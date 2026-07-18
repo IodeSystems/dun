@@ -53,9 +53,12 @@ type Config struct {
 	SessionFile string         // persist the conversation here (resumable); "" = in-memory only
 	OnToken    func(string)
 	OnToolCall func(tool string, args map[string]any, result string)
-	// OnNotify fires when a proactive notification (KindNotification) is injected
-	// into the conversation (e.g. a relevant-doc ping from the RAG finder).
+	// OnNotify fires when a plain notification (KindNotification) is injected
+	// into the conversation (e.g. a background job's completion).
 	OnNotify func(text string)
+	// OnDocs fires when the proactive-RAG preparer surfaces relevant documents —
+	// one aggregated summary per pass (found/surfaced counts + surfaced docs).
+	OnDocs func(DocsNote)
 }
 
 // Harness is a running dun: the MCP manager + an agent Session over its tools.
@@ -189,8 +192,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if finder := docsFinder(mgr, tools); finder != nil {
 		// MinScore 0: raglit's search is BM25, whose scores aren't in a fixed
 		// range (tiny for a small index) — but a MATCH only returns matching
-		// rows, so any hit is a real lexical hit. MaxHits caps the noise.
-		h.Session.Preparer = agent.FinderPreparer(store, finder, agent.FinderOpts{MaxHits: 2, Tag: "docs"})
+		// rows, so any hit is a real lexical hit. MaxHits caps what's surfaced.
+		// dun's aggregating preparer emits one found/surfaced summary per pass.
+		h.Session.Preparer = docsPreparer(store, finder, agent.FinderOpts{MaxHits: 2}, cfg.OnDocs)
 	}
 	return h, nil
 }

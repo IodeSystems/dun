@@ -144,6 +144,9 @@ func main() {
 			em.emit(event{"type": "tool_result", "tool": tool, "result": result})
 		}
 		cfg.OnNotify = func(text string) { em.emit(event{"type": "notification", "text": text}) }
+		cfg.OnDocs = func(n dun.DocsNote) {
+			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
+		}
 		cfg.Ask = func(actx context.Context, q string, opts []string) (string, error) {
 			em.emit(event{"type": "ask", "question": q, "options": opts})
 			select {
@@ -162,6 +165,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), clip(oneLine(result), 200))
 		}
 		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", clip(oneLine(text), 200)) }
+		cfg.OnDocs = func(n dun.DocsNote) {
+			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
+		}
 		cfg.Ask = humanAsk
 		fmt.Fprintf(os.Stderr, "dun: spawning tool servers for %s …\n", absWS)
 	}
@@ -385,6 +391,15 @@ func shortArgs(args map[string]any) string {
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// docsToAny renders surfaced docs as JSON-friendly maps for the -p event.
+func docsToAny(docs []dun.DocHitInfo) []any {
+	out := make([]any, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, map[string]any{"title": d.Title, "id": d.DocID, "line": d.Line, "score": d.Score})
+	}
+	return out
+}
 
 func clip(s string, n int) string {
 	if len(s) <= n {

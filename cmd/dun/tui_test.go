@@ -24,7 +24,16 @@ var (
 	kDown  = tea.KeyMsg{Type: tea.KeyDown}
 	kEnter = tea.KeyMsg{Type: tea.KeyEnter}
 	kN     = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
+	kSlash = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")}
+	kEsc   = tea.KeyMsg{Type: tea.KeyEsc}
 )
+
+func typeStr(m tuiModel, s string) tuiModel {
+	for _, r := range s {
+		m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	return m
+}
 
 // TestTUI_EventHandling drives the model's event logic directly (no terminal):
 // the ready→token→tool_call→done sequence must build the conversation and clear
@@ -193,6 +202,105 @@ func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 	m = key(m, kEnter)
 	if m.convo[0].open {
 		t.Fatal("enter again should close the block")
+	}
+}
+
+// vim-style "/" search: type a query, matches drive the selection, ↑/↓ step
+// between them, esc exits match mode.
+func TestTUI_SlashSearch(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m.convo = []convoEntry{
+		{collapsed: "apple pie"},
+		{collapsed: "banana split"},
+		{collapsed: "apple tart"},
+		{collapsed: "cherry"},
+	}
+	m = key(m, kTab) // convo focus
+	m = key(m, kSlash)
+	if !m.searching {
+		t.Fatal("/ should start search")
+	}
+	m = typeStr(m, "apple")
+	if len(m.matches) != 2 || m.matches[0] != 0 || m.matches[1] != 2 {
+		t.Fatalf("apple should match blocks 0 and 2, got %v", m.matches)
+	}
+	if m.sel != 0 {
+		t.Fatalf("live search should preview the first match, sel=%d", m.sel)
+	}
+	m = key(m, kEnter) // commit → navigate mode
+	if m.searching || !m.searchActive {
+		t.Fatalf("enter should commit to match-scroll: searching=%v active=%v", m.searching, m.searchActive)
+	}
+	m = key(m, kDown) // next match
+	if m.matchPos != 1 || m.sel != 2 {
+		t.Fatalf("↓ should step to match 2 (block 2), pos=%d sel=%d", m.matchPos, m.sel)
+	}
+	m = key(m, kDown) // clamp at last match
+	if m.matchPos != 1 {
+		t.Fatalf("should clamp at last match, pos=%d", m.matchPos)
+	}
+	m = key(m, kUp)
+	if m.matchPos != 0 || m.sel != 0 {
+		t.Fatalf("↑ should step back to match 0, pos=%d sel=%d", m.matchPos, m.sel)
+	}
+	m = key(m, kEsc) // exit match mode
+	if m.searchActive || m.matches != nil {
+		t.Fatal("esc should exit match-scroll mode")
+	}
+	if m.focus != focusConvo {
+		t.Fatal("esc from search should stay in convo focus, not quit")
+	}
+}
+
+// A relevant-docs notification renders as a collapsible summary; →/↑/↓ navigate
+// the nested doc list.
+func TestTUI_DocsNotificationNav(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = m.handleEvent(evMsg{
+		"type": "notification", "kind": "docs", "found": float64(5), "surfaced": float64(2),
+		"docs": []any{
+			map[string]any{"title": "README", "line": "intro", "score": float64(1.2)},
+			map[string]any{"title": "ARCH", "line": "layout", "score": float64(0.8)},
+		},
+	})
+	if len(m.convo) != 1 || m.convo[0].docs == nil {
+		t.Fatalf("docs notification should be one docsBlock entry")
+	}
+	d := m.convo[0].docs
+	if d.found != 5 || d.surfaced != 2 || len(d.docs) != 2 {
+		t.Fatalf("docs block counts wrong: found=%d surfaced=%d n=%d", d.found, d.surfaced, len(d.docs))
+	}
+	if strings.Contains(m.convo[0].view(), "README") {
+		t.Fatal("collapsed docs summary should not list docs")
+	}
+
+	m = key(m, kTab) // focus the summary
+	kRight := tea.KeyMsg{Type: tea.KeyRight}
+	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
+
+	m = key(m, kRight) // can't descend until opened
+	if m.convo[0].docs.descended {
+		t.Fatal("→ should not descend a collapsed summary")
+	}
+	m = key(m, kEnter) // open
+	if !m.convo[0].open || !strings.Contains(m.convo[0].view(), "README") {
+		t.Fatal("enter should open the summary and list docs")
+	}
+	m = key(m, kRight) // descend
+	if !m.convo[0].docs.descended || m.convo[0].docs.cur != 0 {
+		t.Fatalf("→ should descend to doc 0, descended=%v cur=%d", m.convo[0].docs.descended, m.convo[0].docs.cur)
+	}
+	m = key(m, kDown) // next doc
+	if m.convo[0].docs.cur != 1 {
+		t.Fatalf("↓ should move to doc 1, got %d", m.convo[0].docs.cur)
+	}
+	m = key(m, kEnter) // expand doc 1's snippet
+	if !m.convo[0].docs.docs[1].open || !strings.Contains(m.convo[0].view(), "layout") {
+		t.Fatal("enter should expand the current doc's snippet")
+	}
+	m = key(m, kLeft) // ascend
+	if m.convo[0].docs.descended {
+		t.Fatal("← should ascend out of the doc list")
 	}
 }
 

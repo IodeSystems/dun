@@ -79,6 +79,10 @@ func (s *sessionStore) Loaded() int {
 
 func (s *sessionStore) setOnNotify(f func(string)) { s.onNotify = f }
 
+// tagDocs marks aggregated proactive-RAG notifications (see notify.go), routed
+// to the structured onDocs UI path instead of the plain onNotify.
+const tagDocs = "docs"
+
 // blobMarker prefixes a ref where an entry's content was extracted to a blob.
 // It leads with NUL so it can't collide with real tool output or prose.
 const blobMarker = "\x00dun-blob:"
@@ -157,7 +161,8 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 	s.flushLocked()
 	cb := s.onNotify
 	s.mu.Unlock()
-	if e.Kind == agent.KindNotification && cb != nil {
+	// Docs notifications drive a structured UI path (onDocs); skip the plain ping.
+	if e.Kind == agent.KindNotification && e.Tag != tagDocs && cb != nil {
 		cb(e.Content)
 	}
 	return nil

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -37,7 +38,9 @@ func runTUI(o tuiOpts) error {
 		return err
 	}
 	m := newTUIModel(proc, o.workspace)
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	// WithMouseCellMotion makes the terminal (and tmux) forward wheel events to
+	// us instead of scrolling its own scrollback; the viewport consumes them.
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	proc.close()
 	return err
 }
@@ -96,20 +99,71 @@ const (
 
 // convoEntry is one conversation block. A tool call/result is collapsible: full
 // holds the whole output, collapsed a one-line preview; enter (when focused)
-// toggles open. full == "" → a plain, non-collapsible block.
+// toggles open. A relevant-docs summary carries a docsBlock (nested navigation).
+// A plain block has neither full nor docs.
 type convoEntry struct {
 	collapsed string
 	full      string
 	open      bool
+	docs      *docsBlock // proactive-RAG summary (nil for normal blocks)
 }
 
-func (e convoEntry) expandable() bool { return e.full != "" }
+func (e convoEntry) expandable() bool { return e.full != "" || e.docs != nil }
 
 func (e convoEntry) view() string {
+	if e.docs != nil {
+		return e.docs.render(e.open)
+	}
 	if e.open && e.full != "" {
 		return e.full
 	}
 	return e.collapsed
+}
+
+// docNode is one surfaced document inside a docsBlock; open shows its snippet.
+type docNode struct {
+	title, line string
+	score       float64
+	open        bool
+}
+
+// docsBlock is a collapsed proactive-RAG summary ("N relevant · M surfaced").
+// Expanding (enter) reveals the surfaced docs; → descends into the list, where
+// ↑/↓ move between docs, enter expands a doc's snippet, ← / esc ascends.
+type docsBlock struct {
+	found, surfaced int
+	docs            []docNode
+	descended       bool // focus is inside the doc list
+	cur             int  // selected doc when descended
+}
+
+func (d *docsBlock) render(open bool) string {
+	glyph := "▸ "
+	if open {
+		glyph = "▾ "
+	}
+	head := stNote.Render(fmt.Sprintf("%s🔎 %d relevant doc(s) · %d surfaced", glyph, d.found, d.surfaced))
+	if !open || len(d.docs) == 0 {
+		return head
+	}
+	lines := []string{head}
+	for i, doc := range d.docs {
+		cursor := "  "
+		title := doc.title
+		if d.descended && i == d.cur {
+			cursor = stSel.Render("➤ ")
+			title = stSel.Render(title)
+		}
+		dg := "▸"
+		if doc.open {
+			dg = "▾"
+		}
+		lines = append(lines, fmt.Sprintf("   %s%s %s  %s", cursor, dg, title, stDim.Render(fmt.Sprintf("(%.2f)", doc.score))))
+		if doc.open && doc.line != "" {
+			lines = append(lines, stDim.Render("        "+doc.line))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 type tuiModel struct {
@@ -137,6 +191,12 @@ type tuiModel struct {
 	histIdx    int                   // cursor into history (== len when not browsing)
 	focus      int                   // focusInput | focusConvo
 	sel        int                   // selected message index (convo focus); -1 = none
+	search       textinput.Model // vim-style "/" message search box
+	searching    bool            // typing a search query
+	searchActive bool            // navigating matches (↑/↓ step, esc exits)
+	matches      []int           // convo indices matching the query
+	matchPos     int             // cursor into matches
+	blockH       []int           // rendered height of each convo block (for tall-message scroll)
 	w, h       int
 	fatalErr   string
 }
@@ -148,7 +208,10 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	in.Focus()
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	return tuiModel{proc: proc, workspace: workspace, input: in, spin: sp, starting: true, sel: -1, pendingTool: -1}
+	se := textinput.New()
+	se.Prompt = "/"
+	se.Placeholder = "search messages…"
+	return tuiModel{proc: proc, workspace: workspace, input: in, search: se, spin: sp, starting: true, sel: -1, pendingTool: -1}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -164,6 +227,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// lower pane grows (an ask panel).
 		m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
 		m.input.Width = msg.Width - 2
+		m.search.Width = msg.Width - 4
 		m.md = newMarkdown(msg.Width - 2)
 		m.refresh()
 		return m, nil
@@ -174,9 +238,37 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.asking {
 			return m.updateAsking(msg)
 		}
+		// Typing a "/" search query owns the keys until enter/esc.
+		if m.searching {
+			return m.updateSearch(msg)
+		}
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "ctrl+c":
 			return m, tea.Quit
+		case "esc":
+			if m.searchActive { // leave match-scroll mode, back to free selection
+				m.searchActive = false
+				m.matches = nil
+				m.refresh()
+				return m, nil
+			}
+			if d := m.selDocs(); d != nil && d.descended { // ascend out of the doc list
+				d.descended = false
+				m.refresh()
+				return m, nil
+			}
+			return m, tea.Quit
+		case "/":
+			if m.focus == focusConvo {
+				m.searching, m.searchActive, m.matches = true, false, nil
+				m.search.Reset()
+				m.search.Focus()
+				m.refresh()
+				return m, textinput.Blink
+			}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
 		case "tab":
 			// Toggle focus between the input and the conversation (tmux-style).
 			if m.focus == focusInput {
@@ -195,9 +287,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "enter":
 			if m.focus == focusConvo {
-				// Open/close the focused block (a tool call's full output).
+				// Inside a doc list: enter expands/collapses the current document.
+				if d := m.selDocs(); d != nil && d.descended {
+					if d.cur >= 0 && d.cur < len(d.docs) {
+						d.docs[d.cur].open = !d.docs[d.cur].open
+						m.refresh()
+					}
+					return m, nil
+				}
+				// Otherwise open/close the focused block (tool output or docs summary).
 				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].expandable() {
 					m.convo[m.sel].open = !m.convo[m.sel].open
+					if !m.convo[m.sel].open && m.convo[m.sel].docs != nil {
+						m.convo[m.sel].docs.descended = false // closing collapses the descent
+					}
 					m.refresh()
 				}
 				return m, nil
@@ -214,8 +317,23 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.proc.send(v)
 			return m, nil
 		case "up":
-			if m.focus == focusConvo { // move the message selection up
-				if m.sel > 0 {
+			if m.focus == focusConvo {
+				if d := m.selDocs(); d != nil && d.descended { // move within the doc list
+					if d.cur > 0 {
+						d.cur--
+					}
+					m.refresh()
+					return m, nil
+				}
+				if m.searchActive && len(m.matches) > 0 { // step to the previous match
+					if m.matchPos > 0 {
+						m.matchPos--
+					}
+					m.sel = m.matches[m.matchPos]
+				} else if top, h := m.selGeom(); m.vp.Height > 0 && h > m.vp.Height && top < m.vp.YOffset {
+					m.vp.SetYOffset(m.vp.YOffset - 1) // scroll up within a tall message first
+					return m, nil
+				} else if m.sel > 0 {
 					m.sel--
 				}
 				m.refresh()
@@ -228,8 +346,23 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "down":
-			if m.focus == focusConvo { // move the message selection down
-				if m.sel < len(m.convo)-1 {
+			if m.focus == focusConvo {
+				if d := m.selDocs(); d != nil && d.descended { // move within the doc list
+					if d.cur < len(d.docs)-1 {
+						d.cur++
+					}
+					m.refresh()
+					return m, nil
+				}
+				if m.searchActive && len(m.matches) > 0 { // step to the next match
+					if m.matchPos < len(m.matches)-1 {
+						m.matchPos++
+					}
+					m.sel = m.matches[m.matchPos]
+				} else if top, h := m.selGeom(); m.vp.Height > 0 && h > m.vp.Height && top+h > m.vp.YOffset+m.vp.Height {
+					m.vp.SetYOffset(m.vp.YOffset + 1) // scroll down within a tall message first
+					return m, nil
+				} else if m.sel < len(m.convo)-1 {
 					m.sel++
 				}
 				m.refresh()
@@ -245,6 +378,33 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case "right":
+			if m.focus == focusConvo { // descend into an expanded docs summary
+				if m.sel >= 0 && m.sel < len(m.convo) {
+					if e := m.convo[m.sel]; e.docs != nil && e.open && len(e.docs.docs) > 0 {
+						e.docs.descended = true
+						if e.docs.cur < 0 || e.docs.cur >= len(e.docs.docs) {
+							e.docs.cur = 0
+						}
+						m.refresh()
+					}
+				}
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
+		case "left":
+			if m.focus == focusConvo { // ascend out of the doc list
+				if d := m.selDocs(); d != nil {
+					d.descended = false
+					m.refresh()
+				}
+				return m, nil
+			}
+			var lcmd tea.Cmd
+			m.input, lcmd = m.input.Update(msg)
+			return m, lcmd
 		default:
 			if m.focus == focusConvo { // keys don't type into a blurred input
 				return m, nil
@@ -264,6 +424,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.busy, m.starting = false, false
 		m.refresh()
 		return m, nil
+
+	case tea.MouseMsg:
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg) // wheel scrolls the conversation viewport
+		return m, cmd
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -365,6 +530,63 @@ func (m tuiModel) sendAnswer(v string) tuiModel {
 	return m
 }
 
+// updateSearch drives the "/" query box: keys type into it (matches recompute
+// live and the selection jumps to the first hit), enter commits to match-scroll
+// mode (↑/↓ step between hits), esc cancels.
+func (m tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.searching, m.searchActive, m.matches = false, false, nil
+		m.search.Blur()
+		m.refresh()
+		return m, nil
+	case "enter":
+		m.searching = false
+		m.search.Blur()
+		m.matches = m.computeMatches()
+		if len(m.matches) > 0 {
+			m.searchActive = true
+			m.matchPos = 0
+			m.sel = m.matches[0]
+		} else {
+			m.searchActive = false
+		}
+		m.refresh()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.search, cmd = m.search.Update(msg)
+		m.matches = m.computeMatches() // live: preview the first hit as you type
+		if len(m.matches) > 0 {
+			m.matchPos = 0
+			m.sel = m.matches[0]
+		}
+		m.refresh()
+		return m, cmd
+	}
+}
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
+
+// computeMatches returns the convo indices whose text (collapsed AND full, so
+// hidden tool output is searchable) contains the query, case-insensitively.
+func (m tuiModel) computeMatches() []int {
+	q := strings.ToLower(strings.TrimSpace(m.search.Value()))
+	if q == "" {
+		return nil
+	}
+	var out []int
+	for i, e := range m.convo {
+		hay := strings.ToLower(stripANSI(e.collapsed + "\n" + e.full))
+		if strings.Contains(hay, q) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	switch ev["type"] {
 	case "workspace":
@@ -416,7 +638,12 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	case "message":
 		// tokens already streamed the reply; nothing to add.
 	case "notification":
-		m.append(stNote.Render("🔔 " + oneLine(str(ev["text"]))))
+		if str(ev["kind"]) == "docs" {
+			m.convo = append(m.convo, convoEntry{docs: docsFromEvent(ev)})
+			m.refresh()
+		} else {
+			m.append(stNote.Render("🔔 " + oneLine(str(ev["text"]))))
+		}
 	case "ask":
 		m.flushCur()
 		m.asking, m.noting, m.customAnswer = true, false, false
@@ -469,10 +696,18 @@ func (m tuiModel) View() string {
 		status = m.spin.View() + stDim.Render(" spawning tool servers…")
 	case m.asking:
 		status = stAsk.Render("❓ ↑/↓ choose · enter select · n add detail · esc/ctrl+c quit")
+	case m.searching:
+		status = m.search.View() + stDim.Render(fmt.Sprintf("  (%d matches · enter to navigate)", len(m.matches)))
+	case m.searchActive:
+		status = stDim.Render(fmt.Sprintf("match %d/%d  ·  ↑/↓ prev/next · / new search · esc exit", m.matchPos+1, len(m.matches)))
 	case m.busy:
 		status = m.spin.View() + stDim.Render(" working…  (ctrl+c to quit)")
 	case m.focus == focusConvo:
-		status = stDim.Render("convo  ·  ↑/↓ select · enter open/close · tab input · ctrl+c quit")
+		if d := m.selDocs(); d != nil && d.descended {
+			status = stDim.Render("docs  ·  ↑/↓ doc · enter expand · ← back · ctrl+c quit")
+		} else {
+			status = stDim.Render("convo  ·  ↑/↓ select · → docs · / search · enter open/close · tab input")
+		}
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · ctrl+c quit")
 	}
@@ -527,6 +762,52 @@ func (m *tuiModel) flushCur() {
 	}
 }
 
+// selDocs returns the docsBlock of the selected entry, or nil.
+func (m *tuiModel) selDocs() *docsBlock {
+	if m.sel >= 0 && m.sel < len(m.convo) {
+		return m.convo[m.sel].docs
+	}
+	return nil
+}
+
+// selGeom returns the top line offset and rendered height of the selected block
+// (from the last refresh), for tall-message intra-scroll decisions.
+func (m tuiModel) selGeom() (top, h int) {
+	for i := 0; i < m.sel && i < len(m.blockH); i++ {
+		top += m.blockH[i]
+	}
+	if m.sel >= 0 && m.sel < len(m.blockH) {
+		h = m.blockH[m.sel]
+	}
+	return top, h
+}
+
+func intOf(v any) int {
+	if f, ok := v.(float64); ok {
+		return int(f)
+	}
+	return 0
+}
+
+func floatOf(v any) float64 {
+	if f, ok := v.(float64); ok {
+		return f
+	}
+	return 0
+}
+
+// docsFromEvent builds a docsBlock from a `notification` event of kind "docs".
+func docsFromEvent(ev evMsg) *docsBlock {
+	d := &docsBlock{found: intOf(ev["found"]), surfaced: intOf(ev["surfaced"])}
+	if arr, ok := ev["docs"].([]any); ok {
+		for _, it := range arr {
+			dm, _ := it.(map[string]any)
+			d.docs = append(d.docs, docNode{title: str(dm["title"]), line: str(dm["line"]), score: floatOf(dm["score"])})
+		}
+	}
+	return d
+}
+
 // convoText joins the visible text of every block (test/inspection helper).
 func (m tuiModel) convoText() string {
 	parts := make([]string, len(m.convo))
@@ -553,6 +834,7 @@ func (m *tuiModel) refresh() {
 	}
 	wrap := lipgloss.NewStyle().Width(max(1, width))
 	rendered := make([]string, len(blocks))
+	m.blockH = make([]int, len(m.convo)) // cache convo-block heights for scroll math
 	for i, b := range blocks {
 		w := wrap.Render(b)
 		if selMode {
@@ -563,6 +845,9 @@ func (m *tuiModel) refresh() {
 			}
 		}
 		rendered[i] = w
+		if i < len(m.blockH) {
+			m.blockH[i] = lipgloss.Height(w)
+		}
 	}
 	m.vp.SetContent(strings.Join(rendered, "\n"))
 
@@ -573,11 +858,23 @@ func (m *tuiModel) refresh() {
 			top += lipgloss.Height(rendered[i])
 		}
 		h := lipgloss.Height(rendered[m.sel])
-		switch {
-		case top < m.vp.YOffset:
-			m.vp.SetYOffset(top)
-		case top+h > m.vp.YOffset+m.vp.Height:
-			m.vp.SetYOffset(top + h - m.vp.Height)
+		vh := m.vp.Height
+		if h >= vh {
+			// Taller than the window: don't fight intra-message scroll — only snap
+			// when the selection is entirely off-screen. ↑/↓ scroll within it.
+			switch {
+			case top >= m.vp.YOffset+vh: // fully below the fold
+				m.vp.SetYOffset(top)
+			case top+h <= m.vp.YOffset: // fully above the fold
+				m.vp.SetYOffset(top + h - vh)
+			}
+		} else {
+			switch {
+			case top < m.vp.YOffset:
+				m.vp.SetYOffset(top)
+			case top+h > m.vp.YOffset+vh:
+				m.vp.SetYOffset(top + h - vh)
+			}
 		}
 	} else {
 		m.vp.GotoBottom()

@@ -79,6 +79,24 @@ system-prompt composition.
   answering: ↑/↓ choose an option, `n` attaches a detail, a trailing
   "✎ custom / chat…" row opens free-text — replacing the old type-a-number
   prompt. Unit-tested (focus toggle, selection clamp, option+note, custom).
+- **✅ vim `/` search:** in convo focus, `/` opens a query line; matches drive
+  the selection, ↑/↓ step between hits, esc exits (unit-tested).
+- **✅ collapsible tool output:** call+result fold into one block (▸/▾), enter
+  toggles the full output.
+- **✅ relevant-docs notifications (aggregated + nested nav):** dun's OWN
+  aggregating preparer (`docsPreparer`, replacing agentkit's per-hit
+  `FinderPreparer`) emits ONE summary per pass — "found = candidate hits,
+  surfaced = top-MaxHits injected into the prompt". The `-p` notification event
+  gains `kind:"docs"` + `found`/`surfaced`/`docs[]`; the store routes docs
+  notifications to `Config.OnDocs` (skipping the plain onNotify). TUI renders a
+  one-line 🔎 summary, expand on enter, → descends into the doc list (↑/↓ move,
+  enter expands a doc's snippet, ←/esc ascends). Verified live: a WIDGETS.md
+  match emitted `found:2 surfaced:2` with per-doc title/line/score.
+- **✅ tall-message scroll:** when a selected message exceeds the viewport, ↑/↓
+  scroll WITHIN it, stepping to the next message only at its edge; `scrollToSel`
+  leaves a taller-than-window selection alone while any part is visible.
+- **✅ mouse wheel:** `WithMouseCellMotion` so tmux/terminals forward wheel
+  events to the viewport instead of scrolling their own scrollback.
 - **◻ next in this slice:** `/` commands; TUI history replay on `--continue`.
 
 ### ✅ Slice 3 — worktree isolation + exec tool
