@@ -41,6 +41,19 @@ system-prompt composition.
 
 ## Active work
 
+### ✅ Tooling — version stamp + dev self-update
+- **Problem:** `dun` re-execs itself (`os.Executable()`), so a stale on-PATH
+  binary makes the WHOLE tree stale — easy to forget to reinstall.
+- **`make install`** stamps `main.version` (git describe) + `main.srcDir` (module
+  dir). `dun -version` and the TUI header show the stamp.
+- **Self-update (`cmd/dun/selfupdate.go`):** a source-stamped build, on launch,
+  compares source mtimes vs its own; if newer, rebuilds itself in place
+  (`go build -o <exe>`) and re-execs the fresh binary. Guards: `srcDir==""`
+  (release build) / `DUN_CHILD` (spawned -p/-tui children, env-tagged at spawn) /
+  `DUN_AUTOBUILD_DONE` (post-rebuild re-exec) / `DUN_NO_AUTOBUILD=1` all skip; a
+  failed rebuild is non-fatal (warn, run current). Verified: edit→rebuild+reexec,
+  fresh→silent, each guard skips. Tests: buildInput, sourceNewerThan.
+
 ### ✅ Slice 1 — headless composition (PROVEN LIVE)
 - `harness.go` — `Start` spawns the 3 servers (`DefaultServers`), `waitForTools`
   polls discovery, builds an `agent.Session` over the merged tools. `Ask` injects

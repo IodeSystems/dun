@@ -28,7 +28,13 @@ import (
 	"github.com/iodesystems/dun"
 )
 
+// version is stamped at build time via -ldflags "-X main.version=…" (see the
+// Makefile). "dev" for a plain `go build`. Shown by `dun -version` and in the
+// TUI header so a stale on-PATH binary is visible at a glance.
+var version = "dev"
+
 func main() {
+	ver := flag.Bool("version", false, "print version and exit")
 	url := flag.String("url", "https://llm.iodesystems.com", "LLM base URL")
 	model := flag.String("model", "ternary-bonsai-27b", "chat model (must support tool calls)")
 	key := flag.String("key", os.Getenv("DUN_LLM_KEY"), "API key (or $DUN_LLM_KEY)")
@@ -46,6 +52,17 @@ func main() {
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
 	flag.Parse()
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
+
+	if *ver {
+		fmt.Println("dun " + version)
+		return
+	}
+	// Dev self-update: if this is a source-stamped build and the tree changed,
+	// rebuild in place and re-exec the fresh binary. Skipped for spawned children
+	// (DUN_CHILD) and the -p engine mode; no-op for released binaries (srcDir="").
+	if !*prog {
+		selfUpdate()
+	}
 
 	absWS, err := filepath.Abs(*ws)
 	if err != nil {

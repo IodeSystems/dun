@@ -41,7 +41,7 @@ func runServe(o tuiOpts, addr string) error {
 		return err
 	}
 	cmd := exec.Command(exe, procArgs(o, "-p")...)
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "DUN_CHILD=1") // spawned engine never self-rebuilds
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

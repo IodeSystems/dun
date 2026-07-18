@@ -805,7 +805,7 @@ func (m tuiModel) View() string {
 	if m.inspecting {
 		return m.insp.view(m.w, m.h)
 	}
-	head := stHeader.Render("dun") + stDim.Render("  "+m.workspace)
+	head := stHeader.Render("dun") + stDim.Render(" "+version+"  "+m.workspace)
 	if m.branch != "" {
 		head += stDim.Render("  ⎇ " + m.branch)
 	}
@@ -1362,7 +1362,7 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 		return nil, err
 	}
 	cmd := exec.Command(exe, procArgs(o, "-p")...)
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "DUN_CHILD=1") // a spawned engine never self-rebuilds
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

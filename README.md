@@ -19,8 +19,15 @@ bridges their tools into an agentkit loop, and works a task against any
 OpenAI-compatible endpoint.
 
 ```sh
-go build -o dun ./cmd/dun
+make install   # stamps version + source dir, puts dun on PATH ($GOPATH/bin)
 # poly-lsp-mcp, mcpshell, raglit must be on PATH
+
+# `make install` builds a DEV binary: on each launch it checks whether the
+# source tree changed and, if so, rebuilds itself in place and re-execs the
+# fresh build — so `dun` on PATH is never stale. `dun -version` shows the stamp.
+# Disable with DUN_NO_AUTOBUILD=1. A release build (`go install ./cmd/dun`,
+# no source stamp) never self-updates.
+# Plain build without install:  go build -o dun ./cmd/dun
 
 # interactive Bubble Tea UI
 DUN_LLM_KEY=... dun -tui --workspace ./my-project
