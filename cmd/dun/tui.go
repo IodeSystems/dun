@@ -174,6 +174,7 @@ type tuiModel struct {
 	spin      spinner.Model
 	convo     []convoEntry // finalized conversation blocks
 	pendingTool int        // index of a tool call awaiting its result; -1 = none
+	pendingArgs map[string]any // args of the pending tool call (for its renderer)
 	cur         string     // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
 	tools      []string
@@ -609,16 +610,13 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.flushCur()
 		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argKeys(ev["args"]) + ")")})
 		m.pendingTool = len(m.convo) - 1
+		m.pendingArgs, _ = ev["args"].(map[string]any)
 		m.refresh()
 	case "tool_result":
-		res := str(ev["result"])
-		var body string
-		if isDiff(res) {
-			body = colorizeDiff(res)
-		} else {
-			body = stDim.Render(res)
-		}
-		preview := stDim.Render("  → " + clip(oneLine(res), 100))
+		// A per-tool renderer turns the result into a preview + full body.
+		preview, body := renderToolResult(renderCtx{
+			tool: str(ev["tool"]), args: m.pendingArgs, result: str(ev["result"]), width: m.vp.Width,
+		})
 		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
 			// Fold the result into its call so the pair is one collapsible unit.
 			call := m.convo[idx].collapsed
@@ -626,7 +624,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				collapsed: stDim.Render("▸ ") + call + "\n" + preview,
 				full:      stDim.Render("▾ ") + call + "\n" + body,
 			}
-			m.pendingTool = -1
+			m.pendingTool, m.pendingArgs = -1, nil
 			m.refresh()
 		} else {
 			m.convo = append(m.convo, convoEntry{
