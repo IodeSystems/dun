@@ -15,6 +15,9 @@ type memStore struct {
 	mu        sync.Mutex
 	entries   []agent.Entry
 	unclaimed int
+	// onNotify fires (outside the lock) when a KindNotification is appended — the
+	// proactive-RAG / notification-system surface into the UI.
+	onNotify func(string)
 }
 
 func newMemStore() *memStore { return &memStore{} }
@@ -29,8 +32,12 @@ func (m *memStore) ClaimPending(_ context.Context, _ string, _ int64) (int, erro
 
 func (m *memStore) Append(_ context.Context, _ string, e agent.Entry) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.entries = append(m.entries, e)
+	cb := m.onNotify
+	m.mu.Unlock()
+	if e.Kind == agent.KindNotification && cb != nil {
+		cb(e.Content)
+	}
 	return nil
 }
 

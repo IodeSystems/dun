@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -46,6 +47,8 @@ var (
 	stUser   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	stTool   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	stErr    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	stNote   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // proactive notifications
+	stAsk    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
 )
 
 // ── model ──────────────────────────────────────────────────────────
@@ -59,12 +62,14 @@ type tuiModel struct {
 	convo     []string // finalized conversation lines
 	cur       string   // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
-	tools    []string
-	branch   string // worktree branch (from the `workspace` event)
-	starting bool   // spawning servers, before `ready`
-	busy     bool   // a turn in flight
-	w, h     int
-	fatalErr string
+	tools      []string
+	branch     string // worktree branch (from the `workspace` event)
+	starting   bool   // spawning servers, before `ready`
+	busy       bool   // a turn in flight
+	asking     bool   // agent is waiting on an ask_user answer
+	askOptions []string
+	w, h       int
+	fatalErr   string
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
@@ -98,14 +103,29 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp, cmd = m.vp.Update(msg)
 			return m, cmd
 		case "enter":
-			q := strings.TrimSpace(m.input.Value())
-			if q == "" || m.busy || m.starting {
+			v := strings.TrimSpace(m.input.Value())
+			if v == "" {
+				return m, nil
+			}
+			// Answering an ask_user: a number picks an option; else free text.
+			if m.asking {
+				ans := v
+				if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= len(m.askOptions) {
+					ans = m.askOptions[n-1]
+				}
+				m.input.Reset()
+				m.append(stUser.Render("› " + ans))
+				m.asking = false
+				m.proc.answer(ans)
+				return m, nil
+			}
+			if m.busy || m.starting {
 				return m, nil
 			}
 			m.input.Reset()
-			m.append(stUser.Render("› " + q))
+			m.append(stUser.Render("› " + v))
 			m.busy = true
-			m.proc.send(q)
+			m.proc.send(v)
 			return m, nil
 		default:
 			var cmd tea.Cmd
@@ -155,6 +175,19 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.append(stDim.Render("  → " + clip(oneLine(str(ev["result"])), 100)))
 	case "message":
 		// tokens already streamed the reply; nothing to add.
+	case "notification":
+		m.append(stNote.Render("🔔 " + oneLine(str(ev["text"]))))
+	case "ask":
+		m.flushCur()
+		m.asking = true
+		m.append(stAsk.Render("❓ " + str(ev["question"])))
+		m.askOptions = nil
+		if opts, ok := ev["options"].([]any); ok {
+			for i, o := range opts {
+				m.askOptions = append(m.askOptions, fmt.Sprint(o))
+				m.append(stDim.Render(fmt.Sprintf("   %d) %s", i+1, fmt.Sprint(o))))
+			}
+		}
 	case "done":
 		m.flushCur()
 		m.busy = false
@@ -293,6 +326,10 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 
 func (p *dunProc) send(content string) {
 	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content})
+}
+
+func (p *dunProc) answer(value string) {
+	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "answer", "value": value})
 }
 
 func (p *dunProc) close() {

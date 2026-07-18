@@ -96,10 +96,30 @@ system-prompt composition.
   (`docker exec -i`) so poly-lsp/mcpshell also see the contained FS; worktree→
   commit→PR.
 
-### ◻ Slice 4 — persistence + workspace→PR
+### ✅ Slice 4a — human-in-the-loop + proactive notifications
+- **ask_user** (`ask.go`): the agent calls `ask_user{question, options}`; the
+  turn PAUSES at that tool call until answered — `-p` emits an `ask` event, a
+  UI picker / terminal prompt collects the answer, it's returned as the tool
+  result and the turn resumes. `Config.Ask` + `withAsk` dispatcher wrapper.
+- **Proactive notifications** (`notify.go`): `docsFinder` wraps raglit's search
+  tool as an `agent.DocFinder` (ragnotify.MCPFinder); `Session.Preparer =
+  FinderPreparer` pings relevant docs before each turn. Injected
+  KindNotification → `store.onNotify` → `notification` event. MinScore 0 (raglit
+  BM25 scores aren't normalized; a MATCH only returns hits, MaxHits caps).
+- **Workspace auto-index:** dun lexically ingests the workspace into raglit at
+  startup so search + proactive pings have content.
+- **-p protocol grew:** OUT `ask`/`notification`; IN `{"type":"answer","value"}`.
+  `runProgrammatic` restructured — a stdin goroutine routes user/stop→turns,
+  answer→the paused Ask (so an ask mid-turn can be answered). TUI renders ❓ ask
+  pickers (number picks an option) + 🔔 notifications.
+- **Verified live:** ask_user round-trip (agent paused → answered MIT → resumed);
+  proactive 🔔 fired on a workspace README match (watching the worktree). Unit:
+  onNotify fires only for notifications.
+- **◻ deferred:** background/lifted long `exec` → completion as a notification
+  (the agentkit converge pattern); TUI markdown (glamour) + diff view.
+
+### ◻ Slice 4b — persistence + workspace→PR
 - Durable session store (resume, history); worktree diff → review → branch → PR.
-- Auto-ingest the workspace into raglit on start; wire `FinderPreparer` for
-  proactive code/doc pings.
 
 ### ◻ Slice 5 — roles / task DAG (if wanted)
 - Planner/coder/reviewer; multi-Session orchestration (autowork3-style).

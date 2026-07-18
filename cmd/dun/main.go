@@ -15,9 +15,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -89,7 +91,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
 
+	// Best-effort: index the workspace into raglit (lexical, fast) so proactive
+	// doc-notifications + search have content.
+	ingestWorkspace(raglitHome, effWS)
+
 	var em *emitter
+	var in *inputStream
 	cfg := dun.Config{
 		Workspace:  effWS,
 		RaglitHome: raglitHome,
@@ -98,16 +105,32 @@ func main() {
 	}
 	if *prog {
 		em = &emitter{}
+		in = newInputStream()
 		cfg.OnToken = func(s string) { em.emit(event{"type": "token", "text": s}) }
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
 			em.emit(event{"type": "tool_call", "tool": tool, "args": args})
 			em.emit(event{"type": "tool_result", "tool": tool, "result": result})
+		}
+		cfg.OnNotify = func(text string) { em.emit(event{"type": "notification", "text": text}) }
+		cfg.Ask = func(actx context.Context, q string, opts []string) (string, error) {
+			em.emit(event{"type": "ask", "question": q, "options": opts})
+			select {
+			case a, ok := <-in.answers:
+				if !ok {
+					return "", fmt.Errorf("input closed")
+				}
+				return a, nil
+			case <-actx.Done():
+				return "", actx.Err()
+			}
 		}
 	} else {
 		cfg.OnToken = func(s string) { fmt.Print(s) }
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
 			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), clip(oneLine(result), 200))
 		}
+		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", clip(oneLine(text), 200)) }
+		cfg.Ask = humanAsk
 		fmt.Fprintf(os.Stderr, "dun: spawning tool servers for %s …\n", absWS)
 	}
 
@@ -129,7 +152,7 @@ func main() {
 	}
 
 	if *prog {
-		runProgrammatic(ctx, h, em, firstTask)
+		runProgrammatic(ctx, h, em, in, firstTask)
 		return
 	}
 	runHuman(ctx, h, firstTask)
@@ -155,38 +178,88 @@ func runHuman(ctx context.Context, h *dun.Harness, task string) {
 	fmt.Fprintf(os.Stderr, "\n\n--- done (%d tokens) ---\n", res.Usage.Total)
 }
 
-// runProgrammatic drives dun over line-delimited JSON events: emit `ready`, run
-// the first task if given, then read {"type":"user","content":...} events from
-// stdin (one JSON per line) until EOF, running a turn per message.
-func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, firstTask string) {
+// runProgrammatic drives dun over line-delimited JSON events. Input is read by
+// the inputStream's goroutine (so an `ask` inside a turn can consume `answer`
+// events while this loop is blocked in a turn); this loop just handles `user`
+// messages.
+func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string) {
 	em.emit(event{"type": "ready", "tools": h.ToolNames()})
 	if firstTask != "" {
 		turn(ctx, h, em, firstTask)
 	}
-	sc := bufio.NewScanner(os.Stdin)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var in struct {
-			Type    string `json:"type"`
-			Content string `json:"content"`
-		}
-		if err := json.Unmarshal([]byte(line), &in); err != nil {
-			em.emit(event{"type": "error", "error": "bad input event: " + err.Error()})
-			continue
-		}
-		switch in.Type {
-		case "user":
-			turn(ctx, h, em, in.Content)
-		case "stop", "quit":
+	for {
+		select {
+		case content, ok := <-in.users:
+			if !ok {
+				return // stdin closed / stop
+			}
+			turn(ctx, h, em, content)
+		case <-ctx.Done():
 			return
-		default:
-			em.emit(event{"type": "error", "error": "unknown input event type: " + in.Type})
 		}
 	}
+}
+
+// inputStream reads JSON events from stdin in a goroutine and routes them:
+// user/stop → users, answer → answers. Decoupling the scanner from the turn loop
+// lets an ask_user (blocked mid-turn) receive an answer.
+type inputStream struct {
+	users   chan string
+	answers chan string
+}
+
+func newInputStream() *inputStream {
+	s := &inputStream{users: make(chan string), answers: make(chan string)}
+	go func() {
+		sc := bufio.NewScanner(os.Stdin)
+		sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" {
+				continue
+			}
+			var ev struct {
+				Type    string `json:"type"`
+				Content string `json:"content"`
+				Value   string `json:"value"`
+			}
+			if json.Unmarshal([]byte(line), &ev) != nil {
+				continue
+			}
+			switch ev.Type {
+			case "user":
+				s.users <- ev.Content
+			case "answer":
+				s.answers <- ev.Value
+			case "stop", "quit":
+				close(s.users)
+				return
+			}
+		}
+		close(s.users)
+	}()
+	return s
+}
+
+// humanAsk prompts on the terminal and reads a line (a number picks an option).
+func humanAsk(_ context.Context, question string, options []string) (string, error) {
+	fmt.Fprintf(os.Stderr, "\n❓ %s\n", question)
+	for i, o := range options {
+		fmt.Fprintf(os.Stderr, "   %d) %s\n", i+1, o)
+	}
+	fmt.Fprint(os.Stderr, "answer: ")
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	line = strings.TrimSpace(line)
+	if n, err := strconv.Atoi(line); err == nil && n >= 1 && n <= len(options) {
+		return options[n-1], nil
+	}
+	return line, nil
+}
+
+// ingestWorkspace lexically indexes the workspace into raglit (best-effort).
+func ingestWorkspace(raglitHome, workspace string) {
+	cmd := exec.Command("raglit", "ingest", "--home", raglitHome, "--now", workspace)
+	_ = cmd.Run() // best-effort; proactive RAG simply has less to ping without it
 }
 
 func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) {

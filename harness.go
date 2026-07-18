@@ -45,8 +45,12 @@ type Config struct {
 	Client     agent.LLMRunner // the LLM (e.g. *llm.Client)
 	System     string          // nil → defaultSystem
 	Exec       ExecBackend     // nil → no exec tool; else adds the built-in exec tool
+	Ask        AskFunc         // nil → no ask_user tool; else adds the human-in-the-loop tool
 	OnToken    func(string)
 	OnToolCall func(tool string, args map[string]any, result string)
+	// OnNotify fires when a proactive notification (KindNotification) is injected
+	// into the conversation (e.g. a relevant-doc ping from the RAG finder).
+	OnNotify func(text string)
 }
 
 // Harness is a running dun: the MCP manager + an agent Session over its tools.
@@ -82,16 +86,22 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if sys == "" {
 		sys = defaultSystem
 	}
-	// Bridge the MCP tools; if an exec backend is configured, add the built-in
-	// exec tool + route "exec" to it (everything else routes to its MCP server).
+	// Bridge the MCP tools + the built-in tools (exec, ask_user). Non-MCP tools
+	// are handled locally by the dispatcher wrappers; everything else routes to
+	// its MCP server.
 	toolDefs := mcpToolDefs(tools)
 	dispatch := mcpDispatcher(mgr, tools, cfg.OnToolCall)
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef())
 		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall)
 	}
+	if cfg.Ask != nil {
+		toolDefs = append(toolDefs, askToolDef())
+		dispatch = withAsk(dispatch, cfg.Ask, cfg.OnToolCall)
+	}
 
 	store := newMemStore()
+	store.onNotify = cfg.OnNotify
 	h := &Harness{mgr: mgr, Tools: tools, store: store}
 	h.Session = &agent.Session{
 		SessionID:        "dun",
@@ -102,6 +112,15 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Dispatch:         dispatch,
 		OnAssistantToken: cfg.OnToken,
 		MaxTurns:         40,
+	}
+	// Proactive RAG: watch the conversation and inject relevant-doc pings before
+	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
+	// surface via store.onNotify → OnNotify.
+	if finder := docsFinder(mgr, tools); finder != nil {
+		// MinScore 0: raglit's search is BM25, whose scores aren't in a fixed
+		// range (tiny for a small index) — but a MATCH only returns matching
+		// rows, so any hit is a real lexical hit. MaxHits caps the noise.
+		h.Session.Preparer = agent.FinderPreparer(store, finder, agent.FinderOpts{MaxHits: 2, Tag: "docs"})
 	}
 	return h, nil
 }
@@ -162,5 +181,8 @@ You have three tool families:
 - shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops; call the prompt tool for its language reference, help to list commands.
 - docs (raglit): search the document/knowledge index; ingest to add sources.
 - exec: run a shell command (build/test/git/ls) in the workspace. Use it to VERIFY your edits — e.g. run the build and tests after changing code — and to run git.
+- ask_user: when the task is ambiguous or a decision is the user's to make (which approach, which file, is this OK to change), call ask_user with a clear question and optional options INSTEAD of guessing.
+
+Relevant docs may be pushed to you as [docs] notes — use them.
 
 Work step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed.`

@@ -33,9 +33,15 @@ echo '{"type":"user","content":"..."}' | dun -p --workspace ./my-project
 ```
 
 The engine speaks a small JSON event protocol (`-p`): out `ready`/`token`/
-`tool_call`/`tool_result`/`message`/`usage`/`done`/`error`, in
-`{"type":"user",...}`/`{"type":"stop"}`. The TUI is just a client of it, so the
-engine stays headless and scriptable.
+`tool_call`/`tool_result`/`message`/`usage`/`done`/`error` + `ask`/`notification`;
+in `{"type":"user",...}` / `{"type":"answer","value":...}` / `{"type":"stop"}`.
+The TUI is just a client of it, so the engine stays headless and scriptable.
+
+**Human-in-the-loop:** the agent can call `ask_user{question, options}` when a
+decision is yours — the turn pauses, you're asked (a picker in the TUI), and it
+resumes with your answer. **Proactive docs:** relevant docs are pushed as 🔔
+notifications as the conversation moves (raglit's index watched via agentkit's
+FinderPreparer).
 
 ## Isolation
 
