@@ -242,7 +242,9 @@ type tuiModel struct {
 	lc          *launcherConn // launcher registration (nil = no launcher)
 	reloadVer   string        // a newer build the launcher announced ("" = none)
 	reloadReq   bool          // /reload requested → runTUI re-execs after quit
-	suggestions []suggestion  // --suggest: predicted next messages (idle-only picker)
+	suggestions      []suggestion // --suggest: predicted next messages (idle-only picker)
+	suggestSelecting bool         // → arrow-navigable selector (entered via right from empty input)
+	suggestSel       int          // highlighted suggestion in the selector
 	w, h       int
 	fatalErr   string
 }
@@ -416,6 +418,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.suggestSelecting && m.suggestSel < len(m.suggestions) { // send the highlighted suggestion
+				return m.sendUser(m.suggestions[m.suggestSel].text), nil
+			}
 			v := strings.TrimSpace(m.input.Value())
 			// Local slash commands (never sent to the engine): run the palette's
 			// highlighted match (or the exactly-typed command).
@@ -447,6 +452,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.sel--
 				}
 				m.refresh()
+				return m, nil
+			}
+			if m.suggestSelecting { // move up in the suggestion selector
+				if m.suggestSel > 0 {
+					m.suggestSel--
+					m.refresh()
+				}
 				return m, nil
 			}
 			if m.paletteActive() { // move up in the command palette
@@ -485,6 +497,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
+			if m.suggestSelecting { // move down in the suggestion selector
+				if m.suggestSel < len(m.suggestions)-1 {
+					m.suggestSel++
+					m.refresh()
+				}
+				return m, nil
+			}
 			if m.paletteActive() { // move down in the command palette
 				if m.paletteSel < len(m.paletteMatches())-1 {
 					m.paletteSel++
@@ -503,16 +522,34 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "right":
-			if m.focus == focusConvo { // descend into an expanded docs summary
-				if m.sel >= 0 && m.sel < len(m.convo) {
-					if e := m.convo[m.sel]; e.docs != nil && e.open && len(e.docs.docs) > 0 {
+			// Horizontal axis: [convo] ← input → [suggestions].
+			if m.focus == focusConvo {
+				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].docs != nil {
+					// A docs summary owns → : descend when it's open, else stay
+					// (open it with enter first). Never hops to the input.
+					if e := m.convo[m.sel]; e.open && len(e.docs.docs) > 0 {
 						e.docs.descended = true
 						if e.docs.cur < 0 || e.docs.cur >= len(e.docs.docs) {
 							e.docs.cur = 0
 						}
 						m.refresh()
 					}
+					return m, nil
 				}
+				// Any other message (no sub-selection) → right returns to the input.
+				m.focus = focusInput
+				m.input.Focus()
+				m.refresh()
+				return m, textinput.Blink
+			}
+			// focusInput: right from an EMPTY input opens the suggestion selector.
+			if !m.suggestSelecting && m.suggestActive() {
+				m.suggestSelecting = true
+				m.suggestSel = 0
+				m.refresh()
+				return m, nil
+			}
+			if m.suggestSelecting {
 				return m, nil
 			}
 			var cmd tea.Cmd
@@ -524,6 +561,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					d.descended = false
 					m.refresh()
 				}
+				return m, nil
+			}
+			// focusInput: left closes the suggestion selector…
+			if m.suggestSelecting {
+				m.suggestSelecting = false
+				m.refresh()
+				return m, nil
+			}
+			// …and left at the FRONT of the input hops back to the conversation.
+			if m.input.Position() == 0 {
+				m.focus = focusConvo
+				m.input.Blur()
+				if len(m.convo) > 0 {
+					m.sel = len(m.convo) - 1
+				}
+				m.refresh()
 				return m, nil
 			}
 			var lcmd tea.Cmd
@@ -541,6 +594,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			m.suggestSelecting = false // typing leaves the selector and edits the input
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			m.paletteSel = 0 // typing re-filters the palette; start at the top
@@ -716,9 +770,13 @@ func (m tuiModel) suggestActive() bool {
 func (m tuiModel) suggestPanel() string {
 	rows := make([]string, 0, len(m.suggestions)+1)
 	for i, s := range m.suggestions {
-		rows = append(rows, fmt.Sprintf("  %s %s  %s",
-			stSel.Render(fmt.Sprintf("%d", i+1)), s.text,
-			stDim.Render(fmt.Sprintf("%d%%", int(s.prob*100+0.5)))))
+		body := stSel.Render(fmt.Sprintf("%d", i+1)) + " " + s.text + "  " +
+			stDim.Render(fmt.Sprintf("%d%%", int(s.prob*100+0.5)))
+		if m.suggestSelecting && i == m.suggestSel {
+			rows = append(rows, addGutter(body, "▎ ", stSel))
+		} else {
+			rows = append(rows, addGutter(body, "  ", lipgloss.NewStyle()))
+		}
 	}
 	rows = append(rows, m.input.View())
 	return strings.Join(rows, "\n")
@@ -730,7 +788,7 @@ func (m tuiModel) sendUser(v string) tuiModel {
 	m.history = append(m.history, v)
 	m.histIdx = len(m.history)
 	m.input.Reset()
-	m.suggestions = nil
+	m.suggestions, m.suggestSelecting = nil, false
 	m.append(stUser.Render("› " + v))
 	m.busy = true
 	m.proc.send(v)
@@ -825,15 +883,16 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.append(stDim.Render(fmt.Sprintf("ready — %d tools: %s", len(m.tools), strings.Join(m.tools, ", "))))
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
-		m.suggestions = nil
+		m.suggestions, m.suggestSelecting = nil, false
 		m.cur += str(ev["text"])
 		m.refresh()
 	case "suggestions":
 		m.suggestions = parseSuggestionItems(ev["items"])
+		m.suggestSelecting, m.suggestSel = false, 0
 		m.refresh()
 	case "tool_call":
 		m.busy = true
-		m.suggestions = nil
+		m.suggestions, m.suggestSelecting = nil, false
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
 		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argPreview(args, 80) + ")")})
@@ -978,8 +1037,10 @@ func (m tuiModel) View() string {
 		} else {
 			status = stDim.Render("convo  ·  ↑/↓ select · → docs · / search · enter open (tool→inspector) · tab input")
 		}
+	case m.suggestSelecting:
+		status = stDim.Render("next?  ·  ↑/↓ select · enter send · ← back")
 	case m.suggestActive():
-		status = stDim.Render(fmt.Sprintf("next?  ·  1–%d pick · or type · "+m.exitHint(), len(m.suggestions)))
+		status = stDim.Render(fmt.Sprintf("next?  ·  1–%d pick · → select · or type · "+m.exitHint(), len(m.suggestions)))
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · " + m.exitHint())
 	}

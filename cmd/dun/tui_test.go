@@ -345,6 +345,51 @@ func TestTUI_Suggestions(t *testing.T) {
 	}
 }
 
+// Horizontal arrow axis: left at input-front → convo; right from a plain convo
+// message → input; right from an empty input → suggestion selector (left closes).
+func TestTUI_ArrowNav(t *testing.T) {
+	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
+	kRight := tea.KeyMsg{Type: tea.KeyRight}
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m.append("a reply") // a plain convo message to land on
+
+	// left at the front of an (empty) input hops to the conversation.
+	m = key(m, kLeft)
+	if m.focus != focusConvo {
+		t.Fatal("left at input front should focus the conversation")
+	}
+	// right from a plain message (no sub-selection) hops back to the input.
+	m = key(m, kRight)
+	if m.focus != focusInput {
+		t.Fatal("right from a plain convo message should focus the input")
+	}
+	// right from an empty input opens the suggestion selector.
+	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
+		map[string]any{"text": "alpha", "prob": 0.6},
+		map[string]any{"text": "bravo", "prob": 0.4},
+	}})
+	m = key(m, kRight)
+	if !m.suggestSelecting || m.suggestSel != 0 {
+		t.Fatalf("right from empty input should open the selector, got selecting=%v sel=%d", m.suggestSelecting, m.suggestSel)
+	}
+	m = key(m, kDown)
+	if m.suggestSel != 1 {
+		t.Fatalf("↓ should move the selection, got %d", m.suggestSel)
+	}
+	// left closes the selector (doesn't hop panes).
+	if closed := key(m, kLeft); closed.suggestSelecting || closed.focus != focusInput {
+		t.Fatal("left should close the selector and stay on the input")
+	}
+	// enter sends the highlighted suggestion.
+	m = key(m, kEnter)
+	if !strings.Contains(m.convoText(), "bravo") {
+		t.Fatalf("enter should send the selected suggestion, convo: %s", m.convoText())
+	}
+}
+
 // --disable-exit: ctrl+c and esc don't quit, but /quit still does.
 func TestTUI_DisableExit(t *testing.T) {
 	kCtrlC := tea.KeyMsg{Type: tea.KeyCtrlC}
