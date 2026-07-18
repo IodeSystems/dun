@@ -38,7 +38,9 @@ type tuiOpts struct {
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
-func runTUI(o tuiOpts) error {
+// lc (may be nil) is the launcher registration — its reload channel drives the
+// "update ready" indicator + /reload.
+func runTUI(o tuiOpts, lc *launcherConn) error {
 	loadScriptRenderers() // ~/.dun/renderers/*.star override/extend the built-ins
 	proc, err := startDunProc(o)
 	if err != nil {
@@ -47,10 +49,20 @@ func runTUI(o tuiOpts) error {
 	m := newTUIModel(proc, o.workspace)
 	m.model, m.url, m.keySet = o.model, o.url, o.key != "" // for /config
 	m.disableExit = o.disableExit
+	m.lc = lc
 	// WithMouseCellMotion makes the terminal (and tmux) forward wheel events to
 	// us instead of scrolling its own scrollback; the viewport consumes them.
-	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	fm, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	proc.close()
+	// /reload: bubbletea has restored the terminal by now, so re-exec cleanly
+	// into the (launcher-rebuilt) binary with the same args.
+	if tm, ok := fm.(tuiModel); ok && tm.reloadReq && err == nil {
+		lc.close() // drop the old registration; the new process re-registers
+		exe, e := os.Executable()
+		if e == nil {
+			_ = syscall.Exec(exe, os.Args, os.Environ())
+		}
+	}
 	return err
 }
 
@@ -226,6 +238,9 @@ type tuiModel struct {
 	model, url  string        // this session's LLM settings (for /config)
 	keySet      bool          // whether an API key is configured
 	disableExit bool          // --disable-exit: ctrl+c/esc don't quit (use /quit)
+	lc          *launcherConn // launcher registration (nil = no launcher)
+	reloadVer   string        // a newer build the launcher announced ("" = none)
+	reloadReq   bool          // /reload requested → runTUI re-execs after quit
 	w, h       int
 	fatalErr   string
 }
@@ -248,7 +263,25 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return tea.Batch(waitEvent(m.proc.ch), m.spin.Tick, textinput.Blink, waitForDump(m.dumpSig))
+	return tea.Batch(waitEvent(m.proc.ch), m.spin.Tick, textinput.Blink, waitForDump(m.dumpSig), waitReload(m.lc))
+}
+
+// reloadMsg carries a newer build version the launcher announced.
+type reloadMsg string
+
+// waitReload blocks on the launcher's reload channel (nil-safe) and turns a
+// "new build" push into a reloadMsg. Re-armed after each one.
+func waitReload(lc *launcherConn) tea.Cmd {
+	if lc == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		v, ok := <-lc.reload
+		if !ok {
+			return nil
+		}
+		return reloadMsg(v)
+	}
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -510,6 +543,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, cmd
 		}
+
+	case reloadMsg:
+		m.reloadVer = string(msg) // header shows "↻ …"; /reload restarts
+		m.refresh()
+		return m, waitReload(m.lc) // re-arm
 
 	case dumpMsg:
 		m.writeDump()
@@ -837,6 +875,9 @@ func (m tuiModel) View() string {
 	if n := len(m.tools); n > 0 {
 		head += stDim.Render(fmt.Sprintf("  · %d tools", n))
 	}
+	if m.reloadVer != "" {
+		head += "  " + stNote.Render("↻ "+m.reloadVer+" (/reload)")
+	}
 
 	// The lower pane is the input, or — while answering — the option picker. The
 	// convo pane takes whatever height is left (the picker can be several rows).
@@ -1131,6 +1172,10 @@ func init() {
 	slashCommands = []slashCmd{
 		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
 		{"config", "", "show this session's LLM settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
+		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
+			m.reloadReq = true
+			return tea.Quit
+		}},
 		{"quit", "", "exit dun", func(_ *tuiModel, _ []string) tea.Cmd { return tea.Quit }},
 	}
 }

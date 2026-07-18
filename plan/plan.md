@@ -306,19 +306,42 @@ system-prompt composition.
   appends). NB `dun -tui` re-execs `dun -p`, so signal the PARENT pid.
   `waitForDump` cmd → `dumpMsg` → `writeDump`. Unit-tested (`TestTUI_ScreenDump`).
 
-### ◻ Slice L — launcher / daemon (SPEC; supervised independent sessions)
+### ✅ Slice L — launcher / daemon (L1 supervisor + hot-reload; L2 dropped)
 
-> ⚠ **BLOCKER found while building L2 (needs a call).** dun gives each session
-> its OWN git worktree (the isolation model), and every MCP server is bound to
-> that worktree: `poly-lsp-mcp --root <worktree>`, `mcpshell --files-dir
-> <worktree>` (+ per-session `export` eval state), raglit over a per-session temp
-> home. So two sessions never share an effective workspace → **there is nothing
-> to share**, and L2's "boot once per workspace" win does NOT apply to the
-> default (worktree) mode. It only helps `--no-worktree` sessions on one dir
-> (and even then mcpshell needs mcpmgr thread-scoping for its per-session eval
-> state). Options: (1) scope L2 sharing to `--no-worktree` only; (2) build L1
-> (supervisor/registry/kick-warning — worktree-agnostic) now and re-scope L2;
-> (3) drop L2. See the exchange for the chosen path.
+**Repivot.** L2 (shared MCP) was **dropped**: dun gives each session its own git
+worktree, and every MCP server is worktree-bound (`poly-lsp-mcp --root`,
+`mcpshell --files-dir` + per-session `export` eval state, raglit per-session
+home) — so two sessions never share an effective workspace, and there was
+nothing to share. The launcher's real value here is supervision + central
+build/reload, which is what got built.
+
+- **`dun -d` launcher** (`launcher.go` + `launchproto.go` + `launcherclient.go`):
+  a thin daemon on a unix socket (`$DUN_HOME/launcher.sock`, 0700). Lazy
+  auto-start (first `dun -tui`/`-serve` spawns it detached); idle-exits after
+  10m with no sessions; self-cleaning socket (stale-sock reclaim on start).
+- **Registry (L1).** Every session registers on start over a long-lived conn
+  (its close = "left"); `dun -d status` lists them (id/kind/pid/version/age/ws);
+  `dun -d shutdown` **refuses while sessions are attached unless `--force`** —
+  and reports the web count (the kick-warning, launcher side).
+- **Central build + hot-reload.** The launcher owns the source watch + rebuild
+  (one watcher/build for the whole box, vs every `dun` self-checking): every 2s
+  it rebuilds the shared binary when the tree changed (`rebuildDun`, shared with
+  selfUpdate) and PUSHES `reload` to registered sessions. The TUI shows a
+  `↻ <ver> (/reload)` header indicator; `/reload` restarts cleanly into the
+  fresh binary (bubbletea restores the terminal, then `runTUI` re-execs). The
+  launcher itself never re-execs (stable "surface"); a release build (srcDir="")
+  does no watch/build.
+- **Kick-warning (serve side).** `dun -serve` counts live browser PTYs
+  (`activeWeb`); Ctrl-C with sessions attached warns "N attached — Ctrl-C again
+  to drop them" and a second confirms.
+- **Verified live:** launcher auto-started from a `dun -tui`; `dun -d status`
+  showed the session; touching a source file → launcher rebuilt `~/go/bin/dun`
+  (mtime bumped, log "rebuilt → … notifying 1 sessions") → the running TUI's
+  header lit `↻ … (/reload)`. Unit: `TestLauncher_Registry` (register/status/
+  shutdown-refusal/deregister).
+- **◻ deferred:** proactive rebuild watch uses mtime polling (fsnotify later);
+  `/reload` for web sessions (they'd re-exec inside the PTY — untested);
+  multi-viewer; a `dun -d status` TUI.
 
 **Goal.** A thin, long-lived launcher that (1) owns the MCP servers ONCE per
 workspace so sessions don't each pay the ~10s boot, (2) supervises independent

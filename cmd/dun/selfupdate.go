@@ -46,14 +46,7 @@ func selfUpdate() {
 	}
 
 	fmt.Fprintln(os.Stderr, "dun: source changed — rebuilding…")
-	ver := gitDescribe(srcDir)
-	build := exec.Command("go", "build",
-		"-o", exe,
-		"-ldflags", "-X main.version="+ver+" -X main.srcDir="+srcDir,
-		"./cmd/dun")
-	build.Dir = srcDir
-	build.Stdout, build.Stderr = os.Stderr, os.Stderr
-	if err := build.Run(); err != nil {
+	if _, err := rebuildDun(srcDir, exe); err != nil {
 		fmt.Fprintf(os.Stderr, "dun: rebuild failed (%v) — running the current binary\n", err)
 		return
 	}
@@ -62,6 +55,23 @@ func selfUpdate() {
 	if err := syscall.Exec(exe, os.Args, env); err != nil {
 		fmt.Fprintf(os.Stderr, "dun: re-exec failed (%v) — running the current binary\n", err)
 	}
+}
+
+// rebuildDun rebuilds the dun binary at `exe` from srcDir (version + source
+// stamped) and returns the new version. Shared by selfUpdate and the launcher's
+// central builder (launcher.go).
+func rebuildDun(srcDir, exe string) (string, error) {
+	ver := gitDescribe(srcDir)
+	build := exec.Command("go", "build",
+		"-o", exe,
+		"-ldflags", "-X main.version="+ver+" -X main.srcDir="+srcDir,
+		"./cmd/dun")
+	build.Dir = srcDir
+	build.Stdout, build.Stderr = os.Stderr, os.Stderr
+	if err := build.Run(); err != nil {
+		return "", err
+	}
+	return ver, nil
 }
 
 // sourceNewerThan reports whether any source file under dir is newer than t.

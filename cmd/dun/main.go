@@ -56,6 +56,8 @@ func main() {
 	serve := flag.Bool("serve", false, "serve the TUI over the web (xterm.js) at --addr")
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /quit)")
+	daemon := flag.Bool("d", false, "run/query the launcher daemon: `dun -d` (run), `dun -d status`, `dun -d shutdown`")
+	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
 	flag.Parse()
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
@@ -67,6 +69,22 @@ func main() {
 	if *setup {
 		if err := runSetupTUI(); err != nil {
 			fatal(err)
+		}
+		return
+	}
+	// Launcher daemon (supervisor): `dun -d` runs it; `dun -d status|shutdown` query.
+	if *daemon {
+		switch firstTask {
+		case "status":
+			printLauncherStatus()
+		case "shutdown":
+			shutdownLauncher(*force)
+		case "":
+			if err := runLauncher(); err != nil {
+				fatal(err)
+			}
+		default:
+			fatal(fmt.Errorf("dun -d: unknown subcommand %q (status|shutdown|<none>)", firstTask))
 		}
 		return
 	}
@@ -97,14 +115,18 @@ func main() {
 
 	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
 	if *tui {
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit}); err != nil {
+		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
+		defer lc.close()
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit}, lc); err != nil {
 			fatal(err)
 		}
 		return
 	}
 
-	// Serve mode: a web client of `dun -p` (same re-exec, bridged over SSE/POST).
+	// Serve mode: the TUI over xterm.js; each browser tab spawns a web session.
 	if *serve {
+		lc := registerSession("serve", absWS)
+		defer lc.close()
 		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit}, *addr); err != nil {
 			fatal(err)
 		}

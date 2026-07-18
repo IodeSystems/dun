@@ -8,12 +8,18 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 )
+
+// activeWeb counts live browser sessions (open PTYs), for the shutdown
+// kick-warning.
+var activeWeb int64
 
 // dun serve — the bubbletea TUI in the browser via xterm.js. On a WebSocket
 // connect the server spawns `dun -tui` in a pseudo-terminal and pipes raw bytes
@@ -58,7 +64,21 @@ func runServe(o tuiOpts, addr string) error {
 	sub, _ := fs.Sub(termAssetsFS, "web")
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 	mux.HandleFunc("/term/ws", func(w http.ResponseWriter, r *http.Request) { termWS(w, r, o) })
+	go watchShutdown()
 	return http.Serve(ln, mux)
+}
+
+// watchShutdown warns before Ctrl-C drops attached browser sessions; a second
+// Ctrl-C confirms.
+func watchShutdown() {
+	sig := make(chan os.Signal, 2)
+	signal.Notify(sig, os.Interrupt)
+	<-sig
+	if n := atomic.LoadInt64(&activeWeb); n > 0 {
+		log.Printf("⚠ %d web session(s) attached — Ctrl-C again to drop them", n)
+		<-sig
+	}
+	os.Exit(0)
 }
 
 func termWS(w http.ResponseWriter, r *http.Request, o tuiOpts) {
@@ -76,6 +96,8 @@ func termWS(w http.ResponseWriter, r *http.Request, o tuiOpts) {
 	// drops the socket and reaps the process group). Avoids an accidental ctrl+c
 	// killing the session.
 	o.disableExit = true
+	atomic.AddInt64(&activeWeb, 1)
+	defer atomic.AddInt64(&activeWeb, -1)
 	cmd := exec.Command(exe, procArgs(o, "-tui")...)
 	cmd.Env = append(os.Environ(), "DUN_CHILD=1") // spawned TUI never self-rebuilds
 	ptmx, err := pty.Start(cmd) // pty.Start makes the child a session leader
