@@ -48,17 +48,23 @@ system-prompt composition.
 - `mcp.go` — `mcpToolDefs` + `mcpDispatcher` (route by tool→server, errors→model,
   `onCall` hook for the UI).
 - `store.go` — in-memory `agent.Store` (durable persistence is a later slice).
-- `cmd/dun` — headless CLI: `dun --workspace DIR "task"`, streams tokens + tool
-  calls to the terminal.
-- **Verified live vs bonsai:** spawned all 3 (10 tools), `ternary-bonsai-27b`
-  DOES tool-call; the agent self-corrected a bad `node_query` selector → read →
-  answered. Workspace = a tiny Go pkg; poly-lsp used gopls.
+- `cmd/dun` — CLI, two modes:
+  - human: `dun --workspace DIR "task"` streams tokens + tool calls to the terminal.
+  - **`-p` programmatic:** line-delimited JSON events — OUT `ready`/`token`/
+    `tool_call`/`tool_result`/`message`/`usage`/`done`/`error`; IN
+    `{"type":"user","content":...}` / `{"type":"stop"}`. This is the engine
+    PROTOCOL and the decoupling seam: the Slice-2 TUI is a CLIENT of it.
+- **Verified live vs bonsai** (both modes): spawned all 3 (10 tools),
+  `ternary-bonsai-27b` DOES tool-call; the agent self-corrected a bad
+  `node_query` selector → read → answered; `-p` took a stdin user event and
+  emitted the full event stream.
 
-### ◻ Slice 2 — Bubble Tea TUI
-- Charm stack (bubbletea/bubbles/lipgloss). Conversation view, streaming
-  assistant tokens, tool-call stream, input box, `/` commands. Wrap the `Ask`
-  loop in an event model (tokens/tool-calls as msgs). Read-and-propose (diffs
-  shown, not auto-applied) until Slice 3's approval.
+### ◻ Slice 2 — Bubble Tea TUI (client of the `-p` protocol)
+- Charm stack (bubbletea/bubbles/lipgloss). The TUI SPAWNS `dun -p` (or embeds
+  the harness) and renders its JSON event stream: conversation, streaming
+  tokens, tool-call stream, input box → `user` events, `/` commands.
+  Read-and-propose (diffs shown, not auto-applied) until Slice 3's approval.
+  Because it's a protocol client, the engine stays headless/testable.
 
 ### ◻ Slice 3 — Docker + git-worktree isolation + exec
 - Create a git worktree per task; Docker container with the toolchain + tools,
