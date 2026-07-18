@@ -33,6 +33,7 @@ type tuiOpts struct {
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
 func runTUI(o tuiOpts) error {
+	loadScriptRenderers() // ~/.dun/renderers/*.star override/extend the built-ins
 	proc, err := startDunProc(o)
 	if err != nil {
 		return err

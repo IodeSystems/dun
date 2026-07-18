@@ -97,7 +97,17 @@ system-prompt composition.
   leaves a taller-than-window selection alone while any part is visible.
 - **✅ mouse wheel:** `WithMouseCellMotion` so tmux/terminals forward wheel
   events to the viewport instead of scrolling their own scrollback.
-- **◻ next in this slice:** `/` commands; TUI history replay on `--continue`.
+- **✅ tool-result renderers (compiled-in + Starlark):** `ToolRenderer`
+  registry keyed by tool name — `(tool, args, result) → (preview, full)` folded
+  by the ▸/▾ block; unknown tools use a diff-aware generic. Built-ins:
+  node_edit→diff+stat, search/node_query→pretty-JSON. Runtime layer: Starlark
+  scripts in `$DUN_HOME/renderers/*.star` register over the SAME registry
+  (override built-ins, last-write-wins), sandboxed, with helpers (dim/tool/bold/
+  diff/clip/json); render errors fall back to generic. `examples/renderers/
+  search.star` documents the API. NB Starlark's % has no precision (%.2f).
+- **1-col selection gutter** (was 2) to halve focus-switch reflow.
+- **◻ next in this slice:** `/` commands; TUI history replay on `--continue`;
+  hot-reload renderers on file change (today: loaded once at TUI start).
 
 ### ✅ Slice 3 — worktree isolation + exec tool
 - `worktree.go` — `NewWorktree(repo)` creates a `git worktree add -b dun/<ts>`
