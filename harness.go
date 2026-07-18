@@ -12,6 +12,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,6 +61,58 @@ type Harness struct {
 	Session *agent.Session
 	Tools   []mcpmgr.MCPTool
 	store   *memStore
+	wake    chan struct{} // signals a driver to run a Continue turn (bg job done)
+	bgMu    sync.Mutex
+	bgSeq   int
+	bgRun   int // background jobs still running
+}
+
+// Notify injects a proactive notification into the conversation inbox (claimed
+// on the next turn) and fires OnNotify.
+func (h *Harness) Notify(text string) {
+	h.store.publishNotification(agent.Entry{
+		ID: uuid.New().String(), Kind: agent.KindNotification, Content: text, CreatedAt: time.Now().UnixNano(),
+	})
+}
+
+// Wake fires when a background job finishes, so the driver runs a Continue turn.
+func (h *Harness) Wake() <-chan struct{} { return h.wake }
+
+// BackgroundRunning is how many background jobs are still in flight.
+func (h *Harness) BackgroundRunning() int {
+	h.bgMu.Lock()
+	defer h.bgMu.Unlock()
+	return h.bgRun
+}
+
+// Continue runs a turn with NO new user message — to process pending
+// notifications (e.g. a background job's completion). This is the converge
+// point: the notification (+ any queued messages) coalesce into one turn.
+func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
+	return h.Session.Turn(ctx)
+}
+
+// startBackground runs command asynchronously via backend (a container when
+// DockerExec); on completion it injects a completion notification and wakes the
+// driver. Returns the job id.
+func (h *Harness) startBackground(backend ExecBackend, command string) int {
+	h.bgMu.Lock()
+	h.bgSeq++
+	id := h.bgSeq
+	h.bgRun++
+	h.bgMu.Unlock()
+	go func() {
+		out := strings.TrimSpace(backend.Run(context.Background(), command))
+		h.bgMu.Lock()
+		h.bgRun--
+		h.bgMu.Unlock()
+		h.Notify(fmt.Sprintf("background job #%d finished — `%s`:\n%s", id, command, out))
+		select {
+		case h.wake <- struct{}{}:
+		default: // wake is buffered; a full buffer just means a turn is already due
+		}
+	}()
+	return id
 }
 
 // Start spawns the servers, waits for tool discovery, and builds the Session.
@@ -86,6 +140,10 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if sys == "" {
 		sys = defaultSystem
 	}
+	store := newMemStore()
+	store.onNotify = cfg.OnNotify
+	h := &Harness{mgr: mgr, Tools: tools, store: store, wake: make(chan struct{}, 16)}
+
 	// Bridge the MCP tools + the built-in tools (exec, ask_user). Non-MCP tools
 	// are handled locally by the dispatcher wrappers; everything else routes to
 	// its MCP server.
@@ -93,16 +151,13 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	dispatch := mcpDispatcher(mgr, tools, cfg.OnToolCall)
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef())
-		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall)
+		startBg := func(command string) int { return h.startBackground(cfg.Exec, command) }
+		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall, startBg)
 	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
 		dispatch = withAsk(dispatch, cfg.Ask, cfg.OnToolCall)
 	}
-
-	store := newMemStore()
-	store.onNotify = cfg.OnNotify
-	h := &Harness{mgr: mgr, Tools: tools, store: store}
 	h.Session = &agent.Session{
 		SessionID:        "dun",
 		System:           sys,

@@ -74,3 +74,16 @@ func (m *memStore) publish(e agent.Entry) {
 	m.entries = append(m.entries, e)
 	m.unclaimed++
 }
+
+// publishNotification injects a KindNotification into the inbox (pending, so the
+// next turn claims it) and fires onNotify. Used by background-job completions.
+func (m *memStore) publishNotification(e agent.Entry) {
+	m.mu.Lock()
+	m.entries = append(m.entries, e)
+	m.unclaimed++
+	cb := m.onNotify
+	m.mu.Unlock()
+	if cb != nil {
+		cb(e.Content)
+	}
+}

@@ -115,8 +115,15 @@ system-prompt composition.
 - **Verified live:** ask_user round-trip (agent paused → answered MIT → resumed);
   proactive 🔔 fired on a workspace README match (watching the worktree). Unit:
   onNotify fires only for notifications.
-- **◻ deferred:** background/lifted long `exec` → completion as a notification
-  (the agentkit converge pattern); TUI markdown (glamour) + diff view.
+- **✅ background exec → notification convergence:** `exec{background:true}`
+  runs async via the SAME backend (the Docker container when --docker), returns
+  "started job #N" immediately; on completion `Harness.startBackground` injects a
+  KindNotification and signals `Wake()`. The driver runs a `Continue` turn (no
+  new user message) so the agent reacts autonomously — the agentkit converge
+  pattern. `-p` loop + human path drain wakes; `Harness.Notify/Wake/Continue/
+  BackgroundRunning`. **Verified live** with `--docker alpine`: bg job in the
+  container → 🔔 → autonomous turn where the agent acknowledged TESTS_PASSED.
+- **◻ deferred:** TUI markdown (glamour) + diff view.
 
 ### ◻ Slice 4b — persistence + workspace→PR
 - Durable session store (resume, history); worktree diff → review → branch → PR.

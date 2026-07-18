@@ -80,7 +80,7 @@ func TestHostExec(t *testing.T) {
 
 func TestWithExec_RoutesExecLocallyElseMCP(t *testing.T) {
 	inner := agentDispatch(func(name string) string { return "MCP:" + name })
-	d := withExec(inner, HostExec{Dir: t.TempDir()}, nil)
+	d := withExec(inner, HostExec{Dir: t.TempDir()}, nil, nil)
 
 	var call llm.ToolCall
 	call.Function.Name = "exec"

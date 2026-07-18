@@ -167,7 +167,8 @@ func main() {
 	}
 }
 
-// runHuman streams a single task in human-readable form.
+// runHuman streams a single task, then drains any background jobs it started
+// (their completion notifications trigger follow-up turns).
 func runHuman(ctx context.Context, h *dun.Harness, task string) {
 	fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n\ntask: %s\n\n",
 		len(h.ToolNames()), strings.Join(h.ToolNames(), ", "), task)
@@ -176,6 +177,26 @@ func runHuman(ctx context.Context, h *dun.Harness, task string) {
 		fatal(err)
 	}
 	fmt.Fprintf(os.Stderr, "\n\n--- done (%d tokens) ---\n", res.Usage.Total)
+
+	for {
+		if h.BackgroundRunning() == 0 {
+			select {
+			case <-h.Wake(): // a just-finished job's notification
+			default:
+				return
+			}
+		} else {
+			select {
+			case <-h.Wake():
+			case <-ctx.Done():
+				return
+			}
+		}
+		fmt.Fprintf(os.Stderr, "\n--- background job finished; continuing ---\n")
+		if _, err := h.Continue(ctx); err != nil {
+			return
+		}
+	}
 }
 
 // runProgrammatic drives dun over line-delimited JSON events. Input is read by
@@ -194,10 +215,28 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				return // stdin closed / stop
 			}
 			turn(ctx, h, em, content)
+		case <-h.Wake():
+			// A background job finished; run a turn to process its notification.
+			continueTurn(ctx, h, em)
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+// continueTurn runs a turn with no new user message (to process a background
+// job's completion notification) and emits its events.
+func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) {
+	res, err := h.Continue(ctx)
+	if err != nil {
+		em.emit(event{"type": "error", "error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(res.Reply) != "" {
+		em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
+	}
+	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active})
+	em.emit(event{"type": "done"})
 }
 
 // inputStream reads JSON events from stdin in a goroutine and routes them:

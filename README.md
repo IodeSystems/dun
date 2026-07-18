@@ -41,7 +41,9 @@ The TUI is just a client of it, so the engine stays headless and scriptable.
 decision is yours — the turn pauses, you're asked (a picker in the TUI), and it
 resumes with your answer. **Proactive docs:** relevant docs are pushed as 🔔
 notifications as the conversation moves (raglit's index watched via agentkit's
-FinderPreparer).
+FinderPreparer). **Background work:** `exec{background:true}` runs a long command
+(the full test suite, a build) asynchronously in the container; when it finishes
+the agent is notified and reacts on its own — no blocking.
 
 ## Isolation
 

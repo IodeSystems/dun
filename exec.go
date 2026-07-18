@@ -75,30 +75,43 @@ func execToolDef() llm.ToolDef {
 	td.Function.Name = "exec"
 	td.Function.Description = "Run a shell command (build, test, git, ls, …) in the workspace. " +
 		"Returns combined stdout+stderr; a non-zero exit is shown as [exit: …]. Use this to " +
-		"verify edits (build/test) and to run git."
+		"verify edits (build/test) and to run git. For a LONG command (the full test suite, a " +
+		"build), set background:true and keep working — you'll get a notification when it finishes."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"command": map[string]any{"type": "string", "description": "the shell command to run"},
+			"command":    map[string]any{"type": "string", "description": "the shell command to run"},
+			"background": map[string]any{"type": "boolean", "description": "run asynchronously; get notified when it finishes"},
 		},
 		"required": []string{"command"},
 	}
 	return td
 }
 
-// withExec wraps a dispatcher so the built-in "exec" tool is handled locally
-// (via the backend) and everything else routes to the MCP servers.
-func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+// withExec wraps a dispatcher so the built-in "exec" tool is handled locally:
+// synchronous by default, or async via startBg when background:true (its
+// completion arrives later as a notification). Everything else routes to MCP.
+func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startBg func(command string) int) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
 		}
 		var args struct {
-			Command string `json:"command"`
+			Command    string `json:"command"`
+			Background bool   `json:"background"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		if strings.TrimSpace(args.Command) == "" {
 			return "ERROR: exec requires a non-empty command", nil
+		}
+		if args.Background && startBg != nil {
+			id := startBg(args.Command)
+			res := fmt.Sprintf("Started background job #%d: `%s`. It runs in the sandbox; you'll be "+
+				"notified when it finishes. Continue with other work in the meantime.", id, args.Command)
+			if onCall != nil {
+				onCall("exec", map[string]any{"command": args.Command, "background": true}, res)
+			}
+			return res, nil
 		}
 		out := backend.Run(ctx, args.Command)
 		if onCall != nil {
