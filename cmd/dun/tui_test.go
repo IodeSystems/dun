@@ -54,7 +54,7 @@ func TestTUI_EventHandling(t *testing.T) {
 	if m.cur != "" {
 		t.Fatal("tool_call should flush the streamed text")
 	}
-	joined := strings.Join(m.convo, "\n")
+	joined := m.convoText()
 	if !strings.Contains(joined, "looking…") || !strings.Contains(joined, "node_query") {
 		t.Fatalf("conversation missing streamed text or tool line: %q", joined)
 	}
@@ -67,7 +67,7 @@ func TestTUI_EventHandling(t *testing.T) {
 	if m.cur != "" {
 		t.Fatal("done should flush cur")
 	}
-	if !strings.Contains(strings.Join(m.convo, "\n"), "done reading") {
+	if !strings.Contains(m.convoText(), "done reading") {
 		t.Fatal("final streamed text not finalized")
 	}
 }
@@ -75,7 +75,7 @@ func TestTUI_EventHandling(t *testing.T) {
 // Tab toggles pane focus; in convo focus ↑/↓ move the message selection.
 func TestTUI_FocusToggleAndSelection(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
-	m.convo = []string{"m1", "m2", "m3"}
+	m.convo = []convoEntry{{collapsed: "m1"}, {collapsed: "m2"}, {collapsed: "m3"}}
 
 	m = key(m, kTab)
 	if m.focus != focusConvo {
@@ -129,7 +129,7 @@ func TestTUI_AskPickerOptionWithNote(t *testing.T) {
 	if m.asking {
 		t.Fatal("selecting an option should end asking")
 	}
-	if !strings.Contains(strings.Join(m.convo, "\n"), "B — fast") {
+	if !strings.Contains(m.convoText(), "B — fast") {
 		t.Fatalf("answer not echoed with detail: %v", m.convo)
 	}
 }
@@ -153,8 +153,46 @@ func TestTUI_AskPickerCustomAnswer(t *testing.T) {
 	if m.asking {
 		t.Fatal("sending a custom answer should end asking")
 	}
-	if !strings.Contains(strings.Join(m.convo, "\n"), "let's chat about X") {
+	if !strings.Contains(m.convoText(), "let's chat about X") {
 		t.Fatalf("custom answer not echoed: %v", m.convo)
+	}
+}
+
+// A tool call folds its result into one collapsible block; focusing it and
+// pressing enter toggles the full output.
+func TestTUI_ToolCallExpandCollapse(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "node_read", "args": map[string]any{"sel": "F"}})
+	full := "line one\nline two\nline three that is quite long and would be clipped in the preview form"
+	m = m.handleEvent(evMsg{"type": "tool_result", "result": full})
+
+	if len(m.convo) != 1 {
+		t.Fatalf("call+result should be one block, got %d", len(m.convo))
+	}
+	e := m.convo[0]
+	if !e.expandable() {
+		t.Fatal("a tool block should be expandable")
+	}
+	// Collapsed = call line + one preview line; open = call + full body.
+	if got := strings.Count(e.view(), "\n"); got != 1 {
+		t.Fatalf("collapsed view should be 2 lines (call + preview), got %d newlines", got)
+	}
+
+	// Focus it and open.
+	m = key(m, kTab)
+	if m.sel != 0 {
+		t.Fatalf("focus should land on the block, sel=%d", m.sel)
+	}
+	m = key(m, kEnter)
+	if !m.convo[0].open {
+		t.Fatal("enter should open the block")
+	}
+	if !strings.Contains(m.convo[0].view(), "line three") {
+		t.Fatal("open view should show the full output")
+	}
+	m = key(m, kEnter)
+	if m.convo[0].open {
+		t.Fatal("enter again should close the block")
 	}
 }
 
@@ -165,7 +203,7 @@ func TestTUI_ErrorEventClearsBusy(t *testing.T) {
 	if m.busy {
 		t.Fatal("error should clear busy")
 	}
-	if !strings.Contains(strings.Join(m.convo, "\n"), "boom") {
+	if !strings.Contains(m.convoText(), "boom") {
 		t.Fatal("error text not shown")
 	}
 }

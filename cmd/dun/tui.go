@@ -53,16 +53,24 @@ var (
 	stNote   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // proactive notifications
 	stAsk    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
 	stSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // selection gutter
+	stEdge   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused divider half
 )
 
 // paneStyle borders a pane; the focused one is bright (212), else dim (240) —
 // the tmux split-pane look (the bright border is the focused pane's half-edge).
-func paneStyle(focused bool) lipgloss.Style {
-	c := lipgloss.Color("240")
-	if focused {
-		c = lipgloss.Color("212")
+// divider is the single thin rule between the panes (tmux-minimal, no boxes).
+// The focused pane's half is bright: first half if the top (convo) is focused,
+// last half if the bottom (input/ask) is — the "half-edge" focus cue.
+func divider(w int, focusUp bool) string {
+	if w < 2 {
+		w = 2
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(c)
+	half := w / 2
+	left, right := strings.Repeat("─", half), strings.Repeat("─", w-half)
+	if focusUp {
+		return stEdge.Render(left) + stDim.Render(right)
+	}
+	return stDim.Render(left) + stEdge.Render(right)
 }
 
 // addGutter prefixes every line of a (possibly multi-line) block with marker,
@@ -78,13 +86,31 @@ func addGutter(block, marker string, style lipgloss.Style) string {
 
 // ── model ──────────────────────────────────────────────────────────
 
-// Focus is which pane keys drive — tmux-style: Tab toggles, and the focused
-// pane wears a bright border. In convo focus, ↑/↓ move a message selection
+// Focus is which pane keys drive — tmux-style: Tab toggles, and the divider's
+// focused half brightens. In convo focus, ↑/↓ move a message selection
 // (left-border highlight) instead of recalling input history.
 const (
 	focusInput = iota // typing + ↑/↓ history (default)
 	focusConvo        // ↑/↓ select a message, viewport follows
 )
+
+// convoEntry is one conversation block. A tool call/result is collapsible: full
+// holds the whole output, collapsed a one-line preview; enter (when focused)
+// toggles open. full == "" → a plain, non-collapsible block.
+type convoEntry struct {
+	collapsed string
+	full      string
+	open      bool
+}
+
+func (e convoEntry) expandable() bool { return e.full != "" }
+
+func (e convoEntry) view() string {
+	if e.open && e.full != "" {
+		return e.full
+	}
+	return e.collapsed
+}
 
 type tuiModel struct {
 	proc      *dunProc
@@ -92,8 +118,9 @@ type tuiModel struct {
 	vp        viewport.Model
 	input     textinput.Model
 	spin      spinner.Model
-	convo     []string // finalized conversation lines
-	cur       string   // streaming assistant text (not yet finalized); string, not
+	convo     []convoEntry // finalized conversation blocks
+	pendingTool int        // index of a tool call awaiting its result; -1 = none
+	cur         string     // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
 	tools      []string
 	branch     string // worktree branch (from the `workspace` event)
@@ -121,7 +148,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	in.Focus()
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	return tuiModel{proc: proc, workspace: workspace, input: in, spin: sp, starting: true, sel: -1}
+	return tuiModel{proc: proc, workspace: workspace, input: in, spin: sp, starting: true, sel: -1, pendingTool: -1}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -132,12 +159,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
-		// Layout: head(1) + convo box(border 2 + content) + lower box(1+2) +
-		// status(1). Convo content = h-7 in the normal (input) case; View
-		// recomputes it when the lower pane grows (an ask panel).
-		m.vp = viewport.New(max(1, msg.Width-2), max(1, msg.Height-7))
-		m.input.Width = msg.Width - 4
-		m.md = newMarkdown(msg.Width - 4)
+		// Layout: head(1) + convo + divider(1) + lower + status(1). Convo takes
+		// h-4 in the normal (1-line input) case; View recomputes it when the
+		// lower pane grows (an ask panel).
+		m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
+		m.input.Width = msg.Width - 2
+		m.md = newMarkdown(msg.Width - 2)
 		m.refresh()
 		return m, nil
 
@@ -155,9 +182,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == focusInput {
 				m.focus = focusConvo
 				m.input.Blur()
-				if m.sel < 0 || m.sel >= len(m.convo) {
-					m.sel = len(m.convo) - 1
-				}
+				m.sel = len(m.convo) - 1 // start at the newest message
 			} else {
 				m.focus = focusInput
 				m.input.Focus()
@@ -170,6 +195,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "enter":
 			if m.focus == focusConvo {
+				// Open/close the focused block (a tool call's full output).
+				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].expandable() {
+					m.convo[m.sel].open = !m.convo[m.sel].open
+					m.refresh()
+				}
 				return m, nil
 			}
 			v := strings.TrimSpace(m.input.Value())
@@ -355,13 +385,33 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	case "tool_call":
 		m.busy = true
 		m.flushCur()
-		m.append(stTool.Render("⚙ " + str(ev["tool"]) + "(" + argKeys(ev["args"]) + ")"))
+		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argKeys(ev["args"]) + ")")})
+		m.pendingTool = len(m.convo) - 1
+		m.refresh()
 	case "tool_result":
 		res := str(ev["result"])
+		var body string
 		if isDiff(res) {
-			m.append(colorizeDiff(res)) // show the diff in full, colored
+			body = colorizeDiff(res)
 		} else {
-			m.append(stDim.Render("  → " + clip(oneLine(res), 100)))
+			body = stDim.Render(res)
+		}
+		preview := stDim.Render("  → " + clip(oneLine(res), 100))
+		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
+			// Fold the result into its call so the pair is one collapsible unit.
+			call := m.convo[idx].collapsed
+			m.convo[idx] = convoEntry{
+				collapsed: stDim.Render("▸ ") + call + "\n" + preview,
+				full:      stDim.Render("▾ ") + call + "\n" + body,
+			}
+			m.pendingTool = -1
+			m.refresh()
+		} else {
+			m.convo = append(m.convo, convoEntry{
+				collapsed: stDim.Render("▸ ") + preview,
+				full:      stDim.Render("▾ ") + body,
+			})
+			m.refresh()
 		}
 	case "message":
 		// tokens already streamed the reply; nothing to add.
@@ -402,13 +452,14 @@ func (m tuiModel) View() string {
 	// The lower pane is the input, or — while answering — the option picker. The
 	// convo pane takes whatever height is left (the picker can be several rows).
 	lower := m.lowerView()
-	convoH := m.h - 4 - lipgloss.Height(lower) // head 1 + status 1 + convo border 2
+	convoH := m.h - 3 - lipgloss.Height(lower) // head 1 + divider 1 + status 1
 	if convoH < 1 {
 		convoH = 1
 	}
 	vp := m.vp
 	vp.Height = convoH
-	convoBox := paneStyle(m.focus == focusConvo && !m.asking).Width(max(1, m.w-2)).Render(vp.View())
+	// Focus cue lives entirely in the divider's bright half — no pane borders.
+	div := divider(m.w, m.focus == focusConvo && !m.asking)
 
 	var status string
 	switch {
@@ -421,19 +472,19 @@ func (m tuiModel) View() string {
 	case m.busy:
 		status = m.spin.View() + stDim.Render(" working…  (ctrl+c to quit)")
 	case m.focus == focusConvo:
-		status = stDim.Render("convo  ·  ↑/↓ select message · tab input · ctrl+c quit")
+		status = stDim.Render("convo  ·  ↑/↓ select · enter open/close · tab input · ctrl+c quit")
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · ctrl+c quit")
 	}
-	return strings.Join([]string{head, convoBox, lower, status}, "\n")
+	return strings.Join([]string{head, vp.View(), div, lower, status}, "\n")
 }
 
-// lowerView is the bottom pane: the input box, or the answer picker when asking.
+// lowerView is the bottom pane: the input line, or the answer picker when asking.
 func (m tuiModel) lowerView() string {
 	if m.asking {
 		return m.askPanel()
 	}
-	return paneStyle(m.focus == focusInput).Width(max(1, m.w-2)).Render(m.input.View())
+	return m.input.View()
 }
 
 // askPanel renders the answer options (highlighted selection), a trailing
@@ -458,28 +509,40 @@ func (m tuiModel) askPanel() string {
 	if m.noting || m.customAnswer {
 		rows = append(rows, m.input.View())
 	}
-	return paneStyle(true).Width(max(1, m.w-2)).Render(strings.Join(rows, "\n"))
+	return strings.Join(rows, "\n")
 }
 
 // ── helpers ────────────────────────────────────────────────────────
 
 func (m *tuiModel) append(line string) {
-	m.convo = append(m.convo, line)
+	m.convo = append(m.convo, convoEntry{collapsed: line})
 	m.refresh()
 }
 
 func (m *tuiModel) flushCur() {
 	if m.cur != "" {
 		// Finalize the streamed reply as rendered markdown (headers, lists, code).
-		m.convo = append(m.convo, renderMarkdown(m.md, strings.TrimRight(m.cur, "\n")))
+		m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, strings.TrimRight(m.cur, "\n"))})
 		m.cur = ""
 	}
 }
 
+// convoText joins the visible text of every block (test/inspection helper).
+func (m tuiModel) convoText() string {
+	parts := make([]string, len(m.convo))
+	for i, e := range m.convo {
+		parts[i] = e.view()
+	}
+	return strings.Join(parts, "\n")
+}
+
 func (m *tuiModel) refresh() {
-	blocks := m.convo
+	blocks := make([]string, 0, len(m.convo)+1)
+	for _, e := range m.convo {
+		blocks = append(blocks, e.view())
+	}
 	if m.cur != "" {
-		blocks = append(append([]string{}, m.convo...), m.cur)
+		blocks = append(blocks, m.cur)
 	}
 	// In convo focus, gutter every block (selected one bright) so the highlight
 	// aligns and the selected message shows a left border down its full height.
