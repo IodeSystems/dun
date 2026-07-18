@@ -830,7 +830,7 @@ func (m *tuiModel) refresh() {
 	selMode := m.focus == focusConvo && !m.asking && len(blocks) > 0
 	width := m.vp.Width
 	if selMode {
-		width -= 2 // reserve the gutter column (+ a space)
+		width-- // reserve ONE column for the gutter bar — minimal reflow on focus
 	}
 	wrap := lipgloss.NewStyle().Width(max(1, width))
 	rendered := make([]string, len(blocks))
@@ -839,9 +839,9 @@ func (m *tuiModel) refresh() {
 		w := wrap.Render(b)
 		if selMode {
 			if i == m.sel {
-				w = addGutter(w, "▎ ", stSel)
+				w = addGutter(w, "▎", stSel)
 			} else {
-				w = addGutter(w, "  ", lipgloss.NewStyle())
+				w = addGutter(w, " ", lipgloss.NewStyle())
 			}
 		}
 		rendered[i] = w
