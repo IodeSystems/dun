@@ -123,7 +123,13 @@ system-prompt composition.
   pattern. `-p` loop + human path drain wakes; `Harness.Notify/Wake/Continue/
   BackgroundRunning`. **Verified live** with `--docker alpine`: bg job in the
   container → 🔔 → autonomous turn where the agent acknowledged TESTS_PASSED.
-- **◻ deferred:** TUI markdown (glamour) + diff view.
+- **✅ TUI polish:** glamour markdown rendering for finalized assistant replies
+  (stream raw → snap to rendered on finalize); diff colorization for tool
+  results that look like unified diffs (shown in full, +green/-red); input
+  history (↑/↓); busy-spinner inference for autonomous turns; header (workspace
+  · ⎇ branch · N tools), a rule, and a status line with key hints; `› ` prompt.
+  `render.go` (newMarkdown/renderMarkdown/isDiff/colorizeDiff) unit-tested.
+  Visuals need a real terminal to confirm (no-TTY exits cleanly).
 
 ### ✅ Slice 4b — worktree → PR
 - `pr.go` — built-in `open_pr{title, body, base}` tool: commits the worktree

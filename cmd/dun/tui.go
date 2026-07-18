@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -69,13 +70,17 @@ type tuiModel struct {
 	busy       bool   // a turn in flight
 	asking     bool   // agent is waiting on an ask_user answer
 	askOptions []string
+	md         *glamour.TermRenderer // markdown renderer for assistant replies
+	history    []string              // sent inputs, for up/down recall
+	histIdx    int                   // cursor into history (== len when not browsing)
 	w, h       int
 	fatalErr   string
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	in := textinput.New()
-	in.Placeholder = "ask dun to do something…  (enter to send, ctrl+c to quit)"
+	in.Placeholder = "ask dun to do something…"
+	in.Prompt = "› "
 	in.Focus()
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -92,6 +97,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 		m.vp = viewport.New(msg.Width, msg.Height-4)
 		m.input.Width = msg.Width - 2
+		m.md = newMarkdown(msg.Width - 2)
 		m.refresh()
 		return m, nil
 
@@ -123,10 +129,30 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.busy || m.starting {
 				return m, nil
 			}
+			m.history = append(m.history, v)
+			m.histIdx = len(m.history)
 			m.input.Reset()
 			m.append(stUser.Render("› " + v))
 			m.busy = true
 			m.proc.send(v)
+			return m, nil
+		case "up":
+			if len(m.history) > 0 && m.histIdx > 0 {
+				m.histIdx--
+				m.input.SetValue(m.history[m.histIdx])
+				m.input.CursorEnd()
+			}
+			return m, nil
+		case "down":
+			if m.histIdx < len(m.history) {
+				m.histIdx++
+				if m.histIdx == len(m.history) {
+					m.input.SetValue("")
+				} else {
+					m.input.SetValue(m.history[m.histIdx])
+					m.input.CursorEnd()
+				}
+			}
 			return m, nil
 		default:
 			var cmd tea.Cmd
@@ -167,13 +193,20 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		m.append(stDim.Render(fmt.Sprintf("ready — %d tools: %s", len(m.tools), strings.Join(m.tools, ", "))))
 	case "token":
+		m.busy = true // a turn is active (incl. autonomous background-completion turns)
 		m.cur += str(ev["text"])
 		m.refresh()
 	case "tool_call":
+		m.busy = true
 		m.flushCur()
 		m.append(stTool.Render("⚙ " + str(ev["tool"]) + "(" + argKeys(ev["args"]) + ")"))
 	case "tool_result":
-		m.append(stDim.Render("  → " + clip(oneLine(str(ev["result"])), 100)))
+		res := str(ev["result"])
+		if isDiff(res) {
+			m.append(colorizeDiff(res)) // show the diff in full, colored
+		} else {
+			m.append(stDim.Render("  → " + clip(oneLine(res), 100)))
+		}
 	case "message":
 		// tokens already streamed the reply; nothing to add.
 	case "notification":
@@ -205,18 +238,24 @@ func (m tuiModel) View() string {
 	if m.branch != "" {
 		head += stDim.Render("  ⎇ " + m.branch)
 	}
-	status := ""
+	if n := len(m.tools); n > 0 {
+		head += stDim.Render(fmt.Sprintf("  · %d tools", n))
+	}
+	rule := stDim.Render(strings.Repeat("─", max(1, m.w)))
+	var status string
 	switch {
 	case m.fatalErr != "":
 		status = stErr.Render(m.fatalErr)
 	case m.starting:
 		status = m.spin.View() + stDim.Render(" spawning tool servers…")
+	case m.asking:
+		status = stAsk.Render("❓ waiting for your answer (a number picks an option)")
 	case m.busy:
-		status = m.spin.View() + stDim.Render(" working…")
+		status = m.spin.View() + stDim.Render(" working…  (ctrl+c to quit)")
 	default:
-		status = stDim.Render("ready")
+		status = stDim.Render("ready  ·  ↑/↓ history · pgup/pgdn scroll · ctrl+c quit")
 	}
-	return fmt.Sprintf("%s\n%s\n%s\n%s", head, m.vp.View(), m.input.View(), status)
+	return fmt.Sprintf("%s\n%s\n%s\n%s\n%s", head, m.vp.View(), rule, m.input.View(), status)
 }
 
 // ── helpers ────────────────────────────────────────────────────────
@@ -228,7 +267,8 @@ func (m *tuiModel) append(line string) {
 
 func (m *tuiModel) flushCur() {
 	if m.cur != "" {
-		m.convo = append(m.convo, strings.TrimRight(m.cur, "\n"))
+		// Finalize the streamed reply as rendered markdown (headers, lists, code).
+		m.convo = append(m.convo, renderMarkdown(m.md, strings.TrimRight(m.cur, "\n")))
 		m.cur = ""
 	}
 }
