@@ -25,6 +25,7 @@ import (
 type tuiOpts struct {
 	workspace, model, url, key, docker string
 	noWorktree                         bool
+	pr                                 bool
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -291,6 +292,9 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 	}
 	if o.noWorktree {
 		args = append(args, "--no-worktree")
+	}
+	if o.pr {
+		args = append(args, "--pr")
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Env = os.Environ()

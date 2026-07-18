@@ -62,6 +62,11 @@ dun --no-worktree ...                               # work in place (no isolatio
 The container is the sandbox, so model-authored commands can't reach the host —
 no per-action approval prompts, the isolation does the work.
 
+With `--pr`, the agent can **submit its work as a pull request** — it commits the
+worktree branch, pushes it, and runs `gh pr create` (an `open_pr` tool it calls
+when the task is done and verified). Without `--pr`, the changes just stay on the
+branch for you to review and PR yourself.
+
 Next: run the MCP servers inside the container too, and a worktree→PR flow. See
 `plan/plan.md`.
 

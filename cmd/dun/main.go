@@ -35,6 +35,7 @@ func main() {
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
 	noWorktree := flag.Bool("no-worktree", false, "work in the workspace directly, no git worktree")
+	pr := flag.Bool("pr", false, "let the agent open a pull request (commit+push+gh pr create) when done")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
@@ -48,7 +49,7 @@ func main() {
 
 	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
 	if *tui {
-		if err := runTUI(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree}); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree, *pr}); err != nil {
 			fatal(err)
 		}
 		return
@@ -102,6 +103,8 @@ func main() {
 		RaglitHome: raglitHome,
 		Client:     llm.NewClient(*url, *key, *model),
 		Exec:       backend,
+		Worktree:   wt,
+		EnablePR:   *pr,
 	}
 	if *prog {
 		em = &emitter{}

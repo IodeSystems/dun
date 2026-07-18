@@ -125,8 +125,19 @@ system-prompt composition.
   container → 🔔 → autonomous turn where the agent acknowledged TESTS_PASSED.
 - **◻ deferred:** TUI markdown (glamour) + diff view.
 
-### ◻ Slice 4b — persistence + workspace→PR
-- Durable session store (resume, history); worktree diff → review → branch → PR.
+### ✅ Slice 4b — worktree → PR
+- `pr.go` — built-in `open_pr{title, body, base}` tool: commits the worktree
+  changes onto the session branch, pushes it, `gh pr create`. `withPR` dispatcher
+  wrapper; `Config.Worktree` + `Config.EnablePR`. **Opt-in via `--pr`** (pushing +
+  opening a PR is outward-facing); without it, changes just stay on the branch
+  for manual review (Slice 3). System prompt gains "call open_pr when done".
+- **Verified:** unit — openPR commits + pushes the branch to a local bare origin
+  (with the change in the tree); no-worktree guard. LIVE (`--pr`, 13 tools) — the
+  agent node_edit'd main.go, called open_pr, and the branch landed on origin with
+  the edit; gh step reported the manual fallback (local remote isn't GitHub).
+
+### ◻ Slice 4c — persistence
+- Durable session store (resume, history) instead of the in-memory store.
 
 ### ◻ Slice 5 — roles / task DAG (if wanted)
 - Planner/coder/reviewer; multi-Session orchestration (autowork3-style).

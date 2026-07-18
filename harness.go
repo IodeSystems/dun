@@ -48,6 +48,8 @@ type Config struct {
 	System     string          // nil → defaultSystem
 	Exec       ExecBackend     // nil → no exec tool; else adds the built-in exec tool
 	Ask        AskFunc         // nil → no ask_user tool; else adds the human-in-the-loop tool
+	Worktree   *Worktree       // the session worktree (for open_pr)
+	EnablePR   bool            // add the open_pr tool (opt-in: pushing + PR is outward-facing)
 	OnToken    func(string)
 	OnToolCall func(tool string, args map[string]any, result string)
 	// OnNotify fires when a proactive notification (KindNotification) is injected
@@ -157,6 +159,11 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
 		dispatch = withAsk(dispatch, cfg.Ask, cfg.OnToolCall)
+	}
+	if cfg.EnablePR && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
+		toolDefs = append(toolDefs, prToolDef())
+		dispatch = withPR(dispatch, cfg.Worktree, cfg.OnToolCall)
+		sys += "\n\nWhen the task is complete and verified (build/tests pass), call open_pr with a concise title and a summary body to submit your work as a pull request."
 	}
 	h.Session = &agent.Session{
 		SessionID:        "dun",
