@@ -35,9 +35,15 @@ var version = "dev"
 
 func main() {
 	ver := flag.Bool("version", false, "print version and exit")
-	url := flag.String("url", "https://llm.iodesystems.com", "LLM base URL")
-	model := flag.String("model", "ternary-bonsai-27b", "chat model (must support tool calls)")
-	key := flag.String("key", os.Getenv("DUN_LLM_KEY"), "API key (or $DUN_LLM_KEY)")
+	setup := flag.Bool("setup", false, "run the interactive setup wizard (LLM url/model/key) and exit")
+	// Flag defaults come from env then the saved config then the built-in — so a
+	// CLI flag still overrides for a one-off run. See config.go.
+	fc := loadConfig()
+	url := flag.String("url", firstNonEmpty(os.Getenv("DUN_URL"), fc.URL, defaultURL), "LLM base URL")
+	model := flag.String("model", firstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model, defaultModel), "chat model (must support tool calls)")
+	// Key default stays empty so `dun -h` never prints the secret; the real value
+	// is resolved after parse (flag > env > config).
+	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
 	noWorktree := flag.Bool("no-worktree", false, "work in the workspace directly, no git worktree")
@@ -57,6 +63,14 @@ func main() {
 		fmt.Println("dun " + version)
 		return
 	}
+	if *setup {
+		if err := runSetupTUI(); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	// Resolve the effective key: explicit flag > env > saved config.
+	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), fc.Key)
 	// Dev self-update: if this is a source-stamped build and the tree changed,
 	// rebuild in place and re-exec the fresh binary. Skipped for spawned children
 	// (DUN_CHILD) and the -p engine mode; no-op for released binaries (srcDir="").
@@ -82,7 +96,7 @@ func main() {
 
 	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
 	if *tui {
-		if err := runTUI(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree, *pr, *cont, *resume}); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume}); err != nil {
 			fatal(err)
 		}
 		return
@@ -90,7 +104,7 @@ func main() {
 
 	// Serve mode: a web client of `dun -p` (same re-exec, bridged over SSE/POST).
 	if *serve {
-		if err := runServe(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree, *pr, *cont, *resume}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -156,7 +170,7 @@ func main() {
 	cfg := dun.Config{
 		Workspace:  effWS,
 		RaglitHome: raglitHome,
-		Client:     llm.NewClient(*url, *key, *model),
+		Client:     llm.NewClient(*url, effKey, *model),
 		Exec:        backend,
 		Worktree:    wt,
 		EnablePR:    *pr,

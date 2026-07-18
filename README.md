@@ -22,6 +22,10 @@ OpenAI-compatible endpoint.
 make install   # stamps version + source dir, puts dun on PATH ($GOPATH/bin)
 # poly-lsp-mcp, mcpshell, raglit must be on PATH
 
+dun --setup   # Bubble Tea wizard: LLM url / masked key / model (navigable list
+              # of the endpoint's models). Saves to ~/.dun/config.json; re-run
+              # any time. Precedence: --flag > env > config > built-in default.
+
 # `make install` builds a DEV binary: on each launch it checks whether the
 # source tree changed and, if so, rebuilds itself in place and re-execs the
 # fresh build — so `dun` on PATH is never stale. `dun -version` shows the stamp.

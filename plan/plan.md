@@ -41,6 +41,20 @@ system-prompt composition.
 
 ## Active work
 
+### ✅ Config wizard (`dun --setup`) + config file
+- **Problem:** LLM url/model/key came only from flags (hardcoded defaults) + one
+  env var — re-typed or script-edited every run, painful when trying new models.
+- **`cmd/dun/config.go`:** `~/.dun/config.json` (`$DUN_HOME`, 0600 — key is
+  secret). **`dun --setup` is a Bubble Tea wizard** (`setup.go`, re-runnable):
+  URL → masked key → model. The model step fetches the endpoint's `/v1/models`
+  and shows a **navigable list** (↑/↓, enter) with a "type a name" row, so you
+  pick a new model by eye (falls back to typing if offline). `/config` TUI
+  command shows the live settings + points at `--setup`.
+- **Precedence:** CLI flag > env (`DUN_URL`/`DUN_MODEL`/`DUN_LLM_KEY`) > config
+  file > built-in — a one-off `--model X` still wins. Verified: wizard writes
+  0600 json; file → flag defaults; env overrides file. Tests: round-trip,
+  firstNonEmpty, maskKey.
+
 ### ✅ Tooling — version stamp + dev self-update
 - **Problem:** `dun` re-execs itself (`os.Executable()`), so a stale on-PATH
   binary makes the WHOLE tree stale — easy to forget to reinstall.

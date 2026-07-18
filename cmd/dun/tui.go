@@ -45,6 +45,7 @@ func runTUI(o tuiOpts) error {
 		return err
 	}
 	m := newTUIModel(proc, o.workspace)
+	m.model, m.url, m.keySet = o.model, o.url, o.key != "" // for /config
 	// WithMouseCellMotion makes the terminal (and tmux) forward wheel events to
 	// us instead of scrolling its own scrollback; the viewport consumes them.
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
@@ -222,6 +223,8 @@ type tuiModel struct {
 	dumpSig    chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
 	webAddr    string         // bound address of the embedded /web server ("" = off)
 	paletteSel int            // highlighted row in the "/" command palette
+	model, url string         // this session's LLM settings (for /config)
+	keySet     bool           // whether an API key is configured
 	w, h       int
 	fatalErr   string
 }
@@ -1113,8 +1116,27 @@ func init() {
 			m.startWeb(addr)
 			return nil
 		}},
+		{"config", "", "show this session's LLM settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
 		{"quit", "", "exit dun", func(_ *tuiModel, _ []string) tea.Cmd { return tea.Quit }},
 	}
+}
+
+// showConfig appends the running session's LLM settings to the conversation.
+// The wizard (`dun --setup`) is a terminal flow — bubbletea owns stdin here — so
+// this is read-only + a pointer to it.
+func (m *tuiModel) showConfig() {
+	key := "(none)"
+	if m.keySet {
+		key = "set"
+	}
+	var b strings.Builder
+	b.WriteString(stHeader.Render("LLM settings"))
+	b.WriteString("\n  " + stDim.Render("url:   ") + m.url)
+	b.WriteString("\n  " + stDim.Render("model: ") + stTool.Render(m.model))
+	b.WriteString("\n  " + stDim.Render("key:   ") + key)
+	b.WriteString("\n  " + stDim.Render("saved: ") + configPath())
+	b.WriteString("\n" + stDim.Render("run `dun --setup` to change (or --model/--url/--key for one run)"))
+	m.append(b.String())
 }
 
 // paletteActive reports whether the "/" command palette should be shown/driven.
