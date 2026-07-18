@@ -186,6 +186,10 @@ func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 	if got := strings.Count(e.view(), "\n"); got != 1 {
 		t.Fatalf("collapsed view should be 2 lines (call + preview), got %d newlines", got)
 	}
+	// The call line shows the INPUT value, not just the arg key.
+	if !strings.Contains(e.view(), "sel=F") {
+		t.Fatalf("collapsed call line should show the arg value, got %q", e.view())
+	}
 
 	// Focus it and open.
 	m = key(m, kTab)

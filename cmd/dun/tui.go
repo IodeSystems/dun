@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -609,21 +610,28 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	case "tool_call":
 		m.busy = true
 		m.flushCur()
-		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argKeys(ev["args"]) + ")")})
+		args, _ := ev["args"].(map[string]any)
+		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argPreview(args, 80) + ")")})
 		m.pendingTool = len(m.convo) - 1
-		m.pendingArgs, _ = ev["args"].(map[string]any)
+		m.pendingArgs = args
 		m.refresh()
 	case "tool_result":
+		tool := str(ev["tool"])
 		// A per-tool renderer turns the result into a preview + full body.
 		preview, body := renderToolResult(renderCtx{
-			tool: str(ev["tool"]), args: m.pendingArgs, result: str(ev["result"]), width: m.vp.Width,
+			tool: tool, args: m.pendingArgs, result: str(ev["result"]), width: m.vp.Width,
 		})
+		// Collapsed shows a one-line arg preview; expanded shows the full input.
+		callShort := stTool.Render("⚙ " + tool + "(" + argPreview(m.pendingArgs, 80) + ")")
+		callFull := stTool.Render("⚙ " + tool)
+		if af := argFull(m.pendingArgs); af != "" {
+			callFull += "\n" + af
+		}
 		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
 			// Fold the result into its call so the pair is one collapsible unit.
-			call := m.convo[idx].collapsed
 			m.convo[idx] = convoEntry{
-				collapsed: stDim.Render("▸ ") + call + "\n" + preview,
-				full:      stDim.Render("▾ ") + call + "\n" + body,
+				collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
+				full:      stDim.Render("▾ ") + callFull + "\n" + body,
 			}
 			m.pendingTool, m.pendingArgs = -1, nil
 			m.refresh()
@@ -887,16 +895,39 @@ func str(v any) string {
 	return fmt.Sprint(v)
 }
 
-func argKeys(v any) string {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return ""
-	}
+func sortedKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
-	return strings.Join(keys, ",")
+	sort.Strings(keys)
+	return keys
+}
+
+// argPreview is a one-line `key=value` summary of a call's args (each value
+// clipped), for the collapsed call line — so you SEE the input, not just keys.
+func argPreview(args map[string]any, max int) string {
+	if len(args) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(args))
+	for _, k := range sortedKeys(args) {
+		parts = append(parts, k+"="+clip(oneLine(fmt.Sprint(args[k])), 48))
+	}
+	return clip(strings.Join(parts, ", "), max)
+}
+
+// argFull renders the call's args in full (multi-line values kept intact), shown
+// when the tool block is expanded.
+func argFull(args map[string]any) string {
+	if len(args) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, k := range sortedKeys(args) {
+		b.WriteString(stDim.Render("  "+k+":") + " " + fmt.Sprint(args[k]) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // ── subprocess (dun -p) ────────────────────────────────────────────
