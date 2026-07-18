@@ -11,7 +11,7 @@ import (
 // proactive-RAG pings the FinderPreparer injects) and NOT for ordinary entries.
 func TestMemStore_OnNotifyFiresForNotifications(t *testing.T) {
 	var got []string
-	s := newMemStore()
+	s, _ := openSessionStore("")
 	s.onNotify = func(text string) { got = append(got, text) }
 	ctx := context.Background()
 

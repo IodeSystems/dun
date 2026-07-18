@@ -36,6 +36,9 @@ func main() {
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
 	noWorktree := flag.Bool("no-worktree", false, "work in the workspace directly, no git worktree")
 	pr := flag.Bool("pr", false, "let the agent open a pull request (commit+push+gh pr create) when done")
+	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
+	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
+	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
@@ -47,12 +50,37 @@ func main() {
 		fatal(err)
 	}
 
+	if *listSessions {
+		ids := dun.ListSessions(absWS)
+		if len(ids) == 0 {
+			fmt.Fprintln(os.Stderr, "dun: no saved sessions for this workspace")
+		}
+		for _, id := range ids {
+			fmt.Println(id)
+		}
+		return
+	}
+
 	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
 	if *tui {
-		if err := runTUI(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree, *pr}); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree, *pr, *cont, *resume}); err != nil {
 			fatal(err)
 		}
 		return
+	}
+
+	// Session persistence, scoped by the workspace ROOT (~/.dun/sessions/<root>/).
+	var sessionFile, sessionID string
+	switch {
+	case *resume != "":
+		sessionID, sessionFile = *resume, dun.SessionFile(absWS, *resume)
+	case *cont:
+		if sessionID = dun.LatestSession(absWS); sessionID != "" {
+			sessionFile = dun.SessionFile(absWS, sessionID)
+		}
+	}
+	if sessionFile == "" {
+		sessionFile, sessionID = dun.NewSessionFile(absWS)
 	}
 	if firstTask == "" && !*prog {
 		fmt.Fprintln(os.Stderr, `usage: dun [--workspace DIR] "task"   (or -tui, or -p for JSON events)`)
@@ -102,9 +130,10 @@ func main() {
 		Workspace:  effWS,
 		RaglitHome: raglitHome,
 		Client:     llm.NewClient(*url, *key, *model),
-		Exec:       backend,
-		Worktree:   wt,
-		EnablePR:   *pr,
+		Exec:        backend,
+		Worktree:    wt,
+		EnablePR:    *pr,
+		SessionFile: sessionFile,
 	}
 	if *prog {
 		em = &emitter{}
@@ -145,6 +174,14 @@ func main() {
 		fatal(err)
 	}
 	defer h.Close()
+
+	if *prog {
+		em.emit(event{"type": "session", "id": sessionID, "resumed": h.Resumed()})
+	} else if h.Resumed() > 0 {
+		fmt.Fprintf(os.Stderr, "dun: resumed session %s (%d entries)\n", sessionID, h.Resumed())
+	} else {
+		fmt.Fprintf(os.Stderr, "dun: session %s\n", sessionID)
+	}
 
 	if wt != nil && wt.Branch != "" {
 		if *prog {

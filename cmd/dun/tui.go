@@ -27,6 +27,8 @@ type tuiOpts struct {
 	workspace, model, url, key, docker string
 	noWorktree                         bool
 	pr                                 bool
+	cont                               bool   // --continue: resume the latest session
+	resume                             string // --resume <id>: resume a specific session
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -335,6 +337,12 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 	}
 	if o.pr {
 		args = append(args, "--pr")
+	}
+	if o.cont {
+		args = append(args, "--continue")
+	}
+	if o.resume != "" {
+		args = append(args, "--resume", o.resume)
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Env = os.Environ()

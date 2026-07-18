@@ -50,6 +50,7 @@ type Config struct {
 	Ask        AskFunc         // nil → no ask_user tool; else adds the human-in-the-loop tool
 	Worktree   *Worktree       // the session worktree (for open_pr)
 	EnablePR   bool            // add the open_pr tool (opt-in: pushing + PR is outward-facing)
+	SessionFile string         // persist the conversation here (resumable); "" = in-memory only
 	OnToken    func(string)
 	OnToolCall func(tool string, args map[string]any, result string)
 	// OnNotify fires when a proactive notification (KindNotification) is injected
@@ -62,12 +63,15 @@ type Harness struct {
 	mgr     *mcpmgr.Manager
 	Session *agent.Session
 	Tools   []mcpmgr.MCPTool
-	store   *memStore
+	store   *sessionStore
 	wake    chan struct{} // signals a driver to run a Continue turn (bg job done)
 	bgMu    sync.Mutex
 	bgSeq   int
 	bgRun   int // background jobs still running
 }
+
+// Resumed reports how many entries were restored from an existing session file.
+func (h *Harness) Resumed() int { return h.store.Loaded() }
 
 // Notify injects a proactive notification into the conversation inbox (claimed
 // on the next turn) and fires OnNotify.
@@ -142,7 +146,11 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if sys == "" {
 		sys = defaultSystem
 	}
-	store := newMemStore()
+	store, err := openSessionStore(cfg.SessionFile)
+	if err != nil {
+		mgr.Close()
+		return nil, fmt.Errorf("dun: open session: %w", err)
+	}
 	store.onNotify = cfg.OnNotify
 	h := &Harness{mgr: mgr, Tools: tools, store: store, wake: make(chan struct{}, 16)}
 

@@ -142,8 +142,30 @@ system-prompt composition.
   agent node_edit'd main.go, called open_pr, and the branch landed on origin with
   the edit; gh step reported the manual fallback (local remote isn't GitHub).
 
-### ◻ Slice 4c — persistence
-- Durable session store (resume, history) instead of the in-memory store.
+### ✅ Slice 4c — persistence (PROVEN LIVE)
+- `store.go` — `sessionStore` replaces the in-memory store: mirrors the agent
+  Entry list (the *active exchange*, the model's source of truth) to a JSONL
+  under `~/.dun/sessions/<encoded-root>/<id>.jsonl`, scoped by the workspace
+  ROOT (not the ephemeral worktree), à la ~/.claude. `$DUN_HOME` overrides.
+- **One representation, not two:** the Entry list is both the model context AND
+  the TUI history (each Entry rebuilds a rendered line) — no separate event log,
+  so no dual-write corruption surface.
+- **Atomic writes:** full rewrite to `<path>.tmp` + `os.Rename` — a crash leaves
+  the whole old or whole new file, never torn (the "a/b" safety via rename).
+- **File refs extracted:** entry contents > 8 KiB (a `node_read` of a whole
+  file, a big diff, verbose exec output) go to content-addressed blobs
+  (`blobs/<sha>.blob`); the JSONL keeps a ref. Disk-only — in-memory entries
+  hold full content; load re-materializes. Identical reads dedup by hash.
+- `session.go` — path helpers (`SessionsDir`/`RootDir`/`NewSessionFile`/
+  `SessionFile`/`LatestSession`/`ListSessions`).
+- cmd: `--continue` (resume latest for this root), `--resume <id>`, `--sessions`
+  (list + exit); emits a `session` event (id + resumed count); TUI forwards the
+  flags to its `-p` subprocess. `go install ./cmd/dun` → `dun` on PATH.
+- **Verified live vs bonsai:** session 1 stored a fact → session 2 `--continue`
+  reloaded 2 entries (same id) and the model recalled it. Unit: round-trip,
+  blob extraction (not inlined, re-materialized), compaction persists.
+- **◻ deferred:** TUI replays loaded entries as history on resume (today the
+  model has the context but the TUI starts blank on `--continue`).
 
 ### ◻ Slice 5 — roles / task DAG (if wanted)
 - Planner/coder/reviewer; multi-Session orchestration (autowork3-style).
