@@ -116,8 +116,14 @@ system-prompt composition.
   diff/clip/json); render errors fall back to generic. `examples/renderers/
   search.star` documents the API. NB Starlark's % has no precision (%.2f).
 - **1-col selection gutter** (was 2) to halve focus-switch reflow.
-- **◻ next in this slice:** `/` commands; TUI history replay on `--continue`;
-  hot-reload renderers on file change (today: loaded once at TUI start).
+- **✅ slash command interface:** input starting with `/` opens a live PALETTE
+  above the input — matching commands + descriptions, ↑/↓ select, tab complete,
+  enter run, esc dismiss (doesn't quit). Registry (`slashCommands`, populated in
+  init to avoid the help↔registry init cycle); `/help` enumerates it; unknown /
+  ambiguous → hint. Commands: `/help`, `/web [addr]`, `/quit`. Adding one = one
+  registry entry (palette + /help pick it up). Unit-tested (`TestTUI_CommandPalette`).
+- **◻ next in this slice:** TUI history replay on `--continue`; hot-reload
+  renderers on file change (today: loaded once at TUI start).
 
 ### ✅ Slice 3 — worktree isolation + exec tool
 - `worktree.go` — `NewWorktree(repo)` creates a `git worktree add -b dun/<ts>`

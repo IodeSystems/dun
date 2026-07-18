@@ -221,6 +221,7 @@ type tuiModel struct {
 	insp       inspector // the overlay (valid while inspecting)
 	dumpSig    chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
 	webAddr    string         // bound address of the embedded /web server ("" = off)
+	paletteSel int            // highlighted row in the "/" command palette
 	w, h       int
 	fatalErr   string
 }
@@ -294,6 +295,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
+			if m.paletteActive() { // dismiss the command palette, keep the app
+				m.input.Reset()
+				m.paletteSel = 0
+				m.refresh()
+				return m, nil
+			}
 			return m, tea.Quit
 		case "/":
 			if m.focus == focusConvo {
@@ -307,6 +314,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input, cmd = m.input.Update(msg)
 			return m, cmd
 		case "tab":
+			// In the command palette, tab completes to the highlighted command.
+			if m.paletteActive() {
+				if ms := m.paletteMatches(); len(ms) > 0 {
+					sel := m.paletteSel
+					if sel < 0 || sel >= len(ms) {
+						sel = 0
+					}
+					m.input.SetValue("/" + ms[sel].name + " ")
+					m.input.CursorEnd()
+					m.paletteSel = 0
+					m.refresh()
+				}
+				return m, nil
+			}
 			// Toggle focus between the input and the conversation (tmux-style).
 			if m.focus == focusInput {
 				m.focus = focusConvo
@@ -351,16 +372,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			v := strings.TrimSpace(m.input.Value())
-			if v == "" {
-				return m, nil
-			}
-			// Local slash commands (not sent to the engine) — e.g. /web.
+			// Local slash commands (never sent to the engine): run the palette's
+			// highlighted match (or the exactly-typed command).
 			if strings.HasPrefix(v, "/") {
-				m.input.Reset()
-				m.runSlash(v)
-				return m, nil
+				return m, m.runPaletteEnter(v)
 			}
-			if m.busy || m.starting {
+			if v == "" || m.busy || m.starting {
 				return m, nil
 			}
 			m.history = append(m.history, v)
@@ -393,6 +410,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
+			if m.paletteActive() { // move up in the command palette
+				if m.paletteSel > 0 {
+					m.paletteSel--
+					m.refresh()
+				}
+				return m, nil
+			}
 			if len(m.history) > 0 && m.histIdx > 0 {
 				m.histIdx--
 				m.input.SetValue(m.history[m.histIdx])
@@ -420,6 +444,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.sel++
 				}
 				m.refresh()
+				return m, nil
+			}
+			if m.paletteActive() { // move down in the command palette
+				if m.paletteSel < len(m.paletteMatches())-1 {
+					m.paletteSel++
+					m.refresh()
+				}
 				return m, nil
 			}
 			if m.histIdx < len(m.history) {
@@ -465,6 +496,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
+			m.paletteSel = 0 // typing re-filters the palette; start at the top
+			m.refresh()
 			return m, cmd
 		}
 
@@ -808,6 +841,8 @@ func (m tuiModel) View() string {
 		status = m.search.View() + stDim.Render(fmt.Sprintf("  (%d matches · enter to navigate)", len(m.matches)))
 	case m.searchActive:
 		status = stDim.Render(fmt.Sprintf("match %d/%d  ·  ↑/↓ prev/next · / new search · esc exit", m.matchPos+1, len(m.matches)))
+	case m.paletteActive():
+		status = stDim.Render("command  ·  ↑/↓ select · tab complete · enter run · esc/type to edit")
 	case m.busy:
 		status = m.spin.View() + stDim.Render(" working…  (ctrl+c to quit)")
 	case m.focus == focusConvo:
@@ -826,6 +861,9 @@ func (m tuiModel) View() string {
 func (m tuiModel) lowerView() string {
 	if m.asking {
 		return m.askPanel()
+	}
+	if m.paletteActive() {
+		return m.palettePanel()
 	}
 	return m.input.View()
 }
@@ -1048,21 +1086,151 @@ func argFull(args map[string]any) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// ── slash commands (/web …) ────────────────────────────────────────
+// ── slash commands ─────────────────────────────────────────────────
+//
+// Input beginning with "/" is a local command (never sent to the engine).
+// Typing "/" opens a live PALETTE (see palettePanel) listing matching commands
+// with descriptions; ↑/↓ selects, tab completes, enter runs. New commands go in
+// slashCommands — the palette + /help pick them up automatically.
 
-// runSlash handles input beginning with "/" locally (never sent to the engine).
-func (m *tuiModel) runSlash(v string) {
-	fields := strings.Fields(v)
-	switch fields[0] {
-	case "/web":
-		addr := "0.0.0.0:8734" // default binds all interfaces — the point is cross-host
-		if len(fields) > 1 {
-			addr = fields[1]
-		}
-		m.startWeb(addr)
-	default:
-		m.append(stDim.Render("unknown command: " + fields[0] + " (try /web [addr])"))
+type slashCmd struct {
+	name, args, desc string
+	run              func(m *tuiModel, args []string) tea.Cmd
+}
+
+// Populated in init() (not a var literal) — the help handler reads
+// slashCommands, which would be a static initialization cycle otherwise.
+var slashCommands []slashCmd
+
+func init() {
+	slashCommands = []slashCmd{
+		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
+		{"web", "[addr]", "serve this live session to a browser (default 0.0.0.0:8734)", func(m *tuiModel, a []string) tea.Cmd {
+			addr := "0.0.0.0:8734"
+			if len(a) > 0 {
+				addr = a[0]
+			}
+			m.startWeb(addr)
+			return nil
+		}},
+		{"quit", "", "exit dun", func(_ *tuiModel, _ []string) tea.Cmd { return tea.Quit }},
 	}
+}
+
+// paletteActive reports whether the "/" command palette should be shown/driven.
+func (m tuiModel) paletteActive() bool {
+	return m.focus == focusInput && !m.asking && strings.HasPrefix(m.input.Value(), "/")
+}
+
+// paletteMatches returns the commands whose name starts with the typed word.
+func (m tuiModel) paletteMatches() []slashCmd {
+	word := strings.TrimPrefix(strings.Fields(m.input.Value()+" ")[0], "/")
+	var out []slashCmd
+	for _, c := range slashCommands {
+		if strings.HasPrefix(c.name, word) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// runSlash dispatches "/name args…" by exact name or a unique prefix.
+func (m *tuiModel) runSlash(v string) tea.Cmd {
+	fields := strings.Fields(v)
+	if len(fields) == 0 {
+		return nil
+	}
+	name := strings.TrimPrefix(fields[0], "/")
+	var hit *slashCmd
+	n := 0
+	for i := range slashCommands {
+		if slashCommands[i].name == name { // exact wins outright
+			return slashCommands[i].run(m, fields[1:])
+		}
+		if strings.HasPrefix(slashCommands[i].name, name) {
+			hit = &slashCommands[i]
+			n++
+		}
+	}
+	if n == 1 {
+		return hit.run(m, fields[1:])
+	}
+	m.append(stDim.Render("unknown command: /" + name + " — try /help"))
+	return nil
+}
+
+// runPaletteEnter runs the highlighted palette command (preserving any typed
+// args), or the exactly-typed command.
+func (m *tuiModel) runPaletteEnter(v string) tea.Cmd {
+	fields := strings.Fields(v)
+	matches := m.paletteMatches()
+	sel := m.paletteSel
+	m.input.Reset()
+	m.paletteSel = 0
+	if sel < 0 || sel >= len(matches) {
+		sel = 0
+	}
+	// If the first word is already an exact command, honor it (with args).
+	if len(fields) > 0 {
+		if word := strings.TrimPrefix(fields[0], "/"); commandNamed(word) {
+			return m.runSlash(v)
+		}
+	}
+	if len(matches) == 0 {
+		m.append(stDim.Render("unknown command: " + v + " — try /help"))
+		return nil
+	}
+	args := ""
+	if len(fields) > 1 {
+		args = " " + strings.Join(fields[1:], " ")
+	}
+	return m.runSlash("/" + matches[sel].name + args)
+}
+
+func commandNamed(name string) bool {
+	for _, c := range slashCommands {
+		if c.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// showHelp appends the command list to the conversation.
+func (m *tuiModel) showHelp() {
+	var b strings.Builder
+	b.WriteString(stHeader.Render("commands"))
+	for _, c := range slashCommands {
+		usage := "/" + c.name
+		if c.args != "" {
+			usage += " " + c.args
+		}
+		b.WriteString("\n  " + stTool.Render(usage) + "  " + stDim.Render(c.desc))
+	}
+	m.append(b.String())
+}
+
+// palettePanel renders the live command list above the input (like the ask
+// picker), the highlighted row gutter-marked.
+func (m tuiModel) palettePanel() string {
+	matches := m.paletteMatches()
+	rows := make([]string, 0, len(matches)+1)
+	for i, c := range matches {
+		line := stTool.Render("/" + c.name)
+		if c.args != "" {
+			line += " " + stDim.Render(c.args)
+		}
+		line += "  " + stDim.Render(c.desc)
+		if i == m.paletteSel {
+			rows = append(rows, addGutter(line, "▎ ", stSel))
+		} else {
+			rows = append(rows, addGutter(line, "  ", lipgloss.NewStyle()))
+		}
+	}
+	if len(matches) == 0 {
+		rows = append(rows, stDim.Render("  no matching command · /help"))
+	}
+	return strings.Join(rows, "\n") + "\n" + m.input.View()
 }
 
 // startWeb attaches an embedded web server to the LIVE session: it mirrors the

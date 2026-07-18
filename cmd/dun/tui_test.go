@@ -298,6 +298,45 @@ func TestTUI_WebSlashCommand(t *testing.T) {
 	}
 }
 
+// Typing "/" opens the command palette: it lists/filters commands, tab
+// completes the highlighted one, and /help enumerates them.
+func TestTUI_CommandPalette(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+
+	m = typeStr(m, "/")
+	if !m.paletteActive() {
+		t.Fatal("typing / should open the command palette")
+	}
+	if len(m.paletteMatches()) != len(slashCommands) {
+		t.Fatalf("bare / should list all %d commands, got %d", len(slashCommands), len(m.paletteMatches()))
+	}
+	// Filter down to /web.
+	m = typeStr(m, "w")
+	if ms := m.paletteMatches(); len(ms) != 1 || ms[0].name != "web" {
+		t.Fatalf("/w should match only web, got %v", ms)
+	}
+	// Tab completes to the highlighted command.
+	m = key(m, kTab)
+	if m.input.Value() != "/web " {
+		t.Fatalf("tab should complete to %q, got %q", "/web ", m.input.Value())
+	}
+	// esc dismisses the palette without quitting.
+	m = key(m, kEsc)
+	if m.paletteActive() || m.input.Value() != "" {
+		t.Fatalf("esc should clear the palette, value=%q", m.input.Value())
+	}
+
+	// /help enumerates the commands into the conversation.
+	m = typeStr(m, "/help")
+	m = key(m, kEnter)
+	txt := m.convoText()
+	if !strings.Contains(txt, "commands") || !strings.Contains(txt, "/web") || !strings.Contains(txt, "/quit") {
+		t.Fatalf("/help should list the commands, got: %s", txt)
+	}
+}
+
 // An unknown slash command is reported, not sent to the engine.
 func TestTUI_UnknownSlash(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
