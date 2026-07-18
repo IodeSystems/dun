@@ -41,6 +41,19 @@ system-prompt composition.
 
 ## Active work
 
+### ✅ tools/ttydrive — drive TUIs non-interactively (nested module)
+- **Problem:** couldn't SEE/drive dun's Bubble Tea UIs headlessly (the SIGUSR1
+  dump only covers the main TUI, not the `--setup` wizard).
+- **`tools/ttydrive`** (own go.mod: creack/pty + hinshun/vt10x): runs a program
+  in a PTY of a fixed size, reads a keystroke SCRIPT from stdin, and dumps the
+  emulated screen as plain text. Directives: `send/type`, `key <name>…`, `wait`,
+  `waitfor <substr>`, `resize`, `dump`. A vt10x emulator turns raw output into a
+  readable grid — works for inline AND alt-screen bubbletea.
+- **Proven:** drove `dun --setup` end to end (URL→key→the LIVE `/v1/models`
+  list→navigate) and `dun -tui` (opened the command palette). Gotcha: don't grep
+  the dump on a run of `─` (collides with TUI dividers) — match `┌`/`└`.
+- `tools/` pruned from dun's self-update walk (separate modules, not dun's build).
+
 ### ✅ Config wizard (`dun --setup`) + config file
 - **Problem:** LLM url/model/key came only from flags (hardcoded defaults) + one
   env var — re-typed or script-edited every run, painful when trying new models.

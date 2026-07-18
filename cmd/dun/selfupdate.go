@@ -74,8 +74,8 @@ func sourceNewerThan(dir string, t time.Time) bool {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "node_modules", "testdata":
-				return filepath.SkipDir
+			case ".git", "node_modules", "testdata", "tools":
+				return filepath.SkipDir // tools/ = separate nested modules, not dun's build
 			}
 			return nil
 		}
