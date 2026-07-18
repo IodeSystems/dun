@@ -72,7 +72,14 @@ system-prompt composition.
 - Tests: `tui_test.go` drives the event logic headless (ready→token→tool_call→
   done builds the convo + clears flags; error clears busy). Full TUI rendering
   needs a real terminal (no-TTY exits cleanly, no panic).
-- **◻ next in this slice:** `/` commands, diff rendering for edits, key nav/history.
+- **✅ pane focus + selection (tmux-style):** Tab toggles focus between the
+  input and conversation panes; the focused pane wears a bright rounded border
+  (the "half-edge" cue). In convo focus ↑/↓ move a message selection (left
+  gutter highlight, viewport follows). The ask picker is the lower pane while
+  answering: ↑/↓ choose an option, `n` attaches a detail, a trailing
+  "✎ custom / chat…" row opens free-text — replacing the old type-a-number
+  prompt. Unit-tested (focus toggle, selection clamp, option+note, custom).
+- **◻ next in this slice:** `/` commands; TUI history replay on `--continue`.
 
 ### ✅ Slice 3 — worktree isolation + exec tool
 - `worktree.go` — `NewWorktree(repo)` creates a `git worktree add -b dun/<ts>`
