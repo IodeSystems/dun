@@ -30,7 +30,9 @@ func main() {
 	url := flag.String("url", "https://llm.iodesystems.com", "LLM base URL")
 	model := flag.String("model", "ternary-bonsai-27b", "chat model (must support tool calls)")
 	key := flag.String("key", os.Getenv("DUN_LLM_KEY"), "API key (or $DUN_LLM_KEY)")
-	ws := flag.String("workspace", ".", "workspace directory")
+	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
+	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
+	noWorktree := flag.Bool("no-worktree", false, "work in the workspace directly, no git worktree")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
@@ -44,7 +46,7 @@ func main() {
 
 	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
 	if *tui {
-		if err := runTUI(absWS, *model, *url, *key); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree}); err != nil {
 			fatal(err)
 		}
 		return
@@ -59,17 +61,40 @@ func main() {
 	}
 	defer os.RemoveAll(raglitHome)
 
+	// Isolation tier 1: a git worktree (unless --no-worktree). The agent's file
+	// changes land here on a fresh branch, not on the checked-out branch.
+	effWS := absWS
+	var wt *dun.Worktree
+	if !*noWorktree {
+		w, isRepo, werr := dun.NewWorktree(absWS)
+		if werr != nil {
+			fatal(werr)
+		}
+		wt, effWS = w, w.Path
+		if !isRepo && !*prog {
+			fmt.Fprintf(os.Stderr, "dun: %s is not a git repo — working in place (no isolation)\n", absWS)
+		}
+	}
+
+	// Isolation tier 2: exec runs in a Docker container (--docker IMAGE), or host.
+	var backend dun.ExecBackend
+	if *docker != "" {
+		backend = dun.DockerExec{Dir: effWS, Image: *docker}
+	} else {
+		backend = dun.HostExec{Dir: effWS}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
 
 	var em *emitter
-	var cfg dun.Config
-	cfg = dun.Config{
-		Workspace:  absWS,
+	cfg := dun.Config{
+		Workspace:  effWS,
 		RaglitHome: raglitHome,
 		Client:     llm.NewClient(*url, *key, *model),
+		Exec:       backend,
 	}
 	if *prog {
 		em = &emitter{}
@@ -95,11 +120,28 @@ func main() {
 	}
 	defer h.Close()
 
+	if wt != nil && wt.Branch != "" {
+		if *prog {
+			em.emit(event{"type": "workspace", "path": effWS, "branch": wt.Branch})
+		} else {
+			fmt.Fprintf(os.Stderr, "dun: worktree %s (branch %s)\n", effWS, wt.Branch)
+		}
+	}
+
 	if *prog {
 		runProgrammatic(ctx, h, em, firstTask)
 		return
 	}
 	runHuman(ctx, h, firstTask)
+
+	// Report the changes the agent made in the isolated worktree.
+	if wt != nil && wt.Branch != "" {
+		if d := strings.TrimSpace(wt.Diff()); d != "" {
+			fmt.Fprintf(os.Stderr, "\ndun: changes on branch %s (worktree %s):\n%s\n", wt.Branch, effWS, clip(d, 4000))
+		} else {
+			fmt.Fprintf(os.Stderr, "\ndun: no file changes. remove the worktree with: git worktree remove %s\n", effWS)
+		}
+	}
 }
 
 // runHuman streams a single task in human-readable form.

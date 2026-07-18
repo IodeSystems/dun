@@ -37,8 +37,25 @@ The engine speaks a small JSON event protocol (`-p`): out `ready`/`token`/
 `{"type":"user",...}`/`{"type":"stop"}`. The TUI is just a client of it, so the
 engine stays headless and scriptable.
 
-Next: Docker-container + git-worktree isolation (the container is the sandbox,
-so the agent can build/test/edit safely) + a gated exec tool. See `plan/plan.md`.
+## Isolation
+
+dun works in an isolated **git worktree** (a fresh `dun/<ts>` branch off HEAD),
+so the agent's edits never touch your checked-out branch — review the diff at the
+end and turn the branch into a PR. Its `exec` tool (build/test/git) runs on the
+host by default, or **contained in a Docker container** with the worktree
+mounted and no network:
+
+```sh
+dun -tui --workspace ./repo --docker golang:1.26   # exec runs in the container
+dun -tui --workspace ./repo                         # exec runs on the host
+dun --no-worktree ...                               # work in place (no isolation)
+```
+
+The container is the sandbox, so model-authored commands can't reach the host —
+no per-action approval prompts, the isolation does the work.
+
+Next: run the MCP servers inside the container too, and a worktree→PR flow. See
+`plan/plan.md`.
 
 ## Vision
 

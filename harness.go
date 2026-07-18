@@ -44,6 +44,7 @@ type Config struct {
 	Servers    []Server        // nil → DefaultServers(Workspace, RaglitHome)
 	Client     agent.LLMRunner // the LLM (e.g. *llm.Client)
 	System     string          // nil → defaultSystem
+	Exec       ExecBackend     // nil → no exec tool; else adds the built-in exec tool
 	OnToken    func(string)
 	OnToolCall func(tool string, args map[string]any, result string)
 }
@@ -81,6 +82,15 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if sys == "" {
 		sys = defaultSystem
 	}
+	// Bridge the MCP tools; if an exec backend is configured, add the built-in
+	// exec tool + route "exec" to it (everything else routes to its MCP server).
+	toolDefs := mcpToolDefs(tools)
+	dispatch := mcpDispatcher(mgr, tools, cfg.OnToolCall)
+	if cfg.Exec != nil {
+		toolDefs = append(toolDefs, execToolDef())
+		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall)
+	}
+
 	store := newMemStore()
 	h := &Harness{mgr: mgr, Tools: tools, store: store}
 	h.Session = &agent.Session{
@@ -88,8 +98,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		System:           sys,
 		Store:            store,
 		Runner:           cfg.Client,
-		Tools:            mcpToolDefs(tools),
-		Dispatch:         mcpDispatcher(mgr, tools, cfg.OnToolCall),
+		Tools:            toolDefs,
+		Dispatch:         dispatch,
 		OnAssistantToken: cfg.OnToken,
 		MaxTurns:         40,
 	}
@@ -107,11 +117,11 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 // Close shuts down the MCP servers.
 func (h *Harness) Close() { h.mgr.Close() }
 
-// ToolNames lists discovered tool names, sorted.
+// ToolNames lists the agent's tool names (MCP tools + the built-in exec), sorted.
 func (h *Harness) ToolNames() []string {
-	names := make([]string, len(h.Tools))
-	for i, t := range h.Tools {
-		names[i] = t.Name
+	names := make([]string, len(h.Session.Tools))
+	for i, t := range h.Session.Tools {
+		names[i] = t.Function.Name
 	}
 	sort.Strings(names)
 	return names
@@ -151,5 +161,6 @@ You have three tool families:
 - code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector "?" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics.
 - shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops; call the prompt tool for its language reference, help to list commands.
 - docs (raglit): search the document/knowledge index; ingest to add sources.
+- exec: run a shell command (build/test/git/ls) in the workspace. Use it to VERIFY your edits — e.g. run the build and tests after changing code — and to run git.
 
-Work step by step: find with node_query, read what you need, make minimal precise edits, and verify via the diagnostics that come back. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed.`
+Work step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed.`

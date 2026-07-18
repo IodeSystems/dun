@@ -74,11 +74,27 @@ system-prompt composition.
   needs a real terminal (no-TTY exits cleanly, no panic).
 - **◻ next in this slice:** `/` commands, diff rendering for edits, key nav/history.
 
-### ◻ Slice 3 — Docker + git-worktree isolation + exec
-- Create a git worktree per task; Docker container with the toolchain + tools,
-  worktree mounted; spawn MCP servers via `docker exec -i`; add a gated `exec`
-  tool (build/test/git) — the container is the sandbox, so exec/mutations are
-  contained (approval = the isolation, not per-action prompts).
+### ✅ Slice 3 — worktree isolation + exec tool
+- `worktree.go` — `NewWorktree(repo)` creates a `git worktree add -b dun/<ts>`
+  off HEAD (isolates file changes to a branch; `main` untouched). `Diff()`,
+  `Cleanup()` (keeps the branch so work isn't lost); pass-through when not a git
+  repo.
+- `exec.go` — `ExecBackend`: `HostExec` (host, trusted/throwaway) and
+  `DockerExec` (`docker run --rm -v wt:/work -w /work --network none IMAGE …` —
+  the container IS the sandbox, model-authored commands can't touch the host).
+  `execToolDef` + `withExec` (route "exec" locally, everything else to MCP).
+- `harness.go` — `Config.Exec` adds the exec tool + composes the dispatcher.
+  System prompt tells the agent to verify edits with build/test via exec.
+- cmd: `--docker IMAGE` (else host), `--no-worktree`; creates the worktree,
+  reports branch + final diff; emits a `workspace` event in -p; TUI shows `⎇ branch`.
+- **Verified:** worktree isolation (edit doesn't leak to main checkout) + host
+  exec (unit); DockerExec plumbing (mounted worktree, `--network none`); LIVE —
+  agent ran `exec(ls/git status/git branch)` on the dun/… branch, 11 tools.
+- **Model = isolation, not prompts** (per user): the container/worktree contain
+  exec + mutations, so no per-action approval gate.
+- **◻ deferred to 3b/4:** run the MCP servers themselves INSIDE the container
+  (`docker exec -i`) so poly-lsp/mcpshell also see the contained FS; worktree→
+  commit→PR.
 
 ### ◻ Slice 4 — persistence + workspace→PR
 - Durable session store (resume, history); worktree diff → review → branch → PR.

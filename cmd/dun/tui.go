@@ -20,13 +20,19 @@ import (
 // writes user events to its stdin, and renders the event stream. The engine
 // stays headless; the UI is pure presentation.
 
+// tuiOpts are the flags the TUI forwards to its `dun -p` subprocess.
+type tuiOpts struct {
+	workspace, model, url, key, docker string
+	noWorktree                         bool
+}
+
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
-func runTUI(workspace, model, url, key string) error {
-	proc, err := startDunProc(workspace, model, url, key)
+func runTUI(o tuiOpts) error {
+	proc, err := startDunProc(o)
 	if err != nil {
 		return err
 	}
-	m := newTUIModel(proc, workspace)
+	m := newTUIModel(proc, o.workspace)
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	proc.close()
 	return err
@@ -53,11 +59,12 @@ type tuiModel struct {
 	convo     []string // finalized conversation lines
 	cur       string   // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
-	tools []string
-	starting  bool // spawning servers, before `ready`
-	busy      bool // a turn in flight
-	w, h      int
-	fatalErr  string
+	tools    []string
+	branch   string // worktree branch (from the `workspace` event)
+	starting bool   // spawning servers, before `ready`
+	busy     bool   // a turn in flight
+	w, h     int
+	fatalErr string
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
@@ -127,6 +134,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	switch ev["type"] {
+	case "workspace":
+		m.branch = str(ev["branch"])
+		m.append(stDim.Render("worktree branch: " + m.branch))
 	case "ready":
 		m.starting = false
 		if ts, ok := ev["tools"].([]any); ok {
@@ -158,6 +168,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 
 func (m tuiModel) View() string {
 	head := stHeader.Render("dun") + stDim.Render("  "+m.workspace)
+	if m.branch != "" {
+		head += stDim.Render("  ⎇ " + m.branch)
+	}
 	status := ""
 	switch {
 	case m.fatalErr != "":
@@ -225,20 +238,26 @@ type dunProc struct {
 	ch    chan tea.Msg
 }
 
-func startDunProc(workspace, model, url, key string) (*dunProc, error) {
+func startDunProc(o tuiOpts) (*dunProc, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"-p", "--workspace", workspace}
-	if model != "" {
-		args = append(args, "--model", model)
+	args := []string{"-p", "--workspace", o.workspace}
+	if o.model != "" {
+		args = append(args, "--model", o.model)
 	}
-	if url != "" {
-		args = append(args, "--url", url)
+	if o.url != "" {
+		args = append(args, "--url", o.url)
 	}
-	if key != "" {
-		args = append(args, "--key", key)
+	if o.key != "" {
+		args = append(args, "--key", o.key)
+	}
+	if o.docker != "" {
+		args = append(args, "--docker", o.docker)
+	}
+	if o.noWorktree {
+		args = append(args, "--no-worktree")
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Env = os.Environ()
