@@ -1,0 +1,289 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// The TUI is a CLIENT of the `-p` JSON event protocol: it re-execs `dun -p`,
+// writes user events to its stdin, and renders the event stream. The engine
+// stays headless; the UI is pure presentation.
+
+// runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
+func runTUI(workspace, model, url, key string) error {
+	proc, err := startDunProc(workspace, model, url, key)
+	if err != nil {
+		return err
+	}
+	m := newTUIModel(proc, workspace)
+	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	proc.close()
+	return err
+}
+
+// ── styles ─────────────────────────────────────────────────────────
+
+var (
+	stHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	stDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	stUser   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	stTool   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	stErr    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+)
+
+// ── model ──────────────────────────────────────────────────────────
+
+type tuiModel struct {
+	proc      *dunProc
+	workspace string
+	vp        viewport.Model
+	input     textinput.Model
+	spin      spinner.Model
+	convo     []string // finalized conversation lines
+	cur       string   // streaming assistant text (not yet finalized); string, not
+	//                    strings.Builder — Bubble Tea copies the model each Update.
+	tools []string
+	starting  bool // spawning servers, before `ready`
+	busy      bool // a turn in flight
+	w, h      int
+	fatalErr  string
+}
+
+func newTUIModel(proc *dunProc, workspace string) tuiModel {
+	in := textinput.New()
+	in.Placeholder = "ask dun to do something…  (enter to send, ctrl+c to quit)"
+	in.Focus()
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	return tuiModel{proc: proc, workspace: workspace, input: in, spin: sp, starting: true}
+}
+
+func (m tuiModel) Init() tea.Cmd {
+	return tea.Batch(waitEvent(m.proc.ch), m.spin.Tick, textinput.Blink)
+}
+
+func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.w, m.h = msg.Width, msg.Height
+		m.vp = viewport.New(msg.Width, msg.Height-4)
+		m.input.Width = msg.Width - 2
+		m.refresh()
+		return m, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "esc":
+			return m, tea.Quit
+		case "pgup", "pgdown":
+			var cmd tea.Cmd
+			m.vp, cmd = m.vp.Update(msg)
+			return m, cmd
+		case "enter":
+			q := strings.TrimSpace(m.input.Value())
+			if q == "" || m.busy || m.starting {
+				return m, nil
+			}
+			m.input.Reset()
+			m.append(stUser.Render("› " + q))
+			m.busy = true
+			m.proc.send(q)
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
+		}
+
+	case evMsg:
+		return m.handleEvent(msg), waitEvent(m.proc.ch)
+
+	case eofMsg:
+		if m.fatalErr == "" {
+			m.fatalErr = "dun engine exited"
+		}
+		m.busy, m.starting = false, false
+		m.refresh()
+		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m tuiModel) handleEvent(ev evMsg) tuiModel {
+	switch ev["type"] {
+	case "ready":
+		m.starting = false
+		if ts, ok := ev["tools"].([]any); ok {
+			for _, t := range ts {
+				m.tools = append(m.tools, fmt.Sprint(t))
+			}
+		}
+		m.append(stDim.Render(fmt.Sprintf("ready — %d tools: %s", len(m.tools), strings.Join(m.tools, ", "))))
+	case "token":
+		m.cur += str(ev["text"])
+		m.refresh()
+	case "tool_call":
+		m.flushCur()
+		m.append(stTool.Render("⚙ " + str(ev["tool"]) + "(" + argKeys(ev["args"]) + ")"))
+	case "tool_result":
+		m.append(stDim.Render("  → " + clip(oneLine(str(ev["result"])), 100)))
+	case "message":
+		// tokens already streamed the reply; nothing to add.
+	case "done":
+		m.flushCur()
+		m.busy = false
+		m.refresh()
+	case "error":
+		m.append(stErr.Render("error: " + str(ev["error"])))
+		m.busy = false
+	}
+	return m
+}
+
+func (m tuiModel) View() string {
+	head := stHeader.Render("dun") + stDim.Render("  "+m.workspace)
+	status := ""
+	switch {
+	case m.fatalErr != "":
+		status = stErr.Render(m.fatalErr)
+	case m.starting:
+		status = m.spin.View() + stDim.Render(" spawning tool servers…")
+	case m.busy:
+		status = m.spin.View() + stDim.Render(" working…")
+	default:
+		status = stDim.Render("ready")
+	}
+	return fmt.Sprintf("%s\n%s\n%s\n%s", head, m.vp.View(), m.input.View(), status)
+}
+
+// ── helpers ────────────────────────────────────────────────────────
+
+func (m *tuiModel) append(line string) {
+	m.convo = append(m.convo, line)
+	m.refresh()
+}
+
+func (m *tuiModel) flushCur() {
+	if m.cur != "" {
+		m.convo = append(m.convo, strings.TrimRight(m.cur, "\n"))
+		m.cur = ""
+	}
+}
+
+func (m *tuiModel) refresh() {
+	lines := m.convo
+	if m.cur != "" {
+		lines = append(append([]string{}, m.convo...), m.cur)
+	}
+	m.vp.SetContent(lipgloss.NewStyle().Width(m.vp.Width).Render(strings.Join(lines, "\n")))
+	m.vp.GotoBottom()
+}
+
+func str(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprint(v)
+}
+
+func argKeys(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return ""
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return strings.Join(keys, ",")
+}
+
+// ── subprocess (dun -p) ────────────────────────────────────────────
+
+type evMsg map[string]any
+type eofMsg struct{}
+
+type dunProc struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	ch    chan tea.Msg
+}
+
+func startDunProc(workspace, model, url, key string) (*dunProc, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"-p", "--workspace", workspace}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	if url != "" {
+		args = append(args, "--url", url)
+	}
+	if key != "" {
+		args = append(args, "--key", key)
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Env = os.Environ()
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	// Engine stderr (mcp startup logs) → a temp log so it doesn't corrupt the UI.
+	if f, err := os.CreateTemp("", "dun-tui-*.log"); err == nil {
+		cmd.Stderr = f
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	ch := make(chan tea.Msg, 256)
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		for sc.Scan() {
+			var ev map[string]any
+			if json.Unmarshal(sc.Bytes(), &ev) == nil {
+				ch <- evMsg(ev)
+			}
+		}
+		ch <- eofMsg{}
+	}()
+	return &dunProc{cmd: cmd, stdin: stdin, ch: ch}, nil
+}
+
+func (p *dunProc) send(content string) {
+	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content})
+}
+
+func (p *dunProc) close() {
+	_ = p.stdin.Close()
+	if p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+}
+
+// waitEvent blocks for the next engine event and delivers it as a tea.Msg.
+func waitEvent(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg { return <-ch }
+}

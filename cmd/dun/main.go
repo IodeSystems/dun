@@ -32,17 +32,26 @@ func main() {
 	key := flag.String("key", os.Getenv("DUN_LLM_KEY"), "API key (or $DUN_LLM_KEY)")
 	ws := flag.String("workspace", ".", "workspace directory")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
+	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
 	flag.Parse()
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
-	if firstTask == "" && !*prog {
-		fmt.Fprintln(os.Stderr, `usage: dun [--workspace DIR] "task"   (or: dun -p  for JSON events)`)
-		os.Exit(2)
-	}
 
 	absWS, err := filepath.Abs(*ws)
 	if err != nil {
 		fatal(err)
+	}
+
+	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
+	if *tui {
+		if err := runTUI(absWS, *model, *url, *key); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	if firstTask == "" && !*prog {
+		fmt.Fprintln(os.Stderr, `usage: dun [--workspace DIR] "task"   (or -tui, or -p for JSON events)`)
+		os.Exit(2)
 	}
 	raglitHome, err := os.MkdirTemp("", "dun-raglit-")
 	if err != nil {

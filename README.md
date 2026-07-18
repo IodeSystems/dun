@@ -21,12 +21,24 @@ OpenAI-compatible endpoint.
 ```sh
 go build -o dun ./cmd/dun
 # poly-lsp-mcp, mcpshell, raglit must be on PATH
+
+# interactive Bubble Tea UI
+DUN_LLM_KEY=... dun -tui --workspace ./my-project
+
+# one-shot, human-readable
 DUN_LLM_KEY=... dun --workspace ./my-project "find the greet function and explain it"
+
+# programmatic: line-delimited JSON events in/out (the TUI is a client of this)
+echo '{"type":"user","content":"..."}' | dun -p --workspace ./my-project
 ```
 
-Next: a Bubble Tea TUI, and Docker-container + git-worktree isolation (the
-container is the sandbox, so the agent can build/test/edit safely). See
-`plan/plan.md`.
+The engine speaks a small JSON event protocol (`-p`): out `ready`/`token`/
+`tool_call`/`tool_result`/`message`/`usage`/`done`/`error`, in
+`{"type":"user",...}`/`{"type":"stop"}`. The TUI is just a client of it, so the
+engine stays headless and scriptable.
+
+Next: Docker-container + git-worktree isolation (the container is the sandbox,
+so the agent can build/test/edit safely) + a gated exec tool. See `plan/plan.md`.
 
 ## Vision
 

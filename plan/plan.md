@@ -59,12 +59,20 @@ system-prompt composition.
   `node_query` selector → read → answered; `-p` took a stdin user event and
   emitted the full event stream.
 
-### ◻ Slice 2 — Bubble Tea TUI (client of the `-p` protocol)
-- Charm stack (bubbletea/bubbles/lipgloss). The TUI SPAWNS `dun -p` (or embeds
-  the harness) and renders its JSON event stream: conversation, streaming
-  tokens, tool-call stream, input box → `user` events, `/` commands.
-  Read-and-propose (diffs shown, not auto-applied) until Slice 3's approval.
-  Because it's a protocol client, the engine stays headless/testable.
+### ✅ Slice 2 — Bubble Tea TUI (client of the `-p` protocol)
+- `cmd/dun/tui.go` — `dun -tui` re-execs `dun -p` (forwarding --workspace/model/
+  url/key), reads its JSON event stream via a goroutine→channel→`tea.Msg`, and
+  writes `user` events to its stdin. Renders: header (workspace), scrollable
+  viewport (conversation + live-streaming tokens + tool-call/⚙ lines), input
+  box, status spinner (spawning… / working… / ready). Charm stack
+  (bubbletea/bubbles/lipgloss). `-tui` flag wired in main.go.
+- **Engine stays headless** — the UI is pure presentation over the protocol.
+- `cur` is a plain string, NOT strings.Builder (Bubble Tea copies the model each
+  Update; a copied Builder panics — caught pre-flight).
+- Tests: `tui_test.go` drives the event logic headless (ready→token→tool_call→
+  done builds the convo + clears flags; error clears busy). Full TUI rendering
+  needs a real terminal (no-TTY exits cleanly, no panic).
+- **◻ next in this slice:** `/` commands, diff rendering for edits, key nav/history.
 
 ### ◻ Slice 3 — Docker + git-worktree isolation + exec
 - Create a git worktree per task; Docker container with the toolchain + tools,
