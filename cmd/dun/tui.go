@@ -7,9 +7,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -108,9 +113,19 @@ type convoEntry struct {
 	full      string
 	open      bool
 	docs      *docsBlock // proactive-RAG summary (nil for normal blocks)
+	tool      *toolBlock // tool call/result (nil for normal blocks) → enter opens the inspector
 }
 
 func (e convoEntry) expandable() bool { return e.full != "" || e.docs != nil }
+
+// toolBlock carries a tool call's raw input + complete output so enter can open
+// the scrollable/searchable inspector overlay (inspector.go), separate from the
+// inline collapsed/full preview.
+type toolBlock struct {
+	name   string
+	input  string
+	output string
+}
 
 func (e convoEntry) view() string {
 	if e.docs != nil {
@@ -187,6 +202,8 @@ type tuiModel struct {
 	askOptions   []string // the offered options; a trailing "custom" row is implicit
 	askSel       int      // highlighted answer row (== len(askOptions) → the custom row)
 	askNote      string   // optional detail attached to the chosen option ("n")
+	askMulti     bool     // multi-select: space toggles, enter submits the checked set
+	askChecked   []bool   // per-option checked state (multi mode; len == len(askOptions))
 	noting       bool     // capturing a detail for the selected option
 	customAnswer bool     // capturing a free-text / chat answer
 	md           *glamour.TermRenderer // markdown renderer for assistant replies
@@ -200,6 +217,10 @@ type tuiModel struct {
 	matches      []int           // convo indices matching the query
 	matchPos     int             // cursor into matches
 	blockH       []int           // rendered height of each convo block (for tall-message scroll)
+	inspecting bool      // the tool inspector overlay is open (owns all keys)
+	insp       inspector // the overlay (valid while inspecting)
+	dumpSig    chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
+	webAddr    string         // bound address of the embedded /web server ("" = off)
 	w, h       int
 	fatalErr   string
 }
@@ -214,11 +235,15 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	se := textinput.New()
 	se.Prompt = "/"
 	se.Placeholder = "search messages…"
-	return tuiModel{proc: proc, workspace: workspace, input: in, search: se, spin: sp, starting: true, sel: -1, pendingTool: -1}
+	// SIGUSR1 → dump the rendered screen (see dumpMsg): the alt-screen hides what
+	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGUSR1)
+	return tuiModel{proc: proc, workspace: workspace, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1}
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return tea.Batch(waitEvent(m.proc.ch), m.spin.Tick, textinput.Blink)
+	return tea.Batch(waitEvent(m.proc.ch), m.spin.Tick, textinput.Blink, waitForDump(m.dumpSig))
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -232,10 +257,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.Width = msg.Width - 2
 		m.search.Width = msg.Width - 4
 		m.md = newMarkdown(msg.Width - 2)
+		if m.inspecting {
+			m.insp.setSize(m.w, m.h)
+		}
 		m.refresh()
 		return m, nil
 
 	case tea.KeyMsg:
+		// The tool inspector overlay owns every key while open.
+		if m.inspecting {
+			open, cmd := m.insp.update(msg)
+			m.inspecting = open
+			return m, cmd
+		}
 		// Answering an ask_user is a mode of its own (select an option, add a
 		// detail, or type a custom/chat answer) — it owns the keys.
 		if m.asking {
@@ -298,6 +332,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				}
+				// A tool call opens the scrollable/searchable inspector overlay.
+				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].tool != nil {
+					tb := m.convo[m.sel].tool
+					m.insp = newInspector(tb.name, tb.input, tb.output)
+					m.insp.setSize(m.w, m.h)
+					m.inspecting = true
+					return m, nil
+				}
 				// Otherwise open/close the focused block (tool output or docs summary).
 				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].expandable() {
 					m.convo[m.sel].open = !m.convo[m.sel].open
@@ -309,7 +351,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			v := strings.TrimSpace(m.input.Value())
-			if v == "" || m.busy || m.starting {
+			if v == "" {
+				return m, nil
+			}
+			// Local slash commands (not sent to the engine) — e.g. /web.
+			if strings.HasPrefix(v, "/") {
+				m.input.Reset()
+				m.runSlash(v)
+				return m, nil
+			}
+			if m.busy || m.starting {
 				return m, nil
 			}
 			m.history = append(m.history, v)
@@ -417,6 +468,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+	case dumpMsg:
+		m.writeDump()
+		return m, waitForDump(m.dumpSig) // re-arm for the next signal
+
 	case evMsg:
 		return m.handleEvent(msg), waitEvent(m.proc.ch)
 
@@ -447,6 +502,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the input; esc backs out of that sub-mode.
 func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	custom := len(m.askOptions) // index of the trailing "custom / chat" row
+	// In multi mode a "✓ done" row follows the custom row (submits the checked
+	// set) — so options toggle on enter without stealing space (a typed char).
+	maxRow := custom
+	if m.askMulti {
+		maxRow = custom + 1
+	}
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -474,6 +535,10 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.sendAnswer(v), nil
+		case m.askMulti && m.askSel < custom: // toggle the highlighted option
+			m.askChecked[m.askSel] = !m.askChecked[m.askSel]
+			m.refresh()
+			return m, nil
 		case m.askSel == custom: // open free-text / chat entry
 			m.customAnswer = true
 			m.input.Reset()
@@ -481,6 +546,17 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Focus()
 			m.refresh()
 			return m, textinput.Blink
+		case m.askMulti: // the "✓ done" row: submit the checked set
+			var picked []string
+			for i, on := range m.askChecked {
+				if on {
+					picked = append(picked, m.askOptions[i])
+				}
+			}
+			if len(picked) == 0 {
+				return m, nil // nothing checked yet
+			}
+			return m.sendAnswer(strings.Join(picked, ", ")), nil
 		default:
 			ans := m.askOptions[m.askSel]
 			if m.askNote != "" {
@@ -495,13 +571,13 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "down":
-		if !m.noting && !m.customAnswer && m.askSel < custom {
+		if !m.noting && !m.customAnswer && m.askSel < maxRow {
 			m.askSel++
 			m.refresh()
 			return m, nil
 		}
 	case "n":
-		if !m.noting && !m.customAnswer && m.askSel < custom {
+		if !m.noting && !m.customAnswer && !m.askMulti && m.askSel < custom {
 			m.noting = true
 			m.input.Reset()
 			m.input.Placeholder = "add a detail…"
@@ -525,6 +601,7 @@ func (m tuiModel) sendAnswer(v string) tuiModel {
 	m.proc.answer(v)
 	m.asking, m.noting, m.customAnswer = false, false, false
 	m.askOptions, m.askSel, m.askNote = nil, 0, ""
+	m.askMulti, m.askChecked = false, nil
 	m.input.Reset()
 	m.input.Placeholder = "ask dun to do something…"
 	m.input.Focus()
@@ -624,14 +701,18 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// Collapsed shows a one-line arg preview; expanded shows the full input.
 		callShort := stTool.Render("⚙ " + tool + "(" + argPreview(m.pendingArgs, 80) + ")")
 		callFull := stTool.Render("⚙ " + tool)
-		if af := argFull(m.pendingArgs); af != "" {
+		af := argFull(m.pendingArgs)
+		if af != "" {
 			callFull += "\n" + af
 		}
+		// The tool block feeds the inspector overlay: raw input + complete output.
+		tb := &toolBlock{name: tool, input: af, output: body}
 		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
 			// Fold the result into its call so the pair is one collapsible unit.
 			m.convo[idx] = convoEntry{
 				collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
 				full:      stDim.Render("▾ ") + callFull + "\n" + body,
+				tool:      tb,
 			}
 			m.pendingTool, m.pendingArgs = -1, nil
 			m.refresh()
@@ -639,6 +720,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.convo = append(m.convo, convoEntry{
 				collapsed: stDim.Render("▸ ") + preview,
 				full:      stDim.Render("▾ ") + body,
+				tool:      tb,
 			})
 			m.refresh()
 		}
@@ -663,6 +745,17 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				m.askOptions = append(m.askOptions, fmt.Sprint(o))
 			}
 		}
+		m.askMulti, _ = ev["multi"].(bool)
+		m.askChecked = make([]bool, len(m.askOptions))
+		// No options → a pure free-text prompt: drop straight into text entry so
+		// the user can just type. Otherwise typing is inert until enter opens the
+		// "custom answer" row — surprising when there's nothing else to pick.
+		if len(m.askOptions) == 0 {
+			m.customAnswer = true
+			m.input.Reset()
+			m.input.Placeholder = "type your answer…"
+			m.input.Focus()
+		}
 	case "done":
 		m.flushCur()
 		m.busy = false
@@ -675,6 +768,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 }
 
 func (m tuiModel) View() string {
+	// The inspector is a full-screen overlay — it replaces the normal layout.
+	if m.inspecting {
+		return m.insp.view(m.w, m.h)
+	}
 	head := stHeader.Render("dun") + stDim.Render("  "+m.workspace)
 	if m.branch != "" {
 		head += stDim.Render("  ⎇ " + m.branch)
@@ -701,6 +798,10 @@ func (m tuiModel) View() string {
 		status = stErr.Render(m.fatalErr)
 	case m.starting:
 		status = m.spin.View() + stDim.Render(" spawning tool servers…")
+	case m.asking && len(m.askOptions) == 0:
+		status = stAsk.Render("❓ type your answer · enter send · esc/ctrl+c quit")
+	case m.asking && m.askMulti:
+		status = stAsk.Render("❓ ↑/↓ move · enter toggle · ✓ done to submit · esc/ctrl+c quit")
 	case m.asking:
 		status = stAsk.Render("❓ ↑/↓ choose · enter select · n add detail · esc/ctrl+c quit")
 	case m.searching:
@@ -713,7 +814,7 @@ func (m tuiModel) View() string {
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · enter expand · ← back · ctrl+c quit")
 		} else {
-			status = stDim.Render("convo  ·  ↑/↓ select · → docs · / search · enter open/close · tab input")
+			status = stDim.Render("convo  ·  ↑/↓ select · → docs · / search · enter open (tool→inspector) · tab input")
 		}
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · ctrl+c quit")
@@ -742,9 +843,26 @@ func (m tuiModel) askPanel() string {
 		return addGutter(text, "  ", lipgloss.NewStyle())
 	}
 	for i, opt := range m.askOptions {
-		rows = append(rows, gut(opt, sel(i)))
+		label := opt
+		if m.askMulti { // a checkbox per option
+			box := "☐ "
+			if i < len(m.askChecked) && m.askChecked[i] {
+				box = "☑ "
+			}
+			label = box + opt
+		}
+		rows = append(rows, gut(label, sel(i)))
 	}
 	rows = append(rows, gut(stDim.Render("✎ custom answer / chat…"), sel(custom) || m.customAnswer))
+	if m.askMulti { // a submit row so enter can toggle options without needing space
+		n := 0
+		for _, on := range m.askChecked {
+			if on {
+				n++
+			}
+		}
+		rows = append(rows, gut(stAsk.Render(fmt.Sprintf("✓ done — submit %d selected", n)), sel(custom+1)))
+	}
 	if m.askNote != "" {
 		rows = append(rows, stDim.Render("   detail: "+m.askNote))
 	}
@@ -930,6 +1048,95 @@ func argFull(args map[string]any) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// ── slash commands (/web …) ────────────────────────────────────────
+
+// runSlash handles input beginning with "/" locally (never sent to the engine).
+func (m *tuiModel) runSlash(v string) {
+	fields := strings.Fields(v)
+	switch fields[0] {
+	case "/web":
+		addr := "0.0.0.0:8734" // default binds all interfaces — the point is cross-host
+		if len(fields) > 1 {
+			addr = fields[1]
+		}
+		m.startWeb(addr)
+	default:
+		m.append(stDim.Render("unknown command: " + fields[0] + " (try /web [addr])"))
+	}
+}
+
+// startWeb attaches an embedded web server to the LIVE session: it mirrors the
+// engine's event stream to browsers (proc.tap → hub.broadcast) and forwards
+// their input to the same engine stdin the TUI writes to. So a browser on
+// another host watches and drives exactly what the TUI is doing.
+func (m *tuiModel) startWeb(addr string) {
+	if m.webAddr != "" {
+		m.append(stNote.Render("🌐 web already serving · " + m.webAddr))
+		return
+	}
+	lw := &lockedWriter{mu: &m.proc.mu, w: m.proc.stdin}
+	hub, bound, err := startEmbeddedWeb(addr, lw)
+	if err != nil {
+		m.append(stErr.Render("web: " + err.Error()))
+		return
+	}
+	m.proc.setTap(hub.broadcast)
+	m.webAddr = bound
+	for _, u := range reachableURLs(bound) {
+		m.append(stNote.Render("🌐 " + u))
+	}
+	m.append(stDim.Render("⚠ no auth — anyone who can reach that address drives this session"))
+}
+
+// ── screen dump (SIGUSR1) ──────────────────────────────────────────
+
+// dumpMsg is delivered when SIGUSR1 arrives; Update writes the current screen.
+type dumpMsg struct{}
+
+// waitForDump blocks on the signal channel and turns SIGUSR1 into a dumpMsg,
+// re-armed after each dump so the TUI can be snapshotted repeatedly.
+func waitForDump(sig chan os.Signal) tea.Cmd {
+	return func() tea.Msg {
+		<-sig
+		return dumpMsg{}
+	}
+}
+
+// dumpPath is where a screen dump is appended: $DUN_DUMP_FILE or a temp default.
+func dumpPath() string {
+	if p := os.Getenv("DUN_DUMP_FILE"); p != "" {
+		return p
+	}
+	return filepath.Join(os.TempDir(), "dun-screen.txt")
+}
+
+// dumpString renders the current screen (ANSI stripped) plus a state header —
+// what the TUI is showing and the mode flags behind it.
+func (m tuiModel) dumpString() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "═══ dun screen @ %s ═══\n", time.Now().Format("15:04:05.000"))
+	fmt.Fprintf(&b, "focus=%d busy=%v starting=%v asking=%v(multi=%v) inspecting=%v searching=%v sel=%d convo=%d w=%d h=%d\n",
+		m.focus, m.busy, m.starting, m.asking, m.askMulti, m.inspecting, m.searching, m.sel, len(m.convo), m.w, m.h)
+	if m.cur != "" {
+		fmt.Fprintf(&b, "streaming: %q\n", clip(oneLine(m.cur), 200))
+	}
+	b.WriteString("───\n")
+	b.WriteString(stripANSI(m.View()))
+	b.WriteString("\n\n")
+	return b.String()
+}
+
+// writeDump appends the current screen dump to dumpPath (best-effort; a debug
+// aid must never disturb the UI, so errors are swallowed).
+func (m tuiModel) writeDump() {
+	f, err := os.OpenFile(dumpPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(m.dumpString())
+}
+
 // ── subprocess (dun -p) ────────────────────────────────────────────
 
 type evMsg map[string]any
@@ -939,14 +1146,21 @@ type dunProc struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 	ch    chan tea.Msg
+	mu    sync.Mutex     // serializes stdin writes (TUI + embedded /web hub)
+	tap   func(string)   // if set, every raw engine event line is mirrored here (/web)
 }
 
-func startDunProc(o tuiOpts) (*dunProc, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	args := []string{"-p", "--workspace", o.workspace}
+func (p *dunProc) setTap(f func(string)) {
+	p.mu.Lock()
+	p.tap = f
+	p.mu.Unlock()
+}
+
+// procArgs builds a `dun <mode>` argv from the shared flags. mode is "-p" (the
+// engine, for the TUI + `dun serve` web-native bridge) or "-tui" (the full TUI,
+// for the xterm/PTY terminal view served at /term).
+func procArgs(o tuiOpts, mode string) []string {
+	args := []string{mode, "--workspace", o.workspace}
 	if o.model != "" {
 		args = append(args, "--model", o.model)
 	}
@@ -971,7 +1185,15 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 	if o.resume != "" {
 		args = append(args, "--resume", o.resume)
 	}
-	cmd := exec.Command(exe, args...)
+	return args
+}
+
+func startDunProc(o tuiOpts) (*dunProc, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(exe, procArgs(o, "-p")...)
 	cmd.Env = os.Environ()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -989,25 +1211,38 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 		return nil, err
 	}
 	ch := make(chan tea.Msg, 256)
+	p := &dunProc{cmd: cmd, stdin: stdin, ch: ch}
 	go func() {
 		sc := bufio.NewScanner(stdout)
 		sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 		for sc.Scan() {
+			line := sc.Text()
+			// Mirror the raw event to the embedded web hub (/web), if attached.
+			p.mu.Lock()
+			tap := p.tap
+			p.mu.Unlock()
+			if tap != nil {
+				tap(line)
+			}
 			var ev map[string]any
-			if json.Unmarshal(sc.Bytes(), &ev) == nil {
+			if json.Unmarshal([]byte(line), &ev) == nil {
 				ch <- evMsg(ev)
 			}
 		}
 		ch <- eofMsg{}
 	}()
-	return &dunProc{cmd: cmd, stdin: stdin, ch: ch}, nil
+	return p, nil
 }
 
 func (p *dunProc) send(content string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content})
 }
 
 func (p *dunProc) answer(value string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "answer", "value": value})
 }
 

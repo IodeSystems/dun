@@ -41,6 +41,8 @@ func main() {
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
+	serve := flag.Bool("serve", false, "serve a web UI (a browser client of -p) at --addr")
+	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
 	flag.Parse()
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
@@ -64,6 +66,14 @@ func main() {
 	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
 	if *tui {
 		if err := runTUI(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree, *pr, *cont, *resume}); err != nil {
+			fatal(err)
+		}
+		return
+	}
+
+	// Serve mode: a web client of `dun -p` (same re-exec, bridged over SSE/POST).
+	if *serve {
+		if err := runServe(tuiOpts{absWS, *model, *url, *key, *docker, *noWorktree, *pr, *cont, *resume}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -147,8 +157,8 @@ func main() {
 		cfg.OnDocs = func(n dun.DocsNote) {
 			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
 		}
-		cfg.Ask = func(actx context.Context, q string, opts []string) (string, error) {
-			em.emit(event{"type": "ask", "question": q, "options": opts})
+		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
+			em.emit(event{"type": "ask", "question": q, "options": opts, "multi": multi})
 			select {
 			case a, ok := <-in.answers:
 				if !ok {
@@ -326,15 +336,31 @@ func newInputStream() *inputStream {
 	return s
 }
 
-// humanAsk prompts on the terminal and reads a line (a number picks an option).
-func humanAsk(_ context.Context, question string, options []string) (string, error) {
+// humanAsk prompts on the terminal and reads a line. A number picks an option;
+// with multi, comma-separated numbers (e.g. "1,3") pick several.
+func humanAsk(_ context.Context, question string, options []string, multi bool) (string, error) {
 	fmt.Fprintf(os.Stderr, "\n❓ %s\n", question)
 	for i, o := range options {
 		fmt.Fprintf(os.Stderr, "   %d) %s\n", i+1, o)
 	}
-	fmt.Fprint(os.Stderr, "answer: ")
+	if multi && len(options) > 0 {
+		fmt.Fprint(os.Stderr, "answer (comma-separated numbers for several): ")
+	} else {
+		fmt.Fprint(os.Stderr, "answer: ")
+	}
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	line = strings.TrimSpace(line)
+	if multi && len(options) > 0 && strings.ContainsAny(line, ", ") {
+		var picked []string
+		for _, f := range strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == ' ' }) {
+			if n, err := strconv.Atoi(f); err == nil && n >= 1 && n <= len(options) {
+				picked = append(picked, options[n-1])
+			}
+		}
+		if len(picked) > 0 {
+			return strings.Join(picked, ", "), nil
+		}
+	}
 	if n, err := strconv.Atoi(line); err == nil && n >= 1 && n <= len(options) {
 		return options[n-1], nil
 	}

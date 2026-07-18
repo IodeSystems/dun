@@ -81,8 +81,18 @@ system-prompt composition.
   prompt. Unit-tested (focus toggle, selection clamp, option+note, custom).
 - **✅ vim `/` search:** in convo focus, `/` opens a query line; matches drive
   the selection, ↑/↓ step between hits, esc exits (unit-tested).
-- **✅ collapsible tool output:** call+result fold into one block (▸/▾), enter
-  toggles the full output.
+- **✅ collapsible tool output:** call+result fold into one block (▸/▾); the
+  collapsed preview is the glance.
+- **✅ tool inspector overlay (`inspector.go`):** enter on a tool block opens a
+  full-screen overlay — two bordered, focusable sub-frames (input / output),
+  each independently scrollable, with `less`-style search: `/` forward, `?`
+  backward, `n`/`N` repeat/reverse, `g`/`G` ends, tab switches frame, esc/q
+  closes. Content pre-wrapped to the frame width (no clip); current match
+  highlighted bright, others dim; footer shows `match a/b`. Fed by a `toolBlock`
+  (name + raw input via `argFull` + complete output body) attached to the convo
+  entry. This is the human drill-in counterpart to agentkit's `{OUTPUT}` (same
+  complete bytes; agentkit surfaces them to the model's reply, the inspector to
+  the user). Unit-tested: open, tab-focus, `/` search + `n` cycle, view render.
 - **✅ relevant-docs notifications (aggregated + nested nav):** dun's OWN
   aggregating preparer (`docsPreparer`, replacing agentkit's per-hit
   `FinderPreparer`) emits ONE summary per pass — "found = candidate hits,
@@ -132,10 +142,22 @@ system-prompt composition.
   commit→PR.
 
 ### ✅ Slice 4a — human-in-the-loop + proactive notifications
-- **ask_user** (`ask.go`): the agent calls `ask_user{question, options}`; the
-  turn PAUSES at that tool call until answered — `-p` emits an `ask` event, a
+- **ask_user** (`ask.go`): the agent calls `ask_user{question, options, multi}`;
+  the turn PAUSES at that tool call until answered — `-p` emits an `ask` event, a
   UI picker / terminal prompt collects the answer, it's returned as the tool
-  result and the turn resumes. `Config.Ask` + `withAsk` dispatcher wrapper.
+  result and the turn resumes. `Config.Ask` + `withAsk` dispatcher wrapper. One
+  question at a time (the answer to one guides the next); `multi:true` lets the
+  user pick several. Answer is a single (joined) string, so the `answer`
+  protocol is unchanged.
+- **ask panel modes (TUI):**
+  - *free-text* (no options): drops straight into text entry — you just type.
+    (Fix: a no-options ask used to leave typing inert until enter opened a
+    hidden field.)
+  - *single-select*: ↑/↓ choose · enter selects · `n` attaches a detail.
+  - *multi-select* (`multi:true`): ☐/☑ checkboxes; enter TOGGLES the highlighted
+    option (space stays a typed char for the custom row), a trailing "✓ done —
+    submit N selected" row submits the joined set. `n`/detail disabled here.
+  - all modes keep the trailing "✎ custom answer / chat…" free-text row.
 - **Proactive notifications** (`notify.go`): `docsFinder` wraps raglit's search
   tool as an `agent.DocFinder` (ragnotify.MCPFinder); `Session.Preparer =
   FinderPreparer` pings relevant docs before each turn. Injected
@@ -201,6 +223,74 @@ system-prompt composition.
   blob extraction (not inlined, re-materialized), compaction persists.
 - **◻ deferred:** TUI replays loaded entries as history on resume (today the
   model has the context but the TUI starts blank on `--continue`).
+
+### ✅ Slice 4d — web UI (`dun serve`)
+- **A second client of `-p`** — no engine change. `dun -serve --addr` spawns one
+  `dun -p` and bridges it to the browser (`serve.go` + embedded `serve.html`):
+  - `GET /` → the self-contained page.
+  - `GET /events` → **SSE**: replays the event history to a (re)connecting
+    browser, then streams live. Reload = full transcript rebuild.
+  - `POST /input` → validates `{type:user|answer|stop}` and writes it to the
+    engine stdin as one compact JSON line.
+  - `serveHub` fans engine stdout to subscribers; a wedged client is dropped
+    (not allowed to stall the engine) and can reload to replay.
+  - **stdlib only** (net/http SSE + POST) — no websocket/framework dep.
+- **Frontend** (vanilla JS, mirrors `tui.go`'s handleEvent): streamed assistant
+  text; tool call/result as a native `<details>` with input/output `<pre>`
+  panes (browser scroll + Ctrl-F replace the TUI inspector's `/?n`); ask picker
+  as radios / **checkboxes for `multi`** / free-text (multi-select is trivial in
+  HTML) + a custom-answer field; 🔎/🔔 notifications; token counter.
+- **Shared arg-builder:** `pArgs(tuiOpts)` extracted from `startDunProc` so TUI
+  and serve spawn `dun -p` identically.
+- **Cross-host binding:** `--addr` takes any host (`0.0.0.0:8734`, `:8734`).
+  `reachableURLs` prints the LAN-reachable URL(s) — filters loopback + virtual
+  NICs (docker/br-/veth/vpn) so you get the real address, not a wall of 172.x.
+  A non-loopback bind logs a "no auth" warning.
+- **`/web [addr]` (TUI slash command):** starts an EMBEDDED server that mirrors
+  the LIVE TUI session — `proc.tap` fans the engine's raw event stream to the
+  web hub, and browser input writes to the SAME engine stdin (a `lockedWriter`
+  + `dunProc.mu` serialize TUI vs browser writes). So a browser on another host
+  watches and drives exactly what the TUI is doing. Defaults to `0.0.0.0:8734`
+  (the point is remote access); prints the URLs + a no-auth warning into the
+  convo. First `/` slash command in the TUI (unknown → hint).
+- **Verified live (cross-host):** `dun -serve -addr 0.0.0.0:8734` on the dev box
+  (192.168.1.76), opened from a browser on a DIFFERENT host — header showed the
+  `ready` 12-tool list, the token counter (`usage`), and a streamed assistant
+  message, all over SSE. Unit tests: `/web` start + tap + no-rebind, unknown
+  slash, `reachableURLs`/`loopbackOnly`, hub fan-out/replay/input/drop.
+- **◻ deferred:** multi-session (one server = one session); auth/TLS; markdown
+  rendering of assistant replies (raw text now); `/web` history replay to a
+  browser that connects BEFORE `/web` (it sees events from attach-time on).
+
+### ✅ TUI screen dump (SIGUSR1)
+- The alt-screen hides what the TUI shows, so debugging "what is it doing?" is
+  hard. `kill -USR1 <tui-pid>` now appends a snapshot — a state header
+  (focus/busy/asking/inspecting/sel/convo/size) + the ANSI-stripped `View()` —
+  to `$DUN_DUMP_FILE` (default `$TMPDIR/dun-screen.txt`). Repeatable (re-armed;
+  appends). NB `dun -tui` re-execs `dun -p`, so signal the PARENT pid.
+  `waitForDump` cmd → `dumpMsg` → `writeDump`. Unit-tested (`TestTUI_ScreenDump`).
+
+### ✅ Web option B — xterm.js terminal view (`serveterm.go`)
+- **The REAL TUI in the browser**, alongside option A. `dun serve` now serves
+  both: `/` = web-native HTML (option A), `/term` = the actual bubbletea TUI via
+  xterm.js over a PTY. Cross-linked (each page links the other).
+- On a `/term/ws` WebSocket connect, `termWS` spawns `dun -tui` in a pseudo-
+  terminal (`creack/pty`) and pipes raw bytes both ways (`gorilla/websocket`).
+  Framing browser→server: `0x00`+bytes = keystrokes → PTY; `0x01`+4 bytes =
+  resize → `pty.Setsize`. Server→browser: raw PTY output as binary frames.
+- **Resize reflows for real:** xterm fit-addon → resize frame → `pty.Setsize` →
+  the PTY delivers SIGWINCH → bubbletea gets `WindowSizeMsg` → the TUI relays
+  out. (Option A reflows via CSS; B via the terminal's own winsize — the point
+  of the comparison.)
+- xterm.js/css + fit-addon **vendored** under `cmd/dun/web/` and `//go:embed`ed
+  (self-contained, no CDN). `procArgs(o, mode)` (was `pArgs`) builds `-p` or
+  `-tui` argv. Process-group kill on WS close reaps `dun -tui` + its `dun -p`.
+- **Verified live (cross-host):** opened `/term` from a browser on another host
+  — the real TUI booted (header + 12-tool ready line + magenta focus divider +
+  status bar), and typed keystrokes reached the bubbletea input over WS→PTY.
+- **A vs B:** A = native web (selectable DOM, real checkboxes, mobile-friendlier,
+  reimplements rendering); B = 100% TUI fidelity (inspector, colors, reflow) at
+  the cost of a terminal-in-browser (xterm quirks, PTY dep).
 
 ### ◻ Slice 5 — roles / task DAG (if wanted)
 - Planner/coder/reviewer; multi-Session orchestration (autowork3-style).

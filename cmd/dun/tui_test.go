@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -143,6 +144,68 @@ func TestTUI_AskPickerOptionWithNote(t *testing.T) {
 	}
 }
 
+// A no-options ask (free-text question) drops STRAIGHT into text entry: the
+// user can type immediately without first pressing enter on a "custom" row.
+// Regression for a session where the model asked with no options and typing an
+// answer was inert.
+func TestTUI_AskNoOptionsFreeText(t *testing.T) {
+	proc := &dunProc{stdin: discardWC{}}
+	m := newTUIModel(proc, "/ws")
+	m = m.handleEvent(evMsg{"type": "ask", "question": "What is your favorite color?", "options": nil})
+	if !m.asking || len(m.askOptions) != 0 {
+		t.Fatalf("expected a no-options ask, got opts=%v", m.askOptions)
+	}
+	if !m.customAnswer {
+		t.Fatal("no-options ask should enter free-text mode immediately")
+	}
+	// Type without pressing enter first — this was the bug (inert typing).
+	m = typeStr(m, "blue")
+	if m.input.Value() != "blue" {
+		t.Fatalf("typing should reach the input, got %q", m.input.Value())
+	}
+	m = key(m, kEnter)
+	if m.asking {
+		t.Fatal("enter should send the free-text answer")
+	}
+	if !strings.Contains(m.convoText(), "blue") {
+		t.Fatalf("answer not echoed: %v", m.convo)
+	}
+}
+
+// multi:true → enter toggles the highlighted option (space is a typed char, not
+// a toggle), and a trailing "✓ done" row submits the joined set.
+func TestTUI_AskMultiSelect(t *testing.T) {
+	proc := &dunProc{stdin: discardWC{}}
+	m := newTUIModel(proc, "/ws")
+	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B", "C"}, "multi": true})
+	if !m.askMulti || len(m.askChecked) != 3 {
+		t.Fatalf("multi ask not set up: multi=%v checked=%v", m.askMulti, m.askChecked)
+	}
+	m = key(m, kEnter) // toggle A (row 0)
+	if !m.askChecked[0] {
+		t.Fatal("enter should toggle the highlighted option in multi mode")
+	}
+	m = key(m, kDown)
+	m = key(m, kDown)
+	m = key(m, kEnter) // toggle C (row 2)
+	if !m.askChecked[2] || m.askChecked[1] {
+		t.Fatalf("expected A+C checked, got %v", m.askChecked)
+	}
+	// Navigate past the custom row to the "✓ done" row (custom+1 = 4).
+	m = key(m, kDown) // custom row (3)
+	m = key(m, kDown) // done row (4)
+	if m.askSel != 4 {
+		t.Fatalf("should be on the done row, sel=%d", m.askSel)
+	}
+	m = key(m, kEnter) // submit
+	if m.asking {
+		t.Fatal("enter on the done row should submit")
+	}
+	if !strings.Contains(m.convoText(), "A, C") {
+		t.Fatalf("joined answer missing: %v", m.convo)
+	}
+}
+
 // The custom/chat row lets you type a free-text answer.
 func TestTUI_AskPickerCustomAnswer(t *testing.T) {
 	proc := &dunProc{stdin: discardWC{}}
@@ -191,21 +254,143 @@ func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 		t.Fatalf("collapsed call line should show the arg value, got %q", e.view())
 	}
 
-	// Focus it and open.
+	// Focus it and open → the tool inspector overlay (not inline expansion).
 	m = key(m, kTab)
 	if m.sel != 0 {
 		t.Fatalf("focus should land on the block, sel=%d", m.sel)
 	}
 	m = key(m, kEnter)
-	if !m.convo[0].open {
-		t.Fatal("enter should open the block")
+	if !m.inspecting {
+		t.Fatal("enter on a tool block should open the inspector")
 	}
-	if !strings.Contains(m.convo[0].view(), "line three") {
-		t.Fatal("open view should show the full output")
+	if !strings.Contains(m.insp.panes[inspOutput].src, "line three") {
+		t.Fatalf("inspector output should hold the full result, got %q", m.insp.panes[inspOutput].src)
 	}
+	m = key(m, kEsc)
+	if m.inspecting {
+		t.Fatal("esc should close the inspector")
+	}
+}
+
+// /web starts the embedded server that mirrors the live session, attaches the
+// engine tap, prints a URL, and refuses to rebind on a second /web.
+func TestTUI_WebSlashCommand(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = typeStr(m, "/web 127.0.0.1:0") // ephemeral port
 	m = key(m, kEnter)
-	if m.convo[0].open {
-		t.Fatal("enter again should close the block")
+	if m.webAddr == "" {
+		t.Fatal("/web should start the server (webAddr set)")
+	}
+	if m.proc.tap == nil {
+		t.Fatal("/web should attach the engine tap for browser mirroring")
+	}
+	if !strings.Contains(m.convoText(), "🌐") {
+		t.Fatalf("expected a URL line, got: %s", m.convoText())
+	}
+	bound := m.webAddr
+	m = typeStr(m, "/web 127.0.0.1:0")
+	m = key(m, kEnter)
+	if m.webAddr != bound {
+		t.Fatal("a second /web must not rebind")
+	}
+	if !strings.Contains(m.convoText(), "already serving") {
+		t.Fatal("second /web should say it's already serving")
+	}
+}
+
+// An unknown slash command is reported, not sent to the engine.
+func TestTUI_UnknownSlash(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = typeStr(m, "/bogus")
+	m = key(m, kEnter)
+	if !strings.Contains(m.convoText(), "unknown command") {
+		t.Fatalf("expected unknown-command note, got: %s", m.convoText())
+	}
+}
+
+// SIGUSR1 → dumpMsg writes the rendered screen + state header to $DUN_DUMP_FILE.
+func TestTUI_ScreenDump(t *testing.T) {
+	path := t.TempDir() + "/dump.txt"
+	t.Setenv("DUN_DUMP_FILE", path)
+
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m.busy = true
+
+	nm, _ = m.Update(dumpMsg{}) // what SIGUSR1 delivers
+	m = nm.(tuiModel)
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("dump file not written: %v", err)
+	}
+	dump := string(b)
+	if !strings.Contains(dump, "busy=true") || !strings.Contains(dump, "w=80 h=24") {
+		t.Fatalf("state header missing/incomplete:\n%s", dump)
+	}
+	if !strings.Contains(dump, "1 tools") {
+		t.Fatalf("rendered screen not captured:\n%s", dump)
+	}
+	// A second dump appends (history of snapshots).
+	m.Update(dumpMsg{})
+	b2, _ := os.ReadFile(path)
+	if strings.Count(string(b2), "dun screen @") < 2 {
+		t.Fatal("second dump should append, not overwrite")
+	}
+}
+
+// The inspector overlay: enter opens it, tab switches the focused frame, "/"
+// search finds and n cycles matches, esc closes.
+func TestTUI_Inspector(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m.busy = true
+	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "eval", "args": map[string]any{"code": "print(x)"}})
+	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "alpha\nbravo\ncharlie\nbravo again"})
+
+	m = key(m, kTab)   // focus the block
+	m = key(m, kEnter) // open inspector
+	if !m.inspecting {
+		t.Fatal("inspector should be open")
+	}
+	if m.insp.focus != inspOutput {
+		t.Fatalf("output frame should start focused, got %d", m.insp.focus)
+	}
+	// The overlay renders both frames without panic.
+	if v := stripANSI(m.View()); !strings.Contains(v, "eval") || !strings.Contains(v, "output") || !strings.Contains(v, "charlie") {
+		t.Fatalf("inspector view missing tool/frame/content: %q", v)
+	}
+	// tab switches to the input frame; its source is the call's args.
+	m = key(m, kTab)
+	if m.insp.focus != inspInput {
+		t.Fatalf("tab should focus the input frame, got %d", m.insp.focus)
+	}
+	if !strings.Contains(m.insp.panes[inspInput].src, "print(x)") {
+		t.Fatalf("input frame should show the args, got %q", m.insp.panes[inspInput].src)
+	}
+	m = key(m, kTab) // back to output
+
+	// "/bravo" → two matches in the output frame.
+	m = key(m, kSlash)
+	m = typeStr(m, "bravo")
+	m = key(m, kEnter)
+	if len(m.insp.matches) != 2 {
+		t.Fatalf("expected 2 matches for 'bravo', got %d", len(m.insp.matches))
+	}
+	if m.insp.at != 0 {
+		t.Fatalf("first match should be selected, at=%d", m.insp.at)
+	}
+	m = key(m, kN) // next match
+	if m.insp.at != 1 {
+		t.Fatalf("n should advance to the second match, at=%d", m.insp.at)
+	}
+	m = key(m, kEsc)
+	if m.inspecting {
+		t.Fatal("esc should close the inspector")
 	}
 }
 

@@ -20,16 +20,18 @@ import (
 // blocking Ask is simpler and correct for interactive clarification.)
 
 // AskFunc presents a question (with optional choices) to the user and returns
-// their answer. It blocks until answered or ctx is done.
-type AskFunc func(ctx context.Context, question string, options []string) (string, error)
+// their answer. It blocks until answered or ctx is done. multi = the user may
+// pick several options (the answer is their joined selection).
+type AskFunc func(ctx context.Context, question string, options []string, multi bool) (string, error)
 
 func askToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "ask_user"
-	td.Function.Description = "Ask the user a question when the task is ambiguous or a decision is theirs " +
+	td.Function.Description = "Ask the user ONE question when the task is ambiguous or a decision is theirs " +
 		"to make (rather than guessing). Provide `options` for a multiple-choice pick, or omit them for " +
-		"free text. Returns the user's answer."
+		"free text. Set `multi` to let the user select several options. Ask one question at a time — the " +
+		"answer to one often guides the next. Returns the user's answer."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -38,6 +40,10 @@ func askToolDef() llm.ToolDef {
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
 				"description": "optional choices to pick from",
+			},
+			"multi": map[string]any{
+				"type":        "boolean",
+				"description": "allow selecting multiple options (default false = pick one)",
 			},
 		},
 		"required": []string{"question"},
@@ -55,18 +61,19 @@ func withAsk(inner agent.ToolDispatcher, ask AskFunc, onCall func(string, map[st
 		var args struct {
 			Question string   `json:"question"`
 			Options  []string `json:"options"`
+			Multi    bool     `json:"multi"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		if strings.TrimSpace(args.Question) == "" {
 			return "ERROR: ask_user requires a question", nil
 		}
-		ans, err := ask(ctx, args.Question, args.Options)
+		ans, err := ask(ctx, args.Question, args.Options, args.Multi)
 		if err != nil {
 			// Feed the failure back to the model rather than aborting the turn.
 			return "ERROR: could not get an answer: " + err.Error(), nil
 		}
 		if onCall != nil {
-			onCall("ask_user", map[string]any{"question": args.Question, "options": args.Options}, ans)
+			onCall("ask_user", map[string]any{"question": args.Question, "options": args.Options, "multi": args.Multi}, ans)
 		}
 		return ans, nil
 	}
