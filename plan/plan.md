@@ -425,6 +425,25 @@ unix-socket-by-default path (dun targets Linux, so fine).
 resource caps; a `dun -d status` TUI; sharing raglit's index across sessions
 (already per-workspace, so mostly free once the pool is per-workspace).
 
+### ✅ Next-message suggestions (`--suggest`)
+- After each turn the engine predicts the 3–4 messages the USER is most likely to
+  send next, each with a rough probability, and the TUI offers them as quick
+  picks. One extra non-tool LLM round-trip per turn → **opt-in** (`--suggest`).
+- **Engine (`suggest.go`):** `Harness.Suggestions(ctx)` builds the conversation
+  (DefaultContextBuilder, no system) + an instruction, calls the LLM once with
+  JSON-mode ResponseFormat, and `parseSuggestions` defensively extracts the JSON
+  (small models wrap it in prose), clamps prob to [0,1], drops empties, sorts
+  desc, caps 4. `main.go` emits a `suggestions` event after `done`
+  (turn + continueTurn); propagated through `procArgs` so web sessions get it.
+- **TUI:** the picker shows ONLY when idle with an empty input (never fights a
+  running turn or typing); a new turn's `token`/`tool_call` clears it. Digit
+  `1–N` sends that suggestion (via the new shared `sendUser`); probabilities
+  shown as `%`. Status: "next? · 1–N pick · or type".
+- **Verified:** unit — `parseSuggestions` (prose-wrapped/sort/clamp/junk),
+  `TestTUI_Suggestions` (event→picker→digit-send→clear), picker render. Live LLM
+  round-trip blocked at test time by a 429-saturated endpoint (best-effort:
+  suggestions silently skip on error).
+
 ### ◻ Slice 5 — roles / task DAG (if wanted)
 - Planner/coder/reviewer; multi-Session orchestration (autowork3-style).
 

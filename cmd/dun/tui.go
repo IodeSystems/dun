@@ -35,6 +35,7 @@ type tuiOpts struct {
 	cont                               bool   // --continue: resume the latest session
 	resume                             string // --resume <id>: resume a specific session
 	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /quit)
+	suggest                            bool   // --suggest: next-message suggestions after each turn
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -241,6 +242,7 @@ type tuiModel struct {
 	lc          *launcherConn // launcher registration (nil = no launcher)
 	reloadVer   string        // a newer build the launcher announced ("" = none)
 	reloadReq   bool          // /reload requested → runTUI re-execs after quit
+	suggestions []suggestion  // --suggest: predicted next messages (idle-only picker)
 	w, h       int
 	fatalErr   string
 }
@@ -423,13 +425,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if v == "" || m.busy || m.starting {
 				return m, nil
 			}
-			m.history = append(m.history, v)
-			m.histIdx = len(m.history)
-			m.input.Reset()
-			m.append(stUser.Render("› " + v))
-			m.busy = true
-			m.proc.send(v)
-			return m, nil
+			return m.sendUser(v), nil
 		case "up":
 			if m.focus == focusConvo {
 				if d := m.selDocs(); d != nil && d.descended { // move within the doc list
@@ -536,6 +532,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			if m.focus == focusConvo { // keys don't type into a blurred input
 				return m, nil
+			}
+			// Suggestion quick-pick: a digit while the picker is showing sends it.
+			if m.suggestActive() {
+				if k := msg.String(); len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
+					if n := int(k[0] - '0'); n <= len(m.suggestions) {
+						return m.sendUser(m.suggestions[n-1].text), nil
+					}
+				}
 			}
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
@@ -681,6 +685,58 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// suggestion is one predicted next user message (--suggest).
+type suggestion struct {
+	text string
+	prob float64
+}
+
+func parseSuggestionItems(v any) []suggestion {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]suggestion, 0, len(arr))
+	for _, it := range arr {
+		m, _ := it.(map[string]any)
+		if t := strings.TrimSpace(str(m["text"])); t != "" {
+			out = append(out, suggestion{text: t, prob: floatOf(m["prob"])})
+		}
+	}
+	return out
+}
+
+// suggestActive: the next-message picker shows only when idle with an empty
+// input, so it never fights typing or a running turn.
+func (m tuiModel) suggestActive() bool {
+	return m.focus == focusInput && !m.busy && !m.starting && !m.asking &&
+		len(m.suggestions) > 0 && strings.TrimSpace(m.input.Value()) == ""
+}
+
+func (m tuiModel) suggestPanel() string {
+	rows := make([]string, 0, len(m.suggestions)+1)
+	for i, s := range m.suggestions {
+		rows = append(rows, fmt.Sprintf("  %s %s  %s",
+			stSel.Render(fmt.Sprintf("%d", i+1)), s.text,
+			stDim.Render(fmt.Sprintf("%d%%", int(s.prob*100+0.5)))))
+	}
+	rows = append(rows, m.input.View())
+	return strings.Join(rows, "\n")
+}
+
+// sendUser ships a user message to the engine (from the input or a suggestion),
+// echoes it, and clears transient UI (suggestions, input).
+func (m tuiModel) sendUser(v string) tuiModel {
+	m.history = append(m.history, v)
+	m.histIdx = len(m.history)
+	m.input.Reset()
+	m.suggestions = nil
+	m.append(stUser.Render("› " + v))
+	m.busy = true
+	m.proc.send(v)
+	return m
+}
+
 // sendAnswer resolves the ask: echoes the answer, ships it to the engine, and
 // resets to the input pane.
 func (m tuiModel) sendAnswer(v string) tuiModel {
@@ -769,10 +825,15 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.append(stDim.Render(fmt.Sprintf("ready — %d tools: %s", len(m.tools), strings.Join(m.tools, ", "))))
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
+		m.suggestions = nil
 		m.cur += str(ev["text"])
+		m.refresh()
+	case "suggestions":
+		m.suggestions = parseSuggestionItems(ev["items"])
 		m.refresh()
 	case "tool_call":
 		m.busy = true
+		m.suggestions = nil
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
 		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argPreview(args, 80) + ")")})
@@ -917,6 +978,8 @@ func (m tuiModel) View() string {
 		} else {
 			status = stDim.Render("convo  ·  ↑/↓ select · → docs · / search · enter open (tool→inspector) · tab input")
 		}
+	case m.suggestActive():
+		status = stDim.Render(fmt.Sprintf("next?  ·  1–%d pick · or type · "+m.exitHint(), len(m.suggestions)))
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · " + m.exitHint())
 	}
@@ -930,6 +993,9 @@ func (m tuiModel) lowerView() string {
 	}
 	if m.paletteActive() {
 		return m.palettePanel()
+	}
+	if m.suggestActive() {
+		return m.suggestPanel()
 	}
 	return m.input.View()
 }
@@ -1381,6 +1447,9 @@ func procArgs(o tuiOpts, mode string) []string {
 	args := []string{mode, "--workspace", o.workspace}
 	if o.disableExit && mode == "-tui" {
 		args = append(args, "--disable-exit")
+	}
+	if o.suggest {
+		args = append(args, "--suggest") // propagate to -p (engine) and web -tui
 	}
 	if o.model != "" {
 		args = append(args, "--model", o.model)

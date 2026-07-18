@@ -311,6 +311,40 @@ func TestTUI_CommandPalette(t *testing.T) {
 	}
 }
 
+// --suggest: a suggestions event shows the idle picker; a digit sends that
+// suggestion; a new turn (token) clears it.
+func TestTUI_Suggestions(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
+		map[string]any{"text": "run the tests", "prob": 0.7},
+		map[string]any{"text": "commit it", "prob": 0.2},
+	}})
+	if len(m.suggestions) != 2 {
+		t.Fatalf("suggestions not stored: %+v", m.suggestions)
+	}
+	if !m.suggestActive() {
+		t.Fatal("picker should be active when idle + empty input")
+	}
+	// digit "1" sends the first suggestion.
+	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	if !strings.Contains(m.convoText(), "run the tests") {
+		t.Fatalf("digit 1 should send the first suggestion, convo: %s", m.convoText())
+	}
+	if len(m.suggestions) != 0 {
+		t.Fatal("picking a suggestion should clear the list")
+	}
+
+	// A new turn's token clears any showing suggestions.
+	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "x", "prob": 0.5}}})
+	m = m.handleEvent(evMsg{"type": "token", "text": "thinking"})
+	if len(m.suggestions) != 0 {
+		t.Fatal("a new turn should clear suggestions")
+	}
+}
+
 // --disable-exit: ctrl+c and esc don't quit, but /quit still does.
 func TestTUI_DisableExit(t *testing.T) {
 	kCtrlC := tea.KeyMsg{Type: tea.KeyCtrlC}

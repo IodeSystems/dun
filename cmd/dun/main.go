@@ -56,6 +56,7 @@ func main() {
 	serve := flag.Bool("serve", false, "serve the TUI over the web (xterm.js) at --addr")
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /quit)")
+	suggest := flag.Bool("suggest", false, "after each turn, suggest likely next messages (one extra LLM call per turn)")
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: `dun -d` (run), `dun -d status`, `dun -d shutdown`")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
@@ -88,6 +89,7 @@ func main() {
 		}
 		return
 	}
+	suggestEnabled = *suggest // -p emits next-message suggestions after each turn
 	// Resolve the effective key: explicit flag > env > saved config.
 	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), fc.Key)
 	// Dev self-update: if this is a source-stamped build and the tree changed,
@@ -117,7 +119,7 @@ func main() {
 	if *tui {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -127,7 +129,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -347,6 +349,7 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) {
 	}
 	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active})
 	em.emit(event{"type": "done"})
+	emitSuggestions(ctx, h, em)
 }
 
 // inputStream reads JSON events from stdin in a goroutine and routes them:
@@ -427,6 +430,10 @@ func ingestWorkspace(raglitHome, workspace string) {
 	_ = cmd.Run() // best-effort; proactive RAG simply has less to ping without it
 }
 
+// suggestEnabled mirrors --suggest; turn/continueTurn emit next-message
+// suggestions after `done` when set.
+var suggestEnabled bool
+
 func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) {
 	res, err := h.Ask(ctx, task)
 	if err != nil {
@@ -436,6 +443,24 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) {
 	em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
 	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active})
 	em.emit(event{"type": "done"})
+	emitSuggestions(ctx, h, em)
+}
+
+// emitSuggestions asks for likely next user messages and emits them (best-effort,
+// after `done` so the reply shows first). No-op unless --suggest.
+func emitSuggestions(ctx context.Context, h *dun.Harness, em *emitter) {
+	if !suggestEnabled {
+		return
+	}
+	sugs, err := h.Suggestions(ctx)
+	if err != nil || len(sugs) == 0 {
+		return
+	}
+	items := make([]any, len(sugs))
+	for i, s := range sugs {
+		items[i] = map[string]any{"text": s.Text, "prob": s.Prob}
+	}
+	em.emit(event{"type": "suggestions", "items": items})
 }
 
 type event map[string]any
