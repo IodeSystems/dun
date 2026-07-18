@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -35,6 +34,7 @@ type tuiOpts struct {
 	pr                                 bool
 	cont                               bool   // --continue: resume the latest session
 	resume                             string // --resume <id>: resume a specific session
+	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /quit)
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -46,6 +46,7 @@ func runTUI(o tuiOpts) error {
 	}
 	m := newTUIModel(proc, o.workspace)
 	m.model, m.url, m.keySet = o.model, o.url, o.key != "" // for /config
+	m.disableExit = o.disableExit
 	// WithMouseCellMotion makes the terminal (and tmux) forward wheel events to
 	// us instead of scrolling its own scrollback; the viewport consumes them.
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
@@ -221,10 +222,10 @@ type tuiModel struct {
 	inspecting bool      // the tool inspector overlay is open (owns all keys)
 	insp       inspector // the overlay (valid while inspecting)
 	dumpSig    chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
-	webAddr    string         // bound address of the embedded /web server ("" = off)
-	paletteSel int            // highlighted row in the "/" command palette
-	model, url string         // this session's LLM settings (for /config)
-	keySet     bool           // whether an API key is configured
+	paletteSel  int           // highlighted row in the "/" command palette
+	model, url  string        // this session's LLM settings (for /config)
+	keySet      bool          // whether an API key is configured
+	disableExit bool          // --disable-exit: ctrl+c/esc don't quit (use /quit)
 	w, h       int
 	fatalErr   string
 }
@@ -285,6 +286,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "ctrl+c":
+			if m.disableExit {
+				return m, nil // exit disabled — use /quit
+			}
 			return m, tea.Quit
 		case "esc":
 			if m.searchActive { // leave match-scroll mode, back to free selection
@@ -303,6 +307,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.paletteSel = 0
 				m.refresh()
 				return m, nil
+			}
+			if m.disableExit {
+				return m, nil // exit disabled — use /quit
 			}
 			return m, tea.Quit
 		case "/":
@@ -546,6 +553,9 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "ctrl+c":
+		if m.disableExit {
+			return m, nil
+		}
 		return m, tea.Quit
 	case "esc":
 		if m.noting || m.customAnswer {
@@ -553,6 +563,9 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			m.input.Blur()
 			m.refresh()
+			return m, nil
+		}
+		if m.disableExit {
 			return m, nil
 		}
 		return m, tea.Quit
@@ -803,6 +816,15 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	return m
 }
 
+// exitHint is the status-bar exit prompt — "/quit to exit" when ctrl+c is
+// disabled (--disable-exit), else the usual "ctrl+c quit".
+func (m tuiModel) exitHint() string {
+	if m.disableExit {
+		return "/quit to exit"
+	}
+	return "ctrl+c quit"
+}
+
 func (m tuiModel) View() string {
 	// The inspector is a full-screen overlay — it replaces the normal layout.
 	if m.inspecting {
@@ -847,7 +869,7 @@ func (m tuiModel) View() string {
 	case m.paletteActive():
 		status = stDim.Render("command  ·  ↑/↓ select · tab complete · enter run · esc/type to edit")
 	case m.busy:
-		status = m.spin.View() + stDim.Render(" working…  (ctrl+c to quit)")
+		status = m.spin.View() + stDim.Render(" working…  ("+m.exitHint()+")")
 	case m.focus == focusConvo:
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · enter expand · ← back · ctrl+c quit")
@@ -855,7 +877,7 @@ func (m tuiModel) View() string {
 			status = stDim.Render("convo  ·  ↑/↓ select · → docs · / search · enter open (tool→inspector) · tab input")
 		}
 	default:
-		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · ctrl+c quit")
+		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · " + m.exitHint())
 	}
 	return strings.Join([]string{head, vp.View(), div, lower, status}, "\n")
 }
@@ -1108,14 +1130,6 @@ var slashCommands []slashCmd
 func init() {
 	slashCommands = []slashCmd{
 		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
-		{"web", "[addr]", "serve this live session to a browser (default 0.0.0.0:8734)", func(m *tuiModel, a []string) tea.Cmd {
-			addr := "0.0.0.0:8734"
-			if len(a) > 0 {
-				addr = a[0]
-			}
-			m.startWeb(addr)
-			return nil
-		}},
 		{"config", "", "show this session's LLM settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
 		{"quit", "", "exit dun", func(_ *tuiModel, _ []string) tea.Cmd { return tea.Quit }},
 	}
@@ -1255,29 +1269,6 @@ func (m tuiModel) palettePanel() string {
 	return strings.Join(rows, "\n") + "\n" + m.input.View()
 }
 
-// startWeb attaches an embedded web server to the LIVE session: it mirrors the
-// engine's event stream to browsers (proc.tap → hub.broadcast) and forwards
-// their input to the same engine stdin the TUI writes to. So a browser on
-// another host watches and drives exactly what the TUI is doing.
-func (m *tuiModel) startWeb(addr string) {
-	if m.webAddr != "" {
-		m.append(stNote.Render("🌐 web already serving · " + m.webAddr))
-		return
-	}
-	lw := &lockedWriter{mu: &m.proc.mu, w: m.proc.stdin}
-	hub, bound, err := startEmbeddedWeb(addr, lw)
-	if err != nil {
-		m.append(stErr.Render("web: " + err.Error()))
-		return
-	}
-	m.proc.setTap(hub.broadcast)
-	m.webAddr = bound
-	for _, u := range reachableURLs(bound) {
-		m.append(stNote.Render("🌐 " + u))
-	}
-	m.append(stDim.Render("⚠ no auth — anyone who can reach that address drives this session"))
-}
-
 // ── screen dump (SIGUSR1) ──────────────────────────────────────────
 
 // dumpMsg is delivered when SIGUSR1 arrives; Update writes the current screen.
@@ -1336,21 +1327,16 @@ type dunProc struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 	ch    chan tea.Msg
-	mu    sync.Mutex     // serializes stdin writes (TUI + embedded /web hub)
-	tap   func(string)   // if set, every raw engine event line is mirrored here (/web)
-}
-
-func (p *dunProc) setTap(f func(string)) {
-	p.mu.Lock()
-	p.tap = f
-	p.mu.Unlock()
 }
 
 // procArgs builds a `dun <mode>` argv from the shared flags. mode is "-p" (the
-// engine, for the TUI + `dun serve` web-native bridge) or "-tui" (the full TUI,
-// for the xterm/PTY terminal view served at /term).
+// engine, for the TUI) or "-tui" (the full TUI, for the xterm/PTY terminal view
+// served at /term).
 func procArgs(o tuiOpts, mode string) []string {
 	args := []string{mode, "--workspace", o.workspace}
+	if o.disableExit && mode == "-tui" {
+		args = append(args, "--disable-exit")
+	}
 	if o.model != "" {
 		args = append(args, "--model", o.model)
 	}
@@ -1406,16 +1392,8 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 		sc := bufio.NewScanner(stdout)
 		sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 		for sc.Scan() {
-			line := sc.Text()
-			// Mirror the raw event to the embedded web hub (/web), if attached.
-			p.mu.Lock()
-			tap := p.tap
-			p.mu.Unlock()
-			if tap != nil {
-				tap(line)
-			}
 			var ev map[string]any
-			if json.Unmarshal([]byte(line), &ev) == nil {
+			if json.Unmarshal(sc.Bytes(), &ev) == nil {
 				ch <- evMsg(ev)
 			}
 		}
@@ -1425,14 +1403,10 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 }
 
 func (p *dunProc) send(content string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content})
 }
 
 func (p *dunProc) answer(value string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "answer", "value": value})
 }
 

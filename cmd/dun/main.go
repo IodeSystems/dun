@@ -53,8 +53,9 @@ func main() {
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
-	serve := flag.Bool("serve", false, "serve a web UI (a browser client of -p) at --addr")
+	serve := flag.Bool("serve", false, "serve the TUI over the web (xterm.js) at --addr")
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
+	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /quit)")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
 	flag.Parse()
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
@@ -96,7 +97,7 @@ func main() {
 
 	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
 	if *tui {
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume}); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit}); err != nil {
 			fatal(err)
 		}
 		return
@@ -104,7 +105,7 @@ func main() {
 
 	// Serve mode: a web client of `dun -p` (same re-exec, bridged over SSE/POST).
 	if *serve {
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit}, *addr); err != nil {
 			fatal(err)
 		}
 		return

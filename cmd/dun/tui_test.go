@@ -272,32 +272,6 @@ func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 	}
 }
 
-// /web starts the embedded server that mirrors the live session, attaches the
-// engine tap, prints a URL, and refuses to rebind on a second /web.
-func TestTUI_WebSlashCommand(t *testing.T) {
-	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m = typeStr(m, "/web 127.0.0.1:0") // ephemeral port
-	m = key(m, kEnter)
-	if m.webAddr == "" {
-		t.Fatal("/web should start the server (webAddr set)")
-	}
-	if m.proc.tap == nil {
-		t.Fatal("/web should attach the engine tap for browser mirroring")
-	}
-	if !strings.Contains(m.convoText(), "🌐") {
-		t.Fatalf("expected a URL line, got: %s", m.convoText())
-	}
-	bound := m.webAddr
-	m = typeStr(m, "/web 127.0.0.1:0")
-	m = key(m, kEnter)
-	if m.webAddr != bound {
-		t.Fatal("a second /web must not rebind")
-	}
-	if !strings.Contains(m.convoText(), "already serving") {
-		t.Fatal("second /web should say it's already serving")
-	}
-}
-
 // Typing "/" opens the command palette: it lists/filters commands, tab
 // completes the highlighted one, and /help enumerates them.
 func TestTUI_CommandPalette(t *testing.T) {
@@ -312,15 +286,15 @@ func TestTUI_CommandPalette(t *testing.T) {
 	if len(m.paletteMatches()) != len(slashCommands) {
 		t.Fatalf("bare / should list all %d commands, got %d", len(slashCommands), len(m.paletteMatches()))
 	}
-	// Filter down to /web.
-	m = typeStr(m, "w")
-	if ms := m.paletteMatches(); len(ms) != 1 || ms[0].name != "web" {
-		t.Fatalf("/w should match only web, got %v", ms)
+	// Filter down to /config.
+	m = typeStr(m, "co")
+	if ms := m.paletteMatches(); len(ms) != 1 || ms[0].name != "config" {
+		t.Fatalf("/co should match only config, got %v", ms)
 	}
 	// Tab completes to the highlighted command.
 	m = key(m, kTab)
-	if m.input.Value() != "/web " {
-		t.Fatalf("tab should complete to %q, got %q", "/web ", m.input.Value())
+	if m.input.Value() != "/config " {
+		t.Fatalf("tab should complete to %q, got %q", "/config ", m.input.Value())
 	}
 	// esc dismisses the palette without quitting.
 	m = key(m, kEsc)
@@ -332,8 +306,31 @@ func TestTUI_CommandPalette(t *testing.T) {
 	m = typeStr(m, "/help")
 	m = key(m, kEnter)
 	txt := m.convoText()
-	if !strings.Contains(txt, "commands") || !strings.Contains(txt, "/web") || !strings.Contains(txt, "/quit") {
+	if !strings.Contains(txt, "commands") || !strings.Contains(txt, "/config") || !strings.Contains(txt, "/quit") {
 		t.Fatalf("/help should list the commands, got: %s", txt)
+	}
+}
+
+// --disable-exit: ctrl+c and esc don't quit, but /quit still does.
+func TestTUI_DisableExit(t *testing.T) {
+	kCtrlC := tea.KeyMsg{Type: tea.KeyCtrlC}
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.disableExit = true
+	if _, cmd := m.Update(kCtrlC); cmd != nil {
+		t.Fatal("ctrl+c should be ignored when disableExit")
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc}); cmd != nil {
+		t.Fatal("esc should be ignored when disableExit")
+	}
+	// /quit is a deliberate exit — still works.
+	q := typeStr(m, "/quit")
+	if _, cmd := q.Update(kEnter); cmd == nil {
+		t.Fatal("/quit should exit even with disableExit")
+	}
+	// Control: exit enabled → ctrl+c quits.
+	m2 := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	if _, cmd := m2.Update(kCtrlC); cmd == nil {
+		t.Fatal("ctrl+c should quit when exit is enabled")
 	}
 }
 

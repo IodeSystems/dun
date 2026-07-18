@@ -160,7 +160,7 @@ system-prompt composition.
   above the input — matching commands + descriptions, ↑/↓ select, tab complete,
   enter run, esc dismiss (doesn't quit). Registry (`slashCommands`, populated in
   init to avoid the help↔registry init cycle); `/help` enumerates it; unknown /
-  ambiguous → hint. Commands: `/help`, `/web [addr]`, `/quit`. Adding one = one
+  ambiguous → hint. Commands: `/help`, `/config`, `/quit`. Adding one = one
   registry entry (palette + /help pick it up). Unit-tested (`TestTUI_CommandPalette`).
 - **◻ next in this slice:** TUI history replay on `--continue`; hot-reload
   renderers on file change (today: loaded once at TUI start).
@@ -270,43 +270,33 @@ system-prompt composition.
 - **◻ deferred:** TUI replays loaded entries as history on resume (today the
   model has the context but the TUI starts blank on `--continue`).
 
-### ✅ Slice 4d — web UI (`dun serve`)
-- **A second client of `-p`** — no engine change. `dun -serve --addr` spawns one
-  `dun -p` and bridges it to the browser (`serve.go` + embedded `serve.html`):
-  - `GET /` → the self-contained page.
-  - `GET /events` → **SSE**: replays the event history to a (re)connecting
-    browser, then streams live. Reload = full transcript rebuild.
-  - `POST /input` → validates `{type:user|answer|stop}` and writes it to the
-    engine stdin as one compact JSON line.
-  - `serveHub` fans engine stdout to subscribers; a wedged client is dropped
-    (not allowed to stall the engine) and can reload to replay.
-  - **stdlib only** (net/http SSE + POST) — no websocket/framework dep.
-- **Frontend** (vanilla JS, mirrors `tui.go`'s handleEvent): streamed assistant
-  text; tool call/result as a native `<details>` with input/output `<pre>`
-  panes (browser scroll + Ctrl-F replace the TUI inspector's `/?n`); ask picker
-  as radios / **checkboxes for `multi`** / free-text (multi-select is trivial in
-  HTML) + a custom-answer field; 🔎/🔔 notifications; token counter.
-- **Shared arg-builder:** `pArgs(tuiOpts)` extracted from `startDunProc` so TUI
-  and serve spawn `dun -p` identically.
-- **Cross-host binding:** `--addr` takes any host (`0.0.0.0:8734`, `:8734`).
-  `reachableURLs` prints the LAN-reachable URL(s) — filters loopback + virtual
-  NICs (docker/br-/veth/vpn) so you get the real address, not a wall of 172.x.
-  A non-loopback bind logs a "no auth" warning.
-- **`/web [addr]` (TUI slash command):** starts an EMBEDDED server that mirrors
-  the LIVE TUI session — `proc.tap` fans the engine's raw event stream to the
-  web hub, and browser input writes to the SAME engine stdin (a `lockedWriter`
-  + `dunProc.mu` serialize TUI vs browser writes). So a browser on another host
-  watches and drives exactly what the TUI is doing. Defaults to `0.0.0.0:8734`
-  (the point is remote access); prints the URLs + a no-auth warning into the
-  convo. First `/` slash command in the TUI (unknown → hint).
-- **Verified live (cross-host):** `dun -serve -addr 0.0.0.0:8734` on the dev box
-  (192.168.1.76), opened from a browser on a DIFFERENT host — header showed the
-  `ready` 12-tool list, the token counter (`usage`), and a streamed assistant
-  message, all over SSE. Unit tests: `/web` start + tap + no-rebind, unknown
-  slash, `reachableURLs`/`loopbackOnly`, hub fan-out/replay/input/drop.
-- **◻ deferred:** multi-session (one server = one session); auth/TLS; markdown
-  rendering of assistant replies (raw text now); `/web` history replay to a
-  browser that connects BEFORE `/web` (it sees events from attach-time on).
+### ✅ Slice 4d — web UI = the TUI over xterm.js (`serveterm.go`)
+- **`dun -serve --addr` serves the REAL bubbletea TUI in the browser.** On a
+  `/term/ws` WebSocket connect, `termWS` spawns `dun -tui` in a pseudo-terminal
+  (`creack/pty`) and pipes raw bytes both ways (`gorilla/websocket`). Framing
+  browser→server: `0x00`+bytes = keystrokes → PTY; `0x01`+4 bytes = resize →
+  `pty.Setsize`; server→browser: raw PTY output. Page served at `/` and `/term`;
+  xterm.js/css + fit-addon **vendored** under `cmd/dun/web/` + `//go:embed` (no
+  CDN). Each browser gets its OWN session (use `--continue` to resume).
+- **Resize reflows for real:** xterm fit-addon → resize frame → `pty.Setsize` →
+  PTY SIGWINCH → bubbletea `WindowSizeMsg` → the TUI reflows like a terminal.
+- **Cross-host:** `--addr` takes any host; `reachableURLs` prints the LAN URL(s)
+  (filters loopback + docker/vpn NICs); non-loopback bind logs a no-auth warning.
+  Verified: `/term` opened from a browser on another host, real TUI booted, typed
+  keystrokes reached bubbletea over WS→PTY.
+- **Web sessions disable exit:** `termWS` spawns `dun -tui --disable-exit` so a
+  stray ctrl+c/esc in the browser doesn't kill the session — you leave by closing
+  the tab (drops the socket → process-group kill). See `--disable-exit` below.
+- **Dropped option A** (the web-native HTML view over the `-p` SSE event stream,
+  and the `/web` live-session-mirror slash command): the TUI-over-xterm is the
+  keeper, so `serve.go`/`serve.html`/the hub/`proc.tap`/`lockedWriter` are gone.
+
+### ✅ `--disable-exit`
+- TUI flag: ctrl+c and esc no longer quit (guarded in Update + updateAsking);
+  exit only via the deliberate `/quit`. Status bar shows "/quit to exit". Forced
+  on for browser/web sessions (above). `procArgs` appends it for `-tui`.
+  Unit-tested (`TestTUI_DisableExit`) + driven live via ttydrive (ctrl+c → TUI
+  stays up).
 
 ### ✅ TUI screen dump (SIGUSR1)
 - The alt-screen hides what the TUI shows, so debugging "what is it doing?" is
@@ -315,28 +305,6 @@ system-prompt composition.
   to `$DUN_DUMP_FILE` (default `$TMPDIR/dun-screen.txt`). Repeatable (re-armed;
   appends). NB `dun -tui` re-execs `dun -p`, so signal the PARENT pid.
   `waitForDump` cmd → `dumpMsg` → `writeDump`. Unit-tested (`TestTUI_ScreenDump`).
-
-### ✅ Web option B — xterm.js terminal view (`serveterm.go`)
-- **The REAL TUI in the browser**, alongside option A. `dun serve` now serves
-  both: `/` = web-native HTML (option A), `/term` = the actual bubbletea TUI via
-  xterm.js over a PTY. Cross-linked (each page links the other).
-- On a `/term/ws` WebSocket connect, `termWS` spawns `dun -tui` in a pseudo-
-  terminal (`creack/pty`) and pipes raw bytes both ways (`gorilla/websocket`).
-  Framing browser→server: `0x00`+bytes = keystrokes → PTY; `0x01`+4 bytes =
-  resize → `pty.Setsize`. Server→browser: raw PTY output as binary frames.
-- **Resize reflows for real:** xterm fit-addon → resize frame → `pty.Setsize` →
-  the PTY delivers SIGWINCH → bubbletea gets `WindowSizeMsg` → the TUI relays
-  out. (Option A reflows via CSS; B via the terminal's own winsize — the point
-  of the comparison.)
-- xterm.js/css + fit-addon **vendored** under `cmd/dun/web/` and `//go:embed`ed
-  (self-contained, no CDN). `procArgs(o, mode)` (was `pArgs`) builds `-p` or
-  `-tui` argv. Process-group kill on WS close reaps `dun -tui` + its `dun -p`.
-- **Verified live (cross-host):** opened `/term` from a browser on another host
-  — the real TUI booted (header + 12-tool ready line + magenta focus divider +
-  status bar), and typed keystrokes reached the bubbletea input over WS→PTY.
-- **A vs B:** A = native web (selectable DOM, real checkboxes, mobile-friendlier,
-  reimplements rendering); B = 100% TUI fidelity (inspector, colors, reflow) at
-  the cost of a terminal-in-browser (xterm quirks, PTY dep).
 
 ### ◻ Slice 5 — roles / task DAG (if wanted)
 - Planner/coder/reviewer; multi-Session orchestration (autowork3-style).
