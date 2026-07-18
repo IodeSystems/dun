@@ -306,6 +306,27 @@ system-prompt composition.
   appends). NB `dun -tui` re-execs `dun -p`, so signal the PARENT pid.
   `waitForDump` cmd → `dumpMsg` → `writeDump`. Unit-tested (`TestTUI_ScreenDump`).
 
+### ◻ Design idea — a launcher/daemon (raised, not built)
+- **Problem it solves.** Today the process tree is deep and duplicated: local
+  `dun -tui` → `dun -p` → 3 MCP servers; and `dun -serve` spawns a FULL stack
+  (tui → -p → 3 MCP) PER browser tab. So every web session pays the ~10s MCP
+  boot and runs its own engine — independent, not shared. Self-update also
+  re-execs the whole tree.
+- **Shape.** A thin, rarely-changing **launcher** that owns the MCP servers
+  ONCE and supervises engine/UI subprocesses; clients (local TUI + web xterm)
+  attach to it. Because the launcher is stable, on a source change it
+  hot-RELOADS the inner processes (rebuild + respawn) instead of re-exec'ing
+  everything — a cleaner self-update than today's.
+- **The fork to decide:** (a) *shared conversation* — all clients view/drive ONE
+  session (collaborative; needs concurrent-input/turn semantics), or (b)
+  *supervised independent sessions* — the launcher just spawns/tracks separate
+  sessions and can reload them. (b) is far less semantic risk and still gets the
+  shared-MCP win.
+- **Enables the kick-warning:** only with a launcher does "quitting kicks N
+  attached web sessions" exist — the current fresh-stack-per-tab model has
+  nothing shared to kick, which is why `--disable-exit` (close the tab to leave)
+  was the right fix for now.
+
 ### ◻ Slice 5 — roles / task DAG (if wanted)
 - Planner/coder/reviewer; multi-Session orchestration (autowork3-style).
 
