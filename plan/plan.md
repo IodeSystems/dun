@@ -306,26 +306,89 @@ system-prompt composition.
   appends). NB `dun -tui` re-execs `dun -p`, so signal the PARENT pid.
   `waitForDump` cmd → `dumpMsg` → `writeDump`. Unit-tested (`TestTUI_ScreenDump`).
 
-### ◻ Design idea — a launcher/daemon (raised, not built)
-- **Problem it solves.** Today the process tree is deep and duplicated: local
-  `dun -tui` → `dun -p` → 3 MCP servers; and `dun -serve` spawns a FULL stack
-  (tui → -p → 3 MCP) PER browser tab. So every web session pays the ~10s MCP
-  boot and runs its own engine — independent, not shared. Self-update also
-  re-execs the whole tree.
-- **Shape.** A thin, rarely-changing **launcher** that owns the MCP servers
-  ONCE and supervises engine/UI subprocesses; clients (local TUI + web xterm)
-  attach to it. Because the launcher is stable, on a source change it
-  hot-RELOADS the inner processes (rebuild + respawn) instead of re-exec'ing
-  everything — a cleaner self-update than today's.
-- **The fork to decide:** (a) *shared conversation* — all clients view/drive ONE
-  session (collaborative; needs concurrent-input/turn semantics), or (b)
-  *supervised independent sessions* — the launcher just spawns/tracks separate
-  sessions and can reload them. (b) is far less semantic risk and still gets the
-  shared-MCP win.
-- **Enables the kick-warning:** only with a launcher does "quitting kicks N
-  attached web sessions" exist — the current fresh-stack-per-tab model has
-  nothing shared to kick, which is why `--disable-exit` (close the tab to leave)
-  was the right fix for now.
+### ◻ Slice L — launcher / daemon (SPEC; supervised independent sessions)
+
+**Goal.** A thin, long-lived launcher that (1) owns the MCP servers ONCE per
+workspace so sessions don't each pay the ~10s boot, (2) supervises independent
+session engines it can list/kill/reload, and (3) knows what's attached so it can
+warn before a shutdown kicks web sessions. Each session is its OWN conversation
+(option b — no shared-conversation/turn semantics).
+
+**Non-goals (v1):** shared conversation / collaborative drive; multiple clients
+on one session (v1 is one client per session); cross-host control (the launcher
+is local; remote reach stays via `dun -serve`, itself a launcher client); auth
+(local unix socket, 0700).
+
+**Process model.**
+```
+dun -d (launcher, thin, stable)            ← owns nothing that changes often
+├─ mcpmgr + 3 MCP servers  (pool keyed by WORKSPACE — poly-lsp/raglit are
+│                            workspace-bound, so share within a ws, not across)
+├─ session S1 = `dun -p` subprocess (reloadable)  ─ tool calls RPC'd to launcher
+├─ session S2 = `dun -p` subprocess               ─ …dispatched thread-scoped
+└─ control socket  $DUN_HOME/launcher.sock (unix, 0700)
+clients: `dun -tui` and `dun -serve`/xterm → connect, spawn/attach a session,
+         proxy the session's -p event stream ↔ their UI.
+```
+Sessions are SUBPROCESSES (not goroutines) so the launcher stays thin and the
+frequently-changing engine/tooling can be hot-reloaded without bouncing MCP.
+
+**Two channels over the socket:**
+1. *control/RPC* — line-JSON: `spawn{workspace,model,…}→{id}`, `list→[{id,ws,
+   kind,pid,attached,startedAt}]`, `attach{id}`, `kill{id}`, `reload`,
+   `shutdown{force?}→{attached,web}` (refuses if attached>0 unless force).
+2. *tool dispatch* — a session's `ToolDispatcher` RPCs `{sessionID,toolCall}` to
+   the launcher; launcher runs `mcpmgr.Call(threadID=sessionID, tc)` against the
+   workspace's shared servers (thread-scoping already exists in mcpmgr) and
+   returns the result. Latency: one local-socket hop (µs) on top of the MCP
+   call — negligible.
+The client's session I/O (the `-p` event stream + user/answer/stop input) is the
+existing protocol, proxied by the launcher between the client socket and the
+session subprocess's stdio.
+
+**Phases (build + stop-anywhere):**
+- **L1 — supervisor skeleton (no MCP sharing yet).** `dun -d` + control socket +
+  session registry; `dun -tui`/`-serve` auto-start the launcher and ask it to
+  `spawn`/`attach`; sessions are still today's full stacks. Delivers: one entry
+  point, `dun --sessions`/`--kill` via the launcher, groundwork. (Modest on its
+  own — no boot-time win yet.)
+- **L2 — shared MCP (the payoff).** Launcher owns the per-workspace MCP pool;
+  `dun -p` gains a "dispatch to launcher" ToolDispatcher instead of spawning its
+  own mcpmgr. Session start drops ~10s → ~instant on a warm workspace. This is
+  the reason to do the launcher.
+- **L3 — hot reload.** `reload` (or a source-change watch) rebuilds `dun` and
+  respawns session engines / signals UIs to reconnect, launcher + MCP staying up.
+  Supersedes today's whole-tree self-update for launcher-managed sessions; the
+  launcher itself updates only on explicit request (rare — its "surface" is
+  stable). Standalone `dun -tui` (no launcher) keeps the current self-update.
+- **L4 — kick-warning + graceful shutdown.** `dun -d shutdown` / Ctrl-C on the
+  launcher counts attached sessions (esp. web) and refuses without `--force`,
+  printing "N attached (M web)". Graceful: stop sessions, then MCP servers.
+
+**Files (new):** `launcher.go` (daemon: registry, MCP pool, supervise),
+`launchproto.go` (control + dispatch JSON), `launcherclient.go` (auto-start +
+spawn/attach + proxy). `mcp.go` grows a "dispatch to launcher" ToolDispatcher
+(L2). `dun -p` gains a flag to source tools from the launcher, not local mcpmgr.
+
+**Decisions the USER owns (flagged before building):**
+- **Auto-start vs explicit daemon:** recommend LAZY auto-start on first
+  `dun -tui`/`-serve` (+ `dun -d` to pre-warm / keep resident). Confirm.
+- **MCP pool lifetime:** keep a workspace's servers alive after its last session
+  exits (warm for the next), with an idle TTL to reclaim — or stop immediately?
+  Recommend idle-TTL (default ~10m). Confirm.
+- **Session↔client cardinality:** v1 = 1:1 (attach only if free). Multi-viewer
+  (one driver + N watchers) is a later add — OK to defer?
+
+**Risks / untested:** the tool-dispatch RPC must preserve agentkit's error
+contract (model-facing errors go INTO the result string; a real Go error aborts
+the Turn) across the socket — the launcher must distinguish and re-encode.
+mcpmgr thread-scoping under concurrent sessions on one server needs a load check.
+Socket lifecycle (stale sock after a crash → detect + reclaim). Windows has no
+unix-socket-by-default path (dun targets Linux, so fine).
+
+**Optional extensions (out of scope):** cross-host launcher control; per-session
+resource caps; a `dun -d status` TUI; sharing raglit's index across sessions
+(already per-workspace, so mostly free once the pool is per-workspace).
 
 ### ◻ Slice 5 — roles / task DAG (if wanted)
 - Planner/coder/reviewer; multi-Session orchestration (autowork3-style).
