@@ -308,6 +308,18 @@ system-prompt composition.
 
 ### ◻ Slice L — launcher / daemon (SPEC; supervised independent sessions)
 
+> ⚠ **BLOCKER found while building L2 (needs a call).** dun gives each session
+> its OWN git worktree (the isolation model), and every MCP server is bound to
+> that worktree: `poly-lsp-mcp --root <worktree>`, `mcpshell --files-dir
+> <worktree>` (+ per-session `export` eval state), raglit over a per-session temp
+> home. So two sessions never share an effective workspace → **there is nothing
+> to share**, and L2's "boot once per workspace" win does NOT apply to the
+> default (worktree) mode. It only helps `--no-worktree` sessions on one dir
+> (and even then mcpshell needs mcpmgr thread-scoping for its per-session eval
+> state). Options: (1) scope L2 sharing to `--no-worktree` only; (2) build L1
+> (supervisor/registry/kick-warning — worktree-agnostic) now and re-scope L2;
+> (3) drop L2. See the exchange for the chosen path.
+
 **Goal.** A thin, long-lived launcher that (1) owns the MCP servers ONCE per
 workspace so sessions don't each pay the ~10s boot, (2) supervises independent
 session engines it can list/kill/reload, and (3) knows what's attached so it can
