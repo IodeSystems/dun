@@ -27,6 +27,11 @@ type Server struct {
 	ID      string
 	Command string
 	Args    []string
+	// Env entries ("KEY=value") for the spawned server — a per-machine DSN or
+	// endpoint that cannot be baked into a committed config.
+	Env []string
+	// Timeout in seconds for tool discovery; 0 uses dun's default.
+	Timeout int
 }
 
 // DefaultServers points the three tool servers at a workspace directory (later a
@@ -43,16 +48,21 @@ func DefaultServers(workspace, raglitHome string) []Server {
 type Config struct {
 	Workspace  string
 	RaglitHome string
-	Servers    []Server        // nil → DefaultServers(Workspace, RaglitHome)
-	Client     agent.LLMRunner // the LLM (e.g. *llm.Client)
-	System     string          // nil → defaultSystem
-	Exec       ExecBackend     // nil → no exec tool; else adds the built-in exec tool
-	Ask        AskFunc         // nil → no ask_user tool; else adds the human-in-the-loop tool
-	Worktree   *Worktree       // the session worktree (for open_pr)
-	EnablePR   bool            // add the open_pr tool (opt-in: pushing + PR is outward-facing)
-	SessionFile string         // persist the conversation here (resumable); "" = in-memory only
-	OnToken    func(string)
-	OnToolCall func(tool string, args map[string]any, result string)
+
+	Servers []Server // nil → DefaultServers(Workspace, RaglitHome)
+	// ConfigDir is where dun.json / dun.local.json are looked for. Empty →
+	// Workspace. Separated because the workspace may be an isolated worktree
+	// while the config lives with the developer's checkout.
+	ConfigDir   string
+	Client      agent.LLMRunner // the LLM (e.g. *llm.Client)
+	System      string          // nil → defaultSystem
+	Exec        ExecBackend     // nil → no exec tool; else adds the built-in exec tool
+	Ask         AskFunc         // nil → no ask_user tool; else adds the human-in-the-loop tool
+	Worktree    *Worktree       // the session worktree (for open_pr)
+	EnablePR    bool            // add the open_pr tool (opt-in: pushing + PR is outward-facing)
+	SessionFile string          // persist the conversation here (resumable); "" = in-memory only
+	OnToken     func(string)
+	OnToolCall  func(tool string, args map[string]any, result string)
 	// OnNotify fires when a plain notification (KindNotification) is injected
 	// into the conversation (e.g. a background job's completion).
 	OnNotify func(text string)
@@ -126,14 +136,30 @@ func (h *Harness) startBackground(backend ExecBackend, command string) int {
 
 // Start spawns the servers, waits for tool discovery, and builds the Session.
 func Start(ctx context.Context, cfg Config) (*Harness, error) {
+	// Explicit Go-level Servers win outright — a caller that constructed them
+	// meant it. Otherwise resolve the layered config files, which fall back to
+	// the built-in trio when neither exists.
 	servers := cfg.Servers
 	if servers == nil {
-		servers = DefaultServers(cfg.Workspace, cfg.RaglitHome)
+		dir := cfg.ConfigDir
+		if dir == "" {
+			dir = cfg.Workspace
+		}
+		var err error
+		servers, err = LoadServers(dir, cfg.Workspace, cfg.RaglitHome)
+		if err != nil {
+			return nil, err
+		}
 	}
 	mgr := mcpmgr.NewManager()
 	for _, s := range servers {
+		timeout := s.Timeout
+		if timeout == 0 {
+			timeout = 90
+		}
 		if err := mgr.StartServer(ctx, mcpmgr.MCPConfig{
-			ID: s.ID, Name: s.ID, Command: s.Command, Args: s.Args, Timeout: 90,
+			ID: s.ID, Name: s.ID, Command: s.Command, Args: s.Args,
+			Env: s.Env, Timeout: timeout,
 		}); err != nil {
 			mgr.Close()
 			return nil, fmt.Errorf("dun: start %s: %w", s.ID, err)

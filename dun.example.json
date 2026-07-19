@@ -1,0 +1,24 @@
+{
+  "//": "Copy to dun.json (committed, describes the PROJECT) or dun.local.json (gitignored, describes THIS MACHINE). Both are optional; with neither, dun spawns its built-in trio: code=poly-lsp-mcp, shell=mcpshell, docs=raglit.",
+
+  "servers": [
+    {
+      "//": "Override a built-in by reusing its id. Fields you omit are INHERITED, so pointing at a different binary does not mean restating its args.",
+      "id": "code",
+      "command": "/opt/bin/poly-lsp-mcp"
+    },
+    {
+      "//": "Add a project-specific server. {{workspace}} and {{raglit_home}} are substituted at spawn — the same token llm-bench toolsets use.",
+      "id": "db",
+      "command": "db-mcp",
+      "args": ["stdio", "--root", "{{workspace}}"],
+      "env": ["DSN=postgres://localhost/dev"],
+      "timeout": 120
+    },
+    {
+      "//": "Drop a built-in you do not want. One line, rather than re-listing the servers you are keeping.",
+      "id": "docs",
+      "disabled": true
+    }
+  ]
+}

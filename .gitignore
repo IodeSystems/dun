@@ -2,3 +2,4 @@
 /cmd/dun/dun
 .dun/
 *.sqlite
+dun.local.json

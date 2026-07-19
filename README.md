@@ -12,6 +12,28 @@ own tools into one agent working inside an isolated workspace:
 - **[raglit](https://github.com/iodesystems/raglit)** — search your docs/code +
   proactive suggestions.
 
+## MCP servers
+
+dun spawns three tool servers by default — `code` (poly-lsp-mcp), `shell`
+(mcpshell) and `docs` (raglit) — expected on `PATH`. Two optional files
+override that, layered:
+
+| file | committed? | describes |
+|---|---|---|
+| `dun.json` | yes | the PROJECT — "this repo needs a db tool" |
+| `dun.local.json` | **no**, gitignore it | THIS MACHINE — binary paths, DSNs, anything secret |
+
+Precedence extends what dun already documents for LLM settings:
+
+    built-in defaults  <  dun.json  <  dun.local.json  <  Servers set in Go
+
+Servers merge **by id**, and omitted fields inherit — overriding one binary path
+does not mean restating its args, and adding a fourth server does not mean
+re-listing the first three. Set `"disabled": true` to drop one. `{{workspace}}`
+and `{{raglit_home}}` are substituted at spawn.
+
+See `dun.example.json`.
+
 ## Status
 
 **Slice 1 (headless composition) works.** dun spawns the three MCP tool servers,
