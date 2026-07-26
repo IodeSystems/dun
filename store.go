@@ -206,16 +206,38 @@ func (s *sessionStore) publish(e agent.Entry) {
 	s.flushLocked()
 }
 
+// pending reports how many inbox arrivals have not been claimed by a turn.
+// A driver uses this to avoid running a turn with nothing new to say: an
+// empty turn appends a second assistant message after the previous one, and
+// a provider that rejects consecutive trailing assistant messages then fails
+// the NEXT request ("cannot have 2 or more assistant messages at the end").
+func (s *sessionStore) pending() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.unclaimed
+}
+
 // publishNotification injects a KindNotification into the inbox (pending) and
 // fires onNotify. Used by proactive RAG + background-job completions.
 func (s *sessionStore) publishNotification(e agent.Entry) {
+	s.publishNotificationSilent(e)
+	if cb := s.notifyCallback(); cb != nil {
+		cb(e.Content)
+	}
+}
+
+// publishNotificationSilent is publishNotification without the onNotify ping,
+// for a caller that already announced the note when it was buffered.
+func (s *sessionStore) publishNotificationSilent(e agent.Entry) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.entries = append(s.entries, e)
 	s.unclaimed++
 	s.flushLocked()
-	cb := s.onNotify
-	s.mu.Unlock()
-	if cb != nil {
-		cb(e.Content)
-	}
+}
+
+func (s *sessionStore) notifyCallback() func(string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.onNotify
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 )
 
@@ -83,17 +84,81 @@ type Harness struct {
 	bgMu    sync.Mutex
 	bgSeq   int
 	bgRun   int // background jobs still running
+	noteMu  sync.Mutex
+	notes   []string // notifications not yet delivered to the model
 }
 
 // Resumed reports how many entries were restored from an existing session file.
 func (h *Harness) Resumed() int { return h.store.Loaded() }
 
-// Notify injects a proactive notification into the conversation inbox (claimed
-// on the next turn) and fires OnNotify.
+// Notify hands the model a proactive notification (a finished background job).
+//
+// The note is buffered rather than published straight into the inbox, because
+// WHEN it reaches the model decides how much it costs:
+//
+//   - If a tool call is in flight, the note rides back inside that tool's
+//     result (see liftNotes). The model is already waiting on that result, so
+//     the news costs no extra turn and cannot land as a stray assistant message.
+//   - Otherwise flushNotes publishes whatever is left when the turn ends, as
+//     one inbox arrival per note, and wakes the driver ONCE for all of them.
+//
+// OnNotify still fires immediately so a UI shows the job finishing in real time.
 func (h *Harness) Notify(text string) {
-	h.store.publishNotification(agent.Entry{
-		ID: uuid.New().String(), Kind: agent.KindNotification, Content: text, CreatedAt: time.Now().UnixNano(),
-	})
+	h.noteMu.Lock()
+	h.notes = append(h.notes, text)
+	h.noteMu.Unlock()
+	if cb := h.store.notifyCallback(); cb != nil {
+		cb(text)
+	}
+}
+
+// liftNotes drains buffered notifications into a tool result, so a job that
+// finished mid-turn is reported inside the result the model is already reading.
+// Returns result unchanged when nothing is buffered.
+func (h *Harness) liftNotes(result string) string {
+	h.noteMu.Lock()
+	notes := h.notes
+	h.notes = nil
+	h.noteMu.Unlock()
+	if len(notes) == 0 {
+		return result
+	}
+	var b strings.Builder
+	b.WriteString(result)
+	for _, n := range notes {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("[background] ")
+		b.WriteString(n)
+	}
+	return b.String()
+}
+
+// flushNotes publishes any notification the turn did not pick up, as real inbox
+// arrivals. Returns how many were flushed so the caller can decide whether a
+// follow-up turn is worth running.
+func (h *Harness) flushNotes() int {
+	h.noteMu.Lock()
+	notes := h.notes
+	h.notes = nil
+	h.noteMu.Unlock()
+	for _, n := range notes {
+		h.store.publishNotificationSilent(agent.Entry{
+			ID: uuid.New().String(), Kind: agent.KindNotification,
+			Content: n, CreatedAt: time.Now().UnixNano(),
+		})
+	}
+	return len(notes)
+}
+
+// Pending reports whether a Continue turn has anything new to process —
+// unclaimed inbox arrivals or buffered notifications.
+func (h *Harness) Pending() int {
+	h.noteMu.Lock()
+	buffered := len(h.notes)
+	h.noteMu.Unlock()
+	return h.store.pending() + buffered
 }
 
 // Wake fires when a background job finishes, so the driver runs a Continue turn.
@@ -110,6 +175,15 @@ func (h *Harness) BackgroundRunning() int {
 // notifications (e.g. a background job's completion). This is the converge
 // point: the notification (+ any queued messages) coalesce into one turn.
 func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
+	// Publish anything a tool result did not already carry, so the turn below
+	// has it — and so several jobs finishing at once become ONE turn.
+	h.flushNotes()
+	if h.store.pending() == 0 {
+		// Nothing new to react to. Running the model anyway appends an assistant
+		// message directly after the previous one, which providers reject on the
+		// following request. A duplicate wake is a no-op, not a turn.
+		return agent.TurnResult{}, nil
+	}
 	return h.Session.Turn(ctx)
 }
 
@@ -199,6 +273,11 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		toolDefs = append(toolDefs, askToolDef())
 		dispatch = withAsk(dispatch, cfg.Ask, cfg.OnToolCall)
 	}
+	// Outermost wrapper: whatever the tool returns, carry any notification that
+	// arrived while it was running back inside the result. A background job that
+	// finishes mid-turn is then reported in the result the model is already
+	// reading, instead of scheduling a turn of its own.
+	dispatch = withLiftedNotes(dispatch, h)
 	if cfg.EnablePR && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
 		toolDefs = append(toolDefs, prToolDef())
 		dispatch = withPR(dispatch, cfg.Worktree, cfg.OnToolCall)
@@ -300,4 +379,18 @@ func maxTurns() int {
 		}
 	}
 	return 40
+}
+
+// withLiftedNotes appends any notification buffered during a tool call to that
+// tool's result. The model is already reading the result, so a background job
+// that finished mid-turn is reported with no extra turn — and, critically, no
+// assistant message appended after another assistant message.
+func withLiftedNotes(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
+	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		out, err := inner(ctx, tc)
+		if err != nil {
+			return out, err
+		}
+		return h.liftNotes(out), nil
+	}
 }
