@@ -11,7 +11,9 @@ package dun
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -210,7 +212,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Tools:            toolDefs,
 		Dispatch:         dispatch,
 		OnAssistantToken: cfg.OnToken,
-		MaxTurns:         40,
+		MaxTurns:         maxTurns(),
 	}
 	// Proactive RAG: watch the conversation and inject relevant-doc pings before
 	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
@@ -286,3 +288,16 @@ You have three tool families:
 Relevant docs may be pushed to you as [docs] notes — use them.
 
 Work step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed.`
+
+// maxTurns is the cap on agent loop iterations. 40 suits an interactive
+// session, where the user is present and can nudge; a long autonomous task on a
+// large repo can legitimately need far more, since paging through unfamiliar
+// files costs turns before any edit happens. DUN_MAX_TURNS raises it.
+func maxTurns() int {
+	if v := os.Getenv("DUN_MAX_TURNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 40
+}
