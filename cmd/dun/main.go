@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -315,16 +316,38 @@ func runHuman(ctx context.Context, h *dun.Harness, task string) {
 // the inputStream's goroutine (so an `ask` inside a turn can consume `answer`
 // events while this loop is blocked in a turn); this loop just handles `user`
 // messages.
+//
+// Two ways the input ends, and they mean different things:
+//
+//   - EOF (a one-shot `dun -p 'task'` with nothing on stdin): the caller has
+//     nothing more to say, so DRAIN — keep running turns until the background
+//     jobs the agent started have reported in. Returning early would exit with
+//     those jobs still in flight and their notifications never delivered.
+//   - An explicit stop/quit event: the caller asked to be let go NOW. Return
+//     without waiting on anything.
 func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string) {
 	em.emit(event{"type": "ready", "tools": h.ToolNames()})
 	if firstTask != "" {
 		turn(ctx, h, em, firstTask)
 	}
+	users := in.users
 	for {
+		if users == nil { // input is done; finish the background work, then leave
+			if !drainStep(ctx, h, em) {
+				return
+			}
+			continue
+		}
 		select {
-		case content, ok := <-in.users:
+		case content, ok := <-users:
 			if !ok {
-				return // stdin closed / stop
+				if in.stopped() {
+					return // explicit stop: don't wait for background jobs
+				}
+				// A closed channel is always ready in select, so stop selecting
+				// on it and hand the loop to drainStep.
+				users = nil
+				continue
 			}
 			turn(ctx, h, em, content)
 		case <-h.Wake():
@@ -334,6 +357,36 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			return
 		}
 	}
+}
+
+// drainStep advances the post-input drain by one turn, returning false once
+// there is nothing left to wait for.
+//
+// It only ever BLOCKS while a job is actually in flight. With nothing running it
+// takes a queued wake (or a leftover notification) and finishes, so a pending
+// entry that arrived without a wake — proactive RAG publishes straight to the
+// inbox — can't strand the loop until --timeout.
+func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
+	if h.BackgroundRunning() > 0 {
+		select {
+		case <-h.Wake():
+		case <-ctx.Done():
+			return false
+		}
+		continueTurn(ctx, h, em)
+		return true
+	}
+	select {
+	case <-h.Wake(): // a completion that raced the BackgroundRunning check
+		continueTurn(ctx, h, em)
+		return true
+	default:
+	}
+	if h.Pending() > 0 {
+		continueTurn(ctx, h, em)
+		return true
+	}
+	return false
 }
 
 // continueTurn runs a turn with no new user message (to process a background
@@ -355,15 +408,36 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) {
 // inputStream reads JSON events from stdin in a goroutine and routes them:
 // user/stop → users, answer → answers. Decoupling the scanner from the turn loop
 // lets an ask_user (blocked mid-turn) receive an answer.
+//
+// quit distinguishes the two ways users closes: an explicit stop/quit event
+// closes it too, plain EOF does not. runProgrammatic drains background jobs on
+// EOF but not on an explicit stop.
 type inputStream struct {
 	users   chan string
 	answers chan string
+	quit    chan struct{}
 }
 
-func newInputStream() *inputStream {
-	s := &inputStream{users: make(chan string), answers: make(chan string)}
+// stopped reports whether users closed because of an explicit stop/quit event
+// rather than EOF. Safe to call only after users is closed: the scanner closes
+// quit first, so the happens-before is via that close.
+func (s *inputStream) stopped() bool {
+	select {
+	case <-s.quit:
+		return true
+	default:
+		return false
+	}
+}
+
+func newInputStream() *inputStream { return newInputStreamFrom(os.Stdin) }
+
+// newInputStreamFrom is newInputStream over an arbitrary reader, so a test can
+// drive the event parsing and the EOF-vs-stop distinction without a real stdin.
+func newInputStreamFrom(r io.Reader) *inputStream {
+	s := &inputStream{users: make(chan string), answers: make(chan string), quit: make(chan struct{})}
 	go func() {
-		sc := bufio.NewScanner(os.Stdin)
+		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 		for sc.Scan() {
 			line := strings.TrimSpace(sc.Text())
@@ -384,11 +458,12 @@ func newInputStream() *inputStream {
 			case "answer":
 				s.answers <- ev.Value
 			case "stop", "quit":
+				close(s.quit) // before users, so stopped() is visible to the reader
 				close(s.users)
 				return
 			}
 		}
-		close(s.users)
+		close(s.users) // EOF: runProgrammatic drains background jobs before exiting
 	}()
 	return s
 }
