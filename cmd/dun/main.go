@@ -194,9 +194,9 @@ func main() {
 	var em *emitter
 	var in *inputStream
 	cfg := dun.Config{
-		Workspace:  effWS,
-		RaglitHome: raglitHome,
-		Client:     llm.NewClient(*url, effKey, *model),
+		Workspace:   effWS,
+		RaglitHome:  raglitHome,
+		Client:      llm.NewClient(*url, effKey, *model),
 		Exec:        backend,
 		Worktree:    wt,
 		EnablePR:    *pr,
@@ -400,7 +400,9 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) {
 	if strings.TrimSpace(res.Reply) != "" {
 		em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
 	}
-	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active})
+	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
+		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
+		"generated": res.Usage.Generated, "turns": res.Usage.Turns})
 	em.emit(event{"type": "done"})
 	emitSuggestions(ctx, h, em)
 }
@@ -516,7 +518,9 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) {
 		return
 	}
 	em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
-	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active})
+	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
+		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
+		"generated": res.Usage.Generated, "turns": res.Usage.Turns})
 	em.emit(event{"type": "done"})
 	emitSuggestions(ctx, h, em)
 }
