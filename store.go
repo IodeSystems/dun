@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,10 +65,52 @@ func openSessionStore(path string) (*sessionStore, error) {
 					e.Content = "[dun: session blob missing]"
 				}
 			}
-			s.entries = append(s.entries, e)
+			s.entries = append(s.entries, sanitizeOnLoad(e))
 		}
 	}
 	return s, nil
+}
+
+// sanitizeOnLoad rescues a session poisoned by a malformed tool call.
+//
+// A KindToolCall whose Content is not valid JSON makes the session
+// UNRESUMABLE: providers deserialize historical tool_calls to render them (the
+// Qwen chat template iterates `arguments` as a mapping to emit <parameter=…>
+// tags), so every request carrying that entry is rejected at parse time, before
+// the model is ever reached. Measured on a real session: 19,310 chars of
+// unterminated JSON, and from then on every request returned the same 500 in
+// 50ms — immune to compacting the context 51x, because the poison rides in the
+// history rather than the size.
+//
+// The content is NOT discarded. It is the model's own partial work and it is
+// still intact on disk, so it is re-kinded as a notification: rendered as TEXT,
+// never as arguments, so it cannot be deserialized and cannot poison anything —
+// while the model can still read how far it got and continue from there.
+//
+// Sessions written before the append-time check (harness) are the reason this
+// exists; new ones never store such an entry in the first place.
+func sanitizeOnLoad(e agent.Entry) agent.Entry {
+	if e.Kind != agent.KindToolCall || json.Valid([]byte(e.Content)) {
+		return e
+	}
+	name := e.ToolName
+	if name == "" {
+		name = "a tool"
+	}
+	return agent.Entry{
+		ID:   e.ID,
+		Kind: agent.KindNotification,
+		Content: fmt.Sprintf(
+			"[recovered] An earlier call to %s never completed — its arguments were cut off "+
+				"and are not valid JSON, so the call was never executed (%d characters were "+
+				"produced). Continue from where it stopped, with SMALLER writes.\n\n"+
+				"Tail of what it had written:\n```\n%s\n```",
+			name, len(e.Content), salvageTail(e.Content)),
+		// ToolCallID/ToolName deliberately cleared: with them set this would
+		// still correlate as half of a tool exchange whose result never exists.
+		Origin:    e.Origin,
+		CreatedAt: e.CreatedAt,
+	}
 }
 
 // Loaded reports how many entries were restored from an existing session.
@@ -240,4 +283,35 @@ func (s *sessionStore) notifyCallback() func(string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.onNotify
+}
+
+// salvageTailChars bounds how much of a cut-off tool call is re-injected. The
+// whole entry rides in EVERY subsequent prompt, so preserving all of it would
+// re-spend the context that the oversized write already cost — measured: a
+// 19,310-char argument became a 19,545-char message on every turn.
+//
+// The TAIL is what matters: the model wrote the beginning and can see it in its
+// own file; what it cannot infer is where it stopped.
+const salvageTailChars = 1500
+
+// salvageTail unwraps the argument envelope and returns the end of the payload.
+//
+// Raw arguments are a JSON object with escaped newlines
+// ({"node":"…","newText":"package com…\n\n…"}), which is the wrong shape to hand
+// back: the model would have to unescape its own file before continuing it.
+// When the envelope is a truncated object with a string field, the field's text
+// is unescaped and returned; otherwise the raw tail is, which is still better
+// than nothing.
+func salvageTail(args string) string {
+	payload := args
+	// The cut-off value is the LAST string field that never closed; take
+	// everything after its opening quote.
+	if i := strings.LastIndex(args, `":"`); i >= 0 {
+		payload = args[i+3:]
+	}
+	payload = strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\"`, `"`, `\\`, `\`).Replace(payload)
+	if len(payload) > salvageTailChars {
+		payload = "…" + payload[len(payload)-salvageTailChars:]
+	}
+	return payload
 }

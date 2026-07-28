@@ -3,7 +3,9 @@ package dun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -64,7 +66,19 @@ func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool
 		var args map[string]any
 		if s := strings.TrimSpace(tc.Function.Arguments); s != "" && s != "null" {
 			if err := json.Unmarshal([]byte(s), &args); err != nil {
-				return fmt.Sprintf("ERROR: bad arguments: %v", err), nil
+				// Name TRUNCATION explicitly when that is what it is. "bad
+				// arguments: unexpected end of JSON input" reads like the model
+				// wrote malformed JSON; in practice the far more common cause is
+				// the provider cutting the stream mid-write, and the model's
+				// correct response is different — retry SMALLER, not "fix your
+				// syntax". A valid prefix that simply ends is the signature.
+				if isTruncatedJSON(s) {
+					return fmt.Sprintf("ERROR: malformed json — truncation detected: the arguments "+
+						"were cut off after %d characters and this call was NOT executed. "+
+						"Retry with a smaller call (split large writes into successive edits).",
+						len(s)), nil
+				}
+				return fmt.Sprintf("ERROR: malformed json: %v", err), nil
 			}
 		}
 		res, err := mgr.CallTool(ctx, serverID, tc.Function.Name, args)
@@ -76,4 +90,27 @@ func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool
 		}
 		return res, nil
 	}
+}
+
+// isTruncatedJSON reports whether s looks CUT OFF rather than mis-written: a
+// valid prefix that simply ends. json.Decoder distinguishes the two — a
+// truncated document yields io.ErrUnexpectedEOF, while genuinely bad syntax
+// (a stray comma, an unquoted key) yields a SyntaxError at the offending byte.
+//
+// The distinction changes the advice given to the model, so it is worth making
+// rather than reporting every parse failure identically.
+func isTruncatedJSON(s string) bool {
+	var v json.RawMessage
+	err := json.NewDecoder(strings.NewReader(s)).Decode(&v)
+	if err == nil {
+		return false // a complete value; whatever failed, it was not truncation
+	}
+	// Mis-written JSON fails AT a byte with a SyntaxError. Truncated JSON runs
+	// out of input: mid-string gives ErrUnexpectedEOF, and ending on a clean
+	// token boundary ({"a": or {) gives EOF. Both mean "cut off".
+	var se *json.SyntaxError
+	if errors.As(err, &se) {
+		return false
+	}
+	return errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF)
 }

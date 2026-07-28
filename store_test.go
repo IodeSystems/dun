@@ -81,3 +81,44 @@ func TestSessionStore_CompactPersists(t *testing.T) {
 		t.Fatalf("compaction not persisted: %+v", got)
 	}
 }
+
+// History maps loaded store entries to replayable items in chronological order:
+// user/assistant/notification pass through, a tool_call decodes its JSON args,
+// compaction markers and empty assistant turns are dropped.
+func TestHarness_History(t *testing.T) {
+	ctx := context.Background()
+	s, err := openSessionStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []agent.Entry{
+		{ID: "1", Kind: agent.KindUser, Content: "do it", CreatedAt: 1},
+		{ID: "2", Kind: agent.KindAssistant, Content: "", CreatedAt: 2},          // empty → dropped
+		{ID: "3", Kind: agent.KindAssistant, Content: "working", CreatedAt: 3},
+		{ID: "4", Kind: agent.KindToolCall, ToolName: "node_read", ToolCallID: "c1", Content: `{"sel":"F"}`, CreatedAt: 4},
+		{ID: "5", Kind: agent.KindToolResult, ToolName: "node_read", ToolCallID: "c1", Content: "func F(){}", CreatedAt: 5},
+		{ID: "6", Kind: agent.KindCompaction, Content: "summary", CreatedAt: 6},  // marker → dropped
+		{ID: "7", Kind: agent.KindNotification, Content: "job done", CreatedAt: 7},
+	} {
+		if err := s.Append(ctx, "dun", e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := &Harness{store: s}
+	items := h.History()
+
+	var kinds []string
+	for _, it := range items {
+		kinds = append(kinds, it.Kind)
+	}
+	want := "user assistant tool_call tool_result notification"
+	if got := strings.Join(kinds, " "); got != want {
+		t.Fatalf("history kinds = %q, want %q", got, want)
+	}
+	if items[2].Args["sel"] != "F" {
+		t.Fatalf("tool_call args not decoded: %v", items[2].Args)
+	}
+	if items[2].CallID != "c1" || items[3].CallID != "c1" {
+		t.Fatal("tool_call and result should share the call id for folding")
+	}
+}
