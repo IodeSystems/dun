@@ -11,6 +11,7 @@ package dun
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -283,6 +284,23 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		dispatch = withPR(dispatch, cfg.Worktree, cfg.OnToolCall)
 		sys += "\n\nWhen the task is complete and verified (build/tests pass), call open_pr with a concise title and a summary body to submit your work as a pull request."
 	}
+	// Context budget. Without one the Shaper never folds history: the
+	// conversation grows until the SERVER's window fills, and generation is cut
+	// off mid-token. Observed on a long coding run — llama.cpp reported
+	// `n_tokens = 180223, truncated = 1` against an n_ctx of 180224, and the
+	// truncation landed inside a tool call's JSON arguments, so the call came
+	// back unparseable as a 500.
+	//
+	// The window is DISCOVERED rather than assumed: corrallm's /v1/models does
+	// not advertise a context size, and the number that matters is the one the
+	// server actually accepts. Failure to discover leaves the budget unset,
+	// which is the old behaviour — degraded, not broken.
+	shaper := &agent.Shaper{
+		Store:    store,
+		Runner:   cfg.Client,
+		Estimate: nil, // default estimator
+		Policy:   agent.ShaperPolicy{BudgetTokens: discoverBudget(ctx, cfg.Client)},
+	}
 	h.Session = &agent.Session{
 		SessionID:        "dun",
 		System:           sys,
@@ -292,6 +310,11 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Dispatch:         dispatch,
 		OnAssistantToken: cfg.OnToken,
 		MaxTurns:         maxTurns(),
+		Build:            shaper.Build,
+		// On-demand compaction for truncation recovery: the Shaper's own
+		// budget-driven fold happens while BUILDING a prompt, which is too late
+		// once the window filled mid-generation.
+		Compactor: shaper,
 	}
 	// Proactive RAG: watch the conversation and inject relevant-doc pings before
 	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
@@ -393,4 +416,35 @@ func withLiftedNotes(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatche
 		}
 		return h.liftNotes(out), nil
 	}
+}
+
+// contextSafetyFraction is the share of the model's real window dun will fill
+// before the Shaper folds history. The remainder is runway for the reply plus
+// whatever the estimator undercounts — the failure this guards against is a
+// generation cut off mid-write, so the margin has to cover a large tool-call
+// argument, not just a sentence.
+const contextSafetyFraction = 0.75
+
+// discoverBudget measures the server's usable context window and returns the
+// token budget to shape to. Returns 0 (no budget → no compaction, the previous
+// behaviour) when discovery fails, since guessing a window is worse than not
+// shaping: too small wastes context on needless compaction, too large
+// reintroduces the very truncation this prevents.
+func discoverBudget(ctx context.Context, runner agent.LLMRunner) int {
+	// Discovery lives on the concrete client; a custom runner (tests, a fake)
+	// simply gets no budget rather than a guessed one.
+	client, ok := runner.(*llm.Client)
+	if !ok || client == nil {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	n, err := client.DiscoverContext(ctx)
+	if err != nil || n <= 0 {
+		log.Printf("dun: context discovery failed (%v); running without a compaction budget", err)
+		return 0
+	}
+	budget := int(float64(n) * contextSafetyFraction)
+	log.Printf("dun: context window %d tokens; compaction budget %d", n, budget)
+	return budget
 }
