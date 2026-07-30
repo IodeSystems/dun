@@ -37,6 +37,7 @@ var toolDocs = map[string]string{
 		"  path=cmd/dun/tui.go func                // ✓ what's in a file. NOT `cmd/dun/tui.go` (that parses as a type)\n" +
 		"  #Start                                  // find by name anywhere; #'harness.go#Start' pins one\n" +
 		"  #'harness.go#Start'::in.call > *        // who calls it (::out.call = what it calls)\n" +
+		"  #Start::in.call > * path=cmd/dun/main.go  // …only the callers in one file: a bare attr after a space FILTERS\n" +
 		"  path=harness.go ::grep('-E Server|Harness')  // text search. ONE quoted arg — no inner \"quotes\", that matches nothing\n" +
 		"  func name~=^Start                       // ~= is the regex op; = ^= $= *= are literal\n" +
 		"Attribute brackets are optional: path=a/b.go ≡ [path=a/b.go]. Types are a fixed set (func method type struct file dir import …) — you cannot invent one.",
