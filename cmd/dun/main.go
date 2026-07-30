@@ -199,12 +199,16 @@ func main() {
 	// TUI's "send a message to retry" was advice that could not work. A wall
 	// clock on a session a human is sitting in front of was the wrong thing to
 	// measure; a turn that has hung is the thing worth cutting off.
+	// Either way the budget is a pausable clock, not a context deadline: time a
+	// human spends answering ask_user is not dun working, and must not be
+	// charged to dun's budget (see turnclock.go).
 	if *prog {
 		turnTimeout = *timeout
 	} else {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, *timeout)
-		defer cancel()
+		run := newTurnClock(ctx, *timeout)
+		curClock.Store(run)
+		ctx = run.ctx
+		defer run.Stop()
 	}
 
 	var em *emitter
@@ -237,16 +241,21 @@ func main() {
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { em.emit(retryEvent(n)) }
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
-			em.emit(event{"type": "ask", "question": q, "options": opts, "multi": multi})
-			select {
-			case a, ok := <-in.answers:
-				if !ok {
-					return "", fmt.Errorf("input closed")
+			// Paused for the whole wait: the person deciding is not the turn
+			// working, and a question left open should never be what kills the
+			// turn that asked it.
+			return withoutClock(func() (string, error) {
+				em.emit(event{"type": "ask", "question": q, "options": opts, "multi": multi})
+				select {
+				case a, ok := <-in.answers:
+					if !ok {
+						return "", fmt.Errorf("input closed")
+					}
+					return a, nil
+				case <-actx.Done():
+					return "", actx.Err()
 				}
-				return a, nil
-			case <-actx.Done():
-				return "", actx.Err()
-			}
+			})
 		}
 	} else {
 		cfg.OnToken = func(s string) { fmt.Print(s) }
@@ -258,7 +267,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
-		cfg.Ask = humanAsk
+		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
+			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi) })
+		}
 		fmt.Fprintf(os.Stderr, "dun: spawning tool servers for %s …\n", absWS)
 	}
 
@@ -480,8 +491,8 @@ func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
 // job's completion notification, or a message buffered mid-turn) and emits its
 // events.
 func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
-	tctx, cancel := turnCtx(ctx)
-	defer cancel()
+	tctx, end := beginTurn(ctx)
+	defer end()
 	turnActive.Store(true)
 	res, err := h.Continue(tctx)
 	turnActive.Store(false)
@@ -666,15 +677,8 @@ var suggestEnabled bool
 // See the comment where it is set.
 var turnTimeout time.Duration
 
-// turnCtx bounds one turn. The session context carries only ctrl-C, so a turn
-// that hangs is cut off without taking the session with it — the next message
-// starts a fresh turn against a live context.
-func turnCtx(ctx context.Context) (context.Context, context.CancelFunc) {
-	if turnTimeout <= 0 {
-		return context.WithCancel(ctx)
-	}
-	return context.WithTimeout(ctx, turnTimeout)
-}
+// A turn that hangs is cut off without taking the session with it — the next
+// message starts a fresh turn against a live context. See beginTurn.
 
 // turnActive is true while a turn is in flight, so the input reader knows to
 // BUFFER a user message (delivered inside the running turn, via the lift path)
@@ -685,8 +689,8 @@ var turnActive atomic.Bool
 // succeeded — NOT whether the engine should stop. A failed turn never ends the
 // session: the conversation is on disk and the next message picks up from it.
 func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
-	tctx, cancel := turnCtx(ctx)
-	defer cancel()
+	tctx, end := beginTurn(ctx)
+	defer end()
 	turnActive.Store(true)
 	res, err := h.Ask(tctx, task)
 	turnActive.Store(false)

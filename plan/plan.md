@@ -127,6 +127,14 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   `Notify` → `withLiftedQueue`), because a tool result the model is already
   reading is the only free delivery slot — and an assistant message appended after
   another is what providers reject.
+- **The TUI supervises its engine.** A crash (stdout EOF with no `exit` event)
+  respawns it against the same session id, skipping the history replay (already
+  on screen) and re-issuing the `/rag`/`/lsp` the user had on. Capped at 3 per
+  2 minutes — a crash LOOP must be reported, not hidden behind a flickering UI.
+  An announced exit is left alone: that one was asked for.
+- **The turn budget is a pausable clock, not a context deadline.** Time a human
+  spends in `ask_user` is not dun working, so it is not charged (`turnclock.go`,
+  `withoutClock`). A deadline context cannot express that — hence the timer.
 - **`--timeout` bounds a TURN interactively, the RUN one-shot.** A wall clock on
   a session a human is sitting in front of measured the wrong thing: at the
   deadline the session context died, every later turn failed instantly on it,

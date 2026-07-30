@@ -890,3 +890,98 @@ func TestTUI_ExitEventExplainsItself(t *testing.T) {
 		t.Errorf("exit reason lost: %q", m.fatalErr)
 	}
 }
+
+// The TUI outlives its engine. A crash (stdout closes with no exit event) must
+// put a new engine in its place attached to the same session, not leave a dead
+// UI behind — the conversation is on disk and the user is still sitting there.
+func TestTUI_RespawnsACrashedEngine(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "session", "id": "20260730-101010"})
+	if m.sessionID == "" {
+		t.Fatal("session id not captured — a respawn could not reattach")
+	}
+
+	nm, cmd := m.Update(eofMsg{})
+	m = nm.(tuiModel)
+	if cmd == nil {
+		t.Fatal("a crashed engine should be restarted")
+	}
+	if m.fatalErr != "" {
+		t.Errorf("a restartable death is not fatal: %q", m.fatalErr)
+	}
+	if !strings.Contains(m.convoText(), "restarting") {
+		t.Errorf("the restart should be visible: %s", m.convoText())
+	}
+	if !m.skipHistory {
+		t.Error("the respawned engine's history replay must be skipped (it is already on screen)")
+	}
+}
+
+// An engine that says it is going was told to go. Restarting it would fight the
+// user.
+func TestTUI_ExitEventStopsTheRestartLoop(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "exit", "reason": "interrupted"})
+	nm, cmd := m.Update(eofMsg{})
+	m = nm.(tuiModel)
+	if cmd != nil {
+		t.Error("an announced exit must not be restarted")
+	}
+	if !strings.Contains(m.fatalErr, "interrupted") {
+		t.Errorf("exit reason lost: %q", m.fatalErr)
+	}
+}
+
+// A crash LOOP is not survivable by restarting — after the cap the failure is
+// reported instead of hidden behind a flickering UI.
+func TestTUI_RestartCapGivesUp(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	for i := 0; i < engineRestartMax; i++ {
+		nm, cmd := m.Update(eofMsg{})
+		m = nm.(tuiModel)
+		if cmd == nil {
+			t.Fatalf("restart %d should have been attempted", i+1)
+		}
+	}
+	nm, cmd := m.Update(eofMsg{})
+	m = nm.(tuiModel)
+	if cmd != nil {
+		t.Error("past the cap the TUI should stop restarting")
+	}
+	if !strings.Contains(m.fatalErr, "gave up") {
+		t.Errorf("giving up should be reported: %q", m.fatalErr)
+	}
+	if !strings.Contains(m.convoText(), "dun --continue") {
+		t.Errorf("the user should be told the conversation survived: %s", m.convoText())
+	}
+}
+
+// A server the user turned on by hand is gone from a fresh engine, so the TUI
+// puts it back — otherwise a restart silently costs the agent its tools.
+func TestTUI_RestartReappliesServers(t *testing.T) {
+	var sent bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: nopWC{&sent}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	// First ready: docs is running (the user turned it on last session).
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"search"},
+		"servers": []any{map[string]any{"id": "docs", "running": true}}})
+	if !m.wantServers["rag"] {
+		t.Fatalf("running server not recorded: %v", m.wantServers)
+	}
+	// Engine dies, comes back with nothing on.
+	nm, _ = m.Update(eofMsg{})
+	m = nm.(tuiModel)
+	sent.Reset()
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
+		"servers": []any{map[string]any{"id": "docs", "running": false}}})
+	if !strings.Contains(sent.String(), `"action":"on"`) || !strings.Contains(sent.String(), `"id":"rag"`) {
+		t.Errorf("/rag was not turned back on after the restart: %q", sent.String())
+	}
+}

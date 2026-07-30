@@ -119,12 +119,18 @@ sent while it's working is buffered and lifted into the next tool result, so it
 lands *inside* the running turn — no extra round-trip — and several batch in
 order.
 
-**A dead turn is not a dead session.** `--timeout` (default 30m) bounds a *turn*
-in an interactive session and the *whole run* one-shot. A turn that hangs is cut
-off; the engine stays up and the next message starts a fresh turn — it does not
-exit, and the conversation is on disk either way. When the session really is
-over (ctrl-C), the engine says so and the TUI points at `dun --continue` instead
-of offering a retry that cannot work.
+**A dead turn is not a dead session, and a dead engine is not a dead TUI.**
+`--timeout` (default 30m) bounds a *turn* in an interactive session and the
+*whole run* one-shot. It is a pausable clock, not a deadline: time you spend
+answering `ask_user` is not dun working and is not charged to it, so a question
+left open never kills the turn that asked it. A turn that hangs is cut off; the
+engine stays up and the next message starts a fresh turn.
+
+If the engine dies anyway — crash, OOM, kill — the TUI restarts it, reattaches
+to the same session id, keeps your scrollback, and turns your `/rag` and `/lsp`
+servers back on. Three restarts per two minutes, then it stops and tells you
+(`dun --continue` still has everything). An engine that *chose* to exit (ctrl-C,
+`/quit`) says so and is left alone.
 
 **A changed tool set announces itself, for free.** Turning rag or lsp on or off
 mid-session buffers an *aside* — which tools appeared, which are gone. The

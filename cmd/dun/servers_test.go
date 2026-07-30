@@ -60,15 +60,15 @@ func TestServerHint_NamesWhatIsOffAndHow(t *testing.T) {
 // --timeout to the whole run, so at the deadline every following turn failed
 // instantly on the same dead context and the engine exited — while the UI was
 // still advising "send a message to retry".
-func TestTurnCtx_BoundsTheTurnNotTheSession(t *testing.T) {
+func TestBeginTurn_BoundsTheTurnNotTheSession(t *testing.T) {
 	sessionCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	turnTimeout = 20 * time.Millisecond
 	defer func() { turnTimeout = 0 }()
 
-	tctx, tcancel := turnCtx(sessionCtx)
-	defer tcancel()
+	tctx, end := beginTurn(sessionCtx)
+	defer end()
 	select {
 	case <-tctx.Done():
 	case <-time.After(2 * time.Second):
@@ -78,27 +78,59 @@ func TestTurnCtx_BoundsTheTurnNotTheSession(t *testing.T) {
 		t.Fatal("the turn's deadline killed the session context")
 	}
 	// The next turn gets a live context, which is the whole point.
-	next, ncancel := turnCtx(sessionCtx)
-	defer ncancel()
+	next, nend := beginTurn(sessionCtx)
+	defer nend()
 	if next.Err() != nil {
 		t.Fatalf("the turn after a timeout started dead: %v", next.Err())
 	}
 }
 
-// With no per-turn timeout, a turn is bounded only by the session (ctrl-C).
-func TestTurnCtx_NoTimeoutFollowsTheSession(t *testing.T) {
+// With no per-turn budget, a turn is bounded only by the session (ctrl-C) —
+// and must not shadow the run clock an ask needs to pause.
+func TestBeginTurn_NoTimeoutFollowsTheSession(t *testing.T) {
 	turnTimeout = 0
-	sessionCtx, cancel := context.WithCancel(context.Background())
-	tctx, tcancel := turnCtx(sessionCtx)
-	defer tcancel()
-	if _, ok := tctx.Deadline(); ok {
-		t.Error("turn should have no deadline of its own")
+	run := newTurnClock(context.Background(), 0)
+	curClock.Store(run)
+	defer curClock.Store(nil)
+
+	tctx, end := beginTurn(run.ctx)
+	defer end()
+	if curClock.Load() != run {
+		t.Error("an unbudgeted turn must leave the run clock installed")
 	}
-	cancel()
+	run.Stop()
 	select {
 	case <-tctx.Done():
 	case <-time.After(time.Second):
 		t.Fatal("ctrl-C did not reach the turn")
+	}
+}
+
+// Time a human spends answering ask_user is not dun working. Under a plain
+// deadline it was, so a question left open long enough killed the turn that
+// asked it.
+func TestTurnClock_PausedTimeIsNotCharged(t *testing.T) {
+	turnTimeout = 120 * time.Millisecond
+	defer func() { turnTimeout = 0 }()
+
+	tctx, end := beginTurn(context.Background())
+	defer end()
+
+	// A "human" takes far longer than the whole budget to answer.
+	if _, err := withoutClock(func() (string, error) {
+		time.Sleep(300 * time.Millisecond)
+		return "an answer", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if tctx.Err() != nil {
+		t.Fatalf("thinking time was charged to the turn: %v", tctx.Err())
+	}
+	// The budget resumes where it left off, so the turn is still bounded.
+	select {
+	case <-tctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("budget never resumed — the turn is now unbounded")
 	}
 }
 

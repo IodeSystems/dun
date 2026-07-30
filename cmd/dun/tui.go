@@ -54,6 +54,7 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	m.model, m.url, m.keySet = o.model, o.url, o.key != "" // for /config
 	m.disableExit = o.disableExit
 	m.lc = lc
+	m.opts = o // for respawning the engine (see eofMsg)
 	// WithMouseCellMotion makes the terminal (and tmux) forward wheel events to
 	// us instead of scrolling its own scrollback; the viewport consumes them.
 	fm, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
@@ -245,6 +246,17 @@ type tuiModel struct {
 	lc          *launcherConn // launcher registration (nil = no launcher)
 	reloadVer   string        // a newer build the launcher announced ("" = none)
 	reloadReq   bool          // /reload requested → runTUI re-execs after quit
+	// Engine supervision: the TUI outlives its engine. opts is what respawning
+	// one takes, sessionID reattaches it to the same conversation, and the
+	// restart counters stop a crash loop from spinning forever.
+	opts         tuiOpts
+	sessionID    string
+	restarts     int
+	restartStart time.Time
+	skipHistory   bool            // a respawned engine replays what is already on screen
+	wantServers   map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
+	quitting      bool            // the user is leaving; do not respawn
+	exitAnnounced bool            // the engine said it was going; it did not crash
 	suggestions      []suggestion // --suggest: predicted next messages (idle-only picker)
 	suggestSelecting bool         // → arrow-navigable selector (entered via right from empty input)
 	suggestSel       int          // highlighted suggestion in the selector
@@ -333,6 +345,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.disableExit {
 				return m, nil // exit disabled — use /quit
 			}
+			m.quitting = true // deliberate exit: do not respawn the engine
 			return m, tea.Quit
 		case "esc":
 			if m.searchActive { // leave match-scroll mode, back to free selection
@@ -355,6 +368,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.disableExit {
 				return m, nil // exit disabled — use /quit
 			}
+			m.quitting = true // deliberate exit: do not respawn the engine
 			return m, tea.Quit
 		case "/":
 			if m.focus == focusConvo {
@@ -626,12 +640,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleEvent(msg), waitEvent(m.proc.ch)
 
 	case eofMsg:
-		if m.fatalErr == "" {
-			m.fatalErr = "dun engine exited"
+		return m.engineGone()
+
+	case engineUpMsg:
+		if msg.err != nil {
+			m.fatalErr = "engine restart failed: " + msg.err.Error()
+			m.refresh()
+			return m, nil
 		}
-		m.busy, m.starting = false, false
+		m.proc = msg.proc
+		m.fatalErr = ""
+		m.starting = true
 		m.refresh()
-		return m, nil
+		return m, waitEvent(m.proc.ch)
 
 	case tea.MouseMsg:
 		var cmd tea.Cmd
@@ -663,6 +684,7 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.disableExit {
 			return m, nil
 		}
+		m.quitting = true // deliberate exit: do not respawn the engine
 		return m, tea.Quit
 	case "esc":
 		if m.noting || m.customAnswer {
@@ -675,6 +697,7 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.disableExit {
 			return m, nil
 		}
+		m.quitting = true // deliberate exit: do not respawn the engine
 		return m, tea.Quit
 	case "enter":
 		switch {
@@ -879,13 +902,57 @@ func (m tuiModel) computeMatches() []int {
 	return out
 }
 
+// noteServers records which switchable servers are up, so a restart can put
+// them back. Only ones with a command (/rag, /lsp) — the rest are the config's
+// business, and the new engine reads the same config.
+func (m *tuiModel) noteServers(ev evMsg) {
+	list, ok := ev["servers"].([]any)
+	if !ok {
+		return
+	}
+	if m.wantServers == nil {
+		m.wantServers = map[string]bool{}
+	}
+	for _, s := range list {
+		st, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		alias := aliasOf(str(st["id"]))
+		if _, switchable := serverAliases[alias]; !switchable {
+			continue
+		}
+		running, _ := st["running"].(bool)
+		m.wantServers[alias] = running
+	}
+}
+
+// reapplyServers turns back on whatever the user had turned on, after a
+// restart. A no-op on the first ready, when nothing has been asked for yet.
+func (m tuiModel) reapplyServers() tuiModel {
+	if m.restarts == 0 {
+		return m
+	}
+	for alias, want := range m.wantServers {
+		if want {
+			m.proc.serverCmd(alias, "on")
+		}
+	}
+	return m
+}
+
 func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	switch ev["type"] {
 	case "workspace":
 		m.branch = str(ev["branch"])
 		m.append(stDim.Render("worktree branch: " + m.branch))
+	case "session":
+		// Remembered so a respawned engine reattaches to THIS conversation
+		// rather than starting a new one.
+		m.sessionID = str(ev["id"])
 	case "ready":
 		m.starting = false
+		m.tools = nil
 		if ts, ok := ev["tools"].([]any); ok {
 			for _, t := range ts {
 				m.tools = append(m.tools, fmt.Sprint(t))
@@ -897,6 +964,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if hint := strings.TrimSpace(str(ev["hint"])); hint != "" {
 			m.append(stNote.Render(hint))
 		}
+		// Order matters: reapply reads what was running BEFORE this engine
+		// existed, and this event reports the fresh one (everything off).
+		m = m.reapplyServers()
+		m.noteServers(ev)
+		return m
 	case "server":
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
 			m.append(stNote.Render(msg))
@@ -908,6 +980,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				m.tools = append(m.tools, fmt.Sprint(t))
 			}
 		}
+		m.noteServers(ev)
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
 		m.suggestions, m.suggestSelecting = nil, false
@@ -937,6 +1010,12 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		m.refresh()
 	case "history":
+		if m.skipHistory {
+			// A respawned engine replays the conversation it just resumed. It is
+			// already on screen — rendering it again would double the scrollback.
+			m.skipHistory = false
+			break
+		}
 		items, _ := ev["items"].([]any)
 		m.replay(items)
 	case "message":
@@ -1001,7 +1080,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		m.refresh()
 	case "exit":
-		// The engine says why it is going, so eofMsg does not have to guess.
+		// The engine only announces an exit it CHOSE — ctrl-C, an explicit stop,
+		// stdin closing. That is the difference between "it left" and "it died",
+		// and it decides whether the TUI puts a new one in its place.
+		m.exitAnnounced = true
 		if r := str(ev["reason"]); r != "" {
 			m.fatalErr = "dun engine exited: " + r
 		}
@@ -1503,7 +1585,10 @@ func init() {
 		}},
 		{"rag", "[on|off|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
 		{"lsp", "[on|off|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
-		{"quit", "", "exit dun", func(_ *tuiModel, _ []string) tea.Cmd { return tea.Quit }},
+		{"quit", "", "exit dun", func(m *tuiModel, _ []string) tea.Cmd {
+			m.quitting = true
+			return tea.Quit
+		}},
 	}
 }
 
@@ -1708,6 +1793,71 @@ func (m tuiModel) writeDump() {
 
 type evMsg map[string]any
 type eofMsg struct{}
+
+// engineUpMsg carries a respawned engine (or why it could not be respawned).
+type engineUpMsg struct {
+	proc *dunProc
+	err  error
+}
+
+// Engine deaths worth surviving are the ones a session can outlive: a turn that
+// took the process down, an OOM, a bad build. A crash LOOP is not — restarting
+// forever would hide the real failure behind a flickering UI, so the attempts
+// are capped per window and then reported.
+const (
+	engineRestartMax    = 3
+	engineRestartWindow = 2 * time.Minute
+)
+
+// engineGone handles the engine's stdout closing. The TUI does not die with it:
+// the conversation is on disk, so a fresh engine can reattach to the same
+// session id and carry on with the scrollback still on screen.
+func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
+	m.busy, m.starting, m.asking = false, false, false
+	reason := m.fatalErr
+	if reason == "" {
+		reason = "dun engine exited"
+	}
+	// It left on purpose (or we are leaving): let it go.
+	if m.quitting || m.reloadReq || m.exitAnnounced {
+		m.fatalErr = reason
+		m.refresh()
+		return m, nil
+	}
+	if time.Since(m.restartStart) > engineRestartWindow {
+		m.restarts, m.restartStart = 0, time.Now()
+	}
+	if m.restarts >= engineRestartMax {
+		m.fatalErr = reason + " — gave up restarting it"
+		m.append(stErr.Render(m.fatalErr + "\nyour conversation is saved: dun --continue"))
+		m.refresh()
+		return m, nil
+	}
+	m.restarts++
+	m.fatalErr = ""
+	m.skipHistory = true // it will replay what is already on screen
+	m.append(stErr.Render(reason + " — restarting it; the session is kept"))
+	m.refresh()
+	return m, restartEngine(m.opts, m.sessionID)
+}
+
+// restartEngine spawns a replacement engine attached to the same conversation.
+func restartEngine(o tuiOpts, sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		// Reattach by id when we have one; otherwise take the workspace's most
+		// recent session, which is the one that just died.
+		if sessionID != "" {
+			o.resume, o.cont = sessionID, false
+		} else {
+			o.resume, o.cont = "", true
+		}
+		p, err := startDunProc(o)
+		if err != nil {
+			return engineUpMsg{err: err}
+		}
+		return engineUpMsg{proc: p}
+	}
+}
 
 type dunProc struct {
 	cmd   *exec.Cmd
