@@ -33,13 +33,13 @@ var toolDocs = map[string]string{
 	// quoted a second time out of shell reflex. Everything else was a long tail
 	// of one. So the four lines below are those two mistakes, pre-empted, plus
 	// the shapes that answer most questions. Every example is verified to run.
-	"node_query": "\n\nA PATH IS AN ID, and one with / or . in it must be quoted — this is the mistake to avoid:\n" +
-		"  #'cmd/dun/tui.go' func                  // ✓ what's in a file. NOT `cmd/dun/tui.go` (parsed as a type) and NOT #cmd/dun/tui.go (unquoted)\n" +
+	"node_query": "\n\nA BARE PATH IS NOT A SELECTOR — scope by path= instead (no quotes needed):\n" +
+		"  path=cmd/dun/tui.go func                // ✓ what's in a file. NOT `cmd/dun/tui.go` (that parses as a type)\n" +
 		"  #Start                                  // find by name anywhere; #'harness.go#Start' pins one\n" +
 		"  #'harness.go#Start'::in.call > *        // who calls it (::out.call = what it calls)\n" +
-		"  #'harness.go'::grep('-E Server|Harness')  // text search. ONE quoted arg — no inner \"quotes\", that matches nothing\n" +
-		"  func[name~=^Start]                      // ~= is the regex op; = ^= $= *= are literal\n" +
-		"Types are a fixed set (func method type struct file dir import …) — you cannot invent one; a workspace name is an #id.",
+		"  path=harness.go ::grep('-E Server|Harness')  // text search. ONE quoted arg — no inner \"quotes\", that matches nothing\n" +
+		"  func name~=^Start                       // ~= is the regex op; = ^= $= *= are literal\n" +
+		"Attribute brackets are optional: path=a/b.go ≡ [path=a/b.go]. Types are a fixed set (func method type struct file dir import …) — you cannot invent one.",
 	"eval": "\n\nmcpshell is a JS subset — do the whole task in ONE eval that ENDS in the value:\n" +
 		"  export let total = [1,2,3].reduce((a,b) => a + b, 0)   // export → survives to your NEXT eval; plain let/const does not\n" +
 		"  total * 2                                              // the LAST expression is the output (console.log is not the result)\n" +

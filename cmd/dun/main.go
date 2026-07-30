@@ -199,12 +199,18 @@ func main() {
 	}
 	defer os.RemoveAll(raglitHome)
 
+	// Resolve extra mounts: local paths that must be accessible from both
+	// the worktree (symlink) and the Docker container (volume mount).
+	// Loaded from dun.json / dun.local.json and auto-discovered from go.mod.
+	mounts := dun.LoadMounts(absWS, absWS)
+
 	// Isolation tier 1: a git worktree (unless --no-worktree). The agent's file
 	// changes land here on a fresh branch, not on the checked-out branch.
+	// Mounts are symlinked into the worktree parent so replace directives resolve.
 	effWS := absWS
 	var wt *dun.Worktree
 	if !*noWorktree {
-		w, isRepo, werr := dun.NewWorktree(absWS)
+		w, isRepo, werr := dun.NewWorktree(absWS, mounts)
 		if werr != nil {
 			fatal(werr)
 		}
@@ -217,7 +223,7 @@ func main() {
 	// Isolation tier 2: exec runs in a Docker container (--docker IMAGE), or host.
 	var backend dun.ExecBackend
 	if *docker != "" {
-		backend = dun.DockerExec{Dir: effWS, Image: *docker}
+		backend = dun.DockerExec{Dir: effWS, Image: *docker, ExtraMounts: mounts}
 	} else {
 		backend = dun.HostExec{Dir: effWS}
 	}

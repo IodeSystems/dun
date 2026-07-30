@@ -29,7 +29,7 @@ func TestWorktree_IsolatesChanges(t *testing.T) {
 	gitrun(t, repo, "add", ".")
 	gitrun(t, repo, "commit", "-qm", "init")
 
-	wt, isRepo, err := NewWorktree(repo)
+	wt, isRepo, err := NewWorktree(repo, nil)
 	if err != nil || !isRepo {
 		t.Fatalf("NewWorktree: isRepo=%v err=%v", isRepo, err)
 	}
@@ -51,7 +51,7 @@ func TestWorktree_IsolatesChanges(t *testing.T) {
 
 func TestWorktree_NonRepoPassThrough(t *testing.T) {
 	dir := t.TempDir()
-	wt, isRepo, err := NewWorktree(dir)
+	wt, isRepo, err := NewWorktree(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

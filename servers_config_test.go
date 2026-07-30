@@ -245,3 +245,114 @@ func TestSetAutostart_WritesGitignore(t *testing.T) {
 		t.Errorf("want 0600, got %v", st.Mode().Perm())
 	}
 }
+
+// Auto-discovery: a go.mod with a local replace directive should produce a mount.
+func TestDiscoverGoModReplaces_LocalReplace(t *testing.T) {
+	dir := t.TempDir()
+	gomod := "module example.com/project\n\ngo 1.22\n\nrequire github.com/iodesystems/agentkit v0.0.0\n\nreplace github.com/iodesystems/agentkit => ../agentkit\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mounts := discoverGoModReplaces(dir, dir)
+	if len(mounts) != 1 {
+		t.Fatalf("want 1 mount, got %d", len(mounts))
+	}
+	if mounts[0].Name != "agentkit" {
+		t.Errorf("name = %q, want %q", mounts[0].Name, "agentkit")
+	}
+	if mounts[0].Source != "../agentkit" {
+		t.Errorf("source = %q, want %q", mounts[0].Source, "../agentkit")
+	}
+}
+
+// Auto-discovery: non-local replaces are ignored.
+func TestDiscoverGoModReplaces_SkipsNonLocal(t *testing.T) {
+	dir := t.TempDir()
+	gomod := "module example.com/project\n\ngo 1.22\n\nreplace example.com/old => example.com/new v1.0.0\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mounts := discoverGoModReplaces(dir, dir)
+	if len(mounts) != 0 {
+		t.Errorf("want 0 mounts for non-local replace, got %d", len(mounts))
+	}
+}
+
+// Auto-discovery: absolute local replaces are included.
+func TestDiscoverGoModReplaces_AbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	gomod := "module example.com/project\n\ngo 1.22\n\nreplace example.com/lib => /opt/lib\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mounts := discoverGoModReplaces(dir, dir)
+	if len(mounts) != 1 {
+		t.Fatalf("want 1 mount, got %d", len(mounts))
+	}
+	if mounts[0].Name != "lib" {
+		t.Errorf("name = %q, want %q", mounts[0].Name, "lib")
+	}
+	if mounts[0].Source != "/opt/lib" {
+		t.Errorf("source = %q, want %q", mounts[0].Source, "/opt/lib")
+	}
+}
+
+// LoadMounts: no config, no go.mod -> empty.
+func TestLoadMounts_NoConfigNoGoMod(t *testing.T) {
+	dir := t.TempDir()
+	mounts := LoadMounts(dir, dir)
+	if len(mounts) != 0 {
+		t.Errorf("want 0 mounts, got %d", len(mounts))
+	}
+}
+
+// LoadMounts: config mounts merge by name across layers.
+func TestLoadMounts_MergeByName(t *testing.T) {
+	dir := t.TempDir()
+	writeJSON(t, dir, ProjectServersFile, `{"mounts":[{"source":"../shared","name":"shared"}]}`)
+	writeJSON(t, dir, LocalServersFile, `{"mounts":[{"source":"/opt/shared","name":"shared"}]}`)
+	mounts := LoadMounts(dir, dir)
+	if len(mounts) != 1 {
+		t.Fatalf("want 1 mount, got %d", len(mounts))
+	}
+	if mounts[0].Name != "shared" {
+		t.Errorf("name = %q, want %q", mounts[0].Name, "shared")
+	}
+	if mounts[0].Source != "/opt/shared" {
+		t.Errorf("source = %q, want %q", mounts[0].Source, "/opt/shared")
+	}
+}
+
+// LoadMounts: relative sources are resolved against repoRoot.
+func TestLoadMounts_RelativeSourceResolved(t *testing.T) {
+	dir := t.TempDir()
+	writeJSON(t, dir, ProjectServersFile, `{"mounts":[{"source":"../agentkit","name":"agentkit"}]}`)
+	mounts := LoadMounts(dir, dir)
+	if len(mounts) != 1 {
+		t.Fatalf("want 1 mount, got %d", len(mounts))
+	}
+	want := filepath.Join(dir, "../agentkit")
+	if mounts[0].Source != want {
+		t.Errorf("source = %q, want %q", mounts[0].Source, want)
+	}
+}
+
+// LoadMounts: auto-discovered go.mod mounts can be supplemented by config.
+func TestLoadMounts_AutoAndConfig(t *testing.T) {
+	dir := t.TempDir()
+	gomod := "module example.com/project\n\ngo 1.22\n\nreplace github.com/iodesystems/agentkit => ../agentkit\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, dir, ProjectServersFile, `{"mounts":[{"source":"../tools","name":"tools"}]}`)
+	mounts := LoadMounts(dir, dir)
+	if len(mounts) != 2 {
+		t.Fatalf("want 2 mounts, got %d", len(mounts))
+	}
+	if mounts[0].Name != "agentkit" {
+		t.Errorf("first mount name = %q, want %q", mounts[0].Name, "agentkit")
+	}
+	if mounts[1].Name != "tools" {
+		t.Errorf("second mount name = %q, want %q", mounts[1].Name, "tools")
+	}
+}

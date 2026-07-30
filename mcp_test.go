@@ -44,11 +44,11 @@ func TestToolDocs_NodeQueryPreemptsTheCommonMistakes(t *testing.T) {
 		t.Fatal("node_query has no cheat sheet")
 	}
 	for _, want := range []string{
-		"PATH IS AN ID",      // 25 of 39 recorded failures
-		"#'cmd/dun/tui.go'",  // the corrected form, copyable
-		"ONE quoted arg",     // 8 of 39
-		"~= is the regex op", // [name^=[A-Z]] in the corpus
-		"fixed set",          // invented types
+		"BARE PATH IS NOT A SELECTOR", // 25 of 39 recorded failures
+		"path=cmd/dun/tui.go",         // the corrected form: copyable, and unquoted
+		"ONE quoted arg",              // 8 of 39
+		"~= is the regex op",          // [name^=[A-Z]] in the corpus
+		"fixed set",                   // invented types
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("cheat sheet no longer mentions %q", want)
@@ -66,7 +66,7 @@ func TestToolDocs_ReachTheToolDefinition(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatal("expected one def")
 	}
-	if !strings.Contains(defs[0].Function.Description, "PATH IS AN ID") {
+	if !strings.Contains(defs[0].Function.Description, "BARE PATH IS NOT A SELECTOR") {
 		t.Error("the cheat sheet is not attached to the tool definition")
 	}
 }

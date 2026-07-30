@@ -45,12 +45,21 @@ type DockerExec struct {
 	Image string
 	// Network, if false, runs with --network none (no egress). Default false.
 	Network bool
+	// ExtraMounts are additional host paths mounted read-only inside the
+	// container at /<name>. These are how external dependencies (e.g. a
+	// sibling module referenced by go.mod replace) become accessible inside
+	// the container.
+	ExtraMounts []MountSpec
 }
 
 func (d DockerExec) Run(ctx context.Context, command string) string {
 	args := []string{"run", "--rm", "-v", d.Dir + ":/work", "-w", "/work"}
 	if !d.Network {
 		args = append(args, "--network", "none")
+	}
+	// Mount extra paths read-only at /<name>.
+	for _, m := range d.ExtraMounts {
+		args = append(args, "-v", m.Source+":/"+m.Name+":ro")
 	}
 	args = append(args, d.Image, "sh", "-lc", command)
 	return finish(exec.CommandContext(ctx, "docker", args...))

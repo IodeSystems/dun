@@ -22,15 +22,24 @@ type Worktree struct {
 	Path     string // the worktree directory (use this as the workspace)
 	Branch   string // the branch it's on ("" when not a git repo)
 	repoRoot string // the origin repo's toplevel ("" when not a git repo)
+	// Mounts are the extra local path references resolved for this worktree.
+	// Symlinks are created in the worktree parent directory so go.mod replace
+	// directives (and equivalent mechanisms in other ecosystems) resolve.
+	Mounts []MountSpec
 }
 
 // NewWorktree creates a fresh worktree+branch off repoDir's HEAD. If repoDir is
 // not inside a git repo, it returns a pass-through Worktree at repoDir (no
 // isolation) and isRepo=false.
-func NewWorktree(repoDir string) (wt *Worktree, isRepo bool, err error) {
+//
+// mounts declares extra local paths that must be accessible from the worktree.
+// For each mount, a symlink is created in the worktree parent directory pointing
+// to the resolved source path. This is how go.mod replace directives (and
+// equivalent mechanisms in other ecosystems) resolve inside the worktree.
+func NewWorktree(repoDir string, mounts []MountSpec) (wt *Worktree, isRepo bool, err error) {
 	top, terr := git("", "-C", repoDir, "rev-parse", "--show-toplevel")
 	if terr != nil {
-		return &Worktree{Path: repoDir}, false, nil // not a git repo → work in place
+		return &Worktree{Path: repoDir, Mounts: mounts}, false, nil // not a git repo → work in place
 	}
 	root := strings.TrimSpace(top)
 	// Create worktrees under .dun/worktrees/ so the go.mod replace directive
@@ -41,11 +50,13 @@ func NewWorktree(repoDir string) (wt *Worktree, isRepo bool, err error) {
 	if err := os.MkdirAll(wtParent, 0755); err != nil {
 		return nil, false, fmt.Errorf("dun: mkdir worktrees: %w", err)
 	}
-	// Ensure the agentkit symlink exists (idempotent).
-	link := filepath.Join(wtParent, "agentkit")
-	if _, err := os.Lstat(link); err != nil {
-		if err := os.Symlink("../../../agentkit", link); err != nil {
-			return nil, false, fmt.Errorf("dun: symlink agentkit: %w", err)
+	// Create symlinks for each mount (idempotent).
+	for _, m := range mounts {
+		link := filepath.Join(wtParent, m.Name)
+		if _, err := os.Lstat(link); err != nil {
+			if err := os.Symlink(m.Source, link); err != nil {
+				return nil, false, fmt.Errorf("dun: symlink %s: %w", m.Name, err)
+			}
 		}
 	}
 	dir, err := os.MkdirTemp(wtParent, "dun-worktree-")
@@ -57,7 +68,7 @@ func NewWorktree(repoDir string) (wt *Worktree, isRepo bool, err error) {
 		os.RemoveAll(dir)
 		return nil, false, fmt.Errorf("dun: git worktree add: %w", err)
 	}
-	return &Worktree{Path: dir, Branch: branch, repoRoot: root}, true, nil
+	return &Worktree{Path: dir, Branch: branch, repoRoot: root, Mounts: mounts}, true, nil
 }
 
 // Diff returns the worktree's changes vs its base (tracked + a list of untracked

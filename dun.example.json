@@ -25,5 +25,14 @@
       "id": "docs",
       "disabled": true
     }
+  ],
+
+  "//mounts": "Extra local paths that must be accessible from both the worktree (symlink) and Docker container (volume mount). go.mod replace directives are auto-discovered — declare mounts here for non-Go projects or to override the auto-detected source path.",
+  "mounts": [
+    {
+      "//": "source is the host path (relative to repo root or absolute), name is the symlink/volume name. Docker mounts at /<name>.",
+      "source": "../agentkit",
+      "name": "agentkit"
+    }
   ]
 }

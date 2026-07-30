@@ -86,9 +86,27 @@ type ServerSpec struct {
 	Autostart *bool `json:"autostart,omitempty"`
 }
 
+// MountSpec declares an extra local path that must be accessible from both
+// the worktree (via symlink) and the Docker container (via volume mount).
+// This is how a project tells dun about external dependencies like a sibling
+// module referenced by go.mod replace (e.g. agentkit at ../agentkit).
+type MountSpec struct {
+	// Source is the absolute or relative path on the host. Relative paths
+	// are resolved against the repo root.
+	Source string `json:"source"`
+	// Name is the symlink name inside the worktree parent directory and the
+	// volume name for Docker. The Docker mount point is /<name>.
+	Name string `json:"name"`
+}
+
 // ServersFile is the on-disk shape of dun.json / dun.local.json.
 type ServersFile struct {
 	Servers []ServerSpec `json:"servers,omitempty"`
+	// Mounts declares extra local paths that must be accessible from the
+	// worktree (symlink) and Docker container (volume mount). Merged by name
+	// across layers — a local file can override a source path without
+	// restating the project's mount list.
+	Mounts []MountSpec `json:"mounts,omitempty"`
 }
 
 // LoadServers resolves the effective server list for a workspace.
@@ -144,6 +162,98 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 		})
 	}
 	return out, nil
+}
+
+// LoadMounts resolves the effective mount list for a workspace.
+//
+// Mounts merge BY NAME across layers (dun.json < dun.local.json). A local file
+// can override a source path without restating the project's mount list.
+// Relative source paths are resolved against repoRoot.
+//
+// Auto-discovered mounts from go.mod replace directives are prepended — so a
+// project with "replace => ../agentkit" gets the agentkit mount automatically
+// even without a mounts section.
+func LoadMounts(dir, repoRoot string) []MountSpec {
+	// Auto-discover mounts from go.mod replace directives.
+	auto := discoverGoModReplaces(dir, repoRoot)
+	merged := map[string]MountSpec{}
+	order := []string{}
+	for _, m := range auto {
+		merged[m.Name] = m
+		order = append(order, m.Name)
+	}
+
+	for _, path := range serverConfigPaths(dir) {
+		f, err := readServersFile(path)
+		if err != nil || f == nil {
+			continue
+		}
+		for _, spec := range f.Mounts {
+			if spec.Name == "" {
+				continue // skip malformed entries
+			}
+			prev, existed := merged[spec.Name]
+			if !existed {
+				order = append(order, spec.Name)
+				merged[spec.Name] = spec
+			} else if spec.Source != "" {
+				prev.Source = spec.Source
+				merged[spec.Name] = prev
+			}
+		}
+	}
+
+	out := make([]MountSpec, 0, len(order))
+	for _, name := range order {
+		m := merged[name]
+		if m.Source == "" {
+			continue
+		}
+		// Resolve relative paths against repoRoot.
+		if !filepath.IsAbs(m.Source) {
+			m.Source = filepath.Join(repoRoot, m.Source)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// discoverGoModReplaces reads go.mod and extracts local replace directives as
+// MountSpecs. A replace like "github.com/iodesystems/agentkit -> ../agentkit"
+// becomes a mount with name "agentkit" and source "../agentkit".
+func discoverGoModReplaces(dir, repoRoot string) []MountSpec {
+	gomodPath := filepath.Join(repoRoot, "go.mod")
+	b, err := os.ReadFile(gomodPath)
+	if err != nil {
+		return nil
+	}
+	var mounts []MountSpec
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "replace ") {
+			continue
+		}
+		// Format: replace module/path => ../local/path
+		// or:     replace module/path v1.2.3 => ../local/path
+		rest := strings.TrimPrefix(line, "replace ")
+		arrow := "=>"
+		parts := strings.SplitN(rest, arrow, 2)
+		if len(parts) != 2 {
+			continue
+		}
+		target := strings.TrimSpace(parts[1])
+		// Skip non-local replaces (e.g. => other/module v1.0)
+		if !strings.HasPrefix(target, ".") && !strings.HasPrefix(target, "/") {
+			continue
+		}
+		// Derive name from the target path's basename.
+		name := filepath.Base(target)
+		if name == "" || name == "." || name == ".." {
+			continue
+		}
+		mounts = append(mounts, MountSpec{Source: target, Name: name})
+	}
+	return mounts
 }
 
 // mergeSpec layers next over prev field by field. An omitted field INHERITS

@@ -35,7 +35,7 @@ func TestOpenPR_CommitsAndPushes(t *testing.T) {
 	gitrun(t, repo, "commit", "-qm", "init")
 	gitrun(t, repo, "push", "-q", "-u", "origin", "HEAD")
 
-	wt, isRepo, err := NewWorktree(repo)
+	wt, isRepo, err := NewWorktree(repo, nil)
 	if err != nil || !isRepo {
 		t.Fatalf("NewWorktree: %v", err)
 	}
