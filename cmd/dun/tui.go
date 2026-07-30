@@ -988,10 +988,23 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.append(stErr.Render("error: " + str(ev["error"])))
 		m.busy, m.queuedMsgs = false, 0
 		m.clearRetry()
-		// The session is NOT over: the conversation is on disk, so the next message
-		// pairs off whatever was interrupted and picks up where this stopped.
-		m.append(stDim.Render("the session is intact — send a message to retry from here"))
+		// Whether the SESSION survived is the engine's call, not something to
+		// infer from the error text. It says so, because promising "send a
+		// message to retry" to a session that cannot run another turn is worse
+		// than saying nothing.
+		if b, _ := ev["fatal"].(bool); b {
+			m.append(stDim.Render("the session ended — resume it with: dun --continue"))
+		} else {
+			// The conversation is on disk, so the next message pairs off whatever
+			// was interrupted and picks up where this stopped.
+			m.append(stDim.Render("the session is intact — send a message to retry from here"))
+		}
 		m.refresh()
+	case "exit":
+		// The engine says why it is going, so eofMsg does not have to guess.
+		if r := str(ev["reason"]); r != "" {
+			m.fatalErr = "dun engine exited: " + r
+		}
 	}
 	return m
 }

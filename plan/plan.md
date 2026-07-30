@@ -127,6 +127,14 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   `Notify` → `withLiftedQueue`), because a tool result the model is already
   reading is the only free delivery slot — and an assistant message appended after
   another is what providers reject.
+- **`--timeout` bounds a TURN interactively, the RUN one-shot.** A wall clock on
+  a session a human is sitting in front of measured the wrong thing: at the
+  deadline the session context died, every later turn failed instantly on it,
+  and the reader loop exited — while the UI advised "send a message to retry".
+  A hung turn is the thing worth cutting off. The engine now exits only on
+  ctrl-C, an explicit stop, or stdin EOF, and announces which (`exit` event).
+  Auto-continue after a failed turn is disarmed until something new arrives, so
+  a down provider cannot spin the loop.
 - **A failed turn is recoverable, not terminal.** The conversation is on disk, so
   the fix is to make the history structurally valid again (pair off orphan tool
   calls, re-kind orphan results) and let the next message resume.

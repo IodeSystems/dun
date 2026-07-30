@@ -189,8 +189,23 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, *timeout)
-	defer cancel()
+	// --timeout bounds a TURN when the engine is interactive, and the WHOLE RUN
+	// when it is one-shot.
+	//
+	// It used to bound the run either way, which quietly made the session
+	// unrecoverable at the 30-minute mark: the running turn died with "context
+	// deadline exceeded", every following turn failed instantly on the same dead
+	// context, and the reader loop's ctx.Done() case exited the engine — so the
+	// TUI's "send a message to retry" was advice that could not work. A wall
+	// clock on a session a human is sitting in front of was the wrong thing to
+	// measure; a turn that has hung is the thing worth cutting off.
+	if *prog {
+		turnTimeout = *timeout
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *timeout)
+		defer cancel()
+	}
 
 	var em *emitter
 	var in *inputStream
@@ -382,16 +397,24 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		turn(ctx, h, em, firstTask)
 	}
 	users := in.users
+	// A turn that fails must not end the session — the user is still sitting
+	// there and the conversation is still on disk. But the pending work that
+	// turn was going to claim is still pending, so retrying it immediately would
+	// spin: provider down, turn fails, still pending, turn fails… autoContinue
+	// stops that. It is re-armed by anything NEW arriving (a message, a
+	// background completion), which is exactly when a retry is worth making.
+	autoContinue := true
 	for {
 		// Anything buffered while the last turn ran (or after it failed on the
 		// provider) is delivered now, in ONE turn — including a message the user
 		// sent to nudge a dead session back to life.
-		if h.Pending() > 0 {
-			continueTurn(ctx, h, em)
+		if autoContinue && h.Pending() > 0 {
+			autoContinue = continueTurn(ctx, h, em)
 			continue
 		}
 		if users == nil { // input is done; finish the background work, then leave
 			if !drainStep(ctx, h, em) {
+				em.emit(event{"type": "exit", "reason": "input closed"})
 				return
 			}
 			continue
@@ -400,6 +423,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		case content, ok := <-users:
 			if !ok {
 				if in.stopped() {
+					em.emit(event{"type": "exit", "reason": "stopped"})
 					return // explicit stop: don't wait for background jobs
 				}
 				// A closed channel is always ready in select, so stop selecting
@@ -408,10 +432,15 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				continue
 			}
 			turn(ctx, h, em, content)
+			autoContinue = true
 		case <-h.Wake():
 			// A background job finished; run a turn to process its notification.
-			continueTurn(ctx, h, em)
+			autoContinue = continueTurn(ctx, h, em)
 		case <-ctx.Done():
+			// Only ctrl-C reaches here now: --timeout bounds a turn, not the
+			// session. Say so, rather than dying silently and leaving the TUI to
+			// report a bare "engine exited".
+			em.emit(event{"type": "exit", "reason": "interrupted"})
 			return
 		}
 	}
@@ -425,24 +454,24 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 // entry that arrived without a wake — proactive RAG publishes straight to the
 // inbox — can't strand the loop until --timeout.
 func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
+	// A failed turn ends the drain rather than being retried. Unlike the
+	// interactive loop there is nobody left to fix anything — stdin is closed —
+	// so the pending work would fail identically forever.
 	if h.BackgroundRunning() > 0 {
 		select {
 		case <-h.Wake():
 		case <-ctx.Done():
 			return false
 		}
-		continueTurn(ctx, h, em)
-		return true
+		return continueTurn(ctx, h, em)
 	}
 	select {
 	case <-h.Wake(): // a completion that raced the BackgroundRunning check
-		continueTurn(ctx, h, em)
-		return true
+		return continueTurn(ctx, h, em)
 	default:
 	}
 	if h.Pending() > 0 {
-		continueTurn(ctx, h, em)
-		return true
+		return continueTurn(ctx, h, em)
 	}
 	return false
 }
@@ -450,13 +479,15 @@ func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
 // continueTurn runs a turn with no new user message (to process a background
 // job's completion notification, or a message buffered mid-turn) and emits its
 // events.
-func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) {
+func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
+	tctx, cancel := turnCtx(ctx)
+	defer cancel()
 	turnActive.Store(true)
-	res, err := h.Continue(ctx)
+	res, err := h.Continue(tctx)
 	turnActive.Store(false)
 	if err != nil {
-		em.emit(event{"type": "error", "error": err.Error()})
-		return
+		emitTurnError(ctx, em, err)
+		return false
 	}
 	if strings.TrimSpace(res.Reply) != "" {
 		em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
@@ -466,6 +497,7 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) {
 		"generated": res.Usage.Generated, "turns": res.Usage.Turns})
 	em.emit(event{"type": "done"})
 	emitSuggestions(ctx, h, em)
+	return true
 }
 
 // inputStream reads JSON events from stdin in a goroutine and routes them:
@@ -630,18 +662,37 @@ func humanAsk(_ context.Context, question string, options []string, multi bool) 
 // suggestions after `done` when set.
 var suggestEnabled bool
 
+// turnTimeout is --timeout applied PER TURN (interactive engine only; 0 = none).
+// See the comment where it is set.
+var turnTimeout time.Duration
+
+// turnCtx bounds one turn. The session context carries only ctrl-C, so a turn
+// that hangs is cut off without taking the session with it — the next message
+// starts a fresh turn against a live context.
+func turnCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if turnTimeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, turnTimeout)
+}
+
 // turnActive is true while a turn is in flight, so the input reader knows to
 // BUFFER a user message (delivered inside the running turn, via the lift path)
 // instead of handing it to the loop as the start of a new one.
 var turnActive atomic.Bool
 
-func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) {
+// turn runs one user message to completion. It reports whether the turn
+// succeeded — NOT whether the engine should stop. A failed turn never ends the
+// session: the conversation is on disk and the next message picks up from it.
+func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
+	tctx, cancel := turnCtx(ctx)
+	defer cancel()
 	turnActive.Store(true)
-	res, err := h.Ask(ctx, task)
+	res, err := h.Ask(tctx, task)
 	turnActive.Store(false)
 	if err != nil {
-		em.emit(event{"type": "error", "error": err.Error()})
-		return
+		emitTurnError(ctx, em, err)
+		return false
 	}
 	em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
 	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
@@ -649,6 +700,18 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) {
 		"generated": res.Usage.Generated, "turns": res.Usage.Turns})
 	em.emit(event{"type": "done"})
 	emitSuggestions(ctx, h, em)
+	return true
+}
+
+// emitTurnError reports a failed turn, and says whether the SESSION is over.
+//
+// Those are different facts and conflating them is what made a 30-minute
+// deadline look like a crash: fatal is true only when the session context
+// itself is gone (ctrl-C), in which case no message can help. Otherwise the
+// turn is what died — the conversation is on disk, and the next message pairs
+// off whatever was interrupted and continues from there.
+func emitTurnError(sessionCtx context.Context, em *emitter, err error) {
+	em.emit(event{"type": "error", "error": err.Error(), "fatal": sessionCtx.Err() != nil})
 }
 
 // emitSuggestions asks for likely next user messages and emits them (best-effort,
@@ -707,6 +770,7 @@ type event map[string]any
 // changes).
 type emitter struct {
 	mu  sync.Mutex
+	w   io.Writer // nil → stdout; a test points this at a buffer
 	enc *json.Encoder
 }
 
@@ -714,7 +778,11 @@ func (e *emitter) emit(ev event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.enc == nil {
-		e.enc = json.NewEncoder(os.Stdout)
+		w := e.w
+		if w == nil {
+			w = os.Stdout
+		}
+		e.enc = json.NewEncoder(w)
 	}
 	_ = e.enc.Encode(ev)
 }

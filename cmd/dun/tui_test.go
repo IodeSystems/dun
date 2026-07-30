@@ -852,3 +852,41 @@ type nopWC struct{ w io.Writer }
 
 func (n nopWC) Write(p []byte) (int, error) { return n.w.Write(p) }
 func (n nopWC) Close() error                { return nil }
+
+// A turn that died is not a session that died. The engine says which, and the
+// UI must not offer advice that cannot work — "send a message to retry" to a
+// session that can no longer run a turn is how a 30-minute deadline came to
+// look like a crash.
+func TestTUI_ErrorHintTracksFatality(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+
+	m = m.handleEvent(evMsg{"type": "error", "error": "context deadline exceeded", "fatal": false})
+	if !strings.Contains(m.convoText(), "session is intact") {
+		t.Errorf("a recoverable turn failure should say so: %s", m.convoText())
+	}
+
+	m = m.handleEvent(evMsg{"type": "error", "error": "context canceled", "fatal": true})
+	txt := m.convoText()
+	if !strings.Contains(txt, "dun --continue") {
+		t.Errorf("a dead session should point at --continue: %s", txt)
+	}
+	if strings.Count(txt, "session is intact") != 1 {
+		t.Errorf("the fatal error must not repeat the retry advice: %s", txt)
+	}
+}
+
+// The engine announces why it is leaving, so the TUI does not have to report a
+// bare "engine exited" and leave the user guessing.
+func TestTUI_ExitEventExplainsItself(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "exit", "reason": "interrupted"})
+	nm, _ = m.Update(eofMsg{})
+	m = nm.(tuiModel)
+	if !strings.Contains(m.fatalErr, "interrupted") {
+		t.Errorf("exit reason lost: %q", m.fatalErr)
+	}
+}

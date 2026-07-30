@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iodesystems/dun"
 )
@@ -49,4 +54,81 @@ func TestServerHint_NamesWhatIsOffAndHow(t *testing.T) {
 	if strings.Contains(hint, "\ncode did not start") && strings.Count(hint, "\n") > 1 {
 		t.Errorf("failure detail should be flattened to one line: %q", hint)
 	}
+}
+
+// A turn timeout must not be a session timeout. The old behaviour applied
+// --timeout to the whole run, so at the deadline every following turn failed
+// instantly on the same dead context and the engine exited — while the UI was
+// still advising "send a message to retry".
+func TestTurnCtx_BoundsTheTurnNotTheSession(t *testing.T) {
+	sessionCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	turnTimeout = 20 * time.Millisecond
+	defer func() { turnTimeout = 0 }()
+
+	tctx, tcancel := turnCtx(sessionCtx)
+	defer tcancel()
+	select {
+	case <-tctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn context never expired")
+	}
+	if sessionCtx.Err() != nil {
+		t.Fatal("the turn's deadline killed the session context")
+	}
+	// The next turn gets a live context, which is the whole point.
+	next, ncancel := turnCtx(sessionCtx)
+	defer ncancel()
+	if next.Err() != nil {
+		t.Fatalf("the turn after a timeout started dead: %v", next.Err())
+	}
+}
+
+// With no per-turn timeout, a turn is bounded only by the session (ctrl-C).
+func TestTurnCtx_NoTimeoutFollowsTheSession(t *testing.T) {
+	turnTimeout = 0
+	sessionCtx, cancel := context.WithCancel(context.Background())
+	tctx, tcancel := turnCtx(sessionCtx)
+	defer tcancel()
+	if _, ok := tctx.Deadline(); ok {
+		t.Error("turn should have no deadline of its own")
+	}
+	cancel()
+	select {
+	case <-tctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("ctrl-C did not reach the turn")
+	}
+}
+
+// "the turn failed" and "the session is over" are different facts; the engine
+// reports which, because the UI cannot tell from the error text.
+func TestEmitTurnError_FatalOnlyWhenTheSessionIsGone(t *testing.T) {
+	live, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var buf bytes.Buffer
+	em := &emitter{w: &buf}
+
+	emitTurnError(live, em, errors.New("context deadline exceeded"))
+	if got := decodeEvent(t, buf.String()); got["fatal"] != false {
+		t.Errorf("a turn timeout is not fatal to the session: %v", got)
+	}
+
+	buf.Reset()
+	dead, dcancel := context.WithCancel(context.Background())
+	dcancel()
+	emitTurnError(dead, em, errors.New("context canceled"))
+	if got := decodeEvent(t, buf.String()); got["fatal"] != true {
+		t.Errorf("a dead session must be reported as fatal: %v", got)
+	}
+}
+
+func decodeEvent(t *testing.T, line string) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &m); err != nil {
+		t.Fatalf("bad event %q: %v", line, err)
+	}
+	return m
 }

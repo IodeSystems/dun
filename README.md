@@ -119,6 +119,13 @@ sent while it's working is buffered and lifted into the next tool result, so it
 lands *inside* the running turn — no extra round-trip — and several batch in
 order.
 
+**A dead turn is not a dead session.** `--timeout` (default 30m) bounds a *turn*
+in an interactive session and the *whole run* one-shot. A turn that hangs is cut
+off; the engine stays up and the next message starts a fresh turn — it does not
+exit, and the conversation is on disk either way. When the session really is
+over (ctrl-C), the engine says so and the TUI points at `dun --continue` instead
+of offering a retry that cannot work.
+
 **A changed tool set announces itself, for free.** Turning rag or lsp on or off
 mid-session buffers an *aside* — which tools appeared, which are gone. The
 schemas already travel in every request; what the model cannot see there is that
