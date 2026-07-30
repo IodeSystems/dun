@@ -288,6 +288,18 @@ func (s *sessionStore) publish(e agent.Entry) {
 	s.flushLocked()
 }
 
+// appendSilent adds an entry WITHOUT marking it an inbox arrival and without
+// the onNotify ping: the model reads it in the next turn's context, but its
+// presence is not a reason to run one, and the UI already said its piece when
+// the thing happened. This is what keeps a tool-set aside from costing a whole
+// turn (see Harness.Aside).
+func (s *sessionStore) appendSilent(e agent.Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries = append(s.entries, e)
+	s.flushLocked()
+}
+
 // pending reports how many inbox arrivals have not been claimed by a turn.
 // A driver uses this to avoid running a turn with nothing new to say: an
 // empty turn appends a second assistant message after the previous one, and

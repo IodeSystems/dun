@@ -139,23 +139,46 @@ type Harness struct {
 	// the lock sets applyPending and the turn applies it on the way out.
 	turnMu       sync.Mutex
 	applyPending atomic.Bool
+	// toolsInit is false until the first rebuild, so the initial tool set is
+	// not announced as a CHANGE — the system prompt already describes it.
+	toolsInit bool
 }
 
+// queuedKind is what a buffered item IS, which decides how much it is worth.
+//
+// The distinction that matters is the last one: a notification or a user
+// message is news the model has to act on, so if nothing else picks it up the
+// driver runs a turn for it. An aside is context the model needs the next time
+// it thinks — not a reason to think. Publishing an aside as an inbox arrival
+// would spend a whole turn (and, for a tool-set change, a turn whose only
+// content is "ok") on something that costs nothing to carry.
+type queuedKind int
+
+const (
+	queuedNotification queuedKind = iota // a background job finished
+	queuedUser                           // the user typed while the agent worked
+	queuedAside                          // context worth knowing, never worth a turn
+)
+
 // queued is something buffered to reach the model at the cheapest moment: a
-// background job's completion, or a message the user typed while the agent was
-// already working.
+// background job's completion, a message the user typed while the agent was
+// already working, or an aside about the session itself.
 type queued struct {
-	user bool // a user message (vs a background notification)
+	kind queuedKind
 	text string
 }
 
 // prefix labels a queued item where it is lifted into a tool result, so the model
 // can tell the user talking from the machinery reporting.
 func (q queued) prefix() string {
-	if q.user {
+	switch q.kind {
+	case queuedUser:
 		return "[user] "
+	case queuedAside:
+		return "[session] "
+	default:
+		return "[background] "
 	}
-	return "[background] "
 }
 
 // Resumed reports how many entries were restored from an existing session file.
@@ -227,7 +250,7 @@ func (h *Harness) History() []HistoryItem {
 // OnNotify still fires immediately so a UI shows the job finishing in real time.
 func (h *Harness) Notify(text string) {
 	h.noteMu.Lock()
-	h.queue = append(h.queue, queued{text: text})
+	h.queue = append(h.queue, queued{kind: queuedNotification, text: text})
 	h.noteMu.Unlock()
 	if cb := h.store.notifyCallback(); cb != nil {
 		cb(text)
@@ -247,7 +270,31 @@ func (h *Harness) Notify(text string) {
 // does not pick up is published by flushQueued when it ends.
 func (h *Harness) Say(text string) {
 	h.noteMu.Lock()
-	h.queue = append(h.queue, queued{user: true, text: text})
+	h.queue = append(h.queue, queued{kind: queuedUser, text: text})
+	h.noteMu.Unlock()
+}
+
+// Aside hands the model context about the session itself — today, that the tool
+// set changed under it (/rag on, /lsp off).
+//
+// It rides the same buffer as Notify and Say, and differs in exactly one way:
+// it will never CAUSE a turn. The three ways it can reach the model, cheapest
+// first:
+//
+//   - lifted into a tool result the model is already reading (liftQueued),
+//   - published just before the next turn that was going to run anyway
+//     (flushAsides, from prepareTurn) — including the turn a user message
+//     starts, which is the "join with the user message" case,
+//   - otherwise it waits. Indefinitely, and that is correct: a tool set the
+//     model never gets to use costs nothing to leave unsaid.
+//
+// Why not just let the tool schemas speak for themselves? They do travel in
+// every request, so the model CAN see the new set — but not that it changed
+// mid-conversation, and a model that reasoned two turns ago about not having
+// search will keep acting on that. The aside is the delta, not the schemas.
+func (h *Harness) Aside(text string) {
+	h.noteMu.Lock()
+	h.queue = append(h.queue, queued{kind: queuedAside, text: text})
 	h.noteMu.Unlock()
 }
 
@@ -280,14 +327,25 @@ func (h *Harness) liftQueued(result string) string {
 // arrivals — user messages as user turns, notifications as notifications.
 // Returns how many were flushed so the caller can decide whether a follow-up turn
 // is worth running.
+//
+// Asides are NOT flushed here: publishing one as an inbox arrival is what would
+// make a driver run a turn for it. They stay buffered until a turn happens for
+// some other reason (flushAsides) or a tool result carries them.
 func (h *Harness) flushQueued() int {
 	h.noteMu.Lock()
-	items := h.queue
-	h.queue = nil
+	var items, keep []queued
+	for _, q := range h.queue {
+		if q.kind == queuedAside {
+			keep = append(keep, q)
+			continue
+		}
+		items = append(items, q)
+	}
+	h.queue = keep
 	h.noteMu.Unlock()
 	for _, q := range items {
 		kind := agent.KindNotification
-		if q.user {
+		if q.kind == queuedUser {
 			kind = agent.KindUser
 		}
 		h.store.publish(agent.Entry{
@@ -298,11 +356,42 @@ func (h *Harness) flushQueued() int {
 	return len(items)
 }
 
+// flushAsides appends buffered asides to the conversation WITHOUT marking them
+// inbox arrivals, immediately before a turn that is about to run for some other
+// reason. The model reads them in that turn's context; nothing schedules a turn
+// on their account (that is the whole point — see Aside).
+func (h *Harness) flushAsides() int {
+	h.noteMu.Lock()
+	var items, keep []queued
+	for _, q := range h.queue {
+		if q.kind == queuedAside {
+			items = append(items, q)
+			continue
+		}
+		keep = append(keep, q)
+	}
+	h.queue = keep
+	h.noteMu.Unlock()
+	for _, q := range items {
+		h.store.appendSilent(agent.Entry{
+			ID: uuid.New().String(), Kind: agent.KindNotification,
+			Content: q.text, CreatedAt: time.Now().UnixNano(),
+		})
+	}
+	return len(items)
+}
+
 // Pending reports whether a Continue turn has anything new to process —
-// unclaimed inbox arrivals or buffered messages.
+// unclaimed inbox arrivals or buffered messages. Asides do not count: they are
+// carried by a turn, never a reason to run one.
 func (h *Harness) Pending() int {
 	h.noteMu.Lock()
-	buffered := len(h.queue)
+	buffered := 0
+	for _, q := range h.queue {
+		if q.kind != queuedAside {
+			buffered++
+		}
+	}
 	h.noteMu.Unlock()
 	return h.store.pending() + buffered
 }
@@ -313,7 +402,13 @@ func (h *Harness) Pending() int {
 func (h *Harness) Queued() int {
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()
-	return len(h.queue)
+	n := 0
+	for _, q := range h.queue {
+		if q.kind != queuedAside { // the user did not type it; do not count it
+			n++
+		}
+	}
+	return n
 }
 
 // Wake fires when a background job finishes, so the driver runs a Continue turn.
@@ -364,6 +459,10 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	if h.healOrphanToolCalls(ctx) == 0 {
 		h.flushQueued()
 	}
+	// Asides ride whatever turn is about to run — including the one a user
+	// message starts, which is where "the tool set changed" most often lands.
+	// Healing already lifted them into the interrupted call's result.
+	h.flushAsides()
 }
 
 // healOrphanToolCalls answers every persisted tool call that has no result with

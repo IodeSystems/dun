@@ -113,6 +113,14 @@ sent while it's working is buffered and lifted into the next tool result, so it
 lands *inside* the running turn — no extra round-trip — and several batch in
 order.
 
+**A changed tool set announces itself, for free.** Turning rag or lsp on or off
+mid-session buffers an *aside* — which tools appeared, which are gone. The
+schemas already travel in every request; what the model cannot see there is that
+they CHANGED, and one that reasoned earlier about not having `search` will keep
+acting on that. The aside rides the next tool result, or joins the next turn
+that was going to run anyway. It never schedules one of its own: an LLM
+round-trip whose only output is "ok, noted" is not worth buying.
+
 **Human-in-the-loop:** the agent can call `ask_user{question, options}` when a
 decision is yours — the turn pauses, you're asked (a picker in the TUI), and it
 resumes with your answer. **Proactive docs:** relevant docs are pushed as 🔔

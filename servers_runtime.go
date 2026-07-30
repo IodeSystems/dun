@@ -6,6 +6,7 @@ import (
 	"log"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -220,6 +221,15 @@ func (h *Harness) rebuildTools() {
 		return // autostart runs before the Session exists; Start applies it after
 	}
 	tools := h.mgr.GetTools()
+	// Tell the model what changed under it, if anything. Buffered, not sent:
+	// see Harness.Aside for why a tool-set change is never worth a turn of its
+	// own. Skipped on the first build — the system prompt covers that.
+	if h.toolsInit {
+		if note := toolSetDelta(h.Tools, tools); note != "" {
+			h.Aside(note)
+		}
+	}
+	h.toolsInit = true
 	h.Tools = tools
 
 	// Bridge the MCP tools + the built-in tools (exec, ask_user). Non-MCP tools
@@ -269,6 +279,83 @@ func (h *Harness) rebuildTools() {
 		// dun's aggregating preparer emits one found/surfaced summary per pass.
 		h.Session.Preparer = docsPreparer(h.store, finder, agent.FinderOpts{MaxHits: 2}, cfg.OnDocs)
 	}
+}
+
+// toolSetDelta describes what appeared and disappeared, grouped by server, or
+// "" when nothing changed.
+//
+// Names, not schemas: the schemas themselves ride every request in the tools
+// block, so repeating them here would pay for the same bytes twice. What the
+// model cannot see there is that the set CHANGED — it reasoned two turns ago
+// about not having search, and will keep acting on that until told otherwise.
+func toolSetDelta(before, after []mcpmgr.MCPTool) string {
+	was := toolsByServer(before)
+	now := toolsByServer(after)
+	var lines []string
+	for _, id := range serverOrder(was, now) {
+		added := missing(now[id], was[id])
+		removed := missing(was[id], now[id])
+		switch {
+		case len(was[id]) == 0 && len(added) > 0:
+			lines = append(lines, fmt.Sprintf("%s is now available: %s", id, strings.Join(added, ", ")))
+		case len(now[id]) == 0 && len(removed) > 0:
+			lines = append(lines, fmt.Sprintf("%s was turned off; no longer callable: %s", id, strings.Join(removed, ", ")))
+		default:
+			if len(added) > 0 {
+				lines = append(lines, fmt.Sprintf("%s gained: %s", id, strings.Join(added, ", ")))
+			}
+			if len(removed) > 0 {
+				lines = append(lines, fmt.Sprintf("%s lost: %s", id, strings.Join(removed, ", ")))
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "your tools changed — " + strings.Join(lines, "; ") +
+		". Use what is there now; do not call what is gone."
+}
+
+func toolsByServer(tools []mcpmgr.MCPTool) map[string][]string {
+	out := map[string][]string{}
+	for _, t := range tools {
+		out[t.ServerID] = append(out[t.ServerID], t.Name)
+	}
+	for id := range out {
+		sort.Strings(out[id])
+	}
+	return out
+}
+
+// serverOrder is every server mentioned by either side, deterministically.
+func serverOrder(a, b map[string][]string) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, m := range []map[string][]string{a, b} {
+		for id := range m {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// missing returns the entries of want that have are absent from have.
+func missing(want, have []string) []string {
+	in := make(map[string]bool, len(have))
+	for _, s := range have {
+		in[s] = true
+	}
+	var out []string
+	for _, s := range want {
+		if !in[s] {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // ingestWorkspace lexically indexes the workspace into raglit (best-effort).

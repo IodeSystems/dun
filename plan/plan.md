@@ -72,7 +72,8 @@ full detail archived in `done.md`.
 - **Opt-in tool families** — only `shell` autostarts; `/rag` and `/lsp`
   (status·on·off·auto·manual) + `--rag`/`--lsp` start the other two, autostart
   persists to `.dun/dun.local.json`, and a server that fails to start is
-  reported rather than fatal.
+  reported rather than fatal. A change to the tool set is carried to the model
+  as an `Aside` (rides the next tool result / turn; never schedules one).
 - **Retry UX + mid-turn messages** — provider waits are narrated (agentkit
   `Client.OnRetry`, rich corrallm 429s), a mid-stream death retries the TURN, a
   give-up leaves the session resumable, and a message typed mid-turn is lifted
@@ -114,6 +115,12 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   them rather than inventing its own numbers. Request scope covers everything up
   to the response headers; turn scope covers what it structurally cannot — a
   stream that died mid-generation.
+- **Three tiers of buffered news, split by what a turn is worth.** `Say` (user)
+  and `Notify` (background job) are news: if nothing picks them up, the driver
+  runs a turn. `Aside` (the tool set changed) is context: it rides a tool result
+  or joins the next turn, is appended with `store.appendSilent` so it never
+  counts as an inbox arrival, and waits indefinitely otherwise. A turn whose
+  only output is "ok, noted" is not worth buying.
 - **News reaches the model inside a tool result, never as a new turn.** Background
   completions and mid-turn user messages share one buffer (`Harness.Say` /
   `Notify` → `withLiftedQueue`), because a tool result the model is already
