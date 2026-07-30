@@ -127,11 +127,19 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   `Notify` → `withLiftedQueue`), because a tool result the model is already
   reading is the only free delivery slot — and an assistant message appended after
   another is what providers reject.
-- **The TUI supervises its engine.** A crash (stdout EOF with no `exit` event)
-  respawns it against the same session id, skipping the history replay (already
-  on screen) and re-issuing the `/rag`/`/lsp` the user had on. Capped at 3 per
-  2 minutes — a crash LOOP must be reported, not hidden behind a flickering UI.
-  An announced exit is left alone: that one was asked for.
+- **The TUI supervises its engine, including the first one.** A crash (stdout
+  EOF with no `exit` event) respawns it against the same session id, skipping
+  the history replay (already on screen) and re-issuing the `/rag`/`/lsp` the
+  user had on. A first engine that never spawned does NOT stop the UI opening —
+  that is where the error is legible and where `/reconnect` lives — but it must
+  not reattach either, or a fresh `dun` would grab an unrelated old session.
+  Capped at 3 per 2 minutes — a crash LOOP must be reported, not hidden behind a
+  flickering UI. An announced exit is left alone: that one was asked for.
+- **The TUI is the default mode; long flags are `--long`.** `dun` bare printed a
+  usage line and exited, which made the interactive UI the one mode you had to
+  ask for. A positional task still runs headless — scripts must not suddenly
+  open a UI. `flag.Usage` is overridden because Go prints `-tui`, which reads
+  like `-t -u -i`.
 - **The turn budget is a pausable clock, not a context deadline.** Time a human
   spends in `ask_user` is not dun working, so it is not charged (`turnclock.go`,
   `withoutClock`). A deadline context cannot express that — hence the timer.

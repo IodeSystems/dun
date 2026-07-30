@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -983,5 +984,53 @@ func TestTUI_RestartReappliesServers(t *testing.T) {
 		"servers": []any{map[string]any{"id": "docs", "running": false}}})
 	if !strings.Contains(sent.String(), `"action":"on"`) || !strings.Contains(sent.String(), `"id":"rag"`) {
 		t.Errorf("/rag was not turned back on after the restart: %q", sent.String())
+	}
+}
+
+// After the restart cap the TUI is still a working UI, and /reconnect is the
+// way back — the alternative is quitting and losing the terminal state for a
+// session that is fine on disk.
+func TestTUI_ReconnectAfterGivingUp(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m.restarts, m.restartStart = engineRestartMax, time.Now()
+	m.fatalErr = "dun engine exited — gave up restarting it"
+
+	cmd := m.runSlash("/reconnect")
+	if cmd == nil {
+		t.Fatal("/reconnect should spawn an engine")
+	}
+	if m.restarts != 0 {
+		t.Errorf("the retry budget should be refilled, got %d", m.restarts)
+	}
+	if m.fatalErr != "" {
+		t.Errorf("reconnecting clears the dead-engine banner, got %q", m.fatalErr)
+	}
+	if !strings.Contains(m.convoText(), "reconnecting") {
+		t.Errorf("the attempt should be visible: %s", m.convoText())
+	}
+}
+
+// Between an engine dying and its replacement there is no engine. Typing then
+// must not panic, and must not swallow the message silently either.
+func TestTUI_NoEngineIsSurvivable(t *testing.T) {
+	m := newTUIModel(nil, "/ws") // never started
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	if cmd := m.Init(); cmd == nil {
+		t.Fatal("Init with no engine should still schedule work (a retry)")
+	}
+	m = m.sendUser("are you there")
+	if m.busy {
+		t.Error("nothing was sent, so no turn is running")
+	}
+	if !strings.Contains(m.convoText(), "not sent") {
+		t.Errorf("a dropped message must be reported: %s", m.convoText())
+	}
+	// And the slash commands that talk to the engine say so rather than panic.
+	m.runSlash("/rag on")
+	if !strings.Contains(m.convoText(), "no engine") {
+		t.Errorf("server command should report the missing engine: %s", m.convoText())
 	}
 }

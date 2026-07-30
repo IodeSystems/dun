@@ -98,7 +98,7 @@ func termWS(w http.ResponseWriter, r *http.Request, o tuiOpts) {
 	o.disableExit = true
 	atomic.AddInt64(&activeWeb, 1)
 	defer atomic.AddInt64(&activeWeb, -1)
-	cmd := exec.Command(exe, procArgs(o, "-tui")...)
+	cmd := exec.Command(exe, procArgs(o, "--tui")...)
 	cmd.Env = append(os.Environ(), "DUN_CHILD=1") // spawned TUI never self-rebuilds
 	ptmx, err := pty.Start(cmd) // pty.Start makes the child a session leader
 	if err != nil {

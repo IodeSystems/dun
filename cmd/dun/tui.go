@@ -46,19 +46,28 @@ type tuiOpts struct {
 // "update ready" indicator + /reload.
 func runTUI(o tuiOpts, lc *launcherConn) error {
 	loadScriptRenderers() // ~/.dun/renderers/*.star override/extend the built-ins
-	proc, err := startDunProc(o)
-	if err != nil {
-		return err
-	}
+	// A first engine that will not spawn is NOT a reason to refuse to open. The
+	// UI is where the error is legible and where /reconnect lives; exiting to a
+	// bare shell message just moves the same failure somewhere with fewer
+	// options. Init retries from inside.
+	proc, startErr := startDunProc(o)
 	m := newTUIModel(proc, o.workspace)
 	m.model, m.url, m.keySet = o.model, o.url, o.key != "" // for /config
 	m.disableExit = o.disableExit
 	m.lc = lc
 	m.opts = o // for respawning the engine (see eofMsg)
+	if startErr != nil {
+		m.fatalErr = "engine did not start: " + startErr.Error()
+		m.starting = false
+	}
 	// WithMouseCellMotion makes the terminal (and tmux) forward wheel events to
 	// us instead of scrolling its own scrollback; the viewport consumes them.
 	fm, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
-	proc.close()
+	if tm, ok := fm.(tuiModel); ok {
+		tm.proc.close() // the engine it ENDED with, which may not be the one it started
+	} else {
+		proc.close()
+	}
 	// /reload: bubbletea has restored the terminal by now, so re-exec cleanly
 	// into the (launcher-rebuilt) binary with the same args.
 	if tm, ok := fm.(tuiModel); ok && tm.reloadReq && err == nil {
@@ -257,6 +266,7 @@ type tuiModel struct {
 	wantServers   map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
 	quitting      bool            // the user is leaving; do not respawn
 	exitAnnounced bool            // the engine said it was going; it did not crash
+	everUp        bool            // an engine reached `session` once; a retry may reattach
 	suggestions      []suggestion // --suggest: predicted next messages (idle-only picker)
 	suggestSelecting bool         // → arrow-navigable selector (entered via right from empty input)
 	suggestSel       int          // highlighted suggestion in the selector
@@ -286,7 +296,15 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return tea.Batch(waitEvent(m.proc.ch), m.spin.Tick, textinput.Blink, waitForDump(m.dumpSig), waitReload(m.lc))
+	cmds := []tea.Cmd{m.spin.Tick, textinput.Blink, waitForDump(m.dumpSig), waitReload(m.lc)}
+	if m.proc != nil {
+		cmds = append(cmds, waitEvent(m.proc.ch))
+	} else {
+		// The first engine never started. Come up anyway and keep trying —
+		// a TUI that refuses to open cannot even show you the error.
+		cmds = append(cmds, restartEngine(m.opts, "", false))
+	}
+	return tea.Batch(cmds...)
 }
 
 // reloadMsg carries a newer build version the launcher announced.
@@ -637,22 +655,33 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForDump(m.dumpSig) // re-arm for the next signal
 
 	case evMsg:
-		return m.handleEvent(msg), waitEvent(m.proc.ch)
+		nm := m.handleEvent(msg)
+		return nm, waitEvent(nm.proc.ch)
 
 	case eofMsg:
 		return m.engineGone()
 
 	case engineUpMsg:
 		if msg.err != nil {
-			m.fatalErr = "engine restart failed: " + msg.err.Error()
+			m.restarts++
+			if m.restarts >= engineRestartMax {
+				m.fatalErr = "engine will not start: " + msg.err.Error()
+				m.append(stErr.Render(m.fatalErr + "\n/reconnect to try again"))
+				m.refresh()
+				return m, nil
+			}
+			m.fatalErr = "engine will not start: " + msg.err.Error() + " — retrying"
 			m.refresh()
-			return m, nil
+			return m, tea.Tick(engineRetryDelay, func(time.Time) tea.Msg { return retryEngineMsg{} })
 		}
 		m.proc = msg.proc
 		m.fatalErr = ""
 		m.starting = true
 		m.refresh()
 		return m, waitEvent(m.proc.ch)
+
+	case retryEngineMsg:
+		return m, restartEngine(m.opts, m.sessionID, m.everUp)
 
 	case tea.MouseMsg:
 		var cmd tea.Cmd
@@ -824,8 +853,11 @@ func (m tuiModel) sendUser(v string) tuiModel {
 	m.input.Reset()
 	m.suggestions, m.suggestSelecting = nil, false
 	m.append(stUser.Render("› " + v))
+	if !m.proc.send(v) {
+		m.append(stErr.Render("no engine right now — not sent. /reconnect, then send it again"))
+		return m
+	}
 	m.busy = true
-	m.proc.send(v)
 	return m
 }
 
@@ -833,7 +865,9 @@ func (m tuiModel) sendUser(v string) tuiModel {
 // resets to the input pane.
 func (m tuiModel) sendAnswer(v string) tuiModel {
 	m.append(stUser.Render("› " + v))
-	m.proc.answer(v)
+	if !m.proc.answer(v) {
+		m.append(stErr.Render("no engine right now — answer not sent"))
+	}
 	m.asking, m.noting, m.customAnswer = false, false, false
 	m.askOptions, m.askSel, m.askNote = nil, 0, ""
 	m.askMulti, m.askChecked = false, nil
@@ -948,8 +982,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.append(stDim.Render("worktree branch: " + m.branch))
 	case "session":
 		// Remembered so a respawned engine reattaches to THIS conversation
-		// rather than starting a new one.
+		// rather than starting a new one. Before this point there is nothing to
+		// reattach TO, and guessing (--continue) would grab an unrelated session.
 		m.sessionID = str(ev["id"])
+		m.everUp = true
 	case "ready":
 		m.starting = false
 		m.tools = nil
@@ -1583,6 +1619,14 @@ func init() {
 			m.reloadReq = true
 			return tea.Quit
 		}},
+		{"reconnect", "", "restart the engine (after it gave up), keeping this session", func(m *tuiModel, _ []string) tea.Cmd {
+			m.restarts, m.restartStart = 0, time.Now()
+			m.fatalErr = ""
+			m.exitAnnounced = false
+			m.skipHistory = m.everUp
+			m.append(stDim.Render("reconnecting…"))
+			return restartEngine(m.opts, m.sessionID, m.everUp)
+		}},
 		{"rag", "[on|off|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
 		{"lsp", "[on|off|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
 		{"quit", "", "exit dun", func(m *tuiModel, _ []string) tea.Cmd {
@@ -1601,7 +1645,9 @@ func serverSlash(alias string) func(*tuiModel, []string) tea.Cmd {
 		if len(args) > 0 {
 			action = strings.ToLower(args[0])
 		}
-		m.proc.serverCmd(alias, action)
+		if !m.proc.serverCmd(alias, action) {
+			m.append(stErr.Render("no engine right now — /reconnect first"))
+		}
 		return nil
 	}
 }
@@ -1829,7 +1875,7 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	}
 	if m.restarts >= engineRestartMax {
 		m.fatalErr = reason + " — gave up restarting it"
-		m.append(stErr.Render(m.fatalErr + "\nyour conversation is saved: dun --continue"))
+		m.append(stErr.Render(m.fatalErr + "\n/reconnect to try again · your conversation is saved: dun --continue"))
 		m.refresh()
 		return m, nil
 	}
@@ -1838,18 +1884,25 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	m.skipHistory = true // it will replay what is already on screen
 	m.append(stErr.Render(reason + " — restarting it; the session is kept"))
 	m.refresh()
-	return m, restartEngine(m.opts, m.sessionID)
+	return m, restartEngine(m.opts, m.sessionID, true)
 }
 
-// restartEngine spawns a replacement engine attached to the same conversation.
-func restartEngine(o tuiOpts, sessionID string) tea.Cmd {
+// restartEngine spawns a replacement engine.
+//
+// reattach says whether there is a conversation to rejoin. It must be false for
+// the very first engine: forcing --continue there would silently attach a fresh
+// `dun -tui` to some unrelated older session, which is worse than the failure
+// it is recovering from.
+func restartEngine(o tuiOpts, sessionID string, reattach bool) tea.Cmd {
 	return func() tea.Msg {
-		// Reattach by id when we have one; otherwise take the workspace's most
-		// recent session, which is the one that just died.
-		if sessionID != "" {
-			o.resume, o.cont = sessionID, false
-		} else {
-			o.resume, o.cont = "", true
+		if reattach {
+			if sessionID != "" {
+				o.resume, o.cont = sessionID, false
+			} else {
+				// The engine died before naming its session; the workspace's
+				// most recent one is the one that just died.
+				o.resume, o.cont = "", true
+			}
 		}
 		p, err := startDunProc(o)
 		if err != nil {
@@ -1859,6 +1912,12 @@ func restartEngine(o tuiOpts, sessionID string) tea.Cmd {
 	}
 }
 
+// retryEngineMsg is a delayed retry after a failed spawn — an engine that
+// cannot start usually cannot start a millisecond later either.
+type retryEngineMsg struct{}
+
+const engineRetryDelay = 2 * time.Second
+
 type dunProc struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
@@ -1866,11 +1925,11 @@ type dunProc struct {
 }
 
 // procArgs builds a `dun <mode>` argv from the shared flags. mode is "-p" (the
-// engine, for the TUI) or "-tui" (the full TUI, for the xterm/PTY terminal view
-// served at /term).
+// engine, for the TUI) or "--tui" (the full TUI, for the xterm/PTY terminal
+// view served at /term).
 func procArgs(o tuiOpts, mode string) []string {
 	args := []string{mode, "--workspace", o.workspace}
-	if o.disableExit && mode == "-tui" {
+	if o.disableExit && mode == "--tui" {
 		args = append(args, "--disable-exit")
 	}
 	if o.suggest {
@@ -1947,20 +2006,35 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 	return p, nil
 }
 
-func (p *dunProc) send(content string) {
-	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content})
+// The proc methods are nil-safe: between an engine dying and its replacement
+// coming up there is no engine, and the UI stays usable in that window. They
+// report whether the message actually went anywhere.
+func (p *dunProc) send(content string) bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content}) == nil
 }
 
 // serverCmd asks the engine to report on, start, or stop a tool server.
-func (p *dunProc) serverCmd(alias, action string) {
-	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "server", "id": alias, "action": action})
+func (p *dunProc) serverCmd(alias, action string) bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "server", "id": alias, "action": action}) == nil
 }
 
-func (p *dunProc) answer(value string) {
-	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "answer", "value": value})
+func (p *dunProc) answer(value string) bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "answer", "value": value}) == nil
 }
 
 func (p *dunProc) close() {
+	if p == nil {
+		return
+	}
 	_ = p.stdin.Close()
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()

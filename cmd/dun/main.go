@@ -34,7 +34,41 @@ import (
 // TUI header so a stale on-PATH binary is visible at a glance.
 var version = "dev"
 
+// usage prints the flags as --long-flags.
+//
+// Go's flag package accepts -tui and --tui identically but PRINTS the first,
+// and `-tui` reads like the three short flags -t -u -i. Only genuinely
+// single-letter flags keep one dash.
+func usage() {
+	fmt.Fprint(os.Stderr, `dun — a coding agent that works a task in an isolated workspace.
+
+usage:
+  dun                        interactive TUI in the current directory (the default)
+  dun "fix the flaky test"   run one task headless, print the diff, exit
+  dun --continue             reopen the most recent session for this workspace
+  dun -p                     engine mode: line-delimited JSON events on stdin/stdout
+
+flags:
+`)
+	flag.VisitAll(func(f *flag.Flag) {
+		dash := "--"
+		if len(f.Name) == 1 {
+			dash = "-"
+		}
+		name, help := flag.UnquoteUsage(f)
+		head := "  " + dash + f.Name
+		if name != "" {
+			head += " " + name
+		}
+		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0s" {
+			help += " (default " + f.DefValue + ")"
+		}
+		fmt.Fprintf(os.Stderr, "%-24s %s\n", head, help)
+	})
+}
+
 func main() {
+	flag.Usage = usage
 	ver := flag.Bool("version", false, "print version and exit")
 	setup := flag.Bool("setup", false, "run the interactive setup wizard (LLM url/model/key) and exit")
 	// Flag defaults come from env then the saved config then the built-in — so a
@@ -58,7 +92,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /quit)")
 	suggest := flag.Bool("suggest", false, "after each turn, suggest likely next messages (one extra LLM call per turn)")
-	daemon := flag.Bool("d", false, "run/query the launcher daemon: `dun -d` (run), `dun -d status`, `dun -d shutdown`")
+	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
 	// Tri-state: unset means "whatever /rag auto or /lsp auto saved", which a
@@ -122,7 +156,12 @@ func main() {
 	}
 
 	// TUI mode: a Bubble Tea client of `dun -p` (re-exec'd with the same flags).
-	if *tui {
+	//
+	// The DEFAULT. `dun` on its own used to print a usage line and exit, which
+	// made the interactive UI — the thing you want nine times out of ten — the
+	// one mode you had to ask for. A positional task still runs headless: that
+	// is the scripting path and scripts must not suddenly open a UI.
+	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
 		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
@@ -153,10 +192,6 @@ func main() {
 	}
 	if sessionFile == "" {
 		sessionFile, sessionID = dun.NewSessionFile(absWS)
-	}
-	if firstTask == "" && !*prog {
-		fmt.Fprintln(os.Stderr, `usage: dun [--workspace DIR] "task"   (or -tui, or -p for JSON events)`)
-		os.Exit(2)
 	}
 	raglitHome, err := os.MkdirTemp("", "dun-raglit-")
 	if err != nil {
@@ -276,7 +311,9 @@ func main() {
 	h, err := dun.Start(ctx, cfg)
 	if err != nil {
 		if em != nil {
-			em.emit(event{"type": "error", "error": err.Error()})
+			// Fatal: there is no session yet, so "send a message to retry" would
+			// be advice with nothing to send it to.
+			em.emit(event{"type": "error", "error": err.Error(), "fatal": true})
 		}
 		fatal(err)
 	}

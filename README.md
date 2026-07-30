@@ -84,8 +84,8 @@ dun --setup   # Bubble Tea wizard: LLM url / masked key / model (navigable list
 # and then silently never updates again.
 # Plain build without install:  go build -o dun ./cmd/dun
 
-# interactive Bubble Tea UI
-DUN_LLM_KEY=... dun -tui --workspace ./my-project
+# interactive Bubble Tea UI — the DEFAULT, no flag needed
+DUN_LLM_KEY=... dun --workspace ./my-project
 
 # one-shot, human-readable
 DUN_LLM_KEY=... dun --workspace ./my-project "find the greet function and explain it"
@@ -126,11 +126,14 @@ answering `ask_user` is not dun working and is not charged to it, so a question
 left open never kills the turn that asked it. A turn that hangs is cut off; the
 engine stays up and the next message starts a fresh turn.
 
-If the engine dies anyway — crash, OOM, kill — the TUI restarts it, reattaches
-to the same session id, keeps your scrollback, and turns your `/rag` and `/lsp`
-servers back on. Three restarts per two minutes, then it stops and tells you
-(`dun --continue` still has everything). An engine that *chose* to exit (ctrl-C,
-`/quit`) says so and is left alone.
+If the engine dies anyway — crash, OOM, kill, or a config it refuses to start
+with — the TUI restarts it, reattaches to the same session id, keeps your
+scrollback, and turns your `/rag` and `/lsp` servers back on. That includes the
+*first* engine: a TUI that will not open is a TUI that cannot show you the
+error, so it comes up regardless and retries from inside. Three attempts per two
+minutes, then it stops and waits for `/reconnect` (`dun --continue` still has
+everything). An engine that *chose* to exit (ctrl-C, `/quit`) says so and is
+left alone.
 
 **A changed tool set announces itself, for free.** Turning rag or lsp on or off
 mid-session buffers an *aside* — which tools appeared, which are gone. The
@@ -157,8 +160,8 @@ host by default, or **contained in a Docker container** with the worktree
 mounted and no network:
 
 ```sh
-dun -tui --workspace ./repo --docker golang:1.26   # exec runs in the container
-dun -tui --workspace ./repo                         # exec runs on the host
+dun --workspace ./repo --docker golang:1.26   # exec runs in the container
+dun --workspace ./repo                        # exec runs on the host
 dun --no-worktree ...                               # work in place (no isolation)
 ```
 
