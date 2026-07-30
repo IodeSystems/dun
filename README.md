@@ -135,6 +135,19 @@ minutes, then it stops and waits for `/reconnect` (`dun --continue` still has
 everything). An engine that *chose* to exit (ctrl-C, `/quit`) says so and is
 left alone.
 
+**Context shaping is off unless you say otherwise, and never silent.** Set
+`DUN_CONTEXT_TOKENS` to your model's window to enable it (dun shapes to 90% of
+it: oversized old tool results become stubs first, and only then is the oldest
+history folded into a summary). **Unset means no shaping at all** — nothing can
+tell a 32k window from a 180k one without minutes of multi-megabyte probing, and
+guessing low compacts a large window for nothing.
+
+Every fold is reported — `🗜 compacted 12 entries: 30000 → 8000 tokens (saved
+22000)` — in the TUI, on stderr, and as a `compaction` event on `-p`. More than
+one fold in a single turn is called out as thrashing, because that means the
+budget cannot fit one turn's floor (system prompt + tool schemas + the pristine
+tail) and every turn will re-summarize what it just summarized.
+
 **A changed tool set announces itself, for free.** Turning rag or lsp on or off
 mid-session buffers an *aside* — which tools appeared, which are gone. The
 schemas already travel in every request; what the model cannot see there is that

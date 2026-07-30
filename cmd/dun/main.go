@@ -275,6 +275,11 @@ func main() {
 			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { em.emit(retryEvent(n)) }
+		cfg.OnCompaction = func(n dun.CompactionNote) {
+			em.emit(event{"type": "compaction", "text": n.String(), "subsumed": n.Subsumed,
+				"tokens_before": n.TokensBefore, "tokens_after": n.TokensAfter,
+				"turn": n.Turn, "since_last_secs": n.SinceLastSecs})
+		}
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
 			// Paused for the whole wait: the person deciding is not the turn
 			// working, and a question left open should never be what kills the
@@ -302,6 +307,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
+		cfg.OnCompaction = func(n dun.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
 			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi) })
 		}

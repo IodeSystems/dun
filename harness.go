@@ -103,6 +103,12 @@ type Config struct {
 	// OnDocs fires when the proactive-RAG preparer surfaces relevant documents —
 	// one aggregated summary per pass (found/surfaced counts + surfaced docs).
 	OnDocs func(DocsNote)
+	// OnCompaction fires when the Shaper folds history into a summary. Wired
+	// because compaction is otherwise INVISIBLE: it is the one operation that
+	// destroys conversation, and a session that was compacting on every turn
+	// (see contextBudget) ran for 29 minutes, wrote 154k characters of summary,
+	// and left 5 entries alive without a single line of output saying so.
+	OnCompaction func(CompactionNote)
 	// OnRetry fires while dun is waiting on the provider — every backoff, the
 	// recovery, and the give-up, at both request and turn scope. Without it the
 	// wait is invisible: the retries are logged, and a TUI's logs are not on
@@ -142,6 +148,11 @@ type Harness struct {
 	// toolsInit is false until the first rebuild, so the initial tool set is
 	// not announced as a CHANGE — the system prompt already describes it.
 	toolsInit bool
+	// Compaction counters. compactTurn resets each turn, so >1 is thrashing
+	// rather than a busy session.
+	compactMu   sync.Mutex
+	compactTurn int
+	compactLast time.Time
 }
 
 // queuedKind is what a buffered item IS, which decides how much it is worth.
@@ -617,6 +628,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	}
 	h.Session = &agent.Session{
 		SessionID:        "dun",
+		OnCompaction:     h.noteCompaction,
 		Store:            store,
 		Runner:           cfg.Client,
 		OnAssistantToken: cfg.OnToken,
@@ -715,6 +727,66 @@ func systemFor(tools []mcpmgr.MCPTool) string {
 	return b.String()
 }
 
+// CompactionNote is one history fold, for a UI and for the logs.
+type CompactionNote struct {
+	Subsumed      int    // entries folded into the summary
+	TokensBefore  int    // estimated active-window tokens before
+	TokensAfter   int    // and after
+	Summary       string // the summary that replaced them
+	Turn          int    // how many folds this turn — >1 is thrashing
+	SinceLastSecs int    // seconds since the previous fold (0 = first)
+}
+
+// String renders the note as one reviewable line.
+func (n CompactionNote) String() string {
+	s := fmt.Sprintf("compacted %d entries: %d → %d tokens (saved %d)",
+		n.Subsumed, n.TokensBefore, n.TokensAfter, n.TokensBefore-n.TokensAfter)
+	if n.Turn > 1 {
+		s += fmt.Sprintf(" · %d× this turn", n.Turn)
+	}
+	if n.SinceLastSecs > 0 {
+		s += fmt.Sprintf(" · %ds since the last", n.SinceLastSecs)
+	}
+	return s
+}
+
+// compactionThrashTurns is how many folds in ONE turn count as thrashing. More
+// than one means the budget cannot fit what a turn structurally needs (system
+// prompt + tool schemas + the pristine tail), so every turn will fold whatever
+// it just summarized — spending an LLM call each time to destroy context. The
+// budget is wrong, and saying so beats letting it grind.
+const compactionThrashTurns = 2
+
+// noteCompaction records a fold, decorates it with the thrash counters, and
+// hands it to the UI.
+func (h *Harness) noteCompaction(ci agent.CompactionInfo) {
+	h.compactMu.Lock()
+	h.compactTurn++
+	note := CompactionNote{
+		Subsumed:     ci.SubsumedCount,
+		TokensBefore: ci.TokensBefore,
+		TokensAfter:  ci.TokensAfter,
+		Summary:      ci.Summary,
+		Turn:         h.compactTurn,
+	}
+	if !h.compactLast.IsZero() {
+		note.SinceLastSecs = int(time.Since(h.compactLast).Seconds())
+	}
+	h.compactLast = time.Now()
+	thrash := h.compactTurn == compactionThrashTurns
+	h.compactMu.Unlock()
+
+	log.Printf("dun: %s", note)
+	if thrash {
+		log.Printf("dun: compaction is THRASHING (%d folds in one turn) — the context budget "+
+			"cannot fit one turn's floor. Raise DUN_CONTEXT_TOKENS or unset it (unset = no compaction).",
+			h.compactTurn)
+	}
+	if h.cfg.OnCompaction != nil {
+		h.cfg.OnCompaction(note)
+	}
+}
+
 // maxTurns is the cap on agent loop iterations. 40 suits an interactive
 // session, where the user is present and can nudge; a long autonomous task on a
 // large repo can legitimately need far more, since paging through unfamiliar
@@ -801,6 +873,14 @@ func verbatimToolResults() bool {
 // old behaviour and the safe default: no probe can tell a 32k window from a
 // 180k one without minutes of multi-megabyte requests, and guessing low is
 // expensive — it compacts a large window for no reason.
+//
+// "0 → no shaping" was the INTENT here from the start, but agentkit read a zero
+// budget as a budget of zero tokens, so the default path compacted on every
+// single turn. Two real sessions: 45 folds in 29 minutes and 38 in 7, each fold
+// an LLM call, leaving 5 and 7 surviving entries. Fixed in the Shaper (a
+// non-positive budget is now explicitly unbudgeted); the note is here because
+// this is where the 0 comes from and a future "sensible default" would walk
+// straight back into it.
 //
 // The fraction is deliberately close to 1. Shaping exists to stop a generation
 // being cut off mid-write, not to keep the context small: the LOD rung already

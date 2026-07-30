@@ -1115,6 +1115,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.append(stDim.Render("the session is intact — send a message to retry from here"))
 		}
 		m.refresh()
+	case "compaction":
+		// On screen, not just in a log a TUI never shows: this is the one
+		// operation that DESTROYS conversation, and it used to happen silently.
+		m.append(stNote.Render("🗜 " + str(ev["text"])))
+		m.refresh()
 	case "exit":
 		// The engine only announces an exit it CHOSE — ctrl-C, an explicit stop,
 		// stdin closing. That is the difference between "it left" and "it died",

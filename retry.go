@@ -190,6 +190,11 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 	// Session's tools mid-flight; the deferred unlock applies whatever the
 	// command deferred (see Harness.applyTools).
 	h.turnMu.Lock()
+	// Per-turn compaction counter: >1 fold in ONE turn is thrashing, not a long
+	// conversation, and that is the distinction worth reporting.
+	h.compactMu.Lock()
+	h.compactTurn = 0
+	h.compactMu.Unlock()
 	defer func() {
 		h.turnMu.Unlock()
 		if h.applyPending.Load() {

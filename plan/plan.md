@@ -116,6 +116,16 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   them rather than inventing its own numbers. Request scope covers everything up
   to the response headers; turn scope covers what it structurally cannot — a
   stream that died mid-generation.
+- **An unset budget is UNBUDGETED, not a budget of zero.** agentkit's Shaper
+  read `BudgetTokens: 0` as a zero-token ceiling, so dun's default
+  (`DUN_CONTEXT_TOKENS` unset → 0) compacted on every turn: 45 folds in 29 min
+  and 38 in 7 min across two real sessions, 154k chars of summary written, 5 and
+  7 entries surviving out of 50 and 45. Fixed in the Shaper; regression test
+  pins it. Anyone adding a "sensible default" budget must not reintroduce it.
+- **Compaction is reported, always.** It is the only operation that DESTROYS
+  conversation, and it ran unreported for three days. `OnCompaction` →
+  `CompactionNote` → TUI line, stderr, and a `-p` event, with a per-turn counter
+  so thrashing (>1 fold in one turn) names itself.
 - **Three tiers of buffered news, split by what a turn is worth.** `Say` (user)
   and `Notify` (background job) are news: if nothing picks them up, the driver
   runs a turn. `Aside` (the tool set changed) is context: it rides a tool result
