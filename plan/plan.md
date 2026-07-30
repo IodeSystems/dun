@@ -47,7 +47,8 @@ Everything below is ✅ done + (mostly) verified live. One-line pointers only;
 full detail archived in `done.md`.
 
 - **Tooling** — `tools/ttydrive` (drive TUIs headlessly) · `dun --setup` wizard +
-  `~/.dun/config.json` · version stamp + dev self-update.
+  `~/.dun/config.json` · version stamp + dev self-update · `dun` on PATH is a
+  rebuild-then-exec launcher (`tools/dun.sh`), so it is never stale.
 - **Slice 1** — headless composition (3 MCP servers → one Session; `-p` JSON
   event protocol; proven live vs bonsai).
 - **Slice 2** — Bubble Tea TUI (client of `-p`): pane focus/selection, vim `/`
