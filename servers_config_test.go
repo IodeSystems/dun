@@ -158,3 +158,90 @@ func TestLoadServers_RejectsCommandlessServer(t *testing.T) {
 		t.Error("a server with no command should be rejected")
 	}
 }
+
+// Only shell autostarts. code and docs cost real startup time and a machine
+// may not even have their binaries — a session must not depend on them.
+func TestLoadServers_OnlyShellAutostartsByDefault(t *testing.T) {
+	got, err := LoadServers(t.TempDir(), "/ws", "/raglit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := byID(got)
+	if !m["shell"].Autostart {
+		t.Error("shell should autostart")
+	}
+	if m["code"].Autostart || m["docs"].Autostart {
+		t.Errorf("code/docs must be opt-in: code=%v docs=%v", m["code"].Autostart, m["docs"].Autostart)
+	}
+}
+
+// .dun/dun.local.json is where dun writes its own state, and it must win over
+// the same file at the workspace root (the pre-.dun layout, still honored).
+func TestLoadServers_DunDirLocalWinsOverRoot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, DunDir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"docs","autostart":true}]}`)
+	writeJSON(t, filepath.Join(dir, DunDir), LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
+	got, err := LoadServers(dir, "/ws", "/raglit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byID(got)["docs"].Autostart {
+		t.Error(".dun/dun.local.json should have won")
+	}
+}
+
+// Turning autostart back OFF must be expressible, not require deleting the
+// entry that turned it on — which is why Autostart is a pointer.
+func TestSetAutostart_RoundTripBothWays(t *testing.T) {
+	dir := t.TempDir()
+	for _, want := range []bool{true, false, true} {
+		path, err := SetAutostart(dir, "docs", want)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Dir(path) != filepath.Join(dir, DunDir) {
+			t.Errorf("wrote outside %s: %s", DunDir, path)
+		}
+		got, err := LoadServers(dir, "/ws", "/raglit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if byID(got)["docs"].Autostart != want {
+			t.Fatalf("autostart=%v did not survive a reload", want)
+		}
+	}
+	// One entry, not one per call.
+	f, err := readServersFile(filepath.Join(dir, DunDir, LocalServersFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Servers) != 1 {
+		t.Errorf("want a single upserted entry, got %d", len(f.Servers))
+	}
+}
+
+// The local file holds machine state and may hold secrets: writing it must
+// also make it uncommittable, or the first /rag auto leaves a trap.
+func TestSetAutostart_WritesGitignore(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := SetAutostart(dir, "docs", true); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, DunDir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), LocalServersFile) {
+		t.Errorf(".gitignore does not cover %s: %q", LocalServersFile, b)
+	}
+	st, err := os.Stat(filepath.Join(dir, DunDir, LocalServersFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Errorf("want 0600, got %v", st.Mode().Perm())
+	}
+}

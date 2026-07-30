@@ -69,6 +69,10 @@ full detail archived in `done.md`.
 - **`--suggest`** — next-message prediction with probabilities.
 - **Declarative MCP servers** — `dun.json` (project) + `dun.local.json` (machine);
   merge-by-id, inherit, `disabled`, per-server env/timeout.
+- **Opt-in tool families** — only `shell` autostarts; `/rag` and `/lsp`
+  (status·on·off·auto·manual) + `--rag`/`--lsp` start the other two, autostart
+  persists to `.dun/dun.local.json`, and a server that fails to start is
+  reported rather than fatal.
 - **Retry UX + mid-turn messages** — provider waits are narrated (agentkit
   `Client.OnRetry`, rich corrallm 429s), a mid-stream death retries the TURN, a
   give-up leaves the session resumable, and a message typed mid-turn is lifted
@@ -89,6 +93,22 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   grow into a role DAG? Everything in `icebox.md` is viable without Slice 5.
 
 ## Decisions
+- **The tool set is mutable; four fields derive from it.** Servers start and stop
+  mid-session, so `Session.Tools`, `Dispatch`, `System` and `Preparer` are all
+  recomputed together by `Harness.applyTools` — never set individually, or the
+  next `/rag` silently reverts them. A rebuild that lands while a turn holds
+  `turnMu` is deferred to the turn boundary (swapping tools under a running turn
+  is a data race).
+- **A tool server failing to start is never fatal.** It costs that family and is
+  reported (`ServerState.Err`, the startup hint); losing an in-flight session
+  because raglit is misconfigured would be the worse outcome.
+- **`.dun/` is the per-workspace state directory.** `/rag auto` writes
+  `.dun/dun.local.json` (0600 + a `.gitignore`), which is also where per-session
+  state goes when one workspace runs several sessions.
+- **A spawned server's stderr is evidence, not noise.** agentkit's `mcpmgr` keeps
+  a bounded tail and appends it to start/initialize/list-tools errors — the
+  protocol layer can only ever say "transport closed", and the actionable line
+  is always on stderr.
 - **One retry policy, two scopes.** agentkit's `llm.Client` owns the schedule and
   budget (and exports them via `RetryPolicy()`); dun's turn-scope retry reuses
   them rather than inventing its own numbers. Request scope covers everything up

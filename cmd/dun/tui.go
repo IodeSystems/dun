@@ -36,6 +36,9 @@ type tuiOpts struct {
 	resume                             string // --resume <id>: resume a specific session
 	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /quit)
 	suggest                            bool   // --suggest: next-message suggestions after each turn
+	// rag/lsp are --rag/--lsp as typed: "" (unset, use the saved setting),
+	// "true" or "false". Passed through to the -p engine verbatim.
+	rag, lsp string
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -889,6 +892,22 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			}
 		}
 		m.append(stDim.Render(fmt.Sprintf("ready — %d tools: %s", len(m.tools), strings.Join(m.tools, ", "))))
+		// Say which tool families are off, once. Otherwise the only symptom is
+		// an agent that never navigates code or searches docs, and no reason.
+		if hint := strings.TrimSpace(str(ev["hint"])); hint != "" {
+			m.append(stNote.Render(hint))
+		}
+	case "server":
+		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
+			m.append(stNote.Render(msg))
+		}
+		// The tool list changed; keep /help's count and the status bar honest.
+		if ts, ok := ev["tools"].([]any); ok {
+			m.tools = nil
+			for _, t := range ts {
+				m.tools = append(m.tools, fmt.Sprint(t))
+			}
+		}
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
 		m.suggestions, m.suggestSelecting = nil, false
@@ -1469,7 +1488,23 @@ func init() {
 			m.reloadReq = true
 			return tea.Quit
 		}},
+		{"rag", "[on|off|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
+		{"lsp", "[on|off|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
 		{"quit", "", "exit dun", func(_ *tuiModel, _ []string) tea.Cmd { return tea.Quit }},
+	}
+}
+
+// serverSlash builds the /rag and /lsp handlers. The engine owns the work (it
+// holds the harness); the TUI just forwards the action and renders the `server`
+// event that comes back.
+func serverSlash(alias string) func(*tuiModel, []string) tea.Cmd {
+	return func(m *tuiModel, args []string) tea.Cmd {
+		action := ""
+		if len(args) > 0 {
+			action = strings.ToLower(args[0])
+		}
+		m.proc.serverCmd(alias, action)
+		return nil
 	}
 }
 
@@ -1678,6 +1713,12 @@ func procArgs(o tuiOpts, mode string) []string {
 	if o.suggest {
 		args = append(args, "--suggest") // propagate to -p (engine) and web -tui
 	}
+	if o.rag != "" {
+		args = append(args, "--rag="+o.rag)
+	}
+	if o.lsp != "" {
+		args = append(args, "--lsp="+o.lsp)
+	}
 	if o.model != "" {
 		args = append(args, "--model", o.model)
 	}
@@ -1745,6 +1786,11 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 
 func (p *dunProc) send(content string) {
 	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content})
+}
+
+// serverCmd asks the engine to report on, start, or stop a tool server.
+func (p *dunProc) serverCmd(alias, action string) {
+	_ = json.NewEncoder(p.stdin).Encode(map[string]string{"type": "server", "id": alias, "action": action})
 }
 
 func (p *dunProc) answer(value string) {

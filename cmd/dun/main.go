@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -62,6 +61,11 @@ func main() {
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: `dun -d` (run), `dun -d status`, `dun -d shutdown`")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
+	// Tri-state: unset means "whatever /rag auto or /lsp auto saved", which a
+	// plain bool cannot express (its zero value would silently mean "off").
+	var ragFlag, lspFlag tristate
+	flag.Var(&ragFlag, "rag", "start the docs server (raglit) this run: --rag or --rag=false (default: the saved setting)")
+	flag.Var(&lspFlag, "lsp", "start the code server (poly-lsp-mcp) this run: --lsp or --lsp=false (default: the saved setting)")
 	flag.Parse()
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
 
@@ -121,7 +125,7 @@ func main() {
 	if *tui {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -131,7 +135,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -188,10 +192,6 @@ func main() {
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
 
-	// Best-effort: index the workspace into raglit (lexical, fast) so proactive
-	// doc-notifications + search have content.
-	ingestWorkspace(raglitHome, effWS)
-
 	var em *emitter
 	var in *inputStream
 	cfg := dun.Config{
@@ -202,6 +202,11 @@ func main() {
 		Worktree:    wt,
 		EnablePR:    *pr,
 		SessionFile: sessionFile,
+		// The workspace's own checkout, not the worktree: /rag auto is a fact
+		// about this machine and this project, and must outlive the throwaway
+		// worktree this session works in.
+		ConfigDir:         absWS,
+		AutostartOverride: autostartOverrides(ragFlag, lspFlag),
 	}
 	if *prog {
 		em = &emitter{}
@@ -291,8 +296,20 @@ func main() {
 // runHuman streams a single task, then drains any background jobs it started
 // (their completion notifications trigger follow-up turns).
 func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
-	fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n\ntask: %s\n\n",
-		len(h.ToolNames()), strings.Join(h.ToolNames(), ", "), task)
+	fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n",
+		len(h.ToolNames()), strings.Join(h.ToolNames(), ", "))
+	// Name what is NOT running. A one-shot run has no /rag to type, so point at
+	// the flags instead of the commands.
+	for _, st := range h.Servers() {
+		switch {
+		case st.Running:
+		case st.Err != "":
+			fmt.Fprintf(os.Stderr, "dun: %s did not start: %s\n", st.ID, oneLine(st.Err))
+		default:
+			fmt.Fprintf(os.Stderr, "dun: %s off (--%s to start it this run)\n", st.ID, aliasOf(st.ID))
+		}
+	}
+	fmt.Fprintf(os.Stderr, "\ntask: %s\n\n", task)
 	res, err := h.Ask(ctx, task)
 	if err != nil {
 		// The conversation is on disk, so this is recoverable — say how, since the
@@ -338,7 +355,17 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 //   - An explicit stop/quit event: the caller asked to be let go NOW. Return
 //     without waiting on anything.
 func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string) {
-	em.emit(event{"type": "ready", "tools": h.ToolNames()})
+	em.emit(event{"type": "ready", "tools": h.ToolNames(), "servers": serversToAny(h.Servers()),
+		"hint": serverHint(h.Servers())})
+	// Server commands (/rag, /lsp) are handled on the READER's goroutine, not
+	// here: this loop is blocked inside a turn most of the time, and "turn the
+	// docs server on" should not queue behind a five-minute agent run. The
+	// harness defers the actual tool-set swap to a turn boundary.
+	in.setServerCmd(func(alias, action string) {
+		msg := runServerCmd(ctx, h, alias, action)
+		em.emit(event{"type": "server", "id": alias, "action": action, "message": msg,
+			"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
+	})
 	// A message that arrives while a turn is running does NOT wait for it. It is
 	// buffered and lifted into the next tool result, so the model reads it inside
 	// the turn it is already running — and several of them batch. Only when no turn
@@ -459,6 +486,13 @@ type inputStream struct {
 	// because it is set after the harness exists, while the scanner already runs.
 	mu  sync.Mutex
 	mid func(string) bool
+	// srv handles a `server` event (/rag, /lsp) inline, for the same reason as
+	// mid: it must work while a turn is running.
+	srv func(alias, action string)
+	// srvPending holds server commands that arrived before the handler was
+	// installed. The scanner starts before the harness exists, so a client that
+	// writes its first line immediately would otherwise have it dropped.
+	srvPending [][2]string
 }
 
 // setMidTurn installs the mid-turn router (see inputStream.mid).
@@ -466,6 +500,32 @@ func (s *inputStream) setMidTurn(f func(string) bool) {
 	s.mu.Lock()
 	s.mid = f
 	s.mu.Unlock()
+}
+
+// setServerCmd installs the server-command handler (see inputStream.srv) and
+// replays anything that arrived before it existed.
+func (s *inputStream) setServerCmd(f func(alias, action string)) {
+	s.mu.Lock()
+	s.srv = f
+	queued := s.srvPending
+	s.srvPending = nil
+	s.mu.Unlock()
+	for _, c := range queued {
+		f(c[0], c[1])
+	}
+}
+
+// serverCmd runs the installed handler, queueing until one exists.
+func (s *inputStream) serverCmd(alias, action string) {
+	s.mu.Lock()
+	f := s.srv
+	if f == nil {
+		s.srvPending = append(s.srvPending, [2]string{alias, action})
+	}
+	s.mu.Unlock()
+	if f != nil {
+		f(alias, action)
+	}
 }
 
 // midTurn offers text to the router, reporting whether it took it.
@@ -506,11 +566,17 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				Type    string `json:"type"`
 				Content string `json:"content"`
 				Value   string `json:"value"`
+				ID      string `json:"id"`     // server: which server (rag|lsp|<id>)
+				Action  string `json:"action"` // server: status|on|off|auto|manual
 			}
 			if json.Unmarshal([]byte(line), &ev) != nil {
 				continue
 			}
 			switch ev.Type {
+			case "server":
+				// Handled inline (see inputStream.srv): a turn may be running,
+				// and this loop is also the only reader of `answer` events.
+				s.serverCmd(ev.ID, ev.Action)
 			case "user":
 				if s.midTurn(ev.Content) {
 					continue // buffered into the running turn
@@ -558,12 +624,6 @@ func humanAsk(_ context.Context, question string, options []string, multi bool) 
 		return options[n-1], nil
 	}
 	return line, nil
-}
-
-// ingestWorkspace lexically indexes the workspace into raglit (best-effort).
-func ingestWorkspace(raglitHome, workspace string) {
-	cmd := exec.Command("raglit", "ingest", "--home", raglitHome, "--now", workspace)
-	_ = cmd.Run() // best-effort; proactive RAG simply has less to ping without it
 }
 
 // suggestEnabled mirrors --suggest; turn/continueTurn emit next-message

@@ -36,12 +36,32 @@ import (
 // Servers merge BY ID rather than replacing the list wholesale. Overriding one
 // binary's path should not require restating the other two — that is how a
 // config drifts out of sync with the defaults it silently forked.
+//
+// Both files are looked for in the workspace root AND in a .dun/ directory
+// beside it, .dun/ winning. New state dun writes itself (see SetAutostart) goes
+// to .dun/dun.local.json: per-workspace machine state belongs in one directory
+// rather than scattered dotfiles, and that directory is where per-session state
+// will live once one workspace runs several sessions.
 const (
 	// ProjectServersFile is committed and describes the project.
 	ProjectServersFile = "dun.json"
 	// LocalServersFile is gitignored and describes this machine.
 	LocalServersFile = "dun.local.json"
+	// DunDir is the per-workspace state directory.
+	DunDir = ".dun"
 )
+
+// serverConfigPaths lists the layered config files, LOWEST precedence first.
+// A missing file is skipped; the root-level pair is the pre-.dun/ layout and is
+// still honored so an existing checkout keeps working.
+func serverConfigPaths(dir string) []string {
+	return []string{
+		filepath.Join(dir, ProjectServersFile),
+		filepath.Join(dir, DunDir, ProjectServersFile),
+		filepath.Join(dir, LocalServersFile),
+		filepath.Join(dir, DunDir, LocalServersFile),
+	}
+}
 
 // ServerSpec is one MCP server as declared in a config file.
 type ServerSpec struct {
@@ -58,6 +78,12 @@ type ServerSpec struct {
 	// the file to re-list what it wants: dropping one built-in should be one
 	// line, not a transcription of the other two.
 	Disabled bool `json:"disabled,omitempty"`
+	// Autostart controls whether dun spawns this server at startup. A pointer
+	// because, unlike Disabled, this layer must be able to say "false"
+	// explicitly: turning autostart back OFF is a normal thing to do
+	// (/rag manual) and must not require deleting the entry that turned it on.
+	// nil = inherit the layer below.
+	Autostart *bool `json:"autostart,omitempty"`
 }
 
 // ServersFile is the on-disk shape of dun.json / dun.local.json.
@@ -74,12 +100,12 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 	merged := map[string]ServerSpec{}
 	order := []string{}
 	for _, s := range DefaultServers(workspace, raglitHome) {
-		merged[s.ID] = ServerSpec{ID: s.ID, Command: s.Command, Args: s.Args}
+		auto := s.Autostart
+		merged[s.ID] = ServerSpec{ID: s.ID, Command: s.Command, Args: s.Args, Autostart: &auto}
 		order = append(order, s.ID)
 	}
 
-	for _, name := range []string{ProjectServersFile, LocalServersFile} {
-		path := filepath.Join(dir, name)
+	for _, path := range serverConfigPaths(dir) {
 		f, err := readServersFile(path)
 		if err != nil {
 			return nil, err
@@ -109,11 +135,12 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 			return nil, fmt.Errorf("dun: server %q has no command (declare one, or remove the entry)", id)
 		}
 		out = append(out, Server{
-			ID:      s.ID,
-			Command: s.Command,
-			Args:    expandPlaceholders(s.Args, workspace, raglitHome),
-			Env:     expandPlaceholders(s.Env, workspace, raglitHome),
-			Timeout: s.Timeout,
+			ID:        s.ID,
+			Command:   s.Command,
+			Args:      expandPlaceholders(s.Args, workspace, raglitHome),
+			Env:       expandPlaceholders(s.Env, workspace, raglitHome),
+			Timeout:   s.Timeout,
+			Autostart: s.Autostart != nil && *s.Autostart,
 		})
 	}
 	return out, nil
@@ -143,6 +170,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	// from silently resurrecting something the project turned off.
 	if next.Disabled {
 		out.Disabled = true
+	}
+	if next.Autostart != nil {
+		out.Autostart = next.Autostart
 	}
 	return out
 }
@@ -179,6 +209,77 @@ func readServersFile(path string) (*ServersFile, error) {
 		return nil, fmt.Errorf("dun: parse %s: %w", path, err)
 	}
 	return &f, nil
+}
+
+// SetAutostart persists whether a server spawns at startup, in
+// dir/.dun/dun.local.json. Returns the file it wrote.
+//
+// Machine state, not project state: whether raglit is installed and worth
+// spawning here is a fact about this box. The .dun directory is created 0700
+// and given a .gitignore covering the local file, so turning a server on never
+// leaves something to accidentally commit.
+func SetAutostart(dir, id string, on bool) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("dun: SetAutostart: empty server id")
+	}
+	dunDir := filepath.Join(dir, DunDir)
+	if err := os.MkdirAll(dunDir, 0o700); err != nil {
+		return "", fmt.Errorf("dun: create %s: %w", dunDir, err)
+	}
+	if err := ensureDunGitignore(dunDir); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dunDir, LocalServersFile)
+	f, err := readServersFile(path)
+	if err != nil {
+		return "", err
+	}
+	if f == nil {
+		f = &ServersFile{}
+	}
+	found := false
+	for i := range f.Servers {
+		if f.Servers[i].ID == id {
+			f.Servers[i].Autostart = &on
+			found = true
+			break
+		}
+	}
+	if !found {
+		f.Servers = append(f.Servers, ServerSpec{ID: id, Autostart: &on})
+	}
+	b, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("dun: encode %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+		return "", fmt.Errorf("dun: write %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// ensureDunGitignore keeps the machine-local file out of git. It ignores the
+// local file by name rather than the whole directory, so a committed
+// .dun/dun.json remains possible.
+func ensureDunGitignore(dunDir string) error {
+	path := filepath.Join(dunDir, ".gitignore")
+	b, err := os.ReadFile(path)
+	if err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			if strings.TrimSpace(line) == LocalServersFile {
+				return nil
+			}
+		}
+		body := string(b)
+		if !strings.HasSuffix(body, "\n") {
+			body += "\n"
+		}
+		return os.WriteFile(path, []byte(body+LocalServersFile+"\n"), 0o644)
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("dun: read %s: %w", path, err)
+	}
+	return os.WriteFile(path, []byte(LocalServersFile+"\n"), 0o644)
 }
 
 // ServerIDs lists the resolved ids, for logs and diagnostics.

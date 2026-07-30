@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -798,3 +801,54 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 		t.Errorf("queuedMsgs = %d after done; want 0", m.queuedMsgs)
 	}
 }
+
+// /rag and /lsp are forwarded to the engine (which owns the harness), and the
+// `server` event it sends back is rendered into the conversation. The TUI must
+// not try to interpret the action itself.
+func TestTUI_ServerSlashCommands(t *testing.T) {
+	var sent bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: nopWC{&sent}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+
+	m = typeStr(m, "/rag auto")
+	m = key(m, kEnter)
+	var got map[string]string
+	if err := json.Unmarshal(sent.Bytes(), &got); err != nil {
+		t.Fatalf("did not send a server event: %q (%v)", sent.String(), err)
+	}
+	if got["type"] != "server" || got["id"] != "rag" || got["action"] != "auto" {
+		t.Fatalf("wrong event: %v", got)
+	}
+
+	// The engine's reply is what the user sees, verbatim.
+	m = m.handleEvent(evMsg{"type": "server", "id": "rag", "action": "auto",
+		"message": "rag (docs): autostart on (saved to /ws/.dun/dun.local.json)",
+		"tools":   []any{"eval", "search"}})
+	if !strings.Contains(m.convoText(), "autostart on") {
+		t.Fatalf("server reply not shown: %s", m.convoText())
+	}
+	// A start/stop changes the tool set; the TUI's copy must follow.
+	if len(m.tools) != 2 {
+		t.Errorf("tool list not refreshed from the server event: %v", m.tools)
+	}
+}
+
+// A startup hint is the only signal that a tool family is off — the alternative
+// symptom is an agent that silently never navigates code.
+func TestTUI_ReadyHint(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
+		"hint": "docs off — /rag on to start it, /rag auto to start it every session"})
+	if !strings.Contains(m.convoText(), "/rag auto") {
+		t.Fatalf("ready hint not shown: %s", m.convoText())
+	}
+}
+
+// nopWC captures what the TUI writes to the engine.
+type nopWC struct{ w io.Writer }
+
+func (n nopWC) Write(p []byte) (int, error) { return n.w.Write(p) }
+func (n nopWC) Close() error                { return nil }

@@ -14,23 +14,46 @@ own tools into one agent working inside an isolated workspace:
 
 ## MCP servers
 
-dun spawns three tool servers by default — `code` (poly-lsp-mcp), `shell`
-(mcpshell) and `docs` (raglit) — expected on `PATH`. Two optional files
-override that, layered:
+dun knows three tool servers, expected on `PATH`: `code` (poly-lsp-mcp), `shell`
+(mcpshell) and `docs` (raglit).
+
+**Only `shell` starts on its own.** `code` and `docs` are opt-in: each costs real
+startup time (poly-lsp-mcp indexes the repo; raglit has to ingest the workspace
+before it answers anything), and a machine that lacks one of those binaries
+should still get a working dun. Turn them on per session, or once for good:
+
+| command | does |
+|---|---|
+| `/rag` · `/lsp` | status: running? autostart? and the command that changes each |
+| `/rag on` · `/lsp on` | start it now, this session |
+| `/rag off` · `/lsp off` | stop it now |
+| `/rag auto` · `/lsp auto` | start it now **and** every future session (saved) |
+| `/rag manual` · `/lsp manual` | stop starting it automatically (leaves it running) |
+
+`--rag` / `--lsp` force one on for a single run (`--rag=false` forces it off),
+above whatever is saved. Startup names what is off, so a missing tool family is
+never a silent absence. A server that fails to start is reported and skipped —
+it costs you that family, not your session.
+
+Four optional config files, layered:
 
 | file | committed? | describes |
 |---|---|---|
-| `dun.json` | yes | the PROJECT — "this repo needs a db tool" |
-| `dun.local.json` | **no**, gitignore it | THIS MACHINE — binary paths, DSNs, anything secret |
+| `dun.json`, `.dun/dun.json` | yes | the PROJECT — "this repo needs a db tool" |
+| `dun.local.json`, `.dun/dun.local.json` | **no** | THIS MACHINE — binary paths, DSNs, anything secret |
 
 Precedence extends what dun already documents for LLM settings:
 
-    built-in defaults  <  dun.json  <  dun.local.json  <  Servers set in Go
+    built-in defaults  <  dun.json  <  .dun/dun.json  <  dun.local.json  <  .dun/dun.local.json  <  Servers set in Go
+
+`/rag auto` writes `.dun/dun.local.json` (0600, with a `.gitignore` beside it).
+The root-level pair is the older layout and is still read.
 
 Servers merge **by id**, and omitted fields inherit — overriding one binary path
 does not mean restating its args, and adding a fourth server does not mean
-re-listing the first three. Set `"disabled": true` to drop one. `{{workspace}}`
-and `{{raglit_home}}` are substituted at spawn.
+re-listing the first three. Set `"disabled": true` to drop one, `"autostart":
+true` to spawn one at startup. `{{workspace}}` and `{{raglit_home}}` are
+substituted at spawn.
 
 See `dun.example.json`.
 

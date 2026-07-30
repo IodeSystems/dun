@@ -1,7 +1,12 @@
 {
-  "//": "Copy to dun.json (committed, describes the PROJECT) or dun.local.json (gitignored, describes THIS MACHINE). Both are optional; with neither, dun spawns its built-in trio: code=poly-lsp-mcp, shell=mcpshell, docs=raglit.",
+  "//": "Copy to dun.json (committed, describes the PROJECT) or .dun/dun.local.json (gitignored, describes THIS MACHINE). Both are optional; with neither, dun knows three servers — code=poly-lsp-mcp, shell=mcpshell, docs=raglit — and starts only shell. /rag auto and /lsp auto write the autostart flag below.",
 
   "servers": [
+    {
+      "//": "Spawn a server at startup. code and docs are opt-in by default; this is what /lsp auto writes.",
+      "id": "code",
+      "autostart": true
+    },
     {
       "//": "Override a built-in by reusing its id. Fields you omit are INHERITED, so pointing at a different binary does not mean restating its args.",
       "id": "code",

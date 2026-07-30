@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,17 +39,40 @@ type Server struct {
 	Env []string
 	// Timeout in seconds for tool discovery; 0 uses dun's default.
 	Timeout int
+	// Autostart spawns this server when the session starts. Off means the
+	// server is available but idle until asked for (/lsp on, /rag on).
+	Autostart bool
 }
 
 // DefaultServers points the three tool servers at a workspace directory (later a
 // git worktree, and later still `docker exec` into a container).
+//
+// Only shell autostarts. The other two are opt-in because each costs real
+// startup time and neither is universally wanted: poly-lsp-mcp indexes the
+// repo, and raglit needs the workspace ingested before it answers anything.
+// A session that is going to run a couple of shell commands should not pay for
+// either, and — more to the point — a machine missing one of those binaries
+// should still get a working dun. Persist a preference with /rag auto or
+// /lsp auto (see SetAutostart).
 func DefaultServers(workspace, raglitHome string) []Server {
 	return []Server{
 		{ID: "code", Command: "poly-lsp-mcp", Args: []string{"mcp", "--root", workspace}},
-		{ID: "shell", Command: "mcpshell", Args: []string{"mcp", "--files-dir", workspace}},
-		{ID: "docs", Command: "raglit", Args: []string{"serve", "--home", raglitHome}},
+		{ID: "shell", Command: "mcpshell", Args: []string{"mcp", "--files-dir", workspace}, Autostart: true},
+		// --embedded: dun's raglit home is a per-session temp dir, so the index
+		// is single-session and in-process. Without it raglit routes to the
+		// shared daemon, which refuses a client that has no project name and
+		// exits before the MCP handshake ("transport closed").
+		{ID: "docs", Command: "raglit", Args: []string{"serve", "--embedded", "--home", raglitHome}},
 	}
 }
+
+// Server ids dun knows by name. The commands are /lsp and /rag because that is
+// what the things are called; the ids stay tool-family names.
+const (
+	ServerCode  = "code"  // poly-lsp-mcp — /lsp
+	ServerShell = "shell" // mcpshell
+	ServerDocs  = "docs"  // raglit — /rag
+)
 
 // Config configures a dun harness.
 type Config struct {
@@ -59,7 +83,11 @@ type Config struct {
 	// ConfigDir is where dun.json / dun.local.json are looked for. Empty →
 	// Workspace. Separated because the workspace may be an isolated worktree
 	// while the config lives with the developer's checkout.
-	ConfigDir   string
+	ConfigDir string
+	// AutostartOverride forces a server's autostart for THIS run only
+	// (dun --rag / --lsp), above both the built-in default and the config
+	// files. Nothing is persisted — that is what /rag auto is for.
+	AutostartOverride map[string]bool
 	Client      agent.LLMRunner // the LLM (e.g. *llm.Client)
 	System      string          // nil → defaultSystem
 	Exec        ExecBackend     // nil → no exec tool; else adds the built-in exec tool
@@ -96,6 +124,21 @@ type Harness struct {
 	bgRun   int // background jobs still running
 	noteMu  sync.Mutex
 	queue   []queued // messages not yet delivered to the model
+
+	// Servers can start and stop mid-session (/rag on, /lsp off), which means
+	// the tool set is not fixed at construction: srvMu guards the spec list and
+	// the last-error map, and every change ends in applyTools rebuilding the
+	// Session's tools, dispatcher, system prompt and doc preparer.
+	cfg     Config
+	srvMu   sync.Mutex
+	specs   []Server          // every configured server, running or not
+	lastErr map[string]string // id → why its last start attempt failed
+	// turnMu is held for the length of a turn. A server command arrives on
+	// another goroutine (the -p reader), and swapping the Session's tools out
+	// from under a running turn is a data race — so a rebuild that cannot take
+	// the lock sets applyPending and the turn applies it on the way out.
+	turnMu       sync.Mutex
+	applyPending atomic.Bool
 }
 
 // queued is something buffered to reach the model at the cheapest moment: a
@@ -408,67 +451,41 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 			return nil, err
 		}
 	}
+	for id, on := range cfg.AutostartOverride {
+		for i := range servers {
+			if servers[i].ID == id {
+				servers[i].Autostart = on
+			}
+		}
+	}
 	mgr := mcpmgr.NewManager()
-	for _, s := range servers {
-		timeout := s.Timeout
-		if timeout == 0 {
-			timeout = 90
-		}
-		if err := mgr.StartServer(ctx, mcpmgr.MCPConfig{
-			ID: s.ID, Name: s.ID, Command: s.Command, Args: s.Args,
-			Env: s.Env, Timeout: timeout,
-		}); err != nil {
-			mgr.Close()
-			return nil, fmt.Errorf("dun: start %s: %w", s.ID, err)
-		}
-	}
-	tools, err := waitForTools(ctx, mgr, len(servers))
-	if err != nil {
-		mgr.Close()
-		return nil, err
-	}
-
-	sys := cfg.System
-	if sys == "" {
-		sys = defaultSystem
-	}
 	store, err := openSessionStore(cfg.SessionFile)
 	if err != nil {
 		mgr.Close()
 		return nil, fmt.Errorf("dun: open session: %w", err)
 	}
 	store.onNotify = cfg.OnNotify
-	h := &Harness{mgr: mgr, Tools: tools, store: store, client: cfg.Client,
-		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16)}
+	h := &Harness{mgr: mgr, store: store, client: cfg.Client,
+		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
+		cfg: cfg, specs: servers, lastErr: map[string]string{}}
+
+	// Autostart is best-effort by design: a missing binary or a server that
+	// refuses to run is worth SAYING (it lands in Servers()[i].Err, which the
+	// UI reports), but it is not worth refusing to start the session over. The
+	// user can fix the binary and /rag on without losing the session.
+	for _, s := range servers {
+		if !s.Autostart {
+			continue
+		}
+		if err := h.startServer(ctx, s); err != nil {
+			log.Printf("dun: %s did not start: %v", s.ID, err)
+		}
+	}
 	// Carry the client's own retry narration out to the UI. Without this the
 	// waiting is only ever logged, and a TUI's log is not on screen.
 	applyRetryPolicy(cfg.Client)
 	wireRetry(cfg.Client, cfg.OnRetry)
 
-	// Bridge the MCP tools + the built-in tools (exec, ask_user). Non-MCP tools
-	// are handled locally by the dispatcher wrappers; everything else routes to
-	// its MCP server.
-	toolDefs := mcpToolDefs(tools)
-	dispatch := mcpDispatcher(mgr, tools, cfg.OnToolCall)
-	if cfg.Exec != nil {
-		toolDefs = append(toolDefs, execToolDef())
-		startBg := func(command string) int { return h.startBackground(cfg.Exec, command) }
-		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall, startBg)
-	}
-	if cfg.Ask != nil {
-		toolDefs = append(toolDefs, askToolDef())
-		dispatch = withAsk(dispatch, cfg.Ask, cfg.OnToolCall)
-	}
-	// Outermost wrapper: whatever the tool returns, carry any notification that
-	// arrived while it was running back inside the result. A background job that
-	// finishes mid-turn is then reported in the result the model is already
-	// reading, instead of scheduling a turn of its own.
-	dispatch = withLiftedQueue(dispatch, h)
-	if cfg.EnablePR && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
-		toolDefs = append(toolDefs, prToolDef())
-		dispatch = withPR(dispatch, cfg.Worktree, cfg.OnToolCall)
-		sys += "\n\nWhen the task is complete and verified (build/tests pass), call open_pr with a concise title and a summary body to submit your work as a pull request."
-	}
 	// Context shaping. The Shaper's algorithm is a LADDER, and every rung needs
 	// its own policy field — setting BudgetTokens alone disables the cheap rungs
 	// and leaves only the expensive one:
@@ -501,26 +518,17 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	}
 	h.Session = &agent.Session{
 		SessionID:        "dun",
-		System:           sys,
 		Store:            store,
 		Runner:           cfg.Client,
-		Tools:            toolDefs,
-		Dispatch:         dispatch,
 		OnAssistantToken: cfg.OnToken,
 		MaxTurns:         maxTurns(),
 		Build:            measuredBuild(shaper),
 		ToolFormat:       toolFormat(),
 	}
-	// Proactive RAG: watch the conversation and inject relevant-doc pings before
-	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
-	// surface via store.onNotify → OnNotify.
-	if finder := docsFinder(mgr, tools); finder != nil {
-		// MinScore 0: raglit's search is BM25, whose scores aren't in a fixed
-		// range (tiny for a small index) — but a MATCH only returns matching
-		// rows, so any hit is a real lexical hit. MaxHits caps what's surfaced.
-		// dun's aggregating preparer emits one found/surfaced summary per pass.
-		h.Session.Preparer = docsPreparer(store, finder, agent.FinderOpts{MaxHits: 2}, cfg.OnDocs)
-	}
+	// Tools, Dispatch, System and Preparer all depend on WHICH servers are
+	// running, and that changes mid-session (/rag on, /lsp off). applyTools
+	// owns those four fields; nothing else may set them.
+	h.applyTools()
 	return h, nil
 }
 
@@ -552,46 +560,61 @@ func (h *Harness) ToolNames() []string {
 	return names
 }
 
-// waitForTools polls until every spawned server has reported at least one tool
-// (or a timeout). Discovery is async — GetTools returns nothing until a server
-// finishes its MCP handshake.
-func waitForTools(ctx context.Context, mgr *mcpmgr.Manager, wantServers int) ([]mcpmgr.MCPTool, error) {
-	for i := 0; i < 120; i++ {
-		tools := mgr.GetTools()
-		seen := map[string]bool{}
-		for _, t := range tools {
-			seen[t.ServerID] = true
-		}
-		if len(seen) >= wantServers && len(tools) > 0 {
-			return tools, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(500 * time.Millisecond):
-		}
+
+// dun's coding-agent persona + tool guidance.
+//
+// Assembled per session rather than fixed, because the tool families are not
+// fixed: code and docs are opt-in and can come and go mid-session. Describing a
+// family whose tools are absent is worse than saying nothing — the model plans
+// around node_query, calls it, and gets "unknown tool".
+const (
+	systemPreamble = `You are dun, a coding agent working inside an isolated workspace.
+
+Your tools:`
+	systemCode  = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
+	systemShell = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops; call the prompt tool for its language reference, help to list commands."
+	systemDocs  = "\n- docs (raglit): search the document/knowledge index; ingest to add sources."
+	systemExec  = "\n- exec: run a shell command (build/test/git/ls) in the workspace. Use it to VERIFY your edits — e.g. run the build and tests after changing code — and to run git."
+	systemAsk   = "\n- ask_user: when the task is ambiguous or a decision is the user's to make (which approach, which file, is this OK to change), call ask_user with a clear question and optional options INSTEAD of guessing."
+
+	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
+
+	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed."
+	systemWork     = "\n\nWork step by step: read what you need before changing it, make minimal precise edits, and verify by running the build/tests with exec. Be concise. When the task is done, briefly summarize what you changed."
+)
+
+// systemFor describes only the tool families actually present. exec and ask_user
+// are wired by the dispatcher, not MCP, so applyTools appends their lines when
+// the corresponding Config hooks are set — here they are assumed, since every
+// caller that has a workspace has exec.
+func systemFor(tools []mcpmgr.MCPTool) string {
+	have := map[string]bool{}
+	for _, t := range tools {
+		have[t.ServerID] = true
 	}
-	// Return whatever we got; the caller can proceed with a partial tool set.
-	tools := mgr.GetTools()
-	if len(tools) == 0 {
-		return nil, fmt.Errorf("dun: no MCP tools discovered after timeout (are poly-lsp-mcp/mcpshell/raglit on PATH?)")
+	var b strings.Builder
+	b.WriteString(systemPreamble)
+	if have[ServerCode] {
+		b.WriteString(systemCode)
 	}
-	return tools, nil
+	if have[ServerShell] {
+		b.WriteString(systemShell)
+	}
+	if have[ServerDocs] {
+		b.WriteString(systemDocs)
+	}
+	b.WriteString(systemExec)
+	b.WriteString(systemAsk)
+	if have[ServerDocs] {
+		b.WriteString(systemDocsNote)
+	}
+	if have[ServerCode] {
+		b.WriteString(systemWorkCode)
+	} else {
+		b.WriteString(systemWork)
+	}
+	return b.String()
 }
-
-// defaultSystem is dun's coding-agent persona + tool guidance.
-const defaultSystem = `You are dun, a coding agent working inside an isolated workspace.
-
-You have three tool families:
-- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector "?" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics.
-- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops; call the prompt tool for its language reference, help to list commands.
-- docs (raglit): search the document/knowledge index; ingest to add sources.
-- exec: run a shell command (build/test/git/ls) in the workspace. Use it to VERIFY your edits — e.g. run the build and tests after changing code — and to run git.
-- ask_user: when the task is ambiguous or a decision is the user's to make (which approach, which file, is this OK to change), call ask_user with a clear question and optional options INSTEAD of guessing.
-
-Relevant docs may be pushed to you as [docs] notes — use them.
-
-Work step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed.`
 
 // maxTurns is the cap on agent loop iterations. 40 suits an interactive
 // session, where the user is present and can nudge; a long autonomous task on a
