@@ -26,6 +26,20 @@ import (
 // fold the essentials into the definition it always sees. Every example here is
 // verified to run against mcpshell.
 var toolDocs = map[string]string{
+	// node_query's own description teaches the grammar; what it cannot teach is
+	// which HABIT from another language will bite you. Across 205 recorded calls
+	// in real sessions, 39 distinct selectors failed and the spread was lopsided:
+	// 25 were a bare file path written where an id belongs, 8 were a grep pattern
+	// quoted a second time out of shell reflex. Everything else was a long tail
+	// of one. So the four lines below are those two mistakes, pre-empted, plus
+	// the shapes that answer most questions. Every example is verified to run.
+	"node_query": "\n\nA PATH IS AN ID, and one with / or . in it must be quoted — this is the mistake to avoid:\n" +
+		"  #'cmd/dun/tui.go' func                  // ✓ what's in a file. NOT `cmd/dun/tui.go` (parsed as a type) and NOT #cmd/dun/tui.go (unquoted)\n" +
+		"  #Start                                  // find by name anywhere; #'harness.go#Start' pins one\n" +
+		"  #'harness.go#Start'::in.call > *        // who calls it (::out.call = what it calls)\n" +
+		"  #'harness.go'::grep('-E Server|Harness')  // text search. ONE quoted arg — no inner \"quotes\", that matches nothing\n" +
+		"  func[name~=^Start]                      // ~= is the regex op; = ^= $= *= are literal\n" +
+		"Types are a fixed set (func method type struct file dir import …) — you cannot invent one; a workspace name is an #id.",
 	"eval": "\n\nmcpshell is a JS subset — do the whole task in ONE eval that ENDS in the value:\n" +
 		"  export let total = [1,2,3].reduce((a,b) => a + b, 0)   // export → survives to your NEXT eval; plain let/const does not\n" +
 		"  total * 2                                              // the LAST expression is the output (console.log is not the result)\n" +

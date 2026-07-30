@@ -1034,3 +1034,29 @@ func TestTUI_NoEngineIsSurvivable(t *testing.T) {
 		t.Errorf("server command should report the missing engine: %s", m.convoText())
 	}
 }
+// TestTUI_StreamingMatchesFinalized verifies that the streaming cursor
+// (m.cur) is rendered through the same markdown pipeline as finalized text.
+// This prevents the visual "jump" where streaming text looks different from
+// the finalized block.
+func TestTUI_StreamingMatchesFinalized(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m.md = newMarkdown(80)
+	if m.md == nil {
+		t.Skip("glamour renderer unavailable")
+	}
+
+	// Simulate streaming tokens that form markdown.
+	m.cur = "**bold** and `code`"
+
+	// Capture what fullText() renders for the streaming cursor.
+	streaming := m.fullText()
+
+	// Now finalize the same text and capture what convoText() produces.
+	m.flushCur()
+	finalized := m.convoText()
+
+	// Both should be identical — same renderer, same input.
+	if streaming != finalized {
+		t.Errorf("streaming != finalized:\n  streaming:  %q\n  finalized: %q", streaming, finalized)
+	}
+}

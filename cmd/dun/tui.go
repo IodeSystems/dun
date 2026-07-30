@@ -1494,13 +1494,26 @@ func (m tuiModel) convoText() string {
 	return strings.Join(parts, "\n")
 }
 
+// fullText returns all conversation blocks plus the streaming cursor text
+// (markdown-rendered), joined by newlines. Used by refresh() and tests.
+func (m tuiModel) fullText() string {
+	blocks := make([]string, 0, len(m.convo)+1)
+	for _, e := range m.convo {
+		blocks = append(blocks, e.view())
+	}
+	if m.cur != "" {
+		blocks = append(blocks, renderMarkdown(m.md, m.cur))
+	}
+	return strings.Join(blocks, "\n")
+}
+
 func (m *tuiModel) refresh() {
 	blocks := make([]string, 0, len(m.convo)+1)
 	for _, e := range m.convo {
 		blocks = append(blocks, e.view())
 	}
 	if m.cur != "" {
-		blocks = append(blocks, m.cur)
+		blocks = append(blocks, renderMarkdown(m.md, m.cur))
 	}
 	// In convo focus, gutter every block (selected one bright) so the highlight
 	// aligns and the selected message shows a left border down its full height.

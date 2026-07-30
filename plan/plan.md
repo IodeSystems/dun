@@ -116,6 +116,12 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   them rather than inventing its own numbers. Request scope covers everything up
   to the response headers; turn scope covers what it structurally cannot — a
   stream that died mid-generation.
+- **Tool docs prescribe only the HABIT that bites.** `toolDocs["node_query"]`
+  was written from a corpus, not from the grammar: of 39 distinct failing
+  selectors in recorded sessions, 25 were a bare file path where an id belongs
+  and 8 a grep pattern quoted twice out of shell reflex. Those two get the
+  cheat sheet's first two lines. The corpus lives on as a test in poly-lsp-mcp
+  (`TestSelectorCorpus_*`), which is how "is it easier" stays measurable.
 - **An unset budget is UNBUDGETED, not a budget of zero.** agentkit's Shaper
   read `BudgetTokens: 0` as a zero-token ceiling, so dun's default
   (`DUN_CONTEXT_TOKENS` unset → 0) compacted on every turn: 45 folds in 29 min

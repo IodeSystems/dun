@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -32,7 +33,22 @@ func NewWorktree(repoDir string) (wt *Worktree, isRepo bool, err error) {
 		return &Worktree{Path: repoDir}, false, nil // not a git repo → work in place
 	}
 	root := strings.TrimSpace(top)
-	dir, err := os.MkdirTemp("", "dun-worktree-")
+	// Create worktrees under .dun/worktrees/ so the go.mod replace directive
+	// ("replace => ../agentkit") resolves via the symlink at
+	// .dun/worktrees/agentkit → ../../../agentkit. This keeps every session's
+	// files inside the repo tree — no /tmp/ orphans.
+	wtParent := filepath.Join(root, ".dun", "worktrees")
+	if err := os.MkdirAll(wtParent, 0755); err != nil {
+		return nil, false, fmt.Errorf("dun: mkdir worktrees: %w", err)
+	}
+	// Ensure the agentkit symlink exists (idempotent).
+	link := filepath.Join(wtParent, "agentkit")
+	if _, err := os.Lstat(link); err != nil {
+		if err := os.Symlink("../../../agentkit", link); err != nil {
+			return nil, false, fmt.Errorf("dun: symlink agentkit: %w", err)
+		}
+	}
+	dir, err := os.MkdirTemp(wtParent, "dun-worktree-")
 	if err != nil {
 		return nil, false, err
 	}
