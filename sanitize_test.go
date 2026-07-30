@@ -64,3 +64,35 @@ func TestSanitizedEntryIsNotValidArguments(t *testing.T) {
 		t.Error("rescued content still parses as JSON; it must be plain text")
 	}
 }
+
+// A result whose call was re-kinded (or lost with a truncated session file) must
+// not stay a `role:"tool"` message: it references a tool_call_id no assistant
+// message announces, which providers reject as hard as the poison sanitizeOnLoad
+// was rescuing the session from — so the session would still be unresumable.
+func TestPairToolResults_RekindsUnannouncedResult(t *testing.T) {
+	got := pairToolResults([]agent.Entry{
+		{ID: "1", Kind: agent.KindUser, Content: "fix it"},
+		{ID: "2", Kind: agent.KindToolResult, Content: "build failed: 3 errors", ToolCallID: "gone", ToolName: "exec"},
+	})
+	if got[1].Kind != agent.KindNotification {
+		t.Fatalf("kind = %v; want the orphan result rendered as text", got[1].Kind)
+	}
+	if got[1].ToolCallID != "" {
+		t.Errorf("ToolCallID = %q; a cleared id is what stops it correlating again", got[1].ToolCallID)
+	}
+	if !strings.Contains(got[1].Content, "build failed: 3 errors") {
+		t.Errorf("real tool output was discarded: %q", got[1].Content)
+	}
+}
+
+// A properly paired exchange is untouched.
+func TestPairToolResults_LeavesPairedExchangeAlone(t *testing.T) {
+	in := []agent.Entry{
+		{ID: "1", Kind: agent.KindToolCall, Content: "{}", ToolCallID: "c1", ToolName: "exec"},
+		{ID: "2", Kind: agent.KindToolResult, Content: "ok", ToolCallID: "c1", ToolName: "exec"},
+	}
+	got := pairToolResults(in)
+	if got[1].Kind != agent.KindToolResult || got[1].ToolCallID != "c1" {
+		t.Errorf("paired result was rewritten: %+v", got[1])
+	}
+}

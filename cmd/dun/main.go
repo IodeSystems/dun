@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
@@ -214,6 +215,7 @@ func main() {
 		cfg.OnDocs = func(n dun.DocsNote) {
 			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
 		}
+		cfg.OnRetry = func(n dun.RetryNote) { em.emit(retryEvent(n)) }
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
 			em.emit(event{"type": "ask", "question": q, "options": opts, "multi": multi})
 			select {
@@ -235,6 +237,7 @@ func main() {
 		cfg.OnDocs = func(n dun.DocsNote) {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
 		}
+		cfg.OnRetry = func(n dun.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
 		cfg.Ask = humanAsk
 		fmt.Fprintf(os.Stderr, "dun: spawning tool servers for %s …\n", absWS)
 	}
@@ -250,6 +253,11 @@ func main() {
 
 	if *prog {
 		em.emit(event{"type": "session", "id": sessionID, "resumed": h.Resumed()})
+		// Replay the loaded conversation so a resuming client rebuilds scrollback
+		// (the model already holds it as context; this is pure display).
+		if items := h.History(); len(items) > 0 {
+			em.emit(event{"type": "history", "items": items})
+		}
 	} else if h.Resumed() > 0 {
 		fmt.Fprintf(os.Stderr, "dun: resumed session %s (%d entries)\n", sessionID, h.Resumed())
 	} else {
@@ -268,7 +276,7 @@ func main() {
 		runProgrammatic(ctx, h, em, in, firstTask)
 		return
 	}
-	runHuman(ctx, h, firstTask)
+	runHuman(ctx, h, firstTask, absWS)
 
 	// Report the changes the agent made in the isolated worktree.
 	if wt != nil && wt.Branch != "" {
@@ -282,11 +290,15 @@ func main() {
 
 // runHuman streams a single task, then drains any background jobs it started
 // (their completion notifications trigger follow-up turns).
-func runHuman(ctx context.Context, h *dun.Harness, task string) {
+func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 	fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n\ntask: %s\n\n",
 		len(h.ToolNames()), strings.Join(h.ToolNames(), ", "), task)
 	res, err := h.Ask(ctx, task)
 	if err != nil {
+		// The conversation is on disk, so this is recoverable — say how, since the
+		// retries already visible above have run out and the alternative is a user
+		// starting the whole task again.
+		fmt.Fprintf(os.Stderr, "\ndun: resume with: dun --continue --workspace %s \"<what to do next>\"\n", workspace)
 		fatal(err)
 	}
 	fmt.Fprintf(os.Stderr, "\n\n--- done (%d tokens) ---\n", res.Usage.Total)
@@ -327,11 +339,30 @@ func runHuman(ctx context.Context, h *dun.Harness, task string) {
 //     without waiting on anything.
 func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string) {
 	em.emit(event{"type": "ready", "tools": h.ToolNames()})
+	// A message that arrives while a turn is running does NOT wait for it. It is
+	// buffered and lifted into the next tool result, so the model reads it inside
+	// the turn it is already running — and several of them batch. Only when no turn
+	// is in flight does a message start one (the channel path below).
+	in.setMidTurn(func(text string) bool {
+		if !turnActive.Load() {
+			return false
+		}
+		h.Say(text)
+		em.emit(event{"type": "queued", "text": text, "count": h.Queued()})
+		return true
+	})
 	if firstTask != "" {
 		turn(ctx, h, em, firstTask)
 	}
 	users := in.users
 	for {
+		// Anything buffered while the last turn ran (or after it failed on the
+		// provider) is delivered now, in ONE turn — including a message the user
+		// sent to nudge a dead session back to life.
+		if h.Pending() > 0 {
+			continueTurn(ctx, h, em)
+			continue
+		}
 		if users == nil { // input is done; finish the background work, then leave
 			if !drainStep(ctx, h, em) {
 				return
@@ -390,9 +421,12 @@ func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
 }
 
 // continueTurn runs a turn with no new user message (to process a background
-// job's completion notification) and emits its events.
+// job's completion notification, or a message buffered mid-turn) and emits its
+// events.
 func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) {
+	turnActive.Store(true)
 	res, err := h.Continue(ctx)
+	turnActive.Store(false)
 	if err != nil {
 		em.emit(event{"type": "error", "error": err.Error()})
 		return
@@ -418,6 +452,28 @@ type inputStream struct {
 	users   chan string
 	answers chan string
 	quit    chan struct{}
+
+	// mid routes a user message that arrived while a turn was in flight. The turn
+	// loop is not selecting on users then, so without this the scanner blocks —
+	// and blocking it also stalls the `answer` events an ask_user needs. Guarded
+	// because it is set after the harness exists, while the scanner already runs.
+	mu  sync.Mutex
+	mid func(string) bool
+}
+
+// setMidTurn installs the mid-turn router (see inputStream.mid).
+func (s *inputStream) setMidTurn(f func(string) bool) {
+	s.mu.Lock()
+	s.mid = f
+	s.mu.Unlock()
+}
+
+// midTurn offers text to the router, reporting whether it took it.
+func (s *inputStream) midTurn(text string) bool {
+	s.mu.Lock()
+	f := s.mid
+	s.mu.Unlock()
+	return f != nil && f(text)
 }
 
 // stopped reports whether users closed because of an explicit stop/quit event
@@ -456,6 +512,9 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 			}
 			switch ev.Type {
 			case "user":
+				if s.midTurn(ev.Content) {
+					continue // buffered into the running turn
+				}
 				s.users <- ev.Content
 			case "answer":
 				s.answers <- ev.Value
@@ -511,8 +570,15 @@ func ingestWorkspace(raglitHome, workspace string) {
 // suggestions after `done` when set.
 var suggestEnabled bool
 
+// turnActive is true while a turn is in flight, so the input reader knows to
+// BUFFER a user message (delivered inside the running turn, via the lift path)
+// instead of handing it to the loop as the start of a new one.
+var turnActive atomic.Bool
+
 func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) {
+	turnActive.Store(true)
 	res, err := h.Ask(ctx, task)
+	turnActive.Store(false)
 	if err != nil {
 		em.emit(event{"type": "error", "error": err.Error()})
 		return
@@ -540,6 +606,38 @@ func emitSuggestions(ctx context.Context, h *dun.Harness, em *emitter) {
 		items[i] = map[string]any{"text": s.Text, "prob": s.Prob}
 	}
 	em.emit(event{"type": "suggestions", "items": items})
+}
+
+// retryEvent renders a RetryNote as a -p event. Durations travel as milliseconds
+// (JSON has no duration type, and a client that wants to count down needs the
+// number, not a formatted string) alongside the ready-made one-liner in "text".
+func retryEvent(n dun.RetryNote) event {
+	ev := event{"type": "retry", "scope": n.Scope, "kind": n.Kind,
+		"attempt": n.Attempt, "status": n.Status,
+		"delay_ms": n.Delay.Milliseconds(), "elapsed_ms": n.Elapsed.Milliseconds(),
+		"budget_ms": n.Budget.Milliseconds(),
+		"reason":    n.Reason, "detail": n.Detail, "text": n.String(),
+		"server_asked": n.ServerAsked}
+	// Queue numbers only when the provider actually reported them: a plain 429
+	// carries none, and emitting zeros claims a queue of no slots.
+	if n.Queued() {
+		ev["capacity"], ev["in_flight"], ev["waiting"] = n.Capacity, n.InFlight, n.Waiting
+	}
+	if n.Queue != "" {
+		ev["queue"] = n.Queue
+	}
+	return ev
+}
+
+// retryGlyph marks the three states a retry note can be in, for the human stream.
+func retryGlyph(n dun.RetryNote) string {
+	switch n.Kind {
+	case "recovered":
+		return "✓"
+	case "giveup":
+		return "✗"
+	}
+	return "⏳"
 }
 
 type event map[string]any

@@ -26,7 +26,7 @@ func TestNotesLiftIntoToolResult(t *testing.T) {
 		h.Notify("background job #1 finished — `go test`:\nok")
 		return "wrote 3 lines", nil
 	}
-	dispatch := withLiftedNotes(inner, h)
+	dispatch := withLiftedQueue(inner, h)
 
 	out, err := dispatch(context.Background(), llm.ToolCall{})
 	if err != nil {
@@ -53,8 +53,8 @@ func TestNotesFlushWhenNoToolRuns(t *testing.T) {
 	if got := h.Pending(); got != 2 {
 		t.Fatalf("Pending() = %d, want 2 buffered", got)
 	}
-	if n := h.flushNotes(); n != 2 {
-		t.Fatalf("flushNotes() = %d, want 2", n)
+	if n := h.flushQueued(); n != 2 {
+		t.Fatalf("flushQueued() = %d, want 2", n)
 	}
 	if got := h.store.pending(); got != 2 {
 		t.Fatalf("store.pending() = %d, want 2 unclaimed arrivals", got)

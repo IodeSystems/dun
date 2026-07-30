@@ -67,8 +67,47 @@ func openSessionStore(path string) (*sessionStore, error) {
 			}
 			s.entries = append(s.entries, sanitizeOnLoad(e))
 		}
+		s.entries = pairToolResults(s.entries)
 	}
 	return s, nil
+}
+
+// pairToolResults re-kinds any tool RESULT whose call is not in the history.
+//
+// The mirror image of sanitizeOnLoad's problem, and produced by it: re-kinding a
+// malformed call to a notification (deliberately clearing its id) leaves the
+// result behind as a `role:"tool"` message referencing a tool_call_id no
+// assistant message announces — which providers reject exactly as hard as the
+// poison it was rescuing the session from. A turn that dies between a call and
+// its result is the other source, and dun's Harness heals that one by writing the
+// missing result; this direction has no call to write, so the result becomes text.
+//
+// Content is preserved either way: it is real tool output the model can still use.
+func pairToolResults(entries []agent.Entry) []agent.Entry {
+	announced := map[string]bool{}
+	for _, e := range entries {
+		if e.Kind == agent.KindToolCall && e.ToolCallID != "" {
+			announced[e.ToolCallID] = true
+		}
+	}
+	for i, e := range entries {
+		if e.Kind != agent.KindToolResult || e.ToolCallID == "" || announced[e.ToolCallID] {
+			continue
+		}
+		name := e.ToolName
+		if name == "" {
+			name = "a tool"
+		}
+		entries[i] = agent.Entry{
+			ID:   e.ID,
+			Kind: agent.KindNotification,
+			Content: fmt.Sprintf("[recovered] Output from an earlier %s call whose request is no longer "+
+				"in the history:\n\n%s", name, e.Content),
+			Origin:    e.Origin,
+			CreatedAt: e.CreatedAt,
+		}
+	}
+	return entries
 }
 
 // sanitizeOnLoad rescues a session poisoned by a malformed tool call.

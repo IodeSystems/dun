@@ -245,6 +245,10 @@ type tuiModel struct {
 	suggestions      []suggestion // --suggest: predicted next messages (idle-only picker)
 	suggestSelecting bool         // → arrow-navigable selector (entered via right from empty input)
 	suggestSel       int          // highlighted suggestion in the selector
+	retry      string    // live retry banner ("" = not waiting on the provider)
+	retryDue   time.Time // when the next attempt is due, for the countdown
+	retrySeen  int       // retries this outage; the first one also lands in scrollback
+	queuedMsgs int       // messages typed mid-turn, buffered for the running turn
 	w, h       int
 	fatalErr   string
 }
@@ -427,7 +431,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(v, "/") {
 				return m, m.runPaletteEnter(v)
 			}
-			if v == "" || m.busy || m.starting {
+			// Sending while a turn runs is allowed: the engine buffers the message
+			// and lifts it into the next tool result, so the agent reads it inside
+			// the turn it is already running. Still blocked before `ready`, when
+			// there is no engine to receive it.
+			if v == "" || m.starting {
 				return m, nil
 			}
 			return m.sendUser(v), nil
@@ -900,37 +908,18 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.pendingArgs = args
 		m.refresh()
 	case "tool_result":
-		tool := str(ev["tool"])
-		// A per-tool renderer turns the result into a preview + full body.
-		preview, body := renderToolResult(renderCtx{
-			tool: tool, args: m.pendingArgs, result: str(ev["result"]), width: m.vp.Width,
-		})
-		// Collapsed shows a one-line arg preview; expanded shows the full input.
-		callShort := stTool.Render("⚙ " + tool + "(" + argPreview(m.pendingArgs, 80) + ")")
-		callFull := stTool.Render("⚙ " + tool)
-		af := argFull(m.pendingArgs)
-		if af != "" {
-			callFull += "\n" + af
-		}
-		// The tool block feeds the inspector overlay: raw input + complete output.
-		tb := &toolBlock{name: tool, input: af, output: body}
+		ce := m.foldedTool(str(ev["tool"]), m.pendingArgs, str(ev["result"]))
 		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
 			// Fold the result into its call so the pair is one collapsible unit.
-			m.convo[idx] = convoEntry{
-				collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
-				full:      stDim.Render("▾ ") + callFull + "\n" + body,
-				tool:      tb,
-			}
+			m.convo[idx] = ce
 			m.pendingTool, m.pendingArgs = -1, nil
-			m.refresh()
 		} else {
-			m.convo = append(m.convo, convoEntry{
-				collapsed: stDim.Render("▸ ") + preview,
-				full:      stDim.Render("▾ ") + body,
-				tool:      tb,
-			})
-			m.refresh()
+			m.convo = append(m.convo, ce)
 		}
+		m.refresh()
+	case "history":
+		items, _ := ev["items"].([]any)
+		m.replay(items)
 	case "message":
 		// tokens already streamed the reply; nothing to add.
 	case "notification":
@@ -963,15 +952,119 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.input.Placeholder = "type your answer…"
 			m.input.Focus()
 		}
+	case "retry":
+		return m.handleRetry(ev)
+	case "queued":
+		// The message was buffered into the RUNNING turn rather than starting a new
+		// one; say so, or the echo above looks like it went nowhere.
+		m.queuedMsgs = int(evNum(ev["count"]))
+		m.append(stDim.Render("   ↳ queued for this turn — the agent sees it with its next tool result"))
+		m.refresh()
 	case "done":
 		m.flushCur()
-		m.busy = false
+		m.busy, m.queuedMsgs = false, 0
+		m.clearRetry()
 		m.refresh()
 	case "error":
 		m.append(stErr.Render("error: " + str(ev["error"])))
-		m.busy = false
+		m.busy, m.queuedMsgs = false, 0
+		m.clearRetry()
+		// The session is NOT over: the conversation is on disk, so the next message
+		// pairs off whatever was interrupted and picks up where this stopped.
+		m.append(stDim.Render("the session is intact — send a message to retry from here"))
+		m.refresh()
 	}
 	return m
+}
+
+// handleRetry renders the provider-wait state: a live banner while dun is backing
+// off, a scrollback line for the start and the outcome.
+//
+// Only the FIRST wait of an outage goes to scrollback. The banner carries the
+// attempt number and counts down, so awareness lives there; logging every attempt
+// would bury the conversation under a hundred identical lines during a long
+// outage.
+func (m tuiModel) handleRetry(ev evMsg) tuiModel {
+	switch str(ev["kind"]) {
+	case "recovered":
+		m.clearRetry()
+		m.append(stTool.Render("✓ " + str(ev["text"])))
+	case "giveup":
+		m.clearRetry()
+		m.busy = false
+		m.append(stErr.Render("✗ " + str(ev["text"])))
+	default:
+		// A turn-scope retry means the generation died mid-stream and will be
+		// redone, so drop the half-streamed text rather than letting the regenerated
+		// reply append to a broken sentence. Tool results already recorded are kept
+		// (the engine resumes from them), only the interrupted reply is discarded.
+		if str(ev["scope"]) == "turn" {
+			m.cur = ""
+		}
+		m.busy = true
+		m.retry = m.retryBanner(ev)
+		if ms := evNum(ev["delay_ms"]); ms > 0 {
+			m.retryDue = time.Now().Add(time.Duration(ms) * time.Millisecond)
+		} else {
+			m.retryDue = time.Time{}
+		}
+		if m.retrySeen == 0 {
+			m.append(stNote.Render("⏳ " + str(ev["text"])))
+		}
+		m.retrySeen++
+	}
+	m.refresh()
+	return m
+}
+
+// retryBanner is the status-line text for a wait in progress: what the provider
+// said, including the queue numbers when it sent them (corrallm does).
+func (m tuiModel) retryBanner(ev evMsg) string {
+	b := str(ev["reason"])
+	if cap := evNum(ev["capacity"]); cap > 0 {
+		b += fmt.Sprintf(" · %d/%d busy", int(evNum(ev["in_flight"])), int(cap))
+	}
+	if w := evNum(ev["waiting"]); w > 0 {
+		b += fmt.Sprintf(" · %d ahead", int(w))
+	}
+	return b
+}
+
+// clearRetry takes the banner down.
+func (m *tuiModel) clearRetry() {
+	m.retry, m.retryDue, m.retrySeen = "", time.Time{}, 0
+}
+
+// evNum reads a JSON number out of an event (they decode as float64).
+func evNum(v any) float64 {
+	f, _ := v.(float64)
+	return f
+}
+
+// retryCountdown is the " · next try in 7s" tail of the retry banner. Recomputed
+// on every spinner tick, which is what makes the wait visibly a wait rather than
+// a hang.
+func (m tuiModel) retryCountdown() string {
+	if m.retryDue.IsZero() {
+		return ""
+	}
+	left := time.Until(m.retryDue)
+	if left <= 0 {
+		return " · retrying now"
+	}
+	return fmt.Sprintf(" · next try in %s", left.Round(time.Second))
+}
+
+// queuedHint reports messages typed mid-turn that are waiting to be lifted into
+// the next tool result, so the user knows they landed.
+func (m tuiModel) queuedHint() string {
+	switch m.queuedMsgs {
+	case 0:
+		return ""
+	case 1:
+		return " (1 message queued for this turn)"
+	}
+	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
 }
 
 // exitHint is the status-bar exit prompt — "/quit to exit" when ctrl+c is
@@ -1029,8 +1122,10 @@ func (m tuiModel) View() string {
 		status = stDim.Render(fmt.Sprintf("match %d/%d  ·  ↑/↓ prev/next · / new search · esc exit", m.matchPos+1, len(m.matches)))
 	case m.paletteActive():
 		status = stDim.Render("command  ·  ↑/↓ select · tab complete · enter run · esc/type to edit")
+	case m.retry != "":
+		status = stNote.Render("⏳ "+m.retry) + stDim.Render(m.retryCountdown()+"  ("+m.exitHint()+")")
 	case m.busy:
-		status = m.spin.View() + stDim.Render(" working…  ("+m.exitHint()+")")
+		status = m.spin.View() + stDim.Render(" working…"+m.queuedHint()+"  ("+m.exitHint()+")")
 	case m.focus == focusConvo:
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · enter expand · ← back · ctrl+c quit")
@@ -1116,6 +1211,77 @@ func (m *tuiModel) flushCur() {
 		m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, strings.TrimRight(m.cur, "\n"))})
 		m.cur = ""
 	}
+}
+
+// foldedTool builds the collapsed/full folded block for a completed tool
+// call+result — shared by the live tool_result path and history replay so both
+// render identically. The tool block feeds the inspector overlay (raw input +
+// complete output).
+func (m *tuiModel) foldedTool(tool string, args map[string]any, result string) convoEntry {
+	preview, body := renderToolResult(renderCtx{tool: tool, args: args, result: result, width: m.vp.Width})
+	callShort := stTool.Render("⚙ " + tool + "(" + argPreview(args, 80) + ")")
+	callFull := stTool.Render("⚙ " + tool)
+	af := argFull(args)
+	if af != "" {
+		callFull += "\n" + af
+	}
+	return convoEntry{
+		collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
+		full:      stDim.Render("▾ ") + callFull + "\n" + body,
+		tool:      &toolBlock{name: tool, input: af, output: body},
+	}
+}
+
+// replay rebuilds scrollback from a `history` event (a resumed session), reusing
+// the same rendering as live events: user echo, assistant markdown, folded tool
+// call/result blocks, notifications. No turn runs — this is pure display. A
+// trailing dim marker delimits the resumed history from new activity.
+func (m *tuiModel) replay(items []any) {
+	var pendName, pendID string
+	var pendArgs map[string]any
+	hadPend := false
+	flushPend := func() {
+		if hadPend {
+			// A tool_call with no following result (truncated session): show it alone.
+			m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + pendName + "(" + argPreview(pendArgs, 80) + ")")})
+			pendName, pendID, pendArgs, hadPend = "", "", nil, false
+		}
+	}
+	n := 0
+	for _, it := range items {
+		im, _ := it.(map[string]any)
+		switch str(im["kind"]) {
+		case "user":
+			flushPend()
+			m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + str(im["content"]))})
+			n++
+		case "assistant":
+			flushPend()
+			m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, strings.TrimRight(str(im["content"]), "\n"))})
+			n++
+		case "tool_call":
+			flushPend()
+			pendName, pendID, hadPend = str(im["tool"]), str(im["call_id"]), true
+			pendArgs, _ = im["args"].(map[string]any)
+		case "tool_result":
+			args := pendArgs
+			if !hadPend || str(im["call_id"]) != pendID {
+				args = nil // unmatched result: render without the call's args
+			}
+			m.convo = append(m.convo, m.foldedTool(str(im["tool"]), args, str(im["content"])))
+			pendName, pendID, pendArgs, hadPend = "", "", nil, false
+			n++
+		case "notification":
+			flushPend()
+			m.convo = append(m.convo, convoEntry{collapsed: stNote.Render("🔔 " + oneLine(str(im["content"])))})
+			n++
+		}
+	}
+	flushPend()
+	if n > 0 {
+		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(fmt.Sprintf("── resumed %d entries ──", n))})
+	}
+	m.refresh()
 }
 
 // selDocs returns the docsBlock of the selected entry, or nil.

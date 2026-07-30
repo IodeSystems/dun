@@ -272,6 +272,47 @@ func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 	}
 }
 
+// A `history` event (a resumed session) replays the loaded conversation as
+// scrollback: user echo, assistant markdown, a FOLDED tool call+result block,
+// and a notification — plus a trailing "resumed N entries" marker.
+func TestTUI_HistoryReplay(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = m.handleEvent(evMsg{"type": "history", "items": []any{
+		map[string]any{"kind": "user", "content": "fix the bug"},
+		map[string]any{"kind": "assistant", "content": "on it"},
+		map[string]any{"kind": "tool_call", "tool": "node_read", "call_id": "c1", "args": map[string]any{"sel": "F"}},
+		map[string]any{"kind": "tool_result", "tool": "node_read", "call_id": "c1", "content": "func F() {}\nreturn"},
+		map[string]any{"kind": "notification", "content": "background job #1 finished"},
+	}})
+
+	// 4 rendered items (call+result fold to one) + the resumed marker = 5 blocks.
+	if len(m.convo) != 5 {
+		t.Fatalf("expected 5 blocks (4 items folded + marker), got %d", len(m.convo))
+	}
+	txt := m.convoText()
+	for _, want := range []string{"fix the bug", "on it", "node_read", "sel=F", "background job #1", "resumed 4 entries"} {
+		if !strings.Contains(txt, want) {
+			t.Fatalf("replayed scrollback missing %q in:\n%s", want, txt)
+		}
+	}
+	// The tool call+result is one expandable, inspector-backed block.
+	tb := m.convo[2]
+	if !tb.expandable() || tb.tool == nil {
+		t.Fatal("replayed tool block should be expandable with an inspector toolBlock")
+	}
+	if !strings.Contains(tb.tool.output, "func F()") {
+		t.Fatalf("replayed tool block should hold the full result, got %q", tb.tool.output)
+	}
+	// A stray tool_result with no matching call renders standalone (no panic, no args).
+	m2 := newTUIModel(&dunProc{}, "/ws")
+	m2 = m2.handleEvent(evMsg{"type": "history", "items": []any{
+		map[string]any{"kind": "tool_result", "tool": "eval", "call_id": "x", "content": "42"},
+	}})
+	if len(m2.convo) != 2 { // the block + marker
+		t.Fatalf("unmatched tool_result should still render one block + marker, got %d", len(m2.convo))
+	}
+}
+
 // Typing "/" opens the command palette: it lists/filters commands, tab
 // completes the highlighted one, and /help enumerates them.
 func TestTUI_CommandPalette(t *testing.T) {
@@ -617,5 +658,143 @@ func TestTUI_ErrorEventClearsBusy(t *testing.T) {
 	}
 	if !strings.Contains(m.convoText(), "boom") {
 		t.Fatal("error text not shown")
+	}
+}
+
+// The retry UX. The user's report was "a connection error and dun dies, no retry,
+// no info": the retries WERE happening, inside the LLM client, reported only to a
+// log the TUI writes to a temp file. These assert the wait is on screen.
+func TestTUI_RetryBanner(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.w, m.h = 100, 30
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m.busy = true
+
+	// A rich 429 from a fair-share proxy: the queue numbers are the difference
+	// between "429" and "4/4 busy, 2 ahead, come back in 10s".
+	m = m.handleEvent(evMsg{"type": "retry", "scope": "request", "kind": "429",
+		"attempt": 3.0, "status": 429.0, "delay_ms": 10000.0, "elapsed_ms": 13000.0,
+		"capacity": 4.0, "in_flight": 4.0, "waiting": 2.0, "queue": "queue-timeout",
+		"server_asked": true,
+		"reason":       "provider at capacity — 4/4 slots busy, 2 waiting ahead, queue-timeout (attempt 3)",
+		"text":         "provider at capacity — 4/4 slots busy, 2 waiting ahead, queue-timeout (attempt 3) — the provider asked for 10s"})
+
+	if m.retry == "" {
+		t.Fatal("no retry banner; the wait is invisible again")
+	}
+	for _, want := range []string{"4/4 busy", "2 ahead", "queue-timeout"} {
+		if !strings.Contains(m.retry, want) {
+			t.Errorf("banner = %q; want it to mention %q", m.retry, want)
+		}
+	}
+	if m.retryDue.IsZero() {
+		t.Error("no countdown deadline; the banner cannot tick down")
+	}
+	view := m.View()
+	if !strings.Contains(stripANSI(view), "next try in") {
+		t.Errorf("status line has no countdown:\n%s", stripANSI(view))
+	}
+	// The first wait also lands in scrollback, so the record survives the banner.
+	if !strings.Contains(stripANSI(m.convoText()), "provider at capacity") {
+		t.Errorf("first retry not recorded in scrollback:\n%s", stripANSI(m.convoText()))
+	}
+	// Subsequent waits update the banner but must NOT spam the conversation.
+	before := len(m.convo)
+	m = m.handleEvent(evMsg{"type": "retry", "scope": "request", "kind": "429",
+		"attempt": 4.0, "delay_ms": 10000.0, "reason": "provider at capacity (attempt 4)", "text": "again"})
+	if len(m.convo) != before {
+		t.Errorf("scrollback grew by %d on a repeat wait", len(m.convo)-before)
+	}
+
+	// Recovery takes the banner down and says so.
+	m = m.handleEvent(evMsg{"type": "retry", "kind": "recovered", "attempt": 5.0,
+		"text": "provider recovered on attempt 5"})
+	if m.retry != "" || !m.retryDue.IsZero() {
+		t.Error("recovery left the banner up")
+	}
+	if !strings.Contains(stripANSI(m.convoText()), "recovered on attempt 5") {
+		t.Error("recovery not recorded")
+	}
+}
+
+// A turn-scope retry means the generation died mid-stream and will be redone, so
+// the half-streamed text must go — otherwise the regenerated reply appends to a
+// broken sentence.
+func TestTUI_TurnRetryDiscardsPartialReply(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.w, m.h = 100, 30
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.handleEvent(evMsg{"type": "token", "text": "I'll start by rea"})
+	if m.cur == "" {
+		t.Fatal("precondition: partial text should be buffered")
+	}
+	m = m.handleEvent(evMsg{"type": "retry", "scope": "turn", "kind": "interrupted",
+		"attempt": 1.0, "delay_ms": 1000.0, "reason": "the turn was interrupted", "text": "interrupted"})
+	if m.cur != "" {
+		t.Errorf("partial reply kept: %q", m.cur)
+	}
+	if !m.busy {
+		t.Error("a retry in progress is still a turn in flight")
+	}
+	if strings.Contains(stripANSI(m.convoText()), "I'll start by rea") {
+		t.Error("the discarded partial reply was finalized into the conversation")
+	}
+}
+
+// Giving up is not the end of the session: the conversation is on disk, so the
+// user is told that another message resumes from here.
+func TestTUI_GiveUpKeepsSessionUsable(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.w, m.h = 100, 30
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m.busy = true
+	m = m.handleEvent(evMsg{"type": "retry", "kind": "giveup", "attempt": 5.0, "text": "gave up after 5m"})
+	if m.busy {
+		t.Error("giveup should clear busy so the input is usable")
+	}
+	m = m.handleEvent(evMsg{"type": "error", "error": "agent: chat: stream error"})
+	if !strings.Contains(stripANSI(m.convoText()), "send a message to retry from here") {
+		t.Errorf("no recovery hint after a failure:\n%s", stripANSI(m.convoText()))
+	}
+	// And the input accepts one.
+	m = typeStr(m, "keep going")
+	m = key(m, kEnter)
+	if !strings.Contains(stripANSI(m.convoText()), "keep going") {
+		t.Error("a message sent after a failure was dropped")
+	}
+}
+
+// Typing while the agent works is allowed: the engine buffers the message and
+// lifts it into the next tool result, so it lands in the RUNNING turn.
+func TestTUI_SendWhileBusyQueues(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.w, m.h = 100, 30
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m.busy = true
+
+	m = typeStr(m, "also update the README")
+	m = key(m, kEnter)
+	if strings.TrimSpace(m.input.Value()) != "" {
+		t.Errorf("input not cleared; the message was refused while busy: %q", m.input.Value())
+	}
+	if !strings.Contains(stripANSI(m.convoText()), "also update the README") {
+		t.Error("mid-turn message not echoed")
+	}
+	m = m.handleEvent(evMsg{"type": "queued", "text": "also update the README", "count": 1.0})
+	if m.queuedMsgs != 1 {
+		t.Errorf("queuedMsgs = %d; want 1", m.queuedMsgs)
+	}
+	if !strings.Contains(stripANSI(m.View()), "1 message queued") {
+		t.Errorf("status line does not report the queued message:\n%s", stripANSI(m.View()))
+	}
+	// A second one batches with it.
+	m = m.handleEvent(evMsg{"type": "queued", "text": "and the changelog", "count": 2.0})
+	if !strings.Contains(stripANSI(m.View()), "2 messages queued") {
+		t.Errorf("second queued message not counted:\n%s", stripANSI(m.View()))
+	}
+	// The turn ending clears it — the messages are the model's problem now.
+	m = m.handleEvent(evMsg{"type": "done"})
+	if m.queuedMsgs != 0 {
+		t.Errorf("queuedMsgs = %d after done; want 0", m.queuedMsgs)
 	}
 }

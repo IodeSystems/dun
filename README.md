@@ -66,9 +66,29 @@ echo '{"type":"user","content":"..."}' | dun -p --workspace ./my-project
 ```
 
 The engine speaks a small JSON event protocol (`-p`): out `ready`/`token`/
-`tool_call`/`tool_result`/`message`/`usage`/`done`/`error` + `ask`/`notification`;
-in `{"type":"user",...}` / `{"type":"answer","value":...}` / `{"type":"stop"}`.
-The TUI is just a client of it, so the engine stays headless and scriptable.
+`tool_call`/`tool_result`/`message`/`usage`/`done`/`error` + `ask`/`notification`/
+`retry`/`queued`; in `{"type":"user",...}` / `{"type":"answer","value":...}` /
+`{"type":"stop"}`. The TUI is just a client of it, so the engine stays headless
+and scriptable.
+
+**Waiting on the provider:** a 429, a 5xx, or a gateway that isn't answering is
+retried with exponential backoff, and every wait is reported as a `retry` event —
+attempt, delay, elapsed/budget, and (from a fair-share proxy like corrallm) the
+queue itself: slots busy, requests ahead, and why. The TUI shows a live banner
+that counts down instead of a frozen cursor. A stream that dies MID-generation is
+retried at the TURN level, resuming from the conversation on disk so completed
+tool calls are not redone; the half-streamed reply is discarded. If it eventually
+gives up, the session is still intact — sending another message pairs off whatever
+was interrupted and picks up from there. The policy is the operator's, not
+hardcoded: `DUN_RETRY_BUDGET` (negative = unbounded, right for a single-slot local
+endpoint) and `DUN_RETRY_5XX_ATTEMPTS` set the per-request policy;
+`DUN_TURN_RETRY_BUDGET` bounds the turn-level retry (`0` disables it) and
+otherwise inherits the per-request budget.
+
+**Talking mid-turn:** you don't have to wait for the agent to finish. A message
+sent while it's working is buffered and lifted into the next tool result, so it
+lands *inside* the running turn — no extra round-trip — and several batch in
+order.
 
 **Human-in-the-loop:** the agent can call `ask_user{question, options}` when a
 decision is yours — the turn pauses, you're asked (a picker in the TUI), and it

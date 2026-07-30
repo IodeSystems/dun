@@ -10,9 +10,11 @@ package dun
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,6 +75,11 @@ type Config struct {
 	// OnDocs fires when the proactive-RAG preparer surfaces relevant documents —
 	// one aggregated summary per pass (found/surfaced counts + surfaced docs).
 	OnDocs func(DocsNote)
+	// OnRetry fires while dun is waiting on the provider — every backoff, the
+	// recovery, and the give-up, at both request and turn scope. Without it the
+	// wait is invisible: the retries are logged, and a TUI's logs are not on
+	// screen. See RetryNote.
+	OnRetry func(RetryNote)
 }
 
 // Harness is a running dun: the MCP manager + an agent Session over its tools.
@@ -81,16 +88,87 @@ type Harness struct {
 	Session *agent.Session
 	Tools   []mcpmgr.MCPTool
 	store   *sessionStore
+	client  agent.LLMRunner // kept for its retry policy (see turnRetryPolicy)
+	onRetry func(RetryNote)
 	wake    chan struct{} // signals a driver to run a Continue turn (bg job done)
 	bgMu    sync.Mutex
 	bgSeq   int
 	bgRun   int // background jobs still running
 	noteMu  sync.Mutex
-	notes   []string // notifications not yet delivered to the model
+	queue   []queued // messages not yet delivered to the model
+}
+
+// queued is something buffered to reach the model at the cheapest moment: a
+// background job's completion, or a message the user typed while the agent was
+// already working.
+type queued struct {
+	user bool // a user message (vs a background notification)
+	text string
+}
+
+// prefix labels a queued item where it is lifted into a tool result, so the model
+// can tell the user talking from the machinery reporting.
+func (q queued) prefix() string {
+	if q.user {
+		return "[user] "
+	}
+	return "[background] "
 }
 
 // Resumed reports how many entries were restored from an existing session file.
 func (h *Harness) Resumed() int { return h.store.Loaded() }
+
+// HistoryItem is one replayable conversation entry for a resuming client — the
+// neutral shape the -p `history` event carries so a TUI can rebuild scrollback
+// without re-running any turn. A tool_call and its result share a CallID so the
+// client folds them into one block.
+type HistoryItem struct {
+	Kind    string         `json:"kind"` // user|assistant|tool_call|tool_result|notification
+	Content string         `json:"content,omitempty"`
+	Tool    string         `json:"tool,omitempty"`    // tool_call / tool_result
+	CallID  string         `json:"call_id,omitempty"` // pairs a tool_call with its result
+	Args    map[string]any `json:"args,omitempty"`    // decoded tool_call arguments
+}
+
+// History returns the loaded conversation as replayable items in chronological
+// order, for a resuming client to render as scrollback. Empty for a fresh
+// session. Compaction markers are dropped (a resumed client shows the surviving
+// entries, not the fold marker) and empty assistant turns are skipped;
+// tool-call arguments are decoded from the stored JSON so the client renders
+// them like a live call.
+func (h *Harness) History() []HistoryItem {
+	entries, err := h.store.Context(context.Background(), "dun")
+	if err != nil {
+		return nil
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].CreatedAt != entries[j].CreatedAt {
+			return entries[i].CreatedAt < entries[j].CreatedAt
+		}
+		return entries[i].ID < entries[j].ID
+	})
+	out := make([]HistoryItem, 0, len(entries))
+	for _, e := range entries {
+		switch e.Kind {
+		case agent.KindUser:
+			out = append(out, HistoryItem{Kind: "user", Content: e.Content})
+		case agent.KindAssistant:
+			if strings.TrimSpace(e.Content) == "" {
+				continue
+			}
+			out = append(out, HistoryItem{Kind: "assistant", Content: e.Content})
+		case agent.KindToolCall:
+			var args map[string]any
+			_ = json.Unmarshal([]byte(e.Content), &args)
+			out = append(out, HistoryItem{Kind: "tool_call", Tool: e.ToolName, CallID: e.ToolCallID, Args: args})
+		case agent.KindToolResult:
+			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: e.Content})
+		case agent.KindNotification:
+			out = append(out, HistoryItem{Kind: "notification", Content: e.Content})
+		}
+	}
+	return out
+}
 
 // Notify hands the model a proactive notification (a finished background job).
 //
@@ -106,60 +184,93 @@ func (h *Harness) Resumed() int { return h.store.Loaded() }
 // OnNotify still fires immediately so a UI shows the job finishing in real time.
 func (h *Harness) Notify(text string) {
 	h.noteMu.Lock()
-	h.notes = append(h.notes, text)
+	h.queue = append(h.queue, queued{text: text})
 	h.noteMu.Unlock()
 	if cb := h.store.notifyCallback(); cb != nil {
 		cb(text)
 	}
 }
 
-// liftNotes drains buffered notifications into a tool result, so a job that
-// finished mid-turn is reported inside the result the model is already reading.
-// Returns result unchanged when nothing is buffered.
-func (h *Harness) liftNotes(result string) string {
+// Say hands the model a user message that arrived while it was already working.
+//
+// Same machinery as Notify, and for the same reason: the cheapest place for news
+// is inside a tool result the model is already going to read. A message typed
+// mid-turn therefore reaches it WITHIN the running turn — no extra round-trip, no
+// waiting for the agent to finish, and no assistant message stacked on another.
+//
+// The buffer is a slice, so this composes without limit: tool call + message +
+// message + tool call delivers both messages on the next result, and anything
+// typed after that rides the one after. Nothing is dropped — whatever the turn
+// does not pick up is published by flushQueued when it ends.
+func (h *Harness) Say(text string) {
 	h.noteMu.Lock()
-	notes := h.notes
-	h.notes = nil
+	h.queue = append(h.queue, queued{user: true, text: text})
 	h.noteMu.Unlock()
-	if len(notes) == 0 {
+}
+
+// liftQueued drains the buffer into a tool result, so news that arrived mid-turn
+// is reported inside the result the model is already reading. Returns result
+// unchanged when nothing is buffered.
+func (h *Harness) liftQueued(result string) string {
+	h.noteMu.Lock()
+	items := h.queue
+	h.queue = nil
+	h.noteMu.Unlock()
+	if len(items) == 0 {
 		return result
 	}
 	var b strings.Builder
-	b.WriteString(result)
-	for _, n := range notes {
+	// Trailing newlines on the tool's own output would compound with the separator
+	// below into a run of blank lines.
+	b.WriteString(strings.TrimRight(result, "\n"))
+	for _, q := range items {
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
-		b.WriteString("[background] ")
-		b.WriteString(n)
+		b.WriteString(q.prefix())
+		b.WriteString(q.text)
 	}
 	return b.String()
 }
 
-// flushNotes publishes any notification the turn did not pick up, as real inbox
-// arrivals. Returns how many were flushed so the caller can decide whether a
-// follow-up turn is worth running.
-func (h *Harness) flushNotes() int {
+// flushQueued publishes whatever the turn did not pick up, as real inbox
+// arrivals — user messages as user turns, notifications as notifications.
+// Returns how many were flushed so the caller can decide whether a follow-up turn
+// is worth running.
+func (h *Harness) flushQueued() int {
 	h.noteMu.Lock()
-	notes := h.notes
-	h.notes = nil
+	items := h.queue
+	h.queue = nil
 	h.noteMu.Unlock()
-	for _, n := range notes {
-		h.store.publishNotificationSilent(agent.Entry{
-			ID: uuid.New().String(), Kind: agent.KindNotification,
-			Content: n, CreatedAt: time.Now().UnixNano(),
+	for _, q := range items {
+		kind := agent.KindNotification
+		if q.user {
+			kind = agent.KindUser
+		}
+		h.store.publish(agent.Entry{
+			ID: uuid.New().String(), Kind: kind,
+			Content: q.text, CreatedAt: time.Now().UnixNano(),
 		})
 	}
-	return len(notes)
+	return len(items)
 }
 
 // Pending reports whether a Continue turn has anything new to process —
-// unclaimed inbox arrivals or buffered notifications.
+// unclaimed inbox arrivals or buffered messages.
 func (h *Harness) Pending() int {
 	h.noteMu.Lock()
-	buffered := len(h.notes)
+	buffered := len(h.queue)
 	h.noteMu.Unlock()
 	return h.store.pending() + buffered
+}
+
+// Queued reports how many buffered messages are waiting to reach the model, so a
+// UI can say "1 queued" rather than leaving the user wondering whether what they
+// typed went anywhere.
+func (h *Harness) Queued() int {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	return len(h.queue)
 }
 
 // Wake fires when a background job finishes, so the driver runs a Continue turn.
@@ -176,16 +287,85 @@ func (h *Harness) BackgroundRunning() int {
 // notifications (e.g. a background job's completion). This is the converge
 // point: the notification (+ any queued messages) coalesce into one turn.
 func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
-	// Publish anything a tool result did not already carry, so the turn below
-	// has it — and so several jobs finishing at once become ONE turn.
-	h.flushNotes()
+	// Publish anything a tool result did not already carry (and pair off any
+	// interrupted tool call), so the turn below has it — and so several jobs
+	// finishing at once become ONE turn.
+	h.prepareTurn(ctx)
 	if h.store.pending() == 0 {
 		// Nothing new to react to. Running the model anyway appends an assistant
 		// message directly after the previous one, which providers reject on the
 		// following request. A duplicate wake is a no-op, not a turn.
 		return agent.TurnResult{}, nil
 	}
-	return h.Session.Turn(ctx)
+	return h.runTurn(ctx, h.Session.Turn)
+}
+
+// prepareTurn readies the store for a turn (or a retry of one).
+//
+// Two jobs, in this order because the first constrains the second:
+//
+//  1. Pair off any tool call that never got a result. A turn killed between
+//     persisting a call and recording its result leaves the history structurally
+//     invalid — providers deserialize historical tool_calls, and an
+//     assistant(tool_calls) with no matching tool message is rejected before the
+//     model is reached — so every later request fails identically. Healing it is
+//     what makes "just send another message" actually resume the session.
+//  2. Deliver everything buffered. When step 1 wrote a result, the buffer rides
+//     INSIDE it, which is the whole point: the user's message and the recovery
+//     from the dropped connection travel together, in one batch, costing no extra
+//     turn. Otherwise the buffer is published as ordinary inbox arrivals.
+//
+// Called before every attempt in runTurn, so a message typed during a backoff
+// wait joins the retry rather than queuing behind it.
+func (h *Harness) prepareTurn(ctx context.Context) {
+	if h.healOrphanToolCalls(ctx) == 0 {
+		h.flushQueued()
+	}
+}
+
+// healOrphanToolCalls answers every persisted tool call that has no result with
+// one that says the call was interrupted, and returns how many it wrote.
+//
+// The result is deliberately explicit about what is NOT known: an interrupted
+// exec or edit may well have taken effect, so the model is told to CHECK rather
+// than to assume either way. Anything buffered is lifted into the last result, so
+// the model reads the interruption and the user's follow-up in the same breath.
+func (h *Harness) healOrphanToolCalls(ctx context.Context) int {
+	entries, err := h.store.Context(ctx, "dun")
+	if err != nil {
+		return 0
+	}
+	answered := map[string]bool{}
+	for _, e := range entries {
+		if e.Kind == agent.KindToolResult && e.ToolCallID != "" {
+			answered[e.ToolCallID] = true
+		}
+	}
+	var orphans []agent.Entry
+	for _, e := range entries {
+		if e.Kind == agent.KindToolCall && e.ToolCallID != "" && !answered[e.ToolCallID] {
+			orphans = append(orphans, e)
+		}
+	}
+	for i, o := range orphans {
+		name := o.ToolName
+		if name == "" {
+			name = "the tool"
+		}
+		content := fmt.Sprintf(
+			"ERROR: this %s call was INTERRUPTED — the connection to the model dropped before "+
+				"the result was recorded. Whether it took effect is unknown: verify the current "+
+				"state (re-read the file, re-run the check) before repeating it.", name)
+		if i == len(orphans)-1 {
+			content = h.liftQueued(content)
+		}
+		h.store.publish(agent.Entry{
+			ID: uuid.New().String(), Kind: agent.KindToolResult,
+			Content: content, ToolCallID: o.ToolCallID, ToolName: o.ToolName,
+			CreatedAt: time.Now().UnixNano(),
+		})
+	}
+	return len(orphans)
 }
 
 // startBackground runs command asynchronously via backend (a container when
@@ -258,7 +438,12 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		return nil, fmt.Errorf("dun: open session: %w", err)
 	}
 	store.onNotify = cfg.OnNotify
-	h := &Harness{mgr: mgr, Tools: tools, store: store, wake: make(chan struct{}, 16)}
+	h := &Harness{mgr: mgr, Tools: tools, store: store, client: cfg.Client,
+		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16)}
+	// Carry the client's own retry narration out to the UI. Without this the
+	// waiting is only ever logged, and a TUI's log is not on screen.
+	applyRetryPolicy(cfg.Client)
+	wireRetry(cfg.Client, cfg.OnRetry)
 
 	// Bridge the MCP tools + the built-in tools (exec, ask_user). Non-MCP tools
 	// are handled locally by the dispatcher wrappers; everything else routes to
@@ -278,28 +463,41 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// arrived while it was running back inside the result. A background job that
 	// finishes mid-turn is then reported in the result the model is already
 	// reading, instead of scheduling a turn of its own.
-	dispatch = withLiftedNotes(dispatch, h)
+	dispatch = withLiftedQueue(dispatch, h)
 	if cfg.EnablePR && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
 		toolDefs = append(toolDefs, prToolDef())
 		dispatch = withPR(dispatch, cfg.Worktree, cfg.OnToolCall)
 		sys += "\n\nWhen the task is complete and verified (build/tests pass), call open_pr with a concise title and a summary body to submit your work as a pull request."
 	}
-	// Context budget. Without one the Shaper never folds history: the
-	// conversation grows until the SERVER's window fills, and generation is cut
-	// off mid-token. Observed on a long coding run — llama.cpp reported
-	// `n_tokens = 180223, truncated = 1` against an n_ctx of 180224, and the
-	// truncation landed inside a tool call's JSON arguments, so the call came
-	// back unparseable as a 500.
+	// Context shaping. The Shaper's algorithm is a LADDER, and every rung needs
+	// its own policy field — setting BudgetTokens alone disables the cheap rungs
+	// and leaves only the expensive one:
 	//
-	// The window is DISCOVERED rather than assumed: corrallm's /v1/models does
-	// not advertise a context size, and the number that matters is the one the
-	// server actually accepts. Failure to discover leaves the budget unset,
-	// which is the old behaviour — degraded, not broken.
+	//   0. pristine tail   PreserveLastMessages / PreserveLastToolCalls
+	//   1. LOD stubs       LODTruncateAboveChars  (render-time; no writes)
+	//   2. compaction      runs ONLY if LOD still leaves it over budget
+	//
+	// Measured the hard way: a policy with only BudgetTokens set skipped rungs 0
+	// and 1, so every build compacted and preserved nothing — 11 entries
+	// survived from 97 tool calls, and rewriting the prefix each turn
+	// invalidated the KV cache for 8.5x the processed tokens and 3x the wall
+	// clock.
+	//
+	// LODTruncateAboveChars is the important one here: tool results ARE the
+	// context in a coding agent (measured: 122k of a 180k window, one gradle log
+	// 19.8k chars). Stubbing older oversized results is render-time and lossless
+	// on disk, and it is what keeps compaction from ever being needed.
 	shaper := &agent.Shaper{
-		Store:    store,
-		Runner:   cfg.Client,
-		Estimate: nil, // default estimator
-		Policy:   agent.ShaperPolicy{BudgetTokens: discoverBudget(ctx, cfg.Client)},
+		Store:  store,
+		Runner: cfg.Client,
+		Policy: agent.ShaperPolicy{
+			BudgetTokens:          contextBudget(),
+			VerbatimToolResults:   verbatimToolResults(),
+			ToolFormat:            toolFormat(),
+			LODTruncateAboveChars: 4000,
+			PreserveLastMessages:  6,
+			PreserveLastToolCalls: 4,
+		},
 	}
 	h.Session = &agent.Session{
 		SessionID:        "dun",
@@ -310,11 +508,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Dispatch:         dispatch,
 		OnAssistantToken: cfg.OnToken,
 		MaxTurns:         maxTurns(),
-		Build:            shaper.Build,
-		// On-demand compaction for truncation recovery: the Shaper's own
-		// budget-driven fold happens while BUILDING a prompt, which is too late
-		// once the window filled mid-generation.
-		Compactor: shaper,
+		Build:            measuredBuild(shaper),
+		ToolFormat:       toolFormat(),
 	}
 	// Proactive RAG: watch the conversation and inject relevant-doc pings before
 	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
@@ -330,11 +525,18 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 }
 
 // Ask injects a user message and runs the tool loop to completion.
+//
+// Sending a message is also how a user RESUMES a session that died on the
+// provider: prepareTurn runs first, so an interrupted tool call is paired off
+// before the new message is appended (appending it between a call and its result
+// would be the one order the provider rejects), and the turn then retries the
+// transport for as long as the policy allows.
 func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error) {
+	h.prepareTurn(ctx)
 	h.store.publish(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
-	return h.Session.Turn(ctx)
+	return h.runTurn(ctx, h.Session.Turn)
 }
 
 // Close shuts down the MCP servers.
@@ -404,47 +606,135 @@ func maxTurns() int {
 	return 40
 }
 
-// withLiftedNotes appends any notification buffered during a tool call to that
-// tool's result. The model is already reading the result, so a background job
-// that finished mid-turn is reported with no extra turn — and, critically, no
-// assistant message appended after another assistant message.
-func withLiftedNotes(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
+// withLiftedQueue appends anything buffered during a tool call to that tool's
+// result — a background job that finished, a message the user typed. The model is
+// already reading the result, so the news costs no extra turn and, critically, no
+// assistant message is appended after another assistant message.
+func withLiftedQueue(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		out, err := inner(ctx, tc)
 		if err != nil {
 			return out, err
 		}
-		return h.liftNotes(out), nil
+		return h.liftQueued(out), nil
 	}
 }
 
-// contextSafetyFraction is the share of the model's real window dun will fill
-// before the Shaper folds history. The remainder is runway for the reply plus
-// whatever the estimator undercounts — the failure this guards against is a
-// generation cut off mid-write, so the margin has to cover a large tool-call
-// argument, not just a sentence.
-const contextSafetyFraction = 0.75
+// toolFormat selects how tool calls travel, from DUN_TOOL_FORMAT.
+//
+// Native (default) uses the provider's tool_calls. "heredoc" carries calls as
+// grammar-constrained text in ordinary content, parsed client-side.
+//
+// Reach for heredoc when the provider's own format loses data. Measured on Qwen3:
+// a tool argument containing `</parameter>` comes back truncated at the
+// delimiter, and the truncation is the MODEL's — visible with the server's parser
+// bypassed — so no template or provider fix reaches it. It is also cheaper: 42%
+// fewer prompt tokens and 8% fewer generated on a four-tool set.
+//
+// It REQUIRES a provider that accepts `grammar`, and llama.cpp refuses a grammar
+// alongside `tools`, which is why this leaves the native path rather than
+// extending it. Check first:  corrallm features <model>
+func toolFormat() agent.ToolFormat {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DUN_TOOL_FORMAT"))) {
+	case "heredoc":
+		log.Print("dun: DUN_TOOL_FORMAT=heredoc — tool calls travel as " +
+			"grammar-constrained content, not the provider's tool_calls. Requires " +
+			"grammar support; verify with `corrallm features <model>`.")
+		return agent.ToolFormatHeredoc
+	case "", "native":
+		return agent.ToolFormatNative
+	default:
+		log.Printf("dun: unknown DUN_TOOL_FORMAT=%q, using native",
+			os.Getenv("DUN_TOOL_FORMAT"))
+		return agent.ToolFormatNative
+	}
+}
 
-// discoverBudget measures the server's usable context window and returns the
-// token budget to shape to. Returns 0 (no budget → no compaction, the previous
-// behaviour) when discovery fails, since guessing a window is worse than not
-// shaping: too small wastes context on needless compaction, too large
-// reintroduces the very truncation this prevents.
-func discoverBudget(ctx context.Context, runner agent.LLMRunner) int {
-	// Discovery lives on the concrete client; a custom runner (tests, a fake)
-	// simply gets no budget rather than a guessed one.
-	client, ok := runner.(*llm.Client)
-	if !ok || client == nil {
+// verbatimToolResults passes tool-result content to the model byte for byte,
+// including chat-template control tokens, from DUN_VERBATIM_TOOL_RESULTS.
+//
+// OFF by default, because a tool result is prompt, not data. dun reads files all
+// day, and `<|im_start|>` in any of them — a log, a README, a document about the
+// chat template — is a real control token (one token, not eleven characters), so
+// a stock template renders it as a genuine turn boundary. Measured: the rendered
+// turn sequence gains a SYSTEM message sourced from disk.
+//
+// Turn it on ONLY against a server whose template neutralizes those tokens
+// itself, which is the better place for the fix: it costs nothing there and
+// protects every client. ml-kit/templates/probe.py grades a template for exactly
+// this; qwen3-hardened.jinja passes it.
+func verbatimToolResults() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DUN_VERBATIM_TOOL_RESULTS"))) {
+	case "1", "true", "yes", "on":
+		log.Print("dun: DUN_VERBATIM_TOOL_RESULTS is set — tool results go to the model " +
+			"unescaped. This is only safe if the server's chat template neutralizes " +
+			"control tokens; otherwise file contents can forge a turn.")
+		return true
+	}
+	return false
+}
+
+// contextBudget is the token ceiling the Shaper shapes to, from
+// DUN_CONTEXT_TOKENS (the model's window). 0 → no shaping at all, which is the
+// old behaviour and the safe default: no probe can tell a 32k window from a
+// 180k one without minutes of multi-megabyte requests, and guessing low is
+// expensive — it compacts a large window for no reason.
+//
+// The fraction is deliberately close to 1. Shaping exists to stop a generation
+// being cut off mid-write, not to keep the context small: the LOD rung already
+// does that for free, and every compaction costs a prefix rewrite.
+func contextBudget() int {
+	v := os.Getenv("DUN_CONTEXT_TOKENS")
+	if v == "" {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	n, err := client.DiscoverContext(ctx)
+	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
-		log.Printf("dun: context discovery failed (%v); running without a compaction budget", err)
+		log.Printf("dun: ignoring invalid DUN_CONTEXT_TOKENS=%q", v)
 		return 0
 	}
-	budget := int(float64(n) * contextSafetyFraction)
-	log.Printf("dun: context window %d tokens; compaction budget %d", n, budget)
+	budget := n * 90 / 100
+	log.Printf("dun: context window %d tokens; shaping budget %d (LOD stubs first, compaction last)", n, budget)
 	return budget
+}
+
+// measuredBuild logs the size of the prompt the Shaper actually produced.
+//
+// Added because reasoning about context size from the SESSION FILE is
+// unreliable: contents over 8 KiB are stored as blob references, so the JSONL
+// reads ~187k chars for a conversation that materializes to ~715k. The only
+// trustworthy number is the built message list, measured here.
+//
+// Logs the biggest message too: if a fold is not re-rooting the prompt, the
+// giveaway is one surviving tool result still carrying tens of thousands of
+// characters.
+func measuredBuild(shaper *agent.Shaper) agent.ContextBuilder {
+	return func(ctx context.Context, sessionID, system string) ([]llm.Message, error) {
+		msgs, err := shaper.Build(ctx, sessionID, system)
+		if err != nil {
+			return msgs, err
+		}
+		total, biggest, biggestRole := 0, 0, ""
+		for _, m := range msgs {
+			n := len(m.Content)
+			total += n
+			if n > biggest {
+				biggest, biggestRole = n, m.Role
+			}
+		}
+		log.Printf("dun: built prompt: %d messages, %d chars (~%d tokens); largest %d chars (%s)",
+			len(msgs), total, total/4, biggest, biggestRole)
+		// DUN_DUMP_PROMPT writes the exact message list to disk so a failing
+		// call can be replayed verbatim against the provider. The 500 that a
+		// bad tool call produces carries no finish_reason, so the only way to
+		// see one is to re-issue the identical request ourselves.
+		if dir := os.Getenv("DUN_DUMP_PROMPT"); dir != "" {
+			if b, err := json.Marshal(msgs); err == nil {
+				_ = os.MkdirAll(dir, 0o755)
+				_ = os.WriteFile(filepath.Join(dir,
+					fmt.Sprintf("prompt-%d.json", time.Now().UnixNano())), b, 0o644)
+			}
+		}
+		return msgs, nil
+	}
 }
