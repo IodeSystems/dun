@@ -150,3 +150,45 @@ func scanSession(path string) (entries int, preview string) {
 	}
 	return entries, preview
 }
+
+// SessionMeta stores the worktree info alongside a session so that resume
+// can reuse the same worktree (preserving file edits).
+type SessionMeta struct {
+	WorktreePath string `json:"worktreePath,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+}
+
+// MetaFile returns the path for the .meta.json sidecar of a session.
+func MetaFile(root, id string) string {
+	return filepath.Join(RootDir(root), id+".meta.json")
+}
+
+// SaveSessionMeta writes the worktree metadata for a session.
+func SaveSessionMeta(root, id string, meta SessionMeta) error {
+	dir := RootDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	tmp := MetaFile(root, id) + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, MetaFile(root, id))
+}
+
+// LoadSessionMeta reads the worktree metadata for a session, or zero if none.
+func LoadSessionMeta(root, id string) SessionMeta {
+	data, err := os.ReadFile(MetaFile(root, id))
+	if err != nil {
+		return SessionMeta{}
+	}
+	var meta SessionMeta
+	if json.Unmarshal(data, &meta) != nil {
+		return SessionMeta{}
+	}
+	return meta
+}

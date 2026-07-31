@@ -132,7 +132,15 @@ func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx 
 			wt.Branch, wt.BaseBranch, ffOut, pushOut)
 	}
 
-	return fmt.Sprintf("Shipped! Branch %s rebased onto %s, pushed, and local %s fast-forwarded.\n\n%s",
+	// 7. Clean up — delete the shipped branch (local + remote)
+	delOut := wt.DeleteBranch()
+	if strings.Contains(delOut, "delete") && !strings.Contains(delOut, "Branch") {
+		// Error deleting — note it but don't fail; the work is safe on main.
+		return fmt.Sprintf("Shipped! Branch %s rebased onto %s, pushed, and local %s fast-forwarded.\n\n%s\n\nNote: branch cleanup: %s",
+			wt.Branch, upstream, wt.BaseBranch, pushOut, delOut)
+	}
+
+	return fmt.Sprintf("Shipped! Branch %s rebased onto %s, pushed, local %s fast-forwarded, and branch cleaned up.\n\n%s",
 		wt.Branch, upstream, wt.BaseBranch, pushOut)
 }
 
@@ -164,8 +172,11 @@ func continueRebase(wt *Worktree, cfg *ShipConfig, execFn func(ctx context.Conte
 
 	ffOut := wt.FastForwardLocal()
 
-	return fmt.Sprintf("Rebase continued and shipped! Branch %s pushed.\n\n%s\n%s",
-		wt.Branch, pushOut, ffOut)
+	// Clean up shipped branch
+	delOut := wt.DeleteBranch()
+
+	return fmt.Sprintf("Rebase continued and shipped! Branch %s pushed.\n\n%s\n%s\n%s",
+		wt.Branch, pushOut, ffOut, delOut)
 }
 
 // shipSkipChecks pushes without running checks (agent used --force equivalent).
@@ -182,8 +193,11 @@ func shipSkipChecks(wt *Worktree) string {
 
 	ffOut := wt.FastForwardLocal()
 
-	return fmt.Sprintf("Pushed (checks skipped). Branch %s on origin.\n\n%s\n%s",
-		wt.Branch, pushOut, ffOut)
+	// Clean up shipped branch
+	delOut := wt.DeleteBranch()
+
+	return fmt.Sprintf("Pushed (checks skipped). Branch %s on origin.\n\n%s\n%s\n%s",
+		wt.Branch, pushOut, ffOut, delOut)
 }
 
 func (w *Worktree) forcePush() string {

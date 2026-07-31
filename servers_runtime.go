@@ -262,6 +262,7 @@ func (h *Harness) rebuildTools() {
 		toolDefs = append(toolDefs, prToolDef())
 		dispatch = withPR(dispatch, cfg.Worktree, cfg.OnToolCall)
 		sys += "\n\nWhen the task is complete and verified (build/tests pass), call open_pr with a concise title and a summary body to submit your work as a pull request."
+		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
 	}
 	if cfg.EnableShip && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
 		toolDefs = append(toolDefs, shipToolDef())
@@ -273,6 +274,7 @@ func (h *Harness) rebuildTools() {
 		}
 		dispatch = withShip(dispatch, cfg.Worktree, cfg.ShipCfg, execFn, cfg.OnToolCall)
 		sys += "\n\nWhen the task is complete and verified (build/tests pass), call ship to rebase onto the base branch, run checks, push, and integrate your changes."
+		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
 	}
 
 	h.Session.Tools = toolDefs

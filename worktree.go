@@ -223,6 +223,24 @@ func (w *Worktree) FastForwardLocal() string {
 	return strings.TrimSpace(out)
 }
 
+// DeleteBranch removes the worktree's branch (local and remote). Called after
+// a successful ship to clean up — the work is already integrated into the base
+// branch. Best-effort: errors are returned but not fatal.
+func (w *Worktree) DeleteBranch() string {
+	if w.repoRoot == "" {
+		return "not a git repo"
+	}
+	// Delete remote tracking branch
+	if _, err := git("", "-C", w.repoRoot, "push", "origin", "--delete", w.Branch); err != nil {
+		return "delete remote branch: " + err.Error()
+	}
+	// Delete local branch (--force because the worktree may still have it checked out)
+	if _, err := git("", "-C", w.repoRoot, "branch", "--delete", "--force", w.Branch); err != nil {
+		return "delete local branch: " + err.Error()
+	}
+	return "Branch " + w.Branch + " deleted (local + remote)"
+}
+
 func git(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	if dir != "" {
@@ -233,4 +251,58 @@ func git(dir string, args ...string) (string, error) {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return string(out), nil
+}
+
+// ReuseWorktree reuses a previous session's worktree. If the old worktree
+// directory still exists and is valid, it returns it directly. If the directory
+// was cleaned up but the branch still exists, it creates a new worktree from
+// that branch (preserving the commits). Falls back to NewWorktree if neither
+// works.
+func ReuseWorktree(repoDir string, oldPath, oldBranch string, mounts []MountSpec) (wt *Worktree, isRepo bool, err error) {
+	top, terr := git("", "-C", repoDir, "rev-parse", "--show-toplevel")
+	if terr != nil {
+		return &Worktree{Path: repoDir, Mounts: mounts}, false, nil
+	}
+	root := strings.TrimSpace(top)
+
+	// Case 1: old worktree directory still exists and is registered
+	if oldPath != "" {
+		if _, err := os.Stat(oldPath); err == nil {
+			out, _ := git("", "-C", root, "worktree", "list", "--porcelain")
+			if strings.Contains(out, oldPath) {
+				baseBranch, _ := git("", "-C", root, "rev-parse", "--abbrev-ref", "HEAD")
+				baseBranch = strings.TrimSpace(baseBranch)
+				return &Worktree{Path: oldPath, Branch: oldBranch, BaseBranch: baseBranch, repoRoot: root, Mounts: mounts}, true, nil
+			}
+		}
+	}
+
+	// Case 2: branch still exists — create a new worktree from it
+	if oldBranch != "" {
+		out, err := git("", "-C", root, "rev-parse", "--verify", oldBranch)
+		if err == nil && strings.TrimSpace(out) != "" {
+			wtParent := filepath.Join(root, ".dun", "worktrees")
+			os.MkdirAll(wtParent, 0755)
+			for _, m := range mounts {
+				link := filepath.Join(wtParent, m.Name)
+				if _, err := os.Lstat(link); err != nil {
+					os.Symlink(m.Source, link)
+				}
+			}
+			dir, err := os.MkdirTemp(wtParent, "dun-worktree-")
+			if err != nil {
+				return nil, false, err
+			}
+			if _, err := git("", "-C", root, "worktree", "add", dir, oldBranch); err != nil {
+				os.RemoveAll(dir)
+				return nil, false, fmt.Errorf("dun: git worktree add (reuse): %w", err)
+			}
+			baseBranch, _ := git("", "-C", root, "rev-parse", "--abbrev-ref", "HEAD")
+			baseBranch = strings.TrimSpace(baseBranch)
+			return &Worktree{Path: dir, Branch: oldBranch, BaseBranch: baseBranch, repoRoot: root, Mounts: mounts}, true, nil
+		}
+	}
+
+	// Case 3: fallback — create a fresh worktree
+	return NewWorktree(repoDir, mounts)
 }

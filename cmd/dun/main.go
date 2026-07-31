@@ -226,14 +226,31 @@ func main() {
 	// Isolation tier 1: a git worktree (unless --no-worktree). The agent's file
 	// changes land here on a fresh branch, not on the checked-out branch.
 	// Mounts are symlinked into the worktree parent so replace directives resolve.
+	// When resuming, try to reuse the previous session's worktree so file edits
+	// are preserved across sessions.
 	effWS := absWS
 	var wt *dun.Worktree
 	if !*noWorktree {
-		w, isRepo, werr := dun.NewWorktree(absWS, mounts)
+		var w *dun.Worktree
+		var isRepo bool
+		var werr error
+		if sessionID != "" {
+			// Resuming — try to reuse the old worktree
+			meta := dun.LoadSessionMeta(absWS, sessionID)
+			w, isRepo, werr = dun.ReuseWorktree(absWS, meta.WorktreePath, meta.Branch, mounts)
+		}
+		if w == nil {
+			w, isRepo, werr = dun.NewWorktree(absWS, mounts)
+		}
 		if werr != nil {
 			fatal(werr)
 		}
 		wt, effWS = w, w.Path
+		// Save worktree metadata on exit so --continue / --resume can reuse it.
+		if sessionID != "" {
+			meta := dun.SessionMeta{WorktreePath: wt.Path, Branch: wt.Branch}
+			defer func() { _ = dun.SaveSessionMeta(absWS, sessionID, meta) }()
+		}
 		if !isRepo && !*prog {
 			fmt.Fprintf(os.Stderr, "dun: %s is not a git repo — working in place (no isolation)\n", absWS)
 		}
