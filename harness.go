@@ -96,6 +96,13 @@ type Config struct {
 	EnableShip  bool            // add the ship tool (enabled by default)
 	ShipCfg     *ShipConfig     // ship policy + checks; nil = permissive defaults, no checks
 	SessionFile string          // persist the conversation here (resumable); "" = in-memory only
+	// DockerImage is the image used when /docker on is toggled mid-session.
+	// Set from the --docker flag at construction so the runtime toggle has
+	// a default. Empty → "golang:1.23".
+	DockerImage string
+	// ExtraMounts are the mount specs passed at construction, needed when
+	// reconfiguring DockerExec mid-session for a worktree switch.
+	ExtraMounts []MountSpec
 	OnToken     func(string)
 	OnToolCall  func(tool string, args map[string]any, result string)
 	// OnNotify fires when a plain notification (KindNotification) is injected
@@ -664,6 +671,77 @@ func (h *Harness) Close() { h.mgr.Close() }
 
 // Reset clears the session store, starting a fresh conversation log.
 func (h *Harness) Reset() { h.store.Reset() }
+
+// SetExec swaps the exec backend at runtime (e.g. host ↔ Docker) and rebuilds
+// the tool set so the change takes effect immediately.
+func (h *Harness) SetExec(backend ExecBackend) {
+	h.srvMu.Lock()
+	h.cfg.Exec = backend
+	h.srvMu.Unlock()
+	h.applyTools()
+}
+
+// Rehoist reconfigures the workspace layer atomically: workspace path, exec
+// backend, and worktree. This is the right primitive for /worktree new and
+// /docker on — they change where the agent's feet are and must update all
+// three together so the agent doesn't split across directories.
+//
+// dockerOn controls the exec backend: true → DockerExec with cfg.DockerImage,
+// false → HostExec. Both use the new workspace path and cfg.ExtraMounts.
+func (h *Harness) Rehoist(workspace string, wt *Worktree, dockerOn bool) {
+	h.srvMu.Lock()
+	h.cfg.Workspace = workspace
+	h.cfg.Worktree = wt
+	image := h.cfg.DockerImage
+	if image == "" {
+		image = "golang:1.23"
+	}
+	if dockerOn {
+		h.cfg.Exec = DockerExec{Dir: workspace, Image: image, ExtraMounts: h.cfg.ExtraMounts}
+	} else {
+		h.cfg.Exec = HostExec{Dir: workspace}
+	}
+	h.srvMu.Unlock()
+	h.applyTools()
+}
+
+// ExecBackend returns the current exec backend.
+func (h *Harness) ExecBackend() ExecBackend {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	return h.cfg.Exec
+}
+
+// Workspace returns the workspace directory.
+func (h *Harness) Workspace() string {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	return h.cfg.Workspace
+}
+
+// Worktree returns the current worktree (may be nil).
+func (h *Harness) Worktree() *Worktree {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	return h.cfg.Worktree
+}
+
+// IsDocker reports whether the current exec backend is DockerExec.
+func (h *Harness) IsDocker() bool {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	_, ok := h.cfg.Exec.(DockerExec)
+	return ok
+}
+
+// SetWorktree swaps the worktree at runtime and rebuilds the tool set.
+// Deprecated: use Rehoist to change workspace + exec + worktree together.
+func (h *Harness) SetWorktree(wt *Worktree) {
+	h.srvMu.Lock()
+	h.cfg.Worktree = wt
+	h.srvMu.Unlock()
+	h.applyTools()
+}
 
 // ToolNames lists the agent's tool names (MCP tools + the built-in exec), sorted.
 func (h *Harness) ToolNames() []string {

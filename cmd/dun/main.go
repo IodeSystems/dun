@@ -81,9 +81,9 @@ func main() {
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
-	noWorktree := flag.Bool("no-worktree", false, "work in the workspace directly, no git worktree")
-	pr := flag.Bool("pr", false, "shorthand for --ship with mode pr (verify, push, then open a pull request)")
-	ship := flag.Bool("ship", true, "let the agent ship work (fetch+rebase+checks+push) when done")
+	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
+	pr := flag.Bool("pr", false, "let the agent open a pull request (commit+push+gh pr create) when done")
+	ship := flag.Bool("ship", false, "let the agent ship work (rebase+checks+push+ff local base branch) when done")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
@@ -183,7 +183,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *ship, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *worktree, *pr, *ship, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -193,7 +193,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *ship, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *worktree, *pr, *ship, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -223,14 +223,14 @@ func main() {
 	// Loaded from dun.json / dun.local.json and auto-discovered from go.mod.
 	mounts := dun.LoadMounts(absWS, absWS)
 
-	// Isolation tier 1: a git worktree (unless --no-worktree). The agent's file
+	// Isolation tier 1: a git worktree (with --worktree). The agent's file
 	// changes land here on a fresh branch, not on the checked-out branch.
 	// Mounts are symlinked into the worktree parent so replace directives resolve.
 	// When resuming, try to reuse the previous session's worktree so file edits
 	// are preserved across sessions.
 	effWS := absWS
 	var wt *dun.Worktree
-	if !*noWorktree {
+	if *worktree {
 		var w *dun.Worktree
 		var isRepo bool
 		var werr error
@@ -304,6 +304,10 @@ func main() {
 		// worktree this session works in.
 		ConfigDir:         absWS,
 		AutostartOverride: autostartOverrides(ragFlag, lspFlag),
+		// Stored so /docker on and /worktree new can rehoist with the right
+		// image and mounts without the TUI knowing about them.
+		DockerImage: *docker,
+		ExtraMounts: mounts,
 	}
 	if *prog {
 		em = &emitter{}
@@ -478,6 +482,10 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		em.emit(event{"type": "server", "id": alias, "action": action, "message": msg,
 			"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
 	})
+	in.setCtrlCmd(func(id, action string) {
+		msg := runControlCmd(ctx, h, id, action)
+		em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
+	})
 	in.setResetCb(func() {
 		h.Reset()
 		em.emit(event{"type": "reset"})
@@ -626,6 +634,11 @@ type inputStream struct {
 	// installed. The scanner starts before the harness exists, so a client that
 	// writes its first line immediately would otherwise have it dropped.
 	srvPending [][2]string
+	// ctrl handles a `control` event (/docker, /worktree) inline.
+	ctrl func(id, action string)
+	// ctrlPending holds control commands that arrived before the handler was
+	// installed.
+	ctrlPending [][2]string
 	// resetCb handles a `reset` event (clear the session store).
 	resetCb func()
 }
@@ -650,6 +663,19 @@ func (s *inputStream) setServerCmd(f func(alias, action string)) {
 	}
 }
 
+// setCtrlCmd installs the control-command handler (see inputStream.ctrl) and
+// replays anything that arrived before it existed.
+func (s *inputStream) setCtrlCmd(f func(id, action string)) {
+	s.mu.Lock()
+	s.ctrl = f
+	queued := s.ctrlPending
+	s.ctrlPending = nil
+	s.mu.Unlock()
+	for _, c := range queued {
+		f(c[0], c[1])
+	}
+}
+
 // setResetCb installs the session-reset handler.
 func (s *inputStream) setResetCb(f func()) {
 	s.mu.Lock()
@@ -668,6 +694,19 @@ func (s *inputStream) serverCmd(alias, action string) {
 	s.mu.Unlock()
 	if f != nil {
 		f(alias, action)
+	}
+}
+
+// ctrlCmd runs the installed control handler, queueing until one exists.
+func (s *inputStream) ctrlCmd(id, action string) {
+	s.mu.Lock()
+	f := s.ctrl
+	if f == nil {
+		s.ctrlPending = append(s.ctrlPending, [2]string{id, action})
+	}
+	s.mu.Unlock()
+	if f != nil {
+		f(id, action)
 	}
 }
 
@@ -709,8 +748,8 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				Type    string `json:"type"`
 				Content string `json:"content"`
 				Value   string `json:"value"`
-				ID      string `json:"id"`     // server: which server (rag|lsp|<id>)
-				Action  string `json:"action"` // server: status|on|off|auto|manual
+				ID      string `json:"id"`     // server/control: which target
+				Action  string `json:"action"` // server/control: action to take
 			}
 			if json.Unmarshal([]byte(line), &ev) != nil {
 				continue
@@ -720,6 +759,9 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				// Handled inline (see inputStream.srv): a turn may be running,
 				// and this loop is also the only reader of `answer` events.
 				s.serverCmd(ev.ID, ev.Action)
+			case "control":
+				// Handled inline (see inputStream.ctrl): docker/worktree toggles.
+				s.ctrlCmd(ev.ID, ev.Action)
 			case "user":
 				if s.midTurn(ev.Content) {
 					continue // buffered into the running turn

@@ -222,3 +222,76 @@ func serversToAny(states []dun.ServerState) []map[string]any {
 	}
 	return out
 }
+
+// runControlCmd handles /docker and /worktree control commands.
+func runControlCmd(ctx context.Context, h *dun.Harness, id, action string) string {
+	switch id {
+	case "docker":
+		return runDockerCmd(ctx, h, action)
+	case "worktree":
+		return runWorktreeCmd(ctx, h, action)
+	default:
+		return "unknown control target " + strconv.Quote(id) + " — try /docker or /worktree"
+	}
+}
+
+// runDockerCmd handles /docker [on|off|status].
+func runDockerCmd(ctx context.Context, h *dun.Harness, action string) string {
+	switch action {
+	case "", "status":
+		if h.IsDocker() {
+			backend := h.ExecBackend().(dun.DockerExec)
+			return "docker: on (image: " + backend.Image + ")"
+		}
+		return "docker: off (exec runs on host)"
+	case "on":
+		// Rehoist: keep current workspace + worktree, switch exec to Docker.
+		h.Rehoist(h.Workspace(), h.Worktree(), true)
+		image := h.ExecBackend().(dun.DockerExec).Image
+		return "docker: on (image: " + image + ")"
+	case "off":
+		// Rehoist: keep current workspace + worktree, switch exec to host.
+		h.Rehoist(h.Workspace(), h.Worktree(), false)
+		return "docker: off (exec runs on host)"
+	default:
+		return "unknown action " + strconv.Quote(action) + " — try /docker [on|off|status]"
+	}
+}
+
+// runWorktreeCmd handles /worktree [status|new|commit].
+func runWorktreeCmd(ctx context.Context, h *dun.Harness, action string) string {
+	wt := h.Worktree()
+	dockerOn := h.IsDocker()
+	switch action {
+	case "", "status":
+		if wt == nil || wt.Branch == "" {
+			return "worktree: none (working in place)"
+		}
+		return fmt.Sprintf("worktree: %s (branch %s, base %s)", wt.Path, wt.Branch, wt.BaseBranch)
+	case "new":
+		if wt != nil && wt.Branch != "" {
+			return "worktree: already on branch " + wt.Branch
+		}
+		// Create a new worktree. NewWorktree resolves the repo root itself.
+		newWt, isRepo, err := dun.NewWorktree(h.Workspace(), nil)
+		if err != nil {
+			return "worktree: failed to create — " + oneLine(err.Error())
+		}
+		if !isRepo {
+			return "worktree: not a git repo — cannot create worktree"
+		}
+		// Rehoist: move workspace + exec to the new worktree directory,
+		// preserving the current docker setting.
+		h.Rehoist(newWt.Path, newWt, dockerOn)
+		return fmt.Sprintf("worktree: created %s (branch %s)", newWt.Path, newWt.Branch)
+	case "commit":
+		if wt == nil || wt.Branch == "" {
+			return "worktree: none (nothing to commit)"
+		}
+		result := wt.Commit("/worktree commit")
+		return "worktree: " + result
+	default:
+		return "unknown action " + strconv.Quote(action) + " — try /worktree [status|new|commit]"
+	}
+}
+

@@ -32,7 +32,7 @@ import (
 // tuiOpts are the flags the TUI forwards to its `dun -p` subprocess.
 type tuiOpts struct {
 	workspace, model, url, key, docker string
-	noWorktree                         bool
+	worktree                           bool
 	pr                                 bool
 	ship                               bool
 	cont                               bool   // --continue: resume the latest session
@@ -1137,6 +1137,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			}
 		}
 		m.noteServers(ev)
+	case "control":
+		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
+			m.append(stNote.Render(msg))
+		}
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
 		if m.busyStart.IsZero() {
@@ -1848,6 +1852,8 @@ func init() {
 		}},
 		{"rag", "[on|off|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
 		{"lsp", "[on|off|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
+		{"docker", "[on|off|status]", "exec backend: on (Docker), off (host), bare shows status", controlSlash("docker")},
+		{"worktree", "[status|new|commit]", "git worktree: bare shows status, new creates one, commit stages+commits", controlSlash("worktree")},
 		{"clear", "", "clear scrollback and start a fresh session log", func(m *tuiModel, _ []string) tea.Cmd {
 			m.proc.sendReset()
 			m.convo = nil
@@ -1876,6 +1882,21 @@ func serverSlash(alias string) func(*tuiModel, []string) tea.Cmd {
 			action = strings.ToLower(args[0])
 		}
 		if !m.proc.serverCmd(alias, action) {
+			m.append(stErr.Render("no engine right now — /reconnect first"))
+		}
+		return nil
+	}
+}
+
+// controlSlash builds the /docker and /worktree handlers. The TUI forwards the
+// action to the engine via a `control` event and renders the response.
+func controlSlash(id string) func(*tuiModel, []string) tea.Cmd {
+	return func(m *tuiModel, args []string) tea.Cmd {
+		action := ""
+		if len(args) > 0 {
+			action = strings.ToLower(args[0])
+		}
+		if !m.proc.controlCmd(id, action) {
 			m.append(stErr.Render("no engine right now — /reconnect first"))
 		}
 		return nil
@@ -2201,8 +2222,8 @@ func procArgs(o tuiOpts, mode string) []string {
 	if o.docker != "" {
 		args = append(args, "--docker", o.docker)
 	}
-	if o.noWorktree {
-		args = append(args, "--no-worktree")
+	if o.worktree {
+		args = append(args, "--worktree")
 	}
 	if o.pr {
 		args = append(args, "--pr")
@@ -2284,6 +2305,14 @@ func (p *dunProc) serverCmd(alias, action string) bool {
 		return false
 	}
 	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "server", "id": alias, "action": action}) == nil
+}
+
+// controlCmd asks the engine to perform a control action (docker/worktree).
+func (p *dunProc) controlCmd(id, action string) bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "control", "id": id, "action": action}) == nil
 }
 
 func (p *dunProc) answer(value string) bool {

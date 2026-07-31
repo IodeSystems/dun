@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -159,4 +160,155 @@ func serverState(h *Harness, id string) (ServerState, bool) {
 		}
 	}
 	return ServerState{}, false
+}
+
+// Rehoist moves workspace + exec + worktree atomically.
+func TestRehoist_SwitchesHostToDocker(t *testing.T) {
+	dir := t.TempDir()
+	h, err := Start(context.Background(), Config{
+		Workspace:   dir,
+		DockerImage: "golang:1.23",
+		Exec:        HostExec{Dir: dir},
+		SessionFile: "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+
+	// Start: host exec.
+	if h.Workspace() != dir {
+		t.Fatalf("workspace = %q, want %q", h.Workspace(), dir)
+	}
+	if h.IsDocker() {
+		t.Error("should start as host exec")
+	}
+
+	// Rehoist to docker — same workspace, same worktree (nil).
+	h.Rehoist(dir, nil, true)
+
+	if !h.IsDocker() {
+		t.Error("should be docker after rehoist")
+	}
+	de, ok := h.ExecBackend().(DockerExec)
+	if !ok {
+		t.Fatal("exec backend is not DockerExec")
+	}
+	if de.Dir != dir {
+		t.Errorf("DockerExec.Dir = %q, want %q", de.Dir, dir)
+	}
+	if de.Image != "golang:1.23" {
+		t.Errorf("DockerExec.Image = %q, want golang:1.23", de.Image)
+	}
+
+	// Rehoist back to host.
+	h.Rehoist(dir, nil, false)
+	if h.IsDocker() {
+		t.Error("should be host after rehoist off")
+	}
+	he, ok := h.ExecBackend().(HostExec)
+	if !ok {
+		t.Fatal("exec backend is not HostExec")
+	}
+	if he.Dir != dir {
+		t.Errorf("HostExec.Dir = %q, want %q", he.Dir, dir)
+	}
+}
+
+// Rehoist with a worktree moves the workspace path and preserves docker mode.
+func TestRehoist_SwitchesWorktree(t *testing.T) {
+	dir := t.TempDir()
+	mustRunGit(t, dir, "init")
+	mustRunGit(t, dir, "config", "user.email", "test@test")
+	mustRunGit(t, dir, "config", "user.name", "Test")
+	os.Create(dir + "/README")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "init")
+
+	h, err := Start(context.Background(), Config{
+		Workspace:   dir,
+		DockerImage: "golang:1.23",
+		Exec:        HostExec{Dir: dir},
+		SessionFile: "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+
+	// No worktree initially.
+	if wt := h.Worktree(); wt != nil && wt.Branch != "" {
+		t.Fatal("should have no worktree at start")
+	}
+
+	// Create a worktree and rehoist into it.
+	wt, isRepo, err := NewWorktree(dir, nil)
+	if err != nil || !isRepo {
+		t.Fatalf("NewWorktree: isRepo=%v, err=%v", isRepo, err)
+	}
+
+	h.Rehoist(wt.Path, wt, false)
+
+	if h.Workspace() != wt.Path {
+		t.Errorf("workspace = %q, want %q", h.Workspace(), wt.Path)
+	}
+	if h.Worktree() != wt {
+		t.Error("worktree not set")
+	}
+	he, ok := h.ExecBackend().(HostExec)
+	if !ok {
+		t.Fatal("not HostExec")
+	}
+	if he.Dir != wt.Path {
+		t.Errorf("HostExec.Dir = %q, want %q", he.Dir, wt.Path)
+	}
+}
+
+// Rehoist preserves docker mode when switching worktrees.
+func TestRehoist_PreservesDockerAcrossWorktree(t *testing.T) {
+	dir := t.TempDir()
+	mustRunGit(t, dir, "init")
+	mustRunGit(t, dir, "config", "user.email", "test@test")
+	mustRunGit(t, dir, "config", "user.name", "Test")
+	os.Create(dir + "/README")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "init")
+
+	h, err := Start(context.Background(), Config{
+		Workspace:   dir,
+		DockerImage: "golang:1.23",
+		Exec:        DockerExec{Dir: dir, Image: "golang:1.23"},
+		SessionFile: "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+
+	if !h.IsDocker() {
+		t.Fatal("should start as docker")
+	}
+
+	wt, isRepo, err := NewWorktree(dir, nil)
+	if err != nil || !isRepo {
+		t.Fatalf("NewWorktree: isRepo=%v, err=%v", isRepo, err)
+	}
+
+	h.Rehoist(wt.Path, wt, true)
+
+	if !h.IsDocker() {
+		t.Error("docker should be preserved after worktree switch")
+	}
+	de := h.ExecBackend().(DockerExec)
+	if de.Dir != wt.Path {
+		t.Errorf("DockerExec.Dir = %q, want %q", de.Dir, wt.Path)
+	}
+}
+
+func mustRunGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+	}
 }
