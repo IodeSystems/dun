@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -1100,5 +1101,50 @@ func TestTUI_StreamingMatchesFinalized(t *testing.T) {
 	// Both should be identical — same renderer, same input.
 	if streaming != finalized {
 		t.Errorf("streaming != finalized:\n  streaming:  %q\n  finalized: %q", streaming, finalized)
+	}
+}
+
+// TestTUI_ScrollPin verifies that scrolling up unpins the viewport so new
+// messages don't jump the user's position, and scrolling back to the bottom
+// re-pins it.
+func TestTUI_ScrollPin(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+
+	// scrollPinned should default to true (follow bottom).
+	if !m.scrollPinned {
+		t.Fatal("scrollPinned should be true by default")
+	}
+
+	// Initialize the viewport with a window size.
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+
+	// Add enough content to make the viewport scrollable.
+	for i := 0; i < 50; i++ {
+		m.convo = append(m.convo, convoEntry{collapsed: fmt.Sprintf("message line %d", i)})
+	}
+	m.vp.SetContent(m.fullText())
+
+	// After setup, pin should still be true.
+	if !m.scrollPinned {
+		t.Fatal("scrollPinned should still be true after setup")
+	}
+
+	// Simulate scrolling up via pgup.
+	m = key(m, tea.KeyMsg{Type: tea.KeyPgUp})
+
+	// Should be unpinned now.
+	if m.scrollPinned {
+		t.Fatal("scrollPinned should be false after scrolling up")
+	}
+
+	// Simulate scrolling back down to the bottom with multiple pgdowns.
+	for i := 0; i < 10; i++ {
+		m = key(m, tea.KeyMsg{Type: tea.KeyPgDown})
+	}
+
+	// Should be re-pinned at the bottom.
+	if !m.scrollPinned {
+		t.Fatal("scrollPinned should be true after scrolling back to bottom")
 	}
 }

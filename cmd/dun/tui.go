@@ -313,6 +313,7 @@ type tuiModel struct {
 	queuedMsgs       int               // messages typed mid-turn, buffered for the running turn
 	w, h             int
 	fatalErr         string
+	scrollPinned     bool // true when viewport should auto-follow (at bottom)
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
@@ -329,7 +330,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -490,6 +491,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgup", "pgdown":
 			var cmd tea.Cmd
 			m.vp, cmd = m.vp.Update(msg)
+			m.updateScrollPin()
 			return m, cmd
 		case "enter":
 			if m.focus == focusConvo {
@@ -773,6 +775,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg) // wheel scrolls the conversation viewport
+		m.updateScrollPin()
 		return m, cmd
 
 	case spinner.TickMsg:
@@ -1705,8 +1708,19 @@ func (m *tuiModel) refresh() {
 				m.vp.SetYOffset(top + h - vh)
 			}
 		}
-	} else {
+	} else if m.scrollPinned {
 		m.vp.GotoBottom()
+	}
+}
+
+// updateScrollPin unpins the scroll when the user scrolls away from the bottom,
+// and re-pins when they scroll back. This prevents new messages from jumping
+// the viewport while the user is reading older content.
+func (m *tuiModel) updateScrollPin() {
+	if m.vp.AtBottom() {
+		m.scrollPinned = true
+	} else {
+		m.scrollPinned = false
 	}
 }
 
