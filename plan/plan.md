@@ -134,6 +134,13 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   replaced — it broke /resume on the first try: three restarts and a give-up in
   the middle of a working switch. eofMsg carries its *dunProc; a stale one is
   ignored.
+- **A tool must not index its own state.** dun's per-session worktrees live in
+  `.dun/worktrees`, so pointing the code index and raglit at the workspace root
+  indexed 16 copies of the repo: every workspace-wide query came back 100% stale
+  duplicates. An agent's own isolation mechanism poisoning its own search. Both
+  ends fixed (poly-lsp-mcp skips `.dun`; dun ingests the workspace's ENTRIES,
+  not the workspace). Watch for this whenever session state moves inside the
+  tree.
 - **Only the short gaps carry load.** Replay compresses idle gaps (`--max-gap`,
   default 2s) and keeps bursts verbatim: a 4m33s session replays in 9s and still
   stutters where it stuttered. Offsets stay ABSOLUTE after the rewrite, or the

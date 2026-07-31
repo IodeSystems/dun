@@ -7,6 +7,8 @@ package dun
 
 import (
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -74,4 +76,42 @@ func TestNoteCompaction_FiresTheHook(t *testing.T) {
 
 func agentCompaction(subsumed, before, after int) agent.CompactionInfo {
 	return agent.CompactionInfo{SubsumedCount: subsumed, TokensBefore: before, TokensAfter: after, Summary: "s"}
+}
+
+// dun keeps its per-session git worktrees in .dun — copies of the workspace.
+// Handing raglit the workspace root indexed all of them: 16 in this repo, and
+// every workspace-wide search came back stale duplicates with the live files
+// nowhere in the results. The agent's own isolation poisoning its own index.
+func TestIngestTargets_ExcludesDunState(t *testing.T) {
+	ws := t.TempDir()
+	for _, d := range []string{".git", ".dun", "cmd", "plan"} {
+		if err := os.MkdirAll(filepath.Join(ws, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(ws, "README.md"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ingestTargets(ws)
+	var names []string
+	for _, p := range got {
+		names = append(names, filepath.Base(p))
+	}
+	for _, bad := range []string{".git", ".dun"} {
+		if slices.Contains(names, bad) {
+			t.Errorf("%s must not be handed to the indexer: %v", bad, names)
+		}
+	}
+	for _, want := range []string{"cmd", "plan", "README.md"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("real content %q was excluded: %v", want, names)
+		}
+	}
+}
+
+// An unreadable workspace falls back rather than silently indexing nothing.
+func TestIngestTargets_FallsBack(t *testing.T) {
+	if got := ingestTargets(filepath.Join(t.TempDir(), "nope")); len(got) != 1 {
+		t.Errorf("want the workspace itself as a fallback, got %v", got)
+	}
 }

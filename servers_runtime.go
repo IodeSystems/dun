@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -365,12 +366,45 @@ func ingestWorkspace(raglitCmd, raglitHome, workspace string) {
 	if filepath.Base(raglitCmd) != "raglit" {
 		return
 	}
+	// Ingest the workspace's entries, NOT the workspace — so dun's own state
+	// directory is left out.
+	//
+	// .dun holds the per-session git worktrees, which are COPIES of the
+	// workspace. Handing raglit the workspace root indexed every one of them:
+	// measured in this repo, 16 worktrees, and every workspace-wide search came
+	// back entirely stale duplicates with the live files nowhere in the results.
+	// An agent's own isolation mechanism poisoning its own search index is a
+	// spectacular own goal, and the fix is to never hand it the directory.
+	targets := ingestTargets(workspace)
+	if len(targets) == 0 {
+		return
+	}
+	args := append([]string{"ingest", "--embedded", "--home", raglitHome, "--now"}, targets...)
 	// --embedded for the same reason the serve command needs it: a per-session
 	// home has no project name, and the shared daemon refuses those.
-	cmd := exec.Command(raglitCmd, "ingest", "--embedded", "--home", raglitHome, "--now", workspace)
+	cmd := exec.Command(raglitCmd, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// Best-effort: proactive RAG simply has less to ping without it. Worth
 		// logging, since "search finds nothing" is otherwise unexplained.
 		log.Printf("dun: raglit ingest failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
+}
+
+// ingestTargets lists what raglit should index: the workspace's top-level
+// entries minus the two directories that are never content — git's object
+// store, and dun's own state (which contains copies of the workspace).
+func ingestTargets(workspace string) []string {
+	entries, err := os.ReadDir(workspace)
+	if err != nil {
+		return []string{workspace} // unreadable: fall back to the old behaviour
+	}
+	var out []string
+	for _, e := range entries {
+		switch e.Name() {
+		case ".git", DunDir:
+			continue
+		}
+		out = append(out, filepath.Join(workspace, e.Name()))
+	}
+	return out
 }
