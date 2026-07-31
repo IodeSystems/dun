@@ -2193,8 +2193,8 @@ func procArgs(o tuiOpts, mode string) []string {
 	if o.pr {
 		args = append(args, "--pr")
 	}
-	if o.ship {
-		args = append(args, "--ship")
+	if !o.ship {
+		args = append(args, "--no-ship")
 	}
 	if o.cont {
 		args = append(args, "--continue")
