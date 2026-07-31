@@ -817,6 +817,8 @@ func TestTUI_GiveUpKeepsSessionUsable(t *testing.T) {
 
 // Typing while the agent works is allowed: the engine buffers the message and
 // lifts it into the next tool result, so it lands in the RUNNING turn.
+// The TUI shows pending messages above the divider and moves them into the
+// conversation when the turn ends (at the delivery point).
 func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.w, m.h = 100, 30
@@ -828,25 +830,92 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	if strings.TrimSpace(m.input.Value()) != "" {
 		t.Errorf("input not cleared; the message was refused while busy: %q", m.input.Value())
 	}
-	if !strings.Contains(stripANSI(m.convoText()), "also update the README") {
-		t.Error("mid-turn message not echoed")
+	// The echo is in the convo right after sendUser.
+	echoed := stripANSI(m.convoText())
+	if !strings.Contains(echoed, "also update the README") {
+		t.Error("mid-turn message not echoed after sendUser")
 	}
+
+	// The queued event removes the echo and stores it in the pending area.
 	m = m.handleEvent(evMsg{"type": "queued", "text": "also update the README", "count": 1.0})
 	if m.queuedMsgs != 1 {
 		t.Errorf("queuedMsgs = %d; want 1", m.queuedMsgs)
 	}
-	if !strings.Contains(stripANSI(m.View()), "1 message queued") {
-		t.Errorf("status line does not report the queued message:\n%s", stripANSI(m.View()))
+	if len(m.queuedTexts) != 1 || m.queuedTexts[0] != "also update the README" {
+		t.Errorf("queuedTexts = %v; want [\"also update the README\"]", m.queuedTexts)
 	}
+	// Echo should be gone from convo (moved to pending area).
+	if strings.Contains(stripANSI(m.convoText()), "also update the README") {
+		t.Error("echo should be removed from convo after queued event")
+	}
+	// Pending area should show the message above the divider.
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "also update the README") {
+		t.Errorf("pending area does not show queued message:\n%s", view)
+	}
+	if !strings.Contains(view, "1 message queued") {
+		t.Errorf("status line does not report the queued message:\n%s", view)
+	}
+
 	// A second one batches with it.
 	m = m.handleEvent(evMsg{"type": "queued", "text": "and the changelog", "count": 2.0})
+	if len(m.queuedTexts) != 2 || m.queuedTexts[1] != "and the changelog" {
+		t.Errorf("queuedTexts = %v; want 2 items", m.queuedTexts)
+	}
 	if !strings.Contains(stripANSI(m.View()), "2 messages queued") {
 		t.Errorf("second queued message not counted:\n%s", stripANSI(m.View()))
 	}
-	// The turn ending clears it — the messages are the model's problem now.
+	if !strings.Contains(stripANSI(m.View()), "and the changelog") {
+		t.Errorf("pending area missing second message:\n%s", stripANSI(m.View()))
+	}
+
+	// The turn ending moves the messages into the convo at the delivery point.
 	m = m.handleEvent(evMsg{"type": "done"})
 	if m.queuedMsgs != 0 {
 		t.Errorf("queuedMsgs = %d after done; want 0", m.queuedMsgs)
+	}
+	if len(m.queuedTexts) != 0 {
+		t.Errorf("queuedTexts not cleared after done: %v", m.queuedTexts)
+	}
+	// Both messages should now be in the convo as user entries.
+	convo := stripANSI(m.convoText())
+	if !strings.Contains(convo, "also update the README") {
+		t.Error("first queued message not in convo after done")
+	}
+	if !strings.Contains(convo, "and the changelog") {
+		t.Error("second queued message not in convo after done")
+	}
+}
+
+// Queued messages should also move into the convo when the turn errors — the
+// engine flushes them on error, so they're part of the conversation history.
+func TestTUI_QueuedMessagesOnError(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.w, m.h = 100, 30
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m.busy = true
+
+	m = typeStr(m, "fix this bug")
+	m = key(m, kEnter)
+	m = m.handleEvent(evMsg{"type": "queued", "text": "fix this bug", "count": 1.0})
+	if len(m.queuedTexts) != 1 {
+		t.Fatalf("queuedTexts = %v; want 1", m.queuedTexts)
+	}
+
+	// Error event should move queued messages into convo.
+	m = m.handleEvent(evMsg{"type": "error", "error": "provider timeout", "fatal": false})
+	if m.busy {
+		t.Fatal("error should clear busy")
+	}
+	if len(m.queuedTexts) != 0 {
+		t.Errorf("queuedTexts not cleared after error: %v", m.queuedTexts)
+	}
+	convo := stripANSI(m.convoText())
+	if !strings.Contains(convo, "fix this bug") {
+		t.Error("queued message not in convo after error")
+	}
+	if !strings.Contains(convo, "provider timeout") {
+		t.Error("error text not in convo")
 	}
 }
 

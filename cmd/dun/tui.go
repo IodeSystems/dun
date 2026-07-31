@@ -312,7 +312,8 @@ type tuiModel struct {
 	retry            string            // live retry banner ("" = not waiting on the provider)
 	retryDue         time.Time         // when the next attempt is due, for the countdown
 	retrySeen        int               // retries this outage; the first one also lands in scrollback
-	queuedMsgs       int               // messages typed mid-turn, buffered for the running turn
+	queuedMsgs       int                // messages typed mid-turn, buffered for the running turn
+	queuedTexts      []string           // text of each pending message (for the area above the divider)
 	w, h             int
 	fatalErr         string
 	scrollPinned     bool // true when viewport should auto-follow (at bottom)
@@ -329,7 +330,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, queuedTexts: nil}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -1224,18 +1225,44 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		return m.handleRetry(ev)
 	case "queued":
 		// The message was buffered into the RUNNING turn rather than starting a new
-		// one; say so, or the echo above looks like it went nowhere.
+		// one. Remove the echo from the convo (sendUser already appended it) and
+		// store it in the pending area above the divider. When the turn ends the
+		// messages are moved into the convo at the delivery point.
+		text := str(ev["text"])
+		if text != "" {
+			// Pop the echo that sendUser just appended.
+			if len(m.convo) > 0 {
+				m.convo = m.convo[:len(m.convo)-1]
+			}
+			m.queuedTexts = append(m.queuedTexts, text)
+		}
 		m.queuedMsgs = int(evNum(ev["count"]))
-		m.append(stDim.Render("   ↳ queued for this turn — the agent sees it with its next tool result"))
 		m.refresh()
 	case "done":
 		m.flushCur()
+		// Move pending messages into the convo — they were delivered to the LLM
+		// inside tool results during this turn, so they appear here at the
+		// delivery point.
+		if len(m.queuedTexts) > 0 {
+			for _, txt := range m.queuedTexts {
+				m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + txt)})
+			}
+			m.queuedTexts = nil
+		}
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
 		m.clearRetry()
 		m.refresh()
 	case "error":
 		m.append(stErr.Render("error: " + str(ev["error"])))
+		// Move pending messages into the convo — the engine flushes them on error
+		// too, so they're part of the conversation history.
+		if len(m.queuedTexts) > 0 {
+			for _, txt := range m.queuedTexts {
+				m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + txt)})
+			}
+			m.queuedTexts = nil
+		}
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
 		m.clearRetry()
@@ -1370,6 +1397,21 @@ func (m tuiModel) queuedHint() string {
 	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
 }
 
+
+// pendingView renders queued messages above the divider line. Each message is
+// shown with a "› " prefix matching the user style, but dimmed to indicate it
+// hasn't been delivered to the model yet.
+func (m tuiModel) pendingView() string {
+	if len(m.queuedTexts) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, txt := range m.queuedTexts {
+		lines = append(lines, stDim.Render("› "+txt))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // exitHint is the status-bar exit prompt — "/exit to exit" when ctrl+c is
 // disabled (--disable-exit), else the usual "ctrl+c quit".
 func (m tuiModel) exitHint() string {
@@ -1424,7 +1466,11 @@ func (m tuiModel) View() string {
 	// The lower pane is the input, or — while answering — the option picker. The
 	// convo pane takes whatever height is left (the picker can be several rows).
 	lower := m.lowerView()
-	convoH := m.h - 3 - lipgloss.Height(lower) // head 1 + divider 1 + status 1
+	// Pending messages sit above the divider — between the convo viewport and
+	// the input area. Account for their height so the viewport doesn't overlap.
+	pending := m.pendingView()
+	pendingH := lipgloss.Height(pending)
+	convoH := m.h - 3 - pendingH - lipgloss.Height(lower) // head 1 + divider 1 + status 1
 	if convoH < 1 {
 		convoH = 1
 	}
@@ -1468,7 +1514,7 @@ func (m tuiModel) View() string {
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}
-	return strings.Join([]string{head, m.viewportView(vp), div, lower, status}, "\n")
+	return strings.Join([]string{head, m.viewportView(vp), pending, div, lower, status}, "\n")
 }
 
 // lowerView is the bottom pane: the input line, or the answer picker when asking.
