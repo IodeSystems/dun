@@ -12,7 +12,7 @@ import (
 // Describing a tool family whose tools are absent is worse than saying nothing:
 // the model plans around node_query, calls it, and gets "unknown tool".
 func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
-	shellOnly := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}})
+	shellOnly := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, HostExec{Dir: "/tmp"}, nil)
 	if strings.Contains(shellOnly, "node_query") {
 		t.Error("described code tools with no code server running")
 	}
@@ -26,16 +26,27 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 	if !strings.Contains(shellOnly, "ask_user") || !strings.Contains(shellOnly, "- exec:") {
 		t.Error("built-in tools should always be described")
 	}
+	// No worktree or Docker → no containment line.
+	if strings.Contains(shellOnly, "Containment:") {
+		t.Error("should not mention containment with no worktree or Docker")
+	}
 
 	all := systemFor([]mcpmgr.MCPTool{
 		{Name: "node_query", ServerID: ServerCode},
 		{Name: "eval", ServerID: ServerShell},
 		{Name: "search", ServerID: ServerDocs},
-	})
+	}, DockerExec{Dir: "/work", Image: "golang:1.23"}, &Worktree{Path: "/tmp/wt", Branch: "feat"})
 	for _, want := range []string{"node_query", "mcpshell", "raglit", "[docs] notes"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("full tool set: missing %q", want)
 		}
+	}
+	// Should mention both worktree and Docker containment.
+	if !strings.Contains(all, "git worktree at /tmp/wt") {
+		t.Error("should mention worktree path")
+	}
+	if !strings.Contains(all, "Docker container") {
+		t.Error("should mention Docker containment")
 	}
 }
 

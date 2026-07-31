@@ -256,7 +256,7 @@ func (h *Harness) rebuildTools() {
 
 	sys := cfg.System
 	if sys == "" {
-		sys = systemFor(tools)
+		sys = systemFor(tools, cfg.Exec, cfg.Worktree)
 	}
 	if cfg.EnablePR && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
 		toolDefs = append(toolDefs, prToolDef())

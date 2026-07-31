@@ -682,13 +682,11 @@ func (h *Harness) ToolNames() []string {
 // family whose tools are absent is worse than saying nothing — the model plans
 // around node_query, calls it, and gets "unknown tool".
 const (
-	systemPreamble = `You are dun, a coding agent working inside an isolated workspace.
-
-Your tools:`
+	systemPreamble = `You are dun, a coding agent working inside an isolated workspace.`
 	systemCode  = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
 	systemShell = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops; call the prompt tool for its language reference, help to list commands."
 	systemDocs  = "\n- docs (raglit): search the document/knowledge index; ingest to add sources."
-	systemExec  = "\n- exec: run a shell command (build/test/git/ls) in the workspace. Use it to VERIFY your edits — e.g. run the build and tests after changing code — and to run git."
+	systemExec  = "\n- exec: run a shell command (build/test/git/ls) in the workspace. The working directory is the isolated worktree root — edits you make are visible to exec. Use it to VERIFY your edits — e.g. run the build and tests after changing code — and to run git."
 	systemAsk   = "\n- ask_user: when the task is ambiguous or a decision is the user's to make (which approach, which file, is this OK to change), call ask_user with a clear question and optional options INSTEAD of guessing."
 
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
@@ -701,13 +699,27 @@ Your tools:`
 // are wired by the dispatcher, not MCP, so applyTools appends their lines when
 // the corresponding Config hooks are set — here they are assumed, since every
 // caller that has a workspace has exec.
-func systemFor(tools []mcpmgr.MCPTool) string {
+func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree) string {
 	have := map[string]bool{}
 	for _, t := range tools {
 		have[t.ServerID] = true
 	}
 	var b strings.Builder
 	b.WriteString(systemPreamble)
+	// Tell the agent about its containment so it knows what it's working with.
+	var containment []string
+	if wt != nil && wt.Path != "" {
+		containment = append(containment, "git worktree at "+wt.Path)
+	}
+	if _, ok := exec.(DockerExec); ok {
+		containment = append(containment, "Docker container")
+	}
+	if len(containment) > 0 {
+		b.WriteString(" Containment: " + strings.Join(containment, " + ") + ".")
+	} else {
+		b.WriteString(".")
+	}
+	b.WriteString("\n\nYour tools:")
 	if have[ServerCode] {
 		b.WriteString(systemCode)
 	}
