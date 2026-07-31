@@ -244,6 +244,7 @@ type tuiModel struct {
 	branch       string                // worktree branch (from the `workspace` event)
 	starting     bool                  // spawning servers, before `ready`
 	busy         bool                  // a turn in flight
+	busyStart    time.Time             // when the current busy turn started
 	asking       bool                  // agent is waiting on an ask_user answer
 	askOptions   []string              // the offered options; a trailing "custom" row is implicit
 	askSel       int                   // highlighted answer row (== len(askOptions) → the custom row)
@@ -1114,6 +1115,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.noteServers(ev)
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
+		if m.busyStart.IsZero() {
+			m.busyStart = time.Now()
+		}
 		m.suggestions, m.suggestSelecting = nil, false
 		m.cur += str(ev["text"])
 		// Do NOT render here. A provider streaming 60 tokens/s would drive 60
@@ -1127,6 +1131,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.refresh()
 	case "tool_call":
 		m.busy = true
+		if m.busyStart.IsZero() {
+			m.busyStart = time.Now()
+		}
 		m.suggestions, m.suggestSelecting = nil, false
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
@@ -1196,11 +1203,13 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	case "done":
 		m.flushCur()
 		m.busy, m.queuedMsgs = false, 0
+		m.busyStart = time.Time{}
 		m.clearRetry()
 		m.refresh()
 	case "error":
 		m.append(stErr.Render("error: " + str(ev["error"])))
 		m.busy, m.queuedMsgs = false, 0
+		m.busyStart = time.Time{}
 		m.clearRetry()
 		// Whether the SESSION survived is the engine's call, not something to
 		// infer from the error text. It says so, because promising "send a
@@ -1249,6 +1258,7 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 	case "giveup":
 		m.clearRetry()
 		m.busy = false
+		m.busyStart = time.Time{}
 		m.append(stErr.Render("✗ " + str(ev["text"])))
 	default:
 		// A turn-scope retry means the generation died mid-stream and will be
@@ -1310,6 +1320,14 @@ func (m tuiModel) retryCountdown() string {
 		return " · retrying now"
 	}
 	return fmt.Sprintf(" · next try in %s", left.Round(time.Second))
+}
+
+// busyElapsed returns the " · 3s" elapsed tail for the generic busy banner.
+func (m tuiModel) busyElapsed() string {
+	if m.busyStart.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf(" · %s", time.Since(m.busyStart).Round(time.Second))
 }
 
 // queuedHint reports messages typed mid-turn that are waiting to be lifted into
@@ -1408,7 +1426,7 @@ func (m tuiModel) View() string {
 	case m.retry != "":
 		status = stNote.Render("⏳ "+m.retry) + stDim.Render(m.retryCountdown()+"  ("+m.exitHint()+")")
 	case m.busy:
-		status = m.spin.View() + stDim.Render(" working…"+m.queuedHint()+"  ("+m.exitHint()+")")
+		status = m.spin.View() + stDim.Render(" working…"+m.busyElapsed()+m.queuedHint()+"  ("+m.exitHint()+")")
 	case m.focus == focusConvo:
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · enter expand · ← back · ctrl+c quit")
@@ -2054,6 +2072,7 @@ const (
 // session id and carry on with the scrollback still on screen.
 func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	m.busy, m.starting, m.asking = false, false, false
+	m.busyStart = time.Time{}
 	reason := m.fatalErr
 	if reason == "" {
 		reason = "dun engine exited"
