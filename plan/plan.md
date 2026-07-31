@@ -128,6 +128,12 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   and 38 in 7 min across two real sessions, 154k chars of summary written, 5 and
   7 entries surviving out of 50 and 45. Fixed in the Shaper; regression test
   pins it. Anyone adding a "sensible default" budget must not reintroduce it.
+- **An EOF must name its engine.** Deliberately closing an engine (a session
+  switch, /reconnect) still produces an EOF from its reader goroutine, and a
+  supervisor that cannot tell that from a crash restarts the engine you just
+  replaced — it broke /resume on the first try: three restarts and a give-up in
+  the middle of a working switch. eofMsg carries its *dunProc; a stale one is
+  ignored.
 - **A recorded session is the reproduction.** `DUN_TRACE` records the engine's
   events with offsets; `--replay` drives the real TUI from them. Built after
   three perf findings in a row had to be inferred from after-the-fact

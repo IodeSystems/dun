@@ -175,10 +175,20 @@ names the message type behind the slowest frame. dun also notices its own
 stutter: past a tenth of frames over 16ms it says so once and writes a dump.
 `DUN_PPROF=127.0.0.1:6060` serves `net/http/pprof` from any mode.
 
+**Switch sessions without leaving.** `/resume` opens a picker of every saved
+session for the workspace — newest first, each with its age, entry count and
+**opening message**, because an id is a timestamp and a timestamp says when but
+never which. `/resume <id>` goes straight there. Switching restarts the engine on
+that conversation and replays its transcript; the scrollback you were looking at
+is cleared, since it belongs to the session you just left.
+
 **Record a session, replay it exactly.** `DUN_TRACE=t.jsonl dun` writes every
 engine event with its offset from the first one; `dun --replay t.jsonl` feeds
-them back into the real TUI at the original pacing (`--replay-speed 4`, or `0`
-for as fast as possible). No LLM, no subprocess, the same events in the same
+them back into the real TUI at the original pacing. Timing is part of the
+recording on purpose — 60 tokens in a second and the same 60 over a minute are
+different loads, and only one of them reproduces a stutter. Override it with
+`--replay-speed 4` (proportional) or `--input-delay 0` (fast-forward, for CI) /
+`--input-delay 5ms` (a fixed gap, for finding a load ceiling). No LLM, no subprocess, the same events in the same
 order with the same gaps.
 
 This exists because every performance number above had to be inferred from

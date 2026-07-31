@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestReplayProc_EmitsEventsInOrder(t *testing.T) {
 		traceEntry{MS: 5, Ev: json.RawMessage(`{"type":"ready","tools":["eval"]}`)},
 		traceEntry{MS: 10, Ev: json.RawMessage(`{"type":"token","text":"hi"}`)},
 	)
-	proc, err := replayProc(p, 0) // 0 = as fast as possible
+	proc, err := replayProc(p, replayPacing{delay: 0}) // 0 = as fast as possible
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func TestReplayProc_Pacing(t *testing.T) {
 		traceEntry{MS: 0, Ev: json.RawMessage(`{"type":"a"}`)},
 		traceEntry{MS: 120, Ev: json.RawMessage(`{"type":"b"}`)},
 	)
-	proc, err := replayProc(p, 1)
+	proc, err := replayProc(p, replayPacing{speed: 1, delay: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,10 +79,10 @@ func TestReplayProc_Pacing(t *testing.T) {
 
 // An empty or missing trace fails loudly rather than opening a dead UI.
 func TestReplayProc_RejectsEmpty(t *testing.T) {
-	if _, err := replayProc(filepath.Join(t.TempDir(), "nope.jsonl"), 1); err == nil {
+	if _, err := replayProc(filepath.Join(t.TempDir(), "nope.jsonl"), replayPacing{delay: 0}); err == nil {
 		t.Error("a missing trace should error")
 	}
-	if _, err := replayProc(writeTrace(t), 1); err == nil {
+	if _, err := replayProc(writeTrace(t), replayPacing{delay: 0}); err == nil {
 		t.Error("an empty trace should error")
 	}
 }
@@ -101,7 +102,7 @@ func TestTraceWriter_RoundTrip(t *testing.T) {
 	w.write([]byte(`{"type":"token","text":"x"}`))
 	w.close()
 
-	proc, err := replayProc(path, 0)
+	proc, err := replayProc(path, replayPacing{delay: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,3 +130,59 @@ func TestReplay_DoesNotRestartAnEngine(t *testing.T) {
 }
 
 var _ tea.Msg = eofMsg{}
+
+// Pacing is the point of a trace: the same 60 tokens in a second and spread
+// over a minute are different loads, and only one reproduces a stutter. But
+// CI does not want to sit through a ten-minute session, so the recording can be
+// overridden — including to no delay at all.
+func TestReplayPacing(t *testing.T) {
+	cases := []struct {
+		name    string
+		pacing  replayPacing
+		ms      int64
+		elapsed time.Duration
+		want    time.Duration
+	}{
+		{"recorded timing", replayPacing{speed: 1, delay: -1}, 100, 0, 100 * time.Millisecond},
+		{"recorded, already late", replayPacing{speed: 1, delay: -1}, 100, 120 * time.Millisecond, -20 * time.Millisecond},
+		{"double speed", replayPacing{speed: 2, delay: -1}, 100, 0, 50 * time.Millisecond},
+		{"fast-forward", replayPacing{speed: 1, delay: 0}, 100000, 0, 0},
+		{"fixed gap overrides the recording", replayPacing{speed: 1, delay: 5 * time.Millisecond}, 100000, 0, 5 * time.Millisecond},
+	}
+	for _, c := range cases {
+		if got := c.pacing.gap(c.ms, c.elapsed); got != c.want {
+			t.Errorf("%s: gap = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// A trace records WHEN, not just what — without offsets it could not reproduce
+// a load at all.
+func TestTrace_RecordsOffsets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	t.Setenv("DUN_TRACE", path)
+	w := newTraceWriter()
+	w.write([]byte(`{"type":"a"}`))
+	time.Sleep(30 * time.Millisecond)
+	w.write([]byte(`{"type":"b"}`))
+	w.close()
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []traceEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var e traceEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, e)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 entries, got %d", len(got))
+	}
+	if got[1].MS < 20 {
+		t.Errorf("second event recorded at %dms — the gap was not captured", got[1].MS)
+	}
+}

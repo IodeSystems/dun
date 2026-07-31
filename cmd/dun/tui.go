@@ -21,6 +21,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/iodesystems/dun"
 )
 
 // The TUI is a CLIENT of the `-p` JSON event protocol: it re-execs `dun -p`,
@@ -293,19 +295,22 @@ type tuiModel struct {
 	vpc        *viewportCache
 	contentGen uint64
 
-	renderDue        bool         // streamed text arrived; a tick will draw it
-	tickPending      bool         // a render tick is already scheduled
-	replaying        bool         // driven by a trace (--replay), not an engine
-	quitting         bool         // the user is leaving; do not respawn
-	exitAnnounced    bool         // the engine said it was going; it did not crash
-	everUp           bool         // an engine reached `session` once; a retry may reattach
-	suggestions      []suggestion // --suggest: predicted next messages (idle-only picker)
-	suggestSelecting bool         // → arrow-navigable selector (entered via right from empty input)
-	suggestSel       int          // highlighted suggestion in the selector
-	retry            string       // live retry banner ("" = not waiting on the provider)
-	retryDue         time.Time    // when the next attempt is due, for the countdown
-	retrySeen        int          // retries this outage; the first one also lands in scrollback
-	queuedMsgs       int          // messages typed mid-turn, buffered for the running turn
+	renderDue        bool              // streamed text arrived; a tick will draw it
+	tickPending      bool              // a render tick is already scheduled
+	picking          bool              // the session picker owns the keys
+	sessions         []dun.SessionInfo // what it is listing
+	pickSel          int               // highlighted session
+	replaying        bool              // driven by a trace (--replay), not an engine
+	quitting         bool              // the user is leaving; do not respawn
+	exitAnnounced    bool              // the engine said it was going; it did not crash
+	everUp           bool              // an engine reached `session` once; a retry may reattach
+	suggestions      []suggestion      // --suggest: predicted next messages (idle-only picker)
+	suggestSelecting bool              // → arrow-navigable selector (entered via right from empty input)
+	suggestSel       int               // highlighted suggestion in the selector
+	retry            string            // live retry banner ("" = not waiting on the provider)
+	retryDue         time.Time         // when the next attempt is due, for the countdown
+	retrySeen        int               // retries this outage; the first one also lands in scrollback
+	queuedMsgs       int               // messages typed mid-turn, buffered for the running turn
 	w, h             int
 	fatalErr         string
 }
@@ -406,6 +411,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// detail, or type a custom/chat answer) — it owns the keys.
 		if m.asking {
 			return m.updateAsking(msg)
+		}
+		// So does the session picker.
+		if m.picking {
+			return m.updatePicking(msg)
 		}
 		// Typing a "/" search query owns the keys until enter/esc.
 		if m.searching {
@@ -733,6 +742,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case eofMsg:
+		// From an engine we already replaced: its death was the point.
+		if msg.proc != nil && m.proc != nil && msg.proc != m.proc {
+			return m, nil
+		}
 		return m.engineGone()
 
 	case engineUpMsg:
@@ -1410,6 +1423,9 @@ func (m tuiModel) lowerView() string {
 	if m.asking {
 		return m.askPanel()
 	}
+	if m.picking {
+		return m.sessionPanel()
+	}
 	if m.paletteActive() {
 		return m.palettePanel()
 	}
@@ -1761,6 +1777,7 @@ func init() {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())
 			return nil
 		}},
+		{"resume", "[id]", "switch to another saved session (bare opens the picker)", resumeSlash},
 		{"reconnect", "", "restart the engine (after it gave up), keeping this session", func(m *tuiModel, _ []string) tea.Cmd {
 			m.restarts, m.restartStart = 0, time.Now()
 			m.fatalErr = ""
@@ -1980,7 +1997,12 @@ func (m tuiModel) writeDump() {
 // ── subprocess (dun -p) ────────────────────────────────────────────
 
 type evMsg map[string]any
-type eofMsg struct{}
+// eofMsg says an engine's output ended. It names WHICH engine: deliberately
+// closing one (a session switch, /reconnect) still produces an EOF from its
+// reader goroutine, and a supervisor that cannot tell that from a crash will
+// "restart" the engine you just replaced — measured as three restarts and a
+// give-up in the middle of a working /resume.
+type eofMsg struct{ proc *dunProc }
 
 // engineUpMsg carries a respawned engine (or why it could not be respawned).
 type engineUpMsg struct {
@@ -2153,7 +2175,7 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 				ch <- evMsg(ev)
 			}
 		}
-		ch <- eofMsg{}
+		ch <- eofMsg{proc: p}
 	}()
 	return p, nil
 }

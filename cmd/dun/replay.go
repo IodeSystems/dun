@@ -86,10 +86,40 @@ func (w *traceWriter) close() {
 	w.dead = true
 }
 
+// replayPacing decides the gap between replayed events.
+//
+// Recorded offsets are the default because the WHOLE POINT of a trace is that
+// the timing is part of the bug: a burst of 60 tokens in a second is a
+// different load from the same 60 spread over a minute, and only one of them
+// reproduces the stutter. But recorded pacing is wrong for the other two uses —
+// a CI check does not want to sit through a ten-minute session, and hunting for
+// a load ceiling wants events faster than they ever really arrived.
+//
+// Delay < 0 means "use what was recorded"; 0 means no delay at all
+// (fast-forward); anything else is a fixed gap that overrides the recording.
+type replayPacing struct {
+	speed float64       // proportional: 2 = twice as fast. Ignored when Delay >= 0.
+	delay time.Duration // fixed gap; negative = use the recorded offsets
+}
+
+// gap returns how long to wait before the event at offset ms, given the time
+// already elapsed since the replay started.
+func (p replayPacing) gap(ms int64, elapsed time.Duration) time.Duration {
+	if p.delay >= 0 {
+		return p.delay
+	}
+	if p.speed <= 0 {
+		return 0
+	}
+	// Sleep to the event's OWN offset rather than the gap, so scheduling jitter
+	// cannot accumulate across a long trace.
+	return time.Duration(float64(ms)*float64(time.Millisecond)/p.speed) - elapsed
+}
+
 // replayProc is a dunProc fed from a trace instead of a subprocess. It has no
 // cmd and a discarding stdin: replay is a rerun of what the engine SAID, so
 // anything typed has nowhere to go (the TUI says so — see replaying).
-func replayProc(path string, speed float64) (*dunProc, error) {
+func replayProc(path string, pacing replayPacing) (*dunProc, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -113,20 +143,15 @@ func replayProc(path string, speed float64) (*dunProc, error) {
 	go func() {
 		start := time.Now()
 		for _, e := range entries {
-			if speed > 0 {
-				// Sleep to the event's own offset rather than the gap, so
-				// scheduling jitter cannot accumulate across a long trace.
-				due := time.Duration(float64(e.MS)*float64(time.Millisecond)/speed) - time.Since(start)
-				if due > 0 {
-					time.Sleep(due)
-				}
+			if due := pacing.gap(e.MS, time.Since(start)); due > 0 {
+				time.Sleep(due)
 			}
 			var ev map[string]any
 			if json.Unmarshal(e.Ev, &ev) == nil {
 				ch <- evMsg(ev)
 			}
 		}
-		ch <- eofMsg{}
+		ch <- eofMsg{proc: p}
 	}()
 	return p, nil
 }
@@ -139,10 +164,10 @@ func (nopCloser) Close() error { return nil }
 // runReplay drives the real TUI from a trace. Same model, same render path,
 // same everything — only the event source differs, which is the point: a
 // measurement taken here is a measurement of the thing users run.
-func runReplay(path string, speed float64, o tuiOpts) error {
+func runReplay(path string, pacing replayPacing, o tuiOpts) error {
 	initMarkdownStyle()
 	loadScriptRenderers()
-	proc, err := replayProc(path, speed)
+	proc, err := replayProc(path, pacing)
 	if err != nil {
 		return err
 	}

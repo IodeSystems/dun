@@ -1,11 +1,15 @@
 package dun
 
 import (
+	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/agentkit/agent"
 )
 
 // Session persistence layout — à la ~/.claude, scoped by the workspace ROOT.
@@ -80,4 +84,69 @@ func ListSessions(root string) []string {
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
 	return ids
+}
+
+// SessionInfo is one saved session, summarized for a picker.
+//
+// The id alone is a timestamp, which tells you when but never WHICH — and a
+// workspace accumulates dozens. Preview is the opening ask, because that is
+// how a person actually recognises a conversation ("the one where I asked about
+// compaction"), and Entries separates a real session from the two-line one you
+// abandoned.
+type SessionInfo struct {
+	ID      string
+	Path    string
+	ModTime time.Time
+	Entries int
+	Preview string
+}
+
+// previewScanLimit bounds the work a picker does. Sessions are append-only
+// JSONL and can reach megabytes; the opening ask is in the first few entries,
+// so scanning past this only refines the entry COUNT, and an exact count is
+// not worth making the picker wait.
+const previewScanLimit = 4000
+
+// ListSessionInfo summarizes every saved session for a workspace root, newest
+// first. Unreadable sessions are listed with what is known rather than hidden —
+// a session you cannot open is exactly the one you want to see.
+func ListSessionInfo(root string) []SessionInfo {
+	ids := ListSessions(root)
+	out := make([]SessionInfo, 0, len(ids))
+	for _, id := range ids {
+		path := SessionFile(root, id)
+		info := SessionInfo{ID: id, Path: path}
+		if st, err := os.Stat(path); err == nil {
+			info.ModTime = st.ModTime()
+		}
+		info.Entries, info.Preview = scanSession(path)
+		out = append(out, info)
+	}
+	return out
+}
+
+// scanSession counts entries and lifts the first user message.
+func scanSession(path string) (entries int, preview string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() && entries < previewScanLimit {
+		entries++
+		if preview != "" {
+			continue
+		}
+		var e struct {
+			Kind    string `json:"Kind"`
+			Content string `json:"Content"`
+		}
+		if json.Unmarshal(sc.Bytes(), &e) != nil || e.Kind != string(agent.KindUser) {
+			continue
+		}
+		preview = strings.Join(strings.Fields(e.Content), " ")
+	}
+	return entries, preview
 }
