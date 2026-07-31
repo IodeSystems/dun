@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -115,5 +116,82 @@ func TestRenderPacing_KeepsTickingWhileBusy(t *testing.T) {
 	m = nm.(tuiModel)
 	if cmd != nil || m.tickPending {
 		t.Error("an idle TUI must not keep scheduling frames")
+	}
+}
+
+// Bubble Tea calls View() after EVERY message, so its cost is paid per token
+// too — pacing refresh() does nothing for it. Measured separately because it is
+// a different loop.
+func BenchmarkView(b *testing.B) {
+	for _, n := range []int{10, 50, 200} {
+		b.Run(fmt.Sprintf("blocks=%d", n), func(b *testing.B) {
+			m := buildModel(n, 8)
+			m.refresh()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = m.View()
+			}
+		})
+	}
+}
+
+// One token message end to end, the way the runtime actually drives it:
+// Update (which no longer renders) followed by the View the runtime calls.
+func BenchmarkTokenMessageRoundTrip(b *testing.B) {
+	m := buildModel(200, 8)
+	m.refresh()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		nm, _ := m.Update(evMsg{"type": "token", "text": "word "})
+		m = nm.(tuiModel)
+		_ = m.View()
+	}
+}
+
+// dun must notice its own stutter: the person hitting it is working, not
+// watching a metric. One warning per session, after enough samples to mean
+// something, naming where the numbers are.
+func TestSlowFrameDetection(t *testing.T) {
+	var f frameStats
+	// Fast frames never warn, however many.
+	for i := 0; i < 500; i++ {
+		if f.observe(stageUpdate, 200*time.Microsecond) {
+			t.Fatal("fast frames must not warn")
+		}
+	}
+	// A stuttering run does, exactly once.
+	warns := 0
+	for i := 0; i < 500; i++ {
+		if f.observe(stageUpdate, 40*time.Millisecond) {
+			warns++
+		}
+	}
+	if warns != 1 {
+		t.Errorf("want exactly one warning, got %d", warns)
+	}
+	rep := f.report()
+	for _, want := range []string{"update", "slow", "p95"} {
+		if !strings.Contains(rep, want) {
+			t.Errorf("/perf report missing %q:\n%s", want, rep)
+		}
+	}
+	// The warning has to say where to look.
+	if w := f.slowWarning(); !strings.Contains(w, "/perf") {
+		t.Errorf("warning should point at the numbers: %q", w)
+	}
+}
+
+// Stages are reported separately because they failed separately: pacing fixed
+// refresh() while View kept costing per message.
+func TestPerfReport_SeparatesStages(t *testing.T) {
+	var f frameStats
+	f.observe(stageUpdate, time.Millisecond)
+	f.observe(stageView, 2*time.Millisecond)
+	f.observe(stageRefresh, 3*time.Millisecond)
+	rep := f.report()
+	for _, s := range []string{"update", "view", "refresh"} {
+		if !strings.Contains(rep, s) {
+			t.Errorf("report is missing the %s stage:\n%s", s, rep)
+		}
 	}
 }

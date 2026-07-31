@@ -148,14 +148,32 @@ one fold in a single turn is called out as thrashing, because that means the
 budget cannot fit one turn's floor (system prompt + tool schemas + the pristine
 tail) and every turn will re-summarize what it just summarized.
 
-**The UI does not compete with your keyboard.** Redraws are capped at 30Hz while
-text streams in, and each conversation block caches its wrapped render — without
-those, a reply redrew the entire scrollback once per token on the same loop that
-reads input, which is how a session ends up dropping keystrokes while tmux stays
-responsive (measured: 7.8ms per frame at 200 blocks, ~1s of CPU for one
-100-token reply; now 4.8ms for the same reply). `/perf` reports frame timings
-and slow-frame count for the running session; `DUN_PPROF=127.0.0.1:6060` serves
-`net/http/pprof` from any mode when you need to know which function.
+**The UI does not compete with your keyboard.** The worst offender was not a
+loop at all: glamour's auto-style asks the terminal for its background colour
+and waits up to **five seconds** for a reply, tmux frequently never answers, and
+dun rebuilt the renderer on every `WindowSizeMsg` — so every resize froze the UI
+for 5s with keystrokes queued behind it. The style is now resolved once, before
+the event loop starts, from `COLORFGBG` or a single query, and skipped entirely
+inside a multiplexer (`DUN_MD_STYLE=dark|light` overrides, `DUN_MD_QUERY=1`
+forces the round trip).
+
+ Beyond that: redraws are capped at 30Hz while text
+streams in, each conversation block caches its wrapped render, and the viewport's
+own render is memoized on (content, offset, size) — Bubble Tea calls `View()`
+after *every* message, so without that last one a token still cost 353µs of
+re-slicing whatever the pacing did.
+
+| | before | after |
+|---|---|---|
+| a resize (silent terminal) | 5.0 s | 0.3 ms |
+| `View()`, 200 blocks | 353 µs | 23 µs |
+| one 100-token reply | 973 ms | 4.8 ms |
+| per token | 9.7 ms | 1.7 µs |
+
+`/perf` reports per-stage timings (update / view / refresh, with p50/p95/max) and
+names the message type behind the slowest frame. dun also notices its own
+stutter: past a tenth of frames over 16ms it says so once and writes a dump.
+`DUN_PPROF=127.0.0.1:6060` serves `net/http/pprof` from any mode.
 
 **A changed tool set announces itself, for free.** Turning rag or lsp on or off
 mid-session buffers an *aside* — which tools appeared, which are gone. The

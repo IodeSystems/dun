@@ -128,6 +128,12 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   and 38 in 7 min across two real sessions, 154k chars of summary written, 5 and
   7 entries surviving out of 50 and 45. Fixed in the Shaper; regression test
   pins it. Anyone adding a "sensible default" budget must not reintroduce it.
+- **A blocking terminal query is not a "slow render".** The input starvation was
+  glamour's auto-style: an OSC background query with a 5s timeout that tmux does
+  not answer, rebuilt on every WindowSizeMsg, inside Update. Resolved once
+  before the loop starts, skipped in multiplexers. Found only because /perf
+  names the message type behind the worst frame — the lesson is that perf
+  metrics have to attribute, not just measure.
 - **Rendering is paced, and measured.** refresh() re-wrapped the whole
   scrollback once per streamed token — 7.8ms/frame at 200 blocks, ~1s of CPU per
   100-token reply, on the goroutine that reads the keyboard. Fixed by a

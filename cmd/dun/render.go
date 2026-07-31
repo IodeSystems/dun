@@ -1,22 +1,92 @@
 package main
 
 import (
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // Rendering helpers for the TUI: markdown (glamour) for assistant replies, and
 // diff colorization for tool output that looks like a unified diff.
 
-// newMarkdown builds a glamour renderer word-wrapped to width (auto light/dark).
+// mdStyle is the resolved light/dark style, decided ONCE.
+//
+// glamour.WithAutoStyle() asks the terminal for its background colour with an
+// OSC escape and waits up to FIVE SECONDS for a reply. Plenty of terminals
+// never answer — tmux without passthrough among them — and dun rebuilt the
+// renderer on every tea.WindowSizeMsg, inside Update. Measured: a single
+// WindowSizeMsg taking 5.0052s while every keystroke queued behind it. That is
+// the "spinning so hard it missed input while tmux was fine" bug: not a spin at
+// all, a blocking terminal query on the input goroutine, once per resize.
+//
+// Resolved once, off the message loop (initMarkdownStyle, before the program
+// starts), and overridable so the query can be skipped entirely.
+var (
+	mdStyleOnce sync.Once
+	mdStyle     string
+)
+
+// initMarkdownStyle resolves the style. Call it BEFORE the Bubble Tea loop
+// starts: the query writes to the tty and reads the reply, so doing it while
+// the key reader is running would race for the same bytes — and doing it inside
+// Update blocks input for as long as the terminal stays silent.
+func initMarkdownStyle() {
+	mdStyleOnce.Do(func() {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv("DUN_MD_STYLE"))) {
+		case "dark":
+			mdStyle = "dark"
+			return
+		case "light":
+			mdStyle = "light"
+			return
+		case "notty", "none":
+			mdStyle = "notty"
+			return
+		}
+		// COLORFGBG is free when the terminal sets it — no round trip.
+		if fg, bg, ok := parseColorFGBG(os.Getenv("COLORFGBG")); ok {
+			_ = fg
+			mdStyle = "dark"
+			if bg >= 7 {
+				mdStyle = "light"
+			}
+			return
+		}
+		// Inside a multiplexer the OSC background query is unreliable and, when
+		// it goes unanswered, costs a FIVE SECOND stall — measured: dun took
+		// 10.6s to reach `ready` under a silent terminal versus 5.6s with the
+		// query skipped. A dev terminal is dark far more often than not, so the
+		// default is dark and the cost of being wrong is a slightly-off palette,
+		// not five seconds of everyone's startup. DUN_MD_STYLE overrides;
+		// DUN_MD_QUERY=1 forces the round trip.
+		if os.Getenv("DUN_MD_QUERY") != "1" && (os.Getenv("TMUX") != "" || os.Getenv("STY") != "") {
+			mdStyle = "dark"
+			return
+		}
+		if termenv.HasDarkBackground() {
+			mdStyle = "dark"
+			return
+		}
+		mdStyle = "light"
+	})
+}
+
+// newMarkdown builds a glamour renderer word-wrapped to width.
 // Returns nil on failure — callers fall back to raw text.
 func newMarkdown(width int) *glamour.TermRenderer {
 	if width < 20 {
 		width = 20
 	}
-	r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(width))
+	initMarkdownStyle() // no-op after the first call
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle(mdStyle),
+		glamour.WithWordWrap(width),
+	)
 	if err != nil {
 		return nil
 	}
@@ -64,4 +134,19 @@ func colorizeDiff(text string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// parseColorFGBG reads the "fg;bg" form many terminals export. The background
+// index decides light vs dark: 0-6 and 8 are dark, 7 and 9-15 light-ish.
+func parseColorFGBG(v string) (fg, bg int, ok bool) {
+	parts := strings.Split(strings.TrimSpace(v), ";")
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	f, err1 := strconv.Atoi(parts[0])
+	b, err2 := strconv.Atoi(parts[len(parts)-1])
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return f, b, true
 }

@@ -45,6 +45,9 @@ type tuiOpts struct {
 // lc (may be nil) is the launcher registration — its reload channel drives the
 // "update ready" indicator + /reload.
 func runTUI(o tuiOpts, lc *launcherConn) error {
+	// Before the program starts, so the terminal query cannot block the input
+	// loop or race the key reader for the reply bytes. See initMarkdownStyle.
+	initMarkdownStyle()
 	loadScriptRenderers() // ~/.dun/renderers/*.star override/extend the built-ins
 	// A first engine that will not spawn is NOT a reason to refuse to open. The
 	// UI is where the error is legible and where /reconnect lives; exiting to a
@@ -247,6 +250,7 @@ type tuiModel struct {
 	noting       bool                  // capturing a detail for the selected option
 	customAnswer bool                  // capturing a free-text / chat answer
 	md           *glamour.TermRenderer // markdown renderer for assistant replies
+	mdWidth      int                   // width md was built for (rebuild only on change)
 	history      []string              // sent inputs, for up/down recall
 	histIdx      int                   // cursor into history (== len when not browsing)
 	focus        int                   // focusInput | focusConvo
@@ -270,24 +274,37 @@ type tuiModel struct {
 	// Engine supervision: the TUI outlives its engine. opts is what respawning
 	// one takes, sessionID reattaches it to the same conversation, and the
 	// restart counters stop a crash loop from spinning forever.
-	opts             tuiOpts
-	sessionID        string
-	restarts         int
-	restartStart     time.Time
-	skipHistory      bool            // a respawned engine replays what is already on screen
-	wantServers      map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
-	renderDue        bool            // streamed text arrived; a tick will draw it
-	tickPending      bool            // a render tick is already scheduled
-	quitting         bool            // the user is leaving; do not respawn
-	exitAnnounced    bool            // the engine said it was going; it did not crash
-	everUp           bool            // an engine reached `session` once; a retry may reattach
-	suggestions      []suggestion    // --suggest: predicted next messages (idle-only picker)
-	suggestSelecting bool            // → arrow-navigable selector (entered via right from empty input)
-	suggestSel       int             // highlighted suggestion in the selector
-	retry            string          // live retry banner ("" = not waiting on the provider)
-	retryDue         time.Time       // when the next attempt is due, for the countdown
-	retrySeen        int             // retries this outage; the first one also lands in scrollback
-	queuedMsgs       int             // messages typed mid-turn, buffered for the running turn
+	opts         tuiOpts
+	sessionID    string
+	restarts     int
+	restartStart time.Time
+	skipHistory  bool            // a respawned engine replays what is already on screen
+	wantServers  map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
+	// The viewport's rendered text, cached behind a POINTER on purpose.
+	//
+	// Bubble Tea calls View() after EVERY message — including each streamed
+	// token — and bubbles' viewport re-slices and re-joins its window on every
+	// call: 191µs of the 315µs a View costs at 200 blocks, paid per token no
+	// matter how the redraws are paced. But View() has a value receiver, so a
+	// cache stored in the model is written to a COPY and thrown away; only a
+	// pointer field survives to the next call. Its output depends on exactly
+	// (content, offset, size), which is the whole key; contentGen is bumped by
+	// refresh(), the only place content is set.
+	vpc        *viewportCache
+	contentGen uint64
+
+	renderDue        bool         // streamed text arrived; a tick will draw it
+	tickPending      bool         // a render tick is already scheduled
+	quitting         bool         // the user is leaving; do not respawn
+	exitAnnounced    bool         // the engine said it was going; it did not crash
+	everUp           bool         // an engine reached `session` once; a retry may reattach
+	suggestions      []suggestion // --suggest: predicted next messages (idle-only picker)
+	suggestSelecting bool         // → arrow-navigable selector (entered via right from empty input)
+	suggestSel       int          // highlighted suggestion in the selector
+	retry            string       // live retry banner ("" = not waiting on the provider)
+	retryDue         time.Time    // when the next attempt is due, for the countdown
+	retrySeen        int          // retries this outage; the first one also lands in scrollback
+	queuedMsgs       int          // messages typed mid-turn, buffered for the running turn
 	w, h             int
 	fatalErr         string
 }
@@ -306,7 +323,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -340,6 +357,22 @@ func waitReload(lc *launcherConn) tea.Cmd {
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Timed as a whole: this is what a keystroke queues behind, and it is the
+	// number that decides whether dun warns about itself (see perf.go).
+	start := time.Now()
+	nm, cmd := m.update(msg)
+	if frames.observeMsg(stageUpdate, time.Since(start), msgKind(msg)) {
+		// Noticed its own stutter. Say it once, in the conversation, where the
+		// person having the problem is actually looking.
+		if t, ok := nm.(tuiModel); ok {
+			t.append(stErr.Render(frames.slowWarning()))
+			nm = t
+		}
+	}
+	return nm, cmd
+}
+
+func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -349,7 +382,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
 		m.input.Width = msg.Width - 2
 		m.search.Width = msg.Width - 4
-		m.md = newMarkdown(msg.Width - 2)
+		// Only when the WIDTH actually changed: a renderer is word-wrap state
+		// and nothing else, and rebuilding one is not free. A height-only
+		// resize (the common one — an ask panel growing) rebuilt it for nothing.
+		if m.md == nil || m.mdWidth != msg.Width {
+			m.md, m.mdWidth = newMarkdown(msg.Width-2), msg.Width
+		}
 		if m.inspecting {
 			m.insp.setSize(m.w, m.h)
 		}
@@ -1270,7 +1308,33 @@ func (m tuiModel) exitHint() string {
 	return "ctrl+c quit"
 }
 
+// viewportCache memoizes one viewport render. Shared by every copy of the
+// model, which is the point — see the vpc field. Bubble Tea drives Update and
+// View from a single goroutine, so this needs no lock.
+type viewportCache struct {
+	out       string
+	gen       uint64
+	off, w, h int
+	valid     bool
+}
+
+// viewportView is vp.View() memoized on (content, offset, size).
+func (m tuiModel) viewportView(vp viewport.Model) string {
+	c := m.vpc
+	if c == nil {
+		return vp.View()
+	}
+	if c.valid && c.gen == m.contentGen && c.off == vp.YOffset && c.w == vp.Width && c.h == vp.Height {
+		return c.out
+	}
+	c.out, c.valid = vp.View(), true
+	c.gen, c.off, c.w, c.h = m.contentGen, vp.YOffset, vp.Width, vp.Height
+	return c.out
+}
+
 func (m tuiModel) View() string {
+	start := time.Now()
+	defer func() { frames.observe(stageView, time.Since(start)) }()
 	// The inspector is a full-screen overlay — it replaces the normal layout.
 	if m.inspecting {
 		return m.insp.view(m.w, m.h)
@@ -1333,7 +1397,7 @@ func (m tuiModel) View() string {
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · " + m.exitHint())
 	}
-	return strings.Join([]string{head, vp.View(), div, lower, status}, "\n")
+	return strings.Join([]string{head, m.viewportView(vp), div, lower, status}, "\n")
 }
 
 // lowerView is the bottom pane: the input line, or the answer picker when asking.
@@ -1548,7 +1612,7 @@ func (m tuiModel) fullText() string {
 
 func (m *tuiModel) refresh() {
 	start := time.Now()
-	defer func() { frames.observe(time.Since(start)) }()
+	defer func() { frames.observe(stageRefresh, time.Since(start)) }()
 	blocks := make([]string, 0, len(m.convo)+1)
 	for _, e := range m.convo {
 		blocks = append(blocks, e.view())
@@ -1590,6 +1654,7 @@ func (m *tuiModel) refresh() {
 		}
 	}
 	m.vp.SetContent(strings.Join(rendered, "\n"))
+	m.contentGen++
 
 	// Keep the selection in view; otherwise stick to the bottom (live tail).
 	if selMode && m.sel >= 0 && m.sel < len(rendered) {
