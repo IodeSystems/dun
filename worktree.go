@@ -246,6 +246,7 @@ func git(dir string, args ...string) (string, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	detach(cmd) // fetch/push must never reach dun's terminal — see detach.go
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)

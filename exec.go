@@ -34,6 +34,9 @@ type HostExec struct{ Dir string }
 func (h HostExec) Run(ctx context.Context, command string) string {
 	cmd := exec.CommandContext(ctx, "sh", "-lc", command)
 	cmd.Dir = h.Dir
+	// Model-authored commands run git, ssh and friends. None of them may reach
+	// dun's terminal — see detach.go.
+	killGroup(detach(cmd))
 	return finish(cmd)
 }
 
@@ -62,7 +65,7 @@ func (d DockerExec) Run(ctx context.Context, command string) string {
 		args = append(args, "-v", m.Source+":/"+m.Name+":ro")
 	}
 	args = append(args, d.Image, "sh", "-lc", command)
-	return finish(exec.CommandContext(ctx, "docker", args...))
+	return finish(killGroup(detach(exec.CommandContext(ctx, "docker", args...))))
 }
 
 func finish(cmd *exec.Cmd) string {

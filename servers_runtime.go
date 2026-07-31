@@ -395,7 +395,7 @@ func ingestWorkspace(raglitCmd, raglitHome, workspace string) {
 	args := append([]string{"ingest", "--embedded", "--home", raglitHome, "--now"}, targets...)
 	// --embedded for the same reason the serve command needs it: a per-session
 	// home has no project name, and the shared daemon refuses those.
-	cmd := exec.Command(raglitCmd, args...)
+	cmd := detach(exec.Command(raglitCmd, args...))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// Best-effort: proactive RAG simply has less to ping without it. Worth
 		// logging, since "search finds nothing" is otherwise unexplained.
