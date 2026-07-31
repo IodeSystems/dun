@@ -82,19 +82,83 @@ full detail archived in `done.md`.
 
 ## Active work
 
-_None in flight._ Next slice is a decision (see below). Carry-over ◻ items live
-in `icebox.md` — pull one here (with next/risks) when picking it up.
+### ✅ Ship rework — one tool, three modes (2026-07-31)
+`ship` was: clean → fetch → rebase → push → ff local base → delete branch, with
+its checks unwired (`ShipCfg` was never populated by `main.go`, so `Checks` was
+always nil). Rebuilt around the invariant below. `open_pr` is GONE — PR is a
+ship mode, so push exists once. Live-verified paths are in `ship_test.go`
+(pipeline against a real bare origin, base-moved re-verify, rebase resume).
+- **next:** none — but the check-failure signal is still the `[exit:` marker in
+  the backend's output string, which a check that PRINTS that would trip.
+  Fixing it means giving `ExecBackend.Run` an exit code.
+- **risks:** `allowBasePush` defaults off, so a `--no-worktree` session on main
+  now verifies and REFUSES rather than pushing. Intended, but it is a behavior
+  change for anyone who was relying on the old flow.
+- **optional extensions:** an `integrate` mode (advance the local base) — must
+  use `git fetch . HEAD:<base>`, never `checkout`; see the decision below.
 
-### ◻ Slice 5 — roles / task DAG (if wanted)
-- Planner/coder/reviewer; multi-Session orchestration (autowork3-style).
-- **next:** decide whether this is the direction before speccing — it's the one
-  substantial unbuilt slice. Otherwise the backlog is polish (see `icebox.md`).
-- **risks:** multi-Session orchestration is a large surface; agentkit owns the
-  tool loop but not cross-session hand-off — that's net-new.
-- **blocking decision (USER):** is dun a single-agent harness (done) or does it
-  grow into a role DAG? Everything in `icebox.md` is viable without Slice 5.
+### ◐ Slice 5 — sub-agents
+- **Decided (USER, 2026-07-31): yes.** dun grows a sub-agent concept; the root
+  agent spawns them.
+- Sub-agents do NOT get `ship`'s landing modes. The mechanism already exists —
+  `ship.allow` is the policy surface, so a sub-agent is handed
+  `allow: ["verify"]` and can run the whole pipeline while landing nothing.
+  That is strictly better than withholding the tool: a sub-agent that can verify
+  is useful.
+- **next:** spec the sub-agent surface itself (spawn, hand-off, result shape).
+  agentkit owns the tool loop but not cross-session hand-off — that part is
+  net-new.
+- **risks:** multi-Session orchestration is a large surface.
+- **blocking decisions:** none outstanding.
 
 ## Decisions
+- **Never push anything that was not verified in exactly the state it will
+  land in.** bors' "not rocket science rule", and the whole reason ship's order
+  is fetch → rebase → checks → push. Verifying BEFORE the rebase — the obvious
+  order — tests a tree that will never exist anywhere. The residual hole is
+  origin moving between the checks and the push, which is what merge queues
+  exist for; ship re-fetches after the checks and goes round again if the base
+  moved, bounded at 3 rounds because a permanently busy trunk must fail loudly
+  rather than spin.
+- **A ship mode is a terminal state, and `allow` is the policy surface.**
+  verify/push/pr differ in nothing but where they stop. A repo says "agents open
+  PRs, they do not push" by listing modes, which is also how a sub-agent is
+  constrained. Pushing the base branch is its own opt-in (`allowBasePush`,
+  default off): commits made straight to main are DETECTED and refused, with the
+  pipeline still run, because landing on a shared trunk unreviewed should be
+  something a repo asks for, not a fallback.
+- **Checks are serial waves of parallel commands, and the shape carries the
+  semantics** — the array is ordered, each object is not. A wave reports EVERY
+  failure in it (compile and lint broken is two things to fix in one turn, not a
+  second failure discovered after fixing the first); the next wave does not start
+  if one failed. Names are sorted before reporting, or Go's randomized map
+  iteration makes two identical runs produce different text, which reads to the
+  model as a changed result.
+- **A conflicted rebase is a state, not an argument.** Ship used to need
+  `action:"continue-rebase"` from the model — one more thing to get wrong when
+  git already knows. Detected from `rebase-merge`/`rebase-apply` and resumed.
+  The resume must run BEFORE anything reads the branch: a stopped rebase leaves
+  HEAD detached, so "what branch am I on" has no answer until it finishes. A
+  test caught that ordering; the first implementation had it backwards.
+- **Ship must not touch the user's checkout.** The old `FastForwardLocal` ran
+  `git checkout <base>` in the *main* repo — silently changing what branch the
+  human's working directory was on, and racing any other session doing the same.
+  The whole point of worktree isolation, undone by its own tooling. It also
+  deleted the branch it had just pushed while never pushing base, so a
+  "successful" ship left the work only in the local checkout. Both gone. If
+  advancing a local branch comes back, `git fetch . HEAD:<base>` moves the ref
+  without checking anything out.
+- **No child of dun may keep dun's controlling terminal.** `git push` to an
+  https remote opens `/dev/tty` DIRECTLY for its credential prompt — stdin at
+  /dev/null stops nothing — and the TUI's Bubble Tea reader is blocked on that
+  same tty, so the kernel splits arriving keystrokes between the two readers.
+  Measured: a push parked on a prompt for 21 minutes while the session merely
+  looked broken, ~40% of taps reaching the UI, git's prompt invisible under the
+  alt-screen. Every spawn goes through `detach()` (Setsid + `GIT_TERMINAL_PROMPT=0`).
+  `killGroup()` is the other half, not a nicety: a detached child no longer dies
+  with the terminal, so cancellation has to take the process group or the
+  descendants doing the real work outlive it. Not git-specific — ssh, sudo and
+  docker login all do this.
 - **The tool set is mutable; four fields derive from it.** Servers start and stop
   mid-session, so `Session.Tools`, `Dispatch`, `System` and `Preparer` are all
   recomputed together by `Harness.applyTools` — never set individually, or the

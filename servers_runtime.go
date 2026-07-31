@@ -258,14 +258,11 @@ func (h *Harness) rebuildTools() {
 	if sys == "" {
 		sys = systemFor(tools, cfg.Exec, cfg.Worktree)
 	}
-	if cfg.EnablePR && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
-		toolDefs = append(toolDefs, prToolDef())
-		dispatch = withPR(dispatch, cfg.Worktree, cfg.OnToolCall)
-		sys += "\n\nWhen the task is complete and verified (build/tests pass), call open_pr with a concise title and a summary body to submit your work as a pull request."
-		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
-	}
-	if cfg.EnableShip && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
-		toolDefs = append(toolDefs, shipToolDef())
+	// ship is the only way work leaves the worktree. It needs a repo, not a
+	// branch: a --no-worktree session sits on the base branch, and the pipeline
+	// (rebase + checks) is worth running there too — it just refuses to push.
+	if cfg.EnableShip && cfg.Worktree != nil && cfg.Worktree.IsRepo() {
+		toolDefs = append(toolDefs, shipToolDef(cfg.ShipCfg))
 		execFn := func(ctx context.Context, command string) string {
 			if cfg.Exec != nil {
 				return cfg.Exec.Run(ctx, command)
@@ -273,8 +270,12 @@ func (h *Harness) rebuildTools() {
 			return "no exec backend configured"
 		}
 		dispatch = withShip(dispatch, cfg.Worktree, cfg.ShipCfg, execFn, cfg.OnToolCall)
-		sys += "\n\nWhen the task is complete and verified (build/tests pass), call ship to rebase onto the base branch, run checks, push, and integrate your changes."
-		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
+		sys += "\n\nWhen the task is complete, commit everything (including new files) and call ship. It fetches origin, rebases onto " +
+			cfg.Worktree.BaseBranch + ", runs the project's checks, and lands the result in mode " +
+			string(cfg.ShipCfg.defaultMode()) + " unless you name another. Do not push by hand with exec — ship is what verifies before it pushes."
+		if cfg.Worktree.Branch != "" {
+			sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
+		}
 	}
 
 	h.Session.Tools = toolDefs

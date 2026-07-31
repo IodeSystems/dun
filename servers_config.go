@@ -107,6 +107,56 @@ type ServersFile struct {
 	// across layers — a local file can override a source path without
 	// restating the project's mount list.
 	Mounts []MountSpec `json:"mounts,omitempty"`
+	// Ship is the ship tool's policy and checks. Merged FIELD BY FIELD across
+	// layers, so a machine can permit a mode or skip a check without
+	// transcribing the project's whole check list.
+	Ship *ShipConfig `json:"ship,omitempty"`
+}
+
+// LoadShip resolves the effective ship config for a workspace. nil means "no
+// ship section anywhere", which ShipConfig's methods read as permissive
+// defaults with no checks — see ShipConfig.
+func LoadShip(dir string) *ShipConfig {
+	var out *ShipConfig
+	for _, path := range serverConfigPaths(dir) {
+		f, err := readServersFile(path)
+		if err != nil || f == nil || f.Ship == nil {
+			continue
+		}
+		if out == nil {
+			cp := *f.Ship
+			out = &cp
+			continue
+		}
+		merged := mergeShip(*out, *f.Ship)
+		out = &merged
+	}
+	return out
+}
+
+// mergeShip layers one ship section over another: a field the higher layer did
+// not state is INHERITED, for the same reason ServerSpec fields are — turning
+// one knob must not mean restating the rest of the policy.
+func mergeShip(prev, next ShipConfig) ShipConfig {
+	if len(next.Allow) > 0 {
+		prev.Allow = next.Allow
+	}
+	if next.Default != "" {
+		prev.Default = next.Default
+	}
+	if next.AllowBasePush != nil {
+		prev.AllowBasePush = next.AllowBasePush
+	}
+	if next.CheckTimeout != "" {
+		prev.CheckTimeout = next.CheckTimeout
+	}
+	if len(next.Skip) > 0 {
+		prev.Skip = next.Skip
+	}
+	if len(next.Checks) > 0 {
+		prev.Checks = next.Checks
+	}
+	return prev
 }
 
 // LoadServers resolves the effective server list for a workspace.

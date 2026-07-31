@@ -2,7 +2,10 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/iodesystems/dun"
 )
 
 func TestConfigRoundTrip(t *testing.T) {
@@ -49,5 +52,31 @@ func TestMaskKey(t *testing.T) {
 		if got := maskKey(in); got != want {
 			t.Errorf("maskKey(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// --pr is shorthand for ship in pr mode. It predates ship modes, so the
+// compatibility matters: the flag must still mean "open a pull request".
+func TestShipConfig_PRFlagSetsMode(t *testing.T) {
+	dir := t.TempDir()
+	if got := shipConfig(dir, false); got != nil {
+		t.Errorf("no ship section and no --pr should stay nil, got %+v", got)
+	}
+	got := shipConfig(dir, true)
+	if got == nil || got.Default != dun.ShipPR {
+		t.Fatalf("--pr must select pr mode, got %+v", got)
+	}
+}
+
+// A repo that forbids pr, plus an explicit --pr, is a contradiction the user
+// has to see resolved — the flag is the more specific statement.
+func TestShipConfig_PRFlagOverridesAllowList(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, dun.ProjectServersFile),
+		[]byte(`{"ship":{"allow":["verify"]}}`), 0o644)
+
+	got := shipConfig(dir, true)
+	if got == nil || !shipModeListed(got.Allow, dun.ShipPR) {
+		t.Fatalf("--pr must be honoured over the config's allow list, got %+v", got)
 	}
 }

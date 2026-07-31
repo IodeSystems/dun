@@ -189,57 +189,103 @@ func (w *Worktree) RebaseContinue() string {
 	return strings.TrimSpace(out)
 }
 
-// PushWithUpstream pushes the current branch to origin and sets upstream tracking.
-func (w *Worktree) PushWithUpstream() string {
+// IsRepo reports whether this worktree is inside a git repo. Ship needs one;
+// the branch it is ON is a separate question (a --no-worktree session sits on
+// the base branch, which ship still verifies).
+func (w *Worktree) IsRepo() bool { return w.repoRoot != "" }
+
+// CurrentBranch is the branch HEAD is on, or "" when detached or not a repo.
+// Ship asks git rather than trusting w.Branch: the agent can switch branches
+// with exec, and shipping the wrong ref is not a recoverable mistake.
+func (w *Worktree) CurrentBranch() string {
+	if w.repoRoot == "" {
+		return ""
+	}
+	out, err := git("", "-C", w.Path, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return ""
+	}
+	if b := strings.TrimSpace(out); b != "HEAD" {
+		return b
+	}
+	return "" // detached
+}
+
+// RebaseInProgress reports whether a rebase is stopped mid-way. This is what
+// lets ship RESUME instead of making the model declare that it should.
+func (w *Worktree) RebaseInProgress() bool {
+	if w.repoRoot == "" {
+		return false
+	}
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		out, err := git("", "-C", w.Path, "rev-parse", "--git-path", name)
+		if err != nil {
+			continue
+		}
+		p := strings.TrimSpace(out)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(w.Path, p)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// RemoteHead is the sha of origin/<branch>, or "" if there is no such ref.
+// Ship compares it before and after the checks to catch a base that moved.
+func (w *Worktree) RemoteHead(branch string) string {
+	if w.repoRoot == "" {
+		return ""
+	}
+	out, err := git("", "-C", w.Path, "rev-parse", "--verify", "--quiet", "origin/"+branch)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// NeedsPush reports whether HEAD differs from origin/<branch>. A branch that
+// was never pushed needs one.
+func (w *Worktree) NeedsPush(branch string) bool {
+	if w.repoRoot == "" {
+		return false
+	}
+	remote := w.RemoteHead(branch)
+	if remote == "" {
+		return true
+	}
+	head, err := git("", "-C", w.Path, "rev-parse", "HEAD")
+	if err != nil {
+		return true
+	}
+	return strings.TrimSpace(head) != remote
+}
+
+// Push pushes branch to origin, setting upstream tracking.
+//
+// lease sends --force-with-lease, which is REQUIRED after a rebase (the branch
+// no longer fast-forwards) and is a compare-and-swap, not a blind force: if
+// someone else moved the ref since our last fetch, the push is refused. Never
+// pass it for the base branch — a trunk must only ever fast-forward.
+func (w *Worktree) Push(branch string, lease bool) string {
 	if w.repoRoot == "" {
 		return "not a git repo"
 	}
-	out, err := git("", "-C", w.Path, "push", "-u", "origin", w.Branch)
+	args := []string{"-C", w.Path, "push"}
+	if lease {
+		args = append(args, "--force-with-lease")
+	}
+	args = append(args, "-u", "origin", branch)
+	out, err := git("", args...)
 	if err != nil {
 		return "git push: " + err.Error()
 	}
 	return strings.TrimSpace(out)
 }
 
-// FastForwardLocal fast-forwards the local base branch (e.g. "main") to match
-// the worktree branch. This integrates the worktree's commits into the local
-// base branch. Returns an error if the base branch is not a strict ancestor
-// (use rebase first).
-func (w *Worktree) FastForwardLocal() string {
-	if w.repoRoot == "" {
-		return "not a git repo"
-	}
-	// Check out the base branch in the main worktree and ff it to our branch.
-	out, err := git("", "-C", w.repoRoot, "checkout", w.BaseBranch)
-	if err != nil {
-		return "checkout base: " + err.Error()
-	}
-	out, err = git("", "-C", w.repoRoot, "merge", "--ff-only", w.Branch)
-	if err != nil {
-		// Clean up: switch back. The ff-only failed, which is expected if
-		// main has diverged. The caller should handle this.
-		return "merge --ff-only: " + err.Error()
-	}
-	return strings.TrimSpace(out)
-}
 
-// DeleteBranch removes the worktree's branch (local and remote). Called after
-// a successful ship to clean up — the work is already integrated into the base
-// branch. Best-effort: errors are returned but not fatal.
-func (w *Worktree) DeleteBranch() string {
-	if w.repoRoot == "" {
-		return "not a git repo"
-	}
-	// Delete remote tracking branch
-	if _, err := git("", "-C", w.repoRoot, "push", "origin", "--delete", w.Branch); err != nil {
-		return "delete remote branch: " + err.Error()
-	}
-	// Delete local branch (--force because the worktree may still have it checked out)
-	if _, err := git("", "-C", w.repoRoot, "branch", "--delete", "--force", w.Branch); err != nil {
-		return "delete local branch: " + err.Error()
-	}
-	return "Branch " + w.Branch + " deleted (local + remote)"
-}
 
 func git(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)

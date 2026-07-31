@@ -237,13 +237,35 @@ dun --no-worktree ...                               # work in place (no isolatio
 The container is the sandbox, so model-authored commands can't reach the host —
 no per-action approval prompts, the isolation does the work.
 
-With `--pr`, the agent can **submit its work as a pull request** — it commits the
-worktree branch, pushes it, and runs `gh pr create` (an `open_pr` tool it calls
-when the task is done and verified). Without `--pr`, the changes just stay on the
-branch for you to review and PR yourself.
+With `--ship`, the agent gets one way to land work — a `ship` tool that fetches
+origin, rebases onto the base branch, runs the project's checks, and *then*
+pushes. The order is the point: what gets verified is exactly what gets pushed.
+`--pr` is shorthand for `--ship` in `pr` mode, which also opens the pull request.
+Without either, the changes stay on the branch for you to review and push
+yourself.
 
-Next: run the MCP servers inside the container too, and a worktree→PR flow. See
-`plan/plan.md`.
+Modes are the terminal state — `verify` (checks only, pushes nothing), `push`,
+`pr` — and a repo declares which ones are allowed:
+
+```jsonc
+// dun.json
+"ship": {
+  "allow":   ["verify", "pr"],       // this repo's agents open PRs, they don't push
+  "default": "pr",
+  "checks": [                        // serial waves; each object runs in parallel
+    {"compile": "go build ./..."},
+    {"lint": "golangci-lint run", "vet": "go vet ./..."},
+    {"smoke": "go test -short ./..."}
+  ]
+}
+```
+
+Ship requires a clean tree (an untracked file is usually one the agent forgot to
+add), resumes a conflicted rebase on its own, and re-verifies if origin moved
+while the checks were running. Pushing the base branch directly is refused
+unless `"allowBasePush": true`.
+
+Next: run the MCP servers inside the container too. See `plan/plan.md`.
 
 ## Vision
 

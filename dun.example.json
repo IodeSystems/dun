@@ -27,6 +27,31 @@
     }
   ],
 
+  "//ship": "The ship tool: verify, then land. Fetch -> rebase onto the base branch -> checks -> push, in that order, so what is verified is exactly what lands. Every field is optional; merged field-by-field across dun.json and dun.local.json.",
+  "ship": {
+    "//allow": "Permitted terminal states. verify = checks only, pushes nothing. push = land the branch. pr = land it and open a pull request. Omit to permit all three. This is the policy surface: a repo whose agents must not push lists only verify and pr.",
+    "allow": ["verify", "push", "pr"],
+
+    "//default": "The mode used when the model names none. Must be one of allow. Omit for push.",
+    "default": "push",
+
+    "//allowBasePush": "Permit pushing the base branch itself (commits made straight to main). Off by default: ship runs the whole pipeline, then refuses and tells the agent to move its commits onto a branch.",
+    "allowBasePush": false,
+
+    "//checkTimeout": "Bounds ONE check. Go duration string; omit for 10m.",
+    "checkTimeout": "10m",
+
+    "//skip": "Checks to omit, BY NAME.",
+    "skip": [],
+
+    "//checks": "Serial list of parallel waves — the shape carries the semantics: the array is ordered, each object is not. A wave runs its commands at once and reports EVERY failure in it (two broken checks are two things to fix in one turn); the next wave does not start if one failed. A check fails on a non-zero exit.",
+    "checks": [
+      {"compile": "go build ./..."},
+      {"lint": "golangci-lint run", "vet": "go vet ./..."},
+      {"smoke": "go test -short ./..."}
+    ]
+  },
+
   "//mounts": "Extra local paths that must be accessible from both the worktree (symlink) and Docker container (volume mount). go.mod replace directives are auto-discovered — declare mounts here for non-Go projects or to override the auto-detected source path.",
   "mounts": [
     {

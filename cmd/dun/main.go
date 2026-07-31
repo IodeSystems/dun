@@ -82,8 +82,8 @@ func main() {
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
 	noWorktree := flag.Bool("no-worktree", false, "work in the workspace directly, no git worktree")
-	pr := flag.Bool("pr", false, "let the agent open a pull request (commit+push+gh pr create) when done")
-	ship := flag.Bool("ship", false, "let the agent ship work (rebase+checks+push+ff local base branch) when done")
+	pr := flag.Bool("pr", false, "shorthand for --ship with mode pr (verify, push, then open a pull request)")
+	ship := flag.Bool("ship", false, "let the agent ship work (fetch+rebase+checks+push) when done")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
@@ -296,8 +296,8 @@ func main() {
 		Client:      llm.NewClient(*url, effKey, *model),
 		Exec:        backend,
 		Worktree:    wt,
-		EnablePR:    *pr,
-		EnableShip:  *ship,
+		EnableShip:  *ship || *pr,
+		ShipCfg:     shipConfig(absWS, *pr),
 		SessionFile: sessionFile,
 		// The workspace's own checkout, not the worktree: /rag auto is a fact
 		// about this machine and this project, and must outlive the throwaway

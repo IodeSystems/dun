@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun"
 )
 
 // Config — persisted LLM settings so you don't re-pass --url/--model/--key every
@@ -127,4 +129,38 @@ func decodeModels(resp *http.Response) []string {
 		}
 	}
 	return ids
+}
+
+// shipConfig resolves the ship policy for this run: the workspace's `ship`
+// section, with --pr overriding the default mode.
+//
+// --pr predates ship modes and used to be its own tool. It survives as
+// shorthand because a flag people have in their muscle memory should not stop
+// working — but it now means "ship, in pr mode", which is the same pipeline
+// with a different terminal state rather than a second way to push.
+func shipConfig(workspace string, pr bool) *dun.ShipConfig {
+	cfg := dun.LoadShip(workspace)
+	if !pr {
+		return cfg
+	}
+	if cfg == nil {
+		cfg = &dun.ShipConfig{}
+	}
+	cfg.Default = dun.ShipPR
+	// A flag that asks for a mode the config forbids is a contradiction the
+	// user has to see: honour the flag, since it is the more specific
+	// statement, rather than silently shipping in some other mode.
+	if !shipModeListed(cfg.Allow, dun.ShipPR) && len(cfg.Allow) > 0 {
+		cfg.Allow = append(cfg.Allow, dun.ShipPR)
+	}
+	return cfg
+}
+
+func shipModeListed(modes []dun.ShipMode, want dun.ShipMode) bool {
+	for _, m := range modes {
+		if m == want {
+			return true
+		}
+	}
+	return false
 }
