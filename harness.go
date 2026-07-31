@@ -92,8 +92,10 @@ type Config struct {
 	System      string          // nil → defaultSystem
 	Exec        ExecBackend     // nil → no exec tool; else adds the built-in exec tool
 	Ask         AskFunc         // nil → no ask_user tool; else adds the human-in-the-loop tool
-	Worktree    *Worktree       // the session worktree (for open_pr)
+	Worktree    *Worktree       // the session worktree (for open_pr, ship)
 	EnablePR    bool            // add the open_pr tool (opt-in: pushing + PR is outward-facing)
+	EnableShip  bool            // add the ship tool (opt-in: rebase+push+ff local base)
+	ShipCfg     *ShipConfig     // ship configuration (checks, skipChecks); nil = no checks
 	SessionFile string          // persist the conversation here (resumable); "" = in-memory only
 	OnToken     func(string)
 	OnToolCall  func(tool string, args map[string]any, result string)

@@ -263,6 +263,17 @@ func (h *Harness) rebuildTools() {
 		dispatch = withPR(dispatch, cfg.Worktree, cfg.OnToolCall)
 		sys += "\n\nWhen the task is complete and verified (build/tests pass), call open_pr with a concise title and a summary body to submit your work as a pull request."
 	}
+	if cfg.EnableShip && cfg.Worktree != nil && cfg.Worktree.Branch != "" {
+		toolDefs = append(toolDefs, shipToolDef())
+		execFn := func(ctx context.Context, command string) string {
+			if cfg.Exec != nil {
+				return cfg.Exec.Run(ctx, command)
+			}
+			return "no exec backend configured"
+		}
+		dispatch = withShip(dispatch, cfg.Worktree, cfg.ShipCfg, execFn, cfg.OnToolCall)
+		sys += "\n\nWhen the task is complete and verified (build/tests pass), call ship to rebase onto the base branch, run checks, push, and integrate your changes."
+	}
 
 	h.Session.Tools = toolDefs
 	h.Session.Dispatch = dispatch

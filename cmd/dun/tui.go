@@ -34,6 +34,7 @@ type tuiOpts struct {
 	workspace, model, url, key, docker string
 	noWorktree                         bool
 	pr                                 bool
+	ship                               bool
 	cont                               bool   // --continue: resume the latest session
 	resume                             string // --resume <id>: resume a specific session
 	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /quit)
@@ -2162,6 +2163,9 @@ func procArgs(o tuiOpts, mode string) []string {
 	}
 	if o.pr {
 		args = append(args, "--pr")
+	}
+	if o.ship {
+		args = append(args, "--ship")
 	}
 	if o.cont {
 		args = append(args, "--continue")

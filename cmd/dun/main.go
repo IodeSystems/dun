@@ -83,6 +83,7 @@ func main() {
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
 	noWorktree := flag.Bool("no-worktree", false, "work in the workspace directly, no git worktree")
 	pr := flag.Bool("pr", false, "let the agent open a pull request (commit+push+gh pr create) when done")
+	ship := flag.Bool("ship", false, "let the agent ship work (rebase+checks+push+ff local base branch) when done")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
@@ -182,7 +183,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *ship, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -192,7 +193,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *noWorktree, *pr, *ship, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -279,6 +280,7 @@ func main() {
 		Exec:        backend,
 		Worktree:    wt,
 		EnablePR:    *pr,
+		EnableShip:  *ship,
 		SessionFile: sessionFile,
 		// The workspace's own checkout, not the worktree: /rag auto is a fact
 		// about this machine and this project, and must outlive the throwaway
