@@ -242,9 +242,10 @@ type tuiModel struct {
 	//                    strings.Builder — Bubble Tea copies the model each Update.
 	tools        []string
 	branch       string                // worktree branch (from the `workspace` event)
-	starting     bool                  // spawning servers, before `ready`
-	busy         bool                  // a turn in flight
-	busyStart    time.Time             // when the current busy turn started
+	starting      bool                  // spawning servers, before `ready`
+	startingStart time.Time             // when server spawning began
+	busy          bool                  // a turn in flight
+	busyStart     time.Time             // when the current busy turn started
 	asking       bool                  // agent is waiting on an ask_user answer
 	askOptions   []string              // the offered options; a trailing "custom" row is implicit
 	askSel       int                   // highlighted answer row (== len(askOptions) → the custom row)
@@ -768,6 +769,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.proc = msg.proc
 		m.fatalErr = ""
 		m.starting = true
+		m.startingStart = time.Now()
 		m.refresh()
 		return m, waitEvent(m.proc.ch)
 
@@ -1330,6 +1332,14 @@ func (m tuiModel) busyElapsed() string {
 	return fmt.Sprintf(" · %s", time.Since(m.busyStart).Round(time.Second))
 }
 
+// startingElapsed returns the " · 3s" elapsed tail for the spawning banner.
+func (m tuiModel) startingElapsed() string {
+	if m.startingStart.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf(" · %s", time.Since(m.startingStart).Round(time.Second))
+}
+
 // queuedHint reports messages typed mid-turn that are waiting to be lifted into
 // the next tool result, so the user knows they landed.
 func (m tuiModel) queuedHint() string {
@@ -1410,7 +1420,7 @@ func (m tuiModel) View() string {
 	case m.fatalErr != "":
 		status = stErr.Render(m.fatalErr)
 	case m.starting:
-		status = m.spin.View() + stDim.Render(" spawning tool servers…")
+		status = m.spin.View() + stDim.Render(" spawning tool servers…") + m.startingElapsed()
 	case m.asking && len(m.askOptions) == 0:
 		status = stAsk.Render("❓ type your answer · enter send · esc/ctrl+c quit")
 	case m.asking && m.askMulti:
