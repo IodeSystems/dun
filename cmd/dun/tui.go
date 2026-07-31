@@ -1210,6 +1210,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.append(stDim.Render("the session is intact — send a message to retry from here"))
 		}
 		m.refresh()
+	case "reset":
+		// Engine confirmed the store was cleared; nothing extra to show —
+		// the /clear handler already appended a message.
 	case "compaction":
 		// On screen, not just in a log a TUI never shows: this is the one
 		// operation that DESTROYS conversation, and it used to happen silently.
@@ -1788,6 +1791,17 @@ func init() {
 		}},
 		{"rag", "[on|off|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
 		{"lsp", "[on|off|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
+		{"clear", "", "clear scrollback and start a fresh session log", func(m *tuiModel, _ []string) tea.Cmd {
+			m.proc.sendReset()
+			m.convo = nil
+			m.cur = ""
+			m.pendingTool, m.pendingArgs = -1, nil
+			m.sel, m.blockH = -1, nil
+			m.busy, m.asking = false, false
+			m.append(stDim.Render("session cleared — fresh start"))
+			m.refresh()
+			return nil
+		}},
 		{"quit", "", "exit dun", func(m *tuiModel, _ []string) tea.Cmd {
 			m.quitting = true
 			return tea.Quit
@@ -2193,6 +2207,14 @@ func (p *dunProc) send(content string) bool {
 		return false
 	}
 	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content}) == nil
+}
+
+// sendReset tells the engine to clear its session store.
+func (p *dunProc) sendReset() bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "reset"}) == nil
 }
 
 // serverCmd asks the engine to report on, start, or stop a tool server.

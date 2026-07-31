@@ -459,6 +459,10 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		em.emit(event{"type": "server", "id": alias, "action": action, "message": msg,
 			"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
 	})
+	in.setResetCb(func() {
+		h.Reset()
+		em.emit(event{"type": "reset"})
+	})
 	// A message that arrives while a turn is running does NOT wait for it. It is
 	// buffered and lifted into the next tool result, so the model reads it inside
 	// the turn it is already running — and several of them batch. Only when no turn
@@ -603,6 +607,8 @@ type inputStream struct {
 	// installed. The scanner starts before the harness exists, so a client that
 	// writes its first line immediately would otherwise have it dropped.
 	srvPending [][2]string
+	// resetCb handles a `reset` event (clear the session store).
+	resetCb func()
 }
 
 // setMidTurn installs the mid-turn router (see inputStream.mid).
@@ -624,6 +630,14 @@ func (s *inputStream) setServerCmd(f func(alias, action string)) {
 		f(c[0], c[1])
 	}
 }
+
+// setResetCb installs the session-reset handler.
+func (s *inputStream) setResetCb(f func()) {
+	s.mu.Lock()
+	s.resetCb = f
+	s.mu.Unlock()
+}
+
 
 // serverCmd runs the installed handler, queueing until one exists.
 func (s *inputStream) serverCmd(alias, action string) {
@@ -694,7 +708,14 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- ev.Content
 			case "answer":
 				s.answers <- ev.Value
-			case "stop", "quit":
+			case "reset":
+			s.mu.Lock()
+			cb := s.resetCb
+			s.mu.Unlock()
+			if cb != nil {
+				cb()
+			}
+		case "stop", "quit":
 				close(s.quit) // before users, so stopped() is visible to the reader
 				close(s.users)
 				return

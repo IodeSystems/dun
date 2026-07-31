@@ -661,6 +661,9 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 // Close shuts down the MCP servers.
 func (h *Harness) Close() { h.mgr.Close() }
 
+// Reset clears the session store, starting a fresh conversation log.
+func (h *Harness) Reset() { h.store.Reset() }
+
 // ToolNames lists the agent's tool names (MCP tools + the built-in exec), sorted.
 func (h *Harness) ToolNames() []string {
 	names := make([]string, len(h.Session.Tools))
@@ -787,17 +790,15 @@ func (h *Harness) noteCompaction(ci agent.CompactionInfo) {
 	}
 }
 
-// maxTurns is the cap on agent loop iterations. 40 suits an interactive
-// session, where the user is present and can nudge; a long autonomous task on a
-// large repo can legitimately need far more, since paging through unfamiliar
-// files costs turns before any edit happens. DUN_MAX_TURNS raises it.
+// maxTurns is the cap on agent loop iterations. 400 suits a coding agent
+// working through a large task; DUN_MAX_TURNS overrides it.
 func maxTurns() int {
 	if v := os.Getenv("DUN_MAX_TURNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
-	return 40
+	return 400
 }
 
 // withLiftedQueue appends anything buffered during a tool call to that tool's

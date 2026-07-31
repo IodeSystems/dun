@@ -276,6 +276,16 @@ func (s *sessionStore) Compact(_ context.Context, _ string, c agent.Compaction) 
 	return nil
 }
 
+// Reset clears all entries, starting a fresh session log.
+func (s *sessionStore) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries = nil
+	s.unclaimed = 0
+	s.flushLocked()
+}
+
+
 // ── inbox helpers ──────────────────────────────────────────────────
 
 // publish appends an entry AND marks it a pending inbox arrival (a user message

@@ -82,6 +82,31 @@ func TestSessionStore_CompactPersists(t *testing.T) {
 	}
 }
 
+// Reset clears all entries and persists the empty state.
+func TestSessionStore_Reset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	ctx := context.Background()
+	s, _ := openSessionStore(path)
+	s.Append(ctx, "x", agent.Entry{ID: "1", Kind: agent.KindUser, Content: "a"})
+	s.Append(ctx, "x", agent.Entry{ID: "2", Kind: agent.KindAssistant, Content: "b"})
+	if s.Loaded() != 2 {
+		t.Fatalf("before reset: Loaded() = %d, want 2", s.Loaded())
+	}
+
+	s.Reset()
+
+	if s.Loaded() != 0 {
+		t.Fatalf("after reset: Loaded() = %d, want 0", s.Loaded())
+	}
+
+	// Reopen from disk — should be empty.
+	re, _ := openSessionStore(path)
+	got, _ := re.Context(ctx, "x")
+	if len(got) != 0 {
+		t.Fatalf("after reopen: Context returned %d entries, want 0", len(got))
+	}
+}
+
 // History maps loaded store entries to replayable items in chronological order:
 // user/assistant/notification pass through, a tool_call decodes its JSON args,
 // compaction markers and empty assistant turns are dropped.

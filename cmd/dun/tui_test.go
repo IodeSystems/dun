@@ -18,6 +18,11 @@ type discardWC struct{}
 func (discardWC) Write(p []byte) (int, error) { return len(p), nil }
 func (discardWC) Close() error                { return nil }
 
+// bufCloser wraps an io.Writer as an io.WriteCloser (Close is a no-op).
+type bufCloser struct{ io.Writer }
+
+func (bufCloser) Close() error { return nil }
+
 func key(m tuiModel, k tea.KeyMsg) tuiModel {
 	nm, _ := m.Update(k)
 	return nm.(tuiModel)
@@ -465,6 +470,42 @@ func TestTUI_UnknownSlash(t *testing.T) {
 	m = key(m, kEnter)
 	if !strings.Contains(m.convoText(), "unknown command") {
 		t.Fatalf("expected unknown-command note, got: %s", m.convoText())
+	}
+}
+
+// /clear clears the scrollback and sends a reset to the engine.
+func TestTUI_Clear(t *testing.T) {
+	var buf strings.Builder
+	m := newTUIModel(&dunProc{stdin: &bufCloser{Writer: &buf}}, "/ws")
+	// Seed some conversation content.
+	m.convo = append(m.convo, convoEntry{collapsed: "some tool call"})
+	m.cur = "partial assistant reply"
+	m.busy = true
+	m.pendingTool = 0
+
+	m = typeStr(m, "/clear")
+	m = key(m, kEnter)
+
+	// Scrollback should be cleared.
+	if len(m.convo) > 1 { // only the "session cleared" note remains
+		t.Fatalf("convo not cleared: %d entries", len(m.convo))
+	}
+	if m.cur != "" {
+		t.Fatal("cur not cleared")
+	}
+	if m.busy {
+		t.Fatal("busy not cleared")
+	}
+	if m.pendingTool != -1 {
+		t.Fatal("pendingTool not cleared")
+	}
+	if !strings.Contains(m.convoText(), "session cleared") {
+		t.Fatalf("expected clear confirmation, got: %s", m.convoText())
+	}
+
+	// Engine should have received a reset message.
+	if !strings.Contains(buf.String(), `"type":"reset"`) {
+		t.Fatalf("engine did not receive reset, got: %s", buf.String())
 	}
 }
 

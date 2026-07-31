@@ -94,3 +94,21 @@ func TestInputStreamSkipsJunk(t *testing.T) {
 		t.Fatal("stopped() = true, want false")
 	}
 }
+
+// TestInputStreamResetCallback verifies that a "reset" event invokes the
+// callback installed via setResetCb.
+func TestInputStreamResetCallback(t *testing.T) {
+	s := newInputStreamFrom(strings.NewReader(
+		`{"type":"reset"}` + "\n" +
+		`{"type":"user","content":"after"}` + "\n"))
+	var called bool
+	s.setResetCb(func() { called = true })
+	// Give the scanner a moment to process the reset event.
+	time.Sleep(50 * time.Millisecond)
+	if !called {
+		t.Fatal("reset callback not invoked")
+	}
+	if got := drain(t, s); len(got) != 1 || got[0] != "after" {
+		t.Fatalf("messages = %q, want [after]", got)
+	}
+}
