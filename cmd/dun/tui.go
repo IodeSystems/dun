@@ -243,6 +243,7 @@ type tuiModel struct {
 	tools        []string
 	branch       string                // worktree branch (from the `workspace` event)
 	starting     bool                  // spawning servers, before `ready`
+	startingStart time.Time            // when the starting phase began
 	busy         bool                  // a turn in flight
 	busyStart    time.Time             // when the current busy turn started
 	asking       bool                  // agent is waiting on an ask_user answer
@@ -794,6 +795,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.proc = msg.proc
 		m.fatalErr = ""
 		m.starting = true
+		m.startingStart = time.Now()
 		m.refresh()
 		return m, waitEvent(m.proc.ch)
 
@@ -1377,6 +1379,14 @@ func (m tuiModel) retryCountdown() string {
 	return fmt.Sprintf(" · next try in %s", left.Round(time.Second))
 }
 
+// startingElapsed returns the " · 3s" elapsed tail for the spawning banner.
+func (m tuiModel) startingElapsed() string {
+	if m.startingStart.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf(" · %s", time.Since(m.startingStart).Round(time.Second))
+}
+
 // busyElapsed returns the " · 3s" elapsed tail for the generic busy banner.
 func (m tuiModel) busyElapsed() string {
 	if m.busyStart.IsZero() {
@@ -1484,7 +1494,7 @@ func (m tuiModel) View() string {
 	case m.fatalErr != "":
 		status = stErr.Render(m.fatalErr)
 	case m.starting:
-		status = m.spin.View() + stDim.Render(" spawning tool servers…")
+		status = m.spin.View() + stDim.Render(" spawning tool servers…"+m.startingElapsed())
 	case m.asking && len(m.askOptions) == 0:
 		status = stAsk.Render("❓ type your answer · enter send · esc/ctrl+c quit")
 	case m.asking && m.askMulti:
