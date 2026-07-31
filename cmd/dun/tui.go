@@ -37,7 +37,7 @@ type tuiOpts struct {
 	ship                               bool
 	cont                               bool   // --continue: resume the latest session
 	resume                             string // --resume <id>: resume a specific session
-	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /quit)
+	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /exit)
 	suggest                            bool   // --suggest: next-message suggestions after each turn
 	// rag/lsp are --rag/--lsp as typed: "" (unset, use the saved setting),
 	// "true" or "false". Passed through to the -p engine verbatim.
@@ -271,7 +271,7 @@ type tuiModel struct {
 	paletteSel   int                   // highlighted row in the "/" command palette
 	model, url   string                // this session's LLM settings (for /config)
 	keySet       bool                  // whether an API key is configured
-	disableExit  bool                  // --disable-exit: ctrl+c/esc don't quit (use /quit)
+	disableExit  bool                  // --disable-exit: ctrl+c/esc don't quit (use /exit)
 	lc           *launcherConn         // launcher registration (nil = no launcher)
 	reloadVer    string                // a newer build the launcher announced ("" = none)
 	reloadReq    bool                  // /reload requested → runTUI re-execs after quit
@@ -426,7 +426,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			if m.disableExit {
-				return m, nil // exit disabled — use /quit
+				return m, nil // exit disabled — use /exit
 			}
 			m.quitting = true // deliberate exit: do not respawn the engine
 			return m, tea.Quit
@@ -449,7 +449,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.disableExit {
-				return m, nil // exit disabled — use /quit
+				return m, nil // exit disabled — use /exit
 			}
 			m.quitting = true // deliberate exit: do not respawn the engine
 			return m, tea.Quit
@@ -531,6 +531,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// highlighted match (or the exactly-typed command).
 			if strings.HasPrefix(v, "/") {
 				return m, m.runPaletteEnter(v)
+			}
+			// Bare "exit" (no slash) is a hidden command: exits silently.
+			if v == "exit" {
+				m.quitting = true
+				return m, tea.Quit
 			}
 			// Sending while a turn runs is allowed: the engine buffers the message
 			// and lifts it into the next tool result, so the agent reads it inside
@@ -1342,11 +1347,11 @@ func (m tuiModel) queuedHint() string {
 	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
 }
 
-// exitHint is the status-bar exit prompt — "/quit to exit" when ctrl+c is
+// exitHint is the status-bar exit prompt — "/exit to exit" when ctrl+c is
 // disabled (--disable-exit), else the usual "ctrl+c quit".
 func (m tuiModel) exitHint() string {
 	if m.disableExit {
-		return "/quit to exit"
+		return "/exit to exit"
 	}
 	return "ctrl+c quit"
 }
@@ -1835,7 +1840,7 @@ func init() {
 			m.refresh()
 			return nil
 		}},
-		{"quit", "", "exit dun", func(m *tuiModel, _ []string) tea.Cmd {
+		{"exit", "", "exit dun", func(m *tuiModel, _ []string) tea.Cmd {
 			m.quitting = true
 			return tea.Quit
 		}},

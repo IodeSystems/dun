@@ -357,7 +357,7 @@ func TestTUI_CommandPalette(t *testing.T) {
 	m = typeStr(m, "/help")
 	m = key(m, kEnter)
 	txt := m.convoText()
-	if !strings.Contains(txt, "commands") || !strings.Contains(txt, "/config") || !strings.Contains(txt, "/quit") {
+	if !strings.Contains(txt, "commands") || !strings.Contains(txt, "/config") || !strings.Contains(txt, "/exit") {
 		t.Fatalf("/help should list the commands, got: %s", txt)
 	}
 }
@@ -452,10 +452,15 @@ func TestTUI_DisableExit(t *testing.T) {
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc}); cmd != nil {
 		t.Fatal("esc should be ignored when disableExit")
 	}
-	// /quit is a deliberate exit — still works.
-	q := typeStr(m, "/quit")
+	// /exit is a deliberate exit — still works.
+	q := typeStr(m, "/exit")
 	if _, cmd := q.Update(kEnter); cmd == nil {
-		t.Fatal("/quit should exit even with disableExit")
+		t.Fatal("/exit should exit even with disableExit")
+	}
+	// Bare "exit" (no slash) also exits silently.
+	e := typeStr(m, "exit")
+	if _, cmd := e.Update(kEnter); cmd == nil {
+		t.Fatal("bare exit should exit even with disableExit")
 	}
 	// Control: exit enabled → ctrl+c quits.
 	m2 := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")

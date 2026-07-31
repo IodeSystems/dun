@@ -91,7 +91,7 @@ func main() {
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	serve := flag.Bool("serve", false, "serve the TUI over the web (xterm.js) at --addr")
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
-	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /quit)")
+	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /exit)")
 	suggest := flag.Bool("suggest", false, "after each turn, suggest likely next messages (one extra LLM call per turn)")
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
