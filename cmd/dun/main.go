@@ -129,6 +129,9 @@ func main() {
 		}
 		return
 	}
+	// Every mode, not just the TUI: the engine is where a turn burns CPU, and
+	// it is the process a TUI session would want to profile. Opt-in, loopback.
+	startPprof()
 	suggestEnabled = *suggest // -p emits next-message suggestions after each turn
 	// Resolve the effective key: explicit flag > env > saved config.
 	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), fc.Key)

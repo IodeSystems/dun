@@ -148,6 +148,15 @@ one fold in a single turn is called out as thrashing, because that means the
 budget cannot fit one turn's floor (system prompt + tool schemas + the pristine
 tail) and every turn will re-summarize what it just summarized.
 
+**The UI does not compete with your keyboard.** Redraws are capped at 30Hz while
+text streams in, and each conversation block caches its wrapped render — without
+those, a reply redrew the entire scrollback once per token on the same loop that
+reads input, which is how a session ends up dropping keystrokes while tmux stays
+responsive (measured: 7.8ms per frame at 200 blocks, ~1s of CPU for one
+100-token reply; now 4.8ms for the same reply). `/perf` reports frame timings
+and slow-frame count for the running session; `DUN_PPROF=127.0.0.1:6060` serves
+`net/http/pprof` from any mode when you need to know which function.
+
 **A changed tool set announces itself, for free.** Turning rag or lsp on or off
 mid-session buffers an *aside* — which tools appeared, which are gone. The
 schemas already travel in every request; what the model cannot see there is that

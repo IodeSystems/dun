@@ -142,6 +142,18 @@ type convoEntry struct {
 	open      bool
 	docs      *docsBlock // proactive-RAG summary (nil for normal blocks)
 	tool      *toolBlock // tool call/result (nil for normal blocks) → enter opens the inspector
+
+	// Wrapped render, cached. A finalized block's text never changes, but
+	// refresh() runs once per STREAMED TOKEN, so re-wrapping the whole
+	// scrollback every frame made the cost of a reply quadratic in the
+	// conversation: measured at 7.8ms per frame with 200 blocks, ~1s of CPU for
+	// one 100-token reply — on the goroutine that also reads the keyboard,
+	// which is why keystrokes went missing. Invalidated by width (a resize) and
+	// by open (expand/collapse); docs blocks opt out, their inner per-doc state
+	// is not captured here.
+	wrapped  string
+	wrapW    int
+	wrapOpen bool
 }
 
 func (e convoEntry) expandable() bool { return e.full != "" || e.docs != nil }
@@ -212,70 +224,72 @@ func (d *docsBlock) render(open bool) string {
 }
 
 type tuiModel struct {
-	proc      *dunProc
-	workspace string
-	vp        viewport.Model
-	input     textinput.Model
-	spin      spinner.Model
-	convo     []convoEntry // finalized conversation blocks
-	pendingTool int        // index of a tool call awaiting its result; -1 = none
+	proc        *dunProc
+	workspace   string
+	vp          viewport.Model
+	input       textinput.Model
+	spin        spinner.Model
+	convo       []convoEntry   // finalized conversation blocks
+	pendingTool int            // index of a tool call awaiting its result; -1 = none
 	pendingArgs map[string]any // args of the pending tool call (for its renderer)
-	cur         string     // streaming assistant text (not yet finalized); string, not
+	cur         string         // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
-	tools      []string
-	branch     string // worktree branch (from the `workspace` event)
-	starting   bool   // spawning servers, before `ready`
-	busy       bool   // a turn in flight
-	asking       bool     // agent is waiting on an ask_user answer
-	askOptions   []string // the offered options; a trailing "custom" row is implicit
-	askSel       int      // highlighted answer row (== len(askOptions) → the custom row)
-	askNote      string   // optional detail attached to the chosen option ("n")
-	askMulti     bool     // multi-select: space toggles, enter submits the checked set
-	askChecked   []bool   // per-option checked state (multi mode; len == len(askOptions))
-	noting       bool     // capturing a detail for the selected option
-	customAnswer bool     // capturing a free-text / chat answer
+	tools        []string
+	branch       string                // worktree branch (from the `workspace` event)
+	starting     bool                  // spawning servers, before `ready`
+	busy         bool                  // a turn in flight
+	asking       bool                  // agent is waiting on an ask_user answer
+	askOptions   []string              // the offered options; a trailing "custom" row is implicit
+	askSel       int                   // highlighted answer row (== len(askOptions) → the custom row)
+	askNote      string                // optional detail attached to the chosen option ("n")
+	askMulti     bool                  // multi-select: space toggles, enter submits the checked set
+	askChecked   []bool                // per-option checked state (multi mode; len == len(askOptions))
+	noting       bool                  // capturing a detail for the selected option
+	customAnswer bool                  // capturing a free-text / chat answer
 	md           *glamour.TermRenderer // markdown renderer for assistant replies
-	history    []string              // sent inputs, for up/down recall
-	histIdx    int                   // cursor into history (== len when not browsing)
-	focus      int                   // focusInput | focusConvo
-	sel        int                   // selected message index (convo focus); -1 = none
-	search       textinput.Model // vim-style "/" message search box
-	searching    bool            // typing a search query
-	searchActive bool            // navigating matches (↑/↓ step, esc exits)
-	matches      []int           // convo indices matching the query
-	matchPos     int             // cursor into matches
-	blockH       []int           // rendered height of each convo block (for tall-message scroll)
-	inspecting bool      // the tool inspector overlay is open (owns all keys)
-	insp       inspector // the overlay (valid while inspecting)
-	dumpSig    chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
-	paletteSel  int           // highlighted row in the "/" command palette
-	model, url  string        // this session's LLM settings (for /config)
-	keySet      bool          // whether an API key is configured
-	disableExit bool          // --disable-exit: ctrl+c/esc don't quit (use /quit)
-	lc          *launcherConn // launcher registration (nil = no launcher)
-	reloadVer   string        // a newer build the launcher announced ("" = none)
-	reloadReq   bool          // /reload requested → runTUI re-execs after quit
+	history      []string              // sent inputs, for up/down recall
+	histIdx      int                   // cursor into history (== len when not browsing)
+	focus        int                   // focusInput | focusConvo
+	sel          int                   // selected message index (convo focus); -1 = none
+	search       textinput.Model       // vim-style "/" message search box
+	searching    bool                  // typing a search query
+	searchActive bool                  // navigating matches (↑/↓ step, esc exits)
+	matches      []int                 // convo indices matching the query
+	matchPos     int                   // cursor into matches
+	blockH       []int                 // rendered height of each convo block (for tall-message scroll)
+	inspecting   bool                  // the tool inspector overlay is open (owns all keys)
+	insp         inspector             // the overlay (valid while inspecting)
+	dumpSig      chan os.Signal        // SIGUSR1 → dump the rendered screen to a debug file
+	paletteSel   int                   // highlighted row in the "/" command palette
+	model, url   string                // this session's LLM settings (for /config)
+	keySet       bool                  // whether an API key is configured
+	disableExit  bool                  // --disable-exit: ctrl+c/esc don't quit (use /quit)
+	lc           *launcherConn         // launcher registration (nil = no launcher)
+	reloadVer    string                // a newer build the launcher announced ("" = none)
+	reloadReq    bool                  // /reload requested → runTUI re-execs after quit
 	// Engine supervision: the TUI outlives its engine. opts is what respawning
 	// one takes, sessionID reattaches it to the same conversation, and the
 	// restart counters stop a crash loop from spinning forever.
-	opts         tuiOpts
-	sessionID    string
-	restarts     int
-	restartStart time.Time
-	skipHistory   bool            // a respawned engine replays what is already on screen
-	wantServers   map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
-	quitting      bool            // the user is leaving; do not respawn
-	exitAnnounced bool            // the engine said it was going; it did not crash
-	everUp        bool            // an engine reached `session` once; a retry may reattach
-	suggestions      []suggestion // --suggest: predicted next messages (idle-only picker)
-	suggestSelecting bool         // → arrow-navigable selector (entered via right from empty input)
-	suggestSel       int          // highlighted suggestion in the selector
-	retry      string    // live retry banner ("" = not waiting on the provider)
-	retryDue   time.Time // when the next attempt is due, for the countdown
-	retrySeen  int       // retries this outage; the first one also lands in scrollback
-	queuedMsgs int       // messages typed mid-turn, buffered for the running turn
-	w, h       int
-	fatalErr   string
+	opts             tuiOpts
+	sessionID        string
+	restarts         int
+	restartStart     time.Time
+	skipHistory      bool            // a respawned engine replays what is already on screen
+	wantServers      map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
+	renderDue        bool            // streamed text arrived; a tick will draw it
+	tickPending      bool            // a render tick is already scheduled
+	quitting         bool            // the user is leaving; do not respawn
+	exitAnnounced    bool            // the engine said it was going; it did not crash
+	everUp           bool            // an engine reached `session` once; a retry may reattach
+	suggestions      []suggestion    // --suggest: predicted next messages (idle-only picker)
+	suggestSelecting bool            // → arrow-navigable selector (entered via right from empty input)
+	suggestSel       int             // highlighted suggestion in the selector
+	retry            string          // live retry banner ("" = not waiting on the provider)
+	retryDue         time.Time       // when the next attempt is due, for the countdown
+	retrySeen        int             // retries this outage; the first one also lands in scrollback
+	queuedMsgs       int             // messages typed mid-turn, buffered for the running turn
+	w, h             int
+	fatalErr         string
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
@@ -656,7 +670,28 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case evMsg:
 		nm := m.handleEvent(msg)
-		return nm, waitEvent(nm.proc.ch)
+		cmds := []tea.Cmd{waitEvent(nm.proc.ch)}
+		if nm.renderDue && !nm.tickPending {
+			nm.tickPending = true
+			cmds = append(cmds, renderTick())
+		}
+		return nm, tea.Batch(cmds...)
+
+	case renderTickMsg:
+		// One frame per tick at most, no matter how fast the tokens arrive.
+		m.tickPending = false
+		if m.renderDue {
+			m.renderDue = false
+			m.refresh()
+			// Still streaming? Keep the clock running rather than waiting for
+			// the next token to restart it — that would add a tick of latency
+			// to every frame.
+			if m.busy {
+				m.tickPending = true
+				return m, renderTick()
+			}
+		}
+		return m, nil
 
 	case eofMsg:
 		return m.engineGone()
@@ -1021,7 +1056,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
 		m.suggestions, m.suggestSelecting = nil, false
 		m.cur += str(ev["text"])
-		m.refresh()
+		// Do NOT render here. A provider streaming 60 tokens/s would drive 60
+		// full frames a second through the same Update loop that reads the
+		// keyboard, and a frame is not free even with the wrap cache. Mark the
+		// screen dirty; a tick renders at most renderHz. See renderTickMsg.
+		m.renderDue = true
 	case "suggestions":
 		m.suggestions = parseSuggestionItems(ev["items"])
 		m.suggestSelecting, m.suggestSel = false, 0
@@ -1508,6 +1547,8 @@ func (m tuiModel) fullText() string {
 }
 
 func (m *tuiModel) refresh() {
+	start := time.Now()
+	defer func() { frames.observe(time.Since(start)) }()
 	blocks := make([]string, 0, len(m.convo)+1)
 	for _, e := range m.convo {
 		blocks = append(blocks, e.view())
@@ -1526,7 +1567,16 @@ func (m *tuiModel) refresh() {
 	rendered := make([]string, len(blocks))
 	m.blockH = make([]int, len(m.convo)) // cache convo-block heights for scroll math
 	for i, b := range blocks {
-		w := wrap.Render(b)
+		var w string
+		if i < len(m.convo) && m.convo[i].docs == nil {
+			e := &m.convo[i]
+			if e.wrapped == "" || e.wrapW != width || e.wrapOpen != e.open {
+				e.wrapped, e.wrapW, e.wrapOpen = wrap.Render(b), width, e.open
+			}
+			w = e.wrapped
+		} else {
+			w = wrap.Render(b)
+		}
 		if selMode {
 			if i == m.sel {
 				w = addGutter(w, "▎", stSel)
@@ -1637,6 +1687,10 @@ func init() {
 			m.reloadReq = true
 			return tea.Quit
 		}},
+		{"perf", "", "redraw timings for this session (and how to get a profile)", func(m *tuiModel, _ []string) tea.Cmd {
+			m.append(stHeader.Render("render performance") + "\n" + frames.report())
+			return nil
+		}},
 		{"reconnect", "", "restart the engine (after it gave up), keeping this session", func(m *tuiModel, _ []string) tea.Cmd {
 			m.restarts, m.restartStart = 0, time.Now()
 			m.fatalErr = ""
@@ -1695,7 +1749,7 @@ func (m tuiModel) paletteActive() bool {
 
 // paletteMatches returns the commands whose name starts with the typed word.
 func (m tuiModel) paletteMatches() []slashCmd {
-	word := strings.TrimPrefix(strings.Fields(m.input.Value()+" ")[0], "/")
+	word := strings.TrimPrefix(strings.Fields(m.input.Value() + " ")[0], "/")
 	var out []slashCmd
 	for _, c := range slashCommands {
 		if strings.HasPrefix(c.name, word) {
@@ -2062,4 +2116,19 @@ func (p *dunProc) close() {
 // waitEvent blocks for the next engine event and delivers it as a tea.Msg.
 func waitEvent(ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg { return <-ch }
+}
+
+// ── frame pacing ───────────────────────────────────────────────────
+
+// renderTickMsg drives the coalesced redraw (see the "token" event).
+type renderTickMsg struct{}
+
+// renderHz caps redraws while text streams in. A terminal cannot show more
+// than this usefully, and every frame competes with keyboard input on the same
+// Update loop — the measured failure was a session missing keystrokes while
+// tokens arrived, with tmux itself perfectly responsive.
+const renderHz = 30
+
+func renderTick() tea.Cmd {
+	return tea.Tick(time.Second/renderHz, func(time.Time) tea.Msg { return renderTickMsg{} })
 }

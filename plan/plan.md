@@ -128,6 +128,12 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   and 38 in 7 min across two real sessions, 154k chars of summary written, 5 and
   7 entries surviving out of 50 and 45. Fixed in the Shaper; regression test
   pins it. Anyone adding a "sensible default" budget must not reintroduce it.
+- **Rendering is paced, and measured.** refresh() re-wrapped the whole
+  scrollback once per streamed token — 7.8ms/frame at 200 blocks, ~1s of CPU per
+  100-token reply, on the goroutine that reads the keyboard. Fixed by a
+  per-block wrap cache (invalidated by width + open) and a 30Hz frame cap; the
+  input path is now 3µs/token. Frame stats are always on (`/perf`) because the
+  bug was invisible from inside the session; pprof is opt-in (`DUN_PPROF`).
 - **Compaction is reported, always.** It is the only operation that DESTROYS
   conversation, and it ran unreported for three days. `OnCompaction` →
   `CompactionNote` → TUI line, stderr, and a `-p` event, with a per-turn counter
