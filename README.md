@@ -175,6 +175,18 @@ names the message type behind the slowest frame. dun also notices its own
 stutter: past a tenth of frames over 16ms it says so once and writes a dump.
 `DUN_PPROF=127.0.0.1:6060` serves `net/http/pprof` from any mode.
 
+**Record a session, replay it exactly.** `DUN_TRACE=t.jsonl dun` writes every
+engine event with its offset from the first one; `dun --replay t.jsonl` feeds
+them back into the real TUI at the original pacing (`--replay-speed 4`, or `0`
+for as fast as possible). No LLM, no subprocess, the same events in the same
+order with the same gaps.
+
+This exists because every performance number above had to be inferred from
+benchmarks written after the fact — a 5s stall was found by attributing frames
+to message types, not by reproducing it. `dun --replay t.jsonl` then `/perf` is
+a measurement anyone can repeat. It is also the only honest way to test the UI
+against a *real* session rather than one someone imagined.
+
 **A changed tool set announces itself, for free.** Turning rag or lsp on or off
 mid-session buffers an *aside* — which tools appeared, which are gone. The
 schemas already travel in every request; what the model cannot see there is that

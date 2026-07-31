@@ -295,6 +295,7 @@ type tuiModel struct {
 
 	renderDue        bool         // streamed text arrived; a tick will draw it
 	tickPending      bool         // a render tick is already scheduled
+	replaying        bool         // driven by a trace (--replay), not an engine
 	quitting         bool         // the user is leaving; do not respawn
 	exitAnnounced    bool         // the engine said it was going; it did not crash
 	everUp           bool         // an engine reached `session` once; a retry may reattach
@@ -926,6 +927,10 @@ func (m tuiModel) sendUser(v string) tuiModel {
 	m.input.Reset()
 	m.suggestions, m.suggestSelecting = nil, false
 	m.append(stUser.Render("› " + v))
+	if m.replaying {
+		m.append(stDim.Render("replaying a trace — there is no engine to send to"))
+		return m
+	}
 	if !m.proc.send(v) {
 		m.append(stErr.Render("no engine right now — not sent. /reconnect, then send it again"))
 		return m
@@ -2001,6 +2006,12 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	if reason == "" {
 		reason = "dun engine exited"
 	}
+	// A finished trace is not a crash — there is nothing to restart.
+	if m.replaying {
+		m.fatalErr = "replay finished — /perf for the timings"
+		m.refresh()
+		return m, nil
+	}
 	// It left on purpose (or we are leaving): let it go.
 	if m.quitting || m.reloadReq || m.exitAnnounced {
 		m.fatalErr = reason
@@ -2059,6 +2070,7 @@ type dunProc struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 	ch    chan tea.Msg
+	trace *traceWriter // DUN_TRACE: records what the engine said, for --replay
 }
 
 // procArgs builds a `dun <mode>` argv from the shared flags. mode is "-p" (the
@@ -2128,13 +2140,16 @@ func startDunProc(o tuiOpts) (*dunProc, error) {
 		return nil, err
 	}
 	ch := make(chan tea.Msg, 256)
-	p := &dunProc{cmd: cmd, stdin: stdin, ch: ch}
+	tw := newTraceWriter() // DUN_TRACE=path — see replay.go
+	p := &dunProc{cmd: cmd, stdin: stdin, ch: ch, trace: tw}
 	go func() {
+		defer tw.close()
 		sc := bufio.NewScanner(stdout)
 		sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 		for sc.Scan() {
 			var ev map[string]any
 			if json.Unmarshal(sc.Bytes(), &ev) == nil {
+				tw.write(sc.Bytes())
 				ch <- evMsg(ev)
 			}
 		}
@@ -2172,8 +2187,9 @@ func (p *dunProc) close() {
 	if p == nil {
 		return
 	}
+	p.trace.close()
 	_ = p.stdin.Close()
-	if p.cmd.Process != nil {
+	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 	}
 }

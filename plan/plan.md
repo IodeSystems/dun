@@ -128,6 +128,11 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   and 38 in 7 min across two real sessions, 154k chars of summary written, 5 and
   7 entries surviving out of 50 and 45. Fixed in the Shaper; regression test
   pins it. Anyone adding a "sensible default" budget must not reintroduce it.
+- **A recorded session is the reproduction.** `DUN_TRACE` records the engine's
+  events with offsets; `--replay` drives the real TUI from them. Built after
+  three perf findings in a row had to be inferred from after-the-fact
+  benchmarks. Replay is also the only UI fixture that is not someone's guess at
+  what a conversation looks like.
 - **A blocking terminal query is not a "slow render".** The input starvation was
   glamour's auto-style: an OSC background query with a 5s timeout that tmux does
   not answer, rebuilt on every WindowSizeMsg, inside Update. Resolved once

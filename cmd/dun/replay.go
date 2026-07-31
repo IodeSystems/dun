@@ -1,0 +1,156 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"sync"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// Session replay: record the engine's event stream, then feed it back to the
+// TUI at the original pacing.
+//
+// Everything about the render path had to be inferred from benchmarks written
+// after the fact — a 5s stall was found by attributing frames to message types,
+// not by reproducing it. A trace closes that gap: the exact events, in the
+// exact order, with the exact gaps, driving the exact UI, with no LLM and no
+// luck. `dun --replay t.jsonl` then `/perf` is a measurement anyone can repeat.
+//
+// It is also the only honest way to test a UI against a REAL session. The
+// fixtures in the tests are what someone imagined a conversation looks like;
+// a trace is one that happened.
+
+// traceEntry is one recorded engine event. The offset is from the first event,
+// not wall-clock, so a trace replays the same in a year.
+type traceEntry struct {
+	MS int64           `json:"ms"`
+	Ev json.RawMessage `json:"ev"`
+}
+
+// traceWriter appends events to a trace file. Recording must never break the
+// session it is recording: every error disables the writer and is otherwise
+// ignored.
+type traceWriter struct {
+	mu    sync.Mutex
+	f     *os.File
+	start time.Time
+	dead  bool
+}
+
+// newTraceWriter opens the trace named by DUN_TRACE, or returns nil.
+func newTraceWriter() *traceWriter {
+	path := os.Getenv("DUN_TRACE")
+	if path == "" {
+		return nil
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dun: trace: %v\n", err)
+		return nil
+	}
+	return &traceWriter{f: f, start: time.Now()}
+}
+
+func (w *traceWriter) write(line []byte) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.dead {
+		return
+	}
+	e := traceEntry{MS: time.Since(w.start).Milliseconds(), Ev: append(json.RawMessage(nil), line...)}
+	b, err := json.Marshal(e)
+	if err != nil {
+		w.dead = true
+		return
+	}
+	if _, err := w.f.Write(append(b, '\n')); err != nil {
+		w.dead = true
+	}
+}
+
+func (w *traceWriter) close() {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_ = w.f.Close()
+	w.dead = true
+}
+
+// replayProc is a dunProc fed from a trace instead of a subprocess. It has no
+// cmd and a discarding stdin: replay is a rerun of what the engine SAID, so
+// anything typed has nowhere to go (the TUI says so — see replaying).
+func replayProc(path string, speed float64) (*dunProc, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	var entries []traceEntry
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		var e traceEntry
+		if json.Unmarshal(sc.Bytes(), &e) == nil && len(e.Ev) > 0 {
+			entries = append(entries, e)
+		}
+	}
+	_ = f.Close()
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("dun: %s: no events in trace", path)
+	}
+
+	ch := make(chan tea.Msg, 256)
+	p := &dunProc{stdin: nopCloser{io.Discard}, ch: ch}
+	go func() {
+		start := time.Now()
+		for _, e := range entries {
+			if speed > 0 {
+				// Sleep to the event's own offset rather than the gap, so
+				// scheduling jitter cannot accumulate across a long trace.
+				due := time.Duration(float64(e.MS)*float64(time.Millisecond)/speed) - time.Since(start)
+				if due > 0 {
+					time.Sleep(due)
+				}
+			}
+			var ev map[string]any
+			if json.Unmarshal(e.Ev, &ev) == nil {
+				ch <- evMsg(ev)
+			}
+		}
+		ch <- eofMsg{}
+	}()
+	return p, nil
+}
+
+// nopCloser makes an io.Writer a WriteCloser (replay has no engine to write to).
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
+
+// runReplay drives the real TUI from a trace. Same model, same render path,
+// same everything — only the event source differs, which is the point: a
+// measurement taken here is a measurement of the thing users run.
+func runReplay(path string, speed float64, o tuiOpts) error {
+	initMarkdownStyle()
+	loadScriptRenderers()
+	proc, err := replayProc(path, speed)
+	if err != nil {
+		return err
+	}
+	m := newTUIModel(proc, o.workspace)
+	m.opts = o
+	m.replaying = true
+	m.model, m.url = o.model, o.url
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	proc.close()
+	return err
+}

@@ -57,22 +57,25 @@ func initMarkdownStyle() {
 			}
 			return
 		}
-		// Inside a multiplexer the OSC background query is unreliable and, when
-		// it goes unanswered, costs a FIVE SECOND stall — measured: dun took
-		// 10.6s to reach `ready` under a silent terminal versus 5.6s with the
-		// query skipped. A dev terminal is dark far more often than not, so the
-		// default is dark and the cost of being wrong is a slightly-off palette,
-		// not five seconds of everyone's startup. DUN_MD_STYLE overrides;
-		// DUN_MD_QUERY=1 forces the round trip.
-		if os.Getenv("DUN_MD_QUERY") != "1" && (os.Getenv("TMUX") != "" || os.Getenv("STY") != "") {
+		// The OSC background query is OPT-IN, because when the terminal does not
+		// answer it costs a FIVE SECOND stall and there is no way to know in
+		// advance which terminals answer. Measured: 10.6s to reach `ready`
+		// under a silent terminal versus 5.6s with the query skipped, and it
+		// was still 5s of a replay harness that has no business asking anything.
+		//
+		// It only ever helps light-terminal users who do not export COLORFGBG,
+		// and the cost of guessing wrong for them is a slightly-off palette —
+		// against five seconds of everyone else's startup. DUN_MD_STYLE=light
+		// fixes it permanently for them; DUN_MD_QUERY=1 asks the terminal.
+		if os.Getenv("DUN_MD_QUERY") == "1" && termenv.HasDarkBackground() {
 			mdStyle = "dark"
 			return
 		}
-		if termenv.HasDarkBackground() {
-			mdStyle = "dark"
+		if os.Getenv("DUN_MD_QUERY") == "1" {
+			mdStyle = "light"
 			return
 		}
-		mdStyle = "light"
+		mdStyle = "dark"
 	})
 }
 

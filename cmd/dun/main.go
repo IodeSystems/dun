@@ -95,6 +95,8 @@ func main() {
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
+	replay := flag.String("replay", "", "replay a recorded session trace into the TUI (record one with DUN_TRACE=path)")
+	replaySpeed := flag.Float64("replay-speed", 1, "replay pacing multiplier; 0 = as fast as possible")
 	// Tri-state: unset means "whatever /rag auto or /lsp auto saved", which a
 	// plain bool cannot express (its zero value would silently mean "off").
 	var ragFlag, lspFlag tristate
@@ -154,6 +156,16 @@ func main() {
 		}
 		for _, id := range ids {
 			fmt.Println(id)
+		}
+		return
+	}
+
+	// Replay: drive the TUI from a recorded trace instead of an engine. No LLM,
+	// no subprocess, the same events with the same gaps — which is what makes a
+	// UI performance number reproducible instead of anecdotal.
+	if *replay != "" {
+		if err := runReplay(*replay, *replaySpeed, tuiOpts{workspace: absWS, model: *model, url: *url}); err != nil {
+			fatal(err)
 		}
 		return
 	}
