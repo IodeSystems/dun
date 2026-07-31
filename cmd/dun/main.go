@@ -98,6 +98,7 @@ func main() {
 	replay := flag.String("replay", "", "replay a recorded session trace into the TUI (record one with DUN_TRACE=path)")
 	replaySpeed := flag.Float64("replay-speed", 1, "replay: pacing multiplier over the recorded timing (2 = twice as fast)")
 	inputDelay := flag.Duration("input-delay", -1, "replay: fixed gap between events, overriding the recording (0 = no delay); negative = use the recorded timing")
+	maxGap := flag.Duration("max-gap", 2*time.Second, "replay: compress idle gaps longer than this (0 = replay the recording verbatim)")
 	// Tri-state: unset means "whatever /rag auto or /lsp auto saved", which a
 	// plain bool cannot express (its zero value would silently mean "off").
 	var ragFlag, lspFlag tristate
@@ -165,7 +166,7 @@ func main() {
 	// no subprocess, the same events with the same gaps — which is what makes a
 	// UI performance number reproducible instead of anecdotal.
 	if *replay != "" {
-		pacing := replayPacing{speed: *replaySpeed, delay: *inputDelay}
+		pacing := replayPacing{speed: *replaySpeed, delay: *inputDelay, maxGap: *maxGap}
 		if err := runReplay(*replay, pacing, tuiOpts{workspace: absWS, model: *model, url: *url}); err != nil {
 			fatal(err)
 		}

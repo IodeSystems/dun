@@ -184,11 +184,18 @@ is cleared, since it belongs to the session you just left.
 
 **Record a session, replay it exactly.** `DUN_TRACE=t.jsonl dun` writes every
 engine event with its offset from the first one; `dun --replay t.jsonl` feeds
-them back into the real TUI at the original pacing. Timing is part of the
-recording on purpose — 60 tokens in a second and the same 60 over a minute are
-different loads, and only one of them reproduces a stutter. Override it with
-`--replay-speed 4` (proportional) or `--input-delay 0` (fast-forward, for CI) /
-`--input-delay 5ms` (a fixed gap, for finding a load ceiling). No LLM, no subprocess, the same events in the same
+them back into the real TUI at the original pacing — minus the dead air. Only
+the *short* gaps carry load: tokens 25ms apart are what stutters, while the 90
+seconds you spent reading the last reply reproduce nothing but 90 seconds. Gaps
+over `--max-gap` (default 2s) collapse to it and every burst stays verbatim, so
+a 4m33s session replays in 9s and still reproduces the load:
+
+    replayed 128 events over 4m33s · 3 idle gap(s) compressed, replayed in 9s
+
+The replay always says what it did to the recording — a replay that silently
+rewrites time is not evidence. `--max-gap 0` replays the real wall clock,
+`--replay-speed 4` scales proportionally, `--input-delay 0` fast-forwards (CI)
+and `--input-delay 5ms` imposes a fixed gap (hunting a load ceiling). No LLM, no subprocess, the same events in the same
 order with the same gaps.
 
 This exists because every performance number above had to be inferred from

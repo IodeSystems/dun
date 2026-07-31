@@ -97,9 +97,17 @@ func (w *traceWriter) close() {
 //
 // Delay < 0 means "use what was recorded"; 0 means no delay at all
 // (fast-forward); anything else is a fixed gap that overrides the recording.
+//
+// maxGap is the refinement that makes recorded timing usable: only the SHORT
+// gaps carry load. Tokens arriving 16ms apart are the thing that stutters; the
+// four minutes while someone read the reply reproduce nothing but four minutes.
+// Clamping long gaps keeps every burst exactly as it happened and throws away
+// the dead air between them — which is what makes a real session replayable in
+// seconds instead of in real time.
 type replayPacing struct {
-	speed float64       // proportional: 2 = twice as fast. Ignored when Delay >= 0.
-	delay time.Duration // fixed gap; negative = use the recorded offsets
+	speed  float64       // proportional: 2 = twice as fast. Ignored when delay >= 0.
+	delay  time.Duration // fixed gap; negative = use the recorded offsets
+	maxGap time.Duration // clamp idle gaps to this; 0 = verbatim
 }
 
 // gap returns how long to wait before the event at offset ms, given the time
@@ -137,9 +145,10 @@ func replayProc(path string, pacing replayPacing) (*dunProc, error) {
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("dun: %s: no events in trace", path)
 	}
+	stats := squeezeIdle(entries, pacing)
 
 	ch := make(chan tea.Msg, 256)
-	p := &dunProc{stdin: nopCloser{io.Discard}, ch: ch}
+	p := &dunProc{stdin: nopCloser{io.Discard}, ch: ch, replay: stats}
 	go func() {
 		start := time.Now()
 		for _, e := range entries {
@@ -178,4 +187,57 @@ func runReplay(path string, pacing replayPacing, o tuiOpts) error {
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	proc.close()
 	return err
+}
+
+// replayStats is what a replay did to the recording, so the UI can say so. A
+// replay that silently rewrites time is a replay you cannot trust as evidence.
+type replayStats struct {
+	Events   int
+	Span     time.Duration // the recording's own length
+	Played   time.Duration // how long the replay will take
+	Squeezed int           // idle gaps clamped
+}
+
+func (s *replayStats) String() string {
+	if s == nil {
+		return ""
+	}
+	out := fmt.Sprintf("%d events over %s", s.Events, s.Span.Round(time.Second))
+	if s.Squeezed > 0 {
+		out += fmt.Sprintf(" · %d idle gap(s) compressed, replayed in %s",
+			s.Squeezed, s.Played.Round(time.Second))
+	}
+	return out
+}
+
+// squeezeIdle rewrites each entry's offset so gaps longer than pacing.maxGap
+// collapse to it, and reports what it changed.
+//
+// The offsets stay ABSOLUTE (rewritten, not turned into gaps) because the
+// player sleeps to each event's own offset — that is what stops scheduling
+// jitter accumulating across a long trace, and it has to survive this.
+func squeezeIdle(entries []traceEntry, pacing replayPacing) *replayStats {
+	st := &replayStats{Events: len(entries)}
+	if len(entries) == 0 {
+		return st
+	}
+	st.Span = time.Duration(entries[len(entries)-1].MS) * time.Millisecond
+	if pacing.maxGap <= 0 || pacing.delay >= 0 {
+		st.Played = st.Span
+		return st
+	}
+	capMS := pacing.maxGap.Milliseconds()
+	var prevRaw, adj int64
+	for i := range entries {
+		gap := entries[i].MS - prevRaw
+		prevRaw = entries[i].MS
+		if gap > capMS {
+			st.Squeezed++
+			gap = capMS
+		}
+		adj += gap
+		entries[i].MS = adj
+	}
+	st.Played = time.Duration(adj) * time.Millisecond
+	return st
 }

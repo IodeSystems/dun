@@ -134,6 +134,11 @@ in `icebox.md` — pull one here (with next/risks) when picking it up.
   replaced — it broke /resume on the first try: three restarts and a give-up in
   the middle of a working switch. eofMsg carries its *dunProc; a stale one is
   ignored.
+- **Only the short gaps carry load.** Replay compresses idle gaps (`--max-gap`,
+  default 2s) and keeps bursts verbatim: a 4m33s session replays in 9s and still
+  stutters where it stuttered. Offsets stay ABSOLUTE after the rewrite, or the
+  player's sleep-to-offset scheduling stops being jitter-proof. The replay
+  reports what it compressed — silently rewritten time is not evidence.
 - **A recorded session is the reproduction.** `DUN_TRACE` records the engine's
   events with offsets; `--replay` drives the real TUI from them. Built after
   three perf findings in a row had to be inferred from after-the-fact

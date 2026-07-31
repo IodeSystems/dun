@@ -100,7 +100,7 @@ func termWS(w http.ResponseWriter, r *http.Request, o tuiOpts) {
 	defer atomic.AddInt64(&activeWeb, -1)
 	cmd := exec.Command(exe, procArgs(o, "--tui")...)
 	cmd.Env = append(os.Environ(), "DUN_CHILD=1") // spawned TUI never self-rebuilds
-	ptmx, err := pty.Start(cmd) // pty.Start makes the child a session leader
+	ptmx, err := pty.Start(cmd)                   // pty.Start makes the child a session leader
 	if err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("pty error: "+err.Error()))
 		return

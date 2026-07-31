@@ -1997,6 +1997,7 @@ func (m tuiModel) writeDump() {
 // ── subprocess (dun -p) ────────────────────────────────────────────
 
 type evMsg map[string]any
+
 // eofMsg says an engine's output ended. It names WHICH engine: deliberately
 // closing one (a session switch, /reconnect) still produces an EOF from its
 // reader goroutine, and a supervisor that cannot tell that from a crash will
@@ -2031,6 +2032,9 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	// A finished trace is not a crash — there is nothing to restart.
 	if m.replaying {
 		m.fatalErr = "replay finished — /perf for the timings"
+		if s := m.proc.replay.String(); s != "" {
+			m.append(stDim.Render("replayed " + s))
+		}
 		m.refresh()
 		return m, nil
 	}
@@ -2089,10 +2093,11 @@ type retryEngineMsg struct{}
 const engineRetryDelay = 2 * time.Second
 
 type dunProc struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	ch    chan tea.Msg
-	trace *traceWriter // DUN_TRACE: records what the engine said, for --replay
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	ch     chan tea.Msg
+	trace  *traceWriter // DUN_TRACE: records what the engine said, for --replay
+	replay *replayStats // --replay: what the pacing did to the recording
 }
 
 // procArgs builds a `dun <mode>` argv from the shared flags. mode is "-p" (the

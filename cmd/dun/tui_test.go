@@ -1034,6 +1034,7 @@ func TestTUI_NoEngineIsSurvivable(t *testing.T) {
 		t.Errorf("server command should report the missing engine: %s", m.convoText())
 	}
 }
+
 // TestTUI_StreamingMatchesFinalized verifies that the streaming cursor
 // (m.cur) is rendered through the same markdown pipeline as finalized text.
 // This prevents the visual "jump" where streaming text looks different from

@@ -186,3 +186,71 @@ func TestTrace_RecordsOffsets(t *testing.T) {
 		t.Errorf("second event recorded at %dms — the gap was not captured", got[1].MS)
 	}
 }
+
+// Only the SHORT gaps carry load. Tokens 16ms apart are what stutters; the four
+// minutes while someone read the reply reproduce nothing but four minutes. So
+// bursts must survive exactly and dead air must not.
+func TestSqueezeIdle(t *testing.T) {
+	// A burst, a long think, another burst.
+	entries := []traceEntry{
+		{MS: 0}, {MS: 16}, {MS: 32}, // burst: 16ms apart
+		{MS: 240032},               // 4 minutes of nothing
+		{MS: 240048}, {MS: 240064}, // burst again
+	}
+	st := squeezeIdle(entries, replayPacing{speed: 1, delay: -1, maxGap: 2 * time.Second})
+
+	if st.Squeezed != 1 {
+		t.Errorf("want 1 compressed gap, got %d", st.Squeezed)
+	}
+	if st.Span < 4*time.Minute {
+		t.Errorf("span should be the RECORDING's length, got %s", st.Span)
+	}
+	if st.Played > 3*time.Second {
+		t.Errorf("a 4-minute session should replay in seconds, got %s", st.Played)
+	}
+	// Every burst gap is untouched — this is the part that reproduces load.
+	for _, want := range []struct {
+		i   int
+		gap int64
+	}{{1, 16}, {2, 16}, {4, 16}, {5, 16}} {
+		if got := entries[want.i].MS - entries[want.i-1].MS; got != want.gap {
+			t.Errorf("burst gap at %d = %dms, want %dms — bursts must be verbatim", want.i, got, want.gap)
+		}
+	}
+	// The idle gap became exactly the cap.
+	if got := entries[3].MS - entries[2].MS; got != 2000 {
+		t.Errorf("idle gap = %dms, want the 2000ms cap", got)
+	}
+	// Offsets stay absolute and monotonic, or the player's jitter-proof
+	// sleep-to-offset scheduling breaks.
+	for i := 1; i < len(entries); i++ {
+		if entries[i].MS < entries[i-1].MS {
+			t.Fatalf("offsets are no longer monotonic at %d", i)
+		}
+	}
+}
+
+// maxGap 0 means verbatim: some investigations want the real wall clock.
+func TestSqueezeIdle_VerbatimWhenDisabled(t *testing.T) {
+	entries := []traceEntry{{MS: 0}, {MS: 600000}}
+	st := squeezeIdle(entries, replayPacing{speed: 1, delay: -1, maxGap: 0})
+	if st.Squeezed != 0 || entries[1].MS != 600000 {
+		t.Errorf("maxGap 0 must not rewrite the recording: squeezed=%d ms=%d", st.Squeezed, entries[1].MS)
+	}
+}
+
+// A replay that rewrites time has to SAY so — otherwise it is evidence you
+// cannot trust.
+func TestReplayStats_ReportsWhatItChanged(t *testing.T) {
+	st := &replayStats{Events: 40, Span: 5 * time.Minute, Played: 6 * time.Second, Squeezed: 3}
+	s := st.String()
+	for _, want := range []string{"40 events", "5m0s", "3 idle gap", "6s"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("stats missing %q: %s", want, s)
+		}
+	}
+	// Nothing compressed → nothing to explain.
+	if s := (&replayStats{Events: 2, Span: time.Second}).String(); strings.Contains(s, "compressed") {
+		t.Errorf("no compression should not be announced: %s", s)
+	}
+}
