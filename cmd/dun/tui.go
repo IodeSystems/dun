@@ -233,7 +233,7 @@ type tuiModel struct {
 	proc        *dunProc
 	workspace   string
 	vp          viewport.Model
-	input       textinput.Model
+	input       multilineInput
 	spin        spinner.Model
 	convo       []convoEntry   // finalized conversation blocks
 	pendingTool int            // index of a tool call awaiting its result; -1 = none
@@ -319,10 +319,7 @@ type tuiModel struct {
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
-	in := textinput.New()
-	in.Placeholder = "ask dun to do something…"
-	in.Prompt = "› "
-	in.Focus()
+	in := newMultilineInput()
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	se := textinput.New()
@@ -389,7 +386,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// h-4 in the normal (1-line input) case; View recomputes it when the
 		// lower pane grows (an ask panel).
 		m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
-		m.input.Width = msg.Width - 2
+		m.input.width = msg.Width - 2
 		m.search.Width = msg.Width - 4
 		// Only when the WIDTH actually changed: a renderer is word-wrap state
 		// and nothing else, and rebuilding one is not free. A height-only
@@ -461,9 +458,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, textinput.Blink
 			}
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			return m, cmd
+			m.input = m.input.HandleKey(msg)
+			return m, nil
 		case "tab":
 			// In the command palette, tab completes to the highlighted command.
 			if m.paletteActive() {
@@ -526,9 +522,15 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.suggestSelecting && m.suggestSel < len(m.suggestions) { // send the highlighted suggestion
 				return m.sendUser(m.suggestions[m.suggestSel].text), nil
 			}
+			// Enter submits the message. Alt+Enter inserts a newline in the
+			// multiline buffer (so you can compose multi-line messages).
+			if msg.Type == tea.KeyEnter && msg.Alt {
+				// Alt+Enter → insert newline.
+				m.input = m.input.HandleKey(msg)
+				m.refresh()
+				return m, nil
+			}
 			v := strings.TrimSpace(m.input.Value())
-			// Local slash commands (never sent to the engine): run the palette's
-			// highlighted match (or the exactly-typed command).
 			if strings.HasPrefix(v, "/") {
 				return m, m.runPaletteEnter(v)
 			}
@@ -545,6 +547,35 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.sendUser(v), nil
+		case "ctrl+up":
+			// Ctrl+Up: navigate history (previous entry).
+			if m.focus == focusConvo {
+				// In convo focus, Ctrl+Up is ignored (plain Up handles convo nav).
+				return m, nil
+			}
+			if len(m.history) > 0 && m.histIdx > 0 {
+				m.histIdx--
+				m.input.SetValue(m.history[m.histIdx])
+				m.input.CursorEnd()
+				m.refresh()
+			}
+			return m, nil
+		case "ctrl+down":
+			// Ctrl+Down: navigate history (next entry).
+			if m.focus == focusConvo {
+				return m, nil
+			}
+			if m.histIdx < len(m.history) {
+				m.histIdx++
+				if m.histIdx == len(m.history) {
+					m.input.SetValue("")
+				} else {
+					m.input.SetValue(m.history[m.histIdx])
+					m.input.CursorEnd()
+				}
+				m.refresh()
+			}
+			return m, nil
 		case "up":
 			if m.focus == focusConvo {
 				if d := m.selDocs(); d != nil && d.descended { // move within the doc list
@@ -582,11 +613,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if len(m.history) > 0 && m.histIdx > 0 {
-				m.histIdx--
-				m.input.SetValue(m.history[m.histIdx])
-				m.input.CursorEnd()
-			}
+			// Plain up: navigate within the multiline input buffer.
+			m.input = m.input.HandleKey(msg)
+			m.refresh()
 			return m, nil
 		case "down":
 			if m.focus == focusConvo {
@@ -625,15 +654,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.histIdx < len(m.history) {
-				m.histIdx++
-				if m.histIdx == len(m.history) {
-					m.input.SetValue("")
-				} else {
-					m.input.SetValue(m.history[m.histIdx])
-					m.input.CursorEnd()
-				}
-			}
+			// Plain down: navigate within the multiline input buffer.
+			m.input = m.input.HandleKey(msg)
+			m.refresh()
 			return m, nil
 		case "right":
 			// Horizontal axis: [convo] ← input → [suggestions].
@@ -666,9 +689,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.suggestSelecting {
 				return m, nil
 			}
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			return m, cmd
+			m.input = m.input.HandleKey(msg)
+			return m, nil
 		case "left":
 			if m.focus == focusConvo { // ascend out of the doc list
 				if d := m.selDocs(); d != nil {
@@ -693,9 +715,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
-			var lcmd tea.Cmd
-			m.input, lcmd = m.input.Update(msg)
-			return m, lcmd
+			m.input = m.input.HandleKey(msg)
+			return m, nil
 		default:
 			if m.focus == focusConvo { // keys don't type into a blurred input
 				return m, nil
@@ -709,11 +730,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.suggestSelecting = false // typing leaves the selector and edits the input
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
+			m.input = m.input.HandleKey(msg)
 			m.paletteSel = 0 // typing re-filters the palette; start at the top
 			m.refresh()
-			return m, cmd
+			return m, nil
 		}
 
 	case reloadMsg:
@@ -847,7 +867,7 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.askSel == custom: // open free-text / chat entry
 			m.customAnswer = true
 			m.input.Reset()
-			m.input.Placeholder = "type your answer, or chat…"
+			m.input.placeholder = "type your answer, or chat…"
 			m.input.Focus()
 			m.refresh()
 			return m, textinput.Blink
@@ -885,16 +905,15 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.noting && !m.customAnswer && !m.askMulti && m.askSel < custom {
 			m.noting = true
 			m.input.Reset()
-			m.input.Placeholder = "add a detail…"
+			m.input.placeholder = "add a detail…"
 			m.input.Focus()
 			m.refresh()
 			return m, textinput.Blink
 		}
 	}
 	if m.noting || m.customAnswer { // typing into the detail / custom field
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, cmd
+		m.input = m.input.HandleKey(msg)
+		return m, nil
 	}
 	return m, nil
 }
@@ -973,7 +992,7 @@ func (m tuiModel) sendAnswer(v string) tuiModel {
 	m.askOptions, m.askSel, m.askNote = nil, 0, ""
 	m.askMulti, m.askChecked = false, nil
 	m.input.Reset()
-	m.input.Placeholder = "ask dun to do something…"
+	m.input.placeholder = "ask dun to do something…"
 	m.input.Focus()
 	m.focus = focusInput
 	m.refresh()
@@ -1194,7 +1213,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if len(m.askOptions) == 0 {
 			m.customAnswer = true
 			m.input.Reset()
-			m.input.Placeholder = "type your answer…"
+			m.input.placeholder = "type your answer…"
 			m.input.Focus()
 		}
 	case "retry":
@@ -1443,7 +1462,7 @@ func (m tuiModel) View() string {
 	case m.suggestActive():
 		status = stDim.Render(fmt.Sprintf("next?  ·  1–%d pick · → select · or type · "+m.exitHint(), len(m.suggestions)))
 	default:
-		status = stDim.Render("ready  ·  tab scroll · ↑/↓ history · " + m.exitHint())
+		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}
 	return strings.Join([]string{head, m.viewportView(vp), div, lower, status}, "\n")
 }
