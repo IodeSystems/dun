@@ -255,14 +255,18 @@ dun --no-worktree ...                               # work in place (no isolatio
 The container is the sandbox, so model-authored commands can't reach the host —
 no per-action approval prompts, the isolation does the work.
 
-With `--ship`, the agent gets one way to land work — a `ship` tool that fetches
-origin, rebases onto the base branch, runs the project's checks, and *then*
-pushes. The order is the point: what gets verified is exactly what gets pushed.
-`--pr` is shorthand for `--ship` in `pr` mode, which pushes and then reports the
-`gh pr create` line for you to run. dun does not invoke `gh` itself — an expired
-gh token does not fail, it silently starts an OAuth device flow and polls for a
-code no one is reading, which is a hang, not an error. Without either flag, the
-changes stay on the branch for you to review and push yourself.
+The agent gets one way to land work — a `ship` tool that fetches origin, rebases
+onto the base branch, runs the project's checks, and *then* pushes. The order is
+the point: what gets verified is exactly what gets pushed. `--pr` is shorthand
+for `pr` mode, which pushes and then reports the `gh pr create` line for you to
+run. dun does not invoke `gh` itself — an expired gh token does not fail, it
+silently starts an OAuth device flow and polls for a code no one is reading,
+which is a hang, not an error.
+
+Ship is ON by default, because an agent that finishes work and cannot land it
+has done half a job. What a repo is willing to allow is declared in `ship.allow`
+below, which is the real policy surface; `--no-ship` withholds the tool entirely,
+for a session that should only ever look.
 
 Modes are the terminal state — `verify` (checks only, pushes nothing), `push`,
 `pr` — and a repo declares which ones are allowed:

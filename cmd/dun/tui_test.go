@@ -1694,3 +1694,44 @@ func TestActivity_TaskLineTracksTheLastUserMessage(t *testing.T) {
 		t.Errorf("a resumed session should show its task: %q", m2.taskView())
 	}
 }
+
+// ← keeps going the way it was already going. It used to stop at the
+// conversation; now, with nothing left to ascend out of, it continues to the
+// activity strip when there is one — and wraps home when there is not. Same
+// order as tab, so the two never disagree about where "back" is.
+func TestActivity_LeftWalksBackThroughTheZones(t *testing.T) {
+	m := withActivity(t)
+	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
+
+	m = key(m, kLeft)
+	if m.focus != focusConvo {
+		t.Fatalf("left at the front of the input should reach the conversation, got %d", m.focus)
+	}
+	m = key(m, kLeft)
+	if m.focus != focusActivity {
+		t.Fatalf("left again should continue to the activity strip, got %d", m.focus)
+	}
+	m = key(m, kLeft)
+	if m.focus != focusInput {
+		t.Fatalf("left from the collapsed strip should wrap home to the input, got %d", m.focus)
+	}
+}
+
+// With no agents and no jobs there is no strip to walk into, so ← wraps
+// straight home — a session that never delegates never lands on an empty zone.
+func TestActivity_LeftWrapsHomeWithNoActivity(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m.convo = []convoEntry{{collapsed: "a message"}}
+
+	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
+	m = key(m, kLeft)
+	if m.focus != focusConvo {
+		t.Fatalf("want the conversation, got %d", m.focus)
+	}
+	m = key(m, kLeft)
+	if m.focus != focusInput {
+		t.Fatalf("want the input, got %d", m.focus)
+	}
+}

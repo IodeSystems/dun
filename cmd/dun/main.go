@@ -84,7 +84,12 @@ func main() {
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
 	pr := flag.Bool("pr", false, "shorthand for --ship with mode pr (verify, push, then report the gh pr create command)")
-	ship := flag.Bool("ship", false, "let the agent ship work (rebase+checks+push+ff local base branch) when done")
+	// Ship is ON by default: an agent that finishes work and cannot land it has
+	// done half a job, and the modes in ship.allow are the real policy surface —
+	// a repo that does not want pushes says so there, not by withholding the
+	// tool. --no-ship is the opt-out for a session that should only ever look.
+	shipFlag := flag.Bool("ship", true, "let the agent ship work (fetch+rebase+checks+push) when done")
+	noShip := flag.Bool("no-ship", false, "withhold the ship tool entirely (overrides --ship)")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
@@ -107,6 +112,9 @@ func main() {
 	flag.Var(&ragFlag, "rag", "start the docs server (raglit) this run: --rag or --rag=false (default: the saved setting)")
 	flag.Var(&lspFlag, "lsp", "start the code server (poly-lsp-mcp) this run: --lsp or --lsp=false (default: the saved setting)")
 	flag.Parse()
+	// --pr implies shipping: it is a ship MODE, not a separate ability.
+	effShip := (*shipFlag && !*noShip) || *pr
+	ship := &effShip
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
 
 	if *ver {

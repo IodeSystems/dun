@@ -751,12 +751,21 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input = m.input.HandleKey(msg)
 			return m, nil
 		case "left":
-			if m.focus == focusConvo { // ascend out of the doc list
-				if d := m.selDocs(); d != nil {
+			if m.focus == focusConvo {
+				// Inside a doc list, ← ascends out of it — the descend rule
+				// first, always.
+				if d := m.selDocs(); d != nil && d.descended {
 					d.descended = false
 					m.refresh()
+					return m, nil
 				}
-				return m, nil
+				// With nothing to ascend OUT of, ← keeps going the way it was
+				// already going: one more zone away from the input, which is the
+				// activity strip when there is one and the input again when
+				// there is not. Same order as tab, so the two agree.
+				m.cycleFocus(1)
+				m.refresh()
+				return m, textinput.Blink
 			}
 			// focusInput: left closes the suggestion selector…
 			if m.suggestSelecting {
@@ -766,13 +775,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// …and left at the FRONT of the input hops back to the conversation.
 			if m.input.Position() == 0 {
-				m.focus = focusConvo
-				m.input.Blur()
-				if len(m.convo) > 0 {
-					m.sel = len(m.convo) - 1
-				}
+				m.cycleFocus(1)
 				m.refresh()
-				return m, nil
+				return m, textinput.Blink
 			}
 			m.input = m.input.HandleKey(msg)
 			return m, nil
@@ -2396,8 +2401,11 @@ func procArgs(o tuiOpts, mode string) []string {
 	if o.pr {
 		args = append(args, "--pr")
 	}
-	if o.ship {
-		args = append(args, "--ship")
+	// Ship is on by default in the engine too, so the flag that has to survive
+	// the re-exec is the OPT-OUT. Passing nothing when o.ship is false would
+	// silently hand the child the default and undo --no-ship.
+	if !o.ship {
+		args = append(args, "--no-ship")
 	}
 	if o.cont {
 		args = append(args, "--continue")
