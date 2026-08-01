@@ -226,3 +226,26 @@ func TestRoleSystem_TellsEachSideWhatItMayDo(t *testing.T) {
 		t.Errorf("a root must be told how to steer and to clean up: %q", root)
 	}
 }
+
+// Found on a live run: the dismissal notice said "Its transcript is at ."
+// while the file sat on disk perfectly well. quit() dropped the harness before
+// asking it where the transcript was — and the transcript is precisely what is
+// left of a child once it has been dismissed.
+func TestSubAgent_QuitKeepsTheTranscriptPath(t *testing.T) {
+	h, sa := testAgent(t, 8, "count the lines")
+	path := childSessionFile(h.cfg.SessionFile, 8)
+	sa.h = &Harness{cfg: Config{SessionFile: path}}
+
+	out := sa.quit()
+	if !strings.Contains(out, path) {
+		t.Fatalf("the dismissal must name the transcript that outlives the child: %q", out)
+	}
+	if got := sa.transcript(); got != path {
+		t.Errorf("the path must survive dismissal, got %q", got)
+	}
+	// A child that never had a transcript says nothing rather than "at .".
+	_, bare := testAgent(t, 9, "no session file")
+	if out := bare.quit(); strings.Contains(out, "transcript is at .") {
+		t.Errorf("an in-memory child must not claim an empty path: %q", out)
+	}
+}

@@ -564,6 +564,13 @@ func (s *subAgent) tell(msg string) string {
 func (s *subAgent) quit() string {
 	s.mu.Lock()
 	h := s.h
+	// The transcript path lives on the HARNESS, so it has to be salvaged before
+	// the harness is dropped — and kept, because after dismissal the transcript
+	// is the only thing left of this child. Found live: the dismissal notice
+	// said "Its transcript is at ." while the file sat there perfectly well.
+	if h != nil && s.restore == "" {
+		s.restore = h.cfg.SessionFile
+	}
 	s.h = nil
 	s.releaseAskLocked()
 	s.mu.Unlock()
@@ -572,7 +579,10 @@ func (s *subAgent) quit() string {
 		h.Close()
 	}
 	s.settle(agentDismissed)
-	return fmt.Sprintf("Dismissed agent #%d. Its transcript is at %s.", s.num, s.transcript())
+	if path := s.transcript(); path != "" {
+		return fmt.Sprintf("Dismissed agent #%d. Its transcript is at %s.", s.num, path)
+	}
+	return fmt.Sprintf("Dismissed agent #%d.", s.num)
 }
 
 // peek reads the last n lines of the child's transcript, which is the only way
