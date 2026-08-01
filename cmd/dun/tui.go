@@ -68,7 +68,18 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	}
 	// WithMouseCellMotion makes the terminal (and tmux) forward wheel events to
 	// us instead of scrolling its own scrollback; the viewport consumes them.
-	fm, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}
+	// The shift+enter filter (keyfilter.go) has to see the bytes before
+	// bubbletea's parser reduces the sequence to the letter M — so it goes in as
+	// the input reader. bubbletea only puts the terminal into RAW mode when its
+	// input is a tty *os.File, and a wrapped reader is neither, so raw mode
+	// becomes ours: without it the tty stays canonical and nothing arrives until
+	// the user presses enter. Restored by the deferred call, including on panic.
+	if restore, ok := rawMode(os.Stdin); ok {
+		defer restore()
+		opts = append(opts, tea.WithInput(newKeyFilter(os.Stdin)))
+	}
+	fm, err := tea.NewProgram(m, opts...).Run()
 	if tm, ok := fm.(tuiModel); ok {
 		tm.proc.close() // the engine it ENDED with, which may not be the one it started
 	} else {

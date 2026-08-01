@@ -13,6 +13,7 @@ require (
 	github.com/iodesystems/agentkit v0.0.0
 	github.com/muesli/termenv v0.16.0
 	go.starlark.net v0.0.0-20260708150628-5395d018f003
+	golang.org/x/term v0.41.0
 )
 
 require (
@@ -50,7 +51,6 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
