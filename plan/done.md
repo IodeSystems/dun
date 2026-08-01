@@ -204,6 +204,9 @@
   Visuals need a real terminal to confirm (no-TTY exits cleanly).
 
 ### ✅ Slice 4b — worktree → PR
+> **SUPERSEDED TWICE.** `open_pr` was folded into `ship` as its `pr` mode (Ship
+> rework), and then the `gh` call was removed entirely (No unbounded foreground
+> exec). Nothing described below is live code — kept for why the shape changed.
 - `pr.go` — built-in `open_pr{title, body, base}` tool: commits the worktree
   changes onto the session branch, pushes it, `gh pr create`. `withPR` dispatcher
   wrapper; `Config.Worktree` + `Config.EnablePR`. **Opt-in via `--pr`** (pushing +
@@ -422,3 +425,112 @@ build/reload, which is what got built.
   `retry_test.go`, `queue_test.go`, `sanitize_test.go`, `tui_test.go` (banner,
   countdown, partial discard, give-up usability, send-while-busy),
   agentkit `llm/retryevent_test.go`.
+
+### ✅ Ship rework — one tool, three modes (2026-07-31)
+- **Problem:** `ship` was clean → fetch → rebase → push → ff local base → delete
+  branch, and its checks were UNWIRED — `main.go` never populated `ShipCfg`, so
+  `Checks` was always nil. It also ran `git checkout <base>` in the *main* repo
+  (changing what branch the human was on, racing any other session) and deleted
+  the branch it had just pushed while never pushing base: a "successful" ship
+  left the work only in the local checkout.
+- **Rebuilt around the invariant:** never push anything that was not verified in
+  exactly the state it will land in. Order is fetch → rebase → checks → push,
+  nothing mutating in between. Verifying BEFORE the rebase — the obvious order,
+  and the one the old ship implied — tests a tree that will never exist anywhere.
+- **Modes are the only thing that varies:** verify stops after the checks, push
+  lands the branch, pr lands it and hands off the pull request. `open_pr` is GONE
+  — push exists once. `ship.allow` is the policy surface (a sub-agent gets
+  `allow:["verify"]`); `allowBasePush` defaults OFF, so commits made straight to
+  main are detected and refused with the pipeline still run.
+- **Origin moving during the checks** is the residual hole merge queues exist
+  for: ship re-fetches after the checks and goes round again if the base moved,
+  bounded at 3 rounds — a permanently busy trunk must fail loudly, not spin.
+- **A conflicted rebase is a state, not an argument** (the old tool wanted
+  `action:"continue-rebase"` from the model). Detected from `rebase-merge`/
+  `rebase-apply` and resumed — and the resume must run BEFORE anything reads the
+  branch, since a stopped rebase leaves HEAD detached and "what branch am I on"
+  has no answer. A test caught that ordering; the first implementation had it
+  backwards.
+- **Checks are serial waves of parallel commands**, shape carrying the semantics
+  (array ordered, object not). A wave reports EVERY failure in it; names sorted
+  before reporting, or Go's map iteration makes two identical runs read as a
+  changed result.
+- **Verified:** `ship_test.go` runs the pipeline against a real bare origin —
+  base-moved re-verify, rebase resume, failed-check-pushes-nothing, base-branch
+  refusal.
+
+### ✅ No unbounded foreground exec; gh removed from ship (2026-07-31)
+- **Problem, measured:** a live session sat idle 14 minutes. The model hit an
+  expired gh token, ran `gh auth login` through `exec`, and gh — stdin on
+  `/dev/null`, stdout a pipe, no controlling tty — started an **OAuth device
+  flow** and polled GitHub for a one-time code printed into a pipe no human was
+  reading, until the code expired. Found by `ps --forest` + `/proc/PID/fd`
+  (ESTAB socket to 140.82.116.4:443, `ep_poll`).
+- **Not a dun tty-detection bug.** Reproduced standalone: gh 2.45 does not gate
+  the device flow on `CanPrompt()`. Every interactivity check already failed.
+  `detach()` (Slice: no child keeps dun's terminal) turned what would have been a
+  visible prompt into a silent block — a fix converting one failure mode into a
+  quieter one.
+- **Foreground exec is now bounded** (`exec.go`): `defaultExecTimeout` = 5m via a
+  ctx deadline, which `killGroup` already propagates to the whole process group.
+  A caller with its own deadline keeps it, so ship's `checkTimeout` is not
+  silently shortened; `background:true` is exempt via `WithoutExecTimeout` —
+  being unbounded is the entire point of a background job.
+- **A timeout must still render `[exit: …]`.** `runChecks` string-matches that
+  marker, so a timeout worded any other way would read as a PASSING check. The
+  message names the timeout, says the output is partial, and tells the model that
+  a command waiting for input will never get any.
+- **ship no longer invokes gh at all.** `pr` mode pushes, then `handOffPR` prints
+  the `gh pr create` line for a human. `ghRun`/`openOrUpdatePR`/`prFromCommits`
+  deleted. The mode, the `--pr` flag and existing configs are unchanged, so this
+  is revertible when gh gets a non-hanging call path.
+- **Verified:** deadline kills and reports with the marker; `bound()` respects a
+  caller's deadline and the background exemption; pr mode pushes and hands off
+  without claiming to have opened a PR.
+- **Known, not fixed:** killing `docker run` on a timeout does not stop the
+  container — see the icebox.
+
+### ✅ Exit codes, background-job visibility, container cleanup (2026-07-31)
+Three items from the same root: the harness could not tell the model what was
+actually happening.
+
+- **A. `ExecBackend` returns a result, not a string.** Failure was
+  `strings.Contains(out, "[exit:")` — so a check that PRINTED the marker (a test
+  asserting on exec's own output) failed spuriously, and anything that dropped it
+  read as a silent PASS. Two consumers had grown onto that string: `runChecks`
+  and the foreground timeout, whose wording was chosen to satisfy it. `Run` now
+  returns `ExecResult{Output, Code, TimedOut, Limit, Err}` with `Failed()` and
+  `Render()`; the `[exit: …]` marker is still RENDERED for the model, just no
+  longer parsed. A missing exec backend became `Code:-1` rather than a string
+  that read as a passing check.
+- **B. Background jobs stream, and can be tuned.** They were one terminal event:
+  nothing until exit, stdout+stderr merged, success inferred from the ABSENCE of
+  a marker, and the whole output inlined into the model's context.
+  `ExecBackend.Run` grew an `io.Writer` tee (Stdout and Stderr set to the SAME
+  writer value on purpose — os/exec gives interface-equal streams one pipe and
+  one goroutine, which is what makes the interleaving faithful and race-free).
+  `bgjob.go` holds the registry: output goes to a per-job LOG FILE whose path the
+  model is given, completion carries the exit code and a bounded tail, and
+  `exec_monitor(job, buffer_bytes, grep, ignore)` tunes a running job.
+  - Keyed by job **#id**, not pid: `startBg` hands the model an id, and the pid
+    is an `sh` it never sees.
+  - **Silent by default.** Streaming every job unasked would narrate a build into
+    the context window one line at a time; the knobs are opt-in per job.
+  - Partial lines are held back — the model cannot act on half a line and a
+    regexp cannot judge one.
+  - An explicit `exec_monitor` read flushes what is buffered even under the
+    threshold: asking is not the same as a scheduled report.
+- **C. A container no longer outlives the timeout that killed it.** Killing the
+  `docker run` client does not stop the container — it runs to completion and
+  only then does `--rm` remove it. Survivable when the only canceller was session
+  teardown; with a 5m deadline on every foreground exec it was a routine leak.
+  Runs are now `--name dun-<pid>-<n>` and the cancel path `docker stop`s that
+  name before killing the client.
+- **Also:** the system prompt described `exec` even with no backend configured
+  (a tool the model could plan around and never find), and quoted no deadline.
+  Both fixed; the prompt now interpolates `defaultExecTimeout` rather than
+  restating it.
+- **Verified:** a command that prints `[exit:` passes; exit code 3 survives as
+  `Code:3`; the tee sees output without consuming it; a job logs to disk and
+  reports `FAILED (exit 2)` with the path; buffer/grep/ignore each do what they
+  say; `docker stop` targets the run's own name. `go test -race ./.` clean.
