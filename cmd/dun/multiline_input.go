@@ -3,51 +3,55 @@ package main
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-// multilineInput is a 4-line word-wrapped text box for composing messages.
+// multilineInput is the message composer: a word-wrapped text box that grows
+// from one line to inputMaxLines and scrolls after that.
 //
-// It replaces the single-line bubbles textinput for the main user input pane.
-// The buffer is stored as a flat string (rune slice).  Word wrapping is
-// computed at render time from the buffer + available width, producing a
-// virtual display grid.  The cursor is a flat rune offset into the buffer;
-// display coordinates (line, col) are derived from the offset via the wrapped
-// grid.  This avoids the fragility of editing on a wrapped grid and then
-// trying to reconstruct logical lines.
+// The buffer is a flat rune slice and the cursor is a flat offset into it.
+// Wrapping is computed at render time into SEGMENTS that carry their own
+// [start,end) offsets — see wrapSeg. That is the whole design: the first
+// version derived cursor offsets by re-measuring the wrapped STRINGS, which
+// cannot recover the characters wrapping consumed (the space it broke on, the
+// newline it split on), so the cursor drifted and text went missing on the
+// screen. A segment knows where it came from, so display↔offset is exact in
+// both directions.
 //
-// Enter submits (handled by the caller).
-// Down/Right at the end of a wrapped line auto-inserts a newline.
-// Up/Down navigate within the wrapped display.  Ctrl+Up/Ctrl+Down navigate
-// history (handled by the caller).
+// Enter submits (the caller owns that). alt+enter / ctrl+j insert a newline.
+// Readline motions and kills are bound below — a text box that a shell user
+// cannot drive with ctrl+a/ctrl+e/ctrl+w is not finished.
 type multilineInput struct {
 	buf         []rune // flat text buffer
 	cursor      int    // flat rune offset into buf
-	width       int    // available columns for wrapping (set on WindowSizeMsg)
-	maxLines    int    // display height (always 4)
-	scroll      int    // vertical scroll offset — which display line is at the top
+	width       int    // columns available for text (set on WindowSizeMsg)
+	maxLines    int    // most display rows the box may occupy
+	scroll      int    // first visible display row
 	placeholder string
 	focused     bool
 }
 
+// inputMaxLines caps the box. It GROWS to this, it does not start at it: an
+// empty composer that reserves four rows is four rows of conversation nobody
+// gets back.
 const inputMaxLines = 4
+
+// stCaret is the cursor cell. Reverse video rather than a "█" glyph, which
+// painted over the character it was sitting on.
+var stCaret = lipgloss.NewStyle().Reverse(true)
 
 func newMultilineInput() multilineInput {
 	return multilineInput{
-		buf:         []rune{},
-		cursor:      0,
 		maxLines:    inputMaxLines,
 		placeholder: "ask dun to do something…",
 		focused:     true,
 	}
 }
 
-// ── accessors (match the textinput.Model interface used by tuiModel) ──
+// ── accessors (the subset of textinput.Model tuiModel used) ──
 
-func (m *multilineInput) Value() string {
-	return string(m.buf)
-}
+func (m *multilineInput) Value() string { return string(m.buf) }
 
 func (m *multilineInput) SetValue(s string) {
 	m.buf = []rune(s)
@@ -55,26 +59,19 @@ func (m *multilineInput) SetValue(s string) {
 }
 
 func (m *multilineInput) Reset() {
-	m.buf = nil
-	m.cursor = 0
-	m.scroll = 0
+	m.buf, m.cursor, m.scroll = nil, 0, 0
 }
 
-func (m *multilineInput) Focus() {
-	m.focused = true
-}
-
-func (m *multilineInput) Blur() {
-	m.focused = false
-}
+func (m *multilineInput) Focus() { m.focused = true }
+func (m *multilineInput) Blur()  { m.focused = false }
 
 func (m *multilineInput) CursorEnd() {
 	m.cursor = len(m.buf)
 	m.clampScroll()
 }
 
-// Position returns 0 when cursor is at the very beginning of the buffer,
-// non-zero otherwise.  Used by the "left-at-front-hops-to-convo" check.
+// Position is 0 only with the cursor at the very front of the buffer — which is
+// what the "← at the front hops to the conversation" check asks about.
 func (m *multilineInput) Position() int {
 	if m.cursor == 0 {
 		return 0
@@ -82,141 +79,148 @@ func (m *multilineInput) Position() int {
 	return 1
 }
 
-// isEmpty reports whether the input has no visible content.
-func (m *multilineInput) isEmpty() bool {
-	return strings.TrimSpace(string(m.buf)) == ""
+func (m *multilineInput) isEmpty() bool { return strings.TrimSpace(string(m.buf)) == "" }
+
+// ── wrapping ──
+
+// wrapSeg is one display row: the buffer range it shows, plus where the next
+// row starts. next > end exactly when wrapping consumed a character (the space
+// it broke on, or a newline), which is the fact that makes the offset mapping
+// reversible.
+type wrapSeg struct {
+	start, end int
+	next       int
 }
 
-// ── word wrapping ──
-
-// wrappedLines computes the display grid from the flat buffer.
-// Each element is one display row (a string of runes).
-func (m *multilineInput) wrappedLines() []string {
-	if m.width <= 0 {
-		m.width = 80
+func (m *multilineInput) textWidth() int {
+	if m.width > 0 {
+		return m.width
 	}
-	if len(m.buf) == 0 {
-		return []string{""}
-	}
-	// Split on \n first to get logical lines, then word-wrap each.
-	logical := strings.Split(string(m.buf), "\n")
-	var result []string
-	for _, line := range logical {
-		result = append(result, wordWrap(line, m.width)...)
-	}
-	if len(result) == 0 {
-		result = []string{""}
-	}
-	return result
+	return 80
 }
 
-// wordWrap wraps a single logical line into display rows of at most w columns.
-func wordWrap(s string, w int) []string {
-	if w <= 0 {
-		w = 80
+// segments wraps the buffer into display rows. Always at least one row, so an
+// empty buffer still has somewhere to put the cursor.
+func (m *multilineInput) segments() []wrapSeg {
+	w := m.textWidth()
+	var segs []wrapSeg
+	lineStart := 0
+	for i := 0; i <= len(m.buf); i++ {
+		if i < len(m.buf) && m.buf[i] != '\n' {
+			continue
+		}
+		segs = append(segs, wrapLine(m.buf, lineStart, i, w)...)
+		// The newline itself belongs to no row; it is what `next` skips.
+		if n := len(segs) - 1; n >= 0 && i < len(m.buf) {
+			segs[n].next = i + 1
+		}
+		lineStart = i + 1
 	}
-	runes := []rune(s)
-	if len(runes) == 0 {
-		return []string{""}
+	if len(segs) == 0 {
+		segs = []wrapSeg{{}}
 	}
+	return segs
+}
 
-	var lines []string
-	var current []rune
-
-	for len(runes) > 0 {
-		if len(runes) <= w {
-			current = append(current, runes...)
-			runes = nil
+// wrapLine greedily wraps buf[start:end] into rows of at most w columns,
+// breaking on the last space that fits and consuming it.
+func wrapLine(buf []rune, start, end, w int) []wrapSeg {
+	if start >= end {
+		return []wrapSeg{{start: start, end: start, next: start}}
+	}
+	var segs []wrapSeg
+	for start < end {
+		if end-start <= w {
+			segs = append(segs, wrapSeg{start: start, end: end, next: end})
 			break
 		}
-
-		chunk := runes[:w]
-		rest := runes[w:]
-
-		// Try to find a space to break on within the chunk.
-		spacePos := -1
-		for i := w - 1; i >= 0; i-- {
-			if chunk[i] == ' ' {
-				spacePos = i
+		// The break point is the last space inside the window. Breaking AT the
+		// window edge when there is no space is deliberate: an unbroken 200-char
+		// token has to go somewhere, and refusing to split it would overflow.
+		brk := -1
+		for i := start + w; i > start; i-- {
+			if buf[i-1] == ' ' {
+				brk = i - 1
 				break
 			}
 		}
-
-		if spacePos >= 1 {
-			current = append(current, chunk[:spacePos]...)
-			lines = append(lines, string(current))
-			current = nil
-			runes = rest
-		} else {
-			current = append(current, chunk...)
-			lines = append(lines, string(current))
-			current = nil
-			runes = rest
+		if brk <= start {
+			segs = append(segs, wrapSeg{start: start, end: start + w, next: start + w})
+			start += w
+			continue
 		}
+		segs = append(segs, wrapSeg{start: start, end: brk, next: brk + 1})
+		start = brk + 1
 	}
-
-	if len(current) > 0 || len(lines) == 0 {
-		lines = append(lines, string(current))
-	}
-
-	return lines
+	return segs
 }
 
-// cursorDisplayPos returns the display (line, col) for the current cursor offset.
-func (m *multilineInput) cursorDisplayPos() (line, col int) {
-	wrapped := m.wrappedLines()
-	off := 0
-	for i, wl := range wrapped {
-		wlLen := len([]rune(wl))
-		if m.cursor < off+wlLen {
-			return i, m.cursor - off
-		}
-		// Account for the \n that was consumed to create the next logical line.
-		// After the last display row of a logical line, there's an implicit \n
-		// (unless it's the very end of the buffer).
-		if i+1 < len(wrapped) {
-			// Check if the next wrapped line starts a new logical line.
-			// We detect this by checking if the current line is shorter than width
-			// (meaning it ended naturally, not by wrapping).
-			if wlLen < m.width {
-				off++ // skip the \n
+func (m *multilineInput) text(s wrapSeg) string { return string(m.buf[s.start:s.end]) }
+
+// cursorDisplayPos maps the flat cursor to a (row, column).
+func (m *multilineInput) cursorDisplayPos() (int, int) {
+	segs := m.segments()
+	for i, s := range segs {
+		if m.cursor < s.next || (i == len(segs)-1 && m.cursor <= s.end) {
+			col := m.cursor - s.start
+			if col < 0 {
+				col = 0
 			}
-		}
-		off += wlLen
-	}
-	// Cursor is at the very end.
-	return len(wrapped) - 1, len([]rune(wrapped[len(wrapped)-1]))
-}
-
-// cursorAtEndOfWrappedLine reports whether the cursor sits at a wrap break
-// point: the previous display row was exactly width-long (split by wrapping,
-// not by an explicit \n) and there is more buffer after the cursor.
-func (m *multilineInput) cursorAtEndOfWrappedLine() bool {
-	if m.cursor >= len(m.buf) {
-		return false
-	}
-	line, col := m.cursorDisplayPos()
-	wrapped := m.wrappedLines()
-	if line >= len(wrapped) {
-		return false
-	}
-	// Case 1: cursor is at the start of a display line (col == 0) and the
-	// previous display line was full-width → we're at a wrap break.
-	if line > 0 && col == 0 && len([]rune(wrapped[line-1])) == m.width {
-		return true
-	}
-	// Case 2: cursor is at the end of a display line that is full-width,
-	// and the next char in the buffer is not \n (i.e., it's a wrap, not a real newline).
-	if col == len([]rune(wrapped[line])) && len([]rune(wrapped[line])) == m.width {
-		// Check that the next buffer char is not \n (would be a real line break).
-		if m.cursor < len(m.buf) && m.buf[m.cursor] != '\n' {
-			return true
+			if col > s.end-s.start {
+				col = s.end - s.start
+			}
+			return i, col
 		}
 	}
-	return false
+	last := segs[len(segs)-1]
+	return len(segs) - 1, last.end - last.start
 }
 
-// clampCursor ensures the cursor offset is valid.
+// displayToOffset is the inverse, clamped to the row's own text.
+func (m *multilineInput) displayToOffset(row, col int) int {
+	segs := m.segments()
+	if row < 0 {
+		row = 0
+	}
+	if row >= len(segs) {
+		row = len(segs) - 1
+	}
+	s := segs[row]
+	if col > s.end-s.start {
+		col = s.end - s.start
+	}
+	if col < 0 {
+		col = 0
+	}
+	return s.start + col
+}
+
+// height is how many rows the box occupies right now: one until the text needs
+// more, never more than maxLines.
+func (m *multilineInput) height() int {
+	n := len(m.segments())
+	if n < 1 {
+		n = 1
+	}
+	if n > m.maxLines {
+		n = m.maxLines
+	}
+	return n
+}
+
+// AtFirstLine / AtLastLine let the caller decide when ↑/↓ stop moving the
+// cursor and start recalling history — the shell behaviour, where the edge of
+// the buffer is what hands the key on.
+func (m *multilineInput) AtFirstLine() bool {
+	row, _ := m.cursorDisplayPos()
+	return row == 0
+}
+
+func (m *multilineInput) AtLastLine() bool {
+	row, _ := m.cursorDisplayPos()
+	return row == len(m.segments())-1
+}
+
 func (m *multilineInput) clampCursor() {
 	if m.cursor < 0 {
 		m.cursor = 0
@@ -227,26 +231,22 @@ func (m *multilineInput) clampCursor() {
 	m.clampScroll()
 }
 
-// clampScroll ensures the cursor's display line is visible.
+// clampScroll keeps the cursor's row inside the visible window.
 func (m *multilineInput) clampScroll() {
-	line, _ := m.cursorDisplayPos()
-	wrapped := m.wrappedLines()
-	totalLines := len(wrapped)
-	if totalLines <= m.maxLines {
+	row, _ := m.cursorDisplayPos()
+	total := len(m.segments())
+	if total <= m.maxLines {
 		m.scroll = 0
 		return
 	}
-	if line < m.scroll {
-		m.scroll = line
+	if row < m.scroll {
+		m.scroll = row
 	}
-	if line >= m.scroll+m.maxLines {
-		m.scroll = line - m.maxLines + 1
+	if row >= m.scroll+m.maxLines {
+		m.scroll = row - m.maxLines + 1
 	}
-	if m.scroll < 0 {
-		m.scroll = 0
-	}
-	if m.scroll+m.maxLines > totalLines {
-		m.scroll = totalLines - m.maxLines
+	if max := total - m.maxLines; m.scroll > max {
+		m.scroll = max
 	}
 	if m.scroll < 0 {
 		m.scroll = 0
@@ -255,15 +255,67 @@ func (m *multilineInput) clampScroll() {
 
 // ── key handling ──
 
-// HandleKey processes a single key event and returns the updated input.
+// HandleKey processes one key. Motions and kills follow readline, because that
+// is what every other text field on the machine does.
 func (m *multilineInput) HandleKey(msg tea.KeyMsg) multilineInput {
 	if !m.focused {
 		return *m
 	}
 
+	// Named-key bindings are matched on String(), but ONLY for keys that are not
+	// plain runes: a bracketed paste arrives as KeyRunes, and pasting the word
+	// "home" would otherwise be read as the Home key.
+	if msg.Type != tea.KeyRunes || msg.Alt {
+		switch msg.String() {
+		// A newline has to be typeable: enter submits, so the composer needs its own
+		// key. alt+enter is the common one; ctrl+j is what the terminal actually
+		// sends for it on setups where alt is not sent as a modifier.
+		case "alt+enter", "ctrl+j":
+			m.insert([]rune{'\n'})
+			return *m
+		case "ctrl+a", "home":
+			m.cursor = m.lineStart()
+			m.clampCursor()
+			return *m
+		case "ctrl+e", "end":
+			m.cursor = m.lineEnd()
+			m.clampCursor()
+			return *m
+		case "ctrl+b":
+			m.cursorLeft()
+			return *m
+		case "ctrl+f":
+			m.cursorRight()
+			return *m
+		case "alt+left", "ctrl+left", "alt+b":
+			m.cursor = m.wordLeft()
+			m.clampCursor()
+			return *m
+		case "alt+right", "ctrl+right", "alt+f":
+			m.cursor = m.wordRight()
+			m.clampCursor()
+			return *m
+		case "ctrl+w", "alt+backspace", "ctrl+backspace":
+			m.deleteTo(m.wordLeft())
+			return *m
+		case "alt+d":
+			m.deleteTo(m.wordRight())
+			return *m
+		case "ctrl+k":
+			m.deleteTo(m.lineEnd())
+			return *m
+		case "ctrl+u":
+			m.deleteTo(m.lineStart())
+			return *m
+		case "ctrl+d":
+			m.delete()
+			return *m
+		}
+	}
+
 	switch msg.Type {
 	case tea.KeyEnter:
-		// Enter is handled by the caller (submit).
+		// Submit — the caller's business.
 	case tea.KeyUp:
 		m.cursorUp()
 	case tea.KeyDown:
@@ -277,50 +329,126 @@ func (m *multilineInput) HandleKey(msg tea.KeyMsg) multilineInput {
 	case tea.KeyDelete:
 		m.delete()
 	case tea.KeyPgUp:
-		m.pageUp()
+		m.pageBy(-m.maxLines)
 	case tea.KeyPgDown:
-		m.pageDown()
-	case tea.KeyHome:
-		m.cursor = 0
-		m.clampCursor()
-	case tea.KeyEnd:
-		m.cursor = len(m.buf)
-		m.clampCursor()
-	case tea.KeyRunes:
-		m.buf = append(m.buf[:m.cursor], append(msg.Runes, m.buf[m.cursor:]...)...)
-		m.cursor += len(msg.Runes)
-		m.clampCursor()
+		m.pageBy(m.maxLines)
+	case tea.KeyRunes, tea.KeySpace:
+		r := msg.Runes
+		if msg.Type == tea.KeySpace {
+			r = []rune{' '}
+		}
+		m.insert(r)
 	}
-
 	return *m
 }
 
-// ── cursor movement ──
-
-func (m *multilineInput) cursorUp() {
-	line, col := m.cursorDisplayPos()
-	if line <= 0 {
+// insert puts runes at the cursor. Built through a fresh slice on purpose: the
+// obvious append(buf[:c], append(runes, buf[c:]...)...) writes through the
+// caller's slice and can alias the buffer it is copying from.
+func (m *multilineInput) insert(r []rune) {
+	if len(r) == 0 {
 		return
 	}
-	// Find the cursor offset for (line-1, col).
-	m.cursor = m.displayToOffset(line-1, col)
+	out := make([]rune, 0, len(m.buf)+len(r))
+	out = append(out, m.buf[:m.cursor]...)
+	out = append(out, r...)
+	out = append(out, m.buf[m.cursor:]...)
+	m.buf = out
+	m.cursor += len(r)
 	m.clampCursor()
 }
 
-func (m *multilineInput) cursorDown() {
-	// If at the end of a wrapped line (but not end of buffer), insert newline.
-	if m.cursor < len(m.buf) && m.cursorAtEndOfWrappedLine() {
-		m.buf = append(m.buf[:m.cursor], append([]rune{'\n'}, m.buf[m.cursor:]...)...)
-		m.cursor++
-		m.clampCursor()
+// deleteTo removes everything between the cursor and to, in either direction.
+func (m *multilineInput) deleteTo(to int) {
+	lo, hi := m.cursor, to
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(m.buf) {
+		hi = len(m.buf)
+	}
+	if lo == hi {
 		return
 	}
-	line, col := m.cursorDisplayPos()
-	wrapped := m.wrappedLines()
-	if line >= len(wrapped)-1 {
+	out := make([]rune, 0, len(m.buf)-(hi-lo))
+	out = append(out, m.buf[:lo]...)
+	out = append(out, m.buf[hi:]...)
+	m.buf, m.cursor = out, lo
+	m.clampCursor()
+}
+
+// lineStart / lineEnd are the LOGICAL line's bounds — what ctrl+a and ctrl+k
+// mean everywhere else. A wrapped row is a rendering artefact, not a line.
+func (m *multilineInput) lineStart() int {
+	for i := m.cursor - 1; i >= 0; i-- {
+		if m.buf[i] == '\n' {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func (m *multilineInput) lineEnd() int {
+	for i := m.cursor; i < len(m.buf); i++ {
+		if m.buf[i] == '\n' {
+			return i
+		}
+	}
+	return len(m.buf)
+}
+
+func (m *multilineInput) wordLeft() int {
+	i := m.cursor
+	for i > 0 && isWordSep(m.buf[i-1]) {
+		i--
+	}
+	for i > 0 && !isWordSep(m.buf[i-1]) {
+		i--
+	}
+	return i
+}
+
+func (m *multilineInput) wordRight() int {
+	i := m.cursor
+	for i < len(m.buf) && isWordSep(m.buf[i]) {
+		i++
+	}
+	for i < len(m.buf) && !isWordSep(m.buf[i]) {
+		i++
+	}
+	return i
+}
+
+func isWordSep(r rune) bool { return r == ' ' || r == '\t' || r == '\n' }
+
+// ── cursor movement ──
+
+func (m *multilineInput) cursorUp()   { m.moveRow(-1) }
+func (m *multilineInput) cursorDown() { m.moveRow(1) }
+
+func (m *multilineInput) moveRow(d int) {
+	row, col := m.cursorDisplayPos()
+	target := row + d
+	if target < 0 || target >= len(m.segments()) {
 		return
 	}
-	m.cursor = m.displayToOffset(line+1, col)
+	m.cursor = m.displayToOffset(target, col)
+	m.clampCursor()
+}
+
+func (m *multilineInput) pageBy(d int) {
+	row, col := m.cursorDisplayPos()
+	target := row + d
+	if target < 0 {
+		target = 0
+	}
+	if n := len(m.segments()); target >= n {
+		target = n - 1
+	}
+	m.cursor = m.displayToOffset(target, col)
 	m.clampCursor()
 }
 
@@ -332,166 +460,85 @@ func (m *multilineInput) cursorLeft() {
 }
 
 func (m *multilineInput) cursorRight() {
-	if m.cursor < len(m.buf) && m.cursorAtEndOfWrappedLine() {
-		// At end of a wrapped line → insert newline.
-		m.buf = append(m.buf[:m.cursor], append([]rune{'\n'}, m.buf[m.cursor:]...)...)
-		m.cursor++
-		m.clampCursor()
-		return
-	}
 	if m.cursor < len(m.buf) {
 		m.cursor++
 		m.clampCursor()
 	}
 }
 
-func (m *multilineInput) pageUp() {
-	line, col := m.cursorDisplayPos()
-	target := line - m.maxLines
-	if target < 0 {
-		target = 0
-	}
-	m.cursor = m.displayToOffset(target, col)
-	m.clampCursor()
-}
-
-func (m *multilineInput) pageDown() {
-	line, col := m.cursorDisplayPos()
-	wrapped := m.wrappedLines()
-	target := line + m.maxLines
-	if target >= len(wrapped) {
-		target = len(wrapped) - 1
-	}
-	m.cursor = m.displayToOffset(target, col)
-	m.clampCursor()
-}
-
-// displayToOffset converts a display (line, col) to a flat buffer offset.
-func (m *multilineInput) displayToOffset(line, col int) int {
-	wrapped := m.wrappedLines()
-	if line >= len(wrapped) {
-		line = len(wrapped) - 1
-	}
-	if line < 0 {
-		line = 0
-	}
-
-	off := 0
-	for i, wl := range wrapped {
-		wlRunes := []rune(wl)
-		wlLen := len(wlRunes)
-		if i == line {
-			if col > wlLen {
-				col = wlLen
-			}
-			return off + col
-		}
-		// After this display line, check if there's a \n (logical line boundary).
-		if i+1 < len(wrapped) && wlLen < m.width {
-			// This line ended naturally (not by wrapping) → there's a \n.
-			off++
-		}
-		off += wlLen
-	}
-	return off
-}
-
-// ── editing ──
-
 func (m *multilineInput) backspace() {
 	if m.cursor > 0 {
-		m.buf = append(m.buf[:m.cursor-1], m.buf[m.cursor:]...)
-		m.cursor--
-		m.clampCursor()
+		m.deleteTo(m.cursor - 1)
 	}
 }
 
 func (m *multilineInput) delete() {
 	if m.cursor < len(m.buf) {
-		m.buf = append(m.buf[:m.cursor], m.buf[m.cursor+1:]...)
+		out := make([]rune, 0, len(m.buf)-1)
+		out = append(out, m.buf[:m.cursor]...)
+		out = append(out, m.buf[m.cursor+1:]...)
+		m.buf = out
 		m.clampCursor()
 	}
 }
 
 // ── rendering ──
 
-// View renders the 4-line input box with cursor.
+// View renders the visible rows, prompt on the first one, cursor in reverse
+// video. Height is height() — the box grows with the text.
 func (m *multilineInput) View() string {
-	wrapped := m.wrappedLines()
 	m.clampScroll()
-
-	cursorLine, cursorCol := m.cursorDisplayPos()
-
-	var sb strings.Builder
-	for i := 0; i < m.maxLines; i++ {
-		displayIdx := m.scroll + i
-		var lineStr string
-		if displayIdx < len(wrapped) {
-			lineStr = wrapped[displayIdx]
-		}
-
-		// Prompt: "› " on first line, "  " on subsequent lines.
-		prompt := "› "
-		if i > 0 {
-			prompt = "  "
-		}
-
-		// Cursor on this line?
-		isCursorLine := (displayIdx == cursorLine) && m.focused
-
-		if isCursorLine {
-			lineRunes := []rune(lineStr)
-			before := ""
-			after := lineStr
-			cursorCh := "█"
-			if cursorCol < len(lineRunes) {
-				before = string(lineRunes[:cursorCol])
-				cursorCh = string(lineRunes[cursorCol])
-				after = string(lineRunes[cursorCol+1:])
-			} else {
-				before = lineStr
-			}
-			cursorStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-			sb.WriteString(prompt)
-			sb.WriteString(before)
-			sb.WriteString(cursorStyle.Render(cursorCh))
-			sb.WriteString(after)
-		} else {
-			sb.WriteString(prompt)
-			sb.WriteString(lineStr)
-		}
-
-		// Pad to width.
-		displayLen := lipgloss.Width(prompt + lineStr)
-		for displayLen < m.width+2 {
-			sb.WriteString(" ")
-			displayLen++
-		}
-
-		if i < m.maxLines-1 {
-			sb.WriteString("\n")
-		}
+	if len(m.buf) == 0 {
+		return m.placeholderView()
 	}
+	segs := m.segments()
+	row, col := m.cursorDisplayPos()
 
-	// If no content and not focused, show placeholder.
-	if m.isEmpty() && !m.focused {
-		prompt := "› "
-		sb.Reset()
-		sb.WriteString(prompt)
-		sb.WriteString(stDim.Render(m.placeholder))
-		displayLen := lipgloss.Width(prompt + m.placeholder)
-		for displayLen < m.width+2 {
-			sb.WriteString(" ")
-			displayLen++
+	lines := make([]string, 0, m.maxLines)
+	for i := 0; i < m.height(); i++ {
+		idx := m.scroll + i
+		prompt := "  "
+		if idx == 0 {
+			prompt = "› "
 		}
-		for i := 1; i < m.maxLines; i++ {
-			sb.WriteString("\n  ")
-			for j := 0; j < m.width; j++ {
-				sb.WriteString(" ")
-			}
+		var text string
+		if idx < len(segs) {
+			text = m.text(segs[idx])
 		}
-		return sb.String()
+		if m.focused && idx == row {
+			text = withCaret(text, col)
+		}
+		lines = append(lines, m.pad(prompt+text))
 	}
+	return strings.Join(lines, "\n")
+}
 
-	return sb.String()
+// placeholderView is the empty state. The placeholder shows whether or not the
+// box has focus — a hint that disappears when you click into the field is the
+// wrong way round, and it is where the caret has to live anyway.
+func (m *multilineInput) placeholderView() string {
+	text := stDim.Render(m.placeholder)
+	if m.focused {
+		text = withCaret(m.placeholder, 0)
+	}
+	return m.pad("› " + text)
+}
+
+// withCaret reverse-videos the cell at col, adding one past the end of the text
+// when that is where the cursor sits.
+func withCaret(s string, col int) string {
+	r := []rune(s)
+	if col >= len(r) {
+		return s + stCaret.Render(" ")
+	}
+	return string(r[:col]) + stCaret.Render(string(r[col])) + string(r[col+1:])
+}
+
+// pad fills the row to the full width so a shortened line cannot leave the
+// previous frame's characters behind it.
+func (m *multilineInput) pad(s string) string {
+	if n := m.textWidth() + 2 - lipgloss.Width(s); n > 0 {
+		return s + strings.Repeat(" ", n)
+	}
+	return s
 }

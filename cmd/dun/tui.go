@@ -615,7 +615,19 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Plain up: navigate within the multiline input buffer.
+			// Plain up moves within the composer until it runs out of buffer;
+			// from the FIRST row it recalls history, which is what a shell does
+			// and what makes ↑ still mean "the thing I sent before" in a box
+			// that is usually one line tall.
+			if m.input.AtFirstLine() {
+				if len(m.history) > 0 && m.histIdx > 0 {
+					m.histIdx--
+					m.input.SetValue(m.history[m.histIdx])
+					m.input.CursorEnd()
+					m.refresh()
+				}
+				return m, nil
+			}
 			m.input = m.input.HandleKey(msg)
 			m.refresh()
 			return m, nil
@@ -656,7 +668,20 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Plain down: navigate within the multiline input buffer.
+			// …and from the LAST row, ↓ walks history forward again.
+			if m.input.AtLastLine() {
+				if m.histIdx < len(m.history) {
+					m.histIdx++
+					if m.histIdx == len(m.history) {
+						m.input.SetValue("")
+					} else {
+						m.input.SetValue(m.history[m.histIdx])
+						m.input.CursorEnd()
+					}
+					m.refresh()
+				}
+				return m, nil
+			}
 			m.input = m.input.HandleKey(msg)
 			m.refresh()
 			return m, nil

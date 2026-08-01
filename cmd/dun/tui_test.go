@@ -1225,161 +1225,199 @@ func TestTUI_ScrollPin(t *testing.T) {
 
 // ── multiline input tests ──
 
-// TestMultilineInput_Basic verifies the multilineInput struct: typing, cursor
-// movement, Value/Reset, and the 4-line rendering.
+// The composer GROWS. An empty box that reserves four rows costs four rows of
+// conversation for nothing, which is what it did.
 func TestMultilineInput_Basic(t *testing.T) {
 	in := newMultilineInput()
 	in.width = 80
 
-	// Type some text.
 	for _, r := range "hello world" {
 		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
 	if in.Value() != "hello world" {
 		t.Fatalf("expected 'hello world', got %q", in.Value())
 	}
+	if n := len(strings.Split(in.View(), "\n")); n != 1 {
+		t.Fatalf("one line of text is one row, got %d", n)
+	}
 
-	// Reset clears everything.
 	in.Reset()
-	if in.Value() != "" {
+	if in.Value() != "" || !in.isEmpty() {
 		t.Fatalf("Reset should clear, got %q", in.Value())
 	}
-	if !in.isEmpty() {
-		t.Fatal("empty input should report isEmpty")
-	}
-
-	// SetValue works.
 	in.SetValue("preloaded text")
 	if in.Value() != "preloaded text" {
 		t.Fatalf("SetValue failed: got %q", in.Value())
 	}
-
-	// View() renders without panic and is exactly 4 lines.
-	view := in.View()
-	lines := strings.Split(view, "\n")
-	if len(lines) != inputMaxLines {
-		t.Fatalf("View should be %d lines, got %d", inputMaxLines, len(lines))
-	}
 }
 
-// TestMultilineInput_CursorMovement verifies left/right/up/down cursor
-// navigation within the wrapped display grid.
-func TestMultilineInput_CursorMovement(t *testing.T) {
-	in := newMultilineInput()
-	in.width = 10
-
-	// Type text that wraps at width 10.
-	for _, r := range "abcdefghij" {
-		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
-	// Cursor should be at the end.
-	if in.cursor != len(in.buf) {
-		t.Fatalf("cursor should be at end, got %d vs len %d", in.cursor, len(in.buf))
-	}
-
-	// Left moves cursor back.
-	before := in.cursor
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyLeft})
-	if in.cursor >= before {
-		t.Fatal("left should move cursor left")
-	}
-}
-
-// TestMultilineInput_Newline verifies that pressing Down at the end of a
-// wrapped line inserts a newline.
-func TestMultilineInput_Newline(t *testing.T) {
-	in := newMultilineInput()
-	in.width = 10
-
-	// Type enough to fill one wrapped line (10 chars).
-	for _, r := range "1234567890" {
-		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
-	// Cursor is at offset 10, which is end of a full-width wrapped line
-	// with more buffer after → Down should insert newline.
-	// But there's no more buffer, so we need more text after cursor.
-	// Instead, type more and then move cursor back to the wrap point.
-	for _, r := range "abcdefghij" {
-		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
-	// Cursor at 20. Move back to position 10 (end of first wrapped line).
-	in.cursor = 10
-	// Down at end of wrapped line with more buffer → inserts newline.
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyDown})
-
-	// Value should contain a newline at position 10.
-	val := in.Value()
-	if !strings.Contains(val, "\n") {
-		t.Fatalf("Down at wrap point should insert newline, got %q", val)
-	}
-}
-
-// TestMultilineInput_BackspaceAcrossLines verifies backspace at the start of
-// a line joins with the previous line (deletes the \n).
-func TestMultilineInput_BackspaceAcrossLines(t *testing.T) {
+// Regression: with the cursor at the end of a row, View wrote the row, then the
+// cursor, then the row AGAIN — every keystroke looked like it had been typed
+// twice. `after` was initialised to the whole line and never cleared.
+func TestMultilineInput_RendersTextOnce(t *testing.T) {
 	in := newMultilineInput()
 	in.width = 80
+	in.SetValue("hello world")
+	in.CursorEnd()
 
-	// Type "ab\ncd" via SetValue.
-	in.SetValue("ab\ncd")
-	// Move cursor to position 2 (right after "ab", before \n).
-	in.cursor = 2
-
-	// Backspace should delete 'b'.
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
-	if in.Value() != "a\ncd" {
-		t.Fatalf("backspace should delete char before cursor, got %q", in.Value())
-	}
-
-	// Move cursor to position 1 (right after "a", before \n).
-	in.cursor = 1
-	// Backspace should delete 'a'.
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
-	if in.Value() != "\ncd" {
-		t.Fatalf("backspace should delete 'a', got %q", in.Value())
-	}
-
-	// Move cursor to position 0 (before \n).
-	in.cursor = 0
-	// Can't backspace at position 0.
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
-	if in.Value() != "\ncd" {
-		t.Fatalf("backspace at 0 should be a no-op, got %q", in.Value())
-	}
-
-	// Move cursor to position 1 (right after \n).
-	in.cursor = 1
-	// Backspace should delete the \n, joining lines.
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
-	if in.Value() != "cd" {
-		t.Fatalf("backspace at line start should join lines, got %q", in.Value())
+	if n := strings.Count(in.View(), "hello world"); n != 1 {
+		t.Fatalf("the text must be rendered exactly once, got %d copies: %q", n, in.View())
 	}
 }
 
-// TestMultilineInput_WordWrap verifies that long lines wrap at the configured width.
-func TestMultilineInput_WordWrap(t *testing.T) {
+// Regression: wrapping broke at a space by taking chunk[:space] and then
+// advancing past the WHOLE window, so everything between the break and the
+// window edge silently vanished from the display — and, because the cursor
+// mapping was derived from those strings, took the cursor with it.
+func TestWrapLine_KeepsEveryCharacter(t *testing.T) {
+	const text = "one two three four five sixseven eight"
+	buf := []rune(text)
+	segs := wrapLine(buf, 0, len(buf), 10)
+
+	var rebuilt strings.Builder
+	for _, s := range segs {
+		if s.end-s.start > 10 {
+			t.Errorf("row wider than the box: %q", string(buf[s.start:s.end]))
+		}
+		rebuilt.WriteString(string(buf[s.start:s.end]))
+		rebuilt.WriteString(string(buf[s.end:s.next])) // the separator wrapping consumed
+	}
+	if rebuilt.String() != text {
+		t.Fatalf("wrapping lost text:\n want %q\n got  %q", text, rebuilt.String())
+	}
+}
+
+// The cursor mapping has to be exact in both directions, or editing lands in
+// the wrong place. Every offset in a wrapped buffer must survive the round trip.
+func TestMultilineInput_CursorRoundTrip(t *testing.T) {
 	in := newMultilineInput()
 	in.width = 10
+	in.SetValue("one two three\nfour five sixseven eight")
 
-	// Type a long string.
-	for _, r := range "one two three four" {
-		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
-
-	wrapped := in.wrappedLines()
-	if len(wrapped) < 2 {
-		t.Fatalf("long text should wrap to multiple lines, got %d: %v", len(wrapped), wrapped)
-	}
-	// Each wrapped line should be <= width.
-	for i, line := range wrapped {
-		if len([]rune(line)) > in.width {
-			t.Errorf("wrapped line %d exceeds width: %d > %d: %q", i, len([]rune(line)), in.width, line)
+	for off := 0; off <= len(in.buf); off++ {
+		in.cursor = off
+		row, col := in.cursorDisplayPos()
+		if got := in.displayToOffset(row, col); got != off {
+			t.Fatalf("offset %d → (%d,%d) → %d", off, row, col, got)
 		}
 	}
 }
 
-// TestMultilineInput_HistoryViaCtrl verifies that Ctrl+Up/Ctrl+Down navigate
-// history while plain Up/Down navigate within the buffer.
+// Arrows MOVE. The first version inserted a newline into the buffer when → or ↓
+// landed on a wrap point, so navigating your own text rewrote it.
+func TestMultilineInput_ArrowsDoNotEditTheBuffer(t *testing.T) {
+	in := newMultilineInput()
+	in.width = 10
+	in.SetValue("1234567890abcdefghij")
+
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyRight}, {Type: tea.KeyDown}, {Type: tea.KeyUp}, {Type: tea.KeyLeft}} {
+		in.cursor = 10 // the wrap point
+		in = in.HandleKey(k)
+		if in.Value() != "1234567890abcdefghij" {
+			t.Fatalf("%v edited the buffer: %q", k, in.Value())
+		}
+	}
+}
+
+// Enter submits, so a newline needs a key of its own.
+func TestMultilineInput_AltEnterInsertsNewline(t *testing.T) {
+	in := newMultilineInput()
+	in.width = 80
+	in.SetValue("first")
+	in.CursorEnd()
+
+	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("second")})
+	if in.Value() != "first\nsecond" {
+		t.Fatalf("alt+enter should insert a newline, got %q", in.Value())
+	}
+	if n := len(strings.Split(in.View(), "\n")); n != 2 {
+		t.Fatalf("two logical lines is two rows, got %d", n)
+	}
+}
+
+// A text box a shell user cannot drive is not finished.
+func TestMultilineInput_ReadlineEditing(t *testing.T) {
+	mk := func(v string, cur int) multilineInput {
+		in := newMultilineInput()
+		in.width = 80
+		in.SetValue(v)
+		in.cursor = cur
+		return in
+	}
+	cases := []struct {
+		name string
+		in   multilineInput
+		key  tea.KeyMsg
+		want string
+	}{
+		{"ctrl+w kills the word behind", mk("hello world", 11), tea.KeyMsg{Type: tea.KeyCtrlW}, "hello "},
+		{"ctrl+k kills to end of line", mk("hello world", 5), tea.KeyMsg{Type: tea.KeyCtrlK}, "hello"},
+		{"ctrl+u kills to start of line", mk("hello", 3), tea.KeyMsg{Type: tea.KeyCtrlU}, "lo"},
+		{"ctrl+d deletes forward", mk("hello", 0), tea.KeyMsg{Type: tea.KeyCtrlD}, "ello"},
+	}
+	for _, c := range cases {
+		got := c.in.HandleKey(c.key)
+		if got.Value() != c.want {
+			t.Errorf("%s: want %q, got %q", c.name, c.want, got.Value())
+		}
+	}
+
+	// Motions land on the logical line's bounds, not the buffer's.
+	in := mk("first line\nsecond line", 14)
+	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	if in.cursor != 11 {
+		t.Errorf("ctrl+a should go to the start of the LINE, got %d", in.cursor)
+	}
+	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlE})
+	if in.cursor != len(in.buf) {
+		t.Errorf("ctrl+e should go to the end of the line, got %d", in.cursor)
+	}
+}
+
+// Regression: bindings are matched on Key.String(), and a bracketed paste
+// arrives as KeyRunes — so pasting the word "home" was read as the Home key.
+func TestMultilineInput_PastedKeyNameIsText(t *testing.T) {
+	in := newMultilineInput()
+	in.width = 80
+	in.SetValue("go ")
+	in.CursorEnd()
+
+	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("home")})
+	if in.Value() != "go home" {
+		t.Fatalf("a pasted key name must be typed as text, got %q", in.Value())
+	}
+}
+
+// ↑ moves within the composer and recalls history from the top row — the shell
+// behaviour, and what keeps ↑ meaning "what I sent before" in a one-line box.
+func TestMultilineInput_UpAtFirstRowRecallsHistory(t *testing.T) {
+	proc := &dunProc{stdin: discardWC{}}
+	m := newTUIModel(proc, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+
+	m = typeStr(m, "first message")
+	m = key(m, kEnter)
+
+	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.input.Value() != "first message" {
+		t.Fatalf("up from the first row should recall history, got %q", m.input.Value())
+	}
+
+	// With the cursor on a LOWER row, up moves the cursor and leaves the text.
+	m.input.SetValue("aaa\nbbb")
+	m.input.CursorEnd()
+	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.input.Value() != "aaa\nbbb" {
+		t.Fatalf("up inside the buffer must not recall history, got %q", m.input.Value())
+	}
+	if row, _ := m.input.cursorDisplayPos(); row != 0 {
+		t.Fatalf("up should have moved to the first row, got %d", row)
+	}
+}
+
 func TestMultilineInput_HistoryViaCtrl(t *testing.T) {
 	proc := &dunProc{stdin: discardWC{}}
 	m := newTUIModel(proc, "/ws")
@@ -1387,114 +1425,36 @@ func TestMultilineInput_HistoryViaCtrl(t *testing.T) {
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 
-	// Send a message to populate history.
 	m = typeStr(m, "first message")
 	m = key(m, kEnter)
-	if len(m.history) != 1 {
-		t.Fatalf("history should have 1 entry, got %d", len(m.history))
-	}
-
-	// Send another.
 	m = typeStr(m, "second message")
 	m = key(m, kEnter)
 	if len(m.history) != 2 {
 		t.Fatalf("history should have 2 entries, got %d", len(m.history))
 	}
 
-	// Ctrl+Up should recall the last history entry.
 	ctrlUp := tea.KeyMsg{Type: tea.KeyCtrlUp}
 	m = key(m, ctrlUp)
 	if m.input.Value() != "second message" {
-		t.Fatalf("Ctrl+Up should recall last history entry, got %q", m.input.Value())
+		t.Fatalf("ctrl+up should recall the last entry, got %q", m.input.Value())
 	}
-
-	// Another Ctrl+Up should go further back.
 	m = key(m, ctrlUp)
 	if m.input.Value() != "first message" {
-		t.Fatalf("Ctrl+Up should recall previous history entry, got %q", m.input.Value())
+		t.Fatalf("ctrl+up should step back, got %q", m.input.Value())
 	}
-
-	// Ctrl+Down should go forward.
 	ctrlDown := tea.KeyMsg{Type: tea.KeyCtrlDown}
 	m = key(m, ctrlDown)
 	if m.input.Value() != "second message" {
-		t.Fatalf("Ctrl+Down should recall next history entry, got %q", m.input.Value())
+		t.Fatalf("ctrl+down should step forward, got %q", m.input.Value())
 	}
-
-	// One more Ctrl+Down should clear (back to blank).
 	m = key(m, ctrlDown)
 	if m.input.Value() != "" {
-		t.Fatalf("Ctrl+Down past history should clear, got %q", m.input.Value())
+		t.Fatalf("ctrl+down past the end should clear, got %q", m.input.Value())
 	}
 }
 
-// TestMultilineInput_DownInsertsNewline verifies that pressing Down at the end
-// of a wrapped line inserts a newline, while plain Enter submits.
-func TestMultilineInput_DownInsertsNewline(t *testing.T) {
-	proc := &dunProc{stdin: discardWC{}}
-	m := newTUIModel(proc, "/ws")
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-
-	// Type first line.
-	m = typeStr(m, "line one")
-
-	// Plain Enter on single line → submits.
-	m = key(m, kEnter)
-	if !strings.Contains(m.convoText(), "line one") {
-		t.Fatal("single-line Enter should submit")
-	}
-
-	// input.width is set to msg.Width - 2 = 78.
-	// Type enough to fill one wrapped line (78 chars) plus more.
-	longLine := strings.Repeat("x", 78) + "more text"
-	m = typeStr(m, longLine)
-
-	// Cursor is at end. Move back to position 78 (end of first wrapped line).
-	m.input.cursor = 78
-
-	// Down at end of wrapped line → inserts newline.
-	m = key(m, tea.KeyMsg{Type: tea.KeyDown})
-	if !strings.Contains(m.input.Value(), "\n") {
-		t.Fatalf("Down at wrap point should insert newline, got %q", m.input.Value())
-	}
-
-	// Enter should still submit the multiline content.
-	m = key(m, kEnter)
-	if !strings.Contains(m.convoText(), "more text") {
-		t.Fatalf("Enter should submit multiline content, convo: %s", m.convoText())
-	}
-}
-
-// TestMultilineInput_RightAtWrapInsertsNewline verifies that pressing Right
-// at the end of a wrapped line also inserts a newline.
-func TestMultilineInput_RightAtWrapInsertsNewline(t *testing.T) {
-	in := newMultilineInput()
-	in.width = 10
-
-	// Type 20 chars so the first 10 fill one wrapped line.
-	for _, r := range "1234567890abcdefghij" {
-		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
-	// Move cursor to position 10 (end of first wrapped line).
-	in.cursor = 10
-
-	// Right at end of wrapped line with more buffer → inserts newline.
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRight})
-
-	val := in.Value()
-	if !strings.Contains(val, "\n") {
-		t.Fatalf("Right at wrap point should insert newline, got %q", val)
-	}
-	// Newline should be at position 10.
-	if val[10] != '\n' {
-		t.Fatalf("expected newline at position 10, got %q", val[10])
-	}
-}
-
-// TestMultilineInput_EmptyInput verifies placeholder rendering and that
-// submitting empty input is a no-op.
+// The placeholder shows whether or not the box has focus — a hint that
+// disappears the moment you focus the field is the wrong way round.
 func TestMultilineInput_EmptyInput(t *testing.T) {
 	proc := &dunProc{stdin: discardWC{}}
 	m := newTUIModel(proc, "/ws")
@@ -1502,35 +1462,28 @@ func TestMultilineInput_EmptyInput(t *testing.T) {
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 
-	// Record convo length before Enter.
 	before := len(m.convo)
-
-	// Empty Enter should do nothing.
 	m = key(m, kEnter)
 	if len(m.convo) > before {
-		t.Fatalf("empty Enter should not submit, got %d new convo entries", len(m.convo)-before)
+		t.Fatalf("empty enter should not submit, got %d new entries", len(m.convo)-before)
 	}
-
-	// Blur to see the placeholder.
+	if !strings.Contains(m.input.View(), "ask dun") {
+		t.Fatalf("a focused empty input should show the placeholder: %q", m.input.View())
+	}
 	m.input.Blur()
-	view := m.input.View()
-	if !strings.Contains(view, "ask dun") {
-		t.Fatalf("empty blurred input should show placeholder, got: %s", view)
+	if !strings.Contains(m.input.View(), "ask dun") {
+		t.Fatalf("a blurred empty input should show the placeholder: %q", m.input.View())
 	}
 }
 
-// TestMultilineInput_LeftAtFrontHopsToConvo verifies that left at the very
-// beginning of the input hops to convo focus (existing behavior preserved).
 func TestMultilineInput_LeftAtFrontHopsToConvo(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	m.convo = []convoEntry{{collapsed: "a message"}}
 
-	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
-	// Left at the front of an empty input hops to the conversation.
-	m = key(m, kLeft)
+	m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
 	if m.focus != focusConvo {
-		t.Fatal("left at input front should focus the conversation")
+		t.Fatal("left at the input front should focus the conversation")
 	}
 }
