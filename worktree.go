@@ -29,6 +29,16 @@ type Worktree struct {
 	Mounts []MountSpec
 }
 
+// RepoRoot is the top of the git repo containing dir, or "" when there is none.
+// Housekeeping needs it before any Worktree exists.
+func RepoRoot(dir string) string {
+	out, err := git("", "-C", dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // WorktreeInPlace creates a pass-through Worktree pointing at repoDir itself.
 // It detects the git repo root and current branch without creating an actual
 // git worktree. Used when --ship is passed without --worktree: the agent works

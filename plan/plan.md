@@ -388,6 +388,36 @@ isolation forces the split there).
   watching (icebox: configurable timeout, condition now reached).
 
 ## Decisions
+- **A worktree may be deleted when it holds no WORK, which is not the same as a
+  clean tree.** Measured on dun's own repo: 37 registered, 36 on disk, 1.1 GB,
+  one registration already pointing at a deleted directory. By `git status` 34
+  of 37 looked dirty — almost all from one untracked index artifact — so a
+  status-based prune would have reclaimed three. The criterion is commits the
+  repo's HEAD cannot reach, plus edits to TRACKED files, ignoring artifact paths
+  (`.dun/`, `.poly-lsp-mcp/`). Work that already merged is not work. Untracked
+  files are not work: an agent that never added a file left nothing anyone can
+  name. Anything holding work is REPORTED and never removed — a branch with
+  unpushed commits may exist nowhere else.
+- **Liveness must not disturb what it measures.** The prune skips trees touched
+  within an hour, because a machine runs several dun sessions at once and a
+  concurrent session's empty-so-far tree is exactly what would be deleted from
+  under it. Two traps, both hit: a directory's mtime does NOT change when a file
+  three levels down is edited, so liveness reads the newer of the directory and
+  git's INDEX; and a plain `git status` REFRESHES the index, which is a write —
+  the first scan stamped all 30 trees as "touched now" and the pruner would have
+  believed every tree was live forever. `--no-optional-locks` exists for tools
+  that poll. Verified by scanning twice and asserting no age got younger.
+- **Metadata is written when the fact is known, not when the process ends.**
+  `SaveSessionMeta` was a `defer` in main, so it only ran on a clean exit — the
+  one path that does not happen when the TUI kills its engine or a human hits
+  ctrl+C. Result: 57 sessions on this machine, 0 metadata files, so `--resume`
+  could never reuse a worktree and nothing could say which tree belonged to
+  what. The path and branch are known the moment the worktree exists.
+- **Automatic cleanup may only ever delete what is worthless; a human deletes
+  the rest.** The startup prune removes trees holding nothing and reports the
+  ones holding work. `/close` is the explicit destructive counterpart — worktree,
+  branch and transcript, so `/resume` cannot offer it back. The asymmetry is the
+  point: no pass that runs without being asked may decide work is worthless.
 - **Work that is not committed does not exist.** `git stash` does not take
   untracked files and `git clean` removes them; a repo with other agents working
   in it is a repo where either can happen at any moment. 3000 lines went that

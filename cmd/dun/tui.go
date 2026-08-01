@@ -1220,6 +1220,12 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
 			m.append(stNote.Render(msg))
 		}
+		// /close is terminal: the session it was editing no longer exists, so
+		// staying attached to it would be showing a conversation that cannot be
+		// resumed. Quit only once the engine has confirmed the work is done.
+		if str(ev["id"]) == "close" {
+			m.quitting = true
+		}
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
 		if m.busyStart.IsZero() {
@@ -2015,6 +2021,14 @@ func init() {
 			return nil
 		}},
 		{"resume", "[id]", "switch to another saved session (bare opens the picker)", resumeSlash},
+		{"close", "", "discard this session for good: remove its worktree and branch, forget its transcript", func(m *tuiModel, _ []string) tea.Cmd {
+			if !m.proc.controlCmd("close", "") {
+				m.append(stErr.Render("no engine right now — nothing closed"))
+				return nil
+			}
+			m.append(stDim.Render("closing…"))
+			return nil
+		}},
 		{"reconnect", "", "restart the engine (after it gave up), keeping this session", func(m *tuiModel, _ []string) tea.Cmd {
 			m.restarts, m.restartStart = 0, time.Now()
 			m.fatalErr = ""

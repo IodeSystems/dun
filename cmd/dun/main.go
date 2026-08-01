@@ -255,10 +255,15 @@ func main() {
 			fatal(werr)
 		}
 		wt, effWS = w, w.Path
-		// Save worktree metadata on exit so --continue / --resume can reuse it.
+		// Written NOW, not on the way out. This used to be a deferred call in
+		// main, so it only ran on a clean exit — which is the one path that does
+		// not happen when the TUI kills its engine or you ctrl+C. Measured: 57
+		// sessions on this machine, 0 metadata files, so --resume could never
+		// reuse a worktree and nothing could tell which tree belonged to what.
+		// There is nothing to learn by waiting: the path and branch are known
+		// the moment the worktree exists.
 		if sessionID != "" {
-			meta := dun.SessionMeta{WorktreePath: wt.Path, Branch: wt.Branch}
-			defer func() { _ = dun.SaveSessionMeta(absWS, sessionID, meta) }()
+			_ = dun.SaveSessionMeta(absWS, sessionID, dun.SessionMeta{WorktreePath: wt.Path, Branch: wt.Branch})
 		}
 		if !isRepo && !*prog {
 			fmt.Fprintf(os.Stderr, "dun: %s is not a git repo — working in place (no isolation)\n", absWS)
@@ -268,6 +273,22 @@ func main() {
 		// the ship tool is available. The agent works in the checked-out
 		// directory; ship's pipeline (rebase + checks) still runs.
 		wt, _ = dun.WorktreeInPlace(absWS)
+	}
+
+	// Housekeeping, once the live worktree is known so it is never a candidate:
+	// remove session trees that hold nothing, drop registrations whose directory
+	// is gone, and bound the session history. Anything holding work is reported,
+	// never removed — a branch with unpushed commits may exist nowhere else.
+	if repoRoot := dun.RepoRoot(absWS); repoRoot != "" {
+		live := ""
+		if wt != nil {
+			live = wt.Path
+		}
+		res := dun.PruneWorktrees(repoRoot, live)
+		gone := dun.PruneSessions(absWS, repoRoot, sessionID)
+		if !*prog {
+			reportHousekeeping(res, gone)
+		}
 	}
 
 	// Isolation tier 2: exec runs in a Docker container (--docker IMAGE), or host.
@@ -419,7 +440,7 @@ func main() {
 	}
 
 	if *prog {
-		runProgrammatic(ctx, h, em, in, firstTask)
+		runProgrammatic(ctx, h, em, in, firstTask, closeCtx{workspace: absWS, sessionID: sessionID, wt: wt})
 		return
 	}
 	runHuman(ctx, h, firstTask, absWS)
@@ -495,7 +516,16 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 //     those jobs still in flight and their notifications never delivered.
 //   - An explicit stop/quit event: the caller asked to be let go NOW. Return
 //     without waiting on anything.
-func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string) {
+//
+// closeCtx is what /close needs and the harness cannot supply: which workspace
+// and which session this engine is serving, plus the worktree it made.
+type closeCtx struct {
+	workspace string
+	sessionID string
+	wt        *dun.Worktree
+}
+
+func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string, cc closeCtx) {
 	em.emit(event{"type": "ready", "tools": h.ToolNames(), "servers": serversToAny(h.Servers()),
 		"hint": serverHint(h.Servers())})
 	// Server commands (/rag, /lsp) are handled on the READER's goroutine, not
@@ -508,6 +538,14 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
 	})
 	in.setCtrlCmd(func(id, action string) {
+		// /close is handled here rather than in runControlCmd because it is
+		// about the SESSION, not the harness: it needs the workspace root and
+		// the session id, which only this scope has.
+		if id == "close" {
+			em.emit(event{"type": "control", "id": id, "action": action,
+				"message": closeSession(cc.workspace, cc.sessionID, cc.wt)})
+			return
+		}
 		msg := runControlCmd(ctx, h, id, action)
 		em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
 	})
@@ -1067,6 +1105,61 @@ func docsToAny(docs []dun.DocHitInfo) []any {
 		out = append(out, map[string]any{"title": d.Title, "id": d.DocID, "line": d.Line, "score": d.Score})
 	}
 	return out
+}
+
+// closeSession discards this session for good: its worktree, its branch, and
+// its transcript, so /resume cannot offer it back.
+//
+// Deliberately destructive and deliberately explicit — it is the counterpart to
+// the startup prune, which refuses to delete anything holding work. This is how
+// a human says "that work is finished with", which is the only way that call
+// can safely be made.
+func closeSession(workspace, sessionID string, wt *dun.Worktree) string {
+	var parts []string
+	if wt != nil && wt.Branch != "" {
+		root := dun.RepoRoot(workspace)
+		if err := dun.RemoveWorktree(root, wt.Path, wt.Branch); err != nil {
+			parts = append(parts, "worktree NOT removed: "+err.Error())
+		} else {
+			parts = append(parts, "removed worktree "+wt.Branch)
+		}
+	}
+	if sessionID != "" {
+		dun.ForgetSession(workspace, sessionID)
+		parts = append(parts, "forgot session "+sessionID)
+	}
+	if len(parts) == 0 {
+		return "nothing to close — this session has no worktree and no transcript"
+	}
+	return "closed: " + strings.Join(parts, "; ")
+}
+
+// reportHousekeeping says what was cleaned and, more importantly, what was not.
+// An abandoned worktree is the one thing here a human has to decide about.
+func reportHousekeeping(res dun.PruneResult, sessions []string) {
+	if n := len(res.Pruned); n > 0 {
+		fmt.Fprintf(os.Stderr, "dun: pruned %s (%s)\n", plural(n, "stale worktree"), humanBytes(res.Freed))
+	}
+	if n := len(sessions); n > 0 {
+		fmt.Fprintf(os.Stderr, "dun: pruned %s\n", plural(n, "old session"))
+	}
+	if n := len(res.Abandoned); n > 0 {
+		fmt.Fprintf(os.Stderr, "dun: %s still hold work —\n", plural(n, "abandoned worktree"))
+		for _, w := range res.Abandoned {
+			fmt.Fprintf(os.Stderr, "  %s\n", w.Summary())
+		}
+		fmt.Fprintf(os.Stderr, "  (resume one with --resume, or discard it from the TUI with /close)\n")
+	}
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%d MB", n/(1<<20))
+	}
+	return fmt.Sprintf("%d KB", n/(1<<10))
 }
 
 func clip(s string, n int) string {
