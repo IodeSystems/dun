@@ -101,24 +101,34 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
-### ❗ 0. Slice D's code was DELETED on 2026-08-01 — read this first
-Everything below that describes sub-agents or background-job plumbing describes
-code that is **no longer in the tree**. A cherry-pick run from outside the
+### ✅ 0. Slice D and the activity zone — REBUILT (2026-08-01)
+The deletion below happened; the recovery is done. The tracked half came back
+from `stash@{1}` and applied cleanly except `harness.go` and
+`servers_runtime_test.go` (both 3-way merged). `subagent.go`, `bgjob.go` and
+`cmd/dun/activity.go` were rewritten from the D and G sections of this file,
+which is the argument for keeping decisions here rather than only in code.
+- **What is NOT back:** `plan/subagents.md`. The D section below is now the
+  whole spec, and the live-run notes in it describe what a rebuild must
+  reproduce, not what has been re-verified since.
+- **Not yet re-verified live against bonsai.** Everything is unit-tested and
+  `-race` clean; nothing has spawned a real child since the rebuild.
+
+### ❗ 0b. What was lost on 2026-08-01, and why
+Kept because the LESSON is the point, not the loss. A cherry-pick run from outside the
 session stashed the tracked files and cleaned the untracked ones; `git stash`
 does not take untracked files, so these were never captured by anything:
 `subagent.go` (1108) · `subagent_test.go` (702) · `bgjob.go` (415) ·
 `bgjob_test.go` (283) · `plan/subagents.md` (543, the spec) ·
 `cmd/dun/activity.go`. Not on any of the 47 branches, not in the dangling
-objects, not in `.dun/worktrees`. **Unrecoverable.**
+objects, not in `.dun/worktrees`. **Unrecoverable** — rewritten, not restored.
 - What survived: these plan docs (restored from `stash@{1}`), so the DECISIONS
   live even though the code does not. `plan/subagents.md` did not — the D
   section here is now the whole spec.
-- The tracked half of that work (`harness.go`'s hooks, `exec.go`'s
-  `ExecResult`, `ship.go`, the tool renderers) is still in `stash@{1}` and
-  still references the deleted types, so applying it does not compile.
-- **next (USER decision):** rebuild slice D from the D section below, or drop
-  it. Nothing else in this plan should be trusted about sub-agents until that
-  is answered.
+- The tracked half (`harness.go`'s hooks, `exec.go`'s `ExecResult`, `ship.go`,
+  the tool renderers) was in `stash@{1}` and could not compile on its own,
+  since it referenced the deleted types — which is why the recovery had to be
+  "apply the tracked half, then rewrite the rest", in that order.
+- **resolved (USER, 2026-08-01):** rebuilt. See 0 above.
 - **the lesson, which is the reusable part:** work that is not committed does
   not exist. Untracked files survive neither `git stash` nor `git clean`, and a
   repo with other agents working in it is a repo where either can happen at any
@@ -164,7 +174,7 @@ buffer offsets, which is what makes the display↔offset mapping exact:
   line wraps a few columns early. Pre-existing; not worth fixing until someone
   types one.
 
-### ◻ G. The activity zone — one navigable tree over agents + jobs
+### ✅ G. The activity zone — one navigable tree over agents + jobs (2026-08-01)
 The agents pane made a resident child visible (D); it did not make it
 REACHABLE. It has no selection, background jobs have no TUI presence at all
 (`bgJobList` exists, nothing emits it), and a child's conversation is
@@ -200,16 +210,24 @@ tokens and cannot see what it is doing.
   while the child runs. Pushing would mean un-nil'ing every child callback and
   tagging N streams nobody is looking at; pull also works unchanged for stopped
   and dismissed children, which push cannot do at all.
-- **built once, then deleted with slice D (see ❗0):** step 1 was done —
+- **BUILT.** Steps 1–5 all landed: the `jobs` event, the task + activity header
+  lines, the three-zone tab cycle with the `▸`/→/← rule, job detail through the
+  existing inspector, and agent scope with a `↰ parent` row and a live input
+  that routes to `agent_monitor(tell:)`. 8 TUI tests cover the zone.
+- **history — built once, then deleted with slice D (see ❗0b):** step 1 was
   `JobInfo`/`jobState`/`Jobs()`/`jobsChanged()` in `bgjob.go`, `Config.OnJobs`,
   a `jobs` event mirroring `agents`, pushed on start and on finish and NOT in
   between (a push per output chunk repaints on every line of a build log), with
   times crossing as unix seconds so the UI ticks a running job's clock itself.
   Two tests, green under `-race`. `cmd/dun/activity.go` had the zone rendering.
   All of it went with the untracked files.
-- **next:** rebuild step 1 (the `jobs` event) — it is small, it is fully
-  specified by the bullet above, and nothing in the UI can name a job until it
-  exists. But it depends on `bgjob.go`, which is part of the ❗0 decision.
+- **next:** live-verify against bonsai — spawn a child, descend into its scope,
+  steer it from the input, and watch a background job's row move. Everything so
+  far is unit-tested only.
+- **risk that survived the build:** a child's own background jobs are NOT
+  listed in agent scope. Its callbacks are nil by design, so the strip there
+  shows only the way back. Honest, but it means "what is this child running"
+  has no answer in the UI.
 - **assumed, not decided:** the expanded row list is capped at 6 rows and
   scrolls within itself, so an uncapped child count cannot swallow the
   conversation viewport.
@@ -285,10 +303,10 @@ so it predates this work and is not fallout from it.
 - **risks:** none to the fix; the cost is that nobody has been running `-race` in
   CI, so there may be more than one.
 
-### ⏸ D. Slice 5 — sub-agents — **was built through step 5; the CODE IS GONE (❗0)**
-`plan/subagents.md` went with it, so this section is now the entire spec — the
-decisions below are what a rebuild would work from, and the "verified live"
-notes are what it must reproduce, not what it currently does.
+### ◐ D. Slice 5 — sub-agents — **rebuilt 2026-08-01; see ❗0**
+`plan/subagents.md` did not survive, so this section is the entire spec. The
+"verified live" notes below describe the pre-deletion runs — they are what the
+rebuild must reproduce, not evidence about the code as it stands.
 A sub-agent is a second `Harness` (Store and Shaper hang off Session, so context
 isolation forces the split there).
 - **Purpose (USER):** context offloading first, parallelism second. A child does
@@ -370,6 +388,56 @@ isolation forces the split there).
   watching (icebox: configurable timeout, condition now reached).
 
 ## Decisions
+- **Work that is not committed does not exist.** `git stash` does not take
+  untracked files and `git clean` removes them; a repo with other agents working
+  in it is a repo where either can happen at any moment. 3000 lines went that
+  way in one command. Scaffolding commits are cheap — commit a new file the
+  moment it compiles, before it is finished.
+- **The plan is the backup of last resort, so decisions belong in it.**
+  `subagent.go` was rewritten from the D section of this file. What could not be
+  rewritten was `plan/subagents.md` itself, and the difference between "we still
+  have this feature" and "we do not" was whether the reasoning lived somewhere
+  other than the code.
+- **Nothing dun spawns may wait for a human, and a terminal is not the only way
+  it can.** `detach` severed the tty and set `GIT_TERMINAL_PROMPT=0`, which
+  stops the credential prompt — and missed the EDITOR. `git rebase --continue`
+  runs `git commit … -e`, that `-e` launches `$EDITOR`, and vim held a rebase
+  for ten minutes until Go's test timeout killed the tree, after which the agent
+  read "FAIL … 600.024s" and hung the same way on its next command. Setsid does
+  NOT save you: an editor with nowhere to draw does not necessarily exit, it
+  blocks somewhere else. `GIT_EDITOR=true` + `GIT_SEQUENCE_EDITOR=true`. Worst
+  of all, it is environment-dependent in the invisible direction — with EDITOR
+  unset git refuses with a readable error, so it never reproduces in CI.
+- **exec runs a NON-LOGIN, non-interactive shell.** It was `sh -lc`, which
+  sources the operator's profile — which is how `EDITOR=vim` reached the agent
+  in the first place. The agent is not that human's interactive session and must
+  not inherit their aliases, PATH edits or editor: none of it is reproducible on
+  another machine and all of it can block. Cost accepted: a tool installed only
+  via a profile is not found, which fails loudly instead of differing per user.
+- **Anything unbounded must say it is still there, and be debounced by whatever
+  it already says.** A background job (exempt from the deadline) and a sub-agent
+  (resident until dismissed) are both unkillable-by-policy, so the foreground
+  deadline's answer does not apply; they announce themselves instead. Heartbeats
+  at 1m/5m/10m/30m/1h then hourly — highest value early, since most wedges are
+  immediate; lowest cost late. Every notification the thing sends resets the
+  clock, hooked at the ONE place notifications leave (`bgJob.notify`,
+  `subAgent.notify`) so a new kind of report cannot forget to count as a sign of
+  life. The reminder itself must NOT go through there, or it resets the silence
+  it is reporting on. It carries no output: state and duration only.
+- **`▸` means descendable, everywhere.** → opens and descends, ← ascends — the
+  same gesture on the activity strip, on one of its rows, on a job's log, and on
+  the docs blocks in the conversation that already worked this way. This
+  replaced horizontal handlers where → descended into docs on one block and
+  hopped panes on another. One affordance, learned once.
+- **A selection is stored by IDENTITY, not by index.** Activity rows are rebuilt
+  on every event and a new agent shifts every job row down, so an index would
+  walk to a different row while the human was reading it. The same reason row
+  order is stable rather than sorted by interest.
+- **A child's conversation is PULLED, never pushed.** Child callbacks are nil by
+  design (context isolation); un-nil'ing them to feed a UI would tag and forward
+  N streams nobody is looking at. Pull also works unchanged for a STOPPED child,
+  whose process is gone but whose transcript is not — which push cannot do at
+  all. A reply for a scope already left is dropped.
 - **A command's outcome is its EXIT CODE; the text is for the model.** Pass/fail
   was `strings.Contains(out, "[exit:")`, which a check that merely PRINTS that
   marker turns into a false failure and which reads as a silent PASS wherever the
