@@ -82,6 +82,70 @@ type subAgent struct {
 	question string
 	done     chan struct{} // closed when the current run settles
 	restore  string        // transcript path, for a stopped child
+	// hb is the "still there" reminder (heartbeat.go), debounced by anything
+	// this child says — which is why every notification goes through s.notify.
+	hb *heartbeat
+}
+
+// notify is every word this child says to its parent, and the ONE place the
+// reminder's debounce is reset. Hooked here rather than at each call site so a
+// new kind of report cannot forget to count as a sign of life. The reminder
+// itself deliberately does not go through here.
+func (s *subAgent) notify(text string) {
+	if s.hb != nil {
+		s.hb.spoke()
+	}
+	s.parent.notifyAndWake(text)
+}
+
+// heartbeat reminds the parent that a child is still there.
+//
+// Not only a RUNNING one. An idle child is resident until dismissed and there
+// is no cap on how many, so a forgotten one costs its harness forever — and
+// "idle for 40 minutes" is precisely the shape of a leak. A child blocked on
+// ask_parent is the loudest case: it will never resolve itself, and the parent
+// is the only thing that can.
+func (s *subAgent) heartbeat() {
+	if s.hb == nil {
+		return
+	}
+	s.hb.run(
+		func() bool {
+			state, _, _, _ := s.snapshot()
+			return state == agentDismissed
+		},
+		func(quiet time.Duration) {
+			state, status, _, _ := s.snapshot()
+			what := "is still running"
+			switch {
+			case s.blockedOn() != "":
+				what = "is WAITING FOR YOU to answer it"
+			case state == agentIdle:
+				what = "has been idle"
+			case state == agentStopped:
+				return // a stopped child is not doing anything and said so once
+			}
+			line := fmt.Sprintf("agent #%d %s, quiet for %s — task: %s",
+				s.num, what, roundDur(quiet), oneLine(s.prompt, 120))
+			if status != "" {
+				line += "\nlast status: " + status
+			}
+			switch {
+			case s.blockedOn() != "":
+				line += fmt.Sprintf("\nIt asked: %s\nAnswer with agent_monitor(agent:%d, tell:\"…\").",
+					s.blockedOn(), s.num)
+			case state == agentIdle:
+				line += fmt.Sprintf("\nIt is holding its context open. Give it work with "+
+					"agent_monitor(agent:%d, tell:\"…\") or dismiss it with quit:true.", s.num)
+			default:
+				line += fmt.Sprintf("\nNothing is necessarily wrong; this is so a wedged agent does not "+
+					"look like a working one. agent_monitor(agent:%d, tail:40) to see what it is doing.", s.num)
+			}
+			// notifyAndWake, NOT s.notify: the reminder must not reset the
+			// silence it is reporting on.
+			s.parent.notifyAndWake(line)
+		},
+	)
 }
 
 func (s *subAgent) setCancel(c context.CancelFunc) {
@@ -147,6 +211,12 @@ func (s *subAgent) setStatus(status string) {
 	s.mu.Lock()
 	s.status = status
 	s.mu.Unlock()
+	// A status never notifies, but it is still the child speaking — so it
+	// debounces the reminder. A child narrating its progress is exactly the
+	// case that should never be asked whether it is alive.
+	if s.hb != nil {
+		s.hb.spoke()
+	}
 	s.parent.agentsChanged()
 }
 
@@ -332,7 +402,7 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model string) (*subAge
 		model = h.cfg.ChildModel
 	}
 	client, name := h.clientFor(model)
-	sa := &subAgent{num: num, prompt: prompt, model: name, parent: h}
+	sa := &subAgent{num: num, prompt: prompt, model: name, parent: h, hb: newHeartbeat()}
 
 	// Start on a background context: a child outlives the TURN that spawned it
 	// (that is the whole point of an async spawn), so tying it to the caller's
@@ -359,6 +429,7 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model string) (*subAge
 	h.agentsChanged()
 
 	go sa.run(runCtx, prompt)
+	go sa.heartbeat()
 	return sa, nil
 }
 
@@ -398,7 +469,7 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 	s.mu.Unlock()
 
 	s.settle(agentIdle)
-	s.parent.notifyAndWake(s.report())
+	s.notify(s.report())
 }
 
 func (s *subAgent) finalIsEmpty() bool {
@@ -426,7 +497,7 @@ func (s *subAgent) ask(ctx context.Context, question string) (string, bool) {
 	// Blocked is the one state that never resolves itself, so it is pushed to
 	// the human immediately rather than waiting for the next poll.
 	s.parent.agentsChanged()
-	s.parent.notifyAndWake(fmt.Sprintf("agent #%d is BLOCKED waiting on you: %s\n"+
+	s.notify(fmt.Sprintf("agent #%d is BLOCKED waiting on you: %s\n"+
 		"Answer with agent_monitor(agent:%d, tell:\"…\").", s.num, question, s.num))
 
 	select {
@@ -482,7 +553,7 @@ func (s *subAgent) tell(msg string) string {
 			s.setFinal(oneLine(reply, 2000))
 		}
 		s.settle(agentIdle)
-		s.parent.notifyAndWake(s.report())
+		s.notify(s.report())
 	}()
 	return fmt.Sprintf("Told agent #%d. It is working; you will hear when it is done "+
 		"(or agent_monitor(agent:%d, wait:true)).", s.num, s.num)
@@ -950,7 +1021,7 @@ func tellParent(h *Harness, status, message, final string) string {
 	}
 	if message != "" {
 		// An event, not state: delivered now, and it accumulates.
-		h.parent.notifyAndWake(fmt.Sprintf("agent #%d: %s", self.num, message))
+		self.notify(fmt.Sprintf("agent #%d: %s", self.num, message))
 		did = append(did, "message delivered")
 	}
 	if final != "" {

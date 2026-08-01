@@ -35,28 +35,6 @@ import (
 // carry inline. Enough to see the failure; the file has the rest.
 const bgTailBytes = 4000
 
-// bgHeartbeats is when a still-running job says so, unprompted.
-//
-// A background job is exempt from the foreground deadline — that is the whole
-// point of it — which means nothing bounds it and nothing announces it. A job
-// wedged in second two and a job doing ten minutes of honest work produce
-// exactly the same output: none. That is the same failure the foreground
-// deadline exists to prevent, and it needed the opposite fix, because the
-// answer here cannot be "kill it".
-//
-// The schedule backs off (1m, 5m, 10m, 30m, 1h, then hourly) because the value
-// of the reminder is highest early — most wedges are immediate — and its cost
-// is highest late, where an hourly line is a rounding error against a job that
-// has been running all afternoon. It is a HEARTBEAT, not progress: one line, no
-// output, so it cannot spend the context window narrating a build. Reporting
-// the job's output remains opt-in through exec_monitor.
-var bgHeartbeats = []time.Duration{
-	time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour,
-}
-
-// bgHeartbeatEvery is the interval once the schedule above is exhausted.
-const bgHeartbeatEvery = time.Hour
-
 // bgMonitor is what a job is allowed to say while it runs. The zero value is
 // the old behaviour — silent until it exits — which stays the DEFAULT: a job
 // nobody asked about should not spend context.
@@ -81,11 +59,9 @@ type bgJob struct {
 	started time.Time
 	h       *Harness
 
-	// beats/every are this job's heartbeat schedule, copied from the package
-	// defaults when it starts. Per-job rather than global so a test can shorten
-	// them without writing to a variable a running goroutine is reading.
-	beats []time.Duration
-	every time.Duration
+	// hb is the "still running" reminder (heartbeat.go). Debounced by anything
+	// this job says, which is why every notification goes through j.notify.
+	hb *heartbeat
 
 	mu      sync.Mutex
 	mon     bgMonitor
@@ -123,9 +99,21 @@ func (j *bgJob) Write(p []byte) (int, error) {
 	// out to a UI callback, and nothing good comes of holding a job's lock
 	// across either.
 	if note != "" {
-		j.h.notifyAndWake(note)
+		j.notify(note)
 	}
 	return len(p), nil
+}
+
+// notify is every word this job says to the model, and the ONE place the
+// heartbeat's debounce is reset. Hooking it here rather than at each event
+// means a new kind of report cannot forget to count as a sign of life — and the
+// reminder itself deliberately does NOT go through here, or it would reset the
+// silence it is reporting on.
+func (j *bgJob) notify(text string) {
+	if j.hb != nil {
+		j.hb.spoke()
+	}
+	j.h.notifyAndWake(text)
 }
 
 // filter keeps the lines a monitor asked for. No pattern = everything.
@@ -267,8 +255,7 @@ func (h *Harness) startBackground(backend ExecBackend, command string) *bgJob {
 	if h.bgJobs == nil {
 		h.bgJobs = map[int]*bgJob{}
 	}
-	j := &bgJob{id: id, command: command, started: time.Now(), h: h,
-		beats: bgHeartbeats, every: bgHeartbeatEvery}
+	j := &bgJob{id: id, command: command, started: time.Now(), h: h, hb: newHeartbeat()}
 	h.bgJobs[id] = j
 	h.bgMu.Unlock()
 
@@ -297,7 +284,7 @@ func (h *Harness) startBackground(backend ExecBackend, command string) *bgJob {
 		// exists to stop.
 		h.jobsChanged()
 		if note != "" {
-			h.notifyAndWake(note)
+			j.notify(note)
 		}
 	}()
 	return j
@@ -311,37 +298,38 @@ func (h *Harness) startBackground(backend ExecBackend, command string) *bgJob {
 // noise it asked not to hear. The human still sees the row in the pane, which
 // is where a muted job is supposed to remain visible.
 func (j *bgJob) heartbeat() {
-	start := j.started
-	sched, every := j.beats, j.every
-	if len(sched) == 0 {
-		sched, every = bgHeartbeats, bgHeartbeatEvery
+	if j.hb == nil {
+		return
 	}
-	for i := 0; ; i++ {
-		var next time.Duration
-		if i < len(sched) {
-			next = sched[i]
-		} else {
-			next = sched[len(sched)-1] + time.Duration(i-len(sched)+1)*every
-		}
-		wait := time.Until(start.Add(next))
-		if wait > 0 {
-			time.Sleep(wait)
-		}
-		j.mu.Lock()
-		done, muted, written := j.done, j.mon.Ignore, j.written
-		j.mu.Unlock()
-		if done {
-			return
-		}
-		if muted {
-			continue
-		}
-		j.h.notifyAndWake(fmt.Sprintf(
-			"background job #%d is STILL RUNNING after %s — `%s` (%d bytes of output so far).\n%s\n"+
-				"Nothing is wrong yet; this is only so a wedged job does not look like a working one. "+
-				"exec_monitor(job:%d) for what it has produced.",
-			j.id, roundDur(next), j.command, written, j.logLine(), j.id))
-	}
+	j.hb.run(
+		func() bool {
+			j.mu.Lock()
+			defer j.mu.Unlock()
+			return j.done
+		},
+		func(quiet time.Duration) {
+			j.mu.Lock()
+			muted, written := j.mon.Ignore, j.written
+			j.mu.Unlock()
+			// A muted job stays silent here too: `ignore` means the model stopped
+			// caring about this job's outcome, and a reminder is exactly that
+			// noise. The human still sees the row in the pane.
+			if muted {
+				return
+			}
+			out := "no new output"
+			if written > 0 {
+				out = fmt.Sprintf("%d bytes of output, none new", written)
+			}
+			// notifyAndWake, NOT j.notify: the reminder must not reset the
+			// silence it is reporting on.
+			j.h.notifyAndWake(fmt.Sprintf(
+				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n"+
+					"Nothing is necessarily wrong; this is so a wedged job does not look like a working one. "+
+					"exec_monitor(job:%d) to see what it has produced.",
+				j.id, roundDur(quiet), j.command, out, j.logLine(), j.id))
+		},
+	)
 }
 
 // JobInfo is one background job as the UI sees it. The counterpart of

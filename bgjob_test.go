@@ -161,8 +161,7 @@ func TestStartBackground_LogsAndReportsTheExitCode(t *testing.T) {
 // output as one doing honest work — none. The heartbeat is what separates them.
 func TestBgJob_HeartbeatSaysStillRunning(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 7, command: "sleep 300", started: time.Now(), h: h,
-		beats: []time.Duration{10 * time.Millisecond}, every: 20 * time.Millisecond}
+	j := &bgJob{id: 7, command: "sleep 300", started: time.Now(), h: h, hb: fastHeartbeat()}
 	go j.heartbeat()
 
 	waitFor(t, 3*time.Second, func() bool { return len(h.notes()) > 0 })
@@ -193,13 +192,24 @@ func TestBgJob_HeartbeatSaysStillRunning(t *testing.T) {
 func TestBgJob_HeartbeatRespectsMute(t *testing.T) {
 	h := testHarness(t)
 	j := &bgJob{id: 8, command: "sleep 300", started: time.Now(), h: h, mon: bgMonitor{Ignore: true},
-		beats: []time.Duration{10 * time.Millisecond}, every: 10 * time.Millisecond}
+		hb: fastHeartbeat()}
 	go j.heartbeat()
 	defer j.finished(ExecResult{})
 
 	time.Sleep(120 * time.Millisecond)
 	if n := h.notes(); len(n) != 0 {
 		t.Errorf("a muted job must not send heartbeats: %q", n)
+	}
+}
+
+// fastHeartbeat is the real schedule compressed, so a reminder test runs in
+// milliseconds. Per-instance, never a global: writing the package schedule
+// while a loop reads it is a data race, which is how the first version failed.
+func fastHeartbeat() *heartbeat {
+	return &heartbeat{
+		sched: []time.Duration{10 * time.Millisecond},
+		every: 20 * time.Millisecond,
+		last:  time.Now(),
 	}
 }
 
@@ -326,4 +336,38 @@ func TestExecMonitor_ListsJobsAndAppliesSettings(t *testing.T) {
 	if out := execMonitor(h, &id, nil, &bad, nil); !strings.Contains(out, "not a valid regexp") {
 		t.Errorf("a bad pattern must be reported, not swallowed: %q", out)
 	}
+}
+
+// The reminder is DEBOUNCED by anything the job itself says. A job reporting
+// progress is already evidence of life, so a chatty job should never trigger a
+// reminder at all — and the reminder must not reset the silence it is reporting
+// on, or it would only ever fire once.
+func TestBgJob_HeartbeatIsDebouncedByTheJobsOwnOutput(t *testing.T) {
+	h := testHarness(t)
+	j := &bgJob{id: 10, command: "chatty", started: time.Now(), h: h,
+		mon: bgMonitor{BufferBytes: 1}, hb: fastHeartbeat()}
+	go j.heartbeat()
+	defer j.finished(ExecResult{})
+
+	// Keep talking for well past several reminder intervals.
+	deadline := time.Now().Add(120 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		j.Write([]byte("still going\n"))
+		time.Sleep(5 * time.Millisecond)
+	}
+	for _, n := range h.notes() {
+		if strings.Contains(n, "STILL RUNNING") {
+			t.Fatalf("a job that keeps reporting must not also be reminded about: %q", n)
+		}
+	}
+
+	// Stop talking, and the reminder comes back.
+	waitFor(t, 3*time.Second, func() bool {
+		for _, n := range h.notes() {
+			if strings.Contains(n, "STILL RUNNING") {
+				return true
+			}
+		}
+		return false
+	})
 }
