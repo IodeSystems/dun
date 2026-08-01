@@ -1487,3 +1487,210 @@ func TestMultilineInput_LeftAtFrontHopsToConvo(t *testing.T) {
 		t.Fatal("left at the input front should focus the conversation")
 	}
 }
+
+// ── activity zone ──
+
+func withActivity(t *testing.T) tuiModel {
+	t.Helper()
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.handleEvent(evMsg{"type": "agents", "agents": []any{
+		map[string]any{"id": 1.0, "state": "running", "prompt": "read the build log", "tokens": 6500.0, "seconds": 122.0},
+		map[string]any{"id": 2.0, "state": "idle", "prompt": "count matches", "tokens": 900.0, "seconds": 41.0},
+	}})
+	m = m.handleEvent(evMsg{"type": "jobs", "jobs": []any{
+		map[string]any{"id": 3.0, "command": "go test -race ./...", "state": "running",
+			"started": float64(time.Now().Add(-time.Minute).Unix()), "log": "/tmp/job-3.log"},
+	}})
+	return m
+}
+
+// A session that never delegates and never backgrounds a command must lose no
+// space to the zone, and tab must keep behaving exactly as it always did.
+func TestActivity_EmptyZoneIsSkippedEntirely(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+
+	if v := m.activityView(); v != "" {
+		t.Fatalf("an empty zone must render nothing, got %q", v)
+	}
+	m = key(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.focus != focusConvo {
+		t.Fatalf("tab should reach the conversation, got focus %d", m.focus)
+	}
+	m = key(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.focus != focusInput {
+		t.Fatalf("tab should return to the input, skipping an empty zone, got %d", m.focus)
+	}
+}
+
+// Collapsed it costs ONE line no matter how many children exist — that is what
+// makes it affordable to always show.
+func TestActivity_CollapsedIsOneLineWithTheAffordance(t *testing.T) {
+	m := withActivity(t)
+	v := m.activityView()
+	if n := len(strings.Split(v, "\n")); n != 1 {
+		t.Fatalf("collapsed must be one line, got %d:\n%s", n, v)
+	}
+	if !strings.Contains(v, "▸") {
+		t.Errorf("the collapsed line must carry the descend affordance: %q", v)
+	}
+	if !strings.Contains(v, "#1") || !strings.Contains(v, "job 3") {
+		t.Errorf("every row should appear in the summary: %q", v)
+	}
+}
+
+// → opens and descends, ← ascends: the same rule as a docs block, which is the
+// whole point of using the same glyph.
+func TestActivity_RightDescendsLeftAscends(t *testing.T) {
+	m := withActivity(t)
+	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // convo
+	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // activity
+	if m.focus != focusActivity {
+		t.Fatalf("tab should reach the activity zone when it has rows, got %d", m.focus)
+	}
+	if m.actLevel != actCollapsed {
+		t.Fatal("focus alone must not expand the zone — → does")
+	}
+
+	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.actLevel != actList {
+		t.Fatal("right should descend into the row list")
+	}
+	if n := len(strings.Split(m.activityView(), "\n")); n < 3 {
+		t.Errorf("the table should show a row per item, got:\n%s", m.activityView())
+	}
+
+	m = key(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sel := m.actSelected(); sel == nil || sel.key != (actKey{agent: true, id: 2}) {
+		t.Errorf("down should move to the second agent, got %+v", sel)
+	}
+
+	m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
+	if m.actLevel != actCollapsed {
+		t.Fatal("left should ascend back to the collapsed line")
+	}
+	m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
+	if m.focus != focusInput {
+		t.Fatal("left at the top of the zone should go home to the input")
+	}
+}
+
+// The selection is stored by IDENTITY. A new agent shifts every job index down,
+// so an index would silently walk to a different row while you were reading it.
+func TestActivity_SelectionSurvivesANewRow(t *testing.T) {
+	m := withActivity(t)
+	m.focus, m.actLevel = focusActivity, actList
+	m.actSel = actKey{id: 3} // the job
+
+	m = m.handleEvent(evMsg{"type": "agents", "agents": []any{
+		map[string]any{"id": 1.0, "state": "running", "prompt": "a"},
+		map[string]any{"id": 2.0, "state": "idle", "prompt": "b"},
+		map[string]any{"id": 9.0, "state": "running", "prompt": "brand new"},
+	}})
+	sel := m.actSelected()
+	if sel == nil || sel.key != (actKey{id: 3}) {
+		t.Fatalf("the selection must still be on job 3, got %+v", sel)
+	}
+}
+
+// Descending into an agent is a scope switch: the conversation and the task
+// line become that child's, and the strip becomes the way back.
+func TestActivity_AgentScopeSwapsTheConversation(t *testing.T) {
+	m := withActivity(t)
+	m = typeStr(m, "the root task")
+	m = key(m, kEnter)
+	rootLen := len(m.convo)
+
+	m.focus, m.actLevel = focusActivity, actList
+	m.actSel = actKey{agent: true, id: 1}
+	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
+
+	if m.scopeAgent != 1 {
+		t.Fatalf("right on an agent row should enter its scope, got %d", m.scopeAgent)
+	}
+	if len(m.convo) != 0 {
+		t.Errorf("the child's conversation starts empty until its history arrives, got %d", len(m.convo))
+	}
+	if m.task != "read the build log" {
+		t.Errorf("the task line should become the child's prompt, got %q", m.task)
+	}
+	if v := m.activityView(); !strings.Contains(v, "parent") {
+		t.Errorf("agent scope must offer the way back: %q", v)
+	}
+
+	// The child's scrollback arrives, and only for the scope on screen.
+	m = m.handleEvent(evMsg{"type": "agent_history", "agent": 7.0, "items": []any{
+		map[string]any{"kind": "user", "content": "someone else's conversation"},
+	}})
+	if len(m.convo) != 0 {
+		t.Error("history for another agent must not paste into this scope")
+	}
+	m = m.handleEvent(evMsg{"type": "agent_history", "agent": 1.0, "items": []any{
+		map[string]any{"kind": "user", "content": "read the build log"},
+		map[string]any{"kind": "assistant", "content": "137 failures"},
+	}})
+	// Assert on one word: glamour styles each word separately, so escape codes
+	// sit between them in the rendered text.
+	if !strings.Contains(m.convoText(), "137") {
+		t.Errorf("the child's conversation should be on screen: %s", m.convoText())
+	}
+
+	// Leaving restores the root conversation exactly.
+	m.focus, m.actLevel = focusActivity, actList
+	m.actSel = parentKey
+	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.scopeAgent != 0 {
+		t.Fatal("descending into the parent row should leave agent scope")
+	}
+	if len(m.convo) != rootLen || m.task != "the root task" {
+		t.Errorf("the root conversation and task must come back: %d entries, task %q", len(m.convo), m.task)
+	}
+}
+
+// In agent scope the input steers that CHILD, not the session.
+func TestActivity_InputInScopeTellsTheChild(t *testing.T) {
+	m := withActivity(t)
+	m.scopeAgent = 1
+	before := len(m.history)
+
+	m = typeStr(m, "look at the last 40 lines instead")
+	m = key(m, kEnter)
+
+	if len(m.history) != before+1 {
+		t.Error("a message to a child should still be recallable")
+	}
+	if !strings.Contains(m.convoText(), "look at the last 40 lines") {
+		t.Errorf("the message should be echoed: %s", m.convoText())
+	}
+	if m.busy {
+		t.Error("telling a child is not a turn of the session's own")
+	}
+}
+
+// The task line is the last thing the human ASKED for — it survives a resume,
+// because that is exactly when the message has scrolled away.
+func TestActivity_TaskLineTracksTheLastUserMessage(t *testing.T) {
+	m := withActivity(t)
+	if m.taskView() != "" {
+		t.Error("nothing asked yet, so no task line")
+	}
+	m = typeStr(m, "formalize the jobs table")
+	m = key(m, kEnter)
+	if !strings.Contains(m.taskView(), "formalize the jobs table") {
+		t.Errorf("the task line should carry the last message: %q", m.taskView())
+	}
+
+	m2 := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m2.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m2 = nm.(tuiModel)
+	m2 = m2.handleEvent(evMsg{"type": "history", "items": []any{
+		map[string]any{"kind": "user", "content": "the resumed task"},
+	}})
+	if !strings.Contains(m2.taskView(), "the resumed task") {
+		t.Errorf("a resumed session should show its task: %q", m2.taskView())
+	}
+}

@@ -507,6 +507,26 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		h.Reset()
 		em.emit(event{"type": "reset"})
 	})
+	// Agent scope: the human reading a child's conversation, or steering it.
+	// `view` is a PULL — the child's callbacks are nil by design, so its
+	// scrollback is fetched on demand and works for a stopped child too.
+	in.setAgentFn(func(id, action, content string) {
+		n, err := strconv.Atoi(id)
+		if err != nil {
+			return
+		}
+		switch action {
+		case "view":
+			items, ok := h.AgentHistory(n)
+			if !ok {
+				return
+			}
+			em.emit(event{"type": "agent_history", "agent": n,
+				"prompt": h.AgentPrompt(n), "items": items})
+		case "tell":
+			em.emit(event{"type": "agent_told", "agent": n, "message": h.AgentTell(n, content)})
+		}
+	})
 	// A message that arrives while a turn is running does NOT wait for it. It is
 	// buffered and lifted into the next tool result, so the model reads it inside
 	// the turn it is already running — and several of them batch. Only when no turn
@@ -658,6 +678,11 @@ type inputStream struct {
 	ctrlPending [][2]string
 	// resetCb handles a `reset` event (clear the session store).
 	resetCb func()
+	// agentFn handles an `agent` event: the human viewing a child's transcript
+	// or telling it something. Same install-after-the-harness-exists problem as
+	// srv and ctrl, so it queues the same way.
+	agentFn      func(id, action, content string)
+	agentPending [][3]string
 }
 
 // setMidTurn installs the mid-turn router (see inputStream.mid).
@@ -698,6 +723,31 @@ func (s *inputStream) setResetCb(f func()) {
 	s.mu.Lock()
 	s.resetCb = f
 	s.mu.Unlock()
+}
+
+// agentCmd runs the installed agent handler, queueing until one exists.
+func (s *inputStream) agentCmd(id, action, content string) {
+	s.mu.Lock()
+	fn := s.agentFn
+	if fn == nil {
+		s.agentPending = append(s.agentPending, [3]string{id, action, content})
+	}
+	s.mu.Unlock()
+	if fn != nil {
+		fn(id, action, content)
+	}
+}
+
+// setAgentFn installs the handler and drains whatever arrived first.
+func (s *inputStream) setAgentFn(fn func(id, action, content string)) {
+	s.mu.Lock()
+	s.agentFn = fn
+	pending := s.agentPending
+	s.agentPending = nil
+	s.mu.Unlock()
+	for _, p := range pending {
+		fn(p[0], p[1], p[2])
+	}
 }
 
 // serverCmd runs the installed handler, queueing until one exists.
@@ -778,6 +828,11 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 			case "control":
 				// Handled inline (see inputStream.ctrl): docker/worktree toggles.
 				s.ctrlCmd(ev.ID, ev.Action)
+			case "agent":
+				// The human looking at, or steering, a sub-agent. Inline for the
+				// same reason as the others: a turn may be running, and this
+				// loop is the only reader of `answer` events.
+				s.agentCmd(ev.ID, ev.Action, ev.Content)
 			case "user":
 				if s.midTurn(ev.Content) {
 					continue // buffered into the running turn

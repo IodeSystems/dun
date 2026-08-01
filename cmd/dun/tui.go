@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -144,9 +145,14 @@ func addGutter(block, marker string, style lipgloss.Style) string {
 // Focus is which pane keys drive — tmux-style: Tab toggles, and the divider's
 // focused half brightens. In convo focus, ↑/↓ move a message selection
 // (left-border highlight) instead of recalling input history.
+// Three zones, cycled by tab in screen order (input at the bottom, then the
+// conversation, then the activity strip at the top). An EMPTY activity zone is
+// SKIPPED, so a session that never delegates and never backgrounds a command
+// keeps exactly the two-way toggle it always had.
 const (
-	focusInput = iota // typing + ↑/↓ history (default)
-	focusConvo        // ↑/↓ select a message, viewport follows
+	focusInput    = iota // typing + ↑/↓ history (default)
+	focusConvo           // ↑/↓ select a message, viewport follows
+	focusActivity        // ↑/↓ pick an agent or job, → descends into it
 )
 
 // convoEntry is one conversation block. A tool call/result is collapsible: full
@@ -251,42 +257,52 @@ type tuiModel struct {
 	pendingArgs map[string]any // args of the pending tool call (for its renderer)
 	cur         string         // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
-	tools        []string
-	branch       string                // worktree branch (from the `workspace` event)
-	starting     bool                  // spawning servers, before `ready`
-	startingStart time.Time            // when the starting phase began
-	busy         bool                  // a turn in flight
-	busyStart    time.Time             // when the current busy turn started
-	asking       bool                  // agent is waiting on an ask_user answer
-	askOptions   []string              // the offered options; a trailing "custom" row is implicit
-	askSel       int                   // highlighted answer row (== len(askOptions) → the custom row)
-	askNote      string                // optional detail attached to the chosen option ("n")
-	askMulti     bool                  // multi-select: space toggles, enter submits the checked set
-	askChecked   []bool                // per-option checked state (multi mode; len == len(askOptions))
-	noting       bool                  // capturing a detail for the selected option
-	customAnswer bool                  // capturing a free-text / chat answer
-	md           *glamour.TermRenderer // markdown renderer for assistant replies
-	mdWidth      int                   // width md was built for (rebuild only on change)
-	history      []string              // sent inputs, for up/down recall
-	histIdx      int                   // cursor into history (== len when not browsing)
-	focus        int                   // focusInput | focusConvo
-	sel          int                   // selected message index (convo focus); -1 = none
-	search       textinput.Model       // vim-style "/" message search box
-	searching    bool                  // typing a search query
-	searchActive bool                  // navigating matches (↑/↓ step, esc exits)
-	matches      []int                 // convo indices matching the query
-	matchPos     int                   // cursor into matches
-	blockH       []int                 // rendered height of each convo block (for tall-message scroll)
-	inspecting   bool                  // the tool inspector overlay is open (owns all keys)
-	insp         inspector             // the overlay (valid while inspecting)
-	dumpSig      chan os.Signal        // SIGUSR1 → dump the rendered screen to a debug file
-	paletteSel   int                   // highlighted row in the "/" command palette
-	model, url   string                // this session's LLM settings (for /config)
-	keySet       bool                  // whether an API key is configured
-	disableExit  bool                  // --disable-exit: ctrl+c/esc don't quit (use /exit)
-	lc           *launcherConn         // launcher registration (nil = no launcher)
-	reloadVer    string                // a newer build the launcher announced ("" = none)
-	reloadReq    bool                  // /reload requested → runTUI re-execs after quit
+	tools         []string
+	branch        string                // worktree branch (from the `workspace` event)
+	starting      bool                  // spawning servers, before `ready`
+	startingStart time.Time             // when the starting phase began
+	busy          bool                  // a turn in flight
+	busyStart     time.Time             // when the current busy turn started
+	asking        bool                  // agent is waiting on an ask_user answer
+	askOptions    []string              // the offered options; a trailing "custom" row is implicit
+	askSel        int                   // highlighted answer row (== len(askOptions) → the custom row)
+	askNote       string                // optional detail attached to the chosen option ("n")
+	askMulti      bool                  // multi-select: space toggles, enter submits the checked set
+	askChecked    []bool                // per-option checked state (multi mode; len == len(askOptions))
+	noting        bool                  // capturing a detail for the selected option
+	customAnswer  bool                  // capturing a free-text / chat answer
+	md            *glamour.TermRenderer // markdown renderer for assistant replies
+	mdWidth       int                   // width md was built for (rebuild only on change)
+	history       []string              // sent inputs, for up/down recall
+	histIdx       int                   // cursor into history (== len when not browsing)
+	focus         int                   // focusInput | focusConvo | focusActivity
+	task          string                // the last user message, for the task line
+	agents        []agentRow            // live sub-agents (activity.go)
+	jobs          []jobRow              // live background jobs (activity.go)
+	actLevel      int                   // actCollapsed | actList — → descends, ← ascends
+	actSel        actKey                // selected activity row, by identity not index
+	// Agent scope: which child's conversation is on screen (0 = the root's),
+	// and the root's own convo/task stashed while it is.
+	scopeAgent   int
+	rootConvo    []convoEntry
+	rootTask     string
+	sel          int             // selected message index (convo focus); -1 = none
+	search       textinput.Model // vim-style "/" message search box
+	searching    bool            // typing a search query
+	searchActive bool            // navigating matches (↑/↓ step, esc exits)
+	matches      []int           // convo indices matching the query
+	matchPos     int             // cursor into matches
+	blockH       []int           // rendered height of each convo block (for tall-message scroll)
+	inspecting   bool            // the tool inspector overlay is open (owns all keys)
+	insp         inspector       // the overlay (valid while inspecting)
+	dumpSig      chan os.Signal  // SIGUSR1 → dump the rendered screen to a debug file
+	paletteSel   int             // highlighted row in the "/" command palette
+	model, url   string          // this session's LLM settings (for /config)
+	keySet       bool            // whether an API key is configured
+	disableExit  bool            // --disable-exit: ctrl+c/esc don't quit (use /exit)
+	lc           *launcherConn   // launcher registration (nil = no launcher)
+	reloadVer    string          // a newer build the launcher announced ("" = none)
+	reloadReq    bool            // /reload requested → runTUI re-execs after quit
 	// Engine supervision: the TUI outlives its engine. opts is what respawning
 	// one takes, sessionID reattaches it to the same conversation, and the
 	// restart counters stop a crash loop from spinning forever.
@@ -324,8 +340,8 @@ type tuiModel struct {
 	retry            string            // live retry banner ("" = not waiting on the provider)
 	retryDue         time.Time         // when the next attempt is due, for the countdown
 	retrySeen        int               // retries this outage; the first one also lands in scrollback
-	queuedMsgs       int                // messages typed mid-turn, buffered for the running turn
-	queuedTexts      []string           // text of each pending message (for the area above the divider)
+	queuedMsgs       int               // messages typed mid-turn, buffered for the running turn
+	queuedTexts      []string          // text of each pending message (for the area above the divider)
 	w, h             int
 	fatalErr         string
 	scrollPinned     bool // true when viewport should auto-follow (at bottom)
@@ -433,6 +449,15 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.searching {
 			return m.updateSearch(msg)
 		}
+		// The activity zone owns its keys while focused: ↑/↓ select, → descends,
+		// ← ascends and finally leaves. Anything it does not claim (tab, ctrl+c,
+		// "/") falls through to the switch below.
+		if m.focus == focusActivity && !m.asking && !m.searching {
+			if cmd, ok := m.actKeys(msg.String()); ok {
+				m.refresh()
+				return m, cmd
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			if m.disableExit {
@@ -488,15 +513,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Toggle focus between the input and the conversation (tmux-style).
-			if m.focus == focusInput {
-				m.focus = focusConvo
-				m.input.Blur()
-				m.sel = len(m.convo) - 1 // start at the newest message
-			} else {
-				m.focus = focusInput
-				m.input.Focus()
-			}
+			m.cycleFocus(1)
+			m.refresh()
+			return m, textinput.Blink
+		case "shift+tab":
+			m.cycleFocus(-1)
 			m.refresh()
 			return m, textinput.Blink
 		case "pgup", "pgdown":
@@ -1003,6 +1024,20 @@ func (m tuiModel) suggestPanel() string {
 // sendUser ships a user message to the engine (from the input or a suggestion),
 // echoes it, and clears transient UI (suggestions, input).
 func (m tuiModel) sendUser(v string) tuiModel {
+	// In agent scope the input steers that CHILD instead of the session. Same
+	// gesture the parent's agent_monitor(tell:) makes, same code path in the
+	// engine — there is one definition of what telling a child means.
+	if m.scopeAgent != 0 {
+		m.history = append(m.history, v)
+		m.histIdx = len(m.history)
+		m.input.Reset()
+		m.append(stUser.Render("› " + v))
+		if !m.proc.agentCmd(m.scopeAgent, "tell", v) {
+			m.append(stErr.Render("no engine right now — not sent"))
+		}
+		return m
+	}
+	m.task = v
 	m.history = append(m.history, v)
 	m.histIdx = len(m.history)
 	m.input.Reset()
@@ -1229,6 +1264,26 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.replay(items)
 	case "message":
 		// tokens already streamed the reply; nothing to add.
+	case "agents":
+		m.agents = agentRowsFromEvent(ev)
+	case "jobs":
+		m.jobs = jobRowsFromEvent(ev)
+	case "agent_history":
+		// A child's scrollback, pulled on demand. Ignored unless it is the
+		// child currently on screen: a late reply for a scope we have already
+		// left would paste someone else's conversation over this one.
+		if num(ev["agent"]) == m.scopeAgent && m.scopeAgent != 0 {
+			m.convo = nil
+			if p := str(ev["prompt"]); p != "" {
+				m.task = p
+			}
+			items, _ := ev["items"].([]any)
+			m.replay(items)
+		}
+	case "agent_told":
+		if msg := str(ev["message"]); msg != "" {
+			m.append(stNote.Render("↳ " + oneLine(msg)))
+		}
 	case "notification":
 		if str(ev["kind"]) == "docs" {
 			m.convo = append(m.convo, convoEntry{docs: docsFromEvent(ev)})
@@ -1443,7 +1498,6 @@ func (m tuiModel) queuedHint() string {
 	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
 }
 
-
 // pendingView renders queued messages above the divider line. Each message is
 // shown with a "› " prefix matching the user style, but dimmed to indicate it
 // hasn't been delivered to the model yet.
@@ -1505,6 +1559,9 @@ func (m tuiModel) View() string {
 	if n := len(m.tools); n > 0 {
 		head += stDim.Render(fmt.Sprintf("  · %d tools", n))
 	}
+	if n := m.liveAgents(); n > 0 {
+		head += stNote.Render(fmt.Sprintf("  · %d agents", n))
+	}
 	if m.reloadVer != "" {
 		head += "  " + stNote.Render("↻ "+m.reloadVer+" (/reload)")
 	}
@@ -1512,6 +1569,16 @@ func (m tuiModel) View() string {
 	// The lower pane is the input, or — while answering — the option picker. The
 	// convo pane takes whatever height is left (the picker can be several rows).
 	lower := m.lowerView()
+	// The task line and the activity strip sit above the conversation and take
+	// their height off the top. Both vanish when they have nothing to say, so a
+	// session that never delegates loses no space to them.
+	top := make([]string, 0, 2)
+	if t := m.taskView(); t != "" {
+		top = append(top, t)
+	}
+	if a := m.activityView(); a != "" {
+		top = append(top, a)
+	}
 	// Pending messages sit above the divider — between the convo viewport and
 	// the input area. Account for their height so the viewport doesn't overlap.
 	pending := m.pendingView()
@@ -1547,6 +1614,12 @@ func (m tuiModel) View() string {
 		status = stNote.Render("⏳ "+m.retry) + stDim.Render(m.retryCountdown()+"  ("+m.exitHint()+")")
 	case m.busy:
 		status = m.spin.View() + stDim.Render(" working…"+m.busyElapsed()+m.queuedHint()+"  ("+m.exitHint()+")")
+	case m.focus == focusActivity && m.actLevel == actCollapsed:
+		status = stDim.Render("activity  ·  → open · tab input · " + m.exitHint())
+	case m.focus == focusActivity:
+		status = stDim.Render("activity  ·  ↑/↓ select · → open (agent = its view) · ← back · tab input")
+	case m.scopeAgent != 0:
+		status = stDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it · tab activity · ← back to the session", m.scopeAgent))
 	case m.focus == focusConvo:
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · enter expand · ← back · ctrl+c quit")
@@ -1560,7 +1633,9 @@ func (m tuiModel) View() string {
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}
-	return strings.Join([]string{head, m.viewportView(vp), pending, div, lower, status}, "\n")
+	out := append([]string{head}, top...)
+	out = append(out, m.viewportView(vp), pending, div, lower, status)
+	return strings.Join(out, "\n")
 }
 
 // lowerView is the bottom pane: the input line, or the answer picker when asking.
@@ -1677,6 +1752,7 @@ func (m *tuiModel) replay(items []any) {
 		switch str(im["kind"]) {
 		case "user":
 			flushPend()
+			m.task = str(im["content"]) // the task line survives a resume
 			m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + str(im["content"]))})
 			n++
 		case "assistant":
@@ -2443,4 +2519,14 @@ const renderHz = 30
 
 func renderTick() tea.Cmd {
 	return tea.Tick(time.Second/renderHz, func(time.Time) tea.Msg { return renderTickMsg{} })
+}
+
+// agentCmd asks the engine to view or steer a sub-agent (see agent scope).
+func (p *dunProc) agentCmd(id int, action, content string) bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]string{
+		"type": "agent", "id": strconv.Itoa(id), "action": action, "content": content,
+	}) == nil
 }

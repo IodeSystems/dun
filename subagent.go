@@ -1124,3 +1124,52 @@ func (h *Harness) agentsChanged() {
 	}
 	h.cfg.OnAgents(h.Agents())
 }
+
+// AgentHistory returns a child's conversation as replayable items — the same
+// neutral shape the resuming client already knows how to render, so the TUI
+// gets a child's scrollback without a second protocol.
+//
+// PULL, not push. A child's callbacks are deliberately nil (childConfig), and
+// un-nil'ing them would mean tagging and forwarding N streams nobody is looking
+// at. Reading on demand also works unchanged for a STOPPED child, whose process
+// is gone but whose transcript is not — which push could not do at all.
+func (h *Harness) AgentHistory(id int) ([]HistoryItem, bool) {
+	sa := h.agentByID(id)
+	if sa == nil {
+		return nil, false
+	}
+	sa.mu.Lock()
+	child := sa.h
+	sa.mu.Unlock()
+	if child != nil {
+		return child.History(), true
+	}
+	path := sa.transcript()
+	if path == "" {
+		return nil, true
+	}
+	st, err := openSessionStore(path)
+	if err != nil {
+		return nil, true
+	}
+	return (&Harness{store: st}).History(), true
+}
+
+// AgentTell is the human steering a child directly, which is the same gesture
+// the parent's agent_monitor(tell:) makes — deliberately the same code path, so
+// there is one definition of what telling a child means.
+func (h *Harness) AgentTell(id int, text string) string {
+	sa := h.agentByID(id)
+	if sa == nil {
+		return fmt.Sprintf("no agent #%d", id)
+	}
+	return sa.tell(text)
+}
+
+// AgentPrompt is what a child was asked to do, for the UI's task line.
+func (h *Harness) AgentPrompt(id int) string {
+	if sa := h.agentByID(id); sa != nil {
+		return sa.prompt
+	}
+	return ""
+}
