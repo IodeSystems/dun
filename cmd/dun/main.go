@@ -83,7 +83,7 @@ func main() {
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
 	noWorktree := flag.Bool("no-worktree", false, "work in the workspace directly, no git worktree")
 	pr := flag.Bool("pr", false, "shorthand for --ship with mode pr (verify, push, then open a pull request)")
-	ship := flag.Bool("ship", false, "let the agent ship work (fetch+rebase+checks+push) when done")
+	ship := flag.Bool("ship", true, "let the agent ship work (fetch+rebase+checks+push) when done")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")

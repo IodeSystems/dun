@@ -93,7 +93,7 @@ type Config struct {
 	Exec        ExecBackend     // nil → no exec tool; else adds the built-in exec tool
 	Ask         AskFunc         // nil → no ask_user tool; else adds the human-in-the-loop tool
 	Worktree    *Worktree       // the session worktree (for ship)
-	EnableShip  bool            // add the ship tool (opt-in: landing work is outward-facing)
+	EnableShip  bool            // add the ship tool (enabled by default)
 	ShipCfg     *ShipConfig     // ship policy + checks; nil = permissive defaults, no checks
 	SessionFile string          // persist the conversation here (resumable); "" = in-memory only
 	OnToken     func(string)
