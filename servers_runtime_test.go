@@ -23,9 +23,18 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 	if !strings.Contains(shellOnly, "mcpshell") {
 		t.Error("dropped the family that IS running")
 	}
-	// exec and ask_user are dispatcher-side, so they are always described.
+	// exec and ask_user are dispatcher-side, so they are described whenever they
+	// exist rather than per running server.
 	if !strings.Contains(shellOnly, "ask_user") || !strings.Contains(shellOnly, "- exec:") {
 		t.Error("built-in tools should always be described")
+	}
+	// The exec prompt must quote the deadline the code actually enforces —
+	// promising a limit that is not applied is worse than saying nothing.
+	if !strings.Contains(shellOnly, defaultExecTimeout.String()) {
+		t.Errorf("the exec deadline is not in the prompt:\n%s", shellOnly)
+	}
+	if !strings.Contains(shellOnly, "exec_monitor") {
+		t.Error("a model that cannot be told about exec_monitor will never call it")
 	}
 	// No worktree or Docker → no containment line.
 	if strings.Contains(shellOnly, "Containment:") {
@@ -48,6 +57,13 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 	}
 	if !strings.Contains(all, "Docker container") {
 		t.Error("should mention Docker containment")
+	}
+
+	// No backend, no exec tool — so describing one invites a call to something
+	// that is not there. Same rule as the MCP families.
+	none := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil)
+	if strings.Contains(none, "- exec:") || strings.Contains(none, "exec_monitor") {
+		t.Errorf("described exec with no backend configured:\n%s", none)
 	}
 }
 
@@ -125,13 +141,15 @@ func TestStartStopServer_RebuildsToolSet(t *testing.T) {
 	}
 	defer h.Close()
 
-	if len(h.ToolNames()) != 0 {
-		t.Fatalf("nothing autostarted, so there should be no tools: %v", h.ToolNames())
+	// Built-ins (agent, and exec/ask when configured) are dispatcher-side and
+	// always present — what a server start/stop moves is the MCP families.
+	if n := serverToolNames(h); len(n) != 0 {
+		t.Fatalf("nothing autostarted, so there should be no server tools: %v", n)
 	}
 	if err := h.StartServer(context.Background(), ServerShell); err != nil {
 		t.Fatal(err)
 	}
-	if len(h.ToolNames()) == 0 {
+	if len(serverToolNames(h)) == 0 {
 		t.Fatal("tools did not appear after a start")
 	}
 	if !strings.Contains(h.Session.System, "mcpshell") {
@@ -140,8 +158,8 @@ func TestStartStopServer_RebuildsToolSet(t *testing.T) {
 	if err := h.StopServer(ServerShell); err != nil {
 		t.Fatal(err)
 	}
-	if len(h.ToolNames()) != 0 {
-		t.Errorf("tools survived a stop: %v", h.ToolNames())
+	if n := serverToolNames(h); len(n) != 0 {
+		t.Errorf("tools survived a stop: %v", n)
 	}
 	if strings.Contains(h.Session.System, "mcpshell") {
 		t.Error("system prompt still advertises a stopped family")
@@ -311,4 +329,21 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
 	}
+}
+
+// serverToolNames is the harness's tools minus the dispatcher-side built-ins,
+// which do not come and go with a server.
+func serverToolNames(h *Harness) []string {
+	builtin := map[string]bool{
+		"exec": true, "exec_monitor": true, "ask_user": true,
+		"ship": true, "agent": true, "agent_monitor": true,
+		"tell_parent": true, "ask_parent": true,
+	}
+	var out []string
+	for _, n := range h.ToolNames() {
+		if !builtin[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }

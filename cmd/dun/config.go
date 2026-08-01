@@ -2,12 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
 )
 
@@ -138,6 +142,33 @@ func decodeModels(resp *http.Response) []string {
 // shorthand because a flag people have in their muscle memory should not stop
 // working — but it now means "ship, in pr mode", which is the same pipeline
 // with a different terminal state rather than a second way to push.
+// clientCache builds LLM runners by model name, one per model, for the lifetime
+// of the process.
+//
+// Cached rather than constructed per call because a client owns a retry policy
+// and its backpressure state: two clients on the same model would each think
+// they had the endpoint to themselves and would back off independently against
+// one shared rate limit. Children on the same model must contend through ONE
+// client, which is also why there is no concurrency cap on sub-agents — the
+// client is where the queueing actually happens.
+func clientCache(url, key string) func(string) (agent.LLMRunner, error) {
+	var mu sync.Mutex
+	cache := map[string]agent.LLMRunner{}
+	return func(model string) (agent.LLMRunner, error) {
+		if strings.TrimSpace(model) == "" {
+			return nil, fmt.Errorf("no model named")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if c, ok := cache[model]; ok {
+			return c, nil
+		}
+		c := llm.NewClient(url, key, model)
+		cache[model] = c
+		return c, nil
+	}
+}
+
 func shipConfig(workspace string, pr bool) *dun.ShipConfig {
 	cfg := dun.LoadShip(workspace)
 	if !pr {

@@ -240,13 +240,27 @@ func (h *Harness) rebuildTools() {
 	toolDefs := mcpToolDefs(tools)
 	dispatch := mcpDispatcher(h.mgr, tools, cfg.OnToolCall)
 	if cfg.Exec != nil {
-		toolDefs = append(toolDefs, execToolDef())
-		startBg := func(command string) int { return h.startBackground(cfg.Exec, command) }
+		toolDefs = append(toolDefs, execToolDef(), execMonitorToolDef())
+		startBg := func(command string) *bgJob { return h.startBackground(cfg.Exec, command) }
 		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall, startBg)
+		dispatch = withExecMonitor(dispatch, h, cfg.OnToolCall)
 	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
 		dispatch = withAsk(dispatch, cfg.Ask, cfg.OnToolCall)
+	}
+	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
+	// a child never receives `agent`, so depth-1 holds with no counter to get
+	// wrong, and a root never receives `tell_parent`, so it is absent rather
+	// than being a tool that errors when called. See plan/subagents.md.
+	if h.isChild() {
+		toolDefs = append(toolDefs, tellParentToolDef(), askParentToolDef())
+		dispatch = withTellParent(dispatch, h, cfg.OnToolCall)
+		dispatch = withAskParent(dispatch, h, cfg.OnToolCall)
+	} else {
+		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel), agentMonitorToolDef())
+		dispatch = withAgent(dispatch, h, cfg.OnToolCall)
+		dispatch = withAgentMonitor(dispatch, h, cfg.OnToolCall)
 	}
 	// Outermost wrapper: whatever the tool returns, carry any notification that
 	// arrived while it was running back inside the result. A background job that
@@ -257,17 +271,20 @@ func (h *Harness) rebuildTools() {
 	sys := cfg.System
 	if sys == "" {
 		sys = systemFor(tools, cfg.Exec, cfg.Worktree)
+		sys += roleSystem(h.isChild())
 	}
 	// ship is the only way work leaves the worktree. It needs a repo, not a
 	// branch: a --no-worktree session sits on the base branch, and the pipeline
 	// (rebase + checks) is worth running there too — it just refuses to push.
 	if cfg.EnableShip && cfg.Worktree != nil && cfg.Worktree.IsRepo() {
 		toolDefs = append(toolDefs, shipToolDef(cfg.ShipCfg))
-		execFn := func(ctx context.Context, command string) string {
+		execFn := func(ctx context.Context, command string) ExecResult {
 			if cfg.Exec != nil {
-				return cfg.Exec.Run(ctx, command)
+				return cfg.Exec.Run(ctx, command, nil)
 			}
-			return "no exec backend configured"
+			// No backend is a FAILED check, not a passing one: ship must never
+			// report "verified" for commands it could not run.
+			return ExecResult{Code: -1, Err: "no exec backend configured"}
 		}
 		dispatch = withShip(dispatch, cfg.Worktree, cfg.ShipCfg, execFn, cfg.OnToolCall)
 		sys += "\n\nWhen the task is complete, commit everything (including new files) and call ship. It fetches origin, rebases onto " +

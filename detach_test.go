@@ -50,9 +50,44 @@ func TestKillGroup_CancelsTheTree(t *testing.T) {
 // HostExec is where model-authored commands run — the path that actually hit
 // this. The wiring matters more than the helper.
 func TestHostExec_DetachesTheCommand(t *testing.T) {
-	out := HostExec{Dir: t.TempDir()}.Run(context.Background(), "ps -o tty= -p $$")
+	out := HostExec{Dir: t.TempDir()}.Run(context.Background(), "ps -o tty= -p $$", nil)
 	// No controlling terminal renders as "?" (or empty) in ps's tty column.
-	if tty := strings.TrimSpace(out); tty != "" && tty != "?" {
+	if tty := strings.TrimSpace(out.Output); tty != "" && tty != "?" {
 		t.Errorf("exec'd command still has a controlling terminal (%q) — it can steal the TUI's keystrokes", tty)
+	}
+}
+
+// A credential prompt is not the only way git waits for a human. `git rebase
+// --continue` runs `git commit … -e`, which launches $EDITOR — and an editor
+// with nowhere to draw does not reliably exit, it blocks. Measured live: vim
+// held a rebase for the full ten minutes until Go's test timeout killed the
+// tree, and the agent read the timeout as a result and hung the same way on its
+// next command.
+//
+// The hang is environment-dependent in the worst direction: with EDITOR unset
+// git refuses with a readable error, so it never reproduces in CI.
+func TestDetach_SilencesTheGitEditor(t *testing.T) {
+	cmd := exec.Command("git", "rebase", "--continue")
+	cmd.Env = []string{"EDITOR=vim", "VISUAL=vim"}
+	detach(cmd)
+
+	want := map[string]bool{
+		"GIT_EDITOR=true":          false,
+		"GIT_SEQUENCE_EDITOR=true": false,
+		"GIT_TERMINAL_PROMPT=0":    false,
+	}
+	// LAST wins in execve, so these must come after anything inherited.
+	for _, kv := range cmd.Env {
+		if _, ok := want[kv]; ok {
+			want[kv] = true
+		}
+	}
+	for kv, found := range want {
+		if !found {
+			t.Errorf("detach must set %s — without it an unattended rebase waits for a human", kv)
+		}
+	}
+	if last := cmd.Env[len(cmd.Env)-1]; last != "GIT_SEQUENCE_EDITOR=true" {
+		t.Errorf("the overrides must come last to win over an inherited EDITOR, got %q", last)
 	}
 }

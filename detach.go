@@ -29,6 +29,25 @@ import (
 // language git will quote back in a readable error, rather than failing on a
 // bare ENXIO.
 //
+// GIT_EDITOR/GIT_SEQUENCE_EDITOR are the same hazard by a different route, and
+// they were missed the first time. A credential prompt is not the only way git
+// waits for a human: `git rebase --continue` runs
+//
+//	git commit -n --no-gpg-sign -F .git/rebase-merge/message -e
+//
+// and that -e launches $EDITOR. Measured on a live session: EDITOR=vim (from
+// the operator's login shell, which `sh -lc` sources), vim sat there for the
+// full ten minutes until Go's test timeout killed the process tree — and the
+// agent, reading "FAIL … 600.024s", simply ran the next command and hung the
+// same way. Setsid does NOT save you here: an editor with nowhere to draw does
+// not necessarily exit, it just blocks somewhere else.
+//
+// `true` is the editor because it exits 0 immediately and leaves the prepared
+// message alone, which is exactly what an unattended rebase wants. Note this is
+// environment-dependent in the worst way: with EDITOR unset, git refuses with a
+// readable error instead of waiting, so the hang is invisible in CI and on any
+// machine whose operator does not set one.
+//
 // Callers that spawn with CommandContext should pair this with killGroup.
 func detach(cmd *exec.Cmd) *exec.Cmd {
 	if cmd.SysProcAttr == nil {
@@ -38,7 +57,11 @@ func detach(cmd *exec.Cmd) *exec.Cmd {
 	if cmd.Env == nil {
 		cmd.Env = os.Environ()
 	}
-	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(cmd.Env,
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_EDITOR=true",
+		"GIT_SEQUENCE_EDITOR=true",
+	)
 	return cmd
 }
 

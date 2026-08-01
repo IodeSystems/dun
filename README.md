@@ -218,7 +218,25 @@ resumes with your answer. **Proactive docs:** relevant docs are pushed as 🔔
 notifications as the conversation moves (raglit's index watched via agentkit's
 FinderPreparer). **Background work:** `exec{background:true}` runs a long command
 (the full test suite, a build) asynchronously in the container; when it finishes
-the agent is notified and reacts on its own — no blocking.
+the agent is notified and reacts on its own — no blocking. A foreground `exec` is
+killed after 5 minutes, because a command waiting on input it can never receive
+is indistinguishable from slow work; background jobs have no limit. Their output
+streams to a log file whose path the agent gets (so a big log is grepped, not
+pasted into the context), and `exec_monitor` tunes what a running job reports —
+`buffer_bytes` to hear from it periodically, `grep` to hear only matching lines,
+`ignore` to mute it. A job says nothing until it exits unless asked to.
+
+**Sub-agents:** `agent{prompt}` spawns a child agent to spend ITS context instead
+of yours — read a huge log, fetch and digest a page, survey how something is used
+— and hand back the conclusion. A child works in the parent's worktree and shares
+its tool servers (no second index), runs on `--child-model` if you set one, and
+cannot spawn agents of its own or reach you directly. It reports with
+`tell_parent` (a `status` that overwrites, a `message` that accumulates, a
+`final` answer) and can ask the parent — never the human — with `ask_parent`.
+Children stay resident after answering, so `agent_monitor` can tell one a
+follow-up far more cheaply than spawning another; it also peeks, dismisses, and
+restarts children left stopped by a previous session. The TUI lists them live
+with what each has spent.
 
 ## Isolation
 
@@ -240,9 +258,11 @@ no per-action approval prompts, the isolation does the work.
 With `--ship`, the agent gets one way to land work — a `ship` tool that fetches
 origin, rebases onto the base branch, runs the project's checks, and *then*
 pushes. The order is the point: what gets verified is exactly what gets pushed.
-`--pr` is shorthand for `--ship` in `pr` mode, which also opens the pull request.
-Without either, the changes stay on the branch for you to review and push
-yourself.
+`--pr` is shorthand for `--ship` in `pr` mode, which pushes and then reports the
+`gh pr create` line for you to run. dun does not invoke `gh` itself — an expired
+gh token does not fail, it silently starts an OAuth device flow and polls for a
+code no one is reading, which is a hang, not an error. Without either flag, the
+changes stay on the branch for you to review and push yourself.
 
 Modes are the terminal state — `verify` (checks only, pushes nothing), `push`,
 `pr` — and a repo declares which ones are allowed:
@@ -250,7 +270,7 @@ Modes are the terminal state — `verify` (checks only, pushes nothing), `push`,
 ```jsonc
 // dun.json
 "ship": {
-  "allow":   ["verify", "pr"],       // this repo's agents open PRs, they don't push
+  "allow":   ["verify", "pr"],       // this repo's agents land branches for review, they don't push the base
   "default": "pr",
   "checks": [                        // serial waves; each object runs in parallel
     {"compile": "go build ./..."},

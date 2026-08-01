@@ -29,7 +29,7 @@
 
   "//ship": "The ship tool: verify, then land. Fetch -> rebase onto the base branch -> checks -> push, in that order, so what is verified is exactly what lands. Every field is optional; merged field-by-field across dun.json and dun.local.json.",
   "ship": {
-    "//allow": "Permitted terminal states. verify = checks only, pushes nothing. push = land the branch. pr = land it and open a pull request. Omit to permit all three. This is the policy surface: a repo whose agents must not push lists only verify and pr.",
+    "//allow": "Permitted terminal states. verify = checks only, pushes nothing. push = land the branch. pr = land it and report the gh command to open the pull request (dun never runs gh). Omit to permit all three.",
     "allow": ["verify", "push", "pr"],
 
     "//default": "The mode used when the model names none. Must be one of allow. Omit for push.",

@@ -82,7 +82,8 @@ func main() {
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
-	pr := flag.Bool("pr", false, "let the agent open a pull request (commit+push+gh pr create) when done")
+	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
+	pr := flag.Bool("pr", false, "shorthand for --ship with mode pr (verify, push, then report the gh pr create command)")
 	ship := flag.Bool("ship", false, "let the agent ship work (rebase+checks+push+ff local base branch) when done")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
@@ -254,6 +255,11 @@ func main() {
 		if !isRepo && !*prog {
 			fmt.Fprintf(os.Stderr, "dun: %s is not a git repo — working in place (no isolation)\n", absWS)
 		}
+	} else if *ship || *pr {
+		// --ship/--pr without --worktree: create a pass-through worktree so
+		// the ship tool is available. The agent works in the checked-out
+		// directory; ship's pipeline (rebase + checks) still runs.
+		wt, _ = dun.WorktreeInPlace(absWS)
 	}
 
 	// Isolation tier 2: exec runs in a Docker container (--docker IMAGE), or host.
@@ -291,9 +297,15 @@ func main() {
 	var em *emitter
 	var in *inputStream
 	cfg := dun.Config{
-		Workspace:   effWS,
-		RaglitHome:  raglitHome,
-		Client:      llm.NewClient(*url, effKey, *model),
+		Workspace:  effWS,
+		RaglitHome: raglitHome,
+		Client:     llm.NewClient(*url, effKey, *model),
+		// Sub-agents may run on a different model than their parent, and only
+		// cmd/dun knows the endpoint and the key — hence a factory rather than a
+		// second client. Cached per model so N children on one model share one
+		// client, and therefore one retry policy and one rate limit.
+		ClientFor:   clientCache(*url, effKey),
+		ChildModel:  *childModel,
 		Exec:        backend,
 		Worktree:    wt,
 		EnableShip:  *ship || *pr,
@@ -318,6 +330,11 @@ func main() {
 			em.emit(event{"type": "tool_result", "tool": tool, "result": result})
 		}
 		cfg.OnNotify = func(text string) { em.emit(event{"type": "notification", "text": text}) }
+		// The whole list every time, not a delta: it is a handful of rows, and a
+		// UI that has to reconstruct state from deltas gets it wrong the first
+		// time an event is dropped.
+		cfg.OnAgents = func(as []dun.AgentInfo) { em.emit(event{"type": "agents", "agents": agentsToAny(as)}) }
+		cfg.OnJobs = func(js []dun.JobInfo) { em.emit(event{"type": "jobs", "jobs": jobsToAny(js)}) }
 		cfg.OnDocs = func(n dun.DocsNote) {
 			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
 		}
@@ -683,7 +700,6 @@ func (s *inputStream) setResetCb(f func()) {
 	s.mu.Unlock()
 }
 
-
 // serverCmd runs the installed handler, queueing until one exists.
 func (s *inputStream) serverCmd(alias, action string) {
 	s.mu.Lock()
@@ -770,13 +786,13 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 			case "answer":
 				s.answers <- ev.Value
 			case "reset":
-			s.mu.Lock()
-			cb := s.resetCb
-			s.mu.Unlock()
-			if cb != nil {
-				cb()
-			}
-		case "stop", "quit":
+				s.mu.Lock()
+				cb := s.resetCb
+				s.mu.Unlock()
+				if cb != nil {
+					cb()
+				}
+			case "stop", "quit":
 				close(s.quit) // before users, so stopped() is visible to the reader
 				close(s.users)
 				return
@@ -956,6 +972,32 @@ func shortArgs(args map[string]any) string {
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // docsToAny renders surfaced docs as JSON-friendly maps for the -p event.
+func agentsToAny(as []dun.AgentInfo) []any {
+	out := make([]any, 0, len(as))
+	for _, a := range as {
+		out = append(out, map[string]any{
+			"id": a.ID, "model": a.Model, "state": a.State, "status": a.Status,
+			"prompt": a.Prompt, "tokens": a.Tokens, "seconds": a.Seconds, "blocked": a.Blocked,
+		})
+	}
+	return out
+}
+
+// jobsToAny mirrors agentsToAny — the whole list every time, for the same
+// reason. Times cross as unix seconds so the UI can tick a running job's clock
+// without the engine pushing a row per second.
+func jobsToAny(js []dun.JobInfo) []any {
+	out := make([]any, 0, len(js))
+	for _, j := range js {
+		out = append(out, map[string]any{
+			"id": j.ID, "command": j.Command, "log": j.Log, "state": j.State,
+			"bytes": j.Bytes, "started": j.Started, "ended": j.Ended,
+			"code": j.Code, "muted": j.Muted,
+		})
+	}
+	return out
+}
+
 func docsToAny(docs []dun.DocHitInfo) []any {
 	out := make([]any, 0, len(docs))
 	for _, d := range docs {

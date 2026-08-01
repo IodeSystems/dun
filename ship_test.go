@@ -56,7 +56,12 @@ func shipWorktree(t *testing.T, repo string) *Worktree {
 	return wt
 }
 
-func okExec(context.Context, string) string { return "ok" }
+func okExec(context.Context, string) ExecResult { return ExecResult{Output: "ok"} }
+
+// failExec is a check that fails the way a real one does: a non-zero code.
+func failExec(out string, code int) func(context.Context, string) ExecResult {
+	return func(context.Context, string) ExecResult { return ExecResult{Output: out, Code: code} }
+}
 
 // ── policy ─────────────────────────────────────────────────────────
 
@@ -129,13 +134,13 @@ func TestRunChecks_WaveRunsInParallel(t *testing.T) {
 	release := make(chan struct{})
 	go func() { <-arrived; <-arrived; close(release) }()
 
-	exec := func(ctx context.Context, cmd string) string {
+	exec := func(ctx context.Context, cmd string) ExecResult {
 		arrived <- struct{}{}
 		select {
 		case <-release:
-			return "ok"
+			return ExecResult{Output: "ok"}
 		case <-time.After(3 * time.Second):
-			return "[exit: 1] " + cmd + " ran alone — the wave is serial"
+			return ExecResult{Output: cmd + " ran alone — the wave is serial", Code: 1}
 		}
 	}
 	if fail := runChecks(context.Background(), cfg, exec); fail != "" {
@@ -149,11 +154,11 @@ func TestRunChecks_ReportsEveryFailureInAWave(t *testing.T) {
 	cfg := &ShipConfig{Checks: []map[string]string{
 		{"compile": "build", "lint": "lint", "vet": "vet"},
 	}}
-	exec := func(_ context.Context, cmd string) string {
+	exec := func(_ context.Context, cmd string) ExecResult {
 		if cmd == "vet" {
-			return "clean"
+			return ExecResult{Output: "clean"}
 		}
-		return "boom\n[exit: 1]"
+		return ExecResult{Output: "boom", Code: 1}
 	}
 	fail := runChecks(context.Background(), cfg, exec)
 	for _, want := range []string{"compile", "lint"} {
@@ -177,9 +182,9 @@ func TestRunChecks_LaterWavesSkippedAfterAFailure(t *testing.T) {
 		{"smoke": "test"},
 	}}
 	var ran []string
-	exec := func(_ context.Context, cmd string) string {
+	exec := func(_ context.Context, cmd string) ExecResult {
 		ran = append(ran, cmd)
-		return "boom\n[exit: 1]"
+		return ExecResult{Output: "boom", Code: 1}
 	}
 	fail := runChecks(context.Background(), cfg, exec)
 	if !strings.Contains(fail, "stage 1 of 2") {
@@ -196,7 +201,10 @@ func TestRunChecks_SkipByName(t *testing.T) {
 		Checks: []map[string]string{{"compile": "build", "lint": "lint"}},
 	}
 	var ran []string
-	exec := func(_ context.Context, cmd string) string { ran = append(ran, cmd); return "ok" }
+	exec := func(_ context.Context, cmd string) ExecResult {
+		ran = append(ran, cmd)
+		return ExecResult{Output: "ok"}
+	}
 	if fail := runChecks(context.Background(), cfg, exec); fail != "" {
 		t.Fatalf("%s", fail)
 	}
@@ -219,7 +227,7 @@ func TestShip_RefusesDirtyTree(t *testing.T) {
 	wt := shipWorktree(t, repo)
 	os.WriteFile(filepath.Join(wt.Path, "stray.txt"), []byte("uncommitted\n"), 0o644)
 
-	out := doShip(context.Background(), wt, nil, okExec, ShipPush, "", "")
+	out := doShip(context.Background(), wt, nil, okExec, ShipPush)
 	if !strings.Contains(out, "uncommitted changes") {
 		t.Fatalf("an untracked file is work the agent forgot to add — ship must refuse: %q", out)
 	}
@@ -232,7 +240,7 @@ func TestShip_PushLandsTheBranch(t *testing.T) {
 	origin, repo, _ := newShipRepo(t)
 	wt := shipWorktree(t, repo)
 
-	out := doShip(context.Background(), wt, nil, okExec, ShipPush, "", "")
+	out := doShip(context.Background(), wt, nil, okExec, ShipPush)
 	if !strings.Contains(out, "Shipped") {
 		t.Fatalf("push mode should land the branch: %q", out)
 	}
@@ -247,9 +255,9 @@ func TestShip_FailedCheckPushesNothing(t *testing.T) {
 	_, repo, _ := newShipRepo(t)
 	wt := shipWorktree(t, repo)
 	cfg := &ShipConfig{Checks: []map[string]string{{"compile": "build"}}}
-	exec := func(context.Context, string) string { return "undefined: x\n[exit: 1]" }
+	exec := failExec("undefined: x", 1)
 
-	out := doShip(context.Background(), wt, cfg, exec, ShipPush, "", "")
+	out := doShip(context.Background(), wt, cfg, exec, ShipPush)
 	if !strings.Contains(out, "Checks failed") {
 		t.Fatalf("want a check failure, got %q", out)
 	}
@@ -262,7 +270,7 @@ func TestShip_VerifyPushesNothing(t *testing.T) {
 	_, repo, _ := newShipRepo(t)
 	wt := shipWorktree(t, repo)
 
-	out := doShip(context.Background(), wt, nil, okExec, ShipVerify, "", "")
+	out := doShip(context.Background(), wt, nil, okExec, ShipVerify)
 	if !strings.Contains(out, "Nothing pushed") {
 		t.Fatalf("verify must say it pushed nothing: %q", out)
 	}
@@ -287,7 +295,7 @@ func TestShip_OnBaseBranchRefusesPushByDefault(t *testing.T) {
 	origin, repo, base := newShipRepo(t)
 	wt := baseWorktree(t, repo, base)
 
-	out := doShip(context.Background(), wt, nil, okExec, ShipPush, "", "")
+	out := doShip(context.Background(), wt, nil, okExec, ShipPush)
 	if !strings.Contains(out, "NOT pushed") || !strings.Contains(out, base) {
 		t.Fatalf("pushing the base branch must be refused by default: %q", out)
 	}
@@ -302,7 +310,7 @@ func TestShip_OnBaseBranchPushesWhenPermitted(t *testing.T) {
 	wt := baseWorktree(t, repo, base)
 	cfg := &ShipConfig{AllowBasePush: boolp(true)}
 
-	out := doShip(context.Background(), wt, cfg, okExec, ShipPush, "", "")
+	out := doShip(context.Background(), wt, cfg, okExec, ShipPush)
 	if !strings.Contains(out, "Shipped") {
 		t.Fatalf("allowBasePush should permit the push: %q", out)
 	}
@@ -312,11 +320,33 @@ func TestShip_OnBaseBranchPushesWhenPermitted(t *testing.T) {
 	}
 }
 
+// pr mode pushes and then STOPS. dun does not invoke gh: an expired gh token
+// does not fail, it starts an OAuth device flow and polls for a code printed
+// into a pipe nobody reads — a 14-minute hang indistinguishable from slow work.
+// The handoff has to name the command a human runs, or the branch is on origin
+// with no indication of what is left to do.
+func TestShip_PRModePushesThenHandsOff(t *testing.T) {
+	_, repo, base := newShipRepo(t)
+	wt := shipWorktree(t, repo)
+
+	out := doShip(context.Background(), wt, nil, okExec, ShipPR)
+	if !strings.Contains(out, "gh pr create --head "+wt.Branch+" --base "+base) {
+		t.Fatalf("the handoff must be a runnable command: %q", out)
+	}
+	if strings.Contains(out, "Opened pull request") {
+		t.Fatalf("dun must not claim to have opened a PR it never opened: %q", out)
+	}
+	heads, _ := git("", "-C", repo, "ls-remote", "--heads", "origin", wt.Branch)
+	if strings.TrimSpace(heads) == "" {
+		t.Fatal("pr mode still has to push the branch — the handoff is worthless without it")
+	}
+}
+
 func TestShip_OnBaseBranchCannotOpenAPR(t *testing.T) {
 	_, repo, base := newShipRepo(t)
 	wt := baseWorktree(t, repo, base)
 
-	out := doShip(context.Background(), wt, nil, okExec, ShipPR, "", "")
+	out := doShip(context.Background(), wt, nil, okExec, ShipPR)
 	if !strings.Contains(out, "cannot be opened") {
 		t.Fatalf("a PR from base onto itself is not a thing: %q", out)
 	}
@@ -327,7 +357,7 @@ func TestShip_NothingToShip(t *testing.T) {
 	wt := &Worktree{Path: repo, BaseBranch: base, repoRoot: repo}
 	cfg := &ShipConfig{AllowBasePush: boolp(true)}
 
-	out := doShip(context.Background(), wt, cfg, okExec, ShipPush, "", "")
+	out := doShip(context.Background(), wt, cfg, okExec, ShipPush)
 	if !strings.Contains(out, "Nothing to ship") {
 		t.Fatalf("an already-pushed branch has nothing to do: %q", out)
 	}
@@ -347,7 +377,7 @@ func TestShip_ReVerifiesWhenBaseMovesDuringChecks(t *testing.T) {
 	gitrun(t, other, "config", "user.name", "o")
 
 	moved := false
-	exec := func(context.Context, string) string {
+	exec := func(context.Context, string) ExecResult {
 		if !moved {
 			moved = true
 			os.WriteFile(filepath.Join(other, "upstream.txt"), []byte("theirs\n"), 0o644)
@@ -355,11 +385,11 @@ func TestShip_ReVerifiesWhenBaseMovesDuringChecks(t *testing.T) {
 			gitrun(t, other, "commit", "-qm", "upstream moved")
 			gitrun(t, other, "push", "-q", "origin", "HEAD:"+base)
 		}
-		return "ok"
+		return ExecResult{Output: "ok"}
 	}
 	cfg := &ShipConfig{Checks: []map[string]string{{"compile": "build"}}}
 
-	out := doShip(context.Background(), wt, cfg, exec, ShipPush, "", "")
+	out := doShip(context.Background(), wt, cfg, exec, ShipPush)
 	if !strings.Contains(out, "moved during the checks") {
 		t.Fatalf("a base that moved mid-check must be noticed: %q", out)
 	}
@@ -397,7 +427,7 @@ func TestShip_ResumesAConflictedRebase(t *testing.T) {
 	gitrun(t, repo, "checkout", "-q", "conflicting")
 
 	wt = &Worktree{Path: repo, Branch: "conflicting", BaseBranch: base, repoRoot: repo}
-	out := doShip(context.Background(), wt, nil, okExec, ShipPush, "", "")
+	out := doShip(context.Background(), wt, nil, okExec, ShipPush)
 	if !strings.Contains(out, "conflict") {
 		t.Fatalf("want a conflict report, got %q", out)
 	}
@@ -407,7 +437,7 @@ func TestShip_ResumesAConflictedRebase(t *testing.T) {
 
 	// The agent resolves it; a bare ship call must pick up where git left off.
 	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("resolved\n"), 0o644)
-	out = doShip(context.Background(), wt, nil, okExec, ShipVerify, "", "")
+	out = doShip(context.Background(), wt, nil, okExec, ShipVerify)
 	if wt.RebaseInProgress() {
 		t.Fatalf("ship should have resumed and finished the rebase: %q", out)
 	}

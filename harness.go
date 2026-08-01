@@ -88,14 +88,28 @@ type Config struct {
 	// (dun --rag / --lsp), above both the built-in default and the config
 	// files. Nothing is persisted — that is what /rag auto is for.
 	AutostartOverride map[string]bool
-	Client      agent.LLMRunner // the LLM (e.g. *llm.Client)
-	System      string          // nil → defaultSystem
-	Exec        ExecBackend     // nil → no exec tool; else adds the built-in exec tool
-	Ask         AskFunc         // nil → no ask_user tool; else adds the human-in-the-loop tool
-	Worktree    *Worktree       // the session worktree (for ship)
-	EnableShip  bool            // add the ship tool (enabled by default)
-	ShipCfg     *ShipConfig     // ship policy + checks; nil = permissive defaults, no checks
-	SessionFile string          // persist the conversation here (resumable); "" = in-memory only
+	Client            agent.LLMRunner // the LLM (e.g. *llm.Client)
+	// ClientFor builds a runner for a NAMED model, so a sub-agent can run on a
+	// cheaper one than its parent. A factory rather than a client, because the
+	// dun package does not know the endpoint or the key — cmd/dun does. nil, or
+	// an error, means the child falls back to Client.
+	ClientFor func(model string) (agent.LLMRunner, error)
+	// ChildModel is the default model for spawned sub-agents. Empty = the
+	// parent's. A spawn may override it.
+	ChildModel string
+	// Parent, when set, makes this harness a CHILD of that one: it shares the
+	// parent's MCP manager (same worktree root ⇒ same servers, so no second
+	// index), reports to it, and gets the child tool set instead of the root's.
+	Parent *Harness
+	// AgentID is this child's id within its parent. Zero for a root.
+	AgentID     int
+	System      string      // nil → defaultSystem
+	Exec        ExecBackend // nil → no exec tool; else adds the built-in exec tool
+	Ask         AskFunc     // nil → no ask_user tool; else adds the human-in-the-loop tool
+	Worktree    *Worktree   // the session worktree (for ship)
+	EnableShip  bool        // add the ship tool (enabled by default)
+	ShipCfg     *ShipConfig // ship policy + checks; nil = permissive defaults, no checks
+	SessionFile string      // persist the conversation here (resumable); "" = in-memory only
 	// DockerImage is the image used when /docker on is toggled mid-session.
 	// Set from the --docker flag at construction so the runtime toggle has
 	// a default. Empty → "golang:1.23".
@@ -117,6 +131,14 @@ type Config struct {
 	// (see contextBudget) ran for 29 minutes, wrote 154k characters of summary,
 	// and left 5 entries alive without a single line of output saying so.
 	OnCompaction func(CompactionNote)
+	// OnAgents fires whenever a sub-agent changes — spawned, status, settled,
+	// dismissed. The human's only view of what children are costing, since
+	// agent_monitor is model-facing and there is no concurrency cap.
+	OnAgents func([]AgentInfo)
+	// OnJobs fires when a background job starts, finishes, or is re-tuned. Same
+	// argument as OnAgents: exec_monitor is model-facing, so without this a job
+	// the human can see running has no place to be seen from.
+	OnJobs func([]JobInfo)
 	// OnRetry fires while dun is waiting on the provider — every backoff, the
 	// recovery, and the give-up, at both request and turn scope. Without it the
 	// wait is invisible: the retries are logged, and a TUI's logs are not on
@@ -135,7 +157,19 @@ type Harness struct {
 	wake    chan struct{} // signals a driver to run a Continue turn (bg job done)
 	bgMu    sync.Mutex
 	bgSeq   int
-	bgRun   int // background jobs still running
+	bgRun   int            // background jobs still running
+	bgJobs  map[int]*bgJob // every job this session started, by id (see bgjob.go)
+
+	// Sub-agents (see subagent.go and plan/subagents.md). agMu guards both.
+	// ownsMgr is false for a CHILD: it shares its parent's manager, and closing
+	// that from a child would stop the servers out from under the parent.
+	agMu    sync.Mutex
+	agSeq   int
+	agents  map[int]*subAgent
+	ownsMgr bool
+	parent  *Harness  // nil for a root
+	agentID int       // this harness's id within its parent; 0 for a root
+	self    *subAgent // this harness's own record IN its parent; nil for a root
 	noteMu  sync.Mutex
 	queue   []queued // messages not yet delivered to the model
 
@@ -529,28 +563,7 @@ func (h *Harness) healOrphanToolCalls(ctx context.Context) int {
 	return len(orphans)
 }
 
-// startBackground runs command asynchronously via backend (a container when
-// DockerExec); on completion it injects a completion notification and wakes the
-// driver. Returns the job id.
-func (h *Harness) startBackground(backend ExecBackend, command string) int {
-	h.bgMu.Lock()
-	h.bgSeq++
-	id := h.bgSeq
-	h.bgRun++
-	h.bgMu.Unlock()
-	go func() {
-		out := strings.TrimSpace(backend.Run(context.Background(), command))
-		h.bgMu.Lock()
-		h.bgRun--
-		h.bgMu.Unlock()
-		h.Notify(fmt.Sprintf("background job #%d finished — `%s`:\n%s", id, command, out))
-		select {
-		case h.wake <- struct{}{}:
-		default: // wake is buffered; a full buffer just means a turn is already due
-		}
-	}()
-	return id
-}
+// startBackground lives in bgjob.go, with the job registry and the monitor.
 
 // Start spawns the servers, waits for tool discovery, and builds the Session.
 func Start(ctx context.Context, cfg Config) (*Harness, error) {
@@ -576,23 +589,30 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 			}
 		}
 	}
-	mgr := mcpmgr.NewManager()
+	// A CHILD shares its parent's manager. Same worktree root means the same
+	// servers answer the same questions, so spawning a second set would pay for
+	// a second poly-lsp index and a second raglit ingest to get identical
+	// answers. It also must not start or stop them: that is the parent's.
+	mgr, ownsMgr := cfg.Parent.managerFor()
 	store, err := openSessionStore(cfg.SessionFile)
 	if err != nil {
-		mgr.Close()
+		if ownsMgr {
+			mgr.Close()
+		}
 		return nil, fmt.Errorf("dun: open session: %w", err)
 	}
 	store.onNotify = cfg.OnNotify
 	h := &Harness{mgr: mgr, store: store, client: cfg.Client,
 		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
-		cfg: cfg, specs: servers, lastErr: map[string]string{}}
+		cfg: cfg, specs: servers, lastErr: map[string]string{},
+		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID}
 
 	// Autostart is best-effort by design: a missing binary or a server that
 	// refuses to run is worth SAYING (it lands in Servers()[i].Err, which the
 	// UI reports), but it is not worth refusing to start the session over. The
 	// user can fix the binary and /rag on without losing the session.
 	for _, s := range servers {
-		if !s.Autostart {
+		if !s.Autostart || !ownsMgr {
 			continue
 		}
 		if err := h.startServer(ctx, s); err != nil {
@@ -640,6 +660,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Store:            store,
 		Runner:           cfg.Client,
 		OnAssistantToken: cfg.OnToken,
+		OnUsage:          h.noteUsage,
 		MaxTurns:         maxTurns(),
 		Build:            measuredBuild(shaper),
 		ToolFormat:       toolFormat(),
@@ -648,6 +669,17 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// running, and that changes mid-session (/rag on, /lsp off). applyTools
 	// owns those four fields; nothing else may set them.
 	h.applyTools()
+	// Children of a resumed session are gone as processes but their transcripts
+	// are not. Register them as stopped and SAY so — a model that spawned an
+	// agent last session must not assume it is still working.
+	if !ownsMgr {
+		return h, nil // a child does not have children: depth stays at 1
+	}
+	h.restoreAgents()
+	if note := h.stoppedAgentsNote(); note != "" {
+		h.Aside(note)
+		h.agentsChanged()
+	}
 	return h, nil
 }
 
@@ -667,7 +699,28 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 }
 
 // Close shuts down the MCP servers.
-func (h *Harness) Close() { h.mgr.Close() }
+// Close stops this harness's children, then its servers.
+//
+// Children first, and unconditionally: a session that ends KILLS them (see
+// plan/subagents.md), and a child left running after its parent's servers are
+// gone would keep working against tools that no longer answer.
+func (h *Harness) Close() {
+	h.closeAgents()
+	// A child does not own the manager it borrowed. Closing it here would stop
+	// the servers out from under the parent that lent them.
+	if h.ownsMgr {
+		h.mgr.Close()
+	}
+}
+
+// managerFor gives a child its parent's manager, or a root a fresh one. The
+// bool is whether the caller OWNS it, which is what decides who may close it.
+func (p *Harness) managerFor() (*mcpmgr.Manager, bool) {
+	if p == nil {
+		return mcpmgr.NewManager(), true
+	}
+	return p.mgr, false
+}
 
 // Reset clears the session store, starting a fresh conversation log.
 func (h *Harness) Reset() { h.store.Reset() }
@@ -753,7 +806,6 @@ func (h *Harness) ToolNames() []string {
 	return names
 }
 
-
 // dun's coding-agent persona + tool guidance.
 //
 // Assembled per session rather than fixed, because the tool families are not
@@ -762,16 +814,29 @@ func (h *Harness) ToolNames() []string {
 // around node_query, calls it, and gets "unknown tool".
 const (
 	systemPreamble = `You are dun, a coding agent working inside an isolated workspace.`
-	systemCode  = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
-	systemShell = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops; call the prompt tool for its language reference, help to list commands."
-	systemDocs  = "\n- docs (raglit): search the document/knowledge index; ingest to add sources."
-	systemExec  = "\n- exec: run a shell command (build/test/git/ls) in the workspace. The working directory is the isolated worktree root — edits you make are visible to exec. Use it to VERIFY your edits — e.g. run the build and tests after changing code — and to run git."
-	systemAsk   = "\n- ask_user: when the task is ambiguous or a decision is the user's to make (which approach, which file, is this OK to change), call ask_user with a clear question and optional options INSTEAD of guessing."
+	systemCode     = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
+	systemShell    = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops; call the prompt tool for its language reference, help to list commands."
+	systemDocs     = "\n- docs (raglit): search the document/knowledge index; ingest to add sources."
+	systemAsk      = "\n- ask_user: when the task is ambiguous or a decision is the user's to make (which approach, which file, is this OK to change), call ask_user with a clear question and optional options INSTEAD of guessing."
 
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
 
 	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed."
 	systemWork     = "\n\nWork step by step: read what you need before changing it, make minimal precise edits, and verify by running the build/tests with exec. Be concise. When the task is done, briefly summarize what you changed."
+)
+
+// The exec pair are vars, not consts, because the deadline they quote is one
+// number that must not be duplicated: a prompt that promises a limit the code
+// does not enforce is worse than one that says nothing.
+var (
+	systemExec = "\n- exec: run a shell command (build/test/git/ls) in the workspace. The working directory is " +
+		"the isolated worktree root — edits you make are visible to exec. Use it to VERIFY your edits — e.g. run " +
+		"the build and tests after changing code — and to run git. A foreground command is KILLED after " +
+		defaultExecTimeout.String() + ": never run anything interactive (it has no terminal and no input, so it " +
+		"can only hang), and put long work in background:true, which has no limit."
+	systemMonitor = "\n- exec_monitor: check on a background job, or change what it tells you. A job stays silent " +
+		"until it finishes; ask for progress with buffer_bytes, narrow it with grep, or mute it with ignore. Its " +
+		"full output is on disk — grep the log path with exec rather than pulling a large log in whole."
 )
 
 // systemFor describes only the tool families actually present. exec and ask_user
@@ -808,7 +873,10 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree) string {
 	if have[ServerDocs] {
 		b.WriteString(systemDocs)
 	}
-	b.WriteString(systemExec)
+	if exec != nil {
+		b.WriteString(systemExec)
+		b.WriteString(systemMonitor)
+	}
 	b.WriteString(systemAsk)
 	if have[ServerDocs] {
 		b.WriteString(systemDocsNote)
@@ -850,6 +918,24 @@ func (n CompactionNote) String() string {
 // it just summarized — spending an LLM call each time to destroy context. The
 // budget is wrong, and saying so beats letting it grind.
 const compactionThrashTurns = 2
+
+// noteUsage keeps a CHILD's token tally live. It fires after every chat round,
+// not just when a turn finishes, which is what makes the parent's view of a
+// child move while the child is still working.
+//
+// Why it matters more than it sounds: agent_monitor's report is the only thing a
+// parent has to judge a child by, and its two moving parts are elapsed time and
+// tokens. With both frozen, "still working" and "stopped making progress" print
+// the same line — which is exactly how a wedged child went unnoticed for 15
+// minutes while its parent polled it three times.
+//
+// A root harness has no record in a parent, so this is a child-only signal.
+func (h *Harness) noteUsage(u agent.TokenUsage) {
+	if h.self == nil {
+		return
+	}
+	h.self.setTokens(u.Total)
+}
 
 // noteCompaction records a fold, decorates it with the thrash counters, and
 // hands it to the UI.

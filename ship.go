@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -36,7 +35,8 @@ import (
 //
 // MODES are the terminal state, and nothing else varies between them: verify
 // stops after the checks, push lands the branch on origin, pr lands it and
-// opens/updates the pull request. `allow` in the config is the policy surface —
+// hands the pull request back to a human (see handOffPR — dun does not run gh).
+// `allow` in the config is the policy surface —
 // a repo says "agents open PRs, they do not push" by listing modes, and a
 // sub-agent is handed allow:["verify"] so it can run the whole pipeline and
 // land nothing.
@@ -49,7 +49,7 @@ const (
 	ShipVerify ShipMode = "verify"
 	// ShipPush lands the current branch on origin.
 	ShipPush ShipMode = "push"
-	// ShipPR lands the branch and opens (or reports) its pull request.
+	// ShipPR lands the branch and hands the pull request off to a human.
 	ShipPR ShipMode = "pr"
 )
 
@@ -174,21 +174,18 @@ func shipToolDef(cfg *ShipConfig) llm.ToolDef {
 		" (default " + string(cfg.defaultMode()) + ")."
 	props := map[string]any{
 		"mode": map[string]any{
-			"type":        "string",
-			"enum":        names,
-			"description": "terminal state: verify runs the checks and pushes nothing; push lands the branch; pr lands it and opens a pull request",
+			"type": "string",
+			"enum": names,
+			"description": "terminal state: verify runs the checks and pushes nothing; push lands the branch; " +
+				"pr lands it and reports the command a human runs to open the pull request",
 		},
-	}
-	if cfg.permits(ShipPR) {
-		props["title"] = map[string]any{"type": "string", "description": "pr mode: PR title (default: derived from the commits)"}
-		props["body"] = map[string]any{"type": "string", "description": "pr mode: PR body — what changed and why"}
 	}
 	td.Function.Parameters = map[string]any{"type": "object", "properties": props}
 	return td
 }
 
 // withShip wraps a dispatcher so the built-in "ship" tool is handled locally.
-func withShip(inner agent.ToolDispatcher, wt *Worktree, cfg *ShipConfig, execFn func(ctx context.Context, command string) string, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+func withShip(inner agent.ToolDispatcher, wt *Worktree, cfg *ShipConfig, execFn func(ctx context.Context, command string) ExecResult, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "ship" {
 			return inner(ctx, tc)
@@ -197,9 +194,7 @@ func withShip(inner agent.ToolDispatcher, wt *Worktree, cfg *ShipConfig, execFn 
 			return "ERROR: ship needs a git repository", nil
 		}
 		var args struct {
-			Mode  string `json:"mode"`
-			Title string `json:"title"`
-			Body  string `json:"body"`
+			Mode string `json:"mode"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 
@@ -216,7 +211,7 @@ func withShip(inner agent.ToolDispatcher, wt *Worktree, cfg *ShipConfig, execFn 
 			mode = m
 		}
 
-		result := doShip(ctx, wt, cfg, execFn, mode, args.Title, args.Body)
+		result := doShip(ctx, wt, cfg, execFn, mode)
 		if onCall != nil {
 			onCall("ship", map[string]any{"mode": string(mode)}, result)
 		}
@@ -226,7 +221,7 @@ func withShip(inner agent.ToolDispatcher, wt *Worktree, cfg *ShipConfig, execFn 
 
 // doShip runs the pipeline: resume → clean → fetch → rebase → checks → (base
 // moved? round again) → terminal action.
-func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx context.Context, command string) string, mode ShipMode, title, body string) string {
+func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx context.Context, command string) ExecResult, mode ShipMode) string {
 	// Resuming comes FIRST, before anything reads the branch: a stopped rebase
 	// leaves HEAD detached, so every other question ("what branch am I on?")
 	// has no answer until the rebase is finished.
@@ -331,7 +326,7 @@ func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx 
 				return fmt.Sprintf("Checks passed but the push failed: %s", out)
 			}
 		}
-		return fmt.Sprintf("%s\n%s", openOrUpdatePR(ctx, wt, head, base, title, body), verified)
+		return fmt.Sprintf("%s\n%s", handOffPR(head, base), verified)
 	}
 	return "ERROR: unknown ship mode " + string(mode)
 }
@@ -355,7 +350,7 @@ func checkSummary(cfg *ShipConfig) string {
 // whole wave completes before its failures are reported: if compile and lint
 // both fail the model should fix both in one turn, not discover the second
 // after fixing the first. Returns "" when everything passed.
-func runChecks(ctx context.Context, cfg *ShipConfig, execFn func(ctx context.Context, command string) string) string {
+func runChecks(ctx context.Context, cfg *ShipConfig, execFn func(ctx context.Context, command string) ExecResult) string {
 	if cfg == nil || len(cfg.Checks) == 0 {
 		return ""
 	}
@@ -365,8 +360,7 @@ func runChecks(ctx context.Context, cfg *ShipConfig, execFn func(ctx context.Con
 		if len(names) == 0 {
 			continue
 		}
-		outs := make([]string, len(names))
-		fails := make([]bool, len(names))
+		outs := make([]ExecResult, len(names))
 		var wg sync.WaitGroup
 		for j, name := range names {
 			wg.Add(1)
@@ -374,18 +368,20 @@ func runChecks(ctx context.Context, cfg *ShipConfig, execFn func(ctx context.Con
 				defer wg.Done()
 				cctx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
-				out := execFn(cctx, cmd)
-				// The ExecBackend contract reports a non-zero exit inside the
-				// output (see finish); there is no error to inspect.
-				outs[j], fails[j] = out, strings.Contains(out, "[exit:")
+				// Pass/fail is the EXIT CODE. It used to be
+				// strings.Contains(out, "[exit:"), which a check that printed
+				// that marker — a test asserting on exec's own output, say —
+				// turned into a false failure.
+				outs[j] = execFn(cctx, cmd)
 			}(j, wave[name])
 		}
 		wg.Wait()
 
 		var failed []string
 		for j, name := range names {
-			if fails[j] {
-				failed = append(failed, fmt.Sprintf("FAILED %s: %s\n%s", name, wave[name], strings.TrimSpace(outs[j])))
+			if outs[j].Failed() {
+				failed = append(failed, fmt.Sprintf("FAILED %s: %s\n%s",
+					name, wave[name], strings.TrimSpace(outs[j].Render())))
 			}
 		}
 		if len(failed) > 0 {
@@ -396,51 +392,17 @@ func runChecks(ctx context.Context, cfg *ShipConfig, execFn func(ctx context.Con
 	return ""
 }
 
-// openOrUpdatePR opens the branch's pull request, or reports the existing one —
-// the push above already updated it, so an existing PR is a success, not the
-// "already exists" failure `gh pr create` would report.
-func openOrUpdatePR(ctx context.Context, wt *Worktree, head, base, title, body string) string {
-	if url, err := ghRun(ctx, wt.Path, "pr", "view", head, "--json", "url", "--jq", ".url"); err == nil && url != "" {
-		return "Shipped. Pull request updated by the push: " + url
-	}
-	if strings.TrimSpace(title) == "" {
-		title, body = prFromCommits(wt, base)
-	}
-	args := []string{"pr", "create", "--head", head, "--base", base, "--title", title, "--body", body}
-	out, err := ghRun(ctx, wt.Path, args...)
-	if err != nil {
-		return fmt.Sprintf("Shipped: %s is on origin, but opening the PR failed:\n%s\nOpen it manually: "+
-			"gh pr create --head %s --base %s", head, out, head, base)
-	}
-	return "Shipped. Opened pull request: " + out
-}
-
-// prFromCommits derives a title and body from what is actually being shipped.
-// The commits are the source of truth for what changed; asking the model to
-// restate it invites a summary that disagrees with the diff.
-func prFromCommits(wt *Worktree, base string) (title, body string) {
-	log, err := git("", "-C", wt.Path, "log", "--reverse", "--format=%s", "origin/"+base+"..HEAD")
-	if err != nil {
-		return "dun: " + wt.Branch, ""
-	}
-	subjects := strings.Split(strings.TrimSpace(log), "\n")
-	if len(subjects) == 0 || subjects[0] == "" {
-		return "dun: " + wt.Branch, ""
-	}
-	title = subjects[0]
-	if len(subjects) > 1 {
-		body = "- " + strings.Join(subjects, "\n- ")
-	}
-	return title, body
-}
-
-// ghRun invokes the GitHub CLI. Detached for the same reason every other spawn
-// is: `gh` prompts for auth on /dev/tty, and a prompt on dun's terminal steals
-// the TUI's keystrokes (see detach.go).
-func ghRun(ctx context.Context, dir string, args ...string) (string, error) {
-	c := exec.CommandContext(ctx, "gh", args...)
-	c.Dir = dir
-	killGroup(detach(c))
-	out, err := c.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+// handOffPR ends a pr-mode ship: the branch is on origin, and the pull request
+// is the human's to open.
+//
+// dun used to shell out to `gh pr view` / `gh pr create` here. It no longer
+// invokes gh at all. gh owns an auth lifecycle dun cannot participate in — when
+// its stored token expires, `gh` does not fail, it starts an OAuth device flow
+// and polls for a code that is printed into a pipe no human is reading. That is
+// indistinguishable from slow work, and it is how a session came to sit idle
+// for 14 minutes. Printing the command a person can run is strictly more honest
+// than a tool that hangs when its credentials rot.
+func handOffPR(head, base string) string {
+	return fmt.Sprintf("Shipped. %s is on origin.\ndun does not open pull requests — run this yourself:\n"+
+		"  gh pr create --head %s --base %s", head, head, base)
 }
