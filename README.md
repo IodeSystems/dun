@@ -286,8 +286,13 @@ Modes are the terminal state — `verify` (checks only, pushes nothing), `push`,
 
 Ship requires a clean tree (an untracked file is usually one the agent forgot to
 add), resumes a conflicted rebase on its own, and re-verifies if origin moved
-while the checks were running. Pushing the base branch directly is refused
-unless `"allowBasePush": true`.
+while the checks were running.
+
+It ships the branch you are ON, against that branch's own upstream — dun never
+switches branches. A branch with no upstream has nothing to verify against, so
+it falls back to the base branch, and with no remote for that either the checks
+are the whole of ship. What an agent may do is declared with `allow`, not by
+guessing from branch names.
 
 Next: run the MCP servers inside the container too. See `plan/plan.md`.
 

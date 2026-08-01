@@ -35,9 +35,6 @@
     "//default": "The mode used when the model names none. Must be one of allow. Omit for push.",
     "default": "push",
 
-    "//allowBasePush": "Permit pushing the base branch itself (commits made straight to main). Off by default: ship runs the whole pipeline, then refuses and tells the agent to move its commits onto a branch.",
-    "allowBasePush": false,
-
     "//checkTimeout": "Bounds ONE check. Go duration string; omit for 10m.",
     "checkTimeout": "10m",
 

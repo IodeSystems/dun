@@ -62,12 +62,6 @@ type ShipConfig struct {
 	// Default is the mode used when the model names none. Empty = push (or the
 	// first permitted mode, when push is not one).
 	Default ShipMode `json:"default,omitempty"`
-	// AllowBasePush permits pushing the base branch itself — the
-	// commit-straight-to-main case. A pointer so a local layer can turn it back
-	// OFF, the same reason ServerSpec.Autostart is one. nil/false = refuse, and
-	// tell the agent to move its commits onto a branch: landing on a shared
-	// trunk unreviewed should be something a repo opts into, not a fallback.
-	AllowBasePush *bool `json:"allowBasePush,omitempty"`
 	// CheckTimeout bounds ONE check (a Go duration string). Empty = 10m.
 	CheckTimeout string `json:"checkTimeout,omitempty"`
 	// Skip names checks to omit, BY NAME.
@@ -115,10 +109,6 @@ func (c *ShipConfig) defaultMode() ShipMode {
 		return ShipPush
 	}
 	return c.allowed()[0]
-}
-
-func (c *ShipConfig) allowBasePush() bool {
-	return c != nil && c.AllowBasePush != nil && *c.AllowBasePush
 }
 
 func (c *ShipConfig) checkTimeout() time.Duration {
@@ -242,8 +232,28 @@ func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx 
 	if head == "" {
 		return "ERROR: HEAD is detached. Check out a branch before shipping."
 	}
-	onBase := head == base
-	upstream := "origin/" + base
+
+	// Ship the branch you are ON, against ITS OWN upstream.
+	//
+	// dun never switches branches — that is deliberate — so the branch HEAD is
+	// on is the branch being shipped, and there is no second "base" to protect.
+	// The old rule refused to push whenever head == base, which in a
+	// --no-worktree session is ALWAYS true (base is captured from HEAD at
+	// startup), so ship ran the whole pipeline and then declined to do its job
+	// on a branch that was the user's to push. allowBasePush is gone with it:
+	// a repo that does not want agents pushing says so with `allow`, which is
+	// the policy surface, rather than with a flag about branch identity.
+	//
+	// A branch with no upstream has nothing to verify against — nobody has
+	// pushed it — so it falls back to the BASE, which is what a fresh worktree
+	// branch is meant to integrate with. If there is no remote for that either,
+	// there is nothing to fetch and the checks are the whole of ship.
+	upstream := wt.Upstream(head)
+	remoteBranch := strings.TrimPrefix(upstream, "origin/")
+	if upstream == "" && wt.RemoteHead(base) != "" {
+		upstream, remoteBranch = "origin/"+base, base
+	}
+	tracked := upstream != ""
 
 	// The clean-tree gate is first because everything after it assumes the
 	// commits ARE the work. An uncommitted file is not shipped, and an
@@ -255,11 +265,11 @@ func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx 
 	}
 
 	var rounds []string
-	for round := 1; ; round++ {
-		if out := wt.Fetch(); strings.HasPrefix(out, "git fetch:") {
+	for round := 1; tracked; round++ {
+		if out := wt.Fetch(remoteBranch); strings.HasPrefix(out, "git fetch:") {
 			return fmt.Sprintf("Fetch failed: %s\nShip cannot verify against a base it could not fetch.", out)
 		}
-		before := wt.RemoteHead(base)
+		before := wt.RemoteHead(remoteBranch)
 
 		if out := wt.RebaseOnto(upstream); strings.Contains(out, "git rebase:") {
 			return fmt.Sprintf("Rebase onto %s conflicts. Resolve the conflicts in the worktree, commit nothing "+
@@ -273,10 +283,10 @@ func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx 
 
 		// Did the base move while we were checking? If it did, what we just
 		// verified is not what would land.
-		if out := wt.Fetch(); strings.HasPrefix(out, "git fetch:") {
+		if out := wt.Fetch(remoteBranch); strings.HasPrefix(out, "git fetch:") {
 			return fmt.Sprintf("Checks passed, but the pre-push fetch failed: %s\nNot pushing — the base may have moved.", out)
 		}
-		if wt.RemoteHead(base) == before {
+		if wt.RemoteHead(remoteBranch) == before {
 			break
 		}
 		rounds = append(rounds, fmt.Sprintf("round %d: %s moved during the checks, re-verifying", round, upstream))
@@ -287,6 +297,13 @@ func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx 
 		}
 	}
 
+	// An untracked branch skips the loop entirely, so its checks run here.
+	if !tracked {
+		if fail := runChecks(ctx, cfg, execFn); fail != "" {
+			return fail
+		}
+	}
+
 	verified := checkSummary(cfg)
 	if len(rounds) > 0 {
 		verified += "\n" + strings.Join(rounds, "\n")
@@ -294,29 +311,30 @@ func doShip(ctx context.Context, wt *Worktree, cfg *ShipConfig, execFn func(ctx 
 
 	switch mode {
 	case ShipVerify:
+		if !tracked {
+			return fmt.Sprintf("Verified. %s has no upstream, so there was nothing to rebase onto — %s\n"+
+				"Nothing pushed (mode: verify).", head, verified)
+		}
 		return fmt.Sprintf("Verified. Rebased onto %s and %s\nNothing pushed (mode: verify).", upstream, verified)
 
 	case ShipPush:
-		if onBase && !cfg.allowBasePush() {
-			return fmt.Sprintf("Verified, but NOT pushed: you are on %s, the base branch, and this repository does "+
-				"not permit agents to push it directly.\nMove your commits onto a branch "+
-				"(git switch -c <name>) and ship again.\n\n%s", base, verified)
-		}
-		if !wt.NeedsPush(head) {
+		if tracked && !wt.NeedsPush(head) {
 			return fmt.Sprintf("Nothing to ship — %s already matches origin/%s.\n%s", head, head, verified)
 		}
-		// A rebase rewrites the branch, so the ref no longer fast-forwards and
-		// a plain push is REJECTED. --force-with-lease is the correct first
-		// attempt (a compare-and-swap on the ref), not a fallback after failure.
-		// The base branch is the exception: it must only ever fast-forward.
-		out := wt.Push(head, !onBase)
+		// --force-with-lease whenever we rebased: the rebase rewrote the branch,
+		// so a plain push can be rejected, and a lease is a compare-and-swap
+		// rather than a blind force — if the ref moved since the fetch two lines
+		// up, the push is REFUSED. An untracked branch has no ref to race.
+		out := wt.Push(head, tracked)
 		if strings.HasPrefix(out, "git push:") {
 			return fmt.Sprintf("Checks passed but the push failed: %s", out)
 		}
 		return fmt.Sprintf("Shipped. %s pushed to origin.\n%s\n\n%s", head, verified, out)
 
 	case ShipPR:
-		if onBase {
+		// A PR from a branch onto itself is not a policy, it is a
+		// contradiction — so this check stays even though allowBasePush is gone.
+		if head == base {
 			return fmt.Sprintf("Verified, but a pull request cannot be opened from %s onto itself. "+
 				"Move your commits onto a branch (git switch -c <name>) and ship again.\n\n%s", base, verified)
 		}

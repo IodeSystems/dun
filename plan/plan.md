@@ -480,10 +480,20 @@ isolation forces the split there).
 - **A ship mode is a terminal state, and `allow` is the policy surface.**
   verify/push/pr differ in nothing but where they stop. A repo says "agents open
   PRs, they do not push" by listing modes, which is also how a sub-agent is
-  constrained. Pushing the base branch is its own opt-in (`allowBasePush`,
-  default off): commits made straight to main are DETECTED and refused, with the
-  pipeline still run, because landing on a shared trunk unreviewed should be
-  something a repo asks for, not a fallback.
+  constrained.
+- **Ship the branch you are ON, against ITS OWN upstream** (USER, 2026-08-01).
+  dun never switches branches — deliberately — so the branch HEAD is on IS the
+  branch being shipped and there is no second "base" to protect. `allowBasePush`
+  is GONE: it refused to push whenever `head == base`, which in a
+  `--no-worktree` session is true BY CONSTRUCTION (base is captured from HEAD at
+  startup), so ship ran the entire pipeline and then declined to do its job on a
+  branch that was the user's to push. A repo that does not want agents pushing
+  says so with `allow`, not with a rule about branch identity. The rebase target
+  is the branch's tracking ref; a branch with no upstream falls back to the base
+  (what a fresh worktree branch is meant to integrate with), and with no remote
+  for that either the checks are the whole of ship. The one head==base check
+  that survives is in `pr` mode, because a PR from a branch onto itself is a
+  contradiction rather than a policy.
 - **Checks are serial waves of parallel commands, and the shape carries the
   semantics** — the array is ordered, each object is not. A wave reports EVERY
   failure in it (compile and lint broken is two things to fix in one turn, not a

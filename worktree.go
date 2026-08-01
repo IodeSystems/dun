@@ -29,6 +29,21 @@ type Worktree struct {
 	Mounts []MountSpec
 }
 
+// WorktreeInPlace creates a pass-through Worktree pointing at repoDir itself.
+// It detects the git repo root and current branch without creating an actual
+// git worktree. Used when --ship is passed without --worktree: the agent works
+// in the checked-out directory but still needs ship's verify pipeline.
+func WorktreeInPlace(repoDir string) (wt *Worktree, isRepo bool) {
+	top, terr := git("", "-C", repoDir, "rev-parse", "--show-toplevel")
+	if terr != nil {
+		return &Worktree{Path: repoDir}, false // not a git repo
+	}
+	root := strings.TrimSpace(top)
+	baseBranch, _ := git("", "-C", root, "rev-parse", "--abbrev-ref", "HEAD")
+	baseBranch = strings.TrimSpace(baseBranch)
+	return &Worktree{Path: repoDir, BaseBranch: baseBranch, repoRoot: root}, true
+}
+
 // NewWorktree creates a fresh worktree+branch off repoDir's HEAD. If repoDir is
 // not inside a git repo, it returns a pass-through Worktree at repoDir (no
 // isolation) and isRepo=false.
@@ -147,12 +162,29 @@ func (w *Worktree) Commit(message string) string {
 	return out
 }
 
-// Fetch updates origin/<baseBranch> from the remote. Returns output or error.
-func (w *Worktree) Fetch() string {
+// Upstream is the remote-tracking branch of branch ("origin/main"), or "" when
+// it has none. This is what decides whether ship has anything to verify
+// against: a branch nobody has pushed has no remote history to rebase onto.
+func (w *Worktree) Upstream(branch string) string {
+	if w.repoRoot == "" {
+		return ""
+	}
+	out, err := git("", "-C", w.Path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// Fetch updates origin/<branch> from the remote. Returns output or error.
+func (w *Worktree) Fetch(branch string) string {
 	if w.repoRoot == "" {
 		return "not a git repo"
 	}
-	out, err := git("", "-C", w.Path, "fetch", "origin", w.BaseBranch)
+	if branch == "" {
+		branch = w.BaseBranch
+	}
+	out, err := git("", "-C", w.Path, "fetch", "origin", branch)
 	if err != nil {
 		return "git fetch: " + err.Error()
 	}
@@ -284,8 +316,6 @@ func (w *Worktree) Push(branch string, lease bool) string {
 	}
 	return strings.TrimSpace(out)
 }
-
-
 
 func git(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)

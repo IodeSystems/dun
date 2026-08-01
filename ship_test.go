@@ -18,8 +18,6 @@ func mkCall(name, args string) llm.ToolCall {
 	return tc
 }
 
-func boolp(b bool) *bool { return &b }
-
 // newShipRepo builds a repo with a real bare "origin" and returns both plus the
 // base branch name (git's default differs by version, so it is read, not
 // assumed).
@@ -75,9 +73,6 @@ func TestShipConfig_Defaults(t *testing.T) {
 		if !c.permits(m) {
 			t.Errorf("nil config must permit %q", m)
 		}
-	}
-	if c.allowBasePush() {
-		t.Error("pushing the base branch must be opt-in")
 	}
 	if c.checkTimeout() != defaultCheckTimeout {
 		t.Errorf("timeout = %v, want %v", c.checkTimeout(), defaultCheckTimeout)
@@ -289,30 +284,17 @@ func baseWorktree(t *testing.T, repo, base string) *Worktree {
 	return wt
 }
 
-// Commits made directly on the trunk: the pipeline still runs, and the push is
-// what gets refused. "Deal with it" means detect and decline, not silently push.
-func TestShip_OnBaseBranchRefusesPushByDefault(t *testing.T) {
+// Commits made directly on the branch dun started on — the ordinary case for a
+// --no-worktree session. It ships. dun never switches branches, so the branch
+// HEAD is on IS the branch being shipped; refusing it was refusing the job, and
+// in an in-place session "head == base" is true by construction.
+func TestShip_ShipsTheBranchYouAreOn(t *testing.T) {
 	origin, repo, base := newShipRepo(t)
 	wt := baseWorktree(t, repo, base)
 
 	out := doShip(context.Background(), wt, nil, okExec, ShipPush)
-	if !strings.Contains(out, "NOT pushed") || !strings.Contains(out, base) {
-		t.Fatalf("pushing the base branch must be refused by default: %q", out)
-	}
-	files, _ := git("", "-C", origin, "ls-tree", "--name-only", base)
-	if strings.Contains(files, "direct.txt") {
-		t.Fatal("the base branch was pushed without allowBasePush")
-	}
-}
-
-func TestShip_OnBaseBranchPushesWhenPermitted(t *testing.T) {
-	origin, repo, base := newShipRepo(t)
-	wt := baseWorktree(t, repo, base)
-	cfg := &ShipConfig{AllowBasePush: boolp(true)}
-
-	out := doShip(context.Background(), wt, cfg, okExec, ShipPush)
 	if !strings.Contains(out, "Shipped") {
-		t.Fatalf("allowBasePush should permit the push: %q", out)
+		t.Fatalf("the branch you are on is the branch you ship: %q", out)
 	}
 	files, _ := git("", "-C", origin, "ls-tree", "--name-only", base)
 	if !strings.Contains(files, "direct.txt") {
@@ -355,9 +337,7 @@ func TestShip_OnBaseBranchCannotOpenAPR(t *testing.T) {
 func TestShip_NothingToShip(t *testing.T) {
 	_, repo, base := newShipRepo(t)
 	wt := &Worktree{Path: repo, BaseBranch: base, repoRoot: repo}
-	cfg := &ShipConfig{AllowBasePush: boolp(true)}
-
-	out := doShip(context.Background(), wt, cfg, okExec, ShipPush)
+	out := doShip(context.Background(), wt, nil, okExec, ShipPush)
 	if !strings.Contains(out, "Nothing to ship") {
 		t.Fatalf("an already-pushed branch has nothing to do: %q", out)
 	}
@@ -476,16 +456,83 @@ func TestLoadShip_LayersFieldByField(t *testing.T) {
 	}
 }
 
-// A local layer must be able to turn a permission back OFF, which a plain bool
-// cannot express.
-func TestMergeShip_LocalCanRevokeBasePush(t *testing.T) {
-	got := mergeShip(ShipConfig{AllowBasePush: boolp(true)}, ShipConfig{AllowBasePush: boolp(false)})
-	if got.allowBasePush() {
-		t.Error("a later layer must be able to revoke allowBasePush")
+// A later layer overrides what it states and inherits what it does not.
+func TestMergeShip_LaterLayerOverridesWhatItStates(t *testing.T) {
+	got := mergeShip(ShipConfig{Default: ShipPush}, ShipConfig{Default: ShipVerify})
+	if got.Default != ShipVerify {
+		t.Errorf("a later layer must win where it speaks, got %q", got.Default)
 	}
-	// …and a layer that says nothing inherits.
-	got = mergeShip(ShipConfig{AllowBasePush: boolp(true)}, ShipConfig{Default: ShipVerify})
-	if !got.allowBasePush() {
+	got = mergeShip(ShipConfig{Default: ShipPush}, ShipConfig{CheckTimeout: "1m"})
+	if got.Default != ShipPush {
 		t.Error("an unstated field must be inherited, not reset")
+	}
+}
+
+// A feature branch with its OWN upstream rebases onto that upstream, not onto
+// the base. This is the case the old head==base rule could not express: dun
+// never switches branches, so "which branch am I integrating with" is answered
+// by the branch's tracking ref, not by comparing names.
+func TestShip_RebasesOntoTheBranchesOwnUpstream(t *testing.T) {
+	origin, repo, base := newShipRepo(t)
+
+	gitrun(t, repo, "switch", "-q", "-c", "feature-x")
+	os.WriteFile(filepath.Join(repo, "f.txt"), []byte("one\n"), 0o644)
+	gitrun(t, repo, "add", ".")
+	gitrun(t, repo, "commit", "-qm", "feat: one")
+	gitrun(t, repo, "push", "-q", "-u", "origin", "feature-x")
+
+	// Someone else advances the FEATURE branch on origin, and the base too.
+	other := t.TempDir()
+	gitrun(t, other, "clone", "-q", origin, ".")
+	gitrun(t, other, "config", "user.email", "t@t")
+	gitrun(t, other, "config", "user.name", "t")
+	gitrun(t, other, "switch", "-q", "feature-x")
+	os.WriteFile(filepath.Join(other, "theirs.txt"), []byte("theirs\n"), 0o644)
+	gitrun(t, other, "add", ".")
+	gitrun(t, other, "commit", "-qm", "feat: theirs")
+	gitrun(t, other, "push", "-q", "origin", "feature-x")
+
+	// Our own second commit, made locally.
+	os.WriteFile(filepath.Join(repo, "g.txt"), []byte("two\n"), 0o644)
+	gitrun(t, repo, "add", ".")
+	gitrun(t, repo, "commit", "-qm", "feat: two")
+
+	wt := &Worktree{Path: repo, BaseBranch: base, repoRoot: repo}
+	out := doShip(context.Background(), wt, nil, okExec, ShipPush)
+	if !strings.Contains(out, "Shipped") {
+		t.Fatalf("a tracked feature branch should ship: %q", out)
+	}
+	// Their commit survives, which is only true if we rebased onto
+	// origin/feature-x rather than onto the base.
+	files, _ := git("", "-C", origin, "ls-tree", "--name-only", "feature-x")
+	for _, want := range []string{"f.txt", "g.txt", "theirs.txt"} {
+		if !strings.Contains(files, want) {
+			t.Errorf("%s missing from origin/feature-x; files=%q", want, files)
+		}
+	}
+}
+
+// A branch nobody has ever pushed has nothing to verify against. With no
+// upstream and no remote base to fall back on, the checks ARE ship — it must
+// not refuse, and it must not claim to have rebased onto something.
+func TestShip_UntrackedBranchRunsChecksAndPushes(t *testing.T) {
+	origin, repo, _ := newShipRepo(t)
+
+	gitrun(t, repo, "switch", "-q", "-c", "brand-new")
+	os.WriteFile(filepath.Join(repo, "n.txt"), []byte("new\n"), 0o644)
+	gitrun(t, repo, "add", ".")
+	gitrun(t, repo, "commit", "-qm", "feat: brand new")
+
+	wt := &Worktree{Path: repo, BaseBranch: "brand-new", repoRoot: repo}
+	if out := doShip(context.Background(), wt, nil, okExec, ShipVerify); !strings.Contains(out, "no upstream") {
+		t.Errorf("verify should say there was nothing to rebase onto: %q", out)
+	}
+	out := doShip(context.Background(), wt, nil, okExec, ShipPush)
+	if !strings.Contains(out, "Shipped") {
+		t.Fatalf("an untracked branch should still ship: %q", out)
+	}
+	files, _ := git("", "-C", origin, "ls-tree", "--name-only", "brand-new")
+	if !strings.Contains(files, "n.txt") {
+		t.Fatalf("the new branch did not reach origin; files=%q", files)
 	}
 }

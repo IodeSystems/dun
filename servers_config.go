@@ -144,9 +144,6 @@ func mergeShip(prev, next ShipConfig) ShipConfig {
 	if next.Default != "" {
 		prev.Default = next.Default
 	}
-	if next.AllowBasePush != nil {
-		prev.AllowBasePush = next.AllowBasePush
-	}
 	if next.CheckTimeout != "" {
 		prev.CheckTimeout = next.CheckTimeout
 	}
