@@ -3,3 +3,7 @@
 .dun/
 *.sqlite
 dun.local.json
+
+# Compiled test binaries. dun.test (25 MB) was committed by accident in
+# 44ef8fb and git materialised it into every session worktree.
+*.test
