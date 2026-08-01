@@ -146,6 +146,17 @@ buffer offsets, which is what makes the display↔offset mapping exact:
   caret is reverse video rather than a `█` painted over the character it sat on,
   the placeholder shows focused as well as blurred, and ↑ from the first row
   recalls history (ctrl+↑/↓ still do it unconditionally).
+- **shift+enter (USER, 2026-08-01): the terminal DOES send it; bubbletea throws
+  it away.** Measured: `ESC O M` → `KeyRunes "M"` with alt=false — `ESC O`
+  parses as SS3, `M` is not in the SS3 table, and the final byte falls through
+  as a bare rune, byte-identical to pressing the letter M. `ESC [13;2u` and
+  `ESC [27;2;13~` produce nothing at all. So it cannot be a binding, and is
+  rewritten one layer down (`keyfilter.go`) to LF = ctrl+j, which is already the
+  newline key — a spelling, not a meaning. Two traps, both tested: a lone ESC
+  must pass through immediately (holding it to see what follows makes the
+  Escape key wait for the next keystroke), and raw mode becomes OURS, because
+  bubbletea only raws a tty `*os.File` and a wrapped reader is not one — the
+  first attempt left the tty canonical and nothing reached the UI at all.
 - **verified:** `ttydrive` against the real binary — single render, growth to
   two rows on wrap, ctrl+w/ctrl+u, alt+enter. Plus 12 tests, three of them
   regressions for the defects above.
