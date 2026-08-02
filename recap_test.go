@@ -301,3 +301,62 @@ func TestPlanRecap_KeepDoesNotMatchTheRecapCallItself(t *testing.T) {
 		}
 	}
 }
+
+// A prompt line was not enough. Live, with recap fully described in the system
+// prompt: cat (255,720 chars), a failed eval, two help lookups, 902,875 tokens
+// billed, 65,127 active — and no recap. The model ends its turn the moment it
+// has the answer, and nothing in that moment is about its context. So the
+// reminder arrives when it is expensive and NAMES what is costing the most.
+func TestRecapNudge_ArrivesWhenItIsExpensiveAndNamesTheOffender(t *testing.T) {
+	st, _ := openSessionStore("")
+	h := &Harness{store: st, wake: make(chan struct{}, 1)}
+	st.appendSilent(agent.Entry{Kind: agent.KindUser, Content: "how many lines in big.log contain ERROR and why"})
+	st.appendSilent(agent.Entry{Kind: agent.KindToolResult, ToolName: "exec", Content: strings.Repeat("log line ", 30000)})
+
+	// Below the threshold: a small session is never nagged.
+	h.maybeNudgeRecap(1000)
+	if n := h.notes(); len(n) != 0 {
+		t.Fatalf("a small window must not be nudged: %q", n)
+	}
+
+	h.maybeNudgeRecap(40000)
+	notes := h.notes()
+	if len(notes) != 1 {
+		t.Fatalf("a large window should earn exactly one reminder, got %d", len(notes))
+	}
+	msg := notes[0]
+	if !strings.Contains(msg, "from exec") {
+		t.Errorf("the reminder must name what is filling the window: %q", msg)
+	}
+	if !strings.Contains(msg, "how many lines in big.log") {
+		t.Errorf("it must hand over an anchor the model can quote back: %q", msg)
+	}
+	if !strings.Contains(msg, "recap({from:") {
+		t.Errorf("it must show the call, not just mention the idea: %q", msg)
+	}
+
+	// Repeating it every chat round past the threshold would be nagging.
+	h.maybeNudgeRecap(41000)
+	if n := h.notes(); len(n) != 0 {
+		t.Errorf("the same reminder must not repeat without real growth: %q", n)
+	}
+	h.maybeNudgeRecap(60000)
+	if n := h.notes(); len(n) != 1 {
+		t.Errorf("real growth should earn a fresh reminder, got %d", len(n))
+	}
+}
+
+// A big window with no single offender is compaction's problem, not recap's:
+// there is nothing specific to point at, and vague advice is what already
+// failed.
+func TestRecapNudge_SilentWithNoSingleOffender(t *testing.T) {
+	st, _ := openSessionStore("")
+	h := &Harness{store: st, wake: make(chan struct{}, 1)}
+	for i := 0; i < 50; i++ {
+		st.appendSilent(agent.Entry{Kind: agent.KindAssistant, Content: strings.Repeat("x", 500)})
+	}
+	h.maybeNudgeRecap(40000)
+	if n := h.notes(); len(n) != 0 {
+		t.Errorf("no single large entry means nothing to name: %q", n)
+	}
+}

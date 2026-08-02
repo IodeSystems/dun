@@ -194,6 +194,10 @@ type Harness struct {
 	// toolsInit is false until the first rebuild, so the initial tool set is
 	// not announced as a CHANGE — the system prompt already describes it.
 	toolsInit bool
+	// recapNudged is the window size at the last recap reminder, so the same
+	// line is not repeated on every chat round past the threshold.
+	recapMu     sync.Mutex
+	recapNudged int
 	// Compaction counters. compactTurn resets each turn, so >1 is thrashing
 	// rather than a busy session.
 	compactMu   sync.Mutex
@@ -825,6 +829,19 @@ const (
 
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
 
+	// The habit that bites, stated concretely because the general version does
+	// not fire. Measured: a `cat` of a log cost 255,720 characters and 64k of
+	// active window to answer a question whose answer was "30", and the model
+	// only recapped when a human told it to in the task.
+	systemRecap = "\n- recap: replace a stretch of this conversation with a corrected account of it. Call it as soon " +
+		"as a span has stopped earning its place: a big tool result you have taken what you need from (a log " +
+		"you grepped, a file you have read), several attempts that failed before one worked, or a " +
+		"misunderstanding that was cleared up later. Give `from` an exact phrase from the message the churn " +
+		"started after, and `summary` the account you WISH the conversation had — what happened and what is " +
+		"true now. Name results still worth having in `keep` by TOOL NAME or a phrase from the call " +
+		"(\"grep -c\"), not by id. Nothing is lost: it moves to a file. But your summary becomes the only " +
+		"record in context, so it must be accurate — do not round numbers or guess at what you did not read."
+
 	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed."
 	systemWork     = "\n\nWork step by step: read what you need before changing it, make minimal precise edits, and verify by running the build/tests with exec. Be concise. When the task is done, briefly summarize what you changed."
 )
@@ -882,6 +899,7 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree) string {
 		b.WriteString(systemMonitor)
 	}
 	b.WriteString(systemAsk)
+	b.WriteString(systemRecap)
 	if have[ServerDocs] {
 		b.WriteString(systemDocsNote)
 	}
@@ -935,6 +953,9 @@ const compactionThrashTurns = 2
 //
 // A root harness has no record in a parent, so this is a child-only signal.
 func (h *Harness) noteUsage(u agent.TokenUsage) {
+	// A large window earns a reminder that recap exists, naming what is filling
+	// it. See maybeNudgeRecap: the system prompt alone did not move the model.
+	h.maybeNudgeRecap(u.Active)
 	if h.self == nil {
 		return
 	}

@@ -377,3 +377,85 @@ type RecapNote struct {
 	Chars   int
 	Note    string
 }
+
+// ── the nudge ───────────────────────────────────────────────────────
+//
+// A prompt line was not enough. Measured live, with recap fully described in
+// the system prompt: `cat big.log` (255,720 chars), a failed eval, two help
+// lookups and two retries — 902,875 tokens billed, 65,127 active — and the
+// model never called it. That is not a wording problem. The model ends its turn
+// the moment it has the answer, and nothing in that moment is about its context.
+//
+// So the reminder arrives WHEN it is expensive, and it names the specific entry
+// that is costing the most. "Consider recapping" is advice; "the 255,720-char
+// exec result from `cat big.log` is most of your window" is an instruction with
+// a subject. It rides an Aside, so it never buys a turn of its own.
+
+// recapNudgeTokens is the active-window size that earns a reminder. Below this
+// the churn is not yet worth a tool call; a session that never crosses it is
+// never nagged.
+const recapNudgeTokens = 20000
+
+// recapNudgeGrowth is how much the window must grow before saying it AGAIN.
+// Without it, every chat round past the threshold repeats the same line.
+const recapNudgeGrowth = 15000
+
+// maybeNudgeRecap suggests a recap when the window is large, naming the biggest
+// single entry in it. Called on every usage report; silent almost always.
+func (h *Harness) maybeNudgeRecap(active int) {
+	if active < recapNudgeTokens {
+		return
+	}
+	h.recapMu.Lock()
+	if h.recapNudged > 0 && active < h.recapNudged+recapNudgeGrowth {
+		h.recapMu.Unlock()
+		return
+	}
+	h.recapNudged = active
+	h.recapMu.Unlock()
+
+	entries, err := h.store.Context(context.Background(), "dun")
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	big, anchor := biggestEntry(entries), lastUserPhrase(entries)
+	if big.Content == "" || len(big.Content) < 4000 {
+		return // large window, no single offender: compaction's problem, not this
+	}
+	what := "a " + fmt.Sprintf("%d", len(big.Content)) + "-character result"
+	if big.ToolName != "" {
+		what += " from " + big.ToolName
+	}
+	msg := fmt.Sprintf("Your context is now ~%d tokens, and the largest single item in it is %s. "+
+		"If you have already taken what you need from it, recap it away: "+
+		"recap({from: %q, summary: \"…what happened and what is true now…\"}). "+
+		"Keep anything still load-bearing with keep:[\"<tool name or a phrase from the call>\"].",
+		active, what, anchor)
+	h.Aside(msg)
+}
+
+// biggestEntry is the single largest thing in the window — the one worth naming.
+func biggestEntry(entries []agent.Entry) agent.Entry {
+	var big agent.Entry
+	for _, e := range entries {
+		if len(e.Content) > len(big.Content) {
+			big = e
+		}
+	}
+	return big
+}
+
+// lastUserPhrase is an anchor the model can quote back: the opening of the most
+// recent user message. Handing it one removes the commonest way `from` fails.
+func lastUserPhrase(entries []agent.Entry) string {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Kind == agent.KindUser {
+			words := strings.Fields(entries[i].Content)
+			if len(words) > 8 {
+				words = words[:8]
+			}
+			return strings.Join(words, " ")
+		}
+	}
+	return ""
+}
