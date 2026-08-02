@@ -136,10 +136,37 @@ func capExecOutput(out, command string, spill func(command, output string) strin
 		if ref := spill(command, out); ref != "" {
 			// A REF, not a path: under --docker the file is on the host and the
 			// model's container cannot open it, so a path was never usable.
-			where = fmt.Sprintf("ref %q — read it with recap({ref:%q, grep:\"…\"}), or head/tail/full", ref, ref)
+			//
+			// And advise only what can WORK here. On output with no lines to
+			// speak of, grep/head/tail all hand back the single line that was
+			// the problem, so suggesting them sends the model down a road that
+			// dead-ends; paging is the only way in.
+			if longestLine(out) > execInlineMax {
+				where = fmt.Sprintf("ref %q — ONE long line, so grep/head/tail cannot help: page it with "+
+					"recap({ref:%q, at:0}), then the offset each page reports", ref, ref)
+			} else {
+				where = fmt.Sprintf("ref %q — read it with recap({ref:%q, grep:\"…\"}), or head/tail/full/at", ref, ref)
+			}
 		}
 	}
 	return fmt.Sprintf("%s\n…[%d characters elided — %s]…\n%s", h, elided, where, t)
+}
+
+// longestLine is how the clip decides whether line-based advice is honest.
+func longestLine(s string) int {
+	longest, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			if i-start > longest {
+				longest = i - start
+			}
+			start = i + 1
+		}
+	}
+	if len(s)-start > longest {
+		longest = len(s) - start
+	}
+	return longest
 }
 
 // safeCut trims a trailing partial rune.

@@ -589,3 +589,61 @@ func TestCappedReporter_ShowsTheHumanWhatTheModelSaw(t *testing.T) {
 		t.Fatalf("capping twice must not spill twice, got %d refs", n)
 	}
 }
+
+// Live: tail:100 of a three-line file handed the model the entire
+// 98,000-character blob — the cap defeated through recap's own door, by the one
+// tool that exists to manage the window. Every read is bounded.
+func TestReadSpill_BoundsItsOwnAnswers(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
+	h := &Harness{store: st, cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
+	blob := "BEGIN" + strings.Repeat("payload-", 12000) + "END"
+	ref := h.spillRef("gen.sh", blob)
+
+	for _, read := range []struct {
+		name string
+		out  string
+	}{
+		{"tail", h.readSpill(ref, "", 0, 100, 0, false)},
+		{"head", h.readSpill(ref, "", 100, 0, 0, false)},
+		{"grep", h.readSpill(ref, "payload", 0, 0, 0, false)},
+		{"full", h.readSpill(ref, "", 0, 0, 0, true)},
+	} {
+		if len(read.out) > execInlineMax+600 {
+			t.Errorf("%s returned %d characters — the cap must hold through recap's own door", read.name, len(read.out))
+		}
+	}
+	// And a read that had to be clipped says how to get the rest properly,
+	// rather than silently handing back two ends again.
+	if out := h.readSpill(ref, "", 0, 100, 0, false); !strings.Contains(out, "page it instead") {
+		t.Errorf("a clipped read must point at paging: %q", out[len(out)-200:])
+	}
+}
+
+// Live: grep for SECRET on a 98,000-character single line returned that whole
+// line, the clip took the middle, and the middle was where the match was — so
+// the one read that should have answered the question threw the answer away.
+// The model then hunted the spill file through the filesystem, which only
+// worked because exec had a host to search.
+func TestReadSpill_GrepWindowsAMatchInsideAHugeLine(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
+	h := &Harness{store: st, cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
+
+	pad := strings.Repeat("payload-data-", 4000)
+	blob := "BEGIN" + pad + "SECRET=cafebabe1234-END" + pad + "FINISH" // ~104k, one line
+	ref := h.spillRef("gen.sh", blob)
+
+	out := h.readSpill(ref, "SECRET=[a-f0-9]+", 0, 0, 0, false)
+	if !strings.Contains(out, "cafebabe1234") {
+		t.Fatalf("the match must survive the read that found it: %q", out[:200])
+	}
+	if len(out) > execInlineMax {
+		t.Errorf("a windowed grep should be small, got %d characters", len(out))
+	}
+	// The window says WHERE it was, so the model can page around it if it wants
+	// more than the window.
+	if !strings.Contains(out, "@") {
+		t.Errorf("a windowed match must carry its offset: %q", out[:200])
+	}
+}

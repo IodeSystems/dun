@@ -321,6 +321,17 @@ func writeSidecar(path string, entries []agent.Entry) error {
 // bounded by the same cap that created the spill, or a "full" read would put
 // back exactly what was taken out.
 
+// grepWholeLine is the longest line returned in full by a grep read. Beyond it,
+// only a window around each match comes back — the line itself is the problem.
+const grepWholeLine = 2000
+
+// grepContext is how much of a long line to show either side of a match, and
+// grepMaxWindows caps how many matches answer at once.
+const (
+	grepContext    = 300
+	grepMaxWindows = 20
+)
+
 // unlined reports whether the line-based readers are useless here: not "how
 // many lines" but "is any single line bigger than a whole reply". A file of
 // three lines where one is 96,000 characters is unlined for every practical
@@ -333,6 +344,21 @@ func unlined(lines []string) bool {
 		}
 	}
 	return false
+}
+
+// boundRead is the cap applied to recap's OWN answers.
+//
+// Live: asked for tail:100 of a three-line file, this handed the model the
+// entire 98,000-character blob — the cap defeated through recap's own door, by
+// the one tool that exists to manage the window. Every read is bounded, and a
+// read that had to be clipped says how to get the rest properly rather than
+// silently returning two ends again.
+func boundRead(ref, out string) string {
+	if len(out) <= execInlineMax {
+		return out
+	}
+	return fmt.Sprintf("%s\n[that read was %d characters, too big to return whole — page it instead: "+
+		"recap({ref:%q, at:0}), then the offset each page reports]", capExecOutput(out, "", nil), len(out), ref)
 }
 
 // pageOf returns one window of a result that cannot be read any other way, and
@@ -414,10 +440,30 @@ func (h *Harness) readSpill(ref, grep string, head, tail, at int, full bool) str
 		if err != nil {
 			return fmt.Sprintf("ERROR: %q is not a valid regexp: %v", grep, err)
 		}
+		// A match inside a very long line must come back as a WINDOW around the
+		// match, not as the line. Live: grep for SECRET on a 98,000-character
+		// single line returned that whole line, the clip took the middle, and
+		// the middle was where the match was — so the one read that should have
+		// answered the question threw the answer away. The model then spent six
+		// calls hunting the spill file through the filesystem, which only worked
+		// because exec had a host to search; under --docker it would have failed.
 		var hit []string
 		for i, l := range lines {
-			if re.MatchString(l) {
-				hit = append(hit, fmt.Sprintf("%d: %s", i+1, l))
+			if len(l) <= grepWholeLine {
+				if re.MatchString(l) {
+					hit = append(hit, fmt.Sprintf("%d: %s", i+1, l))
+				}
+				continue
+			}
+			for _, loc := range re.FindAllStringIndex(l, grepMaxWindows) {
+				from, to := loc[0]-grepContext, loc[1]+grepContext
+				if from < 0 {
+					from = 0
+				}
+				if to > len(l) {
+					to = len(l)
+				}
+				hit = append(hit, fmt.Sprintf("%d@%d: …%s…", i+1, loc[0], safeCutFront(safeCut(l[from:to]))))
 			}
 		}
 		if len(hit) == 0 {
@@ -429,12 +475,14 @@ func (h *Harness) readSpill(ref, grep string, head, tail, at int, full bool) str
 		if head > len(lines) {
 			head = len(lines)
 		}
-		return fmt.Sprintf("%s: first %d of %d lines\n%s", ref, head, len(lines), strings.Join(lines[:head], "\n"))
+		return boundRead(ref, fmt.Sprintf("%s: first %d of %d lines\n%s", ref, head, len(lines),
+			strings.Join(lines[:head], "\n")))
 	case tail > 0:
 		if tail > len(lines) {
 			tail = len(lines)
 		}
-		return fmt.Sprintf("%s: last %d of %d lines\n%s", ref, tail, len(lines), strings.Join(lines[len(lines)-tail:], "\n"))
+		return boundRead(ref, fmt.Sprintf("%s: last %d of %d lines\n%s", ref, tail, len(lines),
+			strings.Join(lines[len(lines)-tail:], "\n")))
 	case full:
 		// Bounded on purpose. An unbounded "full" would hand back exactly what
 		// the cap removed, which is the whole problem returning through a door
@@ -520,7 +568,32 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			out = h.runRecap(ctx, args.From, args.Summary, args.Keep, args.User)
 		}
 		if onCall != nil {
-			onCall("recap", map[string]any{"from": args.From, "summary": args.Summary, "keep": args.Keep}, out)
+			// Report what was actually ASKED. Read-mode calls used to display as
+			// from:"" summary:"" — an empty rewrite — because only the rewrite
+			// fields were passed on, so the UI showed a call nobody made.
+			a := map[string]any{}
+			if strings.TrimSpace(args.Ref) != "" {
+				a["ref"] = args.Ref
+				for k, v := range map[string]any{"grep": args.Grep, "head": args.Head, "tail": args.Tail, "at": args.At, "full": args.Full} {
+					switch t := v.(type) {
+					case string:
+						if t != "" {
+							a[k] = t
+						}
+					case int:
+						if t != 0 {
+							a[k] = t
+						}
+					case bool:
+						if t {
+							a[k] = t
+						}
+					}
+				}
+			} else {
+				a["from"], a["summary"], a["keep"] = args.From, args.Summary, args.Keep
+			}
+			onCall("recap", a, out)
 		}
 		return out, nil
 	}
