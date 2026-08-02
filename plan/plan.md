@@ -388,6 +388,18 @@ isolation forces the split there).
   watching (icebox: configurable timeout, condition now reached).
 
 ## Decisions
+- **Bound what ENTERS the window before managing what is in it.** Background
+  jobs streamed to a file and returned a bounded tail from the day they were
+  written; the foreground path never did, so one `cat` put 255,720 characters
+  (~64k tokens) in to answer a question whose answer was "30" — and every later
+  turn paid again. Over 20k characters a foreground result is clipped to its
+  START and its END, whole thing spilled beside the bg logs, path in the gap.
+  Both ends because the foreground path sees both shapes: a failure is at the
+  bottom, a listing is useful from the top. Cuts land on line boundaries, and
+  the clip is applied AFTER Render so the `[exit: …]` verdict survives in the
+  tail. Measured on one task: 456,772 tokens → 32,916, active 65,056 → 6,253,
+  and recap became unnecessary. The ordering is the lesson — recap removes churn
+  that already cost you, the cap stops it being charged in the first place.
 - **A context-management suggestion must name what to remove, and arrive when
   the churn is made.** A prompt line describing `recap` produced zero uses. A
   window-size nudge was delivered and READ — it is in the transcript the model
