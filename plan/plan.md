@@ -388,6 +388,22 @@ isolation forces the split there).
   watching (icebox: configurable timeout, condition now reached).
 
 ## Decisions
+- **The model may rewrite its own recent history, under three constraints.**
+  `recap` replaces a span with the account the conversation SHOULD have had:
+  cheaper than compaction (no summarizer call), more accurate (the whole span is
+  in view), and it fixes the RECORD rather than merely shortening it — a
+  misunderstanding removed there stops misleading every later turn. (1) A root
+  CONFIRMS with the human, showing the count and the replacement; a child recaps
+  freely, having nobody to ask and being exactly what this is for (USER). (2)
+  Nothing is destroyed (USER): the span moves to `<session>.recapN.jsonl`,
+  because churn is the evidence for fixing the tooling that produced it, and a
+  sidecar that cannot be written ABORTS the recap. The transcript keeps a
+  citation entry filtered out of `Context` — a pointer to removed churn that
+  itself cost context would be absurd. (3) Tool pairs stay whole: a call without
+  its result is the one shape a provider rejects, so the span is planned before
+  it is applied, and the live recap call is never inside its own span. That last
+  one bit immediately — the anchor search matched the recap call's own
+  arguments, which quote `from` verbatim, so every span came back empty.
 - **A worktree may be deleted when it holds no WORK, which is not the same as a
   clean tree.** Measured on dun's own repo: 37 registered, 36 on disk, 1.1 GB,
   one registration already pointing at a deleted directory. By `git status` 34
