@@ -166,6 +166,25 @@ Open, and worth deciding before building:
   simply void (the feature was removed). An empty answer is too implicit to
   mean that.
 
+**Delete and attestation both already exist (USER, 2026-08-02).** The operation
+set is raglit's `attest` package, unchanged: `corrected` for a refinement,
+`retract` for a void memory, `confirmed`/`affirmed` for a memory someone checked,
+`unsupported` for one the source never supported. Append-only, because a mutable
+record answers "what does this say now" and destroys how it got there — and a
+memory corrected twice then confirmed is a different object from one that was
+right the first time.
+
+**And it makes staleness detect itself.** `attest/state.go` already reports
+`Orphaned` — a verdict whose unit no longer exists, surfaced rather than
+silently re-attached. Address a question unit by its CONTENT (the question plus
+the answer it came from) and a rebuild that changes the answer orphans every
+attestation against the old one. "This was confirmed, and then it changed" is
+then a set difference computed on reingest, not something a human has to notice.
+That is the half of the objection above I called unsolved; what remains is only
+the memory that was wrong from the start and never changed, which is what the
+correction path in the rendering is for. Neither mechanism finds the other's
+case.
+
 **Do not save what the repo already records.** Code structure, past fixes, git
 history: re-derivable, and the fastest to go stale. This is the sharp constraint,
 because a recap summary is very often exactly a restatement of what the code and
