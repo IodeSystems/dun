@@ -395,6 +395,14 @@ isolation forces the split there).
   through `cappedReporter`, which forces the clip to run twice, which forces it
   to be memoized by content: two clips would mean two spills under two refs, and
   the human told to read a copy the model has never heard of.
+- **A read that finds the answer must not clip the answer away.** Grep on a
+  98,894-character single line returned the whole line, the cap took the middle,
+  and the match was in the middle — the one read that should have answered threw
+  the answer away, and the model then hunted the spill file through `find`,
+  which only worked because exec had a host to search. A match inside a long
+  line comes back as a WINDOW around it, carrying its offset. Same test caught
+  `tail:100` handing back an entire blob: the cap must hold through recap's own
+  door, or the tool that manages the window is the one that blows it.
 - **Line-based readers are useless on output with no lines, and a byte cut
   through UTF-8 is corruption.** A minified document or one enormous generated
   line defeats grep, head and tail alike — all three hand back the line that was
