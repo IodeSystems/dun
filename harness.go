@@ -139,6 +139,10 @@ type Config struct {
 	// argument as OnAgents: exec_monitor is model-facing, so without this a job
 	// the human can see running has no place to be seen from.
 	OnJobs func([]JobInfo)
+	// OnRecap fires when the model rewrites a span of its own history. The UI
+	// gets a count and a citation, never the removed content — re-rendering the
+	// churn a recap just took out would defeat it.
+	OnRecap func(RecapNote)
 	// OnRetry fires while dun is waiting on the provider — every backoff, the
 	// recovery, and the give-up, at both request and turn scope. Without it the
 	// wait is invisible: the retries are logged, and a TUI's logs are not on

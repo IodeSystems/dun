@@ -262,6 +262,12 @@ func (h *Harness) rebuildTools() {
 		dispatch = withAgent(dispatch, h, cfg.OnToolCall)
 		dispatch = withAgentMonitor(dispatch, h, cfg.OnToolCall)
 	}
+	// recap is available to BOTH roles, and the difference is the confirmation:
+	// a root asks the human before rewriting a conversation they are part of,
+	// a child has nobody to ask and its context is exactly what this is for.
+	toolDefs = append(toolDefs, recapToolDef())
+	dispatch = withRecap(dispatch, h, cfg.OnToolCall)
+
 	// Outermost wrapper: whatever the tool returns, carry any notification that
 	// arrived while it was running back inside the result. A background job that
 	// finishes mid-turn is then reported in the result the model is already

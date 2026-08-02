@@ -368,6 +368,11 @@ func main() {
 			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { em.emit(retryEvent(n)) }
+		// The COUNT and the citation, never the removed content: re-rendering
+		// the churn a recap just took out would defeat the point of it.
+		cfg.OnRecap = func(n dun.RecapNote) {
+			em.emit(event{"type": "recap", "entries": n.Entries, "chars": n.Chars, "note": n.Note})
+		}
 		cfg.OnCompaction = func(n dun.CompactionNote) {
 			em.emit(event{"type": "compaction", "text": n.String(), "subsumed": n.Subsumed,
 				"tokens_before": n.TokensBefore, "tokens_after": n.TokensAfter,

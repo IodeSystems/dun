@@ -1216,6 +1216,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			}
 		}
 		m.noteServers(ev)
+	case "recap":
+		// One dim line. The scrollback keeps whatever was already drawn — this
+		// is about the model's context, not about rewriting what you have read.
+		m.append(stDim.Render("✂ " + str(ev["note"])))
 	case "control":
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
 			m.append(stNote.Render(msg))

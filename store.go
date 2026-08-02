@@ -253,9 +253,55 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 func (s *sessionStore) Context(_ context.Context, _ string) ([]agent.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]agent.Entry, len(s.entries))
-	copy(out, s.entries)
+	out := make([]agent.Entry, 0, len(s.entries))
+	for _, e := range s.entries {
+		// A recap citation is a note to whoever reads the log, not conversation:
+		// it is persisted, and it never reaches the model or the scrollback. A
+		// pointer to removed churn that itself cost context would be absurd.
+		if e.Kind == kindRecap {
+			continue
+		}
+		out = append(out, e)
+	}
 	return out, nil
+}
+
+// recap replaces a span of the conversation with one entry, records a citation,
+// and optionally rewrites the anchoring user message.
+//
+// Built on the same primitive as Compact — drop a set, insert a marker, rewrite
+// the file atomically — because it is the same operation with a different
+// author: the model writes this summary instead of a summarizer LLM.
+func (s *sessionStore) recap(subsumes []agent.Entry, replacement, citation agent.Entry, anchorID, userEdit string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	drop := map[string]bool{}
+	for _, e := range subsumes {
+		drop[e.ID] = true
+	}
+	kept := s.entries[:0:0]
+	inserted := false
+	for _, e := range s.entries {
+		if drop[e.ID] {
+			// The replacement takes the position of the first entry it replaces,
+			// so the conversation keeps its shape: what came before is still
+			// before it, and the live tool call still follows.
+			if !inserted {
+				kept = append(kept, replacement, citation)
+				inserted = true
+			}
+			continue
+		}
+		if userEdit != "" && e.ID == anchorID {
+			e.Content = userEdit
+		}
+		kept = append(kept, e)
+	}
+	if !inserted {
+		kept = append(kept, replacement, citation)
+	}
+	s.entries = kept
+	s.flushLocked()
 }
 
 func (s *sessionStore) Compact(_ context.Context, _ string, c agent.Compaction) error {
@@ -284,7 +330,6 @@ func (s *sessionStore) Reset() {
 	s.unclaimed = 0
 	s.flushLocked()
 }
-
 
 // ── inbox helpers ──────────────────────────────────────────────────
 

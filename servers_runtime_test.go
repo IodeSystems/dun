@@ -337,7 +337,7 @@ func serverToolNames(h *Harness) []string {
 	builtin := map[string]bool{
 		"exec": true, "exec_monitor": true, "ask_user": true,
 		"ship": true, "agent": true, "agent_monitor": true,
-		"tell_parent": true, "ask_parent": true,
+		"tell_parent": true, "ask_parent": true, "recap": true,
 	}
 	var out []string
 	for _, n := range h.ToolNames() {
