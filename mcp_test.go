@@ -8,8 +8,7 @@ import (
 )
 
 // The eval tool's bridged definition carries the example-first cheat sheet folded
-// onto mcpshell's own description — so the essentials are inline, not gated
-// behind the `prompt` tool.
+// onto mcpshell's own description — so the essentials are inline.
 func TestMcpToolDefs_EnrichesEval(t *testing.T) {
 	defs := mcpToolDefs([]mcpmgr.MCPTool{
 		{Name: "eval", Description: "Execute mcpshell code."},

@@ -22,7 +22,7 @@ import (
 // prescription mostly bounces off small models — so we only PRESCRIBE what is
 // UNAVAILABLE (a model can't discover the absence of `new`), and let EXAMPLES
 // carry everything else. mcpshell's own eval description buries these; the full
-// reference is gated behind its `prompt` tool, which the model rarely calls. We
+// reference is inlined below. We
 // fold the essentials into the definition it always sees. Every example here is
 // verified to run against mcpshell.
 var toolDocs = map[string]string{
@@ -50,8 +50,7 @@ var toolDocs = map[string]string{
 
 // mcpToolDefs bridges discovered MCP tools into the OpenAI tool format. The MCP
 // InputSchema is already a JSON Schema, so it drops straight into Parameters.
-// Descriptions in toolDocs are appended so the model sees the essentials inline
-// (see the toolDocs comment for why this beats the "call the prompt tool" path).
+// Descriptions in toolDocs are appended so the model sees the essentials inline.
 func mcpToolDefs(tools []mcpmgr.MCPTool) []llm.ToolDef {
 	out := make([]llm.ToolDef, 0, len(tools))
 	for _, t := range tools {

@@ -62,7 +62,7 @@ func DefaultServers(workspace, raglitHome string) []Server {
 		// is single-session and in-process. Without it raglit routes to the
 		// shared daemon, which refuses a client that has no project name and
 		// exits before the MCP handshake ("transport closed").
-		{ID: "docs", Command: "raglit", Args: []string{"serve", "--embedded", "--home", raglitHome}},
+		{ID: "docs", Command: "raglit", Args: []string{"serve", "--embedded", "--home", raglitHome, "--simple"}},
 	}
 }
 
@@ -831,8 +831,8 @@ func (h *Harness) ToolNames() []string {
 const (
 	systemPreamble = `You are dun, a coding agent working inside an isolated workspace.`
 	systemCode     = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
-	systemShell    = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops; call the prompt tool for its language reference, help to list commands."
-	systemDocs     = "\n- docs (raglit): search the document/knowledge index; ingest to add sources."
+	systemShell    = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops."
+	systemDocs     = "\n- docs (raglit): search the document/knowledge index; get_document to read a full hit."
 	systemAsk      = "\n- ask_user: when the task is ambiguous or a decision is the user's to make (which approach, which file, is this OK to change), call ask_user with a clear question and optional options INSTEAD of guessing."
 
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
