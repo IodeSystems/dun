@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -252,6 +253,10 @@ func TestRecap_ChildRecapsWithoutAsking(t *testing.T) {
 // lost the one result it had asked to keep. So keep takes a tool NAME or a
 // phrase from the call's arguments, and anything that matches nothing is SAID.
 func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
+	// A bare tool NAME keeps only that tool's MOST RECENT call. Keeping every
+	// call of it preserved the 255,720-character `cat` the recap existed to
+	// remove — measured on the first run where a model recapped unprompted, and
+	// the model reaches for the name it knows rather than a phrase.
 	byName, err := planRecap(convo(), "nested quotes", []string{"exec"})
 	if err != nil {
 		t.Fatal(err)
@@ -262,8 +267,18 @@ func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
 			kept++
 		}
 	}
-	if kept != 4 { // two calls, two results
-		t.Errorf("a tool NAME should keep every call of it and its results, got %d", kept)
+	if kept != 2 { // the latest call and its result, not every exec ever run
+		t.Errorf("a bare tool name should keep only the most recent call, got %d entries", kept)
+	}
+	// …and the big early result is NOT rescued by naming the tool.
+	rescued := false
+	for _, e := range byName.Kept {
+		if e.ToolCallID == "c1" {
+			rescued = true
+		}
+	}
+	if rescued {
+		t.Error("naming a tool must not preserve its oldest, largest result")
 	}
 
 	byArgs, err := planRecap(convo(), "nested quotes", []string{"go test"})
@@ -302,11 +317,68 @@ func TestPlanRecap_KeepDoesNotMatchTheRecapCallItself(t *testing.T) {
 	}
 }
 
-// A prompt line was not enough. Live, with recap fully described in the system
-// prompt: cat (255,720 chars), a failed eval, two help lookups, 902,875 tokens
-// billed, 65,127 active — and no recap. The model ends its turn the moment it
-// has the answer, and nothing in that moment is about its context. So the
-// reminder arrives when it is expensive and NAMES what is costing the most.
+// The two shapes worth catching, named by the USER: a big result just landed,
+// or the same tool is being hammered. Both are churn at the moment it is made,
+// which is when a suggestion is worth anything.
+func TestRecapCue_FiresOnTheShapeOfTheChurn(t *testing.T) {
+	call := func(tool string) agent.Entry {
+		return agent.Entry{Kind: agent.KindToolCall, ToolName: tool, Content: "{}"}
+	}
+	result := func(tool string, n int) agent.Entry {
+		return agent.Entry{ID: "r" + tool + fmt.Sprint(n), Kind: agent.KindToolResult,
+			ToolName: tool, Content: strings.Repeat("x", n)}
+	}
+
+	// Flailing: three exec calls in a row (two in history plus the one that
+	// just ran) is not a plan.
+	cue, ok := recapCueFor([]agent.Entry{call("exec"), result("exec", 10), call("exec"), result("exec", 10)}, "exec", 10)
+	if !ok || !strings.Contains(cue.detail, "3 times in a row") {
+		t.Fatalf("repetition should be caught: %+v ok=%v", cue, ok)
+	}
+
+	// Two in a row is still a plan.
+	if _, ok := recapCueFor([]agent.Entry{call("exec"), result("exec", 10)}, "exec", 10); ok {
+		t.Error("two calls of the same tool must not read as flailing")
+	}
+
+	// A large result the model has since moved past — moving past it is what
+	// the current call proves.
+	big := []agent.Entry{call("exec"), result("exec", 300000), call("eval"), result("eval", 20)}
+	cue, ok = recapCueFor(big, "eval", 20)
+	if !ok || !strings.Contains(cue.detail, "300000-character exec result") {
+		t.Fatalf("a superseded large result should be named: %+v ok=%v", cue, ok)
+	}
+
+	// Nothing large, nothing repeated: say nothing.
+	if _, ok := recapCueFor([]agent.Entry{call("exec"), result("exec", 50)}, "eval", 20); ok {
+		t.Error("an ordinary exchange must not be nudged")
+	}
+}
+
+// A suggestion is made once. Repeating it every call is how a useful signal
+// becomes something the model learns to skip.
+func TestRecapCue_NeverRepeatsItself(t *testing.T) {
+	st, _ := openSessionStore("")
+	h := &Harness{store: st, wake: make(chan struct{}, 1)}
+	st.appendSilent(agent.Entry{Kind: agent.KindUser, Content: "count the errors in big.log please"})
+	st.appendSilent(agent.Entry{ID: "big1", Kind: agent.KindToolResult, ToolName: "exec",
+		Content: strings.Repeat("x", 300000)})
+
+	h.watchRecap("eval", 20)
+	first := h.notes()
+	if len(first) != 1 {
+		t.Fatalf("the first superseded large result should be raised, got %d", len(first))
+	}
+	if !strings.Contains(first[0], "recap({from:") || !strings.Contains(first[0], "count the errors in big.log") {
+		t.Errorf("the suggestion must carry the call and an anchor: %q", first[0])
+	}
+	h.watchRecap("eval", 20)
+	if n := h.notes(); len(n) != 0 {
+		t.Errorf("the same cue must not be raised twice: %q", n)
+	}
+}
+
+// The window-size fallback, for churn with no shape.
 func TestRecapNudge_ArrivesWhenItIsExpensiveAndNamesTheOffender(t *testing.T) {
 	st, _ := openSessionStore("")
 	h := &Harness{store: st, wake: make(chan struct{}, 1)}
@@ -327,6 +399,9 @@ func TestRecapNudge_ArrivesWhenItIsExpensiveAndNamesTheOffender(t *testing.T) {
 	msg := notes[0]
 	if !strings.Contains(msg, "from exec") {
 		t.Errorf("the reminder must name what is filling the window: %q", msg)
+	}
+	if !strings.Contains(msg, "~40000 tokens") {
+		t.Errorf("the fallback is about SIZE, so it must say the size: %q", msg)
 	}
 	if !strings.Contains(msg, "how many lines in big.log") {
 		t.Errorf("it must hand over an anchor the model can quote back: %q", msg)

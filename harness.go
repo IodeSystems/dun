@@ -198,6 +198,7 @@ type Harness struct {
 	// line is not repeated on every chat round past the threshold.
 	recapMu     sync.Mutex
 	recapNudged int
+	recapSeen   map[string]bool // suggestions already made, so none repeats
 	// Compaction counters. compactTurn resets each turn, so >1 is thrashing
 	// rather than a busy session.
 	compactMu   sync.Mutex

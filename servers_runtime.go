@@ -267,6 +267,9 @@ func (h *Harness) rebuildTools() {
 	// a child has nobody to ask and its context is exactly what this is for.
 	toolDefs = append(toolDefs, recapToolDef())
 	dispatch = withRecap(dispatch, h, cfg.OnToolCall)
+	// Watches what every OTHER tool call produces, so a suggestion arrives at
+	// the moment churn is created rather than whenever usage is next measured.
+	dispatch = withRecapWatch(dispatch, h)
 
 	// Outermost wrapper: whatever the tool returns, carry any notification that
 	// arrived while it was running back inside the result. A background job that

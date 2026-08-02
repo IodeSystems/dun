@@ -85,11 +85,24 @@ func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, er
 			}
 		}
 	}
+	// Prefer a USER message. The nudge hands the model a phrase from the last
+	// user message, and the model then echoes that phrase in its own assistant
+	// turns — so "the last entry containing it" is an echo three lines back, and
+	// the span collapses to nothing. Live: it recapped 1 entry of 85 characters
+	// while a 255,720-character result sat untouched.
 	start := -1
 	for i := limit - 1; i >= 0; i-- {
-		if strings.Contains(entries[i].Content, from) {
+		if entries[i].Kind == agent.KindUser && strings.Contains(entries[i].Content, from) {
 			start = i
 			break
+		}
+	}
+	if start < 0 {
+		for i := limit - 1; i >= 0; i-- {
+			if strings.Contains(entries[i].Content, from) {
+				start = i
+				break
+			}
 		}
 	}
 	if start < 0 {
@@ -104,21 +117,37 @@ func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, er
 	// invented "exec_2", matched nothing, and silently lost the one result it
 	// had asked to keep.
 	keeping, matched := map[string]bool{}, map[string]bool{}
-	for _, e := range entries[start+1:] {
-		// The live recap call is kept unconditionally, and its own arguments
-		// QUOTE the keep terms — so matching it here made the confirmation read
-		// "keeping the exec, recap calls", which is true and confusing.
-		if e.Kind != agent.KindToolCall || e.ToolCallID == liveCallID(entries) {
+	live := liveCallID(entries)
+	for _, term := range keep {
+		if term == "" {
 			continue
 		}
-		for _, term := range keep {
-			if term == "" {
+		// A bare tool NAME keeps only that tool's MOST RECENT call. The model
+		// reaches for the name it knows ("exec"), and keeping every call of it
+		// preserved the 255,720-character `cat` the recap existed to remove —
+		// measured, on the first run where the model recapped unprompted. A
+		// phrase from the arguments is specific, so it keeps every match.
+		byName := false
+		for _, e := range entries[start+1:] {
+			if e.Kind == agent.KindToolCall && e.ToolName == term && e.ToolCallID != live {
+				byName = true
+			}
+		}
+		for i := len(entries) - 1; i > start; i-- {
+			e := entries[i]
+			if e.Kind != agent.KindToolCall || e.ToolCallID == live {
 				continue
 			}
-			if e.ToolCallID == term || e.ToolName == term || strings.Contains(e.Content, term) {
-				keeping[e.ToolCallID] = true
-				matched[term] = true
-				sp.KeptCalls = append(sp.KeptCalls, e.ToolName)
+			hit := e.ToolCallID == term || strings.Contains(e.Content, term) ||
+				(byName && e.ToolName == term)
+			if !hit {
+				continue
+			}
+			keeping[e.ToolCallID] = true
+			matched[term] = true
+			sp.KeptCalls = append(sp.KeptCalls, e.ToolName)
+			if byName && e.ToolName == term && !strings.Contains(e.Content, term) {
+				break // the most recent one only
 			}
 		}
 	}
@@ -127,9 +156,7 @@ func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, er
 			sp.Unmatched = append(sp.Unmatched, term)
 		}
 	}
-	// The live tool call is the LAST tool_call with no result yet: this one.
-	live := liveCallID(entries)
-
+	// live (the tool call with no result yet: this recap) is resolved above.
 	for _, e := range entries[start+1:] {
 		switch {
 		case e.Kind == kindRecap:
@@ -378,7 +405,7 @@ type RecapNote struct {
 	Note    string
 }
 
-// ── the nudge ───────────────────────────────────────────────────────
+// ── when to suggest it ──────────────────────────────────────────────
 //
 // A prompt line was not enough. Measured live, with recap fully described in
 // the system prompt: `cat big.log` (255,720 chars), a failed eval, two help
@@ -386,22 +413,103 @@ type RecapNote struct {
 // model never called it. That is not a wording problem. The model ends its turn
 // the moment it has the answer, and nothing in that moment is about its context.
 //
-// So the reminder arrives WHEN it is expensive, and it names the specific entry
-// that is costing the most. "Consider recapping" is advice; "the 255,720-char
-// exec result from `cat big.log` is most of your window" is an instruction with
-// a subject. It rides an Aside, so it never buys a turn of its own.
+// So the suggestion is EVENT-driven, arriving at the moment the churn is made
+// rather than long afterwards, and it names the specific thing to remove.
+// "Consider recapping" is advice; "the 255,720-character exec result you have
+// already moved on from" is an instruction with a subject.
+//
+// Three triggers, in the order they are worth acting on:
+//
+//   1. REPETITION — the same tool several times in a row. That is flailing, and
+//      the earlier attempts are superseded by definition: whatever they said,
+//      the model did not accept it. This is the cheapest churn to remove and
+//      the moment it is most obviously churn.
+//   2. A SUPERSEDED LARGE RESULT — something big arrived and the model has
+//      since done something else, which is the evidence that it has taken what
+//      it needs. Nudging the moment it arrives would be telling it to discard
+//      what it just asked for.
+//   3. WINDOW SIZE — the fallback, for a window that got large without either
+//      shape. Silent when no single entry dominates: that is compaction's
+//      problem, and vague advice is exactly what already failed.
 
-// recapNudgeTokens is the active-window size that earns a reminder. Below this
-// the churn is not yet worth a tool call; a session that never crosses it is
-// never nagged.
+// largeResultChars is when one tool result is worth naming on its own. Roughly
+// 5k tokens — enough that removing it is worth a tool call.
+const largeResultChars = 20000
+
+// repeatCalls is how many identical calls in a row read as flailing rather than
+// as a plan.
+const repeatCalls = 3
+
+// recapNudgeTokens is the window size that earns the fallback reminder.
 const recapNudgeTokens = 20000
 
-// recapNudgeGrowth is how much the window must grow before saying it AGAIN.
-// Without it, every chat round past the threshold repeats the same line.
+// recapNudgeGrowth is how much the window must grow before saying it again.
 const recapNudgeGrowth = 15000
 
-// maybeNudgeRecap suggests a recap when the window is large, naming the biggest
-// single entry in it. Called on every usage report; silent almost always.
+// recapCue is a reason to recap, and what to say about it.
+type recapCue struct {
+	key    string // dedupe: the same cue is never raised twice
+	detail string
+}
+
+// recapCueFor decides whether what just happened is worth a suggestion. Pure,
+// so the decision is testable without a session: entries is the conversation up
+// to and including the call that just ran, and tool/size describe its result.
+func recapCueFor(entries []agent.Entry, tool string, size int) (recapCue, bool) {
+	// 1. Flailing: this call plus the trailing run of the same tool.
+	run := 1
+	for i := len(entries) - 1; i >= 0 && run < repeatCalls+2; i-- {
+		if entries[i].Kind != agent.KindToolCall {
+			continue
+		}
+		if entries[i].ToolName != tool {
+			break
+		}
+		run++
+	}
+	if run >= repeatCalls {
+		return recapCue{
+			key: fmt.Sprintf("repeat:%s:%d", tool, run),
+			detail: fmt.Sprintf("you have called %s %d times in a row. If the earlier attempts are "+
+				"superseded by what you know now, they are pure cost", tool, run),
+		}, true
+	}
+	// 2. Something large that the model has already moved past — moving past it
+	// is exactly what this call proves.
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Kind != agent.KindToolResult || len(e.Content) < largeResultChars {
+			continue
+		}
+		name := e.ToolName
+		if name == "" {
+			name = "a tool"
+		}
+		return recapCue{
+			key: "big:" + e.ID,
+			detail: fmt.Sprintf("the %d-character %s result earlier in this conversation is still in your "+
+				"context, and you have moved on from it", len(e.Content), name),
+		}, true
+	}
+	_ = size
+	return recapCue{}, false
+}
+
+// watchRecap is called after every tool call: it raises at most one suggestion,
+// and never the same one twice.
+func (h *Harness) watchRecap(tool string, size int) {
+	entries, err := h.store.Context(context.Background(), "dun")
+	if err != nil {
+		return
+	}
+	cue, ok := recapCueFor(entries, tool, size)
+	if !ok || !h.claimCue(cue.key) {
+		return
+	}
+	h.Aside(recapAdvice(cue.detail, lastUserPhrase(entries)))
+}
+
+// maybeNudgeRecap is the window-size fallback, for churn with no shape.
 func (h *Harness) maybeNudgeRecap(active int) {
 	if active < recapNudgeTokens {
 		return
@@ -418,20 +526,51 @@ func (h *Harness) maybeNudgeRecap(active int) {
 	if err != nil || len(entries) == 0 {
 		return
 	}
-	big, anchor := biggestEntry(entries), lastUserPhrase(entries)
-	if big.Content == "" || len(big.Content) < 4000 {
-		return // large window, no single offender: compaction's problem, not this
+	big := biggestEntry(entries)
+	if len(big.Content) < 4000 {
+		return // nothing specific to point at; that is compaction's problem
 	}
-	what := "a " + fmt.Sprintf("%d", len(big.Content)) + "-character result"
+	what := fmt.Sprintf("your context is now ~%d tokens and the largest single item in it is a "+
+		"%d-character result", active, len(big.Content))
 	if big.ToolName != "" {
 		what += " from " + big.ToolName
 	}
-	msg := fmt.Sprintf("Your context is now ~%d tokens, and the largest single item in it is %s. "+
-		"If you have already taken what you need from it, recap it away: "+
-		"recap({from: %q, summary: \"…what happened and what is true now…\"}). "+
-		"Keep anything still load-bearing with keep:[\"<tool name or a phrase from the call>\"].",
-		active, what, anchor)
-	h.Aside(msg)
+	h.Aside(recapAdvice(what, lastUserPhrase(entries)))
+}
+
+// recapAdvice is the one wording, so every trigger says it the same way: the
+// reason, then the call, pre-filled with an anchor the model can quote back.
+func recapAdvice(detail, anchor string) string {
+	return fmt.Sprintf("Context note — %s. If you no longer need it verbatim, remove it: "+
+		"recap({from: %q, summary: \"…what happened and what is true now…\"}), keeping anything still "+
+		"load-bearing with keep:[\"<tool name or a phrase from the call>\"]. Nothing is lost; it moves "+
+		"to a file and leaves your context.", detail, anchor)
+}
+
+// claimCue reports whether this suggestion has not been made before.
+func (h *Harness) claimCue(key string) bool {
+	h.recapMu.Lock()
+	defer h.recapMu.Unlock()
+	if h.recapSeen == nil {
+		h.recapSeen = map[string]bool{}
+	}
+	if h.recapSeen[key] {
+		return false
+	}
+	h.recapSeen[key] = true
+	return true
+}
+
+// withRecapWatch runs after every tool call, so a suggestion lands at the moment
+// the churn is created rather than whenever the window happens to be measured.
+func withRecapWatch(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
+	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		out, err := inner(ctx, tc)
+		if err == nil && tc.Function.Name != "recap" {
+			h.watchRecap(tc.Function.Name, len(out))
+		}
+		return out, err
+	}
 }
 
 // biggestEntry is the single largest thing in the window — the one worth naming.
