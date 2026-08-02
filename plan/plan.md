@@ -388,6 +388,26 @@ isolation forces the split there).
   watching (icebox: configurable timeout, condition now reached).
 
 ## Decisions
+- **A context-management suggestion must name what to remove, and arrive when
+  the churn is made.** A prompt line describing `recap` produced zero uses. A
+  window-size nudge was delivered and READ — it is in the transcript the model
+  was working from — and ignored: a threshold says "you are spending a lot", not
+  what to do about what just happened. Firing on the SHAPE of the churn worked
+  on the first try (USER's idea): the same tool 3+ times in a row (flailing, and
+  the earlier attempts are superseded by definition), or a ≥20k-char result the
+  model has since called past (calling past it IS the evidence it took what it
+  needed — nudging on arrival would mean discarding what it just asked for).
+  Each cue is raised once; a repeated signal is one a model learns to skip.
+  Measured, unprompted: 9 entries / 258,256 chars removed, active context
+  65,056 → 1,057 tokens.
+- **A `keep` term must mean what the model meant by it.** Live: `keep:["exec"]`
+  preserved EVERY exec call including the 255,720-char `cat` the recap existed
+  to remove, because the model reaches for the tool NAME it knows rather than a
+  phrase. A bare name now keeps only that tool's most recent call. And the
+  anchor matched an assistant turn ECHOING the phrase the nudge handed over, so
+  the span collapsed to 85 characters beside a quarter-megabyte result — a USER
+  message is preferred as the anchor. Both were invisible to unit tests and
+  obvious on the first live run.
 - **The model may rewrite its own recent history, under three constraints.**
   `recap` replaces a span with the account the conversation SHOULD have had:
   cheaper than compaction (no summarizer call), more accurate (the whole span is
