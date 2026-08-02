@@ -246,3 +246,58 @@ func TestRecap_ChildRecapsWithoutAsking(t *testing.T) {
 	}
 	_ = time.Now
 }
+
+// The model cannot see tool_call ids — they are protocol-level and never appear
+// in its context. Live run: it invented "exec_2", matched nothing, and silently
+// lost the one result it had asked to keep. So keep takes a tool NAME or a
+// phrase from the call's arguments, and anything that matches nothing is SAID.
+func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
+	byName, err := planRecap(convo(), "nested quotes", []string{"exec"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := 0
+	for _, e := range byName.Kept {
+		if e.ToolName == "exec" {
+			kept++
+		}
+	}
+	if kept != 4 { // two calls, two results
+		t.Errorf("a tool NAME should keep every call of it and its results, got %d", kept)
+	}
+
+	byArgs, err := planRecap(convo(), "nested quotes", []string{"go test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byArgs.Kept) < 2 {
+		t.Errorf("a phrase from the arguments should keep that call, got %d", len(byArgs.Kept))
+	}
+
+	// The failure that actually happened: an id the model made up.
+	invented, err := planRecap(convo(), "nested quotes", []string{"exec_2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invented.Unmatched) != 1 || invented.Unmatched[0] != "exec_2" {
+		t.Fatalf("an unmatched keep term must be reported, got %v", invented.Unmatched)
+	}
+	if !strings.Contains(invented.preview("s", ""), "matched nothing") {
+		t.Error("the human must be told a keep term will not be honoured")
+	}
+}
+
+// The recap call's own arguments quote the keep terms, so it matched itself and
+// the confirmation read "keeping the exec, recap calls" — true, and confusing.
+// It is kept unconditionally anyway.
+func TestPlanRecap_KeepDoesNotMatchTheRecapCallItself(t *testing.T) {
+	sp, err := planRecap(convo(), "nested quotes", []string{"from"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range sp.KeptCalls {
+		if name == "recap" {
+			t.Fatalf("the live call must not appear in the kept list: %v", sp.KeptCalls)
+		}
+	}
+}

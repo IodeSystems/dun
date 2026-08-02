@@ -55,6 +55,11 @@ type recapSpan struct {
 	Kept     []agent.Entry // preserved inside the span (tool pairs named by keep)
 	Anchor   *agent.Entry  // the entry the phrase matched; nil = start of session
 	Chars    int
+	// Unmatched are keep terms that named nothing. Reported rather than
+	// ignored: a model that asked to keep a result and silently lost it has
+	// been told the opposite of the truth.
+	Unmatched []string
+	KeptCalls []string // tool names kept, for the confirmation
 }
 
 // planRecap works out which entries a recap would replace.
@@ -92,9 +97,35 @@ func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, er
 	}
 	sp.Anchor = &entries[start]
 
-	keeping := map[string]bool{}
-	for _, id := range keep {
-		keeping[id] = true
+	// A keep term may be a tool_call id, a tool NAME, or a substring of the
+	// call's arguments — because the model cannot see call ids. They are
+	// protocol-level and never appear in its context, so a keep list keyed only
+	// on them is unusable by the only caller there is. Live run: the model
+	// invented "exec_2", matched nothing, and silently lost the one result it
+	// had asked to keep.
+	keeping, matched := map[string]bool{}, map[string]bool{}
+	for _, e := range entries[start+1:] {
+		// The live recap call is kept unconditionally, and its own arguments
+		// QUOTE the keep terms — so matching it here made the confirmation read
+		// "keeping the exec, recap calls", which is true and confusing.
+		if e.Kind != agent.KindToolCall || e.ToolCallID == liveCallID(entries) {
+			continue
+		}
+		for _, term := range keep {
+			if term == "" {
+				continue
+			}
+			if e.ToolCallID == term || e.ToolName == term || strings.Contains(e.Content, term) {
+				keeping[e.ToolCallID] = true
+				matched[term] = true
+				sp.KeptCalls = append(sp.KeptCalls, e.ToolName)
+			}
+		}
+	}
+	for _, term := range keep {
+		if term != "" && !matched[term] {
+			sp.Unmatched = append(sp.Unmatched, term)
+		}
 	}
 	// The live tool call is the LAST tool_call with no result yet: this one.
 	live := liveCallID(entries)
@@ -155,8 +186,11 @@ func hasPendingCall(entries []agent.Entry, e agent.Entry) bool {
 func (sp recapSpan) preview(summary, userEdit string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Recap would remove %d entries (~%d characters) from the conversation.\n", len(sp.Subsumes), sp.Chars)
-	if n := len(sp.Kept); n > 0 {
-		fmt.Fprintf(&b, "Keeping %d entries inside that span.\n", n)
+	if n := len(sp.KeptCalls); n > 0 {
+		fmt.Fprintf(&b, "Keeping the %s call%s and its result.\n", strings.Join(sp.KeptCalls, ", "), plural(n))
+	}
+	if len(sp.Unmatched) > 0 {
+		fmt.Fprintf(&b, "NOTE: %q matched nothing and will NOT be kept.\n", strings.Join(sp.Unmatched, ", "))
 	}
 	b.WriteString("\nReplaced with:\n" + indent(summary))
 	if userEdit != "" && sp.Anchor != nil {
@@ -263,7 +297,7 @@ func recapToolDef() llm.ToolDef {
 			"summary": map[string]any{"type": "string", "description": "what actually happened and what is true now, written to stand alone"},
 			"keep": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
-				"description": "tool_call ids whose call and result must survive verbatim",
+				"description": "which tool results to keep verbatim: a tool NAME (\"exec\") or a phrase from its arguments (\"grep -c\"). Everything else in the span goes.",
 			},
 			"user": map[string]any{"type": "string", "description": "optional: a clearer wording of the anchoring user message"},
 		},
@@ -324,8 +358,16 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 	if h.cfg.OnRecap != nil {
 		h.cfg.OnRecap(RecapNote{Entries: len(sp.Subsumes), Chars: sp.Chars, Note: note})
 	}
-	return fmt.Sprintf("Done — %s. Everything since %q now reads as the summary you gave; "+
+	out := fmt.Sprintf("Done — %s. Everything since %q now reads as the summary you gave; "+
 		"the removed entries are on disk and out of your context. Continue from here.", note, from)
+	if len(sp.Unmatched) > 0 {
+		// Said plainly, because the model asked to keep something and did not
+		// get it. Silence here is how it learns the wrong lesson.
+		out += fmt.Sprintf("\nNOTE: %s matched no tool call in that span, so nothing was kept for it. "+
+			"`keep` takes a tool NAME or a phrase from the call's arguments — call ids are not visible to you.",
+			strings.Join(sp.Unmatched, ", "))
+	}
+	return out
 }
 
 // RecapNote is what the UI is told about a recap: enough for one dim line, and
