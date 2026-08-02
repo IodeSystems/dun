@@ -87,6 +87,10 @@ Do one only if you are already in that file.
 
 ## Recap → a project memory in raglit (USER, 2026-08-02)
 
+> Cross-repo overview, sequencing and the measured evidence:
+> `~/inflight/shelf.md` → "Durable project memory". The raglit half is
+> `raglit/plan/answered-questions.md`. This file is dun's half.
+
 A recap already produces the one thing a project memory wants: a distilled,
 corrected account of a stretch of work, written by the agent that did it and
 confirmed by the human. Today it dies with the session.
