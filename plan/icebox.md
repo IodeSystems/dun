@@ -123,14 +123,48 @@ more origin, not new machinery. Design lives in
   PROJECT — so it lands in the checkout's index, the same rule
   `.dun/dun.local.json` already follows for /rag auto.
 
-**The objection that survives.** A recap can be wrong: measured twice on one
-task, the model wrote "3000 lines" for a 4000-line file and the human approved
-it. In a session that is a local error; indexed, it resurfaces months later in
-an unrelated session carrying the authority of having been confirmed. Deletion
-is easy (one fragment, re-ingest converges) — NOTICING is the hard part, and
-nothing here solves it. The cheap mitigations are provenance plus the standing
-convention that a recalled memory naming a file or a flag is checked before it
-is acted on.
+**Staleness is checked at the moment of USE (USER, 2026-08-02).** This is the
+answer to the objection that otherwise sinks the whole idea. A recap can be
+wrong — measured twice on one task, the model wrote "3000 lines" for a
+4000-line file and the human approved it — and indexed, that resurfaces months
+later carrying the authority of having been confirmed. Deletion was always easy;
+NOTICING was the unsolved half.
+
+So the surfacing itself carries the caveat and the invitation:
+
+  > These are remembered notes, not facts. They were written by an earlier
+  > session and the code may have moved since. If one is wrong or out of date,
+  > fix it: recap({refine_memory: "<the question it answers>", answer: …,
+  > justification: …}).
+
+Noticing staleness in the abstract is unsolvable. Noticing it while working in
+the code the memory describes is easy — the model is holding the evidence at
+exactly that moment, which is the only moment it ever will. Same shape as the
+rest of this system: news reaches the model inside a tool result it is already
+reading, and the recap cue arrives when the churn is made rather than whenever
+usage is next measured.
+
+**`recap({refine_memory, question, answer, justification})` (USER).** The memory
+is addressed by the QUESTION it answers, not by an id: the question is what was
+surfaced, it is human-readable, and the model has already demonstrated — twice,
+live — that it invents opaque ids rather than reading them (`exec_2`, which
+matched nothing). `justification` is the reference into the source that makes
+the new answer checkable, which is the same thing `answered-questions.md` asks
+of every reference.
+
+Open, and worth deciding before building:
+
+- **Refinement is outward-facing across sessions, so it should CONFIRM** — more
+  than a recap does, not less. A recap edits one conversation; a refined memory
+  edits what every future session is told. But confirmation is friction, and
+  friction is how a correction path stops being used.
+- **Nothing is destroyed, here too.** The superseded answer goes to the same
+  kind of sidecar recap already writes, with the correction's provenance. A
+  memory that has been refined three times is itself a signal — either the code
+  is churning there, or the memory was never well-posed.
+- **Deleting must be expressible.** Some memories are not wrong-and-fixable but
+  simply void (the feature was removed). An empty answer is too implicit to
+  mean that.
 
 **Do not save what the repo already records.** Code structure, past fixes, git
 history: re-derivable, and the fastest to go stale. This is the sharp constraint,
