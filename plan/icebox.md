@@ -84,3 +84,41 @@ Do one only if you are already in that file.
   has asked to watch.
 - **`dun -d status` TUI** — the current line list is legible.
 - **cross-host launcher control** — remote reach already exists via `dun -serve`.
+
+## Recap → a project memory in raglit (USER, 2026-08-02)
+
+A recap already produces the one thing a project memory wants: a distilled,
+corrected account of a stretch of work, written by the agent that did it and
+confirmed by the human. Today it dies with the session. Ingesting it into the
+project's raglit index would make it available to every LATER session through
+the proactive-RAG path that already exists (`agent.DocFinder` → agentkit
+`FinderPreparer`), which is how it would reach a model without anyone
+remembering to ask.
+
+**Why it fits:** the confirmation step is already a human saying "this account is
+correct", which is a higher bar than anything else dun would ingest. And the
+sidecar keeps the raw churn, so a memory can always be checked against what
+actually happened.
+
+**Why it is not free — the reason this is iceboxed rather than done:**
+
+- **A recap can be WRONG.** Measured twice on the same task: the model wrote
+  "3000 lines" for a 4000-line file, and the human (me, driving a script)
+  approved it. In a session that is a local error; in a project index it is a
+  permanent one that surfaces in unrelated sessions months later, carrying the
+  authority of having been confirmed. The failure mode is worse than not
+  indexing at all.
+- **Invalidation needs an owner (USER named this).** update/delete implies
+  something notices a memory has gone stale — code changed, a decision was
+  reversed. Nothing in dun watches for that today. The cheap version is a memory
+  citing the commit it was written against, so a reader can see how far the tree
+  has moved since.
+- **Scope.** A memory is about a PROJECT, but a session runs in a worktree that
+  is thrown away. Whatever is written has to land in the checkout's index, not
+  the worktree's — the same rule `.dun/dun.local.json` already follows for
+  /rag auto.
+
+**Sketch:** `recap({…, remember: "…"})` — an explicit second field, not the
+summary itself, so what enters the index is chosen rather than inherited. Then
+`/memories` in the TUI to list, edit and delete them, which is the only honest
+answer to invalidation until something can detect staleness on its own.
