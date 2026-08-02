@@ -404,6 +404,28 @@ func (h *Harness) jobsChanged() {
 	h.cfg.OnJobs(h.Jobs())
 }
 
+// spillExec saves a foreground result too large to hand the model whole, and
+// returns the path. Beside the background job logs, because it is the same kind
+// of thing: output that exists, is wanted occasionally, and must not be paid
+// for on every turn.
+func (h *Harness) spillExec(command, output string) string {
+	dir := h.bgLogDir()
+	if dir == "" {
+		return ""
+	}
+	h.bgMu.Lock()
+	h.bgSeq++
+	n := h.bgSeq
+	h.bgMu.Unlock()
+
+	path := filepath.Join(dir, fmt.Sprintf("exec-%d.out", n))
+	body := fmt.Sprintf("$ %s\n\n%s", command, output)
+	if os.WriteFile(path, []byte(body), 0o600) != nil {
+		return ""
+	}
+	return path
+}
+
 // bgJobByID looks a job up for the monitor tool.
 func (h *Harness) bgJobByID(id int) *bgJob {
 	h.bgMu.Lock()

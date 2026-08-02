@@ -242,7 +242,7 @@ func (h *Harness) rebuildTools() {
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef(), execMonitorToolDef())
 		startBg := func(command string) *bgJob { return h.startBackground(cfg.Exec, command) }
-		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall, startBg)
+		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall, startBg, h.spillExec)
 		dispatch = withExecMonitor(dispatch, h, cfg.OnToolCall)
 	}
 	if cfg.Ask != nil {

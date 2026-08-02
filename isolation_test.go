@@ -180,7 +180,7 @@ func TestBound_DefaultsOnlyWhenNothingElseSaysOtherwise(t *testing.T) {
 
 func TestWithExec_RoutesExecLocallyElseMCP(t *testing.T) {
 	inner := agentDispatch(func(name string) string { return "MCP:" + name })
-	d := withExec(inner, HostExec{Dir: t.TempDir()}, nil, nil)
+	d := withExec(inner, HostExec{Dir: t.TempDir()}, nil, nil, nil)
 
 	var call llm.ToolCall
 	call.Function.Name = "exec"

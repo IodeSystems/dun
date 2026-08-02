@@ -84,6 +84,56 @@ func (r ExecResult) Render() string {
 	return s
 }
 
+// execInlineMax is how much of a foreground result reaches the model.
+//
+// Background jobs have had this since the day they were written: stream to a
+// file, hand the model a bounded tail and the path. The foreground path never
+// did, and one `cat` of a 252 KB log put 255,720 characters — about 64k tokens
+// — into the window, to answer a question whose answer was "30". Every turn
+// after that paid for it again.
+//
+// The cap is generous on purpose: the model ASKED for this output, so the
+// budget is "enough to work with" rather than "enough to notice something went
+// wrong". What does not fit is still on disk and grep-able, which is the same
+// bargain exec_monitor already offers for a long build.
+const execInlineMax = 20000
+
+// execHeadShare is how much of the budget goes to the START of the output. A
+// failure is at the bottom — that is why tailOf keeps the end — but a listing,
+// a file, or a help text is useful from the top, and the foreground path sees
+// both. So both ends survive and the middle is what goes.
+const execHeadShare = 3
+
+// capExecOutput bounds one foreground result, spilling the whole thing to a
+// file the model can grep. Applied AFTER Render, so the "[exit: …]" verdict —
+// which lives at the end — is inside the tail that is kept.
+func capExecOutput(out, command string, spill func(command, output string) string) string {
+	if len(out) <= execInlineMax {
+		return out
+	}
+	head := execInlineMax / execHeadShare
+	tail := execInlineMax - head
+	// Cut on line boundaries: half a line is not something the model can act on,
+	// and it reads as corruption rather than as truncation.
+	h := out[:head]
+	if i := strings.LastIndexByte(h, '\n'); i > 0 {
+		h = h[:i+1]
+	}
+	t := out[len(out)-tail:]
+	if i := strings.IndexByte(t, '\n'); i >= 0 {
+		t = t[i+1:]
+	}
+	elided := len(out) - len(h) - len(t)
+
+	where := "the full output was not saved"
+	if spill != nil {
+		if path := spill(command, out); path != "" {
+			where = "full output: " + path + " — grep it with exec rather than asking for it whole"
+		}
+	}
+	return fmt.Sprintf("%s\n…[%d characters elided — %s]…\n%s", h, elided, where, t)
+}
+
 // defaultExecTimeout bounds a FOREGROUND exec. Nothing the model runs in the
 // foreground is worth blocking the session indefinitely: a command that waits
 // on input it can never receive (`gh auth login` polls a device flow for 15
@@ -281,7 +331,7 @@ func execToolDef() llm.ToolDef {
 // withExec wraps a dispatcher so the built-in "exec" tool is handled locally:
 // synchronous by default, or async via startBg when background:true (its
 // completion arrives later as a notification). Everything else routes to MCP.
-func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startBg func(command string) *bgJob) agent.ToolDispatcher {
+func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startBg func(command string) *bgJob, spill func(command, output string) string) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
@@ -305,7 +355,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			}
 			return res, nil
 		}
-		out := backend.Run(ctx, args.Command, nil).Render()
+		out := capExecOutput(backend.Run(ctx, args.Command, nil).Render(), args.Command, spill)
 		if onCall != nil {
 			onCall("exec", map[string]any{"command": args.Command}, out)
 		}

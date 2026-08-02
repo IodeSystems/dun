@@ -859,6 +859,10 @@ var (
 	systemMonitor = "\n- exec_monitor: check on a background job, or change what it tells you. A job stays silent " +
 		"until it finishes; ask for progress with buffer_bytes, narrow it with grep, or mute it with ignore. Its " +
 		"full output is on disk — grep the log path with exec rather than pulling a large log in whole."
+	systemExecCap = "\n  A foreground result larger than " + fmt.Sprintf("%d", execInlineMax) + " characters is " +
+		"CLIPPED to its start and end before you see it, with the whole thing written to a file whose path is " +
+		"in the gap. That is not an error — grep that file for what you need instead of re-running the command " +
+		"to see more."
 )
 
 // systemFor describes only the tool families actually present. exec and ask_user
@@ -897,6 +901,7 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree) string {
 	}
 	if exec != nil {
 		b.WriteString(systemExec)
+		b.WriteString(systemExecCap)
 		b.WriteString(systemMonitor)
 	}
 	b.WriteString(systemAsk)
