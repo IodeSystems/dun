@@ -89,36 +89,55 @@ Do one only if you are already in that file.
 
 A recap already produces the one thing a project memory wants: a distilled,
 corrected account of a stretch of work, written by the agent that did it and
-confirmed by the human. Today it dies with the session. Ingesting it into the
-project's raglit index would make it available to every LATER session through
-the proactive-RAG path that already exists (`agent.DocFinder` → agentkit
-`FinderPreparer`), which is how it would reach a model without anyone
-remembering to ask.
+confirmed by the human. Today it dies with the session.
 
-**Why it fits:** the confirmation step is already a human saying "this account is
-correct", which is a higher bar than anything else dun would ingest. And the
-sidecar keeps the raw churn, so a memory can always be checked against what
-actually happened.
+**Shape (USER).** Memories are PASSIVE — surfaced by raglit search when they are
+relevant, not loaded as a context file every session. Cost then scales with
+relevance instead of with corpus size, which is what makes the whole thing
+affordable as memories accumulate. One memory DOCUMENT per project; each memory
+is a FRAGMENT; the summary and the answered-questions index are rebuilt as
+fragments accrue.
 
-**Why it is not free — the reason this is iceboxed rather than done:**
+**It maps onto what raglit already is.** `Document{Path, Title, Fragments}` with
+idempotent replace-on-reingest IS "one document, memories as fragments, rebuilt
+on append". And `origin='identity'` is already a machine-written summary indexed
+as its own fragment and ranked beside real text — so the question index is one
+more origin, not new machinery. Design lives in
+`raglit/plan/answered-questions.md`; this file is the dun half.
 
-- **A recap can be WRONG.** Measured twice on the same task: the model wrote
-  "3000 lines" for a 4000-line file, and the human (me, driving a script)
-  approved it. In a session that is a local error; in a project index it is a
-  permanent one that surfaces in unrelated sessions months later, carrying the
-  authority of having been confirmed. The failure mode is worse than not
-  indexing at all.
-- **Invalidation needs an owner (USER named this).** update/delete implies
-  something notices a memory has gone stale — code changed, a decision was
-  reversed. Nothing in dun watches for that today. The cheap version is a memory
-  citing the commit it was written against, so a reader can see how far the tree
-  has moved since.
-- **Scope.** A memory is about a PROJECT, but a session runs in a worktree that
-  is thrown away. Whatever is written has to land in the checkout's index, not
-  the worktree's — the same rule `.dun/dun.local.json` already follows for
-  /rag auto.
+**What dun owns:**
 
-**Sketch:** `recap({…, remember: "…"})` — an explicit second field, not the
-summary itself, so what enters the index is chosen rather than inherited. Then
-`/memories` in the TUI to list, edit and delete them, which is the only honest
-answer to invalidation until something can detect staleness on its own.
+- **Writing.** `recap({…, remember: "…"})` — an explicit field, NOT the summary
+  itself, so what enters the index is chosen rather than inherited. Recap is the
+  right trigger precisely because a human has just confirmed the account is
+  correct, which is a stronger signal than any heuristic for "worth keeping".
+- **Read-suppression.** A memory already surfaced this session is not proposed
+  again. This belongs HERE, in the `FinderPreparer` that does the surfacing, not
+  in the index: several sessions share one index, so read-state is the
+  consumer's, and raglit staying stateless about its readers is what lets two
+  sessions suppress independently.
+- **Provenance.** A fragment records the session and the commit it was written
+  against. Without it, a wrong memory laundered into the rebuilt summary reads
+  as the project's considered view with nothing to trace it back to.
+- **Scope.** A session runs in a throwaway worktree, but a memory is about the
+  PROJECT — so it lands in the checkout's index, the same rule
+  `.dun/dun.local.json` already follows for /rag auto.
+
+**The objection that survives.** A recap can be wrong: measured twice on one
+task, the model wrote "3000 lines" for a 4000-line file and the human approved
+it. In a session that is a local error; indexed, it resurfaces months later in
+an unrelated session carrying the authority of having been confirmed. Deletion
+is easy (one fragment, re-ingest converges) — NOTICING is the hard part, and
+nothing here solves it. The cheap mitigations are provenance plus the standing
+convention that a recalled memory naming a file or a flag is checked before it
+is acted on.
+
+**Do not save what the repo already records.** Code structure, past fixes, git
+history: re-derivable, and the fastest to go stale. This is the sharp constraint,
+because a recap summary is very often exactly a restatement of what the code and
+the commit log already say. The memory-worthy residue is what is NOT in the
+tree — why an approach was abandoned, what a measurement showed, which reading
+of an ambiguous request turned out to be the right one.
+
+**Then `/memories`** to list, read and delete — the only honest answer to
+invalidation until something can detect staleness on its own.
