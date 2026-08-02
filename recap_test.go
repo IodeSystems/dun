@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/agentkit/llm"
 )
 
 // convo builds a conversation: a user message, then churn, then the live recap
@@ -433,5 +434,65 @@ func TestRecapNudge_SilentWithNoSingleOffender(t *testing.T) {
 	h.maybeNudgeRecap(40000)
 	if n := h.notes(); len(n) != 0 {
 		t.Errorf("no single large entry means nothing to name: %q", n)
+	}
+}
+
+// The cap is universal (USER): nothing about the harm is specific to exec. A
+// node_read of a big file, a search with many hits and an eval returning a big
+// structure all cost the same window, so the cap lives around EVERY tool.
+func TestRecapWatch_CapsEveryTool(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
+	h := &Harness{store: st, wake: make(chan struct{}, 1), cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
+
+	huge := strings.Repeat("{\"hit\": \"result line\"},\n", 20000)
+	inner := func(context.Context, llm.ToolCall) (string, error) { return huge, nil }
+	d := withRecapWatch(inner, h)
+
+	var tc llm.ToolCall
+	tc.Function.Name, tc.Function.Arguments = "search", "{}"
+	out, err := d(context.Background(), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) > execInlineMax+400 {
+		t.Fatalf("a non-exec tool went uncapped: %d characters", len(out))
+	}
+	// Structured output is clipped too, knowingly: an unbounded result would
+	// only have to start with "{" to reopen the hole.
+	if !strings.Contains(out, "characters elided") {
+		t.Errorf("the gap must say what happened: %q", out[:200])
+	}
+	// A REF, not a path — under --docker a host path is not openable by the
+	// model at all.
+	if !strings.Contains(out, `recap({ref:`) {
+		t.Errorf("the gap must say how to read the rest: %q", out[len(out)-300:])
+	}
+
+	// And that ref really reads back, dun-side: no shell, no container.
+	ref := ""
+	h.recapMu.Lock()
+	for k := range h.spills {
+		ref = k
+	}
+	h.recapMu.Unlock()
+	if ref == "" {
+		t.Fatal("no spill was registered")
+	}
+	got := h.readSpill(ref, "hit", 0, 0, false)
+	if !strings.Contains(got, "lines match") {
+		t.Errorf("grep should work on a spilled result: %q", got[:120])
+	}
+	if head := h.readSpill(ref, "", 3, 0, false); !strings.Contains(head, "first 3 of") {
+		t.Errorf("head should work: %q", head[:120])
+	}
+	// full is BOUNDED: an unbounded read hands back exactly what the cap took
+	// out, through a door marked convenience.
+	full := h.readSpill(ref, "", 0, 0, true)
+	if len(full) > execInlineMax+500 {
+		t.Errorf("a full read must stay bounded, got %d characters", len(full))
+	}
+	if h.readSpill("nope", "", 0, 0, true) == "" || !strings.Contains(h.readSpill("nope", "", 0, 0, true), "Known refs") {
+		t.Error("an unknown ref should say which ones exist")
 	}
 }

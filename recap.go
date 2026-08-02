@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -303,13 +305,115 @@ func writeSidecar(path string, entries []agent.Entry) error {
 	return f.Sync()
 }
 
+// ── reading back what was clipped ───────────────────────────────────
+//
+// The cap spills the whole result to a file. The first version told the model
+// to "grep it with exec", which is wrong twice over: under --docker the file is
+// on the HOST and the container has only the worktree mounted, so the path does
+// not exist for the model at all; and with no exec backend there is no shell to
+// grep with. Background job logs have carried the same broken instruction since
+// they were written.
+//
+// So retrieval is dun-side and addressed by a REF — a short name printed in the
+// gap — rather than by a path the model may have no way to open. Reads are
+// bounded by the same cap that created the spill, or a "full" read would put
+// back exactly what was taken out.
+
+// registerSpill files a path under a short ref and returns it.
+func (h *Harness) registerSpill(kind, path string) string {
+	h.recapMu.Lock()
+	defer h.recapMu.Unlock()
+	if h.spills == nil {
+		h.spills = map[string]string{}
+	}
+	h.spillSeq++
+	ref := fmt.Sprintf("%s%d", kind, h.spillSeq)
+	h.spills[ref] = path
+	return ref
+}
+
+func (h *Harness) spillPath(ref string) string {
+	h.recapMu.Lock()
+	defer h.recapMu.Unlock()
+	return h.spills[strings.TrimSpace(ref)]
+}
+
+// readSpill answers recap({ref: …}): the clipped result, or a job log, read
+// without a shell and without leaving the process.
+func (h *Harness) readSpill(ref, grep string, head, tail int, full bool) string {
+	path := h.spillPath(ref)
+	if path == "" {
+		var known []string
+		h.recapMu.Lock()
+		for k := range h.spills {
+			known = append(known, k)
+		}
+		h.recapMu.Unlock()
+		sort.Strings(known)
+		if len(known) == 0 {
+			return "ERROR: no saved results yet. A ref appears in the gap when a result is too big to show whole."
+		}
+		return fmt.Sprintf("ERROR: no saved result %q. Known refs: %s", ref, strings.Join(known, ", "))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "ERROR: " + err.Error()
+	}
+	body := string(data)
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+
+	switch {
+	case grep != "":
+		re, err := regexp.Compile(grep)
+		if err != nil {
+			return fmt.Sprintf("ERROR: %q is not a valid regexp: %v", grep, err)
+		}
+		var hit []string
+		for i, l := range lines {
+			if re.MatchString(l) {
+				hit = append(hit, fmt.Sprintf("%d: %s", i+1, l))
+			}
+		}
+		if len(hit) == 0 {
+			return fmt.Sprintf("%s: no line matches %q (%d lines searched).", ref, grep, len(lines))
+		}
+		out := fmt.Sprintf("%s: %d of %d lines match %q\n%s", ref, len(hit), len(lines), grep, strings.Join(hit, "\n"))
+		return capExecOutput(out, "", nil) // a match list can itself be enormous
+	case head > 0:
+		if head > len(lines) {
+			head = len(lines)
+		}
+		return fmt.Sprintf("%s: first %d of %d lines\n%s", ref, head, len(lines), strings.Join(lines[:head], "\n"))
+	case tail > 0:
+		if tail > len(lines) {
+			tail = len(lines)
+		}
+		return fmt.Sprintf("%s: last %d of %d lines\n%s", ref, tail, len(lines), strings.Join(lines[len(lines)-tail:], "\n"))
+	case full:
+		// Bounded on purpose. An unbounded "full" would hand back exactly what
+		// the cap removed, which is the whole problem returning through a door
+		// marked convenience.
+		if len(body) <= execInlineMax {
+			return fmt.Sprintf("%s: %d lines\n%s", ref, len(lines), body)
+		}
+		return fmt.Sprintf("%s: %d lines, %d characters — too large to show whole, so this is still clipped. "+
+			"Narrow it with grep, head or tail.\n%s", ref, len(lines), len(body), capExecOutput(body, "", nil))
+	}
+	return fmt.Sprintf("%s: %d lines, %d characters. Ask for part of it: grep, head or tail (full:true is "+
+		"still bounded).", ref, len(lines), len(body))
+}
+
 // ── the tool ────────────────────────────────────────────────────────
 
 func recapToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "recap"
-	td.Function.Description = "Replace a stretch of this conversation with a corrected account of it. Use it after " +
+	td.Function.Description = "Manage your own context. TWO modes. (1) READ BACK a result that was too big to " +
+		"show whole: recap({ref:\"r3\", grep:\"ERROR\"}) — also head, tail, or full (still bounded). The ref " +
+		"is printed in the gap where the output was clipped, and works for background job logs too; it is read " +
+		"directly, so it works with no shell and inside a container. (2) REPLACE a stretch of this conversation " +
+		"with a corrected account of it. Use it after " +
 		"churn — a huge tool result you no longer need, several failed attempts at the same thing, a " +
 		"misunderstanding that was cleared up later. `from` is a phrase from the message the churn started " +
 		"AFTER (quoted exactly); everything since is replaced by `summary`, which should read as the account " +
@@ -320,6 +424,11 @@ func recapToolDef() llm.ToolDef {
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"ref":     map[string]any{"type": "string", "description": "read mode: a saved result's ref, as printed where its output was clipped"},
+			"grep":    map[string]any{"type": "string", "description": "read mode: only lines matching this regexp"},
+			"head":    map[string]any{"type": "integer", "description": "read mode: the first N lines"},
+			"tail":    map[string]any{"type": "integer", "description": "read mode: the last N lines"},
+			"full":    map[string]any{"type": "boolean", "description": "read mode: as much as the cap allows"},
 			"from":    map[string]any{"type": "string", "description": "exact phrase from the message the churn began after"},
 			"summary": map[string]any{"type": "string", "description": "what actually happened and what is true now, written to stand alone"},
 			"keep": map[string]any{
@@ -328,7 +437,6 @@ func recapToolDef() llm.ToolDef {
 			},
 			"user": map[string]any{"type": "string", "description": "optional: a clearer wording of the anchoring user message"},
 		},
-		"required": []string{"from", "summary"},
 	}
 	return td
 }
@@ -339,13 +447,26 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			return inner(ctx, tc)
 		}
 		var args struct {
+			Ref     string   `json:"ref"`
+			Grep    string   `json:"grep"`
+			Head    int      `json:"head"`
+			Tail    int      `json:"tail"`
+			Full    bool     `json:"full"`
 			From    string   `json:"from"`
 			Summary string   `json:"summary"`
 			Keep    []string `json:"keep"`
 			User    string   `json:"user"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		out := h.runRecap(ctx, args.From, args.Summary, args.Keep, args.User)
+		// A ref means READ. The two modes share a tool because they are the same
+		// job — deciding what is in your context — but they are told apart by
+		// what was asked for, never by a mode flag the model has to remember.
+		var out string
+		if strings.TrimSpace(args.Ref) != "" {
+			out = h.readSpill(args.Ref, args.Grep, args.Head, args.Tail, args.Full)
+		} else {
+			out = h.runRecap(ctx, args.From, args.Summary, args.Keep, args.User)
+		}
 		if onCall != nil {
 			onCall("recap", map[string]any{"from": args.From, "summary": args.Summary, "keep": args.Keep}, out)
 		}
@@ -566,11 +687,32 @@ func (h *Harness) claimCue(key string) bool {
 func withRecapWatch(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		out, err := inner(ctx, tc)
-		if err == nil && tc.Function.Name != "recap" {
-			h.watchRecap(tc.Function.Name, len(out))
+		if err != nil || tc.Function.Name == "recap" {
+			// recap bounds its own reads; clipping them again would clip the
+			// thing the model just asked to see.
+			return out, err
 		}
+		// The cap is UNIVERSAL (USER). It began exec-only, but nothing about
+		// the harm is specific to exec: node_read on a large file, a search with
+		// many hits, an eval returning a big structure all cost the same window.
+		// Structured results are clipped too, and knowingly — a clipped JSON is
+		// still readable prose to a model, while an unbounded one only has to
+		// start with "{" to reopen the hole.
+		out = capExecOutput(out, tc.Function.Name+" "+oneLine(tc.Function.Arguments, 120),
+			func(cmd, body string) string { return h.spillRef(cmd, body) })
+		h.watchRecap(tc.Function.Name, len(out))
 		return out, err
 	}
+}
+
+// spillRef saves an oversized result and returns the ref the model will use to
+// read it back.
+func (h *Harness) spillRef(command, output string) string {
+	path := h.spillExec(command, output)
+	if path == "" {
+		return ""
+	}
+	return h.registerSpill("r", path)
 }
 
 // biggestEntry is the single largest thing in the window — the one worth naming.

@@ -56,6 +56,7 @@ type bgJob struct {
 	id      int
 	command string
 	logPath string
+	logRef  string // how the model addresses this log (see logLine)
 	started time.Time
 	h       *Harness
 
@@ -163,11 +164,21 @@ func (j *bgJob) finished(res ExecResult) string {
 		j.logLine(), tailOf(res.Output, bgTailBytes))
 }
 
+// logLine cites the job's log by REF. It used to hand over a host path with
+// "grep it with exec", which under --docker names a file the model's container
+// cannot open, and with no exec backend names one it has no way to read at all.
 func (j *bgJob) logLine() string {
 	if j.logPath == "" {
 		return "(no log file)"
 	}
-	return fmt.Sprintf("full output: %s — grep it with exec rather than asking for it whole", j.logPath)
+	if j.logRef == "" && j.h != nil {
+		j.logRef = j.h.registerSpill("job", j.logPath)
+	}
+	if j.logRef == "" {
+		return "full output: " + j.logPath
+	}
+	return fmt.Sprintf("full output: ref %q — read it with recap({ref:%q, grep:\"…\"}), or head/tail",
+		j.logRef, j.logRef)
 }
 
 // status is the one-line answer to "what is job N doing?".

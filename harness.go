@@ -199,6 +199,10 @@ type Harness struct {
 	recapMu     sync.Mutex
 	recapNudged int
 	recapSeen   map[string]bool // suggestions already made, so none repeats
+	// spills maps a short ref to a saved result. A ref, not a path: under
+	// --docker the file is on the host and the model's container cannot open it.
+	spills   map[string]string
+	spillSeq int
 	// Compaction counters. compactTurn resets each turn, so >1 is thrashing
 	// rather than a busy session.
 	compactMu   sync.Mutex
@@ -859,10 +863,11 @@ var (
 	systemMonitor = "\n- exec_monitor: check on a background job, or change what it tells you. A job stays silent " +
 		"until it finishes; ask for progress with buffer_bytes, narrow it with grep, or mute it with ignore. Its " +
 		"full output is on disk — grep the log path with exec rather than pulling a large log in whole."
-	systemExecCap = "\n  A foreground result larger than " + fmt.Sprintf("%d", execInlineMax) + " characters is " +
-		"CLIPPED to its start and end before you see it, with the whole thing written to a file whose path is " +
-		"in the gap. That is not an error — grep that file for what you need instead of re-running the command " +
-		"to see more."
+	systemExecCap = "\n\nANY tool result larger than " + fmt.Sprintf("%d", execInlineMax) + " characters is CLIPPED " +
+		"to its start and end before you see it, and the whole thing is saved under a short REF printed in the " +
+		"gap. That is not an error and the command did not fail. Do not claim you saw what was elided — read " +
+		"it instead: recap({ref:\"r1\", grep:\"…\"}), or head/tail/full. Re-running the command will only " +
+		"clip it again."
 )
 
 // systemFor describes only the tool families actually present. exec and ask_user

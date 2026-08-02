@@ -125,10 +125,12 @@ func capExecOutput(out, command string, spill func(command, output string) strin
 	}
 	elided := len(out) - len(h) - len(t)
 
-	where := "the full output was not saved"
+	where := "the rest was not saved"
 	if spill != nil {
-		if path := spill(command, out); path != "" {
-			where = "full output: " + path + " — grep it with exec rather than asking for it whole"
+		if ref := spill(command, out); ref != "" {
+			// A REF, not a path: under --docker the file is on the host and the
+			// model's container cannot open it, so a path was never usable.
+			where = fmt.Sprintf("ref %q — read it with recap({ref:%q, grep:\"…\"}), or head/tail/full", ref, ref)
 		}
 	}
 	return fmt.Sprintf("%s\n…[%d characters elided — %s]…\n%s", h, elided, where, t)
@@ -355,7 +357,9 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			}
 			return res, nil
 		}
-		out := capExecOutput(backend.Run(ctx, args.Command, nil).Render(), args.Command, spill)
+		// NOT capped here: the cap is applied once, around every tool, in
+		// withRecapWatch. Capping twice would spill the same output twice.
+		out := backend.Run(ctx, args.Command, nil).Render()
 		if onCall != nil {
 			onCall("exec", map[string]any{"command": args.Command}, out)
 		}
