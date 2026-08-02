@@ -388,6 +388,21 @@ isolation forces the split there).
   watching (icebox: configurable timeout, condition now reached).
 
 ## Decisions
+- **What the human sees must be what the MODEL saw.** `OnToolCall` fires inside
+  each tool's wrapper, before the outer cap, so the TUI rendered a
+  quarter-megabyte the model never read — and "why did it not see the last
+  line?" was answered wrongly by the operator's own screen. Reporting goes
+  through `cappedReporter`, which forces the clip to run twice, which forces it
+  to be memoized by content: two clips would mean two spills under two refs, and
+  the human told to read a copy the model has never heard of.
+- **Line-based readers are useless on output with no lines, and a byte cut
+  through UTF-8 is corruption.** A minified document or one enormous generated
+  line defeats grep, head and tail alike — all three hand back the line that was
+  the problem — so such a result was visible only at its two ends with no way to
+  open the middle. `recap({ref, at:N})` pages it and each page says where the
+  next begins. Both clip ends land on rune boundaries; invalid UTF-8 can break
+  the transport rather than merely read badly. "Unlined" is the longest LINE,
+  not the line count.
 - **Bound what ENTERS the window before managing what is in it.** Background
   jobs streamed to a file and returned a bounded tail from the day they were
   written; the foreground path never did, so one `cat` put 255,720 characters
