@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -479,20 +480,112 @@ func TestRecapWatch_CapsEveryTool(t *testing.T) {
 	if ref == "" {
 		t.Fatal("no spill was registered")
 	}
-	got := h.readSpill(ref, "hit", 0, 0, false)
+	got := h.readSpill(ref, "hit", 0, 0, 0, false)
 	if !strings.Contains(got, "lines match") {
 		t.Errorf("grep should work on a spilled result: %q", got[:120])
 	}
-	if head := h.readSpill(ref, "", 3, 0, false); !strings.Contains(head, "first 3 of") {
+	if head := h.readSpill(ref, "", 3, 0, 0, false); !strings.Contains(head, "first 3 of") {
 		t.Errorf("head should work: %q", head[:120])
 	}
 	// full is BOUNDED: an unbounded read hands back exactly what the cap took
 	// out, through a door marked convenience.
-	full := h.readSpill(ref, "", 0, 0, true)
+	full := h.readSpill(ref, "", 0, 0, 0, true)
 	if len(full) > execInlineMax+500 {
 		t.Errorf("a full read must stay bounded, got %d characters", len(full))
 	}
-	if h.readSpill("nope", "", 0, 0, true) == "" || !strings.Contains(h.readSpill("nope", "", 0, 0, true), "Known refs") {
+	if h.readSpill("nope", "", 0, 0, 0, true) == "" || !strings.Contains(h.readSpill("nope", "", 0, 0, 0, true), "Known refs") {
 		t.Error("an unknown ref should say which ones exist")
+	}
+}
+
+// Output with no line structure — a minified document, a base64 payload, one
+// enormous generated line — defeats grep, head and tail alike: every one of
+// them is line-based, so they all hand back the single line that was the
+// problem. Paging is the only handle on it.
+func TestReadSpill_PagesOutputWithNoLines(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
+	h := &Harness{store: st, cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
+
+	blob := "{" + strings.Repeat("\"k\":\"v\",", 12000) + "}" // one line, ~96k chars
+	ref := h.spillRef("eval {}", blob)
+	if ref == "" {
+		t.Fatal("no ref")
+	}
+
+	// Asked about, it says the line-based tools cannot help and how to page.
+	desc := h.readSpill(ref, "", 0, 0, 0, false)
+	if !strings.Contains(desc, "no line structure") || !strings.Contains(desc, "at:0") {
+		t.Fatalf("it must say paging is the way in: %q", desc)
+	}
+
+	first := h.readSpill(ref, "", 0, 0, 0, true)
+	if !strings.Contains(first, "characters 0–") {
+		t.Fatalf("full on an unlined blob should page from the start: %q", first[:120])
+	}
+	if !strings.Contains(first, "next page: recap({ref:") {
+		t.Fatalf("a page must say where the next one starts: %q", first[:200])
+	}
+	if len(first) > execInlineMax+400 {
+		t.Errorf("a page must stay bounded, got %d", len(first))
+	}
+
+	second := h.readSpill(ref, "", 0, 0, execInlineMax, false)
+	if !strings.Contains(second, fmt.Sprintf("characters %d–", execInlineMax)) {
+		t.Errorf("at: should page from the offset given: %q", second[:120])
+	}
+	// Past the end of the FILE, which is larger than the blob: the saved copy
+	// carries a "$ command" header so the offsets are the file's, not the
+	// output's.
+	if past := h.readSpill(ref, "", 0, 0, len(blob)+1000, false); !strings.Contains(past, "past the end") {
+		t.Errorf("an offset past the end must say so: %q", past)
+	}
+}
+
+// A byte-boundary cut on multibyte text produces invalid UTF-8 — corruption
+// that can break the transport, not merely read badly. The line-boundary trim
+// does not help when there are no lines.
+func TestCapExecOutput_NeverSplitsARune(t *testing.T) {
+	out := strings.Repeat("héllo wörld ☃ ", 4000) // no newlines at all
+	got := capExecOutput(out, "eval", nil)
+	if utf8.ValidString(got) != true {
+		t.Fatal("clipping produced invalid UTF-8")
+	}
+	if len(got) > execInlineMax+400 {
+		t.Errorf("unlined output must still be clipped, got %d", len(got))
+	}
+}
+
+// The -p stream used to carry the RAW result while the model got the clipped
+// one, so the TUI rendered a quarter-megabyte the model had never read. Both
+// sides must see the same text — and it must spill ONCE, or the human is told
+// to read a copy the model has never heard of.
+func TestCappedReporter_ShowsTheHumanWhatTheModelSaw(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
+	h := &Harness{store: st, wake: make(chan struct{}, 1), cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
+
+	var reported string
+	report := h.cappedReporter(func(_ string, _ map[string]any, result string) { reported = result })
+
+	huge := strings.Repeat("output line\n", 30000)
+	inner := func(_ context.Context, _ llm.ToolCall) (string, error) {
+		report("exec", map[string]any{"command": "cat big"}, huge) // as each wrapper does
+		return huge, nil
+	}
+	var tc llm.ToolCall
+	tc.Function.Name, tc.Function.Arguments = "exec", `{"command":"cat big"}`
+	toModel, err := withRecapWatch(inner, h)(context.Background(), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reported != toModel {
+		t.Fatalf("the human and the model must see the same text (%d vs %d chars)", len(reported), len(toModel))
+	}
+	h.recapMu.Lock()
+	n := len(h.spills)
+	h.recapMu.Unlock()
+	if n != 1 {
+		t.Fatalf("capping twice must not spill twice, got %d refs", n)
 	}
 }

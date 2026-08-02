@@ -2,6 +2,8 @@ package dun
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -319,6 +321,42 @@ func writeSidecar(path string, entries []agent.Entry) error {
 // bounded by the same cap that created the spill, or a "full" read would put
 // back exactly what was taken out.
 
+// unlined reports whether the line-based readers are useless here: not "how
+// many lines" but "is any single line bigger than a whole reply". A file of
+// three lines where one is 96,000 characters is unlined for every practical
+// purpose, and counting lines would call it structured. The saved file also
+// carries a "$ command" header, so a one-line blob is never a one-line file.
+func unlined(lines []string) bool {
+	for _, l := range lines {
+		if len(l) > execInlineMax {
+			return true
+		}
+	}
+	return false
+}
+
+// pageOf returns one window of a result that cannot be read any other way, and
+// says where the next one starts. Paging is the only handle on output with no
+// lines to grep, and the reply has to carry the offset or the model must guess.
+func pageOf(ref, body string, at int) string {
+	if at < 0 {
+		at = 0
+	}
+	if at >= len(body) {
+		return fmt.Sprintf("%s: offset %d is past the end (%d characters).", ref, at, len(body))
+	}
+	end := at + execInlineMax
+	if end > len(body) {
+		end = len(body)
+	}
+	page := safeCutFront(safeCut(body[at:end]))
+	more := ""
+	if end < len(body) {
+		more = fmt.Sprintf(" — next page: recap({ref:%q, at:%d})", ref, end)
+	}
+	return fmt.Sprintf("%s: characters %d–%d of %d%s\n%s", ref, at, end, len(body), more, page)
+}
+
 // registerSpill files a path under a short ref and returns it.
 func (h *Harness) registerSpill(kind, path string) string {
 	h.recapMu.Lock()
@@ -340,7 +378,7 @@ func (h *Harness) spillPath(ref string) string {
 
 // readSpill answers recap({ref: …}): the clipped result, or a job log, read
 // without a shell and without leaving the process.
-func (h *Harness) readSpill(ref, grep string, head, tail int, full bool) string {
+func (h *Harness) readSpill(ref, grep string, head, tail, at int, full bool) string {
 	path := h.spillPath(ref)
 	if path == "" {
 		var known []string
@@ -361,6 +399,14 @@ func (h *Harness) readSpill(ref, grep string, head, tail int, full bool) string 
 	}
 	body := string(data)
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	// Output with no line structure — a minified JSON document, a base64 blob,
+	// one enormous generated line — cannot be read with grep, head or tail:
+	// every one of them is line-based, so they all hand back the single line
+	// that was the problem. Such a result is only reachable by PAGING, so `at`
+	// takes a character offset and the reply says where the next page starts.
+	if at > 0 || (full && unlined(lines)) {
+		return pageOf(ref, body, at)
+	}
 
 	switch {
 	case grep != "":
@@ -397,10 +443,15 @@ func (h *Harness) readSpill(ref, grep string, head, tail int, full bool) string 
 			return fmt.Sprintf("%s: %d lines\n%s", ref, len(lines), body)
 		}
 		return fmt.Sprintf("%s: %d lines, %d characters — too large to show whole, so this is still clipped. "+
-			"Narrow it with grep, head or tail.\n%s", ref, len(lines), len(body), capExecOutput(body, "", nil))
+			"Narrow it with grep, head or tail, or page it with at:0, at:%d, …\n%s",
+			ref, len(lines), len(body), execInlineMax, capExecOutput(body, "", nil))
 	}
-	return fmt.Sprintf("%s: %d lines, %d characters. Ask for part of it: grep, head or tail (full:true is "+
-		"still bounded).", ref, len(lines), len(body))
+	shape := fmt.Sprintf("%d lines", len(lines))
+	if unlined(lines) {
+		shape += " (no line structure — grep/head/tail cannot help; page it with at:0)"
+	}
+	return fmt.Sprintf("%s: %s, %d characters. Ask for part of it: grep, head, tail, at:<offset>, or "+
+		"full:true (still bounded).", ref, shape, len(body))
 }
 
 // ── the tool ────────────────────────────────────────────────────────
@@ -451,6 +502,7 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			Grep    string   `json:"grep"`
 			Head    int      `json:"head"`
 			Tail    int      `json:"tail"`
+			At      int      `json:"at"`
 			Full    bool     `json:"full"`
 			From    string   `json:"from"`
 			Summary string   `json:"summary"`
@@ -463,7 +515,7 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		// what was asked for, never by a mode flag the model has to remember.
 		var out string
 		if strings.TrimSpace(args.Ref) != "" {
-			out = h.readSpill(args.Ref, args.Grep, args.Head, args.Tail, args.Full)
+			out = h.readSpill(args.Ref, args.Grep, args.Head, args.Tail, args.At, args.Full)
 		} else {
 			out = h.runRecap(ctx, args.From, args.Summary, args.Keep, args.User)
 		}
@@ -698,8 +750,7 @@ func withRecapWatch(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		// Structured results are clipped too, and knowingly — a clipped JSON is
 		// still readable prose to a model, while an unbounded one only has to
 		// start with "{" to reopen the hole.
-		out = capExecOutput(out, tc.Function.Name+" "+oneLine(tc.Function.Arguments, 120),
-			func(cmd, body string) string { return h.spillRef(cmd, body) })
+		out = h.capOnce(tc.Function.Name+" "+oneLine(tc.Function.Arguments, 120), out)
 		h.watchRecap(tc.Function.Name, len(out))
 		return out, err
 	}
@@ -713,6 +764,57 @@ func (h *Harness) spillRef(command, output string) string {
 		return ""
 	}
 	return h.registerSpill("r", path)
+}
+
+// capOnce is the cap, memoized by content.
+//
+// It has to be applied in TWO places — once for the model (withRecapWatch) and
+// once for the UI (cappedReporter) — because each tool reports its own call
+// from inside its own wrapper, before the outer cap runs. Without memoizing,
+// the same output would spill twice, under two refs, and the human would be
+// told to read a copy the model has never heard of.
+func (h *Harness) capOnce(command, out string) string {
+	if len(out) <= execInlineMax {
+		return out
+	}
+	sum := sha256.Sum256([]byte(out))
+	key := hex.EncodeToString(sum[:])
+
+	h.recapMu.Lock()
+	if h.capped == nil {
+		h.capped = map[string]string{}
+	}
+	if got, ok := h.capped[key]; ok {
+		h.recapMu.Unlock()
+		return got
+	}
+	h.recapMu.Unlock()
+
+	capped := capExecOutput(out, command, func(cmd, body string) string { return h.spillRef(cmd, body) })
+
+	h.recapMu.Lock()
+	if h.capped == nil {
+		h.capped = map[string]string{}
+	}
+	h.capped[key] = capped
+	h.recapMu.Unlock()
+	return capped
+}
+
+// cappedReporter wraps the UI callback so what the human sees is what the MODEL
+// saw.
+//
+// The -p stream used to carry the RAW result while the model got the clipped
+// one: the TUI rendered a quarter-megabyte the model had never read, and anyone
+// asking "why did it not see the last line?" was misled by their own screen.
+// The harness has to say what actually happened.
+func (h *Harness) cappedReporter(onCall func(string, map[string]any, string)) func(string, map[string]any, string) {
+	if onCall == nil {
+		return nil
+	}
+	return func(tool string, args map[string]any, result string) {
+		onCall(tool, args, h.capOnce(tool+" "+oneLine(fmt.Sprint(args), 120), result))
+	}
 }
 
 // biggestEntry is the single largest thing in the window — the one worth naming.

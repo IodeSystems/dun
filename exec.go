@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -115,11 +116,16 @@ func capExecOutput(out, command string, spill func(command, output string) strin
 	tail := execInlineMax - head
 	// Cut on line boundaries: half a line is not something the model can act on,
 	// and it reads as corruption rather than as truncation.
-	h := out[:head]
+	//
+	// Output with no newlines in reach — a minified JSON blob, a base64 payload,
+	// one enormous line — falls back to a byte cut, which must still land on a
+	// RUNE boundary or the result is invalid UTF-8: corruption of a different
+	// kind, and one that can break the transport rather than merely read badly.
+	h := safeCut(out[:head])
 	if i := strings.LastIndexByte(h, '\n'); i > 0 {
 		h = h[:i+1]
 	}
-	t := out[len(out)-tail:]
+	t := safeCutFront(out[len(out)-tail:])
 	if i := strings.IndexByte(t, '\n'); i >= 0 {
 		t = t[i+1:]
 	}
@@ -134,6 +140,30 @@ func capExecOutput(out, command string, spill func(command, output string) strin
 		}
 	}
 	return fmt.Sprintf("%s\n…[%d characters elided — %s]…\n%s", h, elided, where, t)
+}
+
+// safeCut trims a trailing partial rune.
+func safeCut(s string) string {
+	for len(s) > 0 && !utf8.ValidString(s[len(s)-1:]) {
+		r, size := utf8.DecodeLastRuneInString(s)
+		if r != utf8.RuneError || size != 1 {
+			break
+		}
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// safeCutFront trims a leading partial rune.
+func safeCutFront(s string) string {
+	for len(s) > 0 {
+		r, size := utf8.DecodeRuneInString(s)
+		if r != utf8.RuneError || size != 1 {
+			break
+		}
+		s = s[1:]
+	}
+	return s
 }
 
 // defaultExecTimeout bounds a FOREGROUND exec. Nothing the model runs in the

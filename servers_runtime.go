@@ -237,17 +237,20 @@ func (h *Harness) rebuildTools() {
 	// are handled locally by the dispatcher wrappers; everything else routes to
 	// its MCP server.
 	cfg := h.cfg
+	// Every wrapper reports through this, so the -p stream and the TUI carry the
+	// CLIPPED result — the one the model actually read.
+	report := h.cappedReporter(cfg.OnToolCall)
 	toolDefs := mcpToolDefs(tools)
-	dispatch := mcpDispatcher(h.mgr, tools, cfg.OnToolCall)
+	dispatch := mcpDispatcher(h.mgr, tools, report)
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef(), execMonitorToolDef())
 		startBg := func(command string) *bgJob { return h.startBackground(cfg.Exec, command) }
-		dispatch = withExec(dispatch, cfg.Exec, cfg.OnToolCall, startBg, h.spillExec)
-		dispatch = withExecMonitor(dispatch, h, cfg.OnToolCall)
+		dispatch = withExec(dispatch, cfg.Exec, report, startBg, h.spillExec)
+		dispatch = withExecMonitor(dispatch, h, report)
 	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
-		dispatch = withAsk(dispatch, cfg.Ask, cfg.OnToolCall)
+		dispatch = withAsk(dispatch, cfg.Ask, report)
 	}
 	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
 	// a child never receives `agent`, so depth-1 holds with no counter to get
@@ -255,18 +258,18 @@ func (h *Harness) rebuildTools() {
 	// than being a tool that errors when called. See plan/subagents.md.
 	if h.isChild() {
 		toolDefs = append(toolDefs, tellParentToolDef(), askParentToolDef())
-		dispatch = withTellParent(dispatch, h, cfg.OnToolCall)
-		dispatch = withAskParent(dispatch, h, cfg.OnToolCall)
+		dispatch = withTellParent(dispatch, h, report)
+		dispatch = withAskParent(dispatch, h, report)
 	} else {
 		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel), agentMonitorToolDef())
-		dispatch = withAgent(dispatch, h, cfg.OnToolCall)
-		dispatch = withAgentMonitor(dispatch, h, cfg.OnToolCall)
+		dispatch = withAgent(dispatch, h, report)
+		dispatch = withAgentMonitor(dispatch, h, report)
 	}
 	// recap is available to BOTH roles, and the difference is the confirmation:
 	// a root asks the human before rewriting a conversation they are part of,
 	// a child has nobody to ask and its context is exactly what this is for.
 	toolDefs = append(toolDefs, recapToolDef())
-	dispatch = withRecap(dispatch, h, cfg.OnToolCall)
+	dispatch = withRecap(dispatch, h, report)
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
 	// the moment churn is created rather than whenever usage is next measured.
 	dispatch = withRecapWatch(dispatch, h)
@@ -295,7 +298,7 @@ func (h *Harness) rebuildTools() {
 			// report "verified" for commands it could not run.
 			return ExecResult{Code: -1, Err: "no exec backend configured"}
 		}
-		dispatch = withShip(dispatch, cfg.Worktree, cfg.ShipCfg, execFn, cfg.OnToolCall)
+		dispatch = withShip(dispatch, cfg.Worktree, cfg.ShipCfg, execFn, report)
 		sys += "\n\nWhen the task is complete, commit everything (including new files) and call ship. It fetches origin, rebases onto " +
 			cfg.Worktree.BaseBranch + ", runs the project's checks, and lands the result in mode " +
 			string(cfg.ShipCfg.defaultMode()) + " unless you name another. Do not push by hand with exec — ship is what verifies before it pushes."
