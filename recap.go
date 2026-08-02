@@ -686,6 +686,10 @@ const largeResultChars = 20000
 // as a plan.
 const repeatCalls = 3
 
+// repeatWorthRemoving is what that run must have COST before it is worth a tool
+// call to remove. Below this the suggestion is noise — see recapCueFor.
+const repeatWorthRemoving = 4000
+
 // recapNudgeTokens is the window size that earns the fallback reminder.
 const recapNudgeTokens = 20000
 
@@ -702,18 +706,31 @@ type recapCue struct {
 // so the decision is testable without a session: entries is the conversation up
 // to and including the call that just ran, and tool/size describe its result.
 func recapCueFor(entries []agent.Entry, tool string, size int) (recapCue, bool) {
-	// 1. Flailing: this call plus the trailing run of the same tool.
-	run := 1
+	// 1. Flailing: this call plus the trailing run of the same tool — but only
+	// when the run is actually COSTING something.
+	//
+	// Found by dogfooding this on a real task: three node_query calls in a row
+	// returned 44, 112 and 375 characters, the cue fired, and the model ignored
+	// it. It was right to. Recapping a few hundred characters saves nothing and
+	// costs a tool call, and a suggestion that is correct to ignore is training
+	// the model to ignore suggestions. Repetition is the SHAPE of churn; size is
+	// what makes it worth acting on.
+	run, cost := 1, size
 	for i := len(entries) - 1; i >= 0 && run < repeatCalls+2; i-- {
-		if entries[i].Kind != agent.KindToolCall {
+		e := entries[i]
+		if e.Kind == agent.KindToolResult {
+			cost += len(e.Content)
 			continue
 		}
-		if entries[i].ToolName != tool {
+		if e.Kind != agent.KindToolCall {
+			continue
+		}
+		if e.ToolName != tool {
 			break
 		}
 		run++
 	}
-	if run >= repeatCalls {
+	if run >= repeatCalls && cost >= repeatWorthRemoving {
 		return recapCue{
 			key: fmt.Sprintf("repeat:%s:%d", tool, run),
 			detail: fmt.Sprintf("you have called %s %d times in a row. If the earlier attempts are "+

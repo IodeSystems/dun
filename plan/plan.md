@@ -292,16 +292,21 @@ moving parts, and both were frozen:
   callback — safe today because the run goroutine starts after the assignment,
   and nothing runs a turn during `Start`.
 
-### ◻ E. Data race in the TUI input stream (pre-existing)
-`go test -race ./cmd/dun` fails `TestInputStreamResetCallback` — a real race
-around `newInputStreamFrom` (`cmd/dun/main.go:700`), reproduced on a CLEAN tree,
-so it predates this work and is not fallout from it.
-- **next:** read the reset path; the reader goroutine and the callback swap are
-  the obvious suspects.
-- **why it matters:** `-race` failing anywhere means the suite stops being a
-  guard against the next one. `go test -race .` (the dun package) IS clean.
-- **risks:** none to the fix; the cost is that nobody has been running `-race` in
-  CI, so there may be more than one.
+### ✅ E. Data race in the TUI input stream — fixed by dun itself (2026-08-02)
+Handed to a dun session as a real task, in an isolated worktree. It found the
+cause (the race is in the TEST: `called` is a plain bool written by the scanner
+goroutine and read by the test body, with only a `time.Sleep` between them),
+fixed it with `atomic.Bool`, and proved it with `go test -race -count=1
+./cmd/dun`. 13 turns, 141k tokens, 6.6k active. `go test -race ./...` is now
+clean for the first time.
+- **residual, not introduced by the fix:** the 50ms sleep is still there, so the
+  test is timing-dependent by construction. A channel closed by the callback,
+  selected on with a deadline, would remove both the race and the sleep.
+- **what the run taught about recap** — the repetition cue fired 4 times on
+  three `node_query` calls returning 44, 112 and 375 characters, and the model
+  ignored it. Correctly: recapping a few hundred characters saves nothing and
+  costs a tool call. Cue now requires the run to have COST something.
+
 
 ### ◐ D. Slice 5 — sub-agents — **rebuilt 2026-08-01; see ❗0**
 `plan/subagents.md` did not survive, so this section is the entire spec. The

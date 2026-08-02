@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -100,12 +101,12 @@ func TestInputStreamSkipsJunk(t *testing.T) {
 func TestInputStreamResetCallback(t *testing.T) {
 	s := newInputStreamFrom(strings.NewReader(
 		`{"type":"reset"}` + "\n" +
-		`{"type":"user","content":"after"}` + "\n"))
-	var called bool
-	s.setResetCb(func() { called = true })
+			`{"type":"user","content":"after"}` + "\n"))
+	var called atomic.Bool
+	s.setResetCb(func() { called.Store(true) })
 	// Give the scanner a moment to process the reset event.
 	time.Sleep(50 * time.Millisecond)
-	if !called {
+	if !called.Load() {
 		t.Fatal("reset callback not invoked")
 	}
 	if got := drain(t, s); len(got) != 1 || got[0] != "after" {

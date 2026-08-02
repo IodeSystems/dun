@@ -331,11 +331,20 @@ func TestRecapCue_FiresOnTheShapeOfTheChurn(t *testing.T) {
 			ToolName: tool, Content: strings.Repeat("x", n)}
 	}
 
-	// Flailing: three exec calls in a row (two in history plus the one that
-	// just ran) is not a plan.
-	cue, ok := recapCueFor([]agent.Entry{call("exec"), result("exec", 10), call("exec"), result("exec", 10)}, "exec", 10)
+	// Flailing that COSTS something: three exec calls in a row whose results are
+	// worth removing.
+	cue, ok := recapCueFor([]agent.Entry{call("exec"), result("exec", 5000), call("exec"), result("exec", 5000)}, "exec", 10)
 	if !ok || !strings.Contains(cue.detail, "3 times in a row") {
 		t.Fatalf("repetition should be caught: %+v ok=%v", cue, ok)
+	}
+
+	// …but cheap repetition is not churn. Found by dogfooding on a real task:
+	// three node_query calls returning 44, 112 and 375 characters fired the cue,
+	// and the model was RIGHT to ignore it. A suggestion that is correct to
+	// ignore teaches the model to ignore suggestions.
+	if _, ok := recapCueFor([]agent.Entry{call("node_query"), result("node_query", 44),
+		call("node_query"), result("node_query", 112)}, "node_query", 375); ok {
+		t.Error("repetition with nothing to reclaim must stay silent")
 	}
 
 	// Two in a row is still a plan.
