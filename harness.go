@@ -54,15 +54,75 @@ type Server struct {
 // either, and — more to the point — a machine missing one of those binaries
 // should still get a working dun. Persist a preference with /rag auto or
 // /lsp auto (see SetAutostart).
+// raglitProject namespaces this workspace's index on the shared daemon.
+//
+// Derived from the checkout's directory name, so a human running raglit in the
+// same repo lands on the SAME index — which is the point: one corpus, one set of
+// documents, whoever ingested them. A checkout that has been `raglit init`ed
+// carries its own project name in .raglit/config.json; that is the human's
+// declared name and it wins, because splitting one repo across two indexes is
+// the failure this function exists to avoid.
+func raglitProject(workspace string) string {
+	if name := raglitConfigProject(workspace); name != "" {
+		return name
+	}
+	return normalizeProject(filepath.Base(strings.TrimRight(workspace, string(os.PathSeparator))))
+}
+
+// raglitConfigProject reads the project name a `raglit init` wrote next to this
+// checkout, if there is one. Best-effort: any failure falls back to the
+// directory name rather than refusing to start the docs server.
+func raglitConfigProject(workspace string) string {
+	data, err := os.ReadFile(filepath.Join(workspace, ".raglit", "config.json"))
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		Project string `json:"project"`
+	}
+	if json.Unmarshal(data, &cfg) != nil {
+		return ""
+	}
+	return normalizeProject(cfg.Project)
+}
+
+// normalizeProject mirrors raglit's own index-name rule ([a-z0-9_-], empty →
+// "default"), so dun cannot hand it a name it will reject or sanitize
+// differently.
+func normalizeProject(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else if r == ' ' || r == '.' || r == '/' {
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "default"
+	}
+	return out
+}
+
 func DefaultServers(workspace, raglitHome string) []Server {
 	return []Server{
 		{ID: "code", Command: "poly-lsp-mcp", Args: []string{"mcp", "--root", workspace}},
 		{ID: "shell", Command: "mcpshell", Args: []string{"mcp", "--files-dir", workspace}, Autostart: true},
-		// --embedded: dun's raglit home is a per-session temp dir, so the index
-		// is single-session and in-process. Without it raglit routes to the
-		// shared daemon, which refuses a client that has no project name and
-		// exits before the MCP handshake ("transport closed").
-		{ID: "docs", Command: "raglit", Args: []string{"serve", "--embedded", "--home", raglitHome, "--simple"}},
+		// The shared daemon, namespaced by PROJECT — not an --embedded index in a
+		// per-session temp dir.
+		//
+		// The temp-dir form was wrong twice over. It re-embedded the entire
+		// workspace on every session and threw the result away on exit, and it
+		// opted out of the daemon that exists for exactly dun's shape: raglit's
+		// own comment says "N Claude sessions are N thin clients to ONE daemon
+		// (single writer + worker pool + LLM caller), not N processes fighting
+		// over the same index" — and this repo routinely runs seven at once.
+		//
+		// It also made durable memory impossible: anything written to a home
+		// that is deleted on exit cannot outlive the session that wrote it.
+		{ID: "docs", Command: "raglit", Args: []string{"serve", "--project", raglitProject(workspace)}},
 	}
 }
 
@@ -76,7 +136,11 @@ const (
 
 // Config configures a dun harness.
 type Config struct {
-	Workspace  string
+	Workspace string
+	// RaglitHome overrides where raglit keeps its index. Empty — the normal
+	// case — lets raglit resolve its own home and namespace this workspace by
+	// project, so the index survives the session. It used to be a temp dir
+	// deleted on exit, which is why nothing indexed ever outlived a run.
 	RaglitHome string
 
 	Servers []Server // nil → DefaultServers(Workspace, RaglitHome)

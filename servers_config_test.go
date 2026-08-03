@@ -3,6 +3,7 @@ package dun
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -354,5 +355,55 @@ func TestLoadMounts_AutoAndConfig(t *testing.T) {
 	}
 	if mounts[1].Name != "tools" {
 		t.Errorf("second mount name = %q, want %q", mounts[1].Name, "tools")
+	}
+}
+
+// dun used to point raglit at a per-session temp dir with --embedded: it
+// re-embedded the whole workspace every session, threw the result away on exit,
+// and opted out of the daemon that exists for exactly dun's shape. It also made
+// durable memory impossible — a home deleted on exit cannot hold anything.
+func TestRaglitProject_NamespacesByCheckoutNotBySession(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "My Project.v2")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// No .raglit → the directory name, normalized the way raglit itself would.
+	if got := raglitProject(repo); got != "my-project-v2" {
+		t.Fatalf("project = %q, want my-project-v2", got)
+	}
+	// Stable across sessions: that is the whole point.
+	if raglitProject(repo) != raglitProject(repo+"/") {
+		t.Error("a trailing separator must not change the index a session lands on")
+	}
+
+	// A checkout that has been `raglit init`ed declares its own name, and that
+	// wins — splitting one repo across two indexes is the failure to avoid.
+	if err := os.MkdirAll(filepath.Join(repo, ".raglit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".raglit", "config.json"),
+		[]byte(`{"project":"Declared Name"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := raglitProject(repo); got != "declared-name" {
+		t.Fatalf("a declared project must win, got %q", got)
+	}
+
+	// The docs server and the ingest must agree, or the agent searches an index
+	// nothing was written to.
+	srv := DefaultServers(repo, "")
+	var args []string
+	for _, s := range srv {
+		if s.ID == ServerDocs {
+			args = s.Args
+		}
+	}
+	if !slices.Contains(args, "--project") || !slices.Contains(args, "declared-name") {
+		t.Fatalf("serve must name the project: %v", args)
+	}
+	if slices.Contains(args, "--embedded") {
+		t.Error("serve must not bypass the shared daemon: N sessions, one index")
 	}
 }

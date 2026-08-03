@@ -221,11 +221,12 @@ func main() {
 	if sessionFile == "" {
 		sessionFile, sessionID = dun.NewSessionFile(absWS)
 	}
-	raglitHome, err := os.MkdirTemp("", "dun-raglit-")
-	if err != nil {
-		fatal(err)
-	}
-	defer os.RemoveAll(raglitHome)
+	// No per-session raglit home. It used to be an os.MkdirTemp deleted on exit,
+	// which re-embedded the whole workspace every session and discarded it —
+	// and made a durable index impossible by construction. raglit now resolves
+	// its own home and namespaces this workspace by PROJECT (see
+	// dun.DefaultServers), so the index outlives the session and several
+	// sessions share one.
 
 	// Resolve extra mounts: local paths that must be accessible from both
 	// the worktree (symlink) and the Docker container (volume mount).
@@ -326,9 +327,8 @@ func main() {
 	var em *emitter
 	var in *inputStream
 	cfg := dun.Config{
-		Workspace:  effWS,
-		RaglitHome: raglitHome,
-		Client:     llm.NewClient(*url, effKey, *model),
+		Workspace: effWS,
+		Client:    llm.NewClient(*url, effKey, *model),
 		// Sub-agents may run on a different model than their parent, and only
 		// cmd/dun knows the endpoint and the key — hence a factory rather than a
 		// second client. Cached per model so N children on one model share one
