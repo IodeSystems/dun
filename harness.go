@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -54,19 +55,63 @@ type Server struct {
 // either, and — more to the point — a machine missing one of those binaries
 // should still get a working dun. Persist a preference with /rag auto or
 // /lsp auto (see SetAutostart).
-// raglitProject namespaces this workspace's index on the shared daemon.
+// raglitProject is the CORPUS: the repository, shared by every worktree of it.
 //
-// Derived from the checkout's directory name, so a human running raglit in the
-// same repo lands on the SAME index — which is the point: one corpus, one set of
-// documents, whoever ingested them. A checkout that has been `raglit init`ed
-// carries its own project name in .raglit/config.json; that is the human's
-// declared name and it wins, because splitting one repo across two indexes is
-// the failure this function exists to avoid.
+// It must resolve to the main repo even when the session runs in a worktree, or
+// each worktree gets its own corpus and re-embeds everything the others already
+// paid for — the exact rework the corpus exists to kill. `--show-toplevel`
+// answers the WORKTREE inside a worktree, so the repository is found through
+// `--git-common-dir`, whose parent is the main checkout.
+//
+// A checkout that has been `raglit init`ed carries its own project name; that is
+// the human's declared name and it wins, because splitting one repo across two
+// corpora is the failure this exists to avoid.
 func raglitProject(workspace string) string {
-	if name := raglitConfigProject(workspace); name != "" {
+	root := repoIdentity(workspace)
+	if name := raglitConfigProject(root); name != "" {
 		return name
 	}
-	return normalizeProject(filepath.Base(strings.TrimRight(workspace, string(os.PathSeparator))))
+	return normalizeProject(filepath.Base(strings.TrimRight(root, string(os.PathSeparator))))
+}
+
+// raglitIndex is the MEMBERSHIP set: this directory on this branch.
+//
+// Two worktrees of one repo on two branches get two indexes, so a search returns
+// the files of the branch being worked on rather than a sibling's — dun's plan
+// records the day a workspace-root ingest indexed 16 worktree copies and every
+// search came back entirely stale duplicates. The corpus is what stops that
+// isolation costing 16x the embeddings.
+func raglitIndex(workspace string) string {
+	dir := filepath.Base(strings.TrimRight(workspace, string(os.PathSeparator)))
+	if b := gitLine(workspace, "rev-parse", "--abbrev-ref", "HEAD"); b != "" && b != "HEAD" {
+		return normalizeProject(dir + "-" + b)
+	}
+	return normalizeProject(dir)
+}
+
+// repoIdentity is the main checkout of whatever repo workspace belongs to, or
+// workspace itself when it is not a repo at all.
+func repoIdentity(workspace string) string {
+	common := gitLine(workspace, "rev-parse", "--git-common-dir")
+	if common == "" {
+		return workspace
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(workspace, common)
+	}
+	if abs, err := filepath.Abs(filepath.Dir(common)); err == nil {
+		return abs
+	}
+	return workspace
+}
+
+// gitLine runs a git command in dir and returns its single-line output, or "".
+func gitLine(dir string, args ...string) string {
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // raglitConfigProject reads the project name a `raglit init` wrote next to this
@@ -122,7 +167,9 @@ func DefaultServers(workspace, raglitHome string) []Server {
 		//
 		// It also made durable memory impossible: anything written to a home
 		// that is deleted on exit cannot outlive the session that wrote it.
-		{ID: "docs", Command: "raglit", Args: []string{"serve", "--project", raglitProject(workspace)}},
+		{ID: "docs", Command: "raglit", Args: []string{"serve",
+			"--project", raglitProject(workspace), // the corpus: the repository
+			"--index", raglitIndex(workspace)}}, // the membership: this dir on this branch
 	}
 }
 
