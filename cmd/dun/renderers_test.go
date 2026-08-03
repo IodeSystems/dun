@@ -36,6 +36,24 @@ func TestRenderers_Registry(t *testing.T) {
 	if !strings.Contains(pv, "no results found") {
 		t.Fatalf("non-JSON search should fall back to generic, got %q", pv)
 	}
+
+	// list_documents → JSON summary.
+	pv, _ = renderToolResult(renderCtx{tool: "list_documents", result: `[{"path":"a.go","fragments":3},{"path":"b.go","fragments":1}]`})
+	if !strings.Contains(pv, "2 item(s)") {
+		t.Fatalf("list_documents should count items, got %q", pv)
+	}
+
+	// list_indexes → JSON summary.
+	pv, _ = renderToolResult(renderCtx{tool: "list_indexes", result: `[{"name":"default","documents":5}]`})
+	if !strings.Contains(pv, "1 item(s)") {
+		t.Fatalf("list_indexes should count items, got %q", pv)
+	}
+
+	// search_figures → JSON summary.
+	pv, _ = renderToolResult(renderCtx{tool: "search_figures", result: `[{"path":"x.pdf","page":1}]`})
+	if !strings.Contains(pv, "1 item(s)") {
+		t.Fatalf("search_figures should count items, got %q", pv)
+	}
 }
 
 // ── dun's own tools ─────────────────────────────────────────────────
@@ -216,5 +234,171 @@ func TestExecTail_SkipsBareVerdicts(t *testing.T) {
 	long := strings.Repeat("FAIL\n", 50) + "[exit: status 1]"
 	if got := execTail(long); got != "FAIL" {
 		t.Errorf("lookback should stay bounded: %q", got)
+	}
+}
+
+// ── new renderers ─────────────────────────────────────────────────
+
+func TestNodeReadRender(t *testing.T) {
+	pv, body := renderToolResult(renderCtx{tool: "node_read", result: "func foo() {}\n\treturn x\n"})
+	if !strings.Contains(pv, "✓") {
+		t.Errorf("node_read should show success: %q", pv)
+	}
+	if !strings.Contains(pv, "2 lines") {
+		t.Errorf("node_read should count lines: %q", pv)
+	}
+	if !strings.Contains(body, "func foo()") {
+		t.Errorf("body should be verbatim: %q", body)
+	}
+
+	// Empty result.
+	pv, _ = renderToolResult(renderCtx{tool: "node_read", result: ""})
+	if !strings.Contains(pv, "empty") {
+		t.Errorf("empty node_read should say so: %q", pv)
+	}
+}
+
+func TestEvalRender(t *testing.T) {
+	// Successful result.
+	pv, _ := renderToolResult(renderCtx{tool: "eval", result: "42"})
+	if !strings.Contains(pv, "✓") {
+		t.Errorf("successful eval should show check: %q", pv)
+	}
+	if !strings.Contains(pv, "42") {
+		t.Errorf("eval should show the result: %q", pv)
+	}
+
+	// Error result.
+	pv, _ = renderToolResult(renderCtx{tool: "eval", result: "Error: undefined: foo"})
+	if !strings.Contains(pv, "✗") {
+		t.Errorf("failed eval should show error: %q", pv)
+	}
+
+	// No output.
+	pv, _ = renderToolResult(renderCtx{tool: "eval", result: "   "})
+	if !strings.Contains(pv, "no output") {
+		t.Errorf("empty eval should say so: %q", pv)
+	}
+}
+
+func TestGetDocRender(t *testing.T) {
+	pv, _ := renderToolResult(renderCtx{tool: "get_document", result: "page 1 text\npage 2 text\npage 3 text\n"})
+	if !strings.Contains(pv, "✓") {
+		t.Errorf("get_document should show success: %q", pv)
+	}
+	if !strings.Contains(pv, "3 lines") {
+		t.Errorf("get_document should count lines: %q", pv)
+	}
+
+	// Error.
+	pv, _ = renderToolResult(renderCtx{tool: "get_document", result: "error: document not found"})
+	if !strings.Contains(pv, "✗") {
+		t.Errorf("failed get_document should show error: %q", pv)
+	}
+}
+
+func TestOcrRender(t *testing.T) {
+	// With page references.
+	pv, _ := renderToolResult(renderCtx{tool: "ocr", result: "page 1: hello\npage 2: world\n"})
+	if !strings.Contains(pv, "✓") {
+		t.Errorf("ocr should show success: %q", pv)
+	}
+	if !strings.Contains(pv, "2 page") {
+		t.Errorf("ocr should count pages: %q", pv)
+	}
+
+	// Without page references — falls back to line count.
+	pv, _ = renderToolResult(renderCtx{tool: "ocr", result: "line one\nline two\nline three\n"})
+	if !strings.Contains(pv, "3 lines") {
+		t.Errorf("ocr without pages should count lines: %q", pv)
+	}
+}
+
+func TestIngestRender(t *testing.T) {
+	pv, _ := renderToolResult(renderCtx{tool: "ingest", result: "queued job #abc123 for indexing"})
+	if !strings.Contains(pv, "queued") {
+		t.Errorf("ingest should show queued: %q", pv)
+	}
+
+	// Error.
+	pv, _ = renderToolResult(renderCtx{tool: "ingest", result: "error: invalid URL"})
+	if !strings.Contains(pv, "✗") {
+		t.Errorf("failed ingest should show error: %q", pv)
+	}
+}
+
+func TestRecapRender(t *testing.T) {
+	pv, _ := renderToolResult(renderCtx{tool: "recap", result: "replaced 15 entries (120k chars) → 3.2k chars saved"})
+	if !strings.Contains(pv, "recap") {
+		t.Errorf("recap should show recap marker: %q", pv)
+	}
+
+	// Error.
+	pv, _ = renderToolResult(renderCtx{tool: "recap", result: "error: nothing to recap"})
+	if !strings.Contains(pv, "✗") {
+		t.Errorf("failed recap should show error: %q", pv)
+	}
+}
+
+// ── 3-state view cycling ─────────────────────────────────────────
+
+func TestViewState_Cycles(t *testing.T) {
+	s := viewMinimized
+	if s.Next() != viewExpanded {
+		t.Errorf("minimized.Next() = %v, want expanded", s.Next())
+	}
+	if viewExpanded.Next() != viewRaw {
+		t.Errorf("expanded.Next() = %v, want raw", viewExpanded.Next())
+	}
+	if viewRaw.Next() != viewMinimized {
+		t.Errorf("raw.Next() = %v, want minimized", viewRaw.Next())
+	}
+}
+
+func TestConvoEntry_ViewStates(t *testing.T) {
+	e := convoEntry{
+		collapsed: "collapsed text",
+		full:      "full styled text",
+		raw:       "raw unstyled text",
+		state:     viewMinimized,
+	}
+
+	// Minimized shows collapsed.
+	if e.view() != "collapsed text" {
+		t.Errorf("minimized view = %q, want collapsed", e.view())
+	}
+
+	// Expanded shows full.
+	e.state = viewExpanded
+	if e.view() != "full styled text" {
+		t.Errorf("expanded view = %q, want full", e.view())
+	}
+
+	// Raw shows raw.
+	e.state = viewRaw
+	if e.view() != "raw unstyled text" {
+		t.Errorf("raw view = %q, want raw", e.view())
+	}
+}
+
+func TestConvoEntry_ExpandableWithRaw(t *testing.T) {
+	// A block with only raw (no full) is still expandable.
+	e := convoEntry{collapsed: "c", raw: "raw data"}
+	if !e.expandable() {
+		t.Error("entry with raw should be expandable")
+	}
+
+	// A block with nothing is not expandable.
+	e2 := convoEntry{collapsed: "c"}
+	if e2.expandable() {
+		t.Error("entry with only collapsed should not be expandable")
+	}
+}
+
+func TestConvoEntry_ViewRawFallback(t *testing.T) {
+	// When raw is empty, expanded falls back to collapsed.
+	e := convoEntry{collapsed: "collapsed", full: "full", state: viewRaw}
+	if e.view() != "collapsed" {
+		t.Errorf("raw view with no raw field should fall back to collapsed, got %q", e.view())
 	}
 }

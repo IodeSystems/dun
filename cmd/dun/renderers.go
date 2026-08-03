@@ -113,7 +113,22 @@ func init() {
 	// These commonly return JSON payloads; pretty-print, else generic.
 	registerRenderer("search", rendererFunc(jsonRender))
 	registerRenderer("node_query", rendererFunc(jsonRender))
-	// node_read / eval fall to generic (code/terminal text shown raw).
+	registerRenderer("list_documents", rendererFunc(jsonRender))
+	registerRenderer("list_indexes", rendererFunc(jsonRender))
+	registerRenderer("index_status", rendererFunc(jsonRender))
+	registerRenderer("search_figures", rendererFunc(jsonRender))
+	// node_read returns source code — show what it read.
+	registerRenderer("node_read", rendererFunc(nodeReadRender))
+	// eval runs a script — show the result shape.
+	registerRenderer("eval", rendererFunc(evalRender))
+	// get_document returns indexed text — show path + pages.
+	registerRenderer("get_document", rendererFunc(getDocRender))
+	// ocr extracts pages — show page count.
+	registerRenderer("ocr", rendererFunc(ocrRender))
+	// ingest queues a job — show the job id.
+	registerRenderer("ingest", rendererFunc(ingestRender))
+	// recap summarizes context — show what was replaced.
+	registerRenderer("recap", rendererFunc(recapRender))
 
 	// dun's own tools. Each of these was a clipped sentence that hid its verdict.
 	registerRenderer("exec", rendererFunc(execRender))
@@ -425,6 +440,79 @@ func argStr(args map[string]any, key string) string {
 	}
 	s, _ := args[key].(string)
 	return strings.TrimSpace(s)
+}
+
+// nodeReadRender: what was read and how much.
+func nodeReadRender(rc renderCtx) (string, string) {
+	body := stDim.Render(rc.result)
+	n := countLines(rc.result)
+	head := stDim.Render("  → ") + stTool.Render("✓")
+	if n == 0 {
+		return head + stDim.Render(" (empty)"), body
+	}
+	return head + stDim.Render(fmt.Sprintf(" %s · %s", plural(n, "line"),
+		clip(oneLine(firstLine(rc.result)), 70))), body
+}
+
+// evalRender: the result of a script expression.
+func evalRender(rc renderCtx) (string, string) {
+	body := stDim.Render(rc.result)
+	first := firstLine(rc.result)
+	if strings.HasPrefix(first, "Error:") || strings.HasPrefix(first, "error:") {
+		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
+	}
+	if strings.TrimSpace(rc.result) == "" {
+		return stDim.Render("  → (no output)"), body
+	}
+	return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" · "+clip(oneLine(first), 90)), body
+}
+
+// getDocRender: which document, how many pages.
+func getDocRender(rc renderCtx) (string, string) {
+	body := stDim.Render(rc.result)
+	first := firstLine(rc.result)
+	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
+		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
+	}
+	n := countLines(rc.result)
+	return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(fmt.Sprintf(" %s · %s",
+		plural(n, "line"), clip(first, 70))), body
+}
+
+// ocrRender: how many pages were extracted.
+func ocrRender(rc renderCtx) (string, string) {
+	body := stDim.Render(rc.result)
+	first := firstLine(rc.result)
+	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
+		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
+	}
+	// OCR output mentions page counts; fall back to line count.
+	pages := countMatching(rc.result, "page")
+	if pages > 0 {
+		return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" "+plural(pages, "page")), body
+	}
+	n := countLines(rc.result)
+	return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" "+plural(n, "line")), body
+}
+
+// ingestRender: the job id or status.
+func ingestRender(rc renderCtx) (string, string) {
+	body := stDim.Render(rc.result)
+	first := firstLine(rc.result)
+	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
+		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
+	}
+	return stDim.Render("  → ") + stNote.Render("⏱ queued") + stDim.Render(" · "+clip(first, 80)), body
+}
+
+// recapRender: what was replaced and how much was saved.
+func recapRender(rc renderCtx) (string, string) {
+	body := stDim.Render(rc.result)
+	first := firstLine(rc.result)
+	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
+		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
+	}
+	return stDim.Render("  → ") + stNote.Render("↺ recap") + stDim.Render(" · "+clip(first, 80)), body
 }
 
 func firstLine(s string) string {

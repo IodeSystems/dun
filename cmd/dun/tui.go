@@ -155,16 +155,40 @@ const (
 	focusActivity        // ↑/↓ pick an agent or job, → descends into it
 )
 
+// viewState is the inline display mode for a convoEntry. Enter cycles through
+// them: minimized (one-line preview) → expanded (styled renderer output) →
+// raw (unstyled tool output, for reading verbatim or copying).
+type viewState int
+
+const (
+	viewMinimized viewState = iota // collapsed one-line preview
+	viewExpanded                   // styled renderer output
+	viewRaw                        // unstyled raw tool output
+)
+
+func (s viewState) Next() viewState {
+	switch s {
+	case viewMinimized:
+		return viewExpanded
+	case viewExpanded:
+		return viewRaw
+	default:
+		return viewMinimized
+	}
+}
+
 // convoEntry is one conversation block. A tool call/result is collapsible: full
-// holds the whole output, collapsed a one-line preview; enter (when focused)
-// toggles open. A relevant-docs summary carries a docsBlock (nested navigation).
+// holds the styled renderer output, collapsed a one-line preview, raw the
+// unstyled tool output. Enter (when focused) cycles through the three states.
+// A relevant-docs summary carries a docsBlock (nested navigation).
 // A plain block has neither full nor docs.
 type convoEntry struct {
 	collapsed string
 	full      string
-	open      bool
-	docs      *docsBlock // proactive-RAG summary (nil for normal blocks)
-	tool      *toolBlock // tool call/result (nil for normal blocks) → enter opens the inspector
+	raw       string       // unstyled tool output (empty for non-tool blocks)
+	state     viewState    // minimized | expanded | raw
+	docs      *docsBlock   // proactive-RAG summary (nil for normal blocks)
+	tool      *toolBlock   // tool call/result (nil for normal blocks) → enter opens the inspector
 
 	// Wrapped render, cached. A finalized block's text never changes, but
 	// refresh() runs once per STREAMED TOKEN, so re-wrapping the whole
@@ -172,14 +196,14 @@ type convoEntry struct {
 	// conversation: measured at 7.8ms per frame with 200 blocks, ~1s of CPU for
 	// one 100-token reply — on the goroutine that also reads the keyboard,
 	// which is why keystrokes went missing. Invalidated by width (a resize) and
-	// by open (expand/collapse); docs blocks opt out, their inner per-doc state
-	// is not captured here.
-	wrapped  string
-	wrapW    int
-	wrapOpen bool
+	// by state (expand/collapse/raw); docs blocks opt out, their inner per-doc
+	// state is not captured here.
+	wrapped   string
+	wrapW     int
+	wrapState viewState
 }
 
-func (e convoEntry) expandable() bool { return e.full != "" || e.docs != nil }
+func (e convoEntry) expandable() bool { return (e.full != "" || e.raw != "") || e.docs != nil }
 
 // toolBlock carries a tool call's raw input + complete output so enter can open
 // the scrollable/searchable inspector overlay (inspector.go), separate from the
@@ -192,10 +216,17 @@ type toolBlock struct {
 
 func (e convoEntry) view() string {
 	if e.docs != nil {
-		return e.docs.render(e.open)
+		return e.docs.render(e.state > viewMinimized)
 	}
-	if e.open && e.full != "" {
-		return e.full
+	switch e.state {
+	case viewExpanded:
+		if e.full != "" {
+			return e.full
+		}
+	case viewRaw:
+		if e.raw != "" {
+			return e.raw
+		}
 	}
 	return e.collapsed
 }
@@ -543,10 +574,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.inspecting = true
 					return m, nil
 				}
-				// Otherwise open/close the focused block (tool output or docs summary).
+				// Otherwise cycle the focused block through its view states.
 				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].expandable() {
-					m.convo[m.sel].open = !m.convo[m.sel].open
-					if !m.convo[m.sel].open && m.convo[m.sel].docs != nil {
+					m.convo[m.sel].state = m.convo[m.sel].state.Next()
+					if m.convo[m.sel].state == viewMinimized && m.convo[m.sel].docs != nil {
 						m.convo[m.sel].docs.descended = false // closing collapses the descent
 					}
 					m.refresh()
@@ -723,7 +754,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].docs != nil {
 					// A docs summary owns → : descend when it's open, else stay
 					// (open it with enter first). Never hops to the input.
-					if e := m.convo[m.sel]; e.open && len(e.docs.docs) > 0 {
+					if e := m.convo[m.sel]; e.state > viewMinimized && len(e.docs.docs) > 0 {
 						e.docs.descended = true
 						if e.docs.cur < 0 || e.docs.cur >= len(e.docs.docs) {
 							e.docs.cur = 0
@@ -1727,7 +1758,7 @@ func (m *tuiModel) flushCur() {
 	}
 }
 
-// foldedTool builds the collapsed/full folded block for a completed tool
+// foldedTool builds the collapsed/full/raw folded block for a completed tool
 // call+result — shared by the live tool_result path and history replay so both
 // render identically. The tool block feeds the inspector overlay (raw input +
 // complete output).
@@ -1742,6 +1773,7 @@ func (m *tuiModel) foldedTool(tool string, args map[string]any, result string) c
 	return convoEntry{
 		collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
 		full:      stDim.Render("▾ ") + callFull + "\n" + body,
+		raw:       stDim.Render("▾ ") + callFull + "\n" + stDim.Render(result),
 		tool:      &toolBlock{name: tool, input: af, output: body},
 	}
 }
@@ -1891,8 +1923,8 @@ func (m *tuiModel) refresh() {
 		var w string
 		if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
-			if e.wrapped == "" || e.wrapW != width || e.wrapOpen != e.open {
-				e.wrapped, e.wrapW, e.wrapOpen = wrap.Render(b), width, e.open
+			if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
+				e.wrapped, e.wrapW, e.wrapState = wrap.Render(b), width, e.state
 			}
 			w = e.wrapped
 		} else {

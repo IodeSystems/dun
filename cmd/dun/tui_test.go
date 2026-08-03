@@ -678,9 +678,9 @@ func TestTUI_DocsNotificationNav(t *testing.T) {
 	if m.convo[0].docs.descended {
 		t.Fatal("→ should not descend a collapsed summary")
 	}
-	m = key(m, kEnter) // open
-	if !m.convo[0].open || !strings.Contains(m.convo[0].view(), "README") {
-		t.Fatal("enter should open the summary and list docs")
+	m = key(m, kEnter) // expand
+	if m.convo[0].state <= viewMinimized || !strings.Contains(m.convo[0].view(), "README") {
+		t.Fatal("enter should expand the summary and list docs")
 	}
 	m = key(m, kRight) // descend
 	if !m.convo[0].docs.descended || m.convo[0].docs.cur != 0 {
