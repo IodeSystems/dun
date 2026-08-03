@@ -2,7 +2,9 @@ package dun
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -264,6 +266,8 @@ func PruneWorktrees(repoRoot, keep string) PruneResult {
 			if w.Branch != "" {
 				_, _ = git("", "-C", repoRoot, "branch", "-D", w.Branch)
 			}
+			// …and so does the search index it owned, for the same reason.
+			dropIndexFor(repoRoot, w.Path, w.Branch)
 			res.Freed += w.Bytes
 			res.Pruned = append(res.Pruned, w)
 		}
@@ -274,7 +278,7 @@ func PruneWorktrees(repoRoot, keep string) PruneResult {
 	return res
 }
 
-// RemoveWorktree deletes one worktree and its branch unconditionally — what
+// RemoveWorktree deletes one worktree, its branch, and its search index — what
 // /close does when the human says this work is finished with.
 func RemoveWorktree(repoRoot, path, branch string) error {
 	if repoRoot == "" || path == "" {
@@ -286,7 +290,49 @@ func RemoveWorktree(repoRoot, path, branch string) error {
 	if branch != "" {
 		_, _ = git("", "-C", repoRoot, "branch", "-D", branch)
 	}
+	dropIndexFor(repoRoot, path, branch)
 	return nil
+}
+
+// dropIndexFor removes the raglit index that belonged to a worktree.
+//
+// An index is named <directory>-<branch>, so one is minted per worktree per
+// branch — and on disk it is a DIRECTORY (sqlite + originals/ + pages/), a few
+// megabytes each, that nothing else ever deletes. This repo churned ~13
+// worktrees a day and had 1.1 GB of them swept on 2026-08-03; without this the
+// indexes reproduce that accumulation somewhere less visible.
+//
+// The shared POOL is deliberately untouched. It holds the expensive half of
+// ingest (extract/OCR/segment/embed, keyed by recipe+file and shared by every
+// index), so re-indexing this content anywhere later replays it with no model
+// calls. Its own LRU GC governs when that is reclaimed — dropping an index must
+// never reach into it, or a cleanup becomes a re-embedding bill.
+//
+// Best-effort by design: a stale index costs disk, and failing a worktree
+// removal over it would be the worse trade.
+func dropIndexFor(repoRoot, path, branch string) {
+	name := indexNameFor(path, branch)
+	if name == "" {
+		return
+	}
+	out, err := exec.Command("raglit", "drop-index",
+		"--project", raglitProject(repoRoot), "--index", name).CombinedOutput()
+	if err != nil {
+		log.Printf("dun: raglit drop-index %s: %v: %s", name, err, strings.TrimSpace(string(out)))
+	}
+}
+
+// indexNameFor is raglitIndex for a worktree that may already be gone: it takes
+// the branch as given rather than asking git, since the tree is removed first.
+func indexNameFor(path, branch string) string {
+	dir := filepath.Base(strings.TrimRight(path, string(os.PathSeparator)))
+	if dir == "" || dir == "." || dir == string(os.PathSeparator) {
+		return ""
+	}
+	if branch != "" {
+		return normalizeProject(dir + "-" + branch)
+	}
+	return normalizeProject(dir)
 }
 
 // keepSessions is how many sessions survive a prune. Enough to find the one you

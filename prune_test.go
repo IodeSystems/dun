@@ -248,3 +248,25 @@ func TestPrune_SparesARecentlyTouchedTree(t *testing.T) {
 		t.Fatalf("an old tree holding nothing should be pruned: %+v", res.Pruned)
 	}
 }
+
+// An index is named <directory>-<branch>, so one is minted per worktree per
+// branch — and on disk it is a directory of a few MB that nothing else deletes.
+// The name has to be derivable AFTER the tree is gone, since the worktree is
+// removed before the index is dropped.
+func TestIndexNameFor_SurvivesTheTreeItNames(t *testing.T) {
+	got := indexNameFor("/repo/.dun/worktrees/dun-worktree-123", "dun/1785677812")
+	if got != "dun-worktree-123-dun-1785677812" {
+		t.Fatalf("index name = %q", got)
+	}
+	// It must agree with what the docs server was actually started with, or the
+	// drop names an index nobody created and the real one leaks.
+	if live := raglitIndex("/repo/wt"); live != indexNameFor("/repo/wt", "") {
+		t.Errorf("detached-HEAD naming disagrees: %q vs %q", live, indexNameFor("/repo/wt", ""))
+	}
+	// Nothing sane to name → say nothing rather than delete something else.
+	for _, bad := range []string{"", "/", "."} {
+		if n := indexNameFor(bad, "b"); n != "" && bad != "" {
+			t.Errorf("indexNameFor(%q) = %q, want empty", bad, n)
+		}
+	}
+}
