@@ -2,6 +2,7 @@ package dun
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -405,5 +406,110 @@ func TestRaglitProject_NamespacesByCheckoutNotBySession(t *testing.T) {
 	}
 	if slices.Contains(args, "--embedded") {
 		t.Error("serve must not bypass the shared daemon: N sessions, one index")
+	}
+}
+
+// The corpus is the REPOSITORY and the index is this directory on this branch.
+// Getting the first wrong is expensive: a project resolved from the worktree
+// path gives every worktree its own corpus, so each re-embeds what the others
+// already paid for — the exact rework the corpus exists to kill.
+func TestRaglitCorpusIsTheRepo_IndexIsDirAndBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	repo := filepath.Join(root, "myrepo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(dir string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run(repo, "init", "-q", "-b", "main")
+	run(repo, "commit", "-q", "--allow-empty", "-m", "init")
+
+	wt := filepath.Join(root, "wt-feature")
+	run(repo, "worktree", "add", "-q", wt, "-b", "feat/x")
+
+	// Same corpus from both, because it is the same repository.
+	if p1, p2 := raglitProject(repo), raglitProject(wt); p1 != p2 {
+		t.Fatalf("a worktree must share its repo's corpus: %q vs %q", p1, p2)
+	}
+	if got := raglitProject(wt); got != "myrepo" {
+		t.Errorf("corpus should be the repo name, got %q", got)
+	}
+	// Different indexes, because they are different working trees on different
+	// branches — a search must not return a sibling worktree's files.
+	if i1, i2 := raglitIndex(repo), raglitIndex(wt); i1 == i2 {
+		t.Fatalf("two worktrees must not share one index: both %q", i1)
+	}
+	if got := raglitIndex(wt); got != "wt-feature-feat-x" {
+		t.Errorf("index should be dir+branch, got %q", got)
+	}
+	if got := raglitIndex(repo); got != "myrepo-main" {
+		t.Errorf("index should be dir+branch, got %q", got)
+	}
+}
+
+// dun handed raglit the workspace's top-level entries, which meant handing over
+// build output: a 27 MB `dun` executable and a 25 MB `dun.test`, both gitignored,
+// both sent to a pipeline that extracts, segments and embeds.
+func TestIngestTargets_SendsWhatGitWouldShowYou(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".gitignore", "/binary\n*.test\n")
+	write("main.go", "package main\n")
+	write("README.md", "# hi\n")
+	write("binary", "\x7fELF\x02\x01\x01\x00 not really but ignored\n")
+	write("thing.test", "also ignored\n")
+	write("untracked.md", "untracked but not ignored\n")
+	run("add", "main.go", "README.md", ".gitignore")
+
+	got := map[string]bool{}
+	for _, p := range ingestTargets(dir) {
+		got[filepath.Base(p)] = true
+	}
+	for _, want := range []string{"main.go", "README.md", "untracked.md"} {
+		if !got[want] {
+			t.Errorf("%s should be ingested", want)
+		}
+	}
+	for _, never := range []string{"binary", "thing.test"} {
+		if got[never] {
+			t.Errorf("%s is gitignored build output and must NOT be sent to the indexer", never)
+		}
+	}
+
+	// Not a git repo → the old top-level behaviour, minus .git and .dun.
+	plain := t.TempDir()
+	os.WriteFile(filepath.Join(plain, "a.md"), []byte("x"), 0o644)
+	os.MkdirAll(filepath.Join(plain, ".dun"), 0o755)
+	for _, p := range ingestTargets(plain) {
+		if filepath.Base(p) == ".dun" {
+			t.Error("dun's own state directory must never be indexed")
+		}
 	}
 }

@@ -142,11 +142,15 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if timeout <= 0 {
 		timeout = 90 * time.Second
 	}
-	// raglit answers nothing until the workspace is in its index, and the index
-	// is a per-session temp dir — so ingest belongs to STARTING the docs server,
-	// not to starting dun. A session that never turns rag on never pays for it.
-	if s.ID == ServerDocs && h.cfg.RaglitHome != "" {
-		ingestWorkspace(s.Command, h.cfg.RaglitHome, h.cfg.Workspace)
+	// raglit answers nothing until the workspace is in its index, so ingest
+	// belongs to STARTING the docs server, not to starting dun: a session that
+	// never turns rag on never pays for it.
+	//
+	// The guard used to be `RaglitHome != ""`, which silently became "never"
+	// the moment the per-session temp home was removed — the ingest was still
+	// called, from a branch that could no longer be taken.
+	if s.ID == ServerDocs {
+		ingestWorkspace(s.Command, h.cfg.Workspace)
 	}
 	err := h.mgr.StartServer(ctx, mcpmgr.MCPConfig{
 		ID: s.ID, Name: s.ID, Command: s.Command, Args: s.Args,
@@ -405,49 +409,93 @@ func missing(want, have []string) []string {
 // ingestWorkspace lexically indexes the workspace into raglit (best-effort).
 // raglitCmd is the configured docs binary, so an overridden path is honored;
 // a docs server pointed at something that is not raglit is left alone.
-func ingestWorkspace(raglitCmd, raglitHome, workspace string) {
+func ingestWorkspace(raglitCmd, workspace string) {
 	if filepath.Base(raglitCmd) != "raglit" {
 		return
 	}
-	// Ingest the workspace's entries, NOT the workspace — so dun's own state
-	// directory is left out.
-	//
-	// .dun holds the per-session git worktrees, which are COPIES of the
-	// workspace. Handing raglit the workspace root indexed every one of them:
-	// measured in this repo, 16 worktrees, and every workspace-wide search came
-	// back entirely stale duplicates with the live files nowhere in the results.
-	// An agent's own isolation mechanism poisoning its own search index is a
-	// spectacular own goal, and the fix is to never hand it the directory.
 	targets := ingestTargets(workspace)
 	if len(targets) == 0 {
 		return
 	}
-	// Same daemon, same project as the serve command — or the agent would search
-	// an index nothing was ingested into.
-	args := append([]string{"ingest", "--project", raglitProject(workspace), "--now"}, targets...)
-	cmd := detach(exec.Command(raglitCmd, args...))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		// Best-effort: proactive RAG simply has less to ping without it. Worth
-		// logging, since "search finds nothing" is otherwise unexplained.
-		log.Printf("dun: raglit ingest failed: %v: %s", err, strings.TrimSpace(string(out)))
+	base := []string{"ingest",
+		// Same daemon, same project and index as the serve command — or the
+		// agent searches an index nothing was ingested into.
+		"--project", raglitProject(workspace),
+		"--index", raglitIndex(workspace),
+		"--now"}
+	// Chunked so a large repository cannot overflow argv. Each call queues and
+	// the daemon drains them.
+	for _, batch := range chunkArgs(targets, ingestBatch) {
+		args := append(append([]string{}, base...), batch...)
+		cmd := detach(exec.Command(raglitCmd, args...))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			// Best-effort: proactive RAG simply has less to ping without it.
+			// Worth logging, since "search finds nothing" is otherwise
+			// unexplained.
+			log.Printf("dun: raglit ingest failed: %v: %s", err, strings.TrimSpace(string(out)))
+			return
+		}
 	}
 }
 
-// ingestTargets lists what raglit should index: the workspace's top-level
-// entries minus the two directories that are never content — git's object
-// store, and dun's own state (which contains copies of the workspace).
+// ingestBatch bounds one ingest's argv. Far under ARG_MAX anywhere dun runs; a
+// repo bigger than this simply queues more than once.
+const ingestBatch = 500
+
+func chunkArgs(all []string, n int) [][]string {
+	var out [][]string
+	for len(all) > n {
+		out, all = append(out, all[:n]), all[n:]
+	}
+	if len(all) > 0 {
+		out = append(out, all)
+	}
+	return out
+}
+
+// ingestTargets lists what raglit should index: the files GIT would show you.
+//
+// It used to hand over the workspace's top-level entries, which meant handing
+// over build output. Measured in this repo: a 27 MB `dun` executable and a 25 MB
+// `dun.test`, both gitignored, both sent to a pipeline that extracts, segments
+// and embeds — raglit has no binary defence of its own, so it tried. Most of the
+// pool's growth from 49 MB to 237 MB in one session was compiled binaries being
+// processed as though they were documents.
+//
+// `git ls-files --cached --others --exclude-standard` is exactly the right set:
+// tracked files plus untracked ones git would show, minus everything .gitignore
+// excludes. That is the project's actual content, and it costs one command
+// rather than a hand-maintained list of things that are not documents — the
+// previous version already special-cased .git and .dun, which were the first two
+// entries of a list that would never have ended.
+//
+// A workspace that is not a git repo falls back to the old behaviour.
 func ingestTargets(workspace string) []string {
+	out, err := exec.Command("git", "-C", workspace, "ls-files",
+		"--cached", "--others", "--exclude-standard").Output()
+	if err == nil {
+		var files []string
+		for _, rel := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if rel == "" {
+				continue
+			}
+			files = append(files, filepath.Join(workspace, rel))
+		}
+		if len(files) > 0 {
+			return files
+		}
+	}
 	entries, err := os.ReadDir(workspace)
 	if err != nil {
-		return []string{workspace} // unreadable: fall back to the old behaviour
+		return []string{workspace}
 	}
-	var out []string
+	var fallback []string
 	for _, e := range entries {
 		switch e.Name() {
 		case ".git", DunDir:
 			continue
 		}
-		out = append(out, filepath.Join(workspace, e.Name()))
+		fallback = append(fallback, filepath.Join(workspace, e.Name()))
 	}
-	return out
+	return fallback
 }
