@@ -463,7 +463,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spin.Tick, textinput.Blink, waitForDump(m.dumpSig), waitReload(m.lc)}
+	cmds := []tea.Cmd{m.spin.Tick, m.input.BlinkTick(), waitForDump(m.dumpSig), waitReload(m.lc)}
 	if m.proc != nil {
 		cmds = append(cmds, waitEvent(m.proc.ch))
 	} else {
@@ -956,6 +956,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp, cmd = m.vp.Update(msg) // wheel scrolls the conversation viewport
 		m.updateScrollPin()
 		return m, cmd
+
+	case blinkTickMsg:
+		m.refresh()
+		return m, m.input.BlinkTick()
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd

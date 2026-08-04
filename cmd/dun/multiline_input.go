@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -30,6 +31,7 @@ type multilineInput struct {
 	scroll      int    // first visible display row
 	placeholder string
 	focused     bool
+	blinkOn     bool   // is the caret visible right now?
 }
 
 // inputMaxLines caps the box. It GROWS to this, it does not start at it: an
@@ -46,6 +48,7 @@ func newMultilineInput() multilineInput {
 		maxLines:    inputMaxLines,
 		placeholder: "ask dun to do something…",
 		focused:     true,
+		blinkOn:     true,
 	}
 }
 
@@ -62,8 +65,25 @@ func (m *multilineInput) Reset() {
 	m.buf, m.cursor, m.scroll = nil, 0, 0
 }
 
-func (m *multilineInput) Focus() { m.focused = true }
-func (m *multilineInput) Blur()  { m.focused = false }
+func (m *multilineInput) Focus() {
+	m.focused = true
+	m.blinkOn = true
+}
+func (m *multilineInput) Blur() { m.focused = false }
+
+// BlinkTick toggles the caret visibility and returns the next tick command.
+// When the input is not focused the caret is always on (no blink while idle).
+func (m *multilineInput) BlinkTick() tea.Cmd {
+	if !m.focused {
+		return nil
+	}
+	m.blinkOn = !m.blinkOn
+	return tea.Tick(530*time.Millisecond, func(time.Time) tea.Msg {
+		return blinkTickMsg{}
+	})
+}
+
+type blinkTickMsg struct{}
 
 func (m *multilineInput) CursorEnd() {
 	m.cursor = len(m.buf)
@@ -505,7 +525,7 @@ func (m *multilineInput) View() string {
 		if idx < len(segs) {
 			text = m.text(segs[idx])
 		}
-		if m.focused && idx == row {
+		if m.focused && m.blinkOn && idx == row {
 			text = withCaret(text, col)
 		}
 		lines = append(lines, m.pad(prompt+text))
