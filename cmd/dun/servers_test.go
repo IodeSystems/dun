@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -280,4 +283,159 @@ func TestRunServerCmd_UnknownActionListsRestart(t *testing.T) {
 func haveBin(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+// testExecBackend implements dun.ExecBackend by running real shell commands.
+type testExecBackend struct {
+	dir string
+}
+
+func (e *testExecBackend) Run(ctx context.Context, command string, w io.Writer) dun.ExecResult {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = e.dir
+	var buf bytes.Buffer
+	if w != nil {
+		cmd.Stdout = io.MultiWriter(&buf, w)
+		cmd.Stderr = io.MultiWriter(&buf, w)
+	} else {
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
+	}
+	err := cmd.Run()
+	result := dun.ExecResult{
+		Output: buf.String(),
+	}
+	if err != nil {
+		result.Err = err.Error()
+	}
+	return result
+}
+
+func TestRunShipCmd_VerifyMode(t *testing.T) {
+	origin := t.TempDir()
+	runGit(t, origin, "init", "--bare", "-q")
+
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "config", "user.email", "t@t")
+	runGit(t, repo, "config", "user.name", "t")
+	runGit(t, repo, "remote", "add", "origin", origin)
+	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hello\n"), 0o644)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "init")
+	runGit(t, repo, "push", "-q", "-u", "origin", "HEAD")
+
+	// NewWorktree creates a git worktree on branch dun/<ts> from HEAD.
+	// The worktree lives inside repo/.dun/worktrees/ — commits made there
+	// are visible to the main repo immediately.
+	wt, isRepo, err := dun.NewWorktree(repo, nil)
+	if err != nil || !isRepo {
+		t.Fatalf("NewWorktree: %v", err)
+	}
+	t.Cleanup(wt.Cleanup)
+
+	// Make a commit inside the worktree (this is how dun actually works)
+	os.WriteFile(filepath.Join(wt.Path, "feature.txt"), []byte("new\n"), 0o644)
+	runGit(t, wt.Path, "add", ".")
+	runGit(t, wt.Path, "commit", "-qm", "feat: add feature")
+
+	cfg := dun.Config{
+		Workspace: wt.Path,
+		Worktree:  wt,
+		Exec:      &testExecBackend{dir: wt.Path},
+		ShipCfg:   &dun.ShipConfig{},
+	}
+	harness, err := dun.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(harness.Close)
+
+	out := runShipCmd(context.Background(), harness, "verify")
+	if !strings.Contains(out, "Verified") {
+		t.Fatalf("expected verification success, got: %s", out)
+	}
+	if strings.Contains(out, "Shipped") || strings.Contains(out, "pushed to origin") {
+		t.Error("verify mode should not push, got:", out)
+	}
+}
+
+func TestRunShipCmd_PushMode(t *testing.T) {
+	origin := t.TempDir()
+	runGit(t, origin, "init", "--bare", "-q")
+
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "config", "user.email", "t@t")
+	runGit(t, repo, "config", "user.name", "t")
+	runGit(t, repo, "remote", "add", "origin", origin)
+	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hello\n"), 0o644)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "init")
+	runGit(t, repo, "push", "-q", "-u", "origin", "HEAD")
+
+	// NewWorktree creates a git worktree on branch dun/<ts> from HEAD.
+	wt, isRepo, err := dun.NewWorktree(repo, nil)
+	if err != nil || !isRepo {
+		t.Fatalf("NewWorktree: %v", err)
+	}
+	t.Cleanup(wt.Cleanup)
+
+	// Make a commit inside the worktree
+	os.WriteFile(filepath.Join(wt.Path, "feature.txt"), []byte("new\n"), 0o644)
+	runGit(t, wt.Path, "add", ".")
+	runGit(t, wt.Path, "commit", "-qm", "feat: add feature")
+
+	cfg := dun.Config{
+		Workspace: wt.Path,
+		Worktree:  wt,
+		Exec:      &testExecBackend{dir: wt.Path},
+		ShipCfg:   &dun.ShipConfig{},
+	}
+	harness, err := dun.Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(harness.Close)
+
+	out := runShipCmd(context.Background(), harness, "push")
+	if !strings.Contains(out, "Shipped") {
+		t.Fatalf("expected ship success, got: %s", out)
+	}
+
+	// Verify the commit actually reached origin on the dun/* branch
+	// (bare repos store remote refs as local branches, so use "branch" not "branch -r")
+	branches := runGitCapture(t, origin, "branch")
+	if !strings.Contains(branches, "dun/") {
+		t.Fatalf("no dun/* branch on origin; branches=%q", branches)
+	}
+}
+
+func TestRunShipCmd_UnknownAction(t *testing.T) {
+	out := runShipCmd(context.Background(), nil, "bounce")
+	if !strings.Contains(out, "unknown action") {
+		t.Fatalf("expected unknown action error, got: %q", out)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdout = &bytes.Buffer{}
+	cmd.Stderr = &bytes.Buffer{}
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+}
+
+func runGitCapture(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return string(out)
 }

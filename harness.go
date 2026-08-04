@@ -923,6 +923,40 @@ func (h *Harness) SetWorktree(wt *Worktree) {
 	h.applyTools()
 }
 
+// Ship runs the ship pipeline (fetch, rebase, checks, push/verify/pr).
+// The mode is resolved from the action string ("verify", "push", "pr") or
+// falls back to the ShipConfig default. Returns the result message.
+func (h *Harness) Ship(ctx context.Context, mode ShipMode) string {
+	h.srvMu.Lock()
+	wt := h.cfg.Worktree
+	cfg := h.cfg.ShipCfg
+	exec := h.cfg.Exec
+	h.srvMu.Unlock()
+	if wt == nil || !wt.IsRepo() {
+		return "ERROR: ship needs a git repository"
+	}
+	if exec == nil {
+		return "ERROR: ship requires an exec backend (no exec tool configured)"
+	}
+	if cfg == nil {
+		cfg = &ShipConfig{}
+	}
+	if mode == "" {
+		mode = cfg.defaultMode()
+	}
+	if !cfg.permits(mode) {
+		names := make([]string, 0, len(cfg.allowed()))
+		for _, a := range cfg.allowed() {
+			names = append(names, string(a))
+		}
+		return fmt.Sprintf("ERROR: mode %q is not permitted in this repository. Permitted: %s.",
+			mode, strings.Join(names, ", "))
+	}
+	return doShip(ctx, wt, cfg, func(ctx context.Context, command string) ExecResult {
+		return exec.Run(ctx, command, nil)
+	}, mode)
+}
+
 // ToolNames lists the agent's tool names (MCP tools + the built-in exec), sorted.
 func (h *Harness) ToolNames() []string {
 	names := make([]string, len(h.Session.Tools))

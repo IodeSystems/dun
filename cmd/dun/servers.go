@@ -318,15 +318,17 @@ func serversToAny(states []dun.ServerState) []map[string]any {
 	return out
 }
 
-// runControlCmd handles /docker and /worktree control commands.
+// runControlCmd handles /docker, /worktree, and /ship control commands.
 func runControlCmd(ctx context.Context, h *dun.Harness, id, action string) string {
 	switch id {
 	case "docker":
 		return runDockerCmd(ctx, h, action)
 	case "worktree":
 		return runWorktreeCmd(ctx, h, action)
+	case "ship":
+		return runShipCmd(ctx, h, action)
 	default:
-		return "unknown control target " + strconv.Quote(id) + " — try /docker or /worktree"
+		return "unknown control target " + strconv.Quote(id) + " — try /docker, /worktree, or /ship"
 	}
 }
 
@@ -388,5 +390,21 @@ func runWorktreeCmd(ctx context.Context, h *dun.Harness, action string) string {
 	default:
 		return "unknown action " + strconv.Quote(action) + " — try /worktree [status|new|commit]"
 	}
+}
+
+// runShipCmd handles /ship [verify|push|pr].
+func runShipCmd(ctx context.Context, h *dun.Harness, action string) string {
+	var mode dun.ShipMode
+	switch strings.ToLower(action) {
+	case "", "push":
+		mode = dun.ShipPush
+	case "verify":
+		mode = dun.ShipVerify
+	case "pr":
+		mode = dun.ShipPR
+	default:
+		return "unknown action " + strconv.Quote(action) + " — try /ship [verify|push|pr]"
+	}
+	return h.Ship(ctx, mode)
 }
 
