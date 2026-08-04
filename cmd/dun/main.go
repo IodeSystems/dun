@@ -582,11 +582,13 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if ctrlCmdAsks(id, action) {
 			go func() {
 				msg := runControlCmd(ctx, h, id, action)
+				h.Aside("[control/" + id + "] " + msg)
 				em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
 			}()
 			return
 		}
 		msg := runControlCmd(ctx, h, id, action)
+		h.Aside("[control/" + id + "] " + msg)
 		em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
 	})
 	in.setResetCb(func() {
