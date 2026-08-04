@@ -23,3 +23,29 @@ func TestParseSuggestions(t *testing.T) {
 		t.Fatal("non-JSON should yield nil")
 	}
 }
+
+func TestParseSuggestions_FillerFilter(t *testing.T) {
+	// Filler phrases are dropped.
+	for _, phrase := range []string{"looks good", "thanks", "ok", "done", "great", "awesome"} {
+		s := `{"suggestions":[{"text":"` + phrase + `","prob":0.9}]}`
+		if got := parseSuggestions(s); len(got) != 0 {
+			t.Errorf("filler %q should be dropped, got %+v", phrase, got)
+		}
+	}
+
+	// Case-insensitive.
+	for _, phrase := range []string{"Looks Good", "THANKS", "Ok", "Done"} {
+		s := `{"suggestions":[{"text":"` + phrase + `","prob":0.9}]}`
+		if got := parseSuggestions(s); len(got) != 0 {
+			t.Errorf("filler %q should be dropped (case-insensitive), got %+v", phrase, got)
+		}
+	}
+
+	// Action-bearing suggestions survive.
+	for _, phrase := range []string{"looks good, commit it", "thanks, now run tests", "ok, ship it"} {
+		s := `{"suggestions":[{"text":"` + phrase + `","prob":0.5}]}`
+		if got := parseSuggestions(s); len(got) != 1 {
+			t.Errorf("action phrase %q should survive, got %+v", phrase, got)
+		}
+	}
+}

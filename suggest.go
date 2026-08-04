@@ -59,6 +59,50 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	return parseSuggestions(b.String()), nil
 }
 
+// fillerPhrases are suggestions that carry no action — polite acknowledgments
+// the model generates because it was trained to be agreeable. They make bad
+// quick-picks: the user has nothing to do with them.
+var fillerPhrases = map[string]struct{}{
+	"looks good":          {},
+	"looks good to me":    {},
+	"thanks":              {},
+	"thank you":           {},
+	"thank you!":          {},
+	"thanks!":             {},
+	"ok":                  {},
+	"okay":                {},
+	"sure":                {},
+	"got it":              {},
+	"understood":          {},
+	"that's it":           {},
+	"that's all":          {},
+	"done":                {},
+	"all done":            {},
+	"i'm done":            {},
+	"i think that's it":   {},
+	"i think that's all":  {},
+	"nothing else":        {},
+	"no thanks":           {},
+	"no thank you":        {},
+	"i'm good":            {},
+	"i'm good, thanks":    {},
+	"that's perfect":      {},
+	"perfect":             {},
+	"great":               {},
+	"awesome":             {},
+	"nice":                {},
+	"cool":                {},
+	"good":                {},
+	"good job":            {},
+	"well done":           {},
+	"excellent":           {},
+	"brilliant":           {},
+	"wow":                 {},
+	"wow, that's great":   {},
+	"i don't have anything else": {},
+	"i have nothing else": {},
+}
+
 // parseSuggestions extracts the JSON object (defensively — small models like to
 // wrap it in prose) and returns up to 4 cleaned, prob-sorted suggestions.
 func parseSuggestions(s string) []Suggestion {
@@ -77,6 +121,9 @@ func parseSuggestions(s string) []Suggestion {
 	for _, sg := range out.Suggestions {
 		sg.Text = strings.TrimSpace(sg.Text)
 		if sg.Text == "" {
+			continue
+		}
+		if _, fill := fillerPhrases[strings.ToLower(sg.Text)]; fill {
 			continue
 		}
 		if sg.Prob < 0 {
