@@ -110,6 +110,7 @@ var (
 	stAsk    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
 	stSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // selection gutter
 	stEdge   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused divider half
+	stQueued = lipgloss.NewStyle().Foreground(lipgloss.Color("249")).Background(lipgloss.Color("236")) // queued mid-turn messages
 )
 
 // paneStyle borders a pane; the focused one is bright (212), else dim (240) —
@@ -677,8 +678,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.suggestActive() && m.suggestSel < len(m.suggestions) { // send the highlighted suggestion
-				return m.sendUser(m.suggestions[m.suggestSel].text), nil
+			if m.suggestActive() && m.suggestSel < len(m.suggestions) { // accept the highlighted suggestion into the input
+				m.input.SetValue(m.suggestions[m.suggestSel].text)
+				m.input.CursorEnd()
+				m.suggestions = nil // hide; they reappear when the input is cleared
+				m.refresh()
+				return m, nil
 			}
 			// Enter submits the message. Alt+Enter inserts a newline in the
 			// multiline buffer (so you can compose multi-line messages).
@@ -863,6 +868,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// (fills the buffer so the user can edit before sending).
 			if m.suggestActive() && m.suggestSel < len(m.suggestions) {
 				m.input.SetValue(m.suggestions[m.suggestSel].text)
+				m.input.CursorEnd()
+				m.suggestions = nil // hide; reappear when input is cleared
 				m.refresh()
 				return m, nil
 			}
@@ -896,11 +903,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == focusConvo { // keys don't type into a blurred input
 				return m, nil
 			}
-			// Suggestion quick-pick: a digit while the picker is showing sends it.
+			// Suggestion quick-pick: a digit while the picker is showing fills
+			// the input (not sends), so the user can edit before sending.
 			if m.suggestActive() {
 				if k := msg.String(); len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
 					if n := int(k[0] - '0'); n <= len(m.suggestions) {
-						return m.sendUser(m.suggestions[n-1].text), nil
+						m.input.SetValue(m.suggestions[n-1].text)
+						m.input.CursorEnd()
+						m.suggestions = nil // hide; reappear when input is cleared
+						m.refresh()
+						return m, nil
 					}
 				}
 			}
@@ -1594,6 +1606,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + txt)})
 			}
 			m.queuedTexts = nil
+			// Force scroll to bottom so the delivered messages are visible —
+			// the user just typed them and expects to see them.
+			m.scrollPinned = true
 		}
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
@@ -1613,6 +1628,8 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + txt)})
 			}
 			m.queuedTexts = nil
+			// Force scroll to bottom so the delivered messages are visible.
+			m.scrollPinned = true
 		}
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
@@ -1763,16 +1780,16 @@ func (m tuiModel) queuedHint() string {
 	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
 }
 
-// pendingView renders queued messages above the divider line. Each message is
-// shown with a "› " prefix matching the user style, but dimmed to indicate it
-// hasn't been delivered to the model yet.
+// pendingView renders queued messages above the divider line. Each message has
+// a highlighted background so the user knows it landed and is waiting for
+// delivery into the next tool result.
 func (m tuiModel) pendingView() string {
 	if len(m.queuedTexts) == 0 {
 		return ""
 	}
 	var lines []string
 	for _, txt := range m.queuedTexts {
-		lines = append(lines, stDim.Render("› "+txt))
+		lines = append(lines, stQueued.Render("› "+txt))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -1892,7 +1909,7 @@ func (m tuiModel) View() string {
 			status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter inspector · / search · tab input")
 		}
 	case m.suggestActive():
-		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · enter send · right accept · 1–%d pick · or type · "+m.exitHint(), len(m.suggestions)))
+		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · enter/right/1–%d accept · or type · "+m.exitHint(), len(m.suggestions)))
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}

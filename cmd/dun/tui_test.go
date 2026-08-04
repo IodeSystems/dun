@@ -379,10 +379,10 @@ func TestTUI_Suggestions(t *testing.T) {
 	if !m.suggestActive() {
 		t.Fatal("picker should be active when idle + empty input")
 	}
-	// digit "1" sends the first suggestion.
+	// digit "1" fills the input with the first suggestion (does not send).
 	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
-	if !strings.Contains(m.convoText(), "run the tests") {
-		t.Fatalf("digit 1 should send the first suggestion, convo: %s", m.convoText())
+	if m.input.Value() != "run the tests" {
+		t.Fatalf("digit 1 should fill input with first suggestion, got: %q", m.input.Value())
 	}
 	if len(m.suggestions) != 0 {
 		t.Fatal("picking a suggestion should clear the list")
