@@ -536,3 +536,76 @@ func TestShip_UntrackedBranchRunsChecksAndPushes(t *testing.T) {
 		t.Fatalf("the new branch did not reach origin; files=%q", files)
 	}
 }
+
+// LoadShip reads checks from a dun.json file and doShip runs them.
+func TestShip_ChecksLoadedFromConfig(t *testing.T) {
+	_, repo, _ := newShipRepo(t)
+	wt := shipWorktree(t, repo)
+
+	// Write a dun.json with checks that pass.
+	cfg := `{"ship":{"checks":[{"build":"echo ok"},{"test":"echo ok"}]}}`
+	os.WriteFile(filepath.Join(wt.Path, "dun.json"), []byte(cfg), 0o644)
+	gitrun(t, wt.Path, "add", "dun.json")
+	gitrun(t, wt.Path, "commit", "-qm", "add ship config")
+
+	loaded := LoadShip(wt.Path)
+	if loaded == nil {
+		t.Fatal("LoadShip returned nil")
+	}
+	if len(loaded.Checks) != 2 {
+		t.Fatalf("expected 2 checks, got %d", len(loaded.Checks))
+	}
+
+	out := doShip(context.Background(), wt, loaded, okExec, ShipVerify)
+	if !strings.Contains(out, "Verified") {
+		t.Fatalf("expected verification success, got: %q", out)
+	}
+}
+
+// A failing check in the config prevents ship from pushing.
+func TestShip_ChecksFromConfigBlockPush(t *testing.T) {
+	_, repo, _ := newShipRepo(t)
+	wt := shipWorktree(t, repo)
+
+	// Write a dun.json with a check that fails.
+	cfg := `{"ship":{"checks":[{"compile":"exit 1"}]}}`
+	os.WriteFile(filepath.Join(wt.Path, "dun.json"), []byte(cfg), 0o644)
+	gitrun(t, wt.Path, "add", "dun.json")
+	gitrun(t, wt.Path, "commit", "-qm", "add ship config")
+
+	loaded := LoadShip(wt.Path)
+	if loaded == nil {
+		t.Fatal("LoadShip returned nil")
+	}
+
+	exec := failExec("compile failed", 1)
+	out := doShip(context.Background(), wt, loaded, exec, ShipPush)
+	if !strings.Contains(out, "Checks failed") {
+		t.Fatalf("expected check failure, got: %q", out)
+	}
+}
+
+// Ship with no checks in the config passes through without running any.
+func TestShip_NoChecksInConfig(t *testing.T) {
+	_, repo, _ := newShipRepo(t)
+	wt := shipWorktree(t, repo)
+
+	// Write a dun.json with an empty ship section (no checks).
+	cfg := `{"ship":{}}`
+	os.WriteFile(filepath.Join(wt.Path, "dun.json"), []byte(cfg), 0o644)
+	gitrun(t, wt.Path, "add", "dun.json")
+	gitrun(t, wt.Path, "commit", "-qm", "add ship config")
+
+	loaded := LoadShip(wt.Path)
+	if loaded == nil {
+		t.Fatal("LoadShip returned nil")
+	}
+	if len(loaded.Checks) != 0 {
+		t.Fatalf("expected 0 checks, got %d", len(loaded.Checks))
+	}
+
+	out := doShip(context.Background(), wt, loaded, okExec, ShipVerify)
+	if !strings.Contains(out, "Verified") {
+		t.Fatalf("expected verification success with no checks, got: %q", out)
+	}
+}
