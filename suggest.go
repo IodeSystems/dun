@@ -6,14 +6,25 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
 
-// Next-message suggestions — after a turn, predict what the USER is likely to
-// say next (with a rough probability), so the UI can offer quick picks. It's one
-// extra, non-tool LLM round-trip over the current conversation; opt-in
-// (`dun --suggest`) since it costs a call per turn.
+// Next-message suggestions — predict what the USER is likely to say next (with
+// a rough probability), so the UI can offer quick picks.
+//
+// It is one extra, non-tool LLM round-trip, and it is ON by default
+// (`--no-suggest` withholds it). That default is only defensible because of
+// WHEN it now runs: the UI asks for it after the turn is done and the person
+// has sat still for a few seconds with an empty input box, once per idle. It
+// used to fire from the engine at the end of EVERY turn — including the
+// autonomous ones a heartbeat provoked — which is how a session that nobody was
+// typing into still made two calls a minute.
+//
+// The prompt goes through the session's own Build, not DefaultContextBuilder.
+// Building it the raw way meant this call was the one request in dun that was
+// never shaped (no LOD stubs, no compaction) and never logged — so "built
+// prompt" undercounted the session's real traffic, and the unshaped copy could
+// be larger than the turn it followed.
 
 // Suggestion is one predicted next user message.
 type Suggestion struct {
@@ -30,8 +41,13 @@ Order by prob, highest first.`
 // Suggestions returns the model's predicted next user messages. Errors (or a
 // model that won't produce JSON) yield nil — suggestions are best-effort.
 func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
-	// The conversation so far (no system prompt — we append our own instruction).
-	msgs, err := agent.DefaultContextBuilder(ctx, h.store, h.Session.SessionID, "")
+	// The conversation so far, SHAPED — the same builder the turn itself uses,
+	// so this request is compacted and measured like every other. No system
+	// prompt: we append our own instruction instead.
+	if h.Session == nil || h.Session.Build == nil {
+		return nil, nil
+	}
+	msgs, err := h.Session.Build(ctx, h.Session.SessionID, "")
 	if err != nil {
 		return nil, err
 	}

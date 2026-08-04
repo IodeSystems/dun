@@ -161,9 +161,19 @@ func (s *subAgent) heartbeat() {
 						"look like a working one. agent_monitor(agent:%d, tail:40) to see what it is doing.", s.num)
 				}
 			}
-			// notifyAndWake, NOT s.notify: the reminder must not reset the
-			// silence it is reporting on.
-			s.parent.notifyAndWake(line)
+			// Not s.notify: the reminder must not reset the silence it is
+			// reporting on.
+			//
+			// A BLOCKED child is the one reminder that has to buy a turn. It is
+			// waiting on an answer only the parent can give, so a note the parent
+			// reads "next time it runs a turn anyway" is a note it may never read
+			// — the child waits forever for a parent that has nothing else to do.
+			// Every other case is the absence of news, and pays nothing for it.
+			if s.blockedOn() != "" {
+				s.parent.notifyAndWake(line)
+				return
+			}
+			s.parent.notifyQuietly(line)
 		},
 	)
 }

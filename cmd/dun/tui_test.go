@@ -1900,3 +1900,109 @@ func TestTUI_MCPSlashWireForm(t *testing.T) {
 		t.Errorf("/mcp should lowercase action and target; got %v", got)
 	}
 }
+
+// ── idle-gated suggestions ─────────────────────────────────────────
+//
+// The engine used to volunteer a suggestion call at the end of every turn,
+// including autonomous ones. It now asks only when the UI says the human is
+// idle, and these pin the four conditions that gate the request.
+
+// suggestReq drives the model to the point where a suggestion could fire and
+// reports what went to the engine.
+func suggestReq(t *testing.T, setup func(*tuiModel)) (tuiModel, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = nm.(tuiModel)
+	m.starting = false                             // a live session: servers are up
+	m.convo = []convoEntry{{collapsed: "a reply"}} // something to predict from
+	// The turn ends: the idle clock starts here.
+	m = m.handleEvent(evMsg{"type": "done"})
+	// setup runs AFTER `done` because it describes the state at the moment the
+	// tick LANDS. Running it before proved nothing for the busy case — `done`
+	// clears busy, so that subtest passed while testing the opposite.
+	if setup != nil {
+		setup(&m)
+	}
+	m.lastKeyAt = time.Now().Add(-2 * idleSuggestDelay) // pretend the wait elapsed
+	out, _ := m.update(idleSuggestMsg{})
+	return out.(tuiModel), buf.String()
+}
+
+func TestSuggest_FiresOnceWhenIdle(t *testing.T) {
+	m, sent := suggestReq(t, nil)
+	if !strings.Contains(sent, `"id":"suggest"`) {
+		t.Fatalf("an idle, empty input should ask for suggestions; engine got %q", sent)
+	}
+	if !m.suggestedThisIdle {
+		t.Error("the idle must be marked spent")
+	}
+	// A second tick in the same idle must NOT ask again.
+	var buf2 bytes.Buffer
+	m.proc = &dunProc{stdin: bufCloser{&buf2}}
+	m.lastKeyAt = time.Now().Add(-2 * idleSuggestDelay)
+	if _, _ = m.update(idleSuggestMsg{}); strings.Contains(buf2.String(), "suggest") {
+		t.Errorf("a second tick in one idle must not ask again; engine got %q", buf2.String())
+	}
+}
+
+func TestSuggest_HeldBackWhileTheHumanIsBusy(t *testing.T) {
+	for name, setup := range map[string]func(*tuiModel){
+		"text in the input": func(m *tuiModel) { m.input.SetValue("half a thought") },
+		"a turn is running": func(m *tuiModel) { m.busy = true },
+		"answering an ask":  func(m *tuiModel) { m.asking = true },
+		"suggestions off":   func(m *tuiModel) { m.suggestMode = "off" },
+		"picker already up": func(m *tuiModel) { m.suggestions = []suggestion{{text: "x"}} },
+		"inspector is open": func(m *tuiModel) { m.inspecting = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, sent := suggestReq(t, setup); strings.Contains(sent, "suggest") {
+				t.Errorf("must not ask while %s; engine got %q", name, sent)
+			}
+		})
+	}
+}
+
+// The wait is a DEBOUNCE, not a poll: a keystroke inside the window pushes the
+// deadline out instead of letting the tick through.
+func TestSuggest_KeystrokeRestartsTheWait(t *testing.T) {
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = nm.(tuiModel)
+	m.convo = []convoEntry{{collapsed: "a reply"}}
+	m = m.handleEvent(evMsg{"type": "done"})
+
+	// A key arrives now, so the deadline is 3s from now, not from `done`.
+	nm2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = nm2.(tuiModel)
+	if cmd == nil {
+		t.Fatal("a keystroke in a suggestible session should keep the debounce armed")
+	}
+	out, again := m.update(idleSuggestMsg{})
+	m = out.(tuiModel)
+	if strings.Contains(buf.String(), "suggest") {
+		t.Errorf("the tick fired early after a keystroke; engine got %q", buf.String())
+	}
+	if again == nil {
+		t.Error("an early tick must re-arm for the remainder, not give up")
+	}
+	if !m.idleTickPending {
+		t.Error("the re-armed tick must be tracked")
+	}
+}
+
+// Nothing to predict from, or suggestions off: no timer at all. A keypress the
+// UI ignores must stay ignored.
+func TestSuggest_NoTimerWhenItCouldNeverFire(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}); cmd != nil {
+		t.Error("an empty conversation has nothing to suggest from — no timer")
+	}
+	m.convo = []convoEntry{{collapsed: "a reply"}}
+	m.suggestMode = "off"
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}); cmd != nil {
+		t.Error("suggestions off — no timer")
+	}
+}

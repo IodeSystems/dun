@@ -242,6 +242,29 @@ func (h *Harness) notifyAndWake(text string) {
 	}
 }
 
+// notifyQuietly is what a REMINDER gets: the human sees it immediately, the
+// model reads it whenever it next runs a turn anyway, and it never buys a turn
+// of its own.
+//
+// The distinction matters because a heartbeat is not news. It reports the
+// ABSENCE of news — "still running, still quiet" — and routing it through
+// notifyAndWake made that absence cost a full turn: the wake ran continueTurn,
+// which called the model, which (until this change) also bought a suggestion
+// call. A session with one long job and nobody typing therefore billed two
+// requests per heartbeat, on a schedule that starts at one minute, for saying
+// that nothing had happened.
+//
+// Aside is the existing primitive for exactly this — see Harness.Aside: it can
+// never CAUSE a turn, and it waits indefinitely if none comes, which is the
+// correct fate for a reminder nobody needed. The onNotify ping is kept so the
+// human still sees the line the moment it fires.
+func (h *Harness) notifyQuietly(text string) {
+	h.Aside(text)
+	if cb := h.store.notifyCallback(); cb != nil {
+		cb(text)
+	}
+}
+
 // bgLogDir is where job logs live: beside the session file when there is one,
 // so a resumed session's logs are still findable, else a temp dir.
 func (h *Harness) bgLogDir() string {
@@ -332,9 +355,10 @@ func (j *bgJob) heartbeat() {
 			if written > 0 {
 				out = fmt.Sprintf("%d bytes of output, none new", written)
 			}
-			// notifyAndWake, NOT j.notify: the reminder must not reset the
-			// silence it is reporting on.
-			j.h.notifyAndWake(fmt.Sprintf(
+			// notifyQuietly, NOT j.notify: the reminder must not reset the
+			// silence it is reporting on, and must not buy a turn to report it
+			// — a job being quiet is not a reason to call the model.
+			j.h.notifyQuietly(fmt.Sprintf(
 				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n"+
 					"Nothing is necessarily wrong; this is so a wedged job does not look like a working one. "+
 					"exec_monitor(job:%d) to see what it has produced.",

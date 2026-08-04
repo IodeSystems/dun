@@ -409,6 +409,35 @@ isolation forces the split there).
   watching (icebox: configurable timeout, condition now reached).
 
 ## Decisions
+- **A request nobody asked for must be VISIBLE before it is defensible (USER,
+  2026-08-03).** Measured against a counting stub: one user message cost TWO
+  LLM calls. The second was `Suggestions()`, fired by the engine at the end of
+  every turn, and invisible twice over — it used `DefaultContextBuilder` rather
+  than the session's `Build`, so it was the one request in dun that was never
+  shaped (no LOD stubs, no compaction) AND never logged, which means every
+  `built prompt` line in every session log undercounted the real traffic. Three
+  changes: it goes through `h.Session.Build` (shaped + measured); the engine no
+  longer volunteers it (`emitSuggestions` is reachable only from the `suggest`
+  control command, detached from the reader goroutine because it is a full
+  round-trip); and the UI decides when to ask, because the trigger depends on
+  facts the engine cannot see. Now 1 call per message, verified the same way.
+- **The suggestion trigger is an IDLE DEBOUNCE, not a turn hook (USER,
+  2026-08-03).** It fires only on `done` (so nothing can land between a tool
+  call and its result), after 3s with no keystroke, with the input box empty,
+  and at most once per idle — `len(suggestions) == 0` is what makes "once" hold
+  even though a keystroke restarts the clock. Armed from `tuiModel.Update`, the
+  one funnel every key passes through, and never armed at all when it could not
+  fire (suggestions off, empty conversation) so an ignored keypress stays
+  ignored.
+- **A heartbeat reports the ABSENCE of news and must not buy a turn (USER,
+  2026-08-03).** It went through `notifyAndWake`, so the wake ran `continueTurn`
+  — a full model call, plus (until the above) a suggestion call — to say that
+  nothing had happened, on a schedule starting at one minute. Reminders now use
+  `notifyQuietly`: `Aside` (which by construction can never cause a turn) plus
+  the `onNotify` ping so the human still sees the line. The ONE exception is a
+  child blocked on `ask_parent` — it waits on an answer only the parent can
+  give, so a note the parent reads "next time it runs anyway" is one it may
+  never read.
 - **What the human sees must be what the MODEL saw.** `OnToolCall` fires inside
   each tool's wrapper, before the outer cap, so the TUI rendered a
   quarter-megabyte the model never read — and "why did it not see the last

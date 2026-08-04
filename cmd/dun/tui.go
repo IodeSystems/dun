@@ -436,6 +436,14 @@ type tuiModel struct {
 	suggestions      []suggestion      // predicted next messages (idle-only picker)
 	suggestMode      string            // "on" | "off" | "auto" — /suggest controls this
 	suggestSel       int               // highlighted suggestion in the selector
+	// Idle debounce for the suggestion request. The engine cannot see whether
+	// anyone is typing, so the decision lives here: the clock restarts on every
+	// keystroke and at the end of every turn, and the request goes out only once
+	// the person has actually stopped. See idleSuggestDelay.
+	lastKeyAt         time.Time // last keystroke OR turn end — the idle clock
+	idleTickPending   bool      // a debounce tick is already scheduled
+	idleWantTick      bool      // an event asked for one (handleEvent has no tea.Cmd)
+	suggestedThisIdle bool      // already asked during this idle; do not ask twice
 	retry            string            // live retry banner ("" = not waiting on the provider)
 	retryDue         time.Time         // when the next attempt is due, for the countdown
 	retrySeen        int               // retries this outage; the first one also lands in scrollback
@@ -504,6 +512,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.append(stErr.Render(frames.slowWarning()))
 			nm = t
 		}
+	}
+	// Every keystroke restarts the idle clock. Hooked HERE rather than in the
+	// key switch because that switch returns from a dozen places and each mode
+	// (asking, searching, the inspector) owns its own keys — this is the one
+	// funnel every key actually passes through.
+	if t, ok := nm.(tuiModel); ok {
+		if _, isKey := msg.(tea.KeyMsg); isKey {
+			t.armIdleSuggest()
+		}
+		if t.idleWantTick && !t.idleTickPending {
+			t.idleWantTick, t.idleTickPending = false, true
+			cmd = tea.Batch(cmd, idleSuggestTick(idleSuggestDelay))
+		}
+		t.idleWantTick = false
+		nm = t
 	}
 	return nm, cmd
 }
@@ -905,6 +928,21 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return nm, tea.Batch(cmds...)
 
+	case idleSuggestMsg:
+		m.idleTickPending = false
+		// A keystroke since the tick was armed moves the deadline: wait out the
+		// remainder rather than firing early. This is what makes it a debounce
+		// and not a 3-second poll.
+		if wait := idleSuggestDelay - time.Since(m.lastKeyAt); wait > 0 {
+			m.idleTickPending = true
+			return m, idleSuggestTick(wait)
+		}
+		if m.idleSuggestReady() {
+			m.suggestedThisIdle = true
+			m.proc.controlCmd("suggest", "") // best-effort: no engine, no suggestions
+		}
+		return m, nil
+
 	case renderTickMsg:
 		// One frame per tick at most, no matter how fast the tokens arrive.
 		m.tickPending = false
@@ -1093,6 +1131,69 @@ func parseSuggestionItems(v any) []suggestion {
 		}
 	}
 	return out
+}
+
+// idleSuggestDelay is how long the input must sit still, and empty, before the
+// UI spends a model call guessing what you were going to type.
+//
+// It exists because the engine used to volunteer suggestions at the end of
+// EVERY turn — including the autonomous ones a heartbeat provoked — so a
+// session nobody was typing into still billed a request per turn, and one
+// landed between a tool result and the model's next move. Three seconds is long
+// enough that finishing a thought does not trigger it and short enough that the
+// picker is there when you look up.
+const idleSuggestDelay = 3 * time.Second
+
+// idleSuggestMsg fires when the debounce may have elapsed.
+type idleSuggestMsg struct{}
+
+func idleSuggestTick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return idleSuggestMsg{} })
+}
+
+// armIdleSuggest restarts the idle clock. Called from the keystroke funnel and
+// at the end of a turn — the two things that mean "the human's turn now".
+//
+// It arms nothing when a suggestion could not fire anyway (suggestions off, or
+// an empty conversation with nothing to predict from). Otherwise every
+// keystroke of a session that will never ask schedules a timer, and a keypress
+// that the UI deliberately ignores stops looking ignored to its caller.
+func (m *tuiModel) armIdleSuggest() {
+	if !m.idleSuggestPossible() {
+		return
+	}
+	m.lastKeyAt = time.Now()
+	m.suggestedThisIdle = false
+	m.idleWantTick = true
+}
+
+// idleSuggestPossible is the cheap precondition: could this session ever ask?
+func (m tuiModel) idleSuggestPossible() bool {
+	return m.suggestMode != "off" && !m.quitting && len(m.convo) > 0
+}
+
+// idleSuggestReady is every condition that must hold to spend the call.
+//
+// The `len(m.suggestions) == 0` clause is what makes "once per idle" hold even
+// though a keystroke restarts the clock: with a picker already on screen the
+// answer is already there, so fiddling with the input cannot re-ask. Typing
+// something and clearing it back to empty starts a genuinely new idle, and only
+// then — with the old suggestions cleared by the turn that consumed them — can
+// another request go out.
+func (m tuiModel) idleSuggestReady() bool {
+	if m.suggestMode == "off" || m.suggestedThisIdle || len(m.suggestions) > 0 {
+		return false
+	}
+	// Never mid-turn, never over a modal: a suggestion is a question for a
+	// person who is free to answer it.
+	if m.busy || m.starting || m.asking || m.inspecting || m.searching || m.quitting {
+		return false
+	}
+	if len(m.convo) == 0 { // nothing to predict from
+		return false
+	}
+	return strings.TrimSpace(m.input.Value()) == "" &&
+		time.Since(m.lastKeyAt) >= idleSuggestDelay
 }
 
 // suggestActive: the next-message picker shows only when idle with an empty
@@ -1497,6 +1598,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
 		m.clearRetry()
+		// The turn is done, so the human's idle starts NOW. This is the only
+		// place a suggestion request can begin — `done` is what "the LLM is
+		// marked done" means on the wire, so nothing can land between a tool
+		// call and its result.
+		m.armIdleSuggest()
 		m.refresh()
 	case "error":
 		m.append(stErr.Render("error: " + str(ev["error"])))

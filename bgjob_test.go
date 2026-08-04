@@ -377,3 +377,68 @@ func TestBgJob_HeartbeatIsDebouncedByTheJobsOwnOutput(t *testing.T) {
 		return false
 	})
 }
+
+// A heartbeat reports the ABSENCE of news, and must not buy a turn to do it.
+//
+// It used to go through notifyAndWake: the wake ran a full autonomous turn, and
+// the turn (until the suggestion trigger moved to the UI) bought a second call
+// on top. A session with one long job and nobody typing therefore billed two
+// requests per reminder, starting one minute in, to say nothing had happened.
+func TestBgJob_HeartbeatDoesNotBuyATurn(t *testing.T) {
+	h := testHarness(t)
+	j := &bgJob{id: 11, command: "sleep 300", started: time.Now(), h: h, hb: fastHeartbeat()}
+	go j.heartbeat()
+	defer j.finished(ExecResult{})
+
+	// The human still hears about it...
+	waitFor(t, 3*time.Second, func() bool {
+		for _, n := range h.notes() {
+			if strings.Contains(n, "STILL RUNNING") {
+				return true
+			}
+		}
+		return false
+	})
+	// ...but it was queued as an ASIDE (never a reason to run) and no wake was
+	// posted. The wake is the operative half: it is what drives continueTurn.
+	h.noteMu.Lock()
+	kinds := make([]queuedKind, 0, len(h.queue))
+	for _, q := range h.queue {
+		kinds = append(kinds, q.kind)
+	}
+	h.noteMu.Unlock()
+	for _, k := range kinds {
+		if k != queuedAside {
+			t.Errorf("a reminder must queue as an aside, got kind %d", k)
+		}
+	}
+	select {
+	case <-h.Wake():
+		t.Error("a reminder must not wake the turn loop")
+	default:
+	}
+}
+
+// The completion of a job is real news and must still wake a turn — otherwise
+// the result the model asked for waits for something else to happen first.
+// This is j.notify, the path the runner actually takes (finished() only builds
+// the line; the goroutine that owns the job publishes it).
+func TestBgJob_CompletionStillWakesATurn(t *testing.T) {
+	h := testHarness(t)
+	j := &bgJob{id: 12, command: "true", started: time.Now(), h: h, hb: fastHeartbeat()}
+	j.notify(j.finished(ExecResult{Output: "done"}))
+	h.noteMu.Lock()
+	n, kind := len(h.queue), queuedAside
+	if n > 0 {
+		kind = h.queue[0].kind
+	}
+	h.noteMu.Unlock()
+	if n == 0 || kind != queuedNotification {
+		t.Errorf("a finished job is news, not an aside: %d queued, kind %d", n, kind)
+	}
+	select {
+	case <-h.Wake():
+	default:
+		t.Error("a finished job must wake the turn loop")
+	}
+}

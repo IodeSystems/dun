@@ -147,7 +147,7 @@ func main() {
 	// Every mode, not just the TUI: the engine is where a turn burns CPU, and
 	// it is the process a TUI session would want to profile. Opt-in, loopback.
 	startPprof()
-	suggestEnabled = !*noSuggest // -p emits next-message suggestions after each turn (on by default)
+	suggestEnabled = !*noSuggest // the UI may ASK for next-message suggestions (on by default)
 	// Resolve the effective key: explicit flag > env > saved config.
 	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), fc.Key)
 	// Dev self-update: if this is a source-stamped build and the tree changed,
@@ -557,17 +557,15 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				"message": closeSession(cc.workspace, cc.sessionID, cc.wt)})
 			return
 		}
-		// /suggest (bare): trigger an immediate suggestion request.
+		// /suggest: the ONLY thing that asks for suggestions now. The engine no
+		// longer volunteers them at the end of a turn — the UI knows what the
+		// engine cannot (whether anyone is typing), so it decides when to ask.
+		//
+		// Detached, for the same reason an asking command is: this is the reader
+		// goroutine, and h.Suggestions is a full LLM round-trip. Running it here
+		// blocked every `answer` and `user` event for the length of a model call.
 		if id == "suggest" {
-			sugs, err := h.Suggestions(ctx)
-			if err != nil || len(sugs) == 0 {
-				return
-			}
-			items := make([]any, len(sugs))
-			for i, s := range sugs {
-				items[i] = map[string]any{"text": s.Text, "prob": s.Prob}
-			}
-			em.emit(event{"type": "suggestions", "items": items})
+			go emitSuggestions(ctx, h, em)
 			return
 		}
 		// A control command that ASKS cannot run here. This callback is on the
@@ -730,7 +728,6 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
 		"generated": res.Usage.Generated, "turns": res.Usage.Turns})
 	em.emit(event{"type": "done"})
-	emitSuggestions(ctx, h, em)
 	return true
 }
 
@@ -977,7 +974,7 @@ func humanAsk(_ context.Context, question string, options []string, multi bool) 
 	return line, nil
 }
 
-// suggestEnabled mirrors --no-suggest (inverted); turn/continueTurn emit next-message
+// suggestEnabled mirrors --no-suggest (inverted); the `suggest` control command emits next-message
 // suggestions after `done` when set. On by default.
 var suggestEnabled bool
 
@@ -1011,7 +1008,6 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
 		"generated": res.Usage.Generated, "turns": res.Usage.Turns})
 	em.emit(event{"type": "done"})
-	emitSuggestions(ctx, h, em)
 	return true
 }
 
@@ -1026,8 +1022,14 @@ func emitTurnError(sessionCtx context.Context, em *emitter, err error) {
 	em.emit(event{"type": "error", "error": err.Error(), "fatal": sessionCtx.Err() != nil})
 }
 
-// emitSuggestions asks for likely next user messages and emits them (best-effort,
-// after `done` so the reply shows first). No-op unless suggestions are enabled.
+// emitSuggestions asks for likely next user messages and emits them
+// (best-effort). No-op unless suggestions are enabled.
+//
+// Called ONLY from the `suggest` control command now. It used to run at the end
+// of every turn, which put a full LLM call between a tool result and the next
+// thing the model did, and fired on autonomous turns nobody asked for. The UI
+// decides when to ask, because the trigger depends on facts the engine cannot
+// see: whether the input box is empty, and how long the person has sat still.
 func emitSuggestions(ctx context.Context, h *dun.Harness, em *emitter) {
 	if !suggestEnabled {
 		return
