@@ -269,9 +269,9 @@ func (h *Harness) rebuildTools() {
 		dispatch = withAgent(dispatch, h, report)
 		dispatch = withAgentMonitor(dispatch, h, report)
 	}
-	// recap is available to BOTH roles, and the difference is the confirmation:
-	// a root asks the human before rewriting a conversation they are part of,
-	// a child has nobody to ask and its context is exactly what this is for.
+	// recap is available to BOTH roles, and behaves identically in both: it
+	// applies and then reports. It used to ask a root's human first — see the
+	// rules at the top of recap.go for why that prompt was removed.
 	toolDefs = append(toolDefs, recapToolDef())
 	dispatch = withRecap(dispatch, h, report)
 	// Watches what every OTHER tool call produces, so a suggestion arrives at

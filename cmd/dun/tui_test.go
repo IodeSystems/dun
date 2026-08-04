@@ -677,13 +677,14 @@ func TestTUI_DocsNotificationNav(t *testing.T) {
 	kRight := tea.KeyMsg{Type: tea.KeyRight}
 	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
 
-	m = key(m, kRight) // can't descend until opened
-	if m.convo[0].docs.descended {
-		t.Fatal("→ should not descend a collapsed summary")
-	}
-	m = key(m, kEnter) // expand
+	// → is one level per press, all the way down: open the summary, descend into
+	// the list, open a document. It used to take enter to get past the first two.
+	m = key(m, kRight) // open the summary
 	if m.convo[0].state <= viewMinimized || !strings.Contains(m.convo[0].view(), "README") {
-		t.Fatal("enter should expand the summary and list docs")
+		t.Fatal("→ should open the summary and list docs")
+	}
+	if m.convo[0].docs.descended {
+		t.Fatal("→ opens the summary first; descending is the NEXT press")
 	}
 	m = key(m, kRight) // descend
 	if !m.convo[0].docs.descended || m.convo[0].docs.cur != 0 {
@@ -693,13 +694,140 @@ func TestTUI_DocsNotificationNav(t *testing.T) {
 	if m.convo[0].docs.cur != 1 {
 		t.Fatalf("↓ should move to doc 1, got %d", m.convo[0].docs.cur)
 	}
-	m = key(m, kEnter) // expand doc 1's snippet
+	m = key(m, kRight) // open doc 1's snippet
 	if !m.convo[0].docs.docs[1].open || !strings.Contains(m.convo[0].view(), "layout") {
-		t.Fatal("enter should expand the current doc's snippet")
+		t.Fatal("→ should open the current doc's snippet")
 	}
-	m = key(m, kLeft) // ascend
+	m = key(m, kRight) // nothing deeper — and the focus must NOT leak to the input
+	if m.focus != focusConvo || !m.convo[0].docs.descended {
+		t.Fatalf("→ inside the doc list must stay there, focus=%d descended=%v", m.focus, m.convo[0].docs.descended)
+	}
+	// ← is → run backwards, one level per press.
+	m = key(m, kLeft)
+	if m.convo[0].docs.docs[1].open {
+		t.Fatal("← should close the open document before leaving the list")
+	}
+	m = key(m, kLeft)
 	if m.convo[0].docs.descended {
 		t.Fatal("← should ascend out of the doc list")
+	}
+	m = key(m, kLeft)
+	if m.convo[0].state != viewMinimized {
+		t.Fatalf("← should close the summary itself, got state %d", m.convo[0].state)
+	}
+	if m.focus != focusConvo {
+		t.Fatalf("closing a block must not also change zone, focus=%d", m.focus)
+	}
+	// Enter still cycles, unchanged: the two ways in do not have to agree.
+	m = key(m, kEnter)
+	if m.convo[0].state == viewMinimized {
+		t.Fatal("enter should still expand the summary")
+	}
+}
+
+// The arrow rule for an ordinary folded block: → walks minimized → expanded →
+// raw and stops, ← walks it back, and only a block with nothing left to open
+// hands → to the input. Before this, → left the conversation immediately and
+// the ▸ on every tool line could only be opened with enter.
+func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = nm.(tuiModel)
+	m.convo = []convoEntry{
+		{collapsed: "▸ call", full: "the styled body", raw: "the raw body"},
+		{collapsed: "just a message"},
+	}
+	kRight := tea.KeyMsg{Type: tea.KeyRight}
+	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
+
+	m = key(m, kLeft) // input → convo
+	m.sel = 0
+	if m.focus != focusConvo {
+		t.Fatalf("want the conversation, got %d", m.focus)
+	}
+	for _, want := range []viewState{viewExpanded, viewRaw} {
+		m = key(m, kRight)
+		if m.convo[0].state != want {
+			t.Fatalf("→ should reach state %d, got %d", want, m.convo[0].state)
+		}
+	}
+	// Nothing deeper: → is the horizontal axis again and hands over to the
+	// input, WITHOUT wrapping the block shut on the way out.
+	m = key(m, kRight)
+	if m.focus != focusInput || m.convo[0].state != viewRaw {
+		t.Fatalf("→ past the deepest level should go to the input and leave the block open, focus=%d state=%d",
+			m.focus, m.convo[0].state)
+	}
+	m.focus, m.sel = focusConvo, 0
+	m.input.Blur()
+	for _, want := range []viewState{viewExpanded, viewMinimized} {
+		m = key(m, kLeft)
+		if m.convo[0].state != want {
+			t.Fatalf("← should reach state %d, got %d", want, m.convo[0].state)
+		}
+	}
+	if m.focus != focusConvo {
+		t.Fatalf("← should still be closing the block, not leaving, focus=%d", m.focus)
+	}
+	m = key(m, kLeft) // shut: now ← leaves the zone
+	if m.focus == focusConvo {
+		t.Fatal("← on a shut block should walk on to the next zone")
+	}
+
+	// A block with nothing inside it: → is still the way back to the input.
+	m.focus, m.sel = focusConvo, 1
+	m.input.Blur()
+	m = key(m, kRight)
+	if m.focus != focusInput {
+		t.Fatalf("→ on a block with nothing to open should return to the input, got %d", m.focus)
+	}
+}
+
+// A block whose deepest level is `full` must stop there. viewState.Next() wraps
+// to raw, and view() falls back to the COLLAPSED line when raw is empty — so a
+// naive → showed the one-liner again as if it had closed the block.
+func TestTUI_RightStopsWhereTheBlockEnds(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = nm.(tuiModel)
+	m.convo = []convoEntry{{collapsed: "▸ recap: 9 entries", full: "▾ recap: 9 entries\nreplaced with: …"}}
+
+	m = key(m, tea.KeyMsg{Type: tea.KeyLeft}) // into the conversation
+	m.sel = 0
+	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
+	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.convo[0].state != viewExpanded {
+		t.Fatalf("a block with no raw view must stay expanded, got state %d", m.convo[0].state)
+	}
+	if !strings.Contains(m.convo[0].view(), "replaced with") {
+		t.Fatalf("the expanded body must still be showing: %q", m.convo[0].view())
+	}
+}
+
+// Recap no longer asks before it applies, so the event is the only place a
+// human learns it happened: one dim line that OPENS onto the replacement text.
+func TestTUI_RecapEventIsExpandable(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = m.handleEvent(evMsg{"type": "recap", "entries": 9.0, "chars": 258256.0,
+		"note": "recap: 9 entries (~258256 chars) → s.recap1.jsonl",
+		"detail": "Removed 9 entries (~258256 characters) from the model's context.\n\n" +
+			"Replaced with:\n  │ the answer is a stack"})
+	if len(m.convo) != 1 {
+		t.Fatalf("a recap should be one block, got %d", len(m.convo))
+	}
+	e := m.convo[0]
+	if !e.expandable() {
+		t.Fatal("the recap line must open onto what replaced the span")
+	}
+	if !strings.Contains(e.view(), "9 entries") || strings.Contains(e.view(), "the answer is a stack") {
+		t.Fatalf("collapsed should be the citation only: %q", e.view())
+	}
+	e.state = viewExpanded
+	if !strings.Contains(e.view(), "the answer is a stack") {
+		t.Fatalf("expanded should show the replacement: %q", e.view())
+	}
+	if m.ctxStats.recaps != 1 || m.ctxStats.entriesRecapped != 9 {
+		t.Errorf("/context should still count it: %+v", m.ctxStats)
 	}
 }
 

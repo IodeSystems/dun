@@ -192,18 +192,20 @@ func TestRecap_RewritesTheAnchoringUserMessage(t *testing.T) {
 	}
 }
 
-// The confirmation is not decoration: a decline must leave the conversation
-// exactly as it was.
-func TestRecap_DeclinedLeavesEverythingAlone(t *testing.T) {
+// Recap never asks — not even with an Ask configured — and what it did is
+// REPORTED instead: the count in Note, and the replacement text in Detail.
+// Visibility after the fact is the whole of the trade for dropping the prompt.
+func TestRecap_AppliesWithoutAskingAndReports(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	st, _ := openSessionStore(path)
-	asked := ""
+	var note RecapNote
 	h := &Harness{store: st, cfg: Config{
 		SessionFile: path,
 		Ask: func(_ context.Context, q string, _ []string, _ bool) (string, error) {
-			asked = q
+			t.Errorf("recap must not ask; it asked %q", q)
 			return "leave it alone", nil
 		},
+		OnRecap: func(n RecapNote) { note = n },
 	}}
 	for _, e := range convo() {
 		st.appendSilent(e)
@@ -211,23 +213,25 @@ func TestRecap_DeclinedLeavesEverythingAlone(t *testing.T) {
 	before, _ := st.Context(context.Background(), "dun")
 
 	out := h.runRecap(context.Background(), "nested quotes", "a summary", nil, "")
-	if !strings.Contains(out, "declined") {
-		t.Errorf("a decline must be reported to the model: %q", out)
-	}
-	if !strings.Contains(asked, "Recap would remove") || !strings.Contains(asked, "a summary") {
-		t.Errorf("the human must see the count AND the replacement: %q", asked)
+	if strings.Contains(out, "ERROR") || strings.Contains(out, "declined") {
+		t.Fatalf("recap should have applied: %q", out)
 	}
 	after, _ := st.Context(context.Background(), "dun")
-	if len(after) != len(before) {
-		t.Fatalf("a declined recap changed the conversation: %d → %d", len(before), len(after))
+	if len(after) >= len(before) {
+		t.Fatalf("recap did not shrink the conversation: %d → %d", len(before), len(after))
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "s.recap1.jsonl")); err == nil {
-		t.Error("a declined recap must not write a sidecar")
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "s.recap1.jsonl")); err != nil {
+		t.Errorf("the removed entries must be on disk: %v", err)
+	}
+	if note.Entries == 0 || note.Note == "" {
+		t.Errorf("the UI must be told the count and the citation: %+v", note)
+	}
+	if !strings.Contains(note.Detail, "Removed") || !strings.Contains(note.Detail, "a summary") {
+		t.Errorf("the detail must carry the count AND the replacement: %q", note.Detail)
 	}
 }
 
-// A sub-agent has no human to ask, and its context is exactly what recap is
-// for, so it applies without confirmation.
+// The same, with no Ask configured at all — a sub-agent.
 func TestRecap_ChildRecapsWithoutAsking(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	st, _ := openSessionStore(path)
@@ -299,8 +303,8 @@ func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
 	if len(invented.Unmatched) != 1 || invented.Unmatched[0] != "exec_2" {
 		t.Fatalf("an unmatched keep term must be reported, got %v", invented.Unmatched)
 	}
-	if !strings.Contains(invented.preview("s", ""), "matched nothing") {
-		t.Error("the human must be told a keep term will not be honoured")
+	if !strings.Contains(invented.report("s", ""), "matched nothing") {
+		t.Error("the human must be told a keep term was not honoured")
 	}
 }
 

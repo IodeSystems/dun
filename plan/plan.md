@@ -185,6 +185,15 @@ tokens and cannot see what it is doing.
   Focused + `→` opens and descends; `←` ascends. Uniform across every zone.
   This REPLACES the ad-hoc horizontal handlers (`tui.go:634–694`), where `→`
   descends into docs on one block and hops panes on another.
+  ✅ **Extended to the CONVERSATION blocks (2026-08-03).** The activity tree and
+  docs lists obeyed it; a folded tool block wore the same `▸` and could only be
+  opened with enter. Now `→` walks minimized → expanded → raw one level per
+  press and `←` walks it back, via `convoEntry.deeper()/shallower()` —
+  deliberately NOT `viewState.Next()`, which wraps: wrapping would make `→`
+  close what it had just opened, and would land a block with no raw view on
+  `viewRaw`, where `view()` falls back to the collapsed line. `→` still hands
+  over to the input, but only from a block with nothing left to open. Enter is
+  unchanged (cycle, and inspector for a tool block).
 - **Layout — two header lines in steady state**, both gone when there is
   nothing to show (a session that never delegates loses no space):
   - task line = the last user message, clipped to one line;
@@ -452,9 +461,16 @@ isolation forces the split there).
   `recap` replaces a span with the account the conversation SHOULD have had:
   cheaper than compaction (no summarizer call), more accurate (the whole span is
   in view), and it fixes the RECORD rather than merely shortening it — a
-  misunderstanding removed there stops misleading every later turn. (1) A root
-  CONFIRMS with the human, showing the count and the replacement; a child recaps
-  freely, having nobody to ask and being exactly what this is for (USER). (2)
+  misunderstanding removed there stops misleading every later turn. (1) It is
+  VISIBLE, not confirmed (USER, 2026-08-03). It used to stop and ask a root's
+  human before applying, and that prompt was the wrong shape: approving a
+  rewrite of a span you would have to re-read to judge, mid-turn, where the
+  honest answer is always yes. A question whose answer is never no is a delay,
+  not a safeguard. So every recap applies — root and child alike — and REPORTS:
+  `RecapNote.Note` is the citation line, `RecapNote.Detail` is
+  `recapSpan.report()` (counts, what was kept, the replacement text), and the
+  TUI renders it as a `▸` line that opens onto the detail. Never the removed
+  content: re-rendering the churn would undo the recap. (2)
   Nothing is destroyed (USER): the span moves to `<session>.recapN.jsonl`,
   because churn is the evidence for fixing the tooling that produced it, and a
   sidecar that cannot be written ABORTS the recap. The transcript keeps a

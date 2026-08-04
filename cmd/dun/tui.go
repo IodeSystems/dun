@@ -205,6 +205,45 @@ type convoEntry struct {
 
 func (e convoEntry) expandable() bool { return (e.full != "" || e.raw != "") || e.docs != nil }
 
+// deeper is the next view state that actually shows something NEW: minimized →
+// expanded → raw, skipping any level this block does not have and stopping at
+// the deepest one it does.
+//
+// Next() wraps, which is right for enter (a cycle) and wrong for → (a
+// direction): wrapping would make → close the block it had just opened, and it
+// would land on viewRaw for a block with no raw, where view() silently falls
+// back to the collapsed line — pressing "deeper" and getting the one-liner back.
+func (e convoEntry) deeper() (viewState, bool) {
+	switch e.state {
+	case viewMinimized:
+		if e.full != "" || e.docs != nil {
+			return viewExpanded, true
+		}
+		if e.raw != "" {
+			return viewRaw, true
+		}
+	case viewExpanded:
+		if e.raw != "" {
+			return viewRaw, true
+		}
+	}
+	return e.state, false
+}
+
+// shallower is the inverse, for ←: one level out, stopping at minimized.
+func (e convoEntry) shallower() (viewState, bool) {
+	switch e.state {
+	case viewRaw:
+		if e.full != "" || e.docs != nil {
+			return viewExpanded, true
+		}
+		return viewMinimized, true
+	case viewExpanded:
+		return viewMinimized, true
+	}
+	return e.state, false
+}
+
 // contextStats accumulates context usage data across the session for /context.
 type contextStats struct {
 	// Token usage (cumulative across all turns)
@@ -781,20 +820,17 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "right":
 			// Horizontal axis: [convo] ← input → [suggestions].
+			//
+			// Inside the conversation → means DESCEND, uniformly. `▸` already
+			// means "there is something inside this" on the activity tree and on
+			// a docs list, and both are opened with →; a message wearing the same
+			// glyph that could only be opened with enter was the odd one out.
+			// Only a block with nothing left to open hands → back to the input.
 			if m.focus == focusConvo {
-				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].docs != nil {
-					// A docs summary owns → : descend when it's open, else stay
-					// (open it with enter first). Never hops to the input.
-					if e := m.convo[m.sel]; e.state > viewMinimized && len(e.docs.docs) > 0 {
-						e.docs.descended = true
-						if e.docs.cur < 0 || e.docs.cur >= len(e.docs.docs) {
-							e.docs.cur = 0
-						}
-						m.refresh()
-					}
+				if m.descendSel() {
+					m.refresh()
 					return m, nil
 				}
-				// Any other message (no sub-selection) → right returns to the input.
 				m.focus = focusInput
 				m.input.Focus()
 				m.refresh()
@@ -811,10 +847,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "left":
 			if m.focus == focusConvo {
-				// Inside a doc list, ← ascends out of it — the descend rule
-				// first, always.
-				if d := m.selDocs(); d != nil && d.descended {
-					d.descended = false
+				// ← is exactly → run backwards: close the innermost thing that is
+				// open, one level per press — the descend rule first, always.
+				if m.ascendSel() {
 					m.refresh()
 					return m, nil
 				}
@@ -1282,9 +1317,20 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		m.noteServers(ev)
 	case "recap":
-		// One dim line. The scrollback keeps whatever was already drawn — this
-		// is about the model's context, not about rewriting what you have read.
-		m.append(stDim.Render("✂ " + str(ev["note"])))
+		// One dim line that OPENS. The scrollback keeps whatever was already
+		// drawn — this is about the model's context, not about rewriting what you
+		// have read — but a recap is no longer confirmed before it applies, so
+		// the line has to be able to show what replaced the span. → expands it.
+		note := stDim.Render("✂ " + str(ev["note"]))
+		if detail := strings.TrimRight(str(ev["detail"]), "\n"); detail != "" {
+			m.convo = append(m.convo, convoEntry{
+				collapsed: stDim.Render("▸ ") + note,
+				full:      stDim.Render("▾ ") + note + "\n" + stDim.Render(detail),
+			})
+			m.refresh()
+		} else {
+			m.append(note)
+		}
 		// Track for /context
 		m.ctxStats.recaps++
 		if entries := evNum(ev["entries"]); entries > 0 {
@@ -1731,9 +1777,9 @@ func (m tuiModel) View() string {
 		status = stDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it · tab activity · ← back to the session", m.scopeAgent))
 	case m.focus == focusConvo:
 		if d := m.selDocs(); d != nil && d.descended {
-			status = stDim.Render("docs  ·  ↑/↓ doc · enter expand · ← back · ctrl+c quit")
+			status = stDim.Render("docs  ·  ↑/↓ doc · → open · ← close, then out · ctrl+c quit")
 		} else {
-			status = stDim.Render("convo  ·  ↑/↓ select · → docs · / search · enter open (tool→inspector) · tab input")
+			status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter inspector · / search · tab input")
 		}
 	case m.suggestActive():
 		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · enter send · right accept · 1–%d pick · or type · "+m.exitHint(), len(m.suggestions)))
@@ -1898,6 +1944,67 @@ func (m *tuiModel) selDocs() *docsBlock {
 		return m.convo[m.sel].docs
 	}
 	return nil
+}
+
+// descendSel opens the selected block one level further and reports whether →
+// was consumed by the conversation. False means "this block has nothing left to
+// open", which is the only case where → hands focus back to the input.
+//
+// The order is innermost-first, so → always acts on the deepest thing already
+// open rather than on the block as a whole.
+func (m *tuiModel) descendSel() bool {
+	if m.sel < 0 || m.sel >= len(m.convo) {
+		return false
+	}
+	e := &m.convo[m.sel]
+	if d := e.docs; d != nil {
+		if d.descended {
+			// Inside the list: → opens the highlighted document. Already open,
+			// it stays put — a nested focus does not leak out to the input, or ←
+			// would no longer be the way back to where you came from.
+			if d.cur >= 0 && d.cur < len(d.docs) && !d.docs[d.cur].open {
+				d.docs[d.cur].open = true
+			}
+			return true
+		}
+		if e.state > viewMinimized && len(d.docs) > 0 {
+			d.descended = true
+			if d.cur < 0 || d.cur >= len(d.docs) {
+				d.cur = 0
+			}
+			return true
+		}
+	}
+	if next, ok := e.deeper(); ok {
+		e.state = next
+		return true
+	}
+	return false
+}
+
+// ascendSel closes one level and reports whether ← was consumed. False means
+// the block is already shut, and ← falls through to moving between zones.
+func (m *tuiModel) ascendSel() bool {
+	if m.sel < 0 || m.sel >= len(m.convo) {
+		return false
+	}
+	e := &m.convo[m.sel]
+	if d := e.docs; d != nil && d.descended {
+		if d.cur >= 0 && d.cur < len(d.docs) && d.docs[d.cur].open {
+			d.docs[d.cur].open = false // close the document before leaving the list
+			return true
+		}
+		d.descended = false
+		return true
+	}
+	if prev, ok := e.shallower(); ok {
+		e.state = prev
+		if prev == viewMinimized && e.docs != nil {
+			e.docs.descended = false
+		}
+		return true
+	}
+	return false
 }
 
 // selGeom returns the top line offset and rendered height of the selected block

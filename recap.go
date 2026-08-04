@@ -36,11 +36,14 @@ import (
 //
 // Three rules make it safe:
 //
-//   - It is CONFIRMED. Rewriting a conversation a human is part of is not the
-//     model's decision to take alone, so the human sees the replacement and the
-//     count before anything moves. A sub-agent has no human to ask and recaps
-//     freely: its context is exactly what this is for and its transcript is not
-//     the human's conversation.
+//   - It is VISIBLE, not confirmed. Recap used to stop and ask, and the prompt
+//     was the wrong shape for it: the human is asked to approve a rewrite of a
+//     span they would have to re-read to judge, in the middle of a turn they
+//     asked for, and the honest answer is almost always "yes, obviously". A
+//     question whose answer is never no is a delay, not a safeguard. So it
+//     applies and REPORTS: the count, the citation, and the replacement text,
+//     all readable in the scrollback after the fact. The safeguard is that
+//     nothing is destroyed, which is the next rule.
 //   - Nothing is DESTROYED. The subsumed entries move to a sidecar next to the
 //     session file. They leave the context and the scrollback; they stay on disk,
 //     because churn is the evidence you need to fix the tooling that produced it.
@@ -213,21 +216,24 @@ func hasPendingCall(entries []agent.Entry, e agent.Entry) bool {
 	return false
 }
 
-// preview is what the human confirms: what goes, what stays, what replaces it.
-func (sp recapSpan) preview(summary, userEdit string) string {
+// report is what the human reads AFTER the fact: what went, what stayed, what
+// replaced it. Nothing here is a question — the recap has already applied — so
+// it is written as an account, and it carries the replacement text in full,
+// because "9 entries removed" alone is a number, not visibility.
+func (sp recapSpan) report(summary, userEdit string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Recap would remove %d entries (~%d characters) from the conversation.\n", len(sp.Subsumes), sp.Chars)
+	fmt.Fprintf(&b, "Removed %d entries (~%d characters) from the model's context.\n", len(sp.Subsumes), sp.Chars)
 	if n := len(sp.KeptCalls); n > 0 {
-		fmt.Fprintf(&b, "Keeping the %s call%s and its result.\n", strings.Join(sp.KeptCalls, ", "), plural(n))
+		fmt.Fprintf(&b, "Kept the %s call%s and its result.\n", strings.Join(sp.KeptCalls, ", "), plural(n))
 	}
 	if len(sp.Unmatched) > 0 {
-		fmt.Fprintf(&b, "NOTE: %q matched nothing and will NOT be kept.\n", strings.Join(sp.Unmatched, ", "))
+		fmt.Fprintf(&b, "NOTE: %q matched nothing and was NOT kept.\n", strings.Join(sp.Unmatched, ", "))
 	}
 	b.WriteString("\nReplaced with:\n" + indent(summary))
 	if userEdit != "" && sp.Anchor != nil {
-		b.WriteString("\n\nAnd your message becomes:\n" + indent(userEdit))
+		b.WriteString("\n\nAnd your message now reads:\n" + indent(userEdit))
 	}
-	b.WriteString("\n\nWhat is removed is kept on disk; it just leaves the conversation.")
+	b.WriteString("\n\nWhat was removed is on disk; it left the model's context, not the record.")
 	return b.String()
 }
 
@@ -612,24 +618,17 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 		return "ERROR: " + err.Error()
 	}
 
-	// A sub-agent has nobody to ask, and its context is exactly what this is
-	// for. A root rewriting a conversation a human is part of asks first.
-	if h.cfg.Ask != nil {
-		ans, err := h.cfg.Ask(ctx, sp.preview(summary, userEdit), []string{"apply the recap", "leave it alone"}, false)
-		if err != nil {
-			return "Recap not applied: " + err.Error()
-		}
-		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(ans)), "apply") {
-			return "Recap declined by the user — the conversation is unchanged. Their answer: " + ans
-		}
-	}
-
+	// No confirmation. Recap applies and then says what it did — see the rules
+	// at the top of this file.
 	note, err := h.applyRecap(sp, summary, userEdit)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
 	if h.cfg.OnRecap != nil {
-		h.cfg.OnRecap(RecapNote{Entries: len(sp.Subsumes), Chars: sp.Chars, Note: note})
+		h.cfg.OnRecap(RecapNote{
+			Entries: len(sp.Subsumes), Chars: sp.Chars, Note: note,
+			Detail: sp.report(summary, userEdit),
+		})
 	}
 	out := fmt.Sprintf("Done — %s. Everything since %q now reads as the summary you gave; "+
 		"the removed entries are on disk and out of your context. Continue from here.", note, from)
@@ -643,12 +642,15 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 	return out
 }
 
-// RecapNote is what the UI is told about a recap: enough for one dim line, and
-// nothing that re-renders the churn it just removed.
+// RecapNote is what the UI is told about a recap. Note is the one dim line;
+// Detail is what it opens into — counts, what was kept, and the replacement
+// text. Never the removed content itself: re-rendering the churn a recap just
+// took out would defeat the point of it, and it is on disk for whoever wants it.
 type RecapNote struct {
 	Entries int
 	Chars   int
 	Note    string
+	Detail  string
 }
 
 // ── when to suggest it ──────────────────────────────────────────────
