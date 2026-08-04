@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -163,4 +164,120 @@ func decodeEvent(t *testing.T, line string) map[string]any {
 		t.Fatalf("bad event %q: %v", line, err)
 	}
 	return m
+}
+
+// Bare /mcp answers the question no per-server command answers without typing
+// all of them: which of these is even up. So a STOPPED server must still get a
+// line — an absent one reads as "not configured", which is a different fact.
+func TestServerListing_ShowsEveryServerNotJustRunningOnes(t *testing.T) {
+	out := serverListing([]dun.ServerState{
+		{ID: dun.ServerShell, Running: true, Tools: 4},
+		{ID: dun.ServerDocs, Auto: true},
+		{ID: dun.ServerCode, Err: "mcp: initialize code: transport closed\nsome-lsp: bad flag"},
+	})
+	for _, id := range []string{dun.ServerShell, dun.ServerDocs, dun.ServerCode} {
+		if !strings.Contains(out, id) {
+			t.Errorf("%s missing from the listing: %q", id, out)
+		}
+	}
+	if !strings.Contains(out, "4 tools") {
+		t.Errorf("a running server should report its tool count: %q", out)
+	}
+	if !strings.Contains(out, "autostart") {
+		t.Errorf("autostart is what happens NEXT session — say so: %q", out)
+	}
+	if !strings.Contains(out, "bad flag") {
+		t.Errorf("a server that failed to start must say why: %q", out)
+	}
+	if strings.Contains(out, "transport closed\nsome-lsp") {
+		t.Errorf("failure detail should be flattened to one line: %q", out)
+	}
+}
+
+// /mcp restart bounces what is RUNNING and leaves the rest alone. Both servers
+// are opt-in by design (see dun.DefaultServers), so silently starting one that
+// this session left off would cost a spawn and an index build nobody asked for.
+func TestRunAllServersCmd_RestartsRunningOnesAndSkipsTheRest(t *testing.T) {
+	if !haveBin("mcpshell") {
+		t.Skip("mcpshell not on PATH")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	h, err := dun.Start(ctx, dun.Config{
+		Workspace: dir,
+		Servers: []dun.Server{
+			{ID: dun.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30},
+			{ID: dun.ServerDocs, Command: "definitely-not-a-real-binary-xyz", Timeout: 5},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+
+	if err := h.StartServer(ctx, dun.ServerShell); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := stateOf(h, dun.ServerShell)
+	if !before.Running || before.Tools == 0 {
+		t.Fatalf("shell should be up with tools before the restart: %+v", before)
+	}
+
+	out := runServerCmd(ctx, h, allServers, "restart")
+
+	if !strings.Contains(out, "restarted") {
+		t.Errorf("the running server should report a restart: %q", out)
+	}
+	if !strings.Contains(out, "skipped (not running)") || !strings.Contains(out, dun.ServerDocs) {
+		t.Errorf("the stopped server should be named as skipped, not silently ignored: %q", out)
+	}
+	// The point of a restart is a WORKING server on the other side, not just a
+	// dead one: the tools have to come back.
+	after, _ := stateOf(h, dun.ServerShell)
+	if !after.Running || after.Tools != before.Tools {
+		t.Errorf("shell should be back with its tools: before=%+v after=%+v", before, after)
+	}
+}
+
+// Naming a server is explicit intent, so a stopped one is STARTED rather than
+// refused — and the message has to say which happened, because "restarted" and
+// "started" mean different things about what you were just looking at.
+func TestRunServerCmd_RestartNamedStartsAStoppedServer(t *testing.T) {
+	if !haveBin("mcpshell") {
+		t.Skip("mcpshell not on PATH")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	h, err := dun.Start(ctx, dun.Config{
+		Workspace: dir,
+		Servers:   []dun.Server{{ID: dun.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+
+	if st, _ := stateOf(h, dun.ServerShell); st.Running {
+		t.Fatal("nothing autostarts, so shell should be down")
+	}
+	out := runServerCmd(ctx, h, dun.ServerShell, "restart")
+	if !strings.Contains(out, "started") || strings.Contains(out, "restarted") {
+		t.Errorf("a stopped server that was NAMED should report a start, not a restart: %q", out)
+	}
+	if st, _ := stateOf(h, dun.ServerShell); !st.Running {
+		t.Error("naming a stopped server should start it")
+	}
+}
+
+// An unknown action must not silently do nothing — and now has to advertise
+// restart alongside the rest.
+func TestRunServerCmd_UnknownActionListsRestart(t *testing.T) {
+	if out := runServerCmd(context.Background(), nil, "lsp", "bounce"); !strings.Contains(out, "restart") {
+		t.Errorf("the usage line should offer restart: %q", out)
+	}
+}
+
+func haveBin(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }

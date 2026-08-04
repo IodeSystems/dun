@@ -1739,3 +1739,36 @@ func TestActivity_LeftWrapsHomeWithNoActivity(t *testing.T) {
 	}
 }
 
+// /mcp rides the same `server` event as /rag and /lsp, but addresses the SET.
+// The wire form is the only thing the engine sees, so pin it here: the sentinel
+// id for "all of them", and where the optional target lands.
+func TestTUI_MCPSlashWireForm(t *testing.T) {
+	send := func(line string) map[string]string {
+		t.Helper()
+		var buf bytes.Buffer
+		m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+		m.runSlash(line)
+		var got map[string]string
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("%s wrote %q, which is not one JSON event: %v", line, buf.String(), err)
+		}
+		return got
+	}
+
+	// Bare /mcp lists — no action, every server.
+	if got := send("/mcp"); got["type"] != "server" || got["id"] != allServers || got["action"] != "" {
+		t.Errorf("bare /mcp should ask every server for its status; got %v", got)
+	}
+	// /mcp restart bounces the set.
+	if got := send("/mcp restart"); got["id"] != allServers || got["action"] != "restart" {
+		t.Errorf("/mcp restart should target every server; got %v", got)
+	}
+	// A named target replaces the sentinel — it does NOT become a third field.
+	if got := send("/mcp restart lsp"); got["id"] != "lsp" || got["action"] != "restart" {
+		t.Errorf("/mcp restart lsp should target lsp; got %v", got)
+	}
+	// Case is normalized, the way every other slash handler does it.
+	if got := send("/mcp RESTART LSP"); got["id"] != "lsp" || got["action"] != "restart" {
+		t.Errorf("/mcp should lowercase action and target; got %v", got)
+	}
+}

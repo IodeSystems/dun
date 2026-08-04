@@ -82,13 +82,21 @@ func autostartOverrides(rag, lsp tristate) map[string]bool {
 	return out
 }
 
+// allServers is the id /mcp uses to address every configured server at once.
+// Not a legal server id (ids come from config and from dun.DefaultServers), so
+// it cannot collide with one.
+const allServers = "*"
+
 // runServerCmd applies one /rag or /lsp action and returns the line to show the
 // user. A failure to start is a RETURNED MESSAGE, never a fatal error: a
 // misconfigured raglit should cost you search, not your session.
 //
-// Actions: "" or "status" (report), "on", "off", "auto" (start + remember),
-// "manual" (stop remembering, leave running).
+// Actions: "" or "status" (report), "on", "off", "restart", "auto" (start +
+// remember), "manual" (stop remembering, leave running).
 func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) string {
+	if alias == allServers {
+		return runAllServersCmd(ctx, h, action)
+	}
 	id, ok := serverAliases[alias]
 	if !ok {
 		id = alias // a project-defined server, addressed by its id
@@ -110,6 +118,32 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 			return label + ": " + err.Error()
 		}
 		return label + ": stopped"
+	case "restart":
+		// The EXPLICIT form of what StartServer deliberately refuses to do
+		// implicitly (see its comment): bounce the process and lose whatever it
+		// had warmed up — raglit's index, the LSP's parse cache and child
+		// fleet. That loss is the POINT when a server has gone wedged or slow;
+		// it is the only way back to a clean one without ending the session.
+		//
+		// Naming a server is explicit intent, so a stopped one is STARTED
+		// rather than refused — but the message says which happened, because
+		// "restarted" and "started" mean different things about what you were
+		// looking at.
+		wasRunning := false
+		if st, ok := stateOf(h, id); ok {
+			wasRunning = st.Running
+		}
+		if err := h.StopServer(id); err != nil {
+			return label + ": " + err.Error()
+		}
+		if err := h.StartServer(ctx, id); err != nil {
+			return label + ": did not come back — " + oneLine(err.Error()) +
+				"\nit is STOPPED now; /mcp restart " + id + " to retry"
+		}
+		if !wasRunning {
+			return label + ": started (it was not running) · " + runningSummary(h, id)
+		}
+		return label + ": restarted · " + runningSummary(h, id)
 	case "auto":
 		path, err := h.SetAutostart(id, true)
 		if err != nil {
@@ -127,8 +161,69 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 		}
 		return label + ": autostart off (saved to " + path + ") — still running this session; /" + alias + " off to stop it"
 	default:
-		return "unknown action " + strconv.Quote(action) + " — try /" + alias + " [on|off|auto|manual]"
+		return "unknown action " + strconv.Quote(action) + " — try /" + alias + " [on|off|restart|auto|manual]"
 	}
+}
+
+// runAllServersCmd is /mcp: the whole server set at once, rather than one
+// server at a time the way /rag and /lsp address theirs.
+//
+// A bare /mcp LISTS — including the stopped ones, which is the question you
+// actually have ("which of these is even up?") and which no per-server command
+// answers without typing all of them.
+//
+// An action touches only what is RUNNING. "restart the mcp system" means bounce
+// what is up; it must not silently switch on servers this session left off,
+// because both are opt-in by design (see dun.DefaultServers) and turning one on
+// costs a spawn plus an index build. Name it — /mcp restart <id> — to start a
+// stopped one.
+func runAllServersCmd(ctx context.Context, h *dun.Harness, action string) string {
+	states := h.Servers()
+	sort.Slice(states, func(i, j int) bool { return states[i].ID < states[j].ID })
+	if len(states) == 0 {
+		return "no servers configured"
+	}
+	switch action {
+	case "", "status", "list":
+		return serverListing(states)
+	}
+
+	var lines, skipped []string
+	for _, st := range states {
+		if !st.Running {
+			skipped = append(skipped, st.ID)
+			continue
+		}
+		lines = append(lines, runServerCmd(ctx, h, aliasOf(st.ID), action))
+	}
+	if len(lines) == 0 {
+		return "nothing running to " + action + "\n" + serverListing(states)
+	}
+	if len(skipped) > 0 {
+		lines = append(lines, "skipped (not running): "+strings.Join(skipped, ", "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// serverListing renders every server and its state, one per line.
+func serverListing(states []dun.ServerState) string {
+	var b strings.Builder
+	b.WriteString("mcp servers")
+	for _, st := range states {
+		b.WriteString("\n  " + st.ID + ": ")
+		switch {
+		case st.Running:
+			fmt.Fprintf(&b, "running · %d tools", st.Tools)
+		case st.Err != "":
+			b.WriteString("stopped · last error: " + oneLine(st.Err))
+		default:
+			b.WriteString("stopped")
+		}
+		if st.Auto {
+			b.WriteString(" · autostart")
+		}
+	}
+	return b.String()
 }
 
 // serverStatusLine is the bare "/rag" report: what it is doing now, what it

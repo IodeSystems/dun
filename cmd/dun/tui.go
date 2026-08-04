@@ -2128,8 +2128,9 @@ func init() {
 			m.append(stDim.Render("reconnecting…"))
 			return restartEngine(m.opts, m.sessionID, m.everUp)
 		}},
-		{"rag", "[on|off|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
-		{"lsp", "[on|off|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
+		{"rag", "[on|off|restart|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
+		{"lsp", "[on|off|restart|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
+		{"mcp", "[restart [server]]", "every MCP server at once: bare lists them, restart bounces the running ones", mcpSlash},
 		{"docker", "[on|off|status]", "exec backend: on (Docker), off (host), bare shows status", controlSlash("docker")},
 		{"worktree", "[status|new|commit]", "git worktree: bare shows status, new creates one, commit stages+commits", controlSlash("worktree")},
 		{"clear", "", "clear scrollback and start a fresh session log", func(m *tuiModel, _ []string) tea.Cmd {
@@ -2164,6 +2165,24 @@ func serverSlash(alias string) func(*tuiModel, []string) tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// mcpSlash is /mcp. Where serverSlash binds ONE server per command, this one
+// addresses the SET: bare lists every server, `restart` bounces the running
+// ones, `restart <server>` bounces (or starts) just that one. It rides the same
+// `server` event — the engine reads the allServers id as "all of them".
+func mcpSlash(m *tuiModel, args []string) tea.Cmd {
+	action, target := "", allServers
+	if len(args) > 0 {
+		action = strings.ToLower(args[0])
+	}
+	if len(args) > 1 {
+		target = strings.ToLower(args[1])
+	}
+	if !m.proc.serverCmd(target, action) {
+		m.append(stErr.Render("no engine right now — /reconnect first"))
+	}
+	return nil
 }
 
 // controlSlash builds the /docker and /worktree handlers. The TUI forwards the
