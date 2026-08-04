@@ -485,7 +485,14 @@ isolation forces the split there).
   was no dedicated worktree — the common case, since isolation is opt-in — which
   states the mode and answers nothing. It now reports `Worktree.Status()` (the
   porcelain branch line as a header, the changed files, a count) over a
-  pass-through `WorktreeInPlace`, and `commit` commits in place too.
+  pass-through `WorktreeInPlace`, and `commit` commits in place too. `new` now
+  passes `h.Mounts()` where it passed nil: a worktree lives under
+  `.dun/worktrees/`, so a go.mod `replace => ../agentkit` only resolves through
+  a symlink beside it, and one made mid-session had none — measured, same
+  worktree either way: build OK with the symlink, `replacement directory
+  ../agentkit does not exist` without. It reuses the session's RESOLVED list
+  rather than re-loading, so the symlinks and the Docker volume mounts cannot
+  describe different sets.
 - **A commit message is WRITTEN by the model and APPROVED by the human (USER,
   2026-08-03).** `/worktree commit` committed with the literal string
   "/worktree commit" — the one artefact git keeps forever said less than the

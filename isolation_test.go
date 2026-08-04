@@ -51,6 +51,54 @@ func TestWorktree_IsolatesChanges(t *testing.T) {
 	}
 }
 
+// A worktree lives under .dun/worktrees/, so a go.mod "replace => ../agentkit"
+// only resolves from inside it through a symlink beside it. Without the
+// symlink the isolation is real and the first build in it fails on a
+// dependency that resolves fine in the checkout it was made from.
+func TestWorktree_SymlinksItsMounts(t *testing.T) {
+	repo := t.TempDir()
+	gitrun(t, repo, "init", "-q")
+	gitrun(t, repo, "config", "user.email", "t@t")
+	gitrun(t, repo, "config", "user.name", "t")
+	gitrun(t, repo, "commit", "-qm", "init", "--allow-empty")
+
+	// The sibling module the replace directive points at.
+	dep := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dep, "go.mod"), []byte("module dep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wt, isRepo, err := NewWorktree(repo, []MountSpec{{Source: dep, Name: "dep"}})
+	if err != nil || !isRepo {
+		t.Fatalf("NewWorktree: isRepo=%v err=%v", isRepo, err)
+	}
+	defer wt.Cleanup()
+
+	// "../dep" FROM the worktree is the symlink in the worktree parent.
+	via := filepath.Join(wt.Path, "..", "dep", "go.mod")
+	if _, err := os.Stat(via); err != nil {
+		t.Fatalf("the mount must resolve from inside the worktree (%s): %v", via, err)
+	}
+	if len(wt.Mounts) != 1 || wt.Mounts[0].Name != "dep" {
+		t.Errorf("the worktree should carry its mounts, got %+v", wt.Mounts)
+	}
+}
+
+// Harness.Mounts is what a MID-SESSION worktree is built from (/worktree new).
+// It used to pass nil, so a worktree made at runtime got no symlinks at all
+// while one made at startup did.
+func TestHarnessMounts_AreTheSessionsOwn(t *testing.T) {
+	want := []MountSpec{{Source: "/opt/agentkit", Name: "agentkit"}}
+	h := &Harness{cfg: Config{ExtraMounts: want}}
+	got := h.Mounts()
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("Mounts() = %+v, want %+v", got, want)
+	}
+	if (&Harness{}).Mounts() != nil {
+		t.Error("a session with no mounts must report none, not an empty non-nil surprise")
+	}
+}
+
 func TestWorktree_NonRepoPassThrough(t *testing.T) {
 	dir := t.TempDir()
 	wt, isRepo, err := NewWorktree(dir, nil)

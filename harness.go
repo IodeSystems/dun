@@ -902,6 +902,22 @@ func (h *Harness) Workspace() string {
 	return h.cfg.Workspace
 }
 
+// Mounts are the extra local paths this session was started with — the go.mod
+// replace directives and any dun.json `mounts` entries, already resolved to
+// absolute source paths.
+//
+// Exposed because a worktree created MID-SESSION needs the same list the one
+// created at startup got. Reusing the resolved list rather than re-loading it
+// is what keeps the symlinks in the worktree parent and the Docker volume
+// mounts describing the same set: two loads of the same config can disagree if
+// a file changed underneath, and then a build works in one isolation tier and
+// not the other.
+func (h *Harness) Mounts() []MountSpec {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	return h.cfg.ExtraMounts
+}
+
 // Worktree returns the current worktree (may be nil).
 func (h *Harness) Worktree() *Worktree {
 	h.srvMu.Lock()
