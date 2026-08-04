@@ -338,9 +338,9 @@ func TestTUI_CommandPalette(t *testing.T) {
 		t.Fatalf("bare / should list all %d commands, got %d", len(slashCommands), len(m.paletteMatches()))
 	}
 	// Filter down to /config.
-	m = typeStr(m, "co")
+	m = typeStr(m, "conf")
 	if ms := m.paletteMatches(); len(ms) != 1 || ms[0].name != "config" {
-		t.Fatalf("/co should match only config, got %v", ms)
+		t.Fatalf("/conf should match only config, got %v", ms)
 	}
 	// Tab completes to the highlighted command.
 	m = key(m, kTab)

@@ -205,6 +205,34 @@ type convoEntry struct {
 
 func (e convoEntry) expandable() bool { return (e.full != "" || e.raw != "") || e.docs != nil }
 
+// contextStats accumulates context usage data across the session for /context.
+type contextStats struct {
+	// Token usage (cumulative across all turns)
+	totalTokens     int
+	activeTokens    int  // last reported active window size
+	cachedTokens    int
+	processedTokens int
+	generatedTokens int
+	turns           int
+
+	// Compaction history
+	compactions     int
+	tokensCompacted int // total tokens saved by compaction
+
+	// Recap history
+	recaps          int
+	entriesRecapped int
+	charsRecapped   int
+
+	// Tool result truncation (LOD)
+	toolResults     int  // total tool results seen
+	resultsTruncated int  // how many were LOD-truncated
+
+	// Conversation size
+	convoEntries    int  // entries in the conversation store
+	convoBlocks     int  // blocks rendered on screen
+}
+
 // toolBlock carries a tool call's raw input + complete output so enter can open
 // the scrollable/searchable inspector overlay (inspector.go), separate from the
 // inline collapsed/full preview.
@@ -377,6 +405,8 @@ type tuiModel struct {
 	w, h             int
 	fatalErr         string
 	scrollPinned     bool // true when viewport should auto-follow (at bottom)
+	// Context stats (for /context)
+	ctxStats contextStats
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
@@ -1252,6 +1282,14 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// One dim line. The scrollback keeps whatever was already drawn — this
 		// is about the model's context, not about rewriting what you have read.
 		m.append(stDim.Render("✂ " + str(ev["note"])))
+		// Track for /context
+		m.ctxStats.recaps++
+		if entries := evNum(ev["entries"]); entries > 0 {
+			m.ctxStats.entriesRecapped += int(entries)
+		}
+		if chars := evNum(ev["chars"]); chars > 0 {
+			m.ctxStats.charsRecapped += int(chars)
+		}
 	case "control":
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
 			m.append(stNote.Render(msg))
@@ -1291,13 +1329,19 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.pendingArgs = args
 		m.refresh()
 	case "tool_result":
-		ce := m.foldedTool(str(ev["tool"]), m.pendingArgs, str(ev["result"]))
+		result := str(ev["result"])
+		ce := m.foldedTool(str(ev["tool"]), m.pendingArgs, result)
 		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
 			// Fold the result into its call so the pair is one collapsible unit.
 			m.convo[idx] = ce
 			m.pendingTool, m.pendingArgs = -1, nil
 		} else {
 			m.convo = append(m.convo, ce)
+		}
+		// Track tool result stats for /context
+		m.ctxStats.toolResults++
+		if strings.Contains(result, "[") && strings.Contains(result, "characters elided") {
+			m.ctxStats.resultsTruncated++
 		}
 		m.refresh()
 	case "history":
@@ -1378,6 +1422,14 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		m.queuedMsgs = int(evNum(ev["count"]))
 		m.refresh()
+	case "usage":
+		// Accumulate token usage stats for /context.
+		m.ctxStats.totalTokens += int(evNum(ev["total"]))
+		m.ctxStats.activeTokens = int(evNum(ev["active"]))
+		m.ctxStats.cachedTokens += int(evNum(ev["cached"]))
+		m.ctxStats.processedTokens += int(evNum(ev["processed"]))
+		m.ctxStats.generatedTokens += int(evNum(ev["generated"]))
+		m.ctxStats.turns = int(evNum(ev["turns"]))
 	case "done":
 		m.flushCur()
 		// Move pending messages into the convo — they were delivered to the LLM
@@ -1425,6 +1477,13 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// On screen, not just in a log a TUI never shows: this is the one
 		// operation that DESTROYS conversation, and it used to happen silently.
 		m.append(stNote.Render("🗜 " + str(ev["text"])))
+		// Track for /context: compute saved from before/after
+		m.ctxStats.compactions++
+		before := evNum(ev["tokens_before"])
+		after := evNum(ev["tokens_after"])
+		if before > after {
+			m.ctxStats.tokensCompacted += int(before - after)
+		}
 		m.refresh()
 	case "exit":
 		// The engine only announces an exit it CHOSE — ctrl-C, an explicit stop,
@@ -2049,6 +2108,7 @@ func init() {
 	slashCommands = []slashCmd{
 		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
 		{"config", "", "show this session's LLM settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
+		{"context", "", "inspect context usage: tokens, compaction, recaps, truncation", func(m *tuiModel, _ []string) tea.Cmd { m.showContext(); return nil }},
 		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
 			return tea.Quit
@@ -2142,6 +2202,49 @@ func (m *tuiModel) showConfig() {
 	b.WriteString("\n  " + stDim.Render("key:   ") + key)
 	b.WriteString("\n  " + stDim.Render("saved: ") + configPath())
 	b.WriteString("\n" + stDim.Render("run `dun --setup` to change (or --model/--url/--key for one run)"))
+	m.append(b.String())
+}
+
+// showContext appends a detailed breakdown of context usage to the conversation.
+func (m *tuiModel) showContext() {
+	s := &m.ctxStats
+	var b strings.Builder
+	b.WriteString(stHeader.Render("context"))
+
+	b.WriteString("\n\n  " + stHeader.Render("tokens"))
+	b.WriteString("\n  " + stDim.Render("processed:  ") + fmt.Sprintf("%d", s.processedTokens))
+	b.WriteString("\n  " + stDim.Render("generated:  ") + fmt.Sprintf("%d", s.generatedTokens))
+	b.WriteString("\n  " + stDim.Render("cached:     ") + fmt.Sprintf("%d", s.cachedTokens))
+	b.WriteString("\n  " + stDim.Render("total:      ") + fmt.Sprintf("%d", s.totalTokens))
+	b.WriteString("\n  " + stDim.Render("active:     ") + fmt.Sprintf("%d", s.activeTokens) + stDim.Render(" (last turn's window)"))
+	b.WriteString("\n  " + stDim.Render("turns:      ") + fmt.Sprintf("%d", s.turns))
+
+	b.WriteString("\n\n  " + stHeader.Render("conversation"))
+	b.WriteString("\n  " + stDim.Render("blocks:     ") + fmt.Sprintf("%d", len(m.convo)))
+	b.WriteString("\n  " + stDim.Render("tools:      ") + fmt.Sprintf("%d", len(m.tools)))
+
+	b.WriteString("\n\n  " + stHeader.Render("context shaping"))
+	if s.compactions > 0 {
+		b.WriteString("\n  " + stDim.Render("compactions: ") + fmt.Sprintf("%d", s.compactions) + stDim.Render(" · saved ") + fmt.Sprintf("%d tokens", s.tokensCompacted))
+	} else {
+		b.WriteString("\n  " + stDim.Render("compactions: ") + "0")
+	}
+	if s.recaps > 0 {
+		b.WriteString("\n  " + stDim.Render("recaps:      ") + fmt.Sprintf("%d", s.recaps) + stDim.Render(" · ") + fmt.Sprintf("%d entries, %d chars → disk", s.entriesRecapped, s.charsRecapped))
+	} else {
+		b.WriteString("\n  " + stDim.Render("recaps:      ") + "0")
+	}
+
+	b.WriteString("\n\n  " + stHeader.Render("tool results"))
+	b.WriteString("\n  " + stDim.Render("total:      ") + fmt.Sprintf("%d", s.toolResults))
+	if s.resultsTruncated > 0 {
+		b.WriteString("\n  " + stDim.Render("truncated:  ") + fmt.Sprintf("%d", s.resultsTruncated) + stDim.Render(" (LOD-capped at 4000 chars)"))
+	} else {
+		b.WriteString("\n  " + stDim.Render("truncated:  ") + "0")
+	}
+
+	b.WriteString("\n\n  " + stDim.Render("system prompt + tool schemas are not tracked separately — they are part of the active window."))
+	b.WriteString("\n  " + stDim.Render("Use DUN_CONTEXT_TOKENS to set a shaping budget (unset = no compaction)."))
 	m.append(b.String())
 }
 
