@@ -211,7 +211,8 @@ func (e convoEntry) expandable() bool { return (e.full != "" || e.raw != "") || 
 type toolBlock struct {
 	name   string
 	input  string
-	output string
+	output string // styled renderer output
+	raw    string // original unstyled tool output
 }
 
 func (e convoEntry) view() string {
@@ -569,7 +570,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// A tool call opens the scrollable/searchable inspector overlay.
 				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].tool != nil {
 					tb := m.convo[m.sel].tool
-					m.insp = newInspector(tb.name, tb.input, tb.output)
+					m.insp = newInspector(tb.name, tb.input, tb.raw)
 					m.insp.setSize(m.w, m.h)
 					m.inspecting = true
 					return m, nil
@@ -1774,7 +1775,7 @@ func (m *tuiModel) foldedTool(tool string, args map[string]any, result string) c
 		collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
 		full:      stDim.Render("▾ ") + callFull + "\n" + body,
 		raw:       stDim.Render("▾ ") + callFull + "\n" + stDim.Render(result),
-		tool:      &toolBlock{name: tool, input: af, output: body},
+		tool:      &toolBlock{name: tool, input: af, output: body, raw: result},
 	}
 }
 
