@@ -98,7 +98,8 @@ func main() {
 	serve := flag.Bool("serve", false, "serve the TUI over the web (xterm.js) at --addr")
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /exit)")
-	suggest := flag.Bool("suggest", false, "after each turn, suggest likely next messages (one extra LLM call per turn)")
+	noSuggest := flag.Bool("no-suggest", false, "disable next-message suggestions (on by default)")
+
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
@@ -146,7 +147,7 @@ func main() {
 	// Every mode, not just the TUI: the engine is where a turn burns CPU, and
 	// it is the process a TUI session would want to profile. Opt-in, loopback.
 	startPprof()
-	suggestEnabled = *suggest // -p emits next-message suggestions after each turn
+	suggestEnabled = !*noSuggest // -p emits next-message suggestions after each turn (on by default)
 	// Resolve the effective key: explicit flag > env > saved config.
 	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), fc.Key)
 	// Dev self-update: if this is a source-stamped build and the tree changed,
@@ -192,7 +193,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *worktree, *pr, *ship, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -202,7 +203,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *worktree, *pr, *ship, *cont, *resume, *disableExit, *suggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -549,6 +550,19 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if id == "close" {
 			em.emit(event{"type": "control", "id": id, "action": action,
 				"message": closeSession(cc.workspace, cc.sessionID, cc.wt)})
+			return
+		}
+		// /suggest (bare): trigger an immediate suggestion request.
+		if id == "suggest" {
+			sugs, err := h.Suggestions(ctx)
+			if err != nil || len(sugs) == 0 {
+				return
+			}
+			items := make([]any, len(sugs))
+			for i, s := range sugs {
+				items[i] = map[string]any{"text": s.Text, "prob": s.Prob}
+			}
+			em.emit(event{"type": "suggestions", "items": items})
 			return
 		}
 		msg := runControlCmd(ctx, h, id, action)
@@ -940,8 +954,8 @@ func humanAsk(_ context.Context, question string, options []string, multi bool) 
 	return line, nil
 }
 
-// suggestEnabled mirrors --suggest; turn/continueTurn emit next-message
-// suggestions after `done` when set.
+// suggestEnabled mirrors --no-suggest (inverted); turn/continueTurn emit next-message
+// suggestions after `done` when set. On by default.
 var suggestEnabled bool
 
 // turnTimeout is --timeout applied PER TURN (interactive engine only; 0 = none).
@@ -990,7 +1004,7 @@ func emitTurnError(sessionCtx context.Context, em *emitter, err error) {
 }
 
 // emitSuggestions asks for likely next user messages and emits them (best-effort,
-// after `done` so the reply shows first). No-op unless --suggest.
+// after `done` so the reply shows first). No-op unless suggestions are enabled.
 func emitSuggestions(ctx context.Context, h *dun.Harness, em *emitter) {
 	if !suggestEnabled {
 		return

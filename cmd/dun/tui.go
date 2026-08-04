@@ -39,7 +39,7 @@ type tuiOpts struct {
 	cont                               bool   // --continue: resume the latest session
 	resume                             string // --resume <id>: resume a specific session
 	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /exit)
-	suggest                            bool   // --suggest: next-message suggestions after each turn
+	suggest                            bool   // --no-suggest=false: engine emits suggestions after each turn
 	// rag/lsp are --rag/--lsp as typed: "" (unset, use the saved setting),
 	// "true" or "false". Passed through to the -p engine verbatim.
 	rag, lsp string
@@ -394,7 +394,8 @@ type tuiModel struct {
 	quitting         bool              // the user is leaving; do not respawn
 	exitAnnounced    bool              // the engine said it was going; it did not crash
 	everUp           bool              // an engine reached `session` once; a retry may reattach
-	suggestions      []suggestion      // --suggest: predicted next messages (idle-only picker)
+	suggestions      []suggestion      // predicted next messages (idle-only picker)
+	suggestMode      string            // "on" | "off" | "auto" — /suggest controls this
 	suggestSel       int               // highlighted suggestion in the selector
 	retry            string            // live retry banner ("" = not waiting on the provider)
 	retryDue         time.Time         // when the next attempt is due, for the countdown
@@ -419,7 +420,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, queuedTexts: nil}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, queuedTexts: nil, suggestMode: "auto"}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -1056,10 +1057,16 @@ func parseSuggestionItems(v any) []suggestion {
 }
 
 // suggestActive: the next-message picker shows only when idle with an empty
-// input, so it never fights typing or a running turn.
+// input, so it never fights typing or a running turn. In "auto" mode it also
+// requires that the input is empty (the default). In "on" mode it shows even
+// when the user is typing (so suggestions are always visible).
 func (m tuiModel) suggestActive() bool {
+	if m.suggestMode == "off" {
+		return false
+	}
 	return m.focus == focusInput && !m.busy && !m.starting && !m.asking &&
-		len(m.suggestions) > 0 && strings.TrimSpace(m.input.Value()) == ""
+		len(m.suggestions) > 0 &&
+		(m.suggestMode == "on" || strings.TrimSpace(m.input.Value()) == "")
 }
 
 func (m tuiModel) suggestPanel() string {
@@ -2148,6 +2155,7 @@ func init() {
 			m.quitting = true
 			return tea.Quit
 		}},
+		{"suggest", "[on|off|auto]", "next-message suggestions: bare triggers one now, on/off/auto set the mode", suggestSlash},
 	}
 }
 
@@ -2165,6 +2173,31 @@ func serverSlash(alias string) func(*tuiModel, []string) tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// suggestSlash handles /suggest [on|off|auto].
+// - Bare /suggest: trigger an immediate suggestion request.
+// - /suggest on: always show suggestions (even while typing).
+// - /suggest off: hide suggestions entirely.
+// - /suggest auto: show suggestions only when idle with empty input (default).
+func suggestSlash(m *tuiModel, args []string) tea.Cmd {
+	if len(args) == 0 {
+		// Bare /suggest: trigger an immediate suggestion request.
+		if !m.proc.controlCmd("suggest", "") {
+			m.append(stErr.Render("no engine right now — /reconnect first"))
+		}
+		return nil
+	}
+	mode := strings.ToLower(args[0])
+	switch mode {
+	case "on", "off", "auto":
+		m.suggestMode = mode
+		label := map[string]string{"on": "always", "off": "never", "auto": "when idle"}[mode]
+		m.append(stDim.Render("suggestions: " + mode + " (" + label + ")"))
+	default:
+		m.append(stErr.Render("usage: /suggest [on|off|auto] (bare triggers one now)"))
+	}
+	return nil
 }
 
 // mcpSlash is /mcp. Where serverSlash binds ONE server per command, this one
@@ -2541,8 +2574,8 @@ func procArgs(o tuiOpts, mode string) []string {
 	if o.disableExit && mode == "--tui" {
 		args = append(args, "--disable-exit")
 	}
-	if o.suggest {
-		args = append(args, "--suggest") // propagate to -p (engine) and web -tui
+	if !o.suggest {
+		args = append(args, "--no-suggest") // propagate to -p (engine) and web -tui
 	}
 	if o.rag != "" {
 		args = append(args, "--rag="+o.rag)
