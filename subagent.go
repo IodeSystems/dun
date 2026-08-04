@@ -85,6 +85,12 @@ type subAgent struct {
 	// hb is the "still there" reminder (heartbeat.go), debounced by anything
 	// this child says — which is why every notification goes through s.notify.
 	hb *heartbeat
+	// lastActivity is the last time the child showed any sign of life inside
+	// its harness: a tool call, a chat round completing, or a transcript entry.
+	// This is the cheap signal that distinguishes "working" from "wedged" —
+	// a child blocked in Go (compaction that never returns, a channel read
+	// with no writer) will stop updating this while remaining agentRunning.
+	lastActivity time.Time
 }
 
 // notify is every word this child says to its parent, and the ONE place the
@@ -138,8 +144,22 @@ func (s *subAgent) heartbeat() {
 				line += fmt.Sprintf("\nIt is holding its context open. Give it work with "+
 					"agent_monitor(agent:%d, tell:\"…\") or dismiss it with quit:true.", s.num)
 			default:
-				line += fmt.Sprintf("\nNothing is necessarily wrong; this is so a wedged agent does not "+
-					"look like a working one. agent_monitor(agent:%d, tail:40) to see what it is doing.", s.num)
+				// Check if the child is possibly wedged: it is agentRunning but
+				// has not shown any internal activity (tool call, chat round) for
+				// longer than the heartbeat interval. A child blocked in Go
+				// (compaction that never returns, a channel read with no writer)
+				// will stop updating lastActivity while remaining agentRunning.
+				s.mu.Lock()
+				inactive := time.Since(s.lastActivity)
+				s.mu.Unlock()
+				if inactive > quiet {
+					line += fmt.Sprintf("\nIt has not made progress for %s and may be wedged. "+
+						"agent_monitor(agent:%d, tail:40) to see what it was doing.",
+						roundDur(inactive), s.num)
+				} else {
+					line += fmt.Sprintf("\nNothing is necessarily wrong; this is so a wedged agent does not "+
+						"look like a working one. agent_monitor(agent:%d, tail:40) to see what it is doing.", s.num)
+				}
 			}
 			// notifyAndWake, NOT s.notify: the reminder must not reset the
 			// silence it is reporting on.
@@ -172,7 +192,17 @@ func (s *subAgent) stop() {
 func (s *subAgent) startRunLocked() {
 	s.state = agentRunning
 	s.started, s.ended = time.Now(), time.Time{}
+	s.lastActivity = time.Now()
 	s.done = make(chan struct{})
+}
+
+// noteActivity records that the child showed a sign of life inside its harness.
+// Called from OnToolCall and noteUsage callbacks so the heartbeat can distinguish
+// "working" from "wedged" — a child blocked in Go stops updating this.
+func (s *subAgent) noteActivity() {
+	s.mu.Lock()
+	s.lastActivity = time.Now()
+	s.mu.Unlock()
 }
 
 // settle ends the current run.
@@ -416,6 +446,13 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model string) (*subAge
 	// self is how the child's own callbacks reach its record here — noteUsage
 	// reads it after every chat round. Written before any turn can run.
 	child.self = sa
+
+	// OnToolCall is the liveness probe: every tool call proves the child is
+	// not wedged. It does NOT forward to the parent's UI — it only updates
+	// sa.lastActivity, which the heartbeat checks.
+	child.cfg.OnToolCall = func(string, map[string]any, string) {
+		sa.noteActivity()
+	}
 
 	sa.mu.Lock()
 	sa.h = child
@@ -724,6 +761,9 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 		return fmt.Sprintf("agent #%d could not be resumed: %v", sa.num, err)
 	}
 	child.self = sa
+	child.cfg.OnToolCall = func(string, map[string]any, string) {
+		sa.noteActivity()
+	}
 
 	sa.mu.Lock()
 	sa.h, sa.cancel, sa.model = child, cancel, name

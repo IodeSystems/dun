@@ -1157,6 +1157,7 @@ func (h *Harness) noteUsage(u agent.TokenUsage) {
 		return
 	}
 	h.self.setTokens(u.Total)
+	h.self.noteActivity()
 }
 
 // noteCompaction records a fold, decorates it with the thrash counters, and

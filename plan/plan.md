@@ -252,7 +252,7 @@ tokens and cannot see what it is doing.
   child's token spend against the parent's; making the task line clickable
   (mouse is already wired for the viewport).
 
-### ❓ F. A child wedged with no in-flight request — cause unidentified (code gone, ❗0)
+### ◐ F. A child wedged with no in-flight request — observability added (2026-08-03)
 Live session `20260801-095147`, agent #1. Its last transcript record is
 `11:50:13` (`tell_parent` → "answer recorded — you can stop now"), its last
 prompt `11:50:14` (327 messages, ~106k tokens). Then nothing for 15+ minutes:
@@ -276,8 +276,15 @@ simply was not asking for it. It is blocked in Go, inside `s.h.Ask`
   exactly like this.
 - **risks:** unbounded. A child that wedges is resident forever, holds its
   Harness, and (before E below) reported itself as healthy.
-- **first: make it observable** — a child that has stopped writing to its
-  transcript is the cheap signal, and nothing watches for it.
+- **✅ make it observable (2026-08-03):** added `lastActivity` to `subAgent`, wired
+  via `OnToolCall` callback (every tool call proves the child is not wedged) and
+  `noteUsage` (every chat round). The heartbeat fire callback now checks
+  `lastActivity`: if the child is `agentRunning` but inactive longer than the
+  heartbeat interval, the alert escalates from "still running" to "may be wedged"
+  with a suggestion to `agent_monitor(tail:40)`. `startRunLocked` also seeds
+  `lastActivity`, so a child that never reaches its first tool call is caught.
+- **next:** on the next occurrence, the alert will fire automatically. Still need
+  a goroutine dump (`kill -QUIT`) to identify the exact frame.
 
 ### ✅ E1. A running child looked identical to a wedged one (2026-08-01)
 Found while investigating F, and the reason F went unnoticed for 15 minutes
