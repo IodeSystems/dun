@@ -19,6 +19,28 @@ type discardWC struct{}
 func (discardWC) Write(p []byte) (int, error) { return len(p), nil }
 func (discardWC) Close() error                { return nil }
 
+// convoText joins the visible text of every block (test helper).
+func convoText(m tuiModel) string {
+	parts := make([]string, len(m.convo))
+	for i, e := range m.convo {
+		parts[i] = e.view()
+	}
+	return strings.Join(parts, "\n")
+}
+
+// fullText returns all conversation blocks plus the streaming cursor text
+// (markdown-rendered), joined by newlines (test helper).
+func fullText(m tuiModel) string {
+	blocks := make([]string, 0, len(m.convo)+1)
+	for _, e := range m.convo {
+		blocks = append(blocks, e.view())
+	}
+	if m.cur != "" {
+		blocks = append(blocks, renderMarkdown(m.md, m.cur))
+	}
+	return strings.Join(blocks, "\n")
+}
+
 // bufCloser wraps an io.Writer as an io.WriteCloser (Close is a no-op).
 type bufCloser struct{ io.Writer }
 
@@ -74,7 +96,7 @@ func TestTUI_EventHandling(t *testing.T) {
 	if m.cur != "" {
 		t.Fatal("tool_call should flush the streamed text")
 	}
-	joined := m.convoText()
+	joined := convoText(m)
 	if !strings.Contains(joined, "looking…") || !strings.Contains(joined, "node_query") {
 		t.Fatalf("conversation missing streamed text or tool line: %q", joined)
 	}
@@ -87,7 +109,7 @@ func TestTUI_EventHandling(t *testing.T) {
 	if m.cur != "" {
 		t.Fatal("done should flush cur")
 	}
-	if !strings.Contains(m.convoText(), "done reading") {
+	if !strings.Contains(convoText(m), "done reading") {
 		t.Fatal("final streamed text not finalized")
 	}
 }
@@ -149,7 +171,7 @@ func TestTUI_AskPickerOptionWithNote(t *testing.T) {
 	if m.asking {
 		t.Fatal("selecting an option should end asking")
 	}
-	if !strings.Contains(m.convoText(), "B — fast") {
+	if !strings.Contains(convoText(m), "B — fast") {
 		t.Fatalf("answer not echoed with detail: %v", m.convo)
 	}
 }
@@ -177,7 +199,7 @@ func TestTUI_AskNoOptionsFreeText(t *testing.T) {
 	if m.asking {
 		t.Fatal("enter should send the free-text answer")
 	}
-	if !strings.Contains(m.convoText(), "blue") {
+	if !strings.Contains(convoText(m), "blue") {
 		t.Fatalf("answer not echoed: %v", m.convo)
 	}
 }
@@ -211,7 +233,7 @@ func TestTUI_AskMultiSelect(t *testing.T) {
 	if m.asking {
 		t.Fatal("enter on the done row should submit")
 	}
-	if !strings.Contains(m.convoText(), "A, C") {
+	if !strings.Contains(convoText(m), "A, C") {
 		t.Fatalf("joined answer missing: %v", m.convo)
 	}
 }
@@ -235,7 +257,7 @@ func TestTUI_AskPickerCustomAnswer(t *testing.T) {
 	if m.asking {
 		t.Fatal("sending a custom answer should end asking")
 	}
-	if !strings.Contains(m.convoText(), "let's chat about X") {
+	if !strings.Contains(convoText(m), "let's chat about X") {
 		t.Fatalf("custom answer not echoed: %v", m.convo)
 	}
 }
@@ -299,7 +321,7 @@ func TestTUI_HistoryReplay(t *testing.T) {
 	if len(m.convo) != 5 {
 		t.Fatalf("expected 5 blocks (4 items folded + marker), got %d", len(m.convo))
 	}
-	txt := m.convoText()
+	txt := convoText(m)
 	for _, want := range []string{"fix the bug", "on it", "node_read", "sel=F", "background job #1", "resumed 4 entries"} {
 		if !strings.Contains(txt, want) {
 			t.Fatalf("replayed scrollback missing %q in:\n%s", want, txt)
@@ -356,7 +378,7 @@ func TestTUI_CommandPalette(t *testing.T) {
 	// /help enumerates the commands into the conversation.
 	m = typeStr(m, "/help")
 	m = key(m, kEnter)
-	txt := m.convoText()
+	txt := convoText(m)
 	if !strings.Contains(txt, "commands") || !strings.Contains(txt, "/config") || !strings.Contains(txt, "/exit") {
 		t.Fatalf("/help should list the commands, got: %s", txt)
 	}
@@ -439,8 +461,8 @@ func TestTUI_ArrowNav(t *testing.T) {
 	}})
 	m = key(m, kDown) // select "bravo"
 	m = key(m, kEnter)
-	if !strings.Contains(m.convoText(), "bravo") {
-		t.Fatalf("enter should send the selected suggestion, convo: %s", m.convoText())
+	if !strings.Contains(convoText(m), "bravo") {
+		t.Fatalf("enter should send the selected suggestion, convo: %s", convoText(m))
 	}
 }
 
@@ -477,8 +499,8 @@ func TestTUI_UnknownSlash(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = typeStr(m, "/bogus")
 	m = key(m, kEnter)
-	if !strings.Contains(m.convoText(), "unknown command") {
-		t.Fatalf("expected unknown-command note, got: %s", m.convoText())
+	if !strings.Contains(convoText(m), "unknown command") {
+		t.Fatalf("expected unknown-command note, got: %s", convoText(m))
 	}
 }
 
@@ -508,8 +530,8 @@ func TestTUI_Clear(t *testing.T) {
 	if m.pendingTool != -1 {
 		t.Fatal("pendingTool not cleared")
 	}
-	if !strings.Contains(m.convoText(), "session cleared") {
-		t.Fatalf("expected clear confirmation, got: %s", m.convoText())
+	if !strings.Contains(convoText(m), "session cleared") {
+		t.Fatalf("expected clear confirmation, got: %s", convoText(m))
 	}
 
 	// Engine should have received a reset message.
@@ -838,7 +860,7 @@ func TestTUI_ErrorEventClearsBusy(t *testing.T) {
 	if m.busy {
 		t.Fatal("error should clear busy")
 	}
-	if !strings.Contains(m.convoText(), "boom") {
+	if !strings.Contains(convoText(m), "boom") {
 		t.Fatal("error text not shown")
 	}
 }
@@ -877,8 +899,8 @@ func TestTUI_RetryBanner(t *testing.T) {
 		t.Errorf("status line has no countdown:\n%s", stripANSI(view))
 	}
 	// The first wait also lands in scrollback, so the record survives the banner.
-	if !strings.Contains(stripANSI(m.convoText()), "provider at capacity") {
-		t.Errorf("first retry not recorded in scrollback:\n%s", stripANSI(m.convoText()))
+	if !strings.Contains(stripANSI(convoText(m)), "provider at capacity") {
+		t.Errorf("first retry not recorded in scrollback:\n%s", stripANSI(convoText(m)))
 	}
 	// Subsequent waits update the banner but must NOT spam the conversation.
 	before := len(m.convo)
@@ -894,7 +916,7 @@ func TestTUI_RetryBanner(t *testing.T) {
 	if m.retry != "" || !m.retryDue.IsZero() {
 		t.Error("recovery left the banner up")
 	}
-	if !strings.Contains(stripANSI(m.convoText()), "recovered on attempt 5") {
+	if !strings.Contains(stripANSI(convoText(m)), "recovered on attempt 5") {
 		t.Error("recovery not recorded")
 	}
 }
@@ -918,7 +940,7 @@ func TestTUI_TurnRetryDiscardsPartialReply(t *testing.T) {
 	if !m.busy {
 		t.Error("a retry in progress is still a turn in flight")
 	}
-	if strings.Contains(stripANSI(m.convoText()), "I'll start by rea") {
+	if strings.Contains(stripANSI(convoText(m)), "I'll start by rea") {
 		t.Error("the discarded partial reply was finalized into the conversation")
 	}
 }
@@ -935,13 +957,13 @@ func TestTUI_GiveUpKeepsSessionUsable(t *testing.T) {
 		t.Error("giveup should clear busy so the input is usable")
 	}
 	m = m.handleEvent(evMsg{"type": "error", "error": "agent: chat: stream error"})
-	if !strings.Contains(stripANSI(m.convoText()), "send a message to retry from here") {
-		t.Errorf("no recovery hint after a failure:\n%s", stripANSI(m.convoText()))
+	if !strings.Contains(stripANSI(convoText(m)), "send a message to retry from here") {
+		t.Errorf("no recovery hint after a failure:\n%s", stripANSI(convoText(m)))
 	}
 	// And the input accepts one.
 	m = typeStr(m, "keep going")
 	m = key(m, kEnter)
-	if !strings.Contains(stripANSI(m.convoText()), "keep going") {
+	if !strings.Contains(stripANSI(convoText(m)), "keep going") {
 		t.Error("a message sent after a failure was dropped")
 	}
 }
@@ -962,7 +984,7 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 		t.Errorf("input not cleared; the message was refused while busy: %q", m.input.Value())
 	}
 	// The echo is in the convo right after sendUser.
-	echoed := stripANSI(m.convoText())
+	echoed := stripANSI(convoText(m))
 	if !strings.Contains(echoed, "also update the README") {
 		t.Error("mid-turn message not echoed after sendUser")
 	}
@@ -976,7 +998,7 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 		t.Errorf("queuedTexts = %v; want [\"also update the README\"]", m.queuedTexts)
 	}
 	// Echo should be gone from convo (moved to pending area).
-	if strings.Contains(stripANSI(m.convoText()), "also update the README") {
+	if strings.Contains(stripANSI(convoText(m)), "also update the README") {
 		t.Error("echo should be removed from convo after queued event")
 	}
 	// Pending area should show the message above the divider.
@@ -1009,7 +1031,7 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 		t.Errorf("queuedTexts not cleared after done: %v", m.queuedTexts)
 	}
 	// Both messages should now be in the convo as user entries.
-	convo := stripANSI(m.convoText())
+	convo := stripANSI(convoText(m))
 	if !strings.Contains(convo, "also update the README") {
 		t.Error("first queued message not in convo after done")
 	}
@@ -1041,7 +1063,7 @@ func TestTUI_QueuedMessagesOnError(t *testing.T) {
 	if len(m.queuedTexts) != 0 {
 		t.Errorf("queuedTexts not cleared after error: %v", m.queuedTexts)
 	}
-	convo := stripANSI(m.convoText())
+	convo := stripANSI(convoText(m))
 	if !strings.Contains(convo, "fix this bug") {
 		t.Error("queued message not in convo after error")
 	}
@@ -1073,8 +1095,8 @@ func TestTUI_ServerSlashCommands(t *testing.T) {
 	m = m.handleEvent(evMsg{"type": "server", "id": "rag", "action": "auto",
 		"message": "rag (docs): autostart on (saved to /ws/.dun/dun.local.json)",
 		"tools":   []any{"eval", "search"}})
-	if !strings.Contains(m.convoText(), "autostart on") {
-		t.Fatalf("server reply not shown: %s", m.convoText())
+	if !strings.Contains(convoText(m), "autostart on") {
+		t.Fatalf("server reply not shown: %s", convoText(m))
 	}
 	// A start/stop changes the tool set; the TUI's copy must follow.
 	if len(m.tools) != 2 {
@@ -1090,8 +1112,8 @@ func TestTUI_ReadyHint(t *testing.T) {
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
 		"hint": "docs off — /rag on to start it, /rag auto to start it every session"})
-	if !strings.Contains(m.convoText(), "/rag auto") {
-		t.Fatalf("ready hint not shown: %s", m.convoText())
+	if !strings.Contains(convoText(m), "/rag auto") {
+		t.Fatalf("ready hint not shown: %s", convoText(m))
 	}
 }
 
@@ -1111,12 +1133,12 @@ func TestTUI_ErrorHintTracksFatality(t *testing.T) {
 	m = nm.(tuiModel)
 
 	m = m.handleEvent(evMsg{"type": "error", "error": "context deadline exceeded", "fatal": false})
-	if !strings.Contains(m.convoText(), "session is intact") {
-		t.Errorf("a recoverable turn failure should say so: %s", m.convoText())
+	if !strings.Contains(convoText(m), "session is intact") {
+		t.Errorf("a recoverable turn failure should say so: %s", convoText(m))
 	}
 
 	m = m.handleEvent(evMsg{"type": "error", "error": "context canceled", "fatal": true})
-	txt := m.convoText()
+	txt := convoText(m)
 	if !strings.Contains(txt, "dun --continue") {
 		t.Errorf("a dead session should point at --continue: %s", txt)
 	}
@@ -1159,8 +1181,8 @@ func TestTUI_RespawnsACrashedEngine(t *testing.T) {
 	if m.fatalErr != "" {
 		t.Errorf("a restartable death is not fatal: %q", m.fatalErr)
 	}
-	if !strings.Contains(m.convoText(), "restarting") {
-		t.Errorf("the restart should be visible: %s", m.convoText())
+	if !strings.Contains(convoText(m), "restarting") {
+		t.Errorf("the restart should be visible: %s", convoText(m))
 	}
 	if !m.skipHistory {
 		t.Error("the respawned engine's history replay must be skipped (it is already on screen)")
@@ -1205,8 +1227,8 @@ func TestTUI_RestartCapGivesUp(t *testing.T) {
 	if !strings.Contains(m.fatalErr, "gave up") {
 		t.Errorf("giving up should be reported: %q", m.fatalErr)
 	}
-	if !strings.Contains(m.convoText(), "dun --continue") {
-		t.Errorf("the user should be told the conversation survived: %s", m.convoText())
+	if !strings.Contains(convoText(m), "dun --continue") {
+		t.Errorf("the user should be told the conversation survived: %s", convoText(m))
 	}
 }
 
@@ -1254,8 +1276,8 @@ func TestTUI_ReconnectAfterGivingUp(t *testing.T) {
 	if m.fatalErr != "" {
 		t.Errorf("reconnecting clears the dead-engine banner, got %q", m.fatalErr)
 	}
-	if !strings.Contains(m.convoText(), "reconnecting") {
-		t.Errorf("the attempt should be visible: %s", m.convoText())
+	if !strings.Contains(convoText(m), "reconnecting") {
+		t.Errorf("the attempt should be visible: %s", convoText(m))
 	}
 }
 
@@ -1272,13 +1294,13 @@ func TestTUI_NoEngineIsSurvivable(t *testing.T) {
 	if m.busy {
 		t.Error("nothing was sent, so no turn is running")
 	}
-	if !strings.Contains(m.convoText(), "not sent") {
-		t.Errorf("a dropped message must be reported: %s", m.convoText())
+	if !strings.Contains(convoText(m), "not sent") {
+		t.Errorf("a dropped message must be reported: %s", convoText(m))
 	}
 	// And the slash commands that talk to the engine say so rather than panic.
 	m.runSlash("/rag on")
-	if !strings.Contains(m.convoText(), "no engine") {
-		t.Errorf("server command should report the missing engine: %s", m.convoText())
+	if !strings.Contains(convoText(m), "no engine") {
+		t.Errorf("server command should report the missing engine: %s", convoText(m))
 	}
 }
 
@@ -1297,11 +1319,11 @@ func TestTUI_StreamingMatchesFinalized(t *testing.T) {
 	m.cur = "**bold** and `code`"
 
 	// Capture what fullText() renders for the streaming cursor.
-	streaming := m.fullText()
+	streaming := fullText(m)
 
 	// Now finalize the same text and capture what convoText() produces.
 	m.flushCur()
-	finalized := m.convoText()
+	finalized := convoText(m)
 
 	// Both should be identical — same renderer, same input.
 	if streaming != finalized {
@@ -1328,7 +1350,7 @@ func TestTUI_ScrollPin(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		m.convo = append(m.convo, convoEntry{collapsed: fmt.Sprintf("message line %d", i)})
 	}
-	m.vp.SetContent(m.fullText())
+	m.vp.SetContent(fullText(m))
 
 	// After setup, pin should still be true.
 	if !m.scrollPinned {
@@ -1373,7 +1395,7 @@ func TestMultilineInput_Basic(t *testing.T) {
 	}
 
 	in.Reset()
-	if in.Value() != "" || !in.isEmpty() {
+	if in.Value() != "" || strings.TrimSpace(in.Value()) != "" {
 		t.Fatalf("Reset should clear, got %q", in.Value())
 	}
 	in.SetValue("preloaded text")
@@ -1766,8 +1788,8 @@ func TestActivity_AgentScopeSwapsTheConversation(t *testing.T) {
 	}})
 	// Assert on one word: glamour styles each word separately, so escape codes
 	// sit between them in the rendered text.
-	if !strings.Contains(m.convoText(), "137") {
-		t.Errorf("the child's conversation should be on screen: %s", m.convoText())
+	if !strings.Contains(convoText(m), "137") {
+		t.Errorf("the child's conversation should be on screen: %s", convoText(m))
 	}
 
 	// Leaving restores the root conversation exactly.
@@ -1794,8 +1816,8 @@ func TestActivity_InputInScopeTellsTheChild(t *testing.T) {
 	if len(m.history) != before+1 {
 		t.Error("a message to a child should still be recallable")
 	}
-	if !strings.Contains(m.convoText(), "look at the last 40 lines") {
-		t.Errorf("the message should be echoed: %s", m.convoText())
+	if !strings.Contains(convoText(m), "look at the last 40 lines") {
+		t.Errorf("the message should be echoed: %s", convoText(m))
 	}
 	if m.busy {
 		t.Error("telling a child is not a turn of the session's own")
@@ -2034,7 +2056,7 @@ func TestTUI_PendingClearedOnToolResult(t *testing.T) {
 	}
 
 	// The queued message should be in the convo as a user entry.
-	text := m.convoText()
+	text := convoText(m)
 	if !strings.Contains(text, "fix the bug") {
 		t.Fatalf("convo should contain the lifted message: %q", text)
 	}
@@ -2057,7 +2079,7 @@ func TestTUI_PendingFlushedOnDone(t *testing.T) {
 	if len(m.queuedTexts) != 0 {
 		t.Fatalf("done should clear queuedTexts, got %d", len(m.queuedTexts))
 	}
-	text := m.convoText()
+	text := convoText(m)
 	if !strings.Contains(text, "also check tests") {
 		t.Fatalf("convo should contain the flushed message: %q", text)
 	}
@@ -2080,7 +2102,7 @@ func TestTUI_MultiplePendingMessages(t *testing.T) {
 		t.Fatalf("tool_result should clear all queuedTexts, got %d", len(m.queuedTexts))
 	}
 
-	text := m.convoText()
+	text := convoText(m)
 	if !strings.Contains(text, "first") || !strings.Contains(text, "second") {
 		t.Fatalf("convo should contain both messages: %q", text)
 	}
@@ -2097,7 +2119,7 @@ func TestTUI_PendingClearedOnError(t *testing.T) {
 	if len(m.queuedTexts) != 0 {
 		t.Fatalf("error should clear queuedTexts, got %d", len(m.queuedTexts))
 	}
-	text := m.convoText()
+	text := convoText(m)
 	if !strings.Contains(text, "before crash") {
 		t.Fatalf("convo should contain the message flushed on error: %q", text)
 	}

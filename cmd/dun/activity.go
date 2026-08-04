@@ -139,7 +139,7 @@ func (j jobRow) elapsed(now time.Time) int {
 	return int(end - j.started)
 }
 
-func (j jobRow) running() bool { return j.state == "running" }
+
 
 // liveAgents counts the ones still costing something — a dismissed child is
 // history, and a header that counted it would keep growing forever.
@@ -153,16 +153,7 @@ func (m tuiModel) liveAgents() int {
 	return n
 }
 
-// actTicking reports whether anything in the zone has a clock that needs
-// ticking. Only jobs do — an agent's elapsed is pushed per chat round.
-func (m tuiModel) actTicking() bool {
-	for _, j := range m.jobs {
-		if j.running() {
-			return true
-		}
-	}
-	return false
-}
+
 
 // actRows flattens agents and jobs into one selectable list.
 //

@@ -82,11 +82,11 @@ func TestSwitchSession_ClearsTheScrollback(t *testing.T) {
 		t.Error("the new session's history is a NEW transcript — it must be replayed")
 	}
 	// Only the "resuming…" line survives; the previous conversation is gone.
-	if txt := m.convoText(); strings.Count(txt, "block ") > 0 {
+	if txt := convoText(m); strings.Count(txt, "block ") > 0 {
 		t.Errorf("previous session's scrollback carried over:\n%s", txt)
 	}
-	if !strings.Contains(m.convoText(), "resuming session") {
-		t.Errorf("the switch should be visible: %s", m.convoText())
+	if !strings.Contains(convoText(m), "resuming session") {
+		t.Errorf("the switch should be visible: %s", convoText(m))
 	}
 }
 
@@ -113,8 +113,8 @@ func TestStaleEOF_IsNotACrash(t *testing.T) {
 	if cmd != nil {
 		t.Error("an EOF from a replaced engine must not trigger a restart")
 	}
-	if strings.Contains(m.convoText(), "restarting") {
-		t.Errorf("stale EOF reported as a crash:\n%s", m.convoText())
+	if strings.Contains(convoText(m), "restarting") {
+		t.Errorf("stale EOF reported as a crash:\n%s", convoText(m))
 	}
 	// The CURRENT engine dying is still a crash.
 	if _, cmd = m.Update(eofMsg{proc: current}); cmd == nil {

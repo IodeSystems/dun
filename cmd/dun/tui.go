@@ -267,10 +267,6 @@ type contextStats struct {
 	// Tool result truncation (LOD)
 	toolResults     int  // total tool results seen
 	resultsTruncated int  // how many were LOD-truncated
-
-	// Conversation size
-	convoEntries    int  // entries in the conversation store
-	convoBlocks     int  // blocks rendered on screen
 }
 
 // toolBlock carries a tool call's raw input + complete output so enter can open
@@ -2183,27 +2179,9 @@ func docsFromEvent(ev evMsg) *docsBlock {
 	return d
 }
 
-// convoText joins the visible text of every block (test/inspection helper).
-func (m tuiModel) convoText() string {
-	parts := make([]string, len(m.convo))
-	for i, e := range m.convo {
-		parts[i] = e.view()
-	}
-	return strings.Join(parts, "\n")
-}
 
-// fullText returns all conversation blocks plus the streaming cursor text
-// (markdown-rendered), joined by newlines. Used by refresh() and tests.
-func (m tuiModel) fullText() string {
-	blocks := make([]string, 0, len(m.convo)+1)
-	for _, e := range m.convo {
-		blocks = append(blocks, e.view())
-	}
-	if m.cur != "" {
-		blocks = append(blocks, renderMarkdown(m.md, m.cur))
-	}
-	return strings.Join(blocks, "\n")
-}
+
+
 
 func (m *tuiModel) refresh() {
 	start := time.Now()

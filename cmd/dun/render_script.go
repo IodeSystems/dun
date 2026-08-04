@@ -10,6 +10,7 @@ import (
 
 	starlarkjson "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -83,7 +84,7 @@ func execRenderScript(path string) error {
 		"clip":     starlark.NewBuiltin("clip", clipBuiltin),
 		"json":     starlarkjson.Module,
 	}
-	_, err = starlark.ExecFile(thread, path, src, pre)
+	_, err = starlark.ExecFileOptions(&syntax.FileOptions{}, thread, path, src, pre)
 	return err
 }
 

@@ -178,11 +178,7 @@ func (s *subAgent) heartbeat() {
 	)
 }
 
-func (s *subAgent) setCancel(c context.CancelFunc) {
-	s.mu.Lock()
-	s.cancel = c
-	s.mu.Unlock()
-}
+
 
 func (s *subAgent) stop() {
 	s.mu.Lock()

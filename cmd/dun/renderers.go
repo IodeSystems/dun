@@ -274,6 +274,7 @@ func shipRender(rc renderCtx) (string, string) {
 	body := stDim.Render(rc.result)
 	first := firstLine(rc.result)
 	mark, style := "", stDim
+	_ = style // initial value; every case below reassigns
 	switch {
 	case strings.HasPrefix(first, "Shipped"):
 		mark, style = "✓ shipped", stTool

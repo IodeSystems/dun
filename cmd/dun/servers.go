@@ -240,7 +240,7 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	var b strings.Builder
 	b.WriteString(label + ": ")
 	if st.Running {
-		b.WriteString(fmt.Sprintf("running · %d tools", st.Tools))
+		fmt.Fprintf(&b, "running · %d tools", st.Tools)
 	} else {
 		b.WriteString("stopped")
 	}

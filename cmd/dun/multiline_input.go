@@ -99,7 +99,7 @@ func (m *multilineInput) Position() int {
 	return 1
 }
 
-func (m *multilineInput) isEmpty() bool { return strings.TrimSpace(string(m.buf)) == "" }
+
 
 // ── wrapping ──
 

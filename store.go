@@ -159,7 +159,7 @@ func (s *sessionStore) Loaded() int {
 	return len(s.entries)
 }
 
-func (s *sessionStore) setOnNotify(f func(string)) { s.onNotify = f }
+
 
 // tagDocs marks aggregated proactive-RAG notifications (see notify.go), routed
 // to the structured onDocs UI path instead of the plain onNotify.
@@ -366,24 +366,9 @@ func (s *sessionStore) pending() int {
 	return s.unclaimed
 }
 
-// publishNotification injects a KindNotification into the inbox (pending) and
-// fires onNotify. Used by proactive RAG + background-job completions.
-func (s *sessionStore) publishNotification(e agent.Entry) {
-	s.publishNotificationSilent(e)
-	if cb := s.notifyCallback(); cb != nil {
-		cb(e.Content)
-	}
-}
 
-// publishNotificationSilent is publishNotification without the onNotify ping,
-// for a caller that already announced the note when it was buffered.
-func (s *sessionStore) publishNotificationSilent(e agent.Entry) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.entries = append(s.entries, e)
-	s.unclaimed++
-	s.flushLocked()
-}
+
+
 
 func (s *sessionStore) notifyCallback() func(string) {
 	s.mu.Lock()

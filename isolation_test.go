@@ -272,8 +272,9 @@ func TestDockerExec_ContainerIsStoppableByName(t *testing.T) {
 	}
 
 	// Two runs must never share a name, or stopping one stops the other.
-	if containerName() == containerName() {
-		t.Error("container names collide")
+	name1, name2 := containerName(), containerName()
+	if name1 == name2 {
+		t.Errorf("container names collide: %q", name1)
 	}
 }
 
