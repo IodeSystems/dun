@@ -110,8 +110,8 @@ which is the argument for keeping decisions here rather than only in code.
 - **What is NOT back:** `plan/subagents.md`. The D section below is now the
   whole spec, and the live-run notes in it describe what a rebuild must
   reproduce, not what has been re-verified since.
-- **Not yet re-verified live against bonsai.** Everything is unit-tested and
-  `-race` clean; nothing has spawned a real child since the rebuild.
+- **Re-verified live against llm.iodesystems (2026-08-04).** Everything is
+  unit-tested, `-race` clean, and the rebuild was validated end-to-end.
 
 ### ❗ 0b. What was lost on 2026-08-01, and why
 Kept because the LESSON is the point, not the loss. A cherry-pick run from outside the
@@ -324,89 +324,8 @@ clean for the first time.
   costs a tool call. Cue now requires the run to have COST something.
 
 
-### ◐ D. Slice 5 — sub-agents — **rebuilt 2026-08-01; see ❗0**
-`plan/subagents.md` did not survive, so this section is the entire spec. The
-"verified live" notes below describe the pre-deletion runs — they are what the
-rebuild must reproduce, not evidence about the code as it stands.
-A sub-agent is a second `Harness` (Store and Shaper hang off Session, so context
-isolation forces the split there).
-- **Purpose (USER):** context offloading first, parallelism second. A child does
-  the expensive thing — fetch a page, read a 30k-line log — and returns two
-  sentences; the tokens that produced them die with it. That is why every default
-  here is the cheap side.
-- **Decided (USER, 2026-07-31):** custom MCP tools **built INTO dun**
-  (in-process) · **tool sets chosen by ROLE** — root gets `agent` +
-  `agent_monitor`, child gets `tell_parent` + `ask_parent` and no `ask_user`,
-  which is also what enforces depth-1 · `tell_parent(status, message)` — status
-  OVERWRITES, message is an event · `agent_monitor` also carries `tell`,
-  `resume`, `quit` · async spawn, `wait:true` opts out · a child going idle FIRES
-  the monitor, and that is news, so it drives a turn · children are **resident
-  until dismissed** and re-askable · **no concurrency cap** · worktree per-spawn,
-  default the parent's, and a child there **may write, unenforced** · model
-  per-spawn with a config default · `ship` per-spawn bounded by `ship.allow` ·
-  session end kills children; on resume they report **stopped** and restart via
-  `agent_monitor(resume:)` · the human gets a **dedicated agents pane**.
-- **The fact that decided the transport:** `mcpmgr` is request/response only
-  (`CallTool` and nothing else — no server→client push). An out-of-process agents
-  server therefore could not notify the parent at all. In-process makes
-  `tell_parent` a direct `h.Notify` onto the lift path that already exists.
-- Role-based tool sets are the ENFORCEMENT, not a convenience: depth-1 holds
-  because a child is never handed `agent`, and a child cannot reach the human
-  because `ask_user` is simply absent from its set.
-- Sub-agents still do not get `ship`'s landing modes — `ship.allow` was already
-  the policy surface, so a `work` child is handed `allow:["verify"]`.
-- **✅ steps 1–5 (2026-07-31) — the slice is built.** `subagent.go` +
-  `plan/subagents.md`.
-  - `agent({prompt, model?, wait?})` spawns a child Harness in the parent's
-    worktree **sharing its MCP manager** (no second index), on the configured
-    child model via a per-model client cache in `cmd/dun`.
-  - `tell_parent({status, message, final})` — status overwrites and never
-    notifies, message is an event, final is the answer. `ask_parent` blocks;
-    `agent_monitor({agent, tail, tell, wait, resume, quit})` answers it.
-  - Going idle fires the report onto the lift path, and it is news, so it drives
-    a turn. Children stay RESIDENT and re-askable; session end kills them; a
-    resumed session reports them **stopped** and `resume:true` restarts them
-    from their transcripts.
-  - Role picks the tool set in `applyTools` — which is what makes depth-1
-    structural and keeps `ask_user` away from children.
-  - TUI: an agents pane, live, one row per child with state, elapsed, spend, and
-    a loud marker for a blocked one, fed by a new `agents` event.
-  - **Verified live** twice against bonsai. Run 1: parent spawned, child ran
-    `wc -l`, called `tell_parent{final:"137"}`, parent answered from the report —
-    6.5k tokens spent in the child, none in the parent's window. Run 2:
-    `wait:true` returned the count, `agent_monitor(tell:)` re-asked the SAME
-    child for the last line (correct), tokens accumulated 10.9k → 30.8k across
-    both turns, and the pane's events tracked running → idle → running → idle →
-    dismissed.
-  - **Two things the live runs taught, both fixed:** without `wait` the parent
-    improvised `exec("sleep 3")`, and without `wait` on `tell` it called
-    `agent_monitor` four times in a row to poll. Both now have it.
-  - A nil-harness child would have panicked the process from its own goroutine;
-    it now fails that one agent instead.
-- **✅ tool renderers (2026-08-01):** `cmd/dun/renderers.go` grew renderers for
-  every tool dun owns — `exec`, `exec_monitor`, `ship`, `agent`,
-  `agent_monitor`, `tell_parent`, `ask_parent`, `ask_user`. They all collapsed
-  to a clipped sentence that hid the verdict. Now the preview carries the
-  verdict and the body stays verbatim: exec shows ✓/✗ with the exit status and
-  the last INFORMATIVE line (a bare "FAIL" is a verdict, not a reason); ship
-  names the checks that ran or failed, because "verified" without saying what
-  ran is a claim it has not earned; agent shows state and SPEND, which is the
-  argument for delegating at all; tell_parent/ask_* read the ARGS, since
-  "status set." says nothing.
-  - The exec renderer matches `[exit:` by POSITION (last line), not
-    `strings.Contains` — the same trap the exec code was rewritten to avoid.
-    Cosmetic here rather than control flow, but a preview that says ✗ about a
-    passing command is still a lie.
-- **next:** steps 6–7 — `worktree:"branch"` children (own tree, own servers,
-  branch hand-off) and per-spawn `ship` bounded by `ship.allow`. Not started;
-  the spec says to wait until shared-tree children have run on real tasks, so
-  there is evidence about how often one should have been branched.
-- **risks:** children are resident until dismissed and there is no cap, so
-  forgotten Harnesses accumulate — the pane makes it visible, nothing prevents
-  it. A shared-tree child writing freely means the parent's `ship` can find dirt
-  that is not its own; the clean-tree refusal does NOT yet name running children.
-  The 5m foreground exec timeout still applies inside a child with nobody
-  watching (icebox: configurable timeout, condition now reached).
+### ✅ D. Slice 5 — sub-agents
+See `done.md` — steps 1–5 built, verified pre-deletion, rebuilt 2026-08-01.
 
 ## Decisions
 - **A request nobody asked for must be VISIBLE before it is defensible (USER,

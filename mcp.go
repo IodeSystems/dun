@@ -33,6 +33,7 @@ var toolDocs = map[string]string{
 	// quoted a second time out of shell reflex. Everything else was a long tail
 	// of one. So the four lines below are those two mistakes, pre-empted, plus
 	// the shapes that answer most questions. Every example is verified to run.
+	// Markdown headings ARE structured nodes — use them to find sections.
 	"node_query": "\n\nA BARE PATH IS NOT A SELECTOR — scope by path= instead (no quotes needed):\n" +
 		"  path=cmd/dun/tui.go func                // ✓ what's in a file. NOT `cmd/dun/tui.go` (that parses as a type)\n" +
 		"  #Start                                  // find by name anywhere; #'harness.go#Start' pins one\n" +
@@ -40,7 +41,14 @@ var toolDocs = map[string]string{
 		"  #Start::in.call > * path=cmd/dun/main.go  // …only the callers in one file: a bare attr after a space FILTERS\n" +
 		"  path=harness.go ::grep('-E Server|Harness')  // text search. ONE quoted arg — no inner \"quotes\", that matches nothing\n" +
 		"  func name~=^Start                       // ~= is the regex op; = ^= $= *= are literal\n" +
-		"Attribute brackets are optional: path=a/b.go ≡ [path=a/b.go]. Types are a fixed set (func method type struct file dir import …) — you cannot invent one.",
+		"  path=plan/plan.md ::grep('sub-agent')  // find a line in a markdown file\n" +
+		"  path=plan/plan.md > *                   // the heading tree of a markdown file\n" +
+		"Attribute brackets are optional: path=a/b.go ≡ [path=a/b.go]. Types are a fixed set (func method type struct file dir import …) — you cannot invent one.\n" +
+		"Markdown headings are structured nodes with full hierarchy in the `in` field — use them to navigate docs, plans, and specs.",
+	// node_read: the auto-cap hint is useful but doesn't say when to use what.
+	"node_read": "\n\nRead a symbol whole with its address (e.g. #'mcp.go#toolDocs'). For files, startLine/lineLimit browses — but the view may be truncated. To get a complete file in one call, use lineLimit=totalLines. For symbols, there is no truncation — you get the full declaration.",
+	// node_edit: rename is the right tool for renaming; oldText/newText for snippets.
+	"node_edit": "\n\nRENAMING a symbol? Use the rename op — ONE call renames the declaration AND every usage across the WHOLE workspace, atomically. Do NOT rename by hand-editing files one at a time with oldText/newText: that misses usages and leaves the build broken between edits. For snippets, oldText must occur exactly once WITHIN the node — keep it short. Pass the node's whole text to rewrite it entirely.",
 	"eval": "\n\nmcpshell is a JS subset — do the whole task in ONE eval that ENDS in the value:\n" +
 		"  export let total = [1,2,3].reduce((a,b) => a + b, 0)   // export → survives to your NEXT eval; plain let/const does not\n" +
 		"  total * 2                                              // the LAST expression is the output (console.log is not the result)\n" +
