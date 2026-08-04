@@ -14,6 +14,67 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 )
 
+// Every kind must be in queuedPolicies. The table decides the flush partition
+// (causesTurn), so a kind missing from it does not fail — it quietly inherits
+// the notification policy and starts costing a turn it was never meant to cost.
+// That is precisely the mistake the table replaced four scattered switches to
+// prevent, and only this test notices it.
+func TestEveryQueuedKindHasAPolicy(t *testing.T) {
+	for k := queuedKind(0); k < queuedKindCount; k++ {
+		if _, ok := queuedPolicies[k]; !ok {
+			t.Errorf("queuedKind %d has no queuedPolicies entry; it would "+
+				"silently inherit the notification policy", k)
+		}
+	}
+}
+
+// Each kind must render and persist as SOMETHING. An empty prefix lifts into a
+// tool result unlabelled (the model cannot tell the user from the machinery);
+// an empty entryKind persists a row whose Kind no shaper knows how to treat.
+func TestEveryQueuedKindRendersAndPersists(t *testing.T) {
+	for k := queuedKind(0); k < queuedKindCount; k++ {
+		p := queued{kind: k}.policy()
+		if p.prefix == "" {
+			t.Errorf("kind %d has no prefix; it would lift in unlabelled", k)
+		}
+		if p.entryKind == "" {
+			t.Errorf("kind %d has no entryKind; it would persist with an empty Kind", k)
+		}
+	}
+}
+
+// The two flushes must partition the buffer exactly — every kind taken by one
+// of them, none by both, nothing stranded. Driven through the real drains with
+// one item of every kind buffered, because "by construction" is a claim about
+// today's code and this is the invariant a future edit would quietly break.
+func TestFlushesPartitionEveryKind(t *testing.T) {
+	h := newNoteHarness(t)
+	for k := queuedKind(0); k < queuedKindCount; k++ {
+		h.noteMu.Lock()
+		h.queue = append(h.queue, queued{kind: k, text: "item"})
+		h.noteMu.Unlock()
+	}
+
+	waking := h.flushQueued()
+	silent := h.flushSilent()
+
+	if got := waking + silent; got != int(queuedKindCount) {
+		t.Errorf("flushes delivered %d of %d kinds; some kind is in neither partition",
+			got, int(queuedKindCount))
+	}
+	h.noteMu.Lock()
+	left := len(h.queue)
+	h.noteMu.Unlock()
+	if left != 0 {
+		t.Errorf("%d item(s) stranded in the buffer after both flushes", left)
+	}
+	// Re-flushing must find nothing: an item taken by both partitions would be
+	// delivered twice, which is how a user message gets said to the model twice.
+	if n := h.flushQueued() + h.flushSilent(); n != 0 {
+		t.Errorf("re-flush delivered %d item(s); the partitions overlap", n)
+	}
+}
+
 // A message typed mid-turn rides back inside the running tool's result, labelled
 // so the model can tell the user from the machinery.
 func TestSayLiftsIntoToolResult(t *testing.T) {

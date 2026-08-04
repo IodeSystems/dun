@@ -345,6 +345,11 @@ const (
 	queuedNotification queuedKind = iota // a background job finished
 	queuedUser                           // the user typed while the agent worked
 	queuedAside                          // context worth knowing, never worth a turn
+
+	// queuedKindCount is a sentinel — keep it last. It exists so a test can
+	// walk every kind and assert it has a queuedPolicies entry, since the
+	// fallback for a missing one is silent by design.
+	queuedKindCount
 )
 
 // queued is something buffered to reach the model at the cheapest moment: a
@@ -355,17 +360,40 @@ type queued struct {
 	text string
 }
 
-// prefix labels a queued item where it is lifted into a tool result, so the model
-// can tell the user talking from the machinery reporting.
-func (q queued) prefix() string {
-	switch q.kind {
-	case queuedUser:
-		return "[user] "
-	case queuedAside:
-		return "[session] "
-	default:
-		return "[background] "
+// queuedPolicy is everything the drains need to know about a kind.
+//
+// A table rather than a switch per drain: this mapping used to live in four
+// places (a prefix switch, an Entry-kind mapping, and two partition predicates
+// that each spelled out `== queuedAside`), so adding a kind meant finding all
+// four. Missing the partition is the dangerous one — the new kind silently
+// starts costing a turn, or silently stops being delivered, and nothing errors.
+type queuedPolicy struct {
+	// prefix labels the item where it is lifted into a tool result, so the
+	// model can tell the user talking from the machinery reporting.
+	prefix string
+	// entryKind is how it is persisted once it reaches the conversation.
+	entryKind agent.EntryKind
+	// causesTurn is whether news of this kind is worth WAKING the model for.
+	// False means it may only ride a turn that is already happening — see the
+	// aside rationale on queuedKind. This field IS the flush partition; the
+	// drains derive their predicates from it rather than naming kinds.
+	causesTurn bool
+}
+
+var queuedPolicies = map[queuedKind]queuedPolicy{
+	queuedNotification: {prefix: "[background] ", entryKind: agent.KindNotification, causesTurn: true},
+	queuedUser:         {prefix: "[user] ", entryKind: agent.KindUser, causesTurn: true},
+	queuedAside:        {prefix: "[session] ", entryKind: agent.KindNotification, causesTurn: false},
+}
+
+// policy returns the kind's entry in the table. An unregistered kind falls back
+// to the notification policy — the failure leans toward DELIVERING news at the
+// cost of a turn, because losing it outright is the worse of the two.
+func (q queued) policy() queuedPolicy {
+	if p, ok := queuedPolicies[q.kind]; ok {
+		return p
 	}
+	return queuedPolicies[queuedNotification]
 }
 
 // Resumed reports how many entries were restored from an existing session file.
@@ -470,7 +498,7 @@ func (h *Harness) Say(text string) {
 //
 //   - lifted into a tool result the model is already reading (liftQueued),
 //   - published just before the next turn that was going to run anyway
-//     (flushAsides, from prepareTurn) — including the turn a user message
+//     (flushSilent, from prepareTurn) — including the turn a user message
 //     starts, which is the "join with the user message" case,
 //   - otherwise it waits. Indefinitely, and that is correct: a tool set the
 //     model never gets to use costs nothing to leave unsaid.
@@ -521,10 +549,9 @@ func (h *Harness) mergeForcedToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
 // is reported inside the result the model is already reading. Returns result
 // unchanged when nothing is buffered.
 func (h *Harness) liftQueued(result string) string {
-	h.noteMu.Lock()
-	items := h.queue
-	h.queue = nil
-	h.noteMu.Unlock()
+	// Everything, regardless of policy: a result is already on its way to the
+	// model, so even an aside rides it for free.
+	items := h.drain(func(queued) bool { return true })
 	if len(items) == 0 {
 		return result
 	}
@@ -536,10 +563,28 @@ func (h *Harness) liftQueued(result string) string {
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
-		b.WriteString(q.prefix())
+		b.WriteString(q.policy().prefix)
 		b.WriteString(q.text)
 	}
 	return b.String()
+}
+
+// drain removes every buffered item matching pred and returns it, leaving the
+// rest for a later delivery. One partition under one lock, so an item is never
+// taken by two drains nor missed by both.
+func (h *Harness) drain(pred func(queued) bool) []queued {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	var taken, keep []queued
+	for _, q := range h.queue {
+		if pred(q) {
+			taken = append(taken, q)
+		} else {
+			keep = append(keep, q)
+		}
+	}
+	h.queue = keep
+	return taken
 }
 
 // flushQueued publishes whatever the turn did not pick up, as real inbox
@@ -547,53 +592,34 @@ func (h *Harness) liftQueued(result string) string {
 // Returns how many were flushed so the caller can decide whether a follow-up turn
 // is worth running.
 //
-// Asides are NOT flushed here: publishing one as an inbox arrival is what would
-// make a driver run a turn for it. They stay buffered until a turn happens for
-// some other reason (flushAsides) or a tool result carries them.
+// Takes exactly the kinds whose policy says causesTurn, because publishing as an
+// inbox arrival is what makes a driver run a turn. The rest stay buffered until
+// a turn happens for some other reason (flushSilent) or a tool result carries
+// them.
 func (h *Harness) flushQueued() int {
-	h.noteMu.Lock()
-	var items, keep []queued
-	for _, q := range h.queue {
-		if q.kind == queuedAside {
-			keep = append(keep, q)
-			continue
-		}
-		items = append(items, q)
-	}
-	h.queue = keep
-	h.noteMu.Unlock()
+	items := h.drain(func(q queued) bool { return q.policy().causesTurn })
 	for _, q := range items {
-		kind := agent.KindNotification
-		if q.kind == queuedUser {
-			kind = agent.KindUser
-		}
 		h.store.publish(agent.Entry{
-			ID: uuid.New().String(), Kind: kind,
+			ID: uuid.New().String(), Kind: q.policy().entryKind,
 			Content: q.text, CreatedAt: time.Now().UnixNano(),
 		})
 	}
 	return len(items)
 }
 
-// flushAsides appends buffered asides to the conversation WITHOUT marking them
-// inbox arrivals, immediately before a turn that is about to run for some other
-// reason. The model reads them in that turn's context; nothing schedules a turn
-// on their account (that is the whole point — see Aside).
-func (h *Harness) flushAsides() int {
-	h.noteMu.Lock()
-	var items, keep []queued
-	for _, q := range h.queue {
-		if q.kind == queuedAside {
-			items = append(items, q)
-			continue
-		}
-		keep = append(keep, q)
-	}
-	h.queue = keep
-	h.noteMu.Unlock()
+// flushSilent appends the buffered items that must never CAUSE a turn to the
+// conversation, without marking them inbox arrivals, immediately before a turn
+// about to run for some other reason. The model reads them in that turn's
+// context; nothing schedules a turn on their account (that is the whole point —
+// see Aside, today the only such kind).
+//
+// The exact complement of flushQueued's partition, by construction: both read
+// causesTurn off the same table.
+func (h *Harness) flushSilent() int {
+	items := h.drain(func(q queued) bool { return !q.policy().causesTurn })
 	for _, q := range items {
 		h.store.appendSilent(agent.Entry{
-			ID: uuid.New().String(), Kind: agent.KindNotification,
+			ID: uuid.New().String(), Kind: q.policy().entryKind,
 			Content: q.text, CreatedAt: time.Now().UnixNano(),
 		})
 	}
@@ -682,7 +708,7 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	// Asides ride whatever turn is about to run — including the one a user
 	// message starts, which is where "the tool set changed" most often lands.
 	// Healing already lifted them into the interrupted call's result.
-	h.flushAsides()
+	h.flushSilent()
 }
 
 // healOrphanToolCalls answers every persisted tool call that has no result with
