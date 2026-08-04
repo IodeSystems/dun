@@ -524,6 +524,17 @@ func (m *multilineInput) placeholderView() string {
 	return m.pad("› " + text)
 }
 
+// ghostView renders the empty input with ghost text (a suggested completion)
+// shown as dimmed text after the prompt. The caret sits at the beginning of
+// the ghost text — right arrow accepts it, up/down cycle suggestions.
+func (m *multilineInput) ghostView(ghost string) string {
+	text := stDim.Render(ghost)
+	if m.focused {
+		text = withCaret(ghost, 0)
+	}
+	return m.pad("› " + text)
+}
+
 // withCaret reverse-videos the cell at col, adding one past the end of the text
 // when that is where the cursor sits.
 func withCaret(s string, col int) string {

@@ -395,7 +395,6 @@ type tuiModel struct {
 	exitAnnounced    bool              // the engine said it was going; it did not crash
 	everUp           bool              // an engine reached `session` once; a retry may reattach
 	suggestions      []suggestion      // --suggest: predicted next messages (idle-only picker)
-	suggestSelecting bool              // → arrow-navigable selector (entered via right from empty input)
 	suggestSel       int               // highlighted suggestion in the selector
 	retry            string            // live retry banner ("" = not waiting on the provider)
 	retryDue         time.Time         // when the next attempt is due, for the countdown
@@ -615,7 +614,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.suggestSelecting && m.suggestSel < len(m.suggestions) { // send the highlighted suggestion
+			if m.suggestActive() && m.suggestSel < len(m.suggestions) { // send the highlighted suggestion
 				return m.sendUser(m.suggestions[m.suggestSel].text), nil
 			}
 			// Enter submits the message. Alt+Enter inserts a newline in the
@@ -695,7 +694,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
-			if m.suggestSelecting { // move up in the suggestion selector
+			if m.suggestActive() { // move up in the suggestion selector
 				if m.suggestSel > 0 {
 					m.suggestSel--
 					m.refresh()
@@ -748,7 +747,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
-			if m.suggestSelecting { // move down in the suggestion selector
+			if m.suggestActive() { // move down in the suggestion selector
 				if m.suggestSel < len(m.suggestions)-1 {
 					m.suggestSel++
 					m.refresh()
@@ -800,14 +799,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, textinput.Blink
 			}
-			// focusInput: right from an EMPTY input opens the suggestion selector.
-			if !m.suggestSelecting && m.suggestActive() {
-				m.suggestSelecting = true
-				m.suggestSel = 0
+			// focusInput: right from an EMPTY input accepts the ghost-text suggestion
+			// (fills the buffer so the user can edit before sending).
+			if m.suggestActive() && m.suggestSel < len(m.suggestions) {
+				m.input.SetValue(m.suggestions[m.suggestSel].text)
 				m.refresh()
-				return m, nil
-			}
-			if m.suggestSelecting {
 				return m, nil
 			}
 			m.input = m.input.HandleKey(msg)
@@ -829,13 +825,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, textinput.Blink
 			}
-			// focusInput: left closes the suggestion selector…
-			if m.suggestSelecting {
-				m.suggestSelecting = false
-				m.refresh()
-				return m, nil
-			}
-			// …and left at the FRONT of the input hops back to the conversation.
+			// focusInput: left at the FRONT of the input hops back to the conversation.
 			if m.input.Position() == 0 {
 				m.cycleFocus(1)
 				m.refresh()
@@ -855,7 +845,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-			m.suggestSelecting = false // typing leaves the selector and edits the input
 			m.input = m.input.HandleKey(msg)
 			m.paletteSel = 0 // typing re-filters the palette; start at the top
 			m.refresh()
@@ -1078,13 +1067,20 @@ func (m tuiModel) suggestPanel() string {
 	for i, s := range m.suggestions {
 		body := stSel.Render(fmt.Sprintf("%d", i+1)) + " " + s.text + "  " +
 			stDim.Render(fmt.Sprintf("%d%%", int(s.prob*100+0.5)))
-		if m.suggestSelecting && i == m.suggestSel {
+		if i == m.suggestSel {
 			rows = append(rows, addGutter(body, "▎ ", stSel))
 		} else {
 			rows = append(rows, addGutter(body, "  ", lipgloss.NewStyle()))
 		}
 	}
-	rows = append(rows, m.input.View())
+	// Ghost text: show the selected suggestion as dimmed text in the input line.
+	// Right arrow accepts it (fills the buffer); up/down cycle suggestions.
+	if len(m.suggestions) > 0 && m.suggestSel < len(m.suggestions) &&
+		strings.TrimSpace(m.input.Value()) == "" {
+		rows = append(rows, m.input.ghostView(m.suggestions[m.suggestSel].text))
+	} else {
+		rows = append(rows, m.input.View())
+	}
 	return strings.Join(rows, "\n")
 }
 
@@ -1108,7 +1104,7 @@ func (m tuiModel) sendUser(v string) tuiModel {
 	m.history = append(m.history, v)
 	m.histIdx = len(m.history)
 	m.input.Reset()
-	m.suggestions, m.suggestSelecting = nil, false
+	m.suggestions = nil
 	m.append(stUser.Render("› " + v))
 	if m.replaying {
 		m.append(stDim.Render("replaying a trace — there is no engine to send to"))
@@ -1305,7 +1301,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if m.busyStart.IsZero() {
 			m.busyStart = time.Now()
 		}
-		m.suggestions, m.suggestSelecting = nil, false
+		m.suggestions = nil
 		m.cur += str(ev["text"])
 		// Do NOT render here. A provider streaming 60 tokens/s would drive 60
 		// full frames a second through the same Update loop that reads the
@@ -1314,14 +1310,14 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.renderDue = true
 	case "suggestions":
 		m.suggestions = parseSuggestionItems(ev["items"])
-		m.suggestSelecting, m.suggestSel = false, 0
+		m.suggestSel = 0
 		m.refresh()
 	case "tool_call":
 		m.busy = true
 		if m.busyStart.IsZero() {
 			m.busyStart = time.Now()
 		}
-		m.suggestions, m.suggestSelecting = nil, false
+		m.suggestions = nil
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
 		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argPreview(args, 80) + ")")})
@@ -1732,10 +1728,8 @@ func (m tuiModel) View() string {
 		} else {
 			status = stDim.Render("convo  ·  ↑/↓ select · → docs · / search · enter open (tool→inspector) · tab input")
 		}
-	case m.suggestSelecting:
-		status = stDim.Render("next?  ·  ↑/↓ select · enter send · ← back")
 	case m.suggestActive():
-		status = stDim.Render(fmt.Sprintf("next?  ·  1–%d pick · → select · or type · "+m.exitHint(), len(m.suggestions)))
+		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · enter send · right accept · 1–%d pick · or type · "+m.exitHint(), len(m.suggestions)))
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}

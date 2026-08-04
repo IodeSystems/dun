@@ -417,24 +417,27 @@ func TestTUI_ArrowNav(t *testing.T) {
 	if m.focus != focusInput {
 		t.Fatal("right from a plain convo message should focus the input")
 	}
-	// right from an empty input opens the suggestion selector.
+	// right from an empty input accepts the ghost-text suggestion (fills the buffer).
 	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
 		map[string]any{"text": "alpha", "prob": 0.6},
 		map[string]any{"text": "bravo", "prob": 0.4},
 	}})
-	m = key(m, kRight)
-	if !m.suggestSelecting || m.suggestSel != 0 {
-		t.Fatalf("right from empty input should open the selector, got selecting=%v sel=%d", m.suggestSelecting, m.suggestSel)
-	}
+	// up/down cycle through suggestions (ghost text changes).
 	m = key(m, kDown)
 	if m.suggestSel != 1 {
 		t.Fatalf("↓ should move the selection, got %d", m.suggestSel)
 	}
-	// left closes the selector (doesn't hop panes).
-	if closed := key(m, kLeft); closed.suggestSelecting || closed.focus != focusInput {
-		t.Fatal("left should close the selector and stay on the input")
+	// right accepts the ghost text (fills the input buffer).
+	m = key(m, kRight)
+	if m.input.Value() != "bravo" {
+		t.Fatalf("right should accept ghost text, got %q", m.input.Value())
 	}
-	// enter sends the highlighted suggestion.
+	// enter sends the highlighted suggestion (when input is empty).
+	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
+		map[string]any{"text": "alpha", "prob": 0.6},
+		map[string]any{"text": "bravo", "prob": 0.4},
+	}})
+	m = key(m, kDown) // select "bravo"
 	m = key(m, kEnter)
 	if !strings.Contains(m.convoText(), "bravo") {
 		t.Fatalf("enter should send the selected suggestion, convo: %s", m.convoText())
@@ -1735,3 +1738,4 @@ func TestActivity_LeftWrapsHomeWithNoActivity(t *testing.T) {
 		t.Fatalf("want the input, got %d", m.focus)
 	}
 }
+
