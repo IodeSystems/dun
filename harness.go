@@ -330,6 +330,11 @@ type Harness struct {
 	compactMu   sync.Mutex
 	compactTurn int
 	compactLast time.Time
+	// Session-level counters for /context stats. Guarded by noteMu alongside
+	// the queue, since they are incremented when items are drained from it.
+	systemTokens        int  // estimated token count of system prompt + tool schemas
+	forcedCallsTotal    int  // total forced tool calls injected this session
+	notificationsLifted int  // notifications delivered via liftQueued (smuggled)
 }
 
 // queuedKind is what a buffered item IS, which decides how much it is worth.
@@ -539,6 +544,7 @@ func (h *Harness) mergeForcedToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
 	if len(h.forcedToolCalls) == 0 {
 		return tcs
 	}
+	h.forcedCallsTotal += len(h.forcedToolCalls)
 	merged := make([]llm.ToolCall, 0, len(h.forcedToolCalls)+len(tcs))
 	merged = append(merged, h.forcedToolCalls...)
 	merged = append(merged, tcs...)
@@ -556,6 +562,14 @@ func (h *Harness) liftQueued(result string) string {
 	if len(items) == 0 {
 		return result
 	}
+	// Track notifications that were smuggled into this tool result.
+	h.noteMu.Lock()
+	for _, q := range items {
+		if q.kind == queuedNotification {
+			h.notificationsLifted++
+		}
+	}
+	h.noteMu.Unlock()
 	var b strings.Builder
 	// Trailing newlines on the tool's own output would compound with the separator
 	// below into a run of blank lines.
@@ -656,6 +670,13 @@ func (h *Harness) Queued() int {
 		}
 	}
 	return n
+}
+
+// SessionStats returns the session-level counters for /context display.
+func (h *Harness) SessionStats() (systemTokens, forcedCalls, notificationsLifted int) {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	return h.systemTokens, h.forcedCallsTotal, h.notificationsLifted
 }
 
 // Wake fires when a background job finishes, so the driver runs a Continue turn.

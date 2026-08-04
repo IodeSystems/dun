@@ -265,8 +265,23 @@ type contextStats struct {
 	charsRecapped   int
 
 	// Tool result truncation (LOD)
-	toolResults     int  // total tool results seen
+	toolResults      int  // total tool results seen
 	resultsTruncated int  // how many were LOD-truncated
+
+	// System prompt + tool schemas (estimated from engine)
+	systemTokens int
+
+	// Out-of-band delivery: messages typed mid-turn that were queued into
+	// a running turn rather than starting a new one.
+	oobMessages int
+
+	// Notifications delivered via the queue (smuggled into tool results
+	// rather than triggering their own turn).
+	notificationsSmuggled int
+
+	// Tool calls injected by the host (e.g. /ship) that appear as if the
+	// model made them.
+	forcedToolCalls int
 }
 
 // toolBlock carries a tool call's raw input + complete output so enter can open
@@ -1607,6 +1622,8 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.queuedTexts = append(m.queuedTexts, text)
 		}
 		m.queuedMsgs = int(evNum(ev["count"]))
+		// Track OOB messages for /context.
+		m.ctxStats.oobMessages++
 		m.refresh()
 	case "usage":
 		// Accumulate token usage stats for /context.
@@ -1616,6 +1633,16 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.ctxStats.processedTokens += int(evNum(ev["processed"]))
 		m.ctxStats.generatedTokens += int(evNum(ev["generated"]))
 		m.ctxStats.turns = int(evNum(ev["turns"]))
+		// Session-level stats (cumulative — use last value, not sum).
+		if v := evNum(ev["system_tokens"]); v > 0 {
+			m.ctxStats.systemTokens = int(v)
+		}
+		if v := evNum(ev["forced_calls"]); v > 0 {
+			m.ctxStats.forcedToolCalls = int(v)
+		}
+		if v := evNum(ev["notifications_lifted"]); v > 0 {
+			m.ctxStats.notificationsSmuggled = int(v)
+		}
 	case "done":
 		m.flushCur()
 		// Move pending messages into the convo — they were delivered to the LLM
@@ -2526,8 +2553,23 @@ func (m *tuiModel) showContext() {
 		b.WriteString("\n  " + stDim.Render("truncated:  ") + "0")
 	}
 
-	b.WriteString("\n\n  " + stDim.Render("system prompt + tool schemas are not tracked separately — they are part of the active window."))
+	b.WriteString("\n\n  " + stHeader.Render("system"))
+	if s.systemTokens > 0 {
+		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + fmt.Sprintf("%d tokens", s.systemTokens) + stDim.Render(" (estimated)"))
+	} else {
+		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + "not reported")
+	}
 	b.WriteString("\n  " + stDim.Render("Use DUN_CONTEXT_TOKENS to set a shaping budget (unset = no compaction)."))
+
+	b.WriteString("\n\n  " + stHeader.Render("out-of-band"))
+	b.WriteString("\n  " + stDim.Render("queued msgs:    ") + fmt.Sprintf("%d", s.oobMessages) + stDim.Render(" (delivered mid-turn)"))
+	if s.notificationsSmuggled > 0 {
+		b.WriteString("\n  " + stDim.Render("notifications:  ") + fmt.Sprintf("%d", s.notificationsSmuggled) + stDim.Render(" (smuggled via queue)"))
+	}
+	if s.forcedToolCalls > 0 {
+		b.WriteString("\n  " + stDim.Render("forced calls:   ") + fmt.Sprintf("%d", s.forcedToolCalls) + stDim.Render(" (host-injected)"))
+	}
+
 	m.append(b.String())
 }
 

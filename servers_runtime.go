@@ -320,6 +320,11 @@ func (h *Harness) rebuildTools() {
 	h.Session.System = sys
 	h.Session.OnToolCalls = h.mergeForcedToolCalls
 
+	// Estimate system prompt + tool schema token count (~4 chars per token).
+	h.noteMu.Lock()
+	h.systemTokens = len(sys)/4 + toolDefsTokenEstimate(toolDefs)
+	h.noteMu.Unlock()
+
 	// Proactive RAG: watch the conversation and inject relevant-doc pings before
 	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
 	// surface via store.onNotify → OnNotify. Cleared when docs stops, or the

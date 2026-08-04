@@ -726,9 +726,12 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 	if strings.TrimSpace(res.Reply) != "" {
 		em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
 	}
+	sysTokens, forcedCalls, notifLifted := h.SessionStats()
 	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
 		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
-		"generated": res.Usage.Generated, "turns": res.Usage.Turns})
+		"generated": res.Usage.Generated, "turns": res.Usage.Turns,
+		"system_tokens": sysTokens, "forced_calls": forcedCalls,
+		"notifications_lifted": notifLifted})
 	em.emit(event{"type": "done"})
 	return true
 }
@@ -1006,9 +1009,12 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 		return false
 	}
 	em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
+	sysTokens, forcedCalls, notifLifted := h.SessionStats()
 	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
 		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
-		"generated": res.Usage.Generated, "turns": res.Usage.Turns})
+		"generated": res.Usage.Generated, "turns": res.Usage.Turns,
+		"system_tokens": sysTokens, "forced_calls": forcedCalls,
+		"notifications_lifted": notifLifted})
 	em.emit(event{"type": "done"})
 	return true
 }
