@@ -314,6 +314,7 @@ func (h *Harness) rebuildTools() {
 	h.Session.Tools = toolDefs
 	h.Session.Dispatch = dispatch
 	h.Session.System = sys
+	h.Session.OnToolCalls = h.mergeForcedToolCalls
 
 	// Proactive RAG: watch the conversation and inject relevant-doc pings before
 	// each turn (raglit's search tool as an agent.DocFinder). Injected notices

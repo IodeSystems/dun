@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/agentkit/llm"
 )
 
 // Tool servers the user can turn on and off: /rag (raglit, the docs index) and
@@ -484,6 +487,15 @@ func indentLines(s, prefix string) string {
 }
 
 // runShipCmd handles /ship [verify|push|pr].
+//
+// It does NOT run ship directly. Instead it queues a forced tool call that will
+// be injected into the next LLM response's tool_calls (via Harness.ForceToolCall
+// + Session.OnToolCalls). The Turn loop then persists it as assistant(tool_calls)
+// → tool(result) and dispatches it through withShip, making the exchange look
+// like the model's own decision.
+//
+// If no turn is running, the caller should trigger one (e.g. by sending a
+// mid-turn message or starting a Continue turn) so the injection happens.
 func runShipCmd(ctx context.Context, h *dun.Harness, action string) string {
 	var mode dun.ShipMode
 	switch strings.ToLower(action) {
@@ -496,6 +508,18 @@ func runShipCmd(ctx context.Context, h *dun.Harness, action string) string {
 	default:
 		return "unknown action " + strconv.Quote(action) + " — try /ship [verify|push|pr]"
 	}
-	return h.Ship(ctx, mode)
+	args, _ := json.Marshal(map[string]string{"mode": string(mode)})
+	h.ForceToolCall(llm.ToolCall{
+		ID:   "call_ship_" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Type: "function",
+		Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{
+			Name:      "ship",
+			Arguments: string(args),
+		},
+	})
+	return "ship queued — running on next turn"
 }
 

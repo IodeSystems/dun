@@ -290,6 +290,10 @@ type Harness struct {
 	self    *subAgent // this harness's own record IN its parent; nil for a root
 	noteMu  sync.Mutex
 	queue   []queued // messages not yet delivered to the model
+	// forcedToolCalls are tool calls queued by the host (e.g. /ship) that
+	// should be injected into the next LLM response's tool_calls, so they
+	// appear as if the model made them. Guarded by noteMu.
+	forcedToolCalls []llm.ToolCall
 
 	// Servers can start and stop mid-session (/rag on, /lsp off), which means
 	// the tool set is not fixed at construction: srvMu guards the spec list and
@@ -481,6 +485,38 @@ func (h *Harness) Aside(text string) {
 	h.noteMu.Unlock()
 }
 
+// ForceToolCall queues a tool call to be injected into the next LLM response's
+// tool_calls before they are persisted or dispatched. The call appears as if
+// the model made it: it is persisted as assistant(tool_calls) → tool(result),
+// and the Turn loop dispatches it normally.
+//
+// This is the mechanism for host-initiated actions that must look like the
+// model's own decisions — e.g. /ship forces the assistant to call the ship
+// tool, so the exchange is a proper tool call/result pair, not a disembodied
+// Aside notification.
+func (h *Harness) ForceToolCall(tc llm.ToolCall) {
+	h.noteMu.Lock()
+	h.forcedToolCalls = append(h.forcedToolCalls, tc)
+	h.noteMu.Unlock()
+}
+
+// mergeForcedToolCalls is the OnToolCalls callback installed on the Session.
+// It drains any host-queued tool calls (from ForceToolCall) and prepends them
+// to the model's own tool calls, so the Turn loop persists and dispatches all
+// of them as if the model had generated them.
+func (h *Harness) mergeForcedToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	if len(h.forcedToolCalls) == 0 {
+		return tcs
+	}
+	merged := make([]llm.ToolCall, 0, len(h.forcedToolCalls)+len(tcs))
+	merged = append(merged, h.forcedToolCalls...)
+	merged = append(merged, tcs...)
+	h.forcedToolCalls = nil
+	return merged
+}
+
 // liftQueued drains the buffer into a tool result, so news that arrived mid-turn
 // is reported inside the result the model is already reading. Returns result
 // unchanged when nothing is buffered.
@@ -565,8 +601,8 @@ func (h *Harness) flushAsides() int {
 }
 
 // Pending reports whether a Continue turn has anything new to process —
-// unclaimed inbox arrivals or buffered messages. Asides do not count: they are
-// carried by a turn, never a reason to run one.
+// unclaimed inbox arrivals, buffered messages, or forced tool calls.
+// Asides do not count: they are carried by a turn, never a reason to run one.
 func (h *Harness) Pending() int {
 	h.noteMu.Lock()
 	buffered := 0
@@ -575,8 +611,9 @@ func (h *Harness) Pending() int {
 			buffered++
 		}
 	}
+	forced := len(h.forcedToolCalls)
 	h.noteMu.Unlock()
-	return h.store.pending() + buffered
+	return h.store.pending() + buffered + forced
 }
 
 // Queued reports how many buffered messages are waiting to reach the model, so a

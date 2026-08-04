@@ -352,11 +352,21 @@ func TestRunShipCmd_VerifyMode(t *testing.T) {
 	t.Cleanup(harness.Close)
 
 	out := runShipCmd(context.Background(), harness, "verify")
-	if !strings.Contains(out, "Verified") {
-		t.Fatalf("expected verification success, got: %s", out)
+	if !strings.Contains(out, "ship queued") {
+		t.Fatalf("expected ship queued message, got: %s", out)
 	}
-	if strings.Contains(out, "Shipped") || strings.Contains(out, "pushed to origin") {
-		t.Error("verify mode should not push, got:", out)
+
+	// Verify the forced tool call was queued with correct name + arguments
+	// by running the OnToolCalls callback (which drains the queue).
+	tcs := harness.Session.OnToolCalls(nil)
+	if len(tcs) != 1 {
+		t.Fatalf("expected 1 forced tool call, got %d", len(tcs))
+	}
+	if tcs[0].Function.Name != "ship" {
+		t.Fatalf("expected tool name ship, got %s", tcs[0].Function.Name)
+	}
+	if !strings.Contains(tcs[0].Function.Arguments, `"mode":"verify"`) {
+		t.Fatalf("expected verify mode in arguments, got: %s", tcs[0].Function.Arguments)
 	}
 }
 
@@ -399,15 +409,20 @@ func TestRunShipCmd_PushMode(t *testing.T) {
 	t.Cleanup(harness.Close)
 
 	out := runShipCmd(context.Background(), harness, "push")
-	if !strings.Contains(out, "Shipped") {
-		t.Fatalf("expected ship success, got: %s", out)
+	if !strings.Contains(out, "ship queued") {
+		t.Fatalf("expected ship queued message, got: %s", out)
 	}
 
-	// Verify the commit actually reached origin on the dun/* branch
-	// (bare repos store remote refs as local branches, so use "branch" not "branch -r")
-	branches := runGitCapture(t, origin, "branch")
-	if !strings.Contains(branches, "dun/") {
-		t.Fatalf("no dun/* branch on origin; branches=%q", branches)
+	// Verify the forced tool call was queued with correct name + arguments
+	tcs := harness.Session.OnToolCalls(nil)
+	if len(tcs) != 1 {
+		t.Fatalf("expected 1 forced tool call, got %d", len(tcs))
+	}
+	if tcs[0].Function.Name != "ship" {
+		t.Fatalf("expected tool name ship, got %s", tcs[0].Function.Name)
+	}
+	if !strings.Contains(tcs[0].Function.Arguments, `"mode":"push"`) {
+		t.Fatalf("expected push mode in arguments, got: %s", tcs[0].Function.Arguments)
 	}
 }
 
