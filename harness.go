@@ -737,6 +737,14 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		cfg: cfg, specs: servers, lastErr: map[string]string{},
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID}
 
+	// Server→client push. Only the OWNER registers: a child shares its
+	// parent's manager, and registering again would replace the parent's sink
+	// with one pointed at the child's conversation. Must precede any
+	// StartServer — handlers attach at spawn.
+	if ownsMgr {
+		mgr.SetNotificationHandler(h.noteServerNotification)
+	}
+
 	// Autostart is best-effort by design: a missing binary or a server that
 	// refuses to run is worth SAYING (it lands in Servers()[i].Err, which the
 	// UI reports), but it is not worth refusing to start the session over. The
@@ -850,6 +858,35 @@ func (p *Harness) managerFor() (*mcpmgr.Manager, bool) {
 		return mcpmgr.NewManager(), true
 	}
 	return p.mgr, false
+}
+
+// noteServerNotification lifts an unsolicited MCP notification into the
+// conversation.
+//
+// Notify, not a log line: the whole point is that the MODEL learns of it. A
+// merge conflict appearing under a running agent is the motivating case —
+// from that moment every symbol in the file may combine both sides and an
+// edit can corrupt the merge, and the agent would otherwise find out only if
+// it happened to ask again.
+//
+// Runs on the MCP client's read goroutine, so it hands off and returns:
+// Notify appends to a queue under a mutex and never blocks on a turn.
+//
+// Only notifications/message is lifted. The other MCP notification methods
+// are protocol bookkeeping (tool/resource list changes, progress) that the
+// manager already acts on or that mean nothing to a conversation, and
+// forwarding them would train the model to skim what it sees here.
+func (h *Harness) noteServerNotification(n mcpmgr.Notification) {
+	if n.Method != "notifications/message" {
+		return
+	}
+	text := strings.TrimSpace(n.Text())
+	if text == "" {
+		return
+	}
+	// Name the server. Several are usually running, and "a merge conflict
+	// appeared" is a different fact depending on which workspace said it.
+	h.Notify(fmt.Sprintf("[%s] %s", n.ServerID, text))
 }
 
 // Reset clears the session store, starting a fresh conversation log.
