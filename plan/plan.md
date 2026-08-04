@@ -480,6 +480,30 @@ isolation forces the split there).
   it is applied, and the live recap call is never inside its own span. That last
   one bit immediately — the anchor search matched the recap call's own
   arguments, which quote `from` verbatim, so every span came back empty.
+- **`/worktree` answers about the REPO, not about the isolation mode (USER,
+  2026-08-03).** `status` used to reply "none (working in place)" whenever there
+  was no dedicated worktree — the common case, since isolation is opt-in — which
+  states the mode and answers nothing. It now reports `Worktree.Status()` (the
+  porcelain branch line as a header, the changed files, a count) over a
+  pass-through `WorktreeInPlace`, and `commit` commits in place too.
+- **A commit message is WRITTEN by the model and APPROVED by the human (USER,
+  2026-08-03).** `/worktree commit` committed with the literal string
+  "/worktree commit" — the one artefact git keeps forever said less than the
+  command that produced it. Now: one THROWAWAY tip session (`Harness.
+  CommitMessage`, messages built in `commit.go`, never appended to the
+  conversation) sees the porcelain status, the diff vs HEAD bounded to 24k with
+  the `--stat` always intact, and the last 3 user messages as intent. Untracked
+  CONTENTS are omitted — a new file is the largest and least informative part of
+  a change. Then it is shown, with commit/regenerate/cancel and 3 rounds; unlike
+  a recap, a commit message is written once and read forever. Default format is
+  Conventional Commits, overridable per repo via `commit.format` /
+  `commit.instruction` in dun.json.
+- **A control command that asks MUST NOT run on the reader goroutine.** That
+  goroutine is the only reader of `answer` events, so blocking it on a question
+  means the answer can never arrive — the session hangs on its own prompt.
+  `ctrlCmdAsks()` names the asking commands and `setCtrlCmd` detaches them. Kept
+  beside the commands so adding an asking one is a change in that file rather
+  than a hang found in production.
 - **A worktree may be deleted when it holds no WORK, which is not the same as a
   clean tree.** Measured on dun's own repo: 37 registered, 36 on disk, 1.1 GB,
   one registration already pointing at a deleted directory. By `git status` 34

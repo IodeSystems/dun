@@ -213,14 +213,17 @@ type Config struct {
 	// index), reports to it, and gets the child tool set instead of the root's.
 	Parent *Harness
 	// AgentID is this child's id within its parent. Zero for a root.
-	AgentID     int
-	System      string      // nil → defaultSystem
-	Exec        ExecBackend // nil → no exec tool; else adds the built-in exec tool
-	Ask         AskFunc     // nil → no ask_user tool; else adds the human-in-the-loop tool
-	Worktree    *Worktree   // the session worktree (for ship)
-	EnableShip  bool        // add the ship tool (enabled by default)
-	ShipCfg     *ShipConfig // ship policy + checks; nil = permissive defaults, no checks
-	SessionFile string      // persist the conversation here (resumable); "" = in-memory only
+	AgentID    int
+	System     string      // nil → defaultSystem
+	Exec       ExecBackend // nil → no exec tool; else adds the built-in exec tool
+	Ask        AskFunc     // nil → no ask_user tool; else adds the human-in-the-loop tool
+	Worktree   *Worktree   // the session worktree (for ship)
+	EnableShip bool        // add the ship tool (enabled by default)
+	ShipCfg    *ShipConfig // ship policy + checks; nil = permissive defaults, no checks
+	// CommitCfg is how /worktree commit writes its message. nil = the
+	// conventional-commits default.
+	CommitCfg   *CommitConfig
+	SessionFile string // persist the conversation here (resumable); "" = in-memory only
 	// DockerImage is the image used when /docker on is toggled mid-session.
 	// Set from the --docker flag at construction so the runtime toggle has
 	// a default. Empty → "golang:1.23".
@@ -904,6 +907,25 @@ func (h *Harness) Worktree() *Worktree {
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
 	return h.cfg.Worktree
+}
+
+// AskUser puts a question to the human attached to this session and returns
+// their answer. It is the ask_user tool's path, exposed for the parts of the
+// COMMAND layer that need a decision (/worktree commit showing a message before
+// it writes it) rather than a turn.
+//
+// CALLER BEWARE: this blocks until the human answers, and in the -p/TUI engine
+// the goroutine that reads control commands is the same one that reads answer
+// events. Calling this from a control-command callback deadlocks — run it on
+// its own goroutine. See setCtrlCmd in cmd/dun/main.go.
+func (h *Harness) AskUser(ctx context.Context, question string, options []string) (string, error) {
+	h.srvMu.Lock()
+	ask := h.cfg.Ask
+	h.srvMu.Unlock()
+	if ask == nil {
+		return "", fmt.Errorf("nobody to ask — this session has no human attached")
+	}
+	return ask(ctx, question, options, false)
 }
 
 // IsDocker reports whether the current exec backend is DockerExec.

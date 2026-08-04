@@ -318,6 +318,14 @@ func serversToAny(states []dun.ServerState) []map[string]any {
 	return out
 }
 
+// ctrlCmdAsks reports whether a control command may put a question to the human
+// before it finishes. Those must not run on the reader goroutine — see the
+// caller in main.go. Kept beside the commands themselves so adding an asking
+// one is a change in this file, not a hang found in production.
+func ctrlCmdAsks(id, action string) bool {
+	return id == "worktree" && action == "commit"
+}
+
 // runControlCmd handles /docker, /worktree, and /ship control commands.
 func runControlCmd(ctx context.Context, h *dun.Harness, id, action string) string {
 	switch id {
@@ -355,16 +363,39 @@ func runDockerCmd(ctx context.Context, h *dun.Harness, action string) string {
 	}
 }
 
+// gitView is the Worktree to REPORT on: the session's dedicated one, or a
+// pass-through over the workspace when dun works in place.
+//
+// Without this, every /worktree query answered "none (working in place)" in the
+// common case — worktree isolation is opt-in — which is a true statement of the
+// isolation mode and no answer at all to the question being asked. Working in
+// place still means working in a git repo.
+func gitView(h *dun.Harness) (wt *dun.Worktree, dedicated bool) {
+	if wt := h.Worktree(); wt != nil && wt.Branch != "" {
+		return wt, true
+	}
+	inPlace, isRepo := dun.WorktreeInPlace(h.Workspace())
+	if !isRepo {
+		return nil, false
+	}
+	return inPlace, false
+}
+
 // runWorktreeCmd handles /worktree [status|new|commit].
 func runWorktreeCmd(ctx context.Context, h *dun.Harness, action string) string {
 	wt := h.Worktree()
 	dockerOn := h.IsDocker()
 	switch action {
 	case "", "status":
-		if wt == nil || wt.Branch == "" {
-			return "worktree: none (working in place)"
+		view, dedicated := gitView(h)
+		if view == nil {
+			return "worktree: " + h.Workspace() + " is not a git repository"
 		}
-		return fmt.Sprintf("worktree: %s (branch %s, base %s)", wt.Path, wt.Branch, wt.BaseBranch)
+		head := "in place: " + view.Path
+		if dedicated {
+			head = fmt.Sprintf("worktree: %s (base %s)", view.Path, view.BaseBranch)
+		}
+		return head + "\n" + view.Status()
 	case "new":
 		if wt != nil && wt.Branch != "" {
 			return "worktree: already on branch " + wt.Branch
@@ -382,14 +413,67 @@ func runWorktreeCmd(ctx context.Context, h *dun.Harness, action string) string {
 		h.Rehoist(newWt.Path, newWt, dockerOn)
 		return fmt.Sprintf("worktree: created %s (branch %s)", newWt.Path, newWt.Branch)
 	case "commit":
-		if wt == nil || wt.Branch == "" {
-			return "worktree: none (nothing to commit)"
-		}
-		result := wt.Commit("/worktree commit")
-		return "worktree: " + result
+		return runWorktreeCommit(ctx, h)
 	default:
 		return "unknown action " + strconv.Quote(action) + " — try /worktree [status|new|commit]"
 	}
+}
+
+// maxCommitRounds bounds "regenerate". Three tries and the answer is to write it
+// yourself, not to keep paying for rolls of the same dice.
+const maxCommitRounds = 3
+
+// runWorktreeCommit writes the commit message with the model, shows it, and
+// commits only once the human says so.
+//
+// It commits IN PLACE when there is no dedicated worktree. The old version
+// refused ("none — nothing to commit") which was wrong twice: it named the
+// isolation mode as the reason, and the changes it declined to commit were
+// sitting right there in the repo.
+//
+// MUST NOT run on the engine's control-command goroutine — it asks. See
+// Harness.AskUser and setCtrlCmd in main.go.
+func runWorktreeCommit(ctx context.Context, h *dun.Harness) string {
+	view, _ := gitView(h)
+	if view == nil {
+		return "worktree: " + h.Workspace() + " is not a git repository"
+	}
+	if view.IsClean() {
+		return "worktree: nothing to commit — the tree is clean"
+	}
+	for round := 1; ; round++ {
+		msg, err := h.CommitMessage(ctx, view)
+		if err != nil {
+			return "worktree: could not write a commit message — " + oneLine(err.Error())
+		}
+		q := "Commit these changes?\n\n" + indentLines(msg, "  ") + "\n\n" + indentLines(view.Status(), "  ")
+		options := []string{"commit", "regenerate", "cancel"}
+		if round >= maxCommitRounds {
+			options = []string{"commit", "cancel"} // out of rolls; say so by not offering it
+		}
+		ans, err := h.AskUser(ctx, q, options)
+		if err != nil {
+			return "worktree: not committed — " + oneLine(err.Error())
+		}
+		switch strings.ToLower(strings.TrimSpace(ans)) {
+		case "commit":
+			return "worktree: " + view.Commit(msg)
+		case "regenerate":
+			continue
+		default:
+			return "worktree: cancelled — nothing was committed"
+		}
+	}
+}
+
+// indentLines prefixes every line, so a multi-line commit message reads as one
+// quoted block in the confirmation rather than as more of the question.
+func indentLines(s, prefix string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return strings.Join(lines, "\n")
 }
 
 // runShipCmd handles /ship [verify|push|pr].

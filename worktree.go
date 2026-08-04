@@ -115,6 +115,81 @@ func (w *Worktree) Diff() string {
 	return out
 }
 
+// pendingDiff is everything a commit would take: the diff against HEAD (staged
+// and unstaged together, since `add -A` is about to make that distinction moot)
+// plus untracked files BY NAME.
+//
+// Untracked contents are deliberately omitted. A new file is usually the
+// largest thing in a change and the least informative per byte — its name and
+// its presence already say "this was added" — so including it is how a diff
+// budget gets spent on a vendored directory instead of on the change.
+//
+// limit bounds the whole thing; 0 means unbounded.
+func (w *Worktree) pendingDiff(limit int) string {
+	if w.repoRoot == "" {
+		return ""
+	}
+	stat, _ := git("", "-C", w.Path, "diff", "HEAD", "--stat")
+	diff, _ := git("", "-C", w.Path, "diff", "HEAD")
+	untracked, _ := git("", "-C", w.Path, "ls-files", "--others", "--exclude-standard")
+
+	var b strings.Builder
+	if s := strings.TrimSpace(stat); s != "" {
+		b.WriteString("diff vs HEAD --stat:\n" + s + "\n\n")
+	}
+	if s := strings.TrimSpace(untracked); s != "" {
+		b.WriteString("untracked files (contents not shown):\n" + s + "\n\n")
+	}
+	body := strings.TrimSpace(diff)
+	// The stat and the file list go in whole and the DIFF is what gets cut: they
+	// are the summary that has to survive for a truncated brief to be usable.
+	if limit > 0 {
+		if room := limit - b.Len(); room <= 0 {
+			body = ""
+		} else if len(body) > room {
+			body = body[:room] + fmt.Sprintf("\n[…diff truncated at %d of %d characters — "+
+				"the --stat above is the full shape of the change]", room, len(body))
+		}
+	}
+	if body != "" {
+		b.WriteString("diff vs HEAD:\n" + body)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// Status is the human's `git status` for this worktree: the branch line and the
+// changed files, exactly as porcelain reports them, or "clean".
+//
+// It exists because `/worktree status` had nothing to say when dun works in
+// place (the common case — worktree isolation is opt-in): "none (working in
+// place)" answered a question nobody asked, while the one they did ask — what
+// is uncommitted here — needed a separate trip to a shell.
+func (w *Worktree) Status() string {
+	if w == nil || w.repoRoot == "" {
+		return "not a git repository"
+	}
+	status := w.UncommittedStatus()
+	lines := strings.Split(status, "\n")
+	// Porcelain -b always leads with "## branch...upstream"; keep it as the
+	// header and count only the file lines, or "3 changed" counts the branch.
+	head, files := "", []string{}
+	for _, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "## "):
+			head = strings.TrimPrefix(l, "## ")
+		case strings.TrimSpace(l) != "":
+			files = append(files, l)
+		}
+	}
+	if head == "" {
+		head = w.CurrentBranch()
+	}
+	if len(files) == 0 {
+		return head + "\nclean"
+	}
+	return fmt.Sprintf("%s\n%s\n%d file%s changed", head, strings.Join(files, "\n"), len(files), plural(len(files)))
+}
+
 // Cleanup removes the worktree (a no-op for a pass-through). The branch is kept
 // so the work isn't lost — remove it with `git branch -D <branch>` if unwanted.
 func (w *Worktree) Cleanup() {

@@ -49,6 +49,15 @@
     ]
   },
 
+  "//commit": "How /worktree commit writes its message. One throwaway LLM call sees the porcelain status, the diff vs HEAD (bounded) and the last few user messages, and you approve the result before anything is committed. Omit the whole section for conventional commits.",
+  "commit": {
+    "//format": "A built-in style: 'conventional' (the default — type(scope): subject + a body saying WHY) or 'plain' (no type/scope prefix).",
+    "format": "conventional",
+
+    "//instruction": "Free text handed to the model verbatim, for a project whose convention is its own. Wins over format — the specific statement beats the named one.",
+    "instruction": ""
+  },
+
   "//mounts": "Extra local paths that must be accessible from both the worktree (symlink) and Docker container (volume mount). go.mod replace directives are auto-discovered — declare mounts here for non-Go projects or to override the auto-detected source path.",
   "mounts": [
     {

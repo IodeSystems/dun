@@ -340,6 +340,7 @@ func main() {
 		Worktree:    wt,
 		EnableShip:  *ship || *pr,
 		ShipCfg:     shipConfig(absWS, *pr),
+		CommitCfg:   dun.LoadCommit(absWS),
 		SessionFile: sessionFile,
 		// The workspace's own checkout, not the worktree: /rag auto is a fact
 		// about this machine and this project, and must outlive the throwaway
@@ -567,6 +568,24 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				items[i] = map[string]any{"text": s.Text, "prob": s.Prob}
 			}
 			em.emit(event{"type": "suggestions", "items": items})
+			return
+		}
+		// A control command that ASKS cannot run here. This callback is on the
+		// reader goroutine, which is the only reader of `answer` events — block
+		// it on a question and the answer can never arrive, so the session hangs
+		// with its own prompt on screen. Detach it: the command runs to
+		// completion on its own goroutine and emits when it is done, which is
+		// also what lets the human keep typing while deciding.
+		//
+		// The trade is that a `quit` arriving while the question is open can
+		// outrun the reply. That is the right way round — the alternative is a
+		// session that cannot be quit until someone answers — and the ask itself
+		// unblocks on ctx, so nothing is left hanging.
+		if ctrlCmdAsks(id, action) {
+			go func() {
+				msg := runControlCmd(ctx, h, id, action)
+				em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
+			}()
 			return
 		}
 		msg := runControlCmd(ctx, h, id, action)

@@ -111,6 +111,9 @@ type ServersFile struct {
 	// layers, so a machine can permit a mode or skip a check without
 	// transcribing the project's whole check list.
 	Ship *ShipConfig `json:"ship,omitempty"`
+	// Commit is how `/worktree commit` writes its message. Merged field by
+	// field, same as Ship.
+	Commit *CommitConfig `json:"commit,omitempty"`
 }
 
 // LoadShip resolves the effective ship config for a workspace. nil means "no
@@ -130,6 +133,31 @@ func LoadShip(dir string) *ShipConfig {
 		}
 		merged := mergeShip(*out, *f.Ship)
 		out = &merged
+	}
+	return out
+}
+
+// LoadCommit resolves the effective commit config for a workspace. nil means
+// "no commit section anywhere", which CommitConfig reads as the conventional
+// default — see CommitConfig.
+func LoadCommit(dir string) *CommitConfig {
+	var out *CommitConfig
+	for _, path := range serverConfigPaths(dir) {
+		f, err := readServersFile(path)
+		if err != nil || f == nil || f.Commit == nil {
+			continue
+		}
+		if out == nil {
+			cp := *f.Commit
+			out = &cp
+			continue
+		}
+		if s := strings.TrimSpace(f.Commit.Format); s != "" {
+			out.Format = s
+		}
+		if s := strings.TrimSpace(f.Commit.Instruction); s != "" {
+			out.Instruction = s
+		}
 	}
 	return out
 }

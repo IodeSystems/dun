@@ -2246,7 +2246,7 @@ func init() {
 		{"lsp", "[on|off|restart|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
 		{"mcp", "[restart [server]]", "every MCP server at once: bare lists them, restart bounces the running ones", mcpSlash},
 		{"docker", "[on|off|status]", "exec backend: on (Docker), off (host), bare shows status", controlSlash("docker")},
-		{"worktree", "[status|new|commit]", "git worktree: bare shows status, new creates one, commit stages+commits", controlSlash("worktree")},
+		{"worktree", "[status|new|commit]", "git: bare shows status (in place too), new isolates in a worktree, commit writes the message and asks", controlSlash("worktree")},
 		{"clear", "", "clear scrollback and start a fresh session log", func(m *tuiModel, _ []string) tea.Cmd {
 			m.proc.sendReset()
 			m.convo = nil
