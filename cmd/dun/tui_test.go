@@ -2006,3 +2006,99 @@ func TestSuggest_NoTimerWhenItCouldNeverFire(t *testing.T) {
 		t.Error("suggestions off — no timer")
 	}
 }
+
+// Pending messages: a mid-turn message is queued, then lifted into the next
+// tool result. The pending display must clear on tool_result (not wait for done),
+// and the message must appear in the convo right after that tool result.
+func TestTUI_PendingClearedOnToolResult(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m.busy = true
+
+	// Simulate a queued mid-turn message (the "queued" event).
+	m = m.handleEvent(evMsg{"type": "queued", "text": "fix the bug", "count": 1.0})
+	if len(m.queuedTexts) != 1 {
+		t.Fatalf("queued event should set queuedTexts, got %d", len(m.queuedTexts))
+	}
+	if m.queuedMsgs != 1 {
+		t.Fatalf("queued event should set queuedMsgs, got %d", m.queuedMsgs)
+	}
+
+	// A tool result arrives — liftQueued drained the buffer, so the pending
+	// display must clear and the message must appear in the convo.
+	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "ok"})
+	if len(m.queuedTexts) != 0 {
+		t.Fatalf("tool_result should clear queuedTexts, got %d", len(m.queuedTexts))
+	}
+	if m.queuedMsgs != 0 {
+		t.Fatalf("tool_result should clear queuedMsgs, got %d", m.queuedMsgs)
+	}
+
+	// The queued message should be in the convo as a user entry.
+	text := m.convoText()
+	if !strings.Contains(text, "fix the bug") {
+		t.Fatalf("convo should contain the lifted message: %q", text)
+	}
+}
+
+// When a turn has no tool calls (the LLM replies without calling tools),
+// the queued messages are flushed by flushQueued and rendered on the done event.
+func TestTUI_PendingFlushedOnDone(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m.busy = true
+
+	// Queue a mid-turn message.
+	m = m.handleEvent(evMsg{"type": "queued", "text": "also check tests", "count": 1.0})
+
+	// No tool_call/tool_result — just tokens and done.
+	m = m.handleEvent(evMsg{"type": "token", "text": "ok"})
+	m = m.handleEvent(evMsg{"type": "done"})
+
+	// The message should have been moved into the convo by the done handler.
+	if len(m.queuedTexts) != 0 {
+		t.Fatalf("done should clear queuedTexts, got %d", len(m.queuedTexts))
+	}
+	text := m.convoText()
+	if !strings.Contains(text, "also check tests") {
+		t.Fatalf("convo should contain the flushed message: %q", text)
+	}
+}
+
+// Multiple queued messages should all be rendered after the tool result that
+// lifted them, in the order they were queued.
+func TestTUI_MultiplePendingMessages(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m.busy = true
+
+	m = m.handleEvent(evMsg{"type": "queued", "text": "first", "count": 1.0})
+	m = m.handleEvent(evMsg{"type": "queued", "text": "second", "count": 2.0})
+	if len(m.queuedTexts) != 2 {
+		t.Fatalf("should have 2 queued, got %d", len(m.queuedTexts))
+	}
+
+	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "ok"})
+	if len(m.queuedTexts) != 0 {
+		t.Fatalf("tool_result should clear all queuedTexts, got %d", len(m.queuedTexts))
+	}
+
+	text := m.convoText()
+	if !strings.Contains(text, "first") || !strings.Contains(text, "second") {
+		t.Fatalf("convo should contain both messages: %q", text)
+	}
+}
+
+// Pending messages on error should also be rendered into the convo.
+func TestTUI_PendingClearedOnError(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m.busy = true
+
+	m = m.handleEvent(evMsg{"type": "queued", "text": "before crash", "count": 1.0})
+	m = m.handleEvent(evMsg{"type": "error", "error": "provider down"})
+
+	if len(m.queuedTexts) != 0 {
+		t.Fatalf("error should clear queuedTexts, got %d", len(m.queuedTexts))
+	}
+	text := m.convoText()
+	if !strings.Contains(text, "before crash") {
+		t.Fatalf("convo should contain the message flushed on error: %q", text)
+	}
+}

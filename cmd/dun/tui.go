@@ -1509,6 +1509,17 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if strings.Contains(result, "[") && strings.Contains(result, "characters elided") {
 			m.ctxStats.resultsTruncated++
 		}
+		// liftQueued drains the buffer into every tool result. So any pending
+		// messages were just delivered to the LLM — render them in the convo
+		// right after this tool result, and clear the pending display.
+		if len(m.queuedTexts) > 0 {
+			for _, txt := range m.queuedTexts {
+				m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + txt)})
+			}
+			m.queuedTexts = nil
+			m.queuedMsgs = 0
+			m.scrollPinned = true
+		}
 		m.refresh()
 	case "history":
 		if m.skipHistory {
