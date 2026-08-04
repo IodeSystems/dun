@@ -112,10 +112,16 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 	case "", "status":
 		return serverStatusLine(h, id, label)
 	case "on":
+		t0 := time.Now()
 		if err := h.StartServer(ctx, id); err != nil {
 			return label + ": did not start — " + oneLine(err.Error()) + "\ncarrying on without it; fix and try /" + alias + " on again"
 		}
-		return label + ": " + runningSummary(h, id)
+		elapsed := time.Since(t0)
+		msg := label + ": " + runningSummary(h, id)
+		if elapsed > time.Second {
+			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
+		}
+		return msg
 	case "off":
 		if err := h.StopServer(id); err != nil {
 			return label + ": " + err.Error()
@@ -139,24 +145,40 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 		if err := h.StopServer(id); err != nil {
 			return label + ": " + err.Error()
 		}
+		t0 := time.Now()
 		if err := h.StartServer(ctx, id); err != nil {
 			return label + ": did not come back — " + oneLine(err.Error()) +
 				"\nit is STOPPED now; /mcp restart " + id + " to retry"
 		}
+		elapsed := time.Since(t0)
 		if !wasRunning {
-			return label + ": started (it was not running) · " + runningSummary(h, id)
+			msg := label + ": started (it was not running) · " + runningSummary(h, id)
+			if elapsed > time.Second {
+				msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
+			}
+			return msg
 		}
-		return label + ": restarted · " + runningSummary(h, id)
+		msg := label + ": restarted · " + runningSummary(h, id)
+		if elapsed > time.Second {
+			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
+		}
+		return msg
 	case "auto":
 		path, err := h.SetAutostart(id, true)
 		if err != nil {
 			return label + ": " + err.Error()
 		}
 		msg := label + ": autostart on (saved to " + path + ")"
+		t0 := time.Now()
 		if err := h.StartServer(ctx, id); err != nil {
 			return msg + "\nbut it did not start now — " + oneLine(err.Error())
 		}
-		return msg + "\n" + label + ": " + runningSummary(h, id)
+		elapsed := time.Since(t0)
+		line := label + ": " + runningSummary(h, id)
+		if elapsed > time.Second {
+			line += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
+		}
+		return msg + "\n" + line
 	case "manual":
 		path, err := h.SetAutostart(id, false)
 		if err != nil {

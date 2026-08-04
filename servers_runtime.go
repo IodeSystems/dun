@@ -35,9 +35,10 @@ type ServerState struct {
 	ID      string `json:"id"`
 	Running bool   `json:"running"`
 	// Auto reports whether this server starts on its own next session.
-	Auto  bool   `json:"auto"`
-	Tools int    `json:"tools"`
-	Err   string `json:"err,omitempty"` // why the last start attempt failed
+	Auto         bool   `json:"auto"`
+	Tools        int    `json:"tools"`
+	Err          string `json:"err,omitempty"` // why the last start attempt failed
+	StartSeconds float64 `json:"startSeconds,omitempty"` // how long the last start took, in seconds
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -53,11 +54,12 @@ func (h *Harness) Servers() []ServerState {
 	out := make([]ServerState, 0, len(h.specs))
 	for _, s := range h.specs {
 		out = append(out, ServerState{
-			ID:      s.ID,
-			Running: h.mgr.ServerStarted(s.ID),
-			Auto:    s.Autostart,
-			Tools:   counts[s.ID],
-			Err:     h.lastErr[s.ID],
+			ID:           s.ID,
+			Running:      h.mgr.ServerStarted(s.ID),
+			Auto:         s.Autostart,
+			Tools:        counts[s.ID],
+			Err:          h.lastErr[s.ID],
+			StartSeconds: h.lastStart[s.ID].Seconds(),
 		})
 	}
 	return out
@@ -138,6 +140,7 @@ func (h *Harness) spec(id string) (Server, bool) {
 // set. The error it returns is also recorded, so a UI can show why a family is
 // missing long after the attempt.
 func (h *Harness) startServer(ctx context.Context, s Server) error {
+	t0 := time.Now()
 	timeout := time.Duration(s.Timeout) * time.Second
 	if timeout <= 0 {
 		timeout = 90 * time.Second
@@ -167,6 +170,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		h.lastErr[s.ID] = err.Error()
 	} else {
 		delete(h.lastErr, s.ID)
+		h.lastStart[s.ID] = time.Since(t0)
 	}
 	h.srvMu.Unlock()
 	h.applyTools()

@@ -302,7 +302,8 @@ type Harness struct {
 	cfg     Config
 	srvMu   sync.Mutex
 	specs   []Server          // every configured server, running or not
-	lastErr map[string]string // id → why its last start attempt failed
+	lastErr     map[string]string    // id → why its last start attempt failed
+	lastStart   map[string]time.Duration // id → how long its last start took
 	// turnMu is held for the length of a turn. A server command arrives on
 	// another goroutine (the -p reader), and swapping the Session's tools out
 	// from under a running turn is a data race — so a rebuild that cannot take
@@ -797,7 +798,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	store.onNotify = cfg.OnNotify
 	h := &Harness{mgr: mgr, store: store, client: cfg.Client,
 		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
-		cfg: cfg, specs: servers, lastErr: map[string]string{},
+		cfg: cfg, specs: servers, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID}
 
 	// Server→client push. Only the OWNER registers: a child shares its

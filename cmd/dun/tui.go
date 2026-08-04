@@ -1407,6 +1407,19 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			}
 		}
 		m.append(stDim.Render(fmt.Sprintf("ready — %d tools: %s", len(m.tools), strings.Join(m.tools, ", "))))
+		// Show per-server start times for anything that took >1s.
+		if srvs, ok := ev["servers"].([]any); ok {
+			for _, sv := range srvs {
+				s, ok := sv.(map[string]any)
+				if !ok {
+					continue
+				}
+				secs, _ := s["startSeconds"].(float64)
+				if secs > 1.0 {
+					m.append(stDim.Render(fmt.Sprintf("%s started in %ds", s["id"], int(secs+0.5))))
+				}
+			}
+		}
 		// Say which tool families are off, once. Otherwise the only symptom is
 		// an agent that never navigates code or searches docs, and no reason.
 		if hint := strings.TrimSpace(str(ev["hint"])); hint != "" {
