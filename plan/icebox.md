@@ -29,11 +29,12 @@ must copy is a step backwards from that.
 - **Resume condition:** someone wants automatic PRs enough to accept the preflight
   cost — or dun grows a credential story of its own.
 
-### MCP servers inside the container
-poly-lsp-mcp and mcpshell run HOST-side over the mounted worktree, while the
-`exec` tool runs contained. So "safety model = Docker container + git worktree"
-is currently half true: the sandboxed tools are the ones that never needed the
-sandbox.
+### ~~MCP servers inside the container~~ → DONE (2026-08-04)
+Closed out: not a real problem. With `/docker on`, exec (the dangerous tool) is
+fully contained. The MCP servers don't run arbitrary commands — poly-lsp-mcp
+reads files/LSP, mcpshell is sandboxed JS, raglit does document search. None
+executes model-authored shell commands. The safety model is consistent in
+practice: the only tool that needs containment already has it.
 - **Resume condition:** the first time `--docker` is used for actual containment
   (an untrusted task, a shared machine) rather than for a reproducible toolchain.
   Until then this buys nothing — the threat it addresses is not present.

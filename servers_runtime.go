@@ -260,6 +260,26 @@ func (h *Harness) rebuildTools() {
 		toolDefs = append(toolDefs, askToolDef())
 		dispatch = withAsk(dispatch, cfg.Ask, report)
 	}
+	// Mount tool: only useful when exec runs inside Docker — there is no
+	// container to mount into when exec is on the host.
+	if cfg.Mount != nil && cfg.Exec != nil {
+		_, isDocker := cfg.Exec.(DockerExec)
+		if isDocker {
+			toolDefs = append(toolDefs, mountToolDef())
+			dispatch = withMount(dispatch, func(ctx context.Context, source, name string) (bool, error) {
+				// Ask the user first, then apply the mount if approved.
+				ok, err := cfg.Mount(ctx, source, name)
+				if err != nil || !ok {
+					return ok, err
+				}
+				// User approved — add the mount to the running session.
+				if err := h.AddMount(source, name); err != nil {
+					return false, err
+				}
+				return true, nil
+			}, report)
+		}
+	}
 	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
 	// a child never receives `agent`, so depth-1 holds with no counter to get
 	// wrong, and a root never receives `tell_parent`, so it is absent rather

@@ -311,6 +311,11 @@ func (w *Worktree) RebaseContinue() string {
 // the base branch, which ship still verifies).
 func (w *Worktree) IsRepo() bool { return w.repoRoot != "" }
 
+// RepoRoot returns the top-level directory of the git repo, or "" when not a
+// repo. Used to resolve relative mount paths (e.g. ../agentkit from go.mod
+// replace) against the origin checkout rather than the throwaway worktree.
+func (w *Worktree) RepoRoot() string { return w.repoRoot }
+
 // CurrentBranch is the branch HEAD is on, or "" when detached or not a repo.
 // Ship asks git rather than trusting w.Branch: the agent can switch branches
 // with exec, and shipping the wrong ref is not a recoverable mistake.

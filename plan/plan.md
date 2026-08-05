@@ -30,10 +30,10 @@ iodesystems/dun`.
 ```
 dun (host: Bubble Tea TUI + agentkit Session + LLM → corrallm/bonsai)
   ├─ per task: git WORKTREE of the repo (isolated mutable surface)
-  ├─ Docker CONTAINER (toolchain + the 3 iode tools), worktree mounted in
-  ├─ mcpmgr spawns servers via `docker exec -i`:
+  ├─ mcpmgr spawns servers on the HOST (stdio JSON-RPC):
   │     poly-lsp-mcp mcp --root /work · mcpshell mcp --files-dir /work · raglit serve
-  ├─ exec tool = `docker exec` → build/test/git (safe, contained)
+  ├─ Docker CONTAINER (when /docker on): exec tool only
+  │     `docker run -v worktree:/work` → build/test/git (safe, contained)
   └─ end: worktree diff → review in TUI → branch/PR
 ```
 
@@ -274,7 +274,7 @@ tokens and cannot see what it is doing.
   child's token spend against the parent's; making the task line clickable
   (mouse is already wired for the viewport).
 
-### ◐ F. A child wedged with no in-flight request — observability added (2026-08-03)
+### ✅ F. A child wedged with no in-flight request — observability added (2026-08-03)
 Live session `20260801-095147`, agent #1. Its last transcript record is
 `11:50:13` (`tell_parent` → "answer recorded — you can stop now"), its last
 prompt `11:50:14` (327 messages, ~106k tokens). Then nothing for 15+ minutes:

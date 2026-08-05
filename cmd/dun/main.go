@@ -401,6 +401,20 @@ func main() {
 				}
 			})
 		}
+		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {
+			return withoutClock(func() (bool, error) {
+				em.emit(event{"type": "mount", "source": source, "name": name})
+				select {
+				case a, ok := <-in.answers:
+					if !ok {
+						return false, fmt.Errorf("input closed")
+					}
+					return strings.TrimSpace(strings.ToLower(a)) == "yes" || strings.TrimSpace(strings.ToLower(a)) == "y", nil
+				case <-actx.Done():
+					return false, actx.Err()
+				}
+			})
+		}
 	} else {
 		cfg.OnToken = func(s string) { fmt.Print(s) }
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
@@ -414,6 +428,17 @@ func main() {
 		cfg.OnCompaction = func(n dun.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
 			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi) })
+		}
+		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {
+			return withoutClock(func() (bool, error) {
+				ans, err := humanAsk(actx,
+					fmt.Sprintf("Mount %s as /%s inside the container?", source, name),
+					[]string{"yes", "no"}, false)
+				if err != nil {
+					return false, err
+				}
+				return strings.TrimSpace(strings.ToLower(ans)) == "yes", nil
+			})
 		}
 		fmt.Fprintf(os.Stderr, "dun: spawning tool servers for %s …\n", absWS)
 	}

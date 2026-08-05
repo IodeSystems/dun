@@ -217,6 +217,7 @@ type Config struct {
 	System     string      // nil → defaultSystem
 	Exec       ExecBackend // nil → no exec tool; else adds the built-in exec tool
 	Ask        AskFunc     // nil → no ask_user tool; else adds the human-in-the-loop tool
+	Mount      MountFunc   // nil → no mount tool; else adds the mount (host path → container) tool
 	Worktree   *Worktree   // the session worktree (for ship)
 	EnableShip bool        // add the ship tool (enabled by default)
 	ShipCfg    *ShipConfig // ship policy + checks; nil = permissive defaults, no checks
@@ -1010,6 +1011,62 @@ func (h *Harness) Rehoist(workspace string, wt *Worktree, dockerOn bool) {
 	h.applyTools()
 }
 
+// AddMount adds a mount to the running session mid-flight. This is called by
+// the mount tool after the user approves. It resolves the source path, adds
+// the mount to the config, recreates the DockerExec backend with the new
+// volume, and creates the symlink in the worktree parent directory.
+func (h *Harness) AddMount(source, name string) error {
+	repoRoot := ""
+	if h.cfg.Worktree != nil {
+		repoRoot = h.cfg.Worktree.RepoRoot()
+	}
+	resolved, err := resolveMountSource(source, repoRoot)
+	if err != nil {
+		return err
+	}
+
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+
+	// Check for duplicate name.
+	for _, m := range h.cfg.ExtraMounts {
+		if m.Name == name {
+			return fmt.Errorf("mount name %q is already in use", name)
+		}
+	}
+
+	spec := MountSpec{Source: resolved, Name: name}
+	h.cfg.ExtraMounts = append(h.cfg.ExtraMounts, spec)
+
+	// Reconfigure the exec backend with the new mount.
+	if exec, ok := h.cfg.Exec.(DockerExec); ok {
+		exec.ExtraMounts = h.cfg.ExtraMounts
+		h.cfg.Exec = exec
+	}
+
+	// Create the symlink in the worktree parent directory.
+	if h.cfg.Worktree != nil && h.cfg.Worktree.IsRepo() {
+		wtParent := filepath.Join(repoRoot, ".dun", "worktrees")
+		link := filepath.Join(wtParent, name)
+		if _, err := os.Lstat(link); err != nil {
+			if err := os.MkdirAll(wtParent, 0755); err != nil {
+				return fmt.Errorf("create worktree parent: %w", err)
+			}
+			if err := os.Symlink(resolved, link); err != nil {
+				return fmt.Errorf("symlink %s: %w", name, err)
+			}
+		}
+	}
+
+	// Update the worktree's mount list too.
+	if h.cfg.Worktree != nil {
+		h.cfg.Worktree.Mounts = h.cfg.ExtraMounts
+	}
+
+	h.applyTools()
+	return nil
+}
+
 // ExecBackend returns the current exec backend.
 func (h *Harness) ExecBackend() ExecBackend {
 	h.srvMu.Lock()
@@ -1168,6 +1225,10 @@ var (
 		"the build and tests after changing code — and to run git. Foreground commands have no time limit: " +
 		"never run anything interactive (it has no terminal and no input, so it can only hang), " +
 		"and put long work in background:true, which has no limit."
+	systemMount = "\n- mount: ask the user to mount a host directory inside the Docker container. " +
+		"Use this when a build needs access to a path outside the worktree " +
+		"(e.g. a go.mod replace directive pointing to a sibling module like ../agentkit). " +
+		"The user must approve before the mount is added."
 	systemMonitor = "\n- exec_monitor: change what a background job tells you (buffer_bytes, grep, ignore). " +
 		"A job stays silent until it finishes and you will be notified — do NOT poll it. " +
 		"Only call exec_monitor to tune output or mute a job. " +
@@ -1217,6 +1278,9 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree) string {
 		b.WriteString(systemExec)
 		b.WriteString(systemExecCap)
 		b.WriteString(systemMonitor)
+		if _, ok := exec.(DockerExec); ok {
+			b.WriteString(systemMount)
+		}
 	}
 	b.WriteString(systemAsk)
 	b.WriteString(systemRecap)
