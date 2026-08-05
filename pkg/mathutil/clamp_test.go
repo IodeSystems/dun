@@ -5,17 +5,16 @@ import "testing"
 func TestClamp(t *testing.T) {
 	tests := []struct {
 		name string
-		v, lo, hi int
-		want   int
+		v, lo, hi, want int
 	}{
-		{"within range", 5, 0, 10, 5},
-		{"below range", -1, 0, 10, 0},
-		{"above range", 11, 0, 10, 10},
-		{"equal to lo", 0, 0, 10, 0},
-		{"equal to hi", 10, 0, 10, 10},
+		{"within range", 5, 1, 10, 5},
+		{"below lo", 0, 1, 10, 1},
+		{"above hi", 20, 1, 10, 10},
+		{"equal to lo", 1, 1, 10, 1},
+		{"equal to hi", 10, 1, 10, 10},
 		{"lo equals hi", 5, 3, 3, 3},
-		{"negative range", -5, -10, -1, -5},
-		{"below negative range", -11, -10, -1, -10},
+		{"negative values", -5, -10, -1, -5},
+		{"below negative range", -20, -10, -1, -10},
 		{"above negative range", 0, -10, -1, -1},
 	}
 	for _, tt := range tests {

@@ -164,7 +164,6 @@ func main() {
 		}
 		args := []string{
 			"run", "-i", "--rm",
-			"--user", strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
 			"-v", absWorkspace + ":/work", "-w", "/work",
 			"-e", "DUN_DOCKER=1",
 		}
@@ -1336,3 +1335,4 @@ func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "dun: %v\n", err)
 	os.Exit(1)
 }
+
