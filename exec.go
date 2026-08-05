@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"unicode/utf8"
@@ -16,6 +17,18 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
+
+// envInt reads an integer from the environment, falling back to fallback.
+func envInt(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	_, err := strconv.Atoi(fallback)
+	if err == nil {
+		return fallback
+	}
+	return "0"
+}
 
 // Isolation, tier 2 — the exec tool.
 //
@@ -237,7 +250,16 @@ func (d DockerExec) runArgs(name, command string) []string {
 	// canceller was session teardown; with a 5m deadline on every foreground
 	// exec it is a routine leak — a timed-out `go test` would keep burning the
 	// machine's cores long after dun reported it killed.
-	args := []string{"run", "--rm", "--name", name, "-v", d.Dir + ":/work", "-w", "/work"}
+	// --user matches the host UID:GID so files created in the container are
+	// owned by the same user that runs the MCP servers on the host — without
+	// it, exec creates root-owned files that node_edit can't overwrite.
+	uid := envInt("UID", "0")
+	gid := envInt("GID", "0")
+	args := []string{
+		"run", "--rm", "--name", name,
+		"--user", uid + ":" + gid,
+		"-v", d.Dir + ":/work", "-w", "/work",
+	}
 	if !d.Network {
 		args = append(args, "--network", "none")
 	}

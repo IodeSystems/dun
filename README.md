@@ -247,8 +247,8 @@ host by default, or **contained in a Docker container** with the worktree
 mounted and no network:
 
 ```sh
-dun --workspace ./repo --docker=true             # exec runs in ubuntu:24.04
-dun --workspace ./repo --docker golang:1.26      # exec runs in a specific image
+dun --workspace ./repo --docker=true             # entire process in bundled docker image
+dun --workspace ./repo --docker golang:1.26      # entire process in a specific image
 dun --workspace ./repo                        # exec runs on the host
 dun --no-worktree ...                               # work in place (no isolation)
 ```

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -95,7 +96,7 @@ func main() {
 	// is resolved after parse (flag > env > config).
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
-	docker := flag.String("docker", "", "run exec commands in a Docker container (--docker=true for default image, --docker=IMAGE for a specific one)")
+	docker := flag.String("docker", "", "run the entire process in a Docker container (--docker=true for bundled image, --docker=IMAGE for a specific one)")
 	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
@@ -129,6 +130,72 @@ func main() {
 	flag.Var(&ragFlag, "rag", "start the docs server (raglit) this run: --rag or --rag=false (default: the saved setting)")
 	flag.Var(&lspFlag, "lsp", "start the code server (poly-lsp-mcp) this run: --lsp or --lsp=false (default: the saved setting)")
 	flag.Parse()
+
+	// Full Docker mode: when --docker is set and we are NOT already inside a
+	// container, re-exec the ENTIRE process (agent + MCP servers) inside one.
+	// This eliminates the split-brain where node_edit writes on the host but
+	// exec runs in a container. Inside the container, --docker is cleared so
+	// exec runs natively.
+	dockerImg := resolveDockerImage(*docker)
+	if dockerImg != "" && os.Getenv("DUN_DOCKER") == "" {
+		// Full Docker mode: re-exec the entire process (agent + MCP servers)
+		// inside a container. This eliminates the split-brain where node_edit
+		// writes on the host but exec runs in a separate container.
+		//
+		// When dockerImg is the bundled image (dun:local), we build it from
+		// the Dockerfile if it doesn't exist yet. Any other image name is used
+		// as-is (the user is responsible for having it available).
+		if dockerImg == defaultDockerImage {
+			dockerImg = "dun:local"
+			if err := ensureDunImage(); err != nil {
+				fmt.Fprintf(os.Stderr, "dun: --docker: %v\n", err)
+				fmt.Fprintf(os.Stderr, "    Build it manually: tools/build-docker.sh\n")
+				os.Exit(1)
+			}
+		}
+
+		selfPath, err := os.Executable()
+		if err != nil {
+			selfPath = "dun"
+		}
+		absWorkspace, err := filepath.Abs(*ws)
+		if err != nil {
+			fatal(err)
+		}
+		args := []string{
+			"run", "--rm",
+			"--user", strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
+			"-v", absWorkspace + ":/work", "-w", "/work",
+			"-e", "DUN_DOCKER=1",
+		}
+		if *dockerNetwork {
+			args = append(args, "--network", "host")
+		} else {
+			args = append(args, "--network", "none")
+		}
+		// Use the baked-in binary for our bundled image; for custom images,
+		// the host binary may be inside the mounted workspace and would
+		// resolve to a stale or wrong copy inside the container.
+		if dockerImg == "dun:local" {
+			// dun:local has ENTRYPOINT ["dun"], so just pass the args
+			args = append(args, dockerImg)
+		} else {
+			dunInContainer := selfPath
+			args = append(args, dockerImg, dunInContainer)
+		}
+		args = append(args, dockerReexecArgs()...)
+		cmd := exec.CommandContext(context.Background(), "docker", args...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				os.Exit(exitErr.ExitCode())
+			}
+			fatal(fmt.Errorf("docker run: %w", err))
+		}
+		os.Exit(cmd.ProcessState.ExitCode())
+	}
 	// --pr implies shipping: it is a ship MODE, not a separate ability.
 	effShip := (*shipFlag && !*noShip) || *pr
 	ship := &effShip

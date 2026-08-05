@@ -1,0 +1,4 @@
+.git
+*.recap*.jsonl
+*.log
+tmp
