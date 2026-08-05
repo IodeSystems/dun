@@ -39,13 +39,10 @@ sandbox.
   Until then this buys nothing — the threat it addresses is not present.
 - Note this is the larger half of what is left of Slice 3.
 
-### Configurable foreground exec timeout
-`defaultExecTimeout` is a 5m package constant, sized for a session a human is
-watching. Sub-agents (plan D) and slow toolchains are both reasons it might need
-to be per-repo (`dun.json`) or per-spawn.
-- **Resume condition:** REACHED — sub-agents (plan D) are being built, and a
-  child running a long build hits the limit with nobody watching. Settle it in
-  that slice; it is no longer a knob nobody has needed.
+### ~~Configurable foreground exec timeout~~ → DONE (2026-08-04)
+Resolved by removing the timeout entirely. Foreground and background exec both
+have no automatic kill. A wedged command is caught by the monitor heartbeat
+(notifies rather than kills), avoiding expensive throwaway work.
 
 ### Co-reader detection on dun's own tty
 dun could notice it is not the only process reading its terminal and say so; that

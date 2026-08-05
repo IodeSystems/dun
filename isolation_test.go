@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/iodesystems/agentkit/llm"
 )
@@ -175,56 +174,7 @@ type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
-// A foreground command that never finishes must be killed and REPORTED as
-// killed. The real case is a command blocked on input it can never receive —
-// `gh auth login` polling a device flow with stdin on /dev/null — which held a
-// session for 14 minutes and looked, from the outside, like slow work.
-func TestHostExec_ForegroundDeadlineKillsAndReports(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	out := HostExec{Dir: t.TempDir()}.Run(ctx, "sleep 30", nil)
-	if d := time.Since(start); d > 10*time.Second {
-		t.Fatalf("the deadline did not kill the command: took %s", d)
-	}
-	if !out.TimedOut || !out.Failed() {
-		t.Errorf("a killed command must report as timed out and failed: %+v", out)
-	}
-	if !strings.Contains(out.Render(), "TIMED OUT") {
-		t.Errorf("a timeout must say so, not surface as a bare signal: %q", out.Render())
-	}
-}
 
-// The default only applies where nothing better is known: a caller with its own
-// deadline (ship's checks carry ship.checkTimeout) keeps it, and a background
-// job — whose entire purpose is the long build — is exempt.
-func TestBound_DefaultsOnlyWhenNothingElseSaysOtherwise(t *testing.T) {
-	_, cancel, limit := bound(context.Background())
-	defer cancel()
-	if limit != defaultExecTimeout {
-		t.Errorf("a bare foreground exec should get the default, got %s", limit)
-	}
-
-	own, ownCancel := context.WithTimeout(context.Background(), time.Hour)
-	defer ownCancel()
-	ctx, cancel2, limit2 := bound(own)
-	defer cancel2()
-	if d, ok := ctx.Deadline(); !ok || time.Until(d) < 30*time.Minute {
-		t.Error("an explicit deadline was silently shortened to the default")
-	}
-	if limit2 < 30*time.Minute {
-		t.Errorf("reported limit should be the caller's, got %s", limit2)
-	}
-
-	bg, cancel3, limit3 := bound(WithoutExecTimeout(context.Background()))
-	defer cancel3()
-	if _, ok := bg.Deadline(); ok {
-		t.Error("a background job must not be bounded — that is what background:true is for")
-	}
-	if limit3 != 0 {
-		t.Errorf("no limit in force should report 0, got %s", limit3)
-	}
-}
 
 func TestWithExec_RoutesExecLocallyElseMCP(t *testing.T) {
 	inner := agentDispatch(func(name string) string { return "MCP:" + name })

@@ -194,8 +194,6 @@ func (j *bgJob) status() string {
 
 func outcome(r ExecResult) string {
 	switch {
-	case r.TimedOut:
-		return "TIMED OUT"
 	case r.Err != "":
 		return "FAILED to run (" + r.Err + ")"
 	case r.Code != 0:
@@ -306,9 +304,8 @@ func (h *Harness) startBackground(backend ExecBackend, command string) *bgJob {
 	go j.heartbeat()
 
 	go func() {
-		// Exempt from defaultExecTimeout: an unbounded run is the entire reason
-		// to send a command here instead of running it in the foreground.
-		res := backend.Run(WithoutExecTimeout(context.Background()), command, j)
+		// Background jobs have no time limit: the whole point is the long build.
+		res := backend.Run(context.Background(), command, j)
 		h.bgMu.Lock()
 		h.bgRun--
 		h.bgMu.Unlock()
@@ -379,7 +376,7 @@ type JobInfo struct {
 	ID      int    `json:"id"`
 	Command string `json:"command"`
 	Log     string `json:"log,omitempty"`
-	State   string `json:"state"` // running · ok · failed · timeout · error
+	State   string `json:"state"` // running · ok · failed · error
 	Bytes   int64  `json:"bytes"`
 	Started int64  `json:"started"`
 	Ended   int64  `json:"ended,omitempty"` // 0 while running
@@ -408,8 +405,6 @@ func (j *bgJob) info() JobInfo {
 // but one the UI can switch on instead of matching prose.
 func jobState(r ExecResult) string {
 	switch {
-	case r.TimedOut:
-		return "timeout"
 	case r.Err != "":
 		return "error"
 	case r.Code != 0:

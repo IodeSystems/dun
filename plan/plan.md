@@ -101,6 +101,23 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ✅ 2. Exec timeout removed — monitor heartbeat catches wedged commands (2026-08-04)
+The `defaultExecTimeout` (5m) was a blunt instrument: it killed foreground
+commands that were legitimately long, and the only escape was `background:true`.
+The resolution is to remove the timeout entirely and rely on the monitor
+heartbeat (the same mechanism that catches wedged background jobs and sub-agents)
+to notify rather than kill. This avoids expensive throwaway work — a build that
+ran 4m 50s before being killed is worse than one that ran 5m 10s and was
+reported as wedged.
+- Removed `defaultExecTimeout`, `noTimeoutKey`, `WithoutExecTimeout`, `bound()`.
+- Removed `TimedOut` and `Limit` fields from `ExecResult`.
+- Simplified `finish()`, `Render()`, `Failed()`, `jobState()`.
+- `HostExec.Run()` and `DockerExec.Run()` no longer call `bound()`.
+- `startBackground()` no longer exempts from a timeout that no longer exists.
+- Updated tests: removed `TestHostExec_ForegroundDeadlineKillsAndReports` and
+  `TestBound_DefaultsOnlyWhenNothingElseSaysOtherwise`.
+- System prompt already said "no time limit" — no change needed there.
+
 ### ✅ 0. Slice D and the activity zone — REBUILT (2026-08-01)
 The deletion below happened; the recovery is done. The tracked half came back
 from `stash@{1}` and applied cleanly except `harness.go` and
@@ -560,10 +577,11 @@ See `done.md` — steps 1–5 built, verified pre-deletion, rebuilt 2026-08-01.
 - **Nothing the model runs in the foreground may block forever, and nothing it
   runs in the background may be cut off.** A foreground command waiting on input
   it can never receive is indistinguishable from slow work (measured: 14
-  minutes), so it dies at `defaultExecTimeout`. A background job exists precisely
-  to be long, so it is exempt — the two rules are the same rule, applied to
-  opposite intents. A caller with its own deadline (ship's `checkTimeout`) keeps
-  it.
+  minutes). There is no automatic kill: a wedged foreground command is caught by
+  the monitor heartbeat (same mechanism as background jobs), which notifies
+  rather than kills — avoiding expensive throwaway work. A background job exists
+  precisely to be long, so it is exempt. A caller with its own deadline (ship's
+  `checkTimeout`) keeps it.
 - **A background job is silent until asked.** Streaming every job by default
   would spend the context window narrating a build one line at a time; saying
   nothing until exit is what made a job that died in second 2 look identical to

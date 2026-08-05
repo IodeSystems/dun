@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync/atomic"
-	"time"
 	"unicode/utf8"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -46,20 +45,15 @@ type ExecResult struct {
 	// Output is combined stdout+stderr, verbatim.
 	Output string
 	// Code is the process exit status. 0 is success; -1 means it never ran, or
-	// was killed by a signal (a timeout is the usual reason).
+	// was killed by a signal.
 	Code int
-	// TimedOut is set when the deadline killed it — distinct from Code == -1,
-	// which a command can also reach by being killed for other reasons.
-	TimedOut bool
-	// Limit is the deadline in force, for reporting. 0 = unbounded.
-	Limit time.Duration
 	// Err carries a spawn failure (binary missing, bad cwd) that has no exit
 	// status of its own.
 	Err string
 }
 
 // Failed is the question every caller actually asks.
-func (r ExecResult) Failed() bool { return r.TimedOut || r.Code != 0 || r.Err != "" }
+func (r ExecResult) Failed() bool { return r.Code != 0 || r.Err != "" }
 
 // Render is the model-facing form: the output, plus an "[exit: …]" line when
 // something went wrong. The marker stays because the model reads it, not
@@ -73,10 +67,6 @@ func (r ExecResult) Render() string {
 		s += "\n"
 	}
 	switch {
-	case r.TimedOut:
-		s += fmt.Sprintf("[exit: TIMED OUT after %s and was killed. Output above is partial. "+
-			"If this command legitimately needs longer, run it with background:true; if it was "+
-			"waiting for input, it will never get any — do not retry it as-is.]", r.Limit)
 	case r.Err != "":
 		s += fmt.Sprintf("[exit: %s]", r.Err)
 	default:
@@ -193,41 +183,6 @@ func safeCutFront(s string) string {
 	return s
 }
 
-// defaultExecTimeout bounds a FOREGROUND exec. Set to 0 (no deadline): long
-// builds, slow toolchains, and sub-agent work all run foreground when the
-// model asks for it. A wedged command is caught by a monitor heartbeat
-// which notifies rather than kills — avoiding expensive throwaway work.
-const defaultExecTimeout = 0 * time.Minute // infinite — no automatic kill
-
-// noTimeoutKey marks a context as exempt from defaultExecTimeout.
-type noTimeoutKey struct{}
-
-// WithoutExecTimeout exempts ctx from the foreground deadline. Background jobs
-// are the only caller: the whole point of background:true is the long build,
-// and it blocks nothing while it runs.
-func WithoutExecTimeout(ctx context.Context) context.Context {
-	return context.WithValue(ctx, noTimeoutKey{}, true)
-}
-
-// bound applies defaultExecTimeout, and returns the limit in force so a kill
-// can be reported as a timeout rather than as a bare signal.
-//
-// A caller that already set a deadline keeps it — ship's checks carry
-// ship.checkTimeout, which is a deliberate per-repo number and must not be
-// silently shortened to five minutes.
-func bound(ctx context.Context) (context.Context, context.CancelFunc, time.Duration) {
-	if d, ok := ctx.Deadline(); ok {
-		return ctx, func() {}, time.Until(d)
-	}
-	if exempt, _ := ctx.Value(noTimeoutKey{}).(bool); exempt {
-		return ctx, func() {}, 0
-	}
-	if defaultExecTimeout == 0 {
-		return ctx, func() {}, 0
-	}
-	c, cancel := context.WithTimeout(ctx, defaultExecTimeout)
-	return c, cancel, defaultExecTimeout
-}
 
 // shellFlags is how every command is run: NON-LOGIN and NON-INTERACTIVE.
 //
@@ -249,15 +204,13 @@ const shellFlags = "-c"
 type HostExec struct{ Dir string }
 
 func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResult {
-	ctx, cancel, limit := bound(ctx)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", shellFlags, command)
 	cmd.Dir = h.Dir
 	// Model-authored commands run git, ssh and friends. None of them may reach
 	// dun's terminal — see detach.go. killGroup is also what makes the deadline
 	// bite: it kills the whole process group, not just the `sh` that spawned it.
 	killGroup(detach(cmd))
-	return finish(ctx, limit, w, cmd)
+	return finish(ctx, w, cmd)
 }
 
 // DockerExec runs each command in a fresh container of Image with Dir mounted at
@@ -296,8 +249,6 @@ func (d DockerExec) runArgs(name, command string) []string {
 }
 
 func (d DockerExec) Run(ctx context.Context, command string, w io.Writer) ExecResult {
-	ctx, cancel, limit := bound(ctx)
-	defer cancel()
 	name := containerName()
 	cmd := killGroup(detach(exec.CommandContext(ctx, "docker", d.runArgs(name, command)...)))
 	// Stop the CONTAINER on cancel, then let killGroup take the client. Best
@@ -308,7 +259,7 @@ func (d DockerExec) Run(ctx context.Context, command string, w io.Writer) ExecRe
 		_ = detach(dockerStop(name)).Run()
 		return kill()
 	}
-	return finish(ctx, limit, w, cmd)
+	return finish(ctx, w, cmd)
 }
 
 // containerName makes a run addressable by `docker stop`. Uniqueness only has
@@ -336,7 +287,7 @@ func dockerStop(name string) *exec.Cmd {
 // equal, which is what makes the interleaving faithful and race-free. Assigning
 // two separate-but-equivalent writers would silently get two goroutines racing
 // on the buffer.
-func finish(ctx context.Context, limit time.Duration, w io.Writer, cmd *exec.Cmd) ExecResult {
+func finish(ctx context.Context, w io.Writer, cmd *exec.Cmd) ExecResult {
 	var buf bytes.Buffer
 	sink := io.Writer(&buf)
 	if w != nil {
@@ -345,10 +296,7 @@ func finish(ctx context.Context, limit time.Duration, w io.Writer, cmd *exec.Cmd
 	cmd.Stdout, cmd.Stderr = sink, sink
 	err := cmd.Run()
 
-	res := ExecResult{Output: buf.String(), Limit: limit}
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		res.TimedOut = true
-	}
+	res := ExecResult{Output: buf.String()}
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
