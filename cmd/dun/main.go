@@ -34,6 +34,21 @@ import (
 // TUI header so a stale on-PATH binary is visible at a glance.
 var version = "dev"
 
+// defaultDockerImage is the container used when --docker is passed without an
+// explicit image. Ubuntu 24.04 is the least surprising environment for an LLM:
+// apt, bash, git, and a familiar filesystem.
+const defaultDockerImage = "ubuntu:24.04"
+
+// resolveDockerImage turns the raw --docker flag value into a real image name.
+// "true" → defaultDockerImage, anything else → as-is, "" → "" (off).
+func resolveDockerImage(raw string) string {
+	if raw == "true" {
+		return defaultDockerImage
+	}
+	return raw
+}
+
+
 // usage prints the flags as --long-flags.
 //
 // Go's flag package accepts -tui and --tui identically but PRINTS the first,
@@ -80,7 +95,7 @@ func main() {
 	// is resolved after parse (flag > env > config).
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
-	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
+	docker := flag.String("docker", "", "run exec commands in a Docker container (--docker=true for default image, --docker=IMAGE for a specific one)")
 	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
@@ -194,7 +209,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -204,7 +219,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -295,9 +310,11 @@ func main() {
 	}
 
 	// Isolation tier 2: exec runs in a Docker container (--docker IMAGE), or host.
+	// --docker=true resolves to the default image (ubuntu:24.04).
+	dockerImage := resolveDockerImage(*docker)
 	var backend dun.ExecBackend
-	if *docker != "" {
-		backend = dun.DockerExec{Dir: effWS, Image: *docker, Network: *dockerNetwork, ExtraMounts: mounts}
+	if dockerImage != "" {
+		backend = dun.DockerExec{Dir: effWS, Image: dockerImage, Network: *dockerNetwork, ExtraMounts: mounts}
 	} else {
 		backend = dun.HostExec{Dir: effWS}
 	}
@@ -350,7 +367,7 @@ func main() {
 		AutostartOverride: autostartOverrides(ragFlag, lspFlag),
 		// Stored so /docker on and /worktree new can rehoist with the right
 		// image and mounts without the TUI knowing about them.
-		DockerImage:   *docker,
+		DockerImage:   resolveDockerImage(*docker),
 		DockerNetwork: *dockerNetwork,
 		ExtraMounts: mounts,
 	}
