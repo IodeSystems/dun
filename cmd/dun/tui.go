@@ -110,7 +110,7 @@ var (
 	stAsk    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
 	stSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // selection gutter
 	stEdge   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused divider half
-	stQueued = lipgloss.NewStyle().Foreground(lipgloss.Color("249")).Background(lipgloss.Color("236")) // queued mid-turn messages
+	
 )
 
 // paneStyle borders a pane; the focused one is bright (212), else dim (240) —
@@ -190,6 +190,13 @@ type convoEntry struct {
 	state     viewState    // minimized | expanded | raw
 	docs      *docsBlock   // proactive-RAG summary (nil for normal blocks)
 	tool      *toolBlock   // tool call/result (nil for normal blocks) → enter opens the inspector
+	// provisional marks a message that was typed mid-turn and is queued for
+	// delivery. It appears in the conversation with a dimmed style so the user
+	// knows it landed but hasn't been delivered to the model yet. When the turn
+	// ends and the messages are delivered, they lose the provisional marker and
+	// render as normal user messages.
+	provisional      bool
+	provisionalText  string // original text, used to restore normal style on delivery
 
 	// Wrapped render, cached. A finalized block's text never changes, but
 	// refresh() runs once per STREAMED TOKEN, so re-wrapping the whole
@@ -1533,17 +1540,19 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if strings.Contains(result, "[") && strings.Contains(result, "characters elided") {
 			m.ctxStats.resultsTruncated++
 		}
-		// liftQueued drains the buffer into every tool result. So any pending
-		// messages were just delivered to the LLM — render them in the convo
-		// right after this tool result, and clear the pending display.
-		if len(m.queuedTexts) > 0 {
-			for _, txt := range m.queuedTexts {
-				m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + txt)})
+		// liftQueued drains the buffer into every tool result. So any provisional
+		// messages were just delivered to the LLM — clear the provisional marker
+		// and restore normal style.
+		for i := range m.convo {
+			if m.convo[i].provisional {
+				m.convo[i].provisional = false
+				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
+				m.convo[i].provisionalText = ""
+				m.convo[i].wrapped = "" // invalidate wrap cache
 			}
-			m.queuedTexts = nil
-			m.queuedMsgs = 0
-			m.scrollPinned = true
 		}
+		m.queuedMsgs = 0
+		m.scrollPinned = true
 		m.refresh()
 	case "history":
 		if m.skipHistory {
@@ -1610,16 +1619,27 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		return m.handleRetry(ev)
 	case "queued":
 		// The message was buffered into the RUNNING turn rather than starting a new
-		// one. Remove the echo from the convo (sendUser already appended it) and
-		// store it in the pending area above the divider. When the turn ends the
-		// messages are moved into the convo at the delivery point.
+		// one. Mark it as provisional in the conversation so the user sees it
+		// where it belongs — not stuck above the divider. When the turn ends
+		// the provisional markers are cleared and the messages render normally.
 		text := str(ev["text"])
 		if text != "" {
-			// Pop the echo that sendUser just appended.
-			if len(m.convo) > 0 {
-				m.convo = m.convo[:len(m.convo)-1]
+			// If the last entry is already provisional, this is a new message
+			// that needs its own entry (not the echo from sendUser).
+			if len(m.convo) > 0 && m.convo[len(m.convo)-1].provisional {
+				m.convo = append(m.convo, convoEntry{
+					collapsed:       stDim.Render("› " + text + " (queued)"),
+					provisional:     true,
+					provisionalText: text,
+				})
+			} else if len(m.convo) > 0 {
+				// Mark the echo that sendUser just appended as provisional.
+				e := &m.convo[len(m.convo)-1]
+				e.provisional = true
+				e.provisionalText = text
+				e.collapsed = stDim.Render("› " + text + " (queued)")
+				e.wrapped = "" // invalidate wrap cache
 			}
-			m.queuedTexts = append(m.queuedTexts, text)
 		}
 		m.queuedMsgs = int(evNum(ev["count"]))
 		// Track OOB messages for /context.
@@ -1645,18 +1665,18 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 	case "done":
 		m.flushCur()
-		// Move pending messages into the convo — they were delivered to the LLM
-		// inside tool results during this turn, so they appear here at the
-		// delivery point.
-		if len(m.queuedTexts) > 0 {
-			for _, txt := range m.queuedTexts {
-				m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + txt)})
+		// Clear any remaining provisional markers — the turn is done, so
+		// everything was delivered to the LLM.
+		for i := range m.convo {
+			if m.convo[i].provisional {
+				m.convo[i].provisional = false
+				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
+				m.convo[i].provisionalText = ""
+				m.convo[i].wrapped = ""
 			}
-			m.queuedTexts = nil
-			// Force scroll to bottom so the delivered messages are visible —
-			// the user just typed them and expects to see them.
-			m.scrollPinned = true
 		}
+		// Force scroll to bottom so the delivered messages are visible.
+		m.scrollPinned = true
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
 		m.clearRetry()
@@ -1668,16 +1688,18 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.refresh()
 	case "error":
 		m.append(stErr.Render("error: " + str(ev["error"])))
-		// Move pending messages into the convo — the engine flushes them on error
-		// too, so they're part of the conversation history.
-		if len(m.queuedTexts) > 0 {
-			for _, txt := range m.queuedTexts {
-				m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + txt)})
+		// Clear any remaining provisional markers — the engine flushes them on
+		// error too, so they're part of the conversation history.
+		for i := range m.convo {
+			if m.convo[i].provisional {
+				m.convo[i].provisional = false
+				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
+				m.convo[i].provisionalText = ""
+				m.convo[i].wrapped = ""
 			}
-			m.queuedTexts = nil
-			// Force scroll to bottom so the delivered messages are visible.
-			m.scrollPinned = true
 		}
+		// Force scroll to bottom so the delivered messages are visible.
+		m.scrollPinned = true
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
 		m.clearRetry()
@@ -1827,18 +1849,12 @@ func (m tuiModel) queuedHint() string {
 	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
 }
 
-// pendingView renders queued messages above the divider line. Each message has
-// a highlighted background so the user knows it landed and is waiting for
-// delivery into the next tool result.
+// pendingView is now empty — queued messages appear in the conversation as
+// provisional entries (dimmed, with "(queued)" suffix). The old behavior
+// rendered them above the divider, which made them look disconnected from
+// the conversation flow.
 func (m tuiModel) pendingView() string {
-	if len(m.queuedTexts) == 0 {
-		return ""
-	}
-	var lines []string
-	for _, txt := range m.queuedTexts {
-		lines = append(lines, stQueued.Render("› "+txt))
-	}
-	return strings.Join(lines, "\n")
+	return ""
 }
 
 // exitHint is the status-bar exit prompt — "/exit to exit" when ctrl+c is
