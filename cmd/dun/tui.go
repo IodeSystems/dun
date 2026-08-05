@@ -104,7 +104,7 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 var (
 	stHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	stDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	stUser   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	stUser   = lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("236")).Foreground(lipgloss.Color("144"))
 	stTool   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	stErr    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	stNote   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // proactive notifications
