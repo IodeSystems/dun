@@ -81,6 +81,7 @@ func main() {
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
+	dockerNetwork := flag.Bool("docker-network", false, "give the Docker container network access (default: --network none)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
 	pr := flag.Bool("pr", false, "shorthand for --ship with mode pr (verify, push, then report the gh pr create command)")
@@ -193,7 +194,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, *docker, *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -203,7 +204,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, *docker, *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -296,7 +297,7 @@ func main() {
 	// Isolation tier 2: exec runs in a Docker container (--docker IMAGE), or host.
 	var backend dun.ExecBackend
 	if *docker != "" {
-		backend = dun.DockerExec{Dir: effWS, Image: *docker, ExtraMounts: mounts}
+		backend = dun.DockerExec{Dir: effWS, Image: *docker, Network: *dockerNetwork, ExtraMounts: mounts}
 	} else {
 		backend = dun.HostExec{Dir: effWS}
 	}
@@ -349,7 +350,8 @@ func main() {
 		AutostartOverride: autostartOverrides(ragFlag, lspFlag),
 		// Stored so /docker on and /worktree new can rehoist with the right
 		// image and mounts without the TUI knowing about them.
-		DockerImage: *docker,
+		DockerImage:   *docker,
+		DockerNetwork: *dockerNetwork,
 		ExtraMounts: mounts,
 	}
 	if *prog {

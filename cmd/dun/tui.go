@@ -33,6 +33,7 @@ import (
 // tuiOpts are the flags the TUI forwards to its `dun -p` subprocess.
 type tuiOpts struct {
 	workspace, model, url, key, docker string
+	dockerNetwork                      bool
 	worktree                           bool
 	pr                                 bool
 	ship                               bool
@@ -2960,6 +2961,9 @@ func procArgs(o tuiOpts, mode string) []string {
 	}
 	if o.docker != "" {
 		args = append(args, "--docker", o.docker)
+	}
+	if o.dockerNetwork {
+		args = append(args, "--docker-network")
 	}
 	if o.worktree {
 		args = append(args, "--worktree")

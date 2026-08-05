@@ -371,14 +371,22 @@ func runDockerCmd(ctx context.Context, h *dun.Harness, action string) string {
 	case "", "status":
 		if h.IsDocker() {
 			backend := h.ExecBackend().(dun.DockerExec)
-			return "docker: on (image: " + backend.Image + ")"
+			netStr := "no network"
+			if backend.Network {
+				netStr = "network on"
+			}
+			return "docker: on (image: " + backend.Image + ", " + netStr + ")"
 		}
 		return "docker: off (exec runs on host)"
 	case "on":
 		// Rehoist: keep current workspace + worktree, switch exec to Docker.
 		h.Rehoist(h.Workspace(), h.Worktree(), true)
 		image := h.ExecBackend().(dun.DockerExec).Image
-		return "docker: on (image: " + image + ")"
+		netStr := "no network"
+		if h.ExecBackend().(dun.DockerExec).Network {
+			netStr = "network on"
+		}
+		return "docker: on (image: " + image + ", " + netStr + ")"
 	case "off":
 		// Rehoist: keep current workspace + worktree, switch exec to host.
 		h.Rehoist(h.Workspace(), h.Worktree(), false)
