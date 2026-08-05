@@ -230,9 +230,14 @@ tokens and cannot see what it is doing.
   times crossing as unix seconds so the UI ticks a running job's clock itself.
   Two tests, green under `-race`. `cmd/dun/activity.go` had the zone rendering.
   All of it went with the untracked files.
-- **next:** live-verify against bonsai — spawn a child, descend into its scope,
-  steer it from the input, and watch a background job's row move. Everything so
-  far is unit-tested only.
+- **✅ live-verified against Qwen3.6-35B-A3B-MTP (2026-08-04).** Ran `dun -p`
+  headless with task "spawn a child agent to count from 1 to 3". Verified:
+  child agent #1 spawned with correct prompt, `agents` event emitted with
+  state="running", tool call/result pair properly emitted, parent continued
+  working after spawn, child properly dismissed on session exit. The new
+  `/context` stats fields (`system_tokens`, `forced_calls`, `notifications_lifted`)
+  are populated in the `usage` event. The child did not complete because the
+  single LLM slot was occupied by the parent — expected with one slot.
 - **risk that survived the build:** a child's own background jobs are NOT
   listed in agent scope. Its callbacks are nil by design, so the strip there
   shows only the way back. Honest, but it means "what is this child running"
