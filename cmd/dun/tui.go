@@ -1738,12 +1738,28 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 	switch str(ev["kind"]) {
 	case "recovered":
 		m.clearRetry()
-		m.append(stTool.Render("✓ " + str(ev["text"])))
+		// Update the retry block in-place if it exists.
+		if len(m.convo) > 0 && m.convo[len(m.convo)-1].tool == nil && m.convo[len(m.convo)-1].collapsed != "" && strings.HasPrefix(m.convo[len(m.convo)-1].collapsed, "⏳ ") {
+			e := &m.convo[len(m.convo)-1]
+			e.collapsed = stTool.Render("✓ " + str(ev["text"]))
+			e.full = ""
+			e.state = viewMinimized
+		} else {
+			m.append(stTool.Render("✓ " + str(ev["text"])))
+		}
 	case "giveup":
 		m.clearRetry()
 		m.busy = false
 		m.busyStart = time.Time{}
-		m.append(stErr.Render("✗ " + str(ev["text"])))
+		// Update the retry block in-place if it exists.
+		if len(m.convo) > 0 && m.convo[len(m.convo)-1].tool == nil && m.convo[len(m.convo)-1].collapsed != "" && strings.HasPrefix(m.convo[len(m.convo)-1].collapsed, "⏳ ") {
+			e := &m.convo[len(m.convo)-1]
+			e.collapsed = stErr.Render("✗ " + str(ev["text"]))
+			e.full = ""
+			e.state = viewMinimized
+		} else {
+			m.append(stErr.Render("✗ " + str(ev["text"])))
+		}
 	default:
 		// A turn-scope retry means the generation died mid-stream and will be
 		// redone, so drop the half-streamed text rather than letting the regenerated
@@ -1760,12 +1776,63 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 			m.retryDue = time.Time{}
 		}
 		if m.retrySeen == 0 {
-			m.append(stNote.Render("⏳ " + str(ev["text"])))
+			// First retry: create a collapsible block with a brief collapsed line
+			// and full formatted details.
+			collapsed := stNote.Render("⏳ " + str(ev["reason"]))
+			full := m.retryDetails(ev)
+			m.convo = append(m.convo, convoEntry{
+				collapsed: stDim.Render("▸ ") + collapsed,
+				full:      full,
+			})
+		} else {
+			// Subsequent retry: update the existing block's full details.
+			if len(m.convo) > 0 {
+				e := &m.convo[len(m.convo)-1]
+				e.full = m.retryDetails(ev)
+				e.collapsed = stDim.Render("▸ ") + stNote.Render("⏳ " + str(ev["reason"]))
+				e.wrapped = "" // invalidate wrap cache
+			}
 		}
 		m.retrySeen++
 	}
 	m.refresh()
 	return m
+}
+
+// retryDetails builds the expanded view for a retry block: formatted fields
+// instead of a raw JSON payload.
+func (m tuiModel) retryDetails(ev evMsg) string {
+	var lines []string
+	reason := str(ev["reason"])
+	if reason != "" {
+		lines = append(lines, stNote.Render("reason:  ") + reason)
+	}
+	if detail := str(ev["detail"]); detail != "" {
+		lines = append(lines, stDim.Render("detail:  ") + detail)
+	}
+	if cap := evNum(ev["capacity"]); cap > 0 {
+		lines = append(lines, stDim.Render(fmt.Sprintf("capacity:  %d/%d busy  (%d ahead)",
+			int(evNum(ev["in_flight"])), int(cap), int(evNum(ev["waiting"])))))
+	}
+	if queue := str(ev["queue"]); queue != "" {
+		lines = append(lines, stDim.Render("queue:   ") + queue)
+	}
+	if attempt := evNum(ev["attempt"]); attempt > 0 {
+		lines = append(lines, stDim.Render(fmt.Sprintf("attempt: %d", int(attempt))))
+	}
+	if delay := evNum(ev["delay_ms"]); delay > 0 {
+		lines = append(lines, stDim.Render(fmt.Sprintf("retry in:  %s", time.Duration(delay)*time.Millisecond)))
+	}
+	if elapsed := evNum(ev["elapsed_ms"]); elapsed > 0 {
+		lines = append(lines, stDim.Render(fmt.Sprintf("elapsed:   %s", time.Duration(elapsed)*time.Millisecond)))
+	}
+	if budget := evNum(ev["budget_ms"]); budget > 0 {
+		lines = append(lines, stDim.Render(fmt.Sprintf("budget:    %s", time.Duration(budget)*time.Millisecond)))
+	}
+	if str(ev["server_asked"]) == "true" {
+		lines = append(lines, stDim.Render("server asked for this delay"))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // retryBanner is the status-line text for a wait in progress: what the provider
