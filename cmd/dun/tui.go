@@ -1239,27 +1239,7 @@ func (m tuiModel) suggestActive() bool {
 		(m.suggestMode == "on" || strings.TrimSpace(m.input.Value()) == "")
 }
 
-func (m tuiModel) suggestPanel() string {
-	rows := make([]string, 0, len(m.suggestions)+1)
-	for i, s := range m.suggestions {
-		body := stSel.Render(fmt.Sprintf("%d", i+1)) + " " + s.text + "  " +
-			stDim.Render(fmt.Sprintf("%d%%", int(s.prob*100+0.5)))
-		if i == m.suggestSel {
-			rows = append(rows, addGutter(body, "▎ ", stSel))
-		} else {
-			rows = append(rows, addGutter(body, "  ", lipgloss.NewStyle()))
-		}
-	}
-	// Ghost text: show the selected suggestion as dimmed text in the input line.
-	// Right arrow accepts it (fills the buffer); up/down cycle suggestions.
-	if len(m.suggestions) > 0 && m.suggestSel < len(m.suggestions) &&
-		strings.TrimSpace(m.input.Value()) == "" {
-		rows = append(rows, m.input.ghostView(m.suggestions[m.suggestSel].text))
-	} else {
-		rows = append(rows, m.input.View())
-	}
-	return strings.Join(rows, "\n")
-}
+
 
 // sendUser ships a user message to the engine (from the input or a suggestion),
 // echoes it, and clears transient UI (suggestions, input).
@@ -1997,8 +1977,14 @@ func (m tuiModel) lowerView() string {
 	if m.paletteActive() {
 		return m.palettePanel()
 	}
+	// Suggestions are rendered inside the viewport (refresh), not here — so they
+	// don't steal height from the conversation. The input line is always one row.
 	if m.suggestActive() {
-		return m.suggestPanel()
+		if len(m.suggestions) > 0 && m.suggestSel < len(m.suggestions) &&
+			strings.TrimSpace(m.input.Value()) == "" {
+			return m.input.ghostView(m.suggestions[m.suggestSel].text)
+		}
+		return m.input.View()
 	}
 	return m.input.View()
 }
@@ -2253,6 +2239,19 @@ func (m *tuiModel) refresh() {
 	}
 	if m.cur != "" {
 		blocks = append(blocks, renderMarkdown(m.md, m.cur))
+	}
+	// Suggestions live inside the viewport so they don't steal height from the
+	// conversation — the user can still see the last messages above them.
+	if m.suggestActive() {
+		for i, s := range m.suggestions {
+			body := stSel.Render(fmt.Sprintf("%d", i+1)) + " " + s.text + "  " +
+				stDim.Render(fmt.Sprintf("%d%%", int(s.prob*100+0.5)))
+			if i == m.suggestSel {
+				blocks = append(blocks, addGutter(body, "▎ ", stSel))
+			} else {
+				blocks = append(blocks, addGutter(body, "  ", lipgloss.NewStyle()))
+			}
+		}
 	}
 	// In convo focus, gutter every block (selected one bright) so the highlight
 	// aligns and the selected message shows a left border down its full height.
