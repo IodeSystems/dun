@@ -9,3 +9,7 @@ dun.local.json
 *.test
 go/
 work/
+-e !
+!go.mod
+work/
+!go.mod
