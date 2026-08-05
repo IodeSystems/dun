@@ -81,7 +81,7 @@ func main() {
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
 	docker := flag.String("docker", "", "run exec commands in a Docker container of this image (empty = host)")
-	dockerNetwork := flag.Bool("docker-network", false, "give the Docker container network access (default: --network none)")
+	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
 	pr := flag.Bool("pr", false, "shorthand for --ship with mode pr (verify, push, then report the gh pr create command)")

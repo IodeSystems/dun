@@ -230,8 +230,8 @@ type Config struct {
 	// a default. Empty → "golang:1.23".
 	DockerImage string
 	// DockerNetwork controls whether the container has network access.
-	// false (default) → --network none (no egress).
-	// true → default Docker bridge network (allows package download, etc.).
+	// true (default) → default Docker bridge network (allows package download,
+	// toolchain fetch, etc.). false → --network none (no egress).
 	DockerNetwork bool
 	// ExtraMounts are the mount specs passed at construction, needed when
 	// reconfiguring DockerExec mid-session for a worktree switch.
@@ -1007,7 +1007,7 @@ func (h *Harness) Rehoist(workspace string, wt *Worktree, dockerOn bool) {
 		image = "golang:1.23"
 	}
 	if dockerOn {
-		h.cfg.Exec = DockerExec{Dir: workspace, Image: image, Network: h.cfg.DockerNetwork, ExtraMounts: h.cfg.ExtraMounts}
+		h.cfg.Exec = DockerExec{Dir: workspace, Image: image, Network: true, ExtraMounts: h.cfg.ExtraMounts}
 	} else {
 		h.cfg.Exec = HostExec{Dir: workspace}
 	}
