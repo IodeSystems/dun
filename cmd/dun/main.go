@@ -163,7 +163,7 @@ func main() {
 			fatal(err)
 		}
 		args := []string{
-			"run", "--rm",
+			"run", "-i", "--rm",
 			"--user", strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
 			"-v", absWorkspace + ":/work", "-w", "/work",
 			"-e", "DUN_DOCKER=1",
