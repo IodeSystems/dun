@@ -407,8 +407,9 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			j := startBg(args.Command)
 			res := fmt.Sprintf("Started background job #%d: `%s`. It has no time limit and runs in "+
 				"the sandbox; you'll be notified when it finishes. Continue with other work in the "+
-				"meantime.\n%s\nIt is SILENT until then — call exec_monitor(job:%d) to check on it, "+
-				"or to ask for progress while it runs.", j.id, args.Command, j.logLine(), j.id)
+				"meantime.\n%s\nDo NOT poll it — you will receive a notification when it completes. "+
+				"Only call exec_monitor(job:%d) if you need to change its output (buffer_bytes, grep, ignore).",
+				j.id, args.Command, j.logLine(), j.id)
 			if onCall != nil {
 				onCall("exec", map[string]any{"command": args.Command, "background": true}, res)
 			}

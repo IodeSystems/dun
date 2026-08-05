@@ -485,12 +485,10 @@ func execMonitorToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "exec_monitor"
-	td.Function.Description = "Check on background jobs (exec with background:true). With no `job`, lists them all. " +
-		"With one, reports its state and hands back whatever it has produced since the last report, and can " +
-		"change how much it tells you while it runs: `buffer_bytes` reports once that many bytes have piled up " +
-		"(0 = silent until it exits), `grep` limits reports to matching lines, `ignore` mutes the job entirely " +
-		"including its completion. Every job also writes a log file — grep THAT with exec rather than asking " +
-		"for a big log here."
+	td.Function.Description = "Change how a background job reports: `buffer_bytes` fires once that many bytes accumulate, "+
+		"`grep` limits to matching lines, `ignore` mutes entirely including completion. "+
+		"Do NOT use this to poll — you will be notified when the job finishes. "+
+		"Every job also writes a log file — grep THAT with exec rather than asking for a big log here."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{

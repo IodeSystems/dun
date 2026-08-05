@@ -1168,9 +1168,10 @@ var (
 		"the build and tests after changing code — and to run git. A foreground command is KILLED after " +
 		defaultExecTimeout.String() + ": never run anything interactive (it has no terminal and no input, so it " +
 		"can only hang), and put long work in background:true, which has no limit."
-	systemMonitor = "\n- exec_monitor: check on a background job, or change what it tells you. A job stays silent " +
-		"until it finishes; ask for progress with buffer_bytes, narrow it with grep, or mute it with ignore. Its " +
-		"full output is on disk — grep the log path with exec rather than pulling a large log in whole."
+	systemMonitor = "\n- exec_monitor: change what a background job tells you (buffer_bytes, grep, ignore). " +
+		"A job stays silent until it finishes and you will be notified — do NOT poll it. " +
+		"Only call exec_monitor to tune output or mute a job. " +
+		"Its full output is on disk — grep the log path with exec rather than pulling a large log in whole."
 	systemExecCap = "\n\nANY tool result larger than " + fmt.Sprintf("%d", execInlineMax) + " characters is CLIPPED " +
 		"to its start and end before you see it, and the whole thing is saved under a short REF printed in the " +
 		"gap. That is not an error and the command did not fail. Do not claim you saw what was elided — read " +
