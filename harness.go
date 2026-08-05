@@ -1165,9 +1165,9 @@ const (
 var (
 	systemExec = "\n- exec: run a shell command (build/test/git/ls) in the workspace. The working directory is " +
 		"the isolated worktree root — edits you make are visible to exec. Use it to VERIFY your edits — e.g. run " +
-		"the build and tests after changing code — and to run git. A foreground command is KILLED after " +
-		defaultExecTimeout.String() + ": never run anything interactive (it has no terminal and no input, so it " +
-		"can only hang), and put long work in background:true, which has no limit."
+		"the build and tests after changing code — and to run git. Foreground commands have no time limit: " +
+		"never run anything interactive (it has no terminal and no input, so it can only hang), " +
+		"and put long work in background:true, which has no limit."
 	systemMonitor = "\n- exec_monitor: change what a background job tells you (buffer_bytes, grep, ignore). " +
 		"A job stays silent until it finishes and you will be notified — do NOT poll it. " +
 		"Only call exec_monitor to tune output or mute a job. " +

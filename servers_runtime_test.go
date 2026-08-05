@@ -28,10 +28,17 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 	if !strings.Contains(shellOnly, "ask_user") || !strings.Contains(shellOnly, "- exec:") {
 		t.Error("built-in tools should always be described")
 	}
-	// The exec prompt must quote the deadline the code actually enforces —
-	// promising a limit that is not applied is worse than saying nothing.
-	if !strings.Contains(shellOnly, defaultExecTimeout.String()) {
-		t.Errorf("the exec deadline is not in the prompt:\n%s", shellOnly)
+	// The exec prompt must describe the timeout policy the code actually
+	// enforces — promising a limit that is not applied is worse than saying
+	// nothing. With defaultExecTimeout == 0 the prompt says "no time limit".
+	if defaultExecTimeout == 0 {
+		if !strings.Contains(shellOnly, "no time limit") {
+			t.Errorf("exec prompt should mention no time limit:\n%s", shellOnly)
+		}
+	} else {
+		if !strings.Contains(shellOnly, defaultExecTimeout.String()) {
+			t.Errorf("the exec deadline is not in the prompt:\n%s", shellOnly)
+		}
 	}
 	if !strings.Contains(shellOnly, "exec_monitor") {
 		t.Error("a model that cannot be told about exec_monitor will never call it")

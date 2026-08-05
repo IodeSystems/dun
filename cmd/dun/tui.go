@@ -1275,6 +1275,7 @@ func (m tuiModel) sendUser(v string) tuiModel {
 		if !m.proc.agentCmd(m.scopeAgent, "tell", v) {
 			m.append(stErr.Render("no engine right now — not sent"))
 		}
+		m.refresh()
 		return m
 	}
 	m.task = v
@@ -1285,13 +1286,17 @@ func (m tuiModel) sendUser(v string) tuiModel {
 	m.append(stUser.Render("› " + v))
 	if m.replaying {
 		m.append(stDim.Render("replaying a trace — there is no engine to send to"))
+		m.refresh()
 		return m
 	}
 	if !m.proc.send(v) {
 		m.append(stErr.Render("no engine right now — not sent. /reconnect, then send it again"))
+		m.refresh()
 		return m
 	}
 	m.busy = true
+	m.scrollPinned = true // user just sent a message — show it
+	m.refresh()
 	return m
 }
 

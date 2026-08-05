@@ -193,16 +193,11 @@ func safeCutFront(s string) string {
 	return s
 }
 
-// defaultExecTimeout bounds a FOREGROUND exec. Nothing the model runs in the
-// foreground is worth blocking the session indefinitely: a command that waits
-// on input it can never receive (`gh auth login` polls a device flow for 15
-// minutes with stdin on /dev/null) looks identical, from dun's side, to a
-// command doing slow work. Measured: one such call held a session for 14
-// minutes before the remote gave up.
-//
-// It is a deadline, not a heuristic — the model is told to move long work to
-// background:true, which is exempt.
-const defaultExecTimeout = 5 * time.Minute
+// defaultExecTimeout bounds a FOREGROUND exec. Set to 0 (no deadline): long
+// builds, slow toolchains, and sub-agent work all run foreground when the
+// model asks for it. A wedged command is caught by a monitor heartbeat
+// which notifies rather than kills — avoiding expensive throwaway work.
+const defaultExecTimeout = 0 * time.Minute // infinite — no automatic kill
 
 // noTimeoutKey marks a context as exempt from defaultExecTimeout.
 type noTimeoutKey struct{}
@@ -225,6 +220,9 @@ func bound(ctx context.Context) (context.Context, context.CancelFunc, time.Durat
 		return ctx, func() {}, time.Until(d)
 	}
 	if exempt, _ := ctx.Value(noTimeoutKey{}).(bool); exempt {
+		return ctx, func() {}, 0
+	}
+	if defaultExecTimeout == 0 {
 		return ctx, func() {}, 0
 	}
 	c, cancel := context.WithTimeout(ctx, defaultExecTimeout)
@@ -371,11 +369,11 @@ func execToolDef() llm.ToolDef {
 	td.Function.Name = "exec"
 	td.Function.Description = "Run a shell command (build, test, git, ls, …) in the workspace. " +
 		"Returns combined stdout+stderr; a non-zero exit is shown as [exit: …]. Use this to " +
-		"verify edits (build/test) and to run git. Foreground commands are KILLED after " +
-		defaultExecTimeout.String() + ", so never run anything interactive (it has no terminal and no " +
-		"input — it will just hang until killed). For a LONG command (the full test suite, a " +
-		"build), set background:true and keep working — background jobs have no time limit and " +
-		"you'll get a notification when one finishes."
+		"verify edits (build/test) and to run git. Foreground commands have no time limit, so " +
+		"never run anything interactive (it has no terminal and no input — it will just hang). " +
+		"For a LONG command (the full test suite, a build), set background:true and keep " +
+		"working — background jobs have no time limit and you'll get a notification when one " +
+		"finishes."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
