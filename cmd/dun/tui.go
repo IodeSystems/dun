@@ -2040,8 +2040,11 @@ func (m tuiModel) View() string {
 	// the input area. Account for their height so the viewport doesn't overlap.
 	pending := m.pendingView()
 	pendingH := lipgloss.Height(pending)
+	// Always reserve the overlay line when there is content above the
+	// viewport — regardless of scroll pinning. The pin controls whether
+	// new content auto-scrolls; the overlay is purely informational.
 	overlayH := 0
-	if !m.scrollPinned {
+	if m.vp.YOffset > 0 {
 		overlayH = 1 // scroll overlay bar takes one line above the viewport
 	}
 	convoH := m.h - 3 - pendingH - lipgloss.Height(lower) - overlayH // head 1 + divider 1 + status 1
@@ -2505,7 +2508,35 @@ func (m *tuiModel) refresh() {
 			}
 		}
 	} else if m.scrollPinned {
-		m.vp.GotoBottom()
+		// Auto-follow new content. When there's a streaming reply (m.cur),
+		// don't GotoBottom() blindly — that scrolls past the user's last
+		// message to the bottom of the growing reply. Instead, find the
+		// last user message and keep it visible.
+		if m.cur != "" {
+			// Find the row of the last user message in rendered[].
+			lastUserRow := -1
+			cum := 0
+			for i, r := range rendered {
+				if i < len(m.convo) && m.convo[i].userText != "" {
+					lastUserRow = cum
+				}
+				cum += lipgloss.Height(r)
+			}
+			if lastUserRow >= 0 {
+				vh := m.vp.Height
+				// Keep the last user message visible; if it's below the
+				// viewport, scroll so it sits near the top.
+				if lastUserRow >= m.vp.YOffset+vh {
+					m.vp.SetYOffset(lastUserRow - 1)
+				} else if lastUserRow < m.vp.YOffset {
+					m.vp.SetYOffset(lastUserRow)
+				}
+			} else {
+				m.vp.GotoBottom()
+			}
+		} else {
+			m.vp.GotoBottom()
+		}
 	}
 }
 
