@@ -109,24 +109,10 @@ func (v *vtui) send(msg string) {
 	v.m = key(v.m, kEnter)
 }
 
-// keypress sends a key to the model.
-func (v *vtui) keypress(k tea.KeyMsg) {
-	v.m = key(v.m, k)
-}
 
 // view returns the full rendered output with ANSI codes stripped.
 func (v *vtui) view() string {
 	return stripANSI(v.m.View())
-}
-
-// viewRaw returns the full rendered output with ANSI codes intact.
-func (v *vtui) viewRaw() string {
-	return v.m.View()
-}
-
-// lines returns the rendered output split into lines.
-func (v *vtui) lines() []string {
-	return strings.Split(v.view(), "\n")
 }
 
 // convo returns the conversation text (block views joined by newlines, ANSI stripped).
