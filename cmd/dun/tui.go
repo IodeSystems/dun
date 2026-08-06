@@ -1963,8 +1963,8 @@ func (m tuiModel) viewportView(vp viewport.Model) string {
 // user message style so it's visually distinct from the conversation
 // content below it.
 func (m tuiModel) scrollOverlay() string {
-	if m.vp.YOffset == 0 {
-		return "" // nothing off-screen above the viewport
+	if m.vp.YOffset == 0 || m.vp.AtBottom() {
+		return "" // at top or bottom — nothing to show
 	}
 	width := m.vp.Width
 	yOff := m.vp.YOffset

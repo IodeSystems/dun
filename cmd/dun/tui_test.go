@@ -2453,3 +2453,76 @@ func TestTUI_PendingClearedOnError(t *testing.T) {
 		t.Fatalf("convo should contain the message flushed on error: %q", text)
 	}
 }
+
+// TestVtui_ScrollOverlayInHeader verifies that the scroll overlay replaces
+// the title bar (not a separate line) and that the header shows the normal
+// dun title when at the bottom.
+func TestVtui_ScrollOverlayInHeader(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	// Build a conversation tall enough to scroll (60+ lines of output).
+	for i := 0; i < 15; i++ {
+		v.send(fmt.Sprintf("user message %d", i))
+		// Each response is 4 lines to ensure we get well over 60 total.
+		resp := fmt.Sprintf("Response %d:\n", i)
+		for j := 0; j < 3; j++ {
+			resp += fmt.Sprintf("  line %d.%d of the assistant reply\n", i, j)
+		}
+		v.event(map[string]any{"type": "token", "text": resp})
+		v.event(map[string]any{"type": "done"})
+	}
+
+	// At bottom: header should show the dun title bar, not an overlay.
+	out := v.view()
+	lines := strings.Split(out, "\n")
+	if len(lines) == 0 {
+		t.Fatal("view produced no output")
+	}
+	firstLine := lines[0]
+	if strings.Contains(firstLine, "› user message") {
+		t.Errorf("at bottom: header should show dun title, not overlay; got %q", firstLine)
+	}
+	if !strings.Contains(firstLine, "dun") {
+		t.Errorf("at bottom: header should contain 'dun'; got %q", firstLine)
+	}
+
+	// Scroll up: header should now show the off-screen user message.
+	v.setYOffset(5)
+	v.setScrollPin(false)
+	out = v.view()
+	lines = strings.Split(out, "\n")
+	firstLine = lines[0]
+	if !strings.Contains(firstLine, "›") {
+		t.Errorf("scrolled up: header should show overlay with '›'; got %q", firstLine)
+	}
+	if strings.Contains(firstLine, "dun") && !strings.Contains(firstLine, "user message") {
+		t.Errorf("scrolled up: header should show user message, not dun title; got %q", firstLine)
+	}
+
+	// Verify no extra blank line between header and viewport (the overlay
+	// replaced the header, it didn't add a line).
+	// Count the total lines — should equal terminal height + status line.
+	if len(lines) < v.h {
+		t.Errorf("view too short: got %d lines, expected at least %d", len(lines), v.h)
+	}
+
+	// Scroll further up: overlay should update to show a different message.
+	v.setYOffset(20)
+	out = v.view()
+	lines = strings.Split(out, "\n")
+	firstLine = lines[0]
+	if !strings.Contains(firstLine, "›") {
+		t.Errorf("scrolled further: header should still show overlay; got %q", firstLine)
+	}
+
+	// Scroll back to bottom: header should revert to dun title.
+	v.setScrollPin(true)
+	v.m.refresh() // triggers GotoBottom()
+	out = v.view()
+	lines = strings.Split(out, "\n")
+	firstLine = lines[0]
+	if strings.Contains(firstLine, "› user message") && !strings.Contains(firstLine, "dun") {
+		t.Errorf("back at bottom: header should show dun title; got %q", firstLine)
+	}
+}
