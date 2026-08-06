@@ -220,6 +220,12 @@ type convoEntry struct {
 	wrapped   string
 	wrapW     int
 	wrapState viewState
+
+	// rowOffset is the viewport row (line index) where this entry starts.
+	// Set by refresh() as a cumulative sum of block heights. Used by
+	// scrollOverlay to map vp.YOffset back to conversation entries without
+	// re-rendering.
+	rowOffset int
 }
 
 func (e convoEntry) expandable() bool { return (e.full != "" || e.raw != "") || e.docs != nil }
@@ -1967,20 +1973,21 @@ func (m tuiModel) scrollOverlay() string {
 		return "" // at top or bottom — nothing to show
 	}
 	yOff := m.vp.YOffset
-	// Use the heights refresh() already computed — they match what's
-	// actually in the viewport, unlike re-rendering here which can
-	// diverge on wrap width (selMode gutter, resize, etc.).
-	cumRows := 0
+	// Each entry's rowOffset (set by refresh()) is the viewport line where
+	// it starts. blockH[i] is its height. Together they give exact row
+	// ranges — no re-rendering needed.
 	var lastOffScreen string
 	for i, e := range m.convo {
+		if e.userText == "" {
+			continue
+		}
 		h := 0
 		if i < len(m.blockH) {
 			h = m.blockH[i]
 		}
-		if e.userText != "" && cumRows+h <= yOff {
+		if e.rowOffset+h <= yOff {
 			lastOffScreen = e.userText
 		}
-		cumRows += h
 	}
 	if lastOffScreen == "" {
 		return ""
@@ -2395,6 +2402,7 @@ func (m *tuiModel) refresh() {
 
 	// Render all blocks. For user messages, re-render with full-width
 	// background style (ignoring the pre-styled collapsed from e.view()).
+	cumRow := 0 // running row offset for scrollOverlay mapping
 	for i, b := range blocks {
 		var w string
 		if i < len(m.convo) && m.convo[i].docs == nil {
@@ -2426,6 +2434,10 @@ func (m *tuiModel) refresh() {
 		if i < len(m.blockH) {
 			m.blockH[i] = h
 		}
+		if i < len(m.convo) {
+			m.convo[i].rowOffset = cumRow
+		}
+		cumRow += h
 	}
 	m.vp.SetContent(strings.Join(rendered, "\n"))
 	m.contentGen++
