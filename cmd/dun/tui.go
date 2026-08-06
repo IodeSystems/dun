@@ -1990,10 +1990,7 @@ func (m tuiModel) scrollOverlay() string {
 	return userStyle.Render(text)
 }
 
-// wrapAt renders text wrapped to the given width (test helper + scrollOverlay).
-func wrapAt(text string, width int) string {
-	return lipgloss.NewStyle().Width(max(1, width)).Render(text)
-}
+
 
 func (m tuiModel) View() string {
 	start := time.Now()
