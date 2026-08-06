@@ -2408,55 +2408,18 @@ func (m *tuiModel) refresh() {
 	rendered := make([]string, len(blocks))
 	m.blockH = make([]int, len(m.convo)) // cache convo-block heights for scroll math
 
-	// Determine which user messages are fully off-screen (above the viewport).
-	// When scrolled up, collapse them to a one-line ellipsis so the user
-	// knows what they scrolled past without wasting viewport space.
-	yOff := m.vp.YOffset
-	offScreenUser := make(map[int]bool) // indices of convo entries to collapse
-	if yOff > 0 {
-		cumRows := 0
-		for i, b := range blocks {
-			if i >= len(m.convo) {
-				break
-			}
-			e := &m.convo[i]
-			var h int
-			if e.userText != "" {
-				userStyle := stUser.Width(max(1, width))
-				h = lipgloss.Height(userStyle.Render("› " + e.userText))
-			} else if e.docs != nil {
-				h = lipgloss.Height(e.view())
-			} else if e.wrapped != "" && e.wrapW == width && e.wrapState == e.state {
-				h = lipgloss.Height(e.wrapped)
-			} else {
-				h = lipgloss.Height(wrap.Render(b))
-			}
-			if e.userText != "" && cumRows+h <= yOff {
-				offScreenUser[i] = true
-			}
-			cumRows += h
-		}
-	}
-
 	// Render all blocks. For user messages, re-render with full-width
 	// background style (ignoring the pre-styled collapsed from e.view()).
-	// Off-screen user messages become a one-line ellipsis.
 	for i, b := range blocks {
 		var w string
 		if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
 			if e.userText != "" {
 				userStyle := stUser.Width(max(1, width))
-				if offScreenUser[i] {
-					w = userStyle.Render("› …")
-				} else {
-					// Cache only the full version — the ellipsis is transient
-					// (depends on scroll position) and must never be cached.
-					if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
-						e.wrapped, e.wrapW, e.wrapState = userStyle.Render("› "+e.userText), width, e.state
-					}
-					w = e.wrapped
+				if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
+					e.wrapped, e.wrapW, e.wrapState = userStyle.Render("› "+e.userText), width, e.state
 				}
+				w = e.wrapped
 			} else if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
 				e.wrapped, e.wrapW, e.wrapState = wrap.Render(b), width, e.state
 				w = e.wrapped
