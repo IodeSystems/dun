@@ -88,12 +88,21 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 		proc.close()
 	}
 	// /reload: bubbletea has restored the terminal by now, so re-exec cleanly
-	// into the (launcher-rebuilt) binary with the same args.
+	// into the (launcher-rebuilt) binary with the same args, preserving the
+	// session so the conversation is replayed on reconnect.
 	if tm, ok := fm.(tuiModel); ok && tm.reloadReq && err == nil {
 		lc.close() // drop the old registration; the new process re-registers
 		exe, e := os.Executable()
 		if e == nil {
-			_ = syscall.Exec(exe, os.Args, os.Environ())
+			args := os.Args
+			// Append --resume so the new process reattaches to the same session.
+			// Without it, /reload starts a fresh session and the conversation is lost.
+			if tm.sessionID != "" {
+				args = append(args, "--resume", tm.sessionID)
+			} else if tm.opts.cont {
+				args = append(args, "--continue")
+			}
+			_ = syscall.Exec(exe, args, os.Environ())
 		}
 	}
 	return err
@@ -198,6 +207,7 @@ type convoEntry struct {
 	// render as normal user messages.
 	provisional      bool
 	provisionalText  string // original text, used to restore normal style on delivery
+	userText         string // raw user message text (non-empty for user messages only)
 
 	// Wrapped render, cached. A finalized block's text never changes, but
 	// refresh() runs once per STREAMED TOKEN, so re-wrapping the whole
@@ -207,9 +217,10 @@ type convoEntry struct {
 	// which is why keystrokes went missing. Invalidated by width (a resize) and
 	// by state (expand/collapse/raw); docs blocks opt out, their inner per-doc
 	// state is not captured here.
-	wrapped   string
-	wrapW     int
-	wrapState viewState
+	wrapped       string
+	wrapW         int
+	wrapState     viewState
+	wrapCollapsed bool // true when wrapped holds a collapsed (ellipsis) user message
 }
 
 func (e convoEntry) expandable() bool { return (e.full != "" || e.raw != "") || e.docs != nil }
@@ -1252,7 +1263,7 @@ func (m tuiModel) sendUser(v string) tuiModel {
 		m.history = append(m.history, v)
 		m.histIdx = len(m.history)
 		m.input.Reset()
-		m.append(stUser.Render("› " + v))
+		m.appendUser(v)
 		if !m.proc.agentCmd(m.scopeAgent, "tell", v) {
 			m.append(stErr.Render("no engine right now — not sent"))
 		}
@@ -1264,7 +1275,7 @@ func (m tuiModel) sendUser(v string) tuiModel {
 	m.histIdx = len(m.history)
 	m.input.Reset()
 	m.suggestions = nil
-	m.append(stUser.Render("› " + v))
+	m.appendUser(v)
 	if m.replaying {
 		m.append(stDim.Render("replaying a trace — there is no engine to send to"))
 		m.refresh()
@@ -1284,7 +1295,7 @@ func (m tuiModel) sendUser(v string) tuiModel {
 // sendAnswer resolves the ask: echoes the answer, ships it to the engine, and
 // resets to the input pane.
 func (m tuiModel) sendAnswer(v string) tuiModel {
-	m.append(stUser.Render("› " + v))
+	m.appendUser(v)
 	if !m.proc.answer(v) {
 		m.append(stErr.Render("no engine right now — answer not sent"))
 	}
@@ -1533,6 +1544,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			if m.convo[i].provisional {
 				m.convo[i].provisional = false
 				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
+				m.convo[i].userText = m.convo[i].provisionalText
 				m.convo[i].provisionalText = ""
 				m.convo[i].wrapped = "" // invalidate wrap cache
 			}
@@ -1657,6 +1669,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			if m.convo[i].provisional {
 				m.convo[i].provisional = false
 				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
+				m.convo[i].userText = m.convo[i].provisionalText
 				m.convo[i].provisionalText = ""
 				m.convo[i].wrapped = ""
 			}
@@ -1680,6 +1693,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			if m.convo[i].provisional {
 				m.convo[i].provisional = false
 				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
+				m.convo[i].userText = m.convo[i].provisionalText
 				m.convo[i].provisionalText = ""
 				m.convo[i].wrapped = ""
 			}
@@ -2106,6 +2120,12 @@ func (m *tuiModel) append(line string) {
 	m.refresh()
 }
 
+// appendUser adds a user message and stores the raw text for full-width re-rendering.
+func (m *tuiModel) appendUser(text string) {
+	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + text), userText: text})
+	m.refresh()
+}
+
 func (m *tuiModel) flushCur() {
 	if m.cur != "" {
 		// Finalize the streamed reply as rendered markdown (headers, lists, code).
@@ -2156,7 +2176,7 @@ func (m *tuiModel) replay(items []any) {
 		case "user":
 			flushPend()
 			m.task = str(im["content"]) // the task line survives a resume
-			m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + str(im["content"]))})
+			m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + str(im["content"])), userText: str(im["content"])})
 			n++
 		case "assistant":
 			flushPend()
@@ -2331,14 +2351,35 @@ func (m *tuiModel) refresh() {
 	wrap := lipgloss.NewStyle().Width(max(1, width))
 	rendered := make([]string, len(blocks))
 	m.blockH = make([]int, len(m.convo)) // cache convo-block heights for scroll math
+	// Track cumulative row position for off-screen detection.
+	cumRows := 0
 	for i, b := range blocks {
 		var w string
 		if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
-			if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
+			// For user messages, re-render with full-width background and
+			// collapse to ellipsis when scrolled off-screen (above viewport).
+			if e.userText != "" {
+				userStyle := stUser.Width(max(1, width))
+				collapsed := !m.scrollPinned && cumRows < m.vp.YOffset
+				var userBlock string
+				if collapsed {
+					userBlock = userStyle.Render("› …")
+				} else {
+					userBlock = userStyle.Render("› " + e.userText)
+				}
+				if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state || e.wrapCollapsed != collapsed {
+					e.wrapped, e.wrapW, e.wrapState, e.wrapCollapsed = userBlock, width, e.state, collapsed
+					w = userBlock
+				} else {
+					w = e.wrapped
+				}
+			} else if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
 				e.wrapped, e.wrapW, e.wrapState = wrap.Render(b), width, e.state
+				w = e.wrapped
+			} else {
+				w = e.wrapped
 			}
-			w = e.wrapped
 		} else {
 			w = wrap.Render(b)
 		}
@@ -2350,9 +2391,11 @@ func (m *tuiModel) refresh() {
 			}
 		}
 		rendered[i] = w
+		h := lipgloss.Height(w)
 		if i < len(m.blockH) {
-			m.blockH[i] = lipgloss.Height(w)
+			m.blockH[i] = h
 		}
+		cumRows += h
 	}
 	m.vp.SetContent(strings.Join(rendered, "\n"))
 	m.contentGen++
