@@ -1956,10 +1956,11 @@ func (m tuiModel) viewportView(vp viewport.Model) string {
 	return c.out
 }
 
-// scrollOverlay returns a one-line bar showing the first user message that
-// is fully above the viewport, or "" when scrolled to bottom or no user
-// message is off-screen. The bar uses the user message style so it's
-// visually distinct from the conversation content below it.
+// scrollOverlay returns a one-line bar showing the last user message that
+// is fully above the viewport (the one just scrolled past), or "" when
+// scrolled to bottom or no user message is off-screen. The bar uses the
+// user message style so it's visually distinct from the conversation
+// content below it.
 func (m tuiModel) scrollOverlay() string {
 	if m.scrollPinned {
 		return ""
@@ -1967,12 +1968,12 @@ func (m tuiModel) scrollOverlay() string {
 	width := m.vp.Width
 	yOff := m.vp.YOffset
 	userStyle := stUser.Width(max(1, width))
-	// Walk the conversation, tracking cumulative height, to find the first
+	// Walk the conversation, tracking cumulative height, to find the last
 	// user message fully above the viewport.
 	cumRows := 0
-	for i, e := range m.convo {
+	var lastOffScreen string
+	for _, e := range m.convo {
 		if e.docs != nil {
-			// Docs blocks: use their view height.
 			cumRows += lipgloss.Height(e.view())
 			continue
 		}
@@ -1983,15 +1984,16 @@ func (m tuiModel) scrollOverlay() string {
 			h = lipgloss.Height(wrapAt(e.view(), max(1, width)))
 		}
 		if e.userText != "" && cumRows+h <= yOff {
-			// This user message is fully above the viewport.
-			// Show it as a one-line summary.
-			text := "› " + clip(e.userText, width-2)
-			return userStyle.Render(text)
+			// This user message is fully above the viewport — remember it.
+			lastOffScreen = e.userText
 		}
 		cumRows += h
-		_ = i
 	}
-	return ""
+	if lastOffScreen == "" {
+		return ""
+	}
+	text := "› " + clip(lastOffScreen, width-2)
+	return userStyle.Render(text)
 }
 
 // wrapAt renders text wrapped to the given width (test helper + scrollOverlay).

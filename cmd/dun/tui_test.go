@@ -2297,7 +2297,6 @@ func TestVtui_ScrollOverlay(t *testing.T) {
 
 	overlay = m.scrollOverlay()
 	if overlay == "" {
-		// Debug: check what scrollOverlay sees
 		t.Fatalf("scrolled up: overlay should show off-screen user message (yOff=%d, convoLen=%d)", m.vp.YOffset, len(m.convo))
 	}
 	plain := stripANSI(overlay)
@@ -2315,6 +2314,52 @@ func TestVtui_ScrollOverlay(t *testing.T) {
 	overlay = m.scrollOverlay()
 	if overlay != "" {
 		t.Errorf("back at bottom: overlay should be empty, got %q", stripANSI(overlay))
+	}
+}
+
+// TestVtui_ScrollOverlayChanges verifies that the overlay text updates as
+// the user scrolls further up — the first off-screen user message should
+// change to reflect which message is now hidden.
+func TestVtui_ScrollOverlayChanges(t *testing.T) {
+	v := newVtui(60, 12)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	// Build a tall conversation with distinct user messages.
+	for i := 0; i < 10; i++ {
+		v.send(fmt.Sprintf("msg %d", i))
+		v.event(map[string]any{"type": "token", "text": fmt.Sprintf("reply %d\n", i)})
+		v.event(map[string]any{"type": "done"})
+	}
+
+	v.setScrollPin(false)
+
+	// Scroll progressively further up and verify the overlay changes.
+	var seen []string
+	for yOff := 3; yOff <= 30; yOff += 5 {
+		v.setYOffset(yOff)
+		_ = v.view()
+		overlay := v.model().scrollOverlay()
+		if overlay == "" {
+			continue // might not have off-screen user messages at this offset
+		}
+		plain := stripANSI(overlay)
+		seen = append(seen, plain)
+	}
+
+	if len(seen) < 2 {
+		t.Fatalf("expected overlay to show different messages at different scroll positions, got %v", seen)
+	}
+
+	// Verify the overlay actually changed between positions.
+	if seen[0] == seen[len(seen)-1] {
+		t.Errorf("overlay did not change across scroll positions: always %q", seen[0])
+	}
+
+	// Each overlay should reference a user message.
+	for _, s := range seen {
+		if !strings.HasPrefix(s, "› msg ") {
+			t.Errorf("overlay should reference a user message, got %q", s)
+		}
 	}
 }
 
