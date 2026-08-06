@@ -217,10 +217,9 @@ type convoEntry struct {
 	// which is why keystrokes went missing. Invalidated by width (a resize) and
 	// by state (expand/collapse/raw); docs blocks opt out, their inner per-doc
 	// state is not captured here.
-	wrapped       string
-	wrapW         int
-	wrapState     viewState
-	wrapCollapsed bool // true when wrapped holds a collapsed (ellipsis) user message
+	wrapped   string
+	wrapW     int
+	wrapState viewState
 }
 
 func (e convoEntry) expandable() bool { return (e.full != "" || e.raw != "") || e.docs != nil }
@@ -2351,76 +2350,26 @@ func (m *tuiModel) refresh() {
 	wrap := lipgloss.NewStyle().Width(max(1, width))
 	rendered := make([]string, len(blocks))
 	m.blockH = make([]int, len(m.convo)) // cache convo-block heights for scroll math
-	// Track cumulative row position for off-screen detection.
-	// First pass: compute heights using cached values or full-text renders
-	// to know which blocks are off-screen before rendering.
-	yOff := m.vp.YOffset
-	cumRows := 0
-	for i, b := range blocks {
-		if i < len(m.convo) && m.convo[i].docs == nil {
-			e := &m.convo[i]
-			// For user messages, estimate height for off-screen check.
-			// Use cached height if we have one from a previous frame at this width.
-			if e.userText != "" && e.wrapped != "" && e.wrapW == width {
-				cumRows += lipgloss.Height(e.wrapped)
-			} else {
-				// Render full version to measure height.
-				userStyle := stUser.Width(max(1, width))
-				fullBlock := userStyle.Render("› " + e.userText)
-				cumRows += lipgloss.Height(fullBlock)
-			}
-		} else {
-			wrapped := wrap.Render(b)
-			cumRows += lipgloss.Height(wrapped)
-		}
-	}
-
-	// Second pass: render with collapse for off-screen user messages.
-	cumRows = 0
+	// Render all blocks. For user messages, re-render with full-width
+	// background style (ignoring the pre-styled collapsed from e.view()).
 	for i, b := range blocks {
 		var w string
 		if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
-			// For user messages, re-render with full-width background and
-			// collapse to ellipsis when scrolled off-screen (above viewport).
 			if e.userText != "" {
 				userStyle := stUser.Width(max(1, width))
-				// Compute this block's position range.
-				// We need its height — use cached if valid, else measure full.
-				var blockTop, blockH int
-				blockTop = cumRows
-				if e.wrapped != "" && e.wrapW == width && !e.wrapCollapsed {
-					blockH = lipgloss.Height(e.wrapped)
-				} else {
-					fullBlock := userStyle.Render("› " + e.userText)
-					blockH = lipgloss.Height(fullBlock)
+				w = userStyle.Render("› " + e.userText)
+				if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
+					e.wrapped, e.wrapW, e.wrapState = w, width, e.state
 				}
-				// Collapse when the block is fully above the viewport.
-				collapsed := !m.scrollPinned && (blockTop+blockH) <= yOff
-				var userBlock string
-				if collapsed {
-					userBlock = userStyle.Render("› …")
-				} else {
-					userBlock = userStyle.Render("› " + e.userText)
-				}
-				if e.wrapped == "" || e.wrapW != width || e.wrapCollapsed != collapsed {
-					e.wrapped, e.wrapW, e.wrapCollapsed = userBlock, width, collapsed
-					w = userBlock
-				} else {
-					w = e.wrapped
-				}
-				cumRows += blockH
 			} else if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
 				e.wrapped, e.wrapW, e.wrapState = wrap.Render(b), width, e.state
 				w = e.wrapped
-				cumRows += lipgloss.Height(w)
 			} else {
 				w = e.wrapped
-				cumRows += lipgloss.Height(w)
 			}
 		} else {
 			w = wrap.Render(b)
-			cumRows += lipgloss.Height(w)
 		}
 		if selMode {
 			if i == m.sel {
