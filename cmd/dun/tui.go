@@ -2040,14 +2040,7 @@ func (m tuiModel) View() string {
 	// the input area. Account for their height so the viewport doesn't overlap.
 	pending := m.pendingView()
 	pendingH := lipgloss.Height(pending)
-	// Always reserve the overlay line when there is content above the
-	// viewport — regardless of scroll pinning. The pin controls whether
-	// new content auto-scrolls; the overlay is purely informational.
-	overlayH := 0
-	if m.vp.YOffset > 0 {
-		overlayH = 1 // scroll overlay bar takes one line above the viewport
-	}
-	convoH := m.h - 3 - pendingH - lipgloss.Height(lower) - overlayH // head 1 + divider 1 + status 1
+	convoH := m.h - 3 - pendingH - lipgloss.Height(lower) // head 1 + divider 1 + status 1
 	if convoH < 1 {
 		convoH = 1
 	}
@@ -2095,12 +2088,14 @@ func (m tuiModel) View() string {
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}
-	out := append([]string{head}, top...)
-	// When scrolled up, show an overlay bar above the viewport indicating
-	// the first off-screen user message — so the user knows what they
-	// scrolled past without losing their place.
+	// The header line shows the off-screen user message when scrolled up,
+	// or the normal dun title bar when at the bottom.
 	overlay := m.scrollOverlay()
-	out = append(out, overlay, m.viewportView(vp), pending, div, lower, status)
+	if overlay != "" {
+		head = overlay
+	}
+	out := append([]string{head}, top...)
+	out = append(out, m.viewportView(vp), pending, div, lower, status)
 	return strings.Join(out, "\n")
 }
 
