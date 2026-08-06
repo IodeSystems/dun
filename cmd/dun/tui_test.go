@@ -68,6 +68,87 @@ func typeStr(m tuiModel, s string) tuiModel {
 	return m
 }
 
+// vtui is a virtual TUI for testing rendering without a real terminal.
+// It lets you set dimensions (e.g. phone size 40x15), feed events and keys,
+// and read back the rendered output as plain text (ANSI stripped).
+type vtui struct {
+	m    tuiModel
+	w, h int
+}
+
+// newVtui creates a virtual TUI at the given dimensions.
+// Pass w=0, h=0 for defaults (80x24).
+func newVtui(w, h int) *vtui {
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	v := &vtui{m: m, w: w, h: h}
+	v.resize(w, h)
+	return v
+}
+
+// resize sets the terminal dimensions and triggers a layout refresh.
+func (v *vtui) resize(w, h int) {
+	v.w, v.h = w, h
+	nm, _ := v.m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	v.m = nm.(tuiModel)
+}
+
+// event feeds a JSON event (as map) into the model.
+func (v *vtui) event(ev map[string]any) {
+	v.m = v.m.handleEvent(evMsg(ev))
+}
+
+// send simulates the user typing a message and pressing enter.
+func (v *vtui) send(msg string) {
+	v.m = typeStr(v.m, msg)
+	v.m = key(v.m, kEnter)
+}
+
+// keypress sends a key to the model.
+func (v *vtui) keypress(k tea.KeyMsg) {
+	v.m = key(v.m, k)
+}
+
+// view returns the full rendered output with ANSI codes stripped.
+func (v *vtui) view() string {
+	return stripANSI(v.m.View())
+}
+
+// viewRaw returns the full rendered output with ANSI codes intact.
+func (v *vtui) viewRaw() string {
+	return v.m.View()
+}
+
+// lines returns the rendered output split into lines.
+func (v *vtui) lines() []string {
+	return strings.Split(v.view(), "\n")
+}
+
+// convo returns the conversation text (block views joined by newlines, ANSI stripped).
+func (v *vtui) convo() string {
+	return stripANSI(convoText(v.m))
+}
+
+// model returns the underlying tuiModel for direct inspection.
+func (v *vtui) model() tuiModel {
+	return v.m
+}
+
+// setScrollPin directly controls the scroll pin state (test helper).
+func (v *vtui) setScrollPin(pinned bool) {
+	v.m.scrollPinned = pinned
+}
+
+// setYOffset directly sets the viewport scroll offset (test helper).
+func (v *vtui) setYOffset(y int) {
+	v.m.vp.SetYOffset(y)
+}
+
 // TestTUI_EventHandling drives the model's event logic directly (no terminal):
 // the ready→token→tool_call→done sequence must build the conversation and clear
 // the busy/starting flags correctly.
@@ -2097,6 +2178,160 @@ func TestTUI_PendingClearedOnToolResult(t *testing.T) {
 
 // When a turn has no tool calls (the LLM replies without calling tools),
 // the queued messages are flushed by flushQueued and rendered on the done event.
+// ── virtual TUI rendering tests ──────────────────────────────────────
+
+func TestVtui_UserMessageFullWidth(t *testing.T) {
+	v := newVtui(40, 15) // phone-size terminal
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.send("hello world")
+
+	// The user message should appear in the conversation.
+	if !strings.Contains(v.convo(), "hello world") {
+		t.Fatalf("convo missing user message:\n%s", v.convo())
+	}
+	// The user message entry should have userText set for full-width rendering.
+	m := v.model()
+	var foundUser bool
+	for _, e := range m.convo {
+		if e.userText == "hello world" {
+			foundUser = true
+			break
+		}
+	}
+	if !foundUser {
+		t.Fatal("user message should have userText set for full-width background rendering")
+	}
+}
+
+func TestVtui_PhoneSizeWrapping(t *testing.T) {
+	v := newVtui(20, 10) // very narrow terminal
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.send("short")
+	v.event(map[string]any{"type": "token", "text": "this is a long response that should wrap across multiple lines in a narrow terminal"})
+	v.event(map[string]any{"type": "done"})
+
+	out := v.view()
+	lines := strings.Split(out, "\n")
+	// Check conversation content lines only (skip header, divider, input, status).
+	for i, ln := range lines {
+		plain := stripANSI(ln)
+		// Skip non-convo lines.
+		if strings.HasPrefix(plain, "dun") || strings.HasPrefix(plain, "─") {
+			continue
+		}
+		if strings.Contains(plain, "ready") || strings.Contains(plain, "scroll") || strings.Contains(plain, "ask dun") {
+			continue
+		}
+		// Convo content should wrap to terminal width.
+		if len(plain) > 0 && len(plain) > 25 {
+			t.Errorf("convo line %d too long for 20-col terminal (%d chars): %q", i, len(plain), plain)
+		}
+	}
+}
+
+func TestVtui_SendShowsMessage(t *testing.T) {
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.send("test message")
+
+	// The message should appear in the rendered view.
+	out := v.view()
+	if !strings.Contains(out, "test message") {
+		t.Fatalf("sent message not visible in view:\n%s", out)
+	}
+	// Model should be busy.
+	if !v.model().busy {
+		t.Fatal("model should be busy after send")
+	}
+}
+
+func TestVtui_Resize(t *testing.T) {
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.send("hello")
+
+	wide := v.view()
+	v.resize(40, 15)
+	narrow := v.view()
+
+	// Narrow view should have shorter lines.
+	wideLines := strings.Split(wide, "\n")
+	narrowLines := strings.Split(narrow, "\n")
+
+	maxWide := 0
+	for _, ln := range wideLines {
+		n := len(stripANSI(ln))
+		if n > maxWide {
+			maxWide = n
+		}
+	}
+	maxNarrow := 0
+	for _, ln := range narrowLines {
+		n := len(stripANSI(ln))
+		if n > maxNarrow {
+			maxNarrow = n
+		}
+	}
+	if maxNarrow >= maxWide {
+		t.Errorf("narrow view max line (%d) should be < wide view max line (%d)", maxNarrow, maxWide)
+	}
+}
+
+func TestVtui_ScrollOverlay(t *testing.T) {
+	// Build a conversation tall enough to scroll in a small terminal.
+	v := newVtui(60, 12)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	// Fill with enough content to overflow the viewport.
+	for i := 0; i < 10; i++ {
+		v.send(fmt.Sprintf("message %d", i))
+		v.event(map[string]any{"type": "token", "text": fmt.Sprintf("response %d to your message\n", i)})
+		v.event(map[string]any{"type": "done"})
+	}
+
+	// At bottom (scrollPinned), no overlay.
+	m := v.model()
+	if !m.scrollPinned {
+		t.Fatal("should be pinned at bottom")
+	}
+	overlay := m.scrollOverlay()
+	if overlay != "" {
+		t.Errorf("at bottom: overlay should be empty, got %q", stripANSI(overlay))
+	}
+
+	// Scroll up by directly setting YOffset (simulating user scroll).
+	v.setYOffset(3)
+	v.setScrollPin(false)
+	_ = v.view() // refresh with new offset
+
+	m = v.model()
+	if m.scrollPinned {
+		t.Fatal("should be unpinned after scrolling up")
+	}
+
+	overlay = m.scrollOverlay()
+	if overlay == "" {
+		// Debug: check what scrollOverlay sees
+		t.Fatalf("scrolled up: overlay should show off-screen user message (yOff=%d, convoLen=%d)", m.vp.YOffset, len(m.convo))
+	}
+	plain := stripANSI(overlay)
+	if !strings.HasPrefix(plain, "› ") {
+		t.Errorf("overlay should start with '› ', got %q", plain)
+	}
+
+	// Scroll back to bottom.
+	v.setScrollPin(true)
+	_ = v.view()
+	m = v.model()
+	if !m.scrollPinned {
+		t.Fatal("should be pinned again at bottom")
+	}
+	overlay = m.scrollOverlay()
+	if overlay != "" {
+		t.Errorf("back at bottom: overlay should be empty, got %q", stripANSI(overlay))
+	}
+}
+
 func TestTUI_PendingFlushedOnDone(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true

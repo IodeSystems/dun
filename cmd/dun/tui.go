@@ -1956,6 +1956,49 @@ func (m tuiModel) viewportView(vp viewport.Model) string {
 	return c.out
 }
 
+// scrollOverlay returns a one-line bar showing the first user message that
+// is fully above the viewport, or "" when scrolled to bottom or no user
+// message is off-screen. The bar uses the user message style so it's
+// visually distinct from the conversation content below it.
+func (m tuiModel) scrollOverlay() string {
+	if m.scrollPinned {
+		return ""
+	}
+	width := m.vp.Width
+	yOff := m.vp.YOffset
+	userStyle := stUser.Width(max(1, width))
+	// Walk the conversation, tracking cumulative height, to find the first
+	// user message fully above the viewport.
+	cumRows := 0
+	for i, e := range m.convo {
+		if e.docs != nil {
+			// Docs blocks: use their view height.
+			cumRows += lipgloss.Height(e.view())
+			continue
+		}
+		var h int
+		if e.userText != "" {
+			h = lipgloss.Height(userStyle.Render("› " + e.userText))
+		} else {
+			h = lipgloss.Height(wrapAt(e.view(), max(1, width)))
+		}
+		if e.userText != "" && cumRows+h <= yOff {
+			// This user message is fully above the viewport.
+			// Show it as a one-line summary.
+			text := "› " + clip(e.userText, width-2)
+			return userStyle.Render(text)
+		}
+		cumRows += h
+		_ = i
+	}
+	return ""
+}
+
+// wrapAt renders text wrapped to the given width (test helper + scrollOverlay).
+func wrapAt(text string, width int) string {
+	return lipgloss.NewStyle().Width(max(1, width)).Render(text)
+}
+
 func (m tuiModel) View() string {
 	start := time.Now()
 	defer func() { frames.observe(stageView, time.Since(start)) }()
@@ -1994,7 +2037,11 @@ func (m tuiModel) View() string {
 	// the input area. Account for their height so the viewport doesn't overlap.
 	pending := m.pendingView()
 	pendingH := lipgloss.Height(pending)
-	convoH := m.h - 3 - pendingH - lipgloss.Height(lower) // head 1 + divider 1 + status 1
+	overlayH := 0
+	if !m.scrollPinned {
+		overlayH = 1 // scroll overlay bar takes one line above the viewport
+	}
+	convoH := m.h - 3 - pendingH - lipgloss.Height(lower) - overlayH // head 1 + divider 1 + status 1
 	if convoH < 1 {
 		convoH = 1
 	}
@@ -2043,7 +2090,11 @@ func (m tuiModel) View() string {
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}
 	out := append([]string{head}, top...)
-	out = append(out, m.viewportView(vp), pending, div, lower, status)
+	// When scrolled up, show an overlay bar above the viewport indicating
+	// the first off-screen user message — so the user knows what they
+	// scrolled past without losing their place.
+	overlay := m.scrollOverlay()
+	out = append(out, overlay, m.viewportView(vp), pending, div, lower, status)
 	return strings.Join(out, "\n")
 }
 
