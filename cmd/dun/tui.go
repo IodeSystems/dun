@@ -1966,26 +1966,18 @@ func (m tuiModel) scrollOverlay() string {
 	if m.vp.YOffset == 0 || m.vp.AtBottom() {
 		return "" // at top or bottom — nothing to show
 	}
-	width := m.vp.Width
 	yOff := m.vp.YOffset
-	userStyle := stUser.Width(max(1, width))
-	// Walk the conversation, tracking cumulative height, to find the last
-	// user message fully above the viewport.
+	// Use the heights refresh() already computed — they match what's
+	// actually in the viewport, unlike re-rendering here which can
+	// diverge on wrap width (selMode gutter, resize, etc.).
 	cumRows := 0
 	var lastOffScreen string
-	for _, e := range m.convo {
-		if e.docs != nil {
-			cumRows += lipgloss.Height(e.view())
-			continue
-		}
-		var h int
-		if e.userText != "" {
-			h = lipgloss.Height(userStyle.Render("› " + e.userText))
-		} else {
-			h = lipgloss.Height(wrapAt(e.view(), max(1, width)))
+	for i, e := range m.convo {
+		h := 0
+		if i < len(m.blockH) {
+			h = m.blockH[i]
 		}
 		if e.userText != "" && cumRows+h <= yOff {
-			// This user message is fully above the viewport — remember it.
 			lastOffScreen = e.userText
 		}
 		cumRows += h
@@ -1993,7 +1985,8 @@ func (m tuiModel) scrollOverlay() string {
 	if lastOffScreen == "" {
 		return ""
 	}
-	text := "› " + clip(lastOffScreen, max(0, width-2))
+	userStyle := stUser.Width(max(1, m.vp.Width))
+	text := "› " + clip(lastOffScreen, max(0, m.vp.Width-2))
 	return userStyle.Render(text)
 }
 
