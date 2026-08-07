@@ -1969,8 +1969,8 @@ func (m tuiModel) viewportView(vp viewport.Model) string {
 // user message style so it's visually distinct from the conversation
 // content below it.
 func (m tuiModel) scrollOverlay() string {
-	if m.vp.YOffset == 0 || m.vp.AtBottom() {
-		return "" // at top or bottom — nothing to show
+	if m.vp.YOffset == 0 || m.scrollPinned {
+		return "" // at top or pinned to bottom — nothing to show
 	}
 	yOff := m.vp.YOffset
 	// Each entry's rowOffset (set by refresh()) is the viewport line where

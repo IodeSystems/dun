@@ -2526,3 +2526,66 @@ func TestVtui_ScrollOverlayInHeader(t *testing.T) {
 		t.Errorf("back at bottom: header should show dun title; got %q", firstLine)
 	}
 }
+
+// TestVtui_ScrollOverlayAfterReplay verifies the overlay works after a
+// replay (the /reload path: fresh model → history event → replay → scroll).
+func TestVtui_ScrollOverlayAfterReplay(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	// Simulate a history event (what the engine sends on resume/reload).
+	items := make([]any, 0)
+	for i := 0; i < 10; i++ {
+		items = append(items, map[string]any{"kind": "user", "content": fmt.Sprintf("user message %d", i)})
+		resp := fmt.Sprintf("Response %d:\n", i)
+		for j := 0; j < 3; j++ {
+			resp += fmt.Sprintf("  line %d.%d of the assistant reply\n", i, j)
+		}
+		items = append(items, map[string]any{"kind": "assistant", "content": resp})
+	}
+	v.event(map[string]any{"type": "history", "items": items})
+
+	m := v.model()
+	if len(m.convo) == 0 {
+		t.Fatal("replay produced no convo entries")
+	}
+
+	// Verify userText is set on user entries.
+	userCount := 0
+	for _, e := range m.convo {
+		if e.userText != "" {
+			userCount++
+		}
+	}
+	if userCount != 10 {
+		t.Fatalf("expected 10 user entries with userText, got %d", userCount)
+	}
+
+	// At bottom: no overlay.
+	overlay := m.scrollOverlay()
+	if overlay != "" {
+		t.Errorf("at bottom: overlay should be empty, got %q", stripANSI(overlay))
+	}
+
+	// Scroll up: overlay should show the last off-screen user message.
+	v.setYOffset(5)
+	v.setScrollPin(false)
+	m = v.model()
+	overlay = m.scrollOverlay()
+	if overlay == "" {
+		t.Fatalf("scrolled up (yOff=%d): overlay should show off-screen user message; convoLen=%d blockHLen=%d",
+			m.vp.YOffset, len(m.convo), len(m.blockH))
+	}
+	plain := stripANSI(overlay)
+	if !strings.HasPrefix(plain, "› ") {
+		t.Errorf("overlay should start with '› ', got %q", plain)
+	}
+
+	// Verify the header in View() shows the overlay.
+	out := v.view()
+	lines := strings.Split(out, "\n")
+	firstLine := lines[0]
+	if !strings.Contains(firstLine, "›") {
+		t.Errorf("header should show overlay; got %q", firstLine)
+	}
+}
