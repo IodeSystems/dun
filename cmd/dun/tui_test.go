@@ -2589,3 +2589,59 @@ func TestVtui_ScrollOverlayAfterReplay(t *testing.T) {
 		t.Errorf("header should show overlay; got %q", firstLine)
 	}
 }
+
+// TestVtui_ScrollOverlayAfterRefresh verifies that the overlay survives a
+// refresh() call while scrolled up — the common case where blinkTickMsg
+// fires refresh() between a scroll and the next View(). This caught the
+// bug where AtBottom() used stale m.vp.Height.
+func TestVtui_ScrollOverlayAfterRefresh(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	// Build a tall conversation.
+	for i := 0; i < 10; i++ {
+		v.send(fmt.Sprintf("msg %d", i))
+		resp := fmt.Sprintf("Reply %d:\n", i)
+		for j := 0; j < 3; j++ {
+			resp += fmt.Sprintf("  line %d.%d\n", i, j)
+		}
+		v.event(map[string]any{"type": "token", "text": resp})
+		v.event(map[string]any{"type": "done"})
+	}
+
+	// Scroll up by setting YOffset and unpinning (simulates mouse wheel).
+	v.setYOffset(10)
+	v.setScrollPin(false)
+
+	// A blinkTick fires refresh() — this is what happens in the real TUI
+	// between a scroll event and the next View().
+	v.m.refresh()
+
+	// refresh() should NOT have re-pinned or reset YOffset since scrollPinned
+	// is false.
+	m := v.model()
+	if m.scrollPinned {
+		t.Fatal("refresh() should not re-pin when scrollPinned is false")
+	}
+	if m.vp.YOffset == 0 {
+		t.Fatal("refresh() should not reset YOffset when scrollPinned is false")
+	}
+
+	// The overlay should still show.
+	out := v.view()
+	lines := strings.Split(out, "\n")
+	firstLine := lines[0]
+	if !strings.Contains(firstLine, "›") {
+		t.Errorf("after refresh while scrolled: header should show overlay; got %q", firstLine)
+	}
+
+	// Now pin and refresh — should scroll to bottom and hide overlay.
+	v.setScrollPin(true)
+	v.m.refresh()
+	out = v.view()
+	lines = strings.Split(out, "\n")
+	firstLine = lines[0]
+	if strings.Contains(firstLine, "› msg") && !strings.Contains(firstLine, "dun") {
+		t.Errorf("after pin+refresh: header should show dun title; got %q", firstLine)
+	}
+}
