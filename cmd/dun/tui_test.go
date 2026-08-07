@@ -2645,3 +2645,94 @@ func TestVtui_ScrollOverlayAfterRefresh(t *testing.T) {
 		t.Errorf("after pin+refresh: header should show dun title; got %q", firstLine)
 	}
 }
+
+// TestVtui_ScrollOverlayViaMouseWheel verifies the overlay works through the
+// actual mouse wheel path (not direct YOffset manipulation).
+func TestVtui_ScrollOverlayViaMouseWheel(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	for i := 0; i < 10; i++ {
+		v.send(fmt.Sprintf("msg %d", i))
+		resp := fmt.Sprintf("Reply %d:\n", i)
+		for j := 0; j < 3; j++ {
+			resp += fmt.Sprintf("  line %d.%d\n", i, j)
+		}
+		v.event(map[string]any{"type": "token", "text": resp})
+		v.event(map[string]any{"type": "done"})
+	}
+
+	// At bottom: header shows dun title.
+	out := v.view()
+	lines := strings.Split(out, "\n")
+	if !strings.Contains(lines[0], "dun") {
+		t.Errorf("at bottom: header should show dun; got %q", lines[0])
+	}
+
+	// Scroll up via mouse wheel (one click = 3 lines by default).
+	msg := tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress}
+	nm, _ := v.m.Update(msg)
+	v.m = nm.(tuiModel)
+
+	// Should be unpinned now.
+	if v.m.scrollPinned {
+		t.Fatalf("mouse wheel should unpin scroll (yOff=%d, atBottom=%v)",
+			v.m.vp.YOffset, v.m.vp.AtBottom())
+	}
+
+	// Header should show overlay.
+	out = v.view()
+	lines = strings.Split(out, "\n")
+	firstLine := lines[0]
+	if !strings.Contains(firstLine, "›") {
+		t.Errorf("after mouse wheel: header should show overlay; yOff=%d; got %q",
+			v.m.vp.YOffset, firstLine)
+	}
+}
+
+// TestVtui_ScrollOverlayContentGrowsWhileScrolled verifies the overlay stays
+// visible when new content arrives (token event) while the user is scrolled up.
+func TestVtui_ScrollOverlayContentGrowsWhileScrolled(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	// Build enough content to scroll.
+	for i := 0; i < 8; i++ {
+		v.send(fmt.Sprintf("msg %d", i))
+		resp := fmt.Sprintf("Reply %d:\n", i)
+		for j := 0; j < 3; j++ {
+			resp += fmt.Sprintf("  line %d.%d\n", i, j)
+		}
+		v.event(map[string]any{"type": "token", "text": resp})
+		v.event(map[string]any{"type": "done"})
+	}
+
+	// Scroll up.
+	v.setYOffset(10)
+	v.setScrollPin(false)
+
+	// Verify overlay is showing.
+	out := v.view()
+	lines := strings.Split(out, "\n")
+	if !strings.Contains(lines[0], "›") {
+		t.Fatalf("scrolled up: header should show overlay; got %q", lines[0])
+	}
+
+	// New content arrives while scrolled — a token event triggers refresh()
+	// but does NOT re-pin (only done/error do that).
+	v.event(map[string]any{"type": "token", "text": "new content line 1\nnew content line 2\n"})
+
+	// The overlay should still show — refresh() should not have re-pinned.
+	m := v.model()
+	if m.scrollPinned {
+		t.Fatal("token event should not re-pin when scrollPinned is false")
+	}
+
+	out = v.view()
+	lines = strings.Split(out, "\n")
+	firstLine := lines[0]
+	if !strings.Contains(firstLine, "›") {
+		t.Errorf("after content grows: header should still show overlay; got %q", firstLine)
+	}
+}
+
