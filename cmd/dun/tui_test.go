@@ -2878,3 +2878,70 @@ func TestVtui_ScrollOverlaySwitchesAfterResume(t *testing.T) {
 		t.Errorf("after resume, high scroll: overlay should show 'second', got %q", overlay)
 	}
 }
+
+// TestVtui_ScrollOverlaySwitchesViaMouseWheelAfterReplay verifies the overlay
+// switches between two user messages when scrolling via mouse wheel after a
+// history replay (the /reload path). This caught a bug where the overlay stuck
+// on one message and never updated as the user scrolled further up.
+func TestVtui_ScrollOverlaySwitchesViaMouseWheelAfterReplay(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	wideLine := func(n int) string {
+		return strings.Repeat("x", 70) + fmt.Sprintf(" line %d\n", n)
+	}
+
+	// Simulate a history replay with two user messages separated by content.
+	items := make([]any, 0)
+	items = append(items, map[string]any{"kind": "user", "content": "first"})
+	resp1 := ""
+	for i := 0; i < 30; i++ {
+		resp1 += wideLine(i)
+	}
+	items = append(items, map[string]any{"kind": "assistant", "content": resp1})
+	items = append(items, map[string]any{"kind": "user", "content": "second"})
+	resp2 := ""
+	for i := 0; i < 30; i++ {
+		resp2 += wideLine(i)
+	}
+	items = append(items, map[string]any{"kind": "assistant", "content": resp2})
+	v.event(map[string]any{"type": "history", "items": items})
+
+	// Scroll up via mouse wheel, collecting overlays at each step.
+	// One wheel click = 3 lines. Scroll enough to pass both messages.
+	var seen []string
+	for i := 0; i < 30; i++ {
+		msg := tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress}
+		nm, _ := v.m.Update(msg)
+		v.m = nm.(tuiModel)
+
+		overlay := v.m.scrollOverlay()
+		if overlay != "" {
+			plain := stripANSI(overlay)
+			if len(seen) == 0 || seen[len(seen)-1] != plain {
+				seen = append(seen, plain)
+			}
+		}
+	}
+
+	if len(seen) < 2 {
+		t.Fatalf("expected overlay to show at least two different messages while scrolling, got %v", seen)
+	}
+
+	// Verify both messages appeared.
+	hasFirst, hasSecond := false, false
+	for _, s := range seen {
+		if strings.Contains(s, "first") {
+			hasFirst = true
+		}
+		if strings.Contains(s, "second") {
+			hasSecond = true
+		}
+	}
+	if !hasFirst {
+		t.Errorf("overlay never showed 'first'; saw: %v", seen)
+	}
+	if !hasSecond {
+		t.Errorf("overlay never showed 'second'; saw: %v", seen)
+	}
+}
