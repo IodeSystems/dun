@@ -1043,7 +1043,13 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case blinkTickMsg:
-		m.refresh()
+		// Only refresh when content actually changed — a blind refresh on
+		// every blink tick re-wraps the entire scrollback and pegs the CPU
+		// for long conversations with tool calls.
+		if m.renderDue {
+			m.renderDue = false
+			m.refresh()
+		}
 		return m, m.input.BlinkTick()
 
 	case spinner.TickMsg:
