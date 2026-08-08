@@ -2582,6 +2582,24 @@ func init() {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())
 			return nil
 		}},
+		{"scrolldebug", "", "debug: dump scroll overlay state (rowOffset, blockH, YOffset)", func(m *tuiModel, _ []string) tea.Cmd {
+			var lines []string
+			lines = append(lines, fmt.Sprintf("YOffset=%d pinned=%v vpH=%d convo=%d blockH=%d",
+				m.vp.YOffset, m.scrollPinned, m.vp.Height, len(m.convo), len(m.blockH)))
+			for i, e := range m.convo {
+				if e.userText == "" {
+					continue
+				}
+				h := 0
+				if i < len(m.blockH) {
+					h = m.blockH[i]
+				}
+				lines = append(lines, fmt.Sprintf("  [%d] user=%q rowOffset=%d h=%d bottom=%d offScreen=%v",
+					i, e.userText, e.rowOffset, h, e.rowOffset+h, e.rowOffset+h <= m.vp.YOffset))
+			}
+			m.append(stDim.Render(strings.Join(lines, "\n")))
+			return nil
+		}},
 		{"resume", "[id]", "switch to another saved session (bare opens the picker)", resumeSlash},
 		{"close", "", "discard this session for good: remove its worktree and branch, forget its transcript", func(m *tuiModel, _ []string) tea.Cmd {
 			if !m.proc.controlCmd("close", "") {
