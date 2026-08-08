@@ -2736,3 +2736,145 @@ func TestVtui_ScrollOverlayContentGrowsWhileScrolled(t *testing.T) {
 	}
 }
 
+
+// TestVtui_ScrollOverlaySwitchesMessages verifies that when two user messages
+// are separated by lots of content, scrolling past each one updates the overlay
+// to show the correct off-screen message. This caught a bug where the overlay
+// stuck on the first off-screen message and never switched to the next one.
+func TestVtui_ScrollOverlaySwitchesMessages(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	// Build a conversation with two user messages separated by lots of content.
+	// Use wide lines so each wraps to exactly one row — we need predictable
+	// row offsets for the scrollOverlay math.
+	wideLine := func(n int) string {
+		return strings.Repeat("x", 70) + fmt.Sprintf(" line %d\n", n)
+	}
+
+	v.send("first")
+	resp1 := ""
+	for i := 0; i < 30; i++ {
+		resp1 += wideLine(i)
+	}
+	v.event(map[string]any{"type": "token", "text": resp1})
+	v.event(map[string]any{"type": "done"})
+
+	v.send("second")
+	resp2 := ""
+	for i := 0; i < 30; i++ {
+		resp2 += wideLine(i)
+	}
+	v.event(map[string]any{"type": "token", "text": resp2})
+	v.event(map[string]any{"type": "done"})
+
+	// Scroll up progressively and verify the overlay switches.
+	var overlays []string
+	for yOff := 5; yOff <= 110; yOff += 5 {
+		v.setYOffset(yOff)
+		v.setScrollPin(false)
+		overlay := v.model().scrollOverlay()
+		if overlay != "" {
+			overlays = append(overlays, stripANSI(overlay))
+		}
+	}
+
+	if len(overlays) == 0 {
+		t.Fatal("expected at least one overlay, got none")
+	}
+
+	// Find which messages appeared in the overlay.
+	hasFirst := false
+	hasSecond := false
+	for _, o := range overlays {
+		if strings.Contains(o, "first") {
+			hasFirst = true
+		}
+		if strings.Contains(o, "second") {
+			hasSecond = true
+		}
+	}
+
+	if !hasSecond {
+		t.Errorf("overlay never showed 'second'; got: %v", overlays)
+	}
+	if !hasFirst {
+		t.Errorf("overlay never showed 'first'; got: %v", overlays)
+	}
+
+	// As yOff increases (scrolling further up), the overlay should show 'first'
+	// (the earlier message, already off-screen) then switch to 'second' once
+	// it too scrolls off the top of the viewport.
+	firstMsg := ""
+	secondMsg := ""
+	for _, o := range overlays {
+		if strings.Contains(o, "first") && firstMsg == "" {
+			firstMsg = "first"
+		}
+		if strings.Contains(o, "second") && firstMsg != "" && secondMsg == "" {
+			secondMsg = "second"
+		}
+	}
+	if firstMsg != "first" || secondMsg != "second" {
+		t.Errorf("overlay should show 'first' then 'second' as scroll increases, got order: %v", overlays)
+	}
+}
+
+// TestVtui_ScrollOverlaySwitchesAfterResume verifies the overlay switches
+// between two user messages after a resume (history replay) + scroll cycle.
+// This caught a bug where the overlay stuck on one message after resume
+// and never updated when scrolling past the other.
+func TestVtui_ScrollOverlaySwitchesAfterResume(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	wideLine := func(n int) string {
+		return strings.Repeat("x", 70) + fmt.Sprintf(" line %d\n", n)
+	}
+
+	// Simulate a history replay with two user messages separated by content.
+	items := make([]any, 0)
+	items = append(items, map[string]any{"kind": "user", "content": "first"})
+	resp1 := ""
+	for i := 0; i < 30; i++ {
+		resp1 += wideLine(i)
+	}
+	items = append(items, map[string]any{"kind": "assistant", "content": resp1})
+	items = append(items, map[string]any{"kind": "user", "content": "second"})
+	resp2 := ""
+	for i := 0; i < 30; i++ {
+		resp2 += wideLine(i)
+	}
+	items = append(items, map[string]any{"kind": "assistant", "content": resp2})
+	v.event(map[string]any{"type": "history", "items": items})
+
+	// Scroll up, then resume (pin + refresh), then scroll up again.
+	// The overlay should still switch between messages on the second scroll.
+
+	// First scroll — verify overlay works.
+	v.setYOffset(63)
+	v.setScrollPin(false)
+	overlay := stripANSI(v.model().scrollOverlay())
+	if !strings.Contains(overlay, "second") {
+		t.Logf("first scroll overlay: %q", overlay)
+	}
+
+	// Resume: pin and refresh (simulates new content arriving or user scrolling to bottom).
+	v.setScrollPin(true)
+	v.m.refresh()
+
+	// Second scroll — overlay should still switch.
+	v.setYOffset(5)
+	v.setScrollPin(false)
+	overlay = stripANSI(v.model().scrollOverlay())
+	if !strings.Contains(overlay, "first") {
+		t.Errorf("after resume, low scroll: overlay should show 'first', got %q", overlay)
+	}
+
+	v.setYOffset(63)
+	v.setScrollPin(false)
+	overlay = stripANSI(v.model().scrollOverlay())
+	if !strings.Contains(overlay, "second") {
+		t.Errorf("after resume, high scroll: overlay should show 'second', got %q", overlay)
+	}
+}
