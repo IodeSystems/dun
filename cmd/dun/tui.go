@@ -488,6 +488,8 @@ type tuiModel struct {
 	w, h             int
 	fatalErr         string
 	scrollPinned     bool // true when viewport should auto-follow (at bottom)
+	traceFile        *os.File  // /trace on: recording events+scroll to this file
+	tracePrevYOff    int       // last recorded YOffset (avoid duplicates)
 	// Context stats (for /context)
 	ctxStats contextStats
 }
@@ -570,6 +572,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.traceResize(msg)
 		m.w, m.h = msg.Width, msg.Height
 		// Layout: head(1) + convo + divider(1) + lower + status(1). Convo takes
 		// h-4 in the normal (1-line input) case; View recomputes it when the
@@ -967,6 +970,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForDump(m.dumpSig) // re-arm for the next signal
 
 	case evMsg:
+		m.traceEvent(msg)
 		nm := m.handleEvent(msg)
 		cmds := []tea.Cmd{waitEvent(nm.proc.ch)}
 		if nm.renderDue && !nm.tickPending {
@@ -2515,6 +2519,34 @@ func (m *tuiModel) updateScrollPin() {
 	} else {
 		m.scrollPinned = false
 	}
+	m.traceScroll()
+}
+
+// traceScroll writes the current scroll state to the trace file if tracing is on.
+func (m *tuiModel) traceScroll() {
+	if m.traceFile == nil || m.vp.YOffset == m.tracePrevYOff {
+		return
+	}
+	m.tracePrevYOff = m.vp.YOffset
+	fmt.Fprintf(m.traceFile, "scroll yoff=%d pinned=%v\n", m.vp.YOffset, m.scrollPinned)
+}
+
+// traceEvent writes an engine event to the trace file if tracing is on.
+func (m *tuiModel) traceEvent(ev evMsg) {
+	if m.traceFile == nil {
+		return
+	}
+	etype, _ := ev["type"].(string)
+	data, _ := json.Marshal(ev)
+	fmt.Fprintf(m.traceFile, "event %s %s\n", etype, data)
+}
+
+// traceResize writes a resize event to the trace file if tracing is on.
+func (m *tuiModel) traceResize(msg tea.WindowSizeMsg) {
+	if m.traceFile == nil {
+		return
+	}
+	fmt.Fprintf(m.traceFile, "resize w=%d h=%d\n", msg.Width, msg.Height)
 }
 
 func str(v any) string {
@@ -2607,6 +2639,36 @@ func init() {
 			return nil
 		}},
 		{"resume", "[id]", "switch to another saved session (bare opens the picker)", resumeSlash},
+		{"trace", "[on|off|file]", "record events+scroll to a file for debugging (default: trace.jsonl in workspace)", func(m *tuiModel, args []string) tea.Cmd {
+			if len(args) == 0 || args[0] == "on" {
+				path := "trace.jsonl"
+				if len(args) >= 2 {
+					path = args[1]
+				}
+				f, err := os.OpenFile(filepath.Join(m.workspace, path), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				if err != nil {
+					m.append(stErr.Render("trace: " + err.Error()))
+					return nil
+				}
+				if m.traceFile != nil {
+					m.traceFile.Close()
+				}
+				m.traceFile = f
+				m.tracePrevYOff = -1
+				m.append(stNote.Render("tracing → " + filepath.Join(m.workspace, path)))
+				return nil
+			}
+			if args[0] == "off" {
+				if m.traceFile != nil {
+					m.traceFile.Close()
+					m.traceFile = nil
+				}
+				m.append(stNote.Render("tracing off"))
+				return nil
+			}
+			m.append(stDim.Render("usage: /trace [on|off [file]]"))
+			return nil
+		}},
 		{"close", "", "discard this session for good: remove its worktree and branch, forget its transcript", func(m *tuiModel, _ []string) tea.Cmd {
 			if !m.proc.controlCmd("close", "") {
 				m.append(stErr.Render("no engine right now — nothing closed"))

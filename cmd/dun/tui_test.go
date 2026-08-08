@@ -2945,3 +2945,72 @@ func TestVtui_ScrollOverlaySwitchesViaMouseWheelAfterReplay(t *testing.T) {
 		t.Errorf("overlay never showed 'second'; saw: %v", seen)
 	}
 }
+
+// TestVtui_TraceReplay reads a trace.jsonl file and replays it into a vtui,
+// then checks the scroll overlay at each scroll event.
+// Usage: go test -args TRACE_FILE=path/to/trace.jsonl
+func TestVtui_TraceReplay(t *testing.T) {
+	traceFile := os.Getenv("TRACE_FILE")
+	if traceFile == "" {
+		t.Skip("set TRACE_FILE env var to a trace.jsonl file")
+	}
+	data, err := os.ReadFile(traceFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v := newVtui(80, 24) // default terminal size
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "resize ") {
+			// resize w=80 h=24
+			var w, h int
+			_, err := fmt.Sscanf(line, "resize w=%d h=%d", &w, &h)
+			if err == nil && (w != v.w || h != v.h) {
+				v.resize(w, h)
+				t.Logf("resize w=%d h=%d", w, h)
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "event ") {
+			// event type {"key":"value",...}
+			parts := strings.SplitN(line, " ", 3)
+			if len(parts) < 3 {
+				continue
+			}
+			etype := parts[1]
+			jsonStr := parts[2]
+			var ev map[string]any
+			if err := json.Unmarshal([]byte(jsonStr), &ev); err != nil {
+				t.Logf("parse error for event %s: %v", etype, err)
+				continue
+			}
+			ev["type"] = etype // put type back in
+			v.event(ev)
+			continue
+		}
+		if strings.HasPrefix(line, "scroll ") {
+			// scroll yoff=10 pinned=false
+			var yoff int
+			var pinned bool
+			_, err := fmt.Sscanf(line, "scroll yoff=%d pinned=%v", &yoff, &pinned)
+			if err != nil {
+				continue
+			}
+			v.setYOffset(yoff)
+			v.setScrollPin(pinned)
+			m := v.model()
+			overlay := m.scrollOverlay()
+			plain := ""
+			if overlay != "" {
+				plain = stripANSI(overlay)
+			}
+			t.Logf("scroll yoff=%d pinned=%v overlay=%q", yoff, pinned, plain)
+			continue
+		}
+	}
+}
