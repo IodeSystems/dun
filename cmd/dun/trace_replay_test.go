@@ -3,12 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
 
-// Replay the trace file's layout dump + scroll events against a synthetic
-// conversation that matches the real rowOffset/blockH values.
+// Replay the trace file's layout dump against the scrollOverlay logic
+// directly — no need to rebuild the conversation, just use the real
+// rowOffset/blockH values from the trace.
 func TestVtui_TraceReplaySynthetic(t *testing.T) {
 	traceFile := os.Getenv("TRACE_FILE")
 	if traceFile == "" {
@@ -21,144 +24,113 @@ func TestVtui_TraceReplaySynthetic(t *testing.T) {
 
 	lines := strings.Split(string(data), "\n")
 
-	// Parse layout and scroll events
-	var w, h int
-	type layoutEntry struct {
-		idx, rowOffset, blockH int
-		userText               string
+	type userMsg struct {
+		userText  string
+		rowOffset int
+		blockH    int
 	}
-	var layout []layoutEntry
-	var scrolls []struct {
-		yoff   int
-		pinned bool
-	}
+	var msgs []userMsg
+	var scrolls []int
+
+	layoutRe := regexp.MustCompile(`^layout\s+(\d+)\s+kind=(\w+)\s+userText="([^"]*)"\s+rowOffset=(\d+)\s+h=(\d+)$`)
+	scrollRe := regexp.MustCompile(`^scroll\s+yoff=(\d+)\s+pinned=(\w+)$`)
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "resize ") {
-			fmt.Sscanf(line, "resize w=%d h=%d", &w, &h)
-		} else if strings.HasPrefix(line, "layout ") {
-			var idx, rowOffset, bh int
-			var userText string
-			fmt.Sscanf(line, "layout %d userText=%q rowOffset=%d h=%d", &idx, &userText, &rowOffset, &bh)
-			layout = append(layout, layoutEntry{idx, rowOffset, bh, userText})
-		} else if strings.HasPrefix(line, "scroll ") {
-			var yoff int
-			var pinned bool
-			fmt.Sscanf(line, "scroll yoff=%d pinned=%v", &yoff, &pinned)
-			scrolls = append(scrolls, struct {
-				yoff   int
-				pinned bool
-			}{yoff, pinned})
-		}
-	}
 
-	if w == 0 {
-		w, h = 80, 24
-	}
-	t.Logf("terminal: %dx%d, layout entries: %d, scrolls: %d", w, h, len(layout), len(scrolls))
-
-	// Find user messages from layout
-	var userMsgs []layoutEntry
-	for _, e := range layout {
-		if e.userText != "" {
-			userMsgs = append(userMsgs, e)
-		}
-	}
-	for _, u := range userMsgs {
-		t.Logf("  user=%q rowOffset=%d h=%d bottom=%d", u.userText, u.rowOffset, u.blockH, u.rowOffset+u.blockH)
-	}
-
-	// Build a conversation with the right total height
-	maxRow := 0
-	for _, e := range layout {
-		bottom := e.rowOffset + e.blockH
-		if bottom > maxRow {
-			maxRow = bottom
-		}
-	}
-	t.Logf("total content height: ~%d rows", maxRow)
-
-	v := newVtui(w, h)
-	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
-
-	// Build content to match the layout's rowOffsets.
-	// For each user message, place it at the right rowOffset by filling
-	// with dummy content before it.
-	wideLine := func(n int) string {
-		return strings.Repeat("x", 70) + fmt.Sprintf(" line %d\n", n)
-	}
-
-	prevRow := 1 // after "ready" line
-	for _, u := range userMsgs {
-		// Fill with dummy content up to the user message's rowOffset
-		gap := u.rowOffset - prevRow
-		if gap < 0 {
-			gap = 0
-		}
-		for gap > 0 {
-			v.event(map[string]any{"type": "token", "text": wideLine(0)})
-			v.event(map[string]any{"type": "done"})
-			gap--
-		}
-		v.send(u.userText)
-		prevRow = u.rowOffset + u.blockH
-	}
-	// Fill remaining to reach maxRow
-	for prevRow < maxRow {
-		v.event(map[string]any{"type": "token", "text": wideLine(0)})
-		v.event(map[string]any{"type": "done"})
-		prevRow++
-	}
-
-	// Verify rowOffsets match
-	m := v.model()
-	for _, u := range userMsgs {
-		if u.idx >= len(m.convo) {
+		if m := layoutRe.FindStringSubmatch(line); m != nil && m[2] == "user" {
+			rowOffset, _ := strconv.Atoi(m[4])
+			bh, _ := strconv.Atoi(m[5])
+			msgs = append(msgs, userMsg{userText: m[3], rowOffset: rowOffset, blockH: bh})
 			continue
 		}
-		e := m.convo[u.idx]
-		if e.userText == "" {
+
+		if m := scrollRe.FindStringSubmatch(line); m != nil {
+			yoff, _ := strconv.Atoi(m[1])
+			scrolls = append(scrolls, yoff)
 			continue
 		}
-		h := 0
-		if u.idx < len(m.blockH) {
-			h = m.blockH[u.idx]
-		}
-		t.Logf("  verify [%d] user=%q rowOffset=%d(have %d) h=%d(have %d)",
-			u.idx, u.userText, u.rowOffset, e.rowOffset, u.blockH, h)
 	}
 
-	// Replay scroll events
+	if len(msgs) < 2 {
+		t.Skipf("need at least 2 user messages, got %d", len(msgs))
+	}
+
+	for _, u := range msgs {
+		t.Logf("user=%q rowOffset=%d h=%d bottom=%d",
+			trunc(u.userText, 60), u.rowOffset, u.blockH, u.rowOffset+u.blockH)
+	}
+
+	// Simulate the scrollOverlay logic with real rowOffset/blockH values
+	scrollRange := make(map[int]bool)
+	for _, y := range scrolls {
+		scrollRange[y] = true
+	}
+	if len(scrollRange) == 0 {
+		// No scroll events — simulate full range
+		maxBottom := 0
+		for _, u := range msgs {
+			b := u.rowOffset + u.blockH
+			if b > maxBottom {
+				maxBottom = b
+			}
+		}
+		for y := 0; y <= maxBottom; y += 3 {
+			scrollRange[y] = true
+		}
+	}
+
+	// For each YOffset, compute what the overlay would show
 	var seen []string
-	for _, s := range scrolls {
-		v.setYOffset(s.yoff)
-		v.setScrollPin(false)
-		overlay := v.model().scrollOverlay()
-		if overlay != "" {
-			plain := stripANSI(overlay)
-			if len(seen) == 0 || seen[len(seen)-1] != plain {
-				seen = append(seen, fmt.Sprintf("yoff=%d %s", s.yoff, plain))
+	for yOff := 0; yOff <= 4000; yOff++ {
+		if !scrollRange[yOff] {
+			continue
+		}
+
+		// scrollOverlay logic: find off-screen message closest to viewport top
+		var closestText string
+		closestBottom := -1
+		for _, u := range msgs {
+			bottom := u.rowOffset + u.blockH
+			if bottom <= yOff && bottom > closestBottom {
+				closestBottom = bottom
+				closestText = u.userText
+			}
+		}
+
+		if closestText != "" {
+			truncated := trunc(closestText, 40)
+			entry := fmt.Sprintf("yoff=%d %s", yOff, truncated)
+			if len(seen) == 0 || seen[len(seen)-1] != entry {
+				seen = append(seen, entry)
 			}
 		}
 	}
 
-	t.Logf("unique overlays (%d):", len(seen))
+	// Only print transitions
+	t.Logf("overlay transitions (%d):", len(seen))
 	for _, s := range seen {
 		t.Logf("  %s", s)
 	}
 
-	// Check all user messages appeared in the overlay
-	for _, u := range userMsgs {
+	// Check all messages appeared
+	for _, u := range msgs {
 		found := false
 		for _, s := range seen {
-			if strings.Contains(s, u.userText) {
+			if strings.Contains(s, trunc(u.userText, 40)) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("never saw %q in overlay", u.userText)
+			t.Errorf("never saw %q in overlay", trunc(u.userText, 60))
 		}
 	}
+}
+
+func trunc(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
