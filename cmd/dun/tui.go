@@ -1986,7 +1986,13 @@ func (m tuiModel) scrollOverlay() string {
 	// Each entry's rowOffset (set by refresh()) is the viewport line where
 	// it starts. blockH[i] is its height. Together they give exact row
 	// ranges — no re-rendering needed.
-	var lastOffScreen string
+	//
+	// Pick the off-screen user message whose bottom is closest to the
+	// viewport top — the one the user most recently scrolled past. When
+	// both "first" and "second" are off-screen, we want "second" only
+	// until the user scrolls past it; then we want "first".
+	var closestText string
+	closestBottom := -1
 	for i, e := range m.convo {
 		if e.userText == "" {
 			continue
@@ -1995,15 +2001,17 @@ func (m tuiModel) scrollOverlay() string {
 		if i < len(m.blockH) {
 			h = m.blockH[i]
 		}
-		if e.rowOffset+h <= yOff {
-			lastOffScreen = e.userText
+		bottom := e.rowOffset + h
+		if bottom <= yOff && bottom > closestBottom {
+			closestBottom = bottom
+			closestText = e.userText
 		}
 	}
-	if lastOffScreen == "" {
+	if closestText == "" {
 		return ""
 	}
 	userStyle := stUser.Width(max(1, m.vp.Width))
-	text := "› " + clip(lastOffScreen, max(0, m.vp.Width-2))
+	text := "› " + clip(closestText, max(0, m.vp.Width-2))
 	return userStyle.Render(text)
 }
 
