@@ -64,6 +64,58 @@ failure was invisible from inside the session and took /proc archaeology to find
 - **Resume condition:** sub-agents land (plan D). One session per human is
   self-limiting; N spawned sessions sharing a machine is not.
 
+### The TUI has no layout value, and that is what the scroll bugs are made of
+
+**Resume condition:** the next scroll, geometry or "why is the screen wrong"
+bug in `cmd/dun/tui.go`. Do not start it cold — it is a refactor with no user
+story of its own, and the fix in `57f5594` closed the symptom.
+
+The scroll-overlay hunt (2026-08-06 → 08-09) burned a whole session and landed
+on correct code. `scrollOverlay` was right the entire time; the frame it drew
+into was one row too tall, Bubble Tea's renderer keeps the LAST h lines, and so
+the row was deleted before display. Nothing in the code or the tests could see
+that, and the reason is structural.
+
+**There is no value that represents the frame.** Geometry lives in three
+places that are written by different functions at different times and never
+reconciled:
+- `m.vp` (the bubbles viewport) owns the scroll offset and its own height,
+- `convoEntry.rowOffset` — render output written back into model state, valid
+  only until the next `refresh()`, with no way for a reader to know it is stale,
+- `m.blockH` — the same measurements again, in a parallel slice.
+
+`View` computed a fourth version inline, and that copy was the one that drifted.
+`convoHeight()` is now the single truth, but it still re-derives the row list
+that `View` then re-derives to join. A `frame` value — one pure function
+producing every row plus the convo height, with `View` reduced to a join — makes
+the drift impossible rather than merely fixed, and makes "does the frame fit the
+terminal" a field comparison instead of a rendered-string assertion.
+
+**`refresh()` does four jobs and has 74 callers.** It wraps blocks, measures
+them, writes the measurements into `convo`, sets the viewport content, AND
+decides where to scroll (selection-follow, pin-follow, and a special case for a
+streaming reply). Most callers want only the first three. Splitting content
+from scroll policy would also give the 16 sites that move the viewport one owner
+instead of four (`updateScrollPin`, `refresh`, the mouse handler, and
+`viewport.New` on resize — which silently resets `YOffset` to 0, so a resize
+still loses your place).
+
+**The testing gap is the same gap.** Because layout is only observable as a
+rendered string, every overlay test took the shortcut of calling the leaf
+function and comparing its output; the trace replay went further and
+re-implemented the leaf's own search inside the test. Ten tests, none of which
+could fail on the actual defect. `fec41a1` fixes the tests; a `frame` value
+would have made the shortcut unattractive in the first place.
+
+Scale, for whoever picks this up: `tui.go` is 3.4k lines, `tuiModel` has 88
+fields and 79 methods, `convo` is referenced 151 times, `vp` 79.
+
+**Adjacent, cheap, behaviour-changing — ask first:** `pendingView()` (tui.go)
+returns `""` unconditionally, but `View` still emits it as a row and
+`convoHeight` still subtracts it. One row of every terminal is permanently
+blank for a feature that no longer exists. Deleting it shifts every layout by a
+row, which is why it is not folded into the fix.
+
 ## Low value — recorded so they stop being re-proposed
 
 These are all real, all small, and none of them is worth a session on its own.
