@@ -115,7 +115,7 @@ func (tf traceFile) install(v *vtui) {
 			m.task = e.userText // last user message wins, as replay() does
 		}
 	}
-	m.vp.SetContent(strings.Repeat("x\n", maxRow))
+	m.vp.SetLines(make([]string, maxRow))
 	m.contentGen++
 }
 

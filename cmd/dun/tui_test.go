@@ -1444,7 +1444,7 @@ func TestTUI_ScrollPin(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		m.convo = append(m.convo, convoEntry{collapsed: fmt.Sprintf("message line %d", i)})
 	}
-	m.vp.SetContent(fullText(m))
+	m.vp.SetLines(strings.Split(fullText(m), "\n"))
 
 	// After setup, pin should still be true.
 	if !m.scrollPinned {

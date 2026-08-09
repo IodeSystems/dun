@@ -18,7 +18,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -404,7 +403,7 @@ func (d *docsBlock) render(open bool) string {
 type tuiModel struct {
 	proc        *dunProc
 	workspace   string
-	vp          viewport.Model
+	vp          convoPane
 	input       multilineInput
 	spin        spinner.Model
 	convo       []convoEntry   // finalized conversation blocks
@@ -621,7 +620,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the top of the conversation. On a phone the soft keyboard opening and
 		// closing is a resize, and it fires constantly.
 		if first {
-			m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
+			m.vp = newConvoPane(msg.Width, msg.Height-4)
 		} else {
 			m.vp.Width = max(1, msg.Width)
 		}
@@ -2010,7 +2009,7 @@ type viewportCache struct {
 }
 
 // viewportView is vp.View() memoized on (content, offset, size).
-func (m tuiModel) viewportView(vp viewport.Model) string {
+func (m tuiModel) viewportView(vp convoPane) string {
 	c := m.vpc
 	if c == nil {
 		return vp.View()
@@ -2495,7 +2494,7 @@ func (m *tuiModel) refresh() {
 		width-- // reserve ONE column for the gutter bar — minimal reflow on focus
 	}
 	wrapW := max(1, width)
-	rendered := make([]string, len(blocks))
+	rendered := make([]string, 0, len(m.vp.lines)) // display rows, not blocks
 	m.blockH = make([]int, len(m.convo)) // cache convo-block heights for scroll math
 
 	// Render all blocks. For user messages, re-render with full-width
@@ -2538,8 +2537,8 @@ func (m *tuiModel) refresh() {
 				w = addGutter(w, " ", lipgloss.NewStyle())
 			}
 		}
-		rendered[i] = w
-		h := lipgloss.Height(w)
+		rendered = append(rendered, strings.Split(w, "\n")...)
+		h := len(rendered) - cumRow
 		if i < len(m.blockH) {
 			m.blockH[i] = h
 		}
@@ -2548,7 +2547,10 @@ func (m *tuiModel) refresh() {
 		}
 		cumRow += h
 	}
-	m.vp.SetContent(strings.Join(rendered, "\n"))
+	// Hand the pane the rows themselves. Joining them into one string only for
+	// it to split them back was ~12ms of every refresh on a long conversation —
+	// and every streamed token is a refresh.
+	m.vp.SetLines(rendered)
 	m.contentGen++
 
 	m.applyScroll(selMode)
