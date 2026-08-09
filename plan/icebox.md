@@ -111,15 +111,23 @@ Scale, for whoever picks this up: `tui.go` is 3.4k lines, `tuiModel` has 88
 fields and 79 methods, `convo` is referenced 151 times, `vp` 79.
 
 **The measured cost, and the reason this is not purely cosmetic.** `refresh()`
-rebuilds and re-joins the entire scrollback whatever changed. On a
-resume-sized conversation (~3.6k rows, the size of the session this came from):
-a width change costs **128ms** on a Ryzen 9 — call it a second on a phone. A
-height-only resize used to cost 12ms and now costs 26µs, but only because
-`118b9d9` special-cases it; the general path is untouched. Anything that
-genuinely changes width — rotation, a font change, a split pane — still pays
-full price, and so does every content append. Incremental measurement (measure
-the blocks that changed, keep the rest) is the payoff that would justify the
-`frame` value on its own.
+rebuilds and re-joins the entire scrollback whatever changed. On a resume-sized
+conversation (~7.2k rendered lines, 4.6MB, 550k escape sequences — the size of
+the session this came from), on a Ryzen 9:
+
+| | was | now | why |
+|---|---|---|---|
+| height-only resize | 12ms | 38µs | `118b9d9` skips refresh entirely |
+| width change | 136ms | 15ms | `f70cba2` skips blocks that already fit |
+| token append | — | 35µs | |
+
+What is left of the 15ms is **the join + `SetContent`, ~14ms of it** — `refresh`
+builds `rendered []string`, joins it into one 4.6MB string, and the viewport
+splits it straight back into lines. That is now the whole cost, and no amount of
+caching around it helps: it is paid in full for a one-character append as much
+as for a resize. Feeding the viewport lines it already has, and re-measuring
+only the blocks that changed, is the payoff that would justify the `frame` value
+on its own.
 
 ## Low value — recorded so they stop being re-proposed
 
