@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // discardWC is a stand-in engine stdin: answers/sends go nowhere.
@@ -98,9 +99,13 @@ func (v *vtui) resize(w, h int) {
 	v.m = nm.(tuiModel)
 }
 
-// event feeds a JSON event (as map) into the model.
+// event feeds a JSON event (as map) into the model through Update — the same
+// door the engine's events come in by. Calling handleEvent directly skips the
+// per-message layout sync that Update does, which is how a frame that overdrew
+// the terminal by one row stayed invisible to these tests.
 func (v *vtui) event(ev map[string]any) {
-	v.m = v.m.handleEvent(evMsg(ev))
+	nm, _ := v.m.Update(evMsg(ev))
+	v.m = nm.(tuiModel)
 }
 
 // send simulates the user typing a message and pressing enter.
@@ -2946,71 +2951,97 @@ func TestVtui_ScrollOverlaySwitchesViaMouseWheelAfterReplay(t *testing.T) {
 	}
 }
 
-// TestVtui_TraceReplay reads a trace.jsonl file and replays it into a vtui,
-// then checks the scroll overlay at each scroll event.
-// Usage: go test -args TRACE_FILE=path/to/trace.jsonl
-func TestVtui_TraceReplay(t *testing.T) {
-	traceFile := os.Getenv("TRACE_FILE")
-	if traceFile == "" {
-		t.Skip("set TRACE_FILE env var to a trace.jsonl file")
+// TestVtui_ViewFitsTerminal pins the frame's row budget. Bubble Tea's renderer
+// keeps the LAST h lines of whatever View returns, so one row of overdraw costs
+// the header — the row the scroll overlay is drawn in. That is invisible in any
+// test that calls scrollOverlay() directly, which is what every other overlay
+// test here does.
+func TestVtui_ViewFitsTerminal(t *testing.T) {
+	const w, h = 80, 20
+	for _, tc := range []struct {
+		name string
+		prep func(v *vtui)
+	}{
+		{"bare", func(*vtui) {}},
+		// A task line appears as soon as anything has been asked — which is
+		// always true after a resume, and was exactly the overdraw case.
+		{"task line", func(v *vtui) { v.send("do the thing") }},
+		{"activity strip", func(v *vtui) {
+			v.event(map[string]any{"type": "agents", "agents": []any{
+				map[string]any{"n": 1.0, "state": "running", "prompt": "dig"},
+			}})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newVtui(w, h)
+			v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+			tc.prep(v)
+			if got := lipgloss.Height(v.view()); got != h {
+				t.Errorf("View() drew %d rows into a %d-row terminal", got, h)
+			}
+			if v.m.vp.Height != v.m.convoHeight() {
+				t.Errorf("viewport height %d != drawn height %d — AtBottom/GotoBottom "+
+					"clamp against the wrong window", v.m.vp.Height, v.m.convoHeight())
+			}
+		})
 	}
-	data, err := os.ReadFile(traceFile)
-	if err != nil {
-		t.Fatal(err)
+}
+
+// TestVtui_ScrollOverlayReachesTheScreen scrolls with the wheel and reads the
+// overlay off the TOP ROW OF THE RENDERED FRAME, not from scrollOverlay(). With
+// a task line present the frame used to overdraw by one row, so the renderer
+// dropped the overlay entirely and the top row the user saw was the task line —
+// which never changes while scrolling, and read as "the indicator is stuck".
+func TestVtui_ScrollOverlayReachesTheScreen(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+
+	wideLine := func(n int) string {
+		return strings.Repeat("x", 70) + fmt.Sprintf(" line %d\n", n)
+	}
+	body := func() string {
+		var b strings.Builder
+		for i := 0; i < 30; i++ {
+			b.WriteString(wideLine(i))
+		}
+		return b.String()
+	}
+	// Resume: history replay sets the task line, the way /reload does.
+	v.event(map[string]any{"type": "history", "items": []any{
+		map[string]any{"kind": "user", "content": "FIRSTMSG"},
+		map[string]any{"kind": "assistant", "content": body()},
+		map[string]any{"kind": "user", "content": "SECONDMSG"},
+		map[string]any{"kind": "assistant", "content": body()},
+	}})
+
+	// What the terminal actually shows: Bubble Tea's renderer keeps the last h
+	// lines of the frame (standard_renderer.go), so an overdrawn frame loses its
+	// top row before anyone sees it.
+	topRow := func() string {
+		rows := strings.Split(v.view(), "\n")
+		if len(rows) > v.h {
+			rows = rows[len(rows)-v.h:]
+		}
+		return strings.TrimRight(rows[0], " ")
 	}
 
-	v := newVtui(80, 24) // default terminal size
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	var tops []string
+	for i := 0; i < 25; i++ {
+		nm, _ := v.m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+		v.m = nm.(tuiModel)
+		if top := topRow(); len(tops) == 0 || tops[len(tops)-1] != top {
+			tops = append(tops, top)
 		}
-		if strings.HasPrefix(line, "resize ") {
-			// resize w=80 h=24
-			var w, h int
-			_, err := fmt.Sscanf(line, "resize w=%d h=%d", &w, &h)
-			if err == nil && (w != v.w || h != v.h) {
-				v.resize(w, h)
-				t.Logf("resize w=%d h=%d", w, h)
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "event ") {
-			// event type {"key":"value",...}
-			parts := strings.SplitN(line, " ", 3)
-			if len(parts) < 3 {
-				continue
-			}
-			etype := parts[1]
-			jsonStr := parts[2]
-			var ev map[string]any
-			if err := json.Unmarshal([]byte(jsonStr), &ev); err != nil {
-				t.Logf("parse error for event %s: %v", etype, err)
-				continue
-			}
-			ev["type"] = etype // put type back in
-			v.event(ev)
-			continue
-		}
-		if strings.HasPrefix(line, "scroll ") {
-			// scroll yoff=10 pinned=false
-			var yoff int
-			var pinned bool
-			_, err := fmt.Sscanf(line, "scroll yoff=%d pinned=%v", &yoff, &pinned)
-			if err != nil {
-				continue
-			}
-			v.setYOffset(yoff)
-			v.setScrollPin(pinned)
-			m := v.model()
-			overlay := m.scrollOverlay()
-			plain := ""
-			if overlay != "" {
-				plain = stripANSI(overlay)
-			}
-			t.Logf("scroll yoff=%d pinned=%v overlay=%q", yoff, pinned, plain)
-			continue
-		}
+	}
+
+	joined := strings.Join(tops, " | ")
+	if !strings.Contains(joined, "SECONDMSG") {
+		t.Errorf("top row never showed SECONDMSG while scrolling: %s", joined)
+	}
+	if !strings.Contains(joined, "FIRSTMSG") {
+		t.Errorf("top row never showed FIRSTMSG while scrolling: %s", joined)
+	}
+	if len(tops) < 2 {
+		t.Errorf("top row never changed while scrolling past both messages: %s", joined)
 	}
 }

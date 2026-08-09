@@ -1,0 +1,48 @@
+resize w=80 h=24
+layout 0 kind=user userText="we recently wrote a test for viewing the last of screen message while scrolling, and my case is if we have two messages between lots of content, upon resume, it does not switch messages when scrolling past." rowOffset=0 h=5
+layout 1 kind=assistant userText="" rowOffset=5 h=18
+layout 2 kind=assistant userText="" rowOffset=23 h=6
+layout 3 kind=assistant userText="" rowOffset=29 h=1
+layout 4 kind=tool userText="" rowOffset=30 h=3
+layout 5 kind=tool userText="" rowOffset=33 h=3
+layout 6 kind=assistant userText="" rowOffset=36 h=17
+layout 7 kind=assistant userText="" rowOffset=53 h=3
+layout 8 kind=assistant userText="" rowOffset=56 h=2
+layout 9 kind=tool userText="" rowOffset=58 h=4
+layout 10 kind=tool userText="" rowOffset=62 h=3
+layout 11 kind=assistant userText="" rowOffset=65 h=18
+layout 12 kind=tool userText="" rowOffset=83 h=4
+layout 13 kind=assistant userText="" rowOffset=87 h=2
+layout 14 kind=tool userText="" rowOffset=89 h=4
+layout 15 kind=assistant userText="" rowOffset=93 h=18
+layout 16 kind=assistant userText="" rowOffset=111 h=3
+layout 17 kind=tool userText="" rowOffset=114 h=4
+layout 18 kind=assistant userText="" rowOffset=118 h=18
+layout 104 kind=user userText="im going to /reload... i should be able to see rhe last offscreen message." rowOffset=1036 h=2
+layout 138 kind=user userText="gah, ehen i scroll up past the reload statement, the last offscreen mesaage doesnt change - its with perspectice to sxroll position, righr?" rowOffset=1258 h=4
+layout 188 kind=user userText="super bad cpu. slow ui. scrolling up past the other message does not switch message. test is broken. this serms super hard for you. the arch might be the problrm." rowOffset=1596 h=4
+layout 288 kind=user userText="huh, not useful? despite tje we recently in view, it still pegs super bad cpu message" rowOffset=2569 h=2
+layout 320 kind=user userText="hmm. so in testing, when it scrolls, it swaps? okay, we need a /trace on|off so you can replay tje events into the util and see what i am seeing" rowOffset=2853 h=3
+layout 370 kind=user userText="check the trace" rowOffset=3049 h=1
+layout 410 kind=user userText="after reload, scroling past check the trace didnt swap it out." rowOffset=3323 h=2
+layout 444 kind=assistant userText="" rowOffset=3589 h=2
+layout 445 kind=tool userText="" rowOffset=3591 h=6
+layout 446 kind=assistant userText="" rowOffset=3597 h=2
+layout 447 kind=tool userText="" rowOffset=3599 h=4
+layout 448 kind=tool userText="" rowOffset=3603 h=4
+layout 449 kind=tool userText="" rowOffset=3607 h=4
+layout 450 kind=tool userText="" rowOffset=3611 h=2
+layout 451 kind=assistant userText="" rowOffset=3613 h=26
+layout 452 kind=assistant userText="" rowOffset=3639 h=1
+layout 453 kind=assistant userText="" rowOffset=3640 h=5
+scroll yoff=10 pinned=false
+scroll yoff=3038 pinned=false
+scroll yoff=3035 pinned=false
+scroll yoff=3032 pinned=false
+scroll yoff=3029 pinned=false
+scroll yoff=3026 pinned=false
+scroll yoff=2573 pinned=false
+scroll yoff=2570 pinned=false
+scroll yoff=2567 pinned=false
+scroll yoff=2564 pinned=false
+scroll yoff=2561 pinned=false

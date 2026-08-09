@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -9,128 +8,214 @@ import (
 	"testing"
 )
 
-// Replay the trace file's layout dump against the scrollOverlay logic
-// directly — no need to rebuild the conversation, just use the real
-// rowOffset/blockH values from the trace.
-func TestVtui_TraceReplaySynthetic(t *testing.T) {
-	traceFile := os.Getenv("TRACE_FILE")
-	if traceFile == "" {
-		traceFile = "trace.jsonl"
-	}
-	data, err := os.ReadFile(traceFile)
-	if err != nil {
-		t.Skipf("no trace file: %v (set TRACE_FILE env var)", err)
-	}
+// Trace replay: take a layout+scroll recording made by `/trace on` and put the
+// frames the user actually saw back on a virtual screen.
+//
+// The point of a replay is to be an INDEPENDENT witness. An earlier version of
+// this test re-implemented scrollOverlay's "nearest off-screen user message"
+// search inside the test and compared the two — which passes for any behaviour
+// scrollOverlay has, including a scroll indicator that never reaches the screen
+// at all. So this one asserts nothing about which message *should* win. It
+// renders the real View, truncates it the way Bubble Tea's renderer does, reads
+// the top row off the resulting screen, and checks two things that cannot be
+// derived from the code under test:
+//
+//   - soundness: whatever the top row names must be a user message that really
+//     is off the top of the viewport at that scroll position. (The bug this
+//     replaces caught: the frame overdrew by a row, the renderer dropped the
+//     header, and the top row was the static task line — which names the NEWEST
+//     message, one still below the fold.)
+//   - liveness: over a scroll range that crosses several messages, the top row
+//     must not be constant.
+//
+// Which message wins where is specified by the synthetic tests in tui_test.go,
+// against a layout those tests build themselves.
 
-	lines := strings.Split(string(data), "\n")
-
-	type userMsg struct {
-		userText  string
-		rowOffset int
-		blockH    int
-	}
-	var msgs []userMsg
-	var scrolls []int
-
-	layoutRe := regexp.MustCompile(`^layout\s+(\d+)\s+kind=(\w+)\s+userText="([^"]*)"\s+rowOffset=(\d+)\s+h=(\d+)$`)
-	scrollRe := regexp.MustCompile(`^scroll\s+yoff=(\d+)\s+pinned=(\w+)$`)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		if m := layoutRe.FindStringSubmatch(line); m != nil && m[2] == "user" {
-			rowOffset, _ := strconv.Atoi(m[4])
-			bh, _ := strconv.Atoi(m[5])
-			msgs = append(msgs, userMsg{userText: m[3], rowOffset: rowOffset, blockH: bh})
-			continue
-		}
-
-		if m := scrollRe.FindStringSubmatch(line); m != nil {
-			yoff, _ := strconv.Atoi(m[1])
-			scrolls = append(scrolls, yoff)
-			continue
-		}
-	}
-
-	if len(msgs) < 2 {
-		t.Skipf("need at least 2 user messages, got %d", len(msgs))
-	}
-
-	for _, u := range msgs {
-		t.Logf("user=%q rowOffset=%d h=%d bottom=%d",
-			trunc(u.userText, 60), u.rowOffset, u.blockH, u.rowOffset+u.blockH)
-	}
-
-	// Simulate the scrollOverlay logic with real rowOffset/blockH values
-	scrollRange := make(map[int]bool)
-	for _, y := range scrolls {
-		scrollRange[y] = true
-	}
-	if len(scrollRange) == 0 {
-		// No scroll events — simulate full range
-		maxBottom := 0
-		for _, u := range msgs {
-			b := u.rowOffset + u.blockH
-			if b > maxBottom {
-				maxBottom = b
-			}
-		}
-		for y := 0; y <= maxBottom; y += 3 {
-			scrollRange[y] = true
-		}
-	}
-
-	// For each YOffset, compute what the overlay would show
-	var seen []string
-	for yOff := 0; yOff <= 4000; yOff++ {
-		if !scrollRange[yOff] {
-			continue
-		}
-
-		// scrollOverlay logic: find off-screen message closest to viewport top
-		var closestText string
-		closestBottom := -1
-		for _, u := range msgs {
-			bottom := u.rowOffset + u.blockH
-			if bottom <= yOff && bottom > closestBottom {
-				closestBottom = bottom
-				closestText = u.userText
-			}
-		}
-
-		if closestText != "" {
-			truncated := trunc(closestText, 40)
-			entry := fmt.Sprintf("yoff=%d %s", yOff, truncated)
-			if len(seen) == 0 || seen[len(seen)-1] != entry {
-				seen = append(seen, entry)
-			}
-		}
-	}
-
-	// Only print transitions
-	t.Logf("overlay transitions (%d):", len(seen))
-	for _, s := range seen {
-		t.Logf("  %s", s)
-	}
-
-	// Check all messages appeared
-	for _, u := range msgs {
-		found := false
-		for _, s := range seen {
-			if strings.Contains(s, trunc(u.userText, 40)) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("never saw %q in overlay", trunc(u.userText, 60))
-		}
-	}
-}
-
+// trunc shortens a message for a log line or a failure message.
 func trunc(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+type traceLayout struct {
+	idx       int
+	kind      string
+	userText  string
+	rowOffset int
+	blockH    int
+}
+
+type traceFile struct {
+	w, h    int
+	layout  []traceLayout
+	scrolls []int
+}
+
+var (
+	traceResizeRe = regexp.MustCompile(`^resize w=(\d+) h=(\d+)$`)
+	traceLayoutRe = regexp.MustCompile(`^layout (\d+) kind=(\w+) userText=("(?:[^"\\]|\\.)*") rowOffset=(\d+) h=(\d+)$`)
+	traceScrollRe = regexp.MustCompile(`^scroll yoff=(\d+) pinned=(\w+)$`)
+)
+
+func parseTrace(t *testing.T, data string) traceFile {
+	t.Helper()
+	tf := traceFile{w: 80, h: 24}
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case traceResizeRe.MatchString(line):
+			m := traceResizeRe.FindStringSubmatch(line)
+			tf.w, _ = strconv.Atoi(m[1])
+			tf.h, _ = strconv.Atoi(m[2])
+		case traceLayoutRe.MatchString(line):
+			m := traceLayoutRe.FindStringSubmatch(line)
+			text, err := strconv.Unquote(m[3])
+			if err != nil {
+				t.Fatalf("layout line has an unparseable userText: %s", line)
+			}
+			e := traceLayout{kind: m[2], userText: text}
+			e.idx, _ = strconv.Atoi(m[1])
+			e.rowOffset, _ = strconv.Atoi(m[4])
+			e.blockH, _ = strconv.Atoi(m[5])
+			tf.layout = append(tf.layout, e)
+		case traceScrollRe.MatchString(line):
+			m := traceScrollRe.FindStringSubmatch(line)
+			y, _ := strconv.Atoi(m[1])
+			tf.scrolls = append(tf.scrolls, y)
+		}
+	}
+	return tf
+}
+
+// install puts a recorded layout into a real model: convo entries at their
+// recorded indices, their recorded row offsets and heights, and a viewport
+// holding as many lines as the recording spanned. Nothing is re-rendered —
+// the recording IS the layout, and reproducing it by synthesising content that
+// happens to wrap to the same heights is what made the old replay unusable.
+//
+// A trace only dumps entries, not the task line, but the app sets m.task from
+// the newest user message on both send and resume — so the replay sets it the
+// same way. It is load-bearing: the task line takes a row off the frame, and
+// it looks near enough to the scroll overlay to be mistaken for it.
+func (tf traceFile) install(v *vtui) {
+	maxIdx, maxRow := 0, 0
+	for _, e := range tf.layout {
+		maxIdx = max(maxIdx, e.idx)
+		maxRow = max(maxRow, e.rowOffset+e.blockH)
+	}
+	m := &v.m
+	m.convo = make([]convoEntry, maxIdx+1)
+	m.blockH = make([]int, maxIdx+1)
+	for _, e := range tf.layout {
+		m.convo[e.idx] = convoEntry{userText: e.userText, rowOffset: e.rowOffset}
+		m.blockH[e.idx] = e.blockH
+		if e.userText != "" {
+			m.task = e.userText // last user message wins, as replay() does
+		}
+	}
+	m.vp.SetContent(strings.Repeat("x\n", maxRow))
+	m.contentGen++
+}
+
+// screen renders the model and truncates it the way Bubble Tea's standard
+// renderer does — it keeps the LAST h lines, so a frame one row too tall loses
+// its header before it is ever displayed (standard_renderer.go, flush).
+func screen(v *vtui) []string {
+	rows := strings.Split(v.view(), "\n")
+	if len(rows) > v.h {
+		rows = rows[len(rows)-v.h:]
+	}
+	return rows
+}
+
+func TestVtui_TraceReplay(t *testing.T) {
+	path := os.Getenv("TRACE_FILE")
+	if path == "" {
+		// The recording from the session where the indicator was reported stuck.
+		path = "testdata/scroll-stuck.jsonl"
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("no trace to replay: %v (set TRACE_FILE)", err)
+	}
+	tf := parseTrace(t, string(data))
+	if len(tf.scrolls) == 0 {
+		t.Skip("trace has no scroll events")
+	}
+
+	// Every user message in the recording, by the row its block ended on.
+	type userMsg struct {
+		text   string
+		bottom int
+	}
+	var users []userMsg
+	for _, e := range tf.layout {
+		if e.userText != "" {
+			users = append(users, userMsg{e.userText, e.rowOffset + e.blockH})
+		}
+	}
+	if len(users) < 2 {
+		t.Skipf("trace has %d user messages; need at least 2 to see the indicator move", len(users))
+	}
+
+	v := newVtui(tf.w, tf.h)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	tf.install(v)
+
+	// offScreen reports whether a message that the top row could be naming was
+	// genuinely above the fold at this scroll position.
+	offScreen := func(text string, yOff int) (found, above bool) {
+		for _, u := range users {
+			// The overlay clips long messages to the width, so compare on the
+			// prefix that survived.
+			if strings.HasPrefix(u.text, text) || strings.HasPrefix(text, u.text) {
+				return true, u.bottom <= yOff
+			}
+		}
+		return false, false
+	}
+
+	var tops []string
+	for _, yOff := range tf.scrolls {
+		v.m.vp.SetYOffset(yOff)
+		v.m.scrollPinned = false
+		rows := screen(v)
+		if len(rows) != tf.h {
+			t.Fatalf("yoff=%d: frame is %d rows on a %d-row terminal", yOff, len(rows), tf.h)
+		}
+		top := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rows[0]), "›"))
+		t.Logf("yoff=%4d top=%q", yOff, trunc(top, 60))
+		if len(tops) == 0 || tops[len(tops)-1] != top {
+			tops = append(tops, top)
+		}
+		if top == "" {
+			continue
+		}
+		// Soundness. A top row naming nothing in the conversation is the header
+		// or some other line — fine. A top row naming a user message that is
+		// still on screen or below the fold is the indicator lying.
+		if found, above := offScreen(top, yOff); found && !above {
+			t.Errorf("yoff=%d: top row names %q, which is not off the top of the viewport",
+				yOff, trunc(top, 60))
+		}
+	}
+
+	// Liveness. Count the message boundaries the recorded scroll actually
+	// crossed; the top row has to move at least that often.
+	crossed := map[int]bool{}
+	for _, yOff := range tf.scrolls {
+		n := 0
+		for _, u := range users {
+			if u.bottom <= yOff {
+				n++
+			}
+		}
+		crossed[n] = true
+	}
+	if len(crossed) > 1 && len(tops) < 2 {
+		t.Errorf("the recorded scroll crossed %d message boundaries but the top row never "+
+			"changed: %q", len(crossed), trunc(strings.Join(tops, " | "), 120))
+	}
 }
