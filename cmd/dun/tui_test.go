@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/cellbuf"
 )
 
 // discardWC is a stand-in engine stdin: answers/sends go nowhere.
@@ -3104,3 +3105,42 @@ func TestVtui_PinnedStaysAtBottom(t *testing.T) {
 // topRow is what the terminal shows on its first line — see screen() for why
 // that is not simply the first line View returned.
 func topRow(v *vtui) string { return strings.TrimRight(screen(v)[0], " ") }
+
+// TestVtui_WrapFitsWithoutCuttingText — refresh() skips wrapping a block whose
+// widest line already fits the pane. If that check is ever wrong the damage is
+// silent: the viewport truncates over-width lines (MaxWidth in its View), so
+// the text is not pushed off the edge, it is simply gone.
+//
+// The oracle is independent of the caching: whatever refresh decided, each
+// block's recorded height must equal the height of that block correctly
+// wrapped to the pane.
+func TestVtui_WrapFitsWithoutCuttingText(t *testing.T) {
+	v := newVtui(80, 12)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	var b strings.Builder
+	for i := 0; i < 40; i++ {
+		b.WriteString(strings.Repeat("word ", 14) + fmt.Sprintf("line %d\n", i))
+	}
+	b.WriteString(strings.Repeat("Z", 120) + "\n") // a token no width can break on
+	v.event(map[string]any{"type": "history", "items": []any{
+		map[string]any{"kind": "user", "content": "FIRSTMSG"},
+		map[string]any{"kind": "assistant", "content": b.String()},
+	}})
+
+	// Narrow, widen, and come back: the cache has to be right in every
+	// direction, not just on the way down.
+	for _, w := range []int{80, 79, 60, 40, 24, 100, 40, 80} {
+		v.resize(w, 12)
+		for i := range v.m.convo {
+			e := &v.m.convo[i]
+			if e.userText != "" || e.docs != nil {
+				continue // rendered with a full-width background instead
+			}
+			want := lipgloss.Height(cellbuf.Wrap(e.view(), max(1, v.m.vp.Width), ""))
+			if got := v.m.blockH[i]; got != want {
+				t.Errorf("w=%d entry %d: recorded height %d, correctly-wrapped height %d — text is being cut off",
+					w, i, got, want)
+			}
+		}
+	}
+}
