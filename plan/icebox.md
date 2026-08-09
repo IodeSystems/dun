@@ -110,6 +110,17 @@ would have made the shortcut unattractive in the first place.
 Scale, for whoever picks this up: `tui.go` is 3.4k lines, `tuiModel` has 88
 fields and 79 methods, `convo` is referenced 151 times, `vp` 79.
 
+**The measured cost, and the reason this is not purely cosmetic.** `refresh()`
+rebuilds and re-joins the entire scrollback whatever changed. On a
+resume-sized conversation (~3.6k rows, the size of the session this came from):
+a width change costs **128ms** on a Ryzen 9 — call it a second on a phone. A
+height-only resize used to cost 12ms and now costs 26µs, but only because
+`118b9d9` special-cases it; the general path is untouched. Anything that
+genuinely changes width — rotation, a font change, a split pane — still pays
+full price, and so does every content append. Incremental measurement (measure
+the blocks that changed, keep the rest) is the payoff that would justify the
+`frame` value on its own.
+
 ## Low value — recorded so they stop being re-proposed
 
 These are all real, all small, and none of them is worth a session on its own.
