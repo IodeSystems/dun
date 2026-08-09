@@ -117,17 +117,21 @@ the session this came from), on a Ryzen 9:
 
 | | was | now | why |
 |---|---|---|---|
-| height-only resize | 12ms | 38µs | `118b9d9` skips refresh entirely |
-| width change | 136ms | 15ms | `f70cba2` skips blocks that already fit |
-| token append | — | 35µs | |
+| height-only resize | 12ms | 23µs | `118b9d9` skips refresh entirely |
+| width nudge (80→79) | 136ms | 0.29ms | `f70cba2` skips blocks that already fit |
+| width halve (80→40) | 143ms | 4.1ms | genuine re-wrap; `a4c9cf0` removed the rest |
+| token append | — | 25µs | |
 
-What is left of the 15ms is **the join + `SetContent`, ~14ms of it** — `refresh`
-builds `rendered []string`, joins it into one 4.6MB string, and the viewport
-splits it straight back into lines. That is now the whole cost, and no amount of
-caching around it helps: it is paid in full for a one-character append as much
-as for a resize. Feeding the viewport lines it already has, and re-measuring
-only the blocks that changed, is the payoff that would justify the `frame` value
-on its own.
+Three passes got this: skip refresh when only the height moved, skip wrapping
+blocks that already fit, and stop handing the viewport a joined string it only
+splits back (`a4c9cf0` replaced it with `convoPane`). The remaining 4.1ms on a
+halving is genuine work — every block really does have to re-wrap.
+
+**What this does NOT fix, and why the rework still stands.** `refresh()` still
+re-renders every block on every call, and it is called ~74 times over the code.
+The constant is now small enough that nobody notices, which is exactly how it
+grows back. Measuring only the blocks that changed still wants the `frame`
+value.
 
 ## Low value — recorded so they stop being re-proposed
 
