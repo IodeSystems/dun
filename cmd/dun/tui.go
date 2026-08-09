@@ -2653,7 +2653,7 @@ func init() {
 				if len(args) >= 2 {
 					path = args[1]
 				}
-				f, err := os.OpenFile(filepath.Join(m.workspace, path), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				f, err := os.OpenFile(filepath.Join(m.workspace, path), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 				if err != nil {
 					m.append(stErr.Render("trace: " + err.Error()))
 					return nil
@@ -2663,6 +2663,23 @@ func init() {
 				}
 				m.traceFile = f
 				m.tracePrevYOff = -1
+				// Dump the current conversation layout so we can replay without
+				// needing the history event (trace doesn't survive /reload re-exec).
+				fmt.Fprintf(f, "resize w=%d h=%d\n", m.w, m.h)
+				for i, e := range m.convo {
+					h := 0
+					if i < len(m.blockH) {
+						h = m.blockH[i]
+					}
+					kind := "assistant"
+					if e.userText != "" {
+						kind = "user"
+					} else if e.tool != nil {
+						kind = "tool"
+					}
+					fmt.Fprintf(f, "layout %d kind=%s userText=%q rowOffset=%d h=%d\n",
+						i, kind, e.userText, e.rowOffset, h)
+				}
 				m.append(stNote.Render("tracing → " + filepath.Join(m.workspace, path)))
 				return nil
 			}
