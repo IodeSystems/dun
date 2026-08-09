@@ -484,7 +484,6 @@ type tuiModel struct {
 	retryDue         time.Time         // when the next attempt is due, for the countdown
 	retrySeen        int               // retries this outage; the first one also lands in scrollback
 	queuedMsgs       int               // messages typed mid-turn, buffered for the running turn
-	queuedTexts      []string          // text of each pending message (for the area above the divider)
 	w, h             int
 	fatalErr         string
 	scrollPinned     bool // true when viewport should auto-follow (at bottom)
@@ -505,7 +504,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, queuedTexts: nil, suggestMode: "auto"}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto"}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -583,7 +582,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.traceResize(msg)
 		m.w, m.h = msg.Width, msg.Height
-		// Layout: head(1) + top + convo + pending + divider(1) + lower + status(1).
+		// Layout: head + top + convo + divider(1) + lower + status(1).
 		// convoHeight() is the one place that budget lives — see it for why the
 		// viewport's own height has to match the drawn one.
 		m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
@@ -1944,14 +1943,6 @@ func (m tuiModel) queuedHint() string {
 	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
 }
 
-// pendingView is now empty — queued messages appear in the conversation as
-// provisional entries (dimmed, with "(queued)" suffix). The old behavior
-// rendered them above the divider, which made them look disconnected from
-// the conversation flow.
-func (m tuiModel) pendingView() string {
-	return ""
-}
-
 // exitHint is the status-bar exit prompt — "/exit to exit" when ctrl+c is
 // disabled (--disable-exit), else the usual "ctrl+c quit".
 func (m tuiModel) exitHint() string {
@@ -2056,7 +2047,6 @@ func (m tuiModel) convoHeight() int {
 	if a := m.activityView(); a != "" {
 		h -= lipgloss.Height(a)
 	}
-	h -= lipgloss.Height(m.pendingView())
 	h -= lipgloss.Height(m.lowerView()) // input, or the answer picker (several rows)
 	return max(1, h)
 }
@@ -2105,9 +2095,6 @@ func (m tuiModel) View() string {
 	if a := m.activityView(); a != "" {
 		top = append(top, a)
 	}
-	// Pending messages sit above the divider — between the convo viewport and
-	// the input area. Account for their height so the viewport doesn't overlap.
-	pending := m.pendingView()
 	convoH := m.convoHeight()
 	vp := m.vp
 	vp.Height = convoH
@@ -2156,7 +2143,7 @@ func (m tuiModel) View() string {
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
 	out := append([]string{m.headView()}, top...)
-	out = append(out, m.viewportView(vp), pending, div, lower, status)
+	out = append(out, m.viewportView(vp), div, lower, status)
 	return strings.Join(out, "\n")
 }
 
