@@ -110,12 +110,6 @@ would have made the shortcut unattractive in the first place.
 Scale, for whoever picks this up: `tui.go` is 3.4k lines, `tuiModel` has 88
 fields and 79 methods, `convo` is referenced 151 times, `vp` 79.
 
-**Adjacent, cheap, behaviour-changing — ask first:** `pendingView()` (tui.go)
-returns `""` unconditionally, but `View` still emits it as a row and
-`convoHeight` still subtracts it. One row of every terminal is permanently
-blank for a feature that no longer exists. Deleting it shifts every layout by a
-row, which is why it is not folded into the fix.
-
 ## Low value — recorded so they stop being re-proposed
 
 These are all real, all small, and none of them is worth a session on its own.
