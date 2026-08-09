@@ -564,6 +564,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = tea.Batch(cmd, idleSuggestTick(idleSuggestDelay))
 		}
 		t.idleWantTick = false
+		// Leave Update with the viewport's height equal to the height View is
+		// about to draw it at. AtBottom, GotoBottom and YOffset clamping all
+		// measure against m.vp.Height, so a value left over from a frame that
+		// had no task line (or a one-line input) scrolls against a window taller
+		// than the real one and hides the bottom row. Hooked here for the same
+		// reason armIdleSuggest is: update() returns from a dozen places.
+		if t.h > 0 {
+			t.vp.Height = t.convoHeight()
+		}
 		nm = t
 	}
 	return nm, cmd
@@ -574,9 +583,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.traceResize(msg)
 		m.w, m.h = msg.Width, msg.Height
-		// Layout: head(1) + convo + divider(1) + lower + status(1). Convo takes
-		// h-4 in the normal (1-line input) case; View recomputes it when the
-		// lower pane grows (an ask panel).
+		// Layout: head(1) + top + convo + pending + divider(1) + lower + status(1).
+		// convoHeight() is the one place that budget lives — see it for why the
+		// viewport's own height has to match the drawn one.
 		m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
 		m.input.width = msg.Width - 2
 		m.search.Width = msg.Width - 4
@@ -589,6 +598,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inspecting {
 			m.insp.setSize(m.w, m.h)
 		}
+		// Now that the new width has reached the input (lowerView measures it),
+		// the row budget is knowable — refresh() scrolls against it.
+		m.vp.Height = m.convoHeight()
 		m.refresh()
 		return m, nil
 
@@ -2010,19 +2022,52 @@ func (m tuiModel) scrollOverlay() string {
 	if closestText == "" {
 		return ""
 	}
-	userStyle := stUser.Width(max(1, m.vp.Width))
-	text := "› " + clip(closestText, max(0, m.vp.Width-2))
-	return userStyle.Render(text)
+	// Exactly one row, always. clip() overshoots — it appends the ellipsis to n
+	// characters rather than fitting inside n — so "› " + clip(text, width-2)
+	// came to width+1 cells and lipgloss wrapped the bar onto a second line.
+	// That put the frame a row over the terminal, which costs the top row: this
+	// bar. fitPlain is the width-aware fit the task line right below already
+	// uses, and oneLine keeps an embedded newline from doing the same thing.
+	text, _ := fitPlain(oneLine(closestText), max(0, m.vp.Width-2))
+	return stUser.Width(max(1, m.vp.Width)).Render("› " + text)
 }
 
 
 
-func (m tuiModel) View() string {
-	start := time.Now()
-	defer func() { frames.observe(stageView, time.Since(start)) }()
-	// The inspector is a full-screen overlay — it replaces the normal layout.
-	if m.inspecting {
-		return m.insp.view(m.w, m.h)
+// convoHeight is the number of rows the conversation viewport actually gets
+// drawn at: the terminal minus every fixed row around it. It is the single
+// layout truth — View lays the frame out with it, and Update keeps m.vp.Height
+// equal to it.
+//
+// Both matter. Overcount and View emits more rows than the terminal has, and
+// Bubble Tea's renderer keeps the LAST h lines — it silently drops the header,
+// which is where the scroll overlay lives. Undercount m.vp.Height and
+// AtBottom/GotoBottom clamp against a window taller than the drawn one, hiding
+// the bottom row of the conversation.
+func (m tuiModel) convoHeight() int {
+	h := m.h - 2 // divider 1 + status 1; every other row is measured, not assumed
+	h -= lipgloss.Height(m.headView())
+	// The task line and the activity strip sit above the conversation. Both
+	// vanish when they have nothing to say, so a session that never delegates
+	// loses no space to them.
+	if t := m.taskView(); t != "" {
+		h -= lipgloss.Height(t)
+	}
+	if a := m.activityView(); a != "" {
+		h -= lipgloss.Height(a)
+	}
+	h -= lipgloss.Height(m.pendingView())
+	h -= lipgloss.Height(m.lowerView()) // input, or the answer picker (several rows)
+	return max(1, h)
+}
+
+// headView is the top row: the scroll overlay when the conversation is scrolled
+// up, else the dun title bar. Measured rather than assumed to be one row — it
+// is the row the renderer drops first when a frame overdraws, so a head that
+// wrapped would delete itself.
+func (m tuiModel) headView() string {
+	if overlay := m.scrollOverlay(); overlay != "" {
+		return overlay
 	}
 	head := stHeader.Render("dun") + stDim.Render(" "+version+"  "+m.workspace)
 	if m.branch != "" {
@@ -2037,7 +2082,16 @@ func (m tuiModel) View() string {
 	if m.reloadVer != "" {
 		head += "  " + stNote.Render("↻ "+m.reloadVer+" (/reload)")
 	}
+	return head
+}
 
+func (m tuiModel) View() string {
+	start := time.Now()
+	defer func() { frames.observe(stageView, time.Since(start)) }()
+	// The inspector is a full-screen overlay — it replaces the normal layout.
+	if m.inspecting {
+		return m.insp.view(m.w, m.h)
+	}
 	// The lower pane is the input, or — while answering — the option picker. The
 	// convo pane takes whatever height is left (the picker can be several rows).
 	lower := m.lowerView()
@@ -2054,11 +2108,7 @@ func (m tuiModel) View() string {
 	// Pending messages sit above the divider — between the convo viewport and
 	// the input area. Account for their height so the viewport doesn't overlap.
 	pending := m.pendingView()
-	pendingH := lipgloss.Height(pending)
-	convoH := m.h - 3 - pendingH - lipgloss.Height(lower) // head 1 + divider 1 + status 1
-	if convoH < 1 {
-		convoH = 1
-	}
+	convoH := m.convoHeight()
 	vp := m.vp
 	vp.Height = convoH
 	// Focus cue lives entirely in the divider's bright half — no pane borders.
@@ -2103,13 +2153,9 @@ func (m tuiModel) View() string {
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}
-	// The header line shows the off-screen user message when scrolled up,
-	// or the normal dun title bar when at the bottom.
-	overlay := m.scrollOverlay()
-	if overlay != "" {
-		head = overlay
-	}
-	out := append([]string{head}, top...)
+	// The header row shows the off-screen user message when scrolled up, or the
+	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
+	out := append([]string{m.headView()}, top...)
 	out = append(out, m.viewportView(vp), pending, div, lower, status)
 	return strings.Join(out, "\n")
 }
