@@ -3016,20 +3016,12 @@ func TestVtui_ScrollOverlayReachesTheScreen(t *testing.T) {
 
 	// What the terminal actually shows: Bubble Tea's renderer keeps the last h
 	// lines of the frame (standard_renderer.go), so an overdrawn frame loses its
-	// top row before anyone sees it.
-	topRow := func() string {
-		rows := strings.Split(v.view(), "\n")
-		if len(rows) > v.h {
-			rows = rows[len(rows)-v.h:]
-		}
-		return strings.TrimRight(rows[0], " ")
-	}
-
+	// top row before anyone sees it — see screen().
 	var tops []string
 	for i := 0; i < 25; i++ {
 		nm, _ := v.m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
 		v.m = nm.(tuiModel)
-		if top := topRow(); len(tops) == 0 || tops[len(tops)-1] != top {
+		if top := topRow(v); len(tops) == 0 || tops[len(tops)-1] != top {
 			tops = append(tops, top)
 		}
 	}
@@ -3045,3 +3037,70 @@ func TestVtui_ScrollOverlayReachesTheScreen(t *testing.T) {
 		t.Errorf("top row never changed while scrolling past both messages: %s", joined)
 	}
 }
+
+// bigConvo is a resume-sized conversation: two user messages with a lot of
+// content between and after them.
+func bigConvo(w, h int) *vtui {
+	v := newVtui(w, h)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	var b strings.Builder
+	for i := 0; i < 60; i++ {
+		b.WriteString(strings.Repeat("x", w-10) + fmt.Sprintf(" line %d\n", i))
+	}
+	v.event(map[string]any{"type": "history", "items": []any{
+		map[string]any{"kind": "user", "content": "FIRSTMSG"},
+		map[string]any{"kind": "assistant", "content": b.String()},
+		map[string]any{"kind": "user", "content": "SECONDMSG"},
+		map[string]any{"kind": "assistant", "content": b.String()},
+	}})
+	return v
+}
+
+// TestVtui_ResizeKeepsScrollPosition — a resize must not move the reader. The
+// viewport used to be rebuilt from scratch on every WindowSizeMsg, and a fresh
+// one starts at YOffset 0, so each resize threw you to the top of the
+// conversation. On a phone the soft keyboard opening and closing IS a resize
+// and it fires constantly, which made a scrolled-up session unreadable.
+func TestVtui_ResizeKeepsScrollPosition(t *testing.T) {
+	v := bigConvo(80, 40)
+	v.m.vp.SetYOffset(40)
+	v.m.scrollPinned = false
+	want, wantTop := v.m.vp.YOffset, topRow(v)
+
+	v.resize(80, 20) // keyboard opens
+	if got := v.m.vp.YOffset; got != want {
+		t.Errorf("keyboard open moved the reader: YOffset %d → %d", want, got)
+	}
+	if got := topRow(v); got != wantTop {
+		t.Errorf("keyboard open changed the top row: %q → %q", wantTop, got)
+	}
+
+	v.resize(80, 40) // keyboard closes
+	if got := v.m.vp.YOffset; got != want {
+		t.Errorf("keyboard close moved the reader: YOffset %d → %d", want, got)
+	}
+}
+
+// TestVtui_PinnedStaysAtBottom — pinned means pinned, including across the
+// resize that changes how many rows the conversation gets.
+func TestVtui_PinnedStaysAtBottom(t *testing.T) {
+	v := bigConvo(80, 40)
+	// The history event added the task line, which costs the conversation a
+	// row. refresh() had already scrolled using the previous frame's height, so
+	// the viewport sat one row short of the bottom and hid the newest line.
+	if !v.m.vp.AtBottom() {
+		t.Errorf("pinned but not at the bottom after a resume: YOffset=%d height=%d",
+			v.m.vp.YOffset, v.m.vp.Height)
+	}
+	for _, h := range []int{20, 40, 12, 40} {
+		v.resize(80, h)
+		if !v.m.vp.AtBottom() {
+			t.Errorf("pinned but not at the bottom after resizing to h=%d: YOffset=%d height=%d",
+				h, v.m.vp.YOffset, v.m.vp.Height)
+		}
+	}
+}
+
+// topRow is what the terminal shows on its first line — see screen() for why
+// that is not simply the first line View returned.
+func topRow(v *vtui) string { return strings.TrimRight(screen(v)[0], " ") }

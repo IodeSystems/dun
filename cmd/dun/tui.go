@@ -569,8 +569,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// had no task line (or a one-line input) scrolls against a window taller
 		// than the real one and hides the bottom row. Hooked here for the same
 		// reason armIdleSuggest is: update() returns from a dozen places.
+		//
+		// A changed height is also a reason to re-run the scroll policy. refresh()
+		// runs it while handling the message, using the height the PREVIOUS frame
+		// had — so the very message that adds the task line (the first send, a
+		// resume) left a pinned viewport one row short of the bottom, hiding the
+		// newest line until something else happened.
 		if t.h > 0 {
-			t.vp.Height = t.convoHeight()
+			if got := t.convoHeight(); got != t.vp.Height {
+				t.vp.Height = got
+				t.applyScroll(t.focus == focusConvo && !t.asking && len(t.convo) > 0)
+			}
 		}
 		nm = t
 	}
@@ -581,11 +590,21 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.traceResize(msg)
+		first, prevW := m.w == 0 && m.h == 0, m.w
 		m.w, m.h = msg.Width, msg.Height
 		// Layout: head + top + convo + divider(1) + lower + status(1).
 		// convoHeight() is the one place that budget lives — see it for why the
 		// viewport's own height has to match the drawn one.
-		m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
+		//
+		// Resize the viewport in place rather than building a new one: a fresh
+		// viewport starts at YOffset 0, so every resize threw the reader back to
+		// the top of the conversation. On a phone the soft keyboard opening and
+		// closing is a resize, and it fires constantly.
+		if first {
+			m.vp = viewport.New(max(1, msg.Width), max(1, msg.Height-4))
+		} else {
+			m.vp.Width = max(1, msg.Width)
+		}
 		m.input.width = msg.Width - 2
 		m.search.Width = msg.Width - 4
 		// Only when the WIDTH actually changed: a renderer is word-wrap state
@@ -596,6 +615,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.inspecting {
 			m.insp.setSize(m.w, m.h)
+		}
+		// A height-only resize does not change a single wrapped line — only the
+		// row budget moved. Re-wrapping and re-joining the whole scrollback for
+		// that is pure waste, and on a phone the soft keyboard makes it the most
+		// frequent message there is. The funnel in Update re-heights the viewport
+		// and re-runs the scroll policy, which is the entire job here.
+		if !first && msg.Width == prevW {
+			return m, nil
 		}
 		// Now that the new width has reached the input (lowerView measures it),
 		// the row budget is knowable — refresh() scrolls against it.
@@ -2493,14 +2520,23 @@ func (m *tuiModel) refresh() {
 	m.vp.SetContent(strings.Join(rendered, "\n"))
 	m.contentGen++
 
-	// Keep the selection in view; otherwise stick to the bottom (live tail).
-	if selMode && m.sel >= 0 && m.sel < len(rendered) {
-		top := 0
-		for i := 0; i < m.sel; i++ {
-			top += lipgloss.Height(rendered[i])
-		}
-		h := lipgloss.Height(rendered[m.sel])
-		vh := m.vp.Height
+	m.applyScroll(selMode)
+}
+
+// applyScroll is where the viewport is allowed to move on its own: keep the
+// selection in view, else stick to the bottom (live tail). It reads the block
+// geometry refresh() just measured (rowOffset + blockH) rather than a rendered
+// slice, so it can also be re-run when only the WINDOW changed — a resize, the
+// task line appearing, the input growing a line. Height is as much an input to
+// this decision as content is, and running it on content alone left the
+// viewport a row short of the bottom whenever a frame's row budget moved.
+func (m *tuiModel) applyScroll(selMode bool) {
+	vh := m.vp.Height
+	if vh <= 0 {
+		return
+	}
+	if selMode && m.sel >= 0 && m.sel < len(m.blockH) {
+		top, h := m.selGeom()
 		if h >= vh {
 			// Taller than the window: don't fight intra-message scroll — only snap
 			// when the selection is entirely off-screen. ↑/↓ scroll within it.
@@ -2510,44 +2546,37 @@ func (m *tuiModel) refresh() {
 			case top+h <= m.vp.YOffset: // fully above the fold
 				m.vp.SetYOffset(top + h - vh)
 			}
-		} else {
-			switch {
-			case top < m.vp.YOffset:
-				m.vp.SetYOffset(top)
-			case top+h > m.vp.YOffset+vh:
-				m.vp.SetYOffset(top + h - vh)
+			return
+		}
+		switch {
+		case top < m.vp.YOffset:
+			m.vp.SetYOffset(top)
+		case top+h > m.vp.YOffset+vh:
+			m.vp.SetYOffset(top + h - vh)
+		}
+		return
+	}
+	if !m.scrollPinned {
+		return
+	}
+	// Auto-follow new content. When there's a streaming reply (m.cur), don't
+	// GotoBottom() blindly — that scrolls past the user's last message to the
+	// bottom of the growing reply. Instead keep that message visible.
+	lastUserRow := -1
+	if m.cur != "" {
+		for i := range m.convo {
+			if m.convo[i].userText != "" {
+				lastUserRow = m.convo[i].rowOffset
 			}
 		}
-	} else if m.scrollPinned {
-		// Auto-follow new content. When there's a streaming reply (m.cur),
-		// don't GotoBottom() blindly — that scrolls past the user's last
-		// message to the bottom of the growing reply. Instead, find the
-		// last user message and keep it visible.
-		if m.cur != "" {
-			// Find the row of the last user message in rendered[].
-			lastUserRow := -1
-			cum := 0
-			for i, r := range rendered {
-				if i < len(m.convo) && m.convo[i].userText != "" {
-					lastUserRow = cum
-				}
-				cum += lipgloss.Height(r)
-			}
-			if lastUserRow >= 0 {
-				vh := m.vp.Height
-				// Keep the last user message visible; if it's below the
-				// viewport, scroll so it sits near the top.
-				if lastUserRow >= m.vp.YOffset+vh {
-					m.vp.SetYOffset(lastUserRow - 1)
-				} else if lastUserRow < m.vp.YOffset {
-					m.vp.SetYOffset(lastUserRow)
-				}
-			} else {
-				m.vp.GotoBottom()
-			}
-		} else {
-			m.vp.GotoBottom()
-		}
+	}
+	switch {
+	case lastUserRow < 0:
+		m.vp.GotoBottom()
+	case lastUserRow >= m.vp.YOffset+vh: // below the fold — bring it near the top
+		m.vp.SetYOffset(lastUserRow - 1)
+	case lastUserRow < m.vp.YOffset:
+		m.vp.SetYOffset(lastUserRow)
 	}
 }
 
