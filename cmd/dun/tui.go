@@ -484,6 +484,12 @@ type tuiModel struct {
 	picking          bool              // the session picker owns the keys
 	sessions         []dun.SessionInfo // what it is listing
 	pickSel          int               // highlighted session
+	// Model picker (/model): fetch available models, let the user switch.
+	modelPicking     bool              // the model picker owns the keys
+	modelList        []string          // fetched model ids
+	modelSel         int               // highlighted model
+	modelPersist     bool              // save to config.json (checkbox)
+	modelFetching    bool              // still fetching from the API
 	replaying        bool              // driven by a trace (--replay), not an engine
 	quitting         bool              // the user is leaving; do not respawn
 	exitAnnounced    bool              // the engine said it was going; it did not crash
@@ -649,6 +655,20 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 
+	case modelFetchMsg:
+		m.modelList = []string(msg)
+		sort.Strings(m.modelList)
+		m.modelFetching = false
+		// Start on the current model when it's in the list.
+		for i, id := range m.modelList {
+			if id == m.model {
+				m.modelSel = i
+				break
+			}
+		}
+		m.refresh()
+		return m, nil
+
 	case tea.KeyMsg:
 		// The tool inspector overlay owns every key while open.
 		if m.inspecting {
@@ -664,6 +684,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// So does the session picker.
 		if m.picking {
 			return m.updatePicking(msg)
+		}
+		// So does the model picker.
+		if m.modelPicking {
+			return m.updateModelPicking(msg)
 		}
 		// Typing a "/" search query owns the keys until enter/esc.
 		if m.searching {
@@ -2194,6 +2218,9 @@ func (m tuiModel) lowerView() string {
 	if m.picking {
 		return m.sessionPanel()
 	}
+	if m.modelPicking {
+		return m.modelPanel()
+	}
 	if m.paletteActive() {
 		return m.palettePanel()
 	}
@@ -2707,6 +2734,7 @@ func init() {
 	slashCommands = []slashCmd{
 		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
 		{"config", "", "show this session's LLM settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
+		{"model", "[name]", "switch model (bare opens the picker, enter to confirm, space to toggle persist)", modelSlash},
 		{"context", "", "inspect context usage: tokens, compaction, recaps, truncation", func(m *tuiModel, _ []string) tea.Cmd { m.showContext(); return nil }},
 		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
@@ -2911,7 +2939,7 @@ func (m *tuiModel) showConfig() {
 	b.WriteString("\n  " + stDim.Render("model: ") + stTool.Render(m.model))
 	b.WriteString("\n  " + stDim.Render("key:   ") + key)
 	b.WriteString("\n  " + stDim.Render("saved: ") + configPath())
-	b.WriteString("\n" + stDim.Render("run `dun --setup` to change (or --model/--url/--key for one run)"))
+	b.WriteString("\n" + stDim.Render("use /model to switch models, or `dun --setup` to reconfigure"))
 	m.append(b.String())
 }
 
