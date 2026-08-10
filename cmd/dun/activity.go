@@ -237,17 +237,6 @@ func jobActRow(j jobRow, now time.Time) actRow {
 	}
 }
 
-// taskView is the top line: the last thing the human asked for. It is what
-// every row below it is ultimately in service of, and in a long session the
-// message that started the work has usually scrolled away.
-func (m tuiModel) taskView() string {
-	if m.task == "" || m.w < 20 {
-		return ""
-	}
-	text, _ := fitPlain(oneLine(m.task), m.w-3)
-	return stUser.Render("› ") + stDim.Render(text)
-}
-
 // activityView is the zone itself: one line collapsed, a scrolling table
 // descended. Empty when there is nothing to show, so a session that never
 // delegates and never backgrounds a command loses no space to it.

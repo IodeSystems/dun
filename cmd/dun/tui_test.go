@@ -21,6 +21,14 @@ type discardWC struct{}
 func (discardWC) Write(p []byte) (int, error) { return len(p), nil }
 func (discardWC) Close() error                { return nil }
 
+// resized puts the model through a real WindowSizeMsg. Setting m.w/m.h by hand
+// leaves the conversation pane at width 0, which wraps every block to a single
+// column — a state the app never reaches (test helper).
+func resized(m tuiModel, w, h int) tuiModel {
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	return nm.(tuiModel)
+}
+
 // convoText joins the visible text of every block (test helper).
 func convoText(m tuiModel) string {
 	parts := make([]string, len(m.convo))
@@ -943,7 +951,7 @@ func TestTUI_ErrorEventClearsBusy(t *testing.T) {
 // log the TUI writes to a temp file. These assert the wait is on screen.
 func TestTUI_RetryBanner(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m.w, m.h = 100, 30
+	m = resized(m, 100, 30)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
 
@@ -999,7 +1007,7 @@ func TestTUI_RetryBanner(t *testing.T) {
 // broken sentence.
 func TestTUI_TurnRetryDiscardsPartialReply(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m.w, m.h = 100, 30
+	m = resized(m, 100, 30)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m = m.handleEvent(evMsg{"type": "token", "text": "I'll start by rea"})
 	if m.cur == "" {
@@ -1022,7 +1030,7 @@ func TestTUI_TurnRetryDiscardsPartialReply(t *testing.T) {
 // user is told that another message resumes from here.
 func TestTUI_GiveUpKeepsSessionUsable(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m.w, m.h = 100, 30
+	m = resized(m, 100, 30)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
 	m = m.handleEvent(evMsg{"type": "retry", "kind": "giveup", "attempt": 5.0, "text": "gave up after 5m"})
@@ -1047,7 +1055,7 @@ func TestTUI_GiveUpKeepsSessionUsable(t *testing.T) {
 // (dimmed, with "(queued)" suffix) and clears the marker when the turn ends.
 func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m.w, m.h = 100, 30
+	m = resized(m, 100, 30)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
 
@@ -1128,7 +1136,7 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 // engine flushes them on error, so they're part of the conversation history.
 func TestTUI_QueuedMessagesOnError(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m.w, m.h = 100, 30
+	m = resized(m, 100, 30)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
 
@@ -1918,17 +1926,19 @@ func TestActivity_InputInScopeTellsTheChild(t *testing.T) {
 	}
 }
 
-// The task line is the last thing the human ASKED for — it survives a resume,
-// because that is exactly when the message has scrolled away.
-func TestActivity_TaskLineTracksTheLastUserMessage(t *testing.T) {
+// m.task is the last thing the human ASKED for. It no longer has a line of its
+// own — it read as a second, broken scroll indicator sitting under the real one
+// — but it is still tracked, both for the agent-scoping swap above and for
+// whatever displays it next.
+func TestActivity_TaskTracksTheLastUserMessage(t *testing.T) {
 	m := withActivity(t)
-	if m.taskView() != "" {
-		t.Error("nothing asked yet, so no task line")
+	if m.task != "" {
+		t.Errorf("nothing asked yet, so no task: %q", m.task)
 	}
 	m = typeStr(m, "formalize the jobs table")
 	m = key(m, kEnter)
-	if !strings.Contains(m.taskView(), "formalize the jobs table") {
-		t.Errorf("the task line should carry the last message: %q", m.taskView())
+	if m.task != "formalize the jobs table" {
+		t.Errorf("task should be the last message, got %q", m.task)
 	}
 
 	m2 := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
@@ -1937,8 +1947,19 @@ func TestActivity_TaskLineTracksTheLastUserMessage(t *testing.T) {
 	m2 = m2.handleEvent(evMsg{"type": "history", "items": []any{
 		map[string]any{"kind": "user", "content": "the resumed task"},
 	}})
-	if !strings.Contains(m2.taskView(), "the resumed task") {
-		t.Errorf("a resumed session should show its task: %q", m2.taskView())
+	if m2.task != "the resumed task" {
+		t.Errorf("a resumed session should carry its task, got %q", m2.task)
+	}
+
+	// And it draws nothing: the top row is the header or the scroll overlay,
+	// never a second copy of the newest message.
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.send("formalize the jobs table")
+	for _, row := range screen(v)[:2] {
+		if strings.Contains(row, "formalize the jobs table") {
+			t.Errorf("the task still has a line of its own: %q", strings.TrimRight(row, " "))
+		}
 	}
 }
 
@@ -2964,9 +2985,9 @@ func TestVtui_ViewFitsTerminal(t *testing.T) {
 		prep func(v *vtui)
 	}{
 		{"bare", func(*vtui) {}},
-		// A task line appears as soon as anything has been asked — which is
-		// always true after a resume, and was exactly the overdraw case.
-		{"task line", func(v *vtui) { v.send("do the thing") }},
+		{"after a send", func(v *vtui) { v.send("do the thing") }},
+		// The activity strip is what still takes a row off the top, now that the
+		// task line — the original overdraw — is gone.
 		{"activity strip", func(v *vtui) {
 			v.event(map[string]any{"type": "agents", "agents": []any{
 				map[string]any{"n": 1.0, "state": "running", "prompt": "dig"},

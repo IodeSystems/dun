@@ -2084,12 +2084,8 @@ func (m tuiModel) scrollOverlay() string {
 func (m tuiModel) convoHeight() int {
 	h := m.h - 2 // divider 1 + status 1; every other row is measured, not assumed
 	h -= lipgloss.Height(m.headView())
-	// The task line and the activity strip sit above the conversation. Both
-	// vanish when they have nothing to say, so a session that never delegates
-	// loses no space to them.
-	if t := m.taskView(); t != "" {
-		h -= lipgloss.Height(t)
-	}
+	// The activity strip sits above the conversation. It vanishes when it has
+	// nothing to say, so a session that never delegates loses no space to it.
 	if a := m.activityView(); a != "" {
 		h -= lipgloss.Height(a)
 	}
@@ -2131,13 +2127,10 @@ func (m tuiModel) View() string {
 	// The lower pane is the input, or — while answering — the option picker. The
 	// convo pane takes whatever height is left (the picker can be several rows).
 	lower := m.lowerView()
-	// The task line and the activity strip sit above the conversation and take
-	// their height off the top. Both vanish when they have nothing to say, so a
-	// session that never delegates loses no space to them.
-	top := make([]string, 0, 2)
-	if t := m.taskView(); t != "" {
-		top = append(top, t)
-	}
+	// The activity strip sits above the conversation and takes its height off
+	// the top. It vanishes when it has nothing to say, so a session that never
+	// delegates loses no space to it.
+	top := make([]string, 0, 1)
 	if a := m.activityView(); a != "" {
 		top = append(top, a)
 	}

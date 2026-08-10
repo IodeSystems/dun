@@ -95,10 +95,10 @@ func parseTrace(t *testing.T, data string) traceFile {
 // the recording IS the layout, and reproducing it by synthesising content that
 // happens to wrap to the same heights is what made the old replay unusable.
 //
-// A trace only dumps entries, not the task line, but the app sets m.task from
-// the newest user message on both send and resume — so the replay sets it the
-// same way. It is load-bearing: the task line takes a row off the frame, and
-// it looks near enough to the scroll overlay to be mistaken for it.
+// A trace dumps entries, not model state, so the replay sets m.task the way the
+// app does — from the newest user message. It no longer draws anything (it used
+// to take the row under the scroll overlay and read as a broken copy of it), but
+// keeping it set is what makes this a replay rather than an approximation.
 func (tf traceFile) install(v *vtui) {
 	maxIdx, maxRow := 0, 0
 	for _, e := range tf.layout {
