@@ -124,7 +124,6 @@ func (v *vtui) send(msg string) {
 	v.m = key(v.m, kEnter)
 }
 
-
 // view returns the full rendered output with ANSI codes stripped.
 func (v *vtui) view() string {
 	return stripANSI(v.m.View())
@@ -2764,7 +2763,6 @@ func TestVtui_ScrollOverlayContentGrowsWhileScrolled(t *testing.T) {
 	}
 }
 
-
 // TestVtui_ScrollOverlaySwitchesMessages verifies that when two user messages
 // are separated by lots of content, scrolling past each one updates the overlay
 // to show the correct off-screen message. This caught a bug where the overlay
@@ -3248,5 +3246,60 @@ func TestTUI_EscStillQuitsOutsideAgentScope(t *testing.T) {
 	m = key(m, kEsc)
 	if !m.quitting {
 		t.Error("esc outside agent scope should still quit")
+	}
+}
+
+// The pre-conversation cost must be readable BEFORE the first turn. It used to
+// arrive only on the usage event, which fires after a turn completes — so a
+// session that had run nothing but tool calls showed "not reported" for a number
+// the harness computed at startup, which is exactly when somebody asks.
+func TestTUI_ContextCostArrivesWithoutACompletedTurn(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = m.handleEvent(evMsg{
+		"type": "context_cost", "system_tokens": float64(638), "system_exact": true,
+		"system_prompt": float64(11), "system_shared": float64(497),
+		"system_parts": []any{
+			map[string]any{"name": "built-in tools", "tokens": float64(44)},
+			map[string]any{"name": "mcp: raglit", "tokens": float64(43)},
+			map[string]any{"name": "mcp: chrome", "tokens": float64(43)},
+		},
+	})
+
+	s := m.ctxStats
+	if s.systemTokens != 638 || !s.systemExact || s.systemPrompt != 11 || s.systemShared != 497 {
+		t.Fatalf("context_cost not applied: %+v", s)
+	}
+	if len(s.systemParts) != 3 {
+		t.Fatalf("want 3 rows, got %v", s.systemParts)
+	}
+	sum := s.systemPrompt + s.systemShared
+	for _, p := range s.systemParts {
+		sum += p.Tokens
+	}
+	if sum != s.systemTokens {
+		t.Errorf("rows sum to %d but total says %d", sum, s.systemTokens)
+	}
+}
+
+// The estimate lands first and the exact count replaces it. Both carry the same
+// fields, so a later event must overwrite rather than merge — a stale estimated
+// row surviving beside exact ones is the mixed table the design refuses.
+func TestTUI_ExactCostReplacesTheEstimate(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = m.handleEvent(evMsg{
+		"type": "context_cost", "system_tokens": float64(900), "system_exact": false,
+		"system_prompt": float64(20),
+		"system_parts":  []any{map[string]any{"name": "built-in tools", "tokens": float64(880)}},
+	})
+	m = m.handleEvent(evMsg{
+		"type": "context_cost", "system_tokens": float64(638), "system_exact": true,
+		"system_prompt": float64(11), "system_shared": float64(497),
+		"system_parts": []any{map[string]any{"name": "built-in tools", "tokens": float64(130)}},
+	})
+	if !m.ctxStats.systemExact || m.ctxStats.systemTokens != 638 {
+		t.Fatalf("exact count did not replace the estimate: %+v", m.ctxStats)
+	}
+	if len(m.ctxStats.systemParts) != 1 || m.ctxStats.systemParts[0].Tokens != 130 {
+		t.Errorf("stale estimated rows survived: %v", m.ctxStats.systemParts)
 	}
 }

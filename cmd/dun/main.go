@@ -450,6 +450,11 @@ func main() {
 		// time an event is dropped.
 		cfg.OnAgents = func(as []dun.AgentInfo) { em.emit(event{"type": "agents", "agents": agentsToAny(as)}) }
 		cfg.OnJobs = func(js []dun.JobInfo) { em.emit(event{"type": "jobs", "jobs": jobsToAny(js)}) }
+		cfg.OnSystemBreakdown = func(bd dun.SystemBreakdown) {
+			em.emit(event{"type": "context_cost", "system_tokens": bd.Total,
+				"system_exact": bd.Exact, "system_prompt": bd.Prompt,
+				"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)})
+		}
 		cfg.OnDocs = func(n dun.DocsNote) {
 			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
 		}

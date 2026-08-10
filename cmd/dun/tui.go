@@ -1762,6 +1762,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// Track OOB messages for /context.
 		m.ctxStats.oobMessages++
 		m.refresh()
+	case "context_cost":
+		// The pre-conversation cost, delivered when it is measured rather than
+		// waiting for a turn to finish. Arrives twice: estimates, then exact.
+		m.ctxStats.readSystemCost(ev)
+		m.refresh()
 	case "usage":
 		// Accumulate token usage stats for /context.
 		m.ctxStats.totalTokens += int(evNum(ev["total"]))
@@ -1771,13 +1776,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.ctxStats.generatedTokens += int(evNum(ev["generated"]))
 		m.ctxStats.turns = int(evNum(ev["turns"]))
 		// Session-level stats (cumulative — use last value, not sum).
-		if v := evNum(ev["system_tokens"]); v > 0 {
-			m.ctxStats.systemTokens = int(v)
-			m.ctxStats.systemExact, _ = ev["system_exact"].(bool)
-			m.ctxStats.systemPrompt = int(evNum(ev["system_prompt"]))
-			m.ctxStats.systemShared = int(evNum(ev["system_shared"]))
-			m.ctxStats.systemParts = evParts(ev["system_parts"])
-		}
+		m.ctxStats.readSystemCost(ev)
 		if v := evNum(ev["forced_calls"]); v > 0 {
 			m.ctxStats.forcedToolCalls = int(v)
 		}
@@ -3495,6 +3494,21 @@ func (p *dunProc) agentCmd(id int, action, content string) bool {
 	return json.NewEncoder(p.stdin).Encode(map[string]string{
 		"type": "agent", "id": strconv.Itoa(id), "action": action, "content": content,
 	}) == nil
+}
+
+// readSystemCost decodes the pre-conversation cost off an event carrying it —
+// context_cost at startup, usage after a turn. Shared by both so the two can
+// never drift into disagreeing about the same numbers.
+func (s *contextStats) readSystemCost(ev map[string]any) {
+	v := evNum(ev["system_tokens"])
+	if v <= 0 {
+		return
+	}
+	s.systemTokens = int(v)
+	s.systemExact, _ = ev["system_exact"].(bool)
+	s.systemPrompt = int(evNum(ev["system_prompt"]))
+	s.systemShared = int(evNum(ev["system_shared"]))
+	s.systemParts = evParts(ev["system_parts"])
 }
 
 // evParts decodes the context breakdown rows off a usage event. A row that is

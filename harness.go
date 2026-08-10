@@ -258,6 +258,16 @@ type Config struct {
 	// argument as OnAgents: exec_monitor is model-facing, so without this a job
 	// the human can see running has no place to be seen from.
 	OnJobs func([]JobInfo)
+	// OnSystemBreakdown fires when the pre-conversation cost is (re)measured:
+	// once with estimates the moment tools are built, and again with exact
+	// counts when the tokenizer answers.
+	//
+	// It exists because /context used to learn this number ONLY from the usage
+	// event, which is emitted after a completed turn — so a session that had
+	// done nothing but tool calls reported "not reported" for a figure the
+	// harness had computed at startup. The cost of the context is knowable
+	// before the first turn, and that is exactly when somebody asks.
+	OnSystemBreakdown func(SystemBreakdown)
 	// OnRecap fires when the model rewrites a span of its own history. The UI
 	// gets a count and a citation, never the removed content — re-rendering the
 	// churn a recap just took out would defeat it.
@@ -304,11 +314,11 @@ type Harness struct {
 	// the tool set is not fixed at construction: srvMu guards the spec list and
 	// the last-error map, and every change ends in applyTools rebuilding the
 	// Session's tools, dispatcher, system prompt and doc preparer.
-	cfg     Config
-	srvMu   sync.Mutex
-	specs   []Server          // every configured server, running or not
-	lastErr     map[string]string    // id → why its last start attempt failed
-	lastStart   map[string]time.Duration // id → how long its last start took
+	cfg       Config
+	srvMu     sync.Mutex
+	specs     []Server                 // every configured server, running or not
+	lastErr   map[string]string        // id → why its last start attempt failed
+	lastStart map[string]time.Duration // id → how long its last start took
 	// turnMu is held for the length of a turn. A server command arrives on
 	// another goroutine (the -p reader), and swapping the Session's tools out
 	// from under a running turn is a data race — so a rebuild that cannot take
@@ -337,10 +347,10 @@ type Harness struct {
 	compactLast time.Time
 	// Session-level counters for /context stats. Guarded by noteMu alongside
 	// the queue, since they are incremented when items are drained from it.
-	systemTokens        int  // system prompt + tool schemas; exact when the endpoint can tokenize
+	systemTokens        int             // system prompt + tool schemas; exact when the endpoint can tokenize
 	systemParts         SystemBreakdown // the same total, broken down and labelled exact/estimated
-	forcedCallsTotal    int  // total forced tool calls injected this session
-	notificationsLifted int  // notifications delivered via liftQueued (smuggled)
+	forcedCallsTotal    int             // total forced tool calls injected this session
+	notificationsLifted int             // notifications delivered via liftQueued (smuggled)
 }
 
 // queuedKind is what a buffered item IS, which decides how much it is worth.
@@ -684,9 +694,15 @@ func (h *Harness) Queued() int {
 // tokenizer answers), so /context is never blank and never blocks setup.
 func (h *Harness) setSystemBreakdown(bd SystemBreakdown) {
 	h.noteMu.Lock()
-	defer h.noteMu.Unlock()
 	h.systemTokens = bd.Total
 	h.systemParts = bd
+	cb := h.cfg.OnSystemBreakdown
+	h.noteMu.Unlock()
+	// Outside the lock: this reaches the TUI, and a callback that blocks would
+	// hold the mutex the queue counters share.
+	if cb != nil {
+		cb(bd)
+	}
 }
 
 // SystemBreakdown returns the pre-conversation context in parts, with Exact
