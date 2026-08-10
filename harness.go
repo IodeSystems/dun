@@ -337,7 +337,8 @@ type Harness struct {
 	compactLast time.Time
 	// Session-level counters for /context stats. Guarded by noteMu alongside
 	// the queue, since they are incremented when items are drained from it.
-	systemTokens        int  // estimated token count of system prompt + tool schemas
+	systemTokens        int  // system prompt + tool schemas; exact when the endpoint can tokenize
+	systemParts         SystemBreakdown // the same total, broken down and labelled exact/estimated
 	forcedCallsTotal    int  // total forced tool calls injected this session
 	notificationsLifted int  // notifications delivered via liftQueued (smuggled)
 }
@@ -678,6 +679,26 @@ func (h *Harness) Queued() int {
 }
 
 // SessionStats returns the session-level counters for /context display.
+// setSystemBreakdown replaces the context breakdown. Called twice per rebuild:
+// once with estimates (immediate) and once with exact counts (when the
+// tokenizer answers), so /context is never blank and never blocks setup.
+func (h *Harness) setSystemBreakdown(bd SystemBreakdown) {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	h.systemTokens = bd.Total
+	h.systemParts = bd
+}
+
+// SystemBreakdown returns the pre-conversation context in parts, with Exact
+// telling the caller whether the numbers were measured or estimated. The
+// distinction is the point: rendering a guess like a measurement is the failure
+// this replaced.
+func (h *Harness) SystemParts() SystemBreakdown {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	return h.systemParts
+}
+
 func (h *Harness) SessionStats() (systemTokens, forcedCalls, notificationsLifted int) {
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()

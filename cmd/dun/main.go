@@ -837,11 +837,14 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 		em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
 	}
 	sysTokens, forcedCalls, notifLifted := h.SessionStats()
+	bd := h.SystemParts()
 	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
 		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
 		"generated": res.Usage.Generated, "turns": res.Usage.Turns,
 		"system_tokens": sysTokens, "forced_calls": forcedCalls,
-		"notifications_lifted": notifLifted})
+		"notifications_lifted": notifLifted,
+		"system_exact": bd.Exact, "system_prompt": bd.Prompt,
+		"system_parts": systemPartsEvent(bd)})
 	em.emit(event{"type": "done"})
 	return true
 }
@@ -1120,11 +1123,14 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 	}
 	em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
 	sysTokens, forcedCalls, notifLifted := h.SessionStats()
+	bd := h.SystemParts()
 	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
 		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
 		"generated": res.Usage.Generated, "turns": res.Usage.Turns,
 		"system_tokens": sysTokens, "forced_calls": forcedCalls,
-		"notifications_lifted": notifLifted})
+		"notifications_lifted": notifLifted,
+		"system_exact": bd.Exact, "system_prompt": bd.Prompt,
+		"system_parts": systemPartsEvent(bd)})
 	em.emit(event{"type": "done"})
 	return true
 }
@@ -1336,3 +1342,14 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
+
+// systemPartsEvent renders the context breakdown for the event stream. The TUI
+// is fed by events rather than holding the harness, so the parts travel as
+// plain maps beside the totals they add up to.
+func systemPartsEvent(bd dun.SystemBreakdown) []any {
+	out := make([]any, 0, len(bd.Parts))
+	for _, p := range bd.Parts {
+		out = append(out, map[string]any{"name": p.Name, "tokens": p.Tokens})
+	}
+	return out
+}

@@ -72,20 +72,6 @@ func mcpToolDefs(tools []mcpmgr.MCPTool) []llm.ToolDef {
 	return out
 }
 
-// toolDefsTokenEstimate returns a rough token count for a list of tool
-// definitions. ~4 chars per token is the rule of thumb for English/JSON text.
-func toolDefsTokenEstimate(defs []llm.ToolDef) int {
-	var n int
-	for _, d := range defs {
-		n += len(d.Function.Name)
-		n += len(d.Function.Description)
-		if d.Function.Parameters != nil {
-			n += len(fmt.Sprint(d.Function.Parameters))
-		}
-	}
-	return n / 4
-}
-
 // mcpDispatcher routes a model tool call to the owning MCP server (by tool name).
 // Errors meant for the model (unknown tool, bad args, tool failure) are formatted
 // INTO the result so the loop stays alive.

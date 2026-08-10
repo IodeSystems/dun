@@ -311,8 +311,13 @@ type contextStats struct {
 	toolResults      int  // total tool results seen
 	resultsTruncated int  // how many were LOD-truncated
 
-	// System prompt + tool schemas (estimated from engine)
+	// System prompt + tool schemas. systemExact says whether these were counted
+	// by the model's own tokenizer or estimated at ~4 chars/token — the two must
+	// never render alike.
 	systemTokens int
+	systemExact  bool
+	systemPrompt int
+	systemParts  []dun.ContextPart
 
 	// Out-of-band delivery: messages typed mid-turn that were queued into
 	// a running turn rather than starting a new one.
@@ -1769,6 +1774,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// Session-level stats (cumulative — use last value, not sum).
 		if v := evNum(ev["system_tokens"]); v > 0 {
 			m.ctxStats.systemTokens = int(v)
+			m.ctxStats.systemExact, _ = ev["system_exact"].(bool)
+			m.ctxStats.systemPrompt = int(evNum(ev["system_prompt"]))
+			m.ctxStats.systemParts = evParts(ev["system_parts"])
 		}
 		if v := evNum(ev["forced_calls"]); v > 0 {
 			m.ctxStats.forcedToolCalls = int(v)
@@ -3001,7 +3009,23 @@ func (m *tuiModel) showContext() {
 
 	b.WriteString("\n\n  " + stHeader.Render("system"))
 	if s.systemTokens > 0 {
-		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + fmt.Sprintf("%d tokens", s.systemTokens) + stDim.Render(" (estimated)"))
+		how := " (estimated at ~4 chars/token)"
+		if s.systemExact {
+			how = " (counted by the model's tokenizer)"
+		}
+		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + fmt.Sprintf("%d tokens", s.systemTokens) + stDim.Render(how))
+		// The breakdown is the point: one number says the total is large, and
+		// these rows say which part to go and fix.
+		if s.systemPrompt > 0 {
+			b.WriteString("\n  " + stDim.Render("  system prompt:   ") + fmt.Sprintf("%d", s.systemPrompt))
+		}
+		for _, p := range s.systemParts {
+			label := p.Name
+			if len(label) > 17 {
+				label = label[:17]
+			}
+			b.WriteString("\n  " + stDim.Render(fmt.Sprintf("  %-17s", label)) + fmt.Sprintf("%d", p.Tokens))
+		}
 	} else {
 		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + "not reported")
 	}
@@ -3465,4 +3489,27 @@ func (p *dunProc) agentCmd(id int, action, content string) bool {
 	return json.NewEncoder(p.stdin).Encode(map[string]string{
 		"type": "agent", "id": strconv.Itoa(id), "action": action, "content": content,
 	}) == nil
+}
+
+// evParts decodes the context breakdown rows off a usage event. A row that is
+// missing or malformed is dropped rather than rendered as zero, because a
+// zero-token MCP server on the /context table reads as a real measurement.
+func evParts(v any) []dun.ContextPart {
+	rows, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]dun.ContextPart, 0, len(rows))
+	for _, r := range rows {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := m["name"].(string)
+		if name == "" {
+			continue
+		}
+		out = append(out, dun.ContextPart{Name: name, Tokens: int(evNum(m["tokens"]))})
+	}
+	return out
 }

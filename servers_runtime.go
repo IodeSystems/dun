@@ -340,10 +340,14 @@ func (h *Harness) rebuildTools() {
 	h.Session.System = sys
 	h.Session.OnToolCalls = h.mergeForcedToolCalls
 
-	// Estimate system prompt + tool schema token count (~4 chars per token).
-	h.noteMu.Lock()
-	h.systemTokens = len(sys)/4 + toolDefsTokenEstimate(toolDefs)
-	h.noteMu.Unlock()
+	// Break the pre-conversation context into parts. Estimates land immediately
+	// so /context is never empty; the exact counts replace them when they
+	// arrive. See context_tokens.go for why this is not one number, why
+	// exactness is all-or-nothing, and why the measurement cannot block here.
+	h.setSystemBreakdown(measureSystem(context.Background(), nil, sys, toolDefs, tools))
+	go func() {
+		h.setSystemBreakdown(measureSystem(context.Background(), h.client, sys, toolDefs, tools))
+	}()
 
 	// Proactive RAG: watch the conversation and inject relevant-doc pings before
 	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
