@@ -6,6 +6,7 @@ package dun
 // failure: the trigger, and the invisibility.
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,21 +16,56 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 )
 
-// The default (DUN_CONTEXT_TOKENS unset) must mean NO shaping. It reads as 0,
-// and a 0 that anything downstream treats as "a budget of zero tokens" makes
-// every turn over budget.
-func TestContextBudget_UnsetMeansUnbudgeted(t *testing.T) {
+// windowSayer is a server that states a context window; noWindow is one that
+// does not (the OpenAI/Anthropic case).
+type windowSayer struct{ n int }
+
+func (w windowSayer) ContextWindow(context.Context) (int, bool) { return w.n, w.n > 0 }
+
+type noWindow struct{}
+
+// With no environment variable AND no server answer, the budget must still be
+// 0. A 0 that anything downstream treats as "a budget of zero tokens" makes
+// every turn over budget — two real sessions folded 45 times in 29 minutes and
+// 38 in 7 before that was fixed in the Shaper.
+func TestContextBudget_NothingKnownMeansUnbudgeted(t *testing.T) {
 	t.Setenv("DUN_CONTEXT_TOKENS", "")
-	if got := contextBudget(); got != 0 {
-		t.Fatalf("unset should be 0 (unbudgeted), got %d", got)
+	if got := contextBudget(context.Background(), noWindow{}); got != 0 {
+		t.Fatalf("no env and no server should be 0 (unbudgeted), got %d", got)
+	}
+	if got := contextBudget(context.Background(), windowSayer{0}); got != 0 {
+		t.Errorf("a server stating no window should be 0, got %d", got)
 	}
 	t.Setenv("DUN_CONTEXT_TOKENS", "not-a-number")
-	if got := contextBudget(); got != 0 {
+	if got := contextBudget(context.Background(), noWindow{}); got != 0 {
 		t.Errorf("garbage should fall back to unbudgeted, got %d", got)
 	}
+	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
+}
+
+// The server's number is used when the environment says nothing. This is the
+// change: dun no longer makes somebody type a window the server will state.
+func TestContextBudget_AsksTheServerWhenUnset(t *testing.T) {
+	t.Setenv("DUN_CONTEXT_TOKENS", "")
+	if got, want := contextBudget(context.Background(), windowSayer{220160}), 220160*90/100; got != want {
+		t.Errorf("server window should shape to 90%%: got %d, want %d", got, want)
+	}
+	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
+}
+
+// An explicit setting WINS over the server, including when it is smaller. The
+// server states what the model can hold; a person setting this is expressing an
+// intent about what to spend, and the second must not be overridden by the first.
+func TestContextBudget_EnvironmentWinsOverTheServer(t *testing.T) {
 	t.Setenv("DUN_CONTEXT_TOKENS", "100000")
-	if got := contextBudget(); got != 90000 {
-		t.Errorf("a real window should shape to 90%%: got %d", got)
+	if got := contextBudget(context.Background(), windowSayer{220160}); got != 90000 {
+		t.Errorf("an explicit window should shape to 90%%: got %d", got)
+	}
+	// Garbage in the environment falls THROUGH to the server rather than
+	// disabling shaping: a typo should not silently cost the session its budget.
+	t.Setenv("DUN_CONTEXT_TOKENS", "not-a-number")
+	if got, want := contextBudget(context.Background(), windowSayer{220160}), 220160*90/100; got != want {
+		t.Errorf("invalid env should fall through to the server: got %d, want %d", got, want)
 	}
 	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
 }

@@ -895,7 +895,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Store:  store,
 		Runner: cfg.Client,
 		Policy: agent.ShaperPolicy{
-			BudgetTokens:          contextBudget(),
+			BudgetTokens:          contextBudget(ctx, cfg.Client),
 			VerbatimToolResults:   verbatimToolResults(),
 			ToolFormat:            toolFormat(),
 			LODTruncateAboveChars: 4000,
@@ -1481,11 +1481,24 @@ func verbatimToolResults() bool {
 	return false
 }
 
-// contextBudget is the token ceiling the Shaper shapes to, from
-// DUN_CONTEXT_TOKENS (the model's window). 0 → no shaping at all, which is the
-// old behaviour and the safe default: no probe can tell a 32k window from a
-// 180k one without minutes of multi-megabyte requests, and guessing low is
-// expensive — it compacts a large window for no reason.
+// contextBudget is the token ceiling the Shaper shapes to: the model's window,
+// from the environment if it is set and from the SERVER if it is not. 0 → no
+// shaping at all, and that remains the answer when neither can say.
+//
+// This used to read the environment only, justified by "no probe can tell a 32k
+// window from a 180k one without minutes of multi-megabyte requests". That was
+// true of PROBING and is not true of asking: llama.cpp states the number at
+// /props as default_generation_settings.n_ctx, and agentkit's ContextWindow
+// reads it in one request — including through corrallm's /upstream form.
+// Measured: Qwen3-6-27B-MPT answers 220160. Making somebody type a number the
+// server will hand over is not a safe default, it is a chore with a wrong
+// answer available.
+//
+// The distinction the warning below is really about is GUESSING versus ASKING.
+// A guessed window that is too low compacts a large context for nothing; a
+// stated one is a measurement. Unlike the tokenizer lookup, ContextWindow
+// caches nothing, so a timeout here costs this session its shaping and poisons
+// no later call — which is why a short bound is safe here and is not there.
 //
 // "0 → no shaping" was the INTENT here from the start, but agentkit read a zero
 // budget as a budget of zero tokens, so the default path compacted on every
@@ -1498,18 +1511,45 @@ func verbatimToolResults() bool {
 // The fraction is deliberately close to 1. Shaping exists to stop a generation
 // being cut off mid-write, not to keep the context small: the LOD rung already
 // does that for free, and every compaction costs a prefix rewrite.
-func contextBudget() int {
-	v := os.Getenv("DUN_CONTEXT_TOKENS")
-	if v == "" {
-		return 0
+// contextWindower is agentkit's "ask the server how big the window is"
+// capability, named as an interface so this asserts on the CAPABILITY rather
+// than on *llm.Client, and so a test can supply one.
+type contextWindower interface {
+	ContextWindow(ctx context.Context) (int, bool)
+}
+
+// contextWindowTimeout bounds the one request. Short on purpose: it runs during
+// Start, and an endpoint that will not answer promptly should cost this session
+// its shaping, not its startup.
+const contextWindowTimeout = 10 * time.Second
+
+func contextBudget(ctx context.Context, runner any) int {
+	if v := os.Getenv("DUN_CONTEXT_TOKENS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			log.Printf("dun: ignoring invalid DUN_CONTEXT_TOKENS=%q", v)
+		} else {
+			return logBudget(n, "DUN_CONTEXT_TOKENS")
+		}
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		log.Printf("dun: ignoring invalid DUN_CONTEXT_TOKENS=%q", v)
-		return 0
+	if w, ok := runner.(contextWindower); ok {
+		cctx, cancel := context.WithTimeout(ctx, contextWindowTimeout)
+		defer cancel()
+		if n, ok := w.ContextWindow(cctx); ok && n > 0 {
+			return logBudget(n, "the server's /props")
+		}
 	}
+	log.Printf("dun: no context window known — DUN_CONTEXT_TOKENS unset and the server states none; no shaping")
+	return 0
+}
+
+// logBudget records WHERE the number came from. A session that thrashes should
+// say in its own logs whether it was working from somebody's environment or
+// from the server, because those are fixed in different places.
+func logBudget(n int, source string) int {
 	budget := n * 90 / 100
-	log.Printf("dun: context window %d tokens; shaping budget %d (LOD stubs first, compaction last)", n, budget)
+	log.Printf("dun: context window %d tokens (from %s); shaping budget %d (LOD stubs first, compaction last)",
+		n, source, budget)
 	return budget
 }
 

@@ -3029,7 +3029,8 @@ func (m *tuiModel) showContext() {
 	} else {
 		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + "not reported")
 	}
-	b.WriteString("\n  " + stDim.Render("Use DUN_CONTEXT_TOKENS to set a shaping budget (unset = no compaction)."))
+	b.WriteString("\n  " + stDim.Render("Window comes from the server when it states one; DUN_CONTEXT_TOKENS overrides."))
+	b.WriteString("\n  " + stDim.Render("The startup log names the source. Neither = no compaction."))
 
 	b.WriteString("\n\n  " + stHeader.Render("out-of-band"))
 	b.WriteString("\n  " + stDim.Render("queued msgs:    ") + fmt.Sprintf("%d", s.oobMessages) + stDim.Render(" (delivered mid-turn)"))
