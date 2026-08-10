@@ -49,7 +49,6 @@ func resolveDockerImage(raw string) string {
 	return raw
 }
 
-
 // usage prints the flags as --long-flags.
 //
 // Go's flag package accepts -tui and --tui identically but PRINTS the first,
@@ -435,7 +434,7 @@ func main() {
 		// image and mounts without the TUI knowing about them.
 		DockerImage:   resolveDockerImage(*docker),
 		DockerNetwork: *dockerNetwork,
-		ExtraMounts: mounts,
+		ExtraMounts:   mounts,
 	}
 	if *prog {
 		em = &emitter{}
@@ -843,8 +842,8 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 		"generated": res.Usage.Generated, "turns": res.Usage.Turns,
 		"system_tokens": sysTokens, "forced_calls": forcedCalls,
 		"notifications_lifted": notifLifted,
-		"system_exact": bd.Exact, "system_prompt": bd.Prompt,
-		"system_parts": systemPartsEvent(bd)})
+		"system_exact":         bd.Exact, "system_prompt": bd.Prompt,
+		"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)})
 	em.emit(event{"type": "done"})
 	return true
 }
@@ -1129,8 +1128,8 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 		"generated": res.Usage.Generated, "turns": res.Usage.Turns,
 		"system_tokens": sysTokens, "forced_calls": forcedCalls,
 		"notifications_lifted": notifLifted,
-		"system_exact": bd.Exact, "system_prompt": bd.Prompt,
-		"system_parts": systemPartsEvent(bd)})
+		"system_exact":         bd.Exact, "system_prompt": bd.Prompt,
+		"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)})
 	em.emit(event{"type": "done"})
 	return true
 }
@@ -1341,7 +1340,6 @@ func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "dun: %v\n", err)
 	os.Exit(1)
 }
-
 
 // systemPartsEvent renders the context breakdown for the event stream. The TUI
 // is fed by events rather than holding the harness, so the parts travel as

@@ -13,18 +13,28 @@ import (
 // What the context costs before the conversation starts, broken down.
 //
 // `/context` used to report one number for "prompt + schemas", derived at four
-// characters per token. That hid two different things. The first is WHICH part
-// is expensive — a system prompt and forty tool schemas are separately fixable,
-// and one number says only that the total is large. The second is worse: the
-// ratio is a guess whose error is not small. agentkit measured it at 5.54
-// characters per token on prose and 1.11 on a surveyor's metes and bounds, so a
-// number derived from a single ratio can be five times out and still look
-// precise.
+// characters per token. That hid two things. Which part is expensive — a system
+// prompt and forty MCP schemas are separately fixable, and one total says only
+// that it is large. And that the number was a guess: agentkit measured
+// chars-per-token at 5.54 on prose and 1.11 on a surveyor's metes and bounds, so
+// a single ratio can be five times out and still look precise.
 //
-// So this counts EXACTLY when the endpoint can tokenize (llama.cpp, vLLM, and
-// anything behind corrallm's /upstream passthrough), estimates when it cannot,
-// and says which it did. A count that is sometimes measured and sometimes
-// guessed, rendered identically, is worse than an honest estimate.
+// So this counts EXACTLY when the endpoint can, estimates when it cannot, and
+// says which it did. A count that is sometimes measured and sometimes guessed,
+// rendered identically, is worse than an honest estimate.
+//
+// COSTS ARE MARGINAL, measured by leaving each part out. That is not a
+// refinement — on Anthropic it is the only way to get an honest per-part number.
+// Declaring any tool at all adds the provider's tool-use preamble, measured at
+// ~497 tokens against a preamble-free baseline of 9:
+//
+//	no tools 9    1 tool 551    2 tools 596
+//
+// Counting each server's schemas on their own therefore charges that preamble
+// once per server — four servers overstate by ~1.5k, and the parts stop adding
+// up to the total. A leave-one-out delta answers the question a reader of
+// `/context` actually has ("what would I save by turning this off"), and what no
+// single part owns lands in one shared row instead of being smeared across them.
 
 // ContextPart is one named contributor to the pre-conversation context.
 type ContextPart struct {
@@ -43,15 +53,15 @@ type SystemBreakdown struct {
 	Exact  bool
 	Prompt int
 	Parts  []ContextPart // built-ins first, then one row per MCP server, sorted
+	Shared int           // cost no single part owns (the provider's tool-use preamble)
 	Total  int
 }
 
-// tokenCounter is agentkit's exact-count capability, named as an interface so
-// this package asserts on the CAPABILITY rather than on *llm.Client. A runner
-// that cannot count is not an error and not a special case — it simply does not
-// satisfy this.
-type tokenCounter interface {
-	CountTokens(ctx context.Context, text string) (int, bool)
+// promptCounter is agentkit's structured-count capability, named as an interface
+// so this package asserts on the CAPABILITY rather than on *llm.Client. An
+// endpoint that cannot count simply does not satisfy it.
+type promptCounter interface {
+	CountPrompt(ctx context.Context, system string, tools []llm.ToolDef) (int, bool)
 }
 
 // measureSystemTimeout bounds the whole measurement.
@@ -59,45 +69,47 @@ type tokenCounter interface {
 // Generous ON PURPOSE, and it is why this runs off the setup path. Behind
 // corrallm, /upstream RESOLVES the model and makes the backend resident before
 // forwarding, so the first count against a cold model pays for a model load —
-// measured at 7.6s for one already-warm model, and a cold one is worse.
+// measured at 7.6s for one already-warm model, and a cold one is worse. This now
+// makes N+3 calls rather than N+1, which widens the window it has to fit in.
 //
 // The interaction that makes a short timeout actively harmful: agentkit caches
 // what it discovered per baseURL+model, INCLUDING having found nothing. A probe
 // that times out once therefore downgrades the whole process to estimates, not
 // just this measurement. Better to wait than to poison the cache.
-const measureSystemTimeout = 45 * time.Second
+const measureSystemTimeout = 60 * time.Second
 
-// measureSystem breaks the pre-conversation context into parts and counts them.
-//
-// mcpTools carries the tool→server attribution (mcpmgr.MCPTool.ServerID); defs
-// that match no MCP tool are dun's own, and are grouped as "built-in tools".
-func measureSystem(ctx context.Context, runner any, sys string, defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) SystemBreakdown {
+// toolGroup is one owner's tool definitions.
+type toolGroup struct {
+	name  string
+	defs  []llm.ToolDef
+	bytes []byte // the same schemas as wire JSON, for the estimate path
+}
+
+// groupTools splits tool definitions by owner: dun's own, then one group per MCP
+// server via mcpmgr.MCPTool.ServerID.
+func groupTools(defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) []toolGroup {
+	const builtin = "built-in tools"
 	server := make(map[string]string, len(mcpTools))
 	for _, t := range mcpTools {
 		server[t.Name] = t.ServerID
 	}
-
-	// Group the schema text by owner, in the shape that actually goes on the
-	// wire. The old estimate summed name+description+fmt.Sprint(parameters),
-	// which is neither what is sent nor what a tokenizer would be given.
-	const builtin = "built-in tools"
-	grouped := map[string][]byte{}
-	order := []string{}
+	byName := map[string]*toolGroup{}
+	var order []string
 	for _, d := range defs {
 		owner := builtin
 		if id := server[d.Function.Name]; id != "" {
 			owner = "mcp: " + id
 		}
-		if _, seen := grouped[owner]; !seen {
+		g, seen := byName[owner]
+		if !seen {
+			g = &toolGroup{name: owner}
+			byName[owner] = g
 			order = append(order, owner)
 		}
-		b, err := json.Marshal(d)
-		if err != nil {
-			// A schema that will not marshal cannot be sent either; count it
-			// as nothing rather than guessing at a shape we do not have.
-			continue
+		g.defs = append(g.defs, d)
+		if raw, err := json.Marshal(d); err == nil {
+			g.bytes = append(g.bytes, raw...)
 		}
-		grouped[owner] = append(grouped[owner], b...)
 	}
 	sort.Slice(order, func(i, j int) bool {
 		if (order[i] == builtin) != (order[j] == builtin) {
@@ -105,48 +117,86 @@ func measureSystem(ctx context.Context, runner any, sys string, defs []llm.ToolD
 		}
 		return order[i] < order[j]
 	})
+	out := make([]toolGroup, 0, len(order))
+	for _, name := range order {
+		out = append(out, *byName[name])
+	}
+	return out
+}
 
-	out := SystemBreakdown{}
-	counter, canCount := runner.(tokenCounter)
-	if canCount {
+// measureSystem breaks the pre-conversation context into parts and counts them.
+func measureSystem(ctx context.Context, runner any, sys string, defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) SystemBreakdown {
+	groups := groupTools(defs, mcpTools)
+
+	if counter, ok := runner.(promptCounter); ok {
 		cctx, cancel := context.WithTimeout(ctx, measureSystemTimeout)
 		defer cancel()
-		if exact, ok := countExact(cctx, counter, sys, order, grouped); ok {
+		if exact, ok := countExact(cctx, counter, sys, groups); ok {
 			return exact
 		}
 	}
 
-	out.Prompt = estimateTokens(sys)
-	for _, owner := range order {
-		out.Parts = append(out.Parts, ContextPart{Name: owner, Tokens: estimateTokens(string(grouped[owner]))})
+	out := SystemBreakdown{Prompt: estimateTokens(sys)}
+	for _, g := range groups {
+		out.Parts = append(out.Parts, ContextPart{Name: g.name, Tokens: estimateTokens(string(g.bytes))})
 	}
 	out.Total = total(out)
 	return out
 }
 
-// countExact returns the measured breakdown, or ok=false if ANY part could not
-// be counted. See SystemBreakdown.Exact for why it is all-or-nothing.
-func countExact(ctx context.Context, c tokenCounter, sys string, order []string, grouped map[string][]byte) (SystemBreakdown, bool) {
-	var out SystemBreakdown
-	n, ok := c.CountTokens(ctx, sys)
-	if !ok {
-		return out, false
+// countExact measures each part as a MARGINAL cost — the difference between the
+// whole prompt and the whole prompt without that part — and returns ok=false if
+// ANY count fails. See SystemBreakdown.Exact for why it is all-or-nothing.
+//
+// With a single tool group its own row absorbs the provider's preamble and
+// Shared is zero. That is correct rather than a rounding artifact: when one
+// server is the only server, turning it off really does save the preamble too.
+func countExact(ctx context.Context, c promptCounter, sys string, groups []toolGroup) (SystemBreakdown, bool) {
+	var all []llm.ToolDef
+	for _, g := range groups {
+		all = append(all, g.defs...)
 	}
-	out.Prompt = n
-	for _, owner := range order {
-		n, ok := c.CountTokens(ctx, string(grouped[owner]))
+	// The envelope every count carries. Subtracting it is what makes these
+	// numbers the cost of the SYSTEM CONTEXT rather than of a minimal request.
+	base, ok := c.CountPrompt(ctx, "", nil)
+	if !ok {
+		return SystemBreakdown{}, false
+	}
+	withSystem, ok := c.CountPrompt(ctx, sys, nil)
+	if !ok {
+		return SystemBreakdown{}, false
+	}
+	whole, ok := c.CountPrompt(ctx, sys, all)
+	if !ok {
+		return SystemBreakdown{}, false
+	}
+
+	out := SystemBreakdown{Exact: true, Prompt: withSystem - base, Total: whole - base}
+	owned := 0
+	for i, g := range groups {
+		without := make([]llm.ToolDef, 0, len(all)-len(g.defs))
+		for j, other := range groups {
+			if j != i {
+				without = append(without, other.defs...)
+			}
+		}
+		n, ok := c.CountPrompt(ctx, sys, without)
 		if !ok {
 			return SystemBreakdown{}, false
 		}
-		out.Parts = append(out.Parts, ContextPart{Name: owner, Tokens: n})
+		cost := whole - n
+		owned += cost
+		out.Parts = append(out.Parts, ContextPart{Name: g.name, Tokens: cost})
 	}
-	out.Exact = true
-	out.Total = total(out)
+	// Whatever no single part owns: the provider's tool-use preamble, plus any
+	// non-additivity in the tokenizer. Derived rather than measured so the rows
+	// add up to Total exactly, which is the property /context is read for.
+	out.Shared = out.Total - out.Prompt - owned
 	return out, true
 }
 
 func total(b SystemBreakdown) int {
-	n := b.Prompt
+	n := b.Prompt + b.Shared
 	for _, p := range b.Parts {
 		n += p.Tokens
 	}
@@ -154,5 +204,5 @@ func total(b SystemBreakdown) int {
 }
 
 // estimateTokens is the four-characters-per-token fallback, kept for endpoints
-// with no tokenizer. It is only ever reported as an estimate.
+// with no counter. It is only ever reported as an estimate.
 func estimateTokens(s string) int { return len(s) / 4 }

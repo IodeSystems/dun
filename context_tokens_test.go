@@ -9,23 +9,35 @@ import (
 	"github.com/iodesystems/agentkit/mcpmgr"
 )
 
-// fakeCounter counts words, so a "measured" number is distinguishable from the
-// chars/4 estimate at a glance. failOn makes one specific part unmeasurable.
+// fakeCounter models the shape that made leave-one-out necessary: a fixed
+// preamble the moment ANY tool is declared, plus a per-tool cost. Numbers chosen
+// to match what Anthropic actually charged on 2026-08-10 (baseline 9, preamble
+// ~497, ~45 per small tool) so the arithmetic under test is the real one.
+const (
+	fakeBase     = 9
+	fakePreamble = 497
+	fakePerTool  = 45
+)
+
 type fakeCounter struct {
 	calls  int
-	failOn func(text string) bool
+	failOn func(system string, tools []llm.ToolDef) bool
 }
 
-func (f *fakeCounter) CountTokens(_ context.Context, text string) (int, bool) {
+func (f *fakeCounter) CountPrompt(_ context.Context, system string, tools []llm.ToolDef) (int, bool) {
 	f.calls++
-	if f.failOn != nil && f.failOn(text) {
+	if f.failOn != nil && f.failOn(system, tools) {
 		return 0, false
 	}
-	return len(strings.Fields(text)), true
+	n := fakeBase + len(strings.Fields(system))
+	if len(tools) > 0 {
+		n += fakePreamble + fakePerTool*len(tools)
+	}
+	return n, true
 }
 
-// nonCounter is a runner with no tokenizer — the Anthropic/OpenAI case, and the
-// reason CountTokens returns ok rather than an error.
+// nonCounter is a runner with no counter at all — the reason CountPrompt returns
+// ok rather than an error.
 type nonCounter struct{}
 
 func fixture() (string, []llm.ToolDef, []mcpmgr.MCPTool) {
@@ -76,8 +88,53 @@ func TestBreakdownAttributesEveryToolToItsServer(t *testing.T) {
 	if bd.Parts[0].Name != "built-in tools" {
 		t.Errorf("built-ins must sort first, got %q", bd.Parts[0].Name)
 	}
-	if sum := bd.Prompt + got["built-in tools"] + got["mcp: raglit"] + got["mcp: chrome"]; sum != bd.Total {
+	if sum := bd.Prompt + bd.Shared + got["built-in tools"] + got["mcp: raglit"] + got["mcp: chrome"]; sum != bd.Total {
 		t.Errorf("Total %d != sum of its parts %d", bd.Total, sum)
+	}
+}
+
+// TestPerServerCostsExcludeTheSharedPreamble is the whole reason costs are
+// marginal. Each group here holds exactly one tool, so an honest per-server cost
+// is fakePerTool — NOT fakePerTool+fakePreamble, which is what counting each
+// group on its own would report, once per server.
+func TestPerServerCostsExcludeTheSharedPreamble(t *testing.T) {
+	sys, defs, mcp := fixture()
+	bd := measureSystem(context.Background(), &fakeCounter{}, sys, defs, mcp)
+
+	for _, p := range bd.Parts {
+		if p.Tokens != fakePerTool {
+			t.Errorf("%s costs %d, want %d — the shared preamble is being charged to it",
+				p.Name, p.Tokens, fakePerTool)
+		}
+	}
+	if bd.Shared != fakePreamble {
+		t.Errorf("Shared = %d, want the preamble %d", bd.Shared, fakePreamble)
+	}
+	// And the envelope every count carries must not appear anywhere: this is the
+	// cost of the system context, not of a minimal request.
+	if bd.Total != fakePreamble+3*fakePerTool+len(strings.Fields(sys)) {
+		t.Errorf("Total %d still carries the request envelope", bd.Total)
+	}
+}
+
+// TestOneServerOwnsThePreamble pins the edge the marginal model implies: with a
+// single group, turning it off really does save the preamble too, so its row
+// carries it and Shared is zero. Correct, not a rounding artifact.
+func TestOneServerOwnsThePreamble(t *testing.T) {
+	var d llm.ToolDef
+	d.Function.Name = "only"
+	bd := measureSystem(context.Background(), &fakeCounter{}, "sys",
+		[]llm.ToolDef{d}, []mcpmgr.MCPTool{{Name: "only", ServerID: "solo"}})
+
+	if len(bd.Parts) != 1 {
+		t.Fatalf("want 1 part, got %v", bd.Parts)
+	}
+	if bd.Parts[0].Tokens != fakePreamble+fakePerTool {
+		t.Errorf("sole group costs %d, want %d — it is the only thing switching the preamble on",
+			bd.Parts[0].Tokens, fakePreamble+fakePerTool)
+	}
+	if bd.Shared != 0 {
+		t.Errorf("Shared = %d, want 0 when one group owns everything", bd.Shared)
 	}
 }
 
@@ -87,7 +144,14 @@ func TestBreakdownAttributesEveryToolToItsServer(t *testing.T) {
 func TestOnePartThatCannotBeCountedDowngradesTheWholeTable(t *testing.T) {
 	sys, defs, mcp := fixture()
 	// The tokenizer answers for everything except the chrome server's schemas.
-	c := &fakeCounter{failOn: func(text string) bool { return strings.Contains(text, "fetch a page") }}
+	c := &fakeCounter{failOn: func(_ string, tools []llm.ToolDef) bool {
+		for _, t := range tools {
+			if t.Function.Name == "fetch" {
+				return true
+			}
+		}
+		return false
+	}}
 	bd := measureSystem(context.Background(), c, sys, defs, mcp)
 
 	if bd.Exact {
@@ -120,12 +184,15 @@ func TestNoTokenizerIsNotAnError(t *testing.T) {
 }
 
 // TestTheTokenizerIsAskedOncePerPart guards the cost of doing this at setup:
-// one call for the prompt and one per group, never one per tool definition.
+// a fixed few calls plus one per GROUP, never one per tool definition.
 func TestTheTokenizerIsAskedOncePerPart(t *testing.T) {
 	sys, defs, mcp := fixture()
 	c := &fakeCounter{}
 	measureSystem(context.Background(), c, sys, defs, mcp)
-	if want := 4; c.calls != want { // prompt + built-ins + raglit + chrome
-		t.Errorf("CountTokens called %d times, want %d (one per part, not per tool)", c.calls, want)
+	// base + system + whole + one leave-one-out per group. Marginal costs are
+	// why it is N+3 rather than N+1; the guard is that it stays per PART, never
+	// per tool definition.
+	if want := 6; c.calls != want {
+		t.Errorf("CountPrompt called %d times, want %d (base+system+whole+3 groups)", c.calls, want)
 	}
 }

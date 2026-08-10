@@ -120,7 +120,7 @@ var (
 	stAsk    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
 	stSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // selection gutter
 	stEdge   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused divider half
-	
+
 )
 
 // paneStyle borders a pane; the focused one is bright (212), else dim (240) —
@@ -196,18 +196,18 @@ func (s viewState) Next() viewState {
 type convoEntry struct {
 	collapsed string
 	full      string
-	raw       string       // unstyled tool output (empty for non-tool blocks)
-	state     viewState    // minimized | expanded | raw
-	docs      *docsBlock   // proactive-RAG summary (nil for normal blocks)
-	tool      *toolBlock   // tool call/result (nil for normal blocks) → enter opens the inspector
+	raw       string     // unstyled tool output (empty for non-tool blocks)
+	state     viewState  // minimized | expanded | raw
+	docs      *docsBlock // proactive-RAG summary (nil for normal blocks)
+	tool      *toolBlock // tool call/result (nil for normal blocks) → enter opens the inspector
 	// provisional marks a message that was typed mid-turn and is queued for
 	// delivery. It appears in the conversation with a dimmed style so the user
 	// knows it landed but hasn't been delivered to the model yet. When the turn
 	// ends and the messages are delivered, they lose the provisional marker and
 	// render as normal user messages.
-	provisional      bool
-	provisionalText  string // original text, used to restore normal style on delivery
-	userText         string // raw user message text (non-empty for user messages only)
+	provisional     bool
+	provisionalText string // original text, used to restore normal style on delivery
+	userText        string // raw user message text (non-empty for user messages only)
 
 	// Wrapped render, cached. A finalized block's text never changes, but
 	// refresh() runs once per STREAMED TOKEN, so re-wrapping the whole
@@ -292,7 +292,7 @@ func (e convoEntry) shallower() (viewState, bool) {
 type contextStats struct {
 	// Token usage (cumulative across all turns)
 	totalTokens     int
-	activeTokens    int  // last reported active window size
+	activeTokens    int // last reported active window size
 	cachedTokens    int
 	processedTokens int
 	generatedTokens int
@@ -308,8 +308,8 @@ type contextStats struct {
 	charsRecapped   int
 
 	// Tool result truncation (LOD)
-	toolResults      int  // total tool results seen
-	resultsTruncated int  // how many were LOD-truncated
+	toolResults      int // total tool results seen
+	resultsTruncated int // how many were LOD-truncated
 
 	// System prompt + tool schemas. systemExact says whether these were counted
 	// by the model's own tokenizer or estimated at ~4 chars/token — the two must
@@ -317,6 +317,7 @@ type contextStats struct {
 	systemTokens int
 	systemExact  bool
 	systemPrompt int
+	systemShared int
 	systemParts  []dun.ContextPart
 
 	// Out-of-band delivery: messages typed mid-turn that were queued into
@@ -484,24 +485,24 @@ type tuiModel struct {
 	vpc        *viewportCache
 	contentGen uint64
 
-	renderDue        bool              // streamed text arrived; a tick will draw it
-	tickPending      bool              // a render tick is already scheduled
-	picking          bool              // the session picker owns the keys
-	sessions         []dun.SessionInfo // what it is listing
-	pickSel          int               // highlighted session
+	renderDue   bool              // streamed text arrived; a tick will draw it
+	tickPending bool              // a render tick is already scheduled
+	picking     bool              // the session picker owns the keys
+	sessions    []dun.SessionInfo // what it is listing
+	pickSel     int               // highlighted session
 	// Model picker (/model): fetch available models, let the user switch.
-	modelPicking     bool              // the model picker owns the keys
-	modelList        []string          // fetched model ids
-	modelSel         int               // highlighted model
-	modelPersist     bool              // save to config.json (checkbox)
-	modelFetching    bool              // still fetching from the API
-	replaying        bool              // driven by a trace (--replay), not an engine
-	quitting         bool              // the user is leaving; do not respawn
-	exitAnnounced    bool              // the engine said it was going; it did not crash
-	everUp           bool              // an engine reached `session` once; a retry may reattach
-	suggestions      []suggestion      // predicted next messages (idle-only picker)
-	suggestMode      string            // "on" | "off" | "auto" — /suggest controls this
-	suggestSel       int               // highlighted suggestion in the selector
+	modelPicking  bool         // the model picker owns the keys
+	modelList     []string     // fetched model ids
+	modelSel      int          // highlighted model
+	modelPersist  bool         // save to config.json (checkbox)
+	modelFetching bool         // still fetching from the API
+	replaying     bool         // driven by a trace (--replay), not an engine
+	quitting      bool         // the user is leaving; do not respawn
+	exitAnnounced bool         // the engine said it was going; it did not crash
+	everUp        bool         // an engine reached `session` once; a retry may reattach
+	suggestions   []suggestion // predicted next messages (idle-only picker)
+	suggestMode   string       // "on" | "off" | "auto" — /suggest controls this
+	suggestSel    int          // highlighted suggestion in the selector
 	// Idle debounce for the suggestion request. The engine cannot see whether
 	// anyone is typing, so the decision lives here: the clock restarts on every
 	// keystroke and at the end of every turn, and the request goes out only once
@@ -510,15 +511,15 @@ type tuiModel struct {
 	idleTickPending   bool      // a debounce tick is already scheduled
 	idleWantTick      bool      // an event asked for one (handleEvent has no tea.Cmd)
 	suggestedThisIdle bool      // already asked during this idle; do not ask twice
-	retry            string            // live retry banner ("" = not waiting on the provider)
-	retryDue         time.Time         // when the next attempt is due, for the countdown
-	retrySeen        int               // retries this outage; the first one also lands in scrollback
-	queuedMsgs       int               // messages typed mid-turn, buffered for the running turn
-	w, h             int
-	fatalErr         string
-	scrollPinned     bool // true when viewport should auto-follow (at bottom)
-	traceFile        *os.File  // /trace on: recording events+scroll to this file
-	tracePrevYOff    int       // last recorded YOffset (avoid duplicates)
+	retry             string    // live retry banner ("" = not waiting on the provider)
+	retryDue          time.Time // when the next attempt is due, for the countdown
+	retrySeen         int       // retries this outage; the first one also lands in scrollback
+	queuedMsgs        int       // messages typed mid-turn, buffered for the running turn
+	w, h              int
+	fatalErr          string
+	scrollPinned      bool     // true when viewport should auto-follow (at bottom)
+	traceFile         *os.File // /trace on: recording events+scroll to this file
+	tracePrevYOff     int      // last recorded YOffset (avoid duplicates)
 	// Context stats (for /context)
 	ctxStats contextStats
 }
@@ -1370,8 +1371,6 @@ func (m tuiModel) suggestActive() bool {
 		(m.suggestMode == "on" || strings.TrimSpace(m.input.Value()) == "")
 }
 
-
-
 // sendUser ships a user message to the engine (from the input or a suggestion),
 // echoes it, and clears transient UI (suggestions, input).
 func (m tuiModel) sendUser(v string) tuiModel {
@@ -1776,6 +1775,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.ctxStats.systemTokens = int(v)
 			m.ctxStats.systemExact, _ = ev["system_exact"].(bool)
 			m.ctxStats.systemPrompt = int(evNum(ev["system_prompt"]))
+			m.ctxStats.systemShared = int(evNum(ev["system_shared"]))
 			m.ctxStats.systemParts = evParts(ev["system_parts"])
 		}
 		if v := evNum(ev["forced_calls"]); v > 0 {
@@ -1927,7 +1927,7 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 			if len(m.convo) > 0 {
 				e := &m.convo[len(m.convo)-1]
 				e.full = m.retryDetails(ev)
-				e.collapsed = stDim.Render("▸ ") + stNote.Render("⏳ " + str(ev["reason"]))
+				e.collapsed = stDim.Render("▸ ") + stNote.Render("⏳ "+str(ev["reason"]))
 				e.invalidateWrap()
 			}
 		}
@@ -1943,17 +1943,17 @@ func (m tuiModel) retryDetails(ev evMsg) string {
 	var lines []string
 	reason := str(ev["reason"])
 	if reason != "" {
-		lines = append(lines, stNote.Render("reason:  ") + reason)
+		lines = append(lines, stNote.Render("reason:  ")+reason)
 	}
 	if detail := str(ev["detail"]); detail != "" {
-		lines = append(lines, stDim.Render("detail:  ") + detail)
+		lines = append(lines, stDim.Render("detail:  ")+detail)
 	}
 	if cap := evNum(ev["capacity"]); cap > 0 {
 		lines = append(lines, stDim.Render(fmt.Sprintf("capacity:  %d/%d busy  (%d ahead)",
 			int(evNum(ev["in_flight"])), int(cap), int(evNum(ev["waiting"])))))
 	}
 	if queue := str(ev["queue"]); queue != "" {
-		lines = append(lines, stDim.Render("queue:   ") + queue)
+		lines = append(lines, stDim.Render("queue:   ")+queue)
 	}
 	if attempt := evNum(ev["attempt"]); attempt > 0 {
 		lines = append(lines, stDim.Render(fmt.Sprintf("attempt: %d", int(attempt))))
@@ -2118,8 +2118,6 @@ func (m tuiModel) scrollOverlay() string {
 	text, _ := fitPlain(oneLine(closestText), max(0, m.vp.Width-2))
 	return stUser.Width(max(1, m.vp.Width)).Render("› " + text)
 }
-
-
 
 // convoHeight is the number of rows the conversation viewport actually gets
 // drawn at: the terminal minus every fixed row around it. It is the single
@@ -2505,10 +2503,6 @@ func docsFromEvent(ev evMsg) *docsBlock {
 	return d
 }
 
-
-
-
-
 func (m *tuiModel) refresh() {
 	start := time.Now()
 	defer func() { frames.observe(stageRefresh, time.Since(start)) }()
@@ -2541,7 +2535,7 @@ func (m *tuiModel) refresh() {
 	}
 	wrapW := max(1, width)
 	rendered := make([]string, 0, len(m.vp.lines)) // display rows, not blocks
-	m.blockH = make([]int, len(m.convo)) // cache convo-block heights for scroll math
+	m.blockH = make([]int, len(m.convo))           // cache convo-block heights for scroll math
 
 	// Render all blocks. For user messages, re-render with full-width
 	// background style (ignoring the pre-styled collapsed from e.view()).
@@ -3025,6 +3019,17 @@ func (m *tuiModel) showContext() {
 				label = label[:17]
 			}
 			b.WriteString("\n  " + stDim.Render(fmt.Sprintf("  %-17s", label)) + fmt.Sprintf("%d", p.Tokens))
+		}
+		// Cost no single row owns — the provider's tool-use preamble, charged
+		// once for declaring any tool at all. Shown only when there is some, and
+		// named rather than folded into a server's row, because it does not go
+		// away by turning one server off.
+		if s.systemShared > 0 {
+			b.WriteString("\n  " + stDim.Render("  tool-use overhead") + fmt.Sprintf("%d", s.systemShared) +
+				stDim.Render(" (provider, shared)"))
+		}
+		if s.systemExact && len(s.systemParts) > 1 {
+			b.WriteString("\n  " + stDim.Render("  per-row figures are marginal: what you would save by removing that row."))
 		}
 	} else {
 		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + "not reported")
