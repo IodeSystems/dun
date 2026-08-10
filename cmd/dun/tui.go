@@ -727,6 +727,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
+			// Agent scope is the outermost thing esc can be inside. Quitting dun
+			// from within a child's conversation is not "one level out" by any
+			// reading, and it was what esc did.
+			if m.scopeAgent != 0 {
+				return m, m.leaveAgentScope()
+			}
 			if m.disableExit {
 				return m, nil // exit disabled — use /exit
 			}
@@ -1002,6 +1008,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refresh()
 					return m, nil
 				}
+				// Out of levels inside this conversation: if the conversation is a
+				// CHILD's, the next level out is the session itself. That is what
+				// the status bar promises, and until now nothing delivered it.
+				if m.scopeAgent != 0 {
+					return m, m.leaveAgentScope()
+				}
 				// With nothing to ascend OUT of, ← keeps going the way it was
 				// already going: one more zone away from the input, which is the
 				// activity strip when there is one and the input again when
@@ -1010,8 +1022,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, textinput.Blink
 			}
-			// focusInput: left at the FRONT of the input hops back to the conversation.
+			// focusInput: left at the FRONT of the input hops back to the
+			// conversation — or, in a child's scope, back to the session. Scope
+			// wins: it is where the user lands on descending, so it is where they
+			// press ← to undo it.
 			if m.input.Position() == 0 {
+				if m.scopeAgent != 0 {
+					return m, m.leaveAgentScope()
+				}
 				m.cycleFocus(1)
 				m.refresh()
 				return m, textinput.Blink
@@ -2191,7 +2209,7 @@ func (m tuiModel) View() string {
 	case m.focus == focusActivity:
 		status = stDim.Render("activity  ·  ↑/↓ select · → open (agent = its view) · ← back · tab input")
 	case m.scopeAgent != 0:
-		status = stDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it · tab activity · ← back to the session", m.scopeAgent))
+		status = stDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it · tab activity · ←/esc back to the session", m.scopeAgent))
 	case m.focus == focusConvo:
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · → open · ← close, then out · ctrl+c quit")

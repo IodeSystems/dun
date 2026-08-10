@@ -69,6 +69,7 @@ var (
 	kN     = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
 	kSlash = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")}
 	kEsc   = tea.KeyMsg{Type: tea.KeyEsc}
+	kRight = tea.KeyMsg{Type: tea.KeyRight}
 )
 
 func typeStr(m tuiModel, s string) tuiModel {
@@ -3163,5 +3164,89 @@ func TestVtui_WrapFitsWithoutCuttingText(t *testing.T) {
 					w, i, got, want)
 			}
 		}
+	}
+}
+
+// enterAgentScopeByKeys descends into a child using only the keys a person
+// presses — the existing scope test sets focus and actSel by hand, which
+// proves leaveAgentScope works but not that anyone can reach it.
+func enterAgentScopeByKeys(t *testing.T) tuiModel {
+	t.Helper()
+	m := withActivity(t)
+	m = typeStr(m, "the root task")
+	m = key(m, kEnter)
+	m = key(m, kTab) // input → convo
+	m = key(m, kTab) // convo → activity
+	if m.focus != focusActivity {
+		t.Fatalf("tab twice should reach the activity zone, focus=%d", m.focus)
+	}
+	m = key(m, kRight) // collapsed → list
+	m = key(m, kRight) // descend into the selected agent
+	if m.scopeAgent == 0 {
+		t.Fatal("could not enter agent scope with keys")
+	}
+	return m
+}
+
+// You must be able to get back out of a child, by the keys the screen names.
+// Descending left the user in a conversation with no exit: ← only cycled focus
+// round and round, and esc — the other thing anyone tries — QUIT dun.
+func TestActivity_LeavingAgentScope(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		k    tea.KeyMsg
+	}{
+		{"left", tea.KeyMsg{Type: tea.KeyLeft}},
+		{"esc", kEsc},
+	} {
+		t.Run("from the input, "+tc.name, func(t *testing.T) {
+			m := enterAgentScopeByKeys(t)
+			m = key(m, tc.k)
+			if m.scopeAgent != 0 {
+				t.Errorf("%s did not leave agent scope", tc.name)
+			}
+			if m.quitting {
+				t.Errorf("%s quit dun instead of leaving the child", tc.name)
+			}
+			if m.task != "the root task" {
+				t.Errorf("the root conversation did not come back: task %q", m.task)
+			}
+		})
+	}
+
+	// From the conversation, ← still closes open blocks first; it only leaves
+	// the scope once there is nothing left to ascend inside it.
+	t.Run("from the conversation, left", func(t *testing.T) {
+		m := enterAgentScopeByKeys(t)
+		m = key(m, kTab) // input → convo
+		if m.focus != focusConvo {
+			t.Fatalf("focus=%d, want the conversation", m.focus)
+		}
+		m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
+		if m.scopeAgent != 0 {
+			t.Error("← from the child's conversation did not go back to the session")
+		}
+	})
+
+	// And the strip's own way back still works, and says how to do it.
+	t.Run("via the activity strip", func(t *testing.T) {
+		m := enterAgentScopeByKeys(t)
+		m = key(m, kTab)
+		m = key(m, kTab)
+		m = key(m, kRight) // open the strip
+		m = key(m, kRight) // descend into "parent"
+		if m.scopeAgent != 0 {
+			t.Error("the strip's parent row did not leave agent scope")
+		}
+	})
+}
+
+// esc still quits when there is no scope to leave — the exit path must not
+// have been traded away for the fix above.
+func TestTUI_EscStillQuitsOutsideAgentScope(t *testing.T) {
+	m := withActivity(t)
+	m = key(m, kEsc)
+	if !m.quitting {
+		t.Error("esc outside agent scope should still quit")
 	}
 }

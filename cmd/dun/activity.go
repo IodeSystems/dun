@@ -704,12 +704,14 @@ func (m *tuiModel) leaveAgentScope() tea.Cmd {
 // are nil by design — so claiming to list them would be a lie.
 func (m tuiModel) scopeRows() []actRow {
 	a := m.agentByID(m.scopeAgent)
-	label := fmt.Sprintf("↰ parent (viewing agent #%d", m.scopeAgent)
+	// The row already carries the ↰ as its mark; repeating it in the label
+	// rendered as "↰↰ parent".
+	label := fmt.Sprintf("parent (viewing agent #%d", m.scopeAgent)
 	if a != nil {
 		label += " · " + a.state
 	}
 	return []actRow{{
 		key: parentKey, mark: "↰", style: stNote,
-		label: label + ")", detail: "→ to go back",
+		label: label + ")", detail: "← or esc to go back",
 	}}
 }
