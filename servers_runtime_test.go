@@ -343,3 +343,53 @@ func serverToolNames(h *Harness) []string {
 	}
 	return out
 }
+
+func TestFilterTools_NoFilter(t *testing.T) {
+	tools := []mcpmgr.MCPTool{
+		{Name: "search", ServerID: "docs"},
+		{Name: "ingest", ServerID: "docs"},
+		{Name: "node_query", ServerID: "code"},
+	}
+	specs := []Server{{ID: "docs"}, {ID: "code"}}
+	got := filterTools(tools, specs)
+	if len(got) != 3 {
+		t.Fatalf("got %d tools, want 3", len(got))
+	}
+}
+
+func TestFilterTools_DenyList(t *testing.T) {
+	tools := []mcpmgr.MCPTool{
+		{Name: "search", ServerID: "docs"},
+		{Name: "ingest", ServerID: "docs"},
+		{Name: "ocr", ServerID: "docs"},
+		{Name: "node_query", ServerID: "code"},
+	}
+	specs := []Server{
+		{ID: "docs", Disable: []string{"ingest", "ocr", "search_figures"}},
+		{ID: "code"},
+	}
+	got := filterTools(tools, specs)
+	names := make([]string, len(got))
+	for i, t := range got {
+		names[i] = t.Name
+	}
+	// search passes, ingest/ocr filtered, node_query passes (no filter on code)
+	if len(got) != 2 {
+		t.Fatalf("got %d tools (%v), want 2", len(got), names)
+	}
+	if got[0].Name != "search" || got[1].Name != "node_query" {
+		t.Fatalf("got %v, want [search node_query]", names)
+	}
+}
+
+func TestFilterTools_EmptyDenyPassesAll(t *testing.T) {
+	tools := []mcpmgr.MCPTool{
+		{Name: "search", ServerID: "docs"},
+	}
+	specs := []Server{{ID: "docs", Disable: []string{}}}
+	got := filterTools(tools, specs)
+	// Empty Disable list = no filter → pass everything through
+	if len(got) != 1 {
+		t.Fatalf("got %d tools, want 1", len(got))
+	}
+}

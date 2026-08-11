@@ -41,6 +41,10 @@ func TestLoadServers_DefaultsWithNoFiles(t *testing.T) {
 	if !strings.Contains(strings.Join(m["code"].Args, " "), "/ws") {
 		t.Errorf("workspace not threaded into args: %v", m["code"].Args)
 	}
+	// Default docs server should disable the tools the agent never uses.
+	if m["docs"].Disable == nil || len(m["docs"].Disable) != 6 {
+		t.Errorf("docs server: expected 6 disabled tools, got %v", m["docs"].Disable)
+	}
 }
 
 // Overriding one binary's path must not require restating the other two — that

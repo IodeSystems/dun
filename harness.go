@@ -43,6 +43,9 @@ type Server struct {
 	// Autostart spawns this server when the session starts. Off means the
 	// server is available but idle until asked for (/lsp on, /rag on).
 	Autostart bool
+	// Disable is a deny-list of tool names to hide from the model. When empty,
+	// all tools discovered from this server are passed through.
+	Disable []string
 }
 
 // DefaultServers points the three tool servers at a workspace directory (later a
@@ -169,7 +172,8 @@ func DefaultServers(workspace, raglitHome string) []Server {
 		// that is deleted on exit cannot outlive the session that wrote it.
 		{ID: "docs", Command: "raglit", Args: []string{"serve",
 			"--project", raglitProject(workspace), // the corpus: the repository
-			"--index", raglitIndex(workspace)}}, // the membership: this dir on this branch
+			"--index", raglitIndex(workspace)},    // the membership: this dir on this branch
+			Disable: []string{"search_figures", "ingest", "index_status", "list_indexes", "list_documents", "ocr"}},
 	}
 }
 

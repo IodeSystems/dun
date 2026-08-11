@@ -84,6 +84,11 @@ type ServerSpec struct {
 	// (/rag manual) and must not require deleting the entry that turned it on.
 	// nil = inherit the layer below.
 	Autostart *bool `json:"autostart,omitempty"`
+	// Disable is a deny-list of tool names to hide from the model. When empty,
+	// all tools discovered from this server are passed through. Mirrors
+	// Claude's --disable-tools: name what to exclude, not what to keep.
+	// Forward-compatible — new tools added by a server pass through by default.
+	Disable []string `json:"disable,omitempty"`
 }
 
 // MountSpec declares an extra local path that must be accessible from both
@@ -194,7 +199,7 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 	order := []string{}
 	for _, s := range DefaultServers(workspace, raglitHome) {
 		auto := s.Autostart
-		merged[s.ID] = ServerSpec{ID: s.ID, Command: s.Command, Args: s.Args, Autostart: &auto}
+		merged[s.ID] = ServerSpec{ID: s.ID, Command: s.Command, Args: s.Args, Autostart: &auto, Disable: s.Disable}
 		order = append(order, s.ID)
 	}
 
@@ -234,6 +239,7 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 			Env:       expandPlaceholders(s.Env, workspace, raglitHome),
 			Timeout:   s.Timeout,
 			Autostart: s.Autostart != nil && *s.Autostart,
+			Disable:     s.Disable,
 		})
 	}
 	return out, nil
@@ -358,6 +364,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	}
 	if next.Autostart != nil {
 		out.Autostart = next.Autostart
+	}
+	if next.Disable != nil {
+		out.Disable = next.Disable
 	}
 	return out
 }

@@ -30,6 +30,36 @@ import (
 // family — losing an in-flight conversation because raglit is misconfigured
 // would be a worse outcome than losing search.
 
+// filterTools applies per-server deny-lists. If a server's Disable field
+// is non-empty, those tool names are dropped; all others pass through.
+// Mirrors Claude's --disable-tools: forward-compatible, new tools pass
+// through by default.
+func filterTools(tools []mcpmgr.MCPTool, specs []Server) []mcpmgr.MCPTool {
+	deny := make(map[string]map[string]bool) // serverID -> denied names
+	for _, s := range specs {
+		if len(s.Disable) > 0 {
+			deny[s.ID] = map[string]bool{}
+			for _, t := range s.Disable {
+				deny[s.ID][t] = true
+			}
+		}
+	}
+	if len(deny) == 0 {
+		return tools // no filters active
+	}
+	out := make([]mcpmgr.MCPTool, 0, len(tools))
+	for _, t := range tools {
+		if set, ok := deny[t.ServerID]; ok {
+			if !set[t.Name] {
+				out = append(out, t)
+			}
+		} else {
+			out = append(out, t) // no filter for this server
+		}
+	}
+	return out
+}
+
 // ServerState is one tool server's state, for a UI.
 type ServerState struct {
 	ID      string `json:"id"`
@@ -48,7 +78,7 @@ func (h *Harness) Servers() []ServerState {
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
 	counts := map[string]int{}
-	for _, t := range h.mgr.GetTools() {
+	for _, t := range filterTools(h.mgr.GetTools(), h.specs) {
 		counts[t.ServerID]++
 	}
 	out := make([]ServerState, 0, len(h.specs))
@@ -229,7 +259,7 @@ func (h *Harness) rebuildTools() {
 	if h.Session == nil {
 		return // autostart runs before the Session exists; Start applies it after
 	}
-	tools := h.mgr.GetTools()
+	tools := filterTools(h.mgr.GetTools(), h.specs)
 	// Tell the model what changed under it, if anything. Buffered, not sent:
 	// see Harness.Aside for why a tool-set change is never worth a turn of its
 	// own. Skipped on the first build — the system prompt covers that.
