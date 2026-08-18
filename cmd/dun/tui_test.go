@@ -3194,6 +3194,108 @@ func TestVtui_MarkdownReflowsOnResize(t *testing.T) {
 	}
 }
 
+// TestVtui_MarkdownTokenDoesNotReRender — F1: the re-render branch must fire on
+// a WIDTH change only. A streamed token between two resizes triggers a refresh
+// (via the render tick) at the same width, and it must not pay for a glamour
+// re-render of any finalized block — that is the per-token invariant the wrap
+// cache exists for. The oracle is the rendered string itself: if refresh
+// re-rendered from mdSource, e.collapsed would be rebuilt (same input, but we
+// pin it by identity across the token).
+func TestVtui_MarkdownTokenDoesNotReRender(t *testing.T) {
+	v := newVtui(100, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	md := strings.Repeat(
+		"this is a reasonably long markdown line that should wrap when the window gets narrower than it is wide\n\n", 3)
+	for _, chunk := range []string{md[:100], md[100:]} {
+		v.event(map[string]any{"type": "token", "text": chunk})
+	}
+	v.event(map[string]any{"type": "done"})
+	e := &v.m.convo[len(v.m.convo)-1]
+	if e.mdSource == "" {
+		t.Fatal("the finalized block has no mdSource — the test is not exercising the fix")
+	}
+	// Move to a width where the branch has already run once, so wrapW is set.
+	v.resize(60, 24)
+	if v.m.convo[len(v.m.convo)-1].wrapW == 0 {
+		t.Fatalf("wrapW was not set after a resize — the cache is not being filled (mdSource=%q)",
+			v.m.convo[len(v.m.convo)-1].mdSource)
+	}
+	e = &v.m.convo[len(v.m.convo)-1]
+	before := e.collapsed
+	// Stream another token at the SAME width: refresh runs (render tick), but
+	// no mdSource block may be re-rendered. m.cur grows, so vp.lines change —
+	// the finalized block's own render must not.
+	v.event(map[string]any{"type": "token", "text": "more"})
+	nm, _ := v.m.Update(renderTickMsg{})
+	v.m = nm.(tuiModel)
+	e = &v.m.convo[len(v.m.convo)-1]
+	if e.collapsed != before {
+		t.Error("a token at unchanged width re-rendered the finalized markdown — the branch must fire on width change only")
+	}
+}
+
+// TestVtui_MarkdownReflowFromZeroWrap — F1: the `e.wrapW == 0` clause of the
+// re-render branch. A block appended while the pane is at width W gets
+// measured at W on its first refresh (wrapW := W), so the zero clause is
+// reached only when a refresh happens at a DIFFERENT width than the one that
+// last measured it — which is exactly what a resize does, and what this test
+// drives: every resize must leave no line wider than the window, in both
+// directions.
+func TestVtui_MarkdownReflowFromZeroWrap(t *testing.T) {
+	v := newVtui(100, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	md := strings.Repeat(
+		"this is a reasonably long markdown line that should wrap when the window gets narrower than it is wide\n\n", 3)
+	for _, chunk := range []string{md[:100], md[100:]} {
+		v.event(map[string]any{"type": "token", "text": chunk})
+	}
+	v.event(map[string]any{"type": "done"})
+	e := &v.m.convo[len(v.m.convo)-1]
+	if e.mdSource == "" {
+		t.Fatal("the finalized block has no mdSource — the test is not exercising the fix")
+	}
+	// The entry was measured at 100 on the done-refresh; a resize to any other
+	// width must re-render it, and the result must fit.
+	for _, w := range []int{60, 30, 100, 45} {
+		v.resize(w, 24)
+		for i, l := range v.m.vp.lines {
+			if cw := lipgloss.Width(l); cw > w {
+				t.Errorf("w=%d row %d: rendered line is %d cells wide — text is being cut off", w, i, cw)
+			}
+		}
+	}
+}
+
+// TestVtui_MarkdownReflowsOnResizeFocused — F2: in conversation focus the pane
+// reserves one column for the gutter, so the effective wrap width is vp.Width-1
+// while m.md still wraps at the terminal width. The two differ by a few cells,
+// and this file has been burned by off-by-a-few-cells before — pin that no
+// rendered line exceeds the WINDOW in either focus state, across resizes.
+func TestVtui_MarkdownReflowsOnResizeFocused(t *testing.T) {
+	v := newVtui(100, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	md := strings.Repeat(
+		"this is a reasonably long markdown line that should wrap when the window gets narrower than it is wide\n\n", 3)
+	for _, chunk := range []string{md[:100], md[100:]} {
+		v.event(map[string]any{"type": "token", "text": chunk})
+	}
+	v.event(map[string]any{"type": "done"})
+	for _, focus := range []int{focusInput, focusConvo} {
+		v.m.focus = focus
+		if focus == focusConvo {
+			v.m.sel = len(v.m.convo) - 1 // a selection makes selMode real
+		}
+		for _, w := range []int{100, 60, 30, 80} {
+			v.resize(w, 24)
+			for i, l := range v.m.vp.lines {
+				if cw := lipgloss.Width(l); cw > w {
+					t.Errorf("focus=%d w=%d row %d: rendered line is %d cells wide — text is being cut off", focus, w, i, cw)
+				}
+			}
+		}
+	}
+}
+
 // enterAgentScopeByKeys descends into a child using only the keys a person
 // presses — the existing scope test sets focus and actSel by hand, which
 // proves leaveAgentScope works but not that anyone can reach it.

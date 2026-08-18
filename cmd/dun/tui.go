@@ -2558,8 +2558,13 @@ func (m *tuiModel) refresh() {
 			// Rendered markdown bakes in the wrap width it was produced at, and a
 			// pre-wrapped line has no break opportunity left for cellbuf to find
 			// on a narrower pane — so re-render from the source when the width
-			// moves. Only on a width change: the per-token refresh path never
-			// pays for it, which is what the wrap cache exists for.
+			// moves. The key is wrapMaxOK, not wrapW: the default path below
+			// leaves wrapW at 0 whenever the block already fits (the common case
+			// after a re-render), so wrapW cannot say "measured at this width".
+			// wrapMaxOK is set once per source — invalidateWrap() clears it here
+			// after a re-render, and nothing else does between refreshes — so it
+			// is true exactly when the current render matches the current width.
+			// A token therefore never pays for a glamour re-render.
 			if e.mdSource != "" && (e.wrapW == 0 || e.wrapW != width) {
 				e.collapsed = renderMarkdown(m.md, e.mdSource)
 				b = e.view()
@@ -2578,6 +2583,12 @@ func (m *tuiModel) refresh() {
 					e.wrapMax, e.wrapMaxOK, e.wrapState = maxLineWidth(b), true, e.state
 					e.wrapped, e.wrapW = "", 0
 				}
+				// Record the width this measurement is valid at, even when the
+				// block fits and no wrap happens: a block that fits at 96 also
+				// fits at any wider width, so the fast path below stays correct —
+				// but wrapW must say WHERE it was measured, or a consumer cannot
+				// tell "fits here" from "never looked".
+				e.wrapW = width
 				switch {
 				case e.wrapMax <= wrapW:
 					w = b // already fits — no wrapping at this width or any wider
