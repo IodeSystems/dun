@@ -3165,6 +3165,35 @@ func TestVtui_WrapFitsWithoutCuttingText(t *testing.T) {
 	}
 }
 
+// TestVtui_MarkdownReflowsOnResize — a finalized assistant message is rendered
+// through glamour exactly once, and that render bakes in the word-wrap width
+// that was current when it happened. A pre-wrapped line has no break
+// opportunity left for cellbuf to find on a narrower pane, so without
+// re-rendering from mdSource a resize down leaves over-width lines that the
+// viewport silently truncates (MaxWidth): the text is not pushed off the edge,
+// it is simply gone. This test resizes in both directions and asserts no
+// rendered line ever exceeds the window.
+func TestVtui_MarkdownReflowsOnResize(t *testing.T) {
+	v := newVtui(100, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	md := strings.Repeat(
+		"this is a reasonably long markdown line that should wrap when the window gets narrower than it is wide\n\n", 3)
+	for _, chunk := range []string{md[:100], md[100:]} {
+		v.event(map[string]any{"type": "token", "text": chunk})
+	}
+	v.event(map[string]any{"type": "done"})
+	// Narrow, widen, narrow again: the re-render has to be right in every
+	// direction, not just on the way down.
+	for _, w := range []int{100, 60, 30, 80} {
+		v.resize(w, 24)
+		for i, l := range v.m.vp.lines {
+			if cw := lipgloss.Width(l); cw > w {
+				t.Errorf("w=%d row %d: rendered line is %d cells wide — text is being cut off", w, i, cw)
+			}
+		}
+	}
+}
+
 // enterAgentScopeByKeys descends into a child using only the keys a person
 // presses — the existing scope test sets focus and actSel by hand, which
 // proves leaveAgentScope works but not that anyone can reach it.

@@ -209,6 +209,16 @@ type convoEntry struct {
 	provisionalText string // original text, used to restore normal style on delivery
 	userText        string // raw user message text (non-empty for user messages only)
 
+	// mdSource is the RAW markdown an assistant block was rendered from. The
+	// rendered string bakes in the word-wrap width that was current when it was
+	// produced, and a pre-wrapped line has no break opportunity left for
+	// cellbuf to find on a narrower pane — so a resize down leaves over-width
+	// lines that the viewport silently truncates. Keeping the source lets
+	// refresh() re-render through the (rebuilt) markdown renderer when the
+	// width changes, the way userText already does for user messages. Empty
+	// for blocks that are not rendered markdown.
+	mdSource string
+
 	// Wrapped render, cached. A finalized block's text never changes, but
 	// refresh() runs once per STREAMED TOKEN, so re-wrapping the whole
 	// scrollback every frame made the cost of a reply quadratic in the
@@ -2316,8 +2326,9 @@ func (m *tuiModel) appendUser(text string) {
 
 func (m *tuiModel) flushCur() {
 	if m.cur != "" {
+		src := strings.TrimRight(m.cur, "\n")
 		// Finalize the streamed reply as rendered markdown (headers, lists, code).
-		m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, strings.TrimRight(m.cur, "\n"))})
+		m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src})
 		m.cur = ""
 	}
 }
@@ -2368,7 +2379,8 @@ func (m *tuiModel) replay(items []any) {
 			n++
 		case "assistant":
 			flushPend()
-			m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, strings.TrimRight(str(im["content"]), "\n"))})
+			src := strings.TrimRight(str(im["content"]), "\n")
+			m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src})
 			n++
 		case "tool_call":
 			flushPend()
@@ -2543,6 +2555,16 @@ func (m *tuiModel) refresh() {
 		var w string
 		if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
+			// Rendered markdown bakes in the wrap width it was produced at, and a
+			// pre-wrapped line has no break opportunity left for cellbuf to find
+			// on a narrower pane — so re-render from the source when the width
+			// moves. Only on a width change: the per-token refresh path never
+			// pays for it, which is what the wrap cache exists for.
+			if e.mdSource != "" && (e.wrapW == 0 || e.wrapW != width) {
+				e.collapsed = renderMarkdown(m.md, e.mdSource)
+				b = e.view()
+				e.invalidateWrap()
+			}
 			switch {
 			case e.userText != "":
 				if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
