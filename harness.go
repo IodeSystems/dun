@@ -749,7 +749,7 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 		// following request. A duplicate wake is a no-op, not a turn.
 		return agent.TurnResult{}, nil
 	}
-	return h.runTurn(ctx, h.Session.Turn)
+	return h.runTurnWithRescue(ctx, h.Session.Turn)
 }
 
 // prepareTurn readies the store for a turn (or a retry of one).
@@ -964,7 +964,7 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 	h.store.publish(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
-	return h.runTurn(ctx, h.Session.Turn)
+	return h.runTurnWithRescue(ctx, h.Session.Turn)
 }
 
 // Close shuts down the MCP servers.

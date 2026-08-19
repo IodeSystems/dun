@@ -322,6 +322,29 @@ func (s *sessionStore) Compact(_ context.Context, _ string, c agent.Compaction) 
 	return nil
 }
 
+// reRoot drops the given entries and inserts one marker at the FRONT of the
+// history — the rescue variant of Compact, whose marker goes to the end. The
+// folded prefix becomes "what happened earlier", so it must read BEFORE the
+// surviving tail; a marker appended after it would float newer than the live
+// conversation and reorder the tail behind its own summary.
+func (s *sessionStore) reRoot(_ context.Context, subsumes []agent.Entry, marker agent.Entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	drop := map[string]bool{}
+	for _, e := range subsumes {
+		drop[e.ID] = true
+	}
+	kept := s.entries[:0:0]
+	for _, e := range s.entries {
+		if !drop[e.ID] {
+			kept = append(kept, e)
+		}
+	}
+	s.entries = append([]agent.Entry{marker}, kept...)
+	s.flushLocked()
+	return nil
+}
+
 // Reset clears all entries, starting a fresh session log.
 func (s *sessionStore) Reset() {
 	s.mu.Lock()
