@@ -176,9 +176,19 @@ the response's room and SEND it), `overflow.go` + agentkit's `StopReasonLength`
   tool-call and rides the next turn when it was mid-reply. It is DISCARDABLE —
   written in the present tense about the last response, so `prepareTurn` drops
   it; left in place it teaches a permanent, unexplained timidity.
+- **✅ `/context` now shows it (2026-08-24).** The view could itemise the
+  pre-conversation cost in five rows and could not say how big the window was —
+  so a reader saw WHAT was expensive and never whether it was near the wall,
+  which is how this went unnoticed for a session. New `window` block: size,
+  prompt vs budget with a percentage, the measured per-request overhead on its
+  own row, the response reservation, room left (flagged when it drops under the
+  reservation), the ratio WITH whether it was measured and over how many rounds,
+  and a cut count. `dun.WindowBudget` + `Harness.Window()` carry it; the two
+  duplicated `usage` event literals became one `usageEvent`.
 - **next:** verify live — the endpoint is single-slot and was at capacity, so
   the second run was deferred, not skipped. Watch for `dun: calibrated:`, then
-  `fit:`, then a `length` cut being narrated rather than silently retried.
+  `fit:`, then a `length` cut being narrated rather than silently retried, and
+  open `/context` to see the block against real numbers.
 - **risks:** `defaultMaxOutputTokens` (32k) is reasoned, not measured — it is
   also the reserve subtracted from the prompt, so it trades context for headroom.
   `DUN_MAX_OUTPUT_TOKENS` overrides. The fit is cumulative over a session, so a

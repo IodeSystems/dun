@@ -36,7 +36,7 @@ func TestMeter_FallsBackToCharsByFour(t *testing.T) {
 // fill without anything noticing.
 func TestMeter_CalibratesFromTheProvider(t *testing.T) {
 	var m promptMeter
-	m.noteBuild(60000)
+	m.noteBuild(60000, 0)
 	obs, ok := m.noteUsage(agent.TokenUsage{Processed: 21636})
 	if !ok {
 		t.Fatalf("a plain report should calibrate; got %+v", obs)
@@ -68,7 +68,7 @@ func TestMeter_CalibratesFromTheProvider(t *testing.T) {
 // than round 1 and the budget would collapse.
 func TestMeter_DifferencesCumulativeUsage(t *testing.T) {
 	var m promptMeter
-	m.noteBuild(40000)
+	m.noteBuild(40000, 0)
 	if _, ok := m.noteUsage(agent.TokenUsage{Cached: 5000, Processed: 5000}); !ok {
 		t.Fatal("round 1 should calibrate")
 	}
@@ -77,7 +77,7 @@ func TestMeter_DifferencesCumulativeUsage(t *testing.T) {
 	}
 	// Round 2: the prompt grew to 44k chars, so the running total is 21k — of
 	// which 11k is this round.
-	m.noteBuild(44000)
+	m.noteBuild(44000, 0)
 	if _, ok := m.noteUsage(agent.TokenUsage{Cached: 15000, Processed: 6000}); !ok {
 		t.Fatal("round 2 should calibrate")
 	}
@@ -91,11 +91,11 @@ func TestMeter_DifferencesCumulativeUsage(t *testing.T) {
 // Shaping the context to that is worse than shaping it to the last good number.
 func TestMeter_RefusesAnImplausibleRatio(t *testing.T) {
 	var m promptMeter
-	m.noteBuild(40000)
+	m.noteBuild(40000, 0)
 	m.noteUsage(agent.TokenUsage{Processed: 10000}) // 4.0, good
 	// Round 2 bills 10 tokens for the same 40,000 chars: 4000 chars/token, far
 	// outside the ceiling.
-	m.noteBuild(40000)
+	m.noteBuild(40000, 0)
 	obs, ok := m.noteUsage(agent.TokenUsage{Processed: 10010})
 	if ok {
 		t.Errorf("ratio %.1f should have been refused", obs.Ratio)
@@ -109,7 +109,7 @@ func TestMeter_RefusesAnImplausibleRatio(t *testing.T) {
 // one reporting zero tokens.
 func TestMeter_IgnoresASilentProvider(t *testing.T) {
 	var m promptMeter
-	m.noteBuild(40000)
+	m.noteBuild(40000, 0)
 	if _, ok := m.noteUsage(agent.TokenUsage{}); ok {
 		t.Error("no reported prompt tokens is not a measurement")
 	}
@@ -128,10 +128,13 @@ var liveRounds = [][2]int{
 	{9258, 5577}, {5012, 3816}, {8152, 5221},
 }
 
+// feed replays rounds of (chars, tokens). noteBuild's second argument is what
+// the build was ESTIMATED at, which is carried for /context to display and plays
+// no part in the ratio — these tests are about the ratio, so it is left at 0.
 func feed(m *promptMeter, rounds [][2]int) {
 	cumulative := 0
 	for _, r := range rounds {
-		m.noteBuild(r[0])
+		m.noteBuild(r[0], 0)
 		cumulative += r[1]
 		m.noteUsage(agent.TokenUsage{Processed: cumulative})
 	}

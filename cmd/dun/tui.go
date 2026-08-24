@@ -321,6 +321,22 @@ type contextStats struct {
 	toolResults      int // total tool results seen
 	resultsTruncated int // how many were LOD-truncated
 
+	// How the window is divided, and how well that division is understood. See
+	// dun.WindowBudget: /context used to itemise the pre-conversation cost in
+	// five rows and be unable to say how big the window was, so a reader could
+	// see WHAT was expensive and never whether it was close to the wall.
+	window         int
+	windowReserved int
+	windowCap      int
+	promptBudget   int
+	promptTokens   int
+	promptOverhead int
+	charsPerToken  float64
+	ratioMeasured  bool
+	ratioRounds    int
+	windowCuts     int
+	windowFolds    int
+
 	// System prompt + tool schemas. systemExact says whether these were counted
 	// by the model's own tokenizer or estimated at ~4 chars/token — the two must
 	// never render alike.
@@ -1776,6 +1792,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// The pre-conversation cost, delivered when it is measured rather than
 		// waiting for a turn to finish. Arrives twice: estimates, then exact.
 		m.ctxStats.readSystemCost(ev)
+		m.ctxStats.readWindow(ev)
 		m.refresh()
 	case "usage":
 		// Accumulate token usage stats for /context.
@@ -1787,6 +1804,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.ctxStats.turns = int(evNum(ev["turns"]))
 		// Session-level stats (cumulative — use last value, not sum).
 		m.ctxStats.readSystemCost(ev)
+		m.ctxStats.readWindow(ev)
 		if v := evNum(ev["forced_calls"]); v > 0 {
 			m.ctxStats.forcedToolCalls = int(v)
 		}
@@ -2995,6 +3013,81 @@ func (m *tuiModel) showConfig() {
 	m.append(b.String())
 }
 
+// windowBlock renders how the context window is divided.
+//
+// The section /context was missing, and the reason the failure it describes went
+// unnoticed for a whole session: the old view could itemise the pre-conversation
+// cost across five rows and could not say how big the window was, so a reader
+// could see WHAT was expensive without ever seeing whether it was near the wall.
+//
+// Every figure here says where it came from. A token count that is measured and
+// one that is the 4-chars-per-token default must never render alike — that
+// equivalence is precisely what let a 31%-low estimate pass for a measurement
+// until the endpoint refused to generate.
+func windowBlock(s *contextStats) string {
+	var b strings.Builder
+	b.WriteString("\n\n  " + stHeader.Render("window"))
+	if s.window <= 0 {
+		// Not an absence of data — a STATE, and the one the yscr session ran in.
+		// With no window there is nothing to shape against and no cap to send,
+		// so the model generates until the endpoint stops it.
+		b.WriteString("\n  " + stDim.Render("size:       ") + "not stated" +
+			stDim.Render(" — no shaping, and no cap on a response"))
+		b.WriteString("\n  " + stDim.Render("set DUN_CONTEXT_TOKENS, or use a server that states one."))
+		return b.String()
+	}
+
+	pct := func(n int) string { return fmt.Sprintf(" (%d%%)", n*100/s.window) }
+	b.WriteString("\n  " + stDim.Render("size:       ") + fmt.Sprintf("%d tokens", s.window))
+	if s.promptTokens > 0 {
+		b.WriteString("\n  " + stDim.Render("prompt:     ") +
+			fmt.Sprintf("%d of %d budget", s.promptTokens, s.promptBudget) + stDim.Render(pct(s.promptTokens)))
+	} else {
+		b.WriteString("\n  " + stDim.Render("prompt:     ") +
+			fmt.Sprintf("%d budget", s.promptBudget) + stDim.Render(" (nothing built yet)"))
+	}
+	if s.promptOverhead > 0 {
+		// Charged once per REQUEST and invisible in any message, which is why it
+		// gets its own row rather than being folded into the prompt: it is the
+		// term a single chars-per-token ratio smears across the conversation.
+		b.WriteString("\n  " + stDim.Render("  overhead: ") + fmt.Sprintf("%d", s.promptOverhead) +
+			stDim.Render(" (schemas + template, once)"))
+	}
+	b.WriteString("\n  " + stDim.Render("response:   ") + fmt.Sprintf("%d reserved", s.windowReserved) +
+		stDim.Render(fmt.Sprintf(" (cap %d + margin)", s.windowCap)))
+	if s.promptTokens > 0 {
+		free := s.window - s.promptTokens
+		row := "\n  " + stDim.Render("room now:   ") + fmt.Sprintf("%d", free)
+		if free < s.windowReserved {
+			// The prompt has grown into the response's reservation. This is the
+			// state a cut comes out of, so it is called out rather than left for
+			// the reader to subtract.
+			row += stNote.Render("  ← below the reservation")
+		}
+		b.WriteString(row)
+	}
+
+	how := stDim.Render(fmt.Sprintf(" (default — nothing measured yet; %d rounds)", s.ratioRounds))
+	if s.ratioMeasured {
+		how = stDim.Render(fmt.Sprintf(" (measured over %d rounds)", s.ratioRounds))
+	}
+	b.WriteString("\n  " + stDim.Render("ratio:      ") + fmt.Sprintf("%.2f chars/token", s.charsPerToken) + how)
+
+	if s.windowCuts > 0 {
+		// A cut is the budget having been WRONG, so it belongs here and not with
+		// the compaction counters.
+		what, plural := fmt.Sprintf("%d", s.windowCuts), " replies stopped for room"
+		if s.windowCuts == 1 {
+			plural = " reply stopped for room"
+		}
+		if s.windowFolds > 0 {
+			what += fmt.Sprintf(" (%d folded)", s.windowFolds)
+		}
+		b.WriteString("\n  " + stDim.Render("cut short:  ") + what + stDim.Render(plural))
+	}
+	return b.String()
+}
+
 // showContext appends a detailed breakdown of context usage to the conversation.
 func (m *tuiModel) showContext() {
 	s := &m.ctxStats
@@ -3008,6 +3101,8 @@ func (m *tuiModel) showContext() {
 	b.WriteString("\n  " + stDim.Render("total:      ") + fmt.Sprintf("%d", s.totalTokens))
 	b.WriteString("\n  " + stDim.Render("active:     ") + fmt.Sprintf("%d", s.activeTokens) + stDim.Render(" (last turn's window)"))
 	b.WriteString("\n  " + stDim.Render("turns:      ") + fmt.Sprintf("%d", s.turns))
+
+	b.WriteString(windowBlock(s))
 
 	b.WriteString("\n\n  " + stHeader.Render("conversation"))
 	b.WriteString("\n  " + stDim.Render("blocks:     ") + fmt.Sprintf("%d", len(m.convo)))
@@ -3067,7 +3162,7 @@ func (m *tuiModel) showContext() {
 		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + "not reported")
 	}
 	b.WriteString("\n  " + stDim.Render("Window comes from the server when it states one; DUN_CONTEXT_TOKENS overrides."))
-	b.WriteString("\n  " + stDim.Render("The startup log names the source. Neither = no compaction."))
+	b.WriteString("\n  " + stDim.Render("The startup log names the source. Neither = no shaping and no response cap."))
 
 	b.WriteString("\n\n  " + stHeader.Render("out-of-band"))
 	b.WriteString("\n  " + stDim.Render("queued msgs:    ") + fmt.Sprintf("%d", s.oobMessages) + stDim.Render(" (delivered mid-turn)"))
@@ -3542,6 +3637,26 @@ func (s *contextStats) readSystemCost(ev map[string]any) {
 	s.systemPrompt = int(evNum(ev["system_prompt"]))
 	s.systemShared = int(evNum(ev["system_shared"]))
 	s.systemParts = evParts(ev["system_parts"])
+}
+
+// readWindow decodes the window division off an event carrying it — context_cost
+// at startup, usage after every turn. A window of 0 IS the message ("nobody
+// stated one"), so unlike readSystemCost this does not bail on a zero.
+func (s *contextStats) readWindow(ev map[string]any) {
+	if _, ok := ev["window"]; !ok {
+		return // an older event, or one from a path that does not carry it
+	}
+	s.window = int(evNum(ev["window"]))
+	s.windowReserved = int(evNum(ev["window_reserved"]))
+	s.windowCap = int(evNum(ev["window_cap"]))
+	s.promptBudget = int(evNum(ev["prompt_budget"]))
+	s.promptTokens = int(evNum(ev["prompt_tokens"]))
+	s.promptOverhead = int(evNum(ev["prompt_overhead"]))
+	s.charsPerToken = evNum(ev["chars_per_token"])
+	s.ratioMeasured, _ = ev["ratio_measured"].(bool)
+	s.ratioRounds = int(evNum(ev["ratio_rounds"]))
+	s.windowCuts = int(evNum(ev["window_cuts"]))
+	s.windowFolds = int(evNum(ev["window_folds"]))
 }
 
 // evParts decodes the context breakdown rows off a usage event. A row that is

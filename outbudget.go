@@ -135,3 +135,77 @@ func applyGeneration(opts *llm.ChatOpts, window, promptTokens int) (gen int, ok 
 	opts.ReasoningBudgetMessage = llm.DefaultBudgetMessage
 	return gen, true
 }
+
+// WindowBudget is how the endpoint's context window is divided, and how well
+// that division is understood — the whole of it in one struct, because the
+// numbers only mean anything together.
+//
+// It exists because /context could describe the pre-conversation cost in five
+// itemised rows and could not say the one thing this session's work was about:
+// how big the window is, how much of it the prompt may have, how much is held
+// back for the answer, and whether any of those figures was MEASURED or is
+// still the 4-chars-per-token default. A reader looking at a number has to be
+// able to tell which.
+type WindowBudget struct {
+	// Window is the whole context, prompt and response together. 0 = nobody
+	// stated one, which means no shaping and no generation cap — the state the
+	// yscr session ran in, and the reason it is reported rather than hidden.
+	Window int
+	// Reserved is what is held back for the response: the cap plus the margin.
+	Reserved int
+	// Cap is the ceiling on one response on its own.
+	Cap int
+	// PromptBudget is what the Shaper shapes to: Window - Reserved - Overhead.
+	PromptBudget int
+	// Prompt is the last built prompt in tokens, overhead included.
+	Prompt int
+	// Overhead is the measured per-request cost our characters cannot see —
+	// tool schemas, chat template. 0 until it has been fitted.
+	Overhead int
+	// CharsPerToken is the marginal ratio in force, and Measured says whether it
+	// came from the provider or is still the default. Rounds is how many
+	// observations it rests on, so one measurement is distinguishable from forty.
+	CharsPerToken float64
+	Measured      bool
+	Rounds        int
+	// Cuts is how many rounds this session the endpoint ended for room, and
+	// Folds how many of those were answered by shedding history rather than by
+	// a hint. Both belong here rather than with the compaction counters: a cut
+	// is the budget being WRONG, and this is the budget.
+	Cuts  int
+	Folds int
+}
+
+// Free is the room a response would have right now: the window less the last
+// prompt. Negative is possible and is not clamped — a prompt that has overrun
+// the window is exactly the thing worth showing.
+func (b WindowBudget) Free() int {
+	if b.Window <= 0 {
+		return 0
+	}
+	return b.Window - b.Prompt
+}
+
+// Known reports whether there is a window to divide at all.
+func (b WindowBudget) Known() bool { return b.Window > 0 }
+
+// Window returns the current division of the context window.
+func (h *Harness) Window() WindowBudget {
+	b := WindowBudget{
+		Window:        h.window,
+		Reserved:      outputReserve(),
+		Cap:           maxOutputTokens(),
+		Prompt:        h.meter.lastPromptTokens(),
+		Overhead:      h.meter.Overhead(),
+		CharsPerToken: h.meter.CharsPerToken(),
+		Measured:      h.meter.Measured(),
+		Rounds:        h.meter.rounds(),
+	}
+	if h.window > 0 {
+		b.PromptBudget = shapingBudget(h.window) - b.Overhead
+	}
+	h.noteMu.Lock()
+	b.Cuts, b.Folds = h.overflowCuts, h.overflowFolds
+	h.noteMu.Unlock()
+	return b
+}

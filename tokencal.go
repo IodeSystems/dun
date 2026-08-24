@@ -88,9 +88,11 @@ type promptMeter struct {
 	intercept float64
 	// Accumulators for the least-squares fit over (chars, tokens).
 	n, sx, sy, sxx, sxy float64
-	// built is the size of the most recently BUILT prompt, in chars. Set by
-	// noteBuild immediately before the round it belongs to.
-	built int
+	// built is the size of the most recently BUILT prompt, in chars, and
+	// builtTokens is what that came to under the ratio then in force. Set by
+	// noteBuild immediately before the round they belong to.
+	built       int
+	builtTokens int
 	// prompted is the cumulative prompt-token count at the last observation, so
 	// a per-round figure can be differenced out of agent.TokenUsage's running
 	// totals.
@@ -196,13 +198,30 @@ func (m *promptMeter) Measured() bool {
 	return m.ratio > 0
 }
 
-// noteBuild records the size of the prompt just built. Called from the context
-// builder, which runs immediately before the chat round whose usage will price
-// it — that adjacency is what lets the two numbers be divided at all.
-func (m *promptMeter) noteBuild(chars int) {
+// noteBuild records the size of the prompt just built, in chars and in the
+// tokens they were estimated at. Called from the context builder, which runs
+// immediately before the chat round whose usage will price it — that adjacency
+// is what lets the two numbers be divided at all.
+func (m *promptMeter) noteBuild(chars, tokens int) {
 	m.mu.Lock()
-	m.built = chars
+	m.built, m.builtTokens = chars, tokens
 	m.mu.Unlock()
+}
+
+// lastPromptTokens is what the most recent build was estimated to cost,
+// overhead included. What /context shows as "in use".
+func (m *promptMeter) lastPromptTokens() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.builtTokens
+}
+
+// rounds is how many observations the ratio rests on, so a reader can tell one
+// measurement from forty.
+func (m *promptMeter) rounds() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.obs
 }
 
 // observation is one round's worth of the comparison, for logging.

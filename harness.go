@@ -369,7 +369,12 @@ type Harness struct {
 	// when nobody could state one. Kept because the response's budget is the
 	// window MINUS this round's prompt, which is a per-round subtraction the
 	// startup-time shaping budget cannot stand in for.
-	window              int
+	window int
+	// Overflow counters for /context: rounds the endpoint ended for room, and
+	// how many of those were answered by folding history. Guarded by noteMu
+	// alongside the other session-level counters.
+	overflowCuts        int
+	overflowFolds       int
 	systemTokens        int             // system prompt + tool schemas; exact when the endpoint can tokenize
 	systemParts         SystemBreakdown // the same total, broken down and labelled exact/estimated
 	forcedCallsTotal    int             // total forced tool calls injected this session
@@ -1693,12 +1698,6 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 				biggest, biggestRole = n, m.Role
 			}
 		}
-		// Hand the size to the meter BEFORE the round that will price it: the
-		// provider's usage report arrives with no record of what was sent, so
-		// the pairing is positional. This builder is the last thing to run
-		// before streamChat, on the same goroutine, which is what makes that
-		// safe. See tokencal.go.
-		meter.noteBuild(total)
 		// What this request will actually cost the window: the text, plus the
 		// constant. Both are needed here because the generation budget below is
 		// window MINUS this, and leaving the constant out of it hands the
@@ -1707,6 +1706,12 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		for _, m := range msgs {
 			est += meter.Estimate(m.Content)
 		}
+		// Hand the size to the meter BEFORE the round that will price it: the
+		// provider's usage report arrives with no record of what was sent, so
+		// the pairing is positional. This builder is the last thing to run
+		// before streamChat, on the same goroutine, which is what makes that
+		// safe. See tokencal.go.
+		meter.noteBuild(total, est)
 		how := "estimated at 4 chars/token"
 		if meter.Measured() {
 			how = fmt.Sprintf("measured at %.2f chars/token", meter.CharsPerToken())

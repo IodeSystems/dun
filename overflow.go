@@ -118,6 +118,13 @@ func (h *Harness) onOverflow(ctx context.Context, o agent.Overflow) agent.Overfl
 		}
 	}
 
+	h.noteMu.Lock()
+	h.overflowCuts++
+	if note.Folded > 0 {
+		h.overflowFolds++
+	}
+	h.noteMu.Unlock()
+
 	note.Hint = overflowHint(note)
 	log.Printf("dun: overflow: %s (%s)", note, o)
 	h.reportOverflow(note)

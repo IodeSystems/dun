@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
 )
@@ -408,6 +409,10 @@ func main() {
 		defer run.Stop()
 	}
 
+	// started holds the Harness once dun.Start returns, for the callbacks that
+	// are installed on cfg before it exists. atomic because the breakdown
+	// measurement runs on its own goroutine.
+	var started atomic.Value
 	var em *emitter
 	var in *inputStream
 	client := llm.NewClient(*url, effKey, *model)
@@ -463,10 +468,19 @@ func main() {
 		// time an event is dropped.
 		cfg.OnAgents = func(as []dun.AgentInfo) { em.emit(event{"type": "agents", "agents": agentsToAny(as)}) }
 		cfg.OnJobs = func(js []dun.JobInfo) { em.emit(event{"type": "jobs", "jobs": jobsToAny(js)}) }
+		// started is filled in once dun.Start returns. The breakdown callback is
+		// installed BEFORE the Harness exists and fires after it does, and the
+		// window division it wants to carry can only come from the Harness — so
+		// the reference is late-bound rather than captured. Nil-checked because
+		// an estimate can land before the assignment on a slow start.
 		cfg.OnSystemBreakdown = func(bd dun.SystemBreakdown) {
-			em.emit(event{"type": "context_cost", "system_tokens": bd.Total,
+			ev := event{"type": "context_cost", "system_tokens": bd.Total,
 				"system_exact": bd.Exact, "system_prompt": bd.Prompt,
-				"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)})
+				"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)}
+			if hp, _ := started.Load().(*dun.Harness); hp != nil {
+				addWindow(ev, hp.Window())
+			}
+			em.emit(ev)
 		}
 		cfg.OnDocs = func(n dun.DocsNote) {
 			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
@@ -546,6 +560,9 @@ func main() {
 	}
 
 	h, err := dun.Start(ctx, cfg)
+	if h != nil {
+		started.Store(h)
+	}
 	if err != nil {
 		if em != nil {
 			// Fatal: there is no session yet, so "send a message to retry" would
@@ -853,17 +870,46 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 	if strings.TrimSpace(res.Reply) != "" {
 		em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
 	}
+	em.emit(usageEvent(h, res.Usage))
+	em.emit(event{"type": "done"})
+	return true
+}
+
+// usageEvent is the per-turn accounting event, built in ONE place because it is
+// emitted from two turn paths that had already drifted apart once. It carries
+// three groups: what the turn cost, how the pre-conversation context breaks
+// down, and how the window is divided (see dun.WindowBudget) — the last of which
+// /context has no other way to learn.
+func usageEvent(h *dun.Harness, u agent.TokenUsage) event {
 	sysTokens, forcedCalls, notifLifted := h.SessionStats()
 	bd := h.SystemParts()
-	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
-		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
-		"generated": res.Usage.Generated, "turns": res.Usage.Turns,
+	ev := event{"type": "usage", "total": u.Total, "active": u.Active,
+		"cached": u.Cached, "processed": u.Processed,
+		"generated": u.Generated, "turns": u.Turns,
 		"system_tokens": sysTokens, "forced_calls": forcedCalls,
 		"notifications_lifted": notifLifted,
 		"system_exact":         bd.Exact, "system_prompt": bd.Prompt,
-		"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)})
-	em.emit(event{"type": "done"})
-	return true
+		"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)}
+	addWindow(ev, h.Window())
+	return ev
+}
+
+// addWindow puts the window division onto an event. Separate so context_cost can
+// carry it at STARTUP too: the window and the reserve are known before the first
+// turn, and a /context opened before anything has run should say so rather than
+// look like a session with no window.
+func addWindow(ev event, w dun.WindowBudget) {
+	ev["window"] = w.Window
+	ev["window_reserved"] = w.Reserved
+	ev["window_cap"] = w.Cap
+	ev["prompt_budget"] = w.PromptBudget
+	ev["prompt_tokens"] = w.Prompt
+	ev["prompt_overhead"] = w.Overhead
+	ev["chars_per_token"] = w.CharsPerToken
+	ev["ratio_measured"] = w.Measured
+	ev["ratio_rounds"] = w.Rounds
+	ev["window_cuts"] = w.Cuts
+	ev["window_folds"] = w.Folds
 }
 
 // inputStream reads JSON events from stdin in a goroutine and routes them:
@@ -1139,15 +1185,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 		return false
 	}
 	em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
-	sysTokens, forcedCalls, notifLifted := h.SessionStats()
-	bd := h.SystemParts()
-	em.emit(event{"type": "usage", "total": res.Usage.Total, "active": res.Usage.Active,
-		"cached": res.Usage.Cached, "processed": res.Usage.Processed,
-		"generated": res.Usage.Generated, "turns": res.Usage.Turns,
-		"system_tokens": sysTokens, "forced_calls": forcedCalls,
-		"notifications_lifted": notifLifted,
-		"system_exact":         bd.Exact, "system_prompt": bd.Prompt,
-		"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)})
+	em.emit(usageEvent(h, res.Usage))
 	em.emit(event{"type": "done"})
 	return true
 }
