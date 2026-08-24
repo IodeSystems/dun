@@ -156,10 +156,52 @@ the response's room and SEND it), `overflow.go` + agentkit's `StopReasonLength`
   `*llm.ChatOpts` from the context builder: safe only because `agent.Session`
   copies it by value at the top of each round, on the same goroutine.
 - **blocking decisions:** none.
-- **optional extensions:** turn-level loop detection (N consecutive same-tool
-  calls with near-identical args, all failing). The byte-level detector in
-  `llm/repetition.go` cannot see it, and it is what actually burned the yscr
-  session — the cut was the symptom.
+- **optional extensions:** none outstanding. Turn-level loop detection was the
+  one named here; it is slice 4, and what it can and cannot see is recorded
+  there.
+
+### ✅ 4. Turn-level loop detection — and the two detectors that failed (2026-08-24)
+`llm/repetition.go` catches a loop inside ONE generation. Nothing caught the
+loop across rounds: every response well-formed, every tool call valid, the
+sequence going nowhere. `loopguard.go` does, and the useful part of this slice
+is what the measurement REJECTED. Three candidates, tried against the stuck
+yscr session:
+- **near-identical arguments — rejected.** The visible churn was six attempts at
+  one failing test; consecutive `exec` arguments scored **0.01–0.29** similarity.
+  Each attempt was a genuinely different edit. Syntactic similarity cannot see
+  semantic churn, and the original plan for this slice assumed it could.
+- **recurring result lines — rejected.** Lines recurring across a sliding window
+  of 8 results: **3/8 healthy, 4/8 stuck**. No threshold fits between them
+  without refusing normal debugging, where the same failure legitimately recurs
+  while you work on it.
+- **identical arguments, CONSECUTIVE — accepted**, and it found a loop nobody had
+  noticed: **12 back-to-back `recap` calls with byte-identical arguments** (calls
+  39–50). The first folded 379 entries; the eleven after it each folded ONE,
+  writing `recap17`–`recap26`, 2,523 bytes apiece. All of them nothing.
+
+Consecutiveness is the whole precision argument: the same session called `ship`
+identically 8× and `git log …` 3×, all legitimate, all separated by gaps of 3–48
+calls. Zero false positives at any threshold above 2, on the evidence available.
+- **Refuses, does not warn.** A warning is a round trip that ends with the model
+  deciding, and the observed loop ran 12 deep with every call SUCCEEDING — no
+  failure for a warning to attach to. The refusal is a tool result, paired to
+  the model's own call, so it needs no new delivery path; it quotes the previous
+  result back, because a model told only "refused" reads a transport failure and
+  retries. At +2 more it forces `ask_user` (once) via `ForceToolCall`.
+- **Polling tools are exempt** (`exec_monitor`, `agent_monitor`, `ask_user`):
+  repetition is their success mode. A poll also RESETS the run, since waiting on
+  something is exactly "the world changed in between".
+- **It lifts the queue itself.** It sits outside `withLiftedQueue` so it can see
+  every tool, so a refusal would otherwise strand a message the user typed while
+  the agent looped — the worst moment to drop one.
+- **known limitation, stated in the file:** it does NOT catch semantic churn.
+  Six different edits chasing one failing test still go unnoticed, and nothing
+  here should be read as claiming otherwise.
+- **risks:** `defaultLoopRepeats` = 3 is judged, not fitted — the only observed
+  loop ran to 12, so anything from 3 to 10 would have caught it and 3 is the
+  earliest that is clearly abnormal. `DUN_LOOP_REPEATS` overrides; 0 disables.
+  A tool outside `pollingTools` that is legitimately called identically in a row
+  would be refused; none exists today.
 
 ### ✅ 2. Exec timeout removed — monitor heartbeat catches wedged commands (2026-08-04)
 The `defaultExecTimeout` (5m) was a blunt instrument: it killed foreground

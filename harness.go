@@ -332,6 +332,9 @@ type Harness struct {
 	// toolsInit is false until the first rebuild, so the initial tool set is
 	// not announced as a CHANGE — the system prompt already describes it.
 	toolsInit bool
+	// loop is the run of consecutive identical tool calls, for the guard that
+	// refuses one that cannot return anything new. See loopguard.go.
+	loop loopGuard
 	// recapNudged is the window size at the last recap reminder, so the same
 	// line is not repeated on every chat round past the threshold.
 	recapMu     sync.Mutex

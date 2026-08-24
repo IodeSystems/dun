@@ -365,6 +365,12 @@ func (h *Harness) rebuildTools() {
 		}
 	}
 
+	// Outermost of all, so it sees every tool including ship and recap — recap
+	// being the one the measurement caught looping twelve deep. It must wrap the
+	// wrappers rather than be wrapped by them: a call it refuses never runs, and
+	// a refusal is the LAST thing that should be reconsidered.
+	dispatch = withLoopGuard(dispatch, h)
+
 	h.Session.Tools = toolDefs
 	h.Session.Dispatch = dispatch
 	h.Session.System = sys
