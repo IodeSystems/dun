@@ -100,13 +100,66 @@ func noteFromEvent(ev llm.RetryEvent) RetryNote {
 // Type-asserted rather than added to agent.LLMRunner: the hook is a property of
 // THIS transport, and a caller who supplies some other runner simply gets no
 // request-scope narration (the turn-scope retry below still reports).
-func wireRetry(client agent.LLMRunner, onRetry func(RetryNote)) {
-	if onRetry == nil {
+func wireRetry(client agent.LLMRunner, onRetry func(RetryNote), onTicket func(string)) {
+	if onRetry == nil && onTicket == nil {
 		return
 	}
-	if c, ok := client.(*llm.Client); ok {
-		c.OnRetry = func(ev llm.RetryEvent) { onRetry(noteFromEvent(ev)) }
+	c, ok := client.(*llm.Client)
+	if !ok {
+		return
 	}
+	c.OnRetry = func(ev llm.RetryEvent) {
+		// The ticket is the only part of a 429 worth REMEMBERING rather than
+		// rendering: it is how the next attempt says "same caller". See
+		// Harness.noteTicket.
+		if onTicket != nil && ev.BP != nil && ev.BP.Ticket != "" {
+			onTicket(ev.BP.Ticket)
+		}
+		if onRetry != nil {
+			onRetry(noteFromEvent(ev))
+		}
+	}
+}
+
+// noteTicket remembers the id a fair-share proxy gave this attempt.
+//
+// Called from the llm client's retry hook, which runs on the request's own
+// goroutine — hence the lock, even though runTurn reads it from the turn's.
+func (h *Harness) noteTicket(t string) {
+	h.ticketMu.Lock()
+	h.ticket = t
+	h.ticketMu.Unlock()
+}
+
+// takeTicket reads the remembered id; clear=true forgets it.
+//
+// FORGETTING MATTERS. corrallm derives queue age from the ticket's own mint
+// time, so a ticket held past the turn it belongs to would keep claiming credit
+// for waiting that ended minutes ago — a later, unrelated turn would jump the
+// queue on a debt somebody else already paid. It is scoped to one turn for the
+// same reason it exists: it names ONE attempt to get ONE answer.
+func (h *Harness) takeTicket(clear bool) string {
+	h.ticketMu.Lock()
+	defer h.ticketMu.Unlock()
+	t := h.ticket
+	if clear {
+		h.ticket = ""
+	}
+	return t
+}
+
+// carryTicket puts the remembered id on the ChatOpts the next round will copy,
+// so a turn-scope retry reaches the proxy as the caller that was already
+// waiting rather than as a newcomer.
+//
+// Mutating the shared *llm.ChatOpts is safe here for the same reason it is in
+// applyGeneration: agent.Session copies it by value at the top of every chat
+// round, and this runs on the turn's own goroutine immediately before that.
+func (h *Harness) carryTicket() {
+	if h.Session == nil || h.Session.ChatOpts == nil {
+		return
+	}
+	h.Session.ChatOpts.RequestID = h.takeTicket(false)
 }
 
 // applyRetryPolicy lets an operator move the provider-retry policy without
@@ -217,8 +270,21 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 	backoff := initial
 	start := time.Now()
 	deadline := start.Add(budget)
+	// The ticket belongs to THIS turn. Cleared however the turn ends, so the
+	// next one starts as itself rather than inheriting a claim on a queue place
+	// this turn already used or abandoned.
+	defer func() {
+		h.takeTicket(true)
+		if h.Session != nil && h.Session.ChatOpts != nil {
+			h.Session.ChatOpts.RequestID = ""
+		}
+	}()
 	for attempt := 1; ; attempt++ {
 		h.prepareTurn(ctx)
+		// Before the attempt, not after the failure: the id may have been issued
+		// during THIS attempt's own request-scope retries, and the next attempt
+		// is the one that has to present it.
+		h.carryTicket()
 		res, err := turn(ctx)
 		if err == nil {
 			if attempt > 1 {

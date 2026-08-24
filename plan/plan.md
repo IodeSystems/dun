@@ -101,6 +101,36 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ✅ 4. A turn retry that keeps its place in the queue (2026-08-24)
+The endpoint is single-slot (`maxConcurrent: 1`), and dun retries at two levels:
+`llm.Client` retries a REQUEST (up to response headers — 429, 5xx, gateway
+down), `runTurn` retries a TURN (a stream that died mid-generation, which is not
+resumable). corrallm could not tell the two apart from the outside: every turn
+retry arrived as a brand-new caller, so the waiting the earlier attempt had
+already done was forfeited, and a fresh arrival from anyone else outranked it.
+Measured on the live box: **dun took 175 queue-timeouts in 7 days.**
+
+- corrallm mints a signed ticket when it turns away a request without one and
+  returns it on the 429; agentkit echoes it inside its own retry loop and
+  exposes it as `RetryEvent.BP.Ticket` + `ChatOpts.RequestID`.
+- `wireRetry` now REMEMBERS that id (it was only being rendered), and `runTurn`
+  puts it on `Session.ChatOpts` before every attempt — before, not after the
+  failure, because the id is issued during an attempt's own request-scope
+  retries and the NEXT attempt is the one that must present it.
+- **The ticket is cleared when the turn ends, however it ends.** corrallm derives
+  queue age from the ticket's own mint time, so one held past its turn would
+  keep claiming credit for waiting that finished minutes ago — a later,
+  unrelated turn would jump the queue on a debt somebody else paid.
+- Mutating the shared `*llm.ChatOpts` is safe here for the same reason it is in
+  `applyGeneration`, and for no other: `agent.Session` copies it by value at the
+  top of every round, on the turn's own goroutine.
+- **risks:** the id is only remembered while the client is an `*llm.Client` (the
+  hook is a property of that transport). A different runner gets no ticket and
+  the previous behaviour, which is correct rather than degraded.
+- **next:** watch a live queue-timeout followed by a turn retry and confirm
+  corrallm's Journeys panel shows ONE journey with two attempts rather than two
+  journeys with one each. That is the whole observable.
+
 ### ◐ 3. The context window has two halves, and dun budgeted one (2026-08-24)
 Found in a live yscr session: a tool call cut off after 1278 characters of
 arguments with `finish_reason=length`, retried, cut again identically. Three

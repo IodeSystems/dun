@@ -172,7 +172,7 @@ func DefaultServers(workspace, raglitHome string) []Server {
 		// that is deleted on exit cannot outlive the session that wrote it.
 		{ID: "docs", Command: "raglit", Args: []string{"serve",
 			"--project", raglitProject(workspace), // the corpus: the repository
-			"--index", raglitIndex(workspace)},    // the membership: this dir on this branch
+			"--index", raglitIndex(workspace)}, // the membership: this dir on this branch
 			Disable: []string{"search_figures", "ingest", "index_status", "list_indexes", "list_documents", "ocr"}},
 	}
 }
@@ -291,11 +291,17 @@ type Harness struct {
 	store   *sessionStore
 	client  agent.LLMRunner // kept for its retry policy (see turnRetryPolicy)
 	onRetry func(RetryNote)
-	wake    chan struct{} // signals a driver to run a Continue turn (bg job done)
-	bgMu    sync.Mutex
-	bgSeq   int
-	bgRun   int            // background jobs still running
-	bgJobs  map[int]*bgJob // every job this session started, by id (see bgjob.go)
+	// ticket is the id a fair-share proxy issued for the turn in flight, so a
+	// turn-scope retry can present it and keep the place in line the earlier
+	// attempt earned. Guarded because it is written from the request's
+	// goroutine (the llm client's retry hook) and read from the turn's.
+	ticketMu sync.Mutex
+	ticket   string
+	wake     chan struct{} // signals a driver to run a Continue turn (bg job done)
+	bgMu     sync.Mutex
+	bgSeq    int
+	bgRun    int            // background jobs still running
+	bgJobs   map[int]*bgJob // every job this session started, by id (see bgjob.go)
 
 	// Sub-agents (see subagent.go and plan/subagents.md). agMu guards both.
 	// ownsMgr is false for a CHILD: it shares its parent's manager, and closing
@@ -908,7 +914,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// Carry the client's own retry narration out to the UI. Without this the
 	// waiting is only ever logged, and a TUI's log is not on screen.
 	applyRetryPolicy(cfg.Client)
-	wireRetry(cfg.Client, cfg.OnRetry)
+	wireRetry(cfg.Client, cfg.OnRetry, h.noteTicket)
 
 	// The window is asked for ONCE and then subtracted from all session long:
 	// the prompt's budget at startup, the response's cap on every round.

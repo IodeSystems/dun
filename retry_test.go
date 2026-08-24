@@ -176,7 +176,7 @@ func TestRunTurn_GivesUpAtBudget(t *testing.T) {
 func TestWireRetry_CarriesClientEvents(t *testing.T) {
 	var got []RetryNote
 	c := llm.NewClient("http://127.0.0.1:1", "", "m")
-	wireRetry(c, func(n RetryNote) { got = append(got, n) })
+	wireRetry(c, func(n RetryNote) { got = append(got, n) }, nil)
 	if c.OnRetry == nil {
 		t.Fatal("client hook not installed")
 	}
@@ -206,7 +206,7 @@ func TestWireRetry_CarriesClientEvents(t *testing.T) {
 // wireRetry must tolerate a runner that is not an *llm.Client (a fake, another
 // transport): it simply gets no request-scope narration.
 func TestWireRetry_OtherRunnerIsNoOp(t *testing.T) {
-	wireRetry(mustNotRunRunner{}, func(RetryNote) { t.Fatal("no events expected") })
+	wireRetry(mustNotRunRunner{}, func(RetryNote) { t.Fatal("no events expected") }, nil)
 }
 
 // The provider-retry policy is an OPERATOR decision, not a compile-time one:
@@ -235,5 +235,64 @@ func TestApplyRetryPolicy_IgnoresJunk(t *testing.T) {
 	applyRetryPolicy(c)
 	if c.RetryBudget != 0 || c.Retry5xxAttempts != 0 {
 		t.Errorf("junk applied: budget=%s attempts=%d", c.RetryBudget, c.Retry5xxAttempts)
+	}
+}
+
+// The ticket a fair-share proxy issues during a turn must be REMEMBERED, not
+// just rendered: it is what the next attempt presents to say "same caller".
+func TestWireRetry_RemembersTheTicket(t *testing.T) {
+	var got []string
+	c := llm.NewClient("http://127.0.0.1:1", "", "m")
+	wireRetry(c, nil, func(tk string) { got = append(got, tk) })
+	if c.OnRetry == nil {
+		t.Fatal("client hook not installed for a ticket sink alone")
+	}
+	c.OnRetry(llm.RetryEvent{Kind: llm.Retry429, Attempt: 1, Status: 429,
+		BP: &llm.Backpressure{Reason: "queue-timeout", Ticket: "tkt_abc"}})
+	// A 429 that issued none, and a non-429 event, must not clear or invent one.
+	c.OnRetry(llm.RetryEvent{Kind: llm.Retry429, Attempt: 2, Status: 429,
+		BP: &llm.Backpressure{Reason: "rejected"}})
+	c.OnRetry(llm.RetryEvent{Kind: llm.RetryTransport, Attempt: 3})
+
+	if len(got) != 1 || got[0] != "tkt_abc" {
+		t.Errorf("tickets = %v; want exactly the one the proxy issued", got)
+	}
+}
+
+// A turn-scope retry has to present the ticket the FIRST attempt was given, or
+// the proxy sees a newcomer and the waiting already done is forfeited.
+func TestRunTurn_CarriesTheTicketIntoTheRetry(t *testing.T) {
+	instantRetries(t)
+	h := newNoteHarness(t)
+	h.Session = &agent.Session{ChatOpts: &llm.ChatOpts{}}
+	var seen []string
+	attempts := 0
+	_, err := h.runTurn(context.Background(), func(context.Context) (agent.TurnResult, error) {
+		seen = append(seen, h.Session.ChatOpts.RequestID)
+		attempts++
+		if attempts == 1 {
+			// The proxy turned this attempt away and named it, exactly as the
+			// client's retry hook would report mid-attempt.
+			h.noteTicket("tkt_first")
+			return agent.TurnResult{}, midStreamDeath()
+		}
+		return agent.TurnResult{}, nil
+	})
+	if err != nil {
+		t.Fatalf("runTurn: %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("attempts = %v; want the turn retried once", seen)
+	}
+	if seen[0] != "" {
+		t.Errorf("first attempt carried %q; it had no id yet", seen[0])
+	}
+	if seen[1] != "tkt_first" {
+		t.Errorf("retry carried %q, want the ticket from the first attempt", seen[1])
+	}
+	// And the turn gives it back: corrallm ages a ticket from its own mint time,
+	// so one held past its turn would claim credit for waiting that is over.
+	if h.Session.ChatOpts.RequestID != "" || h.takeTicket(false) != "" {
+		t.Error("the ticket outlived its turn; a later turn would inherit its place in line")
 	}
 }
