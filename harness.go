@@ -351,6 +351,16 @@ type Harness struct {
 	compactLast time.Time
 	// Session-level counters for /context stats. Guarded by noteMu alongside
 	// the queue, since they are incremented when items are drained from it.
+	// meter is the chars-per-token ratio measured from the provider's own usage
+	// reports. It is the Shaper's estimator AND the Session's, so the budget the
+	// context is shaped to and the window size reported to the user are the same
+	// number by construction. See tokencal.go.
+	meter promptMeter
+	// window is the endpoint's whole context, prompt and response together, or 0
+	// when nobody could state one. Kept because the response's budget is the
+	// window MINUS this round's prompt, which is a per-round subtraction the
+	// startup-time shaping budget cannot stand in for.
+	window              int
 	systemTokens        int             // system prompt + tool schemas; exact when the endpoint can tokenize
 	systemParts         SystemBreakdown // the same total, broken down and labelled exact/estimated
 	forcedCallsTotal    int             // total forced tool calls injected this session
@@ -770,6 +780,10 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 // Called before every attempt in runTurn, so a message typed during a backoff
 // wait joins the retry rather than queuing behind it.
 func (h *Harness) prepareTurn(ctx context.Context) {
+	// A hint from a cut in a PREVIOUS turn is stale by definition: it is written
+	// in the present tense about the last response, and the last response is now
+	// the one that recovered. See clearOverflowHints.
+	h.clearOverflowHints()
 	if h.healOrphanToolCalls(ctx) == 0 {
 		h.flushQueued()
 	}
@@ -893,6 +907,10 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	applyRetryPolicy(cfg.Client)
 	wireRetry(cfg.Client, cfg.OnRetry)
 
+	// The window is asked for ONCE and then subtracted from all session long:
+	// the prompt's budget at startup, the response's cap on every round.
+	h.window = contextWindow(ctx, cfg.Client)
+
 	// Context shaping. The Shaper's algorithm is a LADDER, and every rung needs
 	// its own policy field — setting BudgetTokens alone disables the cheap rungs
 	// and leaves only the expensive one:
@@ -914,8 +932,12 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	shaper := &agent.Shaper{
 		Store:  store,
 		Runner: cfg.Client,
+		// Not agentkit's CharsByFour default: on this endpoint's own traffic
+		// that is 31% low, which puts the shape target above the whole window
+		// and makes every rung below unreachable. See tokencal.go.
+		Estimate: &h.meter,
 		Policy: agent.ShaperPolicy{
-			BudgetTokens:          contextBudget(ctx, cfg.Client),
+			BudgetTokens:          shapingBudget(h.window),
 			VerbatimToolResults:   verbatimToolResults(),
 			ToolFormat:            toolFormat(),
 			LODTruncateAboveChars: 4000,
@@ -931,8 +953,18 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		OnAssistantToken: cfg.OnToken,
 		OnUsage:          h.noteUsage,
 		MaxTurns:         maxTurns(),
-		Build:            measuredBuild(shaper),
+		Build:            measuredBuild(shaper, h),
 		ToolFormat:       toolFormat(),
+		// The same estimator the Shaper uses, so `Active` and the budget cannot
+		// disagree about how big the context is.
+		Estimate: &h.meter,
+		// The caps applyGeneration writes on every round. Non-nil from the start
+		// so the Session has something to copy; the values arrive with the first
+		// build, which runs before the first request.
+		ChatOpts: &llm.ChatOpts{},
+		// finish_reason=length: decide between shedding history and telling the
+		// model what it hit. See overflow.go.
+		OnOverflow: h.onOverflow,
 	}
 	// Tools, Dispatch, System and Preparer all depend on WHICH servers are
 	// running, and that changes mid-session (/rag on, /lsp off). applyTools
@@ -1382,6 +1414,10 @@ const compactionThrashTurns = 2
 //
 // A root harness has no record in a parent, so this is a child-only signal.
 func (h *Harness) noteUsage(u agent.TokenUsage) {
+	// Calibrate first: this is the only place the provider's own count of the
+	// prompt meets our count of the chars that produced it, and every number
+	// below (including Active) is denominated in the ratio it sets.
+	logObservation(h.meter.noteUsage(u))
 	// A large window earns a reminder that recap exists, naming what is filling
 	// it. See maybeNudgeRecap: the system prompt alone did not move the model.
 	h.maybeNudgeRecap(u.Active)
@@ -1543,34 +1579,73 @@ type contextWindower interface {
 // its shaping, not its startup.
 const contextWindowTimeout = 10 * time.Second
 
-func contextBudget(ctx context.Context, runner any) int {
+// contextWindow is the whole window, prompt and response together. 0 = nobody
+// could say, which is what makes shaping and generation caps both unavailable.
+func contextWindow(ctx context.Context, runner any) int {
 	if v := os.Getenv("DUN_CONTEXT_TOKENS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			log.Printf("dun: ignoring invalid DUN_CONTEXT_TOKENS=%q", v)
 		} else {
-			return logBudget(n, "DUN_CONTEXT_TOKENS")
+			return logWindow(n, "DUN_CONTEXT_TOKENS")
 		}
 	}
 	if w, ok := runner.(contextWindower); ok {
 		cctx, cancel := context.WithTimeout(ctx, contextWindowTimeout)
 		defer cancel()
 		if n, ok := w.ContextWindow(cctx); ok && n > 0 {
-			return logBudget(n, "the server's /props")
+			return logWindow(n, "the server's /props")
 		}
 	}
-	log.Printf("dun: no context window known — DUN_CONTEXT_TOKENS unset and the server states none; no shaping")
+	log.Printf("dun: no context window known — DUN_CONTEXT_TOKENS unset and the server states none; " +
+		"no shaping and no generation cap")
 	return 0
 }
 
-// logBudget records WHERE the number came from. A session that thrashes should
+// contextBudget is the token ceiling the Shaper shapes the PROMPT to.
+//
+// It used to be 90% of the window, on the reasoning that shaping exists to stop
+// a generation being cut off mid-write rather than to keep the context small.
+// The reasoning was right and the arithmetic was not: 10% of the window is what
+// was left for the response, that 10% was never communicated to the endpoint,
+// and on a reasoning model 10% is not enough anyway. The reserve is now the
+// response's actual cap plus a margin — the same number applyGeneration sends —
+// so the two halves of the window are budgeted by one subtraction instead of by
+// two unrelated guesses. See outbudget.go.
+func contextBudget(ctx context.Context, runner any) int {
+	return shapingBudget(contextWindow(ctx, runner))
+}
+
+// shapingBudget turns a window into the prompt's share of it. Pure: it is
+// recomputed on every build (the fitted overhead moves), so it must not log.
+func shapingBudget(window int) int {
+	if window <= 0 {
+		return 0
+	}
+	budget := window - outputReserve()
+	if budget <= 0 {
+		// A window smaller than one response's reservation. Shaping to a
+		// non-positive budget means "unbudgeted" to the Shaper, which is worse
+		// than shaping to something tight, so fall back to half the window —
+		// the generation cap still bounds the other half. logWindow says so.
+		budget = window / 2
+	}
+	return budget
+}
+
+// logWindow records WHERE the number came from. A session that thrashes should
 // say in its own logs whether it was working from somebody's environment or
 // from the server, because those are fixed in different places.
-func logBudget(n int, source string) int {
-	budget := n * 90 / 100
-	log.Printf("dun: context window %d tokens (from %s); shaping budget %d (LOD stubs first, compaction last)",
-		n, source, budget)
-	return budget
+func logWindow(n int, source string) int {
+	log.Printf("dun: context window %d tokens (from %s); reserving %d for the response, "+
+		"shaping the prompt to %d (LOD stubs first, compaction last)",
+		n, source, outputReserve(), shapingBudget(n))
+	if n-outputReserve() <= 0 {
+		log.Printf("dun: that window is smaller than one response's reservation (%d) — "+
+			"shaping the prompt to half of it instead; lower DUN_MAX_OUTPUT_TOKENS to give "+
+			"the conversation more of it", outputReserve())
+	}
+	return n
 }
 
 // measuredBuild logs the size of the prompt the Shaper actually produced.
@@ -1583,8 +1658,20 @@ func logBudget(n int, source string) int {
 // Logs the biggest message too: if a fold is not re-rooting the prompt, the
 // giveaway is one surviving tool result still carrying tens of thousands of
 // characters.
-func measuredBuild(shaper *agent.Shaper) agent.ContextBuilder {
+func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
+	meter := &h.meter
 	return func(ctx context.Context, sessionID, system string) ([]llm.Message, error) {
+		// Re-budget before every build. The prompt's share of the window is
+		// fixed, but what the Shaper is allowed to fill it with is that share
+		// MINUS the per-request overhead the provider charges and our character
+		// count cannot see — tool schemas above all. The overhead is measured,
+		// so it arrives a few rounds in and moves; a budget set once at startup
+		// would be over by exactly that much, forever. See promptMeter.
+		if h.window > 0 {
+			if b := shapingBudget(h.window) - meter.Overhead(); b > 0 {
+				shaper.Policy.BudgetTokens = b
+			}
+		}
 		msgs, err := shaper.Build(ctx, sessionID, system)
 		if err != nil {
 			return msgs, err
@@ -1597,8 +1684,40 @@ func measuredBuild(shaper *agent.Shaper) agent.ContextBuilder {
 				biggest, biggestRole = n, m.Role
 			}
 		}
-		log.Printf("dun: built prompt: %d messages, %d chars (~%d tokens); largest %d chars (%s)",
-			len(msgs), total, total/4, biggest, biggestRole)
+		// Hand the size to the meter BEFORE the round that will price it: the
+		// provider's usage report arrives with no record of what was sent, so
+		// the pairing is positional. This builder is the last thing to run
+		// before streamChat, on the same goroutine, which is what makes that
+		// safe. See tokencal.go.
+		meter.noteBuild(total)
+		// What this request will actually cost the window: the text, plus the
+		// constant. Both are needed here because the generation budget below is
+		// window MINUS this, and leaving the constant out of it hands the
+		// response room that is already spent.
+		est := meter.Overhead()
+		for _, m := range msgs {
+			est += meter.Estimate(m.Content)
+		}
+		how := "estimated at 4 chars/token"
+		if meter.Measured() {
+			how = fmt.Sprintf("measured at %.2f chars/token", meter.CharsPerToken())
+		}
+		// Size the RESPONSE against the prompt that was just built, and send the
+		// number. This is the only place both halves are known at once: the
+		// window from startup, the prompt from the line above. See outbudget.go.
+		gen, ok := applyGeneration(h.Session.ChatOpts, h.window, est)
+		room := "no window known, response uncapped"
+		if h.window > 0 {
+			room = fmt.Sprintf("response capped at %d (%d left in the %d window)",
+				gen, h.window-est, h.window)
+			if !ok {
+				room = fmt.Sprintf("ONLY %d left in the %d window — below the %d floor; "+
+					"keeping the previous cap and leaving it to the overflow policy",
+					h.window-est, h.window, minOutputTokens)
+			}
+		}
+		log.Printf("dun: built prompt: %d messages, %d chars (~%d tokens, %s); largest %d chars (%s); %s",
+			len(msgs), total, est, how, biggest, biggestRole, room)
 		// DUN_DUMP_PROMPT writes the exact message list to disk so a failing
 		// call can be replayed verbatim against the provider. The 500 that a
 		// bad tool call produces carries no finish_reason, so the only way to

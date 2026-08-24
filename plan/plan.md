@@ -101,6 +101,66 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 3. The context window has two halves, and dun budgeted one (2026-08-24)
+Found in a live yscr session: a tool call cut off after 1278 characters of
+arguments with `finish_reason=length`, retried, cut again identically. Three
+defects, stacked — each invisible on its own.
+- **Every token number was `chars/4`.** Measured against the session's own bytes
+  (llama.cpp `/tokenize`, local-Qwen3.8-27B): 60,000 chars → 21,636 tokens. The
+  estimate was 31% low, so the shape target (159,344 est) was ~230,000 REAL
+  tokens against a 188,160 window. **LOD, compaction and `rescue.go` were
+  unreachable by construction** — the first thing to notice the wall was the
+  model, mid-generation.
+- **The window was spent as an input budget.** 90% to the prompt, an
+  uncommunicated 10% to the response, and no `max_tokens` sent at all — with
+  llama.cpp's `n_predict` defaulting to -1, nothing ended a generation but the
+  slot filling. ~109k prompt + ~79k of thinking = 188,160.
+- **The provider reported the truth every round and nobody looked.** `Usage`
+  carries `prompt_tokens`; `Usage.Active` was `chars/4` too.
+
+Fixed: `tokencal.go` (measure the ratio from `Usage`), `outbudget.go` (reserve
+the response's room and SEND it), `overflow.go` + agentkit's `StopReasonLength`
+(the cut is an event, not a log line).
+- **The ratio is AFFINE, not one number** — the correction the first live run
+  forced. `prompt_tokens` includes the tool schemas (own request field, in no
+  message) and the chat template; dividing that constant into the character
+  count spread a constant across a variable. Six live rounds: a single ratio
+  swung 1.26 → 1.66 chars/token purely from amortisation, and the last one
+  predicts **193,079 tokens for a 301,203-char prompt — over the window, every
+  turn, forever** (the 45-folds-in-29-minutes failure). Fitted as two terms:
+  2.30 chars/token marginal + 1,617 per request → 132,699. The marginal figure
+  agrees with the independent `/tokenize` measurement (2.77); the gap IS the
+  overhead. `Estimate` reports the marginal cost only — the constant is charged
+  once, against the budget, because the Shaper calls `Estimate` per message.
+- **compact vs. hint is the decision that matters.** Both failures wear
+  `finish_reason=length` and the remedies are opposites: a prompt that ate the
+  window is only fixed by folding; a response that ran away is only made worse
+  by it (history destroyed to make room the model spends the same way). The
+  threshold is one response's reservation of room left; a second cut in the same
+  turn escalates to folding, because a hint that did not work will not work
+  twice.
+- **The hint carries the arithmetic** (window, prompt, room left, what the reply
+  reached). A model told "be brief" without them cannot judge how brief.
+  Delivery needs no new mechanism: it is a tail-kept notification tagged
+  `agent.OverflowTag`, so it lands beside the error result when the cut was mid
+  tool-call and rides the next turn when it was mid-reply. It is DISCARDABLE —
+  written in the present tense about the last response, so `prepareTurn` drops
+  it; left in place it teaches a permanent, unexplained timidity.
+- **next:** verify live — the endpoint is single-slot and was at capacity, so
+  the second run was deferred, not skipped. Watch for `dun: calibrated:`, then
+  `fit:`, then a `length` cut being narrated rather than silently retried.
+- **risks:** `defaultMaxOutputTokens` (32k) is reasoned, not measured — it is
+  also the reserve subtracted from the prompt, so it trades context for headroom.
+  `DUN_MAX_OUTPUT_TOKENS` overrides. The fit is cumulative over a session, so a
+  hard change in text mix lags. `applyGeneration` mutates the shared
+  `*llm.ChatOpts` from the context builder: safe only because `agent.Session`
+  copies it by value at the top of each round, on the same goroutine.
+- **blocking decisions:** none.
+- **optional extensions:** turn-level loop detection (N consecutive same-tool
+  calls with near-identical args, all failing). The byte-level detector in
+  `llm/repetition.go` cannot see it, and it is what actually burned the yscr
+  session — the cut was the symptom.
+
 ### ✅ 2. Exec timeout removed — monitor heartbeat catches wedged commands (2026-08-04)
 The `defaultExecTimeout` (5m) was a blunt instrument: it killed foreground
 commands that were legitimately long, and the only escape was `background:true`.

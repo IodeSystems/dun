@@ -345,6 +345,40 @@ func (s *sessionStore) reRoot(_ context.Context, subsumes []agent.Entry, marker 
 	return nil
 }
 
+// dropTagged removes every entry carrying tag and reports how many went.
+//
+// The only deletion in this store that is not a fold. It exists for entries
+// whose usefulness EXPIRES rather than being summarized: an overflow hint tells
+// the model why its last response was cut off, and once a round completes
+// without being cut, that is no longer true of anything. Leaving it in place
+// costs context and, worse, keeps instructing the model to be brief long after
+// the reason has gone.
+//
+// Nothing that carries WORK is ever dropped this way — see the tags it is called
+// with, all of them machinery talking about itself.
+func (s *sessionStore) dropTagged(tag string) int {
+	if tag == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.entries[:0:0]
+	dropped := 0
+	for _, e := range s.entries {
+		if e.Tag == tag {
+			dropped++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if dropped == 0 {
+		return 0
+	}
+	s.entries = kept
+	s.flushLocked()
+	return dropped
+}
+
 // Reset clears all entries, starting a fresh session log.
 func (s *sessionStore) Reset() {
 	s.mu.Lock()

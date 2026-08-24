@@ -47,10 +47,49 @@ func TestContextBudget_NothingKnownMeansUnbudgeted(t *testing.T) {
 // change: dun no longer makes somebody type a window the server will state.
 func TestContextBudget_AsksTheServerWhenUnset(t *testing.T) {
 	t.Setenv("DUN_CONTEXT_TOKENS", "")
-	if got, want := contextBudget(context.Background(), windowSayer{220160}), 220160*90/100; got != want {
-		t.Errorf("server window should shape to 90%%: got %d, want %d", got, want)
+	if got, want := contextBudget(context.Background(), windowSayer{220160}), 220160-outputReserve(); got != want {
+		t.Errorf("server window should shape to window minus the response reserve: got %d, want %d", got, want)
 	}
 	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
+}
+
+// The prompt's budget and the response's cap are two halves of ONE window, and
+// the bug they were born from is them being budgeted independently: 90%% to the
+// prompt, an uncommunicated 10%% to the response, and a reasoning model that
+// spent 60k tokens of the window nobody had reserved. They must still add up.
+func TestContextBudget_LeavesRoomForTheResponse(t *testing.T) {
+	t.Setenv("DUN_CONTEXT_TOKENS", "")
+	const window = 188160
+	budget := contextBudget(context.Background(), windowSayer{window})
+	gen, ok := generationBudget(window, budget)
+	if !ok {
+		t.Fatalf("a prompt shaped to its own budget must still have room to answer; got %d", gen)
+	}
+	if budget+gen > window {
+		t.Errorf("prompt budget %d + response cap %d = %d, over the %d window",
+			budget, gen, budget+gen, window)
+	}
+	if gen != maxOutputTokens() {
+		t.Errorf("a prompt at budget should get the full response cap: got %d, want %d",
+			gen, maxOutputTokens())
+	}
+	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
+}
+
+// A prompt that has eaten the window gets no budget at all rather than a tiny
+// one. Asking for a reply in 500 tokens reproduces the exact failure this
+// reserve exists to prevent — a tool call cut off mid-arguments.
+func TestGenerationBudget_RefusesBelowTheFloor(t *testing.T) {
+	if _, ok := generationBudget(188160, 188160-outputMargin-minOutputTokens+1); ok {
+		t.Error("below the floor must not report a usable budget")
+	}
+	if _, ok := generationBudget(0, 1000); ok {
+		t.Error("an unknown window has no budget to give")
+	}
+	// Room to spare is capped by the hard limit, not handed out whole.
+	if got, _ := generationBudget(1_000_000, 1000); got != maxOutputTokens() {
+		t.Errorf("a huge window still caps one response: got %d, want %d", got, maxOutputTokens())
+	}
 }
 
 // An explicit setting WINS over the server, including when it is smaller. The
@@ -58,13 +97,13 @@ func TestContextBudget_AsksTheServerWhenUnset(t *testing.T) {
 // intent about what to spend, and the second must not be overridden by the first.
 func TestContextBudget_EnvironmentWinsOverTheServer(t *testing.T) {
 	t.Setenv("DUN_CONTEXT_TOKENS", "100000")
-	if got := contextBudget(context.Background(), windowSayer{220160}); got != 90000 {
-		t.Errorf("an explicit window should shape to 90%%: got %d", got)
+	if got, want := contextBudget(context.Background(), windowSayer{220160}), 100000-outputReserve(); got != want {
+		t.Errorf("an explicit window should shape to it minus the response reserve: got %d, want %d", got, want)
 	}
 	// Garbage in the environment falls THROUGH to the server rather than
 	// disabling shaping: a typo should not silently cost the session its budget.
 	t.Setenv("DUN_CONTEXT_TOKENS", "not-a-number")
-	if got, want := contextBudget(context.Background(), windowSayer{220160}), 220160*90/100; got != want {
+	if got, want := contextBudget(context.Background(), windowSayer{220160}), 220160-outputReserve(); got != want {
 		t.Errorf("invalid env should fall through to the server: got %d, want %d", got, want)
 	}
 	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
