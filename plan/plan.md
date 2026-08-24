@@ -101,6 +101,38 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ✅ 5. The freshness check could not see the engine (2026-08-24)
+Every fix in slices 3 and 4 was live in the tree and absent from the running
+process. The live dun-on-dun session took the *exact* failure slice 3 fixes — a
+tool call cut at 2,329 chars, retried, cut at 836 — with no overflow
+notification and no fold escalation, because the binary predates them. Two
+independent causes, and only the second is code:
+- **`dun` on PATH was a plain `go install` build** (2026-08-10 16:05, version
+  `dev`, `srcDir` unstamped). Unstamped disables BOTH self-update
+  (`selfupdate.go`) and the daemon's central builder (`launcher.go`
+  `buildIfStale` returns on `srcDir == ""`). `~/.dun/launcher.log` proves it:
+  1,215 `rebuilt →` lines, the last on 08-10 16:04, every `launcher up` since
+  reading `(dev)`. Eleven dun commits and five agentkit commits never reached a
+  running process. Fix is `make install` (the launcher SCRIPT), not a code
+  change.
+- **`sourceNewerThan` walked only the dun tree.** dun's engine is a `replace`d
+  module living outside it, so an agentkit-only edit left the check reporting
+  "fresh" forever — the one case that matters most, since agentkit is where the
+  context/retry work lives. `tools/dun.sh` already parsed the replace lines;
+  the Go side did not, and the two disagreeing is what made "always the latest"
+  false. Now `localReplaceDirs` reads the same lines (single and block form,
+  comments stripped, non-path targets skipped) and each target is walked too.
+- **Nested modules are pruned by their own `go.mod`, not by name.** The old
+  walker hardcoded `tools` — correct for dun (`tools/ttydrive` is a separate
+  module) and wrong for any replaced module that happens to have a `tools/`.
+- **risks:** mtime-based, as before — a `git checkout` that rewrites timestamps
+  triggers a rebuild that changes nothing (cheap), and a clock skew between
+  trees could suppress one. The line scan is not a go.mod parser: a replace
+  target written across lines would be missed. Both are strictly better than
+  the previous behaviour, which was to never look.
+- **next:** `make install` on this box, then restart the Aug-10 `dun -d` so the
+  daemon itself is not the stale one.
+
 ### ✅ 4. A turn retry that keeps its place in the queue (2026-08-24)
 The endpoint is single-slot (`maxConcurrent: 1`), and dun retries at two levels:
 `llm.Client` retries a REQUEST (up to response headers — 429, 5xx, gateway
