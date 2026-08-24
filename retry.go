@@ -258,7 +258,7 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 	// Per-turn compaction counter: >1 fold in ONE turn is thrashing, not a long
 	// conversation, and that is the distinction worth reporting.
 	h.compactMu.Lock()
-	h.compactTurn = 0
+	h.compactTurn, h.compactOverflow = 0, 0
 	h.compactMu.Unlock()
 	defer func() {
 		h.turnMu.Unlock()

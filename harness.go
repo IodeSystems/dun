@@ -357,7 +357,10 @@ type Harness struct {
 	// rather than a busy session.
 	compactMu   sync.Mutex
 	compactTurn int
-	compactLast time.Time
+	// compactOverflow counts the folds THIS TURN that the overflow policy asked
+	// for, so the thrash warning does not blame the budget for them.
+	compactOverflow int
+	compactLast     time.Time
 	// Session-level counters for /context stats. Guarded by noteMu alongside
 	// the queue, since they are incremented when items are drained from it.
 	// meter is the chars-per-token ratio measured from the provider's own usage
@@ -1414,6 +1417,15 @@ func (n CompactionNote) String() string {
 // prompt + tool schemas + the pristine tail), so every turn will fold whatever
 // it just summarized — spending an LLM call each time to destroy context. The
 // budget is wrong, and saying so beats letting it grind.
+//
+// That diagnosis is only true of folds the SHAPER decided on. The overflow
+// policy folds for an unrelated reason — the endpoint cut a reply, and a second
+// cut escalates to shedding history — and it can do so with the budget nowhere
+// near full. Observed live (2026-08-24): two overflow folds in one turn on a
+// 9,824-token prompt against a 178,354-token budget, reported as "the context
+// budget cannot fit one turn's floor. Raise DUN_CONTEXT_TOKENS." Every word of
+// that was wrong, and it is the exact failure this session's work was about — a
+// number that is confidently misattributed. So the counter is split by cause.
 const compactionThrashTurns = 2
 
 // noteUsage keeps a CHILD's token tally live. It fires after every chat round,
@@ -1445,7 +1457,29 @@ func (h *Harness) noteUsage(u agent.TokenUsage) {
 // noteCompaction records a fold, decorates it with the thrash counters, and
 // hands it to the UI.
 func (h *Harness) noteCompaction(ci agent.CompactionInfo) {
+	h.noteCompactionCause(ci, foldByShaper)
+}
+
+// foldCause is why a fold happened, which decides what the thrash warning is
+// allowed to conclude from a second one in the same turn.
+type foldCause int
+
+const (
+	// foldByShaper: the Shaper could not fit the prompt in its budget. A second
+	// of these in one turn really does mean the budget is too small.
+	foldByShaper foldCause = iota
+	// foldByOverflow: the endpoint cut a reply and the overflow policy escalated
+	// to shedding history. Says nothing about the budget — see the note on
+	// compactionThrashTurns for the live case where conflating them printed
+	// advice that was wrong in every particular.
+	foldByOverflow
+)
+
+func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) {
 	h.compactMu.Lock()
+	if cause == foldByOverflow {
+		h.compactOverflow++
+	}
 	h.compactTurn++
 	note := CompactionNote{
 		Subsumed:     ci.SubsumedCount,
@@ -1459,10 +1493,19 @@ func (h *Harness) noteCompaction(ci agent.CompactionInfo) {
 	}
 	h.compactLast = time.Now()
 	thrash := h.compactTurn == compactionThrashTurns
+	// Only the SHAPER's folds indict the budget. If any fold this turn came from
+	// the overflow policy, the honest reading is "the endpoint keeps cutting
+	// replies", which no amount of DUN_CONTEXT_TOKENS fixes.
+	fromOverflow := h.compactOverflow > 0
 	h.compactMu.Unlock()
 
 	log.Printf("dun: %s", note)
-	if thrash {
+	switch {
+	case thrash && fromOverflow:
+		log.Printf("dun: %d folds in one turn, driven by the endpoint cutting replies short — "+
+			"NOT by the context budget. Look at why generation is being cut (DUN_MAX_OUTPUT_TOKENS, "+
+			"or a prompt near the window) rather than at the budget.", h.compactTurn)
+	case thrash:
 		log.Printf("dun: compaction is THRASHING (%d folds in one turn) — the context budget "+
 			"cannot fit one turn's floor. Raise DUN_CONTEXT_TOKENS or unset it (unset = no compaction).",
 			h.compactTurn)

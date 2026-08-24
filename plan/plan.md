@@ -131,7 +131,7 @@ Measured on the live box: **dun took 175 queue-timeouts in 7 days.**
   corrallm's Journeys panel shows ONE journey with two attempts rather than two
   journeys with one each. That is the whole observable.
 
-### ◐ 3. The context window has two halves, and dun budgeted one (2026-08-24)
+### ✅ 3. The context window has two halves, and dun budgeted one (2026-08-24)
 Found in a live yscr session: a tool call cut off after 1278 characters of
 arguments with `finish_reason=length`, retried, cut again identically. Three
 defects, stacked — each invisible on its own.
@@ -185,10 +185,34 @@ the response's room and SEND it), `overflow.go` + agentkit's `StopReasonLength`
   reservation), the ratio WITH whether it was measured and over how many rounds,
   and a cut count. `dun.WindowBudget` + `Harness.Window()` carry it; the two
   duplicated `usage` event literals became one `usageEvent`.
-- **next:** verify live — the endpoint is single-slot and was at capacity, so
-  the second run was deferred, not skipped. Watch for `dun: calibrated:`, then
-  `fit:`, then a `length` cut being narrated rather than silently retried, and
-  open `/context` to see the block against real numbers.
+- **✅ VERIFIED LIVE (2026-08-24, local-Qwen3.8-27B via corrallm).** Forced with
+  `DUN_MAX_OUTPUT_TOKENS=60`, a cap no response can fit, so the cut is
+  deterministic whatever the model does. Every rung fired:
+  - the cap is SENT — `response capped at 60 (178816 left in the 188160 window)`;
+  - calibration on round 1, then the fit converging **2.37 → 2.32 → 2.28 → 2.27
+    → 2.25 → 2.24 chars/token marginal + 1470 → 1266 per request**, with the
+    per-round estimate error at **-1% … +1%** once fitted (it was 69% low on the
+    uncalibrated first round);
+  - `finish_reason=length` → `StopReasonLength` → narrated, not silently retried;
+  - **both branches**: a cut TOOL CALL (`[recap]`, `[ask_user]`) and a cut REPLY
+    — the latter being the one that used to end a turn on half a sentence;
+  - attempt 1 → hint only, correctly diagnosing a response problem (176,968 of
+    room left); attempt 2 → escalated to folding 20 entries; attempt 3 → the cap
+    fails the turn with the evidence, non-fatal and resumable;
+  - the model-facing hint lands as a notification carrying the real arithmetic.
+- **Two defects the live run found, both fixed** — and both the same failure
+  this slice is about, a number or a diagnosis that LOOKS measured:
+  - **the thrash warning blamed the budget for overflow folds.** Two folds in one
+    turn on a 9,824-token prompt against a 178,354-token budget printed "the
+    context budget cannot fit one turn's floor. Raise DUN_CONTEXT_TOKENS" —
+    wrong in every particular. `foldCause` now splits the counter, and an
+    overflow-driven thrash names the endpoint instead.
+  - **every rescue logged `0 → 0 tokens (saved 0)`.** The fold path never set
+    TokensBefore/After, so the one place a reader checks whether a fold was worth
+    its LLM call reported a measurement-shaped zero. Now measured with the meter.
+- **next:** nothing outstanding. `/context`'s window block has not been seen
+  against a long real session (only synthetic and short live ones); it renders
+  from the same numbers the log prints, which were verified.
 - **risks:** `defaultMaxOutputTokens` (32k) is reasoned, not measured — it is
   also the reserve subtracted from the prompt, so it trades context for headroom.
   `DUN_MAX_OUTPUT_TOKENS` overrides. The fit is cumulative over a session, so a

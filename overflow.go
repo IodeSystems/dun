@@ -68,9 +68,9 @@ type OverflowNote struct {
 // as what dun DID, not as what went wrong: the user's question on seeing this is
 // always "so what is happening now".
 func (n OverflowNote) String() string {
-	what := "retrying with a hint"
+	what := "sent a hint"
 	if n.Folded > 0 {
-		what = fmt.Sprintf("folded %d entries and retrying", n.Folded)
+		what = fmt.Sprintf("folded %d entries to make room", n.Folded)
 	}
 	where := "the reply"
 	if n.InToolCall {
@@ -111,7 +111,7 @@ func (h *Harness) onOverflow(ctx context.Context, o agent.Overflow) agent.Overfl
 	// clause is the escalation: a hint that did not work is not worth repeating.
 	crowded := h.window > 0 && note.Free < compactWhenFreeBelow()
 	if crowded || o.Attempt > 1 {
-		if n, err := h.rescueFold(ctx); err != nil {
+		if n, err := h.foldHistory(ctx, foldByOverflow); err != nil {
 			log.Printf("dun: overflow: could not fold history: %v", err)
 		} else {
 			note.Folded = n

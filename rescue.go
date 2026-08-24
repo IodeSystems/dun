@@ -100,7 +100,13 @@ func (h *Harness) runTurnWithRescue(ctx context.Context, turn func(context.Conte
 	return res, fmt.Errorf("prompt still does not fit after %d rescue passes: %v", maxRescuePasses, err)
 }
 
-// rescueFold splits the session's entries into an older prefix and a newer tail,
+// rescueFold is the endpoint-refusal caller: the Shaper's estimate undershot and
+// the prompt was rejected outright. See foldRescue for the shared machinery.
+func (h *Harness) rescueFold(ctx context.Context) (int, error) {
+	return h.foldHistory(ctx, foldByShaper)
+}
+
+// foldHistory splits the session's entries into an older prefix and a newer tail,
 // summarizes the prefix with a prompt that names what MUST survive (open user
 // asks, work state, and the work that would have been done had there been room),
 // and re-roots the session: the summary replaces the folded prefix as one
@@ -110,7 +116,7 @@ func (h *Harness) runTurnWithRescue(ctx context.Context, turn func(context.Conte
 // The split keeps the recent conversation intact — the model is mid-task, and
 // its last few exchanges are what it needs to continue — while the OLDER half,
 // which has already been acted on, is what can become a paragraph.
-func (h *Harness) rescueFold(ctx context.Context) (int, error) {
+func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error) {
 	entries, err := h.store.Context(ctx, "dun")
 	if err != nil {
 		return 0, fmt.Errorf("load history: %w", err)
@@ -167,7 +173,21 @@ func (h *Harness) rescueFold(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("re-root: %w", err)
 	}
 	log.Printf("dun: rescue fold — %d entries → one summary marker (%d chars)", len(older), len(summary))
-	h.noteCompaction(agent.CompactionInfo{Summary: summary, SubsumedCount: len(older)})
+	// Report what the fold actually SAVED. These used to go out as zeros, so
+	// every rescue logged "0 → 0 tokens (saved 0)" — a measurement-shaped number
+	// that measured nothing, which is the failure this whole area was about. The
+	// figures are the folded entries' cost in the prompt, under the measured
+	// ratio, against the summary that replaced them.
+	before := 0
+	for _, e := range older {
+		before += h.meter.Estimate(e.Content)
+	}
+	h.noteCompactionCause(agent.CompactionInfo{
+		Summary:       summary,
+		SubsumedCount: len(older),
+		TokensBefore:  before,
+		TokensAfter:   h.meter.Estimate(summary),
+	}, cause)
 	return len(older), nil
 }
 
