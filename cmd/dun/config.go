@@ -32,6 +32,12 @@ type dunConfig struct {
 	URL   string `json:"url,omitempty"`
 	Model string `json:"model,omitempty"`
 	Key   string `json:"key,omitempty"`
+	// Provider-retry budgets, persisted so an endpoint that needs them does not
+	// need the env vars on every launch. Precedence: CLI flag > env
+	// (DUN_RETRY_BUDGET / DUN_TURN_RETRY_BUDGET) > these fields > the built-in
+	// defaults. Empty = unset; a negative value means unbounded (request scope).
+	RetryBudget     string `json:"retry_budget,omitempty"`
+	TurnRetryBudget string `json:"turn_retry_budget,omitempty"` // "0" disables turn-scope retry
 }
 
 func dunHome() string {
@@ -167,6 +173,31 @@ func clientCache(url, key string) func(string) (agent.LLMRunner, error) {
 		cache[model] = c
 		return c, nil
 	}
+}
+
+// parseRetryBudgets interprets the persisted retry budgets: request scope (a
+// negative value means unbounded) and turn scope ("0" disables the turn-scope
+// retry, same as DUN_TURN_RETRY_BUDGET). Empty = unset. Junk is ignored with a
+// warning; an env var still wins over both, because applyRetryPolicy and
+// turnRetryPolicy only override when set.
+func parseRetryBudgets(fc dunConfig) (request, turn time.Duration, requestSet, turnSet bool) {
+	if v := fc.RetryBudget; v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dun: ignoring invalid retry_budget %q in config\n", v)
+		} else {
+			request, requestSet = d, true
+		}
+	}
+	if v := fc.TurnRetryBudget; v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			fmt.Fprintf(os.Stderr, "dun: ignoring invalid turn_retry_budget %q in config\n", v)
+		} else {
+			turn, turnSet = d, true
+		}
+	}
+	return request, turn, requestSet, turnSet
 }
 
 func shipConfig(workspace string, pr bool) *dun.ShipConfig {

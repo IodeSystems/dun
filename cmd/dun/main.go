@@ -410,9 +410,22 @@ func main() {
 
 	var em *emitter
 	var in *inputStream
+	client := llm.NewClient(*url, effKey, *model)
+	if rb, tb, reqSet, turnSet := parseRetryBudgets(fc); reqSet || turnSet {
+		if reqSet {
+			client.RetryBudget = rb
+		}
+		if turnSet {
+			if tb == 0 {
+				client.DisableTurnRetry = true
+			} else {
+				client.TurnRetryBudget = tb
+			}
+		}
+	}
 	cfg := dun.Config{
 		Workspace: effWS,
-		Client:    llm.NewClient(*url, effKey, *model),
+		Client:    client,
 		// Sub-agents may run on a different model than their parent, and only
 		// cmd/dun knows the endpoint and the key — hence a factory rather than a
 		// second client. Cached per model so N children on one model share one

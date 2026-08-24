@@ -122,6 +122,11 @@ func wireRetry(client agent.LLMRunner, onRetry func(RetryNote)) {
 //
 // Both bound each other on purpose: the attempt cap stops a genuinely broken
 // upstream, the budget stops a slow one.
+//
+// Precedence is env > config file > built-in default: an export in the shell
+// wins for this process, and the persisted value (dunConfig.RetryBudget, set on
+// Client.RetryBudget before Start) carries it across launches without the env
+// var.
 func applyRetryPolicy(client agent.LLMRunner) {
 	c, ok := client.(*llm.Client)
 	if !ok {
@@ -161,6 +166,13 @@ func turnRetryPolicy(client agent.LLMRunner) (initial, max, budget time.Duration
 		c = &llm.Client{}
 	}
 	initial, max, budget = c.RetryPolicy()
+	// The persisted per-turn budget, set from config before Start: it is the
+	// turn scope's own knob and must not ride on the request-scope RetryBudget.
+	if c.TurnRetryBudget > 0 {
+		budget = c.TurnRetryBudget
+	} else if c.DisableTurnRetry {
+		budget = 0
+	}
 	if v := os.Getenv("DUN_TURN_RETRY_BUDGET"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d < 0 {
