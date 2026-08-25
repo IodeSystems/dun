@@ -116,6 +116,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /exit)")
 	noSuggest := flag.Bool("no-suggest", false, "disable next-message suggestions (on by default)")
+	rephrase := flag.Bool("rephrase", false, "rephrase each user prompt for specificity before acting on it (toggle at runtime: /prompt on)")
 
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
@@ -230,6 +231,7 @@ func main() {
 	// it is the process a TUI session would want to profile. Opt-in, loopback.
 	startPprof()
 	suggestEnabled = !*noSuggest // the UI may ASK for next-message suggestions (on by default)
+	rephraseOn = *rephrase
 	// Resolve the effective key: explicit flag > env > saved config.
 	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), fc.Key)
 	// Dev self-update: if this is a source-stamped build and the tree changed,
@@ -275,7 +277,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -285,7 +287,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String()}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -693,6 +695,14 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
 	})
 	in.setCtrlCmd(func(id, action string) {
+		// /prompt flips a pure engine-side toggle: no harness work, no asking,
+		// so it does not go through runControlCmd. The TUI already echoed the
+		// command to the user; this event keeps the engine's and the TUI's
+		// knowledge in sync (a bare /prompt from the TUI still round-trips).
+		if id == "prompt" {
+			rephraseOn = action == "on"
+			return
+		}
 		// /close is handled here rather than in runControlCmd because it is
 		// about the SESSION, not the harness: it needs the workspace root and
 		// the session id, which only this scope has.
@@ -1159,6 +1169,14 @@ func humanAsk(_ context.Context, question string, options []string, multi bool) 
 // suggestions after `done` when set. On by default.
 var suggestEnabled bool
 
+// rephraseOn is the engine-side /prompt toggle: when true, every user message
+// is rephrased for specificity before it starts a turn (see dun.Harness.
+// Rephrase). Off by default — the extra LLM round-trip is only worth it when
+// asked for. Set by the `prompt` control command and --rephrase; the TUI keeps
+// its own copy for the bare /prompt status, so the engine's copy only has to
+// be right when a turn actually runs.
+var rephraseOn bool
+
 // turnTimeout is --timeout applied PER TURN (interactive engine only; 0 = none).
 // See the comment where it is set.
 var turnTimeout time.Duration
@@ -1178,6 +1196,15 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 	tctx, end := beginTurn(ctx)
 	defer end()
 	turnActive.Store(true)
+	if rephraseOn {
+		// Rephrase BEFORE Ask: the store publishes the message it is passed, so
+		// the rephrased text is what the session records and the model acts on.
+		// The TUI still shows what the user typed. Best-effort — a failure
+		// falls back to the original (see Rephrase).
+		if r, err := h.Rephrase(tctx, task); err == nil {
+			task = r
+		}
+	}
 	res, err := h.Ask(tctx, task)
 	turnActive.Store(false)
 	if err != nil {

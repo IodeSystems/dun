@@ -2101,6 +2101,54 @@ func TestSuggest_HeldBackWhileTheHumanIsBusy(t *testing.T) {
 	}
 }
 
+// /prompt [on|off|status]: the TUI keeps its own copy of the toggle (so bare
+// /prompt reports status without a round-trip) and tells the engine, which is
+// the copy that actually rewrites at turn time.
+func TestPromptSlash_TogglesAndReports(t *testing.T) {
+	defer func(want bool) { rephrasePrompt = want }(rephrasePrompt)
+
+	for _, tc := range []struct{ arg string }{{"on"}, {"off"}} {
+		t.Run(tc.arg, func(t *testing.T) {
+			var buf bytes.Buffer
+			m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+			promptSlash(&m, []string{tc.arg})
+			want := tc.arg == "on"
+			if rephrasePrompt != want {
+				t.Fatalf("/prompt %s: rephrasePrompt = %v, want %v", tc.arg, rephrasePrompt, want)
+			}
+			if got := buf.String(); !strings.Contains(got, `"id":"prompt"`) || !strings.Contains(got, `"action":"`+tc.arg+`"`) {
+				t.Fatalf("the engine must be told; stdin got %q", got)
+			}
+			if !strings.Contains(m.convo[len(m.convo)-1].collapsed, "rephrase: "+tc.arg) {
+				t.Fatalf("no confirmation line: %q", m.convo[len(m.convo)-1].collapsed)
+			}
+		})
+	}
+
+	t.Run("bare shows status", func(t *testing.T) {
+		rephrasePrompt = true
+		var buf bytes.Buffer
+		m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+		promptSlash(&m, nil)
+		last := m.convo[len(m.convo)-1].collapsed
+		if !strings.Contains(last, "rephrase: on") {
+			t.Fatalf("bare /prompt should report on: %q", last)
+		}
+		if buf.String() != "" {
+			t.Fatalf("bare /prompt needs no engine round-trip; stdin got %q", buf.String())
+		}
+	})
+
+	t.Run("bad arg", func(t *testing.T) {
+		var buf bytes.Buffer
+		m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+		promptSlash(&m, []string{"sometimes"})
+		if !strings.Contains(m.convo[len(m.convo)-1].collapsed, "usage") {
+			t.Fatalf("want a usage error: %q", m.convo[len(m.convo)-1].collapsed)
+		}
+	})
+}
+
 // The wait is a DEBOUNCE, not a poll: a keystroke inside the window pushes the
 // deadline out instead of letting the tick through.
 func TestSuggest_KeystrokeRestartsTheWait(t *testing.T) {

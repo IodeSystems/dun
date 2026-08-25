@@ -44,6 +44,11 @@ type tuiOpts struct {
 	// rag/lsp are --rag/--lsp as typed: "" (unset, use the saved setting),
 	// "true" or "false". Passed through to the -p engine verbatim.
 	rag, lsp string
+	// rephrase is --rephrase: rephrase each user prompt for specificity
+	// before acting on it. Passed to the engine verbatim (a CLI flag), so it
+	// survives a /reload or engine restart; /prompt on|off flips the RUNTIME
+	// copy, which wins over this at turn time.
+	rephrase bool
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -2918,6 +2923,7 @@ func init() {
 			return tea.Quit
 		}},
 		{"suggest", "[on|off|auto]", "next-message suggestions: bare triggers one now, on/off/auto set the mode", suggestSlash},
+		{"prompt", "[on|off|status]", "rephrase prompts for specificity before acting: bare shows status, on/off set it", promptSlash},
 	}
 }
 
@@ -2958,6 +2964,50 @@ func suggestSlash(m *tuiModel, args []string) tea.Cmd {
 		m.append(stDim.Render("suggestions: " + mode + " (" + label + ")"))
 	default:
 		m.append(stErr.Render("usage: /suggest [on|off|auto] (bare triggers one now)"))
+	}
+	return nil
+}
+
+// rephrasePrompt is the TUI's copy of the /prompt toggle: whether the next
+// user message is rephrased for specificity before it is sent. The engine
+// keeps its own copy (--rephrase / the `prompt` control command) and does the
+// actual rewriting at turn time; this exists so BARE /prompt can report
+// status without a round-trip, and promptSlash keeps the two in sync.
+var rephrasePrompt bool
+
+// promptSlash handles /prompt [on|off|status].
+//
+// On, every message the user sends is first rewritten by one throwaway LLM
+// call (feature request → acceptance criteria, vague question → one
+// unambiguous phrasing); the engine acts on the rewrite while the input box
+// and scrollback keep what the user actually typed. Bare shows the current
+// state.
+func promptSlash(m *tuiModel, args []string) tea.Cmd {
+	action := ""
+	if len(args) > 0 {
+		action = strings.ToLower(args[0])
+	}
+	switch action {
+	case "":
+		if rephrasePrompt {
+			m.append(stNote.Render("rephrase: on — each prompt is rewritten for specificity before the agent acts"))
+		} else {
+			m.append(stNote.Render("rephrase: off — /prompt on to rewrite prompts for specificity before acting"))
+		}
+	case "on", "off":
+		rephrasePrompt = action == "on"
+		// Tell the engine too so a bare /prompt from a resumed session, or a
+		// --rephrase startup, both resolve to the same state.
+		if m.proc != nil {
+			m.proc.controlCmd("prompt", action)
+		}
+		state := "off — prompts reach the agent as typed"
+		if rephrasePrompt {
+			state = "on — each prompt is rewritten for specificity before acting"
+		}
+		m.append(stNote.Render("rephrase: " + state))
+	default:
+		m.append(stErr.Render("usage: /prompt [on|off|status] (bare shows status)"))
 	}
 	return nil
 }
@@ -3491,6 +3541,9 @@ func procArgs(o tuiOpts, mode string) []string {
 	// silently hand the child the default and undo --no-ship.
 	if !o.ship {
 		args = append(args, "--no-ship")
+	}
+	if o.rephrase {
+		args = append(args, "--rephrase")
 	}
 	if o.cont {
 		args = append(args, "--continue")

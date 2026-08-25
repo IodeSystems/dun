@@ -27,6 +27,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `error` | Turn failed | `error`, `fatal` |
 | `retry` | Provider outage, retrying | `note`, `due`, `seen` |
 | `reset` | Store cleared (`/clear`) | — |
+| `control` | Control action done (`/docker`, `/prompt`) | `id`, `action`, `message` |
 | `compaction` | Context compacted | `text` |
 | `exit` | Engine leaving voluntarily | `reason` |
 
