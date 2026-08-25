@@ -87,11 +87,12 @@ func (n OverflowNote) String() string {
 // the tool calls being dispatched, so anything it does to the history is visible
 // to the next build.
 func (h *Harness) onOverflow(ctx context.Context, o agent.Overflow) agent.OverflowDecision {
+	window := h.windowTokens()
 	note := OverflowNote{
 		Attempt:      o.Attempt,
 		PromptTokens: o.PromptTokens,
 		Generated:    o.Generated,
-		Window:       h.window,
+		Window:       window,
 		InToolCall:   o.InToolCall(),
 	}
 	// Prefer the provider's count of the prompt; fall back to the measured
@@ -102,14 +103,14 @@ func (h *Harness) onOverflow(ctx context.Context, o agent.Overflow) agent.Overfl
 		prompt = int(float64(h.meter.lastBuiltChars()) / h.meter.CharsPerToken())
 		note.PromptTokens = prompt
 	}
-	if h.window > 0 {
-		note.Free = h.window - prompt
+	if window > 0 {
+		note.Free = window - prompt
 	}
 
 	// Fold only when the prompt is what filled the window, or when a previous
 	// pass already told the model and it happened again anyway. The second
 	// clause is the escalation: a hint that did not work is not worth repeating.
-	crowded := h.window > 0 && note.Free < compactWhenFreeBelow()
+	crowded := window > 0 && note.Free < compactWhenFreeBelow()
 	if crowded || o.Attempt > 1 {
 		if n, err := h.foldHistory(ctx, foldByOverflow); err != nil {
 			log.Printf("dun: overflow: could not fold history: %v", err)

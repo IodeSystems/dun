@@ -101,6 +101,44 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ✅ 6. One missed ask disarmed the whole session (2026-08-24)
+Restarting the dun-on-dun session on the fixed binary proved the measurement
+half and found the protection half unreachable — the same shape as the bug it
+fixes, one layer up.
+- **The calibration is right and the old error was worse than recorded.**
+  `prompt 367532 chars → 187003 tokens (1.97 chars/token); the 4 chars/token
+  default had estimated 91883 (-51%)`. That session had been sitting at
+  **187,003 tokens in a 188,160 window** — 1,157 tokens of headroom — while
+  every number it reported said half full.
+- **And none of it was armed.** The startup ask for the window happened at a
+  moment the model was asleep, timed out once, and the session then ran with
+  `window: 0`: no shaping, no generation cap, for its whole life, behind one log
+  line. The turn survived on luck (a 172-token reply). Asked again three minutes
+  later the same endpoint answered in **38ms**, and repeat startups — bare, with
+  all three MCP servers, and while a turn was in flight — all resolved 188160.
+  So the miss was transient and the punishment was permanent.
+- **Fixed by asking again.** `ensureWindow` runs in `measuredBuild` — the one
+  place that runs before every request, on the turn's goroutine — and adopts a
+  window mid-session. Shaping and the cap arm together because both are computed
+  from `h.window` a few lines below. `h.window` became `atomic.Int64`: it is no
+  longer written once before any turn exists.
+- **The backoff is in BUILDS, not seconds** (1, 2, 4, 8, 16 → asks at builds 1,
+  3, 6, 11, 20, 37). A build is what a missed window actually costs; a fixed
+  minute is either idle time on a busy session or a needless timeout on an idle
+  one. Bounded at `windowRetries` = 6, so an endpoint that will never state a
+  window costs six timeouts over a session rather than one per round.
+- **✅ VERIFIED LIVE** with a proxy that refuses the first four `/props`
+  requests and then serves them (`scratchpad/flaky_proxy.py`): startup refused →
+  "no context window known … asked again on the next build"; build 1 refused;
+  build 2 silent (backoff); build 3 → "context window resolved mid-session (ask
+  2 since startup)" → 188160 → the very next build logged **`response capped at
+  32768 (185044 left in the 188160 window)`**.
+- **risks:** the ask is silent about WHY it failed — agentkit's `ContextWindow`
+  returns `(int, bool)`, so a 503 and "this endpoint states none" are the same
+  answer, and both are retried. That is why the bound exists. A window adopted
+  mid-session does not retroactively shape the prompts already sent.
+- **next:** nothing outstanding.
+
 ### ✅ 5. The freshness check could not see the engine (2026-08-24)
 Every fix in slices 3 and 4 was live in the tree and absent from the running
 process. The live dun-on-dun session took the *exact* failure slice 3 fixes — a

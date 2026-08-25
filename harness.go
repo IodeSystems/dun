@@ -372,7 +372,19 @@ type Harness struct {
 	// when nobody could state one. Kept because the response's budget is the
 	// window MINUS this round's prompt, which is a per-round subtraction the
 	// startup-time shaping budget cannot stand in for.
-	window int
+	//
+	// atomic because it is no longer written once at startup: a session that
+	// began without a window adopts one mid-flight (see ensureWindow), from the
+	// turn's goroutine, while /context reads it from the UI's.
+	window atomic.Int64
+	// windowAsks / windowSkip drive that retry: how many times the endpoint has
+	// been asked since startup, and how many builds to let pass before asking
+	// again. Touched only from the context builder, which is one goroutine.
+	windowAsks int
+	windowSkip int
+	// windowRunner is the LLM, kept so the window can be re-asked. nil once
+	// there is nothing left to ask (a window is known, or asking was given up).
+	windowRunner any
 	// Overflow counters for /context: rounds the endpoint ended for room, and
 	// how many of those were answered by folding history. Guarded by noteMu
 	// alongside the other session-level counters.
@@ -924,9 +936,14 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	applyRetryPolicy(cfg.Client)
 	wireRetry(cfg.Client, cfg.OnRetry, h.noteTicket)
 
-	// The window is asked for ONCE and then subtracted from all session long:
-	// the prompt's budget at startup, the response's cap on every round.
-	h.window = contextWindow(ctx, cfg.Client)
+	// The window is subtracted from all session long: the prompt's budget on
+	// every build, the response's cap on every round. It is ASKED for here and,
+	// when the endpoint cannot say yet, asked again as the session runs — see
+	// ensureWindow for why one missed request must not disarm a whole session.
+	h.window.Store(int64(contextWindow(ctx, cfg.Client)))
+	if h.windowTokens() == 0 {
+		h.windowRunner = cfg.Client
+	}
 
 	// Context shaping. The Shaper's algorithm is a LADDER, and every rung needs
 	// its own policy field — setting BudgetTokens alone disables the cheap rungs
@@ -954,7 +971,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// and makes every rung below unreachable. See tokencal.go.
 		Estimate: &h.meter,
 		Policy: agent.ShaperPolicy{
-			BudgetTokens:          shapingBudget(h.window),
+			BudgetTokens:          shapingBudget(h.windowTokens()),
 			VerbatimToolResults:   verbatimToolResults(),
 			ToolFormat:            toolFormat(),
 			LODTruncateAboveChars: 4000,
@@ -1636,26 +1653,93 @@ type contextWindower interface {
 // its shaping, not its startup.
 const contextWindowTimeout = 10 * time.Second
 
-// contextWindow is the whole window, prompt and response together. 0 = nobody
-// could say, which is what makes shaping and generation caps both unavailable.
-func contextWindow(ctx context.Context, runner any) int {
+// windowRetries bounds the re-asking. Six, spread by doubling, spans a long
+// session while costing an endpoint that will NEVER state a window at most six
+// timeouts over its whole life.
+const windowRetries = 6
+
+// windowTokens is the whole context as currently known, 0 while nobody has
+// stated one.
+func (h *Harness) windowTokens() int { return int(h.window.Load()) }
+
+// ensureWindow re-asks for the window when the session is running without one.
+//
+// Startup asking used to be one shot: a single request, 10 seconds, and a miss
+// cost the session its shaping and its generation cap for the rest of its life
+// — silently, behind one log line. That is not a hypothetical. A resumed session
+// asked at a moment the model was asleep, got no answer, and then ran a 187,003-
+// token prompt against a 188,160-token window with nothing armed to notice: the
+// same failure the whole overflow ladder exists to prevent, one layer up. The
+// endpoint answered in 38ms when asked again three minutes later.
+//
+// So the ask is retried from the context builder — the one place that runs
+// before every request, on the turn's goroutine — and the window is adopted
+// mid-session the moment it can be had. Both halves arm together, because both
+// are computed from h.window a few lines below.
+//
+// The backoff is in BUILDS rather than seconds because a build is what a missed
+// window costs: waiting a fixed minute is either idle time on a session mid-turn
+// or a needless timeout on one that is idle. Doubling means a brief blip is
+// recovered from almost at once and a permanently silent endpoint is asked six
+// times and then left alone.
+func (h *Harness) ensureWindow(ctx context.Context) {
+	if h.windowRunner == nil {
+		return // a window is known, or asking has been given up
+	}
+	if h.windowSkip > 0 {
+		h.windowSkip--
+		return
+	}
+	h.windowAsks++
+	if n, src := askWindow(ctx, h.windowRunner); n > 0 {
+		h.window.Store(int64(n))
+		h.windowRunner = nil
+		log.Printf("dun: context window resolved mid-session (ask %d since startup) — shaping "+
+			"and the generation cap are armed from this round on", h.windowAsks)
+		logWindow(n, src)
+		return
+	}
+	if h.windowAsks >= windowRetries {
+		h.windowRunner = nil
+		log.Printf("dun: gave up asking for the context window after %d attempts — this session "+
+			"runs unshaped and uncapped; set DUN_CONTEXT_TOKENS to arm it", h.windowAsks)
+		return
+	}
+	h.windowSkip = 1 << (h.windowAsks - 1) // 1, 2, 4, 8, 16 builds
+}
+
+// askWindow asks for the window and says WHERE the answer came from, or returns
+// 0 when nobody could state one. Silent, because it is asked repeatedly: the
+// callers below do the logging, once per outcome rather than once per attempt.
+func askWindow(ctx context.Context, runner any) (int, string) {
 	if v := os.Getenv("DUN_CONTEXT_TOKENS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			log.Printf("dun: ignoring invalid DUN_CONTEXT_TOKENS=%q", v)
 		} else {
-			return logWindow(n, "DUN_CONTEXT_TOKENS")
+			return n, "DUN_CONTEXT_TOKENS"
 		}
 	}
 	if w, ok := runner.(contextWindower); ok {
 		cctx, cancel := context.WithTimeout(ctx, contextWindowTimeout)
 		defer cancel()
 		if n, ok := w.ContextWindow(cctx); ok && n > 0 {
-			return logWindow(n, "the server's /props")
+			return n, "the server's /props"
 		}
 	}
-	log.Printf("dun: no context window known — DUN_CONTEXT_TOKENS unset and the server states none; " +
-		"no shaping and no generation cap")
+	return 0, ""
+}
+
+// contextWindow is the startup ask: the whole window, prompt and response
+// together. 0 = nobody could say YET, which leaves shaping and generation caps
+// unavailable until ensureWindow gets an answer.
+func contextWindow(ctx context.Context, runner any) int {
+	if n, src := askWindow(ctx, runner); n > 0 {
+		return logWindow(n, src)
+	}
+	log.Printf("dun: no context window known — DUN_CONTEXT_TOKENS unset and the server states " +
+		"none; no shaping and no generation cap until it answers, which is asked again on the " +
+		"next build")
 	return 0
 }
 
@@ -1718,14 +1802,18 @@ func logWindow(n int, source string) int {
 func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 	meter := &h.meter
 	return func(ctx context.Context, sessionID, system string) ([]llm.Message, error) {
+		// A session that started without a window keeps asking for one. Here
+		// rather than at startup only, because this runs before every request
+		// and an endpoint that could not answer at 16:49 answers at 16:52.
+		h.ensureWindow(ctx)
 		// Re-budget before every build. The prompt's share of the window is
 		// fixed, but what the Shaper is allowed to fill it with is that share
 		// MINUS the per-request overhead the provider charges and our character
 		// count cannot see — tool schemas above all. The overhead is measured,
 		// so it arrives a few rounds in and moves; a budget set once at startup
 		// would be over by exactly that much, forever. See promptMeter.
-		if h.window > 0 {
-			if b := shapingBudget(h.window) - meter.Overhead(); b > 0 {
+		if window := h.windowTokens(); window > 0 {
+			if b := shapingBudget(window) - meter.Overhead(); b > 0 {
 				shaper.Policy.BudgetTokens = b
 			}
 		}
@@ -1762,15 +1850,16 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		// Size the RESPONSE against the prompt that was just built, and send the
 		// number. This is the only place both halves are known at once: the
 		// window from startup, the prompt from the line above. See outbudget.go.
-		gen, ok := applyGeneration(h.Session.ChatOpts, h.window, est)
+		window := h.windowTokens()
+		gen, ok := applyGeneration(h.Session.ChatOpts, window, est)
 		room := "no window known, response uncapped"
-		if h.window > 0 {
+		if window > 0 {
 			room = fmt.Sprintf("response capped at %d (%d left in the %d window)",
-				gen, h.window-est, h.window)
+				gen, window-est, window)
 			if !ok {
 				room = fmt.Sprintf("ONLY %d left in the %d window — below the %d floor; "+
 					"keeping the previous cap and leaving it to the overflow policy",
-					h.window-est, h.window, minOutputTokens)
+					window-est, window, minOutputTokens)
 			}
 		}
 		log.Printf("dun: built prompt: %d messages, %d chars (~%d tokens, %s); largest %d chars (%s); %s",

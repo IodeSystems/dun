@@ -21,7 +21,7 @@ func overflowHarness(t *testing.T, window int) (*Harness, *summaryRunner) {
 	h := newNoteHarness(t)
 	r := &summaryRunner{t: t}
 	h.client = r
-	h.window = window
+	h.window.Store(int64(window))
 	return h, r
 }
 

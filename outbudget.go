@@ -191,8 +191,9 @@ func (b WindowBudget) Known() bool { return b.Window > 0 }
 
 // Window returns the current division of the context window.
 func (h *Harness) Window() WindowBudget {
+	window := h.windowTokens()
 	b := WindowBudget{
-		Window:        h.window,
+		Window:        window,
 		Reserved:      outputReserve(),
 		Cap:           maxOutputTokens(),
 		Prompt:        h.meter.lastPromptTokens(),
@@ -201,8 +202,8 @@ func (h *Harness) Window() WindowBudget {
 		Measured:      h.meter.Measured(),
 		Rounds:        h.meter.rounds(),
 	}
-	if h.window > 0 {
-		b.PromptBudget = shapingBudget(h.window) - b.Overhead
+	if window > 0 {
+		b.PromptBudget = shapingBudget(window) - b.Overhead
 	}
 	h.noteMu.Lock()
 	b.Cuts, b.Folds = h.overflowCuts, h.overflowFolds
