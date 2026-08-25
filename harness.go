@@ -315,6 +315,14 @@ type Harness struct {
 	self    *subAgent // this harness's own record IN its parent; nil for a root
 	noteMu  sync.Mutex
 	queue   []queued // messages not yet delivered to the model
+
+	// Session state (goal/plan/todo/status) — see sessionstate.go. stateMu
+	// guards state: the tool runs on the turn's dispatcher goroutine while
+	// rehydration runs at Start. The sidecar path is derived from
+	// cfg.SessionFile on each read/write, so nothing to hold here but the
+	// state itself.
+	stateMu sync.Mutex
+	state   SessionState
 	// sideCalls accumulates the per-kind stats for the non-turn LLM calls
 	// (suggest, rephrase, commit, rescue) — see sidecall.go.
 	sideCalls *sideCallStats
@@ -1004,6 +1012,11 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// model what it hit. See overflow.go.
 		OnOverflow: h.onOverflow,
 	}
+	// Rehydrate the session's durable state before the tools are built, so the
+	// first system prompt already carries it. A resumed session (one with a
+	// session file) finds its goal/plan/todo the same way it finds its
+	// conversation; a fresh or in-memory session has none and renders nothing.
+	h.applySessionState()
 	// Tools, Dispatch, System and Preparer all depend on WHICH servers are
 	// running, and that changes mid-session (/rag on, /lsp off). applyTools
 	// owns those four fields; nothing else may set them.

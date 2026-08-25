@@ -65,9 +65,9 @@ type ServerState struct {
 	ID      string `json:"id"`
 	Running bool   `json:"running"`
 	// Auto reports whether this server starts on its own next session.
-	Auto         bool   `json:"auto"`
-	Tools        int    `json:"tools"`
-	Err          string `json:"err,omitempty"` // why the last start attempt failed
+	Auto         bool    `json:"auto"`
+	Tools        int     `json:"tools"`
+	Err          string  `json:"err,omitempty"`          // why the last start attempt failed
 	StartSeconds float64 `json:"startSeconds,omitempty"` // how long the last start took, in seconds
 }
 
@@ -328,6 +328,12 @@ func (h *Harness) rebuildTools() {
 	// rules at the top of recap.go for why that prompt was removed.
 	toolDefs = append(toolDefs, recapToolDef())
 	dispatch = withRecap(dispatch, h, report)
+	// session_state is available to BOTH roles and, like recap, always on: it
+	// is how a long task keeps its goal, plan, and open steps across context
+	// pressure and process restarts. The state it manages is per-session, so a
+	// child shares its parent's session file and thus its state.
+	toolDefs = append(toolDefs, sessionStateToolDef())
+	dispatch = withSessionState(dispatch, h, report)
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
 	// the moment churn is created rather than whenever usage is next measured.
 	dispatch = withRecapWatch(dispatch, h)
@@ -363,6 +369,13 @@ func (h *Harness) rebuildTools() {
 		if cfg.Worktree.Branch != "" {
 			sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
 		}
+	}
+
+	// The session's durable state, when there is any, goes into the system
+	// prompt so a resumed or compacted session reads its own goal and open
+	// steps before it does anything else. Empty state renders nothing.
+	if block := h.sessionStateBlock(); block != "" {
+		sys += block
 	}
 
 	// Outermost of all, so it sees every tool including ship and recap — recap
