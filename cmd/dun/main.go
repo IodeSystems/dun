@@ -116,7 +116,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /exit)")
 	noSuggest := flag.Bool("no-suggest", false, "disable next-message suggestions (on by default)")
-	rephrase := flag.Bool("rephrase", false, "rephrase each user prompt for specificity before acting on it (toggle at runtime: /prompt on)")
+	rephrase := flag.Bool("rephrase", false, "rephrase each user prompt for specificity before acting on it (toggle at runtime: /rephrase on)")
 
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
@@ -695,11 +695,11 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
 	})
 	in.setCtrlCmd(func(id, action string) {
-		// /prompt flips a pure engine-side toggle: no harness work, no asking,
+		// /rephrase flips a pure engine-side toggle: no harness work, no asking,
 		// so it does not go through runControlCmd. The TUI already echoed the
 		// command to the user; this event keeps the engine's and the TUI's
-		// knowledge in sync (a bare /prompt from the TUI still round-trips).
-		if id == "prompt" {
+		// knowledge in sync (a bare /rephrase from the TUI still round-trips).
+		if id == "rephrase" {
 			rephraseOn = action == "on"
 			return
 		}
@@ -1169,11 +1169,11 @@ func humanAsk(_ context.Context, question string, options []string, multi bool) 
 // suggestions after `done` when set. On by default.
 var suggestEnabled bool
 
-// rephraseOn is the engine-side /prompt toggle: when true, every user message
+// rephraseOn is the engine-side /rephrase toggle: when true, every user message
 // is rephrased for specificity before it starts a turn (see dun.Harness.
 // Rephrase). Off by default — the extra LLM round-trip is only worth it when
-// asked for. Set by the `prompt` control command and --rephrase; the TUI keeps
-// its own copy for the bare /prompt status, so the engine's copy only has to
+// asked for. Set by the `rephrase` control command and --rephrase; the TUI keeps
+// its own copy for the bare /rephrase status, so the engine's copy only has to
 // be right when a turn actually runs.
 var rephraseOn bool
 

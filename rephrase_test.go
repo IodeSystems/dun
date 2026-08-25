@@ -45,9 +45,9 @@ func rephraseHarness(t *testing.T, runner agent.LLMRunner) *Harness {
 
 // The point of the feature: the rewrite is what gets returned, ready to act on.
 func TestRephrase_ReturnsTheRewrite(t *testing.T) {
-	r := &cannedRephraseRunner{reply: "Add a /prompt [on|off] slash command that rephrases user prompts for specificity before acting.\n\nAcceptance criteria:\n1. /prompt on flips the mode on\n2. /prompt off flips it off\n3. with it on, a vague feature request comes back with testable criteria"}
+	r := &cannedRephraseRunner{reply: "Add a /rephrase [on|off] slash command that rephrases user prompts for specificity before acting.\n\nAcceptance criteria:\n1. /rephrase on flips the mode on\n2. /rephrase off flips it off\n3. with it on, a vague feature request comes back with testable criteria"}
 	h := rephraseHarness(t, r)
-	out, err := h.Rephrase(context.Background(), "add a /prompt command")
+	out, err := h.Rephrase(context.Background(), "add a /rephrase command")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestRephrase_UnchangedStaysUnchanged(t *testing.T) {
 // The guards keep directives and one-word answers verbatim WITHOUT paying a
 // round-trip for them.
 func TestRephrase_SkipsDirectivesAndTinyMessages(t *testing.T) {
-	for _, in := range []string{"/prompt on", "/suggest", "yes", "ok"} {
+	for _, in := range []string{"/rephrase on", "/suggest", "yes", "ok"} {
 		r := &cannedRephraseRunner{reply: "REWRITTEN"}
 		h := rephraseHarness(t, r)
 		out, err := h.Rephrase(context.Background(), in)

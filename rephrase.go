@@ -9,10 +9,10 @@ import (
 
 // Prompt rephrasing — make a vague request concrete BEFORE the agent acts on it.
 //
-// A one-line ask ("add a test plan for /prompt") reaches the model as a
+// A one-line ask ("add a rephrase mode for dun") reaches the model as a
 // conversation that is already three decisions deep (which files, which
 // behavior, which tests) and never asked whether that was the intent. With
-// rephrase on (/prompt on), each user message first goes through one throwaway
+// rephrase on (/rephrase on), each user message first goes through one throwaway
 // LLM call that rewrites it with specificity: a feature request comes back with
 // the acceptance criteria, a vague question with the ambiguity resolved.
 //
