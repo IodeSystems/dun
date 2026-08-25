@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/iodesystems/agentkit/llm"
 )
@@ -25,6 +26,10 @@ import (
 // never shaped (no LOD stubs, no compaction) and never logged — so "built
 // prompt" undercounted the session's real traffic, and the unshaped copy could
 // be larger than the turn it followed.
+
+// The round-trip is measured (h.noteSideCall, kind "suggest") — the same
+// reason as the "never logged" one: idle suggestions fire often enough that an
+// unmeasured call is a cost no view can see.
 
 // Suggestion is one predicted next user message.
 type Suggestion struct {
@@ -56,6 +61,7 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	}
 	msgs = append(msgs, llm.Message{Role: "user", Content: suggestInstruction})
 
+	start := time.Now()
 	ch, err := h.Session.Runner.ChatStream(ctx, msgs, nil, &llm.ChatOpts{
 		ResponseFormat: map[string]any{"type": "json_object"}, // JSON mode where supported
 	})
@@ -63,15 +69,21 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 		return nil, err
 	}
 	var b strings.Builder
+	var usage *llm.Usage
 	for c := range ch {
 		if c.Error != "" {
-			return nil, nil // give up quietly
+			h.noteSideCall("suggest", start, nil) // best-effort: count the failed call too
+			return nil, nil
 		}
 		b.WriteString(c.Content)
+		if c.Usage != nil {
+			usage = c.Usage
+		}
 		if c.Done {
 			break
 		}
 	}
+	h.noteSideCall("suggest", start, usage)
 	return parseSuggestions(b.String()), nil
 }
 
@@ -79,44 +91,44 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 // the model generates because it was trained to be agreeable. They make bad
 // quick-picks: the user has nothing to do with them.
 var fillerPhrases = map[string]struct{}{
-	"looks good":          {},
-	"looks good to me":    {},
-	"thanks":              {},
-	"thank you":           {},
-	"thank you!":          {},
-	"thanks!":             {},
-	"ok":                  {},
-	"okay":                {},
-	"sure":                {},
-	"got it":              {},
-	"understood":          {},
-	"that's it":           {},
-	"that's all":          {},
-	"done":                {},
-	"all done":            {},
-	"i'm done":            {},
-	"i think that's it":   {},
-	"i think that's all":  {},
-	"nothing else":        {},
-	"no thanks":           {},
-	"no thank you":        {},
-	"i'm good":            {},
-	"i'm good, thanks":    {},
-	"that's perfect":      {},
-	"perfect":             {},
-	"great":               {},
-	"awesome":             {},
-	"nice":                {},
-	"cool":                {},
-	"good":                {},
-	"good job":            {},
-	"well done":           {},
-	"excellent":           {},
-	"brilliant":           {},
-	"wow":                 {},
-	"wow, that's great":   {},
+	"looks good":                 {},
+	"looks good to me":           {},
+	"thanks":                     {},
+	"thank you":                  {},
+	"thank you!":                 {},
+	"thanks!":                    {},
+	"ok":                         {},
+	"okay":                       {},
+	"sure":                       {},
+	"got it":                     {},
+	"understood":                 {},
+	"that's it":                  {},
+	"that's all":                 {},
+	"done":                       {},
+	"all done":                   {},
+	"i'm done":                   {},
+	"i think that's it":          {},
+	"i think that's all":         {},
+	"nothing else":               {},
+	"no thanks":                  {},
+	"no thank you":               {},
+	"i'm good":                   {},
+	"i'm good, thanks":           {},
+	"that's perfect":             {},
+	"perfect":                    {},
+	"great":                      {},
+	"awesome":                    {},
+	"nice":                       {},
+	"cool":                       {},
+	"good":                       {},
+	"good job":                   {},
+	"well done":                  {},
+	"excellent":                  {},
+	"brilliant":                  {},
+	"wow":                        {},
+	"wow, that's great":          {},
 	"i don't have anything else": {},
-	"i have nothing else": {},
+	"i have nothing else":        {},
 }
 
 // parseSuggestions extracts the JSON object (defensively — small models like to

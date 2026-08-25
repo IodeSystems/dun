@@ -3482,3 +3482,95 @@ func TestTUI_ExactCostReplacesTheEstimate(t *testing.T) {
 		t.Errorf("stale estimated rows survived: %v", m.ctxStats.systemParts)
 	}
 }
+
+// readSideCalls replaces the TUI's copy on every usage event — the engine
+// sends the session total, not a delta. A second event must not double the
+// first, and an event without the field (an older engine) must not clear a
+// newer engine's numbers... or wait, it must: the map is the whole truth, and
+// an engine that stopped sending it is an engine that has no side calls.
+func TestSideCalls_ReadReplacesAndToleratesMissing(t *testing.T) {
+	var s contextStats
+	s.readSideCalls(map[string]any{"side_calls": map[string]any{
+		"suggest": map[string]any{"calls": 2.0, "latency_ms": 600.0, "last_ms": 300.0,
+			"processed": 80.0, "cached": 120.0, "generated": 80.0, "avg_ms": 300.0, "tok_per_s": 133.0},
+	}})
+	if got := s.sideCalls["suggest"].calls; got != 2 {
+		t.Fatalf("first read: calls = %d, want 2", got)
+	}
+	// Same kind reported again with a bigger total: replace, don't sum.
+	s.readSideCalls(map[string]any{"side_calls": map[string]any{
+		"suggest": map[string]any{"calls": 3.0, "latency_ms": 900.0, "last_ms": 300.0,
+			"processed": 120.0, "cached": 180.0, "generated": 120.0, "avg_ms": 300.0, "tok_per_s": 133.0},
+	}})
+	if got := s.sideCalls["suggest"].calls; got != 3 {
+		t.Fatalf("second read must replace, not accumulate: calls = %d", got)
+	}
+	// A malformed row is dropped, not fatal.
+	s.readSideCalls(map[string]any{"side_calls": map[string]any{"commit": "bogus"}})
+	if len(s.sideCalls) != 0 {
+		t.Fatalf("bogus row must not survive: %v", s.sideCalls)
+	}
+	// No field at all: an older engine (or a turn from before the first side
+	// call). The read leaves the previous snapshot in place — the last real
+	// numbers are still the best knowledge, and a section that blinks away on
+	// every turn is worse than one that lags.
+	s.readSideCalls(map[string]any{"side_calls": map[string]any{
+		"suggest": map[string]any{"calls": 3.0},
+	}})
+	s.readSideCalls(map[string]any{"total": 10})
+	if got := s.sideCalls["suggest"].calls; got != 3 {
+		t.Fatalf("missing field must not erase the last real snapshot: calls = %d", got)
+	}
+}
+
+// sideCallBlock renders one row per kind, in a stable (sorted) order, with the
+// kind's plain-English meaning — a reader of /context should not have to know
+// which helper "rescue" names.
+func TestSideCallBlock_Renders(t *testing.T) {
+	var s contextStats
+	s.readSideCalls(map[string]any{"side_calls": map[string]any{
+		"commit": map[string]any{"calls": 1.0, "latency_ms": 1200.0, "last_ms": 1200.0,
+			"processed": 500.0, "cached": 400.0, "generated": 60.0, "avg_ms": 1200.0, "tok_per_s": 50.0},
+		"suggest": map[string]any{"calls": 2.0, "latency_ms": 600.0, "last_ms": 300.0,
+			"processed": 80.0, "cached": 120.0, "generated": 80.0, "avg_ms": 300.0, "tok_per_s": 133.0},
+	}})
+	out := sideCallBlock(&s)
+	if out == "" {
+		t.Fatal("side calls present but the block is empty")
+	}
+	for _, want := range []string{"side calls", "commit", "suggest",
+		"commit messages (/worktree commit)", "next-message predictions (/suggest)",
+		"1 call", "2 calls", "avg 1200 ms", "last 1200 ms", "last 300 ms",
+		"500 proc / 400 cached / 60 gen", "50 tok/s", "133 tok/s"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in block:\n%s", want, out)
+		}
+	}
+	// Stable order: commit before suggest, every time.
+	if strings.Index(out, "commit") > strings.Index(out, "suggest") {
+		t.Errorf("rows must be sorted: %s", out)
+	}
+
+	var empty contextStats
+	if got := sideCallBlock(&empty); got != "" {
+		t.Errorf("no side calls means no section: %q", got)
+	}
+}
+
+// /context shows the side-call section: the usage event is what carries it in.
+func TestContext_ShowsSideCalls(t *testing.T) {
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	m.ctxStats.readSideCalls(map[string]any{"side_calls": map[string]any{
+		"rephrase": map[string]any{"calls": 1.0, "latency_ms": 400.0, "last_ms": 400.0,
+			"processed": 200.0, "cached": 100.0, "generated": 40.0, "avg_ms": 400.0, "tok_per_s": 100.0},
+	}})
+	m.convo = []convoEntry{{collapsed: "old"}}
+	m.showContext()
+	last := m.convo[len(m.convo)-1].collapsed
+	for _, want := range []string{"side calls", "rephrase", "prompt rewrites (/rephrase)", "1 call"} {
+		if !strings.Contains(last, want) {
+			t.Errorf("/context missing %q:\n%s", want, last)
+		}
+	}
+}

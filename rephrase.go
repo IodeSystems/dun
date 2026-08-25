@@ -3,6 +3,7 @@ package dun
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/iodesystems/agentkit/llm"
 )
@@ -28,6 +29,9 @@ import (
 //     rephrasing call must never be the reason a message is not acted on.
 //
 // Off by default: the extra round-trip is only worth it when asked for.
+//
+// The round-trip is measured (h.noteSideCall, kind "rephrase"): with the
+// toggle on, every message pays one, and /context shows where that went.
 
 const rephraseInstruction = `Rewrite the user's message below so an expert coding agent can act on it without asking.
 
@@ -57,21 +61,28 @@ func (h *Harness) Rephrase(ctx context.Context, task string) (string, error) {
 		return task, nil
 	}
 
+	start := time.Now()
 	ch, err := h.Session.Runner.ChatStream(ctx,
 		[]llm.Message{{Role: "user", Content: rephraseInstruction + task}}, nil, nil)
 	if err != nil {
 		return task, nil
 	}
 	var b strings.Builder
+	var usage *llm.Usage
 	for c := range ch {
 		if c.Error != "" {
+			h.noteSideCall("rephrase", start, nil)
 			return task, nil
 		}
 		b.WriteString(c.Content)
+		if c.Usage != nil {
+			usage = c.Usage
+		}
 		if c.Done {
 			break
 		}
 	}
+	h.noteSideCall("rephrase", start, usage)
 	out := strings.TrimSpace(b.String())
 	if out == "" || strings.TrimSpace(out) == trimmed {
 		return task, nil

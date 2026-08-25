@@ -315,6 +315,9 @@ type Harness struct {
 	self    *subAgent // this harness's own record IN its parent; nil for a root
 	noteMu  sync.Mutex
 	queue   []queued // messages not yet delivered to the model
+	// sideCalls accumulates the per-kind stats for the non-turn LLM calls
+	// (suggest, rephrase, commit, rescue) — see sidecall.go.
+	sideCalls *sideCallStats
 	// forcedToolCalls are tool calls queued by the host (e.g. /ship) that
 	// should be injected into the next LLM response's tool_calls, so they
 	// appear as if the model made them. Guarded by noteMu.
@@ -909,7 +912,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	h := &Harness{mgr: mgr, store: store, client: cfg.Client,
 		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
 		cfg: cfg, specs: servers, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
-		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID}
+		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
+		sideCalls: &sideCallStats{}}
 
 	// Server→client push. Only the OWNER registers: a child shares its
 	// parent's manager, and registering again would replace the parent's sink

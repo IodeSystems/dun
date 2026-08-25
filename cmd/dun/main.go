@@ -901,6 +901,12 @@ func usageEvent(h *dun.Harness, u agent.TokenUsage) event {
 		"system_exact":         bd.Exact, "system_prompt": bd.Prompt,
 		"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)}
 	addWindow(ev, h.Window())
+	// The non-turn LLM calls (suggest, rephrase, commit, rescue) — see
+	// dun.sidecall.go. Per-kind totals, so /context can say where the money
+	// went outside the conversation itself.
+	if sc := h.SideCalls(); len(sc) > 0 {
+		ev["side_calls"] = sc
+	}
 	return ev
 }
 

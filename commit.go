@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/iodesystems/agentkit/llm"
 )
@@ -30,6 +31,11 @@ import (
 //   - It is CONFIRMED. Unlike a recap (which is undone by reading a file), a
 //     commit message is written once and read forever, so the human sees it and
 //     can regenerate or cancel before anything is committed.
+
+// Like every side call, it is MEASURED (h.noteSideCall, kind "commit"): the
+// final chunk already carries the provider's usage plus a client-measured
+// latency, and throwing it away is how a session that spent more time on
+// commit messages than on turns looked exactly like one that did not.
 
 // CommitConfig is the `commit` section of dun.json: how the message is written.
 type CommitConfig struct {
@@ -122,20 +128,26 @@ func (h *Harness) CommitMessage(ctx context.Context, wt *Worktree) (string, erro
 	b.WriteString("\n\nReply with ONLY the commit message — the subject line, a blank line, then the body. " +
 		"No code fences, no preamble, no closing remarks, and no trailer lines.")
 
+	start := time.Now()
 	ch, err := h.Session.Runner.ChatStream(ctx, []llm.Message{{Role: "user", Content: b.String()}}, nil, nil)
 	if err != nil {
 		return "", err
 	}
 	var out strings.Builder
+	var usage *llm.Usage
 	for c := range ch {
 		if c.Error != "" {
 			return "", fmt.Errorf("%s", c.Error)
 		}
 		out.WriteString(c.Content)
+		if c.Usage != nil {
+			usage = c.Usage
+		}
 		if c.Done {
 			break
 		}
 	}
+	h.noteSideCall("commit", start, usage)
 	msg := cleanCommitMessage(out.String())
 	if msg == "" {
 		return "", fmt.Errorf("the model returned no message")

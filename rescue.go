@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -30,6 +31,11 @@ import (
 // "Compaction chaining" = repeat while it still does not fit. Each pass folds a
 // contiguous older prefix into one marker, so the prompt shrinks monotonically;
 // the cap below bounds the number of LLM calls this can spend.
+//
+// Each fold call is measured (h.noteSideCall, kind "rescue"): a chained
+// compaction is several of them in a row, and those are the big ones — a
+// handoff over half the session — so the /context view has to say what they
+// cost.
 
 // maxRescuePasses bounds how many split-and-fold passes ONE turn may spend.
 // Two covers the realistic case (one pass halves the payload; a second folds
@@ -217,6 +223,7 @@ func (h *Harness) summarizeRescue(ctx context.Context, older []agent.Entry) (str
 		fmt.Fprintf(&b, "%d. [%s] %s\n", i+1, label, content)
 	}
 
+	start := time.Now()
 	ch, err := h.client.ChatStream(ctx, []llm.Message{
 		{Role: "system", Content: "You are a compaction worker. Produce the state handoff only."},
 		{Role: "user", Content: b.String()},
@@ -225,11 +232,16 @@ func (h *Harness) summarizeRescue(ctx context.Context, older []agent.Entry) (str
 		return "", err
 	}
 	var out strings.Builder
+	var usage *llm.Usage
 	for chunk := range ch {
 		if chunk.Error != "" {
+			h.noteSideCall("rescue", start, nil)
 			return "", fmt.Errorf("%s", chunk.Error)
 		}
 		out.WriteString(chunk.Content)
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
 		if chunk.Done {
 			go func() {
 				for range ch {
@@ -238,6 +250,7 @@ func (h *Harness) summarizeRescue(ctx context.Context, older []agent.Entry) (str
 			break
 		}
 	}
+	h.noteSideCall("rescue", start, usage)
 	s := strings.TrimSpace(out.String())
 	if s == "" {
 		return "", fmt.Errorf("model returned empty summary")

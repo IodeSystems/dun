@@ -362,6 +362,25 @@ type contextStats struct {
 	// Tool calls injected by the host (e.g. /ship) that appear as if the
 	// model made them.
 	forcedToolCalls int
+
+	// Side calls — the LLM calls that are not the turn: /suggest predictions,
+	// /rephrase rewrites, commit messages, rescue compactions. Per-kind running
+	// totals carried on the usage event; the engine sends the whole map each
+	// turn, so the read replaces rather than accumulates.
+	sideCalls map[string]sideCallStats
+}
+
+// sideCallStats is one /context row: the per-kind totals for the calls that
+// are not the conversation turn.
+type sideCallStats struct {
+	calls     int
+	latencyMS int64
+	lastMS    int64
+	processed int
+	cached    int
+	generated int
+	avgMS     int64
+	tokPerS   float64
 }
 
 // toolBlock carries a tool call's raw input + complete output so enter can open
@@ -1810,6 +1829,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// Session-level stats (cumulative — use last value, not sum).
 		m.ctxStats.readSystemCost(ev)
 		m.ctxStats.readWindow(ev)
+		m.ctxStats.readSideCalls(ev)
 		if v := evNum(ev["forced_calls"]); v > 0 {
 			m.ctxStats.forcedToolCalls = int(v)
 		}
@@ -3063,6 +3083,59 @@ func (m *tuiModel) showConfig() {
 	m.append(b.String())
 }
 
+// sideCallBlock renders the per-kind stats for the LLM calls that are not the
+// conversation turn. An empty map means no side calls this session (or an
+// engine that predates the accounting), and the section says nothing at all —
+// a "0 calls" row would be a fact about the absence of facts.
+//
+// Each row names what the kind IS in plain words, because the kind string is
+// an engine identifier and a reader of /context should not have to know which
+// helper "rescue" names. Latency shows the average and the last call — the
+// average hides a slow one, the last one hides a fast streak; the two
+// disagreeing is the interesting case. Tokens are per-kind running totals:
+// processed/cached is the prompt the call re-read, generated is what it wrote.
+func sideCallBlock(s *contextStats) string {
+	if len(s.sideCalls) == 0 {
+		return ""
+	}
+	// Stable order: map iteration is random and a re-render of /context must
+	// not shuffle its own rows.
+	kinds := make([]string, 0, len(s.sideCalls))
+	for k := range s.sideCalls {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+
+	what := map[string]string{
+		"suggest":  "next-message predictions (/suggest)",
+		"rephrase": "prompt rewrites (/rephrase)",
+		"commit":   "commit messages (/worktree commit)",
+		"rescue":   "context rescue compaction",
+	}
+
+	var b strings.Builder
+	b.WriteString("\n\n  " + stHeader.Render("side calls"))
+	b.WriteString(stDim.Render(" — LLM calls that are not the turn"))
+	for _, k := range kinds {
+		r := s.sideCalls[k]
+		label := k
+		if w, ok := what[k]; ok {
+			label = k + " (" + w + ")"
+		}
+		b.WriteString("\n  " + stDim.Render(fmt.Sprintf("%-12s", label)))
+		b.WriteString(plural(r.calls, "call"))
+		if r.calls > 0 {
+			b.WriteString(stDim.Render(fmt.Sprintf(" · avg %d ms · last %d ms", r.avgMS, r.lastMS)))
+		}
+		tok := stDim.Render(fmt.Sprintf(" · %d proc / %d cached / %d gen", r.processed, r.cached, r.generated))
+		if r.tokPerS > 0 {
+			tok += fmt.Sprintf(" · %.0f tok/s", r.tokPerS)
+		}
+		b.WriteString(tok)
+	}
+	return b.String()
+}
+
 // windowBlock renders how the context window is divided.
 //
 // The section /context was missing, and the reason the failure it describes went
@@ -3152,6 +3225,7 @@ func (m *tuiModel) showContext() {
 	b.WriteString("\n  " + stDim.Render("active:     ") + fmt.Sprintf("%d", s.activeTokens) + stDim.Render(" (last turn's window)"))
 	b.WriteString("\n  " + stDim.Render("turns:      ") + fmt.Sprintf("%d", s.turns))
 
+	b.WriteString(sideCallBlock(s))
 	b.WriteString(windowBlock(s))
 
 	b.WriteString("\n\n  " + stHeader.Render("conversation"))
@@ -3710,6 +3784,36 @@ func (s *contextStats) readWindow(ev map[string]any) {
 	s.ratioRounds = int(evNum(ev["ratio_rounds"]))
 	s.windowCuts = int(evNum(ev["window_cuts"]))
 	s.windowFolds = int(evNum(ev["window_folds"]))
+}
+
+// readSideCalls decodes the per-kind side-call totals off a usage event. The
+// engine sends the whole map (a session total, not a delta), so the read
+// REPLACES the TUI's copy. An event without the field (an older engine, or a
+// turn from before the first side call) leaves the previous snapshot in
+// place: the last real numbers are still the best knowledge, and a section
+// that blinks away on every turn is worse than one that lags.
+func (s *contextStats) readSideCalls(ev map[string]any) {
+	v, ok := ev["side_calls"].(map[string]any)
+	if !ok {
+		return
+	}
+	s.sideCalls = make(map[string]sideCallStats, len(v))
+	for kind, row := range v {
+		rm, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		s.sideCalls[kind] = sideCallStats{
+			calls:     int(evNum(rm["calls"])),
+			latencyMS: int64(evNum(rm["latency_ms"])),
+			lastMS:    int64(evNum(rm["last_ms"])),
+			processed: int(evNum(rm["processed"])),
+			cached:    int(evNum(rm["cached"])),
+			generated: int(evNum(rm["generated"])),
+			avgMS:     int64(evNum(rm["avg_ms"])),
+			tokPerS:   evNum(rm["tok_per_s"]),
+		}
+	}
 }
 
 // evParts decodes the context breakdown rows off a usage event. A row that is
