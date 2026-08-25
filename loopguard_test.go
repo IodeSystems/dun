@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
 
@@ -239,7 +238,7 @@ func TestLoopGuard_RefusalStillCarriesQueuedMessages(t *testing.T) {
 func TestLoopGuard_IsTransparentWhenItDoesNotFire(t *testing.T) {
 	h := newNoteHarness(t)
 	inner := &counting{result: "the real result"}
-	var d agent.ToolDispatcher = withLoopGuard(inner.dispatch, h)
+	d := withLoopGuard(inner.dispatch, h)
 
 	out, err := d(context.Background(), call("exec", `{"command":"ls"}`))
 	if err != nil || out != "the real result" {
