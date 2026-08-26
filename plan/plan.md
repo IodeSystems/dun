@@ -101,6 +101,28 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ✅ 8. The pane grew and the offset stayed behind (2026-08-26)
+Follow-up to the bottom-anchor fix (026acbb), reported from a phone: open the
+soft keyboard, close it, and the conversation is no longer at the bottom.
+
+- **Not the anchoring math.** A sweep of every park position against five
+  keyboard heights round-trips exactly. The bug is that `maxYOffset` is
+  `len(lines) - Height`, so GROWING the pane SHRINKS it — and every height
+  change assigned `vp.Height` directly. `SetYOffset` clamps; a bare field
+  assignment does not, so the offset was left past the end of the content.
+- **Why nothing caught it.** `AtBottom` is `YOffset >= maxYOffset`, which
+  answers TRUE from outside the content — so the pane reported itself pinned
+  while drawing blank rows under the last line, and no policy pulled it back.
+- **Why only sometimes.** A non-streaming grow is rescued by `applyScroll`'s
+  `GotoBottom`. Mid-stream it takes the "keep the last user message in view"
+  branch, which leaves `YOffset` alone — so the failure needed a reply to be
+  arriving, which is exactly when a phone user closes the keyboard.
+- Fix: `convoPane.setHeight` assigns and re-clamps, used at all four sites that
+  set the height (the Update funnel's two branches, the width path, and View).
+  Measured before the fix: `yoff=44 max=32`, 12 rows past the end.
+- **next**: confirm on the actual Android session — the reproduction here is a
+  simulated resize, not a real terminal.
+
 ### ✅ 7. Every exec is a job; a slow one hands itself over (2026-08-26)
 A live session sat "working" for ten minutes with ZERO requests to the LLM,
 twice in one hour. It was not slow and it was not thinking — it was blocked in a

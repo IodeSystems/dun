@@ -39,6 +39,20 @@ func (p *convoPane) SetLines(lines []string) {
 	}
 }
 
+// setHeight resizes the window and re-clamps the offset.
+//
+// maxYOffset is len(lines) - Height, so GROWING the pane SHRINKS the furthest
+// it can scroll: an offset that was legal a moment ago can end up past the end.
+// A bare `Height = n` leaves it there, and AtBottom (YOffset >= maxYOffset)
+// then answers TRUE from outside the content — so nothing pulls it back and the
+// pane draws blank rows under the last line. That is what closing a soft
+// keyboard did: the pane grew, the offset stayed, and the conversation was
+// anchored to nothing.
+func (p *convoPane) setHeight(h int) {
+	p.Height = max(1, h)
+	p.SetYOffset(p.YOffset)
+}
+
 // maxYOffset is the furthest down the content can scroll: the last full window.
 func (p convoPane) maxYOffset() int { return max(0, len(p.lines)-p.Height) }
 

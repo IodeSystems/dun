@@ -679,10 +679,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// expects to still be looking at it.
 				if !t.scrollPinned && !selMode {
 					bottom := t.vp.YOffset + t.vp.Height
-					t.vp.Height = got
+					t.vp.setHeight(got)
 					t.vp.SetYOffset(bottom - got)
 				} else {
-					t.vp.Height = got
+					t.vp.setHeight(got)
 				}
 				t.applyScroll(selMode)
 			}
@@ -732,7 +732,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Now that the new width has reached the input (lowerView measures it),
 		// the row budget is knowable — refresh() scrolls against it.
-		m.vp.Height = m.convoHeight()
+		m.vp.setHeight(m.convoHeight())
 		m.refresh()
 		return m, nil
 
@@ -2263,7 +2263,7 @@ func (m tuiModel) View() string {
 	}
 	convoH := m.convoHeight()
 	vp := m.vp
-	vp.Height = convoH
+	vp.setHeight(convoH)
 	// Focus cue lives entirely in the divider's bright half — no pane borders.
 	div := divider(m.w, m.focus == focusConvo && !m.asking)
 

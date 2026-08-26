@@ -120,3 +120,50 @@ func TestResize_AtTheTopClampsInsteadOfDrifting(t *testing.T) {
 		t.Errorf("YOffset = %d after growing back", got)
 	}
 }
+
+// Growing the pane must never leave the offset past the end of the content.
+//
+// maxYOffset is len(lines) - Height, so GROWING the window SHRINKS it. Closing
+// the soft keyboard is a grow, and a bare `Height = n` left YOffset 12 rows
+// beyond the content: AtBottom (YOffset >= maxYOffset) answered TRUE from
+// outside it, so no scroll policy pulled it back and the pane drew blank rows
+// under the last line. Mid-stream is where it showed, because applyScroll's
+// streaming branch keeps the last user message in view and leaves YOffset alone.
+func TestResize_GrowingNeverLeavesTheOffsetPastTheEnd(t *testing.T) {
+	v := filled(t, 60, 12) // keyboard up
+	v.send("a new question")
+	v.event(map[string]any{"type": "token", "text": "streaming reply"})
+
+	v.resize(60, 24) // keyboard down, mid-stream
+
+	m := v.model()
+	if m.vp.YOffset > m.vp.maxYOffset() {
+		t.Fatalf("offset past the end: yoff=%d max=%d (height %d, %d lines)",
+			m.vp.YOffset, m.vp.maxYOffset(), m.vp.Height, len(m.vp.lines))
+	}
+}
+
+// The same invariant over every height change, streaming or not. A soft
+// keyboard does not toggle between two tidy sizes — the composer grows as you
+// type, the task line comes and goes, and each is another height change.
+func TestResize_OffsetStaysInRangeAcrossEveryHeightChange(t *testing.T) {
+	sizes := []int{8, 12, 16, 24}
+	for _, streaming := range []bool{false, true} {
+		for _, from := range sizes {
+			for _, to := range sizes {
+				v := filled(t, 60, from)
+				if streaming {
+					v.send("a new question")
+					v.event(map[string]any{"type": "token", "text": "partial reply"})
+				}
+				v.resize(60, to)
+
+				m := v.model()
+				if m.vp.YOffset > m.vp.maxYOffset() {
+					t.Errorf("streaming=%v %d->%d: yoff=%d past max=%d",
+						streaming, from, to, m.vp.YOffset, m.vp.maxYOffset())
+				}
+			}
+		}
+	}
+}
