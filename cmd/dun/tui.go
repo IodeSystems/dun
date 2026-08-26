@@ -465,7 +465,12 @@ type tuiModel struct {
 	convo       []convoEntry   // finalized conversation blocks
 	pendingTool int            // index of a tool call awaiting its result; -1 = none
 	pendingArgs map[string]any // args of the pending tool call (for its renderer)
-	cur         string         // streaming assistant text (not yet finalized); string, not
+	// activeTool is the in-flight tool call rendered into the status line so
+	// "working…" says WHAT is running, not just that something is. Set on
+	// tool_call, cleared on tool_result. Empty while the model is thinking
+	// (no tool in flight) — then the line falls back to plain "working…".
+	activeTool string
+	cur        string // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
 	tools         []string
 	branch        string                // worktree branch (from the `workspace` event)
@@ -1689,6 +1694,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argPreview(args, 80) + ")")})
 		m.pendingTool = len(m.convo) - 1
 		m.pendingArgs = args
+		m.activeTool = str(ev["tool"]) + "(" + argPreview(args, 40) + ")"
 		m.refresh()
 	case "tool_result":
 		result := str(ev["result"])
@@ -1697,6 +1703,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			// Fold the result into its call so the pair is one collapsible unit.
 			m.convo[idx] = ce
 			m.pendingTool, m.pendingArgs = -1, nil
+			m.activeTool = ""
 		} else {
 			m.convo = append(m.convo, ce)
 		}
@@ -2261,7 +2268,11 @@ func (m tuiModel) View() string {
 	case m.retry != "":
 		status = stNote.Render("⏳ "+m.retry) + stDim.Render(m.retryCountdown()+"  ("+m.exitHint()+")")
 	case m.busy:
-		status = m.spin.View() + stDim.Render(" working…"+m.busyElapsed()+m.queuedHint()+"  ("+m.exitHint()+")")
+		what := ""
+		if m.activeTool != "" {
+			what = " " + m.activeTool
+		}
+		status = m.spin.View() + stDim.Render(" working…"+what+m.busyElapsed()+m.queuedHint()+"  ("+m.exitHint()+")")
 	case m.focus == focusActivity && m.actLevel == actCollapsed:
 		status = stDim.Render("activity  ·  → open · tab input · " + m.exitHint())
 	case m.focus == focusActivity:
@@ -2932,6 +2943,7 @@ func init() {
 			m.convo = nil
 			m.cur = ""
 			m.pendingTool, m.pendingArgs = -1, nil
+			m.activeTool = ""
 			m.sel, m.blockH = -1, nil
 			m.busy, m.asking = false, false
 			m.append(stDim.Render("session cleared — fresh start"))
