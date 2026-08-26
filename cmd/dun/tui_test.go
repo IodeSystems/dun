@@ -3586,3 +3586,33 @@ func TestContext_ShowsSideCalls(t *testing.T) {
 		}
 	}
 }
+
+// An exec call line IS its command. `exec(command=go test ./...)` makes a
+// reader parse a wrapper to reach the one thing on the line that matters.
+func TestCallText_ExecReadsAsAShellCommand(t *testing.T) {
+	got := callText("exec", map[string]any{"command": "go test ./..."}, 80)
+	if got != "$ go test ./..." {
+		t.Errorf("want a prompt line, got %q", got)
+	}
+	// Other args still show — they are not derivable from the command.
+	got = callText("exec", map[string]any{"command": "sleep 60", "timeout": 120}, 80)
+	if !strings.HasPrefix(got, "$ sleep 60") || !strings.Contains(got, "timeout=120") {
+		t.Errorf("timeout must survive: %q", got)
+	}
+	// A multi-line script collapses; expanded, it stays verbatim.
+	args := map[string]any{"command": "set -e\ngo build ./...\ngo test ./..."}
+	if got := callText("exec", args, 80); strings.Contains(got, "\n") {
+		t.Errorf("collapsed line must be one line: %q", got)
+	}
+	if full := callFull("exec", args); !strings.Contains(full, "go build ./...\ngo test ./...") {
+		t.Errorf("expanded must keep the script intact: %q", full)
+	}
+	// Every other tool keeps the generic form.
+	if got := callText("node_read", map[string]any{"path": "a.go"}, 80); got != "⚙ node_read(path=a.go)" {
+		t.Errorf("non-exec unchanged: %q", got)
+	}
+	// No command (a malformed call) falls back rather than showing a bare "$".
+	if got := callText("exec", map[string]any{"timeout": 5}, 80); !strings.HasPrefix(got, "⚙ exec(") {
+		t.Errorf("want the generic form: %q", got)
+	}
+}

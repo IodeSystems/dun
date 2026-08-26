@@ -1721,10 +1721,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.suggestions = nil
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
-		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + str(ev["tool"]) + "(" + argPreview(args, 80) + ")")})
+		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(str(ev["tool"]), args, 80))})
 		m.pendingTool = len(m.convo) - 1
 		m.pendingArgs = args
-		m.activeTool = str(ev["tool"]) + "(" + argPreview(args, 40) + ")"
+		m.activeTool = callText(str(ev["tool"]), args, 40)
 		m.refresh()
 	case "tool_result":
 		result := str(ev["result"])
@@ -2423,16 +2423,13 @@ func (m *tuiModel) flushCur() {
 // complete output).
 func (m *tuiModel) foldedTool(tool string, args map[string]any, result string) convoEntry {
 	preview, body := renderToolResult(renderCtx{tool: tool, args: args, result: result, width: m.vp.Width})
-	callShort := stTool.Render("⚙ " + tool + "(" + argPreview(args, 80) + ")")
-	callFull := stTool.Render("⚙ " + tool)
+	callShort := stTool.Render(callText(tool, args, 80))
+	callLong := callFull(tool, args)
 	af := argFull(args)
-	if af != "" {
-		callFull += "\n" + af
-	}
 	return convoEntry{
 		collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
-		full:      stDim.Render("▾ ") + callFull + "\n" + body,
-		raw:       stDim.Render("▾ ") + callFull + "\n" + stDim.Render(result),
+		full:      stDim.Render("▾ ") + callLong + "\n" + body,
+		raw:       stDim.Render("▾ ") + callLong + "\n" + stDim.Render(result),
 		tool:      &toolBlock{name: tool, input: af, output: body, raw: result},
 	}
 }
@@ -2448,7 +2445,7 @@ func (m *tuiModel) replay(items []any) {
 	flushPend := func() {
 		if hadPend {
 			// A tool_call with no following result (truncated session): show it alone.
-			m.convo = append(m.convo, convoEntry{collapsed: stTool.Render("⚙ " + pendName + "(" + argPreview(pendArgs, 80) + ")")})
+			m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(pendName, pendArgs, 80))})
 			pendName, pendID, pendArgs, hadPend = "", "", nil, false
 		}
 	}
@@ -2835,6 +2832,54 @@ func argPreview(args map[string]any, max int) string {
 		parts = append(parts, k+"="+clip(oneLine(fmt.Sprint(args[k])), 48))
 	}
 	return clip(strings.Join(parts, ", "), max)
+}
+
+// callText is the one-line form of a tool call — `⚙ tool(k=v, …)` — for the
+// collapsed block and the status line.
+//
+// exec is the exception: a shell command reads as a shell command, so it comes
+// out as `$ go test ./...` and the `exec(command=` wrapper, which tells a reader
+// nothing they did not already know, is dropped. Any OTHER arg (timeout) still
+// shows, in parentheses after the command.
+func callText(tool string, args map[string]any, max int) string {
+	if line, ok := execCallText(args, 40); ok && tool == "exec" {
+		return clip(oneLine(line), max)
+	}
+	return "⚙ " + tool + "(" + argPreview(args, max) + ")"
+}
+
+// execCallText renders exec's args as a shell prompt line. ok=false when there
+// is no usable command, so the caller falls back to the generic form.
+func execCallText(args map[string]any, restMax int) (string, bool) {
+	cmd, _ := args["command"].(string)
+	if strings.TrimSpace(cmd) == "" {
+		return "", false
+	}
+	rest := make(map[string]any, len(args))
+	for k, v := range args {
+		if k != "command" {
+			rest[k] = v
+		}
+	}
+	line := "$ " + cmd
+	if p := argPreview(rest, restMax); p != "" {
+		line += "  (" + p + ")"
+	}
+	return line, true
+}
+
+// callFull is the expanded call line: the tool name over its args, or — for
+// exec — the command verbatim, newlines and all, since a multi-line script is
+// exactly what you expanded the block to read.
+func callFull(tool string, args map[string]any) string {
+	if line, ok := execCallText(args, 200); ok && tool == "exec" {
+		return stTool.Render(line)
+	}
+	full := stTool.Render("⚙ " + tool)
+	if af := argFull(args); af != "" {
+		full += "\n" + af
+	}
+	return full
 }
 
 // argFull renders the call's args in full (multi-line values kept intact), shown
