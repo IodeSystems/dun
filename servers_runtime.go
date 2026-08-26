@@ -185,9 +185,17 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.ID == ServerDocs {
 		ingestWorkspace(s.Command, h.cfg.Workspace)
 	}
+	env := s.Env
+	// Arm the AGENTS.md guard on the code server: a file-access hook that
+	// cancels reads/edits until the model has seen the project's rules.
+	if s.ID == ServerCode {
+		if hookEnv := agentsHookEnv(); hookEnv != nil {
+			env = append(env, hookEnv...)
+		}
+	}
 	err := h.mgr.StartServer(ctx, mcpmgr.MCPConfig{
 		ID: s.ID, Name: s.ID, Command: s.Command, Args: s.Args,
-		Env: s.Env, Timeout: int(timeout / time.Second),
+		Env: env, Timeout: int(timeout / time.Second),
 	})
 	if err == nil {
 		err = waitServerTools(ctx, h.mgr, s.ID, timeout)
