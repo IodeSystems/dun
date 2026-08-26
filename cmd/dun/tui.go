@@ -73,9 +73,11 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 		m.fatalErr = "engine did not start: " + startErr.Error()
 		m.starting = false
 	}
-	// WithMouseCellMotion makes the terminal (and tmux) forward wheel events to
-	// us instead of scrolling its own scrollback; the viewport consumes them.
-	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}
+	// No mouse: under tmux on Termux, mouse mode makes taps get consumed as
+	// mouse events, which blocks the Android soft keyboard from popping when
+	// you tap the pane. Wheel scrolling under tmux is unavailable without
+	// mouse mode — scroll with arrow keys instead.
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
 	// The shift+enter filter (keyfilter.go) has to see the bytes before
 	// bubbletea's parser reduces the sequence to the letter M — so it goes in as
 	// the input reader. bubbletea only puts the terminal into RAW mode when its

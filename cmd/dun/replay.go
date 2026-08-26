@@ -184,7 +184,8 @@ func runReplay(path string, pacing replayPacing, o tuiOpts) error {
 	m.opts = o
 	m.replaying = true
 	m.model, m.url = o.model, o.url
-	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	// No mouse — same Termux/tmux keyboard reason as runTUI.
+	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	proc.close()
 	return err
 }
