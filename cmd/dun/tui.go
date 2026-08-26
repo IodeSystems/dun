@@ -663,8 +663,28 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// newest line until something else happened.
 		if t.h > 0 {
 			if got := t.convoHeight(); got != t.vp.Height {
-				t.vp.Height = got
-				t.applyScroll(t.focus == focusConvo && !t.asking && len(t.convo) > 0)
+				selMode := t.focus == focusConvo && !t.asking && len(t.convo) > 0
+				// ANCHOR THE BOTTOM across a height change.
+				//
+				// YOffset is the TOP visible row, so leaving it alone across a
+				// resize pins the top and lets the bottom move by the height
+				// delta. On a phone the soft keyboard opening and closing IS a
+				// height change, and it fires constantly — so a reader parked on
+				// the last few done messages watched them slide out from under
+				// the fold every time the keyboard appeared.
+				//
+				// Pinned readers are handled by applyScroll below (it follows the
+				// bottom already), and a selection owns its own positioning; this
+				// is for the reader who has scrolled somewhere deliberately and
+				// expects to still be looking at it.
+				if !t.scrollPinned && !selMode {
+					bottom := t.vp.YOffset + t.vp.Height
+					t.vp.Height = got
+					t.vp.SetYOffset(bottom - got)
+				} else {
+					t.vp.Height = got
+				}
+				t.applyScroll(selMode)
 			}
 		}
 		nm = t

@@ -3125,28 +3125,40 @@ func bigConvo(w, h int) *vtui {
 	return v
 }
 
-// TestVtui_ResizeKeepsScrollPosition — a resize must not move the reader. The
-// viewport used to be rebuilt from scratch on every WindowSizeMsg, and a fresh
-// one starts at YOffset 0, so each resize threw you to the top of the
-// conversation. On a phone the soft keyboard opening and closing IS a resize
-// and it fires constantly, which made a scrolled-up session unreadable.
+// TestVtui_ResizeKeepsScrollPosition — a resize must not move the reader.
+//
+// The viewport used to be rebuilt from scratch on every WindowSizeMsg, and a
+// fresh one starts at YOffset 0, so each resize threw you to the top of the
+// conversation. On a phone the soft keyboard opening and closing IS a resize and
+// it fires constantly, which made a scrolled-up session unreadable.
+//
+// WHICH EDGE IS HELD CHANGED. This asserted YOffset equality — holding the TOP
+// row — which was a proxy for "not thrown to row 0". Holding the top means the
+// BOTTOM moves by the height delta, and the keyboard covers the bottom of the
+// screen: a reader parked on the last few done messages watched them slide out
+// from under the fold every time it appeared. The bottom row is now the anchor,
+// so YOffset necessarily moves; what must not move is the content being read.
 func TestVtui_ResizeKeepsScrollPosition(t *testing.T) {
 	v := bigConvo(80, 40)
 	v.m.vp.SetYOffset(40)
 	v.m.scrollPinned = false
-	want, wantTop := v.m.vp.YOffset, topRow(v)
+	wantBottom := bottomRow(v.m)
+	before := v.m.vp.YOffset
 
 	v.resize(80, 20) // keyboard opens
-	if got := v.m.vp.YOffset; got != want {
-		t.Errorf("keyboard open moved the reader: YOffset %d → %d", want, got)
+	if got := bottomRow(v.m); got != wantBottom {
+		t.Errorf("keyboard open moved the bottom row: %q → %q", wantBottom, got)
 	}
-	if got := topRow(v); got != wantTop {
-		t.Errorf("keyboard open changed the top row: %q → %q", wantTop, got)
+	if v.m.vp.YOffset == 0 && before != 0 {
+		t.Error("keyboard open threw the reader to the top")
 	}
 
 	v.resize(80, 40) // keyboard closes
-	if got := v.m.vp.YOffset; got != want {
-		t.Errorf("keyboard close moved the reader: YOffset %d → %d", want, got)
+	if got := bottomRow(v.m); got != wantBottom {
+		t.Errorf("keyboard close moved the bottom row: %q → %q", wantBottom, got)
+	}
+	if got := v.m.vp.YOffset; got != before {
+		t.Errorf("a round trip should land back where it started: %d → %d", before, got)
 	}
 }
 
