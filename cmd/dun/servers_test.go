@@ -443,5 +443,3 @@ func runGit(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %v: %v", args, err)
 	}
 }
-
-

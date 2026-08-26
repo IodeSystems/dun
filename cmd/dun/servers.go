@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun"
 )
 
 // Tool servers the user can turn on and off: /rag (raglit, the docs index) and
@@ -552,4 +552,3 @@ func runShipCmd(ctx context.Context, h *dun.Harness, action string) string {
 	})
 	return "ship queued — running on next turn"
 }
-

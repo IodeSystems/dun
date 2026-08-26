@@ -31,7 +31,7 @@ type multilineInput struct {
 	scroll      int    // first visible display row
 	placeholder string
 	focused     bool
-	blinkOn     bool   // is the caret visible right now?
+	blinkOn     bool // is the caret visible right now?
 }
 
 // inputMaxLines caps the box. It GROWS to this, it does not start at it: an
@@ -98,8 +98,6 @@ func (m *multilineInput) Position() int {
 	}
 	return 1
 }
-
-
 
 // ── wrapping ──
 

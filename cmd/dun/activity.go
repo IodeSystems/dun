@@ -139,8 +139,6 @@ func (j jobRow) elapsed(now time.Time) int {
 	return int(end - j.started)
 }
 
-
-
 // liveAgents counts the ones still costing something — a dismissed child is
 // history, and a header that counted it would keep growing forever.
 func (m tuiModel) liveAgents() int {
@@ -152,8 +150,6 @@ func (m tuiModel) liveAgents() int {
 	}
 	return n
 }
-
-
 
 // actRows flattens agents and jobs into one selectable list.
 //
