@@ -18,10 +18,7 @@ func execDispatcher(t *testing.T, h *Harness) agent.ToolDispatcher {
 	t.Helper()
 	be := &HostShell{Dir: t.TempDir()}
 	t.Cleanup(be.Close)
-	return withExec(nil, be, nil, func(command string, background bool) *bgJob {
-		if background {
-			return h.startBackgroundJob(be, command)
-		}
+	return withExec(nil, be, nil, func(command string) *bgJob {
 		return h.startJob(be, command)
 	}, nil)
 }
@@ -103,22 +100,6 @@ func TestExec_SlowCommandBecomesAJob(t *testing.T) {
 		}
 		return false
 	})
-}
-
-// background:true is for a command the model already knows is long. The job is
-// promoted BEFORE the command starts, so the answer is a job number even when
-// the command turns out to be instant.
-func TestExec_BackgroundHandsOverImmediately(t *testing.T) {
-	h := testHarness(t)
-	d := execDispatcher(t, h)
-
-	out, err := d(context.Background(), execCall(`{"command":"echo hi","background":true}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "background job #1") {
-		t.Fatalf("background:true must return a job, not output: %q", out)
-	}
 }
 
 // Donation is what makes promotion possible: the promoted command keeps the

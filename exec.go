@@ -738,16 +738,14 @@ func execToolDef() llm.ToolDef {
 		"A command still running after 30s is NOT killed and does NOT block you: it becomes a " +
 		"background job and you get its number back immediately. From then on the job reports to " +
 		"you — a notification when it finishes, and exec_monitor(job:N) whenever you want to see " +
-		"what it has produced so far. Set `timeout` to wait longer or shorter before that handover, " +
-		"or `background:true` to hand over at once for a command you already know is long. " +
+		"what it has produced so far. Set `timeout` to wait longer or shorter before that handover. " +
 		"Never run anything interactive: it has no terminal and no input, so it will sit there " +
 		"doing nothing until the handover."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"command":    map[string]any{"type": "string", "description": "the shell command to run"},
-			"timeout":    map[string]any{"type": "integer", "description": "seconds to wait for the command before it becomes a background job (default 30)"},
-			"background": map[string]any{"type": "boolean", "description": "hand over to a background job immediately, without waiting"},
+			"command": map[string]any{"type": "string", "description": "the shell command to run"},
+			"timeout": map[string]any{"type": "integer", "description": "seconds to wait for the command before it becomes a background job (default 30)"},
 		},
 		"required": []string{"command"},
 	}
@@ -764,15 +762,14 @@ func execToolDef() llm.ToolDef {
 //
 // That is the whole point. A command can no longer hold the session: the worst
 // case is a job the model was told about, not a turn that never ends.
-func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command string, background bool) *bgJob, spill func(command, output string) string) agent.ToolDispatcher {
+func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command string) *bgJob, spill func(command, output string) string) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
 		}
 		var args struct {
-			Command    string `json:"command"`
-			Background bool   `json:"background"`
-			Timeout    *int   `json:"timeout"`
+			Command string `json:"command"`
+			Timeout *int   `json:"timeout"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		if strings.TrimSpace(args.Command) == "" {
@@ -794,11 +791,11 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		if args.Timeout != nil {
 			grace = time.Duration(*args.Timeout) * time.Second
 		}
-		if args.Background || grace < 0 {
+		if grace < 0 {
 			grace = 0
 		}
 
-		j := startJob(args.Command, grace <= 0)
+		j := startJob(args.Command)
 		if grace > 0 {
 			t := time.NewTimer(grace)
 			select {
@@ -814,7 +811,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			out = j.handoffNotice(grace)
 		}
 		if onCall != nil {
-			onCall("exec", map[string]any{"command": args.Command, "background": !done}, out)
+			onCall("exec", map[string]any{"command": args.Command}, out)
 		}
 		return out, nil
 	}

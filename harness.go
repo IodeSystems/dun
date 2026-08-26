@@ -1363,9 +1363,10 @@ const (
 var (
 	systemExec = "\n- exec: run a shell command (build/test/git/ls) in the workspace. The working directory is " +
 		"the isolated worktree root — edits you make are visible to exec. Use it to VERIFY your edits — e.g. run " +
-		"the build and tests after changing code — and to run git. Foreground commands have no time limit: " +
-		"never run anything interactive (it has no terminal and no input, so it can only hang), " +
-		"and put long work in background:true, which has no limit."
+		"the build and tests after changing code — and to run git. A command still running after 30s is NOT killed and does NOT " +
+		"block you: it becomes a background job with no time limit. Never run anything " +
+		"interactive: it has no terminal and no input, so it can only hang."
+
 	systemMount = "\n- mount: ask the user to mount a host directory inside the Docker container. " +
 		"Use this when a build needs access to a path outside the worktree " +
 		"(e.g. a go.mod replace directive pointing to a sibling module like ../agentkit). " +

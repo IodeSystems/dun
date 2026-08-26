@@ -143,7 +143,7 @@ func TestBgJob_IgnoreMutesCompletionToo(t *testing.T) {
 // survives, and the completion notice names both.
 func TestStartBackground_LogsAndReportsTheExitCode(t *testing.T) {
 	h := testHarness(t)
-	j := h.startBackgroundJob(HostExec{Dir: t.TempDir()}, "echo hello-bg; exit 2")
+	j := h.newJobStarted(HostExec{Dir: t.TempDir()}, "echo hello-bg; exit 2")
 
 	waitFor(t, 10*time.Second, func() bool { return strings.Contains(j.status(), "FAILED") })
 
@@ -270,7 +270,7 @@ func TestJobs_PushedOnStartAndOnFinish(t *testing.T) {
 		return pushes[len(pushes)-1]
 	}
 
-	h.startBackgroundJob(HostExec{Dir: t.TempDir()}, "echo hello-bg; exit 2")
+	h.newJobStarted(HostExec{Dir: t.TempDir()}, "echo hello-bg; exit 2")
 
 	first := last()
 	if len(first) != 1 || first[0].State != "running" {
@@ -317,7 +317,7 @@ func TestJobs_MutedJobIsStillPushed(t *testing.T) {
 		mu.Unlock()
 	}
 
-	j := h.startBackgroundJob(HostExec{Dir: t.TempDir()}, "echo quiet")
+	j := h.newJobStarted(HostExec{Dir: t.TempDir()}, "echo quiet")
 	j.mu.Lock()
 	j.mon.Ignore = true
 	j.mu.Unlock()

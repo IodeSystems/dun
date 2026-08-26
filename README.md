@@ -216,11 +216,9 @@ round-trip whose only output is "ok, noted" is not worth buying.
 decision is yours — the turn pauses, you're asked (a picker in the TUI), and it
 resumes with your answer. **Proactive docs:** relevant docs are pushed as 🔔
 notifications as the conversation moves (raglit's index watched via agentkit's
-FinderPreparer). **Background work:** `exec{background:true}` runs a long command
-(the full test suite, a build) asynchronously in the container; when it finishes
-the agent is notified and reacts on its own — no blocking. A foreground `exec` is
-killed after 5 minutes, because a command waiting on input it can never receive
-is indistinguishable from slow work; background jobs have no limit. Their output
+FinderPreparer). **Background work:** an `exec` that is still running after 30s hands itself over
+to a background job (the full test suite, a long build); when it finishes the
+agent is notified and reacts on its own — no blocking, nothing is killed. Their output
 streams to a log file whose path the agent gets (so a big log is grepped, not
 pasted into the context), and `exec_monitor` tunes what a running job reports —
 `buffer_bytes` to hear from it periodically, `grep` to hear only matching lines,

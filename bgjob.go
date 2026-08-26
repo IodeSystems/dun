@@ -219,9 +219,9 @@ func (j *bgJob) completionNote() string {
 func (j *bgJob) settle() (ExecResult, bool) {
 	j.mu.Lock()
 	if j.settled {
-		// Already decided. exec(background:true) promotes before the command
-		// starts, so the tool call that follows is only reading back the answer
-		// it asked for — it must not promote a second time.
+		// Already decided. A job can be promoted before it runs (newJobStarted,
+		// or a slow command promoted on the fly), so a later read of the same
+		// job must not promote a second time.
 		res, bg := j.res, j.bg
 		j.mu.Unlock()
 		return res, !bg
@@ -426,14 +426,9 @@ func (h *Harness) startJob(backend ExecBackend, command string) *bgJob {
 	return j
 }
 
-// startBackgroundJob is exec(background:true): the caller already knows the
-// command is long, so the job is promoted BEFORE the command starts.
-//
-// Promoting first rather than immediately-after is what removes the race. A
-// surprisingly fast command could otherwise finish in the gap between the two
-// and report itself inline, leaving a caller that explicitly asked for a job
-// holding a number for a job that was never registered.
-func (h *Harness) startBackgroundJob(backend ExecBackend, command string) *bgJob {
+// newJobStarted is the test seam for a job that is promoted BEFORE it runs —
+// the direct equivalent of what a slow command becomes on the fly.
+func (h *Harness) newJobStarted(backend ExecBackend, command string) *bgJob {
 	j := h.newJob(command)
 	j.settle() // nothing is running yet, so this always promotes
 	j.run(backend)
@@ -671,7 +666,7 @@ func execMonitor(h *Harness, id, bufferBytes *int, grep *string, ignore *bool) s
 	if id == nil {
 		jobs := h.bgJobList()
 		if len(jobs) == 0 {
-			return "No background jobs. Start one with exec(background:true)."
+			return "No background jobs. Start one with a long exec; it hands itself over after the grace."
 		}
 		lines := make([]string, 0, len(jobs))
 		for _, j := range jobs {
