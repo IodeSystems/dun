@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"unicode/utf8"
 
@@ -338,7 +339,9 @@ func execToolDef() llm.ToolDef {
 	td.Type = "function"
 	td.Function.Name = "exec"
 	td.Function.Description = "Run a shell command (build, test, git, ls, …) in the workspace. " +
-		"Returns combined stdout+stderr; a non-zero exit is shown as [exit: …]. Use this to " +
+		"The working directory carries from one call to the next (cd persists), so you do not " +
+		"need to cd back to the project root every time — each call starts where the last one " +
+		"ended. Returns combined stdout+stderr; a non-zero exit is shown as [exit: …]. Use this to " +
 		"verify edits (build/test) and to run git. Foreground commands have no time limit, so " +
 		"never run anything interactive (it has no terminal and no input — it will just hang). " +
 		"For a LONG command (the full test suite, a build), set background:true and keep " +
@@ -355,10 +358,38 @@ func execToolDef() llm.ToolDef {
 	return td
 }
 
+// cwdTracker persists the working directory across exec calls so that
+// `cd subdir` in one call carries into the next, without the model
+// needing to repeat the path. Each foreground call is prefixed with
+// `cd <remembered>` and suffixed with `; pwd` to capture the new location.
+// The tracker is per-Harness (one per session), so each agent gets its own.
+type cwdTracker struct {
+	mu  sync.Mutex
+	cwd string
+}
+
+func (t *cwdTracker) set(dir string) {
+	t.mu.Lock()
+	t.cwd = dir
+	t.mu.Unlock()
+}
+
+func (t *cwdTracker) get() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cwd
+}
+
+// shellQuote wraps a path in single quotes, escaping embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // withExec wraps a dispatcher so the built-in "exec" tool is handled locally:
 // synchronous by default, or async via startBg when background:true (its
 // completion arrives later as a notification). Everything else routes to MCP.
 func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startBg func(command string) *bgJob, spill func(command, output string) string) agent.ToolDispatcher {
+	tracker := &cwdTracker{}
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
@@ -372,6 +403,8 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			return "ERROR: exec requires a non-empty command", nil
 		}
 		if args.Background && startBg != nil {
+			// Background jobs don't participate in cwd tracking — they
+			// fire-and-forget and the model greps their log later.
 			j := startBg(args.Command)
 			res := fmt.Sprintf("Started background job #%d: `%s`. It has no time limit and runs in "+
 				"the sandbox; you'll be notified when it finishes. Continue with other work in the "+
@@ -383,9 +416,27 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			}
 			return res, nil
 		}
+		// Prefix with cd if we've remembered a non-empty cwd, and append
+		// `; pwd` so we can persist the final location for the next call.
+		cmd := args.Command
+		if cwd := tracker.get(); cwd != "" {
+			cmd = "cd " + shellQuote(cwd) + " && " + cmd
+		}
+		cmd = cmd + "; pwd"
 		// NOT capped here: the cap is applied once, around every tool, in
 		// withRecapWatch. Capping twice would spill the same output twice.
-		out := backend.Run(ctx, args.Command, nil).Render()
+		res := backend.Run(ctx, cmd, nil)
+		raw := res.Output
+		// The last line is the pwd output; strip it from the model-facing
+		// output and persist the location for the next call.
+		if i := strings.LastIndexByte(raw, '\n'); i >= 0 {
+			last := strings.TrimSpace(raw[i+1:])
+			if strings.HasPrefix(last, "/") {
+				tracker.set(last)
+				res.Output = raw[:i]
+			}
+		}
+		out := res.Render()
 		if onCall != nil {
 			onCall("exec", map[string]any{"command": args.Command}, out)
 		}
