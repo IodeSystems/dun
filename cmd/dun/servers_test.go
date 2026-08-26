@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -146,7 +147,7 @@ func TestEmitTurnError_FatalOnlyWhenTheSessionIsGone(t *testing.T) {
 	var buf bytes.Buffer
 	em := &emitter{w: &buf}
 
-	emitTurnError(live, em, errors.New("context deadline exceeded"))
+	emitTurnError(live, nil, em, errors.New("context deadline exceeded"))
 	if got := decodeEvent(t, buf.String()); got["fatal"] != false {
 		t.Errorf("a turn timeout is not fatal to the session: %v", got)
 	}
@@ -154,7 +155,7 @@ func TestEmitTurnError_FatalOnlyWhenTheSessionIsGone(t *testing.T) {
 	buf.Reset()
 	dead, dcancel := context.WithCancel(context.Background())
 	dcancel()
-	emitTurnError(dead, em, errors.New("context canceled"))
+	emitTurnError(dead, nil, em, errors.New("context canceled"))
 	if got := decodeEvent(t, buf.String()); got["fatal"] != true {
 		t.Errorf("a dead session must be reported as fatal: %v", got)
 	}
@@ -441,5 +442,83 @@ func runGit(t *testing.T, dir string, args ...string) {
 	cmd.Stderr = &bytes.Buffer{}
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("git %v: %v", args, err)
+	}
+}
+
+// Budget expiry and ctrl-C are the same two words at the error site, so the
+// clock has to say which one happened. Reporting "context canceled" for an
+// exhausted budget is what sent a debugging session looking for a crash.
+func TestTurnErr_BudgetExpiryNamesItself(t *testing.T) {
+	turnTimeout = 20 * time.Millisecond
+	defer func() { turnTimeout = 0 }()
+
+	tctx, end := beginTurn(context.Background())
+	defer end()
+	<-tctx.Done()
+
+	// What the agent loop actually returns from a cancelled request: the bare
+	// cancellation, wrapped the way an HTTP client wraps it.
+	got := turnErr(tctx, fmt.Errorf("post %q: %w", "/v1/chat", context.Canceled))
+	var budget errTurnBudget
+	if !errors.As(got, &budget) {
+		t.Fatalf("budget expiry did not name itself: %v", got)
+	}
+	if !strings.Contains(got.Error(), "--timeout") {
+		t.Errorf("the message must point at the knob that caused it: %q", got)
+	}
+}
+
+// Ctrl-C has no reason beyond itself; inventing one would be worse than the
+// two words.
+func TestTurnErr_CtrlCStaysCancelled(t *testing.T) {
+	turnTimeout = time.Hour
+	defer func() { turnTimeout = 0 }()
+
+	sessionCtx, cancel := context.WithCancel(context.Background())
+	tctx, end := beginTurn(sessionCtx)
+	defer end()
+	cancel()
+	<-tctx.Done()
+
+	got := turnErr(tctx, context.Canceled)
+	if !errors.Is(got, context.Canceled) {
+		t.Fatalf("ctrl-C should stay a plain cancellation, got %v", got)
+	}
+	var budget errTurnBudget
+	if errors.As(got, &budget) {
+		t.Error("ctrl-C was blamed on the turn budget")
+	}
+}
+
+// A turn that failed for its own reasons keeps that reason, even when the
+// clock ran out underneath it while the error was on its way up.
+func TestTurnErr_RealFailureKeepsItsMessage(t *testing.T) {
+	turnTimeout = 20 * time.Millisecond
+	defer func() { turnTimeout = 0 }()
+
+	tctx, end := beginTurn(context.Background())
+	defer end()
+	<-tctx.Done()
+
+	got := turnErr(tctx, errors.New("upstream returned 500"))
+	if got.Error() != "upstream returned 500" {
+		t.Fatalf("a real failure was overwritten by the cancellation cause: %v", got)
+	}
+}
+
+// A live turn's errors are never rewritten.
+func TestTurnErr_LiveTurnIsUntouched(t *testing.T) {
+	turnTimeout = time.Hour
+	defer func() { turnTimeout = 0 }()
+
+	tctx, end := beginTurn(context.Background())
+	defer end()
+
+	if got := turnErr(tctx, nil); got != nil {
+		t.Errorf("nil error became %v", got)
+	}
+	boom := errors.New("boom")
+	if got := turnErr(tctx, boom); !errors.Is(got, boom) {
+		t.Errorf("a live turn's error was rewritten to %v", got)
 	}
 }

@@ -876,7 +876,7 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 	res, err := h.Continue(tctx)
 	turnActive.Store(false)
 	if err != nil {
-		emitTurnError(ctx, em, err)
+		emitTurnError(ctx, h, em, turnErr(tctx, err))
 		return false
 	}
 	if strings.TrimSpace(res.Reply) != "" {
@@ -1216,7 +1216,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 	res, err := h.Ask(tctx, task)
 	turnActive.Store(false)
 	if err != nil {
-		emitTurnError(ctx, em, err)
+		emitTurnError(ctx, h, em, turnErr(tctx, err))
 		return false
 	}
 	em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
@@ -1232,7 +1232,15 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 // itself is gone (ctrl-C), in which case no message can help. Otherwise the
 // turn is what died — the conversation is on disk, and the next message pairs
 // off whatever was interrupted and continues from there.
-func emitTurnError(sessionCtx context.Context, em *emitter, err error) {
+//
+// It also RECORDS the error in the session log, before emitting it. The UI is
+// a scrollback: it shows the error once, to whoever is watching at that second,
+// and then the failure is gone — which left the log with a turn that stopped
+// mid-tool-call and no statement of why. Both turn paths funnel through here so
+// the record cannot be attached to one of them and not the other; they had
+// already drifted apart once.
+func emitTurnError(sessionCtx context.Context, h *dun.Harness, em *emitter, err error) {
+	h.RecordTurnError(err)
 	em.emit(event{"type": "error", "error": err.Error(), "fatal": sessionCtx.Err() != nil})
 }
 

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,7 +22,9 @@ import (
 // parent, and cancelling is one-way.
 type turnClock struct {
 	ctx    context.Context
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
+
+	budget time.Duration // the whole budget; for the expiry message
 
 	mu    sync.Mutex
 	left  time.Duration // budget remaining; meaningful while paused
@@ -28,11 +32,27 @@ type turnClock struct {
 	timer *time.Timer   // nil when paused, stopped, or unbudgeted
 }
 
+// errTurnBudget is why a turn ended when its budget ran out.
+//
+// It is carried as the context's cancellation CAUSE rather than returned,
+// because nothing between the timer and the error site touches the clock: the
+// turn fails somewhere inside the agent loop, and what arrives there is the
+// plain "context canceled" that a cancelled context always produces. Ctrl-C
+// produces exactly the same two words, so before this the two were
+// indistinguishable at every place that reports a failed turn — which is how a
+// 30-minute clock running out read as an unexplained cancellation, and sent
+// anyone debugging one looking for a crash that never happened.
+type errTurnBudget struct{ budget time.Duration }
+
+func (e errTurnBudget) Error() string {
+	return fmt.Sprintf("the turn ran past its %s budget (--timeout) and was cut off", e.budget)
+}
+
 // newTurnClock starts a clock over parent. A budget of 0 means no budget: the
 // result is an ordinary cancelable context that only ends with its parent.
 func newTurnClock(parent context.Context, budget time.Duration) *turnClock {
-	ctx, cancel := context.WithCancel(parent)
-	c := &turnClock{ctx: ctx, cancel: cancel, left: budget}
+	ctx, cancel := context.WithCancelCause(parent)
+	c := &turnClock{ctx: ctx, cancel: cancel, budget: budget, left: budget}
 	c.mu.Lock()
 	c.startLocked()
 	c.mu.Unlock()
@@ -44,7 +64,7 @@ func (c *turnClock) startLocked() {
 		return
 	}
 	c.due = time.Now().Add(c.left)
-	c.timer = time.AfterFunc(c.left, c.cancel)
+	c.timer = time.AfterFunc(c.left, func() { c.cancel(errTurnBudget{c.budget}) })
 }
 
 // Pause stops the budget burning. Safe to call when unbudgeted, already paused,
@@ -95,7 +115,10 @@ func (c *turnClock) Stop() {
 		c.timer = nil
 	}
 	c.mu.Unlock()
-	c.cancel()
+	// The ordinary end of a turn: no cause beyond "it is over". A cause set
+	// here would overwrite nothing (the first cancel wins) but would claim a
+	// reason for the deferred Stop that follows every turn, successful or not.
+	c.cancel(context.Canceled)
 }
 
 // curClock is the clock an ask should pause: the running turn's in interactive
@@ -129,4 +152,28 @@ func withoutClock[T any](fn func() (T, error)) (T, error) {
 	c.Pause()
 	defer c.Resume()
 	return fn()
+}
+
+// turnErr replaces a bare cancellation with the reason the turn actually ended.
+//
+// The retry loop does not retry a cancelled context (see Harness.runTurn): a
+// cancellation is a decision, not a transient fault, so "context canceled" is
+// reported after ZERO attempts. That is correct, and it is also why the two
+// words have to say which decision it was — a reader who sees a retryable-
+// looking error with no retries behind it reasonably concludes retries ran out.
+func turnErr(tctx context.Context, err error) error {
+	if err == nil || tctx.Err() == nil {
+		return err
+	}
+	// A real failure that merely landed on a turn already cut off keeps its own
+	// message: the cause explains the cancellation, not an unrelated 500.
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	// A cause of context.Canceled is the absence of a reason — ctrl-C, or the
+	// parent going down — and has nothing to add over err.
+	if cause := context.Cause(tctx); cause != nil && !errors.Is(cause, context.Canceled) {
+		return cause
+	}
+	return err
 }

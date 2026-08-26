@@ -402,3 +402,79 @@ func TestConvoEntry_ViewRawFallback(t *testing.T) {
 		t.Errorf("raw view with no raw field should fall back to collapsed, got %q", e.view())
 	}
 }
+
+// execExitMarker, informative, backgroundJobID: the pure helpers behind
+// execRender.
+
+func TestExecExitMarker(t *testing.T) {
+	// No marker.
+	if m, ok := execExitMarker("hello world"); ok {
+		t.Errorf("no marker: got %q ok=%v", m, ok)
+	}
+
+	// Simple marker.
+	m, ok := execExitMarker("output\n[exit: 1]")
+	if !ok || m != "1" {
+		t.Errorf("exit 1: got %q ok=%v", m, ok)
+	}
+
+	// Marker with a reason.
+	m, ok = execExitMarker("output\n[exit: signal: killed]")
+	if !ok || m != "signal: killed" {
+		t.Errorf("signal: got %q ok=%v", m, ok)
+	}
+
+	// Multi-digit.
+	m, ok = execExitMarker("[exit: 255]")
+	if !ok || m != "255" {
+		t.Errorf("255: got %q ok=%v", m, ok)
+	}
+}
+
+func TestInformative(t *testing.T) {
+	// Bare verdicts: not informative.
+	for _, s := range []string{"FAIL", "FAILED", "ERROR", "ERRORS", "OK", "PASS", "FAIL.", "PASS!"} {
+		if informative(s) {
+			t.Errorf("%q should not be informative", s)
+		}
+	}
+
+	// Shell epilogue.
+	if informative("exit status 1") {
+		t.Error("exit status should not be informative")
+	}
+
+	// A "where: what" line.
+	if !informative("harness.go:123: undefined: foo") {
+		t.Error("file:line: msg should be informative")
+	}
+
+	// A long sentence.
+	if !informative("this is a sentence that is long enough to count") {
+		t.Error("long sentence should be informative")
+	}
+
+	// A short line with no colon: not informative.
+	if informative("short") {
+		t.Error("short line without colon should not be informative")
+	}
+}
+
+func TestBackgroundJobID(t *testing.T) {
+	// No prefix.
+	if _, ok := backgroundJobID("no job here"); ok {
+		t.Error("no prefix should not be ok")
+	}
+
+	// With id.
+	id, ok := backgroundJobID("Started background job #42: running\noutput")
+	if !ok || id != "42" {
+		t.Errorf("job 42: got %q ok=%v", id, ok)
+	}
+
+	// Id followed by a dot.
+	id, ok = backgroundJobID("Started background job #7.done")
+	if !ok || id != "7" {
+		t.Errorf("job 7: got %q ok=%v", id, ok)
+	}
+}

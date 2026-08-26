@@ -251,7 +251,7 @@ type Config struct {
 	// OnCompaction fires when the Shaper folds history into a summary. Wired
 	// because compaction is otherwise INVISIBLE: it is the one operation that
 	// destroys conversation, and a session that was compacting on every turn
-	// (see contextBudget) ran for 29 minutes, wrote 154k characters of summary,
+	// (see shapingBudget) ran for 29 minutes, wrote 154k characters of summary,
 	// and left 5 entries alive without a single line of output saying so.
 	OnCompaction func(CompactionNote)
 	// OnAgents fires whenever a sub-agent changes — spawned, status, settled,
@@ -759,7 +759,7 @@ func (h *Harness) setSystemBreakdown(bd SystemBreakdown) {
 	}
 }
 
-// SystemBreakdown returns the pre-conversation context in parts, with Exact
+// SystemParts returns the pre-conversation context in parts, with Exact
 // telling the caller whether the numbers were measured or estimated. The
 // distinction is the point: rendering a guess like a measurement is the failure
 // this replaced.
@@ -1072,11 +1072,11 @@ func (h *Harness) Close() {
 
 // managerFor gives a child its parent's manager, or a root a fresh one. The
 // bool is whether the caller OWNS it, which is what decides who may close it.
-func (p *Harness) managerFor() (*mcpmgr.Manager, bool) {
-	if p == nil {
+func (h *Harness) managerFor() (*mcpmgr.Manager, bool) {
+	if h == nil {
 		return mcpmgr.NewManager(), true
 	}
-	return p.mgr, false
+	return h.mgr, false
 }
 
 // noteServerNotification lifts an unsolicited MCP notification into the
@@ -1642,9 +1642,13 @@ func verbatimToolResults() bool {
 	return false
 }
 
-// contextBudget is the token ceiling the Shaper shapes to: the model's window,
-// from the environment if it is set and from the SERVER if it is not. 0 → no
-// shaping at all, and that remains the answer when neither can say.
+// contextWindower is agentkit's "ask the server how big the window is"
+// capability, named as an interface so this asserts on the CAPABILITY rather
+// than on *llm.Client, and so a test can supply one.
+//
+// The window comes from the environment (DUN_CONTEXT_TOKENS) if it is set, and
+// from the SERVER if it is not. 0 → no shaping at all, and that remains the
+// answer when neither can say.
 //
 // This used to read the environment only, justified by "no probe can tell a 32k
 // window from a 180k one without minutes of multi-megabyte requests". That was
@@ -1668,13 +1672,6 @@ func verbatimToolResults() bool {
 // non-positive budget is now explicitly unbudgeted); the note is here because
 // this is where the 0 comes from and a future "sensible default" would walk
 // straight back into it.
-//
-// The fraction is deliberately close to 1. Shaping exists to stop a generation
-// being cut off mid-write, not to keep the context small: the LOD rung already
-// does that for free, and every compaction costs a prefix rewrite.
-// contextWindower is agentkit's "ask the server how big the window is"
-// capability, named as an interface so this asserts on the CAPABILITY rather
-// than on *llm.Client, and so a test can supply one.
 type contextWindower interface {
 	ContextWindow(ctx context.Context) (int, bool)
 }
@@ -1774,19 +1771,6 @@ func contextWindow(ctx context.Context, runner any) int {
 	return 0
 }
 
-// contextBudget is the token ceiling the Shaper shapes the PROMPT to.
-//
-// It used to be 90% of the window, on the reasoning that shaping exists to stop
-// a generation being cut off mid-write rather than to keep the context small.
-// The reasoning was right and the arithmetic was not: 10% of the window is what
-// was left for the response, that 10% was never communicated to the endpoint,
-// and on a reasoning model 10% is not enough anyway. The reserve is now the
-// response's actual cap plus a margin — the same number applyGeneration sends —
-// so the two halves of the window are budgeted by one subtraction instead of by
-// two unrelated guesses. See outbudget.go.
-func contextBudget(ctx context.Context, runner any) int {
-	return shapingBudget(contextWindow(ctx, runner))
-}
 
 // shapingBudget turns a window into the prompt's share of it. Pure: it is
 // recomputed on every build (the fitted overhead moves), so it must not log.

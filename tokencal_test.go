@@ -207,3 +207,34 @@ func TestMeter_WithholdsAnUnearnedFit(t *testing.T) {
 		t.Errorf("the one-point ratio should still be in force; got %.2f", got)
 	}
 }
+
+// Fitted and Drift are the two accessors on observation that report whether
+// the affine fit is in force and how far off the estimate was.
+
+func TestObservation_Fitted(t *testing.T) {
+	if (observation{Slope: 0}).Fitted() {
+		t.Error("slope 0 should not be fitted")
+	}
+	if (observation{Slope: 0.001}).Fitted() != true {
+		t.Error("positive slope should be fitted")
+	}
+}
+
+func TestObservation_Drift(t *testing.T) {
+	// No count: no drift.
+	if got := (observation{PromptTokens: 0}).Drift(); got != 0 {
+		t.Errorf("no count: got %f, want 0", got)
+	}
+	// Perfect estimate: zero drift.
+	if got := (observation{PromptTokens: 1000, Estimated: 1000}).Drift(); got != 0 {
+		t.Errorf("perfect: got %f, want 0", got)
+	}
+	// Estimate was 30% low: drift = (700-1000)/1000 = -0.30
+	if got := (observation{PromptTokens: 1000, Estimated: 700}).Drift(); got != -0.30 {
+		t.Errorf("30%% low: got %f, want -0.30", got)
+	}
+	// Estimate was 50% high: drift = (1500-1000)/1000 = +0.50
+	if got := (observation{PromptTokens: 1000, Estimated: 1500}).Drift(); got != 0.50 {
+		t.Errorf("50%% high: got %f, want 0.50", got)
+	}
+}

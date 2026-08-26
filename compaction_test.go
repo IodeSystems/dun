@@ -30,14 +30,14 @@ type noWindow struct{}
 // 38 in 7 before that was fixed in the Shaper.
 func TestContextBudget_NothingKnownMeansUnbudgeted(t *testing.T) {
 	t.Setenv("DUN_CONTEXT_TOKENS", "")
-	if got := contextBudget(context.Background(), noWindow{}); got != 0 {
+	if got := shapingBudget(contextWindow(context.Background(), noWindow{})); got != 0 {
 		t.Fatalf("no env and no server should be 0 (unbudgeted), got %d", got)
 	}
-	if got := contextBudget(context.Background(), windowSayer{0}); got != 0 {
+	if got := shapingBudget(contextWindow(context.Background(), windowSayer{0})); got != 0 {
 		t.Errorf("a server stating no window should be 0, got %d", got)
 	}
 	t.Setenv("DUN_CONTEXT_TOKENS", "not-a-number")
-	if got := contextBudget(context.Background(), noWindow{}); got != 0 {
+	if got := shapingBudget(contextWindow(context.Background(), noWindow{})); got != 0 {
 		t.Errorf("garbage should fall back to unbudgeted, got %d", got)
 	}
 	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
@@ -47,7 +47,7 @@ func TestContextBudget_NothingKnownMeansUnbudgeted(t *testing.T) {
 // change: dun no longer makes somebody type a window the server will state.
 func TestContextBudget_AsksTheServerWhenUnset(t *testing.T) {
 	t.Setenv("DUN_CONTEXT_TOKENS", "")
-	if got, want := contextBudget(context.Background(), windowSayer{220160}), 220160-outputReserve(); got != want {
+	if got, want := shapingBudget(contextWindow(context.Background(), windowSayer{220160})), 220160-outputReserve(); got != want {
 		t.Errorf("server window should shape to window minus the response reserve: got %d, want %d", got, want)
 	}
 	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
@@ -60,7 +60,7 @@ func TestContextBudget_AsksTheServerWhenUnset(t *testing.T) {
 func TestContextBudget_LeavesRoomForTheResponse(t *testing.T) {
 	t.Setenv("DUN_CONTEXT_TOKENS", "")
 	const window = 188160
-	budget := contextBudget(context.Background(), windowSayer{window})
+	budget := shapingBudget(contextWindow(context.Background(), windowSayer{window}))
 	gen, ok := generationBudget(window, budget)
 	if !ok {
 		t.Fatalf("a prompt shaped to its own budget must still have room to answer; got %d", gen)
@@ -97,13 +97,13 @@ func TestGenerationBudget_RefusesBelowTheFloor(t *testing.T) {
 // intent about what to spend, and the second must not be overridden by the first.
 func TestContextBudget_EnvironmentWinsOverTheServer(t *testing.T) {
 	t.Setenv("DUN_CONTEXT_TOKENS", "100000")
-	if got, want := contextBudget(context.Background(), windowSayer{220160}), 100000-outputReserve(); got != want {
+	if got, want := shapingBudget(contextWindow(context.Background(), windowSayer{220160})), 100000-outputReserve(); got != want {
 		t.Errorf("an explicit window should shape to it minus the response reserve: got %d, want %d", got, want)
 	}
 	// Garbage in the environment falls THROUGH to the server rather than
 	// disabling shaping: a typo should not silently cost the session its budget.
 	t.Setenv("DUN_CONTEXT_TOKENS", "not-a-number")
-	if got, want := contextBudget(context.Background(), windowSayer{220160}), 220160-outputReserve(); got != want {
+	if got, want := shapingBudget(contextWindow(context.Background(), windowSayer{220160})), 220160-outputReserve(); got != want {
 		t.Errorf("invalid env should fall through to the server: got %d, want %d", got, want)
 	}
 	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")

@@ -258,7 +258,9 @@ func (s *sessionStore) Context(_ context.Context, _ string) ([]agent.Entry, erro
 		// A recap citation is a note to whoever reads the log, not conversation:
 		// it is persisted, and it never reaches the model or the scrollback. A
 		// pointer to removed churn that itself cost context would be absurd.
-		if e.Kind == kindRecap {
+		// A recorded turn error is the same shape of thing for the same reason
+		// (see kindTurnError).
+		if e.Kind == kindRecap || e.Kind == kindTurnError {
 			continue
 		}
 		out = append(out, e)
