@@ -73,11 +73,19 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 		m.fatalErr = "engine did not start: " + startErr.Error()
 		m.starting = false
 	}
-	// No mouse: under tmux on Termux, mouse mode makes taps get consumed as
-	// mouse events, which blocks the Android soft keyboard from popping when
-	// you tap the pane. Wheel scrolling under tmux is unavailable without
-	// mouse mode — scroll with arrow keys instead.
-	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	// Mouse: full mode, the way Claude Code runs it. The 96f9436 attempt to
+	// fix Termux taps by DROPPING mouse mode was a misdiagnosis — measured
+	// capture of claude cli 2.1.246 shows it enables 1000/1002/1003/1006 plus
+	// the kitty keyboard protocol (kitty.go), so the IME-popping difference is
+	// the input-classification story, not a mouse-mode story.
+	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}
+	// Kitty keyboard protocol (kitty.go): probe BEFORE raw mode, because raw
+	// mode sets O_NONBLOCK and would swallow the terminal's reply as a key.
+	// Only on a tty, and only if the terminal answers the capability query —
+	// a kitty-less terminal gets exactly the pre-change behaviour.
+	if probeKitty(os.Stdin) {
+		defer disableKitty()
+	}
 	// The shift+enter filter (keyfilter.go) has to see the bytes before
 	// bubbletea's parser reduces the sequence to the letter M — so it goes in as
 	// the input reader. bubbletea only puts the terminal into RAW mode when its

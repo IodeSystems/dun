@@ -184,8 +184,11 @@ func runReplay(path string, pacing replayPacing, o tuiOpts) error {
 	m.opts = o
 	m.replaying = true
 	m.model, m.url = o.model, o.url
-	// No mouse — same Termux/tmux keyboard reason as runTUI.
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	// Mouse + kitty keyboard: same wiring as runTUI (see tui.go).
+	if probeKitty(os.Stdin) {
+		defer disableKitty()
+	}
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	proc.close()
 	return err
 }
