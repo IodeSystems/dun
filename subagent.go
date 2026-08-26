@@ -178,8 +178,6 @@ func (s *subAgent) heartbeat() {
 	)
 }
 
-
-
 func (s *subAgent) stop() {
 	s.mu.Lock()
 	c := s.cancel
@@ -388,6 +386,15 @@ func childSessionFile(parent string, num int) string {
 // already encodes.
 func childConfig(parent *Harness, num int, model string, client agent.LLMRunner) Config {
 	cfg := parent.cfg
+	// The exception to inheriting the exec backend: a child gets its OWN shell
+	// on the same directory. The persistent shell is shared by POINTER, so
+	// without this a child's `export` would be visible to its parent and to
+	// every sibling — and every agent's commands would queue behind each other
+	// in one shell. Per-agent environment is the whole reason the shell
+	// persists at all.
+	if hs, ok := cfg.Exec.(*HostShell); ok {
+		cfg.Exec = &HostShell{Dir: hs.Dir}
+	}
 	cfg.Parent = parent
 	cfg.AgentID = num
 	cfg.Client = client

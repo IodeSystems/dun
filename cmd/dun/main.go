@@ -384,7 +384,9 @@ func main() {
 	if dockerImage != "" {
 		backend = dun.DockerExec{Dir: effWS, Image: dockerImage, Network: *dockerNetwork, ExtraMounts: mounts}
 	} else {
-		backend = dun.HostExec{Dir: effWS}
+		// Persistent shell: exports survive between exec calls, while the
+		// working directory resets to the project root each time.
+		backend = &dun.HostShell{Dir: effWS}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

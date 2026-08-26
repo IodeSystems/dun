@@ -101,6 +101,59 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ✅ 7. Every exec is a job; a slow one hands itself over (2026-08-26)
+A live session sat "working" for ten minutes with ZERO requests to the LLM,
+twice in one hour. It was not slow and it was not thinking — it was blocked in a
+foreground exec, and nothing in the loop could tell the two apart.
+
+- **Root cause, three layers.** `TestHostShell_ExitCode` sends `exit 7` into the
+  persistent shell, which exits the SHELL, so the sentinel line the reader waits
+  for is never printed. The escape hatch (`dead()`) could not fire: it read
+  `cmd.ProcessState`, which Go only fills in after `Wait`, and nothing ever
+  waited. A first fix added a waiter goroutine that took `h.mu` — held by `Run`
+  for the whole command — so it never reached its `close(deadCh)` either. Same
+  hang, three mechanisms. And nothing bounded the tool call: `-p` mode has no
+  turn clock (`turnTimeout` is interactive-only), so `go test -timeout 10m` was
+  the only thing that ever ended it.
+- **The shape of the fix is the point.** There is no foreground path any more.
+  Every command starts as a job (`Harness.startJob`); the only question the tool
+  call asks is who reports it. Finishes inside the grace → output inline, one
+  round trip, the job never surfaces. Doesn't → it is PROMOTED: a number, a log,
+  a pane row, a notification on completion, `exec_monitor(job:N)` meanwhile.
+  Nothing is killed and nothing re-runs. The worst case is now a job the model
+  was told about, not a turn that never ends.
+- **Grace = 30s**, `timeout:` overrides it, `background:true` promotes before the
+  command even starts (which removes the race where a fast command reports
+  inline to a caller that asked for a job).
+- **Donation** is what makes promotion possible. The promoted command keeps the
+  shell it is already inside; `HostShell` drops its reference, releases the lock
+  and starts a fresh shell for whoever is next. That is what let the stateless
+  `bgBackend` swap in `servers_runtime.go` go away — one backend for everything,
+  and a long build can no longer hold the shell every other command serializes
+  on. Cost, tested and documented: exports made before a handover are gone from
+  the fresh shell.
+- Also fixed on the way through: `sh`'s stdout+stderr now share ONE `os.Pipe`
+  we own instead of two `StdoutPipe`s (Wait closes the pipes it created, which
+  was eating the tail of any command that killed the shell); `Rehoist` closes
+  the shell it replaces instead of leaking it; the two `TestRehoist_*` tests
+  still asserted `HostExec` after the host backend became `*HostShell`.
+- **Relationship to item 2 below.** That removed a 5-minute deadline because
+  killing a legitimately-long build is worse than letting it run. Still true —
+  which is why this is a HANDOVER, not a deadline. The bound is on how long the
+  MODEL waits, never on how long the command may take.
+- **Per-agent, which it was not.** The goal said exports persist *per agent*.
+  `childConfig` copies the parent's Config, and the shell is a POINTER — so
+  every sub-agent shared one shell with its parent: a child's `export` landed in
+  the parent's environment and its siblings', and all of them queued behind each
+  other. Children now get their own `*HostShell` on the same directory, and
+  `Harness.Close` reaps it.
+- **risks**: promotion is only wired for `*HostShell`; a stateless backend has
+  nothing to donate, which is correct but untested end-to-end under `--docker`.
+  The pre-handover output a provisional job buffers is capped at `bgEarlyMax`
+  (1 MiB); past that a promoted job's log starts at the promotion point.
+- **next**: run a real dun-on-dun session against this and confirm the ten-minute
+  silences are gone.
+
 ### ✅ 6. One missed ask disarmed the whole session (2026-08-24)
 Restarting the dun-on-dun session on the fixed binary proved the measurement
 half and found the protection half unreachable — the same shape as the bug it

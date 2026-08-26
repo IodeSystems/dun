@@ -282,8 +282,18 @@ func (h *Harness) rebuildTools() {
 	dispatch := mcpDispatcher(h.mgr, tools, report)
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef(), execMonitorToolDef())
-		startBg := func(command string) *bgJob { return h.startBackground(cfg.Exec, command) }
-		dispatch = withExec(dispatch, cfg.Exec, report, startBg, h.spillExec)
+		// ONE backend for everything. A long command used to need a stateless
+		// backend of its own so it would not hold the shell that every other
+		// command serializes on; now it donates that shell when it is promoted
+		// (HostShell.RunPromotable), so the persistent environment is available
+		// to every command without any of them being able to block the rest.
+		startJob := func(command string, background bool) *bgJob {
+			if background {
+				return h.startBackgroundJob(cfg.Exec, command)
+			}
+			return h.startJob(cfg.Exec, command)
+		}
+		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec)
 		dispatch = withExecMonitor(dispatch, h, report)
 	}
 	if cfg.Ask != nil {

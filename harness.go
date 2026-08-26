@@ -1058,6 +1058,11 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 // gone would keep working against tools that no longer answer.
 func (h *Harness) Close() {
 	h.closeAgents()
+	// The shell this harness owns. A child's is its own (see childConfig), so
+	// closing it here does not touch the parent's.
+	if hs, ok := h.cfg.Exec.(*HostShell); ok {
+		hs.Close()
+	}
 	// A child does not own the manager it borrowed. Closing it here would stop
 	// the servers out from under the parent that lent them.
 	if h.ownsMgr {
@@ -1130,10 +1135,18 @@ func (h *Harness) Rehoist(workspace string, wt *Worktree, dockerOn bool) {
 	if image == "" {
 		image = "golang:1.23"
 	}
+	// The outgoing backend's shell is nobody's now. Closed in the background
+	// because Close waits on the shell's lock, and a command may still be
+	// running in it — rehoisting must not block on someone else's build.
+	if old, ok := h.cfg.Exec.(*HostShell); ok {
+		go old.Close()
+	}
 	if dockerOn {
 		h.cfg.Exec = DockerExec{Dir: workspace, Image: image, Network: true, ExtraMounts: h.cfg.ExtraMounts}
 	} else {
-		h.cfg.Exec = HostExec{Dir: workspace}
+		// Host: persistent shell so exports survive between exec calls while
+		// the working directory resets to the project root each time.
+		h.cfg.Exec = &HostShell{Dir: workspace}
 	}
 	h.srvMu.Unlock()
 	h.applyTools()

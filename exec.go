@@ -1,6 +1,7 @@
 package dun
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
+	"time"
 	"unicode/utf8"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -197,7 +200,6 @@ func safeCutFront(s string) string {
 	return s
 }
 
-
 // shellFlags is how every command is run: NON-LOGIN and NON-INTERACTIVE.
 //
 // It used to be `-lc`. A login shell sources the operator's profile, which
@@ -225,6 +227,386 @@ func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResu
 	// bite: it kills the whole process group, not just the `sh` that spawned it.
 	killGroup(detach(cmd))
 	return finish(ctx, w, cmd)
+}
+
+// HostShell is a persistent-shell exec backend: ONE long-lived shell process
+// that every command is fed through, so shell state — a variable you `export`,
+// an alias, a sourced file — survives from one command to the next, the way it
+// does in a human's terminal.
+//
+// Why a persistent shell rather than "re-inject the remembered vars into each
+// command": the agent can create state we cannot predict — `export X=…`,
+// `source .env`, an alias. A persistent shell keeps all of it in its own
+// memory without us having to parse every command the model writes.
+//
+// The one thing we DO control is the working directory. The model is told each
+// call starts in the project root, so before every command we `cd` back to
+// Dir. A `cd` the model runs is honored for the rest of THAT command only; the
+// next command starts clean. That is the reset the user asked for — no `cd`
+// bookkeeping in the model's head — while exports carry forward.
+//
+// Protocol: we write the command as a script, then a unique sentinel line. The
+// last line of the script is `echo SENTINEL $?`, so the shell prints the
+// sentinel followed by the command's exit code. A pump goroutine captures
+// stdout+stderr into a line buffer; readUntil reads until it sees the sentinel
+// and splits the command's output from the marker.
+//
+// One command at a time: the shell is one process with one stdin, so calls
+// serialize on mu. A command that outlives its caller's patience does NOT hold
+// that lock forever — its shell is DONATED to it (see RunPromotable) and the
+// next call gets a fresh one. That is what makes a long command a background
+// job rather than a stalled session.
+type HostShell struct {
+	Dir string
+
+	mu  sync.Mutex
+	p   *shellProc
+	seq int
+}
+
+// shellProc is ONE live `sh` process: the pipes we talk to it through, the
+// buffer its output lands in, and how we learn it died. They are a struct
+// rather than fields on HostShell because donation moves all of them at once.
+type shellProc struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	buf    *shLineBuf
+	dead   chan struct{}    // closed when the process exits
+	pumped chan struct{}    // closed when its output pipe reaches EOF
+	state  *os.ProcessState // written BEFORE dead closes; read only after
+}
+
+const shSentinelPrefix = "DUN_EXEC_END_"
+
+// pumpDrainGrace bounds how long a dying shell's output is waited for. EOF
+// normally arrives the instant the process goes, but a grandchild holding the
+// pipe open can delay it indefinitely, and a lost tail is a better outcome than
+// a hang.
+const pumpDrainGrace = 500 * time.Millisecond
+
+// PromotableExec is an ExecBackend that can hand a running command the shell it
+// occupies and step out of its way. Only the persistent shell needs this: a
+// stateless backend gives every command its own process already, so there is
+// nothing to donate and nothing queued behind it.
+type PromotableExec interface {
+	RunPromotable(ctx context.Context, command string, w io.Writer, promote <-chan struct{}) ExecResult
+}
+
+// Run feeds one command through the persistent shell, starting in Dir, and
+// returns its combined output plus exit code.
+func (h *HostShell) Run(ctx context.Context, command string, w io.Writer) ExecResult {
+	return h.RunPromotable(ctx, command, w, nil)
+}
+
+// RunPromotable is Run with an escape hatch. When promote closes, the shell
+// this command occupies is given away to it: HostShell drops its reference, the
+// lock is released, and the next call starts a fresh shell. The command is not
+// killed and not restarted — it keeps running in the shell it already has, its
+// output keeps arriving, and that shell dies with it.
+//
+// A nil promote channel never fires, which is exactly plain Run.
+func (h *HostShell) RunPromotable(ctx context.Context, command string, w io.Writer, promote <-chan struct{}) ExecResult {
+	h.mu.Lock()
+	unlocked := false
+	unlock := func() {
+		if !unlocked {
+			unlocked = true
+			h.mu.Unlock()
+		}
+	}
+	defer unlock()
+
+	if h.p == nil || h.p.exited() {
+		if err := h.start(); err != nil {
+			return ExecResult{Code: -1, Err: "persistent shell: " + err.Error()}
+		}
+	}
+
+	h.seq++
+	sentinel := fmt.Sprintf("%s%d", shSentinelPrefix, h.seq)
+	// cd back to the project root (the reset), run the command, then mark the
+	// end with the exit code. $? is the command's status because it is the
+	// immediately preceding command.
+	script := "cd " + shellQuote(h.Dir) + " 2>/dev/null\n" +
+		command + "\n" +
+		"echo " + sentinel + " $?\n\n"
+	if _, err := h.p.stdin.Write([]byte(script)); err != nil {
+		// The shell died between calls. Start a fresh one and retry once.
+		h.teardown()
+		if err := h.start(); err != nil {
+			return ExecResult{Code: -1, Err: "persistent shell: " + err.Error()}
+		}
+		if _, err := h.p.stdin.Write([]byte(script)); err != nil {
+			return ExecResult{Code: -1, Err: "persistent shell: " + err.Error()}
+		}
+	}
+
+	p := h.p
+	res, donated := p.readUntil(ctx, w, sentinel, promote, func() {
+		h.p = nil
+		unlock()
+	})
+	if donated {
+		// The donated shell existed only for this command; nothing else can
+		// reach it, so it goes when the command does.
+		p.kill()
+		return res
+	}
+	if p.exited() {
+		h.teardown()
+	}
+	return res
+}
+
+// readUntil pulls output until the sentinel line appears, returning everything
+// before it plus the exit code the sentinel carries.
+//
+// It also watches the three things the sentinel will never arrive after:
+// cancellation, promotion, and the shell dying underneath the command. That
+// last one is not an error — `exit 7` and `kill $$` are commands, and the
+// shell's own exit status IS the command's result. Missing it is what used to
+// spin this loop forever.
+//
+// The bool reports whether the shell was donated; the caller owns it after.
+func (p *shellProc) readUntil(ctx context.Context, w io.Writer, sentinel string, promote <-chan struct{}, onPromote func()) (ExecResult, bool) {
+	var buf bytes.Buffer
+	sink := io.Writer(&buf)
+	if w != nil {
+		sink = io.MultiWriter(&buf, w)
+	}
+	donated := false
+	for {
+		if line, ok := p.buf.popLine(); ok {
+			if code, hit := splitSentinel(sink, line, sentinel); hit {
+				return ExecResult{Output: buf.String(), Code: code}, donated
+			}
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ExecResult{Output: buf.String(), Code: -1, Err: "canceled"}, donated
+
+		case <-promote:
+			// A closed channel is always ready, so drop it after one firing.
+			promote, donated = nil, true
+			if onPromote != nil {
+				onPromote()
+			}
+
+		case <-p.dead:
+			// Let the pump reach EOF first, or the tail of the output is lost.
+			select {
+			case <-p.pumped:
+			case <-time.After(pumpDrainGrace):
+			}
+			for {
+				line, ok := p.buf.popLine()
+				if !ok {
+					break
+				}
+				if code, hit := splitSentinel(sink, line, sentinel); hit {
+					return ExecResult{Output: buf.String(), Code: code}, donated
+				}
+			}
+			code := -1
+			if p.state != nil {
+				code = p.state.ExitCode()
+			}
+			return ExecResult{Output: buf.String(), Code: code}, donated
+
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+// splitSentinel writes line to sink unless it carries the sentinel, in which
+// case it writes only the part before the marker and reports the exit code.
+func splitSentinel(sink io.Writer, line, sentinel string) (int, bool) {
+	i := strings.Index(line, sentinel)
+	if i < 0 {
+		fmt.Fprintln(sink, line)
+		return 0, false
+	}
+	if pre := line[:i]; pre != "" {
+		fmt.Fprintln(sink, pre)
+	}
+	code := 0
+	if rest := strings.TrimSpace(line[i+len(sentinel):]); rest != "" {
+		if c, err := strconv.Atoi(rest); err == nil {
+			code = c
+		}
+	}
+	return code, true
+}
+
+// start spawns the persistent shell: a plain `sh` reading commands from stdin.
+// Plain `sh` (no -c, no -i, no -l) gives the same reproducible, profile-free
+// environment contract as HostExec's `sh -c`, but stays alive across calls.
+//
+// The shell must OUTLIVE any single call's context, so it is NOT created with
+// CommandContext and carries no killGroup Cancel. It is detached so it can
+// never race the TUI for the terminal, and killed explicitly.
+//
+// stdout and stderr are the SAME pipe write end, so the kernel interleaves them
+// in the order they were actually written — one pipe, one pump, no cross-stream
+// reordering. The pipe is ours rather than StdoutPipe's on purpose: Wait closes
+// the pipes IT created, and doing that under a still-reading pump is precisely
+// how a command's last lines go missing.
+//
+// Caller must hold h.mu.
+func (h *HostShell) start() error {
+	h.teardown()
+	cmd := exec.Command("sh")
+	cmd.Dir = h.Dir
+	detach(cmd)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		_ = stdin.Close()
+		return err
+	}
+	cmd.Stdout, cmd.Stderr = pw, pw
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = pr.Close()
+		_ = pw.Close()
+		return err
+	}
+	// Drop the parent's copy of the write end, or the pump never sees EOF.
+	_ = pw.Close()
+
+	p := &shellProc{
+		cmd: cmd, stdin: stdin, buf: newShLineBuf(),
+		dead: make(chan struct{}), pumped: make(chan struct{}),
+	}
+	go func() {
+		p.buf.pump(pr)
+		_ = pr.Close()
+		close(p.pumped)
+	}()
+	// Reap the shell when it exits — `exit 7` ends it, and without a Wait it
+	// would linger as a zombie whose status nobody can read.
+	//
+	// state is stored BEFORE dead closes, and dead closes BEFORE any lock is
+	// taken. Both orderings are load-bearing: readUntil observes the close and
+	// then reads state, and a waiter that took h.mu first would deadlock
+	// against the RunPromotable call that holds it for the whole command.
+	go func() {
+		_ = cmd.Wait()
+		p.state = cmd.ProcessState
+		close(p.dead)
+	}()
+	h.p = p
+	return nil
+}
+
+// exited reports whether the shell process is gone. Safe without h.mu: dead is
+// only ever closed, never reassigned, once the shellProc is published.
+func (p *shellProc) exited() bool {
+	select {
+	case <-p.dead:
+		return true
+	default:
+		return false
+	}
+}
+
+// kill takes down the shell and everything it spawned. Setsid (detach) makes
+// the shell its own group leader, so -pid reaches the command it was running —
+// killing only the `sh` would orphan that.
+func (p *shellProc) kill() {
+	if p.stdin != nil {
+		_ = p.stdin.Close()
+	}
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	}
+	// The waiter goroutine owns Wait. Wait for IT, bounded, rather than calling
+	// Wait a second time.
+	select {
+	case <-p.dead:
+	case <-time.After(killGroupDelay):
+	}
+}
+
+// Close kills the shell this backend owns. Rehoist swaps the exec backend
+// wholesale (host ↔ docker, or into a worktree), and the shell the outgoing one
+// held would otherwise sit there for the life of the session.
+func (h *HostShell) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.teardown()
+}
+
+// teardown kills the current shell and forgets it. Caller must hold h.mu.
+func (h *HostShell) teardown() {
+	if h.p != nil {
+		h.p.kill()
+		h.p = nil
+	}
+}
+
+// shellQuote wraps a path in single quotes, escaping embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// shLineBuf is a thread-safe, line-oriented FIFO fed by two goroutines (the
+// shell's stdout and stderr). It is bounded so a runaway command cannot grow
+// memory without bound; Run drains it as it reads.
+type shLineBuf struct {
+	mu    sync.Mutex
+	cond  *sync.Cond
+	n     int
+	lines []string
+	full  bool
+}
+
+const shLineBufMax = 4096 // lines held before the pumpers block
+
+func newShLineBuf() *shLineBuf {
+	b := &shLineBuf{lines: make([]string, 0, 256)}
+	b.cond = sync.NewCond(&b.mu)
+	return b
+}
+
+// pump reads lines from r and enqueues them. It blocks when the buffer is full
+// (backpressure into the shell, which is fine — the shell simply waits for
+// room, exactly like a full pipe would).
+func (b *shLineBuf) pump(r io.Reader) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		b.mu.Lock()
+		for b.n >= shLineBufMax {
+			b.full = true
+			b.cond.Wait()
+		}
+		b.lines = append(b.lines, sc.Text())
+		b.n++
+		b.cond.Signal()
+		b.mu.Unlock()
+	}
+}
+
+// popLine returns the next line, or ("", false) if none is ready.
+func (b *shLineBuf) popLine() (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.n == 0 {
+		return "", false
+	}
+	line := b.lines[0]
+	b.lines = b.lines[1:]
+	b.n--
+	if b.full {
+		b.full = false
+		b.cond.Signal()
+	}
+	return line, true
 }
 
 // DockerExec runs each command in a fresh container of Image with Dir mounted at
@@ -333,63 +715,56 @@ func finish(ctx context.Context, w io.Writer, cmd *exec.Cmd) ExecResult {
 	return res
 }
 
+// execGrace is how long an exec call waits for a command before handing it to
+// the background. Everything ordinary — a build, a focused test run, a git
+// command — answers well inside this; anything that does not is by definition
+// long enough to be worth watching asynchronously instead of blocking on.
+//
+// 30s because the failure it replaces was measured in TEN-MINUTE units: a
+// wedged `go test` held a session silent for its full timeout, twice in one
+// hour, while nothing in the loop could tell "working" from "stuck".
+const execGrace = 30 * time.Second
+
 // execToolDef is the tool the model calls to run commands.
 func execToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "exec"
-	td.Function.Description = "Run a shell command (build, test, git, ls, …) in the workspace. " +
-		"The working directory carries from one call to the next (cd persists), so you do not " +
-		"need to cd back to the project root every time — each call starts where the last one " +
-		"ended. Returns combined stdout+stderr; a non-zero exit is shown as [exit: …]. Use this to " +
-		"verify edits (build/test) and to run git. Foreground commands have no time limit, so " +
-		"never run anything interactive (it has no terminal and no input — it will just hang). " +
-		"For a LONG command (the full test suite, a build), set background:true and keep " +
-		"working — background jobs have no time limit and you'll get a notification when one " +
-		"finishes."
+	td.Function.Description = "Run a shell command (build, test, git, ls, …) in the workspace's " +
+		"project directory. Each call starts in the project root — you do not need to cd into it — " +
+		"but a variable you `export` in one call persists into the next for this agent. Returns " +
+		"combined stdout+stderr; a non-zero exit is shown as [exit: …]. Use this to verify edits " +
+		"(build/test) and to run git.\n" +
+		"A command still running after 30s is NOT killed and does NOT block you: it becomes a " +
+		"background job and you get its number back immediately. From then on the job reports to " +
+		"you — a notification when it finishes, and exec_monitor(job:N) whenever you want to see " +
+		"what it has produced so far. Set `timeout` to wait longer or shorter before that handover, " +
+		"or `background:true` to hand over at once for a command you already know is long. " +
+		"Never run anything interactive: it has no terminal and no input, so it will sit there " +
+		"doing nothing until the handover."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command":    map[string]any{"type": "string", "description": "the shell command to run"},
-			"background": map[string]any{"type": "boolean", "description": "run asynchronously; get notified when it finishes"},
+			"timeout":    map[string]any{"type": "integer", "description": "seconds to wait for the command before it becomes a background job (default 30)"},
+			"background": map[string]any{"type": "boolean", "description": "hand over to a background job immediately, without waiting"},
 		},
 		"required": []string{"command"},
 	}
 	return td
 }
 
-// cwdTracker persists the working directory across exec calls so that
-// `cd subdir` in one call carries into the next, without the model
-// needing to repeat the path. Each foreground call is prefixed with
-// `cd <remembered>` and suffixed with `; pwd` to capture the new location.
-// The tracker is per-Harness (one per session), so each agent gets its own.
-type cwdTracker struct {
-	mu  sync.Mutex
-	cwd string
-}
-
-func (t *cwdTracker) set(dir string) {
-	t.mu.Lock()
-	t.cwd = dir
-	t.mu.Unlock()
-}
-
-func (t *cwdTracker) get() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.cwd
-}
-
-// shellQuote wraps a path in single quotes, escaping embedded single quotes.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-// withExec wraps a dispatcher so the built-in "exec" tool is handled locally:
-// synchronous by default, or async via startBg when background:true (its
-// completion arrives later as a notification). Everything else routes to MCP.
-func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startBg func(command string) *bgJob, spill func(command, output string) string) agent.ToolDispatcher {
-	tracker := &cwdTracker{}
+// withExec wraps a dispatcher so the built-in "exec" tool is handled locally.
+//
+// There is no foreground path any more. Every command starts as a job (see
+// Harness.startJob) and the only question this asks is who reports it: if it
+// finishes within its grace, the output comes back as an ordinary tool result
+// and the job never surfaces; if it does not, the job is promoted — it takes
+// over the shell, gets a number, and the model is told where to look.
+//
+// That is the whole point. A command can no longer hold the session: the worst
+// case is a job the model was told about, not a turn that never ends.
+func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command string, background bool) *bgJob, spill func(command, output string) string) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
@@ -397,48 +772,49 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		var args struct {
 			Command    string `json:"command"`
 			Background bool   `json:"background"`
+			Timeout    *int   `json:"timeout"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		if strings.TrimSpace(args.Command) == "" {
 			return "ERROR: exec requires a non-empty command", nil
 		}
-		if args.Background && startBg != nil {
-			// Background jobs don't participate in cwd tracking — they
-			// fire-and-forget and the model greps their log later.
-			j := startBg(args.Command)
-			res := fmt.Sprintf("Started background job #%d: `%s`. It has no time limit and runs in "+
-				"the sandbox; you'll be notified when it finishes. Continue with other work in the "+
-				"meantime.\n%s\nDo NOT poll it — you will receive a notification when it completes. "+
-				"Only call exec_monitor(job:%d) if you need to change its output (buffer_bytes, grep, ignore).",
-				j.id, args.Command, j.logLine(), j.id)
-			if onCall != nil {
-				onCall("exec", map[string]any{"command": args.Command, "background": true}, res)
-			}
-			return res, nil
-		}
-		// Prefix with cd if we've remembered a non-empty cwd, and append
-		// `; pwd` so we can persist the final location for the next call.
-		cmd := args.Command
-		if cwd := tracker.get(); cwd != "" {
-			cmd = "cd " + shellQuote(cwd) + " && " + cmd
-		}
-		cmd = cmd + "; pwd"
+
 		// NOT capped here: the cap is applied once, around every tool, in
 		// withRecapWatch. Capping twice would spill the same output twice.
-		res := backend.Run(ctx, cmd, nil)
-		raw := res.Output
-		// The last line is the pwd output; strip it from the model-facing
-		// output and persist the location for the next call.
-		if i := strings.LastIndexByte(raw, '\n'); i >= 0 {
-			last := strings.TrimSpace(raw[i+1:])
-			if strings.HasPrefix(last, "/") {
-				tracker.set(last)
-				res.Output = raw[:i]
+		if startJob == nil {
+			// No job machinery (a bare dispatcher in a test): run it straight.
+			out := backend.Run(ctx, args.Command, nil).Render()
+			if onCall != nil {
+				onCall("exec", map[string]any{"command": args.Command}, out)
 			}
+			return out, nil
 		}
+
+		grace := execGrace
+		if args.Timeout != nil {
+			grace = time.Duration(*args.Timeout) * time.Second
+		}
+		if args.Background || grace < 0 {
+			grace = 0
+		}
+
+		j := startJob(args.Command, grace <= 0)
+		if grace > 0 {
+			t := time.NewTimer(grace)
+			select {
+			case <-j.doneCh:
+			case <-t.C:
+			case <-ctx.Done():
+			}
+			t.Stop()
+		}
+		res, done := j.settle()
 		out := res.Render()
+		if !done {
+			out = j.handoffNotice(grace)
+		}
 		if onCall != nil {
-			onCall("exec", map[string]any{"command": args.Command}, out)
+			onCall("exec", map[string]any{"command": args.Command, "background": !done}, out)
 		}
 		return out, nil
 	}

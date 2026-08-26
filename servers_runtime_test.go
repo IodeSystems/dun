@@ -220,12 +220,14 @@ func TestRehoist_SwitchesHostToDocker(t *testing.T) {
 	if h.IsDocker() {
 		t.Error("should be host after rehoist off")
 	}
-	he, ok := h.ExecBackend().(HostExec)
+	// The host backend is the PERSISTENT shell, not a fresh `sh -c` per call:
+	// exports have to survive between exec calls.
+	he, ok := h.ExecBackend().(*HostShell)
 	if !ok {
-		t.Fatal("exec backend is not HostExec")
+		t.Fatalf("exec backend is not *HostShell: %T", h.ExecBackend())
 	}
 	if he.Dir != dir {
-		t.Errorf("HostExec.Dir = %q, want %q", he.Dir, dir)
+		t.Errorf("HostShell.Dir = %q, want %q", he.Dir, dir)
 	}
 }
 
@@ -269,12 +271,12 @@ func TestRehoist_SwitchesWorktree(t *testing.T) {
 	if h.Worktree() != wt {
 		t.Error("worktree not set")
 	}
-	he, ok := h.ExecBackend().(HostExec)
+	he, ok := h.ExecBackend().(*HostShell)
 	if !ok {
-		t.Fatal("not HostExec")
+		t.Fatalf("not *HostShell: %T", h.ExecBackend())
 	}
 	if he.Dir != wt.Path {
-		t.Errorf("HostExec.Dir = %q, want %q", he.Dir, wt.Path)
+		t.Errorf("HostShell.Dir = %q, want %q", he.Dir, wt.Path)
 	}
 }
 

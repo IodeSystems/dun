@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -64,17 +65,32 @@ type bgJob struct {
 	// this job says, which is why every notification goes through j.notify.
 	hb *heartbeat
 
+	// promoteCh is closed when the job goes background; it is what donates the
+	// shell (HostShell.RunPromotable). doneCh is closed when the command
+	// returns, and is what the tool call waits on for its grace.
+	promoteCh chan struct{}
+	doneCh    chan struct{}
+
 	mu      sync.Mutex
 	mon     bgMonitor
 	re      *regexp.Regexp
 	log     *os.File
+	early   []byte // output held in memory while the job has no log file yet
 	partial []byte // bytes since the last newline; a line is not reportable yet
 	pending []byte // matched lines not yet reported
 	written int64
 	done    bool
+	bg      bool // promoted: has a number, a row in the pane, and a voice
+	settled bool // someone has claimed the result — inline or background
 	res     ExecResult
 	ended   time.Time
 }
+
+// bgEarlyMax bounds the in-memory buffer a not-yet-promoted job keeps. Its
+// output is already being accumulated into the ExecResult the tool call will
+// return, so this is a second copy; past the cap a promoted job's log simply
+// begins at the promotion point.
+const bgEarlyMax = 1 << 20
 
 // Write is the tee end of ExecBackend.Run: the command's combined output
 // arrives here as it is produced. Everything goes to the log; only complete,
@@ -84,6 +100,8 @@ func (j *bgJob) Write(p []byte) (int, error) {
 	j.mu.Lock()
 	if j.log != nil {
 		_, _ = j.log.Write(p)
+	} else if len(j.early) < bgEarlyMax {
+		j.early = append(j.early, p...)
 	}
 	j.written += int64(len(p))
 
@@ -147,21 +165,137 @@ func (j *bgJob) reportLocked(force bool) string {
 		j.id, j.command, roundDur(time.Since(j.started)), strings.TrimRight(body, "\n"))
 }
 
-// finished records the outcome and returns the completion notice.
-func (j *bgJob) finished(res ExecResult) string {
+// finish records the outcome and releases whoever is waiting on it. If the job
+// was already promoted it also announces itself, because a background job's
+// completion is news; a provisional job's is not — the tool call that started
+// it is still holding the line and gets the result as its own return value.
+func (j *bgJob) finish(res ExecResult) {
 	j.mu.Lock()
-	defer j.mu.Unlock()
 	j.done, j.res, j.ended = true, res, time.Now()
 	if j.log != nil {
 		_ = j.log.Close()
 		j.log = nil
 	}
+	bg := j.bg
+	j.mu.Unlock()
+
+	close(j.doneCh)
+	if !bg {
+		return
+	}
+	j.h.bgMu.Lock()
+	j.h.bgRun--
+	j.h.bgMu.Unlock()
+	// Pushed even for a MUTED job: `ignore` silences the model, not the human,
+	// and a row stuck on "running" forever is the bug the pane exists to stop.
+	j.h.jobsChanged()
+	if note := j.completionNote(); note != "" {
+		j.notify(note)
+	}
+}
+
+// completionNote is the sentence a finished background job says, or "" for a
+// muted one. Split out of finish so the wording is testable without running a
+// command.
+func (j *bgJob) completionNote() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	if j.mon.Ignore {
 		return ""
 	}
 	return fmt.Sprintf("background job #%d %s — `%s` (%s)\n%s\n%s",
-		j.id, outcome(res), j.command, roundDur(j.ended.Sub(j.started)),
-		j.logLine(), tailOf(res.Output, bgTailBytes))
+		j.id, outcome(j.res), j.command, roundDur(j.ended.Sub(j.started)),
+		j.logLine(), tailOf(j.res.Output, bgTailBytes))
+}
+
+// settle decides ONCE who reports this command: the tool call that started it,
+// or the background machinery. It returns the result and true when the answer
+// is already in hand; otherwise it promotes the job and returns false.
+//
+// The decision is made under j.mu against j.done, so it cannot race finish: a
+// command that completed a microsecond before the grace expired is reported
+// inline, and one that completes a microsecond after is reported by the job it
+// has by then become. Exactly one of the two speaks.
+func (j *bgJob) settle() (ExecResult, bool) {
+	j.mu.Lock()
+	if j.settled {
+		// Already decided. exec(background:true) promotes before the command
+		// starts, so the tool call that follows is only reading back the answer
+		// it asked for — it must not promote a second time.
+		res, bg := j.res, j.bg
+		j.mu.Unlock()
+		return res, !bg
+	}
+	if j.done {
+		res := j.res
+		j.settled = true
+		j.mu.Unlock()
+		return res, true
+	}
+	j.settled, j.bg = true, true
+	j.h.bgMu.Lock()
+	j.h.bgSeq++
+	j.id = j.h.bgSeq
+	j.h.bgRun++
+	if j.h.bgJobs == nil {
+		j.h.bgJobs = map[int]*bgJob{}
+	}
+	j.h.bgJobs[j.id] = j
+	j.h.bgMu.Unlock()
+	// Inside the lock, so the number and the log exist before finish can read
+	// j.bg and start talking about them.
+	j.openLogLocked()
+	j.mu.Unlock()
+
+	// Donate the shell. From here the command runs on its own and the next
+	// exec gets a fresh shell instead of queueing behind this one.
+	close(j.promoteCh)
+	j.h.jobsChanged()
+	go j.heartbeat()
+	return ExecResult{}, false
+}
+
+// openLogLocked gives a newly promoted job its log file and flushes into it
+// everything the job has already produced. A provisional job writes to memory
+// instead: a file per `ls` would bury the session directory in thousands of
+// them, and nothing would ever read one.
+//
+// Caller must hold j.mu.
+func (j *bgJob) openLogLocked() {
+	dir := j.h.bgLogDir()
+	if dir == "" {
+		return
+	}
+	path := filepath.Join(dir, fmt.Sprintf("job-%d.log", j.id))
+	f, err := os.Create(path)
+	if err != nil {
+		// A log we cannot open is not worth failing the job over — the output
+		// still reaches the model, it is just not grep-able.
+		return
+	}
+	if len(j.early) > 0 {
+		_, _ = f.Write(j.early)
+		j.early = nil
+	}
+	j.log, j.logPath = f, path
+}
+
+// handoffNotice is what the model reads when a command outlives its grace.
+//
+// It has two jobs, and the wording is doing both deliberately. Say the command
+// is not dead — the reflex on seeing anything other than output is to run it
+// again, which is how one slow build becomes three. And name the ONE place its
+// answer will come from, so the model stops thinking about it until then.
+func (j *bgJob) handoffNotice(waited time.Duration) string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return fmt.Sprintf(
+		"`%s` is STILL RUNNING after %s — it was NOT killed and has NOT failed. It is now "+
+			"background job #%d and it runs to completion on its own.\n%s\n"+
+			"Do NOT re-run it and do NOT poll it: you will be notified when it finishes. Until "+
+			"then exec_monitor(job:%d) is where you look — it can show you what the job has "+
+			"produced so far, grep it, or mute it. Get on with other work in the meantime.",
+		j.command, roundDur(waited), j.id, j.logLine(), j.id)
 }
 
 // logLine cites the job's log by REF. It used to hand over a host path with
@@ -276,49 +410,62 @@ func (h *Harness) bgLogDir() string {
 	return dir
 }
 
-// startBackground runs command asynchronously via backend (a container when
-// DockerExec); on completion it injects a completion notification and wakes the
-// driver. Returns the job.
-func (h *Harness) startBackground(backend ExecBackend, command string) *bgJob {
-	h.bgMu.Lock()
-	h.bgSeq++
-	id := h.bgSeq
-	h.bgRun++
-	if h.bgJobs == nil {
-		h.bgJobs = map[int]*bgJob{}
-	}
-	j := &bgJob{id: id, command: command, started: time.Now(), h: h, hb: newHeartbeat()}
-	h.bgJobs[id] = j
-	h.bgMu.Unlock()
-
-	if dir := h.bgLogDir(); dir != "" {
-		p := filepath.Join(dir, fmt.Sprintf("job-%d.log", id))
-		// A log we cannot open is not worth failing the job over — the output
-		// still reaches the model, it is just not grep-able.
-		if f, err := os.Create(p); err == nil {
-			j.log, j.logPath = f, p
-		}
-	}
-	// After the log is opened, so the row carries a path the human can grep.
-	h.jobsChanged()
-	go j.heartbeat()
-
-	go func() {
-		// Background jobs have no time limit: the whole point is the long build.
-		res := backend.Run(context.Background(), command, j)
-		h.bgMu.Lock()
-		h.bgRun--
-		h.bgMu.Unlock()
-		note := j.finished(res)
-		// Pushed even for a MUTED job: `ignore` silences the model, not the
-		// human, and a row stuck on "running" forever is the bug the pane
-		// exists to stop.
-		h.jobsChanged()
-		if note != "" {
-			j.notify(note)
-		}
-	}()
+// startJob launches command and returns immediately. The job starts
+// PROVISIONAL: no number, no log file, no row in the pane, no voice — because
+// most commands finish in seconds and none of that would ever be read. If it is
+// still running when the caller's grace runs out, settle promotes it into a
+// real background job; if it finishes first it stays invisible and its output
+// is returned inline as an ordinary tool result.
+//
+// One machine for both, on purpose. There is no separate foreground runner that
+// can block forever: what used to hold a session silent for ten minutes is now
+// just a job nobody promoted yet.
+func (h *Harness) startJob(backend ExecBackend, command string) *bgJob {
+	j := h.newJob(command)
+	j.run(backend)
 	return j
+}
+
+// startBackgroundJob is exec(background:true): the caller already knows the
+// command is long, so the job is promoted BEFORE the command starts.
+//
+// Promoting first rather than immediately-after is what removes the race. A
+// surprisingly fast command could otherwise finish in the gap between the two
+// and report itself inline, leaving a caller that explicitly asked for a job
+// holding a number for a job that was never registered.
+func (h *Harness) startBackgroundJob(backend ExecBackend, command string) *bgJob {
+	j := h.newJob(command)
+	j.settle() // nothing is running yet, so this always promotes
+	j.run(backend)
+	return j
+}
+
+// newJob builds a provisional job. It is not running until run is called.
+func (h *Harness) newJob(command string) *bgJob {
+	return &bgJob{
+		command: command, started: time.Now(), h: h, hb: newHeartbeat(),
+		promoteCh: make(chan struct{}), doneCh: make(chan struct{}),
+	}
+}
+
+// run starts the command. No time limit here, ever: the grace lives in the tool
+// call, which can walk away from it; the command itself is allowed to take as
+// long as it takes.
+func (j *bgJob) run(backend ExecBackend) {
+	go func() {
+		j.finish(runPromotable(backend, j.command, j, j.promoteCh))
+	}()
+}
+
+// runPromotable runs command on backend, letting it hand over its shell if it
+// has one to hand over. A stateless backend (HostExec, DockerExec) gives every
+// command its own process already, so there is nothing to donate and nothing
+// queued behind it — promotion is simply not its concern.
+func runPromotable(backend ExecBackend, command string, w io.Writer, promote <-chan struct{}) ExecResult {
+	if p, ok := backend.(PromotableExec); ok {
+		return p.RunPromotable(context.Background(), command, w, promote)
+	}
+	return backend.Run(context.Background(), command, w)
 }
 
 // heartbeat says "still running" on the bgHeartbeats schedule until the job
@@ -480,9 +627,9 @@ func execMonitorToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "exec_monitor"
-	td.Function.Description = "Change how a background job reports: `buffer_bytes` fires once that many bytes accumulate, "+
-		"`grep` limits to matching lines, `ignore` mutes entirely including completion. "+
-		"Do NOT use this to poll — you will be notified when the job finishes. "+
+	td.Function.Description = "Change how a background job reports: `buffer_bytes` fires once that many bytes accumulate, " +
+		"`grep` limits to matching lines, `ignore` mutes entirely including completion. " +
+		"Do NOT use this to poll — you will be notified when the job finishes. " +
 		"Every job also writes a log file — grep THAT with exec rather than asking for a big log here."
 	td.Function.Parameters = map[string]any{
 		"type": "object",

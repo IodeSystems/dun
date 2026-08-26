@@ -25,6 +25,17 @@ func testHarness(t *testing.T) *Harness {
 	}
 }
 
+// testJob is a job built the way production builds one, with the id and the
+// `bg` flag a test wants to pin. Tests must not hand-roll the struct literal: a
+// job without its channels panics the moment anything finishes it, and one with
+// bg unset is provisional, so it stays silent and proves nothing about the
+// notifications these tests are about.
+func testJob(h *Harness, id int, command string) *bgJob {
+	j := h.newJob(command)
+	j.id, j.bg = id, true
+	return j
+}
+
 // notes drains what the harness has buffered for the model.
 func (h *Harness) notes() []string {
 	h.noteMu.Lock()
@@ -42,13 +53,14 @@ func (h *Harness) notes() []string {
 // monitor exists so the model can OPT IN per job.
 func TestBgJob_SilentUntilAsked(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 1, command: "build", started: time.Now(), h: h}
+	j := testJob(h, 1, "build")
 
 	j.Write([]byte("compiling a\ncompiling b\n"))
 	if n := h.notes(); len(n) != 0 {
 		t.Fatalf("an unmonitored job must not report progress: %q", n)
 	}
-	if note := j.finished(ExecResult{Output: "compiling a\ncompiling b\n"}); note == "" {
+	j.finish(ExecResult{Output: "compiling a\ncompiling b\n"})
+	if note := j.completionNote(); note == "" {
 		t.Fatal("completion is always reported unless the job is muted")
 	}
 }
@@ -56,7 +68,8 @@ func TestBgJob_SilentUntilAsked(t *testing.T) {
 // buffer_bytes is the chattiness bound: report only once enough has piled up.
 func TestBgJob_ProgressOnlyAfterBufferBytes(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 2, command: "build", started: time.Now(), h: h, mon: bgMonitor{BufferBytes: 20}}
+	j := testJob(h, 2, "build")
+	j.mon = bgMonitor{BufferBytes: 20}
 
 	j.Write([]byte("short\n"))
 	if n := h.notes(); len(n) != 0 {
@@ -76,7 +89,8 @@ func TestBgJob_ProgressOnlyAfterBufferBytes(t *testing.T) {
 // regexp cannot judge one.
 func TestBgJob_HoldsPartialLines(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 3, command: "build", started: time.Now(), h: h, mon: bgMonitor{BufferBytes: 1}}
+	j := testJob(h, 3, "build")
+	j.mon = bgMonitor{BufferBytes: 1}
 
 	j.Write([]byte("no newline yet"))
 	if n := h.notes(); len(n) != 0 {
@@ -91,8 +105,9 @@ func TestBgJob_HoldsPartialLines(t *testing.T) {
 
 func TestBgJob_GrepLimitsWhatIsReported(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 4, command: "test", started: time.Now(), h: h,
-		mon: bgMonitor{BufferBytes: 1, Grep: "FAIL"}, re: regexp.MustCompile("FAIL")}
+	j := testJob(h, 4, "test")
+	j.mon = bgMonitor{BufferBytes: 1, Grep: "FAIL"}
+	j.re = regexp.MustCompile("FAIL")
 
 	j.Write([]byte("ok pkg/a\nFAIL pkg/b\nok pkg/c\n"))
 	n := h.notes()
@@ -111,11 +126,12 @@ func TestBgJob_GrepLimitsWhatIsReported(t *testing.T) {
 // completion, or it is not actually muted.
 func TestBgJob_IgnoreMutesCompletionToo(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 5, command: "build", started: time.Now(), h: h,
-		mon: bgMonitor{BufferBytes: 1, Ignore: true}}
+	j := testJob(h, 5, "build")
+	j.mon = bgMonitor{BufferBytes: 1, Ignore: true}
 
 	j.Write([]byte("noise\n"))
-	if note := j.finished(ExecResult{Code: 1}); note != "" {
+	j.finish(ExecResult{Code: 1})
+	if note := j.completionNote(); note != "" {
 		t.Errorf("a muted job must not announce its completion: %q", note)
 	}
 	if n := h.notes(); len(n) != 0 {
@@ -127,7 +143,7 @@ func TestBgJob_IgnoreMutesCompletionToo(t *testing.T) {
 // survives, and the completion notice names both.
 func TestStartBackground_LogsAndReportsTheExitCode(t *testing.T) {
 	h := testHarness(t)
-	j := h.startBackground(HostExec{Dir: t.TempDir()}, "echo hello-bg; exit 2")
+	j := h.startBackgroundJob(HostExec{Dir: t.TempDir()}, "echo hello-bg; exit 2")
 
 	waitFor(t, 10*time.Second, func() bool { return strings.Contains(j.status(), "FAILED") })
 
@@ -167,7 +183,8 @@ func TestStartBackground_LogsAndReportsTheExitCode(t *testing.T) {
 // output as one doing honest work — none. The heartbeat is what separates them.
 func TestBgJob_HeartbeatSaysStillRunning(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 7, command: "sleep 300", started: time.Now(), h: h, hb: fastHeartbeat()}
+	j := testJob(h, 7, "sleep 300")
+	j.hb = fastHeartbeat()
 	go j.heartbeat()
 
 	waitFor(t, 3*time.Second, func() bool { return len(h.notes()) > 0 })
@@ -184,7 +201,7 @@ func TestBgJob_HeartbeatSaysStillRunning(t *testing.T) {
 
 	// And it stops with the job, rather than reminding forever about something
 	// that finished.
-	j.finished(ExecResult{})
+	j.finish(ExecResult{})
 	time.Sleep(60 * time.Millisecond)
 	h.notes() // drain whatever was in flight as it exited
 	time.Sleep(80 * time.Millisecond)
@@ -197,10 +214,11 @@ func TestBgJob_HeartbeatSaysStillRunning(t *testing.T) {
 // heartbeat is exactly the outcome-adjacent noise it asked not to hear.
 func TestBgJob_HeartbeatRespectsMute(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 8, command: "sleep 300", started: time.Now(), h: h, mon: bgMonitor{Ignore: true},
-		hb: fastHeartbeat()}
+	j := testJob(h, 8, "sleep 300")
+	j.mon = bgMonitor{Ignore: true}
+	j.hb = fastHeartbeat()
 	go j.heartbeat()
-	defer j.finished(ExecResult{})
+	defer j.finish(ExecResult{})
 
 	time.Sleep(120 * time.Millisecond)
 	if n := h.notes(); len(n) != 0 {
@@ -252,7 +270,7 @@ func TestJobs_PushedOnStartAndOnFinish(t *testing.T) {
 		return pushes[len(pushes)-1]
 	}
 
-	h.startBackground(HostExec{Dir: t.TempDir()}, "echo hello-bg; exit 2")
+	h.startBackgroundJob(HostExec{Dir: t.TempDir()}, "echo hello-bg; exit 2")
 
 	first := last()
 	if len(first) != 1 || first[0].State != "running" {
@@ -299,7 +317,7 @@ func TestJobs_MutedJobIsStillPushed(t *testing.T) {
 		mu.Unlock()
 	}
 
-	j := h.startBackground(HostExec{Dir: t.TempDir()}, "echo quiet")
+	j := h.startBackgroundJob(HostExec{Dir: t.TempDir()}, "echo quiet")
 	j.mu.Lock()
 	j.mon.Ignore = true
 	j.mu.Unlock()
@@ -320,7 +338,7 @@ func TestExecMonitor_ListsJobsAndAppliesSettings(t *testing.T) {
 		t.Errorf("an empty list should say so: %q", out)
 	}
 
-	j := &bgJob{id: 9, command: "build", started: time.Now(), h: h}
+	j := testJob(h, 9, "build")
 	h.bgMu.Lock()
 	h.bgJobs = map[int]*bgJob{9: j}
 	h.bgMu.Unlock()
@@ -350,10 +368,11 @@ func TestExecMonitor_ListsJobsAndAppliesSettings(t *testing.T) {
 // on, or it would only ever fire once.
 func TestBgJob_HeartbeatIsDebouncedByTheJobsOwnOutput(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 10, command: "chatty", started: time.Now(), h: h,
-		mon: bgMonitor{BufferBytes: 1}, hb: fastHeartbeat()}
+	j := testJob(h, 10, "chatty")
+	j.mon = bgMonitor{BufferBytes: 1}
+	j.hb = fastHeartbeat()
 	go j.heartbeat()
-	defer j.finished(ExecResult{})
+	defer j.finish(ExecResult{})
 
 	// Keep talking for well past several reminder intervals.
 	deadline := time.Now().Add(120 * time.Millisecond)
@@ -386,9 +405,10 @@ func TestBgJob_HeartbeatIsDebouncedByTheJobsOwnOutput(t *testing.T) {
 // requests per reminder, starting one minute in, to say nothing had happened.
 func TestBgJob_HeartbeatDoesNotBuyATurn(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 11, command: "sleep 300", started: time.Now(), h: h, hb: fastHeartbeat()}
+	j := testJob(h, 11, "sleep 300")
+	j.hb = fastHeartbeat()
 	go j.heartbeat()
-	defer j.finished(ExecResult{})
+	defer j.finish(ExecResult{})
 
 	// The human still hears about it...
 	waitFor(t, 3*time.Second, func() bool {
@@ -425,8 +445,9 @@ func TestBgJob_HeartbeatDoesNotBuyATurn(t *testing.T) {
 // the line; the goroutine that owns the job publishes it).
 func TestBgJob_CompletionStillWakesATurn(t *testing.T) {
 	h := testHarness(t)
-	j := &bgJob{id: 12, command: "true", started: time.Now(), h: h, hb: fastHeartbeat()}
-	j.notify(j.finished(ExecResult{Output: "done"}))
+	j := testJob(h, 12, "true")
+	j.hb = fastHeartbeat()
+	j.finish(ExecResult{Output: "done"})
 	h.noteMu.Lock()
 	n, kind := len(h.queue), queuedAside
 	if n > 0 {
