@@ -5,6 +5,7 @@ package dun
 // one does not, or when the target IS the AGENTS.md.
 
 import (
+	"time"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,5 +140,114 @@ func TestAgentsHook_NoGit(t *testing.T) {
 	code, out := runHook(t, "read", p)
 	if code != 0 {
 		t.Errorf("no .git should proceed: exit %d, out: %s", code, out)
+	}
+}
+
+// TestAgentsHook_InjectReadRetry is the critical flow: the model is blocked,
+// reads the AGENTS.md, and the retry succeeds. Without session memory, the
+// retry would be blocked again — the model would be trapped.
+func TestAgentsHook_InjectReadRetry(t *testing.T) {
+	dir := setupWorktree(t, map[string]string{
+		"AGENTS.md": "always use tabs",
+		"main.go":   "package main",
+	})
+	target := filepath.Join(dir, "main.go")
+
+	// 1. First access: blocked.
+	code, out := runHook(t, "read", target)
+	if code != 2 {
+		t.Fatalf("first access should be blocked: exit %d, out: %s", code, out)
+	}
+
+	// 2. Read the AGENTS.md: allowed, and marks it as read.
+	code, _ = runHook(t, "read", filepath.Join(dir, "AGENTS.md"))
+	if code != 0 {
+		t.Fatalf("reading AGENTS.md should proceed: exit %d", code)
+	}
+
+	// 3. Retry the original access: should now succeed.
+	code, out = runHook(t, "read", target)
+	if code != 0 {
+		t.Errorf("retry after reading AGENTS.md should proceed: exit %d, out: %s", code, out)
+	}
+}
+
+// TestAgentsHook_EditAfterRead: editing is also unblocked after the read.
+func TestAgentsHook_EditAfterRead(t *testing.T) {
+	dir := setupWorktree(t, map[string]string{
+		"AGENTS.md": "rules",
+		"main.go":   "package main",
+	})
+	target := filepath.Join(dir, "main.go")
+
+	// Blocked for edit.
+	code, _ := runHook(t, "edit", target)
+	if code != 2 {
+		t.Fatalf("edit should be blocked: exit %d", code)
+	}
+
+	// Read the AGENTS.md.
+	runHook(t, "read", filepath.Join(dir, "AGENTS.md"))
+
+	// Edit now proceeds.
+	code, out := runHook(t, "edit", target)
+	if code != 0 {
+		t.Errorf("edit after reading AGENTS.md should proceed: exit %d, out: %s", code, out)
+	}
+}
+
+// TestAgentsHook_StateFileIsPerWorkspace: two workspaces do not share state.
+func TestAgentsHook_StateFileIsPerWorkspace(t *testing.T) {
+	dir1 := setupWorktree(t, map[string]string{
+		"AGENTS.md": "rules1",
+		"main.go":   "package main",
+	})
+	dir2 := setupWorktree(t, map[string]string{
+		"AGENTS.md": "rules2",
+		"main.go":   "package main",
+	})
+
+	// Read AGENTS.md in workspace 1.
+	runHook(t, "read", filepath.Join(dir1, "AGENTS.md"))
+
+	// Workspace 1 is unblocked.
+	code, _ := runHook(t, "read", filepath.Join(dir1, "main.go"))
+	if code != 0 {
+		t.Errorf("workspace 1 should be unblocked after read: exit %d", code)
+	}
+
+	// Workspace 2 is still blocked (different .dun/agents_read).
+	code, _ = runHook(t, "read", filepath.Join(dir2, "main.go"))
+	if code != 2 {
+		t.Errorf("workspace 2 should still be blocked: exit %d", code)
+	}
+}
+
+// TestAgentsHook_MtimeInvalidation: if the AGENTS.md is modified after being
+// read, the guard re-engages (the mtime no longer matches the state file).
+func TestAgentsHook_MtimeInvalidation(t *testing.T) {
+	dir := setupWorktree(t, map[string]string{
+		"AGENTS.md": "old rules",
+		"main.go":   "package main",
+	})
+	target := filepath.Join(dir, "main.go")
+
+	// Read the AGENTS.md.
+	runHook(t, "read", filepath.Join(dir, "AGENTS.md"))
+
+	// Now it's unblocked.
+	code, _ := runHook(t, "read", target)
+	if code != 0 {
+		t.Fatalf("should be unblocked after read: exit %d", code)
+	}
+
+	// Modify the AGENTS.md (changes mtime).
+	time.Sleep(1100 * time.Millisecond) // ensure mtime changes
+	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("new rules"), 0o644)
+
+	// Now it's blocked again.
+	code, out := runHook(t, "read", target)
+	if code != 2 {
+		t.Errorf("should be re-blocked after AGENTS.md changes: exit %d, out: %s", code, out)
 	}
 }

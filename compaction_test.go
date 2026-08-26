@@ -190,3 +190,50 @@ func TestIngestTargets_FallsBack(t *testing.T) {
 		t.Errorf("want the workspace itself as a fallback, got %v", got)
 	}
 }
+
+// The fold destroys the prefix the AGENTS.md read lived in. The note must name
+// the rules file so the model knows to re-read it, rather than depending on
+// the summary (a model's reading) to have preserved the rules.
+func TestNoteCompaction_NamesAgentsMDWhenPresent(t *testing.T) {
+	var got []CompactionNote
+	h := newNoteHarness(t)
+	// A workspace with a root AGENTS.md and a nested one.
+	ws := t.TempDir()
+	os.MkdirAll(filepath.Join(ws, "src"), 0o755)
+	os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("root rules"), 0o644)
+	os.WriteFile(filepath.Join(ws, "src", "AGENTS.md"), []byte("src rules"), 0o644)
+	h.cfg.Workspace = ws
+	h.cfg.OnCompaction = func(n CompactionNote) { got = append(got, n) }
+
+	h.noteCompaction(agentCompaction(5, 100, 40))
+	if len(got) != 1 {
+		t.Fatalf("want 1 note, got %d", len(got))
+	}
+	s := got[0].Summary
+	if !strings.Contains(s, "AGENTS.md") {
+		t.Errorf("summary should name the rules file: %q", s)
+	}
+	if !strings.Contains(s, "re-read") {
+		t.Errorf("summary should tell the model to re-read: %q", s)
+	}
+	// Both the root and the nested file should be named.
+	if !strings.Contains(s, "AGENTS.md") || strings.Count(s, "AGENTS.md") < 2 {
+		t.Errorf("both AGENTS.md files should be named: %q", s)
+	}
+}
+
+// No AGENTS.md in the workspace: no reminder appended, summary unchanged.
+func TestNoteCompaction_NoAgentsMDNoReminder(t *testing.T) {
+	var got []CompactionNote
+	h := newNoteHarness(t)
+	h.cfg.Workspace = t.TempDir() // empty
+	h.cfg.OnCompaction = func(n CompactionNote) { got = append(got, n) }
+
+	h.noteCompaction(agentCompaction(5, 100, 40))
+	if len(got) != 1 {
+		t.Fatalf("want 1 note, got %d", len(got))
+	}
+	if !strings.EqualFold(got[0].Summary, "s") {
+		t.Errorf("summary should be unchanged with no AGENTS.md: %q", got[0].Summary)
+	}
+}
