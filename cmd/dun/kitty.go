@@ -2,41 +2,51 @@ package main
 
 import (
 	"os"
+	"regexp"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
-// Kitty keyboard protocol: probe and enable, the way Claude Code does it.
+// Kitty keyboard protocol: probe and enable.
 //
-// What this changes on Termux (measured: Claude Code enables full mouse mode
-// AND this, so the IME popping there is not a mouse-mode story — it is the
-// input-classification story): a terminal that speaks the kitty protocol
-// reports keys at the keysym level, and tap → text-entry hand-off follows the
-// terminal app's path rather than being eaten as a pointer event.
+// Why dun cares: on Termux a terminal that reports keys at the keysym level
+// hands taps to the text-entry path instead of eating them, so the composer
+// behaves the way Claude Code's does.
 //
-// We probe first (`CSI > 0 q`) and enable only on a reply: enabling on a
-// terminal that does not speak it would turn every key into a
-// `CSI <code> u` sequence that bubbletea v1 does not decode — we would break
-// every key for every user. No reply within the timeout, and the terminal is
-// left exactly as found.
+// Measured against claude cli 2.1.246 in a pty, its startup writes:
 //
-// Modes enabled on support: 1 (disambiguate escape codes) and 4 (report
-// alternative keys) — the same pair as Claude Code (`CSI > 1 u`, `CSI > 4;2m`).
-// Mode 2 (application keypad) is deliberately OFF: it re-codes arrow keys and
-// enter into `u` sequences bubbletea has no table for, which would turn them
-// into dead keys.
+//	ESC[?2004h ESC[?1004h ESC[?2031h   bracketed paste, focus, theme change
+//	ESC[<u ESC[>1u                     kitty: pop flags, push flags=1
+//	ESC[>4;2m                          xterm modifyOtherKeys=2 — NOT kitty
+//
+// (plus 1000/1002/1003/1006 once past its trust prompt — see tui.go). Two
+// things that capture corrects about the earlier version of this file:
+// `CSI > 0 q` is XTVERSION, not a kitty query (claude sends it once at the END
+// of startup, to identify the terminal, not to gate anything), and
+// `CSI > 4 ; 2 m` is xterm's modifyOtherKeys rather than a kitty mode 4 — so
+// we push flags=1 alone.
+//
+// Unlike claude we still probe rather than enabling blind, because bubbletea
+// v1 has no table for `CSI <code> u`: on a terminal that answers the query but
+// encodes keys we cannot decode, enabling blind turns every key into a dead
+// key. The query is the real one (`CSI ? u`, answered `CSI ? flags u`), paired
+// with a primary DA (`CSI c`) that every terminal answers — DA is the
+// terminator, so a kitty-less terminal costs one round trip instead of the
+// whole timeout, and no reply at all leaves the terminal exactly as found.
 
 const (
-	kittyProbe     = "\x1b[>0q"
-	kittyEnable    = "\x1b[>1;4u" // disambiguate + alternate keys
-	kittyAppMark   = "\x1b[>4;2m" // expect kitty-style key reports
-	kittyDisable   = "\x1b[>0u"
-	// A real terminal answers the capability query in milliseconds; a pipe or
-	// a kitty-less terminal answers never, so the timeout is where "unsupported"
-	// lives. Long enough not to race a slow pty, short enough that dun's start
-	// does not feel it.
+	kittyProbe   = "\x1b[?u"  // kitty keyboard query; reply is CSI ? flags u
+	daProbe      = "\x1b[c"   // primary DA; its reply terminates the read
+	kittyEnable  = "\x1b[>1u" // push flags=1 (disambiguate escape codes)
+	kittyAppMark = "\x1b[>4;2m"
+	kittyDisable = "\x1b[<u" // pop the flags we pushed
+	// A real terminal answers both queries in milliseconds; a pipe or a
+	// kitty-less terminal that also swallows DA answers never, so the timeout is
+	// where "unsupported" lives. Long enough not to race a slow pty, short
+	// enough that dun's start does not feel it.
 	kittyProbeTimeout = 150 * time.Millisecond
 )
 
@@ -50,51 +60,84 @@ func isTTY(f *os.File) bool {
 }
 
 // probeKitty queries the terminal for kitty keyboard protocol support and, on
-// support, enables it. It must run BEFORE the terminal is put in raw mode:
-// raw mode sets O_NONBLOCK, and with it set we would swallow the terminal's
-// reply as if it were a keypress. Not ok for non-tty stdin (tests, `dun
-// -serve` before the pty is wired) — the caller leaves input to bubbletea.
+// support, enables it. It must run BEFORE bubbletea starts, and it puts the
+// tty in raw mode for its own duration: in canonical mode read(2) does not
+// return until a newline — the probe would hang until the user pressed enter —
+// and ECHO paints the terminal's replies on the screen as garbage. The
+// terminal is restored before returning, so bubbletea finds it as it was. Not
+// ok for non-tty stdin (tests, `dun -serve` before the pty is wired) — the
+// caller leaves input to bubbletea.
 func probeKitty(f *os.File) bool {
 	if !isTTY(f) {
 		return false
 	}
 	fd := int(f.Fd())
-	// Clear O_NONBLOCK if it is set, so the reply is readable at all.
+	st, err := term.MakeRaw(fd)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = term.Restore(fd, st) }()
+	// Clear O_NONBLOCK if it is set, so a ready fd reads rather than EAGAINs.
 	if flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0); err == nil {
 		_, _ = unix.FcntlInt(uintptr(fd), unix.F_SETFL, flags&^unix.O_NONBLOCK)
 	}
-	if _, err := f.Write([]byte(kittyProbe)); err != nil {
+	if _, err := f.Write([]byte(kittyProbe + daProbe)); err != nil {
 		return false
 	}
-	// The reply is `CSI > flags ; versions ST`. Presence is the test — the
-	// baseline modes we enable (1 and 4) are what every conforming
-	// kitty-capable terminal implements, so parsing the flags adds nothing.
+	// Read until DA answers (or the deadline), then decide on what arrived.
+	// Everything read here is consumed deliberately: it is the terminal talking
+	// to us, and letting it reach bubbletea's input loop would parse as spurious
+	// keys. Anything the user typed during the probe goes with it — a keystroke
+	// in the first few ms of startup, which is cheaper than a garbled composer.
 	deadline := time.Now().Add(kittyProbeTimeout)
-	buf := make([]byte, 64)
-	for time.Now().Before(deadline) {
-		n, err := f.Read(buf)
+	var reply []byte
+	buf := make([]byte, 256)
+	for {
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			break
+		}
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		n, err := unix.Poll(fds, int(wait.Milliseconds())+1)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil || n == 0 {
+			break
+		}
+		n, err = f.Read(buf)
 		if err != nil {
-			if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK || err == os.ErrDeadlineExceeded {
+			if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
 				continue
 			}
-			return false
+			break
 		}
-		if n > 0 {
-			// We already decided on that byte; do not let it reach bubbletea's
-			// input loop, where it would parse as a spurious key.
-			if _, err := f.Write([]byte(kittyEnable + kittyAppMark)); err != nil {
-				return false
-			}
-			kittyFD = fd
-			return true
+		reply = append(reply, buf[:n]...)
+		if daReply.Match(reply) {
+			break
 		}
-		time.Sleep(2 * time.Millisecond)
 	}
-	return false
+	if !kittyReply.Match(reply) {
+		return false
+	}
+	if _, err := f.Write([]byte(kittyEnable + kittyAppMark)); err != nil {
+		return false
+	}
+	kittyFD = fd
+	return true
 }
 
-// disableKitty puts the terminal back: kitty protocol off, so the shell the
-// user lands in stops expecting kitty-encoded keys.
+// kittyReply is the answer to `CSI ? u`; daReply is the primary DA answer,
+// which every terminal sends and which therefore ends the read. Both are
+// matched anywhere in the buffer — the two replies arrive in one read as often
+// as not, and other unsolicited reports can be interleaved with them.
+var (
+	kittyReply = regexp.MustCompile(`\x1b\[\?[0-9;]*u`)
+	daReply    = regexp.MustCompile(`\x1b\[\?[0-9;]*c`)
+)
+
+// disableKitty puts the terminal back: pop the flags we pushed, so the shell
+// the user lands in stops expecting kitty-encoded keys.
 func disableKitty() {
 	if kittyFD < 0 {
 		return

@@ -184,11 +184,15 @@ func runReplay(path string, pacing replayPacing, o tuiOpts) error {
 	m.opts = o
 	m.replaying = true
 	m.model, m.url = o.model, o.url
-	// Mouse + kitty keyboard: same wiring as runTUI (see tui.go).
+	// Mouse + kitty keyboard: same wiring as runTUI (see tui.go) — all-motion,
+	// so a replay pane behaves like a session pane under tmux on Termux.
 	if probeKitty(os.Stdin) {
 		defer disableKitty()
 	}
-	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	fm, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion()).Run()
+	if tm, ok := fm.(tuiModel); ok {
+		tm.sr.dumpStats()
+	}
 	proc.close()
 	return err
 }

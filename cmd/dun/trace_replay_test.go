@@ -107,10 +107,16 @@ func (tf traceFile) install(v *vtui) {
 	}
 	m := &v.m
 	m.convo = make([]convoEntry, maxIdx+1)
-	m.blockH = make([]int, maxIdx+1)
+	// The frame is the single geometry truth refresh writes; the replay installs
+	// a recorded layout straight into it (no refresh runs during replay). Both
+	// blockH and rowOffset live in the frame now — the per-entry rowOffset on
+	// convoEntry is the record the trace parses back, but the readers (the
+	// scroll overlay in particular) read the frame, so it must be populated too.
+	m.frame = frame{blockH: make([]int, maxIdx+1), rowOffset: make([]int, maxIdx+1)}
 	for _, e := range tf.layout {
 		m.convo[e.idx] = convoEntry{userText: e.userText, rowOffset: e.rowOffset}
-		m.blockH[e.idx] = e.blockH
+		m.frame.blockH[e.idx] = e.blockH
+		m.frame.rowOffset[e.idx] = e.rowOffset
 		if e.userText != "" {
 			m.task = e.userText // last user message wins, as replay() does
 		}

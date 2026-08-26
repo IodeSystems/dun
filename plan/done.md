@@ -112,7 +112,9 @@
   scroll WITHIN it, stepping to the next message only at its edge; `scrollToSel`
   leaves a taller-than-window selection alone while any part is visible.
 - **✅ mouse wheel:** `WithMouseCellMotion` so tmux/terminals forward wheel
-  events to the viewport instead of scrolling their own scrollback.
+  events to the viewport instead of scrolling their own scrollback. LATER
+  changed to `WithMouseAllMotion` (1003) to match claude — see "Termux taps +
+  the kitty probe" below.
 - **✅ tool-result renderers (compiled-in + Starlark):** `ToolRenderer`
   registry keyed by tool name — `(tool, args, result) → (preview, full)` folded
   by the ▸/▾ block; unknown tools use a diff-aware generic. Built-ins:
@@ -620,3 +622,66 @@ isolation forces the split there).
   The 5m foreground exec timeout still applies inside a child with nobody
   watching (icebox: configurable timeout, condition now reached).
 
+## Terminal input
+
+### ✅ Termux taps + the kitty probe (both fixed off ONE pty capture)
+
+Two symptoms, one measurement. Captured claude cli 2.1.246's startup in a pty
+(`TERM=xterm-256color`, 100×40) and diffed it against dun's:
+
+```
+claude:  ESC7 ESC[r ESC8 · ?25h/?25l · ?2004h · ?1004h · ?2031h
+         ESC[<u ESC[>1u · ESC[>4;2m · (no alt screen) · ESC[>0q ESC[c at the END
+dun:     ESC]11;? ESC\ · ESC[6n · ESC[>0q · <nothing, for the whole capture>
+```
+
+- **Tapping a dun pane on Termux never raised the keyboard; tapping a claude
+  pane did.** The mode that matters is **1003** (any-motion), not 1002. claude
+  2.1.246 enables `1000h 1002h 1003h 1006h`; dun asked for 1002+1006
+  (`WithMouseCellMotion`). tmux forwards the ACTIVE pane's mouse mode to the
+  outer terminal, and with `mouse on` it upgrades a pane that asks for nothing
+  to MODE_MOUSE_BUTTON — so 1002-or-nothing and 1003 hand Termux different
+  sequences. Live flags on the device: every claude pane `mouse_all_flag=1`,
+  dun's `0`. Fixed by `WithMouseAllMotion` in runTUI and replay; verified the
+  new build's pane reports `all=1 any=1 sgr=1`, the same profile as claude's.
+- **Measurement trap, twice fallen into.** A pty capture of claude taken from an
+  UNTRUSTED cwd stops at the "trust this folder?" prompt and shows NO mouse mode
+  at all. That artifact is what made 96f9436 drop mouse mode, and it made this
+  round drop it again before the device's tmux flags corrected it. Capture from
+  a trusted cwd, or the capture is of the trust dialog, not of claude.
+- **The other half of the same coin: finger-scroll.** With tracking inactive on
+  the alt screen, `TerminalView.doScroll` sends `KEYCODE_DPAD_UP/DOWN` instead
+  of wheel codes — so a swipe arrived as a run of plain ↑/↓ and walked the
+  composer's history. One rule now governs the whole vertical axis: **↑/↓ move
+  INSIDE whatever you are in — composer caret, suggestion picker, command
+  palette — and at its edge they fall through and scroll the conversation one
+  row.** History moved to ctrl+↑/↓, which was already bound. (The picker keeps
+  digits 1–9 for a direct pick; it just no longer swallows the arrows at the
+  ends of the list, which is where a swipe would stall while reading options.)
+  The ask/multiple-choice overlay follows the same rule — walk the options (or
+  the caret, while typing a detail/custom answer), then scroll — because a
+  question you cannot read the backlog behind is one you cannot answer.
+- **ctrl+end / ctrl+home**: end a scroll-back (newest output, re-pinned to the
+  stream) and jump to the top of the last user message (the current exchange,
+  unpinned). Bound in both the main key path and the ask overlay. `/mouse [all|cell|off]` switches
+  reporting live (bubbletea's Enable/Disable mouse commands) for anyone who
+  wants the wheel back on the desktop: `cell` = wheel scrolls the log, no
+  tap-to-type; `all` = the default.
+- **dun printed garbage at startup and needed an enter to get past it.** The
+  capture ends at `ESC[>0q` — `probeKitty` ran before raw mode and then did a
+  BLOCKING read on a canonical tty: read(2) does not return until a newline
+  (hence the enter) and ECHO painted the reply on screen (hence the garbage).
+  It also counted any byte — that enter included — as kitty support.
+- **The probe was asking the wrong question.** `CSI > 0 q` is XTVERSION, not a
+  kitty query; claude sends it once at the END of startup to identify the
+  terminal. And `CSI > 4 ; 2 m` is xterm modifyOtherKeys, not "kitty mode 4",
+  so the pushed flags are now `CSI > 1 u` alone.
+- **Rewritten probe:** termios raw+noecho for its own duration (restored on
+  return), `CSI ? u` + `CSI c`, `unix.Poll` against the deadline, accept only a
+  `CSI ? flags u` reply, DA reply as the terminator so a kitty-less terminal
+  costs one round trip. Unlike claude we still probe rather than enable blind:
+  bubbletea v1 has no table for `CSI <code> u`, so enabling on a terminal that
+  encodes keys we cannot decode makes every key a dead key.
+- **Tests** (`kitty_test.go`) run against a real pty, because every one of these
+  bugs was invisible without a terminal on the other end: supported, DA-only
+  (the old false positive), silent-terminal (the old hang), termios restored.

@@ -1644,9 +1644,11 @@ func TestMultilineInput_PastedKeyNameIsText(t *testing.T) {
 	}
 }
 
-// ↑ moves within the composer and recalls history from the top row — the shell
-// behaviour, and what keeps ↑ meaning "what I sent before" in a one-line box.
-func TestMultilineInput_UpAtFirstRowRecallsHistory(t *testing.T) {
+// ↑ moves within the composer and, from the top row, scrolls the CONVERSATION
+// rather than recalling history (history is ctrl+↑/↓). On Termux a finger
+// -scroll arrives as a run of plain ↑/↓ keys, and history recall on those made
+// every swipe overwrite the composer.
+func TestMultilineInput_UpAtFirstRowScrollsConvo(t *testing.T) {
 	proc := &dunProc{stdin: discardWC{}}
 	m := newTUIModel(proc, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -1657,8 +1659,8 @@ func TestMultilineInput_UpAtFirstRowRecallsHistory(t *testing.T) {
 	m = key(m, kEnter)
 
 	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
-	if m.input.Value() != "first message" {
-		t.Fatalf("up from the first row should recall history, got %q", m.input.Value())
+	if m.input.Value() != "" {
+		t.Fatalf("up from the first row must NOT recall history, got %q", m.input.Value())
 	}
 
 	// With the cursor on a LOWER row, up moves the cursor and leaves the text.
@@ -1670,6 +1672,204 @@ func TestMultilineInput_UpAtFirstRowRecallsHistory(t *testing.T) {
 	}
 	if row, _ := m.input.cursorDisplayPos(); row != 0 {
 		t.Fatalf("up should have moved to the first row, got %d", row)
+	}
+}
+
+// ↑/↓ from the composer's edge rows scroll the conversation — the keys Termux
+// synthesises for a finger-scroll on the alt screen when mouse tracking is off.
+func TestVtui_ArrowsScrollConvoFromComposer(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	for i := 0; i < 8; i++ {
+		v.send(fmt.Sprintf("msg %d", i))
+		v.event(map[string]any{"type": "token", "text": fmt.Sprintf("Reply %d:\n  a\n  b\n  c\n", i)})
+		v.event(map[string]any{"type": "done"})
+	}
+	bottom := v.m.vp.YOffset
+	if bottom == 0 {
+		t.Fatal("test needs a conversation taller than the viewport")
+	}
+
+	nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	v.m = nm.(tuiModel)
+	if v.m.vp.YOffset != bottom-1 {
+		t.Fatalf("↑ from the composer should scroll up one row: %d -> %d", bottom, v.m.vp.YOffset)
+	}
+	if v.m.scrollPinned {
+		t.Fatal("↑ scrolling off the bottom must unpin, like the wheel does")
+	}
+	if v.m.input.Value() != "" {
+		t.Fatalf("↑ must not recall history into the composer, got %q", v.m.input.Value())
+	}
+
+	nm, _ = v.m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	v.m = nm.(tuiModel)
+	if v.m.vp.YOffset != bottom {
+		t.Fatalf("↓ should scroll back down one row: %d -> %d", bottom-1, v.m.vp.YOffset)
+	}
+	if !v.m.scrollPinned {
+		t.Fatal("↓ back to the bottom should re-pin")
+	}
+}
+
+// With the suggestion picker up, ↑/↓ walk the options FIRST and only scroll the
+// conversation once the selection is at the end — the same rule the composer's
+// caret follows. Reading the options is exactly when you want to scroll back.
+func TestVtui_ArrowsCyclePickerThenScroll(t *testing.T) {
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	for i := 0; i < 8; i++ {
+		v.send(fmt.Sprintf("msg %d", i))
+		v.event(map[string]any{"type": "token", "text": fmt.Sprintf("Reply %d:\n  a\n  b\n  c\n", i)})
+		v.event(map[string]any{"type": "done"})
+	}
+	v.event(map[string]any{"type": "suggestions", "items": []any{
+		map[string]any{"text": "alpha", "prob": 0.6},
+		map[string]any{"text": "bravo", "prob": 0.4},
+	}})
+	if !v.m.suggestActive() {
+		t.Fatal("test needs the picker showing")
+	}
+	bottom := v.m.vp.YOffset
+
+	up := func() { nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyUp}); v.m = nm.(tuiModel) }
+	down := func() { nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyDown}); v.m = nm.(tuiModel) }
+
+	// Already at the top of the list: ↑ falls straight through to scrolling.
+	up()
+	if v.m.suggestSel != 0 {
+		t.Fatalf("↑ at the top of the list must not move the selection, got %d", v.m.suggestSel)
+	}
+	if v.m.vp.YOffset != bottom-1 {
+		t.Fatalf("↑ at the top of the list should scroll: %d -> %d", bottom, v.m.vp.YOffset)
+	}
+	// ↓ walks the list first…
+	down()
+	if v.m.suggestSel != 1 {
+		t.Fatalf("↓ should move to the next suggestion, got %d", v.m.suggestSel)
+	}
+	if v.m.vp.YOffset != bottom-1 {
+		t.Fatalf("↓ inside the list must not scroll (yoff %d)", v.m.vp.YOffset)
+	}
+	// …and scrolls once it runs out of options.
+	down()
+	if v.m.suggestSel != 1 {
+		t.Fatalf("↓ past the end must leave the selection, got %d", v.m.suggestSel)
+	}
+	if v.m.vp.YOffset != bottom {
+		t.Fatalf("↓ past the end should scroll back down: %d -> %d", bottom-1, v.m.vp.YOffset)
+	}
+}
+
+// tallConvo builds a conversation taller than the viewport, parked at the
+// bottom, for the scroll-edge tests below.
+func tallConvo(t *testing.T) *vtui {
+	t.Helper()
+	v := newVtui(80, 15)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	for i := 0; i < 8; i++ {
+		v.send(fmt.Sprintf("msg %d", i))
+		v.event(map[string]any{"type": "token", "text": fmt.Sprintf("Reply %d:\n  a\n  b\n  c\n", i)})
+		v.event(map[string]any{"type": "done"})
+	}
+	if v.m.vp.YOffset == 0 {
+		t.Fatal("test needs a conversation taller than the viewport")
+	}
+	return v
+}
+
+// A question you cannot read the backlog behind is a question you cannot
+// answer: ↑/↓ walk the options and then scroll at the edges, same as everywhere.
+func TestVtui_AskArrowsWalkOptionsThenScroll(t *testing.T) {
+	v := tallConvo(t)
+	v.event(map[string]any{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
+	if !v.m.asking {
+		t.Fatal("test needs the ask overlay up")
+	}
+	bottom := v.m.vp.YOffset
+	up := func() { nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyUp}); v.m = nm.(tuiModel) }
+	down := func() { nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyDown}); v.m = nm.(tuiModel) }
+
+	up() // already on the first option
+	if v.m.askSel != 0 {
+		t.Fatalf("↑ on the first option must not move the selection, got %d", v.m.askSel)
+	}
+	if v.m.vp.YOffset != bottom-1 {
+		t.Fatalf("↑ on the first option should scroll: %d -> %d", bottom, v.m.vp.YOffset)
+	}
+
+	// Walk to the last row, checking the selection moves and nothing scrolls.
+	yoff := v.m.vp.YOffset
+	for prev := -1; v.m.askSel != prev; {
+		prev = v.m.askSel
+		down()
+		if v.m.askSel == prev { // fell through: the list was already at its end
+			break
+		}
+		if v.m.vp.YOffset != yoff {
+			t.Fatalf("↓ inside the option list must not scroll (yoff %d)", v.m.vp.YOffset)
+		}
+	}
+	if v.m.vp.YOffset != yoff+1 {
+		t.Fatalf("↓ past the last option should scroll: %d -> %d", yoff, v.m.vp.YOffset)
+	}
+}
+
+// ctrl+end ends a scroll-back; ctrl+home goes to the top of the last thing the
+// user said.
+func TestVtui_ScrollJumpShortcuts(t *testing.T) {
+	v := tallConvo(t)
+	// Plenty of output under the last user message, so that message is well
+	// above the bottom — otherwise the jump clamps and proves nothing.
+	v.send("the last thing I said")
+	for i := 0; i < 20; i++ {
+		v.event(map[string]any{"type": "token", "text": fmt.Sprintf("reply %d\n", i)})
+		v.event(map[string]any{"type": "done"})
+	}
+	bottom := v.m.vp.YOffset
+
+	for i := 0; i < 4; i++ {
+		nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		v.m = nm.(tuiModel)
+	}
+	if v.m.vp.YOffset == bottom || v.m.scrollPinned {
+		t.Fatalf("setup: expected to be scrolled back and unpinned (yoff=%d pinned=%v)", v.m.vp.YOffset, v.m.scrollPinned)
+	}
+
+	nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	v.m = nm.(tuiModel)
+	if v.m.vp.YOffset != bottom || !v.m.scrollPinned {
+		t.Fatalf("ctrl+end should return to the newest output and re-pin (yoff=%d want %d, pinned=%v)",
+			v.m.vp.YOffset, bottom, v.m.scrollPinned)
+	}
+
+	// ctrl+home parks the top of the last user message at the top of the
+	// viewport. Asserted against the same SetYOffset the model would do, so the
+	// test pins the ROW it targets (the last user block, not the first and not
+	// the bottom) without depending on how tall the blocks happen to render.
+	want := -1
+	for i := range v.m.convo {
+		if v.m.convo[i].userText != "" && i < len(v.m.frame.rowOffset) {
+			want = v.m.frame.rowOffset[i]
+		}
+	}
+	if want <= 0 {
+		t.Fatalf("setup: last user message should not be the first row (got %d)", want)
+	}
+	ref := v.m
+	ref.vp.SetYOffset(want)
+
+	nm, _ = v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	v.m = nm.(tuiModel)
+	if v.m.vp.YOffset != ref.vp.YOffset {
+		t.Fatalf("ctrl+home should jump to the last user message (row %d → yoff %d), got %d",
+			want, ref.vp.YOffset, v.m.vp.YOffset)
+	}
+	if v.m.vp.YOffset == bottom {
+		t.Fatal("ctrl+home from the bottom should have moved the viewport")
+	}
+	if v.m.scrollPinned {
+		t.Fatal("ctrl+home parks the view; it must not stay pinned to the stream")
 	}
 }
 
@@ -2649,7 +2849,7 @@ func TestVtui_ScrollOverlayAfterReplay(t *testing.T) {
 	overlay = m.scrollOverlay()
 	if overlay == "" {
 		t.Fatalf("scrolled up (yOff=%d): overlay should show off-screen user message; convoLen=%d blockHLen=%d",
-			m.vp.YOffset, len(m.convo), len(m.blockH))
+			m.vp.YOffset, len(m.convo), len(m.frame.blockH))
 	}
 	plain := stripANSI(overlay)
 	if !strings.HasPrefix(plain, "› ") {
@@ -3217,7 +3417,7 @@ func TestVtui_WrapFitsWithoutCuttingText(t *testing.T) {
 				continue // rendered with a full-width background instead
 			}
 			want := lipgloss.Height(cellbuf.Wrap(e.view(), max(1, v.m.vp.Width), ""))
-			if got := v.m.blockH[i]; got != want {
+			if got := v.m.frame.blockH[i]; got != want {
 				t.Errorf("w=%d entry %d: recorded height %d, correctly-wrapped height %d — text is being cut off",
 					w, i, got, want)
 			}

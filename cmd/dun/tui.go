@@ -31,6 +31,28 @@ import (
 // stays headless; the UI is pure presentation.
 
 // tuiOpts are the flags the TUI forwards to its `dun -p` subprocess.
+// frame is one computed layout: the conversation's rendered rows plus the
+// per-block geometry (rowOffset + height) and the viewport's window size. It is
+// the SINGLE geometry truth — refresh() computes it, and everything that
+// reads layout (View, convoHeight, applyScroll, the scroll overlay) reads from
+// it. The old m.blockH / convoEntry.rowOffset / m.vp.Height were three parallel
+// structures kept in sync by one writer and drifted in the reads; the model
+// keeps only convoEntry.rowOffset (the per-entry record the trace/replay path
+// parses back) and vp.Height (the pane's own dimension) — block heights and
+// row offsets live ONLY here, in the frame.
+//
+// It is a value, not a pointer: a layout is a snapshot, and copying it is
+// cheap (one []string header + two int slices). The model stores the last one
+// (m.frame) so View — a value receiver — sees the same geometry the scroll
+// policy last decided on, instead of re-deriving a fourth copy inline.
+type frame struct {
+	lines      []string // the wrapped convo display rows
+	rowOffset  []int    // row where block i begins
+	blockH     []int    // rendered height of block i
+	height     int      // rows the convo viewport gets
+	width      int      // the wrap width this layout was built at
+}
+
 type tuiOpts struct {
 	workspace, model, url, key, docker string
 	dockerNetwork                      bool
@@ -73,12 +95,21 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 		m.fatalErr = "engine did not start: " + startErr.Error()
 		m.starting = false
 	}
-	// Mouse: full mode, the way Claude Code runs it. The 96f9436 attempt to
-	// fix Termux taps by DROPPING mouse mode was a misdiagnosis — measured
-	// capture of claude cli 2.1.246 shows it enables 1000/1002/1003/1006 plus
-	// the kitty keyboard protocol (kitty.go), so the IME-popping difference is
-	// the input-classification story, not a mouse-mode story.
-	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}
+	// Mouse: ALL-motion (1003+1006), which is what Claude Code runs — measured
+	// in a pty from a trusted cwd, claude 2.1.246 writes 1000h 1002h 1003h 1006h.
+	// (A capture taken from an UNtrusted cwd stops at the "trust this folder?"
+	// prompt and shows no mouse mode at all; that artifact is what made 96f9436
+	// drop mouse mode and what made the bb01639-era comment here wrong in the
+	// other direction.)
+	//
+	// 1003 rather than 1002 is the whole point on Termux. tmux forwards the
+	// ACTIVE pane's mouse mode to the outer terminal, and with `mouse on` it
+	// upgrades a pane that asks for nothing to MODE_MOUSE_BUTTON — so a
+	// 1002-or-nothing pane and a 1003 pane hand Termux different sequences.
+	// Measured on the real device: panes running claude (`mouse_all_flag=1`)
+	// raise the soft keyboard on tap; dun's pane (1002, then none) did not.
+	// Matching claude's mode is what makes tap-to-type work.
+	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseAllMotion()}
 	// Kitty keyboard protocol (kitty.go): probe BEFORE raw mode, because raw
 	// mode sets O_NONBLOCK and would swallow the terminal's reply as a key.
 	// Only on a tty, and only if the terminal answers the capability query —
@@ -498,8 +529,10 @@ type tuiModel struct {
 	customAnswer  bool                  // capturing a free-text / chat answer
 	md            *glamour.TermRenderer // markdown renderer for assistant replies
 	mdWidth       int                   // width md was built for (rebuild only on change)
-	history       []string              // sent inputs, for up/down recall
+	history       []string              // sent inputs, recalled with ctrl+↑/↓
 	histIdx       int                   // cursor into history (== len when not browsing)
+	mouseMode     string                // "all" | "cell" | "off" — what /mouse last set
+	sr            *scrollRegion         // terminal-native scrolling for the convo pane
 	focus         int                   // focusInput | focusConvo | focusActivity
 	task          string                // the last user message, for the task line
 	agents        []agentRow            // live sub-agents (activity.go)
@@ -517,7 +550,7 @@ type tuiModel struct {
 	searchActive bool            // navigating matches (↑/↓ step, esc exits)
 	matches      []int           // convo indices matching the query
 	matchPos     int             // cursor into matches
-	blockH       []int           // rendered height of each convo block (for tall-message scroll)
+	frame        frame           // the last computed layout snapshot — the single geometry truth
 	inspecting   bool            // the tool inspector overlay is open (owns all keys)
 	insp         inspector       // the overlay (valid while inspecting)
 	dumpSig      chan os.Signal  // SIGUSR1 → dump the rendered screen to a debug file
@@ -600,7 +633,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto"}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto", mouseMode: "all", sr: newScrollRegion()}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -651,6 +684,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// (asking, searching, the inspector) owns its own keys — this is the one
 	// funnel every key actually passes through.
 	if t, ok := nm.(tuiModel); ok {
+		// Scroll region: computed here rather than in View because View must not
+		// mutate, and here is the one place every state change passes through.
+		if c := t.planScrollRegion(); c != nil {
+			cmd = tea.Batch(cmd, c)
+		}
 		if _, isKey := msg.(tea.KeyMsg); isKey {
 			t.armIdleSuggest()
 		}
@@ -866,6 +904,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp, cmd = m.vp.Update(msg)
 			m.updateScrollPin()
 			return m, cmd
+		case "ctrl+end": // end a scroll-back: newest output, following again
+			m.scrollToEnd()
+			return m, nil
+		case "ctrl+home": // top of the last user message: the current exchange
+			m.scrollToLastUser()
+			return m, nil
 		case "enter":
 			if m.focus == focusConvo {
 				// Inside a doc list: enter expands/collapses the current document.
@@ -927,7 +971,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.sendUser(v), nil
 		case "ctrl+up":
-			// Ctrl+Up: navigate history (previous entry).
+			// Ctrl+Up: navigate history (previous entry). The only way to reach
+			// history — plain ↑ scrolls the conversation (see the ↑ case).
 			if m.focus == focusConvo {
 				// In convo focus, Ctrl+Up is ignored (plain Up handles convo nav).
 				return m, nil
@@ -978,31 +1023,33 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
-			if m.suggestActive() { // move up in the suggestion selector
-				if m.suggestSel > 0 {
-					m.suggestSel--
-					m.refresh()
-				}
+			// One rule everywhere on this axis: if ↑ has somewhere to go INSIDE
+			// the thing you are in, it goes there; at the edge it falls through
+			// and scrolls the conversation. So the picker and the palette move
+			// their selection until it reaches the top and then stop capturing
+			// the key — reading the options is exactly when you want to scroll
+			// back through what was said.
+			if m.suggestActive() && m.suggestSel > 0 {
+				m.suggestSel--
+				m.refresh()
 				return m, nil
 			}
-			if m.paletteActive() { // move up in the command palette
-				if m.paletteSel > 0 {
-					m.paletteSel--
-					m.refresh()
-				}
+			if m.paletteActive() && m.paletteSel > 0 {
+				m.paletteSel--
+				m.refresh()
 				return m, nil
 			}
 			// Plain up moves within the composer until it runs out of buffer;
-			// from the FIRST row it recalls history, which is what a shell does
-			// and what makes ↑ still mean "the thing I sent before" in a box
-			// that is usually one line tall.
+			// from the FIRST row it scrolls the CONVERSATION. History lives on
+			// ctrl+↑/↓ instead, because of Termux: with mouse tracking inactive
+			// on the alt screen — the state that lets a tap raise the soft
+			// keyboard, see the mouse note in runTUI and TerminalView.doScroll —
+			// a finger-scroll arrives as a RUN of plain ↑/↓ keys. Walking
+			// history on those made every swipe stomp the composer; one viewport
+			// row per key is exactly what the terminal is describing.
 			if m.input.AtFirstLine() {
-				if len(m.history) > 0 && m.histIdx > 0 {
-					m.histIdx--
-					m.input.SetValue(m.history[m.histIdx])
-					m.input.CursorEnd()
-					m.refresh()
-				}
+				m.vp.SetYOffset(m.vp.YOffset - 1)
+				m.updateScrollPin()
 				return m, nil
 			}
 			m.input = m.input.HandleKey(msg)
@@ -1031,32 +1078,23 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
-			if m.suggestActive() { // move down in the suggestion selector
-				if m.suggestSel < len(m.suggestions)-1 {
-					m.suggestSel++
-					m.refresh()
-				}
+			// …and ↓ mirrors it: move within the picker/palette to the LAST
+			// entry, then fall through and scroll (see the ↑ case).
+			if m.suggestActive() && m.suggestSel < len(m.suggestions)-1 {
+				m.suggestSel++
+				m.refresh()
 				return m, nil
 			}
-			if m.paletteActive() { // move down in the command palette
-				if m.paletteSel < len(m.paletteMatches())-1 {
-					m.paletteSel++
-					m.refresh()
-				}
+			if m.paletteActive() && m.paletteSel < len(m.paletteMatches())-1 {
+				m.paletteSel++
+				m.refresh()
 				return m, nil
 			}
-			// …and from the LAST row, ↓ walks history forward again.
+			// …and from the LAST row, ↓ scrolls the conversation forward (see
+			// the ↑ note above).
 			if m.input.AtLastLine() {
-				if m.histIdx < len(m.history) {
-					m.histIdx++
-					if m.histIdx == len(m.history) {
-						m.input.SetValue("")
-					} else {
-						m.input.SetValue(m.history[m.histIdx])
-						m.input.CursorEnd()
-					}
-					m.refresh()
-				}
+				m.vp.SetYOffset(m.vp.YOffset + 1)
+				m.updateScrollPin()
 				return m, nil
 			}
 			m.input = m.input.HandleKey(msg)
@@ -1330,18 +1368,43 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m.sendAnswer(ans), nil
 		}
+	case "ctrl+end":
+		m.scrollToEnd()
+		return m, nil
+	case "ctrl+home":
+		m.scrollToLastUser()
+		return m, nil
+	// ↑/↓ follow the same rule here as everywhere else: move within the thing
+	// you are in — the option list, or the caret when typing a detail/custom
+	// answer — and at its edge fall through and scroll the conversation. A
+	// question you cannot read the backlog behind is a question you cannot
+	// answer, and the options are exactly when you want to look back.
 	case "up":
-		if !m.noting && !m.customAnswer && m.askSel > 0 {
+		if m.noting || m.customAnswer {
+			if !m.input.AtFirstLine() {
+				break // let the caret move (handled below)
+			}
+		} else if m.askSel > 0 {
 			m.askSel--
 			m.refresh()
 			return m, nil
 		}
+		m.vp.SetYOffset(m.vp.YOffset - 1)
+		m.updateScrollPin()
+		return m, nil
 	case "down":
-		if !m.noting && !m.customAnswer && m.askSel < maxRow {
+		if m.noting || m.customAnswer {
+			if !m.input.AtLastLine() {
+				break // let the caret move (handled below)
+			}
+		} else if m.askSel < maxRow {
 			m.askSel++
 			m.refresh()
 			return m, nil
 		}
+		m.vp.SetYOffset(m.vp.YOffset + 1)
+		m.updateScrollPin()
+		return m, nil
 	case "n":
 		if !m.noting && !m.customAnswer && !m.askMulti && m.askSel < custom {
 			m.noting = true
@@ -2161,6 +2224,45 @@ func (m tuiModel) viewportView(vp convoPane) string {
 	return c.out
 }
 
+// planScrollRegion works out what the conversation pane should show and asks
+// the region for the cheapest way to get there. It mirrors View's layout
+// exactly — a row off here paints the conversation over the divider — so it
+// reads the same helpers View does rather than recomputing anything.
+func (m tuiModel) planScrollRegion() tea.Cmd {
+	if m.sr == nil {
+		return nil
+	}
+	// Modes that replace the layout wholesale get the rows back.
+	if m.inspecting || m.picking || m.modelPicking || m.quitting || m.w <= 0 || m.h <= 0 {
+		return m.sr.disable()
+	}
+	vp := m.vp
+	vp.setHeight(m.convoHeight())
+	if vp.Height < 4 { // too short to be worth a region, and too short to be safe
+		return m.sr.disable()
+	}
+	// Only when the pane is FULL. Short of that the pane pads its bottom with
+	// blank rows, which puts the streaming tail somewhere in the middle where
+	// every token would dirty a region row and force a repaint — measured at 7x
+	// WORSE than no region at all. A pane that is not full also never scrolls,
+	// which is the only thing the region is here to make cheap.
+	if len(vp.lines) < vp.Height {
+		return m.sr.disable()
+	}
+	rows := strings.Split(m.viewportView(vp), "\n")
+	if len(rows) != vp.Height { // the pane did not render the height it was given
+		return m.sr.disable()
+	}
+	// Row 1 is headView; the activity strip, when it has something to say,
+	// takes the row under it. The region ends one row above the pane's bottom:
+	// that row is the streaming tail (see scrollregion.go).
+	top := 2
+	if m.activityView() != "" {
+		top++
+	}
+	return m.sr.plan(rows[:len(rows)-1], top, top+vp.Height-2)
+}
+
 // scrollOverlay returns a one-line bar showing the last user message that
 // is fully above the viewport (the one just scrolled past), or "" when
 // scrolled to bottom or no user message is off-screen. The bar uses the
@@ -2179,6 +2281,10 @@ func (m tuiModel) scrollOverlay() string {
 	// viewport top — the one the user most recently scrolled past. When
 	// both "first" and "second" are off-screen, we want "second" only
 	// until the user scrolls past it; then we want "first".
+	// Read the geometry from the frame — the single snapshot refresh last wrote
+	// — not m.blockH / e.rowOffset directly. Same numbers (refresh writes the
+	// entries from the frame), one value every reader agrees on.
+	bh, ro := m.frame.blockH, m.frame.rowOffset
 	var closestText string
 	closestBottom := -1
 	for i, e := range m.convo {
@@ -2186,10 +2292,14 @@ func (m tuiModel) scrollOverlay() string {
 			continue
 		}
 		h := 0
-		if i < len(m.blockH) {
-			h = m.blockH[i]
+		if i < len(bh) {
+			h = bh[i]
 		}
-		bottom := e.rowOffset + h
+		top := 0
+		if i < len(ro) {
+			top = ro[i]
+		}
+		bottom := top + h
 		if bottom <= yOff && bottom > closestBottom {
 			closestBottom = bottom
 			closestText = e.userText
@@ -2218,7 +2328,16 @@ func (m tuiModel) scrollOverlay() string {
 // which is where the scroll overlay lives. Undercount m.vp.Height and
 // AtBottom/GotoBottom clamp against a window taller than the drawn one, hiding
 // the bottom row of the conversation.
-func (m tuiModel) convoHeight() int {
+// convoHeightBudget is the PURE budget: how many rows the convo viewport gets
+// at the model's CURRENT size, computed from model state (terminal height, the
+// head/activity/lower rows). It is a function of (h, head, activity, lower) and
+// reads no layout cache, so it is safe to call from the Update funnel BEFORE a
+// refresh has run — which is exactly when a resize must be detected.
+//
+// The frame (m.frame.height) records this number for the last refresh, so the
+// render path reads ONE computed value instead of re-deriving it. The two agree
+// because refresh is the only writer and it sets frame.height from this.
+func (m tuiModel) convoHeightBudget() int {
 	h := m.h - 2 // divider 1 + status 1; every other row is measured, not assumed
 	h -= lipgloss.Height(m.headView())
 	// The activity strip sits above the conversation. It vanishes when it has
@@ -2228,6 +2347,17 @@ func (m tuiModel) convoHeight() int {
 	}
 	h -= lipgloss.Height(m.lowerView()) // input, or the answer picker (several rows)
 	return max(1, h)
+}
+
+// convoHeight is the height the render path uses: the frame's recorded budget,
+// or the freshly computed one while no frame exists yet (startup, before the
+// first refresh). It is the single number View, applyScroll, and the scroll
+// overlay agree on.
+func (m tuiModel) convoHeight() int {
+	if m.frame.lines != nil {
+		return m.frame.height
+	}
+	return m.convoHeightBudget()
 }
 
 // headView is the top row: the scroll overlay when the conversation is scrolled
@@ -2271,9 +2401,12 @@ func (m tuiModel) View() string {
 	if a := m.activityView(); a != "" {
 		top = append(top, a)
 	}
-	convoH := m.convoHeight()
+	// Read the height from the frame — the same snapshot applyScroll and the
+	// scroll overlay read — rather than computing a fourth copy here. The local
+	// vp is a value copy (View has a value receiver); setHeight on it keeps the
+	// join below consistent with the frame without mutating the model.
 	vp := m.vp
-	vp.setHeight(convoH)
+	vp.setHeight(m.convoHeight())
 	// Focus cue lives entirely in the divider's bright half — no pane borders.
 	div := divider(m.w, m.focus == focusConvo && !m.asking)
 
@@ -2316,14 +2449,18 @@ func (m tuiModel) View() string {
 			status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter inspector · / search · tab input")
 		}
 	case m.suggestActive():
-		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · enter/right/1–%d accept · or type · "+m.exitHint(), len(m.suggestions)))
+		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · 1–%d pick · enter/right accept · or type · "+m.exitHint(), len(m.suggestions)))
 	default:
 		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
+	// The scroll region owns its rows: the renderer skips them, so View passes
+	// blank filler of the right height and the terminal keeps what is already
+	// painted there (see scrollregion.go).
+	convo := blankRegion(m.viewportView(vp), m.sr.rows())
 	out := append([]string{m.headView()}, top...)
-	out = append(out, m.viewportView(vp), div, lower, status)
+	out = append(out, convo, div, lower, status)
 	return strings.Join(out, "\n")
 }
 
@@ -2560,11 +2697,12 @@ func (m *tuiModel) ascendSel() bool {
 // selGeom returns the top line offset and rendered height of the selected block
 // (from the last refresh), for tall-message intra-scroll decisions.
 func (m tuiModel) selGeom() (top, h int) {
-	for i := 0; i < m.sel && i < len(m.blockH); i++ {
-		top += m.blockH[i]
+	bh := m.frame.blockH
+	for i := 0; i < m.sel && i < len(bh); i++ {
+		top += bh[i]
 	}
-	if m.sel >= 0 && m.sel < len(m.blockH) {
-		h = m.blockH[m.sel]
+	if m.sel >= 0 && m.sel < len(bh) {
+		h = bh[m.sel]
 	}
 	return top, h
 }
@@ -2627,7 +2765,17 @@ func (m *tuiModel) refresh() {
 	}
 	wrapW := max(1, width)
 	rendered := make([]string, 0, len(m.vp.lines)) // display rows, not blocks
-	m.blockH = make([]int, len(m.convo))           // cache convo-block heights for scroll math
+	frm := frame{
+		// Sized by BLOCKS, not by convo: blocks is the convo plus the streaming
+		// block (m.cur) plus any suggestion rows, and the loop below writes one
+		// entry per block. Sizing by len(m.convo) panicked the moment anything
+		// streamed. Convo-indexed readers are unaffected — the extra trailing
+		// entries are simply never asked for.
+		rowOffset: make([]int, len(blocks)),
+		blockH:    make([]int, len(blocks)), // cache block heights for scroll math
+		height:    m.convoHeightBudget(),
+		width:     m.vp.Width,
+	}
 
 	// Render all blocks. For user messages, re-render with full-width
 	// background style (ignoring the pre-styled collapsed from e.view()).
@@ -2692,10 +2840,12 @@ func (m *tuiModel) refresh() {
 		}
 		rendered = append(rendered, strings.Split(w, "\n")...)
 		h := len(rendered) - cumRow
-		if i < len(m.blockH) {
-			m.blockH[i] = h
-		}
+		frm.blockH[i] = h
+		frm.rowOffset[i] = cumRow
 		if i < len(m.convo) {
+			// The entry keeps its own copy for the trace/replay path and for
+			// scrollOverlay's row mapping; the frame is the authoritative one
+			// that View and applyScroll read.
 			m.convo[i].rowOffset = cumRow
 		}
 		cumRow += h
@@ -2705,6 +2855,11 @@ func (m *tuiModel) refresh() {
 	// and every streamed token is a refresh.
 	m.vp.SetLines(rendered)
 	m.contentGen++
+	// The frame is now the single geometry truth. refresh is the ONLY writer:
+	// it populated frm above and stored it, so every reader (View, convoHeight,
+	// applyScroll, scrollOverlay) sees the same snapshot instead of re-deriving
+	// a copy that could drift.
+	m.frame = frm
 
 	m.applyScroll(selMode)
 }
@@ -2721,7 +2876,11 @@ func (m *tuiModel) applyScroll(selMode bool) {
 	if vh <= 0 {
 		return
 	}
-	if selMode && m.sel >= 0 && m.sel < len(m.blockH) {
+	// The block geometry below (selGeom, the last-user-row scan) reads the
+	// frame — the same snapshot refresh just wrote. The frame is the single
+	// value every reader agrees on, so a resize or a content change can never
+	// leave this decision looking at a different geometry than View did.
+	if selMode && m.sel >= 0 && m.sel < len(m.frame.blockH) {
 		top, h := m.selGeom()
 		if h >= vh {
 			// Taller than the window: don't fight intra-message scroll — only snap
@@ -2750,9 +2909,10 @@ func (m *tuiModel) applyScroll(selMode bool) {
 	// bottom of the growing reply. Instead keep that message visible.
 	lastUserRow := -1
 	if m.cur != "" {
+		ro := m.frame.rowOffset
 		for i := range m.convo {
-			if m.convo[i].userText != "" {
-				lastUserRow = m.convo[i].rowOffset
+			if m.convo[i].userText != "" && i < len(ro) {
+				lastUserRow = ro[i]
 			}
 		}
 	}
@@ -2764,6 +2924,33 @@ func (m *tuiModel) applyScroll(selMode bool) {
 	case lastUserRow < m.vp.YOffset:
 		m.vp.SetYOffset(lastUserRow)
 	}
+}
+
+// scrollToEnd jumps to the newest output and re-pins, so the view follows the
+// stream again — the way ctrl+end ends a scroll-back everywhere else.
+func (m *tuiModel) scrollToEnd() {
+	m.vp.GotoBottom()
+	m.scrollPinned = true
+	m.traceScroll()
+}
+
+// scrollToLastUser jumps to the top of the most recent user message: the start
+// of the current exchange, which is what you want after reading back — "show me
+// what I asked and everything since". Unpins, because it is a position the
+// stream would otherwise scroll away from.
+func (m *tuiModel) scrollToLastUser() {
+	ro := m.frame.rowOffset
+	row := -1
+	for i := range m.convo {
+		if m.convo[i].userText != "" && i < len(ro) {
+			row = ro[i]
+		}
+	}
+	if row < 0 {
+		return
+	}
+	m.vp.SetYOffset(row)
+	m.updateScrollPin()
 }
 
 // updateScrollPin unpins the scroll when the user scrolls away from the bottom,
@@ -2819,6 +3006,38 @@ func sortedKeys(m map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// mouseSlash switches mouse reporting at runtime.
+//
+// It exists because Termux forces a choice dun cannot make for you. All-motion
+// (1003, the default, and what claude runs) leaves Termux's mouse tracking
+// INACTIVE, so a tap raises the soft keyboard — and a finger-scroll arrives as
+// plain ↑/↓ keys, which scroll the conversation a row at a time. Cell motion
+// (1002) makes Termux track the pointer, so the wheel scrolls the log directly
+// but a tap never opens the keyboard. On a desktop terminal the difference is
+// only whether motion events are reported at all.
+func mouseSlash(m *tuiModel, args []string) tea.Cmd {
+	if len(args) == 0 {
+		m.append(stNote.Render("mouse: " + m.mouseMode + "  (all|cell|off)"))
+		return nil
+	}
+	switch args[0] {
+	case "all":
+		m.mouseMode = "all"
+		m.append(stNote.Render("mouse: all-motion — tap-to-type on Termux; ↑/↓ scroll the log"))
+		return tea.EnableMouseAllMotion
+	case "cell":
+		m.mouseMode = "cell"
+		m.append(stNote.Render("mouse: cell-motion — wheel scrolls the log; no tap-to-type on Termux"))
+		return tea.EnableMouseCellMotion
+	case "off":
+		m.mouseMode = "off"
+		m.append(stNote.Render("mouse: off — the terminal keeps the pointer (native selection)"))
+		return tea.DisableMouse
+	}
+	m.append(stErr.Render("mouse: want all|cell|off, got " + args[0]))
+	return nil
 }
 
 // argPreview is a one-line `key=value` summary of a call's args (each value
@@ -2925,17 +3144,18 @@ func init() {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())
 			return nil
 		}},
+		{"mouse", "[all|cell|off]", "mouse reporting mode (bare shows it) — `cell` if the wheel should scroll the log", mouseSlash},
 		{"scrolldebug", "", "debug: dump scroll overlay state (rowOffset, blockH, YOffset)", func(m *tuiModel, _ []string) tea.Cmd {
 			var lines []string
 			lines = append(lines, fmt.Sprintf("YOffset=%d pinned=%v vpH=%d convo=%d blockH=%d",
-				m.vp.YOffset, m.scrollPinned, m.vp.Height, len(m.convo), len(m.blockH)))
+				m.vp.YOffset, m.scrollPinned, m.vp.Height, len(m.convo), len(m.frame.blockH)))
 			for i, e := range m.convo {
 				if e.userText == "" {
 					continue
 				}
 				h := 0
-				if i < len(m.blockH) {
-					h = m.blockH[i]
+				if i < len(m.frame.blockH) {
+					h = m.frame.blockH[i]
 				}
 				lines = append(lines, fmt.Sprintf("  [%d] user=%q rowOffset=%d h=%d bottom=%d offScreen=%v",
 					i, e.userText, e.rowOffset, h, e.rowOffset+h, e.rowOffset+h <= m.vp.YOffset))
@@ -2965,8 +3185,8 @@ func init() {
 				fmt.Fprintf(f, "resize w=%d h=%d\n", m.w, m.h)
 				for i, e := range m.convo {
 					h := 0
-					if i < len(m.blockH) {
-						h = m.blockH[i]
+					if i < len(m.frame.blockH) {
+						h = m.frame.blockH[i]
 					}
 					kind := "assistant"
 					if e.userText != "" {
@@ -3019,7 +3239,7 @@ func init() {
 			m.cur = ""
 			m.pendingTool, m.pendingArgs = -1, nil
 			m.activeTool = ""
-			m.sel, m.blockH = -1, nil
+			m.sel = -1
 			m.busy, m.asking = false, false
 			m.append(stDim.Render("session cleared — fresh start"))
 			m.refresh()
