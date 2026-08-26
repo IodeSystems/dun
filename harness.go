@@ -283,6 +283,14 @@ type Config struct {
 	OnRetry func(RetryNote)
 }
 
+// CompactionPause, if the host sets it, is called before the Shaper's
+// compaction LLM call and returns the resume func. The host wires it to its
+// turn budget clock so the fold STOPs the clock while it runs: compaction is
+// bookkeeping, not model work, so it must not burn the turn's time budget.
+// nil (one-shot mode, or a host with no per-turn clock) leaves the fold on the
+// caller's context and budget as-is. See the Shaper.Pause field.
+var CompactionPause func() (resume func())
+
 // Harness is a running dun: the MCP manager + an agent Session over its tools.
 type Harness struct {
 	mgr     *mcpmgr.Manager
@@ -990,6 +998,12 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 			PreserveLastMessages:  6,
 			PreserveLastToolCalls: 4,
 		},
+		// Compaction is bookkeeping, not model work: stop the turn's budget
+		// clock for the fold so a slow endpoint + a long compaction cannot run
+		// the turn past its budget mid-fold and cancel the worker with a bare
+		// "context canceled". Set by the host (cmd/dun) from its turn clock;
+		// nil (one-shot / no clock) means the fold runs on the budget as-is.
+		Pause: CompactionPause,
 	}
 	h.Session = &agent.Session{
 		SessionID:        "dun",
@@ -1445,12 +1459,16 @@ type CompactionNote struct {
 	Summary       string // the summary that replaced them
 	Turn          int    // how many folds this turn — >1 is thrashing
 	SinceLastSecs int    // seconds since the previous fold (0 = first)
+	Cause         string // WHY this fold ran: "shaper" (budget) or "overflow" (endpoint cut a reply)
 }
 
 // String renders the note as one reviewable line.
 func (n CompactionNote) String() string {
 	s := fmt.Sprintf("compacted %d entries: %d → %d tokens (saved %d)",
 		n.Subsumed, n.TokensBefore, n.TokensAfter, n.TokensBefore-n.TokensAfter)
+	if n.Cause != "" {
+		s += " · " + n.Cause
+	}
 	if n.Turn > 1 {
 		s += fmt.Sprintf(" · %d× this turn", n.Turn)
 	}
@@ -1535,6 +1553,11 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 		TokensAfter:  ci.TokensAfter,
 		Summary:      ci.Summary,
 		Turn:         h.compactTurn,
+	}
+	if cause == foldByOverflow {
+		note.Cause = "overflow"
+	} else {
+		note.Cause = "shaper"
 	}
 	if !h.compactLast.IsZero() {
 		note.SinceLastSecs = int(time.Since(h.compactLast).Seconds())

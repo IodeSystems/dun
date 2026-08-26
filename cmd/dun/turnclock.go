@@ -154,6 +154,18 @@ func withoutClock[T any](fn func() (T, error)) (T, error) {
 	return fn()
 }
 
+// pauseClock stops the running turn's budget clock and returns the resume func.
+// It is the acquire/release form of withoutClock, for a host callback that
+// spans a call the clock cannot wrap inline (the Shaper's compaction LLM call
+// runs in agentkit, outside withoutClock's reach). nil-safe: when no turn is
+// running, or the turn is unbudgeted, the clock is already inert and the
+// resume func is a no-op.
+func pauseClock() (resume func()) {
+	c := curClock.Load()
+	c.Pause()
+	return c.Resume
+}
+
 // turnErr replaces a bare cancellation with the reason the turn actually ended.
 //
 // The retry loop does not retry a cancelled context (see Harness.runTurn): a

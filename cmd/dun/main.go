@@ -412,6 +412,12 @@ func main() {
 		ctx = run.ctx
 		defer run.Stop()
 	}
+	// The Shaper's compaction must not burn the turn's budget clock (dun
+	// package, wired from here because the clock is a cmd/dun concern). In
+	// one-shot mode curClock is the run's clock and pauseClock is still the
+	// right thing to wrap the fold with; in interactive mode it's the running
+	// turn's clock.
+	dun.CompactionPause = pauseClock
 
 	// started holds the Harness once dun.Start returns, for the callbacks that
 	// are installed on cfg before it exists. atomic because the breakdown
@@ -502,7 +508,7 @@ func main() {
 		cfg.OnCompaction = func(n dun.CompactionNote) {
 			em.emit(event{"type": "compaction", "text": n.String(), "subsumed": n.Subsumed,
 				"tokens_before": n.TokensBefore, "tokens_after": n.TokensAfter,
-				"turn": n.Turn, "since_last_secs": n.SinceLastSecs})
+				"turn": n.Turn, "since_last_secs": n.SinceLastSecs, "cause": n.Cause})
 		}
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
 			// Paused for the whole wait: the person deciding is not the turn
