@@ -1547,15 +1547,6 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 	fromOverflow := h.compactOverflow > 0
 	h.compactMu.Unlock()
 
-	// A fold destroys conversation. If the workspace has AGENTS.md rules, they
-	// may have been in the folded prefix — the summary is a model's reading and
-	// is not a guarantee the rules survived. Name them so the model knows to
-	// re-read, rather than depending on the summary's fidelity. See
-	// agents_hook.go: re-reading an AGENTS.md is never blocked by the guard.
-	if paths := findAgentsMD(h.cfg.Workspace, 3); len(paths) > 0 {
-		note.Summary += agentsMDReminder(paths)
-	}
-
 	log.Printf("dun: %s", note)
 	switch {
 	case thrash && fromOverflow:

@@ -363,6 +363,10 @@ func (h *Harness) rebuildTools() {
 	if sys == "" {
 		sys = systemFor(tools, cfg.Exec, cfg.Worktree)
 		sys += roleSystem(h.isChild())
+		// The workspace's root AGENTS.md, if any, is standing context: the
+		// model needs the project's rules from the first message, and a system
+		// block survives compaction so a fold never drops them.
+		sys += rootAgentsMDBlock(h.cfg.Workspace)
 	}
 	// ship is the only way work leaves the worktree. It needs a repo, not a
 	// branch: a --no-worktree session sits on the base branch, and the pipeline

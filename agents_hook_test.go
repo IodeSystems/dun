@@ -251,3 +251,47 @@ func TestAgentsHook_MtimeInvalidation(t *testing.T) {
 		t.Errorf("should be re-blocked after AGENTS.md changes: exit %d, out: %s", code, out)
 	}
 }
+
+// rootAgentsMDBlock: the system-prompt injection of the workspace's root
+// AGENTS.md. This is the "always show the root AGENTS.md" default — the rules
+// are standing context, not something that waits for a guard to fire.
+func TestRootAgentsMDBlock(t *testing.T) {
+	// No workspace: nothing.
+	if got := rootAgentsMDBlock(""); got != "" {
+		t.Errorf("empty workspace should give no block: %q", got)
+	}
+
+	// Workspace with no AGENTS.md: nothing.
+	if got := rootAgentsMDBlock(t.TempDir()); got != "" {
+		t.Errorf("no AGENTS.md should give no block: %q", got)
+	}
+
+	// Workspace with a root AGENTS.md: the content is in the block.
+	ws := t.TempDir()
+	os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("always use tabs"), 0o644)
+	got := rootAgentsMDBlock(ws)
+	if !strings.Contains(got, "always use tabs") {
+		t.Errorf("block should carry the file content: %q", got)
+	}
+	if !strings.Contains(got, "AGENTS.md") {
+		t.Errorf("block should name the source: %q", got)
+	}
+
+	// Lowercase agents.md is also honored.
+	ws2 := t.TempDir()
+	os.WriteFile(filepath.Join(ws2, "agents.md"), []byte("use gofmt"), 0o644)
+	got = rootAgentsMDBlock(ws2)
+	if !strings.Contains(got, "use gofmt") {
+		t.Errorf("lowercase agents.md should be read: %q", got)
+	}
+
+	// A NESTED AGENTS.md is NOT the root: it must not appear in the block.
+	// (The guard surfaces it on access; the system prompt only carries the root.)
+	ws3 := t.TempDir()
+	os.MkdirAll(filepath.Join(ws3, "src"), 0o755)
+	os.WriteFile(filepath.Join(ws3, "src", "AGENTS.md"), []byte("nested only"), 0o644)
+	got = rootAgentsMDBlock(ws3)
+	if strings.Contains(got, "nested only") {
+		t.Errorf("a nested AGENTS.md must not appear in the root block: %q", got)
+	}
+}

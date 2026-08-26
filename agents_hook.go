@@ -15,6 +15,14 @@ package dun
 // proceed without the guard. The state file is per-workspace (not global),
 // so two dun sessions on the same repo do not share it.
 //
+// Two layers, access-driven by design. The ROOT AGENTS.md is standing context:
+// rootAgentsMDBlock puts it in the system prompt so the model has the project's
+// rules from the first message, and a system block survives compaction so a fold
+// never silently drops them. NESTED AGENTS.md files are the guard's job — they
+// surface on access (read the one for the directory you are touching), not in
+// the system prompt. The rules are only re-supplied when a path is accessed,
+// never on an arbitrary event like a compaction.
+//
 // The script is embedded in the binary so it works regardless of where dun
 // was installed. The temp file is cleaned up when the server stops (or when
 // the process exits — the OS reclaims it).
@@ -23,7 +31,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // agentsHookScript is the policy executable. It must be bash-compatible and
@@ -111,54 +118,33 @@ echo "AGENTS.md guard: read $relpath before $op-ing $(basename "$target"). It co
 exit 2
 `
 
-// findAgentsMD returns the workspace-relative paths of AGENTS.md / agents.md
-// files under root, walking up to depth levels deep. Bounded on purpose: a
-// monorepo with hundreds of subdirs should not make compaction scan the whole
-// tree. Skips .git, node_modules, and hidden dirs.
-func findAgentsMD(root string, depth int) []string {
-	if root == "" {
-		return nil
-	}
-	var out []string
-	skip := map[string]bool{".git": true, "node_modules": true}
-	var walk func(dir string, d int)
-	walk = func(dir string, d int) {
-		if d > depth {
-			return
-		}
-		ents, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-		for _, e := range ents {
-			name := e.Name()
-			if e.IsDir() {
-				if skip[name] || (len(name) > 0 && name[0] == '.') {
-					continue
-				}
-				walk(filepath.Join(dir, name), d+1)
-				continue
-			}
-			if name == "AGENTS.md" || name == "agents.md" {
-				rel, _ := filepath.Rel(root, filepath.Join(dir, name))
-				out = append(out, rel)
-			}
-		}
-	}
-	walk(root, 0)
-	return out
-}
-
-// agentsMDReminder returns a one-line note to append to a compaction note when
-// the workspace has AGENTS.md files, so the model knows the rules may have been
-// folded out of context. Cheap by design: it names the files, it does not
-// re-supply their content — re-reading is one tool call and never blocked.
-func agentsMDReminder(paths []string) string {
-	if len(paths) == 0 {
+// rootAgentsMDBlock returns the workspace's root AGENTS.md as a system-prompt
+// block, so the model has the project's standing rules in context from the
+// first message rather than only when a guard fires. Empty when there is no
+// root AGENTS.md (a nested one is the guard's job to surface on access, not the
+// system prompt's). The block is re-read on every system rebuild, so a rule
+// edited mid-session is picked up on the next turn without a restart.
+//
+// It goes in the system prompt, not a conversation entry: the rules are about
+// the WORKSPACE, not about what was said. A system block also survives
+// compaction, which is the whole point — the rules are always in context, so a
+// fold never silently drops them.
+func rootAgentsMDBlock(workspace string) string {
+	if workspace == "" {
 		return ""
 	}
-	return " · AGENTS.md rules may have been compacted (" +
-		strings.Join(paths, ", ") + ") — re-read before continuing"
+	for _, name := range []string{"AGENTS.md", "agents.md"} {
+		p := filepath.Join(workspace, name)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		return "\n\n## Project rules (AGENTS.md)\n\n" +
+			"These rules apply to this workspace. Nested directories may have their " +
+			"own AGENTS.md; the code tool will ask you to read one before you touch " +
+			"files under it.\n\n" + string(data)
+	}
+	return ""
 }
 
 // writeAgentsHook writes the embedded hook script to a temp file and returns
