@@ -685,3 +685,58 @@ dun:     ESC]11;? ESC\ · ESC[6n · ESC[>0q · <nothing, for the whole capture>
 - **Tests** (`kitty_test.go`) run against a real pty, because every one of these
   bugs was invisible without a terminal on the other end: supported, DA-only
   (the old false positive), silent-terminal (the old hang), termios restored.
+
+## Render cost
+
+### ✅ Streaming wrote 17x more than it had to (scroll repaint + colour churn)
+
+dun felt sluggish next to claude on a phone over ssh while CPU said it was fine
+(refresh 13–74µs, View 66µs, a token round-trip 116µs, keystroke→first byte
+5.7ms vs claude's 4.6ms). The cost was never CPU — it was bytes.
+
+**Measured with `--replay` on a synthetic 600-token stream, 100×40, pane full:**
+
+| | bytes for a ~15s stream |
+|---|---|
+| before | 1,814,270 |
+| + colour packing | 287,015 |
+| + scroll region | 106,590 (**17x**) |
+
+- **Scroll repaint.** A full-height pane pinned to the bottom means every new
+  wrapped line moves every other line, and Bubble Tea's line diff then rewrites
+  the whole screen: measured 37 of 40 rows dirty per scroll frame. `scrollregion.go`
+  hands those rows to the terminal instead (DECSTBM via SyncScrollArea/
+  ScrollUp/ScrollDown), so a new line costs one inserted line. The region stops
+  ONE ROW SHORT of the pane bottom — that row is where streamed text grows a
+  character at a time, and pulling it in would repaint the region per token
+  (measured 7x WORSE before that was fixed). Off with `DUN_FAST_SCROLL=0`.
+- **Ordering is the subtle part.** Bubble Tea runs every Cmd in its own
+  goroutine, so two INCREMENTAL region commands can land out of order: three ↑
+  presses inside 20ms rendered rows as `38, 36, 37` (reproduced in tmux, not
+  just the vt10x harness). `minRegionGap` issues at most one command per 25ms
+  and schedules a retry for anything arriving inside the gap.
+- **Colour churn.** The renderers above dun style every WORD separately —
+  `ESC[38;5;252m` before it and `ESC[0m` after, around trailing pad spaces
+  included — so a 35-row region repaint was 28KB for ~2KB of text. `sgrpack.go`
+  drops escapes that change nothing; it is a peephole over runs of adjacent
+  escapes and touches nothing else (cursor moves, margins, erases pass byte for
+  byte). Cached on the entry next to `wrapped`, because packing every block on
+  every refresh cost 100µs → 143µs at 200 blocks. Off with `DUN_PACK=0`.
+- **Verified**, not assumed: screens captured through tmux (a real emulator)
+  with region+packing on vs both off are byte-identical once the stream
+  finishes, and mid-stream differ only by the spinner frame and how far the
+  in-flight line has grown.
+- **Rejected:** `tea.WithFPS(renderHz)` — 7% fewer bytes for double the
+  keystroke latency (the renderer would tick at 30Hz instead of 60).
+
+### Startup, and a stall that tmux hides
+
+- `ready` takes 3.46s in a real project vs 0.29s in an empty dir (MCP server
+  spawn), against claude's 0.85s to a usable prompt. Not addressed.
+- **bubbletea's package init** (tea_init.go) calls `lipgloss.HasDarkBackground()`
+  before main runs; termenv's OSC 11 query has a 5s timeout, so first paint is
+  5.18s under `TERM=xterm-256color` when nothing answers — caught with a SIGQUIT
+  stack dump mid-stall. termenv skips the query for `screen`/`tmux` TERMs, which
+  is why dun feels fine under tmux and slow in a bare terminal. dun's OWN query
+  is already gated (render.go); this one is the dependency's, and no v1.3.x
+  release drops it.

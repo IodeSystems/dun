@@ -189,10 +189,7 @@ func runReplay(path string, pacing replayPacing, o tuiOpts) error {
 	if probeKitty(os.Stdin) {
 		defer disableKitty()
 	}
-	fm, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion()).Run()
-	if tm, ok := fm.(tuiModel); ok {
-		tm.sr.dumpStats()
-	}
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion()).Run()
 	proc.close()
 	return err
 }
