@@ -46,11 +46,11 @@ import (
 // (m.frame) so View — a value receiver — sees the same geometry the scroll
 // policy last decided on, instead of re-deriving a fourth copy inline.
 type frame struct {
-	lines      []string // the wrapped convo display rows
-	rowOffset  []int    // row where block i begins
-	blockH     []int    // rendered height of block i
-	height     int      // rows the convo viewport gets
-	width      int      // the wrap width this layout was built at
+	lines     []string // the wrapped convo display rows
+	rowOffset []int    // row where block i begins
+	blockH    []int    // rendered height of block i
+	height    int      // rows the convo viewport gets
+	width     int      // the wrap width this layout was built at
 }
 
 type tuiOpts struct {
@@ -1423,11 +1423,39 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 	}
+	// The custom row IS a text field, so typing on it answers — no enter first.
+	// A no-options ask already drops straight into text entry
+	// (TestTUI_AskNoOptionsFreeText); this makes the row that offers the
+	// same thing behave the same way, and the key that opened the field is the
+	// key that types into it. Enter still opens it empty, and every other row
+	// keeps its bindings (`n` types an n HERE, but still starts a detail there).
+	if !m.noting && !m.customAnswer && m.askSel == custom && typedText(msg) {
+		m.customAnswer = true
+		m.input.Reset()
+		m.input.placeholder = "type your answer, or chat…"
+		m.input.Focus()
+		m.input = m.input.HandleKey(msg)
+		m.refresh()
+		return m, textinput.Blink
+	}
 	if m.noting || m.customAnswer { // typing into the detail / custom field
 		m.input = m.input.HandleKey(msg)
 		return m, nil
 	}
 	return m, nil
+}
+
+// typedText reports whether a key is the user typing a character, as opposed to
+// driving the UI. Alt-modified keys are commands, not text.
+func typedText(msg tea.KeyMsg) bool {
+	if msg.Alt {
+		return false
+	}
+	switch msg.Type {
+	case tea.KeyRunes, tea.KeySpace:
+		return true
+	}
+	return false
 }
 
 // suggestion is one predicted next user message (--suggest).
@@ -2521,7 +2549,13 @@ func (m tuiModel) askPanel() string {
 		}
 		rows = append(rows, gut(label, sel(i)))
 	}
-	rows = append(rows, gut(stDim.Render("✎ custom answer / chat…"), sel(custom) || m.customAnswer))
+	// The affordance belongs on the row itself: highlighted and not yet
+	// capturing is exactly the moment someone wonders whether to press enter.
+	customLabel := "✎ custom answer / chat…"
+	if sel(custom) && !m.customAnswer {
+		customLabel += "   (just type)"
+	}
+	rows = append(rows, gut(stDim.Render(customLabel), sel(custom) || m.customAnswer))
 	if m.askMulti { // a submit row so enter can toggle options without needing space
 		n := 0
 		for _, on := range m.askChecked {

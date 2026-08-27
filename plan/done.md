@@ -740,3 +740,14 @@ dun felt sluggish next to claude on a phone over ssh while CPU said it was fine
   is why dun feels fine under tmux and slow in a bare terminal. dun's OWN query
   is already gated (render.go); this one is the dependency's, and no v1.3.x
   release drops it.
+
+### ✅ The custom-answer row takes typing directly
+
+Highlighting "✎ custom answer / chat…" and typing did nothing until you pressed
+enter first — every keystroke fell through `updateAsking` and was swallowed. A
+no-options ask already dropped straight into text entry, so the row offering the
+same thing behaved differently from the same thing. Now any typed character (or
+space) on that row starts the answer AND is the first character of it; enter
+still opens it empty, arrows still move off the row without getting stuck, and
+`n` types an "n" there while still starting a detail on an option row. The row
+says "(just type)" while it is highlighted and not yet capturing.

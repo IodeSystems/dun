@@ -226,6 +226,68 @@ func TestTUI_FocusToggleAndSelection(t *testing.T) {
 	}
 }
 
+// Typing on the custom row answers straight away — the row is a text field, and
+// having to press enter to wake it up is the bug this covers. Note `n`, which
+// starts a detail on an option row, has to type an "n" here instead.
+func TestTUI_AskCustomRowTypesWithoutEnter(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
+	m = key(m, kDown)
+	m = key(m, kDown) // past B, onto the custom row
+	if m.askSel != len(m.askOptions) {
+		t.Fatalf("expected the custom row highlighted, got sel=%d of %d options", m.askSel, len(m.askOptions))
+	}
+	if m.customAnswer {
+		t.Fatal("highlighting the row must not start capturing on its own")
+	}
+	// The affordance is on the row, where someone is looking when they wonder
+	// whether enter is required.
+	if !strings.Contains(m.askPanel(), "just type") {
+		t.Errorf("highlighted custom row should say it takes typing:\n%s", m.askPanel())
+	}
+
+	m = key(m, kN) // a plain letter — and the one that means "add a detail" elsewhere
+	if !m.customAnswer {
+		t.Fatal("typing on the custom row should start the free-text answer")
+	}
+	if m.noting {
+		t.Fatal("`n` on the custom row types an n; it must not start a detail")
+	}
+	if m.input.Value() != "n" {
+		t.Fatalf("the keystroke that opened the field must also type into it, got %q", m.input.Value())
+	}
+	if strings.Contains(m.askPanel(), "just type") {
+		t.Errorf("the hint should go once the field is capturing:\n%s", m.askPanel())
+	}
+	m = typeStr(m, "ope")
+	if m.input.Value() != "nope" {
+		t.Fatalf("typing should continue into the field, got %q", m.input.Value())
+	}
+	m = key(m, kEnter)
+	if m.asking {
+		t.Fatal("enter should send the custom answer")
+	}
+	if !strings.Contains(convoText(m), "nope") {
+		t.Fatalf("custom answer not echoed: %v", m.convo)
+	}
+}
+
+// Arrow keys still navigate: the custom row captures TEXT, not the UI keys, so
+// a user can arrow onto it and back off without getting stuck in a field.
+func TestTUI_AskCustomRowStillNavigable(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
+	m = key(m, kDown)
+	m = key(m, kDown)
+	if m.askSel != len(m.askOptions) || m.customAnswer {
+		t.Fatalf("setup: sel=%d capturing=%v", m.askSel, m.customAnswer)
+	}
+	m = key(m, kUp)
+	if m.askSel != 1 || m.customAnswer {
+		t.Fatalf("↑ off the custom row should just move: sel=%d capturing=%v", m.askSel, m.customAnswer)
+	}
+}
+
 // The ask picker: ↑/↓ choose an option, `n` attaches a detail, enter sends
 // "<option> — <detail>".
 func TestTUI_AskPickerOptionWithNote(t *testing.T) {
