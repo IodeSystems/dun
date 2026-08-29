@@ -585,39 +585,37 @@ tokens and cannot see what it is doing.
   child's token spend against the parent's; making the task line clickable
   (mouse is already wired for the viewport).
 
-### ✅ F. A child wedged with no in-flight request — observability added (2026-08-03)
+### ✅ F. A child wedged with no in-flight request — cause identified, deadlock fixed (2026-08-29)
 Live session `20260801-095147`, agent #1. Its last transcript record is
 `11:50:13` (`tell_parent` → "answer recorded — you can stop now"), its last
 prompt `11:50:14` (327 messages, ~106k tokens). Then nothing for 15+ minutes:
 no session writes, no log lines, no retry notes, 0% CPU, **no socket**. The
 MAIN agent in the SAME process kept working throughout — a prompt every 1–3s,
 `bytes_sent` 84KB→3.4MB, zero 429s — so the single slot was free and the child
-simply was not asking for it. It is blocked in Go, inside `s.h.Ask`
-(`subagent.go:347`), not on the provider and not on the network.
-- **next:** on the next occurrence, `kill -QUIT <the -p pid>` BEFORE anything
-  else — the goroutine dump lands in the process's stderr log
-  (`/tmp/dun-tui-*.log`) and names the frame. Everything short of that has been
-  tried on a live instance.
+simply was not asking for it.
+- **cause (2026-08-29):** reproduced with two concurrent children. The SIGQUIT
+  goroutine dump named both stuck frames: the child blocked in `(*subAgent).ask`
+  (`subagent.go:553`) waiting on its answer channel, and the parent blocked in
+  `agentMonitor` (`subagent.go:1023`) waiting on the child's `done` channel via
+  `agent_monitor(wait:true)`. Mutual deadlock: the parent can only answer via
+  `agent_monitor(tell:)` but is stuck in `waitCh`; the child can only finish
+  when the parent answers. Trigger: the child's model spam-looped `tell_parent`
+  (loop guard fired every time but the model kept going), then called
+  `ask_parent` with a non-question.
+- **✅ fixed (2026-08-29):** `agentMonitor`'s wait loop now polls
+  `sa.blockedOn()` every 2s alongside `waitCh`/`ctx.Done`. When a child question
+  is pending, the loop breaks and `report()` surfaces the question so the model
+  can answer via `agent_monitor(tell:)` on the next turn. Test:
+  `TestAgentMonitor_WaitBreaksOnBlockedChild` (2s pass, `-race` clean).
 - **why it was not taken this time (USER, 2026-08-01):** SIGQUIT kills the whole
   session, and the main agent was mid-loop. The child had already banked its
   answer, so there was nothing to recover — only a cause to learn.
-- **suspects, none confirmed:** the parent's MCP manager is SHARED with the child
-  (`childConfig`: `cfg.Servers = parent.specs`) and the same `*llm.Client` is
-  shared too — `wireRetry` re-points `c.OnRetry` on every `Start`, so the last
-  harness started owns the callback. Compaction in a child is invisible
-  (`childConfig` nils `OnCompaction`), so a fold that never returns would look
-  exactly like this.
-- **risks:** unbounded. A child that wedges is resident forever, holds its
-  Harness, and (before E below) reported itself as healthy.
 - **✅ make it observable (2026-08-03):** added `lastActivity` to `subAgent`, wired
   via `OnToolCall` callback (every tool call proves the child is not wedged) and
   `noteUsage` (every chat round). The heartbeat fire callback now checks
   `lastActivity`: if the child is `agentRunning` but inactive longer than the
   heartbeat interval, the alert escalates from "still running" to "may be wedged"
-  with a suggestion to `agent_monitor(tail:40)`. `startRunLocked` also seeds
-  `lastActivity`, so a child that never reaches its first tool call is caught.
-- **next:** on the next occurrence, the alert will fire automatically. Still need
-  a goroutine dump (`kill -QUIT`) to identify the exact frame.
+  with a suggestion to `agent_monitor(tail:40)`.
 
 ### ✅ E1. A running child looked identical to a wedged one (2026-08-01)
 Found while investigating F, and the reason F went unnoticed for 15 minutes

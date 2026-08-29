@@ -1020,9 +1020,24 @@ func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell strin
 		b.WriteString(sa.tell(tell) + "\n")
 	}
 	if wait {
-		select {
-		case <-sa.waitCh():
-		case <-ctx.Done():
+	waitLoop:
+		for {
+			ch := sa.waitCh()
+			select {
+			case <-ch:
+				break waitLoop
+			case <-ctx.Done():
+				break waitLoop
+			case <-time.After(2 * time.Second):
+				// Poll: a child that called ask_parent is blocked on the
+				// parent's answer, but the parent is blocked here — a mutual
+				// deadlock with no auto-unblock. Breaking on a pending
+				// question lets report() surface it so the model can answer
+				// via agent_monitor(tell:) on the next turn.
+				if sa.blockedOn() != "" {
+					break waitLoop
+				}
+			}
 		}
 	}
 	b.WriteString(sa.report())

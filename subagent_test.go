@@ -1,6 +1,7 @@
 package dun
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -247,5 +248,61 @@ func TestSubAgent_QuitKeepsTheTranscriptPath(t *testing.T) {
 	_, bare := testAgent(t, 9, "no session file")
 	if out := bare.quit(); strings.Contains(out, "transcript is at .") {
 		t.Errorf("an in-memory child must not claim an empty path: %q", out)
+	}
+}
+
+// The wedge: a child blocked in ask_parent while the parent is parked in
+// agent_monitor(wait:true). Before the fix this was a mutual deadlock — the
+// parent waited on the child's done channel, the child waited on the parent's
+// answer channel, and neither had a timeout. The fix polls blockedOn() every
+// 2s inside the wait loop, so the parent surfaces the question and can answer.
+func TestAgentMonitor_WaitBreaksOnBlockedChild(t *testing.T) {
+	h, sa := testAgent(t, 1, "do the thing")
+
+	// Register in the harness's agent map so agentByID finds it.
+	h.agMu.Lock()
+	if h.agents == nil {
+		h.agents = map[int]*subAgent{}
+	}
+	h.agents[sa.num] = sa
+	h.agMu.Unlock()
+
+	// A real (unclosed) done channel so waitCh blocks.
+	done := make(chan struct{})
+	sa.mu.Lock()
+	sa.done = done
+	sa.startRunLocked()
+	// Simulate a pending ask_parent: the child is blocked on its answer channel.
+	ansCh := make(chan string, 1)
+	sa.answer = ansCh
+	sa.question = "which file should I edit?"
+	sa.state = agentRunning
+	sa.mu.Unlock()
+
+	id := sa.num
+
+	// Call agentMonitor in a goroutine with a generous timeout. If the fix
+	// works it returns within ~4s (two 2s polls) when the child is blocked.
+	out := make(chan string, 1)
+	go func() {
+		defer close(out)
+		out <- agentMonitor(context.Background(), h, &id, 0, "", true, false, false)
+	}()
+
+	select {
+	case result := <-out:
+		if !strings.Contains(result, "BLOCKED") {
+			t.Errorf("report should name the blocked question, got: %s", result)
+		}
+		if !strings.Contains(result, "which file should I edit?") {
+			t.Errorf("report should include the question text, got: %s", result)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("agentMonitor(wait:true) did not return within 10s — the child is blocked and the parent is stuck (the original wedge)")
+	}
+
+	// The child should still be blocked (nobody answered it).
+	if q := sa.blockedOn(); q == "" {
+		t.Error("child should still be blocked after the wait broke out")
 	}
 }
