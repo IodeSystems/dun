@@ -13,13 +13,18 @@ import (
 // parked on the last few done messages watched them slide out from under the
 // fold every time the keyboard appeared.
 
-// bottomRow is the last line the conversation pane is currently showing.
+// bottomRow is the last non-blank line the conversation pane is currently
+// showing. A turn ends with a blank gap row, so the pane's literal last line is
+// empty after a done — the anchor the resize tests pin is the last CONTENT row,
+// which is what the reader is actually parked on.
 func bottomRow(m tuiModel) string {
 	vis := m.vp.visible()
-	if len(vis) == 0 {
-		return ""
+	for i := len(vis) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(stripANSI(vis[i])); s != "" {
+			return s
+		}
 	}
-	return strings.TrimSpace(stripANSI(vis[len(vis)-1]))
+	return ""
 }
 
 // filled drives a real conversation in, the way the engine's events arrive —

@@ -255,6 +255,10 @@ type convoEntry struct {
 	provisionalText string // original text, used to restore normal style on delivery
 	userText        string // raw user message text (non-empty for user messages only)
 
+	// blank marks the empty row turnGap() appends when a turn ends, so
+	// consecutive turns read as blocks. It renders as nothing.
+	blank bool
+
 	// mdSource is the RAW markdown an assistant block was rendered from. The
 	// rendered string bakes in the word-wrap width that was current when it was
 	// produced, and a pre-wrapped line has no break opportunity left for
@@ -1026,7 +1030,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.vp.SetYOffset(m.vp.YOffset - 1) // scroll up within a tall message first
 					return m, nil
 				} else if m.sel > 0 {
-					m.sel--
+					m.sel = m.selSkipUp(m.sel - 1)
 				}
 				m.refresh()
 				return m, nil
@@ -1081,7 +1085,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.vp.SetYOffset(m.vp.YOffset + 1) // scroll down within a tall message first
 					return m, nil
 				} else if m.sel < len(m.convo)-1 {
-					m.sel++
+					m.sel = m.selSkipDown(m.sel + 1)
 				}
 				m.refresh()
 				return m, nil
@@ -1990,6 +1994,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
 		m.clearRetry()
+		// The agent is idle: separate this turn's output from whatever the
+		// human sends next with a blank row.
+		m.turnGap()
 		// The turn is done, so the human's idle starts NOW. This is the only
 		// place a suggestion request can begin — `done` is what "the LLM is
 		// marked done" means on the wire, so nothing can land between a tool
@@ -2025,6 +2032,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			// was interrupted and picks up where this stopped.
 			m.append(stDim.Render("the session is intact — send a message to retry from here"))
 		}
+		m.turnGap()
 		m.refresh()
 	case "reset":
 		// Engine confirmed the store was cleared; nothing extra to show —
@@ -2581,6 +2589,52 @@ func (m *tuiModel) append(line string) {
 	m.refresh()
 }
 
+// selSkippable reports the entry at i as one the message selection must never
+// land on — a blank turn-gap row has nothing to select.
+func (m *tuiModel) selSkippable(i int) bool {
+	return i >= 0 && i < len(m.convo) && m.convo[i].blank
+}
+
+// selSkipDown / selSkipUp step from i to the nearest non-skippable entry in
+// the given direction, clamping at the edge. The selection never rests on a
+// blank turn-gap row.
+func (m *tuiModel) selSkipDown(i int) int {
+	for i < len(m.convo) && m.selSkippable(i) {
+		i++
+	}
+	if i >= len(m.convo) {
+		i = len(m.convo) - 1
+	}
+	if i < 0 {
+		i = 0
+	}
+	return i
+}
+
+func (m *tuiModel) selSkipUp(i int) int {
+	for i >= 0 && m.selSkippable(i) {
+		i--
+	}
+	if i < 0 {
+		i = len(m.convo) - 1
+	}
+	if i >= len(m.convo) {
+		i = len(m.convo) - 1
+	}
+	return i
+}
+
+// turnGap appends the blank row that separates one turn's output from the
+// next, so the conversation reads in blocks. Called when the agent goes idle.
+func (m *tuiModel) turnGap() {
+	// An ask answered without a done in between would otherwise stack two
+	// blank rows; the second is only the first one over.
+	if n := len(m.convo); n > 0 && m.convo[n-1].blank {
+		return
+	}
+	m.convo = append(m.convo, convoEntry{collapsed: "", blank: true})
+}
+
 // appendUser adds a user message and stores the raw text for full-width re-rendering.
 func (m *tuiModel) appendUser(text string) {
 	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + text), userText: text})
@@ -2824,7 +2878,10 @@ func (m *tuiModel) refresh() {
 	cumRow := 0 // running row offset for scrollOverlay mapping
 	for i, b := range blocks {
 		var w string
-		if i < len(m.convo) && m.convo[i].docs == nil {
+		if i < len(m.convo) && m.convo[i].blank {
+			// The turn-gap row: exactly one empty line, nothing to measure.
+			w = ""
+		} else if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
 			// Rendered markdown bakes in the wrap width it was produced at, and a
 			// pre-wrapped line has no break opportunity left for cellbuf to find

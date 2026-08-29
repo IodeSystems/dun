@@ -524,7 +524,7 @@ func (m *tuiModel) setFocus(z int) {
 	case focusConvo:
 		m.input.Blur()
 		if m.sel < 0 || m.sel >= len(m.convo) {
-			m.sel = len(m.convo) - 1
+			m.sel = m.selSkipUp(len(m.convo) - 1)
 		}
 	case focusActivity:
 		m.input.Blur()

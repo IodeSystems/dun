@@ -3532,17 +3532,20 @@ func TestVtui_MarkdownTokenDoesNotReRender(t *testing.T) {
 		v.event(map[string]any{"type": "token", "text": chunk})
 	}
 	v.event(map[string]any{"type": "done"})
-	e := &v.m.convo[len(v.m.convo)-1]
+	// A done appends the blank turn-gap row, so the finalized block is the
+	// entry just before it.
+	e := &v.m.convo[len(v.m.convo)-2]
 	if e.mdSource == "" {
 		t.Fatal("the finalized block has no mdSource — the test is not exercising the fix")
 	}
 	// Move to a width where the branch has already run once, so wrapW is set.
+	// The finalized block is convo[len-2] — the blank turn-gap is still last.
 	v.resize(60, 24)
-	if v.m.convo[len(v.m.convo)-1].wrapW == 0 {
+	if v.m.convo[len(v.m.convo)-2].wrapW == 0 {
 		t.Fatalf("wrapW was not set after a resize — the cache is not being filled (mdSource=%q)",
-			v.m.convo[len(v.m.convo)-1].mdSource)
+			v.m.convo[len(v.m.convo)-2].mdSource)
 	}
-	e = &v.m.convo[len(v.m.convo)-1]
+	e = &v.m.convo[len(v.m.convo)-2]
 	before := e.collapsed
 	// Stream another token at the SAME width: refresh runs (render tick), but
 	// no mdSource block may be re-rendered. m.cur grows, so vp.lines change —
@@ -3550,7 +3553,7 @@ func TestVtui_MarkdownTokenDoesNotReRender(t *testing.T) {
 	v.event(map[string]any{"type": "token", "text": "more"})
 	nm, _ := v.m.Update(renderTickMsg{})
 	v.m = nm.(tuiModel)
-	e = &v.m.convo[len(v.m.convo)-1]
+	e = &v.m.convo[len(v.m.convo)-2]
 	if e.collapsed != before {
 		t.Error("a token at unchanged width re-rendered the finalized markdown — the branch must fire on width change only")
 	}
@@ -3572,7 +3575,9 @@ func TestVtui_MarkdownReflowFromZeroWrap(t *testing.T) {
 		v.event(map[string]any{"type": "token", "text": chunk})
 	}
 	v.event(map[string]any{"type": "done"})
-	e := &v.m.convo[len(v.m.convo)-1]
+	// A done appends the blank turn-gap row, so the finalized block is the
+	// entry just before it.
+	e := &v.m.convo[len(v.m.convo)-2]
 	if e.mdSource == "" {
 		t.Fatal("the finalized block has no mdSource — the test is not exercising the fix")
 	}
