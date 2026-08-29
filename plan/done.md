@@ -60,8 +60,8 @@
     `tool_call`/`tool_result`/`message`/`usage`/`done`/`error`; IN
     `{"type":"user","content":...}` / `{"type":"stop"}`. This is the engine
     PROTOCOL and the decoupling seam: the Slice-2 TUI is a CLIENT of it.
-- **Verified live vs bonsai** (both modes): spawned all 3 (10 tools),
-  `ternary-bonsai-27b` DOES tool-call; the agent self-corrected a bad
+- **Verified live** (both modes): spawned all 3 (10 tools),
+  the default LLM DOES tool-call; the agent self-corrected a bad
   `node_query` selector → read → answered; `-p` took a stdin user event and
   emitted the full event stream.
 
@@ -238,7 +238,7 @@
 - cmd: `--continue` (resume latest for this root), `--resume <id>`, `--sessions`
   (list + exit); emits a `session` event (id + resumed count); TUI forwards the
   flags to its `-p` subprocess. `go install ./cmd/dun` → `dun` on PATH.
-- **Verified live vs bonsai:** session 1 stored a fact → session 2 `--continue`
+- **Verified live:** session 1 stored a fact → session 2 `--continue`
   reloaded 2 entries (same id) and the model recalled it. Unit: round-trip,
   blob extraction (not inlined, re-materialized), compaction persists.
 - **✅ TUI history replay on resume:** the model always had the resumed context,
@@ -585,7 +585,7 @@ isolation forces the split there).
     structural and keeps `ask_user` away from children.
   - TUI: an agents pane, live, one row per child with state, elapsed, spend, and
     a loud marker for a blocked one, fed by a new `agents` event.
-  - **Verified live** twice against bonsai. Run 1: parent spawned, child ran
+  - **Verified live** twice. Run 1: parent spawned, child ran
     `wc -l`, called `tell_parent{final:"137"}`, parent answered from the report —
     6.5k tokens spent in the child, none in the parent's window. Run 2:
     `wait:true` returned the count, `agent_monitor(tell:)` re-asked the SAME

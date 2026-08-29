@@ -28,7 +28,7 @@ iodesystems/dun`.
 ## Architecture
 
 ```
-dun (host: Bubble Tea TUI + agentkit Session + LLM → corrallm/bonsai)
+dun (host: Bubble Tea TUI + agentkit Session + LLM (default ~/.dun/config.json))
   ├─ per task: git WORKTREE of the repo (isolated mutable surface)
   ├─ mcpmgr spawns servers on the HOST (stdio JSON-RPC):
   │     poly-lsp-mcp mcp --root /work · mcpshell mcp --files-dir /work · raglit serve
@@ -50,7 +50,7 @@ full detail archived in `done.md`.
   `~/.dun/config.json` · version stamp + dev self-update · `dun` on PATH is a
   rebuild-then-exec launcher (`tools/dun.sh`), so it is never stale.
 - **Slice 1** — headless composition (3 MCP servers → one Session; `-p` JSON
-  event protocol; proven live vs bonsai).
+  event protocol; proven live).
 - **Slice 2** — Bubble Tea TUI (client of `-p`): pane focus/selection, vim `/`
   search, collapsible tool blocks, inspector overlay, docs notifications,
   tall-message scroll, mouse wheel, Starlark tool renderers, slash-command
@@ -1085,8 +1085,8 @@ See `done.md` — steps 1–5 built, verified pre-deletion, rebuilt 2026-08-01.
 - The 3 tools are sibling MCP servers bridged into ONE Session (NOT nested inside
   mcpshell's `--mcp` composition — the model should call node_edit/search
   directly).
-- LLM: any OpenAI-compatible endpoint; default corrallm/bonsai
-  (`ternary-bonsai-27b`, confirmed tool-calling).
+- LLM: any OpenAI-compatible endpoint; default from ~/.dun/config.json
+  (current: `local-Qwen3.8-27B` at llm.iodesystems.com; confirmed tool-calling).
 - Tool servers are declarative (`dun.json`/`dun.local.json`) over the built-in
   defaults; Slice 3 moves them into the container image.
 
