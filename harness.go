@@ -1006,15 +1006,15 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Pause: CompactionPause,
 	}
 	h.Session = &agent.Session{
-		SessionID:        "dun",
-		OnCompaction:     h.noteCompaction,
-		Store:            store,
-		Runner:           cfg.Client,
-		OnAssistantToken: cfg.OnToken,
-		OnUsage:          h.noteUsage,
-		MaxTurns:         maxTurns(),
-		Build:            measuredBuild(shaper, h),
-		ToolFormat:       toolFormat(),
+		SessionID:            "dun",
+		OnCompactionComplete: h.noteCompaction,
+		Store:                store,
+		Runner:               cfg.Client,
+		OnAssistantToken:     cfg.OnToken,
+		OnUsage:              h.noteUsage,
+		MaxTurns:             maxTurns(),
+		Build:                measuredBuild(shaper, h),
+		ToolFormat:           toolFormat(),
 		// The same estimator the Shaper uses, so `Active` and the budget cannot
 		// disagree about how big the context is.
 		Estimate: &h.meter,
@@ -1793,7 +1793,6 @@ func contextWindow(ctx context.Context, runner any) int {
 		"next build")
 	return 0
 }
-
 
 // shapingBudget turns a window into the prompt's share of it. Pure: it is
 // recomputed on every build (the fitted overhead moves), so it must not log.
