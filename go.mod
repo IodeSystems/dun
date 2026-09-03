@@ -14,8 +14,8 @@ require (
 	github.com/iodesystems/agentkit v0.0.0
 	github.com/muesli/termenv v0.16.0
 	go.starlark.net v0.0.0-20260708150628-5395d018f003
-	golang.org/x/sys v0.42.0
-	golang.org/x/term v0.41.0
+	golang.org/x/sys v0.47.0
+	golang.org/x/term v0.45.0
 )
 
 require (
@@ -43,10 +43,10 @@ require (
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	github.com/yuin/goldmark v1.7.13 // indirect
+	github.com/yuin/goldmark v1.8.5 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
-	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )
 
 replace github.com/iodesystems/agentkit => ../agentkit
