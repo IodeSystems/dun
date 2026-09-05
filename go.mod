@@ -11,7 +11,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/iodesystems/agentkit v0.0.0
+	github.com/iodesystems/agentkit v0.6.0
 	github.com/muesli/termenv v0.16.0
 	go.starlark.net v0.0.0-20260708150628-5395d018f003
 	golang.org/x/sys v0.42.0
