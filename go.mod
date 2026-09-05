@@ -13,7 +13,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/iodesystems/agentkit v0.0.0
 	github.com/muesli/termenv v0.16.0
-	go.starlark.net v0.0.0-20260708150628-5395d018f003
+	go.starlark.net v0.0.0-20260904161901-6ecada49e42f
 	golang.org/x/sys v0.42.0
 	golang.org/x/term v0.41.0
 )
