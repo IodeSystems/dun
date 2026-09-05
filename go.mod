@@ -15,7 +15,7 @@ require (
 	github.com/muesli/termenv v0.16.0
 	go.starlark.net v0.0.0-20260708150628-5395d018f003
 	golang.org/x/sys v0.42.0
-	golang.org/x/term v0.41.0
+	golang.org/x/term v0.45.0
 )
 
 require (
