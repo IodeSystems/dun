@@ -6,7 +6,7 @@
 # what it needs (and it persists across exec calls since everything runs in
 # the SAME container).
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git curl && \
