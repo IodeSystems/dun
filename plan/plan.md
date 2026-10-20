@@ -175,7 +175,7 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
    parked in aw4 on corrallm's `--slot-cache-dir`; aw4 measured cache-served
    96.5% → 57.2% when corrallm guessed the conversation wrong (2026-09-05).
 
-**For aw4 — SENT to aw4-49 2026-10-20 (USER: aw4 work is aw4's; message, don't do):** dun's affine meter; S surfacing
+**For aw4 — SENT to aw4-bc 2026-10-20 (aw4-49 had ended) (USER: aw4 work is aw4's; message, don't do):** dun's affine meter; S surfacing
 stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
 10-16 prompt reorder or 10-18 headroom change.
 
