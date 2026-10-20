@@ -172,7 +172,18 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
    39 → 20,785 chars, 372256e6). dun: `/rag on` measured as a full re-read
    (#1) — a tool-family toggle should append, not rewrite message 0, if the
    template allows; at least it should be rare.
-7. **Re-heading:** measure dun's re-read rate first (aw4: 52% of reads re-read
+7. **◻ Re-heading — measured, worth building (2026-10-20).** `python3 -I
+   tools/rereads.py` over `~/.dun/sessions` (99 sessions with reads, 3,530
+   read calls: exec cat/head/tail/sed/nl, node_read, get_document):
+   - a path already read in the session: **63%** of calls, 54% of read bytes
+     (overstates: node_read of two symbols of one file counts);
+   - the EXACT same target again: **42% of calls, 46% of read bytes —
+     9.5 MB of 20.7 MB**; node_read 60% of its calls, exec 8%.
+   Some repeats follow an edit (the content changed) — the OLDER copy is then
+   stale context, which is the case re-heading stubs. Next: stub the
+   superseded copy of an exact repeat just before a fold (`Shaper.Rehead`,
+   so the cache breaks once), newest copy stays whole. Original note:
+   **Re-heading:** measure dun's re-read rate first (aw4: 52% of reads re-read
    a path; `Shaper.Rehead` exists in agentkit, unused by dun).
 8. **❓ Working budget below the window** — USER call. aw4 shapes to 64k of a
    170k window (dev p50 58k, zero compactions); dun shapes to window − reserve
@@ -185,7 +196,7 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
 stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
 10-16 prompt reorder or 10-18 headroom change.
 
-- **next**: #7 — re-read rate from existing session logs (`~/.dun/sessions`), offline; then #6 once a long live session shows the rewrite causes.
+- **next**: #7 build (Rehead: stub superseded exact-repeat reads at fold time); #6 once a long live session shows rewrite causes.
 - **risks**: usage `Cached` depends on the provider reporting it — it did
   through corrallm/llama.cpp (2026-10-20). Prefix comparison is one sha256 per
   message per build (unmeasured cost; ~700k chars/build in long sessions).
