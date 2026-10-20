@@ -250,8 +250,29 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
       limit) → (2) VecSearch/DocReview branch overlay → (3) register-or-layer
       by project id + public sibling fan-out → (4) browser login.
       Maintainer service + savings report: NOT scheduled.
-    - **❓ project id format** — root commit proposed, unconfirmed; raglit
-      waits on it for (3).
+  - **raglit projects API BUILT (raglit d71387a..13e61a6; record
+    `raglit/plan/done/2026-10-19-daemon-auth.md`).** Bearer on every call.
+    `POST /api/projects/register {project_id,label}` → `{base, layer, …}`,
+    atomic + repeatable; first registration creates an EMPTY PUBLIC base and
+    EVERY registrant (first included) gets a PRIVATE layer — write to `layer`.
+    `GET /api/projects/lookup?id=`. `POST /api/upload?index=<layer>
+    {name,text|data,title}` → async job; `name` = doc identity (re-upload
+    replaces, `/api/forget` removes). `POST /api/visibility` (owner only).
+    `GET /search?index=<layer>&mode=bm25|vec|hybrid` → own layer + base +
+    PUBLIC sibling layers; hits carry `index`. Vector/hybrid overlay the parent
+    now. **Project id = root commit, label = normalized origin (USER
+    confirmed).** Untested against real Zitadel (fake issuer only).
+    - **❓ gap 1: visibility is per LAYER, `public:true` was per NOTE.** One
+      private layer per registrant means a public note has nowhere to go
+      without making all of that user's notes public. Options: a second
+      (public) layer per registrant, or per-document visibility in raglit.
+      USER decision.
+    - **❓ gap 2: dun surfaces through raglit's MCP `search`**
+      (`notify.go:32` `docsFinder` → `ragnotify.MCPFinder`), and sibling
+      fan-out is NOT done for MCP (raglit icebox). Either raglit adds it to
+      MCP, or dun's finder calls `GET /search` directly.
+    - not done in raglit: maintainer service (+ base ownership transfer),
+      savings report, attest workbench for layers created after start.
   - **remote premise (USER, 2026-10-19)**: no LLM-capable dev machines; the
     model (`llm.iodesystems.com`), raglit and possibly dun itself run remote.
     So dun passes the HUMAN's OIDC token to raglit (device flow for the CLI,
