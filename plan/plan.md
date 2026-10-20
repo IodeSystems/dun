@@ -101,6 +101,142 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◻ 9. Memories surfaced out-of-band from raglit; written by a fork (USER, 2026-10-19)
+Plan only; no code yet. Write side modelled on Hermes Agent's background review. Surfacing,
+attestation and the "do not save what the repo records" rule are the existing
+icebox design ("Recap → a project memory in raglit") — this slice replaces only
+its WRITE path (recap-only → a fork).
+
+**How Hermes does it (read from `NousResearch/hermes-agent` @ 0b10b9f8,
+2026-10-19 — do not re-derive):**
+- No smuggling. The main turn carries no memory instruction and no post-gen
+  JSON. Two write paths: the agent calls a normal `memory` tool in-turn, OR a
+  separate fork fires after the turn is delivered
+  (`agent/turn_finalizer.py:779`).
+- Trigger: a user-turn counter, `memory.nudge_interval` default 10
+  (`hermes_cli/config_defaults.py:1337`, `agent/turn_context.py:758`). An
+  in-turn `memory` call resets the counter (`agent/tool_executor.py:747`), so
+  the fork fires only after 10 turns with no write.
+- Cache parity is the whole trick (`agent/background_review.py:920-1017`): the
+  fork reuses the parent's cached system prompt verbatim, sends a
+  BYTE-IDENTICAL `tools[]` (all the parent's tools), and limits what it may do
+  with a dispatch-side whitelist (memory/skill + read-only file tools). The
+  review prompt is appended as one user message after the snapshot. Request #1
+  is a warm cache read; the generation is small. Different model → cache is
+  cold, so it sends a digest instead.
+- Prompt (`_MEMORY_REVIEW_PROMPT`, `background_review.py:383`): "Review the
+  conversation above and consider saving to memory… If nothing is worth
+  saving, just say 'Nothing to save.'" Max 16 iterations; input capped at 75%
+  of the context window.
+- Pre-compaction: only for EXTERNAL memory providers (`on_pre_compress`); the
+  built-in memory has no pre-compaction save.
+
+**What dun has:** `suggest.go:56` is already the fork shape (the turn's shaped
+history + one appended user message) but sends `tools=nil` — on llama.cpp the
+tools are part of the rendered prompt, so this probably misses the cache.
+UNMEASURED. `sidecall.go` already records cached/processed per kind.
+
+**The value is the out-of-band surfacing, not the writing (USER, 2026-10-19).**
+A memory is worth writing only if a raglit index can put it into the
+conversation unasked — the model reading a tool result it was already going to
+read, not calling `search`. The path exists: `docsPreparer` (`notify.go:61`)
+already surfaces raglit hits as one appended Entry, which keeps the cached
+prefix. So the first slice proves surfacing on hand-written notes, and nothing
+on the write side is built until it does.
+
+**Triggers (USER, 2026-10-19).** No turn counter. Three only: the model calls
+`memory` explicitly; a trigger word forces it; optionally, before compaction.
+
+**Stats first: do not bury the session in context (USER, 2026-10-19).**
+Surfaced text is not a one-time cost — the Entry stays in history, so it is
+re-sent every turn until compaction drops it. Today rag has NO byte/token stats:
+`DocsNote` (`notify.go:50`) carries only `Found`/`Surfaced` counts, and
+`/context` does not break out docs entries (checked 2026-10-19). Memories ride
+the same `docsPreparer` Entry, so one set of stats covers rag and memories.
+
+**Slices:**
+- **S stats for surfacing (rag + memories) — before M0.** Per surfacing:
+  bytes and tokens of the appended Entry, per source (doc hit vs memory note).
+  Per session: total surfaced tokens, the share of the current prompt they
+  take, and the carried cost (tokens × turns each Entry has been re-sent).
+  Shown in `/context` next to the system breakdown and on the `docs`
+  notification event; exact counts when the endpoint can count
+  (`context_tokens.go` already does all-or-nothing exact vs estimate). Then a
+  cap: a per-turn token budget for surfacing, and a session budget past which
+  nothing more is surfaced unless asked. Numbers for the defaults come from M0,
+  not from a guess.
+- **M0 prove OOB surfacing — the gate.** Hand-write ~10 notes about this repo
+  (the kind the rule allows: why an approach was dropped, what a measurement
+  showed), ingest them into a raglit index, and run real dun sessions with
+  `/rag` on. Record per session: did the right note surface at the moment it
+  was relevant, how many surfaced that were not relevant, and the token cost
+  per turn. If the right note does not arrive unasked, stop here — the rest of
+  item 9 has no benefit.
+- **M1 measure the fork's cache cost.** Send the turn's exact tools on side
+  calls (refuse every call at dispatch); compare `suggest` cached vs processed
+  before/after on the local server. Also check a forced `ToolChoice` keeps the
+  prefix (it should change only the grammar, not the prompt).
+- **M2 fork + writer.** `h.fork(kind, instruction, allow, toolChoice)` from the
+  suggest/rephrase pattern; same tools, dispatch whitelist; runs after the
+  turn, never during one. Tool `memory` (add/patch/remove, match by substring
+  like Hermes — not by id; see the `exec_2` lesson in the icebox). One note per
+  memory: markdown + frontmatter (question, session, commit, date) +
+  `[[links]]`. Writes directly (USER) — no approval gate; injection/Unicode
+  scan before write. Ingest into the index on write.
+- **M3 triggers.** (a) explicit: `memory` is a normal tool in the turn, and
+  `/remember <text>` for the user. (b) trigger words (USER; NOT in Hermes —
+  grepped, absent): the assistant says "I'll remember", "should remember",
+  "make a note", or the user says "remember…" → fork now with `ToolChoice`
+  forced to `memory` (agentkit supports a named tool, `llm/client.go:1186`).
+  Catches the model that says it will remember and never calls the tool.
+  Host-side regex over the finished text, no tokens. (c) optional, off by
+  default: fork before compaction, since that is where content is lost.
+- **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
+
+- **next**: S (stats), then M0 — M0 reads its results off S.
+- **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
+  attention — M0 measures it); on a single-slot llama-server the fork may evict
+  the turn's KV cache (should cost only the fork's tail — M1); trigger-word
+  false positives ("remember" in ordinary text) fire useless forks; a model
+  writing memories saves restated code facts; raglit `work` shows 6,123 failed
+  jobs against 0 documents (M0 may hit this first).
+- **Partitioning (USER, 2026-10-19).** Two axes: SCOPE (project vs user) and
+  VISIBILITY (private vs public). Memories live on a remote shared raglit
+  daemon, one index per project. A write is PRIVATE unless the tool call says
+  `public:true` (optional field) — a leak cannot be undone, a missed share can.
+  Private × project = a raglit BRANCH of the project index (P6 overlay: the
+  owner's search sees parent + branch, writes go to the branch). Making a
+  private note public = copying it to the parent.
+- **❓ blocked on raglit auth** for remote private memory: the daemon has no
+  auth/owner/visibility today. Request written to `raglit/plan/icebox.md`
+  ("REQUEST from dun … OIDC", USER prefers OIDC) — no raglit session was live.
+- **Personalization (USER, 2026-10-19): no model-written pinned list.** A
+  pinned list reaches every turn, but it sits in the system prompt, so a wrong
+  model-inferred entry ("user prefers X") would steer every session and could
+  override the current request. Instead:
+  - standing preferences = a USER-LEVEL file the user edits by hand
+    (`~/.dun/AGENTS.md`), loaded after the workspace's root `AGENTS.md`
+    (`servers_runtime.go:369`, `rootAgentsMDBlock`) and labelled as defaults
+    the current request overrides. The model never writes to it.
+  - everything the model writes = rag only (private by default), surfaced with
+    the stale-warning and counted by S.
+  - a user statement "remember I want…" goes to a private rag note, and the
+    reply tells the user to add it to `~/.dun/AGENTS.md` if it should apply
+    every turn. Moving it is the user's act.
+- **M-U user file.** Load `~/.dun/AGENTS.md` into the system prompt after the
+  root `AGENTS.md`; count its tokens in `/context`'s system breakdown. Small,
+  separate from the rest of item 9.
+- **assumption**: until raglit auth exists, private notes stay in a LOCAL
+  index; only `public:true` notes go to the remote daemon. M0 can run on a
+  local index either way.
+- **assumptions**: "Obsidian is just graph json" read as: notes are plain
+  markdown with `[[links]]`, the graph is derived from the links, Obsidian is
+  an optional viewer and not a dependency (`.obsidian/*.json` is UI state
+  only). If a JSON graph file is meant as the STORE, M2 changes.
+- **optional extensions**: `session_search` (FTS over past session JSONL, no
+  LLM — Hermes `state.db` FTS5); a small pinned user profile in the system
+  prompt, frozen at session start (Hermes `USER.md`).
+
 ### ✅ 8. The pane grew and the offset stayed behind (2026-08-26)
 Follow-up to the bottom-anchor fix (026acbb), reported from a phone: open the
 soft keyboard, close it, and the conversation is no longer at the bottom.
