@@ -1003,7 +1003,16 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// "context canceled". Set by the host (cmd/dun) from its turn clock;
 		// nil (one-shot / no clock) means the fold runs on the budget as-is.
 		Pause: CompactionPause,
+		// Which end of an old, oversized result its stub keeps. exec output
+		// opens with what failed and closes with the verdict and [exit:N]; a
+		// head-only stub drops the line that says whether it passed (aw4
+		// measured this on its suite runs). Every other tool keeps the head.
+		ToolLOD: toolLOD(),
 	}
+	// A sub-agent's first user message IS its task (the parent's brief), so it
+	// must survive folds. Not for a root session: its first message may be
+	// "hi" or a pasted log, and a pinned entry rides every round for good.
+	shaper.Policy.PinFirstUser = h.isChild()
 	h.Session = &agent.Session{
 		SessionID:            "dun",
 		OnCompactionComplete: h.noteCompaction,
@@ -1826,6 +1835,15 @@ func logWindow(n int, source string) int {
 			"the conversation more of it", outputReserve())
 	}
 	return n
+}
+
+// toolLOD maps each tool to the end of an old, oversized result its stub
+// keeps. Keyed by the tool's real name: TestToolLOD_NamesAreRealTools fails if
+// a tool is renamed out from under it, which would silently fall back to head.
+func toolLOD() map[string]agent.LODKeep {
+	return map[string]agent.LODKeep{
+		"exec": agent.LODEnds,
+	}
 }
 
 // shaperPolicy is dun's shaping policy for a window (0 = not yet known).

@@ -158,7 +158,13 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
    (`context_tokens.go:90` already counts it leave-one-out) — fixes S's
    first-round 1.02 chars/token. Then offer the affine meter to agentkit
    (aw4 uses chars/3).
-5. **Unused agentkit features:** `ToolLOD`/`LODKeep` ends for exec (aw4: a
+5. **✅ (2026-10-20, wiring only)** `ToolLOD`: exec → `LODEnds`
+   (`toolLOD()`, keyed by the real tool name — a test fails on a rename);
+   `PinFirstUser` for SUB-AGENTS only (their first message is the brief; a
+   root session's may be "hi" or a pasted log, and a pinned entry rides every
+   round). Not seen live: LOD only fires over budget, which needs a long
+   session with a known window. Original note:
+   **Unused agentkit features:** `ToolLOD`/`LODKeep` ends for exec (aw4: a
    head-only stub drops the suite's verdict line); `PinFirstUser`. Each
    measured with #1.
 6. **Stable prefix order.** aw4 orders most-shared → least-shared and keeps
@@ -179,7 +185,7 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
 stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
 10-16 prompt reorder or 10-18 headroom change.
 
-- **next**: #5 (ToolLOD ends for exec, PinFirstUser).
+- **next**: #7 — re-read rate from existing session logs (`~/.dun/sessions`), offline; then #6 once a long live session shows the rewrite causes.
 - **risks**: usage `Cached` depends on the provider reporting it — it did
   through corrallm/llama.cpp (2026-10-20). Prefix comparison is one sha256 per
   message per build (unmeasured cost; ~700k chars/build in long sessions).

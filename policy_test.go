@@ -35,3 +35,16 @@ func TestShaperPolicy_UnknownWindowKeepsLOD(t *testing.T) {
 		t.Errorf("non-budget rungs must survive an unknown window: %+v", p)
 	}
 }
+
+// toolLOD is keyed by tool name; a rename would silently fall back to head.
+func TestToolLOD_NamesAreRealTools(t *testing.T) {
+	real := map[string]bool{execToolDef().Function.Name: true}
+	for name := range toolLOD() {
+		if !real[name] {
+			t.Errorf("toolLOD names %q, which is not a tool dun defines", name)
+		}
+	}
+	if toolLOD()["exec"] != agent.LODEnds {
+		t.Error("exec must keep both ends: its verdict and [exit:N] are last")
+	}
+}
