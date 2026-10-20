@@ -172,7 +172,14 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
    39 → 20,785 chars, 372256e6). dun: `/rag on` measured as a full re-read
    (#1) — a tool-family toggle should append, not rewrite message 0, if the
    template allows; at least it should be rare.
-7. **◻ Re-heading — measured, worth building (2026-10-20).** `python3 -I
+7. **✅ Re-heading — measured and built (2026-10-20, `rehead.go`).** Live
+   (DUN_CONTEXT_TOKENS=20000, the same 18k-char file read twice): over budget
+   with both reads in the preserved tail → re-heading stubbed the older copy
+   (18,186 chars, original in `<session>.rehead1.jsonl`) and the prompt fit,
+   so NO fold ran. Plain reads only: node_read, or a lone
+   cat/head/tail/nl/`sed -n` (no pipe/chain/redirect); results ≥1000 chars.
+   Cache stats now name rewrite causes fold / rehead / recap / tools / other.
+   Measurement that justified it: `python3 -I
    tools/rereads.py` over `~/.dun/sessions` (99 sessions with reads, 3,530
    read calls: exec cat/head/tail/sed/nl, node_read, get_document):
    - a path already read in the session: **63%** of calls, 54% of read bytes
@@ -196,7 +203,7 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
 stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
 10-16 prompt reorder or 10-18 headroom change.
 
-- **next**: #7 build (Rehead: stub superseded exact-repeat reads at fold time); #6 once a long live session shows rewrite causes.
+- **next**: #6 once a long real session shows its rewrite causes in `/context` → cache; #8 is the USER's call; #2 lands with item 9 M1.
 - **risks**: usage `Cached` depends on the provider reporting it — it did
   through corrallm/llama.cpp (2026-10-20). Prefix comparison is one sha256 per
   message per build (unmeasured cost; ~700k chars/build in long sessions).

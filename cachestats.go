@@ -28,7 +28,9 @@ import (
 // So each BUILD is compared with the previous one: how many leading messages
 // are byte-identical (kept), and whether everything before the new tail
 // survived (append-only) or something earlier changed (rewrite, with the
-// cause when dun knows it). Each ROUND's usage delta is then filed under the
+// cause when dun knows it: fold, re-heading, the model's recap, a tool-set
+// change; "other" is what is left — an LOD step, a system-prompt change).
+// Each ROUND's usage delta is then filed under the
 // build that preceded it, by class:
 //
 //   - first:          no previous build — nothing could be cached
@@ -74,11 +76,13 @@ type cacheStats struct {
 	mu sync.Mutex
 
 	// Build-to-build comparison state.
-	prevSigs   [][32]byte
-	prevChars  []int // per-message content length, aligned with prevSigs
-	prevTools  [32]byte
-	haveTools  bool
-	foldMarked bool // a fold happened since the last build
+	prevSigs     [][32]byte
+	prevChars    []int // per-message content length, aligned with prevSigs
+	prevTools    [32]byte
+	haveTools    bool
+	foldMarked   bool // a fold happened since the last build
+	reheadMarked bool // a re-heading changed the context since the last build
+	recapMarked  bool // the model's recap replaced a span since the last build
 
 	// Round pairing: the class of the last build, waiting for its usage.
 	pending     cacheClass
@@ -88,17 +92,19 @@ type cacheStats struct {
 	// Cumulative usage at the last round, for deltas.
 	prevCached, prevProcessed int
 
-	Builds        int
-	AppendOnly    int
-	RewritesFold  int
-	RewritesTools int
-	RewritesOther int
-	ResentChars   int // chars of the build from the first changed message on, summed over rewrites
-	LastKeptChars int
-	LastChars     int
-	Reheads       int // re-headings that changed the context (rehead.go)
-	ReheadEntries int // superseded reads stubbed, summed
-	ReheadChars   int // chars those stubs removed, summed
+	Builds         int
+	AppendOnly     int
+	RewritesFold   int
+	RewritesTools  int
+	RewritesRehead int
+	RewritesRecap  int
+	RewritesOther  int
+	ResentChars    int // chars of the build from the first changed message on, summed over rewrites
+	LastKeptChars  int
+	LastChars      int
+	Reheads        int // re-headings that changed the context (rehead.go)
+	ReheadEntries  int // superseded reads stubbed, summed
+	ReheadChars    int // chars those stubs removed, summed
 
 	Class [numClasses]cacheClassStats
 }
@@ -115,8 +121,20 @@ func (s *cacheStats) noteRehead(n, chars int) {
 	}
 	s.mu.Lock()
 	s.Reheads++
+	s.reheadMarked = true
 	s.ReheadEntries += n
 	s.ReheadChars += chars
+	s.mu.Unlock()
+}
+
+// noteRecap marks that the model's recap replaced a span, so the next
+// build's rewrite is attributed to it.
+func (s *cacheStats) noteRecap() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.recapMarked = true
 	s.mu.Unlock()
 }
 
@@ -178,6 +196,10 @@ func (s *cacheStats) noteBuild(msgs []llm.Message, tools []llm.ToolDef, now time
 			switch {
 			case s.foldMarked:
 				s.RewritesFold++
+			case s.reheadMarked:
+				s.RewritesRehead++
+			case s.recapMarked:
+				s.RewritesRecap++
 			case toolsChanged:
 				s.RewritesTools++
 			default:
@@ -189,7 +211,7 @@ func (s *cacheStats) noteBuild(msgs []llm.Message, tools []llm.ToolDef, now time
 	}
 	s.prevSigs, s.prevChars = sigs, chars
 	s.prevTools, s.haveTools = th, true
-	s.foldMarked = false
+	s.foldMarked, s.reheadMarked, s.recapMarked = false, false, false
 	s.pending, s.havePending = class, true
 }
 
@@ -253,6 +275,7 @@ func (s *cacheStats) summary() map[string]any {
 		"classes": classes,
 		"builds":  s.Builds, "append_only": s.AppendOnly,
 		"rewrites_fold": s.RewritesFold, "rewrites_tools": s.RewritesTools,
+		"rewrites_rehead": s.RewritesRehead, "rewrites_recap": s.RewritesRecap,
 		"rewrites_other": s.RewritesOther, "resent_chars": s.ResentChars,
 		"last_kept_chars": s.LastKeptChars, "last_chars": s.LastChars,
 		"reheads": s.Reheads, "rehead_entries": s.ReheadEntries, "rehead_chars": s.ReheadChars,

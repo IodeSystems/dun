@@ -270,6 +270,7 @@ func (h *Harness) applyRecap(sp recapSpan, summary, userEdit string) (string, er
 		anchorID = sp.Anchor.ID
 	}
 	h.store.recap(sp.Subsumes, replacement, citation, anchorID, userEdit)
+	h.cache.noteRecap()
 	return citation.Content, nil
 }
 

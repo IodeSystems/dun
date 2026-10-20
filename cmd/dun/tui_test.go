@@ -3944,7 +3944,7 @@ func TestCacheBlock_Renders(t *testing.T) {
 	out := cacheBlock(&s)
 	for _, want := range []string{"cache", "4 · 50% hit", "300 cached / 300 processed",
 		"first", "append <1s", "2 · 90% hit", "rewrite", "1 · 4% hit",
-		"5 · 3 append-only", "fold 1 · tools 1 · other 0", "9000 chars re-sent", "kept 120 of 4000 chars"} {
+		"5 · 3 append-only", "fold 1 · rehead 0 · recap 0 · tools 1 · other 0", "9000 chars re-sent", "kept 120 of 4000 chars"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

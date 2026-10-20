@@ -89,3 +89,18 @@ func TestCacheStats_PairingAndReset(t *testing.T) {
 		t.Fatalf("reset tally must not go negative: %+v", c)
 	}
 }
+
+// Re-heading and recap are named causes, so "other" means unexplained.
+func TestCacheStats_ReheadAndRecapCauses(t *testing.T) {
+	s := &cacheStats{}
+	now := time.Unix(1, 0)
+	s.noteBuild(msgs("sys", "read1", "read2"), nil, now)
+	s.noteRehead(1, 100)
+	s.noteBuild(msgs("sys", "stub", "read2"), nil, now)
+	s.noteRecap()
+	s.noteBuild(msgs("sys", "summary"), nil, now)
+	s.noteBuild(msgs("sys2", "summary"), nil, now) // e.g. a system-prompt change
+	if s.RewritesRehead != 1 || s.RewritesRecap != 1 || s.RewritesOther != 1 || s.RewritesFold != 0 {
+		t.Fatalf("causes: %+v", s)
+	}
+}

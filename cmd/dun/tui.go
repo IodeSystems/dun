@@ -4296,10 +4296,18 @@ func cacheBlock(s *contextStats) string {
 			stDim.Render(fmt.Sprintf(" · %d processed", n(c, "processed"))))
 	}
 	b.WriteString("\n  " + stDim.Render("builds:     ") + fmt.Sprintf("%d · %d append-only", n(s.cache, "builds"), n(s.cache, "append_only")))
-	if rw := n(s.cache, "rewrites_fold") + n(s.cache, "rewrites_tools") + n(s.cache, "rewrites_other"); rw > 0 {
+	causes := []string{"fold", "rehead", "recap", "tools", "other"}
+	rw := 0
+	for _, c := range causes {
+		rw += n(s.cache, "rewrites_"+c)
+	}
+	if rw > 0 {
+		var parts []string
+		for _, c := range causes {
+			parts = append(parts, fmt.Sprintf("%s %d", c, n(s.cache, "rewrites_"+c)))
+		}
 		b.WriteString("\n  " + stDim.Render("rewrites:   ") + fmt.Sprintf("%d", rw) +
-			stDim.Render(fmt.Sprintf(" (fold %d · tools %d · other %d) · %d chars re-sent",
-				n(s.cache, "rewrites_fold"), n(s.cache, "rewrites_tools"), n(s.cache, "rewrites_other"), n(s.cache, "resent_chars"))))
+			stDim.Render(fmt.Sprintf(" (%s) · %d chars re-sent", strings.Join(parts, " · "), n(s.cache, "resent_chars"))))
 	}
 	if rh := n(s.cache, "reheads"); rh > 0 {
 		b.WriteString("\n  " + stDim.Render("re-headed:  ") + fmt.Sprintf("%d superseded reads", n(s.cache, "rehead_entries")) +
