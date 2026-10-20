@@ -421,6 +421,10 @@ type contextStats struct {
 	// totals carried on the usage event; the engine sends the whole map each
 	// turn, so the read replaces rather than accumulates.
 	sideCalls map[string]sideCallStats
+
+	// Proactive RAG's cost, from the usage event's "surfacing" map (a session
+	// total — the read replaces). nil until the first pass.
+	surfacing map[string]float64
 }
 
 // sideCallStats is one /context row: the per-kind totals for the calls that
@@ -475,6 +479,7 @@ type docNode struct {
 // ↑/↓ move between docs, enter expands a doc's snippet, ← / esc ascends.
 type docsBlock struct {
 	found, surfaced int
+	tokens          int // estimated size of the appended entry; 0 from an older engine
 	docs            []docNode
 	descended       bool // focus is inside the doc list
 	cur             int  // selected doc when descended
@@ -485,7 +490,11 @@ func (d *docsBlock) render(open bool) string {
 	if open {
 		glyph = "▾ "
 	}
-	head := stNote.Render(fmt.Sprintf("%s🔎 %d relevant doc(s) · %d surfaced", glyph, d.found, d.surfaced))
+	label := fmt.Sprintf("%s🔎 %d relevant doc(s) · %d surfaced", glyph, d.found, d.surfaced)
+	if d.tokens > 0 {
+		label += fmt.Sprintf(" · ~%d tok", d.tokens)
+	}
+	head := stNote.Render(label)
 	if !open || len(d.docs) == 0 {
 		return head
 	}
@@ -1970,6 +1979,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.ctxStats.readSystemCost(ev)
 		m.ctxStats.readWindow(ev)
 		m.ctxStats.readSideCalls(ev)
+		m.ctxStats.readSurfacing(ev)
 		if v := evNum(ev["forced_calls"]); v > 0 {
 			m.ctxStats.forcedToolCalls = int(v)
 		}
@@ -2819,7 +2829,7 @@ func floatOf(v any) float64 {
 
 // docsFromEvent builds a docsBlock from a `notification` event of kind "docs".
 func docsFromEvent(ev evMsg) *docsBlock {
-	d := &docsBlock{found: intOf(ev["found"]), surfaced: intOf(ev["surfaced"])}
+	d := &docsBlock{found: intOf(ev["found"]), surfaced: intOf(ev["surfaced"]), tokens: intOf(ev["tokens"])}
 	if arr, ok := ev["docs"].([]any); ok {
 		for _, it := range arr {
 			dm, _ := it.(map[string]any)
@@ -3637,6 +3647,7 @@ func (m *tuiModel) showContext() {
 	b.WriteString("\n  " + stDim.Render("turns:      ") + fmt.Sprintf("%d", s.turns))
 
 	b.WriteString(sideCallBlock(s))
+	b.WriteString(surfacingBlock(s))
 	b.WriteString(windowBlock(s))
 
 	b.WriteString("\n\n  " + stHeader.Render("conversation"))
@@ -4195,6 +4206,48 @@ func (s *contextStats) readWindow(ev map[string]any) {
 	s.ratioRounds = int(evNum(ev["ratio_rounds"]))
 	s.windowCuts = int(evNum(ev["window_cuts"]))
 	s.windowFolds = int(evNum(ev["window_folds"]))
+}
+
+// readSurfacing decodes proactive RAG's totals off a usage event. Like
+// readSideCalls, a missing field keeps the last snapshot.
+func (s *contextStats) readSurfacing(ev map[string]any) {
+	v, ok := ev["surfacing"].(map[string]any)
+	if !ok {
+		return
+	}
+	s.surfacing = make(map[string]float64, len(v))
+	for k, x := range v {
+		s.surfacing[k] = evNum(x)
+	}
+}
+
+// surfacingBlock is the /context section for proactive RAG. The carried line
+// is the point of it: a surfaced entry is re-sent every round until a fold
+// drops it, so "appended" understates the cost and "carried" is what it has
+// actually been in prompt tokens. Empty before the first pass.
+func surfacingBlock(s *contextStats) string {
+	if s.surfacing == nil {
+		return ""
+	}
+	f := func(k string) int { return int(s.surfacing[k]) }
+	entries := func(n int) string {
+		if n == 1 {
+			return "1 entry"
+		}
+		return fmt.Sprintf("%d entries", n)
+	}
+	var b strings.Builder
+	b.WriteString("\n\n  " + stHeader.Render("surfacing"))
+	b.WriteString(stDim.Render(" — proactive RAG added to the conversation"))
+	b.WriteString("\n  " + stDim.Render("passes:     ") + fmt.Sprintf("%d", f("passes")) +
+		stDim.Render(fmt.Sprintf(" · avg %d ms · last %d ms", f("avg_ms"), f("last_ms"))))
+	b.WriteString("\n  " + stDim.Render("surfaced:   ") + fmt.Sprintf("%d of %d found", f("surfaced"), f("found")))
+	b.WriteString("\n  " + stDim.Render("appended:   ") + fmt.Sprintf("%s · %d bytes · ~%d tok", entries(f("entries")), f("bytes"), f("tokens")))
+	b.WriteString("\n  " + stDim.Render("in history: ") + fmt.Sprintf("%s · ~%d tok", entries(f("in_history_entries")), f("in_history")) +
+		stDim.Render(" (re-sent every round)"))
+	b.WriteString("\n  " + stDim.Render("carried:    ") + fmt.Sprintf("~%d tok", f("carried")) +
+		stDim.Render(fmt.Sprintf(" over %s", plural(f("rounds"), "round"))))
+	return b.String()
 }
 
 // readSideCalls decodes the per-kind side-call totals off a usage event. The

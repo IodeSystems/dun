@@ -159,8 +159,6 @@ func (s *sessionStore) Loaded() int {
 	return len(s.entries)
 }
 
-
-
 // tagDocs marks aggregated proactive-RAG notifications (see notify.go), routed
 // to the structured onDocs UI path instead of the plain onNotify.
 const tagDocs = "docs"
@@ -381,6 +379,21 @@ func (s *sessionStore) dropTagged(tag string) int {
 	return dropped
 }
 
+// docsEntries returns the content of the proactive-RAG entries still in
+// history — the ones the next round re-sends. A fold removes entries from
+// s.entries, so what is here is exactly what has not been compacted away.
+func (s *sessionStore) docsEntries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, e := range s.entries {
+		if e.Tag == tagDocs {
+			out = append(out, e.Content)
+		}
+	}
+	return out
+}
+
 // Reset clears all entries, starting a fresh session log.
 func (s *sessionStore) Reset() {
 	s.mu.Lock()
@@ -424,10 +437,6 @@ func (s *sessionStore) pending() int {
 	defer s.mu.Unlock()
 	return s.unclaimed
 }
-
-
-
-
 
 func (s *sessionStore) notifyCallback() func(string) {
 	s.mu.Lock()

@@ -427,7 +427,7 @@ func (h *Harness) rebuildTools() {
 		// range (tiny for a small index) — but a MATCH only returns matching
 		// rows, so any hit is a real lexical hit. MaxHits caps what's surfaced.
 		// dun's aggregating preparer emits one found/surfaced summary per pass.
-		h.Session.Preparer = docsPreparer(h.store, finder, agent.FinderOpts{MaxHits: 2}, cfg.OnDocs)
+		h.Session.Preparer = docsPreparer(h.store, finder, agent.FinderOpts{MaxHits: 2}, h.surfacing, h.meter.Estimate, cfg.OnDocs)
 	}
 }
 

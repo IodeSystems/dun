@@ -155,16 +155,22 @@ re-sent every turn until compaction drops it. Today rag has NO byte/token stats:
 the same `docsPreparer` Entry, so one set of stats covers rag and memories.
 
 **Slices:**
-- **S stats for surfacing (rag + memories) — before M0.** Per surfacing:
-  bytes and tokens of the appended Entry, per source (doc hit vs memory note).
-  Per session: total surfaced tokens, the share of the current prompt they
-  take, and the carried cost (tokens × turns each Entry has been re-sent).
-  Shown in `/context` next to the system breakdown and on the `docs`
-  notification event; exact counts when the endpoint can count
-  (`context_tokens.go` already does all-or-nothing exact vs estimate). Then a
-  cap: a per-turn token budget for surfacing, and a session budget past which
-  nothing more is surfaced unless asked. Numbers for the defaults come from M0,
-  not from a guess.
+- **✅ S stats for surfacing (2026-10-20).** `surfacing.go`: per pass
+  latency (hit or not), found/surfaced, bytes + tokens appended; per round
+  (OnUsage) the docs entries still in history and their tokens, summed as
+  CARRIED; a fold stops an entry accruing. Rides the usage event
+  (`surfacing`) and the `docs` notification (`bytes`/`tokens`/`latency_ms`);
+  `/context` "surfacing" section, `~N tok` on the docs line. Verified live
+  (scratch repo + scratch raglit home, one turn via llm.iodesystems.com): one
+  445-byte entry, 438 tok in history, 438 carried over 1 round, 6 ms pass;
+  the model answered from the surfaced note.
+  - **finding**: the meter's first-round ratio is unsettled — 4910 chars →
+    4830 tokens = 1.02 chars/token, because tool schemas are in the provider's
+    count and not in the chars (`promptMeter.Overhead` splits that only after
+    several rounds). Early token numbers in S (and the shaper) run ~4× high;
+    BYTES are exact. M0 reads tokens only after the meter settles, or bytes.
+  - not done: split by source (doc vs memory — no memories yet); the caps
+    (per-turn / per-session budgets) wait for M0's numbers.
 - **M0 prove OOB surfacing — the gate.** Hand-write ~10 notes about this repo
   (the kind the rule allows: why an approach was dropped, what a measurement
   showed), ingest them into a raglit index, and run real dun sessions with
@@ -193,7 +199,7 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   default: fork before compaction, since that is where content is lost.
 - **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
 
-- **next**: S (stats), then M0 — M0 reads its results off S.
+- **next**: M0 — reads its results off S (`/context` → surfacing).
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
   attention — M0 measures it); on a single-slot llama-server the fork may evict
   the turn's KV cache (should cost only the fork's tail — M1); trigger-word
@@ -250,26 +256,27 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
       limit) → (2) VecSearch/DocReview branch overlay → (3) register-or-layer
       by project id + public sibling fan-out → (4) browser login.
       Maintainer service + savings report: NOT scheduled.
-  - **raglit projects API BUILT (raglit d71387a..13e61a6; record
-    `raglit/plan/done/2026-10-19-daemon-auth.md`).** Bearer on every call.
-    `POST /api/projects/register {project_id,label}` → `{base, layer, …}`,
-    atomic + repeatable; first registration creates an EMPTY PUBLIC base and
-    EVERY registrant (first included) gets a PRIVATE layer — write to `layer`.
-    `GET /api/projects/lookup?id=`. `POST /api/upload?index=<layer>
+  - **raglit projects API BUILT (raglit d71387a..13e61a6, 418f6e0,
+    8dbb74c; record `raglit/plan/done/2026-10-19-daemon-auth.md`).** Bearer
+    on every call. `POST /api/projects/register {project_id,label}` →
+    `{project_id, namespace, base, private, public, new_*}`, repeatable; first
+    registration creates an EMPTY PUBLIC base; every registrant gets a PRIVATE
+    (owner-only) and a PUBLIC layer — write each note to its layer
+    (`public:true` → `public`). Names are namespaced (`<ns>__base`,
+    `<ns>__u<hash>-priv`, `<ns>__u<hash>-pub`): **set dun's raglit project to
+    `namespace`**, then MCP `search` with no index covers the base (once) +
+    every readable layer. MCP `index` takes LOCAL names (no `<ns>__`); hits
+    return local names. `POST /api/upload?index=<layer>
     {name,text|data,title}` → async job; `name` = doc identity (re-upload
     replaces, `/api/forget` removes). `POST /api/visibility` (owner only).
-    `GET /search?index=<layer>&mode=bm25|vec|hybrid` → own layer + base +
-    PUBLIC sibling layers; hits carry `index`. Vector/hybrid overlay the parent
-    now. **Project id = root commit, label = normalized origin (USER
-    confirmed).** Untested against real Zitadel (fake issuer only).
-    - **gap 1 → (a) (USER, 2026-10-19):** TWO layers per registrant,
-      private + public; `public:true` notes go to the public layer. Asked of
-      raglit 2026-10-19 — waiting.
-    - **gap 2 → raglit (USER, 2026-10-19):** sibling fan-out as a general
-      BRANCH feature on every search surface (MCP `search` included), with
-      ownership/ACL as a filter on top ("ownership is a layer on top of
-      branches"). dun keeps surfacing through MCP (`notify.go:32`). Asked of
-      raglit 2026-10-19 — waiting.
+    Sibling fan-out is a BRANCH feature, ON by default, ACL as the filter
+    (USER), on `/search`, `/search-figures` and daemon MCP `search`; opt out
+    `siblings:false`. Vector/hybrid overlay the parent. **Project id = root
+    commit, label = normalized origin (USER confirmed).** Untested against
+    real Zitadel (fake issuer only).
+    - known edge: a layer read own-layer-only (its parent also in the search)
+      does not hide parent docs it shadows — both versions can appear, each
+      labelled by index.
     - not done in raglit: maintainer service (+ base ownership transfer),
       savings report, attest workbench for layers created after start.
   - **remote premise (USER, 2026-10-19)**: no LLM-capable dev machines; the

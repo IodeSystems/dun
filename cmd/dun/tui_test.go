@@ -3883,3 +3883,43 @@ func TestCallText_ExecReadsAsAShellCommand(t *testing.T) {
 		t.Errorf("want the generic form: %q", got)
 	}
 }
+
+// The surfacing section shows what proactive RAG appended AND what it has been
+// re-sent as; absent until the engine reports a pass.
+func TestSurfacingBlock_Renders(t *testing.T) {
+	var s contextStats
+	if got := surfacingBlock(&s); got != "" {
+		t.Errorf("no surfacing yet means no section: %q", got)
+	}
+	s.readSurfacing(map[string]any{"surfacing": map[string]any{
+		"passes": 4.0, "avg_ms": 120.0, "last_ms": 90.0, "found": 7.0, "surfaced": 3.0,
+		"entries": 2.0, "bytes": 640.0, "tokens": 160.0,
+		"in_history_entries": 1.0, "in_history": 80.0, "carried": 1200.0, "rounds": 11.0,
+	}})
+	out := surfacingBlock(&s)
+	for _, want := range []string{"surfacing", "avg 120 ms", "last 90 ms", "3 of 7 found",
+		"2 entries · 640 bytes · ~160 tok", "1 entry · ~80 tok", "re-sent every round",
+		"~1200 tok", "11 rounds"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in block:\n%s", want, out)
+		}
+	}
+	// A usage event without the field keeps the last snapshot.
+	s.readSurfacing(map[string]any{"total": 10})
+	if surfacingBlock(&s) != out {
+		t.Error("an event without surfacing must not clear the section")
+	}
+}
+
+// The docs line in the conversation carries the entry's size when the engine
+// sends it.
+func TestDocsBlock_ShowsTokens(t *testing.T) {
+	d := docsFromEvent(evMsg{"found": 3.0, "surfaced": 2.0, "tokens": 57.0})
+	if got := d.render(false); !strings.Contains(got, "~57 tok") {
+		t.Errorf("docs line should show the size: %q", got)
+	}
+	old := docsFromEvent(evMsg{"found": 3.0, "surfaced": 2.0})
+	if got := old.render(false); strings.Contains(got, "tok") {
+		t.Errorf("no size from an older engine means none shown: %q", got)
+	}
+}

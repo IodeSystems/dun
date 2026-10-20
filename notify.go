@@ -51,14 +51,18 @@ type DocsNote struct {
 	Found    int          // candidate hits after threshold/dedup
 	Surfaced int          // top-MaxHits actually injected into the prompt
 	Docs     []DocHitInfo // the surfaced docs
+	Bytes    int          // size of the appended entry
+	Tokens   int          // its estimated tokens — re-sent every round until folded
+	LatMS    int64        // the finder's round-trip for this pass
 }
 
 // docsPreparer is dun's aggregating NotificationPreparer. It mirrors agentkit's
 // FinderPreparer watermark/dedup/threshold logic, but instead of one notice per
 // hit it appends ONE readable summary Entry (Tag "docs", so the store skips the
 // plain onNotify — the UI is driven by onDocs with structure instead) and calls
-// onDocs with the found/surfaced counts + surfaced docs.
-func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, onDocs func(DocsNote)) agent.NotificationPreparer {
+// onDocs with the found/surfaced counts + surfaced docs. Every pass, hit or
+// not, is recorded in stats (nil-safe); estimate sizes the appended entry.
+func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, onDocs func(DocsNote)) agent.NotificationPreparer {
 	maxHits := opts.MaxHits
 	if maxHits <= 0 {
 		maxHits = 3
@@ -118,8 +122,11 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 			fctx, cancel = context.WithTimeout(ctx, timeout)
 			defer cancel()
 		}
+		findStart := time.Now()
 		hits, err := finder.Find(fctx, texts)
+		lat := time.Since(findStart)
 		if err != nil {
+			stats.notePass(lat, 0, 0, 0, 0)
 			return nil // fail-open: keep the watermark so these entries retry
 		}
 
@@ -146,15 +153,24 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 				docs = append(docs, DocHitInfo{Title: h.Title, DocID: h.DocID, Line: h.Line, Score: h.Score})
 			}
 			b.WriteString("Call the search tool with an id to read a document if it helps.")
+			content := b.String()
 			if err := store.Append(ctx, sessionID, agent.Entry{
 				ID: uuid.New().String(), Kind: agent.KindNotification, Tag: tagDocs,
-				Content: b.String(), CreatedAt: time.Now().UnixNano(),
+				Content: content, CreatedAt: time.Now().UnixNano(),
 			}); err != nil {
 				return err
 			}
-			if onDocs != nil {
-				onDocs(DocsNote{Found: len(kept), Surfaced: len(surfaced), Docs: docs})
+			tok := 0
+			if estimate != nil {
+				tok = estimate(content)
 			}
+			stats.notePass(lat, len(kept), len(surfaced), len(content), tok)
+			if onDocs != nil {
+				onDocs(DocsNote{Found: len(kept), Surfaced: len(surfaced), Docs: docs,
+					Bytes: len(content), Tokens: tok, LatMS: lat.Milliseconds()})
+			}
+		} else {
+			stats.notePass(lat, 0, 0, 0, 0)
 		}
 
 		mu.Lock()

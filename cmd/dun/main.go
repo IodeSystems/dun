@@ -493,7 +493,8 @@ func main() {
 			em.emit(ev)
 		}
 		cfg.OnDocs = func(n dun.DocsNote) {
-			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs)})
+			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs),
+				"bytes": n.Bytes, "tokens": n.Tokens, "latency_ms": n.LatMS})
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { em.emit(retryEvent(n)) }
 		// The count, the citation and what REPLACED the span — never the removed
@@ -914,6 +915,11 @@ func usageEvent(h *dun.Harness, u agent.TokenUsage) event {
 	// went outside the conversation itself.
 	if sc := h.SideCalls(); len(sc) > 0 {
 		ev["side_calls"] = sc
+	}
+	// Proactive RAG's cost — what it appended and what it has been re-sent as.
+	// See dun.surfacing.go.
+	if sf := h.Surfacing(); sf != nil {
+		ev["surfacing"] = sf
 	}
 	return ev
 }
