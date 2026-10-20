@@ -238,3 +238,27 @@ func TestObservation_Drift(t *testing.T) {
 		t.Errorf("50%% high: got %f, want 0.50", got)
 	}
 }
+
+// The first round counts the tool schemas the provider priced. Measured live
+// 2026-10-20: 4910 message chars → 4830 tokens read as 1.02 chars/token,
+// because ~10k chars of schemas were in the count and not in the chars.
+func TestMeter_FirstRoundCountsToolSchemas(t *testing.T) {
+	var m promptMeter
+	m.noteToolChars(10000)
+	m.noteBuild(4910, 0)
+	if _, ok := m.noteUsage(agent.TokenUsage{Processed: 4830}); !ok {
+		t.Fatal("round should be observed")
+	}
+	if got := m.CharsPerToken(); got < 3.0 || got > 3.1 {
+		t.Errorf("one-point ratio should cover message + schema chars: %.2f", got)
+	}
+	// Before the fit, the overhead is the schemas at that ratio — not 0, and
+	// so the estimate of the whole prompt is close to what was counted.
+	if oh := m.Overhead(); oh < 3200 || oh > 3300 {
+		t.Errorf("pre-fit overhead = schema chars / ratio: %d", oh)
+	}
+	est := m.Overhead() + m.Estimate(strings.Repeat("x", 4910))
+	if est < 4700 || est > 4950 {
+		t.Errorf("whole-prompt estimate should be near the 4830 counted: %d", est)
+	}
+}

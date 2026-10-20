@@ -93,6 +93,11 @@ type promptMeter struct {
 	// noteBuild immediately before the round they belong to.
 	built       int
 	builtTokens int
+	// toolChars is the size of the tool schemas sent with that prompt, as wire
+	// JSON. Not part of `built`: the fit's x is message text, which is what the
+	// Shaper decides about. Used only while the fit is not yet trusted — see
+	// noteToolChars.
+	toolChars int
 	// prompted is the cumulative prompt-token count at the last observation, so
 	// a per-round figure can be differenced out of agent.TokenUsage's running
 	// totals.
@@ -154,10 +159,16 @@ func (m *promptMeter) CharsPerToken() float64 {
 func (m *promptMeter) Overhead() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.slope <= 0 || m.intercept <= 0 {
-		return 0
+	if m.slope > 0 && m.intercept > 0 {
+		return int(m.intercept)
 	}
-	return int(m.intercept)
+	// Before the fit: the tool schemas are a MEASURED size (their bytes) at the
+	// one-point ratio, which is itself measured once a round has been priced.
+	// Nothing here is guessed except what the fit will later refine.
+	if m.ratio > 0 && m.toolChars > 0 {
+		return int(math.Ceil(float64(m.toolChars) / m.ratio))
+	}
+	return 0
 }
 
 // fitLocked recomputes the least-squares line through the observations and
@@ -202,6 +213,21 @@ func (m *promptMeter) Measured() bool {
 // tokens they were estimated at. Called from the context builder, which runs
 // immediately before the chat round whose usage will price it — that adjacency
 // is what lets the two numbers be divided at all.
+// noteToolChars records the size of the tool schemas sent with the next round.
+//
+// Why: before the fit has three points, the one-point ratio divided the
+// MESSAGE chars by a token count that also covers the tool schemas. Measured
+// live on 2026-10-20: 4910 chars → 4830 tokens = "1.02 chars/token", when
+// ~2,500 of those tokens were schemas. Every early estimate (shaping budget,
+// /context, surfacing stats) ran ~4× high until the fit split the constant
+// out. The schema bytes are known exactly, so the one-point ratio counts them
+// too — no endpoint token-counting needed (this endpoint does not offer it).
+func (m *promptMeter) noteToolChars(n int) {
+	m.mu.Lock()
+	m.toolChars = n
+	m.mu.Unlock()
+}
+
 func (m *promptMeter) noteBuild(chars, tokens int) {
 	m.mu.Lock()
 	m.built, m.builtTokens = chars, tokens
@@ -276,7 +302,7 @@ func (m *promptMeter) noteUsage(u agent.TokenUsage) (observation, bool) {
 		Chars:        m.built,
 		PromptTokens: round,
 		Estimated:    int(math.Ceil(float64(m.built) / prior)),
-		Ratio:        float64(m.built) / float64(round),
+		Ratio:        float64(m.built+m.toolChars) / float64(round),
 		First:        m.ratio <= 0,
 	}
 	if obs.Ratio < ratioFloor || obs.Ratio > ratioCeil {

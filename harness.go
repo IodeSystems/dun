@@ -1886,6 +1886,9 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 			return msgs, err
 		}
 		h.cache.noteBuild(msgs, h.Session.Tools, time.Now())
+		if tb, err := json.Marshal(h.Session.Tools); err == nil {
+			meter.noteToolChars(len(tb))
+		}
 		total, biggest, biggestRole := 0, 0, ""
 		for _, m := range msgs {
 			n := len(m.Content)

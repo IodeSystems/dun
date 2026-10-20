@@ -144,7 +144,17 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
    one 191,623-char read rode every turn in the preserved tail). dun's exec
    clips at 20k but node_read/MCP results do not. Override only what dun
    measured (LOD 4000, 6 messages, 4 tool calls).
-4. **Seed the meter's overhead from the exact system+tools count**
+4. **✅ (2026-10-20) Meter counts tool-schema bytes before the fit.** Not
+   from the exact count after all: this endpoint does not count exactly
+   (`system_exact` false in every live run). The schema BYTES are known, so
+   the one-point ratio is (message + schema chars) / prompt tokens and the
+   pre-fit Overhead is schema chars / that ratio (`noteToolChars`,
+   tokencal.go). Unit test reproduces the live 4910 → 4830 round.
+   - **finding**: in these live runs dun never learned the WINDOW ("no window
+     known — DUN_CONTEXT_TOKENS unset and the server states none") → no
+     shaping at all. Fine if the USER's runs set DUN_CONTEXT_TOKENS; worth
+     confirming. Original note:
+   **Seed the meter's overhead from the exact system+tools count**
    (`context_tokens.go:90` already counts it leave-one-out) — fixes S's
    first-round 1.02 chars/token. Then offer the affine meter to agentkit
    (aw4 uses chars/3).
@@ -165,11 +175,11 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
    parked in aw4 on corrallm's `--slot-cache-dir`; aw4 measured cache-served
    96.5% → 57.2% when corrallm guessed the conversation wrong (2026-09-05).
 
-**For aw4 (not sent; aw4-49 was busy):** dun's affine meter; S surfacing
+**For aw4 — SENT to aw4-49 2026-10-20 (USER: aw4 work is aw4's; message, don't do):** dun's affine meter; S surfacing
 stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
 10-16 prompt reorder or 10-18 headroom change.
 
-- **next**: #4 (seed the meter), then #5.
+- **next**: #5 (ToolLOD ends for exec, PinFirstUser).
 - **risks**: usage `Cached` depends on the provider reporting it — it did
   through corrallm/llama.cpp (2026-10-20). Prefix comparison is one sha256 per
   message per build (unmeasured cost; ~700k chars/build in long sessions).
