@@ -101,6 +101,72 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 10. Cache and reshaping stats; lessons from aw4 (USER, 2026-10-20)
+The USER has been tuning context sizes without seeing what reshaping costs: how
+often a build rewrites the prefix instead of appending, how much the server then
+re-reads, and whether a miss was ours (prefix rewritten) or the server's (slot
+taken by other traffic). Comparison with aw4 (2026-10-20, two read-only
+catalogs; aw4 itself says it spent "a day rediscovering three quarters of what
+dun already had" — ak e8a5292): aw4 went further on caching and measurement.
+aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
+
+**Suggestions (all accepted by USER), in order:**
+1. **✅ Cache + churn stats (2026-10-20, `cachestats.go`).** Each build is
+   compared with the previous one: leading byte-identical messages kept,
+   append-only vs REWRITE, rewrite cause (fold / tool set changed / other).
+   Each round's usage delta is filed under the build before it: first,
+   back-to-back append (<1s since the last response), append after a gap,
+   rewrite. Usage event `cache`; `/context` "cache" section. Verified live
+   (scratch repo, llm.iodesystems.com):
+   - 3 rounds: first 0% (3749 processed), back-to-back 98.6%, after a gap
+     98.5% (the slot survived a ~70s gap with no other traffic).
+   - **`/rag on` mid-session = a full re-read**: tools rewrite, 0 of 5049
+     chars kept (the system prompt describes the tool families, so message 0
+     changes too), 0% hit, 4884 processed. Confirms the llama.cpp claim for
+     this endpoint — see #6.
+   - not measured: a fold or LOD-step rewrite live (no long session run);
+     the meter's own build/usage pairing with suggest builds in between.
+2. **Fork back-to-back, not idle.** aw4: 68% of next requests arrive <0.1s
+   after the response; past ~0.75s the slot is likely gone. → item 9 M1/M2:
+   fire the memory fork right after `done` with the turn's exact tools, not
+   on suggest's 3s idle debounce.
+3. **`agent.PolicyFor`, not a field-by-field policy** (`harness.go:996`).
+   aw4 blew its window twice in a day forgetting one field (why PolicyFor
+   moved into agentkit). dun lacks `MaxToolResultChars` (64k backstop; aw4:
+   one 191,623-char read rode every turn in the preserved tail). dun's exec
+   clips at 20k but node_read/MCP results do not. Override only what dun
+   measured (LOD 4000, 6 messages, 4 tool calls).
+4. **Seed the meter's overhead from the exact system+tools count**
+   (`context_tokens.go:90` already counts it leave-one-out) — fixes S's
+   first-round 1.02 chars/token. Then offer the affine meter to agentkit
+   (aw4 uses chars/3).
+5. **Unused agentkit features:** `ToolLOD`/`LODKeep` ends for exec (aw4: a
+   head-only stub drops the suite's verdict line); `PinFirstUser`. Each
+   measured with #1.
+6. **Stable prefix order.** aw4 orders most-shared → least-shared and keeps
+   tool order stable (name-sorted tools broke its cache; shared prefix
+   39 → 20,785 chars, 372256e6). dun: `/rag on` measured as a full re-read
+   (#1) — a tool-family toggle should append, not rewrite message 0, if the
+   template allows; at least it should be rare.
+7. **Re-heading:** measure dun's re-read rate first (aw4: 52% of reads re-read
+   a path; `Shaper.Rehead` exists in agentkit, unused by dun).
+8. **❓ Working budget below the window** — USER call. aw4 shapes to 64k of a
+   170k window (dev p50 58k, zero compactions); dun shapes to window − reserve
+   (~153k). Bigger prompt = more prefill on every miss.
+9. **⏸ corrallm conversation header** (KV save/restore per conversation) —
+   parked in aw4 on corrallm's `--slot-cache-dir`; aw4 measured cache-served
+   96.5% → 57.2% when corrallm guessed the conversation wrong (2026-09-05).
+
+**For aw4 (not sent; aw4-49 was busy):** dun's affine meter; S surfacing
+stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
+10-16 prompt reorder or 10-18 headroom change.
+
+- **next**: #3 (PolicyFor + MaxToolResultChars), then #4, #5.
+- **risks**: usage `Cached` depends on the provider reporting it — it did
+  through corrallm/llama.cpp (2026-10-20). Prefix comparison is one sha256 per
+  message per build (unmeasured cost; ~700k chars/build in long sessions).
+- **blocking decisions**: #8.
+
 ### ◻ 9. Memories surfaced out-of-band from raglit; written by a fork (USER, 2026-10-19)
 Plan only; no code yet. Write side modelled on Hermes Agent's background review. Surfacing,
 attestation and the "do not save what the repo records" rule are the existing
