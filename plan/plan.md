@@ -396,8 +396,17 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
       report's `note` says so). Layers now show the parent's figures, page
       images and layouts; late-registered layers get the review workbench;
       vec/hybrid skip indexes with no embedder (400 if none has one).
-    - not done in raglit: the maintainer SERVICE itself (owner transfer is
-      there). dun side: `/rag status` should show `savings` + `recommend`.
+    - **maintainer BUILT (raglit 5f08e54, 2026-10-20)** as a command:
+      `raglit maintain [--dry-run] [--json] <project-id|namespace>` →
+      `POST /api/projects/fold`. Run as the base's owner (transfer the base to
+      the maintainer machine user first; schedule with RAGLIT_TOKEN /
+      RAGLIT_TOKEN_COMMAND). Reads PUBLIC layers only; one base copy per
+      content hash; same name + different bytes stay separate (no text
+      merge). Provenance note per base doc (layer, source, hash) + copied
+      notes with original authors; log in `<base home>/folds.json`. Layers
+      are NOT changed, so sibling search shows layer copies beside the base
+      copy until their owners prune; attest verdicts are NOT copied.
+    - dun side, not built: `/rag status` shows `savings` + `recommend`.
   - **remote premise (USER, 2026-10-19)**: no LLM-capable dev machines; the
     model (`llm.iodesystems.com`), raglit and possibly dun itself run remote.
     So dun passes the HUMAN's OIDC token to raglit (device flow for the CLI,
