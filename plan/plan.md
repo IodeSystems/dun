@@ -209,7 +209,20 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   private note public = copying it to the parent.
 - **❓ blocked on raglit auth** for remote private memory: the daemon has no
   auth/owner/visibility today. Request written to `raglit/plan/icebox.md`
-  ("REQUEST from dun … OIDC", USER prefers OIDC) — no raglit session was live.
+  ("REQUEST from dun … OIDC", USER prefers OIDC). raglit-dd answered
+  2026-10-19: design + decisions recorded under that entry ("raglit
+  proposal"), implementation not started. OIDC via JWKS in the daemon, IdP
+  Zitadel, principal `<iss>#<sub>`; headless dun = a Zitadel machine user
+  (client-credentials, `RAGLIT_TOKEN` or `auth.token_command`). Visibility per
+  index (a branch is an index); write = OWNER ONLY, also on public indexes.
+  - **dependency**: the branch overlay does not cover VecSearch/DocReview yet
+    (`raglit/branch.go:19`) — a search on a private branch misses the parent's
+    VECTOR hits until raglit fixes it (on their slice list).
+  - **❓ conflict to resolve**: write = owner only means a `public:true` note
+    from anyone but the project index's owner cannot land in the shared
+    index — it can only go to that principal's own branch. And a dun daemon
+    authenticating as a machine user makes the MACHINE the owner of
+    "private" notes, not the human.
 - **Personalization (USER, 2026-10-19): no model-written pinned list.** A
   pinned list reaches every turn, but it sits in the system prompt, so a wrong
   model-inferred entry ("user prefers X") would steer every session and could
