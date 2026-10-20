@@ -252,7 +252,7 @@ func (m *promptMeter) rounds() int {
 
 // observation is one round's worth of the comparison, for logging.
 type observation struct {
-	Chars        int
+	Chars        int     // message chars + tool-schema chars
 	PromptTokens int     // what the provider counted for those chars
 	Estimated    int     // what the ratio in force at BUILD time predicted
 	Ratio        float64 // this round's chars-per-token, on its own
@@ -299,7 +299,9 @@ func (m *promptMeter) noteUsage(u agent.TokenUsage) (observation, bool) {
 		prior = fallbackCharsPerToken
 	}
 	obs := observation{
-		Chars:        m.built,
+		// The whole request's chars, schemas included, so the logged
+		// "N chars → M tokens (R chars/token)" divides the numbers it shows.
+		Chars:        m.built + m.toolChars,
 		PromptTokens: round,
 		Estimated:    int(math.Ceil(float64(m.built) / prior)),
 		Ratio:        float64(m.built+m.toolChars) / float64(round),
