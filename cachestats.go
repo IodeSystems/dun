@@ -96,6 +96,9 @@ type cacheStats struct {
 	ResentChars   int // chars of the build from the first changed message on, summed over rewrites
 	LastKeptChars int
 	LastChars     int
+	Reheads       int // re-headings that changed the context (rehead.go)
+	ReheadEntries int // superseded reads stubbed, summed
+	ReheadChars   int // chars those stubs removed, summed
 
 	Class [numClasses]cacheClassStats
 }
@@ -103,6 +106,18 @@ type cacheStats struct {
 func msgSig(m llm.Message) [32]byte {
 	b, _ := json.Marshal(m)
 	return sha256.Sum256(b)
+}
+
+// noteRehead records one re-heading: n stubbed reads, chars removed.
+func (s *cacheStats) noteRehead(n, chars int) {
+	if s == nil || n == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.Reheads++
+	s.ReheadEntries += n
+	s.ReheadChars += chars
+	s.mu.Unlock()
 }
 
 // noteFold marks that the next build follows a fold, so its rewrite is
@@ -240,6 +255,7 @@ func (s *cacheStats) summary() map[string]any {
 		"rewrites_fold": s.RewritesFold, "rewrites_tools": s.RewritesTools,
 		"rewrites_other": s.RewritesOther, "resent_chars": s.ResentChars,
 		"last_kept_chars": s.LastKeptChars, "last_chars": s.LastChars,
+		"reheads": s.Reheads, "rehead_entries": s.ReheadEntries, "rehead_chars": s.ReheadChars,
 	}
 }
 

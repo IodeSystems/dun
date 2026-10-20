@@ -1008,6 +1008,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// head-only stub drops the line that says whether it passed (aw4
 		// measured this on its suite runs). Every other tool keeps the head.
 		ToolLOD: toolLOD(),
+		// Stub the older copy of a read made again — once, just before a fold,
+		// when the prefix is rewritten anyway. See rehead.go.
+		Rehead: h.rehead,
 	}
 	// A sub-agent's first user message IS its task (the parent's brief), so it
 	// must survive folds. Not for a root session: its first message may be

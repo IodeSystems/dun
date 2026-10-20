@@ -379,6 +379,28 @@ func (s *sessionStore) dropTagged(tag string) int {
 	return dropped
 }
 
+// replaceContents swaps the content of the given entries in place (ID →
+// new content) and reports how many it changed. Position, kind and pairing are
+// untouched, so a tool result stays paired with its call.
+func (s *sessionStore) replaceContents(repl map[string]string) int {
+	if len(repl) == 0 {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for i := range s.entries {
+		if c, ok := repl[s.entries[i].ID]; ok {
+			s.entries[i].Content = c
+			n++
+		}
+	}
+	if n > 0 {
+		s.flushLocked()
+	}
+	return n
+}
+
 // docsEntries returns the content of the proactive-RAG entries still in
 // history — the ones the next round re-sends. A fold removes entries from
 // s.entries, so what is here is exactly what has not been compacted away.

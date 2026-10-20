@@ -4301,6 +4301,10 @@ func cacheBlock(s *contextStats) string {
 			stDim.Render(fmt.Sprintf(" (fold %d · tools %d · other %d) · %d chars re-sent",
 				n(s.cache, "rewrites_fold"), n(s.cache, "rewrites_tools"), n(s.cache, "rewrites_other"), n(s.cache, "resent_chars"))))
 	}
+	if rh := n(s.cache, "reheads"); rh > 0 {
+		b.WriteString("\n  " + stDim.Render("re-headed:  ") + fmt.Sprintf("%d superseded reads", n(s.cache, "rehead_entries")) +
+			stDim.Render(fmt.Sprintf(" · %d chars · in %d folds", n(s.cache, "rehead_chars"), rh)))
+	}
 	if last := n(s.cache, "last_chars"); last > 0 {
 		b.WriteString("\n  " + stDim.Render("last build: ") + fmt.Sprintf("kept %d of %d chars", n(s.cache, "last_kept_chars"), last))
 	}
