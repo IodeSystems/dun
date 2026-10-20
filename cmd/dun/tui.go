@@ -425,6 +425,10 @@ type contextStats struct {
 	// Proactive RAG's cost, from the usage event's "surfacing" map (a session
 	// total — the read replaces). nil until the first pass.
 	surfacing map[string]float64
+
+	// The prompt cache and prefix churn, from the usage event's "cache" map
+	// (a session total — the read replaces). nil until the first build.
+	cache map[string]any
 }
 
 // sideCallStats is one /context row: the per-kind totals for the calls that
@@ -1980,6 +1984,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.ctxStats.readWindow(ev)
 		m.ctxStats.readSideCalls(ev)
 		m.ctxStats.readSurfacing(ev)
+		m.ctxStats.readCache(ev)
 		if v := evNum(ev["forced_calls"]); v > 0 {
 			m.ctxStats.forcedToolCalls = int(v)
 		}
@@ -3648,6 +3653,7 @@ func (m *tuiModel) showContext() {
 
 	b.WriteString(sideCallBlock(s))
 	b.WriteString(surfacingBlock(s))
+	b.WriteString(cacheBlock(s))
 	b.WriteString(windowBlock(s))
 
 	b.WriteString("\n\n  " + stHeader.Render("conversation"))
@@ -4247,6 +4253,57 @@ func surfacingBlock(s *contextStats) string {
 		stDim.Render(" (re-sent every round)"))
 	b.WriteString("\n  " + stDim.Render("carried:    ") + fmt.Sprintf("~%d tok", f("carried")) +
 		stDim.Render(fmt.Sprintf(" over %s", plural(f("rounds"), "round"))))
+	return b.String()
+}
+
+// readCache keeps the usage event's "cache" map; a missing field keeps the
+// last snapshot.
+func (s *contextStats) readCache(ev map[string]any) {
+	if v, ok := ev["cache"].(map[string]any); ok {
+		s.cache = v
+	}
+}
+
+// cacheBlock is the /context section for the prompt cache. Rounds are split by
+// the build that preceded them, because the two causes of a miss need opposite
+// fixes: a REWRITE is dun's shaping (fold, tool change, LOD step); a low hit
+// on an APPEND-ONLY round means the server lost the slot in between. Empty
+// before the first build.
+func cacheBlock(s *contextStats) string {
+	if s.cache == nil {
+		return ""
+	}
+	n := func(m map[string]any, k string) int { return int(evNum(m[k])) }
+	var b strings.Builder
+	b.WriteString("\n\n  " + stHeader.Render("cache"))
+	b.WriteString(stDim.Render(" — what the server re-read, by the build before each round"))
+	b.WriteString("\n  " + stDim.Render("rounds:     ") + fmt.Sprintf("%d · %.0f%% hit", n(s.cache, "rounds"), evNum(s.cache["hit_pct"])) +
+		stDim.Render(fmt.Sprintf(" · %d cached / %d processed", n(s.cache, "cached"), n(s.cache, "processed"))))
+	classes, _ := s.cache["classes"].(map[string]any)
+	rows := []struct{ key, label string }{
+		{"first", "first"},
+		{"back_to_back", "append <1s"},
+		{"after_gap", "append, gap"},
+		{"rewrite", "rewrite"},
+	}
+	for _, r := range rows {
+		c, ok := classes[r.key].(map[string]any)
+		if !ok {
+			continue
+		}
+		b.WriteString("\n  " + stDim.Render(fmt.Sprintf("%-12s", r.label)) +
+			fmt.Sprintf("%d · %.0f%% hit", n(c, "rounds"), evNum(c["hit_pct"])) +
+			stDim.Render(fmt.Sprintf(" · %d processed", n(c, "processed"))))
+	}
+	b.WriteString("\n  " + stDim.Render("builds:     ") + fmt.Sprintf("%d · %d append-only", n(s.cache, "builds"), n(s.cache, "append_only")))
+	if rw := n(s.cache, "rewrites_fold") + n(s.cache, "rewrites_tools") + n(s.cache, "rewrites_other"); rw > 0 {
+		b.WriteString("\n  " + stDim.Render("rewrites:   ") + fmt.Sprintf("%d", rw) +
+			stDim.Render(fmt.Sprintf(" (fold %d · tools %d · other %d) · %d chars re-sent",
+				n(s.cache, "rewrites_fold"), n(s.cache, "rewrites_tools"), n(s.cache, "rewrites_other"), n(s.cache, "resent_chars"))))
+	}
+	if last := n(s.cache, "last_chars"); last > 0 {
+		b.WriteString("\n  " + stDim.Render("last build: ") + fmt.Sprintf("kept %d of %d chars", n(s.cache, "last_kept_chars"), last))
+	}
 	return b.String()
 }
 

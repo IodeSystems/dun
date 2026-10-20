@@ -337,6 +337,9 @@ type Harness struct {
 	// surfacing accumulates what proactive RAG appends and re-sends — see
 	// surfacing.go.
 	surfacing *surfacingStats
+	// cache files each round's cache hit under the kind of build that preceded
+	// it, and counts prefix rewrites by cause — see cachestats.go.
+	cache *cacheStats
 	// forcedToolCalls are tool calls queued by the host (e.g. /ship) that
 	// should be injected into the next LLM response's tool_calls, so they
 	// appear as if the model made them. Guarded by noteMu.
@@ -932,7 +935,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
 		cfg: cfg, specs: servers, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
-		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}}
+		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
 
 	// Server→client push. Only the OWNER registers: a child shares its
 	// parent's manager, and registering again would replace the parent's sink
@@ -1513,6 +1516,7 @@ func (h *Harness) noteUsage(u agent.TokenUsage) {
 	// prompt meets our count of the chars that produced it, and every number
 	// below (including Active) is denominated in the ratio it sets.
 	logObservation(h.meter.noteUsage(u))
+	h.cache.noteRound(u, time.Now())
 	h.noteSurfacingRound()
 	// A large window earns a reminder that recap exists, naming what is filling
 	// it. See maybeNudgeRecap: the system prompt alone did not move the model.
@@ -1546,6 +1550,7 @@ const (
 )
 
 func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) {
+	h.cache.noteFold()
 	h.compactMu.Lock()
 	if cause == foldByOverflow {
 		h.compactOverflow++
@@ -1862,6 +1867,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		if err != nil {
 			return msgs, err
 		}
+		h.cache.noteBuild(msgs, h.Session.Tools, time.Now())
 		total, biggest, biggestRole := 0, 0, ""
 		for _, m := range msgs {
 			n := len(m.Content)

@@ -921,6 +921,11 @@ func usageEvent(h *dun.Harness, u agent.TokenUsage) event {
 	if sf := h.Surfacing(); sf != nil {
 		ev["surfacing"] = sf
 	}
+	// What the prompt cache did, by the kind of build before each round, and
+	// how often the prefix was rewritten. See dun.cachestats.go.
+	if cs := h.CacheStats(); cs != nil {
+		ev["cache"] = cs
+	}
 	return ev
 }
 

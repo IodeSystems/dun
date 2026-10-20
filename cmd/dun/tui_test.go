@@ -3923,3 +3923,33 @@ func TestDocsBlock_ShowsTokens(t *testing.T) {
 		t.Errorf("no size from an older engine means none shown: %q", got)
 	}
 }
+
+// The cache section splits rounds by the build before them and names rewrite
+// causes; absent until the engine reports a build.
+func TestCacheBlock_Renders(t *testing.T) {
+	var s contextStats
+	if cacheBlock(&s) != "" {
+		t.Error("no build yet means no section")
+	}
+	s.readCache(map[string]any{"cache": map[string]any{
+		"rounds": 4.0, "hit_pct": 50.0, "cached": 300.0, "processed": 300.0,
+		"classes": map[string]any{
+			"first":        map[string]any{"rounds": 1.0, "hit_pct": 0.0, "processed": 100.0},
+			"back_to_back": map[string]any{"rounds": 2.0, "hit_pct": 90.5, "processed": 20.0},
+			"rewrite":      map[string]any{"rounds": 1.0, "hit_pct": 4.0, "processed": 180.0},
+		},
+		"builds": 5.0, "append_only": 3.0, "rewrites_fold": 1.0, "rewrites_tools": 1.0,
+		"rewrites_other": 0.0, "resent_chars": 9000.0, "last_kept_chars": 120.0, "last_chars": 4000.0,
+	}})
+	out := cacheBlock(&s)
+	for _, want := range []string{"cache", "4 · 50% hit", "300 cached / 300 processed",
+		"first", "append <1s", "2 · 90% hit", "rewrite", "1 · 4% hit",
+		"5 · 3 append-only", "fold 1 · tools 1 · other 0", "9000 chars re-sent", "kept 120 of 4000 chars"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "append, gap") {
+		t.Error("a class with no rounds gets no row")
+	}
+}
