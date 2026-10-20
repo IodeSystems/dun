@@ -218,7 +218,31 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   - **dependency**: the branch overlay does not cover VecSearch/DocReview yet
     (`raglit/branch.go:19`) — a search on a private branch misses the parent's
     VECTOR hits until raglit fixes it (on their slice list).
-  - **❓ conflict to resolve**: write = owner only means a `public:true` note
+  - **Register-or-layer (USER, 2026-10-19)** — resolves the owner-only
+    conflict below. `/rag on` registers an index on the configured raglit
+    server under a PROJECT ID. No index for that id → it becomes the base;
+    one exists → you get a TOP LAYER (P6 branch) over it. You only ever write
+    your own layer. Project id: proposed = the repo's root commit
+    (`git rev-list --max-parents=0 HEAD`, first if several), normalized
+    `origin` as the label — not yet confirmed by USER.
+  - **public:true = (b) (USER)**: every layer on the same base sees all public
+    sibling layers in its search (new in raglit: fan-out to siblings, not just
+    the parent chain).
+  - **Maintained public base (USER)**: a maintainer service, running as its
+    own machine user, owns and is the only writer of the base. It folds
+    public layer notes into the base (dedup, merge, keep attestation). When
+    several layers share a project id with no maintained base, raglit
+    RECOMMENDS running one and shows the savings: duplicate docs across
+    layers, the LLM tokens/embeddings spent ingesting them, bytes stored, and
+    the per-query fan-out cost. (dun's reading of the USER's words — confirm.)
+  - **remote premise (USER, 2026-10-19)**: no LLM-capable dev machines; the
+    model (`llm.iodesystems.com`), raglit and possibly dun itself run remote.
+    So dun passes the HUMAN's OIDC token to raglit (device flow for the CLI,
+    browser login for `dun -serve`); a machine user only for unattended runs.
+    M1 measures the fork's cache through the gateway (slot affinity on a
+    shared llama-server — may be corrallm's work); M0 records latency per
+    surfacing too.
+  - **superseded by register-or-layer**: write = owner only means a `public:true` note
     from anyone but the project index's owner cannot land in the shared
     index — it can only go to that principal's own branch. And a dun daemon
     authenticating as a machine user makes the MACHINE the owner of
