@@ -224,7 +224,8 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
     one exists → you get a TOP LAYER (P6 branch) over it. You only ever write
     your own layer. Project id: proposed = the repo's root commit
     (`git rev-list --max-parents=0 HEAD`, first if several), normalized
-    `origin` as the label — not yet confirmed by USER.
+    `origin` as the label — not yet confirmed by USER (raglit needs it for
+    its slice 3).
   - **public:true = (b) (USER)**: every layer on the same base sees all public
     sibling layers in its search (new in raglit: fan-out to siblings, not just
     the parent chain).
@@ -235,6 +236,22 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
     RECOMMENDS running one and shows the savings: duplicate docs across
     layers, the LLM tokens/embeddings spent ingesting them, bytes stored, and
     the per-query fan-out cost. (dun's reading of the USER's words — confirm.)
+  - **raglit auth BUILT (raglit 8c050a7, d2bfadc; 2026-10-19).** Client
+    token from `RAGLIT_TOKEN` or `RAGLIT_TOKEN_COMMAND` (sh -c, re-run after a
+    401); Go `client.New` reads both. Token must be a JWT (Zitadel: access
+    token type = JWT), `aud` = daemon config `auth.audience`. Unreadable
+    index → 404. **dun runs the OIDC device flow (USER); raglit stores no
+    tokens** → dun slice: device-flow login, then hand raglit the token via
+    `RAGLIT_TOKEN_COMMAND` on the `raglit serve` subprocess.
+    - **LIMIT**: with auth on, ingest is ADMIN-ONLY (it takes daemon-host
+      paths) — a remote non-admin cannot add memories yet. M0 runs on a
+      local index, so it is not blocked.
+    - raglit build order (USER): (1) content-upload ingest (lifts the
+      limit) → (2) VecSearch/DocReview branch overlay → (3) register-or-layer
+      by project id + public sibling fan-out → (4) browser login.
+      Maintainer service + savings report: NOT scheduled.
+    - **❓ project id format** — root commit proposed, unconfirmed; raglit
+      waits on it for (3).
   - **remote premise (USER, 2026-10-19)**: no LLM-capable dev machines; the
     model (`llm.iodesystems.com`), raglit and possibly dun itself run remote.
     So dun passes the HUMAN's OIDC token to raglit (device flow for the CLI,
