@@ -262,15 +262,14 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
     PUBLIC sibling layers; hits carry `index`. Vector/hybrid overlay the parent
     now. **Project id = root commit, label = normalized origin (USER
     confirmed).** Untested against real Zitadel (fake issuer only).
-    - **❓ gap 1: visibility is per LAYER, `public:true` was per NOTE.** One
-      private layer per registrant means a public note has nowhere to go
-      without making all of that user's notes public. Options: a second
-      (public) layer per registrant, or per-document visibility in raglit.
-      USER decision.
-    - **❓ gap 2: dun surfaces through raglit's MCP `search`**
-      (`notify.go:32` `docsFinder` → `ragnotify.MCPFinder`), and sibling
-      fan-out is NOT done for MCP (raglit icebox). Either raglit adds it to
-      MCP, or dun's finder calls `GET /search` directly.
+    - **gap 1 → (a) (USER, 2026-10-19):** TWO layers per registrant,
+      private + public; `public:true` notes go to the public layer. Asked of
+      raglit 2026-10-19 — waiting.
+    - **gap 2 → raglit (USER, 2026-10-19):** sibling fan-out as a general
+      BRANCH feature on every search surface (MCP `search` included), with
+      ownership/ACL as a filter on top ("ownership is a layer on top of
+      branches"). dun keeps surfacing through MCP (`notify.go:32`). Asked of
+      raglit 2026-10-19 — waiting.
     - not done in raglit: maintainer service (+ base ownership transfer),
       savings report, attest workbench for layers created after start.
   - **remote premise (USER, 2026-10-19)**: no LLM-capable dev machines; the
