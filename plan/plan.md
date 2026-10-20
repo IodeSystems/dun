@@ -130,7 +130,15 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
    after the response; past ~0.75s the slot is likely gone. → item 9 M1/M2:
    fire the memory fork right after `done` with the turn's exact tools, not
    on suggest's 3s idle debounce.
-3. **`agent.PolicyFor`, not a field-by-field policy** (`harness.go:996`).
+3. **✅ (2026-10-20) Policy guard + `MaxToolResultChars`.** Not built from
+   `PolicyFor` after all: `PolicyFor(0)` is an EMPTY policy, and dun builds
+   its Shaper before the window is known — that would drop LOD for sessions
+   that start without a window. Instead `shaperPolicy(window)` (harness.go)
+   adds `MaxToolResultChars: agent.DefaultMaxToolResultChars` (64k), and
+   `TestShaperPolicy_CoversPolicyFor` fails when PolicyFor sets a field dun
+   leaves zero (checked: removing the cap makes it fail). Unit-tested only;
+   the cap itself is agentkit's, not exercised live here. Original note:
+   **`agent.PolicyFor`, not a field-by-field policy** (`harness.go:996`).
    aw4 blew its window twice in a day forgetting one field (why PolicyFor
    moved into agentkit). dun lacks `MaxToolResultChars` (64k backstop; aw4:
    one 191,623-char read rode every turn in the preserved tail). dun's exec
@@ -161,7 +169,7 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
 stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
 10-16 prompt reorder or 10-18 headroom change.
 
-- **next**: #3 (PolicyFor + MaxToolResultChars), then #4, #5.
+- **next**: #4 (seed the meter), then #5.
 - **risks**: usage `Cached` depends on the provider reporting it — it did
   through corrallm/llama.cpp (2026-10-20). Prefix comparison is one sha256 per
   message per build (unmeasured cost; ~700k chars/build in long sessions).

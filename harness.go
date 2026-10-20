@@ -996,14 +996,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// that is 31% low, which puts the shape target above the whole window
 		// and makes every rung below unreachable. See tokencal.go.
 		Estimate: &h.meter,
-		Policy: agent.ShaperPolicy{
-			BudgetTokens:          shapingBudget(h.windowTokens()),
-			VerbatimToolResults:   verbatimToolResults(),
-			ToolFormat:            toolFormat(),
-			LODTruncateAboveChars: 4000,
-			PreserveLastMessages:  6,
-			PreserveLastToolCalls: 4,
-		},
+		Policy:   shaperPolicy(h.windowTokens()),
 		// Compaction is bookkeeping, not model work: stop the turn's budget
 		// clock for the fold so a slow endpoint + a long compaction cannot run
 		// the turn past its budget mid-fold and cancel the worker with a bare
@@ -1833,6 +1826,31 @@ func logWindow(n int, source string) int {
 			"the conversation more of it", outputReserve())
 	}
 	return n
+}
+
+// shaperPolicy is dun's shaping policy for a window (0 = not yet known).
+//
+// Assembled field by field rather than from agent.PolicyFor, because PolicyFor
+// returns an EMPTY policy for an unknown window, and dun builds its Shaper
+// before the window has been asked for (it is re-budgeted on every build — see
+// measuredBuild). An empty policy would drop the LOD rung for exactly the
+// sessions that start without a window. The cost of assembling it by hand is
+// the bug aw4 had twice in one day: a field nobody set. TestShaperPolicy_
+// CoversPolicyFor fails when agentkit's PolicyFor sets a field this leaves at
+// zero, so a new agentkit knob is noticed rather than missed.
+func shaperPolicy(window int) agent.ShaperPolicy {
+	return agent.ShaperPolicy{
+		BudgetTokens:          shapingBudget(window),
+		VerbatimToolResults:   verbatimToolResults(),
+		ToolFormat:            toolFormat(),
+		LODTruncateAboveChars: 4000,
+		PreserveLastMessages:  6,
+		PreserveLastToolCalls: 4,
+		// One result, wherever it sits: LOD skips the preserved tail, so a huge
+		// recent result is sent whole every round until it ages out. exec clips
+		// at 20k itself (execInlineMax); node_read and MCP results did not.
+		MaxToolResultChars: agent.DefaultMaxToolResultChars,
+	}
 }
 
 // measuredBuild logs the size of the prompt the Shaper actually produced.
