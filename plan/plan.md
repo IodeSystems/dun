@@ -385,8 +385,19 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
     - known edge: a layer read own-layer-only (its parent also in the search)
       does not hide parent docs it shadows — both versions can appear, each
       labelled by index.
-    - not done in raglit: maintainer service (+ base ownership transfer),
-      savings report, attest workbench for layers created after start.
+    - **more built (raglit 5e42f85..74deef8, 2026-10-20):**
+      `POST /api/owner {index, owner}` hands an index to another principal
+      (owner or admin) — the raglit half of the maintainer: register, then
+      transfer the base to the maintainer's machine user. `GET
+      /api/projects/savings?id=|ns=` = the savings report: copies beyond the
+      first across readable layers (by content hash) — passages, embeddings,
+      page reads, bytes, model time, fan-out now vs with a base; `recommend`
+      when 2+ layers hold copies over an empty base. **No token counts** (the
+      report's `note` says so). Layers now show the parent's figures, page
+      images and layouts; late-registered layers get the review workbench;
+      vec/hybrid skip indexes with no embedder (400 if none has one).
+    - not done in raglit: the maintainer SERVICE itself (owner transfer is
+      there). dun side: `/rag status` should show `savings` + `recommend`.
   - **remote premise (USER, 2026-10-19)**: no LLM-capable dev machines; the
     model (`llm.iodesystems.com`), raglit and possibly dun itself run remote.
     So dun passes the HUMAN's OIDC token to raglit (device flow for the CLI,
