@@ -15,7 +15,7 @@ for note, kind, q in probes:
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     p.stdin.write(json.dumps({"type": "user", "content": q}) + "\n"); p.stdin.flush()
     docs, usage, t0 = None, None, time.time()
-    while time.time() - t0 < 40:
+    while time.time() - t0 < 12:
         r, _, _ = select.select([p.stdout], [], [], 5)
         if not r: continue
         line = p.stdout.readline()
@@ -33,11 +33,11 @@ for note, kind, q in probes:
         p.kill()
     surfaced = [os.path.basename(d.get("id", "")).removesuffix(".md") for d in (docs or {}).get("docs", [])]
     res = {"note": note, "kind": kind, "query": q, "surfaced": surfaced,
-           "scores": [round(d.get("score", 0), 3) for d in (docs or {}).get("docs", [])],
+           "scores": [round(d.get("score", 0), 3) for d in (docs or {}).get("docs", [])], "inline": [d.get("inline") for d in (docs or {}).get("docs", [])],
            "right": (note in surfaced) if kind == "L" else None,
            "bytes": (docs or {}).get("bytes", 0), "tokens": (docs or {}).get("tokens", 0),
            "latency_ms": (docs or {}).get("latency_ms"),
            "surfacing": (usage or {}).get("surfacing"), "secs": round(time.time() - t0, 1)}
     results.append(res)
-    print(json.dumps({k: res[k] for k in ("kind", "note", "surfaced", "scores", "bytes", "latency_ms", "secs")}), flush=True)
+    print(json.dumps({k: res[k] for k in ("kind", "note", "surfaced", "inline", "bytes", "secs")}), flush=True)
 json.dump(results, open(f"{S}/m0/results_live.json", "w"), indent=1)

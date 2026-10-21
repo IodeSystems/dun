@@ -320,8 +320,15 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
     removes all its sidecars.
   - **Caveats:** 11 notes; probes written by the author of the notes (more
     lexical overlap than a real user); captions off.
-  - **❓ USER decisions:** the relevance rule (top-1 + 1.5× margin
-    recommended); inline memory bodies vs pointers.
+  - **✅ USER decisions (2026-10-20), built c1b60fc:** top-1 + 1.5× margin
+    over the runner-up; a document ≤1500 chars is inlined whole (via
+    raglit `get_document`), longer stays a pointer. Applies to ALL proactive
+    RAG, not only memories (one path). Re-run live
+    (`plan/m0/results_live_margin.json`): lexical 10/11 right, **0 wrong**
+    (was 11 wrong of 21); negatives 2/3 surface one note (was 3/3, two
+    each); 558–807 bytes per surfacing, now carrying the answer. Not
+    re-measured: paraphrase probes live; a real (larger) corpus, where the
+    margin may behave differently.
 - **M0 plan (as run):** Hand-write ~10 notes about this repo
   (the kind the rule allows: why an approach was dropped, what a measurement
   showed), ingest them into a raglit index, and run real dun sessions with
@@ -350,7 +357,7 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   default: fork before compaction, since that is where content is lost.
 - **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
 
-- **next**: the USER's two M0 calls (relevance rule; inline bodies vs pointers); then M1.
+- **next**: M1 — measure the memory fork's cache cost, fired right after the reply (item 10 #2).
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
   attention — M0 measures it); on a single-slot llama-server the fork may evict
   the turn's KV cache (should cost only the fork's tail — M1); trigger-word
