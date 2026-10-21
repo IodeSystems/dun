@@ -3,6 +3,7 @@ package dun
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,9 +45,81 @@ func RootDir(root string) string {
 }
 
 // NewSessionFile returns the path for a fresh session under root, plus its id.
+//
+// The id is a timestamp to the second, and two dun processes started in one
+// workspace within a second used to get the SAME file: the second loaded the
+// first's history and rewrote the file under it (found in M0, 2026-10-20, when
+// back-to-back probe sessions 0.6s apart shared one transcript). So the file
+// is claimed with O_EXCL, and a taken id gets a "-2", "-3"… suffix, which still
+// sorts after the bare id and before the next second's.
 func NewSessionFile(root string) (path, id string) {
-	id = time.Now().Format("20060102-150405")
-	return filepath.Join(RootDir(root), id+".jsonl"), id
+	base := time.Now().Format("20060102-150405")
+	dir := RootDir(root)
+	_ = os.MkdirAll(dir, 0o755)
+	for n := 1; n <= 99; n++ {
+		id = base
+		if n > 1 {
+			id = fmt.Sprintf("%s-%d", base, n)
+		}
+		path = filepath.Join(dir, id+".jsonl")
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			f.Close()
+			return path, id
+		}
+		if !os.IsExist(err) {
+			break // not a collision (permissions, disk): let the store report it
+		}
+	}
+	return filepath.Join(dir, base+".jsonl"), base
+}
+
+// sessionIDs lists the session ids under root, unsorted. A session id never
+// contains a dot: "<id>.recapN.jsonl", "<id>.reheadN.jsonl" and
+// "<id>.subN.jsonl" are a session's sidecars and children, not sessions — a
+// lexical "latest" over all *.jsonl picked "<id>.rehead1" over "<id>" itself.
+//
+// An EMPTY session file is skipped too: NewSessionFile claims the file at
+// start, so a dun that exits before saying anything leaves one, and
+// --continue must not resume a conversation that never happened. Those are
+// removed by PruneSessions (emptySessionIDs).
+func sessionIDs(root string) []string {
+	ids, _ := scanSessionIDs(root)
+	return ids
+}
+
+// emptySessionIDs lists claimed-but-empty sessions last modified before
+// cutoff — old enough that no live process is about to write to them.
+func emptySessionIDs(root string, cutoff time.Time) []string {
+	_, empty := scanSessionIDs(root)
+	var out []string
+	for id, mod := range empty {
+		if mod.Before(cutoff) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func scanSessionIDs(root string) (ids []string, empty map[string]time.Time) {
+	entries, _ := os.ReadDir(RootDir(root))
+	empty = map[string]time.Time{}
+	for _, e := range entries {
+		n := e.Name()
+		if !strings.HasSuffix(n, ".jsonl") {
+			continue
+		}
+		id := strings.TrimSuffix(n, ".jsonl")
+		if strings.Contains(id, ".") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && info.Size() == 0 {
+			empty[id] = info.ModTime()
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids, empty
 }
 
 // SessionFile is the path for a specific session id under root.
@@ -56,16 +129,7 @@ func SessionFile(root, id string) string {
 
 // LatestSession returns the most recent session id for root, or "" if none.
 func LatestSession(root string) string {
-	entries, err := os.ReadDir(RootDir(root))
-	if err != nil {
-		return ""
-	}
-	var ids []string
-	for _, e := range entries {
-		if n := e.Name(); strings.HasSuffix(n, ".jsonl") {
-			ids = append(ids, strings.TrimSuffix(n, ".jsonl"))
-		}
-	}
+	ids := sessionIDs(root)
 	if len(ids) == 0 {
 		return ""
 	}
@@ -75,13 +139,7 @@ func LatestSession(root string) string {
 
 // ListSessions returns the session ids for root, newest first.
 func ListSessions(root string) []string {
-	entries, _ := os.ReadDir(RootDir(root))
-	var ids []string
-	for _, e := range entries {
-		if n := e.Name(); strings.HasSuffix(n, ".jsonl") {
-			ids = append(ids, strings.TrimSuffix(n, ".jsonl"))
-		}
-	}
+	ids := sessionIDs(root)
 	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
 	return ids
 }

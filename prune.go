@@ -348,9 +348,18 @@ const keepSessions = 20
 // would leave an unexplained branch behind. except is never removed (the live
 // session).
 func PruneSessions(root, repoRoot, except string) []string {
+	var removed []string
+	// Claimed but never written (a dun that exited before saying anything):
+	// nothing to keep. Ten minutes old, so a session that has just started
+	// and not yet flushed is not taken out from under its process.
+	for _, id := range emptySessionIDs(root, time.Now().Add(-10*time.Minute)) {
+		if id != except && os.Remove(filepath.Join(RootDir(root), id+".jsonl")) == nil {
+			removed = append(removed, id)
+		}
+	}
 	ids := ListSessions(root) // newest first
 	if len(ids) <= keepSessions {
-		return nil
+		return removed
 	}
 	holds := map[string]bool{}
 	for _, w := range ScanWorktrees(repoRoot) {
@@ -358,7 +367,6 @@ func PruneSessions(root, repoRoot, except string) []string {
 			holds[w.Path] = true
 		}
 	}
-	var removed []string
 	for _, id := range ids[keepSessions:] {
 		if id == except {
 			continue
@@ -370,12 +378,7 @@ func PruneSessions(root, repoRoot, except string) []string {
 			continue
 		}
 		_ = os.Remove(MetaFile(root, id))
-		// A child's transcript is not a session of its own, but it is this
-		// session's, and it goes with it.
-		subs, _ := filepath.Glob(filepath.Join(RootDir(root), id+".sub*.jsonl"))
-		for _, s := range subs {
-			_ = os.Remove(s)
-		}
+		removeSidecars(root, id)
 		removed = append(removed, id)
 	}
 	return removed
@@ -386,8 +389,16 @@ func PruneSessions(root, repoRoot, except string) []string {
 func ForgetSession(root, id string) {
 	_ = os.Remove(filepath.Join(RootDir(root), id+".jsonl"))
 	_ = os.Remove(MetaFile(root, id))
-	subs, _ := filepath.Glob(filepath.Join(RootDir(root), id+".sub*.jsonl"))
-	for _, s := range subs {
+	removeSidecars(root, id)
+}
+
+// removeSidecars deletes what belongs to a session besides its transcript:
+// children ("<id>.subN.jsonl") and the archives recap and re-heading write
+// ("<id>.recapN.jsonl", "<id>.reheadN.jsonl"). Only ".sub*" used to go, which
+// left the archives behind with no session to explain them.
+func removeSidecars(root, id string) {
+	side, _ := filepath.Glob(filepath.Join(RootDir(root), id+".*.jsonl"))
+	for _, s := range side {
 		_ = os.Remove(s)
 	}
 }

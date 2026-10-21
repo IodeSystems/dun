@@ -137,6 +137,19 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 			}
 		}
 		sort.SliceStable(kept, func(i, j int) bool { return kept[i].Score > kept[j].Score })
+		// One slot per DOCUMENT. Hits are per fragment, and a document with a
+		// generated caption has two; measured in M0 (2026-10-20), one note took
+		// both slots of a pass. Sorted first, so the best fragment is the one
+		// kept.
+		inPass := map[string]bool{}
+		uniq := kept[:0]
+		for _, h := range kept {
+			if !inPass[h.DocID] {
+				inPass[h.DocID] = true
+				uniq = append(uniq, h)
+			}
+		}
+		kept = uniq
 
 		if len(kept) > 0 {
 			surfaced := kept

@@ -80,3 +80,30 @@ func TestSurfacingRound_CarriedStopsAfterFold(t *testing.T) {
 		t.Fatalf("rounds: %d", h.surfacing.Rounds)
 	}
 }
+
+// Two fragments of one document fill one slot, not two.
+func TestDocsPreparer_OneSlotPerDocument(t *testing.T) {
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	var notes []DocsNote
+	finder := fixedFinder{
+		{DocID: "a", Title: "a (caption)", Score: 9},
+		{DocID: "a", Title: "a (text)", Score: 8},
+		{DocID: "b", Title: "b", Score: 3},
+	}
+	prep := docsPreparer(store, finder, agent.FinderOpts{MaxHits: 2}, nil, nil,
+		func(n DocsNote) { notes = append(notes, n) })
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
+	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || len(notes[0].Docs) != 2 || notes[0].Docs[0].DocID != "a" || notes[0].Docs[1].DocID != "b" {
+		t.Fatalf("want a then b, one slot each: %+v", notes)
+	}
+	if notes[0].Docs[0].Title != "a (caption)" {
+		t.Errorf("the best fragment of a document is the one kept: %q", notes[0].Docs[0].Title)
+	}
+	if notes[0].Found != 2 {
+		t.Errorf("found counts documents: %d", notes[0].Found)
+	}
+}
