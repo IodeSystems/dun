@@ -751,6 +751,20 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
+		// /mcp add and /mcp remove: detached, because starting a server is a
+		// handshake and a tool listing over the network. The action carries
+		// the spec — bearer token included — so the event echoes only the
+		// verb, never the action itself.
+		if id == "mcp" {
+			go func() {
+				verb, _, _ := strings.Cut(action, " ")
+				msg := runMCPCmd(ctx, h, action)
+				h.Aside("[control/mcp] " + msg)
+				em.emit(event{"type": "server", "id": "mcp", "action": verb, "message": msg,
+					"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
+			}()
+			return
+		}
 		// A control command that ASKS cannot run here. This callback is on the
 		// reader goroutine, which is the only reader of `answer` events — block
 		// it on a question and the answer can never arrive, so the session hangs

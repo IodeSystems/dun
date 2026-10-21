@@ -64,7 +64,7 @@ func mcpToolDefs(tools []mcpmgr.MCPTool) []llm.ToolDef {
 	for _, t := range tools {
 		var td llm.ToolDef
 		td.Type = "function"
-		td.Function.Name = t.Name
+		td.Function.Name = modelToolName(t)
 		td.Function.Description = t.Description + toolDocs[t.Name]
 		td.Function.Parameters = t.InputSchema
 		out = append(out, td)
@@ -72,16 +72,35 @@ func mcpToolDefs(tools []mcpmgr.MCPTool) []llm.ToolDef {
 	return out
 }
 
+// modelToolName is the name the model calls a tool by. The built-in servers'
+// tools keep their own names — prompts, tool docs and policy refer to them.
+// Any other server's are "<server>__<tool>": two servers that both have a
+// "search" would otherwise collide, and the last one listed would silently
+// take every call.
+func modelToolName(t mcpmgr.MCPTool) string {
+	switch t.ServerID {
+	case ServerCode, ServerShell, ServerDocs, "":
+		return t.Name
+	}
+	name := t.ServerID + "__" + t.Name
+	if len(name) > 64 { // the OpenAI limit on a function name
+		name = name[:64]
+	}
+	return name
+}
+
 // mcpDispatcher routes a model tool call to the owning MCP server (by tool name).
 // Errors meant for the model (unknown tool, bad args, tool failure) are formatted
 // INTO the result so the loop stays alive.
 func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool string, args map[string]any, result string)) agent.ToolDispatcher {
-	serverOf := make(map[string]string, len(tools))
+	type route struct{ server, tool string }
+	routes := make(map[string]route, len(tools))
 	for _, t := range tools {
-		serverOf[t.Name] = t.ServerID
+		routes[modelToolName(t)] = route{t.ServerID, t.Name}
 	}
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		serverID, ok := serverOf[tc.Function.Name]
+		r, ok := routes[tc.Function.Name]
+		serverID := r.server
 		if !ok {
 			return fmt.Sprintf("ERROR: unknown tool %q", tc.Function.Name), nil
 		}
@@ -103,7 +122,7 @@ func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool
 				return fmt.Sprintf("ERROR: malformed json: %v", err), nil
 			}
 		}
-		res, err := mgr.CallTool(ctx, serverID, tc.Function.Name, args)
+		res, err := mgr.CallTool(ctx, serverID, r.tool, args)
 		if err != nil {
 			res = fmt.Sprintf("ERROR: %v", err)
 		}

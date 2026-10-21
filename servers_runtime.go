@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -196,6 +197,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	err := h.mgr.StartServer(ctx, mcpmgr.MCPConfig{
 		ID: s.ID, Name: s.ID, Command: s.Command, Args: s.Args,
 		Env: env, Timeout: int(timeout / time.Second),
+		URL: s.URL, Headers: s.Headers,
 	})
 	if err == nil {
 		err = waitServerTools(ctx, h.mgr, s.ID, timeout)
@@ -223,6 +225,11 @@ func waitServerTools(ctx context.Context, mgr *mcpmgr.Manager, id string, timeou
 	for {
 		if err := mgr.ServerReadyErr(id); err != nil {
 			return err
+		}
+		// A server that serves only resources or prompts has no tools to wait
+		// for: discovery finishing is the whole signal.
+		if mgr.ServerReady(id) {
+			return nil
 		}
 		for _, t := range mgr.GetTools() {
 			if t.ServerID == id {
@@ -483,7 +490,7 @@ func toolSetDelta(before, after []mcpmgr.MCPTool) string {
 func toolsByServer(tools []mcpmgr.MCPTool) map[string][]string {
 	out := map[string][]string{}
 	for _, t := range tools {
-		out[t.ServerID] = append(out[t.ServerID], t.Name)
+		out[t.ServerID] = append(out[t.ServerID], modelToolName(t)) // the name the model calls
 	}
 	for id := range out {
 		sort.Strings(out[id])
@@ -614,4 +621,76 @@ func ingestTargets(workspace string) []string {
 		fallback = append(fallback, filepath.Join(workspace, e.Name()))
 	}
 	return fallback
+}
+
+// serverIDPattern is what /mcp add accepts as an id: it becomes the tool
+// namespace ("<id>__<tool>") and a raglit index name, so it is kept to
+// characters both allow.
+var serverIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// AddServer saves spec to the user server list ($DUN_HOME/mcp.json, every
+// workspace) with autostart on, and starts it — restarting it when one of
+// that id is running. It returns the file written; a server that saved but
+// did not start returns both the path and the error.
+func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error) {
+	if !serverIDPattern.MatchString(spec.ID) {
+		return "", fmt.Errorf("an id is lowercase letters, digits, - and _ (got %q)", spec.ID)
+	}
+	switch spec.ID {
+	case ServerCode, ServerShell, ServerDocs:
+		return "", fmt.Errorf("%q is a built-in server; pick another id", spec.ID)
+	}
+	if (spec.URL == "") == (spec.Command == "") {
+		return "", fmt.Errorf("a server has a url or a command, not both")
+	}
+	on := true
+	spec.Autostart = &on
+	path, err := PutUserServer(spec)
+	if err != nil {
+		return "", err
+	}
+	s := Server{ID: spec.ID, URL: spec.URL, Headers: requestHeaders(spec), Command: spec.Command,
+		Args: spec.Args, Env: spec.Env, Timeout: spec.Timeout, Autostart: true}
+	h.srvMu.Lock()
+	replaced := false
+	for i := range h.specs {
+		if h.specs[i].ID == s.ID {
+			h.specs[i], replaced = s, true
+		}
+	}
+	if !replaced {
+		h.specs = append(h.specs, s)
+	}
+	h.srvMu.Unlock()
+	if h.mgr.ServerStarted(s.ID) {
+		h.mgr.StopServer(s.ID)
+	}
+	return path, h.startServer(ctx, s)
+}
+
+// RemoveServer stops a server /mcp add saved and deletes it from the user
+// server list. A server some other file declares is not this command's to
+// remove.
+func (h *Harness) RemoveServer(id string) error {
+	ok, err := RemoveUserServer(id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no server %q in %s — a server from dun.json is removed there", id, UserServersFile())
+	}
+	if h.mgr.ServerStarted(id) {
+		h.mgr.StopServer(id)
+	}
+	h.srvMu.Lock()
+	kept := h.specs[:0]
+	for _, s := range h.specs {
+		if s.ID != id {
+			kept = append(kept, s)
+		}
+	}
+	h.specs = kept
+	h.srvMu.Unlock()
+	h.applyTools()
+	return nil
 }

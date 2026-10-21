@@ -35,6 +35,10 @@ type Server struct {
 	ID      string
 	Command string
 	Args    []string
+	// URL and Headers make it a remote server (Streamable HTTP); Command and
+	// Args are then unused. Headers carry the resolved bearer token.
+	URL     string
+	Headers map[string]string
 	// Env entries ("KEY=value") for the spawned server — a per-machine DSN or
 	// endpoint that cannot be baked into a committed config.
 	Env []string

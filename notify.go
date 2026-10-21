@@ -32,7 +32,7 @@ import (
 // if raglit isn't in the tool set.
 func docsFinder(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool) agent.DocFinder {
 	for _, t := range tools {
-		if t.Name == "search" {
+		if isDocsSearch(t) {
 			return ragnotify.MCPFinder(mgr, t.ServerID, "search", ragnotify.Opts{})
 		}
 	}
@@ -42,11 +42,18 @@ func docsFinder(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool) agent.DocFinder {
 // docsServerID is the server that owns the search tool docsFinder uses.
 func docsServerID(tools []mcpmgr.MCPTool) string {
 	for _, t := range tools {
-		if t.Name == "search" {
+		if isDocsSearch(t) {
 			return t.ServerID
 		}
 	}
 	return ""
+}
+
+// isDocsSearch reports whether t is raglit's search: a "search" the model
+// calls by that bare name, so not one of an added server's (those are
+// "<server>__search" — see modelToolName).
+func isDocsSearch(t mcpmgr.MCPTool) bool {
+	return t.Name == "search" && modelToolName(t) == "search"
 }
 
 // DocHitInfo is one surfaced document, for the UI.

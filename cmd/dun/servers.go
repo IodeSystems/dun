@@ -230,6 +230,39 @@ func runAllServersCmd(ctx context.Context, h *dun.Harness, action string) string
 	return strings.Join(lines, "\n")
 }
 
+// runMCPCmd handles the engine side of /mcp add and /mcp remove. add's
+// argument is the server spec as JSON (the TUI's form builds it).
+func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
+	verb, arg, _ := strings.Cut(action, " ")
+	switch verb {
+	case "add":
+		var spec dun.ServerSpec
+		if err := json.Unmarshal([]byte(arg), &spec); err != nil {
+			return "mcp add: " + err.Error()
+		}
+		t0 := time.Now()
+		path, err := h.AddServer(ctx, spec)
+		if path == "" {
+			return "mcp add: " + err.Error()
+		}
+		if err != nil {
+			return spec.ID + ": saved to " + path + ", but did not start — " + oneLine(err.Error()) +
+				"\nfix it and /mcp add again (same id replaces), or /mcp remove " + spec.ID
+		}
+		msg := spec.ID + ": saved to " + path + " · " + runningSummary(h, spec.ID)
+		if elapsed := time.Since(t0); elapsed > time.Second {
+			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
+		}
+		return msg
+	case "remove", "rm":
+		if err := h.RemoveServer(arg); err != nil {
+			return "mcp remove: " + err.Error()
+		}
+		return arg + ": stopped and removed from " + dun.UserServersFile()
+	}
+	return "unknown /mcp action " + strconv.Quote(verb)
+}
+
 // serverListing renders every server and its state, one per line.
 func serverListing(states []dun.ServerState) string {
 	var b strings.Builder

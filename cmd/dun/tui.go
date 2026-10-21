@@ -630,14 +630,19 @@ type tuiModel struct {
 	providerFields [3]textinput.Model // name, url, key
 	providerStep   int
 	providerErr    string
-	provider       string       // name of the provider the engine runs on
-	replaying      bool         // driven by a trace (--replay), not an engine
-	quitting       bool         // the user is leaving; do not respawn
-	exitAnnounced  bool         // the engine said it was going; it did not crash
-	everUp         bool         // an engine reached `session` once; a retry may reattach
-	suggestions    []suggestion // predicted next messages (idle-only picker)
-	suggestMode    string       // "on" | "off" | "auto" — /suggest controls this
-	suggestSel     int          // highlighted suggestion in the selector
+	provider       string // name of the provider the engine runs on
+	// The add-MCP-server form (/mcp add).
+	mcpForm       bool
+	mcpFields     [3]textinput.Model // id, url or command, bearer
+	mcpStep       int
+	mcpErr        string
+	replaying     bool         // driven by a trace (--replay), not an engine
+	quitting      bool         // the user is leaving; do not respawn
+	exitAnnounced bool         // the engine said it was going; it did not crash
+	everUp        bool         // an engine reached `session` once; a retry may reattach
+	suggestions   []suggestion // predicted next messages (idle-only picker)
+	suggestMode   string       // "on" | "off" | "auto" — /suggest controls this
+	suggestSel    int          // highlighted suggestion in the selector
 	// Idle debounce for the suggestion request. The engine cannot see whether
 	// anyone is typing, so the decision lives here: the clock restarts on every
 	// keystroke and at the end of every turn, and the request goes out only once
@@ -843,6 +848,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// So does the session picker.
 		if m.picking {
 			return m.updatePicking(msg)
+		}
+		// So does the add-MCP-server form.
+		if m.mcpForm {
+			return m.updateMCPForm(msg)
 		}
 		// So does the model picker.
 		if m.modelPicking {
@@ -2297,7 +2306,7 @@ func (m tuiModel) planScrollRegion() tea.Cmd {
 		return nil
 	}
 	// Modes that replace the layout wholesale get the rows back.
-	if m.inspecting || m.picking || m.modelPicking || m.quitting || m.w <= 0 || m.h <= 0 {
+	if m.inspecting || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
 		return m.sr.disable()
 	}
 	vp := m.vp
@@ -2538,6 +2547,9 @@ func (m tuiModel) lowerView() string {
 	}
 	if m.modelPicking {
 		return m.modelPanel()
+	}
+	if m.mcpForm {
+		return m.mcpFormPanel()
 	}
 	if m.paletteActive() {
 		return m.palettePanel()
@@ -3353,7 +3365,7 @@ func init() {
 		}},
 		{"rag", "[on|off|restart|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
 		{"lsp", "[on|off|restart|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
-		{"mcp", "[restart [server]]", "every MCP server at once: bare lists them, restart bounces the running ones", mcpSlash},
+		{"mcp", "[add | remove <id> | on|off|restart [id]]", "MCP servers: bare lists them, add saves a new one (URL + optional bearer, or a command) for every workspace", mcpSlash},
 		{"docker", "[on|off|status]", "exec backend: on (Docker), off (host), bare shows status", controlSlash("docker")},
 		{"worktree", "[status|new|commit]", "git: bare shows status (in place too), new isolates in a worktree, commit writes the message and asks", controlSlash("worktree")},
 		{"remember", "[text]", "save a note for later sessions on this project (needs /rag on); bare: the model picks what to keep", func(m *tuiModel, args []string) tea.Cmd {
@@ -3476,6 +3488,19 @@ func rephraseSlash(m *tuiModel, args []string) tea.Cmd {
 // ones, `restart <server>` bounces (or starts) just that one. It rides the same
 // `server` event — the engine reads the allServers id as "all of them".
 func mcpSlash(m *tuiModel, args []string) tea.Cmd {
+	if len(args) > 0 && args[0] == "add" {
+		return m.openMCPForm()
+	}
+	if len(args) > 0 && (args[0] == "remove" || args[0] == "rm") {
+		if len(args) != 2 {
+			m.append(stErr.Render("usage: /mcp remove <id>"))
+			return nil
+		}
+		if !m.proc.controlCmd("mcp", "remove "+args[1]) {
+			m.append(stErr.Render("no engine right now — /reconnect first"))
+		}
+		return nil
+	}
 	action, target := "", allServers
 	if len(args) > 0 {
 		action = strings.ToLower(args[0])

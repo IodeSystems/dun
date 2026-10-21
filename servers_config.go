@@ -70,6 +70,14 @@ type ServerSpec struct {
 	ID      string   `json:"id"`
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
+	// URL is a remote server, reached over Streamable HTTP instead of
+	// spawning Command. Bearer, when set, goes as Authorization: Bearer; a
+	// value "$NAME" or "${NAME}" is read from that environment variable, so a
+	// committed dun.json can name a token without holding it. Headers are
+	// any other per-request headers.
+	URL     string            `json:"url,omitempty"`
+	Bearer  string            `json:"bearer,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 	// Env entries are "KEY=value", passed to the spawned server.
 	Env []string `json:"env,omitempty"`
 	// Timeout in seconds for tool discovery; 0 keeps dun's default.
@@ -126,7 +134,7 @@ type ServersFile struct {
 // defaults with no checks — see ShipConfig.
 func LoadShip(dir string) *ShipConfig {
 	var out *ShipConfig
-	for _, path := range serverConfigPaths(dir) {
+	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
 		f, err := readServersFile(path)
 		if err != nil || f == nil || f.Ship == nil {
 			continue
@@ -147,7 +155,7 @@ func LoadShip(dir string) *ShipConfig {
 // default — see CommitConfig.
 func LoadCommit(dir string) *CommitConfig {
 	var out *CommitConfig
-	for _, path := range serverConfigPaths(dir) {
+	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
 		f, err := readServersFile(path)
 		if err != nil || f == nil || f.Commit == nil {
 			continue
@@ -203,7 +211,7 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 		order = append(order, s.ID)
 	}
 
-	for _, path := range serverConfigPaths(dir) {
+	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
 		f, err := readServersFile(path)
 		if err != nil {
 			return nil, err
@@ -229,17 +237,19 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 		if s.Disabled {
 			continue
 		}
-		if s.Command == "" {
-			return nil, fmt.Errorf("dun: server %q has no command (declare one, or remove the entry)", id)
+		if s.Command == "" && s.URL == "" {
+			return nil, fmt.Errorf("dun: server %q has no command or url (declare one, or remove the entry)", id)
 		}
 		out = append(out, Server{
 			ID:        s.ID,
+			URL:       s.URL,
+			Headers:   requestHeaders(s),
 			Command:   s.Command,
 			Args:      expandPlaceholders(s.Args, workspace, raglitHome),
 			Env:       expandPlaceholders(s.Env, workspace, raglitHome),
 			Timeout:   s.Timeout,
 			Autostart: s.Autostart != nil && *s.Autostart,
-			Disable:     s.Disable,
+			Disable:   s.Disable,
 		})
 	}
 	return out, nil
@@ -264,7 +274,7 @@ func LoadMounts(dir, repoRoot string) []MountSpec {
 		order = append(order, m.Name)
 	}
 
-	for _, path := range serverConfigPaths(dir) {
+	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
 		f, err := readServersFile(path)
 		if err != nil || f == nil {
 			continue
@@ -349,6 +359,15 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	if next.Args != nil {
 		out.Args = next.Args
 	}
+	if next.URL != "" {
+		out.URL = next.URL
+	}
+	if next.Bearer != "" {
+		out.Bearer = next.Bearer
+	}
+	if next.Headers != nil {
+		out.Headers = next.Headers
+	}
 	if next.Env != nil {
 		out.Env = next.Env
 	}
@@ -369,6 +388,85 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 		out.Disable = next.Disable
 	}
 	return out
+}
+
+// requestHeaders resolves a remote server's headers: Headers, plus
+// Authorization from Bearer with any $NAME read from the environment.
+func requestHeaders(s ServerSpec) map[string]string {
+	if s.URL == "" || (s.Bearer == "" && len(s.Headers) == 0) {
+		return nil
+	}
+	out := map[string]string{}
+	for k, v := range s.Headers {
+		out[k] = os.ExpandEnv(v)
+	}
+	if tok := os.ExpandEnv(s.Bearer); tok != "" {
+		out["Authorization"] = "Bearer " + tok
+	}
+	return out
+}
+
+// UserServersFile is the per-user server list, $DUN_HOME/mcp.json: servers
+// added with /mcp add, there in every workspace. It is the lowest file layer
+// — a project's dun.json may still override or disable one by id. 0600,
+// because a bearer token lives in it.
+func UserServersFile() string {
+	return filepath.Join(filepath.Dir(SessionsDir()), "mcp.json")
+}
+
+// PutUserServer adds spec to the user server list, replacing one of the same
+// id. It returns the file written.
+func PutUserServer(spec ServerSpec) (string, error) {
+	path := UserServersFile()
+	f, err := readServersFile(path)
+	if err != nil {
+		return "", err
+	}
+	if f == nil {
+		f = &ServersFile{}
+	}
+	replaced := false
+	for i := range f.Servers {
+		if f.Servers[i].ID == spec.ID {
+			f.Servers[i], replaced = spec, true
+		}
+	}
+	if !replaced {
+		f.Servers = append(f.Servers, spec)
+	}
+	return path, writeUserServers(path, f)
+}
+
+// RemoveUserServer drops id from the user server list; it reports whether
+// it was there.
+func RemoveUserServer(id string) (bool, error) {
+	path := UserServersFile()
+	f, err := readServersFile(path)
+	if err != nil || f == nil {
+		return false, err
+	}
+	kept := f.Servers[:0]
+	for _, s := range f.Servers {
+		if s.ID != id {
+			kept = append(kept, s)
+		}
+	}
+	if len(kept) == len(f.Servers) {
+		return false, nil
+	}
+	f.Servers = kept
+	return true, writeUserServers(path, f)
+}
+
+func writeUserServers(path string, f *ServersFile) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }
 
 // expandPlaceholders substitutes the paths a config file cannot know.
