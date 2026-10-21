@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -38,12 +39,55 @@ func docsFinder(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool) agent.DocFinder {
 	return nil
 }
 
+// docsServerID is the server that owns the search tool docsFinder uses.
+func docsServerID(tools []mcpmgr.MCPTool) string {
+	for _, t := range tools {
+		if t.Name == "search" {
+			return t.ServerID
+		}
+	}
+	return ""
+}
+
 // DocHitInfo is one surfaced document, for the UI.
 type DocHitInfo struct {
-	Title string
-	DocID string
-	Line  string
-	Score float64
+	Title  string
+	DocID  string
+	Line   string
+	Score  float64
+	Inline bool // the whole document went into the prompt, not a pointer
+}
+
+// surfaceMargin is how far the top hit must beat the runner-up to surface.
+// See the relevance note in docsPreparer.
+const surfaceMargin = 1.5
+
+// inlineMaxChars is the largest document surfaced whole. Memory notes are a
+// few hundred characters (the M0 notes: 400–650); a source file is not.
+const inlineMaxChars = 1500
+
+// docBodyFunc reads a document's whole text when it is at most max chars;
+// ok is false when it is longer, or could not be read.
+type docBodyFunc func(ctx context.Context, docID string, max int) (text string, ok bool)
+
+// docsBodyFetcher reads documents through raglit's get_document on the same
+// server the finder searches. max_chars is asked one over the cap, so a
+// document exactly at the cap is distinguishable from a truncated one.
+func docsBodyFetcher(mgr *mcpmgr.Manager, serverID string) docBodyFunc {
+	return func(ctx context.Context, docID string, max int) (string, bool) {
+		raw, err := mgr.CallTool(ctx, serverID, "get_document", map[string]any{"path": docID, "max_chars": max + 1})
+		if err != nil {
+			return "", false
+		}
+		var doc struct {
+			Text      string `json:"text"`
+			Truncated bool   `json:"truncated"`
+		}
+		if json.Unmarshal([]byte(raw), &doc) != nil || doc.Truncated || doc.Text == "" || len(doc.Text) > max {
+			return "", false
+		}
+		return doc.Text, true
+	}
 }
 
 // DocsNote is the aggregated proactive-RAG summary for one pass.
@@ -61,12 +105,9 @@ type DocsNote struct {
 // hit it appends ONE readable summary Entry (Tag "docs", so the store skips the
 // plain onNotify — the UI is driven by onDocs with structure instead) and calls
 // onDocs with the found/surfaced counts + surfaced docs. Every pass, hit or
-// not, is recorded in stats (nil-safe); estimate sizes the appended entry.
-func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, onDocs func(DocsNote)) agent.NotificationPreparer {
-	maxHits := opts.MaxHits
-	if maxHits <= 0 {
-		maxHits = 3
-	}
+// not, is recorded in stats (nil-safe); estimate sizes the appended entry;
+// fetch (nil-safe) reads a short document whole so it can be inlined.
+func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, onDocs func(DocsNote)) agent.NotificationPreparer {
 	kinds := opts.Kinds
 	if len(kinds) == 0 {
 		kinds = []agent.EntryKind{agent.KindUser, agent.KindAssistant}
@@ -151,21 +192,37 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 		}
 		kept = uniq
 
-		if len(kept) > 0 {
-			surfaced := kept
-			if len(surfaced) > maxHits {
-				surfaced = surfaced[:maxHits]
-			}
-			// Model-facing content: a readable pointer list of the surfaced docs.
+		// Relevance: the TOP document only, and only when it clearly beats the
+		// runner-up. Measured in M0 (2026-10-20): "any hit, two slots" made
+		// 11 of 21 surfaced notes the wrong one and surfaced two on every
+		// negative probe. BM25 scores have no fixed range — they move with the
+		// corpus — so the bar is a RATIO to the runner-up, not a score:
+		// top-1 with a 1.5× margin kept 14 of 19 right hits and 3 of 30 noise.
+		// A pass that fails the margin surfaces nothing and marks nothing
+		// seen, so the same documents can win a later, clearer pass.
+		clear := len(kept) == 1 || (len(kept) > 1 && kept[0].Score >= surfaceMargin*kept[1].Score)
+		if clear {
+			h := kept[0]
+			// Model-facing content. A short document is put in WHOLE: what the
+			// pointer showed was its first line (a memory note's question), so
+			// the model had to call search to read the answer — a round trip
+			// to fetch fewer bytes than the round trip costs. A long one stays
+			// a pointer; nothing large enters the prompt unasked.
 			var b strings.Builder
-			fmt.Fprintf(&b, "%d possibly-relevant document(s); surfacing %d:\n", len(kept), len(surfaced))
-			docs := make([]DocHitInfo, 0, len(surfaced))
-			for _, h := range surfaced {
-				fmt.Fprintf(&b, "- %q (id=%s, score=%.2f) — %s\n", h.Title, h.DocID, h.Score, h.Line)
-				seenIDs[h.DocID] = true
-				docs = append(docs, DocHitInfo{Title: h.Title, DocID: h.DocID, Line: h.Line, Score: h.Score})
+			body, inline := "", false
+			if fetch != nil {
+				body, inline = fetch(fctx, h.DocID, inlineMaxChars)
 			}
-			b.WriteString("Call the search tool with an id to read a document if it helps.")
+			info := DocHitInfo{Title: h.Title, DocID: h.DocID, Line: h.Line, Score: h.Score, Inline: inline}
+			if inline {
+				fmt.Fprintf(&b, "Possibly relevant (%d candidate document(s); this one clearly ranked first): %q (id=%s, score=%.2f)\n", len(kept), h.Title, h.DocID, h.Score)
+				b.WriteString(strings.TrimSpace(body))
+			} else {
+				fmt.Fprintf(&b, "%d possibly-relevant document(s); surfacing 1:\n", len(kept))
+				fmt.Fprintf(&b, "- %q (id=%s, score=%.2f) — %s\n", h.Title, h.DocID, h.Score, h.Line)
+				b.WriteString("Call the search tool with an id to read a document if it helps.")
+			}
+			seenIDs[h.DocID] = true
 			content := b.String()
 			if err := store.Append(ctx, sessionID, agent.Entry{
 				ID: uuid.New().String(), Kind: agent.KindNotification, Tag: tagDocs,
@@ -177,13 +234,13 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 			if estimate != nil {
 				tok = estimate(content)
 			}
-			stats.notePass(lat, len(kept), len(surfaced), len(content), tok)
+			stats.notePass(lat, len(kept), 1, len(content), tok)
 			if onDocs != nil {
-				onDocs(DocsNote{Found: len(kept), Surfaced: len(surfaced), Docs: docs,
+				onDocs(DocsNote{Found: len(kept), Surfaced: 1, Docs: []DocHitInfo{info},
 					Bytes: len(content), Tokens: tok, LatMS: lat.Milliseconds()})
 			}
 		} else {
-			stats.notePass(lat, 0, 0, 0, 0)
+			stats.notePass(lat, len(kept), 0, 0, 0)
 		}
 
 		mu.Lock()

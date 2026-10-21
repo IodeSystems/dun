@@ -1385,7 +1385,7 @@ func jobsToAny(js []dun.JobInfo) []any {
 func docsToAny(docs []dun.DocHitInfo) []any {
 	out := make([]any, 0, len(docs))
 	for _, d := range docs {
-		out = append(out, map[string]any{"title": d.Title, "id": d.DocID, "line": d.Line, "score": d.Score})
+		out = append(out, map[string]any{"title": d.Title, "id": d.DocID, "line": d.Line, "score": d.Score, "inline": d.Inline})
 	}
 	return out
 }
