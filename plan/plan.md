@@ -406,6 +406,9 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
       notes with original authors; log in `<base home>/folds.json`. Layers
       are NOT changed, so sibling search shows layer copies beside the base
       copy until their owners prune; attest verdicts are NOT copied.
+    - `GET /api/branches/diff?name=` (raglit 34970c5, not on :7420 yet):
+      added/changed/same/deleted vs the parent's view. Merge not built
+      (waits on the USER's conflict rules). No dun use yet.
     - dun side, not built: `/rag status` shows `savings` + `recommend`.
   - **remote premise (USER, 2026-10-19)**: no LLM-capable dev machines; the
     model (`llm.iodesystems.com`), raglit and possibly dun itself run remote.
