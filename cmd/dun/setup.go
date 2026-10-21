@@ -234,7 +234,13 @@ func runSetupTUI() error {
 		fmt.Fprintln(os.Stderr, "setup cancelled — nothing changed")
 		return nil
 	}
-	c := dunConfig{URL: fm.url.Value(), Model: fm.chosenModel, Key: fm.key.Value()}
+	// The wizard sets the default provider; it keeps the others /model added.
+	c := loadConfig()
+	p := providerConfig{Name: hostName(fm.url.Value()), URL: fm.url.Value(), Key: fm.key.Value()}
+	if old, ok := c.providerAt(p.URL); ok {
+		p.Name = old.Name
+	}
+	c.use(p, fm.chosenModel)
 	if err := saveConfig(c); err != nil {
 		return err
 	}

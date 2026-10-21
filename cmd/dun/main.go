@@ -90,7 +90,7 @@ func main() {
 	// Flag defaults come from env then the saved config then the built-in — so a
 	// CLI flag still overrides for a one-off run. See config.go.
 	fc := loadConfig()
-	url := flag.String("url", firstNonEmpty(os.Getenv("DUN_URL"), fc.URL, defaultURL), "LLM base URL")
+	url := flag.String("url", firstNonEmpty(os.Getenv("DUN_URL"), fc.active().URL), "LLM base URL")
 	model := flag.String("model", firstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model, defaultModel), "chat model (must support tool calls)")
 	// Key default stays empty so `dun -h` never prints the secret; the real value
 	// is resolved after parse (flag > env > config).
@@ -233,7 +233,13 @@ func main() {
 	suggestEnabled = !*noSuggest // the UI may ASK for next-message suggestions (on by default)
 	rephraseOn = *rephrase
 	// Resolve the effective key: explicit flag > env > saved config.
-	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), fc.Key)
+	// The saved key is the one of the provider at --url, so a --url naming
+	// another configured provider gets that provider's key.
+	savedKey := fc.Key
+	if p, ok := fc.providerAt(*url); ok {
+		savedKey = p.Key
+	}
+	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), savedKey)
 	// Dev self-update: if this is a source-stamped build and the tree changed,
 	// rebuild in place and re-exec the fresh binary. Skipped for spawned children
 	// (DUN_CHILD) and the -p engine mode; no-op for released binaries (srcDir="").

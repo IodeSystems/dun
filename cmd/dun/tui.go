@@ -88,6 +88,10 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	proc, startErr := startDunProc(o)
 	m := newTUIModel(proc, o.workspace)
 	m.model, m.url, m.keySet = o.model, o.url, o.key != "" // for /config
+	m.provider = hostName(o.url)
+	if p, ok := loadConfig().providerAt(o.url); ok {
+		m.provider = p.Name
+	}
 	m.disableExit = o.disableExit
 	m.lc = lc
 	m.opts = o // for respawning the engine (see eofMsg)
@@ -614,11 +618,19 @@ type tuiModel struct {
 	sessions    []dun.SessionInfo // what it is listing
 	pickSel     int               // highlighted session
 	// Model picker (/model): fetch available models, let the user switch.
-	modelPicking  bool         // the model picker owns the keys
-	modelList     []string     // fetched model ids
-	modelSel      int          // highlighted model
-	modelPersist  bool         // save to config.json (checkbox)
-	modelFetching bool         // still fetching from the API
+	modelPicking bool            // the model picker owns the keys
+	modelQuery   textinput.Model // its search box
+	modelRows    []modelRow      // every provider's models fetched so far
+	modelErrs    []string        // providers that returned no list
+	modelSel     int             // highlighted row of the filtered list
+	modelPersist bool            // save as the default (checkbox)
+	modelPending int             // providers not yet answered
+	// The add-provider form (/model add, ctrl+a in the picker).
+	providerForm   bool
+	providerFields [3]textinput.Model // name, url, key
+	providerStep   int
+	providerErr    string
+	provider       string // name of the provider the engine runs on
 	replaying     bool         // driven by a trace (--replay), not an engine
 	quitting      bool         // the user is leaving; do not respawn
 	exitAnnounced bool         // the engine said it was going; it did not crash
@@ -810,17 +822,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case modelFetchMsg:
-		m.modelList = []string(msg)
-		sort.Strings(m.modelList)
-		m.modelFetching = false
-		// Start on the current model when it's in the list.
-		for i, id := range m.modelList {
-			if id == m.model {
-				m.modelSel = i
-				break
-			}
+		if m.modelPicking {
+			m.addModelRows(msg)
+			m.refresh()
 		}
-		m.refresh()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -3253,7 +3258,7 @@ func init() {
 	slashCommands = []slashCmd{
 		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
 		{"config", "", "show this session's LLM settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
-		{"model", "[name]", "switch model (bare opens the picker, enter to confirm, space to toggle persist)", modelSlash},
+		{"model", "[provider] [name] | add | remove <provider>", "switch model: bare opens a searchable list from every provider; add saves a new provider", modelSlash},
 		{"context", "", "inspect context usage: tokens, compaction, recaps, truncation", func(m *tuiModel, _ []string) tea.Cmd { m.showContext(); return nil }},
 		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
@@ -3509,6 +3514,7 @@ func (m *tuiModel) showConfig() {
 	}
 	var b strings.Builder
 	b.WriteString(stHeader.Render("LLM settings"))
+	b.WriteString("\n  " + stDim.Render("provider: ") + m.provider)
 	b.WriteString("\n  " + stDim.Render("url:   ") + m.url)
 	b.WriteString("\n  " + stDim.Render("model: ") + stTool.Render(m.model))
 	b.WriteString("\n  " + stDim.Render("key:   ") + key)

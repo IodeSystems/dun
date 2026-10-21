@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err := saveConfig(c); err != nil {
 		t.Fatal(err)
 	}
-	if got := loadConfig(); got != c {
+	if got := loadConfig(); !reflect.DeepEqual(got, c) {
 		t.Fatalf("round-trip mismatch: %+v != %+v", got, c)
 	}
 	// The key is secret → 0600.
@@ -30,7 +31,7 @@ func TestConfigRoundTrip(t *testing.T) {
 
 func TestLoadConfig_missingIsZero(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	if got := (loadConfig()); got != (dunConfig{}) {
+	if got := loadConfig(); !reflect.DeepEqual(got, dunConfig{}) {
 		t.Fatalf("missing config should be zero, got %+v", got)
 	}
 }

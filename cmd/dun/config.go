@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,12 +33,98 @@ type dunConfig struct {
 	URL   string `json:"url,omitempty"`
 	Model string `json:"model,omitempty"`
 	Key   string `json:"key,omitempty"`
+	// Providers are the endpoints /model lists models from, each with its own
+	// key. Provider names the one in use. URL and Key above stay the active
+	// provider's, written on every switch, so a config with no providers (or
+	// a binary that predates them) still means what it says.
+	Provider  string           `json:"provider,omitempty"`
+	Providers []providerConfig `json:"providers,omitempty"`
 	// Provider-retry budgets, persisted so an endpoint that needs them does not
 	// need the env vars on every launch. Precedence: CLI flag > env
 	// (DUN_RETRY_BUDGET / DUN_TURN_RETRY_BUDGET) > these fields > the built-in
 	// defaults. Empty = unset; a negative value means unbounded (request scope).
 	RetryBudget     string `json:"retry_budget,omitempty"`
 	TurnRetryBudget string `json:"turn_retry_budget,omitempty"` // "0" disables turn-scope retry
+}
+
+// providerConfig is one OpenAI-compatible endpoint: /v1/models and
+// /v1/chat/completions under URL, authorized by Key.
+type providerConfig struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	Key  string `json:"key,omitempty"`
+}
+
+// providerList returns the configured providers. A config from before
+// providers has one, the top-level URL and Key, named after its host.
+func (c dunConfig) providerList() []providerConfig {
+	if len(c.Providers) > 0 {
+		return c.Providers
+	}
+	u := firstNonEmpty(c.URL, defaultURL)
+	return []providerConfig{{Name: hostName(u), URL: u, Key: c.Key}}
+}
+
+// active returns the provider in use: the one Provider names, else the one
+// at the top-level URL, else the first.
+func (c dunConfig) active() providerConfig {
+	ps := c.providerList()
+	for _, p := range ps {
+		if p.Name == c.Provider {
+			return p
+		}
+	}
+	if p, ok := c.providerAt(c.URL); ok {
+		return p
+	}
+	return ps[0]
+}
+
+// providerAt finds the provider whose URL is u.
+func (c dunConfig) providerAt(u string) (providerConfig, bool) {
+	for _, p := range c.providerList() {
+		if strings.TrimRight(p.URL, "/") == strings.TrimRight(u, "/") {
+			return p, true
+		}
+	}
+	return providerConfig{}, false
+}
+
+// putProvider adds p, or replaces the provider of the same name.
+func (c *dunConfig) putProvider(p providerConfig) {
+	c.Providers = c.providerList()
+	for i := range c.Providers {
+		if c.Providers[i].Name == p.Name {
+			c.Providers[i] = p
+			return
+		}
+	}
+	c.Providers = append(c.Providers, p)
+}
+
+// removeProvider drops the provider named name; it reports whether one was.
+func (c *dunConfig) removeProvider(name string) bool {
+	ps := c.providerList()
+	for i, p := range ps {
+		if p.Name == name {
+			c.Providers = append(ps[:i:i], ps[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// use makes p and model the saved defaults.
+func (c *dunConfig) use(p providerConfig, model string) {
+	c.putProvider(p)
+	c.Provider, c.URL, c.Key, c.Model = p.Name, p.URL, p.Key, model
+}
+
+func hostName(u string) string {
+	if pu, err := neturl.Parse(u); err == nil && pu.Hostname() != "" {
+		return pu.Hostname()
+	}
+	return u
 }
 
 func dunHome() string {

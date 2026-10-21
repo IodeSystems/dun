@@ -101,6 +101,32 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 11. Several providers, one searchable /model (USER, 2026-10-21 — priority over item 9 M3)
+
+Built (`cmd/dun/config.go` providers, `cmd/dun/model.go`). config.json gains
+`providers: [{name,url,key}]` and `provider`. The top-level url/key/model stay
+the active provider's, rewritten on every save, so an old config means the same
+thing and an old binary still runs. `/model` asks every provider for its
+/v1/models at once and filters as you type: every word must appear in
+"provider model". Enter switches this session, and tab first makes it the
+default. A provider that fails shows one error line. `/model add` (or ctrl+a)
+opens a name/url/key form. `/model <provider> <model>` and `/model remove <p>`
+are also there. `--setup` now keeps the other providers; before, it rewrote the
+whole file. Live (scratch DUN_HOME, the real endpoint plus a fake provider and
+a dead one): add, search across both, a session switch, a saved switch, a
+restart on the saved provider, and remove all behaved as intended.
+
+- **next:** USER tries it with the real local, OpenRouter and corporate keys.
+- **risks:** assumes every provider is OpenAI-compatible with a Bearer key. A
+  corporate gateway that needs other headers (Azure `api-key`, an org header)
+  will not list models or chat. Not yet tested against real OpenRouter (base
+  `https://openrouter.ai/api/v1`; agentkit keeps a trailing /v1). Sub-agents
+  still use the parent's provider (ClientFor takes one url/key). The key goes
+  to the engine on argv, as before.
+- **blocking decisions:** none.
+- **optional extensions:** a per-provider extra-headers field; `--child-model`
+  on another provider; a list cache, so the picker opens with rows on screen.
+
 ### ◐ 10. Cache and reshaping stats; lessons from aw4 (USER, 2026-10-20)
 The USER has been tuning context sizes without seeing what reshaping costs: how
 often a build rewrites the prefix instead of appending, how much the server then
