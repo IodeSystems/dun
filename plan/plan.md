@@ -279,7 +279,43 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
     BYTES are exact. M0 reads tokens only after the meter settles, or bytes.
   - not done: split by source (doc vs memory — no memories yet); the caps
     (per-turn / per-session budgets) wait for M0's numbers.
-- **M0 prove OOB surfacing — the gate.** Hand-write ~10 notes about this repo
+- **✅ M0 RESULT (2026-10-20) — the gate PASSES; noise is the problem.**
+  11 hand-written notes (`plan/m0/notes/`), 25 probes (`plan/m0/probes.md`),
+  an index holding only the notes, captioning off (an embedded serve
+  captions mid-run, and killed sessions left 3 of 11 captioned — biased; so
+  the vision model was removed from the scratch config).
+  - **Retrieval** (`plan/m0/run_retrieval.py`, raglit CLI, top 2):
+    lexical bm25 10/11 (10 at rank 1), hybrid 11/11; paraphrase bm25 9/11
+    (6 at rank 1), hybrid 10/11 (8). **Live** (`plan/m0/run_live.py`, real
+    dun `-p --rag` sessions stopped at the docs notification): lexical
+    10/11, 10 at rank 1 — matches the CLI.
+  - **Noise:** with MinScore 0 and MaxHits 2 both slots fill nearly always:
+    11 of 21 surfaced on lexical probes were the WRONG note; every negative
+    probe surfaced 2 ("what does lipgloss do?" matched on common words).
+    BM25 scores do separate: an absolute 3.5 keeps 16/19 right, 3/30 noise —
+    but BM25 scores depend on corpus size (11 docs here), so it will not
+    transfer. Corpus-independent rule: **top hit only, and only if ≥1.5× the
+    runner-up** → 14/19 right, 3/30 noise. Hybrid scores are RRF (~0.033 for
+    right and wrong alike) — cannot be thresholded.
+  - **Hybrid is not reachable from dun:** raglit MCP `search` has no mode and
+    runs BM25 (`raglit cmd/raglit/serve.go:522`). Gain measured: +1 lexical,
+    +1 paraphrase. Not worth a path change now.
+  - **Cost:** 471–865 bytes appended per pass (avg 822; ~220 tok), pass
+    latency 1–4 ms (embedded, local — a remote daemon adds the network).
+  - **What surfaces is a POINTER** (title + first line = the note's
+    frontmatter question), not the answer: the model must call search to
+    read it. For memories (short by design) inlining the body is cheaper
+    than a follow-up call — USER call.
+  - **Bugs found:** (1) docsPreparer does not dedup DocID WITHIN a pass — a
+    doc with two fragments (text + caption) took both slots; (2) session
+    files are named to the SECOND: two `dun` starts in one workspace within
+    a second share one session file (second loads the first's history and
+    rewrites the file).
+  - **Caveats:** 11 notes; probes written by the author of the notes (more
+    lexical overlap than a real user); captions off.
+  - **❓ USER decisions:** the relevance rule (top-1 + 1.5× margin
+    recommended); inline memory bodies vs pointers.
+- **M0 plan (as run):** Hand-write ~10 notes about this repo
   (the kind the rule allows: why an approach was dropped, what a measurement
   showed), ingest them into a raglit index, and run real dun sessions with
   `/rag` on. Record per session: did the right note surface at the moment it
@@ -307,7 +343,7 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   default: fork before compaction, since that is where content is lost.
 - **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
 
-- **next**: M0 — reads its results off S (`/context` → surfacing).
+- **next**: fix the two M0 bugs; then the USER's relevance-rule call; then M1.
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
   attention — M0 measures it); on a single-slot llama-server the fork may evict
   the turn's KV cache (should cost only the fork's tail — M1); trigger-word

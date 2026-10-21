@@ -1,0 +1,266 @@
+[
+ {
+  "note": "untracked-files-lost",
+  "kind": "L",
+  "query": "should I stash before cherry-picking these commits?",
+  "surfaced": [
+   "untracked-files-lost",
+   "mcp-stderr-flake"
+  ],
+  "scores": [
+   9.498,
+   1.938
+  ],
+  "right": true,
+  "bytes": 841,
+  "tokens": 211,
+  "latency_ms": 2,
+  "surfacing": null,
+  "secs": 0.6
+ },
+ {
+  "note": "exec-every-command-is-a-job",
+  "kind": "L",
+  "query": "why did exec return a job number instead of output?",
+  "surfaced": [
+   "gh-device-flow-hang",
+   "model-invents-ids"
+  ],
+  "scores": [
+   4.117,
+   3.431
+  ],
+  "right": false,
+  "bytes": 841,
+  "tokens": 211,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 1.8
+ },
+ {
+  "note": "gh-device-flow-hang",
+  "kind": "L",
+  "query": "run gh auth login so you can open the PR",
+  "surfaced": [
+   "gh-device-flow-hang",
+   "mcp-stderr-flake"
+  ],
+  "scores": [
+   8.117,
+   2.29
+  ],
+  "right": true,
+  "bytes": 839,
+  "tokens": 210,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 0.6
+ },
+ {
+  "note": "viewport-height-clamp",
+  "kind": "L",
+  "query": "the conversation pane is not at the bottom after resizing",
+  "surfaced": [
+   "viewport-height-clamp",
+   "exec-every-command-is-a-job"
+  ],
+  "scores": [
+   3.868,
+   2.362
+  ],
+  "right": true,
+  "bytes": 865,
+  "tokens": 217,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 0.6
+ },
+ {
+  "note": "loop-detection-consecutive",
+  "kind": "L",
+  "query": "loopguard refused my tool call, is that a loop?",
+  "surfaced": [
+   "loop-detection-consecutive",
+   "mcp-stderr-flake"
+  ],
+  "scores": [
+   6.49,
+   1.447
+  ],
+  "right": true,
+  "bytes": 853,
+  "tokens": 214,
+  "latency_ms": 4,
+  "surfacing": null,
+  "secs": 0.6
+ },
+ {
+  "note": "model-invents-ids",
+  "kind": "L",
+  "query": "should memories be addressed by id?",
+  "surfaced": [
+   "model-invents-ids",
+   "recap-numbers-wrong"
+  ],
+  "scores": [
+   6.872,
+   4.002
+  ],
+  "right": true,
+  "bytes": 841,
+  "tokens": 211,
+  "latency_ms": 2,
+  "surfacing": null,
+  "secs": 1.6
+ },
+ {
+  "note": "recap-numbers-wrong",
+  "kind": "L",
+  "query": "can we store the approved recap as memory?",
+  "surfaced": [
+   "recap-numbers-wrong",
+   "model-invents-ids"
+  ],
+  "scores": [
+   7.763,
+   2.687
+  ],
+  "right": true,
+  "bytes": 841,
+  "tokens": 211,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 0.6
+ },
+ {
+  "note": "bm25-minscore-zero",
+  "kind": "L",
+  "query": "what MinScore should the docs preparer use?",
+  "surfaced": [
+   "bm25-minscore-zero",
+   "recap-numbers-wrong"
+  ],
+  "scores": [
+   4.632,
+   1.378
+  ],
+  "right": true,
+  "bytes": 843,
+  "tokens": 211,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 2.2
+ },
+ {
+  "note": "meter-first-round-ratio",
+  "kind": "L",
+  "query": "why is the token estimate so high on the first round?",
+  "surfaced": [
+   "meter-first-round-ratio",
+   "hermes-fork-cache-parity"
+  ],
+  "scores": [
+   11.992,
+   1.297
+  ],
+  "right": true,
+  "bytes": 864,
+  "tokens": 216,
+  "latency_ms": 4,
+  "surfacing": null,
+  "secs": 1.9
+ },
+ {
+  "note": "mcp-stderr-flake",
+  "kind": "L",
+  "query": "TestStart_FailingAutostartIsNotFatal failed again",
+  "surfaced": [
+   "mcp-stderr-flake"
+  ],
+  "scores": [
+   4.934
+  ],
+  "right": true,
+  "bytes": 471,
+  "tokens": 118,
+  "latency_ms": 1,
+  "surfacing": null,
+  "secs": 0.6
+ },
+ {
+  "note": "hermes-fork-cache-parity",
+  "kind": "L",
+  "query": "will the memory fork hit the prompt cache?",
+  "surfaced": [
+   "hermes-fork-cache-parity",
+   "bm25-minscore-zero"
+  ],
+  "scores": [
+   10.416,
+   2.214
+  ],
+  "right": true,
+  "bytes": 854,
+  "tokens": 214,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 0.6
+ },
+ {
+  "note": "",
+  "kind": "N",
+  "query": "rename the variable cfg to config in main.go",
+  "surfaced": [
+   "recap-numbers-wrong",
+   "loop-detection-consecutive"
+  ],
+  "scores": [
+   1.378,
+   1.286
+  ],
+  "right": null,
+  "bytes": 859,
+  "tokens": 215,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 0.7
+ },
+ {
+  "note": "",
+  "kind": "N",
+  "query": "what does lipgloss do?",
+  "surfaced": [
+   "hermes-fork-cache-parity",
+   "bm25-minscore-zero"
+  ],
+  "scores": [
+   2.754,
+   0.986
+  ],
+  "right": null,
+  "bytes": 853,
+  "tokens": 214,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 0.6
+ },
+ {
+  "note": "",
+  "kind": "N",
+  "query": "add a test for plural()",
+  "surfaced": [
+   "untracked-files-lost",
+   "recap-numbers-wrong"
+  ],
+  "scores": [
+   2.729,
+   0.916
+  ],
+  "right": null,
+  "bytes": 847,
+  "tokens": 212,
+  "latency_ms": 3,
+  "surfacing": null,
+  "secs": 2.3
+ }
+]
