@@ -306,11 +306,18 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
     frontmatter question), not the answer: the model must call search to
     read it. For memories (short by design) inlining the body is cheaper
     than a follow-up call — USER call.
-  - **Bugs found:** (1) docsPreparer does not dedup DocID WITHIN a pass — a
-    doc with two fragments (text + caption) took both slots; (2) session
-    files are named to the SECOND: two `dun` starts in one workspace within
-    a second share one session file (second loads the first's history and
-    rewrites the file).
+  - **Bugs found — ✅ fixed f88598a:** (1) docsPreparer did not dedup DocID
+    WITHIN a pass — a doc with two fragments (text + caption) took both
+    slots; now one slot per document, best fragment kept (unit test).
+    (2) session files are named to the SECOND: two `dun` starts in one
+    workspace within a second shared one transcript; now claimed with
+    O_EXCL, a taken id gets `-N` (verified live: two starts in one second →
+    `…221958.jsonl` and `…221958-2.jsonl`). Found next to it: (3)
+    LatestSession/ListSessions counted `<id>.recapN/.reheadN/.subN` sidecars
+    as sessions, so `--continue` could resume a sidecar, and pruning left
+    recap/rehead archives orphaned — ids never contain a dot now, empty
+    claimed files are skipped and pruned after 10 min, and removing a session
+    removes all its sidecars.
   - **Caveats:** 11 notes; probes written by the author of the notes (more
     lexical overlap than a real user); captions off.
   - **❓ USER decisions:** the relevance rule (top-1 + 1.5× margin
@@ -343,7 +350,7 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   default: fork before compaction, since that is where content is lost.
 - **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
 
-- **next**: fix the two M0 bugs; then the USER's relevance-rule call; then M1.
+- **next**: the USER's two M0 calls (relevance rule; inline bodies vs pointers); then M1.
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
   attention — M0 measures it); on a single-slot llama-server the fork may evict
   the turn's KV cache (should cost only the fork's tail — M1); trigger-word
