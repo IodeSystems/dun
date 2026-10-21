@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
 
@@ -31,6 +32,20 @@ import (
 // reason as the "never logged" one: idle suggestions fire often enough that an
 // unmeasured call is a cost no view can see.
 
+// The request starts with the turn's own prefix: its system prompt
+// (forkSystem) and its tools (forkTools), exactly as the turn sends them.
+// It used to send neither, and missed the cache from token 0 — live, a
+// 5,202-token turn followed by its suggest call: 0 cached, 4,474 processed.
+// On llama.cpp the tool schemas render into the prompt AHEAD of
+// the conversation, so a request without them shares no prefix with the turn
+// and re-reads all of it. Measured (plan item 9 M1, 2026-10-20, a captured
+// 6,592-token turn replayed right after itself on llm.iodesystems.com): no
+// tools — 0 cached, 3,878 processed; the same tools — 6,426 cached, 166
+// processed (the reply and this instruction). tool_choice "none", "required"
+// and a named tool all kept the prefix: the choice changes the grammar, not
+// the prompt. json_object together with tools is a 400 there ("failed to
+// parse grammar"), so JSON mode is asked for only when no tools are sent.
+
 // Suggestion is one predicted next user message.
 type Suggestion struct {
 	Text string  `json:"text"`
@@ -47,12 +62,13 @@ Order by prob, highest first.`
 // model that won't produce JSON) yield nil — suggestions are best-effort.
 func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	// The conversation so far, SHAPED — the same builder the turn itself uses,
-	// so this request is compacted and measured like every other. No system
-	// prompt: we append our own instruction instead.
+	// so this request is compacted and measured like every other. The turn's
+	// own system prompt, not none: the instruction is appended after the
+	// history, and the prompt cache needs everything before it unchanged.
 	if h.Session == nil || h.Session.Build == nil {
 		return nil, nil
 	}
-	msgs, err := h.Session.Build(ctx, h.Session.SessionID, "")
+	msgs, err := h.Session.Build(ctx, h.Session.SessionID, forkSystem(h.Session))
 	if err != nil {
 		return nil, err
 	}
@@ -61,10 +77,14 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	}
 	msgs = append(msgs, llm.Message{Role: "user", Content: suggestInstruction})
 
+	tools, choice := forkTools(h.Session)
+	opts := &llm.ChatOpts{ToolChoice: choice}
+	if len(tools) == 0 {
+		opts.ResponseFormat = map[string]any{"type": "json_object"} // JSON mode where supported
+	}
+
 	start := time.Now()
-	ch, err := h.Session.Runner.ChatStream(ctx, msgs, nil, &llm.ChatOpts{
-		ResponseFormat: map[string]any{"type": "json_object"}, // JSON mode where supported
-	})
+	ch, err := h.Session.Runner.ChatStream(ctx, msgs, tools, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +105,37 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	}
 	h.noteSideCall("suggest", start, usage)
 	return parseSuggestions(b.String()), nil
+}
+
+// forkSystem is the system prompt agent.Session.Turn sends, which Turn
+// computes and does not expose: the base prompt, the heredoc tool text when
+// that transport is on, and SlotSystemNote when there are tools.
+// TestSuggest_SharesTheTurnsPrefix fails if this stops matching Turn.
+func forkSystem(s *agent.Session) string {
+	system := s.System
+	if s.ToolFormat == agent.ToolFormatHeredoc && len(s.Tools) > 0 {
+		system += "\n\n" + llm.HeredocSystemPrompt(s.Tools)
+	}
+	if len(s.Tools) > 0 && !s.OmitSlotInstructions {
+		if system == "" {
+			system = agent.SlotSystemNote
+		} else {
+			system += "\n\n" + agent.SlotSystemNote
+		}
+	}
+	return system
+}
+
+// forkTools returns the tools a side call must send to share the turn's
+// prompt prefix, and the tool_choice that keeps the model from calling one.
+// Native transport: the turn's tools, choice "none". Heredoc transport: the
+// turn itself sends no tools (the schemas are in the system prompt), so
+// neither does the side call.
+func forkTools(s *agent.Session) ([]llm.ToolDef, string) {
+	if s.ToolFormat == agent.ToolFormatHeredoc || len(s.Tools) == 0 {
+		return nil, ""
+	}
+	return s.Tools, "none"
 }
 
 // fillerPhrases are suggestions that carry no action — polite acknowledgments
