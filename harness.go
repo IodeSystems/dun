@@ -360,6 +360,9 @@ type Harness struct {
 	// the lock sets applyPending and the turn applies it on the way out.
 	turnMu       sync.Mutex
 	applyPending atomic.Bool
+	// memory is the note store while the docs server runs, else nil. Set by
+	// rebuildTools; read by /remember from another goroutine.
+	memory atomic.Pointer[memoryStore]
 	// toolsInit is false until the first rebuild, so the initial tool set is
 	// not announced as a CHANGE — the system prompt already describes it.
 	toolsInit bool

@@ -731,6 +731,20 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go emitSuggestions(ctx, h, em)
 			return
 		}
+		// /remember: the memory fork, a full LLM round-trip — detached for the
+		// same reason as suggest. The action is the user's text, not a keyword.
+		if id == "remember" {
+			go func() {
+				msg, err := h.Remember(ctx, action)
+				if err != nil {
+					msg = "nothing saved: " + err.Error()
+				}
+				msg = "memory: " + msg
+				h.Aside("[control/remember] " + msg)
+				em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
+			}()
+			return
+		}
 		// A control command that ASKS cannot run here. This callback is on the
 		// reader goroutine, which is the only reader of `answer` events — block
 		// it on a question and the answer can never arrive, so the session hangs

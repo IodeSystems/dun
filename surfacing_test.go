@@ -22,7 +22,7 @@ func TestDocsPreparer_RecordsSurfacing(t *testing.T) {
 	var notes []DocsNote
 	finder := fixedFinder{{DocID: "d1", Title: "Why X was dropped", Score: 1, Line: "the measurement"}}
 	estimate := func(s string) int { return len(s) / 4 }
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, stats, estimate, nil,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, stats, estimate, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "why was X dropped?", CreatedAt: 1})
@@ -93,7 +93,7 @@ func TestDocsPreparer_OneSlotPerDocument(t *testing.T) {
 		{DocID: "a", Title: "a (text)", Score: 8.9}, // would fail the margin if it counted
 		{DocID: "b", Title: "b", Score: 3},
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
@@ -114,7 +114,7 @@ func TestDocsPreparer_MarginOverRunnerUp(t *testing.T) {
 	var notes []DocsNote
 	var finder fixedFinder = fixedFinder{{DocID: "a", Score: 4}, {DocID: "b", Score: 3}} // 4 < 1.5×3
 	f := &finder
-	prep := docsPreparer(store, finderFunc(func() []agent.DocHit { return *f }), agent.FinderOpts{}, stats, nil, nil,
+	prep := docsPreparer(store, finderFunc(func() []agent.DocHit { return *f }), agent.FinderOpts{}, stats, nil, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q1", CreatedAt: 1})
 	prep.PrepareNotifications(ctx, "s")
@@ -147,7 +147,7 @@ func TestDocsPreparer_InlinesShortBodies(t *testing.T) {
 		store, _ := openSessionStore("")
 		ctx := context.Background()
 		var notes []DocsNote
-		prep := docsPreparer(store, fixedFinder{{DocID: "n", Title: "n", Score: 5, Line: "q?"}}, agent.FinderOpts{}, nil, nil, tc.fetch,
+		prep := docsPreparer(store, fixedFinder{{DocID: "n", Title: "n", Score: 5, Line: "q?"}}, agent.FinderOpts{}, nil, nil, tc.fetch, nil,
 			func(n DocsNote) { notes = append(notes, n) })
 		store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
 		prep.PrepareNotifications(ctx, "s")
@@ -155,5 +155,37 @@ func TestDocsPreparer_InlinesShortBodies(t *testing.T) {
 		if len(notes) != 1 || notes[0].Docs[0].Inline != tc.inline || len(es) != 1 || !strings.Contains(es[0], tc.want) {
 			t.Errorf("%s: notes=%+v entries=%q", tc.name, notes, es)
 		}
+	}
+}
+
+// Scores compare only within one index, so notes and documents each get their
+// own top-1 + margin: a clear note and a clear document both surface, even
+// when the document's raw score is higher (M2 live: 2.3e-5 vs 8.5e-6).
+func TestDocsPreparer_MarginPerGroup(t *testing.T) {
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	var notes []DocsNote
+	finder := fixedFinder{
+		{DocID: "/repo/suggest.go", Title: "suggest.go", Score: 2.3e-5},
+		{DocID: "/mem/stash.md", Title: "stash", Score: 8.5e-6},
+	}
+	group := func(id string) string {
+		if strings.HasPrefix(id, "/mem/") {
+			return groupMemory
+		}
+		return ""
+	}
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, group,
+		func(n DocsNote) { notes = append(notes, n) })
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "should I stash?", CreatedAt: 1})
+	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].Surfaced != 2 {
+		t.Fatalf("want one pass surfacing the note AND the document, got %+v", notes)
+	}
+	es := store.docsEntries()
+	if len(es) != 1 || !strings.Contains(es[0], "earlier session") || !strings.Contains(es[0], "stash") {
+		t.Errorf("the note must surface, labelled as a saved note: %q", es)
 	}
 }

@@ -106,8 +106,9 @@ type DocsNote struct {
 // plain onNotify — the UI is driven by onDocs with structure instead) and calls
 // onDocs with the found/surfaced counts + surfaced docs. Every pass, hit or
 // not, is recorded in stats (nil-safe); estimate sizes the appended entry;
-// fetch (nil-safe) reads a short document whole so it can be inlined.
-func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, onDocs func(DocsNote)) agent.NotificationPreparer {
+// fetch (nil-safe) reads a short document whole so it can be inlined; group
+// (nil-safe: one group) names the corpus a hit came from.
+func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, group func(docID string) string, onDocs func(DocsNote)) agent.NotificationPreparer {
 	kinds := opts.Kinds
 	if len(kinds) == 0 {
 		kinds = []agent.EntryKind{agent.KindUser, agent.KindAssistant}
@@ -198,31 +199,55 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 		// negative probe. BM25 scores have no fixed range — they move with the
 		// corpus — so the bar is a RATIO to the runner-up, not a score:
 		// top-1 with a 1.5× margin kept 14 of 19 right hits and 3 of 30 noise.
-		// A pass that fails the margin surfaces nothing and marks nothing
+		// A group that fails the margin surfaces nothing and marks nothing
 		// seen, so the same documents can win a later, clearer pass.
-		clear := len(kept) == 1 || (len(kept) > 1 && kept[0].Score >= surfaceMargin*kept[1].Score)
-		if clear {
-			h := kept[0]
+		//
+		// The rule runs once per GROUP (memory notes, everything else), because
+		// a score is only comparable within the index that produced it. Measured
+		// live (M2, 2026-10-21): the stash note scored 8.5e-6 in the 1-note
+		// memory index and suggest.go 2.3e-5 in the code index for "should I
+		// stash before rebasing" — one ranking let the code file win every time.
+		type win struct {
+			h agent.DocHit
+			n int // candidates in its group
+		}
+		var wins []win
+		for _, g := range groupHits(kept, group) {
+			if len(g) == 1 || g[0].Score >= surfaceMargin*g[1].Score {
+				wins = append(wins, win{g[0], len(g)})
+			}
+		}
+		if len(wins) > 0 {
 			// Model-facing content. A short document is put in WHOLE: what the
 			// pointer showed was its first line (a memory note's question), so
 			// the model had to call search to read the answer — a round trip
 			// to fetch fewer bytes than the round trip costs. A long one stays
 			// a pointer; nothing large enters the prompt unasked.
 			var b strings.Builder
-			body, inline := "", false
-			if fetch != nil {
-				body, inline = fetch(fctx, h.DocID, inlineMaxChars)
+			var infos []DocHitInfo
+			for i, w := range wins {
+				h := w.h
+				if i > 0 {
+					b.WriteString("\n\n")
+				}
+				body, inline := "", false
+				if fetch != nil {
+					body, inline = fetch(fctx, h.DocID, inlineMaxChars)
+				}
+				infos = append(infos, DocHitInfo{Title: h.Title, DocID: h.DocID, Line: h.Line, Score: h.Score, Inline: inline})
+				if group != nil && group(h.DocID) == groupMemory {
+					b.WriteString("A note an earlier session on this project saved may apply (it records what was true then):\n")
+				}
+				if inline {
+					fmt.Fprintf(&b, "Possibly relevant (%d candidate document(s); this one clearly ranked first): %q (id=%s, score=%.2f)\n", w.n, h.Title, h.DocID, h.Score)
+					b.WriteString(strings.TrimSpace(body))
+				} else {
+					fmt.Fprintf(&b, "%d possibly-relevant document(s); surfacing 1:\n", w.n)
+					fmt.Fprintf(&b, "- %q (id=%s, score=%.2f) — %s\n", h.Title, h.DocID, h.Score, h.Line)
+					b.WriteString("Call the search tool with an id to read a document if it helps.")
+				}
+				seenIDs[h.DocID] = true
 			}
-			info := DocHitInfo{Title: h.Title, DocID: h.DocID, Line: h.Line, Score: h.Score, Inline: inline}
-			if inline {
-				fmt.Fprintf(&b, "Possibly relevant (%d candidate document(s); this one clearly ranked first): %q (id=%s, score=%.2f)\n", len(kept), h.Title, h.DocID, h.Score)
-				b.WriteString(strings.TrimSpace(body))
-			} else {
-				fmt.Fprintf(&b, "%d possibly-relevant document(s); surfacing 1:\n", len(kept))
-				fmt.Fprintf(&b, "- %q (id=%s, score=%.2f) — %s\n", h.Title, h.DocID, h.Score, h.Line)
-				b.WriteString("Call the search tool with an id to read a document if it helps.")
-			}
-			seenIDs[h.DocID] = true
 			content := b.String()
 			if err := store.Append(ctx, sessionID, agent.Entry{
 				ID: uuid.New().String(), Kind: agent.KindNotification, Tag: tagDocs,
@@ -234,9 +259,9 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 			if estimate != nil {
 				tok = estimate(content)
 			}
-			stats.notePass(lat, len(kept), 1, len(content), tok)
+			stats.notePass(lat, len(kept), len(wins), len(content), tok)
 			if onDocs != nil {
-				onDocs(DocsNote{Found: len(kept), Surfaced: 1, Docs: []DocHitInfo{info},
+				onDocs(DocsNote{Found: len(kept), Surfaced: len(wins), Docs: infos,
 					Bytes: len(content), Tokens: tok, LatMS: lat.Milliseconds()})
 			}
 		} else {
@@ -250,4 +275,29 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 		mu.Unlock()
 		return nil
 	})
+}
+
+// groupMemory is the group of hits that are memory notes.
+const groupMemory = "memory"
+
+// groupHits splits score-sorted hits by group, keeping each group sorted and
+// the groups in order of first appearance. A nil group is one group.
+func groupHits(hits []agent.DocHit, group func(string) string) [][]agent.DocHit {
+	var order []string
+	by := map[string][]agent.DocHit{}
+	for _, h := range hits {
+		g := ""
+		if group != nil {
+			g = group(h.DocID)
+		}
+		if _, ok := by[g]; !ok {
+			order = append(order, g)
+		}
+		by[g] = append(by[g], h)
+	}
+	out := make([][]agent.DocHit, len(order))
+	for i, g := range order {
+		out[i] = by[g]
+	}
+	return out
 }

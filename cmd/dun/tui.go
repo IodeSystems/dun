@@ -3351,6 +3351,14 @@ func init() {
 		{"mcp", "[restart [server]]", "every MCP server at once: bare lists them, restart bounces the running ones", mcpSlash},
 		{"docker", "[on|off|status]", "exec backend: on (Docker), off (host), bare shows status", controlSlash("docker")},
 		{"worktree", "[status|new|commit]", "git: bare shows status (in place too), new isolates in a worktree, commit writes the message and asks", controlSlash("worktree")},
+		{"remember", "[text]", "save a note for later sessions on this project (needs /rag on); bare: the model picks what to keep", func(m *tuiModel, args []string) tea.Cmd {
+			if !m.proc.controlCmd("remember", strings.Join(args, " ")) {
+				m.append(stErr.Render("no engine right now — /reconnect first"))
+				return nil
+			}
+			m.append(stDim.Render("remembering…"))
+			return nil
+		}},
 		{"ship", "[verify|push|pr]", "ship the worktree: fetch, rebase, run checks, push (default: push)", controlSlash("ship")},
 		{"clear", "", "clear scrollback and start a fresh session log", func(m *tuiModel, _ []string) tea.Cmd {
 			m.proc.sendReset()

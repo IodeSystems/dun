@@ -349,6 +349,18 @@ func (h *Harness) rebuildTools() {
 	// child shares its parent's session file and thus its state.
 	toolDefs = append(toolDefs, sessionStateToolDef())
 	dispatch = withSessionState(dispatch, h, report)
+	// memory only while the docs server runs: a note is worth writing only
+	// because the proactive search brings it back (see memory.go).
+	h.memory.Store(nil)
+	if id := docsServerID(tools); id != "" {
+		h.srvMu.Lock()
+		docs, _ := h.spec(id)
+		h.srvMu.Unlock()
+		m := raglitMemory(docs, h.cfg.Workspace)
+		h.memory.Store(m)
+		toolDefs = append(toolDefs, memoryToolDef())
+		dispatch = withMemory(dispatch, h, m, report)
+	}
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
 	// the moment churn is created rather than whenever usage is next measured.
 	dispatch = withRecapWatch(dispatch, h)
@@ -429,7 +441,7 @@ func (h *Harness) rebuildTools() {
 		// a margin over the runner-up instead (see docsPreparer): one
 		// document per pass, inlined when short.
 		h.Session.Preparer = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
-			docsBodyFetcher(h.mgr, docsServerID(tools)), cfg.OnDocs)
+			docsBodyFetcher(h.mgr, docsServerID(tools)), h.memoryStore().group, cfg.OnDocs)
 	}
 }
 
