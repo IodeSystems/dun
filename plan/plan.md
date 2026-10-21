@@ -203,7 +203,7 @@ aw4 numbers below are aw4's, from its plan/commits — not re-measured here.
 stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
 10-16 prompt reorder or 10-18 headroom change.
 
-- **next**: #6 once a long real session shows its rewrite causes in `/context` → cache; #8 is the USER's call; #2 lands with item 9 M1.
+- **next**: #6 once a long real session shows its rewrite causes in `/context` → cache; #8 is the USER's call; #2: forks now share the turn's prefix (item 9 M1); fire-time lands with M2.
 - **risks**: usage `Cached` depends on the provider reporting it — it did
   through corrallm/llama.cpp (2026-10-20). Prefix comparison is one sha256 per
   message per build (unmeasured cost; ~700k chars/build in long sessions).
@@ -239,10 +239,9 @@ its WRITE path (recap-only → a fork).
 - Pre-compaction: only for EXTERNAL memory providers (`on_pre_compress`); the
   built-in memory has no pre-compaction save.
 
-**What dun has:** `suggest.go:56` is already the fork shape (the turn's shaped
-history + one appended user message) but sends `tools=nil` — on llama.cpp the
-tools are part of the rendered prompt, so this probably misses the cache.
-UNMEASURED. `sidecall.go` already records cached/processed per kind.
+**What dun has:** `suggest.go` is the fork shape (the turn's shaped history +
+one appended user message). Since M1 it sends the turn's system prompt and
+tools (`forkSystem`, `forkTools`). `sidecall.go` records cached/processed per kind.
 
 **The value is the out-of-band surfacing, not the writing (USER, 2026-10-19).**
 A memory is worth writing only if a raglit index can put it into the
@@ -336,10 +335,25 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   was relevant, how many surfaced that were not relevant, and the token cost
   per turn. If the right note does not arrive unasked, stop here — the rest of
   item 9 has no benefit.
-- **M1 measure the fork's cache cost.** Send the turn's exact tools on side
-  calls (refuse every call at dispatch); compare `suggest` cached vs processed
-  before/after on the local server. Also check a forced `ToolChoice` keeps the
-  prefix (it should change only the grammar, not the prompt).
+- **✅ M1 the fork's cache cost (2026-10-21).** Tools in `plan/m1/`: a
+  logging proxy captured dun's exact requests; `replay.py` re-sent a captured
+  6,592-token turn and then each fork variant right after it.
+  - Replay: no tools → 0 cached (3,878 processed); the turn's tools → 6,426
+    cached, 166 processed (reply + instruction). `tool_choice` `none`,
+    `required` and a named tool all keep the prefix (grammar only).
+    `response_format: json_object` + tools → HTTP 400 "failed to parse
+    grammar". A 3.5s gap still hit (no other traffic at the time).
+  - Live dun found a second break the replay hid: suggest built with an EMPTY
+    system prompt (`Build(ctx, sid, "")`) → 0 cached, 4,474 processed after a
+    5,202-token turn. Fixed: `forkSystem` mirrors the prompt `Turn` computes
+    (base + heredoc text + SlotSystemNote); `forkTools` sends the turn's tools
+    with `tool_choice: none` (none in heredoc mode, as the turn). Live after:
+    4,870 cached, 282 processed. `TestSuggest_SharesTheTurnsPrefix` runs a real
+    `Turn` and fails if the suggest prefix differs (checked: fails on the old
+    code, both transports).
+  - Not measured: a single-slot server under other traffic (does the fork
+    evict the turn's KV?); heredoc mode live; the gap past which the slot is
+    lost on this server.
 - **M2 fork + writer.** `h.fork(kind, instruction, allow, toolChoice)` from the
   suggest/rephrase pattern; same tools, dispatch whitelist; runs after the
   turn, never during one. Tool `memory` (add/patch/remove, match by substring
@@ -357,7 +371,7 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   default: fork before compaction, since that is where content is lost.
 - **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
 
-- **next**: M1 — measure the memory fork's cache cost, fired right after the reply (item 10 #2).
+- **next**: M2 — `h.fork` from the suggest shape (forkSystem/forkTools, refuse at dispatch), the `memory` tool and the note writer.
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
   attention — M0 measures it); on a single-slot llama-server the fork may evict
   the turn's KV cache (should cost only the fork's tail — M1); trigger-word
