@@ -354,13 +354,33 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   - Not measured: a single-slot server under other traffic (does the fork
     evict the turn's KV?); heredoc mode live; the gap past which the slot is
     lost on this server.
-- **M2 fork + writer.** `h.fork(kind, instruction, allow, toolChoice)` from the
-  suggest/rephrase pattern; same tools, dispatch whitelist; runs after the
-  turn, never during one. Tool `memory` (add/patch/remove, match by substring
-  like Hermes — not by id; see the `exec_2` lesson in the icebox). One note per
-  memory: markdown + frontmatter (question, session, commit, date) +
-  `[[links]]`. Writes directly (USER) — no approval gate; injection/Unicode
-  scan before write. Ingest into the index on write.
+- **✅ M2 fork + writer (2026-10-21).** Decisions (USER, 2026-10-21): notes
+  LOCAL first; trigger = the in-turn tool + `/remember`.
+  - `memory.go`: tool `memory` (add/replace/remove; replace/remove find the
+    note by an `old_text` phrase; optional `question`, `public` — `public` is
+    recorded only). One file per note in `~/.dun/memory/<project>/`
+    (frontmatter: question, date, session, commit, public), ingested into
+    index `memory` with the docs server's own store flags (daemon:
+    `--project`; embedded: `--embedded --home`). Scan refuses Cf/control
+    characters, chat-template tokens, >1200 chars. Offered only while the docs
+    server runs.
+  - `fork.go`: `h.fork` = turn prefix (forkSystem/forkTools) + one
+    instruction, tool forced (native: named tool_choice; heredoc: a grammar
+    over that tool), only the forced tool's calls run, holds turnMu.
+    `/remember [text]` (TUI slash, `-p` control `remember`).
+  - **Surfacing per group (found live)**: BM25 scores do not compare across
+    indexes — the stash note scored 8.5e-6 in the memory index, suggest.go
+    2.3e-5 in the code index, so the code file won every pass. The top-1 +
+    1.5× margin now runs per group (memory notes / the rest); a pass can
+    surface one of each. A note is labelled as saved by an earlier session.
+  - Live (scratch, embedded raglit, `plan/m2/`): bare `/remember` after
+    a stated rule wrote a good note (5,214 cached / 152 processed / 147
+    generated); a NEW session asking "should I stash before rebasing" got
+    the note inline and answered from it; an in-turn "remember for future
+    sessions" made the model call `memory` itself.
+  - Not tested: daemon mode live (only embedded); heredoc transport live;
+    replace/remove live; a note indexed while an embedded server is already
+    running (the M2 checks restarted the session).
 - **M3 triggers.** (a) explicit: `memory` is a normal tool in the turn, and
   `/remember <text>` for the user. (b) trigger words (USER; NOT in Hermes —
   grepped, absent): the assistant says "I'll remember", "should remember",
@@ -371,9 +391,13 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   default: fork before compaction, since that is where content is lost.
 - **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
 
-- **next**: M2 — `h.fork` from the suggest shape (forkSystem/forkTools, refuse at dispatch), the `memory` tool and the note writer.
+- **next**: M3 — trigger words (host regex over the finished reply → fork with `memory` forced); measure false positives on dun's own session logs first.
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
-  attention — M0 measures it); on a single-slot llama-server the fork may evict
+  attention — M0 measures it); with 1–2 notes the margin has no runner-up, so
+  ANY word overlap surfaces a note (seen live in M2) — the rule only works as
+  notes accumulate; `ingestWorkspace` ignores a docs server's `--embedded
+  --home` (pre-existing; memory uses `raglitStoreFlags`, the workspace ingest
+  does not); on a single-slot llama-server the fork may evict
   the turn's KV cache (should cost only the fork's tail — M1); trigger-word
   false positives ("remember" in ordinary text) fire useless forks; a model
   writing memories saves restated code facts; raglit `work` shows 6,123 failed
