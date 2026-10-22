@@ -220,7 +220,9 @@ type Session struct {
 	Resumed int    `json:"resumed"`
 }
 
-// History is a resumed conversation, for a client to render as scrollback.
+// History is the conversation so far, for a client to render as scrollback.
+// It REPLACES what the client shows rather than adding to it: a client that
+// got a snapshot also gets the history a respawned engine sends.
 type History struct {
 	Items []HistoryItem `json:"items"`
 }
