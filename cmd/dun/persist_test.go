@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -48,5 +49,21 @@ func TestPersistAndExit(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"type":"leave"`) {
 		t.Errorf("/exit sent %q, want a leave", out.String())
+	}
+}
+
+// The ready line names a handful of tools, not hundreds.
+func TestReadyLineCapsTheToolNames(t *testing.T) {
+	few := []string{"a", "b", "c"}
+	if got := readyLine(few); got != "ready — 3 tools: a, b, c" {
+		t.Errorf("few: %q", got)
+	}
+	var many []string
+	for i := 0; i < 172; i++ {
+		many = append(many, fmt.Sprintf("t%d", i))
+	}
+	got := readyLine(many)
+	if !strings.HasPrefix(got, "ready — 172 tools: t0, t1, t2, t3, t4, t5, t6, t7 … +164 more") || strings.Contains(got, "t8,") {
+		t.Errorf("many: %q", got)
 	}
 }

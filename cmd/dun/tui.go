@@ -1847,7 +1847,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				m.tools = append(m.tools, fmt.Sprint(t))
 			}
 		}
-		m.append(stDim.Render(fmt.Sprintf("ready — %d tools: %s", len(m.tools), strings.Join(m.tools, ", "))))
+		m.append(stDim.Render(readyLine(m.tools)))
 		// Show per-server start times for anything that took >1s.
 		if srvs, ok := ev["servers"].([]any); ok {
 			for _, sv := range srvs {
@@ -2910,6 +2910,20 @@ func (m *tuiModel) turnGap() {
 		return
 	}
 	m.convo = append(m.convo, convoEntry{collapsed: "", blank: true})
+}
+
+// readyToolsShown is how many tool names the ready line spells out before
+// it summarizes: a session with a large MCP server has hundreds, and every
+// resume used to print them all.
+const readyToolsShown = 8
+
+// readyLine is the line a ready event leaves in the conversation.
+func readyLine(tools []string) string {
+	if len(tools) <= readyToolsShown+4 { // a few more names beat "+3 more"
+		return fmt.Sprintf("ready — %d tools: %s", len(tools), strings.Join(tools, ", "))
+	}
+	return fmt.Sprintf("ready — %d tools: %s … +%d more (/mcp lists them by server)",
+		len(tools), strings.Join(tools[:readyToolsShown], ", "), len(tools)-readyToolsShown)
 }
 
 // exit is /exit: tell dund this client is leaving — it stops the engine
