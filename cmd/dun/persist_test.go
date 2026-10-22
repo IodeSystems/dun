@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/iodesystems/dun"
 )
 
@@ -103,5 +104,35 @@ func TestOfflineShowsTheSavedConversation(t *testing.T) {
 	m = m.handleEvent(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "what broke the build"}}})
 	if n := strings.Count(stripANSI(convoText(m)), "what broke the build"); n != 1 {
 		t.Fatalf("after dund's replay: shown %d times", n)
+	}
+}
+
+// ← from the input lands on the newest block every time, not where the last
+// visit left off.
+func TestLeftFromInputSelectsTheNewest(t *testing.T) {
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "ready"})
+	for _, msg := range []string{"one", "two", "three"} {
+		v.send(msg)
+		v.event(map[string]any{"type": "done"})
+	}
+	newest := len(v.m.convo) - 1
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	first := v.m.sel
+	if v.m.focus != focusConvo || first < 0 {
+		t.Fatalf("← did not enter the conversation: focus=%d sel=%d", v.m.focus, first)
+	}
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyUp})
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyUp})
+	if v.m.sel >= first {
+		t.Fatalf("↑ did not move up: %d → %d", first, v.m.sel)
+	}
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab}) // back to the input
+	if v.m.focus == focusConvo {
+		v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab})
+	}
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	if v.m.sel != first || first > newest {
+		t.Errorf("second ← selected %d, want the newest (%d)", v.m.sel, first)
 	}
 }

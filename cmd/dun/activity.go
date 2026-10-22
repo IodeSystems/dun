@@ -523,9 +523,9 @@ func (m *tuiModel) setFocus(z int) {
 		m.input.Focus()
 	case focusConvo:
 		m.input.Blur()
-		if m.sel < 0 || m.sel >= len(m.convo) {
-			m.sel = m.selSkipUp(len(m.convo) - 1)
-		}
+		// Always the newest block, not wherever the last visit left off: ←
+		// from the input means "what just happened" (USER 2026-10-22).
+		m.sel = m.selSkipUp(len(m.convo) - 1)
 	case focusActivity:
 		m.input.Blur()
 		if rows := m.actRows(); len(rows) > 0 && m.actIndex(rows) < 0 {
