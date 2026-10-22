@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
+
+	dun "github.com/iodesystems/dun"
 )
 
 // Numbers people read — token counts, chars, bytes — carry thousands
@@ -11,25 +12,10 @@ import (
 // 1234567 (USER 2026-10-22). Reports format with commaf instead of
 // fmt.Sprintf; ids, ports and years are not written with it.
 
-// grouped writes an integer with thousands separators.
+// grouped writes an integer with thousands separators (dun.Grouped, the one
+// implementation).
 func grouped[T ~int | ~int32 | ~int64 | ~uint | ~uint32 | ~uint64](n T) string {
-	s := strconv.FormatInt(int64(n), 10)
-	if n > 0 && uint64(n) > 1<<63-1 { // a uint64 past int64
-		s = strconv.FormatUint(uint64(n), 10)
-	}
-	neg := strings.HasPrefix(s, "-")
-	s = strings.TrimPrefix(s, "-")
-	var b strings.Builder
-	if neg {
-		b.WriteByte('-')
-	}
-	for i, c := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			b.WriteByte(',')
-		}
-		b.WriteRune(c)
-	}
-	return b.String()
+	return dun.Grouped(n)
 }
 
 // commaf is fmt.Sprintf, except an integer given to %d is written with

@@ -1770,15 +1770,7 @@ func reportHousekeeping(res dun.PruneResult, sessions []string) {
 	}
 }
 
-func humanBytes(n int64) string {
-	switch {
-	case n >= 1<<30:
-		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
-	case n >= 1<<20:
-		return fmt.Sprintf("%d MB", n/(1<<20))
-	}
-	return fmt.Sprintf("%d KB", n/(1<<10))
-}
+func humanBytes(n int64) string { return dun.HumanBytes(n) }
 
 func clip(s string, n int) string {
 	if len(s) <= n {
