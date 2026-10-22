@@ -70,8 +70,8 @@ export const SubscribeToken = graphql(`
 `);
 
 export const SessionEventsLive = graphql(`
-  subscription SessionEventsLive($session: String!, $after: Long, $principal: String!, $timestamp: Long!, $hmac: String!) {
-    dund_sessionEvents(session: $session, after: $after, principal: $principal, timestamp: $timestamp, hmac: $hmac) {
+  subscription SessionEventsLive($session: String!, $after: Long, $epoch: String, $principal: String!, $timestamp: Long!, $hmac: String!) {
+    dund_sessionEvents(session: $session, after: $after, epoch: $epoch, principal: $principal, timestamp: $timestamp, hmac: $hmac) {
       event
     }
   }

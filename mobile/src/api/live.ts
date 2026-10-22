@@ -8,7 +8,10 @@ import { SessionEventsLive, SubscribeToken } from '@/api/ops';
 // socket per app (RT-3): it opens on the first subscription, closes after the
 // last, and multiplexes every session followed. Each (re)subscribe mints a
 // fresh token through an authenticated call (RT-2) — the socket itself
-// carries no bearer — and resumes after the last seq received.
+// carries no bearer — and resumes after the last seq received, of the epoch
+// that numbered it: a restarted dund numbers from 1 again under a new epoch,
+// and a seq from the old one gets a snapshot instead of a replay from the
+// middle of the new numbering.
 
 export function makeLive(baseUrl: string): Client {
   const url = baseUrl.replace(/\/+$/, '').replace(/^http/, 'ws') + '/api/graphql';
@@ -21,10 +24,21 @@ export type Follow = {
   onUnauthorized: () => void;
 };
 
+/** Where a follower is in a session's events: what it resumes from. */
+export type Cursor = { after: string; epoch: string };
+
+/** The cursor after ev: a snapshot's after, else the event's seq. */
+export function advance(c: Cursor, ev: Record<string, unknown>): Cursor {
+  const epoch = typeof ev.epoch === 'string' ? ev.epoch : c.epoch;
+  if (ev.type === 'snapshot' && ev.after !== undefined) return { after: String(ev.after), epoch };
+  if (ev.seq !== undefined) return { after: String(ev.seq), epoch };
+  return c;
+}
+
 /** Follows a session until the returned stop is called. */
 export function followSession(gql: GraphQLClient, live: Client, id: string, f: Follow): () => void {
   let stopped = false;
-  let after = '0';
+  let at: Cursor = { after: '0', epoch: '' };
   let unsubscribe: (() => void) | null = null;
   let backoff = 1000;
 
@@ -50,7 +64,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
     unsubscribe = live.subscribe(
       {
         query: String(SessionEventsLive),
-        variables: { session: id, after, principal: tok.principal, timestamp: tok.timestamp, hmac: tok.hmac },
+        variables: { session: id, after: at.after, epoch: at.epoch, principal: tok.principal, timestamp: tok.timestamp, hmac: tok.hmac },
       },
       {
         next: (r) => {
@@ -64,8 +78,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
           }
           backoff = 1000;
           f.onConn('');
-          if (ev.type === 'snapshot' && ev.after !== undefined) after = String(ev.after);
-          else if (ev.seq !== undefined) after = String(ev.seq);
+          at = advance(at, ev);
           f.onEvent(ev);
         },
         error: (e) => {
@@ -74,7 +87,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
           retry(`connection lost — retrying (${msg})`);
         },
         // The service ended the stream (it fell behind, or restarted):
-        // resume after the last seq.
+        // resume after the last seq, in its epoch.
         complete: () => {
           unsubscribe = null;
           if (refused) return retry(`connection lost — retrying (${refused})`);
