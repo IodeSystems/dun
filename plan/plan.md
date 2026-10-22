@@ -101,6 +101,88 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◻ 13. Session service, a protocol, then a PWA (USER, 2026-10-21)
+
+Goal: a PWA (and later native apps) over dun sessions. First, four
+prerequisites (USER): (1) the session service separated from TUI rendering;
+(2) one service running many sessions; (3) service↔client messages that
+work as subscriptions, ready for HTTP/WS; (4) a React Native UI.
+
+USER's choices (2026-10-21):
+- React Native + react-native-web, so one codebase is the PWA and the
+  apps.
+- Remote from day one: TLS and real auth.
+- One `dun -p` child process per session, supervised by the service.
+- The TUI always attaches to the service (no direct-spawn mode).
+
+Where it stands:
+- The engine is already its own process. It speaks NDJSON over stdio:
+  ~28 event types out (message, tool_call, tool_result, ask, usage,
+  history, …), 7 command types in (user, answer, server, control, agent,
+  reset, …).
+- The TUI spawns the engine and owns its lifetime and restarts.
+- Events are untyped maps with no sequence numbers. A client can neither
+  resume from a point nor share a session with another client.
+- `dun -d` (the launcher) is a registry plus the rebuild watcher, not an
+  owner of engines.
+- `serveterm` streams the TUI's terminal to xterm.js, which is not
+  structured data.
+
+Slices, in order:
+- **S0 protocol.** A versioned envelope: event
+  `{v, session, seq, ts, type, …}` and command `{id, session, type, …}`,
+  with an ack or error per command id. Typed Go structs in one package.
+  TypeScript types generated from them for the RN client. `subscribe(from
+  seq)` replays from the service's log and then streams live; a client
+  that is too far behind gets a snapshot (from the session file — what
+  `history` does today) and continues from there. The transport is
+  neutral: stdio, unix socket and WS carry the same frames.
+- **S1 engine on the protocol.** `dun -p` emits envelopes. The TUI's
+  rendering reads only protocol events: no engine state rebuilt from
+  side channels, no assumption of being the only client.
+- **S2 service (`dund`).** It supervises the engines (spawn, restart, the
+  backoff the TUI does today), keeps a session registry (list, create in a
+  workspace, attach, detach, close) and a per-session event log with seq,
+  fans events out to N subscribers, and routes commands. Sessions outlive
+  clients. It absorbs the launcher (rebuild/reload push). Local
+  transport: a unix socket, 0600.
+- **S3 TUI attaches.** The TUI auto-starts the service and is a client over
+  the socket; reconnect/restart move into the service. `/sessions` lists
+  every session the service has, not just this workspace's.
+- **S4 remote.** HTTP+WS listener; TLS; OIDC JWT checked in dund (go-oidc
+  and JWKS, the same pattern as raglit's daemon, `authn.go`); principal
+  `<iss>#<sub>`; sessions owned by a principal. The TUI uses the device
+  flow, the PWA authorization code + PKCE. The same token can later go to
+  raglit (`RAGLIT_TOKEN_COMMAND`), which unblocks the remote memory layers
+  of item 9.
+- **S5 RN UI.** Expo + react-native-web: session list, conversation (text,
+  tool blocks, docs), input, ask_user answers, the activity zone. PWA
+  manifest and service worker. Native builds later from the same code.
+
+- **next:** S0 — write the protocol types from the existing event
+  inventory, with round-trip tests, before touching the engine.
+- **risks:**
+  - The TUI holds state today that may not be derivable from events (the
+    TUI's own restart counters, suggestions state, the replay mode); S1
+    finds out.
+  - The engine's stdin reader handles server/control commands inline,
+    mid-turn; command ids and acks must keep that.
+  - Per-session engines cost a process each (fine for a handful; measure
+    if dozens).
+  - Remote exposure widens what a stolen token can do: run commands in a
+    workspace.
+- **blocking decisions (USER, before S4):**
+  - (a) TLS where: dund terminates TLS itself, or it sits behind hz (which
+    routes by host and speaks h2 upstream). Validating the JWT in dund
+    holds either way.
+  - (b) Zitadel setup: an application for the PWA (PKCE), one for the
+    device flow, and the audience dund checks. These are created in your
+    Zitadel.
+  - (c) Several users, or one: is a session visible only to its owner, or
+    to an allow-list?
+- **optional extensions:** push notifications when a session asks; a
+  read-only share link; session hand-off between machines.
+
 ### ◐ 12. MCP servers: /mcp add, bearer auth, docs into RAG, skills, prompts (USER, 2026-10-21)
 
 USER's choices: Agent Skills plus MCP-served ones; docs ingested on add and
