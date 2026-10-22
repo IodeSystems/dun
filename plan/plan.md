@@ -292,10 +292,9 @@ Where it stands:
   Released 2026-10-21 (v2.1.3, v2.2.0); dun requires gwag/v2 v2.2.0, no
   replace.
 - ⏸ **gat.Subscribe → gat.RegisterSSE** (gwag-47, 2026-10-22). Deprecated
-  in gwag f4239bc + e7e69b4: local on gwag main, not pushed, not tagged, for
-  v2.3.0. **Blocking decision (USER):** when to migrate. Gwag-47 advises
-  waiting for v2.3.0; otherwise use a local replace and drop it on release.
-  Brief: gw/gat/sse.go, docs/gat.md "Streams".
+  in gwag v2.3.0 (released 2026-10-22, on proxy.golang.org, no replace
+  needed; dun is still on v2.2.0). **Blocking decision (USER):** when to
+  migrate. Brief: gw/gat/sse.go, docs/gat.md "Streams".
   - **What changes for dund:** `sessionEvents` becomes a GET route with
     text/event-stream that also serves GraphQL and gRPC. Today the
     REST long-poll at `/api/v1/sessions/{id}/events` (api.go:496) already
