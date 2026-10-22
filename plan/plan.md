@@ -329,6 +329,19 @@ Where it stands:
   skills) are built from it; a test pins the TUI's engine-routed slashes to
   the list. TUI-only commands (mouse, trace, perf, scrolldebug, reload,
   exit, help) stay in the TUI.
+- ✅ **Slash commands everywhere** (`d30c27d`, `bdcbeba`, `e4d6241`,
+  `d96c69b`): the engine publishes its commands (commands event: usage,
+  choices, group, current toggle state) and routes typed lines (control
+  "slash" → routeSlash). The TUI, the web and the phone all use that one
+  router — the TUI keeps only TUI-only commands (help, config, model,
+  context, reload, perf, mouse, scrolldebug, resume, trace, reconnect,
+  skill, exit, the /mcp add form); a test pins that none shadows an engine
+  command. Web: a `/` palette and a Session panel (toggles with state,
+  actions, text prefill); /close and /clear confirm; /close leaves and
+  forgets. /clear clears every client via the reset event. Verified:
+  unit tests, Playwright headless vs a test dund on localhost (sign-in,
+  palette, slash answer, panel chip, local refusal, live reply), ttydrive.
+  Not on the web yet: /model (a picker), /mcp add (form), /context.
 - **S4 open:** OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
   ✅ `dun dund service install` (`548864a`, CLI-10; the TUI starts the
