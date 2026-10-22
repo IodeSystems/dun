@@ -564,6 +564,8 @@ type McpLogin struct {
 // success.
 type Ack struct {
 	Error string `json:"error,omitempty"`
+	// Reused: a create with ReuseIdle handed back an existing session.
+	Reused bool `json:"reused,omitempty"`
 }
 
 // Snapshot replaces a replay the log can no longer give: a client that

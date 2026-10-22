@@ -226,6 +226,53 @@ func (s *Service) Create(principal, workspace string, args []string, resume stri
 	return n.id, s.saveRegistry()
 }
 
+// reuseHold is how long a session handed out by CreateOrReuse counts as
+// taken although nobody has subscribed to it yet: the client subscribes in
+// its next command, and a second client asking in between must not get the
+// same session.
+var reuseHold = 30 * time.Second
+
+// CreateOrReuse is Create for a plain `dun`: it hands back principal's most
+// recent session in workspace that no client is attached to, and creates one
+// only when there is none. Reused reports which happened.
+//
+// A session qualifies when its workspace is the same directory (a session in
+// another worktree or a subdirectory is another workspace), it was created
+// with the same engine flags (a `dun --docker` does not land in a host
+// session), no client is subscribed, and no other CreateOrReuse handed it out
+// within reuseHold. The choice is made under the service lock, so two clients
+// starting at once never get the same session. "Most recent" is by id, which
+// is the creation time.
+func (s *Service) CreateOrReuse(principal, workspace string, args []string) (id string, reused bool, err error) {
+	if err := checkArgs(args); err != nil {
+		return "", false, err
+	}
+	ws := filepath.Clean(workspace)
+	s.mu.Lock()
+	var pick *session
+	for _, ses := range s.sessions {
+		if ses.isMember(principal) && filepath.Clean(ses.workspace) == ws && ses.reusable(args) &&
+			(pick == nil || ses.id > pick.id) {
+			pick = ses
+		}
+	}
+	if pick != nil {
+		pick.claim()
+	}
+	s.mu.Unlock()
+	if pick != nil {
+		return pick.id, true, nil
+	}
+	id, err = s.Create(principal, workspace, args, "")
+	if err == nil {
+		// A new session is taken too, until its creator subscribes.
+		if ses, gerr := s.Get(principal, id); gerr == nil {
+			ses.claim()
+		}
+	}
+	return id, false, err
+}
+
 // Get is a session principal may use.
 func (s *Service) Get(principal, id string) (*session, error) {
 	s.mu.Lock()

@@ -59,6 +59,7 @@ type session struct {
 	gaveUp       bool
 	restarts     int
 	restartStart time.Time
+	claimed      time.Time // handed out by CreateOrReuse; see reuseHold
 
 	// What the engine is doing, from its events: the idle stop must not end
 	// a turn, a question waiting for a person, a job or a sub-agent. Its own
@@ -146,7 +147,29 @@ func (s *session) summary() proto.SessionSummary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return proto.SessionSummary{ID: s.id, Workspace: s.workspace, Owner: s.owner,
-		Members: slices.Clone(s.members), Running: s.running, LastSeq: s.log.Last(), Persist: s.persist}
+		Members: slices.Clone(s.members), Running: s.running, LastSeq: s.log.Last(), Persist: s.persist,
+		Attached: s.log.Subscribers()}
+}
+
+// reusable reports whether CreateOrReuse may hand this session to a client
+// starting with args: nobody attached, not just handed to another, same
+// flags.
+func (s *session) reusable(args []string) bool {
+	if s.log.Subscribers() > 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.claimed) >= reuseHold && slices.Equal(s.args, args)
+}
+
+// claim marks the session handed out, and used now: the empty-session
+// reaper must not take it before its client subscribes.
+func (s *session) claim() {
+	s.mu.Lock()
+	s.claimed = time.Now()
+	s.mu.Unlock()
+	s.touch()
 }
 
 func (s *session) persists() bool {

@@ -216,6 +216,15 @@ func (c *conn) handle(cmd proto.Command) {
 		// A handshake with a new engine takes seconds; the connection keeps
 		// reading meanwhile.
 		go func() {
+			if p.ReuseIdle && p.Resume == "" {
+				id, reused, err := svc.CreateOrReuse(c.who, p.Workspace, p.Args)
+				if err != nil || !reused {
+					c.ack(cmd, id, err)
+					return
+				}
+				c.reply(cmd, id, &proto.Ack{Reused: true})
+				return
+			}
 			id, err := svc.Create(c.who, p.Workspace, p.Args, p.Resume)
 			c.ack(cmd, id, err)
 		}()

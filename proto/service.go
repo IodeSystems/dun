@@ -37,6 +37,12 @@ type Create struct {
 	Workspace string   `json:"workspace"`
 	Args      []string `json:"args,omitempty"`
 	Resume    string   `json:"resume,omitempty"`
+	// ReuseIdle (with no Resume) answers with the caller's most recent
+	// session in Workspace that no client is attached to, created with the
+	// same Args, and creates one only when there is none. The ack's Reused
+	// says which. The pick is dund's, so two clients starting at once never
+	// get the same session.
+	ReuseIdle bool `json:"reuse_idle,omitempty"`
 }
 
 // Restart restarts the envelope's session's engine with new flags (same
@@ -123,6 +129,8 @@ type SessionSummary struct {
 	Running   bool     `json:"running"`
 	LastSeq   uint64   `json:"last_seq"`
 	Persist   bool     `json:"persist,omitempty"`
+	// Attached is how many clients follow the session right now.
+	Attached int `json:"attached"`
 }
 
 // EngineState is the session's engine process: started, exited, restarting
