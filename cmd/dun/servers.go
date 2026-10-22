@@ -207,11 +207,11 @@ func runAllServersCmd(ctx context.Context, h *dun.Harness, action string) string
 	states := h.Servers()
 	sort.Slice(states, func(i, j int) bool { return states[i].ID < states[j].ID })
 	if len(states) == 0 {
-		return "no servers configured"
+		return "no servers configured\n" + mcpAddHint
 	}
 	switch action {
 	case "", "status", "list":
-		return serverListing(states)
+		return serverListing(states) + "\n" + mcpAddHint
 	}
 
 	var lines, skipped []string
@@ -343,6 +343,9 @@ func catalogEvent(h *dun.Harness) *proto.Catalog {
 }
 
 // serverListing renders every server and its state, one per line.
+// mcpAddHint ends a bare /mcp: how to add one is otherwise invisible.
+const mcpAddHint = "add one: /mcp add — a form: an id, then a URL (https://…) or a command (e.g. npx some-mcp), then a bearer token for a URL"
+
 func serverListing(states []dun.ServerState) string {
 	var b strings.Builder
 	b.WriteString("mcp servers")
