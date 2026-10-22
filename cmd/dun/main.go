@@ -29,6 +29,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/proto"
 )
 
 // version is stamped at build time via -ldflags "-X main.version=…" (see the
@@ -476,39 +477,38 @@ func main() {
 	if *prog {
 		em = &emitter{}
 		in = newInputStream()
-		cfg.OnToken = func(s string) { em.emit(event{"type": "token", "text": s}) }
+		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
-			em.emit(event{"type": "tool_call", "tool": tool, "args": args})
-			em.emit(event{"type": "tool_result", "tool": tool, "result": result})
+			em.emit(&proto.ToolCall{Tool: tool, Args: args})
+			em.emit(&proto.ToolResult{Tool: tool, Result: result})
 		}
-		cfg.OnNotify = func(text string) { em.emit(event{"type": "notification", "text": text}) }
+		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text}) }
 		// A memory trigger reports like /remember does, so the UI shows it the
 		// same way.
 		cfg.OnMemoryTrigger = func(msg string) {
-			em.emit(event{"type": "control", "id": "remember", "action": "trigger", "message": msg})
+			em.emit(&proto.ControlEvent{ID: "remember", Action: "trigger", Message: msg})
 		}
 		// The whole list every time, not a delta: it is a handful of rows, and a
 		// UI that has to reconstruct state from deltas gets it wrong the first
 		// time an event is dropped.
-		cfg.OnAgents = func(as []dun.AgentInfo) { em.emit(event{"type": "agents", "agents": agentsToAny(as)}) }
-		cfg.OnJobs = func(js []dun.JobInfo) { em.emit(event{"type": "jobs", "jobs": jobsToAny(js)}) }
+		cfg.OnAgents = func(as []dun.AgentInfo) { em.emit(&proto.Agents{Agents: agentsProto(as)}) }
+		cfg.OnJobs = func(js []dun.JobInfo) { em.emit(&proto.Jobs{Jobs: jobsProto(js)}) }
 		// started is filled in once dun.Start returns. The breakdown callback is
 		// installed BEFORE the Harness exists and fires after it does, and the
 		// window division it wants to carry can only come from the Harness — so
 		// the reference is late-bound rather than captured. Nil-checked because
 		// an estimate can land before the assignment on a slow start.
 		cfg.OnSystemBreakdown = func(bd dun.SystemBreakdown) {
-			ev := event{"type": "context_cost", "system_tokens": bd.Total,
-				"system_exact": bd.Exact, "system_prompt": bd.Prompt,
-				"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)}
+			ev := &proto.ContextCost{SystemCost: systemCost(bd, bd.Total)}
 			if hp, _ := started.Load().(*dun.Harness); hp != nil {
-				addWindow(ev, hp.Window())
+				w := windowOf(hp.Window())
+				ev.Window = &w
 			}
 			em.emit(ev)
 		}
 		cfg.OnDocs = func(n dun.DocsNote) {
-			em.emit(event{"type": "notification", "kind": "docs", "found": n.Found, "surfaced": n.Surfaced, "docs": docsToAny(n.Docs),
-				"bytes": n.Bytes, "tokens": n.Tokens, "latency_ms": n.LatMS})
+			em.emit(&proto.Notification{Kind: "docs", Found: n.Found, Surfaced: n.Surfaced, Docs: docsProto(n.Docs),
+				Bytes: n.Bytes, Tokens: n.Tokens, LatencyMS: n.LatMS})
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { em.emit(retryEvent(n)) }
 		// The count, the citation and what REPLACED the span — never the removed
@@ -517,20 +517,19 @@ func main() {
 		// the only place a human learns it happened; it carries enough to judge
 		// the rewrite after the fact.
 		cfg.OnRecap = func(n dun.RecapNote) {
-			em.emit(event{"type": "recap", "entries": n.Entries, "chars": n.Chars,
-				"note": n.Note, "detail": n.Detail})
+			em.emit(&proto.Recap{Entries: n.Entries, Chars: n.Chars, Note: n.Note, Detail: n.Detail})
 		}
 		cfg.OnCompaction = func(n dun.CompactionNote) {
-			em.emit(event{"type": "compaction", "text": n.String(), "subsumed": n.Subsumed,
-				"tokens_before": n.TokensBefore, "tokens_after": n.TokensAfter,
-				"turn": n.Turn, "since_last_secs": n.SinceLastSecs, "cause": n.Cause})
+			em.emit(&proto.Compaction{Text: n.String(), Subsumed: n.Subsumed,
+				TokensBefore: n.TokensBefore, TokensAfter: n.TokensAfter,
+				Turn: n.Turn, SinceLastSecs: n.SinceLastSecs, Cause: n.Cause})
 		}
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
 			// Paused for the whole wait: the person deciding is not the turn
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
 			return withoutClock(func() (string, error) {
-				em.emit(event{"type": "ask", "question": q, "options": opts, "multi": multi})
+				em.emit(&proto.Ask{Question: q, Options: opts, Multi: multi})
 				select {
 				case a, ok := <-in.answers:
 					if !ok {
@@ -544,7 +543,7 @@ func main() {
 		}
 		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {
 			return withoutClock(func() (bool, error) {
-				em.emit(event{"type": "mount", "source": source, "name": name})
+				em.emit(&proto.Mount{Source: source, Name: name})
 				select {
 				case a, ok := <-in.answers:
 					if !ok {
@@ -593,18 +592,19 @@ func main() {
 		if em != nil {
 			// Fatal: there is no session yet, so "send a message to retry" would
 			// be advice with nothing to send it to.
-			em.emit(event{"type": "error", "error": err.Error(), "fatal": true})
+			em.emit(&proto.Error{Error: err.Error(), Fatal: true})
 		}
 		fatal(err)
 	}
 	defer h.Close()
 
 	if *prog {
-		em.emit(event{"type": "session", "id": sessionID, "resumed": h.Resumed()})
+		em.setSession(sessionID)
+		em.emit(&proto.Session{ID: sessionID, Resumed: h.Resumed()})
 		// Replay the loaded conversation so a resuming client rebuilds scrollback
 		// (the model already holds it as context; this is pure display).
 		if items := h.History(); len(items) > 0 {
-			em.emit(event{"type": "history", "items": items})
+			em.emit(&proto.History{Items: historyProto(items)})
 		}
 	} else if h.Resumed() > 0 {
 		fmt.Fprintf(os.Stderr, "dun: resumed session %s (%d entries)\n", sessionID, h.Resumed())
@@ -614,7 +614,7 @@ func main() {
 
 	if wt != nil && wt.Branch != "" {
 		if *prog {
-			em.emit(event{"type": "workspace", "path": effWS, "branch": wt.Branch})
+			em.emit(&proto.Workspace{Path: effWS, Branch: wt.Branch})
 		} else {
 			fmt.Fprintf(os.Stderr, "dun: worktree %s (branch %s)\n", effWS, wt.Branch)
 		}
@@ -707,8 +707,8 @@ type closeCtx struct {
 }
 
 func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string, cc closeCtx) {
-	em.emit(event{"type": "ready", "tools": h.ToolNames(), "servers": serversToAny(h.Servers()),
-		"hint": serverHint(h.Servers())})
+	em.emit(&proto.Ready{Tools: h.ToolNames(), Servers: serversProto(h.Servers()),
+		Hint: serverHint(h.Servers())})
 	em.emit(catalogEvent(h))
 	// Server commands (/rag, /lsp) are handled on the READER's goroutine, not
 	// here: this loop is blocked inside a turn most of the time, and "turn the
@@ -716,8 +716,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	// harness defers the actual tool-set swap to a turn boundary.
 	in.setServerCmd(func(alias, action string) {
 		msg := runServerCmd(ctx, h, alias, action)
-		em.emit(event{"type": "server", "id": alias, "action": action, "message": msg,
-			"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
+		em.emit(&proto.ServerEvent{ID: alias, Action: action, Message: msg,
+			Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
 		em.emit(catalogEvent(h))
 	})
 	in.setCtrlCmd(func(id, action string) {
@@ -733,8 +733,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// about the SESSION, not the harness: it needs the workspace root and
 		// the session id, which only this scope has.
 		if id == "close" {
-			em.emit(event{"type": "control", "id": id, "action": action,
-				"message": closeSession(cc.workspace, cc.sessionID, cc.wt)})
+			em.emit(&proto.ControlEvent{ID: id, Action: action,
+				Message: closeSession(cc.workspace, cc.sessionID, cc.wt)})
 			return
 		}
 		// /suggest: the ONLY thing that asks for suggestions now. The engine no
@@ -758,7 +758,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				}
 				msg = "memory: " + msg
 				h.Aside("[control/remember] " + msg)
-				em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			}()
 			return
 		}
@@ -771,15 +771,15 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				verb, _, _ := strings.Cut(action, " ")
 				msg := runMCPCmd(ctx, h, action)
 				h.Aside("[control/mcp] " + msg)
-				em.emit(event{"type": "server", "id": "mcp", "action": verb, "message": msg,
-					"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
+				em.emit(&proto.ServerEvent{ID: "mcp", Action: verb, Message: msg,
+					Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
 				em.emit(catalogEvent(h))
 			}()
 			return
 		}
 		// /memories: the project's notes and what has happened to them.
 		if id == "memories" {
-			em.emit(event{"type": "control", "id": id, "message": memoriesListing(h.Memories(), h.Remembering())})
+			em.emit(&proto.ControlEvent{ID: id, Message: memoriesListing(h.Memories(), h.Remembering())})
 			return
 		}
 		// An MCP prompt, run as a slash command: rendered here, sent back for
@@ -797,10 +797,10 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 					text, err = h.RenderPrompt(ctx, p.Server, p.Name, p.Args)
 				}
 				if err != nil {
-					em.emit(event{"type": "control", "id": id, "message": "prompt " + p.Server + ":" + p.Name + ": " + err.Error()})
+					em.emit(&proto.ControlEvent{ID: id, Message: "prompt " + p.Server + ":" + p.Name + ": " + err.Error()})
 					return
 				}
-				em.emit(event{"type": "prompt", "text": text})
+				em.emit(&proto.PromptText{Text: text})
 			}()
 			return
 		}
@@ -819,17 +819,17 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go func() {
 				msg := runControlCmd(ctx, h, id, action)
 				h.Aside("[control/" + id + "] " + msg)
-				em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			}()
 			return
 		}
 		msg := runControlCmd(ctx, h, id, action)
 		h.Aside("[control/" + id + "] " + msg)
-		em.emit(event{"type": "control", "id": id, "action": action, "message": msg})
+		em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 	})
 	in.setResetCb(func() {
 		h.Reset()
-		em.emit(event{"type": "reset"})
+		em.emit(&proto.ResetEvent{})
 	})
 	// Agent scope: the human reading a child's conversation, or steering it.
 	// `view` is a PULL — the child's callbacks are nil by design, so its
@@ -845,10 +845,9 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			if !ok {
 				return
 			}
-			em.emit(event{"type": "agent_history", "agent": n,
-				"prompt": h.AgentPrompt(n), "items": items})
+			em.emit(&proto.AgentHistory{Agent: n, Prompt: h.AgentPrompt(n), Items: historyProto(items)})
 		case "tell":
-			em.emit(event{"type": "agent_told", "agent": n, "message": h.AgentTell(n, content)})
+			em.emit(&proto.AgentTold{Agent: n, Message: h.AgentTell(n, content)})
 		}
 	})
 	// A message that arrives while a turn is running does NOT wait for it. It is
@@ -860,7 +859,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			return false
 		}
 		h.Say(text)
-		em.emit(event{"type": "queued", "text": text, "count": h.Queued()})
+		em.emit(&proto.Queued{Text: text, Count: h.Queued()})
 		return true
 	})
 	if firstTask != "" {
@@ -884,7 +883,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		}
 		if users == nil { // input is done; finish the background work, then leave
 			if !drainStep(ctx, h, em) {
-				em.emit(event{"type": "exit", "reason": "input closed"})
+				em.emit(&proto.Exit{Reason: "input closed"})
 				return
 			}
 			continue
@@ -893,7 +892,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		case content, ok := <-users:
 			if !ok {
 				if in.stopped() {
-					em.emit(event{"type": "exit", "reason": "stopped"})
+					em.emit(&proto.Exit{Reason: "stopped"})
 					return // explicit stop: don't wait for background jobs
 				}
 				// A closed channel is always ready in select, so stop selecting
@@ -910,7 +909,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			// Only ctrl-C reaches here now: --timeout bounds a turn, not the
 			// session. Say so, rather than dying silently and leaving the TUI to
 			// report a bare "engine exited".
-			em.emit(event{"type": "exit", "reason": "interrupted"})
+			em.emit(&proto.Exit{Reason: "interrupted"})
 			return
 		}
 	}
@@ -960,10 +959,10 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 		return false
 	}
 	if strings.TrimSpace(res.Reply) != "" {
-		em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
+		em.emit(&proto.Message{Role: "assistant", Content: res.Reply})
 	}
 	em.emit(usageEvent(h, res.Usage))
-	em.emit(event{"type": "done"})
+	em.emit(&proto.Done{})
 	return true
 }
 
@@ -972,52 +971,38 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 // three groups: what the turn cost, how the pre-conversation context breaks
 // down, and how the window is divided (see dun.WindowBudget) — the last of which
 // /context has no other way to learn.
-func usageEvent(h *dun.Harness, u agent.TokenUsage) event {
+func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
 	sysTokens, forcedCalls, notifLifted := h.SessionStats()
-	bd := h.SystemParts()
-	ev := event{"type": "usage", "total": u.Total, "active": u.Active,
-		"cached": u.Cached, "processed": u.Processed,
-		"generated": u.Generated, "turns": u.Turns,
-		"system_tokens": sysTokens, "forced_calls": forcedCalls,
-		"notifications_lifted": notifLifted,
-		"system_exact":         bd.Exact, "system_prompt": bd.Prompt,
-		"system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)}
-	addWindow(ev, h.Window())
-	// The non-turn LLM calls (suggest, rephrase, commit, rescue) — see
-	// dun.sidecall.go. Per-kind totals, so /context can say where the money
-	// went outside the conversation itself.
-	if sc := h.SideCalls(); len(sc) > 0 {
-		ev["side_calls"] = sc
+	return &proto.Usage{
+		Total: u.Total, Active: u.Active, Cached: u.Cached, Processed: u.Processed,
+		Generated: u.Generated, Turns: u.Turns,
+		ForcedCalls: forcedCalls, NotificationsLifted: notifLifted,
+		SystemCost: systemCost(h.SystemParts(), sysTokens),
+		Window:     windowOf(h.Window()),
+		// The non-turn LLM calls (suggest, rephrase, commit, rescue) — see
+		// dun.sidecall.go. Per-kind totals, so /context can say where the money
+		// went outside the conversation itself.
+		SideCalls: h.SideCalls(),
+		// Proactive RAG's cost — what it appended and what it has been re-sent
+		// as. See dun.surfacing.go.
+		Surfacing: h.Surfacing(),
+		// What the prompt cache did, by the kind of build before each round,
+		// and how often the prefix was rewritten. See dun.cachestats.go.
+		Cache: h.CacheStats(),
 	}
-	// Proactive RAG's cost — what it appended and what it has been re-sent as.
-	// See dun.surfacing.go.
-	if sf := h.Surfacing(); sf != nil {
-		ev["surfacing"] = sf
-	}
-	// What the prompt cache did, by the kind of build before each round, and
-	// how often the prefix was rewritten. See dun.cachestats.go.
-	if cs := h.CacheStats(); cs != nil {
-		ev["cache"] = cs
-	}
-	return ev
 }
 
-// addWindow puts the window division onto an event. Separate so context_cost can
+// windowOf is the window division for an event. Separate so context_cost can
 // carry it at STARTUP too: the window and the reserve are known before the first
 // turn, and a /context opened before anything has run should say so rather than
 // look like a session with no window.
-func addWindow(ev event, w dun.WindowBudget) {
-	ev["window"] = w.Window
-	ev["window_reserved"] = w.Reserved
-	ev["window_cap"] = w.Cap
-	ev["prompt_budget"] = w.PromptBudget
-	ev["prompt_tokens"] = w.Prompt
-	ev["prompt_overhead"] = w.Overhead
-	ev["chars_per_token"] = w.CharsPerToken
-	ev["ratio_measured"] = w.Measured
-	ev["ratio_rounds"] = w.Rounds
-	ev["window_cuts"] = w.Cuts
-	ev["window_folds"] = w.Folds
+func windowOf(w dun.WindowBudget) proto.Window {
+	return proto.Window{
+		Window: w.Window, WindowReserved: w.Reserved, WindowCap: w.Cap,
+		PromptBudget: w.PromptBudget, PromptTokens: w.Prompt, PromptOverhead: w.Overhead,
+		CharsPerToken: w.CharsPerToken, RatioMeasured: w.Measured, RatioRounds: w.Rounds,
+		WindowCuts: w.Cuts, WindowFolds: w.Folds,
+	}
 }
 
 // inputStream reads JSON events from stdin in a goroutine and routes them:
@@ -1309,9 +1294,9 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 		emitTurnError(ctx, h, em, turnErr(tctx, err))
 		return false
 	}
-	em.emit(event{"type": "message", "role": "assistant", "content": res.Reply})
+	em.emit(&proto.Message{Role: "assistant", Content: res.Reply})
 	em.emit(usageEvent(h, res.Usage))
-	em.emit(event{"type": "done"})
+	em.emit(&proto.Done{})
 	return true
 }
 
@@ -1331,7 +1316,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 // already drifted apart once.
 func emitTurnError(sessionCtx context.Context, h *dun.Harness, em *emitter, err error) {
 	h.RecordTurnError(err)
-	em.emit(event{"type": "error", "error": err.Error(), "fatal": sessionCtx.Err() != nil})
+	em.emit(&proto.Error{Error: err.Error(), Fatal: sessionCtx.Err() != nil})
 }
 
 // emitSuggestions asks for likely next user messages and emits them
@@ -1350,30 +1335,26 @@ func emitSuggestions(ctx context.Context, h *dun.Harness, em *emitter) {
 	if err != nil || len(sugs) == 0 {
 		return
 	}
-	items := make([]any, len(sugs))
+	items := make([]proto.Suggestion, len(sugs))
 	for i, s := range sugs {
-		items[i] = map[string]any{"text": s.Text, "prob": s.Prob}
+		items[i] = proto.Suggestion{Text: s.Text, Prob: s.Prob}
 	}
-	em.emit(event{"type": "suggestions", "items": items})
+	em.emit(&proto.Suggestions{Items: items})
 }
 
 // retryEvent renders a RetryNote as a -p event. Durations travel as milliseconds
 // (JSON has no duration type, and a client that wants to count down needs the
 // number, not a formatted string) alongside the ready-made one-liner in "text".
-func retryEvent(n dun.RetryNote) event {
-	ev := event{"type": "retry", "scope": n.Scope, "kind": n.Kind,
-		"attempt": n.Attempt, "status": n.Status,
-		"delay_ms": n.Delay.Milliseconds(), "elapsed_ms": n.Elapsed.Milliseconds(),
-		"budget_ms": n.Budget.Milliseconds(),
-		"reason":    n.Reason, "detail": n.Detail, "text": n.String(),
-		"server_asked": n.ServerAsked}
+func retryEvent(n dun.RetryNote) *proto.Retry {
+	ev := &proto.Retry{Scope: n.Scope, Kind: n.Kind, Attempt: n.Attempt, Status: n.Status,
+		DelayMS: n.Delay.Milliseconds(), ElapsedMS: n.Elapsed.Milliseconds(),
+		BudgetMS: n.Budget.Milliseconds(),
+		Reason:   n.Reason, Detail: n.Detail, Text: n.String(), ServerAsked: n.ServerAsked,
+		Queue: n.Queue}
 	// Queue numbers only when the provider actually reported them: a plain 429
 	// carries none, and emitting zeros claims a queue of no slots.
 	if n.Queued() {
-		ev["capacity"], ev["in_flight"], ev["waiting"] = n.Capacity, n.InFlight, n.Waiting
-	}
-	if n.Queue != "" {
-		ev["queue"] = n.Queue
+		ev.Capacity, ev.InFlight, ev.Waiting = n.Capacity, n.InFlight, n.Waiting
 	}
 	return ev
 }
@@ -1389,20 +1370,21 @@ func retryGlyph(n dun.RetryNote) string {
 	return "⏳"
 }
 
-type event map[string]any
-
 // emitter writes one JSON event per line to stdout, serialized (tokens stream
 // from the same goroutine as turns today, but the mutex keeps it safe if that
 // changes).
 type emitter struct {
-	mu  sync.Mutex
-	w   io.Writer // nil → stdout; a test points this at a buffer
-	enc *json.Encoder
+	mu      sync.Mutex
+	w       io.Writer // nil → stdout; a test points this at a buffer
+	enc     *json.Encoder
+	session string
 }
 
-func (e *emitter) emit(ev event) {
+func (e *emitter) emit(payload any) {
+	ev := proto.NewEvent(payload)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	ev.Session, ev.TS = e.session, time.Now()
 	if e.enc == nil {
 		w := e.w
 		if w == nil {
@@ -1411,6 +1393,14 @@ func (e *emitter) emit(ev event) {
 		e.enc = json.NewEncoder(w)
 	}
 	_ = e.enc.Encode(ev)
+}
+
+// setSession stamps every later event with the session id. Events before it
+// (a fatal start error) carry none: there is no session yet.
+func (e *emitter) setSession(id string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.session = id
 }
 
 func shortArgs(args map[string]any) string {
@@ -1428,37 +1418,42 @@ func shortArgs(args map[string]any) string {
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// docsToAny renders surfaced docs as JSON-friendly maps for the -p event.
-func agentsToAny(as []dun.AgentInfo) []any {
-	out := make([]any, 0, len(as))
+// agentsProto is every sub-agent, for the agents event.
+func agentsProto(as []dun.AgentInfo) []proto.AgentInfo {
+	out := make([]proto.AgentInfo, 0, len(as))
 	for _, a := range as {
-		out = append(out, map[string]any{
-			"id": a.ID, "model": a.Model, "state": a.State, "status": a.Status,
-			"prompt": a.Prompt, "tokens": a.Tokens, "seconds": a.Seconds, "blocked": a.Blocked,
-		})
+		out = append(out, proto.AgentInfo{ID: a.ID, Model: a.Model, State: a.State, Status: a.Status,
+			Prompt: a.Prompt, Tokens: a.Tokens, Seconds: a.Seconds, Blocked: a.Blocked})
 	}
 	return out
 }
 
-// jobsToAny mirrors agentsToAny — the whole list every time, for the same
+// jobsProto mirrors agentsProto — the whole list every time, for the same
 // reason. Times cross as unix seconds so the UI can tick a running job's clock
 // without the engine pushing a row per second.
-func jobsToAny(js []dun.JobInfo) []any {
-	out := make([]any, 0, len(js))
+func jobsProto(js []dun.JobInfo) []proto.JobInfo {
+	out := make([]proto.JobInfo, 0, len(js))
 	for _, j := range js {
-		out = append(out, map[string]any{
-			"id": j.ID, "command": j.Command, "log": j.Log, "state": j.State,
-			"bytes": j.Bytes, "started": j.Started, "ended": j.Ended,
-			"code": j.Code, "muted": j.Muted,
-		})
+		out = append(out, proto.JobInfo{ID: j.ID, Command: j.Command, Log: j.Log, State: j.State,
+			Bytes: j.Bytes, Started: j.Started, Ended: j.Ended, Code: j.Code, Muted: j.Muted})
 	}
 	return out
 }
 
-func docsToAny(docs []dun.DocHitInfo) []any {
-	out := make([]any, 0, len(docs))
+func docsProto(docs []dun.DocHitInfo) []proto.DocHit {
+	out := make([]proto.DocHit, 0, len(docs))
 	for _, d := range docs {
-		out = append(out, map[string]any{"title": d.Title, "id": d.DocID, "line": d.Line, "score": d.Score, "inline": d.Inline})
+		out = append(out, proto.DocHit{Title: d.Title, ID: d.DocID, Line: d.Line, Score: d.Score, Inline: d.Inline})
+	}
+	return out
+}
+
+// historyProto is a conversation as replayable items.
+func historyProto(items []dun.HistoryItem) []proto.HistoryItem {
+	out := make([]proto.HistoryItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, proto.HistoryItem{Kind: it.Kind, Content: it.Content, Tool: it.Tool,
+			CallID: it.CallID, Args: it.Args})
 	}
 	return out
 }
@@ -1530,13 +1525,14 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
-// systemPartsEvent renders the context breakdown for the event stream. The TUI
+// systemCost renders the context breakdown for the event stream. The TUI
 // is fed by events rather than holding the harness, so the parts travel as
 // plain maps beside the totals they add up to.
-func systemPartsEvent(bd dun.SystemBreakdown) []any {
-	out := make([]any, 0, len(bd.Parts))
+func systemCost(bd dun.SystemBreakdown, total int) proto.SystemCost {
+	parts := make([]proto.ContextPart, 0, len(bd.Parts))
 	for _, p := range bd.Parts {
-		out = append(out, map[string]any{"name": p.Name, "tokens": p.Tokens})
+		parts = append(parts, proto.ContextPart{Name: p.Name, Tokens: p.Tokens})
 	}
-	return out
+	return proto.SystemCost{SystemTokens: total, SystemExact: bd.Exact, SystemPrompt: bd.Prompt,
+		SystemShared: bd.Shared, SystemParts: parts}
 }

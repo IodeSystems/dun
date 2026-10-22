@@ -11,6 +11,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/proto"
 )
 
 // Tool servers the user can turn on and off: /rag (raglit, the docs index) and
@@ -326,8 +327,19 @@ func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 
 // catalogEvent tells the UI which skills and MCP prompts are in reach, so
 // /skill can list them and each prompt can be a slash command.
-func catalogEvent(h *dun.Harness) event {
-	return event{"type": "catalog", "skills": h.Skills(), "prompts": h.Prompts()}
+func catalogEvent(h *dun.Harness) *proto.Catalog {
+	c := &proto.Catalog{Skills: []proto.Skill{}, Prompts: []proto.Prompt{}}
+	for _, s := range h.Skills() {
+		c.Skills = append(c.Skills, proto.Skill{Name: s.Name, Description: s.Description, Source: s.Source, UserOnly: s.UserOnly})
+	}
+	for _, p := range h.Prompts() {
+		pp := proto.Prompt{Server: p.Server, Name: p.Name, Description: p.Description}
+		for _, a := range p.Arguments {
+			pp.Arguments = append(pp.Arguments, proto.PromptArgument{Name: a.Name, Description: a.Description, Required: a.Required})
+		}
+		c.Prompts = append(c.Prompts, pp)
+	}
+	return c
 }
 
 // serverListing renders every server and its state, one per line.
@@ -428,17 +440,11 @@ func serverHint(states []dun.ServerState) string {
 	return strings.Join(lines, "\n")
 }
 
-// serversToAny renders server states for a JSON event.
-func serversToAny(states []dun.ServerState) []map[string]any {
-	out := make([]map[string]any, 0, len(states))
+// serversProto renders server states for an event.
+func serversProto(states []dun.ServerState) []proto.ServerState {
+	out := make([]proto.ServerState, 0, len(states))
 	for _, st := range states {
-		m := map[string]any{
-			"id": st.ID, "running": st.Running, "auto": st.Auto, "tools": st.Tools,
-		}
-		if st.Err != "" {
-			m["err"] = st.Err
-		}
-		out = append(out, m)
+		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err})
 	}
 	return out
 }

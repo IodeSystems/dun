@@ -32,47 +32,28 @@ func decodeStrict[T any](t *testing.T, ndjson []byte) []T {
 	return out
 }
 
-// The engine's event builders, as they are today, decode into the proto
-// structs with no field left over. Moving the engine onto the structs (S1)
-// must not change what a client reads.
-func TestProtoCoversEngineEvents(t *testing.T) {
+// The emitter frames every payload: v, ts, the type, and the session once
+// it is known.
+func TestEmitterFramesEvents(t *testing.T) {
 	var buf bytes.Buffer
 	em := &emitter{w: &buf}
-	em.emit(retryEvent(dun.RetryNote{Scope: "request", Kind: "429", Attempt: 2, Status: 429,
-		Delay: time.Second, Elapsed: 2 * time.Second, Budget: time.Minute, Reason: "rate", Detail: "slow down",
-		Capacity: 4, InFlight: 4, Waiting: 2, Queue: "rejected", ServerAsked: true}))
-	em.emit(retryEvent(dun.RetryNote{Scope: "turn", Kind: "recovered"}))
+	em.emit(&proto.Error{Error: "early", Fatal: true})
+	em.setSession("s1")
+	em.emit(retryEvent(dun.RetryNote{Scope: "request", Kind: "429", Delay: time.Second, Capacity: 4, Queue: "rejected"}))
 	emitTurnError(context.Background(), nil, em, errors.New("boom"))
-	em.emit(event{"type": "agents", "agents": agentsToAny([]dun.AgentInfo{{ID: 1, Model: "m", State: "running",
-		Status: "s", Prompt: "p", Tokens: 3, Seconds: 4, Blocked: true}})})
-	em.emit(event{"type": "jobs", "jobs": jobsToAny([]dun.JobInfo{{ID: 1, Command: "make", Log: "/l", State: "ok",
-		Bytes: 9, Started: 1, Ended: 2, Code: 1, Muted: true}})})
-	em.emit(event{"type": "notification", "kind": "docs", "found": 2, "surfaced": 1,
-		"docs":  docsToAny([]dun.DocHitInfo{{Title: "t", DocID: "d", Line: "l", Score: 0.5, Inline: true}}),
-		"bytes": 10, "tokens": 3, "latency_ms": int64(12)})
-	bd := dun.SystemBreakdown{Exact: true, Prompt: 100, Shared: 5, Total: 200,
-		Parts: []dun.ContextPart{{Name: "shell", Tokens: 50}}}
-	cc := event{"type": "context_cost", "system_tokens": bd.Total, "system_exact": bd.Exact,
-		"system_prompt": bd.Prompt, "system_shared": bd.Shared, "system_parts": systemPartsEvent(bd)}
-	addWindow(cc, dun.WindowBudget{Window: 1000, Reserved: 100, Cap: 900, PromptBudget: 800, Prompt: 300,
-		Overhead: 20, CharsPerToken: 3.5, Measured: true, Rounds: 4, Cuts: 1, Folds: 1})
-	em.emit(cc)
-	em.emit(event{"type": "server", "id": "docs", "action": "on", "message": "m",
-		"servers": serversToAny([]dun.ServerState{{ID: "docs", Running: true, Auto: true, Tools: 3, Err: "e"}}),
-		"tools":   []string{"a"}})
-	em.emit(event{"type": "suggestions", "items": []any{map[string]any{"text": "t", "prob": 0.5}}})
-
 	evs := decodeStrict[proto.Event](t, buf.Bytes())
-	if len(evs) != 9 {
-		t.Fatalf("decoded %d of 9 events", len(evs))
+	if len(evs) != 3 {
+		t.Fatalf("decoded %d of 3 events", len(evs))
 	}
-	r := evs[0].Payload.(*proto.Retry)
-	if r.DelayMS != 1000 || r.Queue != "rejected" || r.Waiting != 2 {
+	if evs[0].Session != "" || evs[1].Session != "s1" || evs[1].V != proto.Version || evs[1].TS.IsZero() {
+		t.Errorf("envelope: %+v / %+v", evs[0], evs[1])
+	}
+	r := evs[1].Payload.(*proto.Retry)
+	if r.DelayMS != 1000 || r.Queue != "rejected" || r.Capacity != 4 {
 		t.Errorf("retry: %+v", r)
 	}
-	c := evs[6].Payload.(*proto.ContextCost)
-	if c.Window == nil || c.Window.Window != 1000 || c.SystemParts[0].Name != "shell" {
-		t.Errorf("context_cost: %+v", c)
+	if e := evs[2].Payload.(*proto.Error); e.Error != "boom" || e.Fatal {
+		t.Errorf("error: %+v", e)
 	}
 }
 
