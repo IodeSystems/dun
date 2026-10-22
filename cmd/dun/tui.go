@@ -1666,7 +1666,19 @@ func (m *tuiModel) armIdleSuggest() {
 
 // idleSuggestPossible is the cheap precondition: could this session ever ask?
 func (m tuiModel) idleSuggestPossible() bool {
-	return m.suggestMode != "off" && !m.quitting && len(m.convo) > 0
+	return m.suggestMode != "off" && !m.quitting && m.asked()
+}
+
+// asked reports whether the conversation on screen holds a user message.
+// Before one there is nothing to predict a next message from: a new session
+// (or one just cleared) asks for no suggestions and shows none.
+func (m tuiModel) asked() bool {
+	for _, e := range m.convo {
+		if e.userText != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // idleSuggestReady is every condition that must hold to spend the call.
@@ -1686,7 +1698,7 @@ func (m tuiModel) idleSuggestReady() bool {
 	if m.busy || m.starting || m.asking || m.inspecting || m.searching || m.quitting {
 		return false
 	}
-	if len(m.convo) == 0 { // nothing to predict from
+	if !m.asked() { // nothing to predict from
 		return false
 	}
 	return strings.TrimSpace(m.input.Value()) == "" &&
@@ -1698,7 +1710,7 @@ func (m tuiModel) idleSuggestReady() bool {
 // requires that the input is empty (the default). In "on" mode it shows even
 // when the user is typing (so suggestions are always visible).
 func (m tuiModel) suggestActive() bool {
-	if m.suggestMode == "off" {
+	if m.suggestMode == "off" || !m.asked() {
 		return false
 	}
 	return m.focus == focusInput && !m.busy && !m.starting && !m.asking &&
@@ -1999,6 +2011,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// screen dirty; a tick renders at most renderHz. See renderTickMsg.
 		m.renderDue = true
 	case "suggestions":
+		// Not before anything was asked: there is nothing to predict from,
+		// and a session that was just cleared must not show the old ones.
+		if !m.asked() {
+			break
+		}
 		m.suggestions = parseSuggestionItems(ev["items"])
 		m.suggestSel = 0
 		m.refresh()
@@ -2311,6 +2328,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.activeTool = ""
 		m.sel = -1
 		m.busy, m.asking = false, false
+		m.suggestions, m.suggestSel = nil, 0 // they were about the conversation just cleared
 		m.settleAsk()
 		m.append(stDim.Render("session cleared — fresh start"))
 		m.refresh()

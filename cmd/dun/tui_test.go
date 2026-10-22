@@ -567,6 +567,7 @@ func TestTUI_Suggestions(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.handleEvent(evMsg{"type": "user", "content": "hi"})
 	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
 		map[string]any{"text": "run the tests", "prob": 0.7},
 		map[string]any{"text": "commit it", "prob": 0.2},
@@ -594,6 +595,43 @@ func TestTUI_Suggestions(t *testing.T) {
 	}
 }
 
+// Before anything is asked there is nothing to predict: a fresh session shows
+// no rows and no ghost text, even if suggestions arrive. /clear (the reset
+// event) drops the ones showing, and none come back until the next message.
+func TestTUI_NoSuggestionsBeforeTheFirstMessage(t *testing.T) {
+	sugs := evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "run the tests", "prob": 0.7}}}
+	shown := func(m tuiModel) bool {
+		return m.suggestActive() || strings.Contains(stripANSI(m.View()), "run the tests")
+	}
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = resized(m, 80, 24)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.handleEvent(sugs)
+	if len(m.suggestions) != 0 || shown(m) {
+		t.Fatal("a fresh session shows suggestions")
+	}
+
+	m = m.handleEvent(evMsg{"type": "user", "content": "hi"})
+	m = m.handleEvent(evMsg{"type": "done"})
+	m = m.handleEvent(sugs)
+	if !shown(m) {
+		t.Fatal("after the first exchange suggestions show as before")
+	}
+
+	m = m.handleEvent(evMsg{"type": "reset"})
+	if len(m.suggestions) != 0 || shown(m) {
+		t.Fatal("/clear left the old suggestions showing")
+	}
+	m = m.handleEvent(sugs)
+	if shown(m) {
+		t.Fatal("a cleared session shows suggestions before a message")
+	}
+	m.lastKeyAt = time.Now().Add(-2 * idleSuggestDelay)
+	if m.idleSuggestPossible() || m.idleSuggestReady() {
+		t.Fatal("a cleared session would ask the engine for suggestions")
+	}
+}
+
 // Suggestions are predictions, not conversation: their text is dimmed, the
 // highlighted one a step brighter, on dark and light terminals alike; the
 // composer's ghost text stays dim behind the caret.
@@ -605,6 +643,7 @@ func TestTUI_SuggestionsAreDimmed(t *testing.T) {
 		m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 		m = resized(m, 80, 24)
 		m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+		m = m.handleEvent(evMsg{"type": "user", "content": "hi"})
 		m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
 			map[string]any{"text": "run the tests", "prob": 0.7},
 			map[string]any{"text": "commit it", "prob": 0.2},
@@ -644,6 +683,7 @@ func TestTUI_ArrowNav(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m.appendUser("hi")  // suggestions need something asked
 	m.append("a reply") // a plain convo message to land on
 
 	// left at the front of an (empty) input hops to the conversation.
@@ -2492,8 +2532,8 @@ func suggestReq(t *testing.T, setup func(*tuiModel)) (tuiModel, string) {
 	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
-	m.starting = false                             // a live session: servers are up
-	m.convo = []convoEntry{{collapsed: "a reply"}} // something to predict from
+	m.starting = false                                              // a live session: servers are up
+	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}} // something to predict from
 	// The turn ends: the idle clock starts here.
 	m = m.handleEvent(evMsg{"type": "done"})
 	// setup runs AFTER `done` because it describes the state at the moment the
@@ -2548,7 +2588,7 @@ func TestSuggest_KeystrokeRestartsTheWait(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
-	m.convo = []convoEntry{{collapsed: "a reply"}}
+	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}}
 	m = m.handleEvent(evMsg{"type": "done"})
 
 	// A key arrives now, so the deadline is 3s from now, not from `done`.
@@ -2577,7 +2617,7 @@ func TestSuggest_NoTimerWhenItCouldNeverFire(t *testing.T) {
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}); cmd != nil {
 		t.Error("an empty conversation has nothing to suggest from — no timer")
 	}
-	m.convo = []convoEntry{{collapsed: "a reply"}}
+	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}}
 	m.suggestMode = "off"
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}); cmd != nil {
 		t.Error("suggestions off — no timer")

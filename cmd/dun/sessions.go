@@ -141,6 +141,7 @@ func (m *tuiModel) switchSession(id string) tea.Cmd {
 	m.startingStart = time.Now()
 	m.fatalErr, m.exitAnnounced = "", false
 	m.restarts, m.restartStart = 0, time.Now()
+	m.suggestions, m.suggestSel = nil, 0 // the session left's, not the one joined
 	m.sessionID = id
 	m.skipHistory = false // this one we DO want replayed — it is a new transcript
 	if ws := m.sessWS[id]; ws != "" {
