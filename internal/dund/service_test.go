@@ -417,3 +417,29 @@ func TestSetFlag(t *testing.T) {
 		t.Errorf("remove: %v", got)
 	}
 }
+
+func TestSignInTokens(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	tok, err := svc.MintSignIn(alice, "a@example.com", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := svc.CheckSignIn(tok); !ok || p != alice {
+		t.Fatalf("check: %q %v", p, ok)
+	}
+	for _, bad := range []string{"", "dun_s_", tok + "x", "dun_" + tok[6:]} {
+		if _, ok := svc.CheckSignIn(bad); ok {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	old, _ := svc.MintSignIn(alice, "a@example.com", -time.Second)
+	if _, ok := svc.CheckSignIn(old); ok {
+		t.Error("a lapsed token was accepted")
+	}
+	if err := svc.RevokeSignIn(tok); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := svc.CheckSignIn(tok); ok {
+		t.Error("a revoked token was accepted")
+	}
+}

@@ -61,6 +61,7 @@ type Server struct {
 	api      huma.API
 	signer   *subSigner
 	releases string
+	sso      *sso // nil: sign-in with the identity provider is off
 }
 
 // Options are what the HTTP surface serves besides the API.
@@ -71,6 +72,9 @@ type Options struct {
 	// web) served at / from the filesystem (WEB-5); without it / is the
 	// embedded stopgap page.
 	WebRoot string
+	// OIDC, when its issuer and client id are set, turns on sign-in with
+	// the identity provider (oidc.go).
+	OIDC OIDC
 	// Releases, when set, is where tools/release-android publishes:
 	// android/latest.json and the APKs, served under /releases with /dun.apk
 	// the latest, and announced by /api/v1/hello.
@@ -120,6 +124,9 @@ func SDL() (string, error) {
 func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 	r := chi.NewRouter()
 	s := &Server{svc: svc, owner: o.Owner, signer: newSigner(), releases: o.Releases}
+	if o.OIDC.on() {
+		s.sso = newSSO(o.OIDC, svc, o.Owner)
+	}
 	webRoot := o.WebRoot
 	if auth {
 		r.Use(s.authenticate)
@@ -128,6 +135,10 @@ func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(indexHTML)
+	}
+	if s.sso != nil {
+		r.Get(loginPath, s.sso.login)
+		r.Get(callbackRP, s.sso.callback)
 	}
 	if o.Releases != "" {
 		r.Handle(releasesPath+"/*", http.StripPrefix(releasesPath, releaseFiles(o.Releases)))
@@ -179,15 +190,31 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || !s.svc.CheckToken(strings.TrimSpace(tok)) {
+		tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		who, ok := s.principalFor(strings.TrimSpace(tok))
+		if !ok {
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"title":"Unauthorized","status":401,"detail":"a valid bearer token is required"}`))
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, s.owner)))
+		ctx := context.WithValue(r.Context(), principalKey{}, who)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, bearerKey{}, strings.TrimSpace(tok))))
 	})
+}
+
+type bearerKey struct{}
+
+// principalFor is whom a bearer token stands for: the local token and a
+// sign-in token both stand for the owner.
+func (s *Server) principalFor(tok string) (string, bool) {
+	if tok == "" {
+		return "", false
+	}
+	if s.svc.CheckToken(tok) {
+		return s.owner, true
+	}
+	return s.svc.CheckSignIn(tok)
 }
 
 // who is the caller, or a 401 when the request was somehow not
@@ -207,6 +234,8 @@ type HelloOutput struct {
 		Protocol int    `json:"protocol"`
 		// Android is the latest released APK; version_code 0 when none.
 		Android AndroidRelease `json:"android"`
+		// SignIn is whether /auth/login (the identity provider) is on.
+		SignIn bool `json:"sign_in"`
 	}
 }
 
@@ -332,6 +361,7 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 			o := &HelloOutput{}
 			o.Body.Version, o.Body.Protocol = Version, proto.Version
 			o.Body.Android = s.latestRelease()
+			o.Body.SignIn = s.sso != nil
 			return o, nil
 		})
 	gat.Register(api, g, huma.Operation{OperationID: "listSessions", Method: http.MethodGet, Path: "/api/v1/sessions",
@@ -408,6 +438,18 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 				return nil, err
 			}
 			return ok(), fail(s.svc.SwitchModel(p, in.ID, in.Body.URL, in.Body.Model))
+		})
+	gat.Register(api, g, huma.Operation{OperationID: "signOut", Method: http.MethodPost, Path: "/api/v1/sign-out",
+		Summary: "End this sign-in token (the local token is not ended this way)."},
+		func(ctx context.Context, _ *struct{}) (*OKOutput, error) {
+			if _, err := who(ctx); err != nil {
+				return nil, err
+			}
+			tok, _ := ctx.Value(bearerKey{}).(string)
+			if strings.HasPrefix(tok, "dun_s_") {
+				return ok(), fail(s.svc.RevokeSignIn(tok))
+			}
+			return ok(), nil
 		})
 	gat.Register(api, g, huma.Operation{OperationID: "stopSession", Method: http.MethodPost, Path: "/api/v1/sessions/{id}/stop",
 		Summary: "Stop the session's engine; the next use starts it again."},

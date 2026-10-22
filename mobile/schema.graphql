@@ -14,6 +14,7 @@ type DundMutationNamespace {
   putUI(body: dund_UIInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "putUI")
   restartSession(body: dund_RestartInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "restartSession")
   sendMessage(body: dund_MessageInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "sendMessage")
+  signOut: dund_OKOutputBody @derived(operationId: "signOut")
   stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
   subscribeToken(id: String!): dund_TokenOutputBody @derived(operationId: "subscribeToken")
   switchModel(body: dund_SwitchModelInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "switchModel")
@@ -42,6 +43,7 @@ type DundV1MutationNamespace {
   putUI(body: dund_UIInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "putUI")
   restartSession(body: dund_RestartInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "restartSession")
   sendMessage(body: dund_MessageInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "sendMessage")
+  signOut: dund_OKOutputBody @derived(operationId: "signOut")
   stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
   subscribeToken(id: String!): dund_TokenOutputBody @derived(operationId: "subscribeToken")
   switchModel(body: dund_SwitchModelInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "switchModel")
@@ -133,6 +135,7 @@ type dund_EventsOutputBody {
 type dund_HelloOutputBody {
   android: dund_AndroidRelease!
   protocol: Long!
+  signIn: Boolean!
   version: String!
 }
 

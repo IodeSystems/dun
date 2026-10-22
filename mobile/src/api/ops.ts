@@ -152,3 +152,13 @@ export const Hello = graphql(`
     }
   }
 `);
+
+export const SignOut = graphql(`
+  mutation SignOut {
+    dund {
+      signOut {
+        ok
+      }
+    }
+  }
+`);

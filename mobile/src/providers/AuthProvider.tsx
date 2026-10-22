@@ -3,7 +3,9 @@ import type { Client as LiveClient } from 'graphql-ws';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { makeClient } from '@/api/client';
+import { SignOut } from '@/api/ops';
 import { makeLive } from '@/api/live';
+import { landing } from '@/lib/landing';
 import { loadBaseUrl, loadToken, saveBaseUrl, saveToken } from '@/lib/storage';
 
 type Auth = {
@@ -26,6 +28,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void (async () => {
+      // Back from the identity provider on the web: keep the token it
+      // brought (this page's origin is the service).
+      const l = landing();
+      if (l?.token) {
+        await saveBaseUrl(window.location.origin);
+        await saveToken(l.token);
+      }
       setBaseUrl(await loadBaseUrl());
       setToken(await loadToken());
       setReady(true);
@@ -40,9 +49,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // A sign-in token is ended on dund too; the local token is not (it is
+    // dund's own credential — `dun dund token` replaces it).
+    if (token?.startsWith('dun_s_') && baseUrl) {
+      await makeClient(baseUrl, token).request(SignOut).catch(() => undefined);
+    }
     await saveToken(null);
     setToken(null);
-  }, []);
+  }, [token, baseUrl]);
 
   const client = useMemo(() => (token && baseUrl ? makeClient(baseUrl, token) : null), [baseUrl, token]);
   const live = useMemo(() => (token && baseUrl ? makeLive(baseUrl) : null), [baseUrl, token]);

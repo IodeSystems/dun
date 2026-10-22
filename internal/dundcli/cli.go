@@ -105,6 +105,7 @@ func newRoot() *cobra.Command {
 
 func serveCmd(l *loader) *cobra.Command {
 	var bin, httpAddr, webRoot, releases string
+	var oidcCfg dundapi.OIDC
 	var checkOnly bool
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -118,10 +119,17 @@ func serveCmd(l *loader) *cobra.Command {
 			if checkOnly {
 				return check(l, bin, httpAddr, webRoot)
 			}
-			return serve(cmd.Context(), l, bin, httpAddr, dundapi.Options{WebRoot: webRoot, Releases: releases})
+			if (oidcCfg.Issuer == "") != (oidcCfg.ClientID == "") || (oidcCfg.Issuer != "" && len(oidcCfg.Allow) == 0) {
+				return errors.New("sign-in needs --oidc-issuer, --oidc-client-id and at least one --oidc-allow email")
+			}
+			return serve(cmd.Context(), l, bin, httpAddr, dundapi.Options{WebRoot: webRoot, Releases: releases, OIDC: oidcCfg})
 		},
 	}
 	cmd.Flags().StringVar(&bin, "dun", "", "the dun binary engines run (default: beside dund, else on PATH)")
+	cmd.Flags().StringVar(&oidcCfg.Issuer, "oidc-issuer", "", "sign-in: the identity provider (e.g. https://id.iodesystems.com, no trailing slash)")
+	cmd.Flags().StringVar(&oidcCfg.ClientID, "oidc-client-id", "", "sign-in: the provider's client id for dund (PKCE, no secret)")
+	cmd.Flags().StringArrayVar(&oidcCfg.Allow, "oidc-allow", nil, "sign-in: an email that may sign in (repeatable); each sees the owner's sessions")
+	cmd.Flags().StringVar(&oidcCfg.Redirect, "oidc-redirect", "", "sign-in: the callback URL (default: /auth/callback on the address the browser used)")
 	cmd.Flags().StringVar(&releases, "releases", "", "serve Android releases from here (tools/release-android): /releases, /dun.apk, announced in /api/v1/hello")
 	cmd.Flags().StringVar(&webRoot, "web-root", "", "serve this built client at / (mobile: pnpm export:web); default: the built-in stopgap page")
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "prove these settings can run, then exit (the unit's ExecStartPre)")
