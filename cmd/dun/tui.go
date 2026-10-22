@@ -257,6 +257,10 @@ type convoEntry struct {
 	// holdH is the least height this block is drawn at: a run's latest call
 	// keeps the tallest height the run has shown (toolrun.go). 0 = natural.
 	holdH int
+	// askText is the question of an ask_user row; askOpen while it waits for
+	// its answer (askpark.go).
+	askText string
+	askOpen bool
 	// provisional marks a message that was typed mid-turn and is queued for
 	// delivery. It appears in the conversation with a dimmed style so the user
 	// knows it landed but hasn't been delivered to the model yet. When the turn
@@ -594,6 +598,9 @@ type tuiModel struct {
 	paging       bool            // the pager has the convo pane (pager.go; owns the keys)
 	holding      bool            // some block has a holdH (a run is in progress)
 	pulse        int             // the selection band's pulse step (band.go)
+	askParked    bool            // a question is open but its picker was put away (askpark.go)
+	flashText    string          // a short status-line note (askpark.go)
+	flashUntil   time.Time       // when it goes
 	pulsePending bool            // a pulse tick is scheduled
 	bandRaw      []string        // the selected block's rows before the band, for a pulse step
 	bandAt       int             // the pane row they start at
@@ -953,11 +960,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.scopeAgent != 0 {
 				return m, m.leaveAgentScope()
 			}
-			if m.disableExit {
-				return m, nil // exit disabled — use /exit
-			}
-			m.quitting = true // deliberate exit: do not respawn the engine
-			return m, tea.Quit
+			// esc is "one level out", and there is no level out of dun: it
+			// says how to leave instead of leaving.
+			return m, m.exitFlash()
 		case "/":
 			if m.focus == focusConvo {
 				m.searching, m.searchActive, m.matches = true, false, nil
@@ -1010,6 +1015,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.refresh()
 					}
 					return m, nil
+				}
+				// The open question, put away earlier, comes back.
+				if m.askParked && m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].askOpen {
+					return m.reopenAsk()
 				}
 				// Thinking (and anything else with a page) opens in the pager.
 				if m.openPager(m.sel) {
@@ -1377,6 +1386,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateScrollPin()
 		return m, cmd
 
+	case flashMsg:
+		return m, nil // the redraw is the point: an expired note leaves the status line
+
 	case pulseMsg:
 		m.pulsePending = false
 		if m.pulseWanted() {
@@ -1423,18 +1435,16 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true // deliberate exit: do not respawn the engine
 		return m, tea.Quit
 	case "esc":
-		if m.noting || m.customAnswer {
+		// One level out: from a detail or a custom answer back to the options,
+		// and from the options out of the question — which stays open.
+		if m.noting || (m.customAnswer && len(m.askOptions) > 0) {
 			m.noting, m.customAnswer = false, false
 			m.input.Reset()
 			m.input.Blur()
 			m.refresh()
 			return m, nil
 		}
-		if m.disableExit {
-			return m, nil
-		}
-		m.quitting = true // deliberate exit: do not respawn the engine
-		return m, tea.Quit
+		return m.parkAsk()
 	case "enter":
 		switch {
 		case m.noting:
@@ -2050,7 +2060,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.asking, m.noting, m.customAnswer = true, false, false
 		m.askSel, m.askNote = 0, ""
 		m.input.Blur()
-		m.append(stAsk.Render("❓ " + str(ev["question"])))
+		m.settleAsk() // a new question replaces any parked one
+		q := convoEntry{askText: str(ev["question"]), askOpen: true}
+		q.renderAsk(false)
+		m.convo = append(m.convo, q)
+		m.refresh()
 		m.askOptions = nil
 		if opts, ok := ev["options"].([]any); ok {
 			for _, o := range opts {
@@ -2119,6 +2133,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// The open question is settled, whoever answered it.
 		// The client that answered has already closed it; on another, it is
 		// still open and closes now.
+		m.settleAsk()
 		m.appendUser(str(ev["value"]))
 		if m.asking {
 			m = m.clearAsk()
@@ -2237,6 +2252,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.activeTool = ""
 		m.sel = -1
 		m.busy, m.asking = false, false
+		m.settleAsk()
 		m.append(stDim.Render("session cleared — fresh start"))
 		m.refresh()
 	case "compaction":
@@ -2258,16 +2274,19 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.fatalErr, m.exitAnnounced = "", false
 		case "restarting":
 			m.busy, m.asking = false, false
+			m.settleAsk()
 			m.busyStart = time.Time{}
 			m.restarts = int(evNum(ev["restarts"]))
 			m.skipHistory = true // it will replay what is already on screen
 			m.append(stErr.Render(str(ev["reason"]) + " — restarting it; the session is kept"))
 		case "gave_up":
 			m.busy, m.asking = false, false
+			m.settleAsk()
 			m.fatalErr = str(ev["reason"]) + " — gave up restarting it"
 			m.append(stErr.Render(m.fatalErr + "\n/reconnect to try again · your conversation is saved"))
 		case "stopped":
 			m.busy, m.asking = false, false
+			m.settleAsk()
 		}
 		m.refresh()
 	case "ui_state":
@@ -2703,20 +2722,24 @@ func (m tuiModel) View() string {
 		status = stErr.Render(m.fatalErr)
 	case m.starting:
 		status = m.spin.View() + stDim.Render(" spawning tool servers…"+m.startingElapsed())
+	case m.flashing():
+		status = stNote.Render(m.flashText)
 	case m.paging:
 		status = stDim.Render(m.pg.hint())
 	case m.asking && len(m.askOptions) == 0:
-		status = stAsk.Render("❓ type your answer · enter send · esc/ctrl+c quit")
+		status = stAsk.Render("❓ type your answer · enter send · esc answer later")
 	case m.asking && m.askMulti:
-		status = stAsk.Render("❓ ↑/↓ move · enter toggle · ✓ done to submit · esc/ctrl+c quit")
+		status = stAsk.Render("❓ ↑/↓ move · enter toggle · ✓ done to submit · esc answer later")
 	case m.asking:
-		status = stAsk.Render("❓ ↑/↓ choose · enter select · n add detail · esc/ctrl+c quit")
+		status = stAsk.Render("❓ ↑/↓ choose · enter select · n add detail · esc answer later")
 	case m.searching:
 		status = m.search.View() + stDim.Render(fmt.Sprintf("  (%d matches · enter to navigate)", len(m.matches)))
 	case m.searchActive:
 		status = stDim.Render(fmt.Sprintf("match %d/%d  ·  ↑/↓ prev/next · / new search · esc exit", m.matchPos+1, len(m.matches)))
 	case m.paletteActive():
 		status = stDim.Render("command  ·  ↑/↓ select · tab complete · enter run · esc/type to edit")
+	case m.askParked && m.focus != focusConvo:
+		status = stAsk.Render("❓ a question is waiting") + stDim.Render(" · tab, select it, enter to answer · "+m.exitHint())
 	case m.retry != "":
 		status = stNote.Render("⏳ "+m.retry) + stDim.Render(m.retryCountdown()+"  ("+m.exitHint()+")")
 	case m.busy:
@@ -4081,6 +4104,7 @@ const (
 // session id and carry on with the scrollback still on screen.
 func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	m.busy, m.starting, m.asking = false, false, false
+	m.askParked = false
 	m.busyStart = time.Time{}
 	reason := m.fatalErr
 	if reason == "" {

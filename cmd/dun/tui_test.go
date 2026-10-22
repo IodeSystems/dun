@@ -656,8 +656,8 @@ func TestTUI_DisableExit(t *testing.T) {
 	if _, cmd := m.Update(kCtrlC); cmd != nil {
 		t.Fatal("ctrl+c should be ignored when disableExit")
 	}
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc}); cmd != nil {
-		t.Fatal("esc should be ignored when disableExit")
+	if nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc}); nm.(tuiModel).quitting || nm.(tuiModel).flashText != "to exit: /exit" {
+		t.Fatalf("esc should not quit, and should say /exit: %q", nm.(tuiModel).flashText)
 	}
 	// /exit is a deliberate exit — still works.
 	q := typeStr(m, "/exit")
@@ -3720,13 +3720,13 @@ func TestActivity_LeavingAgentScope(t *testing.T) {
 	})
 }
 
-// esc still quits when there is no scope to leave — the exit path must not
-// have been traded away for the fix above.
-func TestTUI_EscStillQuitsOutsideAgentScope(t *testing.T) {
+// esc outside agent scope has no level left to leave: it says how to exit
+// rather than exiting.
+func TestTUI_EscOutsideAgentScopeSaysHowToExit(t *testing.T) {
 	m := withActivity(t)
 	m = key(m, kEsc)
-	if !m.quitting {
-		t.Error("esc outside agent scope should still quit")
+	if m.quitting || !strings.Contains(m.flashText, "ctrl+c or /exit") {
+		t.Errorf("esc quit (%v) or did not say how to exit: %q", m.quitting, m.flashText)
 	}
 }
 
