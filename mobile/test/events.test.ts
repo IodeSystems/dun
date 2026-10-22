@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import { apply, applySnapshot, empty, parseLine, replaceWith, suggest, type View } from '../src/lib/events';
+import { apply, applySnapshot, empty, filterModels, parseLine, replaceWith, suggest, type View } from '../src/lib/events';
 
 const run = (evs: Record<string, unknown>[], v: View = empty) => evs.reduce(apply, v);
 
@@ -37,9 +37,26 @@ test('history replaces what is shown, never adds', () => {
 test('an ask stays open until answered, from any client', () => {
   const v = run([{ type: 'ask', question: 'colour?', options: ['red', 'blue'] }]);
   expect(v.ask).toEqual({ question: 'colour?', options: ['red', 'blue'] });
-  const w = apply(v, { type: 'answered', value: 'blue' });
+  const w = run([
+    { type: 'answered', value: 'blue' },
+    { type: 'tool_call', tool: 'ask_user', args: { question: 'colour?', options: ['red', 'blue'], recommended: 'blue' } },
+    { type: 'tool_result', tool: 'ask_user', result: 'blue' },
+  ], v);
   expect(w.ask).toBeNull();
-  expect(w.items.at(-1)).toMatchObject({ kind: 'user', text: 'blue' });
+  expect(w.items.map((i) => i.kind)).toEqual(['question', 'user']);
+  expect(w.items[0]).toMatchObject({ text: 'colour?', recommended: 'blue' });
+});
+
+test('an ask_user in history renders as the question and its answer, not JSON', () => {
+  const v = apply(empty, {
+    type: 'history',
+    items: [
+      { kind: 'tool_call', tool: 'ask_user', args: { question: 'Did you mean to switch models?' } },
+      { kind: 'tool_result', tool: 'ask_user', content: 'yes' },
+    ],
+  });
+  expect(v.items.map((i) => i.kind)).toEqual(['question', 'user']);
+  expect(v.items[0]).toMatchObject({ text: 'Did you mean to switch models?', options: [] });
 });
 
 test('a snapshot renders the conversation then applies its state events', () => {
@@ -91,4 +108,21 @@ test('a confirmed close marks the session closed; a reset clears it', () => {
   const w = apply(run([{ type: 'commands', items: cmds }, { type: 'user', content: 'x' }]), { type: 'reset' });
   expect(w.items).toHaveLength(0);
   expect(w.commands).toHaveLength(2);
+});
+
+test('/model is the client picker; models and settings are kept', () => {
+  expect(parseLine('/model qwen 27', [])).toEqual({ kind: 'model', query: 'qwen 27' });
+  const v = run([
+    { type: 'settings', model: 'm1', provider: 'local', url: 'http://l' },
+    { type: 'models', providers: [{ name: 'local', url: 'http://l', ids: ['qwen-27b', 'llama'] }, { name: 'or', url: 'http://o', ids: ['qwen-7b'] }] },
+  ]);
+  expect(v.settings?.model).toBe('m1');
+  expect(filterModels(v.models!, 'qwen').map((r) => r.id)).toEqual(['qwen-27b', 'qwen-7b']);
+  expect(filterModels(v.models!, 'or qwen').map((r) => r.provider)).toEqual(['or']);
+});
+
+test('a queued message loses its mark when the turn that read it ends', () => {
+  const v = run([{ type: 'turn' }, { type: 'user', content: 'also this', queued: true }]);
+  expect(v.items[0]).toMatchObject({ queued: true });
+  expect(apply(v, { type: 'done' }).items[0]).toMatchObject({ queued: false });
 });

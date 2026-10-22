@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
@@ -81,6 +82,27 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 		{Name: "clear", Group: "session", Description: "clear the conversation and start a fresh session log"},
 		{Name: "close", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript"},
 	}}
+}
+
+// modelsEvent lists every saved provider's models, fetched in parallel.
+// Keys stay here; a client gets names, URLs and ids.
+func modelsEvent() *proto.Models {
+	ps := loadConfig().providerList()
+	out := make([]proto.ModelProvider, len(ps))
+	var wg sync.WaitGroup
+	for i, p := range ps {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			mp := proto.ModelProvider{Name: p.Name, URL: p.URL, IDs: fetchModels(p.URL, p.Key)}
+			if len(mp.IDs) == 0 {
+				mp.Error = "no model list from " + p.URL
+			}
+			out[i] = mp
+		}()
+	}
+	wg.Wait()
+	return &proto.Models{Providers: out}
 }
 
 // slashRoutes are what routeSlash needs from the engine.

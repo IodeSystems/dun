@@ -379,3 +379,41 @@ func TestBusyHoldsBackARestart(t *testing.T) {
 		t.Fatal("a finished job is not")
 	}
 }
+
+// A model switch replaces --model and --url and keeps every other flag.
+func TestSwitchModelKeepsOtherFlags(t *testing.T) {
+	svc, sp, _ := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), []string{"--worktree", "--model", "a", "--url=http://old"}, "")
+	ses, _ := svc.Get(alice, id)
+	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 1000)
+	defer sub.Close()
+	if err := svc.SwitchModel(alice, id, "http://new", "b"); err != nil {
+		t.Fatal(err)
+	}
+	next(t, sub, "ready")
+	a := sp.spawnArgs()
+	if got := a[len(a)-1]; !slices.Equal(got, []string{"--worktree", "--model", "b", "--url", "http://new", "--resume", id}) {
+		t.Fatalf("args: %v", got)
+	}
+	if err := svc.SwitchModel(bob, id, "http://x", "c"); err != ErrNoSession {
+		t.Fatalf("bob: %v", err)
+	}
+}
+
+func TestSetFlag(t *testing.T) {
+	for _, tc := range []struct {
+		in   []string
+		want []string
+	}{
+		{nil, []string{"--model", "m"}},
+		{[]string{"--model", "x", "--pr"}, []string{"--pr", "--model", "m"}},
+		{[]string{"--model=x"}, []string{"--model", "m"}},
+	} {
+		if got := setFlag(tc.in, "--model", "m"); !slices.Equal(got, tc.want) {
+			t.Errorf("%v: %v", tc.in, got)
+		}
+	}
+	if got := setFlag([]string{"--model", "x", "--pr"}, "--model", ""); !slices.Equal(got, []string{"--pr"}) {
+		t.Errorf("remove: %v", got)
+	}
+}

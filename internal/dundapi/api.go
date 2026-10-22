@@ -237,6 +237,14 @@ type ControlInput struct {
 	}
 }
 
+type SwitchModelInput struct {
+	SessionPath
+	Body struct {
+		URL   string `json:"url" doc:"the provider's base URL, from the models event"`
+		Model string `json:"model"`
+	}
+}
+
 type RestartInput struct {
 	SessionPath
 	Body struct {
@@ -370,6 +378,15 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 				return nil, err
 			}
 			return ok(), fail(s.svc.Restart(p, in.ID, in.Body.Args))
+		})
+	gat.Register(api, g, huma.Operation{OperationID: "switchModel", Method: http.MethodPost, Path: "/api/v1/sessions/{id}/model",
+		Summary: "Restart the session's engine on another model (its other flags kept)."},
+		func(ctx context.Context, in *SwitchModelInput) (*OKOutput, error) {
+			p, err := who(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return ok(), fail(s.svc.SwitchModel(p, in.ID, in.Body.URL, in.Body.Model))
 		})
 	gat.Register(api, g, huma.Operation{OperationID: "stopSession", Method: http.MethodPost, Path: "/api/v1/sessions/{id}/stop",
 		Summary: "Stop the session's engine; the next use starts it again."},

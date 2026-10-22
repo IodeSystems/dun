@@ -96,3 +96,23 @@ export const ForgetSession = graphql(`
     }
   }
 `);
+
+export const AskModels = graphql(`
+  mutation AskModels($id: String!) {
+    dund {
+      control(id: $id, body: { kind: control, target: "models", action: "" }) {
+        ok
+      }
+    }
+  }
+`);
+
+export const SwitchModel = graphql(`
+  mutation SwitchModel($id: String!, $url: String!, $model: String!) {
+    dund {
+      switchModel(id: $id, body: { url: $url, model: $model }) {
+        ok
+      }
+    }
+  }
+`);

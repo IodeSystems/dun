@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -368,6 +369,38 @@ func (s *Service) Forget(principal, id string) error {
 		return err
 	}
 	return s.saveRegistry()
+}
+
+// SwitchModel restarts a session's engine on another model and provider
+// URL, keeping its other flags.
+func (s *Service) SwitchModel(principal, id, url, model string) error {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return err
+	}
+	ses.mu.Lock()
+	args := setFlag(setFlag(ses.args, "--model", model), "--url", url)
+	ses.mu.Unlock()
+	return s.Restart(principal, id, args)
+}
+
+// setFlag replaces a --name value (either spelling) or appends it; an empty
+// value removes it.
+func setFlag(args []string, name, value string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == name:
+			i++ // and its value
+		case strings.HasPrefix(args[i], name+"="):
+		default:
+			out = append(out, args[i])
+		}
+	}
+	if value != "" {
+		out = append(out, name, value)
+	}
+	return out
 }
 
 // Stop ends a session's engine; the session stays registered.

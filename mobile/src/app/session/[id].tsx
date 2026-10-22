@@ -5,7 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { explain } from '@/api/client';
 import { followSession } from '@/api/live';
-import { Answer, ForgetSession, SendMessage, Slash } from '@/api/ops';
+import { Answer, AskModels, ForgetSession, SendMessage, Slash, SwitchModel } from '@/api/ops';
+import { ModelPicker } from '@/components/ModelPicker';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
@@ -24,6 +25,7 @@ export default function Session() {
   const [text, setText] = useState('');
   const [sendErr, setSendErr] = useState('');
   const [panel, setPanel] = useState(false);
+  const [picker, setPicker] = useState<string | null>(null); // the search, when open
   const listRef = useRef<FlatList<Item>>(null);
 
   useEffect(() => {
@@ -55,6 +57,24 @@ export default function Session() {
     }
   }
 
+  function openPicker(query: string) {
+    setPicker(query);
+    setPanel(false);
+    // The engine fetches the lists (it holds the keys); they arrive as a
+    // models event.
+    void auth.client?.request(AskModels, { id }).catch((e) => setSendErr('models: ' + explain(e).message));
+  }
+
+  async function switchTo(url: string, model: string, provider: string) {
+    setPicker(null);
+    setView((v) => ({ ...v, status: `switching to ${model} on ${provider}…` }));
+    try {
+      await auth.client?.request(SwitchModel, { id, url, model });
+    } catch (e) {
+      setSendErr('switch: ' + explain(e).message);
+    }
+  }
+
   async function send() {
     const raw = text;
     if (!raw.trim() || !auth.client) return;
@@ -66,6 +86,7 @@ export default function Session() {
     }
     setText('');
     if (l.kind === 'slash') return runSlash(l.line);
+    if (l.kind === 'model') return openPicker(l.query);
     try {
       await auth.client.request(SendMessage, { id, content: l.text });
     } catch (e) {
@@ -89,9 +110,16 @@ export default function Session() {
         options={{
           title: id,
           headerRight: () => (
-            <Pressable onPress={() => setPanel((p) => !p)} style={{ paddingHorizontal: space.md }}>
-              <Text style={{ color: panel ? c.accent : c.muted }}>{panel ? 'Hide session' : 'Session'}</Text>
-            </Pressable>
+            <View style={{ flexDirection: 'row' }}>
+              <Pressable onPress={() => openPicker('')} style={{ paddingHorizontal: space.md }}>
+                <Text style={{ color: c.muted }} numberOfLines={1}>
+                  {view.settings?.model || 'Model'}
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => setPanel((p) => !p)} style={{ paddingHorizontal: space.md }}>
+                <Text style={{ color: panel ? c.accent : c.muted }}>{panel ? 'Hide session' : 'Session'}</Text>
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -110,10 +138,13 @@ export default function Session() {
               <Text style={{ color: c.text, fontSize: font.md }}>❓ {view.ask.question}</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
                 {view.ask.options.map((o) => (
-                  <Button key={o} title={o} onPress={() => void answer(o)} />
+                  <Button key={o} title={o === view.ask?.recommended ? `${o} ★` : o} primary={o === view.ask?.recommended} onPress={() => void answer(o)} />
                 ))}
               </View>
             </View>
+          ) : null}
+          {picker !== null ? (
+            <ModelPicker providers={view.models} current={view.settings} initial={picker} pick={(u, m, p) => void switchTo(u, m, p)} close={() => setPicker(null)} />
           ) : null}
           {panel ? <SessionPanel commands={view.commands} run={(l) => void runSlash(l)} prefill={(t) => { setText(t); setPanel(false); }} /> : null}
           {text.startsWith('/') && !view.ask ? <Palette rows={suggest(text, view.commands, view.skills)} pick={setText} /> : null}
@@ -191,5 +222,16 @@ function Row({ item }: { item: Item }) {
       );
     case 'note':
       return <Text style={{ color: item.error ? c.danger : c.muted, fontSize: font.sm, paddingHorizontal: space.md }}>{item.text}</Text>;
+    case 'question':
+      return (
+        <View style={{ borderLeftWidth: 3, borderColor: c.accent, paddingHorizontal: space.md, paddingVertical: space.xs, gap: 2 }}>
+          <Text selectable style={{ color: c.text, fontSize: font.md }}>❓ {item.text}</Text>
+          {item.options.length ? (
+            <Text style={{ color: c.muted, fontSize: font.sm }}>
+              {item.options.map((o) => (o === item.recommended ? `${o} (recommended)` : o)).join(' · ')}
+            </Text>
+          ) : null}
+        </View>
+      );
   }
 }

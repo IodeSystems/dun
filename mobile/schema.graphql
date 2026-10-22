@@ -16,6 +16,7 @@ type DundMutationNamespace {
   sendMessage(body: dund_MessageInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "sendMessage")
   stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
   subscribeToken(id: String!): dund_TokenOutputBody @derived(operationId: "subscribeToken")
+  switchModel(body: dund_SwitchModelInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "switchModel")
   v1: DundV1MutationNamespace!
 }
 
@@ -43,6 +44,7 @@ type DundV1MutationNamespace {
   sendMessage(body: dund_MessageInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "sendMessage")
   stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
   subscribeToken(id: String!): dund_TokenOutputBody @derived(operationId: "subscribeToken")
+  switchModel(body: dund_SwitchModelInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "switchModel")
 }
 
 type DundV1QueryNamespace {
@@ -152,6 +154,12 @@ type dund_SessionsOutputBody {
 
 type dund_StreamEvent {
   event: JSON!
+}
+
+input dund_SwitchModelInputBodyInput {
+  model: String!
+  """the provider's base URL, from the models event"""
+  url: String!
 }
 
 type dund_TokenOutputBody {
