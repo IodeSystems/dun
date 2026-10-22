@@ -87,6 +87,9 @@ type ServerState struct {
 	// toolTokens); Hidden is how many discovered tools Disable hides.
 	Cost   int `json:"cost,omitempty"`
 	Hidden int `json:"hidden,omitempty"`
+	// Auth is a remote server's credentials: its OAuth login state, "static
+	// bearer", "static header" or "none"; "" for a local server.
+	Auth string `json:"auth,omitempty"`
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -120,6 +123,7 @@ func (h *Harness) Servers() []ServerState {
 			StartSeconds: h.lastStart[s.ID].Seconds(),
 			Cost:         cost[s.ID],
 			Hidden:       hidden[s.ID],
+			Auth:         h.authState(s),
 		}
 		switch {
 		case s.Via == ViaShell:
@@ -241,11 +245,24 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.ID == ServerShell {
 		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
 	}
-	err := h.mgr.StartServer(ctx, mcpmgr.MCPConfig{
+	mcfg := mcpmgr.MCPConfig{
 		ID: s.ID, Name: s.ID, Command: s.Command, Args: args,
 		Env: env, Timeout: int(timeout / time.Second),
 		URL: s.URL, Headers: s.Headers,
-	})
+	}
+	// An OAuth server logs in BEFORE it connects: a login takes as long as
+	// the person does, and must not run inside the handshake's timeout.
+	var err error
+	if oc := h.oauthFor(s); oc != nil {
+		err = oc.ensure(ctx)
+		mcfg.Authorization, mcfg.OnUnauthorized = oc.Authorization, oc.OnUnauthorized
+	}
+	if err == nil {
+		err = h.mgr.StartServer(ctx, mcfg)
+		if err != nil {
+			err = explainStartErr(ctx, s, err)
+		}
+	}
 	if err == nil {
 		err = waitServerTools(ctx, h.mgr, s.ID, timeout)
 		if err != nil {
@@ -731,6 +748,9 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 		return "", err
 	}
 	spec.Via = via
+	if err := checkOAuth(spec, via); err != nil {
+		return "", err
+	}
 	on := true
 	spec.Autostart = &on
 	path, err := PutUserServer(spec)
@@ -738,7 +758,7 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 		return "", err
 	}
 	s := Server{ID: spec.ID, URL: spec.URL, Headers: requestHeaders(spec), Command: spec.Command,
-		Args: spec.Args, Env: spec.Env, Timeout: spec.Timeout, Autostart: true, Via: via, Bearer: spec.Bearer}
+		Args: spec.Args, Env: spec.Env, Timeout: spec.Timeout, Autostart: true, Via: via, Bearer: spec.Bearer, OAuth: spec.OAuth}
 	wasHosted := false
 	h.srvMu.Lock()
 	replaced := false
@@ -781,6 +801,12 @@ func (h *Harness) RemoveServer(id string) error {
 	if h.mgr.ServerStarted(id) {
 		h.mgr.StopServer(id)
 	}
+	// Its stored login goes with it: a token for a server dun no longer
+	// knows is a secret with no owner.
+	_ = os.Remove(filepath.Join(OAuthDir(), id+".json"))
+	h.oauthMu.Lock()
+	delete(h.oauth, id)
+	h.oauthMu.Unlock()
 	h.srvMu.Lock()
 	hosted := false
 	kept := h.specs[:0]

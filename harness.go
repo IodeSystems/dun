@@ -57,6 +57,9 @@ type Server struct {
 	// shell-hosted server can read the variable when it connects instead of
 	// dun writing the token into a file. Headers carries the resolved value.
 	Bearer string
+	// OAuth, when set, logs in to the server and sends the token it gets
+	// (mcpoauth.go) instead of a fixed Bearer.
+	OAuth *OAuthSpec
 }
 
 // DefaultServers points the three tool servers at a workspace directory (later a
@@ -261,6 +264,12 @@ type Config struct {
 	// the background at session start: err is nil when it is up and its
 	// tools have joined the tool set.
 	OnServerStarted func(id string, err error)
+	// OnLogin shows the person the URL that logs in to an OAuth server
+	// (mcpoauth.go); url "" means another session's login is being waited
+	// for. The engine may have no display, so this is the way that always
+	// works; OpenBrowser, when set, also tries to open it here.
+	OnLogin     func(server, url string)
+	OpenBrowser func(url string) error
 	// OnNotify fires when a plain notification (KindNotification) is injected
 	// into the conversation (e.g. a background job's completion).
 	OnNotify func(text string)
@@ -380,6 +389,11 @@ type Harness struct {
 	lastErr   map[string]string        // id → why its last start attempt failed
 	lastStart map[string]time.Duration // id → how long its last start took
 	hosted    map[string]hostedState   // id → how the running shell took a shell-placed server
+	// oauth is each OAuth server's login, kept across restarts of the server
+	// so a cached token and a running login are not lost. Its own lock:
+	// Servers() reads it while holding srvMu.
+	oauthMu sync.Mutex
+	oauth   map[string]*oauthClient
 	// turnMu is held for the length of a turn. A server command arrives on
 	// another goroutine (the -p reader), and swapping the Session's tools out
 	// from under a running turn is a data race — so a rebuild that cannot take

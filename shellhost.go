@@ -299,6 +299,9 @@ func (h *Harness) MoveServer(ctx context.Context, id, via string) (bool, error) 
 	if s.Via == via {
 		return false, nil
 	}
+	if via == ViaShell && s.OAuth != nil {
+		return false, fmt.Errorf("%q logs in with oauth, and dun holds its token: it cannot run in the shell", id)
+	}
 	found, err := SetUserServerVia(id, via)
 	if err != nil {
 		return false, err

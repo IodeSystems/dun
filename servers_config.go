@@ -119,6 +119,120 @@ type ServerSpec struct {
 	// inside its one eval tool as a namespace (help("<ns>")), and dun does not
 	// start it at all. A built-in server cannot be placed in the shell.
 	Via string `json:"via,omitempty"`
+	// OAuth logs in to a remote server instead of sending a fixed Bearer:
+	// the token is obtained in the browser, kept in $DUN_HOME/oauth/<id>.json
+	// and refreshed (see mcpoauth.go). Not with Bearer, and not in the shell.
+	OAuth *OAuthSpec `json:"oauth,omitempty"`
+}
+
+// OAuthSpec is how dun logs in to an OAuth- or OIDC-protected MCP server.
+// There is no dynamic client registration: the client is registered with the
+// identity provider by hand, with the redirect URI
+// http://127.0.0.1:<redirect_port>/oauth/callback, and named here.
+type OAuthSpec struct {
+	// ClientID is the registered client. Required.
+	ClientID string `json:"client_id,omitempty"`
+	// ClientSecret makes it a confidential client; empty is a public one
+	// (PKCE only). "$NAME" or "${NAME}" is read from the environment, as
+	// Bearer is; dun never writes a resolved secret.
+	ClientSecret string `json:"client_secret,omitempty"`
+	// Scopes to ask for. Empty: the 401's scope, else the server's
+	// scopes_supported.
+	Scopes []string `json:"scopes,omitempty"`
+	// Issuer is the identity provider to log in with. Set, it skips
+	// discovery: for a server that only validates tokens (Superset with
+	// Google) or sits behind a gate. Empty: the server's 401 names its
+	// protected-resource metadata (RFC 9728), which names the issuer.
+	Issuer string `json:"issuer,omitempty"`
+	// Audience, when set, is sent as audience= on the authorize request
+	// (some IdPs need it to issue a token for an API).
+	Audience string `json:"audience,omitempty"`
+	// Resource is the RFC 8707 resource indicator sent on the authorize and
+	// token requests. Empty: the server's resource when it was discovered,
+	// and none with an explicit Issuer (Google and other IdPs that are not
+	// MCP-aware reject unknown parameters). "none" never sends one; any
+	// other value is sent as given.
+	Resource string `json:"resource,omitempty"`
+	// Send is which token goes in Authorization: "access_token" (default)
+	// or "id_token" — for an IdP whose access tokens are opaque (Google),
+	// where the server validates the ID token (aud = client_id).
+	Send string `json:"send,omitempty"`
+	// RedirectPort is the loopback port of the redirect URI; 0 is
+	// DefaultOAuthRedirectPort. It is fixed so it can be registered exactly.
+	RedirectPort int `json:"redirect_port,omitempty"`
+	// AuthParams are extra authorize-request parameters, e.g. Google's
+	// access_type=offline and prompt=consent, without which it issues no
+	// refresh token.
+	AuthParams map[string]string `json:"auth_params,omitempty"`
+}
+
+// OAuth Send values.
+const (
+	SendAccessToken = "access_token"
+	SendIDToken     = "id_token"
+)
+
+// mergeOAuth layers next over prev field by field, as mergeSpec does.
+func mergeOAuth(prev, next *OAuthSpec) *OAuthSpec {
+	if next == nil {
+		return prev
+	}
+	if prev == nil {
+		cp := *next
+		return &cp
+	}
+	out := *prev
+	if next.ClientID != "" {
+		out.ClientID = next.ClientID
+	}
+	if next.ClientSecret != "" {
+		out.ClientSecret = next.ClientSecret
+	}
+	if next.Scopes != nil {
+		out.Scopes = next.Scopes
+	}
+	if next.Issuer != "" {
+		out.Issuer = next.Issuer
+	}
+	if next.Audience != "" {
+		out.Audience = next.Audience
+	}
+	if next.Resource != "" {
+		out.Resource = next.Resource
+	}
+	if next.Send != "" {
+		out.Send = next.Send
+	}
+	if next.RedirectPort != 0 {
+		out.RedirectPort = next.RedirectPort
+	}
+	if next.AuthParams != nil {
+		out.AuthParams = next.AuthParams
+	}
+	return &out
+}
+
+// checkOAuth reports what makes a server's oauth block unusable.
+func checkOAuth(s ServerSpec, via string) error {
+	o := s.OAuth
+	if o == nil {
+		return nil
+	}
+	switch {
+	case s.URL == "":
+		return fmt.Errorf("oauth is for a remote server (a url), not a command")
+	case strings.TrimSpace(o.ClientID) == "":
+		return fmt.Errorf("oauth needs a client_id (dun does no dynamic client registration)")
+	case s.Bearer != "":
+		return fmt.Errorf("has both bearer and oauth — keep one")
+	case via == ViaShell:
+		return fmt.Errorf("an oauth server cannot run in the shell: dun holds its token (remove \"via\")")
+	case o.Send != "" && o.Send != SendAccessToken && o.Send != SendIDToken:
+		return fmt.Errorf("oauth send %q: want %q or %q", o.Send, SendAccessToken, SendIDToken)
+	case o.RedirectPort < 0 || o.RedirectPort > 65535:
+		return fmt.Errorf("oauth redirect_port %d is not a port", o.RedirectPort)
+	}
+	return nil
 }
 
 // MarshalJSON writes an empty, non-nil Disable as "disable": [] — omitempty
@@ -299,6 +413,9 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 		if via == ViaShell && builtinServer(id) {
 			return nil, fmt.Errorf("dun: server %q is built in and cannot be placed in the shell (remove its \"via\")", id)
 		}
+		if err := checkOAuth(s, via); err != nil {
+			return nil, fmt.Errorf("dun: server %q: %w", id, err)
+		}
 		out = append(out, Server{
 			ID:        s.ID,
 			URL:       s.URL,
@@ -311,6 +428,7 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 			Disable:   s.Disable,
 			Via:       via,
 			Bearer:    s.Bearer,
+			OAuth:     s.OAuth,
 		})
 	}
 	return out, nil
@@ -500,6 +618,7 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	if next.Via != "" {
 		out.Via = next.Via
 	}
+	out.OAuth = mergeOAuth(prev.OAuth, next.OAuth)
 	return out
 }
 

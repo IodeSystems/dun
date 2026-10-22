@@ -47,6 +47,7 @@ func init() {
 	event[Commands]("commands")
 	event[Models]("models")
 	event[McpTools]("mcp_tools")
+	event[McpLogin]("mcp_login")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -270,6 +271,10 @@ type ServerState struct {
 	Auto    bool   `json:"auto"`
 	Tools   int    `json:"tools"`
 	Err     string `json:"err,omitempty"`
+	// Auth is a remote server's credentials: its OAuth login state
+	// ("oauth: logged in as … until …", "oauth: needs login …"), "static
+	// bearer", "static header" or "none".
+	Auth string `json:"auth,omitempty"`
 }
 
 // ServerEvent reports a server command's outcome and the new server set.
@@ -479,6 +484,15 @@ type McpTool struct {
 	Tokens      int    `json:"tokens"`
 	Enabled     bool   `json:"enabled"`
 	HiddenBy    string `json:"hiddenBy,omitempty"` // the Disable entry hiding it
+}
+
+// McpLogin asks the person to log in to an OAuth MCP server: open URL in a
+// browser. The engine may run where no browser is (under dund), so this is
+// the way the login reaches them. URL "" means the engine is waiting for a
+// login another session started.
+type McpLogin struct {
+	Server string `json:"server"`
+	URL    string `json:"url,omitempty"`
 }
 
 // --- the protocol's own ---
