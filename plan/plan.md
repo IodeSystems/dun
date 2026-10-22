@@ -264,6 +264,23 @@ Where it stands:
   (`dun -d`) still exists for the TUI's own reload notice — dund could send
   it instead; `--serve` (xterm.js) still spawns a TUI per tab.
 
+- **S4a done** (`130aaca`): `dun dund serve --http <addr>`: huma + gat,
+  REST at `/api/v1` (sessions list/create/adopt, message, answer,
+  control/server, restart, stop, forget, UI state, events long-poll ≤25 s)
+  and the same operations as GraphQL at `/api/graphql` (namespace `dund`);
+  `/healthz` and `/api/v1/hello` open. Local token (`dun dund token`,
+  SHA-256 kept) checked by HTTP middleware in front of all of `/api`:
+  **gat calls operations in-process, so huma per-operation middlewares do
+  not run for GraphQL** — found by a test; handlers also refuse an empty
+  principal. Live: healthz, 401, a message over REST and its reply via the
+  long-poll, sessions via GraphQL.
+- **S4 open:** graphql-ws subscriptions in gat (gwag) to replace the
+  long-poll; OIDC principals (caveat 10) and how they map to the unix
+  owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
+  how dund gets `--http` when the TUI auto-starts it (a `dund service
+  install` unit, CLI-10, is the canon answer) and binding the LAN address
+  for hz (192.168.1.76:20003).
+
 Slices, in order:
 - ✅ **S0 engine protocol (internal).** The `proto/` types and `Log`, with
   round-trip tests and a strict-decode test of the engine's real events.
