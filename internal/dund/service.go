@@ -48,6 +48,8 @@ type Service struct {
 	sessions map[string]*session
 	closing  bool
 	done     chan struct{} // closed by Close
+
+	up upgrader // a pending restart into a new build (upgrade.go)
 }
 
 // New opens the registry in dir, loading the sessions it lists. Their engines
@@ -57,6 +59,7 @@ func New(dir string, spawner Spawner) (*Service, error) {
 		return nil, fmt.Errorf("dund: %w", err)
 	}
 	s := &Service{dir: dir, spawner: spawner, sessions: map[string]*session{}, done: make(chan struct{})}
+	s.up.init()
 	recs, err := s.loadRegistry()
 	if err != nil {
 		return nil, err
@@ -64,7 +67,7 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	dropped := 0
 	for _, r := range recs {
 		ses := &session{svc: s, id: r.ID, workspace: r.Workspace, owner: r.Owner,
-			members: r.Members, args: r.Args, persist: r.Persist, log: proto.NewLog(r.ID, logCapacity)}
+			members: r.Members, args: r.Args, persist: r.Persist, resume: r.Resume, log: proto.NewLog(r.ID, logCapacity)}
 		// A session nothing was ever asked in is not kept (USER 2026-10-22);
 		// no engine runs yet, so it can simply be left out.
 		if !ses.persist && !ses.hasMessages() {
@@ -74,12 +77,21 @@ func New(dir string, spawner Spawner) (*Service, error) {
 		}
 		s.sessions[r.ID] = ses
 	}
+	// A session whose transcript ended mid-turn without a recorded stop was
+	// working when dund last died (a crash records nothing): woken the same
+	// way, and said so.
+	for _, ses := range s.sessions {
+		if ses.resume == "" && crashedMidTurn(ses.workspace, ses.id) {
+			ses.resume = resumeMessage("dund stopped unexpectedly (a crash, or it was killed)", true, false, nil, nil)
+		}
+	}
 	if dropped > 0 {
 		if err := s.saveRegistry(); err != nil {
 			return nil, err
 		}
 	}
 	go s.reapIdle()
+	go s.resumeFlagged()
 	return s, nil
 }
 
@@ -387,9 +399,24 @@ func (s *Service) Stream(ctx context.Context, principal, id string, after uint64
 		return nil, err
 	}
 	out := make(chan proto.Event)
+	// The upgrade status rides every stream, unsequenced: an HTTP client has
+	// no service-level connection to get it on.
+	upd := make(chan proto.UpgradeStatus, 16)
+	unwatch := s.WatchUpgrade(func(st proto.UpgradeStatus) {
+		select {
+		case upd <- st:
+		default:
+		}
+	})
+	upgradeEv := func(st proto.UpgradeStatus) proto.Event {
+		ev := proto.NewEvent(&st)
+		ev.TS = time.Now()
+		return ev
+	}
 	go func() {
 		defer close(out)
 		defer sub.Close()
+		defer unwatch()
 		send := func(ev proto.Event) bool {
 			select {
 			case out <- ev:
@@ -406,8 +433,15 @@ func (s *Service) Stream(ctx context.Context, principal, id string, after uint64
 				return
 			}
 		}
+		if st := s.UpgradeStatus(); st != nil && !send(upgradeEv(*st)) {
+			return
+		}
 		for {
 			select {
+			case st := <-upd:
+				if !send(upgradeEv(st)) {
+					return
+				}
 			case ev, ok := <-sub.C():
 				if !ok || !send(ev) {
 					return
@@ -569,15 +603,29 @@ func (s *Service) dropIfEmpty(ses *session) {
 
 // Busy reports whether any session's engine is doing something a restart
 // would cut short.
-func (s *Service) Busy() bool {
+func (s *Service) Busy() bool { return len(s.Waiting()) > 0 }
+
+// all is every session, copied out: a session's own lock is never taken
+// under s.mu (session.exited takes them the other way round).
+func (s *Service) all() []*session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	out := make([]*session, 0, len(s.sessions))
 	for _, ses := range s.sessions {
-		if ses.busy() {
-			return true
-		}
+		out = append(out, ses)
 	}
-	return false
+	sort.Slice(out, func(i, j int) bool { return out[i].id < out[j].id })
+	return out
+}
+
+// Waiting is everything a restart would cut short, every session, in
+// session order.
+func (s *Service) Waiting() []proto.UpgradeWait {
+	var out []proto.UpgradeWait
+	for _, ses := range s.all() {
+		out = append(out, ses.waiting()...)
+	}
+	return out
 }
 
 // Close stops every engine. The registry keeps the sessions, so the next
@@ -614,6 +662,9 @@ type record struct {
 	Members   []string `json:"members"`
 	Args      []string `json:"args,omitempty"`
 	Persist   bool     `json:"persist,omitempty"`
+	// Resume is the message the session's agent is woken with on the next
+	// start: it was working when dund stopped. Sent once, then cleared.
+	Resume string `json:"resume,omitempty"`
 }
 
 func (s *Service) registryPath() string { return filepath.Join(s.dir, "sessions.json") }
@@ -640,7 +691,7 @@ func (s *Service) saveRegistry() error {
 	recs := make([]record, 0, len(s.sessions))
 	for _, ses := range s.sessions {
 		recs = append(recs, record{ID: ses.id, Workspace: ses.workspace, Owner: ses.owner,
-			Members: ses.members, Args: ses.args, Persist: ses.persist})
+			Members: ses.members, Args: ses.args, Persist: ses.persist, Resume: ses.resumeNote()})
 	}
 	s.mu.Unlock()
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })

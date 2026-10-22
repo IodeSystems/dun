@@ -462,6 +462,17 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 			}
 			return ok(), fail(s.svc.Stop(p, in.ID))
 		})
+	gat.Register(api, g, huma.Operation{OperationID: "upgradeNow", Method: http.MethodPost, Path: "/api/v1/upgrade/now",
+		Summary: "Restart into the pending upgrade without waiting: running turns are interrupted and resumed after the restart."},
+		func(ctx context.Context, _ *struct{}) (*OKOutput, error) {
+			if _, err := who(ctx); err != nil {
+				return nil, err
+			}
+			if err := s.svc.UpgradeNow(); err != nil {
+				return nil, huma.Error409Conflict(err.Error())
+			}
+			return ok(), nil
+		})
 	gat.Register(api, g, huma.Operation{OperationID: "forgetSession", Method: http.MethodDelete, Path: "/api/v1/sessions/{id}",
 		Summary: "Remove the session from the service (the transcript stays)."},
 		func(ctx context.Context, in *SessionPath) (*OKOutput, error) {

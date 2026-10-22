@@ -109,6 +109,7 @@ func newRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "dund",
 		Short:         "dun's session service",
+		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -198,15 +199,18 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		ln.Close()
 		return err
 	}
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := context.WithCancel(ctx)
 	defer stop()
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigc)
 	errc := make(chan error, 2)
 	self, _ := os.Executable() // now: after a rebuild it names the deleted file
+	dundapi.Version = Version
 	srv := dund.NewServer(svc, dund.UnixPeer)
-	upgradeTo := make(chan string, 1)
-	var upgrade func(string) error
+	var upgrade func(exe, version string) error
 	if !underServiceManager() {
-		upgrade = func(exe string) error { return requestUpgrade(ctx, svc, exe, upgradeTo) }
+		upgrade = func(exe, version string) error { return requestUpgrade(svc, exe, version) }
 	}
 	srv.SetBuild(Version, self, upgrade)
 	go func() { errc <- srv.Serve(ln) }()
@@ -234,22 +238,27 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		}
 		fmt.Fprintf(os.Stderr, "dund: HTTP on %s\n", httpAddr)
 	}
-	rebuilt := watchSelf(ctx, svc, self)
+	go watchSelf(ctx, svc, self)
 	fmt.Fprintf(os.Stderr, "dund: serving %s (engines: %s)\n", sock, bin)
 	reexec := false
 	select {
+	case sig := <-sigc:
+		// A planned stop (a service restart, a kill): sessions that are
+		// working are interrupted, recorded, and resumed by the next start.
+		fmt.Fprintf(os.Stderr, "dund: %v — stopping engines\n", sig)
+		svc.PrepareStop(fmt.Sprintf("dund was stopped (%v)", sig))
 	case <-ctx.Done():
 		fmt.Fprintln(os.Stderr, "dund: stopping engines")
 	case err = <-errc:
-	case <-rebuilt:
-		fmt.Fprintln(os.Stderr, "dund: a new build is in place and nothing is busy — restarting into it")
-		reexec = true
-	case exe := <-upgradeTo:
-		// A client of another build asked: restart into its binary, engines
-		// too, so the two agree.
-		fmt.Fprintf(os.Stderr, "dund: a client asked to upgrade to %s and nothing is busy — restarting into it\n", exe)
+	case exe := <-svc.UpgradeReady():
+		// The upgrade's waiting is over (or was cut short and recorded):
+		// restart into the new binary, engines too, so the two agree.
+		fmt.Fprintf(os.Stderr, "dund: restarting into %s\n", exe)
+		if exe != self {
+			os.Args = withFlag(os.Args, "--dun", exe)
+		}
 		self, reexec = exe, true
-		os.Args = withFlag(os.Args, "--dun", exe)
+		srv.Drain(time.Second) // clients read "restarting" before the socket goes
 	}
 	if hs != nil {
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -274,9 +283,22 @@ func underServiceManager() bool {
 	return os.Getenv("INVOCATION_ID") != "" || strings.HasPrefix(os.Getenv("XPC_SERVICE_NAME"), "com.iodesystems.")
 }
 
-// requestUpgrade checks exe and hands it to the serve loop once nothing is
-// busy. It answers at once; the restart follows.
-func requestUpgrade(ctx context.Context, svc *dund.Service, exe string, to chan<- string) error {
+// requestUpgrade checks exe and makes the upgrade into it pending (see
+// dund.Service.RequestUpgrade): it answers at once; the restart follows
+// when nothing is busy, or on "now", or after the grace period.
+func requestUpgrade(svc *dund.Service, exe, version string) error {
+	if err := checkUpgradeExe(exe); err != nil {
+		return err
+	}
+	if version == "" {
+		version = ProbeVersion(exe)
+	}
+	return svc.RequestUpgrade(exe, version)
+}
+
+// checkUpgradeExe: an upgrade names an absolute, executable, regular file of
+// this user.
+func checkUpgradeExe(exe string) error {
 	if !filepath.IsAbs(exe) {
 		return fmt.Errorf("upgrade: %q is not an absolute path", exe)
 	}
@@ -290,22 +312,33 @@ func requestUpgrade(ctx context.Context, svc *dund.Service, exe string, to chan<
 	if !ownedByMe(st) {
 		return fmt.Errorf("upgrade: %s is not owned by this user", exe)
 	}
-	go func() {
-		t := time.NewTicker(selfCheck)
-		defer t.Stop()
-		for svc.Busy() {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-			}
-		}
-		select {
-		case to <- exe:
-		default: // one is already on its way
-		}
-	}()
 	return nil
+}
+
+// ProbeVersion asks a dun or dund binary which build it is (`--version`,
+// whose last word is the version); "" when it does not say in time.
+func ProbeVersion(exe string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "--version")
+	// A child: no self-rebuild, no launcher.
+	cmd.Env = append(os.Environ(), "DUN_CHILD=1", "DUN_NO_AUTOBUILD=1")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return lastWord(string(out))
+}
+
+// lastWord is the first line's last word: "dun v1.2" and "dund version v1.2"
+// both name v1.2.
+func lastWord(s string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	f := strings.Fields(line)
+	if len(f) == 0 {
+		return ""
+	}
+	return f[len(f)-1]
 }
 
 // withFlag sets --name's value in args (either spelling), adding it if absent.
@@ -327,37 +360,41 @@ func withFlag(args []string, name, value string) []string {
 // selfCheck is how often dund looks at its own binary.
 const selfCheck = 2 * time.Second
 
-// watchSelf fires once this process's executable has been replaced (a
-// rebuild renames a new binary over it) AND no session is busy, so that a
-// restart cuts no turn, question, job or sub-agent short. Clients reconnect
-// on their own; engines resume on first use.
-func watchSelf(ctx context.Context, svc *dund.Service, exe string) <-chan struct{} {
-	out := make(chan struct{})
-	start, err := os.Stat(exe)
+// watchSelf makes an upgrade pending each time this process's executable is
+// replaced (a rebuild renames a new binary over it), until ctx ends. The
+// upgrade restarts once nothing is busy (see dund.Service.RequestUpgrade);
+// clients reconnect on their own, engines resume on first use.
+func watchSelf(ctx context.Context, svc *dund.Service, exe string) {
+	last, err := os.Stat(exe)
 	if err != nil {
-		return out
+		return
 	}
-	go func() {
-		t := time.NewTicker(selfCheck)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-			}
-			now, err := os.Stat(exe)
-			if err != nil || os.SameFile(start, now) && now.ModTime().Equal(start.ModTime()) {
-				continue
-			}
-			if svc.Busy() {
-				continue
-			}
-			close(out)
+	t := time.NewTicker(selfCheck)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
 			return
+		case <-t.C:
 		}
-	}()
-	return out
+		now, err := os.Stat(exe)
+		if err != nil || os.SameFile(last, now) && now.ModTime().Equal(last.ModTime()) {
+			continue
+		}
+		last = now
+		ver := ProbeVersion(exe)
+		fmt.Fprintf(os.Stderr, "dund: a new build (%s) is in place — restarting into it once nothing is busy\n", orNew(ver))
+		if err := svc.RequestUpgrade(exe, ver); err != nil {
+			fmt.Fprintf(os.Stderr, "dund: %v\n", err)
+		}
+	}
+}
+
+func orNew(v string) string {
+	if v == "" {
+		return "version unknown"
+	}
+	return v
 }
 
 // claimPidfile refuses to start while another dund owns this home, and

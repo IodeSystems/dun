@@ -18,6 +18,7 @@ type DundMutationNamespace {
   stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
   subscribeToken(id: String!): dund_TokenOutputBody @derived(operationId: "subscribeToken")
   switchModel(body: dund_SwitchModelInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "switchModel")
+  upgradeNow: dund_OKOutputBody @derived(operationId: "upgradeNow")
   v1: DundV1MutationNamespace!
 }
 
@@ -49,6 +50,7 @@ type DundV1MutationNamespace {
   stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
   subscribeToken(id: String!): dund_TokenOutputBody @derived(operationId: "subscribeToken")
   switchModel(body: dund_SwitchModelInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "switchModel")
+  upgradeNow: dund_OKOutputBody @derived(operationId: "upgradeNow")
 }
 
 type DundV1QueryNamespace {

@@ -171,9 +171,9 @@ func TestServerHelloAndUpgrade(t *testing.T) {
 	svc, _, _ := newSvc(t)
 	for _, c := range []struct {
 		name    string
-		upgrade func(string) error
+		upgrade func(string, string) error
 		ok      bool
-	}{{"client-started", func(string) error { return nil }, true}, {"service", nil, false}} {
+	}{{"client-started", func(string, string) error { return nil }, true}, {"service", nil, false}} {
 		sock := filepath.Join(t.TempDir(), "dund.sock")
 		ln, err := net.Listen("unix", sock)
 		if err != nil {
@@ -183,7 +183,7 @@ func TestServerHelloAndUpgrade(t *testing.T) {
 		var asked string
 		up := c.upgrade
 		if up != nil {
-			up = func(exe string) error { asked = exe; return nil }
+			up = func(exe, _ string) error { asked = exe; return nil }
 		}
 		srv.SetBuild("v1", "/bin/dund-v1", up)
 		go srv.Serve(ln)

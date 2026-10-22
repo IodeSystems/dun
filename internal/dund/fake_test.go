@@ -19,6 +19,7 @@ import (
 type fakeSpawner struct {
 	mu     sync.Mutex
 	spawns [][]string // the args of every spawn
+	got    []string   // what the engines received (record)
 	n      atomic.Int64
 	fail   error
 }
@@ -35,13 +36,27 @@ func (f *fakeSpawner) Spawn(workspace string, args []string) (Engine, error) {
 	if i := slices.Index(args, "--resume"); i >= 0 {
 		id = args[i+1]
 	}
-	e := &fakeEngine{done: make(chan struct{})}
+	e := &fakeEngine{done: make(chan struct{}), sp: f}
 	var inW io.WriteCloser
 	e.in, inW = io.Pipe()
 	e.stdin = inW
 	e.stdoutR, e.stdoutW = io.Pipe()
 	go e.run(id)
 	return e, nil
+}
+
+// record notes what an engine received ("user <id>: <text>",
+// "interrupt <id>: <reason>").
+func (f *fakeSpawner) record(s string) {
+	f.mu.Lock()
+	f.got = append(f.got, s)
+	f.mu.Unlock()
+}
+
+func (f *fakeSpawner) received() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.got)
 }
 
 func (f *fakeSpawner) spawnArgs() [][]string {
@@ -57,6 +72,7 @@ type fakeEngine struct {
 	stdoutW *io.PipeWriter
 	done    chan struct{}
 	once    sync.Once
+	sp      *fakeSpawner
 }
 
 func (e *fakeEngine) emit(enc *json.Encoder, p any) {
@@ -71,6 +87,7 @@ func (e *fakeEngine) run(id string) {
 	e.emit(enc, &proto.Session{ID: id})
 	e.emit(enc, &proto.Ready{Tools: []string{"exec"}})
 	sc := bufio.NewScanner(e.in)
+	slow := false
 	for sc.Scan() {
 		var c proto.Command
 		if json.Unmarshal(sc.Bytes(), &c) != nil {
@@ -78,13 +95,38 @@ func (e *fakeEngine) run(id string) {
 		}
 		switch p := c.Payload.(type) {
 		case *proto.User:
-			if p.Content == "crash" {
+			e.sp.record("user " + id + ": " + p.Content)
+			switch p.Content {
+			case "crash":
 				return
+			case "slow": // a turn that runs until "finish" or an interrupt
+				e.emit(enc, &proto.UserEcho{Content: p.Content})
+				e.emit(enc, &proto.Turn{Kind: "user"})
+				slow = true
+				continue
+			case "finish":
+				if slow {
+					slow = false
+					e.emit(enc, &proto.Done{})
+				}
+				continue
+			case "job": // a background job, running until "endjob"
+				e.emit(enc, &proto.Jobs{Jobs: []proto.JobInfo{{ID: 3, Command: "go test ./...", State: "running"}}})
+				continue
+			case "endjob":
+				e.emit(enc, &proto.Jobs{Jobs: []proto.JobInfo{{ID: 3, Command: "go test ./...", State: "done"}}})
+				continue
 			}
 			e.emit(enc, &proto.UserEcho{Content: p.Content})
 			e.emit(enc, &proto.Turn{Kind: "user"})
 			e.emit(enc, &proto.Message{Role: "assistant", Content: "re: " + p.Content})
 			e.emit(enc, &proto.Done{})
+		case *proto.Interrupt:
+			e.sp.record("interrupt " + id + ": " + p.Reason)
+			if slow {
+				slow = false
+				e.emit(enc, &proto.Done{Reason: "interrupted"})
+			}
 		case *proto.Stop:
 			e.emit(enc, &proto.Exit{Reason: "stopped"})
 			return

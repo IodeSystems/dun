@@ -26,9 +26,8 @@ func TestRequestUpgradeChecksTheBinary(t *testing.T) {
 	os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755)
 	plain := filepath.Join(dir, "notes")
 	os.WriteFile(plain, []byte("x"), 0o644)
-	to := make(chan string, 1)
 	for _, bad := range []string{"dun", plain, dir, filepath.Join(dir, "missing")} {
-		if err := requestUpgrade(t.Context(), nil, bad, to); err == nil {
+		if err := checkUpgradeExe(bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
 	}

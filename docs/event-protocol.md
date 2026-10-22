@@ -63,7 +63,7 @@ When the user types while a turn is running, the engine buffers the message
 | `answer` | Respond to `ask_user` | `value` |
 | `server` | Control a server (`/rag`, `/lsp`) | `id`, `action` (`status`/`on`/`off`/`auto`/`manual`) |
 | `reset` | Clear the session store | — |
-| `interrupt` | Stop the turn in flight, keep the session (see below) | — |
+| `interrupt` | Stop the turn in flight, keep the session (see below) | `reason` (optional: what stopped it, when not the user) |
 | `stop` | Stop processing, exit | — |
 | `quit` | Quit entirely | — |
 
@@ -87,6 +87,26 @@ runs) cancels the current turn only. The engine (`Harness.Interrupt`):
 
 With no turn running, the answer is a `control` event (`id` `interrupt`)
 saying so.
+
+With a `reason` (dund sends one when a restart cuts a turn short), the
+notification starts `[<reason>] …` instead, a cut tool call's result names
+the reason, and the note does not tell the model to wait for the user.
+
+### dund upgrades (service frames)
+
+dund broadcasts `upgrade` `{state, version, exe, waiting, deadline}` to every
+connection, with no session in the envelope, when an upgrade is pending (its
+own binary was replaced, or a client of another build sent `upgrade`), each
+time `waiting` changes, and once as `state: "restarting"` before it restarts.
+`waiting` lists `{session, what: turn|question|job|agent, id, detail, hint}`.
+A new connection gets the current one at once; an HTTP session stream carries
+it too. dund restarts when `waiting` is empty, on `upgrade {now: true}`
+(`/upgrade now`, the web's Restart now), or at `deadline` (10 minutes).
+A restart (or SIGTERM) that cuts work short interrupts each turn with the
+reason, records the session in dund's registry, and the next dund sends that
+session's engine a user message starting `[automatic] ` that says what was
+cut and to resume. A session whose transcript ended mid-turn less than 30
+minutes before dund starts (a crash) is resumed the same way.
 
 ## Engine Supervision
 

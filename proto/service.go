@@ -22,6 +22,7 @@ func init() {
 	event[UIState]("ui_state")
 	event[PersistState]("persist")
 	event[HelloReply]("hello")
+	event[UpgradeStatus]("upgrade")
 }
 
 // ListSessions asks for the sessions the caller is a member of.
@@ -91,6 +92,11 @@ type HelloReply struct {
 	// Busy: a turn, a question, a job or a sub-agent is running somewhere, so
 	// an upgrade waits for it.
 	Busy bool `json:"busy,omitempty"`
+	// Coordinated: this dund broadcasts its upgrades (UpgradeStatus) and
+	// resumes the work a restart cuts short. An older dund leaves it unset.
+	Coordinated bool `json:"coordinated,omitempty"`
+	// Upgrade is the pending upgrade, if there is one.
+	Upgrade *UpgradeStatus `json:"upgrade,omitempty"`
 }
 
 // Upgrade asks a client-started dund to restart into Exe (engines too), as
@@ -99,6 +105,42 @@ type HelloReply struct {
 // restarted instead.
 type Upgrade struct {
 	Exe string `json:"exe"`
+	// Version is the build Exe is, when the client knows it (its own).
+	Version string `json:"version,omitempty"`
+	// Now: restart into the pending upgrade at once (Exe is then optional),
+	// interrupting what it waits for; those sessions resume afterwards.
+	Now bool `json:"now,omitempty"`
+}
+
+// UpgradeStatus is dund's restart into a new build, sent to every
+// connection, whatever it follows, with no session in the envelope: when the
+// upgrade becomes pending (a new binary is in place, or a client asked), each
+// time what it waits for changes, and once more as "restarting" just before
+// dund restarts. A connection made while one is pending gets it at once; a
+// session stream over HTTP carries it too.
+//
+// State: "pending" (waiting for Waiting to end) or "restarting". Version is
+// the target build, "" when dund could not tell.
+type UpgradeStatus struct {
+	State   string        `json:"state"`
+	Version string        `json:"version,omitempty"`
+	Exe     string        `json:"exe,omitempty"`
+	Waiting []UpgradeWait `json:"waiting,omitempty"`
+	// Deadline (unix seconds) is when dund restarts anyway, interrupting
+	// what it still waits for; those sessions resume after the restart.
+	Deadline int64 `json:"deadline,omitempty"`
+}
+
+// UpgradeWait is one thing a pending upgrade waits for. What: "turn",
+// "question", "job" (ID is the job's, Detail its command) or "agent" (ID is
+// the sub-agent's, Detail its prompt). Hint is how to end it, in words a
+// client may replace with its own keys.
+type UpgradeWait struct {
+	Session string `json:"session"`
+	What    string `json:"what"`
+	ID      int    `json:"id,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Hint    string `json:"hint,omitempty"`
 }
 
 // Leave is a client exiting (/exit): its subscription ends, and the engine

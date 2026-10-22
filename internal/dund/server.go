@@ -53,20 +53,64 @@ type Server struct {
 	// SetBuild; a nil upgrade means a service manager owns the process.
 	version string
 	exe     string
-	upgrade func(exe string) error
+	upgrade func(exe, version string) error
 
 	mu    sync.Mutex
 	conns map[*conn]struct{}
 }
 
 func NewServer(svc *Service, principal Principal) *Server {
-	return &Server{svc: svc, principal: principal, conns: map[*conn]struct{}{}}
+	s := &Server{svc: svc, principal: principal, conns: map[*conn]struct{}{}}
+	// The upgrade status goes to every connection, whatever it follows.
+	svc.WatchUpgrade(s.broadcastUpgrade)
+	return s
 }
 
 // SetBuild names this dund's build for Hello, and how to honour Upgrade (nil:
-// refuse, a service manager restarts it).
-func (s *Server) SetBuild(version, exe string, upgrade func(exe string) error) {
+// refuse, a service manager restarts it). upgrade checks exe and makes the
+// upgrade pending (Service.RequestUpgrade).
+func (s *Server) SetBuild(version, exe string, upgrade func(exe, version string) error) {
 	s.version, s.exe, s.upgrade = version, exe, upgrade
+}
+
+// broadcastUpgrade queues st for every connection. A connection that cannot
+// take it now gets it dropped rather than stalling the others: the next
+// change, or its reconnect, brings it up to date.
+func (s *Server) broadcastUpgrade(st proto.UpgradeStatus) {
+	s.mu.Lock()
+	to := make([]*conn, 0, len(s.conns))
+	for c := range s.conns {
+		to = append(to, c)
+	}
+	s.mu.Unlock()
+	for _, c := range to {
+		ev := proto.NewEvent(&st)
+		ev.TS = time.Now()
+		select {
+		case c.out <- ev:
+		case <-c.done:
+		default:
+			log.Printf("dund: a connection's queue is full; it misses an upgrade status")
+		}
+	}
+}
+
+// Drain waits, up to d, until every connection has written what is queued
+// for it: the "restarting" status before dund execs a new build.
+func (s *Server) Drain(d time.Duration) {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		queued := 0
+		for c := range s.conns {
+			queued += len(c.out)
+		}
+		s.mu.Unlock()
+		if queued == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // Serve accepts connections until ln closes.
@@ -95,6 +139,11 @@ func (s *Server) Serve(ln net.Listener) error {
 		s.mu.Lock()
 		s.conns[cn] = struct{}{}
 		s.mu.Unlock()
+		if st := s.svc.UpgradeStatus(); st != nil {
+			ev := proto.NewEvent(st)
+			ev.TS = time.Now()
+			cn.out <- ev // the queue is new and empty
+		}
 		go cn.write()
 		go cn.read()
 	}
@@ -110,8 +159,9 @@ type conn struct {
 	done chan struct{}
 	once sync.Once
 
-	mu   sync.Mutex
-	subs map[string]*proto.Subscription // by session id
+	mu    sync.Mutex
+	subs  map[string]*proto.Subscription // by session id
+	build string                         // the client's, from its Hello
 }
 
 func (c *conn) close() {
@@ -258,13 +308,31 @@ func (c *conn) handle(cmd proto.Command) {
 	case *proto.Stop:
 		c.ack(cmd, cmd.Session, svc.Stop(c.who, cmd.Session))
 	case *proto.Hello:
-		c.reply(cmd, "", &proto.HelloReply{Version: c.srv.version, Exe: c.srv.exe, Upgradable: c.srv.upgrade != nil, Busy: svc.Busy()})
+		c.mu.Lock()
+		c.build = p.Version
+		c.mu.Unlock()
+		c.reply(cmd, "", &proto.HelloReply{Version: c.srv.version, Exe: c.srv.exe, Upgradable: c.srv.upgrade != nil,
+			Busy: svc.Busy(), Coordinated: true, Upgrade: svc.UpgradeStatus()})
 	case *proto.Upgrade:
+		if p.Exe == "" && p.Now {
+			c.ack(cmd, "", svc.UpgradeNow())
+			return
+		}
 		if c.srv.upgrade == nil {
 			c.ack(cmd, "", errors.New("a service manager runs this dund: restart the service instead (dun dund service restart)"))
 			return
 		}
-		c.ack(cmd, "", c.srv.upgrade(p.Exe))
+		ver := p.Version
+		if ver == "" {
+			c.mu.Lock()
+			ver = c.build
+			c.mu.Unlock()
+		}
+		err := c.srv.upgrade(p.Exe, ver)
+		if err == nil && p.Now {
+			err = svc.UpgradeNow()
+		}
+		c.ack(cmd, "", err)
 	case *proto.Persist:
 		on, changed, err := svc.SetPersist(c.who, cmd.Session, p.Mode)
 		if err != nil {

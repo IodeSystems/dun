@@ -69,8 +69,12 @@ type session struct {
 	lastActive time.Time
 	inTurn     bool
 	asking     bool
-	jobsBusy   bool
-	agentsBusy bool
+	jobs       []proto.JobInfo   // the running ones
+	agents     []proto.AgentInfo // the running or blocked ones
+	// resume is the message a restart left for this session's agent: it was
+	// working when dund stopped, and is woken with it on the next start
+	// (persisted in the registry). Guarded by actMu, a leaf lock.
+	resume string
 }
 
 // track notes what an event says the engine is doing.
@@ -88,24 +92,29 @@ func (s *session) track(ev proto.Event) {
 	case *proto.Answered:
 		s.asking = false
 	case *proto.Jobs:
-		s.jobsBusy = false
+		s.jobs = nil
 		for _, j := range p.Jobs {
 			if j.State == "running" {
-				s.jobsBusy = true
+				s.jobs = append(s.jobs, j)
 			}
 		}
 	case *proto.Agents:
-		s.agentsBusy = false
+		s.agents = nil
 		for _, a := range p.Agents {
 			if a.State == "running" || a.Blocked {
-				s.agentsBusy = true
+				s.agents = append(s.agents, a)
 			}
 		}
 	case *proto.EngineState:
 		if p.State != "started" {
-			s.inTurn, s.asking, s.jobsBusy, s.agentsBusy = false, false, false, false
+			s.inTurn, s.asking, s.jobs, s.agents = false, false, nil, nil
 		}
 	}
+}
+
+// occupied: a turn, a question, a job or a sub-agent. Called with actMu held.
+func (s *session) occupied() bool {
+	return s.inTurn || s.asking || len(s.jobs) > 0 || len(s.agents) > 0
 }
 
 // idle reports whether the engine runs with no one following it and nothing
@@ -119,19 +128,40 @@ func (s *session) idle(d time.Duration) bool {
 	s.mu.Unlock()
 	s.actMu.Lock()
 	defer s.actMu.Unlock()
-	return running && !s.inTurn && !s.asking && !s.jobsBusy && !s.agentsBusy &&
-		time.Since(s.lastActive) >= d
+	return running && !s.occupied() && time.Since(s.lastActive) >= d
 }
 
 // busy reports whether the engine is doing something a restart would cut
 // short: a turn, a question to a person, a job, a sub-agent.
-func (s *session) busy() bool {
+func (s *session) busy() bool { return len(s.waiting()) > 0 }
+
+// waiting is what a restart would cut short in this session, one entry per
+// thing, for a pending upgrade to name.
+func (s *session) waiting() []proto.UpgradeWait {
 	s.mu.Lock()
 	running := s.running
 	s.mu.Unlock()
+	if !running {
+		return nil
+	}
 	s.actMu.Lock()
 	defer s.actMu.Unlock()
-	return running && (s.inTurn || s.asking || s.jobsBusy || s.agentsBusy)
+	var out []proto.UpgradeWait
+	switch {
+	case s.asking:
+		out = append(out, proto.UpgradeWait{Session: s.id, What: "question", Hint: "answer it, or interrupt the turn"})
+	case s.inTurn:
+		out = append(out, proto.UpgradeWait{Session: s.id, What: "turn", Hint: "interrupt it"})
+	}
+	for _, j := range s.jobs {
+		out = append(out, proto.UpgradeWait{Session: s.id, What: "job", ID: j.ID, Detail: j.Command,
+			Hint: fmt.Sprintf("/jobs kill %d", j.ID)})
+	}
+	for _, a := range s.agents {
+		out = append(out, proto.UpgradeWait{Session: s.id, What: "agent", ID: a.ID, Detail: a.Prompt,
+			Hint: "interrupt the turn"})
+	}
+	return out
 }
 
 // touch marks the session used now (a command, a subscribe).
