@@ -134,4 +134,3 @@ func TestSubscriptionRefusesWithoutAValidToken(t *testing.T) {
 		return
 	}
 }
-
