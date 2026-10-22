@@ -131,7 +131,6 @@ func TestCreateOrReuseClaimLapses(t *testing.T) {
 // Over the socket: create with reuse_idle answers reused, and the session
 // list says how many clients are attached.
 func TestServerReuseIdleAndAttachedCount(t *testing.T) {
-	noHold(t)
 	svc, _, _ := newSvc(t)
 	sock := filepath.Join(t.TempDir(), "dund.sock")
 	ln, err := net.Listen("unix", sock)
@@ -165,14 +164,14 @@ func TestServerReuseIdleAndAttachedCount(t *testing.T) {
 		t.Fatalf("second while attached: %+v %+v", ack, ack.Payload)
 	}
 
-	// a leaves; b never subscribed and noHold lapses its claim at once, so a
-	// third client gets an existing session (b's, the newer).
+	// a leaves. b's session is newer, but b has not subscribed yet and it is
+	// held for b; a's hold ended with its subscribe. A third client gets a's.
 	a.send("c4", id, &proto.Detach{})
 	a.until(ackOf("c4"))
 	c := dial(t, sock)
 	c.send("c1", "", &proto.Create{Workspace: ws, ReuseIdle: true})
-	if ack := c.until(ackOf("c1")); !ack.Payload.(*proto.Ack).Reused || ack.Session == "" {
-		t.Fatalf("third: %+v %+v", ack, ack.Payload)
+	if ack := c.until(ackOf("c1")); !ack.Payload.(*proto.Ack).Reused || ack.Session != id {
+		t.Fatalf("third: %+v %+v, want %s", ack, ack.Payload, id)
 	}
 }
 

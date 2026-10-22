@@ -233,7 +233,8 @@ func (s *Service) Create(principal, workspace string, args []string, resume stri
 // reuseHold is how long a session handed out by CreateOrReuse counts as
 // taken although nobody has subscribed to it yet: the client subscribes in
 // its next command, and a second client asking in between must not get the
-// same session.
+// same session. A subscribe ends the hold; a client that never comes ends it
+// after this.
 var reuseHold = 30 * time.Second
 
 // CreateOrReuse is Create for a plain `dun`: it hands back principal's most

@@ -335,6 +335,9 @@ func (s *session) stop() {
 // empty epoch is this log's.
 func (s *session) subscribe(after uint64, epoch string) (*proto.Event, []proto.Event, *proto.Subscription, error) {
 	s.touch()
+	s.mu.Lock()
+	s.claimed = time.Time{} // its client is here: the subscription holds it now
+	s.mu.Unlock()
 	var replay []proto.Event
 	var sub *proto.Subscription
 	err := errEpoch
