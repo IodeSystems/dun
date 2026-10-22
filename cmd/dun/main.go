@@ -746,6 +746,9 @@ type closeCtx struct {
 	wt        *dun.Worktree
 }
 
+// skillPoll is how often the engine looks for changed skill files.
+var skillPoll = 3 * time.Second
+
 func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string, cc closeCtx) {
 	em.emit(&proto.Ready{Tools: h.ToolNames(), Servers: serversProto(h.Servers()),
 		Hint: serverHint(h.Servers())})
@@ -764,6 +767,25 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		em.emit(commandsEvent(h))
 	}
 	in.setServerCmd(srvCmd)
+	// A skill added, removed or edited on disk reaches the model's skill
+	// list and every client's palette within a few seconds, not at the next
+	// restart.
+	h.CheckSkills() // records what is there now
+	go func() {
+		t := time.NewTicker(skillPoll)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			if h.CheckSkills() {
+				em.emit(catalogEvent(h))
+				em.emit(commandsEvent(h))
+			}
+		}
+	}()
 	resetCmd := func() {
 		h.Reset()
 		em.emit(&proto.ResetEvent{})

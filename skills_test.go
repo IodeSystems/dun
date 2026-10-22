@@ -156,3 +156,50 @@ func TestDocGroup_MCPDocsAreTheirOwnGroup(t *testing.T) {
 		t.Error("grouping")
 	}
 }
+
+// A skill added, edited or removed on disk is noticed: CheckSkills reports
+// the change and tells the model what came and went. The first call only
+// records.
+func TestCheckSkills_NoticesChanges(t *testing.T) {
+	home := t.TempDir()
+	defer func(f func() (string, error)) { userHomeDir = f }(userHomeDir)
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Setenv("DUN_HOME", filepath.Join(home, ".dun"))
+	user := filepath.Join(home, ".dun", "skills")
+	writeSkill(t, user, "deploy", "---\nname: deploy\ndescription: ship it\n---\nbody")
+
+	h := newNoteHarness(t)
+	h.mgr, h.cfg.ConfigDir = mcpmgr.NewManager(), t.TempDir()
+	asides := func() string {
+		h.noteMu.Lock()
+		defer h.noteMu.Unlock()
+		var b strings.Builder
+		for _, q := range h.queue {
+			b.WriteString(q.text + "\n")
+		}
+		h.queue = nil
+		return b.String()
+	}
+	if h.CheckSkills() {
+		t.Fatal("the first check only records")
+	}
+	if h.CheckSkills() {
+		t.Fatal("nothing changed")
+	}
+
+	writeSkill(t, user, "review", "---\nname: review\ndescription: review a diff\n---\nbody")
+	if !h.CheckSkills() || !strings.Contains(asides(), "new review") {
+		t.Fatal("a new skill was not noticed")
+	}
+	// An edit: same name, new content (the size changes, so no mtime race).
+	writeSkill(t, user, "review", "---\nname: review\ndescription: review a diff, carefully\n---\nlonger body")
+	if !h.CheckSkills() || !strings.Contains(asides(), "edited") {
+		t.Fatal("an edit was not noticed")
+	}
+	if err := os.RemoveAll(filepath.Join(user, "deploy")); err != nil {
+		t.Fatal(err)
+	}
+	if !h.CheckSkills() || !strings.Contains(asides(), "gone deploy") {
+		t.Fatal("a removal was not noticed")
+	}
+}

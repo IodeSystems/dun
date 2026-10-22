@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -247,15 +248,7 @@ func (h *Harness) discoverCatalog(ctx context.Context, id string) {
 // Skills returns every skill in reach, by precedence: a later source
 // replaces an earlier one of the same name. Sorted by name.
 func (h *Harness) Skills() []Skill {
-	dir := h.cfg.ConfigDir
-	if dir == "" {
-		dir = h.cfg.Workspace
-	}
-	roots := skillDirs(dir)
-	user, project := roots[:len(roots)-2], roots[len(roots)-2:]
-	if dir == "" {
-		user, project = roots, nil
-	}
+	user, project := h.skillRoots()
 	all := loadLocalSkills(user)
 	h.srvMu.Lock()
 	ids := make([]string, 0, len(h.catalog))
@@ -281,6 +274,88 @@ func (h *Harness) Skills() []Skill {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// skillRoots is the local skill roots: the user's (below the servers'
+// skills in precedence) and the project's (above them).
+func (h *Harness) skillRoots() (user, project []struct{ dir, source string }) {
+	dir := h.cfg.ConfigDir
+	if dir == "" {
+		dir = h.cfg.Workspace
+	}
+	roots := skillDirs(dir)
+	if dir == "" {
+		return roots, nil
+	}
+	return roots[:len(roots)-2], roots[len(roots)-2:]
+}
+
+// skillsSig fingerprints the local skill roots: every skill directory's
+// SKILL.md path, size and modification time. Cheap enough to poll.
+func skillsSig(roots []struct{ dir, source string }) string {
+	var b strings.Builder
+	for _, r := range roots {
+		entries, err := os.ReadDir(r.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			p := filepath.Join(r.dir, e.Name(), "SKILL.md")
+			if st, err := os.Stat(p); err == nil {
+				fmt.Fprintf(&b, "%s %d %d\n", p, st.Size(), st.ModTime().UnixNano())
+			}
+		}
+	}
+	return b.String()
+}
+
+// CheckSkills reports whether a local skill was added, removed or edited
+// since the last check. If so the tool set is rebuilt — the skill tool's
+// description lists the skills, so the model would not otherwise see a new
+// one — at the end of the running turn if there is one, and the model is told
+// which skills came and went. The first call only records.
+func (h *Harness) CheckSkills() bool {
+	user, project := h.skillRoots()
+	sig := skillsSig(append(append([]struct{ dir, source string }{}, user...), project...))
+	h.skillMu.Lock()
+	first, changed := !h.skillSeen, sig != h.skillSig
+	h.skillSeen, h.skillSig = true, sig
+	before := h.skillNames
+	var now []string
+	for _, s := range h.Skills() {
+		now = append(now, s.Name)
+	}
+	h.skillNames = now
+	h.skillMu.Unlock()
+	if first || !changed {
+		return false
+	}
+	var added, gone []string
+	for _, n := range now {
+		if !slices.Contains(before, n) {
+			added = append(added, n)
+		}
+	}
+	for _, n := range before {
+		if !slices.Contains(now, n) {
+			gone = append(gone, n)
+		}
+	}
+	switch {
+	case len(added) > 0 || len(gone) > 0:
+		note := "skills changed:"
+		if len(added) > 0 {
+			note += " new " + strings.Join(added, ", ") + ";"
+		}
+		if len(gone) > 0 {
+			note += " gone " + strings.Join(gone, ", ") + ";"
+		}
+		h.Aside(strings.TrimSuffix(note, ";") + " (the skill tool lists them)")
+	default:
+		h.Aside("a skill was edited; load it again with the skill tool for the new text")
+	}
+	h.applyTools()
+	return true
 }
 
 // PromptInfo is one MCP prompt, for a UI to offer as a slash command.

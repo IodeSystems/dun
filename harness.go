@@ -380,6 +380,12 @@ type Harness struct {
 	// catalog is what each started server offers besides tools: skills and
 	// prompts (skills.go). Guarded by srvMu.
 	catalog map[string]mcpCatalog
+
+	// The local skills as last seen by CheckSkills.
+	skillMu    sync.Mutex
+	skillSeen  bool
+	skillSig   string
+	skillNames []string
 	// trigMark is the CreatedAt of the newest entry the memory triggers have
 	// looked at (memtrigger.go).
 	trigMu   sync.Mutex
