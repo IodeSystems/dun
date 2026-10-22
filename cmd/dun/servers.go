@@ -482,7 +482,12 @@ const mcpAddHint = "add one: /mcp add — a form: an id, then a URL (https://…
 func serverListing(states []dun.ServerState) string {
 	var b strings.Builder
 	b.WriteString("mcp servers")
+	total, direct := 0, 0
 	for _, st := range states {
+		if st.Running && st.Via != dun.ViaShell {
+			total += st.Cost
+			direct++
+		}
 		b.WriteString("\n  " + st.ID + ": ")
 		switch {
 		case st.Via == dun.ViaShell:
@@ -506,6 +511,10 @@ func serverListing(states []dun.ServerState) string {
 		if hint := heavyHint(st); st.Running && hint != "" {
 			b.WriteString("\n    " + hint)
 		}
+	}
+	if direct > 0 {
+		b.WriteString("\n  tool definitions: ~" + kTokens(total) + " tokens in every request, from " +
+			plural(direct, "running server") + " (/context shows the whole prompt)")
 	}
 	return b.String()
 }
@@ -575,7 +584,7 @@ func hostedSummary(st dun.ServerState) string {
 	s := fmt.Sprintf("in the shell as %s (eval: help(%q))", st.Namespace, st.Namespace)
 	switch {
 	case st.Hosted:
-		return s + fmt.Sprintf(" · %d tools", st.Tools)
+		return s + fmt.Sprintf(" · %d tools · 0 tokens per request (its schemas stay in the shell)", st.Tools)
 	case st.Err != "":
 		return s + " · not connected: " + oneLine(st.Err)
 	}

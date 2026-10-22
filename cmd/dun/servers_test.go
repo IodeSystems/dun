@@ -535,3 +535,19 @@ func TestTurnErr_LiveTurnIsUntouched(t *testing.T) {
 		t.Errorf("a live turn's error was rewritten to %v", got)
 	}
 }
+
+// /mcp says what the tool definitions cost per request in total, and that a
+// server in the shell adds none.
+func TestServerListing_ShowsDefinitionCost(t *testing.T) {
+	out := serverListing([]dun.ServerState{
+		{ID: "a", Running: true, Via: dun.ViaDirect, Tools: 10, Cost: 3000},
+		{ID: "b", Running: true, Via: dun.ViaDirect, Tools: 2, Cost: 1200},
+		{ID: "c", Via: dun.ViaShell, Hosted: true, Tools: 40, Namespace: "c"},
+		{ID: "d"},
+	})
+	for _, want := range []string{"~3.0k tokens", "~1.2k tokens", "tool definitions: ~4.2k tokens in every request, from 2 running servers", "40 tools · 0 tokens per request"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
