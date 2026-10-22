@@ -65,6 +65,8 @@ usage:
   dun "fix the flaky test"   run one task headless, print the diff, exit
   dun --continue             reopen the most recent session for this workspace
   dun -p                     engine mode: line-delimited JSON events on stdin/stdout
+  dun doctor                 check providers, tools, dund and the service; say how to fix
+  dun dund …                 the session service (dun dund --help)
 
 flags:
 `)
@@ -90,6 +92,10 @@ func main() {
 	// so the service and the engines it runs are always the same build.
 	if len(os.Args) > 1 && os.Args[1] == "dund" {
 		os.Exit(dundcli.Main(os.Args[2:]))
+	}
+	// `dun doctor`: what dun needs, checked read-only (doctor.go).
+	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		os.Exit(runDoctor())
 	}
 	flag.Usage = usage
 	ver := flag.Bool("version", false, "print version and exit")
