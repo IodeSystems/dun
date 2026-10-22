@@ -72,7 +72,7 @@ full detail archived in `done.md`.
   merge-by-id, inherit, `disabled`, per-server env/timeout.
 - **Opt-in tool families** — only `shell` autostarts; `/rag` and `/lsp`
   (status·on·off·auto·manual) + `--rag`/`--lsp` start the other two, autostart
-  persists to `.dun/dun.local.json`, and a server that fails to start is
+  persists to the project's `dun.local.json` (see 14), and a server that fails to start is
   reported rather than fatal. A change to the tool set is carried to the model
   as an `Aside` (rides the next tool result / turn; never schedules one).
 - **Retry UX + mid-turn messages** — provider waits are narrated (agentkit
@@ -100,6 +100,56 @@ and `/proc` on a live session. A–C closed those, and D (sub-agents) is built
 through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
+
+### ◐ 14. dun writes nothing into the repos it works on (USER, 2026-10-22)
+
+USER: "we don't want to pollute git trees and we cannot tell people to use
+dun" — no `.dun/` in a repo, no `.gitignore` entry asked of anyone.
+
+Done (`project.go`; README "dun writes nothing into the repos"):
+- `$DUN_HOME/projects.json` maps an absolute source dir → id, minted on first
+  sight (`<slug>-<6 hex>`), written temp+rename under flock. State in
+  `$DUN_HOME/projects/<id>/`: `dun.json` (human), `dun.local.json` (/rag auto),
+  `agents_read`, `worktrees/` (session trees + mount symlinks),
+  `overlays/<slug>-<hash>/` (one linked worktree's own state).
+- A git worktree (any kind) → its source repo's id via `--git-common-dir`;
+  the overlay wins over the project's state. Bare repos / submodules: the
+  toplevel stands for itself.
+- Config: built-in < `$DUN_HOME/mcp.json` < repo `dun.json` < repo
+  `.dun/dun.json` < repo `dun.local.json`, `.dun/dun.local.json` (old layout,
+  read-only) < project state < overlay. Reading never registers a dir.
+- `go.mod replace => ../x`: the mount symlink beside the worktree, as before
+  (go.mod never rewritten). Replace discovery now reads `replace ( … )`
+  blocks and mounts `../x/sub` as `x`.
+- Migration: on first sight `.dun/dun.local.json` + `.dun/agents_read` are
+  COPIED in (logged once). Old `<repo>/.dun/worktrees/*` still listed,
+  reused and pruned; nothing new goes there.
+- AGENTS.md hook state via `DUN_AGENTS_STATE`; mtime portable (`stat -f %m`).
+- `/trace` defaults to the temp dir.
+- Verified: `make test`; live `dun -p --worktree` on a temp repo with
+  `DUN_HOME=$(mktemp -d)`: repo `git status --porcelain` empty, worktree under
+  `projects/app-<id>/worktrees/`, `go build` with `replace => ../x` OK in it.
+
+- **next:** merge (USER). Then decide the session/memory keys (below).
+- **risks:** a repo MOVED gets a new id (registry is by path) — its
+  worktrees and settings stay under the old id, unlisted. `replace =>
+  ../../x` (climbs past the worktree's parent) and a go.mod NOT at the repo
+  root still do not resolve on the host (they did not before either). Not
+  run on macOS (flock, `stat -f`, `/private/var` paths — handled in code,
+  untested there). The hook's state env relies on poly-lsp-mcp passing its
+  environment to the hook process.
+- **blocking decisions:** (USER) should sessions (`~/.dun/sessions/<encoded
+  abs path>/`) and memory (`~/.dun/memory/<raglit project>/`) be keyed by the
+  project id? Today a linked worktree's sessions are separate from its
+  source's, and two clones with one dir name share memory.
+- **remaining repo writer outside dun:** poly-lsp-mcp writes
+  `<root>/.poly-lsp-mcp/cache.gob` and has no flag to put it elsewhere
+  (another session owns poly-lsp-mcp).
+- **assumptions:** a `/rag auto` made in a linked worktree is that
+  worktree's (overlay), not the project's; pruning a session tree also
+  removes its overlay (dun-written state for a dir that is gone).
+- **optional extensions:** `dun projects` (list/forget/re-point a moved
+  repo); project-level `skills/` in the state dir.
 
 ### ◐ 13. Session service, a protocol, then a PWA (USER, 2026-10-21)
 

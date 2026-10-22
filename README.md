@@ -35,19 +35,34 @@ above whatever is saved. Startup names what is off, so a missing tool family is
 never a silent absence. A server that fails to start is reported and skipped —
 it costs you that family, not your session.
 
-Four optional config files, layered:
+**dun writes nothing into the repos it works on** — no `.dun/`, no
+`.gitignore` entry to ask of anyone. What it keeps per project lives in
+`$DUN_HOME/projects/<id>/` (default `~/.dun`):
 
-| file | committed? | describes |
-|---|---|---|
-| `dun.json`, `.dun/dun.json` | yes | the PROJECT — "this repo needs a db tool" |
-| `dun.local.json`, `.dun/dun.local.json` | **no** | THIS MACHINE — binary paths, DSNs, anything secret |
+    $DUN_HOME/projects.json                  absolute repo dir → id (minted on first sight)
+    $DUN_HOME/projects/<id>/dun.json         optional, yours to write
+    $DUN_HOME/projects/<id>/dun.local.json   what /rag auto, /lsp auto save (0600)
+    $DUN_HOME/projects/<id>/agents_read      the AGENTS.md guard's memory
+    $DUN_HOME/projects/<id>/worktrees/       --worktree session trees
+    $DUN_HOME/projects/<id>/overlays/<dir>/  one linked worktree's own state
 
-Precedence extends what dun already documents for LLM settings:
+The id is the directory's name plus a random suffix. A git worktree (dun's,
+`git worktree add`, Claude Code's) belongs to its source repo's project, and
+what dun saves while working in it goes to that worktree's overlay, which wins
+over the project's. A go.mod `replace => ../x` still resolves inside a session
+worktree: a symlink `worktrees/x` points at the real sibling.
 
-    built-in defaults  <  dun.json  <  .dun/dun.json  <  dun.local.json  <  .dun/dun.local.json  <  Servers set in Go
+A repo MAY commit `dun.json` or `.dun/dun.json` (the PROJECT — "this repo
+needs a db tool"); dun reads them and never writes them. Precedence:
 
-`/rag auto` writes `.dun/dun.local.json` (0600, with a `.gitignore` beside it).
-The root-level pair is the older layout and is still read.
+    built-in defaults  <  $DUN_HOME/mcp.json  <  dun.json  <  .dun/dun.json
+      <  projects/<id>/dun.json, dun.local.json  <  overlay  <  Servers set in Go
+
+A `dun.local.json` or `.dun/dun.local.json` in the repo is the older layout:
+still read (just below the project dir), and copied into the project dir the
+first time dun sees the repo. dun says so once; the repo copy can then go.
+Session worktrees an older dun made in `<repo>/.dun/worktrees/` keep working
+(resume, prune) where they are.
 
 Servers merge **by id**, and omitted fields inherit — overriding one binary path
 does not mean restating its args, and adding a fourth server does not mean
