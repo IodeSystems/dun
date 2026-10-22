@@ -41,7 +41,7 @@ func (c *client) send(cid, session string, payload any) {
 // until reads events until one matches.
 func (c *client) until(match func(proto.Event) bool) proto.Event {
 	c.t.Helper()
-	_ = c.c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_ = c.c.SetReadDeadline(time.Now().Add(10 * time.Second)) // generous: the full suite runs in parallel
 	for c.sc.Scan() {
 		var ev proto.Event
 		if json.Unmarshal(c.sc.Bytes(), &ev) == nil && match(ev) {
