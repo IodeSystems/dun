@@ -128,6 +128,8 @@ USER's choices (2026-10-21):
 - One `dun -p` child process per session, supervised by the service.
 - The TUI always attaches to the service (no direct-spawn mode).
 - Realtime: RT-1..3 (graphql-ws), not the RT-4 relay.
+- A session is visible only to its owner (the principal that created it).
+  Sharing/invites: maybe later (optional extension).
 - gat has no graphql-ws subscriptions (`gw/gat/gat.go:238`: "WebSocket
   subscriptions are not supported in gat mode"; only its own HMAC pubsub WS
   at `/_gat/subscribe`). USER: add graphql-transport-ws subscriptions over
@@ -191,9 +193,8 @@ Slices, in order:
 - **blocking decisions (USER):**
   - (a) Zitadel: an app for the PWA (PKCE), one for the device flow, and
     the audience dund checks — created in your Zitadel.
-  - (b) One user or several: is a session visible only to its owner, or to
-    an allow-list?
-- **optional extensions:** push notifications when a session asks; a
+- **optional extensions:** push notifications when a session asks;
+  share/invite a session to another principal (USER: "maybe later"); a
   read-only share link; session hand-off between machines.
 
 ### ◐ 12. MCP servers: /mcp add, bearer auth, docs into RAG, skills, prompts (USER, 2026-10-21)
