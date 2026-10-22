@@ -189,16 +189,29 @@ Where it stands:
   4. the model/provider/url (the TUI reads its own config);
   5. suggest mode (TUI-only today; shared per USER);
   6. rephrase on/off (engine toggle; no state event).
-  Fix: engine events `user` (echo; author added by dund), `turn` (start),
-  `answered`, and a `settings` state event (model, provider, rephrase,
-  suggest); the TUI renders from them instead of from what it sent.
+- **S1 gaps 1–3, 5, 6 closed** (`a3992fa`): engine events `user` (echo of
+  every message taken, `queued` when mid-turn), `turn` (kind user|continue),
+  `answered`, `settings` (model, provider, url, rephrase, suggest — a state
+  type in the Log); suggest mode now lives in the engine. The TUI renders
+  messages, answers, busy and toggles from them, not from what it sent.
+  Verified: unit tests via a fake engine (`echoWC`), a live `dun -p` run
+  (settings → user → turn → ask → answered → message; strict decode), and
+  the real TUI under ttydrive (the message renders from the echo).
+  Gap 4 (model/provider) is in `settings`; the `/model` switch still
+  restarts the engine from the TUI — moves to dund in S2.
+  Not yet seen live: a mid-turn queued echo. Old `--replay` traces have no
+  `user` events, so their user messages do not render.
+- **S1 remaining:** the TUI still decodes events as maps (lenient reads of
+  the same field names); typing it to `proto.Event` is churn without a
+  behavior change, so it waits for a reason. Per-user UI state has nowhere
+  to live until dund (S2).
 
 Slices, in order:
 - ✅ **S0 engine protocol (internal).** The `proto/` types and `Log`, with
   round-trip tests and a strict-decode test of the engine's real events.
   This is the engine↔dund pipe, not a browser surface: NDJSON over stdio
   stays.
-- **S1 engine on the protocol.** `dun -p` emits these structs; the TUI
+- ✅ **S1 engine on the protocol.** `dun -p` emits these structs; the TUI
   renders only from them and does not assume it is the only client.
 - **S2 `dund`.** cobra (CLI-1); supervises engines (spawn, restart,
   backoff), session registry, one `Log` per session; CLI-8/CLI-10
@@ -213,8 +226,9 @@ Slices, in order:
 - **S5 RN client.** Expo + react-native-web; graphql-codegen types; one
   `graphql-ws` client (RT-3); PWA manifest + service worker.
 
-- **next:** S1 rest — engine events `user`, `turn`, `answered`,
-  `settings`; the TUI renders from them, not from what it sent.
+- **next:** S2 `dund` — cobra; supervise `dun -p` children; one `Log` per
+  session; session registry with a member list (owner only); per-user UI
+  state store; unix socket 0600. Then S3 (the TUI attaches).
 - **risks:**
   - The TUI holds state today that may not be derivable from events (its
     restart counters, suggestions state, replay mode); S1 finds out.
