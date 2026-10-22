@@ -92,6 +92,10 @@ func (l launchd) load(name, path string, _, start bool) error {
 	return nil
 }
 
+func (launchd) homeLine(home string) string {
+	return "<key>DUN_HOME</key><string>" + html.EscapeString(home) + "</string>\n"
+}
+
 func (launchd) unload(name string) error {
 	_, err := launchctl("bootout", guiDomain()+"/"+launchdLabel(name))
 	return err

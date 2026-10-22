@@ -35,6 +35,8 @@ type manager interface {
 	unload(name string) error
 	verb(verb, name string) error // start, stop, restart, status
 	logs(name, home string) error
+	// homeLine is the line of a rendered file that names its DUN_HOME.
+	homeLine(home string) string
 }
 
 // serviceManager is this OS's: launchd on macOS, systemd elsewhere.
@@ -55,6 +57,19 @@ func ServiceFile(name string) (string, bool) {
 		return p, false
 	}
 	return p, true
+}
+
+// ServiceServes reports whether the installed service runs dund for home.
+// A TUI on another DUN_HOME (a scratch one, a test) must not start the
+// user's service: it would serve the wrong home, and the TUI would wait for a
+// socket that never appears.
+func ServiceServes(name, home string) bool {
+	p, ok := ServiceFile(name)
+	if !ok {
+		return false
+	}
+	b, err := os.ReadFile(p)
+	return err == nil && strings.Contains(string(b), serviceManager().homeLine(home))
 }
 
 // StartService starts the installed service (the TUI, when dund is down).
@@ -82,6 +97,8 @@ func (systemd) load(name, _ string, enable, start bool) error {
 	}
 	return nil
 }
+
+func (systemd) homeLine(home string) string { return "Environment=DUN_HOME=" + quoteUnit(home) + "\n" }
 
 func (systemd) unload(name string) error { return systemctl("disable", "--now", name).Run() }
 

@@ -83,3 +83,16 @@ func TestServicePATHFromUnit(t *testing.T) {
 		t.Errorf("ServicePATH = %q %v", got, ok)
 	}
 }
+
+// A rendered file names its home on the line homeLine gives, so a TUI can
+// tell the user's service from one for another DUN_HOME.
+func TestHomeLine(t *testing.T) {
+	u := renderUnit("/bin/dun", []string{"dund"}, "/home/me/.dun", nil, nil)
+	if !strings.Contains(u, systemd{}.homeLine("/home/me/.dun")) || strings.Contains(u, systemd{}.homeLine("/tmp/rc")) {
+		t.Errorf("systemd home line in\n%s", u)
+	}
+	p := launchd{}.render("dund", "/bin/dun", []string{"dund"}, "/Users/me/.dun", nil, nil)
+	if !strings.Contains(p, launchd{}.homeLine("/Users/me/.dun")) || strings.Contains(p, launchd{}.homeLine("/tmp/rc")) {
+		t.Errorf("launchd home line in\n%s", p)
+	}
+}
