@@ -4164,3 +4164,30 @@ func TestTUI_AskPreselectsTheRecommendation(t *testing.T) {
 		t.Errorf("enter should answer with the recommendation: %s", convoText(m))
 	}
 }
+
+// A paste of styled text keeps its text and loses what would draw on the
+// terminal instead: escapes, carriage returns, control characters.
+func TestCleanInput(t *testing.T) {
+	cases := map[string]string{
+		"\x1b[1;31mred\x1b[0m text":               "red text",
+		"line1\r\nline2\rline3":                   "line1\nline2\nline3",
+		"\x1b]8;;http://x\x07link\x1b]8;;\x07 ok": "link ok",
+		"tab\tkept\x00\x07\x7fgone":               "tab\tkeptgone",
+		"\ufeffbom\u200bzw":                       "bomzw",
+		"日本語 😀":                                   "日本語 😀",
+	}
+	for in, want := range cases {
+		if got := string(cleanInput([]rune(in))); got != want {
+			t.Errorf("cleanInput(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPasteIsCleaned(t *testing.T) {
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Paste: true, Runes: []rune("\x1b[32mgo\x1b[0m test\r\n./...")})
+	if got := v.m.input.Value(); got != "go test\n./..." {
+		t.Errorf("input %q", got)
+	}
+}

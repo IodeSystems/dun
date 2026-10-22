@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // multilineInput is the message composer: a word-wrapped text box that grows
@@ -57,8 +58,38 @@ func newMultilineInput() multilineInput {
 func (m *multilineInput) Value() string { return string(m.buf) }
 
 func (m *multilineInput) SetValue(s string) {
-	m.buf = []rune(s)
+	m.buf = cleanInput([]rune(s))
 	m.clampCursor()
+}
+
+// cleanInput is text fit for the composer: what a paste of styled text (or a
+// stray control key) carries that would draw on the terminal instead of in
+// the box goes. Escape sequences (colors, OSC links) are stripped; \r\n and
+// a lone \r become \n (a raw \r sends the cursor to column 0 and the line
+// overwrites itself); a tab stays; every other control character goes.
+func cleanInput(r []rune) []rune {
+	s := string(r)
+	if strings.ContainsRune(s, '\x1b') || strings.ContainsRune(s, '\u009b') {
+		s = ansi.Strip(s)
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	out := make([]rune, 0, len(s))
+	for _, c := range s {
+		switch {
+		case c == '\r':
+			out = append(out, '\n')
+		case c == '\n' || c == '\t':
+			out = append(out, c)
+		case c < 0x20 || c == 0x7f || (c >= 0x80 && c < 0xa0):
+			// C0, DEL, C1 controls: never text
+		case c == '\u200b' || c == '\ufeff':
+			// zero-width space, byte-order mark: invisible, and they shift the
+			// cursor against the text
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (m *multilineInput) Reset() {
@@ -359,7 +390,7 @@ func (m *multilineInput) HandleKey(msg tea.KeyMsg) multilineInput {
 	case tea.KeyPgDown:
 		m.pageBy(m.maxLines)
 	case tea.KeyRunes, tea.KeySpace:
-		r := msg.Runes
+		r := cleanInput(msg.Runes)
 		if msg.Type == tea.KeySpace {
 			r = []rune{' '}
 		}
