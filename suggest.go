@@ -68,6 +68,11 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	if h.Session == nil || h.Session.Build == nil {
 		return nil, nil
 	}
+	// Nothing asked yet (a new session, or one just cleared): there is no
+	// next message to predict, and the call would be paid for nothing.
+	if !h.asked(ctx) {
+		return nil, nil
+	}
 	msgs, err := h.Session.Build(ctx, h.Session.SessionID, forkSystem(h.Session))
 	if err != nil {
 		return nil, err
@@ -105,6 +110,24 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	}
 	h.noteSideCall("suggest", start, usage)
 	return parseSuggestions(b.String()), nil
+}
+
+// asked reports whether the conversation holds a user message — or a
+// compaction marker, which only folds a conversation that had some.
+func (h *Harness) asked(ctx context.Context) bool {
+	if h.Session.Store == nil {
+		return false
+	}
+	entries, err := h.Session.Store.Context(ctx, h.Session.SessionID)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.Kind == agent.KindUser || e.Kind == agent.KindCompaction {
+			return true
+		}
+	}
+	return false
 }
 
 // forkSystem is the system prompt agent.Session.Turn sends, which Turn

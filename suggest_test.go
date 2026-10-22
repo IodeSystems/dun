@@ -127,3 +127,29 @@ func TestSuggest_SharesTheTurnsPrefix(t *testing.T) {
 		}
 	}
 }
+
+// A conversation nothing was asked in — a new session, or one /clear just
+// emptied — has no next message to predict: no side call goes out. After the
+// first user message one does.
+func TestSuggest_NoCallBeforeTheFirstUserMessage(t *testing.T) {
+	h := newNoteHarness(t)
+	r := &prefixRunner{}
+	h.Session = &agent.Session{SessionID: "dun", Store: h.store, Runner: r, System: "You are dun.",
+		Build: func(ctx context.Context, sid, system string) ([]llm.Message, error) {
+			return agent.DefaultContextBuilder(ctx, h.store, sid, system)
+		}}
+	ctx := context.Background()
+	// Not a user message: what an engine may write on its own before one.
+	_ = h.store.Append(ctx, "dun", agent.Entry{ID: "n1", Kind: agent.KindNotification, Content: "servers up"})
+	if sugs, err := h.Suggestions(ctx); err != nil || sugs != nil || len(r.msgs) != 0 {
+		t.Fatalf("empty session: %d calls, %v, %v", len(r.msgs), sugs, err)
+	}
+	_ = h.store.Append(ctx, "dun", agent.Entry{ID: "u1", Kind: agent.KindUser, Content: "what does exec do?"})
+	if sugs, _ := h.Suggestions(ctx); len(r.msgs) != 1 || len(sugs) == 0 {
+		t.Fatalf("after a message: %d calls, %v", len(r.msgs), sugs)
+	}
+	h.Reset() // /clear
+	if _, _ = h.Suggestions(ctx); len(r.msgs) != 1 {
+		t.Fatalf("after /clear: %d calls, want none more", len(r.msgs))
+	}
+}
