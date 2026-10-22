@@ -342,6 +342,17 @@ Where it stands:
   unit tests, Playwright headless vs a test dund on localhost (sign-in,
   palette, slash answer, panel chip, local refusal, live reply), ttydrive.
   Not on the web yet: /model (a picker), /mcp add (form), /context.
+- ✅ **ask_user needs options + a recommendation** (`2307c7e`, USER): ≥2
+  options and `recommended` (one of them; not for multi), else an error back
+  to the model. TUI marks + preselects it; web stars it and renders asks
+  (live or history) as the question + answer, not JSON.
+- ✅ **/model on the web** (`41a2fbc`): control "models" → engine fetches
+  every provider's list (keys stay in the engine); dund `switchModel` swaps
+  --model/--url, keeps other flags, restarts. Picker searched by words.
+- **Web e2e:** `tools/e2e-web.cjs` (Playwright, a TEST dund on localhost,
+  fresh session) — sign-in, palette, slash answers, panel, refusal, live
+  reply, ask with recommendation, model picker. Run with PLAYWRIGHT=<pkg>
+  (hz's docs/node_modules/playwright has one).
 - **S4 open:** OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
   ✅ `dun dund service install` (`548864a`, CLI-10; the TUI starts the
