@@ -115,7 +115,7 @@ now follows: API-7 (huma + gat: one handler serves REST and GraphQL), VER-1
 subscribe, one multiplexed client), WEB-4 (graphql-codegen `client-preset`;
 no hand-written client types), EDGE-1/2 (behind hz, HTTP only, no app TLS),
 CLI-1 (cobra) for `dund`. Divergences recorded in `~/doc/patterns/caveats.md`
-(uncommitted there, beside older uncommitted edits in that repo):
+(~/doc `7896fb5`):
 - **caveat 9:** React Native + react-native-web instead of WEB-1 (web + native
   from one codebase). WEB-4/7/8/10, RT-3, X-LINT-2 still apply.
 - **caveat 10:** OIDC JWTs (Zitadel, go-oidc, `<iss>#<sub>`) validated in the
@@ -128,6 +128,12 @@ USER's choices (2026-10-21):
 - One `dun -p` child process per session, supervised by the service.
 - The TUI always attaches to the service (no direct-spawn mode).
 - Realtime: RT-1..3 (graphql-ws), not the RT-4 relay.
+- gat has no graphql-ws subscriptions (`gw/gat/gat.go:238`: "WebSocket
+  subscriptions are not supported in gat mode"; only its own HMAC pubsub WS
+  at `/_gat/subscribe`). USER: add graphql-transport-ws subscriptions over
+  gat's in-memory pubsub, in the gwag repo (out of tree) — which also settles
+  the canon's disagreement (realtime/relay.md: gat has no subscription
+  transport; RT-1: gat pubsub is a source). Needed by S4, not before.
 
 Where it stands:
 - The engine is its own process, NDJSON over stdio: 30 event types out,
@@ -156,12 +162,14 @@ Slices, in order:
 - **S3 TUI attaches** over the socket; `/sessions` lists all sessions.
 - **S4 remote API.** huma + gat at `/api/v1` (sessions: list, create,
   close; send a command; the subscribe-token mutation) behind hz; OIDC
-  per caveat 10; live events per RT-1..3 (blocking decision (a)).
+  per caveat 10; live events per RT-1..3 over gat. Prerequisite: graphql-ws
+  subscriptions in gat (gwag repo; reuse `gw/graphql_subscribe.go` /
+  `graphql_sub_broker.go` if they fit).
 - **S5 RN client.** Expo + react-native-web; graphql-codegen types; one
   `graphql-ws` client (RT-3); PWA manifest + service worker.
 
-- **next:** USER decides (a); then S0: drop the TS generator, write the
-  round-trip and strict-decode tests, commit.
+- **next:** S0: round-trip and strict-decode tests, commit. The TS
+  generator is already dropped.
 - **risks:**
   - The TUI holds state today that may not be derivable from events (its
     restart counters, suggestions state, replay mode); S1 finds out.
@@ -172,20 +180,10 @@ Slices, in order:
   - The 30 event payloads as GraphQL types: unions/interfaces through
     huma → gat are unverified.
 - **blocking decisions (USER):**
-  - (a) **gat has no graphql-ws subscriptions** (`gw/gat/gat.go:238`:
-    "WebSocket subscriptions are not supported in gat mode"; it has its own
-    HMAC pubsub WS at `/_gat/subscribe`). RT-1..3 then means one of:
-    full gwag `gw` in dund (embedded NATS; CLU-1 says graduate only for
-    multi-service), adding graphql-ws subscriptions to gat (gwag repo work,
-    and it fixes the canon's own disagreement: realtime/relay.md says gat
-    has no subscription transport, RT-1 names gat as a source), or
-    `/_gat/subscribe` with a third caveat.
-  - (b) Zitadel: an app for the PWA (PKCE), one for the device flow, and
+  - (a) Zitadel: an app for the PWA (PKCE), one for the device flow, and
     the audience dund checks — created in your Zitadel.
-  - (c) One user or several: is a session visible only to its owner, or to
+  - (b) One user or several: is a session visible only to its owner, or to
     an allow-list?
-  - (d) Commit the `~/doc` caveats 9–10 (that repo also holds older
-    uncommitted edits: caveat 8, cli.md, web/app.md, projects.md).
 - **optional extensions:** push notifications when a session asks; a
   read-only share link; session hand-off between machines.
 
