@@ -96,6 +96,9 @@ func modelsEvent() *proto.Models {
 		go func() {
 			defer wg.Done()
 			ids, why := listModels(p.URL, p.Key)
+			if ids == nil {
+				ids = []string{} // a list, never null, for every client
+			}
 			out[i] = proto.ModelProvider{Name: p.Name, URL: p.URL, IDs: ids, Error: why,
 				Default: p.Name == def, Key: p.Key != ""}
 		}()

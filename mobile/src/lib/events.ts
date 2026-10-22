@@ -27,7 +27,7 @@ export type Command = {
 
 export type Skill = { name: string; description: string };
 
-export type ModelProvider = { name: string; url: string; ids: string[]; error?: string; default?: boolean; key?: boolean };
+export type ModelProvider = { name: string; url: string; ids: string[] | null; error?: string; default?: boolean; key?: boolean };
 export type Settings = { model: string; provider: string; url: string };
 
 export type View = {
@@ -231,7 +231,7 @@ export function filterModels(ps: ModelProvider[], query: string): { provider: st
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const out: { provider: string; url: string; id: string }[] = [];
   for (const p of ps)
-    for (const id of p.ids) {
+    for (const id of p.ids ?? []) {
       const hay = (p.name + ' ' + id).toLowerCase();
       if (words.every((w) => hay.includes(w))) out.push({ provider: p.name, url: p.url, id });
     }

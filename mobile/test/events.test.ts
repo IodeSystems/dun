@@ -126,3 +126,11 @@ test('a queued message loses its mark when the turn that read it ends', () => {
   expect(v.items[0]).toMatchObject({ queued: true });
   expect(apply(v, { type: 'done' }).items[0]).toMatchObject({ queued: false });
 });
+
+test('a provider that failed to list (ids null) does not break the picker', () => {
+  const ps = [
+    { name: 'dead', url: 'https://dead', ids: null, error: 'HTTP 401' },
+    { name: 'ok', url: 'https://ok', ids: ['m1'] },
+  ];
+  expect(filterModels(ps, '').map((r) => r.id)).toEqual(['m1']);
+});

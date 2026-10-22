@@ -59,7 +59,7 @@ export function ModelPicker({ providers, current, initial, pick, op, edit, close
         <View key={p.name} style={{ gap: space.xs, borderTopWidth: 1, borderTopColor: c.border, paddingTop: space.xs }}>
           <Text style={{ color: p.error ? c.danger : c.text, fontSize: font.sm }}>
             {p.default ? '★ ' : ''}
-            {p.name} — {p.url} · {p.key ? 'key set' : 'no key'} · {p.error ? p.error : `${p.ids.length} models`}
+            {p.name} — {p.url} · {p.key ? 'key set' : 'no key'} · {p.error ? p.error : `${(p.ids ?? []).length} models`}
           </Text>
           <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
             <Button title="Edit" onPress={() => edit(p)} />
