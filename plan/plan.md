@@ -313,6 +313,22 @@ Where it stands:
   missing → bad). Unverified there: device flow, native custom-scheme
   redirects, JWT access tokens, aud = project id. Files: corrallm
   internal/auth/oidc.go, internal/api/access.go, internal/config/authcfg.go.
+- **Remote login decided (USER 2026-10-21):** corrallm style — dund runs
+  /auth/login → Zitadel (PKCE, auth method None, client_id in the body) →
+  /auth/callback, verifies the ID token (aud = client id, nonce,
+  email_verified), checks an allow-list of emails that map to the unix
+  owner (the phone sees the TUI's sessions), and mints its own session token
+  (hashed, AUTH-2) returned in the URL fragment or a dun:// link. USER
+  creates one Zitadel Web app by hand (redirect
+  https://dun.iodesystems.com/auth/callback). Paused for commands (below).
+- **Slash commands on every client (USER 2026-10-21, before the login):**
+  the engine publishes its commands as data (a `commands` event: name,
+  usage, description, choices, route = server|control|prompt|skill|session,
+  target, current state); the web app's `/` palette and a session panel
+  (toggles for rag/lsp/docker/rephrase/suggest; MCP servers, memories,
+  skills) are built from it; a test pins the TUI's engine-routed slashes to
+  the list. TUI-only commands (mouse, trace, perf, scrolldebug, reload,
+  exit, help) stay in the TUI.
 - **S4 open:** OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
   ✅ `dun dund service install` (`548864a`, CLI-10; the TUI starts the
