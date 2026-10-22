@@ -609,7 +609,28 @@ restart on the saved provider, and remove all behaved as intended.
   - Verified: Go and app tests, and a browser run starting logged out
     against a fake LiteLLM: 8 of 8 steps pass, and no key appears in the
     page. The TUI is covered by unit tests only.
-- **next:** USER tries it on the corp machine (macOS, LiteLLM).
+- **`dun doctor`** (`714aac4`) checks, read-only, and gives a fix for each
+  finding:
+  - providers: logged in, a model chosen, each one's model list with the
+    real reason it fails;
+  - tools: on PATH and on the service's PATH;
+  - dund: its socket answers this user, which tests peer credentials;
+  - the service;
+  - a self-updating build's Go version.
+
+  Its first run here found that the saved model `local-Qwen3.8-27B` is no
+  longer among llm.iodesystems.com's models.
+- **launchd** (`bee395f`): `dun dund service` runs a LaunchAgent on macOS,
+  with the same verbs. Both systemd and launchd now capture the installer's
+  PATH.
+  - **risks:** untested on a Mac. Verified so far: darwin vet and build,
+    and the plist parses with plistlib. The `launchctl bootstrap`,
+    `kickstart` and `kill` behaviour is from documentation, not a run.
+  - **blocking decision (USER):** canon CLI-10 is systemd-only. A
+    macOS/launchd clause belongs in ~/doc (out of tree), mirroring this:
+    PATH capture, `SuccessfulExit=false`, and a log file.
+- **next:** USER on the Mac: `git pull && make install`, `dun doctor`,
+  `/login corp`; optionally `dun dund service install --start -- <flags>`.
 - **optional extensions:**
   - Specific provider kinds: OpenRouter, Anthropic, Azure (`api-key`
     header).
