@@ -274,6 +274,17 @@ Where it stands:
   not run for GraphQL** — found by a test; handlers also refuse an empty
   principal. Live: healthz, 401, a message over REST and its reply via the
   long-poll, sessions via GraphQL.
+- **gwag findings** (session gwag-47, 2026-10-21, read-only, awaiting
+  USER): (1) gat skips ALL huma middleware for GraphQL and gRPC ingress —
+  op Middlewares and api.UseMiddleware both (huma wraps them only inside
+  huma.Register; gat mounts /graphql via api.Adapter().Handle and calls
+  cap.invoke directly: dispatch_inproc.go:60, grpc_ingress.go:237); no test
+  pins it; docs/gat.md:352 overstates. dund's outer http middleware +
+  empty-principal refusal is the right interim. Other gat adopters (joko,
+  veliode-go, teledrive-callcenter) may be exposed. (2) gw/subscriptions.go's
+  graphql-ws transport is not NATS-bound and ports to gat (~200 lines) plus
+  Subscription fields whose resolvers subscribe; gat pubsub has no history,
+  so replay-after-seq comes from dund's Log. Field shape: USER decision.
 - **S4 open:** graphql-ws subscriptions in gat (gwag) to replace the
   long-poll; OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
