@@ -325,12 +325,12 @@ Slices, in order:
     `*.iodesystems.com` wildcard, so `dun` needs a reissue (assumed, not
     confirmed); until then hz presents the veliode.com cert for it. Backend
     down until S4 gives dund an HTTP listener on 20003.
-    **❓ Stuck (2026-10-21, 35+ min):** `hz sync status` says "A sync is
-    already running" and `hz pending` still lists the unpublished changes
-    (service dun; `dun` added to the iodesystems.com zone's sub_zones; a
-    veliode.com observed-record change). The CLI cannot inspect or cancel a
-    sync; the fix is on the hz host (192.168.1.89, its logs/restart) —
-    USER's call, it affects every service.
+    ✅ Synced (USER cleared it). Verified: the cert carries
+    `dun.iodesystems.com` (verify ok); a test dund on
+    `192.168.1.76:20003` answered through hz — healthz 200, sessions 401
+    without the token and the list with it, hello open; 503 again after it
+    stopped. NOTE: `hz sync status` is not a status query — it STARTS a
+    sync ("Sync started."); use `hz pending`.
   - An Android APK downloadable like bintag's: `expo prebuild` + `gradlew
     assembleRelease` (no EAS), `releases/android/dun-<code>.apk` +
     `latest.json` (version_code, sha256, size), `/dun.apk` redirects to the
