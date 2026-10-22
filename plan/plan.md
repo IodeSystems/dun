@@ -101,6 +101,73 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 12. MCP servers: /mcp add, bearer auth, docs into RAG, skills, prompts (USER, 2026-10-21)
+
+USER's choices: Agent Skills plus MCP-served ones; docs ingested on add and
+on refresh; servers saved in ~/.dun/mcp.json for every project; the HTTP
+transport built in agentkit.
+
+Built:
+- **agentkit** `20f80f3`, `5c02089`: mcpmgr gains a Streamable HTTP
+  transport (POST per message, JSON or SSE reply, Mcp-Session-Id and
+  MCP-Protocol-Version, DELETE on close, headers on every request).
+  `Capabilities`, `List/ReadResource`, `List/GetPrompt` and `ServerReady`.
+- **dun**:
+  - `url`/`bearer` (`$NAME` reads env)/`headers` on a server spec.
+  - `$DUN_HOME/mcp.json` is the lowest config layer.
+  - `/mcp add` is a form with a masked token; `/mcp remove` and
+    `/mcp refresh <id>` exist.
+  - Tools of non-built-in servers are named `<id>__<tool>`.
+  - Text resources go to `$DUN_HOME/mcp-docs/<id>/` and raglit index
+    `mcp-<id>`, surfaced as their own group.
+  - Skills (`skills.go`) are read from `~/.claude/skills`,
+    `$DUN_HOME/skills`, MCP `skill://…/SKILL.md`, then the project's
+    `.claude/skills` and `.dun/skills`. The `skill` tool carries the list
+    and returns the body or one of the skill's files. `/skill` lists them
+    or asks the model to use one.
+  - MCP prompts are `/<server>:<prompt>` slash commands.
+- Fixed on the way: `AddMount` held srvMu across the tool rebuild, which
+  takes srvMu. Hidden until the rebuild read skills; already reachable with
+  the docs server on.
+
+Live (scratch DUN_HOME, embedded raglit, fake server `plan/m3/fakemcp.py`,
+real model):
+- add: 1 tool, 2 docs indexed, 2 skill files kept out of the index;
+- the model answered a question only the server's runbook could answer,
+  because the doc surfaced;
+- `/corp:triage T-42` became the user message and called
+  `corp__lookup_ticket`;
+- `/skill incident-triage` loaded the body and `checklist.md`;
+- after a restart, the server autostarted from mcp.json.
+
+Measured, n=1 each: with the skill list in the system prompt, the model
+did NOT load the matching skill for "triage ticket". With the list in the
+`skill` tool's description it did, first, and followed all three steps.
+The list now goes in the tool description.
+
+- **next:** USER adds a real server. Tell me which, so its resource and
+  skill layout is checked against what was assumed here.
+- **risks:**
+  - The skill URI layout `skill://<name>/SKILL.md` (or `…/skills/…/SKILL.md`)
+    is an assumption; there is no MCP standard for it.
+  - Not built: the older HTTP+SSE transport (2024-11-05), OAuth (static
+    bearer only), and the server-initiated GET stream.
+  - Docs re-sync only on add/refresh, so a server's later doc changes are
+    missed until `/mcp refresh`.
+  - `~/.claude/skills` skills may name tools dun lacks. The claude.ai
+    `synced/` bucket is skipped, because only `<root>/<name>/SKILL.md` is
+    read.
+  - A local skill's directory is a host path; scripts in it are not visible
+    to a Docker exec backend.
+  - Project servers from dun.json with ids other than code/shell/docs also
+    get `<id>__` tool names now (behaviour change; none exist here).
+  - `TestStart_FailingAutostartIsNotFatal` failed once under load: the
+    stderr tail was lost to a broken-pipe race. It passed 5/5 alone and in
+    two later full runs. It looks like it predates this change.
+- **blocking decisions:** none.
+- **optional extensions:** `/mcp refresh` on a schedule; resource templates;
+  OAuth device flow; skills from a server's prompts.
+
 ### ◐ 11. Several providers, one searchable /model (USER, 2026-10-21 — priority over item 9 M3)
 
 Built (`cmd/dun/config.go` providers, `cmd/dun/model.go`). config.json gains

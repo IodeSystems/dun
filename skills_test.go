@@ -63,7 +63,7 @@ func TestSkills_PrecedenceAndPromptBlock(t *testing.T) {
 	if strings.Join(names, ",") != "deploy=project,manual=user" {
 		t.Fatalf("skills = %v", names)
 	}
-	block := skillsSystemBlock(h.Skills())
+	block := skillList(h.Skills())
 	if !strings.Contains(block, "- deploy: project deploy") || strings.Contains(block, "manual") {
 		t.Errorf("block:\n%s", block)
 	}

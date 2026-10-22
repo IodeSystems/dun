@@ -125,9 +125,11 @@ func skillSlash(m *tuiModel, args []string) tea.Cmd {
 		m.append(stErr.Render("no skill " + name + " — /skill lists them"))
 		return nil
 	}
-	text := "Use the skill " + name + " (call skill name=" + name + " first)."
+	text := "Use the skill " + name + " (call skill name=" + name + " first)"
 	if len(args) > 1 {
-		text += " " + strings.Join(args[1:], " ")
+		text += ": " + strings.Join(args[1:], " ")
+	} else {
+		text += "."
 	}
 	*m = m.sendUser(text)
 	return nil

@@ -20,7 +20,8 @@ import (
 // The format is Agent Skills, the one Claude Code reads: a directory holding
 // SKILL.md, whose YAML frontmatter has a name and a description, whose body
 // is the instructions, and which may mention other files in the directory.
-// Only the name and description ride every request (in the system prompt);
+// Only the name and description ride every request (in the skill tool's
+// description);
 // the body costs tokens only once the model calls skill for it. That split is
 // the point — a skill library can be large without the prompt being large.
 //
@@ -331,8 +332,9 @@ func (h *Harness) RenderPrompt(ctx context.Context, server, name string, args ma
 	return strings.Join(parts, "\n\n"), nil
 }
 
-// skillsSystemBlock lists the model's skills for the system prompt.
-func skillsSystemBlock(skills []Skill) string {
+// skillList renders the model's skills as "- name: description" lines, or
+// "" when there are none it may use.
+func skillList(skills []Skill) string {
 	var b strings.Builder
 	n := 0
 	for _, s := range skills {
@@ -350,19 +352,19 @@ func skillsSystemBlock(skills []Skill) string {
 		fmt.Fprintf(&b, "\n- %s: %s", s.Name, d)
 		n++
 	}
-	if n == 0 {
-		return ""
-	}
-	return "\n\nSkills — instructions for particular tasks. When the task in front of you matches a skill's " +
-		"description, call skill with its name BEFORE you start, and follow what it says:" + b.String()
+	return b.String()
 }
 
-func skillToolDef() llm.ToolDef {
+// skillToolDef carries the skill list in its own description. The list
+// was in the system prompt at first; live, the model matched a task to the
+// tools it had and never to a skill listed there (plan item 12).
+func skillToolDef(list string) llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "skill"
-	td.Function.Description = "Load a skill's instructions (the skills are listed in the system prompt). " +
-		"Pass file to read one of the files the skill mentions."
+	td.Function.Description = "Load a skill: instructions for one kind of task, which tell you how this user " +
+		"wants it done. When the task in front of you matches a skill below, call this FIRST — before any " +
+		"other tool — and follow what it says. Pass file to read a file the skill mentions. Skills:" + list
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{

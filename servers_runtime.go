@@ -373,12 +373,10 @@ func (h *Harness) rebuildTools() {
 		toolDefs = append(toolDefs, memoryToolDef())
 		dispatch = withMemory(dispatch, h, m, report)
 	}
-	// skill, when any skill is in reach: the list rides the system prompt,
-	// the body comes back from this tool.
-	skills := h.Skills()
-	skillsBlock := skillsSystemBlock(skills)
-	if skillsBlock != "" {
-		toolDefs = append(toolDefs, skillToolDef())
+	// skill, when any skill is in reach: the list rides the tool's
+	// description, the body comes back from the tool.
+	if list := skillList(h.Skills()); list != "" {
+		toolDefs = append(toolDefs, skillToolDef(list))
 		dispatch = withSkill(dispatch, h, report)
 	}
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
@@ -400,7 +398,6 @@ func (h *Harness) rebuildTools() {
 		// block survives compaction so a fold never drops them.
 		sys += rootAgentsMDBlock(h.cfg.Workspace)
 	}
-	sys += skillsBlock
 	// ship is the only way work leaves the worktree. It needs a repo, not a
 	// branch: a --no-worktree session sits on the base branch, and the pipeline
 	// (rebase + checks) is worth running there too — it just refuses to push.
