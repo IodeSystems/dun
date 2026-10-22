@@ -164,3 +164,43 @@ func TestServerRefusalSaysWhy(t *testing.T) {
 		t.Fatalf("refusal: %+v", p)
 	}
 }
+
+// hello names the build; upgrade is honoured only when an upgrade func is set
+// (a client-started dund), and refused with the service hint otherwise.
+func TestServerHelloAndUpgrade(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	for _, c := range []struct {
+		name    string
+		upgrade func(string) error
+		ok      bool
+	}{{"client-started", func(string) error { return nil }, true}, {"service", nil, false}} {
+		sock := filepath.Join(t.TempDir(), "dund.sock")
+		ln, err := net.Listen("unix", sock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := NewServer(svc, func(net.Conn) (string, error) { return alice, nil })
+		var asked string
+		up := c.upgrade
+		if up != nil {
+			up = func(exe string) error { asked = exe; return nil }
+		}
+		srv.SetBuild("v1", "/bin/dund-v1", up)
+		go srv.Serve(ln)
+		cl := dial(t, sock)
+		cl.send("h", "", &proto.Hello{Version: "v2"})
+		r := cl.until(typed("hello")).Payload.(*proto.HelloReply)
+		if r.Version != "v1" || r.Exe != "/bin/dund-v1" || r.Upgradable != c.ok {
+			t.Errorf("%s: hello %+v", c.name, r)
+		}
+		cl.send("u", "", &proto.Upgrade{Exe: "/bin/dun-v2"})
+		a := cl.until(ackOf("u")).Payload.(*proto.Ack)
+		if c.ok && (a.Error != "" || asked != "/bin/dun-v2") {
+			t.Errorf("%s: upgrade ack %+v asked %q", c.name, a, asked)
+		}
+		if !c.ok && !strings.Contains(a.Error, "service") {
+			t.Errorf("%s: want a service refusal, got %+v", c.name, a)
+		}
+		ln.Close()
+	}
+}

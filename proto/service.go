@@ -14,11 +14,14 @@ func init() {
 	command[Forget]("forget")
 	command[Persist]("persist")
 	command[Leave]("leave")
+	command[Hello]("hello")
+	command[Upgrade]("upgrade")
 
 	event[SessionList]("sessions")
 	event[EngineState]("engine")
 	event[UIState]("ui_state")
 	event[PersistState]("persist")
+	event[HelloReply]("hello")
 }
 
 // ListSessions asks for the sessions the caller is a member of.
@@ -64,6 +67,29 @@ type Persist struct {
 type PersistState struct {
 	On      bool `json:"on"`
 	Changed bool `json:"changed,omitempty"`
+}
+
+// Hello is a client saying which build it is. dund answers with its own, so
+// a client can tell that the service it reached is a different build.
+type Hello struct {
+	Version string `json:"version"`
+	Exe     string `json:"exe,omitempty"`
+}
+
+// HelloReply is dund's build. Upgradable: it was started by a client, not a
+// service manager, so an Upgrade will be honoured.
+type HelloReply struct {
+	Version    string `json:"version"`
+	Exe        string `json:"exe,omitempty"`
+	Upgradable bool   `json:"upgradable,omitempty"`
+}
+
+// Upgrade asks a client-started dund to restart into Exe (engines too), as
+// soon as nothing is busy. The executable must be a regular file owned by
+// dund's user. A dund run by a service manager refuses: the service is
+// restarted instead.
+type Upgrade struct {
+	Exe string `json:"exe"`
 }
 
 // Leave is a client exiting (/exit): its subscription ends, and the engine

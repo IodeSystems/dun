@@ -91,6 +91,7 @@ func main() {
 	// `dun dund …` is the session service (internal/dundcli), in this binary
 	// so the service and the engines it runs are always the same build.
 	if len(os.Args) > 1 && os.Args[1] == "dund" {
+		dundcli.Version = version
 		os.Exit(dundcli.Main(os.Args[2:]))
 	}
 	// `dun doctor`: what dun needs, checked read-only (doctor.go).

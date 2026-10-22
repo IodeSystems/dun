@@ -49,12 +49,24 @@ type Server struct {
 	svc       *Service
 	principal Principal
 
+	// The build this dund runs, and how to move it to another: set by
+	// SetBuild; a nil upgrade means a service manager owns the process.
+	version string
+	exe     string
+	upgrade func(exe string) error
+
 	mu    sync.Mutex
 	conns map[*conn]struct{}
 }
 
 func NewServer(svc *Service, principal Principal) *Server {
 	return &Server{svc: svc, principal: principal, conns: map[*conn]struct{}{}}
+}
+
+// SetBuild names this dund's build for Hello, and how to honour Upgrade (nil:
+// refuse, a service manager restarts it).
+func (s *Server) SetBuild(version, exe string, upgrade func(exe string) error) {
+	s.version, s.exe, s.upgrade = version, exe, upgrade
 }
 
 // Serve accepts connections until ln closes.
@@ -217,6 +229,14 @@ func (c *conn) handle(cmd proto.Command) {
 		go func() { c.ack(cmd, cmd.Session, svc.Forget(c.who, cmd.Session)) }()
 	case *proto.Stop:
 		c.ack(cmd, cmd.Session, svc.Stop(c.who, cmd.Session))
+	case *proto.Hello:
+		c.reply(cmd, "", &proto.HelloReply{Version: c.srv.version, Exe: c.srv.exe, Upgradable: c.srv.upgrade != nil})
+	case *proto.Upgrade:
+		if c.srv.upgrade == nil {
+			c.ack(cmd, "", errors.New("a service manager runs this dund: restart the service instead (dun dund service restart)"))
+			return
+		}
+		c.ack(cmd, "", c.srv.upgrade(p.Exe))
 	case *proto.Persist:
 		on, changed, err := svc.SetPersist(c.who, cmd.Session, p.Mode)
 		if err != nil {

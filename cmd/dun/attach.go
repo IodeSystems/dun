@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -122,6 +123,7 @@ func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 	sc := bufio.NewScanner(c)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	ac := &attachConn{c: c}
+	notes := checkDundBuild(ac, sc)
 	id := o.resume
 	if id == "" && o.cont {
 		id = dun.LatestSession(o.workspace)
@@ -156,6 +158,9 @@ func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 	tw := newTraceWriter() // DUN_TRACE=path — see replay.go
 	p := &dunProc{stdin: ac, ch: ch, trace: tw, session: id}
 	p.at.Store(&after)
+	for _, n := range notes {
+		ch <- evMsg{"type": "notification", "text": n}
+	}
 	// What arrived while waiting for the acks is the start of the stream.
 	early := ac.early
 	ac.early = nil
@@ -204,6 +209,36 @@ func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 		ch <- eofMsg{proc: p}
 	}()
 	return p, nil
+}
+
+// checkDundBuild compares dund's build with this one. A client-started dund
+// of another build is asked to restart into this binary (it does once nothing
+// is busy, and the reconnect carries this TUI across); a service is only
+// reported; a dund too old to answer gets the command that replaces it.
+func checkDundBuild(ac *attachConn, sc *bufio.Scanner) []string {
+	ev, err := ac.call(sc, "", &proto.Hello{Version: version})
+	if err != nil {
+		return []string{"dund is an older build that cannot be upgraded from here — " +
+			"stop it (kill $(cat " + filepath.Join(dunHome(), "dund.pid") + ")) and start dun again; sessions are kept"}
+	}
+	r, ok := ev.Payload.(*proto.HelloReply)
+	if !ok || r.Version == version || r.Version == "dev" || version == "dev" {
+		return nil
+	}
+	if !r.Upgradable {
+		return []string{"dund (a service) runs build " + r.Version + ", this is " + version + " — dun dund service restart"}
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		return []string{"dund runs build " + r.Version + ", this is " + version + "; cannot name this binary to upgrade it: " + err.Error()}
+	}
+	if _, err := ac.call(sc, "", &proto.Upgrade{Exe: exe}); err != nil {
+		return []string{"dund runs build " + r.Version + ", this is " + version + "; it would not upgrade: " + err.Error()}
+	}
+	return []string{"dund ran build " + r.Version + " — restarting it into this one (" + version + ") once nothing is busy; this reconnects"}
 }
 
 // attachConn is the TUI's writer to the service. The TUI writes engine

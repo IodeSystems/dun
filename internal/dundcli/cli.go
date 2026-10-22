@@ -201,7 +201,15 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 2)
-	go func() { errc <- dund.NewServer(svc, dund.UnixPeer).Serve(ln) }()
+	self, _ := os.Executable() // now: after a rebuild it names the deleted file
+	srv := dund.NewServer(svc, dund.UnixPeer)
+	upgradeTo := make(chan string, 1)
+	var upgrade func(string) error
+	if !underServiceManager() {
+		upgrade = func(exe string) error { return requestUpgrade(ctx, svc, exe, upgradeTo) }
+	}
+	srv.SetBuild(Version, self, upgrade)
+	go func() { errc <- srv.Serve(ln) }()
 	var hs *http.Server
 	if httpAddr != "" {
 		o.Owner = dundapi.Owner(os.Getuid())
@@ -226,7 +234,6 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		}
 		fmt.Fprintf(os.Stderr, "dund: HTTP on %s\n", httpAddr)
 	}
-	self, _ := os.Executable() // now: after a rebuild it names the deleted file
 	rebuilt := watchSelf(ctx, svc, self)
 	fmt.Fprintf(os.Stderr, "dund: serving %s (engines: %s)\n", sock, bin)
 	reexec := false
@@ -237,6 +244,12 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	case <-rebuilt:
 		fmt.Fprintln(os.Stderr, "dund: a new build is in place and nothing is busy — restarting into it")
 		reexec = true
+	case exe := <-upgradeTo:
+		// A client of another build asked: restart into its binary, engines
+		// too, so the two agree.
+		fmt.Fprintf(os.Stderr, "dund: a client asked to upgrade to %s and nothing is busy — restarting into it\n", exe)
+		self, reexec = exe, true
+		os.Args = withFlag(os.Args, "--dun", exe)
 	}
 	if hs != nil {
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -250,6 +263,65 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		return syscall.Exec(self, os.Args, os.Environ())
 	}
 	return err
+}
+
+// Version is the build this dund runs, set by the binary that embeds it.
+var Version = "dev"
+
+// underServiceManager reports whether systemd or launchd started this
+// process: then the service is restarted, not re-exec'd at a client's word.
+func underServiceManager() bool {
+	return os.Getenv("INVOCATION_ID") != "" || strings.HasPrefix(os.Getenv("XPC_SERVICE_NAME"), "com.iodesystems.")
+}
+
+// requestUpgrade checks exe and hands it to the serve loop once nothing is
+// busy. It answers at once; the restart follows.
+func requestUpgrade(ctx context.Context, svc *dund.Service, exe string, to chan<- string) error {
+	if !filepath.IsAbs(exe) {
+		return fmt.Errorf("upgrade: %q is not an absolute path", exe)
+	}
+	st, err := os.Stat(exe)
+	if err != nil {
+		return fmt.Errorf("upgrade: %w", err)
+	}
+	if !st.Mode().IsRegular() || st.Mode()&0o111 == 0 {
+		return fmt.Errorf("upgrade: %s is not an executable file", exe)
+	}
+	if !ownedByMe(st) {
+		return fmt.Errorf("upgrade: %s is not owned by this user", exe)
+	}
+	go func() {
+		t := time.NewTicker(selfCheck)
+		defer t.Stop()
+		for svc.Busy() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+		select {
+		case to <- exe:
+		default: // one is already on its way
+		}
+	}()
+	return nil
+}
+
+// withFlag sets --name's value in args (either spelling), adding it if absent.
+func withFlag(args []string, name, value string) []string {
+	out := append([]string(nil), args...)
+	for i := 0; i < len(out); i++ {
+		switch {
+		case out[i] == name && i+1 < len(out):
+			out[i+1] = value
+			return out
+		case strings.HasPrefix(out[i], name+"="):
+			out[i] = name + "=" + value
+			return out
+		}
+	}
+	return append(out, name, value)
 }
 
 // selfCheck is how often dund looks at its own binary.

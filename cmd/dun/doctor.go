@@ -179,11 +179,45 @@ func (d *doctor) dund() {
 		}
 		if l, ok := ev.Payload.(*proto.SessionList); ok {
 			d.add("ok", "dund", fmt.Sprintf("answers at %s: %d session(s) for this user", sock, len(l.Items)), "")
+			d.dundBuild(c, sc)
 			return
 		}
 	}
 	d.add("fail", "dund", "no answer at "+sock+" (it identifies you by the kernel's peer credentials)",
 		"dun dund service logs (or "+dundLog()+")")
+}
+
+// dundBuild compares the running dund's build with this binary's: a dund left
+// running from an older build keeps its old behaviour (and its old bugs) until
+// it restarts.
+func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
+	pid := filepath.Join(dunHome(), "dund.pid")
+	restart := "stop it — kill $(cat " + pid + ") — and start dun again; sessions are kept"
+	if _, svc := dundcli.ServiceFile(dundcli.ServiceUnit); svc {
+		restart = "dun dund service restart; sessions are kept"
+	}
+	if err := json.NewEncoder(c).Encode(proto.NewCommand("doctor-hello", &proto.Hello{Version: version})); err != nil {
+		return
+	}
+	for sc.Scan() {
+		var ev proto.Event
+		if json.Unmarshal(sc.Bytes(), &ev) != nil || ev.Re != "doctor-hello" {
+			continue
+		}
+		r, ok := ev.Payload.(*proto.HelloReply)
+		switch {
+		case !ok:
+			d.add("fail", "dund", "runs an older build that predates build checks (and today's fixes)", restart)
+		case r.Version == version || r.Version == "dev" || version == "dev":
+			d.add("ok", "dund", "runs this build ("+r.Version+")", "")
+		case r.Upgradable:
+			d.add("warn", "dund", "runs build "+r.Version+", this is "+version,
+				"start dun: it asks dund to restart into this build once nothing is busy (or kill $(cat "+pid+"))")
+		default:
+			d.add("warn", "dund", "the service runs build "+r.Version+", this is "+version, "dun dund service restart")
+		}
+		return
+	}
 }
 
 func (d *doctor) build() {
