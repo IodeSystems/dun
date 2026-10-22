@@ -509,10 +509,50 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   without one ("don't push unless asked") are left to the model's own
   memory call. Side-call stats reach /context only with the next turn's
   usage event.
-- **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
+- **M4 refine/void/confirm ✅ (2026-10-21, `memattest.go`, c82a5f4 + the fix
+  after it; raglit fdb9f38).**
+  - The USER's call: a refine comes from the user or from reality, so it
+    applies without asking. `memory` gains refine, void and confirm, each
+    with `why` (the evidence) and `source` (user | code).
+  - The note file stays the current answer, which is what the index
+    serves. Every verdict is appended to `<note>.md.attest.jsonl` in
+    attest.Entry's shape, plus `was`, the replaced text. `unit` is a
+    content id, so a confirmation of since-refined text shows as "confirmed
+    before a later change".
+  - void → `unsupported`, not `retract`: in attest/attestation.go, retract
+    withdraws a ruling and leaves the unit untouched. The table in
+    answered-questions.md says retract, and disagrees with the code.
+  - A voided file is kept as `*.md.void`. A surfaced note now carries the
+    cue to refine or void it. `/memories` lists notes and their history.
 
-- **next**: M4 (refine/retract/attest), or the remote layers (partitioning
-  below) — USER's choice of order.
+  Live (scratch, embedded raglit, real model):
+  - "we renamed the release branch" → refine, source user;
+  - a README that contradicted a note → refine, source code, citing it;
+  - "we removed the cache dir" → void; search no longer finds the note;
+  - "check the note against ci.sh" → read the file, then confirm with the
+    line quoted.
+
+  Found:
+  - `raglit forget` took no `--embedded`/`--project` and ignored `--index`
+    on the daemon, so M2's `remove` had never worked (it was untested
+    live). Fixed in raglit fdb9f38.
+  - void logged before forgetting; fixed.
+  - The model invented dates and confirmed without checking; the tool text
+    now forbids both, and the confirm re-run was clean.
+
+  Risks:
+  - The daemon path of the new forget is verified only as far as the
+    daemon accepting the POST. The running daemon refuses a dirty client
+    ("version mismatch"), so it needs a clean raglit install and a daemon
+    restart (USER's machine).
+  - Until then, void in daemon mode (dun's default) fails with "the index
+    refused it", and changes nothing.
+  - Confirm quality depends on the model checking first: wording, not
+    enforcement.
+
+- **next**: USER installs raglit (fdb9f38+) and restarts the daemon; then
+  one live void in daemon mode. After that: the remote layers
+  (partitioning below).
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
   attention — M0 measures it); with 1–2 notes the margin has no runner-up, so
   ANY word overlap surfaces a note (seen live in M2) — the rule only works as
