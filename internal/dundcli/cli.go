@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -48,12 +49,22 @@ func Main(args []string) int {
 	return 0
 }
 
+// maxSocketPath is the longest unix socket path bind accepts: sun_path less
+// its NUL — 108 bytes on Linux, 104 on macOS and the BSDs.
+func maxSocketPath() int {
+	if runtime.GOOS == "linux" {
+		return 107
+	}
+	return 103
+}
+
 // Socket is the service's socket for a DUN_HOME: <home>/dund.sock, unless
-// that is longer than a unix socket path may be (107 bytes) — then a name
-// derived from home in $XDG_RUNTIME_DIR (per user, 0700), else the temp dir.
+// that is longer than a unix socket path may be (maxSocketPath) — then a
+// name derived from home in $XDG_RUNTIME_DIR (per user, 0700), else the temp
+// dir.
 func Socket(home string) string {
 	p := filepath.Join(home, "dund.sock")
-	if len(p) <= 107 {
+	if len(p) <= maxSocketPath() {
 		return p
 	}
 	dir := os.Getenv("XDG_RUNTIME_DIR")
@@ -169,10 +180,10 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		return err
 	}
 	sock := l.socket()
-	// The kernel's limit on a socket path is 108 bytes; past it bind fails
-	// with "invalid argument", which names nothing.
-	if len(sock) > 107 {
-		return fmt.Errorf("socket path is %d bytes, over the 107 a unix socket allows: %s (use --socket)", len(sock), sock)
+	// Past the kernel's limit bind fails with "invalid argument", which
+	// names nothing.
+	if n := maxSocketPath(); len(sock) > n {
+		return fmt.Errorf("socket path is %d bytes, over the %d a unix socket allows here: %s (use --socket)", len(sock), n, sock)
 	}
 	_ = os.Remove(sock) // a stale socket; the pidfile says no service owns it
 	ln, err := net.Listen("unix", sock)
