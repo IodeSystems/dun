@@ -206,6 +206,36 @@ Where it stands:
   behavior change, so it waits for a reason. Per-user UI state has nowhere
   to live until dund (S2).
 
+- **S2 core done** (`a65bd18`, `5207764`): `internal/dund` + `cmd/dund`
+  (cobra; `serve` with pidfile, SIGINT/SIGTERM, socket 0600; `sessions`).
+  Engines are children (`dun -p`, DUN_CHILD=1); a crash restarts with
+  `--resume <id>` (3 per 2 min, then `engine{gave_up}`; the next command
+  retries); stop on request; after a service restart the registry
+  (`dund/sessions.json`) is loaded and engines start on first use. One
+  `proto.Log` per session (20k events). Protocol over the socket: create,
+  sessions, subscribe (replay, or a snapshot from the session file when too
+  far behind — incl. a seq from before a service restart), detach,
+  ui_get/ui_put (per member, pushed to that member's other connections),
+  stop; anything else goes to the session's engine. Members only (owner =
+  `unix:<uid>` from SO_PEERCRED); a non-member gets "no such session". Engine
+  flags from clients pass an allowlist (no --key/--resume).
+  Verified: race-tested unit tests over a fake engine and a real unix
+  socket; a live run (create → reply → engine SIGKILLed → resumed with its
+  entries → dund restarted → stale seq → snapshot with the conversation →
+  clean shutdown).
+- **S2 open:**
+  - seq restarts at 1 when dund restarts (logs are memory only); clients
+    recover via the snapshot (ErrFuture). An epoch in the envelope would
+    make it explicit.
+  - `history` now means "replace the scrollback": a snapshot client also
+    gets the respawned engine's history. The TUI must treat it so (S3).
+  - Not yet in dund: the launcher's rebuild watch and reload push; `/model`
+    (an engine restart with new flags); `dund service install` (CLI-10);
+    CFG-1 properties (dun reads config.json today — divergence to record or
+    fix).
+  - Socket path limit: 107 bytes; `--socket` overrides, and a long path
+    fails with a clear error.
+
 Slices, in order:
 - ✅ **S0 engine protocol (internal).** The `proto/` types and `Log`, with
   round-trip tests and a strict-decode test of the engine's real events.
@@ -226,9 +256,9 @@ Slices, in order:
 - **S5 RN client.** Expo + react-native-web; graphql-codegen types; one
   `graphql-ws` client (RT-3); PWA manifest + service worker.
 
-- **next:** S2 `dund` — cobra; supervise `dun -p` children; one `Log` per
-  session; session registry with a member list (owner only); per-user UI
-  state store; unix socket 0600. Then S3 (the TUI attaches).
+- **next:** S3 — the TUI attaches to dund over the socket (auto-starting
+  it), renders from the session's events, keeps its UI state in dund;
+  `/sessions` lists dund's sessions. Then fold the launcher into dund.
 - **risks:**
   - The TUI holds state today that may not be derivable from events (its
     restart counters, suggestions state, replay mode); S1 finds out.
