@@ -34,8 +34,20 @@ day. Fleet tracking: ~/inflight/shelf.md.
     purity, refs, immutability and others. set-state-in-effect caught a
     real bug in item 13.
   - It also brings 3 expo/* env-var rules.
-  - Whether oxlint covers the React Compiler rules and expo/* is NOT
-    verified. Assume a gap until checked against the oxlint rule list.
+  - **oxlint 1.89 coverage** (measured by gwag-47, 2026-10-22: each of
+    the 72 rules active on a .tsx file, given alone to oxlint): 62 are
+    covered, including every React Compiler hooks rule.
+  - **Missing, and why it matters here:**
+    - **react/no-deprecated:** a real gap.
+    - **The 3 expo/* rules:** they guard nothing today. `src/` uses no
+      `process.env` and no `'use dom'`; only `app.config.ts`, which runs
+      in node, reads env. oxlint `jsPlugins` (alpha) might run
+      eslint-plugin-expo; untested.
+    - **The other 6** are covered by tsc or are not needed: import/no-unresolved,
+      no-dupe-args, jsx-uses-react/-vars, react-hooks/config and
+      react-hooks/gating.
+  - **What remains:** the TS 7.0 `app.config.ts` risk above, and
+    react/no-deprecated.
 
 ### gh, restored on a call path that cannot hang
 `ship` no longer invokes gh (see `done.md`). The removal is deliberate but
