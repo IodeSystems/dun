@@ -225,6 +225,61 @@ func (s *Service) List(principal string) []proto.SessionSummary {
 	return out
 }
 
+// Send routes a command to a session's engine, starting it if need be.
+func (s *Service) Send(principal, id string, c proto.Command) error {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return err
+	}
+	return ses.send(c)
+}
+
+// Poll returns the session's events after seq after — waiting up to wait for
+// the first one when there are none yet — at most max of them. A caller too
+// far behind gets a snapshot first. For clients without a live stream.
+func (s *Service) Poll(principal, id string, after uint64, wait time.Duration, max int) (*proto.Event, []proto.Event, error) {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	snap, replay, sub, err := ses.subscribe(after)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer sub.Close()
+	if err := ses.ensureRunning(); err != nil {
+		return nil, nil, err
+	}
+	if len(replay) == 0 && snap == nil && wait > 0 {
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		select {
+		case ev, ok := <-sub.C():
+			if ok {
+				replay = append(replay, ev)
+			}
+		case <-t.C:
+		}
+		// What arrived with it (a turn is a burst) goes in the same answer.
+	drain:
+		for {
+			select {
+			case ev, ok := <-sub.C():
+				if !ok {
+					break drain
+				}
+				replay = append(replay, ev)
+			default:
+				break drain
+			}
+		}
+	}
+	if max > 0 && len(replay) > max {
+		replay = replay[:max]
+	}
+	return snap, replay, nil
+}
+
 // Restart restarts a session's engine with new flags, on the same
 // conversation.
 func (s *Service) Restart(principal, id string, args []string) error {

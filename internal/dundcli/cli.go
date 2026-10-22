@@ -4,6 +4,7 @@
 //
 //	dund serve       run the service (one per DUN_HOME)
 //	dund sessions    list your sessions
+//	dund token       make a new local token for HTTP clients (the old one stops working)
 //
 // Paths: $DUN_HOME (default ~/.dun) holds dund.sock (0600), dund.pid, the
 // registry in dund/ and, when a client started the service, dund.log.
@@ -17,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -30,6 +32,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/iodesystems/dun/internal/dund"
+	"github.com/iodesystems/dun/internal/dundapi"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -96,12 +99,12 @@ func newRoot() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&l.home, "home", "", "state directory (default $DUN_HOME, else ~/.dun)")
 	root.PersistentFlags().StringVar(&l.sock, "socket", "", "unix socket (default <home>/dund.sock)")
-	root.AddCommand(serveCmd(l), sessionsCmd(l))
+	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l))
 	return root
 }
 
 func serveCmd(l *loader) *cobra.Command {
-	var bin string
+	var bin, httpAddr string
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "run the service",
@@ -111,10 +114,11 @@ func serveCmd(l *loader) *cobra.Command {
 			if bin == "" {
 				bin = defaultDun()
 			}
-			return serve(cmd.Context(), l, bin)
+			return serve(cmd.Context(), l, bin, httpAddr)
 		},
 	}
 	cmd.Flags().StringVar(&bin, "dun", "", "the dun binary engines run (default: beside dund, else on PATH)")
+	cmd.Flags().StringVar(&httpAddr, "http", "", "also serve HTTP here (e.g. 127.0.0.1:20003); needs a token (dund token)")
 	return cmd
 }
 
@@ -136,7 +140,7 @@ func defaultDun() string {
 	return "dun"
 }
 
-func serve(ctx context.Context, l *loader, bin string) error {
+func serve(ctx context.Context, l *loader, bin, httpAddr string) error {
 	if err := os.MkdirAll(l.home, 0o700); err != nil {
 		return err
 	}
@@ -166,8 +170,31 @@ func serve(ctx context.Context, l *loader, bin string) error {
 	}
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() { errc <- dund.NewServer(svc, dund.UnixPeer).Serve(ln) }()
+	var hs *http.Server
+	if httpAddr != "" {
+		h, err := dundapi.Handler(svc, dundapi.Owner(os.Getuid()))
+		if err != nil {
+			ln.Close()
+			return err
+		}
+		hs = &http.Server{Addr: httpAddr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
+		hl, err := net.Listen("tcp", httpAddr)
+		if err != nil {
+			ln.Close()
+			return fmt.Errorf("listen %s: %w", httpAddr, err)
+		}
+		go func() {
+			if err := hs.Serve(hl); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errc <- err
+			}
+		}()
+		if !svc.HasToken() {
+			fmt.Fprintln(os.Stderr, "dund: no local token yet — HTTP clients are refused until `dun dund token`")
+		}
+		fmt.Fprintf(os.Stderr, "dund: HTTP on %s\n", httpAddr)
+	}
 	self, _ := os.Executable() // now: after a rebuild it names the deleted file
 	rebuilt := watchSelf(ctx, svc, self)
 	fmt.Fprintf(os.Stderr, "dund: serving %s (engines: %s)\n", sock, bin)
@@ -179,6 +206,11 @@ func serve(ctx context.Context, l *loader, bin string) error {
 	case <-rebuilt:
 		fmt.Fprintln(os.Stderr, "dund: a new build is in place and nothing is busy — restarting into it")
 		reexec = true
+	}
+	if hs != nil {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = hs.Shutdown(sctx)
+		cancel()
 	}
 	ln.Close()
 	os.Remove(sock)
@@ -236,6 +268,26 @@ func claimPidfile(path string) error {
 		}
 	}
 	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
+}
+
+func tokenCmd(l *loader) *cobra.Command {
+	return &cobra.Command{
+		Use:   "token",
+		Short: "make a new local token for HTTP clients; the previous one stops working",
+		Long: "Prints a new bearer token for clients that reach dund over HTTP (a browser on\n" +
+			"localhost, the app on the LAN). Only its hash is kept, so this is the one time\n" +
+			"it is shown; run it again to replace it.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			l.load()
+			tok, err := dund.NewToken(filepath.Join(l.home, "dund"))
+			if err != nil {
+				return err
+			}
+			fmt.Println(tok)
+			return nil
+		},
+	}
 }
 
 func sessionsCmd(l *loader) *cobra.Command {
