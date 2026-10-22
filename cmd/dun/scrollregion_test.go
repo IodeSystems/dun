@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,10 +80,36 @@ func TestScrollRegionResyncsOnLayoutChange(t *testing.T) {
 func TestBlankRegionKeepsLineCount(t *testing.T) {
 	in := "one\ntwo\nthree\nfour"
 	got := blankRegion(in, 3)
-	if want := "\n\n\nfour"; got != want {
+	if want := "one\n\n\nfour"; got != want {
 		t.Fatalf("blankRegion = %q, want %q", got, want)
 	}
 	if blankRegion(in, 99) != in {
 		t.Error("a count past the end must leave the pane alone")
+	}
+}
+
+// The rows View leaves blank for the region must be rows the renderer
+// ignores, and Bubble Tea ignores 0-based frame lines [top, bot) while the
+// region sits on 1-based screen rows top..bot. The region's first screen row
+// is therefore the renderer's: View must give it real content, or every full
+// repaint blanks the top line of the conversation (it did — seen in tmux).
+func TestScrollRegionTopRowIsNotBlanked(t *testing.T) {
+	v := tallConvo(t)
+	v.event(map[string]any{"type": "token", "text": "more"})
+	if !v.m.sr.live {
+		t.Fatal("precondition: the region should be live on a full, pinned pane")
+	}
+	top, bot := v.m.sr.top, v.m.sr.bot
+	frame := strings.Split(v.m.View(), "\n")
+	if first := stripANSI(frame[top-1]); strings.TrimSpace(first) == "" {
+		t.Errorf("the region's first screen row (frame line %d) is blank; the renderer paints it", top-1)
+	}
+	if want := stripANSI(v.m.vp.visible()[0]); !strings.Contains(want, strings.TrimSpace(stripANSI(frame[top-1]))) {
+		t.Errorf("frame line %d = %q, want the pane's first row %q", top-1, stripANSI(frame[top-1]), want)
+	}
+	for i := top; i < bot; i++ { // what setIgnoredLines(top, bot) ignores
+		if frame[i] != "" {
+			t.Errorf("frame line %d is ignored by the renderer but not blank", i)
+		}
 	}
 }

@@ -164,10 +164,21 @@ func sameLines(a, b []string) bool {
 	return true
 }
 
-// blankRegion replaces the region's rows in a rendered pane with empty ones.
+// blankRegion replaces the region's rows in a rendered pane with empty ones —
+// all but the FIRST, which keeps its real content.
+//
 // The renderer never writes ignored rows, so their content is arbitrary — but
 // the LINE COUNT is load-bearing: it is what puts every row below the pane
 // (divider, composer, status) on the screen row the layout expects.
+//
+// The first row is the renderer's too. Bubble Tea takes the same two numbers
+// in two conventions: the margins and cursor moves read top..bot as 1-based
+// screen rows, but setIgnoredLines(top, bot) ignores 0-based frame lines
+// [top, bot) — one row lower. So the region's first screen row is NOT
+// ignored: every full repaint (each region sync is one) wrote this blank over
+// it, and the top of the conversation lost a row, measured in tmux as well as
+// in ttydrive. Given the real row, the renderer and the region agree on what
+// belongs there, and whichever writes last writes the same thing.
 func blankRegion(pane string, n int) string {
 	if n <= 0 {
 		return pane
@@ -176,7 +187,7 @@ func blankRegion(pane string, n int) string {
 	if n > len(rows) {
 		return pane
 	}
-	for i := 0; i < n; i++ {
+	for i := 1; i < n; i++ {
 		rows[i] = ""
 	}
 	return strings.Join(rows, "\n")
