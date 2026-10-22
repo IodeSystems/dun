@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/muesli/termenv"
 )
 
 // buildModel makes a TUI with a realistic conversation: n finalized blocks of
@@ -132,6 +133,24 @@ func BenchmarkView(b *testing.B) {
 				_ = m.View()
 			}
 		})
+	}
+}
+
+// One step of the selection band's pulse, end to end: the tick through Update
+// (which repaints only the selected rows) and the View the runtime calls. It
+// runs at 1/pulseStep while something is selected, so this × ~8/s is its CPU.
+func BenchmarkPulseStep(b *testing.B) {
+	old := band
+	band = newBandStyle(termenv.TrueColor, true, true, true)
+	defer func() { band = old }()
+	m := buildModel(200, 8)
+	m.setFocus(focusConvo)
+	m.refresh()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		nm, _ := m.Update(pulseMsg{})
+		m = nm.(tuiModel)
+		_ = m.View()
 	}
 }
 

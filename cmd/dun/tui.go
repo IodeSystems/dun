@@ -80,6 +80,7 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	// Before the program starts, so the terminal query cannot block the input
 	// loop or race the key reader for the reply bytes. See initMarkdownStyle.
 	initMarkdownStyle()
+	setupBand()           // after the style: the band's filter follows dark or light
 	loadScriptRenderers() // ~/.dun/renderers/*.star override/extend the built-ins
 	// A first engine that will not spawn is NOT a reason to refuse to open. The
 	// UI is where the error is legible and where /reconnect lives; exiting to a
@@ -592,6 +593,10 @@ type tuiModel struct {
 	insp         inspector       // the overlay (valid while inspecting)
 	paging       bool            // the pager has the convo pane (pager.go; owns the keys)
 	holding      bool            // some block has a holdH (a run is in progress)
+	pulse        int             // the selection band's pulse step (band.go)
+	pulsePending bool            // a pulse tick is scheduled
+	bandRaw      []string        // the selected block's rows before the band, for a pulse step
+	bandAt       int             // the pane row they start at
 	pg           pager           // the pager (valid while paging)
 	dumpSig      chan os.Signal  // SIGUSR1 → dump the rendered screen to a debug file
 	paletteSel   int             // highlighted row in the "/" command palette
@@ -810,6 +815,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The block being paged may have grown, and the pane may have moved.
 		t.syncPager()
+		// The pulse clock runs while a band is on screen, and only then.
+		if t.pulseWanted() && !t.pulsePending {
+			t.pulsePending = true
+			cmd = tea.Batch(cmd, pulseTick())
+		}
 		nm = t
 	}
 	return nm, cmd
@@ -1367,6 +1377,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp, cmd = m.vp.Update(msg) // wheel scrolls the conversation viewport
 		m.updateScrollPin()
 		return m, cmd
+
+	case pulseMsg:
+		m.pulsePending = false
+		if m.pulseWanted() {
+			m.pulse++
+			m.repaintBand()
+		}
+		return m, nil
 
 	case blinkTickMsg:
 		// Only refresh when content actually changed — a blind refresh on
@@ -2488,7 +2506,9 @@ func (m tuiModel) planScrollRegion() tea.Cmd {
 		return nil
 	}
 	// Modes that replace the layout wholesale get the rows back.
-	if m.inspecting || m.paging || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
+	// The band pulses mid-pane, and a region can only repaint whole; the
+	// renderer's line diff sends just the rows that changed.
+	if m.inspecting || m.paging || m.bandShown() || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
 		return m.sr.disable()
 	}
 	vp := m.vp
@@ -3102,6 +3122,7 @@ func (m *tuiModel) refresh() {
 	// Render all blocks. For user messages, re-render with full-width
 	// background style (ignoring the pre-styled collapsed from e.view()).
 	cumRow := 0 // running row offset for scrollOverlay mapping
+	m.bandRaw = nil
 	for i, b := range blocks {
 		var w string
 		if i < len(m.convo) && m.convo[i].blank {
@@ -3173,7 +3194,14 @@ func (m *tuiModel) refresh() {
 				w = addGutter(w, " ", lipgloss.NewStyle())
 			}
 		}
-		rendered = append(rendered, strings.Split(w, "\n")...)
+		if selMode && i == m.sel && band.on() {
+			// The band is drawn over the finished rows, and they are kept as
+			// they were so a pulse step can redraw just these (repaintBand).
+			m.bandRaw, m.bandAt = strings.Split(w, "\n"), len(rendered)
+			rendered = append(rendered, band.rows(m.bandRaw, m.vp.Width, m.pulse)...)
+		} else {
+			rendered = append(rendered, strings.Split(w, "\n")...)
+		}
 		h := len(rendered) - cumRow
 		frm.blockH[i] = h
 		frm.rowOffset[i] = cumRow

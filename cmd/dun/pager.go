@@ -82,6 +82,7 @@ type pager struct {
 	rows   []string     // the page laid out at w
 	nodeAt []int        // row where node i's head is
 	w, h   int          // the pane: h includes the title row
+	phase  int          // the selection band's pulse step (band.go)
 }
 
 func newPager(src int, id any) pager {
@@ -121,7 +122,11 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 		if n.err {
 			st = stErr
 		}
-		p.rows = append(p.rows, gutter+stDim.Render(mark)+st.Render(head))
+		r := gutter + stDim.Render(mark) + st.Render(head)
+		if i == p.cur {
+			r = band.row(r, p.w, p.phase)
+		}
+		p.rows = append(p.rows, r)
 		if p.open[i] {
 			for _, r := range wrapRows(n.body, p.w-4) {
 				p.rows = append(p.rows, "    "+r)
@@ -302,5 +307,6 @@ func (m *tuiModel) syncPager() {
 		m.paging = false
 		return
 	}
+	m.pg.phase = m.pulse
 	m.pg.layout(doc, m.vp.Width, m.convoHeight())
 }
