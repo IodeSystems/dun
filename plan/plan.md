@@ -272,7 +272,7 @@ Slices, in order:
   stays.
 - ✅ **S1 engine on the protocol.** `dun -p` emits these structs; the TUI
   renders only from them and does not assume it is the only client.
-- **S2 `dund`.** cobra (CLI-1); supervises engines (spawn, restart,
+- ✅ **S2 `dund`.** cobra (CLI-1); supervises engines (spawn, restart,
   backoff), session registry, one `Log` per session; CLI-8/CLI-10
   (pidfile, signals, `dund service install`). Absorbs the launcher.
   Local transport: a unix socket, 0600.
