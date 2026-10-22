@@ -292,8 +292,11 @@ func groupLen(items []*runItem) int {
 // groupLine is a group of calls as one line: `✓ ⚙ read ×4: a.go, b.go, …`.
 func groupLine(items []*runItem, w int) string {
 	label := "⚙ " + items[0].tool
-	if items[0].tool == "exec" {
+	switch {
+	case items[0].tool == "exec":
 		label = "$"
+	case isFileTool(items[0].tool):
+		label = strings.TrimPrefix(items[0].tool, filePrefix) // read ×4: a.go, …
 	}
 	label += fmt.Sprintf(" ×%d: ", len(items))
 	ts := make([]string, len(items))

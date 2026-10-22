@@ -3570,6 +3570,9 @@ func callText(tool string, args map[string]any, max int) string {
 	if line, ok := evalCallText(args, max); ok && tool == "eval" {
 		return line
 	}
+	if line, ok := fileCallText(tool, args, max); ok {
+		return line
+	}
 	return "⚙ " + tool + "(" + argPreview(args, max) + ")"
 }
 
