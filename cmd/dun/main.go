@@ -800,8 +800,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	// goroutine: it only cancels a context, and the turn loop reports the end
 	// with done{reason: interrupted}. Installed before ready, so a client that
 	// has seen ready can count on it.
-	interruptCmd := func() {
-		if !h.Interrupt() {
+	interruptCmd := func(reason string) {
+		if !h.Interrupt(reason) {
 			em.emit(&proto.ControlEvent{ID: "interrupt", Message: "nothing to interrupt: no turn is running"})
 		}
 	}
@@ -865,7 +865,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			return
 		}
 		if id == "interrupt" {
-			interruptCmd()
+			interruptCmd("")
 			return
 		}
 		// /jobs: list or kill background jobs. Detached: a kill waits up to a
@@ -1252,7 +1252,7 @@ type inputStream struct {
 	// resetCb handles a `reset` event (clear the session store).
 	resetCb func()
 	// interruptCb handles an `interrupt` event (stop the turn in flight).
-	interruptCb func()
+	interruptCb func(reason string)
 	// agentFn handles an `agent` event: the human viewing a child's transcript
 	// or telling it something. Same install-after-the-harness-exists problem as
 	// srv and ctrl, so it queues the same way.
@@ -1294,7 +1294,7 @@ func (s *inputStream) setCtrlCmd(f func(id, action string)) {
 }
 
 // setInterrupt installs the interrupt handler.
-func (s *inputStream) setInterrupt(f func()) {
+func (s *inputStream) setInterrupt(f func(reason string)) {
 	s.mu.Lock()
 	s.interruptCb = f
 	s.mu.Unlock()
@@ -1398,6 +1398,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				Value   string `json:"value"`
 				ID      string `json:"id"`     // server/control: which target
 				Action  string `json:"action"` // server/control: action to take
+				Reason  string `json:"reason"` // interrupt: what stopped the turn ("" = the user)
 			}
 			if json.Unmarshal([]byte(line), &ev) != nil {
 				continue
@@ -1428,7 +1429,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				cb := s.interruptCb
 				s.mu.Unlock()
 				if cb != nil {
-					cb()
+					cb(ev.Reason)
 				}
 			case "reset":
 				s.mu.Lock()

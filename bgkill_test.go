@@ -321,7 +321,7 @@ func TestInterrupt_ListsRunningJobs(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	time.Sleep(100 * time.Millisecond) // the command is running in its grace
-	h.Interrupt()
+	h.Interrupt("")
 	if err := waitErr(t, done); !errors.Is(err, ErrInterrupted) {
 		t.Fatalf("err = %v", err)
 	}

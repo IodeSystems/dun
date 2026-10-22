@@ -51,8 +51,11 @@ type Reset struct{}
 // had produced stays in the transcript, with a marker the model reads; the
 // turn ends with done (reason "interrupted"). Messages queued during it start
 // the next turn at once. With no turn running it is answered by a control
-// event that says so.
-type Interrupt struct{}
+// event that says so. Reason names what stopped it when that is not the
+// user (dund restarting): the marker the model reads says so.
+type Interrupt struct {
+	Reason string `json:"reason,omitempty"`
+}
 
 // Stop ends the engine without waiting for background jobs.
 type Stop struct{}

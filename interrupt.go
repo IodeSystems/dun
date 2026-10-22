@@ -111,16 +111,22 @@ type interruptState struct {
 	// cutJobs is the "still running: …" line for the last interrupted turn,
 	// for the engine's done event (InterruptedJobs). Guarded by intMu.
 	cutJobs string
+	// intReason is who or what stopped the turn, for the note the model
+	// reads; "" is the user. Guarded by intMu.
+	intReason string
 }
 
 // Interrupt stops the turn in flight, if there is one, and reports whether
 // there was. Safe from any goroutine (the engine calls it from its reader).
-func (h *Harness) Interrupt() bool {
+// reason names what stopped it, for the note the model reads (e.g. "dund
+// restarted into build X while this turn was running"); "" means the user.
+func (h *Harness) Interrupt(reason string) bool {
 	h.intMu.Lock()
 	defer h.intMu.Unlock()
 	if h.intCancel == nil {
 		return false
 	}
+	h.intReason = reason
 	h.interrupting.Store(true)
 	h.intCancel(ErrInterrupted)
 	return true
@@ -132,7 +138,7 @@ func (h *Harness) interruptible(ctx context.Context) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	h.intMu.Lock()
 	h.intCancel = cancel
-	h.turnStart, h.cutJobs = time.Now(), ""
+	h.turnStart, h.cutJobs, h.intReason = time.Now(), "", ""
 	h.intMu.Unlock()
 	h.interrupting.Store(false)
 	h.round.reset()
@@ -174,8 +180,16 @@ func (h *Harness) recordInterrupt(ctx context.Context) {
 		})
 		now++
 	}
-	h.healOrphans(ctx, userInterruptedCall, true)
+	h.intMu.Lock()
+	reason := h.intReason
+	h.intMu.Unlock()
+	cut := userInterruptedCall
 	note := "[the user interrupted this turn] Your previous response was stopped by the user before it finished"
+	if reason != "" {
+		cut = func(name string) string { return interruptedCallFor(name, reason) }
+		note = "[" + reason + "] Your previous response was stopped before it finished"
+	}
+	h.healOrphans(ctx, cut, true)
 	if !done && strings.TrimSpace(content) != "" {
 		note += "; the reply text above is partial, cut where it stands"
 	}
@@ -193,7 +207,9 @@ func (h *Harness) recordInterrupt(ctx context.Context) {
 			strings.Join(list, ", ") + ". The user can stop one with /jobs kill N; leave them running " +
 			"unless the user asks you to stop them (exec_monitor kill)."
 	}
-	note += " Do not resume or repeat it on your own: the user's next message says what to do."
+	if reason == "" {
+		note += " Do not resume or repeat it on your own: the user's next message says what to do."
+	}
 	h.store.appendSilent(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindNotification, Tag: interruptTag,
 		Content: note, CreatedAt: time.Now().UnixNano(),
@@ -289,6 +305,13 @@ func userInterruptedCall(name string) string {
 	return fmt.Sprintf("ERROR: this %s call was INTERRUPTED by the user before its result was "+
 		"recorded. Whether it took effect is unknown: verify the current state before repeating "+
 		"it, and repeat it only if the user's next message still wants it.", name)
+}
+
+// interruptedCallFor is a cut call's result when something other than the
+// user stopped the turn (reason says what).
+func interruptedCallFor(name, reason string) string {
+	return fmt.Sprintf("ERROR: this %s call was INTERRUPTED before its result was recorded (%s). "+
+		"Whether it took effect is unknown: verify the current state before repeating it.", name, reason)
 }
 
 // withInterrupt is the outermost dispatcher: a call the turn reaches after the

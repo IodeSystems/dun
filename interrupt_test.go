@@ -135,12 +135,12 @@ func TestInterrupt_SavesPartialAndMarker(t *testing.T) {
 	r := &scriptRunner{rounds: []roundFn{thinkThenHang(long, "Hello, I will start by", started)}}
 	h := startScripted(t, r)
 
-	if h.Interrupt() {
+	if h.Interrupt("") {
 		t.Fatal("Interrupt with no turn running must report false")
 	}
 	done := askAsync(h, "fix the bug")
 	<-started
-	if !h.Interrupt() {
+	if !h.Interrupt("") {
 		t.Fatal("Interrupt during a turn must report true")
 	}
 	if err := waitErr(t, done); !errors.Is(err, ErrInterrupted) {
@@ -189,6 +189,26 @@ func TestInterrupt_SavesPartialAndMarker(t *testing.T) {
 	}
 }
 
+// An interrupt with a reason (dund restarting) records that reason in the
+// marker, not "the user interrupted", and does not tell the model to wait
+// for the user.
+func TestInterrupt_ReasonIsRecorded(t *testing.T) {
+	started := make(chan struct{})
+	r := &scriptRunner{rounds: []roundFn{thinkThenHang("thinking", "Partial", started)}}
+	h := startScripted(t, r)
+	done := askAsync(h, "go")
+	<-started
+	h.Interrupt("dund restarted into build v2 while this turn was running")
+	if err := waitErr(t, done); !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("err = %v", err)
+	}
+	n := lastOfKind(entries(t, h), agent.KindNotification)
+	if n == nil || !strings.HasPrefix(n.Content, "[dund restarted into build v2 while this turn was running]") ||
+		strings.Contains(n.Content, "the user") {
+		t.Fatalf("marker: %+v", n)
+	}
+}
+
 // A thought cut before any reply text leaves no empty assistant entry, only
 // the marker with the note.
 func TestInterrupt_ReasoningOnly(t *testing.T) {
@@ -197,7 +217,7 @@ func TestInterrupt_ReasoningOnly(t *testing.T) {
 	h := startScripted(t, r)
 	done := askAsync(h, "go")
 	<-started
-	h.Interrupt()
+	h.Interrupt("")
 	waitErr(t, done)
 	es := entries(t, h)
 	if a := lastOfKind(es, agent.KindAssistant); a != nil {
@@ -236,7 +256,7 @@ func TestInterrupt_ToolInFlightAndQueued(t *testing.T) {
 	done := askAsync(h, "run it")
 	<-inTool
 	h.Say("actually, stop and look at main.go")
-	h.Interrupt()
+	h.Interrupt("")
 	if err := waitErr(t, done); !errors.Is(err, ErrInterrupted) {
 		t.Fatalf("err = %v", err)
 	}
