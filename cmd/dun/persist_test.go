@@ -2,9 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun"
 )
 
 // /exit tells dund this client is leaving; /persist sends its mode; the
@@ -65,5 +70,38 @@ func TestReadyLineCapsTheToolNames(t *testing.T) {
 	got := readyLine(many)
 	if !strings.HasPrefix(got, "ready — 172 tools: t0, t1, t2, t3, t4, t5, t6, t7 … +164 more") || strings.Contains(got, "t8,") {
 		t.Errorf("many: %q", got)
+	}
+}
+
+// dund unreachable on the first attach: the conversation being resumed is
+// shown from disk, read-only, and dund's later replay of it is skipped.
+func TestOfflineShowsTheSavedConversation(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := dun.RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	id := "20261022-120000"
+	os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(`{"Kind":"user","Content":"what broke the build"}`+"\n"+
+		`{"Kind":"assistant","Content":"the overlay is read first"}`+"\n"), 0o644)
+
+	m := newTUIModel(nil, ws)
+	m.opts = tuiOpts{workspace: ws, resume: id}
+	m = resized(m, 80, 24)
+	nm, _ := m.Update(engineUpMsg{err: errors.New("dund closed the connection")})
+	m = nm.(tuiModel)
+	out := stripANSI(convoText(m))
+	if !strings.Contains(out, "what broke the build") || !strings.Contains(out, "read-only from disk") {
+		t.Fatalf("saved conversation not shown:\n%s", out)
+	}
+	// A second failure does not show it twice.
+	nm, _ = m.Update(engineUpMsg{err: errors.New("again")})
+	m = nm.(tuiModel)
+	if n := strings.Count(stripANSI(convoText(m)), "what broke the build"); n != 1 {
+		t.Fatalf("shown %d times", n)
+	}
+	// dund comes back and replays the same history: skipped.
+	m = m.handleEvent(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "what broke the build"}}})
+	if n := strings.Count(stripANSI(convoText(m)), "what broke the build"); n != 1 {
+		t.Fatalf("after dund's replay: shown %d times", n)
 	}
 }

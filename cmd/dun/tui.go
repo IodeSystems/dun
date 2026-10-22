@@ -587,10 +587,11 @@ type tuiModel struct {
 	// A reconnect that fails (dund not back yet) is retried with backoff
 	// until reconnectFor has passed since reconnSince; reconnTries counts
 	// the attempts, for the status line.
-	reconnTries int
-	reconnSince time.Time
-	skipHistory bool            // a respawned engine replays what is already on screen
-	wantServers map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
+	reconnTries  int
+	reconnSince  time.Time
+	skipHistory  bool            // a respawned engine replays what is already on screen
+	offlineShown bool            // the saved conversation was shown from disk while dund was unreachable
+	wantServers  map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
 	// The viewport's rendered text, cached behind a POINTER on purpose.
 	//
 	// Bubble Tea calls View() after EVERY message — including each streamed
@@ -1350,6 +1351,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// keep trying, more slowly, for reconnectFor.
 			if m.reconnSince.IsZero() {
 				m.reconnSince = time.Now()
+			}
+			// Nothing on screen yet (dund failed before the first attach): the
+			// conversation being resumed is on disk — show it, read-only,
+			// rather than an empty screen while this retries.
+			if !m.everUp && !m.offlineShown {
+				m.showSavedConversation()
 			}
 			m.reconnTries++
 			if time.Since(m.reconnSince) >= reconnectFor {
@@ -2955,6 +2962,36 @@ func readyLine(tools []string) string {
 	}
 	return fmt.Sprintf("ready — %d tools: %s … +%d more (/mcp lists them by server)",
 		len(tools), strings.Join(tools[:readyToolsShown], ", "), len(tools)-readyToolsShown)
+}
+
+// showSavedConversation puts the session being resumed on screen from its
+// transcript on disk, read-only, while the session service cannot be reached.
+// When dund answers, its replay of the same conversation is skipped.
+func (m *tuiModel) showSavedConversation() {
+	m.offlineShown = true
+	id := m.opts.resume
+	if id == "" && m.opts.cont {
+		id = dun.LatestSession(m.opts.workspace)
+	}
+	if id == "" {
+		return
+	}
+	hist := dun.SessionHistory(dun.SessionFile(m.opts.workspace, id))
+	if len(hist) == 0 {
+		return
+	}
+	b, err := json.Marshal(hist)
+	if err != nil {
+		return
+	}
+	var items []any
+	if json.Unmarshal(b, &items) != nil {
+		return
+	}
+	m.replay(items)
+	m.append(stDim.Render("── " + id + ", read-only from disk: the session service (dund) cannot be reached — retrying ──"))
+	m.skipHistory = true
+	m.refresh()
 }
 
 // exit is /exit: tell dund this client is leaving — it stops the engine
