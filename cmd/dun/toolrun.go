@@ -10,25 +10,24 @@ import (
 // as it always did, and folds every earlier one into a single row above it.
 //
 //	▸ ⚙ 6 tool calls — exec×4, eval×2 · 1 failed
-//	▸ ✻ thought for 2s · 40 words — …        (the latest round's thinking)
-//	⚙ exec(go test ./...)                     (the latest call)
+//	✻ thought for 2s · 40 words               (the latest round's thinking, boxed)
+//	$ go test ./...  → ✓ 12 lines · ok        (the latest call, its output boxed)
 //
 // A run is the stretch of tool calls, and the thinking between them, with
 // nothing else in it: a reply, a user message or a notification ends it.
 // The fold happens when a NEW call arrives — the previous call and its
 // thinking move into the aggregate, and the new call takes the bottom.
 //
-// The latest call's space never shrinks while the run goes on: each call is
-// held at the tallest height the run has shown (holdH), so a short call after
-// a long one does not pull the log up under the reader and push it down
-// again on the next. The hold is released when the run ends (settleRun) —
-// at that moment a reply or the end of the turn is changing the screen
-// anyway, so the one shrink lands with it instead of on its own.
+// The latest round's boxes (box.go) are bounded, so a run costs at most the
+// aggregate row and two boxes of screen. A fold removes the previous round's
+// boxes ABOVE the newest ones: a reader pinned to the bottom keeps the
+// newest round where it was, and the rows that change are older ones.
 //
 // What it does not do: fold under the person. A fold that would take in the
 // selected block, renumber the conversation while a search is walking it, or
-// change rows a reader who scrolled up has on screen, waits for the next call. → on the aggregate lists its calls in place; enter
-// opens it in the pager as a tree, each call a node that opens to its result.
+// change rows a reader who scrolled up has on screen, waits for the next
+// call. → on the aggregate lists its calls in place; enter opens it in the
+// pager as a tree, each call a node that opens to its result.
 
 // runItem is one thing a run folded: a call, or a round's thinking.
 type runItem struct {
@@ -152,9 +151,9 @@ func runMember(e convoEntry) bool {
 
 // foldRun runs as a new tool call is about to be appended: everything since
 // the run began, up to the current round's thinking, folds into one
-// aggregate. It returns the height the new call should be held at. live is
-// false for history, which folds whatever the screen is doing.
-func (m *tuiModel) foldRun(live bool) int {
+// aggregate. live is false for history, which folds whatever the screen is
+// doing.
+func (m *tuiModel) foldRun(live bool) {
 	// The current round's thinking stays with the call it led to.
 	k := len(m.convo)
 	for k > 0 && m.convo[k-1].think != nil {
@@ -171,20 +170,16 @@ func (m *tuiModel) foldRun(live bool) int {
 		}
 	}
 	if prev < 0 {
-		return 0 // the first call of a run: nothing to fold yet
-	}
-	hold := m.convo[prev].holdH
-	if prev < len(m.frame.blockH) {
-		hold = max(hold, m.frame.blockH[prev])
+		return // the first call of a run: nothing to fold yet
 	}
 	// Not under the person: a selected block in the span, a search that holds
 	// indices into the conversation, or a reader who scrolled up to where the
 	// span is on screen, defers the fold to the next call.
 	if live && ((m.focus == focusConvo && m.sel >= start && m.sel < k) || m.searching || m.searchActive) {
-		return hold
+		return
 	}
 	if live && !m.scrollPinned && start < len(m.frame.rowOffset) && m.frame.rowOffset[start] < m.vp.YOffset+m.vp.Height {
-		return hold
+		return
 	}
 
 	// The span's items in order. An aggregate already in it is kept — its
@@ -210,7 +205,6 @@ func (m *tuiModel) foldRun(live bool) int {
 		agg = &convoEntry{run: &toolRun{}}
 	}
 	agg.run.items = items
-	agg.holdH = 0
 	agg.renderRun()
 
 	shift := k - start - 1
@@ -221,16 +215,4 @@ func (m *tuiModel) foldRun(live bool) int {
 	if m.pendingTool >= k {
 		m.pendingTool -= shift
 	}
-	return hold
-}
-
-// settleRun releases the height held for a run's latest call: the run is over.
-func (m *tuiModel) settleRun() {
-	if !m.holding {
-		return
-	}
-	for i := range m.convo {
-		m.convo[i].holdH = 0
-	}
-	m.holding = false
 }

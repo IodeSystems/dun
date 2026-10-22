@@ -49,7 +49,7 @@ func TestTUI_WhitespaceReplyTakesNoRow(t *testing.T) {
 	v.event(map[string]any{"type": "token", "text": "\n\nHere it is."})
 	nm, _ = v.m.Update(renderTickMsg{})
 	v.m = nm.(tuiModel)
-	if after := rowsAfter(v.view(), "→ ✓"); len(after) == 0 || !strings.Contains(after[0], "Here it is.") {
+	if after := rowsAfter(v.view(), "│ 0"); len(after) == 0 || !strings.Contains(after[0], "Here it is.") {
 		t.Errorf("reply not directly under the call: %q", after)
 	}
 }

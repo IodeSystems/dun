@@ -62,6 +62,30 @@ func BenchmarkStreamingTurn(b *testing.B) {
 	}
 }
 
+// One frame of a long thought streaming into its box, on a conversation of
+// 200 blocks: the delta, then the refresh a render tick runs. The box re-wraps
+// only itself; every other block is a cache hit, so this should sit near
+// BenchmarkRefresh/blocks=200 plus one box's wrap.
+func BenchmarkStreamingBox(b *testing.B) {
+	m := buildModel(200, 8)
+	m.refresh()
+	for i := 0; i < 200; i++ {
+		m.addThinking(fmt.Sprintf("line %d of a long thought, about as wide as a real one is\n", i))
+	}
+	m.refresh()
+	base := m.convo[len(m.convo)-1].think.text
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if i%100 == 99 { // hold the thought at a realistic 200–300 lines
+			b.StopTimer()
+			m.convo[len(m.convo)-1].think.text = base
+			b.StartTimer()
+		}
+		m.addThinking("another line of the thought, streaming in\n")
+		m.refresh()
+	}
+}
+
 // The input path must stay cheap no matter how big the conversation is: this is
 // what competes with a keystroke.
 func BenchmarkTokenHandling(b *testing.B) {

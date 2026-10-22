@@ -28,38 +28,6 @@ func thinkIdx(m tuiModel) int {
 	return -1
 }
 
-// While it streams, thinking shows in full; the reply's first token folds it
-// to one line that says what it was.
-func TestThinking_StreamsThenFolds(t *testing.T) {
-	v := newVtui(80, 24)
-	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
-	v.send("plan it")
-	think(v, 0, 3)
-	i := thinkIdx(v.m)
-	if i < 0 || !v.m.convo[i].think.live || v.m.convo[i].state != viewExpanded {
-		t.Fatalf("no live, expanded thinking block: %d", i)
-	}
-	if !strings.Contains(v.view(), "step 2 of the plan") || !strings.Contains(v.view(), "thinking…") {
-		t.Fatalf("live thinking not on screen:\n%s", v.view())
-	}
-
-	v.event(map[string]any{"type": "token", "text": "Here is the plan."})
-	e := v.m.convo[i]
-	if e.think.live || e.state != viewMinimized {
-		t.Fatalf("thinking did not fold when the reply began: live=%v state=%v", e.think.live, e.state)
-	}
-	if got := stripANSI(e.view()); strings.Contains(got, "\n") || !strings.Contains(got, "thought") || !strings.Contains(got, "15 words") {
-		t.Errorf("folded thinking is not a one-line summary: %q", got)
-	}
-	if strings.Contains(v.view(), "step 2 of the plan") {
-		t.Errorf("folded thinking still shows its body:\n%s", v.view())
-	}
-	// The reply came after the thinking, not into it.
-	if v.m.cur != "Here is the plan." {
-		t.Errorf("reply: %q", v.m.cur)
-	}
-}
-
 // A tool call ends the round's thinking too, and the next round's thinking is
 // a block of its own.
 func TestThinking_ToolCallEndsTheRound(t *testing.T) {
@@ -84,7 +52,7 @@ func TestThinking_ToolCallEndsTheRound(t *testing.T) {
 }
 
 // A reader who scrolled up is not moved by thinking streaming in below them,
-// nor by it folding.
+// nor by the round ending.
 func TestThinking_DoesNotScrollAReaderWhoScrolledUp(t *testing.T) {
 	v := tallConvo(t)
 	v.send("again")
@@ -108,28 +76,6 @@ func TestThinking_DoesNotScrollAReaderWhoScrolledUp(t *testing.T) {
 	think(v2, 0, 20)
 	if !v2.m.vp.AtBottom() {
 		t.Error("a pinned reader should follow the thinking")
-	}
-}
-
-// The block the person has selected stays as it is when the round ends.
-func TestThinking_SelectedStaysOpen(t *testing.T) {
-	v := newVtui(80, 24)
-	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
-	v.send("plan it")
-	think(v, 0, 3)
-	v.m = key(v.m, kTab) // convo focus starts on the newest block: the thinking
-	i := thinkIdx(v.m)
-	if v.m.focus != focusConvo || v.m.sel != i {
-		t.Fatalf("precondition: focus=%d sel=%d think=%d", v.m.focus, v.m.sel, i)
-	}
-	v.event(map[string]any{"type": "token", "text": "reply"})
-	v.event(map[string]any{"type": "done"})
-	e := v.m.convo[i]
-	if e.think.live {
-		t.Error("still live after done")
-	}
-	if e.state != viewExpanded || !strings.Contains(stripANSI(e.view()), "step 2 of the plan") {
-		t.Errorf("selected thinking folded under the reader: state=%v", e.state)
 	}
 }
 
@@ -198,25 +144,5 @@ func TestThinking_PagerFollowsLiveThinking(t *testing.T) {
 	think(v, 40, 5)
 	if scr := v.view(); !strings.Contains(scr, "step 44 of the plan") {
 		t.Errorf("live pager did not follow:\n%s", scr)
-	}
-}
-
-// Resumed history shows past thinking folded, in place.
-func TestThinking_ReplayFolded(t *testing.T) {
-	v := newVtui(80, 24)
-	v.event(map[string]any{"type": "history", "items": []any{
-		map[string]any{"kind": "user", "content": "hi"},
-		map[string]any{"kind": "reasoning", "content": "they said hi\nso greet"},
-		map[string]any{"kind": "assistant", "content": "hello"},
-	}})
-	i := thinkIdx(v.m)
-	if i < 0 || v.m.convo[i].think.live || v.m.convo[i].state != viewMinimized {
-		t.Fatalf("no folded thinking from history: %d", i)
-	}
-	if got := stripANSI(v.m.convo[i].view()); !strings.Contains(got, "thought · 5 words — they said hi") {
-		t.Errorf("summary: %q", got)
-	}
-	if strings.Contains(v.m.convo[i+1].mdSource, "hello") == false {
-		t.Errorf("thinking is not just before the reply it belongs to")
 	}
 }

@@ -254,9 +254,9 @@ type convoEntry struct {
 	tool      *toolBlock  // tool call/result (nil for normal blocks) → enter opens the inspector
 	think     *thinkBlock // a round's reasoning (thinking.go) → enter opens the pager
 	run       *toolRun    // earlier calls of a run, folded (toolrun.go) → enter opens the pager
-	// holdH is the least height this block is drawn at: a run's latest call
-	// keeps the tallest height the run has shown (toolrun.go). 0 = natural.
-	holdH int
+	// box draws a thinking block or a tool call's output bounded, scrolling
+	// inside itself (box.go). nil = not boxed.
+	box *boxState
 	// askText is the question of an ask_user row; askOpen while it waits for
 	// its answer (askpark.go).
 	askText string
@@ -468,6 +468,7 @@ type toolBlock struct {
 	input  string
 	output string // styled renderer output
 	raw    string // original unstyled tool output
+	head   string // the call and its one-line preview: the box's header (box.go)
 }
 
 func (e convoEntry) view() string {
@@ -596,7 +597,6 @@ type tuiModel struct {
 	inspecting   bool            // the tool inspector overlay is open (owns all keys)
 	insp         inspector       // the overlay (valid while inspecting)
 	paging       bool            // the pager has the convo pane (pager.go; owns the keys)
-	holding      bool            // some block has a holdH (a run is in progress)
 	pulse        int             // the selection band's pulse step (band.go)
 	askParked    bool            // a question is open but its picker was put away (askpark.go)
 	flashText    string          // a short status-line note (askpark.go)
@@ -1002,6 +1002,17 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, textinput.Blink
 		case "pgup", "pgdown":
+			// A selected box pages inside itself first (box.go).
+			if m.focus == focusConvo && m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].boxed() {
+				n := max(1, m.convo[m.sel].box.shown-1)
+				if msg.String() == "pgup" {
+					n = -n
+				}
+				if m.scrollBox(n) {
+					m.refresh()
+					return m, nil
+				}
+			}
 			var cmd tea.Cmd
 			m.vp, cmd = m.vp.Update(msg)
 			m.updateScrollPin()
@@ -1123,6 +1134,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.matchPos--
 					}
 					m.sel = m.matches[m.matchPos]
+				} else if m.scrollBox(-1) { // inside a selected box, to its top first
+					m.refresh()
+					return m, nil
 				} else if top, h := m.selGeom(); m.vp.Height > 0 && h > m.vp.Height && top < m.vp.YOffset {
 					m.vp.SetYOffset(m.vp.YOffset - 1) // scroll up within a tall message first
 					return m, nil
@@ -1178,6 +1192,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.matchPos++
 					}
 					m.sel = m.matches[m.matchPos]
+				} else if m.scrollBox(1) { // inside a selected box, to its bottom first
+					m.refresh()
+					return m, nil
 				} else if top, h := m.selGeom(); m.vp.Height > 0 && h > m.vp.Height && top+h > m.vp.YOffset+m.vp.Height {
 					m.vp.SetYOffset(m.vp.YOffset + 1) // scroll down within a tall message first
 					return m, nil
@@ -1946,11 +1963,6 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.busyStart = time.Now()
 		}
 		m.suggestions = nil
-		if m.holding {
-			// A reply ends the run; its held space goes with it.
-			m.settleRun()
-			m.refresh()
-		}
 		if m.liveThinking() >= 0 {
 			// The reply has begun, so the round's thinking is over. Folding
 			// changes the block's height, so this frame is drawn now, not on
@@ -1977,11 +1989,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.endThinking()
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
-		// The calls before this one fold into the run's aggregate, and this one
-		// takes their place at the run's tallest height.
-		hold := m.foldRun(true)
-		m.holding = m.holding || hold > 0
-		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(str(ev["tool"]), args, 80)), holdH: hold})
+		// The calls before this one fold into the run's aggregate.
+		m.foldRun(true)
+		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(str(ev["tool"]), args, 80))})
 		m.pendingTool = len(m.convo) - 1
 		m.pendingArgs = args
 		m.activeTool = callText(str(ev["tool"]), args, 40)
@@ -1991,7 +2001,6 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		ce := m.foldedTool(str(ev["tool"]), m.pendingArgs, result)
 		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
 			// Fold the result into its call so the pair is one collapsible unit.
-			ce.holdH = m.convo[idx].holdH
 			m.convo[idx] = ce
 			m.pendingTool, m.pendingArgs = -1, nil
 			m.activeTool = ""
@@ -2192,7 +2201,6 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 	case "done":
 		m.endThinking()
-		m.settleRun()
 		m.flushCur()
 		// Clear any remaining provisional markers — the turn is done, so
 		// everything was delivered to the LLM.
@@ -2221,7 +2229,6 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.refresh()
 	case "error":
 		m.endThinking()
-		m.settleRun()
 		m.append(stErr.Render("error: " + str(ev["error"])))
 		// Clear any remaining provisional markers — the engine flushes them on
 		// error too, so they're part of the conversation history.
@@ -2979,7 +2986,9 @@ func (m *tuiModel) foldedTool(tool string, args map[string]any, result string) c
 		collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
 		full:      stDim.Render("▾ ") + callLong + "\n" + body,
 		raw:       stDim.Render("▾ ") + callLong + "\n" + stDim.Render(result),
-		tool:      &toolBlock{name: tool, args: args, input: af, output: body, raw: result},
+		tool: &toolBlock{name: tool, args: args, input: af, output: body, raw: result,
+			head: callShort + strings.ReplaceAll(preview, "\n", " ")},
+		box: &boxState{follow: true},
 	}
 }
 
@@ -3021,7 +3030,7 @@ func (m *tuiModel) replay(items []any) {
 			if !hadPend || str(im["call_id"]) != pendID {
 				args = nil // unmatched result: render without the call's args
 			}
-			m.foldRun(false) // a past run folds the way a live one did; nothing is held
+			m.foldRun(false) // a past run folds the way a live one did
 			m.convo = append(m.convo, m.foldedTool(str(im["tool"]), args, str(im["content"])))
 			pendName, pendID, pendArgs, hadPend = "", "", nil, false
 			n++
@@ -3031,7 +3040,7 @@ func (m *tuiModel) replay(items []any) {
 			n++
 		case "reasoning":
 			flushPend()
-			m.convo = append(m.convo, thinkingEntry(str(im["content"])))
+			m.convo = append(m.convo, thinkingEntry(&thinkBlock{text: str(im["content"])}))
 		}
 	}
 	flushPend()
@@ -3202,6 +3211,10 @@ func (m *tuiModel) refresh() {
 		if i < len(m.convo) && m.convo[i].blank {
 			// The turn-gap row: exactly one empty line, nothing to measure.
 			w = ""
+		} else if i < len(m.convo) && m.convo[i].boxed() {
+			// A bounded box: its own cache, so a token re-wraps only the box
+			// that grew (box.go).
+			w = renderBox(&m.convo[i], wrapW, frm.height)
 		} else if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
 			// Rendered markdown bakes in the wrap width it was produced at, and a
@@ -3255,11 +3268,6 @@ func (m *tuiModel) refresh() {
 			}
 		} else {
 			w = packSGR(cellbuf.Wrap(b, wrapW, ""))
-		}
-		if i < len(m.convo) && m.convo[i].holdH > 0 {
-			if n := strings.Count(w, "\n") + 1; n < m.convo[i].holdH {
-				w += strings.Repeat("\n", m.convo[i].holdH-n)
-			}
 		}
 		if selMode {
 			if i == m.sel {

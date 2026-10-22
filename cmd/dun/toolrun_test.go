@@ -73,29 +73,6 @@ func TestToolRun_FoldsEarlierCalls(t *testing.T) {
 	}
 }
 
-// The latest call is held at the tallest height the run has shown, and gets
-// its own height back when the run ends.
-func TestToolRun_HoldsTheTallestHeight(t *testing.T) {
-	v := newVtui(40, 40)
-	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
-	v.send("go")
-	call(v, "echo "+strings.Repeat("long ", 14), "x\n") // wraps at 40 columns
-	tall := v.m.frame.blockH[len(v.m.convo)-1]
-	call(v, "echo short", "y\n")
-	last := len(v.m.convo) - 1
-	if got := v.m.frame.blockH[last]; got != tall {
-		t.Fatalf("short call after a tall one is %d rows, want held at %d", got, tall)
-	}
-	natural := strings.Count(v.m.convo[last].view(), "\n") + 1
-	if natural >= tall {
-		t.Fatalf("test needs a shorter call: natural %d, tall %d", natural, tall)
-	}
-	v.event(map[string]any{"type": "done"})
-	if got := v.m.frame.blockH[last]; got != natural {
-		t.Errorf("after the run ended the call is %d rows, want its own %d", got, natural)
-	}
-}
-
 // A reader who scrolled up is not moved by calls arriving, by results, or by
 // folding — and a fold that would change rows on their screen waits.
 func TestToolRun_DoesNotScrollAReaderWhoScrolledUp(t *testing.T) {
@@ -235,9 +212,7 @@ func TestToolRun_ReplayFolds(t *testing.T) {
 		// the reply, then the resumed marker
 		t.Errorf("reply not after the run: %q", e.mdSource)
 	}
-	for _, e := range v.m.convo {
-		if e.holdH != 0 {
-			t.Error("history holds a height")
-		}
+	if last := v.m.convo[r+2]; last.tool == nil || !last.boxed() {
+		t.Errorf("the run's latest call is not a box: %+v", last)
 	}
 }

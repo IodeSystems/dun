@@ -6,18 +6,19 @@ import (
 	"time"
 )
 
-// Thinking: the model's reasoning, shown while it streams and folded once the
-// round moves on.
+// Thinking: the model's reasoning, shown in a box (box.go) while it streams,
+// and kept there once the round moves on.
 //
 // One block per round. The engine's `reasoning` events are deltas; the first
-// one of a round opens a block, LIVE and expanded, and every later one grows
-// it. The round's first reply token, its first tool call, or the end of the
-// turn closes it: the block folds to a one-line summary — unless the person
-// has it selected, in which case it stays exactly as they are reading it.
+// one of a round opens a block, LIVE, and every later one grows it. The
+// round's first reply token, its first tool call, or the end of the turn
+// closes it: the header says "thought for Ns" instead of "thinking…", and
+// nothing else changes — the box keeps its height, so the end of a round
+// moves nothing.
 //
-// It is an ordinary convo block in every other way: ↑/↓ select it, →/← open
-// and close it in place, and enter opens it in the pager (pager.go), where a
-// long chain of thought can be read and scrolled at full height.
+// It is an ordinary convo block in every other way: ↑/↓ select it (and
+// scroll inside it while selected), and enter opens it in the pager
+// (pager.go), where a long chain of thought can be read at full height.
 //
 // Nothing here moves the viewport. A growing block is new content like a
 // streamed reply, and applyScroll decides what that does: a pinned reader
@@ -25,7 +26,7 @@ import (
 
 type thinkBlock struct {
 	text       string
-	start, end time.Time // end is zero while live
+	start, end time.Time // end is zero while live; both zero from history
 	live       bool
 }
 
@@ -46,7 +47,7 @@ func (m *tuiModel) addThinking(delta string) {
 	if i < 0 {
 		// A new round. Anything streamed before it belongs above it.
 		m.flushCur()
-		m.convo = append(m.convo, convoEntry{think: &thinkBlock{start: time.Now(), live: true}, state: viewExpanded})
+		m.convo = append(m.convo, thinkingEntry(&thinkBlock{start: time.Now(), live: true}))
 		i = len(m.convo) - 1
 	}
 	e := &m.convo[i]
@@ -56,7 +57,7 @@ func (m *tuiModel) addThinking(delta string) {
 }
 
 // endThinking closes the live block, if there is one: the round's thinking is
-// over. It folds, unless it is the block the person has selected.
+// over. Only its header changes.
 func (m *tuiModel) endThinking() {
 	i := m.liveThinking()
 	if i < 0 {
@@ -65,38 +66,35 @@ func (m *tuiModel) endThinking() {
 	e := &m.convo[i]
 	e.think.live = false
 	e.think.end = time.Now()
-	if !(m.focus == focusConvo && m.sel == i) {
-		e.state = viewMinimized
-	}
 	e.renderThink()
 }
 
-// thinkingEntry is a finished block, from history.
-func thinkingEntry(text string) convoEntry {
-	e := convoEntry{think: &thinkBlock{text: text}}
+// thinkingEntry is a block for t, boxed and following its tail.
+func thinkingEntry(t *thinkBlock) convoEntry {
+	e := convoEntry{think: t, box: &boxState{follow: true}}
 	e.renderThink()
 	return e
 }
 
-// renderThink writes the block's collapsed and full forms from its text.
+// renderThink writes the block's plain form, which is what search and the
+// screen dump read; the screen draws the box (renderBox).
 func (e *convoEntry) renderThink() {
-	t := e.think
-	body := strings.TrimSpace(t.text)
-	head := "✻ thinking…"
-	if !t.live {
-		head = "✻ thought"
-		if !t.end.IsZero() {
-			head += " for " + thinkDur(t.end.Sub(t.start))
-		}
-	}
-	words := len(strings.Fields(body))
-	summary := head + fmt.Sprintf(" · %d words", words)
-	if first, _ := fitPlain(oneLine(firstLine(body)), 40); first != "" {
-		summary += " — " + first
-	}
-	e.collapsed = stDim.Render("▸ " + summary)
-	e.full = stDim.Render("▾ "+head) + "\n" + stDim.Render(body)
+	// Plain concatenation: this runs on every delta, and styling the whole
+	// thought each time was the cost of a frame.
+	e.collapsed = stDim.Render(thinkHeader(e.think)) + "\n" + strings.TrimSpace(e.think.text)
 	e.invalidateWrap()
+}
+
+// thinkHeader is the box's top line: what it is, how long, how much.
+func thinkHeader(t *thinkBlock) string {
+	words := fmt.Sprintf(" · %d words", len(strings.Fields(t.text)))
+	switch {
+	case t.live:
+		return "✻ thinking… " + thinkDur(time.Since(t.start)) + words
+	case !t.end.IsZero():
+		return "✻ thought for " + thinkDur(t.end.Sub(t.start)) + words
+	}
+	return "✻ thought" + words
 }
 
 func thinkDur(d time.Duration) string {
