@@ -336,6 +336,9 @@ var CompactionPause func() (resume func())
 
 // Harness is a running dun: the MCP manager + an agent Session over its tools.
 type Harness struct {
+	// The turn in flight's cancel and what its round has streamed (interrupt.go).
+	interruptState
+
 	mgr     *mcpmgr.Manager
 	Session *agent.Session
 	Tools   []mcpmgr.MCPTool
@@ -740,6 +743,11 @@ func (h *Harness) mergeForcedToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
 // is reported inside the result the model is already reading. Returns result
 // unchanged when nothing is buffered.
 func (h *Harness) liftQueued(result string) string {
+	// Not into a turn the user interrupted: the buffer is what starts the next
+	// turn (see interruptState.interrupting).
+	if h.interrupting.Load() {
+		return result
+	}
 	// Everything, regardless of policy: a result is already on its way to the
 	// model, so even an aside rides it for free.
 	items := h.drain(func(queued) bool { return true })
@@ -903,6 +911,8 @@ func (h *Harness) BackgroundRunning() int {
 // notifications (e.g. a background job's completion). This is the converge
 // point: the notification (+ any queued messages) coalesce into one turn.
 func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
+	ctx, end := h.interruptible(ctx)
+	defer end()
 	// Publish anything a tool result did not already carry (and pair off any
 	// interrupted tool call), so the turn below has it — and so several jobs
 	// finishing at once become ONE turn.
@@ -913,7 +923,8 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 		// following request. A duplicate wake is a no-op, not a turn.
 		return agent.TurnResult{}, nil
 	}
-	return h.turnThenTriggers(ctx)
+	res, err := h.turnThenTriggers(ctx)
+	return h.finishInterrupt(ctx, res, err)
 }
 
 // prepareTurn readies the store for a turn (or a retry of one).
@@ -955,6 +966,24 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 // than to assume either way. Anything buffered is lifted into the last result, so
 // the model reads the interruption and the user's follow-up in the same breath.
 func (h *Harness) healOrphanToolCalls(ctx context.Context) int {
+	return h.healOrphans(ctx, droppedCall, false)
+}
+
+// droppedCall is a result for a call the connection cut.
+func droppedCall(name string) string {
+	return fmt.Sprintf(
+		"ERROR: this %s call was INTERRUPTED — the connection to the model dropped before "+
+			"the result was recorded. Whether it took effect is unknown: verify the current "+
+			"state (re-read the file, re-run the check) before repeating it.", name)
+}
+
+// healOrphans answers every unanswered call with result(name).
+//
+// Normally (silent false) the results are inbox arrivals and the buffer rides
+// the last one. For an interrupt (silent true) they are neither: the cut turn
+// is over, nothing in it is a reason to run another, and the buffer is what
+// starts the next turn.
+func (h *Harness) healOrphans(ctx context.Context, result func(name string) string, silent bool) int {
 	entries, err := h.store.Context(ctx, "dun")
 	if err != nil {
 		return 0
@@ -976,18 +1005,22 @@ func (h *Harness) healOrphanToolCalls(ctx context.Context) int {
 		if name == "" {
 			name = "the tool"
 		}
-		content := fmt.Sprintf(
-			"ERROR: this %s call was INTERRUPTED — the connection to the model dropped before "+
-				"the result was recorded. Whether it took effect is unknown: verify the current "+
-				"state (re-read the file, re-run the check) before repeating it.", name)
+		content := result(name)
+		e := agent.Entry{
+			ID: uuid.New().String(), Kind: agent.KindToolResult,
+			ToolCallID: o.ToolCallID, ToolName: o.ToolName,
+			CreatedAt: time.Now().UnixNano(),
+		}
+		if silent {
+			e.Content = content
+			h.store.appendSilent(e)
+			continue
+		}
 		if i == len(orphans)-1 {
 			content = h.liftQueued(content)
 		}
-		h.store.publish(agent.Entry{
-			ID: uuid.New().String(), Kind: agent.KindToolResult,
-			Content: content, ToolCallID: o.ToolCallID, ToolName: o.ToolName,
-			CreatedAt: time.Now().UnixNano(),
-		})
+		e.Content = content
+		h.store.publish(e)
 	}
 	return len(orphans)
 }
@@ -1147,7 +1180,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		SessionID:            "dun",
 		OnCompactionComplete: h.noteCompaction,
 		Store:                store,
-		Runner:               teeReasoning(cfg.Client, cfg.OnReasoning),
+		Runner:               h.teeTurn(cfg.Client, cfg.OnReasoning),
 		OnAssistantToken:     cfg.OnToken,
 		OnUsage:              h.noteUsage,
 		MaxTurns:             maxTurns(),
@@ -1195,11 +1228,14 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 // would be the one order the provider rejects), and the turn then retries the
 // transport for as long as the policy allows.
 func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error) {
+	ctx, end := h.interruptible(ctx)
+	defer end()
 	h.prepareTurn(ctx)
 	h.store.publish(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
-	return h.turnThenTriggers(ctx)
+	res, err := h.turnThenTriggers(ctx)
+	return h.finishInterrupt(ctx, res, err)
 }
 
 // turnThenTriggers runs a turn, then — in the background, once the turn has

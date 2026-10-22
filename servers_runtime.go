@@ -517,6 +517,9 @@ func (h *Harness) rebuildTools() {
 	// wrappers rather than be wrapped by them: a call it refuses never runs, and
 	// a refusal is the LAST thing that should be reconsidered.
 	dispatch = withLoopGuard(dispatch, h)
+	// Outside everything: a call the turn reaches after an interrupt is not
+	// run at all (interrupt.go).
+	dispatch = withInterrupt(dispatch)
 
 	h.Session.Tools = toolDefs
 	h.Session.Dispatch = dispatch
