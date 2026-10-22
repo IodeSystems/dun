@@ -116,3 +116,23 @@ export const SwitchModel = graphql(`
     }
   }
 `);
+
+export const GetUI = graphql(`
+  query GetUI($id: String!) {
+    dund {
+      getUI(id: $id) {
+        state
+      }
+    }
+  }
+`);
+
+export const PutUI = graphql(`
+  mutation PutUI($id: String!, $state: JSON!) {
+    dund {
+      putUI(id: $id, body: { state: $state }) {
+        ok
+      }
+    }
+  }
+`);

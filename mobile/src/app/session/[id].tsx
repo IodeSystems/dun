@@ -1,11 +1,11 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { explain } from '@/api/client';
 import { followSession } from '@/api/live';
-import { Answer, AskModels, ForgetSession, SendMessage, Slash, SwitchModel } from '@/api/ops';
+import { Answer, AskModels, ForgetSession, GetUI, PutUI, SendMessage, Slash, SwitchModel } from '@/api/ops';
 import { ModelPicker } from '@/components/ModelPicker';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
@@ -26,6 +26,11 @@ export default function Session() {
   const [sendErr, setSendErr] = useState('');
   const [panel, setPanel] = useState(false);
   const [picker, setPicker] = useState<string | null>(null); // the search, when open
+  // This user's UI state in the session, kept by dund and shared with their
+  // other clients (the TUI's format): the sent history and an unsent draft.
+  const sent = useRef<string[]>([]);
+  const recall = useRef(-1); // index into sent while ↑/↓ browse it
+  const uiLoaded = useRef(false);
   const listRef = useRef<FlatList<Item>>(null);
 
   useEffect(() => {
@@ -36,6 +41,43 @@ export default function Session() {
       onUnauthorized: () => void auth.signOut(),
     });
   }, [auth, id]);
+
+  useEffect(() => {
+    if (!auth.client || !id) return;
+    uiLoaded.current = false;
+    void auth.client
+      .request(GetUI, { id })
+      .then((r) => {
+        const st = (r.dund.getUI?.state ?? {}) as { history?: unknown; draft?: unknown };
+        if (Array.isArray(st.history)) sent.current = st.history.filter((h): h is string => typeof h === 'string');
+        if (typeof st.draft === 'string' && st.draft) setText((t) => t || (st.draft as string));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        uiLoaded.current = true;
+      });
+  }, [auth.client, id]);
+
+  const saveUI = useCallback(
+    (draft: string) => {
+      if (!auth.client) return;
+      void auth.client.request(PutUI, { id, state: { history: sent.current.slice(-200), draft } }).catch(() => undefined);
+    },
+    [auth.client, id],
+  );
+
+  // The draft, saved a moment after typing stops.
+  useEffect(() => {
+    if (!uiLoaded.current) return;
+    const t = setTimeout(() => saveUI(text), 1500);
+    return () => clearTimeout(t);
+  }, [text, saveUI]);
+
+  function remember(line: string) {
+    sent.current = [...sent.current, line].slice(-200);
+    recall.current = -1;
+    saveUI('');
+  }
 
   // /close confirmed by the engine: the service lets the session go and the
   // screen leaves it.
@@ -85,6 +127,7 @@ export default function Session() {
       return;
     }
     setText('');
+    remember(raw.trim());
     if (l.kind === 'slash') return runSlash(l.line);
     if (l.kind === 'model') return openPicker(l.query);
     try {
@@ -160,6 +203,22 @@ export default function Session() {
               onKeyPress={(e) => {
                 // Enter sends on the web; Shift+Enter is a newline.
                 const ne = e.nativeEvent as { key: string; shiftKey?: boolean };
+                // ↑/↓ in an empty (or recalled) composer step through what was sent.
+                if (Platform.OS === 'web' && (ne.key === 'ArrowUp' || ne.key === 'ArrowDown') && (text === '' || recall.current >= 0)) {
+                  const h = sent.current;
+                  if (!h.length) return;
+                  e.preventDefault();
+                  let i = recall.current < 0 ? h.length : recall.current;
+                  i = ne.key === 'ArrowUp' ? Math.max(0, i - 1) : i + 1;
+                  if (i >= h.length) {
+                    recall.current = -1;
+                    setText('');
+                  } else {
+                    recall.current = i;
+                    setText(h[i] ?? '');
+                  }
+                  return;
+                }
                 if (Platform.OS === 'web' && ne.key === 'Enter' && !ne.shiftKey) {
                   e.preventDefault();
                   if (view.ask && text.trim()) {

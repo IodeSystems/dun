@@ -83,6 +83,18 @@ const api = async (method, path, body) => (await fetch(base + path, { method, he
     await p.getByText(/Qwen3\.8-27B/i).first().waitFor({ timeout: 5000 });
     await p.getByText('Close', { exact: true }).click();
   });
+  await step('the draft and sent history survive a reload (kept by dund)', async () => {
+    await box.fill('half a thought');
+    await p.waitForTimeout(2500); // saved a moment after typing stops
+    await p.reload();
+    const again = p.getByPlaceholder(/ask dun to do something/);
+    await again.waitFor({ timeout: 15000 });
+    for (let i = 0; i < 20 && (await again.inputValue()) !== 'half a thought'; i++) await p.waitForTimeout(250);
+    if ((await again.inputValue()) !== 'half a thought') throw new Error('draft not restored: ' + (await again.inputValue()));
+    await again.fill('');
+    await again.press('ArrowUp');
+    if (!(await again.inputValue())) throw new Error('↑ recalled nothing');
+  });
   console.log('page errors:', errors.length ? errors.slice(0, 5) : 'none');
   await b.close();
   await api('DELETE', `/api/v1/sessions/${ses}`);
