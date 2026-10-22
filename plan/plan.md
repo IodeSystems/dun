@@ -277,9 +277,11 @@ Where it stands:
 - **S4 open:** graphql-ws subscriptions in gat (gwag) to replace the
   long-poll; OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
-  how dund gets `--http` when the TUI auto-starts it (a `dund service
-  install` unit, CLI-10, is the canon answer) and binding the LAN address
-  for hz (192.168.1.76:20003).
+  ✅ `dun dund service install` (`548864a`, CLI-10; the TUI starts the
+  unit when one is installed). **Not yet installed on the real box** — USER
+  to say go: stop any TUI-started dund (`kill $(cat ~/.dun/dund.pid)`),
+  `dun dund service install --enable --start -- --http 192.168.1.76:20003`,
+  `dun dund token`.
 
 Slices, in order:
 - ✅ **S0 engine protocol (internal).** The `proto/` types and `Log`, with
