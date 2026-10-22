@@ -162,3 +162,13 @@ export const SignOut = graphql(`
     }
   }
 `);
+
+export const Control = graphql(`
+  mutation Control($id: String!, $target: String!, $action: String!) {
+    dund {
+      control(id: $id, body: { kind: control, target: $target, action: $action }) {
+        ok
+      }
+    }
+  }
+`);

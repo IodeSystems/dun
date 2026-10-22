@@ -5,7 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { explain } from '@/api/client';
 import { followSession } from '@/api/live';
-import { Answer, AskModels, ForgetSession, GetUI, PutUI, SendMessage, Slash, SwitchModel } from '@/api/ops';
+import { Answer, AskModels, Control, ForgetSession, GetUI, PutUI, SendMessage, Slash, SwitchModel } from '@/api/ops';
+import { McpForm } from '@/components/McpForm';
 import { ModelPicker } from '@/components/ModelPicker';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
@@ -26,6 +27,7 @@ export default function Session() {
   const [sendErr, setSendErr] = useState('');
   const [panel, setPanel] = useState(false);
   const [picker, setPicker] = useState<string | null>(null); // the search, when open
+  const [mcpForm, setMcpForm] = useState(false);
   // This user's UI state in the session, kept by dund and shared with their
   // other clients (the TUI's format): the sent history and an unsent draft.
   const sent = useRef<string[]>([]);
@@ -127,9 +129,10 @@ export default function Session() {
       return;
     }
     setText('');
-    remember(raw.trim());
+    if (l.kind !== 'mcpadd') remember(raw.trim());
     if (l.kind === 'slash') return runSlash(l.line);
     if (l.kind === 'model') return openPicker(l.query);
+    if (l.kind === 'mcpadd') return setMcpForm(true);
     try {
       await auth.client.request(SendMessage, { id, content: l.text });
     } catch (e) {
@@ -189,7 +192,26 @@ export default function Session() {
           {picker !== null ? (
             <ModelPicker providers={view.models} current={view.settings} initial={picker} pick={(u, m, p) => void switchTo(u, m, p)} close={() => setPicker(null)} />
           ) : null}
-          {panel ? <SessionPanel commands={view.commands} run={(l) => void runSlash(l)} prefill={(t) => { setText(t); setPanel(false); }} /> : null}
+          {mcpForm ? (
+            <McpForm
+              close={() => setMcpForm(false)}
+              add={(spec) => void auth.client?.request(Control, { id, target: 'mcp', action: 'add ' + spec }).catch((e) => setSendErr('mcp add: ' + explain(e).message))}
+            />
+          ) : null}
+          {panel ? (
+            <SessionPanel
+              commands={view.commands}
+              run={(l) => void runSlash(l)}
+              prefill={(t) => {
+                setText(t);
+                setPanel(false);
+              }}
+              addServer={() => {
+                setMcpForm(true);
+                setPanel(false);
+              }}
+            />
+          ) : null}
           {text.startsWith('/') && !view.ask ? <Palette rows={suggest(text, view.commands, view.skills)} pick={setText} /> : null}
           {conn ? <ErrorText>{conn}</ErrorText> : view.status ? <Muted>{view.status}</Muted> : null}
           {sendErr ? <ErrorText>{sendErr}</ErrorText> : null}

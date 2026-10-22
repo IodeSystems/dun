@@ -9,10 +9,11 @@ import { font, space, useColors } from '@/lib/theme';
 
 const GROUPS = ['tools', 'git', 'memory', 'session'];
 
-export function SessionPanel({ commands, run, prefill }: {
+export function SessionPanel({ commands, run, prefill, addServer }: {
   commands: Command[];
   run: (line: string) => void;
   prefill: (text: string) => void;
+  addServer: () => void;
 }) {
   const c = useColors();
   const groups = GROUPS.filter((g) => commands.some((x) => x.group === g));
@@ -40,6 +41,7 @@ export function SessionPanel({ commands, run, prefill }: {
                     <Chip key={ch.value} label={ch.value} active={cmd.state === ch.value} onPress={() => run(`${cmd.name} ${ch.value}`)} />
                   ))}
                   {!cmd.choices?.length && !cmd.text ? <Chip label="run" onPress={() => run(cmd.name)} /> : null}
+                  {cmd.name === 'mcp' ? <Chip label="add…" onPress={addServer} /> : null}
                   {cmd.text ? <Chip label="write…" onPress={() => prefill(`/${cmd.name} `)} /> : null}
                 </View>
               </View>

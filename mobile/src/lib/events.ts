@@ -184,6 +184,7 @@ export type Line =
   | { kind: 'slash'; line: string }
   | { kind: 'skill'; text: string }
   | { kind: 'model'; query: string }
+  | { kind: 'mcpadd' }
   | { kind: 'unknown'; name: string };
 
 export function parseLine(raw: string, skills: Skill[]): Line {
@@ -197,8 +198,10 @@ export function parseLine(raw: string, skills: Skill[]): Line {
     const ask = `Use the skill ${skill} (call skill name=${skill} first)`;
     return { kind: 'skill', text: words.length ? `${ask}: ${words.join(' ')}` : ask + '.' };
   }
-  // The model picker is the client's (the TUI has its own).
+  // The model picker and the add-server form are the client's (the TUI has
+  // its own of each).
   if (name === 'model') return { kind: 'model', query: rest.join(' ') };
+  if (name === 'mcp' && rest[0]?.toLowerCase() === 'add') return { kind: 'mcpadd' };
   if (!name) return { kind: 'unknown', name: '' };
   return { kind: 'slash', line: text.slice(1) };
 }
