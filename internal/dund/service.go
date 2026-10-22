@@ -40,6 +40,10 @@ type Service struct {
 	dir     string // registry and UI state live here
 	spawner Spawner
 
+	// saveMu orders registry writes: two at once shared one temp file, and
+	// the one that read the registry first could land last.
+	saveMu sync.Mutex
+
 	mu       sync.Mutex
 	sessions map[string]*session
 	closing  bool
@@ -629,6 +633,8 @@ func (s *Service) loadRegistry() ([]record, error) {
 }
 
 func (s *Service) saveRegistry() error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	s.mu.Lock()
 	recs := make([]record, 0, len(s.sessions))
 	for _, ses := range s.sessions {
