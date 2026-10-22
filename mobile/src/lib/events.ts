@@ -27,7 +27,7 @@ export type Command = {
 
 export type Skill = { name: string; description: string };
 
-export type ModelProvider = { name: string; url: string; ids: string[]; error?: string };
+export type ModelProvider = { name: string; url: string; ids: string[]; error?: string; default?: boolean; key?: boolean };
 export type Settings = { model: string; provider: string; url: string };
 
 export type View = {
@@ -214,7 +214,7 @@ export function suggest(typed: string, commands: Command[], skills: Skill[]): { 
   if (arg === undefined) {
     for (const c of commands) if (c.name.startsWith(head)) out.push({ insert: '/' + c.name + ' ', label: '/' + c.name + (c.usage ? ' ' + c.usage : ''), hint: c.description });
     if ('skill'.startsWith(head)) out.push({ insert: '/skill ', label: '/skill <name> [text]', hint: 'ask the model to use a skill' });
-    if ('model'.startsWith(head)) out.push({ insert: '/model', label: '/model [search]', hint: 'switch model: a searchable list from every provider' });
+    if ('model'.startsWith(head)) out.push({ insert: '/model', label: '/model [search]', hint: 'switch model: a searchable list from every provider; /model add | edit <p> | remove <p> | use <p> <id>' });
     return out;
   }
   if (head === 'skill') {

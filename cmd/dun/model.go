@@ -58,7 +58,12 @@ func (m tuiModel) providerNamed(name string) (providerConfig, bool) {
 //	/model <name>               switch to that model on this provider
 //	/model <provider> <name>    switch to that model on that provider
 //	/model add                  add a provider
-//	/model remove <provider>    forget a provider
+//	/model edit <provider>      change its URL or key
+//	/model remove <provider>    forget a provider (the default moves to the next)
+//	/model use <provider> <id>  switch and save as default, by id — for a
+//	                            provider that does not list its models
+//
+// Changes to providers go through applyProviderOp, as they do from the web.
 func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	if m.replaying {
 		m.append(stDim.Render("this is a replay — there is no engine to resume with"))
@@ -66,27 +71,41 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	}
 	switch {
 	case len(args) == 1 && args[0] == "add":
-		return m.openProviderForm()
+		return m.openProviderForm(nil)
 	case len(args) >= 1 && (args[0] == "remove" || args[0] == "rm"):
 		if len(args) != 2 {
 			m.append(stErr.Render("usage: /model remove <provider>"))
 			return nil
 		}
-		cfg := loadConfig()
-		if args[1] == cfg.active().Name {
-			m.append(stErr.Render("cannot remove " + args[1] + ": it is the saved default — save another first"))
+		msg, err := applyProviderOp(providerOp{Op: "remove", Name: args[1]})
+		if err != nil {
+			m.append(stErr.Render(err.Error()))
 			return nil
 		}
-		if !cfg.removeProvider(args[1]) {
+		m.append(stDim.Render(msg))
+		return nil
+	case len(args) >= 1 && args[0] == "edit":
+		if len(args) != 2 {
+			m.append(stErr.Render("usage: /model edit <provider>"))
+			return nil
+		}
+		p, ok := loadConfig().named(args[1])
+		if !ok {
 			m.append(stErr.Render("no provider named " + args[1]))
 			return nil
 		}
-		if err := saveConfig(cfg); err != nil {
-			m.append(stErr.Render("failed to save config: " + err.Error()))
+		return m.openProviderForm(&p)
+	case len(args) >= 1 && args[0] == "use":
+		if len(args) != 3 {
+			m.append(stErr.Render("usage: /model use <provider> <model-id>"))
 			return nil
 		}
-		m.append(stDim.Render("removed provider " + args[1]))
-		return nil
+		p, ok := loadConfig().named(args[1])
+		if !ok {
+			m.append(stErr.Render("no provider named " + args[1] + " — /model add"))
+			return nil
+		}
+		return m.switchModel(p, args[2], true)
 	case len(args) == 2:
 		p, ok := m.providerNamed(args[0])
 		if !ok {
@@ -123,9 +142,9 @@ func (m *tuiModel) openModelPicker(query string) tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink}
 	for _, p := range ps {
 		cmds = append(cmds, func() tea.Msg {
-			ids := fetchModels(p.URL, p.Key)
+			ids, why := listModels(p.URL, p.Key)
 			if len(ids) == 0 {
-				return modelFetchMsg{provider: p.Name, err: "no model list from " + p.URL}
+				return modelFetchMsg{provider: p.Name, err: why + " — /model use " + p.Name + " <model-id>, /model edit " + p.Name}
 			}
 			return modelFetchMsg{provider: p.Name, ids: ids}
 		})
@@ -242,7 +261,7 @@ func (m tuiModel) updateModelPicking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	case "ctrl+a":
-		return m, m.openProviderForm()
+		return m, m.openProviderForm(nil)
 	case "enter":
 		r, ok := m.selectedModel()
 		if !ok {
@@ -376,7 +395,9 @@ func (m tuiModel) modelPanel() string {
 
 // ── the add-provider form ──
 
-func (m *tuiModel) openProviderForm() tea.Cmd {
+// openProviderForm opens the add form, or with edit the edit form for that
+// provider: its name fixed, its URL filled in, the key left empty to keep it.
+func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 	mk := func(placeholder string) textinput.Model {
 		t := textinput.New()
 		t.Placeholder = placeholder
@@ -390,8 +411,15 @@ func (m *tuiModel) openProviderForm() tea.Cmd {
 	}
 	m.providerFields[2].EchoMode = textinput.EchoPassword
 	m.providerFields[2].EchoCharacter = '•'
-	m.providerFields[0].Focus()
-	m.providerStep, m.providerErr = 0, ""
+	m.providerStep, m.providerErr, m.providerEdit = 0, "", ""
+	if edit != nil {
+		m.providerEdit = edit.Name
+		m.providerFields[0].SetValue(edit.Name)
+		m.providerFields[1].SetValue(edit.URL)
+		m.providerFields[2].Placeholder = "new API key (empty keeps the saved one)"
+		m.providerStep = 1
+	}
+	m.providerFields[m.providerStep].Focus()
 	m.providerForm, m.modelPicking = true, true
 	m.input.Blur()
 	m.refresh()
@@ -405,7 +433,7 @@ func (m tuiModel) updateProviderForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closeModelPicker()
 		return m, nil
 	case "shift+tab", "up":
-		if m.providerStep > 0 {
+		if m.providerStep > 0 && !(m.providerEdit != "" && m.providerStep == 1) {
 			m.providerFields[m.providerStep].Blur()
 			m.providerStep--
 			m.providerFields[m.providerStep].Focus()
@@ -439,26 +467,32 @@ func (m tuiModel) updateProviderForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // saveProvider writes the form's provider to the config and opens the picker
 // filtered to it, which is also the check that the URL and key work.
 func (m *tuiModel) saveProvider() tea.Cmd {
-	p := providerConfig{
+	op := providerOp{Op: "add",
 		Name: strings.TrimSpace(m.providerFields[0].Value()),
-		URL:  strings.TrimRight(strings.TrimSpace(m.providerFields[1].Value()), "/"),
-		Key:  strings.TrimSpace(m.providerFields[2].Value()),
+		URL:  m.providerFields[1].Value(),
+		Key:  m.providerFields[2].Value(),
 	}
-	cfg := loadConfig()
-	cfg.putProvider(p)
-	if err := saveConfig(cfg); err != nil {
-		m.providerErr = "failed to save config: " + err.Error()
+	if m.providerEdit != "" {
+		op.Op, op.Name = "edit", m.providerEdit
+	}
+	msg, err := applyProviderOp(op)
+	if err != nil {
+		m.providerErr = err.Error()
 		m.refresh()
 		return nil
 	}
 	m.providerForm = false
-	m.append(stDim.Render(fmt.Sprintf("saved provider %s (%s, key %s)", p.Name, p.URL, maskKey(p.Key))))
-	return m.openModelPicker(p.Name + " ")
+	m.append(stDim.Render(msg))
+	return m.openModelPicker(op.Name + " ")
 }
 
 func (m tuiModel) providerFormPanel() string {
 	labels := [3]string{"name", "url ", "key "}
-	rows := []string{stHeader.Render("add provider") + stDim.Render("  an OpenAI-compatible endpoint · enter next · shift+tab back · esc cancel")}
+	title := "add provider"
+	if m.providerEdit != "" {
+		title = "edit provider " + m.providerEdit
+	}
+	rows := []string{stHeader.Render(title) + stDim.Render("  an OpenAI-compatible endpoint · enter next · shift+tab back · esc cancel")}
 	for i, f := range m.providerFields {
 		label := stDim.Render("  " + labels[i] + "  ")
 		if i == m.providerStep {

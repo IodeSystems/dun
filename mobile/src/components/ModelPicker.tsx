@@ -1,23 +1,28 @@
 import { useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
 
-import { Field, Muted } from '@/components/ui';
+import { Button, Field, Muted } from '@/components/ui';
 import { filterModels, type ModelProvider } from '@/lib/events';
+import type { ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
 
 // /model: every saved provider's models (fetched by the engine), searched by
-// any words of provider or id, as the TUI's picker does.
-export function ModelPicker({ providers, current, initial, pick, close }: {
+// any words of provider or id, as the TUI's picker does. Below them the
+// providers themselves: edit, remove, add, and a model used by id — for a
+// provider that does not list its models.
+export function ModelPicker({ providers, current, initial, pick, op, edit, close }: {
   providers: ModelProvider[] | null;
   current: { model: string; provider: string } | null;
   initial: string;
   pick: (url: string, id: string, provider: string) => void;
+  op: (op: ProviderOp, url?: string) => void;
+  edit: (p: ModelProvider | null) => void;
   close: () => void;
 }) {
   const c = useColors();
   const [q, setQ] = useState(initial);
+  const [byId, setById] = useState<{ provider: string; id: string } | null>(null);
   const rows = providers ? filterModels(providers, q) : [];
-  const failed = (providers ?? []).filter((p) => p.error);
   return (
     <View style={{ gap: space.sm, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: space.sm, backgroundColor: c.surface }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
@@ -30,11 +35,6 @@ export function ModelPicker({ providers, current, initial, pick, close }: {
       </View>
       <Field value={q} onChangeText={setQ} placeholder="search: words of the provider or model" autoCapitalize="none" autoCorrect={false} autoFocus />
       {!providers ? <ActivityIndicator /> : null}
-      {failed.map((p) => (
-        <Muted key={p.name}>
-          {p.name}: {p.error}
-        </Muted>
-      ))}
       <FlatList
         style={{ maxHeight: 300 }}
         keyboardShouldPersistTaps="handled"
@@ -54,6 +54,37 @@ export function ModelPicker({ providers, current, initial, pick, close }: {
         }}
         ListEmptyComponent={providers ? <Muted>no model matches</Muted> : null}
       />
+      <Text style={{ color: c.text, fontSize: font.sm, fontWeight: '600' }}>Providers</Text>
+      {(providers ?? []).map((p) => (
+        <View key={p.name} style={{ gap: space.xs, borderTopWidth: 1, borderTopColor: c.border, paddingTop: space.xs }}>
+          <Text style={{ color: p.error ? c.danger : c.text, fontSize: font.sm }}>
+            {p.default ? '★ ' : ''}
+            {p.name} — {p.url} · {p.key ? 'key set' : 'no key'} · {p.error ? p.error : `${p.ids.length} models`}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+            <Button title="Edit" onPress={() => edit(p)} />
+            <Button title="Remove" onPress={() => op({ op: 'remove', name: p.name })} />
+            <Button title="Use model id…" onPress={() => setById({ provider: p.name, id: '' })} />
+          </View>
+          {byId?.provider === p.name ? (
+            <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
+              <View style={{ flex: 1 }}>
+                <Field value={byId.id} onChangeText={(id) => setById({ provider: p.name, id })} placeholder="model id, e.g. gpt-4o" autoCapitalize="none" autoCorrect={false} autoFocus />
+              </View>
+              <Button
+                title="Use"
+                primary
+                disabled={!/^\S+$/.test(byId.id.trim())}
+                onPress={() => {
+                  op({ op: 'use', name: p.name, model: byId.id.trim() }, p.url);
+                  setById(null);
+                }}
+              />
+            </View>
+          ) : null}
+        </View>
+      ))}
+      <Button title="Add provider" onPress={() => edit(null)} />
     </View>
   );
 }

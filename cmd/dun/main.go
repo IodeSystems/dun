@@ -824,6 +824,24 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go em.emit(modelsEvent())
 			return
 		}
+		// /model add, edit, remove, use from the web or the phone: the action
+		// is a providerOp, key included, so the event echoes only the verb.
+		if id == "provider" {
+			go func() {
+				var op providerOp
+				msg := ""
+				if err := json.Unmarshal([]byte(action), &op); err != nil {
+					msg = "a provider operation is JSON: " + err.Error()
+				} else if m, err := applyProviderOp(op); err != nil {
+					msg = err.Error()
+				} else {
+					msg = m
+				}
+				em.emit(&proto.ControlEvent{ID: id, Action: op.Op, Message: msg})
+				em.emit(modelsEvent())
+			}()
+			return
+		}
 		// /memories: the project's notes and what has happened to them.
 		if id == "memories" {
 			em.emit(&proto.ControlEvent{ID: id, Message: memoriesListing(h.Memories(), h.Remembering())})

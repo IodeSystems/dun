@@ -444,6 +444,10 @@ type ModelProvider struct {
 	URL   string   `json:"url"`
 	IDs   []string `json:"ids"`
 	Error string   `json:"error,omitempty"`
+	// Default marks the saved default provider; Key says whether one is
+	// saved (the key itself stays on the machine dun runs on).
+	Default bool `json:"default,omitempty"`
+	Key     bool `json:"key,omitempty"`
 }
 
 // --- the protocol's own ---

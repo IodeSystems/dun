@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -114,6 +116,101 @@ func (c *dunConfig) removeProvider(name string) bool {
 	return false
 }
 
+// named finds the saved provider called name.
+func (c dunConfig) named(name string) (providerConfig, bool) {
+	for _, p := range c.providerList() {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return providerConfig{}, false
+}
+
+// providerOp is one change to the saved providers, from /model on any client.
+type providerOp struct {
+	Op    string `json:"op"` // add (replaces one of the same name), edit, remove, use
+	Name  string `json:"name"`
+	URL   string `json:"url,omitempty"`
+	Key   string `json:"key,omitempty"`   // edit: empty keeps the saved key
+	Model string `json:"model,omitempty"` // use: an id, typed when the list is not there
+}
+
+// applyProviderOp changes the saved providers and says what it did. It is
+// the one implementation: the TUI calls it directly (it must work when no
+// engine can start — a bad provider is how you get there), the engine calls
+// it for the web and the phone. Keys never appear in the answer.
+func applyProviderOp(op providerOp) (string, error) {
+	cfg := loadConfig()
+	name := strings.TrimSpace(op.Name)
+	if name == "" || strings.ContainsAny(name, " \t") {
+		return "", errors.New("a provider name is one word")
+	}
+	var msg string
+	switch op.Op {
+	case "add", "edit":
+		u := strings.TrimRight(strings.TrimSpace(op.URL), "/")
+		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			return "", errors.New("the URL starts with http:// or https://")
+		}
+		p := providerConfig{Name: name, URL: u, Key: strings.TrimSpace(op.Key)}
+		old, exists := cfg.named(name)
+		if op.Op == "edit" {
+			if !exists {
+				return "", errors.New("no provider named " + name)
+			}
+			if p.Key == "" {
+				p.Key = old.Key
+			}
+		}
+		wasDefault := exists && cfg.active().Name == name
+		cfg.putProvider(p)
+		if wasDefault {
+			cfg.Provider, cfg.URL, cfg.Key = p.Name, p.URL, p.Key
+		}
+		msg = fmt.Sprintf("saved provider %s (%s, %s)", name, u, keyNote(p.Key))
+	case "remove":
+		if _, ok := cfg.named(name); !ok {
+			return "", errors.New("no provider named " + name)
+		}
+		if len(cfg.providerList()) == 1 {
+			return "", errors.New(name + " is the only provider — add another first")
+		}
+		wasDefault := cfg.active().Name == name
+		cfg.removeProvider(name)
+		msg = "removed provider " + name
+		if wasDefault {
+			next := cfg.Providers[0]
+			cfg.Provider, cfg.URL, cfg.Key = next.Name, next.URL, next.Key
+			msg += "; the default provider is now " + next.Name + " — pick a model on it"
+		}
+	case "use":
+		p, ok := cfg.named(name)
+		if !ok {
+			return "", errors.New("no provider named " + name)
+		}
+		model := strings.TrimSpace(op.Model)
+		if model == "" || strings.ContainsAny(model, " \t") {
+			return "", errors.New("a model id is one word")
+		}
+		cfg.use(p, model)
+		msg = "default: " + model + " on " + name
+	default:
+		return "", errors.New("no provider operation " + op.Op + " (add, edit, remove, use)")
+	}
+	if err := saveConfig(cfg); err != nil {
+		return "", fmt.Errorf("failed to save config: %w", err)
+	}
+	return msg, nil
+}
+
+// keyNote says whether there is a key, never what it is.
+func keyNote(k string) string {
+	if k == "" {
+		return "no key"
+	}
+	return "key set"
+}
+
 // use makes p and model the saved defaults.
 func (c *dunConfig) use(p providerConfig, model string) {
 	c.putProvider(p)
@@ -183,11 +280,23 @@ func maskKey(k string) string {
 
 // fetchModels queries an OpenAI-compatible /models endpoint (best-effort).
 func fetchModels(base, key string) []string {
+	ids, _ := listModels(base, key)
+	return ids
+}
+
+// listModels asks base for its models, at /v1/models and then /models (a
+// base that already ends in /v1, as LiteLLM's often does, needs the second).
+// With no ids it says why, from the last try: a status and the start of the
+// body, or the network error — on a corporate network the reason (a 401, a
+// proxy, a certificate) is the whole diagnosis.
+func listModels(base, key string) ([]string, string) {
 	base = strings.TrimRight(base, "/")
 	client := &http.Client{Timeout: 6 * time.Second}
+	why := "no model list"
 	for _, u := range []string{base + "/v1/models", base + "/models"} {
 		req, err := http.NewRequest(http.MethodGet, u, nil)
 		if err != nil {
+			why = err.Error()
 			continue
 		}
 		if key != "" {
@@ -196,14 +305,22 @@ func fetchModels(base, key string) []string {
 		req.Header.Set("Accept", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {
+			why = err.Error()
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 160))
+			resp.Body.Close()
+			why = fmt.Sprintf("%s: HTTP %d %s", u, resp.StatusCode, strings.Join(strings.Fields(string(b)), " "))
 			continue
 		}
 		ids := decodeModels(resp)
 		if len(ids) > 0 {
-			return ids
+			return ids, ""
 		}
+		why = u + ": an empty model list (the key may have no models)"
 	}
-	return nil
+	return nil, why
 }
 
 func decodeModels(resp *http.Response) []string {

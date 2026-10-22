@@ -8,10 +8,12 @@ import { followSession } from '@/api/live';
 import { Answer, AskModels, Control, ForgetSession, GetUI, PutUI, SendMessage, Slash, SwitchModel } from '@/api/ops';
 import { McpForm } from '@/components/McpForm';
 import { ModelPicker } from '@/components/ModelPicker';
+import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
 import { apply, empty, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
+import { modelLine, type ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -28,6 +30,8 @@ export default function Session() {
   const [panel, setPanel] = useState(false);
   const [picker, setPicker] = useState<string | null>(null); // the search, when open
   const [mcpForm, setMcpForm] = useState(false);
+  // The add/edit provider form: null adds, a provider edits it.
+  const [providerForm, setProviderForm] = useState<{ edit: { name: string; url: string } | null } | null>(null);
   // This user's UI state in the session, kept by dund and shared with their
   // other clients (the TUI's format): the sent history and an unsent draft.
   const sent = useRef<string[]>([]);
@@ -109,6 +113,19 @@ export default function Session() {
     void auth.client?.request(AskModels, { id }).catch((e) => setSendErr('models: ' + explain(e).message));
   }
 
+  // A change to the saved providers, done by the engine (it holds the keys);
+  // it answers with a note and a fresh models event. Using a model by id
+  // saves it as the default, then switches this session to it.
+  async function providerOp(op: ProviderOp, url?: string) {
+    if (op.op === 'remove' && !(await confirm('Remove', `Forget provider ${op.name} and its key?`))) return;
+    try {
+      await auth.client?.request(Control, { id, target: 'provider', action: JSON.stringify(op) });
+    } catch (e) {
+      return setSendErr('provider ' + op.op + ': ' + explain(e).message);
+    }
+    if (op.op === 'use' && url) await switchTo(url, op.model, op.name);
+  }
+
   async function switchTo(url: string, model: string, provider: string) {
     setPicker(null);
     setView((v) => ({ ...v, status: `switching to ${model} on ${provider}…` }));
@@ -131,7 +148,17 @@ export default function Session() {
     setText('');
     if (l.kind !== 'mcpadd') remember(raw.trim());
     if (l.kind === 'slash') return runSlash(l.line);
-    if (l.kind === 'model') return openPicker(l.query);
+    if (l.kind === 'model') {
+      const m = modelLine(l.query);
+      if (m.kind === 'usage') return setSendErr(m.message);
+      if (m.kind === 'add') return setProviderForm({ edit: null });
+      if (m.kind === 'edit') {
+        const p = view.models?.find((x) => x.name === m.name);
+        return p ? setProviderForm({ edit: p }) : setSendErr(`no provider named ${m.name} (open /model to load them)`);
+      }
+      if (m.kind === 'op') return providerOp(m.op, m.op.op === 'use' ? view.models?.find((x) => x.name === m.op.name)?.url : undefined);
+      return openPicker(m.query);
+    }
     if (l.kind === 'mcpadd') return setMcpForm(true);
     try {
       await auth.client.request(SendMessage, { id, content: l.text });
@@ -190,8 +217,17 @@ export default function Session() {
             </View>
           ) : null}
           {picker !== null ? (
-            <ModelPicker providers={view.models} current={view.settings} initial={picker} pick={(u, m, p) => void switchTo(u, m, p)} close={() => setPicker(null)} />
+            <ModelPicker
+              providers={view.models}
+              current={view.settings}
+              initial={picker}
+              pick={(u, m, p) => void switchTo(u, m, p)}
+              op={(o, u) => void providerOp(o, u)}
+              edit={(p) => setProviderForm({ edit: p })}
+              close={() => setPicker(null)}
+            />
           ) : null}
+          {providerForm ? <ProviderForm edit={providerForm.edit} save={(o) => void providerOp(o)} close={() => setProviderForm(null)} /> : null}
           {mcpForm ? (
             <McpForm
               close={() => setMcpForm(false)}

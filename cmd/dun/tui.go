@@ -634,6 +634,7 @@ type tuiModel struct {
 	providerFields [3]textinput.Model // name, url, key
 	providerStep   int
 	providerErr    string
+	providerEdit   string // the provider the form edits; "" adds one
 	provider       string // name of the provider the engine runs on
 	// The add-MCP-server form (/mcp add).
 	mcpForm       bool

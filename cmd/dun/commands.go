@@ -87,18 +87,17 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 // modelsEvent lists every saved provider's models, fetched in parallel.
 // Keys stay here; a client gets names, URLs and ids.
 func modelsEvent() *proto.Models {
-	ps := loadConfig().providerList()
+	cfg := loadConfig()
+	ps, def := cfg.providerList(), cfg.active().Name
 	out := make([]proto.ModelProvider, len(ps))
 	var wg sync.WaitGroup
 	for i, p := range ps {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			mp := proto.ModelProvider{Name: p.Name, URL: p.URL, IDs: fetchModels(p.URL, p.Key)}
-			if len(mp.IDs) == 0 {
-				mp.Error = "no model list from " + p.URL
-			}
-			out[i] = mp
+			ids, why := listModels(p.URL, p.Key)
+			out[i] = proto.ModelProvider{Name: p.Name, URL: p.URL, IDs: ids, Error: why,
+				Default: p.Name == def, Key: p.Key != ""}
 		}()
 	}
 	wg.Wait()
