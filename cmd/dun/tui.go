@@ -153,12 +153,20 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 			args := os.Args
 			// Append --resume so the new process reattaches to the same session.
 			// Without it, /reload starts a fresh session and the conversation is lost.
-			if tm.sessionID != "" {
+			switch {
+			case tm.sessionID != "":
 				args = append(args, "--resume", tm.sessionID)
-			} else if tm.opts.cont {
+			case tm.proc != nil && tm.proc.session != "":
+				// Re-exec'd before the session event (a new build seen on
+				// the first attach): the connection names it.
+				args = append(args, "--resume", tm.proc.session)
+			case tm.opts.cont:
 				args = append(args, "--continue")
 			}
-			_ = syscall.Exec(exe, args, os.Environ())
+			e = syscall.Exec(exe, args, os.Environ())
+		}
+		if e != nil {
+			fmt.Fprintf(os.Stderr, "dun: could not restart into %s: %v — run dun again\n", exe, e)
 		}
 	}
 	return err
@@ -582,6 +590,7 @@ type tuiModel struct {
 	lc           *launcherConn  // launcher registration (nil = no launcher)
 	reloadVer    string         // a newer build the launcher announced ("" = none)
 	reloadReq    bool           // /reload requested → runTUI re-execs after quit
+	upgrade      *upgradeState  // a pending dund upgrade (upgrade.go); nil = none
 	// Engine supervision: the TUI outlives its engine. opts is what respawning
 	// one takes, sessionID reattaches it to the same conversation, and the
 	// restart counters stop a crash loop from spinning forever.
@@ -1329,6 +1338,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.update(msg.msg)
 
 	case evMsg:
+		if msg["type"] == "self_reexec" && !m.replaying {
+			// This binary on disk is the build dund runs now: quit and
+			// re-exec into it on this session, as /reload does.
+			m.reloadReq = true
+			return m, tea.Quit
+		}
 		m.traceEvent(msg)
 		nm := m.handleEvent(msg)
 		cmds := []tea.Cmd{waitEvent(nm.proc)}
@@ -1408,6 +1423,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(reconnectDelay(m.reconnTries), func(time.Time) tea.Msg { return retryEngineMsg{} })
 		}
 		m.proc = msg.proc
+		m.upgrade = nil // the dund reached says again if one is pending
 		m.fatalErr = ""
 		m.reconnTries, m.reconnSince = 0, time.Time{}
 		// A reattach may replay from the middle of a session whose engine is
@@ -2166,6 +2182,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 	case "retry":
 		return m.handleRetry(ev)
+	case "upgrade":
+		// dund is upgrading (to every connection, no session): a status row
+		// of its own until the reconnect clears it.
+		m.upgrade = parseUpgrade(ev)
+		m.refresh()
 	case "persist":
 		// dund's answer to /persist.
 		on, changed := ev["on"] == true, ev["changed"] == true
@@ -2764,6 +2785,9 @@ func (m tuiModel) convoHeightBudget() int {
 		h -= lipgloss.Height(a)
 	}
 	h -= lipgloss.Height(m.lowerView()) // input, or the answer picker (several rows)
+	if u := m.upgradeView(); u != "" {
+		h -= lipgloss.Height(u)
+	}
 	return max(1, h)
 }
 
@@ -2898,7 +2922,11 @@ func (m tuiModel) View() string {
 		convo = m.pg.view(vp.Width, vp.Height)
 	}
 	out := append([]string{m.headView()}, top...)
-	out = append(out, convo, div, lower, status)
+	out = append(out, convo, div, lower)
+	if u := m.upgradeView(); u != "" {
+		out = append(out, u) // persistent while dund upgrades
+	}
+	out = append(out, status)
 	return strings.Join(out, "\n")
 }
 
@@ -3090,7 +3118,7 @@ func (m *tuiModel) exit() tea.Cmd {
 
 // appendUser adds a user message and stores the raw text for full-width re-rendering.
 func (m *tuiModel) appendUser(text string) {
-	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + text), userText: text})
+	m.convo = append(m.convo, convoEntry{collapsed: userRow(text), userText: text})
 	m.refresh()
 }
 
@@ -3145,7 +3173,7 @@ func (m *tuiModel) replay(items []any) {
 		case "user":
 			m.endRun()
 			m.task = str(im["content"]) // the task line survives a resume
-			m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + str(im["content"])), userText: str(im["content"])})
+			m.convo = append(m.convo, convoEntry{collapsed: userRow(str(im["content"])), userText: str(im["content"])})
 			n++
 		case "assistant":
 			m.endRun()
@@ -3369,7 +3397,7 @@ func (m *tuiModel) refresh() {
 			switch {
 			case e.userText != "":
 				if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
-					e.wrapped, e.wrapW, e.wrapState = packSGR(stUser.Width(wrapW).Render("› "+e.userText)), width, e.state
+					e.wrapped, e.wrapW, e.wrapState = packSGR(userRowAt(e.userText, wrapW)), width, e.state
 				}
 				w = e.wrapped
 			default:
@@ -3738,6 +3766,22 @@ func init() {
 		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
 			return tea.Quit
+		}},
+		{"upgrade", "[now]", "dund's pending upgrade: what it waits for; now restarts it at once (cut work resumes after)", func(m *tuiModel, args []string) tea.Cmd {
+			if m.upgrade == nil {
+				m.append(stDim.Render("no dund upgrade is pending"))
+				return nil
+			}
+			if len(args) == 0 || args[0] != "now" {
+				m.append(m.upgradeView())
+				return nil
+			}
+			if !m.proc.upgradeNow() {
+				m.append(stErr.Render("no session service right now — nothing restarted"))
+				return nil
+			}
+			m.append(stDim.Render("asked dund to restart now — running turns are interrupted and resume after"))
+			return nil
 		}},
 		{"perf", "", "redraw timings for this session (and how to get a profile)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())
@@ -4305,6 +4349,9 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	m.busy, m.starting, m.asking = false, false, false
 	m.askParked = false
 	m.busyStart = time.Time{}
+	// A reply cut mid-stream ends here: the next one is its own block, not
+	// appended to it (seen after a dund crash and the resume).
+	m.flushCur()
 	reason := m.fatalErr
 	if reason == "" {
 		reason = "lost the session service (dund)"

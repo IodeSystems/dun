@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -123,7 +122,7 @@ func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 	sc := bufio.NewScanner(c)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	ac := &attachConn{c: c}
-	notes := checkDundBuild(ac, sc)
+	notes, reexec := checkDundBuild(ac, sc)
 	id := o.resume
 	if id == "" && o.cont {
 		id = dun.LatestSession(o.workspace)
@@ -167,6 +166,11 @@ func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 	p.at.Store(&after)
 	for _, n := range notes {
 		ch <- evMsg{"type": "notification", "text": n}
+	}
+	if reexec != "" {
+		// This binary on disk is dund's build now: the model quits and
+		// re-execs into it, on this session (runTUI, as /reload).
+		ch <- evMsg{"type": "self_reexec", "version": reexec}
 	}
 	if reused {
 		ch <- evMsg{"type": "reused", "text": reusedLine(o.workspace, id)}
@@ -239,53 +243,6 @@ func reusedLine(workspace, id string) string {
 		unit = "message"
 	}
 	return fmt.Sprintf("resumed %s (%s, %d %s) — /new for a fresh session", id, age, n, unit)
-}
-
-// checkDundBuild compares dund's build with this one. A client-started dund
-// of another build is asked to restart into this binary (it does once nothing
-// is busy, and the reconnect carries this TUI across); a service is only
-// reported; a dund too old to answer gets the command that replaces it.
-func checkDundBuild(ac *attachConn, sc *bufio.Scanner) []string {
-	ev, err := ac.call(sc, "", &proto.Hello{Version: version})
-	if err != nil {
-		return []string{"dund is an older build that cannot be upgraded from here — " +
-			"stop it (kill $(cat " + filepath.Join(dunHome(), "dund.pid") + ")) and start dun again; sessions are kept"}
-	}
-	r, ok := ev.Payload.(*proto.HelloReply)
-	if !ok || r.Version == version || r.Version == "dev" || version == "dev" {
-		return nil
-	}
-	if !r.Upgradable {
-		return []string{"dund (a service) runs build " + r.Version + ", this is " + version + " — dun dund service restart"}
-	}
-	exe, err := os.Executable()
-	if err == nil {
-		exe, err = filepath.EvalSymlinks(exe)
-	}
-	if err != nil {
-		return []string{"dund runs build " + r.Version + ", this is " + version + "; cannot name this binary to upgrade it: " + err.Error()}
-	}
-	// Once per build pair: a dund that comes back as the same old build after
-	// an upgrade was handed a binary that is not this build, and asking again
-	// is a loop of restarts. Say what was tried instead.
-	pair := r.Version + "→" + version
-	if upgradeAsked[pair] && r.Busy {
-		return nil // asked already; it is waiting for the running work to end
-	}
-	if upgradeAsked[pair] {
-		return []string{"dund still runs build " + r.Version + " after restarting into " + exe +
-			" — that file is not build " + version + " (a stale copy?): stop dund (kill $(cat " +
-			filepath.Join(dunHome(), "dund.pid") + ")) and run dun from the build you want"}
-	}
-	upgradeAsked[pair] = true
-	if _, err := ac.call(sc, "", &proto.Upgrade{Exe: exe}); err != nil {
-		return []string{"dund runs build " + r.Version + ", this is " + version + "; it would not upgrade: " + err.Error()}
-	}
-	if r.Busy {
-		return []string{"dund runs build " + r.Version + " and is busy (a turn, a question or a job is running): it restarts into " +
-			version + " when that ends — ctrl+g interrupts a turn, /jobs kills a job"}
-	}
-	return []string{"dund ran build " + r.Version + " — restarting it into " + exe + " (" + version + "); this reconnects"}
 }
 
 // upgradeAsked records the build pairs this TUI already asked dund to move
