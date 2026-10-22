@@ -292,6 +292,89 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 	return "unknown /mcp action " + strconv.Quote(verb)
 }
 
+// mcpToolsEvent answers control "mcptools": "" is every running server's
+// cost, one line each; "<id>" that server's tools; "toggle <id> <tool>
+// on|off" turns one on or off and answers with the new list.
+func mcpToolsEvent(h *dun.Harness, action string) *proto.McpTools {
+	f := strings.Fields(action)
+	ev := &proto.McpTools{Tools: []proto.McpTool{}}
+	switch {
+	case len(f) == 0:
+		ev.Message = toolCostListing(h.Servers())
+		return ev
+	case f[0] == "toggle" && len(f) == 4 && (f[3] == "on" || f[3] == "off"):
+		ev.Server = f[1]
+		path, err := h.SetToolEnabled(f[1], f[2], f[3] == "on")
+		switch {
+		case err != nil:
+			ev.Message = f[1] + ": " + err.Error()
+		case path == "":
+			ev.Message = f[1] + ": " + f[2] + " is already " + f[3]
+		default:
+			ev.Message = f[1] + ": " + f[2] + " " + f[3] + " (saved to " + path + "; the model sees it from the next turn)"
+		}
+	case len(f) == 1:
+		ev.Server = f[0]
+	default:
+		ev.Message = "usage: /mcp tools [id] · toggle: mcptools toggle <id> <tool> on|off"
+		return ev
+	}
+	tools, err := h.ServerTools(ev.Server)
+	if err != nil {
+		ev.Message = strings.TrimPrefix(ev.Message+"\n", "\n") + ev.Server + ": " + err.Error()
+		return ev
+	}
+	for _, t := range tools {
+		ev.Tools = append(ev.Tools, proto.McpTool{Name: t.Name, Description: t.Description, Schema: t.Schema,
+			Tokens: t.Tokens, Enabled: t.Enabled, HiddenBy: t.HiddenBy})
+	}
+	return ev
+}
+
+// toolCostListing is bare /mcp tools: what each running server's schemas cost.
+func toolCostListing(states []dun.ServerState) string {
+	var b strings.Builder
+	b.WriteString("mcp tool cost per request")
+	for _, st := range states {
+		if !st.Running {
+			continue
+		}
+		b.WriteString("\n  " + st.ID + ": " + toolCost(st))
+		if hint := heavyHint(st); hint != "" {
+			b.WriteString("\n    " + hint)
+		}
+	}
+	return b.String() + "\n/mcp tools <id> lists one server's tools, to turn some off"
+}
+
+// toolCost is "160 tools · ~38k tokens · 12 hidden".
+func toolCost(st dun.ServerState) string {
+	s := fmt.Sprintf("%d tools · ~%s tokens", st.Tools, kTokens(st.Cost))
+	if st.Hidden > 0 {
+		s += fmt.Sprintf(" · %d hidden", st.Hidden)
+	}
+	return s
+}
+
+// heavyHint names the two ways to make a heavy server cheaper.
+func heavyHint(st dun.ServerState) string {
+	if st.Cost < dun.HeavyServerTokens || st.Via == dun.ViaShell {
+		return ""
+	}
+	hint := "heavy: /mcp tools " + st.ID + " to hide some"
+	if st.Via == dun.ViaDirect {
+		hint += ", or /mcp move " + st.ID + " shell"
+	}
+	return hint
+}
+
+func kTokens(n int) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return strconv.Itoa(n)
+}
+
 // mcpDocsLine syncs a server's documentation into the docs index and says
 // what happened.
 func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
@@ -378,7 +461,7 @@ func serverListing(states []dun.ServerState) string {
 		case st.Via == dun.ViaShell:
 			b.WriteString(hostedSummary(st))
 		case st.Running:
-			fmt.Fprintf(&b, "running · %d tools", st.Tools)
+			b.WriteString("running · " + toolCost(st))
 		case st.Err != "":
 			b.WriteString("stopped · last error: " + oneLine(st.Err))
 		default:
@@ -389,6 +472,9 @@ func serverListing(states []dun.ServerState) string {
 		}
 		if st.Auto && st.Via != dun.ViaShell {
 			b.WriteString(" · autostart")
+		}
+		if hint := heavyHint(st); st.Running && hint != "" {
+			b.WriteString("\n    " + hint)
 		}
 	}
 	return b.String()

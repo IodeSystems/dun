@@ -122,8 +122,21 @@ shell (mcpshell hosts it inside `eval`, so its schemas leave every request).
   (mcpshell's eval description is fixed text); a move reads "moved into the
   shell" in the tool-set Aside. Hosted status is parsed from mcpshell's stderr
   ("upstream "ns" connected … N tool(s)"). Live-checked with a stdio server.
-- ◻ **Per-tool cost and toggles** (`/mcp tools <id>` pager, glob Disable, web
-  parity) — next.
+- ✅ **Per-tool cost and toggles.** `/mcp` and bare `/mcp tools` show per
+  server `N tools · ~Xk tokens · M hidden` (each tool's wire JSON priced by the
+  calibrated promptMeter); ≥5k tokens adds a hint (hide some, or move to the
+  shell). `/mcp tools <id>`: TUI pager tree (row = ●/○ name, cost, first line;
+  enter/→ = description + schema; space = toggle), web panel with the same.
+  Engine control `mcptools` ("<id>" | "toggle <id> <tool> on|off") answers
+  with the `mcp_tools` event. Disable entries may be globs (path.Match). A
+  toggle writes Disable to `$DUN_HOME/mcp.json` for a /mcp-added server, else
+  to the project state `dun.local.json`; an emptied list is written as `[]` so
+  it still overrides a lower layer. Live-checked: 61-tool server, two off, one
+  back on, model tool list follows.
+- **risks (tools):** re-enabling a tool a glob hides is refused (edit the
+  glob); a user-file server whose Disable a repo dun.json also sets — the repo
+  wins next session; per-server cost is the meter estimate, not the exact
+  /context count (which covers only enabled tools).
 - **risks:** restarting the shell kills an in-flight eval and its state; a
   hanging upstream blocks the shell's start (mcpshell dials before serving, no
   per-upstream timeout); the stderr parse depends on mcpshell's wording (pinned

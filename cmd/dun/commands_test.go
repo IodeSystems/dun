@@ -58,6 +58,8 @@ func TestRouteSlash(t *testing.T) {
 		"mcp refresh docs":        {"control", "mcp", "refresh docs"},
 		"mcp move corp SHELL":     {"control", "mcp", "move corp shell"},
 		"mcp move corp direct":    {"control", "mcp", "move corp direct"},
+		"mcp tools el":            {"control", "mcptools", "el"},
+		"mcp tools":               {"control", "mcptools", ""},
 		"mcp restart":             {"server", allServers, "restart"},
 		"mcp off github":          {"server", "github", "off"},
 		"docker OFF":              {"control", "docker", "off"},

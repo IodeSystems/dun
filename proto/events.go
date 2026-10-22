@@ -46,6 +46,7 @@ func init() {
 	event[Settings]("settings")
 	event[Commands]("commands")
 	event[Models]("models")
+	event[McpTools]("mcp_tools")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -459,6 +460,25 @@ type ModelProvider struct {
 	// saved (the key itself stays on the machine dun runs on).
 	Default bool `json:"default,omitempty"`
 	Key     bool `json:"key,omitempty"`
+}
+
+// McpTools answers control "mcptools": every tool one server discovered,
+// hidden ones included, with what each costs. Action "<id>" asks; "toggle
+// <id> <tool> on|off" turns one on or off and answers with the new list.
+// Message says what happened (the file written, or why not).
+type McpTools struct {
+	Server  string    `json:"server"`
+	Tools   []McpTool `json:"tools"`
+	Message string    `json:"message,omitempty"`
+}
+
+type McpTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Schema      string `json:"schema,omitempty"` // the input schema, indented JSON
+	Tokens      int    `json:"tokens"`
+	Enabled     bool   `json:"enabled"`
+	HiddenBy    string `json:"hiddenBy,omitempty"` // the Disable entry hiding it
 }
 
 // --- the protocol's own ---

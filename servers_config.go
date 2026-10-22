@@ -110,12 +110,27 @@ type ServerSpec struct {
 	// all tools discovered from this server are passed through. Mirrors
 	// Claude's --disable-tools: name what to exclude, not what to keep.
 	// Forward-compatible — new tools added by a server pass through by default.
+	// An entry is a name or a glob ("tts_*", path.Match). An empty list (not
+	// an absent one) hides nothing and overrides a lower layer's; see
+	// MarshalJSON.
 	Disable []string `json:"disable,omitempty"`
 	// Via is where the server runs: "" or "direct" — dun connects to it and
 	// every tool's schema rides every request — or "shell": mcpshell hosts it
 	// inside its one eval tool as a namespace (help("<ns>")), and dun does not
 	// start it at all. A built-in server cannot be placed in the shell.
 	Via string `json:"via,omitempty"`
+}
+
+// MarshalJSON writes an empty, non-nil Disable as "disable": [] — omitempty
+// would drop it, and then turning the last hidden tool back on would let a
+// lower layer's list (the docs server's built-in one) hide them again.
+func (s ServerSpec) MarshalJSON() ([]byte, error) {
+	type plain ServerSpec
+	b, err := json.Marshal(plain(s))
+	if err != nil || s.Disable == nil || len(s.Disable) > 0 {
+		return b, err
+	}
+	return append(b[:len(b)-1], `,"disable":[]}`...), nil
 }
 
 // Placements a ServerSpec.Via may name. "" means ViaDirect.
@@ -556,9 +571,20 @@ func RemoveUserServer(id string) (bool, error) {
 	return true, writeUserServers(path, f)
 }
 
+// SetUserServerDisable sets a user-list server's tool deny-list. It reports
+// whether the server was in the list.
+func SetUserServerDisable(id string, disable []string) (bool, error) {
+	return editUserServer(id, func(s *ServerSpec) { s.Disable = disable })
+}
+
 // SetUserServerVia sets where a server in the user server list runs ("" for
 // direct, ViaShell). It reports whether the server was in the list.
 func SetUserServerVia(id, via string) (bool, error) {
+	return editUserServer(id, func(s *ServerSpec) { s.Via = via })
+}
+
+// editUserServer edits id's entry in the user server list, if it is there.
+func editUserServer(id string, edit func(*ServerSpec)) (bool, error) {
 	path := UserServersFile()
 	f, err := readServersFile(path)
 	if err != nil || f == nil {
@@ -567,7 +593,8 @@ func SetUserServerVia(id, via string) (bool, error) {
 	found := false
 	for i := range f.Servers {
 		if f.Servers[i].ID == id {
-			f.Servers[i].Via, found = via, true
+			edit(&f.Servers[i])
+			found = true
 		}
 	}
 	if !found {
@@ -632,6 +659,18 @@ func SetAutostart(dir, id string, on bool) (string, error) {
 	if id == "" {
 		return "", fmt.Errorf("dun: SetAutostart: empty server id")
 	}
+	return updateLocalServer(dir, id, func(s *ServerSpec) { s.Autostart = &on })
+}
+
+// SetLocalDisable writes a server's tool deny-list to dir's state directory
+// (see SetAutostart), where it overrides what a repo's dun.json says.
+func SetLocalDisable(dir, id string, disable []string) (string, error) {
+	return updateLocalServer(dir, id, func(s *ServerSpec) { s.Disable = disable })
+}
+
+// updateLocalServer edits (or adds) id's entry in dir's machine-state
+// dun.local.json and returns the file written.
+func updateLocalServer(dir, id string, edit func(*ServerSpec)) (string, error) {
 	p, err := EnsureProject(dir)
 	if err != nil {
 		return "", err
@@ -647,13 +686,15 @@ func SetAutostart(dir, id string, on bool) (string, error) {
 	found := false
 	for i := range f.Servers {
 		if f.Servers[i].ID == id {
-			f.Servers[i].Autostart = &on
+			edit(&f.Servers[i])
 			found = true
 			break
 		}
 	}
 	if !found {
-		f.Servers = append(f.Servers, ServerSpec{ID: id, Autostart: &on})
+		s := ServerSpec{ID: id}
+		edit(&s)
+		f.Servers = append(f.Servers, s)
 	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

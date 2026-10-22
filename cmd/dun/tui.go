@@ -663,6 +663,7 @@ type tuiModel struct {
 	mcpStep       int                // 0-2 the fields, 3 the placement
 	mcpShell      bool               // placement: in the shell (true) or direct
 	mcpErr        string
+	mcpToolsWant  string          // the server whose /mcp tools this TUI asked for (mcptools.go)
 	engineCmds    []engineCmd     // the engine's slash commands (commands event)
 	skills        []catalogSkill  // from the engine's catalog event
 	prompts       []catalogPrompt // MCP prompts, each a slash command
@@ -894,6 +895,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// So does the pager, all but ctrl+c: it reads one block in the convo
 		// pane's place, and esc brings the conversation back.
 		if m.paging && msg.String() != "ctrl+c" {
+			if v := m.toolsPaging(); v != nil && msg.String() == " " {
+				m.toggleMCPTool(v)
+				return m, nil
+			}
 			if !m.pg.key(msg.String()) {
 				m.paging = false
 				m.refresh()
@@ -1886,6 +1891,8 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.noteServers(ev)
 	case "catalog":
 		m.noteCatalog(ev)
+	case "mcp_tools":
+		m = m.noteMCPTools(ev)
 	case "prompt":
 		// An MCP prompt the user ran as a slash command, rendered by the
 		// engine: it goes in as their message.

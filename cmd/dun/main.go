@@ -912,6 +912,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
+		// /mcp tools: one server's tools, hidden ones included, or a toggle.
+		// Detached: a toggle writes a file and may rebuild the tool set.
+		if id == "mcptools" {
+			go func() { em.emit(mcpToolsEvent(h, action)) }()
+			return
+		}
 		// /memories: the project's notes and what has happened to them.
 		if id == "memories" {
 			em.emit(&proto.ControlEvent{ID: id, Message: memoriesListing(h.Memories(), h.Remembering())})

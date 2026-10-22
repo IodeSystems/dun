@@ -72,17 +72,18 @@ func (e convoEntry) page() (pageDoc, bool) {
 }
 
 type pager struct {
-	src    int          // the convo index of the block being read
-	id     any          // its pageID, to tell it is still the same block
-	doc    pageDoc      // its page, as of the last sync
-	open   map[int]bool // tree nodes the reader opened
-	cur    int          // the selected node (tree)
-	off    int          // first body row shown
-	follow bool         // at the bottom: stay there as the page grows
-	rows   []string     // the page laid out at w
-	nodeAt []int        // row where node i's head is
-	w, h   int          // the pane: h includes the title row
-	phase  int          // the selection band's pulse step (band.go)
+	src     int          // the convo index of the block being read
+	id      any          // its pageID, to tell it is still the same block
+	doc     pageDoc      // its page, as of the last sync
+	open    map[int]bool // tree nodes the reader opened
+	cur     int          // the selected node (tree)
+	off     int          // first body row shown
+	follow  bool         // at the bottom: stay there as the page grows
+	rows    []string     // the page laid out at w
+	nodeAt  []int        // row where node i's head is
+	w, h    int          // the pane: h includes the title row
+	phase   int          // the selection band's pulse step (band.go)
+	toggles bool         // space turns the selected node on or off (mcptools.go)
 }
 
 func newPager(src int, id any) pager {
@@ -257,6 +258,9 @@ func (p pager) view(w, h int) string {
 
 // hint is the status line while the pager is open.
 func (p pager) hint() string {
+	if p.toggles {
+		return "↑/↓ select · enter/→ open · ← close · space on/off · esc back"
+	}
 	if p.tree() {
 		return "↑/↓ select · enter/→ open · ← close · pgup/pgdn scroll · esc back"
 	}
@@ -287,6 +291,11 @@ func (m *tuiModel) openPager(i int) bool {
 // closes the pager rather than show something else at that index.
 func (m *tuiModel) syncPager() {
 	if !m.paging {
+		return
+	}
+	if v, ok := m.pg.id.(*mcpToolsView); ok { // not a convo block: its own page
+		m.pg.phase = m.pulse
+		m.pg.layout(v.page(), m.vp.Width, m.convoHeight())
 		return
 	}
 	if m.pg.src < 0 || m.pg.src >= len(m.convo) || m.convo[m.pg.src].pageID() != m.pg.id {

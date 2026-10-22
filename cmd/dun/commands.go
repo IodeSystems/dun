@@ -63,10 +63,11 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 			Description: "docs index (raglit): bare shows status, auto starts it every session"},
 		{Name: "lsp", Usage: "[on|off|restart|auto|manual]", Group: "tools", Choices: srvChoices, State: lspState, Detail: lspDetail,
 			Description: "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session"},
-		{Name: "mcp", Usage: "[add | remove <id> | refresh <id> | move <id> shell|direct | on|off|restart [id]]", Group: "tools", Text: true,
+		{Name: "mcp", Usage: "[add | tools [id] | remove <id> | refresh <id> | move <id> shell|direct | on|off|restart [id]]", Group: "tools", Text: true,
 			Choices: choices("add", "add a server: a form — id, then a URL or a command, then a bearer for a URL, then direct or in the shell",
 				"on", "start servers", "off", "stop servers", "restart", "restart servers", "remove", "remove a server", "refresh", "re-index a server's docs",
-				"move", "place a server in the shell (one eval namespace, no schemas per request) or direct"),
+				"move", "place a server in the shell (one eval namespace, no schemas per request) or direct",
+				"tools", "what each server's tools cost; with an id, list them and turn some off"),
 			Description: "MCP servers: bare lists them; add opens a form (id, URL or command, bearer)"},
 		{Name: "docker", Usage: "[on|off|status]", Group: "tools", Choices: choices("on", "exec in Docker", "off", "exec on the host", "status", ""),
 			State: onOff(docker), Description: "exec backend: on (Docker), off (host), bare shows status"},
@@ -150,6 +151,16 @@ func routeSlash(line string, r slashRoutes) {
 				return
 			}
 			r.control("mcp", arg(0)+" "+args[1])
+		case "tools":
+			if len(args) > 2 {
+				r.reply("usage: /mcp tools [id]")
+				return
+			}
+			id := ""
+			if len(args) == 2 {
+				id = args[1]
+			}
+			r.control("mcptools", id)
 		case "move":
 			if len(args) != 3 || (arg(2) != dun.ViaShell && arg(2) != dun.ViaDirect) {
 				r.reply("usage: /mcp move <id> shell|direct")

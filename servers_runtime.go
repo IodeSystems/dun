@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -32,17 +33,14 @@ import (
 // would be a worse outcome than losing search.
 
 // filterTools applies per-server deny-lists. If a server's Disable field
-// is non-empty, those tool names are dropped; all others pass through.
+// is non-empty, the tools it names are dropped; all others pass through.
 // Mirrors Claude's --disable-tools: forward-compatible, new tools pass
-// through by default.
+// through by default. An entry is a tool name or a glob ("tts_*", path.Match).
 func filterTools(tools []mcpmgr.MCPTool, specs []Server) []mcpmgr.MCPTool {
-	deny := make(map[string]map[string]bool) // serverID -> denied names
+	deny := make(map[string][]string) // serverID -> patterns
 	for _, s := range specs {
 		if len(s.Disable) > 0 {
-			deny[s.ID] = map[string]bool{}
-			for _, t := range s.Disable {
-				deny[s.ID][t] = true
-			}
+			deny[s.ID] = s.Disable
 		}
 	}
 	if len(deny) == 0 {
@@ -50,15 +48,22 @@ func filterTools(tools []mcpmgr.MCPTool, specs []Server) []mcpmgr.MCPTool {
 	}
 	out := make([]mcpmgr.MCPTool, 0, len(tools))
 	for _, t := range tools {
-		if set, ok := deny[t.ServerID]; ok {
-			if !set[t.Name] {
-				out = append(out, t)
-			}
-		} else {
-			out = append(out, t) // no filter for this server
+		if hiddenBy(t.Name, deny[t.ServerID]) == "" {
+			out = append(out, t)
 		}
 	}
 	return out
+}
+
+// hiddenBy is the first Disable entry that hides name, or "". A malformed
+// glob still matches its own exact text.
+func hiddenBy(name string, disable []string) string {
+	for _, p := range disable {
+		if ok, err := path.Match(p, name); ok || (err != nil && p == name) {
+			return p
+		}
+	}
+	return ""
 }
 
 // ServerState is one tool server's state, for a UI.
@@ -78,6 +83,10 @@ type ServerState struct {
 	// Namespace is what the model calls it by.
 	Hosted    bool   `json:"hosted,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
+	// Cost is what the enabled tools' schemas cost in every request (see
+	// toolTokens); Hidden is how many discovered tools Disable hides.
+	Cost   int `json:"cost,omitempty"`
+	Hidden int `json:"hidden,omitempty"`
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -86,9 +95,18 @@ type ServerState struct {
 func (h *Harness) Servers() []ServerState {
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
-	counts := map[string]int{}
-	for _, t := range filterTools(h.mgr.GetTools(), h.specs) {
+	counts, cost, hidden := map[string]int{}, map[string]int{}, map[string]int{}
+	deny := map[string][]string{}
+	for _, s := range h.specs {
+		deny[s.ID] = s.Disable
+	}
+	for _, t := range h.mgr.GetTools() {
+		if hiddenBy(t.Name, deny[t.ServerID]) != "" {
+			hidden[t.ServerID]++
+			continue
+		}
 		counts[t.ServerID]++
+		cost[t.ServerID] += h.toolTokens(t)
 	}
 	shellUp := h.mgr.ServerStarted(ServerShell)
 	out := make([]ServerState, 0, len(h.specs))
@@ -100,6 +118,8 @@ func (h *Harness) Servers() []ServerState {
 			Tools:        counts[s.ID],
 			Err:          h.lastErr[s.ID],
 			StartSeconds: h.lastStart[s.ID].Seconds(),
+			Cost:         cost[s.ID],
+			Hidden:       hidden[s.ID],
 		}
 		switch {
 		case s.Via == ViaShell:
