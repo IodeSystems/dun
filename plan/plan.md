@@ -626,9 +626,13 @@ restart on the saved provider, and remove all behaved as intended.
   - **risks:** untested on a Mac. Verified so far: darwin vet and build,
     and the plist parses with plistlib. The `launchctl bootstrap`,
     `kickstart` and `kill` behaviour is from documentation, not a run.
-  - **blocking decision (USER):** canon CLI-10 is systemd-only. A
-    macOS/launchd clause belongs in ~/doc (out of tree), mirroring this:
-    PATH capture, `SuccessfulExit=false`, and a log file.
+  - Canon written (USER 2026-10-22), as ~/doc commits `41cfee5` and
+    `0e9ce2d`. These are local; ~/doc is not pushed from here.
+    - CLI-10 now covers launchd and PATH capture.
+    - New rules: CLI-12 (binaries in `~/.local/bin`), CLI-13 (`doctor`),
+      CLI-14 (Linux and macOS).
+    - dun follows them: `make test` vets for darwin, and the socket-path
+      limit is per OS.
 - **next:** USER on the Mac: `git pull && make install`, `dun doctor`,
   `/login corp`; optionally `dun dund service install --start -- <flags>`.
 - **optional extensions:**
