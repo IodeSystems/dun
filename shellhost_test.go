@@ -238,3 +238,22 @@ func TestShellHosted_ModelView(t *testing.T) {
 		t.Errorf("delta: %q", note)
 	}
 }
+
+// mcpshell always gets a file toolkit rooted at the session's tree: added
+// when a configured shell's args left it out, never doubled, and an explicit
+// one is kept.
+func TestWithFilesDir(t *testing.T) {
+	for _, c := range []struct{ in, want []string }{
+		{[]string{"mcp", "--web"}, []string{"mcp", "--web", "--files-dir", "/ws"}},
+		{[]string{"mcp", "--files-dir", "/elsewhere"}, []string{"mcp", "--files-dir", "/elsewhere"}},
+		{[]string{"mcp", "--files-dir=/elsewhere"}, []string{"mcp", "--files-dir=/elsewhere"}},
+		{[]string{"mcp", "-files-dir", "/x"}, []string{"mcp", "-files-dir", "/x"}},
+	} {
+		if got := withFilesDir(c.in, "/ws"); !slices.Equal(got, c.want) {
+			t.Errorf("withFilesDir(%v) = %v", c.in, got)
+		}
+	}
+	if got := withFilesDir([]string{"mcp"}, ""); !slices.Equal(got, []string{"mcp"}) {
+		t.Errorf("no root: %v", got)
+	}
+}

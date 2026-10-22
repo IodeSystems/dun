@@ -127,8 +127,32 @@ func (h *Harness) hostedSpecs() []Server {
 }
 
 // shellArgs is the shell's argv: its configured args, plus --mcp <file> when
-// any server is placed in it. A shell that is not mcpshell is left alone.
+// any server is placed in it, and always a file toolkit. A shell that is not
+// mcpshell is left alone.
 func (h *Harness) shellArgs(s Server) []string {
+	args := h.shellArgsHosted(s)
+	if filepath.Base(s.Command) == "mcpshell" {
+		args = withFilesDir(args, h.cfg.Workspace)
+	}
+	return args
+}
+
+// withFilesDir adds `--files-dir <root>` to mcpshell's args unless they name
+// one: a configured shell entry replaces the default args wholesale, and one
+// that set only --web (say) lost the file toolkit with them (USER 2026-10-22).
+func withFilesDir(args []string, root string) []string {
+	if root == "" {
+		return args
+	}
+	for _, a := range args {
+		if a == "--files-dir" || a == "-files-dir" || strings.HasPrefix(a, "--files-dir=") || strings.HasPrefix(a, "-files-dir=") {
+			return args
+		}
+	}
+	return append(append([]string{}, args...), "--files-dir", root)
+}
+
+func (h *Harness) shellArgsHosted(s Server) []string {
 	h.srvMu.Lock()
 	hosted := h.hostedSpecs()
 	h.srvMu.Unlock()
