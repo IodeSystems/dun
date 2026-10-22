@@ -773,7 +773,17 @@ says "(just type)" while it is highlighted and not yet capturing.
   convo pane (head, input, status stay). Plain text scrolls; an aggregate is a
   tree, a node per call/thought that opens to args + result. Follows a live
   block by identity, not index. esc/q back.
-- **Proven:** unit tests (`reasoning_test.go`, `thinking_test.go`,
+- **Selection band** (`band.go`): the selected block (convo focus) and the
+  pager tree's selected node are drawn through a background filter — each
+  segment's own background (or the theme base) lightened/darkened 6–14%,
+  re-applied after resets, padded to the pane width. Truecolor pulses the
+  strength (10 steps, 1.2s); 256 is palette-matched and static; 16 is one
+  static bg; DUN_NO_ANIM=1 is static. The clock runs only while a band is
+  shown; a step rewrites only the selected rows; the scroll region is off
+  while it shows. Measured: BenchmarkPulseStep ~0.5ms/step at 200 blocks; live
+  1.1–1.3% of a core in convo focus with or without the pulse, same as input
+  focus (the floor is the existing blink/spinner).
+- **Proven:** unit tests (`reasoning_test.go`, `thinking_test.go`, `band_test.go`,
   `toolrun_test.go`, `TestReasoningEventReachesTheTUI`) and ttydrive against a
   fake OpenAI-compatible server streaming `reasoning_content` + 5 exec calls,
   with a scratch DUN_HOME dund, including a dund restart → `--continue` history

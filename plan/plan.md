@@ -91,7 +91,8 @@ full detail archived in `done.md`.
   timed-out `docker run` now stops its container.
 - **Thinking + tool runs in the TUI** (2026-10-22) — reasoning streams live as
   a `reasoning` event and folds per round; earlier calls of a run fold into one
-  row; enter opens either in the pager (`cmd/dun/pager.go`). See `done.md`.
+  row; enter opens either in the pager (`cmd/dun/pager.go`); the selection is
+  a pulsing background filter (`cmd/dun/band.go`). See `done.md`.
 
 ## Active work
 
