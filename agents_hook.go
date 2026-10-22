@@ -10,10 +10,13 @@ package dun
 // poly-lsp-mcp Server supports via --hook / $POLY_LSP_HOOK.
 //
 // Session memory: the hook records which AGENTS.md files have been read in
-// this session (by path+mtime) in a state file at $root/.dun/agents_read.
-// Once an AGENTS.md has been read, subsequent accesses to files under it
-// proceed without the guard. The state file is per-workspace (not global),
-// so two dun sessions on the same repo do not share it.
+// this session (by path+mtime) in a state file dun names in $DUN_AGENTS_STATE:
+// the workspace's agents_read in $DUN_HOME/projects/<id>/ (or the workspace's
+// overlay there, for a linked worktree — see project.go). It used to be
+// $root/.dun/agents_read, a file in the repo. Once an AGENTS.md has been read,
+// subsequent accesses to files under it proceed without the guard. The state
+// file is per-workspace (not global), so a session in one worktree does not
+// unlock the guard for another.
 //
 // Two layers, access-driven by design. The ROOT AGENTS.md is standing context:
 // rootAgentsMDBlock puts it in the system prompt so the model has the project's
@@ -51,13 +54,18 @@ done
 [[ -z "$root" ]] && exit 0
 
 # The state file tracks which AGENTS.md files have been read in this session.
-state="$root/.dun/agents_read"
+# dun passes it in DUN_AGENTS_STATE ($DUN_HOME/projects/<id>/…/agents_read) —
+# never a file in the repo. Run by hand without it: a per-user temp file.
+state="${DUN_AGENTS_STATE:-${TMPDIR:-/tmp}/dun-agents-read-$(id -u)}"
+
+# mtime: GNU stat (Linux) spells it -c %Y, BSD stat (macOS) -f %m.
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 
 # is_read: returns 0 if the given AGENTS.md path+mtime is in the state file.
 is_read() {
   local p="$1"
   local mt
-  mt="$(stat -c %Y "$p" 2>/dev/null || echo 0)"
+  mt="$(mtime "$p")"
   [[ -f "$state" ]] || return 1
   grep -qxF "$p $mt" "$state" 2>/dev/null
 }
@@ -66,7 +74,7 @@ is_read() {
 mark_read() {
   local p="$1"
   local mt
-  mt="$(stat -c %Y "$p" 2>/dev/null || echo 0)"
+  mt="$(mtime "$p")"
   mkdir -p "$(dirname "$state")" 2>/dev/null
   echo "$p $mt" >> "$state"
 }
@@ -166,12 +174,28 @@ func writeAgentsHook() (string, error) {
 	return f.Name(), nil
 }
 
-// agentsHookEnv returns the POLY_LSP_HOOK env entry for the code server, or
-// nil if the hook could not be written.
-func agentsHookEnv() []string {
+// agentsHookEnv returns the env entries that arm the hook on the code server
+// for workspace — POLY_LSP_HOOK and the state file — or nil if the hook could
+// not be written.
+func agentsHookEnv(workspace string) []string {
 	path, err := writeAgentsHook()
 	if err != nil {
 		return nil
 	}
-	return []string{"POLY_LSP_HOOK=" + filepath.Clean(path)}
+	env := []string{"POLY_LSP_HOOK=" + filepath.Clean(path)}
+	if state := agentsStateFile(workspace); state != "" {
+		env = append(env, "DUN_AGENTS_STATE="+state)
+	}
+	return env
+}
+
+// agentsStateFile is where the hook keeps what has been read for workspace,
+// or "" when its project cannot be registered (the hook then falls back to a
+// temp file — the guard still works, its memory just is not per-workspace).
+func agentsStateFile(workspace string) string {
+	p, err := EnsureProject(workspace)
+	if err != nil {
+		return ""
+	}
+	return p.AgentsReadFile()
 }

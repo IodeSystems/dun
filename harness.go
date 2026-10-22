@@ -1283,16 +1283,14 @@ func (h *Harness) addMountLocked(resolved, name, repoRoot string) error {
 		h.cfg.Exec = exec
 	}
 
-	// Create the symlink in the worktree parent directory.
-	if h.cfg.Worktree != nil && h.cfg.Worktree.IsRepo() {
-		wtParent := filepath.Join(repoRoot, ".dun", "worktrees")
-		link := filepath.Join(wtParent, name)
-		if _, err := os.Lstat(link); err != nil {
-			if err := os.MkdirAll(wtParent, 0755); err != nil {
-				return fmt.Errorf("create worktree parent: %w", err)
-			}
-			if err := os.Symlink(resolved, link); err != nil {
-				return fmt.Errorf("symlink %s: %w", name, err)
+	// Create the symlink in the worktree parent directory — only a session
+	// worktree's, in the project's state dir. Working in place, the parent is
+	// wherever the user keeps the repo; an old-layout worktree's parent is
+	// <repo>/.dun/worktrees/. dun writes in neither.
+	if wt := h.cfg.Worktree; wt != nil && wt.IsRepo() && wt.Branch != "" {
+		if p := ResolveProject(repoRoot); p != nil && filepath.Dir(wt.Path) == p.WorktreesDir() {
+			if err := linkMount(p.WorktreesDir(), MountSpec{Source: resolved, Name: name}); err != nil {
+				return err
 			}
 		}
 	}

@@ -208,8 +208,8 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if filepath.Dir(path) != filepath.Join(dir, DunDir) {
-			t.Errorf("wrote outside %s: %s", DunDir, path)
+		if p := ResolveProject(dir); p == nil || filepath.Dir(path) != p.StateDir {
+			t.Errorf("wrote outside the project state dir: %s", path)
 		}
 		got, err := LoadServers(dir, "/ws", "/raglit")
 		if err != nil {
@@ -220,7 +220,7 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 		}
 	}
 	// One entry, not one per call.
-	f, err := readServersFile(filepath.Join(dir, DunDir, LocalServersFile))
+	f, err := readServersFile(filepath.Join(ResolveProject(dir).StateDir, LocalServersFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,26 +229,33 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 	}
 }
 
-// The local file holds machine state and may hold secrets: writing it must
-// also make it uncommittable, or the first /rag auto leaves a trap.
-func TestSetAutostart_WritesGitignore(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := SetAutostart(dir, "docs", true); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(filepath.Join(dir, DunDir, ".gitignore"))
+// The local file holds machine state and may hold secrets. It goes to the
+// project's state dir, 0600, and NOTHING lands in the repo — it used to write
+// .dun/dun.local.json and a .gitignore there, which asked every repo dun
+// touched to carry dun's files.
+func TestSetAutostart_WritesProjectDirNotRepo(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	repo := pruneRepo(t)
+	path, err := SetAutostart(repo, "docs", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), LocalServersFile) {
-		t.Errorf(".gitignore does not cover %s: %q", LocalServersFile, b)
+	p := ResolveProject(repo)
+	if p == nil || path != filepath.Join(p.StateDir, LocalServersFile) {
+		t.Fatalf("wrote %s, want the project's %s", path, LocalServersFile)
 	}
-	st, err := os.Stat(filepath.Join(dir, DunDir, LocalServersFile))
+	st, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if st.Mode().Perm() != 0o600 {
 		t.Errorf("want 0600, got %v", st.Mode().Perm())
+	}
+	if _, err := os.Stat(filepath.Join(repo, DunDir)); !os.IsNotExist(err) {
+		t.Errorf("SetAutostart created %s in the repo", DunDir)
+	}
+	if out, _ := git("", "-C", repo, "status", "--porcelain"); strings.TrimSpace(out) != "" {
+		t.Errorf("the repo must stay clean, got:\n%s", out)
 	}
 }
 

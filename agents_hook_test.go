@@ -23,8 +23,15 @@ func runHook(t *testing.T, op, target string) (int, string) {
 	}
 	defer os.Remove(path)
 
+	// The state file dun would name for the workspace the target is in — as
+	// startServer does through agentsHookEnv.
+	ws := filepath.Dir(target)
+	if root := RepoRoot(ws); root != "" {
+		ws = root
+	}
 	cmd := exec.Command(path, op, target)
 	cmd.Dir = filepath.Dir(target)
+	cmd.Env = append(os.Environ(), "DUN_AGENTS_STATE="+agentsStateFile(ws))
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
@@ -216,10 +223,48 @@ func TestAgentsHook_StateFileIsPerWorkspace(t *testing.T) {
 		t.Errorf("workspace 1 should be unblocked after read: exit %d", code)
 	}
 
-	// Workspace 2 is still blocked (different .dun/agents_read).
+	// Workspace 2 is still blocked (a different project's agents_read).
 	code, _ = runHook(t, "read", filepath.Join(dir2, "main.go"))
 	if code != 2 {
 		t.Errorf("workspace 2 should still be blocked: exit %d", code)
+	}
+}
+
+// The guard's memory is dun's state, not the repo's: it lands in the project
+// dir under DUN_HOME, and the repo stays exactly as clean as it was. It used to
+// be $root/.dun/agents_read — an untracked file in every repo dun touched.
+func TestAgentsHook_StateLivesOutsideTheRepo(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := setupWorktree(t, map[string]string{
+		"AGENTS.md": "rules",
+		"main.go":   "package main",
+	})
+	runHook(t, "read", filepath.Join(dir, "AGENTS.md"))
+	if code, out := runHook(t, "read", filepath.Join(dir, "main.go")); code != 0 {
+		t.Fatalf("should be unblocked after read: exit %d, out: %s", code, out)
+	}
+	p := ResolveProject(dir)
+	if p == nil {
+		t.Fatal("the workspace should be registered")
+	}
+	b, err := os.ReadFile(p.AgentsReadFile())
+	if err != nil || !strings.Contains(string(b), "AGENTS.md") {
+		t.Errorf("state should be in %s: %q, %v", p.AgentsReadFile(), b, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, DunDir)); !os.IsNotExist(err) {
+		t.Errorf("the hook created %s in the repo", DunDir)
+	}
+	if out, _ := git("", "-C", dir, "status", "--porcelain"); strings.TrimSpace(out) != "" {
+		t.Errorf("the repo must stay clean, got:\n%s", out)
+	}
+}
+
+// The mtime read is portable: GNU stat is -c %Y, BSD stat (macOS) -f %m. A
+// script that only knew -c read every mtime as 0 on a Mac, so an edited
+// AGENTS.md never re-engaged the guard there.
+func TestAgentsHook_MtimeIsPortable(t *testing.T) {
+	if !strings.Contains(agentsHookScript, "stat -c %Y") || !strings.Contains(agentsHookScript, "stat -f %m") {
+		t.Error("the hook must read mtime with both GNU and BSD stat")
 	}
 }
 

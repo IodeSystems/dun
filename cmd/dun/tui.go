@@ -3420,13 +3420,18 @@ func init() {
 			return nil
 		}},
 		{"resume", "[id]", "switch to another saved session (bare opens the picker)", resumeSlash},
-		{"trace", "[on|off|file]", "record events+scroll to a file for debugging (default: trace.jsonl in workspace)", func(m *tuiModel, args []string) tea.Cmd {
+		{"trace", "[on|off|file]", "record events+scroll to a file for debugging (default: dun-trace.jsonl in the temp dir)", func(m *tuiModel, args []string) tea.Cmd {
 			if len(args) == 0 || args[0] == "on" {
-				path := "trace.jsonl"
+				// Not the workspace by default: dun writes nothing into a repo
+				// it was not asked to. A path given is the human's choice.
+				path := filepath.Join(os.TempDir(), "dun-trace.jsonl")
 				if len(args) >= 2 {
 					path = args[1]
+					if !filepath.IsAbs(path) {
+						path = filepath.Join(m.workspace, path)
+					}
 				}
-				f, err := os.OpenFile(filepath.Join(m.workspace, path), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+				f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 				if err != nil {
 					m.append(stErr.Render("trace: " + err.Error()))
 					return nil

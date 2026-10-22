@@ -327,7 +327,7 @@ func TestRunShipCmd_VerifyMode(t *testing.T) {
 	runGit(t, repo, "push", "-q", "-u", "origin", "HEAD")
 
 	// NewWorktree creates a git worktree on branch dun/<ts> from HEAD.
-	// The worktree lives inside repo/.dun/worktrees/ — commits made there
+	// The worktree lives in $DUN_HOME/projects/<id>/worktrees/ — commits made there
 	// are visible to the main repo immediately.
 	wt, isRepo, err := dun.NewWorktree(repo, nil)
 	if err != nil || !isRepo {

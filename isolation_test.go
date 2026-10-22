@@ -50,7 +50,7 @@ func TestWorktree_IsolatesChanges(t *testing.T) {
 	}
 }
 
-// A worktree lives under .dun/worktrees/, so a go.mod "replace => ../agentkit"
+// A worktree lives under $DUN_HOME/projects/<id>/worktrees/, so a go.mod "replace => ../agentkit"
 // only resolves from inside it through a symlink beside it. Without the
 // symlink the isolation is real and the first build in it fails on a
 // dependency that resolves fine in the checkout it was made from.

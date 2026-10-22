@@ -24,43 +24,57 @@ import (
 //
 //	dun.json        project-level, COMMITTED. "this project needs a db tool."
 //	                Belongs in version control because it describes the project.
-//	dun.local.json  machine-level, GITIGNORED. "on THIS box the binary is at
-//	                /opt/bin/x and the DSN is ...". Belongs to the machine, and
-//	                may hold secrets, so it is written 0600 and never committed.
+//	dun.local.json  machine-level. "on THIS box the binary is at /opt/bin/x and
+//	                the DSN is ...". Belongs to the machine, and may hold
+//	                secrets, so it lives in $DUN_HOME/projects/<id>/, 0600,
+//	                where nothing can commit it.
 //
 // Precedence matches what dun already documents for its LLM settings
 // (flag > env > file > default), extended down the middle:
 //
-//	built-in DefaultServers  <  dun.json  <  dun.local.json  <  Config.Servers (Go)
+//	built-in DefaultServers  <  $DUN_HOME/mcp.json  <  the repo's files
+//	  <  the project's state dir  <  the directory's overlay  <  Config.Servers (Go)
 //
 // Servers merge BY ID rather than replacing the list wholesale. Overriding one
 // binary's path should not require restating the other two — that is how a
 // config drifts out of sync with the defaults it silently forked.
 //
-// Both files are looked for in the workspace root AND in a .dun/ directory
-// beside it, .dun/ winning. New state dun writes itself (see SetAutostart) goes
-// to .dun/dun.local.json: per-workspace machine state belongs in one directory
-// rather than scattered dotfiles, and that directory is where per-session state
-// will live once one workspace runs several sessions.
+// dun never writes into a repo (see project.go). A repo's own files are READ —
+// in its root and in a .dun/ beside it, .dun/ winning — because a project may
+// commit them on purpose. A dun.local.json there is the older layout, from
+// before dun kept machine state in $DUN_HOME, and is still read. Everything dun
+// writes (see SetAutostart) goes to $DUN_HOME/projects/<id>/.
 const (
 	// ProjectServersFile is committed and describes the project.
 	ProjectServersFile = "dun.json"
-	// LocalServersFile is gitignored and describes this machine.
+	// LocalServersFile is machine state: never committed, written 0600.
 	LocalServersFile = "dun.local.json"
-	// DunDir is the per-workspace state directory.
+	// DunDir is the directory in a repo where a project MAY commit dun.json
+	// and skills/. dun reads it and never creates it.
 	DunDir = ".dun"
 )
 
 // serverConfigPaths lists the layered config files, LOWEST precedence first.
-// A missing file is skipped; the root-level pair is the pre-.dun/ layout and is
-// still honored so an existing checkout keeps working.
+// A missing file is skipped. It registers nothing: a directory dun has never
+// seen has no project state to read.
 func serverConfigPaths(dir string) []string {
-	return []string{
+	paths := []string{
 		filepath.Join(dir, ProjectServersFile),
 		filepath.Join(dir, DunDir, ProjectServersFile),
 		filepath.Join(dir, LocalServersFile),
 		filepath.Join(dir, DunDir, LocalServersFile),
 	}
+	if p := ResolveProject(dir); p != nil {
+		paths = append(paths,
+			filepath.Join(p.StateDir, ProjectServersFile),
+			filepath.Join(p.StateDir, LocalServersFile))
+		if p.OverlayDir != "" {
+			paths = append(paths,
+				filepath.Join(p.OverlayDir, ProjectServersFile),
+				filepath.Join(p.OverlayDir, LocalServersFile))
+		}
+	}
+	return paths
 }
 
 // ServerSpec is one MCP server as declared in a config file.
@@ -311,7 +325,8 @@ func LoadMounts(dir, repoRoot string) []MountSpec {
 
 // discoverGoModReplaces reads go.mod and extracts local replace directives as
 // MountSpecs. A replace like "github.com/iodesystems/agentkit -> ../agentkit"
-// becomes a mount with name "agentkit" and source "../agentkit".
+// becomes a mount with name "agentkit" and source "../agentkit". Both the
+// one-line form and a "replace ( … )" block are read.
 func discoverGoModReplaces(dir, repoRoot string) []MountSpec {
 	gomodPath := filepath.Join(repoRoot, "go.mod")
 	b, err := os.ReadFile(gomodPath)
@@ -319,32 +334,78 @@ func discoverGoModReplaces(dir, repoRoot string) []MountSpec {
 		return nil
 	}
 	var mounts []MountSpec
+	seen := map[string]bool{}
+	inBlock := false
 	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "replace ") {
-			continue
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
 		}
+		line = strings.TrimSpace(line)
 		// Format: replace module/path => ../local/path
 		// or:     replace module/path v1.2.3 => ../local/path
-		rest := strings.TrimPrefix(line, "replace ")
-		arrow := "=>"
-		parts := strings.SplitN(rest, arrow, 2)
+		// or a block of the same lines without the keyword.
+		var rest string
+		switch {
+		case inBlock && line == ")":
+			inBlock = false
+			continue
+		case inBlock:
+			rest = line
+		case strings.HasPrefix(line, "replace") && strings.TrimSpace(strings.TrimPrefix(line, "replace")) == "(":
+			inBlock = true
+			continue
+		case strings.HasPrefix(line, "replace "):
+			rest = strings.TrimPrefix(line, "replace ")
+		default:
+			continue
+		}
+		parts := strings.SplitN(rest, "=>", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		target := strings.TrimSpace(parts[1])
-		// Skip non-local replaces (e.g. => other/module v1.0)
-		if !strings.HasPrefix(target, ".") && !strings.HasPrefix(target, "/") {
+		m, ok := replaceMount(strings.Trim(strings.TrimSpace(parts[1]), `"`))
+		if !ok || seen[m.Name] {
 			continue
 		}
-		// Derive name from the target path's basename.
-		name := filepath.Base(target)
-		if name == "" || name == "." || name == ".." {
-			continue
-		}
-		mounts = append(mounts, MountSpec{Source: target, Name: name})
+		seen[m.Name] = true
+		mounts = append(mounts, m)
 	}
 	return mounts
+}
+
+// replaceMount is what a replace target needs beside a worktree to resolve
+// from inside it, and ok=false when it needs nothing.
+//
+// A session worktree is a CHECKOUT somewhere else, so "../x" from it is not the
+// repo's sibling. The symlink goes in the worktree's parent under the FIRST
+// path component past the "..": "../x/sub" needs <parent>/x, not <parent>/sub,
+// for x/sub to exist under it. A target inside the repo ("./tools") needs
+// nothing: the worktree has its own copy. Non-local targets (another module
+// path and a version) are not paths at all.
+//
+// "../../x" climbs past the worktree's parent, where no symlink beside the
+// worktree can reach. It still yields a mount: Docker mounts it at /x, and
+// /work/../../x is /x. On the host it does not resolve (not handled yet).
+func replaceMount(target string) (MountSpec, bool) {
+	if filepath.IsAbs(target) {
+		name := filepath.Base(target)
+		if name == "" || name == "." || name == string(os.PathSeparator) {
+			return MountSpec{}, false
+		}
+		return MountSpec{Source: target, Name: name}, true
+	}
+	if !strings.HasPrefix(target, ".") {
+		return MountSpec{}, false
+	}
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(target)), "/")
+	up := 0
+	for up < len(parts) && parts[up] == ".." {
+		up++
+	}
+	if up == 0 || up == len(parts) {
+		return MountSpec{}, false // inside the repo, or a bare "../.." with no name
+	}
+	return MountSpec{Source: strings.Join(parts[:up+1], "/"), Name: parts[up]}, true
 }
 
 // mergeSpec layers next over prev field by field. An omitted field INHERITS
@@ -503,25 +564,22 @@ func readServersFile(path string) (*ServersFile, error) {
 	return &f, nil
 }
 
-// SetAutostart persists whether a server spawns at startup, in
-// dir/.dun/dun.local.json. Returns the file it wrote.
+// SetAutostart persists whether a server spawns at startup, in dir's state
+// directory: $DUN_HOME/projects/<id>/dun.local.json, or dir's overlay when dir
+// is a linked worktree. Returns the file it wrote.
 //
 // Machine state, not project state: whether raglit is installed and worth
-// spawning here is a fact about this box. The .dun directory is created 0700
-// and given a .gitignore covering the local file, so turning a server on never
-// leaves something to accidentally commit.
+// spawning here is a fact about this box. It used to go to dir/.dun/ with a
+// .gitignore beside it — a write into a repo that is not dun's to change.
 func SetAutostart(dir, id string, on bool) (string, error) {
 	if id == "" {
 		return "", fmt.Errorf("dun: SetAutostart: empty server id")
 	}
-	dunDir := filepath.Join(dir, DunDir)
-	if err := os.MkdirAll(dunDir, 0o700); err != nil {
-		return "", fmt.Errorf("dun: create %s: %w", dunDir, err)
-	}
-	if err := ensureDunGitignore(dunDir); err != nil {
+	p, err := EnsureProject(dir)
+	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(dunDir, LocalServersFile)
+	path := filepath.Join(p.WriteDir(), LocalServersFile)
 	f, err := readServersFile(path)
 	if err != nil {
 		return "", err
@@ -544,34 +602,10 @@ func SetAutostart(dir, id string, on bool) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("dun: encode %s: %w", path, err)
 	}
-	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
-		return "", fmt.Errorf("dun: write %s: %w", path, err)
+	if err := writeFileAtomic(path, append(b, '\n'), 0o600); err != nil {
+		return "", err
 	}
 	return path, nil
-}
-
-// ensureDunGitignore keeps the machine-local file out of git. It ignores the
-// local file by name rather than the whole directory, so a committed
-// .dun/dun.json remains possible.
-func ensureDunGitignore(dunDir string) error {
-	path := filepath.Join(dunDir, ".gitignore")
-	b, err := os.ReadFile(path)
-	if err == nil {
-		for _, line := range strings.Split(string(b), "\n") {
-			if strings.TrimSpace(line) == LocalServersFile {
-				return nil
-			}
-		}
-		body := string(b)
-		if !strings.HasSuffix(body, "\n") {
-			body += "\n"
-		}
-		return os.WriteFile(path, []byte(body+LocalServersFile+"\n"), 0o644)
-	}
-	if !os.IsNotExist(err) {
-		return fmt.Errorf("dun: read %s: %w", path, err)
-	}
-	return os.WriteFile(path, []byte(LocalServersFile+"\n"), 0o644)
 }
 
 // ServerIDs lists the resolved ids, for logs and diagnostics.

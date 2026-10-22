@@ -190,7 +190,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// Arm the AGENTS.md guard on the code server: a file-access hook that
 	// cancels reads/edits until the model has seen the project's rules.
 	if s.ID == ServerCode {
-		if hookEnv := agentsHookEnv(); hookEnv != nil {
+		if hookEnv := agentsHookEnv(h.cfg.Workspace); hookEnv != nil {
 			env = append(env, hookEnv...)
 		}
 	}

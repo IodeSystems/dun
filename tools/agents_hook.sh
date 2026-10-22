@@ -15,8 +15,8 @@
 #
 # Policy: cancel (exit 2, stdout = note) when an AGENTS.md sits in the target's
 # directory chain (up to the nearest .git) AND has not already been read this
-# session. Reading the AGENTS.md marks it read (state file at $root/.dun/
-# agents_read, keyed by path+mtime). A changed AGENTS.md re-engages the guard.
+# session. Reading the AGENTS.md marks it read (state file $DUN_AGENTS_STATE,
+# keyed by path+mtime). A changed AGENTS.md re-engages the guard.
 
 #!/usr/bin/env bash
 set -euo pipefail
@@ -33,13 +33,18 @@ done
 [[ -z "$root" ]] && exit 0
 
 # The state file tracks which AGENTS.md files have been read in this session.
-state="$root/.dun/agents_read"
+# dun passes it in DUN_AGENTS_STATE ($DUN_HOME/projects/<id>/…/agents_read) —
+# never a file in the repo. Run by hand without it: a per-user temp file.
+state="${DUN_AGENTS_STATE:-${TMPDIR:-/tmp}/dun-agents-read-$(id -u)}"
+
+# mtime: GNU stat (Linux) spells it -c %Y, BSD stat (macOS) -f %m.
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 
 # is_read: returns 0 if the given AGENTS.md path+mtime is in the state file.
 is_read() {
   local p="$1"
   local mt
-  mt="$(stat -c %Y "$p" 2>/dev/null || echo 0)"
+  mt="$(mtime "$p")"
   [[ -f "$state" ]] || return 1
   grep -qxF "$p $mt" "$state" 2>/dev/null
 }
@@ -48,7 +53,7 @@ is_read() {
 mark_read() {
   local p="$1"
   local mt
-  mt="$(stat -c %Y "$p" 2>/dev/null || echo 0)"
+  mt="$(mtime "$p")"
   mkdir -p "$(dirname "$state")" 2>/dev/null
   echo "$p $mt" >> "$state"
 }

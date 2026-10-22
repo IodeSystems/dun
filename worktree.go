@@ -71,22 +71,9 @@ func NewWorktree(repoDir string, mounts []MountSpec) (wt *Worktree, isRepo bool,
 	// Remember what branch we're on — this is the base the worktree branches from.
 	baseBranch, _ := git("", "-C", root, "rev-parse", "--abbrev-ref", "HEAD")
 	baseBranch = strings.TrimSpace(baseBranch)
-	// Create worktrees under .dun/worktrees/ so the go.mod replace directive
-	// ("replace => ../agentkit") resolves via the symlink at
-	// .dun/worktrees/agentkit → ../../../agentkit. This keeps every session's
-	// files inside the repo tree — no /tmp/ orphans.
-	wtParent := filepath.Join(root, ".dun", "worktrees")
-	if err := os.MkdirAll(wtParent, 0755); err != nil {
-		return nil, false, fmt.Errorf("dun: mkdir worktrees: %w", err)
-	}
-	// Create symlinks for each mount (idempotent).
-	for _, m := range mounts {
-		link := filepath.Join(wtParent, m.Name)
-		if _, err := os.Lstat(link); err != nil {
-			if err := os.Symlink(m.Source, link); err != nil {
-				return nil, false, fmt.Errorf("dun: symlink %s: %w", m.Name, err)
-			}
-		}
+	wtParent, err := worktreeParent(root, mounts)
+	if err != nil {
+		return nil, false, err
 	}
 	dir, err := os.MkdirTemp(wtParent, "dun-worktree-")
 	if err != nil {
@@ -98,6 +85,46 @@ func NewWorktree(repoDir string, mounts []MountSpec) (wt *Worktree, isRepo bool,
 		return nil, false, fmt.Errorf("dun: git worktree add: %w", err)
 	}
 	return &Worktree{Path: dir, Branch: branch, BaseBranch: baseBranch, repoRoot: root, Mounts: mounts}, true, nil
+}
+
+// worktreeParent is the directory new session worktrees of root go in —
+// $DUN_HOME/projects/<id>/worktrees/, never inside the repo — with a symlink
+// per mount beside them (idempotent).
+//
+// The symlinks are what make a go.mod "replace => ../agentkit" resolve: from
+// <parent>/dun-worktree-x, ../agentkit is <parent>/agentkit, which points at
+// the real sibling. The go.mod itself is never rewritten — a rewritten go.mod
+// is a dirty tracked file one `git add -A` away from being committed.
+//
+// Worktrees used to live in <repo>/.dun/worktrees/; ones already there are
+// still found (ScanWorktrees) and reused (ReuseWorktree), never moved.
+func worktreeParent(root string, mounts []MountSpec) (string, error) {
+	p, err := EnsureProject(root)
+	if err != nil {
+		return "", err
+	}
+	wtParent := p.WorktreesDir()
+	if err := os.MkdirAll(wtParent, 0o755); err != nil {
+		return "", fmt.Errorf("dun: mkdir worktrees: %w", err)
+	}
+	for _, m := range mounts {
+		if err := linkMount(wtParent, m); err != nil {
+			return "", err
+		}
+	}
+	return wtParent, nil
+}
+
+// linkMount puts m's symlink in wtParent unless something is already there.
+func linkMount(wtParent string, m MountSpec) error {
+	link := filepath.Join(wtParent, m.Name)
+	if _, err := os.Lstat(link); err == nil {
+		return nil
+	}
+	if err := os.Symlink(m.Source, link); err != nil {
+		return fmt.Errorf("dun: symlink %s: %w", m.Name, err)
+	}
+	return nil
 }
 
 // Diff returns the worktree's changes vs its base (tracked + a list of untracked
@@ -424,7 +451,8 @@ func git(dir string, args ...string) (string, error) {
 // directory still exists and is valid, it returns it directly. If the directory
 // was cleaned up but the branch still exists, it creates a new worktree from
 // that branch (preserving the commits). Falls back to NewWorktree if neither
-// works.
+// works. A worktree in the old in-repo location (<repo>/.dun/worktrees/) is
+// reused where it is; anything created is created in the project's state dir.
 func ReuseWorktree(repoDir string, oldPath, oldBranch string, mounts []MountSpec) (wt *Worktree, isRepo bool, err error) {
 	top, terr := git("", "-C", repoDir, "rev-parse", "--show-toplevel")
 	if terr != nil {
@@ -448,13 +476,9 @@ func ReuseWorktree(repoDir string, oldPath, oldBranch string, mounts []MountSpec
 	if oldBranch != "" {
 		out, err := git("", "-C", root, "rev-parse", "--verify", oldBranch)
 		if err == nil && strings.TrimSpace(out) != "" {
-			wtParent := filepath.Join(root, ".dun", "worktrees")
-			os.MkdirAll(wtParent, 0755)
-			for _, m := range mounts {
-				link := filepath.Join(wtParent, m.Name)
-				if _, err := os.Lstat(link); err != nil {
-					os.Symlink(m.Source, link)
-				}
+			wtParent, err := worktreeParent(root, mounts)
+			if err != nil {
+				return nil, false, err
 			}
 			dir, err := os.MkdirTemp(wtParent, "dun-worktree-")
 			if err != nil {

@@ -542,10 +542,11 @@ func runWorktreeCmd(ctx context.Context, h *dun.Harness, action string) string {
 		// Create a new worktree. NewWorktree resolves the repo root itself.
 		//
 		// The mounts are the session's, not nil. A worktree lives under
-		// .dun/worktrees/, so a go.mod "replace => ../agentkit" resolves through
-		// a symlink NewWorktree puts beside it — and passing nil here meant a
-		// worktree made with /worktree new had no such symlink, so the first
-		// build inside it failed on a dependency that resolves fine at startup.
+		// $DUN_HOME/projects/<id>/worktrees/, so a go.mod "replace =>
+		// ../agentkit" resolves through a symlink NewWorktree puts beside it —
+		// and passing nil here meant a worktree made with /worktree new had no
+		// such symlink, so the first build inside it failed on a dependency
+		// that resolves fine at startup.
 		// Same list Docker mounts, so both isolation tiers see one set of paths.
 		newWt, isRepo, err := dun.NewWorktree(h.Workspace(), h.Mounts())
 		if err != nil {

@@ -44,7 +44,16 @@ const liveGrace = time.Hour
 // artifactPaths are files a tool wrote into the worktree that are not the
 // agent's work. They are ignored when deciding whether a tree holds anything:
 // an index cache is not a reason to keep a gigabyte.
-var artifactPaths = []string{".dun/", ".poly-lsp-mcp/"}
+//
+// Only TRACKED paths reach this check (untracked ones are never work), so it
+// matters when a repo once committed one of these by accident. The .dun/
+// entries are what an older dun wrote there; dun writes none of them now.
+// .dun/ as a whole is NOT an artifact: a project may commit .dun/dun.json or
+// .dun/skills/, and an edit to those is work.
+var artifactPaths = []string{
+	".dun/agents_read", ".dun/dun.local.json", ".dun/.gitignore", ".dun/worktrees/",
+	".poly-lsp-mcp/", // poly-lsp-mcp's index cache; it has no flag to put it elsewhere
+}
 
 // WorktreeInfo is one session worktree and what it is holding.
 type WorktreeInfo struct {
@@ -109,12 +118,12 @@ func ScanWorktrees(repoRoot string) []WorktreeInfo {
 	if err != nil {
 		return nil
 	}
-	ours := filepath.Join(repoRoot, ".dun", "worktrees") + string(os.PathSeparator)
+	ours := sessionWorktreeDirs(repoRoot)
 
 	var list []WorktreeInfo
 	var cur WorktreeInfo
 	flush := func() {
-		if cur.Path != "" && strings.HasPrefix(cur.Path, ours) {
+		if cur.Path != "" && underAny(cur.Path, ours) {
 			list = append(list, cur)
 		}
 		cur = WorktreeInfo{}
@@ -135,6 +144,48 @@ func ScanWorktrees(repoRoot string) []WorktreeInfo {
 	}
 	sort.Slice(list, func(a, b int) bool { return list[a].Path < list[b].Path })
 	return list
+}
+
+// sessionWorktreeDirs are the directories dun creates session worktrees of
+// repoRoot in: the project's state dir now, and <repo>/.dun/worktrees/ — the
+// old layout, still read so trees made before the move are listed, resumed and
+// pruned. The legacy dir is checked for the repo's main worktree too, since
+// repoRoot may be a linked worktree of it.
+func sessionWorktreeDirs(repoRoot string) []string {
+	source, top := projectRoots(repoRoot)
+	dirs := []string{filepath.Join(repoRoot, DunDir, "worktrees"), filepath.Join(top, DunDir, "worktrees")}
+	if source != top {
+		dirs = append(dirs, filepath.Join(source, DunDir, "worktrees"))
+	}
+	if p := ResolveProject(repoRoot); p != nil {
+		dirs = append(dirs, p.WorktreesDir())
+	}
+	var out []string
+	for _, d := range dirs {
+		out = append(out, d+string(os.PathSeparator))
+		if r := realPath(d); r != d {
+			out = append(out, r+string(os.PathSeparator))
+		}
+	}
+	return out
+}
+
+// underAny reports whether path is below one of the dirs (each ending in a
+// separator). A path is compared both as git printed it and resolved: git
+// may hold /var/… where the dir was resolved to /private/var/….
+func underAny(path string, dirs []string) bool {
+	candidates := []string{path}
+	if r := realPath(path); r != path {
+		candidates = append(candidates, r)
+	}
+	for _, c := range candidates {
+		for _, d := range dirs {
+			if strings.HasPrefix(c, d) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // fill measures one worktree: what it holds, how old it is, how big.
@@ -258,9 +309,11 @@ func PruneWorktrees(repoRoot, keep string) PruneResult {
 		case w.HoldsWork():
 			res.Abandoned = append(res.Abandoned, w)
 		default:
+			overlay := overlayFor(repoRoot, w.Path) // before the tree is gone: it resolves the path
 			if _, err := git("", "-C", repoRoot, "worktree", "remove", "--force", w.Path); err != nil {
 				continue
 			}
+			dropOverlay(overlay)
 			// The BRANCH goes with it. Keeping a branch whose tree held nothing
 			// just moves the clutter somewhere less visible.
 			if w.Branch != "" {
@@ -284,14 +337,34 @@ func RemoveWorktree(repoRoot, path, branch string) error {
 	if repoRoot == "" || path == "" {
 		return nil
 	}
+	overlay := overlayFor(repoRoot, path)
 	if out, err := git("", "-C", repoRoot, "worktree", "remove", "--force", path); err != nil {
 		return fmt.Errorf("worktree remove: %s", strings.TrimSpace(out))
 	}
+	dropOverlay(overlay)
 	if branch != "" {
 		_, _ = git("", "-C", repoRoot, "branch", "-D", branch)
 	}
 	dropIndexFor(repoRoot, path, branch)
 	return nil
+}
+
+// overlayFor is the state overlay dun keeps for worktree path (see project.go),
+// or "" when its project is unknown. Only the state dun wrote for that one
+// directory is in it — the AGENTS.md guard's memory, a /rag auto made there —
+// and the directory is about to stop existing.
+func overlayFor(repoRoot, path string) string {
+	p := ResolveProject(repoRoot)
+	if p == nil {
+		return ""
+	}
+	return overlayDir(p.StateDir, realPath(path))
+}
+
+func dropOverlay(dir string) {
+	if dir != "" {
+		_ = os.RemoveAll(dir)
+	}
 }
 
 // dropIndexFor removes the raglit index that belonged to a worktree.
