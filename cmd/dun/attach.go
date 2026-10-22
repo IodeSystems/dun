@@ -270,12 +270,17 @@ func (a *attachConn) call(sc *bufio.Scanner, session string, payload any) (proto
 			}
 			return ev, nil
 		}
+		// An error answering no command is dund saying why it is about to
+		// hang up (e.g. it cannot tell who is connecting).
+		if ack, ok := ev.Payload.(*proto.Ack); ok && ev.Re == "" && ack.Error != "" {
+			return ev, errors.New(ack.Error)
+		}
 		a.early = append(a.early, append([]byte(nil), sc.Bytes()...))
 	}
 	if err := sc.Err(); err != nil {
 		return proto.Event{}, err
 	}
-	return proto.Event{}, errors.New("dund closed the connection")
+	return proto.Event{}, errors.New("dund closed the connection (if it crashed, the reason is in " + dundLog() + ")")
 }
 
 // restartWith asks the service to restart this session's engine with new

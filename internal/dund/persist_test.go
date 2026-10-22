@@ -3,6 +3,7 @@ package dund
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/iodesystems/dun/proto"
 )
@@ -112,4 +113,27 @@ func TestLeaveStopsUnlessPersistOrAttached(t *testing.T) {
 		t.Fatalf("not stopped: %v %v", err, running())
 	}
 	_ = proto.Version
+}
+
+// An empty session nobody follows is stopped and forgotten after emptyStop;
+// one with messages waits for the full idle stop.
+func TestReap_EmptySessionGoesAfterEmptyStop(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	empty, _ := svc.Create(alice, t.TempDir(), nil, "")
+	asked, _ := svc.Create(alice, t.TempDir(), nil, "")
+	if empty == asked {
+		t.Skip("same-second ids")
+	}
+	setAsked(t, empty, false)
+	for _, id := range []string{empty, asked} {
+		ses, _ := svc.Get(alice, id)
+		ses.actMu.Lock()
+		ses.lastActive = time.Now().Add(-emptyStop - time.Minute)
+		ses.actMu.Unlock()
+	}
+	svc.reapOnce()
+	ls := svc.List(alice)
+	if len(ls) != 1 || ls[0].ID != asked || !ls[0].Running {
+		t.Fatalf("after the sweep: %+v", ls)
+	}
 }

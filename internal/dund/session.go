@@ -33,6 +33,8 @@ var (
 	// keeps running. Stopping it loses nothing: the next command or
 	// subscribe starts it again on the same conversation.
 	idleStop = 30 * time.Minute
+	// emptyStop is the idle stop for a session nothing was asked in.
+	emptyStop = 10 * time.Minute
 )
 
 // session is one conversation: its engine, its event log, who may see it.

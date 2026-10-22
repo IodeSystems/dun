@@ -430,6 +430,17 @@ func PruneSessions(root, repoRoot, except string) []string {
 			removed = append(removed, id)
 		}
 	}
+	// Written to but never asked anything — a dun opened and left, whose
+	// transcript holds only notices: nothing to resume (USER 2026-10-22).
+	// The same ten minutes, by modification time, keep a live one; a session
+	// that cannot be read is kept, since it is exactly the one to look at.
+	for _, id := range unaskedSessionIDs(root, time.Now().Add(-10*time.Minute)) {
+		if id == except {
+			continue
+		}
+		ForgetSession(root, id)
+		removed = append(removed, id)
+	}
 	ids := ListSessions(root) // newest first
 	if len(ids) <= keepSessions {
 		return removed
@@ -455,6 +466,23 @@ func PruneSessions(root, repoRoot, except string) []string {
 		removed = append(removed, id)
 	}
 	return removed
+}
+
+// unaskedSessionIDs lists sessions with entries but no user message, last
+// modified before cutoff.
+func unaskedSessionIDs(root string, cutoff time.Time) []string {
+	var out []string
+	for _, id := range ListSessions(root) {
+		path := SessionFile(root, id)
+		st, err := os.Stat(path)
+		if err != nil || !st.ModTime().Before(cutoff) {
+			continue
+		}
+		if entries, preview, unreadable := scanSession(path); entries > 0 && preview == "" && !unreadable {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // ForgetSession removes one session outright — transcript, children, metadata —

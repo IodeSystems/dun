@@ -3,6 +3,7 @@ package dund
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -144,4 +145,22 @@ func TestServerOverAUnixSocket(t *testing.T) {
 
 func ackOrType(cid, typ string) func(proto.Event) bool {
 	return func(ev proto.Event) bool { return ev.Re == cid && (ev.Type == "ack" || ev.Type == typ) }
+}
+
+// A connection whose peer cannot be identified is refused with a reason the
+// client can show, not closed silently.
+func TestServerRefusalSaysWhy(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	sock := filepath.Join(t.TempDir(), "dund.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go NewServer(svc, func(net.Conn) (string, error) { return "", errors.New("no peer credentials") }).Serve(ln)
+	c := dial(t, sock)
+	ev := c.until(typed("ack"))
+	if p := ev.Payload.(*proto.Ack); !strings.Contains(p.Error, "cannot tell who is connecting: no peer credentials") {
+		t.Fatalf("refusal: %+v", p)
+	}
 }

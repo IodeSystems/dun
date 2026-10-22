@@ -270,3 +270,34 @@ func TestIndexNameFor_SurvivesTheTreeItNames(t *testing.T) {
 		}
 	}
 }
+
+// A session with entries but no user message, old enough not to be live, is
+// removed with its sidecars; a fresh one, an asked one, the live one and an
+// unreadable one are kept.
+func TestPruneSessions_RemovesUnaskedSessions(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	old := time.Now().Add(-time.Hour)
+	write := func(id, body string, age time.Time) {
+		p := filepath.Join(dir, id+".jsonl")
+		os.WriteFile(p, []byte(body), 0o644)
+		os.Chtimes(p, age, age)
+	}
+	notice := `{"Kind":"notification","Content":"ready"}` + "\n"
+	write("20261022-100000", notice, old)                                    // unasked, old: removed
+	write("20261022-100000.sub1", notice, old)                               // its sidecar goes with it
+	write("20261022-100001", `{"Kind":"user","Content":"fix it"}`+"\n", old) // asked: kept
+	write("20261022-100002", notice, time.Now())                             // unasked but fresh: kept
+	write("20261022-100003", notice, old)                                    // the live one: kept
+	write("20261022-100004", "not json\n", old)                              // unreadable: kept
+
+	removed := PruneSessions(ws, ws, "20261022-100003")
+	if strings.Join(removed, ",") != "20261022-100000" {
+		t.Fatalf("removed %v", removed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20261022-100000.sub1.jsonl")); !os.IsNotExist(err) {
+		t.Error("the sidecar was left behind")
+	}
+}

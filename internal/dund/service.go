@@ -92,19 +92,37 @@ func (s *Service) reapIdle() {
 			return
 		case <-t.C:
 		}
-		s.mu.Lock()
-		var idle []*session
-		for _, ses := range s.sessions {
-			if !ses.persists() && ses.idle(idleStop) {
-				idle = append(idle, ses)
-			}
+		s.reapOnce()
+	}
+}
+
+// reapOnce stops the engines that have sat idle long enough: idleStop for
+// any session, emptyStop for one nothing was asked in (which is then
+// forgotten).
+func (s *Service) reapOnce() {
+	type stop struct {
+		ses *session
+		why string
+	}
+	s.mu.Lock()
+	var idle []stop
+	for _, ses := range s.sessions {
+		switch {
+		case ses.persists():
+		case ses.idle(idleStop):
+			idle = append(idle, stop{ses, "idle for " + idleStop.String()})
+		// Nothing ever asked in it and nobody watching: a dun opened and
+		// left (ctrl+c only detaches). It goes sooner than the idle stop,
+		// so they do not pile up (USER 2026-10-22).
+		case ses.idle(emptyStop) && !ses.hasMessages():
+			idle = append(idle, stop{ses, "nothing asked in " + emptyStop.String()})
 		}
-		s.mu.Unlock()
-		for _, ses := range idle {
-			ses.log.Append(proto.NewEvent(&proto.EngineState{State: "stopping", Reason: "idle for " + idleStop.String()}))
-			ses.stop()
-			s.dropIfEmpty(ses)
-		}
+	}
+	s.mu.Unlock()
+	for _, st := range idle {
+		st.ses.log.Append(proto.NewEvent(&proto.EngineState{State: "stopping", Reason: st.why}))
+		st.ses.stop()
+		s.dropIfEmpty(st.ses)
 	}
 }
 

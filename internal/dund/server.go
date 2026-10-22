@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"sync"
@@ -68,6 +69,12 @@ func (s *Server) Serve(ln net.Listener) error {
 		}
 		who, err := s.principal(c)
 		if err != nil {
+			// Said, not just done: a silent close reads at the client as "dund
+			// closed the connection", which names nothing to fix.
+			log.Printf("dund: refused a connection: cannot tell who it is: %v", err)
+			ev := proto.NewEvent(&proto.Ack{Error: "dund cannot tell who is connecting: " + err.Error()})
+			_ = c.SetWriteDeadline(time.Now().Add(time.Second))
+			_ = json.NewEncoder(c).Encode(ev)
 			_ = c.Close()
 			continue
 		}
