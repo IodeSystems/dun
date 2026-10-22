@@ -687,7 +687,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spin.Tick, m.input.BlinkTick(), waitForDump(m.dumpSig), waitReload(m.lc)}
 	if m.proc != nil {
-		cmds = append(cmds, waitEvent(m.proc.ch))
+		cmds = append(cmds, waitEvent(m.proc))
 	} else {
 		// The first engine never started. Come up anyway and keep trying —
 		// a TUI that refuses to open cannot even show you the error.
@@ -1309,10 +1309,22 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.writeDump()
 		return m, waitForDump(m.dumpSig) // re-arm for the next signal
 
+	case procMsg:
+		if msg.p != m.proc {
+			// A connection this TUI has moved on from: none of its events are
+			// this conversation's. Keep draining it, so its reader can finish,
+			// until it ends.
+			if _, end := msg.msg.(eofMsg); end {
+				return m, nil
+			}
+			return m, waitEvent(msg.p)
+		}
+		return m.update(msg.msg)
+
 	case evMsg:
 		m.traceEvent(msg)
 		nm := m.handleEvent(msg)
-		cmds := []tea.Cmd{waitEvent(nm.proc.ch)}
+		cmds := []tea.Cmd{waitEvent(nm.proc)}
 		if nm.renderDue && !nm.tickPending {
 			nm.tickPending = true
 			cmds = append(cmds, renderTick())
@@ -1399,7 +1411,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startingStart = time.Now()
 		}
 		m.refresh()
-		return m, waitEvent(m.proc.ch)
+		return m, waitEvent(m.proc)
 
 	case retryEngineMsg:
 		return m, restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
@@ -4519,9 +4531,29 @@ func (p *dunProc) seen() resumeAt {
 // seen is the last session event this TUI has shown.
 func (m tuiModel) seen() resumeAt { return m.proc.seen() }
 
-// waitEvent blocks for the next engine event and delivers it as a tea.Msg.
-func waitEvent(ch chan tea.Msg) tea.Cmd {
-	return func() tea.Msg { return <-ch }
+// waitEvent blocks for p's next event and delivers it tagged with p.
+//
+// The tag is what keeps ONE reader per connection. Every event re-arms the
+// wait, and it used to re-arm on whatever m.proc was by then — so an event
+// from a connection being replaced (a /reconnect, a session or model switch
+// while it was still delivering) armed a SECOND reader on the new one. Two
+// goroutines then took turns at one channel and Bubble Tea delivered their
+// messages in whatever order they finished: streamed tokens arrived
+// shuffled, and the reply was stored that way ("hasYour capture", inline
+// code moved across words). Now an event says which connection it came
+// from: the current one re-arms itself, an old one is drained to its end and
+// ignored.
+func waitEvent(p *dunProc) tea.Cmd {
+	if p == nil || p.ch == nil {
+		return nil
+	}
+	return func() tea.Msg { return procMsg{p: p, msg: <-p.ch} }
+}
+
+// procMsg is a message from one engine connection.
+type procMsg struct {
+	p   *dunProc
+	msg tea.Msg
 }
 
 // ── frame pacing ───────────────────────────────────────────────────
