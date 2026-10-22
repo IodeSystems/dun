@@ -75,3 +75,27 @@ func TestProtoCoversTUICommands(t *testing.T) {
 		t.Errorf("agent: %+v", a)
 	}
 }
+
+// Reasoning goes out as its own event, decodes strictly, and the TUI reads
+// the wire shape it was sent in.
+func TestReasoningEventReachesTheTUI(t *testing.T) {
+	var buf bytes.Buffer
+	em := &emitter{w: &buf}
+	em.emit(&proto.Reasoning{Text: "weighing it"})
+	evs := decodeStrict[proto.Event](t, buf.Bytes())
+	if len(evs) != 1 || evs[0].Type != "reasoning" {
+		t.Fatalf("got %+v", evs)
+	}
+	if r := evs[0].Payload.(*proto.Reasoning); r.Text != "weighing it" {
+		t.Errorf("reasoning: %+v", r)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &raw); err != nil {
+		t.Fatal(err)
+	}
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = m.handleEvent(evMsg(raw))
+	if i := m.liveThinking(); i < 0 || m.convo[i].think.text != "weighing it" {
+		t.Errorf("the TUI did not take the event: %d", i)
+	}
+}

@@ -247,10 +247,11 @@ func (s viewState) Next() viewState {
 type convoEntry struct {
 	collapsed string
 	full      string
-	raw       string     // unstyled tool output (empty for non-tool blocks)
-	state     viewState  // minimized | expanded | raw
-	docs      *docsBlock // proactive-RAG summary (nil for normal blocks)
-	tool      *toolBlock // tool call/result (nil for normal blocks) → enter opens the inspector
+	raw       string      // unstyled tool output (empty for non-tool blocks)
+	state     viewState   // minimized | expanded | raw
+	docs      *docsBlock  // proactive-RAG summary (nil for normal blocks)
+	tool      *toolBlock  // tool call/result (nil for normal blocks) → enter opens the inspector
+	think     *thinkBlock // a round's reasoning (thinking.go) → enter opens the pager
 	// provisional marks a message that was typed mid-turn and is queued for
 	// delivery. It appears in the conversation with a dimmed style so the user
 	// knows it landed but hasn't been delivered to the model yet. When the turn
@@ -584,6 +585,8 @@ type tuiModel struct {
 	frame        frame           // the last computed layout snapshot — the single geometry truth
 	inspecting   bool            // the tool inspector overlay is open (owns all keys)
 	insp         inspector       // the overlay (valid while inspecting)
+	paging       bool            // the pager has the convo pane (pager.go; owns the keys)
+	pg           pager           // the pager (valid while paging)
 	dumpSig      chan os.Signal  // SIGUSR1 → dump the rendered screen to a debug file
 	paletteSel   int             // highlighted row in the "/" command palette
 	model, url   string          // this session's LLM settings (for /config)
@@ -799,6 +802,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.applyScroll(selMode)
 			}
 		}
+		// The block being paged may have grown, and the pane may have moved.
+		t.syncPager()
 		nm = t
 	}
 	return nm, cmd
@@ -861,6 +866,15 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			open, cmd := m.insp.update(msg)
 			m.inspecting = open
 			return m, cmd
+		}
+		// So does the pager, all but ctrl+c: it reads one block in the convo
+		// pane's place, and esc brings the conversation back.
+		if m.paging && msg.String() != "ctrl+c" {
+			if !m.pg.key(msg.String()) {
+				m.paging = false
+				m.refresh()
+			}
+			return m, nil
 		}
 		// Answering an ask_user is a mode of its own (select an option, add a
 		// detail, or type a custom/chat answer) — it owns the keys.
@@ -979,6 +993,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						d.docs[d.cur].open = !d.docs[d.cur].open
 						m.refresh()
 					}
+					return m, nil
+				}
+				// Thinking (and anything else with a page) opens in the pager.
+				if m.openPager(m.sel) {
 					return m, nil
 				}
 				// A tool call opens the scrollable/searchable inspector overlay.
@@ -1335,6 +1353,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, restartEngine(m.opts, m.sessionID, m.everUp, m.seenSeq())
 
 	case tea.MouseMsg:
+		if m.paging {
+			m.pg.mouse(msg)
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg) // wheel scrolls the conversation viewport
 		m.updateScrollPin()
@@ -1870,12 +1892,26 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.quitting = true
 			m.proc.forget() // and the service lets the session go
 		}
+	case "reasoning":
+		m.busy = true
+		if m.busyStart.IsZero() {
+			m.busyStart = time.Now()
+		}
+		m.suggestions = nil
+		m.addThinking(str(ev["text"]))
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)
 		if m.busyStart.IsZero() {
 			m.busyStart = time.Now()
 		}
 		m.suggestions = nil
+		if m.liveThinking() >= 0 {
+			// The reply has begun, so the round's thinking is over. Folding
+			// changes the block's height, so this frame is drawn now, not on
+			// the tick.
+			m.endThinking()
+			m.refresh()
+		}
 		m.cur += str(ev["text"])
 		// Do NOT render here. A provider streaming 60 tokens/s would drive 60
 		// full frames a second through the same Update loop that reads the
@@ -1892,6 +1928,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.busyStart = time.Now()
 		}
 		m.suggestions = nil
+		m.endThinking()
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
 		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(str(ev["tool"]), args, 80))})
@@ -1969,7 +2006,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.append(stNote.Render("🔔 " + oneLine(str(ev["text"]))))
 		}
 	case "ask":
+		m.endThinking()
 		m.flushCur()
+		m.paging = false // the question needs the screen
 		m.asking, m.noting, m.customAnswer = true, false, false
 		m.askSel, m.askNote = 0, ""
 		m.input.Blur()
@@ -2078,6 +2117,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.ctxStats.notificationsSmuggled = int(v)
 		}
 	case "done":
+		m.endThinking()
 		m.flushCur()
 		// Clear any remaining provisional markers — the turn is done, so
 		// everything was delivered to the LLM.
@@ -2105,6 +2145,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.armIdleSuggest()
 		m.refresh()
 	case "error":
+		m.endThinking()
 		m.append(stErr.Render("error: " + str(ev["error"])))
 		// Clear any remaining provisional markers — the engine flushes them on
 		// error too, so they're part of the conversation history.
@@ -2246,6 +2287,9 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 		if str(ev["scope"]) == "turn" {
 			m.cur = ""
 		}
+		// Whatever was thought before the failure stays, folded; the retried
+		// round thinks in a block of its own.
+		m.endThinking()
 		m.busy = true
 		m.retry = m.retryBanner(ev)
 		if ms := evNum(ev["delay_ms"]); ms > 0 {
@@ -2421,7 +2465,7 @@ func (m tuiModel) planScrollRegion() tea.Cmd {
 		return nil
 	}
 	// Modes that replace the layout wholesale get the rows back.
-	if m.inspecting || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
+	if m.inspecting || m.paging || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
 		return m.sr.disable()
 	}
 	vp := m.vp
@@ -2604,6 +2648,8 @@ func (m tuiModel) View() string {
 		status = stErr.Render(m.fatalErr)
 	case m.starting:
 		status = m.spin.View() + stDim.Render(" spawning tool servers…"+m.startingElapsed())
+	case m.paging:
+		status = stDim.Render(m.pg.hint())
 	case m.asking && len(m.askOptions) == 0:
 		status = stAsk.Render("❓ type your answer · enter send · esc/ctrl+c quit")
 	case m.asking && m.askMulti:
@@ -2634,7 +2680,7 @@ func (m tuiModel) View() string {
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · → open · ← close, then out · ctrl+c quit")
 		} else {
-			status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter inspector · / search · tab input")
+			status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter open · / search · tab input")
 		}
 	case m.suggestActive():
 		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · 1–%d pick · enter/right accept · or type · "+m.exitHint(), len(m.suggestions)))
@@ -2647,6 +2693,9 @@ func (m tuiModel) View() string {
 	// blank filler of the right height and the terminal keeps what is already
 	// painted there (see scrollregion.go).
 	convo := blankRegion(m.viewportView(vp), m.sr.rowsFor(vp.Height))
+	if m.paging {
+		convo = m.pg.view(vp.Width, vp.Height)
+	}
 	out := append([]string{m.headView()}, top...)
 	out = append(out, convo, div, lower, status)
 	return strings.Join(out, "\n")
@@ -2862,6 +2911,9 @@ func (m *tuiModel) replay(items []any) {
 			flushPend()
 			m.convo = append(m.convo, convoEntry{collapsed: stNote.Render("🔔 " + oneLine(str(im["content"])))})
 			n++
+		case "reasoning":
+			flushPend()
+			m.convo = append(m.convo, thinkingEntry(str(im["content"])))
 		}
 	}
 	flushPend()
