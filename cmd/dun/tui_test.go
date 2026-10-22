@@ -4004,3 +4004,20 @@ func TestTUI_UIStateRoundTrip(t *testing.T) {
 		t.Fatalf("send did not save the history: %s", rec.buf.String())
 	}
 }
+
+// The model's recommendation is marked and preselected, so enter takes it.
+func TestTUI_AskPreselectsTheRecommendation(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
+	m = resized(m, 80, 24)
+	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B", "C"}, "recommended": "B"})
+	if m.askSel != 1 {
+		t.Fatalf("askSel = %d, want the recommended row", m.askSel)
+	}
+	if !strings.Contains(m.askPanel(), "(recommended)") {
+		t.Errorf("not marked:\n%s", m.askPanel())
+	}
+	m = key(m, kEnter)
+	if !strings.Contains(convoText(m), "B") || m.asking {
+		t.Errorf("enter should answer with the recommendation: %s", convoText(m))
+	}
+}

@@ -1350,14 +1350,14 @@ func (h *Harness) Worktree() *Worktree {
 // the goroutine that reads control commands is the same one that reads answer
 // events. Calling this from a control-command callback deadlocks — run it on
 // its own goroutine. See setCtrlCmd in cmd/dun/main.go.
-func (h *Harness) AskUser(ctx context.Context, question string, options []string) (string, error) {
+func (h *Harness) AskUser(ctx context.Context, question string, options []string, recommended string) (string, error) {
 	h.srvMu.Lock()
 	ask := h.cfg.Ask
 	h.srvMu.Unlock()
 	if ask == nil {
 		return "", fmt.Errorf("nobody to ask — this session has no human attached")
 	}
-	return ask(ctx, question, options, false)
+	return ask(ctx, question, options, false, recommended)
 }
 
 // IsDocker reports whether the current exec backend is DockerExec.

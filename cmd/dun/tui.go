@@ -551,6 +551,7 @@ type tuiModel struct {
 	busyStart     time.Time             // when the current busy turn started
 	asking        bool                  // agent is waiting on an ask_user answer
 	askOptions    []string              // the offered options; a trailing "custom" row is implicit
+	askRec        string                // the option the model recommends (marked, preselected)
 	askSel        int                   // highlighted answer row (== len(askOptions) → the custom row)
 	askNote       string                // optional detail attached to the chosen option ("n")
 	askMulti      bool                  // multi-select: space toggles, enter submits the checked set
@@ -1980,6 +1981,12 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		m.askMulti, _ = ev["multi"].(bool)
 		m.askChecked = make([]bool, len(m.askOptions))
+		m.askRec = str(ev["recommended"])
+		for i, o := range m.askOptions {
+			if o == m.askRec && !m.askMulti {
+				m.askSel = i // enter takes the recommendation
+			}
+		}
 		// No options → a pure free-text prompt: drop straight into text entry so
 		// the user can just type. Otherwise typing is inert until enter opens the
 		// "custom answer" row — surprising when there's nothing else to pick.
@@ -2693,6 +2700,9 @@ func (m tuiModel) askPanel() string {
 				box = "☑ "
 			}
 			label = box + opt
+		}
+		if opt == m.askRec {
+			label += stDim.Render("  (recommended)")
 		}
 		rows = append(rows, gut(label, sel(i)))
 	}

@@ -537,12 +537,12 @@ func main() {
 				TokensBefore: n.TokensBefore, TokensAfter: n.TokensAfter,
 				Turn: n.Turn, SinceLastSecs: n.SinceLastSecs, Cause: n.Cause})
 		}
-		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
+		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec string) (string, error) {
 			// Paused for the whole wait: the person deciding is not the turn
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
 			return withoutClock(func() (string, error) {
-				em.emit(&proto.Ask{Question: q, Options: opts, Multi: multi})
+				em.emit(&proto.Ask{Question: q, Options: opts, Multi: multi, Recommended: rec})
 				select {
 				case a, ok := <-in.answers:
 					if !ok {
@@ -582,14 +582,14 @@ func main() {
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
 		cfg.OnCompaction = func(n dun.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
-		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool) (string, error) {
-			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi) })
+		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec string) (string, error) {
+			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi, rec) })
 		}
 		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {
 			return withoutClock(func() (bool, error) {
 				ans, err := humanAsk(actx,
 					fmt.Sprintf("Mount %s as /%s inside the container?", source, name),
-					[]string{"yes", "no"}, false)
+					[]string{"yes", "no"}, false, "")
 				if err != nil {
 					return false, err
 				}
@@ -816,6 +816,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				em.emit(catalogEvent(h))
 				em.emit(commandsEvent(h))
 			}()
+			return
+		}
+		// The model list, for a client's model picker: a network round trip
+		// per provider, so off the reader goroutine.
+		if id == "models" {
+			go em.emit(modelsEvent())
 			return
 		}
 		// /memories: the project's notes and what has happened to them.
@@ -1263,10 +1269,14 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 
 // humanAsk prompts on the terminal and reads a line. A number picks an option;
 // with multi, comma-separated numbers (e.g. "1,3") pick several.
-func humanAsk(_ context.Context, question string, options []string, multi bool) (string, error) {
+func humanAsk(_ context.Context, question string, options []string, multi bool, recommended string) (string, error) {
 	fmt.Fprintf(os.Stderr, "\n❓ %s\n", question)
 	for i, o := range options {
-		fmt.Fprintf(os.Stderr, "   %d) %s\n", i+1, o)
+		mark := ""
+		if o == recommended {
+			mark = "  (recommended)"
+		}
+		fmt.Fprintf(os.Stderr, "   %d) %s%s\n", i+1, o, mark)
 	}
 	if multi && len(options) > 0 {
 		fmt.Fprint(os.Stderr, "answer (comma-separated numbers for several): ")

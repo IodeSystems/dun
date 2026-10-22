@@ -19,18 +19,25 @@ import (
 // decides. (agentkit's lifting primitive could make this async/background; a
 // blocking Ask is simpler and correct for interactive clarification.)
 
-// AskFunc presents a question (with optional choices) to the user and returns
-// their answer. It blocks until answered or ctx is done. multi = the user may
-// pick several options (the answer is their joined selection).
-type AskFunc func(ctx context.Context, question string, options []string, multi bool) (string, error)
+// AskFunc presents a question and its choices to the user and returns their
+// answer. It blocks until answered or ctx is done. multi = the user may pick
+// several options (the answer is their joined selection). recommended is the
+// option the model recommends ("" only for multi). The user may always answer
+// in their own words instead.
+type AskFunc func(ctx context.Context, question string, options []string, multi bool, recommended string) (string, error)
+
+// askMinOptions: a question with fewer choices pushes all the work onto the
+// user. USER 2026-10-21: an ask with no options or recommendation is invalid.
+const askMinOptions = 2
 
 func askToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "ask_user"
 	td.Function.Description = "Ask the user ONE question when the task is ambiguous or a decision is theirs " +
-		"to make (rather than guessing). Provide `options` for a multiple-choice pick, or omit them for " +
-		"free text. Set `multi` to let the user select several options. Ask one question at a time — the " +
+		"to make (rather than guessing). Always give at least two concrete `options` and name the one you " +
+		"recommend in `recommended`, saying why in the question — the user can still answer in their own " +
+		"words. Set `multi` to let the user select several options. Ask one question at a time — the " +
 		"answer to one often guides the next. Returns the user's answer."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
@@ -39,14 +46,19 @@ func askToolDef() llm.ToolDef {
 			"options": map[string]any{
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
-				"description": "optional choices to pick from",
+				"minItems":    askMinOptions,
+				"description": "at least two concrete choices; the user may still type their own answer",
+			},
+			"recommended": map[string]any{
+				"type":        "string",
+				"description": "the option you recommend, exactly as written in options",
 			},
 			"multi": map[string]any{
 				"type":        "boolean",
 				"description": "allow selecting multiple options (default false = pick one)",
 			},
 		},
-		"required": []string{"question"},
+		"required": []string{"question", "options", "recommended"},
 	}
 	return td
 }
@@ -59,22 +71,52 @@ func withAsk(inner agent.ToolDispatcher, ask AskFunc, onCall func(string, map[st
 			return inner(ctx, tc)
 		}
 		var args struct {
-			Question string   `json:"question"`
-			Options  []string `json:"options"`
-			Multi    bool     `json:"multi"`
+			Question    string   `json:"question"`
+			Options     []string `json:"options"`
+			Multi       bool     `json:"multi"`
+			Recommended string   `json:"recommended"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		if strings.TrimSpace(args.Question) == "" {
-			return "ERROR: ask_user requires a question", nil
+		if msg := checkAsk(args.Question, args.Options, args.Multi, args.Recommended); msg != "" {
+			// Back to the model, which asks again properly; the user sees
+			// nothing until it does.
+			return "ERROR: " + msg, nil
 		}
-		ans, err := ask(ctx, args.Question, args.Options, args.Multi)
+		ans, err := ask(ctx, args.Question, args.Options, args.Multi, args.Recommended)
 		if err != nil {
 			// Feed the failure back to the model rather than aborting the turn.
 			return "ERROR: could not get an answer: " + err.Error(), nil
 		}
 		if onCall != nil {
-			onCall("ask_user", map[string]any{"question": args.Question, "options": args.Options, "multi": args.Multi}, ans)
+			onCall("ask_user", map[string]any{"question": args.Question, "options": args.Options, "multi": args.Multi,
+				"recommended": args.Recommended}, ans)
 		}
 		return ans, nil
 	}
+}
+
+// checkAsk is why an ask_user call is not fit to show, or "".
+func checkAsk(question string, options []string, multi bool, recommended string) string {
+	if strings.TrimSpace(question) == "" {
+		return "ask_user requires a question"
+	}
+	n := 0
+	for _, o := range options {
+		if strings.TrimSpace(o) != "" {
+			n++
+		}
+	}
+	if n < askMinOptions {
+		return "ask_user needs at least two concrete options (the user can still type their own answer) " +
+			"and the one you recommend in `recommended` — ask again with them"
+	}
+	if multi && recommended == "" {
+		return ""
+	}
+	for _, o := range options {
+		if o == recommended {
+			return ""
+		}
+	}
+	return "ask_user `recommended` must be one of the options, exactly as written — ask again"
 }

@@ -169,16 +169,16 @@ func TestCommitMessage_RefusesACleanTree(t *testing.T) {
 // must say so rather than silently proceeding.
 func TestAskUser_NobodyAttached(t *testing.T) {
 	h := &Harness{}
-	if _, err := h.AskUser(t.Context(), "?", []string{"a"}); err == nil ||
+	if _, err := h.AskUser(t.Context(), "?", []string{"a"}, ""); err == nil ||
 		!strings.Contains(err.Error(), "nobody to ask") {
 		t.Fatalf("want a nobody-to-ask error, got %v", err)
 	}
 	asked := ""
-	h = &Harness{cfg: Config{Ask: func(_ context.Context, q string, _ []string, _ bool) (string, error) {
+	h = &Harness{cfg: Config{Ask: func(_ context.Context, q string, _ []string, _ bool, _ string) (string, error) {
 		asked = q
 		return "commit", nil
 	}}}
-	ans, err := h.AskUser(t.Context(), "Commit these changes?", []string{"commit", "cancel"})
+	ans, err := h.AskUser(t.Context(), "Commit these changes?", []string{"commit", "cancel"}, "commit")
 	if err != nil || ans != "commit" || asked != "Commit these changes?" {
 		t.Fatalf("ask=%q ans=%q err=%v", asked, ans, err)
 	}

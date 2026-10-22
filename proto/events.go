@@ -44,6 +44,7 @@ func init() {
 	event[Answered]("answered")
 	event[Settings]("settings")
 	event[Commands]("commands")
+	event[Models]("models")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -130,9 +131,10 @@ type ContextCost struct {
 
 // Ask is a question for the human; the answer command replies.
 type Ask struct {
-	Question string   `json:"question"`
-	Options  []string `json:"options"`
-	Multi    bool     `json:"multi"`
+	Question    string   `json:"question"`
+	Options     []string `json:"options"`
+	Multi       bool     `json:"multi"`
+	Recommended string   `json:"recommended,omitempty"`
 }
 
 // Mount asks to mount a host path into the container; answered yes or no.
@@ -428,6 +430,20 @@ type CommandSpec struct {
 type CommandChoice struct {
 	Value       string `json:"value"`
 	Description string `json:"description,omitempty"`
+}
+
+// Models answers control "models": every saved provider's models, fetched
+// by the engine (the keys never leave it). A client switches with dund's
+// switchModel (the provider's URL and a model id).
+type Models struct {
+	Providers []ModelProvider `json:"providers"`
+}
+
+type ModelProvider struct {
+	Name  string   `json:"name"`
+	URL   string   `json:"url"`
+	IDs   []string `json:"ids"`
+	Error string   `json:"error,omitempty"`
 }
 
 // --- the protocol's own ---

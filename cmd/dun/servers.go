@@ -597,7 +597,7 @@ func runWorktreeCommit(ctx context.Context, h *dun.Harness) string {
 		if round >= maxCommitRounds {
 			options = []string{"commit", "cancel"} // out of rolls; say so by not offering it
 		}
-		ans, err := h.AskUser(ctx, q, options)
+		ans, err := h.AskUser(ctx, q, options, "commit")
 		if err != nil {
 			return "worktree: not committed — " + oneLine(err.Error())
 		}
