@@ -299,6 +299,20 @@ Where it stands:
   the last seq. Verified: Go tests over a real socket; live through hz with
   a node client (TLS + upgrade + token → replayed events). The long-poll
   REST/GraphQL query stays for simple clients.
+- **Zitadel, from corrallm-87 (2026-10-21):** no Zitadel admin credential
+  exists anywhere (no PAT, no machine key); corrallm's project/app were made
+  BY HAND in the console. "The admin token" = corrallm's own API token
+  (~/.corrallm/admin.token), unrelated. corrallm: one Web app, auth method
+  None (PKCE, no secret), redirect https://llm.iodesystems.com/auth/callback;
+  verifies only the ID token (go-oidc, aud = client ID, nonce,
+  email_verified), then issues its OWN HMAC session cookie; admission = its
+  own email list. Issuer `https://id.iodesystems.com` exactly (no trailing
+  slash — go-oidc byte-matches). No-secret clients: send client_id in the
+  body (oauth2.AuthStyleInParams). Preflight worth copying: probe the
+  authorize endpoint (302 → good, 400 Errors.App.NotFound / redirect_uri
+  missing → bad). Unverified there: device flow, native custom-scheme
+  redirects, JWT access tokens, aud = project id. Files: corrallm
+  internal/auth/oidc.go, internal/api/access.go, internal/config/authcfg.go.
 - **S4 open:** OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
   ✅ `dun dund service install` (`548864a`, CLI-10; the TUI starts the
