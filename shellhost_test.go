@@ -225,11 +225,11 @@ mcpshell mcp: serving on stdio`
 // The model learns a hosted namespace from the system prompt — mcpshell's
 // eval description names none — and a move reads as a move.
 func TestShellHosted_ModelView(t *testing.T) {
-	sys := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "corp_docs")
+	sys := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "", "corp_docs")
 	if !strings.Contains(sys, "corp_docs") || !strings.Contains(sys, `help("corp_docs")`) {
 		t.Errorf("system:\n%s", sys)
 	}
-	if strings.Contains(systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil), "hosted") {
+	if strings.Contains(systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, ""), "hosted") {
 		t.Error("no hosted line without hosted servers")
 	}
 	before := []mcpmgr.MCPTool{{Name: "search", ServerID: "corp-docs"}}

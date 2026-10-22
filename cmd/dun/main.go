@@ -502,6 +502,7 @@ func main() {
 		EnableShip:  *ship || *pr,
 		ShipCfg:     shipConfig(absWS, *pr),
 		CommitCfg:   dun.LoadCommit(absWS),
+		Files:       dun.LoadFiles(absWS),
 		SessionFile: sessionFile,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.

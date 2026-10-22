@@ -106,6 +106,37 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 18. Built-in file tools (USER, 2026-10-22, branch `files-tools`)
+
+USER: a file toolset "minimal, configurable, but efficient and complete", modelled
+on aw4's without its coupling. Needs agentkit branch `files-tools` (package
+`agentkit/files`, unreleased → v0.10.0); dun's go.mod is still v0.9.0 and does NOT
+build without it.
+
+- agentkit/files mounted in rebuildTools next to exec: `file_read/edit/write/grep/list`
+  on by default, `file_delete/move` opt-in. Root = `cfg.Workspace` (the worktree
+  when one is in use); rebuilt on Rehoist, kept across other rebuilds so the
+  read-tracking (write's overwrite guard) survives.
+- Config: `"files"` section in every dun.json layer (`LoadFiles`), field by field;
+  `tools: []` = off, `null` = inherit; `ignore` accumulates.
+- System prompt: one line naming the held file tools and preferring them to exec.
+- TUI: `filerender.go` — `read a.go:10-40 (31 lines of 3487)`, `edit a.go +3 −1`
+  (coloured hunk body), `grep /pat/ → N matches in K files`, `list → 2 dirs, 9 files`,
+  `write x (N lines, new|overwritten)`; grouped reads label as `read ×4: …`.
+- AfterWrite: not wired. poly-lsp-mcp watches the tree itself (fsnotify, 200ms
+  debounce, on by default; Index.LookupExisting backstops a missed event).
+- Live check (2026-10-22): `dun -p --worktree` with a fake model, scratch DUN_HOME,
+  temp git repo — list/read/grep/multi-edit/whitespace-miss/write/unread-overwrite
+  refusal/`..` refusal/glob list all answered as designed; the edit landed in the
+  worktree, the main checkout stayed clean.
+- **next**: user releases agentkit v0.10.0 → bump dun go.mod → merge.
+- **risks**: no real model has used them yet — whether models actually prefer them to
+  exec is unmeasured. Sub-agents get the same set (no read-only research role
+  exists to hook). Docker sessions: the tools act on the host path that is mounted
+  into the container, which is the same tree.
+- **optional extensions**: a read-only role for research children; file_structure
+  (aw4's outline) if node_query is absent; AfterWrite → formatter.
+
 ### ◐ 17. Cost and limits in /context (USER, 2026-10-22, branch `llm-cost`)
 
 USER: "If we can parse out any known cost/budget values from agentkit, that would

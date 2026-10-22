@@ -58,6 +58,18 @@
     "instruction": ""
   },
 
+  "//files": "The built-in file tools (file_read, file_edit, file_write, file_grep, file_list; file_delete and file_move when listed), rooted at the session's working tree. Omit for the defaults. Merged field-by-field; ignore patterns from every layer add up.",
+  "files": {
+    "//tools": "Which tools. [] turns them all off. delete and move are off unless listed.",
+    "tools": ["read", "edit", "write", "grep", "list"],
+    "//read_only": "Keep read, grep and list only.",
+    "read_only": false,
+    "//read_max": "Bytes one ranged read returns (default 65536); unranged_max, grep_max and list_max work the same way.",
+    "read_max": 65536,
+    "//ignore": "gitignore-syntax patterns hidden from grep and list, on top of .gitignore.",
+    "ignore": []
+  },
+
   "//mounts": "Extra local paths that must be accessible from both the worktree (symlink) and Docker container (volume mount). go.mod replace directives are auto-discovered — declare mounts here for non-Go projects or to override the auto-detected source path.",
   "mounts": [
     {

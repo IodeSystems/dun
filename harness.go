@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	filetools "github.com/iodesystems/agentkit/files"
 	"log"
 	"os"
 	"os/exec"
@@ -231,6 +232,9 @@ type Config struct {
 	// ChildModel is the default model for spawned sub-agents. Empty = the
 	// parent's. A spawn may override it.
 	ChildModel string
+	// Files configures the built-in file tools (files.go); nil = the defaults
+	// (read, edit, write, grep, list), rooted at Workspace.
+	Files *FilesConfig
 	// Parent, when set, makes this harness a CHILD of that one: it shares the
 	// parent's MCP manager (same worktree root ⇒ same servers, so no second
 	// index), reports to it, and gets the child tool set instead of the root's.
@@ -370,6 +374,11 @@ type Harness struct {
 	// state itself.
 	stateMu sync.Mutex
 	state   SessionState
+	// files is the built-in file toolset for the current working tree, and
+	// filesKey what it was built from (see fileTools). Touched only under
+	// turnMu, by rebuildTools.
+	files    *filetools.Toolset
+	filesKey string
 	// sideCalls accumulates the per-kind stats for the non-turn LLM calls
 	// (suggest, rephrase, commit, rescue) — see sidecall.go.
 	sideCalls *sideCallStats
@@ -1552,7 +1561,8 @@ var (
 		"clip it again."
 )
 
-// systemFor describes only the tool families actually present. exec and ask_user
+// systemFor describes only the tool families actually present. files is the
+// file tools' line (systemFiles), "" when they are off. exec and ask_user
 // are wired by the dispatcher, not MCP, so applyTools appends their lines when
 // the corresponding Config hooks are set — here they are assumed, since every
 // caller that has a workspace has exec.
@@ -1560,7 +1570,7 @@ var (
 // hosted are the MCP servers the shell carries as eval namespaces. mcpshell's
 // eval description is fixed text that names none of them, so without this
 // line the model has no way to know they exist.
-func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, hosted ...string) string {
+func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files string, hosted ...string) string {
 	have := map[string]bool{}
 	for _, t := range tools {
 		have[t.ServerID] = true
@@ -1581,6 +1591,7 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, hosted ..
 		b.WriteString(".")
 	}
 	b.WriteString("\n\nYour tools:")
+	b.WriteString(files)
 	if have[ServerCode] {
 		b.WriteString(systemCode)
 	}

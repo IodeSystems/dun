@@ -389,6 +389,13 @@ func (h *Harness) rebuildTools() {
 		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec)
 		dispatch = withExecMonitor(dispatch, h, report)
 	}
+	// File tools, rooted at the working tree. Rebuilt with the tool set, so a
+	// worktree switch (Rehoist) moves their root with exec's.
+	ft := h.fileTools()
+	if ft != nil {
+		toolDefs = append(toolDefs, ft.Defs()...)
+		dispatch = withFiles(dispatch, ft, report)
+	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
 		dispatch = withAsk(dispatch, cfg.Ask, report)
@@ -469,7 +476,7 @@ func (h *Harness) rebuildTools() {
 
 	sys := cfg.System
 	if sys == "" {
-		sys = systemFor(tools, cfg.Exec, cfg.Worktree, hostedNS...)
+		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), hostedNS...)
 		sys += roleSystem(h.isChild())
 		// The workspace's root AGENTS.md, if any, is standing context: the
 		// model needs the project's rules from the first message, and a system

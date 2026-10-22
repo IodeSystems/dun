@@ -14,7 +14,7 @@ import (
 // Describing a tool family whose tools are absent is worse than saying nothing:
 // the model plans around node_query, calls it, and gets "unknown tool".
 func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
-	shellOnly := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, HostExec{Dir: "/tmp"}, nil)
+	shellOnly := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, HostExec{Dir: "/tmp"}, nil, "")
 	if strings.Contains(shellOnly, "node_query") {
 		t.Error("described code tools with no code server running")
 	}
@@ -42,7 +42,7 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 		{Name: "node_query", ServerID: ServerCode},
 		{Name: "eval", ServerID: ServerShell},
 		{Name: "search", ServerID: ServerDocs},
-	}, DockerExec{Dir: "/work", Image: "golang:1.23"}, &Worktree{Path: "/tmp/wt", Branch: "feat"})
+	}, DockerExec{Dir: "/work", Image: "golang:1.23"}, &Worktree{Path: "/tmp/wt", Branch: "feat"}, "")
 	for _, want := range []string{"node_query", "mcpshell", "raglit", "[docs] notes"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("full tool set: missing %q", want)
@@ -58,7 +58,7 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 
 	// No backend, no exec tool — so describing one invites a call to something
 	// that is not there. Same rule as the MCP families.
-	none := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil)
+	none := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "")
 	if strings.Contains(none, "- exec:") || strings.Contains(none, "exec_monitor") {
 		t.Errorf("described exec with no backend configured:\n%s", none)
 	}
@@ -341,7 +341,7 @@ func serverToolNames(h *Harness) []string {
 	}
 	var out []string
 	for _, n := range h.ToolNames() {
-		if !builtin[n] {
+		if !builtin[n] && !strings.HasPrefix(n, "file_") {
 			out = append(out, n)
 		}
 	}

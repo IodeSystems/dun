@@ -310,6 +310,24 @@ guessing from branch names.
 
 Next: run the MCP servers inside the container too. See `plan/plan.md`.
 
+### File tools
+
+`file_read`, `file_edit`, `file_write`, `file_grep` and `file_list` are built
+in (agentkit's `files` package), rooted at the session's working tree — the
+worktree when there is one. A path that climbs out, by `..`, an absolute path
+or a symlink, is refused. Reads are line-numbered and capped (8KB with no
+range, 64KB with one, and the result says how to page); edits replace text that
+must match exactly once and return the diff; grep respects `.gitignore` and uses
+`rg` when it is on PATH. `file_delete` and `file_move` exist but are off unless
+listed:
+
+```jsonc
+// dun.json
+"files": {"tools": ["read", "grep", "list"], "ignore": ["testdata/golden/"]}
+```
+
+`"tools": []` turns them off; `"read_only": true` keeps read, grep and list.
+
 ## Vision
 
 ```

@@ -293,6 +293,9 @@ type ServersFile struct {
 	// Commit is how `/worktree commit` writes its message. Merged field by
 	// field, same as Ship.
 	Commit *CommitConfig `json:"commit,omitempty"`
+	// Files configures the built-in file tools (files.go). Merged field by
+	// field; ignore patterns accumulate across layers.
+	Files *FilesConfig `json:"files,omitempty"`
 }
 
 // LoadShip resolves the effective ship config for a workspace. nil means "no
