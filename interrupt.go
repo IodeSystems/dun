@@ -105,6 +105,12 @@ type interruptState struct {
 	// also take it out of the buffer that starts the next turn.
 	interrupting atomic.Bool
 	round        roundCapture
+	// turnStart is when the current turn began: a job started at or after it
+	// belongs to the turn, which is what the interrupt note lists.
+	turnStart time.Time
+	// cutJobs is the "still running: …" line for the last interrupted turn,
+	// for the engine's done event (InterruptedJobs). Guarded by intMu.
+	cutJobs string
 }
 
 // Interrupt stops the turn in flight, if there is one, and reports whether
@@ -126,6 +132,7 @@ func (h *Harness) interruptible(ctx context.Context) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	h.intMu.Lock()
 	h.intCancel = cancel
+	h.turnStart, h.cutJobs = time.Now(), ""
 	h.intMu.Unlock()
 	h.interrupting.Store(false)
 	h.round.reset()
@@ -176,11 +183,63 @@ func (h *Harness) recordInterrupt(ctx context.Context) {
 	if !done {
 		note += reasoningNote(reasoning, took)
 	}
+	if jobs := h.cutTurnJobs(); len(jobs) > 0 {
+		list := make([]string, len(jobs))
+		now := time.Now()
+		for i, j := range jobs {
+			list[i] = JobLine(j, now)
+		}
+		note += " Background jobs this turn started are STILL RUNNING — the interrupt does not stop them: " +
+			strings.Join(list, ", ") + ". The user can stop one with /jobs kill N; leave them running " +
+			"unless the user asks you to stop them (exec_monitor kill)."
+	}
 	note += " Do not resume or repeat it on your own: the user's next message says what to do."
 	h.store.appendSilent(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindNotification, Tag: interruptTag,
 		Content: note, CreatedAt: time.Now().UnixNano(),
 	})
+}
+
+// cutTurnJobs is the running jobs the cut turn started. It also records the
+// user's line for them (InterruptedJobs).
+func (h *Harness) cutTurnJobs() []JobInfo {
+	h.intMu.Lock()
+	since := h.turnStart
+	h.intMu.Unlock()
+	if since.IsZero() {
+		return nil
+	}
+	jobs := h.jobsStartedSince(since)
+	line := interruptedJobsLine(jobs, time.Now())
+	h.intMu.Lock()
+	h.cutJobs = line
+	h.intMu.Unlock()
+	return jobs
+}
+
+// interruptedJobsLine is what the user reads under "interrupted": the jobs
+// still running and how to stop them. "" when there are none.
+func interruptedJobsLine(jobs []JobInfo, now time.Time) string {
+	if len(jobs) == 0 {
+		return ""
+	}
+	list := make([]string, len(jobs))
+	for i, j := range jobs {
+		list[i] = JobLine(j, now)
+	}
+	hint := fmt.Sprintf("/jobs kill %d to stop it", jobs[0].ID)
+	if len(jobs) > 1 {
+		hint = fmt.Sprintf("/jobs kill %d to stop one, /jobs kill all for all", jobs[0].ID)
+	}
+	return "still running: " + strings.Join(list, ", ") + " — " + hint
+}
+
+// InterruptedJobs is the "still running: …" line for the last interrupted
+// turn, or "" when it left no job running.
+func (h *Harness) InterruptedJobs() string {
+	h.intMu.Lock()
+	defer h.intMu.Unlock()
+	return h.cutJobs
 }
 
 // reasoningNoteMax bounds the last sentence the note quotes.

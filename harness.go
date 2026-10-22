@@ -356,6 +356,10 @@ type Harness struct {
 	bgSeq    int
 	bgRun    int            // background jobs still running
 	bgJobs   map[int]*bgJob // every job this session started, by id (see bgjob.go)
+	// bgLive is every job not yet finished, numbered or not: a command still
+	// inside its grace has no id yet, and /jobs kill all and an interrupt
+	// must still find it (see bgkill.go).
+	bgLive map[*bgJob]struct{}
 
 	// Sub-agents (see subagent.go and plan/subagents.md). agMu guards both.
 	// ownsMgr is false for a CHILD: it shares its parent's manager, and closing
@@ -1586,9 +1590,10 @@ var (
 		"Use this when a build needs access to a path outside the worktree " +
 		"(e.g. a go.mod replace directive pointing to a sibling module like ../agentkit). " +
 		"The user must approve before the mount is added."
-	systemMonitor = "\n- exec_monitor: change what a background job tells you (buffer_bytes, grep, ignore). " +
+	systemMonitor = "\n- exec_monitor: change what a background job tells you (buffer_bytes, grep, ignore), " +
+		"or end it (kill: true ends the job and everything it started). " +
 		"A job stays silent until it finishes and you will be notified — do NOT poll it. " +
-		"Only call exec_monitor to tune output or mute a job. " +
+		"Only call exec_monitor to tune output, mute a job, or kill one that is no longer wanted. " +
 		"Its full output is on disk — grep the log path with exec rather than pulling a large log in whole."
 	systemExecCap = "\n\nANY tool result larger than " + fmt.Sprintf("%d", execInlineMax) + " characters is CLIPPED " +
 		"to its start and end before you see it, and the whole thing is saved under a short REF printed in the " +

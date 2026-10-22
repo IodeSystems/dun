@@ -67,10 +67,14 @@ type ExecResult struct {
 	// Err carries a spawn failure (binary missing, bad cwd) that has no exit
 	// status of its own.
 	Err string
+	// Killed says who ended the command and when ("killed by the user after
+	// 12s"), for a job stopped on request (bgkill.go). Set, it is the verdict:
+	// the command did not fail on its own.
+	Killed string
 }
 
 // Failed is the question every caller actually asks.
-func (r ExecResult) Failed() bool { return r.Code != 0 || r.Err != "" }
+func (r ExecResult) Failed() bool { return r.Code != 0 || r.Err != "" || r.Killed != "" }
 
 // Render is the model-facing form: the output, plus an "[exit: …]" line when
 // something went wrong. The marker stays because the model reads it, not
@@ -84,6 +88,8 @@ func (r ExecResult) Render() string {
 		s += "\n"
 	}
 	switch {
+	case r.Killed != "":
+		s += fmt.Sprintf("[exit: %s]", r.Killed)
 	case r.Err != "":
 		s += fmt.Sprintf("[exit: %s]", r.Err)
 	default:
@@ -352,6 +358,16 @@ func (h *HostShell) RunPromotable(ctx context.Context, command string, w io.Writ
 		p.kill()
 		return res
 	}
+	if ctx.Err() != nil {
+		// Cancelled: termGroup is ending this shell even if the command beat
+		// it to the sentinel, so the next call must not write into it. (A
+		// second termGroup on a group already gone is a no-op.)
+		h.p = nil
+		if !p.exited() && p.cmd != nil && p.cmd.Process != nil {
+			go termGroup(p.cmd.Process.Pid, killTermGrace)
+		}
+		return res
+	}
 	if p.exited() {
 		h.teardown()
 	}
@@ -375,6 +391,14 @@ func (p *shellProc) readUntil(ctx context.Context, w io.Writer, sentinel string,
 		sink = io.MultiWriter(&buf, w)
 	}
 	donated := false
+	// Cancellation ENDS the command: the shell's whole process group gets
+	// SIGTERM, then SIGKILL (termGroup), and the loop keeps reading until the
+	// shell is dead, so the output up to the kill is kept. It used to return
+	// at once and leave the command running in a shell the next call reused.
+	// The shell can die on SIGTERM while a child that ignores it lives on, so a
+	// cancelled read also waits for termGroup (the group empty, or SIGKILLed).
+	ctxDone, canceled := ctx.Done(), false
+	termDone := make(chan struct{})
 	for {
 		if line, ok := p.buf.popLine(); ok {
 			if code, hit := splitSentinel(sink, line, sentinel); hit {
@@ -383,8 +407,15 @@ func (p *shellProc) readUntil(ctx context.Context, w io.Writer, sentinel string,
 			continue
 		}
 		select {
-		case <-ctx.Done():
-			return ExecResult{Output: buf.String(), Code: -1, Err: "canceled"}, donated
+		case <-ctxDone:
+			ctxDone, canceled = nil, true
+			if p.cmd == nil || p.cmd.Process == nil {
+				return ExecResult{Output: buf.String(), Code: -1, Err: "canceled"}, donated
+			}
+			go func() {
+				termGroup(p.cmd.Process.Pid, killTermGrace)
+				close(termDone)
+			}()
 
 		case <-promote:
 			// A closed channel is always ready, so drop it after one firing.
@@ -412,7 +443,12 @@ func (p *shellProc) readUntil(ctx context.Context, w io.Writer, sentinel string,
 			if p.state != nil {
 				code = p.state.ExitCode()
 			}
-			return ExecResult{Output: buf.String(), Code: code}, donated
+			res := ExecResult{Output: buf.String(), Code: code}
+			if canceled {
+				res.Code, res.Err = -1, "canceled"
+				<-termDone
+			}
+			return res, donated
 
 		case <-time.After(20 * time.Millisecond):
 		}

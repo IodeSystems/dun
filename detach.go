@@ -69,8 +69,13 @@ func detach(cmd *exec.Cmd) *exec.Cmd {
 // (or grandchildren still holding the output pipe) before giving up on it.
 const killGroupDelay = 5 * time.Second
 
-// killGroup makes context cancellation kill the child's whole process group
-// rather than just the child.
+// killTermGrace is how long a process group gets to exit on SIGTERM before it
+// gets SIGKILL. Short: whoever asked for the kill wants the job gone.
+const killTermGrace = 2 * time.Second
+
+// killGroup makes context cancellation end the child's whole process group
+// rather than just the child: SIGTERM now, SIGKILL to whatever is left after
+// killTermGrace.
 //
 // This is the other half of detach, not a separate nicety: a detached child no
 // longer dies when the terminal hangs up, so without it a cancelled `sh -lc`
@@ -82,8 +87,39 @@ func killGroup(cmd *exec.Cmd) *exec.Cmd {
 		if cmd.Process == nil {
 			return nil
 		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		pgid := cmd.Process.Pid
+		err := syscall.Kill(-pgid, syscall.SIGTERM)
+		if err == nil {
+			// The leader can exit on SIGTERM while a grandchild that ignores
+			// it lives on. The escalation goes to the GROUP, so it reaches
+			// that grandchild after the leader is gone.
+			go escalateGroup(pgid, killTermGrace)
+		}
+		return err
 	}
 	cmd.WaitDelay = killGroupDelay
 	return cmd
+}
+
+// termGroup ends process group pgid the same way: SIGTERM, then SIGKILL to
+// what is left after grace. It returns once the group is gone or has been
+// sent SIGKILL. syscall.Kill(-pgid, …) is the same call on Linux and macOS.
+func termGroup(pgid int, grace time.Duration) {
+	if pgid <= 0 || syscall.Kill(-pgid, syscall.SIGTERM) != nil {
+		return // no such group: already gone
+	}
+	escalateGroup(pgid, grace)
+}
+
+// escalateGroup waits up to grace for group pgid to empty, then sends SIGKILL
+// to any member left. Signal 0 tests for the group without touching it.
+func escalateGroup(pgid int, grace time.Duration) {
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		time.Sleep(25 * time.Millisecond)
+		if syscall.Kill(-pgid, 0) != nil {
+			return
+		}
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 }

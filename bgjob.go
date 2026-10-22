@@ -71,6 +71,13 @@ type bgJob struct {
 	promoteCh chan struct{}
 	doneCh    chan struct{}
 
+	// ctx is what the command runs under; cancel is how a kill ends it (the
+	// backend turns cancellation into SIGTERM, then SIGKILL, for the whole
+	// process group — see bgkill.go). Not the turn's context: an interrupt
+	// must not kill a job.
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	mu      sync.Mutex
 	mon     bgMonitor
 	re      *regexp.Regexp
@@ -84,6 +91,12 @@ type bgJob struct {
 	settled bool // someone has claimed the result — inline or background
 	res     ExecResult
 	ended   time.Time
+	last    string // the last non-empty complete line of output (/jobs shows it)
+
+	// killedBy is who asked for the kill ("user", "model"), and killAfter how
+	// long the job had run then. Set once, by kill.
+	killedBy  string
+	killAfter time.Duration
 }
 
 // bgEarlyMax bounds the in-memory buffer a not-yet-promoted job keeps. Its
@@ -108,6 +121,9 @@ func (j *bgJob) Write(p []byte) (int, error) {
 	j.partial = append(j.partial, p...)
 	if i := lastNewline(j.partial); i >= 0 {
 		complete := j.partial[:i+1]
+		if l := lastLine(complete); l != "" {
+			j.last = l
+		}
 		j.partial = append([]byte(nil), j.partial[i+1:]...)
 		j.pending = append(j.pending, j.filter(complete)...)
 	}
@@ -171,14 +187,27 @@ func (j *bgJob) reportLocked(force bool) string {
 // it is still holding the line and gets the result as its own return value.
 func (j *bgJob) finish(res ExecResult) {
 	j.mu.Lock()
+	// A kill is the verdict unless the command beat it with a clean exit.
+	if j.killedBy != "" && res.Failed() {
+		res.Killed = fmt.Sprintf("killed by the %s after %s", j.killedBy, roundDur(j.killAfter))
+	}
 	j.done, j.res, j.ended = true, res, time.Now()
 	if j.log != nil {
+		if res.Killed != "" {
+			_, _ = fmt.Fprintf(j.log, "\n[dun: %s; it and everything it started were stopped]\n", res.Killed)
+		}
 		_ = j.log.Close()
 		j.log = nil
 	}
 	bg := j.bg
 	j.mu.Unlock()
 
+	if j.cancel != nil {
+		j.cancel() // releases the context; the command is already gone
+	}
+	j.h.bgMu.Lock()
+	delete(j.h.bgLive, j)
+	j.h.bgMu.Unlock()
 	close(j.doneCh)
 	if !bg {
 		return
@@ -328,6 +357,8 @@ func (j *bgJob) status() string {
 
 func outcome(r ExecResult) string {
 	switch {
+	case r.Killed != "":
+		return "was " + r.Killed + " (it did not fail on its own)"
 	case r.Err != "":
 		return "FAILED to run (" + r.Err + ")"
 	case r.Code != 0:
@@ -437,10 +468,19 @@ func (h *Harness) newJobStarted(backend ExecBackend, command string) *bgJob {
 
 // newJob builds a provisional job. It is not running until run is called.
 func (h *Harness) newJob(command string) *bgJob {
-	return &bgJob{
+	ctx, cancel := context.WithCancel(context.Background())
+	j := &bgJob{
 		command: command, started: time.Now(), h: h, hb: newHeartbeat(),
 		promoteCh: make(chan struct{}), doneCh: make(chan struct{}),
+		ctx: ctx, cancel: cancel,
 	}
+	h.bgMu.Lock()
+	if h.bgLive == nil {
+		h.bgLive = map[*bgJob]struct{}{}
+	}
+	h.bgLive[j] = struct{}{}
+	h.bgMu.Unlock()
+	return j
 }
 
 // run starts the command. No time limit here, ever: the grace lives in the tool
@@ -448,7 +488,7 @@ func (h *Harness) newJob(command string) *bgJob {
 // long as it takes.
 func (j *bgJob) run(backend ExecBackend) {
 	go func() {
-		j.finish(runPromotable(backend, j.command, j, j.promoteCh))
+		j.finish(runPromotable(j.ctx, backend, j.command, j, j.promoteCh))
 	}()
 }
 
@@ -456,11 +496,11 @@ func (j *bgJob) run(backend ExecBackend) {
 // has one to hand over. A stateless backend (HostExec, DockerExec) gives every
 // command its own process already, so there is nothing to donate and nothing
 // queued behind it — promotion is simply not its concern.
-func runPromotable(backend ExecBackend, command string, w io.Writer, promote <-chan struct{}) ExecResult {
+func runPromotable(ctx context.Context, backend ExecBackend, command string, w io.Writer, promote <-chan struct{}) ExecResult {
 	if p, ok := backend.(PromotableExec); ok {
-		return p.RunPromotable(context.Background(), command, w, promote)
+		return p.RunPromotable(ctx, command, w, promote)
 	}
-	return backend.Run(context.Background(), command, w)
+	return backend.Run(ctx, command, w)
 }
 
 // heartbeat says "still running" on the bgHeartbeats schedule until the job
@@ -518,7 +558,7 @@ type JobInfo struct {
 	ID      int    `json:"id"`
 	Command string `json:"command"`
 	Log     string `json:"log,omitempty"`
-	State   string `json:"state"` // running · ok · failed · error
+	State   string `json:"state"` // running · ok · failed · error · killed
 	Bytes   int64  `json:"bytes"`
 	Started int64  `json:"started"`
 	Ended   int64  `json:"ended,omitempty"` // 0 while running
@@ -527,6 +567,8 @@ type JobInfo struct {
 	// not to hear about. Shown because a silenced job is a choice, and an
 	// invisible silenced job is indistinguishable from a lost one.
 	Muted bool `json:"muted,omitempty"`
+	// Last is the job's last line of output so far.
+	Last string `json:"last,omitempty"`
 }
 
 // info snapshots a job under its lock.
@@ -535,7 +577,7 @@ func (j *bgJob) info() JobInfo {
 	defer j.mu.Unlock()
 	out := JobInfo{
 		ID: j.id, Command: j.command, Log: j.logPath, State: "running",
-		Bytes: j.written, Started: j.started.Unix(), Muted: j.mon.Ignore,
+		Bytes: j.written, Started: j.started.Unix(), Muted: j.mon.Ignore, Last: j.last,
 	}
 	if j.done {
 		out.State, out.Code, out.Ended = jobState(j.res), j.res.Code, j.ended.Unix()
@@ -547,6 +589,8 @@ func (j *bgJob) info() JobInfo {
 // but one the UI can switch on instead of matching prose.
 func jobState(r ExecResult) string {
 	switch {
+	case r.Killed != "":
+		return "killed"
 	case r.Err != "":
 		return "error"
 	case r.Code != 0:
@@ -623,7 +667,8 @@ func execMonitorToolDef() llm.ToolDef {
 	td.Type = "function"
 	td.Function.Name = "exec_monitor"
 	td.Function.Description = "Change how a background job reports: `buffer_bytes` fires once that many bytes accumulate, " +
-		"`grep` limits to matching lines, `ignore` mutes entirely including completion. " +
+		"`grep` limits to matching lines, `ignore` mutes entirely including completion (the job keeps running). " +
+		"`kill: true` ends the job and everything it started (SIGTERM, then SIGKILL); you still get its completion notice, which says it was killed. " +
 		"Do NOT use this to poll — you will be notified when the job finishes. " +
 		"Every job also writes a log file — grep THAT with exec rather than asking for a big log here."
 	td.Function.Parameters = map[string]any{
@@ -633,6 +678,7 @@ func execMonitorToolDef() llm.ToolDef {
 			"buffer_bytes": map[string]any{"type": "integer", "description": "report progress once this many matching bytes accumulate (0 = never)"},
 			"grep":         map[string]any{"type": "string", "description": "only report lines matching this regexp (empty string clears it)"},
 			"ignore":       map[string]any{"type": "boolean", "description": "mute this job completely, including its completion notice"},
+			"kill":         map[string]any{"type": "boolean", "description": "true ends the job and everything it started"},
 		},
 	}
 	return td
@@ -648,13 +694,29 @@ func withExecMonitor(inner agent.ToolDispatcher, h *Harness, onCall func(string,
 			BufferBytes *int    `json:"buffer_bytes"`
 			Grep        *string `json:"grep"`
 			Ignore      *bool   `json:"ignore"`
+			Kill        bool    `json:"kill"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		out := execMonitor(h, args.Job, args.BufferBytes, args.Grep, args.Ignore)
+		var out string
+		switch {
+		case args.Kill && args.Job == nil:
+			out = "ERROR: kill needs the job id: exec_monitor({job:N, kill:true})."
+		case args.Kill:
+			msg, err := h.KillJob(*args.Job, "model")
+			if err != nil {
+				msg = "ERROR: " + err.Error()
+			}
+			out = msg
+		default:
+			out = execMonitor(h, args.Job, args.BufferBytes, args.Grep, args.Ignore)
+		}
 		if onCall != nil {
 			a := map[string]any{}
 			if args.Job != nil {
 				a["job"] = *args.Job
+			}
+			if args.Kill {
+				a["kill"] = true
 			}
 			onCall("exec_monitor", a, out)
 		}
