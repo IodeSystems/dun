@@ -152,7 +152,7 @@ func TestGraphQLSchemaCarriesTheOperations(t *testing.T) {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	sdl := string(b)
-	for _, op := range []string{"listSessions", "createSession", "sendMessage", "sessionEvents"} {
+	for _, op := range []string{"listSessions", "createSession", "sendMessage", "pollSessionEvents", "dund_sessionEvents"} {
 		if !strings.Contains(sdl, op) {
 			t.Errorf("%s missing from the SDL", op)
 		}

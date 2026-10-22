@@ -291,23 +291,18 @@ Where it stands:
   unreleased → v2.2.0); ~/doc RT-1/RT-2 + relay.md updated (8ae0072).
   Released 2026-10-21 (v2.1.3, v2.2.0); dun requires gwag/v2 v2.2.0, no
   replace.
-- ⏸ **gat.Subscribe → gat.RegisterSSE** (gwag-47, 2026-10-22). Deprecated
-  in gwag v2.3.0 (released 2026-10-22, on proxy.golang.org, no replace
-  needed; dun is still on v2.2.0). **Blocking decision (USER):** when to
-  migrate. Brief: gw/gat/sse.go, docs/gat.md "Streams".
-  - **What changes for dund:** `sessionEvents` becomes a GET route with
-    text/event-stream that also serves GraphQL and gRPC. Today the
-    REST long-poll at `/api/v1/sessions/{id}/events` (api.go:496) already
-    holds that OperationID, so rename the subscription or let SSE replace
-    the long-poll.
-  - `{id}` must come from a query param, because path params bind only on
-    REST. `StreamInput` already takes the session as a field; check this
-    when migrating.
-  - Event map: keep a single `StreamEvent` type, so the GraphQL field stays
-    the same and the mobile codegen does not break. Several types would
-    make the field a union, which breaks existing clients.
-  - The RT-2 HMAC check moves from the source func into the handler. The
-    API middlewares now also wrap the stream.
+- ✅ **gat.RegisterSSE** (USER "Migrate", 2026-10-22; gwag v2.3.0).
+  - `sessionEvents` is one handler on three surfaces: SSE at GET
+    `/api/v1/session-events?session&after&principal&timestamp&hmac`, the
+    unchanged `Subscription.dund_sessionEvents` (its result is now
+    non-null), and gRPC.
+  - The REST long-poll keeps its path. Its operation is renamed
+    `pollSessionEvents`, which renames the GraphQL query field.
+  - A handler cannot return an error. A refusal (bad token, no session) is
+    one unsequenced `error` event, then the end of the stream. The app
+    then retries with backoff instead of at once.
+  - REST SSE needs the bearer AND the HMAC.
+  - Not run: the gRPC surface (dund serves no gRPC).
 - ✅ **Live events** (`bc4daf8`, `e16a3fd`): `Subscription.dund_sessionEvents`
   over graphql-ws on /api/graphql; RT-2 HMAC from `subscribeToken`
   (principal|session|ts, in-memory secret, ±5 min); the WS upgrade skips the
@@ -404,7 +399,7 @@ Where it stands:
   (WEB-4: `dun dund schema` → `mobile/schema.graphql` → graphql-codegen
   client-preset, string documents → graphql-request). Screens: sign-in
   (address + token, checked before kept; SecureStore / localStorage),
-  sessions, a session (long-poll via `sessionEvents`, pure reducer with 6
+  sessions, a session (long-poll via `pollSessionEvents` at the time, pure reducer with 6
   jest tests, asks with option buttons). `make web` exports and installs to
   ~/.local/share/dun/web; the unit now runs `--web-root` there (WEB-5).
   Verified: typecheck, lint, jest, web export; https://dun.iodesystems.com/

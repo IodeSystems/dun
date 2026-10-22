@@ -493,7 +493,7 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 			}
 			return ok(), fail(s.svc.PutUI(p, in.ID, in.Body.State))
 		})
-	gat.Register(api, g, huma.Operation{OperationID: "sessionEvents", Method: http.MethodGet, Path: "/api/v1/sessions/{id}/events",
+	gat.Register(api, g, huma.Operation{OperationID: "pollSessionEvents", Method: http.MethodGet, Path: "/api/v1/sessions/{id}/events",
 		Summary: "The session's events after a seq; waits for the first one."},
 		func(ctx context.Context, in *EventsInput) (*EventsOutput, error) {
 			wait := time.Duration(min(max(in.Wait, 0), int(pollWaitMax/time.Second))) * time.Second

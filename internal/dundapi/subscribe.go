@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/sse"
 	"github.com/iodesystems/gwag/v2/gw/gat"
+
+	"github.com/iodesystems/dun/proto"
 )
 
 // Live events: Subscription.dund_sessionEvents over graphql-transport-ws on
@@ -96,27 +99,32 @@ func (s *Server) registerStream(api huma.API, g *gat.Gateway) {
 			o.Body.HMAC = s.signer.sign(p, in.ID, o.Body.Timestamp)
 			return o, nil
 		})
-	gat.Subscribe(api, g, huma.Operation{OperationID: "sessionEvents",
+	// One handler, three surfaces (gat.RegisterSSE): text/event-stream on
+	// REST, Subscription.dund_sessionEvents over graphql-ws, a gRPC stream.
+	// The handler cannot return an error, so a refusal is one "error" event
+	// and the end of the stream: the client re-mints and subscribes again.
+	gat.RegisterSSE(api, g, huma.Operation{OperationID: "sessionEvents", Method: http.MethodGet, Path: "/api/v1/session-events",
 		Summary: "A session's events after a seq, then live (snapshot first when too far behind)."},
-		func(ctx context.Context, in *StreamInput) (<-chan *StreamEvent, error) {
+		map[string]any{"event": StreamEvent{}},
+		func(ctx context.Context, in *StreamInput, send sse.Sender) {
+			refuse := func(why string) {
+				ev := proto.NewEvent(&proto.Error{Error: why})
+				ev.Session, ev.TS = in.Session, time.Now()
+				_ = send.Data(&StreamEvent{Event: flat(ev)})
+			}
 			if !s.signer.verify(in.Principal, in.Session, in.Timestamp, in.HMAC, time.Now()) {
-				return nil, huma.Error401Unauthorized("subscription token invalid or expired: mint a new one")
+				refuse("subscription token invalid or expired: mint a new one")
+				return
 			}
 			evs, err := s.svc.Stream(ctx, in.Principal, in.Session, in.After)
 			if err != nil {
-				return nil, fail(err)
+				refuse(err.Error())
+				return
 			}
-			out := make(chan *StreamEvent)
-			go func() {
-				defer close(out)
-				for ev := range evs {
-					select {
-					case out <- &StreamEvent{Event: flat(ev)}:
-					case <-ctx.Done():
-						return
-					}
+			for ev := range evs {
+				if send.Data(&StreamEvent{Event: flat(ev)}) != nil {
+					return
 				}
-			}()
-			return out, nil
+			}
 		})
 }

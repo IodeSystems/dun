@@ -25,13 +25,13 @@ type DundQueryNamespace {
   getUI(id: String!): dund_UIOutputBody @derived(operationId: "getUI")
   hello: dund_HelloOutputBody @derived(operationId: "hello")
   listSessions: dund_SessionsOutputBody @derived(operationId: "listSessions")
-  sessionEvents(
+  pollSessionEvents(
     """the last seq seen; 0 for the start"""
     after: Long
     id: String!
     """seconds to wait for the first new event (max 25)"""
     wait: Long
-  ): dund_EventsOutputBody @derived(operationId: "sessionEvents")
+  ): dund_EventsOutputBody @derived(operationId: "pollSessionEvents")
   v1: DundV1QueryNamespace!
 }
 
@@ -53,13 +53,13 @@ type DundV1QueryNamespace {
   getUI(id: String!): dund_UIOutputBody @derived(operationId: "getUI")
   hello: dund_HelloOutputBody @derived(operationId: "hello")
   listSessions: dund_SessionsOutputBody @derived(operationId: "listSessions")
-  sessionEvents(
+  pollSessionEvents(
     """the last seq seen; 0 for the start"""
     after: Long
     id: String!
     """seconds to wait for the first new event (max 25)"""
     wait: Long
-  ): dund_EventsOutputBody @derived(operationId: "sessionEvents")
+  ): dund_EventsOutputBody @derived(operationId: "pollSessionEvents")
 }
 
 """Untyped JSON value (used as a fallback for OpenAPI schemas that can't be mapped exactly)."""
@@ -87,7 +87,7 @@ type Subscription {
     session: String!
     """from subscribeToken"""
     timestamp: Long!
-  ): dund_StreamEvent @derived(operationId: "sessionEvents")
+  ): dund_StreamEvent! @derived(operationId: "sessionEvents")
 }
 
 type dund_AndroidRelease {

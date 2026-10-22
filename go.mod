@@ -16,7 +16,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/iodesystems/agentkit v0.0.0
-	github.com/iodesystems/gwag/v2 v2.2.0
+	github.com/iodesystems/gwag/v2 v2.3.0
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261016124120-4811d7e34ea3

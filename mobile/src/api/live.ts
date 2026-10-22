@@ -46,6 +46,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
       return retry(`connection lost — retrying (${x.message})`);
     }
     if (!tok || stopped) return;
+    let refused = '';
     unsubscribe = live.subscribe(
       {
         query: String(SessionEventsLive),
@@ -55,6 +56,12 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
         next: (r) => {
           const ev = (r.data as { dund_sessionEvents?: { event?: Record<string, unknown> } } | null)?.dund_sessionEvents?.event;
           if (!ev) return;
+          // A refusal (bad token, no such session) is an unsequenced error
+          // event and then the end of the stream: retry with backoff.
+          if (ev.type === 'error' && ev.seq === undefined) {
+            refused = String(ev.error ?? 'refused');
+            return;
+          }
           backoff = 1000;
           f.onConn('');
           if (ev.type === 'snapshot' && ev.after !== undefined) after = String(ev.after);
@@ -70,6 +77,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
         // resume after the last seq.
         complete: () => {
           unsubscribe = null;
+          if (refused) return retry(`connection lost — retrying (${refused})`);
           if (!stopped) setTimeout(start, 0);
         },
       },

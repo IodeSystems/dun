@@ -18,7 +18,7 @@ export const ListSessions = graphql(`
 export const SessionEvents = graphql(`
   query SessionEvents($id: String!, $after: Long, $wait: Long) {
     dund {
-      sessionEvents(id: $id, after: $after, wait: $wait) {
+      pollSessionEvents(id: $id, after: $after, wait: $wait) {
         events
         snapshot
         last

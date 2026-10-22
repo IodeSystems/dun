@@ -1,9 +1,12 @@
 package dundapi_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -118,8 +121,13 @@ func TestSubscriptionRefusesWithoutAValidToken(t *testing.T) {
 	c := wsDial(t, ctx, srv.URL)
 	p, _ := json.Marshal(map[string]any{"query": subscribeQuery(id, "unix:1000", time.Now().Unix(), "deadbeef", 0)})
 	wsWrite(t, ctx, c, wsMsg{ID: "1", Type: "subscribe", Payload: p})
-	if msg := wsRead(t, ctx, c); msg.Type != "error" || !strings.Contains(string(msg.Payload), "token") {
+	// Refused: one "error" event, then the end of the stream.
+	if msg := wsRead(t, ctx, c); msg.Type != "next" || !strings.Contains(string(msg.Payload), `"type":"error"`) ||
+		!strings.Contains(string(msg.Payload), "token") {
 		t.Fatalf("forged token: %+v %s", msg, msg.Payload)
+	}
+	if msg := wsRead(t, ctx, c); msg.Type != "complete" || msg.ID != "1" {
+		t.Fatalf("forged token, stream not ended: %+v %s", msg, msg.Payload)
 	}
 	q, _ := json.Marshal(map[string]any{"query": `{ dund { listSessions { items { id } } } }`})
 	wsWrite(t, ctx, c, wsMsg{ID: "2", Type: "subscribe", Payload: q})
@@ -133,4 +141,33 @@ func TestSubscriptionRefusesWithoutAValidToken(t *testing.T) {
 		}
 		return
 	}
+}
+
+// The same stream over REST: Server-Sent Events, bearer and token both.
+func TestSessionEventsOverSSE(t *testing.T) {
+	srv, tok, _ := setup(t)
+	_, m := call(t, srv, tok, "POST", "/api/v1/sessions", map[string]any{"workspace": t.TempDir()})
+	id := m["id"].(string)
+	_, tk := call(t, srv, tok, "POST", "/api/v1/sessions/"+id+"/subscribe-token", nil)
+	q := url.Values{"session": {id}, "principal": {tk["principal"].(string)},
+		"timestamp": {fmt.Sprint(int64(tk["timestamp"].(float64)))}, "hmac": {tk["hmac"].(string)}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/v1/session-events?"+q.Encode(), nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); resp.StatusCode != 200 || !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("%d %s", resp.StatusCode, ct)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		if strings.HasPrefix(sc.Text(), "data:") && strings.Contains(sc.Text(), `"type":"ready"`) {
+			return
+		}
+	}
+	t.Fatalf("no ready event: %v", sc.Err())
 }
