@@ -1602,8 +1602,9 @@ func (m tuiModel) suggestActive() bool {
 		(m.suggestMode == "on" || strings.TrimSpace(m.input.Value()) == "")
 }
 
-// sendUser ships a user message to the engine (from the input or a suggestion),
-// echoes it, and clears transient UI (suggestions, input).
+// sendUser ships a user message to the engine (from the input or a suggestion)
+// and clears transient UI (suggestions, input). The message is rendered when
+// the engine's `user` event comes back, as it is on every other client.
 func (m tuiModel) sendUser(v string) tuiModel {
 	// In agent scope the input steers that CHILD instead of the session. Same
 	// gesture the parent's agent_monitor(tell:) makes, same code path in the
@@ -1619,12 +1620,10 @@ func (m tuiModel) sendUser(v string) tuiModel {
 		m.refresh()
 		return m
 	}
-	m.task = v
 	m.history = append(m.history, v)
 	m.histIdx = len(m.history)
 	m.input.Reset()
 	m.suggestions = nil
-	m.appendUser(v)
 	if m.replaying {
 		m.append(stDim.Render("replaying a trace — there is no engine to send to"))
 		m.refresh()
@@ -1641,13 +1640,20 @@ func (m tuiModel) sendUser(v string) tuiModel {
 	return m
 }
 
-// sendAnswer resolves the ask: echoes the answer, ships it to the engine, and
-// resets to the input pane.
+// sendAnswer resolves the ask: ships the answer to the engine and resets to
+// the input pane.
 func (m tuiModel) sendAnswer(v string) tuiModel {
-	m.appendUser(v)
 	if !m.proc.answer(v) {
 		m.append(stErr.Render("no engine right now — answer not sent"))
 	}
+	m = m.clearAsk()
+	m.refresh()
+	return m
+}
+
+// clearAsk returns to the input pane with no question open. The answer is
+// rendered from the engine's `answered` event.
+func (m tuiModel) clearAsk() tuiModel {
 	m.asking, m.noting, m.customAnswer = false, false, false
 	m.askOptions, m.askSel, m.askNote = nil, 0, ""
 	m.askMulti, m.askChecked = false, nil
@@ -1655,7 +1661,6 @@ func (m tuiModel) sendAnswer(v string) tuiModel {
 	m.input.placeholder = "ask dun to do something…"
 	m.input.Focus()
 	m.focus = focusInput
-	m.refresh()
 	return m
 }
 
@@ -1974,31 +1979,53 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 	case "retry":
 		return m.handleRetry(ev)
-	case "queued":
-		// The message was buffered into the RUNNING turn rather than starting a new
-		// one. Mark it as provisional in the conversation so the user sees it
-		// where it belongs — not stuck above the divider. When the turn ends
-		// the provisional markers are cleared and the messages render normally.
-		text := str(ev["text"])
-		if text != "" {
-			// If the last entry is already provisional, this is a new message
-			// that needs its own entry (not the echo from sendUser).
-			if len(m.convo) > 0 && m.convo[len(m.convo)-1].provisional {
-				m.convo = append(m.convo, convoEntry{
-					collapsed:       stDim.Render("› " + text + " (queued)"),
-					provisional:     true,
-					provisionalText: text,
-					userText:        text,
-				})
-			} else if len(m.convo) > 0 {
-				// Mark the echo that sendUser just appended as provisional.
-				e := &m.convo[len(m.convo)-1]
-				e.provisional = true
-				e.provisionalText = text
-				e.collapsed = stDim.Render("› " + text + " (queued)")
-				e.invalidateWrap()
-			}
+	case "user":
+		// The engine took a user message — from this client or another. It is
+		// rendered here, not when sent, so every client shows the same
+		// conversation. One buffered into the RUNNING turn is marked
+		// provisional so it shows where it belongs — not stuck above the
+		// divider; the marks clear when the turn ends.
+		text := str(ev["content"])
+		if ev["queued"] == true {
+			m.convo = append(m.convo, convoEntry{
+				collapsed:       stDim.Render("› " + text + " (queued)"),
+				provisional:     true,
+				provisionalText: text,
+				userText:        text,
+			})
+		} else {
+			m.task = text
+			m.appendUser(text)
 		}
+		m.scrollPinned = true
+		m.refresh()
+	case "turn":
+		m.busy = true
+		if m.busyStart.IsZero() {
+			m.busyStart = time.Now()
+		}
+		m.suggestions = nil
+	case "answered":
+		// The open question is settled, whoever answered it.
+		// The client that answered has already closed it; on another, it is
+		// still open and closes now.
+		m.appendUser(str(ev["value"]))
+		if m.asking {
+			m = m.clearAsk()
+		}
+		m.refresh()
+	case "settings":
+		m.model, m.url = str(ev["model"]), str(ev["url"])
+		if p := str(ev["provider"]); p != "" {
+			m.provider = p
+		}
+		rephrasePrompt = ev["rephrase"] == true
+		if mode := str(ev["suggest"]); mode != "" {
+			m.suggestMode = mode
+		}
+	case "queued":
+		// The message itself arrived as a `user` event (queued); this is the
+		// count of what the running turn has buffered.
 		m.queuedMsgs = int(evNum(ev["count"]))
 		// Track OOB messages for /context.
 		m.ctxStats.oobMessages++
@@ -3461,7 +3488,10 @@ func suggestSlash(m *tuiModel, args []string) tea.Cmd {
 	mode := strings.ToLower(args[0])
 	switch mode {
 	case "on", "off", "auto":
+		// Shared by every client of the session: the engine holds it and
+		// confirms with a settings event.
 		m.suggestMode = mode
+		m.proc.controlCmd("suggest", mode)
 		label := map[string]string{"on": "always", "off": "never", "auto": "when idle"}[mode]
 		m.append(stDim.Render("suggestions: " + mode + " (" + label + ")"))
 	default:

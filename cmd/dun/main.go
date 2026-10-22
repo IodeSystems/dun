@@ -233,6 +233,13 @@ func main() {
 	startPprof()
 	suggestEnabled = !*noSuggest // the UI may ASK for next-message suggestions (on by default)
 	rephraseOn = *rephrase
+	if !suggestEnabled {
+		suggestMode = "off"
+	}
+	engineModel, engineURL = *model, *url
+	if p, ok := fc.providerAt(*url); ok {
+		engineProvider = p.Name
+	}
 	// Resolve the effective key: explicit flag > env > saved config.
 	// The saved key is the one of the provider at --url, so a --url naming
 	// another configured provider gets that provider's key.
@@ -535,6 +542,7 @@ func main() {
 					if !ok {
 						return "", fmt.Errorf("input closed")
 					}
+					em.emit(&proto.Answered{Value: a})
 					return a, nil
 				case <-actx.Done():
 					return "", actx.Err()
@@ -549,6 +557,7 @@ func main() {
 					if !ok {
 						return false, fmt.Errorf("input closed")
 					}
+					em.emit(&proto.Answered{Value: a})
 					return strings.TrimSpace(strings.ToLower(a)) == "yes" || strings.TrimSpace(strings.ToLower(a)) == "y", nil
 				case <-actx.Done():
 					return false, actx.Err()
@@ -710,6 +719,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	em.emit(&proto.Ready{Tools: h.ToolNames(), Servers: serversProto(h.Servers()),
 		Hint: serverHint(h.Servers())})
 	em.emit(catalogEvent(h))
+	em.emit(settingsEvent())
 	// Server commands (/rag, /lsp) are handled on the READER's goroutine, not
 	// here: this loop is blocked inside a turn most of the time, and "turn the
 	// docs server on" should not queue behind a five-minute agent run. The
@@ -727,6 +737,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// knowledge in sync (a bare /rephrase from the TUI still round-trips).
 		if id == "rephrase" {
 			rephraseOn = action == "on"
+			em.emit(settingsEvent())
 			return
 		}
 		// /close is handled here rather than in runControlCmd because it is
@@ -745,7 +756,13 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// goroutine, and h.Suggestions is a full LLM round-trip. Running it here
 		// blocked every `answer` and `user` event for the length of a model call.
 		if id == "suggest" {
-			go emitSuggestions(ctx, h, em)
+			switch action {
+			case "on", "off", "auto":
+				suggestMode = action
+				em.emit(settingsEvent())
+			default:
+				go emitSuggestions(ctx, h, em)
+			}
 			return
 		}
 		// /remember: the memory fork, a full LLM round-trip — detached for the
@@ -859,6 +876,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			return false
 		}
 		h.Say(text)
+		em.emit(&proto.UserEcho{Content: text, Queued: true})
 		em.emit(&proto.Queued{Text: text, Count: h.Queued()})
 		return true
 	})
@@ -949,6 +967,7 @@ func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
 // job's completion notification, or a message buffered mid-turn) and emits its
 // events.
 func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
+	em.emit(&proto.Turn{Kind: "continue"})
 	tctx, end := beginTurn(ctx)
 	defer end()
 	turnActive.Store(true)
@@ -1260,6 +1279,21 @@ var suggestEnabled bool
 // be right when a turn actually runs.
 var rephraseOn bool
 
+// suggestMode is when a client shows suggestions: on (always), off, auto
+// (idle with an empty input). One value per session, shared by every client;
+// /suggest on|off|auto sets it.
+var suggestMode = "auto"
+
+// engineModel, engineURL and engineProvider are what this engine runs on, for
+// the settings event. Set once at start.
+var engineModel, engineURL, engineProvider string
+
+// settingsEvent is the session's shared toggles.
+func settingsEvent() *proto.Settings {
+	return &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
+		Rephrase: rephraseOn, Suggest: suggestMode}
+}
+
 // turnTimeout is --timeout applied PER TURN (interactive engine only; 0 = none).
 // See the comment where it is set.
 var turnTimeout time.Duration
@@ -1276,6 +1310,10 @@ var turnActive atomic.Bool
 // succeeded — NOT whether the engine should stop. A failed turn never ends the
 // session: the conversation is on disk and the next message picks up from it.
 func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
+	// What the user typed, before any rephrase: every client renders the
+	// message from this, not from what it sent itself.
+	em.emit(&proto.UserEcho{Content: task})
+	em.emit(&proto.Turn{Kind: "user"})
 	tctx, end := beginTurn(ctx)
 	defer end()
 	turnActive.Store(true)

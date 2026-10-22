@@ -39,6 +39,10 @@ func init() {
 	event[AgentTold]("agent_told")
 	event[Suggestions]("suggestions")
 	event[Exit]("exit")
+	event[UserEcho]("user")
+	event[Turn]("turn")
+	event[Answered]("answered")
+	event[Settings]("settings")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -360,6 +364,36 @@ type Suggestion struct {
 // Exit: the engine is ending.
 type Exit struct {
 	Reason string `json:"reason"`
+}
+
+// --- what one client did, for every other ---
+
+// UserEcho is a user message the engine took, sent to every client so each
+// renders it — not just the one that typed it. Queued says it went into the
+// running turn rather than starting one.
+type UserEcho struct {
+	Content string `json:"content"`
+	Queued  bool   `json:"queued,omitempty"`
+}
+
+// Turn: a turn started. Kind is "user" (a message started it) or "continue"
+// (background work did).
+type Turn struct {
+	Kind string `json:"kind"`
+}
+
+// Answered: the open ask (or mount) got its answer.
+type Answered struct {
+	Value string `json:"value"`
+}
+
+// Settings is the session's shared toggles, sent at ready and on each change.
+type Settings struct {
+	Model    string `json:"model"`
+	Provider string `json:"provider,omitempty"`
+	URL      string `json:"url"`
+	Rephrase bool   `json:"rephrase"`
+	Suggest  string `json:"suggest"` // on | off | auto
 }
 
 // --- the protocol's own ---

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -57,8 +58,45 @@ type bufCloser struct{ io.Writer }
 func (bufCloser) Close() error { return nil }
 
 func key(m tuiModel, k tea.KeyMsg) tuiModel {
+	busy := m.busy
 	nm, _ := m.Update(k)
-	return nm.(tuiModel)
+	m = nm.(tuiModel)
+	if m.proc != nil {
+		if e, ok := m.proc.stdin.(*echoWC); ok {
+			m = e.echo(m, busy)
+		}
+	}
+	return m
+}
+
+// echoWC is a fake engine's stdin: it records the commands the TUI writes,
+// and key() answers each with the events the engine sends back — the `user`
+// echo (queued when a turn was running) and `answered`.
+type echoWC struct{ buf bytes.Buffer }
+
+func (e *echoWC) Write(p []byte) (int, error) { return e.buf.Write(p) }
+func (e *echoWC) Close() error                { return nil }
+
+func (e *echoWC) echo(m tuiModel, busy bool) tuiModel {
+	sc := bufio.NewScanner(&e.buf)
+	for sc.Scan() {
+		var c map[string]any
+		if json.Unmarshal(sc.Bytes(), &c) != nil {
+			continue
+		}
+		switch c["type"] {
+		case "user":
+			if busy {
+				m = m.handleEvent(evMsg{"type": "user", "content": c["content"], "queued": true})
+			} else {
+				m = m.handleEvent(evMsg{"type": "user", "content": c["content"]})
+			}
+		case "answer":
+			m = m.handleEvent(evMsg{"type": "answered", "value": c["value"]})
+		}
+	}
+	e.buf.Reset()
+	return m
 }
 
 var (
@@ -122,6 +160,7 @@ func (v *vtui) event(ev map[string]any) {
 func (v *vtui) send(msg string) {
 	v.m = typeStr(v.m, msg)
 	v.m = key(v.m, kEnter)
+	v.event(map[string]any{"type": "user", "content": msg}) // the engine's echo
 }
 
 // view returns the full rendered output with ANSI codes stripped.
@@ -230,7 +269,7 @@ func TestTUI_FocusToggleAndSelection(t *testing.T) {
 // having to press enter to wake it up is the bug this covers. Note `n`, which
 // starts a detail on an option row, has to type an "n" here instead.
 func TestTUI_AskCustomRowTypesWithoutEnter(t *testing.T) {
-	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	m = key(m, kDown)
 	m = key(m, kDown) // past B, onto the custom row
@@ -291,7 +330,7 @@ func TestTUI_AskCustomRowStillNavigable(t *testing.T) {
 // The ask picker: ↑/↓ choose an option, `n` attaches a detail, enter sends
 // "<option> — <detail>".
 func TestTUI_AskPickerOptionWithNote(t *testing.T) {
-	proc := &dunProc{stdin: discardWC{}}
+	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
 	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	if !m.asking || len(m.askOptions) != 2 || m.askSel != 0 {
@@ -324,7 +363,7 @@ func TestTUI_AskPickerOptionWithNote(t *testing.T) {
 // Regression for a session where the model asked with no options and typing an
 // answer was inert.
 func TestTUI_AskNoOptionsFreeText(t *testing.T) {
-	proc := &dunProc{stdin: discardWC{}}
+	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
 	m = m.handleEvent(evMsg{"type": "ask", "question": "What is your favorite color?", "options": nil})
 	if !m.asking || len(m.askOptions) != 0 {
@@ -350,7 +389,7 @@ func TestTUI_AskNoOptionsFreeText(t *testing.T) {
 // multi:true → enter toggles the highlighted option (space is a typed char, not
 // a toggle), and a trailing "✓ done" row submits the joined set.
 func TestTUI_AskMultiSelect(t *testing.T) {
-	proc := &dunProc{stdin: discardWC{}}
+	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
 	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B", "C"}, "multi": true})
 	if !m.askMulti || len(m.askChecked) != 3 {
@@ -383,7 +422,7 @@ func TestTUI_AskMultiSelect(t *testing.T) {
 
 // The custom/chat row lets you type a free-text answer.
 func TestTUI_AskPickerCustomAnswer(t *testing.T) {
-	proc := &dunProc{stdin: discardWC{}}
+	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
 	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	m = key(m, kDown)
@@ -566,7 +605,7 @@ func TestTUI_Suggestions(t *testing.T) {
 func TestTUI_ArrowNav(t *testing.T) {
 	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
 	kRight := tea.KeyMsg{Type: tea.KeyRight}
-	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
@@ -1091,7 +1130,7 @@ func TestTUI_TurnRetryDiscardsPartialReply(t *testing.T) {
 // Giving up is not the end of the session: the conversation is on disk, so the
 // user is told that another message resumes from here.
 func TestTUI_GiveUpKeepsSessionUsable(t *testing.T) {
-	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 100, 30)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
@@ -1126,13 +1165,13 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	if strings.TrimSpace(m.input.Value()) != "" {
 		t.Errorf("input not cleared; the message was refused while busy: %q", m.input.Value())
 	}
-	// The echo is in the convo right after sendUser.
-	echoed := stripANSI(convoText(m))
-	if !strings.Contains(echoed, "also update the README") {
-		t.Error("mid-turn message not echoed after sendUser")
+	// Nothing is rendered until the engine echoes it.
+	if strings.Contains(stripANSI(convoText(m)), "also update the README") {
+		t.Error("mid-turn message rendered before the engine took it")
 	}
 
-	// The queued event marks the echo as provisional (dimmed, in-place).
+	// The engine's echo (queued) shows it provisional, dimmed, in place.
+	m = m.handleEvent(evMsg{"type": "user", "content": "also update the README", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "also update the README", "count": 1.0})
 	if m.queuedMsgs != 1 {
 		t.Errorf("queuedMsgs = %d; want 1", m.queuedMsgs)
@@ -1158,6 +1197,7 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	}
 
 	// A second one batches with it.
+	m = m.handleEvent(evMsg{"type": "user", "content": "and the changelog", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "and the changelog", "count": 2.0})
 	found2 := false
 	for _, e := range m.convo {
@@ -1204,6 +1244,7 @@ func TestTUI_QueuedMessagesOnError(t *testing.T) {
 
 	m = typeStr(m, "fix this bug")
 	m = key(m, kEnter)
+	m = m.handleEvent(evMsg{"type": "user", "content": "fix this bug", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "fix this bug", "count": 1.0})
 	// The message should be provisional in the convo.
 	found := false
@@ -2009,7 +2050,7 @@ func TestMultilineInput_LeftAtFrontHopsToConvo(t *testing.T) {
 
 func withActivity(t *testing.T) tuiModel {
 	t.Helper()
-	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
@@ -2461,9 +2502,8 @@ func TestTUI_PendingClearedOnToolResult(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
-	// First append the echo (sendUser does this), then the queued event marks it.
-	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› fix the bug")})
 	// Simulate a queued mid-turn message (the "queued" event).
+	m = m.handleEvent(evMsg{"type": "user", "content": "fix the bug", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "fix the bug", "count": 1.0})
 	// The message should be provisional in the convo.
 	found := false
@@ -2713,8 +2753,7 @@ func TestTUI_PendingFlushedOnDone(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
-	// Queue a mid-turn message (echo first, then queued event marks it).
-	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› also check tests")})
+	m = m.handleEvent(evMsg{"type": "user", "content": "also check tests", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "also check tests", "count": 1.0})
 
 	// No tool_call/tool_result — just tokens and done.
@@ -2739,10 +2778,9 @@ func TestTUI_MultiplePendingMessages(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
-	// Echo first, then queued event marks it.
-	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› first")})
+	m = m.handleEvent(evMsg{"type": "user", "content": "first", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "first", "count": 1.0})
-	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› second")})
+	m = m.handleEvent(evMsg{"type": "user", "content": "second", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "second", "count": 2.0})
 
 	// Both should be provisional.
@@ -2774,8 +2812,7 @@ func TestTUI_PendingClearedOnError(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
-	// Echo first (sendUser does this), then queued event marks it.
-	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› before crash")})
+	m = m.handleEvent(evMsg{"type": "user", "content": "before crash", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "before crash", "count": 1.0})
 	m = m.handleEvent(evMsg{"type": "error", "error": "provider down"})
 
