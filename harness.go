@@ -250,6 +250,10 @@ type Config struct {
 	// stream is not teed at all.
 	OnReasoning func(string)
 	OnToolCall  func(tool string, args map[string]any, result string)
+	// OnServerStarted reports an added (non-built-in) server that started in
+	// the background at session start: err is nil when it is up and its
+	// tools have joined the tool set.
+	OnServerStarted func(id string, err error)
 	// OnNotify fires when a plain notification (KindNotification) is injected
 	// into the conversation (e.g. a background job's completion).
 	OnNotify func(text string)
@@ -1012,14 +1016,38 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// refuses to run is worth SAYING (it lands in Servers()[i].Err, which the
 	// UI reports), but it is not worth refusing to start the session over. The
 	// user can fix the binary and /rag on without losing the session.
+	//
+	// They start at once, not one after another: a session waits for its
+	// slowest built-in, not for the sum. An ADDED server — often remote, now
+	// and then behind a login gate that answers with a web page and burns the
+	// whole discovery timeout — does not hold the session up at all: it starts
+	// in the background and its tools join the tool set when it is up.
+	var builtins sync.WaitGroup
 	for _, s := range servers {
 		if !s.Autostart || !ownsMgr {
 			continue
 		}
-		if err := h.startServer(ctx, s); err != nil {
-			log.Printf("dun: %s did not start: %v", s.ID, err)
+		if !builtinServer(s.ID) {
+			go func() {
+				err := h.startServer(ctx, s)
+				if err != nil {
+					log.Printf("dun: %s did not start: %v", s.ID, err)
+				}
+				if cfg.OnServerStarted != nil {
+					cfg.OnServerStarted(s.ID, err)
+				}
+			}()
+			continue
 		}
+		builtins.Add(1)
+		go func() {
+			defer builtins.Done()
+			if err := h.startServer(ctx, s); err != nil {
+				log.Printf("dun: %s did not start: %v", s.ID, err)
+			}
+		}()
 	}
+	builtins.Wait()
 	// Carry the client's own retry narration out to the UI. Without this the
 	// waiting is only ever logged, and a TUI's log is not on screen.
 	applyRetryPolicy(cfg.Client)

@@ -516,6 +516,23 @@ func main() {
 		in = newInputStream()
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
+		// An added server that came up (or did not) after the session started.
+		// Before Start returns there is no harness to describe; the ready
+		// event that follows carries the server list instead.
+		cfg.OnServerStarted = func(id string, err error) {
+			h, _ := started.Load().(*dun.Harness)
+			if h == nil {
+				return
+			}
+			msg := id + ": " + runningSummary(h, id)
+			if err != nil {
+				msg = id + ": did not start — " + oneLine(err.Error())
+			}
+			em.emit(&proto.ServerEvent{ID: id, Action: "start", Message: msg,
+				Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
+			em.emit(catalogEvent(h))
+			em.emit(commandsEvent(h))
+		}
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
 			em.emit(&proto.ToolCall{Tool: tool, Args: args})
 			em.emit(&proto.ToolResult{Tool: tool, Result: result})

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
 )
@@ -394,5 +395,41 @@ func TestFilterTools_EmptyDenyPassesAll(t *testing.T) {
 	// Empty Disable list = no filter → pass everything through
 	if len(got) != 1 {
 		t.Fatalf("got %d tools, want 1", len(got))
+	}
+}
+
+// An added server that hangs (a login gate answering with a page, say) does
+// not hold up the session: Start returns at once, and the failure arrives
+// later through OnServerStarted.
+func TestStart_AddedServerStartsInTheBackground(t *testing.T) {
+	dir := t.TempDir()
+	reported := make(chan error, 1)
+	t0 := time.Now()
+	h, err := Start(context.Background(), Config{
+		Workspace: dir,
+		Servers: []Server{{
+			ID: "slow", Command: "sh", Timeout: 2, Autostart: true,
+			Args: []string{"-c", "sleep 30"}, // never speaks MCP
+		}},
+		OnServerStarted: func(id string, err error) {
+			if id == "slow" {
+				reported <- err
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if d := time.Since(t0); d > time.Second {
+		t.Fatalf("Start waited %s for an added server", d)
+	}
+	select {
+	case err := <-reported:
+		if err == nil {
+			t.Error("a server that never spoke MCP was reported up")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no report for the background server")
 	}
 }
