@@ -64,24 +64,22 @@ bridges their tools into an agentkit loop, and works a task against any
 OpenAI-compatible endpoint.
 
 ```sh
-make install   # puts a self-rebuilding LAUNCHER on PATH ($GOPATH/bin/dun)
+make install   # builds the stamped binary into ~/.local/bin/dun (BINDIR=… to change)
 # mcpshell must be on PATH; poly-lsp-mcp and raglit only if you use /lsp, /rag
 
 dun --setup   # Bubble Tea wizard: LLM url / masked key / model (navigable list
               # of the endpoint's models). Saves to ~/.dun/config.json; re-run
               # any time. Precedence: --flag > env > config > built-in default.
 
-# `dun` on PATH is a LAUNCHER script (tools/dun.sh), not the binary: on each
-# launch it rebuilds from the source tree if any .go / go.mod changed — this
-# repo AND any local `replace` target in go.mod, so editing agentkit counts —
-# then execs the result. stdin, the tty, signals, argv and the exit code pass
-# straight through. ~55ms when nothing changed. The binary it manages lives in
-# ~/.cache/dun (override: DUN_BIN); skip the check with DUN_NO_AUTOBUILD=1.
+# The stamped binary updates itself from this source tree
+# (cmd/dun/selfupdate.go). A plain `go install ./cmd/dun` leaves srcDir empty
+# and never updates.
 #
-# Why a script: a binary on PATH is only as fresh as the last reinstall. The
-# in-binary updater (cmd/dun/selfupdate.go) still works for a stamped build —
-# `make install-bin` — but a plain `go install ./cmd/dun` leaves srcDir empty
-# and then silently never updates again.
+# `make install-launcher` instead puts a LAUNCHER script (tools/dun.sh) on
+# $GOPATH/bin: on each launch it rebuilds from the source tree if any .go /
+# go.mod changed — this repo AND any local `replace` target in go.mod — then
+# execs the result. ~55ms when nothing changed. The binary it manages lives in
+# ~/.cache/dun (override: DUN_BIN); skip the check with DUN_NO_AUTOBUILD=1.
 # Plain build without install:  go build -o dun ./cmd/dun
 
 # interactive Bubble Tea UI — the DEFAULT, no flag needed

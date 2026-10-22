@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dun launcher — what `make install` puts on your PATH.
+# dun launcher — what `make install-launcher` puts on your PATH.
 #
 # A script rather than the binary, because a binary on PATH is only as fresh as
 # the last time someone remembered to reinstall it. The in-binary self-update
@@ -73,7 +73,7 @@ rebuild() {
 	return 1
 }
 
-[ -d "$SRCDIR" ] || die "source tree $SRCDIR is gone — reinstall with 'make install' from a checkout"
+[ -d "$SRCDIR" ] || die "source tree $SRCDIR is gone — reinstall with 'make install-launcher' from a checkout"
 
 if [ "${DUN_NO_AUTOBUILD:-}" != "1" ] && stale; then
 	command -v go >/dev/null || die "go is not on PATH — cannot rebuild"
@@ -89,5 +89,5 @@ if [ "${DUN_NO_AUTOBUILD:-}" != "1" ] && stale; then
 	fi
 fi
 
-[ -x "$BIN" ] || die "no binary at $BIN — run 'make install' from $SRCDIR"
+[ -x "$BIN" ] || die "no binary at $BIN — run 'make install-launcher' from $SRCDIR"
 exec "$BIN" "$@"
