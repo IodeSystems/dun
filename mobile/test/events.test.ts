@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import { apply, applySnapshot, empty, filterModels, interruptedNote, interrupting, parseLine, replaceWith, suggest, type View } from '../src/lib/events';
+import { apply, applySnapshot, empty, filterModels, interruptedNote, interrupting, isKillAll, parseLine, replaceWith, suggest, type View } from '../src/lib/events';
 
 const run = (evs: Record<string, unknown>[], v: View = empty) => evs.reduce(apply, v);
 
@@ -153,6 +153,21 @@ test('an interrupted turn keeps its partial reply, ends with a note, and keeps q
   expect(w.items[2]).toMatchObject({ text: 'Starting with' });
   expect(w.items[3]).toMatchObject({ text: interruptedNote });
   expect(w.items[1]).toMatchObject({ queued: true });
+});
+
+test('an interrupted turn names the jobs it left running', () => {
+  const v = run([{ type: 'user', content: 'go' }, { type: 'turn', kind: 'user' }]);
+  const detail = 'still running: #3 go test ./... (2m) — /jobs kill 3 to stop it';
+  const w = apply(v, { type: 'done', reason: 'interrupted', detail });
+  expect(w.items.slice(-2)).toMatchObject([{ text: interruptedNote }, { kind: 'note', text: detail }]);
+  expect(apply(v, { type: 'done', reason: 'interrupted' }).items.at(-1)).toMatchObject({ text: interruptedNote });
+});
+
+test('only /jobs kill all asks first', () => {
+  expect(isKillAll('jobs kill all')).toBe(true);
+  expect(isKillAll('/jobs KILL all ')).toBe(true);
+  expect(isKillAll('jobs kill 3')).toBe(false);
+  expect(isKillAll('jobs')).toBe(false);
 });
 
 test('interrupting is a no-op when idle, and an idle answer clears it', () => {

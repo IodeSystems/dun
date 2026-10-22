@@ -13,7 +13,7 @@ import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
-import { apply, empty, interrupting, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
+import { apply, empty, interrupting, isKillAll, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
 import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
@@ -101,6 +101,7 @@ export default function Session() {
     const name = line.trim().split(/\s+/)[0]?.toLowerCase();
     if (name === 'close' && !(await confirm('Close', 'Remove this session\'s worktree and branch and forget its transcript, for good?'))) return;
     if (name === 'clear' && !(await confirm('Clear', 'Clear the conversation and start a fresh session log?'))) return;
+    if (isKillAll(line) && !(await confirm('Kill jobs', 'Kill every running background job, and everything each one started?'))) return;
     // The engine answers /mcp tools <id> with the list; the panel shows it.
     const want = toolsRequest(line);
     if (want) setToolsFor(want);
