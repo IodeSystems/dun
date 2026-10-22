@@ -278,6 +278,52 @@ func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
 	return msg
 }
 
+// memoriesListing renders /memories: each note's question (or its first
+// line), when it was written, and what has happened to it since.
+func memoriesListing(ms []dun.MemoryInfo, on bool) string {
+	if !on {
+		return "memories: the docs index is off — /rag on (notes are kept on disk either way)"
+	}
+	if len(ms) == 0 {
+		return "memories: none for this project yet — /remember, or say \"remember, …\""
+	}
+	var b strings.Builder
+	live, void := 0, 0
+	for _, m := range ms {
+		if m.Void {
+			void++
+		} else {
+			live++
+		}
+	}
+	fmt.Fprintf(&b, "memories — %d current, %d void", live, void)
+	for _, m := range ms {
+		title := m.Question
+		if title == "" {
+			title, _, _ = strings.Cut(m.Body, "\n")
+		}
+		if len(title) > 100 {
+			title = title[:100] + "…"
+		}
+		var tags []string
+		tags = append(tags, m.Date)
+		if m.Refined > 0 {
+			tags = append(tags, fmt.Sprintf("refined %d×", m.Refined))
+		}
+		if m.Confirmed != "" {
+			tags = append(tags, "confirmed "+m.Confirmed)
+		} else if m.StaleConfirm {
+			tags = append(tags, "confirmed before a later change")
+		}
+		if m.Void {
+			tags = append(tags, "void: "+oneLine(m.VoidWhy))
+		}
+		fmt.Fprintf(&b, "\n  %s  · %s", title, strings.Join(tags, " · "))
+	}
+	b.WriteString("\nto fix one, tell the model (\"that note about X is wrong, it's Y\") — it refines or voids it with you as the source")
+	return b.String()
+}
+
 // catalogEvent tells the UI which skills and MCP prompts are in reach, so
 // /skill can list them and each prompt can be a slash command.
 func catalogEvent(h *dun.Harness) event {

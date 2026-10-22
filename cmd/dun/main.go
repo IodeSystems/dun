@@ -777,6 +777,11 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
+		// /memories: the project's notes and what has happened to them.
+		if id == "memories" {
+			em.emit(event{"type": "control", "id": id, "message": memoriesListing(h.Memories(), h.Remembering())})
+			return
+		}
 		// An MCP prompt, run as a slash command: rendered here, sent back for
 		// the UI to submit as the user's message — so it is echoed, queued and
 		// recorded exactly like one typed.

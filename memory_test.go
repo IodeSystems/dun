@@ -51,37 +51,83 @@ func TestMemory_AddWritesAnIndexedNote(t *testing.T) {
 	}
 }
 
-func TestMemory_ReplaceAndRemoveFindTheNoteByPhrase(t *testing.T) {
+func TestMemory_RefineAndVoidFindTheNoteByPhraseAndKeepHistory(t *testing.T) {
 	m, ingested, forgot := testMemory(t)
-	meta := noteMeta{}
+	meta := noteMeta{Session: "s1", Commit: "c1"}
 	for _, c := range []string{"The build needs CGO_ENABLED=0.", "The tests need a running postgres."} {
-		if _, err := m.apply(memoryArgs{Action: "add", Content: c}, meta); err != nil {
+		if _, err := m.apply(memoryArgs{Action: "add", Content: c, Question: "What does " + c[4:9] + " need?"}, meta); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := m.apply(memoryArgs{Action: "replace", OldText: "The", Content: "x"}, meta); err == nil ||
+	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "The", Content: "x", Why: "w", Source: "user"}, meta); err == nil ||
 		!strings.Contains(err.Error(), "2 notes contain") {
 		t.Errorf("an ambiguous phrase must be refused, got %v", err)
 	}
-	if _, err := m.apply(memoryArgs{Action: "remove", OldText: "redis"}, meta); err == nil {
-		t.Error("a phrase in no note must be refused")
+	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "CGO_ENABLED", Content: "x"}, meta); err == nil ||
+		!strings.Contains(err.Error(), "why is required") {
+		t.Errorf("a refine without why must be refused, got %v", err)
+	}
+	if _, err := m.apply(memoryArgs{Action: "void", OldText: "postgres", Why: "w", Source: "guess"}, meta); err == nil {
+		t.Error("source must be user or code")
 	}
 
 	before, _ := filepath.Glob(filepath.Join(m.dir, "*.md"))
-	if _, err := m.apply(memoryArgs{Action: "replace", OldText: "CGO_ENABLED", Content: "The build needs CGO_ENABLED=1 since sqlite."}, meta); err != nil {
+	m.now = func() time.Time { return time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC) }
+	out, err := m.apply(memoryArgs{Action: "refine", OldText: "CGO_ENABLED", Content: "The build needs CGO_ENABLED=1 since sqlite.",
+		Why: "go.mod now requires mattn/go-sqlite3", Source: "code"}, noteMeta{Session: "s2", Commit: "c2"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	after, _ := filepath.Glob(filepath.Join(m.dir, "*.md"))
-	if len(after) != len(before) || (*ingested)[len(*ingested)-1] != (*ingested)[0] {
-		t.Errorf("replace must rewrite the same file (so the index replaces the document): %v → %v", before, after)
+	if len(after) != len(before) || (*ingested)[len(*ingested)-1] != (*ingested)[0] || !strings.HasPrefix(out, "refined ") {
+		t.Errorf("refine must rewrite the same file (so the index replaces the document): %v → %v", before, after)
+	}
+	path := (*ingested)[0]
+	n, _ := readNote(path)
+	if n.body != "The build needs CGO_ENABLED=1 since sqlite." || n.meta["date"] != "2026-10-21" ||
+		n.meta["session"] != "s1" || n.meta["refined"] != "2026-11-02" || n.meta["question"] == "" {
+		t.Errorf("refined note keeps where it came from and says when it changed: %+v", n)
+	}
+	log := readAttest(path)
+	if len(log) != 1 || log[0].Kind != "corrected" || log[0].Was != "The build needs CGO_ENABLED=0." ||
+		log[0].By != "dun:code" || log[0].Note == "" {
+		t.Errorf("the log keeps the old text and the reason: %+v", log)
 	}
 
-	if _, err := m.apply(memoryArgs{Action: "remove", OldText: "postgres"}, meta); err != nil {
-		t.Fatal(err)
+	out, err = m.apply(memoryArgs{Action: "void", OldText: "postgres", Why: "the tests use sqlite now", Source: "user"}, meta)
+	if err != nil || !strings.HasPrefix(out, "voided ") {
+		t.Fatal(out, err)
 	}
 	left, _ := filepath.Glob(filepath.Join(m.dir, "*.md"))
-	if len(left) != 1 || len(*forgot) != 1 {
-		t.Errorf("remove must forget and delete one note: left %v, forgot %v", left, *forgot)
+	kept, _ := filepath.Glob(filepath.Join(m.dir, "*.md"+voidSuffix))
+	if len(left) != 1 || len(kept) != 1 || len(*forgot) != 1 {
+		t.Errorf("void must forget the note and keep its file: left %v kept %v forgot %v", left, kept, *forgot)
+	}
+	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "postgres", Content: "x", Why: "w", Source: "user"}, meta); err == nil {
+		t.Error("a void note is not found again")
+	}
+}
+
+// A confirmation is of the text it saw: refining afterwards leaves it as
+// "confirmed before a later change" until someone confirms again.
+func TestMemory_ConfirmThenRefineIsAStaleConfirmation(t *testing.T) {
+	m, _, _ := testMemory(t)
+	_, _ = m.apply(memoryArgs{Action: "add", Content: "Deploys go through the zebra cluster.", Question: "Where do deploys go?"}, noteMeta{})
+	if _, err := m.apply(memoryArgs{Action: "confirm", OldText: "zebra", Why: "deploy.sh targets zebra", Source: "code"}, noteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	ls := m.list()
+	if len(ls) != 1 || ls[0].Confirmed != "2026-10-21" || ls[0].StaleConfirm {
+		t.Fatalf("confirmed: %+v", ls)
+	}
+	_, _ = m.apply(memoryArgs{Action: "refine", OldText: "zebra", Content: "Deploys go through the yak cluster.", Why: "moved", Source: "user"}, noteMeta{})
+	ls = m.list()
+	if ls[0].Confirmed != "" || !ls[0].StaleConfirm || ls[0].Refined != 1 {
+		t.Errorf("after a refine the confirmation is stale: %+v", ls[0])
+	}
+	_, _ = m.apply(memoryArgs{Action: "confirm", OldText: "yak", Why: "deploy.sh targets yak", Source: "code"}, noteMeta{})
+	if ls = m.list(); ls[0].Confirmed == "" || ls[0].StaleConfirm {
+		t.Errorf("a new confirmation of the current text clears it: %+v", ls[0])
 	}
 }
 

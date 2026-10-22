@@ -248,7 +248,11 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 				}
 				switch g {
 				case groupMemory:
-					b.WriteString("A note an earlier session on this project saved may apply (it records what was true then):\n")
+					// The cue is here because this is the one moment the model
+					// holds the evidence: it is working in what the note is about.
+					b.WriteString("A note an earlier session on this project saved may apply. It records what was true " +
+						"then; if the user or the code now says otherwise, fix it — memory action=refine (or void if it " +
+						"no longer applies) with why and source:\n")
 				case groupMCPDocs:
 					b.WriteString("From the documentation of an MCP server you have:\n")
 				}

@@ -57,20 +57,25 @@ func memoryToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "memory"
-	td.Function.Description = "Save a note for later sessions on this project. A saved note comes back to you " +
-		"unasked when a later conversation is about it. Save ONLY what a later session would need and could not " +
-		"get from the code, the git history or the docs: the user's preferences and corrections, decisions and " +
+	td.Function.Description = "Save a note for later sessions on this project, or fix one. A saved note comes back " +
+		"to you unasked when a later conversation is about it. Save ONLY what a later session would need and could " +
+		"not get from the code, the git history or the docs: the user's preferences and corrections, decisions and " +
 		"their reasons, pitfalls found the hard way. Do NOT save code facts, file contents or task progress. One " +
 		"fact per note, written to stand alone — the reader will not see this conversation. action add writes a " +
-		"new note; replace and remove find an existing note by old_text, a phrase copied from it."
+		"new note. A note records what was true when it was written: when the user says otherwise or the code " +
+		"shows otherwise, refine it (new content) or void it (no longer applies), with why and source; confirm " +
+		"one you checked against the code and found right. refine, void and confirm find the note by old_text, a " +
+		"phrase copied from it or its question."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"action":   map[string]any{"type": "string", "enum": []string{"add", "replace", "remove"}},
-			"content":  map[string]any{"type": "string", "description": "add/replace: the note — the fact and where it applies, and why it holds only if that was said; never add a reason or consequence nobody stated"},
-			"question": map[string]any{"type": "string", "description": "add/replace: the question this note answers, in the words a later user would ask it"},
-			"old_text": map[string]any{"type": "string", "description": "replace/remove: a phrase copied exactly from the note to change"},
-			"public":   map[string]any{"type": "boolean", "description": "share with everyone on this project (default: private to you)"},
+			"action":   map[string]any{"type": "string", "enum": []string{"add", "refine", "void", "confirm"}},
+			"content":  map[string]any{"type": "string", "description": "add/refine: the note — the fact and where it applies, and why it holds only if that was said; never add a reason or consequence nobody stated"},
+			"question": map[string]any{"type": "string", "description": "add/refine: the question this note answers, in the words a later user would ask it"},
+			"old_text": map[string]any{"type": "string", "description": "refine/void/confirm: a phrase copied exactly from the note or its question"},
+			"why":      map[string]any{"type": "string", "description": "refine/void/confirm: what the user said, or what in the code shows it (a file and what it says)"},
+			"source":   map[string]any{"type": "string", "enum": []string{"user", "code"}, "description": "refine/void/confirm: who says so — the user, or the code as it is now"},
+			"public":   map[string]any{"type": "boolean", "description": "add: share with everyone on this project (default: private to you)"},
 		},
 		"required": []string{"action"},
 	}
@@ -82,6 +87,8 @@ type memoryArgs struct {
 	Content  string `json:"content"`
 	Question string `json:"question"`
 	OldText  string `json:"old_text"`
+	Why      string `json:"why"`
+	Source   string `json:"source"`
 	Public   bool   `json:"public"`
 }
 
@@ -89,6 +96,8 @@ type memoryArgs struct {
 type noteMeta struct {
 	Session string
 	Commit  string
+	// extra is a rewritten note's existing frontmatter, kept over the above.
+	extra map[string]string
 }
 
 // memoryStore writes, replaces and removes notes in one directory, and keeps
@@ -116,7 +125,7 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 			return "", err
 		}
 		return "saved " + filepath.Base(path), nil
-	case "replace":
+	case "refine", "replace":
 		path, err := m.find(a.OldText)
 		if err != nil {
 			return "", err
@@ -124,42 +133,111 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		if err := scanNote(a.Content, a.Question); err != nil {
 			return "", err
 		}
-		// Same file, so the index replaces the document instead of adding one.
-		if err := m.write(path, a, meta); err != nil {
+		by, err := attestBy(a)
+		if err != nil {
 			return "", err
 		}
-		return "replaced " + filepath.Base(path), nil
-	case "remove":
+		old, err := readNote(path)
+		if err != nil {
+			return "", err
+		}
+		if a.Question == "" {
+			a.Question = old.meta["question"]
+		}
+		a.Public = old.meta["public"] == "true"
+		if err := m.attest(path, attestEntry{Kind: "corrected", Unit: old.unit(), Text: strings.TrimSpace(a.Content),
+			Note: a.Why, By: by, Was: old.body}); err != nil {
+			return "", err
+		}
+		// Same file, so the index replaces the document instead of adding one.
+		old.meta["refined"] = m.now().Format("2006-01-02")
+		delete(old.meta, "confirmed") // a confirmation was of the text this replaces
+		if err := m.write(path, a, noteMeta{Session: meta.Session, Commit: meta.Commit, extra: old.meta}); err != nil {
+			return "", err
+		}
+		return "refined " + filepath.Base(path) + " (the old text is kept in its log)", nil
+	case "void", "remove":
 		path, err := m.find(a.OldText)
 		if err != nil {
 			return "", err
 		}
-		if m.forget != nil {
-			if err := m.forget(path); err != nil {
-				return "", fmt.Errorf("not removed: the index refused it: %w", err)
-			}
-		}
-		if err := os.Remove(path); err != nil {
+		by, err := attestBy(a)
+		if err != nil {
 			return "", err
 		}
-		return "removed " + filepath.Base(path), nil
+		old, err := readNote(path)
+		if err != nil {
+			return "", err
+		}
+		// unsupported, not retract: in attest, retract withdraws an earlier
+		// ruling and leaves the unit untouched; unsupported is the one
+		// verdict that stops a claim counting.
+		if err := m.attest(path, attestEntry{Kind: "unsupported", Unit: old.unit(), Note: a.Why, By: by}); err != nil {
+			return "", err
+		}
+		if m.forget != nil {
+			if err := m.forget(path); err != nil {
+				return "", fmt.Errorf("not voided: the index refused it: %w", err)
+			}
+		}
+		// Kept, out of the *.md set that is listed and indexed: nothing a
+		// note said is destroyed.
+		if err := os.Rename(path, path+voidSuffix); err != nil {
+			return "", err
+		}
+		return "voided " + filepath.Base(path) + " (kept as " + filepath.Base(path+voidSuffix) + ")", nil
+	case "confirm":
+		path, err := m.find(a.OldText)
+		if err != nil {
+			return "", err
+		}
+		by, err := attestBy(a)
+		if err != nil {
+			return "", err
+		}
+		old, err := readNote(path)
+		if err != nil {
+			return "", err
+		}
+		if err := m.attest(path, attestEntry{Kind: "confirmed", Unit: old.unit(), Note: a.Why, By: by}); err != nil {
+			return "", err
+		}
+		old.meta["confirmed"] = m.now().Format("2006-01-02")
+		if err := m.write(path, memoryArgs{Content: old.body, Question: old.meta["question"], Public: old.meta["public"] == "true"},
+			noteMeta{extra: old.meta}); err != nil {
+			return "", err
+		}
+		return "confirmed " + filepath.Base(path), nil
 	default:
-		return "", fmt.Errorf("action must be add, replace or remove, not %q", a.Action)
+		return "", fmt.Errorf("action must be add, refine, void or confirm, not %q", a.Action)
 	}
 }
 
 func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) error {
+	// A rewritten note keeps when and where it was first written; refined
+	// and confirmed say what has happened to it since.
+	field := func(k, v string) string {
+		if old := meta.extra[k]; old != "" {
+			return old
+		}
+		return v
+	}
 	var b strings.Builder
 	b.WriteString("---\n")
 	if q := strings.TrimSpace(a.Question); q != "" {
 		b.WriteString("question: " + q + "\n")
 	}
-	b.WriteString("date: " + m.now().Format("2006-01-02") + "\n")
-	if meta.Session != "" {
-		b.WriteString("session: " + meta.Session + "\n")
+	b.WriteString("date: " + field("date", m.now().Format("2006-01-02")) + "\n")
+	if v := field("session", meta.Session); v != "" {
+		b.WriteString("session: " + v + "\n")
 	}
-	if meta.Commit != "" {
-		b.WriteString("commit: " + meta.Commit + "\n")
+	if v := field("commit", meta.Commit); v != "" {
+		b.WriteString("commit: " + v + "\n")
+	}
+	for _, k := range []string{"refined", "confirmed"} {
+		if v := meta.extra[k]; v != "" {
+			b.WriteString(k + ": " + v + "\n")
+		}
 	}
 	fmt.Fprintf(&b, "public: %t\n", a.Public)
 	b.WriteString("---\n")

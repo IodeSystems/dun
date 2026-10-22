@@ -3392,6 +3392,12 @@ func init() {
 		{"mcp", "[add | remove <id> | refresh <id> | on|off|restart [id]]", "MCP servers: bare lists them, add saves one (URL + optional bearer, or a command) for every workspace and indexes its docs, refresh re-indexes them", mcpSlash},
 		{"docker", "[on|off|status]", "exec backend: on (Docker), off (host), bare shows status", controlSlash("docker")},
 		{"worktree", "[status|new|commit]", "git: bare shows status (in place too), new isolates in a worktree, commit writes the message and asks", controlSlash("worktree")},
+		{"memories", "", "this project's saved notes: when written, refined, confirmed or void", func(m *tuiModel, _ []string) tea.Cmd {
+			if !m.proc.controlCmd("memories", "") {
+				m.append(stErr.Render("no engine right now — /reconnect first"))
+			}
+			return nil
+		}},
 		{"skill", "[name] [text]", "skills: bare lists them (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers); with a name, asks the model to use it", skillSlash},
 		{"remember", "[text]", "save a note for later sessions on this project (needs /rag on); bare: the model picks what to keep", func(m *tuiModel, args []string) tea.Cmd {
 			if !m.proc.controlCmd("remember", strings.Join(args, " ")) {
