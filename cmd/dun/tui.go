@@ -579,8 +579,13 @@ type tuiModel struct {
 	sessionID    string
 	restarts     int
 	restartStart time.Time
-	skipHistory  bool            // a respawned engine replays what is already on screen
-	wantServers  map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
+	// A reconnect that fails (dund not back yet) is retried with backoff
+	// until reconnectFor has passed since reconnSince; reconnTries counts
+	// the attempts, for the status line.
+	reconnTries int
+	reconnSince time.Time
+	skipHistory bool            // a respawned engine replays what is already on screen
+	wantServers map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
 	// The viewport's rendered text, cached behind a POINTER on purpose.
 	//
 	// Bubble Tea calls View() after EVERY message — including each streamed
@@ -675,7 +680,7 @@ func (m tuiModel) Init() tea.Cmd {
 	} else {
 		// The first engine never started. Come up anyway and keep trying —
 		// a TUI that refuses to open cannot even show you the error.
-		cmds = append(cmds, restartEngine(m.opts, "", false, 0))
+		cmds = append(cmds, restartEngine(m.opts, "", false, resumeAt{}))
 	}
 	return tea.Batch(cmds...)
 }
@@ -1335,26 +1340,39 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engineUpMsg:
 		if msg.err != nil {
-			m.restarts++
-			if m.restarts >= engineRestartMax {
-				m.fatalErr = "engine will not start: " + msg.err.Error()
-				m.append(stErr.Render(m.fatalErr + "\n/reconnect to try again"))
+			// dund may be on its way back (a restart into a new build takes a
+			// second; a crashed service is restarted by systemd after a few):
+			// keep trying, more slowly, for reconnectFor.
+			if m.reconnSince.IsZero() {
+				m.reconnSince = time.Now()
+			}
+			m.reconnTries++
+			if time.Since(m.reconnSince) >= reconnectFor {
+				m.fatalErr = fmt.Sprintf("cannot reach the session service (dund) after %d attempts: %v", m.reconnTries, msg.err)
+				m.append(stErr.Render(m.fatalErr + "\n/reconnect to try again · your conversation is saved: dun --continue"))
+				m.reconnTries, m.reconnSince = 0, time.Time{}
 				m.refresh()
 				return m, nil
 			}
-			m.fatalErr = "engine will not start: " + msg.err.Error() + " — retrying"
+			m.fatalErr = fmt.Sprintf("reconnecting… (attempt %d): %v", m.reconnTries+1, msg.err)
 			m.refresh()
-			return m, tea.Tick(engineRetryDelay, func(time.Time) tea.Msg { return retryEngineMsg{} })
+			return m, tea.Tick(reconnectDelay(m.reconnTries), func(time.Time) tea.Msg { return retryEngineMsg{} })
 		}
 		m.proc = msg.proc
 		m.fatalErr = ""
-		m.starting = true
-		m.startingStart = time.Now()
+		m.reconnTries, m.reconnSince = 0, time.Time{}
+		// A reattach may replay from the middle of a session whose engine is
+		// long up: no ready is coming. An engine that is starting says so
+		// (engine "started"), and that is what waits for ready.
+		if !msg.reattach {
+			m.starting = true
+			m.startingStart = time.Now()
+		}
 		m.refresh()
 		return m, waitEvent(m.proc.ch)
 
 	case retryEngineMsg:
-		return m, restartEngine(m.opts, m.sessionID, m.everUp, m.seenSeq())
+		return m, restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 
 	case tea.MouseMsg:
 		if m.paging {
@@ -2258,6 +2276,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		switch str(ev["state"]) {
 		case "started":
 			m.fatalErr, m.exitAnnounced = "", false
+			// A new engine: input waits for its ready.
+			if !m.starting {
+				m.starting, m.startingStart = true, time.Now()
+			}
 		case "restarting":
 			m.busy, m.asking = false, false
 			m.settleAsk()
@@ -2266,7 +2288,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.skipHistory = true // it will replay what is already on screen
 			m.append(stErr.Render(str(ev["reason"]) + " — restarting it; the session is kept"))
 		case "gave_up":
-			m.busy, m.asking = false, false
+			m.busy, m.asking, m.starting = false, false, false
 			m.settleAsk()
 			m.fatalErr = str(ev["reason"]) + " — gave up restarting it"
 			m.append(stErr.Render(m.fatalErr + "\n/reconnect to try again · your conversation is saved"))
@@ -3658,11 +3680,12 @@ func init() {
 		}},
 		{"reconnect", "", "restart the engine (after it gave up), keeping this session", func(m *tuiModel, _ []string) tea.Cmd {
 			m.restarts, m.restartStart = 0, time.Now()
+			m.reconnTries, m.reconnSince = 0, time.Time{}
 			m.fatalErr = ""
 			m.exitAnnounced = false
 			m.skipHistory = m.everUp
 			m.append(stDim.Render("reconnecting…"))
-			return restartEngine(m.opts, m.sessionID, m.everUp, m.seenSeq())
+			return restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 		}},
 		{"skill", "[name] [text]", "skills: bare lists them (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers); with a name, asks the model to use it", skillSlash},
 		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
@@ -4120,9 +4143,11 @@ type evMsg map[string]any
 type eofMsg struct{ proc *dunProc }
 
 // engineUpMsg carries a respawned engine (or why it could not be respawned).
+// reattach: it follows a session this TUI already shows.
 type engineUpMsg struct {
-	proc *dunProc
-	err  error
+	proc     *dunProc
+	err      error
+	reattach bool
 }
 
 // Engine deaths worth surviving are the ones a session can outlive: a turn that
@@ -4154,8 +4179,11 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	}
-	// It left on purpose (or we are leaving): let it go.
-	if m.quitting || m.reloadReq || m.exitAnnounced {
+	// We are leaving: let it go. An engine that announced its exit is not
+	// a reason to stay down: the connection is to dund, and its ending means
+	// dund went away (a restart into a new build stops the engines first,
+	// so their exit arrives just before the connection ends).
+	if m.quitting || m.reloadReq {
 		m.fatalErr = reason
 		m.refresh()
 		return m, nil
@@ -4171,10 +4199,11 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	}
 	m.restarts++
 	m.fatalErr = ""
+	m.reconnTries, m.reconnSince = 0, time.Now()
 	m.skipHistory = true // it will replay what is already on screen
 	m.append(stErr.Render(reason + " — reconnecting; the session is kept"))
 	m.refresh()
-	return m, restartEngine(m.opts, m.sessionID, true, m.seenSeq())
+	return m, restartEngine(m.opts, m.sessionID, true, m.seen())
 }
 
 // restartEngine spawns a replacement engine.
@@ -4186,7 +4215,7 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 //
 // after is the last event seq already shown: a reattach to the same session
 // follows on from it rather than replaying the session from the start.
-func restartEngine(o tuiOpts, sessionID string, reattach bool, after uint64) tea.Cmd {
+func restartEngine(o tuiOpts, sessionID string, reattach bool, after resumeAt) tea.Cmd {
 	return func() tea.Msg {
 		if reattach {
 			if sessionID != "" {
@@ -4198,13 +4227,13 @@ func restartEngine(o tuiOpts, sessionID string, reattach bool, after uint64) tea
 			}
 		}
 		if !reattach {
-			after = 0
+			after = resumeAt{}
 		}
 		p, err := attachSession(o, after)
 		if err != nil {
-			return engineUpMsg{err: err}
+			return engineUpMsg{err: err, reattach: reattach}
 		}
-		return engineUpMsg{proc: p}
+		return engineUpMsg{proc: p, reattach: reattach}
 	}
 }
 
@@ -4212,13 +4241,28 @@ func restartEngine(o tuiOpts, sessionID string, reattach bool, after uint64) tea
 // cannot start usually cannot start a millisecond later either.
 type retryEngineMsg struct{}
 
-const engineRetryDelay = 2 * time.Second
+// A failed reconnect is retried after reconnectDelay, until reconnectFor has
+// passed: long enough for dund to come back from a restart (about a second
+// for a new build; systemd restarts a crashed one after 3 s), short enough
+// that a service that is really down gets reported.
+const (
+	engineRetryDelay = time.Second
+	reconnectFor     = time.Minute
+)
+
+// reconnectDelay is the wait before attempt n+1: 1 s, 2 s, 4 s, then 8 s.
+func reconnectDelay(n int) time.Duration {
+	if n < 1 {
+		n = 1
+	}
+	return engineRetryDelay << min(n-1, 3)
+}
 
 type dunProc struct {
 	cmd     *exec.Cmd
-	session string         // the dund session this follows
-	lastSeq *atomic.Uint64 // the last event seq seen, to resume after
-	closed  atomic.Bool    // closed on purpose: its EOF is not a loss
+	session string                   // the dund session this follows
+	at      atomic.Pointer[resumeAt] // the last event seen, to resume after
+	closed  atomic.Bool              // closed on purpose: its EOF is not a loss
 	stdin   io.WriteCloser
 	ch      chan tea.Msg
 	trace   *traceWriter // DUN_TRACE: records what the engine said, for --replay
@@ -4283,7 +4327,7 @@ func procArgs(o tuiOpts, mode string) []string {
 
 // startDunProc attaches to the session o names (or a new one) through dund.
 // See attach.go.
-func startDunProc(o tuiOpts) (*dunProc, error) { return attachSession(o, 0) }
+func startDunProc(o tuiOpts) (*dunProc, error) { return attachSession(o, resumeAt{}) }
 
 // The proc methods are nil-safe: between an engine dying and its replacement
 // coming up there is no engine, and the UI stays usable in that window. They
@@ -4338,13 +4382,19 @@ func (p *dunProc) close() {
 	}
 }
 
-// seenSeq is the last session event seq this TUI has shown.
-func (m tuiModel) seenSeq() uint64 {
-	if m.proc == nil || m.proc.lastSeq == nil {
-		return 0
+// seen is where this proc is in its session's events.
+func (p *dunProc) seen() resumeAt {
+	if p == nil {
+		return resumeAt{}
 	}
-	return m.proc.lastSeq.Load()
+	if at := p.at.Load(); at != nil {
+		return *at
+	}
+	return resumeAt{}
 }
+
+// seen is the last session event this TUI has shown.
+func (m tuiModel) seen() resumeAt { return m.proc.seen() }
 
 // waitEvent blocks for the next engine event and delivers it as a tea.Msg.
 func waitEvent(ch chan tea.Msg) tea.Cmd {

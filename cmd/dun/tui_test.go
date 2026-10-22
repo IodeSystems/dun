@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1356,8 +1357,8 @@ func TestTUI_ExitEventExplainsItself(t *testing.T) {
 	m = m.handleEvent(evMsg{"type": "exit", "reason": "interrupted"})
 	nm, _ = m.Update(eofMsg{})
 	m = nm.(tuiModel)
-	if !strings.Contains(m.fatalErr, "interrupted") {
-		t.Errorf("exit reason lost: %q", m.fatalErr)
+	if !strings.Contains(convoText(m), "interrupted") {
+		t.Errorf("exit reason lost: %s", convoText(m))
 	}
 }
 
@@ -1426,20 +1427,87 @@ func TestTUI_SnapshotRendersConversationAndState(t *testing.T) {
 	}
 }
 
-// An engine that says it is going was told to go. Restarting it would fight the
-// user.
-func TestTUI_ExitEventStopsTheRestartLoop(t *testing.T) {
+// The connection is to dund, not to the engine. dund restarting into a new
+// build stops its engines first — each says exit — and then the connection
+// ends: that is a lost service, and the TUI reconnects (measured: it used to
+// take the exit as "it left on purpose" and sit dead until restarted).
+func TestTUI_ExitThenLostServiceReconnects(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "exit", "reason": "interrupted"})
+	m = m.handleEvent(evMsg{"type": "session", "id": "20261022-111912"})
+	m = m.handleEvent(evMsg{"type": "exit", "reason": "stopped"})
+	m = m.handleEvent(evMsg{"type": "engine", "state": "stopped"})
 	nm, cmd := m.Update(eofMsg{})
 	m = nm.(tuiModel)
-	if cmd != nil {
-		t.Error("an announced exit must not be restarted")
+	if cmd == nil {
+		t.Fatal("the TUI did not reconnect after dund went away")
 	}
-	if !strings.Contains(m.fatalErr, "interrupted") {
-		t.Errorf("exit reason lost: %q", m.fatalErr)
+	if m.fatalErr != "" || !strings.Contains(convoText(m), "reconnecting") {
+		t.Errorf("reconnect not shown: err=%q\n%s", m.fatalErr, convoText(m))
+	}
+	// Leaving is still leaving.
+	m.quitting = true
+	if _, cmd := m.Update(eofMsg{}); cmd != nil {
+		t.Error("a quitting TUI must not reconnect")
+	}
+}
+
+// dund not back yet: the reconnect is retried with backoff and the attempt
+// shown, past the three tries that used to give up inside dund's restart
+// window; after reconnectFor it gives up and says how to retry.
+func TestTUI_ReconnectRetriesWhileDundComesBack(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = resized(m, 80, 24)
+	m = m.handleEvent(evMsg{"type": "session", "id": "20261022-111912"})
+	nm, _ := m.Update(eofMsg{})
+	m = nm.(tuiModel)
+	down := errors.New("dial unix dund.sock: connect: no such file or directory")
+	for i := 1; i <= 6; i++ {
+		nm, cmd := m.Update(engineUpMsg{err: down, reattach: true})
+		m = nm.(tuiModel)
+		if cmd == nil {
+			t.Fatalf("attempt %d: no retry", i)
+		}
+		if want := fmt.Sprintf("reconnecting… (attempt %d)", i+1); !strings.Contains(m.fatalErr, want) {
+			t.Fatalf("attempt %d: status %q, want %q", i, m.fatalErr, want)
+		}
+	}
+	if d := reconnectDelay(6); d != 8*time.Second {
+		t.Errorf("backoff cap: %s", d)
+	}
+	m.reconnSince = time.Now().Add(-reconnectFor)
+	nm, cmd := m.Update(engineUpMsg{err: down, reattach: true})
+	m = nm.(tuiModel)
+	if cmd != nil || !strings.Contains(m.fatalErr, "cannot reach") || !strings.Contains(convoText(m), "/reconnect") {
+		t.Fatalf("give up: cmd=%v err=%q", cmd != nil, m.fatalErr)
+	}
+}
+
+// A reattach can replay from the middle of a session whose engine has long
+// been up — no ready is coming — and must not leave the TUI "starting" with
+// input blocked. A new engine says "started", and that waits for ready.
+func TestTUI_ReattachDoesNotWaitForAReadyThatIsNotComing(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = resized(m, 80, 24)
+	m = m.handleEvent(evMsg{"type": "session", "id": "20261022-111912"})
+	m = m.handleEvent(evMsg{"type": "ready"})
+	nm, _ := m.Update(eofMsg{})
+	m = nm.(tuiModel)
+	nm, _ = m.Update(engineUpMsg{proc: &dunProc{stdin: discardWC{}, ch: make(chan tea.Msg)}, reattach: true})
+	m = nm.(tuiModel)
+	m = m.handleEvent(evMsg{"type": "user", "content": "from the phone"})
+	m = m.handleEvent(evMsg{"type": "done"})
+	if m.starting {
+		t.Fatal("a reattach with no new engine is stuck starting")
+	}
+	m = m.handleEvent(evMsg{"type": "engine", "state": "started"})
+	if !m.starting {
+		t.Fatal("a new engine should hold input until ready")
+	}
+	m = m.handleEvent(evMsg{"type": "ready"})
+	if m.starting {
+		t.Fatal("ready should end starting")
 	}
 }
 

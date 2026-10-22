@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -104,9 +103,18 @@ func engineArgs(o tuiOpts) []string {
 	return out
 }
 
+// resumeAt is where a client is in a session's events: the last seq it saw
+// and the epoch that numbered it (see proto.Event). After dund restarts its
+// seqs start again from 1 under a new epoch, so a seq alone could land a
+// reattach in the middle of the new numbering.
+type resumeAt struct {
+	epoch string
+	seq   uint64
+}
+
 // attachSession attaches to the session o names, or creates one, and follows
-// it from after seq after (0: from the start).
-func attachSession(o tuiOpts, after uint64) (*dunProc, error) {
+// it from after after (the zero value: from the start).
+func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 	c, err := dialDund()
 	if err != nil {
 		return nil, err
@@ -124,10 +132,10 @@ func attachSession(o tuiOpts, after uint64) (*dunProc, error) {
 			c.Close()
 			return nil, err
 		}
-		id, after = ack.Session, 0
+		id, after = ack.Session, resumeAt{}
 	}
 	ac.session = id
-	if _, err := ac.call(sc, id, &proto.Subscribe{After: after}); err != nil {
+	if _, err := ac.call(sc, id, &proto.Subscribe{After: after.seq, Epoch: after.epoch}); err != nil {
 		if !strings.Contains(err.Error(), "no such session") {
 			c.Close()
 			return nil, err
@@ -141,12 +149,13 @@ func attachSession(o tuiOpts, after uint64) (*dunProc, error) {
 			c.Close()
 			return nil, err
 		}
+		after = resumeAt{}
 	}
 
 	ch := make(chan tea.Msg, 256)
 	tw := newTraceWriter() // DUN_TRACE=path — see replay.go
-	p := &dunProc{stdin: ac, ch: ch, trace: tw, session: id, lastSeq: &atomic.Uint64{}}
-	p.lastSeq.Store(after)
+	p := &dunProc{stdin: ac, ch: ch, trace: tw, session: id}
+	p.at.Store(&after)
 	// What arrived while waiting for the acks is the start of the stream.
 	early := ac.early
 	ac.early = nil
@@ -169,8 +178,11 @@ func attachSession(o tuiOpts, after uint64) (*dunProc, error) {
 			if s, _ := ev["session"].(string); s != "" && s != id {
 				return true
 			}
+			// A snapshot's after is the seq it brings this client up to.
 			if seq, ok := ev["seq"].(float64); ok {
-				p.lastSeq.Store(uint64(seq))
+				p.at.Store(&resumeAt{epoch: str(ev["epoch"]), seq: uint64(seq)})
+			} else if a, ok := ev["after"].(float64); ok && ev["type"] == "snapshot" {
+				p.at.Store(&resumeAt{epoch: str(ev["epoch"]), seq: uint64(a)})
 			}
 			tw.write(line)
 			ch <- evMsg(ev)

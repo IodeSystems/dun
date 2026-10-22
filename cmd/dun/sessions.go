@@ -153,7 +153,7 @@ func (m *tuiModel) switchSession(id string) tea.Cmd {
 
 	o := m.opts
 	o.resume, o.cont = id, false
-	return restartEngine(o, id, true, 0) // another session: from its start
+	return restartEngine(o, id, true, resumeAt{}) // another session: from its start
 }
 
 // sessionPanel renders the picker in the lower pane, newest first.
