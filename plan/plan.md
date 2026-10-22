@@ -540,19 +540,17 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   - The model invented dates and confirmed without checking; the tool text
     now forbids both, and the confirm re-run was clean.
 
+  Daemon mode verified 2026-10-21, after `make install` of raglit fdb9f38
+  and `systemctl --user restart raglit` (USER cleared it): `ingest
+  --project dun-m4-scratch --index memory` → search finds it → `forget`
+  with the same flags → search finds nothing. (An empty
+  `dun-m4-scratch__memory` index is left on the daemon.)
+
   Risks:
-  - The daemon path of the new forget is verified only as far as the
-    daemon accepting the POST. The running daemon refuses a dirty client
-    ("version mismatch"), so it needs a clean raglit install and a daemon
-    restart (USER's machine).
-  - Until then, void in daemon mode (dun's default) fails with "the index
-    refused it", and changes nothing.
   - Confirm quality depends on the model checking first: wording, not
     enforcement.
 
-- **next**: USER installs raglit (fdb9f38+) and restarts the daemon; then
-  one live void in daemon mode. After that: the remote layers
-  (partitioning below).
+- **next**: the remote layers (partitioning below).
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
   attention — M0 measures it); with 1–2 notes the margin has no runner-up, so
   ANY word overlap surfaces a note (seen live in M2) — the rule only works as
