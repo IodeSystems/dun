@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,7 +28,10 @@ import (
 
 const (
 	dundStartWait = 10 * time.Second
-	ackWait       = 4 * time.Minute // a create waits for a new engine to name its session
+	// dundStopWait is how long a dund that still holds its pidfile but no
+	// longer answers (it is stopping its engines) is given to exit.
+	dundStopWait = 30 * time.Second
+	ackWait      = 4 * time.Minute // a create waits for a new engine to name its session
 )
 
 // dialDund connects to the service, starting it when nothing listens.
@@ -35,6 +39,9 @@ func dialDund() (net.Conn, error) {
 	sock := dundcli.Socket(dunHome())
 	if c, err := net.Dial("unix", sock); err == nil {
 		return c, nil
+	}
+	if err := waitDundStopped(); err != nil {
+		return nil, err
 	}
 	if err := startDund(); err != nil {
 		return nil, err
@@ -53,6 +60,30 @@ func dialDund() (net.Conn, error) {
 }
 
 func dundLog() string { return dunHome() + "/dund.log" }
+
+// waitDundStopped waits for a dund that is alive but not answering — one
+// stopping its engines — to exit, so the one started next is not refused as
+// "already running".
+func waitDundStopped() error {
+	pid, alive := dundcli.Running(dunHome())
+	if !alive {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "dun: dund (pid %d) is stopping — waiting for it to exit\n", pid)
+	deadline := time.Now().Add(dundStopWait)
+	for time.Now().Before(deadline) {
+		if _, alive := dundcli.Running(dunHome()); !alive {
+			return nil
+		}
+		if c, err := net.Dial("unix", dundcli.Socket(dunHome())); err == nil {
+			c.Close() // it came back (a re-exec): use it
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("dund (pid %d) holds %s but has not answered for %s — it is stuck stopping: kill -9 %d, then start dun again (see %s)",
+		pid, filepath.Join(dunHome(), "dund.pid"), dundStopWait, pid, dundLog())
+}
 
 // startDund starts the service: the installed one (a systemd unit, or a
 // launchd agent on macOS) when there is one for this DUN_HOME, so its flags,

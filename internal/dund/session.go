@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"slices"
 	"sync"
 	"time"
@@ -355,7 +356,14 @@ func (s *session) stop() {
 	case <-done:
 	case <-time.After(stopGrace):
 		eng.Kill()
-		<-done
+		// Bounded too: a process outside the group (one that made its own)
+		// can still hold stdout open, and a stop that never returns keeps
+		// the pidfile and blocks the next dund from starting.
+		select {
+		case <-done:
+		case <-time.After(stopGrace):
+			log.Printf("dund: session %s: engine killed but its output never closed; going on without it", s.id)
+		}
 	}
 }
 

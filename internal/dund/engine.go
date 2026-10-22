@@ -42,6 +42,7 @@ func (s ExecSpawner) Spawn(workspace string, args []string) (Engine, error) {
 	// A spawned engine never rebuilds itself; the service owns freshness.
 	cmd.Env = append(append(os.Environ(), "DUN_CHILD=1"), s.Env...)
 	cmd.Stderr = os.Stderr
+	ownGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("spawn: %w", err)
@@ -61,9 +62,7 @@ func (e *execEngine) Stdout() io.Reader { return e.stdout }
 func (e *execEngine) Wait() error       { return e.cmd.Wait() }
 func (e *execEngine) Kill() {
 	_ = e.stdin.Close()
-	if e.cmd.Process != nil {
-		_ = e.cmd.Process.Kill()
-	}
+	killGroup(e.cmd)
 }
 
 // allowedFlags are the engine flags a client may pass to create. --key is

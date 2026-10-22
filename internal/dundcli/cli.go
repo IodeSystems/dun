@@ -406,6 +406,10 @@ func claimPidfile(path string) error {
 	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
 }
 
+// Running is the pid of the dund that owns home, and whether it is alive —
+// which, with nothing answering its socket, means it is still stopping.
+func Running(home string) (int, bool) { return pidAlive(filepath.Join(home, "dund.pid")) }
+
 // pidAlive is the pid a pidfile names and whether that process exists.
 func pidAlive(path string) (int, bool) {
 	b, err := os.ReadFile(path)
