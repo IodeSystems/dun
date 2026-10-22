@@ -532,6 +532,25 @@ func (h *Harness) History() []HistoryItem {
 	if err != nil {
 		return nil
 	}
+	return historyItems(entries)
+}
+
+// SessionHistory is History read straight from a session file, with no
+// harness: what a service sends a client that has fallen too far behind to
+// replay. A missing file is an empty conversation.
+func SessionHistory(sessionFile string) []HistoryItem {
+	st, err := openSessionStore(sessionFile)
+	if err != nil {
+		return nil
+	}
+	entries, err := st.Context(context.Background(), "dun")
+	if err != nil {
+		return nil
+	}
+	return historyItems(entries)
+}
+
+func historyItems(entries []agent.Entry) []HistoryItem {
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].CreatedAt != entries[j].CreatedAt {
 			return entries[i].CreatedAt < entries[j].CreatedAt

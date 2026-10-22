@@ -1,0 +1,288 @@
+package dund
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/iodesystems/dun/proto"
+)
+
+// connBuffer is how many frames may wait for one slow connection before it
+// is closed. Each subscription has its own, larger buffer in the Log.
+const connBuffer = 1024
+
+// Principal names who is on the other end of a connection.
+type Principal func(net.Conn) (string, error)
+
+// UnixPeer is the principal of a unix socket's peer: "unix:<uid>", from the
+// kernel's peer credentials, not from anything the client says.
+func UnixPeer(c net.Conn) (string, error) {
+	uc, ok := c.(*net.UnixConn)
+	if !ok {
+		return "", errors.New("not a unix socket")
+	}
+	raw, err := uc.SyscallConn()
+	if err != nil {
+		return "", err
+	}
+	var cred *syscall.Ucred
+	var cerr error
+	if err := raw.Control(func(fd uintptr) {
+		cred, cerr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	}); err != nil {
+		return "", err
+	}
+	if cerr != nil {
+		return "", cerr
+	}
+	return "unix:" + strconv.Itoa(int(cred.Uid)), nil
+}
+
+// Server speaks the protocol to clients over a listener.
+type Server struct {
+	svc       *Service
+	principal Principal
+
+	mu    sync.Mutex
+	conns map[*conn]struct{}
+}
+
+func NewServer(svc *Service, principal Principal) *Server {
+	return &Server{svc: svc, principal: principal, conns: map[*conn]struct{}{}}
+}
+
+// Serve accepts connections until ln closes.
+func (s *Server) Serve(ln net.Listener) error {
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			return err
+		}
+		who, err := s.principal(c)
+		if err != nil {
+			_ = c.Close()
+			continue
+		}
+		cn := &conn{srv: s, nc: c, who: who, out: make(chan proto.Event, connBuffer),
+			subs: map[string]*proto.Subscription{}, done: make(chan struct{})}
+		s.mu.Lock()
+		s.conns[cn] = struct{}{}
+		s.mu.Unlock()
+		go cn.write()
+		go cn.read()
+	}
+}
+
+// conn is one client connection. It may follow several sessions at once;
+// every event names its session.
+type conn struct {
+	srv  *Server
+	nc   net.Conn
+	who  string
+	out  chan proto.Event
+	done chan struct{}
+	once sync.Once
+
+	mu   sync.Mutex
+	subs map[string]*proto.Subscription // by session id
+}
+
+func (c *conn) close() {
+	c.once.Do(func() {
+		close(c.done)
+		_ = c.nc.Close()
+		c.mu.Lock()
+		for _, sub := range c.subs {
+			sub.Close()
+		}
+		c.subs = map[string]*proto.Subscription{}
+		c.mu.Unlock()
+		c.srv.mu.Lock()
+		delete(c.srv.conns, c)
+		c.srv.mu.Unlock()
+	})
+}
+
+// send queues a frame; a connection that cannot keep up is closed, not
+// waited for.
+func (c *conn) send(ev proto.Event) {
+	select {
+	case <-c.done:
+	case c.out <- ev:
+	default:
+		c.close()
+	}
+}
+
+func (c *conn) write() {
+	enc := json.NewEncoder(c.nc)
+	for {
+		select {
+		case <-c.done:
+			return
+		case ev := <-c.out:
+			if enc.Encode(ev) != nil {
+				c.close()
+				return
+			}
+		}
+	}
+}
+
+func (c *conn) read() {
+	defer c.close()
+	sc := newScanner(c.nc)
+	for sc.Scan() {
+		var cmd proto.Command
+		if err := json.Unmarshal(sc.Bytes(), &cmd); err != nil {
+			c.ack(cmd, "", fmt.Errorf("bad frame: %w", err))
+			continue
+		}
+		c.handle(cmd)
+	}
+}
+
+func (c *conn) ack(cmd proto.Command, session string, err error) {
+	if cmd.CID == "" && err == nil {
+		return
+	}
+	a := &proto.Ack{}
+	if err != nil {
+		a.Error = err.Error()
+	}
+	ev := proto.NewEvent(a)
+	ev.Re, ev.Session, ev.TS = cmd.CID, session, time.Now()
+	c.send(ev)
+}
+
+func (c *conn) reply(cmd proto.Command, session string, payload any) {
+	ev := proto.NewEvent(payload)
+	ev.Re, ev.Session, ev.TS = cmd.CID, session, time.Now()
+	c.send(ev)
+}
+
+func (c *conn) handle(cmd proto.Command) {
+	svc := c.srv.svc
+	switch p := cmd.Payload.(type) {
+	case *proto.ListSessions:
+		c.reply(cmd, "", &proto.SessionList{Items: svc.List(c.who)})
+	case *proto.Create:
+		// A handshake with a new engine takes seconds; the connection keeps
+		// reading meanwhile.
+		go func() {
+			id, err := svc.Create(c.who, p.Workspace, p.Args)
+			c.ack(cmd, id, err)
+		}()
+	case *proto.Subscribe:
+		c.subscribe(cmd, p.After)
+	case *proto.Detach:
+		c.mu.Lock()
+		if sub, ok := c.subs[cmd.Session]; ok {
+			sub.Close()
+			delete(c.subs, cmd.Session)
+		}
+		c.mu.Unlock()
+		c.ack(cmd, cmd.Session, nil)
+	case *proto.UIGet:
+		st, err := svc.UI(c.who, cmd.Session)
+		if err != nil {
+			c.ack(cmd, cmd.Session, err)
+			return
+		}
+		c.reply(cmd, cmd.Session, &proto.UIState{State: st})
+	case *proto.UIPut:
+		err := svc.PutUI(c.who, cmd.Session, p.State)
+		c.ack(cmd, cmd.Session, err)
+		if err == nil {
+			c.srv.uiChanged(c, cmd.Session, p.State)
+		}
+	case *proto.Stop:
+		c.ack(cmd, cmd.Session, svc.Stop(c.who, cmd.Session))
+	default:
+		// Anything else is for the session's engine.
+		if cmd.Session == "" {
+			c.ack(cmd, "", fmt.Errorf("%s needs a session", cmd.Type))
+			return
+		}
+		ses, err := svc.Get(c.who, cmd.Session)
+		if err == nil {
+			err = ses.send(cmd)
+		}
+		c.ack(cmd, cmd.Session, err)
+	}
+}
+
+// subscribe catches the connection up on a session and follows it live.
+// Following starts the engine if it is not running.
+func (c *conn) subscribe(cmd proto.Command, after uint64) {
+	ses, err := c.srv.svc.Get(c.who, cmd.Session)
+	if err != nil {
+		c.ack(cmd, cmd.Session, err)
+		return
+	}
+	snap, replay, sub, err := ses.subscribe(after)
+	if err != nil {
+		c.ack(cmd, cmd.Session, err)
+		return
+	}
+	c.mu.Lock()
+	if old, ok := c.subs[cmd.Session]; ok {
+		old.Close()
+	}
+	c.subs[cmd.Session] = sub
+	c.mu.Unlock()
+	c.ack(cmd, cmd.Session, nil)
+	if snap != nil {
+		c.send(*snap)
+	}
+	for _, ev := range replay {
+		c.send(ev)
+	}
+	go func() {
+		var last uint64
+		for ev := range sub.C() {
+			last = ev.Seq
+			c.send(ev)
+		}
+		// Dropped for falling behind: say so, and from where to resume.
+		if errors.Is(sub.Err(), proto.ErrSlow) {
+			c.ack(cmd, cmd.Session, fmt.Errorf("dropped: fell behind; subscribe after %d", last))
+		}
+	}()
+	if err := ses.ensureRunning(); err != nil {
+		c.reply(proto.Command{}, cmd.Session, &proto.EngineState{State: "gave_up", Reason: err.Error()})
+	}
+}
+
+// uiChanged sends a member's new UI state to that member's other
+// connections following the session. Nobody else sees it.
+func (s *Server) uiChanged(from *conn, session string, state map[string]any) {
+	s.mu.Lock()
+	var to []*conn
+	for c := range s.conns {
+		if c == from || c.who != from.who {
+			continue
+		}
+		c.mu.Lock()
+		_, following := c.subs[session]
+		c.mu.Unlock()
+		if following {
+			to = append(to, c)
+		}
+	}
+	s.mu.Unlock()
+	for _, c := range to {
+		ev := proto.NewEvent(&proto.UIState{State: state})
+		ev.Session, ev.TS = session, time.Now()
+		c.send(ev)
+	}
+}
