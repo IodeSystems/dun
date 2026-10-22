@@ -14,12 +14,13 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/iodesystems/agentkit v0.0.0
-	github.com/iodesystems/gwag/v2 v2.1.2
+	github.com/iodesystems/gwag/v2 v2.2.0
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261016124120-4811d7e34ea3
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
+	nhooyr.io/websocket v1.8.17
 )
 
 require (
@@ -65,9 +66,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8 // indirect
 	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
-	nhooyr.io/websocket v1.8.17 // indirect
 )
 
 replace github.com/iodesystems/agentkit => ../agentkit
-
-replace github.com/iodesystems/gwag/v2 => ../_lib/gwag

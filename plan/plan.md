@@ -289,8 +289,8 @@ Where it stands:
   does that): d72d4b6 + v2.1.3 (gat runs api + op huma middlewares on
   GraphQL/gRPC ingress); ecb6b6f `gat.Subscribe` (graphql-transport-ws,
   unreleased → v2.2.0); ~/doc RT-1/RT-2 + relay.md updated (8ae0072).
-  **dun's go.mod replaces gwag/v2 with ../_lib/gwag** until v2.2.0 is cut —
-  then drop the replace.
+  Released 2026-10-21 (v2.1.3, v2.2.0); dun requires gwag/v2 v2.2.0, no
+  replace.
 - ✅ **Live events** (`bc4daf8`, `e16a3fd`): `Subscription.dund_sessionEvents`
   over graphql-ws on /api/graphql; RT-2 HMAC from `subscribeToken`
   (principal|session|ts, in-memory secret, ±5 min); the WS upgrade skips the
