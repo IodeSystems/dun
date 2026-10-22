@@ -106,6 +106,32 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 17. Cost and limits in /context (USER, 2026-10-22, branch `llm-cost`)
+
+USER: "If we can parse out any known cost/budget values from agentkit, that would
+be amazing for managing this." Needs agentkit branch `llm-cost-limits` (v0.9.0,
+unreleased): `Usage.Cost / Limits / KeyBudget`, `Client.KeyBudget`, `Client.OnUsage`.
+
+- `dun.SpendMeter` (spend.go): `OnUsage` of the main client AND of every
+  `clientCache` client → session spend covers turn rounds, side calls
+  (suggest/rephrase/commit/rescue/memory fork) and sub-agents. Last turn = since
+  the previous turn ended. Latest rate-limit snapshot; key budget from
+  per-response LiteLLM headers merged with the poll (reset only from the poll).
+- Key budget poll: `PollBudget` goroutine at start, every 5m, after a turn when
+  the last read is ≥30s old; stops once the endpoint has none.
+- Wire: `proto.Spend` in `usage.spend` and as a `spend` event (a state type);
+  absent = not reported.
+- TUI: /context "cost & limits" (ctxRow, money 2dp + currency); status prefix
+  `⚠ <what> N% left` under 10% (dim), coloured under 2% or empty.
+- Live check: fake LiteLLM (stream headers + usage.cost + /key/info) → section
+  rendered from the captured events.
+- **next**: user releases agentkit v0.9.0 → bump dun go.mod (does NOT build on
+  v0.8.0) → merge.
+- **risks**: not tried against the real corp gateway. LiteLLM stream headers
+  carry key spend from BEFORE the call. Limits are one snapshot across models.
+  A runner that is not *llm.Client is not metered.
+- **optional extensions**: the web UI; per-model limits; a budget stop.
+
 ### ◐ 16. OAuth/OIDC-protected MCP servers (USER, 2026-10-22)
 
 USER: Snowflake's managed MCP (401 → RFC 9728 → RFC 8414, no DCR, pre-registered

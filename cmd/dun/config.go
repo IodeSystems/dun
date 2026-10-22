@@ -402,7 +402,10 @@ func decodeModels(resp *http.Response) []string {
 // one shared rate limit. Children on the same model must contend through ONE
 // client, which is also why there is no concurrency cap on sub-agents — the
 // client is where the queueing actually happens.
-func clientCache(url, key string) func(string) (agent.LLMRunner, error) {
+//
+// onUsage is set on each client as it is built, before anyone can use it — so
+// a sub-agent's spend reaches the same meter as the parent's (dun/spend.go).
+func clientCache(url, key string, onUsage func(llm.Usage)) func(string) (agent.LLMRunner, error) {
 	var mu sync.Mutex
 	cache := map[string]agent.LLMRunner{}
 	return func(model string) (agent.LLMRunner, error) {
@@ -415,6 +418,7 @@ func clientCache(url, key string) func(string) (agent.LLMRunner, error) {
 			return c, nil
 		}
 		c := llm.NewClient(url, key, model)
+		c.OnUsage = onUsage
 		cache[model] = c
 		return c, nil
 	}

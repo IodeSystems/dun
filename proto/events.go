@@ -17,6 +17,7 @@ func init() {
 	event[Done]("done")
 	event[Usage]("usage")
 	event[ContextCost]("context_cost")
+	event[Spend]("spend")
 	event[Ask]("ask")
 	event[Mount]("mount")
 	event[Error]("error")
@@ -133,6 +134,62 @@ type Usage struct {
 	SideCalls map[string]map[string]any `json:"side_calls,omitempty"`
 	Surfacing map[string]any            `json:"surfacing,omitempty"`
 	Cache     map[string]any            `json:"cache,omitempty"`
+	// Spend is the session's money and limits as of this turn's end. Nil when
+	// no meter is wired.
+	Spend *Spend `json:"spend,omitempty"`
+}
+
+// Spend is what the gateway reported about money and limits: the session's
+// total, the last turn's, the key's budget and the latest rate-limit windows.
+// Sent with every usage event, and on its own as "spend" when a budget poll
+// lands between turns.
+//
+// A value the endpoint did not report is ABSENT (a nil pointer, an empty list),
+// never 0: a provider that says nothing about money must not read as free.
+type Spend struct {
+	// Currency of Session and LastTurn: "USD", "credits", or "" when the
+	// source named none. Mixed: some costs came in another currency.
+	Currency string `json:"currency,omitempty"`
+	Mixed    bool   `json:"mixed,omitempty"`
+	// Session is the summed cost of every response that reported one; nil when
+	// none did. Calls / CostedCalls say how much of the session that covers.
+	Session     *float64 `json:"session_cost,omitempty"`
+	Calls       int      `json:"calls"`
+	CostedCalls int      `json:"costed_calls"`
+	// LastTurn is the cost since the turn before it ended (side calls between
+	// turns included); nil when none of those calls reported one.
+	LastTurn       *float64 `json:"last_turn_cost,omitempty"`
+	LastTurnCalls  int      `json:"last_turn_calls"`
+	LastTurnCosted int      `json:"last_turn_costed"`
+	// Key is the key's budget; nil when not known.
+	Key *KeyBudget `json:"key,omitempty"`
+	// KeyUnsupported: the endpoint exposes no key budget. KeyError: the last
+	// read failed (the last good Key, if any, is still sent).
+	KeyUnsupported bool   `json:"key_unsupported,omitempty"`
+	KeyError       string `json:"key_error,omitempty"`
+	// Limits are the rate-limit windows the latest response reported.
+	Limits   []RateLimit `json:"limits,omitempty"`
+	LimitsAt string      `json:"limits_at,omitempty"` // RFC 3339
+}
+
+// KeyBudget is a key's spend against its budget.
+type KeyBudget struct {
+	Spend     float64  `json:"spend"`
+	Limit     *float64 `json:"limit,omitempty"`     // nil: no limit, or not reported
+	Remaining *float64 `json:"remaining,omitempty"` // nil: not reported
+	ResetAt   string   `json:"reset_at,omitempty"`  // RFC 3339; "" not reported
+	Interval  string   `json:"interval,omitempty"`  // "30d", "monthly"; "" not reported
+	Currency  string   `json:"currency,omitempty"`
+	Source    string   `json:"source"`          // litellm, litellm-headers, openrouter
+	AsOf      string   `json:"as_of,omitempty"` // RFC 3339, when it was read
+}
+
+// RateLimit is one rate-limit window.
+type RateLimit struct {
+	Name      string `json:"name"`                // requests, tokens, input tokens, output tokens
+	Limit     *int64 `json:"limit,omitempty"`     // nil: not reported
+	Remaining *int64 `json:"remaining,omitempty"` // nil: not reported
+	ResetAt   string `json:"reset_at,omitempty"`  // RFC 3339; "" not reported
 }
 
 // ContextCost is the system cost at startup, before any turn. The window is

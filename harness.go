@@ -223,6 +223,11 @@ type Config struct {
 	// dun package does not know the endpoint or the key — cmd/dun does. nil, or
 	// an error, means the child falls back to Client.
 	ClientFor func(model string) (agent.LLMRunner, error)
+	// Spend totals what the gateway reports about money and limits (see
+	// spend.go). The CALLER points each llm.Client's OnUsage at Spend.Note —
+	// Client and every client ClientFor builds — since only it constructs them.
+	// nil → no spend accounting.
+	Spend *SpendMeter
 	// ChildModel is the default model for spawned sub-agents. Empty = the
 	// parent's. A spawn may override it.
 	ChildModel string

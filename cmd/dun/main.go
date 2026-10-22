@@ -476,8 +476,13 @@ func main() {
 	// Logged out, or no model chosen: a stand-in that refuses every call with
 	// what to do, so the engine still starts (a client can /login through it)
 	// and nothing is contacted.
+	// Money and limits: every response from this client and from every client
+	// the per-model cache builds reports into one meter, so the session's spend
+	// covers the turn, its side calls and its sub-agents. See dun/spend.go.
+	spend := dun.NewSpendMeter()
+	client.OnUsage = spend.Note
 	var runner agent.LLMRunner = client
-	childClients := clientCache(*url, effKey)
+	childClients := clientCache(*url, effKey, spend.Note)
 	if why := providerMissing(*url, *model); why != nil {
 		runner = noProvider{why}
 		childClients = func(string) (agent.LLMRunner, error) { return nil, why }
@@ -490,6 +495,7 @@ func main() {
 		// second client. Cached per model so N children on one model share one
 		// client, and therefore one retry policy and one rate limit.
 		ClientFor:   childClients,
+		Spend:       spend,
 		ChildModel:  *childModel,
 		Exec:        backend,
 		Worktree:    wt,
@@ -683,6 +689,17 @@ func main() {
 		} else {
 			fmt.Fprintf(os.Stderr, "dun: worktree %s (branch %s)\n", effWS, wt.Branch)
 		}
+	}
+
+	// The key's budget: read at start, every few minutes and after a turn, on
+	// its own goroutine — never on the turn path. An endpoint with none stops
+	// the poller after one probe per documented path.
+	if providerMissing(*url, *model) == nil {
+		go spend.PollBudget(ctx, client, dun.BudgetPollEvery, dun.BudgetPollGap, func() {
+			if em != nil {
+				em.emit(spendProto(h.Spend(), time.Now()))
+			}
+		})
 	}
 
 	if *prog {
@@ -1150,7 +1167,15 @@ func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
 		// What the prompt cache did, by the kind of build before each round,
 		// and how often the prefix was rewritten. See dun.cachestats.go.
 		Cache: h.CacheStats(),
+		// Money and limits. The turn is closed here, in the one place both
+		// turn paths pass through, so "last turn" means the same on both.
+		Spend: endTurnSpend(h),
 	}
+}
+
+func endTurnSpend(h *dun.Harness) *proto.Spend {
+	h.EndTurnSpend()
+	return spendProto(h.Spend(), time.Now())
 }
 
 // windowOf is the window division for an event. Separate so context_cost can

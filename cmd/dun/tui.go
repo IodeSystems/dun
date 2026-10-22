@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/x/cellbuf"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/proto"
 )
 
 // The TUI is a CLIENT of the `-p` JSON event protocol: it re-execs `dun -p`,
@@ -350,6 +351,10 @@ func (e convoEntry) shallower() (viewState, bool) {
 
 // contextStats accumulates context usage data across the session for /context.
 type contextStats struct {
+	// Money and limits as the gateway reported them (cmd/dun/spend.go). nil
+	// until the first usage or spend event.
+	spend *proto.Spend
+
 	// Token usage (cumulative across all turns)
 	totalTokens     int
 	activeTokens    int // last reported active window size
@@ -2166,6 +2171,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.ctxStats.readSystemCost(ev)
 		m.ctxStats.readWindow(ev)
 		m.refresh()
+	case "spend":
+		// A key-budget read that landed between turns (dun/spend.go).
+		m.ctxStats.readSpend(ev)
+		m.refresh()
 	case "usage":
 		// Accumulate token usage stats for /context.
 		m.ctxStats.totalTokens += int(evNum(ev["total"]))
@@ -2180,6 +2189,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.ctxStats.readSideCalls(ev)
 		m.ctxStats.readSurfacing(ev)
 		m.ctxStats.readCache(ev)
+		m.ctxStats.readSpend(ev)
 		if v := evNum(ev["forced_calls"]); v > 0 {
 			m.ctxStats.forcedToolCalls = int(v)
 		}
@@ -2761,7 +2771,7 @@ func (m tuiModel) View() string {
 		if m.activeTool != "" {
 			what = " " + m.activeTool
 		}
-		status = m.spin.View() + stDim.Render(" working…"+what+m.busyElapsed()+m.queuedHint()+"  ("+m.exitHint()+")")
+		status = m.spin.View() + " " + m.spendStatus(time.Now()) + stDim.Render("working…"+what+m.busyElapsed()+m.queuedHint()+"  ("+m.exitHint()+")")
 	case m.focus == focusActivity && m.actLevel == actCollapsed:
 		status = stDim.Render("activity  ·  → open · tab input · " + m.exitHint())
 	case m.focus == focusActivity:
@@ -2784,7 +2794,7 @@ func (m tuiModel) View() string {
 	case m.suggestActive():
 		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · 1–%d pick · enter/right accept · or type · "+m.exitHint(), len(m.suggestions)))
 	default:
-		status = stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · " + m.exitHint())
+		status = m.spendStatus(time.Now()) + stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · "+m.exitHint())
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
@@ -3893,6 +3903,7 @@ func (m *tuiModel) showContext() {
 	b.WriteString(sideCallBlock(s))
 	b.WriteString(surfacingBlock(s))
 	b.WriteString(cacheBlock(s))
+	b.WriteString(costBlock(s, time.Now()))
 	b.WriteString(windowBlock(s))
 
 	b.WriteString("\n\n  " + stHeader.Render("conversation"))
