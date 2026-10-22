@@ -1386,11 +1386,48 @@ func TestTUI_RespawnsACrashedEngine(t *testing.T) {
 	if m.fatalErr != "" {
 		t.Errorf("a restartable death is not fatal: %q", m.fatalErr)
 	}
-	if !strings.Contains(convoText(m), "restarting") {
-		t.Errorf("the restart should be visible: %s", convoText(m))
+	if !strings.Contains(convoText(m), "reconnecting") {
+		t.Errorf("the reconnect should be visible: %s", convoText(m))
 	}
 	if !m.skipHistory {
-		t.Error("the respawned engine's history replay must be skipped (it is already on screen)")
+		t.Error("a snapshot or history on reattach must be skipped (it is already on screen)")
+	}
+}
+
+// dund restarts a crashed engine and says so; the TUI shows it, skips the
+// history the new engine replays, and clears the error once it is back.
+func TestTUI_ShowsTheServiceRestartingTheEngine(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = resized(m, 80, 24)
+	m.busy = true
+	m = m.handleEvent(evMsg{"type": "engine", "state": "restarting", "reason": "engine exited: signal: killed", "restarts": 1.0})
+	if m.busy || !m.skipHistory || m.restarts != 1 || !strings.Contains(convoText(m), "restarting it") {
+		t.Fatalf("restarting: busy=%v skip=%v restarts=%d\n%s", m.busy, m.skipHistory, m.restarts, convoText(m))
+	}
+	m = m.handleEvent(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "old"}}})
+	if strings.Contains(convoText(m), "old") {
+		t.Error("the respawned engine's history was rendered again")
+	}
+	m = m.handleEvent(evMsg{"type": "engine", "state": "gave_up", "reason": "engine exited"})
+	if !strings.Contains(m.fatalErr, "gave up") {
+		t.Fatalf("gave_up: %q", m.fatalErr)
+	}
+	m = m.handleEvent(evMsg{"type": "engine", "state": "started"})
+	if m.fatalErr != "" {
+		t.Fatalf("started should clear the error: %q", m.fatalErr)
+	}
+}
+
+// A snapshot on a fresh attach renders the conversation and applies the
+// state events it carries.
+func TestTUI_SnapshotRendersConversationAndState(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m = resized(m, 80, 24)
+	m = m.handleEvent(evMsg{"type": "snapshot", "after": 40.0,
+		"items": []any{map[string]any{"kind": "user", "content": "earlier question"}},
+		"state": []any{map[string]any{"type": "session", "id": "s9"}, map[string]any{"type": "workspace", "branch": "wt-9"}}})
+	if !strings.Contains(convoText(m), "earlier question") || m.sessionID != "s9" || m.branch != "wt-9" {
+		t.Fatalf("snapshot: session=%q branch=%q\n%s", m.sessionID, m.branch, convoText(m))
 	}
 }
 

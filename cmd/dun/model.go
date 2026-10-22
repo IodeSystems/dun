@@ -291,8 +291,8 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	}
 	m.append(stDim.Render(fmt.Sprintf("switching to %s on %s, %s…", model, p.Name, desc)))
 
-	// Restart the engine on the new endpoint, resuming this session.
-	m.proc.close()
+	// The service restarts the engine on the new endpoint, on this
+	// conversation; its history comes back and is rendered afresh.
 	m.convo = nil
 	m.cur, m.pendingTool, m.pendingArgs = "", -1, nil
 	m.sel = -1
@@ -305,9 +305,11 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	m.refresh()
 
 	m.opts.model, m.opts.url, m.opts.key = model, p.URL, p.Key
-	o := m.opts
-	o.resume, o.cont = m.sessionID, false
-	return restartEngine(o, m.sessionID, true)
+	if !m.proc.restartWith(m.opts) {
+		m.append(stErr.Render("no session service right now — /reconnect, then switch again"))
+		m.refresh()
+	}
+	return nil
 }
 
 const modelWindow = 10

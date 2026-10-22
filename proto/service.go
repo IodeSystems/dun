@@ -10,6 +10,7 @@ func init() {
 	command[Detach]("detach")
 	command[UIGet]("ui_get")
 	command[UIPut]("ui_put")
+	command[Restart]("restart")
 
 	event[SessionList]("sessions")
 	event[EngineState]("engine")
@@ -22,9 +23,19 @@ type ListSessions struct{}
 // Create starts a session in a workspace. Args are engine flags from an
 // allowlist (dund rejects the rest). The ack's envelope names the new
 // session; the caller is its owner and only member.
+//
+// Resume adopts an existing conversation (a session file in the workspace)
+// under that id; a session dund already has is answered with its id.
 type Create struct {
 	Workspace string   `json:"workspace"`
 	Args      []string `json:"args,omitempty"`
+	Resume    string   `json:"resume,omitempty"`
+}
+
+// Restart restarts the envelope's session's engine with new flags (same
+// allowlist as create) on the same conversation: a model switch.
+type Restart struct {
+	Args []string `json:"args"`
 }
 
 // Detach ends the caller's subscription to the envelope's session. The

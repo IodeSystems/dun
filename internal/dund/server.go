@@ -179,7 +179,7 @@ func (c *conn) handle(cmd proto.Command) {
 		// A handshake with a new engine takes seconds; the connection keeps
 		// reading meanwhile.
 		go func() {
-			id, err := svc.Create(c.who, p.Workspace, p.Args)
+			id, err := svc.Create(c.who, p.Workspace, p.Args, p.Resume)
 			c.ack(cmd, id, err)
 		}()
 	case *proto.Subscribe:
@@ -205,6 +205,8 @@ func (c *conn) handle(cmd proto.Command) {
 		if err == nil {
 			c.srv.uiChanged(c, cmd.Session, p.State)
 		}
+	case *proto.Restart:
+		go func() { c.ack(cmd, cmd.Session, svc.Restart(c.who, cmd.Session, p.Args)) }()
 	case *proto.Stop:
 		c.ack(cmd, cmd.Session, svc.Stop(c.who, cmd.Session))
 	default:

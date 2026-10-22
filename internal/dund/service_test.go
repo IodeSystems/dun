@@ -56,7 +56,7 @@ func types(evs []proto.Event) []string {
 
 func TestCreateRegistersTheEnginesSession(t *testing.T) {
 	svc, _, _ := newSvc(t)
-	id, err := svc.Create(alice, t.TempDir(), []string{"--model", "m"})
+	id, err := svc.Create(alice, t.TempDir(), []string{"--model", "m"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,11 +82,11 @@ func TestCreateRegistersTheEnginesSession(t *testing.T) {
 func TestCreateRejectsFlagsOffTheAllowlist(t *testing.T) {
 	svc, sp, _ := newSvc(t)
 	for _, args := range [][]string{{"--key", "sk"}, {"--resume", "x"}, {"-model", "m"}, {"--model"}} {
-		if _, err := svc.Create(alice, t.TempDir(), args); err == nil {
+		if _, err := svc.Create(alice, t.TempDir(), args, ""); err == nil {
 			t.Errorf("%v accepted", args)
 		}
 	}
-	if _, err := svc.Create(alice, "relative/dir", nil); err == nil {
+	if _, err := svc.Create(alice, "relative/dir", nil, ""); err == nil {
 		t.Error("relative workspace accepted")
 	}
 	if n := len(sp.spawnArgs()); n != 0 {
@@ -97,7 +97,7 @@ func TestCreateRejectsFlagsOffTheAllowlist(t *testing.T) {
 // A session is only for its members: to anyone else it does not exist.
 func TestOnlyMembersSeeASession(t *testing.T) {
 	svc, _, _ := newSvc(t)
-	id, err := svc.Create(alice, t.TempDir(), nil)
+	id, err := svc.Create(alice, t.TempDir(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestOnlyMembersSeeASession(t *testing.T) {
 
 func TestSendReachesTheEngineAndEventsComeBackNumbered(t *testing.T) {
 	svc, _, _ := newSvc(t)
-	id, _ := svc.Create(alice, t.TempDir(), nil)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
 	ses, _ := svc.Get(alice, id)
 	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 100)
 	defer sub.Close()
@@ -132,7 +132,7 @@ func TestSendReachesTheEngineAndEventsComeBackNumbered(t *testing.T) {
 // capped, and a person's next command is the retry.
 func TestCrashedEngineRestartsThenGivesUp(t *testing.T) {
 	svc, sp, _ := newSvc(t)
-	id, _ := svc.Create(alice, t.TempDir(), []string{"--model", "m"})
+	id, _ := svc.Create(alice, t.TempDir(), []string{"--model", "m"}, "")
 	ses, _ := svc.Get(alice, id)
 	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 1000)
 	defer sub.Close()
@@ -161,7 +161,7 @@ func TestCrashedEngineRestartsThenGivesUp(t *testing.T) {
 
 func TestStopDoesNotRestartAndASendStartsAgain(t *testing.T) {
 	svc, sp, _ := newSvc(t)
-	id, _ := svc.Create(alice, t.TempDir(), nil)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
 	ses, _ := svc.Get(alice, id)
 	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 1000)
 	defer sub.Close()
@@ -186,7 +186,7 @@ func TestRegistrySurvivesARestart(t *testing.T) {
 	sp := &fakeSpawner{}
 	svc, _ := New(dir, sp)
 	ws := t.TempDir()
-	id, err := svc.Create(alice, ws, []string{"--rephrase"})
+	id, err := svc.Create(alice, ws, []string{"--rephrase"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestRegistrySurvivesARestart(t *testing.T) {
 // service restarted — gets a snapshot, then the live stream.
 func TestSubscribeFromTheFutureGetsASnapshot(t *testing.T) {
 	svc, _, _ := newSvc(t)
-	id, _ := svc.Create(alice, t.TempDir(), nil)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
 	ses, _ := svc.Get(alice, id)
 	snap, _, sub, err := ses.subscribe(10_000)
 	if err != nil {
@@ -238,7 +238,7 @@ func TestSubscribeFromTheFutureGetsASnapshot(t *testing.T) {
 
 func TestUIStateIsPerMember(t *testing.T) {
 	svc, _, dir := newSvc(t)
-	id, _ := svc.Create(alice, t.TempDir(), nil)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
 	if st, err := svc.UI(alice, id); err != nil || len(st) != 0 {
 		t.Fatalf("initial: %v %v", st, err)
 	}
@@ -253,5 +253,49 @@ func TestUIStateIsPerMember(t *testing.T) {
 	st, err := svc2.UI(alice, id)
 	if err != nil || st["draft"] != "half a thought" {
 		t.Fatalf("after reload: %v %v", st, err)
+	}
+}
+
+// An existing conversation is adopted under its own id; asking again gets
+// the same session, and someone else cannot take it.
+func TestCreateAdoptsAConversation(t *testing.T) {
+	svc, sp, _ := newSvc(t)
+	ws := t.TempDir()
+	id, err := svc.Create(alice, ws, nil, "20260101-000000")
+	if err != nil || id != "20260101-000000" {
+		t.Fatalf("adopt: %q %v", id, err)
+	}
+	if a := sp.spawnArgs(); !slices.Equal(a[0], []string{"--resume", id}) {
+		t.Fatalf("spawn: %v", a)
+	}
+	if again, err := svc.Create(alice, ws, nil, id); err != nil || again != id || len(sp.spawnArgs()) != 1 {
+		t.Fatalf("again: %q %v, %d spawns", again, err, len(sp.spawnArgs()))
+	}
+	if _, err := svc.Create(bob, ws, nil, id); err != ErrNoSession {
+		t.Fatalf("bob adopting alice's: %v", err)
+	}
+}
+
+func TestRestartSwapsFlagsOnTheSameConversation(t *testing.T) {
+	svc, sp, dir := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), []string{"--model", "a"}, "")
+	ses, _ := svc.Get(alice, id)
+	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 1000)
+	defer sub.Close()
+	if err := svc.Restart(alice, id, []string{"--model", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	next(t, sub, "ready")
+	a := sp.spawnArgs()
+	if !slices.Equal(a[len(a)-1], []string{"--model", "b", "--resume", id}) {
+		t.Fatalf("restart args: %v", a[len(a)-1])
+	}
+	if err := svc.Restart(alice, id, []string{"--key", "x"}); err == nil {
+		t.Fatal("--key accepted")
+	}
+	svc2, _ := New(dir, &fakeSpawner{})
+	defer svc2.Close()
+	if s2, _ := svc2.Get(alice, id); !slices.Equal(s2.args, []string{"--model", "b"}) {
+		t.Fatalf("persisted args: %v", s2.args)
 	}
 }

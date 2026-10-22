@@ -29,6 +29,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -85,6 +86,11 @@ flags:
 }
 
 func main() {
+	// `dun dund …` is the session service (internal/dundcli), in this binary
+	// so the service and the engines it runs are always the same build.
+	if len(os.Args) > 1 && os.Args[1] == "dund" {
+		os.Exit(dundcli.Main(os.Args[2:]))
+	}
 	flag.Usage = usage
 	ver := flag.Bool("version", false, "print version and exit")
 	setup := flag.Bool("setup", false, "run the interactive setup wizard (LLM url/model/key) and exit")

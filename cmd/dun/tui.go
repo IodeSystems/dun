@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -687,7 +687,7 @@ func (m tuiModel) Init() tea.Cmd {
 	} else {
 		// The first engine never started. Come up anyway and keep trying —
 		// a TUI that refuses to open cannot even show you the error.
-		cmds = append(cmds, restartEngine(m.opts, "", false))
+		cmds = append(cmds, restartEngine(m.opts, "", false, 0))
 	}
 	return tea.Batch(cmds...)
 }
@@ -1321,7 +1321,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitEvent(m.proc.ch)
 
 	case retryEngineMsg:
-		return m, restartEngine(m.opts, m.sessionID, m.everUp)
+		return m, restartEngine(m.opts, m.sessionID, m.everUp, m.seenSeq())
 
 	case tea.MouseMsg:
 		var cmd tea.Cmd
@@ -2127,6 +2127,40 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		after := evNum(ev["tokens_after"])
 		if before > after {
 			m.ctxStats.tokensCompacted += int(before - after)
+		}
+		m.refresh()
+	case "engine":
+		// dund supervises the engine now; this is what it reports.
+		switch str(ev["state"]) {
+		case "started":
+			m.fatalErr, m.exitAnnounced = "", false
+		case "restarting":
+			m.busy, m.asking = false, false
+			m.busyStart = time.Time{}
+			m.restarts = int(evNum(ev["restarts"]))
+			m.skipHistory = true // it will replay what is already on screen
+			m.append(stErr.Render(str(ev["reason"]) + " — restarting it; the session is kept"))
+		case "gave_up":
+			m.busy, m.asking = false, false
+			m.fatalErr = str(ev["reason"]) + " — gave up restarting it"
+			m.append(stErr.Render(m.fatalErr + "\n/reconnect to try again · your conversation is saved"))
+		case "stopped":
+			m.busy, m.asking = false, false
+		}
+		m.refresh()
+	case "snapshot":
+		// Too far behind to replay: the conversation, then the latest state.
+		// On a reconnect the conversation is already on screen; the history a
+		// respawned engine sends next is skipped by the same flag.
+		if !m.skipHistory {
+			items, _ := ev["items"].([]any)
+			m.replay(items)
+		}
+		state, _ := ev["state"].([]any)
+		for _, st := range state {
+			if sev, ok := st.(map[string]any); ok && sev["type"] != "history" {
+				m = m.handleEvent(evMsg(sev))
+			}
 		}
 		m.refresh()
 	case "exit":
@@ -3412,7 +3446,7 @@ func init() {
 			m.exitAnnounced = false
 			m.skipHistory = m.everUp
 			m.append(stDim.Render("reconnecting…"))
-			return restartEngine(m.opts, m.sessionID, m.everUp)
+			return restartEngine(m.opts, m.sessionID, m.everUp, m.seenSeq())
 		}},
 		{"rag", "[on|off|restart|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
 		{"lsp", "[on|off|restart|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
@@ -4031,7 +4065,7 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	m.busyStart = time.Time{}
 	reason := m.fatalErr
 	if reason == "" {
-		reason = "dun engine exited"
+		reason = "lost the session service (dund)"
 	}
 	// A finished trace is not a crash — there is nothing to restart.
 	if m.replaying {
@@ -4060,9 +4094,9 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	m.restarts++
 	m.fatalErr = ""
 	m.skipHistory = true // it will replay what is already on screen
-	m.append(stErr.Render(reason + " — restarting it; the session is kept"))
+	m.append(stErr.Render(reason + " — reconnecting; the session is kept"))
 	m.refresh()
-	return m, restartEngine(m.opts, m.sessionID, true)
+	return m, restartEngine(m.opts, m.sessionID, true, m.seenSeq())
 }
 
 // restartEngine spawns a replacement engine.
@@ -4071,7 +4105,10 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 // the very first engine: forcing --continue there would silently attach a fresh
 // `dun -tui` to some unrelated older session, which is worse than the failure
 // it is recovering from.
-func restartEngine(o tuiOpts, sessionID string, reattach bool) tea.Cmd {
+//
+// after is the last event seq already shown: a reattach to the same session
+// follows on from it rather than replaying the session from the start.
+func restartEngine(o tuiOpts, sessionID string, reattach bool, after uint64) tea.Cmd {
 	return func() tea.Msg {
 		if reattach {
 			if sessionID != "" {
@@ -4082,7 +4119,10 @@ func restartEngine(o tuiOpts, sessionID string, reattach bool) tea.Cmd {
 				o.resume, o.cont = "", true
 			}
 		}
-		p, err := startDunProc(o)
+		if !reattach {
+			after = 0
+		}
+		p, err := attachSession(o, after)
 		if err != nil {
 			return engineUpMsg{err: err}
 		}
@@ -4097,11 +4137,13 @@ type retryEngineMsg struct{}
 const engineRetryDelay = 2 * time.Second
 
 type dunProc struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	ch     chan tea.Msg
-	trace  *traceWriter // DUN_TRACE: records what the engine said, for --replay
-	replay *replayStats // --replay: what the pacing did to the recording
+	cmd     *exec.Cmd
+	session string         // the dund session this follows
+	lastSeq *atomic.Uint64 // the last event seq seen, to resume after
+	stdin   io.WriteCloser
+	ch      chan tea.Msg
+	trace   *traceWriter // DUN_TRACE: records what the engine said, for --replay
+	replay  *replayStats // --replay: what the pacing did to the recording
 }
 
 // procArgs builds a `dun <mode>` argv from the shared flags. mode is "-p" (the
@@ -4160,46 +4202,9 @@ func procArgs(o tuiOpts, mode string) []string {
 	return args
 }
 
-func startDunProc(o tuiOpts) (*dunProc, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.Command(exe, procArgs(o, "-p")...)
-	cmd.Env = append(os.Environ(), "DUN_CHILD=1") // a spawned engine never self-rebuilds
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	// Engine stderr (mcp startup logs) → a temp log so it doesn't corrupt the UI.
-	if f, err := os.CreateTemp("", "dun-tui-*.log"); err == nil {
-		cmd.Stderr = f
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	ch := make(chan tea.Msg, 256)
-	tw := newTraceWriter() // DUN_TRACE=path — see replay.go
-	p := &dunProc{cmd: cmd, stdin: stdin, ch: ch, trace: tw}
-	go func() {
-		defer tw.close()
-		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-		for sc.Scan() {
-			var ev map[string]any
-			if json.Unmarshal(sc.Bytes(), &ev) == nil {
-				tw.write(sc.Bytes())
-				ch <- evMsg(ev)
-			}
-		}
-		ch <- eofMsg{proc: p}
-	}()
-	return p, nil
-}
+// startDunProc attaches to the session o names (or a new one) through dund.
+// See attach.go.
+func startDunProc(o tuiOpts) (*dunProc, error) { return attachSession(o, 0) }
 
 // The proc methods are nil-safe: between an engine dying and its replacement
 // coming up there is no engine, and the UI stays usable in that window. They
@@ -4251,6 +4256,14 @@ func (p *dunProc) close() {
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 	}
+}
+
+// seenSeq is the last session event seq this TUI has shown.
+func (m tuiModel) seenSeq() uint64 {
+	if m.proc == nil || m.proc.lastSeq == nil {
+		return 0
+	}
+	return m.proc.lastSeq.Load()
 }
 
 // waitEvent blocks for the next engine event and delivers it as a tea.Msg.

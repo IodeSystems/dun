@@ -69,9 +69,23 @@ func (s *Service) isClosing() bool {
 
 // Create starts an engine in workspace and registers the session it names,
 // owned by principal.
-func (s *Service) Create(principal, workspace string, args []string) (string, error) {
+//
+// resume, when set, adopts that existing conversation; if the service already
+// has it, its id comes back (to a member) and nothing is spawned.
+func (s *Service) Create(principal, workspace string, args []string, resume string) (string, error) {
 	if err := checkArgs(args); err != nil {
 		return "", err
+	}
+	if resume != "" {
+		if _, err := s.Get(principal, resume); err == nil {
+			return resume, nil
+		}
+		s.mu.Lock()
+		_, taken := s.sessions[resume]
+		s.mu.Unlock()
+		if taken {
+			return "", ErrNoSession // someone else's
+		}
 	}
 	if !filepath.IsAbs(workspace) {
 		return "", fmt.Errorf("workspace must be an absolute path: %q", workspace)
@@ -82,7 +96,11 @@ func (s *Service) Create(principal, workspace string, args []string) (string, er
 	if s.isClosing() {
 		return "", errors.New("service is shutting down")
 	}
-	eng, err := s.spawner.Spawn(workspace, args)
+	spawnArgs := slices.Clone(args)
+	if resume != "" {
+		spawnArgs = append(spawnArgs, "--resume", resume)
+	}
+	eng, err := s.spawner.Spawn(workspace, spawnArgs)
 	if err != nil {
 		return "", err
 	}
@@ -175,6 +193,26 @@ func (s *Service) List(principal string) []proto.SessionSummary {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// Restart restarts a session's engine with new flags, on the same
+// conversation.
+func (s *Service) Restart(principal, id string, args []string) error {
+	if err := checkArgs(args); err != nil {
+		return err
+	}
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return err
+	}
+	ses.stop()
+	ses.mu.Lock()
+	ses.args = slices.Clone(args)
+	ses.mu.Unlock()
+	if err := s.saveRegistry(); err != nil {
+		return err
+	}
+	return ses.ensureRunning()
 }
 
 // Stop ends a session's engine; the session stays registered.
