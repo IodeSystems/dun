@@ -33,8 +33,9 @@ func resumeSlash(m *tuiModel, args []string) tea.Cmd {
 		return m.switchSession(args[0])
 	}
 	m.sessions = dun.ListSessionInfo(m.workspace)
+	m.addServiceSessions()
 	if len(m.sessions) == 0 {
-		m.append(stDim.Render("no saved sessions for this workspace yet"))
+		m.append(stDim.Render("no saved sessions yet"))
 		return nil
 	}
 	m.picking, m.pickSel = true, 0
@@ -50,6 +51,39 @@ func resumeSlash(m *tuiModel, args []string) tea.Cmd {
 	m.input.Blur()
 	m.refresh()
 	return nil
+}
+
+// addServiceSessions adds the sessions dund runs in OTHER workspaces after
+// this workspace's, and notes which have a live engine. A failure to reach
+// dund leaves the list as the files say.
+func (m *tuiModel) addServiceSessions() {
+	m.sessWS, m.sessLive = map[string]string{}, map[string]bool{}
+	list, err := dundSessions()
+	if err != nil {
+		return
+	}
+	have := map[string]bool{}
+	for _, s := range m.sessions {
+		have[s.ID] = true
+	}
+	infos := map[string][]dun.SessionInfo{} // per workspace, read once
+	for _, s := range list {
+		m.sessLive[s.ID] = s.Running
+		if have[s.ID] || s.Workspace == m.workspace {
+			continue
+		}
+		m.sessWS[s.ID] = s.Workspace
+		if _, ok := infos[s.Workspace]; !ok {
+			infos[s.Workspace] = dun.ListSessionInfo(s.Workspace)
+		}
+		info := dun.SessionInfo{ID: s.ID}
+		for _, in := range infos[s.Workspace] {
+			if in.ID == s.ID {
+				info = in
+			}
+		}
+		m.sessions = append(m.sessions, info)
+	}
 }
 
 // updatePicking owns the keys while the session list is open.
@@ -109,6 +143,11 @@ func (m *tuiModel) switchSession(id string) tea.Cmd {
 	m.restarts, m.restartStart = 0, time.Now()
 	m.sessionID = id
 	m.skipHistory = false // this one we DO want replayed — it is a new transcript
+	if ws := m.sessWS[id]; ws != "" {
+		// A session dund runs in another workspace: follow it there.
+		m.workspace, m.opts.workspace = ws, ws
+		m.append(stDim.Render("workspace " + ws))
+	}
 	m.append(stDim.Render("resuming session " + id + "…"))
 	m.refresh()
 
@@ -143,6 +182,12 @@ func (m tuiModel) sessionPanel() string {
 		}
 		line := fmt.Sprintf("%s%s  %s  %s",
 			mark, s.ID, stDim.Render(relTime(s.ModTime)), stDim.Render(fmt.Sprintf("%d entries", s.Entries)))
+		if m.sessLive[s.ID] {
+			line += stTool.Render("  running")
+		}
+		if ws := m.sessWS[s.ID]; ws != "" {
+			line += stDim.Render("  " + ws)
+		}
 		if p := s.Preview; p != "" {
 			line += "\n     " + clip(p, max(20, m.w-12))
 		} else {

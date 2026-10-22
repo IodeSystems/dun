@@ -617,6 +617,8 @@ type tuiModel struct {
 	tickPending bool              // a render tick is already scheduled
 	picking     bool              // the session picker owns the keys
 	sessions    []dun.SessionInfo // what it is listing
+	sessWS      map[string]string // id → workspace, for sessions dund has elsewhere
+	sessLive    map[string]bool   // id → its engine is running in dund
 	pickSel     int               // highlighted session
 	// Model picker (/model): fetch available models, let the user switch.
 	modelPicking bool            // the model picker owns the keys
@@ -1297,6 +1299,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eofMsg:
 		// From an engine we already replaced: its death was the point.
 		if msg.proc != nil && m.proc != nil && msg.proc != m.proc {
+			return m, nil
+		}
+		// One this TUI closed itself (a session switch): the connection
+		// ending was the point, even before its replacement is up.
+		if msg.proc != nil && msg.proc.closed.Load() {
 			return m, nil
 		}
 		return m.engineGone()
@@ -4146,6 +4153,7 @@ type dunProc struct {
 	cmd     *exec.Cmd
 	session string         // the dund session this follows
 	lastSeq *atomic.Uint64 // the last event seq seen, to resume after
+	closed  atomic.Bool    // closed on purpose: its EOF is not a loss
 	stdin   io.WriteCloser
 	ch      chan tea.Msg
 	trace   *traceWriter // DUN_TRACE: records what the engine said, for --replay
@@ -4257,6 +4265,7 @@ func (p *dunProc) close() {
 	if p == nil {
 		return
 	}
+	p.closed.Store(true)
 	p.trace.close()
 	_ = p.stdin.Close()
 	if p.cmd != nil && p.cmd.Process != nil {

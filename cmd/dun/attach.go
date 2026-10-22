@@ -196,7 +196,8 @@ type attachConn struct {
 	session string
 	mu      sync.Mutex
 	n       int
-	early   [][]byte // events read while waiting for an ack
+	early   [][]byte      // events read while waiting for an answer
+	wait    time.Duration // how long call waits; 0 = ackWait
 }
 
 // Write takes one JSON command per call (json.Encoder writes one per
@@ -221,8 +222,9 @@ func (a *attachConn) Write(b []byte) (int, error) {
 
 func (a *attachConn) Close() error { return a.c.Close() }
 
-// call sends a command and reads until its ack, keeping the events read on
-// the way for the stream.
+// call sends a command and reads until the event that answers it (an ack,
+// or a reply such as a session list), keeping the events read on the way for
+// the stream.
 func (a *attachConn) call(sc *bufio.Scanner, session string, payload any) (proto.Event, error) {
 	a.mu.Lock()
 	a.n++
@@ -234,14 +236,18 @@ func (a *attachConn) call(sc *bufio.Scanner, session string, payload any) (proto
 	if err != nil {
 		return proto.Event{}, err
 	}
-	_ = a.c.SetReadDeadline(time.Now().Add(ackWait))
+	wait := a.wait
+	if wait == 0 {
+		wait = ackWait
+	}
+	_ = a.c.SetReadDeadline(time.Now().Add(wait))
 	defer a.c.SetReadDeadline(time.Time{})
 	for sc.Scan() {
 		var ev proto.Event
 		if json.Unmarshal(sc.Bytes(), &ev) != nil {
 			continue
 		}
-		if ev.Type == "ack" && ev.Re == cid {
+		if ev.Re == cid {
 			if ack, ok := ev.Payload.(*proto.Ack); ok && ack.Error != "" {
 				return ev, errors.New(ack.Error)
 			}
@@ -317,4 +323,26 @@ func (m tuiModel) applyUI(v any) tuiModel {
 		m.input.SetValue(d)
 	}
 	return m
+}
+
+// dundSessions lists this user's sessions in dund, every workspace. It does
+// not start dund: no service means no sessions beyond the files.
+func dundSessions() ([]proto.SessionSummary, error) {
+	c, err := net.DialTimeout("unix", dundcli.Socket(dunHome()), time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	sc := bufio.NewScanner(c)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	ac := &attachConn{c: c, wait: 3 * time.Second}
+	ev, err := ac.call(sc, "", &proto.ListSessions{})
+	if err != nil {
+		return nil, err
+	}
+	l, ok := ev.Payload.(*proto.SessionList)
+	if !ok {
+		return nil, fmt.Errorf("dund answered sessions with %s", ev.Type)
+	}
+	return l.Items, nil
 }
