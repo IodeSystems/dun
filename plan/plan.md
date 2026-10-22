@@ -591,7 +591,32 @@ restart on the saved provider, and remove all behaved as intended.
   - Verified: Go and app tests, and a browser run against a test dund and a
     fake LiteLLM (401 with a bad key, a list with a good one): all 7
     steps pass, and no key appears in the page.
-- **next:** USER tries it on the corp machine with the LiteLLM gateway.
+- **Providers are logins** (USER 2026-10-22, `f3951c1`).
+  - There is no built-in provider: the llm.iodesystems.com /
+    ternary-bonsai-27b fallback is gone.
+  - Logged out, or with no model, the engine still starts (a client can
+    log in through it) and refuses a turn with what to do. It contacts
+    nothing.
+  - `/login [name]` is a form: an OpenAI-compatible URL, bearer optional.
+    Logging in again under a name replaces it and keeps the key. The first
+    login becomes the default.
+  - `/logout <name>`: the default moves to the next provider; the last
+    logout leaves none.
+  - `/model` only picks among logged-in providers' models, plus
+    `use <p> <id>`.
+  - Providers carry `kind`; `openai` is the only one so far.
+  - A legacy top-level url/key config counts as one logged-in provider.
+  - Verified: Go and app tests, and a browser run starting logged out
+    against a fake LiteLLM: 8 of 8 steps pass, and no key appears in the
+    page. The TUI is covered by unit tests only.
+- **next:** USER tries it on the corp machine (macOS, LiteLLM).
+- **optional extensions:**
+  - Specific provider kinds: OpenRouter, Anthropic, Azure (`api-key`
+    header).
+  - Sub-agents on another provider: `model: "<provider>/<id>"`.
+    `clientCache` is built from the parent's URL and key only
+    (`cmd/dun/config.go`), so a sub-agent can pick a model but not a
+    provider.
 - **risks:** assumes every provider is OpenAI-compatible with a Bearer key. A
   corporate gateway that needs other headers (Azure `api-key`, an org header)
   will not list models or chat. Not yet tested against real OpenRouter (base
