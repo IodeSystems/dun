@@ -60,7 +60,6 @@ func TestRouteSlash(t *testing.T) {
 		"worktree new":            {"control", "worktree", "new"},
 		"remember Tests Are Slow": {"control", "remember", "Tests Are Slow"},
 		"memories":                {"control", "memories", ""},
-		"rephrase on":             {"control", "rephrase", "on"},
 		"clear":                   {"reset", "", ""},
 		"close":                   {"control", "close", ""},
 	} {
@@ -69,6 +68,12 @@ func TestRouteSlash(t *testing.T) {
 		if len(calls) != 1 || calls[0] != want {
 			t.Errorf("%q: %v, want %v", line, calls, want)
 		}
+	}
+	// A toggle the engine answers silently is answered here.
+	calls = nil
+	routeSlash("rephrase on", r)
+	if len(calls) != 2 || calls[0] != (call{"control", "rephrase", "on"}) || calls[1] != (call{"reply", "rephrase: on", ""}) {
+		t.Errorf("rephrase on: %v", calls)
 	}
 	// Bare /rephrase reports; it must not turn rephrasing off.
 	for _, line := range []string{"rephrase", "rephrase status", "nope", "mcp add", "mcp remove"} {

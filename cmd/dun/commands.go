@@ -129,13 +129,22 @@ func routeSlash(line string, r slashRoutes) {
 	case "rephrase":
 		// Bare or status reports; only on/off change it (the engine toggle
 		// reads anything else as off).
+		// The engine's toggle sends no message of its own (the TUI prints
+		// one), so the answer is said here.
 		switch arg(0) {
 		case "on", "off":
 			r.control(name, arg(0))
+			r.reply("rephrase: " + arg(0))
 		default:
 			r.reply("rephrase: " + onOff(rephraseOn))
 		}
-	case "docker", "worktree", "ship", "suggest":
+	case "suggest":
+		r.control(name, arg(0))
+		switch arg(0) {
+		case "on", "off", "auto":
+			r.reply("suggestions: " + arg(0))
+		}
+	case "docker", "worktree", "ship":
 		r.control(name, arg(0))
 	case "memories", "close":
 		r.control(name, "")
