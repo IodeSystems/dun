@@ -547,10 +547,25 @@ func (m *multilineInput) placeholderView() string {
 // the ghost text — right arrow accepts it, up/down cycle suggestions.
 func (m *multilineInput) ghostView(ghost string) string {
 	text := stDim.Render(ghost)
-	if m.focused {
-		text = withCaret(ghost, 0)
+	if m.focused && ghost != "" {
+		// The caret on its first cell; the rest stays ghost.
+		r := []rune(ghost)
+		text = stCaret.Render(string(r[0])) + stDim.Render(string(r[1:]))
 	}
 	return m.pad("› " + text)
+}
+
+// suggestStyle is a predicted next message: dim, and the highlighted one a
+// step towards the text colour — lighter on a dark terminal, darker on a
+// light one (mdStyle, resolved without querying the terminal).
+func suggestStyle(selected bool) lipgloss.Style {
+	if !selected {
+		return stDim
+	}
+	if mdStyle == "light" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 }
 
 // withCaret reverse-videos the cell at col, adding one past the end of the text

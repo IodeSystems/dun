@@ -594,6 +594,47 @@ func TestTUI_Suggestions(t *testing.T) {
 	}
 }
 
+// Suggestions are predictions, not conversation: their text is dimmed, the
+// highlighted one a step brighter, on dark and light terminals alike; the
+// composer's ghost text stays dim behind the caret.
+func TestTUI_SuggestionsAreDimmed(t *testing.T) {
+	inColour(t)
+	for _, style := range []string{"dark", "light"} {
+		old := mdStyle
+		mdStyle = style
+		m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+		m = resized(m, 80, 24)
+		m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+		m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
+			map[string]any{"text": "run the tests", "prob": 0.7},
+			map[string]any{"text": "commit it", "prob": 0.2},
+		}})
+		var sel, other string
+		for _, ln := range m.vp.lines {
+			switch {
+			case strings.Contains(ln, "run the tests"):
+				sel = ln
+			case strings.Contains(ln, "commit it"):
+				other = ln
+			}
+		}
+		if !strings.Contains(other, stDim.Render("commit it")) {
+			t.Errorf("%s: an unselected suggestion is not dim: %q", style, other)
+		}
+		want := suggestStyle(true).Render("run the tests")
+		if !strings.Contains(sel, want) || want == stDim.Render("run the tests") || want == "run the tests" {
+			t.Errorf("%s: the selected suggestion should be dim but brighter: %q", style, sel)
+		}
+		if g := m.input.ghostView("run the tests"); !strings.Contains(g, stDim.Render("un the tests")) {
+			t.Errorf("%s: the ghost text behind the caret is not dim: %q", style, g)
+		}
+		if !strings.Contains(stripANSI(m.View()), "enter/right accept") {
+			t.Errorf("%s: the accept hint is gone", style)
+		}
+		mdStyle = old
+	}
+}
+
 // Horizontal arrow axis: left at input-front → convo; right from a plain convo
 // message → input; right from an empty input → suggestion selector (left closes).
 func TestTUI_ArrowNav(t *testing.T) {

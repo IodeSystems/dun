@@ -3218,8 +3218,10 @@ func (m *tuiModel) refresh() {
 	// Suggestions live inside the viewport so they don't steal height from the
 	// conversation — the user can still see the last messages above them.
 	if m.suggestActive() {
+		// Predictions, not conversation: dimmed, the highlighted one a step
+		// brighter (suggestStyle), so they never read as something said.
 		for i, s := range m.suggestions {
-			body := stSel.Render(fmt.Sprintf("%d", i+1)) + " " + s.text + "  " +
+			body := stSel.Render(fmt.Sprintf("%d", i+1)) + " " + suggestStyle(i == m.suggestSel).Render(s.text) + "  " +
 				stDim.Render(fmt.Sprintf("%d%%", int(s.prob*100+0.5)))
 			if i == m.suggestSel {
 				blocks = append(blocks, addGutter(body, "▎ ", stSel))
