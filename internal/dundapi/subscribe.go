@@ -101,24 +101,21 @@ func (s *Server) registerStream(api huma.API, g *gat.Gateway) {
 		})
 	// One handler, three surfaces (gat.RegisterSSE): text/event-stream on
 	// REST, Subscription.dund_sessionEvents over graphql-ws, a gRPC stream.
-	// The handler cannot return an error, so a refusal is one "error" event
-	// and the end of the stream: the client re-mints and subscribes again.
+	// The token is checked by StreamInput.Resolve, which gat runs on every
+	// surface before the handler (gwag v2.3.1): 401 on REST, an error frame
+	// with status 401 on GraphQL, Unauthenticated on gRPC.
 	gat.RegisterSSE(api, g, huma.Operation{OperationID: "sessionEvents", Method: http.MethodGet, Path: "/api/v1/session-events",
-		Summary: "A session's events after a seq, then live (snapshot first when too far behind)."},
+		Summary:     "A session's events after a seq, then live (snapshot first when too far behind).",
+		Middlewares: huma.Middlewares{s.withSigner}},
 		map[string]any{"event": StreamEvent{}},
 		func(ctx context.Context, in *StreamInput, send sse.Sender) {
-			refuse := func(why string) {
-				ev := proto.NewEvent(&proto.Error{Error: why})
-				ev.Session, ev.TS = in.Session, time.Now()
-				_ = send.Data(&StreamEvent{Event: flat(ev)})
-			}
-			if !s.signer.verify(in.Principal, in.Session, in.Timestamp, in.HMAC, time.Now()) {
-				refuse("subscription token invalid or expired: mint a new one")
-				return
-			}
 			evs, err := s.svc.Stream(ctx, in.Principal, in.Session, in.After)
 			if err != nil {
-				refuse(err.Error())
+				// The handler cannot return an error: one unsequenced error
+				// event, then the end of the stream (the app backs off).
+				ev := proto.NewEvent(&proto.Error{Error: err.Error()})
+				ev.Session, ev.TS = in.Session, time.Now()
+				_ = send.Data(&StreamEvent{Event: flat(ev)})
 				return
 			}
 			for ev := range evs {
@@ -127,4 +124,21 @@ func (s *Server) registerStream(api huma.API, g *gat.Gateway) {
 				}
 			}
 		})
+}
+
+type signerKey struct{}
+
+// withSigner hands the signer to StreamInput.Resolve, which has only the
+// request context.
+func (s *Server) withSigner(ctx huma.Context, next func(huma.Context)) {
+	next(huma.WithValue(ctx, signerKey{}, s.signer))
+}
+
+// Resolve refuses a subscription without a valid token (RT-2).
+func (in *StreamInput) Resolve(ctx huma.Context) []error {
+	sg, _ := ctx.Context().Value(signerKey{}).(*subSigner)
+	if sg == nil || !sg.verify(in.Principal, in.Session, in.Timestamp, in.HMAC, time.Now()) {
+		return []error{huma.Error401Unauthorized("subscription token invalid or expired: mint a new one")}
+	}
+	return nil
 }

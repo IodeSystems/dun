@@ -88,6 +88,8 @@ github.com/iodesystems/gwag/v2 v2.2.0 h1:VAHEI2UUART9pGPn59j/7NBvwXx0rrnjeIasSeV
 github.com/iodesystems/gwag/v2 v2.2.0/go.mod h1:DhwtM+vBI1xKDCmJf5Up85GwhBoSZI3mSrYSCwXRqHk=
 github.com/iodesystems/gwag/v2 v2.3.0 h1:thSVvtqXYFR64tI5EoOMqccUjUZKlvualuKMzvMFFAc=
 github.com/iodesystems/gwag/v2 v2.3.0/go.mod h1:DhwtM+vBI1xKDCmJf5Up85GwhBoSZI3mSrYSCwXRqHk=
+github.com/iodesystems/gwag/v2 v2.3.1 h1:KaMWT1XDxQegVL9fAjTde6KQDvOWaWvDRkVgJqBH26g=
+github.com/iodesystems/gwag/v2 v2.3.1/go.mod h1:DhwtM+vBI1xKDCmJf5Up85GwhBoSZI3mSrYSCwXRqHk=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=

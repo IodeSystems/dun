@@ -56,7 +56,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
         next: (r) => {
           const ev = (r.data as { dund_sessionEvents?: { event?: Record<string, unknown> } } | null)?.dund_sessionEvents?.event;
           if (!ev) return;
-          // A refusal (bad token, no such session) is an unsequenced error
+          // A stream dund could not open (no such session) is an unsequenced error
           // event and then the end of the stream: retry with backoff.
           if (ev.type === 'error' && ev.seq === undefined) {
             refused = String(ev.error ?? 'refused');

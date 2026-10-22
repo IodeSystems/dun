@@ -291,16 +291,18 @@ Where it stands:
   unreleased → v2.2.0); ~/doc RT-1/RT-2 + relay.md updated (8ae0072).
   Released 2026-10-21 (v2.1.3, v2.2.0); dun requires gwag/v2 v2.2.0, no
   replace.
-- ✅ **gat.RegisterSSE** (USER "Migrate", 2026-10-22; gwag v2.3.0).
+- ✅ **gat.RegisterSSE** (USER "Migrate", 2026-10-22; gwag v2.3.1).
   - `sessionEvents` is one handler on three surfaces: SSE at GET
     `/api/v1/session-events?session&after&principal&timestamp&hmac`, the
     unchanged `Subscription.dund_sessionEvents` (its result is now
     non-null), and gRPC.
   - The REST long-poll keeps its path. Its operation is renamed
     `pollSessionEvents`, which renames the GraphQL query field.
-  - A handler cannot return an error. A refusal (bad token, no session) is
-    one unsequenced `error` event, then the end of the stream. The app
-    then retries with backoff instead of at once.
+  - gwag v2.3.1: the token is checked in `StreamInput.Resolve`, before
+    the handler, on every surface: 401 on REST, an error frame with
+    status 401 on GraphQL, Unauthenticated on gRPC. Only a stream dund
+    cannot open (no session) is still one unsequenced `error` event, then
+    the end of the stream, and the app backs off on it.
   - REST SSE needs the bearer AND the HMAC.
   - Not run: the gRPC surface (dund serves no gRPC).
 - ✅ **Live events** (`bc4daf8`, `e16a3fd`): `Subscription.dund_sessionEvents`

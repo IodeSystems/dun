@@ -121,13 +121,10 @@ func TestSubscriptionRefusesWithoutAValidToken(t *testing.T) {
 	c := wsDial(t, ctx, srv.URL)
 	p, _ := json.Marshal(map[string]any{"query": subscribeQuery(id, "unix:1000", time.Now().Unix(), "deadbeef", 0)})
 	wsWrite(t, ctx, c, wsMsg{ID: "1", Type: "subscribe", Payload: p})
-	// Refused: one "error" event, then the end of the stream.
-	if msg := wsRead(t, ctx, c); msg.Type != "next" || !strings.Contains(string(msg.Payload), `"type":"error"`) ||
-		!strings.Contains(string(msg.Payload), "token") {
+	// Refused before the handler runs: an error frame with status 401.
+	if msg := wsRead(t, ctx, c); msg.Type != "error" || !strings.Contains(string(msg.Payload), "token") ||
+		!strings.Contains(string(msg.Payload), `"status":401`) {
 		t.Fatalf("forged token: %+v %s", msg, msg.Payload)
-	}
-	if msg := wsRead(t, ctx, c); msg.Type != "complete" || msg.ID != "1" {
-		t.Fatalf("forged token, stream not ended: %+v %s", msg, msg.Payload)
 	}
 	q, _ := json.Marshal(map[string]any{"query": `{ dund { listSessions { items { id } } } }`})
 	wsWrite(t, ctx, c, wsMsg{ID: "2", Type: "subscribe", Payload: q})
@@ -162,6 +159,14 @@ func TestSessionEventsOverSSE(t *testing.T) {
 	defer resp.Body.Close()
 	if ct := resp.Header.Get("Content-Type"); resp.StatusCode != 200 || !strings.HasPrefix(ct, "text/event-stream") {
 		t.Fatalf("%d %s", resp.StatusCode, ct)
+	}
+	q.Set("hmac", "deadbeef")
+	bad, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/v1/session-events?"+q.Encode(), nil)
+	bad.Header.Set("Authorization", "Bearer "+tok)
+	if r, err := http.DefaultClient.Do(bad); err != nil || r.StatusCode != http.StatusUnauthorized {
+		t.Errorf("forged token over REST: %v %v", r.Status, err)
+	} else {
+		r.Body.Close()
 	}
 	sc := bufio.NewScanner(resp.Body)
 	for sc.Scan() {
