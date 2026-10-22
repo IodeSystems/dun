@@ -62,8 +62,12 @@ func maxSocketPath() int {
 // that is longer than a unix socket path may be (maxSocketPath) — then a
 // name derived from home in $XDG_RUNTIME_DIR (per user, 0700), else the temp
 // dir.
-func Socket(home string) string {
-	p := filepath.Join(home, "dund.sock")
+func Socket(home string) string { return SocketFile(home, "dund") }
+
+// SocketFile is Socket for any of DUN_HOME's sockets: <home>/<name>.sock, or
+// <name>-<hash of home>.sock in the runtime dir when that is too long.
+func SocketFile(home, name string) string {
+	p := filepath.Join(home, name+".sock")
 	if len(p) <= maxSocketPath() {
 		return p
 	}
@@ -72,7 +76,7 @@ func Socket(home string) string {
 		dir = os.TempDir()
 	}
 	sum := sha256.Sum256([]byte(home))
-	return filepath.Join(dir, "dund-"+hex.EncodeToString(sum[:6])+".sock")
+	return filepath.Join(dir, name+"-"+hex.EncodeToString(sum[:6])+".sock")
 }
 
 // loader holds the flags every command shares.

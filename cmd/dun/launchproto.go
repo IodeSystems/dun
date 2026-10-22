@@ -2,7 +2,8 @@ package main
 
 import (
 	"os"
-	"path/filepath"
+
+	"github.com/iodesystems/dun/internal/dundcli"
 )
 
 // The launcher protocol — line-delimited JSON over a unix socket
@@ -11,7 +12,9 @@ import (
 // status / shutdown / reload. See launcher.go (daemon) + launcherclient.go
 // (clients).
 
-func launcherSocket() string { return filepath.Join(dunHome(), "launcher.sock") }
+// launcherSocket falls back like dund's socket does when DUN_HOME is too long
+// for a unix socket path ("bind: invalid argument" otherwise).
+func launcherSocket() string { return dundcli.SocketFile(dunHome(), "launcher") }
 
 // req is a client→launcher message. Op selects the handler.
 type req struct {
