@@ -285,8 +285,21 @@ Where it stands:
   graphql-ws transport is not NATS-bound and ports to gat (~200 lines) plus
   Subscription fields whose resolvers subscribe; gat pubsub has no history,
   so replay-after-seq comes from dund's Log. Field shape: USER decision.
-- **S4 open:** graphql-ws subscriptions in gat (gwag) to replace the
-  long-poll; OIDC principals (caveat 10) and how they map to the unix
+- **gwag delivered** (gwag-47, local commits, not pushed/tagged — USER
+  does that): d72d4b6 + v2.1.3 (gat runs api + op huma middlewares on
+  GraphQL/gRPC ingress); ecb6b6f `gat.Subscribe` (graphql-transport-ws,
+  unreleased → v2.2.0); ~/doc RT-1/RT-2 + relay.md updated (8ae0072).
+  **dun's go.mod replaces gwag/v2 with ../_lib/gwag** until v2.2.0 is cut —
+  then drop the replace.
+- ✅ **Live events** (`bc4daf8`, `e16a3fd`): `Subscription.dund_sessionEvents`
+  over graphql-ws on /api/graphql; RT-2 HMAC from `subscribeToken`
+  (principal|session|ts, in-memory secret, ±5 min); the WS upgrade skips the
+  bearer check, queries over the socket still find no principal. The app
+  uses one lazy graphql-ws client, re-mints per (re)subscribe, resumes after
+  the last seq. Verified: Go tests over a real socket; live through hz with
+  a node client (TLS + upgrade + token → replayed events). The long-poll
+  REST/GraphQL query stays for simple clients.
+- **S4 open:** OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
   ✅ `dun dund service install` (`548864a`, CLI-10; the TUI starts the
   unit when one is installed). **Installed on the box 2026-10-21** (USER
