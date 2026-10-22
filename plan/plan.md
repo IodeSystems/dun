@@ -278,10 +278,14 @@ Where it stands:
   long-poll; OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
   ✅ `dun dund service install` (`548864a`, CLI-10; the TUI starts the
-  unit when one is installed). **Not yet installed on the real box** — USER
-  to say go: stop any TUI-started dund (`kill $(cat ~/.dun/dund.pid)`),
-  `dun dund service install --enable --start -- --http 192.168.1.76:20003`,
-  `dun dund token`.
+  unit when one is installed). **Installed on the box 2026-10-21** (USER
+  go): unit `dund`, enabled, `--http 192.168.1.76:20003`; local token
+  made; https://dun.iodesystems.com/healthz 200 through hz. A shim
+  rebuild (`dun --version`) made dund re-exec into the new build on its
+  own (journal 21:59:01).
+- **Stopgap web page** (`4a580b4`): `/` serves plain HTML+JS over
+  `/api/v1` (token sign-in in localStorage, session list, chat, asks,
+  long-poll) — NOT the react-native-web client; that is S5, not started.
 
 Slices, in order:
 - ✅ **S0 engine protocol (internal).** The `proto/` types and `Log`, with
