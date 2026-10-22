@@ -197,6 +197,15 @@ never which. `/resume <id>` goes straight there. Switching restarts the engine o
 that conversation and replays its transcript; the scrollback you were looking at
 is cleared, since it belongs to the session you just left.
 
+**A plain `dun` picks up where you left.** Started without `--resume` or
+`--continue`, dun asks dund for this workspace's newest session that no client
+(another terminal, a browser tab) is attached to, and resumes it — so sessions
+opened and left do not pile up. The first line says so: `resumed <id> (5m ago,
+4 messages) — /new for a fresh session`. Only a session started in the same
+directory with the same flags counts: one under another worktree or with
+`--docker` is another workspace. dund makes the pick, so two terminals started at
+once never land in the same session. `/new` (or `dun --new`) starts a fresh one.
+
 **Record a session, replay it exactly.** `DUN_TRACE=t.jsonl dun` writes every
 engine event with its offset from the first one; `dun --replay t.jsonl` feeds
 them back into the real TUI at the original pacing — minus the dead air. Only

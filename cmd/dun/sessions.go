@@ -133,15 +133,7 @@ func (m *tuiModel) switchSession(id string) tea.Cmd {
 		m.refresh()
 		return nil
 	}
-	m.proc.close()
-	m.convo = nil
-	m.cur, m.pendingTool = "", -1
-	m.sel = -1
-	m.busy, m.asking, m.starting = false, false, true
-	m.startingStart = time.Now()
-	m.fatalErr, m.exitAnnounced = "", false
-	m.restarts, m.restartStart = 0, time.Now()
-	m.suggestions, m.suggestSel = nil, 0 // the session left's, not the one joined
+	m.leaveSession()
 	m.sessionID = id
 	m.skipHistory = false // this one we DO want replayed — it is a new transcript
 	if ws := m.sessWS[id]; ws != "" {
@@ -155,6 +147,39 @@ func (m *tuiModel) switchSession(id string) tea.Cmd {
 	o := m.opts
 	o.resume, o.cont = id, false
 	return restartEngine(o, id, true, resumeAt{}) // another session: from its start
+}
+
+// leaveSession detaches from the session on screen and clears what belongs
+// to it — scrollback, the turn, its suggestions — before another is joined.
+func (m *tuiModel) leaveSession() {
+	m.proc.close()
+	m.convo = nil
+	m.cur, m.pendingTool = "", -1
+	m.sel = -1
+	m.busy, m.asking, m.starting = false, false, true
+	m.startingStart = time.Now()
+	m.fatalErr, m.exitAnnounced = "", false
+	m.restarts, m.restartStart = 0, time.Now()
+	m.suggestions, m.suggestSel = nil, 0
+}
+
+// newSlash is /new: a fresh session in this workspace. The one left keeps
+// running for whoever else is in it (or until the idle stop), and a plain
+// dun can come back to it.
+func newSlash(m *tuiModel, _ []string) tea.Cmd {
+	if m.replaying {
+		m.append(stDim.Render("this is a replay — there is no engine to start a session with"))
+		return nil
+	}
+	m.leaveSession()
+	// No id to reattach to until the new engine names one, and a retry must
+	// not fall back to the session just left.
+	m.sessionID, m.everUp = "", false
+	m.skipHistory = false
+	m.opts.resume, m.opts.cont, m.opts.fresh = "", false, true
+	m.append(stDim.Render("starting a fresh session…"))
+	m.refresh()
+	return restartEngine(m.opts, "", false, resumeAt{})
 }
 
 // sessionPanel renders the picker in the lower pane, newest first.

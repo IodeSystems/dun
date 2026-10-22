@@ -125,6 +125,7 @@ func main() {
 	noShip := flag.Bool("no-ship", false, "withhold the ship tool entirely (overrides --ship)")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
+	fresh := flag.Bool("new", false, "start a new session, even when this workspace has one no client is attached to (which plain dun resumes)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
@@ -306,7 +307,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -316,7 +317,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh}, *addr); err != nil {
 			fatal(err)
 		}
 		return

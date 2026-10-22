@@ -72,6 +72,9 @@ type tuiOpts struct {
 	// survives a /reload or engine restart; /rephrase on|off flips the RUNTIME
 	// copy, which wins over this at turn time.
 	rephrase bool
+	// fresh is --new (and /new): a new session even when the workspace has
+	// one nobody is attached to. Without it a plain `dun` reuses that one.
+	fresh bool
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -2010,6 +2013,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// keyboard, and a frame is not free even with the wrap cache. Mark the
 		// screen dirty; a tick renders at most renderHz. See renderTickMsg.
 		m.renderDue = true
+	case "reused":
+		// A plain dun resumed an idle session (attach.go): say which.
+		m.append(stDim.Render(str(ev["text"])))
 	case "suggestions":
 		// Not before anything was asked: there is nothing to predict from,
 		// and a session that was just cleared must not show the old ones.
@@ -3738,6 +3744,7 @@ func init() {
 			return nil
 		}},
 		{"resume", "[id]", "switch to another saved session (bare opens the picker)", resumeSlash},
+		{"new", "", "start a fresh session in this workspace", newSlash},
 		{"trace", "[on|off|file]", "record events+scroll to a file for debugging (default: dun-trace.jsonl in the temp dir)", func(m *tuiModel, args []string) tea.Cmd {
 			if len(args) == 0 || args[0] == "on" {
 				// Not the workspace by default: dun writes nothing into a repo
@@ -4434,6 +4441,9 @@ func procArgs(o tuiOpts, mode string) []string {
 	}
 	if o.resume != "" {
 		args = append(args, "--resume", o.resume)
+	}
+	if o.fresh && mode == "--tui" {
+		args = append(args, "--new")
 	}
 	return args
 }

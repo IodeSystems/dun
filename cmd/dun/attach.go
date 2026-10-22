@@ -96,7 +96,7 @@ func engineArgs(o tuiOpts) []string {
 		switch all[i] {
 		case "--key", "--resume":
 			i++
-		case "--continue", "--disable-exit":
+		case "--continue", "--disable-exit", "--new":
 		default:
 			out = append(out, all[i])
 		}
@@ -128,13 +128,20 @@ func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 	if id == "" && o.cont {
 		id = dun.LatestSession(o.workspace)
 	}
+	reused := false
 	if id == "" {
-		ack, err := ac.call(sc, "", &proto.Create{Workspace: o.workspace, Args: engineArgs(o)})
+		// A plain dun takes the workspace's newest session nobody is
+		// attached to, so sessions opened and left do not pile up; dund
+		// picks, so two TUIs starting at once do not share one.
+		ack, err := ac.call(sc, "", &proto.Create{Workspace: o.workspace, Args: engineArgs(o), ReuseIdle: !o.fresh})
 		if err != nil {
 			c.Close()
 			return nil, err
 		}
 		id, after = ack.Session, resumeAt{}
+		if a, ok := ack.Payload.(*proto.Ack); ok {
+			reused = a.Reused
+		}
 	}
 	ac.session = id
 	if _, err := ac.call(sc, id, &proto.Subscribe{After: after.seq, Epoch: after.epoch}); err != nil {
@@ -160,6 +167,9 @@ func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 	p.at.Store(&after)
 	for _, n := range notes {
 		ch <- evMsg{"type": "notification", "text": n}
+	}
+	if reused {
+		ch <- evMsg{"type": "reused", "text": reusedLine(o.workspace, id)}
 	}
 	// What arrived while waiting for the acks is the start of the stream.
 	early := ac.early
@@ -209,6 +219,26 @@ func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
 		ch <- eofMsg{proc: p}
 	}()
 	return p, nil
+}
+
+// reusedLine says which session a plain dun resumed, and how to get a new
+// one instead.
+func reusedLine(workspace, id string) string {
+	n := 0
+	for _, it := range dun.SessionHistory(dun.SessionFile(workspace, id)) {
+		if it.Kind == "user" || it.Kind == "assistant" {
+			n++
+		}
+	}
+	age := "nothing saved yet"
+	if st, err := os.Stat(dun.SessionFile(workspace, id)); err == nil {
+		age = relTime(st.ModTime())
+	}
+	unit := "messages"
+	if n == 1 {
+		unit = "message"
+	}
+	return fmt.Sprintf("resumed %s (%s, %d %s) — /new for a fresh session", id, age, n, unit)
 }
 
 // checkDundBuild compares dund's build with this one. A client-started dund
