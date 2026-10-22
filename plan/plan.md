@@ -140,16 +140,24 @@ Where it stands:
   7 command types in. Events are untyped maps, no sequence numbers.
 - The TUI spawns the engine and owns its lifetime and restarts.
 - `dun -d` (the launcher) is a registry plus the rebuild watcher.
-- S0 work in progress, uncommitted, in `proto/`: typed Go structs for all 30
-  events and 8 commands (incl. subscribe), a flat envelope
-  (`{v, session, seq, ts, type, re}` / `{v, cid, session, type}` — `cid`
-  because server/control/agent commands already use `id` for their target),
-  and `Log` (seq, replay after a seq, ErrGap → snapshot, a slow subscriber
-  dropped, latest-per-state-type). A hand-written TS generator was also
-  written; it goes (WEB-4: types come from graphql-codegen).
+- **S0 done** (`proto/`): typed Go structs for all 30 events and 8
+  commands (incl. subscribe), a flat envelope (`{v, session, seq, ts, type,
+  re}` / `{v, cid, session, type}` — `cid` because server/control/agent
+  commands already use `id` for their target), and `Log` (seq, replay after
+  a seq, ErrGap → snapshot, ErrFuture, a slow subscriber dropped with
+  ErrSlow, latest event per state type). Verified: round trip of every type
+  with every field set; strict decode of the engine's own builders and the
+  TUI's command encoders (`cmd/dun/proto_compat_test.go`; a removed field
+  fails it — checked by deleting `server_asked`); strict decode of a live
+  `dun -p` run (33 lines, 13 types incl. usage and catalog;
+  `PROTO_CAPTURE=<file> go test -run TestDecodeCapture ./proto`). Not yet
+  seen live: ask, mount, retry, recap, compaction, agents/jobs,
+  agent_history, suggestions, history.
+- Assumptions: the diagnostic blocks of usage (side_calls, surfacing, cache)
+  stay open maps; agent command ids stay strings, as the TUI sends them.
 
 Slices, in order:
-- **S0 engine protocol (internal).** The `proto/` types and `Log`, with
+- ✅ **S0 engine protocol (internal).** The `proto/` types and `Log`, with
   round-trip tests and a strict-decode test of the engine's real events.
   This is the engine↔dund pipe, not a browser surface: NDJSON over stdio
   stays.
@@ -168,8 +176,9 @@ Slices, in order:
 - **S5 RN client.** Expo + react-native-web; graphql-codegen types; one
   `graphql-ws` client (RT-3); PWA manifest + service worker.
 
-- **next:** S0: round-trip and strict-decode tests, commit. The TS
-  generator is already dropped.
+- **next:** S1 — the engine emits `proto` structs through a `Log`
+  (seq on every line); the TUI decodes `proto.Event`; then find the TUI
+  state not derivable from events.
 - **risks:**
   - The TUI holds state today that may not be derivable from events (its
     restart counters, suggestions state, replay mode); S1 finds out.
