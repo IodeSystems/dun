@@ -39,7 +39,8 @@ func TestSplitFrontmatter_TheShapesSkillFilesUse(t *testing.T) {
 	}
 }
 
-// Later roots win by name; a skill without a description is dropped; a
+// Later roots win by name; a synced bucket is read; a skill without a
+// description is dropped; a
 // user-only skill is listed for /skill but not offered to the model.
 func TestSkills_PrecedenceAndPromptBlock(t *testing.T) {
 	home := t.TempDir()
@@ -60,7 +61,8 @@ func TestSkills_PrecedenceAndPromptBlock(t *testing.T) {
 	for _, s := range h.Skills() {
 		names = append(names, s.Name+"="+s.Source)
 	}
-	if strings.Join(names, ",") != "deploy=project,manual=user" {
+	// "deep" is in a synced bucket (synced/bucket/deep), Claude's layout.
+	if strings.Join(names, ",") != "deep=user,deploy=project,manual=user" {
 		t.Fatalf("skills = %v", names)
 	}
 	block := skillList(h.Skills())
@@ -73,7 +75,7 @@ func TestSkills_PrecedenceAndPromptBlock(t *testing.T) {
 	if out := h.loadSkill(context.Background(), "deploy", "../../../ref.md"); out != "the reference" {
 		t.Errorf("a file stays inside the skill: %q", out)
 	}
-	if out := h.loadSkill(context.Background(), "nope", ""); !strings.Contains(out, "have: deploy, manual") {
+	if out := h.loadSkill(context.Background(), "nope", ""); !strings.Contains(out, "have: deep, deploy, manual") {
 		t.Errorf("unknown: %q", out)
 	}
 }

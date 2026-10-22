@@ -78,10 +78,30 @@ func skillDirs(projectDir string) []struct{ dir, source string } {
 	return out
 }
 
-// loadLocalSkills reads every */SKILL.md under the roots.
+// withSynced adds, after each root, the buckets Claude syncs skills into:
+// <root>/synced/<bucket>/<name>/SKILL.md (claude.ai's skills, USER
+// 2026-10-22). A skill directly in the root wins over a synced one of the
+// same name.
+func withSynced(roots []struct{ dir, source string }) []struct{ dir, source string } {
+	var out []struct{ dir, source string }
+	for _, r := range roots {
+		buckets, _ := os.ReadDir(filepath.Join(r.dir, "synced"))
+		for _, b := range buckets {
+			d := filepath.Join(r.dir, "synced", b.Name())
+			if st, err := os.Stat(d); err == nil && st.IsDir() {
+				out = append(out, struct{ dir, source string }{d, r.source})
+			}
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// loadLocalSkills reads every */SKILL.md under the roots, and under their
+// synced buckets.
 func loadLocalSkills(roots []struct{ dir, source string }) []Skill {
 	var out []Skill
-	for _, r := range roots {
+	for _, r := range withSynced(roots) {
 		entries, err := os.ReadDir(r.dir)
 		if err != nil {
 			continue
@@ -294,7 +314,7 @@ func (h *Harness) skillRoots() (user, project []struct{ dir, source string }) {
 // SKILL.md path, size and modification time. Cheap enough to poll.
 func skillsSig(roots []struct{ dir, source string }) string {
 	var b strings.Builder
-	for _, r := range roots {
+	for _, r := range withSynced(roots) {
 		entries, err := os.ReadDir(r.dir)
 		if err != nil {
 			continue
