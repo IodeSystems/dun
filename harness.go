@@ -245,6 +245,10 @@ type Config struct {
 	// reconfiguring DockerExec mid-session for a worktree switch.
 	ExtraMounts []MountSpec
 	OnToken     func(string)
+	// OnReasoning fires with each delta of the model's reasoning, as it
+	// streams, for the turn's own rounds only (see reasoning.go). nil → the
+	// stream is not teed at all.
+	OnReasoning func(string)
 	OnToolCall  func(tool string, args map[string]any, result string)
 	// OnNotify fires when a plain notification (KindNotification) is injected
 	// into the conversation (e.g. a background job's completion).
@@ -514,7 +518,7 @@ func (h *Harness) Resumed() int { return h.store.Loaded() }
 // without re-running any turn. A tool_call and its result share a CallID so the
 // client folds them into one block.
 type HistoryItem struct {
-	Kind    string         `json:"kind"` // user|assistant|tool_call|tool_result|notification
+	Kind    string         `json:"kind"` // user|assistant|tool_call|tool_result|notification|reasoning
 	Content string         `json:"content,omitempty"`
 	Tool    string         `json:"tool,omitempty"`    // tool_call / tool_result
 	CallID  string         `json:"call_id,omitempty"` // pairs a tool_call with its result
@@ -559,6 +563,13 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 	})
 	out := make([]HistoryItem, 0, len(entries))
 	for _, e := range entries {
+		// The round's reasoning rides the entry it produced (agentkit stamps it
+		// on the reply, or on the first call of a round with no prose). It goes
+		// out as its own item just BEFORE that entry — where it happened — so a
+		// client that does not know the kind skips it and loses nothing else.
+		if r := strings.TrimSpace(e.Reasoning); r != "" {
+			out = append(out, HistoryItem{Kind: "reasoning", Content: r})
+		}
 		switch e.Kind {
 		case agent.KindUser:
 			out = append(out, HistoryItem{Kind: "user", Content: e.Content})
@@ -1062,7 +1073,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		SessionID:            "dun",
 		OnCompactionComplete: h.noteCompaction,
 		Store:                store,
-		Runner:               cfg.Client,
+		Runner:               teeReasoning(cfg.Client, cfg.OnReasoning),
 		OnAssistantToken:     cfg.OnToken,
 		OnUsage:              h.noteUsage,
 		MaxTurns:             maxTurns(),

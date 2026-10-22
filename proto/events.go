@@ -10,6 +10,7 @@ package proto
 
 func init() {
 	event[Token]("token")
+	event[Reasoning]("reasoning")
 	event[Message]("message")
 	event[ToolCall]("tool_call")
 	event[ToolResult]("tool_result")
@@ -54,6 +55,16 @@ func init() {
 
 // Token is a streamed fragment of the assistant's reply.
 type Token struct {
+	Text string `json:"text"`
+}
+
+// Reasoning is a streamed fragment of the model's reasoning — its thinking
+// before the reply or the tool call of a round. Deltas, like Token, and only
+// the turn's own: a sub-agent's or a side call's thinking is not sent. A
+// round's thinking ends when its first token or tool_call arrives, or the
+// turn ends (done, error); there is no event of its own for that. Thinking
+// from finished rounds comes back in history as items of kind "reasoning".
+type Reasoning struct {
 	Text string `json:"text"`
 }
 

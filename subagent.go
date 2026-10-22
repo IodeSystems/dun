@@ -407,6 +407,7 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner)
 	// them to the parent's UI would interleave N children's streams into one
 	// conversation, which is the context re-merge the split exists to prevent.
 	cfg.OnToken = nil
+	cfg.OnReasoning = nil
 	cfg.OnToolCall = nil
 	cfg.OnNotify = nil
 	cfg.OnDocs = nil

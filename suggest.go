@@ -84,7 +84,7 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	}
 
 	start := time.Now()
-	ch, err := h.Session.Runner.ChatStream(ctx, msgs, tools, opts)
+	ch, err := untee(h.Session.Runner).ChatStream(ctx, msgs, tools, opts)
 	if err != nil {
 		return nil, err
 	}

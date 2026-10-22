@@ -129,7 +129,7 @@ func (h *Harness) CommitMessage(ctx context.Context, wt *Worktree) (string, erro
 		"No code fences, no preamble, no closing remarks, and no trailer lines.")
 
 	start := time.Now()
-	ch, err := h.Session.Runner.ChatStream(ctx, []llm.Message{{Role: "user", Content: b.String()}}, nil, nil)
+	ch, err := untee(h.Session.Runner).ChatStream(ctx, []llm.Message{{Role: "user", Content: b.String()}}, nil, nil)
 	if err != nil {
 		return "", err
 	}

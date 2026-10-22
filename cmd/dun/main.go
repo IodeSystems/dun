@@ -515,6 +515,7 @@ func main() {
 		em = &emitter{}
 		in = newInputStream()
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
+		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
 			em.emit(&proto.ToolCall{Tool: tool, Args: args})
 			em.emit(&proto.ToolResult{Tool: tool, Result: result})
