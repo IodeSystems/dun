@@ -49,8 +49,8 @@ install-launcher: ## put the self-rebuilding launcher on PATH (dun is always the
 run: ## build + launch the TUI
 	go run -ldflags "$(LDFLAGS)" ./cmd/dun -tui
 
-test: ## build + vet + test
-	go build ./... && go vet ./... && go test ./...
+test: ## build + vet (Linux and macOS, CLI-14) + test
+	go build ./... && go vet ./... && GOOS=darwin go vet ./... && go test ./...
 
 schema: ## regenerate mobile/schema.graphql from dund's operations
 	go run ./cmd/dun dund schema > mobile/schema.graphql
