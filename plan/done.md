@@ -867,3 +867,27 @@ says "(just type)" while it is highlighted and not yet capturing.
   before, none after `/jobs kill 1` and after `exec_monitor kill`.
 - **Not done:** a command that calls setsid itself leaves the group and is not
   reached. Pid reuse between the group emptying and the SIGKILL is not guarded.
+
+## ✅ RAG ingest skips junk, large dirs, large and binary files (USER, 2026-10-22)
+
+- **Rules** (`rag_ingest.go`, `planIngest`): one file list — `git ls-files -z
+  --cached --others --exclude-standard`, or outside git a walk that honors
+  nested `.gitignore` (port of agentkit's unexported matcher, `rag_ignore.go`)
+  and never enters junk dirs. Skipped: junk names anywhere (node_modules,
+  .venv/venv, env with pyvenv.cfg, target beside Cargo.toml/pom.xml, dist,
+  build, out, caches, .dun/worktrees, .claude/worktrees, ...); a dir over
+  5,000 files / 200 MB, at the highest such dir, root never; files over
+  1,024 KB; binary (extension or NUL in 8 KB; PDF exempt). vendor/ is judged
+  by size only.
+- **Config:** `"rag": {include, exclude, max_file_kb, max_dir_files,
+  max_dir_mb}` (`LoadRag`), patterns gitignore syntax and accumulated. include
+  beats every automatic skip, exclude beats include; inside a junk dir only an
+  include naming it or a path in it reaches.
+- **Surfaced:** `ServerState.Ingest` → `/rag on|auto|restart` answer, bare
+  `/rag`, the ready hint, and `log.Printf` in the engine log.
+- **Live:** scratch tree (3,000-file node_modules, 6,020-file data/, 5 MB
+  JSON, sources), git and non-git: 3 files indexed, summary names all skips;
+  with an include, 25. This repo: 362 files. Real raglit ingest NOT run
+  (isolating raglit's daemon from the user's was not trivial).
+- **Not done:** the highest-offending-dir rule skips a large `src/` whole in
+  a big monorepo; raise `max_dir_files` or include it.

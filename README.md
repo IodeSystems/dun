@@ -30,6 +30,28 @@ should still get a working dun. Turn them on per session, or once for good:
 | `/rag auto` · `/lsp auto` | start it now **and** every future session (saved) |
 | `/rag manual` · `/lsp manual` | stop starting it automatically (leaves it running) |
 
+**What `/rag` indexes.** In a git repo, the files git shows (tracked plus
+untracked-not-ignored); outside one, a walk that honors `.gitignore`. Then,
+automatically skipped: dependency, build and cache directories by name
+(`node_modules`, `.venv`, `dist`, `build`, `__pycache__`, `target` beside a
+`Cargo.toml`/`pom.xml`, ...), any directory whose files add up to more than
+5,000 or 200 MB (skipped whole, at the highest such directory — never the
+workspace root), files over 1 MB, and binary files. `/rag on`, the ready line
+and a bare `/rag` say what was skipped:
+
+    docs: indexing 1,234 files · skipped node_modules/ (dependencies), data/ (12,345 files, 2.3 GB),
+    14 files over 1 MB (largest: dump.json 310 MB) — to include one: "rag": {"include": ["data/"]} in dun.json
+
+```jsonc
+// dun.json — include overrides every automatic skip; exclude wins over include
+"rag": {"include": ["data/", "docs/big.json"], "exclude": ["fixtures/"],
+        "max_file_kb": 1024, "max_dir_files": 5000, "max_dir_mb": 200}
+```
+
+Patterns are gitignore syntax and add up across layers. Inside a dependency
+directory only a pattern naming it or a path in it (`node_modules/foo/`)
+reaches; a bare `*.json` does not reopen every `node_modules`.
+
 `--rag` / `--lsp` force one on for a single run (`--rag=false` forces it off),
 above whatever is saved. Startup names what is off, so a missing tool family is
 never a silent absence. A server that fails to start is reported and skipped —

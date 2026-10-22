@@ -90,6 +90,9 @@ type ServerState struct {
 	// Auth is a remote server's credentials: its OAuth login state, "static
 	// bearer", "static header" or "none"; "" for a local server.
 	Auth string `json:"auth,omitempty"`
+	// Ingest is the docs server's last ingest summary: what was indexed and
+	// what was skipped (IngestPlan.Summary). "" for every other server.
+	Ingest string `json:"ingest,omitempty"`
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -124,6 +127,9 @@ func (h *Harness) Servers() []ServerState {
 			Cost:         cost[s.ID],
 			Hidden:       hidden[s.ID],
 			Auth:         h.authState(s),
+		}
+		if s.ID == ServerDocs {
+			st.Ingest = h.ingestNote
 		}
 		switch {
 		case s.Via == ViaShell:
@@ -231,7 +237,14 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// the moment the per-session temp home was removed — the ingest was still
 	// called, from a branch that could no longer be taken.
 	if s.ID == ServerDocs {
-		ingestWorkspace(s.Command, h.cfg.Workspace)
+		dir := h.cfg.ConfigDir
+		if dir == "" {
+			dir = h.cfg.Workspace
+		}
+		note := ingestWorkspace(s.Command, h.cfg.Workspace, LoadRag(dir))
+		h.srvMu.Lock()
+		h.ingestNote = note
+		h.srvMu.Unlock()
 	}
 	env := s.Env
 	// Arm the AGENTS.md guard on the code server: a file-access hook that
@@ -635,17 +648,21 @@ func missing(want, have []string) []string {
 	return out
 }
 
-// ingestWorkspace lexically indexes the workspace into raglit (best-effort).
-// raglitCmd is the configured docs binary, so an overridden path is honored;
-// a docs server pointed at something that is not raglit is left alone.
-func ingestWorkspace(raglitCmd, workspace string) {
+// ingestWorkspace lexically indexes the workspace into raglit (best-effort)
+// and returns the summary the user sees (IngestPlan.Summary), "" when nothing
+// was ingested. raglitCmd is the configured docs binary, so an overridden path
+// is honored; a docs server pointed at something that is not raglit is left
+// alone.
+func ingestWorkspace(raglitCmd, workspace string, cfg *RagConfig) string {
 	if filepath.Base(raglitCmd) != "raglit" {
-		return
+		return ""
 	}
-	targets := ingestTargets(workspace)
-	if len(targets) == 0 {
-		return
+	plan := planIngest(workspace, cfg)
+	if len(plan.Files) == 0 {
+		return ""
 	}
+	summary := plan.Summary()
+	log.Printf("dun: %s", summary)
 	base := []string{"ingest",
 		// Same daemon, same project and index as the serve command — or the
 		// agent searches an index nothing was ingested into.
@@ -654,7 +671,7 @@ func ingestWorkspace(raglitCmd, workspace string) {
 		"--now"}
 	// Chunked so a large repository cannot overflow argv. Each call queues and
 	// the daemon drains them.
-	for _, batch := range chunkArgs(targets, ingestBatch) {
+	for _, batch := range chunkArgs(plan.Files, ingestBatch) {
 		args := append(append([]string{}, base...), batch...)
 		cmd := detach(exec.Command(raglitCmd, args...))
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -662,9 +679,10 @@ func ingestWorkspace(raglitCmd, workspace string) {
 			// Worth logging, since "search finds nothing" is otherwise
 			// unexplained.
 			log.Printf("dun: raglit ingest failed: %v: %s", err, strings.TrimSpace(string(out)))
-			return
+			return summary + " · ingest failed: " + err.Error()
 		}
 	}
+	return summary
 }
 
 // ingestBatch bounds one ingest's argv. Far under ARG_MAX anywhere dun runs; a
@@ -682,51 +700,18 @@ func chunkArgs(all []string, n int) [][]string {
 	return out
 }
 
-// ingestTargets lists what raglit should index: the files GIT would show you.
+// ingestTargets lists what raglit should index under the default rules;
+// planIngest (rag_ingest.go) has them.
 //
 // It used to hand over the workspace's top-level entries, which meant handing
 // over build output. Measured in this repo: a 27 MB `dun` executable and a 25 MB
 // `dun.test`, both gitignored, both sent to a pipeline that extracts, segments
-// and embeds — raglit has no binary defence of its own, so it tried. Most of the
-// pool's growth from 49 MB to 237 MB in one session was compiled binaries being
-// processed as though they were documents.
-//
-// `git ls-files --cached --others --exclude-standard` is exactly the right set:
-// tracked files plus untracked ones git would show, minus everything .gitignore
-// excludes. That is the project's actual content, and it costs one command
-// rather than a hand-maintained list of things that are not documents — the
-// previous version already special-cased .git and .dun, which were the first two
-// entries of a list that would never have ended.
-//
-// A workspace that is not a git repo falls back to the old behaviour.
+// and embeds. Inside git the list is `git ls-files --cached --others
+// --exclude-standard` (tracked files plus untracked ones .gitignore does not
+// exclude); outside git, a walk that honors .gitignore. Both are then filtered
+// by the junk, size and binary rules.
 func ingestTargets(workspace string) []string {
-	out, err := exec.Command("git", "-C", workspace, "ls-files",
-		"--cached", "--others", "--exclude-standard").Output()
-	if err == nil {
-		var files []string
-		for _, rel := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if rel == "" {
-				continue
-			}
-			files = append(files, filepath.Join(workspace, rel))
-		}
-		if len(files) > 0 {
-			return files
-		}
-	}
-	entries, err := os.ReadDir(workspace)
-	if err != nil {
-		return []string{workspace}
-	}
-	var fallback []string
-	for _, e := range entries {
-		switch e.Name() {
-		case ".git", DunDir:
-			continue
-		}
-		fallback = append(fallback, filepath.Join(workspace, e.Name()))
-	}
-	return fallback
+	return planIngest(workspace, nil).Files
 }
 
 // builtinServer reports whether id is one of dun's own three servers.

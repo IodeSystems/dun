@@ -70,6 +70,17 @@
     "ignore": []
   },
 
+  "//rag": "What /rag gives the docs index (raglit). Skipped automatically: dependency, build and cache directories by name (node_modules, .venv, dist, build, target beside a Cargo.toml or pom.xml, ...), any directory whose files add up to more than max_dir_files or max_dir_mb (skipped whole, at the highest such directory; the workspace root never), files over max_file_kb, and binary files. Each skip is named in the /rag on message. Merged field-by-field; include and exclude from every layer add up.",
+  "rag": {
+    "//include": "gitignore-syntax patterns that override every automatic skip. Inside a dependency or build directory, only a pattern naming it or a path in it (\"node_modules/foo/\") reaches; a bare \"*.json\" does not.",
+    "include": [],
+    "//exclude": "gitignore-syntax patterns never indexed. Wins over include.",
+    "exclude": [],
+    "max_file_kb": 1024,
+    "max_dir_files": 5000,
+    "max_dir_mb": 200
+  },
+
   "//mounts": "Extra local paths that must be accessible from both the worktree (symlink) and Docker container (volume mount). go.mod replace directives are auto-discovered — declare mounts here for non-Go projects or to override the auto-detected source path.",
   "mounts": [
     {

@@ -122,7 +122,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 		if elapsed > time.Second {
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
-		return msg
+		return msg + ingestLine(h, id)
 	case "off":
 		if err := h.StopServer(id); err != nil {
 			return label + ": " + err.Error()
@@ -157,13 +157,13 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 			if elapsed > time.Second {
 				msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 			}
-			return msg
+			return msg + ingestLine(h, id)
 		}
 		msg := label + ": restarted · " + runningSummary(h, id)
 		if elapsed > time.Second {
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
-		return msg
+		return msg + ingestLine(h, id)
 	case "auto":
 		path, err := h.SetAutostart(id, true)
 		if err != nil {
@@ -179,7 +179,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 		if elapsed > time.Second {
 			line += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
-		return msg + "\n" + line
+		return msg + "\n" + line + ingestLine(h, id)
 	case "manual":
 		path, err := h.SetAutostart(id, false)
 		if err != nil {
@@ -533,6 +533,9 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	if st.Err != "" {
 		b.WriteString("\nlast start failed: " + oneLine(st.Err))
 	}
+	if st.Running && st.Ingest != "" {
+		b.WriteString("\n" + st.Ingest)
+	}
 	switch {
 	case !st.Running && !st.Auto:
 		b.WriteString("\n/" + alias + " on to start it now · /" + alias + " auto to start it every session")
@@ -544,6 +547,15 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 		b.WriteString("\n/" + alias + " manual to stop starting it automatically")
 	}
 	return b.String()
+}
+
+// ingestLine is the docs server's ingest summary as a line of its own — what
+// was indexed, what was skipped and how to include it — or "".
+func ingestLine(h *dun.Harness, id string) string {
+	if st, ok := stateOf(h, id); ok && st.Ingest != "" {
+		return "\n" + st.Ingest
+	}
+	return ""
 }
 
 func runningSummary(h *dun.Harness, id string) string {
@@ -584,13 +596,18 @@ func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
 	return dun.ServerState{}, false
 }
 
-// serverHint is the startup line naming what is NOT running and how to get it.
+// serverHint is the startup line naming what is NOT running and how to get it,
+// plus the docs server's ingest summary when it autostarted.
 // Shown once, at ready: an agent that silently lacks code navigation is the
 // kind of thing a user only discovers by watching it flail with grep.
 func serverHint(states []dun.ServerState) string {
 	var lines []string
 	for _, st := range states {
 		if st.Running {
+			// An autostarted docs server says what it indexed and skipped.
+			if st.Ingest != "" {
+				lines = append(lines, st.Ingest)
+			}
 			continue
 		}
 		if st.Via == dun.ViaShell {

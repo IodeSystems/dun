@@ -61,6 +61,19 @@ func TestServerHint_NamesWhatIsOffAndHow(t *testing.T) {
 	}
 }
 
+// An autostarted docs server says at ready what it indexed and what it
+// skipped — a skipped node_modules is otherwise invisible.
+func TestServerHint_CarriesIngestSummary(t *testing.T) {
+	sum := `docs: indexing 12 files · skipped node_modules/ (dependencies) — to include one: "rag": {"include": ["node_modules/"]} in dun.json`
+	hint := serverHint([]dun.ServerState{
+		{ID: dun.ServerShell, Running: true},
+		{ID: dun.ServerDocs, Running: true, Ingest: sum},
+	})
+	if hint != sum {
+		t.Errorf("hint = %q, want the ingest summary", hint)
+	}
+}
+
 // A turn timeout must not be a session timeout. The old behaviour applied
 // --timeout to the whole run, so at the deadline every following turn failed
 // instantly on the same dead context and the engine exited — while the UI was

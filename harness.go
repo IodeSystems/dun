@@ -409,7 +409,10 @@ type Harness struct {
 	specs     []Server                 // every configured server, running or not
 	lastErr   map[string]string        // id → why its last start attempt failed
 	lastStart map[string]time.Duration // id → how long its last start took
-	hosted    map[string]hostedState   // id → how the running shell took a shell-placed server
+	// ingestNote is the docs server's last ingest summary, for /rag and the
+	// ready hint. Guarded by srvMu.
+	ingestNote string
+	hosted     map[string]hostedState // id → how the running shell took a shell-placed server
 	// oauth is each OAuth server's login, kept across restarts of the server
 	// so a cached token and a running login are not lost. Its own lock:
 	// Servers() reads it while holding srvMu.

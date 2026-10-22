@@ -159,25 +159,27 @@ func agentCompaction(subsumed, before, after int) agent.CompactionInfo {
 // nowhere in the results. The agent's own isolation poisoning its own index.
 func TestIngestTargets_ExcludesDunState(t *testing.T) {
 	ws := t.TempDir()
-	for _, d := range []string{".git", ".dun", "cmd", "plan"} {
-		if err := os.MkdirAll(filepath.Join(ws, d), 0o755); err != nil {
+	for _, f := range []string{".git/HEAD", ".dun/worktrees/s1/README.md", "cmd/main.go", "plan/plan.md", "README.md"} {
+		p := filepath.Join(ws, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := os.WriteFile(filepath.Join(ws, "README.md"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
+		if err := os.WriteFile(p, []byte("hi"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	got := ingestTargets(ws)
 	var names []string
 	for _, p := range got {
-		names = append(names, filepath.Base(p))
+		rel, _ := filepath.Rel(ws, p)
+		names = append(names, filepath.ToSlash(rel))
 	}
-	for _, bad := range []string{".git", ".dun"} {
-		if slices.Contains(names, bad) {
-			t.Errorf("%s must not be handed to the indexer: %v", bad, names)
+	for _, n := range names {
+		if strings.HasPrefix(n, ".git/") || strings.HasPrefix(n, ".dun/worktrees/") {
+			t.Errorf("%s must not be handed to the indexer: %v", n, names)
 		}
 	}
-	for _, want := range []string{"cmd", "plan", "README.md"} {
+	for _, want := range []string{"cmd/main.go", "plan/plan.md", "README.md"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("real content %q was excluded: %v", want, names)
 		}

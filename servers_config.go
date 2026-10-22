@@ -296,6 +296,9 @@ type ServersFile struct {
 	// Files configures the built-in file tools (files.go). Merged field by
 	// field; ignore patterns accumulate across layers.
 	Files *FilesConfig `json:"files,omitempty"`
+	// Rag is what the docs index is given (rag_ingest.go). Limits merge field
+	// by field; include and exclude accumulate across layers.
+	Rag *RagConfig `json:"rag,omitempty"`
 }
 
 // LoadShip resolves the effective ship config for a workspace. nil means "no
