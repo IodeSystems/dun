@@ -114,6 +114,29 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
+
+- **Reuse:** plain `dun` attaches to the workspace's newest session that has
+  no client attached and the same engine args; dund chooses, atomically
+  (`Create{ReuseIdle}`, a 30 s hold).
+  - `/new` and `--new` start a fresh session.
+  - `SessionSummary.Attached` counts clients, and `dun dund sessions` shows
+    them.
+- **Suggestions:** none are generated or shown before the first user
+  message, and none carry over across /clear, /new and /resume.
+- **Resume of a long session** (`33d05cb`): the root cause of "lost the
+  session service". A subscribe's replay overflowed the connection queue,
+  and send then closed the connection silently. Now a backlog over 256
+  events goes as a snapshot, and send waits (10 s stall, logged).
+- **Upgrades** (`2e58f90`, `da585a1`): hello/upgrade between a TUI and a
+  client-started dund of another build. dund reports when it is busy; the
+  TUI asks once per build pair; doctor checks the build.
+- **risks:**
+  - Reuse needs equal engine args, so after /model a plain `dun` makes a
+    new session.
+  - A served web terminal also reuses idle sessions.
+- **next:** confirm on the corp Mac that a long session resumes.
+
 ### ◐ 18. Built-in file tools (USER, 2026-10-22, branch `files-tools`)
 
 USER: a file toolset "minimal, configurable, but efficient and complete", modelled
