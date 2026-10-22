@@ -76,3 +76,23 @@ export const SessionEventsLive = graphql(`
     }
   }
 `);
+
+export const Slash = graphql(`
+  mutation Slash($id: String!, $line: String!) {
+    dund {
+      control(id: $id, body: { kind: control, target: "slash", action: $line }) {
+        ok
+      }
+    }
+  }
+`);
+
+export const ForgetSession = graphql(`
+  mutation ForgetSession($id: String!) {
+    dund {
+      forgetSession(id: $id) {
+        ok
+      }
+    }
+  }
+`);

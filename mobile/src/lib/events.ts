@@ -12,6 +12,20 @@ export type Item =
 
 export type Ask = { question: string; options: string[] };
 
+/** A slash command the engine carries out (proto.CommandSpec). */
+export type Command = {
+  name: string;
+  usage?: string;
+  description: string;
+  group: string;
+  choices?: { value: string; description?: string }[];
+  text?: boolean;
+  state?: string;
+  detail?: string;
+};
+
+export type Skill = { name: string; description: string };
+
 export type View = {
   items: Item[];
   /** The reply streaming in, before its message event settles it. */
@@ -19,10 +33,15 @@ export type View = {
   busy: boolean;
   status: string;
   ask: Ask | null;
+  /** The engine's slash commands, with their current state (commands event). */
+  commands: Command[];
+  skills: Skill[];
+  /** The engine said the session is closed: the client should leave it. */
+  closed: boolean;
   n: number; // key counter
 };
 
-export const empty: View = { items: [], streaming: null, busy: false, status: '', ask: null, n: 0 };
+export const empty: View = { items: [], streaming: null, busy: false, status: '', ask: null, commands: [], skills: [], closed: false, n: 0 };
 
 type Ev = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -53,8 +72,8 @@ function fromHistory(v: View, it: Ev): View {
 }
 
 /** Replace what is shown with a conversation (history replaces, never adds). */
-export function replaceWith(items: unknown[]): View {
-  let v: View = { ...empty };
+export function replaceWith(items: unknown[], keep?: View): View {
+  let v: View = { ...empty, commands: keep?.commands ?? [], skills: keep?.skills ?? [] };
   for (const it of items) if (it && typeof it === 'object') v = fromHistory(v, it as Ev);
   return v;
 }
@@ -62,9 +81,9 @@ export function replaceWith(items: unknown[]): View {
 export function apply(v: View, ev: Ev): View {
   switch (ev.type) {
     case 'snapshot':
-      return applySnapshot(ev);
+      return applySnapshot(ev, v);
     case 'history':
-      return { ...replaceWith((ev.items as unknown[]) ?? []), busy: v.busy, status: v.status, ask: v.ask };
+      return { ...replaceWith((ev.items as unknown[]) ?? [], v), busy: v.busy, status: v.status, ask: v.ask };
     case 'user':
       return push(v, { kind: 'user', text: str(ev.content), queued: ev.queued === true });
     case 'turn':
@@ -95,9 +114,18 @@ export function apply(v: View, ev: Ev): View {
     case 'notification':
       if (ev.kind === 'docs') return push(v, { kind: 'note', text: `🔎 ${Number(ev.surfaced ?? 0)} doc(s) surfaced` });
       return ev.text ? push(v, { kind: 'note', text: '🔔 ' + str(ev.text) }) : v;
-    case 'control':
+    case 'commands':
+      return { ...v, commands: (ev.items as Command[]) ?? [] };
+    case 'catalog':
+      return { ...v, skills: ((ev.skills as Skill[]) ?? []).map((k) => ({ name: k.name, description: k.description })) };
+    case 'control': {
+      const w = ev.id === 'close' && /^closed/.test(str(ev.message)) ? { ...v, closed: true } : v;
+      return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;
+    }
     case 'server':
       return ev.message ? push(v, { kind: 'note', text: str(ev.message) }) : v;
+    case 'reset':
+      return { ...empty, commands: v.commands, skills: v.skills, n: v.n };
     case 'engine':
       if (ev.state === 'started') return v;
       return push({ ...v, busy: false, ask: ev.state === 'restarting' ? null : v.ask },
@@ -111,8 +139,52 @@ export function apply(v: View, ev: Ev): View {
 }
 
 /** A snapshot: the conversation, then the latest state events. */
-export function applySnapshot(snap: Ev): View {
-  let v = replaceWith((snap.items as unknown[]) ?? []);
+export function applySnapshot(snap: Ev, keep?: View): View {
+  let v = replaceWith((snap.items as unknown[]) ?? [], keep);
   for (const s of (snap.state as Ev[]) ?? []) if (s.type !== 'history') v = apply(v, s);
   return v;
+}
+
+/**
+ * What a typed line means: a slash command for the engine, a skill (sent as
+ * a message asking the model to use it, as the TUI does), or a message.
+ */
+export type Line =
+  | { kind: 'message'; text: string }
+  | { kind: 'slash'; line: string }
+  | { kind: 'skill'; text: string }
+  | { kind: 'unknown'; name: string };
+
+export function parseLine(raw: string, skills: Skill[]): Line {
+  const text = raw.trim();
+  if (!text.startsWith('/')) return { kind: 'message', text };
+  const [head = '', ...rest] = text.slice(1).split(/\s+/);
+  const name = head.toLowerCase();
+  if (name === 'skill') {
+    const [skill, ...words] = rest;
+    if (!skill || !skills.some((k) => k.name === skill)) return { kind: 'unknown', name: 'skill ' + (skill ?? '') };
+    const ask = `Use the skill ${skill} (call skill name=${skill} first)`;
+    return { kind: 'skill', text: words.length ? `${ask}: ${words.join(' ')}` : ask + '.' };
+  }
+  if (!name) return { kind: 'unknown', name: '' };
+  return { kind: 'slash', line: text.slice(1) };
+}
+
+/** Palette rows for what has been typed after '/'. */
+export function suggest(typed: string, commands: Command[], skills: Skill[]): { insert: string; label: string; hint: string }[] {
+  const q = typed.replace(/^\//, '').toLowerCase();
+  const [head = '', arg] = q.split(/\s+/, 2);
+  const out: { insert: string; label: string; hint: string }[] = [];
+  if (arg === undefined) {
+    for (const c of commands) if (c.name.startsWith(head)) out.push({ insert: '/' + c.name + ' ', label: '/' + c.name + (c.usage ? ' ' + c.usage : ''), hint: c.description });
+    if ('skill'.startsWith(head)) out.push({ insert: '/skill ', label: '/skill <name> [text]', hint: 'ask the model to use a skill' });
+    return out;
+  }
+  if (head === 'skill') {
+    for (const k of skills) if (k.name.startsWith(arg)) out.push({ insert: `/skill ${k.name} `, label: k.name, hint: k.description });
+    return out;
+  }
+  const c = commands.find((x) => x.name === head);
+  for (const ch of c?.choices ?? []) if (ch.value.startsWith(arg)) out.push({ insert: `/${head} ${ch.value}`, label: ch.value, hint: ch.description ?? '' });
+  return out;
 }

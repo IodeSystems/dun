@@ -1,13 +1,15 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { explain } from '@/api/client';
 import { followSession } from '@/api/live';
-import { Answer, SendMessage } from '@/api/ops';
+import { Answer, ForgetSession, SendMessage, Slash } from '@/api/ops';
+import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
-import { apply, empty, type Item, type View as Shown } from '@/lib/events';
+import { confirm } from '@/lib/confirm';
+import { apply, empty, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -21,6 +23,7 @@ export default function Session() {
   const [conn, setConn] = useState('');
   const [text, setText] = useState('');
   const [sendErr, setSendErr] = useState('');
+  const [panel, setPanel] = useState(false);
   const listRef = useRef<FlatList<Item>>(null);
 
   useEffect(() => {
@@ -32,15 +35,41 @@ export default function Session() {
     });
   }, [auth, id]);
 
-  async function send() {
-    const t = text.trim();
-    if (!t || !auth.client) return;
-    setText('');
-    setSendErr('');
+  // /close confirmed by the engine: the service lets the session go and the
+  // screen leaves it.
+  useEffect(() => {
+    if (!view.closed || !auth.client) return;
+    void auth.client.request(ForgetSession, { id }).catch(() => undefined);
+    router.replace('/');
+  }, [view.closed, auth.client, id]);
+
+  async function runSlash(line: string) {
+    if (!auth.client) return;
+    const name = line.trim().split(/\s+/)[0]?.toLowerCase();
+    if (name === 'close' && !(await confirm('Close', 'Remove this session\'s worktree and branch and forget its transcript, for good?'))) return;
+    if (name === 'clear' && !(await confirm('Clear', 'Clear the conversation and start a fresh session log?'))) return;
     try {
-      await auth.client.request(SendMessage, { id, content: t });
+      await auth.client.request(Slash, { id, line });
     } catch (e) {
-      setText(t);
+      setSendErr('/' + line + ': ' + explain(e).message);
+    }
+  }
+
+  async function send() {
+    const raw = text;
+    if (!raw.trim() || !auth.client) return;
+    setSendErr('');
+    const l = parseLine(raw, view.skills);
+    if (l.kind === 'unknown') {
+      setSendErr(`no command /${l.name} — type / to see them`);
+      return;
+    }
+    setText('');
+    if (l.kind === 'slash') return runSlash(l.line);
+    try {
+      await auth.client.request(SendMessage, { id, content: l.text });
+    } catch (e) {
+      setText(raw);
       setSendErr('not sent: ' + explain(e).message);
     }
   }
@@ -56,7 +85,16 @@ export default function Session() {
   const rows: Item[] = view.streaming ? [...view.items, { key: 'streaming', kind: 'assistant', text: view.streaming }] : view.items;
   return (
     <Screen>
-      <Stack.Screen options={{ title: id }} />
+      <Stack.Screen
+        options={{
+          title: id,
+          headerRight: () => (
+            <Pressable onPress={() => setPanel((p) => !p)} style={{ paddingHorizontal: space.md }}>
+              <Text style={{ color: panel ? c.accent : c.muted }}>{panel ? 'Hide session' : 'Session'}</Text>
+            </Pressable>
+          ),
+        }}
+      />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <FlatList
           ref={listRef}
@@ -77,6 +115,8 @@ export default function Session() {
               </View>
             </View>
           ) : null}
+          {panel ? <SessionPanel commands={view.commands} run={(l) => void runSlash(l)} prefill={(t) => { setText(t); setPanel(false); }} /> : null}
+          {text.startsWith('/') && !view.ask ? <Palette rows={suggest(text, view.commands, view.skills)} pick={setText} /> : null}
           {conn ? <ErrorText>{conn}</ErrorText> : view.status ? <Muted>{view.status}</Muted> : null}
           {sendErr ? <ErrorText>{sendErr}</ErrorText> : null}
           <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-end' }}>
@@ -85,7 +125,7 @@ export default function Session() {
               value={text}
               onChangeText={setText}
               multiline
-              placeholder={view.ask ? 'or type an answer…' : 'ask dun to do something…'}
+              placeholder={view.ask ? 'or type an answer…' : 'ask dun to do something… (/ for commands)'}
               onKeyPress={(e) => {
                 // Enter sends on the web; Shift+Enter is a newline.
                 const ne = e.nativeEvent as { key: string; shiftKey?: boolean };

@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import { apply, applySnapshot, empty, replaceWith, type View } from '../src/lib/events';
+import { apply, applySnapshot, empty, parseLine, replaceWith, suggest, type View } from '../src/lib/events';
 
 const run = (evs: Record<string, unknown>[], v: View = empty) => evs.reduce(apply, v);
 
@@ -57,4 +57,38 @@ test('a snapshot event in the stream replaces what is shown', () => {
   const v = run([{ type: 'user', content: 'stale' }]);
   const w = apply(v, { type: 'snapshot', after: 9, items: [{ kind: 'assistant', content: 'fresh' }], state: [] });
   expect(w.items.map((i) => (i.kind === 'tool' ? i.title : i.text))).toEqual(['fresh']);
+});
+
+const cmds = [
+  { name: 'rag', description: 'docs', group: 'tools', choices: [{ value: 'on' }, { value: 'off' }], state: 'off' },
+  { name: 'remember', description: 'save', group: 'memory', text: true },
+];
+
+test('commands and skills are kept, through a history replace', () => {
+  let v = run([{ type: 'commands', items: cmds }, { type: 'catalog', skills: [{ name: 'tdd', description: 'test first', source: 'user' }] }]);
+  v = apply(v, { type: 'history', items: [] });
+  expect(v.commands.map((c) => c.name)).toEqual(['rag', 'remember']);
+  expect(v.skills[0]?.name).toBe('tdd');
+});
+
+test('a line is a message, a slash command, a skill, or unknown', () => {
+  const skills = [{ name: 'tdd', description: '' }];
+  expect(parseLine('hello', skills)).toEqual({ kind: 'message', text: 'hello' });
+  expect(parseLine(' /rag on ', skills)).toEqual({ kind: 'slash', line: 'rag on' });
+  expect(parseLine('/skill tdd fix it', skills)).toEqual({ kind: 'skill', text: 'Use the skill tdd (call skill name=tdd first): fix it' });
+  expect(parseLine('/skill nope', skills).kind).toBe('unknown');
+});
+
+test('the palette completes names, then choices, then skills', () => {
+  expect(suggest('/r', cmds, []).map((s) => s.insert)).toEqual(['/rag ', '/remember ']);
+  expect(suggest('/rag o', cmds, []).map((s) => s.insert)).toEqual(['/rag on', '/rag off']);
+  expect(suggest('/skill t', cmds, [{ name: 'tdd', description: 'x' }]).map((s) => s.insert)).toEqual(['/skill tdd ']);
+});
+
+test('a confirmed close marks the session closed; a reset clears it', () => {
+  const v = run([{ type: 'user', content: 'x' }, { type: 'control', id: 'close', message: 'closed: forgot session s1' }]);
+  expect(v.closed).toBe(true);
+  const w = apply(run([{ type: 'commands', items: cmds }, { type: 'user', content: 'x' }]), { type: 'reset' });
+  expect(w.items).toHaveLength(0);
+  expect(w.commands).toHaveLength(2);
 });
