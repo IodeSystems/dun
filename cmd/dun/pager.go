@@ -44,8 +44,11 @@ type pageDoc struct {
 // read from. Index alone is not identity — the conversation is replaced
 // wholesale (/clear, a resume, an agent's view) under an open pager.
 func (e convoEntry) pageID() any {
-	if e.think != nil {
+	switch {
+	case e.think != nil:
 		return e.think
+	case e.run != nil:
+		return e.run
 	}
 	return nil
 }
@@ -62,6 +65,8 @@ func (e convoEntry) page() (pageDoc, bool) {
 			}
 		}
 		return pageDoc{title: title, nodes: []pageNode{{body: strings.TrimSpace(e.think.text)}}}, true
+	case e.run != nil:
+		return e.run.page(), true
 	}
 	return pageDoc{}, false
 }

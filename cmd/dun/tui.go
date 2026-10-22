@@ -252,6 +252,10 @@ type convoEntry struct {
 	docs      *docsBlock  // proactive-RAG summary (nil for normal blocks)
 	tool      *toolBlock  // tool call/result (nil for normal blocks) → enter opens the inspector
 	think     *thinkBlock // a round's reasoning (thinking.go) → enter opens the pager
+	run       *toolRun    // earlier calls of a run, folded (toolrun.go) → enter opens the pager
+	// holdH is the least height this block is drawn at: a run's latest call
+	// keeps the tallest height the run has shown (toolrun.go). 0 = natural.
+	holdH int
 	// provisional marks a message that was typed mid-turn and is queued for
 	// delivery. It appears in the conversation with a dimmed style so the user
 	// knows it landed but hasn't been delivered to the model yet. When the turn
@@ -455,6 +459,7 @@ type sideCallStats struct {
 // inline collapsed/full preview.
 type toolBlock struct {
 	name   string
+	args   map[string]any // the call's arguments, for a run's summary
 	input  string
 	output string // styled renderer output
 	raw    string // original unstyled tool output
@@ -586,6 +591,7 @@ type tuiModel struct {
 	inspecting   bool            // the tool inspector overlay is open (owns all keys)
 	insp         inspector       // the overlay (valid while inspecting)
 	paging       bool            // the pager has the convo pane (pager.go; owns the keys)
+	holding      bool            // some block has a holdH (a run is in progress)
 	pg           pager           // the pager (valid while paging)
 	dumpSig      chan os.Signal  // SIGUSR1 → dump the rendered screen to a debug file
 	paletteSel   int             // highlighted row in the "/" command palette
@@ -1905,6 +1911,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.busyStart = time.Now()
 		}
 		m.suggestions = nil
+		if m.holding {
+			// A reply ends the run; its held space goes with it.
+			m.settleRun()
+			m.refresh()
+		}
 		if m.liveThinking() >= 0 {
 			// The reply has begun, so the round's thinking is over. Folding
 			// changes the block's height, so this frame is drawn now, not on
@@ -1931,7 +1942,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.endThinking()
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
-		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(str(ev["tool"]), args, 80))})
+		// The calls before this one fold into the run's aggregate, and this one
+		// takes their place at the run's tallest height.
+		hold := m.foldRun(true)
+		m.holding = m.holding || hold > 0
+		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(str(ev["tool"]), args, 80)), holdH: hold})
 		m.pendingTool = len(m.convo) - 1
 		m.pendingArgs = args
 		m.activeTool = callText(str(ev["tool"]), args, 40)
@@ -1941,6 +1956,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		ce := m.foldedTool(str(ev["tool"]), m.pendingArgs, result)
 		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
 			// Fold the result into its call so the pair is one collapsible unit.
+			ce.holdH = m.convo[idx].holdH
 			m.convo[idx] = ce
 			m.pendingTool, m.pendingArgs = -1, nil
 			m.activeTool = ""
@@ -1964,8 +1980,13 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				m.convo[i].invalidateWrap()
 			}
 		}
+		// Delivered messages are worth bringing into view; a tool result on its
+		// own is not, and pinning on every one dragged a reader who had
+		// scrolled up back to the bottom once per call.
+		if m.queuedMsgs > 0 {
+			m.scrollPinned = true
+		}
 		m.queuedMsgs = 0
-		m.scrollPinned = true
 		m.refresh()
 	case "history":
 		if m.skipHistory {
@@ -2118,6 +2139,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 	case "done":
 		m.endThinking()
+		m.settleRun()
 		m.flushCur()
 		// Clear any remaining provisional markers — the turn is done, so
 		// everything was delivered to the LLM.
@@ -2146,6 +2168,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.refresh()
 	case "error":
 		m.endThinking()
+		m.settleRun()
 		m.append(stErr.Render("error: " + str(ev["error"])))
 		// Clear any remaining provisional markers — the engine flushes them on
 		// error too, so they're part of the conversation history.
@@ -2862,7 +2885,7 @@ func (m *tuiModel) foldedTool(tool string, args map[string]any, result string) c
 		collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
 		full:      stDim.Render("▾ ") + callLong + "\n" + body,
 		raw:       stDim.Render("▾ ") + callLong + "\n" + stDim.Render(result),
-		tool:      &toolBlock{name: tool, input: af, output: body, raw: result},
+		tool:      &toolBlock{name: tool, args: args, input: af, output: body, raw: result},
 	}
 }
 
@@ -2904,6 +2927,7 @@ func (m *tuiModel) replay(items []any) {
 			if !hadPend || str(im["call_id"]) != pendID {
 				args = nil // unmatched result: render without the call's args
 			}
+			m.foldRun(false) // a past run folds the way a live one did; nothing is held
 			m.convo = append(m.convo, m.foldedTool(str(im["tool"]), args, str(im["content"])))
 			pendName, pendID, pendArgs, hadPend = "", "", nil, false
 			n++
@@ -3136,6 +3160,11 @@ func (m *tuiModel) refresh() {
 			}
 		} else {
 			w = packSGR(cellbuf.Wrap(b, wrapW, ""))
+		}
+		if i < len(m.convo) && m.convo[i].holdH > 0 {
+			if n := strings.Count(w, "\n") + 1; n < m.convo[i].holdH {
+				w += strings.Repeat("\n", m.convo[i].holdH-n)
+			}
 		}
 		if selMode {
 			if i == m.sel {
