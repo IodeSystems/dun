@@ -132,11 +132,30 @@ func (c *conn) close() {
 
 // send queues a frame; a connection that cannot keep up is closed, not
 // waited for.
+// sendStall is how long a send waits for the writer before the connection is
+// given up as dead.
+var sendStall = 10 * time.Second
+
+// send queues an event for the writer, waiting while the queue is full: a
+// resume replays a backlog in one burst, and dropping the connection when the
+// queue filled (as this did) made every resume of a long session fail the
+// same way, silently. A writer that makes no progress for sendStall is a dead
+// client: that closes the connection, and says so.
 func (c *conn) send(ev proto.Event) {
 	select {
 	case <-c.done:
+		return
 	case c.out <- ev:
+		return
 	default:
+	}
+	t := time.NewTimer(sendStall)
+	defer t.Stop()
+	select {
+	case <-c.done:
+	case c.out <- ev:
+	case <-t.C:
+		log.Printf("dund: closed a connection: its client read nothing for %s", sendStall)
 		c.close()
 	}
 }

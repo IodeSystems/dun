@@ -22,6 +22,9 @@ const (
 	restartMax    = 3
 	restartWindow = 2 * time.Minute
 	subBuffer     = 4096
+	// maxReplay is the longest backlog replayed event by event; past it a
+	// subscriber gets a snapshot.
+	maxReplay = 256
 )
 
 // Variables so tests can shorten them.
@@ -314,8 +317,15 @@ func (s *session) subscribe(after uint64, epoch string) (*proto.Event, []proto.E
 	err := errEpoch
 	if epoch == "" || epoch == s.log.Epoch() {
 		replay, sub, err = s.log.Subscribe(after, subBuffer)
-		if err == nil {
+		if err == nil && len(replay) <= maxReplay {
 			return nil, replay, sub, nil
+		}
+		if err == nil {
+			// A long backlog (a turn streams an event per token) goes as a
+			// snapshot: the conversation and the current state, not thousands
+			// of deltas that only rebuild it.
+			sub.Close()
+			err = proto.ErrGap
 		}
 	}
 	if err != errEpoch && !errors.Is(err, proto.ErrGap) && !errors.Is(err, proto.ErrFuture) {

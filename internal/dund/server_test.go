@@ -204,3 +204,33 @@ func TestServerHelloAndUpgrade(t *testing.T) {
 		ln.Close()
 	}
 }
+
+// Resuming a session whose log holds a long backlog (a turn streams an event
+// per token) must not drop the connection: it gets a snapshot. Before, the
+// replay overflowed the connection's queue and the connection was closed
+// silently — every resume of a long session failed the same way.
+func TestResumeWithALongBacklog(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	sock := filepath.Join(t.TempDir(), "dund.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go NewServer(svc, func(net.Conn) (string, error) { return alice, nil }).Serve(ln)
+
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	ses, _ := svc.Get(alice, id)
+	for i := 0; i < 5000; i++ {
+		ses.log.Append(proto.NewEvent(&proto.Token{Text: "x"}))
+	}
+	c := dial(t, sock)
+	c.send("s", id, &proto.Subscribe{After: 0})
+	c.until(ackOf("s"))
+	if ev := c.until(typed("snapshot")); ev.Payload.(*proto.Snapshot).After < 5000 {
+		t.Fatalf("snapshot after %d", ev.Payload.(*proto.Snapshot).After)
+	}
+	// Still connected: a command is answered.
+	c.send("l", "", &proto.ListSessions{})
+	c.until(typed("sessions"))
+}
