@@ -4,6 +4,8 @@
 // The events are the protocol's flat JSON frames (dun proto/events.go); only
 // the fields read here are relied on.
 
+import type { McpTool, McpTools } from './mcp';
+
 export type Item =
   | { key: string; kind: 'user'; text: string; queued?: boolean }
   | { key: string; kind: 'assistant'; text: string }
@@ -43,12 +45,14 @@ export type View = {
   /** Every provider's models, once asked for (control "models"). */
   models: ModelProvider[] | null;
   settings: Settings | null;
+  /** The last server tool list the engine sent (control "mcptools"). */
+  mcpTools: McpTools | null;
   /** The engine said the session is closed: the client should leave it. */
   closed: boolean;
   n: number; // key counter
 };
 
-export const empty: View = { items: [], streaming: null, busy: false, status: '', ask: null, commands: [], skills: [], models: null, settings: null, closed: false, n: 0 };
+export const empty: View = { items: [], streaming: null, busy: false, status: '', ask: null, commands: [], skills: [], models: null, settings: null, mcpTools: null, closed: false, n: 0 };
 
 type Ev = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -93,7 +97,7 @@ function fromHistory(v: View, it: Ev): View {
 
 /** Replace what is shown with a conversation (history replaces, never adds). */
 export function replaceWith(items: unknown[], keep?: View): View {
-  let v: View = { ...empty, commands: keep?.commands ?? [], skills: keep?.skills ?? [], models: keep?.models ?? null, settings: keep?.settings ?? null };
+  let v: View = { ...empty, commands: keep?.commands ?? [], skills: keep?.skills ?? [], models: keep?.models ?? null, settings: keep?.settings ?? null, mcpTools: keep?.mcpTools ?? null };
   for (const it of items) if (it && typeof it === 'object') v = fromHistory(v, it as Ev);
   return v;
 }
@@ -144,6 +148,14 @@ export function apply(v: View, ev: Ev): View {
       return { ...v, commands: (ev.items as Command[]) ?? [] };
     case 'models':
       return { ...v, models: (ev.providers as ModelProvider[]) ?? [] };
+    case 'mcp_tools': {
+      // No server: the cost listing, a note only. A list keeps the last one
+      // when an answer carries none (a refused toggle names why).
+      const tools = (ev.tools as McpTool[] | undefined) ?? [];
+      const server = str(ev.server);
+      const w = server && (tools.length || v.mcpTools?.server !== server) ? { ...v, mcpTools: { server, tools } } : v;
+      return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;
+    }
     case 'settings':
       return { ...v, settings: { model: str(ev.model), provider: str(ev.provider), url: str(ev.url) } };
     case 'catalog':

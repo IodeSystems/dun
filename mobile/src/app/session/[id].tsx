@@ -7,12 +7,14 @@ import { explain } from '@/api/client';
 import { followSession } from '@/api/live';
 import { Answer, AskModels, Control, ForgetSession, GetUI, PutUI, SendMessage, Slash, SwitchModel } from '@/api/ops';
 import { McpForm } from '@/components/McpForm';
+import { McpToolsPanel } from '@/components/McpToolsPanel';
 import { ModelPicker } from '@/components/ModelPicker';
 import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
 import { apply, empty, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
+import { toggleAction, toolsRequest } from '@/lib/mcp';
 import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
@@ -30,6 +32,7 @@ export default function Session() {
   const [panel, setPanel] = useState(false);
   const [picker, setPicker] = useState<string | null>(null); // the search, when open
   const [mcpForm, setMcpForm] = useState(false);
+  const [toolsFor, setToolsFor] = useState<string | null>(null); // the server /mcp tools asked for
   // The login form: edit is a provider logged in again, name a new one's.
   const [providerForm, setProviderForm] = useState<{ edit: { name: string; url: string } | null; name?: string } | null>(null);
   // This user's UI state in the session, kept by dund and shared with their
@@ -98,6 +101,9 @@ export default function Session() {
     const name = line.trim().split(/\s+/)[0]?.toLowerCase();
     if (name === 'close' && !(await confirm('Close', 'Remove this session\'s worktree and branch and forget its transcript, for good?'))) return;
     if (name === 'clear' && !(await confirm('Clear', 'Clear the conversation and start a fresh session log?'))) return;
+    // The engine answers /mcp tools <id> with the list; the panel shows it.
+    const want = toolsRequest(line);
+    if (want) setToolsFor(want);
     try {
       await auth.client.request(Slash, { id, line });
     } catch (e) {
@@ -231,6 +237,17 @@ export default function Session() {
             <McpForm
               close={() => setMcpForm(false)}
               add={(spec) => void auth.client?.request(Control, { id, target: 'mcp', action: 'add ' + spec }).catch((e) => setSendErr('mcp add: ' + explain(e).message))}
+            />
+          ) : null}
+          {toolsFor && view.mcpTools?.server === toolsFor ? (
+            <McpToolsPanel
+              tools={view.mcpTools}
+              close={() => setToolsFor(null)}
+              toggle={(t) =>
+                void auth.client
+                  ?.request(Control, { id, target: 'mcptools', action: toggleAction(toolsFor, t) })
+                  .catch((e) => setSendErr('mcp tools: ' + explain(e).message))
+              }
             />
           ) : null}
           {panel ? (
