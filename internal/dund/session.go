@@ -116,6 +116,17 @@ func (s *session) idle(d time.Duration) bool {
 		time.Since(s.lastActive) >= d
 }
 
+// busy reports whether the engine is doing something a restart would cut
+// short: a turn, a question to a person, a job, a sub-agent.
+func (s *session) busy() bool {
+	s.mu.Lock()
+	running := s.running
+	s.mu.Unlock()
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	return running && (s.inTurn || s.asking || s.jobsBusy || s.agentsBusy)
+}
+
 // touch marks the session used now (a command, a subscribe).
 func (s *session) touch() {
 	s.actMu.Lock()

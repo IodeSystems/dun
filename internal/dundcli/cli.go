@@ -168,16 +168,61 @@ func serve(ctx context.Context, l *loader, bin string) error {
 	defer stop()
 	errc := make(chan error, 1)
 	go func() { errc <- dund.NewServer(svc, dund.UnixPeer).Serve(ln) }()
+	self, _ := os.Executable() // now: after a rebuild it names the deleted file
+	rebuilt := watchSelf(ctx, svc, self)
 	fmt.Fprintf(os.Stderr, "dund: serving %s (engines: %s)\n", sock, bin)
+	reexec := false
 	select {
 	case <-ctx.Done():
 		fmt.Fprintln(os.Stderr, "dund: stopping engines")
 	case err = <-errc:
+	case <-rebuilt:
+		fmt.Fprintln(os.Stderr, "dund: a new build is in place and nothing is busy — restarting into it")
+		reexec = true
 	}
 	ln.Close()
 	os.Remove(sock)
 	svc.Close()
+	if reexec {
+		return syscall.Exec(self, os.Args, os.Environ())
+	}
 	return err
+}
+
+// selfCheck is how often dund looks at its own binary.
+const selfCheck = 2 * time.Second
+
+// watchSelf fires once this process's executable has been replaced (a
+// rebuild renames a new binary over it) AND no session is busy, so that a
+// restart cuts no turn, question, job or sub-agent short. Clients reconnect
+// on their own; engines resume on first use.
+func watchSelf(ctx context.Context, svc *dund.Service, exe string) <-chan struct{} {
+	out := make(chan struct{})
+	start, err := os.Stat(exe)
+	if err != nil {
+		return out
+	}
+	go func() {
+		t := time.NewTicker(selfCheck)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			now, err := os.Stat(exe)
+			if err != nil || os.SameFile(start, now) && now.ModTime().Equal(start.ModTime()) {
+				continue
+			}
+			if svc.Busy() {
+				continue
+			}
+			close(out)
+			return
+		}
+	}()
+	return out
 }
 
 // claimPidfile refuses to start while another dund owns this home, and
@@ -185,7 +230,7 @@ func serve(ctx context.Context, l *loader, bin string) error {
 func claimPidfile(path string) error {
 	if b, err := os.ReadFile(path); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
-			if syscall.Kill(pid, 0) == nil {
+			if pid != os.Getpid() && syscall.Kill(pid, 0) == nil {
 				return fmt.Errorf("already running (pid %d, %s)", pid, path)
 			}
 		}

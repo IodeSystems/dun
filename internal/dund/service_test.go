@@ -361,3 +361,21 @@ func TestIdleEnginesStop(t *testing.T) {
 		t.Error("after done it is idle again")
 	}
 }
+
+// A rebuild restarts dund only when nothing is busy.
+func TestBusyHoldsBackARestart(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	ses, _ := svc.Get(alice, id)
+	if svc.Busy() {
+		t.Fatal("busy with nothing running")
+	}
+	ses.track(proto.NewEvent(&proto.Jobs{Jobs: []proto.JobInfo{{State: "running"}}}))
+	if !svc.Busy() {
+		t.Fatal("a running job is busy")
+	}
+	ses.track(proto.NewEvent(&proto.Jobs{Jobs: []proto.JobInfo{{State: "ok"}}}))
+	if svc.Busy() {
+		t.Fatal("a finished job is not")
+	}
+}

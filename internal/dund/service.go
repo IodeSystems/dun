@@ -273,6 +273,19 @@ func (s *Service) Stop(principal, id string) error {
 	return nil
 }
 
+// Busy reports whether any session's engine is doing something a restart
+// would cut short.
+func (s *Service) Busy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ses := range s.sessions {
+		if ses.busy() {
+			return true
+		}
+	}
+	return false
+}
+
 // Close stops every engine. The registry keeps the sessions, so the next
 // service picks them up.
 func (s *Service) Close() {
