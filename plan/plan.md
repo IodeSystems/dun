@@ -302,7 +302,7 @@ stats for aw4 `recall.go` (no recorded cost); aw4 has no after-figures for its
   message per build (unmeasured cost; ~700k chars/build in long sessions).
 - **blocking decisions**: #8.
 
-### ◻ 9. Memories surfaced out-of-band from raglit; written by a fork (USER, 2026-10-19)
+### ◐ 9. Memories surfaced out-of-band from raglit; written by a fork (USER, 2026-10-19)
 Plan only; no code yet. Write side modelled on Hermes Agent's background review. Surfacing,
 attestation and the "do not save what the repo records" rule are the existing
 icebox design ("Recap → a project memory in raglit") — this slice replaces only
@@ -474,17 +474,45 @@ the same `docsPreparer` Entry, so one set of stats covers rag and memories.
   - Not tested: daemon mode live (only embedded); heredoc transport live;
     replace/remove live; a note indexed while an embedded server is already
     running (the M2 checks restarted the session).
-- **M3 triggers.** (a) explicit: `memory` is a normal tool in the turn, and
-  `/remember <text>` for the user. (b) trigger words (USER; NOT in Hermes —
-  grepped, absent): the assistant says "I'll remember", "should remember",
-  "make a note", or the user says "remember…" → fork now with `ToolChoice`
-  forced to `memory` (agentkit supports a named tool, `llm/client.go:1186`).
-  Catches the model that says it will remember and never calls the tool.
-  Host-side regex over the finished text, no tokens. (c) optional, off by
-  default: fork before compaction, since that is where content is lost.
+- **M3 triggers ✅ (2026-10-21, `memtrigger.go`, c804612 + 0bec724).**
+  Measured first (`plan/m3/trigger_scan.py`) over 274 dun logs plus the
+  USER's Claude Code transcripts (3,047 user / 13,854 assistant messages;
+  dun's own 243 / 4,434 had no hit for any pattern):
+  - "remember" opening a clause was a standing rule or project fact in
+    10 of 10 deduplicated cases; mid-clause ("I remember", "don't remember")
+    it was 0 of 4. About 0.3% of user messages.
+  - "I'll remember / keep that in mind": 0 in 18k assistant texts. "I've
+    saved that as a standing rule" followed a real save in those logs. It
+    fires here only when the turn made no memory call.
+
+  Built: after each turn, its new entries are scanned once (a CreatedAt
+  mark, set at Start so resumed history is skipped). Either signal with no
+  memory call in the turn runs the /remember fork in the background, on a
+  detached ctx with a 2m bound. Children do not trigger.
+  `DUN_MEMORY_TRIGGERS=0` turns it off.
+
+  Live:
+  - the model saving it itself fired nothing (no duplicate);
+  - "Remember, … call no tools" saved the note through the trigger;
+  - "What do you remember about…" fired nothing.
+
+  Fixed from the live runs:
+  - the trigger's ctx was cancelled ("context canceled");
+  - the note invented a reason, because "why it holds" was asked for
+    unconditionally;
+  - fork, suggest, commit and rephrase stopped at Done, before the
+    include_usage chunk, so their side-call stats were 0. Now: 142 proc /
+    5,682 cached / 240 gen;
+  - the TUI ate the typed words "up"/"down" when input arrived as a burst.
+
+  Risks: trigger words catch only the explicit phrasing; corrections
+  without one ("don't push unless asked") are left to the model's own
+  memory call. Side-call stats reach /context only with the next turn's
+  usage event.
 - **M4 refine/retract/attest** — icebox + `raglit/plan/answered-questions.md`.
 
-- **next**: M3 — trigger words (host regex over the finished reply → fork with `memory` forced); measure false positives on dun's own session logs first.
+- **next**: M4 (refine/retract/attest), or the remote layers (partitioning
+  below) — USER's choice of order.
 - **risks**: OOB surfacing is noisy (wrong notes each turn cost tokens and
   attention — M0 measures it); with 1–2 notes the margin has no runner-up, so
   ANY word overlap surfaces a note (seen live in M2) — the rule only works as
