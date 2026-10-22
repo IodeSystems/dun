@@ -190,4 +190,3 @@ func TestIngestTargets_FallsBack(t *testing.T) {
 		t.Errorf("want the workspace itself as a fallback, got %v", got)
 	}
 }
-

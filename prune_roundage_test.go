@@ -15,7 +15,7 @@ func TestRoundAge(t *testing.T) {
 		{5 * time.Minute, "5m"},
 		{59 * time.Minute, "59m"},
 		{1 * time.Hour, "1h"},
-		{3 * time.Hour + 30 * time.Minute, "3h"},
+		{3*time.Hour + 30*time.Minute, "3h"},
 		{24 * time.Hour, "24h"},
 		{47 * time.Hour, "47h"},
 		{48 * time.Hour, "2 days"},

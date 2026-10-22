@@ -43,11 +43,11 @@ type Skill struct {
 	Source string `json:"source"`
 	// Dir is a local skill's directory. Server and URI locate an MCP one;
 	// Files are the other resources under the same prefix.
-	Dir         string   `json:"-"`
-	Server      string   `json:"-"`
-	URI         string   `json:"-"`
-	Files       []string `json:"-"`
-	UserOnly    bool     `json:"userOnly,omitempty"`
+	Dir      string   `json:"-"`
+	Server   string   `json:"-"`
+	URI      string   `json:"-"`
+	Files    []string `json:"-"`
+	UserOnly bool     `json:"userOnly,omitempty"`
 }
 
 const (

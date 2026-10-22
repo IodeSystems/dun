@@ -118,11 +118,11 @@ func TestHarness_History(t *testing.T) {
 	}
 	for _, e := range []agent.Entry{
 		{ID: "1", Kind: agent.KindUser, Content: "do it", CreatedAt: 1},
-		{ID: "2", Kind: agent.KindAssistant, Content: "", CreatedAt: 2},          // empty → dropped
+		{ID: "2", Kind: agent.KindAssistant, Content: "", CreatedAt: 2}, // empty → dropped
 		{ID: "3", Kind: agent.KindAssistant, Content: "working", CreatedAt: 3},
 		{ID: "4", Kind: agent.KindToolCall, ToolName: "node_read", ToolCallID: "c1", Content: `{"sel":"F"}`, CreatedAt: 4},
 		{ID: "5", Kind: agent.KindToolResult, ToolName: "node_read", ToolCallID: "c1", Content: "func F(){}", CreatedAt: 5},
-		{ID: "6", Kind: agent.KindCompaction, Content: "summary", CreatedAt: 6},  // marker → dropped
+		{ID: "6", Kind: agent.KindCompaction, Content: "summary", CreatedAt: 6}, // marker → dropped
 		{ID: "7", Kind: agent.KindNotification, Content: "job done", CreatedAt: 7},
 	} {
 		if err := s.Append(ctx, "dun", e); err != nil {

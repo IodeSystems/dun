@@ -42,7 +42,7 @@ func mountToolDef() llm.ToolDef {
 		"type": "object",
 		"properties": map[string]any{
 			"source": map[string]any{
-				"type": "string",
+				"type":        "string",
 				"description": "the host path to mount (absolute, or relative to the repo root like ../agentkit)",
 			},
 			"name": map[string]any{

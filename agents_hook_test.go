@@ -5,12 +5,12 @@ package dun
 // one does not, or when the target IS the AGENTS.md.
 
 import (
-	"time"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // runHook writes the embedded script to a temp file and runs it with the

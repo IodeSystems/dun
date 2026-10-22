@@ -152,8 +152,8 @@ func TestMountTool_RegisteredWithDocker(t *testing.T) {
 func TestMountTool_NotRegisteredWithHost(t *testing.T) {
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
-		Workspace:   dir,
-		Exec:        HostExec{Dir: dir},
+		Workspace: dir,
+		Exec:      HostExec{Dir: dir},
 		Mount: func(ctx context.Context, source, name string) (bool, error) {
 			return true, nil
 		},
@@ -291,4 +291,3 @@ func TestMountTool_DispatcherMissingArgs(t *testing.T) {
 		t.Errorf("expected error for empty name, got %q", result)
 	}
 }
-

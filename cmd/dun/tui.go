@@ -638,13 +638,13 @@ type tuiModel struct {
 	mcpErr        string
 	skills        []catalogSkill  // from the engine's catalog event
 	prompts       []catalogPrompt // MCP prompts, each a slash command
-	replaying     bool         // driven by a trace (--replay), not an engine
-	quitting      bool         // the user is leaving; do not respawn
-	exitAnnounced bool         // the engine said it was going; it did not crash
-	everUp        bool         // an engine reached `session` once; a retry may reattach
-	suggestions   []suggestion // predicted next messages (idle-only picker)
-	suggestMode   string       // "on" | "off" | "auto" — /suggest controls this
-	suggestSel    int          // highlighted suggestion in the selector
+	replaying     bool            // driven by a trace (--replay), not an engine
+	quitting      bool            // the user is leaving; do not respawn
+	exitAnnounced bool            // the engine said it was going; it did not crash
+	everUp        bool            // an engine reached `session` once; a retry may reattach
+	suggestions   []suggestion    // predicted next messages (idle-only picker)
+	suggestMode   string          // "on" | "off" | "auto" — /suggest controls this
+	suggestSel    int             // highlighted suggestion in the selector
 	// Idle debounce for the suggestion request. The engine cannot see whether
 	// anyone is typing, so the decision lives here: the clock restarts on every
 	// keystroke and at the end of every turn, and the request goes out only once
