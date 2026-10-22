@@ -101,85 +101,91 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
-### ◻ 13. Session service, a protocol, then a PWA (USER, 2026-10-21)
+### ◐ 13. Session service, a protocol, then a PWA (USER, 2026-10-21)
 
 Goal: a PWA (and later native apps) over dun sessions. First, four
 prerequisites (USER): (1) the session service separated from TUI rendering;
 (2) one service running many sessions; (3) service↔client messages that
 work as subscriptions, ready for HTTP/WS; (4) a React Native UI.
 
+**Canon** (`~/doc/patterns/standards.md`). The first draft of this item was
+written without it (USER caught it 2026-10-21). The browser-facing surface
+now follows: API-7 (huma + gat: one handler serves REST and GraphQL), VER-1
+(`/api/v1`), RT-1..3 (graphql-transport-ws on `/api/graphql`, HMAC-gated
+subscribe, one multiplexed client), WEB-4 (graphql-codegen `client-preset`;
+no hand-written client types), EDGE-1/2 (behind hz, HTTP only, no app TLS),
+CLI-1 (cobra) for `dund`. Divergences recorded in `~/doc/patterns/caveats.md`
+(uncommitted there, beside older uncommitted edits in that repo):
+- **caveat 9:** React Native + react-native-web instead of WEB-1 (web + native
+  from one codebase). WEB-4/7/8/10, RT-3, X-LINT-2 still apply.
+- **caveat 10:** OIDC JWTs (Zitadel, go-oidc, `<iss>#<sub>`) validated in the
+  daemon, as raglit does; CLI device flow, browser PKCE; subscribe still
+  HMAC-gated (RT-2) via a token minted by an authed mutation.
+
 USER's choices (2026-10-21):
-- React Native + react-native-web, so one codebase is the PWA and the
-  apps.
-- Remote from day one: TLS and real auth.
+- React Native + react-native-web (caveat 9).
+- Remote from day one, with real auth (caveat 10). TLS at hz (EDGE-2).
 - One `dun -p` child process per session, supervised by the service.
 - The TUI always attaches to the service (no direct-spawn mode).
+- Realtime: RT-1..3 (graphql-ws), not the RT-4 relay.
 
 Where it stands:
-- The engine is already its own process. It speaks NDJSON over stdio:
-  ~28 event types out (message, tool_call, tool_result, ask, usage,
-  history, …), 7 command types in (user, answer, server, control, agent,
-  reset, …).
+- The engine is its own process, NDJSON over stdio: 30 event types out,
+  7 command types in. Events are untyped maps, no sequence numbers.
 - The TUI spawns the engine and owns its lifetime and restarts.
-- Events are untyped maps with no sequence numbers. A client can neither
-  resume from a point nor share a session with another client.
-- `dun -d` (the launcher) is a registry plus the rebuild watcher, not an
-  owner of engines.
-- `serveterm` streams the TUI's terminal to xterm.js, which is not
-  structured data.
+- `dun -d` (the launcher) is a registry plus the rebuild watcher.
+- S0 work in progress, uncommitted, in `proto/`: typed Go structs for all 30
+  events and 8 commands (incl. subscribe), a flat envelope
+  (`{v, session, seq, ts, type, re}` / `{v, cid, session, type}` — `cid`
+  because server/control/agent commands already use `id` for their target),
+  and `Log` (seq, replay after a seq, ErrGap → snapshot, a slow subscriber
+  dropped, latest-per-state-type). A hand-written TS generator was also
+  written; it goes (WEB-4: types come from graphql-codegen).
 
 Slices, in order:
-- **S0 protocol.** A versioned envelope: event
-  `{v, session, seq, ts, type, …}` and command `{id, session, type, …}`,
-  with an ack or error per command id. Typed Go structs in one package.
-  TypeScript types generated from them for the RN client. `subscribe(from
-  seq)` replays from the service's log and then streams live; a client
-  that is too far behind gets a snapshot (from the session file — what
-  `history` does today) and continues from there. The transport is
-  neutral: stdio, unix socket and WS carry the same frames.
-- **S1 engine on the protocol.** `dun -p` emits envelopes. The TUI's
-  rendering reads only protocol events: no engine state rebuilt from
-  side channels, no assumption of being the only client.
-- **S2 service (`dund`).** It supervises the engines (spawn, restart, the
-  backoff the TUI does today), keeps a session registry (list, create in a
-  workspace, attach, detach, close) and a per-session event log with seq,
-  fans events out to N subscribers, and routes commands. Sessions outlive
-  clients. It absorbs the launcher (rebuild/reload push). Local
-  transport: a unix socket, 0600.
-- **S3 TUI attaches.** The TUI auto-starts the service and is a client over
-  the socket; reconnect/restart move into the service. `/sessions` lists
-  every session the service has, not just this workspace's.
-- **S4 remote.** HTTP+WS listener; TLS; OIDC JWT checked in dund (go-oidc
-  and JWKS, the same pattern as raglit's daemon, `authn.go`); principal
-  `<iss>#<sub>`; sessions owned by a principal. The TUI uses the device
-  flow, the PWA authorization code + PKCE. The same token can later go to
-  raglit (`RAGLIT_TOKEN_COMMAND`), which unblocks the remote memory layers
-  of item 9.
-- **S5 RN UI.** Expo + react-native-web: session list, conversation (text,
-  tool blocks, docs), input, ask_user answers, the activity zone. PWA
-  manifest and service worker. Native builds later from the same code.
+- **S0 engine protocol (internal).** The `proto/` types and `Log`, with
+  round-trip tests and a strict-decode test of the engine's real events.
+  This is the engine↔dund pipe, not a browser surface: NDJSON over stdio
+  stays.
+- **S1 engine on the protocol.** `dun -p` emits these structs; the TUI
+  renders only from them and does not assume it is the only client.
+- **S2 `dund`.** cobra (CLI-1); supervises engines (spawn, restart,
+  backoff), session registry, one `Log` per session; CLI-8/CLI-10
+  (pidfile, signals, `dund service install`). Absorbs the launcher.
+  Local transport: a unix socket, 0600.
+- **S3 TUI attaches** over the socket; `/sessions` lists all sessions.
+- **S4 remote API.** huma + gat at `/api/v1` (sessions: list, create,
+  close; send a command; the subscribe-token mutation) behind hz; OIDC
+  per caveat 10; live events per RT-1..3 (blocking decision (a)).
+- **S5 RN client.** Expo + react-native-web; graphql-codegen types; one
+  `graphql-ws` client (RT-3); PWA manifest + service worker.
 
-- **next:** S0 — write the protocol types from the existing event
-  inventory, with round-trip tests, before touching the engine.
+- **next:** USER decides (a); then S0: drop the TS generator, write the
+  round-trip and strict-decode tests, commit.
 - **risks:**
-  - The TUI holds state today that may not be derivable from events (the
-    TUI's own restart counters, suggestions state, the replay mode); S1
-    finds out.
+  - The TUI holds state today that may not be derivable from events (its
+    restart counters, suggestions state, replay mode); S1 finds out.
   - The engine's stdin reader handles server/control commands inline,
-    mid-turn; command ids and acks must keep that.
-  - Per-session engines cost a process each (fine for a handful; measure
-    if dozens).
-  - Remote exposure widens what a stolen token can do: run commands in a
-    workspace.
-- **blocking decisions (USER, before S4):**
-  - (a) TLS where: dund terminates TLS itself, or it sits behind hz (which
-    routes by host and speaks h2 upstream). Validating the JWT in dund
-    holds either way.
-  - (b) Zitadel setup: an application for the PWA (PKCE), one for the
-    device flow, and the audience dund checks. These are created in your
-    Zitadel.
-  - (c) Several users, or one: is a session visible only to its owner, or
-    to an allow-list?
+    mid-turn; cids and acks must keep that.
+  - A process per session (fine for a handful; measure if dozens).
+  - A stolen token can run commands in a workspace.
+  - The 30 event payloads as GraphQL types: unions/interfaces through
+    huma → gat are unverified.
+- **blocking decisions (USER):**
+  - (a) **gat has no graphql-ws subscriptions** (`gw/gat/gat.go:238`:
+    "WebSocket subscriptions are not supported in gat mode"; it has its own
+    HMAC pubsub WS at `/_gat/subscribe`). RT-1..3 then means one of:
+    full gwag `gw` in dund (embedded NATS; CLU-1 says graduate only for
+    multi-service), adding graphql-ws subscriptions to gat (gwag repo work,
+    and it fixes the canon's own disagreement: realtime/relay.md says gat
+    has no subscription transport, RT-1 names gat as a source), or
+    `/_gat/subscribe` with a third caveat.
+  - (b) Zitadel: an app for the PWA (PKCE), one for the device flow, and
+    the audience dund checks — created in your Zitadel.
+  - (c) One user or several: is a session visible only to its owner, or to
+    an allow-list?
+  - (d) Commit the `~/doc` caveats 9–10 (that repo also holds older
+    uncommitted edits: caveat 8, cli.md, web/app.md, projects.md).
 - **optional extensions:** push notifications when a session asks; a
   read-only share link; session hand-off between machines.
 
