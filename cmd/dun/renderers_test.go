@@ -269,7 +269,7 @@ func TestEvalRender(t *testing.T) {
 	}
 
 	// Error result.
-	pv, _ = renderToolResult(renderCtx{tool: "eval", result: "Error: undefined: foo"})
+	pv, _ = renderToolResult(renderCtx{tool: "eval", result: "ERROR: mcp tool error: ERROR: Unknown command 'foo'"})
 	if !strings.Contains(pv, "✗") {
 		t.Errorf("failed eval should show error: %q", pv)
 	}

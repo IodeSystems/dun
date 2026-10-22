@@ -242,6 +242,9 @@ func callLine(it *runItem) string {
 
 // failLines are up to two lines of a failed call's error.
 func failLines(it *runItem) []string {
+	if it.tool == "eval" {
+		return evalFailLines(it.result)
+	}
 	lines := meaningfulLines(it.result)
 	if n := len(lines); n > 0 && strings.HasPrefix(lines[n-1], "[exit:") {
 		lines = lines[:n-1]
@@ -324,7 +327,13 @@ func (r *toolRun) page() pageDoc {
 		if it.think != nil {
 			n.body = strings.TrimSpace(it.think.text)
 		} else {
-			n.body = callFull(it.tool, it.args) + "\n\n" + strings.TrimRight(it.result, "\n")
+			// The renderer's full body (a table, laid-out values, a marked
+			// error) where it has one; the raw result otherwise.
+			res := strings.TrimRight(it.output, "\n")
+			if strings.TrimSpace(stripANSI(res)) == "" {
+				res = strings.TrimRight(it.result, "\n")
+			}
+			n.body = callFull(it.tool, it.args) + "\n\n" + res
 			n.insp = &inspSource{name: it.tool, input: argFull(it.args), output: it.result}
 		}
 		doc.nodes = append(doc.nodes, n)

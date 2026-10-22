@@ -3473,6 +3473,9 @@ func callText(tool string, args map[string]any, max int) string {
 	if line, ok := execCallText(args, 40); ok && tool == "exec" {
 		return clip(oneLine(line), max)
 	}
+	if line, ok := evalCallText(args, max); ok && tool == "eval" {
+		return line
+	}
 	return "⚙ " + tool + "(" + argPreview(args, max) + ")"
 }
 
@@ -3502,6 +3505,9 @@ func execCallText(args map[string]any, restMax int) (string, bool) {
 func callFull(tool string, args map[string]any) string {
 	if line, ok := execCallText(args, 200); ok && tool == "exec" {
 		return stTool.Render(line)
+	}
+	if tool == "eval" && evalCode(args) != "" {
+		return evalCallFull(args)
 	}
 	full := stTool.Render("⚙ " + tool)
 	if af := argFull(args); af != "" {

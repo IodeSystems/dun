@@ -119,7 +119,7 @@ func init() {
 	registerRenderer("search_figures", rendererFunc(jsonRender))
 	// node_read returns source code — show what it read.
 	registerRenderer("node_read", rendererFunc(nodeReadRender))
-	// eval runs a script — show the result shape.
+	// eval is mcpshell — its own renderer (evalrender.go).
 	registerRenderer("eval", rendererFunc(evalRender))
 	// get_document returns indexed text — show path + pages.
 	registerRenderer("get_document", rendererFunc(getDocRender))
@@ -453,19 +453,6 @@ func nodeReadRender(rc renderCtx) (string, string) {
 	}
 	return head + stDim.Render(fmt.Sprintf(" %s · %s", plural(n, "line"),
 		clip(oneLine(firstLine(rc.result)), 70))), body
-}
-
-// evalRender: the result of a script expression.
-func evalRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
-	first := firstLine(rc.result)
-	if strings.HasPrefix(first, "Error:") || strings.HasPrefix(first, "error:") {
-		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
-	}
-	if strings.TrimSpace(rc.result) == "" {
-		return stDim.Render("  → (no output)"), body
-	}
-	return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" · "+clip(oneLine(first), 90)), body
 }
 
 // getDocRender: which document, how many pages.
