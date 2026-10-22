@@ -86,6 +86,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/iodesystems/agentkit v0.10.0 h1:cp4Q2Em73ar8yBL3q/0FS+3ODoJREnI7by5k5aLTjyw=
 github.com/iodesystems/agentkit v0.10.0/go.mod h1:3YrLqwl305SCujUXQkim8INHf7y3kaXsqjaUUipGtks=
+github.com/iodesystems/agentkit v0.10.1 h1:yB3RYM0MLIdYStUVsqRQDfXV8rNgTOUXC49RIT2eDz0=
+github.com/iodesystems/agentkit v0.10.1/go.mod h1:3YrLqwl305SCujUXQkim8INHf7y3kaXsqjaUUipGtks=
 github.com/iodesystems/gwag/v2 v2.3.1 h1:KaMWT1XDxQegVL9fAjTde6KQDvOWaWvDRkVgJqBH26g=
 github.com/iodesystems/gwag/v2 v2.3.1/go.mod h1:DhwtM+vBI1xKDCmJf5Up85GwhBoSZI3mSrYSCwXRqHk=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
