@@ -1,6 +1,8 @@
 package dund
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -297,5 +299,65 @@ func TestRestartSwapsFlagsOnTheSameConversation(t *testing.T) {
 	defer svc2.Close()
 	if s2, _ := svc2.Get(alice, id); !slices.Equal(s2.args, []string{"--model", "b"}) {
 		t.Fatalf("persisted args: %v", s2.args)
+	}
+}
+
+func TestForgetRemovesTheSession(t *testing.T) {
+	svc, _, dir := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	_ = svc.PutUI(alice, id, map[string]any{"draft": "x"})
+	if err := svc.Forget(bob, id); err != ErrNoSession {
+		t.Fatalf("bob forgetting: %v", err)
+	}
+	if err := svc.Forget(alice, id); err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.List(alice)) != 0 {
+		t.Fatal("still listed")
+	}
+	svc2, _ := New(dir, &fakeSpawner{})
+	defer svc2.Close()
+	if len(svc2.List(alice)) != 0 {
+		t.Fatal("still in the registry")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ui", id)); !os.IsNotExist(err) {
+		t.Fatalf("ui state left: %v", err)
+	}
+}
+
+// An engine nobody follows and nothing occupies is stopped; one in a turn,
+// asking, or followed is not.
+func TestIdleEnginesStop(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	ses, _ := svc.Get(alice, id)
+	time.Sleep(20 * time.Millisecond) // the fake's startup events land
+	d := 10 * time.Millisecond
+	time.Sleep(2 * d)
+	if !ses.idle(d) {
+		t.Fatal("an unfollowed, unoccupied engine should be idle")
+	}
+	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 100)
+	if ses.idle(d) {
+		t.Error("followed, it is not idle")
+	}
+	sub.Close()
+	for _, busy := range []any{&proto.Turn{Kind: "user"}, &proto.Ask{Question: "?"},
+		&proto.Jobs{Jobs: []proto.JobInfo{{State: "running"}}}, &proto.Agents{Agents: []proto.AgentInfo{{State: "running"}}}} {
+		ses.track(proto.NewEvent(busy))
+		time.Sleep(2 * d)
+		if ses.idle(d) {
+			t.Errorf("idle during %T", busy)
+		}
+		ses.track(proto.NewEvent(&proto.EngineState{State: "stopped"})) // clear
+		ses.mu.Lock()
+		ses.running = true
+		ses.mu.Unlock()
+	}
+	ses.track(proto.NewEvent(&proto.Turn{Kind: "user"}))
+	ses.track(proto.NewEvent(&proto.Done{}))
+	time.Sleep(2 * d)
+	if !ses.idle(d) {
+		t.Error("after done it is idle again")
 	}
 }

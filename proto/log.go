@@ -83,6 +83,13 @@ func (l *Log) Append(ev Event) Event {
 	return ev
 }
 
+// Subscribers is how many subscriptions are live.
+func (l *Log) Subscribers() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.subs)
+}
+
 // Last is the seq of the newest event, 0 before the first.
 func (l *Log) Last() uint64 {
 	l.mu.Lock()

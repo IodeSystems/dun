@@ -263,3 +263,11 @@ func (p *dunProc) restartWith(o tuiOpts) bool {
 	}
 	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "restart", "args": engineArgs(o)}) == nil
 }
+
+// forget asks the service to drop this session (after /close deleted it).
+func (p *dunProc) forget() bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "forget"}) == nil
+}

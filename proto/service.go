@@ -11,6 +11,7 @@ func init() {
 	command[UIGet]("ui_get")
 	command[UIPut]("ui_put")
 	command[Restart]("restart")
+	command[Forget]("forget")
 
 	event[SessionList]("sessions")
 	event[EngineState]("engine")
@@ -37,6 +38,11 @@ type Create struct {
 type Restart struct {
 	Args []string `json:"args"`
 }
+
+// Forget removes the envelope's session from the service: its engine is
+// stopped and its registry entry and members' UI state are deleted. The
+// transcript is the engine's to delete (the close control command).
+type Forget struct{}
 
 // Detach ends the caller's subscription to the envelope's session. The
 // session keeps running.

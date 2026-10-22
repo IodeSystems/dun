@@ -41,6 +41,7 @@ type Service struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 	closing  bool
+	done     chan struct{} // closed by Close
 }
 
 // New opens the registry in dir, loading the sessions it lists. Their engines
@@ -49,7 +50,7 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("dund: %w", err)
 	}
-	s := &Service{dir: dir, spawner: spawner, sessions: map[string]*session{}}
+	s := &Service{dir: dir, spawner: spawner, sessions: map[string]*session{}, done: make(chan struct{})}
 	recs, err := s.loadRegistry()
 	if err != nil {
 		return nil, err
@@ -58,7 +59,36 @@ func New(dir string, spawner Spawner) (*Service, error) {
 		s.sessions[r.ID] = &session{svc: s, id: r.ID, workspace: r.Workspace, owner: r.Owner,
 			members: r.Members, args: r.Args, log: proto.NewLog(r.ID, logCapacity)}
 	}
+	go s.reapIdle()
 	return s, nil
+}
+
+// idleCheck is how often idle engines are looked for.
+var idleCheck = time.Minute
+
+// reapIdle stops engines that have sat idle for idleStop, until Close.
+func (s *Service) reapIdle() {
+	t := time.NewTicker(idleCheck)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-t.C:
+		}
+		s.mu.Lock()
+		var idle []*session
+		for _, ses := range s.sessions {
+			if ses.idle(idleStop) {
+				idle = append(idle, ses)
+			}
+		}
+		s.mu.Unlock()
+		for _, ses := range idle {
+			ses.log.Append(proto.NewEvent(&proto.EngineState{State: "stopping", Reason: "idle for " + idleStop.String()}))
+			ses.stop()
+		}
+	}
 }
 
 func (s *Service) isClosing() bool {
@@ -215,6 +245,24 @@ func (s *Service) Restart(principal, id string, args []string) error {
 	return ses.ensureRunning()
 }
 
+// Forget stops a session's engine and removes the session: registry entry,
+// log, every member's UI state.
+func (s *Service) Forget(principal, id string) error {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return err
+	}
+	ses.stop()
+	ses.log.Close()
+	s.mu.Lock()
+	delete(s.sessions, id)
+	s.mu.Unlock()
+	if err := os.RemoveAll(filepath.Join(s.dir, "ui", id)); err != nil {
+		return err
+	}
+	return s.saveRegistry()
+}
+
 // Stop ends a session's engine; the session stays registered.
 func (s *Service) Stop(principal, id string) error {
 	ses, err := s.Get(principal, id)
@@ -229,6 +277,9 @@ func (s *Service) Stop(principal, id string) error {
 // service picks them up.
 func (s *Service) Close() {
 	s.mu.Lock()
+	if !s.closing {
+		close(s.done)
+	}
 	s.closing = true
 	all := make([]*session, 0, len(s.sessions))
 	for _, ses := range s.sessions {

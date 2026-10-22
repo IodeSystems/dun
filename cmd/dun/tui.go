@@ -1855,6 +1855,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// resumed. Quit only once the engine has confirmed the work is done.
 		if str(ev["id"]) == "close" {
 			m.quitting = true
+			m.proc.forget() // and the service lets the session go
 		}
 	case "token":
 		m.busy = true // a turn is active (incl. autonomous background-completion turns)

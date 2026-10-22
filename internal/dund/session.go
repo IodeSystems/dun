@@ -29,6 +29,10 @@ var (
 	restartDelay = time.Second
 	stopGrace    = 10 * time.Second
 	logCapacity  = 20000
+	// idleStop is how long an engine nobody follows and nothing occupies
+	// keeps running. Stopping it loses nothing: the next command or
+	// subscribe starts it again on the same conversation.
+	idleStop = 30 * time.Minute
 )
 
 // session is one conversation: its engine, its event log, who may see it.
@@ -49,6 +53,74 @@ type session struct {
 	gaveUp       bool
 	restarts     int
 	restartStart time.Time
+
+	// What the engine is doing, from its events: the idle stop must not end
+	// a turn, a question waiting for a person, a job or a sub-agent. Its own
+	// lock: the event reader must never wait on mu, which send holds while
+	// writing to an engine that may itself be waiting for the reader.
+	actMu      sync.Mutex
+	lastActive time.Time
+	inTurn     bool
+	asking     bool
+	jobsBusy   bool
+	agentsBusy bool
+}
+
+// track notes what an event says the engine is doing.
+func (s *session) track(ev proto.Event) {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	s.lastActive = time.Now()
+	switch p := ev.Payload.(type) {
+	case *proto.Turn:
+		s.inTurn = true
+	case *proto.Done, *proto.Error:
+		s.inTurn = false
+	case *proto.Ask, *proto.Mount:
+		s.asking = true
+	case *proto.Answered:
+		s.asking = false
+	case *proto.Jobs:
+		s.jobsBusy = false
+		for _, j := range p.Jobs {
+			if j.State == "running" {
+				s.jobsBusy = true
+			}
+		}
+	case *proto.Agents:
+		s.agentsBusy = false
+		for _, a := range p.Agents {
+			if a.State == "running" || a.Blocked {
+				s.agentsBusy = true
+			}
+		}
+	case *proto.EngineState:
+		if p.State != "started" {
+			s.inTurn, s.asking, s.jobsBusy, s.agentsBusy = false, false, false, false
+		}
+	}
+}
+
+// idle reports whether the engine runs with no one following it and nothing
+// to do, for at least d.
+func (s *session) idle(d time.Duration) bool {
+	if s.log.Subscribers() > 0 {
+		return false
+	}
+	s.mu.Lock()
+	running := s.running
+	s.mu.Unlock()
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	return running && !s.inTurn && !s.asking && !s.jobsBusy && !s.agentsBusy &&
+		time.Since(s.lastActive) >= d
+}
+
+// touch marks the session used now (a command, a subscribe).
+func (s *session) touch() {
+	s.actMu.Lock()
+	s.lastActive = time.Now()
+	s.actMu.Unlock()
 }
 
 func (s *session) isMember(principal string) bool { return slices.Contains(s.members, principal) }
@@ -65,6 +137,7 @@ func (s *session) summary() proto.SessionSummary {
 func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) {
 	for sc.Scan() {
 		if ev, ok := decodeEvent(sc.Bytes()); ok {
+			s.track(ev)
 			s.log.Append(ev)
 		}
 	}
@@ -156,6 +229,7 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 
 // send writes a command to the engine, starting it first if need be.
 func (s *session) send(c proto.Command) error {
+	s.touch()
 	if err := s.ensureRunning(); err != nil {
 		return err
 	}
@@ -197,6 +271,7 @@ func (s *session) stop() {
 // subscribe returns what a client needs to catch up after seq after — the
 // kept events, or a snapshot when they are gone — and the live stream.
 func (s *session) subscribe(after uint64) (*proto.Event, []proto.Event, *proto.Subscription, error) {
+	s.touch()
 	replay, sub, err := s.log.Subscribe(after, subBuffer)
 	if err == nil {
 		return nil, replay, sub, nil
