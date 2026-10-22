@@ -57,21 +57,34 @@ type Server struct {
 	svc *dund.Service
 	// owner is the principal the local token stands for: the user the
 	// service runs as (unix:<uid>), the same one its socket clients are.
-	owner  string
-	api    huma.API
-	signer *subSigner
+	owner    string
+	api      huma.API
+	signer   *subSigner
+	releases string
 }
 
-// Handler is the whole HTTP surface. webRoot, when set, is the built client
-// (mobile: expo export --platform web) served at / from the filesystem
-// (WEB-5); without it / is the embedded stopgap page.
-func Handler(svc *dund.Service, owner, webRoot string) (http.Handler, error) {
-	if webRoot != "" {
-		if st, err := os.Stat(filepath.Join(webRoot, "index.html")); err != nil || st.IsDir() {
-			return nil, fmt.Errorf("web root %s has no index.html", webRoot)
+// Options are what the HTTP surface serves besides the API.
+type Options struct {
+	// Owner is the principal the local token stands for (unix:<uid>).
+	Owner string
+	// WebRoot, when set, is the built client (mobile: expo export --platform
+	// web) served at / from the filesystem (WEB-5); without it / is the
+	// embedded stopgap page.
+	WebRoot string
+	// Releases, when set, is where tools/release-android publishes:
+	// android/latest.json and the APKs, served under /releases with /dun.apk
+	// the latest, and announced by /api/v1/hello.
+	Releases string
+}
+
+// Handler is the whole HTTP surface.
+func Handler(svc *dund.Service, o Options) (http.Handler, error) {
+	if o.WebRoot != "" {
+		if st, err := os.Stat(filepath.Join(o.WebRoot, "index.html")); err != nil || st.IsDir() {
+			return nil, fmt.Errorf("web root %s has no index.html", o.WebRoot)
 		}
 	}
-	return newRouter(svc, owner, true, webRoot)
+	return newRouter(svc, o, true)
 }
 
 // spa serves webRoot's files, and its index.html for any other path: a
@@ -92,7 +105,7 @@ func spa(webRoot string) http.HandlerFunc {
 // SDL is the GraphQL schema, for client codegen (WEB-4). No service runs:
 // building the schema calls no handler.
 func SDL() (string, error) {
-	h, err := newRouter(nil, "", false, "")
+	h, err := newRouter(nil, Options{}, false)
 	if err != nil {
 		return "", err
 	}
@@ -104,9 +117,10 @@ func SDL() (string, error) {
 	return rec.Body.String(), nil
 }
 
-func newRouter(svc *dund.Service, owner string, auth bool, webRoot string) (http.Handler, error) {
+func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 	r := chi.NewRouter()
-	s := &Server{svc: svc, owner: owner, signer: newSigner()}
+	s := &Server{svc: svc, owner: o.Owner, signer: newSigner(), releases: o.Releases}
+	webRoot := o.WebRoot
 	if auth {
 		r.Use(s.authenticate)
 	}
@@ -114,6 +128,10 @@ func newRouter(svc *dund.Service, owner string, auth bool, webRoot string) (http
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(indexHTML)
+	}
+	if o.Releases != "" {
+		r.Handle(releasesPath+"/*", http.StripPrefix(releasesPath, releaseFiles(o.Releases)))
+		r.Get(apkPath, s.latestAPK)
 	}
 	switch {
 	case webRoot != "":
@@ -187,6 +205,8 @@ type HelloOutput struct {
 	Body struct {
 		Version  string `json:"version"`
 		Protocol int    `json:"protocol"`
+		// Android is the latest released APK; version_code 0 when none.
+		Android AndroidRelease `json:"android"`
 	}
 }
 
@@ -311,6 +331,7 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 		func(ctx context.Context, _ *struct{}) (*HelloOutput, error) {
 			o := &HelloOutput{}
 			o.Body.Version, o.Body.Protocol = Version, proto.Version
+			o.Body.Android = s.latestRelease()
 			return o, nil
 		})
 	gat.Register(api, g, huma.Operation{OperationID: "listSessions", Method: http.MethodGet, Path: "/api/v1/sessions",

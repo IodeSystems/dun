@@ -88,6 +88,18 @@ type Subscription {
   ): dund_StreamEvent @derived(operationId: "sessionEvents")
 }
 
+type dund_AndroidRelease {
+  """path of the APK on this server"""
+  apkPath: String
+  notes: String
+  releasedAt: String
+  sha256: String
+  size: Long
+  """0 when no APK has been released"""
+  versionCode: Long!
+  versionName: String
+}
+
 input dund_AnswerInputBodyInput {
   value: String!
 }
@@ -119,6 +131,7 @@ type dund_EventsOutputBody {
 }
 
 type dund_HelloOutputBody {
+  android: dund_AndroidRelease!
   protocol: Long!
   version: String!
 }

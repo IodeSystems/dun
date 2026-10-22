@@ -136,3 +136,19 @@ export const PutUI = graphql(`
     }
   }
 `);
+
+export const Hello = graphql(`
+  query Hello {
+    dund {
+      hello {
+        version
+        android {
+          versionCode
+          versionName
+          apkPath
+          notes
+        }
+      }
+    }
+  }
+`);

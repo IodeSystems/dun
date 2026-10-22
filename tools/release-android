@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# tools/release-android — build a release APK and publish it to RELEASES_DIR, where
+# the server serves it (/releases/android/…, /dun.apk) and announces it in
+# GET /api/v1/hello (android.version_code), which the app polls for updates.
+#
+#   tools/release-android [--notes "what changed"]
+#
+# RELEASES_DIR (env) defaults to ~/.local/share/dun/releases, which dund serves
+# with `dun dund serve --releases <dir>`; a running dund picks a release up on
+# its next request, without a restart. (Adapted from bintag's script.)
+#
+# versionCode = seconds since 2024-01-01T00:00:00Z, raised to latest+1 if that
+# is not greater than the published one. Android compares versionCode only, and
+# refuses to install a lower one over a higher one, so it must strictly increase
+# across every release. A clock-based code does that on any branch or checkout
+# and for rebuilds of one commit; `git rev-list --count HEAD` does not (a branch
+# or a rewritten history can count lower, and a rebuild counts the same). It
+# stays under Android's limit, 2100000000, until the year 2090.
+#
+# versionName = app.json version + "+" + short sha (".dirty" for a dirty tree).
+#
+# Signing: the debug keystore from the Expo template, as bintag does. An update installs over
+# the installed app only when both are signed by the same key, so the script
+# refuses to publish an APK whose signer differs from the previous release's.
+#
+# Each run is a clean `expo prebuild` (it regenerates mobile/android, including
+# the template's debug keystore, which is the same file every time) and
+# `gradlew assembleRelease`: about 2 minutes with warm Gradle caches. Publishing
+# is two renames: the APK, then latest.json.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+root="$PWD"
+
+notes=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --notes) notes="${2:?--notes needs a value}"; shift 2 ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    *) echo "tools/release-android: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
+[ -n "$notes" ] || notes="$(git log -1 --format=%s)"
+
+releases="${RELEASES_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/dun/releases}"
+case "$releases" in /*) ;; *) releases="$root/$releases" ;; esac
+out="$releases/android"
+mkdir -p "$out"
+
+sdk="${ANDROID_HOME:-$HOME/Android/Sdk}"
+bt="$(ls -d "$sdk"/build-tools/*/ 2>/dev/null | sort -V | tail -1)"
+aapt="${bt}aapt"
+apksigner="${bt}apksigner"
+for t in "$aapt" "$apksigner"; do
+  [ -x "$t" ] || { echo "tools/release-android: $t not found (set ANDROID_HOME)" >&2; exit 1; }
+done
+
+json_get() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$@"; }
+# Tool output is captured before parsing: under pipefail, `tool | head -1` fails the
+# script when head exits first and the tool dies of SIGPIPE.
+signer() {
+  local out
+  out="$("$apksigner" verify --print-certs "$1")"
+  sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$out"
+}
+
+prev_code=0 prev_apk=""
+if [ -f "$out/latest.json" ]; then
+  prev_code="$(json_get "$out/latest.json" version_code)"
+  prev_apk="$out/$(json_get "$out/latest.json" file)"
+fi
+
+code=$(( $(date -u +%s) - $(date -u -d 2024-01-01T00:00:00Z +%s) ))
+if [ "$code" -le "$prev_code" ]; then code=$((prev_code + 1)); fi
+if [ "$code" -ge 2100000000 ]; then echo "tools/release-android: versionCode $code is over Android's limit" >&2; exit 1; fi
+
+sha="$(git rev-parse --short HEAD)"
+git diff --quiet HEAD -- mobile || sha="$sha.dirty"
+name="$(python3 -c 'import json; print(json.load(open("mobile/app.json"))["expo"]["version"])')+$sha"
+
+echo "==> release versionCode $code, versionName $name (previous: ${prev_code})" >&2
+export DUN_VERSION_CODE="$code" DUN_VERSION_NAME="$name"
+
+echo "==> expo prebuild" >&2
+CI=1 pnpm -C mobile exec expo prebuild --platform android --no-install >&2
+
+echo "==> gradlew assembleRelease" >&2
+(cd mobile/android && ./gradlew --console=plain -q assembleRelease >&2)
+apk="mobile/android/app/build/outputs/apk/release/app-release.apk"
+
+badging="$("$aapt" dump badging "$apk")"
+got="$(sed -n "s/^package: .* versionCode='\([0-9]*\)'.*/\1/p" <<<"$badging")"
+if [ "$got" != "$code" ]; then
+  echo "tools/release-android: built APK has versionCode '$got', expected $code" >&2
+  exit 1
+fi
+cert="$(signer "$apk")"
+if [ -n "$prev_apk" ] && [ -f "$prev_apk" ]; then
+  prev_cert="$(signer "$prev_apk")"
+  if [ "$cert" != "$prev_cert" ]; then
+    echo "tools/release-android: signer $cert differs from the previous release's $prev_cert;" >&2
+    echo "  installed apps could not update to it. Not published." >&2
+    exit 1
+  fi
+fi
+
+file="dun-$code.apk"
+cp "$apk" "$out/.$file.tmp"
+mv "$out/.$file.tmp" "$out/$file"
+sum="$(sha256sum "$out/$file" | cut -d' ' -f1)"
+size="$(stat -c %s "$out/$file")"
+CODE="$code" NAME="$name" SUM="$sum" SIZE="$size" FILE="$file" NOTES="$notes" \
+  python3 - "$out/.latest.json.tmp" <<'PY'
+import datetime, json, os, sys
+e = os.environ
+json.dump({
+    "version_code": int(e["CODE"]),
+    "version_name": e["NAME"],
+    "sha256": e["SUM"],
+    "size": int(e["SIZE"]),
+    "file": e["FILE"],
+    "notes": e["NOTES"],
+    "released_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}, open(sys.argv[1], "w"), indent=2)
+PY
+mv "$out/.latest.json.tmp" "$out/latest.json"
+
+echo "==> published $out/$file" >&2
+echo "    versionCode $code  versionName $name" >&2
+echo "    sha256 $sum  size $size  signer $cert" >&2
+echo "$out/latest.json"

@@ -24,7 +24,7 @@ func setup(t *testing.T) (*httptest.Server, string, *dund.Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(svc.Close)
-	h, err := dundapi.Handler(svc, "unix:1000", "")
+	h, err := dundapi.Handler(svc, dundapi.Options{Owner: "unix:1000"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestWebRootServesTheClient(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "index.html"), []byte("<html>app shell</html>"), 0o644)
 	_ = os.MkdirAll(filepath.Join(root, "_expo"), 0o755)
 	_ = os.WriteFile(filepath.Join(root, "_expo", "app.js"), []byte("js"), 0o644)
-	h, err := dundapi.Handler(svc, "unix:1000", root)
+	h, err := dundapi.Handler(svc, dundapi.Options{Owner: "unix:1000", WebRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,47 @@ func TestWebRootServesTheClient(t *testing.T) {
 	if resp, _ := http.Get(srv.URL + "/api/v1/sessions"); resp.StatusCode != 401 {
 		t.Errorf("api without token: %d", resp.StatusCode)
 	}
-	if _, err := dundapi.Handler(svc, "unix:1000", t.TempDir()); err == nil {
+	if _, err := dundapi.Handler(svc, dundapi.Options{Owner: "unix:1000", WebRoot: t.TempDir()}); err == nil {
 		t.Error("a web root without index.html was accepted")
+	}
+}
+
+// A release published by tools/release-android is announced by hello and
+// downloadable; /dun.apk is the latest; directories are not listed.
+func TestAndroidReleases(t *testing.T) {
+	svc, _ := dund.New(t.TempDir(), &fakeSpawner{})
+	defer svc.Close()
+	rel := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(rel, "android"), 0o755)
+	_ = os.WriteFile(filepath.Join(rel, "android", "dun-7.apk"), []byte("PK apk"), 0o644)
+	_ = os.WriteFile(filepath.Join(rel, "android", "latest.json"),
+		[]byte(`{"version_code":7,"version_name":"0.1.0+abc","sha256":"x","size":6,"file":"dun-7.apk"}`), 0o644)
+	h, err := dundapi.Handler(svc, dundapi.Options{Owner: "unix:1000", Releases: rel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	resp, _ := http.Get(srv.URL + "/api/v1/hello")
+	var hello struct {
+		Android struct {
+			VersionCode int    `json:"version_code"`
+			APKPath     string `json:"apk_path"`
+		} `json:"android"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&hello)
+	if hello.Android.VersionCode != 7 || hello.Android.APKPath != "/releases/android/dun-7.apk" {
+		t.Fatalf("hello: %+v", hello.Android)
+	}
+	resp, err = http.Get(srv.URL + "/dun.apk") // follows the redirect
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || string(b) != "PK apk" || resp.Header.Get("Content-Type") != "application/vnd.android.package-archive" {
+		t.Fatalf("apk: %d %q %s", resp.StatusCode, b, resp.Header.Get("Content-Type"))
+	}
+	if resp, _ := http.Get(srv.URL + "/releases/android/"); resp.StatusCode != 404 {
+		t.Errorf("listing: %d", resp.StatusCode)
 	}
 }

@@ -104,7 +104,7 @@ func newRoot() *cobra.Command {
 }
 
 func serveCmd(l *loader) *cobra.Command {
-	var bin, httpAddr, webRoot string
+	var bin, httpAddr, webRoot, releases string
 	var checkOnly bool
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -118,10 +118,11 @@ func serveCmd(l *loader) *cobra.Command {
 			if checkOnly {
 				return check(l, bin, httpAddr, webRoot)
 			}
-			return serve(cmd.Context(), l, bin, httpAddr, webRoot)
+			return serve(cmd.Context(), l, bin, httpAddr, dundapi.Options{WebRoot: webRoot, Releases: releases})
 		},
 	}
 	cmd.Flags().StringVar(&bin, "dun", "", "the dun binary engines run (default: beside dund, else on PATH)")
+	cmd.Flags().StringVar(&releases, "releases", "", "serve Android releases from here (tools/release-android): /releases, /dun.apk, announced in /api/v1/hello")
 	cmd.Flags().StringVar(&webRoot, "web-root", "", "serve this built client at / (mobile: pnpm export:web); default: the built-in stopgap page")
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "prove these settings can run, then exit (the unit's ExecStartPre)")
 	cmd.Flags().StringVar(&httpAddr, "http", "", "also serve HTTP here (e.g. 127.0.0.1:20003); needs a token (dund token)")
@@ -146,7 +147,7 @@ func defaultDun() string {
 	return "dun"
 }
 
-func serve(ctx context.Context, l *loader, bin, httpAddr, webRoot string) error {
+func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Options) error {
 	if err := os.MkdirAll(l.home, 0o700); err != nil {
 		return err
 	}
@@ -180,7 +181,8 @@ func serve(ctx context.Context, l *loader, bin, httpAddr, webRoot string) error 
 	go func() { errc <- dund.NewServer(svc, dund.UnixPeer).Serve(ln) }()
 	var hs *http.Server
 	if httpAddr != "" {
-		h, err := dundapi.Handler(svc, dundapi.Owner(os.Getuid()), webRoot)
+		o.Owner = dundapi.Owner(os.Getuid())
+		h, err := dundapi.Handler(svc, o)
 		if err != nil {
 			ln.Close()
 			return err

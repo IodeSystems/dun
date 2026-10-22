@@ -5,6 +5,7 @@ import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native
 
 import { explain, UnauthorizedError } from '@/api/client';
 import { CreateSession, ListSessions } from '@/api/ops';
+import { AppRelease } from '@/components/AppRelease';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
@@ -63,6 +64,7 @@ export default function Sessions() {
         keyExtractor={(s) => s.id}
         ListHeaderComponent={
           <View style={{ gap: space.sm, marginBottom: space.sm }}>
+            <AppRelease />
             {list.isLoading ? <ActivityIndicator /> : null}
             {list.error && !refused ? <ErrorText>{list.error.message}</ErrorText> : null}
             {!list.isLoading && !items.length ? <Muted>No sessions yet — start one below, or with dun in a terminal.</Muted> : null}
