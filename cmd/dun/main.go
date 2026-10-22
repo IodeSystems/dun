@@ -726,17 +726,32 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		Hint: serverHint(h.Servers())})
 	em.emit(catalogEvent(h))
 	em.emit(settingsEvent())
+	em.emit(commandsEvent(h))
 	// Server commands (/rag, /lsp) are handled on the READER's goroutine, not
 	// here: this loop is blocked inside a turn most of the time, and "turn the
 	// docs server on" should not queue behind a five-minute agent run. The
 	// harness defers the actual tool-set swap to a turn boundary.
-	in.setServerCmd(func(alias, action string) {
+	srvCmd := func(alias, action string) {
 		msg := runServerCmd(ctx, h, alias, action)
 		em.emit(&proto.ServerEvent{ID: alias, Action: action, Message: msg,
 			Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
 		em.emit(catalogEvent(h))
-	})
-	in.setCtrlCmd(func(id, action string) {
+		em.emit(commandsEvent(h))
+	}
+	in.setServerCmd(srvCmd)
+	resetCmd := func() {
+		h.Reset()
+		em.emit(&proto.ResetEvent{})
+	}
+	var ctrlCmd func(id, action string)
+	ctrlCmd = func(id, action string) {
+		// A slash line from a client that is not the TUI (web, phone): routed
+		// here, by the same handlers the TUI's commands reach. See commands.go.
+		if id == "slash" {
+			routeSlash(action, slashRoutes{server: srvCmd, control: ctrlCmd, reset: resetCmd,
+				reply: func(msg string) { em.emit(&proto.ControlEvent{ID: "slash", Action: action, Message: msg}) }})
+			return
+		}
 		// /rephrase flips a pure engine-side toggle: no harness work, no asking,
 		// so it does not go through runControlCmd. The TUI already echoed the
 		// command to the user; this event keeps the engine's and the TUI's
@@ -744,6 +759,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if id == "rephrase" {
 			rephraseOn = action == "on"
 			em.emit(settingsEvent())
+			em.emit(commandsEvent(h))
 			return
 		}
 		// /close is handled here rather than in runControlCmd because it is
@@ -766,6 +782,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			case "on", "off", "auto":
 				suggestMode = action
 				em.emit(settingsEvent())
+				em.emit(commandsEvent(h))
 			default:
 				go emitSuggestions(ctx, h, em)
 			}
@@ -797,6 +814,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				em.emit(&proto.ServerEvent{ID: "mcp", Action: verb, Message: msg,
 					Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
 				em.emit(catalogEvent(h))
+				em.emit(commandsEvent(h))
 			}()
 			return
 		}
@@ -849,11 +867,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		msg := runControlCmd(ctx, h, id, action)
 		h.Aside("[control/" + id + "] " + msg)
 		em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
-	})
-	in.setResetCb(func() {
-		h.Reset()
-		em.emit(&proto.ResetEvent{})
-	})
+		if id == "docker" {
+			em.emit(commandsEvent(h))
+		}
+	}
+	in.setCtrlCmd(ctrlCmd)
+	in.setResetCb(resetCmd)
 	// Agent scope: the human reading a child's conversation, or steering it.
 	// `view` is a PULL — the child's callbacks are nil by design, so its
 	// scrollback is fetched on demand and works for a stopped child too.

@@ -43,7 +43,7 @@ var (
 var stateTypes = map[string]bool{
 	"session": true, "workspace": true, "ready": true, "server": true,
 	"catalog": true, "agents": true, "jobs": true, "context_cost": true,
-	"usage": true, "settings": true, "engine": true,
+	"usage": true, "settings": true, "engine": true, "commands": true,
 }
 
 func NewLog(session string, capacity int) *Log {

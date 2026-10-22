@@ -43,6 +43,7 @@ func init() {
 	event[Turn]("turn")
 	event[Answered]("answered")
 	event[Settings]("settings")
+	event[Commands]("commands")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -396,6 +397,37 @@ type Settings struct {
 	URL      string `json:"url"`
 	Rephrase bool   `json:"rephrase"`
 	Suggest  string `json:"suggest"` // on | off | auto
+}
+
+// Commands is the slash commands a session takes, as data, for every client:
+// a palette, argument completion, and toggles that show the current state.
+// A client sends a line as the control command "slash" with the line (no
+// leading /) as its action; the engine routes it. Skills and MCP prompts are
+// in the catalog event, not here.
+type Commands struct {
+	Items []CommandSpec `json:"items"`
+}
+
+type CommandSpec struct {
+	Name        string `json:"name"`
+	Usage       string `json:"usage,omitempty"`
+	Description string `json:"description"`
+	// Group sorts commands for a panel: tools, git, memory, session.
+	Group string `json:"group"`
+	// Choices are the values the first argument takes.
+	Choices []CommandChoice `json:"choices,omitempty"`
+	// Text: free text follows (or is) the argument.
+	Text bool `json:"text,omitempty"`
+	// State is the current value for a toggle ("on", "off", a mode); empty
+	// for an action.
+	State string `json:"state,omitempty"`
+	// Detail qualifies the state, e.g. "autostart".
+	Detail string `json:"detail,omitempty"`
+}
+
+type CommandChoice struct {
+	Value       string `json:"value"`
+	Description string `json:"description,omitempty"`
 }
 
 // --- the protocol's own ---
