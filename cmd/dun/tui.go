@@ -639,6 +639,7 @@ type tuiModel struct {
 	mcpFields     [3]textinput.Model // id, url or command, bearer
 	mcpStep       int
 	mcpErr        string
+	engineCmds    []engineCmd     // the engine's slash commands (commands event)
 	skills        []catalogSkill  // from the engine's catalog event
 	prompts       []catalogPrompt // MCP prompts, each a slash command
 	replaying     bool            // driven by a trace (--replay), not an engine
@@ -2025,12 +2026,13 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m = m.clearAsk()
 		}
 		m.refresh()
+	case "commands":
+		m.engineCmds = engineCmdsFromEvent(ev)
 	case "settings":
 		m.model, m.url = str(ev["model"]), str(ev["url"])
 		if p := str(ev["provider"]); p != "" {
 			m.provider = p
 		}
-		rephrasePrompt = ev["rephrase"] == true
 		if mode := str(ev["suggest"]); mode != "" {
 			m.suggestMode = mode
 		}
@@ -2126,8 +2128,15 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.turnGap()
 		m.refresh()
 	case "reset":
-		// Engine confirmed the store was cleared; nothing extra to show —
-		// the /clear handler already appended a message.
+		// The conversation was cleared — by this client's /clear or another's.
+		m.convo = nil
+		m.cur = ""
+		m.pendingTool, m.pendingArgs = -1, nil
+		m.activeTool = ""
+		m.sel = -1
+		m.busy, m.asking = false, false
+		m.append(stDim.Render("session cleared — fresh start"))
+		m.refresh()
 	case "compaction":
 		// On screen, not just in a log a TUI never shows: this is the one
 		// operation that DESTROYS conversation, and it used to happen silently.
@@ -3445,14 +3454,6 @@ func init() {
 			m.append(stDim.Render("usage: /trace [on|off [file]]"))
 			return nil
 		}},
-		{"close", "", "discard this session for good: remove its worktree and branch, forget its transcript", func(m *tuiModel, _ []string) tea.Cmd {
-			if !m.proc.controlCmd("close", "") {
-				m.append(stErr.Render("no engine right now — nothing closed"))
-				return nil
-			}
-			m.append(stDim.Render("closing…"))
-			return nil
-		}},
 		{"reconnect", "", "restart the engine (after it gave up), keeping this session", func(m *tuiModel, _ []string) tea.Cmd {
 			m.restarts, m.restartStart = 0, time.Now()
 			m.fatalErr = ""
@@ -3461,182 +3462,11 @@ func init() {
 			m.append(stDim.Render("reconnecting…"))
 			return restartEngine(m.opts, m.sessionID, m.everUp, m.seenSeq())
 		}},
-		{"rag", "[on|off|restart|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
-		{"lsp", "[on|off|restart|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
-		{"mcp", "[add | remove <id> | refresh <id> | on|off|restart [id]]", "MCP servers: bare lists them, add saves one (URL + optional bearer, or a command) for every workspace and indexes its docs, refresh re-indexes them", mcpSlash},
-		{"docker", "[on|off|status]", "exec backend: on (Docker), off (host), bare shows status", controlSlash("docker")},
-		{"worktree", "[status|new|commit]", "git: bare shows status (in place too), new isolates in a worktree, commit writes the message and asks", controlSlash("worktree")},
-		{"memories", "", "this project's saved notes: when written, refined, confirmed or void", func(m *tuiModel, _ []string) tea.Cmd {
-			if !m.proc.controlCmd("memories", "") {
-				m.append(stErr.Render("no engine right now — /reconnect first"))
-			}
-			return nil
-		}},
 		{"skill", "[name] [text]", "skills: bare lists them (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers); with a name, asks the model to use it", skillSlash},
-		{"remember", "[text]", "save a note for later sessions on this project (needs /rag on); bare: the model picks what to keep", func(m *tuiModel, args []string) tea.Cmd {
-			if !m.proc.controlCmd("remember", strings.Join(args, " ")) {
-				m.append(stErr.Render("no engine right now — /reconnect first"))
-				return nil
-			}
-			m.append(stDim.Render("remembering…"))
-			return nil
-		}},
-		{"ship", "[verify|push|pr]", "ship the worktree: fetch, rebase, run checks, push (default: push)", controlSlash("ship")},
-		{"clear", "", "clear scrollback and start a fresh session log", func(m *tuiModel, _ []string) tea.Cmd {
-			m.proc.sendReset()
-			m.convo = nil
-			m.cur = ""
-			m.pendingTool, m.pendingArgs = -1, nil
-			m.activeTool = ""
-			m.sel = -1
-			m.busy, m.asking = false, false
-			m.append(stDim.Render("session cleared — fresh start"))
-			m.refresh()
-			return nil
-		}},
 		{"exit", "", "exit dun", func(m *tuiModel, _ []string) tea.Cmd {
 			m.quitting = true
 			return tea.Quit
 		}},
-		{"suggest", "[on|off|auto]", "next-message suggestions: bare triggers one now, on/off/auto set the mode", suggestSlash},
-		{"rephrase", "[on|off|status]", "rephrase prompts for specificity before acting: bare shows status, on/off set it", rephraseSlash},
-	}
-}
-
-// serverSlash builds the /rag and /lsp handlers. The engine owns the work (it
-// holds the harness); the TUI just forwards the action and renders the `server`
-// event that comes back.
-func serverSlash(alias string) func(*tuiModel, []string) tea.Cmd {
-	return func(m *tuiModel, args []string) tea.Cmd {
-		action := ""
-		if len(args) > 0 {
-			action = strings.ToLower(args[0])
-		}
-		if !m.proc.serverCmd(alias, action) {
-			m.append(stErr.Render("no engine right now — /reconnect first"))
-		}
-		return nil
-	}
-}
-
-// suggestSlash handles /suggest [on|off|auto].
-// - Bare /suggest: trigger an immediate suggestion request.
-// - /suggest on: always show suggestions (even while typing).
-// - /suggest off: hide suggestions entirely.
-// - /suggest auto: show suggestions only when idle with empty input (default).
-func suggestSlash(m *tuiModel, args []string) tea.Cmd {
-	if len(args) == 0 {
-		// Bare /suggest: trigger an immediate suggestion request.
-		if !m.proc.controlCmd("suggest", "") {
-			m.append(stErr.Render("no engine right now — /reconnect first"))
-		}
-		return nil
-	}
-	mode := strings.ToLower(args[0])
-	switch mode {
-	case "on", "off", "auto":
-		// Shared by every client of the session: the engine holds it and
-		// confirms with a settings event.
-		m.suggestMode = mode
-		m.proc.controlCmd("suggest", mode)
-		label := map[string]string{"on": "always", "off": "never", "auto": "when idle"}[mode]
-		m.append(stDim.Render("suggestions: " + mode + " (" + label + ")"))
-	default:
-		m.append(stErr.Render("usage: /suggest [on|off|auto] (bare triggers one now)"))
-	}
-	return nil
-}
-
-// rephrasePrompt is the TUI's copy of the /rephrase toggle: whether the next
-// user message is rephrased for specificity before it is sent. The engine
-// keeps its own copy (--rephrase / the `prompt` control command) and does the
-// actual rewriting at turn time; this exists so BARE /rephrase can report
-// status without a round-trip, and promptSlash keeps the two in sync.
-var rephrasePrompt bool
-
-// rephraseSlash handles /rephrase [on|off|status].
-//
-// On, every message the user sends is first rewritten by one throwaway LLM
-// call (feature request → acceptance criteria, vague question → one
-// unambiguous phrasing); the engine acts on the rewrite while the input box
-// and scrollback keep what the user actually typed. Bare shows the current
-// state.
-func rephraseSlash(m *tuiModel, args []string) tea.Cmd {
-	action := ""
-	if len(args) > 0 {
-		action = strings.ToLower(args[0])
-	}
-	switch action {
-	case "":
-		if rephrasePrompt {
-			m.append(stNote.Render("rephrase: on — each prompt is rewritten for specificity before the agent acts"))
-		} else {
-			m.append(stNote.Render("rephrase: off — /rephrase on to rewrite prompts for specificity before acting"))
-		}
-	case "on", "off":
-		rephrasePrompt = action == "on"
-		// Tell the engine too so a bare /rephrase from a resumed session, or a
-		// --rephrase startup, both resolve to the same state.
-		if m.proc != nil {
-			m.proc.controlCmd("rephrase", action)
-		}
-		state := "off — prompts reach the agent as typed"
-		if rephrasePrompt {
-			state = "on — each prompt is rewritten for specificity before acting"
-		}
-		m.append(stNote.Render("rephrase: " + state))
-	default:
-		m.append(stErr.Render("usage: /rephrase [on|off|status] (bare shows status)"))
-	}
-	return nil
-}
-
-// mcpSlash is /mcp. Where serverSlash binds ONE server per command, this one
-// addresses the SET: bare lists every server, `restart` bounces the running
-// ones, `restart <server>` bounces (or starts) just that one. It rides the same
-// `server` event — the engine reads the allServers id as "all of them".
-func mcpSlash(m *tuiModel, args []string) tea.Cmd {
-	if len(args) > 0 && args[0] == "add" {
-		return m.openMCPForm()
-	}
-	if len(args) > 0 && (args[0] == "remove" || args[0] == "rm" || args[0] == "refresh") {
-		if len(args) != 2 {
-			m.append(stErr.Render("usage: /mcp " + args[0] + " <id>"))
-			return nil
-		}
-		if args[0] == "refresh" {
-			m.append(stDim.Render("indexing " + args[1] + "'s docs…"))
-		}
-		if !m.proc.controlCmd("mcp", args[0]+" "+args[1]) {
-			m.append(stErr.Render("no engine right now — /reconnect first"))
-		}
-		return nil
-	}
-	action, target := "", allServers
-	if len(args) > 0 {
-		action = strings.ToLower(args[0])
-	}
-	if len(args) > 1 {
-		target = strings.ToLower(args[1])
-	}
-	if !m.proc.serverCmd(target, action) {
-		m.append(stErr.Render("no engine right now — /reconnect first"))
-	}
-	return nil
-}
-
-// controlSlash builds the /docker and /worktree handlers. The TUI forwards the
-// action to the engine via a `control` event and renders the response.
-func controlSlash(id string) func(*tuiModel, []string) tea.Cmd {
-	return func(m *tuiModel, args []string) tea.Cmd {
-		action := ""
-		if len(args) > 0 {
-			action = strings.ToLower(args[0])
-		}
-		if !m.proc.controlCmd(id, action) {
-			m.append(stErr.Render("no engine right now — /reconnect first"))
-		}
-		return nil
 	}
 }
 
@@ -3917,7 +3747,12 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 	if n == 1 {
 		return hit.run(m, fields[1:])
 	}
-	m.append(stDim.Render("unknown command: /" + name + " — try /help"))
+	if n == 0 {
+		// Not one of this TUI's: the engine has the last word (its list may
+		// not have arrived yet). It answers an unknown one itself.
+		return engineSlash(name)(m, fields[1:])
+	}
+	m.append(stDim.Render("ambiguous command: /" + name + " — try /help"))
 	return nil
 }
 
@@ -3939,8 +3774,8 @@ func (m *tuiModel) runPaletteEnter(v string) tea.Cmd {
 		}
 	}
 	if len(matches) == 0 {
-		m.append(stDim.Render("unknown command: " + v + " — try /help"))
-		return nil
+		// None of the known ones: the engine decides (runSlash hands it on).
+		return m.runSlash(v)
 	}
 	args := ""
 	if len(fields) > 1 {

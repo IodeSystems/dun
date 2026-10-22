@@ -43,10 +43,13 @@ func (m *tuiModel) noteCatalog(ev evMsg) {
 
 // allSlash is the static commands plus one per MCP prompt.
 func (m tuiModel) allSlash() []slashCmd {
-	if len(m.prompts) == 0 {
+	if len(m.prompts) == 0 && len(m.engineCmds) == 0 {
 		return slashCommands
 	}
 	out := append([]slashCmd(nil), slashCommands...)
+	for _, c := range m.engineCmds {
+		out = append(out, slashCmd{c.name, c.usage, c.desc, engineSlash(c.name)})
+	}
 	for _, p := range m.prompts {
 		var args []string
 		for _, a := range p.Arguments {
@@ -133,4 +136,37 @@ func skillSlash(m *tuiModel, args []string) tea.Cmd {
 	}
 	*m = m.sendUser(text)
 	return nil
+}
+
+// engineCmd is one of the engine's slash commands (proto.CommandSpec): the
+// TUI shows and completes it, and the engine carries it out.
+type engineCmd struct{ name, usage, desc string }
+
+func engineCmdsFromEvent(ev evMsg) []engineCmd {
+	items, _ := ev["items"].([]any)
+	out := make([]engineCmd, 0, len(items))
+	for _, it := range items {
+		c, _ := it.(map[string]any)
+		if n := str(c["name"]); n != "" {
+			out = append(out, engineCmd{n, str(c["usage"]), str(c["description"])})
+		}
+	}
+	return out
+}
+
+// engineSlash sends a slash command to the engine as the line typed; the
+// engine routes it (cmd/dun commands.go: routeSlash) exactly as it does for
+// every other client, so the TUI cannot drift from them. Adding an MCP server
+// is the one exception: it is a form only this TUI has.
+func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
+	return func(m *tuiModel, args []string) tea.Cmd {
+		if name == "mcp" && len(args) > 0 && args[0] == "add" {
+			return m.openMCPForm()
+		}
+		line := strings.TrimSpace(name + " " + strings.Join(args, " "))
+		if !m.proc.controlCmd("slash", line) {
+			m.append(stErr.Render("no engine right now — /reconnect first"))
+		}
+		return nil
+	}
 }

@@ -1,32 +1,34 @@
 package main
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/iodesystems/dun"
 )
 
-// Every TUI slash command the engine carries out is in the list other
-// clients get — so a command added to the TUI cannot silently be missing on
-// the web.
-func TestCommandListCoversTheTUIsEngineCommands(t *testing.T) {
-	engineRouted := []string{"rag", "lsp", "mcp", "docker", "worktree", "ship", "memories", "remember", "suggest", "rephrase", "clear", "close"}
-	var tui []string
-	for _, c := range (tuiModel{}).allSlash() {
-		tui = append(tui, c.name)
+// The TUI has no local copy of an engine command — so none can drift from
+// what the other clients run — and it shows and completes the engine's list
+// once the commands event arrives.
+func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
+	local := map[string]bool{}
+	for _, c := range slashCommands {
+		local[c.name] = true
 	}
-	var listed []string
 	for _, c := range commandList(nil, false).Items {
-		listed = append(listed, c.Name)
-		if !slices.Contains(tui, c.Name) {
-			t.Errorf("/%s is listed for clients but the TUI has no such command", c.Name)
+		if local[c.Name] {
+			t.Errorf("/%s is both a local TUI command and an engine command", c.Name)
 		}
 	}
-	for _, n := range engineRouted {
-		if !slices.Contains(listed, n) {
-			t.Errorf("/%s is engine-routed in the TUI but missing from the list", n)
+	m := tuiModel{}
+	m.engineCmds = engineCmdsFromEvent(evMsg{"items": []any{map[string]any{"name": "rag", "usage": "[on|off]", "description": "docs"}}})
+	found := false
+	for _, c := range m.allSlash() {
+		if c.name == "rag" && c.args == "[on|off]" {
+			found = true
 		}
+	}
+	if !found {
+		t.Error("the engine's commands are not in the TUI's palette")
 	}
 }
 

@@ -677,12 +677,19 @@ func TestTUI_DisableExit(t *testing.T) {
 }
 
 // An unknown slash command is reported, not sent to the engine.
+// A command the TUI does not know goes to the engine, which answers for an
+// unknown one — the same answer every client gets.
 func TestTUI_UnknownSlash(t *testing.T) {
-	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	var buf strings.Builder
+	m := newTUIModel(&dunProc{stdin: &bufCloser{Writer: &buf}}, "/ws")
 	m = typeStr(m, "/bogus")
 	m = key(m, kEnter)
-	if !strings.Contains(convoText(m), "unknown command") {
-		t.Fatalf("expected unknown-command note, got: %s", convoText(m))
+	if !strings.Contains(buf.String(), `"action":"bogus"`) {
+		t.Fatalf("not handed to the engine: %s", buf.String())
+	}
+	m = m.handleEvent(evMsg{"type": "control", "id": "slash", "action": "bogus", "message": "no command /bogus"})
+	if !strings.Contains(convoText(m), "no command /bogus") {
+		t.Fatalf("expected the engine's answer, got: %s", convoText(m))
 	}
 }
 
@@ -698,27 +705,20 @@ func TestTUI_Clear(t *testing.T) {
 
 	m = typeStr(m, "/clear")
 	m = key(m, kEnter)
-
-	// Scrollback should be cleared.
+	// The engine is asked, as every client asks it…
+	if !strings.Contains(buf.String(), `"id":"slash"`) || !strings.Contains(buf.String(), `"action":"clear"`) {
+		t.Fatalf("expected a slash clear to the engine, got: %s", buf.String())
+	}
+	// …and its reset event is what clears the screen (any client's /clear).
+	m = m.handleEvent(evMsg{"type": "reset"})
 	if len(m.convo) > 1 { // only the "session cleared" note remains
 		t.Fatalf("convo not cleared: %d entries", len(m.convo))
 	}
-	if m.cur != "" {
-		t.Fatal("cur not cleared")
-	}
-	if m.busy {
-		t.Fatal("busy not cleared")
-	}
-	if m.pendingTool != -1 {
-		t.Fatal("pendingTool not cleared")
+	if m.cur != "" || m.busy || m.pendingTool != -1 {
+		t.Fatalf("not reset: cur=%q busy=%v pendingTool=%d", m.cur, m.busy, m.pendingTool)
 	}
 	if !strings.Contains(convoText(m), "session cleared") {
 		t.Fatalf("expected clear confirmation, got: %s", convoText(m))
-	}
-
-	// Engine should have received a reset message.
-	if !strings.Contains(buf.String(), `"type":"reset"`) {
-		t.Fatalf("engine did not receive reset, got: %s", buf.String())
 	}
 }
 
@@ -1290,9 +1290,10 @@ func TestTUI_ServerSlashCommands(t *testing.T) {
 	m = key(m, kEnter)
 	var got map[string]string
 	if err := json.Unmarshal(sent.Bytes(), &got); err != nil {
-		t.Fatalf("did not send a server event: %q (%v)", sent.String(), err)
+		t.Fatalf("did not send a command: %q (%v)", sent.String(), err)
 	}
-	if got["type"] != "server" || got["id"] != "rag" || got["action"] != "auto" {
+	// The line goes to the engine's router, as from every client.
+	if got["type"] != "control" || got["id"] != "slash" || got["action"] != "rag auto" {
 		t.Fatalf("wrong event: %v", got)
 	}
 
@@ -2344,12 +2345,17 @@ func TestActivity_LeftWrapsHomeWithNoActivity(t *testing.T) {
 	}
 }
 
-// /mcp rides the same `server` event as /rag and /lsp, but addresses the SET.
-// The wire form is the only thing the engine sees, so pin it here: the sentinel
-// id for "all of them", and where the optional target lands.
-func TestTUI_MCPSlashWireForm(t *testing.T) {
-	send := func(line string) map[string]string {
-		t.Helper()
+// An engine command leaves the TUI as the line typed (the engine's router,
+// commands.go, parses it — its tests pin the routing); /mcp add stays here,
+// as the form.
+func TestTUI_EngineSlashWireForm(t *testing.T) {
+	for line, want := range map[string]string{
+		"/mcp":              "mcp",
+		"/mcp RESTART LSP":  "mcp RESTART LSP",
+		"/rephrase on":      "rephrase on",
+		"/remember a  note": "remember a note",
+		"/not-a-command x":  "not-a-command x",
+	} {
 		var buf bytes.Buffer
 		m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 		m.runSlash(line)
@@ -2357,24 +2363,15 @@ func TestTUI_MCPSlashWireForm(t *testing.T) {
 		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 			t.Fatalf("%s wrote %q, which is not one JSON event: %v", line, buf.String(), err)
 		}
-		return got
+		if got["type"] != "control" || got["id"] != "slash" || got["action"] != want {
+			t.Errorf("%s: %v, want slash %q", line, got, want)
+		}
 	}
-
-	// Bare /mcp lists — no action, every server.
-	if got := send("/mcp"); got["type"] != "server" || got["id"] != allServers || got["action"] != "" {
-		t.Errorf("bare /mcp should ask every server for its status; got %v", got)
-	}
-	// /mcp restart bounces the set.
-	if got := send("/mcp restart"); got["id"] != allServers || got["action"] != "restart" {
-		t.Errorf("/mcp restart should target every server; got %v", got)
-	}
-	// A named target replaces the sentinel — it does NOT become a third field.
-	if got := send("/mcp restart lsp"); got["id"] != "lsp" || got["action"] != "restart" {
-		t.Errorf("/mcp restart lsp should target lsp; got %v", got)
-	}
-	// Case is normalized, the way every other slash handler does it.
-	if got := send("/mcp RESTART LSP"); got["id"] != "lsp" || got["action"] != "restart" {
-		t.Errorf("/mcp should lowercase action and target; got %v", got)
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	m.runSlash("/mcp add")
+	if buf.Len() != 0 || !m.mcpForm {
+		t.Errorf("/mcp add should open the form and send nothing; sent %q", buf.String())
 	}
 }
 
@@ -2439,54 +2436,6 @@ func TestSuggest_HeldBackWhileTheHumanIsBusy(t *testing.T) {
 			}
 		})
 	}
-}
-
-// /rephrase [on|off|status]: the TUI keeps its own copy of the toggle (so bare
-// /rephrase reports status without a round-trip) and tells the engine, which is
-// the copy that actually rewrites at turn time.
-func TestRephraseSlash_TogglesAndReports(t *testing.T) {
-	defer func(want bool) { rephrasePrompt = want }(rephrasePrompt)
-
-	for _, tc := range []struct{ arg string }{{"on"}, {"off"}} {
-		t.Run(tc.arg, func(t *testing.T) {
-			var buf bytes.Buffer
-			m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
-			rephraseSlash(&m, []string{tc.arg})
-			want := tc.arg == "on"
-			if rephrasePrompt != want {
-				t.Fatalf("/rephrase %s: rephrasePrompt = %v, want %v", tc.arg, rephrasePrompt, want)
-			}
-			if got := buf.String(); !strings.Contains(got, `"id":"rephrase"`) || !strings.Contains(got, `"action":"`+tc.arg+`"`) {
-				t.Fatalf("the engine must be told; stdin got %q", got)
-			}
-			if !strings.Contains(m.convo[len(m.convo)-1].collapsed, "rephrase: "+tc.arg) {
-				t.Fatalf("no confirmation line: %q", m.convo[len(m.convo)-1].collapsed)
-			}
-		})
-	}
-
-	t.Run("bare shows status", func(t *testing.T) {
-		rephrasePrompt = true
-		var buf bytes.Buffer
-		m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
-		rephraseSlash(&m, nil)
-		last := m.convo[len(m.convo)-1].collapsed
-		if !strings.Contains(last, "rephrase: on") {
-			t.Fatalf("bare /rephrase should report on: %q", last)
-		}
-		if buf.String() != "" {
-			t.Fatalf("bare /rephrase needs no engine round-trip; stdin got %q", buf.String())
-		}
-	})
-
-	t.Run("bad arg", func(t *testing.T) {
-		var buf bytes.Buffer
-		m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
-		rephraseSlash(&m, []string{"sometimes"})
-		if !strings.Contains(m.convo[len(m.convo)-1].collapsed, "usage") {
-			t.Fatalf("want a usage error: %q", m.convo[len(m.convo)-1].collapsed)
-		}
-	})
 }
 
 // The wait is a DEBOUNCE, not a poll: a keystroke inside the window pushes the
