@@ -152,6 +152,23 @@ func parseRFC3339(s string) (time.Time, bool) {
 }
 
 // costBlock is /context's "cost & limits" section.
+// noCostHint says why calls came back with no cost, and what would change
+// that: the answer depends on the gateway.
+func noCostHint(sp *proto.Spend) string {
+	src := ""
+	if sp.Key != nil {
+		src = sp.Key.Source
+	}
+	switch {
+	case strings.HasPrefix(src, "litellm"):
+		return "LiteLLM sends a cost only on non-streaming responses, and dun streams: the gateway's operator can set " +
+			"include_cost_in_streaming_usage to put it in the stream (key spend above still counts it)"
+	case src == "openrouter":
+		return "OpenRouter normally puts a cost in every response's usage; none arrived — check the URL points at openrouter.ai"
+	}
+	return "this endpoint sends no cost with its responses (LiteLLM and OpenRouter do); dun has no price table to estimate one"
+}
+
 func costBlock(s *contextStats, now time.Time) string {
 	var b strings.Builder
 	b.WriteString("\n\n  " + stHeader.Render("cost & limits"))
@@ -176,6 +193,9 @@ func costBlock(s *contextStats, now time.Time) string {
 		b.WriteString(ctxRow("session spend", ctxMoney(*sp.Session), note))
 	} else {
 		notReported("session spend", commaf(" (%d calls, none priced)", sp.Calls))
+	}
+	if sp.Session == nil && sp.Calls > 0 {
+		b.WriteString("\n    " + stDim.Render(noCostHint(sp)))
 	}
 	if sp.LastTurn != nil {
 		note := curNote(*sp.LastTurn, sp.Currency)

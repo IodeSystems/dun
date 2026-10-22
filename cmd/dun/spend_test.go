@@ -197,3 +197,29 @@ func TestClientCacheWiresOnUsage(t *testing.T) {
 		t.Error("OnUsage is not the meter's")
 	}
 }
+
+// No cost on any call: the hint names the gateway's reason.
+func TestCostBlock_NoCostHint(t *testing.T) {
+	now := time.Now()
+	for _, c := range []struct {
+		key  *proto.KeyBudget
+		want string
+	}{
+		{&proto.KeyBudget{Source: "litellm", Currency: "USD"}, "include_cost_in_streaming_usage"},
+		{&proto.KeyBudget{Source: "litellm-headers", Currency: "USD"}, "include_cost_in_streaming_usage"},
+		{&proto.KeyBudget{Source: "openrouter", Currency: "credits"}, "openrouter.ai"},
+		{nil, "sends no cost with its responses"},
+	} {
+		out := stripANSI(costBlock(&contextStats{spend: &proto.Spend{Calls: 3, Key: c.key}}, now))
+		if !strings.Contains(out, c.want) {
+			t.Errorf("%+v: no %q in\n%s", c.key, c.want, out)
+		}
+	}
+	// Priced, or nothing sent yet: no hint.
+	one := 0.01
+	for _, sp := range []*proto.Spend{{Calls: 2, CostedCalls: 2, Session: &one}, {Calls: 0}} {
+		if out := stripANSI(costBlock(&contextStats{spend: sp}, now)); strings.Contains(out, "sends no cost") || strings.Contains(out, "include_cost") {
+			t.Errorf("hint shown for %+v:\n%s", sp, out)
+		}
+	}
+}
