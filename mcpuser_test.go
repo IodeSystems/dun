@@ -18,7 +18,7 @@ import (
 	"github.com/iodesystems/agentkit/mcpmgr"
 )
 
-// TestMain keeps every test off the real $DUN_HOME: LoadServers reads the
+// TestMain keeps every test off the real $DUN_HOME and ~/.claude: LoadServers reads the
 // user server list from it, and a server someone added with /mcp add must
 // not change what a test sees.
 func TestMain(m *testing.M) {
@@ -27,6 +27,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("DUN_HOME", home)
+	userHomeDir = func() (string, error) { return home, nil } // and ~/.claude/skills
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)

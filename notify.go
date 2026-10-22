@@ -242,8 +242,15 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					body, inline = fetch(fctx, h.DocID, inlineMaxChars)
 				}
 				infos = append(infos, DocHitInfo{Title: h.Title, DocID: h.DocID, Line: h.Line, Score: h.Score, Inline: inline})
-				if group != nil && group(h.DocID) == groupMemory {
+				g := ""
+				if group != nil {
+					g = group(h.DocID)
+				}
+				switch g {
+				case groupMemory:
 					b.WriteString("A note an earlier session on this project saved may apply (it records what was true then):\n")
+				case groupMCPDocs:
+					b.WriteString("From the documentation of an MCP server you have:\n")
 				}
 				if inline {
 					fmt.Fprintf(&b, "Possibly relevant (%d candidate document(s); this one clearly ranked first): %q (id=%s, score=%.2f)\n", w.n, h.Title, h.DocID, h.Score)

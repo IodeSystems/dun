@@ -205,6 +205,11 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 			h.mgr.StopServer(s.ID) // half-started is worse than not started
 		}
 	}
+	// Skills and prompts are read once, at start, so the tool rebuild below
+	// can list them. Only for an added server: the built-ins serve neither.
+	if err == nil && !builtinServer(s.ID) {
+		h.discoverCatalog(ctx, s.ID)
+	}
 	h.srvMu.Lock()
 	if err != nil {
 		h.lastErr[s.ID] = err.Error()
@@ -368,6 +373,14 @@ func (h *Harness) rebuildTools() {
 		toolDefs = append(toolDefs, memoryToolDef())
 		dispatch = withMemory(dispatch, h, m, report)
 	}
+	// skill, when any skill is in reach: the list rides the system prompt,
+	// the body comes back from this tool.
+	skills := h.Skills()
+	skillsBlock := skillsSystemBlock(skills)
+	if skillsBlock != "" {
+		toolDefs = append(toolDefs, skillToolDef())
+		dispatch = withSkill(dispatch, h, report)
+	}
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
 	// the moment churn is created rather than whenever usage is next measured.
 	dispatch = withRecapWatch(dispatch, h)
@@ -387,6 +400,7 @@ func (h *Harness) rebuildTools() {
 		// block survives compaction so a fold never drops them.
 		sys += rootAgentsMDBlock(h.cfg.Workspace)
 	}
+	sys += skillsBlock
 	// ship is the only way work leaves the worktree. It needs a repo, not a
 	// branch: a --no-worktree session sits on the base branch, and the pipeline
 	// (rebase + checks) is worth running there too — it just refuses to push.
@@ -448,7 +462,7 @@ func (h *Harness) rebuildTools() {
 		// a margin over the runner-up instead (see docsPreparer): one
 		// document per pass, inlined when short.
 		h.Session.Preparer = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
-			docsBodyFetcher(h.mgr, docsServerID(tools)), h.memoryStore().group, cfg.OnDocs)
+			docsBodyFetcher(h.mgr, docsServerID(tools)), docGroup(h.memoryStore()), cfg.OnDocs)
 	}
 }
 
@@ -623,6 +637,11 @@ func ingestTargets(workspace string) []string {
 	return fallback
 }
 
+// builtinServer reports whether id is one of dun's own three servers.
+func builtinServer(id string) bool {
+	return id == ServerCode || id == ServerShell || id == ServerDocs
+}
+
 // serverIDPattern is what /mcp add accepts as an id: it becomes the tool
 // namespace ("<id>__<tool>") and a raglit index name, so it is kept to
 // characters both allow.
@@ -636,8 +655,7 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	if !serverIDPattern.MatchString(spec.ID) {
 		return "", fmt.Errorf("an id is lowercase letters, digits, - and _ (got %q)", spec.ID)
 	}
-	switch spec.ID {
-	case ServerCode, ServerShell, ServerDocs:
+	if builtinServer(spec.ID) {
 		return "", fmt.Errorf("%q is a built-in server; pick another id", spec.ID)
 	}
 	if (spec.URL == "") == (spec.Command == "") {

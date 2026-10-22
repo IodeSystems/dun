@@ -253,7 +253,12 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		if elapsed := time.Since(t0); elapsed > time.Second {
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
-		return msg
+		return msg + "\n" + mcpDocsLine(ctx, h, spec.ID)
+	case "refresh":
+		if arg == "" {
+			return "usage: /mcp refresh <id> — re-read its docs into the index"
+		}
+		return arg + ": " + mcpDocsLine(ctx, h, arg)
 	case "remove", "rm":
 		if err := h.RemoveServer(arg); err != nil {
 			return "mcp remove: " + err.Error()
@@ -261,6 +266,22 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		return arg + ": stopped and removed from " + dun.UserServersFile()
 	}
 	return "unknown /mcp action " + strconv.Quote(verb)
+}
+
+// mcpDocsLine syncs a server's documentation into the docs index and says
+// what happened.
+func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
+	msg, err := h.SyncMCPDocs(ctx, id)
+	if err != nil {
+		return "docs: not indexed — " + oneLine(err.Error())
+	}
+	return msg
+}
+
+// catalogEvent tells the UI which skills and MCP prompts are in reach, so
+// /skill can list them and each prompt can be a slash command.
+func catalogEvent(h *dun.Harness) event {
+	return event{"type": "catalog", "skills": h.Skills(), "prompts": h.Prompts()}
 }
 
 // serverListing renders every server and its state, one per line.

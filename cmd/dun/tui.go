@@ -636,6 +636,8 @@ type tuiModel struct {
 	mcpFields     [3]textinput.Model // id, url or command, bearer
 	mcpStep       int
 	mcpErr        string
+	skills        []catalogSkill  // from the engine's catalog event
+	prompts       []catalogPrompt // MCP prompts, each a slash command
 	replaying     bool         // driven by a trace (--replay), not an engine
 	quitting      bool         // the user is leaving; do not respawn
 	exitAnnounced bool         // the engine said it was going; it did not crash
@@ -1794,6 +1796,14 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			}
 		}
 		m.noteServers(ev)
+	case "catalog":
+		m.noteCatalog(ev)
+	case "prompt":
+		// An MCP prompt the user ran as a slash command, rendered by the
+		// engine: it goes in as their message.
+		if text := strings.TrimSpace(str(ev["text"])); text != "" {
+			m = m.sendUser(text)
+		}
 	case "recap":
 		// One dim line that OPENS. The scrollback keeps whatever was already
 		// drawn — this is about the model's context, not about rewriting what you
@@ -3365,9 +3375,10 @@ func init() {
 		}},
 		{"rag", "[on|off|restart|auto|manual]", "docs index (raglit): bare shows status, auto starts it every session", serverSlash("rag")},
 		{"lsp", "[on|off|restart|auto|manual]", "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session", serverSlash("lsp")},
-		{"mcp", "[add | remove <id> | on|off|restart [id]]", "MCP servers: bare lists them, add saves a new one (URL + optional bearer, or a command) for every workspace", mcpSlash},
+		{"mcp", "[add | remove <id> | refresh <id> | on|off|restart [id]]", "MCP servers: bare lists them, add saves one (URL + optional bearer, or a command) for every workspace and indexes its docs, refresh re-indexes them", mcpSlash},
 		{"docker", "[on|off|status]", "exec backend: on (Docker), off (host), bare shows status", controlSlash("docker")},
 		{"worktree", "[status|new|commit]", "git: bare shows status (in place too), new isolates in a worktree, commit writes the message and asks", controlSlash("worktree")},
+		{"skill", "[name] [text]", "skills: bare lists them (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers); with a name, asks the model to use it", skillSlash},
 		{"remember", "[text]", "save a note for later sessions on this project (needs /rag on); bare: the model picks what to keep", func(m *tuiModel, args []string) tea.Cmd {
 			if !m.proc.controlCmd("remember", strings.Join(args, " ")) {
 				m.append(stErr.Render("no engine right now — /reconnect first"))
@@ -3491,12 +3502,15 @@ func mcpSlash(m *tuiModel, args []string) tea.Cmd {
 	if len(args) > 0 && args[0] == "add" {
 		return m.openMCPForm()
 	}
-	if len(args) > 0 && (args[0] == "remove" || args[0] == "rm") {
+	if len(args) > 0 && (args[0] == "remove" || args[0] == "rm" || args[0] == "refresh") {
 		if len(args) != 2 {
-			m.append(stErr.Render("usage: /mcp remove <id>"))
+			m.append(stErr.Render("usage: /mcp " + args[0] + " <id>"))
 			return nil
 		}
-		if !m.proc.controlCmd("mcp", "remove "+args[1]) {
+		if args[0] == "refresh" {
+			m.append(stDim.Render("indexing " + args[1] + "'s docs…"))
+		}
+		if !m.proc.controlCmd("mcp", args[0]+" "+args[1]) {
 			m.append(stErr.Render("no engine right now — /reconnect first"))
 		}
 		return nil
@@ -3776,7 +3790,7 @@ func (m tuiModel) paletteActive() bool {
 func (m tuiModel) paletteMatches() []slashCmd {
 	word := strings.TrimPrefix(strings.Fields(m.input.Value() + " ")[0], "/")
 	var out []slashCmd
-	for _, c := range slashCommands {
+	for _, c := range m.allSlash() {
 		if strings.HasPrefix(c.name, word) {
 			out = append(out, c)
 		}
@@ -3793,12 +3807,13 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 	name := strings.TrimPrefix(fields[0], "/")
 	var hit *slashCmd
 	n := 0
-	for i := range slashCommands {
-		if slashCommands[i].name == name { // exact wins outright
-			return slashCommands[i].run(m, fields[1:])
+	cmds := m.allSlash()
+	for i := range cmds {
+		if cmds[i].name == name { // exact wins outright
+			return cmds[i].run(m, fields[1:])
 		}
-		if strings.HasPrefix(slashCommands[i].name, name) {
-			hit = &slashCommands[i]
+		if strings.HasPrefix(cmds[i].name, name) {
+			hit = &cmds[i]
 			n++
 		}
 	}
@@ -3822,7 +3837,7 @@ func (m *tuiModel) runPaletteEnter(v string) tea.Cmd {
 	}
 	// If the first word is already an exact command, honor it (with args).
 	if len(fields) > 0 {
-		if word := strings.TrimPrefix(fields[0], "/"); commandNamed(word) {
+		if word := strings.TrimPrefix(fields[0], "/"); m.commandNamed(word) {
 			return m.runSlash(v)
 		}
 	}
@@ -3837,8 +3852,8 @@ func (m *tuiModel) runPaletteEnter(v string) tea.Cmd {
 	return m.runSlash("/" + matches[sel].name + args)
 }
 
-func commandNamed(name string) bool {
-	for _, c := range slashCommands {
+func (m tuiModel) commandNamed(name string) bool {
+	for _, c := range m.allSlash() {
 		if c.name == name {
 			return true
 		}
@@ -3850,7 +3865,7 @@ func commandNamed(name string) bool {
 func (m *tuiModel) showHelp() {
 	var b strings.Builder
 	b.WriteString(stHeader.Render("commands"))
-	for _, c := range slashCommands {
+	for _, c := range m.allSlash() {
 		usage := "/" + c.name
 		if c.args != "" {
 			usage += " " + c.args

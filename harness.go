@@ -367,6 +367,9 @@ type Harness struct {
 	// memory is the note store while the docs server runs, else nil. Set by
 	// rebuildTools; read by /remember from another goroutine.
 	memory atomic.Pointer[memoryStore]
+	// catalog is what each started server offers besides tools: skills and
+	// prompts (skills.go). Guarded by srvMu.
+	catalog map[string]mcpCatalog
 	// toolsInit is false until the first rebuild, so the initial tool set is
 	// not announced as a CHANGE — the system prompt already describes it.
 	toolsInit bool
@@ -1198,6 +1201,15 @@ func (h *Harness) AddMount(source, name string) error {
 		return err
 	}
 
+	if err := h.addMountLocked(resolved, name, repoRoot); err != nil {
+		return err
+	}
+	// After srvMu is released: the rebuild takes it (docs spec, skills).
+	h.applyTools()
+	return nil
+}
+
+func (h *Harness) addMountLocked(resolved, name, repoRoot string) error {
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
 
@@ -1235,8 +1247,6 @@ func (h *Harness) AddMount(source, name string) error {
 	if h.cfg.Worktree != nil {
 		h.cfg.Worktree.Mounts = h.cfg.ExtraMounts
 	}
-
-	h.applyTools()
 	return nil
 }
 

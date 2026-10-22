@@ -700,6 +700,7 @@ type closeCtx struct {
 func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string, cc closeCtx) {
 	em.emit(event{"type": "ready", "tools": h.ToolNames(), "servers": serversToAny(h.Servers()),
 		"hint": serverHint(h.Servers())})
+	em.emit(catalogEvent(h))
 	// Server commands (/rag, /lsp) are handled on the READER's goroutine, not
 	// here: this loop is blocked inside a turn most of the time, and "turn the
 	// docs server on" should not queue behind a five-minute agent run. The
@@ -708,6 +709,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		msg := runServerCmd(ctx, h, alias, action)
 		em.emit(event{"type": "server", "id": alias, "action": action, "message": msg,
 			"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
+		em.emit(catalogEvent(h))
 	})
 	in.setCtrlCmd(func(id, action string) {
 		// /rephrase flips a pure engine-side toggle: no harness work, no asking,
@@ -762,6 +764,29 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				h.Aside("[control/mcp] " + msg)
 				em.emit(event{"type": "server", "id": "mcp", "action": verb, "message": msg,
 					"servers": serversToAny(h.Servers()), "tools": h.ToolNames()})
+				em.emit(catalogEvent(h))
+			}()
+			return
+		}
+		// An MCP prompt, run as a slash command: rendered here, sent back for
+		// the UI to submit as the user's message — so it is echoed, queued and
+		// recorded exactly like one typed.
+		if id == "prompt" {
+			go func() {
+				var p struct {
+					Server string            `json:"server"`
+					Name   string            `json:"name"`
+					Args   map[string]string `json:"args"`
+				}
+				text, err := "", json.Unmarshal([]byte(action), &p)
+				if err == nil {
+					text, err = h.RenderPrompt(ctx, p.Server, p.Name, p.Args)
+				}
+				if err != nil {
+					em.emit(event{"type": "control", "id": id, "message": "prompt " + p.Server + ":" + p.Name + ": " + err.Error()})
+					return
+				}
+				em.emit(event{"type": "prompt", "text": text})
 			}()
 			return
 		}
