@@ -301,11 +301,13 @@ Slices, in order:
     the audience dund checks — created in your Zitadel.
 - **Deployment asks (USER, 2026-10-21):**
   - `dun.iodesystems.com` on hz, internal-only (LAN + VPN), like caselit:
-    one non-slot unit on 192.168.1.76, a port in hz's 20000–32767 band,
-    `/healthz`. Provisioning the hz service (port check, definition, sync)
-    is running now; dund has no HTTP listener until S4, so the backend is
-    down until then. WebSockets need a long HAProxy `timeout_tunnel` (the
-    default client/server timeout is 50 s).
+    hz service `dun` CREATED 2026-10-21 — backend `192.168.1.76:20003`
+    (from `hz ports next`), internal-only, `/healthz`, `--timeout-tunnel
+    3600` (server timeout left at the 50 s default). The sync was still
+    running after 10+ min: the iodesystems.com cert is a SAN list, not a
+    `*.iodesystems.com` wildcard, so `dun` needs a reissue (assumed, not
+    confirmed); until then hz presents the veliode.com cert for it. Backend
+    down until S4 gives dund an HTTP listener on 20003.
   - An Android APK downloadable like bintag's: `expo prebuild` + `gradlew
     assembleRelease` (no EAS), `releases/android/dun-<code>.apk` +
     `latest.json` (version_code, sha256, size), `/dun.apk` redirects to the
@@ -317,10 +319,11 @@ Slices, in order:
     app reaches a standalone install.
   - Standalone on localhost: dund serves HTTP on 127.0.0.1 itself, no hz;
     the PWA works there (browsers allow service workers on localhost
-    without TLS). Auth there is a **blocking decision (USER)**: loopback TCP
-    is reachable by every local user, unlike the 0600 socket, so either an
-    opaque local token (AUTH-2: generated into $DUN_HOME, SHA-256 stored,
-    `dun dund token` prints it) or OIDC as remote — or no auth on loopback.
+    without TLS). Auth there (USER, 2026-10-21: option A): an opaque local
+    token, AUTH-2 — generated into $DUN_HOME on first serve, only its
+    SHA-256 stored, compared constant-time, `dun dund token` prints it;
+    loopback TCP is reachable by every local user, so it is required there
+    too. The 0600 unix socket keeps peer-uid auth.
 - **optional extensions:** push notifications when a session asks;
   share/invite a session to another principal (USER: "maybe later"); a
   read-only share link; session hand-off between machines.
