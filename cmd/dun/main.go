@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -794,6 +795,16 @@ type closeCtx struct {
 var skillPoll = 3 * time.Second
 
 func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string, cc closeCtx) {
+	// Stop the turn in flight (proto.Interrupt, /interrupt). On the reader
+	// goroutine: it only cancels a context, and the turn loop reports the end
+	// with done{reason: interrupted}. Installed before ready, so a client that
+	// has seen ready can count on it.
+	interruptCmd := func() {
+		if !h.Interrupt() {
+			em.emit(&proto.ControlEvent{ID: "interrupt", Message: "nothing to interrupt: no turn is running"})
+		}
+	}
+	in.setInterrupt(interruptCmd)
 	em.emit(&proto.Ready{Tools: h.ToolNames(), Servers: serversProto(h.Servers()),
 		Hint: serverHint(h.Servers())})
 	em.emit(catalogEvent(h))
@@ -850,6 +861,10 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if id == "slash" {
 			routeSlash(action, slashRoutes{server: srvCmd, control: ctrlCmd, reset: resetCmd,
 				reply: func(msg string) { em.emit(&proto.ControlEvent{ID: "slash", Action: action, Message: msg}) }})
+			return
+		}
+		if id == "interrupt" {
+			interruptCmd()
 			return
 		}
 		// /rephrase flips a pure engine-side toggle: no harness work, no asking,
@@ -1134,6 +1149,10 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 	turnActive.Store(true)
 	res, err := h.Continue(tctx)
 	turnActive.Store(false)
+	if errors.Is(err, dun.ErrInterrupted) {
+		emitInterrupted(h, em, res)
+		return true // what was queued during it runs next
+	}
 	if err != nil {
 		emitTurnError(ctx, h, em, turnErr(tctx, err))
 		return false
@@ -1225,6 +1244,8 @@ type inputStream struct {
 	ctrlPending [][2]string
 	// resetCb handles a `reset` event (clear the session store).
 	resetCb func()
+	// interruptCb handles an `interrupt` event (stop the turn in flight).
+	interruptCb func()
 	// agentFn handles an `agent` event: the human viewing a child's transcript
 	// or telling it something. Same install-after-the-harness-exists problem as
 	// srv and ctrl, so it queues the same way.
@@ -1263,6 +1284,13 @@ func (s *inputStream) setCtrlCmd(f func(id, action string)) {
 	for _, c := range queued {
 		f(c[0], c[1])
 	}
+}
+
+// setInterrupt installs the interrupt handler.
+func (s *inputStream) setInterrupt(f func()) {
+	s.mu.Lock()
+	s.interruptCb = f
+	s.mu.Unlock()
 }
 
 // setResetCb installs the session-reset handler.
@@ -1387,6 +1415,14 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- ev.Content
 			case "answer":
 				s.answers <- ev.Value
+			case "interrupt":
+				// Inline: the turn it stops is what blocks the loop.
+				s.mu.Lock()
+				cb := s.interruptCb
+				s.mu.Unlock()
+				if cb != nil {
+					cb()
+				}
 			case "reset":
 				s.mu.Lock()
 				cb := s.resetCb
@@ -1501,6 +1537,10 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 	}
 	res, err := h.Ask(tctx, task)
 	turnActive.Store(false)
+	if errors.Is(err, dun.ErrInterrupted) {
+		emitInterrupted(h, em, res)
+		return true
+	}
 	if err != nil {
 		emitTurnError(ctx, h, em, turnErr(tctx, err))
 		return false
@@ -1509,6 +1549,15 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 	em.emit(usageEvent(h, res.Usage))
 	em.emit(&proto.Done{})
 	return true
+}
+
+// emitInterrupted ends a turn the user stopped. Not an error: the transcript
+// holds what the turn produced and a marker, and the next message continues
+// from there. The partial reply has already streamed as tokens, so there is
+// no message event; done's reason tells clients to close the turn as cut.
+func emitInterrupted(h *dun.Harness, em *emitter, res agent.TurnResult) {
+	em.emit(usageEvent(h, res.Usage))
+	em.emit(&proto.Done{Reason: "interrupted"})
 }
 
 // emitTurnError reports a failed turn, and says whether the SESSION is over.

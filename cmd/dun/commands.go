@@ -83,6 +83,7 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 			State: suggestMode, Description: "next-message suggestions: bare asks for some now, on/off/auto set the mode"},
 		{Name: "rephrase", Usage: "[on|off|status]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", ""),
 			State: onOff(rephraseOn), Description: "rephrase prompts for specificity before acting"},
+		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
 		{Name: "clear", Group: "session", Description: "clear the conversation and start a fresh session log"},
 		{Name: "close", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript"},
 	}}
@@ -195,7 +196,7 @@ func routeSlash(line string, r slashRoutes) {
 		}
 	case "docker", "worktree", "ship":
 		r.control(name, arg(0))
-	case "memories", "close":
+	case "memories", "close", "interrupt":
 		r.control(name, "")
 	case "remember":
 		r.control(name, strings.Join(args, " "))

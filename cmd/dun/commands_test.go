@@ -70,6 +70,7 @@ func TestRouteSlash(t *testing.T) {
 		"memories":                {"control", "memories", ""},
 		"clear":                   {"reset", "", ""},
 		"close":                   {"control", "close", ""},
+		"interrupt":               {"control", "interrupt", ""},
 	} {
 		calls = nil
 		routeSlash(line, r)

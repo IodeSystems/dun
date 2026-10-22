@@ -23,7 +23,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `ask` | Agent waiting on user input | `question`, `options[]`, `multi` |
 | `queued` | Message buffered mid-turn | `text`, `count` |
 | `usage` | Token accounting | `total`, `active`, `cached`, `processed`, `generated`, `turns` |
-| `done` | Turn completed | — |
+| `done` | Turn completed | `reason` (`interrupted` when the user stopped it) |
 | `error` | Turn failed | `error`, `fatal` |
 | `retry` | Provider outage, retrying | `note`, `due`, `seen` |
 | `reset` | Store cleared (`/clear`) | — |
@@ -63,12 +63,30 @@ When the user types while a turn is running, the engine buffers the message
 | `answer` | Respond to `ask_user` | `value` |
 | `server` | Control a server (`/rag`, `/lsp`) | `id`, `action` (`status`/`on`/`off`/`auto`/`manual`) |
 | `reset` | Clear the session store | — |
+| `interrupt` | Stop the turn in flight, keep the session (see below) | — |
 | `stop` | Stop processing, exit | — |
 | `quit` | Quit entirely | — |
 
 A message sent while a turn is running is **not** queued behind the turn. The
 engine calls `Harness.Say()` which buffers it into the next tool result via
 `liftQueued()`. Multiple messages batch without limit.
+
+### Interrupting a turn
+
+`interrupt` (also `/interrupt`, and in the TUI ctrl+k or esc while a turn
+runs) cancels the current turn only. The engine (`Harness.Interrupt`):
+
+1. records the reply text the cut round had streamed as an assistant entry,
+   answers a tool call left in flight as interrupted by the user, and appends
+   a notification `[the user interrupted this turn] …` with a short note on
+   the discarded reasoning (duration, length, last sentence — never the
+   reasoning itself);
+2. ends the turn with `done` `{"reason":"interrupted"}` — no `error`, no retry;
+3. starts the next turn at once when messages were queued during the cut
+   turn; otherwise it waits for the next message as usual.
+
+With no turn running, the answer is a `control` event (`id` `interrupt`)
+saying so.
 
 ## Engine Supervision
 

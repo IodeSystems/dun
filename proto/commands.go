@@ -11,6 +11,7 @@ func init() {
 	command[AgentCmd]("agent")
 	command[Reset]("reset")
 	command[Stop]("stop") // "quit" is accepted as an alias
+	command[Interrupt]("interrupt")
 	command[Subscribe]("subscribe")
 }
 
@@ -45,6 +46,13 @@ type AgentCmd struct {
 
 // Reset clears the conversation.
 type Reset struct{}
+
+// Interrupt stops the turn in flight and keeps the session. What the turn
+// had produced stays in the transcript, with a marker the model reads; the
+// turn ends with done (reason "interrupted"). Messages queued during it start
+// the next turn at once. With no turn running it is answered by a control
+// event that says so.
+type Interrupt struct{}
 
 // Stop ends the engine without waiting for background jobs.
 type Stop struct{}

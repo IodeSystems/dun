@@ -87,8 +87,11 @@ type ToolResult struct {
 	Result string `json:"result"`
 }
 
-// Done ends a turn.
-type Done struct{}
+// Done ends a turn. Reason is empty for a turn that finished, and
+// "interrupted" for one the user stopped (see Interrupt).
+type Done struct {
+	Reason string `json:"reason,omitempty"`
+}
 
 // SystemCost is what the context costs before the conversation.
 type SystemCost struct {
