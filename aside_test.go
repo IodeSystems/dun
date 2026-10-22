@@ -114,17 +114,17 @@ func TestToolSetDelta(t *testing.T) {
 	code := []mcpmgr.MCPTool{{Name: "node_query", ServerID: ServerCode}}
 	docs := []mcpmgr.MCPTool{{Name: "search", ServerID: ServerDocs}, {Name: "ingest", ServerID: ServerDocs}}
 
-	if got := toolSetDelta(code, code); got != "" {
+	if got := toolSetDelta(code, code, nil); got != "" {
 		t.Errorf("no change should say nothing, got %q", got)
 	}
-	added := toolSetDelta(code, append(append([]mcpmgr.MCPTool{}, code...), docs...))
+	added := toolSetDelta(code, append(append([]mcpmgr.MCPTool{}, code...), docs...), nil)
 	if !strings.Contains(added, "docs is now available") || !strings.Contains(added, "search") {
 		t.Errorf("start not described: %q", added)
 	}
 	if strings.Contains(added, "node_query") {
 		t.Errorf("unchanged server should not be mentioned: %q", added)
 	}
-	removed := toolSetDelta(append(append([]mcpmgr.MCPTool{}, code...), docs...), code)
+	removed := toolSetDelta(append(append([]mcpmgr.MCPTool{}, code...), docs...), code, nil)
 	if !strings.Contains(removed, "turned off") || !strings.Contains(removed, "search") {
 		t.Errorf("stop not described: %q", removed)
 	}

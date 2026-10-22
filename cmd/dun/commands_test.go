@@ -56,6 +56,8 @@ func TestRouteSlash(t *testing.T) {
 		"rag on":                  {"server", "rag", "on"},
 		"/lsp":                    {"server", "lsp", ""},
 		"mcp refresh docs":        {"control", "mcp", "refresh docs"},
+		"mcp move corp SHELL":     {"control", "mcp", "move corp shell"},
+		"mcp move corp direct":    {"control", "mcp", "move corp direct"},
 		"mcp restart":             {"server", allServers, "restart"},
 		"mcp off github":          {"server", "github", "off"},
 		"docker OFF":              {"control", "docker", "off"},
@@ -78,7 +80,7 @@ func TestRouteSlash(t *testing.T) {
 		t.Errorf("rephrase on: %v", calls)
 	}
 	// Bare /rephrase reports; it must not turn rephrasing off.
-	for _, line := range []string{"rephrase", "rephrase status", "nope", "mcp add", "mcp remove"} {
+	for _, line := range []string{"rephrase", "rephrase status", "nope", "mcp add", "mcp remove", "mcp move corp", "mcp move corp sideways"} {
 		calls = nil
 		routeSlash(line, r)
 		if len(calls) != 1 || calls[0].kind != "reply" {

@@ -12,7 +12,8 @@ import (
 
 // /mcp add — a form for a new MCP server: an id, then a URL (a remote server
 // over Streamable HTTP) or a command line (a local one over stdio), then an
-// optional bearer token. The engine saves it to $DUN_HOME/mcp.json, there in
+// optional bearer token, then its placement: direct (the default) or in the
+// shell (dun.ViaShell). The engine saves it to $DUN_HOME/mcp.json, there in
 // every workspace, and starts it; the result comes back as a server event.
 //
 // The token is typed here rather than given as a /mcp add argument: a slash
@@ -33,7 +34,7 @@ func (m *tuiModel) openMCPForm() tea.Cmd {
 	m.mcpFields[2].EchoMode = textinput.EchoPassword
 	m.mcpFields[2].EchoCharacter = '•'
 	m.mcpFields[0].Focus()
-	m.mcpStep, m.mcpErr, m.mcpForm = 0, "", true
+	m.mcpStep, m.mcpErr, m.mcpForm, m.mcpShell = 0, "", true, false
 	m.input.Blur()
 	m.refresh()
 	return textinput.Blink
@@ -52,26 +53,42 @@ func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "shift+tab", "up":
 		if m.mcpStep > 0 {
-			m.mcpFields[m.mcpStep].Blur()
+			if m.mcpStep < len(m.mcpFields) {
+				m.mcpFields[m.mcpStep].Blur()
+			}
 			m.mcpStep--
 			m.mcpFields[m.mcpStep].Focus()
 		}
 		m.refresh()
 		return m, textinput.Blink
+	case " ", "left", "right", "h", "l":
+		if m.mcpStep == mcpViaStep {
+			m.mcpShell = !m.mcpShell
+			m.refresh()
+			return m, nil
+		}
 	case "enter", "tab", "down":
-		v := strings.TrimSpace(m.mcpFields[m.mcpStep].Value())
+		v := ""
+		if m.mcpStep < len(m.mcpFields) {
+			v = strings.TrimSpace(m.mcpFields[m.mcpStep].Value())
+		}
 		switch {
 		case m.mcpStep == 0 && !mcpIDOK(v):
 			m.mcpErr = "an id is lowercase letters, digits, - and _ — it prefixes the server's tools"
 		case m.mcpStep == 1 && v == "":
 			m.mcpErr = "a URL or a command"
-		case m.mcpStep < 2:
+		case m.mcpStep < mcpViaStep:
 			m.mcpErr = ""
 			m.mcpFields[m.mcpStep].Blur()
 			m.mcpStep++
-			m.mcpFields[m.mcpStep].Focus()
+			if m.mcpStep < len(m.mcpFields) {
+				m.mcpFields[m.mcpStep].Focus()
+			}
 		case msg.String() == "enter":
 			spec := mcpFormSpec(m.mcpFields[0].Value(), m.mcpFields[1].Value(), m.mcpFields[2].Value())
+			if m.mcpShell {
+				spec.Via = dun.ViaShell
+			}
 			b, _ := json.Marshal(spec)
 			if !m.proc.controlCmd("mcp", "add "+string(b)) {
 				m.mcpErr = "no engine right now — /reconnect first"
@@ -84,11 +101,17 @@ func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, textinput.Blink
 	}
+	if m.mcpStep >= len(m.mcpFields) {
+		return m, nil // the placement row takes no text
+	}
 	var cmd tea.Cmd
 	m.mcpFields[m.mcpStep], cmd = m.mcpFields[m.mcpStep].Update(msg)
 	m.refresh()
 	return m, cmd
 }
+
+// mcpViaStep is the form's last row: direct or in the shell.
+const mcpViaStep = 3
 
 func mcpIDOK(id string) bool {
 	if id == "" || len(id) > 32 || id[0] == '-' || id[0] == '_' {
@@ -125,6 +148,23 @@ func (m tuiModel) mcpFormPanel() string {
 			label = stSel.Render("▎ " + labels[i] + "  ")
 		}
 		rows = append(rows, label+f.View())
+	}
+	label := stDim.Render("  place   ")
+	if m.mcpStep == mcpViaStep {
+		label = stSel.Render("▎ place   ")
+	}
+	direct, shell := "( ) direct", "( ) in the shell"
+	if m.mcpShell {
+		shell = "(•) in the shell"
+	} else {
+		direct = "(•) direct"
+	}
+	rows = append(rows, label+direct+"   "+shell+stDim.Render("   space switches"))
+	if m.mcpShell {
+		rows = append(rows, "  "+stDim.Render("in the shell: one eval namespace, no tool schemas in every request; but no docs indexing,"),
+			"  "+stDim.Render("no prompts or skills, no tool deny-list, and its calls show as eval"))
+	} else {
+		rows = append(rows, "  "+stDim.Render("direct: each tool's schema rides every request; docs, prompts, skills and renderers work"))
 	}
 	if m.mcpErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.mcpErr))

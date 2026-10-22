@@ -70,6 +70,14 @@ type ServerState struct {
 	Tools        int     `json:"tools"`
 	Err          string  `json:"err,omitempty"`          // why the last start attempt failed
 	StartSeconds float64 `json:"startSeconds,omitempty"` // how long the last start took, in seconds
+	// Via is an added server's placement: ViaDirect or ViaShell; "" for a
+	// built-in, which has no choice.
+	Via string `json:"via,omitempty"`
+	// For a shell-placed server: Hosted is true when the running shell
+	// connected it (Tools is then its tool count, Err why it did not), and
+	// Namespace is what the model calls it by.
+	Hosted    bool   `json:"hosted,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -82,16 +90,27 @@ func (h *Harness) Servers() []ServerState {
 	for _, t := range filterTools(h.mgr.GetTools(), h.specs) {
 		counts[t.ServerID]++
 	}
+	shellUp := h.mgr.ServerStarted(ServerShell)
 	out := make([]ServerState, 0, len(h.specs))
 	for _, s := range h.specs {
-		out = append(out, ServerState{
+		st := ServerState{
 			ID:           s.ID,
 			Running:      h.mgr.ServerStarted(s.ID),
 			Auto:         s.Autostart,
 			Tools:        counts[s.ID],
 			Err:          h.lastErr[s.ID],
 			StartSeconds: h.lastStart[s.ID].Seconds(),
-		})
+		}
+		switch {
+		case s.Via == ViaShell:
+			st.Via, st.Namespace, st.Err, st.Tools = ViaShell, ShellNamespace(s.ID), "", 0
+			if hs, ok := h.hosted[s.ID]; ok && shellUp {
+				st.Hosted, st.Tools, st.Err = hs.Connected, hs.Tools, hs.Err
+			}
+		case !builtinServer(s.ID):
+			st.Via = ViaDirect
+		}
+		out = append(out, st)
 	}
 	return out
 }
@@ -171,6 +190,10 @@ func (h *Harness) spec(id string) (Server, bool) {
 // set. The error it returns is also recorded, so a UI can show why a family is
 // missing long after the attempt.
 func (h *Harness) startServer(ctx context.Context, s Server) error {
+	if s.Via == ViaShell {
+		return fmt.Errorf("%s runs inside the shell — the model calls it through eval as %s; /mcp move %s direct to run it on its own",
+			s.ID, ShellNamespace(s.ID), s.ID)
+	}
 	t0 := time.Now()
 	timeout := time.Duration(s.Timeout) * time.Second
 	if timeout <= 0 {
@@ -194,8 +217,12 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 			env = append(env, hookEnv...)
 		}
 	}
+	args := s.Args
+	if s.ID == ServerShell {
+		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
+	}
 	err := h.mgr.StartServer(ctx, mcpmgr.MCPConfig{
-		ID: s.ID, Name: s.ID, Command: s.Command, Args: s.Args,
+		ID: s.ID, Name: s.ID, Command: s.Command, Args: args,
 		Env: env, Timeout: int(timeout / time.Second),
 		URL: s.URL, Headers: s.Headers,
 	})
@@ -209,6 +236,9 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// can list them. Only for an added server: the built-ins serve neither.
 	if err == nil && !builtinServer(s.ID) {
 		h.discoverCatalog(ctx, s.ID)
+	}
+	if err == nil && s.ID == ServerShell {
+		h.readHosted()
 	}
 	h.srvMu.Lock()
 	if err != nil {
@@ -280,11 +310,20 @@ func (h *Harness) rebuildTools() {
 		return // autostart runs before the Session exists; Start applies it after
 	}
 	tools := filterTools(h.mgr.GetTools(), h.specs)
+	hostedNS := h.hostedNamespaces()
+	moved := map[string]string{} // id → namespace, for servers now in the shell
+	if len(hostedNS) > 0 {
+		h.srvMu.Lock()
+		for _, s := range h.hostedSpecs() {
+			moved[s.ID] = ShellNamespace(s.ID)
+		}
+		h.srvMu.Unlock()
+	}
 	// Tell the model what changed under it, if anything. Buffered, not sent:
 	// see Harness.Aside for why a tool-set change is never worth a turn of its
 	// own. Skipped on the first build — the system prompt covers that.
 	if h.toolsInit {
-		if note := toolSetDelta(h.Tools, tools); note != "" {
+		if note := toolSetDelta(h.Tools, tools, moved); note != "" {
 			h.Aside(note)
 		}
 	}
@@ -393,7 +432,7 @@ func (h *Harness) rebuildTools() {
 
 	sys := cfg.System
 	if sys == "" {
-		sys = systemFor(tools, cfg.Exec, cfg.Worktree)
+		sys = systemFor(tools, cfg.Exec, cfg.Worktree, hostedNS...)
 		sys += roleSystem(h.isChild())
 		// The workspace's root AGENTS.md, if any, is standing context: the
 		// model needs the project's rules from the first message, and a system
@@ -472,14 +511,21 @@ func (h *Harness) rebuildTools() {
 // block, so repeating them here would pay for the same bytes twice. What the
 // model cannot see there is that the set CHANGED — it reasoned two turns ago
 // about not having search, and will keep acting on that until told otherwise.
-func toolSetDelta(before, after []mcpmgr.MCPTool) string {
+//
+// moved maps a server now hosted in the shell to its namespace: its tools
+// leaving the list is a move, not "turned off".
+func toolSetDelta(before, after []mcpmgr.MCPTool, moved map[string]string) string {
 	was := toolsByServer(before)
 	now := toolsByServer(after)
 	var lines []string
 	for _, id := range serverOrder(was, now) {
 		added := missing(now[id], was[id])
 		removed := missing(was[id], now[id])
+		ns, isMoved := moved[id]
 		switch {
+		case isMoved && len(now[id]) == 0 && len(removed) > 0:
+			lines = append(lines, fmt.Sprintf("%s moved into the shell — call it through eval as %s.<tool>(…); help(%q) lists its commands; no longer callable directly: %s",
+				id, ns, ns, strings.Join(removed, ", ")))
 		case len(was[id]) == 0 && len(added) > 0:
 			lines = append(lines, fmt.Sprintf("%s is now available: %s", id, strings.Join(added, ", ")))
 		case len(now[id]) == 0 && len(removed) > 0:
@@ -660,6 +706,11 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	if (spec.URL == "") == (spec.Command == "") {
 		return "", fmt.Errorf("a server has a url or a command, not both")
 	}
+	via, err := NormalizeVia(spec.Via)
+	if err != nil {
+		return "", err
+	}
+	spec.Via = via
 	on := true
 	spec.Autostart = &on
 	path, err := PutUserServer(spec)
@@ -667,11 +718,13 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 		return "", err
 	}
 	s := Server{ID: spec.ID, URL: spec.URL, Headers: requestHeaders(spec), Command: spec.Command,
-		Args: spec.Args, Env: spec.Env, Timeout: spec.Timeout, Autostart: true}
+		Args: spec.Args, Env: spec.Env, Timeout: spec.Timeout, Autostart: true, Via: via, Bearer: spec.Bearer}
+	wasHosted := false
 	h.srvMu.Lock()
 	replaced := false
 	for i := range h.specs {
 		if h.specs[i].ID == s.ID {
+			wasHosted = h.specs[i].Via == ViaShell
 			h.specs[i], replaced = s, true
 		}
 	}
@@ -681,6 +734,15 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	h.srvMu.Unlock()
 	if h.mgr.ServerStarted(s.ID) {
 		h.mgr.StopServer(s.ID)
+	}
+	if via == ViaShell || wasHosted {
+		if _, err := h.restartShell(ctx); err != nil {
+			return path, fmt.Errorf("the shell did not come back: %w", err)
+		}
+	}
+	if via == ViaShell {
+		h.applyTools()
+		return path, nil
 	}
 	return path, h.startServer(ctx, s)
 }
@@ -700,14 +762,22 @@ func (h *Harness) RemoveServer(id string) error {
 		h.mgr.StopServer(id)
 	}
 	h.srvMu.Lock()
+	hosted := false
 	kept := h.specs[:0]
 	for _, s := range h.specs {
 		if s.ID != id {
 			kept = append(kept, s)
+		} else {
+			hosted = s.Via == ViaShell
 		}
 	}
 	h.specs = kept
 	h.srvMu.Unlock()
+	if hosted {
+		if _, err := h.restartShell(context.Background()); err != nil {
+			return fmt.Errorf("removed, but the shell did not come back: %w", err)
+		}
+	}
 	h.applyTools()
 	return nil
 }

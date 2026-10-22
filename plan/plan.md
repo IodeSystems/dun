@@ -105,6 +105,33 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 15. MCP servers in the shell, and per-tool cost/toggles (USER, 2026-10-22)
+
+USER: per server, DIRECT by default; a user-added server may be placed in the
+shell (mcpshell hosts it inside `eval`, so its schemas leave every request).
+
+- ✅ **Placement.** `ServerSpec.Via` ("" / "direct" / "shell"); built-ins
+  refused. A shell-placed server is never started by mcpmgr; the shell's launch
+  gets `--mcp <$DUN_HOME/projects/<id>/shell-mcp.json>` (0600; removed when
+  nothing is hosted). `$NAME` bearer → mcpshell `auth_cmd` printing the var (no
+  token written); literal bearer / headers are written resolved. Adding,
+  removing or moving a hosted server restarts a RUNNING shell. `/mcp move <id>
+  shell|direct`; TUI + web add forms have the choice (direct preselected) and
+  say what the shell loses (docs indexing, prompts/skills, deny-list,
+  renderers). The model learns namespaces from a line in the system prompt
+  (mcpshell's eval description is fixed text); a move reads "moved into the
+  shell" in the tool-set Aside. Hosted status is parsed from mcpshell's stderr
+  ("upstream "ns" connected … N tool(s)"). Live-checked with a stdio server.
+- ◻ **Per-tool cost and toggles** (`/mcp tools <id>` pager, glob Disable, web
+  parity) — next.
+- **risks:** restarting the shell kills an in-flight eval and its state; a
+  hanging upstream blocks the shell's start (mcpshell dials before serving, no
+  per-upstream timeout); the stderr parse depends on mcpshell's wording (pinned
+  by TestParseHosted; a miss reads "unknown", still listed to the model);
+  mcpshell has no env expansion in headers and no per-tool deny-list.
+- **assumptions:** namespace = id with non-identifier chars → `_` (leading
+  digit → `_` prefix); /mcp move edits only `$DUN_HOME/mcp.json` entries.
+
 ### ◐ 14. dun writes nothing into the repos it works on (USER, 2026-10-22)
 
 USER: "we don't want to pollute git trees and we cannot tell people to use

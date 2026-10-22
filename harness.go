@@ -50,6 +50,13 @@ type Server struct {
 	// Disable is a deny-list of tool names to hide from the model. When empty,
 	// all tools discovered from this server are passed through.
 	Disable []string
+	// Via is "" (dun connects to it) or ViaShell (mcpshell hosts it and dun
+	// does not start it). See ServerSpec.Via.
+	Via string
+	// Bearer is the token as configured, "$NAME" unexpanded, so a
+	// shell-hosted server can read the variable when it connects instead of
+	// dun writing the token into a file. Headers carries the resolved value.
+	Bearer string
 }
 
 // DefaultServers points the three tool servers at a workspace directory (later a
@@ -372,6 +379,7 @@ type Harness struct {
 	specs     []Server                 // every configured server, running or not
 	lastErr   map[string]string        // id → why its last start attempt failed
 	lastStart map[string]time.Duration // id → how long its last start took
+	hosted    map[string]hostedState   // id → how the running shell took a shell-placed server
 	// turnMu is held for the length of a turn. A server command arrives on
 	// another goroutine (the -p reader), and swapping the Session's tools out
 	// from under a running turn is a data race — so a rebuild that cannot take
@@ -1024,7 +1032,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// in the background and its tools join the tool set when it is up.
 	var builtins sync.WaitGroup
 	for _, s := range servers {
-		if !s.Autostart || !ownsMgr {
+		if !s.Autostart || !ownsMgr || s.Via == ViaShell { // the shell starts it
 			continue
 		}
 		if !builtinServer(s.ID) {
@@ -1529,7 +1537,11 @@ var (
 // are wired by the dispatcher, not MCP, so applyTools appends their lines when
 // the corresponding Config hooks are set — here they are assumed, since every
 // caller that has a workspace has exec.
-func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree) string {
+//
+// hosted are the MCP servers the shell carries as eval namespaces. mcpshell's
+// eval description is fixed text that names none of them, so without this
+// line the model has no way to know they exist.
+func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, hosted ...string) string {
 	have := map[string]bool{}
 	for _, t := range tools {
 		have[t.ServerID] = true
@@ -1555,6 +1567,10 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree) string {
 	}
 	if have[ServerShell] {
 		b.WriteString(systemShell)
+		if len(hosted) > 0 {
+			fmt.Fprintf(&b, " MCP servers hosted in the shell, called inside eval as <ns>.<tool>({…}): %s — help(%q) lists one's commands.",
+				strings.Join(hosted, ", "), hosted[0])
+		}
 	}
 	if have[ServerDocs] {
 		b.WriteString(systemDocs)

@@ -111,6 +111,29 @@ type ServerSpec struct {
 	// Claude's --disable-tools: name what to exclude, not what to keep.
 	// Forward-compatible — new tools added by a server pass through by default.
 	Disable []string `json:"disable,omitempty"`
+	// Via is where the server runs: "" or "direct" — dun connects to it and
+	// every tool's schema rides every request — or "shell": mcpshell hosts it
+	// inside its one eval tool as a namespace (help("<ns>")), and dun does not
+	// start it at all. A built-in server cannot be placed in the shell.
+	Via string `json:"via,omitempty"`
+}
+
+// Placements a ServerSpec.Via may name. "" means ViaDirect.
+const (
+	ViaDirect = "direct"
+	ViaShell  = "shell"
+)
+
+// NormalizeVia reads a Via value: "" for direct, ViaShell, or an error naming
+// what is accepted.
+func NormalizeVia(via string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(via)) {
+	case "", ViaDirect:
+		return "", nil
+	case ViaShell:
+		return ViaShell, nil
+	}
+	return "", fmt.Errorf("via %q: want %q or %q", via, ViaDirect, ViaShell)
 }
 
 // MountSpec declares an extra local path that must be accessible from both
@@ -254,6 +277,13 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 		if s.Command == "" && s.URL == "" {
 			return nil, fmt.Errorf("dun: server %q has no command or url (declare one, or remove the entry)", id)
 		}
+		via, err := NormalizeVia(s.Via)
+		if err != nil {
+			return nil, fmt.Errorf("dun: server %q: %w", id, err)
+		}
+		if via == ViaShell && builtinServer(id) {
+			return nil, fmt.Errorf("dun: server %q is built in and cannot be placed in the shell (remove its \"via\")", id)
+		}
 		out = append(out, Server{
 			ID:        s.ID,
 			URL:       s.URL,
@@ -264,6 +294,8 @@ func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
 			Timeout:   s.Timeout,
 			Autostart: s.Autostart != nil && *s.Autostart,
 			Disable:   s.Disable,
+			Via:       via,
+			Bearer:    s.Bearer,
 		})
 	}
 	return out, nil
@@ -448,6 +480,11 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	if next.Disable != nil {
 		out.Disable = next.Disable
 	}
+	// "direct" is a value, not an absence, so a higher layer can move a server
+	// back out of the shell.
+	if next.Via != "" {
+		out.Via = next.Via
+	}
 	return out
 }
 
@@ -516,6 +553,26 @@ func RemoveUserServer(id string) (bool, error) {
 		return false, nil
 	}
 	f.Servers = kept
+	return true, writeUserServers(path, f)
+}
+
+// SetUserServerVia sets where a server in the user server list runs ("" for
+// direct, ViaShell). It reports whether the server was in the list.
+func SetUserServerVia(id, via string) (bool, error) {
+	path := UserServersFile()
+	f, err := readServersFile(path)
+	if err != nil || f == nil {
+		return false, err
+	}
+	found := false
+	for i := range f.Servers {
+		if f.Servers[i].ID == id {
+			f.Servers[i].Via, found = via, true
+		}
+	}
+	if !found {
+		return false, nil
+	}
 	return true, writeUserServers(path, f)
 }
 

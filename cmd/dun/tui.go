@@ -660,7 +660,8 @@ type tuiModel struct {
 	// The add-MCP-server form (/mcp add).
 	mcpForm       bool
 	mcpFields     [3]textinput.Model // id, url or command, bearer
-	mcpStep       int
+	mcpStep       int                // 0-2 the fields, 3 the placement
+	mcpShell      bool               // placement: in the shell (true) or direct
 	mcpErr        string
 	engineCmds    []engineCmd     // the engine's slash commands (commands event)
 	skills        []catalogSkill  // from the engine's catalog event

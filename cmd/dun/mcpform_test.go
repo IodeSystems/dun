@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/iodesystems/dun"
 )
 
 func TestMCPFormSpec_URLOrCommand(t *testing.T) {
@@ -20,6 +24,41 @@ func TestMCPFormSpec_URLOrCommand(t *testing.T) {
 		if mcpIDOK(bad) {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+// The last row is the placement: direct preselected, space switches it to the
+// shell, the panel says what the shell costs, and enter sends via:"shell".
+func TestMCPForm_PlacementDirectByDefault(t *testing.T) {
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	m.openMCPForm()
+	m.mcpFields[0].SetValue("corp-docs")
+	m.mcpFields[1].SetValue("corp-mcp --stdio")
+	var cur tea.Model = m
+	for i := 0; i < 3; i++ {
+		cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+	}
+	tm := cur.(tuiModel)
+	if tm.mcpStep != mcpViaStep || tm.mcpShell || !strings.Contains(stripANSI(tm.mcpFormPanel()), "(•) direct") {
+		t.Fatalf("step %d shell %v:\n%s", tm.mcpStep, tm.mcpShell, stripANSI(tm.mcpFormPanel()))
+	}
+	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	tm = cur.(tuiModel)
+	if v := stripANSI(tm.mcpFormPanel()); !tm.mcpShell || !strings.Contains(v, "(•) in the shell") || !strings.Contains(v, "no docs indexing") {
+		t.Fatalf("space must switch to the shell and say what it loses:\n%s", v)
+	}
+	cur.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	var got map[string]string
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("sent %q: %v", buf.String(), err)
+	}
+	if got["id"] != "mcp" || !strings.HasPrefix(got["action"], "add ") {
+		t.Fatalf("sent %v", got)
+	}
+	var spec dun.ServerSpec
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(got["action"], "add ")), &spec); err != nil || spec.Via != dun.ViaShell || spec.Command != "corp-mcp" {
+		t.Errorf("spec %+v %v", spec, err)
 	}
 }
 

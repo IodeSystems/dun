@@ -106,6 +106,12 @@ func raglitDocsSink(docs Server) *mcpDocsSink {
 // SyncMCPDocs copies server id's text resources into the docs index and
 // returns a line for the user.
 func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
+	h.srvMu.Lock()
+	s, _ := h.spec(id)
+	h.srvMu.Unlock()
+	if s.Via == ViaShell {
+		return "", fmt.Errorf("%s runs inside the shell, and dun indexes the docs only of a server it connects to itself — /mcp move %s direct to index them", id, id)
+	}
 	if !h.mgr.ServerStarted(id) {
 		return "", fmt.Errorf("%s is not running — /mcp on %s first", id, id)
 	}

@@ -231,8 +231,8 @@ func runAllServersCmd(ctx context.Context, h *dun.Harness, action string) string
 	return strings.Join(lines, "\n")
 }
 
-// runMCPCmd handles the engine side of /mcp add and /mcp remove. add's
-// argument is the server spec as JSON (the TUI's form builds it).
+// runMCPCmd handles the engine side of /mcp add, move, refresh and remove.
+// add's argument is the server spec as JSON (the TUI's form builds it).
 func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 	verb, arg, _ := strings.Cut(action, " ")
 	switch verb {
@@ -254,7 +254,30 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		if elapsed := time.Since(t0); elapsed > time.Second {
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
+		if st, _ := stateOf(h, spec.ID); st.Via == dun.ViaShell {
+			return msg + "\n" + shellPlacementNote
+		}
 		return msg + "\n" + mcpDocsLine(ctx, h, spec.ID)
+	case "move":
+		id, via, _ := strings.Cut(strings.TrimSpace(arg), " ")
+		via = strings.TrimSpace(via)
+		if id == "" || (via != dun.ViaShell && via != dun.ViaDirect) {
+			return "usage: /mcp move <id> shell|direct"
+		}
+		restarted, err := h.MoveServer(ctx, id, via)
+		if err != nil {
+			return "mcp move: " + err.Error()
+		}
+		msg := id + ": " + runningSummary(h, id)
+		if !restarted && via == dun.ViaShell {
+			if sh, _ := stateOf(h, dun.ServerShell); !sh.Running {
+				msg += "\nthe shell is not running — it hosts " + id + " when it starts (/mcp on shell)"
+			}
+		}
+		if via == dun.ViaShell {
+			msg += "\n" + shellPlacementNote
+		}
+		return msg
 	case "refresh":
 		if arg == "" {
 			return "usage: /mcp refresh <id> — re-read its docs into the index"
@@ -352,6 +375,8 @@ func serverListing(states []dun.ServerState) string {
 	for _, st := range states {
 		b.WriteString("\n  " + st.ID + ": ")
 		switch {
+		case st.Via == dun.ViaShell:
+			b.WriteString(hostedSummary(st))
 		case st.Running:
 			fmt.Fprintf(&b, "running · %d tools", st.Tools)
 		case st.Err != "":
@@ -359,7 +384,10 @@ func serverListing(states []dun.ServerState) string {
 		default:
 			b.WriteString("stopped")
 		}
-		if st.Auto {
+		if st.Via == dun.ViaDirect {
+			b.WriteString(" · direct")
+		}
+		if st.Auto && st.Via != dun.ViaShell {
 			b.WriteString(" · autostart")
 		}
 	}
@@ -404,11 +432,32 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 
 func runningSummary(h *dun.Harness, id string) string {
 	st, ok := stateOf(h, id)
+	if ok && st.Via == dun.ViaShell {
+		return hostedSummary(st)
+	}
 	if !ok || !st.Running {
 		return "not running"
 	}
 	return fmt.Sprintf("running · %d tools", st.Tools)
 }
+
+// hostedSummary is a shell-placed server's state: where the model finds it,
+// and whether the running shell connected it.
+func hostedSummary(st dun.ServerState) string {
+	s := fmt.Sprintf("in the shell as %s (eval: help(%q))", st.Namespace, st.Namespace)
+	switch {
+	case st.Hosted:
+		return s + fmt.Sprintf(" · %d tools", st.Tools)
+	case st.Err != "":
+		return s + " · not connected: " + oneLine(st.Err)
+	}
+	return s
+}
+
+// shellPlacementNote is what a server gives up in the shell; said where the
+// choice is made.
+const shellPlacementNote = "in the shell its schemas leave every request, but dun no longer indexes its docs (/mcp refresh), " +
+	"lists its prompts or skills, applies its tool deny-list, or renders its calls — they show as eval"
 
 func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
 	for _, st := range h.Servers() {
@@ -426,6 +475,12 @@ func serverHint(states []dun.ServerState) string {
 	var lines []string
 	for _, st := range states {
 		if st.Running {
+			continue
+		}
+		if st.Via == dun.ViaShell {
+			if st.Err != "" {
+				lines = append(lines, fmt.Sprintf("%s (in the shell) did not connect: %s", st.ID, oneLine(st.Err)))
+			}
 			continue
 		}
 		alias := aliasOf(st.ID)
