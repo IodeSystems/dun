@@ -25,7 +25,7 @@ func TestBox_GrowsToTheCapThenFollowsItsTail(t *testing.T) {
 	v := newVtui(80, 40) // pane ~36 rows: cap 10
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	v.send("plan it")
-	cap := boxCap(v.m.frame.height)
+	cap := boxCap(v.m.h)
 	if cap != 10 {
 		t.Fatalf("precondition: cap %d", cap)
 	}
@@ -125,28 +125,7 @@ func TestBox_InnerScrollAndEdges(t *testing.T) {
 	}
 }
 
-// A tool call's output is a box too: header is the call and its preview.
-func TestBox_ToolOutput(t *testing.T) {
-	v := newVtui(80, 40)
-	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
-	v.send("go")
-	var out strings.Builder
-	for k := 0; k < 30; k++ {
-		fmt.Fprintf(&out, "out %d\n", k)
-	}
-	v.event(map[string]any{"type": "tool_call", "tool": "exec", "args": map[string]any{"command": "seq 30"}})
-	v.event(map[string]any{"type": "tool_result", "tool": "exec", "result": out.String()})
-	last := len(v.m.convo) - 1
-	if h := boxH(v.m, last); h != boxCap(v.m.frame.height) {
-		t.Errorf("tool box is %d rows, want the cap", h)
-	}
-	scr := v.view()
-	if !strings.Contains(scr, "$ seq 30") || !strings.Contains(scr, "out 29") || strings.Contains(scr, "out 10") {
-		t.Errorf("tool box: header or tail wrong:\n%s", scr)
-	}
-}
-
-// The cap on a short pane is a third of it, never under three.
+// The cap on a short terminal is a third of it, never under three.
 func TestBox_CapRule(t *testing.T) {
 	for _, c := range []struct{ h, want int }{{40, 10}, {24, 8}, {12, 4}, {6, 3}, {2, 3}} {
 		if got := boxCap(c.h); got != c.want {
@@ -185,7 +164,7 @@ func TestBox_Replay(t *testing.T) {
 		map[string]any{"kind": "assistant", "content": "hello"},
 	}})
 	i := thinkIdx(v.m)
-	if i < 0 || !v.m.convo[i].boxed() || boxH(v.m, i) != boxCap(v.m.frame.height) {
+	if i < 0 || !v.m.convo[i].boxed() || boxH(v.m, i) != boxCap(v.m.h) {
 		t.Fatalf("no capped box from history: %d", i)
 	}
 	scr := v.view()

@@ -30,43 +30,75 @@ type thinkBlock struct {
 	live       bool
 }
 
-// liveThinking is the index of the block still streaming, or -1.
-func (m *tuiModel) liveThinking() int {
+// liveThought is the thought still streaming and the block it is in — its
+// own box, or a run's (toolrun.go) — or nil, -1.
+func (m *tuiModel) liveThought() (*thinkBlock, int) {
 	for i := len(m.convo) - 1; i >= 0; i-- {
-		if t := m.convo[i].think; t != nil && t.live {
-			return i
+		e := m.convo[i]
+		if e.think != nil && e.think.live {
+			return e.think, i
+		}
+		if e.run != nil && e.run.live() {
+			return e.run.items[len(e.run.items)-1].think, i
 		}
 	}
-	return -1
+	return nil, -1
 }
 
-// addThinking takes one reasoning delta: it opens the round's block if none
+// liveThinking is the index of the block with a thought still streaming, or -1.
+func (m *tuiModel) liveThinking() int {
+	_, i := m.liveThought()
+	return i
+}
+
+// touchThought redraws block i after its thought changed.
+func (m *tuiModel) touchThought(i int) {
+	if m.convo[i].run != nil {
+		m.touchRun(i)
+		return
+	}
+	m.convo[i].renderThink()
+}
+
+// addThought puts a thought in its place: inside the open run, if there is
+// one, else in a box of its own. From addThinking (a new, live thought) and
+// from replay (a finished one).
+func (m *tuiModel) addThought(t *thinkBlock) int {
+	if r := m.openRun(); r >= 0 {
+		m.convo[r].run.items = append(m.convo[r].run.items, &runItem{think: t})
+		m.touchRun(r)
+		return r
+	}
+	// A new round. Anything streamed before it belongs above it.
+	m.flushCur()
+	m.convo = append(m.convo, thinkingEntry(t))
+	return len(m.convo) - 1
+}
+
+// addThinking takes one reasoning delta: it opens the round's thought if none
 // is live, and grows it. Rendering is left to the tick, as for tokens.
 func (m *tuiModel) addThinking(delta string) {
-	i := m.liveThinking()
-	if i < 0 {
-		// A new round. Anything streamed before it belongs above it.
-		m.flushCur()
-		m.convo = append(m.convo, thinkingEntry(&thinkBlock{start: time.Now(), live: true}))
-		i = len(m.convo) - 1
+	t, i := m.liveThought()
+	if t == nil {
+		t = &thinkBlock{start: time.Now(), live: true}
+		i = m.addThought(t)
 	}
-	e := &m.convo[i]
-	e.think.text += delta
-	e.renderThink()
+	t.text += delta
+	m.touchThought(i)
 	m.renderDue = true
 }
 
-// endThinking closes the live block, if there is one: the round's thinking is
-// over. Only its header changes.
+// endThinking closes the live thought, if there is one: the round's thinking
+// is over. Its box keeps its height; in a run, the thought folds to one line
+// and the rows it gives back show earlier steps.
 func (m *tuiModel) endThinking() {
-	i := m.liveThinking()
-	if i < 0 {
+	t, i := m.liveThought()
+	if t == nil {
 		return
 	}
-	e := &m.convo[i]
-	e.think.live = false
-	e.think.end = time.Now()
-	e.renderThink()
+	t.live = false
+	t.end = time.Now()
+	m.touchThought(i)
 }
 
 // thinkingEntry is a block for t, boxed and following its tail.

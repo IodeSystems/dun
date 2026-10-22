@@ -219,44 +219,42 @@ const (
 )
 
 // viewState is the inline display mode for a convoEntry. Enter cycles through
-// them: minimized (one-line preview) → expanded (styled renderer output) →
-// raw (unstyled tool output, for reading verbatim or copying).
+// them: minimized (one-line preview) → expanded (its full form).
 type viewState int
 
 const (
 	viewMinimized viewState = iota // collapsed one-line preview
-	viewExpanded                   // styled renderer output
-	viewRaw                        // unstyled raw tool output
+	viewExpanded                   // the full form
 )
 
 func (s viewState) Next() viewState {
-	switch s {
-	case viewMinimized:
+	if s == viewMinimized {
 		return viewExpanded
-	case viewExpanded:
-		return viewRaw
-	default:
-		return viewMinimized
 	}
+	return viewMinimized
 }
 
-// convoEntry is one conversation block. A tool call/result is collapsible: full
-// holds the styled renderer output, collapsed a one-line preview, raw the
-// unstyled tool output. Enter (when focused) cycles through the three states.
-// A relevant-docs summary carries a docsBlock (nested navigation).
-// A plain block has neither full nor docs.
+// convoEntry is one conversation block. A block with a full form opens and
+// closes (enter, →/←); a relevant-docs summary carries a docsBlock (nested
+// navigation); a thinking block or a run of tool calls is a box (box.go),
+// and enter opens it in the pager.
 type convoEntry struct {
 	collapsed string
 	full      string
-	raw       string      // unstyled tool output (empty for non-tool blocks)
-	state     viewState   // minimized | expanded | raw
+	state     viewState   // minimized | expanded
 	docs      *docsBlock  // proactive-RAG summary (nil for normal blocks)
-	tool      *toolBlock  // tool call/result (nil for normal blocks) → enter opens the inspector
 	think     *thinkBlock // a round's reasoning (thinking.go) → enter opens the pager
-	run       *toolRun    // earlier calls of a run, folded (toolrun.go) → enter opens the pager
-	// box draws a thinking block or a tool call's output bounded, scrolling
-	// inside itself (box.go). nil = not boxed.
+	run       *toolRun    // a run of tool calls and thinking (toolrun.go) → enter opens the pager
+	// box draws a thinking block or a run bounded, scrolling inside itself
+	// (box.go). nil = not boxed.
 	box *boxState
+	// maxH is the most rows this block has drawn under maxKey (its wrap width
+	// and view state): it is never drawn shorter, because the conversation's
+	// height never goes down while a session runs (noshrink_test.go). A width
+	// or a state change — a resize, the person opening or closing it — starts
+	// it over.
+	maxH   int
+	maxKey int
 	// askText is the question of an ask_user row; askOpen while it waits for
 	// its answer (askpark.go).
 	askText string
@@ -330,42 +328,21 @@ func (e *convoEntry) invalidateWrap() {
 	e.packed = ""
 }
 
-func (e convoEntry) expandable() bool { return (e.full != "" || e.raw != "") || e.docs != nil }
+func (e convoEntry) expandable() bool { return e.full != "" || e.docs != nil }
 
-// deeper is the next view state that actually shows something NEW: minimized →
-// expanded → raw, skipping any level this block does not have and stopping at
-// the deepest one it does.
-//
-// Next() wraps, which is right for enter (a cycle) and wrong for → (a
-// direction): wrapping would make → close the block it had just opened, and it
-// would land on viewRaw for a block with no raw, where view() silently falls
-// back to the collapsed line — pressing "deeper" and getting the one-liner back.
+// deeper is the next view state that shows something NEW, for →: expanded,
+// when the block has a full form. Next() wraps, which is right for enter (a
+// cycle) and wrong for → (a direction): → must not close what it opened.
 func (e convoEntry) deeper() (viewState, bool) {
-	switch e.state {
-	case viewMinimized:
-		if e.full != "" || e.docs != nil {
-			return viewExpanded, true
-		}
-		if e.raw != "" {
-			return viewRaw, true
-		}
-	case viewExpanded:
-		if e.raw != "" {
-			return viewRaw, true
-		}
+	if e.state == viewMinimized && (e.full != "" || e.docs != nil) {
+		return viewExpanded, true
 	}
 	return e.state, false
 }
 
 // shallower is the inverse, for ←: one level out, stopping at minimized.
 func (e convoEntry) shallower() (viewState, bool) {
-	switch e.state {
-	case viewRaw:
-		if e.full != "" || e.docs != nil {
-			return viewExpanded, true
-		}
-		return viewMinimized, true
-	case viewExpanded:
+	if e.state == viewExpanded {
 		return viewMinimized, true
 	}
 	return e.state, false
@@ -459,31 +436,12 @@ type sideCallStats struct {
 	tokPerS   float64
 }
 
-// toolBlock carries a tool call's raw input + complete output so enter can open
-// the scrollable/searchable inspector overlay (inspector.go), separate from the
-// inline collapsed/full preview.
-type toolBlock struct {
-	name   string
-	args   map[string]any // the call's arguments, for a run's summary
-	input  string
-	output string // styled renderer output
-	raw    string // original unstyled tool output
-	head   string // the call and its one-line preview: the box's header (box.go)
-}
-
 func (e convoEntry) view() string {
 	if e.docs != nil {
 		return e.docs.render(e.state > viewMinimized)
 	}
-	switch e.state {
-	case viewExpanded:
-		if e.full != "" {
-			return e.full
-		}
-	case viewRaw:
-		if e.raw != "" {
-			return e.raw
-		}
+	if e.state == viewExpanded && e.full != "" {
+		return e.full
 	}
 	return e.collapsed
 }
@@ -545,9 +503,8 @@ type tuiModel struct {
 	vp          convoPane
 	input       multilineInput
 	spin        spinner.Model
-	convo       []convoEntry   // finalized conversation blocks
-	pendingTool int            // index of a tool call awaiting its result; -1 = none
-	pendingArgs map[string]any // args of the pending tool call (for its renderer)
+	convo       []convoEntry // finalized conversation blocks
+	pendingTool int          // index of a tool call awaiting its result; -1 = none
 	// activeTool is the in-flight tool call rendered into the status line so
 	// "working…" says WHAT is running, not just that something is. Set on
 	// tool_call, cleared on tool_result. Empty while the model is thinking
@@ -598,21 +555,23 @@ type tuiModel struct {
 	insp         inspector       // the overlay (valid while inspecting)
 	paging       bool            // the pager has the convo pane (pager.go; owns the keys)
 	pulse        int             // the selection band's pulse step (band.go)
-	askParked    bool            // a question is open but its picker was put away (askpark.go)
-	flashText    string          // a short status-line note (askpark.go)
-	flashUntil   time.Time       // when it goes
-	pulsePending bool            // a pulse tick is scheduled
-	bandRaw      []string        // the selected block's rows before the band, for a pulse step
-	bandAt       int             // the pane row they start at
-	pg           pager           // the pager (valid while paging)
-	dumpSig      chan os.Signal  // SIGUSR1 → dump the rendered screen to a debug file
-	paletteSel   int             // highlighted row in the "/" command palette
-	model, url   string          // this session's LLM settings (for /config)
-	keySet       bool            // whether an API key is configured
-	disableExit  bool            // --disable-exit: ctrl+c/esc don't quit (use /exit)
-	lc           *launcherConn   // launcher registration (nil = no launcher)
-	reloadVer    string          // a newer build the launcher announced ("" = none)
-	reloadReq    bool            // /reload requested → runTUI re-execs after quit
+	curMaxH      int             // maxH for the streaming reply (see convoEntry.maxH)
+	curMaxKey    int
+	askParked    bool           // a question is open but its picker was put away (askpark.go)
+	flashText    string         // a short status-line note (askpark.go)
+	flashUntil   time.Time      // when it goes
+	pulsePending bool           // a pulse tick is scheduled
+	bandRaw      []string       // the selected block's rows before the band, for a pulse step
+	bandAt       int            // the pane row they start at
+	pg           pager          // the pager (valid while paging)
+	dumpSig      chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
+	paletteSel   int            // highlighted row in the "/" command palette
+	model, url   string         // this session's LLM settings (for /config)
+	keySet       bool           // whether an API key is configured
+	disableExit  bool           // --disable-exit: ctrl+c/esc don't quit (use /exit)
+	lc           *launcherConn  // launcher registration (nil = no launcher)
+	reloadVer    string         // a newer build the launcher announced ("" = none)
+	reloadReq    bool           // /reload requested → runTUI re-execs after quit
 	// Engine supervision: the TUI outlives its engine. opts is what respawning
 	// one takes, sessionID reattaches it to the same conversation, and the
 	// restart counters stop a crash loop from spinning forever.
@@ -899,6 +858,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleMCPTool(v)
 				return m, nil
 			}
+			// "i" on a call opens the inspector over the pager; esc there comes
+			// back here.
+			if n := m.pg.curNode(); msg.String() == "i" && m.pg.tree() && n != nil && n.insp != nil {
+				m.insp = newInspector(n.insp.name, n.insp.input, n.insp.output)
+				m.insp.setSize(m.w, m.h)
+				m.inspecting = true
+				return m, nil
+			}
 			if !m.pg.key(msg.String()) {
 				m.paging = false
 				m.refresh()
@@ -1039,14 +1006,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Thinking (and anything else with a page) opens in the pager.
 				if m.openPager(m.sel) {
-					return m, nil
-				}
-				// A tool call opens the scrollable/searchable inspector overlay.
-				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].tool != nil {
-					tb := m.convo[m.sel].tool
-					m.insp = newInspector(tb.name, tb.input, tb.raw)
-					m.insp.setSize(m.w, m.h)
-					m.inspecting = true
 					return m, nil
 				}
 				// Otherwise cycle the focused block through its view states.
@@ -1966,6 +1925,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.busyStart = time.Now()
 		}
 		m.suggestions = nil
+		m.endRun() // the reply began: the run takes nothing more
 		if m.liveThinking() >= 0 {
 			// The reply has begun, so the round's thinking is over. Folding
 			// changes the block's height, so this frame is drawn now, not on
@@ -1992,24 +1952,19 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.endThinking()
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
-		// The calls before this one fold into the run's aggregate.
-		m.foldRun(true)
-		m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(str(ev["tool"]), args, 80))})
-		m.pendingTool = len(m.convo) - 1
-		m.pendingArgs = args
+		// Into the run's box (toolrun.go): appended, nothing above it moves.
+		m.pendingTool = m.runAddCall(str(ev["tool"]), args)
 		m.activeTool = callText(str(ev["tool"]), args, 40)
 		m.refresh()
 	case "tool_result":
 		result := str(ev["result"])
-		ce := m.foldedTool(str(ev["tool"]), m.pendingArgs, result)
-		if idx := m.pendingTool; idx >= 0 && idx < len(m.convo) {
-			// Fold the result into its call so the pair is one collapsible unit.
-			m.convo[idx] = ce
-			m.pendingTool, m.pendingArgs = -1, nil
-			m.activeTool = ""
-		} else {
-			m.convo = append(m.convo, ce)
+		idx := m.pendingTool
+		if idx < 0 || idx >= len(m.convo) || m.convo[idx].run == nil {
+			idx = m.runAddCall(str(ev["tool"]), nil) // a result with no call seen
 		}
+		m.runSetResult(idx, str(ev["tool"]), result)
+		m.pendingTool = -1
+		m.activeTool = ""
 		// Track tool result stats for /context
 		m.ctxStats.toolResults++
 		if strings.Contains(result, "[") && strings.Contains(result, "characters elided") {
@@ -2204,6 +2159,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 	case "done":
 		m.endThinking()
+		m.endRun()
 		m.flushCur()
 		// Clear any remaining provisional markers — the turn is done, so
 		// everything was delivered to the LLM.
@@ -2232,6 +2188,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.refresh()
 	case "error":
 		m.endThinking()
+		m.endRun()
 		m.append(stErr.Render("error: " + str(ev["error"])))
 		// Clear any remaining provisional markers — the engine flushes them on
 		// error too, so they're part of the conversation history.
@@ -2266,7 +2223,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// The conversation was cleared — by this client's /clear or another's.
 		m.convo = nil
 		m.cur = ""
-		m.pendingTool, m.pendingArgs = -1, nil
+		m.pendingTool = -1
 		m.activeTool = ""
 		m.sel = -1
 		m.busy, m.asking = false, false
@@ -2348,7 +2305,7 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 	case "recovered":
 		m.clearRetry()
 		// Update the retry block in-place if it exists.
-		if len(m.convo) > 0 && m.convo[len(m.convo)-1].tool == nil && m.convo[len(m.convo)-1].collapsed != "" && strings.HasPrefix(m.convo[len(m.convo)-1].collapsed, "⏳ ") {
+		if len(m.convo) > 0 && m.convo[len(m.convo)-1].run == nil && m.convo[len(m.convo)-1].collapsed != "" && strings.HasPrefix(m.convo[len(m.convo)-1].collapsed, "⏳ ") {
 			e := &m.convo[len(m.convo)-1]
 			e.collapsed = stTool.Render("✓ " + str(ev["text"]))
 			e.full = ""
@@ -2361,7 +2318,7 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 		m.busy = false
 		m.busyStart = time.Time{}
 		// Update the retry block in-place if it exists.
-		if len(m.convo) > 0 && m.convo[len(m.convo)-1].tool == nil && m.convo[len(m.convo)-1].collapsed != "" && strings.HasPrefix(m.convo[len(m.convo)-1].collapsed, "⏳ ") {
+		if len(m.convo) > 0 && m.convo[len(m.convo)-1].run == nil && m.convo[len(m.convo)-1].collapsed != "" && strings.HasPrefix(m.convo[len(m.convo)-1].collapsed, "⏳ ") {
 			e := &m.convo[len(m.convo)-1]
 			e.collapsed = stErr.Render("✗ " + str(ev["text"]))
 			e.full = ""
@@ -2375,7 +2332,13 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 		// reply append to a broken sentence. Tool results already recorded are kept
 		// (the engine resumes from them), only the interrupted reply is discarded.
 		if str(ev["scope"]) == "turn" {
-			m.cur = ""
+			if replyShown(m.cur) {
+				// Its text goes (it is being regenerated), its rows do not: a
+				// marker holds the height it had.
+				m.convo = append(m.convo, convoEntry{collapsed: stDim.Render("↺ the reply was cut off — regenerating"),
+					maxH: m.curMaxH, maxKey: m.curMaxKey})
+			}
+			m.cur, m.curMaxH, m.curMaxKey = "", 0, 0
 		}
 		// Whatever was thought before the failure stays, folded; the retried
 		// round thinks in a block of its own.
@@ -2966,9 +2929,30 @@ func (m *tuiModel) flushCur() {
 	if replyShown(m.cur) {
 		src := strings.TrimRight(m.cur, "\n")
 		// Finalize the streamed reply as rendered markdown (headers, lists, code).
-		m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src})
+		// The final render can come out shorter than a partial one did (an
+		// unclosed fence, a list mid-item): it keeps the streamed height.
+		m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src,
+			maxH: m.curMaxH, maxKey: m.curMaxKey})
 	}
-	m.cur = ""
+	m.cur, m.curMaxH, m.curMaxKey = "", 0, 0
+}
+
+// heightKey is what a block's held height is valid for: one wrap width, one
+// view state.
+func heightKey(w int, st viewState) int { return w*4 + int(st) + 1 }
+
+// holdHeight pads rendered block w to the most rows it has had under key,
+// and records a new most.
+func holdHeight(w string, maxH, maxKey *int, key int) string {
+	if *maxKey != key {
+		*maxH, *maxKey = 0, key
+	}
+	n := strings.Count(w, "\n") + 1
+	if n < *maxH {
+		return w + strings.Repeat("\n", *maxH-n)
+	}
+	*maxH = n
+	return w
 }
 
 // replyShown says whether the streaming reply has anything to draw. Until it
@@ -2976,77 +2960,45 @@ func (m *tuiModel) flushCur() {
 // and it sat between the message just sent and whatever came next.
 func replyShown(cur string) bool { return strings.TrimSpace(cur) != "" }
 
-// foldedTool builds the collapsed/full/raw folded block for a completed tool
-// call+result — shared by the live tool_result path and history replay so both
-// render identically. The tool block feeds the inspector overlay (raw input +
-// complete output).
-func (m *tuiModel) foldedTool(tool string, args map[string]any, result string) convoEntry {
-	preview, body := renderToolResult(renderCtx{tool: tool, args: args, result: result, width: m.vp.Width})
-	callShort := stTool.Render(callText(tool, args, 80))
-	callLong := callFull(tool, args)
-	af := argFull(args)
-	return convoEntry{
-		collapsed: stDim.Render("▸ ") + callShort + "\n" + preview,
-		full:      stDim.Render("▾ ") + callLong + "\n" + body,
-		raw:       stDim.Render("▾ ") + callLong + "\n" + stDim.Render(result),
-		tool: &toolBlock{name: tool, args: args, input: af, output: body, raw: result,
-			head: callShort + strings.ReplaceAll(preview, "\n", " ")},
-		box: &boxState{follow: true},
-	}
-}
-
 // replay rebuilds scrollback from a `history` event (a resumed session), reusing
 // the same rendering as live events: user echo, assistant markdown, folded tool
 // call/result blocks, notifications. No turn runs — this is pure display. A
 // trailing dim marker delimits the resumed history from new activity.
 func (m *tuiModel) replay(items []any) {
-	var pendName, pendID string
-	var pendArgs map[string]any
-	hadPend := false
-	flushPend := func() {
-		if hadPend {
-			// A tool_call with no following result (truncated session): show it alone.
-			m.convo = append(m.convo, convoEntry{collapsed: stTool.Render(callText(pendName, pendArgs, 80))})
-			pendName, pendID, pendArgs, hadPend = "", "", nil, false
-		}
-	}
 	n := 0
+	run := -1 // the run the next tool_result belongs to
 	for _, it := range items {
 		im, _ := it.(map[string]any)
 		switch str(im["kind"]) {
 		case "user":
-			flushPend()
+			m.endRun()
 			m.task = str(im["content"]) // the task line survives a resume
 			m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + str(im["content"])), userText: str(im["content"])})
 			n++
 		case "assistant":
-			flushPend()
+			m.endRun()
 			src := strings.TrimRight(str(im["content"]), "\n")
 			m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src})
 			n++
 		case "tool_call":
-			flushPend()
-			pendName, pendID, hadPend = str(im["tool"]), str(im["call_id"]), true
-			pendArgs, _ = im["args"].(map[string]any)
+			// The same path as a live call: into the run's box (toolrun.go).
+			args, _ := im["args"].(map[string]any)
+			run = m.runAddCall(str(im["tool"]), args)
 		case "tool_result":
-			args := pendArgs
-			if !hadPend || str(im["call_id"]) != pendID {
-				args = nil // unmatched result: render without the call's args
+			if run < 0 || run >= len(m.convo) || m.convo[run].run == nil {
+				run = m.runAddCall(str(im["tool"]), nil) // a result with no call seen
 			}
-			m.foldRun(false) // a past run folds the way a live one did
-			m.convo = append(m.convo, m.foldedTool(str(im["tool"]), args, str(im["content"])))
-			pendName, pendID, pendArgs, hadPend = "", "", nil, false
+			m.runSetResult(run, str(im["tool"]), str(im["content"]))
 			n++
 		case "notification":
-			flushPend()
+			m.endRun()
 			m.convo = append(m.convo, convoEntry{collapsed: stNote.Render("🔔 " + oneLine(str(im["content"])))})
 			n++
 		case "reasoning":
-			flushPend()
-			m.convo = append(m.convo, thinkingEntry(&thinkBlock{text: str(im["content"])}))
+			m.addThought(&thinkBlock{text: str(im["content"])})
 		}
 	}
-	flushPend()
+	m.endRun()
 	if n > 0 {
 		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(commaf("── resumed %d entries ──", n))})
 	}
@@ -3217,7 +3169,7 @@ func (m *tuiModel) refresh() {
 		} else if i < len(m.convo) && m.convo[i].boxed() {
 			// A bounded box: its own cache, so a token re-wraps only the box
 			// that grew (box.go).
-			w = renderBox(&m.convo[i], wrapW, frm.height)
+			w = renderBox(&m.convo[i], wrapW, m.h)
 		} else if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
 			// Rendered markdown bakes in the wrap width it was produced at, and a
@@ -3271,6 +3223,15 @@ func (m *tuiModel) refresh() {
 			}
 		} else {
 			w = packSGR(cellbuf.Wrap(b, wrapW, ""))
+		}
+		// Never shorter than it has been (convoEntry.maxH). Docs blocks change
+		// only when the person opens or closes something in them.
+		switch {
+		case i < len(m.convo) && m.convo[i].docs == nil && !m.convo[i].blank:
+			e := &m.convo[i]
+			w = holdHeight(w, &e.maxH, &e.maxKey, heightKey(wrapW, e.state))
+		case i == len(m.convo) && replyShown(m.cur):
+			w = holdHeight(w, &m.curMaxH, &m.curMaxKey, heightKey(wrapW, viewMinimized))
 		}
 		if selMode {
 			if i == m.sel {
@@ -3646,7 +3607,7 @@ func init() {
 					kind := "assistant"
 					if e.userText != "" {
 						kind = "user"
-					} else if e.tool != nil {
+					} else if e.run != nil {
 						kind = "tool"
 					}
 					fmt.Fprintf(f, "layout %d kind=%s userText=%q rowOffset=%d h=%d\n",

@@ -448,41 +448,37 @@ func TestTUI_AskPickerCustomAnswer(t *testing.T) {
 // pressing enter toggles the full output.
 func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
+	m = resized(m, 100, 30)
 	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "node_read", "args": map[string]any{"sel": "F"}})
 	full := "line one\nline two\nline three that is quite long and would be clipped in the preview form"
 	m = m.handleEvent(evMsg{"type": "tool_result", "result": full})
 
-	if len(m.convo) != 1 {
-		t.Fatalf("call+result should be one block, got %d", len(m.convo))
-	}
-	e := m.convo[0]
-	if !e.expandable() {
-		t.Fatal("a tool block should be expandable")
-	}
-	// Collapsed = call line + one preview line; open = call + full body.
-	if got := strings.Count(e.view(), "\n"); got != 1 {
-		t.Fatalf("collapsed view should be 2 lines (call + preview), got %d newlines", got)
+	if len(m.convo) != 1 || m.convo[0].run == nil {
+		t.Fatalf("call+result should be one run block, got %d", len(m.convo))
 	}
 	// The call line shows the INPUT value, not just the arg key.
-	if !strings.Contains(e.view(), "sel=F") {
-		t.Fatalf("collapsed call line should show the arg value, got %q", e.view())
+	if !strings.Contains(stripANSI(m.View()), "sel=F") {
+		t.Fatalf("the call line should show the arg value:\n%s", stripANSI(m.View()))
 	}
-
-	// Focus it and open → the tool inspector overlay (not inline expansion).
+	// Focus it: enter opens the tree, "i" on the call opens the inspector.
 	m = key(m, kTab)
 	if m.sel != 0 {
 		t.Fatalf("focus should land on the block, sel=%d", m.sel)
 	}
 	m = key(m, kEnter)
+	if !m.paging || !m.pg.tree() {
+		t.Fatal("enter on a run should open its tree")
+	}
+	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	if !m.inspecting {
-		t.Fatal("enter on a tool block should open the inspector")
+		t.Fatal("i on a call should open the inspector")
 	}
 	if !strings.Contains(m.insp.panes[inspOutput].src, "line three") {
 		t.Fatalf("inspector output should hold the full result, got %q", m.insp.panes[inspOutput].src)
 	}
 	m = key(m, kEsc)
-	if m.inspecting {
-		t.Fatal("esc should close the inspector")
+	if m.inspecting || !m.paging {
+		t.Fatal("esc should close the inspector back to the tree")
 	}
 }
 
@@ -499,9 +495,9 @@ func TestTUI_HistoryReplay(t *testing.T) {
 		map[string]any{"kind": "notification", "content": "background job #1 finished"},
 	}})
 
-	// 4 rendered items (call+result fold to one) + the resumed marker = 5 blocks.
+	// user, reply, the run (call+result), notification, the resumed marker.
 	if len(m.convo) != 5 {
-		t.Fatalf("expected 5 blocks (4 items folded + marker), got %d", len(m.convo))
+		t.Fatalf("expected 5 blocks, got %d", len(m.convo))
 	}
 	txt := convoText(m)
 	for _, want := range []string{"fix the bug", "on it", "node_read", "sel=F", "background job #1", "resumed 4 entries"} {
@@ -509,13 +505,10 @@ func TestTUI_HistoryReplay(t *testing.T) {
 			t.Fatalf("replayed scrollback missing %q in:\n%s", want, txt)
 		}
 	}
-	// The tool call+result is one expandable, inspector-backed block.
+	// The tool call+result is one run, holding the full result for the tree.
 	tb := m.convo[2]
-	if !tb.expandable() || tb.tool == nil {
-		t.Fatal("replayed tool block should be expandable with an inspector toolBlock")
-	}
-	if !strings.Contains(tb.tool.output, "func F()") {
-		t.Fatalf("replayed tool block should hold the full result, got %q", tb.tool.output)
+	if tb.run == nil || len(tb.run.items) != 1 || !strings.Contains(tb.run.items[0].result, "func F()") {
+		t.Fatalf("replayed run should hold the full result: %+v", tb.run)
 	}
 	// A stray tool_result with no matching call renders standalone (no panic, no args).
 	m2 := newTUIModel(&dunProc{}, "/ws")
@@ -766,8 +759,9 @@ func TestTUI_Inspector(t *testing.T) {
 	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "eval", "args": map[string]any{"code": "print(x)"}})
 	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "alpha\nbravo\ncharlie\nbravo again"})
 
-	m = key(m, kTab)   // focus the block
-	m = key(m, kEnter) // open inspector
+	m = key(m, kTab)                                               // focus the block
+	m = key(m, kEnter)                                             // the run's tree
+	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")}) // the call in the inspector
 	if !m.inspecting {
 		t.Fatal("inspector should be open")
 	}
@@ -938,7 +932,7 @@ func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
 	m.convo = []convoEntry{
-		{collapsed: "▸ call", full: "the styled body", raw: "the raw body"},
+		{collapsed: "▸ call", full: "the styled body"},
 		{collapsed: "just a message"},
 	}
 	kRight := tea.KeyMsg{Type: tea.KeyRight}
@@ -949,7 +943,7 @@ func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
 	if m.focus != focusConvo {
 		t.Fatalf("want the conversation, got %d", m.focus)
 	}
-	for _, want := range []viewState{viewExpanded, viewRaw} {
+	for _, want := range []viewState{viewExpanded} {
 		m = key(m, kRight)
 		if m.convo[0].state != want {
 			t.Fatalf("→ should reach state %d, got %d", want, m.convo[0].state)
@@ -958,13 +952,13 @@ func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
 	// Nothing deeper: → is the horizontal axis again and hands over to the
 	// input, WITHOUT wrapping the block shut on the way out.
 	m = key(m, kRight)
-	if m.focus != focusInput || m.convo[0].state != viewRaw {
+	if m.focus != focusInput || m.convo[0].state != viewExpanded {
 		t.Fatalf("→ past the deepest level should go to the input and leave the block open, focus=%d state=%d",
 			m.focus, m.convo[0].state)
 	}
 	m.focus, m.sel = focusConvo, 0
 	m.input.Blur()
-	for _, want := range []viewState{viewExpanded, viewMinimized} {
+	for _, want := range []viewState{viewMinimized} {
 		m = key(m, kLeft)
 		if m.convo[0].state != want {
 			t.Fatalf("← should reach state %d, got %d", want, m.convo[0].state)

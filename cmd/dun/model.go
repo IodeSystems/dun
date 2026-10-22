@@ -323,7 +323,7 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	// The service restarts the engine on the new endpoint, on this
 	// conversation; its history comes back and is rendered afresh.
 	m.convo = nil
-	m.cur, m.pendingTool, m.pendingArgs = "", -1, nil
+	m.cur, m.pendingTool = "", -1
 	m.sel = -1
 	m.busy, m.asking, m.starting = false, false, true
 	m.startingStart = time.Now()

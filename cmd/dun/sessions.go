@@ -135,7 +135,7 @@ func (m *tuiModel) switchSession(id string) tea.Cmd {
 	}
 	m.proc.close()
 	m.convo = nil
-	m.cur, m.pendingTool, m.pendingArgs = "", -1, nil
+	m.cur, m.pendingTool = "", -1
 	m.sel = -1
 	m.busy, m.asking, m.starting = false, false, true
 	m.startingStart = time.Now()

@@ -28,8 +28,8 @@ func thinkIdx(m tuiModel) int {
 	return -1
 }
 
-// A tool call ends the round's thinking too, and the next round's thinking is
-// a block of its own.
+// A tool call ends the round's thinking too; the thought becomes the first
+// step of the run, in place, and the next round's thinking goes in the run.
 func TestThinking_ToolCallEndsTheRound(t *testing.T) {
 	v := newVtui(80, 24)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
@@ -38,12 +38,13 @@ func TestThinking_ToolCallEndsTheRound(t *testing.T) {
 	first := thinkIdx(v.m)
 	v.event(map[string]any{"type": "tool_call", "tool": "eval", "args": map[string]any{"code": "1"}})
 	v.event(map[string]any{"type": "tool_result", "tool": "eval", "result": "1"})
-	if v.m.convo[first].think.live || v.m.convo[first].state != viewMinimized {
-		t.Fatal("tool call did not end the thinking")
+	r := v.m.convo[first].run
+	if r == nil || r.items[0].think == nil || r.items[0].think.live {
+		t.Fatal("the tool call did not end the thinking and take it into the run")
 	}
 	think(v, 1, 1)
-	if second := thinkIdx(v.m); second == first || !v.m.convo[second].think.live {
-		t.Fatalf("the next round did not open its own block: %d vs %d", second, first)
+	if t2, i := v.m.liveThought(); t2 == nil || i != first || len(r.items) != 3 {
+		t.Fatalf("the next round's thinking should stream inside the run: block %d, %d items", i, len(r.items))
 	}
 	v.event(map[string]any{"type": "done"})
 	if v.m.liveThinking() >= 0 {

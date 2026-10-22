@@ -340,66 +340,25 @@ func TestRecapRender(t *testing.T) {
 	}
 }
 
-// ── 3-state view cycling ─────────────────────────────────────────
+// ── view cycling ─────────────────────────────────────────────
 
 func TestViewState_Cycles(t *testing.T) {
-	s := viewMinimized
-	if s.Next() != viewExpanded {
-		t.Errorf("minimized.Next() = %v, want expanded", s.Next())
-	}
-	if viewExpanded.Next() != viewRaw {
-		t.Errorf("expanded.Next() = %v, want raw", viewExpanded.Next())
-	}
-	if viewRaw.Next() != viewMinimized {
-		t.Errorf("raw.Next() = %v, want minimized", viewRaw.Next())
+	if viewMinimized.Next() != viewExpanded || viewExpanded.Next() != viewMinimized {
+		t.Errorf("minimized ↔ expanded: %v %v", viewMinimized.Next(), viewExpanded.Next())
 	}
 }
 
 func TestConvoEntry_ViewStates(t *testing.T) {
-	e := convoEntry{
-		collapsed: "collapsed text",
-		full:      "full styled text",
-		raw:       "raw unstyled text",
-		state:     viewMinimized,
-	}
-
-	// Minimized shows collapsed.
+	e := convoEntry{collapsed: "collapsed text", full: "full styled text"}
 	if e.view() != "collapsed text" {
 		t.Errorf("minimized view = %q, want collapsed", e.view())
 	}
-
-	// Expanded shows full.
 	e.state = viewExpanded
 	if e.view() != "full styled text" {
 		t.Errorf("expanded view = %q, want full", e.view())
 	}
-
-	// Raw shows raw.
-	e.state = viewRaw
-	if e.view() != "raw unstyled text" {
-		t.Errorf("raw view = %q, want raw", e.view())
-	}
-}
-
-func TestConvoEntry_ExpandableWithRaw(t *testing.T) {
-	// A block with only raw (no full) is still expandable.
-	e := convoEntry{collapsed: "c", raw: "raw data"}
-	if !e.expandable() {
-		t.Error("entry with raw should be expandable")
-	}
-
-	// A block with nothing is not expandable.
-	e2 := convoEntry{collapsed: "c"}
-	if e2.expandable() {
+	if (convoEntry{collapsed: "c"}).expandable() {
 		t.Error("entry with only collapsed should not be expandable")
-	}
-}
-
-func TestConvoEntry_ViewRawFallback(t *testing.T) {
-	// When raw is empty, expanded falls back to collapsed.
-	e := convoEntry{collapsed: "collapsed", full: "full", state: viewRaw}
-	if e.view() != "collapsed" {
-		t.Errorf("raw view with no raw field should fall back to collapsed, got %q", e.view())
 	}
 }
 

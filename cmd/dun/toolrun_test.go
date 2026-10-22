@@ -10,7 +10,7 @@ import (
 
 // call feeds one round: a line of thinking, then an exec call and its result.
 func call(v *vtui, cmd, result string) {
-	v.event(map[string]any{"type": "reasoning", "text": "next: " + cmd})
+	v.event(map[string]any{"type": "reasoning", "text": "next: " + cmd + ". Then check it."})
 	v.event(map[string]any{"type": "tool_call", "tool": "exec", "args": map[string]any{"command": cmd}})
 	v.event(map[string]any{"type": "tool_result", "tool": "exec", "result": result})
 }
@@ -24,58 +24,156 @@ func runIdx(m tuiModel) int {
 	return -1
 }
 
-// Five calls in a row: the four earlier ones (and their thinking) fold into
-// one row that counts them, and the fifth shows as a call does.
-func TestToolRun_FoldsEarlierCalls(t *testing.T) {
-	v := newVtui(100, 30)
-	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
-	v.send("run them")
-	for i := 0; i < 4; i++ {
-		call(v, fmt.Sprintf("echo %d", i), fmt.Sprintf("%d\n", i))
-	}
-	v.event(map[string]any{"type": "reasoning", "text": "one more"})
-	v.event(map[string]any{"type": "tool_call", "tool": "eval", "args": map[string]any{"code": "1/0"}})
-	v.event(map[string]any{"type": "tool_result", "tool": "eval", "result": "ERROR: division by zero"})
-	call(v, "echo last", "last\n")
-
-	r := runIdx(v.m)
-	if r < 0 {
-		t.Fatalf("no aggregate:\n%s", v.convo())
-	}
-	agg := v.m.convo[r].run
-	if agg.calls() != 5 {
-		t.Errorf("aggregate holds %d calls, want 5", agg.calls())
-	}
-	sum := stripANSI(v.m.convo[r].view())
-	if !strings.Contains(sum, "5 tool calls — exec×4, eval×1 · 1 failed") || strings.Contains(sum, "\n") {
-		t.Errorf("summary: %q", sum)
-	}
-	// After the aggregate: the latest round's thinking, then the latest call.
-	tail := v.m.convo[r+1:]
-	if len(tail) != 2 || tail[0].think == nil || tail[1].tool == nil || !strings.Contains(stripANSI(tail[1].view()), "echo last") {
-		t.Fatalf("tail after the aggregate: %d entries\n%s", len(tail), v.convo())
-	}
-	// Exactly one aggregate: the run folded into one row, not one per call.
+func runsIn(m tuiModel) int {
 	n := 0
-	for _, e := range v.m.convo {
+	for _, e := range m.convo {
 		if e.run != nil {
 			n++
 		}
 	}
-	if n != 1 {
-		t.Errorf("%d aggregates", n)
+	return n
+}
+
+// A run of calls with thinking between them is ONE box: every thought and
+// call is appended inside it, the first thought included, and the header
+// counts them.
+func TestRun_OneBoxThatAppends(t *testing.T) {
+	v := newVtui(100, 40)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	v.send("run them")
+	blocks := len(v.m.convo)
+	for i := 0; i < 4; i++ {
+		call(v, fmt.Sprintf("echo %d", i), fmt.Sprintf("%d\n", i))
 	}
-	// A reply ends the run: the next call starts a new one.
+	v.event(map[string]any{"type": "reasoning", "text": "divide."})
+	v.event(map[string]any{"type": "tool_call", "tool": "eval", "args": map[string]any{"code": "1/0"}})
+	v.event(map[string]any{"type": "tool_result", "tool": "eval", "result": "ERROR: division by zero"})
+
+	if runsIn(v.m) != 1 || len(v.m.convo) != blocks+1 {
+		t.Fatalf("want one run block after the message, got %d runs, %d blocks (was %d)", runsIn(v.m), len(v.m.convo), blocks)
+	}
+	r := v.m.convo[runIdx(v.m)].run
+	if len(r.items) != 10 || r.items[0].think == nil {
+		t.Fatalf("items: %d, first is a thought: %v", len(r.items), r.items[0].think != nil)
+	}
+	head := stripANSI(r.summary())
+	if !strings.Contains(head, "10 steps — exec×4, eval×1") || !strings.Contains(head, "1 failed") {
+		t.Errorf("header: %q", head)
+	}
+	// A reply ends the run; the next call starts another, below.
 	v.event(map[string]any{"type": "token", "text": "half way"})
 	call(v, "echo new", "new\n")
-	if runIdx(v.m) != r {
-		t.Errorf("a call after a reply joined the old run")
+	if runsIn(v.m) != 2 {
+		t.Errorf("a call after a reply should start a new run: %d runs", runsIn(v.m))
 	}
 }
 
-// A reader who scrolled up is not moved by calls arriving, by results, or by
-// folding — and a fold that would change rows on their screen waits.
-func TestToolRun_DoesNotScrollAReaderWhoScrolledUp(t *testing.T) {
+// Finished steps are one line; the active one — a thought still streaming —
+// is open, and the box shows its tail.
+func TestRun_ActiveStepOpenFinishedOneLine(t *testing.T) {
+	v := newVtui(100, 40)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	v.send("go")
+	call(v, "echo 0", "0\n")
+	v.event(map[string]any{"type": "reasoning", "text": "first part.\nsecond line of it\n"})
+	nm, _ := v.m.Update(renderTickMsg{})
+	v.m = nm.(tuiModel)
+	scr := v.view()
+	for _, want := range []string{"✻ Then check it.  (", "✓ $ echo 0", "▾ ✻ thinking…", "second line of it"} {
+		if !strings.Contains(scr, want) {
+			t.Errorf("missing %q:\n%s", want, scr)
+		}
+	}
+	if strings.Contains(scr, "next: echo 0.") {
+		t.Errorf("a finished thought should show only its last sentence:\n%s", scr)
+	}
+}
+
+// When the active step folds to one line, the box keeps its height and the
+// rows it gave back show earlier steps.
+func TestRun_GrowOnlyWhenAStepFolds(t *testing.T) {
+	v := newVtui(100, 40) // cap 10: 9 body rows
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	v.send("go")
+	for i := 0; i < 6; i++ {
+		call(v, fmt.Sprintf("echo %d", i), "ok\n")
+	}
+	var long strings.Builder
+	for k := 0; k < 20; k++ {
+		fmt.Fprintf(&long, "a long line %d of thought\n", k)
+	}
+	v.event(map[string]any{"type": "reasoning", "text": long.String()})
+	nm, _ := v.m.Update(renderTickMsg{})
+	v.m = nm.(tuiModel)
+	r := runIdx(v.m)
+	before := v.m.frame.blockH[r]
+	if before != boxCap(v.m.h) {
+		t.Fatalf("precondition: box at its cap, %d", before)
+	}
+	if strings.Contains(v.view(), "$ echo 2") {
+		t.Fatalf("precondition: earlier steps hidden under the open thought:\n%s", v.view())
+	}
+	v.event(map[string]any{"type": "tool_call", "tool": "exec", "args": map[string]any{"command": "echo 6"}})
+	if h := v.m.frame.blockH[r]; h != before {
+		t.Fatalf("the box changed height when the thought folded: %d → %d", before, h)
+	}
+	if !strings.Contains(v.view(), "$ echo 2") {
+		t.Errorf("the rows given back should show earlier steps:\n%s", v.view())
+	}
+}
+
+// A failed call keeps up to two lines of its error, and is not grouped.
+func TestRun_FailureLines(t *testing.T) {
+	v := newVtui(100, 40)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	v.send("go")
+	call(v, "go test ./...", "ok  pkg/a\nconfig_test.go:41: want 3 layers, got 2\nFAIL pkg/b\n[exit: 1]")
+	scr := v.view()
+	if !strings.Contains(scr, "✗ $ go test ./...") || !strings.Contains(scr, "config_test.go:41: want 3 layers, got 2") || !strings.Contains(scr, "FAIL pkg/b") {
+		t.Errorf("failure and its error lines:\n%s", scr)
+	}
+	if strings.Contains(scr, "ok  pkg/a") {
+		t.Errorf("only the last two lines of the error belong under it:\n%s", scr)
+	}
+}
+
+// Consecutive successful calls of one tool with short targets group into one
+// line; a failed one is not grouped.
+func TestRun_Grouping(t *testing.T) {
+	items := []*runItem{}
+	for _, f := range []string{"a.go", "b.go", "c.go", "d.go"} {
+		items = append(items, &runItem{tool: "read", args: map[string]any{"path": f}, done: true})
+	}
+	items = append(items, &runItem{tool: "read", args: map[string]any{"path": "e.go"}, done: true, failed: true})
+	if n := groupLen(items); n != 4 {
+		t.Fatalf("groupLen = %d, want 4 (the failed one breaks the group)", n)
+	}
+	if got := stripANSI(groupLine(items[:4], 80)); got != "✓ ⚙ read ×4: a.go, b.go, c.go, d.go" {
+		t.Errorf("group line: %q", got)
+	}
+	long := &runItem{tool: "read", args: map[string]any{"path": strings.Repeat("x", 40)}, done: true}
+	if groupLen([]*runItem{items[0], long}) != 1 {
+		t.Error("a long target should not group")
+	}
+}
+
+func TestLastSentence(t *testing.T) {
+	for in, want := range map[string]string{
+		"First. Then the second one.":           "Then the second one.",
+		"one\nsentence across lines":            "one sentence across lines",
+		"Ends with a question? And an answer!":  "And an answer!",
+		"version 1.2 is fine. so load it last.": "so load it last.",
+		"  trailing space.  ":                   "trailing space.",
+		"":                                      "",
+	} {
+		if got := lastSentence(in); got != want {
+			t.Errorf("lastSentence(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A reader who scrolled up is not moved by calls arriving in a run.
+func TestRun_DoesNotScrollAReaderWhoScrolledUp(t *testing.T) {
 	v := tallConvo(t)
 	v.send("again")
 	call(v, "echo 0", "0\n")
@@ -93,44 +191,14 @@ func TestToolRun_DoesNotScrollAReaderWhoScrolledUp(t *testing.T) {
 	}
 }
 
-// An aggregate the person has selected does not change under them; the fold
-// catches up once they move away.
-func TestToolRun_SelectedAggregateDoesNotRefold(t *testing.T) {
-	v := newVtui(100, 40)
-	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
-	v.send("go")
-	for i := 0; i < 3; i++ {
-		call(v, fmt.Sprintf("echo %d", i), "ok\n")
-	}
-	r := runIdx(v.m)
-	v.m = key(v.m, kTab)
-	for v.m.sel > r {
-		v.m = key(v.m, kUp)
-	}
-	if v.m.sel != r {
-		t.Fatalf("could not select the aggregate: sel=%d run=%d", v.m.sel, r)
-	}
-	before := v.m.convo[r].run.calls()
-	call(v, "echo 3", "ok\n")
-	if v.m.sel != r || v.m.convo[r].run == nil || v.m.convo[r].run.calls() != before {
-		t.Fatalf("the selected aggregate changed: sel=%d calls %d → %d", v.m.sel, before, v.m.convo[r].run.calls())
-	}
-	v.m = key(v.m, kTab) // away from the conversation
-	call(v, "echo 4", "ok\n")
-	if got := v.m.convo[runIdx(v.m)].run.calls(); got != 4 {
-		t.Errorf("deferred fold did not catch up: %d calls, want 4", got)
-	}
-}
-
-// Enter on the aggregate opens it as a tree: a node per call (and thinking),
-// enter opens a node to its result, failures are marked, esc comes back.
-func TestToolRun_EnterOpensTheTree(t *testing.T) {
+// Enter on the run opens it as a tree: a node per thought and call, a call
+// opens to its result, failures are marked.
+func TestRun_EnterOpensTheTree(t *testing.T) {
 	v := newVtui(100, 30)
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.send("go")
 	call(v, "echo 0", "zero\n")
 	call(v, "false", "\n[exit: 1]")
-	call(v, "echo 2", "two\n")
 	r := runIdx(v.m)
 	v.m = key(v.m, kTab)
 	for v.m.sel > r {
@@ -140,79 +208,38 @@ func TestToolRun_EnterOpensTheTree(t *testing.T) {
 	if !v.m.paging || !v.m.pg.tree() {
 		t.Fatalf("enter did not open the tree: paging=%v", v.m.paging)
 	}
-	// thinking, call, thinking, call
 	if len(v.m.pg.doc.nodes) != 4 || !v.m.pg.doc.nodes[3].err || v.m.pg.doc.nodes[1].err {
 		t.Fatalf("nodes: %+v", v.m.pg.doc.nodes)
 	}
-	scr := v.view()
-	if !strings.Contains(scr, "2 tool calls") || !strings.Contains(scr, "✓ $ echo 0") || !strings.Contains(scr, "✗ $ false") {
-		t.Fatalf("tree not on screen:\n%s", scr)
-	}
-	if strings.Contains(scr, "zero") {
-		t.Fatalf("a node opened before it was asked:\n%s", scr)
-	}
 	v.m = key(v.m, kDown)
 	v.m = key(v.m, kEnter)
-	if scr := v.view(); !strings.Contains(scr, "zero") {
-		t.Fatalf("enter did not open the node:\n%s", scr)
-	}
-	v.m = key(v.m, kEnter)
-	if scr := v.view(); strings.Contains(scr, "zero") {
-		t.Fatalf("enter did not close the node:\n%s", scr)
+	if !strings.Contains(v.view(), "zero") {
+		t.Fatalf("enter did not open the node:\n%s", v.view())
 	}
 	v.m = key(v.m, kEsc)
-	if v.m.paging || v.m.quitting || v.m.sel != r {
-		t.Fatalf("esc: paging=%v quitting=%v sel=%d", v.m.paging, v.m.quitting, v.m.sel)
+	if v.m.paging || v.m.sel != r {
+		t.Fatalf("esc: paging=%v sel=%d", v.m.paging, v.m.sel)
 	}
 }
 
-// A long tree scrolls: the selection stays on screen as it moves down.
-func TestToolRun_TreeScrolls(t *testing.T) {
-	v := newVtui(100, 16)
-	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
-	v.send("go")
-	for i := 0; i < 30; i++ {
-		call(v, fmt.Sprintf("echo %d", i), "ok\n")
-	}
-	r := runIdx(v.m)
-	v.m = key(v.m, kTab)
-	for v.m.sel > r {
-		v.m = key(v.m, kUp)
-	}
-	v.m = key(v.m, kEnter)
-	for i := 0; i < 50; i++ {
-		v.m = key(v.m, kDown)
-	}
-	if v.m.pg.off == 0 {
-		t.Fatal("the tree did not scroll with the selection")
-	}
-	if scr := v.view(); !strings.Contains(scr, "echo 25") {
-		t.Errorf("selected node not on screen:\n%s", scr)
-	}
-}
-
-// Resumed history folds a past run the same way.
-func TestToolRun_ReplayFolds(t *testing.T) {
+// Resumed history builds the same run box.
+func TestRun_Replay(t *testing.T) {
 	v := newVtui(100, 30)
 	items := []any{map[string]any{"kind": "user", "content": "go"}}
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("c%d", i)
 		items = append(items,
-			map[string]any{"kind": "reasoning", "content": "think " + id},
+			map[string]any{"kind": "reasoning", "content": "think " + id + "."},
 			map[string]any{"kind": "tool_call", "tool": "exec", "call_id": id, "args": map[string]any{"command": "echo " + id}},
 			map[string]any{"kind": "tool_result", "tool": "exec", "call_id": id, "content": id})
 	}
 	items = append(items, map[string]any{"kind": "assistant", "content": "done"})
 	v.event(map[string]any{"type": "history", "items": items})
-	r := runIdx(v.m)
-	if r < 0 || v.m.convo[r].run.calls() != 4 {
-		t.Fatalf("history did not fold:\n%s", v.convo())
+	if runsIn(v.m) != 1 {
+		t.Fatalf("history should build one run, got %d:\n%s", runsIn(v.m), v.convo())
 	}
-	if e := v.m.convo[len(v.m.convo)-2]; e.mdSource != "done" {
-		// the reply, then the resumed marker
-		t.Errorf("reply not after the run: %q", e.mdSource)
-	}
-	if last := v.m.convo[r+2]; last.tool == nil || !last.boxed() {
-		t.Errorf("the run's latest call is not a box: %+v", last)
+	r := v.m.convo[runIdx(v.m)]
+	if len(r.run.items) != 10 || r.run.open || !r.boxed() {
+		t.Errorf("replayed run: %d items, open=%v, boxed=%v", len(r.run.items), r.run.open, r.boxed())
 	}
 }

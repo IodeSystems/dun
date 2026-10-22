@@ -8,26 +8,31 @@ import (
 	"github.com/charmbracelet/x/cellbuf"
 )
 
-// Boxes: a round's thinking and a tool call's output are drawn in a box that
-// grows with its content up to a cap and then scrolls INSIDE itself, so a
-// long stream never moves the conversation by more than the box's own growth.
+// Boxes: a round's thinking, and a run of tool calls (toolrun.go), are drawn
+// in a box that grows with its content up to a cap and then scrolls INSIDE
+// itself, so a long stream never moves the conversation by more than the
+// box's own growth.
 //
 //	✻ thinking… 12s · 340 words               ↑ 23 more
 //	│ the newest lines of the thought,
 //	│ followed as they stream
 //
 // The header stays on top and says what is hidden. While live the box follows
-// its tail; done, it keeps its height, scrolled to the end — there is no fold
-// and no shrink, so the end of a round moves nothing. Selected in convo
-// focus, ↑/↓ and pgup/pgdn scroll inside it; ↑ at its top and ↓ at its bottom
-// move the selection on, as for any block. enter opens the whole thing in the
-// pager.
+// its tail; done, it keeps its height, scrolled to the end. A box never gets
+// shorter: it is drawn at the most rows it has reached (peak), and when its
+// content gets shorter — a run's finished step folds to one line — the rows
+// given back show earlier content, or stay blank when there is none.
+// Selected in convo focus, ↑/↓ and pgup/pgdn scroll inside it; ↑ at its top
+// and ↓ at its bottom move the selection on, as for any block. enter opens
+// the whole thing in the pager.
 
 type boxState struct {
 	off    int  // first body row shown
 	follow bool // pinned to the newest row: new content scrolls the box
 	max    int  // the largest off, as of the last render
 	shown  int  // body rows shown, as of the last render
+	peak   int  // the most body rows it has shown at peakW: it never shows fewer
+	peakW  int
 
 	// The wrapped body, cached by source and width. A box that only grew —
 	// a thought streaming in — keeps the rows of its finished lines (stable
@@ -40,31 +45,19 @@ type boxState struct {
 	stableRows int
 }
 
-// boxCap is a box's height, header included, on a pane of h rows: ten rows,
-// or a third of a short pane, never under three.
+// boxCap is a box's height, header included, for a terminal of h rows: ten
+// rows, or about a third of a short one, never under three. The terminal and
+// not the pane, so a composer or a question growing cannot shrink a box.
 func boxCap(h int) int { return max(3, min(10, h/3)) }
 
-// boxed says the entry is drawn as a box right now: a thinking block, or a
-// tool call with its result, in its default state (→ still opens a tool
-// call's full output inline).
+// boxed says the entry is drawn as a box right now.
 func (e convoEntry) boxed() bool { return e.box != nil && e.state == viewMinimized }
 
-// boxSource is the box's header and body. plain says the body is unstyled
-// text, dimmed row by row — which is what lets it be wrapped a line at a time.
-func (e convoEntry) boxSource() (head, body string, plain bool) {
-	switch {
-	case e.think != nil:
-		return stDim.Render(thinkHeader(e.think)), strings.TrimSpace(e.think.text), true
-	case e.tool != nil:
-		return e.tool.head, strings.TrimRight(e.tool.output, "\n"), false
-	}
-	return e.collapsed, "", false
-}
-
-// wrapBody brings b.rows up to date with body at width w.
-func (b *boxState) wrapBody(body string, w int, plain bool) {
-	ww := max(1, w-2)
-	edge := stDim.Render("│ ")
+// wrapBody brings b.rows up to date with body at width w, each row behind
+// edge. plain says the body is unstyled text, dimmed row by row — which is
+// what lets it be wrapped a line at a time.
+func (b *boxState) wrapBody(body string, w int, plain bool, edge string) {
+	ww := max(1, w-lipgloss.Width(edge))
 	if !plain {
 		if b.src == body && b.w == w && b.rows != nil {
 			return
@@ -103,13 +96,28 @@ func (b *boxState) wrapBody(body string, w int, plain bool) {
 	}
 }
 
-// renderBox draws the box at width w on a pane of paneH rows.
-func renderBox(e *convoEntry, w, paneH int) string {
+// boxContent is the box's header and body rows at width w.
+func (e *convoEntry) boxContent(w int) (string, []string) {
+	switch {
+	case e.run != nil:
+		return e.run.summary(), e.run.boxRows(w)
+	case e.think != nil:
+		e.box.wrapBody(strings.TrimSpace(e.think.text), w, true, stDim.Render("│ "))
+		return stDim.Render(thinkHeader(e.think)), e.box.rows
+	}
+	return e.collapsed, nil
+}
+
+// renderBox draws the box at width w for a terminal of termH rows.
+func renderBox(e *convoEntry, w, termH int) string {
 	b := e.box
-	head, body, plain := e.boxSource()
-	b.wrapBody(body, w, plain)
-	b.shown = min(len(b.rows), boxCap(paneH)-1)
-	b.max = len(b.rows) - b.shown
+	head, rows := e.boxContent(w)
+	if b.peakW != w { // a resize re-wraps; that is the one time a box may shrink
+		b.peak, b.peakW = 0, w
+	}
+	b.peak = max(b.peak, min(len(rows), boxCap(termH)-1))
+	b.shown = b.peak
+	b.max = max(0, len(rows)-b.shown)
 	if b.follow || b.off > b.max {
 		b.off = b.max
 	}
@@ -119,17 +127,20 @@ func renderBox(e *convoEntry, w, paneH int) string {
 	if b.off > 0 {
 		ind = append(ind, "↑ "+strconv.Itoa(b.off)+" more")
 	}
-	if below := len(b.rows) - b.off - b.shown; below > 0 {
+	if below := len(rows) - b.off - b.shown; below > 0 {
 		ind = append(ind, "↓ "+strconv.Itoa(below)+" more")
 	}
 	tail := ""
 	if len(ind) > 0 {
 		tail = "  " + stDim.Render(strings.Join(ind, " · "))
 	}
-	head = lipgloss.NewStyle().MaxWidth(max(1, w-lipgloss.Width(tail))).Render(head)
+	head = fitRow(head, w-lipgloss.Width(tail))
 	out := make([]string, 0, 1+b.shown)
 	out = append(out, head+tail)
-	out = append(out, b.rows[b.off:b.off+b.shown]...)
+	out = append(out, rows[b.off:min(len(rows), b.off+b.shown)]...)
+	for len(out) < 1+b.shown { // held height: what the content gave back
+		out = append(out, "")
+	}
 	return strings.Join(out, "\n")
 }
 

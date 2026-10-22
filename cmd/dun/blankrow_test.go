@@ -36,11 +36,11 @@ func TestTUI_WhitespaceReplyTakesNoRow(t *testing.T) {
 	v.event(map[string]any{"type": "tool_call", "tool": "exec", "args": map[string]any{"command": "echo 0"}})
 	v.event(map[string]any{"type": "tool_result", "tool": "exec", "result": "0\n"})
 	after := rowsAfter(v.view(), "end")
-	if len(after) == 0 || !strings.Contains(after[0], "echo 0") {
-		t.Fatalf("the row after the message is %q, want the tool call\n%s", after[0], v.view())
+	if len(after) < 2 || !strings.Contains(after[0], "⚙ 1 step") || !strings.Contains(after[1], "echo 0") {
+		t.Fatalf("the rows after the message are %q, want the run and its call\n%s", after[:2], v.view())
 	}
 	for _, e := range v.m.convo {
-		if e.mdSource == "" && e.collapsed == "" && !e.blank && e.tool == nil && e.think == nil && e.run == nil && e.docs == nil {
+		if e.mdSource == "" && e.collapsed == "" && !e.blank && e.think == nil && e.run == nil && e.docs == nil {
 			t.Errorf("an empty block was finalized: %+v", e)
 		}
 	}
@@ -49,7 +49,7 @@ func TestTUI_WhitespaceReplyTakesNoRow(t *testing.T) {
 	v.event(map[string]any{"type": "token", "text": "\n\nHere it is."})
 	nm, _ = v.m.Update(renderTickMsg{})
 	v.m = nm.(tuiModel)
-	if after := rowsAfter(v.view(), "│ 0"); len(after) == 0 || !strings.Contains(after[0], "Here it is.") {
+	if after := rowsAfter(v.view(), "$ echo 0"); len(after) == 0 || !strings.Contains(after[0], "Here it is.") {
 		t.Errorf("reply not directly under the call: %q", after)
 	}
 }

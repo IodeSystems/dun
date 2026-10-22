@@ -32,7 +32,19 @@ import (
 type pageNode struct {
 	head string
 	body string
-	err  bool // marks the head as a failure
+	err  bool        // marks the head as a failure
+	insp *inspSource // a call: "i" opens it in the inspector
+}
+
+// inspSource is what the inspector shows for a call.
+type inspSource struct{ name, input, output string }
+
+// curNode is the selected node, or nil.
+func (p pager) curNode() *pageNode {
+	if p.cur < 0 || p.cur >= len(p.doc.nodes) {
+		return nil
+	}
+	return &p.doc.nodes[p.cur]
 }
 
 type pageDoc struct {
@@ -262,7 +274,7 @@ func (p pager) hint() string {
 		return "↑/↓ select · enter/→ open · ← close · space on/off · esc back"
 	}
 	if p.tree() {
-		return "↑/↓ select · enter/→ open · ← close · pgup/pgdn scroll · esc back"
+		return "↑/↓ select · enter/→ open · ← close · i inspect a call · pgup/pgdn scroll · esc back"
 	}
 	return "↑/↓ pgup/pgdn scroll · g/G ends · esc back"
 }

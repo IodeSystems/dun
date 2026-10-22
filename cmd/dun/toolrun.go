@@ -4,42 +4,58 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
-// Tool runs: a turn that makes many tool calls in a row shows the LATEST one
-// as it always did, and folds every earlier one into a single row above it.
+// Tool runs: the tool calls of a turn, and the thinking between them, are ONE
+// bounded box (box.go) that only ever grows.
 //
-//	▸ ⚙ 6 tool calls — exec×4, eval×2 · 1 failed
-//	✻ thought for 2s · 40 words               (the latest round's thinking, boxed)
-//	$ go test ./...  → ✓ 12 lines · ok        (the latest call, its output boxed)
+//	⚙ 5 tool calls — exec×4, eval×1 · 1 failed · thought 12s    ↑ 40 more
+//	│ ✻ thought for 2s · 40 words
+//	│ │ the round's reasoning, dimmed
+//	│ ✓ $ go test ./...  → ✓ 12 lines · ok
+//	│ ✻ thinking… 1s · 12 words
+//	│ │ the newest lines, followed while live
 //
-// A run is the stretch of tool calls, and the thinking between them, with
-// nothing else in it: a reply, a user message or a notification ends it.
-// The fold happens when a NEW call arrives — the previous call and its
-// thinking move into the aggregate, and the new call takes the bottom.
+// Every new thought or call is APPENDED inside the box; nothing above it is
+// removed, folded or shrunk, because the conversation's height never goes
+// down while a session runs (the no-screen-jump rule — tested as a property
+// over mixed event streams, see noshrink_test.go). The header carries the
+// summary and changes in place.
 //
-// The latest round's boxes (box.go) are bounded, so a run costs at most the
-// aggregate row and two boxes of screen. A fold removes the previous round's
-// boxes ABOVE the newest ones: a reader pinned to the bottom keeps the
-// newest round where it was, and the rows that change are older ones.
+// A run is OPEN while it is the last block and the round's reply has not
+// begun: thoughts and calls go into it. A reply, a user message, a
+// notification — anything appended after it — ends it, and the next call
+// starts a new run. The first call of a run takes over the thinking box just
+// above it, if there is one: the thought becomes the run's first item, in
+// the same place, so the box only grows.
 //
-// What it does not do: fold under the person. A fold that would take in the
-// selected block, renumber the conversation while a search is walking it, or
-// change rows a reader who scrolled up has on screen, waits for the next
-// call. → on the aggregate lists its calls in place; enter opens it in the
-// pager as a tree, each call a node that opens to its result.
+// Enter opens the run in the pager as a tree, a node per thought and per
+// call; "i" on a call node opens it in the inspector.
 
-// runItem is one thing a run folded: a call, or a round's thinking.
+// runItem is one thing in a run: a call, or a round's thinking.
 type runItem struct {
 	tool   string
 	args   map[string]any
 	result string
-	failed bool
-	think  string // set for a thinking item; tool is then ""
+	done   bool   // the result arrived
+	failed bool   // it was a failure (toolFailed)
+	head   string // the call and its one-line preview, styled
+	output string // the renderer's styled output, for the pager
+	think  *thinkBlock
+	wrap   boxState // a thought's wrapped rows (box.go's line-at-a-time cache)
 }
 
 type toolRun struct {
-	items []runItem
+	items []*runItem
+	open  bool // still taking calls and thoughts
+	ver   int  // bumped on every change, the key of the rows cache
+
+	rows    []string // the box body as of rowsVer at rowsW
+	rowsVer int
+	rowsW   int
 }
 
 // toolFailed reads whether a result is a failure: exec's own exit marker, or
@@ -64,13 +80,20 @@ func (r *toolRun) calls() int {
 	return n
 }
 
-// summary is the aggregate's one line: count, tools by name with counts
-// (most used first), failures.
+// summary is the run's header: count, tools by name with counts (most used
+// first), failures, and how long it spent thinking.
 func (r *toolRun) summary() string {
 	counts := map[string]int{}
 	failed := 0
+	var thought time.Duration
 	for _, it := range r.items {
-		if it.tool == "" {
+		if it.think != nil {
+			switch {
+			case it.think.live:
+				thought += time.Since(it.think.start)
+			case !it.think.end.IsZero():
+				thought += it.think.end.Sub(it.think.start)
+			}
 			continue
 		}
 		counts[it.tool]++
@@ -92,127 +115,303 @@ func (r *toolRun) summary() string {
 	for i, n := range names {
 		parts[i] = fmt.Sprintf("%s×%d", n, counts[n])
 	}
-	s := fmt.Sprintf("⚙ %s — %s", plural(r.calls(), "tool call"), strings.Join(parts, ", "))
-	if failed > 0 {
-		return stTool.Render(s) + stErr.Render(fmt.Sprintf(" · %d failed", failed))
+	s := stTool.Render(fmt.Sprintf("⚙ %s — %s", plural(len(r.items), "step"), strings.Join(parts, ", ")))
+	if thought > 0 {
+		s += stDim.Render(" · thought " + thinkDur(thought))
 	}
-	return stTool.Render(s)
+	if failed > 0 {
+		s += stErr.Render(fmt.Sprintf(" · %d failed", failed))
+	}
+	return s
 }
 
-// itemLine is one item as a single line, for the in-place list and the tree.
-func (it runItem) line(width int) string {
-	if it.tool == "" {
-		words := len(strings.Fields(it.think))
-		first, _ := fitPlain(oneLine(firstLine(it.think)), 40)
-		return fmt.Sprintf("✻ thought · %d words — %s", words, first)
+// line is an item as a single line, for the tree's heads and the plain text.
+func (it *runItem) line(width int) string {
+	if it.think != nil {
+		return thinkHeader(it.think)
 	}
 	mark := "✓ "
-	if it.failed {
+	switch {
+	case !it.done:
+		mark = "… "
+	case it.failed:
 		mark = "✗ "
 	}
 	return mark + callText(it.tool, it.args, width)
 }
 
-// renderRun writes the aggregate's collapsed and expanded forms.
-func (e *convoEntry) renderRun() {
-	r := e.run
-	e.collapsed = stDim.Render("▸ ") + r.summary()
-	rows := []string{stDim.Render("▾ ") + r.summary()}
-	for _, it := range r.items {
-		st := stDim
-		if it.failed {
-			st = stErr
-		}
-		rows = append(rows, "  "+st.Render(it.line(80)))
+// boxRows is the run's box body at width w, a step per line:
+//
+//	✻ the overlay is read before the project file   (2s, 60 words)
+//	✗ $ go test ./internal/...  → ✗ 2 failed
+//	    config_test.go:41: want 3 layers, got 2
+//	✓ ⚙ read ×4: a.go, b.go, c.go, d.go
+//	▾ ✻ thinking… 1s · 12 words
+//	  the live thought's text, all of it; the box shows its tail
+//
+// Finished steps are one line (a failure keeps up to two lines of its
+// error); only the ACTIVE step — the thought still streaming — is open. The
+// box windows the tail of this, so the active step gets the rows left under
+// the cap, and when it finishes and folds to one line the rows it gives back
+// show earlier steps instead: the box never shrinks (renderBox).
+func (r *toolRun) boxRows(w int) []string {
+	if r.rows != nil && r.rowsVer == r.ver && r.rowsW == w && !r.live() {
+		return r.rows
 	}
-	e.full = strings.Join(rows, "\n")
-	e.invalidateWrap()
+	rows := r.rows[:0]
+	lw := max(1, w-2)
+	for k := 0; k < len(r.items); k++ {
+		it := r.items[k]
+		switch {
+		case it.think != nil && it.think.live:
+			rows = append(rows, "  "+stDim.Render("▾ "+thinkHeader(it.think)))
+			it.wrap.wrapBody(strings.TrimSpace(it.think.text), w, true, "    ")
+			rows = append(rows, it.wrap.rows...)
+		case it.think != nil:
+			rows = append(rows, "  "+thoughtLine(it.think, lw))
+		default:
+			if n := groupLen(r.items[k:]); n > 1 {
+				rows = append(rows, "  "+groupLine(r.items[k:k+n], lw))
+				k += n - 1
+				continue
+			}
+			rows = append(rows, "  "+fitRow(callLine(it), lw))
+			if it.done && it.failed {
+				for _, ln := range failLines(it) {
+					rows = append(rows, "      "+fitRow(stErr.Render(ln), max(1, w-6)))
+				}
+			}
+		}
+	}
+	r.rows, r.rowsVer, r.rowsW = rows, r.ver, w
+	return rows
 }
 
-// runPage is the aggregate as a tree for the pager.
+// live says the run's last step is a thought still streaming.
+func (r *toolRun) live() bool {
+	n := len(r.items)
+	return n > 0 && r.items[n-1].think != nil && r.items[n-1].think.live
+}
+
+// thoughtLine is a finished thought as one line: its LAST sentence — where it
+// landed — then how long and how much.
+func thoughtLine(t *thinkBlock, w int) string {
+	meta := fmt.Sprintf("  (%s, %d words)", thoughtTime(t), len(strings.Fields(t.text)))
+	last, _ := fitPlain(lastSentence(t.text), max(1, w-2-len([]rune(meta))))
+	return stDim.Render("✻ " + last + meta)
+}
+
+func thoughtTime(t *thinkBlock) string {
+	if t.end.IsZero() || t.start.IsZero() {
+		return "–"
+	}
+	return thinkDur(t.end.Sub(t.start))
+}
+
+// lastSentence is the final sentence of a thought, on one line.
+func lastSentence(s string) string {
+	s = strings.TrimSpace(oneLine(s))
+	body := strings.TrimRight(s, ".!?…")
+	cut := -1
+	for i := len(body) - 1; i > 0; i-- {
+		if (body[i-1] == '.' || body[i-1] == '!' || body[i-1] == '?') && body[i] == ' ' {
+			cut = i
+			break
+		}
+	}
+	if cut < 0 {
+		return s
+	}
+	return strings.TrimSpace(s[cut:])
+}
+
+// callLine is a call: its mark, short form and outcome preview.
+func callLine(it *runItem) string {
+	mark := stDim.Render("… ")
+	switch {
+	case it.done && it.failed:
+		mark = stErr.Render("✗ ")
+	case it.done:
+		mark = stTool.Render("✓ ")
+	}
+	if it.head != "" {
+		return mark + it.head
+	}
+	return mark + stTool.Render(callText(it.tool, it.args, 80))
+}
+
+// failLines are up to two lines of a failed call's error.
+func failLines(it *runItem) []string {
+	lines := meaningfulLines(it.result)
+	if n := len(lines); n > 0 && strings.HasPrefix(lines[n-1], "[exit:") {
+		lines = lines[:n-1]
+	}
+	if len(lines) > 2 {
+		lines = lines[len(lines)-2:]
+	}
+	return lines
+}
+
+// callTarget is what a call was about, short: exec's command, or a tool's
+// only argument. "" when it is not short enough to group.
+func callTarget(it *runItem) string {
+	var v string
+	switch {
+	case it.tool == "exec":
+		v, _ = it.args["command"].(string)
+	case len(it.args) == 1:
+		for _, a := range it.args {
+			v = fmt.Sprint(a)
+		}
+	default:
+		return ""
+	}
+	v = oneLine(v)
+	if v == "" || len(v) > 30 {
+		return ""
+	}
+	return v
+}
+
+// groupLen is how many calls at the head of items group into one line:
+// consecutive finished, successful calls of one tool with short targets.
+func groupLen(items []*runItem) int {
+	n := 0
+	for _, it := range items {
+		if it.think != nil || !it.done || it.failed || it.tool != items[0].tool || callTarget(it) == "" {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// groupLine is a group of calls as one line: `✓ ⚙ read ×4: a.go, b.go, …`.
+func groupLine(items []*runItem, w int) string {
+	label := "⚙ " + items[0].tool
+	if items[0].tool == "exec" {
+		label = "$"
+	}
+	label += fmt.Sprintf(" ×%d: ", len(items))
+	ts := make([]string, len(items))
+	for i, it := range items {
+		ts[i] = callTarget(it)
+	}
+	list, _ := fitPlain(strings.Join(ts, ", "), max(1, w-2-len([]rune(label))))
+	return stTool.Render("✓ "+label) + stDim.Render(list)
+}
+
+// fitRow cuts a styled row to w columns.
+func fitRow(s string, w int) string { return lipgloss.NewStyle().MaxWidth(max(1, w)).Render(s) }
+
+// plain is the run as text, for search and the screen dump.
+func (r *toolRun) plain() string {
+	lines := []string{stripANSI(r.summary())}
+	for _, it := range r.items {
+		lines = append(lines, it.line(80))
+		if it.think != nil {
+			lines = append(lines, strings.TrimSpace(it.think.text))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// runPage is the run as a tree for the pager.
 func (r *toolRun) page() pageDoc {
 	doc := pageDoc{title: stripANSI(r.summary())}
 	for _, it := range r.items {
 		n := pageNode{head: it.line(200), err: it.failed}
-		if it.tool == "" {
-			n.body = strings.TrimSpace(it.think)
+		if it.think != nil {
+			n.body = strings.TrimSpace(it.think.text)
 		} else {
 			n.body = callFull(it.tool, it.args) + "\n\n" + strings.TrimRight(it.result, "\n")
+			n.insp = &inspSource{name: it.tool, input: argFull(it.args), output: it.result}
 		}
 		doc.nodes = append(doc.nodes, n)
 	}
 	return doc
 }
 
-// runMember says whether a block can be folded into a run.
-func runMember(e convoEntry) bool {
-	return e.run != nil || e.tool != nil || (e.think != nil && !e.think.live)
+// ── the model's side ───────────────────────────────────────────────
+
+// openRun is the index of the run still taking items, or -1: the last block,
+// if it is a run that has not been ended.
+func (m *tuiModel) openRun() int {
+	if n := len(m.convo); n > 0 && m.convo[n-1].run != nil && m.convo[n-1].run.open {
+		return n - 1
+	}
+	return -1
 }
 
-// foldRun runs as a new tool call is about to be appended: everything since
-// the run began, up to the current round's thinking, folds into one
-// aggregate. live is false for history, which folds whatever the screen is
-// doing.
-func (m *tuiModel) foldRun(live bool) {
-	// The current round's thinking stays with the call it led to.
-	k := len(m.convo)
-	for k > 0 && m.convo[k-1].think != nil {
-		k--
+// touchRun marks run entry i changed.
+func (m *tuiModel) touchRun(i int) {
+	e := &m.convo[i]
+	e.run.ver++
+	e.collapsed = e.run.plain()
+	e.invalidateWrap()
+}
+
+// runEntry makes a run block.
+func runEntry(items ...*runItem) convoEntry {
+	e := convoEntry{run: &toolRun{items: items, open: true}, box: &boxState{follow: true}}
+	e.collapsed = e.run.plain()
+	return e
+}
+
+// runAddCall appends a call to the open run, or starts one — taking over the
+// finished thinking box just above, if there is one, in place. It returns the
+// run's index.
+func (m *tuiModel) runAddCall(tool string, args map[string]any) int {
+	it := &runItem{tool: tool, args: args}
+	if i := m.openRun(); i >= 0 {
+		m.convo[i].run.items = append(m.convo[i].run.items, it)
+		m.touchRun(i)
+		return i
 	}
-	start := k
-	for start > 0 && runMember(m.convo[start-1]) {
-		start--
-	}
-	prev := -1
-	for i := start; i < k; i++ {
-		if m.convo[i].tool != nil {
-			prev = i
+	if n := len(m.convo); n > 0 && m.convo[n-1].think != nil && !m.convo[n-1].think.live {
+		e := &m.convo[n-1]
+		t := e.think
+		th := &runItem{think: t}
+		r := &toolRun{items: []*runItem{th, it}, open: true}
+		if m.paging && m.pg.id == any(t) {
+			m.pg.id = r // the pager follows the block it was reading
 		}
+		e.think, e.run = nil, r
+		m.touchRun(n - 1)
+		return n - 1
 	}
-	if prev < 0 {
-		return // the first call of a run: nothing to fold yet
-	}
-	// Not under the person: a selected block in the span, a search that holds
-	// indices into the conversation, or a reader who scrolled up to where the
-	// span is on screen, defers the fold to the next call.
-	if live && ((m.focus == focusConvo && m.sel >= start && m.sel < k) || m.searching || m.searchActive) {
+	m.convo = append(m.convo, runEntry(it))
+	return len(m.convo) - 1
+}
+
+// runSetResult gives the run's pending call its result.
+func (m *tuiModel) runSetResult(i int, tool, result string) {
+	if i < 0 || i >= len(m.convo) || m.convo[i].run == nil {
 		return
 	}
-	if live && !m.scrollPinned && start < len(m.frame.rowOffset) && m.frame.rowOffset[start] < m.vp.YOffset+m.vp.Height {
-		return
-	}
-
-	// The span's items in order. An aggregate already in it is kept — its
-	// identity is what an open pager follows, and its state is the person's.
-	var agg *convoEntry
-	var items []runItem
-	for i := start; i < k; i++ {
-		e := m.convo[i]
-		switch {
-		case e.run != nil:
-			if agg == nil {
-				agg = &e
-			}
-			items = append(items, e.run.items...)
-		case e.tool != nil:
-			items = append(items, runItem{tool: e.tool.name, args: e.tool.args,
-				result: e.tool.raw, failed: toolFailed(e.tool.name, e.tool.raw)})
-		case e.think != nil:
-			items = append(items, runItem{think: e.think.text})
+	r := m.convo[i].run
+	var it *runItem
+	for k := len(r.items) - 1; k >= 0; k-- {
+		if r.items[k].think == nil && !r.items[k].done {
+			it = r.items[k]
+			break
 		}
 	}
-	if agg == nil {
-		agg = &convoEntry{run: &toolRun{}}
+	if it == nil { // a result with no call: show it on its own
+		it = &runItem{tool: tool}
+		r.items = append(r.items, it)
 	}
-	agg.run.items = items
-	agg.renderRun()
+	preview, body := renderToolResult(renderCtx{tool: it.tool, args: it.args, result: result, width: m.vp.Width})
+	it.result, it.done, it.output = result, true, body
+	it.failed = toolFailed(it.tool, result)
+	it.head = stTool.Render(callText(it.tool, it.args, 80)) + strings.ReplaceAll(preview, "\n", " ")
+	m.touchRun(i)
+}
 
-	shift := k - start - 1
-	m.convo = append(append(m.convo[:start:start], *agg), m.convo[k:]...)
-	if m.sel >= k {
-		m.sel -= shift
-	}
-	if m.pendingTool >= k {
-		m.pendingTool -= shift
+// endRun ends the open run, if any: the round's reply began, or the turn did.
+func (m *tuiModel) endRun() {
+	if i := m.openRun(); i >= 0 {
+		m.convo[i].run.open = false
+		m.touchRun(i)
 	}
 }
