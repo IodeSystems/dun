@@ -98,6 +98,10 @@ full detail archived in `done.md`.
   cut the running turn; the partial reply, a cut call's result and a marker
   (short reasoning note) stay in the transcript; queued messages start the
   next turn. ctrl+c still only quits the TUI. See `done.md`.
+- **Kill background jobs** (2026-10-22) — `KillJob` ends a job's process group
+  (SIGTERM, SIGKILL after 2s; docker: `docker stop`); `exec_monitor kill`,
+  `/jobs [kill <n>|kill all]`, `x` in the activity pane; an interrupt lists the
+  cut turn's running jobs with the kill command. See `done.md`.
 
 ## Active work
 

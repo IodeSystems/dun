@@ -832,3 +832,38 @@ says "(just type)" while it is highlighted and not yet capturing.
   "nothing to interrupt" (the turn has not started). A tool that ignores ctx
   holds the interrupt until it returns. Heredoc tool format: the saved partial
   can hold half a heredoc block (prose only was checked).
+
+## ✅ Kill background jobs (USER, 2026-10-22)
+
+- **Harness** (`bgkill.go`): every job runs under its own context; `kill`
+  cancels it and records who asked. `KillJob(id, by)` waits (bounded) for the
+  job to end; finished → "already finished"; unknown id → error.
+  `KillAllJobs` also reaches commands still in their grace (`bgLive`): the
+  exec call waiting on one returns `[exit: killed by the user after Ns]`
+  inline. `ExecResult.Killed` is the verdict: log line `[dun: killed by …]`,
+  pane state `killed`, completion notice "was killed by the user after Ns (it
+  did not fail on its own)" — still sent unless muted.
+- **Backends:** HostShell — cancellation used to return and leave the command
+  running in a shell the next call reused; now `termGroup` sends SIGTERM to the
+  shell's group (setsid leader), SIGKILL after `killTermGrace` (2s), and the
+  read waits for it. HostExec — `killGroup` is SIGTERM then SIGKILL (was
+  SIGKILL at once). Docker — unchanged path: `docker stop --time 2` on the
+  named container, then the client's group.
+- **Model:** `exec_monitor {job, kill: true}`; tool description and system
+  prompt say "ends the job and everything it started".
+- **User:** engine command `/jobs` (bare lists running: id, command, age, last
+  line), `/jobs kill <n>`, `/jobs kill all`. TUI asks y/n on the status line
+  for `kill all` and for `x` on a running job in the activity table (hint
+  updated). Web confirms `kill all` with its confirm helper.
+- **Interrupt:** the marker lists the cut turn's running jobs (a job still in
+  its grace is promoted so it has a number) and says they were not stopped;
+  `done.detail` carries "still running: #3 … (2m) — /jobs kill 3 …", shown
+  under the TUI's and web's interrupted row.
+- **Proven:** `bgkill_test.go` (child + grandchild gone, both host backends;
+  SIGTERM-ignoring tree → SIGKILL; grace kill; already finished; exec_monitor
+  kill; interrupt listing; docker opt-in `DUN_DOCKER_TEST=1`, passed locally),
+  `cmd/dun/jobkill_test.go`, `commands_test.go`, jest. Live: `dun -p` with a
+  fake model and scratch DUN_HOME — `ps` showed `sh`, `sleep 300`, `sleep 301`
+  before, none after `/jobs kill 1` and after `exec_monitor kill`.
+- **Not done:** a command that calls setsid itself leaves the group and is not
+  reached. Pid reuse between the group emptying and the SIGKILL is not guarded.

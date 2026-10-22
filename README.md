@@ -237,7 +237,11 @@ agent is notified and reacts on its own — no blocking, nothing is killed. Thei
 streams to a log file whose path the agent gets (so a big log is grepped, not
 pasted into the context), and `exec_monitor` tunes what a running job reports —
 `buffer_bytes` to hear from it periodically, `grep` to hear only matching lines,
-`ignore` to mute it. A job says nothing until it exits unless asked to.
+`ignore` to mute it, `kill` to end it and everything it started. A job says
+nothing until it exits unless asked to. You stop one with `/jobs kill <n>` (bare
+`/jobs` lists them, `/jobs kill all` ends every one after a y/n) or `x` on its row
+in the activity pane. An interrupt does not stop the turn's jobs; it lists the
+ones still running, with the kill command.
 
 **Sub-agents:** `agent{prompt}` spawns a child agent to spend ITS context instead
 of yours — read a huge log, fetch and digest a page, survey how something is used
