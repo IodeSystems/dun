@@ -150,7 +150,7 @@ func (m tuiModel) mouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return m, nil
 		}
-		return m, tea.Batch(copyCmd(text), m.flash(commaf("copied %d chars", len([]rune(text)))))
+		return m, copyCmd(text)
 	}
 	return m, nil
 }
@@ -295,30 +295,107 @@ func osc52(text string) string {
 	return "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\x07"
 }
 
-// Injected by tests: the terminal write, the environment, and the tmux call.
+// Injected by tests: the terminal write, the environment, PATH lookup, and
+// running a command (with stdin, returning its output).
 var (
 	termWrite = func(s string) { _, _ = os.Stdout.WriteString(s) }
 	clipEnv   = os.Getenv
-	tmuxLoad  = func(text string) error {
-		c := exec.Command("tmux", "load-buffer", "-w", "-")
-		c.Stdin = strings.NewReader(text)
-		return c.Run()
+	clipLook  = func(name string) bool { _, err := exec.LookPath(name); return err == nil }
+	clipRun   = func(stdin, name string, args ...string) (string, error) {
+		c := exec.Command(name, args...)
+		c.Stdin = strings.NewReader(stdin)
+		out, err := c.Output()
+		return strings.TrimSpace(string(out)), err
 	}
 )
 
-// copyText puts text on the clipboard: OSC 52 to the terminal, and inside tmux
-// also tmux's paste buffer, which -w hands on to the clipboard whatever
-// set-clipboard says.
-func copyText(text string) {
-	termWrite(osc52(text))
-	if clipEnv("TMUX") != "" {
-		_ = tmuxLoad(text)
+// nativeClip is the local clipboard tool, when the terminal is on this machine
+// (not over ssh, where the tool would fill the remote's clipboard): pbcopy,
+// wl-copy, xclip, xsel, termux-clipboard-set. It covers terminals without OSC
+// 52 — macOS Terminal.app among them.
+func nativeClip() []string {
+	if clipEnv("SSH_TTY") != "" || clipEnv("SSH_CONNECTION") != "" {
+		return nil
 	}
+	cands := [][]string{{"pbcopy"}, {"termux-clipboard-set"}}
+	if clipEnv("WAYLAND_DISPLAY") != "" {
+		cands = append(cands, []string{"wl-copy"})
+	}
+	if clipEnv("DISPLAY") != "" {
+		cands = append(cands, []string{"xclip", "-selection", "clipboard"}, []string{"xsel", "--clipboard", "--input"})
+	}
+	for _, c := range cands {
+		if clipLook(c[0]) {
+			return c
+		}
+	}
+	return nil
+}
+
+// copyText puts text on the clipboard by every route that reaches it, and
+// says which ones did, for the flash.
+//
+// Inside tmux, OSC 52 from an app reaches the clipboard only with tmux's
+// set-clipboard "on" (the default, "external", drops it); then tmux also makes
+// a buffer of it. Otherwise load-buffer makes the buffer, and -w forwards it
+// to the clipboard unless set-clipboard is "off".
+func copyText(text string) (via []string, hint string) {
+	if c := nativeClip(); c != nil {
+		if _, err := clipRun(text, c[0], c[1:]...); err == nil {
+			via = append(via, c[0])
+		}
+	}
+	if clipEnv("TMUX") == "" {
+		termWrite(osc52(text))
+		via = append(via, "terminal")
+		if clipEnv("TERM_PROGRAM") == "Apple_Terminal" && len(via) == 1 {
+			hint = "Terminal.app ignores OSC 52 — over ssh, use iTerm2 or another terminal that supports it"
+		}
+		return via, hint
+	}
+	sc, _ := clipRun("", "tmux", "show-options", "-gv", "set-clipboard")
+	switch sc {
+	case "on":
+		termWrite(osc52(text))
+		return append(via, "tmux"), ""
+	case "off":
+		if _, err := clipRun(text, "tmux", "load-buffer", "-"); err == nil {
+			via = append(via, "tmux buffer")
+		}
+		if len(via) == 1 {
+			hint = "tmux set-clipboard is off: only tmux's buffer has it — tmux set -g set-clipboard on"
+		}
+		return via, hint
+	}
+	if _, err := clipRun(text, "tmux", "load-buffer", "-w", "-"); err == nil {
+		via = append(via, "tmux")
+	}
+	return via, hint
+}
+
+type copiedMsg struct {
+	n    int
+	via  []string
+	hint string
 }
 
 func copyCmd(text string) tea.Cmd {
 	return func() tea.Msg {
-		copyText(text)
-		return nil
+		via, hint := copyText(text)
+		return copiedMsg{n: len([]rune(text)), via: via, hint: hint}
 	}
+}
+
+// copiedNote is the flash after a copy: how much, and where it went.
+func copiedNote(c copiedMsg) string {
+	s := commaf("copied %d chars", c.n)
+	if len(c.via) > 0 {
+		s += " → " + strings.Join(c.via, " + ")
+	} else {
+		s = commaf("could not copy %d chars: no clipboard route worked", c.n)
+	}
+	if c.hint != "" {
+		s += " · " + c.hint
+	}
+	return s
 }

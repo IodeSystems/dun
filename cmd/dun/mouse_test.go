@@ -215,13 +215,8 @@ func TestMouse_ClickActivity(t *testing.T) {
 // clears it. It never selects a block.
 func TestMouse_DragCopiesAndKeyClears(t *testing.T) {
 	var wrote []string
-	var loaded []string
-	defer func(w func(string), e func(string) string, l func(string) error) {
-		termWrite, clipEnv, tmuxLoad = w, e, l
-	}(termWrite, clipEnv, tmuxLoad)
-	termWrite = func(s string) { wrote = append(wrote, s) }
-	clipEnv = func(string) string { return "" }
-	tmuxLoad = func(s string) error { loaded = append(loaded, s); return nil }
+	var ran []string
+	fakeClip(t, map[string]string{}, &wrote, &ran, nil)
 
 	m, _, _, first := mouseConvoAt(t)
 	m.vp.SetYOffset(0)
@@ -243,19 +238,20 @@ func TestMouse_DragCopiesAndKeyClears(t *testing.T) {
 	if !m.drag.held || cmd == nil {
 		t.Fatal("release after a drag should hold the highlight and copy")
 	}
-	if m.flashText != "copied 15 chars" { // "message 0\nmessa"
+	nm, _ = m.Update(cmd())
+	m = nm.(tuiModel)
+	if m.flashText != "copied 15 chars → terminal" { // "message 0\nmessa"
 		t.Errorf("flash %q", m.flashText)
 	}
-	copyText(selText(m.vp.lines, cellPos{m.vp.YOffset + y0 - m.convoTopRow(), 0}, cellPos{m.vp.YOffset + y1 - m.convoTopRow(), 4}, 0))
-	if len(wrote) != 1 || wrote[0] != osc52("message 0\nmessa") || len(loaded) != 0 {
-		t.Errorf("outside tmux: OSC 52 only; wrote %q loaded %q", wrote, loaded)
+	if len(wrote) != 1 || wrote[0] != osc52("message 0\nmessa") || len(ran) != 0 {
+		t.Errorf("outside tmux, no native tool: OSC 52 only; wrote %q ran %q", wrote, ran)
 	}
 	// esc clears the highlight and does nothing else.
 	m = key(m, kEsc)
 	if m.drag.on || strings.Contains(m.View(), "\x1b[0;7m") {
 		t.Error("esc should clear the highlight")
 	}
-	if m.flashText != "copied 15 chars" {
+	if m.flashText != "copied 15 chars → terminal" {
 		t.Errorf("esc did more than clear: flash %q", m.flashText)
 	}
 	// Any other key clears it too, and still does its job.
@@ -333,22 +329,69 @@ func TestOSC52(t *testing.T) {
 	}
 }
 
-// Inside tmux the text also goes to tmux's buffer; the real tmux never runs.
-func TestCopyText_Tmux(t *testing.T) {
-	defer func(w func(string), e func(string) string, l func(string) error) {
-		termWrite, clipEnv, tmuxLoad = w, e, l
-	}(termWrite, clipEnv, tmuxLoad)
-	var wrote, loaded []string
-	termWrite = func(s string) { wrote = append(wrote, s) }
-	clipEnv = func(k string) string {
-		if k == "TMUX" {
-			return "/tmp/tmux-1/default,1,0"
+// fakeClip replaces every clipboard route: env is the environment, tools
+// the commands on PATH, ran records each command line, and tmuxSC is what
+// `tmux show-options -gv set-clipboard` answers.
+func fakeClip(t *testing.T, env map[string]string, wrote, ran *[]string, tools map[string]bool, tmuxSC ...string) {
+	t.Helper()
+	w, e, l, r := termWrite, clipEnv, clipLook, clipRun
+	t.Cleanup(func() { termWrite, clipEnv, clipLook, clipRun = w, e, l, r })
+	termWrite = func(s string) { *wrote = append(*wrote, s) }
+	clipEnv = func(k string) string { return env[k] }
+	clipLook = func(name string) bool { return tools[name] }
+	clipRun = func(stdin, name string, args ...string) (string, error) {
+		line := strings.Join(append([]string{name}, args...), " ")
+		if line == "tmux show-options -gv set-clipboard" {
+			if len(tmuxSC) > 0 {
+				return tmuxSC[0], nil
+			}
+			return "external", nil
 		}
-		return ""
+		*ran = append(*ran, line+" <- "+stdin)
+		return "", nil
 	}
-	tmuxLoad = func(s string) error { loaded = append(loaded, s); return nil }
-	copyText("copied")
-	if len(wrote) != 1 || wrote[0] != osc52("copied") || len(loaded) != 1 || loaded[0] != "copied" {
-		t.Errorf("in tmux: wrote %q loaded %q", wrote, loaded)
+}
+
+// The routes per setting; the real tmux and clipboard tools never run.
+func TestCopyText_Routes(t *testing.T) {
+	inTmux := map[string]string{"TMUX": "/tmp/tmux-1/default,1,0"}
+	cases := []struct {
+		name   string
+		env    map[string]string
+		tools  map[string]bool
+		sc     string
+		wrote  int
+		ran    []string
+		via    string
+		hinted bool
+	}{
+		{"plain terminal", map[string]string{}, nil, "", 1, nil, "terminal", false},
+		{"local mac", map[string]string{}, map[string]bool{"pbcopy": true}, "", 1, []string{"pbcopy <- x"}, "pbcopy terminal", false},
+		{"mac over ssh skips pbcopy", map[string]string{"SSH_TTY": "/dev/ttys1"}, map[string]bool{"pbcopy": true}, "", 1, nil, "terminal", false},
+		{"Terminal.app, nothing else", map[string]string{"TERM_PROGRAM": "Apple_Terminal", "SSH_TTY": "x"}, nil, "", 1, nil, "terminal", true},
+		{"tmux external", inTmux, nil, "external", 0, []string{"tmux load-buffer -w - <- x"}, "tmux", false},
+		{"tmux on: OSC 52 only, tmux buffers it", inTmux, nil, "on", 1, nil, "tmux", false},
+		{"tmux off", inTmux, nil, "off", 0, []string{"tmux load-buffer - <- x"}, "tmux buffer", true},
+		{"tmux off, local wl-copy", map[string]string{"TMUX": "t", "WAYLAND_DISPLAY": "w"}, map[string]bool{"wl-copy": true}, "off", 0, []string{"wl-copy <- x", "tmux load-buffer - <- x"}, "wl-copy tmux buffer", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var wrote, ran []string
+			fakeClip(t, c.env, &wrote, &ran, c.tools, c.sc)
+			via, hint := copyText("x")
+			if len(wrote) != c.wrote || strings.Join(ran, "|") != strings.Join(c.ran, "|") ||
+				strings.Join(via, " ") != c.via || (hint != "") != c.hinted {
+				t.Errorf("wrote %d ran %q via %q hint %q", len(wrote), ran, via, hint)
+			}
+		})
+	}
+}
+
+func TestCopiedNote(t *testing.T) {
+	if s := copiedNote(copiedMsg{n: 1234, via: []string{"pbcopy", "tmux"}}); s != "copied 1,234 chars → pbcopy + tmux" {
+		t.Errorf("%q", s)
+	}
+	if s := copiedNote(copiedMsg{n: 3}); !strings.Contains(s, "could not copy") {
+		t.Errorf("%q", s)
 	}
 }

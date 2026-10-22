@@ -1475,6 +1475,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateScrollPin()
 		return m, cmd
 
+	case copiedMsg:
+		return m, m.flash(copiedNote(msg))
+
 	case flashMsg:
 		return m, nil // the redraw is the point: an expired note leaves the status line
 
