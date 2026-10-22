@@ -798,3 +798,37 @@ says "(just type)" while it is highlighted and not yet capturing.
 - **Not done:** the web client renders neither (see icebox). Per-call duration
   is not on the wire (tool_call and tool_result are emitted together after the
   call), so the aggregate shows no total time.
+
+## ✅ Turn interrupt (USER, 2026-10-22)
+
+- **Engine:** `Harness.Interrupt` (`interrupt.go`) cancels the turn's context
+  with `ErrInterrupted`; runTurn does not retry it. `finishInterrupt` saves the
+  cut round's streamed reply (captured in the reasoning tee — agentkit only
+  persists a round whose stream completed), answers an orphan call with a
+  user-interrupt result, and appends a `[the user interrupted this turn]`
+  notification (tag `interrupt`) with the reasoning's duration, length and last
+  sentence — never the reasoning itself. All silent appends. `withInterrupt`
+  (outermost dispatcher) skips calls reached after the interrupt and relabels
+  the one it cut; `liftQueued` lifts nothing while interrupting, so typed
+  messages stay pending and the loop starts the next turn at once.
+- **Protocol:** command `interrupt`; `done.reason = "interrupted"`; idle →
+  `control{id: interrupt}` "nothing to interrupt". `/interrupt` is an engine
+  command (web gets it).
+- **Fix on the way:** the reasoning tee closed a cancelled stream cleanly, which
+  agentkit read as a finished reply (partial persisted, turn "succeeded"). It
+  now sends an error chunk, and refuses to start a round on a cancelled ctx.
+- **TUI:** ctrl+k while busy interrupts (idle: kill-to-end-of-line); esc
+  interrupts after every existing esc consumer; ctrl+c unchanged; busy hint
+  `ctrl+k interrupt · ctrl+c quit (the turn keeps running)`; `interrupting…`
+  status; thought folds `interrupted after Ns`; open run marked; dim
+  `⏹ interrupted — …` row (no-shrink test covers it).
+- **Web:** Stop button while busy → `/interrupt`; `done{interrupted}` keeps the
+  streamed partial and adds the note.
+- **Proven:** `interrupt_test.go` (harness), `cmd/dun/interrupt_test.go`
+  (engine over proto, queued → next turn), `interrupt_tui_test.go`, jest; live
+  in `tmux -L dunint` against a fake slow-thinking server with a scratch
+  DUN_HOME dund — the next request carried partial → marker → message.
+- **Not done:** an interrupt during `/rephrase`'s pre-turn call is answered
+  "nothing to interrupt" (the turn has not started). A tool that ignores ctx
+  holds the interrupt until it returns. Heredoc tool format: the saved partial
+  can hold half a heredoc block (prose only was checked).

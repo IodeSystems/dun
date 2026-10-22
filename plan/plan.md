@@ -94,6 +94,10 @@ full detail archived in `done.md`.
   calls and thinking is one grow-only box (the log never shrinks); enter
   opens either in the pager (`cmd/dun/pager.go`); the selection is
   a pulsing background filter (`cmd/dun/band.go`). See `done.md`.
+- **Turn interrupt** (2026-10-22) — ctrl+k / esc / `/interrupt` / web Stop
+  cut the running turn; the partial reply, a cut call's result and a marker
+  (short reasoning note) stay in the transcript; queued messages start the
+  next turn. ctrl+c still only quits the TUI. See `done.md`.
 
 ## Active work
 
