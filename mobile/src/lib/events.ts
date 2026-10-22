@@ -5,6 +5,7 @@
 // the fields read here are relied on.
 
 import type { McpTool, McpTools } from './mcp';
+import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 
 export type Item =
   | { key: string; kind: 'user'; text: string; queued?: boolean }
@@ -49,10 +50,12 @@ export type View = {
   mcpTools: McpTools | null;
   /** The engine said the session is closed: the client should leave it. */
   closed: boolean;
+  /** dund upgrading (the upgrade event): the banner; null when none. */
+  upgrade: Upgrade | null;
   n: number; // key counter
 };
 
-export const empty: View = { items: [], streaming: null, busy: false, status: '', ask: null, commands: [], skills: [], models: null, settings: null, mcpTools: null, closed: false, n: 0 };
+export const empty: View = { items: [], streaming: null, busy: false, status: '', ask: null, commands: [], skills: [], models: null, settings: null, mcpTools: null, closed: false, upgrade: null, n: 0 };
 
 type Ev = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -63,6 +66,12 @@ type NewItem = WithoutKey<Item>;
 
 function push(v: View, item: NewItem): View {
   return { ...v, n: v.n + 1, items: [...v.items, { ...item, key: String(v.n) } as Item] };
+}
+
+/** A user message; dund's automatic resume after a restart is a note, not the person's. */
+function pushUser(v: View, text: string, queued?: boolean): View {
+  if (text.startsWith(autoResumePrefix)) return push(v, { kind: 'note', text: '↻ resumed after the restart — ' + text.slice(autoResumePrefix.length) });
+  return push(v, queued ? { kind: 'user', text, queued } : { kind: 'user', text });
 }
 
 function settleQueued(v: View): View {
@@ -80,7 +89,7 @@ function pushQuestion(v: View, args: unknown): View {
 function fromHistory(v: View, it: Ev): View {
   switch (it.kind) {
     case 'user':
-      return push(v, { kind: 'user', text: str(it.content) });
+      return pushUser(v, str(it.content));
     case 'assistant':
       return push(v, { kind: 'assistant', text: str(it.content) });
     case 'tool_call':
@@ -107,9 +116,11 @@ export function apply(v: View, ev: Ev): View {
     case 'snapshot':
       return applySnapshot(ev, v);
     case 'history':
-      return { ...replaceWith((ev.items as unknown[]) ?? [], v), busy: v.busy, status: v.status, ask: v.ask };
+      return { ...replaceWith((ev.items as unknown[]) ?? [], v), busy: v.busy, status: v.status, ask: v.ask, upgrade: v.upgrade };
     case 'user':
-      return push(v, { kind: 'user', text: str(ev.content), queued: ev.queued === true });
+      return pushUser(v, str(ev.content), ev.queued === true);
+    case 'upgrade':
+      return { ...v, upgrade: parseUpgrade(ev) };
     case 'turn':
       return { ...v, busy: true, status: 'working…' };
     case 'token':
@@ -170,7 +181,7 @@ export function apply(v: View, ev: Ev): View {
     case 'server':
       return ev.message ? push(v, { kind: 'note', text: str(ev.message) }) : v;
     case 'reset':
-      return { ...empty, commands: v.commands, skills: v.skills, models: v.models, settings: v.settings, n: v.n };
+      return { ...empty, commands: v.commands, skills: v.skills, models: v.models, settings: v.settings, upgrade: v.upgrade, n: v.n };
     case 'engine':
       if (ev.state === 'started') return v;
       return push({ ...v, busy: false, ask: ev.state === 'restarting' ? null : v.ask },

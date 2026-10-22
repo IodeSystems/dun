@@ -87,6 +87,16 @@ export const Slash = graphql(`
   }
 `);
 
+export const UpgradeNow = graphql(`
+  mutation UpgradeNow {
+    dund {
+      upgradeNow {
+        ok
+      }
+    }
+  }
+`);
+
 export const ForgetSession = graphql(`
   mutation ForgetSession($id: String!) {
     dund {

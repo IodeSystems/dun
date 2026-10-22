@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { explain } from '@/api/client';
 import { followSession } from '@/api/live';
-import { Answer, AskModels, Control, ForgetSession, GetUI, PutUI, SendMessage, Slash, SwitchModel } from '@/api/ops';
+import { Answer, AskModels, Control, ForgetSession, GetUI, Hello, PutUI, SendMessage, Slash, SwitchModel, UpgradeNow } from '@/api/ops';
 import { McpForm } from '@/components/McpForm';
 import { McpToolsPanel } from '@/components/McpToolsPanel';
 import { ModelPicker } from '@/components/ModelPicker';
@@ -15,6 +15,7 @@ import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
 import { apply, empty, interrupting, isKillAll, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
+import { shouldReload, upgradeLines, waitsOnTurnHere } from '@/lib/upgrade';
 import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
@@ -42,11 +43,42 @@ export default function Session() {
   const uiLoaded = useRef(false);
   const listRef = useRef<FlatList<Item>>(null);
 
+  // The dund build this page loaded against. After dund restarts into
+  // another build (a snapshot follows the reconnect), the web page reloads
+  // so the client matches it.
+  const loadedVersion = useRef<string | null>(null);
   useEffect(() => {
     if (!auth.client || !auth.live || !id) return;
-    return followSession(auth.client, auth.live, id, {
-      onEvent: (ev) => setView((v) => apply(v, ev)),
-      onConn: setConn,
+    const live = auth.live;
+    const client = auth.client;
+    const dundVersion = async () => {
+      try {
+        return (await client.request(Hello)).dund.hello?.version ?? '';
+      } catch {
+        return '';
+      }
+    };
+    void dundVersion().then((v) => {
+      loadedVersion.current ??= v || null;
+    });
+    const checkBuild = () =>
+      void dundVersion().then((v) => {
+        if (Platform.OS === 'web' && shouldReload(loadedVersion.current, v)) (globalThis as { location?: { reload(): void } }).location?.reload();
+      });
+    let lost = false;
+    return followSession(client, live, id, {
+      onEvent: (ev) => {
+        setView((v) => apply(v, ev));
+        if (ev.type === 'snapshot') checkBuild();
+      },
+      onConn: (problem) => {
+        setConn(problem);
+        if (problem) lost = true;
+        else if (lost) {
+          lost = false;
+          checkBuild();
+        }
+      },
       onUnauthorized: () => void auth.signOut(),
     });
   }, [auth, id]);
@@ -116,6 +148,17 @@ export default function Session() {
   function stop() {
     setView(interrupting);
     void runSlash('interrupt');
+  }
+
+  // Restart now: dund interrupts what the upgrade waits for; those sessions
+  // resume after the restart.
+  async function upgradeNow() {
+    if (!(await confirm('Restart now', 'Interrupt the running work and restart dund into the new build? Interrupted sessions resume afterwards.'))) return;
+    try {
+      await auth.client?.request(UpgradeNow);
+    } catch (e) {
+      setSendErr('restart: ' + explain(e).message);
+    }
   }
 
   function openPicker(query: string) {
@@ -272,6 +315,19 @@ export default function Session() {
             />
           ) : null}
           {text.startsWith('/') && !view.ask ? <Palette rows={suggest(text, view.commands, view.skills)} pick={setText} /> : null}
+          {view.upgrade ? (
+            <View style={{ gap: 2 }}>
+              {upgradeLines(view.upgrade, id).map((l, i) => (
+                <Muted key={i}>{l}</Muted>
+              ))}
+              {view.upgrade.state === 'pending' ? (
+                <View style={{ flexDirection: 'row', gap: space.sm }}>
+                  {waitsOnTurnHere(view.upgrade, id) && view.busy ? <Button title="Stop" onPress={stop} disabled={view.status === 'interrupting…'} /> : null}
+                  <Button title="Restart now" onPress={() => void upgradeNow()} />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
           {conn ? <ErrorText>{conn}</ErrorText> : view.status ? <Muted>{view.status}</Muted> : null}
           {sendErr ? <ErrorText>{sendErr}</ErrorText> : null}
           <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-end' }}>
