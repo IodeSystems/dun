@@ -7,7 +7,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/iodesystems/dun/proto"
@@ -31,17 +30,17 @@ func UnixPeer(c net.Conn) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var cred *syscall.Ucred
+	var uid uint32
 	var cerr error
 	if err := raw.Control(func(fd uintptr) {
-		cred, cerr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+		uid, cerr = peerUID(int(fd)) // peer_<os>.go
 	}); err != nil {
 		return "", err
 	}
 	if cerr != nil {
 		return "", cerr
 	}
-	return "unix:" + strconv.Itoa(int(cred.Uid)), nil
+	return "unix:" + strconv.FormatUint(uint64(uid), 10), nil
 }
 
 // Server speaks the protocol to clients over a listener.

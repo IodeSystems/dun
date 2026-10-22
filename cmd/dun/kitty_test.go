@@ -113,7 +113,7 @@ func TestProbeKittySilentTerminalDoesNotNeedAKeypress(t *testing.T) {
 func TestProbeKittyRestoresTermios(t *testing.T) {
 	master, slave := kittyPTY(t)
 	fd := int(slave.Fd())
-	before, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	before, err := unix.IoctlGetTermios(fd, getTermios)
 	if err != nil {
 		t.Skip(err.Error())
 	}
@@ -122,7 +122,7 @@ func TestProbeKittyRestoresTermios(t *testing.T) {
 	readQuery(t, master)
 	master.WriteString("\x1b[?62;1;6c")
 	<-done
-	after, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	after, err := unix.IoctlGetTermios(fd, getTermios)
 	if err != nil {
 		t.Fatal(err)
 	}
