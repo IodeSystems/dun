@@ -130,6 +130,12 @@ USER's choices (2026-10-21):
 - Realtime: RT-1..3 (graphql-ws), not the RT-4 relay.
 - A session is visible only to its owner (the principal that created it).
   Sharing/invites: maybe later (optional extension).
+- Multi-user state from the start (USER): a session has a member list (only
+  the owner for now) and dund keeps UI state per (session, principal) — read
+  position, draft, sent-input history, open agent view, focus/selection,
+  collapsed blocks — shared by that user's devices, never by other users.
+  Session-wide toggles (rephrase, suggest mode, docker, model, servers) stay
+  ONE value per session, and their events say who changed them.
 - gat has no graphql-ws subscriptions (`gw/gat/gat.go:238`: "WebSocket
   subscriptions are not supported in gat mode"; only its own HMAC pubsub WS
   at `/_gat/subscribe`). USER: add graphql-transport-ws subscriptions over
@@ -157,6 +163,35 @@ Where it stands:
   agent_history, suggestions, history.
 - Assumptions: the diagnostic blocks of usage (side_calls, surfacing, cache)
   stay open maps; agent command ids stay strings, as the TUI sends them.
+- **S1 engine half done** (`49665b7`): `dun -p` emits `proto` structs with
+  `{v, session, ts}`; a live run carries the same keys per type as before
+  (13 types). seq is NOT set by the engine: dund's Log numbers events so seq
+  survives an engine restart.
+- **S1 finding — TUI state by owner** (`tuiModel`):
+  - session (every client the same; must come from events): convo, streaming
+    text, pending/active tool, tools, branch, starting, busy, the open ask
+    (question, options, multi), agents, jobs, skills/prompts, retry banner,
+    queued count, context stats, model/provider, suggest mode.
+  - per user (dund, per principal): input draft, sent-input history, focus,
+    selection, activity level/selection, agent scope, search, scroll/read
+    position, ask selection in progress (sel, note, checked), suggestion
+    list + selection.
+  - local only (render/device): viewport, caches, frame, width/height,
+    spinner, markdown renderer, overlays/pickers/forms while open, mouse
+    mode, idle clock, trace, replay.
+  - supervision (moves to dund in S2): restarts, wantServers, skipHistory,
+    everUp, exitAnnounced, launcher/reload.
+- **S1 gaps — nothing tells a second client:**
+  1. the user's message (the TUI appends what it sent; no event echoes it);
+  2. a turn starting (busy is inferred from sending; a turn begun by a
+     background wake has no message at all);
+  3. an ask answered (another client keeps showing the question);
+  4. the model/provider/url (the TUI reads its own config);
+  5. suggest mode (TUI-only today; shared per USER);
+  6. rephrase on/off (engine toggle; no state event).
+  Fix: engine events `user` (echo; author added by dund), `turn` (start),
+  `answered`, and a `settings` state event (model, provider, rephrase,
+  suggest); the TUI renders from them instead of from what it sent.
 
 Slices, in order:
 - ✅ **S0 engine protocol (internal).** The `proto/` types and `Log`, with
@@ -178,9 +213,8 @@ Slices, in order:
 - **S5 RN client.** Expo + react-native-web; graphql-codegen types; one
   `graphql-ws` client (RT-3); PWA manifest + service worker.
 
-- **next:** S1 — the engine emits `proto` structs through a `Log`
-  (seq on every line); the TUI decodes `proto.Event`; then find the TUI
-  state not derivable from events.
+- **next:** S1 rest — engine events `user`, `turn`, `answered`,
+  `settings`; the TUI renders from them, not from what it sent.
 - **risks:**
   - The TUI holds state today that may not be derivable from events (its
     restart counters, suggestions state, replay mode); S1 finds out.
