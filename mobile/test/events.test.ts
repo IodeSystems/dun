@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import { apply, applySnapshot, empty, filterModels, parseLine, replaceWith, suggest, type View } from '../src/lib/events';
+import { apply, applySnapshot, empty, filterModels, interruptedNote, interrupting, parseLine, replaceWith, suggest, type View } from '../src/lib/events';
 
 const run = (evs: Record<string, unknown>[], v: View = empty) => evs.reduce(apply, v);
 
@@ -134,4 +134,30 @@ test('a provider that failed to list (ids null) does not break the picker', () =
     { name: 'ok', url: 'https://ok', ids: ['m1'] },
   ];
   expect(filterModels(ps, '').map((r) => r.id)).toEqual(['m1']);
+});
+
+test('an interrupted turn keeps its partial reply, ends with a note, and keeps queued marks', () => {
+  const v = run([
+    { type: 'user', content: 'go' },
+    { type: 'turn', kind: 'user' },
+    { type: 'token', text: 'Starting with' },
+    { type: 'user', content: 'no, the other one', queued: true },
+  ]);
+  const s = interrupting(v);
+  expect(s.status).toBe('interrupting…');
+  const w = apply(s, { type: 'done', reason: 'interrupted' });
+  expect(w.busy).toBe(false);
+  expect(w.status).toBe('');
+  expect(w.streaming).toBeNull();
+  expect(w.items.map((i) => i.kind)).toEqual(['user', 'user', 'assistant', 'note']);
+  expect(w.items[2]).toMatchObject({ text: 'Starting with' });
+  expect(w.items[3]).toMatchObject({ text: interruptedNote });
+  expect(w.items[1]).toMatchObject({ queued: true });
+});
+
+test('interrupting is a no-op when idle, and an idle answer clears it', () => {
+  expect(interrupting(empty)).toBe(empty);
+  const v = interrupting(run([{ type: 'turn' }]));
+  const w = apply(v, { type: 'control', id: 'interrupt', message: 'nothing to interrupt: no turn is running' });
+  expect(w.status).toBe('');
 });

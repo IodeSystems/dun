@@ -13,7 +13,7 @@ import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
-import { apply, empty, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
+import { apply, empty, interrupting, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
 import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
@@ -109,6 +109,12 @@ export default function Session() {
     } catch (e) {
       setSendErr('/' + line + ': ' + explain(e).message);
     }
+  }
+
+  // Stop: the engine's /interrupt. The turn ends with done{interrupted}.
+  function stop() {
+    setView(interrupting);
+    void runSlash('interrupt');
   }
 
   function openPicker(query: string) {
@@ -302,6 +308,7 @@ export default function Session() {
                 }
               }}
             />
+            {view.busy ? <Button title="Stop" onPress={stop} disabled={view.status === 'interrupting…'} /> : null}
             <Button
               title="Send"
               primary

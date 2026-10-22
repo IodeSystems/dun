@@ -132,6 +132,7 @@ export function apply(v: View, ev: Ev): View {
       if (ev.tool === 'ask_user') return push(v, { kind: 'user', text: str(ev.result) });
       return push(v, { kind: 'tool', title: '↳ ' + str(ev.tool), body: str(ev.result) });
     case 'done':
+      if (ev.reason === 'interrupted') return interrupted(v);
       // Messages queued into the turn have been read by it.
       return { ...settleQueued(v), busy: false, status: '', streaming: null };
     case 'error':
@@ -161,7 +162,9 @@ export function apply(v: View, ev: Ev): View {
     case 'catalog':
       return { ...v, skills: ((ev.skills as Skill[]) ?? []).map((k) => ({ name: k.name, description: k.description })) };
     case 'control': {
-      const w = ev.id === 'close' && /^closed/.test(str(ev.message)) ? { ...v, closed: true } : v;
+      let w = ev.id === 'close' && /^closed/.test(str(ev.message)) ? { ...v, closed: true } : v;
+      // No turn to interrupt: drop the "interrupting…".
+      if (ev.id === 'interrupt' && w.status === 'interrupting…') w = { ...w, status: '' };
       return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;
     }
     case 'server':
@@ -178,6 +181,25 @@ export function apply(v: View, ev: Ev): View {
       return { ...v, status: `${Number(ev.count ?? 0)} message(s) queued for the running turn` };
   }
   return v;
+}
+
+/** The line an interrupted turn ends with (the TUI's too). */
+export const interruptedNote = '⏹ interrupted — your next message continues from here';
+
+/** What the screen shows from pressing Stop until the turn ends. */
+export function interrupting(v: View): View {
+  return v.busy ? { ...v, status: 'interrupting…' } : v;
+}
+
+/**
+ * A turn the user stopped: the reply streamed so far stays (the engine keeps
+ * it too), and a note ends the turn. Queued messages stay marked: they were
+ * not read by the cut turn, they start the next one.
+ */
+function interrupted(v: View): View {
+  let w: View = { ...v, busy: false, status: '', streaming: null };
+  if (v.streaming?.trim()) w = push(w, { kind: 'assistant', text: v.streaming });
+  return push(w, { kind: 'note', text: interruptedNote });
 }
 
 /** A snapshot: the conversation, then the latest state events. */
