@@ -20,7 +20,10 @@ endif
 # Where the launcher keeps the binary it builds. Must match tools/dun.sh.
 DUN_BIN := $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/dun/dun
 
-.PHONY: build install install-bin run test clean
+# Where `make web` installs the built client that dund serves (--web-root).
+WEB_ROOT := $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/dun/web
+
+.PHONY: build install install-bin run test clean schema web
 
 build: ## build ./dun (version + source stamped)
 	go build -ldflags "$(LDFLAGS)" -o dun ./cmd/dun
@@ -41,6 +44,16 @@ run: ## build + launch the TUI
 
 test: ## build + vet + test
 	go build ./... && go vet ./... && go test ./...
+
+schema: ## regenerate mobile/schema.graphql from dund's operations
+	go run ./cmd/dun dund schema > mobile/schema.graphql
+
+web: ## build the client (mobile/, react-native-web) and install it for dund's --web-root
+	cd mobile && pnpm install --frozen-lockfile && pnpm export:web
+	@rm -rf $(WEB_ROOT).new && mkdir -p $(dir $(WEB_ROOT)) && cp -r mobile/dist $(WEB_ROOT).new
+	@if [ -d $(WEB_ROOT) ]; then mv $(WEB_ROOT) $(WEB_ROOT).old; fi
+	@mv $(WEB_ROOT).new $(WEB_ROOT) && rm -rf $(WEB_ROOT).old
+	@echo "installed the web client → $(WEB_ROOT)"
 
 clean:
 	rm -f ./dun

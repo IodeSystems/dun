@@ -19,7 +19,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -57,18 +61,66 @@ type Server struct {
 	api   huma.API
 }
 
-// Handler is the whole HTTP surface.
-func Handler(svc *dund.Service, owner string) (http.Handler, error) {
+// Handler is the whole HTTP surface. webRoot, when set, is the built client
+// (mobile: expo export --platform web) served at / from the filesystem
+// (WEB-5); without it / is the embedded stopgap page.
+func Handler(svc *dund.Service, owner, webRoot string) (http.Handler, error) {
+	if webRoot != "" {
+		if st, err := os.Stat(filepath.Join(webRoot, "index.html")); err != nil || st.IsDir() {
+			return nil, fmt.Errorf("web root %s has no index.html", webRoot)
+		}
+	}
+	return newRouter(svc, owner, true, webRoot)
+}
+
+// spa serves webRoot's files, and its index.html for any other path: a
+// client route (/session/…) is the app's shell, which routes itself.
+func spa(webRoot string) http.HandlerFunc {
+	files := http.FileServer(http.Dir(webRoot))
+	return func(w http.ResponseWriter, req *http.Request) {
+		p := filepath.Join(webRoot, filepath.Clean("/"+req.URL.Path))
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			files.ServeHTTP(w, req)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, req, filepath.Join(webRoot, "index.html"))
+	}
+}
+
+// SDL is the GraphQL schema, for client codegen (WEB-4). No service runs:
+// building the schema calls no handler.
+func SDL() (string, error) {
+	h, err := newRouter(nil, "", false, "")
+	if err != nil {
+		return "", err
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/schema/graphql", nil))
+	if rec.Code != http.StatusOK {
+		return "", fmt.Errorf("schema: %d %s", rec.Code, rec.Body.String())
+	}
+	return rec.Body.String(), nil
+}
+
+func newRouter(svc *dund.Service, owner string, auth bool, webRoot string) (http.Handler, error) {
 	r := chi.NewRouter()
 	s := &Server{svc: svc, owner: owner}
-	r.Use(s.authenticate)
+	if auth {
+		r.Use(s.authenticate)
+	}
 	page := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(indexHTML)
 	}
-	r.Get("/", page)
-	r.Get("/index.html", page)
+	switch {
+	case webRoot != "":
+		r.NotFound(spa(webRoot))
+	case auth: // the stopgap page, when there is no built client
+		r.Get("/", page)
+		r.Get("/index.html", page)
+	}
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("ok " + Version + "\n"))
@@ -87,9 +139,10 @@ func Handler(svc *dund.Service, owner string) (http.Handler, error) {
 	return r, nil
 }
 
-// open are the paths anyone may reach. The page holds no data; it asks for
+// open are the API paths anyone may reach. Everything outside /api is the
+// client (pages and assets, which hold no data) and is open too; it asks for
 // the token and calls the API with it.
-var open = map[string]bool{"/": true, "/index.html": true, "/healthz": true, "/api/v1/hello": true}
+var open = map[string]bool{"/api/v1/hello": true}
 
 // indexHTML is the stopgap browser client (web/index.html). Embedded: dund is
 // a tool binary with no slot model (WEB-5's exception).
@@ -102,7 +155,7 @@ var indexHTML []byte
 // the context every handler gets, whether called as REST or through gat.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if open[r.URL.Path] {
+		if open[r.URL.Path] || !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}

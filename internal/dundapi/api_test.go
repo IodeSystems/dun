@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +24,7 @@ func setup(t *testing.T) (*httptest.Server, string, *dund.Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(svc.Close)
-	h, err := dundapi.Handler(svc, "unix:1000")
+	h, err := dundapi.Handler(svc, "unix:1000", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,5 +203,40 @@ func TestPageIsServedWithoutAToken(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 || !strings.Contains(string(b), "dun dund token") {
 		t.Fatalf("page: %d %.80s", resp.StatusCode, b)
+	}
+}
+
+// A web root is served at /, with the app shell for its client routes; the
+// API still needs the token.
+func TestWebRootServesTheClient(t *testing.T) {
+	dir := t.TempDir()
+	svc, _ := dund.New(dir, &fakeSpawner{})
+	defer svc.Close()
+	root := t.TempDir()
+	_ = os.WriteFile(filepath.Join(root, "index.html"), []byte("<html>app shell</html>"), 0o644)
+	_ = os.MkdirAll(filepath.Join(root, "_expo"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "_expo", "app.js"), []byte("js"), 0o644)
+	h, err := dundapi.Handler(svc, "unix:1000", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	for path, want := range map[string]string{"/": "app shell", "/session/abc": "app shell", "/_expo/app.js": "js"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || !strings.Contains(string(b), want) {
+			t.Errorf("%s: %d %q", path, resp.StatusCode, b)
+		}
+	}
+	if resp, _ := http.Get(srv.URL + "/api/v1/sessions"); resp.StatusCode != 401 {
+		t.Errorf("api without token: %d", resp.StatusCode)
+	}
+	if _, err := dundapi.Handler(svc, "unix:1000", t.TempDir()); err == nil {
+		t.Error("a web root without index.html was accepted")
 	}
 }

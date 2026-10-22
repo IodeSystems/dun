@@ -99,12 +99,12 @@ func newRoot() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&l.home, "home", "", "state directory (default $DUN_HOME, else ~/.dun)")
 	root.PersistentFlags().StringVar(&l.sock, "socket", "", "unix socket (default <home>/dund.sock)")
-	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l), serviceCmd(l))
+	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l), serviceCmd(l), schemaCmd())
 	return root
 }
 
 func serveCmd(l *loader) *cobra.Command {
-	var bin, httpAddr string
+	var bin, httpAddr, webRoot string
 	var checkOnly bool
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -116,12 +116,13 @@ func serveCmd(l *loader) *cobra.Command {
 				bin = defaultDun()
 			}
 			if checkOnly {
-				return check(l, bin, httpAddr)
+				return check(l, bin, httpAddr, webRoot)
 			}
-			return serve(cmd.Context(), l, bin, httpAddr)
+			return serve(cmd.Context(), l, bin, httpAddr, webRoot)
 		},
 	}
 	cmd.Flags().StringVar(&bin, "dun", "", "the dun binary engines run (default: beside dund, else on PATH)")
+	cmd.Flags().StringVar(&webRoot, "web-root", "", "serve this built client at / (mobile: pnpm export:web); default: the built-in stopgap page")
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "prove these settings can run, then exit (the unit's ExecStartPre)")
 	cmd.Flags().StringVar(&httpAddr, "http", "", "also serve HTTP here (e.g. 127.0.0.1:20003); needs a token (dund token)")
 	return cmd
@@ -145,7 +146,7 @@ func defaultDun() string {
 	return "dun"
 }
 
-func serve(ctx context.Context, l *loader, bin, httpAddr string) error {
+func serve(ctx context.Context, l *loader, bin, httpAddr, webRoot string) error {
 	if err := os.MkdirAll(l.home, 0o700); err != nil {
 		return err
 	}
@@ -179,7 +180,7 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string) error {
 	go func() { errc <- dund.NewServer(svc, dund.UnixPeer).Serve(ln) }()
 	var hs *http.Server
 	if httpAddr != "" {
-		h, err := dundapi.Handler(svc, dundapi.Owner(os.Getuid()))
+		h, err := dundapi.Handler(svc, dundapi.Owner(os.Getuid()), webRoot)
 		if err != nil {
 			ln.Close()
 			return err
@@ -282,6 +283,22 @@ func pidAlive(path string) (int, bool) {
 		return 0, false
 	}
 	return pid, syscall.Kill(pid, 0) == nil
+}
+
+func schemaCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "schema",
+		Short: "print the GraphQL schema (SDL) clients generate their types from",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			sdl, err := dundapi.SDL()
+			if err != nil {
+				return err
+			}
+			fmt.Print(sdl)
+			return nil
+		},
+	}
 }
 
 func tokenCmd(l *loader) *cobra.Command {

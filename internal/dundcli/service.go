@@ -216,7 +216,7 @@ WantedBy=default.target
 // check proves `serve` can run with these settings: the state directory is
 // usable, the registry loads, the engine binary is executable, no other dund
 // owns this home, and the HTTP address can be bound.
-func check(l *loader, bin, httpAddr string) error {
+func check(l *loader, bin, httpAddr, webRoot string) error {
 	if err := os.MkdirAll(l.home, 0o700); err != nil {
 		return fmt.Errorf("home %s: %w", l.home, err)
 	}
@@ -245,6 +245,11 @@ func check(l *loader, bin, httpAddr string) error {
 		ln.Close()
 		if !dund.TokenExists(filepath.Join(l.home, "dund")) {
 			fmt.Fprintln(os.Stderr, "note: no local token yet — HTTP clients are refused until `dun dund token`")
+		}
+	}
+	if webRoot != "" {
+		if st, err := os.Stat(filepath.Join(webRoot, "index.html")); err != nil || st.IsDir() {
+			return fmt.Errorf("web root %s has no index.html (pnpm export:web in mobile/)", webRoot)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "dund: check ok (home %s, engines %s", l.home, bin)

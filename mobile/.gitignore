@@ -42,3 +42,6 @@ yarn-error.*
 
 # Gradle output of local Expo modules
 /modules/*/android/build/
+
+# generated GraphQL client (pnpm gen)
+/src/gql/

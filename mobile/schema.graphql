@@ -1,0 +1,142 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+directive @derived(operationId: String) on FIELD_DEFINITION | OBJECT | INPUT_OBJECT | INPUT_FIELD_DEFINITION | ENUM | SCALAR | UNION | INTERFACE | ARGUMENT_DEFINITION
+
+type DundMutationNamespace {
+  answer(body: dund_AnswerInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "answer")
+  control(body: dund_ControlInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "control")
+  createSession(body: dund_CreateInputBodyInput!): dund_IDOutputBody @derived(operationId: "createSession")
+  forgetSession(id: String!): dund_OKOutputBody @derived(operationId: "forgetSession")
+  putUI(body: dund_UIInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "putUI")
+  restartSession(body: dund_RestartInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "restartSession")
+  sendMessage(body: dund_MessageInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "sendMessage")
+  stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
+  v1: DundV1MutationNamespace!
+}
+
+type DundQueryNamespace {
+  getUI(id: String!): dund_UIOutputBody @derived(operationId: "getUI")
+  hello: dund_HelloOutputBody @derived(operationId: "hello")
+  listSessions: dund_SessionsOutputBody @derived(operationId: "listSessions")
+  sessionEvents(
+    """the last seq seen; 0 for the start"""
+    after: Long
+    id: String!
+    """seconds to wait for the first new event (max 25)"""
+    wait: Long
+  ): dund_EventsOutputBody @derived(operationId: "sessionEvents")
+  v1: DundV1QueryNamespace!
+}
+
+type DundV1MutationNamespace {
+  answer(body: dund_AnswerInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "answer")
+  control(body: dund_ControlInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "control")
+  createSession(body: dund_CreateInputBodyInput!): dund_IDOutputBody @derived(operationId: "createSession")
+  forgetSession(id: String!): dund_OKOutputBody @derived(operationId: "forgetSession")
+  putUI(body: dund_UIInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "putUI")
+  restartSession(body: dund_RestartInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "restartSession")
+  sendMessage(body: dund_MessageInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "sendMessage")
+  stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
+}
+
+type DundV1QueryNamespace {
+  getUI(id: String!): dund_UIOutputBody @derived(operationId: "getUI")
+  hello: dund_HelloOutputBody @derived(operationId: "hello")
+  listSessions: dund_SessionsOutputBody @derived(operationId: "listSessions")
+  sessionEvents(
+    """the last seq seen; 0 for the start"""
+    after: Long
+    id: String!
+    """seconds to wait for the first new event (max 25)"""
+    wait: Long
+  ): dund_EventsOutputBody @derived(operationId: "sessionEvents")
+}
+
+"""Untyped JSON value (used as a fallback for OpenAPI schemas that can't be mapped exactly)."""
+scalar JSON
+
+"""64-bit integer encoded as a decimal string to preserve precision past 2^53. Accepts a JSON number or a decimal string as input."""
+scalar Long
+
+type Mutation {
+  dund: DundMutationNamespace!
+}
+
+type Query {
+  dund: DundQueryNamespace!
+}
+
+input dund_AnswerInputBodyInput {
+  value: String!
+}
+
+input dund_ControlInputBodyInput {
+  action: String!
+  """control: /docker, /worktree, /mcp…; server: /rag, /lsp"""
+  kind: dund_ControlInputBodyKind!
+  target: String!
+}
+
+"""control: /docker, /worktree, /mcp…; server: /rag, /lsp"""
+enum dund_ControlInputBodyKind {
+  control
+  server
+}
+
+input dund_CreateInputBodyInput {
+  args: [String!]
+  resume: String
+  workspace: String!
+}
+
+type dund_EventsOutputBody {
+  events: [JSON!]!
+  """pass as after on the next call"""
+  last: Long!
+  snapshot: JSON
+}
+
+type dund_HelloOutputBody {
+  protocol: Long!
+  version: String!
+}
+
+type dund_IDOutputBody {
+  id: String!
+}
+
+input dund_MessageInputBodyInput {
+  content: String!
+}
+
+type dund_OKOutputBody {
+  ok: Boolean!
+}
+
+input dund_RestartInputBodyInput {
+  args: [String!]
+}
+
+type dund_SessionSummary {
+  id: String!
+  lastSeq: Long!
+  members: [String!]!
+  owner: String!
+  running: Boolean!
+  workspace: String!
+}
+
+type dund_SessionsOutputBody {
+  items: [dund_SessionSummary!]!
+}
+
+input dund_UIInputBodyInput {
+  state: JSON!
+}
+
+type dund_UIOutputBody {
+  state: JSON!
+}
