@@ -294,7 +294,20 @@ Where it stands:
   made; https://dun.iodesystems.com/healthz 200 through hz. A shim
   rebuild (`dun --version`) made dund re-exec into the new build on its
   own (journal 21:59:01).
-- **Stopgap web page** (`4a580b4`): `/` serves plain HTML+JS over
+- **S5 first cut** (`a8268de` scaffold, `08614e0`): `mobile/` — Expo SDK 57,
+  expo-router, react-native-web (caveat 9), TanStack Query, typed GraphQL
+  (WEB-4: `dun dund schema` → `mobile/schema.graphql` → graphql-codegen
+  client-preset, string documents → graphql-request). Screens: sign-in
+  (address + token, checked before kept; SecureStore / localStorage),
+  sessions, a session (long-poll via `sessionEvents`, pure reducer with 6
+  jest tests, asks with option buttons). `make web` exports and installs to
+  ~/.local/share/dun/web; the unit now runs `--web-root` there (WEB-5).
+  Verified: typecheck, lint, jest, web export; https://dun.iodesystems.com/
+  renders the RN-web sign-in in Chrome with no console errors. NOT verified:
+  the signed-in screens in a browser (I may not type the token there — USER
+  signs in); no APK built yet; icons are bintag's placeholders; no PWA
+  manifest/service worker yet; UI state not synced to dund yet.
+- **Stopgap web page** (`4a580b4`, now only when no `--web-root`): `/` serves plain HTML+JS over
   `/api/v1` (token sign-in in localStorage, session list, chat, asks,
   long-poll) — NOT the react-native-web client; that is S5, not started.
 
