@@ -212,7 +212,7 @@ func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
 			d.add("ok", "dund", "runs this build ("+r.Version+")", "")
 		case r.Upgradable && r.Busy:
 			d.add("warn", "dund", "runs build "+r.Version+", this is "+version+", and is busy (a turn, a question or a job is running), so it cannot restart yet",
-				"let it finish, interrupt it (ctrl+k), kill its jobs (/jobs kill all) — or "+restart)
+				"let it finish, interrupt it (ctrl+g), kill its jobs (/jobs kill all) — or "+restart)
 		case r.Upgradable:
 			d.add("warn", "dund", "runs build "+r.Version+", this is "+version,
 				"start dun: it asks dund to restart into this build (or "+restart+")")

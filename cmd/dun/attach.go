@@ -283,7 +283,7 @@ func checkDundBuild(ac *attachConn, sc *bufio.Scanner) []string {
 	}
 	if r.Busy {
 		return []string{"dund runs build " + r.Version + " and is busy (a turn, a question or a job is running): it restarts into " +
-			version + " when that ends — ctrl+k interrupts a turn, /jobs kills a job"}
+			version + " when that ends — ctrl+g interrupts a turn, /jobs kills a job"}
 	}
 	return []string{"dund ran build " + r.Version + " — restarting it into " + exe + " (" + version + "); this reconnects"}
 }

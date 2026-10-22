@@ -163,7 +163,7 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 		if name == "mcp" && len(args) > 0 && args[0] == "add" {
 			return m.openMCPForm()
 		}
-		// /interrupt: the same command ctrl+k sends, so the status line says
+		// /interrupt: the same command ctrl+g sends, so the status line says
 		// "interrupting…" for it too.
 		if name == "interrupt" && m.turnRunning() {
 			nm, cmd := m.interrupt()

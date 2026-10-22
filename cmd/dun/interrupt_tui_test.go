@@ -8,7 +8,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-var kCtrlK = tea.KeyMsg{Type: tea.KeyCtrlK}
+var (
+	kCtrlK = tea.KeyMsg{Type: tea.KeyCtrlK}
+	kCtrlG = tea.KeyMsg{Type: tea.KeyCtrlG}
+)
 
 // busyVtui is a session with a turn running, and a record of what the TUI
 // writes to the engine.
@@ -32,19 +35,19 @@ func sentInterrupt(rec *bytes.Buffer) bool {
 	return strings.Contains(rec.String(), `"type":"interrupt"`)
 }
 
-func TestInterrupt_CtrlKWhileBusy(t *testing.T) {
+func TestInterrupt_CtrlGWhileBusy(t *testing.T) {
 	v, rec := busyVtui(t)
-	v.m = key(v.m, kCtrlK)
+	v.m = key(v.m, kCtrlG)
 	if !sentInterrupt(rec) {
-		t.Fatalf("ctrl+k while busy sent %q, want an interrupt", rec.String())
+		t.Fatalf("ctrl+g while busy sent %q, want an interrupt", rec.String())
 	}
 	if !strings.Contains(v.view(), "interrupting…") {
 		t.Errorf("the status line should say interrupting:\n%s", v.view())
 	}
 	rec.Reset()
-	v.m = key(v.m, kCtrlK)
+	v.m = key(v.m, kCtrlG)
 	if sentInterrupt(rec) {
-		t.Error("a second ctrl+k before the turn ends sent another interrupt")
+		t.Error("a second ctrl+g before the turn ends sent another interrupt")
 	}
 
 	v.event(map[string]any{"type": "done", "reason": "interrupted"})
@@ -57,6 +60,23 @@ func TestInterrupt_CtrlKWhileBusy(t *testing.T) {
 	}
 	if !strings.Contains(c, "interrupted after") {
 		t.Errorf("the thought should fold as interrupted:\n%s", c)
+	}
+}
+
+// ctrl+k is the composer's kill-to-end-of-line even while a turn runs: it
+// used to be the interrupt key, which took the edit away mid-turn.
+func TestInterrupt_CtrlKBusyStillKillsLine(t *testing.T) {
+	v, rec := busyVtui(t)
+	v.m = typeStr(v.m, "hello world")
+	for range 6 {
+		v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	}
+	v.m = key(v.m, kCtrlK)
+	if sentInterrupt(rec) {
+		t.Fatal("ctrl+k while busy sent an interrupt")
+	}
+	if got := v.m.input.Value(); got != "hello" {
+		t.Errorf("input %q, want %q", got, "hello")
 	}
 }
 
@@ -174,7 +194,7 @@ func TestInterrupt_CtrlCStillQuits(t *testing.T) {
 // The busy status line says what each key does.
 func TestInterrupt_BusyHint(t *testing.T) {
 	v, _ := busyVtui(t)
-	if s := v.view(); !strings.Contains(s, "ctrl+k interrupt · ctrl+c quit (the turn keeps running)") {
+	if s := v.view(); !strings.Contains(s, "ctrl+g interrupt · ctrl+c quit (the turn keeps running)") {
 		t.Errorf("busy status:\n%s", s)
 	}
 }

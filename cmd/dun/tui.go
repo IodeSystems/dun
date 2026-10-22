@@ -865,9 +865,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// ctrl+k while a turn runs interrupts it, whatever has the keys. Idle,
-		// it is the input's kill-to-end-of-line as before.
-		if msg.String() == "ctrl+k" && m.turnRunning() {
+		// ctrl+g while a turn runs interrupts it, whatever has the keys. Idle it
+		// does nothing; ctrl+k stays the input's kill-to-end-of-line, busy or not.
+		if msg.String() == interruptKey && m.turnRunning() {
 			return m.interrupt()
 		}
 		// A y/n question (kill job N?) takes the next key, whatever it is.
