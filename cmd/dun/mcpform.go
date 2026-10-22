@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -12,12 +13,30 @@ import (
 
 // /mcp add — a form for a new MCP server: an id, then a URL (a remote server
 // over Streamable HTTP) or a command line (a local one over stdio), then an
-// optional bearer token, then its placement: direct (the default) or in the
-// shell (dun.ViaShell). The engine saves it to $DUN_HOME/mcp.json, there in
-// every workspace, and starts it; the result comes back as a server event.
+// optional bearer token, then — for a URL with no bearer — an optional OAuth
+// login (client id, scopes, issuer, which token to send), then its
+// placement: direct (the default) or in the shell (dun.ViaShell). The engine
+// saves it to $DUN_HOME/mcp.json, there in every workspace, and starts it;
+// the result comes back as a server event.
+//
+// The OAuth rows are the common ones. The rest of the oauth block
+// (client_secret, audience, resource, redirect_port, auth_params) is set in
+// mcp.json by hand.
 //
 // The token is typed here rather than given as a /mcp add argument: a slash
 // command's arguments are in the input history and the scrollback.
+
+// The form's rows. The oauth rows are shown only for a URL with no bearer.
+const (
+	mcpID = iota
+	mcpServer
+	mcpBearer
+	mcpClient
+	mcpScopes
+	mcpIssuer
+	mcpSend
+	mcpViaStep // the last row: direct or in the shell
+)
 
 func (m *tuiModel) openMCPForm() tea.Cmd {
 	mk := func(placeholder string) textinput.Model {
@@ -26,14 +45,18 @@ func (m *tuiModel) openMCPForm() tea.Cmd {
 		t.Width = 56
 		return t
 	}
-	m.mcpFields = [3]textinput.Model{
+	m.mcpFields = [mcpViaStep]textinput.Model{
 		mk("e.g. corp-docs"),
 		mk("https://host/mcp, or a command: my-mcp --stdio"),
 		mk("bearer token (empty for none; $NAME reads an env var)"),
+		mk("oauth client id (empty: no login)"),
+		mk("scopes, space-separated (empty: what the server asks for)"),
+		mk("issuer (empty: the server names it)"),
+		mk("access_token (default) or id_token"),
 	}
-	m.mcpFields[2].EchoMode = textinput.EchoPassword
-	m.mcpFields[2].EchoCharacter = '•'
-	m.mcpFields[0].Focus()
+	m.mcpFields[mcpBearer].EchoMode = textinput.EchoPassword
+	m.mcpFields[mcpBearer].EchoCharacter = '•'
+	m.mcpFields[mcpID].Focus()
 	m.mcpStep, m.mcpErr, m.mcpForm, m.mcpShell = 0, "", true, false
 	m.input.Blur()
 	m.refresh()
@@ -46,6 +69,36 @@ func (m *tuiModel) closeMCPForm() {
 	m.refresh()
 }
 
+// mcpOAuthRows reports whether the oauth rows apply: a URL with no bearer.
+func (m *tuiModel) mcpOAuthRows() bool {
+	t := strings.TrimSpace(m.mcpFields[mcpServer].Value())
+	return (strings.HasPrefix(t, "http://") || strings.HasPrefix(t, "https://")) &&
+		strings.TrimSpace(m.mcpFields[mcpBearer].Value()) == ""
+}
+
+// mcpNext is the row after step: the oauth rows are skipped when they do not
+// apply, and after an empty client id.
+func (m *tuiModel) mcpNext(step int) int {
+	next := step + 1
+	if next >= mcpClient && next < mcpViaStep &&
+		(!m.mcpOAuthRows() || strings.TrimSpace(m.mcpFields[mcpClient].Value()) == "" && step >= mcpClient) {
+		return mcpViaStep
+	}
+	return next
+}
+
+// mcpPrev is the row before step, skipping oauth rows that do not apply.
+func (m *tuiModel) mcpPrev(step int) int {
+	prev := step - 1
+	if step == mcpViaStep && !m.mcpOAuthRows() {
+		return mcpBearer
+	}
+	if step == mcpViaStep && strings.TrimSpace(m.mcpFields[mcpClient].Value()) == "" {
+		return mcpClient
+	}
+	return prev
+}
+
 func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
@@ -56,7 +109,7 @@ func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.mcpStep < len(m.mcpFields) {
 				m.mcpFields[m.mcpStep].Blur()
 			}
-			m.mcpStep--
+			m.mcpStep = m.mcpPrev(m.mcpStep)
 			m.mcpFields[m.mcpStep].Focus()
 		}
 		m.refresh()
@@ -73,20 +126,30 @@ func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			v = strings.TrimSpace(m.mcpFields[m.mcpStep].Value())
 		}
 		switch {
-		case m.mcpStep == 0 && !mcpIDOK(v):
+		case m.mcpStep == mcpID && !mcpIDOK(v):
 			m.mcpErr = "an id is lowercase letters, digits, - and _ — it prefixes the server's tools"
-		case m.mcpStep == 1 && v == "":
+		case m.mcpStep == mcpServer && v == "":
 			m.mcpErr = "a URL or a command"
+		case m.mcpStep == mcpSend && v != "" && v != dun.SendAccessToken && v != dun.SendIDToken:
+			m.mcpErr = "send is access_token or id_token"
 		case m.mcpStep < mcpViaStep:
 			m.mcpErr = ""
 			m.mcpFields[m.mcpStep].Blur()
-			m.mcpStep++
+			m.mcpStep = m.mcpNext(m.mcpStep)
 			if m.mcpStep < len(m.mcpFields) {
 				m.mcpFields[m.mcpStep].Focus()
 			}
 		case msg.String() == "enter":
-			spec := mcpFormSpec(m.mcpFields[0].Value(), m.mcpFields[1].Value(), m.mcpFields[2].Value())
+			spec := mcpFormSpec(m.mcpFields[mcpID].Value(), m.mcpFields[mcpServer].Value(), m.mcpFields[mcpBearer].Value())
+			if m.mcpOAuthRows() {
+				spec.OAuth = mcpFormOAuth(m.mcpFields[mcpClient].Value(), m.mcpFields[mcpScopes].Value(),
+					m.mcpFields[mcpIssuer].Value(), m.mcpFields[mcpSend].Value())
+			}
 			if m.mcpShell {
+				if spec.OAuth != nil {
+					m.mcpErr = "an oauth server cannot run in the shell — dun holds its token"
+					break
+				}
 				spec.Via = dun.ViaShell
 			}
 			b, _ := json.Marshal(spec)
@@ -109,9 +172,6 @@ func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.refresh()
 	return m, cmd
 }
-
-// mcpViaStep is the form's last row: direct or in the shell.
-const mcpViaStep = 3
 
 func mcpIDOK(id string) bool {
 	if id == "" || len(id) > 32 || id[0] == '-' || id[0] == '_' {
@@ -139,10 +199,33 @@ func mcpFormSpec(id, target, bearer string) dun.ServerSpec {
 	return spec
 }
 
+// mcpFormOAuth is the oauth block from the form's rows; nil without a client
+// id. Scopes split on spaces or commas.
+func mcpFormOAuth(clientID, scopes, issuer, send string) *dun.OAuthSpec {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return nil
+	}
+	o := &dun.OAuthSpec{ClientID: clientID, Issuer: strings.TrimSpace(issuer), Send: strings.TrimSpace(send)}
+	o.Scopes = strings.FieldsFunc(scopes, func(r rune) bool { return r == ' ' || r == ',' })
+	if len(o.Scopes) == 0 {
+		o.Scopes = nil
+	}
+	return o
+}
+
 func (m tuiModel) mcpFormPanel() string {
-	labels := [3]string{"id    ", "server", "bearer"}
+	labels := [mcpViaStep]string{"id    ", "server", "bearer", "client", "scopes", "issuer", "send  "}
 	rows := []string{stHeader.Render("add MCP server") + stDim.Render("  enter next · shift+tab back · esc cancel")}
+	oauth := m.mcpOAuthRows()
 	for i, f := range m.mcpFields {
+		if i == mcpClient && oauth {
+			rows = append(rows, "  "+stDim.Render("oauth login (optional): a client registered with the identity provider, redirect URI"),
+				"  "+stDim.Render("http://127.0.0.1:"+strconv.Itoa(dun.DefaultOAuthRedirectPort)+"/oauth/callback; secret, audience, resource and the rest go in mcp.json"))
+		}
+		if i >= mcpClient && !oauth {
+			break
+		}
 		label := stDim.Render("  " + labels[i] + "  ")
 		if i == m.mcpStep {
 			label = stSel.Render("▎ " + labels[i] + "  ")

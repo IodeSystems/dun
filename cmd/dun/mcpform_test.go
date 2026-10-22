@@ -62,6 +62,52 @@ func TestMCPForm_PlacementDirectByDefault(t *testing.T) {
 	}
 }
 
+// For a URL with no bearer the form goes on to an oauth login; an empty
+// client id skips the rest of it, and a command never sees it.
+func TestMCPForm_OAuthRows(t *testing.T) {
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	m.openMCPForm()
+	m.mcpFields[mcpID].SetValue("snow")
+	m.mcpFields[mcpServer].SetValue("https://acct.snowflakecomputing.com/mcp")
+	var cur tea.Model = m
+	for i := 0; i < 3; i++ {
+		cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+	}
+	tm := cur.(tuiModel)
+	if tm.mcpStep != mcpClient || !strings.Contains(stripANSI(tm.mcpFormPanel()), "oauth login (optional)") {
+		t.Fatalf("step %d:\n%s", tm.mcpStep, stripANSI(tm.mcpFormPanel()))
+	}
+	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab}) // empty client id: straight to the placement
+	if tm = cur.(tuiModel); tm.mcpStep != mcpViaStep {
+		t.Fatalf("an empty client id must skip the oauth rows: step %d", tm.mcpStep)
+	}
+	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	tm = cur.(tuiModel)
+	tm.mcpFields[mcpClient].SetValue("c1")
+	tm.mcpFields[mcpScopes].SetValue("openid, email")
+	tm.mcpFields[mcpSend].SetValue("jwt")
+	cur = tm
+	for i := 0; i < 4; i++ {
+		cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+	}
+	if tm = cur.(tuiModel); tm.mcpStep != mcpSend || !strings.Contains(tm.mcpErr, "access_token or id_token") {
+		t.Fatalf("step %d err %q", tm.mcpStep, tm.mcpErr)
+	}
+	tm.mcpFields[mcpSend].SetValue("id_token")
+	cur, _ = tm.Update(tea.KeyMsg{Type: tea.KeyTab})
+	cur.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	var got map[string]string
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("sent %q: %v", buf.String(), err)
+	}
+	var spec dun.ServerSpec
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(got["action"], "add ")), &spec); err != nil || spec.OAuth == nil ||
+		spec.OAuth.ClientID != "c1" || spec.OAuth.Send != "id_token" || strings.Join(spec.OAuth.Scopes, " ") != "openid email" {
+		t.Errorf("spec %+v %+v %v", spec, spec.OAuth, err)
+	}
+}
+
 // The token never reaches the screen or the slash history.
 func TestMCPForm_MasksTheToken(t *testing.T) {
 	m := newTUIModel(nil, ".")

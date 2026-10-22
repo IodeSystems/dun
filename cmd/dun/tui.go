@@ -659,9 +659,9 @@ type tuiModel struct {
 	provider       string // name of the provider the engine runs on
 	// The add-MCP-server form (/mcp add).
 	mcpForm       bool
-	mcpFields     [3]textinput.Model // id, url or command, bearer
-	mcpStep       int                // 0-2 the fields, 3 the placement
-	mcpShell      bool               // placement: in the shell (true) or direct
+	mcpFields     [mcpViaStep]textinput.Model // id, url or command, bearer, then oauth (see mcpform.go)
+	mcpStep       int                         // a field, or mcpViaStep: the placement
+	mcpShell      bool                        // placement: in the shell (true) or direct
 	mcpErr        string
 	mcpToolsWant  string          // the server whose /mcp tools this TUI asked for (mcptools.go)
 	engineCmds    []engineCmd     // the engine's slash commands (commands event)
@@ -1910,6 +1910,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.noteCatalog(ev)
 	case "mcp_tools":
 		m = m.noteMCPTools(ev)
+	case "mcp_login":
+		// Whole, not oneLine'd or clipped: the URL is to be copied.
+		m.append(stNote.Render("🔑 " + loginLine(str(ev["server"]), str(ev["url"]))))
 	case "prompt":
 		// An MCP prompt the user ran as a slash command, rendered by the
 		// engine: it goes in as their message.

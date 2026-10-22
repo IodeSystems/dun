@@ -106,6 +106,68 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 16. OAuth/OIDC-protected MCP servers (USER, 2026-10-22)
+
+USER: Snowflake's managed MCP (401 → RFC 9728 → RFC 8414, no DCR, pre-registered
+client + exact redirect URI), Superset (validates an external IdP's JWT; with
+Google that is the ID token), and corp tools behind a login gate. TUI first;
+web later.
+
+- ✅ **Config.** `ServerSpec.OAuth` (`servers_config.go`): client_id,
+  client_secret (`$NAME`/`${NAME}` read at use, never written resolved),
+  scopes, issuer (skips discovery), audience, resource (default: the
+  discovered resource; with an explicit issuer, none — Google rejects unknown
+  params; "none" omits; a value is sent as given), send (access_token |
+  id_token), redirect_port (default 33418), auth_params (e.g. Google's
+  access_type=offline). Merged field by field. Refused: no url, no client_id,
+  with bearer, via shell (/mcp move too).
+- ✅ **Flow** (`mcpoauth.go`). Discovery: issuer, else 401 resource_metadata
+  (else the well-known URL) → PRM (resource must cover the server URL, path
+  prefix allowed) → authorization_servers[0] → AS metadata. Code + PKCE S256 +
+  state (+ nonce with openid; nonce and aud checked, signature not — token came
+  straight from the token endpoint). Loopback listener 127.0.0.1:<port>
+  /oauth/callback for one code; port busy → wait for another session's login to
+  land in the shared token file. URL → `Config.OnLogin` → proto `mcp_login`
+  (TUI line "🔑 open to log in to <id>: <url>"; plain mode stderr) and
+  `OpenBrowser` (xdg-open / open / refuse — per-OS files; off with
+  DUN_NO_BROWSER). Token exchange: public = client_id; confidential = basic
+  when listed or nothing listed, else post. Stored `$DUN_HOME/oauth/<id>.json`
+  0600 with issuer, token/revocation endpoints, auth method, resource.
+  Authorization refreshes inside a 60 s skew; OnUnauthorized refreshes, else
+  logs in (bounded 5 min); a 401 within 30 s of a login is an error, not
+  another tab. The login runs BEFORE the handshake (ensure), so it is not
+  inside the discovery timeout; added servers still start in the background.
+- ✅ **Commands.** `/mcp login <id>` (forced login, starts it if stopped),
+  `/mcp logout <id>` (delete, revoke best effort, stop), `/mcp` lists auth per
+  remote server (oauth state / static bearer / static header / none). `/mcp on
+  <oauth id>` runs off the reader goroutine. Form: client id, scopes, issuer,
+  send rows for a URL with no bearer; the rest in mcp.json.
+- ✅ **Gate diagnosis** (`mcpgate.go`). Unauthenticated initialize, redirects
+  not followed: 3xx to another host or a login-looking path, 200 text/html, or
+  IAP's `X-Goog-IAP-Generated-Response` → "behind a login gate: it redirects to
+  <host> — not the MCP OAuth flow …", with IAP (Google ID token, aud = IAP
+  client) and Cloudflare Access (`cloudflared access token -app=<url>` into a
+  `cf-access-token` header) hints. A 401 with resource_metadata on a server
+  without oauth says to add an oauth block.
+- ✅ **Verified.** Unit tests on httptest fakes (discovery flow through the
+  harness, 0600, bearer on MCP requests, refresh, refused refresh → login,
+  timeout, issuer mode + id_token, nonce, confidential post/basic, logout +
+  revoke, gates, config round-trip). Live: `dun -p`, scratch DUN_HOME, fake
+  IdP+MCP, a script following the `mcp_login` URL: ready arrives while the
+  login waits; tools appear after it; /mcp, logout, login all as above.
+- **next:** web login via dund's public callback (the loopback redirect only
+  works where the browser and the engine share a host); token commands
+  (`token_cmd`, e.g. cloudflared) — not built.
+- **risks:** untested against real Snowflake and Google. Snowflake's PRM
+  `resource` format and its accepted auth methods are assumed; Google needs
+  `auth_params` access_type=offline (+ prompt=consent) for a refresh token, and
+  a desktop client's redirect is loopback with any port; IAP needs the ID
+  token's aud allowlisted. Stored tokens are plaintext 0600 (no keyring).
+  A gate that answers 401 without the IAP header reads as an OAuth server.
+- **assumptions:** one oauth client per server id; the token file is shared
+  by every session of the user; mobile ignores `mcp_login` until the web
+  slice.
+
 ### ◐ 15. MCP servers in the shell, and per-tool cost/toggles (USER, 2026-10-22)
 
 USER: per server, DIRECT by default; a user-added server may be placed in the

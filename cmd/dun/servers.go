@@ -231,7 +231,8 @@ func runAllServersCmd(ctx context.Context, h *dun.Harness, action string) string
 	return strings.Join(lines, "\n")
 }
 
-// runMCPCmd handles the engine side of /mcp add, move, refresh and remove.
+// runMCPCmd handles the engine side of /mcp add, move, refresh, remove,
+// login and logout.
 // add's argument is the server spec as JSON (the TUI's form builds it).
 func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 	verb, arg, _ := strings.Cut(action, " ")
@@ -283,6 +284,24 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 			return "usage: /mcp refresh <id> — re-read its docs into the index"
 		}
 		return arg + ": " + mcpDocsLine(ctx, h, arg)
+	case "login":
+		if arg == "" {
+			return "usage: /mcp login <id> — log in to an oauth server in the browser"
+		}
+		msg, err := h.LoginServer(ctx, arg)
+		if err != nil {
+			return arg + ": login failed — " + oneLine(err.Error())
+		}
+		return arg + ": " + msg + " · " + runningSummary(h, arg)
+	case "logout":
+		if arg == "" {
+			return "usage: /mcp logout <id> — delete (and revoke) its stored token"
+		}
+		msg, err := h.LogoutServer(ctx, arg)
+		if err != nil {
+			return "mcp logout: " + err.Error()
+		}
+		return arg + ": " + msg
 	case "remove", "rm":
 		if err := h.RemoveServer(arg); err != nil {
 			return "mcp remove: " + err.Error()
@@ -448,9 +467,17 @@ func catalogEvent(h *dun.Harness) *proto.Catalog {
 	return c
 }
 
+// loginLine is the line that asks the person to log in to an OAuth server.
+func loginLine(server, url string) string {
+	if url == "" {
+		return server + ": waiting for a login to it that another session started"
+	}
+	return "open to log in to " + server + ": " + url
+}
+
 // serverListing renders every server and its state, one per line.
 // mcpAddHint ends a bare /mcp: how to add one is otherwise invisible.
-const mcpAddHint = "add one: /mcp add — a form: an id, then a URL (https://…) or a command (e.g. npx some-mcp), then a bearer token for a URL"
+const mcpAddHint = "add one: /mcp add — a form: an id, then a URL (https://…) or a command (e.g. npx some-mcp), then a bearer token or an oauth client for a URL"
 
 func serverListing(states []dun.ServerState) string {
 	var b strings.Builder
@@ -472,6 +499,9 @@ func serverListing(states []dun.ServerState) string {
 		}
 		if st.Auto && st.Via != dun.ViaShell {
 			b.WriteString(" · autostart")
+		}
+		if st.Auth != "" {
+			b.WriteString(" · " + st.Auth)
 		}
 		if hint := heavyHint(st); st.Running && hint != "" {
 			b.WriteString("\n    " + hint)
@@ -588,7 +618,7 @@ func serverHint(states []dun.ServerState) string {
 func serversProto(states []dun.ServerState) []proto.ServerState {
 	out := make([]proto.ServerState, 0, len(states))
 	for _, st := range states {
-		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err})
+		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Auth: st.Auth})
 	}
 	return out
 }

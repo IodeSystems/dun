@@ -511,6 +511,12 @@ func main() {
 		DockerNetwork: *dockerNetwork,
 		ExtraMounts:   mounts,
 	}
+	// An OAuth server's login opens a browser on this machine too — unless
+	// DUN_NO_BROWSER is set (a headless box, a test). The URL is shown to
+	// the person either way.
+	if os.Getenv("DUN_NO_BROWSER") == "" {
+		cfg.OpenBrowser = dun.OpenBrowser
+	}
 	if *prog {
 		em = &emitter{}
 		in = newInputStream()
@@ -538,6 +544,7 @@ func main() {
 			em.emit(&proto.ToolResult{Tool: tool, Result: result})
 		}
 		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text}) }
+		cfg.OnLogin = func(server, url string) { em.emit(&proto.McpLogin{Server: server, URL: url}) }
 		// A memory trigger reports like /remember does, so the UI shows it the
 		// same way.
 		cfg.OnMemoryTrigger = func(msg string) {
@@ -618,6 +625,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), clip(oneLine(result), 200))
 		}
 		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", clip(oneLine(text), 200)) }
+		cfg.OnLogin = func(server, url string) { fmt.Fprintf(os.Stderr, "\n  🔑 %s\n", loginLine(server, url)) }
 		cfg.OnMemoryTrigger = func(msg string) { fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", clip(oneLine(msg), 200)) }
 		cfg.OnDocs = func(n dun.DocsNote) {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
@@ -777,11 +785,20 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	// docs server on" should not queue behind a five-minute agent run. The
 	// harness defers the actual tool-set swap to a turn boundary.
 	srvCmd := func(alias, action string) {
-		msg := runServerCmd(ctx, h, alias, action)
-		em.emit(&proto.ServerEvent{ID: alias, Action: action, Message: msg,
-			Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
-		em.emit(catalogEvent(h))
-		em.emit(commandsEvent(h))
+		run := func() {
+			msg := runServerCmd(ctx, h, alias, action)
+			em.emit(&proto.ServerEvent{ID: alias, Action: action, Message: msg,
+				Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
+			em.emit(catalogEvent(h))
+			em.emit(commandsEvent(h))
+		}
+		// Starting an OAuth server may wait minutes on a person in a
+		// browser: not on the reader goroutine, which answers asks.
+		if h.HasOAuth(alias) {
+			go run()
+			return
+		}
+		run()
 	}
 	in.setServerCmd(srvCmd)
 	// A skill added, removed or edited on disk reaches the model's skill
