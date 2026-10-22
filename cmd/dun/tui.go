@@ -133,6 +133,7 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	}
 	fm, err := tea.NewProgram(m, opts...).Run()
 	if tm, ok := fm.(tuiModel); ok {
+		tm.saveUI()     // the draft and sent history, for this user's next client
 		tm.proc.close() // the engine it ENDED with, which may not be the one it started
 	} else {
 		proc.close()
@@ -1624,6 +1625,7 @@ func (m tuiModel) sendUser(v string) tuiModel {
 	m.histIdx = len(m.history)
 	m.input.Reset()
 	m.suggestions = nil
+	m.saveUI()
 	if m.replaying {
 		m.append(stDim.Render("replaying a trace — there is no engine to send to"))
 		m.refresh()
@@ -1771,6 +1773,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// reattach TO, and guessing (--continue) would grab an unrelated session.
 		m.sessionID = str(ev["id"])
 		m.everUp = true
+		m.proc.uiGet() // this user's UI state in the session, kept by dund
 	case "ready":
 		m.starting = false
 		m.tools = nil
@@ -2149,6 +2152,8 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.busy, m.asking = false, false
 		}
 		m.refresh()
+	case "ui_state":
+		m = m.applyUI(ev["state"])
 	case "snapshot":
 		// Too far behind to replay: the conversation, then the latest state.
 		// On a reconnect the conversation is already on screen; the history a

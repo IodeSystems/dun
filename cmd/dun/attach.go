@@ -271,3 +271,50 @@ func (p *dunProc) forget() bool {
 	}
 	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "forget"}) == nil
 }
+
+// UI state: what this user's clients share in a session, kept by dund per
+// member — the sent-input history (ctrl+↑/↓) and an unsent draft. Other
+// members never see it.
+
+const uiHistoryMax = 200
+
+// uiGet asks for this user's UI state; it comes back as a ui_state event.
+func (p *dunProc) uiGet() {
+	if p == nil {
+		return
+	}
+	_ = json.NewEncoder(p.stdin).Encode(map[string]any{"type": "ui_get"})
+}
+
+// saveUI stores the draft and the sent history.
+func (m tuiModel) saveUI() {
+	if m.proc == nil || m.replaying {
+		return
+	}
+	hist := m.history
+	if len(hist) > uiHistoryMax {
+		hist = hist[len(hist)-uiHistoryMax:]
+	}
+	_ = json.NewEncoder(m.proc.stdin).Encode(map[string]any{"type": "ui_put",
+		"state": map[string]any{"history": hist, "draft": m.input.Value()}})
+}
+
+// applyUI takes in UI state another of this user's clients saved: the
+// history replaces ours when ours is empty or shorter, and the draft fills
+// an empty input — never what is being typed.
+func (m tuiModel) applyUI(v any) tuiModel {
+	st, _ := v.(map[string]any)
+	if hs, ok := st["history"].([]any); ok && len(hs) >= len(m.history) {
+		m.history = make([]string, 0, len(hs)) // not [:0]: model copies share the array
+		for _, h := range hs {
+			if s, ok := h.(string); ok {
+				m.history = append(m.history, s)
+			}
+		}
+		m.histIdx = len(m.history)
+	}
+	if d, _ := st["draft"].(string); d != "" && strings.TrimSpace(m.input.Value()) == "" {
+		m.input.SetValue(d)
+	}
+	return m
+}

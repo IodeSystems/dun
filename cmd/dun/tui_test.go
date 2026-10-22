@@ -4027,3 +4027,31 @@ func TestCacheBlock_Renders(t *testing.T) {
 		t.Error("a class with no rounds gets no row")
 	}
 }
+
+// The sent history and an unsent draft are this user's, kept by dund: a send
+// saves them, a ui_state from another of the user's clients fills them in —
+// but never over what is being typed.
+func TestTUI_UIStateRoundTrip(t *testing.T) {
+	rec := &echoWC{}
+	m := newTUIModel(&dunProc{stdin: rec}, "/ws")
+	m = resized(m, 80, 24)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.handleEvent(evMsg{"type": "ui_state", "state": map[string]any{
+		"history": []any{"first", "second"}, "draft": "half typed"}})
+	if len(m.history) != 2 || m.history[1] != "second" || m.input.Value() != "half typed" {
+		t.Fatalf("applied: history=%v draft=%q", m.history, m.input.Value())
+	}
+	m.input.SetValue("my own words")
+	m = m.handleEvent(evMsg{"type": "ui_state", "state": map[string]any{"draft": "theirs"}})
+	if m.input.Value() != "my own words" {
+		t.Fatalf("a pushed draft overwrote typing: %q", m.input.Value())
+	}
+	rec.buf.Reset()
+	m.input.Reset()
+	m = typeStr(m, "third")
+	nm, _ := m.Update(kEnter)
+	m = nm.(tuiModel)
+	if !strings.Contains(rec.buf.String(), `"type":"ui_put"`) || !strings.Contains(rec.buf.String(), `"third"`) {
+		t.Fatalf("send did not save the history: %s", rec.buf.String())
+	}
+}
