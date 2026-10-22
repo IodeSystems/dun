@@ -2905,13 +2905,21 @@ func (m *tuiModel) appendUser(text string) {
 }
 
 func (m *tuiModel) flushCur() {
-	if m.cur != "" {
+	// A reply of only whitespace is no reply. Reasoning models open with
+	// "\n\n" after their thinking, and a round that then calls a tool leaves
+	// nothing else — finalizing it would leave a blank row in the log.
+	if replyShown(m.cur) {
 		src := strings.TrimRight(m.cur, "\n")
 		// Finalize the streamed reply as rendered markdown (headers, lists, code).
 		m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src})
-		m.cur = ""
 	}
+	m.cur = ""
 }
+
+// replyShown says whether the streaming reply has anything to draw. Until it
+// does it takes no row: a block that renders to nothing is still one row,
+// and it sat between the message just sent and whatever came next.
+func replyShown(cur string) bool { return strings.TrimSpace(cur) != "" }
 
 // foldedTool builds the collapsed/full/raw folded block for a completed tool
 // call+result — shared by the live tool_result path and history replay so both
@@ -3103,7 +3111,7 @@ func (m *tuiModel) refresh() {
 	for _, e := range m.convo {
 		blocks = append(blocks, e.view())
 	}
-	if m.cur != "" {
+	if replyShown(m.cur) {
 		blocks = append(blocks, renderMarkdown(m.md, m.cur))
 	}
 	// Suggestions live inside the viewport so they don't steal height from the
@@ -3292,7 +3300,7 @@ func (m *tuiModel) applyScroll(selMode bool) {
 	// GotoBottom() blindly — that scrolls past the user's last message to the
 	// bottom of the growing reply. Instead keep that message visible.
 	lastUserRow := -1
-	if m.cur != "" {
+	if replyShown(m.cur) {
 		ro := m.frame.rowOffset
 		for i := range m.convo {
 			if m.convo[i].userText != "" && i < len(ro) {
