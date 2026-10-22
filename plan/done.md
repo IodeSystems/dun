@@ -751,3 +751,33 @@ space) on that row starts the answer AND is the first character of it; enter
 still opens it empty, arrows still move off the row without getting stuck, and
 `n` types an "n" there while still starting a detail on an option row. The row
 says "(just type)" while it is highlighted and not yet capturing.
+
+## ✅ Thinking and tool runs in the TUI (USER, 2026-10-22)
+
+- **Engine:** agentkit streams `StreamChunk.Reasoning` but has no callback for
+  it. `reasoning.go` tees the Session's runner (chunks forwarded unchanged) into
+  `Config.OnReasoning`; `-p` emits `reasoning` {text} deltas. Only the turn's
+  rounds: suggest/rephrase/commit/fork call `untee` first, and children get
+  `OnReasoning = nil` like `OnToken`. History emits a `reasoning` item just
+  before the entry agentkit stamped it on.
+- **TUI thinking** (`thinking.go`): one block per round, live and expanded;
+  the first reply token, a tool call, done, error or a turn retry folds it to
+  "✻ thought for Ns · W words — first line", unless it is selected.
+- **Tool runs** (`toolrun.go`): on each new call, the previous calls of the run
+  and their thinking fold into one aggregate row ("⚙ N tool calls — exec×4 ·
+  1 failed"). The latest call is held at the run's tallest height (`holdH`),
+  released when the run ends. A fold is deferred when it would touch the
+  selection, a live search, or rows a scrolled-up reader has on screen.
+  `tool_result` no longer pins the scroll unless queued messages were delivered.
+- **Pager** (`pager.go`): enter on thinking or an aggregate gives the block the
+  convo pane (head, input, status stay). Plain text scrolls; an aggregate is a
+  tree, a node per call/thought that opens to args + result. Follows a live
+  block by identity, not index. esc/q back.
+- **Proven:** unit tests (`reasoning_test.go`, `thinking_test.go`,
+  `toolrun_test.go`, `TestReasoningEventReachesTheTUI`) and ttydrive against a
+  fake OpenAI-compatible server streaming `reasoning_content` + 5 exec calls,
+  with a scratch DUN_HOME dund, including a dund restart → `--continue` history
+  replay.
+- **Not done:** the web client renders neither (see icebox). Per-call duration
+  is not on the wire (tool_call and tool_result are emitted together after the
+  call), so the aggregate shows no total time.

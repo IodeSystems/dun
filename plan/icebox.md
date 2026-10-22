@@ -169,6 +169,16 @@ The constant is now small enough that nobody notices, which is exactly how it
 grows back. Measuring only the blocks that changed still wants the `frame`
 value.
 
+### Web client: thinking and tool runs
+
+**Resume condition:** the next change to `mobile/src/lib/events.ts`, or a user
+asking for it on the phone. The TUI has both (`done.md`, 2026-10-22); the web
+shows neither. It needs: a `reasoning` case in `apply` that grows a thinking
+item (deltas, like `token`), ended by the next `token`/`tool_call`/`done`/
+`error`; a `reasoning` kind in `fromHistory`; and, for runs, the same fold rule
+as `cmd/dun/toolrun.go` over its item list. Unknown kinds are ignored today, so
+nothing breaks meanwhile.
+
 ## Low value — recorded so they stop being re-proposed
 
 These are all real, all small, and none of them is worth a session on its own.

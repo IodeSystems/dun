@@ -89,6 +89,9 @@ full detail archived in `done.md`.
   `ExecBackend` returns `ExecResult` (pass/fail is the CODE, not a substring),
   background jobs stream to a log file and are tunable via `exec_monitor`, and a
   timed-out `docker run` now stops its container.
+- **Thinking + tool runs in the TUI** (2026-10-22) — reasoning streams live as
+  a `reasoning` event and folds per round; earlier calls of a run fold into one
+  row; enter opens either in the pager (`cmd/dun/pager.go`). See `done.md`.
 
 ## Active work
 
