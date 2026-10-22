@@ -38,6 +38,9 @@ type scrollRegion struct {
 	paneH    int       // the pane height plan() saw when it claimed those rows
 	last     []string  // what the region shows right now
 	lastAt   time.Time // when the last region command was issued (see minRegionGap)
+	// held: the region handed its rows back because the pane changed IN PLACE
+	// (see plan), and it takes them again only when the pane next scrolls.
+	held bool
 }
 
 // maxScrollStep bounds how far a single frame may scroll before a repaint is
@@ -95,6 +98,13 @@ func (s *scrollRegion) plan(lines []string, top, bot, paneH int, now time.Time) 
 	if s.live && top == s.top && bot == s.bot && paneH == s.paneH && sameLines(s.last, lines) {
 		return nil
 	}
+	// Handed back for an in-place change: the renderer's line diff is the
+	// cheap way to draw those, so the rows stay its until the pane scrolls.
+	if !s.live && s.held && !(top == s.top && bot == s.bot && paneH == s.paneH && shifted(s.last, lines)) {
+		s.top, s.bot, s.paneH = top, bot, paneH
+		s.last = append([]string(nil), lines...)
+		return nil
+	}
 	if gap := minRegionGap - now.Sub(s.lastAt); gap > 0 {
 		return regionRetry(gap)
 	}
@@ -127,13 +137,35 @@ func (s *scrollRegion) plan(lines []string, top, bot, paneH int, now time.Time) 
 			return tea.ScrollUp(added, s.top, s.bot)
 		}
 	}
-	// Something else changed — a re-wrap, a selection, a collapsed block. Paint
-	// the whole region; it is what the normal renderer would have cost anyway.
-	return s.sync(lines, top, bot, paneH)
+	// Something changed IN PLACE — a box streaming at its cap (box.go), a
+	// re-wrap, a selection. A region can only repaint whole, which for a few
+	// changed rows is far more than the renderer's line diff sends, and the
+	// pane's last row (the renderer's) was seen in tmux lagging a frame behind
+	// a region that repainted around it. Hand the rows back until the next
+	// scroll. ClearScrollArea alone repaints them; a full screen clear would
+	// flash.
+	s.live, s.held = false, true
+	s.last = append([]string(nil), lines...)
+	//nolint:staticcheck // SA1019: deprecated, but v1.3.10 has no replacement - the only scroll-region mechanism
+	return tea.ClearScrollArea
+}
+
+// shifted says b is a scroll of a by 1..maxScrollStep rows, either way.
+func shifted(a, b []string) bool {
+	n := len(b)
+	if len(a) != n {
+		return false
+	}
+	for k := 1; k <= maxScrollStep && k < n; k++ {
+		if sameLines(a[k:], b[:n-k]) || sameLines(a[:n-k], b[k:]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *scrollRegion) sync(lines []string, top, bot, paneH int) tea.Cmd {
-	s.live, s.top, s.bot, s.paneH = true, top, bot, paneH
+	s.live, s.held, s.top, s.bot, s.paneH = true, false, top, bot, paneH
 	s.last = append([]string(nil), lines...)
 	//nolint:staticcheck // SA1019: deprecated, but v1.3.10 has no replacement - the only scroll-region mechanism
 	return tea.SyncScrollArea(append([]string(nil), lines...), top, bot)

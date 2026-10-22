@@ -34,10 +34,24 @@ func TestScrollRegionScrollsOnAppend(t *testing.T) {
 	if got := typeName(s.plan(rows("a", "b", "c"), 2, 4, 4, now)()); got != "tea.scrollUpMsg" {
 		t.Fatalf("a line arriving at the top should scroll, got %s", got)
 	}
-	// Something that is not a shift at all.
+	// Something that is not a shift at all: the rows go back to the renderer,
+	// whose line diff draws an in-place change for less.
 	now = now.Add(minRegionGap)
-	if got := typeName(s.plan(rows("x", "y", "z"), 2, 4, 4, now)()); got != "tea.syncScrollAreaMsg" {
-		t.Fatalf("a re-wrap should repaint the region, got %s", got)
+	if got := typeName(s.plan(rows("x", "y", "z"), 2, 4, 4, now)()); got != "tea.clearScrollAreaMsg" {
+		t.Fatalf("an in-place change should hand the rows back, got %s", got)
+	}
+	if s.rowsFor(4) != 0 {
+		t.Error("handed back, the region must not blank its rows")
+	}
+	// More in-place change (a box streaming at its cap): still the renderer's.
+	now = now.Add(minRegionGap)
+	if c := s.plan(rows("x", "y", "w"), 2, 4, 4, now); c != nil {
+		t.Fatalf("in-place change while handed back should cost nothing, got %s", typeName(c()))
+	}
+	// The pane scrolls again: the region takes the rows back.
+	now = now.Add(minRegionGap)
+	if got := typeName(s.plan(rows("y", "w", "v"), 2, 4, 4, now)()); got != "tea.syncScrollAreaMsg" {
+		t.Fatalf("a scroll should reclaim the region, got %s", got)
 	}
 }
 
