@@ -69,6 +69,9 @@ func (h *Harness) Rephrase(ctx context.Context, task string) (string, error) {
 	}
 	var b strings.Builder
 	var usage *llm.Usage
+	// Read to the close, not to Done: with include_usage the usage arrives in
+	// its own chunk after the finish, and a reader that stops at Done records
+	// the call as costing nothing.
 	for c := range ch {
 		if c.Error != "" {
 			h.noteSideCall("rephrase", start, nil)
@@ -77,9 +80,6 @@ func (h *Harness) Rephrase(ctx context.Context, task string) (string, error) {
 		b.WriteString(c.Content)
 		if c.Usage != nil {
 			usage = c.Usage
-		}
-		if c.Done {
-			break
 		}
 	}
 	h.noteSideCall("rephrase", start, usage)

@@ -714,6 +714,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Timed as a whole: this is what a keystroke queues behind, and it is the
 	// number that decides whether dun warns about itself (see perf.go).
 	start := time.Now()
+	// A burst of typed characters arrives as one KeyRunes per word, and a
+	// KeyRunes' String() is its text: the word "up" typed (or sent over ssh,
+	// tmux, the web terminal) matched case "up" and was eaten as an arrow key.
+	// One rune at a time cannot spell a key name. A paste stays whole.
+	if k, ok := msg.(tea.KeyMsg); ok && k.Type == tea.KeyRunes && !k.Paste && len(k.Runes) > 1 {
+		var cur tea.Model = m
+		var cmds []tea.Cmd
+		for _, r := range k.Runes {
+			var c tea.Cmd
+			cur, c = cur.(tuiModel).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: k.Alt})
+			cmds = append(cmds, c)
+		}
+		return cur, tea.Batch(cmds...)
+	}
 	nm, cmd := m.update(msg)
 	if frames.observeMsg(stageUpdate, time.Since(start), msgKind(msg)) {
 		// Noticed its own stutter. Say it once, in the conversation, where the

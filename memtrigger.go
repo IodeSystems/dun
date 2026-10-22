@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/iodesystems/agentkit/agent"
 )
@@ -73,6 +74,9 @@ func scanMemoryTrigger(entries []agent.Entry) memoryTrigger {
 // instruction: the ask is usually a sentence; a pasted document that
 // happens to say "remember" is not.
 const triggerMax = 1200
+
+// triggerTimeout bounds a triggered fork, which no caller waits on.
+const triggerTimeout = 2 * time.Minute
 
 // checkMemoryTriggers looks at the entries since the last check and runs
 // the memory fork when they call for it. It returns the fork's line for the

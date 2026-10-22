@@ -90,6 +90,9 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	}
 	var b strings.Builder
 	var usage *llm.Usage
+	// Read to the close, not to Done: with include_usage the usage arrives in
+	// its own chunk after the finish, and a reader that stops at Done records
+	// the call as costing nothing.
 	for c := range ch {
 		if c.Error != "" {
 			h.noteSideCall("suggest", start, nil) // best-effort: count the failed call too
@@ -98,9 +101,6 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 		b.WriteString(c.Content)
 		if c.Usage != nil {
 			usage = c.Usage
-		}
-		if c.Done {
-			break
 		}
 	}
 	h.noteSideCall("suggest", start, usage)

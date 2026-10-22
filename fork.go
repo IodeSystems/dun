@@ -61,6 +61,9 @@ func (h *Harness) fork(ctx context.Context, kind, instruction string, only llm.T
 	var content strings.Builder
 	var calls []llm.ToolCall
 	var usage *llm.Usage
+	// Read to the close, not to Done: with include_usage the usage arrives in
+	// its own chunk after the finish, and a reader that stops at Done records
+	// the call as costing nothing.
 	for c := range ch {
 		if c.Error != "" {
 			h.noteSideCall(kind, start, nil)
@@ -72,9 +75,6 @@ func (h *Harness) fork(ctx context.Context, kind, instruction string, only llm.T
 		}
 		if c.Usage != nil {
 			usage = c.Usage
-		}
-		if c.Done {
-			break
 		}
 	}
 	h.noteSideCall(kind, start, usage)
@@ -100,9 +100,12 @@ func (h *Harness) fork(ctx context.Context, kind, instruction string, only llm.T
 // rememberInstruction asks for notes from the conversation; with what set,
 // for that one thing.
 func rememberInstruction(what string) string {
-	const rules = " Write each note to stand alone — the reader will not see this conversation: the fact, why it " +
-		"holds, and where it applies, plus the question it answers in a later user's words. Do not save what " +
-		"the code, the git history or the docs already record."
+	// "why it holds" used to be asked for unconditionally; live, the model
+	// supplied one ("without it the deploy will fail") that nobody had said.
+	const rules = " Write each note to stand alone — the reader will not see this conversation: the fact and " +
+		"where it applies, plus the question it answers in a later user's words. Give the reason only if the " +
+		"conversation states one; never add a reason, consequence or detail that was not said. Do not save " +
+		"what the code, the git history or the docs already record."
 	if what = strings.TrimSpace(what); what != "" {
 		return "The user asked you to remember this: " + what + "\n\nSave it with ONE memory call (action add)," +
 			" using the conversation above to make it complete." + rules

@@ -67,7 +67,7 @@ func memoryToolDef() llm.ToolDef {
 		"type": "object",
 		"properties": map[string]any{
 			"action":   map[string]any{"type": "string", "enum": []string{"add", "replace", "remove"}},
-			"content":  map[string]any{"type": "string", "description": "add/replace: the note — the fact, why it holds, and where it applies"},
+			"content":  map[string]any{"type": "string", "description": "add/replace: the note — the fact and where it applies, and why it holds only if that was said; never add a reason or consequence nobody stated"},
 			"question": map[string]any{"type": "string", "description": "add/replace: the question this note answers, in the words a later user would ask it"},
 			"old_text": map[string]any{"type": "string", "description": "replace/remove: a phrase copied exactly from the note to change"},
 			"public":   map[string]any{"type": "boolean", "description": "share with everyone on this project (default: private to you)"},

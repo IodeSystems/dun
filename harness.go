@@ -1103,8 +1103,13 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error) {
 	res, err := h.runTurnWithRescue(ctx, h.Session.Turn)
 	if err == nil {
+		// Not the turn's ctx: the caller cancels it once the turn returns,
+		// which is before the fork has started (live, every trigger failed
+		// "context canceled").
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), triggerTimeout)
 		go func() {
-			if msg := h.checkMemoryTriggers(ctx); msg != "" {
+			defer cancel()
+			if msg := h.checkMemoryTriggers(fctx); msg != "" {
 				h.Aside("[memory] " + msg)
 				if h.cfg.OnMemoryTrigger != nil {
 					h.cfg.OnMemoryTrigger(msg)

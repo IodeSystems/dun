@@ -135,6 +135,9 @@ func (h *Harness) CommitMessage(ctx context.Context, wt *Worktree) (string, erro
 	}
 	var out strings.Builder
 	var usage *llm.Usage
+	// Read to the close, not to Done: with include_usage the usage arrives in
+	// its own chunk after the finish, and a reader that stops at Done records
+	// the call as costing nothing.
 	for c := range ch {
 		if c.Error != "" {
 			return "", fmt.Errorf("%s", c.Error)
@@ -142,9 +145,6 @@ func (h *Harness) CommitMessage(ctx context.Context, wt *Worktree) (string, erro
 		out.WriteString(c.Content)
 		if c.Usage != nil {
 			usage = c.Usage
-		}
-		if c.Done {
-			break
 		}
 	}
 	h.noteSideCall("commit", start, usage)

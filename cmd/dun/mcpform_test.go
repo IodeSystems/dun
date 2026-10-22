@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestMCPFormSpec_URLOrCommand(t *testing.T) {
@@ -57,5 +59,23 @@ func TestCatalog_PromptsBecomeSlashCommands(t *testing.T) {
 	}
 	if len(m.skills) != 1 || m.skills[0].Name != "deploy" {
 		t.Errorf("skills %+v", m.skills)
+	}
+}
+
+// A word that is also a key name, arriving as one burst, is text.
+func TestBurstOfRunes_KeyNamedWordIsTyped(t *testing.T) {
+	m := newTUIModel(nil, ".")
+	m.input.Focus()
+	var cur tea.Model = m
+	for _, w := range []string{"a", " ", "up", " ", "down", " ", "b"} {
+		k := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(w)}
+		if w == " " {
+			k = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")}
+		}
+		cur, _ = cur.Update(k)
+	}
+	tm := cur.(tuiModel)
+	if got := tm.input.Value(); got != "a up down b" {
+		t.Errorf("input = %q", got)
 	}
 }
