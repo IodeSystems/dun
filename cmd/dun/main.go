@@ -340,6 +340,14 @@ func main() {
 	// dun.DefaultServers), so the index outlives the session and several
 	// sessions share one.
 
+	// Register the workspace as a project on first sight, importing what an
+	// older dun left in its .dun/. Everything dun keeps about it lives in
+	// $DUN_HOME/projects/<id>/, never in the repo. Not fatal: without it dun
+	// still reads the repo's own config, it only cannot save anything.
+	if _, err := dun.EnsureProject(absWS); err != nil {
+		fmt.Fprintf(os.Stderr, "dun: %v\n", err)
+	}
+
 	// Resolve extra mounts: local paths that must be accessible from both
 	// the worktree (symlink) and the Docker container (volume mount).
 	// Loaded from dun.json / dun.local.json and auto-discovered from go.mod.
