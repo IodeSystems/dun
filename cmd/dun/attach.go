@@ -55,18 +55,13 @@ func dialDund() (net.Conn, error) {
 
 func dundLog() string { return dunHome() + "/dund.log" }
 
-// startDund starts the service: the installed systemd unit when there is
-// one (so its flags, --http included, apply), else `dun dund serve` from this
-// binary, in its own session so it outlives the TUI, output to dund.log.
+// startDund starts the service: the installed one (a systemd unit, or a
+// launchd agent on macOS) when there is one, so its flags, --http included,
+// apply; else `dun dund serve` from this binary, in its own session so it
+// outlives the TUI, output to dund.log.
 func startDund() error {
-	if unit, err := dundcli.UnitPath(dundcli.ServiceUnit); err == nil {
-		if _, err := os.Stat(unit); err == nil {
-			out, err := exec.Command("systemctl", "--user", "start", dundcli.ServiceUnit).CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("systemctl --user start %s: %v: %s", dundcli.ServiceUnit, err, strings.TrimSpace(string(out)))
-			}
-			return nil
-		}
+	if _, ok := dundcli.ServiceFile(dundcli.ServiceUnit); ok {
+		return dundcli.StartService(dundcli.ServiceUnit)
 	}
 	exe, err := os.Executable()
 	if err != nil {
