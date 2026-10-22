@@ -9,6 +9,7 @@
 package dund
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -278,6 +279,57 @@ func (s *Service) Poll(principal, id string, after uint64, wait time.Duration, m
 		replay = replay[:max]
 	}
 	return snap, replay, nil
+}
+
+// Stream follows a session from after seq after: a snapshot first when the
+// caller is too far behind, then the kept events, then live ones, on one
+// channel that closes when ctx ends or the subscriber falls behind (resume
+// from the last seq received). The engine is started if it is not running.
+func (s *Service) Stream(ctx context.Context, principal, id string, after uint64) (<-chan proto.Event, error) {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return nil, err
+	}
+	snap, replay, sub, err := ses.subscribe(after)
+	if err != nil {
+		return nil, err
+	}
+	if err := ses.ensureRunning(); err != nil {
+		sub.Close()
+		return nil, err
+	}
+	out := make(chan proto.Event)
+	go func() {
+		defer close(out)
+		defer sub.Close()
+		send := func(ev proto.Event) bool {
+			select {
+			case out <- ev:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+		if snap != nil && !send(*snap) {
+			return
+		}
+		for _, ev := range replay {
+			if !send(ev) {
+				return
+			}
+		}
+		for {
+			select {
+			case ev, ok := <-sub.C():
+				if !ok || !send(ev) {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 // Restart restarts a session's engine with new flags, on the same

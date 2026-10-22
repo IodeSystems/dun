@@ -69,3 +69,5 @@ require (
 )
 
 replace github.com/iodesystems/agentkit => ../agentkit
+
+replace github.com/iodesystems/gwag/v2 => ../_lib/gwag

@@ -1,6 +1,7 @@
 schema {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }
 
 directive @derived(operationId: String) on FIELD_DEFINITION | OBJECT | INPUT_OBJECT | INPUT_FIELD_DEFINITION | ENUM | SCALAR | UNION | INTERFACE | ARGUMENT_DEFINITION
@@ -14,6 +15,7 @@ type DundMutationNamespace {
   restartSession(body: dund_RestartInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "restartSession")
   sendMessage(body: dund_MessageInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "sendMessage")
   stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
+  subscribeToken(id: String!): dund_TokenOutputBody @derived(operationId: "subscribeToken")
   v1: DundV1MutationNamespace!
 }
 
@@ -40,6 +42,7 @@ type DundV1MutationNamespace {
   restartSession(body: dund_RestartInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "restartSession")
   sendMessage(body: dund_MessageInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "sendMessage")
   stopSession(id: String!): dund_OKOutputBody @derived(operationId: "stopSession")
+  subscribeToken(id: String!): dund_TokenOutputBody @derived(operationId: "subscribeToken")
 }
 
 type DundV1QueryNamespace {
@@ -67,6 +70,20 @@ type Mutation {
 
 type Query {
   dund: DundQueryNamespace!
+}
+
+type Subscription {
+  dund_sessionEvents(
+    """the last seq seen; 0 for the start"""
+    after: Long
+    """from subscribeToken"""
+    hmac: String!
+    """from subscribeToken"""
+    principal: String!
+    session: String!
+    """from subscribeToken"""
+    timestamp: Long!
+  ): dund_StreamEvent @derived(operationId: "sessionEvents")
 }
 
 input dund_AnswerInputBodyInput {
@@ -131,6 +148,16 @@ type dund_SessionSummary {
 
 type dund_SessionsOutputBody {
   items: [dund_SessionSummary!]!
+}
+
+type dund_StreamEvent {
+  event: JSON!
+}
+
+type dund_TokenOutputBody {
+  hmac: String!
+  principal: String!
+  timestamp: Long!
 }
 
 input dund_UIInputBodyInput {

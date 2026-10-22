@@ -57,8 +57,9 @@ type Server struct {
 	svc *dund.Service
 	// owner is the principal the local token stands for: the user the
 	// service runs as (unix:<uid>), the same one its socket clients are.
-	owner string
-	api   huma.API
+	owner  string
+	api    huma.API
+	signer *subSigner
 }
 
 // Handler is the whole HTTP surface. webRoot, when set, is the built client
@@ -105,7 +106,7 @@ func SDL() (string, error) {
 
 func newRouter(svc *dund.Service, owner string, auth bool, webRoot string) (http.Handler, error) {
 	r := chi.NewRouter()
-	s := &Server{svc: svc, owner: owner}
+	s := &Server{svc: svc, owner: owner, signer: newSigner()}
 	if auth {
 		r.Use(s.authenticate)
 	}
@@ -133,6 +134,7 @@ func newRouter(svc *dund.Service, owner string, auth bool, webRoot string) (http
 		return nil, err
 	}
 	s.register(api, g)
+	s.registerStream(api, g)
 	if err := gat.RegisterHuma(api, g, "/api"); err != nil {
 		return nil, err
 	}
@@ -155,7 +157,7 @@ var indexHTML []byte
 // the context every handler gets, whether called as REST or through gat.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if open[r.URL.Path] || !strings.HasPrefix(r.URL.Path, "/api/") {
+		if open[r.URL.Path] || !strings.HasPrefix(r.URL.Path, "/api/") || isUpgrade(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
