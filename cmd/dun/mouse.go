@@ -399,3 +399,39 @@ func copiedNote(c copiedMsg) string {
 	}
 	return s
 }
+
+// yankText is what y copies from a block: its source, not its rendering — a
+// reply's markdown, a message as typed, a thought, a run's calls with their
+// arguments and results in full.
+func yankText(e convoEntry) string {
+	switch {
+	case e.userText != "":
+		return e.userText
+	case e.mdSource != "":
+		return e.mdSource
+	case e.think != nil:
+		return strings.TrimSpace(e.think.text)
+	case e.run != nil:
+		var parts []string
+		for _, it := range e.run.items {
+			if it.think != nil {
+				parts = append(parts, strings.TrimSpace(it.think.text))
+				continue
+			}
+			p := "⚙ " + it.tool
+			if a := stripANSI(argFull(it.args)); a != "" {
+				p += "\n" + a
+			}
+			if it.result != "" {
+				p += "\n" + strings.TrimRight(it.result, "\n")
+			}
+			parts = append(parts, p)
+		}
+		return strings.Join(parts, "\n\n")
+	}
+	text := e.full
+	if text == "" {
+		text = e.collapsed
+	}
+	return strings.TrimSpace(stripANSI(text))
+}

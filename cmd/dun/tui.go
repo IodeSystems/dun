@@ -961,6 +961,13 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, nil
 		}
+		// y yanks the selected block's text to the clipboard (vim's yank).
+		if msg.String() == "y" && m.focus == focusConvo && m.sel >= 0 && m.sel < len(m.convo) {
+			if text := yankText(m.convo[m.sel]); text != "" {
+				return m, copyCmd(text)
+			}
+			return m, nil
+		}
 		// l descends into the selected box, like →.
 		if msg.String() == "l" && m.selBox() != nil {
 			m.selBox().inside = true
@@ -2919,9 +2926,9 @@ func (m tuiModel) View() string {
 			case m.insideBox() != nil:
 				status = stDim.Render("inside  ·  ↑/↓ pgup/pgdn g/G scroll · ← leave · enter open")
 			case m.selBox() != nil:
-				status = stDim.Render("convo  ·  ↑/↓ select · → scroll inside · enter open · / search · tab input")
+				status = stDim.Render("convo  ·  ↑/↓ select · → scroll inside · enter open · y copy · / search · tab input")
 			default:
-				status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter open · / search · tab input")
+				status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter open · y copy · / search · tab input")
 			}
 		}
 	case m.suggestActive():

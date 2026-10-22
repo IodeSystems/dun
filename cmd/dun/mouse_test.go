@@ -395,3 +395,53 @@ func TestCopiedNote(t *testing.T) {
 		t.Errorf("%q", s)
 	}
 }
+
+// y copies the selected block's source text.
+func TestYank(t *testing.T) {
+	var wrote, ran []string
+	fakeClip(t, map[string]string{}, &wrote, &ran, nil)
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	v.event(map[string]any{"type": "user", "content": "hello there"})
+	v.event(map[string]any{"type": "turn", "kind": "user"})
+	v.event(map[string]any{"type": "token", "text": "A **bold** reply"})
+	v.event(map[string]any{"type": "done"})
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft}) // the newest block
+	if v.m.focus != focusConvo {
+		t.Fatal("precondition: the conversation has focus")
+	}
+	nm, cmd := v.m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("y on a selected block should copy")
+	}
+	nm, _ = nm.(tuiModel).Update(cmd())
+	if len(wrote) != 1 || wrote[0] != osc52("A **bold** reply") {
+		t.Errorf("wrote %q, want the reply's markdown", wrote)
+	}
+	if f := nm.(tuiModel).flashText; !strings.HasPrefix(f, "copied 16 chars") {
+		t.Errorf("flash %q", f)
+	}
+}
+
+func TestYankText_Run(t *testing.T) {
+	e := convoEntry{run: &toolRun{items: []*runItem{
+		{tool: "exec", args: map[string]any{"command": "ls"}, result: "a\nb\n"},
+		{think: &thinkBlock{text: " hmm "}},
+	}}}
+	got := stripANSI(yankText(e))
+	for _, want := range []string{"⚙ exec", "command: ls", "a\nb", "hmm"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+}
+
+// y in the input is a letter.
+func TestYank_InputTypesY(t *testing.T) {
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	v.m = typeStr(v.m, "yay")
+	if got := v.m.input.Value(); got != "yay" {
+		t.Errorf("input %q", got)
+	}
+}
