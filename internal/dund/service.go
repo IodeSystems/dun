@@ -57,9 +57,23 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	dropped := 0
 	for _, r := range recs {
-		s.sessions[r.ID] = &session{svc: s, id: r.ID, workspace: r.Workspace, owner: r.Owner,
-			members: r.Members, args: r.Args, log: proto.NewLog(r.ID, logCapacity)}
+		ses := &session{svc: s, id: r.ID, workspace: r.Workspace, owner: r.Owner,
+			members: r.Members, args: r.Args, persist: r.Persist, log: proto.NewLog(r.ID, logCapacity)}
+		// A session nothing was ever asked in is not kept (USER 2026-10-22);
+		// no engine runs yet, so it can simply be left out.
+		if !ses.persist && !ses.hasMessages() {
+			ses.log.Close()
+			dropped++
+			continue
+		}
+		s.sessions[r.ID] = ses
+	}
+	if dropped > 0 {
+		if err := s.saveRegistry(); err != nil {
+			return nil, err
+		}
 	}
 	go s.reapIdle()
 	return s, nil
@@ -81,7 +95,7 @@ func (s *Service) reapIdle() {
 		s.mu.Lock()
 		var idle []*session
 		for _, ses := range s.sessions {
-			if ses.idle(idleStop) {
+			if !ses.persists() && ses.idle(idleStop) {
 				idle = append(idle, ses)
 			}
 		}
@@ -89,6 +103,7 @@ func (s *Service) reapIdle() {
 		for _, ses := range idle {
 			ses.log.Append(proto.NewEvent(&proto.EngineState{State: "stopping", Reason: "idle for " + idleStop.String()}))
 			ses.stop()
+			s.dropIfEmpty(ses)
 		}
 	}
 }
@@ -403,14 +418,81 @@ func setFlag(args []string, name, value string) []string {
 	return out
 }
 
-// Stop ends a session's engine; the session stays registered.
+// Stop ends a session's engine; the session stays registered, unless
+// nothing was ever asked in it.
 func (s *Service) Stop(principal, id string) error {
 	ses, err := s.Get(principal, id)
 	if err != nil {
 		return err
 	}
 	ses.stop()
+	s.dropIfEmpty(ses)
 	return nil
+}
+
+// SetPersist sets or reports whether a session keeps running when its last
+// client leaves: mode "on", "off", "status", or "" (on if it is off, else
+// status). It returns the setting and whether this call changed it.
+func (s *Service) SetPersist(principal, id, mode string) (on, changed bool, err error) {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return false, false, err
+	}
+	ses.mu.Lock()
+	was := ses.persist
+	switch mode {
+	case "on", "":
+		ses.persist = true
+	case "off":
+		ses.persist = false
+	case "status":
+	default:
+		ses.mu.Unlock()
+		return false, false, fmt.Errorf("persist: %q is not on, off or status", mode)
+	}
+	on, changed = ses.persist, ses.persist != was
+	ses.mu.Unlock()
+	if changed {
+		if err := s.saveRegistry(); err != nil {
+			return was, false, err
+		}
+	}
+	return on, changed, nil
+}
+
+// Leave is a client exiting (/exit): the engine stops unless the session
+// persists or another client is still attached, and a session nothing was
+// asked in is forgotten. The caller's own subscription is already closed.
+func (s *Service) Leave(principal, id string) error {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return err
+	}
+	if ses.persists() || ses.log.Subscribers() > 0 {
+		return nil
+	}
+	ses.log.Append(proto.NewEvent(&proto.EngineState{State: "stopping", Reason: "its last client exited"}))
+	ses.stop()
+	s.dropIfEmpty(ses)
+	return nil
+}
+
+// dropIfEmpty forgets a stopped session that holds no user message and does
+// not persist: an engine started and left without anything asked in it.
+func (s *Service) dropIfEmpty(ses *session) {
+	if ses.persists() || ses.hasMessages() {
+		return
+	}
+	ses.log.Close()
+	s.mu.Lock()
+	if s.sessions[ses.id] != ses {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.sessions, ses.id)
+	s.mu.Unlock()
+	_ = os.RemoveAll(filepath.Join(s.dir, "ui", ses.id))
+	_ = s.saveRegistry()
 }
 
 // Busy reports whether any session's engine is doing something a restart
@@ -459,6 +541,7 @@ type record struct {
 	Owner     string   `json:"owner"`
 	Members   []string `json:"members"`
 	Args      []string `json:"args,omitempty"`
+	Persist   bool     `json:"persist,omitempty"`
 }
 
 func (s *Service) registryPath() string { return filepath.Join(s.dir, "sessions.json") }
@@ -483,7 +566,7 @@ func (s *Service) saveRegistry() error {
 	recs := make([]record, 0, len(s.sessions))
 	for _, ses := range s.sessions {
 		recs = append(recs, record{ID: ses.id, Workspace: ses.workspace, Owner: ses.owner,
-			Members: ses.members, Args: ses.args})
+			Members: ses.members, Args: ses.args, Persist: ses.persist})
 	}
 	s.mu.Unlock()
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })

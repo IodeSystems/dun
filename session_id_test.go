@@ -72,3 +72,22 @@ func TestEmptySession_SkippedAndPruned(t *testing.T) {
 		t.Error("a fresh empty session may be live and must stay")
 	}
 }
+
+// A session with entries but no user message is not offered to resume; an
+// unreadable one still is.
+func TestListSessionInfo_SkipsSessionsWithNoUserMessage(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "20261022-100000.jsonl"), []byte(`{"Kind":"notification","Content":"ready"}`+"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "20261022-100001.jsonl"), []byte(`{"Kind":"user","Content":"fix the tests"}`+"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "20261022-100002.jsonl"), []byte("not json\n"), 0o644)
+	var ids []string
+	for _, s := range ListSessionInfo(ws) {
+		ids = append(ids, s.ID)
+	}
+	if len(ids) != 2 || ids[0] != "20261022-100002" || ids[1] != "20261022-100001" {
+		t.Errorf("listed %v; want the asked one and the unreadable one", ids)
+	}
+}

@@ -46,6 +46,7 @@ type session struct {
 	log       *proto.Log
 
 	mu           sync.Mutex
+	persist      bool // keeps running when its last client leaves, and past the idle stop
 	eng          Engine
 	engDone      chan struct{} // closed when eng has exited
 	running      bool
@@ -140,7 +141,28 @@ func (s *session) summary() proto.SessionSummary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return proto.SessionSummary{ID: s.id, Workspace: s.workspace, Owner: s.owner,
-		Members: slices.Clone(s.members), Running: s.running, LastSeq: s.log.Last()}
+		Members: slices.Clone(s.members), Running: s.running, LastSeq: s.log.Last(), Persist: s.persist}
+}
+
+func (s *session) persists() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.persist
+}
+
+// hasMessages reports whether the session's transcript holds a user message.
+// A session without one is not worth keeping: nothing was asked in it.
+func (s *session) hasMessages() bool { return askedIn(s.workspace, s.id) }
+
+// askedIn reads the engine's transcript (a variable: the tests' fake engine
+// writes none).
+var askedIn = func(workspace, id string) bool {
+	for _, it := range dun.SessionHistory(dun.SessionFile(workspace, id)) {
+		if it.Kind == "user" {
+			return true
+		}
+	}
+	return false
 }
 
 // readEvents appends every frame the engine writes until its stdout closes,

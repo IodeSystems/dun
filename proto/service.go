@@ -12,10 +12,13 @@ func init() {
 	command[UIPut]("ui_put")
 	command[Restart]("restart")
 	command[Forget]("forget")
+	command[Persist]("persist")
+	command[Leave]("leave")
 
 	event[SessionList]("sessions")
 	event[EngineState]("engine")
 	event[UIState]("ui_state")
+	event[PersistState]("persist")
 }
 
 // ListSessions asks for the sessions the caller is a member of.
@@ -48,6 +51,26 @@ type Forget struct{}
 // session keeps running.
 type Detach struct{}
 
+// Persist sets or reports whether the envelope's session keeps running when
+// its last client leaves (and past the idle stop). Mode is "on", "off",
+// "status", or "" — on if it is off, else status. Answered with a persist
+// event.
+type Persist struct {
+	Mode string `json:"mode,omitempty"`
+}
+
+// PersistState is a session's persist setting; Changed says this command
+// changed it.
+type PersistState struct {
+	On      bool `json:"on"`
+	Changed bool `json:"changed,omitempty"`
+}
+
+// Leave is a client exiting (/exit): its subscription ends, and the engine
+// stops unless the session persists or another client is attached. A
+// session with no messages is then forgotten.
+type Leave struct{}
+
 // UIGet asks for the caller's UI state in the envelope's session.
 type UIGet struct{}
 
@@ -70,6 +93,7 @@ type SessionSummary struct {
 	Members   []string `json:"members"`
 	Running   bool     `json:"running"`
 	LastSeq   uint64   `json:"last_seq"`
+	Persist   bool     `json:"persist,omitempty"`
 }
 
 // EngineState is the session's engine process: started, exited, restarting

@@ -1054,8 +1054,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Bare "exit" (no slash) is a hidden command: exits silently.
 			if v == "exit" {
-				m.quitting = true
-				return m, tea.Quit
+				return m, m.exit()
 			}
 			// Sending while a turn runs is allowed: the engine buffers the message
 			// and lifts it into the next tool result, so the agent reads it inside
@@ -2077,6 +2076,19 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 	case "retry":
 		return m.handleRetry(ev)
+	case "persist":
+		// dund's answer to /persist.
+		on, changed := ev["on"] == true, ev["changed"] == true
+		switch {
+		case on && changed:
+			m.append(stDim.Render("persist: on — this session keeps running after /exit · /persist off to undo"))
+		case on:
+			m.append(stDim.Render("persist: on — /exit leaves this session running · /persist off to let /exit stop it"))
+		case changed:
+			m.append(stDim.Render("persist: off — /exit stops this session's engine (the conversation is kept)"))
+		default:
+			m.append(stDim.Render("persist: off — /exit stops this session's engine · /persist to keep it running"))
+		}
 	case "user":
 		// The engine took a user message — from this client or another. It is
 		// rendered here, not when sent, so every client shows the same
@@ -2877,6 +2889,15 @@ func (m *tuiModel) turnGap() {
 	m.convo = append(m.convo, convoEntry{collapsed: "", blank: true})
 }
 
+// exit is /exit: tell dund this client is leaving — it stops the engine
+// unless the session persists or another client is attached — then quit.
+// ctrl+c only detaches.
+func (m *tuiModel) exit() tea.Cmd {
+	m.proc.leave()
+	m.quitting = true
+	return tea.Quit
+}
+
 // appendUser adds a user message and stores the raw text for full-width re-rendering.
 func (m *tuiModel) appendUser(text string) {
 	m.convo = append(m.convo, convoEntry{collapsed: stUser.Render("› " + text), userText: text})
@@ -3590,9 +3611,24 @@ func init() {
 			return restartEngine(m.opts, m.sessionID, m.everUp, m.seenSeq())
 		}},
 		{"skill", "[name] [text]", "skills: bare lists them (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers); with a name, asks the model to use it", skillSlash},
-		{"exit", "", "exit dun", func(m *tuiModel, _ []string) tea.Cmd {
-			m.quitting = true
-			return tea.Quit
+		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
+			return m.exit()
+		}},
+		{"persist", "[on|off|status]", "keep this session running after /exit (bare: on, or the status if already on)", func(m *tuiModel, args []string) tea.Cmd {
+			mode := ""
+			if len(args) > 0 {
+				mode = strings.ToLower(args[0])
+			}
+			switch mode {
+			case "", "on", "off", "status":
+			default:
+				m.append(stErr.Render("usage: /persist [on|off|status]"))
+				return nil
+			}
+			if !m.proc.persist(mode) {
+				m.append(stErr.Render("no session service right now — /reconnect, then try again"))
+			}
+			return nil
 		}},
 	}
 }

@@ -210,6 +210,23 @@ func (c *conn) handle(cmd proto.Command) {
 		go func() { c.ack(cmd, cmd.Session, svc.Forget(c.who, cmd.Session)) }()
 	case *proto.Stop:
 		c.ack(cmd, cmd.Session, svc.Stop(c.who, cmd.Session))
+	case *proto.Persist:
+		on, changed, err := svc.SetPersist(c.who, cmd.Session, p.Mode)
+		if err != nil {
+			c.ack(cmd, cmd.Session, err)
+			return
+		}
+		c.reply(cmd, cmd.Session, &proto.PersistState{On: on, Changed: changed})
+	case *proto.Leave:
+		// This connection's subscription goes first, so the service counts the
+		// clients still attached without it.
+		c.mu.Lock()
+		if sub, ok := c.subs[cmd.Session]; ok {
+			sub.Close()
+			delete(c.subs, cmd.Session)
+		}
+		c.mu.Unlock()
+		go func() { c.ack(cmd, cmd.Session, svc.Leave(c.who, cmd.Session)) }()
 	default:
 		// Anything else is for the session's engine.
 		if cmd.Session == "" {

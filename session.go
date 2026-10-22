@@ -165,9 +165,10 @@ type SessionInfo struct {
 // not worth making the picker wait.
 const previewScanLimit = 4000
 
-// ListSessionInfo summarizes every saved session for a workspace root, newest
-// first. Unreadable sessions are listed with what is known rather than hidden —
-// a session you cannot open is exactly the one you want to see.
+// ListSessionInfo summarizes every saved session with a user message in it for
+// a workspace root, newest first. Unreadable sessions are listed with what is
+// known rather than hidden — a session you cannot open is exactly the one you
+// want to see.
 func ListSessionInfo(root string) []SessionInfo {
 	ids := ListSessions(root)
 	out := make([]SessionInfo, 0, len(ids))
@@ -177,17 +178,25 @@ func ListSessionInfo(root string) []SessionInfo {
 		if st, err := os.Stat(path); err == nil {
 			info.ModTime = st.ModTime()
 		}
-		info.Entries, info.Preview = scanSession(path)
+		var unreadable bool
+		info.Entries, info.Preview, unreadable = scanSession(path)
+		// Read whole and no user message: nothing was asked in it, so there
+		// is nothing to resume (USER 2026-10-22). One that could not be read
+		// stays listed.
+		if !unreadable && info.Preview == "" {
+			continue
+		}
 		out = append(out, info)
 	}
 	return out
 }
 
-// scanSession counts entries and lifts the first user message.
-func scanSession(path string) (entries int, preview string) {
+// scanSession counts entries and lifts the first user message; unreadable is
+// a file that would not open or a line that is not an entry.
+func scanSession(path string) (entries int, preview string, unreadable bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, ""
+		return 0, "", true
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
@@ -201,12 +210,16 @@ func scanSession(path string) (entries int, preview string) {
 			Kind    string `json:"Kind"`
 			Content string `json:"Content"`
 		}
-		if json.Unmarshal(sc.Bytes(), &e) != nil || e.Kind != string(agent.KindUser) {
+		if json.Unmarshal(sc.Bytes(), &e) != nil {
+			unreadable = true
+			continue
+		}
+		if e.Kind != string(agent.KindUser) {
 			continue
 		}
 		preview = strings.Join(strings.Fields(e.Content), " ")
 	}
-	return entries, preview
+	return entries, preview, unreadable || sc.Err() != nil
 }
 
 // SessionMeta stores the worktree info alongside a session so that resume
