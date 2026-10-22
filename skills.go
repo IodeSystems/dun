@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -376,6 +377,68 @@ func (h *Harness) CheckSkills() bool {
 	}
 	h.applyTools()
 	return true
+}
+
+// skillsIndex is the raglit index local skills go into, in the docs server's
+// store: the proactive search then surfaces a skill that matches the
+// conversation, without the model knowing to ask for it (USER 2026-10-22).
+const skillsIndex = "skills"
+
+// syncSkillIndex brings the skills index in step with the local skills the
+// model may use: a SKILL.md new or changed since the last sync is ingested,
+// one that is gone is forgotten. Called whenever the tool set is rebuilt
+// with the docs server running — that is, when /rag starts and when a skill
+// changes. MCP servers' skills stay in their servers.
+func (h *Harness) syncSkillIndex(sink *mcpDocsSink) {
+	if sink == nil {
+		return
+	}
+	h.skillIdxMu.Lock()
+	defer h.skillIdxMu.Unlock()
+	cur := map[string]string{}
+	for _, s := range h.Skills() {
+		if s.Dir == "" || s.UserOnly {
+			continue
+		}
+		p := filepath.Join(s.Dir, "SKILL.md")
+		if st, err := os.Stat(p); err == nil {
+			cur[p] = fmt.Sprintf("%d %d", st.Size(), st.ModTime().UnixNano())
+		}
+	}
+	var changed, gone []string
+	for p, sig := range cur {
+		if h.skillIdx[p] != sig {
+			changed = append(changed, p)
+		}
+	}
+	for p := range h.skillIdx {
+		if _, ok := cur[p]; !ok {
+			gone = append(gone, p)
+		}
+	}
+	sort.Strings(changed)
+	sort.Strings(gone)
+	if h.skillIdx == nil {
+		h.skillIdx = map[string]string{}
+	}
+	if len(gone) > 0 {
+		if err := sink.forget(skillsIndex, gone); err != nil {
+			log.Printf("dun: skills index: %v", err)
+		} else {
+			for _, p := range gone {
+				delete(h.skillIdx, p)
+			}
+		}
+	}
+	if len(changed) > 0 {
+		if err := sink.ingest(skillsIndex, changed); err != nil {
+			log.Printf("dun: skills index: %v", err)
+			return
+		}
+		for _, p := range changed {
+			h.skillIdx[p] = cur[p]
+		}
+	}
 }
 
 // PromptInfo is one MCP prompt, for a UI to offer as a slash command.

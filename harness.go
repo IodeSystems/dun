@@ -386,6 +386,10 @@ type Harness struct {
 	skillSeen  bool
 	skillSig   string
 	skillNames []string
+
+	// What syncSkillIndex last put in the skills index: SKILL.md → size+mtime.
+	skillIdxMu sync.Mutex
+	skillIdx   map[string]string
 	// trigMark is the CreatedAt of the newest entry the memory triggers have
 	// looked at (memtrigger.go).
 	trigMu   sync.Mutex

@@ -205,3 +205,48 @@ func TestCheckSkills_NoticesChanges(t *testing.T) {
 		t.Fatal("a removal was not noticed")
 	}
 }
+
+// The skills index follows the local skills: everything the first time,
+// then only what changed, and a removed skill is forgotten. A user-only
+// skill is not indexed: the model may not load it.
+func TestSyncSkillIndex(t *testing.T) {
+	home := t.TempDir()
+	defer func(f func() (string, error)) { userHomeDir = f }(userHomeDir)
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Setenv("DUN_HOME", filepath.Join(home, ".dun"))
+	user := filepath.Join(home, ".dun", "skills")
+	writeSkill(t, user, "deploy", "---\nname: deploy\ndescription: ship it\n---\nbody")
+	writeSkill(t, user, "manual", "---\nname: manual\ndescription: by hand\ndisable-model-invocation: true\n---\n")
+	h := newNoteHarness(t)
+	h.mgr, h.cfg.ConfigDir = mcpmgr.NewManager(), t.TempDir()
+
+	var log []string
+	sink := &mcpDocsSink{
+		ingest: func(index string, paths []string) error {
+			for _, p := range paths {
+				log = append(log, "ingest "+index+" "+filepath.Base(filepath.Dir(p)))
+			}
+			return nil
+		},
+		forget: func(index string, paths []string) error {
+			for _, p := range paths {
+				log = append(log, "forget "+index+" "+filepath.Base(filepath.Dir(p)))
+			}
+			return nil
+		},
+	}
+	step := func(want string) {
+		t.Helper()
+		log = nil
+		h.syncSkillIndex(sink)
+		if got := strings.Join(log, "; "); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	}
+	step("ingest skills deploy")
+	step("")
+	writeSkill(t, user, "review", "---\nname: review\ndescription: review a diff\n---\nbody")
+	step("ingest skills review")
+	os.RemoveAll(filepath.Join(user, "deploy"))
+	step("forget skills deploy")
+}

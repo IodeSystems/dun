@@ -370,6 +370,8 @@ func (h *Harness) rebuildTools() {
 		h.srvMu.Unlock()
 		m := raglitMemory(docs, h.cfg.Workspace)
 		h.memory.Store(m)
+		// Skills into the docs index, off the turn lock: raglit takes a while.
+		go h.syncSkillIndex(raglitDocsSink(docs))
 		toolDefs = append(toolDefs, memoryToolDef())
 		dispatch = withMemory(dispatch, h, m, report)
 	}
