@@ -301,6 +301,28 @@ Slices, in order:
 - **blocking decisions (USER):**
   - (a) Zitadel: an app for the PWA (PKCE), one for the device flow, and
     the audience dund checks — created in your Zitadel.
+- **Deployment asks (USER, 2026-10-21):**
+  - `dun.iodesystems.com` on hz, internal-only (LAN + VPN), like caselit:
+    one non-slot unit on 192.168.1.76, a port in hz's 20000–32767 band,
+    `/healthz`. Provisioning the hz service (port check, definition, sync)
+    is running now; dund has no HTTP listener until S4, so the backend is
+    down until then. WebSockets need a long HAProxy `timeout_tunnel` (the
+    default client/server timeout is 50 s).
+  - An Android APK downloadable like bintag's: `expo prebuild` + `gradlew
+    assembleRelease` (no EAS), `releases/android/dun-<code>.apk` +
+    `latest.json` (version_code, sha256, size), `/dun.apk` redirects to the
+    latest, `/api/v1/hello` carries the android update info and the app
+    offers or forces an update (bintag `bin/release-android`,
+    `internal/api/hello.go`, `mobile/src/lib/update/`). The server URL
+    defaults to https://dun.iodesystems.com with a runtime override in
+    Settings (bintag `mobile/src/lib/storage.ts`), which is also how the
+    app reaches a standalone install.
+  - Standalone on localhost: dund serves HTTP on 127.0.0.1 itself, no hz;
+    the PWA works there (browsers allow service workers on localhost
+    without TLS). Auth there is a **blocking decision (USER)**: loopback TCP
+    is reachable by every local user, unlike the 0600 socket, so either an
+    opaque local token (AUTH-2: generated into $DUN_HOME, SHA-256 stored,
+    `dun dund token` prints it) or OIDC as remote — or no auth on loopback.
 - **optional extensions:** push notifications when a session asks;
   share/invite a session to another principal (USER: "maybe later"); a
   read-only share link; session hand-off between machines.
