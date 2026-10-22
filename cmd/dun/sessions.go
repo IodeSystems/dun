@@ -181,7 +181,7 @@ func (m tuiModel) sessionPanel() string {
 			mark = stTool.Render("• ") // where you are now
 		}
 		line := fmt.Sprintf("%s%s  %s  %s",
-			mark, s.ID, stDim.Render(relTime(s.ModTime)), stDim.Render(fmt.Sprintf("%d entries", s.Entries)))
+			mark, s.ID, stDim.Render(relTime(s.ModTime)), stDim.Render(commaf("%d entries", s.Entries)))
 		if m.sessLive[s.ID] {
 			line += stTool.Render("  running")
 		}

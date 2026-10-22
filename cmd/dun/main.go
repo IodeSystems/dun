@@ -726,7 +726,7 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 		fmt.Fprintf(os.Stderr, "\ndun: resume with: dun --continue --workspace %s \"<what to do next>\"\n", workspace)
 		fatal(err)
 	}
-	fmt.Fprintf(os.Stderr, "\n\n--- done (%d tokens) ---\n", res.Usage.Total)
+	fmt.Fprint(os.Stderr, commaf("\n\n--- done (%d tokens) ---\n", res.Usage.Total))
 
 	for {
 		if h.BackgroundRunning() == 0 {

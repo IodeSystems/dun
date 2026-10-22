@@ -513,7 +513,7 @@ func (d *docsBlock) render(open bool) string {
 	}
 	label := fmt.Sprintf("%s🔎 %d relevant doc(s) · %d surfaced", glyph, d.found, d.surfaced)
 	if d.tokens > 0 {
-		label += fmt.Sprintf(" · ~%d tok", d.tokens)
+		label += commaf(" · ~%d tok", d.tokens)
 	}
 	head := stNote.Render(label)
 	if !open || len(d.docs) == 0 {
@@ -3048,7 +3048,7 @@ func (m *tuiModel) replay(items []any) {
 	}
 	flushPend()
 	if n > 0 {
-		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(fmt.Sprintf("── resumed %d entries ──", n))})
+		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(commaf("── resumed %d entries ──", n))})
 	}
 	m.refresh()
 }
@@ -3727,6 +3727,24 @@ func (m *tuiModel) showConfig() {
 // average hides a slow one, the last one hides a fast streak; the two
 // disagreeing is the interesting case. Tokens are per-kind running totals:
 // processed/cached is the prompt the call re-read, generated is what it wrote.
+// ctxLabelW is the label column of /context's aligned rows.
+const ctxLabelW = 22
+
+// ctxRow is one aligned /context row: the label padded to its column, the
+// value, and a dim note after it. Labels longer than the column are cut, so
+// a long server name cannot push its number out of line.
+func ctxRow(label, value, note string) string {
+	if lipgloss.Width(label) > ctxLabelW-1 {
+		label = clip(label, ctxLabelW-1)
+	}
+	pad := strings.Repeat(" ", ctxLabelW-lipgloss.Width(label))
+	return "\n  " + stDim.Render(label+pad) + value + stDim.Render(note)
+}
+
+// ctxNum is a count for a /context row: grouped, right-aligned, so a column
+// of numbers lines up on its last digit.
+func ctxNum(n int) string { return fmt.Sprintf("%9s", grouped(n)) }
+
 func sideCallBlock(s *contextStats) string {
 	if len(s.sideCalls) == 0 {
 		return ""
@@ -3755,14 +3773,14 @@ func sideCallBlock(s *contextStats) string {
 		if w, ok := what[k]; ok {
 			label = k + " (" + w + ")"
 		}
-		b.WriteString("\n  " + stDim.Render(fmt.Sprintf("%-12s", label)))
+		b.WriteString("\n  " + stDim.Render(commaf("%-12s", label)))
 		b.WriteString(plural(r.calls, "call"))
 		if r.calls > 0 {
-			b.WriteString(stDim.Render(fmt.Sprintf(" · avg %d ms · last %d ms", r.avgMS, r.lastMS)))
+			b.WriteString(stDim.Render(commaf(" · avg %d ms · last %d ms", r.avgMS, r.lastMS)))
 		}
-		tok := stDim.Render(fmt.Sprintf(" · %d proc / %d cached / %d gen", r.processed, r.cached, r.generated))
+		tok := stDim.Render(commaf(" · %d proc / %d cached / %d gen", r.processed, r.cached, r.generated))
 		if r.tokPerS > 0 {
-			tok += fmt.Sprintf(" · %.0f tok/s", r.tokPerS)
+			tok += commaf(" · %.0f tok/s", r.tokPerS)
 		}
 		b.WriteString(tok)
 	}
@@ -3793,27 +3811,27 @@ func windowBlock(s *contextStats) string {
 		return b.String()
 	}
 
-	pct := func(n int) string { return fmt.Sprintf(" (%d%%)", n*100/s.window) }
-	b.WriteString("\n  " + stDim.Render("size:       ") + fmt.Sprintf("%d tokens", s.window))
+	pct := func(n int) string { return commaf(" (%d%%)", n*100/s.window) }
+	b.WriteString("\n  " + stDim.Render("size:       ") + commaf("%d tokens", s.window))
 	if s.promptTokens > 0 {
 		b.WriteString("\n  " + stDim.Render("prompt:     ") +
-			fmt.Sprintf("%d of %d budget", s.promptTokens, s.promptBudget) + stDim.Render(pct(s.promptTokens)))
+			commaf("%d of %d budget", s.promptTokens, s.promptBudget) + stDim.Render(pct(s.promptTokens)))
 	} else {
 		b.WriteString("\n  " + stDim.Render("prompt:     ") +
-			fmt.Sprintf("%d budget", s.promptBudget) + stDim.Render(" (nothing built yet)"))
+			commaf("%d budget", s.promptBudget) + stDim.Render(" (nothing built yet)"))
 	}
 	if s.promptOverhead > 0 {
 		// Charged once per REQUEST and invisible in any message, which is why it
 		// gets its own row rather than being folded into the prompt: it is the
 		// term a single chars-per-token ratio smears across the conversation.
-		b.WriteString("\n  " + stDim.Render("  overhead: ") + fmt.Sprintf("%d", s.promptOverhead) +
+		b.WriteString("\n  " + stDim.Render("  overhead: ") + commaf("%d", s.promptOverhead) +
 			stDim.Render(" (schemas + template, once)"))
 	}
-	b.WriteString("\n  " + stDim.Render("response:   ") + fmt.Sprintf("%d reserved", s.windowReserved) +
-		stDim.Render(fmt.Sprintf(" (cap %d + margin)", s.windowCap)))
+	b.WriteString("\n  " + stDim.Render("response:   ") + commaf("%d reserved", s.windowReserved) +
+		stDim.Render(commaf(" (cap %d + margin)", s.windowCap)))
 	if s.promptTokens > 0 {
 		free := s.window - s.promptTokens
-		row := "\n  " + stDim.Render("room now:   ") + fmt.Sprintf("%d", free)
+		row := "\n  " + stDim.Render("room now:   ") + commaf("%d", free)
 		if free < s.windowReserved {
 			// The prompt has grown into the response's reservation. This is the
 			// state a cut comes out of, so it is called out rather than left for
@@ -3823,24 +3841,25 @@ func windowBlock(s *contextStats) string {
 		b.WriteString(row)
 	}
 
-	how := stDim.Render(fmt.Sprintf(" (default — nothing measured yet; %d rounds)", s.ratioRounds))
+	how := stDim.Render(commaf(" (default — nothing measured yet; %d rounds)", s.ratioRounds))
 	if s.ratioMeasured {
-		how = stDim.Render(fmt.Sprintf(" (measured over %d rounds)", s.ratioRounds))
+		how = stDim.Render(commaf(" (measured over %d rounds)", s.ratioRounds))
 	}
-	b.WriteString("\n  " + stDim.Render("ratio:      ") + fmt.Sprintf("%.2f chars/token", s.charsPerToken) + how)
+	b.WriteString("\n  " + stDim.Render("ratio:      ") + commaf("%.2f chars/token", s.charsPerToken) + how)
 
 	if s.windowCuts > 0 {
 		// A cut is the budget having been WRONG, so it belongs here and not with
 		// the compaction counters.
-		what, plural := fmt.Sprintf("%d", s.windowCuts), " replies stopped for room"
+		what, plural := commaf("%d", s.windowCuts), " replies stopped for room"
 		if s.windowCuts == 1 {
 			plural = " reply stopped for room"
 		}
 		if s.windowFolds > 0 {
-			what += fmt.Sprintf(" (%d folded)", s.windowFolds)
+			what += commaf(" (%d folded)", s.windowFolds)
 		}
 		b.WriteString("\n  " + stDim.Render("cut short:  ") + what + stDim.Render(plural))
 	}
+	b.WriteString("\n  " + stDim.Render("the size is the server's when it states one; DUN_CONTEXT_TOKENS overrides it (the startup log names the source)"))
 	return b.String()
 }
 
@@ -3851,12 +3870,12 @@ func (m *tuiModel) showContext() {
 	b.WriteString(stHeader.Render("context"))
 
 	b.WriteString("\n\n  " + stHeader.Render("tokens"))
-	b.WriteString("\n  " + stDim.Render("processed:  ") + fmt.Sprintf("%d", s.processedTokens))
-	b.WriteString("\n  " + stDim.Render("generated:  ") + fmt.Sprintf("%d", s.generatedTokens))
-	b.WriteString("\n  " + stDim.Render("cached:     ") + fmt.Sprintf("%d", s.cachedTokens))
-	b.WriteString("\n  " + stDim.Render("total:      ") + fmt.Sprintf("%d", s.totalTokens))
-	b.WriteString("\n  " + stDim.Render("active:     ") + fmt.Sprintf("%d", s.activeTokens) + stDim.Render(" (last turn's window)"))
-	b.WriteString("\n  " + stDim.Render("turns:      ") + fmt.Sprintf("%d", s.turns))
+	b.WriteString("\n  " + stDim.Render("processed:  ") + commaf("%d", s.processedTokens))
+	b.WriteString("\n  " + stDim.Render("generated:  ") + commaf("%d", s.generatedTokens))
+	b.WriteString("\n  " + stDim.Render("cached:     ") + commaf("%d", s.cachedTokens))
+	b.WriteString("\n  " + stDim.Render("total:      ") + commaf("%d", s.totalTokens))
+	b.WriteString("\n  " + stDim.Render("active:     ") + commaf("%d", s.activeTokens) + stDim.Render(" (last turn's window)"))
+	b.WriteString("\n  " + stDim.Render("turns:      ") + commaf("%d", s.turns))
 
 	b.WriteString(sideCallBlock(s))
 	b.WriteString(surfacingBlock(s))
@@ -3864,25 +3883,25 @@ func (m *tuiModel) showContext() {
 	b.WriteString(windowBlock(s))
 
 	b.WriteString("\n\n  " + stHeader.Render("conversation"))
-	b.WriteString("\n  " + stDim.Render("blocks:     ") + fmt.Sprintf("%d", len(m.convo)))
-	b.WriteString("\n  " + stDim.Render("tools:      ") + fmt.Sprintf("%d", len(m.tools)))
+	b.WriteString("\n  " + stDim.Render("blocks:     ") + commaf("%d", len(m.convo)))
+	b.WriteString("\n  " + stDim.Render("tools:      ") + commaf("%d", len(m.tools)))
 
 	b.WriteString("\n\n  " + stHeader.Render("context shaping"))
 	if s.compactions > 0 {
-		b.WriteString("\n  " + stDim.Render("compactions: ") + fmt.Sprintf("%d", s.compactions) + stDim.Render(" · saved ") + fmt.Sprintf("%d tokens", s.tokensCompacted))
+		b.WriteString("\n  " + stDim.Render("compactions: ") + commaf("%d", s.compactions) + stDim.Render(" · saved ") + commaf("%d tokens", s.tokensCompacted))
 	} else {
 		b.WriteString("\n  " + stDim.Render("compactions: ") + "0")
 	}
 	if s.recaps > 0 {
-		b.WriteString("\n  " + stDim.Render("recaps:      ") + fmt.Sprintf("%d", s.recaps) + stDim.Render(" · ") + fmt.Sprintf("%d entries, %d chars → disk", s.entriesRecapped, s.charsRecapped))
+		b.WriteString("\n  " + stDim.Render("recaps:      ") + commaf("%d", s.recaps) + stDim.Render(" · ") + commaf("%d entries, %d chars → disk", s.entriesRecapped, s.charsRecapped))
 	} else {
 		b.WriteString("\n  " + stDim.Render("recaps:      ") + "0")
 	}
 
 	b.WriteString("\n\n  " + stHeader.Render("tool results"))
-	b.WriteString("\n  " + stDim.Render("total:      ") + fmt.Sprintf("%d", s.toolResults))
+	b.WriteString("\n  " + stDim.Render("total:      ") + commaf("%d", s.toolResults))
 	if s.resultsTruncated > 0 {
-		b.WriteString("\n  " + stDim.Render("truncated:  ") + fmt.Sprintf("%d", s.resultsTruncated) + stDim.Render(" (LOD-capped at 4000 chars)"))
+		b.WriteString("\n  " + stDim.Render("truncated:  ") + commaf("%d", s.resultsTruncated) + stDim.Render(" (LOD-capped at 4000 chars)"))
 	} else {
 		b.WriteString("\n  " + stDim.Render("truncated:  ") + "0")
 	}
@@ -3893,43 +3912,36 @@ func (m *tuiModel) showContext() {
 		if s.systemExact {
 			how = " (counted by the model's tokenizer)"
 		}
-		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + fmt.Sprintf("%d tokens", s.systemTokens) + stDim.Render(how))
+		b.WriteString(ctxRow("prompt + schemas", ctxNum(s.systemTokens), " tokens"+how))
 		// The breakdown is the point: one number says the total is large, and
 		// these rows say which part to go and fix.
 		if s.systemPrompt > 0 {
-			b.WriteString("\n  " + stDim.Render("  system prompt:   ") + fmt.Sprintf("%d", s.systemPrompt))
+			b.WriteString(ctxRow("  system prompt", ctxNum(s.systemPrompt), ""))
 		}
 		for _, p := range s.systemParts {
-			label := p.Name
-			if len(label) > 17 {
-				label = label[:17]
-			}
-			b.WriteString("\n  " + stDim.Render(fmt.Sprintf("  %-17s", label)) + fmt.Sprintf("%d", p.Tokens))
+			b.WriteString(ctxRow("  "+p.Name, ctxNum(p.Tokens), ""))
 		}
 		// Cost no single row owns — the provider's tool-use preamble, charged
 		// once for declaring any tool at all. Shown only when there is some, and
 		// named rather than folded into a server's row, because it does not go
 		// away by turning one server off.
 		if s.systemShared > 0 {
-			b.WriteString("\n  " + stDim.Render("  tool-use overhead") + fmt.Sprintf("%d", s.systemShared) +
-				stDim.Render(" (provider, shared)"))
+			b.WriteString(ctxRow("  tool-use overhead", ctxNum(s.systemShared), " (provider, shared)"))
 		}
 		if s.systemExact && len(s.systemParts) > 1 {
-			b.WriteString("\n  " + stDim.Render("  per-row figures are marginal: what you would save by removing that row."))
+			b.WriteString("\n    " + stDim.Render("per-row figures are marginal: what you would save by removing that row."))
 		}
 	} else {
-		b.WriteString("\n  " + stDim.Render("prompt + schemas:  ") + "not reported")
+		b.WriteString(ctxRow("prompt + schemas", "not reported", ""))
 	}
-	b.WriteString("\n  " + stDim.Render("Window comes from the server when it states one; DUN_CONTEXT_TOKENS overrides."))
-	b.WriteString("\n  " + stDim.Render("The startup log names the source. Neither = no shaping and no response cap."))
 
 	b.WriteString("\n\n  " + stHeader.Render("out-of-band"))
-	b.WriteString("\n  " + stDim.Render("queued msgs:    ") + fmt.Sprintf("%d", s.oobMessages) + stDim.Render(" (delivered mid-turn)"))
+	b.WriteString("\n  " + stDim.Render("queued msgs:    ") + commaf("%d", s.oobMessages) + stDim.Render(" (delivered mid-turn)"))
 	if s.notificationsSmuggled > 0 {
-		b.WriteString("\n  " + stDim.Render("notifications:  ") + fmt.Sprintf("%d", s.notificationsSmuggled) + stDim.Render(" (smuggled via queue)"))
+		b.WriteString("\n  " + stDim.Render("notifications:  ") + commaf("%d", s.notificationsSmuggled) + stDim.Render(" (smuggled via queue)"))
 	}
 	if s.forcedToolCalls > 0 {
-		b.WriteString("\n  " + stDim.Render("forced calls:   ") + fmt.Sprintf("%d", s.forcedToolCalls) + stDim.Render(" (host-injected)"))
+		b.WriteString("\n  " + stDim.Render("forced calls:   ") + commaf("%d", s.forcedToolCalls) + stDim.Render(" (host-injected)"))
 	}
 
 	m.append(b.String())
@@ -4435,19 +4447,19 @@ func surfacingBlock(s *contextStats) string {
 		if n == 1 {
 			return "1 entry"
 		}
-		return fmt.Sprintf("%d entries", n)
+		return commaf("%d entries", n)
 	}
 	var b strings.Builder
 	b.WriteString("\n\n  " + stHeader.Render("surfacing"))
 	b.WriteString(stDim.Render(" — proactive RAG added to the conversation"))
-	b.WriteString("\n  " + stDim.Render("passes:     ") + fmt.Sprintf("%d", f("passes")) +
-		stDim.Render(fmt.Sprintf(" · avg %d ms · last %d ms", f("avg_ms"), f("last_ms"))))
-	b.WriteString("\n  " + stDim.Render("surfaced:   ") + fmt.Sprintf("%d of %d found", f("surfaced"), f("found")))
-	b.WriteString("\n  " + stDim.Render("appended:   ") + fmt.Sprintf("%s · %d bytes · ~%d tok", entries(f("entries")), f("bytes"), f("tokens")))
-	b.WriteString("\n  " + stDim.Render("in history: ") + fmt.Sprintf("%s · ~%d tok", entries(f("in_history_entries")), f("in_history")) +
+	b.WriteString("\n  " + stDim.Render("passes:     ") + commaf("%d", f("passes")) +
+		stDim.Render(commaf(" · avg %d ms · last %d ms", f("avg_ms"), f("last_ms"))))
+	b.WriteString("\n  " + stDim.Render("surfaced:   ") + commaf("%d of %d found", f("surfaced"), f("found")))
+	b.WriteString("\n  " + stDim.Render("appended:   ") + commaf("%s · %d bytes · ~%d tok", entries(f("entries")), f("bytes"), f("tokens")))
+	b.WriteString("\n  " + stDim.Render("in history: ") + commaf("%s · ~%d tok", entries(f("in_history_entries")), f("in_history")) +
 		stDim.Render(" (re-sent every round)"))
-	b.WriteString("\n  " + stDim.Render("carried:    ") + fmt.Sprintf("~%d tok", f("carried")) +
-		stDim.Render(fmt.Sprintf(" over %s", plural(f("rounds"), "round"))))
+	b.WriteString("\n  " + stDim.Render("carried:    ") + commaf("~%d tok", f("carried")) +
+		stDim.Render(commaf(" over %s", plural(f("rounds"), "round"))))
 	return b.String()
 }
 
@@ -4472,8 +4484,8 @@ func cacheBlock(s *contextStats) string {
 	var b strings.Builder
 	b.WriteString("\n\n  " + stHeader.Render("cache"))
 	b.WriteString(stDim.Render(" — what the server re-read, by the build before each round"))
-	b.WriteString("\n  " + stDim.Render("rounds:     ") + fmt.Sprintf("%d · %.0f%% hit", n(s.cache, "rounds"), evNum(s.cache["hit_pct"])) +
-		stDim.Render(fmt.Sprintf(" · %d cached / %d processed", n(s.cache, "cached"), n(s.cache, "processed"))))
+	b.WriteString("\n  " + stDim.Render("rounds:     ") + commaf("%d · %.0f%% hit", n(s.cache, "rounds"), evNum(s.cache["hit_pct"])) +
+		stDim.Render(commaf(" · %d cached / %d processed", n(s.cache, "cached"), n(s.cache, "processed"))))
 	classes, _ := s.cache["classes"].(map[string]any)
 	rows := []struct{ key, label string }{
 		{"first", "first"},
@@ -4486,11 +4498,11 @@ func cacheBlock(s *contextStats) string {
 		if !ok {
 			continue
 		}
-		b.WriteString("\n  " + stDim.Render(fmt.Sprintf("%-12s", r.label)) +
-			fmt.Sprintf("%d · %.0f%% hit", n(c, "rounds"), evNum(c["hit_pct"])) +
-			stDim.Render(fmt.Sprintf(" · %d processed", n(c, "processed"))))
+		b.WriteString("\n  " + stDim.Render(commaf("%-12s", r.label)) +
+			commaf("%d · %.0f%% hit", n(c, "rounds"), evNum(c["hit_pct"])) +
+			stDim.Render(commaf(" · %d processed", n(c, "processed"))))
 	}
-	b.WriteString("\n  " + stDim.Render("builds:     ") + fmt.Sprintf("%d · %d append-only", n(s.cache, "builds"), n(s.cache, "append_only")))
+	b.WriteString("\n  " + stDim.Render("builds:     ") + commaf("%d · %d append-only", n(s.cache, "builds"), n(s.cache, "append_only")))
 	causes := []string{"fold", "rehead", "recap", "tools", "other"}
 	rw := 0
 	for _, c := range causes {
@@ -4499,17 +4511,17 @@ func cacheBlock(s *contextStats) string {
 	if rw > 0 {
 		var parts []string
 		for _, c := range causes {
-			parts = append(parts, fmt.Sprintf("%s %d", c, n(s.cache, "rewrites_"+c)))
+			parts = append(parts, commaf("%s %d", c, n(s.cache, "rewrites_"+c)))
 		}
-		b.WriteString("\n  " + stDim.Render("rewrites:   ") + fmt.Sprintf("%d", rw) +
-			stDim.Render(fmt.Sprintf(" (%s) · %d chars re-sent", strings.Join(parts, " · "), n(s.cache, "resent_chars"))))
+		b.WriteString("\n  " + stDim.Render("rewrites:   ") + commaf("%d", rw) +
+			stDim.Render(commaf(" (%s) · %d chars re-sent", strings.Join(parts, " · "), n(s.cache, "resent_chars"))))
 	}
 	if rh := n(s.cache, "reheads"); rh > 0 {
-		b.WriteString("\n  " + stDim.Render("re-headed:  ") + fmt.Sprintf("%d superseded reads", n(s.cache, "rehead_entries")) +
-			stDim.Render(fmt.Sprintf(" · %d chars · in %d folds", n(s.cache, "rehead_chars"), rh)))
+		b.WriteString("\n  " + stDim.Render("re-headed:  ") + commaf("%d superseded reads", n(s.cache, "rehead_entries")) +
+			stDim.Render(commaf(" · %d chars · in %d folds", n(s.cache, "rehead_chars"), rh)))
 	}
 	if last := n(s.cache, "last_chars"); last > 0 {
-		b.WriteString("\n  " + stDim.Render("last build: ") + fmt.Sprintf("kept %d of %d chars", n(s.cache, "last_kept_chars"), last))
+		b.WriteString("\n  " + stDim.Render("last build: ") + commaf("kept %d of %d chars", n(s.cache, "last_kept_chars"), last))
 	}
 	return b.String()
 }

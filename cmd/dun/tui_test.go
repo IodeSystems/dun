@@ -3842,7 +3842,7 @@ func TestSideCallBlock_Renders(t *testing.T) {
 	}
 	for _, want := range []string{"side calls", "commit", "suggest",
 		"commit messages (/worktree commit)", "next-message predictions (/suggest)",
-		"1 call", "2 calls", "avg 1200 ms", "last 1200 ms", "last 300 ms",
+		"1 call", "2 calls", "avg 1,200 ms", "last 1,200 ms", "last 300 ms",
 		"500 proc / 400 cached / 60 gen", "50 tok/s", "133 tok/s"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in block:\n%s", want, out)
@@ -3922,7 +3922,7 @@ func TestSurfacingBlock_Renders(t *testing.T) {
 	out := surfacingBlock(&s)
 	for _, want := range []string{"surfacing", "avg 120 ms", "last 90 ms", "3 of 7 found",
 		"2 entries · 640 bytes · ~160 tok", "1 entry · ~80 tok", "re-sent every round",
-		"~1200 tok", "11 rounds"} {
+		"~1,200 tok", "11 rounds"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in block:\n%s", want, out)
 		}
@@ -3967,7 +3967,7 @@ func TestCacheBlock_Renders(t *testing.T) {
 	out := cacheBlock(&s)
 	for _, want := range []string{"cache", "4 · 50% hit", "300 cached / 300 processed",
 		"first", "append <1s", "2 · 90% hit", "rewrite", "1 · 4% hit",
-		"5 · 3 append-only", "fold 1 · rehead 0 · recap 0 · tools 1 · other 0", "9000 chars re-sent", "kept 120 of 4000 chars"} {
+		"5 · 3 append-only", "fold 1 · rehead 0 · recap 0 · tools 1 · other 0", "9,000 chars re-sent", "kept 120 of 4,000 chars"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

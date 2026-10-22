@@ -18,14 +18,14 @@ func TestWindowBlock_ReportsTheDivision(t *testing.T) {
 		charsPerToken: 2.30, ratioMeasured: true, ratioRounds: 42,
 	}
 	out := windowBlock(s)
-	for _, want := range []string{"188160", "108738", "151727", "1617", "34816", "2.30 chars/token", "measured over 42 rounds"} {
+	for _, want := range []string{"188,160", "108,738", "151,727", "1,617", "34,816", "2.30 chars/token", "measured over 42 rounds"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
 	// room now = window - prompt
-	if !strings.Contains(out, "79422") {
-		t.Errorf("room left should be shown as 79422:\n%s", out)
+	if !strings.Contains(out, "79,422") {
+		t.Errorf("room left should be shown as 79,422:\n%s", out)
 	}
 	if strings.Contains(out, "below the reservation") {
 		t.Errorf("79422 of room is above the 34816 reservation; no warning is due:\n%s", out)

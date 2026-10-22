@@ -612,7 +612,7 @@ func (m tuiModel) jobDetail(j jobRow) string {
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "elapsed: %s\n", compactDur(j.elapsed(time.Now())))
-	fmt.Fprintf(&b, "output:  %d bytes\n", j.bytes)
+	b.WriteString(commaf("output:  %d bytes\n", j.bytes))
 	if j.muted {
 		b.WriteString("muted:   the model asked not to be told about this one\n")
 	}
