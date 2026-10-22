@@ -50,7 +50,10 @@ type Reset struct{}
 type Stop struct{}
 
 // Subscribe asks for every event after seq After (0: from the start), then
-// the live stream. See Log.Subscribe.
+// the live stream. See Log.Subscribe. Epoch is the epoch After was numbered
+// in (empty: this log's). After a service restart it is not the log's, and
+// the answer starts with a snapshot.
 type Subscribe struct {
 	After uint64 `json:"after"`
+	Epoch string `json:"epoch,omitempty"`
 }

@@ -72,6 +72,7 @@ type TokenOutput struct {
 type StreamInput struct {
 	Session   string `query:"session" required:"true"`
 	After     uint64 `query:"after" doc:"the last seq seen; 0 for the start"`
+	Epoch     string `query:"epoch" doc:"the epoch of that seq (from the event); another epoch than the log's gets a snapshot"`
 	Principal string `query:"principal" required:"true" doc:"from subscribeToken"`
 	Timestamp int64  `query:"timestamp" required:"true" doc:"from subscribeToken"`
 	HMAC      string `query:"hmac" required:"true" doc:"from subscribeToken"`
@@ -109,7 +110,7 @@ func (s *Server) registerStream(api huma.API, g *gat.Gateway) {
 		Middlewares: huma.Middlewares{s.withSigner}},
 		map[string]any{"event": StreamEvent{}},
 		func(ctx context.Context, in *StreamInput, send sse.Sender) {
-			evs, err := s.svc.Stream(ctx, in.Principal, in.Session, in.After)
+			evs, err := s.svc.Stream(ctx, in.Principal, in.Session, in.After, in.Epoch)
 			if err != nil {
 				// The handler cannot return an error: one unsequenced error
 				// event, then the end of the stream (the app backs off).

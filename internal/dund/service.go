@@ -251,15 +251,16 @@ func (s *Service) Send(principal, id string, c proto.Command) error {
 	return ses.send(c)
 }
 
-// Poll returns the session's events after seq after — waiting up to wait for
+// Poll returns the session's events after seq after (of epoch epoch; see
+// proto.Subscribe) — waiting up to wait for
 // the first one when there are none yet — at most max of them. A caller too
 // far behind gets a snapshot first. For clients without a live stream.
-func (s *Service) Poll(principal, id string, after uint64, wait time.Duration, max int) (*proto.Event, []proto.Event, error) {
+func (s *Service) Poll(principal, id string, after uint64, epoch string, wait time.Duration, max int) (*proto.Event, []proto.Event, error) {
 	ses, err := s.Get(principal, id)
 	if err != nil {
 		return nil, nil, err
 	}
-	snap, replay, sub, err := ses.subscribe(after)
+	snap, replay, sub, err := ses.subscribe(after, epoch)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -297,16 +298,17 @@ func (s *Service) Poll(principal, id string, after uint64, wait time.Duration, m
 	return snap, replay, nil
 }
 
-// Stream follows a session from after seq after: a snapshot first when the
+// Stream follows a session from after seq after (of epoch epoch; see
+// proto.Subscribe): a snapshot first when the
 // caller is too far behind, then the kept events, then live ones, on one
 // channel that closes when ctx ends or the subscriber falls behind (resume
 // from the last seq received). The engine is started if it is not running.
-func (s *Service) Stream(ctx context.Context, principal, id string, after uint64) (<-chan proto.Event, error) {
+func (s *Service) Stream(ctx context.Context, principal, id string, after uint64, epoch string) (<-chan proto.Event, error) {
 	ses, err := s.Get(principal, id)
 	if err != nil {
 		return nil, err
 	}
-	snap, replay, sub, err := ses.subscribe(after)
+	snap, replay, sub, err := ses.subscribe(after, epoch)
 	if err != nil {
 		return nil, err
 	}

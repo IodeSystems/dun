@@ -6,9 +6,13 @@
 // line is readable by eye and by a client that knows only a few types.
 //
 // Two directions:
-//   - Event, session → client: {v, session, seq, ts, type, re?, …payload}.
-//     seq numbers a session's events from 1 with no gaps; a client that knows
-//     the last seq it saw can resume after it (see Log).
+//   - Event, session → client: {v, session, seq, epoch, ts, type, re?,
+//     …payload}. seq numbers a session's events from 1 with no gaps; a client
+//     that knows the last seq it saw can resume after it (see Log). epoch
+//     names the Log that numbered seq: a restarted service has a new Log per
+//     session, numbering from 1 again under a new epoch, so a seq means
+//     something only beside its epoch. A client resumes with both
+//     (Subscribe); one whose epoch is not the log's gets a snapshot.
 //   - Command, client → session: {v, cid, session, type, …payload}. A
 //     command that carries a cid is answered by an "ack" event whose re is
 //     that cid. (Not "id": server, control and agent commands already use id
@@ -35,6 +39,7 @@ type Event struct {
 	V       int       `json:"v"`
 	Session string    `json:"session,omitempty"`
 	Seq     uint64    `json:"seq,omitempty"`
+	Epoch   string    `json:"epoch,omitempty"` // the Log that numbered Seq
 	TS      time.Time `json:"ts"`
 	Type    string    `json:"type"`
 	// Re is the id of the command this event answers (an ack).
@@ -55,7 +60,7 @@ type Command struct {
 
 // The envelopes' JSON names; no payload may use them.
 var (
-	eventKeys   = map[string]bool{"v": true, "session": true, "seq": true, "ts": true, "type": true, "re": true}
+	eventKeys   = map[string]bool{"v": true, "session": true, "seq": true, "epoch": true, "ts": true, "type": true, "re": true}
 	commandKeys = map[string]bool{"v": true, "cid": true, "session": true, "type": true}
 )
 

@@ -323,6 +323,7 @@ type UIInput struct {
 type EventsInput struct {
 	SessionPath
 	After uint64 `query:"after" doc:"the last seq seen; 0 for the start"`
+	Epoch string `query:"epoch" doc:"the epoch of that seq (last call's epoch); another epoch than the log's gets a snapshot"`
 	Wait  int    `query:"wait" doc:"seconds to wait for the first new event (max 25)"`
 }
 
@@ -333,6 +334,7 @@ type EventsOutput struct {
 		Snapshot map[string]any   `json:"snapshot,omitempty"`
 		Events   []map[string]any `json:"events"`
 		Last     uint64           `json:"last" doc:"pass as after on the next call"`
+		Epoch    string           `json:"epoch,omitempty" doc:"pass as epoch on the next call"`
 	}
 }
 
@@ -501,20 +503,20 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 			if err != nil {
 				return nil, err
 			}
-			snap, evs, err := s.svc.Poll(p, in.ID, in.After, wait, pollMax)
+			snap, evs, err := s.svc.Poll(p, in.ID, in.After, in.Epoch, wait, pollMax)
 			if err != nil {
 				return nil, fail(err)
 			}
 			o := &EventsOutput{}
-			o.Body.Last = in.After
+			o.Body.Last, o.Body.Epoch = in.After, in.Epoch
 			if snap != nil {
 				o.Body.Snapshot = flat(*snap)
-				o.Body.Last = snap.Payload.(*proto.Snapshot).After
+				o.Body.Last, o.Body.Epoch = snap.Payload.(*proto.Snapshot).After, snap.Epoch
 			}
 			o.Body.Events = make([]map[string]any, 0, len(evs))
 			for _, ev := range evs {
 				o.Body.Events = append(o.Body.Events, flat(ev))
-				o.Body.Last = ev.Seq
+				o.Body.Last, o.Body.Epoch = ev.Seq, ev.Epoch
 			}
 			return o, nil
 		})

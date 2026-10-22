@@ -28,6 +28,8 @@ type DundQueryNamespace {
   pollSessionEvents(
     """the last seq seen; 0 for the start"""
     after: Long
+    """the epoch of that seq (last call's epoch); another epoch than the log's gets a snapshot"""
+    epoch: String
     id: String!
     """seconds to wait for the first new event (max 25)"""
     wait: Long
@@ -56,6 +58,8 @@ type DundV1QueryNamespace {
   pollSessionEvents(
     """the last seq seen; 0 for the start"""
     after: Long
+    """the epoch of that seq (last call's epoch); another epoch than the log's gets a snapshot"""
+    epoch: String
     id: String!
     """seconds to wait for the first new event (max 25)"""
     wait: Long
@@ -80,6 +84,8 @@ type Subscription {
   dund_sessionEvents(
     """the last seq seen; 0 for the start"""
     after: Long
+    """the epoch of that seq (from the event); another epoch than the log's gets a snapshot"""
+    epoch: String
     """from subscribeToken"""
     hmac: String!
     """from subscribeToken"""
@@ -126,6 +132,8 @@ input dund_CreateInputBodyInput {
 }
 
 type dund_EventsOutputBody {
+  """pass as epoch on the next call"""
+  epoch: String
   events: [JSON!]!
   """pass as after on the next call"""
   last: Long!
@@ -160,6 +168,7 @@ type dund_SessionSummary {
   lastSeq: Long!
   members: [String!]!
   owner: String!
+  persist: Boolean
   running: Boolean!
   workspace: String!
 }

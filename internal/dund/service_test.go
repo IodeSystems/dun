@@ -220,7 +220,7 @@ func TestSubscribeFromTheFutureGetsASnapshot(t *testing.T) {
 	svc, _, _ := newSvc(t)
 	id, _ := svc.Create(alice, t.TempDir(), nil, "")
 	ses, _ := svc.Get(alice, id)
-	snap, _, sub, err := ses.subscribe(10_000)
+	snap, _, sub, err := ses.subscribe(10_000, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,5 +441,39 @@ func TestSignInTokens(t *testing.T) {
 	}
 	if _, ok := svc.CheckSignIn(tok); ok {
 		t.Error("a revoked token was accepted")
+	}
+}
+
+// After a restart the session's log is new: its seqs start from 1 again
+// and may already have passed the seq a client resumes from. A seq from
+// another epoch gets a snapshot, never a replay from the middle of the new
+// numbering; the log's own epoch (or none) still replays.
+func TestSubscribeFromAnotherEpochGetsASnapshot(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	ses, _ := svc.Get(alice, id)
+	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 100)
+	for range 3 {
+		_ = ses.send(proto.NewCommand("", &proto.User{Content: "x"}))
+		next(t, sub, "done")
+	}
+	sub.Close()
+	snap, replay, sub, err := ses.subscribe(2, "an-older-epoch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub.Close()
+	if snap == nil || len(replay) != 0 || snap.Epoch != ses.log.Epoch() || snap.Payload.(*proto.Snapshot).After != ses.log.Last() {
+		t.Fatalf("other epoch: snap=%+v replay=%v", snap, types(replay))
+	}
+	for _, epoch := range []string{"", ses.log.Epoch()} {
+		snap, replay, sub, err := ses.subscribe(2, epoch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sub.Close()
+		if snap != nil || len(replay) == 0 || replay[0].Seq != 3 || replay[0].Epoch != ses.log.Epoch() {
+			t.Fatalf("epoch %q: snap=%v replay=%v", epoch, snap != nil, types(replay))
+		}
 	}
 }

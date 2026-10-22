@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -143,4 +144,23 @@ func TestLogClose(t *testing.T) {
 		t.Fatalf("subscribe after close: %v", err)
 	}
 	l.Append(NewEvent(&Done{})) // no subscribers left; must not panic
+}
+
+// Every log has its own epoch, on every event it numbers and on the wire: a
+// restarted service's new log numbers from 1 again, and the epoch is how a
+// client tells its seq 5 from the old log's.
+func TestLogEpoch(t *testing.T) {
+	a, b := NewLog("s", 10), NewLog("s", 10)
+	if a.Epoch() == "" || a.Epoch() == b.Epoch() {
+		t.Fatalf("epochs %q %q", a.Epoch(), b.Epoch())
+	}
+	ev := a.Append(NewEvent(&Done{}))
+	if ev.Epoch != a.Epoch() {
+		t.Fatalf("event epoch %q, log %q", ev.Epoch, a.Epoch())
+	}
+	raw, _ := json.Marshal(ev)
+	var back Event
+	if err := json.Unmarshal(raw, &back); err != nil || back.Epoch != a.Epoch() || back.Seq != 1 {
+		t.Fatalf("round trip %s: %+v %v", raw, back, err)
+	}
 }

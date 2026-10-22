@@ -1,6 +1,8 @@
 package proto
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"sort"
 	"sync"
@@ -19,8 +21,13 @@ import (
 // A subscriber that does not keep up is dropped, not waited for: one stalled
 // phone must not stall the engine or the other clients. Its channel closes
 // with Err ErrSlow, and it resubscribes after the last seq it read.
+//
+// Each Log has its own epoch, stamped on every event it numbers. A seq means
+// something only in its epoch: a service that restarts makes a new Log for
+// each session, numbering from 1 again (see Event).
 type Log struct {
 	session string
+	epoch   string
 	cap     int
 
 	mu     sync.Mutex
@@ -51,7 +58,7 @@ func NewLog(session string, capacity int) *Log {
 		capacity = 1
 	}
 	return &Log{
-		session: session, cap: capacity, ring: make([]Event, capacity), next: 1,
+		session: session, epoch: newEpoch(), cap: capacity, ring: make([]Event, capacity), next: 1,
 		subs: map[*Subscription]struct{}{}, latest: map[string]Event{}, now: time.Now,
 	}
 }
@@ -63,7 +70,7 @@ func (l *Log) Append(ev Event) Event {
 	defer l.mu.Unlock()
 	ev.V = Version
 	ev.Session = l.session
-	ev.Seq = l.next
+	ev.Seq, ev.Epoch = l.next, l.epoch
 	if ev.TS.IsZero() {
 		ev.TS = l.now()
 	}
@@ -82,6 +89,17 @@ func (l *Log) Append(ev Event) Event {
 	}
 	return ev
 }
+
+// newEpoch is a random id, so a restarted service's logs never share an
+// epoch with the logs before them.
+func newEpoch() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// Epoch names this Log; see Log.
+func (l *Log) Epoch() string { return l.epoch }
 
 // Subscribers is how many subscriptions are live.
 func (l *Log) Subscribers() int {

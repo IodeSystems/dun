@@ -504,8 +504,10 @@ type Ack struct {
 }
 
 // Snapshot replaces a replay the log can no longer give: a client that
-// subscribed from before the oldest kept event gets the conversation so far
-// and the latest state events, then the live stream from After+1.
+// subscribed from before the oldest kept event, past the newest, or from
+// another epoch (a seq numbered before the service restarted) gets the
+// conversation so far and the latest state events, then the live stream
+// from After+1. The snapshot event's epoch is the one After belongs to.
 type Snapshot struct {
 	After uint64        `json:"after"`
 	Items []HistoryItem `json:"items"`

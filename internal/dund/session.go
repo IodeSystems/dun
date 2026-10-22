@@ -301,15 +301,22 @@ func (s *session) stop() {
 	}
 }
 
-// subscribe returns what a client needs to catch up after seq after — the
-// kept events, or a snapshot when they are gone — and the live stream.
-func (s *session) subscribe(after uint64) (*proto.Event, []proto.Event, *proto.Subscription, error) {
+// subscribe returns what a client needs to catch up after seq after of
+// epoch epoch — the kept events, or a snapshot when they are gone or the seq
+// is another log's (the service restarted since) — and the live stream. An
+// empty epoch is this log's.
+func (s *session) subscribe(after uint64, epoch string) (*proto.Event, []proto.Event, *proto.Subscription, error) {
 	s.touch()
-	replay, sub, err := s.log.Subscribe(after, subBuffer)
-	if err == nil {
-		return nil, replay, sub, nil
+	var replay []proto.Event
+	var sub *proto.Subscription
+	err := errEpoch
+	if epoch == "" || epoch == s.log.Epoch() {
+		replay, sub, err = s.log.Subscribe(after, subBuffer)
+		if err == nil {
+			return nil, replay, sub, nil
+		}
 	}
-	if !errors.Is(err, proto.ErrGap) && !errors.Is(err, proto.ErrFuture) {
+	if err != errEpoch && !errors.Is(err, proto.ErrGap) && !errors.Is(err, proto.ErrFuture) {
 		return nil, nil, nil, err
 	}
 	// Last before State: a state event newer than last is sent twice (once
@@ -323,9 +330,12 @@ func (s *session) subscribe(after uint64) (*proto.Event, []proto.Event, *proto.S
 		return nil, nil, nil, err
 	}
 	snap := proto.NewEvent(&proto.Snapshot{After: last, Items: historyItems(items), State: state})
-	snap.Session, snap.TS = s.id, time.Now()
+	snap.Session, snap.Epoch, snap.TS = s.id, s.log.Epoch(), time.Now()
 	return &snap, replay, sub, nil
 }
+
+// errEpoch: a seq from another log than this one.
+var errEpoch = errors.New("seq from another epoch")
 
 func historyItems(items []dun.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))

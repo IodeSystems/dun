@@ -182,7 +182,7 @@ func (c *conn) handle(cmd proto.Command) {
 			c.ack(cmd, id, err)
 		}()
 	case *proto.Subscribe:
-		c.subscribe(cmd, p.After)
+		c.subscribe(cmd, p.After, p.Epoch)
 	case *proto.Detach:
 		c.mu.Lock()
 		if sub, ok := c.subs[cmd.Session]; ok {
@@ -243,13 +243,13 @@ func (c *conn) handle(cmd proto.Command) {
 
 // subscribe catches the connection up on a session and follows it live.
 // Following starts the engine if it is not running.
-func (c *conn) subscribe(cmd proto.Command, after uint64) {
+func (c *conn) subscribe(cmd proto.Command, after uint64, epoch string) {
 	ses, err := c.srv.svc.Get(c.who, cmd.Session)
 	if err != nil {
 		c.ack(cmd, cmd.Session, err)
 		return
 	}
-	snap, replay, sub, err := ses.subscribe(after)
+	snap, replay, sub, err := ses.subscribe(after, epoch)
 	if err != nil {
 		c.ack(cmd, cmd.Session, err)
 		return
