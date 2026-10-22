@@ -56,3 +56,23 @@ export const Answer = graphql(`
     }
   }
 `);
+
+export const SubscribeToken = graphql(`
+  mutation SubscribeToken($id: String!) {
+    dund {
+      subscribeToken(id: $id) {
+        principal
+        timestamp
+        hmac
+      }
+    }
+  }
+`);
+
+export const SessionEventsLive = graphql(`
+  subscription SessionEventsLive($session: String!, $after: Long, $principal: String!, $timestamp: Long!, $hmac: String!) {
+    dund_sessionEvents(session: $session, after: $after, principal: $principal, timestamp: $timestamp, hmac: $hmac) {
+      event
+    }
+  }
+`);

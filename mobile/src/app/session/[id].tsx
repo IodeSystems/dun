@@ -3,15 +3,15 @@ import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { explain, UnauthorizedError } from '@/api/client';
-import { Answer, SendMessage, SessionEvents } from '@/api/ops';
+import { explain } from '@/api/client';
+import { followSession } from '@/api/live';
+import { Answer, SendMessage } from '@/api/ops';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
-import { apply, applySnapshot, empty, type Item, type View as Shown } from '@/lib/events';
+import { apply, empty, type Item, type View as Shown } from '@/lib/events';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
 
-// One session: its events followed by long-poll (sessionEvents waits up to
-// 25 s for the next one) until gat carries graphql-ws subscriptions.
+// One session: its events followed live over graphql-ws (src/api/live.ts).
 export default function Session() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const auth = useAuth();
@@ -24,40 +24,12 @@ export default function Session() {
   const listRef = useRef<FlatList<Item>>(null);
 
   useEffect(() => {
-    if (!auth.client || !id) return;
-    const client = auth.client;
-    let stop = false;
-    let after = '0';
-    let backoff = 1000;
-    void (async () => {
-      while (!stop) {
-        try {
-          const r = (await client.request(SessionEvents, { id, after, wait: '25' })).dund.sessionEvents;
-          if (stop || !r) return;
-          setConn('');
-          setView((v) => {
-            let w = r.snapshot ? applySnapshot(r.snapshot as Record<string, unknown>) : v;
-            for (const ev of r.events) w = apply(w, ev as Record<string, unknown>);
-            return w;
-          });
-          after = r.last;
-          backoff = 1000;
-        } catch (e) {
-          if (stop) return;
-          const x = explain(e);
-          if (x instanceof UnauthorizedError) {
-            void auth.signOut();
-            return;
-          }
-          setConn(`connection lost — retrying (${x.message})`);
-          await new Promise((res) => setTimeout(res, backoff));
-          backoff = Math.min(backoff * 2, 15_000);
-        }
-      }
-    })();
-    return () => {
-      stop = true;
-    };
+    if (!auth.client || !auth.live || !id) return;
+    return followSession(auth.client, auth.live, id, {
+      onEvent: (ev) => setView((v) => apply(v, ev)),
+      onConn: setConn,
+      onUnauthorized: () => void auth.signOut(),
+    });
   }, [auth, id]);
 
   async function send() {

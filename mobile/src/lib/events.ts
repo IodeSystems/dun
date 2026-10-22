@@ -61,6 +61,8 @@ export function replaceWith(items: unknown[]): View {
 
 export function apply(v: View, ev: Ev): View {
   switch (ev.type) {
+    case 'snapshot':
+      return applySnapshot(ev);
     case 'history':
       return { ...replaceWith((ev.items as unknown[]) ?? []), busy: v.busy, status: v.status, ask: v.ask };
     case 'user':

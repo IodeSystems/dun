@@ -41,6 +41,9 @@ importers:
       graphql-request:
         specifier: ^7.4.0
         version: 7.4.0(graphql@16.14.2)
+      graphql-ws:
+        specifier: ^6.4.1
+        version: 6.4.1(graphql@16.14.2)(ws@8.22.0)
       react:
         specifier: 19.2.3
         version: 19.2.3

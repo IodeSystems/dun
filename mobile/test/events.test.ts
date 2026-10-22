@@ -52,3 +52,9 @@ test('unknown events change nothing', () => {
   expect(apply(empty, { type: 'from_the_future', x: 1 })).toBe(empty);
   expect(replaceWith([null, 3, { kind: 'mystery' }]).items).toHaveLength(0);
 });
+
+test('a snapshot event in the stream replaces what is shown', () => {
+  const v = run([{ type: 'user', content: 'stale' }]);
+  const w = apply(v, { type: 'snapshot', after: 9, items: [{ kind: 'assistant', content: 'fresh' }], state: [] });
+  expect(w.items.map((i) => (i.kind === 'tool' ? i.title : i.text))).toEqual(['fresh']);
+});

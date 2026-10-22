@@ -1,7 +1,9 @@
 import type { GraphQLClient } from 'graphql-request';
+import type { Client as LiveClient } from 'graphql-ws';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { makeClient } from '@/api/client';
+import { makeLive } from '@/api/live';
 import { loadBaseUrl, loadToken, saveBaseUrl, saveToken } from '@/lib/storage';
 
 type Auth = {
@@ -9,6 +11,8 @@ type Auth = {
   baseUrl: string;
   token: string | null;
   client: GraphQLClient | null;
+  /** The one live socket (lazy: opens with the first subscription). */
+  live: LiveClient | null;
   signIn: (baseUrl: string, token: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -41,10 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const client = useMemo(() => (token && baseUrl ? makeClient(baseUrl, token) : null), [baseUrl, token]);
+  const live = useMemo(() => (token && baseUrl ? makeLive(baseUrl) : null), [baseUrl, token]);
+  useEffect(() => () => void live?.dispose(), [live]);
 
   const value = useMemo(
-    () => ({ ready, baseUrl, token, client, signIn, signOut }),
-    [ready, baseUrl, token, client, signIn, signOut],
+    () => ({ ready, baseUrl, token, client, live, signIn, signOut }),
+    [ready, baseUrl, token, client, live, signIn, signOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
