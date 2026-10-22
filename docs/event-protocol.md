@@ -73,7 +73,7 @@ engine calls `Harness.Say()` which buffers it into the next tool result via
 
 ### Interrupting a turn
 
-`interrupt` (also `/interrupt`, and in the TUI ctrl+g or esc while a turn
+`interrupt` (also `/interrupt`, and in the TUI ctrl+c, ctrl+g or esc while a turn
 runs) cancels the current turn only. The engine (`Harness.Interrupt`):
 
 1. records the reply text the cut round had streamed as an assistant entry,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -9,13 +10,17 @@ import (
 // Interrupting a turn from the TUI: ctrl+g (or esc, when nothing else takes
 // it) while a turn runs sends the engine's interrupt command. The turn ends
 // with done{reason: interrupted}; what it wrote stays, and the next message
-// continues from there. ctrl+c does NOT interrupt: it quits this TUI, and the
-// turn keeps running in the session.
+// continues from there. ctrl+c interrupts too; a second ctrl+c within
+// quitAgain quits this TUI (the session keeps running). Idle, ctrl+c quits.
 
 // interruptKey interrupts a running turn. ctrl+g is "cancel" in emacs and
 // readline; ctrl+k was tried first and took the composer's kill-to-end-of-line
 // while a turn ran (USER 2026-10-22).
 const interruptKey = "ctrl+g"
+
+// quitAgain is how soon a second ctrl+c after one that interrupted a turn
+// quits instead.
+const quitAgain = 2 * time.Second
 
 // interruptedRow is the line an interrupted turn ends with.
 const interruptedRow = "⏹ interrupted — your next message continues from here"
@@ -50,9 +55,9 @@ func (m tuiModel) interrupt() (tea.Model, tea.Cmd) {
 // busyHint is the key hint on the busy status line: what each key does.
 func (m tuiModel) busyHint() string {
 	if m.disableExit {
-		return "ctrl+g interrupt · /exit to exit"
+		return "ctrl+c or ctrl+g interrupt · /exit to exit"
 	}
-	return "ctrl+g interrupt · ctrl+c quit (the turn keeps running)"
+	return "ctrl+c or ctrl+g interrupt · ctrl+c twice quits"
 }
 
 // markInterrupted folds the turn's open blocks as cut: the live thought says

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -179,22 +180,47 @@ func TestInterrupt_EscPrecedence(t *testing.T) {
 	})
 }
 
-// ctrl+c does not interrupt: it quits the TUI, busy or not.
-func TestInterrupt_CtrlCStillQuits(t *testing.T) {
+// Busy, the first ctrl+c interrupts the turn and the second quits.
+func TestInterrupt_CtrlCInterruptsThenQuits(t *testing.T) {
 	v, rec := busyVtui(t)
-	nm, cmd := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	if sentInterrupt(rec) {
-		t.Fatal("ctrl+c sent an interrupt")
+	nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	v.m = nm.(tuiModel)
+	if !sentInterrupt(rec) || v.m.quitting {
+		t.Fatalf("first ctrl+c: interrupt=%v quitting=%v", sentInterrupt(rec), v.m.quitting)
 	}
+	nm, cmd := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if !nm.(tuiModel).quitting || cmd == nil {
-		t.Fatal("ctrl+c while busy should quit the TUI")
+		t.Fatal("a second ctrl+c should quit the TUI")
+	}
+}
+
+// After quitAgain, a ctrl+c on a still-running turn interrupts again rather
+// than quitting.
+func TestInterrupt_CtrlCLateSecondDoesNotQuit(t *testing.T) {
+	v, _ := busyVtui(t)
+	v.m.ctrlCAt = time.Now().Add(-2 * quitAgain)
+	nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if nm.(tuiModel).quitting {
+		t.Fatal("a ctrl+c long after the last one should not quit")
+	}
+}
+
+// Idle, ctrl+c quits at once.
+func TestInterrupt_CtrlCIdleQuits(t *testing.T) {
+	v := newVtui(80, 24)
+	rec := &bytes.Buffer{}
+	v.m.proc = &dunProc{stdin: bufCloser{rec}}
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	nm, cmd := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if sentInterrupt(rec) || !nm.(tuiModel).quitting || cmd == nil {
+		t.Fatalf("idle ctrl+c: interrupt=%v quitting=%v", sentInterrupt(rec), nm.(tuiModel).quitting)
 	}
 }
 
 // The busy status line says what each key does.
 func TestInterrupt_BusyHint(t *testing.T) {
 	v, _ := busyVtui(t)
-	if s := v.view(); !strings.Contains(s, "ctrl+g interrupt · ctrl+c quit (the turn keeps running)") {
+	if s := v.view(); !strings.Contains(s, "ctrl+c or ctrl+g interrupt · ctrl+c twice quits") {
 		t.Errorf("busy status:\n%s", s)
 	}
 }

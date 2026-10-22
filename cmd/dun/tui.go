@@ -595,6 +595,7 @@ type tuiModel struct {
 	reconnTries  int
 	reconnSince  time.Time
 	skipHistory  bool            // a respawned engine replays what is already on screen
+	ctrlCAt      time.Time       // the last ctrl+c that interrupted a turn (a second one quits)
 	offlineShown bool            // the saved conversation was shown from disk while dund was unreachable
 	wantServers  map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
 	// The viewport's rendered text, cached behind a POINTER on purpose.
@@ -868,6 +869,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ctrl+g while a turn runs interrupts it, whatever has the keys. Idle it
 		// does nothing; ctrl+k stays the input's kill-to-end-of-line, busy or not.
 		if msg.String() == interruptKey && m.turnRunning() {
+			return m.interrupt()
+		}
+		// ctrl+c while a turn runs interrupts it too; a second ctrl+c within
+		// quitAgain falls through to the quit below (USER 2026-10-22).
+		if msg.String() == "ctrl+c" && m.turnRunning() && time.Since(m.ctrlCAt) > quitAgain {
+			m.ctrlCAt = time.Now()
 			return m.interrupt()
 		}
 		// A y/n question (kill job N?) takes the next key, whatever it is.
