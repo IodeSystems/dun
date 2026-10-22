@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dund"
 )
 
 // /exit tells dund this client is leaving; /persist sends its mode; the
@@ -134,5 +137,46 @@ func TestLeftFromInputSelectsTheNewest(t *testing.T) {
 	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
 	if v.m.sel != first || first > newest {
 		t.Errorf("second ← selected %d, want the newest (%d)", v.m.sel, first)
+	}
+}
+
+// A TUI asks a dund of another build to upgrade once; if that dund answers
+// as the same old build again, it reports instead of asking forever.
+func TestCheckDundBuildAsksOnce(t *testing.T) {
+	old := version
+	version = "new"
+	defer func() { version = old }()
+	upgradeAsked = map[string]bool{}
+
+	svc, err := dund.New(t.TempDir(), dund.ExecSpawner{Bin: "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	sock := filepath.Join(t.TempDir(), "d.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	srv := dund.NewServer(svc, func(net.Conn) (string, error) { return "unix:1", nil })
+	asked := 0
+	srv.SetBuild("old", "/old/dun", func(string) error { asked++; return nil })
+	go srv.Serve(ln)
+
+	check := func() []string {
+		c, err := net.Dial("unix", sock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		sc := bufio.NewScanner(c)
+		return checkDundBuild(&attachConn{c: c}, sc)
+	}
+	if n := check(); asked != 1 || len(n) != 1 || !strings.Contains(n[0], "restarting it into") {
+		t.Fatalf("first: asked=%d %v", asked, n)
+	}
+	if n := check(); asked != 1 || len(n) != 1 || !strings.Contains(n[0], "still runs build old") {
+		t.Fatalf("second: asked=%d %v", asked, n)
 	}
 }

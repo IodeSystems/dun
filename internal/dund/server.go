@@ -230,7 +230,7 @@ func (c *conn) handle(cmd proto.Command) {
 	case *proto.Stop:
 		c.ack(cmd, cmd.Session, svc.Stop(c.who, cmd.Session))
 	case *proto.Hello:
-		c.reply(cmd, "", &proto.HelloReply{Version: c.srv.version, Exe: c.srv.exe, Upgradable: c.srv.upgrade != nil})
+		c.reply(cmd, "", &proto.HelloReply{Version: c.srv.version, Exe: c.srv.exe, Upgradable: c.srv.upgrade != nil, Busy: svc.Busy()})
 	case *proto.Upgrade:
 		if c.srv.upgrade == nil {
 			c.ack(cmd, "", errors.New("a service manager runs this dund: restart the service instead (dun dund service restart)"))

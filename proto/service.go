@@ -82,6 +82,9 @@ type HelloReply struct {
 	Version    string `json:"version"`
 	Exe        string `json:"exe,omitempty"`
 	Upgradable bool   `json:"upgradable,omitempty"`
+	// Busy: a turn, a question, a job or a sub-agent is running somewhere, so
+	// an upgrade waits for it.
+	Busy bool `json:"busy,omitempty"`
 }
 
 // Upgrade asks a client-started dund to restart into Exe (engines too), as

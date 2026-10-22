@@ -235,11 +235,32 @@ func checkDundBuild(ac *attachConn, sc *bufio.Scanner) []string {
 	if err != nil {
 		return []string{"dund runs build " + r.Version + ", this is " + version + "; cannot name this binary to upgrade it: " + err.Error()}
 	}
+	// Once per build pair: a dund that comes back as the same old build after
+	// an upgrade was handed a binary that is not this build, and asking again
+	// is a loop of restarts. Say what was tried instead.
+	pair := r.Version + "→" + version
+	if upgradeAsked[pair] && r.Busy {
+		return nil // asked already; it is waiting for the running work to end
+	}
+	if upgradeAsked[pair] {
+		return []string{"dund still runs build " + r.Version + " after restarting into " + exe +
+			" — that file is not build " + version + " (a stale copy?): stop dund (kill $(cat " +
+			filepath.Join(dunHome(), "dund.pid") + ")) and run dun from the build you want"}
+	}
+	upgradeAsked[pair] = true
 	if _, err := ac.call(sc, "", &proto.Upgrade{Exe: exe}); err != nil {
 		return []string{"dund runs build " + r.Version + ", this is " + version + "; it would not upgrade: " + err.Error()}
 	}
-	return []string{"dund ran build " + r.Version + " — restarting it into this one (" + version + ") once nothing is busy; this reconnects"}
+	if r.Busy {
+		return []string{"dund runs build " + r.Version + " and is busy (a turn, a question or a job is running): it restarts into " +
+			version + " when that ends — ctrl+k interrupts a turn, /jobs kills a job"}
+	}
+	return []string{"dund ran build " + r.Version + " — restarting it into " + exe + " (" + version + "); this reconnects"}
 }
+
+// upgradeAsked records the build pairs this TUI already asked dund to move
+// between, so a failed upgrade is reported instead of retried forever.
+var upgradeAsked = map[string]bool{}
 
 // attachConn is the TUI's writer to the service. The TUI writes engine
 // commands as JSON lines; each is sent with the session named.
