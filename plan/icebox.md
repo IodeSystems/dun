@@ -13,6 +13,30 @@
 
 ## Conditional — worth doing when the condition fires
 
+### mobile/: TypeScript 7 + oxlint type-aware (fleet path, X-LINT-2)
+Reported by gwag-47 on 2026-10-22. USER decided the fleet path the same
+day. Fleet tracking: ~/inflight/shelf.md.
+
+**Resume condition:** USER schedules the move.
+
+**Evidence** (read-only checks, 2026-10-22):
+- **typescript JS API.** pnpm why: the only runtime dependents are
+  cosmiconfig and `@expo/require-utils` 57.0.6.
+  - require-utils transpiles `app.config.ts` through `typescript`. With
+    no classic `transpileModule`, it tries the TS 7.1+ API at
+    `typescript/unstable/sync`. If neither loads, it returns null.
+  - So on TS 7.0, `app.config.ts` may not load. Test `expo config` and an
+    `export:web` on the exact TS 7 version first.
+  - Metro, babel and expo-doctor were not checked.
+- **Lint.** `eslint-config-expo/flat` brings 84 rules through the plugins
+  import, @typescript-eslint, react, react-hooks and expo.
+  - It includes the React Compiler react-hooks rules: set-state-in-effect,
+    purity, refs, immutability and others. set-state-in-effect caught a
+    real bug in item 13.
+  - It also brings 3 expo/* env-var rules.
+  - Whether oxlint covers the React Compiler rules and expo/* is NOT
+    verified. Assume a gap until checked against the oxlint rule list.
+
 ### gh, restored on a call path that cannot hang
 `ship` no longer invokes gh (see `done.md`). The removal is deliberate but
 temporary: opening the PR was genuinely useful, and printing a command a human
