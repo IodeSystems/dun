@@ -192,3 +192,25 @@ func TestListModelsSaysWhy(t *testing.T) {
 		t.Errorf("why = %q", why)
 	}
 }
+
+// /model edit: the name is fixed, the URL is filled in, an empty key keeps
+// the saved one.
+func TestProviderForm_EditKeepsTheKey(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	if err := saveConfig(dunConfig{URL: "https://old.example.com", Key: "sk-old", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	m := newTUIModel(nil, ".")
+	modelSlash(&m, []string{"edit", "old.example.com"})
+	if !m.providerForm || m.providerEdit != "old.example.com" || m.providerStep != 1 || m.providerFields[1].Value() != "https://old.example.com" {
+		t.Fatalf("edit form: form=%v edit=%q step=%d url=%q", m.providerForm, m.providerEdit, m.providerStep, m.providerFields[1].Value())
+	}
+	m.providerFields[1].SetValue("")
+	m = pick(m, "https://new.example.com", "enter", "enter")
+	if m.providerForm {
+		t.Fatalf("not saved: %q", m.providerErr)
+	}
+	if c := loadConfig(); c.URL != "https://new.example.com" || c.Key != "sk-old" || c.active().Name != "old.example.com" {
+		t.Errorf("after edit: url=%q key kept=%v active=%q", c.URL, c.Key == "sk-old", c.active().Name)
+	}
+}

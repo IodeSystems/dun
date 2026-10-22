@@ -566,7 +566,32 @@ whole file. Live (scratch DUN_HOME, the real endpoint plus a fake provider and
 a dead one): add, search across both, a session switch, a saved switch, a
 restart on the saved provider, and remove all behaved as intended.
 
-- **next:** USER tries it with the real local, OpenRouter and corporate keys.
+- **Provider management on every client** (USER 2026-10-22: a bad provider
+  entry blocked /model on a corp machine with a LiteLLM gateway).
+  - `applyProviderOp` is the one implementation of add, edit, remove and
+    use. The TUI calls it directly, so it works when no engine starts. The
+    engine runs it for the web and the phone: control `provider`, a JSON
+    op, and the event echoes only the verb.
+  - Behaviour:
+    - Edit keeps the saved key unless a new one is typed.
+    - Removing the default moves it to the next provider; only the last
+      provider is refused.
+    - `/model use <p> <id>` saves a model typed by hand, for a gateway
+      with no model list.
+    - A failed listing says why: HTTP status and body, or the network
+      error.
+    - The models event marks the default provider and whether a key is
+      set. Keys never leave the machine.
+  - Web: provider rows (Edit, Remove, Use model id…), an add/edit form,
+    and `/model add|edit|rm|use` typed. A line with a key in it is refused.
+  - Fixed: a provider that failed to list sent `"ids": null` and crashed
+    the web picker. This was probably the web half of the corp report.
+  - Engine provider ops and listings run under one lock, so a stale listing
+    can no longer land after an edit; the browser test caught this.
+  - Verified: Go and app tests, and a browser run against a test dund and a
+    fake LiteLLM (401 with a bad key, a list with a good one): all 7
+    steps pass, and no key appears in the page.
+- **next:** USER tries it on the corp machine with the LiteLLM gateway.
 - **risks:** assumes every provider is OpenAI-compatible with a Bearer key. A
   corporate gateway that needs other headers (Azure `api-key`, an org header)
   will not list models or chat. Not yet tested against real OpenRouter (base

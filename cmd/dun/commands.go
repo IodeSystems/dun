@@ -84,6 +84,11 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 	}}
 }
 
+// providersMu orders provider changes and model listings in the engine, so
+// the last models event a client gets reflects the last change: a listing
+// started just before an edit cannot land after it with the old key.
+var providersMu sync.Mutex
+
 // modelsEvent lists every saved provider's models, fetched in parallel.
 // Keys stay here; a client gets names, URLs and ids.
 func modelsEvent() *proto.Models {

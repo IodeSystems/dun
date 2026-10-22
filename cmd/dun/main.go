@@ -821,13 +821,19 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// The model list, for a client's model picker: a network round trip
 		// per provider, so off the reader goroutine.
 		if id == "models" {
-			go em.emit(modelsEvent())
+			go func() {
+				providersMu.Lock()
+				defer providersMu.Unlock()
+				em.emit(modelsEvent())
+			}()
 			return
 		}
 		// /model add, edit, remove, use from the web or the phone: the action
 		// is a providerOp, key included, so the event echoes only the verb.
 		if id == "provider" {
 			go func() {
+				providersMu.Lock()
+				defer providersMu.Unlock()
 				var op providerOp
 				msg := ""
 				if err := json.Unmarshal([]byte(action), &op); err != nil {
