@@ -39,6 +39,13 @@ func NewToken(dir string) (string, error) {
 	return tok, nil
 }
 
+// TokenExists reports whether a local token has been made for the service
+// whose state is in dir.
+func TokenExists(dir string) bool {
+	_, err := os.Stat(tokenPath(dir))
+	return err == nil
+}
+
 // HasToken reports whether a local token has been made.
 func (s *Service) HasToken() bool {
 	_, err := os.Stat(tokenPath(s.dir))

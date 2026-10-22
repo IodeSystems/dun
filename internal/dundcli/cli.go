@@ -99,12 +99,13 @@ func newRoot() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&l.home, "home", "", "state directory (default $DUN_HOME, else ~/.dun)")
 	root.PersistentFlags().StringVar(&l.sock, "socket", "", "unix socket (default <home>/dund.sock)")
-	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l))
+	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l), serviceCmd(l))
 	return root
 }
 
 func serveCmd(l *loader) *cobra.Command {
 	var bin, httpAddr string
+	var checkOnly bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "run the service",
@@ -114,10 +115,14 @@ func serveCmd(l *loader) *cobra.Command {
 			if bin == "" {
 				bin = defaultDun()
 			}
+			if checkOnly {
+				return check(l, bin, httpAddr)
+			}
 			return serve(cmd.Context(), l, bin, httpAddr)
 		},
 	}
 	cmd.Flags().StringVar(&bin, "dun", "", "the dun binary engines run (default: beside dund, else on PATH)")
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "prove these settings can run, then exit (the unit's ExecStartPre)")
 	cmd.Flags().StringVar(&httpAddr, "http", "", "also serve HTTP here (e.g. 127.0.0.1:20003); needs a token (dund token)")
 	return cmd
 }
@@ -260,14 +265,23 @@ func watchSelf(ctx context.Context, svc *dund.Service, exe string) <-chan struct
 // claimPidfile refuses to start while another dund owns this home, and
 // replaces a pidfile whose process is gone.
 func claimPidfile(path string) error {
-	if b, err := os.ReadFile(path); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
-			if pid != os.Getpid() && syscall.Kill(pid, 0) == nil {
-				return fmt.Errorf("already running (pid %d, %s)", pid, path)
-			}
-		}
+	if pid, alive := pidAlive(path); alive && pid != os.Getpid() {
+		return fmt.Errorf("already running (pid %d, %s)", pid, path)
 	}
 	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
+}
+
+// pidAlive is the pid a pidfile names and whether that process exists.
+func pidAlive(path string) (int, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	return pid, syscall.Kill(pid, 0) == nil
 }
 
 func tokenCmd(l *loader) *cobra.Command {
