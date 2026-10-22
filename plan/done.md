@@ -760,13 +760,15 @@ says "(just type)" while it is highlighted and not yet capturing.
   rounds: suggest/rephrase/commit/fork call `untee` first, and children get
   `OnReasoning = nil` like `OnToken`. History emits a `reasoning` item just
   before the entry agentkit stamped it on.
-- **TUI thinking** (`thinking.go`): one block per round, live and expanded;
-  the first reply token, a tool call, done, error or a turn retry folds it to
-  "✻ thought for Ns · W words — first line", unless it is selected.
+- **TUI thinking** (`thinking.go`): one block per round. Since 2026-10-22
+  (USER: "expand to some reasonable size, and subscroll there") it is a
+  bounded box (`box.go`): grows to min(10, pane/3) rows, then scrolls inside,
+  tail-following while live; done, it keeps its height (no fold). Selected,
+  ↑/↓ pgup/pgdn scroll inside it and leave it at its edges.
 - **Tool runs** (`toolrun.go`): on each new call, the previous calls of the run
   and their thinking fold into one aggregate row ("⚙ N tool calls — exec×4 ·
-  1 failed"). The latest call is held at the run's tallest height (`holdH`),
-  released when the run ends. A fold is deferred when it would touch the
+  1 failed"). The latest call's output is a box too (the earlier height hold
+  is gone). A fold is deferred when it would touch the
   selection, a live search, or rows a scrolled-up reader has on screen.
   `tool_result` no longer pins the scroll unless queued messages were delivered.
 - **Pager** (`pager.go`): enter on thinking or an aggregate gives the block the
