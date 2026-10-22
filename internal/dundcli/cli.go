@@ -451,9 +451,9 @@ func sessionsCmd(l *loader) *cobra.Command {
 					continue
 				}
 				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(w, "ID\tRUNNING\tEVENTS\tWORKSPACE")
+				fmt.Fprintln(w, "ID\tRUNNING\tATTACHED\tEVENTS\tWORKSPACE")
 				for _, s := range list.Items {
-					fmt.Fprintf(w, "%s\t%v\t%d\t%s\n", s.ID, s.Running, s.LastSeq, s.Workspace)
+					fmt.Fprintf(w, "%s\t%v\t%d\t%d\t%s\n", s.ID, s.Running, s.Attached, s.LastSeq, s.Workspace)
 				}
 				return w.Flush()
 			}
