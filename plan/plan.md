@@ -353,6 +353,25 @@ Where it stands:
   fresh session) — sign-in, palette, slash answers, panel, refusal, live
   reply, ask with recommendation, model picker. Run with PLAYWRIGHT=<pkg>
   (hz's docs/node_modules/playwright has one).
+- ✅ **App UI state** (`e2d8cf2`): draft + sent history in dund (TUI format),
+  shared across the user's clients; ↑/↓ recall on the web.
+- ✅ **PWA** (`a464544`): manifest, service worker (shell offline, /api never
+  cached), dun icons replacing bintag's placeholders. Verified headless.
+- ✅ **APK** (`ae36fca`): `tools/release-android` (bintag's, adapted) →
+  ~/.local/share/dun/releases; the unit runs `--releases` there; /dun.apk →
+  the latest (verified through hz: 99.5 MB, installer MIME); hello announces
+  it; the Android app offers newer builds, the web links to the APK. First
+  build dun-88582157 (ae36fca). NOT run on a device or emulator (none
+  installed) — USER installs it on a phone.
+- ✅ **Sign-in with Zitadel, built and OFF** (`c06867b`): flags
+  `--oidc-issuer https://id.iodesystems.com --oidc-client-id <id>
+  --oidc-allow <email>`; tested with a fake provider (Go + a browser run).
+  **Blocking (USER):** create the Zitadel Web app by hand — auth method None
+  (PKCE), redirect `https://dun.iodesystems.com/auth/callback`; for the phone
+  app also allow `dun://auth`... no: the app goes through dund's callback
+  too (the provider only ever sees the https callback), so one redirect URI
+  is enough. Then give the client id and the email(s) to allow; the unit is
+  reinstalled with the flags.
 - **S4 open:** OIDC principals (caveat 10) and how they map to the unix
   owner (`unix:<uid>`) so the TUI's and the phone's sessions are the same;
   ✅ `dun dund service install` (`548864a`, CLI-10; the TUI starts the
