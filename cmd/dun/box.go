@@ -22,9 +22,11 @@ import (
 // shorter: it is drawn at the most rows it has reached (peak), and when its
 // content gets shorter — a run's finished step folds to one line — the rows
 // given back show earlier content, or stay blank when there is none.
-// Selected in convo focus, ↑/↓ and pgup/pgdn scroll inside it; ↑ at its top
-// and ↓ at its bottom move the selection on, as for any block. enter opens
-// the whole thing in the pager.
+// Selecting a box never scrolls it: in convo focus ↑/↓ step from block to
+// block, boxes included. To scroll one you DESCEND into it (→ or l); inside,
+// ↑/↓, pgup/pgdn, g/G and the wheel scroll its contents, the header says so,
+// and ←, h or esc come back out, the position kept — a box left at its end
+// follows its tail again. enter opens the whole thing in the pager.
 
 type boxState struct {
 	off    int  // first body row shown
@@ -33,6 +35,7 @@ type boxState struct {
 	shown  int  // body rows shown, as of the last render
 	peak   int  // the most body rows it has shown at peakW: it never shows fewer
 	peakW  int
+	inside bool // descended into: the keys scroll it (box.go, insideBox)
 
 	// The wrapped body, cached by source and width. A box that only grew —
 	// a thought streaming in — keeps the rows of its finished lines (stable
@@ -130,6 +133,9 @@ func renderBox(e *convoEntry, w, termH int) string {
 	if below := len(rows) - b.off - b.shown; below > 0 {
 		ind = append(ind, "↓ "+strconv.Itoa(below)+" more")
 	}
+	if b.inside {
+		ind = append(ind, "scrolling — ← to leave")
+	}
 	tail := ""
 	if len(ind) > 0 {
 		tail = "  " + stDim.Render(strings.Join(ind, " · "))
@@ -144,18 +150,60 @@ func renderBox(e *convoEntry, w, termH int) string {
 	return strings.Join(out, "\n")
 }
 
-// scrollBox moves the selected box's window by n rows and reports whether it
-// moved — false at the edge, where the key belongs to the selection.
-func (m *tuiModel) scrollBox(n int) bool {
-	if m.sel < 0 || m.sel >= len(m.convo) || !m.convo[m.sel].boxed() {
+// selBox is the selected block's box, if it is drawn as one, in convo focus.
+func (m *tuiModel) selBox() *boxState {
+	if m.focus != focusConvo || m.asking || m.sel < 0 || m.sel >= len(m.convo) || !m.convo[m.sel].boxed() {
+		return nil
+	}
+	return m.convo[m.sel].box
+}
+
+// insideBox is the box the person has descended into, or nil.
+func (m *tuiModel) insideBox() *boxState {
+	if b := m.selBox(); b != nil && b.inside {
+		return b
+	}
+	return nil
+}
+
+// leaveBox comes back out of b, keeping its position; at its end, it follows
+// its tail again.
+func leaveBox(b *boxState) {
+	b.inside = false
+	b.follow = b.off >= b.max
+}
+
+// scroll moves b's window by n rows, clamped.
+func (b *boxState) scroll(n int) {
+	b.off = min(max(b.off+n, 0), b.max)
+	b.follow = b.off >= b.max
+}
+
+// insideKeys is the keyboard while descended into a box: it scrolls, and
+// ←/h/esc leave. It reports whether the key was taken.
+func (m *tuiModel) insideKeys(k string) bool {
+	b := m.insideBox()
+	if b == nil {
 		return false
 	}
-	b := m.convo[m.sel].box
-	off := min(max(b.off+n, 0), b.max)
-	if off == b.off {
+	page := max(1, b.shown-1)
+	switch k {
+	case "up", "k":
+		b.scroll(-1)
+	case "down", "j":
+		b.scroll(1)
+	case "pgup":
+		b.scroll(-page)
+	case "pgdown":
+		b.scroll(page)
+	case "g", "home":
+		b.scroll(-b.max - 1)
+	case "G", "end":
+		b.scroll(b.max + 1)
+	case "left", "h", "esc":
+		leaveBox(b)
+	default:
 		return false
 	}
-	b.off = off
-	b.follow = off >= b.max
 	return true
 }

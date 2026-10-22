@@ -783,6 +783,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The block being paged may have grown, and the pane may have moved.
 		t.syncPager()
+		// Out of the conversation, out of any box in it (however focus moved).
+		if t.focus != focusConvo && t.sel >= 0 && t.sel < len(t.convo) && t.convo[t.sel].box != nil && t.convo[t.sel].box.inside {
+			leaveBox(t.convo[t.sel].box)
+		}
 		// The pulse clock runs while a band is on screen, and only then.
 		if t.pulseWanted() && !t.pulsePending {
 			t.pulsePending = true
@@ -902,6 +906,17 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		}
+		// Descended into a box, the keys scroll it (box.go).
+		if m.insideKeys(msg.String()) {
+			m.refresh()
+			return m, nil
+		}
+		// l descends into the selected box, like →.
+		if msg.String() == "l" && m.selBox() != nil {
+			m.selBox().inside = true
+			m.refresh()
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			if m.disableExit {
@@ -969,17 +984,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, textinput.Blink
 		case "pgup", "pgdown":
-			// A selected box pages inside itself first (box.go).
-			if m.focus == focusConvo && m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].boxed() {
-				n := max(1, m.convo[m.sel].box.shown-1)
-				if msg.String() == "pgup" {
-					n = -n
-				}
-				if m.scrollBox(n) {
-					m.refresh()
-					return m, nil
-				}
-			}
 			var cmd tea.Cmd
 			m.vp, cmd = m.vp.Update(msg)
 			m.updateScrollPin()
@@ -1093,9 +1097,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.matchPos--
 					}
 					m.sel = m.matches[m.matchPos]
-				} else if m.scrollBox(-1) { // inside a selected box, to its top first
-					m.refresh()
-					return m, nil
 				} else if top, h := m.selGeom(); m.vp.Height > 0 && h > m.vp.Height && top < m.vp.YOffset {
 					m.vp.SetYOffset(m.vp.YOffset - 1) // scroll up within a tall message first
 					return m, nil
@@ -1151,9 +1152,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.matchPos++
 					}
 					m.sel = m.matches[m.matchPos]
-				} else if m.scrollBox(1) { // inside a selected box, to its bottom first
-					m.refresh()
-					return m, nil
 				} else if top, h := m.selGeom(); m.vp.Height > 0 && h > m.vp.Height && top+h > m.vp.YOffset+m.vp.Height {
 					m.vp.SetYOffset(m.vp.YOffset + 1) // scroll down within a tall message first
 					return m, nil
@@ -1361,6 +1359,19 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if m.paging {
 			m.pg.mouse(msg)
+			return m, nil
+		}
+		// The wheel scrolls a box only once you are inside it.
+		if b := m.insideBox(); b != nil {
+			if msg.Action == tea.MouseActionPress {
+				switch msg.Button {
+				case tea.MouseButtonWheelUp:
+					b.scroll(-wheelDelta)
+				case tea.MouseButtonWheelDown:
+					b.scroll(wheelDelta)
+				}
+				m.refresh()
+			}
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -2739,7 +2750,14 @@ func (m tuiModel) View() string {
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · → open · ← close, then out · ctrl+c quit")
 		} else {
-			status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter open · / search · tab input")
+			switch {
+			case m.insideBox() != nil:
+				status = stDim.Render("inside  ·  ↑/↓ pgup/pgdn g/G scroll · ← leave · enter open")
+			case m.selBox() != nil:
+				status = stDim.Render("convo  ·  ↑/↓ select · → scroll inside · enter open · / search · tab input")
+			default:
+				status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter open · / search · tab input")
+			}
 		}
 	case m.suggestActive():
 		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · 1–%d pick · enter/right accept · or type · "+m.exitHint(), len(m.suggestions)))
@@ -3024,6 +3042,11 @@ func (m *tuiModel) descendSel() bool {
 		return false
 	}
 	e := &m.convo[m.sel]
+	// A box: → descends into it, to scroll it (box.go). Inside, → stays.
+	if e.boxed() {
+		e.box.inside = true
+		return true
+	}
 	if d := e.docs; d != nil {
 		if d.descended {
 			// Inside the list: → opens the highlighted document. Already open,

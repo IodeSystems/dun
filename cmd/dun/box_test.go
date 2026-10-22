@@ -67,61 +67,179 @@ func TestBox_DoneKeepsTheHeight(t *testing.T) {
 	}
 }
 
-// Selected, the box takes ↑/↓ and pgup/pgdn inside itself; at its edges the
-// keys move the selection on, as for any block.
-func TestBox_InnerScrollAndEdges(t *testing.T) {
-	v := newVtui(80, 40)
-	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+// boxConvo is a conversation with a thinking box between two messages, and a
+// run box after them, all longer than their boxes (test helper).
+func boxConvo(t *testing.T, h int) (v *vtui, think, run int) {
+	t.Helper()
+	v = newVtui(80, h)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.send("plan it")
 	thinkLines(v, 0, 20) // 20 rows, 9 shown: 11 hidden above
 	v.event(map[string]any{"type": "token", "text": "the reply"})
 	v.event(map[string]any{"type": "done"})
-	i := thinkIdx(v.m)
+	think = thinkIdx(v.m)
+	v.send("now run")
+	for i := 0; i < 12; i++ {
+		call(v, fmt.Sprintf("echo %d", i), "ok\n")
+	}
+	v.event(map[string]any{"type": "token", "text": "ran them"})
+	v.event(map[string]any{"type": "done"})
+	run = runIdx(v.m)
+	return v, think, run
+}
+
+// In convo focus ↑/↓ step from block to block: past a thinking box and a run
+// box without scrolling either.
+func TestBox_SelectionMovesPastBoxes(t *testing.T) {
+	v, think, run := boxConvo(t, 40)
+	tb, rb := v.m.convo[think].box, v.m.convo[run].box
+	toff, roff := tb.off, rb.off
 	v.m = key(v.m, kTab)
-	for v.m.sel > i {
+	seen := map[int]bool{}
+	for k := 0; k < 30 && v.m.sel > 0; k++ {
+		seen[v.m.sel] = true
+		before := v.m.sel
+		v.m = key(v.m, kUp)
+		if v.m.sel >= before {
+			t.Fatalf("↑ did not move the selection off block %d", before)
+		}
+	}
+	if !seen[think] || !seen[run] {
+		t.Fatalf("the walk skipped a box: think=%v run=%v", seen[think], seen[run])
+	}
+	if tb.off != toff || rb.off != roff {
+		t.Errorf("selecting a box scrolled it: think %d → %d, run %d → %d", toff, tb.off, roff, rb.off)
+	}
+	if strings.Contains(v.view(), "scrolling — ← to leave") {
+		t.Error("nothing was descended into")
+	}
+}
+
+// → descends into a box; inside, ↑/↓ pgup/pgdn g/G scroll it and the header
+// says so; ←, h and esc leave with the position kept, and the selection stays.
+func TestBox_DescendScrollAndLeave(t *testing.T) {
+	v, think, _ := boxConvo(t, 40)
+	v.m = key(v.m, kTab)
+	for v.m.sel > think {
 		v.m = key(v.m, kUp)
 	}
-	if v.m.sel != i {
-		t.Fatalf("could not select the box: sel=%d box=%d", v.m.sel, i)
+	b := v.m.convo[think].box
+	if v.m.sel != think || b.off != 11 {
+		t.Fatalf("precondition: think selected at its end: sel=%d off=%d", v.m.sel, b.off)
 	}
-	b := v.m.convo[i].box
-	if b.off != 11 {
-		t.Fatalf("precondition: box at its end, off=%d", b.off)
+	v.m = key(v.m, kRight)
+	if !b.inside || !strings.Contains(v.view(), "scrolling — ← to leave") || !strings.Contains(v.view(), "inside  ·  ↑/↓") {
+		t.Fatalf("→ did not descend, or no cue:\n%s", v.view())
 	}
 	v.m = key(v.m, kUp)
-	if v.m.sel != i || b.off != 10 || b.follow {
-		t.Fatalf("↑ should scroll inside the box: sel=%d off=%d follow=%v", v.m.sel, b.off, b.follow)
-	}
-	if !strings.Contains(v.view(), "↓ 1 more") {
-		t.Errorf("hidden-below count missing:\n%s", v.view())
+	if b.off != 10 || v.m.sel != think {
+		t.Fatalf("↑ inside should scroll the box: off=%d sel=%d", b.off, v.m.sel)
 	}
 	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyPgUp})
-	if b.off != 2 {
-		t.Errorf("pgup should page inside the box: off=%d", b.off)
-	}
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyPgUp})
 	v.m = key(v.m, kUp)
-	v.m = key(v.m, kUp)
-	if b.off != 0 || v.m.sel != i {
-		t.Fatalf("↑ should scroll to the box's top first: off=%d sel=%d", b.off, v.m.sel)
+	if b.off != 0 || v.m.sel != think {
+		t.Fatalf("inside, the top of the box is not an exit: off=%d sel=%d", b.off, v.m.sel)
 	}
-	v.m = key(v.m, kUp)
-	if v.m.sel >= i {
-		t.Errorf("↑ at the top should leave the box: off=%d sel=%d", b.off, v.m.sel)
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	if b.off != 11 {
+		t.Errorf("G should go to the end: off=%d", b.off)
 	}
-	// Back down: into the box at its top, ↓ walks it to the end, then leaves.
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
 	v.m = key(v.m, kDown)
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	if b.inside || b.off != 1 || b.follow || v.m.sel != think || v.m.focus != focusConvo {
+		t.Fatalf("← should leave, keeping the position: inside=%v off=%d follow=%v sel=%d", b.inside, b.off, b.follow, v.m.sel)
+	}
+	// l descends too; esc leaves (and does not quit).
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	if !b.inside {
+		t.Fatal("l should descend")
+	}
+	v.m = key(v.m, kEsc)
+	if b.inside || v.m.quitting {
+		t.Fatalf("esc should leave the box: inside=%v quitting=%v", b.inside, v.m.quitting)
+	}
+	// Enter still opens the pager, from outside or in.
+	v.m = key(v.m, kRight)
+	v.m = key(v.m, kEnter)
+	if !v.m.paging {
+		t.Error("enter should open the pager")
+	}
+}
+
+// A live box left at its end follows its tail again; left above its end, it
+// stays where the person put it.
+func TestBox_TailFollowResumesOnLeave(t *testing.T) {
+	v := newVtui(80, 40)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.send("plan it")
+	thinkLines(v, 0, 20)
+	i := thinkIdx(v.m)
+	b := v.m.convo[i].box
+	v.m = key(v.m, kTab) // the live thought is the newest block
 	if v.m.sel != i {
-		t.Fatalf("↓ did not come back to the box: sel=%d", v.m.sel)
+		t.Fatalf("precondition: sel=%d think=%d", v.m.sel, i)
 	}
-	for k := 0; k < 11; k++ {
-		v.m = key(v.m, kDown)
+	v.m = key(v.m, kRight)
+	v.m = key(v.m, kUp)
+	thinkLines(v, 20, 5)
+	if b.off != 10 {
+		t.Fatalf("scrolled up inside, new lines should not move it: off=%d", b.off)
 	}
-	if v.m.sel != i || b.off != 11 || !b.follow {
-		t.Fatalf("↓ should scroll the box to its end first: sel=%d off=%d follow=%v", v.m.sel, b.off, b.follow)
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	thinkLines(v, 25, 5)
+	if !b.follow || b.off != b.max || !strings.Contains(v.view(), "line 29 of the thought") {
+		t.Errorf("left at its end, the box should follow its tail: follow=%v off=%d max=%d", b.follow, b.off, b.max)
+	}
+}
+
+// The wheel scrolls a box only from inside it; otherwise the conversation.
+func TestBox_WheelOnlyInside(t *testing.T) {
+	v, think, _ := boxConvo(t, 20) // taller than the pane, so it can scroll
+	v.m = key(v.m, kTab)
+	for v.m.sel > think {
+		v.m = key(v.m, kUp)
+	}
+	b := v.m.convo[think].box
+	wheel := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp}
+	off, y := b.off, v.m.vp.YOffset
+	nm, _ := v.m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	v.m = nm.(tuiModel)
+	if b.off != off || v.m.vp.YOffset == y {
+		t.Fatalf("outside, the wheel should scroll the conversation: box %d → %d, yoff %d → %d", off, b.off, y, v.m.vp.YOffset)
+	}
+	v.m = key(v.m, kRight)
+	y = v.m.vp.YOffset
+	nm, _ = v.m.Update(wheel)
+	v.m = nm.(tuiModel)
+	if b.off != off-wheelDelta || v.m.vp.YOffset != y {
+		t.Errorf("inside, the wheel should scroll the box: box %d → %d, yoff %d → %d", off, b.off, y, v.m.vp.YOffset)
+	}
+}
+
+// The run box's step list descends the same way.
+func TestBox_RunDescends(t *testing.T) {
+	v, _, run := boxConvo(t, 40)
+	v.m = key(v.m, kTab)
+	for v.m.sel > run {
+		v.m = key(v.m, kUp)
+	}
+	b := v.m.convo[run].box
+	end := b.off
+	if end == 0 {
+		t.Fatal("precondition: the run has steps hidden above")
+	}
+	v.m = key(v.m, kUp) // selection moves on, the run stays
+	if v.m.sel == run || b.off != end {
+		t.Fatalf("↑ on a run should move the selection: sel=%d off=%d", v.m.sel, b.off)
 	}
 	v.m = key(v.m, kDown)
-	if v.m.sel == i {
-		t.Error("↓ at the bottom should move the selection on")
+	v.m = key(v.m, kRight)
+	v.m = key(v.m, kUp)
+	if b.off != end-1 || v.m.sel != run {
+		t.Errorf("inside a run, ↑ walks its steps: off=%d (was %d) sel=%d", b.off, end, v.m.sel)
 	}
 }
 
