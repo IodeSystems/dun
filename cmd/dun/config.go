@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,13 +24,16 @@ import (
 // settings save to $DUN_HOME/config.json (default ~/.dun/config.json, 0600).
 //
 // Precedence when dun starts: CLI flag > env (DUN_URL/DUN_MODEL/DUN_LLM_KEY) >
-// config file > built-in default. So a one-off `--model X` still wins for a
-// single run without touching the saved config.
+// config file. So a one-off `--model X` still wins for a single run without
+// touching the saved config.
+//
+// There is no built-in provider (USER 2026-10-22): dun talks to nothing until
+// a provider is logged in (/login, `dun --setup`) or named by flag or env.
 
-const (
-	defaultURL   = "https://llm.iodesystems.com"
-	defaultModel = "ternary-bonsai-27b"
-)
+// providerOpenAI is the one kind of provider today: any OpenAI-compatible
+// endpoint (/v1/models, /v1/chat/completions), with an optional bearer key.
+// Specific providers (OpenRouter, Anthropic, Azure…) come later as kinds.
+const providerOpenAI = "openai"
 
 type dunConfig struct {
 	URL   string `json:"url,omitempty"`
@@ -53,33 +57,46 @@ type dunConfig struct {
 // /v1/chat/completions under URL, authorized by Key.
 type providerConfig struct {
 	Name string `json:"name"`
+	Kind string `json:"kind,omitempty"` // "" is providerOpenAI
 	URL  string `json:"url"`
 	Key  string `json:"key,omitempty"`
 }
 
-// providerList returns the configured providers. A config from before
-// providers has one, the top-level URL and Key, named after its host.
+// providerList returns the logged-in providers. A config from before
+// providers that names a URL has one, the top-level URL and Key, named after
+// its host. A config with neither has none: logged out.
 func (c dunConfig) providerList() []providerConfig {
 	if len(c.Providers) > 0 {
 		return c.Providers
 	}
-	u := firstNonEmpty(c.URL, defaultURL)
-	return []providerConfig{{Name: hostName(u), URL: u, Key: c.Key}}
+	if c.URL == "" {
+		return nil
+	}
+	return []providerConfig{{Name: hostName(c.URL), Kind: providerOpenAI, URL: c.URL, Key: c.Key}}
 }
 
 // active returns the provider in use: the one Provider names, else the one
-// at the top-level URL, else the first.
-func (c dunConfig) active() providerConfig {
+// at the top-level URL, else the first; false when logged out.
+func (c dunConfig) active() (providerConfig, bool) {
 	ps := c.providerList()
+	if len(ps) == 0 {
+		return providerConfig{}, false
+	}
 	for _, p := range ps {
 		if p.Name == c.Provider {
-			return p
+			return p, true
 		}
 	}
 	if p, ok := c.providerAt(c.URL); ok {
-		return p
+		return p, true
 	}
-	return ps[0]
+	return ps[0], true
+}
+
+// activeName is the provider in use, or "" when logged out.
+func (c dunConfig) activeName() string {
+	p, _ := c.active()
+	return p.Name
 }
 
 // providerAt finds the provider whose URL is u.
@@ -126,19 +143,21 @@ func (c dunConfig) named(name string) (providerConfig, bool) {
 	return providerConfig{}, false
 }
 
-// providerOp is one change to the saved providers, from /model on any client.
+// providerOp is one change to the logged-in providers, from /login, /logout
+// or /model on any client.
 type providerOp struct {
-	Op    string `json:"op"` // add (replaces one of the same name), edit, remove, use
+	Op    string `json:"op"` // login (replaces one of the same name), logout, use
 	Name  string `json:"name"`
+	Kind  string `json:"kind,omitempty"` // login: "" or "openai", the only kind so far
 	URL   string `json:"url,omitempty"`
-	Key   string `json:"key,omitempty"`   // edit: empty keeps the saved key
+	Key   string `json:"key,omitempty"`   // login: optional; again under a saved name, empty keeps the saved key
 	Model string `json:"model,omitempty"` // use: an id, typed when the list is not there
 }
 
-// applyProviderOp changes the saved providers and says what it did. It is
-// the one implementation: the TUI calls it directly (it must work when no
-// engine can start — a bad provider is how you get there), the engine calls
-// it for the web and the phone. Keys never appear in the answer.
+// applyProviderOp changes the logged-in providers and says what it did. It
+// is the one implementation: the TUI calls it directly (it must work when no
+// engine can start), the engine calls it for the web and the phone. Keys
+// never appear in the answer.
 func applyProviderOp(op providerOp) (string, error) {
 	cfg := loadConfig()
 	name := strings.TrimSpace(op.Name)
@@ -147,46 +166,49 @@ func applyProviderOp(op providerOp) (string, error) {
 	}
 	var msg string
 	switch op.Op {
-	case "add", "edit":
+	case "login":
+		if op.Kind != "" && op.Kind != providerOpenAI {
+			return "", errors.New("no provider kind " + op.Kind + " yet: " + providerOpenAI + " (any OpenAI-compatible endpoint) is the one there is")
+		}
 		u := strings.TrimRight(strings.TrimSpace(op.URL), "/")
 		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 			return "", errors.New("the URL starts with http:// or https://")
 		}
-		p := providerConfig{Name: name, URL: u, Key: strings.TrimSpace(op.Key)}
+		p := providerConfig{Name: name, Kind: providerOpenAI, URL: u, Key: strings.TrimSpace(op.Key)}
 		old, exists := cfg.named(name)
-		if op.Op == "edit" {
-			if !exists {
-				return "", errors.New("no provider named " + name)
-			}
-			if p.Key == "" {
-				p.Key = old.Key
-			}
+		if exists && p.Key == "" {
+			p.Key = old.Key
 		}
-		wasDefault := exists && cfg.active().Name == name
+		_, loggedIn := cfg.active()
+		wasDefault := exists && cfg.activeName() == name
 		cfg.putProvider(p)
-		if wasDefault {
+		switch {
+		case wasDefault:
 			cfg.Provider, cfg.URL, cfg.Key = p.Name, p.URL, p.Key
+		case !loggedIn: // the first login is the default; the model comes next
+			cfg.Provider, cfg.URL, cfg.Key, cfg.Model = p.Name, p.URL, p.Key, ""
 		}
-		msg = fmt.Sprintf("saved provider %s (%s, %s)", name, u, keyNote(p.Key))
-	case "remove":
+		msg = fmt.Sprintf("logged in to %s (%s, %s)", name, u, keyNote(p.Key))
+	case "logout":
 		if _, ok := cfg.named(name); !ok {
-			return "", errors.New("no provider named " + name)
+			return "", errors.New("not logged in to " + name)
 		}
-		if len(cfg.providerList()) == 1 {
-			return "", errors.New(name + " is the only provider — add another first")
-		}
-		wasDefault := cfg.active().Name == name
+		wasDefault := cfg.activeName() == name
 		cfg.removeProvider(name)
-		msg = "removed provider " + name
-		if wasDefault {
+		msg = "logged out of " + name
+		switch {
+		case len(cfg.Providers) == 0:
+			cfg.Provider, cfg.URL, cfg.Key, cfg.Model = "", "", "", ""
+			msg += "; no provider is left — /login to add one"
+		case wasDefault:
 			next := cfg.Providers[0]
-			cfg.Provider, cfg.URL, cfg.Key = next.Name, next.URL, next.Key
-			msg += "; the default provider is now " + next.Name + " — pick a model on it"
+			cfg.Provider, cfg.URL, cfg.Key, cfg.Model = next.Name, next.URL, next.Key, ""
+			msg += "; the default provider is now " + next.Name + " — pick a model with /model"
 		}
 	case "use":
 		p, ok := cfg.named(name)
 		if !ok {
-			return "", errors.New("no provider named " + name)
+			return "", errors.New("not logged in to " + name)
 		}
 		model := strings.TrimSpace(op.Model)
 		if model == "" || strings.ContainsAny(model, " \t") {
@@ -195,12 +217,31 @@ func applyProviderOp(op providerOp) (string, error) {
 		cfg.use(p, model)
 		msg = "default: " + model + " on " + name
 	default:
-		return "", errors.New("no provider operation " + op.Op + " (add, edit, remove, use)")
+		return "", errors.New("no provider operation " + op.Op + " (login, logout, use)")
 	}
 	if err := saveConfig(cfg); err != nil {
 		return "", fmt.Errorf("failed to save config: %w", err)
 	}
 	return msg, nil
+}
+
+// providerMissing says why the engine cannot talk to a model, or nil.
+func providerMissing(url, model string) error {
+	switch {
+	case strings.TrimSpace(url) == "":
+		return errors.New("not logged in to a provider — /login <name> (an OpenAI-compatible URL, bearer optional)")
+	case strings.TrimSpace(model) == "":
+		return errors.New("no model chosen — /model")
+	}
+	return nil
+}
+
+// noProvider stands in for the LLM when providerMissing says why: every call
+// fails with that, and nothing is contacted.
+type noProvider struct{ why error }
+
+func (n noProvider) ChatStream(context.Context, []llm.Message, []llm.ToolDef, *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+	return nil, n.why
 }
 
 // keyNote says whether there is a key, never what it is.

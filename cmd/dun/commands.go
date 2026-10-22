@@ -93,7 +93,7 @@ var providersMu sync.Mutex
 // Keys stay here; a client gets names, URLs and ids.
 func modelsEvent() *proto.Models {
 	cfg := loadConfig()
-	ps, def := cfg.providerList(), cfg.active().Name
+	ps, def := cfg.providerList(), cfg.activeName()
 	out := make([]proto.ModelProvider, len(ps))
 	var wg sync.WaitGroup
 	for i, p := range ps {

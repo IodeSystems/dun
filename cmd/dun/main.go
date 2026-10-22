@@ -94,11 +94,12 @@ func main() {
 	flag.Usage = usage
 	ver := flag.Bool("version", false, "print version and exit")
 	setup := flag.Bool("setup", false, "run the interactive setup wizard (LLM url/model/key) and exit")
-	// Flag defaults come from env then the saved config then the built-in — so a
-	// CLI flag still overrides for a one-off run. See config.go.
+	// Flag defaults come from env then the saved config — so a CLI flag still
+	// overrides for a one-off run. There is no built-in provider. See config.go.
 	fc := loadConfig()
-	url := flag.String("url", firstNonEmpty(os.Getenv("DUN_URL"), fc.active().URL), "LLM base URL")
-	model := flag.String("model", firstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model, defaultModel), "chat model (must support tool calls)")
+	act, _ := fc.active()
+	url := flag.String("url", firstNonEmpty(os.Getenv("DUN_URL"), act.URL), "LLM base URL (default: the logged-in provider; /login)")
+	model := flag.String("model", firstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model), "chat model (must support tool calls; default: the saved one, /model)")
 	// Key default stays empty so `dun -h` never prints the secret; the real value
 	// is resolved after parse (flag > env > config).
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
@@ -458,14 +459,23 @@ func main() {
 			}
 		}
 	}
+	// Logged out, or no model chosen: a stand-in that refuses every call with
+	// what to do, so the engine still starts (a client can /login through it)
+	// and nothing is contacted.
+	var runner agent.LLMRunner = client
+	childClients := clientCache(*url, effKey)
+	if why := providerMissing(*url, *model); why != nil {
+		runner = noProvider{why}
+		childClients = func(string) (agent.LLMRunner, error) { return nil, why }
+	}
 	cfg := dun.Config{
 		Workspace: effWS,
-		Client:    client,
+		Client:    runner,
 		// Sub-agents may run on a different model than their parent, and only
 		// cmd/dun knows the endpoint and the key — hence a factory rather than a
 		// second client. Cached per model so N children on one model share one
 		// client, and therefore one retry policy and one rate limit.
-		ClientFor:   clientCache(*url, effKey),
+		ClientFor:   childClients,
 		ChildModel:  *childModel,
 		Exec:        backend,
 		Worktree:    wt,

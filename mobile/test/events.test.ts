@@ -111,7 +111,8 @@ test('a confirmed close marks the session closed; a reset clears it', () => {
 });
 
 test('/model is the client picker; models and settings are kept', () => {
-  expect(parseLine('/model qwen 27', [])).toEqual({ kind: 'model', query: 'qwen 27' });
+  expect(parseLine('/model qwen 27', [])).toEqual({ kind: 'provider', cmd: 'model', args: ['qwen', '27'] });
+  expect(parseLine('/login corp', [])).toEqual({ kind: 'provider', cmd: 'login', args: ['corp'] });
   const v = run([
     { type: 'settings', model: 'm1', provider: 'local', url: 'http://l' },
     { type: 'models', providers: [{ name: 'local', url: 'http://l', ids: ['qwen-27b', 'llama'] }, { name: 'or', url: 'http://o', ids: ['qwen-7b'] }] },

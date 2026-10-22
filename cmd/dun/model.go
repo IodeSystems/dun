@@ -52,49 +52,20 @@ func (m tuiModel) providerNamed(name string) (providerConfig, bool) {
 	return providerConfig{}, false
 }
 
-// modelSlash implements /model:
+// modelSlash implements /model — picking among the logged-in providers'
+// models (/login and /logout manage the providers):
 //
 //	/model                      the picker
 //	/model <name>               switch to that model on this provider
 //	/model <provider> <name>    switch to that model on that provider
-//	/model add                  add a provider
-//	/model edit <provider>      change its URL or key
-//	/model remove <provider>    forget a provider (the default moves to the next)
 //	/model use <provider> <id>  switch and save as default, by id — for a
 //	                            provider that does not list its models
-//
-// Changes to providers go through applyProviderOp, as they do from the web.
 func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	if m.replaying {
 		m.append(stDim.Render("this is a replay — there is no engine to resume with"))
 		return nil
 	}
 	switch {
-	case len(args) == 1 && args[0] == "add":
-		return m.openProviderForm(nil)
-	case len(args) >= 1 && (args[0] == "remove" || args[0] == "rm"):
-		if len(args) != 2 {
-			m.append(stErr.Render("usage: /model remove <provider>"))
-			return nil
-		}
-		msg, err := applyProviderOp(providerOp{Op: "remove", Name: args[1]})
-		if err != nil {
-			m.append(stErr.Render(err.Error()))
-			return nil
-		}
-		m.append(stDim.Render(msg))
-		return nil
-	case len(args) >= 1 && args[0] == "edit":
-		if len(args) != 2 {
-			m.append(stErr.Render("usage: /model edit <provider>"))
-			return nil
-		}
-		p, ok := loadConfig().named(args[1])
-		if !ok {
-			m.append(stErr.Render("no provider named " + args[1]))
-			return nil
-		}
-		return m.openProviderForm(&p)
 	case len(args) >= 1 && args[0] == "use":
 		if len(args) != 3 {
 			m.append(stErr.Render("usage: /model use <provider> <model-id>"))
@@ -102,25 +73,64 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 		}
 		p, ok := loadConfig().named(args[1])
 		if !ok {
-			m.append(stErr.Render("no provider named " + args[1] + " — /model add"))
+			m.append(stErr.Render("not logged in to " + args[1] + " — /login " + args[1]))
 			return nil
 		}
 		return m.switchModel(p, args[2], true)
 	case len(args) == 2:
 		p, ok := m.providerNamed(args[0])
 		if !ok {
-			m.append(stErr.Render("no provider named " + args[0] + " — /model add"))
+			m.append(stErr.Render("not logged in to " + args[0] + " — /login " + args[0]))
 			return nil
 		}
 		return m.switchModel(p, args[1], false)
 	case len(args) == 1:
-		p, _ := m.providerNamed(m.provider)
+		p, ok := m.providerNamed(m.provider)
+		if !ok && m.url == "" {
+			m.append(stErr.Render("not logged in to a provider — /login <name>"))
+			return nil
+		}
 		if p.URL == "" {
 			p = providerConfig{Name: m.provider, URL: m.url, Key: m.opts.key}
 		}
 		return m.switchModel(p, args[0], false)
 	}
 	return m.openModelPicker("")
+}
+
+// loginSlash implements /login [name]: the form (a key typed in the composer
+// would be kept in the sent history), then the picker on that provider. A
+// name already logged in opens with its URL and keeps its key unless a new
+// one is typed. Changes go through applyProviderOp, as they do from the web.
+func loginSlash(m *tuiModel, args []string) tea.Cmd {
+	if len(args) > 1 {
+		m.append(stErr.Render("usage: /login [name] — the URL and key go in the form"))
+		return nil
+	}
+	if len(args) == 1 {
+		if p, ok := loadConfig().named(args[0]); ok {
+			return m.openProviderForm(&p)
+		}
+		cmd := m.openProviderForm(nil)
+		m.providerFields[0].SetValue(args[0])
+		return cmd
+	}
+	return m.openProviderForm(nil)
+}
+
+// logoutSlash implements /logout <name>.
+func logoutSlash(m *tuiModel, args []string) tea.Cmd {
+	if len(args) != 1 {
+		m.append(stErr.Render("usage: /logout <provider>"))
+		return nil
+	}
+	msg, err := applyProviderOp(providerOp{Op: "logout", Name: args[0]})
+	if err != nil {
+		m.append(stErr.Render(err.Error()))
+		return nil
+	}
+	m.append(stDim.Render(msg))
+	return nil
 }
 
 // openModelPicker opens the picker with query typed in, and asks every
@@ -144,7 +154,7 @@ func (m *tuiModel) openModelPicker(query string) tea.Cmd {
 		cmds = append(cmds, func() tea.Msg {
 			ids, why := listModels(p.URL, p.Key)
 			if len(ids) == 0 {
-				return modelFetchMsg{provider: p.Name, err: why + " — /model use " + p.Name + " <model-id>, /model edit " + p.Name}
+				return modelFetchMsg{provider: p.Name, err: why + " — /model use " + p.Name + " <model-id>, or /login " + p.Name + " again"}
 			}
 			return modelFetchMsg{provider: p.Name, ids: ids}
 		})
@@ -342,7 +352,7 @@ func (m tuiModel) modelPanel() string {
 	if m.modelPersist {
 		persist = "✓"
 	}
-	head := stHeader.Render("models") + stDim.Render("  type to search · ↑/↓ choose · enter switch · tab save as default · ctrl+a add provider · esc cancel")
+	head := stHeader.Render("models") + stDim.Render("  type to search · ↑/↓ choose · enter switch · tab save as default · ctrl+a log in to a provider · esc cancel")
 	rows := []string{head, m.modelQuery.View()}
 
 	shown := m.filteredModels()
@@ -382,6 +392,9 @@ func (m tuiModel) modelPanel() string {
 	case len(shown) > 0:
 		status = append(status, fmt.Sprintf("%d-%d of %d", lo+1, hi, len(shown)))
 	}
+	if len(m.pickerProviders()) == 0 {
+		status = append(status, "not logged in to a provider — ctrl+a, or /login <name>")
+	}
 	if m.modelPending > 0 {
 		status = append(status, fmt.Sprintf("fetching from %d provider(s)…", m.modelPending))
 	}
@@ -395,8 +408,9 @@ func (m tuiModel) modelPanel() string {
 
 // ── the add-provider form ──
 
-// openProviderForm opens the add form, or with edit the edit form for that
-// provider: its name fixed, its URL filled in, the key left empty to keep it.
+// openProviderForm opens the login form, or with edit the form for a provider
+// already logged in: its name fixed, its URL filled in, the key left empty to
+// keep it.
 func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 	mk := func(placeholder string) textinput.Model {
 		t := textinput.New()
@@ -407,7 +421,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 	m.providerFields = [3]textinput.Model{
 		mk("e.g. openrouter"),
 		mk("e.g. https://openrouter.ai/api/v1"),
-		mk("API key (empty for none)"),
+		mk("bearer key (optional)"),
 	}
 	m.providerFields[2].EchoMode = textinput.EchoPassword
 	m.providerFields[2].EchoCharacter = '•'
@@ -416,7 +430,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 		m.providerEdit = edit.Name
 		m.providerFields[0].SetValue(edit.Name)
 		m.providerFields[1].SetValue(edit.URL)
-		m.providerFields[2].Placeholder = "new API key (empty keeps the saved one)"
+		m.providerFields[2].Placeholder = "new bearer key (empty keeps the saved one)"
 		m.providerStep = 1
 	}
 	m.providerFields[m.providerStep].Focus()
@@ -467,13 +481,13 @@ func (m tuiModel) updateProviderForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // saveProvider writes the form's provider to the config and opens the picker
 // filtered to it, which is also the check that the URL and key work.
 func (m *tuiModel) saveProvider() tea.Cmd {
-	op := providerOp{Op: "add",
+	op := providerOp{Op: "login",
 		Name: strings.TrimSpace(m.providerFields[0].Value()),
 		URL:  m.providerFields[1].Value(),
 		Key:  m.providerFields[2].Value(),
 	}
 	if m.providerEdit != "" {
-		op.Op, op.Name = "edit", m.providerEdit
+		op.Name = m.providerEdit
 	}
 	msg, err := applyProviderOp(op)
 	if err != nil {
@@ -488,11 +502,11 @@ func (m *tuiModel) saveProvider() tea.Cmd {
 
 func (m tuiModel) providerFormPanel() string {
 	labels := [3]string{"name", "url ", "key "}
-	title := "add provider"
+	title := "log in to a provider"
 	if m.providerEdit != "" {
-		title = "edit provider " + m.providerEdit
+		title = "log in to " + m.providerEdit + " again"
 	}
-	rows := []string{stHeader.Render(title) + stDim.Render("  an OpenAI-compatible endpoint · enter next · shift+tab back · esc cancel")}
+	rows := []string{stHeader.Render(title) + stDim.Render("  an OpenAI-compatible endpoint, bearer optional · enter next · shift+tab back · esc cancel")}
 	for i, f := range m.providerFields {
 		label := stDim.Render("  " + labels[i] + "  ")
 		if i == m.providerStep {
@@ -503,6 +517,6 @@ func (m tuiModel) providerFormPanel() string {
 	if m.providerErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.providerErr))
 	}
-	rows = append(rows, "  "+stDim.Render("saved to "+configPath()+" (0600); a name already saved is replaced"))
+	rows = append(rows, "  "+stDim.Render("saved to "+configPath()+" (0600); logging in again under a name replaces it"))
 	return strings.Join(rows, "\n")
 }

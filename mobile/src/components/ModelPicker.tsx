@@ -8,8 +8,8 @@ import { font, mono, space, useColors } from '@/lib/theme';
 
 // /model: every saved provider's models (fetched by the engine), searched by
 // any words of provider or id, as the TUI's picker does. Below them the
-// providers themselves: edit, remove, add, and a model used by id — for a
-// provider that does not list its models.
+// logged-in providers: log in again, log out, a model used by id (for a
+// provider that does not list its models), and log in to another.
 export function ModelPicker({ providers, current, initial, pick, op, edit, close }: {
   providers: ModelProvider[] | null;
   current: { model: string; provider: string } | null;
@@ -62,8 +62,8 @@ export function ModelPicker({ providers, current, initial, pick, op, edit, close
             {p.name} — {p.url} · {p.key ? 'key set' : 'no key'} · {p.error ? p.error : `${(p.ids ?? []).length} models`}
           </Text>
           <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
-            <Button title="Edit" onPress={() => edit(p)} />
-            <Button title="Remove" onPress={() => op({ op: 'remove', name: p.name })} />
+            <Button title="Log in again" onPress={() => edit(p)} />
+            <Button title="Log out" onPress={() => op({ op: 'logout', name: p.name })} />
             <Button title="Use model id…" onPress={() => setById({ provider: p.name, id: '' })} />
           </View>
           {byId?.provider === p.name ? (
@@ -84,7 +84,8 @@ export function ModelPicker({ providers, current, initial, pick, op, edit, close
           ) : null}
         </View>
       ))}
-      <Button title="Add provider" onPress={() => edit(null)} />
+      {providers && providers.length === 0 ? <Muted>Not logged in to a provider: dun talks to no model until you log in.</Muted> : null}
+      <Button title="Log in to a provider" onPress={() => edit(null)} />
     </View>
   );
 }

@@ -42,7 +42,8 @@ type setupModel struct {
 
 func newSetupModel(cur dunConfig) setupModel {
 	url := textinput.New()
-	url.SetValue(firstNonEmpty(cur.URL, defaultURL))
+	url.SetValue(cur.URL)
+	url.Placeholder = "https://… (an OpenAI-compatible endpoint)"
 	url.Focus()
 	url.Width = 48
 
@@ -53,7 +54,7 @@ func newSetupModel(cur dunConfig) setupModel {
 	key.Width = 48
 
 	custom := textinput.New()
-	custom.SetValue(firstNonEmpty(cur.Model, defaultModel))
+	custom.SetValue(cur.Model)
 	custom.Width = 48
 
 	sp := spinner.New()
@@ -110,7 +111,7 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.models = []string(msg)
 		m.fetching = false
 		m.sel = 0
-		want := firstNonEmpty(m.cur.Model, defaultModel)
+		want := m.cur.Model
 		for i, id := range m.models {
 			if id == want {
 				m.sel = i
@@ -236,7 +237,7 @@ func runSetupTUI() error {
 	}
 	// The wizard sets the default provider; it keeps the others /model added.
 	c := loadConfig()
-	p := providerConfig{Name: hostName(fm.url.Value()), URL: fm.url.Value(), Key: fm.key.Value()}
+	p := providerConfig{Name: hostName(fm.url.Value()), Kind: providerOpenAI, URL: fm.url.Value(), Key: fm.key.Value()}
 	if old, ok := c.providerAt(p.URL); ok {
 		p.Name = old.Name
 	}

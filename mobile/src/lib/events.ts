@@ -183,7 +183,7 @@ export type Line =
   | { kind: 'message'; text: string }
   | { kind: 'slash'; line: string }
   | { kind: 'skill'; text: string }
-  | { kind: 'model'; query: string }
+  | { kind: 'provider'; cmd: 'model' | 'login' | 'logout'; args: string[] }
   | { kind: 'mcpadd' }
   | { kind: 'unknown'; name: string };
 
@@ -198,9 +198,9 @@ export function parseLine(raw: string, skills: Skill[]): Line {
     const ask = `Use the skill ${skill} (call skill name=${skill} first)`;
     return { kind: 'skill', text: words.length ? `${ask}: ${words.join(' ')}` : ask + '.' };
   }
-  // The model picker and the add-server form are the client's (the TUI has
-  // its own of each).
-  if (name === 'model') return { kind: 'model', query: rest.join(' ') };
+  // The model picker, the login form and the add-server form are the
+  // client's (the TUI has its own of each).
+  if (name === 'model' || name === 'login' || name === 'logout') return { kind: 'provider', cmd: name, args: rest };
   if (name === 'mcp' && rest[0]?.toLowerCase() === 'add') return { kind: 'mcpadd' };
   if (!name) return { kind: 'unknown', name: '' };
   return { kind: 'slash', line: text.slice(1) };
@@ -214,7 +214,9 @@ export function suggest(typed: string, commands: Command[], skills: Skill[]): { 
   if (arg === undefined) {
     for (const c of commands) if (c.name.startsWith(head)) out.push({ insert: '/' + c.name + ' ', label: '/' + c.name + (c.usage ? ' ' + c.usage : ''), hint: c.description });
     if ('skill'.startsWith(head)) out.push({ insert: '/skill ', label: '/skill <name> [text]', hint: 'ask the model to use a skill' });
-    if ('model'.startsWith(head)) out.push({ insert: '/model', label: '/model [search]', hint: 'switch model: a searchable list from every provider; /model add | edit <p> | remove <p> | use <p> <id>' });
+    if ('model'.startsWith(head)) out.push({ insert: '/model', label: '/model [search] | use <provider> <id>', hint: 'switch model: a searchable list from every logged-in provider' });
+    if ('login'.startsWith(head)) out.push({ insert: '/login', label: '/login [name]', hint: 'log in to an LLM provider: an OpenAI-compatible URL, bearer optional' });
+    if ('logout'.startsWith(head)) out.push({ insert: '/logout ', label: '/logout <provider>', hint: 'log out of an LLM provider' });
     return out;
   }
   if (head === 'skill') {

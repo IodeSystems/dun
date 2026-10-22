@@ -13,7 +13,7 @@ import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
 import { apply, empty, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
-import { modelLine, type ProviderOp } from '@/lib/provider';
+import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -30,8 +30,8 @@ export default function Session() {
   const [panel, setPanel] = useState(false);
   const [picker, setPicker] = useState<string | null>(null); // the search, when open
   const [mcpForm, setMcpForm] = useState(false);
-  // The add/edit provider form: null adds, a provider edits it.
-  const [providerForm, setProviderForm] = useState<{ edit: { name: string; url: string } | null } | null>(null);
+  // The login form: edit is a provider logged in again, name a new one's.
+  const [providerForm, setProviderForm] = useState<{ edit: { name: string; url: string } | null; name?: string } | null>(null);
   // This user's UI state in the session, kept by dund and shared with their
   // other clients (the TUI's format): the sent history and an unsent draft.
   const sent = useRef<string[]>([]);
@@ -117,7 +117,7 @@ export default function Session() {
   // it answers with a note and a fresh models event. Using a model by id
   // saves it as the default, then switches this session to it.
   async function providerOp(op: ProviderOp, url?: string) {
-    if (op.op === 'remove' && !(await confirm('Remove', `Forget provider ${op.name} and its key?`))) return;
+    if (op.op === 'logout' && !(await confirm('Log out', `Log out of ${op.name}: forget its URL and key?`))) return;
     try {
       await auth.client?.request(Control, { id, target: 'provider', action: JSON.stringify(op) });
     } catch (e) {
@@ -146,15 +146,14 @@ export default function Session() {
       return;
     }
     setText('');
-    if (l.kind !== 'mcpadd') remember(raw.trim());
+    if (l.kind !== 'mcpadd' && !(l.kind === 'provider' && l.cmd === 'login' && l.args.length > 1)) remember(raw.trim());
     if (l.kind === 'slash') return runSlash(l.line);
-    if (l.kind === 'model') {
-      const m = modelLine(l.query);
+    if (l.kind === 'provider') {
+      const m = providerLine(l.cmd, l.args);
       if (m.kind === 'usage') return setSendErr(m.message);
-      if (m.kind === 'add') return setProviderForm({ edit: null });
-      if (m.kind === 'edit') {
+      if (m.kind === 'login') {
         const p = view.models?.find((x) => x.name === m.name);
-        return p ? setProviderForm({ edit: p }) : setSendErr(`no provider named ${m.name} (open /model to load them)`);
+        return setProviderForm(p ? { edit: p } : { edit: null, name: m.name });
       }
       if (m.kind === 'op') return providerOp(m.op, m.op.op === 'use' ? view.models?.find((x) => x.name === m.op.name)?.url : undefined);
       return openPicker(m.query);
@@ -227,7 +226,7 @@ export default function Session() {
               close={() => setPicker(null)}
             />
           ) : null}
-          {providerForm ? <ProviderForm edit={providerForm.edit} save={(o) => void providerOp(o)} close={() => setProviderForm(null)} /> : null}
+          {providerForm ? <ProviderForm edit={providerForm.edit} name={providerForm.name} save={(o) => void providerOp(o)} close={() => setProviderForm(null)} /> : null}
           {mcpForm ? (
             <McpForm
               close={() => setMcpForm(false)}

@@ -67,9 +67,11 @@ OpenAI-compatible endpoint.
 make install   # builds the stamped binary into ~/.local/bin/dun (BINDIR=… to change)
 # mcpshell must be on PATH; poly-lsp-mcp and raglit only if you use /lsp, /rag
 
-dun --setup   # Bubble Tea wizard: LLM url / masked key / model (navigable list
-              # of the endpoint's models). Saves to ~/.dun/config.json; re-run
-              # any time. Precedence: --flag > env > config > built-in default.
+dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
+              # URL, bearer optional) and pick a model. In the TUI, web or
+              # app: /login [name], /logout <name>, /model. Saves to
+              # ~/.dun/config.json. There is no built-in provider: dun talks
+              # to no model until you log in. Precedence: --flag > env > config.
 
 # The stamped binary updates itself from this source tree
 # (cmd/dun/selfupdate.go). A plain `go install ./cmd/dun` leaves srcDir empty

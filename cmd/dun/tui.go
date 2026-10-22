@@ -3388,7 +3388,9 @@ func init() {
 	slashCommands = []slashCmd{
 		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
 		{"config", "", "show this session's LLM settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
-		{"model", "[provider] [name] | add | remove <provider>", "switch model: bare opens a searchable list from every provider; add saves a new provider", modelSlash},
+		{"model", "[provider] [name] | use <provider> <id>", "switch model: bare opens a searchable list from every logged-in provider", modelSlash},
+		{"login", "[name]", "log in to an LLM provider: an OpenAI-compatible URL, bearer optional (again under a name replaces it)", loginSlash},
+		{"logout", "<provider>", "log out of an LLM provider: forget its URL and key", logoutSlash},
 		{"context", "", "inspect context usage: tokens, compaction, recaps, truncation", func(m *tuiModel, _ []string) tea.Cmd { m.showContext(); return nil }},
 		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
