@@ -70,10 +70,10 @@ func memoryToolDef() llm.ToolDef {
 		"type": "object",
 		"properties": map[string]any{
 			"action":   map[string]any{"type": "string", "enum": []string{"add", "refine", "void", "confirm"}},
-			"content":  map[string]any{"type": "string", "description": "add/refine: the note — the fact and where it applies, and why it holds only if that was said; never add a reason or consequence nobody stated"},
+			"content":  map[string]any{"type": "string", "description": "add/refine: the note — the fact and where it applies, and why it holds only if that was said; never add a reason or consequence nobody stated, and no dates (dun records when)"},
 			"question": map[string]any{"type": "string", "description": "add/refine: the question this note answers, in the words a later user would ask it"},
 			"old_text": map[string]any{"type": "string", "description": "refine/void/confirm: a phrase copied exactly from the note or its question"},
-			"why":      map[string]any{"type": "string", "description": "refine/void/confirm: what the user said, or what in the code shows it (a file and what it says)"},
+			"why":      map[string]any{"type": "string", "description": "refine/void/confirm: the evidence — the user's own words, or the file you read and what it says. A confirm needs that check done first: \"the user asked me to check\" is not evidence. No dates — dun records when"},
 			"source":   map[string]any{"type": "string", "enum": []string{"user", "code"}, "description": "refine/void/confirm: who says so — the user, or the code as it is now"},
 			"public":   map[string]any{"type": "boolean", "description": "add: share with everyone on this project (default: private to you)"},
 		},
@@ -169,16 +169,18 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		// Out of the index first: a log line for a void that then failed
+		// would say the note is gone while search still serves it.
+		if m.forget != nil {
+			if err := m.forget(path); err != nil {
+				return "", fmt.Errorf("not voided: the index refused it: %w", err)
+			}
+		}
 		// unsupported, not retract: in attest, retract withdraws an earlier
 		// ruling and leaves the unit untouched; unsupported is the one
 		// verdict that stops a claim counting.
 		if err := m.attest(path, attestEntry{Kind: "unsupported", Unit: old.unit(), Note: a.Why, By: by}); err != nil {
 			return "", err
-		}
-		if m.forget != nil {
-			if err := m.forget(path); err != nil {
-				return "", fmt.Errorf("not voided: the index refused it: %w", err)
-			}
 		}
 		// Kept, out of the *.md set that is listed and indexed: nothing a
 		// note said is destroyed.

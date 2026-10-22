@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,5 +236,19 @@ func TestRaglitStoreFlags_KeepsTheStoreNotTheIndex(t *testing.T) {
 	got = strings.Join(raglitStoreFlags([]string{"serve", "--embedded", "--home=/h", "--index", "m0", "--embed"}), " ")
 	if got != "--embedded --home=/h" {
 		t.Errorf("embedded config: got %q", got)
+	}
+}
+
+// A void the index refused leaves no verdict behind: the note is still served.
+func TestMemory_FailedVoidWritesNoVerdict(t *testing.T) {
+	m, _, _ := testMemory(t)
+	_, _ = m.apply(memoryArgs{Action: "add", Content: "The cache is wiped on reboot."}, noteMeta{})
+	m.forget = func(string) error { return fmt.Errorf("flag provided but not defined: -embedded") }
+	if _, err := m.apply(memoryArgs{Action: "void", OldText: "cache", Why: "removed", Source: "user"}, noteMeta{}); err == nil {
+		t.Fatal("want the refusal")
+	}
+	paths, _ := filepath.Glob(filepath.Join(m.dir, "*.md"))
+	if len(paths) != 1 || len(readAttest(paths[0])) != 0 {
+		t.Errorf("a failed void must change nothing: %v %v", paths, readAttest(paths[0]))
 	}
 }

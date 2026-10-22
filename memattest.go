@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // A note's history (plan item 9 M4).
@@ -64,7 +65,9 @@ func attestBy(a memoryArgs) (string, error) {
 }
 
 func (m *memoryStore) attest(notePath string, e attestEntry) error {
-	e.At = m.now().UTC().Format("2006-01-02T15:04:05Z")
+	// Local time with its offset (still RFC3339): the date a person reads
+	// in /memories is the day it was where they are.
+	e.At = m.now().Format(time.RFC3339)
 	b, err := json.Marshal(e)
 	if err != nil {
 		return err
