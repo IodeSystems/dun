@@ -175,6 +175,16 @@ func TestMountTool_NotRegisteredWithHost(t *testing.T) {
 // the tool call reaches the MountFunc callback and the result is correct.
 func TestMountTool_DispatcherCallsMountFunc(t *testing.T) {
 	dir := t.TempDir()
+	// "../agentkit" resolves against the working directory (no repo root
+	// here). It used to pass only where the checkout had an agentkit sibling
+	// — the main clone, not a worktree of it.
+	base := t.TempDir()
+	for _, d := range []string{"agentkit", "ws"} {
+		if err := os.Mkdir(filepath.Join(base, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(filepath.Join(base, "ws"))
 	mounted := false
 	h, err := Start(context.Background(), Config{
 		Workspace:   dir,
