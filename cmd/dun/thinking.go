@@ -28,6 +28,7 @@ type thinkBlock struct {
 	text       string
 	start, end time.Time // end is zero while live; both zero from history
 	live       bool
+	cut        bool // the user interrupted the turn mid-thought
 }
 
 // liveThought is the thought still streaming and the block it is in — its
@@ -123,6 +124,8 @@ func thinkHeader(t *thinkBlock) string {
 	switch {
 	case t.live:
 		return "✻ thinking… " + thinkDur(time.Since(t.start)) + words
+	case t.cut && !t.end.IsZero():
+		return "✻ interrupted after " + thinkDur(t.end.Sub(t.start)) + words
 	case !t.end.IsZero():
 		return "✻ thought for " + thinkDur(t.end.Sub(t.start)) + words
 	}

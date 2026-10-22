@@ -51,7 +51,9 @@ type runItem struct {
 type toolRun struct {
 	items []*runItem
 	open  bool // still taking calls and thoughts
-	ver   int  // bumped on every change, the key of the rows cache
+	// interrupted: the user stopped the turn while this run was open.
+	interrupted bool
+	ver         int // bumped on every change, the key of the rows cache
 
 	rows    []string // the box body as of rowsVer at rowsW
 	rowsVer int
@@ -121,6 +123,9 @@ func (r *toolRun) summary() string {
 	}
 	if failed > 0 {
 		s += stErr.Render(fmt.Sprintf(" · %d failed", failed))
+	}
+	if r.interrupted {
+		s += stDim.Render(" · ⏹ interrupted")
 	}
 	return s
 }

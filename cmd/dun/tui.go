@@ -522,6 +522,7 @@ type tuiModel struct {
 	starting      bool                  // spawning servers, before `ready`
 	startingStart time.Time             // when the starting phase began
 	busy          bool                  // a turn in flight
+	interrupting  bool                  // an interrupt was sent; the turn has not ended yet
 	busyStart     time.Time             // when the current busy turn started
 	asking        bool                  // agent is waiting on an ask_user answer
 	askOptions    []string              // the offered options; a trailing "custom" row is implicit
@@ -860,6 +861,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// ctrl+k while a turn runs interrupts it, whatever has the keys. Idle,
+		// it is the input's kill-to-end-of-line as before.
+		if msg.String() == "ctrl+k" && m.turnRunning() {
+			return m.interrupt()
+		}
 		// The tool inspector overlay owns every key while open.
 		if m.inspecting {
 			open, cmd := m.insp.update(msg)
@@ -958,6 +964,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// reading, and it was what esc did.
 			if m.scopeAgent != 0 {
 				return m, m.leaveAgentScope()
+			}
+			// Nothing else wanted it, and a turn runs: esc stops the turn.
+			if m.turnRunning() {
+				return m.interrupt()
 			}
 			// esc is "one level out", and there is no level out of dun: it
 			// says how to leave instead of leaving.
@@ -1946,6 +1956,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
 			m.append(stNote.Render(msg))
 		}
+		if str(ev["id"]) == "interrupt" { // there was no turn to interrupt
+			m.interrupting = false
+		}
 		// /close is terminal: the session it was editing no longer exists, so
 		// staying attached to it would be showing a conversation that cannot be
 		// resumed. Quit only once the engine has confirmed the work is done.
@@ -2204,13 +2217,28 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.ctxStats.notificationsSmuggled = int(v)
 		}
 	case "done":
+		cut := str(ev["reason"]) == "interrupted"
+		if cut {
+			m.markInterrupted()
+		}
 		m.endThinking()
 		m.endRun()
 		m.flushCur()
+		if cut {
+			// A question the cut turn asked is closed with it.
+			if m.asking {
+				m = m.clearAsk()
+			}
+			m.settleAsk()
+			m.append(stDim.Render(interruptedRow))
+		}
+		m.interrupting = false
 		// Clear any remaining provisional markers — the turn is done, so
-		// everything was delivered to the LLM.
+		// everything was delivered to the LLM. After an interrupt they were
+		// not: they are the next turn's message, which the engine starts at
+		// once, and its done settles them.
 		for i := range m.convo {
-			if m.convo[i].provisional {
+			if !cut && m.convo[i].provisional {
 				m.convo[i].provisional = false
 				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
 				m.convo[i].userText = m.convo[i].provisionalText
@@ -2772,13 +2800,15 @@ func (m tuiModel) View() string {
 	case m.askParked && m.focus != focusConvo:
 		status = stAsk.Render("❓ a question is waiting") + stDim.Render(" · tab, select it, enter to answer · "+m.exitHint())
 	case m.retry != "":
-		status = stNote.Render("⏳ "+m.retry) + stDim.Render(m.retryCountdown()+"  ("+m.exitHint()+")")
+		status = stNote.Render("⏳ "+m.retry) + stDim.Render(m.retryCountdown()+"  ("+m.busyHint()+")")
+	case m.busy && m.interrupting:
+		status = m.spin.View() + " " + stDim.Render("interrupting…"+m.busyElapsed()+m.queuedHint())
 	case m.busy:
 		what := ""
 		if m.activeTool != "" {
 			what = " " + m.activeTool
 		}
-		status = m.spin.View() + " " + m.spendStatus(time.Now()) + stDim.Render("working…"+what+m.busyElapsed()+m.queuedHint()+"  ("+m.exitHint()+")")
+		status = m.spin.View() + " " + m.spendStatus(time.Now()) + stDim.Render("working…"+what+m.busyElapsed()+m.queuedHint()+" · "+m.busyHint())
 	case m.focus == focusActivity && m.actLevel == actCollapsed:
 		status = stDim.Render("activity  ·  → open · tab input · " + m.exitHint())
 	case m.focus == focusActivity:

@@ -163,6 +163,13 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 		if name == "mcp" && len(args) > 0 && args[0] == "add" {
 			return m.openMCPForm()
 		}
+		// /interrupt: the same command ctrl+k sends, so the status line says
+		// "interrupting…" for it too.
+		if name == "interrupt" && m.turnRunning() {
+			nm, cmd := m.interrupt()
+			*m = nm.(tuiModel)
+			return cmd
+		}
 		// /mcp tools <id> goes to the engine like any other; the list it
 		// answers with opens in the pager because this TUI asked for it.
 		if name == "mcp" && len(args) == 2 && args[0] == "tools" {

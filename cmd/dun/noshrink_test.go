@@ -115,7 +115,11 @@ func TestNoShrink_RandomEventStreams(t *testing.T) {
 							pending = false
 						}
 					case k == 12:
-						c.ev(map[string]any{"type": "done"})
+						if r.Intn(3) == 0 {
+							c.ev(map[string]any{"type": "done", "reason": "interrupted"})
+						} else {
+							c.ev(map[string]any{"type": "done"})
+						}
 						c.ev(map[string]any{"type": "user", "content": randText(r)})
 						c.ev(map[string]any{"type": "turn"})
 					case k == 13:
