@@ -90,9 +90,9 @@ full detail archived in `done.md`.
   background jobs stream to a log file and are tunable via `exec_monitor`, and a
   timed-out `docker run` now stops its container.
 - **Thinking + tool runs in the TUI** (2026-10-22) — reasoning streams live as
-  a `reasoning` event into a bounded box (`cmd/dun/box.go`), as does a tool
-  call's output; earlier calls of a run fold into one
-  row; enter opens either in the pager (`cmd/dun/pager.go`); the selection is
+  a `reasoning` event into a bounded box (`cmd/dun/box.go`); a run of tool
+  calls and thinking is one grow-only box (the log never shrinks); enter
+  opens either in the pager (`cmd/dun/pager.go`); the selection is
   a pulsing background filter (`cmd/dun/band.go`). See `done.md`.
 
 ## Active work

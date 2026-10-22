@@ -765,12 +765,17 @@ says "(just type)" while it is highlighted and not yet capturing.
   bounded box (`box.go`): grows to min(10, pane/3) rows, then scrolls inside,
   tail-following while live; done, it keeps its height (no fold). Selected,
   ↑/↓ pgup/pgdn scroll inside it and leave it at its edges.
-- **Tool runs** (`toolrun.go`): on each new call, the previous calls of the run
-  and their thinking fold into one aggregate row ("⚙ N tool calls — exec×4 ·
-  1 failed"). The latest call's output is a box too (the earlier height hold
-  is gone). A fold is deferred when it would touch the
-  selection, a live search, or rows a scrolled-up reader has on screen.
-  `tool_result` no longer pins the scroll unless queued messages were delivered.
+- **Tool runs** (`toolrun.go`), since 2026-10-22 (USER: "total height should
+  never decrease"): a run of calls and the thinking between them is ONE
+  grow-only box — a step list (finished thought = its last sentence, call =
+  short form + preview, failures keep 2 error lines, same-tool calls group),
+  only the streaming thought open. The old fold-and-replace aggregate is gone.
+  Every block is held at the most rows it has drawn (`maxH`); property test
+  `noshrink_test.go`. Enter → tree; "i" on a call → inspector.
+- **mcpshell eval renderer** (`evalrender.go`): code as the call line, hosted
+  calls as `◇ ns.tool k=v`, records as a table, values laid out, errors with
+  their line marked; fixtures captured from mcpshell in
+  `testdata/mcpshell/`.
 - **Pager** (`pager.go`): enter on thinking or an aggregate gives the block the
   convo pane (head, input, status stay). Plain text scrolls; an aggregate is a
   tree, a node per call/thought that opens to args + result. Follows a live
