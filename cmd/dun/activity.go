@@ -216,6 +216,8 @@ func jobActRow(j jobRow, now time.Time) actRow {
 		mark, style, state = "✗", stErr, fmt.Sprintf("failed (exit %d)", j.code)
 	case "timeout", "error":
 		mark, style = "✗", stErr
+	case "killed":
+		mark, style = "⏹", stDim
 	default:
 		mark, style = "·", stDim
 	}
@@ -555,6 +557,13 @@ func (m *tuiModel) actKeys(key string) (tea.Cmd, bool) {
 	case "down":
 		if m.actLevel == actList {
 			m.actMove(1)
+		}
+		return nil, true
+	case "x":
+		// Kill the selected job, after a y/n. Only in the table: collapsed,
+		// nothing is selected that you can see.
+		if m.actLevel == actList {
+			m.actKill()
 		}
 		return nil, true
 	case "right", "enter":

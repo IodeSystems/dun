@@ -523,6 +523,7 @@ type tuiModel struct {
 	startingStart time.Time             // when the starting phase began
 	busy          bool                  // a turn in flight
 	interrupting  bool                  // an interrupt was sent; the turn has not ended yet
+	confirm       confirmState          // a pending y/n question (jobkill.go)
 	busyStart     time.Time             // when the current busy turn started
 	asking        bool                  // agent is waiting on an ask_user answer
 	askOptions    []string              // the offered options; a trailing "custom" row is implicit
@@ -865,6 +866,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// it is the input's kill-to-end-of-line as before.
 		if msg.String() == "ctrl+k" && m.turnRunning() {
 			return m.interrupt()
+		}
+		// A y/n question (kill job N?) takes the next key, whatever it is.
+		if m.confirm.q != "" {
+			return m.updateConfirm(msg)
 		}
 		// The tool inspector overlay owns every key while open.
 		if m.inspecting {
@@ -2231,6 +2236,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			}
 			m.settleAsk()
 			m.append(stDim.Render(interruptedRow))
+			// The jobs the cut turn started keep running: say which, and how
+			// to stop them.
+			if d := strings.TrimSpace(str(ev["detail"])); d != "" {
+				m.append(stNote.Render("  " + d))
+			}
 		}
 		m.interrupting = false
 		// Clear any remaining provisional markers — the turn is done, so
@@ -2781,6 +2791,8 @@ func (m tuiModel) View() string {
 		status = stErr.Render(m.fatalErr)
 	case m.starting:
 		status = m.spin.View() + stDim.Render(" spawning tool servers…"+m.startingElapsed())
+	case m.confirm.q != "":
+		status = stAsk.Render("❓ " + m.confirm.q)
 	case m.flashing():
 		status = stNote.Render(m.flashText)
 	case m.paging:
@@ -2812,7 +2824,7 @@ func (m tuiModel) View() string {
 	case m.focus == focusActivity && m.actLevel == actCollapsed:
 		status = stDim.Render("activity  ·  → open · tab input · " + m.exitHint())
 	case m.focus == focusActivity:
-		status = stDim.Render("activity  ·  ↑/↓ select · → open (agent = its view) · ← back · tab input")
+		status = stDim.Render("activity  ·  ↑/↓ select · → open (agent = its view) · x kill job · ← back · tab input")
 	case m.scopeAgent != 0:
 		status = stDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it · tab activity · ←/esc back to the session", m.scopeAgent))
 	case m.focus == focusConvo:

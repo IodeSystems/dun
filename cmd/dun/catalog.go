@@ -170,6 +170,11 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			*m = nm.(tuiModel)
 			return cmd
 		}
+		// /jobs kill all asks first: it ends every running job at once.
+		if name == "jobs" && len(args) == 2 && strings.EqualFold(args[0], "kill") && strings.EqualFold(args[1], "all") {
+			m.askConfirm("kill every running job? (y/n)", func(m *tuiModel) { m.killJobsCmd("jobs kill all") })
+			return nil
+		}
 		// /mcp tools <id> goes to the engine like any other; the list it
 		// answers with opens in the pager because this TUI asked for it.
 		if name == "mcp" && len(args) == 2 && args[0] == "tools" {
