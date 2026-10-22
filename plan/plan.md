@@ -341,7 +341,8 @@ Where it stands:
   forgets. /clear clears every client via the reset event. Verified:
   unit tests, Playwright headless vs a test dund on localhost (sign-in,
   palette, slash answer, panel chip, local refusal, live reply), ttydrive.
-  Not on the web yet: /model (a picker), /mcp add (form), /context.
+  /model (`41a2fbc`) and /mcp add (`77d3ff9`, a form) since added; not on
+  the web yet: /context.
 - ✅ **ask_user needs options + a recommendation** (`2307c7e`, USER): ≥2
   options and `recommended` (one of them; not for multi), else an error back
   to the model. TUI marks + preselects it; web stars it and renders asks
@@ -360,9 +361,10 @@ Where it stands:
 - ✅ **APK** (`ae36fca`): `tools/release-android` (bintag's, adapted) →
   ~/.local/share/dun/releases; the unit runs `--releases` there; /dun.apk →
   the latest (verified through hz: 99.5 MB, installer MIME); hello announces
-  it; the Android app offers newer builds, the web links to the APK. First
-  build dun-88582157 (ae36fca). NOT run on a device or emulator (none
-  installed) — USER installs it on a phone.
+  it; the Android app offers newer builds, the web links to the APK. Latest
+  build dun-88582522 (c06867b, with sign-in), same signer as the first. NOT
+  run on a device or emulator (none installed) — USER installs it on a
+  phone.
 - ✅ **Sign-in with Zitadel, built and OFF** (`c06867b`): flags
   `--oidc-issuer https://id.iodesystems.com --oidc-client-id <id>
   --oidc-allow <email>`; tested with a fake provider (Go + a browser run).
@@ -417,9 +419,10 @@ Slices, in order:
 - **S5 RN client.** Expo + react-native-web; graphql-codegen types; one
   `graphql-ws` client (RT-3); PWA manifest + service worker.
 
-- **next:** S4 — dund's HTTP listener (huma + gat at `/api/v1`, `/healthz`)
-  on the hz port; graphql-ws subscriptions in gat (gwag repo) first; OIDC
-  per caveat 10; the standalone-localhost auth decision.
+- **next:** USER: create the Zitadel Web app (see "Sign-in with Zitadel"),
+  then reinstall the unit with the --oidc-* flags; install the APK on a
+  phone and report. Then: /context on the web; the launcher's reload notice
+  through dund; scroll/agent-view UI state.
 - **risks:**
   - The TUI holds state today that may not be derivable from events (its
     restart counters, suggestions state, replay mode); S1 finds out.
