@@ -1,7 +1,9 @@
 package main
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/iodesystems/dun"
 )
@@ -90,6 +92,53 @@ func TestRouteSlash(t *testing.T) {
 		routeSlash(line, r)
 		if len(calls) != 1 || calls[0].kind != "reply" {
 			t.Errorf("%q should only reply, got %v", line, calls)
+		}
+	}
+}
+
+func TestRouteSlash_Jobs(t *testing.T) {
+	type call struct{ kind, a, b string }
+	var calls []call
+	r := slashRoutes{
+		server:  func(a, b string) { calls = append(calls, call{"server", a, b}) },
+		control: func(a, b string) { calls = append(calls, call{"control", a, b}) },
+		reset:   func() { calls = append(calls, call{"reset", "", ""}) },
+		reply:   func(m string) { calls = append(calls, call{"reply", m, ""}) },
+	}
+	for line, want := range map[string]call{
+		"jobs":          {"control", "jobs", ""},
+		"/jobs list":    {"control", "jobs", ""},
+		"jobs kill 3":   {"control", "jobs", "kill 3"},
+		"jobs kill #3":  {"control", "jobs", "kill 3"},
+		"jobs KILL ALL": {"control", "jobs", "kill all"},
+	} {
+		calls = nil
+		routeSlash(line, r)
+		if len(calls) != 1 || calls[0] != want {
+			t.Errorf("%q: %v, want %v", line, calls, want)
+		}
+	}
+	for _, line := range []string{"jobs kill", "jobs kill x", "jobs kill 0", "jobs stop 3", "jobs kill 3 4"} {
+		calls = nil
+		routeSlash(line, r)
+		if len(calls) != 1 || calls[0].kind != "reply" {
+			t.Errorf("%q should only reply with the usage, got %v", line, calls)
+		}
+	}
+}
+
+func TestJobsListing(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	if got := jobsListing(nil, now); got != "no background jobs are running" {
+		t.Errorf("empty: %q", got)
+	}
+	got := jobsListing([]dun.JobInfo{
+		{ID: 3, Command: "go test ./...", Started: now.Unix() - 125, Last: "ok  pkg/a 1.2s"},
+		{ID: 5, Command: "sleep 30", Started: now.Unix() - 7},
+	}, now)
+	for _, want := range []string{"2 running", "#3 go test ./... (2m) ⟩ ok  pkg/a 1.2s", "#5 sleep 30 (7s)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("listing lacks %q:\n%s", want, got)
 		}
 	}
 }

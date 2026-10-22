@@ -867,6 +867,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			interruptCmd()
 			return
 		}
+		// /jobs: list or kill background jobs. Detached: a kill waits up to a
+		// few seconds for the job's process group to be gone.
+		if id == "jobs" {
+			go func() { em.emit(&proto.ControlEvent{ID: id, Action: action, Message: jobsCmd(h, action)}) }()
+			return
+		}
 		// /rephrase flips a pure engine-side toggle: no harness work, no asking,
 		// so it does not go through runControlCmd. The TUI already echoed the
 		// command to the user; this event keeps the engine's and the TUI's
@@ -1557,7 +1563,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 // no message event; done's reason tells clients to close the turn as cut.
 func emitInterrupted(h *dun.Harness, em *emitter, res agent.TurnResult) {
 	em.emit(usageEvent(h, res.Usage))
-	em.emit(&proto.Done{Reason: "interrupted"})
+	em.emit(&proto.Done{Reason: "interrupted", Detail: h.InterruptedJobs()})
 }
 
 // emitTurnError reports a failed turn, and says whether the SESSION is over.

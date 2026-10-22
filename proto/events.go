@@ -88,9 +88,12 @@ type ToolResult struct {
 }
 
 // Done ends a turn. Reason is empty for a turn that finished, and
-// "interrupted" for one the user stopped (see Interrupt).
+// "interrupted" for one the user stopped (see Interrupt). Detail, on an
+// interrupted turn, lists the jobs it started that are still running and how
+// to stop them ("still running: #3 go test ./... (2m) — /jobs kill 3 …").
 type Done struct {
 	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // SystemCost is what the context costs before the conversation.

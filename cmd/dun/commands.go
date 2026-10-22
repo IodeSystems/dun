@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
@@ -83,6 +86,8 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 			State: suggestMode, Description: "next-message suggestions: bare asks for some now, on/off/auto set the mode"},
 		{Name: "rephrase", Usage: "[on|off|status]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", ""),
 			State: onOff(rephraseOn), Description: "rephrase prompts for specificity before acting"},
+		{Name: "jobs", Usage: "[kill <n>|kill all]", Group: "session", Choices: choices("kill", "kill a job and everything it started: a number, or all"),
+			Description: "background jobs: bare lists the running ones, kill <n> ends one and everything it started, kill all ends every one"},
 		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
 		{Name: "clear", Group: "session", Description: "clear the conversation and start a fresh session log"},
 		{Name: "close", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript"},
@@ -115,6 +120,51 @@ func modelsEvent() *proto.Models {
 	}
 	wg.Wait()
 	return &proto.Models{Providers: out}
+}
+
+// isJobID says s is a job number ("3" or "#3").
+func isJobID(s string) bool {
+	n, err := strconv.Atoi(strings.TrimPrefix(s, "#"))
+	return err == nil && n > 0
+}
+
+// jobsCmd carries out /jobs for every client: action "" lists the running
+// jobs, "kill <n>" and "kill all" end them. The answer is the message shown.
+func jobsCmd(h *dun.Harness, action string) string {
+	f := strings.Fields(action)
+	if len(f) == 0 {
+		return jobsListing(h.RunningJobs(), time.Now())
+	}
+	if len(f) == 2 && f[0] == "kill" {
+		if f[1] == "all" {
+			return h.KillAllJobs("user")
+		}
+		if n, err := strconv.Atoi(f[1]); err == nil {
+			msg, err := h.KillJob(n, "user")
+			if err != nil {
+				return err.Error()
+			}
+			return msg
+		}
+	}
+	return "usage: /jobs [kill <n>|kill all]"
+}
+
+// jobsListing is bare /jobs: one line per running job — id, command, age,
+// and its last line of output.
+func jobsListing(jobs []dun.JobInfo, now time.Time) string {
+	if len(jobs) == 0 {
+		return "no background jobs are running"
+	}
+	lines := []string{fmt.Sprintf("%d running (/jobs kill <n> to stop one):", len(jobs))}
+	for _, j := range jobs {
+		line := "  " + dun.JobLine(j, now)
+		if j.Last != "" {
+			line += " ⟩ " + dun.ShortCommand(j.Last, 80)
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // slashRoutes are what routeSlash needs from the engine.
@@ -196,6 +246,17 @@ func routeSlash(line string, r slashRoutes) {
 		}
 	case "docker", "worktree", "ship":
 		r.control(name, arg(0))
+	case "jobs":
+		switch {
+		case len(args) == 0 || (arg(0) == "list" && len(args) == 1):
+			r.control(name, "")
+		case arg(0) == "kill" && len(args) == 2 && arg(1) == "all":
+			r.control(name, "kill all")
+		case arg(0) == "kill" && len(args) == 2 && isJobID(args[1]):
+			r.control(name, "kill "+strings.TrimPrefix(args[1], "#"))
+		default:
+			r.reply("usage: /jobs [kill <n>|kill all]")
+		}
 	case "memories", "close", "interrupt":
 		r.control(name, "")
 	case "remember":
