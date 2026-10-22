@@ -573,6 +573,7 @@ type tuiModel struct {
 	insp         inspector       // the overlay (valid while inspecting)
 	paging       bool            // the pager has the convo pane (pager.go; owns the keys)
 	pulse        int             // the selection band's pulse step (band.go)
+	drag         mouseSel        // a left-button click or drag in the convo pane (mouse.go)
 	curMaxH      int             // maxH for the streaming reply (see convoEntry.maxH)
 	curMaxKey    int
 	askParked    bool           // a question is open but its picker was put away (askpark.go)
@@ -875,6 +876,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Any key clears a mouse highlight; esc does only that.
+		if m.drag.on {
+			shown := m.drag.shown()
+			m.drag = mouseSel{}
+			if shown && msg.String() == "esc" {
+				return m, nil
+			}
+		}
 		// ctrl+g while a turn runs interrupts it, whatever has the keys. Idle it
 		// does nothing; ctrl+k stays the input's kill-to-end-of-line, busy or not.
 		if msg.String() == interruptKey && m.turnRunning() {
@@ -1443,6 +1452,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.paging {
 			m.pg.mouse(msg)
 			return m, nil
+		}
+		// Clicks and drags (mouse.go); everything below is the wheel.
+		if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+			return m.mouseLeft(msg)
 		}
 		// The wheel scrolls a box only once you are inside it.
 		if b := m.insideBox(); b != nil {
@@ -2672,7 +2685,8 @@ func (m tuiModel) planScrollRegion() tea.Cmd {
 	// Modes that replace the layout wholesale get the rows back.
 	// The band pulses mid-pane, and a region can only repaint whole; the
 	// renderer's line diff sends just the rows that changed.
-	if m.inspecting || m.paging || m.bandShown() || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
+	// So does a mouse highlight: it changes rows in place.
+	if m.inspecting || m.paging || m.bandShown() || m.drag.shown() || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
 		return m.sr.disable()
 	}
 	vp := m.vp
@@ -2917,7 +2931,7 @@ func (m tuiModel) View() string {
 	// The scroll region owns its rows: the renderer skips them, so View passes
 	// blank filler of the right height and the terminal keeps what is already
 	// painted there (see scrollregion.go).
-	convo := blankRegion(m.viewportView(vp), m.sr.rowsFor(vp.Height))
+	convo := blankRegion(m.selOverlay(m.viewportView(vp), vp.YOffset), m.sr.rowsFor(vp.Height))
 	if m.paging {
 		convo = m.pg.view(vp.Width, vp.Height)
 	}
@@ -3635,7 +3649,10 @@ func sortedKeys(m map[string]any) []string {
 // only whether motion events are reported at all.
 func mouseSlash(m *tuiModel, args []string) tea.Cmd {
 	if len(args) == 0 {
-		m.append(stNote.Render("mouse: " + m.mouseMode + "  (all|cell|off)"))
+		m.append(stNote.Render("mouse: " + m.mouseMode + "  (all|cell|off)\n" +
+			"  click selects a block or focuses the input · drag copies the text (OSC 52; tmux's buffer too)\n" +
+			"  the terminal's own selection: shift+drag (iTerm2: option+drag)\n" +
+			"  tmux taking drags for copy-mode? bind -n MouseDrag1Pane if -F '#{mouse_any_flag}' 'send -M' 'copy-mode -M'"))
 		return nil
 	}
 	switch args[0] {
@@ -3787,7 +3804,7 @@ func init() {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())
 			return nil
 		}},
-		{"mouse", "[all|cell|off]", "mouse reporting mode (bare shows it) — `cell` if the wheel should scroll the log", mouseSlash},
+		{"mouse", "[all|cell|off]", "mouse reporting mode (bare shows it) — `cell` if the wheel should scroll the log; click selects, drag copies, shift+drag (iTerm2: option+drag) is the terminal's own selection", mouseSlash},
 		{"scrolldebug", "", "debug: dump scroll overlay state (rowOffset, blockH, YOffset)", func(m *tuiModel, _ []string) tea.Cmd {
 			var lines []string
 			lines = append(lines, fmt.Sprintf("YOffset=%d pinned=%v vpH=%d convo=%d blockH=%d",

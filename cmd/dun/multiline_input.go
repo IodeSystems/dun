@@ -213,6 +213,14 @@ func (m *multilineInput) displayToOffset(row, col int) int {
 	return s.start + col
 }
 
+// clickAt puts the cursor under a click on visible row `row` of the box, `col`
+// cells from its left edge (the two-cell prompt included). Columns count runes,
+// as the wrapping does.
+func (m *multilineInput) clickAt(row, col int) {
+	m.cursor = m.displayToOffset(m.scroll+row, col-2)
+	m.clampCursor()
+}
+
 // height is how many rows the box occupies right now: one until the text needs
 // more, never more than maxLines.
 func (m *multilineInput) height() int {
