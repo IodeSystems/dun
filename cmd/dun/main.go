@@ -459,6 +459,9 @@ func main() {
 		ShipCfg:     shipConfig(absWS, *pr),
 		CommitCfg:   dun.LoadCommit(absWS),
 		SessionFile: sessionFile,
+		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
+		// memory tool). See memtrigger.go.
+		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") == "0",
 		// The workspace's own checkout, not the worktree: /rag auto is a fact
 		// about this machine and this project, and must outlive the throwaway
 		// worktree this session works in.
@@ -479,6 +482,11 @@ func main() {
 			em.emit(event{"type": "tool_result", "tool": tool, "result": result})
 		}
 		cfg.OnNotify = func(text string) { em.emit(event{"type": "notification", "text": text}) }
+		// A memory trigger reports like /remember does, so the UI shows it the
+		// same way.
+		cfg.OnMemoryTrigger = func(msg string) {
+			em.emit(event{"type": "control", "id": "remember", "action": "trigger", "message": msg})
+		}
 		// The whole list every time, not a delta: it is a handful of rows, and a
 		// UI that has to reconstruct state from deltas gets it wrong the first
 		// time an event is dropped.
@@ -554,6 +562,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), clip(oneLine(result), 200))
 		}
 		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", clip(oneLine(text), 200)) }
+		cfg.OnMemoryTrigger = func(msg string) { fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", clip(oneLine(msg), 200)) }
 		cfg.OnDocs = func(n dun.DocsNote) {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
 		}

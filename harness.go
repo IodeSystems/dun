@@ -252,6 +252,12 @@ type Config struct {
 	// OnDocs fires when the proactive-RAG preparer surfaces relevant documents —
 	// one aggregated summary per pass (found/surfaced counts + surfaced docs).
 	OnDocs func(DocsNote)
+	// OnMemoryTrigger fires when a turn's words ran the memory fork
+	// (memtrigger.go), with the line for the user.
+	OnMemoryTrigger func(msg string)
+	// DisableMemoryTriggers stops that fork from running on its own;
+	// /remember and the memory tool still work.
+	DisableMemoryTriggers bool
 	// OnCompaction fires when the Shaper folds history into a summary. Wired
 	// because compaction is otherwise INVISIBLE: it is the one operation that
 	// destroys conversation, and a session that was compacting on every turn
@@ -370,6 +376,10 @@ type Harness struct {
 	// catalog is what each started server offers besides tools: skills and
 	// prompts (skills.go). Guarded by srvMu.
 	catalog map[string]mcpCatalog
+	// trigMark is the CreatedAt of the newest entry the memory triggers have
+	// looked at (memtrigger.go).
+	trigMu   sync.Mutex
+	trigMark int64
 	// toolsInit is false until the first rebuild, so the initial tool set is
 	// not announced as a CHANGE — the system prompt already describes it.
 	toolsInit bool
@@ -823,7 +833,7 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 		// following request. A duplicate wake is a no-op, not a turn.
 		return agent.TurnResult{}, nil
 	}
-	return h.runTurnWithRescue(ctx, h.Session.Turn)
+	return h.turnThenTriggers(ctx)
 }
 
 // prepareTurn readies the store for a turn (or a retry of one).
@@ -946,6 +956,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		cfg: cfg, specs: servers, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
+	// A resumed session's history is not this session's to act on: the
+	// memory triggers look only at what arrives from here on.
+	h.markTriggerScan()
 
 	// Server→client push. Only the OWNER registers: a child shares its
 	// parent's manager, and registering again would replace the parent's sink
@@ -1082,7 +1095,24 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 	h.store.publish(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
-	return h.runTurnWithRescue(ctx, h.Session.Turn)
+	return h.turnThenTriggers(ctx)
+}
+
+// turnThenTriggers runs a turn, then — in the background, once the turn has
+// let go of turnMu — the memory triggers over what it added.
+func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error) {
+	res, err := h.runTurnWithRescue(ctx, h.Session.Turn)
+	if err == nil {
+		go func() {
+			if msg := h.checkMemoryTriggers(ctx); msg != "" {
+				h.Aside("[memory] " + msg)
+				if h.cfg.OnMemoryTrigger != nil {
+					h.cfg.OnMemoryTrigger(msg)
+				}
+			}
+		}()
+	}
+	return res, err
 }
 
 // Close shuts down the MCP servers.
