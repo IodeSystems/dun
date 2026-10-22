@@ -16,6 +16,7 @@ package dundapi
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -61,6 +62,13 @@ func Handler(svc *dund.Service, owner string) (http.Handler, error) {
 	r := chi.NewRouter()
 	s := &Server{svc: svc, owner: owner}
 	r.Use(s.authenticate)
+	page := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(indexHTML)
+	}
+	r.Get("/", page)
+	r.Get("/index.html", page)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("ok " + Version + "\n"))
@@ -79,8 +87,15 @@ func Handler(svc *dund.Service, owner string) (http.Handler, error) {
 	return r, nil
 }
 
-// open are the paths anyone may reach.
-var open = map[string]bool{"/healthz": true, "/api/v1/hello": true}
+// open are the paths anyone may reach. The page holds no data; it asks for
+// the token and calls the API with it.
+var open = map[string]bool{"/": true, "/index.html": true, "/healthz": true, "/api/v1/hello": true}
+
+// indexHTML is the stopgap browser client (web/index.html). Embedded: dund is
+// a tool binary with no slot model (WEB-5's exception).
+//
+//go:embed web/index.html
+var indexHTML []byte
 
 // authenticate 401s a request without the local token, except to the open
 // paths, and puts the caller's principal in the request context — which is

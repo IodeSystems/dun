@@ -190,3 +190,16 @@ func TestGraphQLRunsTheOperations(t *testing.T) {
 		t.Fatalf("without the token: %s", out)
 	}
 }
+
+// The page is open (it holds nothing) and is HTML.
+func TestPageIsServedWithoutAToken(t *testing.T) {
+	srv, _, _ := setup(t)
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || !strings.Contains(string(b), "dun dund token") {
+		t.Fatalf("page: %d %.80s", resp.StatusCode, b)
+	}
+}
