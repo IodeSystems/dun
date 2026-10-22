@@ -252,18 +252,17 @@ Where it stands:
   `dund` process stays up (stop: `kill $(cat ~/.dun/dund.pid)`); `--key`
   is not passed to engines (they read the saved key); `--disable-exit`
   only affects the TUI.
-- **S3 open:**
-  - the TUI does not yet store its UI state in dund (draft, sent-input
-    history, scroll/read position, agent scope) — the store exists (S2);
-  - `/sessions` still lists this workspace's session files, not dund's
-    sessions across workspaces;
-  - `/close` forgets the transcript but leaves dund's registry entry (and
-    a running engine); dund needs a `forget`;
-  - idle engines are never stopped (one process per session, forever);
-  - a dund from an older build keeps running after a rebuild — the
-    launcher's rebuild/reload has not moved into dund yet;
-  - `--serve` (xterm.js) still spawns a `dun --tui` per tab, each now a
-    dund client.
+- **S3 rest done:** `/close` → dund `forget` (`8b73de2`); idle engines
+  stop after 30 min with no subscriber and no turn/ask/job/agent
+  (`8b73de2`); the TUI keeps its draft and sent history in dund per user
+  (`1ff31c3`, live: draft back after quit + `--continue`); `/resume` lists
+  dund's sessions in every workspace and follows one into its workspace
+  (`25be82d`, live); dund re-execs into a new build once nothing is busy
+  (`5818e41`, live: same pid, sessions intact).
+- **S3 still open:** UI state beyond draft + history (scroll/read
+  position, agent scope, collapsed blocks) is not stored yet; the launcher
+  (`dun -d`) still exists for the TUI's own reload notice — dund could send
+  it instead; `--serve` (xterm.js) still spawns a TUI per tab.
 
 Slices, in order:
 - ✅ **S0 engine protocol (internal).** The `proto/` types and `Log`, with
@@ -276,7 +275,7 @@ Slices, in order:
   backoff), session registry, one `Log` per session; CLI-8/CLI-10
   (pidfile, signals, `dund service install`). Absorbs the launcher.
   Local transport: a unix socket, 0600.
-- ◐ **S3 TUI attaches** over the socket; `/sessions` lists all sessions.
+- ✅ **S3 TUI attaches** over the socket; `/sessions` lists all sessions.
 - **S4 remote API.** huma + gat at `/api/v1` (sessions: list, create,
   close; send a command; the subscribe-token mutation) behind hz; OIDC
   per caveat 10; live events per RT-1..3 over gat. Prerequisite: graphql-ws
@@ -285,10 +284,9 @@ Slices, in order:
 - **S5 RN client.** Expo + react-native-web; graphql-codegen types; one
   `graphql-ws` client (RT-3); PWA manifest + service worker.
 
-- **next:** S3 rest — TUI UI state in dund; `/sessions` from dund;
-  dund `forget` for /close; idle-engine stop; fold the launcher (rebuild
-  watch + reload) into dund. Then S4 (remote: huma + gat, OIDC; needs the
-  graphql-ws subscriptions in gat first).
+- **next:** S4 — dund's HTTP listener (huma + gat at `/api/v1`, `/healthz`)
+  on the hz port; graphql-ws subscriptions in gat (gwag repo) first; OIDC
+  per caveat 10; the standalone-localhost auth decision.
 - **risks:**
   - The TUI holds state today that may not be derivable from events (its
     restart counters, suggestions state, replay mode); S1 finds out.
