@@ -131,11 +131,35 @@ agents pane exists so a resident child is a choice rather than a leak.
 - **Upgrades** (`2e58f90`, `da585a1`): hello/upgrade between a TUI and a
   client-started dund of another build. dund reports when it is busy; the
   TUI asks once per build pair; doctor checks the build.
+- **Coordinated upgrade** (USER 2026-10-22; branch of this worktree, 4
+  commits): dund broadcasts `upgrade {state, version, waiting, deadline}`
+  to every connection; TUI status row / web banner name each wait and its
+  key (ctrl+c, /jobs kill); restart when idle, on `/upgrade now` / Restart
+  now, or after 10 min. A cutting restart (also SIGTERM) interrupts with a
+  reason (`Interrupt(reason)`), flags `resume` in the registry, and the next
+  dund wakes only those sessions with an `[automatic] …` user message
+  (killed jobs listed, a cut ask_user to be re-asked by the agent). A
+  transcript ending mid-turn < 30 min old at start = crash, resumed the
+  same way. TUI re-execs into its binary when that is dund's new build;
+  web reloads on a new build. Live-checked in tmux (scratch DUN_HOME, fake
+  model): watchSelf pending → ctrl+g → restart → TUI re-exec; /upgrade now →
+  resume message reached the model; job wait → /jobs kill; SIGTERM and
+  SIGKILL resumes.
 - **risks:**
   - Reuse needs equal engine args, so after /model a plain `dun` makes a
     new session.
   - A served web terminal also reuses idle sessions.
-- **next:** confirm on the corp Mac that a long session resumes.
+  - A pending ask is not replayed by the engine on resume; the resume
+    message asks the agent to re-ask (assumption: acceptable).
+  - The synthetic message is marked by its `[automatic] ` text prefix, not
+    a transcript tag.
+  - A message sent in the second between "restarting" and engine stop can
+    start a turn that is then cut without a resume flag.
+  - Two TUIs of different builds, each with its own file, can each ask dund
+    once per pair to move to theirs (bounded, not a loop).
+  - The web reload is untested in a browser.
+- **next:** confirm on the corp Mac that a long session resumes, and the
+  upgrade flow with the real dund there.
 
 ### ◐ 18. Built-in file tools (USER, 2026-10-22, branch `files-tools`)
 
