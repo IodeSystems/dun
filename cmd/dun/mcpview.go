@@ -56,7 +56,7 @@ func (v *mcpServersView) page() pageDoc {
 				" · session " + modeWord(st.ViaSession) + " → " + viaCell(st)
 		}
 		body += "\n" + v.details[i]
-		nodes = append(nodes, pageNode{head: serverRow(st, idW, viaW, v.details[i]), body: body, err: st.Err != ""})
+		nodes = append(nodes, pageNode{head: serverRow(st, idW, viaW, v.details[i]), body: body, err: st.Err != "", pre: true})
 	}
 	return pageDoc{title: "mcp servers · " + switchLegend, header: serverHeader(idW, viaW, hotKey), nodes: nodes}
 }

@@ -89,6 +89,9 @@ func TestMCPServersView_Keys(t *testing.T) {
 	if h := stripANSI(m.serversPaging().hint()); !strings.Contains(h, "mode at session") {
 		t.Errorf("hint names the mode scope: %q", h)
 	}
+	if v := stripANSI(m.pg.view(140, 10)); !strings.Contains(v, "playwright  stdio     ●        –        –     scripted (global)") {
+		t.Errorf("the rows keep their columns:\n%s", v)
+	}
 	sent := func(k string) string {
 		t.Helper()
 		buf.Reset()

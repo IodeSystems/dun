@@ -51,8 +51,8 @@ func fixture() (string, []llm.ToolDef, []mcpmgr.MCPTool) {
 		return d
 	}
 	defs := []llm.ToolDef{
-		def("search", "search the corpus"),
-		def("fetch", "fetch a page"),
+		def("raglit__search", "search the corpus"),
+		def("chrome__fetch", "fetch a page"),
 		def("exec", "run a shell command"),
 	}
 	mcp := []mcpmgr.MCPTool{
@@ -146,7 +146,7 @@ func TestOnePartThatCannotBeCountedDowngradesTheWholeTable(t *testing.T) {
 	// The tokenizer answers for everything except the chrome server's schemas.
 	c := &fakeCounter{failOn: func(_ string, tools []llm.ToolDef) bool {
 		for _, t := range tools {
-			if t.Function.Name == "fetch" {
+			if t.Function.Name == "chrome__fetch" {
 				return true
 			}
 		}

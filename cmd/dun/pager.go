@@ -33,6 +33,7 @@ type pageNode struct {
 	head string
 	body string
 	err  bool        // marks the head as a failure
+	pre  bool        // the head's spacing is kept (a table row), not collapsed
 	insp *inspSource // a call: "i" opens it in the inspector
 }
 
@@ -136,7 +137,11 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 		if p.open[i] {
 			mark = "▾ "
 		}
-		head, _ := fitPlain(oneLine(n.head), p.w-3)
+		h := oneLine(n.head)
+		if n.pre {
+			h = strings.ReplaceAll(n.head, "\n", " ")
+		}
+		head, _ := fitPlain(h, p.w-3)
 		st := stTool
 		if n.err {
 			st = stErr

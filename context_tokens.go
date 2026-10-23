@@ -96,7 +96,7 @@ func groupTools(defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) []toolGroup {
 	const builtin = "built-in tools"
 	server := make(map[string]string, len(mcpTools))
 	for _, t := range mcpTools {
-		server[t.Name] = t.ServerID
+		server[modelToolName(t)] = t.ServerID // the name the model sees: an added server's carries its id
 	}
 	byName := map[string]*toolGroup{}
 	var order []string
