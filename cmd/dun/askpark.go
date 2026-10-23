@@ -65,22 +65,19 @@ func (e *convoEntry) renderAsk(parked bool) {
 
 // parkAsk closes the picker and leaves the question open.
 func (m tuiModel) parkAsk() (tea.Model, tea.Cmd) {
-	m.asking, m.askParked = false, true
-	m.noting, m.customAnswer = false, false
 	if i := m.askEntry(); i >= 0 {
 		m.convo[i].renderAsk(true)
 	}
-	m.input.Reset()
-	m.input.placeholder = "ask dun to do something…"
-	m.input.Focus()
 	m.focus = focusInput
-	m.holdConvo()
+	m.dropAsk()
+	m.askParked = true
 	m.refresh()
 	return m, m.flash("question left open — select it in the conversation (tab) and press enter to answer")
 }
 
 // reopenAsk brings the parked question's picker back as it was left.
 func (m tuiModel) reopenAsk() (tea.Model, tea.Cmd) {
+	m.keepDraft()
 	m.asking, m.askParked = true, false
 	m.flashText = "" // the picker's own keys belong in the status line now
 	if i := m.askEntry(); i >= 0 {
@@ -129,4 +126,39 @@ func (m *tuiModel) holdConvo() {
 	m.vp.setHeight(h)
 	m.refresh()
 	m.vp.SetYOffset(yoff)
+}
+
+// dropAsk closes the question panel, however the question ended: answered,
+// parked, cut with the turn, or gone with the engine. The composer gets back
+// the draft it had when the question opened.
+func (m *tuiModel) dropAsk() {
+	if !m.asking {
+		return
+	}
+	m.asking, m.noting, m.customAnswer = false, false, false
+	m.restoreDraft()
+	m.input.placeholder = "ask dun to do something…"
+	m.input.Focus()
+	m.holdConvo()
+}
+
+// keepDraft sets the composer aside while a question uses it for a detail or
+// a custom answer. The whole input is kept: text, cursor, paste tokens.
+func (m *tuiModel) keepDraft() {
+	if !m.askDraftSet {
+		m.askDraft, m.askDraftSet = m.input, true
+	}
+}
+
+// restoreDraft puts the kept draft back in the composer (empty if none). The
+// size is the composer's current one: the terminal may have been resized.
+func (m *tuiModel) restoreDraft() {
+	if !m.askDraftSet {
+		m.input.Reset()
+		return
+	}
+	d := m.askDraft
+	d.width, d.maxLines, d.lay = m.input.width, m.input.maxLines, m.input.lay
+	m.input, m.askDraft, m.askDraftSet = d, multilineInput{}, false
+	m.input.clampScroll()
 }

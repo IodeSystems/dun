@@ -185,3 +185,84 @@ func TestAsk_ClosingDoesNotMoveTheConversation(t *testing.T) {
 		})
 	}
 }
+
+// draftVtui has "half a thought" in the composer, cursor after "half", when
+// a question arrives.
+func draftVtui(t *testing.T, ask map[string]any) *vtui {
+	t.Helper()
+	v := newVtui(80, 24)
+	v.m.proc = &dunProc{stdin: &echoWC{}}
+	v.event(map[string]any{"type": "ready", "tools": []any{"ask_user"}})
+	v.send("start")
+	v.m.busy = true
+	v.m = typeStr(v.m, "half a thought")
+	v.m.input.cursor = 4
+	ask["type"] = "ask"
+	v.event(ask)
+	if !v.m.asking {
+		t.Fatal("precondition: the picker should be open")
+	}
+	return v
+}
+
+// A draft in the composer when a question arrives comes back, with its cursor,
+// however the question ends.
+func TestAsk_DraftComesBack(t *testing.T) {
+	enter := func(v *vtui) { v.m = key(v.m, kEnter) }
+	for name, end := range map[string]func(v *vtui){
+		"option": enter,
+		"custom answer": func(v *vtui) {
+			for range 3 {
+				v.m = key(v.m, kDown)
+			}
+			v.m = typeStr(v.m, "mine")
+			enter(v)
+		},
+		"detail": func(v *vtui) {
+			v.m = key(v.m, kN)
+			v.m = typeStr(v.m, "because")
+			enter(v) // saves the detail
+			enter(v) // sends the option with it
+		},
+		"multi": func(v *vtui) {
+			v.m.askMulti, v.m.askChecked = true, make([]bool, len(v.m.askOptions))
+			enter(v) // check A
+			for range 3 {
+				v.m = key(v.m, kDown) // to the done row
+			}
+			enter(v)
+		},
+		"park":           func(v *vtui) { v.m = key(v.m, kEsc) },
+		"interrupted":    func(v *vtui) { v.event(map[string]any{"type": "done", "reason": "interrupted"}) },
+		"turn ended":     func(v *vtui) { v.event(map[string]any{"type": "done"}) },
+		"engine stopped": func(v *vtui) { v.event(map[string]any{"type": "engine", "state": "stopped"}) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := draftVtui(t, map[string]any{"question": "Which?", "options": []any{"A", "B"}})
+			end(v)
+			if v.m.asking {
+				t.Fatal("the question is still open")
+			}
+			if got := v.m.input.Value(); got != "half a thought" || v.m.input.cursor != 4 {
+				t.Errorf("composer = %q cursor %d, want the draft back with cursor 4", got, v.m.input.cursor)
+			}
+		})
+	}
+	// Parked, the composer is the draft again; what is typed then is the
+	// draft the next close gives back.
+	v := draftVtui(t, map[string]any{"question": "Which?", "options": []any{"A", "B"}})
+	v.m = key(v.m, kEsc)
+	v.m = typeStr(v.m, " more")
+	v.m = key(v.m, kTab)
+	for v.m.sel > 0 && !v.m.convo[v.m.sel].askOpen {
+		v.m = key(v.m, kUp)
+	}
+	v.m = key(v.m, kEnter) // reopen
+	if !v.m.asking {
+		t.Fatal("did not reopen")
+	}
+	v.m = key(v.m, kEnter)
+	if got := v.m.input.Value(); got != "half more a thought" {
+		t.Errorf("after reopen and answer: composer = %q", got)
+	}
+}

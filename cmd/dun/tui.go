@@ -549,6 +549,8 @@ type tuiModel struct {
 	askChecked    []bool                // per-option checked state (multi mode; len == len(askOptions))
 	noting        bool                  // capturing a detail for the selected option
 	customAnswer  bool                  // capturing a free-text / chat answer
+	askDraft      multilineInput        // the composer as it was when the question took the keys
+	askDraftSet   bool                  // askDraft holds a draft to give back (restoreDraft)
 	convoHold     int                   // the convo pane keeps at least this many rows (holdConvo)
 	convoHoldW    int                   // the pane width convoHold was measured at
 	md            *glamour.TermRenderer // markdown renderer for assistant replies
@@ -1870,14 +1872,10 @@ func (m tuiModel) sendAnswer(v string) tuiModel {
 // clearAsk returns to the input pane with no question open. The answer is
 // rendered from the engine's `answered` event.
 func (m tuiModel) clearAsk() tuiModel {
-	m.asking, m.noting, m.customAnswer = false, false, false
+	m.focus = focusInput
+	m.dropAsk()
 	m.askOptions, m.askSel, m.askNote = nil, 0, ""
 	m.askMulti, m.askChecked = false, nil
-	m.input.Reset()
-	m.input.placeholder = "ask dun to do something…"
-	m.input.Focus()
-	m.focus = focusInput
-	m.holdConvo()
 	return m
 }
 
@@ -2194,6 +2192,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.endThinking()
 		m.flushCur()
 		m.paging = false // the question needs the screen
+		if !m.asking {
+			m.keepDraft() // the composer is the user's draft; the question borrows it
+		}
 		m.asking, m.noting, m.customAnswer = true, false, false
 		m.askSel, m.askNote = 0, ""
 		m.input.Blur()
@@ -2337,12 +2338,12 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.endThinking()
 		m.endRun()
 		m.flushCur()
+		// A question the turn asked ends with it, however the turn ended.
+		if m.asking {
+			m = m.clearAsk()
+		}
+		m.settleAsk()
 		if cut {
-			// A question the cut turn asked is closed with it.
-			if m.asking {
-				m = m.clearAsk()
-			}
-			m.settleAsk()
 			m.append(stDim.Render(interruptedRow))
 			// The jobs the cut turn started keep running: say which, and how
 			// to stop them.
@@ -2418,8 +2419,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.pendingTool = -1
 		m.activeTool = ""
 		m.sel = -1
-		m.convoHold = 0
-		m.busy, m.asking = false, false
+		m.busy = false
+		m.dropAsk()
+		m.convoHold = 0                      // nothing left on screen to hold in place
 		m.suggestions, m.suggestSel = nil, 0 // they were about the conversation just cleared
 		m.settleAsk()
 		m.append(stDim.Render("session cleared — fresh start"))
@@ -2446,19 +2448,22 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				m.starting, m.startingStart = true, time.Now()
 			}
 		case "restarting":
-			m.busy, m.asking = false, false
+			m.busy = false
+			m.dropAsk()
 			m.settleAsk()
 			m.busyStart = time.Time{}
 			m.restarts = int(evNum(ev["restarts"]))
 			m.skipHistory = true // it will replay what is already on screen
 			m.append(stErr.Render(str(ev["reason"]) + " — restarting it; the session is kept"))
 		case "gave_up":
-			m.busy, m.asking, m.starting = false, false, false
+			m.busy, m.starting = false, false
+			m.dropAsk()
 			m.settleAsk()
 			m.fatalErr = str(ev["reason"]) + " — gave up restarting it"
 			m.append(stErr.Render(m.fatalErr + "\n/reconnect to try again · your conversation is saved"))
 		case "stopped":
-			m.busy, m.asking = false, false
+			m.busy = false
+			m.dropAsk()
 			m.settleAsk()
 		}
 		m.refresh()
@@ -4434,7 +4439,8 @@ const (
 // the conversation is on disk, so a fresh engine can reattach to the same
 // session id and carry on with the scrollback still on screen.
 func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
-	m.busy, m.starting, m.asking = false, false, false
+	m.busy, m.starting = false, false
+	m.dropAsk()
 	m.askParked = false
 	m.busyStart = time.Time{}
 	// A reply cut mid-stream ends here: the next one is its own block, not

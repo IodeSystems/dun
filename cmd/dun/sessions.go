@@ -156,7 +156,9 @@ func (m *tuiModel) leaveSession() {
 	m.convo = nil
 	m.cur, m.pendingTool = "", -1
 	m.sel = -1
-	m.busy, m.asking, m.starting = false, false, true
+	m.busy, m.starting = false, true
+	m.dropAsk()
+	m.convoHold = 0 // the conversation is about to be replaced
 	m.startingStart = time.Now()
 	m.fatalErr, m.exitAnnounced = "", false
 	m.restarts, m.restartStart = 0, time.Now()

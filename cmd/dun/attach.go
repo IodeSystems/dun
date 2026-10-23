@@ -415,8 +415,12 @@ func (m tuiModel) saveUI() {
 	if len(hist) > uiHistoryMax {
 		hist = hist[len(hist)-uiHistoryMax:]
 	}
+	draft := m.input.Value()
+	if m.askDraftSet { // the composer holds an answer being typed, not the draft
+		draft = m.askDraft.Value()
+	}
 	_ = json.NewEncoder(m.proc.stdin).Encode(map[string]any{"type": "ui_put",
-		"state": map[string]any{"history": hist, "draft": m.input.Value()}})
+		"state": map[string]any{"history": hist, "draft": draft}})
 }
 
 // applyUI takes in UI state another of this user's clients saved: the
