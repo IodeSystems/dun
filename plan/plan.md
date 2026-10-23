@@ -138,8 +138,15 @@ watcher keeps it fresh, and dun only reads it.
   `/raglit attach|detach <index> [--project|--global]` adds it to the
   model's search calls and the proactive search, with the same three
   scopes as /mcp.
-- **next:** wait for raglit-dd's reply (the /mcp scopes are merged); then
-  build the dun side on its scope storage.
+- **raglit-dd's plan (2026-10-23):** order C+A, then B, then D. Already landed:
+  `serve`/`search --shared a,b`. C stays on flag.FlagSet (not cobra); root
+  `--help` is one screen; `raglit index --list`, `raglit index <name>
+  status|search|forget|pause|resume|unwatch|purge`; every current command
+  keeps its name. A: `raglit watch <dir> --index NAME`. `--public` and
+  `public|private` are deferred (they need OIDC/ACL). B: a qualified
+  `proj:idx` passes for reads only. D: MCP ingest `paths` + a `forget` tool.
+- **next:** build `/raglit watch|attach` once A and B land; until then
+  `--shared` covers attaching another project's index.
 - **risks:** dun relies on raglit's CLI (serve/ingest/forget/search with
   --project/--index); C could break it. The list was sent to raglit-dd.
 - **blocking decisions:** none.
