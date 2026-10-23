@@ -110,6 +110,32 @@ full detail archived in `done.md`.
 
 ## Active work
 
+### ◻ 21. Extensions: raglit and poly-lsp as bundled manifests (USER, 2026-10-23)
+
+USER approved: an extension is an MCP server plus a manifest. No
+dun-specific protocol, and no CLI calls.
+- **Manifest:** `server` (the same spec as /mcp add, with the three scopes
+  and the mode), `slash` (`/raglit <sub>` → a tool call), `roles` (lookups
+  dun asks for: `search`, `index`), `hooks` (events dun sends: `turn.before`
+  → search as aside, `skills.changed`/`rules.changed`/`mcp.docs`/
+  `memory.save` → ingest/forget, `workspace.open`), `host_hooks` (the
+  extension calls dun: `POLY_LSP_HOOK` → agents_md_guard), `env`, `skills`.
+- **Where:** bundled in the binary (also written out as examples),
+  `~/.dun/extensions/<id>/`, `.dun/extensions/<id>/`.
+- **Must keep existing behaviour:** before converting, pin tests for
+  surfacing, memory, the skills/rules/MCP-docs indexing and the AGENTS.md
+  guard. They must pass unchanged through the hook path. Then repeat the
+  live checks (skill cue, /rules index, the guard).
+- **next:** after the cleanup and rename branch (/poly-lsp, /raglit)
+  merges.
+- **risks:** raglit's MCP ingest takes one URL; dun sends batches by CLI
+  today. A `paths` list and a forget tool were asked of raglit-dd
+  (2026-10-23). Until then, index hooks stay on the CLI.
+- **blocking decisions:** none. Shell-command hooks (Claude Code style
+  tool.before/after) are not in v1 (recommended; the USER did not object).
+- **optional extensions:** shell-command hooks; replaceable back ends (a
+  second search implementation); git-URL install.
+
 ### ◻ 20. Shared raglit indexes: watch a directory, attach it to a session (USER, 2026-10-22)
 
 USER's goal: index a directory once, and let many sessions use it. raglit's
@@ -134,12 +160,7 @@ watcher keeps it fresh, and dun only reads it.
 - **risks:** dun relies on raglit's CLI (serve/ingest/forget/search with
   --project/--index); C could break it. The list was sent to raglit-dd.
 - **blocking decisions:** none.
-- **optional extensions (USER raised, not scheduled):** rename /lsp →
-  /poly-lsp and /rag → /raglit, and the server ids code → poly-lsp and
-  docs → raglit, keeping the old ids readable in config; extensions (a
-  manifest with server, command, roles, skills) with poly-lsp and raglit
-  bundled. Open questions: packaging only or replaceable back ends, and
-  install sources.
+- **optional extensions:** none.
 
 The pattern that drove the last three items: the harness could not say what was
 actually happening — a ship that reported success while leaving the work local, a
