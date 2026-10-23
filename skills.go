@@ -396,6 +396,7 @@ func (h *Harness) syncSkillIndex(sink *mcpDocsSink) {
 	h.skillIdxMu.Lock()
 	defer h.skillIdxMu.Unlock()
 	cur := map[string]string{}
+	docs := map[string]Skill{}
 	for _, s := range h.Skills() {
 		if s.Dir == "" || s.UserOnly {
 			continue
@@ -403,8 +404,10 @@ func (h *Harness) syncSkillIndex(sink *mcpDocsSink) {
 		p := filepath.Join(s.Dir, "SKILL.md")
 		if st, err := os.Stat(p); err == nil {
 			cur[p] = fmt.Sprintf("%d %d", st.Size(), st.ModTime().UnixNano())
+			docs[p] = s
 		}
 	}
+	h.skillDocs = docs
 	var changed, gone []string
 	for p, sig := range cur {
 		if h.skillIdx[p] != sig {
@@ -439,6 +442,15 @@ func (h *Harness) syncSkillIndex(sink *mcpDocsSink) {
 			h.skillIdx[p] = cur[p]
 		}
 	}
+}
+
+// skillForDoc names the skill a surfaced document is the SKILL.md of, so
+// the surfacing can point at the skill instead of quoting a fragment of it.
+func (h *Harness) skillForDoc(docID string) (Skill, bool) {
+	h.skillIdxMu.Lock()
+	defer h.skillIdxMu.Unlock()
+	s, ok := h.skillDocs[docID]
+	return s, ok
 }
 
 // PromptInfo is one MCP prompt, for a UI to offer as a slash command.

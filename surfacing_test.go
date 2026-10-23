@@ -22,7 +22,7 @@ func TestDocsPreparer_RecordsSurfacing(t *testing.T) {
 	var notes []DocsNote
 	finder := fixedFinder{{DocID: "d1", Title: "Why X was dropped", Score: 1, Line: "the measurement"}}
 	estimate := func(s string) int { return len(s) / 4 }
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, stats, estimate, nil, nil,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, stats, estimate, nil, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "why was X dropped?", CreatedAt: 1})
@@ -93,7 +93,7 @@ func TestDocsPreparer_OneSlotPerDocument(t *testing.T) {
 		{DocID: "a", Title: "a (text)", Score: 8.9}, // would fail the margin if it counted
 		{DocID: "b", Title: "b", Score: 3},
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, nil,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
@@ -114,7 +114,7 @@ func TestDocsPreparer_MarginOverRunnerUp(t *testing.T) {
 	var notes []DocsNote
 	var finder fixedFinder = fixedFinder{{DocID: "a", Score: 4}, {DocID: "b", Score: 3}} // 4 < 1.5×3
 	f := &finder
-	prep := docsPreparer(store, finderFunc(func() []agent.DocHit { return *f }), agent.FinderOpts{}, stats, nil, nil, nil,
+	prep := docsPreparer(store, finderFunc(func() []agent.DocHit { return *f }), agent.FinderOpts{}, stats, nil, nil, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q1", CreatedAt: 1})
 	prep.PrepareNotifications(ctx, "s")
@@ -147,7 +147,7 @@ func TestDocsPreparer_InlinesShortBodies(t *testing.T) {
 		store, _ := openSessionStore("")
 		ctx := context.Background()
 		var notes []DocsNote
-		prep := docsPreparer(store, fixedFinder{{DocID: "n", Title: "n", Score: 5, Line: "q?"}}, agent.FinderOpts{}, nil, nil, tc.fetch, nil,
+		prep := docsPreparer(store, fixedFinder{{DocID: "n", Title: "n", Score: 5, Line: "q?"}}, agent.FinderOpts{}, nil, nil, tc.fetch, nil, nil,
 			func(n DocsNote) { notes = append(notes, n) })
 		store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
 		prep.PrepareNotifications(ctx, "s")
@@ -175,7 +175,7 @@ func TestDocsPreparer_MarginPerGroup(t *testing.T) {
 		}
 		return ""
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, group,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, group, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "should I stash?", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
@@ -187,5 +187,48 @@ func TestDocsPreparer_MarginPerGroup(t *testing.T) {
 	es := store.docsEntries()
 	if len(es) != 1 || !strings.Contains(es[0], "earlier session") || !strings.Contains(es[0], "stash") {
 		t.Errorf("the note must surface, labelled as a saved note: %q", es)
+	}
+}
+
+// A surfaced SKILL.md names the skill and how to load it, instead of
+// quoting a fragment the model would act on without loading the skill; and
+// skills rank in their own group, so a document does not crowd one out.
+func TestDocsPreparer_SkillHitPointsAtTheSkill(t *testing.T) {
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	var notes []DocsNote
+	finder := fixedFinder{
+		{DocID: "/repo/deploy.go", Title: "deploy.go", Score: 9, Line: "func deploy"},
+		{DocID: "/s/release/SKILL.md", Title: "SKILL.md", Score: 1, Line: "1. tag the build"},
+	}
+	skill := func(id string) (Skill, bool) {
+		if id == "/s/release/SKILL.md" {
+			return Skill{Name: "release", Description: "cut a release"}, true
+		}
+		return Skill{}, false
+	}
+	fetched := false
+	fetch := func(_ context.Context, id string, _ int) (string, bool) {
+		fetched = fetched || id == "/s/release/SKILL.md"
+		return "", false
+	}
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, fetch, docGroup(nil, skill), skill,
+		func(n DocsNote) { notes = append(notes, n) })
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "cut a release", CreatedAt: 1})
+	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].Surfaced != 2 {
+		t.Fatalf("want the document AND the skill surfaced, got %+v", notes)
+	}
+	es := store.docsEntries()
+	if len(es) != 1 || !strings.Contains(es[0], `call skill name="release"`) || strings.Contains(es[0], "tag the build") {
+		t.Errorf("the skill must surface as a load cue, not a fragment: %q", es)
+	}
+	if fetched {
+		t.Error("a skill's body must not be inlined")
+	}
+	if notes[0].Docs[1].Title != "skill release" {
+		t.Errorf("the UI row should name the skill: %+v", notes[0].Docs)
 	}
 }

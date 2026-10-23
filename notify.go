@@ -114,8 +114,9 @@ type DocsNote struct {
 // onDocs with the found/surfaced counts + surfaced docs. Every pass, hit or
 // not, is recorded in stats (nil-safe); estimate sizes the appended entry;
 // fetch (nil-safe) reads a short document whole so it can be inlined; group
-// (nil-safe: one group) names the corpus a hit came from.
-func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, group func(docID string) string, onDocs func(DocsNote)) agent.NotificationPreparer {
+// (nil-safe: one group) names the corpus a hit came from; skill (nil-safe)
+// names the skill a hit is the SKILL.md of.
+func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, group func(docID string) string, skill func(docID string) (Skill, bool), onDocs func(DocsNote)) agent.NotificationPreparer {
 	kinds := opts.Kinds
 	if len(kinds) == 0 {
 		kinds = []agent.EntryKind{agent.KindUser, agent.KindAssistant}
@@ -237,6 +238,17 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 				if i > 0 {
 					b.WriteString("\n\n")
 				}
+				seenIDs[h.DocID] = true
+				if sk, ok := lookupSkill(skill, h.DocID); ok {
+					// A skill, not a document: name it and say how to load it.
+					// A quoted fragment of a SKILL.md reads as advice, and the
+					// model acts on the fragment without loading the skill or
+					// the files it names.
+					infos = append(infos, DocHitInfo{Title: "skill " + sk.Name, DocID: h.DocID, Line: sk.Description, Score: h.Score})
+					fmt.Fprintf(&b, "A skill matches what you are working on (%d candidate skill(s); this one clearly ranked first): %q — %s\n", w.n, sk.Name, sk.Description)
+					fmt.Fprintf(&b, "If it applies, call skill name=%q and follow it before you act.", sk.Name)
+					continue
+				}
 				body, inline := "", false
 				if fetch != nil {
 					body, inline = fetch(fctx, h.DocID, inlineMaxChars)
@@ -264,7 +276,6 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					fmt.Fprintf(&b, "- %q (id=%s, score=%.2f) — %s\n", h.Title, h.DocID, h.Score, h.Line)
 					b.WriteString("Call the search tool with an id to read a document if it helps.")
 				}
-				seenIDs[h.DocID] = true
 			}
 			content := b.String()
 			if err := store.Append(ctx, sessionID, agent.Entry{
@@ -297,6 +308,16 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 
 // groupMemory is the group of hits that are memory notes.
 const groupMemory = "memory"
+
+// groupSkill is the group of hits that are skills' SKILL.md files.
+const groupSkill = "skill"
+
+func lookupSkill(skill func(string) (Skill, bool), docID string) (Skill, bool) {
+	if skill == nil {
+		return Skill{}, false
+	}
+	return skill(docID)
+}
 
 // groupHits splits score-sorted hits by group, keeping each group sorted and
 // the groups in order of first appearance. A nil group is one group.

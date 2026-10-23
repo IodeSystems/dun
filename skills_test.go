@@ -153,7 +153,7 @@ func checkIndex(index string) error {
 
 func TestDocGroup_MCPDocsAreTheirOwnGroup(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	g := docGroup(nil)
+	g := docGroup(nil, nil)
 	if g(filepath.Join(mcpDocsDir("corp"), "a.md")) != groupMCPDocs || g("/ws/README.md") != "" {
 		t.Error("grouping")
 	}

@@ -560,7 +560,7 @@ func (h *Harness) rebuildTools() {
 		// a margin over the runner-up instead (see docsPreparer): one
 		// document per pass, inlined when short.
 		h.Session.Preparer = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
-			docsBodyFetcher(h.mgr, docsServerID(tools)), docGroup(h.memoryStore()), cfg.OnDocs)
+			docsBodyFetcher(h.mgr, docsServerID(tools)), docGroup(h.memoryStore(), h.skillForDoc), h.skillForDoc, cfg.OnDocs)
 	}
 }
 

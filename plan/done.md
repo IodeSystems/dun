@@ -914,3 +914,17 @@ says "(just type)" while it is highlighted and not yet capturing.
 - **Known:** in the palette, enter on "/skill rev" runs the highlighted
   choice, so the match list is reached with text after the query
   (`/skill rev fix it`) or outside the palette.
+
+## ✅ A surfaced skill is a load cue, not a fragment (USER, 2026-10-22)
+
+- With /rag on, a hit on a skill's SKILL.md (the `skills` index, d9eb08e)
+  ranks in its own group and is written as "A skill matches … call skill
+  name=X and follow it before you act", never inlined. The UI row reads
+  "skill X".
+- **Live:** scratch HOME + DUN_HOME, real model, 101 skills, the target
+  sorted last (past the 80-skill list cap). "sign and verify the release
+  tarball with minisign": 1 surfaced (~60 tok); the model's first call was
+  `skill name=zz-tarball-signing`.
+- **Known:** the first index of many skills is slow (~77/min on the shared
+  raglit daemon); a skill not yet indexed cannot surface. Test projects go
+  into whatever raglit daemon is running, the user's included.
