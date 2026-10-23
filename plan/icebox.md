@@ -22,6 +22,24 @@ user, and the rate limit across the bridge.
 **Resume condition:** USER asks for it (capacity: yours), and cc-socks
 offers a list/deliver call to build on (systems).
 
+### `img_read(path, question?)` — the model looks at an image file (item 30 follow-up)
+Item 30 gets images in only from the user. A tool would let the model read
+a screenshot a test wrote, a rendered diagram, a file in the repo: the same
+`prepareImage` scaling, the image on a user-kind entry after the tool result
+(a tool result cannot carry one), or for a model without vision the
+`vision_model` description as the result. Open: where the image entry sits
+so the call/result pairing stays valid.
+**Resume condition:** USER asks for it (capacity: yours).
+
+### Mobile image upload (item 30 follow-up)
+The phone sends `sendMessage{content}` over GraphQL (`mobile/src/api/ops.ts`);
+an image there has no path on the engine's machine, so it needs an upload
+(bytes to dund, written where the engine reads them — `$DUN_HOME/images/`
+as the TUI's clipboard does), an `images` field on the mutation, a schema
+regen, and a picker in the app. Not small, so not done with item 30. The
+engine side (`proto.User.Images`, `image_refused`) is already there.
+**Resume condition:** USER asks for it (capacity: yours).
+
 ### The real dun index holds Claude Code worktrees (item 26 finding)
 `dun__dun-main` on the 7420 daemon (2026-10-23): 2582 documents, 2174 under
 `.claude/worktrees/` (with `mobile/node_modules`). dun's own ingest skips

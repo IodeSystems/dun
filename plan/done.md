@@ -2070,3 +2070,82 @@ the conversation rows did not.
   report` while it is frozen — expected vs actual rows, plus the region
   state in the capture (`live`, `held`, top/bot), say which side diverged:
   rows frozen with `live:false` = the renderer still ignoring them.
+
+## ✅ 30. Images in the composer; vision probe; vision→text fallback (USER, 2026-10-23)
+
+USER scope (approved 2026-10-23): images into the TUI composer, sent as
+content parts, kept out of the session log, and a per-model vision probe
+with a vision→text fallback.
+
+- **Composer** (`cmd/dun/imageinput.go`, `multiline_input.go`): an image is
+  a token like a paste token (`images` side table beside `pastes`, same
+  private-use runes), drawn and valued as its label `[image N: name W×H]`.
+  In: ctrl+v (was unbound; a `tea.Cmd` runs `wl-paste --type image/png`,
+  then `xclip … -t image/png -o`; PNG magic checked; no image → nothing, as
+  before) — the bytes go to `$DUN_HOME/images/<sha256>.png`; or a paste
+  (bracketed, or a multi-rune KeyRunes) whose whole text is an existing
+  png/jpg/jpeg/gif/webp (quotes, `file://`, `~/`, `\ ` escapes) that
+  decodes — else it is text. Labels are numbered per TUI process and
+  remembered (`imageRegistry`, a pointer shared by the model's copies), so
+  `SetValue` turns a known label back into its token: history recall, the
+  ask draft (`keepDraft` copies the struct), a refused draft. ctrl+o leaves
+  an image alone.
+- **Wire** (`proto`): `User.Images []Image{path, label}`; event
+  `image_refused{message, content, images}` then `done`. dund passes it
+  through (it re-encodes `proto.User`).
+- **Engine** (`cmd/dun/main.go`, `images.go`): `users` carries `userMsg`
+  (text + images). A message with images during a turn is HELD
+  (`inputStream.hold`, a notification says so) and starts the next turn —
+  never lifted into a tool result. Not rephrased (a rewrite moves labels).
+  `turn` refuses up front when the record says no vision and no
+  `vision_model` is set.
+- **Harness** (`images.go`): `AskImages` → `imageParts`: text up to and
+  including each label, then the image (`llm.ImageData`); `prepareImage`
+  scales to ≤1568 px long side (x/image CatmullRom, never up), PNG/JPEG
+  that need no scaling are sent as their own bytes, others re-encode PNG,
+  a PNG > 1 MiB after that → JPEG q85 on white. Probe: the first image to
+  a model (key `VisionKey(url, model)`) records `vision=true` on a turn that
+  went through, `vision=false` on a refusal (`refusesImages`: 4xx not 429
+  mentioning image/vision/multimodal/content type; 5xx with llama.cpp's
+  "image input is not supported"/"mmproj"), in `$DUN_HOME/vision.json`;
+  later sends use the record. No vision → each image described by the
+  `vision_model` side call (kind "vision"; prompt: describe for an
+  assistant who cannot see it, user text as context), label becomes
+  `[image N: name W×H — description: …]` and the entry is that text (so a
+  resume does not describe again). Refused after the probe → the entry is
+  dropped and `*ImageRefusedError` says how to set `vision_model`.
+  `runTurn` does not turn-retry a refusal (a 5xx one would be).
+- **Log** (`store.go`): `flushLocked` writes each data-URI image part to
+  the session folder's `blobs/<sha256>.<ext>` and keeps `\x00dun-image:` +
+  name; load rebuilds the data URI; a missing file → a text part
+  "[dun: image missing from the session — …]".
+- **Config** (`cmd/dun/config.go`): `vision_model` (a model id, on the
+  active provider) and optional `vision_provider` (a logged-in provider's
+  name) in `$DUN_HOME/config.json`.
+- **Tests:** `images_test.go` (downscale + no upscale + JPEG for a noisy
+  PNG, part order, no base64 in the log + resume rebuilds + missing blob,
+  `refusesImages` table, probe recorded true, refusal → described text sent
+  and recorded false and the next image not re-probed, no describer →
+  refused and not in the session), `cmd/dun/imageinput_test.go` (path
+  paste forms → token, non-images stay text, token vs paste behaviour and
+  recall, clipboard through an injected `clipboardRun`, ctrl+v → cmd,
+  stdin images in + `image_refused`/`done` out strictly, TUI refusal keeps
+  the draft with its token + notice), `proto_compat_test` (send with
+  images). `make test` passes.
+- **Assumptions:** 1568 px and the 1 MiB PNG→JPEG cut (picked, not
+  measured); `vision_model` is on the active provider unless
+  `vision_provider` names one; the record key is provider URL + model id
+  (no provider name); clipboard images stay in `$DUN_HOME/images/` (never
+  cleaned); a mid-turn image message waits for the turn instead of being
+  lifted; an image in a sub-agent tell is refused; a 4xx that mentions an
+  image for another reason marks the model no-vision (delete its
+  `vision.json` entry to probe again); agentkit's client still retries a
+  llama.cpp 5xx refusal itself before dun sees it; the probe-refusal path
+  has already echoed the message to clients (the up-front refusal has not).
+- **Risks:** images are not in agentkit's context estimate
+  (`estimateTokens` counts `Content`), so the prompt meter puts their
+  tokens in overhead; every later request re-sends an image while its
+  entry is in the window.
+- **Not verified:** a real clipboard (Wayland/X11), a real vision provider,
+  a real refusal body from a provider.
+- Out of scope → icebox: `img_read` tool; mobile image upload.

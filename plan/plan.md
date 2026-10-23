@@ -174,6 +174,11 @@ reply are dund's view at delivery)
 done.md (open: the clear/sync race is reproduced by a worst-order harness,
 not caught on a real terminal)
 
+### ✅ 30. Images in the composer; vision probe; vision→text fallback — done
+2026-10-23, see done.md (open: never run against a real clipboard or a real
+vision / non-vision provider; image tokens are not counted in the context
+estimate)
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has

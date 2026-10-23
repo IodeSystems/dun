@@ -397,6 +397,29 @@ dim `✉ dun msg from …` line. Only your own sessions on the same dund; a sess
 cannot message itself; at most 6 messages a minute from one session to
 another. A sub-agent has neither tool, and a dun run without dund has neither.
 
+**Images:** in the TUI, ctrl+v with an image on the clipboard (`wl-paste`,
+else `xclip`) or a paste that is the path of an image file (png, jpg, gif,
+webp; quoted, `file://` or `~/` forms too — what a terminal pastes for a
+dropped file) puts the image in the composer as one token,
+`[image 1: shot.png 1920×1080]`. The label is the message's text; the image is
+sent after it, scaled to at most 1568 px on its long side (PNG stays PNG, JPEG
+stays JPEG; a PNG still over 1 MB is sent as JPEG q85). The session log keeps
+the image as a file in the session folder's `blobs/` by content hash, never as
+base64. The first image sent to a model probes it: a refusal records that
+model (by provider URL and id) as having no vision in `~/.dun/vision.json`, a
+turn that goes through records that it has. For a model without vision, a
+vision model describes each image and the description goes in its place; set
+one in `~/.dun/config.json`:
+
+```jsonc
+"vision_model": "qwen2.5-vl-7b-instruct",  // a model id that reads images, on the active provider
+"vision_provider": "openrouter"             // optional: a model on another logged-in provider
+```
+
+With none set, a message with images to such a model is not sent: the TUI says
+why and puts the message back in the composer. A message with images sent
+during a turn waits for the turn to end (an image cannot ride a tool result).
+
 ## Isolation
 
 dun works in an isolated **git worktree** (a fresh `dun/<ts>` branch off HEAD),
