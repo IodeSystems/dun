@@ -27,11 +27,16 @@ export type Follow = {
 /** Where a follower is in a session's events: what it resumes from. */
 export type Cursor = { after: string; epoch: string };
 
+/** A string or number as a string; anything else is fallback. */
+function scalar(v: unknown, fallback: string): string {
+  return typeof v === 'string' || typeof v === 'number' ? String(v) : fallback;
+}
+
 /** The cursor after ev: a snapshot's after, else the event's seq. */
 export function advance(c: Cursor, ev: Record<string, unknown>): Cursor {
   const epoch = typeof ev.epoch === 'string' ? ev.epoch : c.epoch;
-  if (ev.type === 'snapshot' && ev.after !== undefined) return { after: String(ev.after), epoch };
-  if (ev.seq !== undefined) return { after: String(ev.seq), epoch };
+  if (ev.type === 'snapshot' && ev.after !== undefined) return { after: scalar(ev.after, ''), epoch };
+  if (ev.seq !== undefined) return { after: scalar(ev.seq, ''), epoch };
   return c;
 }
 
@@ -45,7 +50,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
   const retry = (problem: string) => {
     if (stopped) return;
     f.onConn(problem);
-    setTimeout(start, backoff);
+    setTimeout(() => void start(), backoff);
     backoff = Math.min(backoff * 2, 15_000);
   };
 
@@ -73,7 +78,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
           // A stream dund could not open (no such session) is an unsequenced error
           // event and then the end of the stream: retry with backoff.
           if (ev.type === 'error' && ev.seq === undefined) {
-            refused = String(ev.error ?? 'refused');
+            refused = scalar(ev.error, 'refused');
             return;
           }
           backoff = 1000;
@@ -81,9 +86,9 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
           at = advance(at, ev);
           f.onEvent(ev);
         },
-        error: (e) => {
+        error: (e: unknown) => {
           unsubscribe = null;
-          const msg = e instanceof Error ? e.message : Array.isArray(e) ? (e[0]?.message ?? 'error') : 'connection closed';
+          const msg = e instanceof Error ? e.message : Array.isArray(e) ? ((e[0] as { message?: string } | undefined)?.message ?? 'error') : 'connection closed';
           retry(`connection lost — retrying (${msg})`);
         },
         // The service ended the stream (it fell behind, or restarted):
@@ -91,7 +96,7 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
         complete: () => {
           unsubscribe = null;
           if (refused) return retry(`connection lost — retrying (${refused})`);
-          if (!stopped) setTimeout(start, 0);
+          if (!stopped) setTimeout(() => void start(), 0);
         },
       },
     );

@@ -94,10 +94,10 @@ export default function SignIn() {
           </View>
         ) : null}
         <Muted>Token (from `dun dund token`)</Muted>
-        <Field value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="dun_…" onSubmitEditing={submit} />
+        <Field value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="dun_…" onSubmitEditing={() => void submit()} />
         {err ? <ErrorText>{err}</ErrorText> : null}
         <View>
-          <Button title={busy ? 'Checking…' : 'Sign in with the token'} primary={!sso} onPress={submit} disabled={busy || !token.trim()} />
+          <Button title={busy ? 'Checking…' : 'Sign in with the token'} primary={!sso} onPress={() => void submit()} disabled={busy || !token.trim()} />
         </View>
       </ScrollView>
     </Screen>

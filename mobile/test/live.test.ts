@@ -29,7 +29,7 @@ test('a resubscribe after a restart names the epoch of its seq', async () => {
     },
   } as unknown as Client;
   const gql = {
-    request: async () => ({ dund: { subscribeToken: { principal: 'p', timestamp: '1', hmac: 'h' } } }),
+    request: () => Promise.resolve({ dund: { subscribeToken: { principal: 'p', timestamp: '1', hmac: 'h' } } }),
   } as unknown as GraphQLClient;
   const seen: Record<string, unknown>[] = [];
   const stop = followSession(gql, live, 's1', { onEvent: (e) => seen.push(e), onConn: () => {}, onUnauthorized: () => {} });

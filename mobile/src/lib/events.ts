@@ -77,7 +77,7 @@ type WithoutKey<T> = T extends unknown ? Omit<T, 'key'> : never;
 type NewItem = WithoutKey<Item>;
 
 function push(v: View, item: NewItem): View {
-  return { ...v, n: v.n + 1, items: [...v.items, { ...item, key: String(v.n) } as Item] };
+  return { ...v, n: v.n + 1, items: [...v.items, { ...item, key: String(v.n) }] };
 }
 
 /** A user message; dund's automatic resume after a restart is a note, not the person's. */
@@ -185,7 +185,7 @@ export function apply(v: View, ev: Ev): View {
     case 'catalog':
       return { ...v, skills: ((ev.skills as Skill[]) ?? []).map((k) => ({ name: k.name, description: k.description })) };
     case 'control': {
-      let w = ev.id === 'close' && /^closed/.test(str(ev.message)) ? { ...v, closed: true } : v;
+      let w = ev.id === 'close' && str(ev.message).startsWith('closed') ? { ...v, closed: true } : v;
       // No turn to interrupt: drop the "interrupting…".
       if (ev.id === 'interrupt' && w.status === 'interrupting…') w = { ...w, status: '' };
       return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;

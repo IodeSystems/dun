@@ -6,8 +6,10 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 //   DUN_VERSION_NAME -> version (Android versionName), e.g. "0.1.0+ab12cd3"
 // Unset (dev, expo start) leaves app.json as it is.
 export default ({ config }: ConfigContext): ExpoConfig => {
-  const code = process.env.DUN_VERSION_CODE;
-  const name = process.env.DUN_VERSION_NAME;
+  // process.env is `any` under the React Native typings: pin it.
+  const env = process.env as Record<string, string | undefined>;
+  const code = env.DUN_VERSION_CODE;
+  const name = env.DUN_VERSION_NAME;
   if (code !== undefined && !/^[1-9][0-9]*$/.test(code)) {
     throw new Error(`DUN_VERSION_CODE must be a positive integer, got "${code}"`);
   }
