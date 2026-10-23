@@ -2851,12 +2851,12 @@ func (m tuiModel) planScrollRegion() tea.Cmd {
 	// renderer's line diff sends just the rows that changed.
 	// So does a mouse highlight: it changes rows in place.
 	if m.inspecting || m.paging || m.bandShown() || m.drag.shown() || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
-		return m.sr.disable()
+		return m.sr.disable(time.Now())
 	}
 	vp := m.vp
 	vp.setHeight(m.convoHeight())
 	if vp.Height < 4 { // too short to be worth a region, and too short to be safe
-		return m.sr.disable()
+		return m.sr.disable(time.Now())
 	}
 	// Only when the pane is FULL. Short of that the pane pads its bottom with
 	// blank rows, which puts the streaming tail somewhere in the middle where
@@ -2864,11 +2864,11 @@ func (m tuiModel) planScrollRegion() tea.Cmd {
 	// WORSE than no region at all. A pane that is not full also never scrolls,
 	// which is the only thing the region is here to make cheap.
 	if len(vp.lines) < vp.Height {
-		return m.sr.disable()
+		return m.sr.disable(time.Now())
 	}
 	rows := strings.Split(m.viewportView(vp), "\n")
 	if len(rows) != vp.Height { // the pane did not render the height it was given
-		return m.sr.disable()
+		return m.sr.disable(time.Now())
 	}
 	// Row 1 is headView; the activity strip, when it has something to say,
 	// takes the row under it. The region ends one row above the pane's bottom:

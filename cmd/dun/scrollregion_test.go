@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func rows(ss ...string) []string { return ss }
@@ -125,5 +127,98 @@ func TestScrollRegionTopRowIsNotBlanked(t *testing.T) {
 		if frame[i] != "" {
 			t.Errorf("frame line %d is ignored by the renderer but not blank", i)
 		}
+	}
+}
+
+// regionRace models what Bubble Tea does with the region's commands: each runs
+// in its own goroutine, so two issued inside minRegionGap of each other may
+// reach the renderer in either order. It delivers every such run in the WORSE
+// order — the later one first — and tracks the one bit of renderer state that
+// decides whether the pane can move: is it ignoring the region's rows.
+type regionRace struct {
+	ignoring bool // the renderer skips the region's rows (sync sets, clear unsets)
+	pending  []tea.Cmd
+	at       []time.Time
+}
+
+func (r *regionRace) issue(c tea.Cmd, now time.Time) {
+	if c == nil {
+		return
+	}
+	if n := len(r.at); n > 0 && now.Sub(r.at[n-1]) >= minRegionGap {
+		r.flush() // the earlier ones have long landed
+	}
+	r.pending, r.at = append(r.pending, c), append(r.at, now)
+}
+
+func (r *regionRace) flush() {
+	for i := len(r.pending) - 1; i >= 0; i-- {
+		r.deliver(r.pending[i]())
+	}
+	r.pending, r.at = nil, nil
+}
+
+func (r *regionRace) deliver(msg tea.Msg) {
+	if b, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range b {
+			r.deliver(c())
+		}
+		return
+	}
+	switch typeName(msg) {
+	case "tea.syncScrollAreaMsg":
+		r.ignoring = true
+	case "tea.clearScrollAreaMsg":
+		r.ignoring = false
+	}
+}
+
+// The frozen pane: the region syncs, and a moment later something that needs
+// the rows back (a selection's band, a mouse highlight) disables it. If the
+// clear lands before the sync, the renderer ends up ignoring the rows while
+// the model has handed them back — View draws the pane, nothing paints it, and
+// scrolling moves the offset (and everything outside the pane) but not the
+// text, for as long as the band stays up.
+func TestScrollRegionDisableWaitsForTheGap(t *testing.T) {
+	s := &scrollRegion{}
+	r := &regionRace{}
+	now := time.Now()
+	r.issue(s.plan(rows("a", "b", "c"), 2, 4, 4, now), now)
+	now = now.Add(minRegionGap / 5)
+	r.issue(s.disable(now), now)
+	if s.rowsFor(4) != 0 {
+		t.Error("handed back, the rows are View's to draw at once")
+	}
+	// The retry: the band is still up, so the rows are still wanted back.
+	now = now.Add(minRegionGap)
+	r.issue(s.disable(now), now)
+	r.flush()
+	if s.live || r.ignoring {
+		t.Fatalf("the renderer ignores the region's rows (%v), but the region handed them back (live=%v): the pane is frozen", r.ignoring, s.live)
+	}
+}
+
+// The other way round: rows handed back, then a sync straight after (the band
+// went away). The sync landing first and the clear after it leaves the model
+// blanking rows (live) that the renderer then paints — as blank.
+func TestScrollRegionSyncWaitsForADisable(t *testing.T) {
+	s := &scrollRegion{}
+	r := &regionRace{}
+	now := time.Now()
+	r.issue(s.plan(rows("a", "b", "c"), 2, 4, 4, now), now)
+	now = now.Add(minRegionGap)
+	r.issue(s.disable(now), now)
+	now = now.Add(minRegionGap / 5)
+	r.issue(s.plan(rows("a", "b", "c"), 2, 4, 4, now), now)
+	r.flush()
+	if s.live != r.ignoring {
+		t.Fatalf("region live=%v but the renderer ignoring=%v", s.live, r.ignoring)
+	}
+	// After the gap, the rows are taken back.
+	now = now.Add(minRegionGap)
+	r.issue(s.plan(rows("a", "b", "c"), 2, 4, 4, now), now)
+	r.flush()
+	if !s.live || !r.ignoring {
+		t.Fatalf("after the gap the region should sync: live=%v ignoring=%v", s.live, r.ignoring)
 	}
 }

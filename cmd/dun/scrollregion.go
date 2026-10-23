@@ -44,6 +44,10 @@ type scrollRegion struct {
 	// wait: /repaint has cleared the screen, and the region takes no rows
 	// until the clears have run (repaint.go).
 	wait bool
+	// owed: the rows were handed back inside minRegionGap of the last region
+	// command, so the clear that tells the renderer is still to be sent (see
+	// disable).
+	owed bool
 }
 
 // maxScrollStep bounds how far a single frame may scroll before a repaint is
@@ -108,15 +112,15 @@ func (s *scrollRegion) plan(lines []string, top, bot, paneH int, now time.Time) 
 		s.last = append([]string(nil), lines...)
 		return nil
 	}
+	// A region has to be at least two rows for scrolling to mean anything, and
+	// the boundaries have to be real screen rows.
+	if top < 1 || bot < top+1 || len(lines) != bot-top+1 {
+		return s.disable(now)
+	}
 	if gap := minRegionGap - now.Sub(s.lastAt); gap > 0 {
 		return regionRetry(gap)
 	}
 	s.lastAt = now
-	// A region has to be at least two rows for scrolling to mean anything, and
-	// the boundaries have to be real screen rows.
-	if top < 1 || bot < top+1 || len(lines) != bot-top+1 {
-		return s.disable()
-	}
 	if !s.live || top != s.top || bot != s.bot || paneH != s.paneH {
 		return s.sync(lines, top, bot, paneH)
 	}
@@ -168,7 +172,7 @@ func shifted(a, b []string) bool {
 }
 
 func (s *scrollRegion) sync(lines []string, top, bot, paneH int) tea.Cmd {
-	s.live, s.held, s.top, s.bot, s.paneH = true, false, top, bot, paneH
+	s.live, s.held, s.owed, s.top, s.bot, s.paneH = true, false, false, top, bot, paneH
 	s.last = append([]string(nil), lines...)
 	//nolint:staticcheck // SA1019: deprecated, but v1.3.10 has no replacement - the only scroll-region mechanism
 	return tea.SyncScrollArea(append([]string(nil), lines...), top, bot)
@@ -178,11 +182,31 @@ func (s *scrollRegion) sync(lines []string, top, bot, paneH int) tea.Cmd {
 // still holds whatever View last claimed was on those rows — which was blank
 // filler while the region was live — so the screen has to be repainted, not
 // diffed, or the conversation would vanish under its own placeholder.
-func (s *scrollRegion) disable() tea.Cmd {
-	if s == nil || !s.live {
+//
+// The clear waits its turn like any other region command (minRegionGap). It
+// used not to, and a clear that overtook the sync just before it left the
+// renderer ignoring rows the model had handed back: View drew the pane and
+// nothing painted it, so scrolling moved the offset, the overlay and the
+// status line, but not the text — until the band (or highlight) that asked
+// for the rows went away.
+//
+// The model lets go at once (View draws the real rows again) and the clear is
+// OWED until the gap is up. Drawing rows the renderer still skips costs
+// nothing: they reach the screen when the clear repaints. A sync in the
+// meantime supersedes the debt — it resets the renderer's rows itself.
+func (s *scrollRegion) disable(now time.Time) tea.Cmd {
+	if s == nil || (!s.live && !s.owed) {
 		return nil
 	}
 	s.live, s.last = false, nil
+	if gap := minRegionGap - now.Sub(s.lastAt); gap > 0 {
+		if s.owed {
+			return nil // the retry that pays it is already on its way
+		}
+		s.owed = true
+		return regionRetry(gap)
+	}
+	s.lastAt, s.owed = now, false
 	//nolint:staticcheck // SA1019: deprecated, but v1.3.10 has no replacement - the only scroll-region mechanism
 	return tea.Batch(tea.ClearScrollArea, tea.ClearScreen)
 }
