@@ -1556,8 +1556,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateAsking drives the answer picker: ↑/↓ highlight an option (the last row
 // is a custom/chat free-text answer), enter selects, `n` attaches a detail to
-// the highlighted option. While typing a detail or a custom answer, keys go to
-// the input; esc backs out of that sub-mode.
+// the highlighted option, tab or → opens the option as a custom answer to edit.
+// While typing a detail or a custom answer, keys go to the input; esc backs
+// out of that sub-mode.
 func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	custom := len(m.askOptions) // index of the trailing "custom / chat" row
 	// In multi mode a "✓ done" row follows the custom row (submits the checked
@@ -1622,11 +1623,7 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m.sendAnswer(strings.Join(picked, ", ")), nil
 		default:
-			ans := m.askOptions[m.askSel]
-			if m.askNote != "" {
-				ans += " — " + m.askNote
-			}
-			return m.sendAnswer(ans), nil
+			return m.sendAnswer(m.askAnswerAt(m.askSel)), nil
 		}
 	case "ctrl+end":
 		m.scrollToEnd()
@@ -1665,6 +1662,20 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.vp.SetYOffset(m.vp.YOffset + 1)
 		m.updateScrollPin()
 		return m, nil
+	case "tab", "right":
+		// Edit the highlighted answer before sending it: the custom field,
+		// holding what enter would send from here. Esc goes back to the
+		// options; nothing is sent.
+		if !m.noting && !m.customAnswer && m.askSel < custom {
+			m.customAnswer = true
+			m.input.Reset()
+			m.input.SetValue(m.askAnswerAt(m.askSel))
+			m.input.CursorEnd()
+			m.input.placeholder = "type your answer, or chat…"
+			m.input.Focus()
+			m.refresh()
+			return m, textinput.Blink
+		}
 	case "n":
 		if !m.noting && !m.customAnswer && !m.askMulti && m.askSel < custom {
 			m.noting = true
@@ -1695,6 +1706,25 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// askAnswerAt is the answer the option at row i stands for: the option and
+// its detail, or in multi mode the checked options with this one among them.
+func (m tuiModel) askAnswerAt(i int) string {
+	if !m.askMulti {
+		ans := m.askOptions[i]
+		if m.askNote != "" {
+			ans += " — " + m.askNote
+		}
+		return ans
+	}
+	var picked []string
+	for j, opt := range m.askOptions {
+		if j == i || (j < len(m.askChecked) && m.askChecked[j]) {
+			picked = append(picked, opt)
+		}
+	}
+	return strings.Join(picked, ", ")
 }
 
 // typedText reports whether a key is the user typing a character, as opposed to
@@ -2922,10 +2952,14 @@ func (m tuiModel) View() string {
 		}
 	case m.asking && len(m.askOptions) == 0:
 		status = stAsk.Render("❓ type your answer · enter send · esc answer later")
+	case m.asking && m.noting:
+		status = stAsk.Render("❓ type a detail · enter keep it · esc back to the options")
+	case m.asking && m.customAnswer:
+		status = stAsk.Render("❓ type your answer · enter send · esc back to the options")
 	case m.asking && m.askMulti:
-		status = stAsk.Render("❓ ↑/↓ move · enter toggle · ✓ done to submit · esc answer later")
+		status = stAsk.Render("❓ ↑/↓ move · enter toggle · tab/→ edit · ✓ done to submit · esc answer later")
 	case m.asking:
-		status = stAsk.Render("❓ ↑/↓ choose · enter select · n add detail · esc answer later")
+		status = stAsk.Render("❓ ↑/↓ choose · enter select · tab/→ edit · n add detail · esc answer later")
 	case m.searching:
 		status = m.search.View() + stDim.Render(fmt.Sprintf("  (%d matches · enter to navigate)", len(m.matches)))
 	case m.searchActive:

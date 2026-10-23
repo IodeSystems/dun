@@ -266,3 +266,68 @@ func TestAsk_DraftComesBack(t *testing.T) {
 		t.Errorf("after reopen and answer: composer = %q", got)
 	}
 }
+
+// tab or → on an option opens it in the custom field to edit, cursor at the
+// end; enter sends the edited text, esc goes back to the options unsent.
+func TestAsk_TabEditsTheOption(t *testing.T) {
+	kRight := tea.KeyMsg{Type: tea.KeyRight}
+	for name, k := range map[string]tea.KeyMsg{"tab": kTab, "right": kRight} {
+		t.Run(name, func(t *testing.T) {
+			v := askingVtui(t, "A", "B", "C")
+			v.m = key(v.m, kDown) // B
+			v.m = key(v.m, k)
+			if !v.m.customAnswer || v.m.input.Value() != "B" || v.m.input.cursor != 1 {
+				t.Fatalf("custom=%v composer=%q cursor=%d", v.m.customAnswer, v.m.input.Value(), v.m.input.cursor)
+			}
+			if !strings.Contains(v.view(), "esc back to the options") {
+				t.Errorf("no editing hint:\n%s", v.view())
+			}
+			v.m = typeStr(v.m, ", but blue")
+			v.m = key(v.m, kEnter)
+			if v.m.asking || !strings.Contains(v.convo(), "› B, but blue") {
+				t.Errorf("asking=%v convo:\n%s", v.m.asking, v.convo())
+			}
+		})
+	}
+	t.Run("esc", func(t *testing.T) {
+		v := askingVtui(t, "A", "B")
+		v.m = key(v.m, kDown)
+		v.m = key(v.m, kRight)
+		v.m = key(v.m, kEsc)
+		if !v.m.asking || v.m.customAnswer || v.m.askSel != 1 {
+			t.Errorf("asking=%v custom=%v sel=%d", v.m.asking, v.m.customAnswer, v.m.askSel)
+		}
+		if strings.Contains(v.convo(), "› B") {
+			t.Error("esc sent the answer")
+		}
+	})
+	t.Run("with a detail", func(t *testing.T) {
+		v := askingVtui(t, "A", "B")
+		v.m = key(v.m, kN)
+		v.m = typeStr(v.m, "soon")
+		v.m = key(v.m, kEnter)
+		v.m = key(v.m, kTab)
+		if v.m.input.Value() != "A — soon" {
+			t.Errorf("composer = %q, want what enter would send", v.m.input.Value())
+		}
+	})
+	t.Run("multi", func(t *testing.T) {
+		v := askingVtui(t, "A", "B", "C")
+		v.m.askMulti, v.m.askChecked = true, make([]bool, 3)
+		v.m = key(v.m, kEnter) // check A
+		v.m = key(v.m, kDown)
+		v.m = key(v.m, kDown) // highlight C
+		v.m = key(v.m, kTab)
+		if v.m.input.Value() != "A, C" {
+			t.Errorf("composer = %q, want the checked set with the highlighted one", v.m.input.Value())
+		}
+	})
+	t.Run("custom row", func(t *testing.T) {
+		v := askingVtui(t, "A")
+		v.m = key(v.m, kDown) // the custom row
+		v.m = key(v.m, kTab)
+		if v.m.customAnswer {
+			t.Error("tab on the custom row has no option to edit")
+		}
+	})
+}
