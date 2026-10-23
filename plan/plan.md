@@ -142,6 +142,17 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 23. ask_user UI: no bounce, draft restored, edit an option, multi used (USER, 2026-10-23)
+
+- ◻ The conversation jumps when the question panel appears/goes away.
+- ◻ A draft in the composer is lost when a question comes and goes.
+- ◻ tab / → on an option opens it in the custom-answer editor.
+- ◻ Models never set `multi`: rewrite the ask_user description.
+- **next:** reproduce the bounce in tmux (scratch HOME, real model).
+- **risks:** the scroll region (sr) and the height-anchor code in Update.
+- **blocking decisions:** none yet.
+- **optional extensions:** none.
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
