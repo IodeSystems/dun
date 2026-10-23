@@ -30,7 +30,14 @@ export type Command = {
 
 export type Skill = { name: string; description: string };
 
-export type ModelProvider = { name: string; url: string; ids: string[] | null; error?: string; default?: boolean; key?: boolean };
+export type ModelProvider = {
+  name: string;
+  url: string;
+  ids: string[] | null;
+  error?: string;
+  default?: boolean;
+  key?: boolean;
+};
 export type Settings = { model: string; provider: string; url: string };
 
 export type View = {
@@ -55,7 +62,21 @@ export type View = {
   n: number; // key counter
 };
 
-export const empty: View = { items: [], streaming: null, busy: false, status: '', ask: null, commands: [], skills: [], models: null, settings: null, mcpTools: null, closed: false, upgrade: null, n: 0 };
+export const empty: View = {
+  items: [],
+  streaming: null,
+  busy: false,
+  status: '',
+  ask: null,
+  commands: [],
+  skills: [],
+  models: null,
+  settings: null,
+  mcpTools: null,
+  closed: false,
+  upgrade: null,
+  n: 0,
+};
 
 type Ev = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -82,7 +103,8 @@ function push(v: View, item: NewItem): View {
 
 /** A user message; dund's automatic resume after a restart is a note, not the person's. */
 function pushUser(v: View, text: string, queued?: boolean): View {
-  if (text.startsWith(autoResumePrefix)) return push(v, { kind: 'note', text: '↻ resumed after the restart — ' + text.slice(autoResumePrefix.length) });
+  if (text.startsWith(autoResumePrefix))
+    return push(v, { kind: 'note', text: '↻ resumed after the restart — ' + text.slice(autoResumePrefix.length) });
   return push(v, queued ? { kind: 'user', text, queued } : { kind: 'user', text });
 }
 
@@ -94,7 +116,12 @@ function settleQueued(v: View): View {
 /** An ask_user call as the question it is, not as JSON. */
 function pushQuestion(v: View, args: unknown): View {
   const a = (args ?? {}) as Ev;
-  return push(v, { kind: 'question', text: str(a.question), options: (a.options as string[]) ?? [], recommended: str(a.recommended) || undefined });
+  return push(v, {
+    kind: 'question',
+    text: str(a.question),
+    options: (a.options as string[]) ?? [],
+    recommended: str(a.recommended) || undefined,
+  });
 }
 
 /** A history item (history event, snapshot) as a shown item. */
@@ -118,7 +145,14 @@ function fromHistory(v: View, it: Ev): View {
 
 /** Replace what is shown with a conversation (history replaces, never adds). */
 export function replaceWith(items: unknown[], keep?: View): View {
-  let v: View = { ...empty, commands: keep?.commands ?? [], skills: keep?.skills ?? [], models: keep?.models ?? null, settings: keep?.settings ?? null, mcpTools: keep?.mcpTools ?? null };
+  let v: View = {
+    ...empty,
+    commands: keep?.commands ?? [],
+    skills: keep?.skills ?? [],
+    models: keep?.models ?? null,
+    settings: keep?.settings ?? null,
+    mcpTools: keep?.mcpTools ?? null,
+  };
   for (const it of items) if (it && typeof it === 'object') v = fromHistory(v, it as Ev);
   return v;
 }
@@ -128,7 +162,13 @@ export function apply(v: View, ev: Ev): View {
     case 'snapshot':
       return applySnapshot(ev, v);
     case 'history':
-      return { ...replaceWith((ev.items as unknown[]) ?? [], v), busy: v.busy, status: v.status, ask: v.ask, upgrade: v.upgrade };
+      return {
+        ...replaceWith((ev.items as unknown[]) ?? [], v),
+        busy: v.busy,
+        status: v.status,
+        ask: v.ask,
+        upgrade: v.upgrade,
+      };
     case 'user':
       return pushUser(v, str(ev.content), ev.queued === true);
     case 'upgrade':
@@ -159,9 +199,19 @@ export function apply(v: View, ev: Ev): View {
       // Messages queued into the turn have been read by it.
       return { ...settleQueued(v), busy: false, status: '', streaming: null };
     case 'error':
-      return push({ ...settleQueued(v), busy: false, status: '', streaming: null }, { kind: 'note', text: 'error: ' + str(ev.error), error: true });
+      return push(
+        { ...settleQueued(v), busy: false, status: '', streaming: null },
+        { kind: 'note', text: 'error: ' + str(ev.error), error: true },
+      );
     case 'ask':
-      return { ...v, ask: { question: str(ev.question), options: (ev.options as string[]) ?? [], recommended: str(ev.recommended) || undefined } };
+      return {
+        ...v,
+        ask: {
+          question: str(ev.question),
+          options: (ev.options as string[]) ?? [],
+          recommended: str(ev.recommended) || undefined,
+        },
+      };
     case 'answered':
       // The question and the answer are shown from ask_user's call and result.
       return { ...v, ask: null };
@@ -183,7 +233,10 @@ export function apply(v: View, ev: Ev): View {
     case 'settings':
       return { ...v, settings: { model: str(ev.model), provider: str(ev.provider), url: str(ev.url) } };
     case 'catalog':
-      return { ...v, skills: ((ev.skills as Skill[]) ?? []).map((k) => ({ name: k.name, description: k.description })) };
+      return {
+        ...v,
+        skills: ((ev.skills as Skill[]) ?? []).map((k) => ({ name: k.name, description: k.description })),
+      };
     case 'control': {
       let w = ev.id === 'close' && str(ev.message).startsWith('closed') ? { ...v, closed: true } : v;
       // No turn to interrupt: drop the "interrupting…".
@@ -193,11 +246,25 @@ export function apply(v: View, ev: Ev): View {
     case 'server':
       return ev.message ? push(v, { kind: 'note', text: str(ev.message) }) : v;
     case 'reset':
-      return { ...empty, commands: v.commands, skills: v.skills, models: v.models, settings: v.settings, upgrade: v.upgrade, n: v.n };
+      return {
+        ...empty,
+        commands: v.commands,
+        skills: v.skills,
+        models: v.models,
+        settings: v.settings,
+        upgrade: v.upgrade,
+        n: v.n,
+      };
     case 'engine':
       if (ev.state === 'started') return v;
-      return push({ ...v, busy: false, ask: ev.state === 'restarting' ? null : v.ask },
-        { kind: 'note', text: `engine ${str(ev.state)}${ev.reason ? ': ' + str(ev.reason) : ''}`, error: ev.state === 'gave_up' });
+      return push(
+        { ...v, busy: false, ask: ev.state === 'restarting' ? null : v.ask },
+        {
+          kind: 'note',
+          text: `engine ${str(ev.state)}${ev.reason ? ': ' + str(ev.reason) : ''}`,
+          error: ev.state === 'gave_up',
+        },
+      );
     case 'retry':
       return { ...v, status: str(ev.text) || 'retrying…' };
     case 'queued':
@@ -271,24 +338,49 @@ export function parseLine(raw: string, skills: Skill[]): Line {
 }
 
 /** Palette rows for what has been typed after '/'. */
-export function suggest(typed: string, commands: Command[], skills: Skill[]): { insert: string; label: string; hint: string }[] {
+export function suggest(
+  typed: string,
+  commands: Command[],
+  skills: Skill[],
+): { insert: string; label: string; hint: string }[] {
   const q = typed.replace(/^\//, '').toLowerCase();
   const [head = '', arg] = q.split(/\s+/, 2);
   const out: { insert: string; label: string; hint: string }[] = [];
   if (arg === undefined) {
-    for (const c of commands) if (c.name.startsWith(head)) out.push({ insert: '/' + c.name + ' ', label: '/' + c.name + (c.usage ? ' ' + c.usage : ''), hint: c.description });
-    if ('skill'.startsWith(head)) out.push({ insert: '/skill ', label: '/skill <name> [text]', hint: 'ask the model to use a skill' });
-    if ('model'.startsWith(head)) out.push({ insert: '/model', label: '/model [search] | use <provider> <id>', hint: 'switch model: a searchable list from every logged-in provider' });
-    if ('login'.startsWith(head)) out.push({ insert: '/login', label: '/login [name]', hint: 'log in to an LLM provider: an OpenAI-compatible URL, bearer optional' });
-    if ('logout'.startsWith(head)) out.push({ insert: '/logout ', label: '/logout <provider>', hint: 'log out of an LLM provider' });
+    for (const c of commands)
+      if (c.name.startsWith(head))
+        out.push({
+          insert: '/' + c.name + ' ',
+          label: '/' + c.name + (c.usage ? ' ' + c.usage : ''),
+          hint: c.description,
+        });
+    if ('skill'.startsWith(head))
+      out.push({ insert: '/skill ', label: '/skill <name> [text]', hint: 'ask the model to use a skill' });
+    if ('model'.startsWith(head))
+      out.push({
+        insert: '/model',
+        label: '/model [search] | use <provider> <id>',
+        hint: 'switch model: a searchable list from every logged-in provider',
+      });
+    if ('login'.startsWith(head))
+      out.push({
+        insert: '/login',
+        label: '/login [name]',
+        hint: 'log in to an LLM provider: an OpenAI-compatible URL, bearer optional',
+      });
+    if ('logout'.startsWith(head))
+      out.push({ insert: '/logout ', label: '/logout <provider>', hint: 'log out of an LLM provider' });
     return out;
   }
   if (head === 'skill') {
-    for (const k of skills) if (k.name.startsWith(arg)) out.push({ insert: `/skill ${k.name} `, label: k.name, hint: k.description });
+    for (const k of skills)
+      if (k.name.startsWith(arg)) out.push({ insert: `/skill ${k.name} `, label: k.name, hint: k.description });
     return out;
   }
   const c = commands.find((x) => x.name === head);
-  for (const ch of c?.choices ?? []) if (ch.value.startsWith(arg)) out.push({ insert: `/${head} ${ch.value}`, label: ch.value, hint: ch.description ?? '' });
+  for (const ch of c?.choices ?? [])
+    if (ch.value.startsWith(arg))
+      out.push({ insert: `/${head} ${ch.value}`, label: ch.value, hint: ch.description ?? '' });
   return out;
 }
 

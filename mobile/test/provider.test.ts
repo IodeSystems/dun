@@ -11,7 +11,10 @@ test('names and URLs follow the engine rules', () => {
 
 test('typed /model, /login and /logout', () => {
   expect(providerLine('model', ['qwen', '27b'])).toEqual({ kind: 'search', query: 'qwen 27b' });
-  expect(providerLine('model', ['use', 'corp', 'gpt-x'])).toEqual({ kind: 'op', op: { op: 'use', name: 'corp', model: 'gpt-x' } });
+  expect(providerLine('model', ['use', 'corp', 'gpt-x'])).toEqual({
+    kind: 'op',
+    op: { op: 'use', name: 'corp', model: 'gpt-x' },
+  });
   expect(providerLine('model', ['use', 'corp']).kind).toBe('usage');
   expect(providerLine('login', [])).toEqual({ kind: 'login', name: '' });
   expect(providerLine('login', ['corp'])).toEqual({ kind: 'login', name: 'corp' });

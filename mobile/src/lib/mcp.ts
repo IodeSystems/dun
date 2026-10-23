@@ -4,7 +4,14 @@
 /** Where a server runs: direct (dun connects to it; the default) or in the shell (mcpshell hosts it inside eval). */
 export type Placement = 'direct' | 'shell';
 
-export type ServerSpec = { id: string; url?: string; bearer?: string; command?: string; args?: string[]; via?: 'shell' };
+export type ServerSpec = {
+  id: string;
+  url?: string;
+  bearer?: string;
+  command?: string;
+  args?: string[];
+  via?: 'shell';
+};
 
 /** What each placement costs and keeps — said where the choice is made (cmd/dun mcpform.go, servers.go). */
 export const placementNote: Record<Placement, string> = {
@@ -14,7 +21,14 @@ export const placementNote: Record<Placement, string> = {
 };
 
 /** One tool of a server, as the engine's mcp_tools event lists it (proto.McpTool). */
-export type McpTool = { name: string; description?: string; schema?: string; tokens: number; enabled: boolean; hiddenBy?: string };
+export type McpTool = {
+  name: string;
+  description?: string;
+  schema?: string;
+  tokens: number;
+  enabled: boolean;
+  hiddenBy?: string;
+};
 export type McpTools = { server: string; tools: McpTool[] };
 
 /** "3 of 5 on · ~1.2k tokens": what the enabled tools cost in every request. */

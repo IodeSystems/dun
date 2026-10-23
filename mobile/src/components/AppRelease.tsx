@@ -30,10 +30,15 @@ export function AppRelease() {
     label = `Get the Android app (${rel.versionName ?? ''})`;
   }
   return (
-    <Pressable onPress={() => void Linking.openURL(url)} style={{ padding: space.md, borderRadius: 8, borderWidth: 1, borderColor: c.accent }}>
+    <Pressable
+      onPress={() => void Linking.openURL(url)}
+      style={{ padding: space.md, borderRadius: 8, borderWidth: 1, borderColor: c.accent }}
+    >
       <View style={{ gap: 2 }}>
         <Text style={{ color: c.accent, fontSize: font.md }}>{label}</Text>
-        {Platform.OS === 'android' && rel.notes ? <Text style={{ color: c.muted, fontSize: font.sm }}>{rel.notes}</Text> : null}
+        {Platform.OS === 'android' && rel.notes ? (
+          <Text style={{ color: c.muted, fontSize: font.sm }}>{rel.notes}</Text>
+        ) : null}
       </View>
     </Pressable>
   );

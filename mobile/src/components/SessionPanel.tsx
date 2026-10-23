@@ -9,7 +9,12 @@ import { font, space, useColors } from '@/lib/theme';
 
 const GROUPS = ['tools', 'git', 'memory', 'session'];
 
-export function SessionPanel({ commands, run, prefill, addServer }: {
+export function SessionPanel({
+  commands,
+  run,
+  prefill,
+  addServer,
+}: {
   commands: Command[];
   run: (line: string) => void;
   prefill: (text: string) => void;
@@ -38,7 +43,12 @@ export function SessionPanel({ commands, run, prefill, addServer }: {
                 <Text style={{ color: c.muted, fontSize: font.sm }}>{cmd.description}</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.xs }}>
                   {(cmd.choices ?? []).map((ch) => (
-                    <Chip key={ch.value} label={ch.value} active={cmd.state === ch.value} onPress={() => run(`${cmd.name} ${ch.value}`)} />
+                    <Chip
+                      key={ch.value}
+                      label={ch.value}
+                      active={cmd.state === ch.value}
+                      onPress={() => run(`${cmd.name} ${ch.value}`)}
+                    />
                   ))}
                   {!cmd.choices?.length && !cmd.text ? <Chip label="run" onPress={() => run(cmd.name)} /> : null}
                   {cmd.name === 'mcp' ? <Chip label="add…" onPress={addServer} /> : null}
@@ -66,20 +76,40 @@ function Chip({ label, onPress, active }: { label: string; onPress: () => void; 
         borderColor: active ? c.accent : c.border,
         backgroundColor: active ? c.accent : c.surface,
         opacity: pressed ? 0.7 : 1,
-      })}>
+      })}
+    >
       <Text style={{ color: active ? c.accentText : c.text, fontSize: font.sm }}>{label}</Text>
     </Pressable>
   );
 }
 
-export function Palette({ rows, pick }: { rows: { insert: string; label: string; hint: string }[]; pick: (insert: string) => void }) {
+export function Palette({
+  rows,
+  pick,
+}: {
+  rows: { insert: string; label: string; hint: string }[];
+  pick: (insert: string) => void;
+}) {
   const c = useColors();
   if (!rows.length) return null;
   return (
-    <View style={{ borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface, maxHeight: 240, overflow: 'hidden' }}>
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: 8,
+        backgroundColor: c.surface,
+        maxHeight: 240,
+        overflow: 'hidden',
+      }}
+    >
       <ScrollView keyboardShouldPersistTaps="handled">
         {rows.slice(0, 12).map((r) => (
-          <Pressable key={r.insert} onPress={() => pick(r.insert)} style={({ pressed }) => ({ padding: space.sm, backgroundColor: pressed ? c.sunken : 'transparent' })}>
+          <Pressable
+            key={r.insert}
+            onPress={() => pick(r.insert)}
+            style={({ pressed }) => ({ padding: space.sm, backgroundColor: pressed ? c.sunken : 'transparent' })}
+          >
             <Text style={{ color: c.text, fontSize: font.md }}>{r.label}</Text>
             {r.hint ? <Text style={{ color: c.muted, fontSize: font.sm }}>{r.hint}</Text> : null}
           </Pressable>

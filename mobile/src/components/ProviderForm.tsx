@@ -9,7 +9,12 @@ import { font, space, useColors } from '@/lib/theme';
 // kept in the sent history. Any OpenAI-compatible endpoint, bearer optional
 // (the one kind so far). Logging in again under a saved name keeps its key
 // unless a new one is typed.
-export function ProviderForm({ edit, name: initialName, save, close }: {
+export function ProviderForm({
+  edit,
+  name: initialName,
+  save,
+  close,
+}: {
   edit: { name: string; url: string } | null;
   name?: string;
   save: (op: ProviderOp) => void;
@@ -27,11 +32,43 @@ export function ProviderForm({ edit, name: initialName, save, close }: {
     close();
   }
   return (
-    <View style={{ gap: space.sm, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: space.sm, backgroundColor: c.surface }}>
-      <Text style={{ color: c.text, fontSize: font.md, fontWeight: '600' }}>{edit ? `Log in to ${edit.name} again` : 'Log in to a provider'}</Text>
-      {edit ? null : <Field value={name} onChangeText={setName} placeholder="name (e.g. corp)" autoCapitalize="none" autoCorrect={false} />}
-      <Field value={url} onChangeText={setUrl} placeholder="https://… (an OpenAI-compatible endpoint, e.g. LiteLLM)" autoCapitalize="none" autoCorrect={false} />
-      <Field value={key} onChangeText={setKey} placeholder={edit ? 'new bearer key (empty keeps the saved one)' : 'bearer key (optional)'} autoCapitalize="none" autoCorrect={false} secureTextEntry />
+    <View
+      style={{
+        gap: space.sm,
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: 8,
+        padding: space.sm,
+        backgroundColor: c.surface,
+      }}
+    >
+      <Text style={{ color: c.text, fontSize: font.md, fontWeight: '600' }}>
+        {edit ? `Log in to ${edit.name} again` : 'Log in to a provider'}
+      </Text>
+      {edit ? null : (
+        <Field
+          value={name}
+          onChangeText={setName}
+          placeholder="name (e.g. corp)"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      )}
+      <Field
+        value={url}
+        onChangeText={setUrl}
+        placeholder="https://… (an OpenAI-compatible endpoint, e.g. LiteLLM)"
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      <Field
+        value={key}
+        onChangeText={setKey}
+        placeholder={edit ? 'new bearer key (empty keeps the saved one)' : 'bearer key (optional)'}
+        autoCapitalize="none"
+        autoCorrect={false}
+        secureTextEntry
+      />
       <Muted>Saved on the machine dund runs on (0600); the key is never sent back.</Muted>
       {err ? <ErrorText>{err}</ErrorText> : null}
       <View style={{ flexDirection: 'row', gap: space.sm }}>

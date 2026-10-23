@@ -1,13 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "eslint",
-    "typescript",
-    "unicorn",
-    "oxc",
-    "react",
-    "import"
-  ],
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "react", "import"],
   "jsPlugins": [
     "eslint-plugin-expo",
     {
@@ -86,19 +79,13 @@
     "eslint/prefer-spread": "error",
     "react/rules-of-hooks": "error",
     "react/exhaustive-deps": "warn",
-    "eslint/eqeqeq": [
-      "warn",
-      "smart"
-    ],
+    "eslint/eqeqeq": ["warn", "smart"],
     "eslint/no-empty-pattern": "warn",
     "eslint/no-extend-native": "warn",
     "eslint/no-extra-bind": "warn",
     "eslint/no-unused-labels": "warn",
     "eslint/no-with": "warn",
-    "eslint/unicode-bom": [
-      "warn",
-      "never"
-    ],
+    "eslint/unicode-bom": ["warn", "never"],
     "import/namespace": "error",
     "import/export": "error",
     "import/no-named-as-default": "warn",
@@ -151,18 +138,10 @@
     "expo/use-dom-exports": "error",
     "react-js/no-deprecated": "error"
   },
-  "ignorePatterns": [
-    "dist/**",
-    "android/**",
-    "ios/**",
-    ".expo/**",
-    "src/gql/**"
-  ],
+  "ignorePatterns": ["dist/**", "android/**", "ios/**", ".expo/**", "src/gql/**"],
   "overrides": [
     {
-      "files": [
-        "public/sw.js"
-      ],
+      "files": ["public/sw.js"],
       "rules": {
         "typescript/await-thenable": "off",
         "typescript/no-array-delete": "off",

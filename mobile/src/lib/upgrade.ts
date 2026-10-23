@@ -54,13 +54,19 @@ export function upgradeLines(u: Upgrade | null, session: string): string[] {
   if (!u) return [];
   if (u.state === 'restarting') return [`⟳ dund is restarting into ${build(u.version)}… this reconnects`];
   if (!u.waiting.length) return [`⟳ dund is upgrading to ${build(u.version)} — restarting`];
-  const head = `⟳ dund is upgrading to ${build(u.version)} — waiting for:` + (u.deadline ? ` (or it restarts at ${hhmm(u.deadline)})` : '');
+  const head =
+    `⟳ dund is upgrading to ${build(u.version)} — waiting for:` +
+    (u.deadline ? ` (or it restarts at ${hhmm(u.deadline)})` : '');
   return [head, ...u.waiting.map((w) => '· ' + waitLine(w, session))];
 }
 
 /** Whether this session's own turn is among what dund waits for (the banner's Stop). */
 export function waitsOnTurnHere(u: Upgrade | null, session: string): boolean {
-  return !!u && u.state === 'pending' && u.waiting.some((w) => w.session === session && (w.what === 'turn' || w.what === 'question'));
+  return (
+    !!u &&
+    u.state === 'pending' &&
+    u.waiting.some((w) => w.session === session && (w.what === 'turn' || w.what === 'question'))
+  );
 }
 
 /**

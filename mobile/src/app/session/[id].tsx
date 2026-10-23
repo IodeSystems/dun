@@ -5,7 +5,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { explain } from '@/api/client';
 import { followSession } from '@/api/live';
-import { Answer, AskModels, Control, ForgetSession, GetUI, Hello, PutUI, SendMessage, Slash, SwitchModel, UpgradeNow } from '@/api/ops';
+import {
+  Answer,
+  AskModels,
+  Control,
+  ForgetSession,
+  GetUI,
+  Hello,
+  PutUI,
+  SendMessage,
+  Slash,
+  SwitchModel,
+  UpgradeNow,
+} from '@/api/ops';
 import { McpForm } from '@/components/McpForm';
 import { McpToolsPanel } from '@/components/McpToolsPanel';
 import { ModelPicker } from '@/components/ModelPicker';
@@ -35,7 +47,10 @@ export default function Session() {
   const [mcpForm, setMcpForm] = useState(false);
   const [toolsFor, setToolsFor] = useState<string | null>(null); // the server /mcp tools asked for
   // The login form: edit is a provider logged in again, name a new one's.
-  const [providerForm, setProviderForm] = useState<{ edit: { name: string; url: string } | null; name?: string } | null>(null);
+  const [providerForm, setProviderForm] = useState<{
+    edit: { name: string; url: string } | null;
+    name?: string;
+  } | null>(null);
   // This user's UI state in the session, kept by dund and shared with their
   // other clients (the TUI's format): the sent history and an unsent draft.
   const sent = useRef<string[]>([]);
@@ -63,7 +78,8 @@ export default function Session() {
     });
     const checkBuild = () =>
       void dundVersion().then((v) => {
-        if (Platform.OS === 'web' && shouldReload(loadedVersion.current, v)) (globalThis as { location?: { reload(): void } }).location?.reload();
+        if (Platform.OS === 'web' && shouldReload(loadedVersion.current, v))
+          (globalThis as { location?: { reload(): void } }).location?.reload();
       });
     let lost = false;
     return followSession(client, live, id, {
@@ -102,7 +118,9 @@ export default function Session() {
   const saveUI = useCallback(
     (draft: string) => {
       if (!auth.client) return;
-      void auth.client.request(PutUI, { id, state: { history: sent.current.slice(-200), draft } }).catch(() => undefined);
+      void auth.client
+        .request(PutUI, { id, state: { history: sent.current.slice(-200), draft } })
+        .catch(() => undefined);
     },
     [auth.client, id],
   );
@@ -131,9 +149,17 @@ export default function Session() {
   async function runSlash(line: string) {
     if (!auth.client) return;
     const name = line.trim().split(/\s+/)[0]?.toLowerCase();
-    if (name === 'close' && !(await confirm('Close', 'Remove this session\'s worktree and branch and forget its transcript, for good?'))) return;
+    if (
+      name === 'close' &&
+      !(await confirm('Close', "Remove this session's worktree and branch and forget its transcript, for good?"))
+    )
+      return;
     if (name === 'clear' && !(await confirm('Clear', 'Clear the conversation and start a fresh session log?'))) return;
-    if (isKillAll(line) && !(await confirm('Kill jobs', 'Kill every running background job, and everything each one started?'))) return;
+    if (
+      isKillAll(line) &&
+      !(await confirm('Kill jobs', 'Kill every running background job, and everything each one started?'))
+    )
+      return;
     // The engine answers /mcp tools <id> with the list; the panel shows it.
     const want = toolsRequest(line);
     if (want) setToolsFor(want);
@@ -153,7 +179,13 @@ export default function Session() {
   // Restart now: dund interrupts what the upgrade waits for; those sessions
   // resume after the restart.
   async function upgradeNow() {
-    if (!(await confirm('Restart now', 'Interrupt the running work and restart dund into the new build? Interrupted sessions resume afterwards.'))) return;
+    if (
+      !(await confirm(
+        'Restart now',
+        'Interrupt the running work and restart dund into the new build? Interrupted sessions resume afterwards.',
+      ))
+    )
+      return;
     try {
       await auth.client?.request(UpgradeNow);
     } catch (e) {
@@ -211,7 +243,8 @@ export default function Session() {
         const p = view.models?.find((x) => x.name === m.name);
         return setProviderForm(p ? { edit: p } : { edit: null, name: m.name });
       }
-      if (m.kind === 'op') return providerOp(m.op, m.op.op === 'use' ? view.models?.find((x) => x.name === m.op.name)?.url : undefined);
+      if (m.kind === 'op')
+        return providerOp(m.op, m.op.op === 'use' ? view.models?.find((x) => x.name === m.op.name)?.url : undefined);
       return openPicker(m.query);
     }
     if (l.kind === 'mcpadd') return setMcpForm(true);
@@ -231,7 +264,9 @@ export default function Session() {
     }
   }
 
-  const rows: Item[] = view.streaming ? [...view.items, { key: 'streaming', kind: 'assistant', text: view.streaming }] : view.items;
+  const rows: Item[] = view.streaming
+    ? [...view.items, { key: 'streaming', kind: 'assistant', text: view.streaming }]
+    : view.items;
   return (
     <Screen>
       <Stack.Screen
@@ -257,16 +292,35 @@ export default function Session() {
           data={rows}
           keyExtractor={(i) => i.key}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-          contentContainerStyle={{ padding: space.lg, gap: space.sm, maxWidth: 860, width: '100%', alignSelf: 'center' }}
+          contentContainerStyle={{
+            padding: space.lg,
+            gap: space.sm,
+            maxWidth: 860,
+            width: '100%',
+            alignSelf: 'center',
+          }}
           renderItem={({ item }) => <Row item={item} />}
         />
-        <View style={{ padding: space.md, paddingBottom: space.md + insets.bottom, borderTopWidth: 1, borderColor: c.border, gap: space.sm }}>
+        <View
+          style={{
+            padding: space.md,
+            paddingBottom: space.md + insets.bottom,
+            borderTopWidth: 1,
+            borderColor: c.border,
+            gap: space.sm,
+          }}
+        >
           {view.ask ? (
             <View style={{ gap: space.sm, padding: space.md, borderWidth: 1, borderColor: c.accent, borderRadius: 8 }}>
               <Text style={{ color: c.text, fontSize: font.md }}>❓ {view.ask.question}</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
                 {view.ask.options.map((o) => (
-                  <Button key={o} title={o === view.ask?.recommended ? `${o} ★` : o} primary={o === view.ask?.recommended} onPress={() => void answer(o)} />
+                  <Button
+                    key={o}
+                    title={o === view.ask?.recommended ? `${o} ★` : o}
+                    primary={o === view.ask?.recommended}
+                    onPress={() => void answer(o)}
+                  />
                 ))}
               </View>
             </View>
@@ -282,11 +336,22 @@ export default function Session() {
               close={() => setPicker(null)}
             />
           ) : null}
-          {providerForm ? <ProviderForm edit={providerForm.edit} name={providerForm.name} save={(o) => void providerOp(o)} close={() => setProviderForm(null)} /> : null}
+          {providerForm ? (
+            <ProviderForm
+              edit={providerForm.edit}
+              name={providerForm.name}
+              save={(o) => void providerOp(o)}
+              close={() => setProviderForm(null)}
+            />
+          ) : null}
           {mcpForm ? (
             <McpForm
               close={() => setMcpForm(false)}
-              add={(spec) => void auth.client?.request(Control, { id, target: 'mcp', action: 'add ' + spec }).catch((e) => setSendErr('mcp add: ' + explain(e).message))}
+              add={(spec) =>
+                void auth.client
+                  ?.request(Control, { id, target: 'mcp', action: 'add ' + spec })
+                  .catch((e) => setSendErr('mcp add: ' + explain(e).message))
+              }
             />
           ) : null}
           {toolsFor && view.mcpTools?.server === toolsFor ? (
@@ -314,7 +379,9 @@ export default function Session() {
               }}
             />
           ) : null}
-          {text.startsWith('/') && !view.ask ? <Palette rows={suggest(text, view.commands, view.skills)} pick={setText} /> : null}
+          {text.startsWith('/') && !view.ask ? (
+            <Palette rows={suggest(text, view.commands, view.skills)} pick={setText} />
+          ) : null}
           {view.upgrade ? (
             <View style={{ gap: 2 }}>
               {upgradeLines(view.upgrade, id).map((l, i) => (
@@ -322,7 +389,9 @@ export default function Session() {
               ))}
               {view.upgrade.state === 'pending' ? (
                 <View style={{ flexDirection: 'row', gap: space.sm }}>
-                  {waitsOnTurnHere(view.upgrade, id) && view.busy ? <Button title="Stop" onPress={stop} disabled={view.status === 'interrupting…'} /> : null}
+                  {waitsOnTurnHere(view.upgrade, id) && view.busy ? (
+                    <Button title="Stop" onPress={stop} disabled={view.status === 'interrupting…'} />
+                  ) : null}
                   <Button title="Restart now" onPress={() => void upgradeNow()} />
                 </View>
               ) : null}
@@ -341,7 +410,11 @@ export default function Session() {
                 // Enter sends on the web; Shift+Enter is a newline.
                 const ne = e.nativeEvent as { key: string; shiftKey?: boolean };
                 // ↑/↓ in an empty (or recalled) composer step through what was sent.
-                if (Platform.OS === 'web' && (ne.key === 'ArrowUp' || ne.key === 'ArrowDown') && (text === '' || recall.current >= 0)) {
+                if (
+                  Platform.OS === 'web' &&
+                  (ne.key === 'ArrowUp' || ne.key === 'ArrowDown') &&
+                  (text === '' || recall.current >= 0)
+                ) {
                   const h = sent.current;
                   if (!h.length) return;
                   e.preventDefault();
@@ -399,13 +472,26 @@ function Row({ item }: { item: Item }) {
       );
     case 'assistant':
       return (
-        <View style={{ backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: space.md }}>
-          <Text selectable style={{ color: c.text, fontSize: font.md }}>{item.text}</Text>
+        <View
+          style={{
+            backgroundColor: c.surface,
+            borderWidth: 1,
+            borderColor: c.border,
+            borderRadius: 8,
+            padding: space.md,
+          }}
+        >
+          <Text selectable style={{ color: c.text, fontSize: font.md }}>
+            {item.text}
+          </Text>
         </View>
       );
     case 'tool':
       return (
-        <Pressable onPress={() => setOpen(!open)} style={{ backgroundColor: c.sunken, borderRadius: 8, padding: space.sm }}>
+        <Pressable
+          onPress={() => setOpen(!open)}
+          style={{ backgroundColor: c.sunken, borderRadius: 8, padding: space.sm }}
+        >
           <Text style={{ color: c.muted, fontFamily: mono, fontSize: font.sm }}>
             {open ? '▾ ' : '▸ '}
             {item.title}
@@ -418,11 +504,25 @@ function Row({ item }: { item: Item }) {
         </Pressable>
       );
     case 'note':
-      return <Text style={{ color: item.error ? c.danger : c.muted, fontSize: font.sm, paddingHorizontal: space.md }}>{item.text}</Text>;
+      return (
+        <Text style={{ color: item.error ? c.danger : c.muted, fontSize: font.sm, paddingHorizontal: space.md }}>
+          {item.text}
+        </Text>
+      );
     case 'question':
       return (
-        <View style={{ borderLeftWidth: 3, borderColor: c.accent, paddingHorizontal: space.md, paddingVertical: space.xs, gap: 2 }}>
-          <Text selectable style={{ color: c.text, fontSize: font.md }}>❓ {item.text}</Text>
+        <View
+          style={{
+            borderLeftWidth: 3,
+            borderColor: c.accent,
+            paddingHorizontal: space.md,
+            paddingVertical: space.xs,
+            gap: 2,
+          }}
+        >
+          <Text selectable style={{ color: c.text, fontSize: font.md }}>
+            ❓ {item.text}
+          </Text>
           {item.options.length ? (
             <Text style={{ color: c.muted, fontSize: font.sm }}>
               {item.options.map((o) => (o === item.recommended ? `${o} (recommended)` : o)).join(' · ')}

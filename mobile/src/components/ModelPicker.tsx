@@ -10,7 +10,15 @@ import { font, mono, space, useColors } from '@/lib/theme';
 // any words of provider or id, as the TUI's picker does. Below them the
 // logged-in providers: log in again, log out, a model used by id (for a
 // provider that does not list its models), and log in to another.
-export function ModelPicker({ providers, current, initial, pick, op, edit, close }: {
+export function ModelPicker({
+  providers,
+  current,
+  initial,
+  pick,
+  op,
+  edit,
+  close,
+}: {
   providers: ModelProvider[] | null;
   current: { model: string; provider: string } | null;
   initial: string;
@@ -24,7 +32,16 @@ export function ModelPicker({ providers, current, initial, pick, op, edit, close
   const [byId, setById] = useState<{ provider: string; id: string } | null>(null);
   const rows = providers ? filterModels(providers, q) : [];
   return (
-    <View style={{ gap: space.sm, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: space.sm, backgroundColor: c.surface }}>
+    <View
+      style={{
+        gap: space.sm,
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: 8,
+        padding: space.sm,
+        backgroundColor: c.surface,
+      }}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         <Text style={{ color: c.text, fontSize: font.md, fontWeight: '600', flex: 1 }}>
           Model{current ? `: ${current.model} on ${current.provider || '?'}` : ''}
@@ -33,7 +50,14 @@ export function ModelPicker({ providers, current, initial, pick, op, edit, close
           <Text style={{ color: c.muted }}>Close</Text>
         </Pressable>
       </View>
-      <Field value={q} onChangeText={setQ} placeholder="search: words of the provider or model" autoCapitalize="none" autoCorrect={false} autoFocus />
+      <Field
+        value={q}
+        onChangeText={setQ}
+        placeholder="search: words of the provider or model"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoFocus
+      />
       {!providers ? <ActivityIndicator /> : null}
       <FlatList
         style={{ maxHeight: 300 }}
@@ -43,7 +67,10 @@ export function ModelPicker({ providers, current, initial, pick, op, edit, close
         renderItem={({ item: r }) => {
           const on = current?.model === r.id && current?.provider === r.provider;
           return (
-            <Pressable onPress={() => pick(r.url, r.id, r.provider)} style={({ pressed }) => ({ padding: space.sm, backgroundColor: pressed ? c.sunken : 'transparent' })}>
+            <Pressable
+              onPress={() => pick(r.url, r.id, r.provider)}
+              style={({ pressed }) => ({ padding: space.sm, backgroundColor: pressed ? c.sunken : 'transparent' })}
+            >
               <Text style={{ color: on ? c.accent : c.text, fontFamily: mono, fontSize: font.sm }}>
                 {on ? '● ' : ''}
                 {r.id}
@@ -69,7 +96,14 @@ export function ModelPicker({ providers, current, initial, pick, op, edit, close
           {byId?.provider === p.name ? (
             <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
               <View style={{ flex: 1 }}>
-                <Field value={byId.id} onChangeText={(id) => setById({ provider: p.name, id })} placeholder="model id, e.g. gpt-4o" autoCapitalize="none" autoCorrect={false} autoFocus />
+                <Field
+                  value={byId.id}
+                  onChangeText={(id) => setById({ provider: p.name, id })}
+                  placeholder="model id, e.g. gpt-4o"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoFocus
+                />
               </View>
               <Button
                 title="Use"
@@ -84,7 +118,9 @@ export function ModelPicker({ providers, current, initial, pick, op, edit, close
           ) : null}
         </View>
       ))}
-      {providers && providers.length === 0 ? <Muted>Not logged in to a provider: dun talks to no model until you log in.</Muted> : null}
+      {providers && providers.length === 0 ? (
+        <Muted>Not logged in to a provider: dun talks to no model until you log in.</Muted>
+      ) : null}
       <Button title="Log in to a provider" onPress={() => edit(null)} />
     </View>
   );

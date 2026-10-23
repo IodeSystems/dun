@@ -54,7 +54,9 @@ export default function SignIn() {
       await auth.signIn(u, t);
     } catch (e) {
       const x = explain(e);
-      setErr(x instanceof UnauthorizedError ? 'That token was refused. Make a new one with `dun dund token`.' : x.message);
+      setErr(
+        x instanceof UnauthorizedError ? 'That token was refused. Make a new one with `dun dund token`.' : x.message,
+      );
     } finally {
       setBusy(false);
     }
@@ -74,7 +76,10 @@ export default function SignIn() {
       window.location.href = base + '/auth/login?return=' + encodeURIComponent('/');
       return;
     }
-    const r = await WebBrowser.openAuthSessionAsync(base + '/auth/login?return=' + encodeURIComponent('dun://auth'), 'dun://auth');
+    const r = await WebBrowser.openAuthSessionAsync(
+      base + '/auth/login?return=' + encodeURIComponent('dun://auth'),
+      'dun://auth',
+    );
     if (r.type !== 'success') return;
     const f = fragmentParams(r.url);
     if (f.get('error')) setErr(f.get('error') ?? '');
@@ -83,7 +88,9 @@ export default function SignIn() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.md, maxWidth: 560, width: '100%', alignSelf: 'center' }}>
+      <ScrollView
+        contentContainerStyle={{ padding: space.lg, gap: space.md, maxWidth: 560, width: '100%', alignSelf: 'center' }}
+      >
         <Text style={{ color: c.text, fontSize: font.lg }}>Sign in to dund</Text>
         <Muted>Server</Muted>
         <Field value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
@@ -94,10 +101,23 @@ export default function SignIn() {
           </View>
         ) : null}
         <Muted>Token (from `dun dund token`)</Muted>
-        <Field value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="dun_…" onSubmitEditing={() => void submit()} />
+        <Field
+          value={token}
+          onChangeText={setToken}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          placeholder="dun_…"
+          onSubmitEditing={() => void submit()}
+        />
         {err ? <ErrorText>{err}</ErrorText> : null}
         <View>
-          <Button title={busy ? 'Checking…' : 'Sign in with the token'} primary={!sso} onPress={() => void submit()} disabled={busy || !token.trim()} />
+          <Button
+            title={busy ? 'Checking…' : 'Sign in with the token'}
+            primary={!sso}
+            onPress={() => void submit()}
+            disabled={busy || !token.trim()}
+          />
         </View>
       </ScrollView>
     </Screen>

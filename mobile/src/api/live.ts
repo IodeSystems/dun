@@ -69,11 +69,19 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
     unsubscribe = live.subscribe(
       {
         query: String(SessionEventsLive),
-        variables: { session: id, after: at.after, epoch: at.epoch, principal: tok.principal, timestamp: tok.timestamp, hmac: tok.hmac },
+        variables: {
+          session: id,
+          after: at.after,
+          epoch: at.epoch,
+          principal: tok.principal,
+          timestamp: tok.timestamp,
+          hmac: tok.hmac,
+        },
       },
       {
         next: (r) => {
-          const ev = (r.data as { dund_sessionEvents?: { event?: Record<string, unknown> } } | null)?.dund_sessionEvents?.event;
+          const ev = (r.data as { dund_sessionEvents?: { event?: Record<string, unknown> } } | null)?.dund_sessionEvents
+            ?.event;
           if (!ev) return;
           // A stream dund could not open (no such session) is an unsequenced error
           // event and then the end of the stream: retry with backoff.
@@ -88,7 +96,12 @@ export function followSession(gql: GraphQLClient, live: Client, id: string, f: F
         },
         error: (e: unknown) => {
           unsubscribe = null;
-          const msg = e instanceof Error ? e.message : Array.isArray(e) ? ((e[0] as { message?: string } | undefined)?.message ?? 'error') : 'connection closed';
+          const msg =
+            e instanceof Error
+              ? e.message
+              : Array.isArray(e)
+                ? ((e[0] as { message?: string } | undefined)?.message ?? 'error')
+                : 'connection closed';
           retry(`connection lost — retrying (${msg})`);
         },
         // The service ended the stream (it fell behind, or restarted):

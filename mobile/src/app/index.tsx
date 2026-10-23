@@ -67,16 +67,28 @@ export default function Sessions() {
             <AppRelease />
             {list.isLoading ? <ActivityIndicator /> : null}
             {list.error && !refused ? <ErrorText>{list.error.message}</ErrorText> : null}
-            {!list.isLoading && !items.length ? <Muted>No sessions yet — start one below, or with dun in a terminal.</Muted> : null}
+            {!list.isLoading && !items.length ? (
+              <Muted>No sessions yet — start one below, or with dun in a terminal.</Muted>
+            ) : null}
           </View>
         }
         renderItem={({ item: s }) => (
           <Pressable
             onPress={() => router.push({ pathname: '/session/[id]', params: { id: s.id } })}
-            style={{ padding: space.md, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, gap: 2 }}>
+            style={{
+              padding: space.md,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: c.border,
+              backgroundColor: c.surface,
+              gap: 2,
+            }}
+          >
             <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
               <Text style={{ color: c.text, fontFamily: mono, fontSize: font.sm }}>{s.id}</Text>
-              <Text style={{ color: s.running ? c.accent : c.muted, fontSize: font.sm }}>{s.running ? 'running' : 'stopped'}</Text>
+              <Text style={{ color: s.running ? c.accent : c.muted, fontSize: font.sm }}>
+                {s.running ? 'running' : 'stopped'}
+              </Text>
             </View>
             <Text style={{ color: c.muted, fontSize: font.sm }} numberOfLines={2}>
               {s.workspace}
@@ -86,9 +98,20 @@ export default function Sessions() {
         ListFooterComponent={
           <View style={{ gap: space.sm, marginTop: space.lg }}>
             <Muted>New session in a workspace (an absolute path on the machine dund runs on)</Muted>
-            <Field value={ws} onChangeText={setWs} placeholder="/home/you/src/project" autoCapitalize="none" autoCorrect={false} />
+            <Field
+              value={ws}
+              onChangeText={setWs}
+              placeholder="/home/you/src/project"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
             {create.error ? <ErrorText>{create.error.message}</ErrorText> : null}
-            <Button title={create.isPending ? 'Starting…' : 'New session'} primary disabled={!ws.trim() || create.isPending} onPress={() => create.mutate(ws.trim())} />
+            <Button
+              title={create.isPending ? 'Starting…' : 'New session'}
+              primary
+              disabled={!ws.trim() || create.isPending}
+              onPress={() => create.mutate(ws.trim())}
+            />
           </View>
         }
       />

@@ -30,7 +30,8 @@ export default function RootLayout() {
               headerStyle: { backgroundColor: c.bg },
               headerTintColor: c.text,
               contentStyle: { backgroundColor: c.bg },
-            }}>
+            }}
+          >
             <Stack.Screen name="index" options={{ title: 'dun' }} />
             <Stack.Screen name="signin" options={{ title: 'Sign in' }} />
             <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />

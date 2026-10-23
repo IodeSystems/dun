@@ -52,7 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A sign-in token is ended on dund too; the local token is not (it is
     // dund's own credential — `dun dund token` replaces it).
     if (token?.startsWith('dun_s_') && baseUrl) {
-      await makeClient(baseUrl, token).request(SignOut).catch(() => undefined);
+      await makeClient(baseUrl, token)
+        .request(SignOut)
+        .catch(() => undefined);
     }
     await saveToken(null);
     setToken(null);

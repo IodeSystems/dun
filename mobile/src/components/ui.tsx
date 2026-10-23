@@ -3,7 +3,17 @@ import { Pressable, Text, TextInput, type TextInputProps, View, type ViewStyle }
 
 import { font, space, TOUCH, useColors } from '@/lib/theme';
 
-export function Button({ title, onPress, primary, disabled }: { title: string; onPress: () => void; primary?: boolean; disabled?: boolean }) {
+export function Button({
+  title,
+  onPress,
+  primary,
+  disabled,
+}: {
+  title: string;
+  onPress: () => void;
+  primary?: boolean;
+  disabled?: boolean;
+}) {
   const c = useColors();
   return (
     <Pressable
@@ -20,7 +30,8 @@ export function Button({ title, onPress, primary, disabled }: { title: string; o
         borderColor: primary ? c.accent : c.border,
         backgroundColor: primary ? c.accent : c.surface,
         opacity: disabled ? 0.5 : pressed ? 0.8 : 1,
-      })}>
+      })}
+    >
       <Text style={{ color: primary ? c.accentText : c.text, fontSize: font.md, fontWeight: '600' }}>{title}</Text>
     </Pressable>
   );
@@ -33,8 +44,16 @@ export function Field(props: TextInputProps) {
       placeholderTextColor={c.muted}
       {...props}
       style={[
-        { minHeight: TOUCH, borderWidth: 1, borderColor: c.border, borderRadius: 8, paddingHorizontal: space.md,
-          backgroundColor: c.surface, color: c.text, fontSize: font.md },
+        {
+          minHeight: TOUCH,
+          borderWidth: 1,
+          borderColor: c.border,
+          borderRadius: 8,
+          paddingHorizontal: space.md,
+          backgroundColor: c.surface,
+          color: c.text,
+          fontSize: font.md,
+        },
         props.style,
       ]}
     />

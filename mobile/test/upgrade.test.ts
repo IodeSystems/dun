@@ -41,7 +41,10 @@ test('history and reset keep the banner', () => {
 
 test("dund's automatic resume shows as a note, live and from history", () => {
   const v = apply(empty, { type: 'user', content: '[automatic] dund restarted into build b while you were working.' });
-  expect(v.items[0]).toMatchObject({ kind: 'note', text: '↻ resumed after the restart — dund restarted into build b while you were working.' });
+  expect(v.items[0]).toMatchObject({
+    kind: 'note',
+    text: '↻ resumed after the restart — dund restarted into build b while you were working.',
+  });
   const w = apply(empty, { type: 'history', items: [{ kind: 'user', content: '[automatic] x' }] });
   expect(w.items[0]?.kind).toBe('note');
 });

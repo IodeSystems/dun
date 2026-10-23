@@ -32,12 +32,17 @@ test('a resubscribe after a restart names the epoch of its seq', async () => {
     request: () => Promise.resolve({ dund: { subscribeToken: { principal: 'p', timestamp: '1', hmac: 'h' } } }),
   } as unknown as GraphQLClient;
   const seen: Record<string, unknown>[] = [];
-  const stop = followSession(gql, live, 's1', { onEvent: (e) => seen.push(e), onConn: () => {}, onUnauthorized: () => {} });
+  const stop = followSession(gql, live, 's1', {
+    onEvent: (e) => seen.push(e),
+    onConn: () => {},
+    onUnauthorized: () => {},
+  });
   const settle = () => new Promise((r) => setTimeout(r, 5));
   await settle();
   expect(subs[0]!.variables).toMatchObject({ session: 's1', after: '0', epoch: '' });
 
-  const send = (ev: Record<string, unknown>) => subs[subs.length - 1]!.sink.next({ data: { dund_sessionEvents: { event: ev } } });
+  const send = (ev: Record<string, unknown>) =>
+    subs[subs.length - 1]!.sink.next({ data: { dund_sessionEvents: { event: ev } } });
   send({ type: 'session', seq: 1, epoch: 'old' });
   send({ type: 'done', seq: 40, epoch: 'old' });
   subs[0]!.sink.complete(); // dund went away

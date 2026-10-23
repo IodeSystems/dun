@@ -1,5 +1,17 @@
 /// <reference types="jest" />
-import { apply, applySnapshot, empty, filterModels, interruptedNote, interrupting, isKillAll, parseLine, replaceWith, suggest, type View } from '../src/lib/events';
+import {
+  apply,
+  applySnapshot,
+  empty,
+  filterModels,
+  interruptedNote,
+  interrupting,
+  isKillAll,
+  parseLine,
+  replaceWith,
+  suggest,
+  type View,
+} from '../src/lib/events';
 
 const run = (evs: Record<string, unknown>[], v: View = empty) => evs.reduce(apply, v);
 
@@ -30,18 +42,31 @@ test('a tool call settles the text streamed before it', () => {
 
 test('history replaces what is shown, never adds', () => {
   const v = run([{ type: 'user', content: 'old' }]);
-  const w = apply(v, { type: 'history', items: [{ kind: 'user', content: 'a' }, { kind: 'assistant', content: 'b' }] });
+  const w = apply(v, {
+    type: 'history',
+    items: [
+      { kind: 'user', content: 'a' },
+      { kind: 'assistant', content: 'b' },
+    ],
+  });
   expect(w.items.map((i) => (i.kind === 'tool' ? i.title : i.text))).toEqual(['a', 'b']);
 });
 
 test('an ask stays open until answered, from any client', () => {
   const v = run([{ type: 'ask', question: 'colour?', options: ['red', 'blue'] }]);
   expect(v.ask).toEqual({ question: 'colour?', options: ['red', 'blue'] });
-  const w = run([
-    { type: 'answered', value: 'blue' },
-    { type: 'tool_call', tool: 'ask_user', args: { question: 'colour?', options: ['red', 'blue'], recommended: 'blue' } },
-    { type: 'tool_result', tool: 'ask_user', result: 'blue' },
-  ], v);
+  const w = run(
+    [
+      { type: 'answered', value: 'blue' },
+      {
+        type: 'tool_call',
+        tool: 'ask_user',
+        args: { question: 'colour?', options: ['red', 'blue'], recommended: 'blue' },
+      },
+      { type: 'tool_result', tool: 'ask_user', result: 'blue' },
+    ],
+    v,
+  );
   expect(w.ask).toBeNull();
   expect(w.items.map((i) => i.kind)).toEqual(['question', 'user']);
   expect(w.items[0]).toMatchObject({ text: 'colour?', recommended: 'blue' });
@@ -60,7 +85,11 @@ test('an ask_user in history renders as the question and its answer, not JSON', 
 });
 
 test('a snapshot renders the conversation then applies its state events', () => {
-  const v = applySnapshot({ after: 40, items: [{ kind: 'user', content: 'q' }], state: [{ type: 'ask', question: 'ok?', options: [] }] });
+  const v = applySnapshot({
+    after: 40,
+    items: [{ kind: 'user', content: 'q' }],
+    state: [{ type: 'ask', question: 'ok?', options: [] }],
+  });
   expect(v.items).toHaveLength(1);
   expect(v.ask?.question).toBe('ok?');
 });
@@ -82,7 +111,10 @@ const cmds = [
 ];
 
 test('commands and skills are kept, through a history replace', () => {
-  let v = run([{ type: 'commands', items: cmds }, { type: 'catalog', skills: [{ name: 'tdd', description: 'test first', source: 'user' }] }]);
+  let v = run([
+    { type: 'commands', items: cmds },
+    { type: 'catalog', skills: [{ name: 'tdd', description: 'test first', source: 'user' }] },
+  ]);
   v = apply(v, { type: 'history', items: [] });
   expect(v.commands.map((c) => c.name)).toEqual(['raglit', 'remember']);
   expect(v.skills[0]?.name).toBe('tdd');
@@ -92,7 +124,10 @@ test('a line is a message, a slash command, a skill, or unknown', () => {
   const skills = [{ name: 'tdd', description: '' }];
   expect(parseLine('hello', skills)).toEqual({ kind: 'message', text: 'hello' });
   expect(parseLine(' /raglit on ', skills)).toEqual({ kind: 'slash', line: 'raglit on' });
-  expect(parseLine('/skill tdd fix it', skills)).toEqual({ kind: 'skill', text: 'Use the skill tdd (call skill name=tdd first): fix it' });
+  expect(parseLine('/skill tdd fix it', skills)).toEqual({
+    kind: 'skill',
+    text: 'Use the skill tdd (call skill name=tdd first): fix it',
+  });
   expect(parseLine('/skill nope', skills).kind).toBe('unknown');
 });
 
@@ -103,9 +138,18 @@ test('the palette completes names, then choices, then skills', () => {
 });
 
 test('a confirmed close marks the session closed; a reset clears it', () => {
-  const v = run([{ type: 'user', content: 'x' }, { type: 'control', id: 'close', message: 'closed: forgot session s1' }]);
+  const v = run([
+    { type: 'user', content: 'x' },
+    { type: 'control', id: 'close', message: 'closed: forgot session s1' },
+  ]);
   expect(v.closed).toBe(true);
-  const w = apply(run([{ type: 'commands', items: cmds }, { type: 'user', content: 'x' }]), { type: 'reset' });
+  const w = apply(
+    run([
+      { type: 'commands', items: cmds },
+      { type: 'user', content: 'x' },
+    ]),
+    { type: 'reset' },
+  );
   expect(w.items).toHaveLength(0);
   expect(w.commands).toHaveLength(2);
 });
@@ -115,7 +159,13 @@ test('/model is the client picker; models and settings are kept', () => {
   expect(parseLine('/login corp', [])).toEqual({ kind: 'provider', cmd: 'login', args: ['corp'] });
   const v = run([
     { type: 'settings', model: 'm1', provider: 'local', url: 'http://l' },
-    { type: 'models', providers: [{ name: 'local', url: 'http://l', ids: ['qwen-27b', 'llama'] }, { name: 'or', url: 'http://o', ids: ['qwen-7b'] }] },
+    {
+      type: 'models',
+      providers: [
+        { name: 'local', url: 'http://l', ids: ['qwen-27b', 'llama'] },
+        { name: 'or', url: 'http://o', ids: ['qwen-7b'] },
+      ],
+    },
   ]);
   expect(v.settings?.model).toBe('m1');
   expect(filterModels(v.models!, 'qwen').map((r) => r.id)).toEqual(['qwen-27b', 'qwen-7b']);
@@ -156,7 +206,10 @@ test('an interrupted turn keeps its partial reply, ends with a note, and keeps q
 });
 
 test('an interrupted turn names the jobs it left running', () => {
-  const v = run([{ type: 'user', content: 'go' }, { type: 'turn', kind: 'user' }]);
+  const v = run([
+    { type: 'user', content: 'go' },
+    { type: 'turn', kind: 'user' },
+  ]);
   const detail = 'still running: #3 go test ./... (2m) — /jobs kill 3 to stop it';
   const w = apply(v, { type: 'done', reason: 'interrupted', detail });
   expect(w.items.slice(-2)).toMatchObject([{ text: interruptedNote }, { kind: 'note', text: detail }]);
@@ -178,9 +231,25 @@ test('interrupting is a no-op when idle, and an idle answer clears it', () => {
 });
 
 test('a docs note names each surfaced document, why it won and where it came from', () => {
-  const v = run([{ type: 'notification', kind: 'docs', surfaced: 1, docs: [{ title: 'skill docs', score: 1.2e-5, why: 'only candidate · score 1.2e-05', source: 'skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills' }] }]);
+  const v = run([
+    {
+      type: 'notification',
+      kind: 'docs',
+      surfaced: 1,
+      docs: [
+        {
+          title: 'skill docs',
+          score: 1.2e-5,
+          why: 'only candidate · score 1.2e-05',
+          source: 'skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills',
+        },
+      ],
+    },
+  ]);
   const text = (x: View) => x.items.map((i) => (i.kind === 'tool' ? i.title : i.text))[0];
-  expect(text(v)).toBe('🔎 1 doc(s) surfaced\n• skill docs (only candidate · score 1.2e-05)\n  skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills');
+  expect(text(v)).toBe(
+    '🔎 1 doc(s) surfaced\n• skill docs (only candidate · score 1.2e-05)\n  skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills',
+  );
   // An older engine: no why, no source.
   const w = run([{ type: 'notification', kind: 'docs', surfaced: 1, docs: [{ title: 'README', score: 1 }] }]);
   expect(text(w)).toBe('🔎 1 doc(s) surfaced\n• README');

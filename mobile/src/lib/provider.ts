@@ -30,13 +30,22 @@ export type ProviderLine =
 export function providerLine(cmd: 'model' | 'login' | 'logout', args: string[]): ProviderLine {
   const [a = '', b = '', c = ''] = args;
   if (cmd === 'login') {
-    return args.length <= 1 ? { kind: 'login', name: a } : { kind: 'usage', message: 'usage: /login [name] — the URL and key go in the form, so the key stays out of the history' };
+    return args.length <= 1
+      ? { kind: 'login', name: a }
+      : {
+          kind: 'usage',
+          message: 'usage: /login [name] — the URL and key go in the form, so the key stays out of the history',
+        };
   }
   if (cmd === 'logout') {
-    return args.length === 1 ? { kind: 'op', op: { op: 'logout', name: a } } : { kind: 'usage', message: 'usage: /logout <provider>' };
+    return args.length === 1
+      ? { kind: 'op', op: { op: 'logout', name: a } }
+      : { kind: 'usage', message: 'usage: /logout <provider>' };
   }
   if (a === 'use') {
-    return args.length === 3 ? { kind: 'op', op: { op: 'use', name: b, model: c } } : { kind: 'usage', message: 'usage: /model use <provider> <model-id>' };
+    return args.length === 3
+      ? { kind: 'op', op: { op: 'use', name: b, model: c } }
+      : { kind: 'usage', message: 'usage: /model use <provider> <model-id>' };
   }
   return { kind: 'search', query: args.join(' ') };
 }
