@@ -255,3 +255,36 @@ func TestPeerRequestIsAnsweredOverStdio(t *testing.T) {
 		}
 	}
 }
+
+// A session in a dun worktree is named for its source checkout, not the
+// dun-worktree-XXXX directory, and shows the worktree beside it; one in
+// place on the same repo differs by its time.
+func TestPeerNameOfAWorktreeSession(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	repo := filepath.Join(t.TempDir(), "myrepo")
+	_ = os.MkdirAll(repo, 0o700)
+	inPlace, _ := svc.Create(alice, repo, nil, "")
+	inWt, _ := svc.Create(alice, repo, []string{"--worktree"}, "")
+	wt := filepath.Join(t.TempDir(), "worktrees", "dun-worktree-abcd")
+	ses, _ := svc.Get(alice, inWt)
+	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 100)
+	defer sub.Close()
+	_ = svc.Send(alice, inWt, proto.NewCommand("", &proto.User{Content: "moved " + wt + " dun/1761234567"}))
+	next(t, sub, "workspace")
+	ps := svc.Peers(alice, inPlace)
+	if len(ps) != 2 {
+		t.Fatalf("%+v", ps)
+	}
+	if ps[0].Name != "myrepo:"+timeOfID(inPlace) || ps[0].Worktree != "" {
+		t.Errorf("in place: %+v", ps[0])
+	}
+	if ps[1].Name != "myrepo:"+timeOfID(inWt) || ps[1].Worktree != wt || ps[1].Branch != "dun/1761234567" {
+		t.Errorf("worktree: %+v", ps[1])
+	}
+	// The in-place Workspace event --ship sends names the workspace: no worktree.
+	_ = svc.Send(alice, inWt, proto.NewCommand("", &proto.User{Content: "moved " + repo + " main"}))
+	next(t, sub, "workspace")
+	if p := svc.Peers(alice, inPlace)[1]; p.Worktree != "" || p.Branch != "main" {
+		t.Errorf("in-place worktree: %+v", p)
+	}
+}

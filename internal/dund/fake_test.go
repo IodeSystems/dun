@@ -97,6 +97,10 @@ func (e *fakeEngine) run(id string) {
 		switch p := c.Payload.(type) {
 		case *proto.User:
 			e.sp.record("user " + id + ": " + p.Content)
+			if f := strings.Fields(p.Content); len(f) == 3 && f[0] == "moved" { // into a worktree: path, branch
+				e.emit(enc, &proto.Workspace{Path: f[1], Branch: f[2]})
+				continue
+			}
 			if js, ok := strings.CutPrefix(p.Content, "peer-request "); ok { // ask dund, as dun_list/dun_msg do
 				var req proto.PeerRequest
 				_ = json.Unmarshal([]byte(js), &req)

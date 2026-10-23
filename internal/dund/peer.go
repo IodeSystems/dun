@@ -161,7 +161,7 @@ func candidates(ps []*proto.PeerSession) string {
 }
 
 // nameSessions names each row "<folder>:<hhmmss>" (USER 2026-10-23). folder
-// is the workspace's base name; workspaces that share one but differ get
+// is the (source) workspace's base name, never a worktree's; workspaces that share one but differ get
 // parent folders until they do not (src/dun vs old/dun), and the others keep
 // the plain base name. hhmmss is the id past its date ("20261021-222836" →
 // "222836"). A name still shared (one workspace, one time of day, two dates)
@@ -268,12 +268,15 @@ func (s *session) busy() bool {
 // peerRow is the session's row, unnamed (nameSessions names the list).
 func (s *session) peerRow(self string) proto.PeerSession {
 	s.actMu.Lock()
-	branch, last := s.branch, s.lastUser
+	wt, branch, last := s.worktree, s.branch, s.lastUser
 	s.actMu.Unlock()
 	if branch == "" {
 		branch = gitBranch(s.workspace)
 	}
-	row := proto.PeerSession{ID: s.id, Workspace: s.workspace, Branch: branch, State: "idle",
+	// Workspace is what the session was created in — the source checkout,
+	// also when the engine works in a dun worktree — so the name never
+	// becomes a dun-worktree-XXXX directory's.
+	row := proto.PeerSession{ID: s.id, Workspace: s.workspace, Worktree: wt, Branch: branch, State: "idle",
 		Attached: s.log.Subscribers(), You: s.id == self}
 	if s.busy() {
 		row.State = "busy"

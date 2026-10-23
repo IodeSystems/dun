@@ -53,10 +53,13 @@ type PeerSession struct {
 	Name      string `json:"name"`
 	Workspace string `json:"workspace"`
 	Branch    string `json:"branch,omitempty"`
-	State     string `json:"state"`
-	Attached  int    `json:"attached"`
-	Task      string `json:"task,omitempty"`
-	You       bool   `json:"you,omitempty"`
+	// Worktree is the dun worktree the session works in, on Branch; empty
+	// when it works in place. Name is always the source workspace's.
+	Worktree string `json:"worktree,omitempty"`
+	State    string `json:"state"`
+	Attached int    `json:"attached"`
+	Task     string `json:"task,omitempty"`
+	You      bool   `json:"you,omitempty"`
 }
 
 // PeerMsg is a message from another session, delivered by dund. Wake: start

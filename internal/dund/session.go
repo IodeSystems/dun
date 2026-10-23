@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -76,8 +77,10 @@ type session struct {
 	// working when dund stopped, and is woken with it on the next start
 	// (persisted in the registry). Guarded by actMu, a leaf lock.
 	resume string
-	// branch is the worktree branch the engine reported, and lastUser the
-	// last message it took: dun_list's branch and task (peer.go).
+	// worktree and branch are the worktree the engine reported working in
+	// (empty: in place, in workspace), and lastUser the last message it
+	// took: dun_list's worktree column and task (peer.go).
+	worktree string
 	branch   string
 	lastUser string
 }
@@ -97,7 +100,12 @@ func (s *session) track(ev proto.Event) {
 	case *proto.Answered:
 		s.asking = false
 	case *proto.Workspace:
-		s.branch = p.Branch
+		// The in-place Worktree that --ship makes reports the workspace
+		// itself: that is no worktree.
+		s.worktree, s.branch = "", p.Branch
+		if filepath.Clean(p.Path) != filepath.Clean(s.workspace) {
+			s.worktree = p.Path
+		}
 	case *proto.UserEcho:
 		s.lastUser = p.Content
 	case *proto.Jobs:
