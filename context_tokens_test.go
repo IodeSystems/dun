@@ -66,7 +66,7 @@ func fixture() (string, []llm.ToolDef, []mcpmgr.MCPTool) {
 // the total was large, these rows say which part to go and fix.
 func TestBreakdownAttributesEveryToolToItsServer(t *testing.T) {
 	sys, defs, mcp := fixture()
-	bd := measureSystem(context.Background(), &fakeCounter{}, sys, defs, mcp)
+	bd := measureSystem(context.Background(), &fakeCounter{}, sys, "", "", defs, mcp)
 
 	if !bd.Exact {
 		t.Fatal("a runner that can count must produce an exact breakdown")
@@ -99,7 +99,7 @@ func TestBreakdownAttributesEveryToolToItsServer(t *testing.T) {
 // group on its own would report, once per server.
 func TestPerServerCostsExcludeTheSharedPreamble(t *testing.T) {
 	sys, defs, mcp := fixture()
-	bd := measureSystem(context.Background(), &fakeCounter{}, sys, defs, mcp)
+	bd := measureSystem(context.Background(), &fakeCounter{}, sys, "", "", defs, mcp)
 
 	for _, p := range bd.Parts {
 		if p.Tokens != fakePerTool {
@@ -123,7 +123,7 @@ func TestPerServerCostsExcludeTheSharedPreamble(t *testing.T) {
 func TestOneServerOwnsThePreamble(t *testing.T) {
 	var d llm.ToolDef
 	d.Function.Name = "only"
-	bd := measureSystem(context.Background(), &fakeCounter{}, "sys",
+	bd := measureSystem(context.Background(), &fakeCounter{}, "sys", "", "",
 		[]llm.ToolDef{d}, []mcpmgr.MCPTool{{Name: "only", ServerID: "solo"}})
 
 	if len(bd.Parts) != 1 {
@@ -152,7 +152,7 @@ func TestOnePartThatCannotBeCountedDowngradesTheWholeTable(t *testing.T) {
 		}
 		return false
 	}}
-	bd := measureSystem(context.Background(), c, sys, defs, mcp)
+	bd := measureSystem(context.Background(), c, sys, "", "", defs, mcp)
 
 	if bd.Exact {
 		t.Fatal("one uncountable part must downgrade the whole breakdown to estimated")
@@ -170,7 +170,7 @@ func TestOnePartThatCannotBeCountedDowngradesTheWholeTable(t *testing.T) {
 // and must not cost a probe per part.
 func TestNoTokenizerIsNotAnError(t *testing.T) {
 	sys, defs, mcp := fixture()
-	bd := measureSystem(context.Background(), nonCounter{}, sys, defs, mcp)
+	bd := measureSystem(context.Background(), nonCounter{}, sys, "", "", defs, mcp)
 
 	if bd.Exact {
 		t.Fatal("a runner with no tokenizer cannot produce exact counts")
@@ -188,7 +188,7 @@ func TestNoTokenizerIsNotAnError(t *testing.T) {
 func TestTheTokenizerIsAskedOncePerPart(t *testing.T) {
 	sys, defs, mcp := fixture()
 	c := &fakeCounter{}
-	measureSystem(context.Background(), c, sys, defs, mcp)
+	measureSystem(context.Background(), c, sys, "", "", defs, mcp)
 	// base + system + whole + one leave-one-out per group. Marginal costs are
 	// why it is N+3 rather than N+1; the guard is that it stays per PART, never
 	// per tool definition.

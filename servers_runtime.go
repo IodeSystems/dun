@@ -488,13 +488,16 @@ func (h *Harness) rebuildTools() {
 	dispatch = withLiftedQueue(dispatch, h)
 
 	sys := cfg.System
+	rules, rulesMode, rulesSet := "", "", rulesSet{}
 	if sys == "" {
 		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), hostedNS...)
 		sys += roleSystem(h.isChild())
-		// The workspace's root AGENTS.md, if any, is standing context: the
-		// model needs the project's rules from the first message, and a system
-		// block survives compaction so a fold never drops them.
-		sys += rootAgentsMDBlock(h.cfg.Workspace)
+		// The workspace's root AGENTS.md and CLAUDE.md, and what they import,
+		// are standing context: the model needs the project's rules from the
+		// first message, and a system block survives compaction so a fold
+		// never drops them (rules.go).
+		rules, rulesMode, rulesSet = h.rulesBlock(docsServerID(tools) != "")
+		sys += rules
 	}
 	// ship is the only way work leaves the worktree. It needs a repo, not a
 	// branch: a --no-worktree session sits on the base branch, and the pipeline
@@ -543,10 +546,18 @@ func (h *Harness) rebuildTools() {
 	// so /context is never empty; the exact counts replace them when they
 	// arrive. See context_tokens.go for why this is not one number, why
 	// exactness is all-or-nothing, and why the measurement cannot block here.
-	h.setSystemBreakdown(measureSystem(context.Background(), nil, sys, toolDefs, tools))
+	h.setSystemBreakdown(measureSystem(context.Background(), nil, sys, rules, rulesMode, toolDefs, tools))
 	go func() {
-		h.setSystemBreakdown(measureSystem(context.Background(), h.client, sys, toolDefs, tools))
+		h.setSystemBreakdown(measureSystem(context.Background(), h.client, sys, rules, rulesMode, toolDefs, tools))
 	}()
+	// The rules index follows the mode: filled in index mode, emptied of an
+	// earlier session's files otherwise. A root session's job, off the lock.
+	if id := docsServerID(tools); id != "" && !h.isChild() {
+		h.srvMu.Lock()
+		docs, _ := h.spec(id)
+		h.srvMu.Unlock()
+		go h.syncRulesIndex(raglitDocsSink(docs), rulesSet, rulesMode)
+	}
 
 	// Proactive RAG: watch the conversation and inject relevant-doc pings before
 	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
@@ -560,7 +571,7 @@ func (h *Harness) rebuildTools() {
 		// a margin over the runner-up instead (see docsPreparer): one
 		// document per pass, inlined when short.
 		h.Session.Preparer = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
-			docsBodyFetcher(h.mgr, docsServerID(tools)), docGroup(h.memoryStore(), h.skillForDoc), h.skillForDoc, cfg.OnDocs)
+			docsBodyFetcher(h.mgr, docsServerID(tools)), docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc), h.skillForDoc, cfg.OnDocs)
 	}
 }
 

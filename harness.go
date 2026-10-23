@@ -324,6 +324,10 @@ type Config struct {
 	// wait is invisible: the retries are logged, and a TUI's logs are not on
 	// screen. See RetryNote.
 	OnRetry func(RetryNote)
+	// OnRules tells the user something about the project's rules that is not
+	// an answer to a command: the offer to make a large rules block cheaper
+	// (rules.go).
+	OnRules func(msg string)
 }
 
 // CompactionPause, if the host sets it, is called before the Shaper's
@@ -440,7 +444,15 @@ type Harness struct {
 	// What syncSkillIndex last put in the skills index: SKILL.md → size+mtime.
 	skillIdxMu sync.Mutex
 	skillIdx   map[string]string
-	skillDocs  map[string]Skill // SKILL.md path → its skill, for surfacing
+	skillDocs  map[string]skillHit // indexed file → its skill, for surfacing
+
+	// The project's rules (rules.go): rulesMu guards the state file,
+	// rulesIdxMu orders index syncs, rulesDocsMu guards rulesDocs — the
+	// imported files in the rules index, for surfacing.
+	rulesMu     sync.Mutex
+	rulesIdxMu  sync.Mutex
+	rulesDocsMu sync.Mutex
+	rulesDocs   map[string]bool
 	// trigMark is the CreatedAt of the newest entry the memory triggers have
 	// looked at (memtrigger.go).
 	trigMu   sync.Mutex

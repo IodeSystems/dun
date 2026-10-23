@@ -116,7 +116,7 @@ type DocsNote struct {
 // fetch (nil-safe) reads a short document whole so it can be inlined; group
 // (nil-safe: one group) names the corpus a hit came from; skill (nil-safe)
 // names the skill a hit is the SKILL.md of.
-func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, group func(docID string) string, skill func(docID string) (Skill, bool), onDocs func(DocsNote)) agent.NotificationPreparer {
+func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, group func(docID string) string, skill func(docID string) (skillHit, bool), onDocs func(DocsNote)) agent.NotificationPreparer {
 	kinds := opts.Kinds
 	if len(kinds) == 0 {
 		kinds = []agent.EntryKind{agent.KindUser, agent.KindAssistant}
@@ -200,6 +200,21 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 			}
 		}
 		kept = uniq
+		// And one per SKILL: a skill's SKILL.md and its reference files are
+		// one candidate. Measured live (2026-10-22): two files of one skill
+		// read as "2 candidate skills, this one clearly ranked first".
+		skillSeen := map[string]bool{}
+		uniq = kept[:0]
+		for _, h := range kept {
+			if sk, ok := lookupSkill(skill, h.DocID); ok {
+				if skillSeen[sk.Name] {
+					continue
+				}
+				skillSeen[sk.Name] = true
+			}
+			uniq = append(uniq, h)
+		}
+		kept = uniq
 
 		// Relevance: the TOP document only, and only when it clearly beats the
 		// runner-up. Measured in M0 (2026-10-20): "any hit, two slots" made
@@ -247,6 +262,11 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					infos = append(infos, DocHitInfo{Title: "skill " + sk.Name, DocID: h.DocID, Line: sk.Description, Score: h.Score})
 					fmt.Fprintf(&b, "A skill matches what you are working on (%d candidate skill(s); this one clearly ranked first): %q — %s\n", w.n, sk.Name, sk.Description)
 					fmt.Fprintf(&b, "If it applies, call skill name=%q and follow it before you act.", sk.Name)
+					if sk.File != "" {
+						// The match was in a file the skill points at: say
+						// which, so the model can read it after the skill.
+						fmt.Fprintf(&b, " The match is in its file %q (skill name=%q file=%q).", sk.File, sk.Name, sk.File)
+					}
 					continue
 				}
 				body, inline := "", false
@@ -267,6 +287,8 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 						"no longer applies) with why and source:\n")
 				case groupMCPDocs:
 					b.WriteString("From the documentation of an MCP server you have:\n")
+				case groupRules:
+					b.WriteString("From a file the project's rules import (they are searchable, not in your instructions; /rules index):\n")
 				}
 				if inline {
 					fmt.Fprintf(&b, "Possibly relevant (%d candidate document(s); this one clearly ranked first): %q (id=%s, score=%.2f)\n", w.n, h.Title, h.DocID, h.Score)
@@ -309,12 +331,17 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 // groupMemory is the group of hits that are memory notes.
 const groupMemory = "memory"
 
-// groupSkill is the group of hits that are skills' SKILL.md files.
+// groupSkill is the group of hits that are skills' SKILL.md and reference
+// files.
 const groupSkill = "skill"
 
-func lookupSkill(skill func(string) (Skill, bool), docID string) (Skill, bool) {
+// groupRules is the group of hits that are imported rules files in the
+// rules index (rules.go).
+const groupRules = "rules"
+
+func lookupSkill(skill func(string) (skillHit, bool), docID string) (skillHit, bool) {
 	if skill == nil {
-		return Skill{}, false
+		return skillHit{}, false
 	}
 	return skill(docID)
 }

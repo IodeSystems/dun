@@ -411,6 +411,10 @@ type contextStats struct {
 	systemPrompt int
 	systemShared int
 	systemParts  []dun.ContextPart
+	// The project rules' share of systemPrompt and their /rules mode ("" =
+	// no rules).
+	systemRules     int
+	systemRulesMode string
 
 	// Out-of-band delivery: messages typed mid-turn that were queued into
 	// a running turn rather than starting a new one.
@@ -4177,6 +4181,11 @@ func (m *tuiModel) showContext() {
 		if s.systemPrompt > 0 {
 			b.WriteString(ctxRow("  system prompt", ctxNum(s.systemPrompt), ""))
 		}
+		// Part of the system prompt, not beside it: the project rules are the
+		// one piece of it a user can change (/rules), so they get a row.
+		if s.systemRulesMode != "" {
+			b.WriteString(ctxRow("    project rules", ctxNum(s.systemRules), " (/rules "+s.systemRulesMode+")"))
+		}
 		for _, p := range s.systemParts {
 			b.WriteString(ctxRow("  "+p.Name, ctxNum(p.Tokens), ""))
 		}
@@ -4725,6 +4734,8 @@ func (s *contextStats) readSystemCost(ev map[string]any) {
 	s.systemPrompt = int(evNum(ev["system_prompt"]))
 	s.systemShared = int(evNum(ev["system_shared"]))
 	s.systemParts = evParts(ev["system_parts"])
+	s.systemRules = int(evNum(ev["system_rules"]))
+	s.systemRulesMode = str(ev["system_rules_mode"])
 }
 
 // readWindow decodes the window division off an event carrying it — context_cost

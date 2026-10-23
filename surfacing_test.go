@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -201,18 +202,18 @@ func TestDocsPreparer_SkillHitPointsAtTheSkill(t *testing.T) {
 		{DocID: "/repo/deploy.go", Title: "deploy.go", Score: 9, Line: "func deploy"},
 		{DocID: "/s/release/SKILL.md", Title: "SKILL.md", Score: 1, Line: "1. tag the build"},
 	}
-	skill := func(id string) (Skill, bool) {
+	skill := func(id string) (skillHit, bool) {
 		if id == "/s/release/SKILL.md" {
-			return Skill{Name: "release", Description: "cut a release"}, true
+			return skillHit{Skill: Skill{Name: "release", Description: "cut a release"}}, true
 		}
-		return Skill{}, false
+		return skillHit{}, false
 	}
 	fetched := false
 	fetch := func(_ context.Context, id string, _ int) (string, bool) {
 		fetched = fetched || id == "/s/release/SKILL.md"
 		return "", false
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, fetch, docGroup(nil, skill), skill,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, fetch, docGroup(nil, skill, nil), skill,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "cut a release", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
@@ -230,5 +231,67 @@ func TestDocsPreparer_SkillHitPointsAtTheSkill(t *testing.T) {
 	}
 	if notes[0].Docs[1].Title != "skill release" {
 		t.Errorf("the UI row should name the skill: %+v", notes[0].Docs)
+	}
+}
+
+// A hit on a skill's reference file is the same load cue, and names the
+// file to read.
+func TestDocsPreparer_SkillReferenceHit(t *testing.T) {
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	finder := fixedFinder{{DocID: "/s/release/reference/tags.md", Title: "tags.md", Score: 3, Line: "tag v1"}}
+	skill := func(id string) (skillHit, bool) {
+		if id == "/s/release/reference/tags.md" {
+			return skillHit{Skill: Skill{Name: "release", Description: "cut a release"}, File: "reference/tags.md"}, true
+		}
+		return skillHit{}, false
+	}
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, skill, nil), skill, nil)
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "how do I tag", CreatedAt: 1})
+	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	es := store.docsEntries()
+	if len(es) != 1 || !strings.Contains(es[0], `call skill name="release"`) || !strings.Contains(es[0], `file="reference/tags.md"`) || strings.Contains(es[0], "tag v1") {
+		t.Errorf("cue: %q", es)
+	}
+}
+
+// Two files of one skill are one candidate: the margin is between skills.
+func TestDocsPreparer_OneCandidatePerSkill(t *testing.T) {
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	finder := fixedFinder{
+		{DocID: "/s/a/ref.md", Title: "ref.md", Score: 3},
+		{DocID: "/s/a/SKILL.md", Title: "SKILL.md", Score: 2.9},
+		{DocID: "/s/b/SKILL.md", Title: "SKILL.md", Score: 1},
+	}
+	skill := func(id string) (skillHit, bool) {
+		name := filepath.Base(filepath.Dir(id))
+		return skillHit{Skill: Skill{Name: name, Description: "d"}}, true
+	}
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, skill, nil), skill, nil)
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "x", CreatedAt: 1})
+	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if es := store.docsEntries(); len(es) != 1 || !strings.Contains(es[0], `(2 candidate skill(s)`) || !strings.Contains(es[0], `name="a"`) {
+		t.Errorf("cue: %q", es)
+	}
+}
+
+// An imported rules file in the rules index is its own group, framed as such.
+func TestDocsPreparer_RulesHit(t *testing.T) {
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	finder := fixedFinder{{DocID: "/ws/docs/style.md", Title: "style.md", Score: 3, Line: "tabs"}}
+	rules := func(id string) bool { return id == "/ws/docs/style.md" }
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, nil, rules), nil, nil)
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "indent style", CreatedAt: 1})
+	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if es := store.docsEntries(); len(es) != 1 || !strings.Contains(es[0], "the project's rules import") {
+		t.Errorf("framing: %q", es)
 	}
 }

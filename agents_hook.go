@@ -19,9 +19,9 @@ package dun
 // unlock the guard for another.
 //
 // Two layers, access-driven by design. The ROOT AGENTS.md is standing context:
-// rootAgentsMDBlock puts it in the system prompt so the model has the project's
-// rules from the first message, and a system block survives compaction so a fold
-// never silently drops them. NESTED AGENTS.md files are the guard's job — they
+// rules.go puts it (with CLAUDE.md and what they import) in the system prompt
+// so the model has the project's rules from the first message, and a system
+// block survives compaction so a fold never silently drops them. NESTED AGENTS.md files are the guard's job — they
 // surface on access (read the one for the directory you are touching), not in
 // the system prompt. The rules are only re-supplied when a path is accessed,
 // never on an arbitrary event like a compaction.
@@ -125,35 +125,6 @@ relpath="${found#"$root"/}"
 echo "AGENTS.md guard: read $relpath before $op-ing $(basename "$target"). It contains project-specific rules, conventions, or constraints that apply to this path. Read it, then retry the operation."
 exit 2
 `
-
-// rootAgentsMDBlock returns the workspace's root AGENTS.md as a system-prompt
-// block, so the model has the project's standing rules in context from the
-// first message rather than only when a guard fires. Empty when there is no
-// root AGENTS.md (a nested one is the guard's job to surface on access, not the
-// system prompt's). The block is re-read on every system rebuild, so a rule
-// edited mid-session is picked up on the next turn without a restart.
-//
-// It goes in the system prompt, not a conversation entry: the rules are about
-// the WORKSPACE, not about what was said. A system block also survives
-// compaction, which is the whole point — the rules are always in context, so a
-// fold never silently drops them.
-func rootAgentsMDBlock(workspace string) string {
-	if workspace == "" {
-		return ""
-	}
-	for _, name := range []string{"AGENTS.md", "agents.md"} {
-		p := filepath.Join(workspace, name)
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		return "\n\n## Project rules (AGENTS.md)\n\n" +
-			"These rules apply to this workspace. Nested directories may have their " +
-			"own AGENTS.md; the code tool will ask you to read one before you touch " +
-			"files under it.\n\n" + string(data)
-	}
-	return ""
-}
 
 // writeAgentsHook writes the embedded hook script to a temp file and returns
 // its path. The caller is responsible for cleanup (os.Remove).

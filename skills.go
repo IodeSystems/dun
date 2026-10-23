@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path"
@@ -384,11 +385,62 @@ func (h *Harness) CheckSkills() bool {
 // conversation, without the model knowing to ask for it (USER 2026-10-22).
 const skillsIndex = "skills"
 
+// A skill's reference files go into the index too (USER 2026-10-22): a
+// match is often in the file SKILL.md points at, not in SKILL.md. Only text
+// documents, small ones, a bounded number per skill; scripts/ and hidden
+// directories are code and tooling, not instructions.
+const (
+	skillRefMax       = 64 << 10 // a reference file larger than this is not indexed
+	skillRefsPerSkill = 50
+)
+
+var skillRefExt = map[string]bool{".md": true, ".markdown": true, ".txt": true, ".rst": true}
+
+// skillRefs lists a local skill's reference files, relative to its dir.
+func skillRefs(dir string) []string {
+	var out []string
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if len(out) >= skillRefsPerSkill {
+			return filepath.SkipAll
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if p != dir && (strings.HasPrefix(name, ".") || name == "scripts" || name == "node_modules") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || !skillRefExt[strings.ToLower(filepath.Ext(name))] {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, p)
+		if rel == "SKILL.md" {
+			return nil
+		}
+		if st, err := d.Info(); err != nil || st.Size() > skillRefMax {
+			return nil
+		}
+		out = append(out, rel)
+		return nil
+	})
+	return out
+}
+
+// skillHit is an indexed file of a skill: its SKILL.md (File "") or a
+// reference file (File relative to the skill's dir).
+type skillHit struct {
+	Skill
+	File string
+}
+
 // syncSkillIndex brings the skills index in step with the local skills the
-// model may use: a SKILL.md new or changed since the last sync is ingested,
-// one that is gone is forgotten. Called whenever the tool set is rebuilt
-// with the docs server running — that is, when /rag starts and when a skill
-// changes. MCP servers' skills stay in their servers.
+// model may use: a SKILL.md or reference file new or changed since the last
+// sync is ingested, one that is gone is forgotten. Called whenever the tool
+// set is rebuilt with the docs server running — that is, when /rag starts
+// and when a skill changes. MCP servers' skills stay in their servers.
 func (h *Harness) syncSkillIndex(sink *mcpDocsSink) {
 	if sink == nil {
 		return
@@ -396,57 +448,38 @@ func (h *Harness) syncSkillIndex(sink *mcpDocsSink) {
 	h.skillIdxMu.Lock()
 	defer h.skillIdxMu.Unlock()
 	cur := map[string]string{}
-	docs := map[string]Skill{}
+	docs := map[string]skillHit{}
+	add := func(s Skill, rel string) {
+		p := filepath.Join(s.Dir, rel)
+		if st, err := os.Stat(p); err == nil {
+			cur[p] = fmt.Sprintf("%d %d", st.Size(), st.ModTime().UnixNano())
+			hit := skillHit{Skill: s}
+			if rel != "SKILL.md" {
+				hit.File = rel
+			}
+			docs[p] = hit
+		}
+	}
 	for _, s := range h.Skills() {
 		if s.Dir == "" || s.UserOnly {
 			continue
 		}
-		p := filepath.Join(s.Dir, "SKILL.md")
-		if st, err := os.Stat(p); err == nil {
-			cur[p] = fmt.Sprintf("%d %d", st.Size(), st.ModTime().UnixNano())
-			docs[p] = s
+		add(s, "SKILL.md")
+		for _, rel := range skillRefs(s.Dir) {
+			add(s, rel)
 		}
 	}
 	h.skillDocs = docs
-	var changed, gone []string
-	for p, sig := range cur {
-		if h.skillIdx[p] != sig {
-			changed = append(changed, p)
-		}
+	now, err := syncIndex(sink, skillsIndex, h.skillIdx, cur)
+	if err != nil {
+		log.Printf("dun: skills index: %v", err)
 	}
-	for p := range h.skillIdx {
-		if _, ok := cur[p]; !ok {
-			gone = append(gone, p)
-		}
-	}
-	sort.Strings(changed)
-	sort.Strings(gone)
-	if h.skillIdx == nil {
-		h.skillIdx = map[string]string{}
-	}
-	if len(gone) > 0 {
-		if err := sink.forget(skillsIndex, gone); err != nil {
-			log.Printf("dun: skills index: %v", err)
-		} else {
-			for _, p := range gone {
-				delete(h.skillIdx, p)
-			}
-		}
-	}
-	if len(changed) > 0 {
-		if err := sink.ingest(skillsIndex, changed); err != nil {
-			log.Printf("dun: skills index: %v", err)
-			return
-		}
-		for _, p := range changed {
-			h.skillIdx[p] = cur[p]
-		}
-	}
+	h.skillIdx = now
 }
 
-// skillForDoc names the skill a surfaced document is the SKILL.md of, so
-// the surfacing can point at the skill instead of quoting a fragment of it.
-func (h *Harness) skillForDoc(docID string) (Skill, bool) {
+// skillForDoc names the skill a surfaced document belongs to, so the
+// surfacing can point at the skill instead of quoting a fragment of it.
+func (h *Harness) skillForDoc(docID string) (skillHit, bool) {
 	h.skillIdxMu.Lock()
 	defer h.skillIdxMu.Unlock()
 	s, ok := h.skillDocs[docID]

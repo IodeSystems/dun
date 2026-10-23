@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
@@ -55,6 +56,10 @@ type SystemBreakdown struct {
 	Parts  []ContextPart // built-ins first, then one row per MCP server, sorted
 	Shared int           // cost no single part owns (the provider's tool-use preamble)
 	Total  int
+	// Rules is the project rules block's share of Prompt (rules.go), and
+	// RulesMode the mode it was rendered in; "" when there are no rules.
+	Rules     int
+	RulesMode string
 }
 
 // promptCounter is agentkit's structured-count capability, named as an interface
@@ -125,18 +130,34 @@ func groupTools(defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) []toolGroup {
 }
 
 // measureSystem breaks the pre-conversation context into parts and counts them.
-func measureSystem(ctx context.Context, runner any, sys string, defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) SystemBreakdown {
+// rules is the part of sys that is the project rules block, rendered in
+// rulesMode.
+func measureSystem(ctx context.Context, runner any, sys, rules, rulesMode string, defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) SystemBreakdown {
 	groups := groupTools(defs, mcpTools)
 
 	if counter, ok := runner.(promptCounter); ok {
 		cctx, cancel := context.WithTimeout(ctx, measureSystemTimeout)
 		defer cancel()
 		if exact, ok := countExact(cctx, counter, sys, groups); ok {
-			return exact
+			if rules == "" {
+				return exact
+			}
+			// The rules' share is marginal like every row: the system prompt
+			// with them, less the system prompt without them. All-or-nothing
+			// like the rest: a failed count falls back to estimates.
+			without, ok1 := counter.CountPrompt(cctx, strings.Replace(sys, rules, "", 1), nil)
+			base, ok2 := counter.CountPrompt(cctx, "", nil)
+			if ok1 && ok2 {
+				exact.Rules, exact.RulesMode = exact.Prompt-(without-base), rulesMode
+				return exact
+			}
 		}
 	}
 
-	out := SystemBreakdown{Prompt: estimateTokens(sys)}
+	out := SystemBreakdown{Prompt: estimateTokens(sys), Rules: estimateTokens(rules)}
+	if rules != "" {
+		out.RulesMode = rulesMode
+	}
 	for _, g := range groups {
 		out.Parts = append(out.Parts, ContextPart{Name: g.name, Tokens: estimateTokens(string(g.bytes))})
 	}

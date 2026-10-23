@@ -236,10 +236,11 @@ func firstNonEmptyStr(vs ...string) string {
 	return ""
 }
 
-// docGroup names a hit's surfacing group: memory notes, skills, MCP docs, or
-// the workspace's own documents. Each group is ranked on its own because
-// raglit scores from different indexes do not compare (see groupHits).
-func docGroup(mem *memoryStore, skill func(string) (Skill, bool)) func(string) string {
+// docGroup names a hit's surfacing group: memory notes, skills, imported
+// rules, MCP docs, or the workspace's own documents. Each group is ranked on
+// its own because raglit scores from different indexes do not compare (see
+// groupHits). skill and rules may be nil.
+func docGroup(mem *memoryStore, skill func(string) (skillHit, bool), rules func(string) bool) func(string) string {
 	root := mcpDocsRoot() + string(os.PathSeparator)
 	return func(docID string) string {
 		if g := mem.group(docID); g != "" {
@@ -249,6 +250,9 @@ func docGroup(mem *memoryStore, skill func(string) (Skill, bool)) func(string) s
 			if _, ok := skill(docID); ok {
 				return groupSkill
 			}
+		}
+		if rules != nil && rules(docID) {
+			return groupRules
 		}
 		if strings.HasPrefix(docID, root) {
 			return groupMCPDocs

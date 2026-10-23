@@ -82,6 +82,11 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 		{Name: "memories", Group: "memory", Description: "this project's saved notes: when written, refined, confirmed or void"},
 		{Name: "remember", Usage: "[text]", Group: "memory", Text: true,
 			Description: "save a note for later sessions on this project (needs /rag on); bare: the model picks what to keep"},
+		{Name: "rules", Usage: "[full|summary|index]", Group: "session",
+			Choices: choices("full", "the rules files and their imports, whole, in the system prompt",
+				"summary", "the imports condensed once by the model (root files stay whole)",
+				"index", "the imports in the docs index, surfaced by relevance (needs /rag on)"),
+			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): bare shows files, cost and mode"},
 		{Name: "suggest", Usage: "[on|off|auto]", Group: "session", Choices: choices("on", "always", "off", "never", "auto", "when idle"),
 			State: suggestMode, Description: "next-message suggestions: bare asks for some now, on/off/auto set the mode"},
 		{Name: "rephrase", Usage: "[on|off|status]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", ""),
@@ -256,6 +261,15 @@ func routeSlash(line string, r slashRoutes) {
 			r.control(name, "kill "+strings.TrimPrefix(args[1], "#"))
 		default:
 			r.reply("usage: /jobs [kill <n>|kill all]")
+		}
+	case "rules":
+		switch {
+		case len(args) == 0:
+			r.control(name, "")
+		case len(args) == 1 && (arg(0) == dun.RulesFull || arg(0) == dun.RulesSummary || arg(0) == dun.RulesIndex):
+			r.control(name, arg(0))
+		default:
+			r.reply("usage: /rules [full|summary|index]")
 		}
 	case "memories", "close", "interrupt":
 		r.control(name, "")

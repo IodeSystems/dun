@@ -560,6 +560,7 @@ func main() {
 		cfg.OnMemoryTrigger = func(msg string) {
 			em.emit(&proto.ControlEvent{ID: "remember", Action: "trigger", Message: msg})
 		}
+		cfg.OnRules = func(msg string) { em.emit(&proto.ControlEvent{ID: "rules", Action: "offer", Message: msg}) }
 		// The whole list every time, not a delta: it is a handful of rows, and a
 		// UI that has to reconstruct state from deltas gets it wrong the first
 		// time an event is dropped.
@@ -637,6 +638,7 @@ func main() {
 		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", clip(oneLine(text), 200)) }
 		cfg.OnLogin = func(server, url string) { fmt.Fprintf(os.Stderr, "\n  🔑 %s\n", loginLine(server, url)) }
 		cfg.OnMemoryTrigger = func(msg string) { fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", clip(oneLine(msg), 200)) }
+		cfg.OnRules = func(msg string) { fmt.Fprintf(os.Stderr, "\n  %s\n", msg) }
 		cfg.OnDocs = func(n dun.DocsNote) {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
 		}
@@ -974,6 +976,24 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// Detached: a toggle writes a file and may rebuild the tool set.
 		if id == "mcptools" {
 			go func() { em.emit(mcpToolsEvent(h, action)) }()
+			return
+		}
+		// /rules: bare reports; a mode is saved and the system rebuilt.
+		// Detached: summary is a model round trip, and every mode rebuilds
+		// the tool set, which waits for a running turn.
+		if id == "rules" {
+			go func() {
+				msg := h.RulesStatus()
+				if action != "" {
+					var err error
+					if msg, err = h.SetRulesMode(ctx, action); err != nil {
+						msg = "rules: " + err.Error()
+					} else {
+						h.Aside("[control/rules] " + msg)
+					}
+				}
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			}()
 			return
 		}
 		// /memories: the project's notes and what has happened to them.
@@ -1794,5 +1814,5 @@ func systemCost(bd dun.SystemBreakdown, total int) proto.SystemCost {
 		parts = append(parts, proto.ContextPart{Name: p.Name, Tokens: p.Tokens})
 	}
 	return proto.SystemCost{SystemTokens: total, SystemExact: bd.Exact, SystemPrompt: bd.Prompt,
-		SystemShared: bd.Shared, SystemParts: parts}
+		SystemShared: bd.Shared, SystemParts: parts, SystemRules: bd.Rules, SystemRulesMode: bd.RulesMode}
 }

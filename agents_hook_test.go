@@ -302,19 +302,19 @@ func TestAgentsHook_MtimeInvalidation(t *testing.T) {
 // are standing context, not something that waits for a guard to fire.
 func TestRootAgentsMDBlock(t *testing.T) {
 	// No workspace: nothing.
-	if got := rootAgentsMDBlock(""); got != "" {
+	if got := rootRules(""); got != "" {
 		t.Errorf("empty workspace should give no block: %q", got)
 	}
 
 	// Workspace with no AGENTS.md: nothing.
-	if got := rootAgentsMDBlock(t.TempDir()); got != "" {
+	if got := rootRules(t.TempDir()); got != "" {
 		t.Errorf("no AGENTS.md should give no block: %q", got)
 	}
 
 	// Workspace with a root AGENTS.md: the content is in the block.
 	ws := t.TempDir()
 	os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("always use tabs"), 0o644)
-	got := rootAgentsMDBlock(ws)
+	got := rootRules(ws)
 	if !strings.Contains(got, "always use tabs") {
 		t.Errorf("block should carry the file content: %q", got)
 	}
@@ -325,7 +325,7 @@ func TestRootAgentsMDBlock(t *testing.T) {
 	// Lowercase agents.md is also honored.
 	ws2 := t.TempDir()
 	os.WriteFile(filepath.Join(ws2, "agents.md"), []byte("use gofmt"), 0o644)
-	got = rootAgentsMDBlock(ws2)
+	got = rootRules(ws2)
 	if !strings.Contains(got, "use gofmt") {
 		t.Errorf("lowercase agents.md should be read: %q", got)
 	}
@@ -335,7 +335,7 @@ func TestRootAgentsMDBlock(t *testing.T) {
 	ws3 := t.TempDir()
 	os.MkdirAll(filepath.Join(ws3, "src"), 0o755)
 	os.WriteFile(filepath.Join(ws3, "src", "AGENTS.md"), []byte("nested only"), 0o644)
-	got = rootAgentsMDBlock(ws3)
+	got = rootRules(ws3)
 	if strings.Contains(got, "nested only") {
 		t.Errorf("a nested AGENTS.md must not appear in the root block: %q", got)
 	}

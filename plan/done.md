@@ -928,3 +928,64 @@ says "(just type)" while it is highlighted and not yet capturing.
 - **Known:** the first index of many skills is slow (~77/min on the shared
   raglit daemon); a skill not yet indexed cannot surface. Test projects go
   into whatever raglit daemon is running, the user's included.
+
+## ✅ Project rules: @imports, CLAUDE.md, /rules modes; skill reference files indexed (USER, 2026-10-22)
+
+- **Rules block** (`rules.go`, replaces `rootAgentsMDBlock`): root AGENTS.md
+  (or agents.md) and root CLAUDE.md, then their `@path` imports in full, one
+  `### <path> (imported by X)` section each. Claude Code semantics: outside
+  fenced blocks and code spans, relative to the importing file, `~` = home,
+  depth 5, cycle-safe (a file already in the block is skipped). Missing →
+  one line `(x.md, imported by AGENTS.md: not found)`. Caps 64 KiB per file,
+  256 KiB total, cut with a note. Re-read on every system rebuild.
+- **Decisions / assumptions (reversible):** CLAUDE.md is read too (USER
+  2026-10-22 assumption); same file (symlink) or identical bytes → once,
+  heading "(also CLAUDE.md)"; a CLAUDE.md that is only `@AGENTS.md` adds
+  nothing. An `@token` counts as an import only if it contains `/` or `.`
+  (so "ask @carl" is not a missing file). Indented code blocks are not
+  treated as code.
+- **/rules** (engine command, session group; no clash with TUI slashes):
+  bare → files, sizes, estimated tokens, mode (and why a saved mode is not
+  in force). `full` (default) · `summary` — one side call (kind "rules")
+  condenses the IMPORTS, root files stay verbatim; cached in
+  `$DUN_HOME/projects/<id>/rules.json` keyed by a hash of the imports; a
+  summary not smaller than the files is refused; stale → full + re-offer ·
+  `index` — imports into raglit index `rules`, the block lists the paths
+  and says they are searchable; needs /rag (refused with "/rag on first";
+  with /rag off later, the block falls back to full). What is indexed is
+  saved in rules.json, so leaving index mode forgets it, from a later
+  process too. Hits from it are their own surfacing group, framed as
+  imported rules.
+- **Offer:** full block > 4,000 tokens (meter estimate,
+  `rulesOfferTokens`) and there are imports → one control line naming
+  /rules summary and /rules index; once per hash of the full block.
+- **/context:** "project rules N (/rules <mode>)" under system prompt
+  (marginal count when the endpoint counts, else estimate).
+- **Skills:** `syncSkillIndex` also indexes each local skill's .md/.markdown/
+  .txt/.rst files (≤ 64 KiB, ≤ 50 per skill; not scripts/, hidden dirs,
+  node_modules). A hit on one gives the same cue plus "The match is in its
+  file X (skill name=S file=X)". One candidate per skill in a pass (a
+  skill's files no longer count as several candidate skills — seen live).
+  `syncIndex` is shared by the skills and rules indexes.
+- **Live** (tmux, scratch HOME + DUN_HOME, real model local-Qwen3.8-27B,
+  scratch raglit project `dunscratch-rules` on the shared daemon): AGENTS.md
+  importing docs/conventions.md (24 KB, a codeword on line 151). Offer shown
+  at start (~6,257 tok). Full: answered PLUM-HARBOR-7731 from the prompt.
+  Summary: ~264 tok vs ~8,000; after /clear the model answered the codeword
+  and "m13 → t6" from the summary's wording; /context showed "project rules
+  206 (/rules summary)". Index without /rag: refused. With /rag: block ~148
+  tok, rules.json lists the file, the hit surfaced framed as an imported
+  rules file; the model answered via grep. `/rules full` forgot the file
+  (raglit search on index rules: no matches). Skill: "zanthic glaze
+  crawling" (only in kiln-firing/reference/glaze.md) → cue with
+  file=reference/glaze.md; the model's first call was `skill
+  name=kiln-firing file=reference/glaze.md`.
+- **Known:** the first index-mode question, asked right after /rules index,
+  got `search` → no hits (the ingest had not finished); a minute later it
+  surfaced. A pointer hit shows raglit's generated caption, not the
+  matching line, so the model searched again. A group with ONE candidate
+  always surfaces (existing rule): seen live, the kiln skill and
+  conventions.md surfaced on unrelated questions. Editing only a skill's
+  reference file does not trigger a re-index until the next tool rebuild
+  (skillsSig watches SKILL.md). Summary faithfulness is the model's; the
+  summary is shown only via /rules token counts, not its text.

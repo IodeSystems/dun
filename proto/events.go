@@ -103,6 +103,9 @@ type SystemCost struct {
 	SystemPrompt int           `json:"system_prompt"`
 	SystemShared int           `json:"system_shared"`
 	SystemParts  []ContextPart `json:"system_parts"`
+	// The project rules block's share of SystemPrompt, and its /rules mode.
+	SystemRules     int    `json:"system_rules,omitempty"`
+	SystemRulesMode string `json:"system_rules_mode,omitempty"`
 }
 
 type ContextPart struct {

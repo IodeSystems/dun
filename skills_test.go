@@ -153,7 +153,7 @@ func checkIndex(index string) error {
 
 func TestDocGroup_MCPDocsAreTheirOwnGroup(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	g := docGroup(nil, nil)
+	g := docGroup(nil, nil, nil)
 	if g(filepath.Join(mcpDocsDir("corp"), "a.md")) != groupMCPDocs || g("/ws/README.md") != "" {
 		t.Error("grouping")
 	}
@@ -249,4 +249,53 @@ func TestSyncSkillIndex(t *testing.T) {
 	step("ingest skills review")
 	os.RemoveAll(filepath.Join(user, "deploy"))
 	step("forget skills deploy")
+}
+
+// A skill's reference files are indexed with its SKILL.md, map to the
+// skill for surfacing, and are forgotten when gone. Scripts, hidden
+// directories, non-text and oversized files stay out.
+func TestSyncSkillIndex_ReferenceFiles(t *testing.T) {
+	home := t.TempDir()
+	defer func(f func() (string, error)) { userHomeDir = f }(userHomeDir)
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Setenv("DUN_HOME", filepath.Join(home, ".dun"))
+	user := filepath.Join(home, ".dun", "skills")
+	writeSkill(t, user, "deploy", "---\nname: deploy\ndescription: ship it\n---\nsee reference/runbook.md")
+	dir := filepath.Join(user, "deploy")
+	for name, size := range map[string]int{
+		"reference/runbook.md": 10, "notes.txt": 10, "scripts/help.md": 10, ".git/x.md": 10,
+		"tool.py": 10, "huge.md": skillRefMax + 1,
+	} {
+		writeRule(t, filepath.Join(dir, name), strings.Repeat("x", size))
+	}
+	h := newNoteHarness(t)
+	h.mgr, h.cfg.ConfigDir = mcpmgr.NewManager(), t.TempDir()
+	var log []string
+	rec := func(verb string) func(string, []string) error {
+		return func(index string, paths []string) error {
+			for _, p := range paths {
+				rel, _ := filepath.Rel(dir, p)
+				log = append(log, verb+" "+rel)
+			}
+			return nil
+		}
+	}
+	sink := &mcpDocsSink{ingest: rec("ingest"), forget: rec("forget")}
+	h.syncSkillIndex(sink)
+	if got := strings.Join(log, "; "); got != "ingest SKILL.md; ingest notes.txt; ingest reference/runbook.md" {
+		t.Errorf("first sync: %q", got)
+	}
+	hit, ok := h.skillForDoc(filepath.Join(dir, "reference", "runbook.md"))
+	if !ok || hit.Name != "deploy" || hit.File != "reference/runbook.md" {
+		t.Errorf("reference file hit: %+v %v", hit, ok)
+	}
+	if hit, _ := h.skillForDoc(filepath.Join(dir, "SKILL.md")); hit.Name != "deploy" || hit.File != "" {
+		t.Errorf("SKILL.md hit: %+v", hit)
+	}
+	log = nil
+	os.Remove(filepath.Join(dir, "notes.txt"))
+	h.syncSkillIndex(sink)
+	if got := strings.Join(log, "; "); got != "forget notes.txt" {
+		t.Errorf("removal: %q", got)
+	}
 }
