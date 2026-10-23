@@ -23,6 +23,10 @@ import (
 // user server list from it, and a server someone added with /mcp add must
 // not change what a test sees.
 func TestMain(m *testing.M) {
+	if persona := os.Getenv(fakeBinEnv); persona != "" {
+		fakeBinMain(persona) // a fake server or CLI (fakebin_test.go), not a test run
+		return
+	}
 	home, err := os.MkdirTemp("", "dun-test-home-")
 	if err != nil {
 		panic(err)
