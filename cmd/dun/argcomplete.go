@@ -8,6 +8,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun"
 )
 
 // Argument completion in the "/" palette.
@@ -138,27 +140,100 @@ func skillChoices(m *tuiModel, arg string) *argList {
 	return &argList{rankChoices(arg, cands), len(cands), "skills"}
 }
 
-// mcpNeedsID is the /mcp subcommands that take a server id next.
-var mcpNeedsID = map[string]bool{"tools": true, "remove": true, "refresh": true, "move": true,
-	"login": true, "logout": true, "on": true, "off": true, "restart": true}
+// mcpArgs is what each /mcp subcommand takes after it, position by
+// position: a server id, a preset, a mode, a tool switch, a scope flag, or
+// "" for free text (a tool name). The /rag and /lsp switches take a scope.
+var mcpArgs = map[string][]string{
+	"tools": {"id"}, "remove": {"id"}, "rm": {"id"}, "refresh": {"id"}, "login": {"id"}, "logout": {"id"}, "restart": {"id"},
+	"on": {"id", "scope"}, "off": {"id", "scope"}, "unset": {"id", "unsetScope"},
+	"mode": {"id", "mode", "scope"}, "via": {"id", "mode", "scope"}, "move": {"id", "mode", "scope"},
+	"toggle": {"id", "", "tool", "scope"},
+	"add":    {"preset"},
+}
+
+var srvArgs = map[string][]string{"on": {"scope"}, "off": {"scope"}, "unset": {"unsetScope"}}
+
+// mcpArgCands are the candidates of one argument kind.
+func mcpArgCands(m *tuiModel, kind string) ([]argChoice, string) {
+	var out []argChoice
+	add := func(v, d string) { out = append(out, argChoice{value: v, label: v, desc: d}) }
+	switch kind {
+	case "id":
+		for _, id := range m.serverIDs {
+			add(id, "")
+		}
+		return out, "servers"
+	case "preset":
+		for _, p := range dun.ServerPresets {
+			add(p.ID, p.Description)
+		}
+		return out, "presets"
+	case "mode":
+		add(dun.ModeStandalone, "its own tools, schemas in every request")
+		add(dun.ModeScripted, "in mcpshell, called through eval, schemas out of the prompt")
+		add("unset", "clear this scope's mode")
+		return out, "modes"
+	case "tool":
+		add("on", "")
+		add("off", "")
+		add("unset", "clear this scope's switch")
+		return out, "switches"
+	case "scope", "unsetScope":
+		if kind == "scope" {
+			add("--global", "every workspace ($DUN_HOME/mcp.json)")
+		}
+		add("--project", "this project")
+		add("--session", "this session (the default)")
+		return out, "scopes"
+	}
+	return nil, ""
+}
+
+// positionalChoices completes the argument after a subcommand from kinds:
+// the argument being typed is f's last word, or the next one when arg ends
+// in a space.
+func positionalChoices(m *tuiModel, arg string, kinds map[string][]string) *argList {
+	f := strings.Fields(arg)
+	trailing := strings.TrimRight(arg, " \t\n") != arg
+	if len(f) == 0 {
+		return nil
+	}
+	spec, ok := kinds[f[0]]
+	if !ok {
+		return nil
+	}
+	pos, q := len(f)-1, f[len(f)-1]
+	if trailing {
+		pos, q = len(f), ""
+	}
+	if pos == 0 || pos > len(spec) {
+		return nil
+	}
+	cands, what := mcpArgCands(m, spec[pos-1])
+	if cands == nil {
+		return nil
+	}
+	prefix := strings.Join(f[:pos], " ") + " "
+	for i := range cands {
+		cands[i].value = prefix + cands[i].value
+	}
+	return &argList{rankChoices(q, cands), len(cands), what}
+}
 
 // engineChoices completes an engine command's first argument from the
 // choices it declared. /mcp also completes the server id after a
 // subcommand that takes one.
 func engineChoices(c engineCmd) argCompleter {
 	return func(m *tuiModel, arg string) *argList {
-		f := strings.Fields(arg)
-		trailing := strings.TrimRight(arg, " \t\n") != arg
-		if c.name == "mcp" && len(f) > 0 && mcpNeedsID[f[0]] && (len(f) == 1 && trailing || len(f) == 2 && !trailing) {
-			q := ""
-			if len(f) == 2 {
-				q = f[1]
+		switch c.name {
+		case "mcp":
+			if l := positionalChoices(m, arg, mcpArgs); l != nil {
+				return l
 			}
-			cands := make([]argChoice, len(m.serverIDs))
-			for i, id := range m.serverIDs {
-				cands[i] = argChoice{value: f[0] + " " + id, label: id}
+		case "rag", "lsp":
+			if l := positionalChoices(m, arg, srvArgs); l != nil {
+				return l
 			}
-			return &argList{rankChoices(q, cands), len(cands), "servers"}
 		}
 		if strings.ContainsAny(arg, " \t\n") {
 			return nil

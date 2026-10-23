@@ -256,7 +256,7 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 	if builtinServer(s.ID) {
 		sc.ViaFrom = ""
 		if via == ViaShell {
-			return Server{}, false, fmt.Errorf("dun: server %q is built in and cannot be placed in the shell (remove its \"via\")", s.ID)
+			return Server{}, false, fmt.Errorf("dun: server %q is built in and cannot be scripted (remove its \"via\")", s.ID)
 		}
 	}
 	if via == ViaDirect {
@@ -282,7 +282,7 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		Headers:        requestHeaders(s),
 		Command:        s.Command,
 		Args:           expandPlaceholders(s.Args, workspace, raglitHome),
-		Env:            expandPlaceholders(s.Env, workspace, raglitHome),
+		Env:            envRefs(expandPlaceholders(s.Env, workspace, raglitHome)),
 		Timeout:        s.Timeout,
 		Autostart:      on,
 		Disable:        e.global.Disable,
@@ -294,6 +294,28 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		OAuth:          s.OAuth,
 		Scopes:         sc,
 	}, true, nil
+}
+
+// envRefs reads each "KEY=$NAME" or "KEY=${NAME}" from dun's environment
+// when the server starts, as Bearer is, so mcp.json can name a secret
+// without holding it. Only a value that is wholly one reference: "a$b" stays
+// as written.
+func envRefs(env []string) []string {
+	if env == nil {
+		return nil
+	}
+	out := make([]string, len(env))
+	for i, kv := range env {
+		k, v, ok := strings.Cut(kv, "=")
+		if m := envRef.FindStringSubmatch(v); ok && m != nil {
+			v = os.Getenv(m[1] + m[2])
+		}
+		out[i] = k + "=" + v
+		if !ok {
+			out[i] = kv
+		}
+	}
+	return out
 }
 
 // resolveServers is the server list for a workspace, with a session's
@@ -552,19 +574,19 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 		return "", err
 	}
 	if builtinServer(id) {
-		return "", fmt.Errorf("%q is a built-in server and cannot be placed in the shell", id)
+		return "", fmt.Errorf("%q is a built-in server: it is always standalone", id)
 	}
 	switch via {
 	case "":
 		if scope == ScopeGlobal {
-			return "", fmt.Errorf("the global placement is shell or direct — it has no unset")
+			return "", fmt.Errorf("the global mode is standalone or scripted — it has no unset")
 		}
 	case ViaDirect, ViaShell:
 	default:
-		return "", fmt.Errorf("via %q: want %q or %q", via, ViaDirect, ViaShell)
+		return "", fmt.Errorf("mode %q: want standalone or scripted", via)
 	}
 	if via == ViaShell && s.OAuth != nil {
-		return "", fmt.Errorf("%q logs in with oauth, and dun holds its token: it cannot run in the shell", id)
+		return "", fmt.Errorf("%q logs in with oauth, and dun holds its token: it cannot be scripted", id)
 	}
 	stored := via
 	if scope == ScopeGlobal && via == ViaDirect {

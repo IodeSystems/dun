@@ -160,10 +160,10 @@ func TestMoveServer_BothWays(t *testing.T) {
 	if h.mgr.ServerStarted("corp") {
 		t.Fatal("a shell-placed server must not be started directly")
 	}
-	if err := h.StartServer(ctx, "corp"); err == nil || !strings.Contains(err.Error(), "inside the shell") {
+	if err := h.StartServer(ctx, "corp"); err == nil || !strings.Contains(err.Error(), "is scripted") {
 		t.Errorf("start on request: %v", err)
 	}
-	if _, err := h.SyncMCPDocs(ctx, "corp"); err == nil || !strings.Contains(err.Error(), "runs inside the shell") {
+	if _, err := h.SyncMCPDocs(ctx, "corp"); err == nil || !strings.Contains(err.Error(), "is scripted") {
 		t.Errorf("refresh: %v", err)
 	}
 	st := h.Servers()[0]

@@ -347,6 +347,7 @@ type ServerState struct {
 	// ViaSession its value at each scope, ViaFrom the deciding scope.
 	// Detail is what it is doing now, as one line.
 	Via        string `json:"via,omitempty"`
+	Proto      string `json:"proto,omitempty"` // "stdio", "https" or "http"
 	Global     string `json:"global,omitempty"`
 	Project    string `json:"project,omitempty"`
 	Session    string `json:"session,omitempty"`

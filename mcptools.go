@@ -54,7 +54,7 @@ func (h *Harness) ServerTools(id string) ([]ToolInfo, error) {
 	case !ok:
 		return nil, fmt.Errorf("no server %q", id)
 	case s.Via == ViaShell:
-		return nil, fmt.Errorf("%s runs inside the shell, which lists its tools itself: help(%q) in eval — /mcp via %s direct to manage them here",
+		return nil, fmt.Errorf("%s is scripted: the shell lists its tools itself, help(%q) in eval — /mcp mode %s standalone to manage them here",
 			id, ShellNamespace(id), id)
 	case !h.mgr.ServerStarted(id):
 		return nil, fmt.Errorf("%s is not running — /mcp on %s first", id, id)

@@ -67,12 +67,11 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 			Description: "docs index (raglit): bare shows status, auto starts it every session"},
 		{Name: "lsp", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: lspState, Detail: lspDetail,
 			Description: "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session"},
-		{Name: "mcp", Usage: "[add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | via <id> shell|direct|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
+		{Name: "mcp", Usage: "[add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | mode <id> standalone|scripted|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
 			Choices: choices("add", "add a server: a form — a preset, or an id and a URL or a local command",
 				"on", "turn a server on: this session, or --project / --global", "off", "turn a server off: this session, or --project / --global",
 				"unset", "clear a server's --project or --session switch", "restart", "restart servers", "remove", "remove a server from the catalog", "refresh", "re-index a server's docs",
-				"via", "place a server in the shell (one eval namespace, no schemas per request) or direct, at a scope",
-				"move", "the same as via",
+				"mode", "standalone (its own tools, schemas in every request) or scripted (in mcpshell, called through eval), at a scope",
 				"toggle", "turn one tool on or off, at a scope",
 				"tools", "what each server's tools cost; with an id, list them and turn some off",
 				"login", "log in to an oauth server in the browser", "logout", "delete (and revoke) an oauth server's token"),
@@ -230,12 +229,12 @@ func routeSlash(line string, r slashRoutes) {
 				id = args[1]
 			}
 			r.control("mcptools", id)
-		case "via", "move":
-			if len(args) < 3 || len(args) > 4 || (arg(2) != dun.ViaShell && arg(2) != dun.ViaDirect && arg(2) != "unset") {
-				r.reply("usage: /mcp via <id> shell|direct|unset [--global|--project|--session] (bare: this session; move is the same)")
+		case "mode", "via", "move":
+			if _, err := dun.NormalizeVia(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
+				r.reply("usage: /mcp mode <id> standalone|scripted|unset [--global|--project|--session] (bare: this session; via and move, shell and direct are the same)")
 				return
 			}
-			r.control("mcp", "via "+strings.Join(lowerAll(args[1:]), " "))
+			r.control("mcp", "mode "+strings.Join(lowerAll(args[1:]), " "))
 		case "toggle":
 			if len(args) < 4 || len(args) > 5 {
 				r.reply("usage: /mcp toggle <id> <tool> on|off|unset [--global|--project|--session] (bare: this session)")

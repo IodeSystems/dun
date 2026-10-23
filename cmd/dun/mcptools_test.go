@@ -78,11 +78,11 @@ func TestToolCost_AndHeavyHint(t *testing.T) {
 	if got := toolCost(st); got != "160 tools · ~38.2k tokens · 12 hidden" {
 		t.Errorf("cost %q", got)
 	}
-	if h := heavyHint(st); !strings.Contains(h, "/mcp tools el") || !strings.Contains(h, "/mcp via el shell") {
+	if h := heavyHint(st); !strings.Contains(h, "/mcp tools el") || !strings.Contains(h, "/mcp mode el scripted") {
 		t.Errorf("hint %q", h)
 	}
 	st.Via = "" // a built-in cannot move
-	if h := heavyHint(st); strings.Contains(h, "via") {
+	if h := heavyHint(st); strings.Contains(h, "mode") {
 		t.Errorf("built-in hint %q", h)
 	}
 	if heavyHint(dun.ServerState{ID: "x", Cost: 100}) != "" {

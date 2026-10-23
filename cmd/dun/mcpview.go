@@ -15,9 +15,9 @@ import (
 //	g  global   on ↔ off
 //	p  project  unset → on → off → unset
 //	s  session  unset → on → off → unset
-//	v  via      shell → direct → unset, at the via scope (session unless
-//	            changed); global has no unset, so it is shell ↔ direct
-//	V  then g/p/s chooses the via scope
+//	m  mode     scripted → standalone → unset, at the mode scope (session
+//	            unless changed); global has no unset, so it is the two
+//	M  then g/p/s chooses the mode scope
 //
 // Each key sends the typed command (/mcp on <id> --global …) through the
 // engine like any other client, and the server event that answers refreshes
@@ -41,8 +41,8 @@ func hotKey(word, key string) string {
 type mcpServersView struct {
 	rows     []dun.ServerState
 	details  []string
-	viaScope string // the scope v writes
-	pickVia  bool   // V was pressed: the next g/p/s picks viaScope
+	viaScope string // the scope m writes
+	pickVia  bool   // M was pressed: the next g/p/s picks viaScope
 }
 
 func (v *mcpServersView) page() pageDoc {
@@ -52,8 +52,8 @@ func (v *mcpServersView) page() pageDoc {
 		body := "switches: global " + cellWord(st.Global) + " · project " + cellWord(st.Project) +
 			" · session " + cellWord(st.Session) + " → " + stateCell(st)
 		if st.Via != "" {
-			body += "\nvia: global " + cellWord(st.ViaGlobal) + " · project " + cellWord(st.ViaProject) +
-				" · session " + cellWord(st.ViaSession) + " → " + viaCell(st)
+			body += "\nmode: global " + modeWord(st.ViaGlobal) + " · project " + modeWord(st.ViaProject) +
+				" · session " + modeWord(st.ViaSession) + " → " + viaCell(st)
 		}
 		body += "\n" + v.details[i]
 		nodes = append(nodes, pageNode{head: serverRow(st, idW, viaW, v.details[i]), body: body, err: st.Err != ""})
@@ -61,15 +61,15 @@ func (v *mcpServersView) page() pageDoc {
 	return pageDoc{title: "mcp servers · " + switchLegend, header: serverHeader(idW, viaW, hotKey), nodes: nodes}
 }
 
-// hint is the status line: the keys, with the scope v writes to.
+// hint is the status line: the keys, with the scope m writes to.
 func (v *mcpServersView) hint() string {
 	if v.pickVia {
-		return stDim.Render("via scope: ") + hotKey("global", "g") + stDim.Render(" · ") + hotKey("project", "p") +
+		return stDim.Render("mode scope: ") + hotKey("global", "g") + stDim.Render(" · ") + hotKey("project", "p") +
 			stDim.Render(" · ") + hotKey("session", "s") + stDim.Render(" · esc cancel")
 	}
 	return hotKey("global", "g") + stDim.Render(" on/off · ") + hotKey("project", "p") + stDim.Render("/") +
-		hotKey("session", "s") + stDim.Render(" unset→on→off · ") + hotKey("via", "v") +
-		stDim.Render(" at "+v.viaScope+" (V+g/p/s: scope) · enter details · esc back")
+		hotKey("session", "s") + stDim.Render(" unset→on→off · ") + hotKey("mode", "m") +
+		stDim.Render(" at "+v.viaScope+" (M+g/p/s: scope) · enter details · esc back")
 }
 
 // serverStates reads a server event's list.
@@ -84,7 +84,7 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 		auto, _ := o["auto"].(bool)
 		running, _ := o["running"].(bool)
 		out = append(out, dun.ServerState{ID: str(o["id"]), Auto: auto, Running: running, Err: str(o["err"]),
-			Via: str(o["via"]), Global: str(o["global"]), Project: str(o["project"]), Session: str(o["session"]),
+			Via: str(o["via"]), Proto: str(o["proto"]), Global: str(o["global"]), Project: str(o["project"]), Session: str(o["session"]),
 			From: str(o["from"]), ViaGlobal: str(o["viaGlobal"]), ViaProject: str(o["viaProject"]),
 			ViaSession: str(o["viaSession"]), ViaFrom: str(o["viaFrom"])})
 		details = append(details, str(o["detail"]))
@@ -141,7 +141,7 @@ func nextTri(v string) string {
 	return "unset"
 }
 
-// nextVia is shell → direct → unset → shell; global has no unset.
+// nextVia is scripted → standalone → unset → scripted; global has no unset.
 func nextVia(v, scope string) string {
 	switch v {
 	case dun.ViaShell:
@@ -164,11 +164,11 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 		}
 		return true
 	}
-	if k == "V" {
+	if k == "M" {
 		v.pickVia = true
 		return true
 	}
-	if k != "g" && k != "p" && k != "s" && k != "v" {
+	if k != "g" && k != "p" && k != "s" && k != "m" {
 		return false
 	}
 	if m.pg.cur < 0 || m.pg.cur >= len(v.rows) {
@@ -185,16 +185,20 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 			scope, cur = dun.ScopeSession, st.Session
 		}
 		line = "mcp " + nextTri(cur) + " " + st.ID + " --" + scope
-	case "v":
+	case "m":
 		if st.Via == "" {
-			m.flashText, m.flashUntil = st.ID+" is built in: it always runs direct", time.Now().Add(flashFor)
+			m.flashText, m.flashUntil = st.ID+" is built in: it is always standalone", time.Now().Add(flashFor)
 			return true
 		}
 		cur := map[string]string{dun.ScopeGlobal: st.ViaGlobal, dun.ScopeProject: st.ViaProject, dun.ScopeSession: st.ViaSession}[v.viaScope]
 		if v.viaScope == dun.ScopeGlobal && cur == "" {
 			cur = dun.ViaDirect
 		}
-		line = "mcp via " + st.ID + " " + nextVia(cur, v.viaScope) + " --" + v.viaScope
+		next := nextVia(cur, v.viaScope)
+		if next != "unset" {
+			next = dun.ModeWord(next)
+		}
+		line = "mcp mode " + st.ID + " " + next + " --" + v.viaScope
 	}
 	if !m.proc.controlCmd("slash", line) {
 		m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)

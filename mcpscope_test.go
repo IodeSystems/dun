@@ -245,3 +245,13 @@ func TestFollowServers_GlobalChangeReachesARunningSession(t *testing.T) {
 		t.Error("global has no unset")
 	}
 }
+
+// An env value that is wholly $NAME is read from dun's environment at start;
+// anything else stays as written.
+func TestEnvRefs(t *testing.T) {
+	t.Setenv("DUNTEST_DSN", "pg://x")
+	got := envRefs([]string{"A=$DUNTEST_DSN", "B=${DUNTEST_DSN}", "C=a$DUNTEST_DSN", "D=lit", "E"})
+	if want := []string{"A=pg://x", "B=pg://x", "C=a$DUNTEST_DSN", "D=lit", "E"}; !slices.Equal(got, want) {
+		t.Errorf("%q", got)
+	}
+}

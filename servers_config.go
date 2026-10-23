@@ -95,7 +95,8 @@ type ServerSpec struct {
 	URL     string            `json:"url,omitempty"`
 	Bearer  string            `json:"bearer,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
-	// Env entries are "KEY=value", passed to the spawned server.
+	// Env entries are "KEY=value", passed to the spawned server. A value that
+	// is only "$NAME" or "${NAME}" is read from dun's environment at start.
 	Env []string `json:"env,omitempty"`
 	// Timeout in seconds for tool discovery; 0 keeps dun's default.
 	Timeout int `json:"timeout,omitempty"`
@@ -233,7 +234,7 @@ func checkOAuth(s ServerSpec, via string) error {
 	case s.Bearer != "":
 		return fmt.Errorf("has both bearer and oauth — keep one")
 	case via == ViaShell:
-		return fmt.Errorf("an oauth server cannot run in the shell: dun holds its token (remove \"via\")")
+		return fmt.Errorf("an oauth server cannot be scripted (run in the shell): dun holds its token (remove \"via\")")
 	case o.Send != "" && o.Send != SendAccessToken && o.Send != SendIDToken:
 		return fmt.Errorf("oauth send %q: want %q or %q", o.Send, SendAccessToken, SendIDToken)
 	case o.RedirectPort < 0 || o.RedirectPort > 65535:
@@ -260,16 +261,33 @@ const (
 	ViaShell  = "shell"
 )
 
+// What the user reads for a placement: standalone (direct — its own tools,
+// every schema in every request) or scripted (in the shell — called through
+// eval, its schemas out of the prompt). The stored values stay "direct" and
+// "shell": an older dun refuses any other "via" and would not start.
+const (
+	ModeStandalone = "standalone"
+	ModeScripted   = "scripted"
+)
+
+// ModeWord is a placement as the user reads it.
+func ModeWord(via string) string {
+	if via == ViaShell {
+		return ModeScripted
+	}
+	return ModeStandalone
+}
+
 // NormalizeVia reads a Via value: "" for direct, ViaShell, or an error naming
-// what is accepted.
+// what is accepted. The user's words are synonyms.
 func NormalizeVia(via string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(via)) {
-	case "", ViaDirect:
+	case "", ViaDirect, ModeStandalone:
 		return "", nil
-	case ViaShell:
+	case ViaShell, ModeScripted:
 		return ViaShell, nil
 	}
-	return "", fmt.Errorf("via %q: want %q or %q", via, ViaDirect, ViaShell)
+	return "", fmt.Errorf("mode %q: want %s or %s", via, ModeStandalone, ModeScripted)
 }
 
 // MountSpec declares an extra local path that must be accessible from both

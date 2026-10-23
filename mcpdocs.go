@@ -110,7 +110,7 @@ func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
 	s, _ := h.spec(id)
 	h.srvMu.Unlock()
 	if s.Via == ViaShell {
-		return "", fmt.Errorf("%s runs inside the shell, and dun indexes the docs only of a server it connects to itself — /mcp move %s direct to index them", id, id)
+		return "", fmt.Errorf("%s is scripted (hosted in the shell), and dun indexes the docs only of a server it connects to itself — /mcp mode %s standalone to index them", id, id)
 	}
 	if !h.mgr.ServerStarted(id) {
 		return "", fmt.Errorf("%s is not running — /mcp on %s first", id, id)

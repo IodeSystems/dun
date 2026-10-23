@@ -11,11 +11,13 @@ import (
 
 // The server switches as commands and as a table (dun mcpscope.go has the
 // model): on/off at global, project or session scope, unset at the last two,
-// and the placement (via) at each.
+// and the mode at each — standalone (dun connects to it; "direct" in the
+// files) or scripted (hosted in mcpshell, called through eval; "shell").
 //
 //	/mcp on|off <id> [--global|--project|--session]   bare: this session
 //	/mcp unset <id> --project|--session
-//	/mcp via <id> shell|direct|unset [--scope]        /mcp move is the same
+//	/mcp mode <id> standalone|scripted|unset [--scope]
+//	                                   via, move and shell|direct are synonyms
 //	/mcp toggle <id> <tool> on|off|unset [--scope]
 
 // switchLegend reads the table's marks.
@@ -97,23 +99,23 @@ func runSwitchCmd(ctx context.Context, h *dun.Harness, alias, verb string, flags
 	return msg + ingestLine(h, id)
 }
 
-// runViaCmd places a server: via <id> shell|direct|unset [--scope].
+// runViaCmd sets a server's mode: mode <id> standalone|scripted|unset [--scope].
 func runViaCmd(ctx context.Context, h *dun.Harness, f []string) string {
-	const usage = "usage: /mcp via <id> shell|direct|unset [--global|--project|--session] (bare: this session)"
+	const usage = "usage: /mcp mode <id> standalone|scripted|unset [--global|--project|--session] (bare: this session)"
 	if len(f) < 2 {
 		return usage
 	}
 	id, via := f[0], strings.ToLower(f[1])
 	scope, err := scopeArg(f[2:], dun.ScopeSession)
 	if err != nil {
-		return "mcp via: " + err.Error()
+		return "mcp mode: " + err.Error()
 	}
-	switch via {
-	case dun.ViaShell, dun.ViaDirect:
-	case "unset":
+	if via == "unset" {
 		via = ""
-	default:
+	} else if v, err := dun.NormalizeVia(via); err != nil {
 		return usage
+	} else {
+		via = map[string]string{"": dun.ViaDirect, dun.ViaShell: dun.ViaShell}[v]
 	}
 	var restarted bool
 	if via == "" { // MoveServer reads "" as direct
@@ -122,10 +124,14 @@ func runViaCmd(ctx context.Context, h *dun.Harness, f []string) string {
 		restarted, err = h.MoveServer(ctx, id, scope, via)
 	}
 	if err != nil {
-		return "mcp via: " + err.Error()
+		return "mcp mode: " + err.Error()
 	}
 	st, _ := stateOf(h, id)
-	msg := id + ": via " + scope + " " + f[1] + " → " + viaCell(st) + " · " + serverDetail(st)
+	word := "unset"
+	if via != "" {
+		word = dun.ModeWord(via)
+	}
+	msg := id + ": mode " + scope + " " + word + " → " + viaCell(st) + " · " + serverDetail(st)
 	if restarted {
 		msg += " · shell restarted"
 	}
@@ -206,18 +212,26 @@ func stateCell(st dun.ServerState) string {
 	return onOff(st.Auto) + " (" + from + ")"
 }
 
-// viaCell is "shell (global)": where it runs, and which switch said so.
+// viaCell is "scripted (global)": the mode, and which switch said so.
 func viaCell(st dun.ServerState) string {
 	if st.Via == "" {
-		return "direct (built-in)"
+		return "standalone (built-in)"
 	}
-	return st.Via + " (" + st.ViaFrom + ")"
+	return dun.ModeWord(st.Via) + " (" + st.ViaFrom + ")"
+}
+
+// modeWord is one scope's mode switch as a word: "" stays unset.
+func modeWord(v string) string {
+	if v == "" {
+		return "unset"
+	}
+	return dun.ModeWord(v)
 }
 
 // tableCols are the column headers after the id, with each one's hotkey
 // (the TUI's /mcp view cycles a column with it). "" is no key.
 var tableCols = []struct{ word, key string }{
-	{"global", "g"}, {"project", "p"}, {"session", "s"}, {"via", "v"}, {"→ state", ""},
+	{"global", "g"}, {"project", "p"}, {"session", "s"}, {"mode", "m"}, {"→ state", ""},
 }
 
 // keyStyle renders a header word with its hotkey letter marked.
@@ -228,7 +242,7 @@ func plainKey(word, _ string) string { return word }
 
 // tableWidths are the id column's and the via column's widths.
 func tableWidths(states []dun.ServerState) (idW, viaW int) {
-	idW, viaW = len("server"), len("via")
+	idW, viaW = len("server"), len("mode")
 	for _, st := range states {
 		idW = max(idW, len(st.ID))
 		viaW = max(viaW, len([]rune(viaCell(st))))
@@ -239,13 +253,13 @@ func tableWidths(states []dun.ServerState) (idW, viaW int) {
 // serverHeader is the table's header row.
 func serverHeader(idW, viaW int, key keyStyle) string {
 	var b strings.Builder
-	b.WriteString(pad("server", idW))
+	b.WriteString(pad("server", idW) + "  " + pad("proto", protoW))
 	for i, c := range tableCols {
 		b.WriteString("  ")
 		w := len([]rune(c.word))
 		if i < 3 {
 			w = max(w, 7)
-		} else if c.word == "via" {
+		} else if c.word == "mode" {
 			w = viaW
 		}
 		if c.key == "" {
@@ -261,7 +275,7 @@ func serverHeader(idW, viaW int, key keyStyle) string {
 // and what it is doing.
 func serverRow(st dun.ServerState, idW, viaW int, detail string) string {
 	cell := func(v string) string { return "   " + cellMark(v) + "   " }
-	return pad(st.ID, idW) + "  " + cell(st.Global) + "  " + cell(st.Project) + "  " + cell(st.Session) +
+	return pad(st.ID, idW) + "  " + pad(st.Proto, protoW) + "  " + cell(st.Global) + "  " + cell(st.Project) + "  " + cell(st.Session) +
 		"  " + pad(viaCell(st), viaW) + "  " + stateCell(st) + " · " + detail
 }
 
@@ -274,6 +288,9 @@ func serverTable(states []dun.ServerState, key keyStyle) string {
 	}
 	return strings.Join(rows, "\n")
 }
+
+// protoW is the proto column: stdio, https, http.
+const protoW = 5
 
 func pad(s string, w int) string {
 	if n := len([]rune(s)); n < w {

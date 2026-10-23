@@ -232,7 +232,7 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 			return msg + "\n" + shellPlacementNote
 		}
 		return msg + "\n" + mcpDocsLine(ctx, h, spec.ID)
-	case "via", "move":
+	case "mode", "via", "move":
 		return runViaCmd(ctx, h, strings.Fields(arg))
 	case "refresh":
 		if arg == "" {
@@ -329,7 +329,7 @@ func heavyHint(st dun.ServerState) string {
 	}
 	hint := "heavy: /mcp tools " + st.ID + " to hide some"
 	if st.Via == dun.ViaDirect {
-		hint += ", or /mcp via " + st.ID + " shell"
+		hint += ", or /mcp mode " + st.ID + " scripted"
 	}
 	return hint
 }
@@ -444,7 +444,7 @@ func serverListing(states []dun.ServerState) string {
 		b.WriteString("\n  tool definitions: ~" + kTokens(total) + " tokens in every request, from " +
 			plural(direct, "running server") + " (/context shows the whole prompt)")
 	}
-	b.WriteString("\n  /mcp on|off <id> [--global|--project|--session] (bare: this session) · /mcp unset <id> --project|--session · /mcp via <id> shell|direct")
+	b.WriteString("\n  /mcp on|off <id> [--global|--project|--session] (bare: this session) · /mcp unset <id> --project|--session · /mcp mode <id> standalone|scripted")
 	return b.String()
 }
 
@@ -523,7 +523,7 @@ func runningSummary(h *dun.Harness, id string) string {
 // hostedSummary is a shell-placed server's state: where the model finds it,
 // and whether the running shell connected it.
 func hostedSummary(st dun.ServerState) string {
-	s := fmt.Sprintf("in the shell as %s (eval: help(%q))", st.Namespace, st.Namespace)
+	s := fmt.Sprintf("scripted as %s (eval: help(%q))", st.Namespace, st.Namespace)
 	switch {
 	case st.Hosted:
 		return s + fmt.Sprintf(" · %d tools · 0 tokens per request (its schemas stay in the shell)", st.Tools)
@@ -535,7 +535,7 @@ func hostedSummary(st dun.ServerState) string {
 
 // shellPlacementNote is what a server gives up in the shell; said where the
 // choice is made.
-const shellPlacementNote = "in the shell its schemas leave every request, but dun no longer indexes its docs (/mcp refresh), " +
+const shellPlacementNote = "scripted, its schemas leave every request, but dun no longer indexes its docs (/mcp refresh), " +
 	"lists its prompts or skills, applies its tool deny-list, or renders its calls — they show as eval"
 
 func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
@@ -563,7 +563,7 @@ func serverHint(states []dun.ServerState) string {
 		}
 		if st.Via == dun.ViaShell {
 			if st.Err != "" {
-				lines = append(lines, fmt.Sprintf("%s (in the shell) did not connect: %s", st.ID, oneLine(st.Err)))
+				lines = append(lines, fmt.Sprintf("%s (scripted) did not connect: %s", st.ID, oneLine(st.Err)))
 			}
 			continue
 		}
@@ -587,7 +587,7 @@ func serversProto(states []dun.ServerState) []proto.ServerState {
 	out := make([]proto.ServerState, 0, len(states))
 	for _, st := range states {
 		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Auth: st.Auth,
-			Via: st.Via, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
+			Via: st.Via, Proto: st.Proto, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
 			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
 			Detail: serverDetail(st)})
 	}

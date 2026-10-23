@@ -88,6 +88,8 @@ type ServerState struct {
 	// ("on", "off", "" unset; Global is never unset); From is the scope that
 	// decided Auto. ViaGlobal, ViaProject and ViaSession are the placement at
 	// each scope ("direct", "shell", ""), ViaFrom the scope that decided Via.
+	// Proto is how dun reaches it: "stdio" (a command) or the URL's scheme.
+	Proto      string `json:"proto,omitempty"`
 	Global     string `json:"global,omitempty"`
 	Project    string `json:"project,omitempty"`
 	Session    string `json:"session,omitempty"`
@@ -136,6 +138,7 @@ func (h *Harness) Servers() []ServerState {
 			Cost:         cost[s.ID],
 			Hidden:       hidden[s.ID],
 			Auth:         h.authState(s),
+			Proto:        serverProto(s),
 			Global:       onOffWord(s.Scopes.GlobalOn(s.Via)),
 			Project:      tri(s.Scopes.Project),
 			Session:      tri(s.Scopes.Session),
@@ -160,6 +163,17 @@ func (h *Harness) Servers() []ServerState {
 		out = append(out, st)
 	}
 	return out
+}
+
+// serverProto is "stdio" for a command, else the URL's scheme.
+func serverProto(s Server) string {
+	if s.URL == "" {
+		return "stdio"
+	}
+	if scheme, _, ok := strings.Cut(s.URL, "://"); ok {
+		return strings.ToLower(scheme)
+	}
+	return "http"
 }
 
 // tri is a switch as shown: "on", "off", or "" unset.
@@ -224,7 +238,7 @@ func (h *Harness) spec(id string) (Server, bool) {
 // missing long after the attempt.
 func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.Via == ViaShell {
-		return fmt.Errorf("%s runs inside the shell — the model calls it through eval as %s; /mcp via %s direct to run it on its own",
+		return fmt.Errorf("%s is scripted — the model calls it through eval as %s; /mcp mode %s standalone to run it on its own",
 			s.ID, ShellNamespace(s.ID), s.ID)
 	}
 	t0 := time.Now()

@@ -243,7 +243,7 @@ func engineCmdsFromEvent(ev evMsg) []engineCmd {
 func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 	return func(m *tuiModel, args []string) tea.Cmd {
 		if name == "mcp" && len(args) > 0 && args[0] == "add" {
-			return m.openMCPForm()
+			return m.openMCPForm(args[1:]...)
 		}
 		// /interrupt: the same command ctrl+g sends, so the status line says
 		// "interrupting…" for it too.
