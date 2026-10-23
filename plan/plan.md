@@ -162,28 +162,9 @@ agents pane exists so a resident child is a choice rather than a leak.
 ### ✅ 27. Surfacing floor — done 2026-10-23, see done.md (open: the coverage
 floor for an index without embeddings, 0.5 + ratio vs 0.67 alone)
 
-### ◐ 28. /repaint and /repaint report (USER, 2026-10-23)
-
-USER: "can we have a /repaint tool, it should capture the screen and the
-state for an optional bugreport ... propose to send it through a llm for
-anonymization and redaction, with an explanation of the issue. I have seen
-some situations where the screen is just mangled." Design approved.
-
-- **/repaint:** capture, then clear screen + scroll region, reset terminal
-  modes, re-query the size, drop holdConvo and the region state, re-render
-  the convo from state; one dim line names the capture dir.
-- **Capture** `$DUN_HOME/bugreports/<ts>/` (0700): expected.{txt,ansi},
-  actual.{txt,ansi} (tmux only), diff.txt, state.json, events.jsonl (a
-  200-entry ring in the Update funnel), README.txt.
-- **/repaint report:** deterministic pre-redaction → model (session model;
-  y/n first when its endpoint is not local) → redacted/ + explanation.md →
-  the same scan as a post-check. Prints the `gh issue create` line; never
-  runs gh.
-- **next:** build, tests, live check in tmux (socket dunlive28).
-- **risks:** a model that does not keep row widths; the expected frame is
-  the last View plus the region's rows, not a read-back of the terminal.
-- **blocking decisions:** none yet.
-- **optional extensions:** a capture without tmux (read-back via a pty).
+### ✅ 28. /repaint and /repaint report — done 2026-10-23, see done.md (open:
+junk written before /repaint is typed is gone by capture time; a ctrl+l
+capture would keep it)
 
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 

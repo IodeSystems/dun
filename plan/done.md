@@ -1870,3 +1870,91 @@ went hybrid by default (raglit e66a3df) the score is RRF (≤ ~0.033), so the
 - **Open decision (USER):** the coverage floor for an index without
   embeddings: 0.5 + ratio (built) vs 0.67 alone (more right, 6 vs 1 wrong,
   same off-topic count). One constant and one branch.
+
+## ✅ 28. /repaint and /repaint report (USER, 2026-10-23)
+
+USER: "can we have a /repaint tool, it should capture the screen and the
+state for an optional bugreport ... propose to send it through a llm for
+anonymization and redaction, with an explanation of the issue. I have seen
+some situations where the screen is just mangled." Design approved by USER
+2026-10-23. Commits `e0d69ca` (capture + repaint), `57ab77c` (report),
+`924b5f6`, `3f5e9ad`, `9c7be69`, `5823629` (fixes from the live run).
+
+- **/repaint** (`cmd/dun/repaint.go`): waits 50 ms (`repaintSettle`, so the
+  last View is flushed), captures, then in one `tea.Sequence`: `termReset`
+  written to the tty (1049h, SGR 0, `ESC ( B`, DECSTBM reset, origin and
+  insert mode off, autowrap on), ClearScrollArea, ClearScreen, WindowSize
+  (a missed resize), the /mouse mode, bracketed paste, hidden cursor, then
+  `repaintDoneMsg`. Before that: the scroll region is reset and set to
+  `wait` (plan returns nil until done, then syncs from scratch), holdConvo
+  dropped, mouse highlight cleared, wrap and viewport caches invalidated,
+  refresh. Not reset: `maxH` (no-shrink rule) and kitty flags (a stack).
+  Ends with "repainted · capture saved to <dir>/".
+- **Capture** `$DUN_HOME/bugreports/<YYYYMMDD-HHMMSS>/` (0700, files 0600):
+  `expected.{txt,ansi}` = the last View (pointer `shown`), the last h rows,
+  each cut to w, the region's `sr.last` laid over rows top..bot;
+  `actual.{txt,ansi}` = `tmux capture-pane -p -e -t $TMUX_PANE` (else "not
+  available: not in tmux"); `diff.txt` (rows that differ, trailing blanks
+  ignored, SO/SI and other C0 bytes dropped from text rows); `state.json`
+  (sizes from dun, the tty and `tmux display`, env, kitty, mouse, layout
+  heights, YOffset, region, focus, what is open, hold, version, vcs
+  commit, session); `events.jsonl` (ring of 200 in the Update funnel, one
+  record per run of the same kind with no summary, engine events looked
+  through procMsg; text ≤ 80 runes, typed keys named not spelled);
+  `README.txt`.
+- **/repaint report** (`cmd/dun/repaintreport.go`, `repaint.go`): the
+  deterministic pass ($HOME → `~___`, user and host names ≥ 3 chars at word
+  boundaries, e-mail, key prefixes/JWT/bearer, any 32+ run mixing upper,
+  lower and digits; every placeholder padded with `_` or cut to the width
+  it replaces) writes `prered/` and `prompt.txt` (ESC shown as `⎋`). Not
+  local (loopback, private, link-local, `localhost`, `.local`/`.lan`/
+  `.home.arpa`/`.internal`, dotless name; dun had no such notion) → y/n
+  via confirmState. Engine control `repaint` (dir checked to be
+  `$DUN_HOME/bugreports/<one level>`) runs a side call kind `repaint` and
+  writes `model-output.txt`; the event carries the dir, never content. The
+  TUI splits `=== FILE … ===` blocks into `redacted/` (falls back to prered
+  per missing file and says so), derives `.txt` and `diff.txt` from the
+  redacted `.ansi`, writes `explanation.md`, re-runs the scan (leaks listed
+  with file:row) and lists rows whose width changed. Prints `gh issue
+  create --web --repo iodesystems/dun --title … --body-file …`; never runs
+  gh.
+- **Tests:** `cmd/dun/repaint_test.go` (all files with a fake tmux, diff
+  rows, no-tmux note, region rows in expected, reset + wait + done line,
+  ring bound, tick runs, procMsg, SO/SI), `repaintreport_test.go`
+  (redaction of path/user/host/email/token at width, commit id kept,
+  placeholder fit, localEndpoint, prompt has no leaks, post-check flags a
+  leak and a width change, fences stripped, confirm only for a remote
+  model), `repaint_test.go` (dir check, one round trip, side call
+  counted). `make test` passes.
+- **Live** (tmux `-L dunlive28`, scratch HOME + DUN_HOME with a copy of
+  the config, own dund, real model local-Qwen3.8-27B at
+  llm.iodesystems.com, plain dir `proj28`): window resized 100x30 → 88x27
+  while streaming; junk printf'd to the pane tty at rows 6, 14, 20 →
+  `/repaint report` → screen restored (no junk in capture-pane after);
+  `diff.txt` "27 and 27 rows, 3 differ" naming exactly rows 6, 14, 20;
+  state sizes 88x27 three ways; y/n asked (endpoint is not local), y →
+  after the provider queue (several "at capacity" retries) `redacted/` +
+  `explanation.md` titled "External tty writes corrupt rendered rows after
+  scroll-region clear", naming rows 6, 14, 20 and the three strings as
+  outside writes, missed resize ruled out. Post-check: no leaks; 20 width
+  warnings in actual.ansi (the model shortened `[text]` runs). `n` at the
+  question: prered/ and prompt.txt written, nothing sent.
+- **Found live and fixed:** SO/SI from tmux made 5 clean rows differ;
+  ticks filled the ring in ~10 s; engine events were all `main.procMsg`;
+  a burst "/repaint⏎" captured a View the renderer had not flushed.
+- **Known / open:**
+  - Junk written BEFORE /repaint is typed is usually gone by capture time:
+    typing "/" opens the palette, the pane height changes, the region
+    syncs, and SyncScrollArea makes the renderer repaint every row. Seen
+    twice live ("0 differ"). The capture shows junk written after the
+    palette opened. A key with no layout change (ctrl+l) would capture
+    first — USER decision.
+  - The model's explanation got the mechanism partly wrong (says the
+    scroll region protects rows from outside writes; it does not).
+  - The model redacted all conversation text, numbers included, and did
+    not keep row widths; the width check reports it.
+  - Seen, not changed: the side call's provider retries set the TUI's
+    retry banner ("provider at capacity … attempt 5"), and it stayed after
+    the report finished, until the next turn.
+  - Layout numbers in state.json are taken after the composer was cleared
+    (README.txt says so); expected is the frame before.
