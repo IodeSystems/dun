@@ -1,0 +1,7 @@
+dist
+android
+ios
+.expo
+src/gql
+pnpm-lock.yaml
+schema.graphql
