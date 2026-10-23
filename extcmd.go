@@ -27,7 +27,8 @@ import (
 // "if": "file" or "dir": it runs with only those of the paths typed, decided
 // by stat when it runs (every path must be taken by some step); and
 // "unless": "--flag": it is skipped when the flag is typed (the flag is not
-// part of the text). A step that errs stops the rest.
+// part of the text); "with": "--flag" is the reverse, it runs only when the
+// flag is typed. A step that errs stops the rest.
 //
 // Placeholders, in args' string values and in cli's elements:
 //
@@ -65,7 +66,7 @@ func (c ExtSlashCmd) steps() []ExtStep {
 
 // empty reports whether s names nothing to do.
 func (s ExtStep) empty() bool {
-	return s.Tool == "" && s.CLI == nil && s.Args == nil && s.If == "" && s.Unless == ""
+	return s.Tool == "" && s.CLI == nil && s.Args == nil && s.If == "" && s.Unless == "" && s.With == ""
 }
 
 // strings are every string the step expands: its args' (nested too) and its
@@ -141,6 +142,8 @@ func (s ExtStep) validate(index *IndexRole) error {
 		return fmt.Errorf(".if: the step uses no {{path}} or {{paths}}")
 	case s.Unless != "" && !flagPattern.MatchString(s.Unless):
 		return fmt.Errorf(".unless: %q — want a flag, --name", s.Unless)
+	case s.With != "" && !flagPattern.MatchString(s.With):
+		return fmt.Errorf(".with: %q — want a flag, --name", s.With)
 	case s.uses("{{path}}") && s.uses("{{paths}}"):
 		return fmt.Errorf(": {{path}} and {{paths}} in one step")
 	}
@@ -176,6 +179,9 @@ func parseCmdInput(c ExtSlashCmd, text, workspace string) (cmdInput, error) {
 	for _, s := range c.steps() {
 		if s.Unless != "" {
 			known[s.Unless] = true
+		}
+		if s.With != "" {
+			known[s.With] = true
 		}
 	}
 	in := cmdInput{workspace: workspace, flags: map[string]bool{}}
@@ -332,7 +338,7 @@ func (h *Harness) RunExtCommand(ctx context.Context, id, command, text string) (
 	taken := map[string]bool{}
 	tools := false
 	for _, st := range steps {
-		if st.Unless != "" && in.flags[st.Unless] {
+		if st.Unless != "" && in.flags[st.Unless] || st.With != "" && !in.flags[st.With] {
 			continue
 		}
 		paths := in.paths

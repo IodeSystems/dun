@@ -35,6 +35,13 @@
       "excludes": {
         "help": "this workspace's index: its exclude GLOBs (ignore), the builtin ones, and allow (exempt from builtin)",
         "tool": "manage_index", "args": {"action": "status", "index": "{{index}}"}
+      },
+      "prune": {
+        "help": "[--yes] — documents whose file is gone (a deleted worktree, a removed directory) are already out of search; list them per directory in this workspace's index, and with --yes remove them",
+        "steps": [
+          {"tool": "manage_index", "args": {"action": "prune", "index": "{{index}}"}, "unless": "--yes"},
+          {"tool": "manage_index", "args": {"action": "prune", "index": "{{index}}", "confirm": true}, "with": "--yes"}
+        ]
       }
     }
   },

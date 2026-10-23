@@ -84,6 +84,7 @@ this workspace's index (the `--index` dun serves it with), not on `dun.json`:
 | `/raglit exclude GLOB [--keep]` | `manage_index ignore` (no new matches), then `purge` (removes the indexed ones and lists them); `--keep` skips the purge |
 | `/raglit unexclude GLOB` | `manage_index unignore` |
 | `/raglit excludes` | `manage_index status`: the ignore, builtin and allow lists |
+| `/raglit prune [--yes]` | documents whose file is gone (a removed worktree or directory) are already out of search; this lists them per directory (`manage_index prune`), and `--yes` removes them. Every index at once: `raglit prune [--yes]` |
 
 A GLOB matches the absolute path (`**/build/**` is a directory anywhere); one
 with no `/` matches the file name (`*.log`). Quote one the shell would
@@ -111,7 +112,7 @@ rest. A step is `tool` + `args` (a call of the extension's own server — a tool
 in `server.disable` works) or `cli` (argv for `roles.index.cli`, run with the
 serve args' `--home`/`--daemon`/`--project`). `if: file|dir` runs a step with
 only those of the paths typed (by stat, when it runs); `unless: --flag` skips
-it when the flag is typed. Placeholders: `{{arg}}` the text (quotes removed,
+it when the flag is typed, and `with: --flag` runs it only then. Placeholders: `{{arg}}` the text (quotes removed,
 case kept), `{{paths}}` each word as an absolute path (a whole value: a JSON
 array, or one argv element per path), `{{path}}` one path (the step runs once
 per path), `{{index}}`/`{{project}}` the names the server is started with,

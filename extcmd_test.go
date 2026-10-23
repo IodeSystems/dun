@@ -25,6 +25,7 @@ func TestExtSlashCmd_ErrorsNameTheField(t *testing.T) {
 		`{"tool":"t","if":"link","args":{"p":"{{path}}"}}`:     "slash.commands.c.if:",
 		`{"tool":"t","if":"file"}`:                             "slash.commands.c.if: the step uses no",
 		`{"tool":"t","unless":"keep"}`:                         "slash.commands.c.unless:",
+		`{"tool":"t","with":"yes"}`:                            "slash.commands.c.with:",
 		`{"tool":"t","args":{"a":"{{path}}","b":"{{paths}}"}}`: "slash.commands.c: {{path}} and {{paths}}",
 		`{"tool":"t","args":{"a":"{{nope}}"}}`:                 "slash.commands.c: unknown placeholder {{nope}}",
 		`{"tool":"t","args":{"a":["x {{paths}}"]}}`:            "slash.commands.c: {{paths}} is a whole value",
@@ -274,12 +275,17 @@ func TestRaglitCommands(t *testing.T) {
 	run("exclude", `Build/** --keep`)
 	run("unexclude", `'**/*.LOG'`)
 	out := run("excludes", "")
+	// prune: a report without --yes, the removal only with it.
+	run("prune", "")
+	run("prune", "--yes")
 	want := []string{
 		`{"action":"ignore","index":"` + idx + `","pattern":"**/*.LOG"}`,
 		`{"action":"purge","confirm":true,"index":"` + idx + `","pattern":"**/*.LOG"}`,
 		`{"action":"ignore","index":"` + idx + `","pattern":"Build/**"}`,
 		`{"action":"unignore","index":"` + idx + `","pattern":"**/*.LOG"}`,
 		`{"action":"status","index":"` + idx + `"}`,
+		`{"action":"prune","index":"` + idx + `"}`,
+		`{"action":"prune","confirm":true,"index":"` + idx + `"}`,
 	}
 	if got := manage(); !slices.Equal(got, want) {
 		t.Errorf("manage_index calls:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

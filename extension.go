@@ -135,13 +135,14 @@ type ExtSlashCmd struct {
 // ExtStep is one thing a command does: a call of the extension's own tool
 // with args, or the index role's CLI with argv cli. If ("file", "dir") runs
 // it with only those of the paths typed; unless ("--flag") skips it when the
-// flag is typed.
+// flag is typed, and with ("--flag") runs it only when the flag is typed.
 type ExtStep struct {
 	Tool   string         `json:"tool,omitempty"`
 	Args   map[string]any `json:"args,omitempty"`
 	CLI    []string       `json:"cli,omitempty"`
 	If     string         `json:"if,omitempty"`
 	Unless string         `json:"unless,omitempty"`
+	With   string         `json:"with,omitempty"`
 }
 
 // ExtRoles are the lookups an extension serves.
