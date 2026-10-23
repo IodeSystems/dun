@@ -252,6 +252,19 @@ func TestEventRingCollapsesTicks(t *testing.T) {
 	}
 }
 
+// Engine events come wrapped in a procMsg; the ring records the event.
+func TestEventRingLooksThroughProcMsg(t *testing.T) {
+	r := newEventRing()
+	r.add(time.Now(), "main.procMsg", procMsg{msg: evMsg{"type": "token", "text": "hello"}})
+	r.add(time.Now(), "main.procMsg", procMsg{msg: evMsg{"type": "user", "content": "my message"}})
+	got := r.jsonl()
+	for _, want := range []string{`"kind":"ev:token","info":"5 bytes"`, `"kind":"ev:user","info":"my message"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("jsonl lacks %s:\n%s", want, got)
+		}
+	}
+}
+
 // tmux marks line-drawing cells with SO/SI; the text rows drop them.
 func TestPlainRowDropsControls(t *testing.T) {
 	if got := plainRow("\x0f\x1b[1m› /repaint\x1b[0m\x0e"); got != "› /repaint" {

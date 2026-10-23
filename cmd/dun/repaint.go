@@ -480,22 +480,40 @@ type evRec struct {
 	last time.Time // the last of a run (n > 1)
 	n    int       // how many in the run
 	kind string
+	ev   bool // kind is an engine event's type: written "ev:<type>"
 	info string
 }
 
 func newEventRing() *eventRing { return &eventRing{} }
 
 // add records one message. kind is msgKind's (computed once per Update).
+//
+// Engine events arrive wrapped in a procMsg (which engine sent it), so the
+// wrapper is looked through: seen live, every engine event was recorded as
+// "main.procMsg" with nothing said about it. The event's type is kept as it
+// is, without the "ev:" prefix, so recording it allocates nothing.
 func (r *eventRing) add(at time.Time, kind string, msg tea.Msg) {
 	if r == nil {
 		return
 	}
+	if pm, ok := msg.(procMsg); ok {
+		msg = pm.msg
+		if _, isEv := msg.(evMsg); !isEv {
+			kind = msgKind(msg) // eofMsg and the like: rare
+		}
+	}
+	ev := false
+	if e, ok := msg.(evMsg); ok {
+		if t, ok := e["type"].(string); ok {
+			kind, ev = t, true
+		}
+	}
 	info := msgSummary(msg)
-	if prev := &r.buf[(r.next-1+evlogSize)%evlogSize]; r.n > 0 && info == "" && prev.info == "" && prev.kind == kind {
+	if prev := &r.buf[(r.next-1+evlogSize)%evlogSize]; r.n > 0 && info == "" && prev.info == "" && prev.kind == kind && prev.ev == ev {
 		prev.last, prev.n = at, prev.n+1
 		return
 	}
-	r.buf[r.next] = evRec{at: at, n: 1, kind: kind, info: info}
+	r.buf[r.next] = evRec{at: at, n: 1, kind: kind, ev: ev, info: info}
 	r.next = (r.next + 1) % evlogSize
 	if r.n < evlogSize {
 		r.n++
@@ -525,6 +543,9 @@ func (r *eventRing) jsonl() string {
 			N     int    `json:"n,omitempty"`     // a run of n
 			Until string `json:"until,omitempty"` // the run's last
 		}{T: e.at.Format("15:04:05.000"), Kind: e.kind, Info: e.info}
+		if e.ev {
+			rec.Kind = "ev:" + e.kind
+		}
 		if e.n > 1 {
 			rec.N, rec.Until = e.n, e.last.Format("15:04:05.000")
 		}
