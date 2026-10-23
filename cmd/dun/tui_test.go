@@ -1034,7 +1034,7 @@ func TestTUI_DocsSourceAndWhy(t *testing.T) {
 	// Titles too long for the row: the kinds alone.
 	d.docs = append(d.docs, docNode{title: "What do I need to do before rolling back the tidewater service?", kind: "memory",
 		why: "2.0× the runner-up (of 3) · score 4e-05"})
-	if c := d.render(false); !strings.Contains(c, "· skill (only candidate), memory") {
+	if c := d.render(false); !strings.Contains(c, "· skill, memory · 1 only candidate") {
 		t.Errorf("collapsed row should fall back to kinds: %s", c)
 	}
 }
