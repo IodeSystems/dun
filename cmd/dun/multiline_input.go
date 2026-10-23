@@ -144,6 +144,8 @@ func (m *multilineInput) SetValue(s string) {
 // the box goes. Escape sequences (colors, OSC links) are stripped; \r\n and
 // a lone \r become \n (a raw \r sends the cursor to column 0 and the line
 // overwrites itself); a tab stays; every other control character goes.
+// ctrlTabRune — ctrl+tab, as the key filter spells it (keyfilter.go) — is a
+// tab: it is how a tab is typed, since plain tab moves between zones.
 func cleanInput(r []rune) []rune {
 	s := string(r)
 	if strings.ContainsRune(s, '\x1b') || strings.ContainsRune(s, '\u009b') {
@@ -157,6 +159,8 @@ func cleanInput(r []rune) []rune {
 			out = append(out, '\n')
 		case c == '\n' || c == '\t':
 			out = append(out, c)
+		case c == ctrlTabRune:
+			out = append(out, '\t')
 		case c < 0x20 || c == 0x7f || (c >= 0x80 && c < 0xa0):
 			// C0, DEL, C1 controls: never text
 		case c == '\u200b' || c == '\ufeff':

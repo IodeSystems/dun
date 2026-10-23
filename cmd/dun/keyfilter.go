@@ -50,21 +50,39 @@ type keyFilter struct {
 	hold []byte // raw bytes that may be the start of a sequence
 }
 
-// shiftEnterSeqs are the encodings rewritten to LF.
-var shiftEnterSeqs = [][]byte{
-	[]byte("\x1bOM"),        // SS3 M — the common one
-	[]byte("\x1b[13;2u"),    // CSI-u (kitty, foot, wezterm)
-	[]byte("\x1b[27;2;13~"), // xterm modifyOtherKeys
+// ctrl+tab and shift+tab, rescued the same way (USER 2026-10-23: tab moves
+// between zones, ctrl+tab types a tab).
+//
+// A legacy terminal sends a plain TAB (0x09) for ctrl+tab — the two are the
+// same byte and nothing here can tell them apart. A terminal that REPORTS the
+// modifier does so as CSI 9;5u (kitty protocol, which dun turns on when the
+// terminal answers the probe, kitty.go) or CSI 27;5;9~ (xterm
+// modifyOtherKeys=2, which dun asks for alongside it), and bubbletea v1
+// swallows both. Each becomes ctrlTabRune, a noncharacter no terminal sends as
+// text, which the composer turns into a literal \t (multiline_input.go).
+//
+// shift+tab under the kitty protocol is CSI 9;2u rather than the legacy CSI Z,
+// and bubbletea swallows that too — so under kitty shift+tab did nothing. It
+// is rewritten to CSI Z, which bubbletea reports as shift+tab.
+const ctrlTabRune = '\uFDD0'
+
+// keyRewrites are the encodings rewritten, and what each becomes.
+var keyRewrites = []struct{ seq, out []byte }{
+	{[]byte("\x1bOM"), []byte("\n")},        // shift+enter: SS3 M — the common one
+	{[]byte("\x1b[13;2u"), []byte("\n")},    // shift+enter: CSI-u (kitty, foot, wezterm)
+	{[]byte("\x1b[27;2;13~"), []byte("\n")}, // shift+enter: xterm modifyOtherKeys
+	{[]byte("\x1b[9;5u"), []byte(string(ctrlTabRune))},
+	{[]byte("\x1b[27;5;9~"), []byte(string(ctrlTabRune))},
+	{[]byte("\x1b[9;2u"), []byte("\x1b[Z")},
+	{[]byte("\x1b[27;2;9~"), []byte("\x1b[Z")},
 }
 
 // maxSeq is the longest sequence, and so the most bytes that can be held back
 // waiting to find out whether they are one.
 var maxSeq = func() int {
 	n := 0
-	for _, s := range shiftEnterSeqs {
-		if len(s) > n {
-			n = len(s)
-		}
+	for _, r := range keyRewrites {
+		n = max(n, len(r.seq))
 	}
 	return n
 }()
@@ -98,8 +116,8 @@ func (k *keyFilter) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// rewriteKeys replaces every complete sequence with LF, returning what to emit
-// and what to hold for the next read.
+// rewriteKeys replaces every complete sequence with its rewrite, returning
+// what to emit and what to hold for the next read.
 //
 // A trailing PARTIAL sequence is held only once at least two bytes of it have
 // arrived. A lone trailing ESC is passed straight through, because holding it
@@ -115,9 +133,9 @@ func rewriteKeys(b []byte, flush bool) (emit, hold []byte) {
 			continue
 		}
 		rest := b[i:]
-		if m := matchSeq(rest); m > 0 {
-			out = append(out, '\n')
-			i += m
+		if n, rw := matchSeq(rest); n > 0 {
+			out = append(out, rw...)
+			i += n
 			continue
 		}
 		if !flush && len(rest) >= 2 && isSeqPrefix(rest) {
@@ -129,14 +147,15 @@ func rewriteKeys(b []byte, flush bool) (emit, hold []byte) {
 	return out, nil
 }
 
-// matchSeq returns the length of the sequence at the front of b, or 0.
-func matchSeq(b []byte) int {
-	for _, s := range shiftEnterSeqs {
-		if bytes.HasPrefix(b, s) {
-			return len(s)
+// matchSeq returns the length of the sequence at the front of b and its
+// rewrite, or 0.
+func matchSeq(b []byte) (int, []byte) {
+	for _, r := range keyRewrites {
+		if bytes.HasPrefix(b, r.seq) {
+			return len(r.seq), r.out
 		}
 	}
-	return 0
+	return 0, nil
 }
 
 // isSeqPrefix reports whether b could still grow into a sequence.
@@ -144,8 +163,8 @@ func isSeqPrefix(b []byte) bool {
 	if len(b) >= maxSeq {
 		return false
 	}
-	for _, s := range shiftEnterSeqs {
-		if bytes.HasPrefix(s, b) {
+	for _, r := range keyRewrites {
+		if bytes.HasPrefix(r.seq, b) {
 			return true
 		}
 	}
