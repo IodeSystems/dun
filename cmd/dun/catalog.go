@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -105,6 +106,10 @@ func skillSlash(m *tuiModel, args []string) tea.Cmd {
 			m.append(stDim.Render("no skills — add <name>/SKILL.md under ~/.dun/skills or .dun/skills (Claude Code's ~/.claude/skills is read too)"))
 			return nil
 		}
+		if len(m.skills) > skillListAll {
+			m.append(skillSummary(m.skills))
+			return nil
+		}
 		var b strings.Builder
 		b.WriteString(stHeader.Render("skills"))
 		for _, s := range m.skills {
@@ -125,8 +130,26 @@ func skillSlash(m *tuiModel, args []string) tea.Cmd {
 		}
 	}
 	if !found {
-		m.append(stErr.Render("no skill " + name + " — /skill lists them"))
-		return nil
+		// Not a name: a part of one. One skill's name matches → that skill;
+		// more → list them; none by name → list what the descriptions match.
+		all := skillChoices(m, name).choices
+		var byName []argChoice
+		for _, c := range all {
+			if c.hits != nil { // matched on the name, not the description
+
+				byName = append(byName, c)
+			}
+		}
+		switch {
+		case len(byName) == 1:
+			name = byName[0].value
+		case len(all) == 0:
+			m.append(stErr.Render("no skill matches " + name + " — /skill lists them"))
+			return nil
+		default:
+			m.append(skillMatches(name, all, len(m.skills), max(40, m.w-4)))
+			return nil
+		}
 	}
 	text := "Use the skill " + name + " (call skill name=" + name + " first)"
 	if len(args) > 1 {
@@ -138,9 +161,61 @@ func skillSlash(m *tuiModel, args []string) tea.Cmd {
 	return nil
 }
 
+// skillListAll is how many skills bare /skill lists one by one; more are
+// summarised by source.
+const skillListAll = 15
+
+// skillMatchMax is how many matches /skill <part of a name> lists.
+const skillMatchMax = 20
+
+// skillSummary is bare /skill for many skills: a count per source, in the
+// order the sources first appear, and how to find one.
+func skillSummary(skills []catalogSkill) string {
+	var order []string
+	count := map[string]int{}
+	for _, s := range skills {
+		if count[s.Source] == 0 {
+			order = append(order, s.Source)
+		}
+		count[s.Source]++
+	}
+	w := 0
+	for _, src := range order {
+		w = max(w, len(src))
+	}
+	var b strings.Builder
+	b.WriteString(stHeader.Render(commaf("%d skills", len(skills))))
+	for _, src := range order {
+		b.WriteString("\n  " + stDim.Render(fmt.Sprintf("%-*s", w, src)) + "  " + stTool.Render(commaf("%d", count[src])))
+	}
+	b.WriteString("\n" + stDim.Render("type /skill <part of a name> to search — the palette lists the matches as you type"))
+	return b.String()
+}
+
+// skillMatches lists the skills a query matched, best first, each on one
+// row of width w.
+func skillMatches(query string, ms []argChoice, total, w int) string {
+	var b strings.Builder
+	b.WriteString(stHeader.Render(fmt.Sprintf("%d of %d skills match %q", len(ms), total, query)))
+	for i, c := range ms {
+		if i == skillMatchMax {
+			b.WriteString("\n  " + stDim.Render(fmt.Sprintf("… %d more — type more of the name", len(ms)-i)))
+			break
+		}
+		b.WriteString("\n  " + choiceLine(c, w))
+	}
+	b.WriteString("\n" + stDim.Render("/skill <name> [text] runs one"))
+	return b.String()
+}
+
 // engineCmd is one of the engine's slash commands (proto.CommandSpec): the
 // TUI shows and completes it, and the engine carries it out.
-type engineCmd struct{ name, usage, desc string }
+type engineCmd struct {
+	name, usage, desc string
+	choices           []engineChoice // the first argument's values
+}
+
+type engineChoice struct{ value, desc string }
 
 func engineCmdsFromEvent(ev evMsg) []engineCmd {
 	items, _ := ev["items"].([]any)
@@ -148,7 +223,14 @@ func engineCmdsFromEvent(ev evMsg) []engineCmd {
 	for _, it := range items {
 		c, _ := it.(map[string]any)
 		if n := str(c["name"]); n != "" {
-			out = append(out, engineCmd{n, str(c["usage"]), str(c["description"])})
+			ec := engineCmd{name: n, usage: str(c["usage"]), desc: str(c["description"])}
+			chs, _ := c["choices"].([]any)
+			for _, ch := range chs {
+				if cm, ok := ch.(map[string]any); ok && str(cm["value"]) != "" {
+					ec.choices = append(ec.choices, engineChoice{str(cm["value"]), str(cm["description"])})
+				}
+			}
+			out = append(out, ec)
 		}
 	}
 	return out

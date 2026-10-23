@@ -891,3 +891,26 @@ says "(just type)" while it is highlighted and not yet capturing.
   (isolating raglit's daemon from the user's was not trivial).
 - **Not done:** the highest-offending-dir rule skips a large `src/` whole in
   a big monorepo; raise `max_dir_files` or include it.
+
+## ✅ Palette argument completion; /skill for many skills (USER, 2026-10-22)
+
+- **Palette** (`cmd/dun/argcomplete.go`): "/<cmd> " + a partial argument lists
+  that command's choices when it has a completer (`completerFor`): ↑/↓, tab
+  completes "/<cmd> <value> ", enter runs it. Count line ("12 of 180 skills").
+  Window of `paletteWindow` (10) rows around the selection — the command list
+  is capped the same way now (it was not capped before).
+- **Matching:** case-folded; name prefix > substring > in-order letters > a
+  description substring; matched letters bright.
+- **Completers:** /skill (names, source, description); every engine command
+  with declared `choices` (/rag, /lsp, /mcp, /docker, /worktree, /ship …);
+  /mcp <subcommand> then a server id (ids from ready/server events). Not done:
+  /resume ids (a disk read + dund call per keystroke), /model names (only
+  known after the picker fetches them).
+- **/skill:** bare with > 15 skills counts them by source; `/skill <part>`
+  that is not a name: one name match runs it, else lists the matches (20).
+- **Live:** tmux, scratch HOME + DUN_HOME, 200 generated skills, fake URL:
+  `/skill rev` ↓↓ tab + text + enter, `/skill tst` (fuzzy) ↓ enter,
+  `/skill zzzq`, `/mcp tools `, `/skill alpha x` (list) — as designed.
+- **Known:** in the palette, enter on "/skill rev" runs the highlighted
+  choice, so the match list is reached with text after the query
+  (`/skill rev fix it`) or outside the palette.

@@ -656,6 +656,7 @@ type tuiModel struct {
 	mcpToolsWant  string          // the server whose /mcp tools this TUI asked for (mcptools.go)
 	engineCmds    []engineCmd     // the engine's slash commands (commands event)
 	skills        []catalogSkill  // from the engine's catalog event
+	serverIDs     []string        // every MCP server's id (ready/servers events), for /mcp completion
 	prompts       []catalogPrompt // MCP prompts, each a slash command
 	replaying     bool            // driven by a trace (--replay), not an engine
 	quitting      bool            // the user is leaving; do not respawn
@@ -1039,6 +1040,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			// In the command palette, tab completes to the highlighted command.
 			if m.paletteActive() {
+				if cmd, l, ok := m.paletteArgs(); ok {
+					if len(l.choices) > 0 {
+						sel := min(max(m.paletteSel, 0), len(l.choices)-1)
+						m.input.SetValue("/" + cmd + " " + l.choices[sel].value + " ")
+						m.input.CursorEnd()
+						m.paletteSel = 0
+						m.refresh()
+					}
+					return m, nil
+				}
 				if ms := m.paletteMatches(); len(ms) > 0 {
 					sel := m.paletteSel
 					if sel < 0 || sel >= len(ms) {
@@ -1243,7 +1254,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
-			if m.paletteActive() && m.paletteSel < len(m.paletteMatches())-1 {
+			if m.paletteActive() && m.paletteSel < m.paletteRows()-1 {
 				m.paletteSel++
 				m.refresh()
 				return m, nil
@@ -1920,6 +1931,13 @@ func (m *tuiModel) noteServers(ev evMsg) {
 	list, ok := ev["servers"].([]any)
 	if !ok {
 		return
+	}
+	// Every server's id, for /mcp's completion.
+	m.serverIDs = m.serverIDs[:0]
+	for _, s := range list {
+		if st, ok := s.(map[string]any); ok && str(st["id"]) != "" {
+			m.serverIDs = append(m.serverIDs, str(st["id"]))
+		}
 	}
 	if m.wantServers == nil {
 		m.wantServers = map[string]bool{}
@@ -2913,7 +2931,11 @@ func (m tuiModel) View() string {
 	case m.searchActive:
 		status = stDim.Render(fmt.Sprintf("match %d/%d  ·  ↑/↓ prev/next · / new search · esc exit", m.matchPos+1, len(m.matches)))
 	case m.paletteActive():
-		status = stDim.Render("command  ·  ↑/↓ select · tab complete · enter run · esc/type to edit")
+		what := "command"
+		if _, _, ok := m.paletteArgs(); ok {
+			what = "argument"
+		}
+		status = stDim.Render(what + "  ·  ↑/↓ select · tab complete · enter run · esc/type to edit")
 	case m.askParked && m.focus != focusConvo:
 		status = stAsk.Render("❓ a question is waiting") + stDim.Render(" · tab, select it, enter to answer · "+m.exitHint())
 	case m.retry != "":
@@ -3910,7 +3932,7 @@ func init() {
 			m.append(stDim.Render("reconnecting…"))
 			return restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 		}},
-		{"skill", "[name] [text]", "skills: bare lists them (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers); with a name, asks the model to use it", skillSlash},
+		{"skill", "[name] [text]", "skills: bare lists them (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers), or counts them by source when there are many; with a name, asks the model to use it; with part of a name, lists the matches", skillSlash},
 		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
 		}},
@@ -4235,6 +4257,13 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 // runPaletteEnter runs the highlighted palette command (preserving any typed
 // args), or the exactly-typed command.
 func (m *tuiModel) runPaletteEnter(v string) tea.Cmd {
+	// An argument choice highlighted: run the command with it.
+	if cmd, l, ok := m.paletteArgs(); ok && len(l.choices) > 0 {
+		sel := min(max(m.paletteSel, 0), len(l.choices)-1)
+		m.input.Reset()
+		m.paletteSel = 0
+		return m.runSlash("/" + cmd + " " + l.choices[sel].value)
+	}
 	fields := strings.Fields(v)
 	matches := m.paletteMatches()
 	sel := m.paletteSel
@@ -4286,9 +4315,14 @@ func (m *tuiModel) showHelp() {
 // palettePanel renders the live command list above the input (like the ask
 // picker), the highlighted row gutter-marked.
 func (m tuiModel) palettePanel() string {
+	if cmd, l, ok := m.paletteArgs(); ok {
+		return m.argPanel(cmd, l) + "\n" + m.input.View()
+	}
 	matches := m.paletteMatches()
-	rows := make([]string, 0, len(matches)+1)
-	for i, c := range matches {
+	lo, hi := paletteRange(m.paletteSel, len(matches))
+	rows := make([]string, 0, hi-lo+1)
+	for i := lo; i < hi; i++ {
+		c := matches[i]
 		line := stTool.Render("/" + c.name)
 		if c.args != "" {
 			line += " " + stDim.Render(c.args)
@@ -4302,6 +4336,8 @@ func (m tuiModel) palettePanel() string {
 	}
 	if len(matches) == 0 {
 		rows = append(rows, stDim.Render("  no matching command · /help"))
+	} else if lo > 0 || hi < len(matches) {
+		rows = append(rows, stDim.Render(fmt.Sprintf("  %d-%d of %d commands", lo+1, hi, len(matches))))
 	}
 	return strings.Join(rows, "\n") + "\n" + m.input.View()
 }
