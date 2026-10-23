@@ -29,7 +29,7 @@
         ]
       },
       "unexclude": {
-        "help": "GLOB — index paths that match GLOB again (an exclude's GLOB, as typed); removed documents come back when they change or are included again",
+        "help": "GLOB — index paths that match GLOB again (an exclude's GLOB, as typed); removed documents come back at raglit's next read of a watched directory, or with include or add-document",
         "tool": "manage_index", "args": {"action": "unignore", "index": "{{index}}", "pattern": "{{arg}}"}
       },
       "excludes": {
