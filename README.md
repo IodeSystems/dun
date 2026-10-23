@@ -282,6 +282,16 @@ names the message type behind the slowest frame. dun also notices its own
 stutter: past a tenth of frames over 16ms it says so once and writes a dump.
 `DUN_PPROF=127.0.0.1:6060` serves `net/http/pprof` from any mode.
 
+**A mangled screen.** `/repaint` clears the screen and the scroll region,
+resets the terminal modes a stray write can change (alt screen, colours,
+charset, margins), asks for the size again and redraws everything from
+dun's state. First it saves a capture to `$DUN_HOME/bugreports/<time>/`
+(mode 0700): the screen dun believes it drew, what the terminal shows
+(inside tmux, from `capture-pane`), a row-by-row diff of the two, the
+sizes, layout and terminal settings, and the last 200 UI messages.
+`README.txt` in the directory says what each file is. Nothing is sent
+anywhere.
+
 **Switch sessions without leaving.** `/resume` opens a picker of every saved
 session for the workspace — newest first, each with its age, entry count and
 **opening message**, because an id is a timestamp and a timestamp says when but

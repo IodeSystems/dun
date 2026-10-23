@@ -684,6 +684,11 @@ type tuiModel struct {
 	// refresh(), the only place content is set.
 	vpc        *viewportCache
 	contentGen uint64
+	// shown is the last frame View returned, and evlog the last messages
+	// Update handled: what /repaint captures (repaint.go). Pointers, for the
+	// reason vpc is one.
+	shown *shownFrame
+	evlog *eventRing
 
 	renderDue   bool              // streamed text arrived; a tick will draw it
 	tickPending bool              // a render tick is already scheduled
@@ -759,7 +764,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto", mouseMode: "all", sr: newScrollRegion()}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto", mouseMode: "all", sr: newScrollRegion(), shown: &shownFrame{}, evlog: newEventRing()}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -810,8 +815,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return cur, tea.Batch(cmds...)
 	}
+	kind := msgKind(msg)
+	m.evlog.add(start, kind, msg) // for /repaint (repaint.go)
 	nm, cmd := m.update(msg)
-	if frames.observeMsg(stageUpdate, time.Since(start), msgKind(msg)) {
+	if frames.observeMsg(stageUpdate, time.Since(start), kind) {
 		// Noticed its own stutter. Say it once, in the conversation, where the
 		// person having the problem is actually looking.
 		if t, ok := nm.(tuiModel); ok {
@@ -1429,6 +1436,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reloadVer = string(msg) // header shows "↻ …"; /reload restarts
 		m.refresh()
 		return m, waitReload(m.lc) // re-arm
+
+	case repaintDoneMsg:
+		m.repaintDone(msg)
+		return m, nil
 
 	case dumpMsg:
 		m.writeDump()
@@ -2979,7 +2990,17 @@ func (m tuiModel) headView() string {
 	return head
 }
 
+// View is drawView, remembered: /repaint's expected screen is the last frame
+// the renderer was handed (repaint.go).
 func (m tuiModel) View() string {
+	out := m.drawView()
+	if m.shown != nil {
+		m.shown.s = out
+	}
+	return out
+}
+
+func (m tuiModel) drawView() string {
 	start := time.Now()
 	defer func() { frames.observe(stageView, time.Since(start)) }()
 	// The inspector is a full-screen overlay — it replaces the normal layout.
@@ -3967,6 +3988,7 @@ func init() {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())
 			return nil
 		}},
+		{"repaint", "", "clear and redraw the whole screen, after saving what dun drew and what the terminal shows to ~/.dun/bugreports/", repaintSlash},
 		{"mouse", "[all|cell|off]", "mouse reporting mode (bare shows it) — `cell` if the wheel should scroll the log; click selects, drag copies, shift+drag (iTerm2: option+drag) is the terminal's own selection", mouseSlash},
 		{"scrolldebug", "", "debug: dump scroll overlay state (rowOffset, blockH, YOffset)", func(m *tuiModel, _ []string) tea.Cmd {
 			var lines []string

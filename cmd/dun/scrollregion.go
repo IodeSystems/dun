@@ -41,6 +41,9 @@ type scrollRegion struct {
 	// held: the region handed its rows back because the pane changed IN PLACE
 	// (see plan), and it takes them again only when the pane next scrolls.
 	held bool
+	// wait: /repaint has cleared the screen, and the region takes no rows
+	// until the clears have run (repaint.go).
+	wait bool
 }
 
 // maxScrollStep bounds how far a single frame may scroll before a repaint is
@@ -90,7 +93,7 @@ func (s *scrollRegion) rowsFor(h int) int {
 // which is one of: nothing (unchanged), a scroll of a few lines (the fast path
 // this exists for), or a full region repaint.
 func (s *scrollRegion) plan(lines []string, top, bot, paneH int, now time.Time) tea.Cmd {
-	if s == nil || s.off {
+	if s == nil || s.off || s.wait {
 		return nil
 	}
 	// Nothing to do is always safe to answer immediately; anything that WRITES
