@@ -869,11 +869,19 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		}
 		// /ext lists the extensions; "call <id> <command> <text>" is an
 		// extension's slash command, a tool call — detached, as any server
-		// round trip is.
+		// round trip is. "watch|attach|detach <id> <args>" are the index
+		// commands (extIndexCmd).
 		if id == "ext" {
 			go func() {
 				msg := extListing(h)
-				if f := strings.SplitN(action, " ", 4); len(f) >= 3 && f[0] == "call" {
+				if f := strings.SplitN(action, " ", 3); len(f) >= 2 && (f[0] == "watch" || f[0] == "attach" || f[0] == "detach") {
+					rest := ""
+					if len(f) == 3 {
+						rest = f[2]
+					}
+					msg = extIndexCmd(ctx, h, f[0], f[1], rest)
+					h.Aside("[control/ext] " + f[1] + " " + f[0] + ": " + msg)
+				} else if f := strings.SplitN(action, " ", 4); len(f) >= 3 && f[0] == "call" {
 					text := ""
 					if len(f) == 4 {
 						text = f[3]

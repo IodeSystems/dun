@@ -125,6 +125,12 @@ func TestRouteSlash(t *testing.T) {
 		"clear":                                {"reset", "", ""},
 		"close":                                {"control", "close", ""},
 		"interrupt":                            {"control", "interrupt", ""},
+		// raglit's index commands keep a path's and a name's case.
+		"raglit watch ~/My Docs --index Hb": {"control", "ext", "watch raglit ~/My Docs --index Hb"},
+		"raglit ATTACH Other:Idx --project": {"control", "ext", "attach raglit Other:Idx --project"},
+		"raglit detach x --global":          {"control", "ext", "detach raglit x --global"},
+		"raglit attach":                     {"control", "ext", "attach raglit"},
+		"poly-lsp attach x":                 {"server", "poly-lsp", "attach x"}, // no search role
 	} {
 		calls = nil
 		routeSlash(line, r)
@@ -191,6 +197,46 @@ func TestJobsListing(t *testing.T) {
 	for _, want := range []string{"2 running", "#3 go test ./... (2m) ⟩ ok  pkg/a 1.2s", "#5 sleep 30 (7s)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("listing lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestParseWatchAndAttach(t *testing.T) {
+	for in, want := range map[string][2]string{
+		"docs":                 {"docs", ""},
+		"~/My Docs --index Hb": {"~/My Docs", "Hb"},
+		"--index=h /abs/dir":   {"/abs/dir", "h"},
+	} {
+		dir, idx, err := parseWatch(strings.Fields(in))
+		if err != nil || dir != want[0] || idx != want[1] {
+			t.Errorf("watch %q: %q %q %v", in, dir, idx, err)
+		}
+	}
+	for _, bad := range []string{"", "--index", "d --bogus"} {
+		if _, _, err := parseWatch(strings.Fields(bad)); err == nil {
+			t.Errorf("watch %q accepted", bad)
+		}
+	}
+	type att struct {
+		index, scope string
+		list         bool
+	}
+	for in, want := range map[string]att{
+		"":              {"", dun.ScopeSession, true},
+		"--list":        {"", dun.ScopeSession, true},
+		"x":             {"x", dun.ScopeSession, false},
+		"p:x --project": {"p:x", dun.ScopeProject, false},
+		"--global p:x":  {"p:x", dun.ScopeGlobal, false},
+		"x --session":   {"x", dun.ScopeSession, false},
+	} {
+		i, s, l, err := parseAttach(strings.Fields(in))
+		if err != nil || (att{i, s, l}) != want {
+			t.Errorf("attach %q: %q %q %v %v", in, i, s, l, err)
+		}
+	}
+	for _, bad := range []string{"a b", "x --bogus"} {
+		if _, _, _, err := parseAttach(strings.Fields(bad)); err == nil {
+			t.Errorf("attach %q accepted", bad)
 		}
 	}
 }

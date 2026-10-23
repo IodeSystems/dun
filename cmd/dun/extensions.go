@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -101,5 +102,138 @@ func extListing(h *dun.Harness) string {
 		}
 	}
 	fmt.Fprintf(&b, "\nadd one: %s/<id>/%s, or .dun/extensions/<id>/ in a project (examples/extensions in dun's repo)", dun.UserExtensionsDir(), dun.ExtensionFile)
+	return b.String()
+}
+
+// extIndexVerb reports whether /<slash> <verb> is one of the index commands
+// e's roles give it (dun/attach.go): watch with an index CLI, attach and
+// detach with a search role. An extension's own command of the same name
+// wins (routeSlash asks it first).
+func extIndexVerb(e dun.Extension, verb string) bool {
+	switch verb {
+	case "watch":
+		return e.Roles.Index != nil && e.Roles.Index.CLI != ""
+	case "attach", "detach":
+		return e.Roles.Search != nil
+	}
+	return false
+}
+
+// parseWatch reads "<dir> [--index N]"; the dir may hold spaces.
+func parseWatch(args []string) (dir, index string, err error) {
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--index" || a == "-index":
+			if i+1 >= len(args) {
+				return "", "", fmt.Errorf("--index needs a name")
+			}
+			i++
+			index = args[i]
+		case strings.HasPrefix(a, "--index="):
+			index = strings.TrimPrefix(a, "--index=")
+		case strings.HasPrefix(a, "-"):
+			return "", "", fmt.Errorf("unknown flag %s", a)
+		default:
+			pos = append(pos, a)
+		}
+	}
+	if len(pos) == 0 {
+		return "", "", fmt.Errorf("which directory?")
+	}
+	return strings.Join(pos, " "), index, nil
+}
+
+// parseAttach reads "<index> [--session|--project|--global]" (bare: the
+// session); no index, or --list, lists.
+func parseAttach(args []string) (index, scope string, list bool, err error) {
+	scope = dun.ScopeSession
+	for _, a := range args {
+		if a == "--list" || a == "-l" {
+			list = true
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			s, ok := dun.ParseScope(a)
+			if !ok {
+				return "", "", false, fmt.Errorf("unknown flag %s", a)
+			}
+			scope = s
+			continue
+		}
+		if index != "" {
+			return "", "", false, fmt.Errorf("one index at a time")
+		}
+		index = a
+	}
+	return index, scope, list || index == "", nil
+}
+
+// extIndexCmd carries out /<slash> watch|attach|detach for extension id;
+// the answer is the message shown.
+func extIndexCmd(ctx context.Context, h *dun.Harness, verb, id, rest string) string {
+	slash := id
+	for _, e := range h.Extensions() {
+		if e.ID == id && e.SlashName() != "" {
+			slash = e.SlashName()
+		}
+	}
+	args := strings.Fields(rest)
+	switch verb {
+	case "watch":
+		dir, index, err := parseWatch(args)
+		if err != nil {
+			return "usage: /" + slash + " watch <dir> [--index NAME] — " + err.Error()
+		}
+		index, out, err := h.WatchDir(ctx, id, dir, index)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out + "\nwatched into index " + index + " — /" + slash + " attach " + index +
+			" to search it in this session (" + h.AttachName(id, index) + " from another project's)"
+	case "attach", "detach":
+		index, scope, list, err := parseAttach(args)
+		if err != nil {
+			return "usage: /" + slash + " " + verb + " <index>|<project>:<index> [--project|--global] — " + err.Error()
+		}
+		if list {
+			if verb == "detach" {
+				return "usage: /" + slash + " detach <index> [--project|--global]"
+			}
+			return attachListing(h, id, slash)
+		}
+		name, path, changed, err := h.AttachIndex(ctx, id, index, scope, verb == "attach")
+		switch {
+		case err != nil:
+			return "error: " + err.Error()
+		case !changed && verb == "attach":
+			return name + " is already attached at " + scope
+		case !changed:
+			return name + " is not attached at " + scope + "\n" + attachListing(h, id, slash)
+		}
+		msg := name + " " + verb + "ed (" + scope + ")"
+		if path != "" {
+			msg += " in " + path
+		}
+		return msg + "\n" + attachListing(h, id, slash)
+	}
+	return "unknown command " + verb
+}
+
+// attachListing is bare /<slash> attach: each attached index and its scopes.
+func attachListing(h *dun.Harness, id, slash string) string {
+	at, err := h.Attachments(id)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	if len(at) == 0 {
+		return slash + ": no indexes attached — /" + slash + " attach <index>|<project>:<index> [--project|--global]"
+	}
+	var b strings.Builder
+	b.WriteString(slash + " attached (searched with this project's indexes when a search names none):")
+	for _, a := range at {
+		fmt.Fprintf(&b, "\n  %-28s %s", a.Index, strings.Join(a.Scopes, ", "))
+	}
 	return b.String()
 }

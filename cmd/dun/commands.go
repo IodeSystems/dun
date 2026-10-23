@@ -95,6 +95,17 @@ func extCommand(e dun.Extension, state, detail string) proto.CommandSpec {
 		pairs = append(pairs, n, firstNonEmpty(c.Description, "calls "+c.Tool))
 		usage += "|" + n
 	}
+	if extIndexVerb(e, "watch") {
+		pairs = append(pairs, "watch", "watch a directory into an index of this project: watch <dir> [--index NAME]")
+		usage += "|watch"
+		names = append(names, "watch")
+	}
+	if extIndexVerb(e, "attach") {
+		pairs = append(pairs, "attach", "search another index too: attach <index>|<project>:<index> [--project|--global]; bare lists",
+			"detach", "stop searching an attached index: detach <index> [--project|--global]")
+		usage += "|attach|detach"
+		names = append(names, "attach")
+	}
 	usage = "[" + usage + "] [--global|--project|--session]"
 	if len(names) > 0 {
 		usage += " | <command> [text]"
@@ -264,6 +275,12 @@ func routeSlash(line string, r slashRoutes) {
 		// typed; anything else is its server's switch.
 		if _, ok := e.Slash.Commands[arg(0)]; ok && len(args) > 0 {
 			r.control("ext", "call "+e.ID+" "+arg(0)+" "+strings.Join(args[1:], " "))
+			return
+		}
+		// watch|attach|detach, by the extension's roles: a directory and an
+		// index name keep their case.
+		if extIndexVerb(e, arg(0)) {
+			r.control("ext", strings.TrimSpace(arg(0)+" "+e.ID+" "+strings.Join(args[1:], " ")))
 			return
 		}
 		r.server(e.ID, strings.Join(lowerAll(args), " "))
