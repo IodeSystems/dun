@@ -13,6 +13,15 @@
 
 ## Conditional — worth doing when the condition fires
 
+### `/integration enable claude` — let dun_list/dun_msg reach Claude Code sessions (bridge to cc-socks) (item 29 follow-up)
+dun_list and dun_msg reach only dun sessions on the same dund
+(`internal/dund/peer.go`). A bridge would list Claude Code sessions through
+cc-socks and deliver into them, behind an opt-in `/integration enable
+claude`. Open: how a Claude Code session is told a message is not from its
+user, and the rate limit across the bridge.
+**Resume condition:** USER asks for it (capacity: yours), and cc-socks
+offers a list/deliver call to build on (systems).
+
 ### The real dun index holds Claude Code worktrees (item 26 finding)
 `dun__dun-main` on the 7420 daemon (2026-10-23): 2582 documents, 2174 under
 `.claude/worktrees/` (with `mobile/node_modules`). dun's own ingest skips

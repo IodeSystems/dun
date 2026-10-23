@@ -1958,3 +1958,72 @@ some situations where the screen is just mangled." Design approved by USER
     the report finished, until the next turn.
   - Layout numbers in state.json are taken after the composer was cleared
     (README.txt says so); expected is the frame before.
+
+## ✅ 29. dun↔dun messaging: dun_list and dun_msg (USER, 2026-10-23)
+
+USER design (approved 2026-10-23): one dun session's model sees and messages
+the other live dun sessions out of band. Naming and worktree rules added by
+USER mid-work. Commits `6680641` (proto), `bd6d3fe` (dund), `35e6d13`
+(tools + queue), `39bc48b` (worktree naming), `a61d893` (engine wiring, TUI).
+
+- **Transport** (`proto/peer.go`): the engine's stdio, the one channel it
+  has to dund. Engine → dund `peer_request{rid, op list|msg, to, text,
+  wake}` (an event dund does NOT log: plumbing); dund → engine
+  `peer_reply{rid, error, sessions | id, name, busy, started}`; dund →
+  target `peer{from, from_name, text, wake}`. No second transport.
+- **dund** (`internal/dund/peer.go`): answered on its own goroutine, never
+  the event reader's (delivery writes to another engine's stdin; two
+  readers waiting on each other's engines would deadlock). Owner's sessions
+  only (`Get` = no such session for others), loaded only (`sendLoaded`
+  never starts an engine; a registered-but-stopped target is "not loaded"),
+  self refused, `peerRateMax` 6 per `peerRateWindow` 1 min per (sender,
+  target), sliding. Busy = `inTurn || asking` from dund's own event
+  tracking. Task = state sidecar status, else goal, else last user echo.
+- **Names** (`nameSessions`): `<folder>:<hhmmss>` — folder = basename of
+  the workspace dund recorded (the source checkout, also for a `--worktree`
+  session, so never `dun-worktree-XXXX`); same basename, different paths →
+  each takes the fewest parent components that tell it from the others
+  (`src/dun` vs `old/dun`, `x/src/dun` vs `b/src/dun`); a name still
+  shared → the id. hhmmss = id past its date (`-2` suffix kept). `to:`
+  takes name or id; unknown/ambiguous lists the candidates.
+- **Worktree column**: dund tracks `proto.Workspace`; a path other than the
+  workspace = a worktree (`wt <branch>` in the listing); the in-place one
+  `--ship` reports is not. `/worktree new` now emits `Workspace` too (it
+  emitted only a control line). In-place branch = `.git/HEAD` read
+  directly (worktree `.git` file followed).
+- **Engine** (`peers.go`, `cmd/dun/peers.go`): `Config.Peers` (a
+  `PeerLink`) set only when `DUN_DUND` is in the env — dund's ExecSpawner
+  sets it, the engine unsets it at start so a dun run in exec does not
+  inherit it. Standalone: tools absent (matches ask/exec/mount: optional
+  tools are left out, not erroring). Children: `childConfig` drops it.
+  Reply wait 15 s (`peerTimeout`).
+- **Delivery** (`Harness.PeerMessage`): queued kinds `queuedPeer`
+  (causesTurn) and `queuedPeerQuiet` (wake:false; rides the next turn via
+  flushSilent). Text = `PeerLabel` ("[dun msg from <name> (session <id>)]
+  … not from your user … cannot answer a question you asked your user …
+  Reply with dun_msg(to:"<id>")"), prefix `[peer] ` when lifted. wake frees
+  `userWaitCh` (exec grace, agent/agent_monitor waits) and pokes `h.wake`
+  so an idle driver runs `continueTurn`. The wait-release texts now say "a
+  message arrived (the user wrote, or another dun session did)".
+  `Pending`/`Queued` count by `causesTurn` (was: not aside).
+- **ask_user**: a peer frame goes to `peerFn`, never `in.answers`; the
+  question stays open and the message lifts into the result after it.
+- **TUI**: `notification{kind:"peer"}` → dim `✉ dun msg from <name> (<id>):
+  <text>`; `dun_msg` renderer (to + text, refusal in red); `dun_list`
+  generic.
+- **Tests**: `internal/dund/peer_test.go` (owner/loaded filter, you marker,
+  busy row, naming incl. collisions and the worktree case, git HEAD, busy vs
+  idle delivery, refusals, rate limit, the stdio round trip, nothing
+  logged), `peers_test.go` (tools only for a root with a link, child has
+  none, rendering, wake default, busy lift + wait freed, idle wake,
+  wake:false, ask not answered), `cmd/dun/peers_test.go` (env unset, frame
+  routing, link round trip, timeout, renderer). `make test` passes.
+- **Assumptions:** reply's busy/started are dund's view at delivery (the
+  engine decides from its own `turnActive`; a turn ending in between makes
+  "busy" stale — the message still arrives); wake:false does not free a
+  wait; the mobile client shows a peer notification with its default
+  notification style.
+- **Not verified:** never run live between two real sessions under a real
+  dund.
+- Out of scope → icebox: Claude Code sessions (`/integration enable
+  claude`).

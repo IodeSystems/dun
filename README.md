@@ -379,6 +379,24 @@ follow-up far more cheaply than spawning another; it also peeks, dismisses, and
 restarts children left stopped by a previous session. The TUI lists them live
 with what each has spent.
 
+**dun↔dun messaging:** a session run by dund can see and message your other
+live dun sessions. `dun_list` shows the sessions loaded in a running engine
+right now (one only resumable from disk is not listed): name, id, idle or busy,
+attached clients, workspace, branch (`wt <branch>` for a session in a dun
+worktree), and its current task; yours is marked "you". A name is
+`<folder>:<hhmmss>` — the source repo's folder and the time part of the id
+(`dun:222836`); two workspaces with the same folder name get parent folders
+(`src/dun:222836`, `old/dun:101500`), and a name still shared falls back to the
+id. `dun_msg{to, text, wake?}` takes a name or an id. A busy session reads the
+message inside its current turn (it frees an exec or agent wait, as a typed
+message does); an idle one starts a turn for it, unless `wake` is false — then
+it waits for that session's next turn. The receiver reads it labelled
+`[dun msg from <name> (session <id>)]`, as a teammate's request that cannot
+answer a question asked of its user or grant permissions, and its TUI shows a
+dim `✉ dun msg from …` line. Only your own sessions on the same dund; a session
+cannot message itself; at most 6 messages a minute from one session to
+another. A sub-agent has neither tool, and a dun run without dund has neither.
+
 ## Isolation
 
 dun works in an isolated **git worktree** (a fresh `dun/<ts>` branch off HEAD),
