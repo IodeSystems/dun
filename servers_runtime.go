@@ -462,6 +462,12 @@ func (h *Harness) rebuildTools() {
 			}, report)
 		}
 	}
+	// dun_list and dun_msg: a root under dund only (cfg.Peers is nil
+	// otherwise, and always for a child — see childConfig).
+	if cfg.Peers != nil && !h.isChild() {
+		toolDefs = append(toolDefs, dunListToolDef(), dunMsgToolDef())
+		dispatch = withPeers(dispatch, cfg.Peers, report)
+	}
 	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
 	// a child never receives `agent`, so depth-1 holds with no counter to get
 	// wrong, and a root never receives `tell_parent`, so it is absent rather

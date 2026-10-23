@@ -362,6 +362,10 @@ type Config struct {
 	// wait is invisible: the retries are logged, and a TUI's logs are not on
 	// screen. See RetryNote.
 	OnRetry func(RetryNote)
+	// Peers reaches the other live dun sessions through dund (peers.go). nil
+	// — no dund on the other end of the engine's stdio — leaves dun_list and
+	// dun_msg out of the tool set.
+	Peers PeerLink
 	// OnRules tells the user something about the project's rules that is not
 	// an answer to a command: the offer to make a large rules block cheaper
 	// (rules.go).
@@ -589,6 +593,8 @@ const (
 	queuedNotification queuedKind = iota // a background job finished
 	queuedUser                           // the user typed while the agent worked
 	queuedAside                          // context worth knowing, never worth a turn
+	queuedPeer                           // another dun session's dun_msg (peers.go)
+	queuedPeerQuiet                      // the same, sent with wake:false
 
 	// queuedKindCount is a sentinel — keep it last. It exists so a test can
 	// walk every kind and assert it has a queuedPolicies entry, since the
@@ -628,6 +634,10 @@ var queuedPolicies = map[queuedKind]queuedPolicy{
 	queuedNotification: {prefix: "[background] ", entryKind: agent.KindNotification, causesTurn: true},
 	queuedUser:         {prefix: "[user] ", entryKind: agent.KindUser, causesTurn: true},
 	queuedAside:        {prefix: "[session] ", entryKind: agent.KindNotification, causesTurn: false},
+	// A peer message carries its own label too (PeerLabel), so it reads the
+	// same flushed as lifted: never as the user.
+	queuedPeer:      {prefix: "[peer] ", entryKind: agent.KindNotification, causesTurn: true},
+	queuedPeerQuiet: {prefix: "[peer] ", entryKind: agent.KindNotification, causesTurn: false},
 }
 
 // policy returns the kind's entry in the table. An unregistered kind falls back
@@ -782,7 +792,7 @@ func (h *Harness) userWaiting() <-chan struct{} {
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()
 	for _, q := range h.queue {
-		if q.kind == queuedUser {
+		if q.kind == queuedUser || q.kind == queuedPeer {
 			return closedCh
 		}
 	}
@@ -950,7 +960,7 @@ func (h *Harness) Pending() int {
 	h.noteMu.Lock()
 	buffered := 0
 	for _, q := range h.queue {
-		if q.kind != queuedAside {
+		if q.policy().causesTurn {
 			buffered++
 		}
 	}
@@ -967,7 +977,7 @@ func (h *Harness) Queued() int {
 	defer h.noteMu.Unlock()
 	n := 0
 	for _, q := range h.queue {
-		if q.kind != queuedAside { // the user did not type it; do not count it
+		if q.policy().causesTurn { // an aside: the user did not type it; do not count it
 			n++
 		}
 	}

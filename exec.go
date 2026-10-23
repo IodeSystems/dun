@@ -864,7 +864,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			// grace early, and "after 10m" for a 12 s wait misleads.
 			out = j.handoffNotice(min(grace, time.Since(start)))
 			if woken {
-				out += "\nHanded over early because the user wrote — their message follows."
+				out += "\nHanded over early because a message arrived (the user wrote, or another dun session did) — it follows."
 			}
 		}
 		if onCall != nil {

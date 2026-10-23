@@ -403,6 +403,7 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner)
 	cfg.Servers = parent.specs // shared manager; nothing is spawned from these
 	cfg.EnableShip = false
 	cfg.Ask = nil
+	cfg.Peers = nil // other sessions talk to the root, not to its children
 	// A child's tokens, retries and compactions are its own business. Forwarding
 	// them to the parent's UI would interleave N children's streams into one
 	// conversation, which is the context re-merge the split exists to prevent.
@@ -936,8 +937,8 @@ func spawnTool(ctx context.Context, h *Harness, prompt, model string, wait bool)
 	case <-ctx.Done():
 		return fmt.Sprintf("agent #%d is still running; the turn was cancelled.", sa.num)
 	case <-h.userWaiting():
-		return fmt.Sprintf("agent #%d is still running; stopped waiting because the user wrote — their "+
-			"message follows. You will be told when it finishes.", sa.num)
+		return fmt.Sprintf("agent #%d is still running; stopped waiting because a message arrived (the user wrote, or another dun session did) — "+
+			"it follows. You will be told when it finishes.", sa.num)
 	}
 	return sa.report()
 }
@@ -1034,9 +1035,9 @@ func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell strin
 			case <-ctx.Done():
 				break waitLoop
 			case <-user:
-				// The user wrote: stop waiting so the message rides this
+				// A message arrived: stop waiting so it rides this
 				// result. The child keeps running.
-				b.WriteString("Stopped waiting because the user wrote — their message follows.\n")
+				b.WriteString("Stopped waiting because a message arrived (the user wrote, or another dun session did) — it follows.\n")
 				break waitLoop
 			case <-time.After(2 * time.Second):
 				// Poll: a child that called ask_parent is blocked on the
