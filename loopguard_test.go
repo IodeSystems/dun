@@ -161,7 +161,7 @@ func TestLoopGuard_NormalizesKeyOrderButNotContent(t *testing.T) {
 // argued out of it. The human decides, once.
 func TestLoopGuard_EscalatesToTheUserOnce(t *testing.T) {
 	h := newNoteHarness(t)
-	h.cfg.Ask = func(context.Context, string, []string, bool, string) (string, error) { return "", nil }
+	h.cfg.Ask = func(context.Context, string, []string, bool, []string) (string, error) { return "", nil }
 	d := withLoopGuard((&counting{}).dispatch, h)
 
 	for i := 0; i < defaultLoopRepeats+loopAskAfter+4; i++ {

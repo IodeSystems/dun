@@ -1552,7 +1552,11 @@ func (h *Harness) AskUser(ctx context.Context, question string, options []string
 	if ask == nil {
 		return "", fmt.Errorf("nobody to ask — this session has no human attached")
 	}
-	return ask(ctx, question, options, false, recommended)
+	var rec []string
+	if recommended != "" {
+		rec = []string{recommended}
+	}
+	return ask(ctx, question, options, false, rec)
 }
 
 // IsDocker reports whether the current exec backend is DockerExec.

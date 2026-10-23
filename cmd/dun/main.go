@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -597,12 +598,16 @@ func main() {
 				TokensBefore: n.TokensBefore, TokensAfter: n.TokensAfter,
 				Turn: n.Turn, SinceLastSecs: n.SinceLastSecs, Cause: n.Cause})
 		}
-		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec string) (string, error) {
+		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {
 			// Paused for the whole wait: the person deciding is not the turn
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
 			return withoutClock(func() (string, error) {
-				em.emit(&proto.Ask{Question: q, Options: opts, Multi: multi, Recommended: rec})
+				ask := &proto.Ask{Question: q, Options: opts, Multi: multi, RecommendedAll: rec}
+				if len(rec) > 0 {
+					ask.Recommended = rec[0]
+				}
+				em.emit(ask)
 				select {
 				case a, ok := <-in.answers:
 					if !ok {
@@ -644,14 +649,14 @@ func main() {
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
 		cfg.OnCompaction = func(n dun.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
-		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec string) (string, error) {
+		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {
 			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi, rec) })
 		}
 		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {
 			return withoutClock(func() (bool, error) {
 				ans, err := humanAsk(actx,
 					fmt.Sprintf("Mount %s as /%s inside the container?", source, name),
-					[]string{"yes", "no"}, false, "")
+					[]string{"yes", "no"}, false, nil)
 				if err != nil {
 					return false, err
 				}
@@ -1502,11 +1507,11 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 
 // humanAsk prompts on the terminal and reads a line. A number picks an option;
 // with multi, comma-separated numbers (e.g. "1,3") pick several.
-func humanAsk(_ context.Context, question string, options []string, multi bool, recommended string) (string, error) {
+func humanAsk(_ context.Context, question string, options []string, multi bool, recommended []string) (string, error) {
 	fmt.Fprintf(os.Stderr, "\n❓ %s\n", question)
 	for i, o := range options {
 		mark := ""
-		if o == recommended {
+		if slices.Contains(recommended, o) {
 			mark = "  (recommended)"
 		}
 		fmt.Fprintf(os.Stderr, "   %d) %s%s\n", i+1, o, mark)

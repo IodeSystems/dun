@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
@@ -12,7 +13,7 @@ func TestWithAsk_MultiPassthrough(t *testing.T) {
 	var gotQ string
 	var gotOpts []string
 	var gotMulti bool
-	ask := func(_ context.Context, q string, opts []string, multi bool, _ string) (string, error) {
+	ask := func(_ context.Context, q string, opts []string, multi bool, _ []string) (string, error) {
 		gotQ, gotOpts, gotMulti = q, opts, multi
 		return "A, C", nil
 	}
@@ -37,7 +38,7 @@ func TestWithAsk_MultiPassthrough(t *testing.T) {
 // A missing `multi` defaults to false (single-select).
 func TestWithAsk_MultiDefaultsFalse(t *testing.T) {
 	var gotMulti = true
-	ask := func(_ context.Context, _ string, _ []string, multi bool, _ string) (string, error) {
+	ask := func(_ context.Context, _ string, _ []string, multi bool, _ []string) (string, error) {
 		gotMulti = multi
 		return "x", nil
 	}
@@ -57,8 +58,8 @@ func TestWithAsk_MultiDefaultsFalse(t *testing.T) {
 // goes back to the model; the user never sees it. USER 2026-10-21.
 func TestWithAsk_RequiresOptionsAndARecommendation(t *testing.T) {
 	asked := ""
-	ask := func(_ context.Context, q string, _ []string, _ bool, rec string) (string, error) {
-		asked = q + "|" + rec
+	ask := func(_ context.Context, q string, _ []string, _ bool, rec []string) (string, error) {
+		asked = q + "|" + strings.Join(rec, ",")
 		return "ok", nil
 	}
 	d := withAsk(nil, ask, nil)
@@ -71,6 +72,13 @@ func TestWithAsk_RequiresOptionsAndARecommendation(t *testing.T) {
 		`{"question":"Q","options":["a","b"],"recommended":"b"}`:   false,
 		`{"question":"Q","options":["a","b","c"],"multi":true}`:    false,
 		`{"question":"","options":["a","b"],"recommended":"a"}`:    true,
+		// recommended as an array: several only with multi, each an option.
+		`{"question":"Q","options":["a","b"],"recommended":["a"]}`:                      false,
+		`{"question":"Q","options":["a","b"],"recommended":["a","b"]}`:                  true,
+		`{"question":"Q","options":["a","b"],"recommended":[]}`:                         true,
+		`{"question":"Q","options":["a","b","c"],"multi":true,"recommended":["a","c"]}`: false,
+		`{"question":"Q","options":["a","b","c"],"multi":true,"recommended":[]}`:        false,
+		`{"question":"Q","options":["a","b","c"],"multi":true,"recommended":["d"]}`:     true,
 	} {
 		asked = ""
 		var tc llm.ToolCall
@@ -90,5 +98,41 @@ func TestWithAsk_RequiresOptionsAndARecommendation(t *testing.T) {
 	}
 	if asked != "" && asked != "Q|" { // the last valid case (multi) passes no recommendation
 		t.Logf("last ask: %s", asked)
+	}
+}
+
+// For multi, `recommended` may name several options: as an array, or as a
+// comma-separated string whose parts are all options. A string that is itself
+// an option stays one, commas and all.
+func TestAskRecommended(t *testing.T) {
+	opts := []string{"lint", "tests", "a, b"}
+	for raw, want := range map[string]string{
+		`["lint","tests"]`: "lint|tests",
+		`"lint, tests"`:    "lint|tests",
+		`"a, b"`:           "a, b",
+		`"lint"`:           "lint",
+		`""`:               "",
+		`null`:             "",
+		`"lint, nope"`:     "lint, nope",
+	} {
+		got := strings.Join(askRecommended([]byte(raw), opts, true), "|")
+		if got != want {
+			t.Errorf("%s: got %q, want %q", raw, got, want)
+		}
+	}
+	// Single-select never splits.
+	if got := askRecommended([]byte(`"lint, tests"`), opts, false); len(got) != 1 {
+		t.Errorf("single split the string: %q", got)
+	}
+}
+
+// The description has to make the case for multi, or models never set it
+// (seen: every question one pick, one recommendation).
+func TestAskToolDef_TeachesMulti(t *testing.T) {
+	td := askToolDef()
+	for _, want := range []string{"Pick several (`multi`: true)", "include, fix, enable", "Pick one"} {
+		if !strings.Contains(td.Function.Description, want) {
+			t.Errorf("description lacks %q", want)
+		}
 	}
 }

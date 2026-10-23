@@ -331,3 +331,33 @@ func TestAsk_TabEditsTheOption(t *testing.T) {
 		}
 	})
 }
+
+// A multi question starts with every recommended option checked and marked;
+// the done row sends them. Single-select still highlights its one.
+func TestAsk_MultiPrechecksTheRecommended(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
+	m = resized(m, 80, 24)
+	m = m.handleEvent(evMsg{"type": "ask", "question": "Fix which?", "options": []any{"lint", "tests", "docs"},
+		"multi": true, "recommended": "lint", "recommended_all": []any{"lint", "docs"}})
+	if !m.askChecked[0] || m.askChecked[1] || !m.askChecked[2] || m.askSel != 0 {
+		t.Fatalf("checked=%v sel=%d", m.askChecked, m.askSel)
+	}
+	if n := strings.Count(m.askPanel(), "(recommended)"); n != 2 {
+		t.Errorf("%d marked, want 2:\n%s", n, m.askPanel())
+	}
+	for range 4 {
+		m = key(m, kDown) // to the done row
+	}
+	m = key(m, kEnter)
+	if m.asking || !strings.Contains(convoText(m), "lint, docs") {
+		t.Errorf("asking=%v convo:\n%s", m.asking, convoText(m))
+	}
+
+	// An engine that sends only `recommended` (single) is read as before.
+	m = newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
+	m = resized(m, 80, 24)
+	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}, "recommended": "B"})
+	if m.askSel != 1 || m.askChecked[1] {
+		t.Errorf("single: sel=%d checked=%v", m.askSel, m.askChecked)
+	}
+}

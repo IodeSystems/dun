@@ -201,7 +201,7 @@ func TestRecap_AppliesWithoutAskingAndReports(t *testing.T) {
 	var note RecapNote
 	h := &Harness{store: st, cfg: Config{
 		SessionFile: path,
-		Ask: func(_ context.Context, q string, _ []string, _ bool, _ string) (string, error) {
+		Ask: func(_ context.Context, q string, _ []string, _ bool, _ []string) (string, error) {
 			t.Errorf("recap must not ask; it asked %q", q)
 			return "leave it alone", nil
 		},

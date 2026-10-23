@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -542,7 +543,7 @@ type tuiModel struct {
 	busyStart     time.Time             // when the current busy turn started
 	asking        bool                  // agent is waiting on an ask_user answer
 	askOptions    []string              // the offered options; a trailing "custom" row is implicit
-	askRec        string                // the option the model recommends (marked, preselected)
+	askRec        []string              // the options the model recommends (marked, preselected)
 	askSel        int                   // highlighted answer row (== len(askOptions) → the custom row)
 	askNote       string                // optional detail attached to the chosen option ("n")
 	askMulti      bool                  // multi-select: space toggles, enter submits the checked set
@@ -2241,9 +2242,22 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		m.askMulti, _ = ev["multi"].(bool)
 		m.askChecked = make([]bool, len(m.askOptions))
-		m.askRec = str(ev["recommended"])
+		// recommended_all lists them all (several only for multi); an older
+		// engine sends just recommended.
+		m.askRec = nil
+		if all, ok := ev["recommended_all"].([]any); ok {
+			for _, r := range all {
+				m.askRec = append(m.askRec, fmt.Sprint(r))
+			}
+		} else if r := str(ev["recommended"]); r != "" {
+			m.askRec = []string{r}
+		}
 		for i, o := range m.askOptions {
-			if o == m.askRec && !m.askMulti {
+			switch {
+			case !slices.Contains(m.askRec, o):
+			case m.askMulti:
+				m.askChecked[i] = true // checked to start with; done takes them
+			default:
 				m.askSel = i // enter takes the recommendation
 			}
 		}
@@ -3074,7 +3088,7 @@ func (m tuiModel) askPanel() string {
 			}
 			label = box + opt
 		}
-		if opt == m.askRec {
+		if slices.Contains(m.askRec, opt) {
 			label += stDim.Render("  (recommended)")
 		}
 		rows = append(rows, gut(label, sel(i)))

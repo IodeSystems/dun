@@ -213,7 +213,10 @@ type Ask struct {
 	Question    string   `json:"question"`
 	Options     []string `json:"options"`
 	Multi       bool     `json:"multi"`
-	Recommended string   `json:"recommended,omitempty"`
+	Recommended string   `json:"recommended,omitempty"` // the first of RecommendedAll, for older clients
+	// RecommendedAll is every option the model recommends: one, or for multi
+	// the ones to check (any number).
+	RecommendedAll []string `json:"recommended_all,omitempty"`
 }
 
 // Mount asks to mount a host path into the container; answered yes or no.

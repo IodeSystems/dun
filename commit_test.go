@@ -174,7 +174,7 @@ func TestAskUser_NobodyAttached(t *testing.T) {
 		t.Fatalf("want a nobody-to-ask error, got %v", err)
 	}
 	asked := ""
-	h = &Harness{cfg: Config{Ask: func(_ context.Context, q string, _ []string, _ bool, _ string) (string, error) {
+	h = &Harness{cfg: Config{Ask: func(_ context.Context, q string, _ []string, _ bool, _ []string) (string, error) {
 		asked = q
 		return "commit", nil
 	}}}
