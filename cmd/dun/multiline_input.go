@@ -43,7 +43,8 @@ type multilineInput struct {
 	scroll      int    // first visible display row
 	placeholder string
 	focused     bool
-	blinkOn     bool // is the caret visible right now?
+	blinkOn     bool      // is the caret visible right now?
+	typedAt     time.Time // last key; the caret holds solid while typing
 
 	// pastes holds the text of each paste token in buf. A token rune not in
 	// the table is ordinary text.
@@ -165,14 +166,18 @@ func (m *multilineInput) Focus() {
 }
 func (m *multilineInput) Blur() { m.focused = false }
 
+// caretBlink is the blink half-period. The caret stays solid while keys
+// arrive and starts blinking once typing has paused for one period.
+const caretBlink = 530 * time.Millisecond
+
 // BlinkTick toggles the caret visibility and returns the next tick command.
 // When the input is not focused the caret is always on (no blink while idle).
 func (m *multilineInput) BlinkTick() tea.Cmd {
 	if !m.focused {
 		return nil
 	}
-	m.blinkOn = !m.blinkOn
-	return tea.Tick(530*time.Millisecond, func(time.Time) tea.Msg {
+	m.blinkOn = !m.blinkOn || time.Since(m.typedAt) < caretBlink
+	return tea.Tick(caretBlink, func(time.Time) tea.Msg {
 		return blinkTickMsg{}
 	})
 }
@@ -625,6 +630,7 @@ func (m *multilineInput) HandleKey(msg tea.KeyMsg) multilineInput {
 	if !m.focused {
 		return *m
 	}
+	m.typedAt, m.blinkOn = time.Now(), true
 
 	// Named-key bindings are matched on String(), but ONLY for keys that are not
 	// plain runes: a bracketed paste arrives as KeyRunes, and pasting the word

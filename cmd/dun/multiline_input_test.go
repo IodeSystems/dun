@@ -358,3 +358,23 @@ func BenchmarkComposerLongLineLayout(b *testing.B) {
 		_ = in.computeLayout(in.wrapWidth())
 	}
 }
+
+// The caret stays solid while keys arrive and blinks once typing pauses.
+func TestMultilineInput_CaretSolidWhileTyping(t *testing.T) {
+	in := newMultilineInput()
+	in.Focus()
+	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	in.BlinkTick()
+	if !in.blinkOn {
+		t.Fatal("caret blinked off right after a key")
+	}
+	in.typedAt = time.Now().Add(-2 * caretBlink)
+	in.BlinkTick()
+	if in.blinkOn {
+		t.Fatal("caret did not blink after typing paused")
+	}
+	in.BlinkTick()
+	if !in.blinkOn {
+		t.Fatal("caret did not blink back on")
+	}
+}
