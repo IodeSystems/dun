@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -142,13 +144,90 @@ func (h *Harness) fileTools() *filetools.Toolset {
 	return ts
 }
 
+// tmpRoots are the directories read, grep and list may also look in by
+// absolute path: scratch output, a test's log, a command's dump all land there,
+// and refusing the path exec just printed sends the model back to cat (USER
+// 2026-10-23). Reads only — a change to /tmp still goes through exec.
+func tmpRoots() []string {
+	roots := []string{"/tmp"}
+	if d := os.TempDir(); filepath.Clean(d) != "/tmp" {
+		roots = append(roots, d)
+	}
+	var out []string
+	for _, r := range roots {
+		if real, err := filepath.EvalSymlinks(r); err == nil {
+			out = append(out, real)
+		}
+	}
+	return out
+}
+
+// tmpReaders is a read-only toolset per tmp root, configured like ts (same
+// caps and prefix). Resolve keeps the path as the model wrote it, so a read's
+// header says /tmp/x.log, not x.log.
+func tmpReaders(cfg filetools.Config) []*filetools.Toolset {
+	var out []*filetools.Toolset
+	for _, root := range tmpRoots() {
+		c := cfg
+		c.Root, c.ReadOnly, c.ExtraIgnore = root, true, nil
+		c.Resolve = func(rel string) (string, error) { return filetools.Under(root, rel) }
+		ts, err := filetools.New(c)
+		if err != nil {
+			continue
+		}
+		out = append(out, ts)
+	}
+	return out
+}
+
+// tmpReaders is tmpReaders for this session's files config; nil when the
+// file tools are off. Rebuilt with the tool set: they track no reads that
+// matter, since nothing writes through them.
+func (h *Harness) tmpReaders() []*filetools.Toolset {
+	cfg, ok := h.cfg.Files.toolsetConfig(h.cfg.Workspace)
+	if !ok {
+		return nil
+	}
+	return tmpReaders(cfg)
+}
+
+// tmpReader is the tmp toolset for a read, grep or list call whose path is
+// absolute, outside the working tree, and under a tmp root; nil otherwise.
+func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args string) *filetools.Toolset {
+	switch ts.Bare(name) {
+	case filetools.Read, filetools.Grep, filetools.List:
+	default:
+		return nil
+	}
+	var a struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(args), &a) != nil || !filepath.IsAbs(strings.TrimSpace(a.Path)) {
+		return nil
+	}
+	p := filepath.Clean(strings.TrimSpace(a.Path))
+	if _, err := filetools.Under(ts.Root(), p); err == nil {
+		return nil // inside the working tree: the tree's toolset has it
+	}
+	for _, t := range tmp {
+		if _, err := filetools.Under(t.Root(), p); err == nil {
+			return t
+		}
+	}
+	return nil
+}
+
 // withFiles routes the file tools to the toolset and reports each call.
-func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if !ts.Handles(tc.Function.Name) {
 			return inner(ctx, tc)
 		}
-		out := ts.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
+		route := ts
+		if t := tmpReader(ts, tmp, tc.Function.Name, tc.Function.Arguments); t != nil {
+			route = t
+		}
+		out := route.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
 		if onCall != nil {
 			var args map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
@@ -168,7 +247,8 @@ func systemFiles(ts *filetools.Toolset) string {
 	if len(names) == 0 {
 		return ""
 	}
-	line := "\n- " + strings.Join(names, ", ") + ": read, search and change files in the working tree, by paths relative to it. " +
+	line := "\n- " + strings.Join(names, ", ") + ": read, search and change files in the working tree, by paths relative to it " +
+		"(read, grep and list also take an absolute path under /tmp). " +
 		"Prefer them to exec for reading files (not cat/head/sed), searching (not grep/rg/find)"
 	if ts.Handles(ts.Name(filetools.Edit)) {
 		line += " and editing (not sed or heredocs)"

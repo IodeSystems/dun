@@ -213,3 +213,42 @@ func TestLoadFiles_Layers(t *testing.T) {
 		t.Fatalf("tools: null must inherit, got %v", c.Tools)
 	}
 }
+
+// Reads, greps and lists reach /tmp by absolute path; changes do not, and a
+// path outside both the tree and /tmp is still refused.
+func TestFileTools_ReadTmp(t *testing.T) {
+	h := startFiles(t, Config{})
+	dir, err := os.MkdirTemp("/tmp", "dun-readtmp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	log := filepath.Join(dir, "run.log")
+	os.WriteFile(log, []byte("alpha\nneedle beta\n"), 0o644)
+
+	if out := dispatchFile(t, h, "file_read", `{"path":"`+log+`"}`); !strings.Contains(out, "needle beta") || !strings.Contains(out, log) {
+		t.Errorf("read of %s:\n%s", log, out)
+	}
+	if out := dispatchFile(t, h, "file_grep", `{"pattern":"needle","path":"`+dir+`"}`); !strings.Contains(out, "needle beta") {
+		t.Errorf("grep under %s:\n%s", dir, out)
+	}
+	if out := dispatchFile(t, h, "file_list", `{"path":"`+dir+`"}`); !strings.Contains(out, "run.log") {
+		t.Errorf("list of %s:\n%s", dir, out)
+	}
+	if out := dispatchFile(t, h, "file_write", `{"path":"`+filepath.Join(dir, "new.txt")+`","content":"x"}`); !strings.Contains(out, "ERROR") {
+		t.Errorf("a write to /tmp went through:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new.txt")); err == nil {
+		t.Error("the write landed in /tmp")
+	}
+	if out := dispatchFile(t, h, "file_read", `{"path":"/etc/hostname"}`); !strings.Contains(out, "outside the root") {
+		t.Errorf("a read outside the tree and /tmp:\n%s", out)
+	}
+	// A link in /tmp that points out of it is not followed.
+	link := filepath.Join(dir, "out")
+	if err := os.Symlink("/etc", link); err == nil {
+		if out := dispatchFile(t, h, "file_read", `{"path":"`+link+`/hostname"}`); !strings.Contains(out, "outside the root") {
+			t.Errorf("read through a link out of /tmp:\n%s", out)
+		}
+	}
+}

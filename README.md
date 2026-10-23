@@ -461,7 +461,8 @@ Next: run the MCP servers inside the container too. See `plan/plan.md`.
 `file_read`, `file_edit`, `file_write`, `file_grep` and `file_list` are built
 in (agentkit's `files` package), rooted at the session's working tree — the
 worktree when there is one. A path that climbs out, by `..`, an absolute path
-or a symlink, is refused. Reads are line-numbered and capped (8KB with no
+or a symlink, is refused — except that `file_read`, `file_grep` and `file_list`
+also take an absolute path under `/tmp` (and `$TMPDIR`), read only. Reads are line-numbered and capped (8KB with no
 range, 64KB with one, and the result says how to page); edits replace text that
 must match exactly once and return the diff; grep respects `.gitignore` and uses
 `rg` when it is on PATH. `file_delete` and `file_move` exist but are off unless
