@@ -136,3 +136,52 @@ func TestEsc_ShowsHowToExit(t *testing.T) {
 		t.Error("ctrl+c should still quit")
 	}
 }
+
+// The question panel going away must not move the conversation: not when the
+// panel closes, and not when the answer and the reply arrive after it. It used
+// to grow the pane, scroll every row down, then scroll them back (the bounce).
+func TestAsk_ClosingDoesNotMoveTheConversation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyMsg
+		back int // rows scrolled back first
+	}{{"answer", kEnter, 0}, {"park", kEsc, 0}, {"scrolled back", kEnter, 3}} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := tallConvo(t)
+			v.m.proc = &dunProc{stdin: &echoWC{}}
+			v.m.busy = true
+			v.event(map[string]any{"type": "ask", "question": "Which?", "options": []any{"A", "B", "C"}})
+			for i := 0; i < tc.back; i++ {
+				v.m = key(v.m, kUp) // on the first option: scrolls the conversation
+			}
+			top := func() string { return v.m.vp.lines[v.m.vp.YOffset] }
+			yoff, row := v.m.vp.YOffset, top()
+
+			nm, _ := v.m.Update(tc.key) // no echo yet: the engine answers later
+			v.m = nm.(tuiModel)
+			if v.m.asking {
+				t.Fatal("the panel should be closed")
+			}
+			if v.m.vp.YOffset != yoff || top() != row {
+				t.Fatalf("closing moved the conversation: yoff %d -> %d, top %q -> %q", yoff, v.m.vp.YOffset, row, top())
+			}
+			// Answered here, or (parked) on another client.
+			v.event(map[string]any{"type": "answered", "value": "A"})
+			v.event(map[string]any{"type": "token", "text": "ok"})
+			if v.m.vp.YOffset != yoff || top() != row {
+				t.Fatalf("the answer moved the conversation: yoff %d -> %d, top %q -> %q", yoff, v.m.vp.YOffset, row, top())
+			}
+			// Enough new rows end the hold, and the pane follows the bottom again.
+			for i := 0; i < 10; i++ {
+				v.event(map[string]any{"type": "token", "text": "\nmore"})
+			}
+			v.event(map[string]any{"type": "done"})
+			if v.m.convoHold != 0 {
+				t.Errorf("hold still on after the content passed it: %d", v.m.convoHold)
+			}
+			if tc.back == 0 && !v.m.vp.AtBottom() {
+				t.Error("pinned pane should follow the new rows")
+			}
+		})
+	}
+}

@@ -549,6 +549,8 @@ type tuiModel struct {
 	askChecked    []bool                // per-option checked state (multi mode; len == len(askOptions))
 	noting        bool                  // capturing a detail for the selected option
 	customAnswer  bool                  // capturing a free-text / chat answer
+	convoHold     int                   // the convo pane keeps at least this many rows (holdConvo)
+	convoHoldW    int                   // the pane width convoHold was measured at
 	md            *glamour.TermRenderer // markdown renderer for assistant replies
 	mdWidth       int                   // width md was built for (rebuild only on change)
 	history       []string              // sent inputs, recalled with ctrl+↑/↓
@@ -1875,6 +1877,7 @@ func (m tuiModel) clearAsk() tuiModel {
 	m.input.placeholder = "ask dun to do something…"
 	m.input.Focus()
 	m.focus = focusInput
+	m.holdConvo()
 	return m
 }
 
@@ -2415,6 +2418,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.pendingTool = -1
 		m.activeTool = ""
 		m.sel = -1
+		m.convoHold = 0
 		m.busy, m.asking = false, false
 		m.suggestions, m.suggestSel = nil, 0 // they were about the conversation just cleared
 		m.settleAsk()
@@ -3516,6 +3520,17 @@ func (m *tuiModel) refresh() {
 			m.convo[i].rowOffset = cumRow
 		}
 		cumRow += h
+	}
+	// A closed question's rows stay in the pane until new rows take them
+	// (holdConvo): blank rows at the bottom, so nothing above them moves.
+	if m.convoHold > 0 {
+		if m.vp.Width != m.convoHoldW || len(rendered) >= m.convoHold {
+			m.convoHold = 0
+		} else {
+			for len(rendered) < m.convoHold {
+				rendered = append(rendered, "")
+			}
+		}
 	}
 	// Hand the pane the rows themselves. Joining them into one string only for
 	// it to split them back was ~12ms of every refresh on a long conversation —

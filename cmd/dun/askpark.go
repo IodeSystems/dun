@@ -74,6 +74,7 @@ func (m tuiModel) parkAsk() (tea.Model, tea.Cmd) {
 	m.input.placeholder = "ask dun to do something…"
 	m.input.Focus()
 	m.focus = focusInput
+	m.holdConvo()
 	m.refresh()
 	return m, m.flash("question left open — select it in the conversation (tab) and press enter to answer")
 }
@@ -105,4 +106,27 @@ func (m *tuiModel) settleAsk() {
 		m.convo[i].renderAsk(false)
 	}
 	m.askParked = false
+}
+
+// holdConvo keeps the conversation where it is when the question panel
+// closes. Call it after the panel has gone (asking is false).
+//
+// The panel is several rows and the composer one, so the conversation pane
+// grows by the difference. Pinned to the bottom, the pane then showed that many
+// older rows at the top and every row moved down; the answer and the next reply
+// arrived a moment later and moved them all back up. That was the bounce.
+//
+// Instead the top row stays put: the pane is given blank rows at the bottom up
+// to the new height (refresh pads to convoHold), and the rows that arrive next
+// fill them. The hold ends when the content reaches it, or at a new width.
+func (m *tuiModel) holdConvo() {
+	yoff := m.vp.YOffset
+	h := m.convoHeightBudget()
+	if yoff == 0 || h <= m.vp.Height {
+		return // nothing above the pane to move down, or the pane did not grow
+	}
+	m.convoHold, m.convoHoldW = yoff+h, m.vp.Width
+	m.vp.setHeight(h)
+	m.refresh()
+	m.vp.SetYOffset(yoff)
 }
