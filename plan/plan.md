@@ -158,7 +158,7 @@ watcher keeps it fresh, and dun only reads it.
   `/raglit attach|detach <index> [--project|--global]` adds it to the
   model's search calls and the proactive search, with the same three
   scopes as /mcp.
-- **next:** wait for raglit-dd's reply and the /mcp scopes branch; then
+- **next:** wait for raglit-dd's reply (the /mcp scopes are merged); then
   build the dun side on its scope storage.
 - **risks:** dun relies on raglit's CLI (serve/ingest/forget/search with
   --project/--index); C could break it. The list was sent to raglit-dd.
