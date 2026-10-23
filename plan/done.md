@@ -1285,3 +1285,79 @@ against c410052.
   scopes add up (no scope hides another's attachment); `attach` names an
   index, not a namespace (`proj:*` is refused: raglit reads only a named
   index of an undeclared project); watch does not auto-attach.
+
+## ✅ 22. Extension slash commands as a proxy; raglit include/exclude (USER, 2026-10-23)
+
+USER's design: a manifest gives its slash command more commands, each an MCP
+call to the extension's own server or a run of its CLI; raglit's
+include/exclude are the first. Commits `8688a63` (proxy), `ceed0be`
+(raglit). Checked against raglit c410052 (`manage_index` ignore, unignore,
+purge with confirm, status; MCP `ingest` paths; `watch DIR --index`).
+
+- **Schema** (`extcmd.go`, `ExtSlashCmd`/`ExtStep` in `extension.go`):
+  `slash.commands.<name>` = `{help, tool, args}` | `{help, cli}` |
+  `{help, steps: [step…]}`; a step is `tool`+`args` or `cli`, plus
+  optional `if: file|dir` and `unless: --flag`. Placeholders `{{arg}}`
+  (text, quotes removed, case kept), `{{paths}}` (whole value: JSON array /
+  argv elements), `{{path}}` (step runs per path), `{{index}}`/`{{project}}`
+  (serve args' `--index`/`--project`, else the workspace's), `{{workspace}}`.
+  Unknown placeholders, `{{path}}`+`{{paths}}` in one step, `if` without a
+  path placeholder, a cli step without `roles.index.cli` are manifest
+  errors that name the field.
+- **Run:** text split with shell quoting (`SplitShell`, moved from
+  cmd/dun); declared `unless` flags taken out; paths absolute against the
+  workspace (`~/` = home); stat decides `if`, every path must be taken by a
+  step; a tool step needs the server running (a tool in `disable` works),
+  a cli step does not; steps run in order, an error stops the rest; the
+  answer is each reply (JSON indented), `› <step>` before each when more
+  than one ran. `WatchDir` now uses the same CLI runner (`runIndexCLI`:
+  argv + serve args' `--home/--daemon/--project/--embedded`, detached).
+- **Routing:** unchanged path — routeSlash → control `ext` `call <id>
+  <cmd> <text>` (text as typed) → `RunExtCommand`. Bare `/raglit` lists
+  `commands:` with help; the completion choices carry the help.
+- **Manifest changes:** `arg` replaced by `args` + `{{arg}}`; per-command
+  `description` renamed `help` (the test extension migrated).
+- **Tests:** `extcmd_test.go` (field-named errors, input/placeholder
+  expansion, a user extension over the fake raglit: dir → watch, file →
+  ingest, disabled tool called, ignore→purge order, `--keep`, an error
+  stops the rest, no-text and missing-path errors; the raglit manifest's
+  five commands against the serve args' index); `cmd/dun`: routing keeps
+  case/quotes, completion help, bare /raglit lists commands. `make test`
+  passes.
+- **Live** (tmux `-L dunlive22`, scratch HOME + DUN_HOME + RAGLIT_ROOT,
+  `RAGLIT_DAEMON=http://127.0.0.1:7498`, own daemon built from `git
+  archive c410052`, real model local-Qwen3.8-27B, workspace `proj22` on
+  `main`, so `{{index}}` = `proj22-main`):
+  - Bare `/raglit` listed the 5 commands + watch/attach/detach with help.
+  - `/raglit include ../handbook22 ../loose22/loose-note.md` → `raglit
+    watch …/handbook22 --index proj22-main` (root added to
+    `raglitroot/projects/proj22/config.json`, 2 queued into
+    `proj22__proj22-main`, watch on) and MCP `ingest` of the file. CLI
+    search found both. A new `gannet.md` in handbook22 was searchable ~13 s
+    later; the model answered "cachectl drain --violet-moss" from it.
+  - `/raglit add-document ../once22` → ingest; `once.md` searchable; a
+    later file in once22 was never indexed (not watched).
+  - `/raglit exclude '**/*.log'` → ignore, then purge: `documents: 1,
+    sample: [.../build-errors.log]`. CLI search: no matches; the model's two
+    searches found nothing. Appending to that .log and a new .log while
+    excluded: not enqueued (jobs count unchanged).
+  - `/raglit excludes` → ignore `["**/*.log"]`, allow, builtin.
+  - `/raglit unexclude '**/*.log'` → ignore `[]`; after one more change in
+    the watched dir both .log files were indexed again.
+  - `/raglit exclude fresh.log --keep` → fresh.log still searchable;
+    `/raglit exclude fresh.log` (no `/`: file name) → purged 1.
+- **Known / not verified:**
+  - Risk: `{{index}}` is per branch (`<dir>-<branch>`), so an include
+    belongs to this worktree's branch index; `dropIndexFor` on worktree
+    removal drops it while raglit's config keeps the watch root.
+  - `exclude` acts on this workspace's index only (not memory, skills,
+    rules, or attached indexes).
+  - `unexclude`: whether removed files come back without any change in the
+    watched dir was not isolated (one change triggered both back).
+  - A typo'd flag (`--kep`) is taken as text (the GLOB). Runs of spaces in the text
+    collapse to one, also inside quotes (the TUI and routeSlash split and
+    rejoin words before SplitShell sees them).
+  - The web/mobile clients were not run.
+- **Assumptions:** `arg`/`description` in a user's manifest written in the
+  one day since item 21 are rare enough to break (DisallowUnknownFields
+  names the field); `help` holds the usage (`FILE|DIR... — …`).
