@@ -1412,3 +1412,75 @@ models never set `multi`. Commits `63db6f8` (bounce), `9071995` (draft),
   done row submits — as before). The mobile/web client shows only the first
   recommendation and has no multi UI. Blank rows held under a collapsed
   thinking block (holdHeight) were seen; they predate this.
+
+## ✅ 24. Every surfaced RAG item shows where it came from (USER, 2026-10-23)
+
+USER: "who is poisoning or pointlessing my agent" — the TUI showed `skill
+docs (0.00)` with no origin; it was a claude.ai-synced skill
+(`~/.claude/skills/synced/<bucket>/docs/SKILL.md`). Commits `018c157`
+(feature), `206b3af` + `8caaff6` (collapsed row). Checked against raglit
+08c1551.
+
+- **What:**
+  - `DocHitInfo` / proto `DocHit` (additive, omitempty): `kind` (skill,
+    memory, rule, mcp-doc, doc, attached doc), `path` (relative inside the
+    workspace or config dir, else `~/`), `index` (raglit's hit field),
+    `root` (skills: `user ~/.claude/skills`, `claude.ai sync
+    (synced/<bucket>)`, `dun user skills`, `project .claude/skills|.dun/skills`,
+    `extension <id>`; `Skill.Root`, `skillRootLabel`), `candidates`,
+    `runner_up`, and the display strings `source` and `why`.
+  - Why: `only candidate · score 1.4e-05` or `3.0× the runner-up (of 4) ·
+    score 3e-05` (%.2g; %.2f printed 0.00).
+  - Model text: the why replaces "(N candidates; this one clearly ranked
+    first)" and `score=%.2f`; a `Source: …` line follows each item.
+  - TUI: one dim source line under each doc title (always, not only when
+    open); the why in place of `(%.2f)`; the collapsed row adds the titles
+    by kind when ≤ 60 runes, else the kinds and a count of lone candidates
+    (`· skill, memory, doc · 3 only candidate`). An older event: `(score
+    %.2g)`, no source line, collapsed row unchanged. `-p` mode prints the
+    why and source per doc. Web (`internal/dundapi/web`) and mobile notes
+    list each doc with why and source.
+  - The index: agentkit's `agent.DocHit` has no index field, so the
+    proactive finder is dun's own (`indexedFinder`, extension.go: the same
+    call as ragnotify.MCPFinder, plus `hitIndexes.note` on the raw JSON;
+    a document's first, best hit names its index). "attached doc" = the
+    hit's index is a named part of the attach selector.
+  - The lone-candidate rule is unchanged; notify.go points at plan item
+    "surfacing floor".
+- **Tests:** `surfacing_test.go` (Why, source labels for skill/memory/
+  attached doc in the UI info and the model's text, skillRootLabel,
+  displayPath, hitIndexes + attached); `cmd/dun/tui_test.go` (source line,
+  why, collapsed row and its fallback; an older event); mobile
+  `events.test.ts` (new and older event; jest run with the main checkout's
+  node_modules). `make test` passes.
+- **Live** (tmux `-L dunlive23`, scratch HOME + DUN_HOME + RAGLIT_ROOT, own
+  daemon on 127.0.0.1:7497 from `git archive` raglit 08c1551, real model
+  local-Qwen3.8-27B, workspace proj23; a skill in
+  `$HOME/.claude/skills/synced/bkt7f3/quillpress`):
+  - Skill turn: `skill quillpress (only candidate · score 1.4e-05)` /
+    `skill · ~/.claude/skills/synced/bkt7f3/quillpress/SKILL.md · index
+    skills · claude.ai sync (synced/bkt7f3)`; README.md alongside as `doc ·
+    README.md · index proj23-main` (only candidate, 2e-06). The session's
+    docs entry carried the same `Source:` lines; the model loaded the skill.
+  - Memory turn (`/remember`, `/clear`, a rollback question): `memory ·
+    <DUN_HOME>/memory/proj23/….md · index memory` (only candidate, 1e-05);
+    the path is absolute because the scratch DUN_HOME is not under the
+    scratch HOME. The model answered from the note.
+  - A third question surfaced 3 lone candidates, two of them wrong (see
+    "surfacing floor"); the collapsed row read `· skill, memory, doc · 3
+    only candidate`.
+- **Known / not verified:**
+  - Web and mobile were not run (mobile: jest + tsc on events.ts; the tsc
+    run has one unrelated error, `@/gql` not generated in a worktree).
+  - rule, mcp-doc and attached-doc kinds and the extension/project skill
+    roots were tested, not seen live. Whether raglit tags another
+    project's hit as `proj:idx` (what "attached doc" matches) was not seen
+    live.
+  - The tmux server of the live run exited on its own twice (the dund
+    session survived; the TUI re-attached). A reattached TUI showed
+    "working…" with no turn running. Not investigated.
+  - A replayed session shows the docs entry as a 🔔 notification with the
+    model's text, not as a docs block (as before).
+- **Assumptions:** `path` relative to the workspace first, then the config
+  dir; the doc id is the file path (raglit), so `path` is derived from it;
+  `index` is per document, from its best hit.

@@ -126,6 +126,10 @@ full detail archived in `done.md`.
   `add-document`, `exclude GLOB [--keep]` (ignore + purge), `unexclude`,
   `excludes`. Open: an include is tied to the per-branch index. See
   `done.md`.
+- **Surfaced items show their source (24)** (2026-10-23) — kind · path ·
+  index · skill root, and "only candidate" / "N× the runner-up (of K)"
+  with the score in %.2g, in the model's text and every client. Open: the
+  lone-candidate rule (item "surfacing floor"). See `done.md`.
 - **Kill background jobs** (2026-10-22) — `KillJob` ends a job's process group
   (SIGTERM, SIGKILL after 2s; docker: `docker stop`); `exec_monitor kill`,
   `/jobs [kill <n>|kill all]`, `x` in the activity pane; an interrupt lists the
@@ -150,7 +154,7 @@ agents pane exists so a resident child is a choice rather than a leak.
 
 USER's case: a long query with only one weak match surfaced a claude.ai
 skill as "1 surfaced". A group with one candidate passes the margin test
-with nothing to beat (notify.go, `len(g) == 1`); since item 23 it is
+with nothing to beat (notify.go, `len(g) == 1`); since item 24 it is
 marked "only candidate" in the UI and the model's text, but it still
 surfaces.
 
@@ -171,26 +175,18 @@ surfaces.
   candidates (the margin already guards the others); (4) an index with no
   embeddings (no `--embed`): keep today's rule, or never surface a lone
   candidate.
+- **Evidence (item 24 live, 2026-10-23, raglit 08c1551, BM25):** "Which
+  mirror does a quillpress gazette issue get pushed to?" surfaced 3, each
+  the only candidate of its group: the quillpress skill (9.2e-06, right),
+  a memory note about the tidewater rollback (1e-06, wrong) and the
+  project README (1e-06, wrong). The wrong two are lone candidates, not
+  margin winners.
 - **next:** once raglit has `mode`: call search with `mode=vec` for the
   lone candidate's group (or hybrid for all), log the similarity of right
   and wrong lone hits on the M0 probes, propose a floor.
 - **risks:** a second search per pass doubles the turn.before latency; an
   embedding model that is down must fail open (surface as today).
 - **optional extensions:** show the similarity next to "only candidate".
-
-### ◐ 23. Every surfaced RAG item shows where it came from (USER, 2026-10-23)
-
-USER: "who is poisoning or pointlessing my agent" — a `skill docs (0.00)`
-row with no origin (it was `~/.claude/skills/synced/<bucket>/docs/SKILL.md`).
-Commit `018c157`.
-
-- **Done:** kind · path · index · skill root on every surfaced item, in the
-  model's text ("Source: …") and every client; "only candidate" / "N× the
-  runner-up (of K)" with the score in %.2g.
-- **next:** live check (skill + memory turn, capture the docs block).
-- **risks:** the index comes from raglit's hit JSON (`index`); agentkit's
-  DocHit drops it, so dun parses the search result itself
-  (`indexedFinder`, extension.go).
 
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
