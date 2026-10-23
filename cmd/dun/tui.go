@@ -1219,7 +1219,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if v == "" || m.starting {
 				return m, nil
 			}
-			return m.sendUser(v), nil
+			return m.sendUserImages(v, m.input.Images()), nil
 		case "ctrl+up":
 			// Ctrl+Up: navigate history (previous entry). The only way to reach
 			// history — plain ↑ scrolls the conversation (see the ↑ case).
@@ -1432,6 +1432,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			// ctrl+v: an image on the clipboard goes in as an image token.
+			// Text is pasted by the terminal, as before.
+			if msg.Type == tea.KeyCtrlV {
+				return m, pasteImageCmd()
+			}
 			m.input = m.input.HandleKey(msg)
 			m.paletteSel = 0 // typing re-filters the palette; start at the top
 			m.refresh()
@@ -1597,6 +1602,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case copiedMsg:
 		return m, m.flash(copiedNote(msg))
+
+	case clipImageMsg:
+		switch {
+		case msg.err != nil:
+			return m, m.flash(msg.err.Error())
+		case msg.ok:
+			m.input.InsertImage(msg.path, msg.name, msg.w, msg.h)
+			m.refresh()
+		}
+		return m, nil
 
 	case flashMsg:
 		return m, nil // the redraw is the point: an expired note leaves the status line
@@ -1925,10 +1940,20 @@ func (m tuiModel) suggestActive() bool {
 // sendUser ships a user message to the engine (from the input or a suggestion)
 // and clears transient UI (suggestions, input). The message is rendered when
 // the engine's `user` event comes back, as it is on every other client.
-func (m tuiModel) sendUser(v string) tuiModel {
+func (m tuiModel) sendUser(v string) tuiModel { return m.sendUserImages(v, nil) }
+
+// sendUserImages is sendUser for a message with the composer's images.
+func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 	// In agent scope the input steers that CHILD instead of the session. Same
 	// gesture the parent's agent_monitor(tell:) makes, same code path in the
 	// engine — there is one definition of what telling a child means.
+	if m.scopeAgent != 0 && len(imgs) > 0 {
+		// A child's tell is text: sent without its images, the message would
+		// claim images the child never got. The draft stays.
+		m.append(stErr.Render("images cannot be sent to a sub-agent — not sent"))
+		m.refresh()
+		return m
+	}
 	if m.scopeAgent != 0 {
 		m.history = append(m.history, v)
 		m.histIdx = len(m.history)
@@ -1950,7 +1975,7 @@ func (m tuiModel) sendUser(v string) tuiModel {
 		m.refresh()
 		return m
 	}
-	if !m.proc.send(v) {
+	if !m.proc.send(v, imgs) {
 		m.append(stErr.Render("no engine right now — not sent. /reconnect, then send it again"))
 		m.refresh()
 		return m
@@ -2395,6 +2420,26 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.appendUser(text)
 		}
 		m.scrollPinned = true
+		m.refresh()
+	case "image_refused":
+		// A message with images the engine did not send (images.go): why,
+		// and the message back in the composer, ahead of anything typed since.
+		m.append(stErr.Render("not sent: " + str(ev["message"])))
+		var imgs []proto.Image
+		if list, ok := ev["images"].([]any); ok {
+			for _, it := range list {
+				if o, ok := it.(map[string]any); ok {
+					imgs = append(imgs, proto.Image{Path: str(o["path"]), Label: str(o["label"])})
+				}
+			}
+		}
+		m.input.Remember(imgs)
+		draft := str(ev["content"])
+		if cur := m.input.Value(); strings.TrimSpace(cur) != "" {
+			draft += "\n" + cur
+		}
+		m.input.SetValue(draft)
+		m.input.CursorEnd()
 		m.refresh()
 	case "turn":
 		m.busy = true
@@ -4762,11 +4807,15 @@ func startDunProc(o tuiOpts) (*dunProc, error) { return attachSession(o, resumeA
 // The proc methods are nil-safe: between an engine dying and its replacement
 // coming up there is no engine, and the UI stays usable in that window. They
 // report whether the message actually went anywhere.
-func (p *dunProc) send(content string) bool {
+func (p *dunProc) send(content string, imgs []proto.Image) bool {
 	if p == nil {
 		return false
 	}
-	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "user", "content": content}) == nil
+	ev := map[string]any{"type": "user", "content": content}
+	if len(imgs) > 0 {
+		ev["images"] = imgs
+	}
+	return json.NewEncoder(p.stdin).Encode(ev) == nil
 }
 
 // sendReset tells the engine to clear its session store.

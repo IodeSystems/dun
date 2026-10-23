@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/iodesystems/dun/proto"
 )
 
 // multilineInput is the message composer: a word-wrapped text box that grows
@@ -50,6 +51,11 @@ type multilineInput struct {
 	// the table is ordinary text.
 	pastes  map[rune]string
 	nextTok rune
+	// images holds each image token in buf (imageinput.go); imgs is every
+	// image label made, shared by the copies, so a label in recalled text
+	// becomes its token again.
+	images map[rune]proto.Image
+	imgs   *imageRegistry
 	// lay is the last layout. A pointer so the copies Bubble Tea makes of the
 	// model (View runs on one) share it.
 	lay *layout
@@ -92,20 +98,24 @@ func newMultilineInput() multilineInput {
 		focused:     true,
 		blinkOn:     true,
 		lay:         &layout{},
+		imgs:        &imageRegistry{},
 	}
 }
 
 // ── accessors (the subset of textinput.Model tuiModel used) ──
 
-// Value is the text as written: paste tokens are replaced by their text.
+// Value is the text as written: paste tokens are replaced by their text,
+// image tokens by their labels.
 func (m *multilineInput) Value() string {
-	if len(m.pastes) == 0 {
+	if len(m.pastes) == 0 && len(m.images) == 0 {
 		return string(m.buf)
 	}
 	var b strings.Builder
 	for _, r := range m.buf {
 		if p, ok := m.pastes[r]; ok {
 			b.WriteString(p)
+		} else if img, ok := m.images[r]; ok {
+			b.WriteString(img.Label)
 		} else {
 			b.WriteRune(r)
 		}
@@ -115,12 +125,15 @@ func (m *multilineInput) Value() string {
 
 // SetValue replaces the text. Text big enough to be a paste token (a recalled
 // history entry, a restored draft) becomes one, so recalling it does not
-// flood the box either; ctrl+o opens it.
+// flood the box either; ctrl+o opens it. An image label this TUI knows
+// becomes its image token again.
 func (m *multilineInput) SetValue(s string) {
-	m.pastes = nil
+	m.pastes, m.images = nil, nil
 	r := cleanInput([]rune(s))
 	if bigPaste(r) {
 		r = []rune{m.addPaste(r)}
+	} else {
+		r = m.tokenizeImages(r)
 	}
 	m.buf = r
 	m.clampCursor()
@@ -157,7 +170,7 @@ func cleanInput(r []rune) []rune {
 }
 
 func (m *multilineInput) Reset() {
-	m.buf, m.cursor, m.scroll, m.pastes = nil, 0, 0, nil
+	m.buf, m.cursor, m.scroll, m.pastes, m.images = nil, 0, 0, nil, nil
 }
 
 func (m *multilineInput) Focus() {
@@ -238,15 +251,21 @@ func (m *multilineInput) addPaste(text []rune) rune {
 }
 
 func (m *multilineInput) isTok(r rune) bool {
-	if r < tokFirst || r > tokLast || m.pastes == nil {
+	if r < tokFirst || r > tokLast {
 		return false
 	}
-	_, ok := m.pastes[r]
+	if _, ok := m.pastes[r]; ok {
+		return true
+	}
+	_, ok := m.images[r]
 	return ok
 }
 
 // pasteLabel is what a token shows: [pasted 120 lines · 4,312 chars].
 func (m *multilineInput) pasteLabel(tok rune) string {
+	if img, ok := m.images[tok]; ok {
+		return img.Label
+	}
 	p := []rune(m.pastes[tok])
 	n := pasteLines(p, strings.Count(string(p), "\n"))
 	unit := "lines"
@@ -258,17 +277,19 @@ func (m *multilineInput) pasteLabel(tok rune) string {
 
 // expandPaste (ctrl+o) puts a token's text back into the buffer for editing:
 // the token just before the cursor, else the one under it, else every token.
+// An image token has no text to edit and stays.
 func (m *multilineInput) expandPaste() {
+	isPaste := func(r rune) bool { _, ok := m.pastes[r]; return ok }
 	at := -1
-	if m.cursor > 0 && m.isTok(m.buf[m.cursor-1]) {
+	if m.cursor > 0 && isPaste(m.buf[m.cursor-1]) {
 		at = m.cursor - 1
-	} else if m.cursor < len(m.buf) && m.isTok(m.buf[m.cursor]) {
+	} else if m.cursor < len(m.buf) && isPaste(m.buf[m.cursor]) {
 		at = m.cursor
 	}
 	out := make([]rune, 0, len(m.buf))
 	cur := m.cursor
 	for i, r := range m.buf {
-		if m.isTok(r) && (at < 0 || i == at) {
+		if isPaste(r) && (at < 0 || i == at) {
 			p := []rune(m.pastes[r])
 			out = append(out, p...)
 			if i < m.cursor {
@@ -709,6 +730,14 @@ func (m *multilineInput) HandleKey(msg tea.KeyMsg) multilineInput {
 		r := cleanInput(msg.Runes)
 		if msg.Type == tea.KeySpace {
 			r = []rune{' '}
+		}
+		// A paste (bracketed, or several runes at once from a terminal
+		// without it) that names an image file is that image.
+		if msg.Paste || len(r) > 1 {
+			if tok, ok := m.pastedImage(r); ok {
+				m.insert([]rune{tok})
+				return *m
+			}
 		}
 		if msg.Paste && bigPaste(r) {
 			r = []rune{m.addPaste(r)}

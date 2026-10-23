@@ -188,7 +188,7 @@ func TestReattachAfterDundRestartWithSeqsPastOurs(t *testing.T) {
 	}
 	waitFor(t, p, "ready")
 	for i := 0; i < 2; i++ {
-		p.send(fmt.Sprintf("q%d", i))
+		p.send(fmt.Sprintf("q%d", i), nil)
 		waitFor(t, p, "done")
 	}
 	seen := p.seen()
@@ -209,7 +209,7 @@ func TestReattachAfterDundRestartWithSeqsPastOurs(t *testing.T) {
 	}
 	waitFor(t, other, "ready")
 	for other.seen().seq <= seen.seq {
-		other.send("from the phone")
+		other.send("from the phone", nil)
 		waitFor(t, other, "done")
 	}
 
@@ -224,6 +224,6 @@ func TestReattachAfterDundRestartWithSeqsPastOurs(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("events before the snapshot: %v", got)
 	}
-	back.send("still here")
+	back.send("still here", nil)
 	waitFor(t, back, "done")
 }

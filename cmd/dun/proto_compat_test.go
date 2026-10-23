@@ -61,7 +61,7 @@ func TestEmitterFramesEvents(t *testing.T) {
 func TestProtoCoversTUICommands(t *testing.T) {
 	var buf bytes.Buffer
 	p := &dunProc{stdin: nopCloser{&buf}}
-	p.send("hi")
+	p.send("hi [image 1: a.png 2×1]", []proto.Image{{Path: "/tmp/a.png", Label: "[image 1: a.png 2×1]"}})
 	p.sendReset()
 	p.serverCmd("rag", "on")
 	p.controlCmd("docker", "on")
@@ -70,6 +70,9 @@ func TestProtoCoversTUICommands(t *testing.T) {
 	cs := decodeStrict[proto.Command](t, buf.Bytes())
 	if len(cs) != 6 {
 		t.Fatalf("decoded %d of 6 commands", len(cs))
+	}
+	if u := cs[0].Payload.(*proto.User); len(u.Images) != 1 || u.Images[0].Path != "/tmp/a.png" {
+		t.Errorf("user: %+v", u)
 	}
 	if a := cs[5].Payload.(*proto.AgentCmd); a.ID != "3" || a.Content != "go on" {
 		t.Errorf("agent: %+v", a)
