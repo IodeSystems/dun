@@ -1133,8 +1133,11 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if !turnActive.Load() {
 			return false
 		}
-		h.Say(text)
+		// Echo BEFORE Say: Say can release an exec wait, and the tool_result
+		// that follows is what clears the client's "(queued)" mark. Echoed
+		// after, the mark would land behind the result that delivered it.
 		em.emit(&proto.UserEcho{Content: text, Queued: true})
+		h.Say(text)
 		em.emit(&proto.Queued{Text: text, Count: h.Queued()})
 		return true
 	})

@@ -775,6 +775,9 @@ func execToolDef() llm.ToolDef {
 		"background job and you get its number back immediately. From then on the job reports to " +
 		"you — a notification when it finishes, and exec_monitor(job:N) whenever you want to see " +
 		"what it has produced so far. Set `timeout` to wait longer or shorter before that handover. " +
+		"If the user writes during the wait, the handover happens at once and their message is in the " +
+		"result. On a long job, check it early with exec_monitor and confirm the first output looks " +
+		"right instead of waiting for the end. " +
 		"Never run anything interactive: it has no terminal and no input, so it will sit there " +
 		"doing nothing until the handover."
 	td.Function.Parameters = map[string]any{
@@ -798,7 +801,12 @@ func execToolDef() llm.ToolDef {
 //
 // That is the whole point. A command can no longer hold the session: the worst
 // case is a job the model was told about, not a turn that never ends.
-func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command string) *bgJob, spill func(command, output string) string) agent.ToolDispatcher {
+//
+// The grace also ends when the user writes (userWaiting, from Harness.Say):
+// the job is promoted early and the message rides the handoff, so a model
+// that asked to wait an hour reads it now — and can look at the job's output
+// so far instead of waiting for the end.
+func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command string) *bgJob, spill func(command, output string) string, userWaiting func() <-chan struct{}) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
@@ -831,20 +839,33 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			grace = 0
 		}
 
+		var user <-chan struct{} // nil blocks forever: no harness, no wake
+		if userWaiting != nil {
+			user = userWaiting()
+		}
+		start := time.Now()
 		j := startJob(args.Command)
+		woken := false
 		if grace > 0 {
 			t := time.NewTimer(grace)
 			select {
 			case <-j.doneCh:
 			case <-t.C:
 			case <-ctx.Done():
+			case <-user:
+				woken = true
 			}
 			t.Stop()
 		}
 		res, done := j.settle()
 		out := res.Render()
 		if !done {
-			out = j.handoffNotice(grace)
+			// The time it actually waited: a wake or an interrupt ends the
+			// grace early, and "after 10m" for a 12 s wait misleads.
+			out = j.handoffNotice(min(grace, time.Since(start)))
+			if woken {
+				out += "\nHanded over early because the user wrote — their message follows."
+			}
 		}
 		if onCall != nil {
 			onCall("exec", map[string]any{"command": args.Command}, out)

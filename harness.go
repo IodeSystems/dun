@@ -415,6 +415,9 @@ type Harness struct {
 	self    *subAgent // this harness's own record IN its parent; nil for a root
 	noteMu  sync.Mutex
 	queue   []queued // messages not yet delivered to the model
+	// userWaitCh is closed by Say, so a tool sitting in a wait can stop and let
+	// the message reach the model now. Guarded by noteMu; see userWaiting.
+	userWaitCh chan struct{}
 	// budgetNote is the budget notice waiting for the next model call (see
 	// budget.go). Guarded by noteMu.
 	budgetNote string
@@ -750,10 +753,43 @@ func (h *Harness) Notify(text string) {
 // message + tool call delivers both messages on the next result, and anything
 // typed after that rides the one after. Nothing is dropped — whatever the turn
 // does not pick up is published by flushQueued when it ends.
+//
+// A tool call blocked in a wait (exec's grace, agent wait:true) would hold the
+// message for as long as it waits — an hour, for exec timeout:3600. So Say
+// also releases those waits: see userWaiting.
 func (h *Harness) Say(text string) {
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedUser, text: text})
+	if h.userWaitCh != nil {
+		close(h.userWaitCh)
+		h.userWaitCh = nil
+	}
 	h.noteMu.Unlock()
+}
+
+// closedCh is a channel that is always ready.
+var closedCh = func() chan struct{} { c := make(chan struct{}); close(c); return c }()
+
+// userWaiting is ready once the user has a message waiting for the model. A
+// tool that blocks adds it to its select and, when it fires, returns what it
+// has, so the message rides that result (liftQueued) instead of waiting out
+// the tool.
+//
+// Ready at once if a message is ALREADY queued: one typed while the model was
+// still writing the call must not wait for it either. Checked and fetched under
+// the same lock Say closes it under, so no message falls between the two.
+func (h *Harness) userWaiting() <-chan struct{} {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	for _, q := range h.queue {
+		if q.kind == queuedUser {
+			return closedCh
+		}
+	}
+	if h.userWaitCh == nil {
+		h.userWaitCh = make(chan struct{})
+	}
+	return h.userWaitCh
 }
 
 // Aside hands the model context about the session itself — today, that the tool

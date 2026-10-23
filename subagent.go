@@ -935,6 +935,9 @@ func spawnTool(ctx context.Context, h *Harness, prompt, model string, wait bool)
 	case <-sa.waitCh():
 	case <-ctx.Done():
 		return fmt.Sprintf("agent #%d is still running; the turn was cancelled.", sa.num)
+	case <-h.userWaiting():
+		return fmt.Sprintf("agent #%d is still running; stopped waiting because the user wrote — their "+
+			"message follows. You will be told when it finishes.", sa.num)
 	}
 	return sa.report()
 }
@@ -1021,6 +1024,7 @@ func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell strin
 		b.WriteString(sa.tell(tell) + "\n")
 	}
 	if wait {
+		user := h.userWaiting()
 	waitLoop:
 		for {
 			ch := sa.waitCh()
@@ -1028,6 +1032,11 @@ func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell strin
 			case <-ch:
 				break waitLoop
 			case <-ctx.Done():
+				break waitLoop
+			case <-user:
+				// The user wrote: stop waiting so the message rides this
+				// result. The child keeps running.
+				b.WriteString("Stopped waiting because the user wrote — their message follows.\n")
 				break waitLoop
 			case <-time.After(2 * time.Second):
 				// Poll: a child that called ask_parent is blocked on the

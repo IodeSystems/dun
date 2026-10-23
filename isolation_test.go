@@ -176,7 +176,7 @@ func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 func TestWithExec_RoutesExecLocallyElseMCP(t *testing.T) {
 	inner := agentDispatch(func(name string) string { return "MCP:" + name })
-	d := withExec(inner, HostExec{Dir: t.TempDir()}, nil, nil, nil)
+	d := withExec(inner, HostExec{Dir: t.TempDir()}, nil, nil, nil, nil)
 
 	var call llm.ToolCall
 	call.Function.Name = "exec"
