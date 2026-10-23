@@ -44,7 +44,7 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 		var st dun.ServerState
 		ok := false
 		for _, s := range servers {
-			if s.ID == serverAliases[alias] {
+			if s.ID == alias {
 				st, ok = s, true
 			}
 		}
@@ -60,12 +60,12 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 	srvChoices := choices("on", "on for this session (--project, --global for wider)", "off", "off for this session (--project, --global for wider)",
 		"unset", "clear a --project or --session switch", "restart", "restart it",
 		"auto", "on for this project (= on --project)", "manual", "off for this project (= off --project)")
-	ragState, ragDetail := serverState("rag")
-	lspState, lspDetail := serverState("lsp")
+	ragState, ragDetail := serverState(dun.ServerDocs)
+	lspState, lspDetail := serverState(dun.ServerCode)
 	return &proto.Commands{Items: []proto.CommandSpec{
-		{Name: "rag", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: ragState, Detail: ragDetail,
+		{Name: "raglit", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: ragState, Detail: ragDetail,
 			Description: "docs index (raglit): bare shows status, auto starts it every session"},
-		{Name: "lsp", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: lspState, Detail: lspDetail,
+		{Name: "poly-lsp", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: lspState, Detail: lspDetail,
 			Description: "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session"},
 		{Name: "mcp", Usage: "[add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | mode <id> standalone|scripted|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
 			Choices: choices("add", "add a server: a form — a preset, or an id and a URL or a local command",
@@ -191,7 +191,7 @@ type slashRoutes struct {
 	reply   func(msg string) // an answer that is not a command's own event
 }
 
-// routeSlash carries out one slash line ("rag on", "/remember the tests are
+// routeSlash carries out one slash line ("raglit on", "/remember the tests are
 // slow") from a client that is not the TUI.
 func routeSlash(line string, r slashRoutes) {
 	f := strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), "/"))
@@ -207,7 +207,7 @@ func routeSlash(line string, r slashRoutes) {
 		return ""
 	}
 	switch name {
-	case "rag", "lsp":
+	case "raglit", "poly-lsp":
 		r.server(name, strings.Join(lowerAll(args), " "))
 	case "mcp":
 		switch arg(0) {

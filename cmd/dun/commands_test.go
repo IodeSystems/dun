@@ -22,10 +22,10 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 		}
 	}
 	m := tuiModel{}
-	m.engineCmds = engineCmdsFromEvent(evMsg{"items": []any{map[string]any{"name": "rag", "usage": "[on|off]", "description": "docs"}}})
+	m.engineCmds = engineCmdsFromEvent(evMsg{"items": []any{map[string]any{"name": "raglit", "usage": "[on|off]", "description": "docs"}}})
 	found := false
 	for _, c := range m.allSlash() {
-		if c.name == "rag" && c.args == "[on|off]" {
+		if c.name == "raglit" && c.args == "[on|off]" {
 			found = true
 		}
 	}
@@ -40,7 +40,7 @@ func TestCommandListShowsState(t *testing.T) {
 	for _, c := range l.Items {
 		got[c.Name] = c.State + "/" + c.Detail
 	}
-	if got["rag"] != "on/autostart" || got["lsp"] != "off/not configured" || got["docker"] != "on/" {
+	if got["raglit"] != "on/autostart" || got["poly-lsp"] != "off/not configured" || got["docker"] != "on/" {
 		t.Fatalf("states: %v", got)
 	}
 }
@@ -55,8 +55,8 @@ func TestRouteSlash(t *testing.T) {
 		reply:   func(m string) { calls = append(calls, call{"reply", m, ""}) },
 	}
 	for line, want := range map[string]call{
-		"rag on":                               {"server", "rag", "on"},
-		"/lsp":                                 {"server", "lsp", ""},
+		"raglit on":                            {"server", "raglit", "on"},
+		"/poly-lsp":                            {"server", "poly-lsp", ""},
 		"mcp refresh docs":                     {"control", "mcp", "refresh docs"},
 		"mcp login snow":                       {"control", "mcp", "login snow"},
 		"mcp LOGOUT snow":                      {"control", "mcp", "logout snow"},
@@ -68,7 +68,7 @@ func TestRouteSlash(t *testing.T) {
 		"mcp off corp":                         {"server", "corp", "off"},
 		"mcp unset corp --session":             {"server", "corp", "unset --session"},
 		"mcp toggle corp Tool_X off --project": {"control", "mcptools", "toggle corp Tool_X off --project"},
-		"rag on --project":                     {"server", "rag", "on --project"},
+		"raglit on --project":                  {"server", "raglit", "on --project"},
 		"mcp tools el":                         {"control", "mcptools", "el"},
 		"mcp tools":                            {"control", "mcptools", ""},
 		"mcp restart":                          {"server", allServers, "restart"},

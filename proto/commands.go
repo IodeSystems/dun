@@ -25,7 +25,7 @@ type Answer struct {
 	Value string `json:"value"`
 }
 
-// ServerCmd turns a tool server on, off, auto or manual (/rag, /lsp).
+// ServerCmd turns a tool server on, off, auto or manual (/raglit, /poly-lsp).
 type ServerCmd struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`

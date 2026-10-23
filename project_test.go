@@ -136,17 +136,17 @@ func TestProject_GitWorktreeMapsToSource_OverlayWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !byID(inRepo)["docs"].Autostart {
+	if !byID(inRepo)["raglit"].Autostart {
 		t.Error("the source reads the project's state")
 	}
-	if byID(inWt)["docs"].Autostart {
+	if byID(inWt)["raglit"].Autostart {
 		t.Error("the worktree's overlay must win over the project's state")
 	}
 	if byID(inWt)["db"].Command != "dbtool" {
 		t.Error("the worktree must still see the project's state under the overlay")
 	}
-	// A /rag auto in the worktree is that worktree's.
-	path, err := setAutostart(wt, "docs", true)
+	// A /raglit auto in the worktree is that worktree's.
+	path, err := setAutostart(wt, "raglit", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,19 +232,19 @@ func TestProject_ImportsLegacyState(t *testing.T) {
 		}
 	}
 	got, _ := LoadServers(repo, "/ws", "/raglit")
-	if !byID(got)["docs"].Autostart {
+	if !byID(got)["raglit"].Autostart {
 		t.Error("the imported setting must take effect")
 	}
 	// Turned off after the move: that is the state now, and a second sight
 	// must not import the repo's stale copy over it.
-	if _, err := setAutostart(repo, "docs", false); err != nil {
+	if _, err := setAutostart(repo, "raglit", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := EnsureProject(repo); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = LoadServers(repo, "/ws", "/raglit")
-	if byID(got)["docs"].Autostart {
+	if byID(got)["raglit"].Autostart {
 		t.Error("the project's own state must win over the repo's old copy")
 	}
 }

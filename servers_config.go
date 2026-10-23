@@ -83,7 +83,7 @@ func serverConfigPaths(dir string) []string {
 // ServerSpec is one MCP server as declared in a config file.
 type ServerSpec struct {
 	// ID is the merge key and the tool namespace. Reusing a built-in id
-	// ("code", "shell", "docs") overrides that server rather than adding one.
+	// ("poly-lsp", "shell", "raglit") overrides that server rather than adding one.
 	ID      string   `json:"id"`
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
@@ -107,7 +107,7 @@ type ServerSpec struct {
 	// Autostart controls whether dun spawns this server at startup. A pointer
 	// because, unlike Disabled, this layer must be able to say "false"
 	// explicitly: turning autostart back OFF is a normal thing to do
-	// (/rag manual) and must not require deleting the entry that turned it on.
+	// (/raglit manual) and must not require deleting the entry that turned it on.
 	// nil = inherit the layer below.
 	Autostart *bool `json:"autostart,omitempty"`
 	// Disable is a deny-list of tool names to hide from the model. When empty,
@@ -739,6 +739,9 @@ func readServersFile(path string) (*ServersFile, error) {
 		// Name the file. A JSON error with no filename in a two-file layered
 		// config sends the reader to the wrong one.
 		return nil, fmt.Errorf("dun: parse %s: %w", path, err)
+	}
+	for i := range f.Servers {
+		f.Servers[i].ID = canonicalServerID(f.Servers[i].ID)
 	}
 	return &f, nil
 }

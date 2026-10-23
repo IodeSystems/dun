@@ -39,7 +39,7 @@ func TestCacheStats_ClassifiesRounds(t *testing.T) {
 	s.noteBuild(msgs("sys", "summary", "u2"), tools, t0.Add(34200*time.Millisecond))
 	s.noteRound(agent.TokenUsage{Cached: 200, Processed: 250}, t0.Add(35*time.Second))
 
-	// Tools changed (/rag on), messages append-only: still a rewrite.
+	// Tools changed (/raglit on), messages append-only: still a rewrite.
 	s.noteBuild(msgs("sys", "summary", "u2", "a2"), []llm.ToolDef{{Type: "function"}, {Type: "x"}}, t0.Add(35100*time.Millisecond))
 
 	want := map[cacheClass]cacheClassStats{

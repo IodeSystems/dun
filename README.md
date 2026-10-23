@@ -14,10 +14,10 @@ own tools into one agent working inside an isolated workspace:
 
 ## MCP servers
 
-dun knows three tool servers, expected on `PATH`: `code` (poly-lsp-mcp), `shell`
-(mcpshell) and `docs` (raglit).
+dun knows three tool servers, expected on `PATH`: `poly-lsp` (poly-lsp-mcp), `shell`
+(mcpshell) and `raglit`.
 
-**Only `shell` starts on its own.** `code` and `docs` are opt-in: each costs real
+**Only `shell` starts on its own.** `poly-lsp` and `raglit` are opt-in: each costs real
 startup time (poly-lsp-mcp indexes the repo; raglit has to ingest the workspace
 before it answers anything), and a machine that lacks one of those binaries
 should still get a working dun. Turn them on per session, or once for good:
@@ -52,14 +52,14 @@ next turn, unless it set that switch itself.
 A repo's committed `dun.json` `autostart`/`via` is not a fourth scope: it is
 the project value while the project's own switch is unset.
 
-**What `/rag` indexes.** In a git repo, the files git shows (tracked plus
+**What `/raglit` indexes.** In a git repo, the files git shows (tracked plus
 untracked-not-ignored); outside one, a walk that honors `.gitignore`. Then,
 automatically skipped: dependency, build and cache directories by name
 (`node_modules`, `.venv`, `dist`, `build`, `__pycache__`, `target` beside a
 `Cargo.toml`/`pom.xml`, ...), any directory whose files add up to more than
 5,000 or 200 MB (skipped whole, at the highest such directory — never the
 workspace root), files over 1 MB, and binary files. `/raglit on`, the ready line
-and a bare `/rag` say what was skipped:
+and a bare `/raglit` say what was skipped:
 
     docs: indexing 1,234 files · skipped node_modules/ (dependencies), data/ (12,345 files, 2.3 GB),
     14 files over 1 MB (largest: dump.json 310 MB) — to include one: "rag": {"include": ["data/"]} in dun.json
@@ -85,7 +85,7 @@ it costs you that family, not your session.
 
     $DUN_HOME/projects.json                  absolute repo dir → id (minted on first sight)
     $DUN_HOME/projects/<id>/dun.json         optional, yours to write
-    $DUN_HOME/projects/<id>/dun.local.json   the project switches (/rag auto, /mcp on --project) (0600)
+    $DUN_HOME/projects/<id>/dun.local.json   the project switches (/raglit auto, /mcp on --project) (0600)
     $DUN_HOME/projects/<id>/agents_read      the AGENTS.md guard's memory
     $DUN_HOME/projects/<id>/worktrees/       --worktree session trees
     $DUN_HOME/projects/<id>/overlays/<dir>/  one linked worktree's own state
@@ -128,7 +128,7 @@ OpenAI-compatible endpoint.
 
 ```sh
 make install   # builds the stamped binary into ~/.local/bin/dun (BINDIR=… to change)
-# mcpshell must be on PATH; poly-lsp-mcp and raglit only if you use /lsp, /rag
+# mcpshell must be on PATH; poly-lsp-mcp and raglit only if you use /poly-lsp, /raglit
 
 dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
               # URL, bearer optional) and pick a model. In the TUI, web or
@@ -191,7 +191,7 @@ engine stays up and the next message starts a fresh turn.
 
 If the engine dies anyway — crash, OOM, kill, or a config it refuses to start
 with — the TUI restarts it, reattaches to the same session id, keeps your
-scrollback, and turns your `/rag` and `/lsp` servers back on. That includes the
+scrollback, and turns your `/raglit` and `/poly-lsp` servers back on. That includes the
 *first* engine: a TUI that will not open is a TUI that cannot show you the
 error, so it comes up regardless and retries from inside. Three attempts per two
 minutes, then it stops and waits for `/reconnect` (`dun --continue` still has
@@ -276,7 +276,7 @@ to message types, not by reproducing it. `dun --replay t.jsonl` then `/perf` is
 a measurement anyone can repeat. It is also the only honest way to test the UI
 against a *real* session rather than one someone imagined.
 
-**A changed tool set announces itself, for free.** Turning rag or lsp on or off
+**A changed tool set announces itself, for free.** Turning raglit or poly-lsp on or off
 mid-session buffers an *aside* — which tools appeared, which are gone. The
 schemas already travel in every request; what the model cannot see there is that
 they CHANGED, and one that reasoned earlier about not having `search` will keep

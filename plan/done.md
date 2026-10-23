@@ -1062,3 +1062,47 @@ says "(just type)" while it is highlighted and not yet capturing.
   server with no autostart anywhere counts as on (the shell always hosted
   it). `Config.Servers` is now the base the files layer over, not a
   replacement; a child still takes its parent's list as given.
+
+## /mcp cleanup, remove, and the poly-lsp / raglit rename (2026-10-23)
+
+### ✅ Dead code, /mcp remove, /poly-lsp and /raglit
+- **What:**
+  - Removed what the scopes and rules work orphaned: `SetUserServerVia`,
+    `SetLocalDisable`, `SetUserServerDisable`, the package-level and
+    `Harness` `SetAutostart`, `toolRun.calls`, `session.busy`. Tests write
+    the project switch through `updateLocalServer` (helper `setAutostart`).
+    `SetToolEnabled` and `rootAgentsMDBlock` were already gone (rules.go
+    holds the rules comment). `MoveServer` is `SetServerVia` plus the
+    shell-restart report; `/mcp mode` calls it for every value; `move` and
+    `via` still work as synonyms.
+  - `/mcp remove <id>` also deletes the id's entries (including `tools`) in
+    the current project's `dun.local.json` (and the linked-worktree overlay's)
+    and in this session's `.mcp.json`. Other projects' files are not read;
+    the message says their entries are skipped when loaded.
+  - `/raglit` and `/poly-lsp` replace `/rag` and `/lsp`, no aliases. Server
+    ids: `code` → `poly-lsp`, `docs` → `raglit` (`ServerCode`, `ServerDocs`).
+    `canonicalServerID` reads the old ids in `readServersFile` (dun.json,
+    dun.local.json, mcp.json) and in the session sidecar (a current key beats
+    an old one); `builtinServer` accepts both, so `/mcp add` still refuses
+    them. New writes use the new ids. Hints, help, palette, README,
+    dun.example.json, docs/event-protocol.md, schema.graphql follow.
+  - Unchanged on purpose: model-facing tool names (unprefixed), the system
+    prompt's family labels, raglit index names (workspace, `skills`,
+    `memory`, `rules`, `mcp-<id>`), the `"rag"` config key, the notification
+    kind `docs`, the `--rag` / `--lsp` flags.
+- **Live** (tmux, scratch HOME + DUN_HOME, workspace `dunscratch-clean`, fake
+  model URL): startup lines `poly-lsp off — /poly-lsp on to start it,
+  /poly-lsp auto …` and the same for raglit. `/raglit on` → `raglit: session
+  on … running · 4 tools`; `/poly-lsp on` → both `●` session in `/mcp`
+  (rows poly-lsp, shell, raglit); `/context` listed `mcp: poly-lsp`, `mcp:
+  raglit`, `mcp: shell`; bare `/raglit` printed the `/raglit off …` hint.
+  Second run with an old-format `dun.json` (`{"id":"docs","autostart":true}`)
+  and `mcp.json` (`{"id":"code","autostart":false}`): raglit started at
+  launch, table showed `raglit … on (project)` and `poly-lsp … off (global)`.
+- **Known / not verified:** `/mcp remove` was tested, not run live. The
+  ingest line still starts with `docs:` (it names the index, pinned by
+  tests). A web or mobile client that sends a `server` event with id `rag`
+  or `lsp` gets "no server"; the shipped mobile client has no hard-coded ids
+  (its test fixtures were renamed). `/mcp on docs` (old id typed) is not
+  mapped: only files are. `TestScrollRegionTopRowIsNotBlanked` failed once
+  under load, passes alone and on rerun.

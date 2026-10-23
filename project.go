@@ -23,7 +23,7 @@ import (
 //
 //	$DUN_HOME/projects.json                  registry: absolute source dir → id
 //	$DUN_HOME/projects/<id>/dun.json         optional, written by a human
-//	$DUN_HOME/projects/<id>/dun.local.json   machine state dun writes (/rag auto)
+//	$DUN_HOME/projects/<id>/dun.local.json   machine state dun writes (/raglit auto)
 //	$DUN_HOME/projects/<id>/agents_read      the AGENTS.md guard's memory
 //	$DUN_HOME/projects/<id>/worktrees/       session worktrees + mount symlinks
 //	$DUN_HOME/projects/<id>/overlays/<dir>/  one linked worktree's own state

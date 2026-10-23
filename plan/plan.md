@@ -103,6 +103,9 @@ full detail archived in `done.md`.
   in the session's `.mcp.json`; a running session follows changes at its next
   turn; `/mcp` is a table with g/p/s/m keys; `/mcp add` presets, quoted
   commands, env. See `done.md`.
+- **/poly-lsp and /raglit** (2026-10-23) — the slash commands and the server
+  ids are named for the servers; old `code`/`docs` config is still read. See
+  `done.md`.
 - **Kill background jobs** (2026-10-22) — `KillJob` ends a job's process group
   (SIGTERM, SIGKILL after 2s; docker: `docker stop`); `exec_monitor kill`,
   `/jobs [kill <n>|kill all]`, `x` in the activity pane; an interrupt lists the

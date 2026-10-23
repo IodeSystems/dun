@@ -19,7 +19,7 @@ import (
 // tool set changed" is a whole round-trip spent on an acknowledgement.
 func TestAside_NeverSchedulesATurn(t *testing.T) {
 	h := newNoteHarness(t)
-	h.Aside("your tools changed — docs is now available: search")
+	h.Aside("your tools changed — raglit is now available: search")
 	if h.Pending() != 0 {
 		t.Errorf("an aside must not be pending work: Pending()=%d", h.Pending())
 	}
@@ -41,7 +41,7 @@ func TestAside_NeverSchedulesATurn(t *testing.T) {
 func TestAside_LiftsIntoToolResult(t *testing.T) {
 	h := newNoteHarness(t)
 	inner := func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		h.Aside("your tools changed — docs is now available: search")
+		h.Aside("your tools changed — raglit is now available: search")
 		return "wrote 3 lines", nil
 	}
 	out, err := withLiftedQueue(inner, h)(context.Background(), llm.ToolCall{})
@@ -61,7 +61,7 @@ func TestAside_LiftsIntoToolResult(t *testing.T) {
 // with the user message rather than preceding it as its own turn.
 func TestAside_JoinsTheNextTurn(t *testing.T) {
 	h := newNoteHarness(t)
-	h.Aside("your tools changed — code was turned off")
+	h.Aside("your tools changed — poly-lsp was turned off")
 	h.prepareTurn(context.Background())
 
 	entries, err := h.store.Context(context.Background(), "dun")
@@ -71,7 +71,7 @@ func TestAside_JoinsTheNextTurn(t *testing.T) {
 	if len(entries) != 1 || entries[0].Kind != agent.KindNotification {
 		t.Fatalf("aside did not land in the conversation: %+v", entries)
 	}
-	if !strings.Contains(entries[0].Content, "code was turned off") {
+	if !strings.Contains(entries[0].Content, "poly-lsp was turned off") {
 		t.Errorf("wrong content: %q", entries[0].Content)
 	}
 	// Appended, NOT published: an inbox arrival here would schedule the very
@@ -91,7 +91,7 @@ func TestAside_JoinsTheNextTurn(t *testing.T) {
 // two are separated by KIND, not by arrival order.
 func TestAside_DoesNotSwallowRealNews(t *testing.T) {
 	h := newNoteHarness(t)
-	h.Aside("your tools changed — docs is now available: search")
+	h.Aside("your tools changed — raglit is now available: search")
 	h.Notify("background job #1 finished")
 	if h.Pending() != 1 {
 		t.Fatalf("the notification is still pending work: Pending()=%d", h.Pending())
@@ -118,7 +118,7 @@ func TestToolSetDelta(t *testing.T) {
 		t.Errorf("no change should say nothing, got %q", got)
 	}
 	added := toolSetDelta(code, append(append([]mcpmgr.MCPTool{}, code...), docs...), nil)
-	if !strings.Contains(added, "docs is now available") || !strings.Contains(added, "search") {
+	if !strings.Contains(added, "raglit is now available") || !strings.Contains(added, "search") {
 		t.Errorf("start not described: %q", added)
 	}
 	if strings.Contains(added, "node_query") {

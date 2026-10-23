@@ -439,7 +439,7 @@ type skillHit struct {
 // syncSkillIndex brings the skills index in step with the local skills the
 // model may use: a SKILL.md or reference file new or changed since the last
 // sync is ingested, one that is gone is forgotten. Called whenever the tool
-// set is rebuilt with the docs server running — that is, when /rag starts
+// set is rebuilt with the docs server running — that is, when /raglit starts
 // and when a skill changes. MCP servers' skills stay in their servers.
 func (h *Harness) syncSkillIndex(sink *mcpDocsSink) {
 	if sink == nil {

@@ -121,9 +121,10 @@ func LoadSessionServers(sessionFile string) map[string]SessionServer {
 		return out
 	}
 	for id, s := range f.Servers {
-		if !s.empty() {
-			out[id] = s
+		if _, current := f.Servers[canonicalServerID(id)]; s.empty() || (id != canonicalServerID(id) && current) {
+			continue // a pre-rename key loses to the current one
 		}
+		out[canonicalServerID(id)] = s
 	}
 	return out
 }

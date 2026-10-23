@@ -51,12 +51,12 @@ func fixture() (string, []llm.ToolDef, []mcpmgr.MCPTool) {
 		return d
 	}
 	defs := []llm.ToolDef{
-		def("raglit__search", "search the corpus"),
+		def("corp__search", "search the corpus"),
 		def("chrome__fetch", "fetch a page"),
 		def("exec", "run a shell command"),
 	}
 	mcp := []mcpmgr.MCPTool{
-		{Name: "search", ServerID: "raglit"},
+		{Name: "search", ServerID: "corp"},
 		{Name: "fetch", ServerID: "chrome"},
 	}
 	return sys, defs, mcp
@@ -75,7 +75,7 @@ func TestBreakdownAttributesEveryToolToItsServer(t *testing.T) {
 	for _, p := range bd.Parts {
 		got[p.Name] = p.Tokens
 	}
-	for _, want := range []string{"built-in tools", "mcp: raglit", "mcp: chrome"} {
+	for _, want := range []string{"built-in tools", "mcp: corp", "mcp: chrome"} {
 		if got[want] == 0 {
 			t.Errorf("no row for %q; got %v", want, got)
 		}
@@ -88,7 +88,7 @@ func TestBreakdownAttributesEveryToolToItsServer(t *testing.T) {
 	if bd.Parts[0].Name != "built-in tools" {
 		t.Errorf("built-ins must sort first, got %q", bd.Parts[0].Name)
 	}
-	if sum := bd.Prompt + bd.Shared + got["built-in tools"] + got["mcp: raglit"] + got["mcp: chrome"]; sum != bd.Total {
+	if sum := bd.Prompt + bd.Shared + got["built-in tools"] + got["mcp: corp"] + got["mcp: chrome"]; sum != bd.Total {
 		t.Errorf("Total %d != sum of its parts %d", bd.Total, sum)
 	}
 }

@@ -280,7 +280,7 @@ type AnswerInput struct {
 type ControlInput struct {
 	SessionPath
 	Body struct {
-		Kind   string `json:"kind" enum:"control,server" doc:"control: /docker, /worktree, /mcp…; server: /rag, /lsp"`
+		Kind   string `json:"kind" enum:"control,server" doc:"control: /docker, /worktree, /mcp…; server: /raglit, /poly-lsp"`
 		Target string `json:"target"`
 		Action string `json:"action"`
 	}

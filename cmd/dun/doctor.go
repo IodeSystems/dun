@@ -98,8 +98,8 @@ func (d *doctor) providers() {
 var doctorTools = []struct{ name, need string }{
 	{"git", ""},
 	{"mcpshell", ""},
-	{"poly-lsp-mcp", "/lsp"},
-	{"raglit", "/rag"},
+	{"poly-lsp-mcp", "/poly-lsp"},
+	{"raglit", "/raglit"},
 }
 
 func (d *doctor) tools() {

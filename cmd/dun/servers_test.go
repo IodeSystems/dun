@@ -18,7 +18,7 @@ import (
 )
 
 // --rag=false (force off for this run) must be distinguishable from not passing
-// --rag at all (use whatever /rag auto saved). A plain bool cannot say that.
+// --rag at all (use whatever /raglit auto saved). A plain bool cannot say that.
 func TestTristate_UnsetIsNotFalse(t *testing.T) {
 	var rag, lsp tristate
 	if got := autostartOverrides(rag, lsp); got != nil {

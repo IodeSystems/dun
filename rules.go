@@ -46,7 +46,7 @@ import (
 // condensed version the model writes once (cached under the project's state
 // dir, keyed by a hash of the imports), "index" puts them in the raglit index
 // "rules" so they surface by relevance. The root files stay verbatim in every
-// mode. A summary whose sources changed, or an index with /rag off, falls
+// mode. A summary whose sources changed, or an index with /raglit off, falls
 // back to full.
 
 const (

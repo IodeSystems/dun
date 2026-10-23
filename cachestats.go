@@ -19,7 +19,7 @@ import (
 // fixes:
 //
 //   - dun rewrote the prefix: a fold, an LOD step, a tool-set change
-//     (/rag on), a re-heading. The server HAD to re-read from the first
+//     (/raglit on), a re-heading. The server HAD to re-read from the first
 //     changed message. The fix is in dun's shaping policy.
 //   - dun only appended, and the server re-read anyway: its KV slot was
 //     taken by other traffic in between (a shared llama-server). The fix is

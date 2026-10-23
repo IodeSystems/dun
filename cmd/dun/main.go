@@ -142,7 +142,7 @@ func main() {
 	replaySpeed := flag.Float64("replay-speed", 1, "replay: pacing multiplier over the recorded timing (2 = twice as fast)")
 	inputDelay := flag.Duration("input-delay", -1, "replay: fixed gap between events, overriding the recording (0 = no delay); negative = use the recorded timing")
 	maxGap := flag.Duration("max-gap", 2*time.Second, "replay: compress idle gaps longer than this (0 = replay the recording verbatim)")
-	// Tri-state: unset means "whatever /rag auto or /lsp auto saved", which a
+	// Tri-state: unset means "whatever /raglit auto or /poly-lsp auto saved", which a
 	// plain bool cannot express (its zero value would silently mean "off").
 	var ragFlag, lspFlag tristate
 	flag.Var(&ragFlag, "rag", "start the docs server (raglit) this run: --rag or --rag=false (default: the saved setting)")
@@ -510,7 +510,7 @@ func main() {
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.
 		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") == "0",
-		// The workspace's own checkout, not the worktree: /rag auto is a fact
+		// The workspace's own checkout, not the worktree: /raglit auto is a fact
 		// about this machine and this project, and must outlive the throwaway
 		// worktree this session works in.
 		ConfigDir:         absWS,
@@ -729,7 +729,7 @@ func main() {
 func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 	fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n",
 		len(h.ToolNames()), strings.Join(h.ToolNames(), ", "))
-	// Name what is NOT running. A one-shot run has no /rag to type, so point at
+	// Name what is NOT running. A one-shot run has no /raglit to type, so point at
 	// the flags instead of the commands.
 	for _, st := range h.Servers() {
 		switch {
@@ -737,7 +737,7 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 		case st.Err != "":
 			fmt.Fprintf(os.Stderr, "dun: %s did not start: %s\n", st.ID, oneLine(st.Err))
 		default:
-			fmt.Fprintf(os.Stderr, "dun: %s off (--%s to start it this run)\n", st.ID, aliasOf(st.ID))
+			fmt.Fprintf(os.Stderr, "dun: %s off (--%s to start it this run)\n", st.ID, flagOf(st.ID))
 		}
 	}
 	fmt.Fprintf(os.Stderr, "\ntask: %s\n\n", task)
@@ -813,7 +813,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	em.emit(catalogEvent(h))
 	em.emit(settingsEvent())
 	em.emit(commandsEvent(h))
-	// Server commands (/rag, /lsp) are handled on the READER's goroutine, not
+	// Server commands (/raglit, /poly-lsp) are handled on the READER's goroutine, not
 	// here: this loop is blocked inside a turn most of the time, and "turn the
 	// docs server on" should not queue behind a five-minute agent run. The
 	// harness defers the actual tool-set swap to a turn boundary.
@@ -1257,7 +1257,7 @@ type inputStream struct {
 	// because it is set after the harness exists, while the scanner already runs.
 	mu  sync.Mutex
 	mid func(string) bool
-	// srv handles a `server` event (/rag, /lsp) inline, for the same reason as
+	// srv handles a `server` event (/raglit, /poly-lsp) inline, for the same reason as
 	// mid: it must work while a turn is running.
 	srv func(alias, action string)
 	// srvPending holds server commands that arrived before the handler was

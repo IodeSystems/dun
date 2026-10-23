@@ -77,28 +77,28 @@ test('a snapshot event in the stream replaces what is shown', () => {
 });
 
 const cmds = [
-  { name: 'rag', description: 'docs', group: 'tools', choices: [{ value: 'on' }, { value: 'off' }], state: 'off' },
+  { name: 'raglit', description: 'docs', group: 'tools', choices: [{ value: 'on' }, { value: 'off' }], state: 'off' },
   { name: 'remember', description: 'save', group: 'memory', text: true },
 ];
 
 test('commands and skills are kept, through a history replace', () => {
   let v = run([{ type: 'commands', items: cmds }, { type: 'catalog', skills: [{ name: 'tdd', description: 'test first', source: 'user' }] }]);
   v = apply(v, { type: 'history', items: [] });
-  expect(v.commands.map((c) => c.name)).toEqual(['rag', 'remember']);
+  expect(v.commands.map((c) => c.name)).toEqual(['raglit', 'remember']);
   expect(v.skills[0]?.name).toBe('tdd');
 });
 
 test('a line is a message, a slash command, a skill, or unknown', () => {
   const skills = [{ name: 'tdd', description: '' }];
   expect(parseLine('hello', skills)).toEqual({ kind: 'message', text: 'hello' });
-  expect(parseLine(' /rag on ', skills)).toEqual({ kind: 'slash', line: 'rag on' });
+  expect(parseLine(' /raglit on ', skills)).toEqual({ kind: 'slash', line: 'raglit on' });
   expect(parseLine('/skill tdd fix it', skills)).toEqual({ kind: 'skill', text: 'Use the skill tdd (call skill name=tdd first): fix it' });
   expect(parseLine('/skill nope', skills).kind).toBe('unknown');
 });
 
 test('the palette completes names, then choices, then skills', () => {
-  expect(suggest('/r', cmds, []).map((s) => s.insert)).toEqual(['/rag ', '/remember ']);
-  expect(suggest('/rag o', cmds, []).map((s) => s.insert)).toEqual(['/rag on', '/rag off']);
+  expect(suggest('/r', cmds, []).map((s) => s.insert)).toEqual(['/raglit ', '/remember ']);
+  expect(suggest('/raglit o', cmds, []).map((s) => s.insert)).toEqual(['/raglit on', '/raglit off']);
   expect(suggest('/skill t', cmds, [{ name: 'tdd', description: 'x' }]).map((s) => s.insert)).toEqual(['/skill tdd ']);
 });
 

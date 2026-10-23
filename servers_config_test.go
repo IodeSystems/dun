@@ -35,15 +35,15 @@ func TestLoadServers_DefaultsWithNoFiles(t *testing.T) {
 		t.Fatalf("want the 3 built-ins, got %d: %v", len(got), ServerIDs(got))
 	}
 	m := byID(got)
-	if m["code"].Command != "poly-lsp-mcp" {
-		t.Errorf("code server: %+v", m["code"])
+	if m["poly-lsp"].Command != "poly-lsp-mcp" {
+		t.Errorf("poly-lsp server: %+v", m["poly-lsp"])
 	}
-	if !strings.Contains(strings.Join(m["code"].Args, " "), "/ws") {
-		t.Errorf("workspace not threaded into args: %v", m["code"].Args)
+	if !strings.Contains(strings.Join(m["poly-lsp"].Args, " "), "/ws") {
+		t.Errorf("workspace not threaded into args: %v", m["poly-lsp"].Args)
 	}
 	// Default docs server should disable the tools the agent never uses.
-	if m["docs"].Disable == nil || len(m["docs"].Disable) != 6 {
-		t.Errorf("docs server: expected 6 disabled tools, got %v", m["docs"].Disable)
+	if m["raglit"].Disable == nil || len(m["raglit"].Disable) != 6 {
+		t.Errorf("raglit server: expected 6 disabled tools, got %v", m["raglit"].Disable)
 	}
 }
 
@@ -57,11 +57,11 @@ func TestLoadServers_OverrideByIDKeepsSiblings(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := byID(got)
-	if m["code"].Command != "/opt/bin/poly-lsp-mcp" {
-		t.Errorf("override did not take: %+v", m["code"])
+	if m["poly-lsp"].Command != "/opt/bin/poly-lsp-mcp" {
+		t.Errorf("override did not take: %+v", m["poly-lsp"])
 	}
 	// Args were not restated, so they must be inherited, not cleared.
-	if len(m["code"].Args) == 0 {
+	if len(m["poly-lsp"].Args) == 0 {
 		t.Error("omitted args should INHERIT, not clear")
 	}
 	if len(got) != 3 {
@@ -120,7 +120,7 @@ func TestLoadServers_Disable(t *testing.T) {
 		t.Fatalf("docs should be gone: %v", ServerIDs(got))
 	}
 	for _, s := range got {
-		if s.ID == "docs" {
+		if s.ID == "raglit" {
 			t.Error("disabled server still present")
 		}
 	}
@@ -176,8 +176,8 @@ func TestLoadServers_OnlyShellAutostartsByDefault(t *testing.T) {
 	if !m["shell"].Autostart {
 		t.Error("shell should autostart")
 	}
-	if m["code"].Autostart || m["docs"].Autostart {
-		t.Errorf("code/docs must be opt-in: code=%v docs=%v", m["code"].Autostart, m["docs"].Autostart)
+	if m["poly-lsp"].Autostart || m["raglit"].Autostart {
+		t.Errorf("poly-lsp/raglit must be opt-in: poly-lsp=%v raglit=%v", m["poly-lsp"].Autostart, m["raglit"].Autostart)
 	}
 }
 
@@ -194,7 +194,7 @@ func TestLoadServers_DunDirLocalWinsOverRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if byID(got)["docs"].Autostart {
+	if byID(got)["raglit"].Autostart {
 		t.Error(".dun/dun.local.json should have won")
 	}
 }
@@ -209,7 +209,7 @@ func setAutostart(dir, id string, on bool) (string, error) {
 func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 	dir := t.TempDir()
 	for _, want := range []bool{true, false, true} {
-		path, err := setAutostart(dir, "docs", want)
+		path, err := setAutostart(dir, "raglit", want)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +220,7 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if byID(got)["docs"].Autostart != want {
+		if byID(got)["raglit"].Autostart != want {
 			t.Fatalf("autostart=%v did not survive a reload", want)
 		}
 	}
@@ -241,7 +241,7 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 func TestSetAutostart_WritesProjectDirNotRepo(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	repo := pruneRepo(t)
-	path, err := setAutostart(repo, "docs", true)
+	path, err := setAutostart(repo, "raglit", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,5 +527,66 @@ func TestIngestTargets_SendsWhatGitWouldShowYou(t *testing.T) {
 		if filepath.Base(p) == ".dun" {
 			t.Error("dun's own state directory must never be indexed")
 		}
+	}
+}
+
+// Config written before the rename says "code" and "docs". Every file and
+// sidecar that can carry a server id reads those as poly-lsp and raglit.
+func TestLegacyServerIDs_ReadAsTheNewOnes(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := t.TempDir()
+
+	// dun.json, mcp.json: a definition and a switch under the old ids.
+	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"docs","autostart":true},{"id":"code","command":"/opt/bin/lsp"}]}`)
+	got, err := LoadServers(dir, "/ws", "/raglit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := ServerIDs(got); slices.Contains(ids, "docs") || slices.Contains(ids, "code") {
+		t.Errorf("an old id must not survive as a second server: %v", ids)
+	}
+	m := byID(got)
+	if !m["raglit"].Autostart {
+		t.Error("docs autostart on must read as raglit on")
+	}
+	if m["poly-lsp"].Command != "/opt/bin/lsp" || len(m["poly-lsp"].Args) == 0 {
+		t.Errorf("code override must read as poly-lsp and inherit its args: %+v", m["poly-lsp"])
+	}
+
+	// Project state (what /raglit auto wrote): old id off, then new id on, wins.
+	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
+	got, _ = LoadServers(dir, "/ws", "/raglit")
+	if byID(got)["raglit"].Autostart {
+		t.Error("project state docs=false must read as raglit=false")
+	}
+	if _, err := setAutostart(dir, "raglit", true); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = LoadServers(dir, "/ws", "/raglit")
+	if !byID(got)["raglit"].Autostart {
+		t.Error("a new write under the new id must be read")
+	}
+	f, err := readServersFile(filepath.Join(ResolveProject(dir).StateDir, LocalServersFile))
+	if err != nil || f == nil {
+		t.Fatal(err)
+	}
+	for _, s := range f.Servers {
+		if s.ID != "raglit" {
+			t.Errorf("new writes use the new ids, found %q", s.ID)
+		}
+	}
+
+	// The session sidecar. A current key beats an old one in the same file.
+	sess := filepath.Join(t.TempDir(), "s.jsonl")
+	on, off := true, false
+	if _, err := saveSessionServers(sess, map[string]SessionServer{"docs": {On: &off}, "code": {On: &on}, "raglit": {On: &on}}); err != nil {
+		t.Fatal(err)
+	}
+	sw := LoadSessionServers(sess)
+	if len(sw) != 2 || sw["poly-lsp"].On == nil || !*sw["poly-lsp"].On || sw["raglit"].On == nil || !*sw["raglit"].On {
+		t.Errorf("sidecar: %+v", sw)
+	}
+	if !builtinServer("docs") || !builtinServer("code") || !builtinServer("raglit") || !builtinServer("poly-lsp") {
+		t.Error("old and new ids both name the built-ins")
 	}
 }

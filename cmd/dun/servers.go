@@ -14,44 +14,25 @@ import (
 	"github.com/iodesystems/dun/proto"
 )
 
-// Tool servers the user can turn on and off: /rag (raglit, the docs index) and
-// /lsp (poly-lsp-mcp, semantic code). Neither starts on its own — see
+// Tool servers the user can turn on and off: /raglit (the docs index) and
+// /poly-lsp (semantic code). Neither starts on its own — see
 // dun.DefaultServers for why — so this is how a session gets them, and how a
 // machine that wants them every time says so once.
 //
-// The command names are what the tools are called; the server ids are the tool
-// families they provide.
-var serverAliases = map[string]string{
-	"rag": dun.ServerDocs,
-	"lsp": dun.ServerCode,
-}
+// The command is the server's id: /raglit switches the server raglit, /poly-lsp
+// the server poly-lsp.
 
-// serverLabel renders "rag (docs)" for messages: the command the user types,
-// then the id they will see in logs and config files.
-func serverLabel(alias string) string {
-	return alias + " (" + serverAliases[alias] + ")"
-}
+// hasCommand reports whether id is a server with a command of its own, rather
+// than one the config defines.
+func hasCommand(id string) bool { return id == dun.ServerDocs || id == dun.ServerCode }
 
-// aliasOf is serverAliases reversed: the command name for a server id, or the
-// id itself for a server that has no command (shell, or a project's own).
-func aliasOf(id string) string {
-	for alias, sid := range serverAliases {
-		if sid == id {
-			return alias
-		}
-	}
-	return id
-}
-
-// commandOf is the slash command that switches a server: /raglit for the docs
-// server, /poly-lsp for the code server. A server with no command of its own
-// is addressed by id.
-func commandOf(id string) string {
+// flagOf is the --rag / --lsp flag that starts a server for one run.
+func flagOf(id string) string {
 	switch id {
 	case dun.ServerDocs:
-		return "raglit"
+		return "rag"
 	case dun.ServerCode:
-		return "poly-lsp"
+		return "lsp"
 	}
 	return id
 }
@@ -104,7 +85,7 @@ func autostartOverrides(rag, lsp tristate) map[string]bool {
 // it cannot collide with one.
 const allServers = "*"
 
-// runServerCmd applies one /rag or /lsp action and returns the line to show the
+// runServerCmd applies one /raglit or /poly-lsp action and returns the line to show the
 // user. A failure to start is a RETURNED MESSAGE, never a fatal error: a
 // misconfigured raglit should cost you search, not your session.
 //
@@ -119,14 +100,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 	if f := strings.Fields(action); len(f) > 1 || (len(f) == 1 && (f[0] == "unset")) {
 		return runSwitchCmd(ctx, h, alias, f[0], f[1:])
 	}
-	id, ok := serverAliases[alias]
-	if !ok {
-		id = alias // a project-defined server, addressed by its id
-	}
-	label := alias
-	if _, known := serverAliases[alias]; known {
-		label = serverLabel(alias)
-	}
+	id, label := alias, alias // addressed by its id
 	switch action {
 	case "", "status":
 		return serverStatusLine(h, id, label)
@@ -178,7 +152,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 }
 
 // runAllServersCmd is /mcp: the whole server set at once, rather than one
-// server at a time the way /rag and /lsp address theirs.
+// server at a time the way /raglit and /poly-lsp address theirs.
 //
 // A bare /mcp LISTS — including the stopped ones, which is the question you
 // actually have ("which of these is even up?") and which no per-server command
@@ -206,7 +180,7 @@ func runAllServersCmd(ctx context.Context, h *dun.Harness, action string) string
 			skipped = append(skipped, st.ID)
 			continue
 		}
-		lines = append(lines, runServerCmd(ctx, h, aliasOf(st.ID), action))
+		lines = append(lines, runServerCmd(ctx, h, st.ID, action))
 	}
 	if len(lines) == 0 {
 		return "nothing running to " + action + "\n" + serverListing(states)
@@ -487,14 +461,14 @@ func serverDetail(st dun.ServerState) string {
 	return s
 }
 
-// serverStatusLine is the bare "/rag" report: what it is doing now, what it
+// serverStatusLine is the bare "/raglit" report: what it is doing now, what it
 // will do next session, and the one command that changes each.
 func serverStatusLine(h *dun.Harness, id, label string) string {
 	st, ok := stateOf(h, id)
 	if !ok {
 		return label + ": not configured"
 	}
-	cmd := commandOf(id)
+	cmd := id
 	var b strings.Builder
 	b.WriteString(label + ": ")
 	if st.Running {
@@ -585,13 +559,11 @@ func serverHint(states []dun.ServerState) string {
 			}
 			continue
 		}
-		alias := aliasOf(st.ID)
-		_, hasCmd := serverAliases[alias]
 		switch {
 		case st.Err != "":
 			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, oneLine(st.Err)))
-		case hasCmd:
-			lines = append(lines, fmt.Sprintf("%s off — /%s on to start it, /%s auto to start it every session", st.ID, commandOf(st.ID), commandOf(st.ID)))
+		case hasCommand(st.ID):
+			lines = append(lines, fmt.Sprintf("%s off — /%s on to start it, /%s auto to start it every session", st.ID, st.ID, st.ID))
 		default:
 			lines = append(lines, st.ID+" off")
 		}

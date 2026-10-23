@@ -351,7 +351,7 @@ func RemoveWorktree(repoRoot, path, branch string) error {
 
 // overlayFor is the state overlay dun keeps for worktree path (see project.go),
 // or "" when its project is unknown. Only the state dun wrote for that one
-// directory is in it — the AGENTS.md guard's memory, a /rag auto made there —
+// directory is in it — the AGENTS.md guard's memory, a /raglit auto made there —
 // and the directory is about to stop existing.
 func overlayFor(repoRoot, path string) string {
 	p := ResolveProject(repoRoot)

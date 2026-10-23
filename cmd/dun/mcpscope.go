@@ -44,14 +44,7 @@ func scopeArg(flags []string, def string) (string, error) {
 
 // runSwitchCmd sets one server's on/off switch: verb on, off or unset.
 func runSwitchCmd(ctx context.Context, h *dun.Harness, alias, verb string, flags []string) string {
-	id, ok := serverAliases[alias]
-	if !ok {
-		id = alias
-	}
-	label := alias
-	if _, known := serverAliases[alias]; known {
-		label = serverLabel(alias)
-	}
+	id, label := alias, alias
 	def := dun.ScopeSession
 	if verb == "unset" {
 		def = ""

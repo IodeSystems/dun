@@ -96,7 +96,7 @@ func TestStart_FailingAutostartIsNotFatal(t *testing.T) {
 	}
 }
 
-// /rag on for a server that cannot start reports and carries on; the session
+// /raglit on for a server that cannot start reports and carries on; the session
 // keeps whatever tools it already had.
 func TestStartServer_FailureLeavesSessionUsable(t *testing.T) {
 	dir := t.TempDir()
@@ -350,11 +350,11 @@ func serverToolNames(h *Harness) []string {
 
 func TestFilterTools_NoFilter(t *testing.T) {
 	tools := []mcpmgr.MCPTool{
-		{Name: "search", ServerID: "docs"},
-		{Name: "ingest", ServerID: "docs"},
-		{Name: "node_query", ServerID: "code"},
+		{Name: "search", ServerID: ServerDocs},
+		{Name: "ingest", ServerID: ServerDocs},
+		{Name: "node_query", ServerID: ServerCode},
 	}
-	specs := []Server{{ID: "docs"}, {ID: "code"}}
+	specs := []Server{{ID: ServerDocs}, {ID: ServerCode}}
 	got := filterTools(tools, specs)
 	if len(got) != 3 {
 		t.Fatalf("got %d tools, want 3", len(got))
@@ -363,14 +363,14 @@ func TestFilterTools_NoFilter(t *testing.T) {
 
 func TestFilterTools_DenyList(t *testing.T) {
 	tools := []mcpmgr.MCPTool{
-		{Name: "search", ServerID: "docs"},
-		{Name: "ingest", ServerID: "docs"},
-		{Name: "ocr", ServerID: "docs"},
-		{Name: "node_query", ServerID: "code"},
+		{Name: "search", ServerID: ServerDocs},
+		{Name: "ingest", ServerID: ServerDocs},
+		{Name: "ocr", ServerID: ServerDocs},
+		{Name: "node_query", ServerID: ServerCode},
 	}
 	specs := []Server{
-		{ID: "docs", Disable: []string{"ingest", "ocr", "search_figures"}},
-		{ID: "code"},
+		{ID: ServerDocs, Disable: []string{"ingest", "ocr", "search_figures"}},
+		{ID: ServerCode},
 	}
 	got := filterTools(tools, specs)
 	names := make([]string, len(got))
@@ -388,9 +388,9 @@ func TestFilterTools_DenyList(t *testing.T) {
 
 func TestFilterTools_EmptyDenyPassesAll(t *testing.T) {
 	tools := []mcpmgr.MCPTool{
-		{Name: "search", ServerID: "docs"},
+		{Name: "search", ServerID: ServerDocs},
 	}
-	specs := []Server{{ID: "docs", Disable: []string{}}}
+	specs := []Server{{ID: ServerDocs, Disable: []string{}}}
 	got := filterTools(tools, specs)
 	// Empty Disable list = no filter → pass everything through
 	if len(got) != 1 {
