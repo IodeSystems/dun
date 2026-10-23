@@ -13,6 +13,24 @@
 
 ## Conditional — worth doing when the condition fires
 
+### Attached indexes keep raglit's `shared` namespaces (item 20 follow-up)
+With another project's index attached, dun sends `<own>:*,<proj>:<idx>`
+as the search selector, which replaces raglit's default (own + the config's
+`shared` namespaces). raglit expands "all" only as the whole selector
+(namespace.go nsReadSelector, checked at c410052); "all" inside a list is
+`<own>__all`. Fix: raglit adds a token meaning "the default set" usable in a
+list; dun sends it in place of `<own>:*` (attach.go attachSelector).
+**Resume condition:** USER decides to ask raglit for the token (capacity:
+yours), then raglit ships it (systems).
+
+### Workspace ingest through MCP (item 20 follow-up)
+The workspace.open ingest picks its sink before the server starts, so it
+always runs `raglit ingest --now` (seen live 2026-10-23); skills, rules and
+memory already use MCP ingest. Moving it after the start would queue
+through MCP instead; the first search then may find nothing until the queue
+drains (the CLI's `--now` drains it first).
+**Resume condition:** USER wants no raglit CLI process at session start.
+
 ### mobile/: TypeScript 7 + oxlint type-aware (fleet path, X-LINT-2)
 Reported by gwag-47 on 2026-10-22. USER decided the fleet path the same
 day. Fleet tracking: ~/inflight/shelf.md.

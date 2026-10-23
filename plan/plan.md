@@ -110,71 +110,21 @@ full detail archived in `done.md`.
   `extension.json` (server, slash, roles, hooks, host_hooks, env, skills);
   raglit and poly-lsp are bundled manifests (`examples/extensions/`); user
   and project ones load from `$DUN_HOME/extensions/` and
-  `.dun/extensions/`; `/ext` lists them. Index role on the raglit CLI until
-  raglit's MCP ingest takes `paths` and has `forget`. See `done.md`.
+  `.dun/extensions/`; `/ext` lists them. With raglit ≥ 9af06d1 the index
+  role uses MCP ingest/forget (verified live for skills, rules, memory); the
+  workspace ingest still runs the CLI. See `done.md`.
+- **Shared raglit indexes (20)** (2026-10-23) — `/raglit watch <dir>
+  [--index N]`, `/raglit attach|detach <index>|<proj>:<index>
+  [--project|--global]`; attachments add up across the three scopes and
+  reach the model's search/get and the proactive search. Open: the `shared`
+  namespaces are not read while another project's index is attached
+  (icebox). See `done.md`.
 - **Kill background jobs** (2026-10-22) — `KillJob` ends a job's process group
   (SIGTERM, SIGKILL after 2s; docker: `docker stop`); `exec_monitor kill`,
   `/jobs [kill <n>|kill all]`, `x` in the activity pane; an interrupt lists the
   cut turn's running jobs with the kill command. See `done.md`.
 
 ## Active work
-
-### ◻ 20. Shared raglit indexes: watch a directory, attach it to a session (USER, 2026-10-22)
-
-- **Checkpoint 2026-10-23 (reboot):** no code written yet, no live check. raglit
-  HEAD 9af06d1 has A, B and D (MCP ingest paths[] + forget). `raglit` on PATH
-  (~/go/bin, self-rebuilds from raglit's working tree — running it ran npm
-  build there) reported 9af06d1 dirty; daemon 293c295 (older by 24h). For the
-  live check build from `git archive HEAD` into scratch, not the working tree.
-  Design read from code, to build next:
-  - selector: raglit expands "all"/"" only as the whole selector
-    (namespace.go nsReadSelector); a token "all" becomes `<own>__all`. So with
-    attachments dun sends `<own>:*,<proj:idx>,…`. Loses the config's `shared`
-    namespaces when something is attached (risk; ask raglit for an "all" token).
-  - storage: `Attach []string` on ServerSpec (mcp.json / dun.local.json) and
-    SessionServer (.mcp.json sidecar); union of the three scopes; add to
-    mergeSpec, switchesOnly, SessionServer.empty. Bare `idx` stored as
-    `<this project>:idx`.
-  - search: wrap dispatch for raglit read tools with an `index` param
-    (toolTakes) and empty index; surfacer: ragnotify.Opts.ExtraArgs index +
-    docsBodyFetcher index (rebuilt on spec change via reloadServers→applyTools);
-    append attached list to the search tool's description.
-  - routing: routeSlash lowercases server args — route raglit
-    watch|attach|detach|index to a control id with args as typed, run detached.
-  - next: implement, tests, then the live check (also confirm for the parent:
-    skills/rules/memory go through MCP ingest, no `raglit ingest` CLI runs; an
-    ingested file is searchable once the queue drains; nothing assumes `--now`).
-
-USER's goal: index a directory once, and let many sessions use it. raglit's
-daemon is shared, so one index serves every session that attaches it; raglit's
-watcher keeps it fresh, and dun only reads it.
-
-- **raglit side (asked of the raglit session, raglit-dd, 2026-10-22):**
-  - A. `raglit watch <dir> --index <name>` (USER's exact form): creates the
-    index if missing, optionally public; idempotent; recorded in the config.
-    And `raglit index --list`, `raglit index <name> <subcommand>`.
-  - B. `raglit serve` passes a qualified `proj:idx` through when it is
-    readable. Today serveclient.go → nsReadSelector drops any project not in
-    the config's Shared list (verified in code, not live).
-  - C. USER feedback: group the verbose root CLI under cobra subcommands;
-    as urgent as A — `--help` hides that A half-exists (config + sync + watch).
-- **dun side:** `/raglit watch <dir> [--index N] [--public]` calls A;
-  `/raglit attach|detach <index> [--project|--global]` adds it to the
-  model's search calls and the proactive search, with the same three
-  scopes as /mcp.
-- **raglit-dd's plan (2026-10-23):** order C+A, then B, then D. Already landed:
-  `serve`/`search --shared a,b`. C stays on flag.FlagSet (not cobra); root
-  `--help` is one screen; `raglit index --list`, `raglit index <name>
-  status|search|forget|pause|resume|unwatch|purge`; every current command
-  keeps its name. A: `raglit watch <dir> --index NAME`. `--public` and
-  `public|private` are deferred (they need OIDC/ACL). B: a qualified
-  `proj:idx` passes for reads only. D: MCP ingest `paths` + a `forget` tool.
-- **next:** build `/raglit watch|attach` once A and B land; until then
-  `--shared` covers attaching another project's index.
-- **risks:** dun relies on raglit's CLI (serve/ingest/forget/search with
-  --project/--index); C could break it. The list was sent to raglit-dd.
-- **blocking decisions:** none.
-- **optional extensions:** none.
 
 The pattern that drove the last three items: the harness could not say what was
 actually happening — a ship that reported success while leaving the work local, a

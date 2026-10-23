@@ -1197,3 +1197,91 @@ says "(just type)" while it is highlighted and not yet capturing.
   too (a note nobody recalls is not worth writing); shell-command hooks
   are not in v1; `dun ext init` not built — the examples dir is the
   template.
+
+## ✅ 20. Shared raglit indexes: watch a directory, attach it to a session (USER, 2026-10-22; done 2026-10-23)
+
+USER's goal: index a directory once and let many sessions use it. raglit's
+daemon is shared, raglit's watcher keeps the index fresh, dun only reads it.
+Commits `a02a6c1`, `639542a`, `1feb785`. Needs raglit ≥ 87aaf12 (qualified
+`proj:idx` reads) and 9af06d1 (MCP ingest `paths` + `forget`); checked
+against c410052.
+
+- **What:**
+  - `/raglit watch <dir> [--index N]` → `raglit watch <abs dir> <serve args'
+    --home/--daemon/--project/--embedded> --index N`, run as the index role's
+    CLI (`roles.index.cli`), detached. Relative dir = the workspace's; `~/`
+    expanded; N defaults to the dir's name; N is spelled as raglit stores it
+    (lowercase, [a-z0-9_-]). The answer is raglit's output plus the attach
+    command.
+  - `/raglit attach <index>|<project>:<index> [--project|--global]`,
+    `/raglit detach …` (default scope: session), bare `/raglit attach` or
+    `--list` lists each attachment and its scopes. Stored as `attach` on
+    ServerSpec (mcp.json, dun.local.json) and SessionServer (`.mcp.json`
+    sidecar); the scopes are a union (`Server.Attach`, per scope in
+    `ServerScopes.Attach*`). A bare name is stored as `<own>:name`, own =
+    the serve args' `--project`, else `{{project}}`.
+  - With another project's index attached, the model's `search` and
+    `get_document` calls that name no index, the proactive search
+    (ragnotify ExtraArgs) and the short-hit reader (docsBodyFetcher) send
+    `<own>:*,<proj>:<idx>,…`. Attachments of the own project send nothing
+    (already read by the default). The search tool's description lists the
+    attachments. Code: `attach.go`; routing `cmd/dun/extensions.go`
+    (extIndexVerb, parseWatch, parseAttach, extIndexCmd).
+  - Generic by role, not by id: watch needs `roles.index.cli`, attach/detach
+    need `roles.search` (selector only when the search tool takes `index`).
+    An extension's own slash command of the same name wins.
+  - routeSlash sends `watch|attach|detach` to control `ext` with the args as
+    typed (it lowercases server args).
+  - raglit's new `forget` MCP tool is in the manifest's `disable` (dun calls
+    it through the index role, like `ingest`).
+- **Tests:** `attach_test.go` (qualify, union, selector, scope storage and
+  sidecar round trip, an attach-only entry is switches-only; through a fake
+  MCP server: search/get selector, a named index left alone, description,
+  proactive search, fetcher, project + session scopes, detach; WatchDir argv
+  with a fake `raglit`); `cmd/dun/commands_test.go` (routing keeps case,
+  poly-lsp has no attach; parseWatch/parseAttach). `make test` passes.
+- **Live** (tmux `-L dunlive20`, scratch HOME + DUN_HOME + RAGLIT_ROOT, own
+  raglit daemon on 127.0.0.1:7499 built from `git archive c410052`, real
+  model local-Qwen3.8-27B):
+  - Session A (workspace proja): `/raglit watch ../handbook --index Handbook`
+    → raglit added the root to `raglitroot/projects/proja/config.json`,
+    queued 1 file into `proja__handbook`, watch on.
+  - Session B (projb): `/raglit attach proja:handbook` → listed at session
+    scope, sidecar `"attach": ["proja:handbook"]`. "How do I restart the
+    quillfeather relay…?" → the model called `search(index=projb:*,
+    proja:handbook, …)`, got the runbook, answered `--amber-tide`,
+    team-osprey.
+  - After /clear, "Answer without calling any tools: at what percent …" →
+    1 surfaced: kestrel-runbook.md with its text inlined (so the get call
+    with the selector worked); the model answered 63% with no tool call.
+    Control: `/raglit detach proja:handbook`, /clear, same question → no
+    handbook hit; the model said it had no such information.
+  - Watcher: a new file in the handbook dir was searchable through
+    `proja:handbook` from projb ~20 s later.
+  - Index paths: a 0.2 s `ps` poll for raglit CLI processes saw only the two
+    workspace ingests (`raglit ingest --project proj? --index proj?-main
+    --now`) and the watch. Skills (zz-vellum-binding), rules (`/rules index`,
+    docs/deploy-rules.md) and memory (`/remember …`) went through MCP ingest:
+    no CLI process, and `raglit search --index skills|rules|memory` found
+    each once the queue drained.
+- **Known / not verified:**
+  - Risk: with another project's index attached, the selector replaces
+    raglit's default, so the `shared` namespaces in raglit's project config
+    are not read. raglit has no token for "the default set" inside a list
+    ("all" in a list becomes `<own>__all`). Decision for USER: ask raglit
+    for such a token (icebox).
+  - The workspace ingest still runs the CLI (`raglit ingest --now`): its
+    sink is chosen before the server starts (icebox).
+  - A model call that names an index gets no attachments (by design).
+    `/raglit attach --project` writes dun.local.json; an attachment in a
+    committed dun.json cannot be removed by a local detach (dun.local.json
+    replaces the list only when it has one). `--project`/`--global` were
+    tested, not run live. The web/mobile clients were not run.
+  - The 0.2 s ps poll could miss a CLI process shorter than that; the
+    workspace ingests it did catch take longer.
+  - raglit's `manage_index` tool (status, pause, purge …) is visible to the
+    model; not changed here.
+- **Assumptions:** an attached index is read-only from dun's side; the
+  scopes add up (no scope hides another's attachment); `attach` names an
+  index, not a namespace (`proj:*` is refused: raglit reads only a named
+  index of an undeclared project); watch does not auto-attach.
