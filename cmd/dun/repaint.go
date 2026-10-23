@@ -57,18 +57,20 @@ const termReset = "\x1b[?1049h" + // alt screen
 
 // repaintDoneMsg arrives after the clears: the region may take its rows again.
 type repaintDoneMsg struct {
-	dir string // the capture ("" when it failed)
-	err error  // why it failed
+	dir    string // the capture ("" when it failed)
+	err    error  // why it failed
+	report bool   // /repaint report: go on to the model (repaintreport.go)
 }
 
-// repaintSlash is /repaint.
+// repaintSlash is /repaint [report].
 func repaintSlash(m *tuiModel, args []string) tea.Cmd {
-	if len(args) > 0 {
-		m.append(stErr.Render("usage: /repaint"))
+	report := len(args) > 0 && args[0] == "report"
+	if len(args) > 0 && !report {
+		m.append(stErr.Render("usage: /repaint [report]"))
 		return nil
 	}
 	dir, err := m.capture(time.Now())
-	return m.repaint(repaintDoneMsg{dir: dir, err: err})
+	return m.repaint(repaintDoneMsg{dir: dir, err: err, report: report})
 }
 
 // repaint drops every cache and hold between dun's state and the screen and
@@ -133,6 +135,9 @@ func (m *tuiModel) repaintDone(msg repaintDoneMsg) {
 		return
 	}
 	m.append(stDim.Render("repainted · capture saved to " + tildePath(msg.dir) + "/"))
+	if msg.report {
+		m.startReport(msg.dir)
+	}
 }
 
 // tildePath shows a path under $HOME as ~/….
@@ -267,6 +272,15 @@ state.json     sizes (dun, the tty, tmux), terminal env, mouse mode, layout
                dun version and the session id
 events.jsonl   the last 200 messages the TUI handled, oldest first: time,
                kind and a short summary (at most 80 characters of text)
+
+/repaint report adds:
+prered/        these files after the deterministic pass ($HOME, user and
+               host names, e-mail addresses, token-shaped strings)
+prompt.txt     exactly what was sent to the model
+model-output.txt  what it answered
+redacted/      the model's redacted copy, each row at its width; the .txt
+               screens and diff.txt are made from its .ansi screens
+explanation.md what the model thinks went wrong
 
 Nothing here is sent anywhere unless you send it.
 `

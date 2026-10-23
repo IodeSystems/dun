@@ -1051,6 +1051,20 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
+		// /repaint report: the action is a capture directory; the model call
+		// reads its prompt.txt and writes model-output.txt (repaint.go).
+		// Detached: a model round trip. The event carries the directory or
+		// the error, never the capture.
+		if id == "repaint" {
+			go func() {
+				if err := h.RepaintReport(ctx, action); err != nil {
+					em.emit(&proto.ControlEvent{ID: id, Action: "error", Message: "repaint report: " + err.Error()})
+					return
+				}
+				em.emit(&proto.ControlEvent{ID: id, Action: "done", Message: "repaint report: model output in " + action})
+			}()
+			return
+		}
 		// /memories: the project's notes and what has happened to them.
 		if id == "memories" {
 			em.emit(&proto.ControlEvent{ID: id, Message: memoriesListing(h.Memories(), h.Remembering())})

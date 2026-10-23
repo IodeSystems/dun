@@ -689,6 +689,8 @@ type tuiModel struct {
 	// reason vpc is one.
 	shown *shownFrame
 	evlog *eventRing
+	// reportDir is the capture a /repaint report is waiting on the model for.
+	reportDir string
 
 	renderDue   bool              // streamed text arrived; a tick will draw it
 	tickPending bool              // a render tick is already scheduled
@@ -2145,6 +2147,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.ctxStats.charsRecapped += int(chars)
 		}
 	case "control":
+		// /repaint report's answer: the TUI finishes it (repaintreport.go).
+		if str(ev["id"]) == "repaint" {
+			m.reportEvent(str(ev["action"]), str(ev["message"]))
+			break
+		}
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
 			m.append(stNote.Render(msg))
 		}
@@ -3988,7 +3995,7 @@ func init() {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())
 			return nil
 		}},
-		{"repaint", "", "clear and redraw the whole screen, after saving what dun drew and what the terminal shows to ~/.dun/bugreports/", repaintSlash},
+		{"repaint", "[report]", "clear and redraw the whole screen, after saving what dun drew and what the terminal shows to ~/.dun/bugreports/; report also has the model redact the capture and explain what went wrong (asks first if the model is not local)", repaintSlash},
 		{"mouse", "[all|cell|off]", "mouse reporting mode (bare shows it) — `cell` if the wheel should scroll the log; click selects, drag copies, shift+drag (iTerm2: option+drag) is the terminal's own selection", mouseSlash},
 		{"scrolldebug", "", "debug: dump scroll overlay state (rowOffset, blockH, YOffset)", func(m *tuiModel, _ []string) tea.Cmd {
 			var lines []string
@@ -4159,6 +4166,7 @@ func sideCallBlock(s *contextStats) string {
 		"rephrase": "prompt rewrites (/rephrase)",
 		"commit":   "commit messages (/worktree commit)",
 		"rescue":   "context rescue compaction",
+		"repaint":  "bug report redaction (/repaint report)",
 	}
 
 	var b strings.Builder

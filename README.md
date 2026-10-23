@@ -292,6 +292,18 @@ sizes, layout and terminal settings, and the last 200 UI messages.
 `README.txt` in the directory says what each file is. Nothing is sent
 anywhere.
 
+`/repaint report` does the same, then has the session's model redact the
+capture and explain it. A mechanical pass goes first ($HOME, the user and
+host names, e-mail addresses, token-shaped strings), so the model never sees
+those; the model then replaces paths, names and conversation text with
+placeholders of the same width (`[path]___`), so every row keeps its width
+and the mangling stays visible, and writes `explanation.md`: which rows
+differ, the likely cause, how to reproduce it. The result goes through the
+mechanical scan again, and anything it still finds is listed. When the
+model's endpoint is not local (loopback, a private or link-local address,
+or a LAN name), dun asks before sending. It prints the `gh issue create
+--web` line to draft an issue and never runs it.
+
 **Switch sessions without leaving.** `/resume` opens a picker of every saved
 session for the workspace — newest first, each with its age, entry count and
 **opening message**, because an id is a timestamp and a timestamp says when but
