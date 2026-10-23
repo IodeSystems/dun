@@ -494,10 +494,12 @@ type docsBlock struct {
 const docsBriefMax = 60
 
 // brief names the surfaced documents on the collapsed row, by kind, each
-// lone candidate marked: " · skill docs (only candidate), memory stash".
-// "" when it would not fit, or from an older engine that sends no kind.
+// lone candidate marked: " · skill docs (only candidate), memory stash";
+// by kind alone when the titles do not fit (" · skill (only candidate),
+// memory"). "" when neither fits, or from an older engine that sends no
+// kind.
 func (d *docsBlock) brief() string {
-	var parts []string
+	var long, short []string
 	for _, doc := range d.docs {
 		if doc.kind == "" {
 			return ""
@@ -506,16 +508,19 @@ func (d *docsBlock) brief() string {
 		if !strings.HasPrefix(p, doc.kind+" ") {
 			p = doc.kind + " " + p
 		}
+		k := doc.kind
 		if strings.HasPrefix(doc.why, "only candidate") {
 			p += " (only candidate)"
+			k += " (only candidate)"
 		}
-		parts = append(parts, p)
+		long, short = append(long, p), append(short, k)
 	}
-	s := strings.Join(parts, ", ")
-	if s == "" || len([]rune(s)) > docsBriefMax {
-		return ""
+	for _, parts := range [][]string{long, short} {
+		if s := strings.Join(parts, ", "); s != "" && len([]rune(s)) <= docsBriefMax {
+			return " · " + s
+		}
 	}
-	return " · " + s
+	return ""
 }
 
 func (d *docsBlock) render(open bool) string {

@@ -1031,6 +1031,12 @@ func TestTUI_DocsSourceAndWhy(t *testing.T) {
 	if c := d.render(false); !strings.Contains(c, "· skill docs (only candidate)") {
 		t.Errorf("collapsed row should name the doc and mark it weak: %s", c)
 	}
+	// Titles too long for the row: the kinds alone.
+	d.docs = append(d.docs, docNode{title: "What do I need to do before rolling back the tidewater service?", kind: "memory",
+		why: "2.0× the runner-up (of 3) · score 4e-05"})
+	if c := d.render(false); !strings.Contains(c, "· skill (only candidate), memory") {
+		t.Errorf("collapsed row should fall back to kinds: %s", c)
+	}
 }
 
 // An older engine sends no source, why or kind: the block still renders,
