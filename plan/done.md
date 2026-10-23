@@ -1504,9 +1504,10 @@ docs (0.00)` with no origin; it was a claude.ai-synced skill
   typings (`app.config.ts` now pins it); `String(unknown)` in `api/live.ts`
   became `scalar()`; promise-returning callbacks wrapped in `void`; one
   needless `as Item`; `/^closed/.test` -> `startsWith`.
-- **Exception:** `public/sw.js` is outside tsconfig, so type-aware rules see
-  `error` types; an override turns off the type-aware `typescript/*` rules for
-  that one file (other rules stay on). USER to confirm.
+- **Service worker:** `mobile/public/tsconfig.json` (allowJs, checkJs, webworker
+  lib) is the nearest tsconfig for `public/sw.js`; tsgolint uses it, so no
+  lint override. `pnpm typecheck` also runs `tsc -p public/tsconfig.json`.
+  Side effect: expo copies that tsconfig.json into `dist/`.
 - **Prettier:** none before; `.prettierrc.json` (single quote, width 120)
   and one `prettier --write` commit.
 - **Times (this box):** lint eslint 2.8-4.0 s -> oxlint 1.2 s; tsc 1.7-2.0 s
