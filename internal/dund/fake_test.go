@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -96,6 +97,12 @@ func (e *fakeEngine) run(id string) {
 		switch p := c.Payload.(type) {
 		case *proto.User:
 			e.sp.record("user " + id + ": " + p.Content)
+			if js, ok := strings.CutPrefix(p.Content, "peer-request "); ok { // ask dund, as dun_list/dun_msg do
+				var req proto.PeerRequest
+				_ = json.Unmarshal([]byte(js), &req)
+				e.emit(enc, &req)
+				continue
+			}
 			switch p.Content {
 			case "crash":
 				return
@@ -121,6 +128,11 @@ func (e *fakeEngine) run(id string) {
 			e.emit(enc, &proto.Turn{Kind: "user"})
 			e.emit(enc, &proto.Message{Role: "assistant", Content: "re: " + p.Content})
 			e.emit(enc, &proto.Done{})
+		case *proto.PeerMsg:
+			e.sp.record(fmt.Sprintf("peer %s: from %s (%s) wake=%v: %s", id, p.FromName, p.From, p.Wake, p.Text))
+		case *proto.PeerReply:
+			b, _ := json.Marshal(p)
+			e.sp.record("reply " + id + ": " + string(b))
 		case *proto.Interrupt:
 			e.sp.record("interrupt " + id + ": " + p.Reason)
 			if slow {

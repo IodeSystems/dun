@@ -40,7 +40,9 @@ type execEngine struct {
 func (s ExecSpawner) Spawn(workspace string, args []string) (Engine, error) {
 	cmd := exec.Command(s.Bin, append([]string{"-p", "--workspace", workspace}, args...)...)
 	// A spawned engine never rebuilds itself; the service owns freshness.
-	cmd.Env = append(append(os.Environ(), "DUN_CHILD=1"), s.Env...)
+	// DUN_DUND tells it dund is on the other end of its stdio, so it offers
+	// dun_list and dun_msg (proto/peer.go).
+	cmd.Env = append(append(os.Environ(), "DUN_CHILD=1", "DUN_DUND=1"), s.Env...)
 	cmd.Stderr = os.Stderr
 	ownGroup(cmd)
 	stdin, err := cmd.StdinPipe()

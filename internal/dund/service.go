@@ -50,6 +50,10 @@ type Service struct {
 	done     chan struct{} // closed by Close
 
 	up upgrader // a pending restart into a new build (upgrade.go)
+
+	// peerSent is when each (sender, target) pair's recent dun_msg went, for
+	// the rate limit (peer.go). Guarded by mu.
+	peerSent map[[2]string][]time.Time
 }
 
 // New opens the registry in dir, loading the sessions it lists. Their engines

@@ -76,6 +76,10 @@ type session struct {
 	// working when dund stopped, and is woken with it on the next start
 	// (persisted in the registry). Guarded by actMu, a leaf lock.
 	resume string
+	// branch is the worktree branch the engine reported, and lastUser the
+	// last message it took: dun_list's branch and task (peer.go).
+	branch   string
+	lastUser string
 }
 
 // track notes what an event says the engine is doing.
@@ -92,6 +96,10 @@ func (s *session) track(ev proto.Event) {
 		s.asking = true
 	case *proto.Answered:
 		s.asking = false
+	case *proto.Workspace:
+		s.branch = p.Branch
+	case *proto.UserEcho:
+		s.lastUser = p.Content
 	case *proto.Jobs:
 		s.jobs = nil
 		for _, j := range p.Jobs {
@@ -225,6 +233,10 @@ var askedIn = func(workspace, id string) bool {
 func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) {
 	for sc.Scan() {
 		if ev, ok := decodeEvent(sc.Bytes()); ok {
+			if req, ok := ev.Payload.(*proto.PeerRequest); ok {
+				go s.svc.handlePeer(s, *req)
+				continue
+			}
 			s.track(ev)
 			s.log.Append(ev)
 		}
@@ -321,15 +333,21 @@ func (s *session) send(c proto.Command) error {
 	if err := s.ensureRunning(); err != nil {
 		return err
 	}
-	c.CID, c.Session = "", "" // the engine's own frames carry neither
-	b, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.eng == nil {
 		return errors.New("engine not running")
+	}
+	return s.write(c)
+}
+
+// write puts one command on the engine's stdin. Called with mu held and an
+// engine attached.
+func (s *session) write(c proto.Command) error {
+	c.CID, c.Session = "", "" // the engine's own frames carry neither
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
 	}
 	if _, err := s.eng.Stdin().Write(append(b, '\n')); err != nil {
 		return fmt.Errorf("send to engine: %w", err)
