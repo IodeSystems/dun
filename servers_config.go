@@ -712,7 +712,9 @@ func writeUserServers(path string, f *ServersFile) error {
 // expandPlaceholders substitutes the paths a config file cannot know.
 //
 // {{workspace}} is the same token llm-bench's toolsets already use, so anyone
-// who has written one of those configs will recognise it.
+// who has written one of those configs will recognise it. {{project}} and
+// {{index}} are raglit's corpus and membership names for the workspace
+// (raglitProject, raglitIndex); they ask git, so only when used.
 func expandPlaceholders(in []string, workspace, raglitHome string) []string {
 	if in == nil {
 		return nil
@@ -721,6 +723,12 @@ func expandPlaceholders(in []string, workspace, raglitHome string) []string {
 	for i, s := range in {
 		s = strings.ReplaceAll(s, "{{workspace}}", workspace)
 		s = strings.ReplaceAll(s, "{{raglit_home}}", raglitHome)
+		if strings.Contains(s, "{{project}}") {
+			s = strings.ReplaceAll(s, "{{project}}", raglitProject(workspace))
+		}
+		if strings.Contains(s, "{{index}}") {
+			s = strings.ReplaceAll(s, "{{index}}", raglitIndex(workspace))
+		}
 		out[i] = s
 	}
 	return out

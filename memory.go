@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -333,29 +332,18 @@ func scanNote(content, question string) error {
 	return nil
 }
 
-// raglitMemory is the store for a workspace's project, indexed through the
-// docs server's own raglit binary and store flags, so a note lands where that
-// server searches (the shared daemon by default; an --embedded --home when the
-// config says so).
-func raglitMemory(docs Server, workspace string) *memoryStore {
+// memoryFor is the store for a workspace's project, indexed through the
+// memory.save extension's index sink — for raglit its own binary and store
+// flags, so a note lands where that server searches (the shared daemon by
+// default; an --embedded --home when the config says so). A nil sink keeps
+// the file and indexes nothing.
+func memoryFor(sink *mcpDocsSink, workspace string) *memoryStore {
 	m := &memoryStore{dir: memoryDir(raglitProject(workspace)), now: time.Now}
-	if filepath.Base(docs.Command) != "raglit" {
-		return m // not raglit: keep the file, index nothing
+	if sink == nil {
+		return m
 	}
-	store := raglitStoreFlags(docs.Args)
-	run := func(args ...string) error {
-		out, err := detach(exec.Command(docs.Command, args...)).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
-		}
-		return nil
-	}
-	m.ingest = func(path string) error {
-		return run(append(append([]string{"ingest"}, store...), "--index", memoryIndex, "--now", path)...)
-	}
-	m.forget = func(path string) error {
-		return run(append(append([]string{"forget"}, store...), "--index", memoryIndex, path)...)
-	}
+	m.ingest = func(path string) error { return sink.ingest(memoryIndex, []string{path}) }
+	m.forget = func(path string) error { return sink.forget(memoryIndex, []string{path}) }
 	return m
 }
 

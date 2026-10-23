@@ -77,8 +77,9 @@ type mcpDocsSink struct {
 	forget func(index string, paths []string) error
 }
 
-// raglitDocsSink runs raglit against the docs server's store, or returns nil
-// when the docs server is not raglit.
+// raglitDocsSink runs the raglit CLI against the docs server's store — an
+// index role's cli fallback (indexSink) — or returns nil when the docs
+// server is not raglit.
 func raglitDocsSink(docs Server) *mcpDocsSink {
 	if filepath.Base(docs.Command) != "raglit" {
 		return nil
@@ -118,12 +119,15 @@ func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
 	if _, ok := h.mgr.Capabilities(id)["resources"]; !ok {
 		return "serves no resources — nothing to index", nil
 	}
-	h.srvMu.Lock()
-	docs, ok := h.spec(ServerDocs)
-	h.srvMu.Unlock()
+	// The mcp.docs extension's index: through its CLI fallback, raglit's
+	// need not be running.
 	var sink *mcpDocsSink
-	if ok {
-		sink = raglitDocsSink(docs)
+	for _, e := range h.extensions() {
+		if e.Subscribes(HookMCPDocs) {
+			if sink = h.indexSink(e); sink != nil {
+				break
+			}
+		}
 	}
 	if sink == nil {
 		return "", fmt.Errorf("the docs index is raglit, and none is configured")

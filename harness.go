@@ -71,16 +71,6 @@ type Server struct {
 	OAuth *OAuthSpec
 }
 
-// DefaultServers points the three tool servers at a workspace directory (later a
-// git worktree, and later still `docker exec` into a container).
-//
-// Only shell autostarts. The other two are opt-in because each costs real
-// startup time and neither is universally wanted: poly-lsp-mcp indexes the
-// repo, and raglit needs the workspace ingested before it answers anything.
-// A session that is going to run a couple of shell commands should not pay for
-// either, and — more to the point — a machine missing one of those binaries
-// should still get a working dun. Persist a preference with /raglit auto or
-// /poly-lsp auto (see SetServerOn).
 // raglitProject is the CORPUS: the repository, shared by every worktree of it.
 //
 // It must resolve to the main repo even when the session runs in a worktree, or
@@ -177,12 +167,28 @@ func normalizeProject(name string) string {
 	return out
 }
 
+// DefaultServers points the three tool servers at a workspace directory (later a
+// git worktree, and later still `docker exec` into a container).
+//
+// Only shell autostarts. The other two are opt-in because each costs real
+// startup time and neither is universally wanted: poly-lsp-mcp indexes the
+// repo, and raglit needs the workspace ingested before it answers anything.
+// A session that is going to run a couple of shell commands should not pay for
+// either, and — more to the point — a machine missing one of those binaries
+// should still get a working dun. Persist a preference with /raglit auto or
+// /poly-lsp auto (see SetServerOn).
+//
+// poly-lsp and raglit are bundled extensions: their servers are their
+// manifests' (examples/extensions/, extension.go).
 func DefaultServers(workspace, raglitHome string) []Server {
+	code, _ := bundledExt(ServerCode)
+	docs, _ := bundledExt(ServerDocs)
 	return []Server{
-		{ID: ServerCode, Command: "poly-lsp-mcp", Args: []string{"mcp", "--root", workspace}},
+		bundledServer(code, workspace, raglitHome),
 		{ID: "shell", Command: "mcpshell", Args: []string{"mcp", "--files-dir", workspace}, Autostart: true},
-		// The shared daemon, namespaced by PROJECT — not an --embedded index in a
-		// per-session temp dir.
+		// raglit is the shared daemon, namespaced by PROJECT — not an
+		// --embedded index in a per-session temp dir ({{project}} and
+		// {{index}} in its manifest).
 		//
 		// The temp-dir form was wrong twice over. It re-embedded the entire
 		// workspace on every session and threw the result away on exit, and it
@@ -193,11 +199,17 @@ func DefaultServers(workspace, raglitHome string) []Server {
 		//
 		// It also made durable memory impossible: anything written to a home
 		// that is deleted on exit cannot outlive the session that wrote it.
-		{ID: ServerDocs, Command: "raglit", Args: []string{"serve",
-			"--project", raglitProject(workspace), // the corpus: the repository
-			"--index", raglitIndex(workspace)}, // the membership: this dir on this branch
-			Disable: []string{"search_figures", "ingest", "index_status", "list_indexes", "list_documents", "ocr"}},
+		bundledServer(docs, workspace, raglitHome),
 	}
+}
+
+// bundledServer is a bundled extension's server for workspace, its
+// placeholders expanded.
+func bundledServer(e Extension, workspace, raglitHome string) Server {
+	s := e.server()
+	s.Args = expandPlaceholders(s.Args, workspace, raglitHome)
+	s.Env = expandPlaceholders(s.Env, workspace, raglitHome)
+	return s
 }
 
 // Server ids dun knows by name. The id of poly-lsp-mcp and of raglit is the
@@ -437,10 +449,15 @@ type Harness struct {
 	specs     []Server                 // every configured server, running or not
 	lastErr   map[string]string        // id → why its last start attempt failed
 	lastStart map[string]time.Duration // id → how long its last start took
-	// ingestNote is the docs server's last ingest summary, for /raglit and the
-	// ready hint. Guarded by srvMu.
+	// ingestNote is the last workspace ingest's summary, for /raglit and the
+	// ready hint, and ingestID the server it went to. Guarded by srvMu.
 	ingestNote string
-	hosted     map[string]hostedState // id → how the running shell took a shell-placed server
+	ingestID   string
+	// exts are the loaded extensions and extErrs the manifests that did not
+	// load (extension.go). Fixed at Start.
+	exts    []Extension
+	extErrs []ExtError
+	hosted  map[string]hostedState // id → how the running shell took a shell-placed server
 	// sessSw is this session's own server switches (mcpscope.go), saved in
 	// the session's .mcp.json sidecar. Guarded by srvMu. reconMu orders the
 	// reloads that apply a switch change.
@@ -1084,15 +1101,23 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// as given: it shares the parent's manager and switches nothing.
 	servers := cfg.Servers
 	var sessSw map[string]SessionServer
+	extDir := cfg.ConfigDir
+	if extDir == "" {
+		extDir = cfg.Workspace
+	}
+	// Extensions: the bundled ones and the user's and project's manifests
+	// (extension.go). Their servers join the base the files layer over.
+	exts, extErrs := LoadExtensions(extDir)
+	for _, e := range extErrs {
+		log.Printf("dun: extension %v", e)
+	}
 	if cfg.Parent == nil {
-		dir := cfg.ConfigDir
-		if dir == "" {
-			dir = cfg.Workspace
-		}
+		dir := extDir
 		base := cfg.Servers
 		if base == nil {
 			base = DefaultServers(cfg.Workspace, cfg.RaglitHome)
 		}
+		base = extServers(base, exts)
 		sessSw = LoadSessionServers(cfg.SessionFile)
 		var err error
 		servers, err = resolveServers(dir, cfg.Workspace, cfg.RaglitHome, base, sessSw, cfg.AutostartOverride)
@@ -1115,7 +1140,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	store.onNotify = cfg.OnNotify
 	h := &Harness{mgr: mgr, store: store, client: cfg.Client,
 		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
-		cfg: cfg, specs: servers, sessSw: sessSw, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
+		cfg: cfg, specs: servers, sessSw: sessSw, exts: exts, extErrs: extErrs, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
 	// A resumed session's history is not this session's to act on: the

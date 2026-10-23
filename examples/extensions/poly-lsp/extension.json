@@ -1,0 +1,13 @@
+{
+  "id": "poly-lsp",
+  "description": "semantic code navigation and edits (poly-lsp-mcp), with the AGENTS.md guard",
+  "server": {
+    "command": "poly-lsp-mcp",
+    "args": ["mcp", "--root", "{{workspace}}"]
+  },
+  "slash": {
+    "name": "poly-lsp",
+    "description": "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session"
+  },
+  "host_hooks": {"POLY_LSP_HOOK": "agents_md_guard"}
+}

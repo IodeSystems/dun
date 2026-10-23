@@ -1,0 +1,18 @@
+{
+  "id": "raglit",
+  "description": "the docs index: search, proactive surfacing, memory, and the skills, rules and MCP-docs indexes",
+  "server": {
+    "command": "raglit",
+    "args": ["serve", "--project", "{{project}}", "--index", "{{index}}"],
+    "disable": ["search_figures", "ingest", "index_status", "list_indexes", "list_documents", "ocr"]
+  },
+  "slash": {
+    "name": "raglit",
+    "description": "docs index (raglit): bare shows status, auto starts it every session"
+  },
+  "roles": {
+    "search": {"tool": "search", "get": "get_document"},
+    "index": {"tool": "ingest", "forget": "forget", "cli": "raglit"}
+  },
+  "hooks": ["turn.before", "workspace.open", "memory.save", "skills.changed", "rules.changed", "mcp.docs"]
+}

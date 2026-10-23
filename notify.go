@@ -13,13 +13,13 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/mcpmgr"
-	"github.com/iodesystems/agentkit/ragnotify"
 )
 
-// Proactive notifications — wiring raglit's search tool as an agent.DocFinder so
-// dun can ping relevant docs before each turn (the ragnotify pattern, over an
-// MCP server instead of a Go call). The finder reuses the SAME raglit server the
-// model searches explicitly.
+// Proactive notifications — wiring a turn.before extension's search tool
+// (raglit's) as an agent.DocFinder so dun can ping relevant docs before each
+// turn (the ragnotify pattern, over an MCP server instead of a Go call; see
+// newSurfacer in extension.go). The finder reuses the SAME server the model
+// searches explicitly.
 //
 // Unlike agentkit's stock FinderPreparer (one notification PER hit), dun uses an
 // AGGREGATING preparer: each pass emits ONE summary — "N found, M surfaced" —
@@ -27,34 +27,6 @@ import (
 // into the prompt (what the model is given to read); "found" = all candidate
 // hits after threshold/dedup. The UI collapses this to one line, expandable to
 // the doc list (see the TUI's docsBlock).
-
-// docsFinder returns a DocFinder over the discovered raglit `search` tool, or nil
-// if raglit isn't in the tool set.
-func docsFinder(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool) agent.DocFinder {
-	for _, t := range tools {
-		if isDocsSearch(t) {
-			return ragnotify.MCPFinder(mgr, t.ServerID, "search", ragnotify.Opts{})
-		}
-	}
-	return nil
-}
-
-// docsServerID is the server that owns the search tool docsFinder uses.
-func docsServerID(tools []mcpmgr.MCPTool) string {
-	for _, t := range tools {
-		if isDocsSearch(t) {
-			return t.ServerID
-		}
-	}
-	return ""
-}
-
-// isDocsSearch reports whether t is raglit's search: a "search" the model
-// calls by that bare name, so not one of an added server's (those are
-// "<server>__search" — see modelToolName).
-func isDocsSearch(t mcpmgr.MCPTool) bool {
-	return t.Name == "search" && modelToolName(t) == "search"
-}
 
 // DocHitInfo is one surfaced document, for the UI.
 type DocHitInfo struct {
@@ -77,12 +49,13 @@ const inlineMaxChars = 1500
 // ok is false when it is longer, or could not be read.
 type docBodyFunc func(ctx context.Context, docID string, max int) (text string, ok bool)
 
-// docsBodyFetcher reads documents through raglit's get_document on the same
-// server the finder searches. max_chars is asked one over the cap, so a
-// document exactly at the cap is distinguishable from a truncated one.
-func docsBodyFetcher(mgr *mcpmgr.Manager, serverID string) docBodyFunc {
+// docsBodyFetcher reads documents through the search role's get tool
+// (raglit's get_document) on the same server the finder searches. max_chars
+// is asked one over the cap, so a document exactly at the cap is
+// distinguishable from a truncated one.
+func docsBodyFetcher(mgr *mcpmgr.Manager, serverID, tool string) docBodyFunc {
 	return func(ctx context.Context, docID string, max int) (string, bool) {
-		raw, err := mgr.CallTool(ctx, serverID, "get_document", map[string]any{"path": docID, "max_chars": max + 1})
+		raw, err := mgr.CallTool(ctx, serverID, tool, map[string]any{"path": docID, "max_chars": max + 1})
 		if err != nil {
 			return "", false
 		}

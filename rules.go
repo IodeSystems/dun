@@ -619,7 +619,7 @@ func (h *Harness) RulesStatus() string {
 	h.rulesMu.Lock()
 	st := h.readRulesState()
 	h.rulesMu.Unlock()
-	docsOn := h.mgr != nil && h.mgr.ServerStarted(ServerDocs)
+	docsOn := h.hookStarted(HookRulesChanged)
 	mode := effectiveMode(st, set, docsOn)
 	saved := firstNonEmptyStr(st.Mode, RulesFull)
 	var b strings.Builder
@@ -686,7 +686,7 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 		if len(set.Imports) == 0 {
 			return "", fmt.Errorf("the root rules import no files: there is nothing to index")
 		}
-		if h.mgr == nil || !h.mgr.ServerStarted(ServerDocs) {
+		if !h.hookStarted(HookRulesChanged) {
 			return "", fmt.Errorf("index mode needs the docs index: /raglit on first")
 		}
 	case RulesSummary:

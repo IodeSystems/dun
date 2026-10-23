@@ -78,8 +78,7 @@ func mcpToolDefs(tools []mcpmgr.MCPTool) []llm.ToolDef {
 // "search" would otherwise collide, and the last one listed would silently
 // take every call.
 func modelToolName(t mcpmgr.MCPTool) string {
-	switch t.ServerID {
-	case ServerCode, ServerShell, ServerDocs, "":
+	if t.ServerID == "" || builtinServer(t.ServerID) {
 		return t.Name
 	}
 	name := t.ServerID + "__" + t.Name

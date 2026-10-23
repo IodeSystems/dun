@@ -27,9 +27,9 @@ func TestMemStore_OnNotifyFiresForNotifications(t *testing.T) {
 	}
 }
 
-// docsFinder returns a finder when raglit's search tool is present, else nil.
+// No search tool, no proactive search.
 func TestDocsFinder_NilWithoutSearch(t *testing.T) {
-	if docsFinder(nil, nil) != nil {
+	if newSurfacer(nil, searchExts(BundledExtensions(), nil)) != nil {
 		t.Fatal("no tools → no finder")
 	}
 }

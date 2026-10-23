@@ -145,15 +145,15 @@ func writeAgentsHook() (string, error) {
 	return f.Name(), nil
 }
 
-// agentsHookEnv returns the env entries that arm the hook on the code server
-// for workspace — POLY_LSP_HOOK and the state file — or nil if the hook could
-// not be written.
-func agentsHookEnv(workspace string) []string {
+// agentsHookEnv returns the env entries that arm the hook for workspace —
+// envVar naming the script (POLY_LSP_HOOK, from poly-lsp's manifest
+// host_hooks) and the state file — or nil if the hook could not be written.
+func agentsHookEnv(envVar, workspace string) []string {
 	path, err := writeAgentsHook()
 	if err != nil {
 		return nil
 	}
-	env := []string{"POLY_LSP_HOOK=" + filepath.Clean(path)}
+	env := []string{envVar + "=" + filepath.Clean(path)}
 	if state := agentsStateFile(workspace); state != "" {
 		env = append(env, "DUN_AGENTS_STATE="+state)
 	}

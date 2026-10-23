@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -101,9 +100,13 @@ type ServerState struct {
 	// Auth is a remote server's credentials: its OAuth login state, "static
 	// bearer", "static header" or "none"; "" for a local server.
 	Auth string `json:"auth,omitempty"`
-	// Ingest is the docs server's last ingest summary: what was indexed and
-	// what was skipped (IngestPlan.Summary). "" for every other server.
+	// Ingest is the last workspace ingest's summary, on the server it went
+	// to (a workspace.open extension): what was indexed and what was skipped
+	// (IngestPlan.Summary). "" for every other server.
 	Ingest string `json:"ingest,omitempty"`
+	// Slash is the extension's slash command ("raglit"), "" for a server
+	// that is not an extension or has none.
+	Slash string `json:"slash,omitempty"`
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -148,8 +151,11 @@ func (h *Harness) Servers() []ServerState {
 			ViaSession:   s.Scopes.ViaSession,
 			ViaFrom:      s.Scopes.ViaFrom,
 		}
-		if s.ID == ServerDocs {
+		if s.ID == h.ingestID {
 			st.Ingest = h.ingestNote
+		}
+		if e, ok := h.extension(s.ID); ok {
+			st.Slash = e.SlashName()
 		}
 		switch {
 		case s.Via == ViaShell:
@@ -240,30 +246,30 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if timeout <= 0 {
 		timeout = 90 * time.Second
 	}
+	ext, isExt := h.extension(s.ID)
 	// raglit answers nothing until the workspace is in its index, so ingest
-	// belongs to STARTING the docs server, not to starting dun: a session that
-	// never turns rag on never pays for it.
+	// belongs to STARTING the server (hook workspace.open), not to starting
+	// dun: a session that never turns rag on never pays for it.
 	//
 	// The guard used to be `RaglitHome != ""`, which silently became "never"
 	// the moment the per-session temp home was removed — the ingest was still
 	// called, from a branch that could no longer be taken.
-	if s.ID == ServerDocs {
+	if isExt && ext.Subscribes(HookWorkspaceOpen) {
 		dir := h.cfg.ConfigDir
 		if dir == "" {
 			dir = h.cfg.Workspace
 		}
-		note := ingestWorkspace(s.Command, h.cfg.Workspace, LoadRag(dir))
+		note := ingestWorkspace(h.indexSink(ext), h.cfg.Workspace, LoadRag(dir))
 		h.srvMu.Lock()
-		h.ingestNote = note
+		h.ingestNote, h.ingestID = note, s.ID
 		h.srvMu.Unlock()
 	}
 	env := s.Env
-	// Arm the AGENTS.md guard on the code server: a file-access hook that
-	// cancels reads/edits until the model has seen the project's rules.
-	if s.ID == ServerCode {
-		if hookEnv := agentsHookEnv(h.cfg.Workspace); hookEnv != nil {
-			env = append(env, hookEnv...)
-		}
+	// Host hooks: the extension calls back into dun. poly-lsp's arms the
+	// AGENTS.md guard, a file-access hook that cancels reads/edits until the
+	// model has seen the project's rules.
+	if isExt {
+		env = append(env, hostHookEnv(ext, h.cfg.Workspace)...)
 	}
 	args := s.Args
 	if s.ID == ServerShell {
@@ -468,19 +474,22 @@ func (h *Harness) rebuildTools() {
 	// child shares its parent's session file and thus its state.
 	toolDefs = append(toolDefs, sessionStateToolDef())
 	dispatch = withSessionState(dispatch, h, report)
-	// memory only while the docs server runs: a note is worth writing only
-	// because the proactive search brings it back (see memory.go).
+	// The extensions the hooks go to, among the running servers.
+	exts := h.extensions()
+	searchers := searchExts(exts, tools)
+	// memory only while a memory.save extension runs AND a turn.before one
+	// does: a note is worth writing only because the proactive search brings
+	// it back (see memory.go).
 	h.memory.Store(nil)
-	if id := docsServerID(tools); id != "" {
-		h.srvMu.Lock()
-		docs, _ := h.spec(id)
-		h.srvMu.Unlock()
-		m := raglitMemory(docs, h.cfg.Workspace)
+	if e, ok := hookExt(exts, HookMemorySave, tools); ok && len(searchers) > 0 {
+		m := memoryFor(h.indexSink(e), h.cfg.Workspace)
 		h.memory.Store(m)
-		// Skills into the docs index, off the turn lock: raglit takes a while.
-		go h.syncSkillIndex(raglitDocsSink(docs))
 		toolDefs = append(toolDefs, memoryToolDef())
 		dispatch = withMemory(dispatch, h, m, report)
+	}
+	// Skills into the index, off the turn lock: raglit takes a while.
+	if e, ok := hookExt(exts, HookSkillsChanged, tools); ok {
+		go h.syncSkillIndex(h.indexSink(e))
 	}
 	// skill, when any skill is in reach: the list rides the tool's
 	// description, the body comes back from the tool.
@@ -507,7 +516,8 @@ func (h *Harness) rebuildTools() {
 		// are standing context: the model needs the project's rules from the
 		// first message, and a system block survives compaction so a fold
 		// never drops them (rules.go).
-		rules, rulesMode, rulesSet = h.rulesBlock(docsServerID(tools) != "")
+		_, rulesIndexed := hookExt(exts, HookRulesChanged, tools)
+		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
 	}
 	// ship is the only way work leaves the worktree. It needs a repo, not a
@@ -563,26 +573,25 @@ func (h *Harness) rebuildTools() {
 	}()
 	// The rules index follows the mode: filled in index mode, emptied of an
 	// earlier session's files otherwise. A root session's job, off the lock.
-	if id := docsServerID(tools); id != "" && !h.isChild() {
-		h.srvMu.Lock()
-		docs, _ := h.spec(id)
-		h.srvMu.Unlock()
-		go h.syncRulesIndex(raglitDocsSink(docs), rulesSet, rulesMode)
+	if e, ok := hookExt(exts, HookRulesChanged, tools); ok && !h.isChild() {
+		go h.syncRulesIndex(h.indexSink(e), rulesSet, rulesMode)
 	}
 
-	// Proactive RAG: watch the conversation and inject relevant-doc pings before
-	// each turn (raglit's search tool as an agent.DocFinder). Injected notices
-	// surface via store.onNotify → OnNotify. Cleared when docs stops, or the
-	// preparer would call a dead server before every turn.
+	// Proactive RAG (hook turn.before): watch the conversation and inject
+	// relevant-doc pings before each turn (the extensions' search role as an
+	// agent.DocFinder). Injected notices surface via store.onNotify →
+	// OnNotify. Cleared when the server stops, or the preparer would call a
+	// dead server before every turn.
 	h.Session.Preparer = nil
-	if finder := docsFinder(h.mgr, tools); finder != nil {
+	if sf := newSurfacer(h.mgr, searchers); sf != nil {
 		// MinScore 0: raglit's search is BM25, whose scores aren't in a fixed
 		// range (tiny for a small index) — but a MATCH only returns matching
 		// rows, so any hit is a real lexical hit. What surfaces is decided by
 		// a margin over the runner-up instead (see docsPreparer): one
 		// document per pass, inlined when short.
-		h.Session.Preparer = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
-			docsBodyFetcher(h.mgr, docsServerID(tools)), docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc), h.skillForDoc, cfg.OnDocs)
+		group := sf.group(searchers[0].ID, docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc))
+		h.Session.Preparer = docsPreparer(h.store, sf.finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
+			sf.fetch, group, h.skillForDoc, cfg.OnDocs)
 	}
 }
 
@@ -670,13 +679,14 @@ func missing(want, have []string) []string {
 	return out
 }
 
-// ingestWorkspace lexically indexes the workspace into raglit (best-effort)
+// ingestWorkspace lexically indexes the workspace through sink (best-effort)
 // and returns the summary the user sees (IngestPlan.Summary), "" when nothing
-// was ingested. raglitCmd is the configured docs binary, so an overridden path
-// is honored; a docs server pointed at something that is not raglit is left
-// alone.
-func ingestWorkspace(raglitCmd, workspace string, cfg *RagConfig) string {
-	if filepath.Base(raglitCmd) != "raglit" {
+// was ingested. The index is raglitIndex(workspace), in the store the serve
+// args name (raglit's --project) — the same as the serve command's, or the
+// agent searches an index nothing was ingested into. A nil sink (a server
+// that is not raglit, with no index tools) is left alone.
+func ingestWorkspace(sink *mcpDocsSink, workspace string, cfg *RagConfig) string {
+	if sink == nil {
 		return ""
 	}
 	plan := planIngest(workspace, cfg)
@@ -685,24 +695,14 @@ func ingestWorkspace(raglitCmd, workspace string, cfg *RagConfig) string {
 	}
 	summary := plan.Summary()
 	log.Printf("dun: %s", summary)
-	base := []string{"ingest",
-		// Same daemon, same project and index as the serve command — or the
-		// agent searches an index nothing was ingested into.
-		"--project", raglitProject(workspace),
-		"--index", raglitIndex(workspace),
-		"--now"}
-	// Chunked so a large repository cannot overflow argv. Each call queues and
-	// the daemon drains them.
-	for _, batch := range chunkArgs(plan.Files, ingestBatch) {
-		args := append(append([]string{}, base...), batch...)
-		cmd := detach(exec.Command(raglitCmd, args...))
-		if out, err := cmd.CombinedOutput(); err != nil {
-			// Best-effort: proactive RAG simply has less to ping without it.
-			// Worth logging, since "search finds nothing" is otherwise
-			// unexplained.
-			log.Printf("dun: raglit ingest failed: %v: %s", err, strings.TrimSpace(string(out)))
-			return summary + " · ingest failed: " + err.Error()
-		}
+	// The sink chunks, so a large repository cannot overflow argv. Each call
+	// queues and the daemon drains them.
+	if err := sink.ingest(raglitIndex(workspace), plan.Files); err != nil {
+		// Best-effort: proactive RAG simply has less to ping without it.
+		// Worth logging, since "search finds nothing" is otherwise
+		// unexplained.
+		log.Printf("dun: workspace ingest failed: %v", err)
+		return summary + " · ingest failed: " + err.Error()
 	}
 	return summary
 }
@@ -736,10 +736,14 @@ func ingestTargets(workspace string) []string {
 	return planIngest(workspace, nil).Files
 }
 
-// builtinServer reports whether id is one of dun's own three servers.
+// builtinServer reports whether id is one of dun's own three servers: the
+// shell and the bundled extensions.
 func builtinServer(id string) bool {
-	id = canonicalServerID(id)
-	return id == ServerCode || id == ServerShell || id == ServerDocs
+	if canonicalServerID(id) == ServerShell {
+		return true
+	}
+	_, ok := bundledExt(id)
+	return ok
 }
 
 // serverIDPattern is what /mcp add accepts as an id: it becomes the tool

@@ -306,10 +306,17 @@ func (h *Harness) skillRoots() (user, project []struct{ dir, source string }) {
 		dir = h.cfg.Workspace
 	}
 	roots := skillDirs(dir)
-	if dir == "" {
-		return roots, nil
+	// Extensions' skills directories, above the user's own.
+	var exts []struct{ dir, source string }
+	for _, e := range h.extensions() {
+		if d := e.skillsDir(); d != "" {
+			exts = append(exts, struct{ dir, source string }{d, "extension " + e.ID})
+		}
 	}
-	return roots[:len(roots)-2], roots[len(roots)-2:]
+	if dir == "" {
+		return append(roots, exts...), nil
+	}
+	return append(roots[:len(roots)-2:len(roots)-2], exts...), roots[len(roots)-2:]
 }
 
 // skillsSig fingerprints the local skill roots: every skill directory's

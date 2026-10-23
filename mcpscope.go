@@ -387,10 +387,11 @@ func onOffWord(b bool) string {
 // baseServers is what the files layer over: the caller's Go-level servers,
 // or the built-ins.
 func (h *Harness) baseServers() []Server {
-	if h.cfg.Servers != nil {
-		return h.cfg.Servers
+	base := h.cfg.Servers
+	if base == nil {
+		base = DefaultServers(h.cfg.Workspace, h.cfg.RaglitHome)
 	}
-	return DefaultServers(h.cfg.Workspace, h.cfg.RaglitHome)
+	return extServers(base, h.exts)
 }
 
 // resolveSpecs re-reads every layer.

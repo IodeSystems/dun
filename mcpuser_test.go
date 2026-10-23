@@ -130,7 +130,7 @@ func TestAddServer_RemoteToolsAreNamespacedAndRemovable(t *testing.T) {
 	if !slices.Contains(names, "corp__search") || slices.Contains(names, "search") {
 		t.Fatalf("tools = %v; an added server's tools carry its id", names)
 	}
-	if docsServerID(h.mgr.GetTools()) != "" {
+	if len(searchExts(BundledExtensions(), h.mgr.GetTools())) != 0 {
 		t.Error("an added server's search must not be taken for raglit's")
 	}
 	tc := llm.ToolCall{}
