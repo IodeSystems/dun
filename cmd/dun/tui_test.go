@@ -109,6 +109,7 @@ var (
 	kSlash = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")}
 	kEsc   = tea.KeyMsg{Type: tea.KeyEsc}
 	kRight = tea.KeyMsg{Type: tea.KeyRight}
+	kLeft  = tea.KeyMsg{Type: tea.KeyLeft}
 )
 
 func typeStr(m tuiModel, s string) tuiModel {
@@ -686,15 +687,24 @@ func TestTUI_ArrowNav(t *testing.T) {
 	m.appendUser("hi")  // suggestions need something asked
 	m.append("a reply") // a plain convo message to land on
 
-	// left at the front of an (empty) input hops to the conversation.
+	// Arrows never change the focus zone (USER 2026-10-23): ← at the front
+	// of an (empty) input is an edge and stays in the input…
 	m = key(m, kLeft)
-	if m.focus != focusConvo {
-		t.Fatal("left at input front should focus the conversation")
-	}
-	// right from a plain message (no sub-selection) hops back to the input.
-	m = key(m, kRight)
 	if m.focus != focusInput {
-		t.Fatal("right from a plain convo message should focus the input")
+		t.Fatal("← at the input's front must not leave the input")
+	}
+	// …and → from a plain message (nothing to descend) stays in the convo.
+	m = key(m, kTab)
+	if m.focus != focusConvo {
+		t.Fatal("tab from the input should focus the conversation")
+	}
+	m = key(m, kRight)
+	if m.focus != focusConvo {
+		t.Fatal("→ on a plain convo message must not leave the conversation")
+	}
+	m = key(m, kTab)
+	if m.focus != focusInput {
+		t.Fatal("tab from the conversation (no activity) should be the input")
 	}
 	// right from an empty input accepts the ghost-text suggestion (fills the buffer).
 	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
@@ -1084,9 +1094,10 @@ func TestTUI_DocsOlderEvent(t *testing.T) {
 }
 
 // The arrow rule for an ordinary folded block: → walks minimized → expanded →
-// raw and stops, ← walks it back, and only a block with nothing left to open
-// hands → to the input. Before this, → left the conversation immediately and
-// the ▸ on every tool line could only be opened with enter.
+// raw and stops, ← walks it back, and at either end the arrow stops — it does
+// not hand the keys to another zone (USER 2026-10-23). Before the descend
+// rule, → left the conversation immediately and the ▸ on every tool line
+// could only be opened with enter.
 func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -1098,7 +1109,7 @@ func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
 	kRight := tea.KeyMsg{Type: tea.KeyRight}
 	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
 
-	m = key(m, kLeft) // input → convo
+	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // input → convo
 	m.sel = 0
 	if m.focus != focusConvo {
 		t.Fatalf("want the conversation, got %d", m.focus)
@@ -1109,15 +1120,12 @@ func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
 			t.Fatalf("→ should reach state %d, got %d", want, m.convo[0].state)
 		}
 	}
-	// Nothing deeper: → is the horizontal axis again and hands over to the
-	// input, WITHOUT wrapping the block shut on the way out.
+	// Nothing deeper: → stops, WITHOUT wrapping the block shut.
 	m = key(m, kRight)
-	if m.focus != focusInput || m.convo[0].state != viewExpanded {
-		t.Fatalf("→ past the deepest level should go to the input and leave the block open, focus=%d state=%d",
+	if m.focus != focusConvo || m.convo[0].state != viewExpanded {
+		t.Fatalf("→ past the deepest level should stop and leave the block open, focus=%d state=%d",
 			m.focus, m.convo[0].state)
 	}
-	m.focus, m.sel = focusConvo, 0
-	m.input.Blur()
 	for _, want := range []viewState{viewMinimized} {
 		m = key(m, kLeft)
 		if m.convo[0].state != want {
@@ -1127,17 +1135,16 @@ func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
 	if m.focus != focusConvo {
 		t.Fatalf("← should still be closing the block, not leaving, focus=%d", m.focus)
 	}
-	m = key(m, kLeft) // shut: now ← leaves the zone
-	if m.focus == focusConvo {
-		t.Fatal("← on a shut block should walk on to the next zone")
+	m = key(m, kLeft) // shut: ← is at the edge and stops
+	if m.focus != focusConvo || m.sel != 0 {
+		t.Fatalf("← on a shut block must stay put, focus=%d sel=%d", m.focus, m.sel)
 	}
 
-	// A block with nothing inside it: → is still the way back to the input.
-	m.focus, m.sel = focusConvo, 1
-	m.input.Blur()
+	// A block with nothing inside it: → stops too.
+	m.sel = 1
 	m = key(m, kRight)
-	if m.focus != focusInput {
-		t.Fatalf("→ on a block with nothing to open should return to the input, got %d", m.focus)
+	if m.focus != focusConvo || m.sel != 1 {
+		t.Fatalf("→ on a block with nothing to open must stay put, focus=%d sel=%d", m.focus, m.sel)
 	}
 }
 
@@ -1150,7 +1157,7 @@ func TestTUI_RightStopsWhereTheBlockEnds(t *testing.T) {
 	m = nm.(tuiModel)
 	m.convo = []convoEntry{{collapsed: "▸ recap: 9 entries", full: "▾ recap: 9 entries\nreplaced with: …"}}
 
-	m = key(m, tea.KeyMsg{Type: tea.KeyLeft}) // into the conversation
+	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // into the conversation
 	m.sel = 0
 	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
 	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
@@ -2289,15 +2296,17 @@ func TestMultilineInput_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestMultilineInput_LeftAtFrontHopsToConvo(t *testing.T) {
+// ← at the front of the input is an edge: it stops there. It used to hop to
+// the conversation (USER 2026-10-23: arrows never change the focus zone).
+func TestMultilineInput_LeftAtFrontStaysInInput(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	m.convo = []convoEntry{{collapsed: "a message"}}
 
-	m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
-	if m.focus != focusConvo {
-		t.Fatal("left at the input front should focus the conversation")
+	m = key(m, kLeft)
+	if m.focus != focusInput {
+		t.Fatal("← at the input front must stay in the input")
 	}
 }
 
@@ -2356,44 +2365,46 @@ func TestActivity_CollapsedIsOneLineWithTheAffordance(t *testing.T) {
 	}
 }
 
-// → opens and descends, ← ascends: the same rule as a docs block, which is the
-// whole point of using the same glyph.
-func TestActivity_RightDescendsLeftAscends(t *testing.T) {
+// tab reaches the zone with the table open and the highlight on a row, so →
+// goes straight in (USER 2026-10-23). ← is the zone's edge; esc goes home and
+// the strip folds back to one line.
+func TestActivity_TabOpensTheTableWithAHighlight(t *testing.T) {
 	m := withActivity(t)
-	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // convo
-	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // activity
+	m = key(m, kTab) // convo
+	m = key(m, kTab) // activity
 	if m.focus != focusActivity {
 		t.Fatalf("tab should reach the activity zone when it has rows, got %d", m.focus)
 	}
-	if m.actLevel != actCollapsed {
-		t.Fatal("focus alone must not expand the zone — → does")
-	}
-
-	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
 	if m.actLevel != actList {
-		t.Fatal("right should descend into the row list")
+		t.Fatal("focusing the zone should open its table")
 	}
-	if n := len(strings.Split(m.activityView(), "\n")); n < 3 {
-		t.Errorf("the table should show a row per item, got:\n%s", m.activityView())
+	if v := m.activityView(); !strings.Contains(v, "➤") || len(strings.Split(v, "\n")) < 3 {
+		t.Errorf("the table should show a row per item with the cursor on one:\n%s", v)
 	}
 
-	m = key(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = key(m, kDown)
 	if sel := m.actSelected(); sel == nil || sel.key != (actKey{agent: true, id: 2}) {
 		t.Errorf("down should move to the second agent, got %+v", sel)
 	}
-
-	m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
-	if m.actLevel != actCollapsed {
-		t.Fatal("left should ascend back to the collapsed line")
+	m = key(m, kLeft)
+	if m.focus != focusActivity || m.actLevel != actList {
+		t.Fatalf("← must not leave the zone or fold it, focus=%d level=%d", m.focus, m.actLevel)
 	}
-	m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
-	if m.focus != focusInput {
-		t.Fatal("left at the top of the zone should go home to the input")
+	m = key(m, kEsc)
+	if m.focus != focusInput || m.actLevel != actCollapsed {
+		t.Fatalf("esc should go home and fold the strip, focus=%d level=%d", m.focus, m.actLevel)
+	}
+	// tab away folds it too.
+	m = key(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.focus != focusActivity {
+		t.Fatalf("shift+tab from the input should reach the activity zone, got %d", m.focus)
+	}
+	m = key(m, kTab)
+	if m.focus != focusInput || m.actLevel != actCollapsed {
+		t.Fatalf("tab out of the zone should fold it, focus=%d level=%d", m.focus, m.actLevel)
 	}
 }
 
-// The selection is stored by IDENTITY. A new agent shifts every job index down,
-// so an index would silently walk to a different row while you were reading it.
 func TestActivity_SelectionSurvivesANewRow(t *testing.T) {
 	m := withActivity(t)
 	m.focus, m.actLevel = focusActivity, actList
@@ -2521,44 +2532,79 @@ func TestActivity_TaskTracksTheLastUserMessage(t *testing.T) {
 	}
 }
 
-// ← keeps going the way it was already going. It used to stop at the
-// conversation; now, with nothing left to ascend out of, it continues to the
-// activity strip when there is one — and wraps home when there is not. Same
-// order as tab, so the two never disagree about where "back" is.
-func TestActivity_LeftWalksBackThroughTheZones(t *testing.T) {
+// Arrows never change the focus zone (USER 2026-10-23): at every edge of every
+// zone they stop. Only tab and shift+tab move between zones.
+func TestFocus_ArrowsStopAtEveryEdge(t *testing.T) {
 	m := withActivity(t)
-	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
+	m.convo = []convoEntry{{collapsed: "first"}, {collapsed: "second"}}
+	m.refresh()
+	stay := func(z int, what string, k tea.KeyMsg) {
+		t.Helper()
+		m = key(m, k)
+		if m.focus != z {
+			t.Fatalf("%s moved focus %d → %d", what, z, m.focus)
+		}
+	}
+	// The input: empty, so the cursor is at both its front and its back.
+	for _, k := range []tea.KeyMsg{kLeft, kRight, kUp, kDown} {
+		stay(focusInput, "input "+k.String(), k)
+	}
+	m = typeStr(m, "abc")
+	stay(focusInput, "→ at the input's end", kRight)
+	m.input.cursor = 0
+	stay(focusInput, "← at the input's front", kLeft)
+	m.input.Reset()
 
-	m = key(m, kLeft)
+	// The conversation: top, bottom, and a block with nothing to open.
+	m = key(m, kTab)
 	if m.focus != focusConvo {
-		t.Fatalf("left at the front of the input should reach the conversation, got %d", m.focus)
+		t.Fatalf("tab should reach the conversation, got %d", m.focus)
 	}
-	m = key(m, kLeft)
+	m.sel = 0
+	stay(focusConvo, "↑ at the top", kUp)
+	stay(focusConvo, "← with nothing to ascend", kLeft)
+	stay(focusConvo, "→ with nothing to descend", kRight)
+	m.sel = len(m.convo) - 1
+	stay(focusConvo, "↓ at the bottom", kDown)
+	stay(focusConvo, "→ at the bottom", kRight)
+
+	// The activity zone: first row, last row, ←.
+	m = key(m, kTab)
 	if m.focus != focusActivity {
-		t.Fatalf("left again should continue to the activity strip, got %d", m.focus)
+		t.Fatalf("tab should reach the activity zone, got %d", m.focus)
 	}
-	m = key(m, kLeft)
+	stay(focusActivity, "↑ on the first row", kUp)
+	stay(focusActivity, "← in the zone", kLeft)
+	for range 5 {
+		stay(focusActivity, "↓ to the last row", kDown)
+	}
+	if sel := m.actSelected(); sel == nil || sel.key != (actKey{id: 3}) {
+		t.Fatalf("↓ should stop on the last row (job 3), got %+v", sel)
+	}
+	m = key(m, kTab)
 	if m.focus != focusInput {
-		t.Fatalf("left from the collapsed strip should wrap home to the input, got %d", m.focus)
+		t.Fatalf("tab from the activity zone should wrap to the input, got %d", m.focus)
 	}
 }
 
-// With no agents and no jobs there is no strip to walk into, so ← wraps
-// straight home — a session that never delegates never lands on an empty zone.
-func TestActivity_LeftWrapsHomeWithNoActivity(t *testing.T) {
+// A job that has finished is still listed, so the zone is still reachable:
+// a dead job is the one most worth reading.
+func TestActivity_OnlyDeadJobsIsStillReachable(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m.convo = []convoEntry{{collapsed: "a message"}}
-
-	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
-	m = key(m, kLeft)
-	if m.focus != focusConvo {
-		t.Fatalf("want the conversation, got %d", m.focus)
+	now := float64(time.Now().Unix())
+	m = m.handleEvent(evMsg{"type": "jobs", "jobs": []any{
+		map[string]any{"id": 7.0, "command": "make", "state": "failed", "code": 2.0, "started": now - 9, "ended": now - 3},
+		map[string]any{"id": 8.0, "command": "true", "state": "ok", "started": now - 2, "ended": now - 1},
+	}})
+	m = key(m, kTab)
+	m = key(m, kTab)
+	if m.focus != focusActivity {
+		t.Fatalf("finished jobs should keep the zone reachable, got focus %d", m.focus)
 	}
-	m = key(m, kLeft)
-	if m.focus != focusInput {
-		t.Fatalf("want the input, got %d", m.focus)
+	if sel := m.actSelected(); sel == nil || sel.key != (actKey{id: 7}) {
+		t.Fatalf("the first dead job should be highlighted, got %+v", sel)
 	}
 }
 
@@ -3876,8 +3922,7 @@ func enterAgentScopeByKeys(t *testing.T) tuiModel {
 	if m.focus != focusActivity {
 		t.Fatalf("tab twice should reach the activity zone, focus=%d", m.focus)
 	}
-	m = key(m, kRight) // collapsed → list
-	m = key(m, kRight) // descend into the selected agent
+	m = key(m, kRight) // focus opened the table: descend into the selected agent
 	if m.scopeAgent == 0 {
 		t.Fatal("could not enter agent scope with keys")
 	}
@@ -3929,10 +3974,24 @@ func TestActivity_LeavingAgentScope(t *testing.T) {
 		m := enterAgentScopeByKeys(t)
 		m = key(m, kTab)
 		m = key(m, kTab)
-		m = key(m, kRight) // open the strip
-		m = key(m, kRight) // descend into "parent"
+		m = key(m, kRight) // descend into "parent" (focus opened the strip)
 		if m.scopeAgent != 0 {
 			t.Error("the strip's parent row did not leave agent scope")
+		}
+	})
+
+	// ← in the strip, inside a scope, is the same level out as from the
+	// conversation: it leaves the child, and is not a zone move.
+	t.Run("via the activity strip, left", func(t *testing.T) {
+		m := enterAgentScopeByKeys(t)
+		m = key(m, kTab)
+		m = key(m, kTab)
+		if m.focus != focusActivity {
+			t.Fatalf("focus=%d, want the strip", m.focus)
+		}
+		m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
+		if m.scopeAgent != 0 {
+			t.Error("← in the strip did not leave agent scope")
 		}
 	})
 }

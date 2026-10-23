@@ -38,8 +38,7 @@ func jobsVtui(t *testing.T) (*vtui, *bytes.Buffer) {
 // /jobs kill N, anything else sends nothing.
 func TestTUI_XKillsSelectedJobAfterConfirm(t *testing.T) {
 	v, rec := jobsVtui(t)
-	v.m.setFocus(focusActivity)
-	v.m = key(v.m, kRight) // descend into the table; the first row is job 3
+	v.m.setFocus(focusActivity) // focusing opens the table; the first row is job 3
 	if !strings.Contains(v.view(), "x kill job") {
 		t.Errorf("the pane's hints should name x:\n%s", v.view())
 	}

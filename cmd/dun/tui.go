@@ -1351,22 +1351,21 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, nil
 		case "right":
-			// Horizontal axis: [convo] ← input → [suggestions].
-			//
 			// Inside the conversation → means DESCEND, uniformly. `▸` already
 			// means "there is something inside this" on the activity tree and on
 			// a docs list, and both are opened with →; a message wearing the same
 			// glyph that could only be opened with enter was the odd one out.
-			// Only a block with nothing left to open hands → back to the input.
+			//
+			// A block with nothing left to open stops →: arrows never change the
+			// focus zone, only tab/shift+tab do (USER 2026-10-23 — "the movement
+			// between panes is incredibly obnoxious"). → used to hand the keys
+			// back to the input here, and ← at the input's front hopped to the
+			// conversation, so an arrow held one press too long left the pane.
 			if m.focus == focusConvo {
 				if m.descendSel() {
 					m.refresh()
-					return m, nil
 				}
-				m.focus = focusInput
-				m.input.Focus()
-				m.refresh()
-				return m, textinput.Blink
+				return m, nil
 			}
 			// focusInput: right from an EMPTY input accepts the ghost-text suggestion
 			// (fills the buffer so the user can edit before sending).
@@ -1393,25 +1392,20 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.scopeAgent != 0 {
 					return m, m.leaveAgentScope()
 				}
-				// With nothing to ascend OUT of, ← keeps going the way it was
-				// already going: one more zone away from the input, which is the
-				// activity strip when there is one and the input again when
-				// there is not. Same order as tab, so the two agree.
-				m.cycleFocus(1)
-				m.refresh()
-				return m, textinput.Blink
+				// Nothing to ascend out of: the edge. ← stops here rather than
+				// moving to another zone (USER 2026-10-23, see the → case).
+				return m, nil
 			}
-			// focusInput: left at the FRONT of the input hops back to the
-			// conversation — or, in a child's scope, back to the session. Scope
-			// wins: it is where the user lands on descending, so it is where they
-			// press ← to undo it.
+			// focusInput: left at the FRONT of the input, in a child's scope,
+			// goes back to the session — scope is where the user lands on
+			// descending, so it is where they press ← to undo it. That is a
+			// level of the conversation, not a zone: the keys stay in the input.
+			// Outside a scope the front of the input is an edge and ← stops.
 			if m.input.Position() == 0 {
 				if m.scopeAgent != 0 {
 					return m, m.leaveAgentScope()
 				}
-				m.cycleFocus(1)
-				m.refresh()
-				return m, textinput.Blink
+				return m, nil
 			}
 			m.input = m.input.HandleKey(msg)
 			return m, nil
@@ -3140,7 +3134,7 @@ func (m tuiModel) drawView() string {
 	case m.focus == focusActivity && m.actLevel == actCollapsed:
 		status = stDim.Render("activity  ·  → open · tab input · " + m.exitHint())
 	case m.focus == focusActivity:
-		status = stDim.Render("activity  ·  ↑/↓ select · → open (agent = its view) · x kill job · ← back · tab input")
+		status = stDim.Render("activity  ·  ↑/↓ select · →/enter open (agent = its view) · x kill job · tab next zone · esc input")
 	case m.scopeAgent != 0:
 		status = stDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it · tab activity · ←/esc back to the session", m.scopeAgent))
 	case m.focus == focusConvo:

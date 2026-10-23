@@ -410,7 +410,7 @@ func TestYank(t *testing.T) {
 	v.event(map[string]any{"type": "turn", "kind": "user"})
 	v.event(map[string]any{"type": "token", "text": "A **bold** reply"})
 	v.event(map[string]any{"type": "done"})
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft}) // the newest block
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab}) // the newest block
 	if v.m.focus != focusConvo {
 		t.Fatal("precondition: the conversation has focus")
 	}

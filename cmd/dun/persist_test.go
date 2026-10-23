@@ -107,9 +107,10 @@ func TestOfflineShowsTheSavedConversation(t *testing.T) {
 	}
 }
 
-// ← from the input lands on the newest block every time, not where the last
-// visit left off.
-func TestLeftFromInputSelectsTheNewest(t *testing.T) {
+// tab from the input lands on the newest block every time, not where the last
+// visit left off. (← used to be the way in; arrows no longer change the zone,
+// USER 2026-10-23.)
+func TestTabFromInputSelectsTheNewest(t *testing.T) {
 	v := newVtui(80, 24)
 	v.event(map[string]any{"type": "ready"})
 	for _, msg := range []string{"one", "two", "three"} {
@@ -117,10 +118,10 @@ func TestLeftFromInputSelectsTheNewest(t *testing.T) {
 		v.event(map[string]any{"type": "done"})
 	}
 	newest := len(v.m.convo) - 1
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab})
 	first := v.m.sel
 	if v.m.focus != focusConvo || first < 0 {
-		t.Fatalf("← did not enter the conversation: focus=%d sel=%d", v.m.focus, first)
+		t.Fatalf("tab did not enter the conversation: focus=%d sel=%d", v.m.focus, first)
 	}
 	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyUp})
 	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyUp})
@@ -131,8 +132,8 @@ func TestLeftFromInputSelectsTheNewest(t *testing.T) {
 	if v.m.focus == focusConvo {
 		v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab})
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab})
 	if v.m.sel != first || first > newest {
-		t.Errorf("second ← selected %d, want the newest (%d)", v.m.sel, first)
+		t.Errorf("second tab selected %d, want the newest (%d)", v.m.sel, first)
 	}
 }

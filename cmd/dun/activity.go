@@ -516,10 +516,18 @@ func (m *tuiModel) cycleFocus(d int) {
 }
 
 // setFocus applies the per-zone entry state: the input takes the cursor back,
-// the conversation starts on the newest message, and the activity zone starts
-// collapsed with a valid selection.
+// the conversation starts on the newest message, and the activity zone opens
+// its table with the selection on a row.
+//
+// Focusing the zone OPENS it (USER 2026-10-23): tab lands on a job or an agent
+// with the highlight on it, so → or enter goes straight in. It used to land on
+// the collapsed one-liner, where nothing visible was selected and the first →
+// only unfolded the table. Leaving the zone folds it back to one line.
 func (m *tuiModel) setFocus(z int) {
 	m.focus = z
+	if z != focusActivity {
+		m.actLevel = actCollapsed
+	}
 	switch z {
 	case focusInput:
 		m.input.Focus()
@@ -530,14 +538,18 @@ func (m *tuiModel) setFocus(z int) {
 		m.sel = m.selSkipUp(len(m.convo) - 1)
 	case focusActivity:
 		m.input.Blur()
+		m.actLevel = actList
 		if rows := m.actRows(); len(rows) > 0 && m.actIndex(rows) < 0 {
 			m.actSel = rows[0].key
 		}
 	}
 }
 
-// actKeys drives the zone: ↑/↓ pick a row, → opens and descends, ← ascends and
-// finally leaves. Returns false when the key is not ours.
+// actKeys drives the zone: ↑/↓ pick a row, → or enter goes into it. ← is the
+// zone's edge: it leaves an agent's scope (a level of the conversation) and
+// otherwise does nothing — arrows never change the focus zone, tab does (USER
+// 2026-10-23). esc still goes home to the input, as it does from the
+// conversation. Returns false when the key is not ours.
 //
 // The `▸`/→/← rule is the whole point: it means the same thing here, on a docs
 // block in the conversation, and on a job's output. One affordance, learned
@@ -572,12 +584,12 @@ func (m *tuiModel) actKeys(key string) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return m.actDescend(), true
-	case "left", "esc":
-		if m.actLevel == actList {
-			m.actLevel = actCollapsed
-			return nil, true
+	case "left":
+		if m.scopeAgent != 0 {
+			return m.leaveAgentScope(), true
 		}
-		// Ascending out of the top of the zone goes home, to the input.
+		return nil, true
+	case "esc":
 		m.setFocus(focusInput)
 		return textinput.Blink, true
 	}
@@ -717,6 +729,6 @@ func (m tuiModel) scopeRows() []actRow {
 	}
 	return []actRow{{
 		key: parentKey, mark: "↰", style: stNote,
-		label: label + ")", detail: "← or esc to go back",
+		label: label + ")", detail: "← or enter to go back",
 	}}
 }
