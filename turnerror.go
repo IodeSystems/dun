@@ -11,10 +11,19 @@ import (
 // log later. Filtered out of Context exactly like kindRecap: it costs the model
 // nothing and never renders as conversation.
 //
-// It must not reach the model. A harness error is not something the model did
-// or saw, and feeding one back invites it to explain — or apologise for — a
-// failure that happened underneath it. What the model needs after a cut-off
-// turn is the conversation, which is already on disk.
+// The entry itself never reaches the model. A harness error (a provider 500, a
+// dropped connection) is not something the model did or saw, and feeding one
+// back invites it to explain — or apologise for — a failure that happened
+// underneath it. What the model needs after such a turn is the conversation,
+// which is already on disk.
+//
+// The turn budget is the exception, by a different path (USER, 2026-10-23):
+// running out of time IS about the model's work — the turn stopped mid-step,
+// and nothing in the conversation says so. The model is told twice: a notice
+// when the budget is spent (it gets a grace period to checkpoint and end the
+// turn), and, if the grace runs out too, one line in the next turn naming what
+// was cut (budget.go). Both are notifications written for the model; this
+// record stays out of context for every error, the budget's included.
 //
 // It exists because a turn error had no durable record AT ALL: it rendered once
 // in the TUI and left with the scrollback, so "why did that turn die?" was

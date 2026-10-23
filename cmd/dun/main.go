@@ -139,6 +139,7 @@ func main() {
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
 	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
+	timeoutGrace := flag.Duration("timeout-grace", 0, "after --timeout, time the model gets to wrap up before the cut (0 = 20% of --timeout, 2m-10m; negative = none)")
 	replay := flag.String("replay", "", "replay a recorded session trace into the TUI (record one with DUN_TRACE=path)")
 	replaySpeed := flag.Float64("replay-speed", 1, "replay: pacing multiplier over the recorded timing (2 = twice as fast)")
 	inputDelay := flag.Duration("input-delay", -1, "replay: fixed gap between events, overriding the recording (0 = no delay); negative = use the recorded timing")
@@ -443,10 +444,11 @@ func main() {
 	// Either way the budget is a pausable clock, not a context deadline: time a
 	// human spends answering ask_user is not dun working, and must not be
 	// charged to dun's budget (see turnclock.go).
+	turnGrace = *timeoutGrace
 	if *prog {
 		turnTimeout = *timeout
 	} else {
-		run := newTurnClock(ctx, *timeout)
+		run := newTurnClock(ctx, *timeout, graceFor(*timeout))
 		curClock.Store(run)
 		ctx = run.ctx
 		defer run.Stop()
@@ -672,6 +674,20 @@ func main() {
 	h, err := dun.Start(ctx, cfg)
 	if h != nil {
 		started.Store(h)
+		// The budget's two marks (turnclock.go): tell the model, then cut.
+		budgetHooks.Store(&budgetMarks{
+			spent: func(budget, grace time.Duration) {
+				h.NoteBudget(budget, grace)
+				msg := fmt.Sprintf("turn budget %s spent — the model is told to wrap up; cut in %s",
+					dun.BudgetDur(budget), dun.BudgetDur(grace))
+				if em != nil {
+					em.emit(&proto.Notification{Kind: "budget", Text: msg})
+				} else {
+					fmt.Fprintf(os.Stderr, "\ndun: %s\n", msg)
+				}
+			},
+			cut: h.NoteBudgetCut,
+		})
 	}
 	if err != nil {
 		if em != nil {
@@ -755,7 +771,7 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 		// retries already visible above have run out and the alternative is a user
 		// starting the whole task again.
 		fmt.Fprintf(os.Stderr, "\ndun: resume with: dun --continue --workspace %s \"<what to do next>\"\n", workspace)
-		fatal(err)
+		fatal(turnErr(ctx, err))
 	}
 	fmt.Fprint(os.Stderr, commaf("\n\n--- done (%d tokens) ---\n", res.Usage.Total))
 
@@ -1215,12 +1231,14 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 	turnActive.Store(true)
 	res, err := h.Continue(tctx)
 	turnActive.Store(false)
+	// turnErr first: a budget cut arrives as an interrupt, and is an error.
+	err = turnErr(tctx, err)
 	if errors.Is(err, dun.ErrInterrupted) {
 		emitInterrupted(h, em, res)
 		return true // what was queued during it runs next
 	}
 	if err != nil {
-		emitTurnError(ctx, h, em, turnErr(tctx, err))
+		emitTurnError(ctx, h, em, err)
 		return false
 	}
 	if strings.TrimSpace(res.Reply) != "" {
@@ -1604,12 +1622,14 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 	}
 	res, err := h.Ask(tctx, task)
 	turnActive.Store(false)
+	// turnErr first: a budget cut arrives as an interrupt, and is an error.
+	err = turnErr(tctx, err)
 	if errors.Is(err, dun.ErrInterrupted) {
 		emitInterrupted(h, em, res)
 		return true
 	}
 	if err != nil {
-		emitTurnError(ctx, h, em, turnErr(tctx, err))
+		emitTurnError(ctx, h, em, err)
 		return false
 	}
 	em.emit(&proto.Message{Role: "assistant", Content: res.Reply})

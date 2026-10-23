@@ -23,6 +23,8 @@ import (
 //  1. Interrupt cancels the CURRENT turn's context with ErrInterrupted as the
 //     cause. Only the turn's: the engine, the session and the background jobs
 //     stay up. runTurn does not retry a cancelled context, so the cut is final.
+//     A turn budget cut arrives the same way, as BudgetCut on the parent
+//     context (budget.go), and is recorded the same way.
 //  2. The turn returns. finishInterrupt records what the model had produced, so
 //     the next turn reads it:
 //     - the reply text the cut round had streamed (agentkit persists a round
@@ -41,6 +43,34 @@ import (
 // It is not a failure: the transcript is consistent and the next message
 // continues from it.
 var ErrInterrupted = errors.New("the user interrupted the turn")
+
+// interruptCause is the cut turn's cancellation cause: ErrInterrupted, plus
+// who or what stopped it, so a tool call cut short can say so in its result
+// ("" is the user).
+type interruptCause struct{ reason string }
+
+func (c interruptCause) Error() string {
+	if c.reason == "" {
+		return ErrInterrupted.Error()
+	}
+	return "the turn was stopped: " + c.reason
+}
+
+func (c interruptCause) Is(target error) bool { return target == ErrInterrupted }
+
+// interruptReason is what stopped ctx's turn: "" for the user, or no cut.
+func interruptReason(ctx context.Context) string {
+	cause := context.Cause(ctx)
+	var c interruptCause
+	if errors.As(cause, &c) {
+		return c.reason
+	}
+	var b BudgetCut
+	if errors.As(cause, &b) {
+		return b.reason()
+	}
+	return ""
+}
 
 // interruptTag marks the notification that records an interrupt.
 const interruptTag = "interrupt"
@@ -114,6 +144,10 @@ type interruptState struct {
 	// intReason is who or what stopped the turn, for the note the model
 	// reads; "" is the user. Guarded by intMu.
 	intReason string
+	// intLead, when set, opens the note in place of the generic "stopped
+	// before it finished": a budget cut says which budget, and during what.
+	// Guarded by intMu.
+	intLead string
 }
 
 // Interrupt stops the turn in flight, if there is one, and reports whether
@@ -126,9 +160,9 @@ func (h *Harness) Interrupt(reason string) bool {
 	if h.intCancel == nil {
 		return false
 	}
-	h.intReason = reason
+	h.intReason, h.intLead = reason, ""
 	h.interrupting.Store(true)
-	h.intCancel(ErrInterrupted)
+	h.intCancel(interruptCause{reason})
 	return true
 }
 
@@ -138,7 +172,7 @@ func (h *Harness) interruptible(ctx context.Context) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	h.intMu.Lock()
 	h.intCancel = cancel
-	h.turnStart, h.cutJobs, h.intReason = time.Now(), "", ""
+	h.turnStart, h.cutJobs, h.intReason, h.intLead = time.Now(), "", "", ""
 	h.intMu.Unlock()
 	h.interrupting.Store(false)
 	h.round.reset()
@@ -150,9 +184,12 @@ func (h *Harness) interruptible(ctx context.Context) (context.Context, func()) {
 	}
 }
 
-// interrupted says ctx is a turn the user interrupted.
+// interrupted says ctx is a turn that was stopped: by the user, by dund, or by
+// its budget running out (BudgetCut arrives as the PARENT context's cause).
 func interrupted(ctx context.Context) bool {
-	return errors.Is(context.Cause(ctx), ErrInterrupted)
+	cause := context.Cause(ctx)
+	var b BudgetCut
+	return errors.Is(cause, ErrInterrupted) || errors.As(cause, &b)
 }
 
 // finishInterrupt turns a turn the user cut into ErrInterrupted, after
@@ -181,13 +218,19 @@ func (h *Harness) recordInterrupt(ctx context.Context) {
 		now++
 	}
 	h.intMu.Lock()
-	reason := h.intReason
+	reason, lead := h.intReason, h.intLead
 	h.intMu.Unlock()
+	if reason == "" {
+		reason = interruptReason(ctx) // a budget cut nobody noted
+	}
 	cut := userInterruptedCall
 	note := "[the user interrupted this turn] Your previous response was stopped by the user before it finished"
 	if reason != "" {
 		cut = func(name string) string { return interruptedCallFor(name, reason) }
 		note = "[" + reason + "] Your previous response was stopped before it finished"
+	}
+	if lead != "" {
+		note = lead
 	}
 	h.healOrphans(ctx, cut, true)
 	if !done && strings.TrimSpace(content) != "" {
@@ -207,8 +250,11 @@ func (h *Harness) recordInterrupt(ctx context.Context) {
 			strings.Join(list, ", ") + ". The user can stop one with /jobs kill N; leave them running " +
 			"unless the user asks you to stop them (exec_monitor kill)."
 	}
-	if reason == "" {
+	switch {
+	case reason == "":
 		note += " Do not resume or repeat it on your own: the user's next message says what to do."
+	case lead != "":
+		note += " Check the state before you continue."
 	}
 	h.store.appendSilent(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindNotification, Tag: interruptTag,
@@ -319,19 +365,30 @@ func interruptedCallFor(name, reason string) string {
 func withInterrupt(inner agent.ToolDispatcher) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		name := tc.Function.Name
+		// Who stopped the turn, as the result names it. A budget cut is not
+		// the user, and must not read as one.
+		by := func() string {
+			if r := interruptReason(ctx); r != "" {
+				return "the turn was stopped (" + r + ")"
+			}
+			return "the user interrupted the turn"
+		}
 		if interrupted(ctx) {
-			return fmt.Sprintf("ERROR: not run — the user interrupted the turn before this %s call started.", name), nil
+			return fmt.Sprintf("ERROR: not run — %s before this %s call started.", by(), name), nil
 		}
 		out, err := inner(ctx, tc)
 		if !interrupted(ctx) {
 			return out, err
 		}
 		if err != nil {
+			if r := interruptReason(ctx); r != "" {
+				return interruptedCallFor(name, r), nil
+			}
 			return userInterruptedCall(name), nil
 		}
 		// It finished, but the interrupt may have cut it short: keep what it
 		// returned and say so.
-		return strings.TrimRight(out, "\n") + "\n\n[the user interrupted the turn while this call ran; " +
+		return strings.TrimRight(out, "\n") + "\n\n[" + by() + " while this call ran; " +
 			"the output above may be incomplete]", nil
 	}
 }

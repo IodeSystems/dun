@@ -415,6 +415,12 @@ type Harness struct {
 	self    *subAgent // this harness's own record IN its parent; nil for a root
 	noteMu  sync.Mutex
 	queue   []queued // messages not yet delivered to the model
+	// budgetNote is the budget notice waiting for the next model call (see
+	// budget.go). Guarded by noteMu.
+	budgetNote string
+	// docsPrep is the proactive search's preparer, nil while no docs server
+	// runs. The Session's Preparer wraps it (withBudgetNotice), so is never nil.
+	docsPrep agent.NotificationPreparer
 
 	// Session state (goal/plan/todo/status) — see sessionstate.go. stateMu
 	// guards state: the tool runs on the turn's dispatcher goroutine while
@@ -981,6 +987,7 @@ func (h *Harness) BackgroundRunning() int {
 func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 	ctx, end := h.interruptible(ctx)
 	defer end()
+	h.clearBudgetNotes()
 	// Publish anything a tool result did not already carry (and pair off any
 	// interrupted tool call), so the turn below has it — and so several jobs
 	// finishing at once become ONE turn.
@@ -1306,6 +1313,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error) {
 	ctx, end := h.interruptible(ctx)
 	defer end()
+	h.clearBudgetNotes()
 	h.prepareTurn(ctx)
 	h.store.publish(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),

@@ -82,8 +82,7 @@ func TestBeginTurn_BoundsTheTurnNotTheSession(t *testing.T) {
 	sessionCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	turnTimeout = 20 * time.Millisecond
-	defer func() { turnTimeout = 0 }()
+	shortBudget(t, 20*time.Millisecond)
 
 	tctx, end := beginTurn(sessionCtx)
 	defer end()
@@ -107,7 +106,7 @@ func TestBeginTurn_BoundsTheTurnNotTheSession(t *testing.T) {
 // and must not shadow the run clock an ask needs to pause.
 func TestBeginTurn_NoTimeoutFollowsTheSession(t *testing.T) {
 	turnTimeout = 0
-	run := newTurnClock(context.Background(), 0)
+	run := newTurnClock(context.Background(), 0, 0)
 	curClock.Store(run)
 	defer curClock.Store(nil)
 
@@ -128,8 +127,7 @@ func TestBeginTurn_NoTimeoutFollowsTheSession(t *testing.T) {
 // deadline it was, so a question left open long enough killed the turn that
 // asked it.
 func TestTurnClock_PausedTimeIsNotCharged(t *testing.T) {
-	turnTimeout = 120 * time.Millisecond
-	defer func() { turnTimeout = 0 }()
+	shortBudget(t, 120*time.Millisecond)
 
 	tctx, end := beginTurn(context.Background())
 	defer end()
@@ -462,8 +460,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 // clock has to say which one happened. Reporting "context canceled" for an
 // exhausted budget is what sent a debugging session looking for a crash.
 func TestTurnErr_BudgetExpiryNamesItself(t *testing.T) {
-	turnTimeout = 20 * time.Millisecond
-	defer func() { turnTimeout = 0 }()
+	shortBudget(t, 20*time.Millisecond)
 
 	tctx, end := beginTurn(context.Background())
 	defer end()
@@ -472,7 +469,7 @@ func TestTurnErr_BudgetExpiryNamesItself(t *testing.T) {
 	// What the agent loop actually returns from a cancelled request: the bare
 	// cancellation, wrapped the way an HTTP client wraps it.
 	got := turnErr(tctx, fmt.Errorf("post %q: %w", "/v1/chat", context.Canceled))
-	var budget errTurnBudget
+	var budget dun.BudgetCut
 	if !errors.As(got, &budget) {
 		t.Fatalf("budget expiry did not name itself: %v", got)
 	}
@@ -497,7 +494,7 @@ func TestTurnErr_CtrlCStaysCancelled(t *testing.T) {
 	if !errors.Is(got, context.Canceled) {
 		t.Fatalf("ctrl-C should stay a plain cancellation, got %v", got)
 	}
-	var budget errTurnBudget
+	var budget dun.BudgetCut
 	if errors.As(got, &budget) {
 		t.Error("ctrl-C was blamed on the turn budget")
 	}
@@ -506,8 +503,7 @@ func TestTurnErr_CtrlCStaysCancelled(t *testing.T) {
 // A turn that failed for its own reasons keeps that reason, even when the
 // clock ran out underneath it while the error was on its way up.
 func TestTurnErr_RealFailureKeepsItsMessage(t *testing.T) {
-	turnTimeout = 20 * time.Millisecond
-	defer func() { turnTimeout = 0 }()
+	shortBudget(t, 20*time.Millisecond)
 
 	tctx, end := beginTurn(context.Background())
 	defer end()

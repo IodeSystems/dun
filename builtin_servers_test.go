@@ -92,7 +92,7 @@ func writeHits(t *testing.T, path string, ids ...string) {
 // returning the aside it appended ("" for none).
 func surfaceOnce(t *testing.T, h *Harness, text string) string {
 	t.Helper()
-	if h.Session.Preparer == nil {
+	if h.docsPrep == nil {
 		t.Fatal("no proactive search is armed")
 	}
 	ctx := context.Background()
@@ -191,7 +191,7 @@ func TestRaglit_SurfacesMemorySkillMCPAndWorkspaceHitsBeforeATurn(t *testing.T) 
 	if err := h.StopServer(ServerDocs); err != nil {
 		t.Fatal(err)
 	}
-	if h.Session.Preparer != nil {
+	if h.docsPrep != nil {
 		t.Error("the proactive search outlived raglit")
 	}
 }

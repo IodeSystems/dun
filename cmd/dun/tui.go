@@ -2265,10 +2265,15 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.append(stNote.Render("↳ " + oneLine(msg)))
 		}
 	case "notification":
-		if str(ev["kind"]) == "docs" {
+		switch str(ev["kind"]) {
+		case "docs":
 			m.convo = append(m.convo, convoEntry{docs: docsFromEvent(ev)})
 			m.refresh()
-		} else {
+		case "budget":
+			// The turn budget ran out and the grace started: the machinery
+			// speaking, so dim, not a bell.
+			m.append(stDim.Render("⏱ " + oneLine(str(ev["text"]))))
+		default:
 			m.append(stNote.Render("🔔 " + oneLine(str(ev["text"]))))
 		}
 	case "ask":
