@@ -135,6 +135,28 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ◐ 22. Extension slash commands as a proxy; raglit include/exclude (USER, 2026-10-23)
+
+- **What:** manifest `slash.commands.<name>` = `{help, tool+args | cli |
+  steps:[…]}`; a step may carry `if: file|dir` (stat at run time) and
+  `unless: --flag`. Placeholders `{{paths}} {{path}} {{arg}} {{index}}
+  {{project}} {{workspace}}`. A tool step calls the extension's own server
+  directly (works for a tool in `disable`); a cli step runs
+  `roles.index.cli` detached with the serve args' store flags. Routing:
+  the existing `call` path (routeSlash → control ext → RunExtCommand).
+  raglit: include, add-document, exclude [--keep], unexclude, excludes.
+- **next:** schema + runner + tests (scaffolding commit), raglit manifest
+  (implementation commit), live check (copy item 20's method).
+- **risks:** `{{index}}` is per branch (`<dir>-<branch>`): an include is tied
+  to this worktree's index, and `dropIndexFor` on worktree removal drops the
+  included documents while raglit's config keeps the watch root. `exclude`
+  acts on this workspace's index only.
+- **blocking decisions:** none known.
+- **assumptions:** the manifest field `arg` (item 21, one day old) is
+  replaced by `args` with `{{arg}}`; the per-command text is `help` (was
+  `description`).
+- **optional extensions:** /raglit watch|attach|detach as manifest commands.
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
