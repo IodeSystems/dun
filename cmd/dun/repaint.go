@@ -452,6 +452,8 @@ func (m tuiModel) openName() string {
 		return "inspector"
 	case m.paging:
 		return "pager"
+	case m.jobViewing:
+		return "job view"
 	case m.confirm.q != "":
 		return "confirm"
 	case m.asking:

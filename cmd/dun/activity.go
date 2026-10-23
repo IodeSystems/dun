@@ -19,7 +19,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -609,54 +608,13 @@ func (m *tuiModel) actDescend() tea.Cmd {
 	if row.key.agent {
 		return m.enterAgentScope(row.key.id)
 	}
-	j := m.jobByID(row.key.id)
-	if j == nil {
-		return nil
-	}
-	// The inspector is already scrollable and searchable, and a job's log is
-	// exactly the kind of thing it exists for. No second widget.
-	m.insp = newInspector("exec #"+fmt.Sprint(j.id), j.command, m.jobDetail(*j))
-	m.insp.setSize(m.w, m.h)
-	m.inspecting = true
-	return nil
+	// A job opens in its own view, in the conversation pane's place: the
+	// command on top, the log as a tail panel under it (jobview.go).
+	return m.openJobView(row.key.id)
 }
 
-// jobDetail is what a job's inspector shows: the verdict, where the log is, and
-// as much of it as the TUI can read. The engine wrote the log to a path it
-// handed us, so the tail is read here rather than round-tripped.
-func (m tuiModel) jobDetail(j jobRow) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "command: %s\n", j.command)
-	fmt.Fprintf(&b, "state:   %s", j.state)
-	if j.state == "failed" {
-		fmt.Fprintf(&b, " (exit %d)", j.code)
-	}
-	b.WriteString("\n")
-	fmt.Fprintf(&b, "elapsed: %s\n", compactDur(j.elapsed(time.Now())))
-	b.WriteString(commaf("output:  %d bytes\n", j.bytes))
-	if j.muted {
-		b.WriteString("muted:   the model asked not to be told about this one\n")
-	}
-	if j.log == "" {
-		b.WriteString("\n(no log file — this session is in memory)")
-		return b.String()
-	}
-	fmt.Fprintf(&b, "log:     %s\n\n", j.log)
-	data, err := os.ReadFile(j.log)
-	if err != nil {
-		b.WriteString("(log unreadable: " + err.Error() + ")")
-		return b.String()
-	}
-	if len(data) > jobLogTail {
-		b.WriteString("…(showing the last " + fmt.Sprint(jobLogTail) + " bytes)\n")
-		data = data[len(data)-jobLogTail:]
-	}
-	b.Write(data)
-	return b.String()
-}
-
-// jobLogTail bounds what the inspector loads. A build log can be tens of
-// megabytes and the failure is always at the bottom.
+// jobLogTail bounds how much of a log the job view keeps (jobview.go). A
+// build log can be tens of megabytes and the failure is always at the bottom.
 const jobLogTail = 256 * 1024
 
 // ── agent scope ─────────────────────────────────────────────────────

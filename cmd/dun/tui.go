@@ -644,6 +644,9 @@ type tuiModel struct {
 	bandRaw      []string       // the selected block's rows before the band, for a pulse step
 	bandAt       int            // the pane row they start at
 	pg           pager          // the pager (valid while paging)
+	jobViewing   bool           // a job's view has the convo pane (jobview.go; owns the keys)
+	jv           jobView        // the job view (valid while jobViewing)
+	jvGen        int            // which opening of the job view its read timer belongs to
 	dumpSig      chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
 	paletteSel   int            // highlighted row in the "/" command palette
 	model, url   string         // this session's LLM settings (for /config)
@@ -881,6 +884,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The block being paged may have grown, and the pane may have moved.
 		t.syncPager()
+		t.syncJobView()
 		// Out of the conversation, out of any box in it (however focus moved).
 		if t.focus != focusConvo && t.sel >= 0 && t.sel < len(t.convo) && t.convo[t.sel].box != nil && t.convo[t.sel].box.inside {
 			leaveBox(t.convo[t.sel].box)
@@ -983,6 +987,15 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inspecting {
 			open, cmd := m.insp.update(msg)
 			m.inspecting = open
+			return m, cmd
+		}
+		// So does a job's view, all but ctrl+c (jobview.go).
+		if m.jobViewing && msg.String() != "ctrl+c" {
+			open, cmd := m.jv.key(msg)
+			if !open {
+				m.jobViewing = false
+				m.refresh()
+			}
 			return m, cmd
 		}
 		// So does the pager, all but ctrl+c: it reads one block in the convo
@@ -1496,6 +1509,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case jobTailMsg:
+		return m, m.jobTail(msg)
+
 	case renderTickMsg:
 		// One frame per tick at most, no matter how fast the tokens arrive.
 		m.tickPending = false
@@ -1570,6 +1586,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if m.paging {
 			m.pg.mouse(msg)
+			return m, nil
+		}
+		if m.jobViewing {
+			m.jv.mouse(msg)
 			return m, nil
 		}
 		// Clicks and drags (mouse.go); everything below is the wheel.
@@ -2328,6 +2348,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.endThinking()
 		m.flushCur()
 		m.paging = false // the question needs the screen
+		m.jobViewing = false
 		if !m.asking {
 			m.keepDraft() // the composer is the user's draft; the question borrows it
 		}
@@ -2893,7 +2914,7 @@ func (m tuiModel) planScrollRegion() tea.Cmd {
 	// The band pulses mid-pane, and a region can only repaint whole; the
 	// renderer's line diff sends just the rows that changed.
 	// So does a mouse highlight: it changes rows in place.
-	if m.inspecting || m.paging || m.bandShown() || m.drag.shown() || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
+	if m.inspecting || m.paging || m.jobViewing || m.bandShown() || m.drag.shown() || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
 		return m.sr.disable(time.Now())
 	}
 	vp := m.vp
@@ -3093,6 +3114,8 @@ func (m tuiModel) drawView() string {
 		status = stAsk.Render("❓ " + m.confirm.q)
 	case m.flashing():
 		status = stNote.Render(m.flashText)
+	case m.jobViewing:
+		status = stDim.Render(m.jv.hint())
 	case m.paging:
 		if v := m.serversPaging(); v != nil {
 			status = v.hint() // styled itself: its hotkeys are marked
@@ -3163,6 +3186,9 @@ func (m tuiModel) drawView() string {
 	convo := blankRegion(m.selOverlay(m.viewportView(vp), vp.YOffset), m.sr.rowsFor(vp.Height))
 	if m.paging {
 		convo = m.pg.view(vp.Width, vp.Height)
+	}
+	if m.jobViewing {
+		convo = m.jv.view(vp.Width, vp.Height)
 	}
 	out := append([]string{m.headView()}, top...)
 	out = append(out, convo, div, lower)
