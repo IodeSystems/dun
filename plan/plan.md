@@ -138,6 +138,11 @@ full detail archived in `done.md`.
   the conversation (holdConvo); a composer draft comes back however the
   question ends; tab/→ edits the highlighted answer; the description makes
   the case for `multi`, `recommended` may be a list. See `done.md`.
+- **Soft turn budget (25)** (2026-10-23) — at --timeout the model is told
+  (next call) to checkpoint and end the turn; --timeout-grace (auto 20%,
+  2–10m) later the turn is cut via the interrupt path and the next turn
+  reads one line naming what was running. Open: the cut note is a stored
+  notification. See `done.md`.
 
 ## Active work
 
@@ -149,23 +154,6 @@ and `/proc` on a live session. A–C closed those, and D (sub-agents) is built
 through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
-
-### ◐ 25. Soft turn budget: tell the model, then cut (USER, 2026-10-23)
-
-USER: "When we have this error [the turn ran past its 30m0s budget], shouldn't
-we note this to the agent? instead of killing the flow."
-
-- **Build:** at --timeout the clock does not cancel; the next model call gets
-  a notice (preparer path) and a grace period starts (--timeout-grace, auto
-  20% of the budget, 2–10m). At grace end the turn is cut through the
-  interrupt path, and the next turn reads a one-line note about the cut.
-- **next:** turnclock phases, harness NoteBudget/CutForBudget, TUI line,
-  tests, live check (scratch HOME + DUN_HOME, `--timeout 60s`).
-- **risks:** a tool that ignores ctx still holds the turn past the cut (as
-  today); the grace clock pauses for ask_user like the budget.
-- **blocking decisions:** none known.
-- **optional extensions:** sub-agents have no turn budget (they do not use
-  the clock); a budget for them is a separate item.
 
 ### ◻ Surfacing floor: a lone weak match should not surface (USER, 2026-10-23)
 

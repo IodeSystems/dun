@@ -1526,3 +1526,58 @@ docs (0.00)` with no origin; it was a claude.ai-synced skill
   removes it with the session (children's `<id>.subN` dirs too).
 - `startServer` now clones the spec's env before appending (it aliased
   `s.Env`).
+
+## ✅ 25. Soft turn budget: tell the model, then cut (USER, 2026-10-23)
+
+USER: "When we have this error [the turn ran past its 30m0s budget],
+shouldn't we note this to the agent? instead of killing the flow."
+Commit `751c5fd`.
+
+- **Clock** (`cmd/dun/turnclock.go`): two phases on one pausable timer.
+  Budget spent → mark `spent` (no cancel), grace starts; grace spent → mark
+  `cut`, then cancel with cause `dun.BudgetCut`. ask_user/compaction pause
+  either phase. A stale fire after a pause is ignored (generation counter).
+  `--timeout-grace`: 0 = 20% of the budget, 2m–10m; negative = none.
+- **Notice** (`budget.go`): `NoteBudget` queues it; the Session preparer
+  (`withBudgetNotice`, wraps the docs preparer, so never nil) appends it as
+  a `budget`-tagged notification at the top of the next round: after a
+  running tool's result, never between a call and its result. Dropped at
+  the next turn's start (per turn, not per retry attempt). Text: "[dun] This
+  turn has used its 30m time budget. dun cuts the turn off in 6m. Finish or
+  checkpoint the current step now: commit (a WIP commit if it is not done)
+  and note where you are. Then summarize what is done and what is left, and
+  end the turn."
+- **Cut:** `NoteBudgetCut` records what is running (unanswered tool calls,
+  else the streaming model step) before the cancel; `interrupted()` treats
+  `BudgetCut` as an interrupt, so the interrupt path records partial reply,
+  heals the cut call with the budget as the reason (`withInterrupt` no
+  longer says "the user" for a non-user cause) and writes one note: "[dun]
+  Your previous turn was cut off after its 30m budget plus 6m grace, during
+  the exec call. … Check the state before you continue." `turnErr` maps the
+  resulting ErrInterrupted back to the budget error, so the TUI shows the
+  error and `kindTurnError` is recorded (still out of context).
+- **TUI:** event `notification` kind `budget` → one dim `⏱` line.
+- **Sub-agents:** do not use the clock (`subagent.go` runs `h.Ask` on
+  `context.Background()`), so no change and no "wrapping up" report.
+  Found: `dun.CompactionPause` is global, so a CHILD's compaction pauses
+  the parent's turn clock. Not changed.
+- **Tests:** `budget_test.go` (notice on the next call once, after the
+  tool result, dropped next turn; stale notice dropped; cut during a tool →
+  result names the budget, next-turn note once over two turns, turn error
+  hidden; cut during a model step), `cmd/dun/turnclock_test.go` (soft then
+  cut, paused budget and paused grace do not expire, stop before budget,
+  graceFor, turnErr, TUI line). `make test` passes.
+- **Live** (scratch HOME + DUN_HOME with a copy of the config, `dun -p` in
+  tmux `-L dunlive25`, real model local-Qwen3.8-27B, repo `proj25`):
+  - A, `--timeout 60s --timeout-grace 90s`, six `sleep 25` steps: budget
+    ran out in step 2; the notice landed after step 2's result; the model
+    made a WIP commit ("WIP: steps 1-2 of 6"), wrote done/left and ended
+    the turn 66 s into the grace. No cut.
+  - B, `--timeout 30s --timeout-grace 10s`, one `sleep 100` exec: cut at
+    40 s during the exec; error event names budget + grace; the next turn's
+    session log has the note once before the user message; the model
+    described the cut correctly.
+- **Not verified live:** the TUI line in a real terminal (unit test only).
+- **Seen, not changed:** exec cancelled by the cut hands the command off to
+  a background job with "STILL RUNNING after 2m30s" (its configured wait,
+  not the 12 s it ran).
