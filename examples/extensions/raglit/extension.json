@@ -4,7 +4,7 @@
   "server": {
     "command": "raglit",
     "args": ["serve", "--project", "{{project}}", "--index", "{{index}}"],
-    "disable": ["search_figures", "ingest", "index_status", "list_indexes", "list_documents", "ocr"]
+    "disable": ["search_figures", "ingest", "index_status", "list_indexes", "list_documents", "ocr", "forget"]
   },
   "slash": {
     "name": "raglit",

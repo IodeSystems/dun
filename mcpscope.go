@@ -70,6 +70,8 @@ type ServerScopes struct {
 	ViaGlobal, ViaProject    string // "", ViaDirect, ViaShell
 	ViaSession               string
 	ViaFrom                  string // the scope that decided Via; "" for a built-in
+	// Attached indexes at each scope (attach.go); Server.Attach is their union.
+	AttachGlobal, AttachProject, AttachSession []string
 }
 
 // GlobalOn is the global switch as shown: unset is off, except for a server
@@ -83,12 +85,15 @@ func (s ServerScopes) GlobalOn(via string) bool {
 
 // SessionServer is one server's switches in a session's sidecar.
 type SessionServer struct {
-	On    *bool           `json:"on,omitempty"`
-	Via   string          `json:"via,omitempty"`
-	Tools map[string]bool `json:"tools,omitempty"`
+	On     *bool           `json:"on,omitempty"`
+	Via    string          `json:"via,omitempty"`
+	Tools  map[string]bool `json:"tools,omitempty"`
+	Attach []string        `json:"attach,omitempty"`
 }
 
-func (s SessionServer) empty() bool { return s.On == nil && s.Via == "" && len(s.Tools) == 0 }
+func (s SessionServer) empty() bool {
+	return s.On == nil && s.Via == "" && len(s.Tools) == 0 && len(s.Attach) == 0
+}
 
 // SessionServersFile is the session's switch sidecar, "" for an in-memory
 // session (mirrors StateFile).
@@ -210,7 +215,7 @@ func loadCatalog(dir string, base []Server) ([]catalogEntry, error) {
 func switchesOnly(s ServerSpec) bool {
 	return s.Command == "" && s.URL == "" && s.Args == nil && s.Env == nil && s.Headers == nil &&
 		s.Bearer == "" && s.OAuth == nil && s.Timeout == 0 &&
-		(s.Autostart != nil || s.Via != "" || s.Disable != nil || s.Tools != nil)
+		(s.Autostart != nil || s.Via != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil)
 }
 
 // resolve turns a catalog entry and this session's switches into the Server
@@ -227,7 +232,8 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		}
 		return Server{}, false, fmt.Errorf("dun: server %q has no command or url (declare one, or remove the entry)", s.ID)
 	}
-	sc := ServerScopes{Global: e.global.Autostart, Project: e.project.Autostart, Session: sess.On}
+	sc := ServerScopes{Global: e.global.Autostart, Project: e.project.Autostart, Session: sess.On,
+		AttachGlobal: e.global.Attach, AttachProject: e.project.Attach, AttachSession: sess.Attach}
 	var err error
 	for _, v := range []struct {
 		in  string
@@ -294,6 +300,7 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		Bearer:         s.Bearer,
 		OAuth:          s.OAuth,
 		Scopes:         sc,
+		Attach:         unionAttach(sc.AttachGlobal, sc.AttachProject, sc.AttachSession),
 	}, true, nil
 }
 

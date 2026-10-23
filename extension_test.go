@@ -158,7 +158,10 @@ func fakeIndexMCP(t *testing.T, calls *[]string, mu *sync.Mutex) *httptest.Serve
 			result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}}}
 		case "tools/list":
 			result = map[string]any{"tools": []map[string]any{
-				{"name": "search", "inputSchema": map[string]any{"type": "object"}},
+				{"name": "search", "description": "Search.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+					"query": map[string]any{"type": "string"}, "index": map[string]any{"type": "string"}}}},
+				{"name": "get_document", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+					"path": map[string]any{"type": "string"}, "index": map[string]any{"type": "string"}}}},
 				{"name": "ingest", "inputSchema": paths}, {"name": "forget", "inputSchema": paths}}}
 		case "tools/call":
 			a, _ := json.Marshal(msg.Params.Arguments)

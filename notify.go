@@ -52,10 +52,15 @@ type docBodyFunc func(ctx context.Context, docID string, max int) (text string, 
 // docsBodyFetcher reads documents through the search role's get tool
 // (raglit's get_document) on the same server the finder searches. max_chars
 // is asked one over the cap, so a document exactly at the cap is
-// distinguishable from a truncated one.
-func docsBodyFetcher(mgr *mcpmgr.Manager, serverID, tool string) docBodyFunc {
+// distinguishable from a truncated one. index, when set, is the attached
+// indexes' selector (attach.go), so a hit from one of them can be read.
+func docsBodyFetcher(mgr *mcpmgr.Manager, serverID, tool, index string) docBodyFunc {
 	return func(ctx context.Context, docID string, max int) (string, bool) {
-		raw, err := mgr.CallTool(ctx, serverID, tool, map[string]any{"path": docID, "max_chars": max + 1})
+		args := map[string]any{"path": docID, "max_chars": max + 1}
+		if index != "" {
+			args["index"] = index
+		}
+		raw, err := mgr.CallTool(ctx, serverID, tool, args)
 		if err != nil {
 			return "", false
 		}

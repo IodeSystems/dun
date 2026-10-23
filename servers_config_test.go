@@ -41,9 +41,10 @@ func TestLoadServers_DefaultsWithNoFiles(t *testing.T) {
 	if !strings.Contains(strings.Join(m["poly-lsp"].Args, " "), "/ws") {
 		t.Errorf("workspace not threaded into args: %v", m["poly-lsp"].Args)
 	}
-	// Default docs server should disable the tools the agent never uses.
-	if m["raglit"].Disable == nil || len(m["raglit"].Disable) != 6 {
-		t.Errorf("raglit server: expected 6 disabled tools, got %v", m["raglit"].Disable)
+	// Default docs server should disable the tools the agent never uses (forget is
+	// dun's, through the index role, like ingest).
+	if m["raglit"].Disable == nil || len(m["raglit"].Disable) != 7 {
+		t.Errorf("raglit server: expected 7 disabled tools, got %v", m["raglit"].Disable)
 	}
 }
 

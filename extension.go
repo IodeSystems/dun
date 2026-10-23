@@ -45,9 +45,13 @@ import (
 //	roles        lookups dun makes on demand:
 //	               search {tool, get}: tool takes {"query"} and answers hits
 //	                 (raglit's shape); get takes {"path", "max_chars"} and
-//	                 answers {"text", "truncated"}, to inline a short hit
+//	                 answers {"text", "truncated"}, to inline a short hit.
+//	                 When tool takes an "index", /<slash> attach|detach
+//	                 adds other projects' indexes to it (attach.go)
 //	               index {tool, forget, cli}: where documents go — see
-//	                 indexSink for the MCP/CLI choice
+//	                 indexSink for the MCP/CLI choice. With cli,
+//	                 /<slash> watch <dir> has the CLI watch a directory
+//	                 into an index
 //	hooks        events dun sends:
 //	               turn.before      search the conversation, surface a clear
 //	                                winner as an aside (roles.search)
@@ -622,16 +626,25 @@ type surfacer struct {
 	from   func(docID string) string // the extension a hit came from
 }
 
-func newSurfacer(mgr *mcpmgr.Manager, exts []Extension) *surfacer {
+// sel is each extension's attached-index selector (attach.go), "" for none.
+func newSurfacer(mgr *mcpmgr.Manager, exts []Extension, sel map[string]string) *surfacer {
 	if len(exts) == 0 {
 		return nil
 	}
 	finders := make([]agent.DocFinder, len(exts))
 	fetches := map[string]docBodyFunc{}
 	for i, e := range exts {
-		finders[i] = ragnotify.MCPFinder(mgr, e.ID, e.Roles.Search.Tool, ragnotify.Opts{})
+		var opts ragnotify.Opts
+		getIndex := ""
+		if s := sel[e.ID]; s != "" {
+			opts.ExtraArgs = map[string]any{"index": s}
+			if toolTakes(mgr.GetTools(), e.ID, e.Roles.Search.Get, "index") {
+				getIndex = s
+			}
+		}
+		finders[i] = ragnotify.MCPFinder(mgr, e.ID, e.Roles.Search.Tool, opts)
 		if e.Roles.Search.Get != "" {
-			fetches[e.ID] = docsBodyFetcher(mgr, e.ID, e.Roles.Search.Get)
+			fetches[e.ID] = docsBodyFetcher(mgr, e.ID, e.Roles.Search.Get, getIndex)
 		}
 	}
 	if len(exts) == 1 {

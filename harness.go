@@ -69,6 +69,8 @@ type Server struct {
 	// OAuth, when set, logs in to the server and sends the token it gets
 	// (mcpoauth.go) instead of a fixed Bearer.
 	OAuth *OAuthSpec
+	// Attach is every scope's attached indexes, merged (attach.go).
+	Attach []string
 }
 
 // raglitProject is the CORPUS: the repository, shared by every worktree of it.

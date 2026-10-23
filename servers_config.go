@@ -131,6 +131,9 @@ type ServerSpec struct {
 	// the token is obtained in the browser, kept in $DUN_HOME/oauth/<id>.json
 	// and refreshed (see mcpoauth.go). Not with Bearer, and not in the shell.
 	OAuth *OAuthSpec `json:"oauth,omitempty"`
+	// Attach names other indexes the server's search role also reads
+	// ("project:index"), at this scope; the scopes add up (attach.go).
+	Attach []string `json:"attach,omitempty"`
 }
 
 // OAuthSpec is how dun logs in to an OAuth- or OIDC-protected MCP server.
@@ -600,6 +603,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 		out.Via = next.Via
 	}
 	out.OAuth = mergeOAuth(prev.OAuth, next.OAuth)
+	if next.Attach != nil {
+		out.Attach = next.Attach
+	}
 	return out
 }
 

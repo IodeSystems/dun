@@ -29,7 +29,7 @@ func TestMemStore_OnNotifyFiresForNotifications(t *testing.T) {
 
 // No search tool, no proactive search.
 func TestDocsFinder_NilWithoutSearch(t *testing.T) {
-	if newSurfacer(nil, searchExts(BundledExtensions(), nil)) != nil {
+	if newSurfacer(nil, searchExts(BundledExtensions(), nil), nil) != nil {
 		t.Fatal("no tools → no finder")
 	}
 }

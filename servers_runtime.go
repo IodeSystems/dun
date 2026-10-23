@@ -406,6 +406,16 @@ func (h *Harness) rebuildTools() {
 	report := h.cappedReporter(cfg.OnToolCall)
 	toolDefs := mcpToolDefs(tools)
 	dispatch := mcpDispatcher(h.mgr, tools, report)
+	// The extensions the hooks go to, among the running servers.
+	exts := h.extensions()
+	searchers := searchExts(exts, tools)
+	// Attached indexes (attach.go): the search and get calls that name no
+	// index read them too, and the search tool says which they are.
+	attached := h.attachSelectors(searchers, tools)
+	h.srvMu.Lock()
+	describeAttached(toolDefs, searchers, h.specs, attached)
+	h.srvMu.Unlock()
+	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef(), execMonitorToolDef())
 		// ONE backend for everything. A long command used to need a stateless
@@ -474,9 +484,6 @@ func (h *Harness) rebuildTools() {
 	// child shares its parent's session file and thus its state.
 	toolDefs = append(toolDefs, sessionStateToolDef())
 	dispatch = withSessionState(dispatch, h, report)
-	// The extensions the hooks go to, among the running servers.
-	exts := h.extensions()
-	searchers := searchExts(exts, tools)
 	// memory only while a memory.save extension runs AND a turn.before one
 	// does: a note is worth writing only because the proactive search brings
 	// it back (see memory.go).
@@ -583,7 +590,7 @@ func (h *Harness) rebuildTools() {
 	// OnNotify. Cleared when the server stops, or the preparer would call a
 	// dead server before every turn.
 	h.Session.Preparer = nil
-	if sf := newSurfacer(h.mgr, searchers); sf != nil {
+	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil {
 		// MinScore 0: raglit's search is BM25, whose scores aren't in a fixed
 		// range (tiny for a small index) — but a MATCH only returns matching
 		// rows, so any hit is a real lexical hit. What surfaces is decided by
