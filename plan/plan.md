@@ -105,6 +105,35 @@ full detail archived in `done.md`.
 
 ## Active work
 
+### ◻ 20. Shared raglit indexes: watch a directory, attach it to a session (USER, 2026-10-22)
+
+USER's goal: index a directory once, and let many sessions use it. raglit's
+daemon is shared, so one index serves every session that attaches it; raglit's
+watcher keeps it fresh, and dun only reads it.
+
+- **raglit side (asked of the raglit session, raglit-dd, 2026-10-22):**
+  - A. One command: "watch this dir into index N"; creates N if missing,
+    optionally public; idempotent; recorded in the config.
+  - B. `raglit serve` passes a qualified `proj:idx` through when it is
+    readable. Today serveclient.go → nsReadSelector drops any project not in
+    the config's Shared list (verified in code, not live).
+  - C. USER feedback: group the verbose root CLI under cobra subcommands.
+- **dun side:** `/raglit watch <dir> [--index N] [--public]` calls A;
+  `/raglit attach|detach <index> [--project|--global]` adds it to the
+  model's search calls and the proactive search, with the same three
+  scopes as /mcp.
+- **next:** wait for raglit-dd's reply and the /mcp scopes branch; then
+  build the dun side on its scope storage.
+- **risks:** dun relies on raglit's CLI (serve/ingest/forget/search with
+  --project/--index); C could break it. The list was sent to raglit-dd.
+- **blocking decisions:** none.
+- **optional extensions (USER raised, not scheduled):** rename /lsp →
+  /poly-lsp and /rag → /raglit, and the server ids code → poly-lsp and
+  docs → raglit, keeping the old ids readable in config; extensions (a
+  manifest with server, command, roles, skills) with poly-lsp and raglit
+  bundled. Open questions: packaging only or replaceable back ends, and
+  install sources.
+
 The pattern that drove the last three items: the harness could not say what was
 actually happening — a ship that reported success while leaving the work local, a
 wait that looked like slow work for 14 minutes, a background job that was one
