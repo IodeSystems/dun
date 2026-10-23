@@ -117,8 +117,9 @@ daemon is shared, so one index serves every session that attaches it; raglit's
 watcher keeps it fresh, and dun only reads it.
 
 - **raglit side (asked of the raglit session, raglit-dd, 2026-10-22):**
-  - A. One command: "watch this dir into index N"; creates N if missing,
-    optionally public; idempotent; recorded in the config.
+  - A. `raglit watch <dir> --index <name>` (USER's exact form): creates the
+    index if missing, optionally public; idempotent; recorded in the config.
+    And `raglit index --list`, `raglit index <name> <subcommand>`.
   - B. `raglit serve` passes a qualified `proj:idx` through when it is
     readable. Today serveclient.go → nsReadSelector drops any project not in
     the config's Shared list (verified in code, not live).
