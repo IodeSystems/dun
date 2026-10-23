@@ -136,19 +136,26 @@ func TestRepaintCaptureWithoutTmux(t *testing.T) {
 // screen has what the region drew there instead, and is exactly h rows.
 func TestRepaintExpectedHasRegionRows(t *testing.T) {
 	v := tallConvo(t)
-	v.event(map[string]any{"type": "token", "text": "more"})
-	if !v.m.sr.live {
-		t.Fatal("precondition: region live")
+	// The region as a sync left it (set directly: whether a plan syncs in a
+	// test depends on minRegionGap and the clock).
+	region := []string{"REGION 1", "REGION 2", "REGION 3"}
+	*v.m.sr = scrollRegion{}
+	v.m.sr.sync(region, 3, 5, v.m.vp.Height)
+	frame := strings.Split(v.m.View(), "\n")
+	if frame[3] != "" {
+		t.Fatalf("precondition: View blanks the region's rows, got %q", frame[3])
 	}
-	v.m.View()
 	exp := v.m.expectedRows()
 	if len(exp) != v.m.h {
 		t.Fatalf("expected %d rows, got %d", v.m.h, len(exp))
 	}
-	for i, line := range v.m.sr.last {
-		if exp[v.m.sr.top-1+i] != line {
-			t.Errorf("row %d = %q, want the region's %q", v.m.sr.top+i, exp[v.m.sr.top-1+i], line)
+	for i, line := range region {
+		if exp[2+i] != line {
+			t.Errorf("row %d = %q, want the region's %q", 3+i, exp[2+i], line)
 		}
+	}
+	if exp[0] != frame[0] || exp[5] != frame[5] {
+		t.Error("rows outside the region are the frame's")
 	}
 }
 
