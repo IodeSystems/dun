@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -264,7 +265,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		h.ingestNote, h.ingestID = note, s.ID
 		h.srvMu.Unlock()
 	}
-	env := s.Env
+	env := slices.Clone(s.Env) // appended to below; never the spec's own slice
 	// Host hooks: the extension calls back into dun. poly-lsp's arms the
 	// AGENTS.md guard, a file-access hook that cancels reads/edits until the
 	// model has seen the project's rules.
@@ -274,6 +275,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	args := s.Args
 	if s.ID == ServerShell {
 		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
+		env = h.shellEnv(s, env)
 	}
 	mcfg := mcpmgr.MCPConfig{
 		ID: s.ID, Name: s.ID, Command: s.Command, Args: args,

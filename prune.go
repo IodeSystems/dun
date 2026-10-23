@@ -491,6 +491,11 @@ func ForgetSession(root, id string) {
 	_ = os.Remove(filepath.Join(RootDir(root), id+".jsonl"))
 	_ = os.Remove(MetaFile(root, id))
 	removeSidecars(root, id)
+	// The shell's saved output (Harness.overflowDir), the children's too.
+	over, _ := filepath.Glob(filepath.Join(RootDir(root), "overflow", id+".*"))
+	for _, d := range append(over, filepath.Join(RootDir(root), "overflow", id)) {
+		_ = os.RemoveAll(d)
+	}
 }
 
 // removeSidecars deletes what belongs to a session besides its transcript:

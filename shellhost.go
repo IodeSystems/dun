@@ -137,6 +137,35 @@ func (h *Harness) shellArgs(s Server) []string {
 	return args
 }
 
+// overflowEnv names the dir mcpshell saves over-limit eval output to; the
+// truncated response points at the file and read()/grep() accept its path.
+const overflowEnv = "MCPSHELL_TMP_OVERFLOW_DIR"
+
+// shellEnv adds MCPSHELL_TMP_OVERFLOW_DIR to an mcpshell shell's env, unless
+// the config already sets it. A shell that is not mcpshell is left alone.
+func (h *Harness) shellEnv(s Server, env []string) []string {
+	if filepath.Base(s.Command) != "mcpshell" {
+		return env
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, overflowEnv+"=") {
+			return env
+		}
+	}
+	return append(env, overflowEnv+"="+h.overflowDir())
+}
+
+// overflowDir is this session's dir for the shell's saved output: beside the
+// session file and keyed by its id, so a shell restart or a resume finds the
+// same files; else a temp dir per process. mcpshell creates it.
+func (h *Harness) overflowDir() string {
+	if h.cfg.SessionFile == "" {
+		return filepath.Join(os.TempDir(), "dun-overflow", strconv.Itoa(os.Getpid()))
+	}
+	id := strings.TrimSuffix(filepath.Base(h.cfg.SessionFile), ".jsonl")
+	return filepath.Join(filepath.Dir(h.cfg.SessionFile), "overflow", id)
+}
+
 // withFilesDir adds `--files-dir <root>` to mcpshell's args unless they name
 // one: a configured shell entry replaces the default args wholesale, and one
 // that set only --web (say) lost the file toolkit with them (USER 2026-10-22).

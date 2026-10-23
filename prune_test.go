@@ -215,6 +215,11 @@ func TestForgetSession_LeavesNothingToResume(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte("{}\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, id+".sub1.jsonl"), []byte("{}\n"), 0o644)
 	SaveSessionMeta(repo, id, SessionMeta{Branch: "gone"})
+	os.MkdirAll(filepath.Join(dir, "overflow", id), 0o700)
+	os.WriteFile(filepath.Join(dir, "overflow", id, "eval-1.txt"), []byte("x"), 0o600)
+	os.MkdirAll(filepath.Join(dir, "overflow", id+".sub1"), 0o700)
+	keep := filepath.Join(dir, "overflow", id+"0") // another session sharing the prefix
+	os.MkdirAll(keep, 0o700)
 
 	ForgetSession(repo, id)
 
@@ -223,6 +228,14 @@ func TestForgetSession_LeavesNothingToResume(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, id+".sub1.jsonl")); err == nil {
 		t.Error("a child's transcript should go with its parent's")
+	}
+	for _, d := range []string{id, id + ".sub1"} {
+		if _, err := os.Stat(filepath.Join(dir, "overflow", d)); err == nil {
+			t.Errorf("the shell's saved output %q should go with the session", d)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Error("another session's overflow dir must stay")
 	}
 }
 

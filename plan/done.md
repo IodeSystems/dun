@@ -1514,3 +1514,15 @@ docs (0.00)` with no origin; it was a claude.ai-synced skill
   -> 0.5 s (TS 6 -> 7).
 - **No Makefile/CI target ran mobile lint** (no workflows in the repo);
   `make web` only runs `export:web`. Nothing to update there.
+
+## Shell overflow dir (2026-10-23)
+
+- dun sets `MCPSHELL_TMP_OVERFLOW_DIR=<sessions>/<root>/overflow/<session-id>`
+  on an mcpshell shell (`Harness.shellEnv`, `overflowDir`); no session file →
+  `$TMPDIR/dun-overflow/<pid>`. A config that sets the var wins.
+- mcpshell (≥ `aaff09b`) saves eval output over `--max-output` there and names
+  the file in the truncated response; its read()/grep() accept that path.
+- Same id across a shell restart and a resume → same dir. `ForgetSession`
+  removes it with the session (children's `<id>.subN` dirs too).
+- `startServer` now clones the spec's env before appending (it aliased
+  `s.Env`).

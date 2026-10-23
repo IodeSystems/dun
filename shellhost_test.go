@@ -259,3 +259,30 @@ func TestWithFilesDir(t *testing.T) {
 		t.Errorf("no root: %v", got)
 	}
 }
+
+// mcpshell saves over-limit eval output to a per-session dir: beside the
+// session file, keyed by its id, so a restart or resume finds the same files.
+func TestShellEnv_OverflowDir(t *testing.T) {
+	shell := Server{ID: ServerShell, Command: "/usr/local/bin/mcpshell", Env: []string{"A=1"}}
+	h := newServerHarness(t, shell)
+	h.cfg.SessionFile = "/home/u/.dun/sessions/repo/20261023-101500.jsonl"
+	want := "MCPSHELL_TMP_OVERFLOW_DIR=/home/u/.dun/sessions/repo/overflow/20261023-101500"
+	if got := h.shellEnv(shell, slices.Clone(shell.Env)); !slices.Equal(got, []string{"A=1", want}) {
+		t.Errorf("shellEnv = %v", got)
+	}
+	// The config's own setting wins.
+	own := []string{"MCPSHELL_TMP_OVERFLOW_DIR=/mine"}
+	if got := h.shellEnv(shell, own); !slices.Equal(got, own) {
+		t.Errorf("configured dir overridden: %v", got)
+	}
+	// Not mcpshell: untouched.
+	other := Server{ID: ServerShell, Command: "/opt/othershell"}
+	if got := h.shellEnv(other, nil); len(got) != 0 {
+		t.Errorf("not mcpshell: %v", got)
+	}
+	// No session file: a temp dir per process.
+	h.cfg.SessionFile = ""
+	if got := h.shellEnv(shell, nil); len(got) != 1 || !strings.Contains(got[0], "dun-overflow") {
+		t.Errorf("in-memory session: %v", got)
+	}
+}
