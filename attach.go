@@ -242,6 +242,17 @@ func (h *Harness) WatchDir(ctx context.Context, id, dir, index string) (string, 
 	if index == "" {
 		index = normalizeProject(filepath.Base(dir))
 	}
+	// raglit's spelling of the name (NormalizeIndexName), so the name
+	// reported is the one to attach.
+	index = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			return r
+		}
+		return -1
+	}, strings.ToLower(index))
+	if index == "" {
+		return "", "", fmt.Errorf("an index name is letters, digits, - and _")
+	}
 	args := append(append([]string{"watch", dir}, raglitStoreFlags(s.Args)...), "--index", index)
 	out, err := detach(exec.CommandContext(ctx, s.Command, args...)).CombinedOutput()
 	text := strings.TrimSpace(string(out))

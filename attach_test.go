@@ -252,4 +252,8 @@ func TestWatchDir_RunsTheIndexCLI(t *testing.T) {
 	if _, _, err := h.WatchDir(context.Background(), ServerDocs, "nope", "x"); err == nil {
 		t.Error("a missing directory is refused")
 	}
+	// A name is spelled as raglit stores it, so the one reported attaches.
+	if idx, _, err := h.WatchDir(context.Background(), ServerDocs, "My Notes", "Hand.Book"); err != nil || idx != "handbook" {
+		t.Errorf("name: %q %v", idx, err)
+	}
 }
