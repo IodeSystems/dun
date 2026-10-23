@@ -1618,27 +1618,23 @@ func TestTUI_RestartCapGivesUp(t *testing.T) {
 	}
 }
 
-// A server the user turned on by hand is gone from a fresh engine, so the TUI
-// puts it back — otherwise a restart silently costs the agent its tools.
-func TestTUI_RestartReappliesServers(t *testing.T) {
+// A respawned engine keeps the session's server switches itself, so the TUI
+// sends none: a "/rag on" from here would pin a session switch the user never
+// set.
+func TestTUI_RestartSendsNoServerSwitches(t *testing.T) {
 	var sent bytes.Buffer
 	m := newTUIModel(&dunProc{stdin: nopWC{&sent}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	// First ready: docs is running (the user turned it on last session).
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"search"},
 		"servers": []any{map[string]any{"id": "docs", "running": true}}})
-	if !m.wantServers["rag"] {
-		t.Fatalf("running server not recorded: %v", m.wantServers)
-	}
-	// Engine dies, comes back with nothing on.
 	nm, _ = m.Update(eofMsg{})
 	m = nm.(tuiModel)
 	sent.Reset()
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
 		"servers": []any{map[string]any{"id": "docs", "running": false}}})
-	if !strings.Contains(sent.String(), `"action":"on"`) || !strings.Contains(sent.String(), `"id":"rag"`) {
-		t.Errorf("/rag was not turned back on after the restart: %q", sent.String())
+	if strings.Contains(sent.String(), `"type":"server"`) {
+		t.Errorf("a restart sent a server switch: %q", sent.String())
 	}
 }
 

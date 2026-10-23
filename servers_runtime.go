@@ -36,19 +36,16 @@ import (
 // is non-empty, the tools it names are dropped; all others pass through.
 // Mirrors Claude's --disable-tools: forward-compatible, new tools pass
 // through by default. An entry is a tool name or a glob ("tts_*", path.Match).
+//
+// The deny-list is resolved per tool across the scopes (Server.toolState).
 func filterTools(tools []mcpmgr.MCPTool, specs []Server) []mcpmgr.MCPTool {
-	deny := make(map[string][]string) // serverID -> patterns
+	by := make(map[string]Server, len(specs))
 	for _, s := range specs {
-		if len(s.Disable) > 0 {
-			deny[s.ID] = s.Disable
-		}
-	}
-	if len(deny) == 0 {
-		return tools // no filters active
+		by[s.ID] = s
 	}
 	out := make([]mcpmgr.MCPTool, 0, len(tools))
 	for _, t := range tools {
-		if hiddenBy(t.Name, deny[t.ServerID]) == "" {
+		if on, _, _ := by[t.ServerID].toolState(t.Name); on {
 			out = append(out, t)
 		}
 	}
@@ -87,6 +84,18 @@ type ServerState struct {
 	// toolTokens); Hidden is how many discovered tools Disable hides.
 	Cost   int `json:"cost,omitempty"`
 	Hidden int `json:"hidden,omitempty"`
+	// Global, Project and Session are the on/off switch at each scope
+	// ("on", "off", "" unset; Global is never unset); From is the scope that
+	// decided Auto. ViaGlobal, ViaProject and ViaSession are the placement at
+	// each scope ("direct", "shell", ""), ViaFrom the scope that decided Via.
+	Global     string `json:"global,omitempty"`
+	Project    string `json:"project,omitempty"`
+	Session    string `json:"session,omitempty"`
+	From       string `json:"from,omitempty"`
+	ViaGlobal  string `json:"viaGlobal,omitempty"`
+	ViaProject string `json:"viaProject,omitempty"`
+	ViaSession string `json:"viaSession,omitempty"`
+	ViaFrom    string `json:"viaFrom,omitempty"`
 	// Auth is a remote server's credentials: its OAuth login state, "static
 	// bearer", "static header" or "none"; "" for a local server.
 	Auth string `json:"auth,omitempty"`
@@ -102,12 +111,12 @@ func (h *Harness) Servers() []ServerState {
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
 	counts, cost, hidden := map[string]int{}, map[string]int{}, map[string]int{}
-	deny := map[string][]string{}
+	by := map[string]Server{}
 	for _, s := range h.specs {
-		deny[s.ID] = s.Disable
+		by[s.ID] = s
 	}
 	for _, t := range h.mgr.GetTools() {
-		if hiddenBy(t.Name, deny[t.ServerID]) != "" {
+		if on, _, _ := by[t.ServerID].toolState(t.Name); !on {
 			hidden[t.ServerID]++
 			continue
 		}
@@ -127,6 +136,14 @@ func (h *Harness) Servers() []ServerState {
 			Cost:         cost[s.ID],
 			Hidden:       hidden[s.ID],
 			Auth:         h.authState(s),
+			Global:       onOffWord(s.Scopes.GlobalOn(s.Via)),
+			Project:      tri(s.Scopes.Project),
+			Session:      tri(s.Scopes.Session),
+			From:         s.Scopes.OnFrom,
+			ViaGlobal:    s.Scopes.ViaGlobal,
+			ViaProject:   s.Scopes.ViaProject,
+			ViaSession:   s.Scopes.ViaSession,
+			ViaFrom:      s.Scopes.ViaFrom,
 		}
 		if s.ID == ServerDocs {
 			st.Ingest = h.ingestNote
@@ -143,6 +160,14 @@ func (h *Harness) Servers() []ServerState {
 		out = append(out, st)
 	}
 	return out
+}
+
+// tri is a switch as shown: "on", "off", or "" unset.
+func tri(b *bool) string {
+	if b == nil {
+		return ""
+	}
+	return onOffWord(*b)
 }
 
 // StartServer spawns a configured server by id and rebuilds the tool set.
@@ -178,32 +203,10 @@ func (h *Harness) StopServer(id string) error {
 	return nil
 }
 
-// SetAutostart persists whether a server spawns at startup, and updates this
-// session's view of it so Servers() reports the new setting immediately.
-// Returns the config file written.
+// SetAutostart sets the project switch on (/rag auto) or off (/rag
+// manual) and applies it. Returns the config file written.
 func (h *Harness) SetAutostart(id string, on bool) (string, error) {
-	h.srvMu.Lock()
-	_, ok := h.spec(id)
-	h.srvMu.Unlock()
-	if !ok {
-		return "", fmt.Errorf("dun: no server %q", id)
-	}
-	dir := h.cfg.ConfigDir
-	if dir == "" {
-		dir = h.cfg.Workspace
-	}
-	path, err := SetAutostart(dir, id, on)
-	if err != nil {
-		return "", err
-	}
-	h.srvMu.Lock()
-	for i := range h.specs {
-		if h.specs[i].ID == id {
-			h.specs[i].Autostart = on
-		}
-	}
-	h.srvMu.Unlock()
-	return path, nil
+	return h.SetServerOn(context.Background(), id, ScopeProject, &on)
 }
 
 // spec finds a configured server by id. Caller holds srvMu.
@@ -221,7 +224,7 @@ func (h *Harness) spec(id string) (Server, bool) {
 // missing long after the attempt.
 func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.Via == ViaShell {
-		return fmt.Errorf("%s runs inside the shell — the model calls it through eval as %s; /mcp move %s direct to run it on its own",
+		return fmt.Errorf("%s runs inside the shell — the model calls it through eval as %s; /mcp via %s direct to run it on its own",
 			s.ID, ShellNamespace(s.ID), s.ID)
 	}
 	t0 := time.Now()
@@ -763,34 +766,22 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	if err != nil {
 		return "", err
 	}
-	s := Server{ID: spec.ID, URL: spec.URL, Headers: requestHeaders(spec), Command: spec.Command,
-		Args: spec.Args, Env: spec.Env, Timeout: spec.Timeout, Autostart: true, Via: via, Bearer: spec.Bearer, OAuth: spec.OAuth}
-	wasHosted := false
+	// Same id replaces: bounce it (or the shell hosting it) for the new
+	// definition. The other scopes' switches for it still apply.
 	h.srvMu.Lock()
-	replaced := false
-	for i := range h.specs {
-		if h.specs[i].ID == s.ID {
-			wasHosted = h.specs[i].Via == ViaShell
-			h.specs[i], replaced = s, true
-		}
-	}
-	if !replaced {
-		h.specs = append(h.specs, s)
-	}
+	old, had := h.spec(spec.ID)
 	h.srvMu.Unlock()
-	if h.mgr.ServerStarted(s.ID) {
-		h.mgr.StopServer(s.ID)
+	restart := map[string]bool{spec.ID: true}
+	if had && old.Via == ViaShell {
+		restart[ServerShell] = true
 	}
-	if via == ViaShell || wasHosted {
-		if _, err := h.restartShell(ctx); err != nil {
-			return path, fmt.Errorf("the shell did not come back: %w", err)
-		}
+	if err := h.reloadServers(ctx, true, restart); err != nil {
+		return path, err
 	}
-	if via == ViaShell {
-		h.applyTools()
-		return path, nil
+	if s, err := h.knownServer(spec.ID); err == nil && s.Autostart && s.Via != ViaShell && !h.mgr.ServerStarted(s.ID) {
+		return path, h.startServer(ctx, s)
 	}
-	return path, h.startServer(ctx, s)
+	return path, nil
 }
 
 // RemoveServer stops a server /mcp add saved and deletes it from the user
@@ -804,32 +795,18 @@ func (h *Harness) RemoveServer(id string) error {
 	if !ok {
 		return fmt.Errorf("no server %q in %s — a server from dun.json is removed there", id, UserServersFile())
 	}
-	if h.mgr.ServerStarted(id) {
-		h.mgr.StopServer(id)
-	}
 	// Its stored login goes with it: a token for a server dun no longer
 	// knows is a secret with no owner.
 	_ = os.Remove(filepath.Join(OAuthDir(), id+".json"))
 	h.oauthMu.Lock()
 	delete(h.oauth, id)
 	h.oauthMu.Unlock()
-	h.srvMu.Lock()
-	hosted := false
-	kept := h.specs[:0]
-	for _, s := range h.specs {
-		if s.ID != id {
-			kept = append(kept, s)
-		} else {
-			hosted = s.Via == ViaShell
-		}
+	if err := h.reloadServers(context.Background(), true, nil); err != nil {
+		return fmt.Errorf("removed, but %w", err)
 	}
-	h.specs = kept
-	h.srvMu.Unlock()
-	if hosted {
-		if _, err := h.restartShell(context.Background()); err != nil {
-			return fmt.Errorf("removed, but the shell did not come back: %w", err)
-		}
+	if h.mgr.ServerStarted(id) { // a project file still defines it; removed is removed
+		h.mgr.StopServer(id)
+		h.applyTools()
 	}
-	h.applyTools()
 	return nil
 }

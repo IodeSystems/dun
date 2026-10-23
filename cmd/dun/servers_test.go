@@ -189,7 +189,7 @@ func decodeEvent(t *testing.T, line string) map[string]any {
 func TestServerListing_ShowsEveryServerNotJustRunningOnes(t *testing.T) {
 	out := serverListing([]dun.ServerState{
 		{ID: dun.ServerShell, Running: true, Tools: 4},
-		{ID: dun.ServerDocs, Auto: true},
+		{ID: dun.ServerDocs, Auto: true, Global: "off", Project: "on", From: dun.ScopeProject},
 		{ID: dun.ServerCode, Err: "mcp: initialize code: transport closed\nsome-lsp: bad flag"},
 	})
 	for _, id := range []string{dun.ServerShell, dun.ServerDocs, dun.ServerCode} {
@@ -200,8 +200,8 @@ func TestServerListing_ShowsEveryServerNotJustRunningOnes(t *testing.T) {
 	if !strings.Contains(out, "4 tools") {
 		t.Errorf("a running server should report its tool count: %q", out)
 	}
-	if !strings.Contains(out, "autostart") {
-		t.Errorf("autostart is what happens NEXT session — say so: %q", out)
+	if !strings.Contains(out, "on (project)") {
+		t.Errorf("the state and the switch that decided it: %q", out)
 	}
 	if !strings.Contains(out, "bad flag") {
 		t.Errorf("a server that failed to start must say why: %q", out)
@@ -542,7 +542,7 @@ func TestServerListing_ShowsDefinitionCost(t *testing.T) {
 	out := serverListing([]dun.ServerState{
 		{ID: "a", Running: true, Via: dun.ViaDirect, Tools: 10, Cost: 3000},
 		{ID: "b", Running: true, Via: dun.ViaDirect, Tools: 2, Cost: 1200},
-		{ID: "c", Via: dun.ViaShell, Hosted: true, Tools: 40, Namespace: "c"},
+		{ID: "c", Via: dun.ViaShell, Auto: true, Hosted: true, Tools: 40, Namespace: "c"},
 		{ID: "d"},
 	})
 	for _, want := range []string{"~3.0k tokens", "~1.2k tokens", "tool definitions: ~4.2k tokens in every request, from 2 running servers", "40 tools · 0 tokens per request"} {

@@ -7,8 +7,10 @@ import (
 )
 
 // /mcp tools <id> — one server's tools in the pager: a row per tool (name,
-// cost, the first line of its description, on/off), enter or → opens the
-// full description and the parameter schema, space turns the tool on or off.
+// cost, its switch at each scope, the first line of its description), enter
+// or → opens the full description and the parameter schema, space turns the
+// tool on or off for this session, and g/p/s cycle its global, project and
+// session switch as in the /mcp table (mcpview.go).
 //
 // The engine owns the list and the toggle (control "mcptools", answered with
 // an mcp_tools event), as it does for every client; this is only the view.
@@ -18,6 +20,8 @@ import (
 
 type mcpToolRow struct {
 	name, desc, schema, hiddenBy string
+	global, project, session     string // "on", "off", "" unset
+	from                         string // the scope that decided enabled
 	tokens                       int
 	enabled                      bool
 }
@@ -38,8 +42,12 @@ func (v *mcpToolsView) page() pageDoc {
 			cost += r.tokens
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
-		head := fmt.Sprintf("%s %s  ~%s tok  %s", mark, r.name, kTokens(r.tokens), first)
+		head := fmt.Sprintf("%s %s  ~%s tok  g%s p%s s%s  %s", mark, r.name, kTokens(r.tokens),
+			cellMark(r.global), cellMark(r.project), cellMark(r.session), first)
 		body := strings.TrimSpace(r.desc)
+		if r.from != "" {
+			body = onOff(r.enabled) + " (" + r.from + ")\n\n" + body
+		}
 		if r.hiddenBy != "" {
 			body = "hidden by " + r.hiddenBy + "\n\n" + body
 		}
@@ -75,7 +83,8 @@ func (m tuiModel) noteMCPTools(ev evMsg) tuiModel {
 			o, _ := t.(map[string]any)
 			en, _ := o["enabled"].(bool)
 			rows = append(rows, mcpToolRow{name: str(o["name"]), desc: str(o["description"]), schema: str(o["schema"]),
-				hiddenBy: str(o["hiddenBy"]), tokens: int(evNum(o["tokens"])), enabled: en})
+				hiddenBy: str(o["hiddenBy"]), tokens: int(evNum(o["tokens"])), enabled: en,
+				global: str(o["global"]), project: str(o["project"]), session: str(o["session"]), from: str(o["from"])})
 		}
 	}
 	if msg != "" {
@@ -114,4 +123,32 @@ func (m *tuiModel) toggleMCPTool(v *mcpToolsView) {
 	if !m.proc.controlCmd("mcptools", "toggle "+v.server+" "+r.name+" "+to) {
 		m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
 	}
+}
+
+// toolKey cycles the selected tool's switch: g global on/off, p and s
+// project and session unset → on → off. False: not one of those keys.
+func (m *tuiModel) toolKey(v *mcpToolsView, k string) bool {
+	if k != "g" && k != "p" && k != "s" {
+		return false
+	}
+	if m.pg.cur < 0 || m.pg.cur >= len(v.rows) {
+		return true
+	}
+	r := v.rows[m.pg.cur]
+	var to, scope string
+	switch k {
+	case "g":
+		to, scope = "on", "global"
+		if r.global == "on" {
+			to = "off"
+		}
+	case "p":
+		to, scope = nextTri(r.project), "project"
+	case "s":
+		to, scope = nextTri(r.session), "session"
+	}
+	if !m.proc.controlCmd("mcptools", "toggle "+v.server+" "+r.name+" "+to+" --"+scope) {
+		m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
+	}
+	return true
 }

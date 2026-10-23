@@ -105,6 +105,7 @@ func TestAddServer_RemoteToolsAreNamespacedAndRemovable(t *testing.T) {
 	h.mgr, h.lastErr, h.lastStart = mcpmgr.NewManager(), map[string]string{}, map[string]time.Duration{}
 	defer h.mgr.Close()
 	h.Session = &agent.Session{}
+	h.cfg.Servers = []Server{}
 	ctx := context.Background()
 
 	if _, err := h.AddServer(ctx, ServerSpec{ID: "docs", URL: ts.URL}); err == nil {

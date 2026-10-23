@@ -32,8 +32,11 @@ import (
 // Precedence matches what dun already documents for its LLM settings
 // (flag > env > file > default), extended down the middle:
 //
-//	built-in DefaultServers  <  $DUN_HOME/mcp.json  <  the repo's files
-//	  <  the project's state dir  <  the directory's overlay  <  Config.Servers (Go)
+//	built-in DefaultServers (or Config.Servers)  <  $DUN_HOME/mcp.json
+//	  <  the repo's files  <  the project's state dir  <  the directory's overlay
+//
+// mcp.json is the GLOBAL scope and the rest the PROJECT scope of a server's
+// switches; a session's own switches sit on top (mcpscope.go).
 //
 // Servers merge BY ID rather than replacing the list wholesale. Overriding one
 // binary's path should not require restating the other two — that is how a
@@ -114,6 +117,10 @@ type ServerSpec struct {
 	// an absent one) hides nothing and overrides a lower layer's; see
 	// MarshalJSON.
 	Disable []string `json:"disable,omitempty"`
+	// Tools turns single tools on (true) or off (false) by exact name, over
+	// any deny-list. Written at project scope (dun.local.json in the
+	// project's state); see mcpscope.go.
+	Tools map[string]bool `json:"tools,omitempty"`
 	// Via is where the server runs: "" or "direct" — dun connects to it and
 	// every tool's schema rides every request — or "shell": mcpshell hosts it
 	// inside its one eval tool as a namespace (help("<ns>")), and dun does not
@@ -369,75 +376,14 @@ func mergeShip(prev, next ShipConfig) ShipConfig {
 	return prev
 }
 
-// LoadServers resolves the effective server list for a workspace.
+// LoadServers resolves the effective server list for a workspace, with no
+// session switches (see mcpscope.go for the scopes).
 //
 // dir is where the project files are looked for (the repo being worked in).
 // Both files are optional and a missing one is not an error — the built-in trio
 // is a working default and most projects will never need to override it.
 func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
-	merged := map[string]ServerSpec{}
-	order := []string{}
-	for _, s := range DefaultServers(workspace, raglitHome) {
-		auto := s.Autostart
-		merged[s.ID] = ServerSpec{ID: s.ID, Command: s.Command, Args: s.Args, Autostart: &auto, Disable: s.Disable}
-		order = append(order, s.ID)
-	}
-
-	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
-		f, err := readServersFile(path)
-		if err != nil {
-			return nil, err
-		}
-		if f == nil {
-			continue
-		}
-		for _, spec := range f.Servers {
-			if spec.ID == "" {
-				return nil, fmt.Errorf("dun: %s: a server entry has no id", path)
-			}
-			prev, existed := merged[spec.ID]
-			if !existed {
-				order = append(order, spec.ID)
-			}
-			merged[spec.ID] = mergeSpec(prev, spec)
-		}
-	}
-
-	out := make([]Server, 0, len(order))
-	for _, id := range order {
-		s := merged[id]
-		if s.Disabled {
-			continue
-		}
-		if s.Command == "" && s.URL == "" {
-			return nil, fmt.Errorf("dun: server %q has no command or url (declare one, or remove the entry)", id)
-		}
-		via, err := NormalizeVia(s.Via)
-		if err != nil {
-			return nil, fmt.Errorf("dun: server %q: %w", id, err)
-		}
-		if via == ViaShell && builtinServer(id) {
-			return nil, fmt.Errorf("dun: server %q is built in and cannot be placed in the shell (remove its \"via\")", id)
-		}
-		if err := checkOAuth(s, via); err != nil {
-			return nil, fmt.Errorf("dun: server %q: %w", id, err)
-		}
-		out = append(out, Server{
-			ID:        s.ID,
-			URL:       s.URL,
-			Headers:   requestHeaders(s),
-			Command:   s.Command,
-			Args:      expandPlaceholders(s.Args, workspace, raglitHome),
-			Env:       expandPlaceholders(s.Env, workspace, raglitHome),
-			Timeout:   s.Timeout,
-			Autostart: s.Autostart != nil && *s.Autostart,
-			Disable:   s.Disable,
-			Via:       via,
-			Bearer:    s.Bearer,
-			OAuth:     s.OAuth,
-		})
-	}
-	return out, nil
+	return resolveServers(dir, workspace, raglitHome, DefaultServers(workspace, raglitHome), nil, nil)
 }
 
 // LoadMounts resolves the effective mount list for a workspace.
@@ -619,6 +565,17 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	if next.Disable != nil {
 		out.Disable = next.Disable
 	}
+	// Per tool, so one layer's switch does not drop another's.
+	if next.Tools != nil {
+		m := map[string]bool{}
+		for k, v := range out.Tools {
+			m[k] = v
+		}
+		for k, v := range next.Tools {
+			m[k] = v
+		}
+		out.Tools = m
+	}
 	// "direct" is a value, not an absence, so a higher layer can move a server
 	// back out of the shell.
 	if next.Via != "" {
@@ -694,6 +651,33 @@ func RemoveUserServer(id string) (bool, error) {
 	}
 	f.Servers = kept
 	return true, writeUserServers(path, f)
+}
+
+// UpsertUserServer edits id's entry in the user server list, adding one that
+// holds only the edit when there is none (a global switch for a built-in, or
+// for a server a repo defines). It returns the file written.
+func UpsertUserServer(id string, edit func(*ServerSpec)) (string, error) {
+	path := UserServersFile()
+	f, err := readServersFile(path)
+	if err != nil {
+		return "", err
+	}
+	if f == nil {
+		f = &ServersFile{}
+	}
+	found := false
+	for i := range f.Servers {
+		if f.Servers[i].ID == id {
+			edit(&f.Servers[i])
+			found = true
+		}
+	}
+	if !found {
+		s := ServerSpec{ID: id}
+		edit(&s)
+		f.Servers = append(f.Servers, s)
+	}
+	return path, writeUserServers(path, f)
 }
 
 // SetUserServerDisable sets a user-list server's tool deny-list. It reports
@@ -821,6 +805,15 @@ func updateLocalServer(dir, id string, edit func(*ServerSpec)) (string, error) {
 		edit(&s)
 		f.Servers = append(f.Servers, s)
 	}
+	// An entry an unset emptied goes: a bare id reads as a server with no
+	// command (see switchesOnly).
+	kept := f.Servers[:0]
+	for _, s := range f.Servers {
+		if b, _ := json.Marshal(s); string(b) != `{"id":`+strconvQuote(s.ID)+`}` {
+			kept = append(kept, s)
+		}
+	}
+	f.Servers = kept
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("dun: encode %s: %w", path, err)
@@ -829,6 +822,11 @@ func updateLocalServer(dir, id string, edit func(*ServerSpec)) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // ServerIDs lists the resolved ids, for logs and diagnostics.

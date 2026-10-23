@@ -49,7 +49,10 @@ func (p pager) curNode() *pageNode {
 
 type pageDoc struct {
 	title string
-	nodes []pageNode
+	// header is a row above the nodes, not selectable and drawn as given
+	// (styled): a table's column heads.
+	header string
+	nodes  []pageNode
 }
 
 // pageID is the identity of a block with a page: the pointer its page is
@@ -117,6 +120,9 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 	p.cur = min(max(p.cur, 0), max(0, len(doc.nodes)-1))
 	p.rows, p.nodeAt = p.rows[:0], p.nodeAt[:0]
 	tree := p.tree()
+	if doc.header != "" {
+		p.rows = append(p.rows, "   "+doc.header) // under the heads, past the gutter and mark
+	}
 	for i, n := range doc.nodes {
 		p.nodeAt = append(p.nodeAt, len(p.rows))
 		if !tree {
@@ -271,7 +277,7 @@ func (p pager) view(w, h int) string {
 // hint is the status line while the pager is open.
 func (p pager) hint() string {
 	if p.toggles {
-		return "↑/↓ select · enter/→ open · ← close · space on/off · esc back"
+		return "↑/↓ select · enter/→ open · ← close · space on/off (session) · g global · p project · s session · esc back"
 	}
 	if p.tree() {
 		return "↑/↓ select · enter/→ open · ← close · i inspect a call · pgup/pgdn scroll · esc back"
@@ -305,7 +311,7 @@ func (m *tuiModel) syncPager() {
 	if !m.paging {
 		return
 	}
-	if v, ok := m.pg.id.(*mcpToolsView); ok { // not a convo block: its own page
+	if v, ok := m.pg.id.(interface{ page() pageDoc }); ok { // not a convo block: its own page
 		m.pg.phase = m.pulse
 		m.pg.layout(v.page(), m.vp.Width, m.convoHeight())
 		return

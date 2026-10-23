@@ -115,11 +115,11 @@ func mcpshellConfig(hosted []Server) ([]byte, error) {
 	return json.MarshalIndent(map[string]any{"mcpServers": out}, "", "  ")
 }
 
-// hostedSpecs lists the shell-placed servers. Caller holds srvMu.
+// hostedSpecs lists the shell-placed servers that are on. Caller holds srvMu.
 func (h *Harness) hostedSpecs() []Server {
 	var out []Server
 	for _, s := range h.specs {
-		if s.Via == ViaShell {
+		if s.Via == ViaShell && s.Autostart {
 			out = append(out, s)
 		}
 	}
@@ -302,57 +302,25 @@ func (h *Harness) restartShell(ctx context.Context) (bool, error) {
 	return true, h.startServer(ctx, sh)
 }
 
-// MoveServer places a user-added server directly or in the shell, saves it to
-// the user server list, and applies it: the server is stopped or started, and
-// a running shell is restarted with the new hosted set. It reports whether the
-// shell restarted.
-func (h *Harness) MoveServer(ctx context.Context, id, via string) (bool, error) {
-	via, err := NormalizeVia(via)
+// MoveServer places a server directly or in the shell at scope (see
+// SetServerVia). It reports whether the shell restarted: it does when the
+// hosted set changed while it runs.
+func (h *Harness) MoveServer(ctx context.Context, id, scope, via string) (bool, error) {
+	v, err := NormalizeVia(via)
 	if err != nil {
 		return false, err
 	}
-	if builtinServer(id) {
-		return false, fmt.Errorf("%q is a built-in server and cannot be placed in the shell", id)
+	if v == "" {
+		v = ViaDirect
 	}
-	h.srvMu.Lock()
-	s, ok := h.spec(id)
-	h.srvMu.Unlock()
-	if !ok {
-		return false, fmt.Errorf("no server %q", id)
+	hosted := func() string {
+		h.srvMu.Lock()
+		defer h.srvMu.Unlock()
+		return strings.Join(ServerIDs(h.hostedSpecs()), ",")
 	}
-	if s.Via == via {
-		return false, nil
-	}
-	if via == ViaShell && s.OAuth != nil {
-		return false, fmt.Errorf("%q logs in with oauth, and dun holds its token: it cannot run in the shell", id)
-	}
-	found, err := SetUserServerVia(id, via)
-	if err != nil {
+	before := hosted()
+	if _, err := h.SetServerVia(ctx, id, scope, v); err != nil {
 		return false, err
 	}
-	if !found {
-		return false, fmt.Errorf("%q is not in %s — a server from a dun.json is placed there, with \"via\"", id, UserServersFile())
-	}
-	h.srvMu.Lock()
-	for i := range h.specs {
-		if h.specs[i].ID == id {
-			h.specs[i].Via = via
-		}
-	}
-	h.srvMu.Unlock()
-	s.Via = via
-	if via == ViaShell && h.mgr.ServerStarted(id) {
-		h.mgr.StopServer(id)
-	}
-	restarted, err := h.restartShell(ctx)
-	if err != nil {
-		return restarted, fmt.Errorf("the shell did not come back: %w", err)
-	}
-	if via == "" && s.Autostart {
-		if err := h.startServer(ctx, s); err != nil {
-			return restarted, err
-		}
-	}
-	h.applyTools()
-	return restarted, nil
+	return h.mgr.ServerStarted(ServerShell) && hosted() != before, nil
 }

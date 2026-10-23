@@ -55,24 +55,30 @@ func TestRouteSlash(t *testing.T) {
 		reply:   func(m string) { calls = append(calls, call{"reply", m, ""}) },
 	}
 	for line, want := range map[string]call{
-		"rag on":                  {"server", "rag", "on"},
-		"/lsp":                    {"server", "lsp", ""},
-		"mcp refresh docs":        {"control", "mcp", "refresh docs"},
-		"mcp login snow":          {"control", "mcp", "login snow"},
-		"mcp LOGOUT snow":         {"control", "mcp", "logout snow"},
-		"mcp move corp SHELL":     {"control", "mcp", "move corp shell"},
-		"mcp move corp direct":    {"control", "mcp", "move corp direct"},
-		"mcp tools el":            {"control", "mcptools", "el"},
-		"mcp tools":               {"control", "mcptools", ""},
-		"mcp restart":             {"server", allServers, "restart"},
-		"mcp off github":          {"server", "github", "off"},
-		"docker OFF":              {"control", "docker", "off"},
-		"worktree new":            {"control", "worktree", "new"},
-		"remember Tests Are Slow": {"control", "remember", "Tests Are Slow"},
-		"memories":                {"control", "memories", ""},
-		"clear":                   {"reset", "", ""},
-		"close":                   {"control", "close", ""},
-		"interrupt":               {"control", "interrupt", ""},
+		"rag on":                               {"server", "rag", "on"},
+		"/lsp":                                 {"server", "lsp", ""},
+		"mcp refresh docs":                     {"control", "mcp", "refresh docs"},
+		"mcp login snow":                       {"control", "mcp", "login snow"},
+		"mcp LOGOUT snow":                      {"control", "mcp", "logout snow"},
+		"mcp move corp SHELL":                  {"control", "mcp", "via corp shell"},
+		"mcp move corp direct":                 {"control", "mcp", "via corp direct"},
+		"mcp via corp shell --project":         {"control", "mcp", "via corp shell --project"},
+		"mcp on corp --global":                 {"server", "corp", "on --global"},
+		"mcp off corp":                         {"server", "corp", "off"},
+		"mcp unset corp --session":             {"server", "corp", "unset --session"},
+		"mcp toggle corp Tool_X off --project": {"control", "mcptools", "toggle corp Tool_X off --project"},
+		"rag on --project":                     {"server", "rag", "on --project"},
+		"mcp tools el":                         {"control", "mcptools", "el"},
+		"mcp tools":                            {"control", "mcptools", ""},
+		"mcp restart":                          {"server", allServers, "restart"},
+		"mcp off github":                       {"server", "github", "off"},
+		"docker OFF":                           {"control", "docker", "off"},
+		"worktree new":                         {"control", "worktree", "new"},
+		"remember Tests Are Slow":              {"control", "remember", "Tests Are Slow"},
+		"memories":                             {"control", "memories", ""},
+		"clear":                                {"reset", "", ""},
+		"close":                                {"control", "close", ""},
+		"interrupt":                            {"control", "interrupt", ""},
 	} {
 		calls = nil
 		routeSlash(line, r)
@@ -87,7 +93,7 @@ func TestRouteSlash(t *testing.T) {
 		t.Errorf("rephrase on: %v", calls)
 	}
 	// Bare /rephrase reports; it must not turn rephrasing off.
-	for _, line := range []string{"rephrase", "rephrase status", "nope", "mcp add", "mcp remove", "mcp login", "mcp move corp", "mcp move corp sideways"} {
+	for _, line := range []string{"rephrase", "rephrase status", "nope", "mcp add", "mcp remove", "mcp login", "mcp move corp", "mcp move corp sideways", "mcp unset corp", "mcp toggle corp x", "mcp on --global"} {
 		calls = nil
 		routeSlash(line, r)
 		if len(calls) != 1 || calls[0].kind != "reply" {

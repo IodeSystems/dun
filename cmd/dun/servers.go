@@ -95,11 +95,16 @@ const allServers = "*"
 // user. A failure to start is a RETURNED MESSAGE, never a fatal error: a
 // misconfigured raglit should cost you search, not your session.
 //
-// Actions: "" or "status" (report), "on", "off", "restart", "auto" (start +
-// remember), "manual" (stop remembering, leave running).
+// Actions: "" or "status" (report), "on" and "off" (a switch: this session's
+// unless a scope flag follows, "on --project"), "unset --project|--session",
+// "restart", "auto" (the project switch on) and "manual" (the project switch
+// off; it was "stop starting it here", which off at project scope is).
 func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) string {
 	if alias == allServers {
 		return runAllServersCmd(ctx, h, action)
+	}
+	if f := strings.Fields(action); len(f) > 1 || (len(f) == 1 && (f[0] == "unset")) {
+		return runSwitchCmd(ctx, h, alias, f[0], f[1:])
 	}
 	id, ok := serverAliases[alias]
 	if !ok {
@@ -112,22 +117,8 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 	switch action {
 	case "", "status":
 		return serverStatusLine(h, id, label)
-	case "on":
-		t0 := time.Now()
-		if err := h.StartServer(ctx, id); err != nil {
-			return label + ": did not start — " + oneLine(err.Error()) + "\ncarrying on without it; fix and try /" + alias + " on again"
-		}
-		elapsed := time.Since(t0)
-		msg := label + ": " + runningSummary(h, id)
-		if elapsed > time.Second {
-			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
-		}
-		return msg + ingestLine(h, id)
-	case "off":
-		if err := h.StopServer(id); err != nil {
-			return label + ": " + err.Error()
-		}
-		return label + ": stopped"
+	case "on", "off":
+		return runSwitchCmd(ctx, h, alias, action, nil)
 	case "restart":
 		// The EXPLICIT form of what StartServer deliberately refuses to do
 		// implicitly (see its comment): bounce the process and lose whatever it
@@ -165,29 +156,11 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 		}
 		return msg + ingestLine(h, id)
 	case "auto":
-		path, err := h.SetAutostart(id, true)
-		if err != nil {
-			return label + ": " + err.Error()
-		}
-		msg := label + ": autostart on (saved to " + path + ")"
-		t0 := time.Now()
-		if err := h.StartServer(ctx, id); err != nil {
-			return msg + "\nbut it did not start now — " + oneLine(err.Error())
-		}
-		elapsed := time.Since(t0)
-		line := label + ": " + runningSummary(h, id)
-		if elapsed > time.Second {
-			line += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
-		}
-		return msg + "\n" + line + ingestLine(h, id)
+		return runSwitchCmd(ctx, h, alias, "on", []string{"--project"})
 	case "manual":
-		path, err := h.SetAutostart(id, false)
-		if err != nil {
-			return label + ": " + err.Error()
-		}
-		return label + ": autostart off (saved to " + path + ") — still running this session; /" + alias + " off to stop it"
+		return runSwitchCmd(ctx, h, alias, "off", []string{"--project"})
 	default:
-		return "unknown action " + strconv.Quote(action) + " — try /" + alias + " [on|off|restart|auto|manual]"
+		return "unknown action " + strconv.Quote(action) + " — try /" + alias + " [on|off|unset|restart|auto|manual] [--global|--project|--session]"
 	}
 }
 
@@ -259,26 +232,8 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 			return msg + "\n" + shellPlacementNote
 		}
 		return msg + "\n" + mcpDocsLine(ctx, h, spec.ID)
-	case "move":
-		id, via, _ := strings.Cut(strings.TrimSpace(arg), " ")
-		via = strings.TrimSpace(via)
-		if id == "" || (via != dun.ViaShell && via != dun.ViaDirect) {
-			return "usage: /mcp move <id> shell|direct"
-		}
-		restarted, err := h.MoveServer(ctx, id, via)
-		if err != nil {
-			return "mcp move: " + err.Error()
-		}
-		msg := id + ": " + runningSummary(h, id)
-		if !restarted && via == dun.ViaShell {
-			if sh, _ := stateOf(h, dun.ServerShell); !sh.Running {
-				msg += "\nthe shell is not running — it hosts " + id + " when it starts (/mcp on shell)"
-			}
-		}
-		if via == dun.ViaShell {
-			msg += "\n" + shellPlacementNote
-		}
-		return msg
+	case "via", "move":
+		return runViaCmd(ctx, h, strings.Fields(arg))
 	case "refresh":
 		if arg == "" {
 			return "usage: /mcp refresh <id> — re-read its docs into the index"
@@ -321,21 +276,13 @@ func mcpToolsEvent(h *dun.Harness, action string) *proto.McpTools {
 	case len(f) == 0:
 		ev.Message = toolCostListing(h.Servers())
 		return ev
-	case f[0] == "toggle" && len(f) == 4 && (f[3] == "on" || f[3] == "off"):
+	case f[0] == "toggle" && (len(f) == 4 || len(f) == 5):
 		ev.Server = f[1]
-		path, err := h.SetToolEnabled(f[1], f[2], f[3] == "on")
-		switch {
-		case err != nil:
-			ev.Message = f[1] + ": " + err.Error()
-		case path == "":
-			ev.Message = f[1] + ": " + f[2] + " is already " + f[3]
-		default:
-			ev.Message = f[1] + ": " + f[2] + " " + f[3] + " (saved to " + path + "; the model sees it from the next turn)"
-		}
+		ev.Message = toolSwitchLine(h, f[1], f[2], f[3], f[4:])
 	case len(f) == 1:
 		ev.Server = f[0]
 	default:
-		ev.Message = "usage: /mcp tools [id] · toggle: mcptools toggle <id> <tool> on|off"
+		ev.Message = "usage: /mcp tools [id] · /mcp toggle <id> <tool> on|off|unset [--global|--project|--session]"
 		return ev
 	}
 	tools, err := h.ServerTools(ev.Server)
@@ -345,7 +292,7 @@ func mcpToolsEvent(h *dun.Harness, action string) *proto.McpTools {
 	}
 	for _, t := range tools {
 		ev.Tools = append(ev.Tools, proto.McpTool{Name: t.Name, Description: t.Description, Schema: t.Schema,
-			Tokens: t.Tokens, Enabled: t.Enabled, HiddenBy: t.HiddenBy})
+			Tokens: t.Tokens, Enabled: t.Enabled, HiddenBy: t.HiddenBy, Global: t.Global, Project: t.Project, Session: t.Session, From: t.From})
 	}
 	return ev
 }
@@ -382,7 +329,7 @@ func heavyHint(st dun.ServerState) string {
 	}
 	hint := "heavy: /mcp tools " + st.ID + " to hide some"
 	if st.Via == dun.ViaDirect {
-		hint += ", or /mcp move " + st.ID + " shell"
+		hint += ", or /mcp via " + st.ID + " shell"
 	}
 	return hint
 }
@@ -481,42 +428,45 @@ const mcpAddHint = "add one: /mcp add — a form: an id, then a URL (https://…
 
 func serverListing(states []dun.ServerState) string {
 	var b strings.Builder
-	b.WriteString("mcp servers")
+	b.WriteString("mcp servers — " + switchLegend)
+	b.WriteString("\n" + serverTable(states, plainKey))
 	total, direct := 0, 0
 	for _, st := range states {
 		if st.Running && st.Via != dun.ViaShell {
 			total += st.Cost
 			direct++
 		}
-		b.WriteString("\n  " + st.ID + ": ")
-		switch {
-		case st.Via == dun.ViaShell:
-			b.WriteString(hostedSummary(st))
-		case st.Running:
-			b.WriteString("running · " + toolCost(st))
-		case st.Err != "":
-			b.WriteString("stopped · last error: " + oneLine(st.Err))
-		default:
-			b.WriteString("stopped")
-		}
-		if st.Via == dun.ViaDirect {
-			b.WriteString(" · direct")
-		}
-		if st.Auto && st.Via != dun.ViaShell {
-			b.WriteString(" · autostart")
-		}
-		if st.Auth != "" {
-			b.WriteString(" · " + st.Auth)
-		}
 		if hint := heavyHint(st); st.Running && hint != "" {
-			b.WriteString("\n    " + hint)
+			b.WriteString("\n  " + st.ID + ": " + hint)
 		}
 	}
 	if direct > 0 {
 		b.WriteString("\n  tool definitions: ~" + kTokens(total) + " tokens in every request, from " +
 			plural(direct, "running server") + " (/context shows the whole prompt)")
 	}
+	b.WriteString("\n  /mcp on|off <id> [--global|--project|--session] (bare: this session) · /mcp unset <id> --project|--session · /mcp via <id> shell|direct")
 	return b.String()
+}
+
+// serverDetail is what a server is doing now, after its state column.
+func serverDetail(st dun.ServerState) string {
+	var s string
+	switch {
+	case st.Via == dun.ViaShell && st.Auto:
+		s = hostedSummary(st)
+	case st.Via == dun.ViaShell:
+		s = "not hosted"
+	case st.Running:
+		s = "running · " + toolCost(st)
+	case st.Err != "":
+		s = "stopped · last error: " + oneLine(st.Err)
+	default:
+		s = "stopped"
+	}
+	if st.Auth != "" {
+		s += " · " + st.Auth
+	}
+	return s
 }
 
 // serverStatusLine is the bare "/rag" report: what it is doing now, what it
@@ -534,26 +484,18 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	} else {
 		b.WriteString("stopped")
 	}
-	if st.Auto {
-		b.WriteString(" · autostart on")
-	} else {
-		b.WriteString(" · autostart off")
-	}
+	b.WriteString(" · " + stateCell(st) + " · switches: global " + cellWord(st.Global) +
+		", project " + cellWord(st.Project) + ", session " + cellWord(st.Session))
 	if st.Err != "" {
 		b.WriteString("\nlast start failed: " + oneLine(st.Err))
 	}
 	if st.Running && st.Ingest != "" {
 		b.WriteString("\n" + st.Ingest)
 	}
-	switch {
-	case !st.Running && !st.Auto:
-		b.WriteString("\n/" + alias + " on to start it now · /" + alias + " auto to start it every session")
-	case !st.Running && st.Auto:
-		b.WriteString("\n/" + alias + " on to start it now")
-	case st.Running && !st.Auto:
-		b.WriteString("\n/" + alias + " auto to start it every session · /" + alias + " off to stop it")
-	default:
-		b.WriteString("\n/" + alias + " manual to stop starting it automatically")
+	if st.Auto {
+		b.WriteString("\n/" + alias + " off to stop it this session · /" + alias + " manual to keep it off in this project")
+	} else {
+		b.WriteString("\n/" + alias + " on to start it this session · /" + alias + " auto to start it in this project every session")
 	}
 	return b.String()
 }
@@ -644,7 +586,10 @@ func serverHint(states []dun.ServerState) string {
 func serversProto(states []dun.ServerState) []proto.ServerState {
 	out := make([]proto.ServerState, 0, len(states))
 	for _, st := range states {
-		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Auth: st.Auth})
+		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Auth: st.Auth,
+			Via: st.Via, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
+			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
+			Detail: serverDetail(st)})
 	}
 	return out
 }

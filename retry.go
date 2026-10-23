@@ -251,6 +251,10 @@ func turnRetryPolicy(client agent.LLMRunner) (initial, max, budget time.Duration
 // before every attempt, which is what makes a message typed during the wait ride
 // along with the retry instead of waiting for it.
 func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent.TurnResult, error)) (agent.TurnResult, error) {
+	// A server switch changed elsewhere (globally, or for the project) since
+	// the last turn reaches this session here, before the lock: a rebuild
+	// it causes applies now rather than after the turn.
+	h.followServers(ctx)
 	// Held for the whole turn so a concurrent /rag or /lsp cannot swap the
 	// Session's tools mid-flight; the deferred unlock applies whatever the
 	// command deferred (see Harness.applyTools).

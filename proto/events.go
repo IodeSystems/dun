@@ -341,6 +341,21 @@ type ServerState struct {
 	// ("oauth: logged in as … until …", "oauth: needs login …"), "static
 	// bearer", "static header" or "none".
 	Auth string `json:"auth,omitempty"`
+	// The switches (dun mcpscope.go): Global, Project and Session are "on",
+	// "off" or "" (unset); From is the scope that decided Auto. Via is
+	// "direct" or "shell" ("" for a built-in), ViaGlobal/ViaProject/
+	// ViaSession its value at each scope, ViaFrom the deciding scope.
+	// Detail is what it is doing now, as one line.
+	Via        string `json:"via,omitempty"`
+	Global     string `json:"global,omitempty"`
+	Project    string `json:"project,omitempty"`
+	Session    string `json:"session,omitempty"`
+	From       string `json:"from,omitempty"`
+	ViaGlobal  string `json:"viaGlobal,omitempty"`
+	ViaProject string `json:"viaProject,omitempty"`
+	ViaSession string `json:"viaSession,omitempty"`
+	ViaFrom    string `json:"viaFrom,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 // ServerEvent reports a server command's outcome and the new server set.
@@ -550,6 +565,11 @@ type McpTool struct {
 	Tokens      int    `json:"tokens"`
 	Enabled     bool   `json:"enabled"`
 	HiddenBy    string `json:"hiddenBy,omitempty"` // the Disable entry hiding it
+	// The switch at each scope ("on", "off", "" unset) and the deciding one.
+	Global  string `json:"global,omitempty"`
+	Project string `json:"project,omitempty"`
+	Session string `json:"session,omitempty"`
+	From    string `json:"from,omitempty"`
 }
 
 // McpLogin asks the person to log in to an OAuth MCP server: open URL in a

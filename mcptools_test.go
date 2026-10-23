@@ -73,7 +73,7 @@ func TestFilterTools_Globs(t *testing.T) {
 // Every discovered tool is listed with its cost, hidden ones included; a
 // toggle writes the user server list and the model's tool set follows; a
 // hidden tool turns back on; one a glob hides says so instead.
-func TestSetToolEnabled_WritesDisableAndRebuilds(t *testing.T) {
+func TestSetToolOn_GlobalWritesDisableAndRebuilds(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ts := fakeMCPTools(t, "tts_say", "tts_list", "voices")
 	h := newServerHarness(t)
@@ -87,7 +87,8 @@ func TestSetToolEnabled_WritesDisableAndRebuilds(t *testing.T) {
 	}
 	full := st.Cost
 
-	path, err := h.SetToolEnabled("el", "tts_list", false)
+	off, on := false, true
+	path, _, err := h.SetToolOn("el", "tts_list", ScopeGlobal, &off)
 	if err != nil || path != UserServersFile() {
 		t.Fatalf("off: %q %v", path, err)
 	}
@@ -108,7 +109,7 @@ func TestSetToolEnabled_WritesDisableAndRebuilds(t *testing.T) {
 		t.Fatalf("the hidden tool must still be listed: %+v", tools)
 	}
 
-	if _, err := h.SetToolEnabled("el", "tts_list", true); err != nil {
+	if _, _, err := h.SetToolOn("el", "tts_list", ScopeGlobal, &on); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(modelTools(h), "el__tts_list") {
@@ -118,7 +119,7 @@ func TestSetToolEnabled_WritesDisableAndRebuilds(t *testing.T) {
 	if f, _ := readServersFile(UserServersFile()); f.Servers[0].Disable == nil || len(f.Servers[0].Disable) != 0 {
 		t.Errorf("saved %#v", f.Servers[0].Disable)
 	}
-	if p, err := h.SetToolEnabled("el", "voices", true); p != "" || err != nil {
+	if p, changed, err := h.SetToolOn("el", "voices", ScopeGlobal, &on); p != "" || changed || err != nil {
 		t.Errorf("already on: %q %v", p, err)
 	}
 
@@ -126,18 +127,24 @@ func TestSetToolEnabled_WritesDisableAndRebuilds(t *testing.T) {
 	if _, err := SetUserServerDisable("el", []string{"tts_*"}); err != nil {
 		t.Fatal(err)
 	}
-	h.specs[0].Disable = []string{"tts_*"}
-	if _, err := h.SetToolEnabled("el", "tts_say", true); err == nil || !strings.Contains(err.Error(), `"tts_*"`) {
+	if err := h.reloadServers(ctx, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.SetToolOn("el", "tts_say", ScopeGlobal, &on); err == nil || !strings.Contains(err.Error(), `"tts_*"`) {
 		t.Errorf("glob: %v", err)
 	}
-	if _, err := h.SetToolEnabled("el", "nope", false); err == nil {
+	// A session switch turns it on over the glob, for this session only.
+	if _, _, err := h.SetToolOn("el", "tts_say", ScopeSession, &on); err != nil || !slices.Contains(modelTools(h), "el__tts_say") {
+		t.Errorf("session over glob: %v %v", err, modelTools(h))
+	}
+	if _, _, err := h.SetToolOn("el", "nope", ScopeGlobal, &off); err == nil {
 		t.Error("an unknown tool must be refused")
 	}
 }
 
-// A server some config file declared keeps its deny-list in the project's
-// machine state, never in the repo.
-func TestSetToolEnabled_ProjectServerGoesToStateDir(t *testing.T) {
+// A project switch for a tool goes to the project's machine state, never
+// to the repo.
+func TestSetToolOn_ProjectGoesToStateDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DUN_HOME", home)
 	ts := fakeMCPTools(t, "a", "b")
@@ -146,13 +153,17 @@ func TestSetToolEnabled_ProjectServerGoesToStateDir(t *testing.T) {
 	if err := h.StartServer(context.Background(), "proj"); err != nil {
 		t.Fatal(err)
 	}
-	path, err := h.SetToolEnabled("proj", "a", false)
+	off := false
+	path, _, err := h.SetToolOn("proj", "a", ScopeProject, &off)
 	if err != nil || !strings.HasPrefix(path, home) || filepath.Base(path) != LocalServersFile {
 		t.Fatalf("%q %v", path, err)
 	}
 	got, err := LoadServers(h.cfg.Workspace, h.cfg.Workspace, "")
-	if err != nil || !slices.Equal(byID(got)["proj"].Disable, []string{"a"}) {
-		t.Errorf("reload: %+v %v", byID(got)["proj"], err)
+	if p := byID(got)["proj"]; err != nil || p.ProjectTools["a"] != false || len(p.ProjectTools) != 1 {
+		t.Errorf("reload: %+v %v", p, err)
+	}
+	if slices.Contains(modelTools(h), "proj__a") || !slices.Contains(modelTools(h), "proj__b") {
+		t.Errorf("model tools %v", modelTools(h))
 	}
 }
 

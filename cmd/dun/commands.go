@@ -57,22 +57,26 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 		}
 		return onOff(st.Running), detail
 	}
-	srvChoices := choices("on", "start it now", "off", "stop it", "restart", "restart it",
-		"auto", "start it every session", "manual", "stop starting it every session")
+	srvChoices := choices("on", "on for this session (--project, --global for wider)", "off", "off for this session (--project, --global for wider)",
+		"unset", "clear a --project or --session switch", "restart", "restart it",
+		"auto", "on for this project (= on --project)", "manual", "off for this project (= off --project)")
 	ragState, ragDetail := serverState("rag")
 	lspState, lspDetail := serverState("lsp")
 	return &proto.Commands{Items: []proto.CommandSpec{
-		{Name: "rag", Usage: "[on|off|restart|auto|manual]", Group: "tools", Choices: srvChoices, State: ragState, Detail: ragDetail,
+		{Name: "rag", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: ragState, Detail: ragDetail,
 			Description: "docs index (raglit): bare shows status, auto starts it every session"},
-		{Name: "lsp", Usage: "[on|off|restart|auto|manual]", Group: "tools", Choices: srvChoices, State: lspState, Detail: lspDetail,
+		{Name: "lsp", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: lspState, Detail: lspDetail,
 			Description: "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session"},
-		{Name: "mcp", Usage: "[add | tools [id] | remove <id> | refresh <id> | move <id> shell|direct | login|logout <id> | on|off|restart [id]]", Group: "tools", Text: true,
-			Choices: choices("add", "add a server: a form — id, then a URL or a command, then a bearer for a URL, then direct or in the shell",
-				"on", "start servers", "off", "stop servers", "restart", "restart servers", "remove", "remove a server", "refresh", "re-index a server's docs",
-				"move", "place a server in the shell (one eval namespace, no schemas per request) or direct",
+		{Name: "mcp", Usage: "[add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | via <id> shell|direct|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
+			Choices: choices("add", "add a server: a form — a preset, or an id and a URL or a local command",
+				"on", "turn a server on: this session, or --project / --global", "off", "turn a server off: this session, or --project / --global",
+				"unset", "clear a server's --project or --session switch", "restart", "restart servers", "remove", "remove a server from the catalog", "refresh", "re-index a server's docs",
+				"via", "place a server in the shell (one eval namespace, no schemas per request) or direct, at a scope",
+				"move", "the same as via",
+				"toggle", "turn one tool on or off, at a scope",
 				"tools", "what each server's tools cost; with an id, list them and turn some off",
 				"login", "log in to an oauth server in the browser", "logout", "delete (and revoke) an oauth server's token"),
-			Description: "MCP servers: bare lists them; add opens a form (id, URL or command, bearer)"},
+			Description: "MCP servers: bare shows the switch table (global · project · session · via); add opens a form"},
 		{Name: "docker", Usage: "[on|off|status]", Group: "tools", Choices: choices("on", "exec in Docker", "off", "exec on the host", "status", ""),
 			State: onOff(docker), Description: "exec backend: on (Docker), off (host), bare shows status"},
 		{Name: "worktree", Usage: "[status|new|commit]", Group: "git", Choices: choices("status", "", "new", "isolate in a new worktree", "commit", "write the message and ask"),
@@ -125,6 +129,14 @@ func modelsEvent() *proto.Models {
 	}
 	wg.Wait()
 	return &proto.Models{Providers: out}
+}
+
+func lowerAll(in []string) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = strings.ToLower(s)
+	}
+	return out
 }
 
 // isJobID says s is a job number ("3" or "#3").
@@ -197,7 +209,7 @@ func routeSlash(line string, r slashRoutes) {
 	}
 	switch name {
 	case "rag", "lsp":
-		r.server(name, arg(0))
+		r.server(name, strings.Join(lowerAll(args), " "))
 	case "mcp":
 		switch arg(0) {
 		case "add":
@@ -218,18 +230,39 @@ func routeSlash(line string, r slashRoutes) {
 				id = args[1]
 			}
 			r.control("mcptools", id)
-		case "move":
-			if len(args) != 3 || (arg(2) != dun.ViaShell && arg(2) != dun.ViaDirect) {
-				r.reply("usage: /mcp move <id> shell|direct")
+		case "via", "move":
+			if len(args) < 3 || len(args) > 4 || (arg(2) != dun.ViaShell && arg(2) != dun.ViaDirect && arg(2) != "unset") {
+				r.reply("usage: /mcp via <id> shell|direct|unset [--global|--project|--session] (bare: this session; move is the same)")
 				return
 			}
-			r.control("mcp", "move "+args[1]+" "+arg(2))
+			r.control("mcp", "via "+strings.Join(lowerAll(args[1:]), " "))
+		case "toggle":
+			if len(args) < 4 || len(args) > 5 {
+				r.reply("usage: /mcp toggle <id> <tool> on|off|unset [--global|--project|--session] (bare: this session)")
+				return
+			}
+			// The tool name keeps its case: a server's tools are case-sensitive.
+			r.control("mcptools", "toggle "+arg(1)+" "+args[2]+" "+strings.Join(lowerAll(args[3:]), " "))
+		case "unset":
+			if len(args) != 3 {
+				r.reply("usage: /mcp unset <id> --project|--session")
+				return
+			}
+			r.server(arg(1), "unset "+arg(2))
 		default:
 			target := allServers
-			if len(args) > 1 {
+			if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
 				target = arg(1)
 			}
-			r.server(target, arg(0))
+			action := arg(0)
+			if len(args) > 2 {
+				action += " " + strings.Join(lowerAll(args[2:]), " ")
+			}
+			if target == allServers && len(args) > 1 {
+				r.reply("usage: /mcp " + arg(0) + " <id> [--global|--project|--session] — a switch names its server")
+				return
+			}
+			r.server(target, action)
 		}
 	case "rephrase":
 		// Bare or status reports; only on/off change it (the engine toggle

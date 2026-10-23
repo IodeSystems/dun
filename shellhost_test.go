@@ -101,6 +101,7 @@ func newServerHarness(t *testing.T, specs ...Server) *Harness {
 	t.Cleanup(h.mgr.Close)
 	h.Session = &agent.Session{}
 	h.specs = specs
+	h.cfg.Servers = append([]Server{}, specs...) // the base the files layer over; not the built-ins
 	h.cfg.Workspace = t.TempDir()
 	return h
 }
@@ -111,7 +112,7 @@ func TestShellArgs_McpOnlyWhenHosted(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DUN_HOME", home)
 	shell := Server{ID: ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", "/ws"}}
-	h := newServerHarness(t, shell, Server{ID: "corp", Command: "corp-mcp"})
+	h := newServerHarness(t, shell, Server{ID: "corp", Command: "corp-mcp", Autostart: true})
 	if got := h.shellArgs(shell); !slices.Equal(got, shell.Args) {
 		t.Errorf("nothing hosted: %v", got)
 	}
@@ -170,7 +171,7 @@ func TestMoveServer_BothWays(t *testing.T) {
 		t.Errorf("state %+v", st)
 	}
 
-	if _, err := h.MoveServer(ctx, "corp", ViaDirect); err != nil {
+	if _, err := h.MoveServer(ctx, "corp", ScopeGlobal, ViaDirect); err != nil {
 		t.Fatal(err)
 	}
 	if !h.mgr.ServerStarted("corp") || !slices.Contains(h.ToolNames(), "corp__search") {
@@ -180,7 +181,7 @@ func TestMoveServer_BothWays(t *testing.T) {
 		t.Errorf("saved %+v", f.Servers[0])
 	}
 
-	if _, err := h.MoveServer(ctx, "corp", ViaShell); err != nil {
+	if _, err := h.MoveServer(ctx, "corp", ScopeGlobal, ViaShell); err != nil {
 		t.Fatal(err)
 	}
 	if h.mgr.ServerStarted("corp") || slices.Contains(h.ToolNames(), "corp__search") {
@@ -190,11 +191,12 @@ func TestMoveServer_BothWays(t *testing.T) {
 		t.Errorf("saved %+v", f.Servers[0])
 	}
 
-	h.specs = append(h.specs, Server{ID: ServerCode, Command: "poly-lsp-mcp"})
-	if _, err := h.MoveServer(ctx, ServerCode, ViaShell); err == nil || !strings.Contains(err.Error(), "built-in") {
+	h.cfg.Servers = append(h.cfg.Servers, Server{ID: ServerCode, Command: "poly-lsp-mcp"})
+	_ = h.reloadServers(ctx, true, nil)
+	if _, err := h.MoveServer(ctx, ServerCode, ScopeGlobal, ViaShell); err == nil || !strings.Contains(err.Error(), "built-in") {
 		t.Errorf("built-in: %v", err)
 	}
-	if _, err := h.MoveServer(ctx, "corp", "sideways"); err == nil {
+	if _, err := h.MoveServer(ctx, "corp", ScopeGlobal, "sideways"); err == nil {
 		t.Error("a bad placement must be refused")
 	}
 }

@@ -614,8 +614,7 @@ type tuiModel struct {
 	// to tell a double click (mouse.go).
 	lastClickAt   time.Time
 	lastClickLine int
-	offlineShown  bool            // the saved conversation was shown from disk while dund was unreachable
-	wantServers   map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
+	offlineShown  bool // the saved conversation was shown from disk while dund was unreachable
 	// The viewport's rendered text, cached behind a POINTER on purpose.
 	//
 	// Bubble Tea calls View() after EVERY message — including each streamed
@@ -652,23 +651,25 @@ type tuiModel struct {
 	providerEdit   string // the provider the form edits; "" adds one
 	provider       string // name of the provider the engine runs on
 	// The add-MCP-server form (/mcp add).
-	mcpForm       bool
-	mcpFields     [mcpViaStep]textinput.Model // id, url or command, bearer, then oauth (see mcpform.go)
-	mcpStep       int                         // a field, or mcpViaStep: the placement
-	mcpShell      bool                        // placement: in the shell (true) or direct
-	mcpErr        string
-	mcpToolsWant  string          // the server whose /mcp tools this TUI asked for (mcptools.go)
-	engineCmds    []engineCmd     // the engine's slash commands (commands event)
-	skills        []catalogSkill  // from the engine's catalog event
-	serverIDs     []string        // every MCP server's id (ready/servers events), for /mcp completion
-	prompts       []catalogPrompt // MCP prompts, each a slash command
-	replaying     bool            // driven by a trace (--replay), not an engine
-	quitting      bool            // the user is leaving; do not respawn
-	exitAnnounced bool            // the engine said it was going; it did not crash
-	everUp        bool            // an engine reached `session` once; a retry may reattach
-	suggestions   []suggestion    // predicted next messages (idle-only picker)
-	suggestMode   string          // "on" | "off" | "auto" — /suggest controls this
-	suggestSel    int             // highlighted suggestion in the selector
+	mcpForm      bool
+	mcpFields    [mcpViaStep]textinput.Model // id, url or command, bearer, then oauth (see mcpform.go)
+	mcpStep      int                         // a field, or mcpViaStep: the placement
+	mcpShell     bool                        // placement: in the shell (true) or direct
+	mcpErr       string
+	mcpToolsWant string // the server whose /mcp tools this TUI asked for (mcptools.go)
+	// mcpServersWant: this TUI asked for the /mcp table (mcpview.go).
+	mcpServersWant bool
+	engineCmds     []engineCmd     // the engine's slash commands (commands event)
+	skills         []catalogSkill  // from the engine's catalog event
+	serverIDs      []string        // every MCP server's id (ready/servers events), for /mcp completion
+	prompts        []catalogPrompt // MCP prompts, each a slash command
+	replaying      bool            // driven by a trace (--replay), not an engine
+	quitting       bool            // the user is leaving; do not respawn
+	exitAnnounced  bool            // the engine said it was going; it did not crash
+	everUp         bool            // an engine reached `session` once; a retry may reattach
+	suggestions    []suggestion    // predicted next messages (idle-only picker)
+	suggestMode    string          // "on" | "off" | "auto" — /suggest controls this
+	suggestSel     int             // highlighted suggestion in the selector
 	// Idle debounce for the suggestion request. The engine cannot see whether
 	// anyone is typing, so the decision lives here: the clock restarts on every
 	// keystroke and at the end of every turn, and the request goes out only once
@@ -917,8 +918,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// So does the pager, all but ctrl+c: it reads one block in the convo
 		// pane's place, and esc brings the conversation back.
 		if m.paging && msg.String() != "ctrl+c" {
-			if v := m.toolsPaging(); v != nil && msg.String() == " " {
-				m.toggleMCPTool(v)
+			if v := m.toolsPaging(); v != nil && (msg.String() == " " || m.toolKey(v, msg.String())) {
+				if msg.String() == " " {
+					m.toggleMCPTool(v)
+				}
+				return m, nil
+			}
+			if v := m.serversPaging(); v != nil && m.serverKey(v, msg.String()) {
+				m.refresh()
 				return m, nil
 			}
 			// "i" on a call opens the inspector over the pager; esc there comes
@@ -1943,35 +1950,7 @@ func (m *tuiModel) noteServers(ev evMsg) {
 			m.serverIDs = append(m.serverIDs, str(st["id"]))
 		}
 	}
-	if m.wantServers == nil {
-		m.wantServers = map[string]bool{}
-	}
-	for _, s := range list {
-		st, ok := s.(map[string]any)
-		if !ok {
-			continue
-		}
-		alias := aliasOf(str(st["id"]))
-		if _, switchable := serverAliases[alias]; !switchable {
-			continue
-		}
-		running, _ := st["running"].(bool)
-		m.wantServers[alias] = running
-	}
-}
-
-// reapplyServers turns back on whatever the user had turned on, after a
-// restart. A no-op on the first ready, when nothing has been asked for yet.
-func (m tuiModel) reapplyServers() tuiModel {
-	if m.restarts == 0 {
-		return m
-	}
-	for alias, want := range m.wantServers {
-		if want {
-			m.proc.serverCmd(alias, "on")
-		}
-	}
-	return m
+	m.noteServerView(list)
 }
 
 func (m tuiModel) handleEvent(ev evMsg) tuiModel {
@@ -2013,14 +1992,18 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if hint := strings.TrimSpace(str(ev["hint"])); hint != "" {
 			m.append(stNote.Render(hint))
 		}
-		// Order matters: reapply reads what was running BEFORE this engine
-		// existed, and this event reports the fresh one (everything off).
-		m = m.reapplyServers()
+		// No servers are turned back on here: a respawned engine reattaches
+		// to this session, whose switches it keeps itself (dun mcpscope.go).
 		m.noteServers(ev)
 		return m
 	case "server":
-		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
+		list, _ := ev["servers"].([]any)
+		opened := str(ev["id"]) == allServers && m.openServerTable(list)
+		if msg := strings.TrimSpace(str(ev["message"])); msg != "" && !opened {
 			m.append(stNote.Render(msg))
+			if m.serversPaging() != nil {
+				m.flashText, m.flashUntil = oneLine(msg), time.Now().Add(flashFor)
+			}
 		}
 		// The tool list changed; keep /help's count and the status bar honest.
 		if ts, ok := ev["tools"].([]any); ok {
@@ -2923,7 +2906,11 @@ func (m tuiModel) View() string {
 	case m.flashing():
 		status = stNote.Render(m.flashText)
 	case m.paging:
-		status = stDim.Render(m.pg.hint())
+		if v := m.serversPaging(); v != nil {
+			status = v.hint() // styled itself: its hotkeys are marked
+		} else {
+			status = stDim.Render(m.pg.hint())
+		}
 	case m.asking && len(m.askOptions) == 0:
 		status = stAsk.Render("❓ type your answer · enter send · esc answer later")
 	case m.asking && m.askMulti:

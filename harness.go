@@ -48,12 +48,20 @@ type Server struct {
 	// Autostart spawns this server when the session starts. Off means the
 	// server is available but idle until asked for (/lsp on, /rag on).
 	Autostart bool
-	// Disable is a deny-list of tool names to hide from the model. When empty,
-	// all tools discovered from this server are passed through.
+	// Disable is the GLOBAL deny-list of tool names to hide from the model.
+	// When empty, all tools discovered from this server are passed through.
 	Disable []string
+	// ProjectDisable is a project file's deny-list (nil: none), which used
+	// to replace Disable whole and still does; ProjectTools and SessionTools
+	// turn single tools on or off at those scopes. See Server.toolState.
+	ProjectDisable []string
+	ProjectTools   map[string]bool
+	SessionTools   map[string]bool
 	// Via is "" (dun connects to it) or ViaShell (mcpshell hosts it and dun
 	// does not start it). See ServerSpec.Via.
 	Via string
+	// Scopes is where Autostart and Via came from (mcpscope.go).
+	Scopes ServerScopes
 	// Bearer is the token as configured, "$NAME" unexpanded, so a
 	// shell-hosted server can read the variable when it connects instead of
 	// dun writing the token into a file. Headers carries the resolved value.
@@ -209,7 +217,9 @@ type Config struct {
 	// deleted on exit, which is why nothing indexed ever outlived a run.
 	RaglitHome string
 
-	Servers []Server // nil → DefaultServers(Workspace, RaglitHome)
+	// Servers are what the config files layer over: nil → DefaultServers(
+	// Workspace, RaglitHome). A child (Parent set) takes them as given.
+	Servers []Server
 	// ConfigDir is where dun.json / dun.local.json are looked for. Empty →
 	// Workspace. Separated because the workspace may be an isolated worktree
 	// while the config lives with the developer's checkout.
@@ -417,6 +427,11 @@ type Harness struct {
 	// ready hint. Guarded by srvMu.
 	ingestNote string
 	hosted     map[string]hostedState // id → how the running shell took a shell-placed server
+	// sessSw is this session's own server switches (mcpscope.go), saved in
+	// the session's .mcp.json sidecar. Guarded by srvMu. reconMu orders the
+	// reloads that apply a switch change.
+	sessSw  map[string]SessionServer
+	reconMu sync.Mutex
 	// oauth is each OAuth server's login, kept across restarts of the server
 	// so a cached token and a running login are not lost. Its own lock:
 	// Servers() reads it while holding srvMu.
@@ -1049,26 +1064,26 @@ func (h *Harness) healOrphans(ctx context.Context, result func(name string) stri
 
 // Start spawns the servers, waits for tool discovery, and builds the Session.
 func Start(ctx context.Context, cfg Config) (*Harness, error) {
-	// Explicit Go-level Servers win outright — a caller that constructed them
-	// meant it. Otherwise resolve the layered config files, which fall back to
-	// the built-in trio when neither exists.
+	// The servers are the built-ins (or a caller's Go-level ones) under the
+	// layered config files, under this session's own switches (mcpscope.go)
+	// and the --rag/--lsp flags. A child takes its parent's resolved list
+	// as given: it shares the parent's manager and switches nothing.
 	servers := cfg.Servers
-	if servers == nil {
+	var sessSw map[string]SessionServer
+	if cfg.Parent == nil {
 		dir := cfg.ConfigDir
 		if dir == "" {
 			dir = cfg.Workspace
 		}
+		base := cfg.Servers
+		if base == nil {
+			base = DefaultServers(cfg.Workspace, cfg.RaglitHome)
+		}
+		sessSw = LoadSessionServers(cfg.SessionFile)
 		var err error
-		servers, err = LoadServers(dir, cfg.Workspace, cfg.RaglitHome)
+		servers, err = resolveServers(dir, cfg.Workspace, cfg.RaglitHome, base, sessSw, cfg.AutostartOverride)
 		if err != nil {
 			return nil, err
-		}
-	}
-	for id, on := range cfg.AutostartOverride {
-		for i := range servers {
-			if servers[i].ID == id {
-				servers[i].Autostart = on
-			}
 		}
 	}
 	// A CHILD shares its parent's manager. Same worktree root means the same
@@ -1086,7 +1101,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	store.onNotify = cfg.OnNotify
 	h := &Harness{mgr: mgr, store: store, client: cfg.Client,
 		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
-		cfg: cfg, specs: servers, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
+		cfg: cfg, specs: servers, sessSw: sessSw, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
 	// A resumed session's history is not this session's to act on: the

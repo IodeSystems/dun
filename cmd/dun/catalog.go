@@ -262,6 +262,10 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 		if name == "mcp" && len(args) == 2 && args[0] == "tools" {
 			m.openMCPTools(args[1])
 		}
+		// Bare /mcp: the listing opens as the switch table (mcpview.go).
+		if name == "mcp" && (len(args) == 0 || len(args) == 1 && (args[0] == "list" || args[0] == "status")) {
+			m.openMCPServers()
+		}
 		line := strings.TrimSpace(name + " " + strings.Join(args, " "))
 		if !m.proc.controlCmd("slash", line) {
 			m.append(stErr.Render("no engine right now — /reconnect first"))
