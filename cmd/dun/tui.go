@@ -833,11 +833,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// (asking, searching, the inspector) owns its own keys — this is the one
 	// funnel every key actually passes through.
 	if t, ok := nm.(tuiModel); ok {
-		// Scroll region: computed here rather than in View because View must not
-		// mutate, and here is the one place every state change passes through.
-		if c := t.planScrollRegion(); c != nil {
-			cmd = tea.Batch(cmd, c)
-		}
 		if _, isKey := msg.(tea.KeyMsg); isKey {
 			t.armIdleSuggest()
 		}
@@ -894,6 +889,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.pulseWanted() && !t.pulsePending {
 			t.pulsePending = true
 			cmd = tea.Batch(cmd, pulseTick())
+		}
+		// Scroll region: computed here rather than in View because View must not
+		// mutate, and here is the one place every state change passes through.
+		// LAST, after the height sync above: that block can move YOffset (it
+		// anchors the bottom), and a region planned before it showed rows from
+		// the old offset while View blanked them for the new one — one row off
+		// per composer line, until the next message replanned.
+		if c := t.planScrollRegion(); c != nil {
+			cmd = tea.Batch(cmd, c)
 		}
 		nm = t
 	}

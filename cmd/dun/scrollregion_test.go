@@ -222,3 +222,30 @@ func TestScrollRegionSyncWaitsForADisable(t *testing.T) {
 		t.Fatalf("after the gap the region should sync: live=%v ignoring=%v", s.live, r.ignoring)
 	}
 }
+
+// Scrolled up, the composer growing or shrinking a line is a height change,
+// and Update anchors the bottom across it by moving YOffset. The region must
+// be planned for the offset View draws, not the one before that move — it
+// was, and showed rows one off from the model until the next message.
+func TestScrollRegionFollowsAHeightChange(t *testing.T) {
+	v := tallConvo(t)
+	step := func(name string, msg tea.Msg) {
+		t.Helper()
+		v.m.sr.lastAt = time.Time{} // no gap between steps: each one plans
+		nm, _ := v.m.Update(msg)
+		v.m = nm.(tuiModel)
+		if !v.m.sr.live || v.m.sr.paneH != v.m.vp.Height {
+			t.Fatalf("%s: precondition: a live region on the pane (live=%v paneH=%d h=%d)", name, v.m.sr.live, v.m.sr.paneH, v.m.vp.Height)
+		}
+		rows := strings.Split(v.m.vp.View(), "\n")
+		if !sameLines(v.m.sr.last, rows[:len(rows)-1]) {
+			t.Errorf("%s: region's first row %q, the pane's %q", name, stripANSI(v.m.sr.last[0]), stripANSI(rows[0]))
+		}
+	}
+	step("pgup", tea.KeyMsg{Type: tea.KeyPgUp})
+	step("ctrl+j", tea.KeyMsg{Type: tea.KeyCtrlJ}) // composer +1 line
+	step("ctrl+j", tea.KeyMsg{Type: tea.KeyCtrlJ})
+	step("backspace", tea.KeyMsg{Type: tea.KeyBackspace}) // and back
+	step("backspace", tea.KeyMsg{Type: tea.KeyBackspace})
+	step("wheel", tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+}
