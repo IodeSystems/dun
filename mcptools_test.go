@@ -124,7 +124,7 @@ func TestSetToolOn_GlobalWritesDisableAndRebuilds(t *testing.T) {
 	}
 
 	// A glob hides more than one; turning one back on cannot shrink it.
-	if _, err := SetUserServerDisable("el", []string{"tts_*"}); err != nil {
+	if _, err := UpsertUserServer("el", func(s *ServerSpec) { s.Disable = []string{"tts_*"} }); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.reloadServers(ctx, true, nil); err != nil {

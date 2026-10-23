@@ -72,16 +72,6 @@ func toolFailed(tool, result string) bool {
 	return strings.HasPrefix(r, "ERROR") || strings.HasPrefix(r, "error:")
 }
 
-func (r *toolRun) calls() int {
-	n := 0
-	for _, it := range r.items {
-		if it.tool != "" {
-			n++
-		}
-	}
-	return n
-}
-
 // summary is the run's header: count, tools by name with counts (most used
 // first), failures, and how long it spent thinking.
 func (r *toolRun) summary() string {

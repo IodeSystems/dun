@@ -146,7 +146,7 @@ func TestProject_GitWorktreeMapsToSource_OverlayWins(t *testing.T) {
 		t.Error("the worktree must still see the project's state under the overlay")
 	}
 	// A /rag auto in the worktree is that worktree's.
-	path, err := SetAutostart(wt, "docs", true)
+	path, err := setAutostart(wt, "docs", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestProject_ConfigPrecedence_CommittedRepoFilesReadNotWritten(t *testing.T)
 		t.Fatal(err)
 	}
 	writeJSON(t, p.StateDir, ProjectServersFile, `{"servers":[{"id":"db","command":"state-db"}]}`)
-	if _, err := SetAutostart(repo, "db", true); err != nil {
+	if _, err := setAutostart(repo, "db", true); err != nil {
 		t.Fatal(err)
 	}
 	got, err = LoadServers(repo, "/ws", "/raglit")
@@ -237,7 +237,7 @@ func TestProject_ImportsLegacyState(t *testing.T) {
 	}
 	// Turned off after the move: that is the state now, and a second sight
 	// must not import the repo's stale copy over it.
-	if _, err := SetAutostart(repo, "docs", false); err != nil {
+	if _, err := setAutostart(repo, "docs", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := EnsureProject(repo); err != nil {

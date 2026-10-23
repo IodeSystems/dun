@@ -46,7 +46,7 @@ import (
 // in its root and in a .dun/ beside it, .dun/ winning — because a project may
 // commit them on purpose. A dun.local.json there is the older layout, from
 // before dun kept machine state in $DUN_HOME, and is still read. Everything dun
-// writes (see SetAutostart) goes to $DUN_HOME/projects/<id>/.
+// writes (see SetServerOn) goes to $DUN_HOME/projects/<id>/.
 const (
 	// ProjectServersFile is committed and describes the project.
 	ProjectServersFile = "dun.json"
@@ -698,38 +698,6 @@ func UpsertUserServer(id string, edit func(*ServerSpec)) (string, error) {
 	return path, writeUserServers(path, f)
 }
 
-// SetUserServerDisable sets a user-list server's tool deny-list. It reports
-// whether the server was in the list.
-func SetUserServerDisable(id string, disable []string) (bool, error) {
-	return editUserServer(id, func(s *ServerSpec) { s.Disable = disable })
-}
-
-// SetUserServerVia sets where a server in the user server list runs ("" for
-// direct, ViaShell). It reports whether the server was in the list.
-func SetUserServerVia(id, via string) (bool, error) {
-	return editUserServer(id, func(s *ServerSpec) { s.Via = via })
-}
-
-// editUserServer edits id's entry in the user server list, if it is there.
-func editUserServer(id string, edit func(*ServerSpec)) (bool, error) {
-	path := UserServersFile()
-	f, err := readServersFile(path)
-	if err != nil || f == nil {
-		return false, err
-	}
-	found := false
-	for i := range f.Servers {
-		if f.Servers[i].ID == id {
-			edit(&f.Servers[i])
-			found = true
-		}
-	}
-	if !found {
-		return false, nil
-	}
-	return true, writeUserServers(path, f)
-}
-
 func writeUserServers(path string, f *ServersFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -773,26 +741,6 @@ func readServersFile(path string) (*ServersFile, error) {
 		return nil, fmt.Errorf("dun: parse %s: %w", path, err)
 	}
 	return &f, nil
-}
-
-// SetAutostart persists whether a server spawns at startup, in dir's state
-// directory: $DUN_HOME/projects/<id>/dun.local.json, or dir's overlay when dir
-// is a linked worktree. Returns the file it wrote.
-//
-// Machine state, not project state: whether raglit is installed and worth
-// spawning here is a fact about this box. It used to go to dir/.dun/ with a
-// .gitignore beside it — a write into a repo that is not dun's to change.
-func SetAutostart(dir, id string, on bool) (string, error) {
-	if id == "" {
-		return "", fmt.Errorf("dun: SetAutostart: empty server id")
-	}
-	return updateLocalServer(dir, id, func(s *ServerSpec) { s.Autostart = &on })
-}
-
-// SetLocalDisable writes a server's tool deny-list to dir's state directory
-// (see SetAutostart), where it overrides what a repo's dun.json says.
-func SetLocalDisable(dir, id string, disable []string) (string, error) {
-	return updateLocalServer(dir, id, func(s *ServerSpec) { s.Disable = disable })
 }
 
 // updateLocalServer edits (or adds) id's entry in dir's machine-state

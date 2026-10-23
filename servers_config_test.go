@@ -199,12 +199,17 @@ func TestLoadServers_DunDirLocalWinsOverRoot(t *testing.T) {
 	}
 }
 
+// setAutostart writes dir's project switch for id, as /mcp on --project does.
+func setAutostart(dir, id string, on bool) (string, error) {
+	return updateLocalServer(dir, id, func(s *ServerSpec) { s.Autostart = &on })
+}
+
 // Turning autostart back OFF must be expressible, not require deleting the
 // entry that turned it on — which is why Autostart is a pointer.
 func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 	dir := t.TempDir()
 	for _, want := range []bool{true, false, true} {
-		path, err := SetAutostart(dir, "docs", want)
+		path, err := setAutostart(dir, "docs", want)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -236,7 +241,7 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 func TestSetAutostart_WritesProjectDirNotRepo(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	repo := pruneRepo(t)
-	path, err := SetAutostart(repo, "docs", true)
+	path, err := setAutostart(repo, "docs", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +257,7 @@ func TestSetAutostart_WritesProjectDirNotRepo(t *testing.T) {
 		t.Errorf("want 0600, got %v", st.Mode().Perm())
 	}
 	if _, err := os.Stat(filepath.Join(repo, DunDir)); !os.IsNotExist(err) {
-		t.Errorf("SetAutostart created %s in the repo", DunDir)
+		t.Errorf("a project switch created %s in the repo", DunDir)
 	}
 	if out, _ := git("", "-C", repo, "status", "--porcelain"); strings.TrimSpace(out) != "" {
 		t.Errorf("the repo must stay clean, got:\n%s", out)

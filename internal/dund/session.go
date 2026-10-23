@@ -132,10 +132,6 @@ func (s *session) idle(d time.Duration) bool {
 	return running && !s.occupied() && time.Since(s.lastActive) >= d
 }
 
-// busy reports whether the engine is doing something a restart would cut
-// short: a turn, a question to a person, a job, a sub-agent.
-func (s *session) busy() bool { return len(s.waiting()) > 0 }
-
 // waiting is what a restart would cut short in this session, one entry per
 // thing, for a pending upgrade to name.
 func (s *session) waiting() []proto.UpgradeWait {

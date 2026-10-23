@@ -80,7 +80,7 @@ type Server struct {
 // A session that is going to run a couple of shell commands should not pay for
 // either, and — more to the point — a machine missing one of those binaries
 // should still get a working dun. Persist a preference with /rag auto or
-// /lsp auto (see SetAutostart).
+// /lsp auto (see SetServerOn).
 // raglitProject is the CORPUS: the repository, shared by every worktree of it.
 //
 // It must resolve to the main repo even when the session runs in a worktree, or

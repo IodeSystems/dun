@@ -302,24 +302,16 @@ func (h *Harness) restartShell(ctx context.Context) (bool, error) {
 	return true, h.startServer(ctx, sh)
 }
 
-// MoveServer places a server directly or in the shell at scope (see
-// SetServerVia). It reports whether the shell restarted: it does when the
-// hosted set changed while it runs.
+// MoveServer is SetServerVia that also reports whether the shell restarted:
+// it does when the hosted set changed while it runs.
 func (h *Harness) MoveServer(ctx context.Context, id, scope, via string) (bool, error) {
-	v, err := NormalizeVia(via)
-	if err != nil {
-		return false, err
-	}
-	if v == "" {
-		v = ViaDirect
-	}
 	hosted := func() string {
 		h.srvMu.Lock()
 		defer h.srvMu.Unlock()
 		return strings.Join(ServerIDs(h.hostedSpecs()), ",")
 	}
 	before := hosted()
-	if _, err := h.SetServerVia(ctx, id, scope, v); err != nil {
+	if _, err := h.SetServerVia(ctx, id, scope, via); err != nil {
 		return false, err
 	}
 	return h.mgr.ServerStarted(ServerShell) && hosted() != before, nil

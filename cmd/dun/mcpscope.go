@@ -117,12 +117,7 @@ func runViaCmd(ctx context.Context, h *dun.Harness, f []string) string {
 	} else {
 		via = map[string]string{"": dun.ViaDirect, dun.ViaShell: dun.ViaShell}[v]
 	}
-	var restarted bool
-	if via == "" { // MoveServer reads "" as direct
-		_, err = h.SetServerVia(ctx, id, scope, "")
-	} else {
-		restarted, err = h.MoveServer(ctx, id, scope, via)
-	}
+	restarted, err := h.MoveServer(ctx, id, scope, via)
 	if err != nil {
 		return "mcp mode: " + err.Error()
 	}

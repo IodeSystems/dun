@@ -217,12 +217,6 @@ func (h *Harness) StopServer(id string) error {
 	return nil
 }
 
-// SetAutostart sets the project switch on (/rag auto) or off (/rag
-// manual) and applies it. Returns the config file written.
-func (h *Harness) SetAutostart(id string, on bool) (string, error) {
-	return h.SetServerOn(context.Background(), id, ScopeProject, &on)
-}
-
 // spec finds a configured server by id. Caller holds srvMu.
 func (h *Harness) spec(id string) (Server, bool) {
 	for _, s := range h.specs {

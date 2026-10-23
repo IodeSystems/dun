@@ -297,7 +297,7 @@ func TestAgentsHook_MtimeInvalidation(t *testing.T) {
 	}
 }
 
-// rootAgentsMDBlock: the system-prompt injection of the workspace's root
+// rootRules: the system-prompt injection of the workspace's root
 // AGENTS.md. This is the "always show the root AGENTS.md" default — the rules
 // are standing context, not something that waits for a guard to fire.
 func TestRootAgentsMDBlock(t *testing.T) {
