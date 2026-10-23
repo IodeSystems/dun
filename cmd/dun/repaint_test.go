@@ -233,3 +233,28 @@ func TestDiffRows(t *testing.T) {
 		t.Error("trailing blanks are not a difference")
 	}
 }
+
+// A run of ticks is one record, so they cannot push everything else out.
+func TestEventRingCollapsesTicks(t *testing.T) {
+	r := newEventRing()
+	t0 := time.Now()
+	r.add(t0, "tea.KeyMsg", tea.KeyMsg{Type: tea.KeyEnter})
+	for i := 0; i < 500; i++ {
+		r.add(t0.Add(time.Duration(i)*time.Millisecond), "spinner.TickMsg", struct{}{})
+	}
+	r.add(t0, "tea.KeyMsg", tea.KeyMsg{Type: tea.KeyEnter})
+	recs := r.records()
+	if len(recs) != 3 || recs[1].n != 500 || recs[0].info != "enter" {
+		t.Fatalf("records = %+v", recs)
+	}
+	if !strings.Contains(r.jsonl(), `"n":500`) {
+		t.Errorf("jsonl lacks the count:\n%s", r.jsonl())
+	}
+}
+
+// tmux marks line-drawing cells with SO/SI; the text rows drop them.
+func TestPlainRowDropsControls(t *testing.T) {
+	if got := plainRow("\x0f\x1b[1m› /repaint\x1b[0m\x0e"); got != "› /repaint" {
+		t.Errorf("plainRow = %q", got)
+	}
+}

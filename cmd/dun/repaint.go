@@ -219,7 +219,7 @@ func (m tuiModel) capture(now time.Time) (string, error) {
 	exp := m.expectedRows()
 	expTxt := make([]string, len(exp))
 	for i, r := range exp {
-		expTxt[i] = ansi.Strip(r)
+		expTxt[i] = plainRow(r)
 	}
 	files := map[string]string{
 		"expected.ansi": strings.Join(exp, "\n") + "\n",
@@ -238,7 +238,7 @@ func (m tuiModel) capture(now time.Time) (string, error) {
 		act := strings.Split(strings.TrimSuffix(string(a), "\n"), "\n")
 		actTxt := make([]string, len(act))
 		for i, r := range act {
-			actTxt[i] = ansi.Strip(r)
+			actTxt[i] = plainRow(r)
 		}
 		files["actual.ansi"] = strings.Join(act, "\n") + "\n"
 		files["actual.txt"] = strings.Join(actTxt, "\n") + "\n"
@@ -269,7 +269,8 @@ actual.ansi    not available: outside tmux there is no way to read it back)
 diff.txt       the rows where expected and actual differ, both versions
 state.json     sizes (dun, the tty, tmux), terminal env, mouse mode, layout
                numbers, the scroll region, focus, open pickers, holds, the
-               dun version and the session id
+               dun version and the session id (taken as /repaint runs, so
+               the composer has already been cleared)
 events.jsonl   the last 200 messages the TUI handled, oldest first: time,
                kind and a short summary (at most 80 characters of text)
 
@@ -284,6 +285,24 @@ explanation.md what the model thinks went wrong
 
 Nothing here is sent anywhere unless you send it.
 `
+
+// plainRow is a screen row as text: no escape codes, and no other control
+// bytes. tmux marks line-drawing cells with SO/SI (ESC ( 0 written to the
+// pane does it), which ansi.Strip keeps.
+func plainRow(s string) string {
+	s = ansi.Strip(s)
+	if strings.IndexFunc(s, isControl) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isControl(r rune) bool { return r < 0x20 && r != '\t' || r == 0x7f }
 
 // diffRows compares two screens row by row (trailing blanks ignored) and
 // lists the rows that differ, both versions.
@@ -446,6 +465,10 @@ const evlogSize = 200
 
 // eventRing is the last evlogSize messages Update saw. A fixed array written
 // in place: recording one costs the summary string and nothing else.
+//
+// A run of the same message with nothing to say (spinner and cursor ticks,
+// ten a second) is one record with a count: measured live, the ticks alone
+// filled all 200 entries in about ten seconds.
 type eventRing struct {
 	buf  [evlogSize]evRec
 	next int // where the next one goes
@@ -454,6 +477,8 @@ type eventRing struct {
 
 type evRec struct {
 	at   time.Time
+	last time.Time // the last of a run (n > 1)
+	n    int       // how many in the run
 	kind string
 	info string
 }
@@ -465,7 +490,12 @@ func (r *eventRing) add(at time.Time, kind string, msg tea.Msg) {
 	if r == nil {
 		return
 	}
-	r.buf[r.next] = evRec{at: at, kind: kind, info: msgSummary(msg)}
+	info := msgSummary(msg)
+	if prev := &r.buf[(r.next-1+evlogSize)%evlogSize]; r.n > 0 && info == "" && prev.info == "" && prev.kind == kind {
+		prev.last, prev.n = at, prev.n+1
+		return
+	}
+	r.buf[r.next] = evRec{at: at, n: 1, kind: kind, info: info}
 	r.next = (r.next + 1) % evlogSize
 	if r.n < evlogSize {
 		r.n++
@@ -488,11 +518,17 @@ func (r *eventRing) records() []evRec {
 func (r *eventRing) jsonl() string {
 	var b strings.Builder
 	for _, e := range r.records() {
-		line, _ := json.Marshal(struct {
-			T    string `json:"t"`
-			Kind string `json:"kind"`
-			Info string `json:"info,omitempty"`
-		}{e.at.Format("15:04:05.000"), e.kind, e.info})
+		rec := struct {
+			T     string `json:"t"`
+			Kind  string `json:"kind"`
+			Info  string `json:"info,omitempty"`
+			N     int    `json:"n,omitempty"`     // a run of n
+			Until string `json:"until,omitempty"` // the run's last
+		}{T: e.at.Format("15:04:05.000"), Kind: e.kind, Info: e.info}
+		if e.n > 1 {
+			rec.N, rec.Until = e.n, e.last.Format("15:04:05.000")
+		}
+		line, _ := json.Marshal(rec)
 		b.Write(line)
 		b.WriteByte('\n')
 	}

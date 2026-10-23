@@ -400,8 +400,12 @@ func finishReport(dir string, r redactor) (reportResult, error) {
 		}
 		if strings.HasSuffix(name, ".ansi") {
 			res.widths = append(res.widths, widthChanges(name, string(before), body)...)
-			txt := ansi.Strip(body)
-			screens[name] = strings.Split(strings.TrimSuffix(txt, "\n"), "\n")
+			rows := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+			for i, r := range rows {
+				rows[i] = plainRow(r)
+			}
+			screens[name] = rows
+			txt := strings.Join(rows, "\n") + "\n"
 			if err := write(strings.TrimSuffix(name, ".ansi")+".txt", txt); err != nil {
 				return res, err
 			}
