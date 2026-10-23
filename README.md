@@ -202,6 +202,19 @@ DUN_LLM_KEY=... dun --workspace ./my-project "find the greet function and explai
 echo '{"type":"user","content":"..."}' | dun -p --workspace ./my-project
 ```
 
+**TUI keys.** The screen has three focus zones: the composer, the
+conversation, and the activity strip (agents and background jobs, shown only
+when there are any).
+
+| key | does |
+|---|---|
+| tab / shift+tab | move between zones — the only keys that do. In the `/` palette tab completes first. The activity zone is skipped when it has nothing in it; a finished or failed job keeps it reachable. |
+| ← → ↑ ↓ | act inside the focused zone only (cursor, select, open/close a block, scroll). At an edge they stop. → on an empty composer accepts the suggestion; ← leaves an agent's view. |
+| ctrl+tab | type a literal tab in the composer. Needs a terminal that answers dun's kitty keyboard protocol probe (kitty, ghostty, wezterm, foot; dun then also asks for xterm modifyOtherKeys) and so reports ctrl+tab as its own key. Any other terminal sends plain tab for ctrl+tab, and that cannot be told apart. Through tmux and in the browser (`dun -serve`, where the browser keeps ctrl+tab) it is not verified / not available. A pasted tab is always kept. |
+| alt+enter / shift+enter / ctrl+j | newline in the composer |
+| esc | one level out: a search, a box, the conversation's selection, the activity zone (back to the composer), an agent's view, then interrupt a running turn |
+| → / enter on a job | the job view: the command on top (open; enter/→/← shut and open it), the log under it as a tail that follows while the job runs. ↑/↓ pgup/pgdn g/G scroll, `/` `?` search, `n`/`N` step, ← or esc back. `x` on a job row kills it. |
+
 The engine speaks a small JSON event protocol (`-p`): out `ready`/`token`/
 `tool_call`/`tool_result`/`message`/`usage`/`done`/`error` + `ask`/`notification`/
 `retry`/`queued`; in `{"type":"user",...}` / `{"type":"answer","value":...}` /

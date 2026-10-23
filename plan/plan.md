@@ -179,6 +179,10 @@ not caught on a real terminal)
 vision / non-vision provider; image tokens are not counted in the context
 estimate)
 
+### ✅ 32. Focus by tab only; ctrl+tab types a tab; the job view — done
+2026-10-23, see done.md (open: not run live in a real terminal; ctrl+tab
+only where the kitty probe succeeds)
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has

@@ -2149,3 +2149,53 @@ with a vision→text fallback.
 - **Not verified:** a real clipboard (Wayland/X11), a real vision provider,
   a real refusal body from a provider.
 - Out of scope → icebox: `img_read` tool; mobile image upload.
+
+## ✅ 32. Focus by tab only; ctrl+tab types a tab; the job view (USER, 2026-10-23)
+
+USER: "the movement between panes is incredibly obnoxious … arrow key back
+shouldn't go between the focus groups. it should be tab, and ctrl+tab should
+be the insert raw tab … job display should have the similar to multistep
+tool+think". Commits `1967864` (focus), `38fc768` (ctrl+tab), `cadb19e`
+(job view).
+
+- **Arrows never change the zone.** Removed: ← at the composer's front →
+  convo; → on a convo block with nothing to descend → composer; ← in convo
+  with nothing to ascend → next zone; ← in the activity table → fold, then
+  composer. At every edge the arrow is a no-op. Kept: → on an empty
+  composer accepts the suggestion; ← leaves an agent's scope (from the
+  composer's front, the convo, and now the strip); ↑/↓ at the composer's
+  first/last row still scroll the conversation (not a zone move). esc
+  unchanged: from convo or activity it still goes home to the composer.
+- **Activity zone:** focusing it opens the table with ➤ on a row (was: the
+  collapsed line, first → only unfolded); leaving folds it. Skipped by tab
+  when `actRows()` is empty; finished/failed/killed jobs stay listed, so
+  they keep it reachable.
+- **ctrl+tab** (`keyfilter.go`): CSI 9;5u (kitty) and CSI 27;5;9~
+  (modifyOtherKeys) → `ctrlTabRune` U+FDD0 → `cleanInput` makes it `\t`.
+  bubbletea v1 swallowed both. Also CSI 9;2u / CSI 27;2;9~ → CSI Z: under
+  the kitty protocol shift+tab was swallowed too. Legacy terminals send TAB
+  for ctrl+tab — indistinguishable; dun only gets the CSI forms when the
+  kitty probe succeeds (`kittyAppMark` is sent only then).
+- **Pasted tabs** already worked: bracketed paste keeps `\t`, `cleanInput`
+  keeps it, the layout draws it to 4-col stops. Now pinned by tests (incl.
+  through bubbletea's real parser).
+- **Job view** (`jobview.go`, replaces the inspector for jobs): convo-pane
+  view like the pager; command item on top (open by default; long ones
+  open to "command" + wrapped body, capped at a third of the pane), output
+  tail panel (follows while running; ↑ at its top selects the command;
+  pgup/pgdn g/G wheel; / ? n N search, less's start rule; esc clears a
+  search, then leaves). Log read incrementally from `jobRow.log` every
+  500ms (gen-tagged timer), last 256 KB, ANSI stripped, last `\r` wins,
+  tabs to 8. `jobDetail` removed.
+- **Tests changed** (intended behaviour change): `TestTUI_ArrowNav`,
+  `TestTUI_RightDescendsAFoldedBlock`, `TestTUI_RightStopsWhereTheBlockEnds`,
+  `TestYank`, `TestTUI_XKillsSelectedJobAfterConfirm`,
+  `enterAgentScopeByKeys`/`TestActivity_LeavingAgentScope`; replaced:
+  `TestMultilineInput_LeftAtFrontHopsToConvo` → `…StaysInInput`,
+  `TestActivity_RightDescendsLeftAscends` → `…TabOpensTheTableWithAHighlight`,
+  `TestActivity_LeftWalksBackThroughTheZones` →
+  `TestFocus_ArrowsStopAtEveryEdge`, `TestActivity_LeftWrapsHomeWithNoActivity`
+  → `TestActivity_OnlyDeadJobsIsStillReachable`,
+  `TestLeftFromInputSelectsTheNewest` → `TestTabFromInputSelectsTheNewest`.
+- **Not verified:** not run live in a terminal; ctrl+tab not tried on a
+  real kitty/ghostty/tmux; the job view not watched on a real running job.
