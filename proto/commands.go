@@ -16,8 +16,19 @@ func init() {
 }
 
 // User is a message from the human. Mid-turn, it is queued (see Queued).
+// Images are files on the engine's machine attached to it; each one's Label
+// stands for it in Content, so a client that cannot show images still reads
+// where it was.
 type User struct {
-	Content string `json:"content"`
+	Content string  `json:"content"`
+	Images  []Image `json:"images,omitempty"`
+}
+
+// Image is one image attached to a user message: a file the engine reads,
+// and the text that stands for it in the message ("[image 1: a.png 640×480]").
+type Image struct {
+	Path  string `json:"path"`
+	Label string `json:"label"`
 }
 
 // Answer replies to the open ask or mount.

@@ -30,6 +30,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `control` | Control action done (`/docker`, `/prompt`) | `id`, `action`, `message` |
 | `compaction` | Context compacted | `text` |
 | `exit` | Engine leaving voluntarily | `reason` |
+| `image_refused` | A message with images not sent (no vision, no `vision_model`; or an unreadable image) | `message`, `content`, `images[]` — the client puts the message back in the composer; `done` follows |
 
 ### Token Streaming
 
@@ -59,7 +60,7 @@ When the user types while a turn is running, the engine buffers the message
 
 | Type | Purpose | Fields |
 |------|---------|--------|
-| `user` | Send a message | `content` |
+| `user` | Send a message | `content`, `images[]` (optional: `{path, label}` — a file on the engine's machine and the text in `content` that stands for it) |
 | `answer` | Respond to `ask_user` | `value` |
 | `server` | Control a server (`/raglit`, `/poly-lsp`) | `id`, `action` (`status`/`on`/`off`/`auto`/`manual`) |
 | `reset` | Clear the session store | — |

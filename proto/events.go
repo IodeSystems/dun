@@ -42,6 +42,7 @@ func init() {
 	event[Suggestions]("suggestions")
 	event[Exit]("exit")
 	event[UserEcho]("user")
+	event[ImageRefused]("image_refused")
 	event[Turn]("turn")
 	event[Answered]("answered")
 	event[Settings]("settings")
@@ -499,6 +500,16 @@ type Exit struct {
 type UserEcho struct {
 	Content string `json:"content"`
 	Queued  bool   `json:"queued,omitempty"`
+}
+
+// ImageRefused: a user message with images was not sent, because the model
+// cannot read images and no vision model is configured to describe them.
+// Content and Images are the message as the client sent it, so the client
+// can put it back in the composer; Message says why and what to configure.
+type ImageRefused struct {
+	Message string  `json:"message"`
+	Content string  `json:"content"`
+	Images  []Image `json:"images,omitempty"`
 }
 
 // Turn: a turn started. Kind is "user" (a message started it) or "continue"
