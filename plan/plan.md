@@ -121,6 +121,30 @@ full detail archived in `done.md`.
 
 ### ◻ 20. Shared raglit indexes: watch a directory, attach it to a session (USER, 2026-10-22)
 
+- **Checkpoint 2026-10-23 (reboot):** no code written yet, no live check. raglit
+  HEAD 9af06d1 has A, B and D (MCP ingest paths[] + forget). `raglit` on PATH
+  (~/go/bin, self-rebuilds from raglit's working tree — running it ran npm
+  build there) reported 9af06d1 dirty; daemon 293c295 (older by 24h). For the
+  live check build from `git archive HEAD` into scratch, not the working tree.
+  Design read from code, to build next:
+  - selector: raglit expands "all"/"" only as the whole selector
+    (namespace.go nsReadSelector); a token "all" becomes `<own>__all`. So with
+    attachments dun sends `<own>:*,<proj:idx>,…`. Loses the config's `shared`
+    namespaces when something is attached (risk; ask raglit for an "all" token).
+  - storage: `Attach []string` on ServerSpec (mcp.json / dun.local.json) and
+    SessionServer (.mcp.json sidecar); union of the three scopes; add to
+    mergeSpec, switchesOnly, SessionServer.empty. Bare `idx` stored as
+    `<this project>:idx`.
+  - search: wrap dispatch for raglit read tools with an `index` param
+    (toolTakes) and empty index; surfacer: ragnotify.Opts.ExtraArgs index +
+    docsBodyFetcher index (rebuilt on spec change via reloadServers→applyTools);
+    append attached list to the search tool's description.
+  - routing: routeSlash lowercases server args — route raglit
+    watch|attach|detach|index to a control id with args as typed, run detached.
+  - next: implement, tests, then the live check (also confirm for the parent:
+    skills/rules/memory go through MCP ingest, no `raglit ingest` CLI runs; an
+    ingested file is searchable once the queue drains; nothing assumes `--now`).
+
 USER's goal: index a directory once, and let many sessions use it. raglit's
 daemon is shared, so one index serves every session that attaches it; raglit's
 watcher keeps it fresh, and dun only reads it.
