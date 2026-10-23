@@ -595,15 +595,15 @@ func (h *Harness) rebuildTools() {
 	// docs server, so the preparer is never nil.
 	var docs agent.NotificationPreparer
 	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil {
-		// MinScore 0: raglit's search is BM25, whose scores aren't in a fixed
-		// range (tiny for a small index) — but a MATCH only returns matching
-		// rows, so any hit is a real lexical hit. What surfaces is decided by
-		// a margin over the runner-up instead (see docsPreparer): one
-		// document per pass, inlined when short.
+		// MinScore 0: raglit's score is BM25 or a rank fusion (hybrid), in
+		// no fixed range. What surfaces is decided by the hit's similarity
+		// or query-word coverage instead (see docsPreparer): one document
+		// per group and pass, inlined when short.
 		group := sf.group(searchers[0].ID, docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc))
 		home, _ := os.UserHomeDir()
 		src := &hitSources{index: sf.idx.get, attached: sf.attached,
-			display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) }}
+			display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) },
+			meta:    sf.idx.metaOf, meaning: sf.meaning}
 		docs = docsPreparer(h.store, sf.finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
 			sf.fetch, group, h.skillForDoc, src, cfg.OnDocs)
 	}

@@ -39,7 +39,7 @@
     }
   },
   "roles": {
-    "search": {"tool": "search", "get": "get_document"},
+    "search": {"tool": "search", "get": "get_document", "list": "list_indexes"},
     "index": {"tool": "ingest", "forget": "forget", "cli": "raglit"}
   },
   "hooks": ["turn.before", "workspace.open", "memory.save", "skills.changed", "rules.changed", "mcp.docs"]

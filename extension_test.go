@@ -178,6 +178,97 @@ func fakeIndexMCP(t *testing.T, calls *[]string, mu *sync.Mutex) *httptest.Serve
 	return ts
 }
 
+// fakeSearchMCP is a raglit-shaped server for the proactive search: search
+// answers hits, list_indexes the indexes and whether each has embeddings.
+// It counts the list calls.
+func fakeSearchMCP(t *testing.T, hits, indexes string, lists *int, mu *sync.Mutex) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &msg)
+		if len(msg.ID) == 0 {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		obj := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}}
+		var result any = map[string]any{}
+		switch msg.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{
+				{"name": "search", "inputSchema": obj}, {"name": "get_document", "inputSchema": obj},
+				{"name": "list_indexes", "inputSchema": obj}}}
+		case "tools/call":
+			text := "{}"
+			switch msg.Params.Name {
+			case "search":
+				text = hits
+			case "list_indexes":
+				mu.Lock()
+				*lists++
+				mu.Unlock()
+				text = indexes
+			}
+			result = map[string]any{"content": []map[string]any{{"type": "text", "text": text}}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		out, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result})
+		fmt.Fprint(w, string(out))
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// Through the real wiring: the index list is read once per server start,
+// and decides the rule — coverage for the index without embeddings, the
+// similarity floor for the one with.
+func TestSurfacer_IndexMeaningPerServerStart(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	var lists int
+	var mu sync.Mutex
+	ws := t.TempDir()
+	hits := `{"hits":[
+		{"index":"plain","doc_id":"` + ws + `/plain.md","title":"plain.md","score":2e-5,"matched_terms":["deploy","gate"],"query_terms":3},
+		{"index":"main","doc_id":"` + ws + `/weak.go","title":"weak.go","score":0.03,"similarity":0.5,"matched_terms":["deploy","gate","check"],"query_terms":3}]}`
+	indexes := `{"indexes":[{"name":"plain","meaning":false},{"name":"main","meaning":true}]}`
+	ts := fakeSearchMCP(t, hits, indexes, &lists, &mu)
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{{ID: ServerDocs, URL: ts.URL, Timeout: 10}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	ctx := context.Background()
+	if err := h.StartServer(ctx, ServerDocs); err != nil {
+		t.Fatal(err)
+	}
+	got := surfaceOnce(t, h, "what does the deploy gate check")
+	if !strings.Contains(got, "plain.md") || !strings.Contains(got, "only candidate · 2/3 terms") || strings.Contains(got, "weak.go") {
+		t.Errorf("want plain.md by coverage and not weak.go (under the floor): %q", got)
+	}
+	surfaceOnce(t, h, "and the deploy gate again")
+	count := func() int { mu.Lock(); defer mu.Unlock(); return lists }
+	if count() != 1 {
+		t.Errorf("the list is read once per server start: %d reads", count())
+	}
+	if err := h.StopServer(ServerDocs); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.StartServer(ctx, ServerDocs); err != nil {
+		t.Fatal(err)
+	}
+	surfaceOnce(t, h, "the deploy gate after a restart")
+	if count() != 2 {
+		t.Errorf("a restart reads the list again: %d reads", count())
+	}
+}
+
 // When the index tool takes `paths` and a forget tool exists, documents go
 // through MCP; raglit's ingest does not (one url), so it uses the CLI.
 func TestIndexSink_MCPWhenTheToolTakesPathsElseTheCLI(t *testing.T) {

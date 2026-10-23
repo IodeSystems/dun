@@ -1039,6 +1039,31 @@ func TestTUI_DocsSourceAndWhy(t *testing.T) {
 	}
 }
 
+// The why of the similarity rule shows as sent, and a lone candidate is
+// still marked on the collapsed row.
+func TestTUI_DocsSimilarityWhy(t *testing.T) {
+	d := docsFromEvent(evMsg{
+		"type": "notification", "kind": "docs", "found": float64(4), "surfaced": float64(2),
+		"docs": []any{
+			map[string]any{"title": "loopguard.go", "score": 0.03, "kind": "doc", "candidates": float64(4),
+				"similarity": 0.746, "matched_terms": float64(8), "query_terms": float64(8), "runner_up_sim": 0.696,
+				"source": "doc · loopguard.go · index dun-main", "why": "sim 0.75 · 8/8 terms · +0.05 over runner-up (of 4)"},
+			map[string]any{"title": "skill pdf", "score": 0.03, "kind": "skill", "candidates": float64(1),
+				"source": "skill · ~/.claude/skills/pdf/SKILL.md · index skills", "why": "only candidate · sim 0.75 · 4/4 terms"},
+		},
+	})
+	open := d.render(true)
+	for _, want := range []string{"(sim 0.75 · 8/8 terms · +0.05 over runner-up (of 4))", "(only candidate · sim 0.75 · 4/4 terms)",
+		"loopguard.go · index dun-main"} {
+		if !strings.Contains(open, want) {
+			t.Errorf("expanded block lacks %q:\n%s", want, open)
+		}
+	}
+	if c := d.render(false); !strings.Contains(c, "skill pdf (only candidate)") {
+		t.Errorf("collapsed row should mark the lone candidate: %s", c)
+	}
+}
+
 // An older engine sends no source, why or kind: the block still renders,
 // with the raw score readable and no empty source line.
 func TestTUI_DocsOlderEvent(t *testing.T) {

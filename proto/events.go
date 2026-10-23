@@ -283,8 +283,17 @@ type DocHit struct {
 	Root       string  `json:"root,omitempty"`  // a skill's root
 	Candidates int     `json:"candidates,omitempty"`
 	RunnerUp   float64 `json:"runner_up,omitempty"`
-	Source     string  `json:"source,omitempty"` // the above on one line, for display
-	Why        string  `json:"why,omitempty"`    // "only candidate · score …" or "N× the runner-up (of K) · score …"
+	// What the surfacing rule read; absent from an engine before the
+	// similarity floor, or for a raglit before e66a3df.
+	Similarity  float64 `json:"similarity,omitempty"`    // the hit's cosine
+	Matched     int     `json:"matched_terms,omitempty"` // query words it holds
+	QueryTerms  int     `json:"query_terms,omitempty"`   // of this many
+	RunnerUpSim float64 `json:"runner_up_sim,omitempty"` // the runner-up's cosine
+	Source      string  `json:"source,omitempty"`        // the above on one line, for display
+	// "sim 0.71 · 3/4 terms · +0.07 over runner-up (of 4)", "only candidate ·
+	// sim 0.66 · 2/3 terms"; from an older engine "only candidate · score …"
+	// or "N× the runner-up (of K) · score …"
+	Why string `json:"why,omitempty"`
 }
 
 // Recap is a span of the conversation rewritten shorter.

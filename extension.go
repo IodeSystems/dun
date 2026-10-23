@@ -45,9 +45,13 @@ import (
 //	             or a run of roles.index.cli, with {{arg}}, {{paths}},
 //	             {{path}}, {{index}}, {{project}} filled in (extcmd.go)
 //	roles        lookups dun makes on demand:
-//	               search {tool, get}: tool takes {"query"} and answers hits
-//	                 (raglit's shape); get takes {"path", "max_chars"} and
-//	                 answers {"text", "truncated"}, to inline a short hit.
+//	               search {tool, get, list}: tool takes {"query"} and answers
+//	                 hits (raglit's shape); get takes {"path", "max_chars"}
+//	                 and answers {"text", "truncated"}, to inline a short
+//	                 hit; list takes {} and answers {"indexes": [{"name",
+//	                 "meaning"}]}: which indexes search by meaning, so a
+//	                 proactive hit is judged by its similarity or by the
+//	                 query words it holds (docsPreparer).
 //	                 When tool takes an "index", /<slash> attach|detach
 //	                 adds other projects' indexes to it (attach.go)
 //	               index {tool, forget, cli}: where documents go — see
@@ -146,10 +150,12 @@ type ExtRoles struct {
 	Index  *IndexRole  `json:"index,omitempty"`
 }
 
-// SearchRole names the search tool and, optionally, the document reader.
+// SearchRole names the search tool and, optionally, the document reader
+// and the index list.
 type SearchRole struct {
 	Tool string `json:"tool"`
 	Get  string `json:"get,omitempty"`
+	List string `json:"list,omitempty"`
 }
 
 // IndexRole is where documents go. Tool and Forget are MCP tools taking
@@ -640,7 +646,14 @@ type surfacer struct {
 	fetch  docBodyFunc
 	from   func(docID string) string // the extension a hit came from
 	idx    *hitIndexes               // the index each hit came from
+	means  *indexMeaning             // which indexes search by meaning
 	sel    map[string]string         // each extension's attached-index selector
+}
+
+// meaning reports whether a hit's index searches by meaning; known is false
+// when its extension's index list does not name it.
+func (s *surfacer) meaning(docID string) (meaning, known bool) {
+	return s.means.of(s.from(docID), s.idx.get(docID))
 }
 
 // attached reports whether index is one of the attached indexes of an
@@ -658,20 +671,28 @@ func (s *surfacer) attached(index string) bool {
 	return false
 }
 
-// hitIndexes remembers the index each surfaced hit came from: raglit tags
-// every hit with its index, and agent.DocHit has no field for it.
+// hitIndexes remembers the index each surfaced hit came from, and what
+// raglit measured about it in the latest search (hitMeta): raglit tags every
+// hit with both, and agent.DocHit has no field for them.
 type hitIndexes struct {
-	mu sync.Mutex
-	m  map[string]string
+	mu   sync.Mutex
+	m    map[string]string
+	meta map[string]hitMeta
 }
 
-// note records the indexes of a search result's hits. Hits are best first,
-// so a document in two indexes keeps the index of its best hit.
-func (x *hitIndexes) note(raw string) {
+// note records the indexes and measures of a search result's hits, and
+// returns the indexes named. Hits are best first, so a document in two
+// indexes keeps the index of its best hit. A document's measures are its
+// fragments' best: the highest similarity, the most query words. A hit with
+// no query_terms is from a raglit older than e66a3df and has none.
+func (x *hitIndexes) note(raw string) []string {
 	type hit struct {
-		DocID string `json:"doc_id"`
-		ID    string `json:"id"`
-		Index string `json:"index"`
+		DocID        string   `json:"doc_id"`
+		ID           string   `json:"id"`
+		Index        string   `json:"index"`
+		Similarity   *float64 `json:"similarity"`
+		MatchedTerms []string `json:"matched_terms"`
+		QueryTerms   *int     `json:"query_terms"`
 	}
 	var rows []hit
 	if s := strings.TrimSpace(raw); strings.HasPrefix(s, "[") {
@@ -685,16 +706,40 @@ func (x *hitIndexes) note(raw string) {
 	defer x.mu.Unlock()
 	if x.m == nil {
 		x.m = map[string]string{}
+		x.meta = map[string]hitMeta{}
 	}
 	done := map[string]bool{}
+	named := map[string]bool{}
+	var indexes []string
+	pass := map[string]hitMeta{}
 	for _, r := range rows {
 		id := firstNonEmptyStr(r.DocID, r.ID)
-		if id == "" || r.Index == "" || done[id] {
+		if id == "" {
+			continue
+		}
+		if r.QueryTerms != nil {
+			m := pass[id]
+			m.Terms = *r.QueryTerms
+			m.Matched = max(m.Matched, len(r.MatchedTerms))
+			if s := r.Similarity; s != nil && (!m.HasSim || *s > m.Sim) {
+				m.Sim, m.HasSim = *s, true
+			}
+			pass[id] = m
+		}
+		if r.Index != "" && !named[r.Index] {
+			named[r.Index] = true
+			indexes = append(indexes, r.Index)
+		}
+		if r.Index == "" || done[id] {
 			continue
 		}
 		done[id] = true
 		x.m[id] = r.Index
 	}
+	for id, m := range pass {
+		x.meta[id] = m
+	}
+	return indexes
 }
 
 func (x *hitIndexes) get(docID string) string {
@@ -703,16 +748,103 @@ func (x *hitIndexes) get(docID string) string {
 	return x.m[docID]
 }
 
+// metaOf is a document's measures from the latest search that returned it;
+// ok is false when raglit gave none.
+func (x *hitIndexes) metaOf(docID string) (hitMeta, bool) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	m, ok := x.meta[docID]
+	return m, ok
+}
+
+// indexMeaning is which indexes search by meaning (have embeddings), read
+// from each extension's list role (raglit's list_indexes, `meaning`). It is
+// read once per surfacer — a new surfacer is built when a server restarts or
+// the attach set changes (applyTools) — and once more for an index the list
+// did not name. An index it does not know is left to docsPreparer.
+type indexMeaning struct {
+	mu    sync.Mutex
+	known map[string]map[string]bool // extension → index → meaning
+	asked map[string]bool            // extension, and extension+index after a miss
+}
+
+// load reads ext's index list when it has not, or when one of indexes is
+// not in it and has not been asked about. Fails open: an index it cannot
+// read stays unknown.
+func (x *indexMeaning) load(ctx context.Context, mgr *mcpmgr.Manager, ext, tool string, indexes []string) {
+	if x == nil || tool == "" {
+		return
+	}
+	x.mu.Lock()
+	if x.known == nil {
+		x.known, x.asked = map[string]map[string]bool{}, map[string]bool{}
+	}
+	ask := !x.asked[ext]
+	x.asked[ext] = true
+	for _, ix := range indexes {
+		if _, ok := x.known[ext][ix]; !ok && !x.asked[ext+"\x00"+ix] {
+			x.asked[ext+"\x00"+ix] = true
+			ask = true
+		}
+	}
+	x.mu.Unlock()
+	if !ask {
+		return
+	}
+	raw, err := mgr.CallTool(ctx, ext, tool, map[string]any{})
+	if err != nil {
+		return
+	}
+	type row struct {
+		Name    string `json:"name"`
+		Meaning *bool  `json:"meaning"`
+	}
+	var rows []row
+	if s := strings.TrimSpace(raw); strings.HasPrefix(s, "[") {
+		_ = json.Unmarshal([]byte(s), &rows)
+	} else {
+		var wrap struct{ Indexes []row }
+		_ = json.Unmarshal([]byte(s), &wrap)
+		rows = wrap.Indexes
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.known[ext] == nil {
+		x.known[ext] = map[string]bool{}
+	}
+	for _, r := range rows {
+		if r.Name != "" && r.Meaning != nil {
+			x.known[ext][r.Name] = *r.Meaning
+		}
+	}
+}
+
+func (x *indexMeaning) of(ext, index string) (meaning, known bool) {
+	if x == nil {
+		return false, false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	meaning, known = x.known[ext][index]
+	return meaning, known
+}
+
 // indexedFinder is ragnotify's MCP finder that also records each hit's
-// index in idx.
+// index and measures in idx, and reads which of those indexes search by
+// meaning (list, the search role's list tool) into means.
 type indexedFinder struct {
 	mgr   *mcpmgr.Manager
 	id    string
 	tool  string
+	list  string
 	extra map[string]any
 	idx   *hitIndexes
+	means *indexMeaning
 }
 
+// Find searches without a mode: raglit then searches each index by meaning
+// and by words (hybrid) when it has embeddings, by words when not. An
+// explicit hybrid or vec skips every index without embeddings.
 func (f *indexedFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, error) {
 	args := map[string]any{"query": strings.Join(texts, "\n")}
 	for k, v := range f.extra {
@@ -722,7 +854,7 @@ func (f *indexedFinder) Find(ctx context.Context, texts []string) ([]agent.DocHi
 	if err != nil {
 		return nil, fmt.Errorf("surfacer: call %s: %w", f.tool, err)
 	}
-	f.idx.note(raw)
+	f.means.load(ctx, f.mgr, f.id, f.list, f.idx.note(raw))
 	return ragnotify.ParseHits(raw)
 }
 
@@ -734,6 +866,7 @@ func newSurfacer(mgr *mcpmgr.Manager, exts []Extension, sel map[string]string) *
 	finders := make([]agent.DocFinder, len(exts))
 	fetches := map[string]docBodyFunc{}
 	idx := &hitIndexes{}
+	means := &indexMeaning{}
 	for i, e := range exts {
 		var extra map[string]any
 		getIndex := ""
@@ -743,14 +876,15 @@ func newSurfacer(mgr *mcpmgr.Manager, exts []Extension, sel map[string]string) *
 				getIndex = s
 			}
 		}
-		finders[i] = &indexedFinder{mgr: mgr, id: e.ID, tool: e.Roles.Search.Tool, extra: extra, idx: idx}
+		finders[i] = &indexedFinder{mgr: mgr, id: e.ID, tool: e.Roles.Search.Tool, list: e.Roles.Search.List,
+			extra: extra, idx: idx, means: means}
 		if e.Roles.Search.Get != "" {
 			fetches[e.ID] = docsBodyFetcher(mgr, e.ID, e.Roles.Search.Get, getIndex)
 		}
 	}
 	if len(exts) == 1 {
 		id := exts[0].ID
-		return &surfacer{finder: finders[0], fetch: fetches[id], from: func(string) string { return id }, idx: idx, sel: sel}
+		return &surfacer{finder: finders[0], fetch: fetches[id], from: func(string) string { return id }, idx: idx, means: means, sel: sel}
 	}
 	m := &multiFinder{ids: make([]string, len(exts)), finders: finders, from: map[string]string{}}
 	for i, e := range exts {
@@ -762,7 +896,7 @@ func newSurfacer(mgr *mcpmgr.Manager, exts []Extension, sel map[string]string) *
 		}
 		return "", false
 	}
-	return &surfacer{finder: m, fetch: fetch, from: m.source, idx: idx, sel: sel}
+	return &surfacer{finder: m, fetch: fetch, from: m.source, idx: idx, means: means, sel: sel}
 }
 
 // multiFinder asks every finder and remembers which one answered each hit.

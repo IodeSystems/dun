@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -296,8 +297,9 @@ func TestDocsPreparer_RulesHit(t *testing.T) {
 	}
 }
 
-// Why reads at BM25's small scale (%.2f printed 0.00) and says whether a
-// margin was tested at all.
+// Why says whether a margin was tested at all, and what the rule read: the
+// similarity, the query words held and the lead over the runner-up. A hit
+// from an older raglit reads at BM25's small scale (%.2f printed 0.00).
 func TestDocHitInfo_Why(t *testing.T) {
 	for _, tc := range []struct {
 		d    DocHitInfo
@@ -306,6 +308,12 @@ func TestDocHitInfo_Why(t *testing.T) {
 		{DocHitInfo{Score: 1.234e-5, Candidates: 1}, "only candidate · score 1.2e-05"},
 		{DocHitInfo{Score: 3e-5, RunnerUp: 1e-5, Candidates: 4}, "3.0× the runner-up (of 4) · score 3e-05"},
 		{DocHitInfo{Score: 0.5}, "score 0.5"}, // an older engine: no candidates known
+		{DocHitInfo{Score: 0.03, Candidates: 4, Similarity: 0.712, Matched: 3, QueryTerms: 4, RunnerUpSim: 0.64},
+			"sim 0.71 · 3/4 terms · +0.07 over runner-up (of 4)"},
+		{DocHitInfo{Score: 0.03, Candidates: 1, Similarity: 0.66, Matched: 2, QueryTerms: 3}, "only candidate · sim 0.66 · 2/3 terms"},
+		{DocHitInfo{Score: 0.03, Candidates: 2, Similarity: 0.7, Matched: 0, QueryTerms: 3}, "sim 0.70 · 0/3 terms · runner-up has no sim (of 2)"},
+		{DocHitInfo{Score: 2e-5, Candidates: 1, Matched: 2, QueryTerms: 3}, "only candidate · 2/3 terms"}, // no embeddings
+		{DocHitInfo{Score: 2e-5, Candidates: 3, Matched: 2, QueryTerms: 3}, "2/3 terms · top of 3"},
 	} {
 		if got := tc.d.Why(); got != tc.want {
 			t.Errorf("Why(%+v) = %q, want %q", tc.d, got, tc.want)
@@ -429,4 +437,195 @@ func TestHitIndexes_Note(t *testing.T) {
 	if !s.attached("proja:handbook") || s.attached("projb:*") || s.attached("handbook") {
 		t.Error("attached: only the named indexes after the own wildcard")
 	}
+}
+
+// raglit's measures ride the raw hits: a document keeps its fragments' best
+// similarity and term count, and a hit with no query_terms (a raglit
+// before e66a3df) has no measures.
+func TestHitIndexes_NoteMeasures(t *testing.T) {
+	var x hitIndexes
+	got := x.note(`{"hits":[
+		{"index":"main","doc_id":"/a","score":0.03,"similarity":0.61,"matched_terms":["x"],"query_terms":3},
+		{"index":"main","doc_id":"/a","score":0.02,"similarity":0.72,"matched_terms":["x","y"],"query_terms":3},
+		{"index":"skills","doc_id":"/b","score":0.01,"matched_terms":[],"query_terms":3},
+		{"index":"old","doc_id":"/c","score":1e-5}]}`)
+	if strings.Join(got, ",") != "main,skills,old" {
+		t.Errorf("indexes named: %v", got)
+	}
+	if m, ok := x.metaOf("/a"); !ok || !m.HasSim || m.Sim != 0.72 || m.Matched != 2 || m.Terms != 3 {
+		t.Errorf("/a: %+v %v", m, ok)
+	}
+	if m, ok := x.metaOf("/b"); !ok || m.HasSim || m.Matched != 0 || m.Terms != 3 {
+		t.Errorf("/b (no similarity): %+v %v", m, ok)
+	}
+	if _, ok := x.metaOf("/c"); ok {
+		t.Error("/c is from an older raglit: no measures")
+	}
+}
+
+// metaSources serves raglit's measures to docsPreparer: a document's index
+// is its first path element ("/main/a" → "main"); meaning says which
+// indexes have embeddings (absent: the list does not name it).
+func metaSources(meta map[string]hitMeta, meaning map[string]bool) *hitSources {
+	index := func(id string) string { return strings.Split(strings.TrimPrefix(id, "/"), "/")[0] }
+	return &hitSources{
+		index: index,
+		meta:  func(id string) (hitMeta, bool) { m, ok := meta[id]; return m, ok },
+		meaning: func(id string) (bool, bool) {
+			m, ok := meaning[index(id)]
+			return m, ok
+		},
+	}
+}
+
+// surfaceWith runs one pass over hits and returns what surfaced.
+func surfaceWith(t *testing.T, hits fixedFinder, src *hitSources) []DocHitInfo {
+	t.Helper()
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	var notes []DocsNote
+	prep := docsPreparer(store, hits, agent.FinderOpts{}, nil, nil, nil, nil, nil, src,
+		func(n DocsNote) { notes = append(notes, n) })
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
+	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) == 0 {
+		return nil
+	}
+	es := store.docsEntries()
+	for _, d := range notes[0].Docs {
+		if len(es) != 1 || !strings.Contains(es[0], d.Why()) {
+			t.Errorf("the model's text must carry the why %q: %q", d.Why(), es)
+		}
+	}
+	return notes[0].Docs
+}
+
+// An index with embeddings: a lone candidate needs the floor, nothing more.
+func TestDocsPreparer_SimilarityFloor(t *testing.T) {
+	means := map[string]bool{"main": true}
+	hits := fixedFinder{{DocID: "/main/a", Title: "a", Score: 0.03}}
+	below := metaSources(map[string]hitMeta{"/main/a": {Sim: surfaceFloor - 0.01, HasSim: true, Matched: 3, Terms: 3}}, means)
+	if got := surfaceWith(t, hits, below); got != nil {
+		t.Errorf("a lone candidate under the floor surfaced: %+v", got)
+	}
+	sim := surfaceFloor + 0.01
+	above := metaSources(map[string]hitMeta{"/main/a": {Sim: sim, HasSim: true, Matched: 2, Terms: 3}}, means)
+	got := surfaceWith(t, hits, above)
+	if want := fmt.Sprintf("only candidate · sim %.2f · 2/3 terms", sim); len(got) != 1 || got[0].Why() != want {
+		t.Errorf("a lone candidate over the floor: %+v, want why %q", got, want)
+	}
+}
+
+// Two candidates: the top needs the floor AND surfaceDelta over the
+// runner-up's similarity. The order is by similarity, not by score (a
+// hybrid score is a rank fusion).
+func TestDocsPreparer_SimilarityDelta(t *testing.T) {
+	means := map[string]bool{"main": true}
+	top := surfaceFloor + 0.05
+	hits := fixedFinder{{DocID: "/main/b", Title: "b", Score: 0.033}, {DocID: "/main/a", Title: "a", Score: 0.03}}
+	near := metaSources(map[string]hitMeta{
+		"/main/a": {Sim: top, HasSim: true, Matched: 3, Terms: 4},
+		"/main/b": {Sim: top - surfaceDelta/2, HasSim: true, Matched: 4, Terms: 4},
+	}, means)
+	if got := surfaceWith(t, hits, near); got != nil {
+		t.Errorf("a lead under the delta surfaced: %+v", got)
+	}
+	runner := top - surfaceDelta - 0.02
+	clear := metaSources(map[string]hitMeta{
+		"/main/a": {Sim: top, HasSim: true, Matched: 3, Terms: 4},
+		"/main/b": {Sim: runner, HasSim: true, Matched: 4, Terms: 4},
+	}, means)
+	got := surfaceWith(t, hits, clear)
+	want := fmt.Sprintf("sim %.2f · 3/4 terms · +%.2f over runner-up (of 2)", top, top-runner)
+	if len(got) != 1 || got[0].DocID != "/main/a" || got[0].Why() != want || got[0].RunnerUpSim != runner {
+		t.Errorf("the higher similarity wins by the delta: %+v, want why %q", got, want)
+	}
+}
+
+// A hit the vector side did not rank has no similarity: it never surfaces
+// from an index with embeddings, however many words it holds; and as a
+// runner-up it sets no bar.
+func TestDocsPreparer_NoSimilarityNeverSurfaces(t *testing.T) {
+	means := map[string]bool{"main": true}
+	lone := fixedFinder{{DocID: "/main/a", Title: "a", Score: 0.03}}
+	if got := surfaceWith(t, lone, metaSources(map[string]hitMeta{"/main/a": {Matched: 4, Terms: 4}}, means)); got != nil {
+		t.Errorf("a hit with no similarity surfaced: %+v", got)
+	}
+	two := fixedFinder{{DocID: "/main/b", Title: "b", Score: 0.033}, {DocID: "/main/a", Title: "a", Score: 0.03}}
+	got := surfaceWith(t, two, metaSources(map[string]hitMeta{
+		"/main/a": {Sim: surfaceFloor, HasSim: true, Matched: 1, Terms: 4},
+		"/main/b": {Matched: 4, Terms: 4},
+	}, means))
+	if len(got) != 1 || got[0].DocID != "/main/a" || !strings.Contains(got[0].Why(), "runner-up has no sim (of 2)") {
+		t.Errorf("a runner-up with no similarity: %+v", got)
+	}
+}
+
+// An index without embeddings has no similarity: the top hit (by score)
+// needs coverageFloor of the query's words, and the score ratio over a
+// runner-up. An index the list does not name is judged by whether any of
+// its hits has a similarity.
+func TestDocsPreparer_CoverageWithoutEmbeddings(t *testing.T) {
+	means := map[string]bool{"plain": false}
+	hits := fixedFinder{{DocID: "/plain/a", Title: "a", Score: 3e-5}, {DocID: "/plain/b", Title: "b", Score: 1.5e-5}}
+	if got := surfaceWith(t, hits, metaSources(map[string]hitMeta{
+		"/plain/a": {Matched: 1, Terms: 3}, "/plain/b": {Matched: 3, Terms: 3}}, means)); got != nil {
+		t.Errorf("the top hit holds 1 of 3 words: %+v", got)
+	}
+	cover := metaSources(map[string]hitMeta{"/plain/a": {Matched: 2, Terms: 4}, "/plain/b": {Matched: 1, Terms: 4}}, means)
+	got := surfaceWith(t, hits, cover)
+	if len(got) != 1 || got[0].DocID != "/plain/a" || got[0].Why() != "2/4 terms · 2.0× the runner-up (of 2)" {
+		t.Errorf("2 of 4 words is the floor: %+v", got)
+	}
+	near := fixedFinder{{DocID: "/plain/a", Title: "a", Score: 2e-5}, {DocID: "/plain/b", Title: "b", Score: 1.9e-5}}
+	if got := surfaceWith(t, near, cover); got != nil {
+		t.Errorf("enough words but no margin over the runner-up: %+v", got)
+	}
+
+	// Not in the list: no similarity on any of its hits means no embeddings.
+	lone := fixedFinder{{DocID: "/other/a", Title: "a", Score: 2e-5}}
+	got = surfaceWith(t, lone, metaSources(map[string]hitMeta{"/other/a": {Matched: 3, Terms: 4}}, nil))
+	if len(got) != 1 || got[0].Why() != "only candidate · 3/4 terms" {
+		t.Errorf("an unlisted index with no similarity: coverage: %+v", got)
+	}
+	// ... and a similarity on one says it has them.
+	two := fixedFinder{{DocID: "/other/a", Title: "a", Score: 0.03}, {DocID: "/other/b", Title: "b", Score: 0.02}}
+	if got := surfaceWith(t, two, metaSources(map[string]hitMeta{
+		"/other/a": {Matched: 4, Terms: 4}, "/other/b": {Sim: surfaceFloor - 0.1, HasSim: true, Matched: 1, Terms: 4}}, nil)); got != nil {
+		t.Errorf("an unlisted index with a similarity: the similarity rule: %+v", got)
+	}
+}
+
+// The query is the newest user message, its first surfaceQueryWords words;
+// a later pass in the turn (no new user message) searches the newest entry.
+func TestDocsPreparer_QueryIsTheNewestMessageCapped(t *testing.T) {
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	var queries []string
+	finder := textsFinder(func(texts []string) { queries = append(queries, strings.Join(texts, "|")) })
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, nil, nil, nil, nil)
+
+	var long []string
+	for i := 0; i < surfaceQueryWords+30; i++ {
+		long = append(long, fmt.Sprintf("w%d", i))
+	}
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindAssistant, Content: "the reply to the last message", CreatedAt: 1})
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: strings.Join(long, "  \n"), CreatedAt: 2})
+	prep.PrepareNotifications(ctx, "s")
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindAssistant, Content: "now reading notify.go", CreatedAt: 3})
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindAssistant, Content: "", CreatedAt: 4})
+	prep.PrepareNotifications(ctx, "s")
+	want := []string{strings.Join(long[:surfaceQueryWords], " "), "now reading notify.go"}
+	if len(queries) != 2 || queries[0] != want[0] || queries[1] != want[1] {
+		t.Errorf("queries = %q, want %q", queries, want)
+	}
+}
+
+type textsFinder func([]string)
+
+func (f textsFinder) Find(_ context.Context, texts []string) ([]agent.DocHit, error) {
+	f(texts)
+	return nil, nil
 }

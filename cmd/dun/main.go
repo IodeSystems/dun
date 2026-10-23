@@ -1795,6 +1795,7 @@ func docsProto(docs []dun.DocHitInfo) []proto.DocHit {
 	for _, d := range docs {
 		out = append(out, proto.DocHit{Title: d.Title, ID: d.DocID, Line: d.Line, Score: d.Score, Inline: d.Inline,
 			Kind: d.Kind, Path: d.Path, Index: d.Index, Root: d.Root, Candidates: d.Candidates, RunnerUp: d.RunnerUp,
+			Similarity: d.Similarity, Matched: d.Matched, QueryTerms: d.QueryTerms, RunnerUpSim: d.RunnerUpSim,
 			Source: d.Source(), Why: d.Why()})
 	}
 	return out
