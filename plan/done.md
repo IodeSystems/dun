@@ -1361,3 +1361,54 @@ purge with confirm, status; MCP `ingest` paths; `watch DIR --index`).
 - **Assumptions:** `arg`/`description` in a user's manifest written in the
   one day since item 21 are rare enough to break (DisallowUnknownFields
   names the field); `help` holds the usage (`FILE|DIR... — …`).
+
+## ✅ 23. ask_user UI: no bounce, draft kept, edit an answer, multi used (USER, 2026-10-23)
+
+USER: "when asked a question and it goes away, we have bounce back", "text is
+not restored", "tab or right … should be allowed to edit that answer", and
+models never set `multi`. Commits `63db6f8` (bounce), `9071995` (draft),
+`a61c8e2` (edit), `2e54e38` (multi).
+
+- **Bounce — cause:** the picker is several rows, the composer one. On close
+  the convo pane grew by the difference; pinned to the bottom, every row moved
+  down (older rows appeared at the top); the `answered` row and the reply then
+  moved them back up. Seen in tmux: top row `line 11` → `line 8` → `line 11`.
+  **Fix** (`askpark.go` holdConvo): keep YOffset, set the pane to the new
+  height, and pad it with blank rows up to `yoff + height` (refresh,
+  `convoHold`); the next rows fill them. The hold ends when the content
+  reaches it, at a new width, on reset/session switch. Unpinned readers keep
+  their top row too (the Update funnel sees no height change).
+- **Draft:** `keepDraft` copies the whole composer (text, cursor, paste
+  tokens) when a question opens (or a parked one reopens); `dropAsk` gives
+  it back on every close: option, detail, custom, multi done, park,
+  interrupt, any turn end, engine restarting/stopped/gave up/gone, /model,
+  session switch. `saveUI` saves the kept draft, not a half-typed answer. A
+  turn that ends for any reason now closes and settles its question (was:
+  interrupt only).
+- **Edit:** tab / → on an option open the custom field holding what enter
+  would send (option + detail; multi: the checked options with the
+  highlighted one), cursor at the end; enter sends, esc back to the options.
+  Neither key had a binding on option rows (in the field they still edit).
+  Status line: `tab/→ edit`; while typing, `enter send · esc back`.
+- **Multi:** the description names "pick several" (include, fix, enable,
+  install, remove, test) beside "pick one". `recommended` is string |
+  string[] (anyOf); several only with multi; for multi a comma string whose
+  parts are all options is split. `AskFunc` takes `[]string`; event `ask`
+  adds `recommended_all`, keeps `recommended` = first (mobile reads it). The
+  TUI pre-checks every recommended option of a multi question.
+- **Tests:** `askpark_test.go` (no move on answer/park/scrolled back; draft
+  back for 8 endings + park/reopen; tab/→ edit, esc, detail, multi, custom
+  row; multi pre-check), `ask_test.go` (array/string cases, comma split,
+  description). `make test` passes.
+- **Live** (tmux `-L dunlive23`, scratch HOME + DUN_HOME, repo `proj23`, real
+  model local-Qwen3.8-27B): top convo row unchanged over 36 frames after
+  answering (full pane); "my draft text" with the caret 4 from the end came
+  back after a multi submit; → opened "green" in the field, esc returned, tab
+  + " but darker" sent "green but darker". Two prompts that list
+  non-exclusive items ("which of them to fix", "these CI checks … ask me")
+  got `multi=true` with 3 and 2 recommended, unprompted; "which color" stayed
+  single with one recommendation.
+- **Not done / known:** space does not toggle in multi (enter toggles, the
+  done row submits — as before). The mobile/web client shows only the first
+  recommendation and has no multi UI. Blank rows held under a collapsed
+  thinking block (holdHeight) were seen; they predate this.
