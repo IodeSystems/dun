@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -133,7 +134,7 @@ func TestAddServer_RemoteToolsAreNamespacedAndRemovable(t *testing.T) {
 	if out, _ := h.Session.Dispatch(ctx, tc); !strings.HasPrefix(out, "corp result") || !strings.Contains(out, "available: corp__search") {
 		t.Errorf("dispatch through the namespace: %q", out)
 	}
-	if err := h.RemoveServer("corp"); err != nil {
+	if _, err := h.RemoveServer("corp"); err != nil {
 		t.Fatal(err)
 	}
 	names = nil
@@ -145,5 +146,52 @@ func TestAddServer_RemoteToolsAreNamespacedAndRemovable(t *testing.T) {
 	}
 	if f, _ := readServersFile(UserServersFile()); f == nil || len(f.Servers) != 0 {
 		t.Errorf("remove must delete it from the user list: %+v", f)
+	}
+}
+
+// /mcp remove takes the server's entries in this project's state and this
+// session's sidecar with it, and leaves other servers and other projects.
+func TestRemoveServer_ClearsProjectAndSessionEntries(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ts := fakeMCP(t, "tok")
+	defer ts.Close()
+	repo, other := pruneRepo(t), pruneRepo(t)
+	h := newNoteHarness(t)
+	h.mgr, h.lastErr, h.lastStart = mcpmgr.NewManager(), map[string]string{}, map[string]time.Duration{}
+	defer h.mgr.Close()
+	h.Session = &agent.Session{}
+	h.cfg.Servers = []Server{}
+	h.cfg.Workspace = repo
+	h.cfg.SessionFile = filepath.Join(t.TempDir(), "s.jsonl")
+	ctx := context.Background()
+
+	if _, err := h.AddServer(ctx, ServerSpec{ID: "corp", URL: ts.URL, Bearer: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{repo, other} {
+		if _, err := updateLocalServer(d, "corp", func(s *ServerSpec) { s.Tools = map[string]bool{"search": false} }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := setAutostart(repo, "keep", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.SetServerOn(ctx, "corp", ScopeSession, boolp(true)); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := h.RemoveServer("corp")
+	if err != nil || len(cleared) != 2 {
+		t.Fatalf("cleared %v %v", cleared, err)
+	}
+	f, _ := readServersFile(filepath.Join(ResolveProject(repo).StateDir, LocalServersFile))
+	if f == nil || len(f.Servers) != 1 || f.Servers[0].ID != "keep" {
+		t.Errorf("this project's file: %+v", f)
+	}
+	f, _ = readServersFile(filepath.Join(ResolveProject(other).StateDir, LocalServersFile))
+	if f == nil || len(f.Servers) != 1 || f.Servers[0].ID != "corp" {
+		t.Errorf("another project's file must stay: %+v", f)
+	}
+	if sw := LoadSessionServers(h.cfg.SessionFile); len(sw) != 0 {
+		t.Errorf("session entries: %+v", sw)
 	}
 }

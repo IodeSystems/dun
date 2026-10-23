@@ -1393,8 +1393,8 @@ func TestTUI_ReadyHint(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
-		"hint": "docs off — /rag on to start it, /rag auto to start it every session"})
-	if !strings.Contains(convoText(m), "/rag auto") {
+		"hint": "docs off — /raglit on to start it, /raglit auto to start it every session"})
+	if !strings.Contains(convoText(m), "/raglit auto") {
 		t.Fatalf("ready hint not shown: %s", convoText(m))
 	}
 }

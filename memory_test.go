@@ -223,8 +223,8 @@ func TestRemember_ForksWithTheTurnsPrefixAndRunsOnlyMemory(t *testing.T) {
 
 func TestRemember_NeedsTheDocsIndex(t *testing.T) {
 	h := newNoteHarness(t)
-	if _, err := h.Remember(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "/rag on") {
-		t.Errorf("want a pointer to /rag on, got %v", err)
+	if _, err := h.Remember(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "/raglit on") {
+		t.Errorf("want a pointer to /raglit on, got %v", err)
 	}
 }
 

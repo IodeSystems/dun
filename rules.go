@@ -630,7 +630,7 @@ func (h *Harness) RulesStatus() string {
 			why = "no summary yet"
 		}
 		if saved == RulesIndex {
-			why = "the docs index is off (/rag on)"
+			why = "the docs index is off (/raglit on)"
 		}
 		fmt.Fprintf(&b, " (saved: %s, but %s)", saved, why)
 	}
@@ -687,7 +687,7 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 			return "", fmt.Errorf("the root rules import no files: there is nothing to index")
 		}
 		if h.mgr == nil || !h.mgr.ServerStarted(ServerDocs) {
-			return "", fmt.Errorf("index mode needs the docs index: /rag on first")
+			return "", fmt.Errorf("index mode needs the docs index: /raglit on first")
 		}
 	case RulesSummary:
 		if !set.importedText() {

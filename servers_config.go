@@ -790,6 +790,50 @@ func updateLocalServer(dir, id string, edit func(*ServerSpec)) (string, error) {
 	return path, nil
 }
 
+// removeLocalServer deletes id's entry (switches and tool switches) from
+// dir's project state file, and from the linked-worktree overlay's when dir
+// has one. It returns the files it changed. No project, or no entry, is none.
+func removeLocalServer(dir, id string) ([]string, error) {
+	p := ResolveProject(dir)
+	if p == nil {
+		return nil, nil
+	}
+	dirs := []string{p.StateDir}
+	if p.OverlayDir != "" {
+		dirs = append(dirs, p.OverlayDir)
+	}
+	var changed []string
+	for _, d := range dirs {
+		path := filepath.Join(d, LocalServersFile)
+		f, err := readServersFile(path)
+		if err != nil {
+			return changed, err
+		}
+		if f == nil {
+			continue
+		}
+		kept := f.Servers[:0]
+		for _, s := range f.Servers {
+			if s.ID != id {
+				kept = append(kept, s)
+			}
+		}
+		if len(kept) == len(f.Servers) {
+			continue
+		}
+		f.Servers = kept
+		b, err := json.MarshalIndent(f, "", "  ")
+		if err != nil {
+			return changed, fmt.Errorf("dun: encode %s: %w", path, err)
+		}
+		if err := writeFileAtomic(path, append(b, '\n'), 0o600); err != nil {
+			return changed, err
+		}
+		changed = append(changed, path)
+	}
+	return changed, nil
+}
+
 func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)

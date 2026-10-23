@@ -24,11 +24,11 @@ should still get a working dun. Turn them on per session, or once for good:
 
 | command | does |
 |---|---|
-| `/rag` · `/lsp` | status: on or off, which switch decided, and the command that changes each |
-| `/rag on` · `/lsp on` | on for this session (kept across a resume) |
-| `/rag off` · `/lsp off` | off for this session |
-| `/rag auto` · `/lsp auto` | on for this project, every session (= `on --project`) |
-| `/rag manual` · `/lsp manual` | off for this project (= `off --project`); it stops now |
+| `/raglit` · `/poly-lsp` | status: on or off, which switch decided, and the command that changes each |
+| `/raglit on` · `/poly-lsp on` | on for this session (kept across a resume) |
+| `/raglit off` · `/poly-lsp off` | off for this session |
+| `/raglit auto` · `/poly-lsp auto` | on for this project, every session (= `on --project`) |
+| `/raglit manual` · `/poly-lsp manual` | off for this project (= `off --project`); it stops now |
 
 **Every server has three switches** — global (`$DUN_HOME/mcp.json`, every
 workspace), project (`$DUN_HOME/projects/<id>/dun.local.json`) and session
@@ -58,7 +58,7 @@ automatically skipped: dependency, build and cache directories by name
 (`node_modules`, `.venv`, `dist`, `build`, `__pycache__`, `target` beside a
 `Cargo.toml`/`pom.xml`, ...), any directory whose files add up to more than
 5,000 or 200 MB (skipped whole, at the highest such directory — never the
-workspace root), files over 1 MB, and binary files. `/rag on`, the ready line
+workspace root), files over 1 MB, and binary files. `/raglit on`, the ready line
 and a bare `/rag` say what was skipped:
 
     docs: indexing 1,234 files · skipped node_modules/ (dependencies), data/ (12,345 files, 2.3 GB),

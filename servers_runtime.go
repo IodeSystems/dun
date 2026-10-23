@@ -794,14 +794,15 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 
 // RemoveServer stops a server /mcp add saved and deletes it from the user
 // server list. A server some other file declares is not this command's to
-// remove.
-func (h *Harness) RemoveServer(id string) error {
+// remove. Its entries in the current project's state and in this session's
+// sidecar go too, and are returned; other projects' files are not read.
+func (h *Harness) RemoveServer(id string) ([]string, error) {
 	ok, err := RemoveUserServer(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok {
-		return fmt.Errorf("no server %q in %s — a server from dun.json is removed there", id, UserServersFile())
+		return nil, fmt.Errorf("no server %q in %s — a server from dun.json is removed there", id, UserServersFile())
 	}
 	// Its stored login goes with it: a token for a server dun no longer
 	// knows is a secret with no owner.
@@ -809,12 +810,28 @@ func (h *Harness) RemoveServer(id string) error {
 	h.oauthMu.Lock()
 	delete(h.oauth, id)
 	h.oauthMu.Unlock()
+	cleared, err := removeLocalServer(h.configDir(), id)
+	if err != nil {
+		return cleared, fmt.Errorf("removed, but its project entry stays: %w", err)
+	}
+	h.srvMu.Lock()
+	_, inSession := h.sessSw[id]
+	h.srvMu.Unlock()
+	if inSession {
+		path, err := h.editSession(id, func(s *SessionServer) { *s = SessionServer{} })
+		if err != nil {
+			return cleared, fmt.Errorf("removed, but its session entry stays: %w", err)
+		}
+		if path != "" {
+			cleared = append(cleared, path)
+		}
+	}
 	if err := h.reloadServers(context.Background(), true, nil); err != nil {
-		return fmt.Errorf("removed, but %w", err)
+		return cleared, fmt.Errorf("removed, but %w", err)
 	}
 	if h.mgr.ServerStarted(id) { // a project file still defines it; removed is removed
 		h.mgr.StopServer(id)
 		h.applyTools()
 	}
-	return nil
+	return cleared, nil
 }

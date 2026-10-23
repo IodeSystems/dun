@@ -1,9 +1,9 @@
 {
-  "//": "Copy to dun.json (committed, describes the PROJECT) or .dun/dun.local.json (gitignored, describes THIS MACHINE). Both are optional; with neither, dun knows three servers — code=poly-lsp-mcp, shell=mcpshell, docs=raglit — and starts only shell. /rag auto and /lsp auto write the autostart flag below. Here autostart and via are the PROJECT switch's starting value: the project's own switch (/mcp on|off --project, saved under $DUN_HOME/projects/<id>/) overrides them, and a session's switch overrides that.",
+  "//": "Copy to dun.json (committed, describes the PROJECT) or .dun/dun.local.json (gitignored, describes THIS MACHINE). Both are optional; with neither, dun knows three servers — code=poly-lsp-mcp, shell=mcpshell, docs=raglit — and starts only shell. /raglit auto and /poly-lsp auto write the autostart flag below. Here autostart and via are the PROJECT switch's starting value: the project's own switch (/mcp on|off --project, saved under $DUN_HOME/projects/<id>/) overrides them, and a session's switch overrides that.",
 
   "servers": [
     {
-      "//": "Spawn a server at startup. code and docs are opt-in by default; this is what /lsp auto writes.",
+      "//": "Spawn a server at startup. code and docs are opt-in by default; this is what /poly-lsp auto writes.",
       "id": "code",
       "autostart": true
     },

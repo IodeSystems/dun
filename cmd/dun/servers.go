@@ -43,6 +43,19 @@ func aliasOf(id string) string {
 	return id
 }
 
+// commandOf is the slash command that switches a server: /raglit for the docs
+// server, /poly-lsp for the code server. A server with no command of its own
+// is addressed by id.
+func commandOf(id string) string {
+	switch id {
+	case dun.ServerDocs:
+		return "raglit"
+	case dun.ServerCode:
+		return "poly-lsp"
+	}
+	return id
+}
+
 // tristate is a bool flag that remembers whether it was given at all, so
 // "--rag=false" (force off for this run) is distinguishable from not passing
 // --rag (use the saved setting).
@@ -258,10 +271,15 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		}
 		return arg + ": " + msg
 	case "remove", "rm":
-		if err := h.RemoveServer(arg); err != nil {
+		cleared, err := h.RemoveServer(arg)
+		if err != nil {
 			return "mcp remove: " + err.Error()
 		}
-		return arg + ": stopped and removed from " + dun.UserServersFile()
+		msg := arg + ": stopped and removed from " + dun.UserServersFile()
+		if len(cleared) > 0 {
+			msg += "\ncleared its switches in " + strings.Join(cleared, ", ")
+		}
+		return msg + "\nother projects' state files are not touched; their entries for " + arg + " are skipped when loaded"
 	}
 	return "unknown /mcp action " + strconv.Quote(verb)
 }
@@ -355,7 +373,7 @@ func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
 // line), when it was written, and what has happened to it since.
 func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 	if !on {
-		return "memories: the docs index is off — /rag on (notes are kept on disk either way)"
+		return "memories: the docs index is off — /raglit on (notes are kept on disk either way)"
 	}
 	if len(ms) == 0 {
 		return "memories: none for this project yet — /remember, or say \"remember, …\""
@@ -476,7 +494,7 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	if !ok {
 		return label + ": not configured"
 	}
-	alias := aliasOf(id)
+	cmd := commandOf(id)
 	var b strings.Builder
 	b.WriteString(label + ": ")
 	if st.Running {
@@ -493,9 +511,9 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 		b.WriteString("\n" + st.Ingest)
 	}
 	if st.Auto {
-		b.WriteString("\n/" + alias + " off to stop it this session · /" + alias + " manual to keep it off in this project")
+		b.WriteString("\n/" + cmd + " off to stop it this session · /" + cmd + " manual to keep it off in this project")
 	} else {
-		b.WriteString("\n/" + alias + " on to start it this session · /" + alias + " auto to start it in this project every session")
+		b.WriteString("\n/" + cmd + " on to start it this session · /" + cmd + " auto to start it in this project every session")
 	}
 	return b.String()
 }
@@ -573,7 +591,7 @@ func serverHint(states []dun.ServerState) string {
 		case st.Err != "":
 			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, oneLine(st.Err)))
 		case hasCmd:
-			lines = append(lines, fmt.Sprintf("%s off — /%s on to start it, /%s auto to start it every session", st.ID, alias, alias))
+			lines = append(lines, fmt.Sprintf("%s off — /%s on to start it, /%s auto to start it every session", st.ID, commandOf(st.ID), commandOf(st.ID)))
 		default:
 			lines = append(lines, st.ID+" off")
 		}
