@@ -66,7 +66,9 @@ import (
 //	             ~/.dun/skills
 //
 // Placeholders in server args and env: {{workspace}}, {{project}} (the
-// repository's corpus name) and {{index}} (this directory on this branch).
+// repository's corpus name) and {{index}} (this directory on this branch);
+// and in a user's or project's command, args and env, {{dir}}: the
+// extension's own directory, for a server it ships.
 //
 // An extension with no roles or hooks is a packaged MCP server and shows in
 // /mcp like any other. Not in v1: shell-command hooks.
@@ -284,6 +286,20 @@ func (e *Extension) validate() error {
 	return nil
 }
 
+// expandDir puts the extension's directory in for {{dir}}.
+func (e *Extension) expandDir(dir string) {
+	rep := func(s string) string { return strings.ReplaceAll(s, "{{dir}}", dir) }
+	e.Server.Command = rep(e.Server.Command)
+	for _, l := range [][]string{e.Server.Args, e.Server.Env} {
+		for i := range l {
+			l[i] = rep(l[i])
+		}
+	}
+	for k, v := range e.Env {
+		e.Env[k] = rep(v)
+	}
+}
+
 // spec is the server as the config layers see it: the manifest's server with
 // env merged in.
 func (e Extension) spec() ServerSpec {
@@ -392,6 +408,7 @@ func LoadExtensions(dir string) ([]Extension, []ExtError) {
 				continue
 			}
 			e.Source, e.Path = source, p
+			e.expandDir(filepath.Dir(p))
 			replaced := false
 			for i := range all {
 				if all[i].ID == e.ID {

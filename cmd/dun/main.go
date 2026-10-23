@@ -862,8 +862,31 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// A slash line from a client that is not the TUI (web, phone): routed
 		// here, by the same handlers the TUI's commands reach. See commands.go.
 		if id == "slash" {
-			routeSlash(action, slashRoutes{server: srvCmd, control: ctrlCmd, reset: resetCmd,
+			exts, _ := engineExtensions(h.Extensions())
+			routeSlash(action, slashRoutes{server: srvCmd, control: ctrlCmd, reset: resetCmd, exts: exts,
 				reply: func(msg string) { em.emit(&proto.ControlEvent{ID: "slash", Action: action, Message: msg}) }})
+			return
+		}
+		// /ext lists the extensions; "call <id> <command> <text>" is an
+		// extension's slash command, a tool call — detached, as any server
+		// round trip is.
+		if id == "ext" {
+			go func() {
+				msg := extListing(h)
+				if f := strings.SplitN(action, " ", 4); len(f) >= 3 && f[0] == "call" {
+					text := ""
+					if len(f) == 4 {
+						text = f[3]
+					}
+					out, err := h.RunExtCommand(ctx, f[1], f[2], text)
+					if err != nil {
+						out = "error: " + err.Error()
+					}
+					msg = "/" + f[1] + " " + f[2] + ": " + out
+					h.Aside("[control/ext] " + msg)
+				}
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			}()
 			return
 		}
 		if id == "interrupt" {

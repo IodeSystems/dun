@@ -230,7 +230,10 @@ func engineChoices(c engineCmd) argCompleter {
 			if l := positionalChoices(m, arg, mcpArgs); l != nil {
 				return l
 			}
-		case "raglit", "poly-lsp":
+		}
+		// An extension's slash command switches its server (it offers the
+		// switch's actions): /raglit on --project.
+		if hasChoice(c, "auto") && hasChoice(c, "manual") {
 			if l := positionalChoices(m, arg, srvArgs); l != nil {
 				return l
 			}
@@ -244,6 +247,15 @@ func engineChoices(c engineCmd) argCompleter {
 		}
 		return &argList{rankChoices(arg, cands), len(cands), "choices"}
 	}
+}
+
+func hasChoice(c engineCmd, v string) bool {
+	for _, ch := range c.choices {
+		if ch.value == v {
+			return true
+		}
+	}
+	return false
 }
 
 // completerFor is the completer of the command called name, or nil.

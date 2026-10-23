@@ -1,0 +1,12 @@
+{
+  "id": "hello",
+  "description": "test extension: a slash command and a turn.before search, over a fake MCP server",
+  "server": {"command": "python3", "args": ["{{dir}}/server.py"]},
+  "slash": {
+    "name": "hello",
+    "description": "the test extension: /hello greet <name>",
+    "commands": {"greet": {"tool": "greet", "arg": "name", "description": "say hello to <name>"}}
+  },
+  "roles": {"search": {"tool": "find"}},
+  "hooks": ["turn.before"]
+}

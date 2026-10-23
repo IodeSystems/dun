@@ -224,3 +224,57 @@ func TestIndexSink_MCPWhenTheToolTakesPathsElseTheCLI(t *testing.T) {
 		t.Fatal("the fallback is chosen by name, not run here")
 	}
 }
+
+// installHello copies the test extension (testdata/extensions/hello) to
+// $DUN_HOME/extensions, as a user would.
+func installHello(t *testing.T, home string) {
+	t.Helper()
+	for _, f := range []string{ExtensionFile, "server.py"} {
+		b, err := os.ReadFile(filepath.Join("testdata", "extensions", "hello", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeRule(t, filepath.Join(home, "extensions", "hello", f), string(b))
+	}
+}
+
+// A user extension's slash command calls its tool, and its turn.before
+// search surfaces a hit as an aside, the way raglit's does.
+func TestUserExtension_SlashCommandAndTurnBeforeAside(t *testing.T) {
+	if !haveBinary("python3") {
+		t.Skip("python3 not on PATH")
+	}
+	home := t.TempDir()
+	t.Setenv("DUN_HOME", home)
+	installHello(t, home)
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if errs := h.ExtensionErrors(); len(errs) != 0 {
+		t.Fatalf("load: %v", errs)
+	}
+	if _, err := h.RunExtCommand(context.Background(), "hello", "greet", "world"); err == nil || !strings.Contains(err.Error(), "/hello on") {
+		t.Errorf("not running: %v", err)
+	}
+	if err := h.StartServer(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := h.RunExtCommand(context.Background(), "hello", "greet", " world "); err != nil || out != "hello, world" {
+		t.Errorf("/hello greet world: %q %v", out, err)
+	}
+	if !slices.Contains(modelToolNames(h), "hello__find") {
+		t.Errorf("its tools are namespaced like any added server's: %v", modelToolNames(h))
+	}
+	if aside := surfaceOnce(t, h, "the weather"); aside != "" {
+		t.Errorf("no hit, no aside: %q", aside)
+	}
+	aside := surfaceOnce(t, h, "how do I deploy to zebra?")
+	if !strings.Contains(aside, "Zebra deploys need the --frostbite flag") || !strings.Contains(aside, "hello://zebra-fact") {
+		t.Errorf("the hit should surface as an aside: %q", aside)
+	}
+	if st, _ := serverState(h, "hello"); st.Slash != "hello" || st.Via != ViaDirect {
+		t.Errorf("state: %+v", st)
+	}
+}

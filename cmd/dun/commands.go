@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,11 +36,16 @@ func onOff(b bool) string {
 
 // commandsEvent is the list, with the current state of each toggle.
 func commandsEvent(h *dun.Harness) *proto.Commands {
-	return commandList(h.Servers(), h.IsDocker())
+	exts, _ := engineExtensions(h.Extensions())
+	return commandList(h.Servers(), h.IsDocker(), exts...)
 }
 
-// commandList builds the list from the state it shows.
-func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
+// commandList builds the list from the state it shows: the extensions'
+// slash commands (the bundled ones when exts is empty), then dun's own.
+func commandList(servers []dun.ServerState, docker bool, exts ...dun.Extension) *proto.Commands {
+	if len(exts) == 0 {
+		exts = dun.BundledExtensions()
+	}
 	serverState := func(alias string) (string, string) {
 		var st dun.ServerState
 		ok := false
@@ -57,16 +63,53 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 		}
 		return onOff(st.Running), detail
 	}
-	srvChoices := choices("on", "on for this session (--project, --global for wider)", "off", "off for this session (--project, --global for wider)",
-		"unset", "clear a --project or --session switch", "restart", "restart it",
-		"auto", "on for this project (= on --project)", "manual", "off for this project (= off --project)")
-	ragState, ragDetail := serverState(dun.ServerDocs)
-	lspState, lspDetail := serverState(dun.ServerCode)
-	return &proto.Commands{Items: []proto.CommandSpec{
-		{Name: "raglit", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: ragState, Detail: ragDetail,
-			Description: "docs index (raglit): bare shows status, auto starts it every session"},
-		{Name: "poly-lsp", Usage: "[on|off|unset|restart|auto|manual] [--global|--project|--session]", Group: "tools", Choices: srvChoices, State: lspState, Detail: lspDetail,
-			Description: "code intelligence (poly-lsp-mcp): bare shows status, auto starts it every session"},
+	var items []proto.CommandSpec
+	for _, e := range exts {
+		if e.Slash == nil {
+			continue
+		}
+		state, detail := serverState(e.ID)
+		items = append(items, extCommand(e, state, detail))
+	}
+	return &proto.Commands{Items: append(items, ownCommands(docker)...)}
+}
+
+// srvActions are the server switch's actions, as an extension's slash
+// command offers them.
+var srvActions = []string{"on", "on for this session (--project, --global for wider)", "off", "off for this session (--project, --global for wider)",
+	"unset", "clear a --project or --session switch", "restart", "restart it",
+	"auto", "on for this project (= on --project)", "manual", "off for this project (= off --project)"}
+
+// extCommand is an extension's slash command: the server switch's actions,
+// then the extension's own commands.
+func extCommand(e dun.Extension, state, detail string) proto.CommandSpec {
+	pairs := append([]string{}, srvActions...)
+	usage := "on|off|unset|restart|auto|manual"
+	names := make([]string, 0, len(e.Slash.Commands))
+	for n := range e.Slash.Commands {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		c := e.Slash.Commands[n]
+		pairs = append(pairs, n, firstNonEmpty(c.Description, "calls "+c.Tool))
+		usage += "|" + n
+	}
+	usage = "[" + usage + "] [--global|--project|--session]"
+	if len(names) > 0 {
+		usage += " | <command> [text]"
+	}
+	return proto.CommandSpec{Name: e.Slash.Name, Usage: usage, Group: "tools", Choices: choices(pairs...),
+		Text: len(names) > 0, State: state, Detail: detail,
+		Description: firstNonEmpty(e.Slash.Description, e.Description)}
+}
+
+// ownCommands are dun's own engine commands, which no extension's slash
+// command may shadow.
+func ownCommands(docker bool) []proto.CommandSpec {
+	return []proto.CommandSpec{
+		{Name: "ext", Group: "tools",
+			Description: "extensions: where each comes from (bundled, user, project), its server, slash command, roles and hooks, and manifests that did not load"},
 		{Name: "mcp", Usage: "[add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | mode <id> standalone|scripted|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
 			Choices: choices("add", "add a server: a form — a preset, or an id and a URL or a local command",
 				"on", "turn a server on: this session, or --project / --global", "off", "turn a server off: this session, or --project / --global",
@@ -99,7 +142,7 @@ func commandList(servers []dun.ServerState, docker bool) *proto.Commands {
 		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
 		{Name: "clear", Group: "session", Description: "clear the conversation and start a fresh session log"},
 		{Name: "close", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript"},
-	}}
+	}
 }
 
 // providersMu orders provider changes and model listings in the engine, so
@@ -189,6 +232,9 @@ type slashRoutes struct {
 	control func(id, action string)
 	reset   func()
 	reply   func(msg string) // an answer that is not a command's own event
+	// exts are the extensions whose slash commands route (engineExtensions);
+	// nil is the bundled ones.
+	exts []dun.Extension
 }
 
 // routeSlash carries out one slash line ("raglit on", "/remember the tests are
@@ -206,9 +252,30 @@ func routeSlash(line string, r slashRoutes) {
 		}
 		return ""
 	}
+	exts := r.exts
+	if exts == nil {
+		exts = dun.BundledExtensions()
+	}
+	for _, e := range exts {
+		if e.SlashName() != name {
+			continue
+		}
+		// /<slash> <command> <text> calls the extension's tool, the text as
+		// typed; anything else is its server's switch.
+		if _, ok := e.Slash.Commands[arg(0)]; ok && len(args) > 0 {
+			r.control("ext", "call "+e.ID+" "+arg(0)+" "+strings.Join(args[1:], " "))
+			return
+		}
+		r.server(e.ID, strings.Join(lowerAll(args), " "))
+		return
+	}
 	switch name {
-	case "raglit", "poly-lsp":
-		r.server(name, strings.Join(lowerAll(args), " "))
+	case "ext":
+		if len(args) > 0 {
+			r.reply("usage: /ext — lists the extensions")
+			return
+		}
+		r.control(name, "")
 	case "mcp":
 		switch arg(0) {
 		case "add":

@@ -19,12 +19,23 @@ import (
 // dun.DefaultServers for why — so this is how a session gets them, and how a
 // machine that wants them every time says so once.
 //
-// The command is the server's id: /raglit switches the server raglit, /poly-lsp
-// the server poly-lsp.
+// The command is an extension's slash command (its manifest's slash.name):
+// /raglit switches the server raglit, /poly-lsp the server poly-lsp.
 
-// hasCommand reports whether id is a server with a command of its own, rather
-// than one the config defines.
-func hasCommand(id string) bool { return id == dun.ServerDocs || id == dun.ServerCode }
+// slashOf is the slash command of st's extension, or "" for a server with
+// none. A state built without one (a test's) falls back to the bundled
+// extension of its id.
+func slashOf(st dun.ServerState) string {
+	if st.Slash != "" {
+		return st.Slash
+	}
+	for _, e := range dun.BundledExtensions() {
+		if e.ID == st.ID {
+			return e.SlashName()
+		}
+	}
+	return ""
+}
 
 // flagOf is the --rag / --lsp flag that starts a server for one run.
 func flagOf(id string) string {
@@ -469,6 +480,9 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 		return label + ": not configured"
 	}
 	cmd := id
+	if s := slashOf(st); s != "" {
+		cmd = s
+	}
 	var b strings.Builder
 	b.WriteString(label + ": ")
 	if st.Running {
@@ -562,8 +576,9 @@ func serverHint(states []dun.ServerState) string {
 		switch {
 		case st.Err != "":
 			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, oneLine(st.Err)))
-		case hasCommand(st.ID):
-			lines = append(lines, fmt.Sprintf("%s off — /%s on to start it, /%s auto to start it every session", st.ID, st.ID, st.ID))
+		case slashOf(st) != "":
+			cmd := slashOf(st)
+			lines = append(lines, fmt.Sprintf("%s off — /%s on to start it, /%s auto to start it every session", st.ID, cmd, cmd))
 		default:
 			lines = append(lines, st.ID+" off")
 		}

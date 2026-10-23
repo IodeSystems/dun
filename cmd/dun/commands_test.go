@@ -32,6 +32,51 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 	if !found {
 		t.Error("the engine's commands are not in the TUI's palette")
 	}
+
+	// A user's extension cannot shadow a command either — the engine's or
+	// the TUI's own: it loads without its slash command, and says so.
+	ext := func(id, slash string) dun.Extension {
+		return dun.Extension{ID: id, Source: dun.ExtUser, Slash: &dun.ExtSlash{Name: slash,
+			Commands: map[string]dun.ExtSlashCmd{"greet": {Tool: "greet", Arg: "name"}}}}
+	}
+	exts, refused := engineExtensions(append(dun.BundledExtensions(), ext("a", "mcp"), ext("b", "help"), ext("c", "ext"), ext("hello", "hello")))
+	if len(refused) != 3 {
+		t.Errorf("refused: %v", refused)
+	}
+	got := map[string]bool{}
+	for _, c := range commandList(nil, false, exts...).Items {
+		if got[c.Name] {
+			t.Errorf("/%s listed twice", c.Name)
+		}
+		got[c.Name] = true
+	}
+	if !got["hello"] || !got["raglit"] || !got["poly-lsp"] {
+		t.Errorf("extension commands: %v", got)
+	}
+	for _, c := range commandList(nil, false, exts...).Items {
+		if c.Name == "hello" && !strings.Contains(c.Usage, "greet") {
+			t.Errorf("hello's usage lacks its command: %q", c.Usage)
+		}
+	}
+	type call struct{ kind, a, b string }
+	var calls []call
+	r := slashRoutes{exts: exts,
+		server:  func(a, b string) { calls = append(calls, call{"server", a, b}) },
+		control: func(a, b string) { calls = append(calls, call{"control", a, b}) },
+		reply:   func(m string) { calls = append(calls, call{"reply", m, ""}) },
+	}
+	for line, want := range map[string]call{
+		"hello greet World": {"control", "ext", "call hello greet World"},
+		"hello on":          {"server", "hello", "on"},
+		"mcp on a":          {"server", "a", "on"},
+		"ext":               {"control", "ext", ""},
+	} {
+		calls = nil
+		routeSlash(line, r)
+		if len(calls) != 1 || calls[0] != want {
+			t.Errorf("%q: %v, want %v", line, calls, want)
+		}
+	}
 }
 
 func TestCommandListShowsState(t *testing.T) {
