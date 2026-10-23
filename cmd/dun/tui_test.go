@@ -1005,6 +1005,53 @@ func TestTUI_DocsNotificationNav(t *testing.T) {
 	}
 }
 
+// A surfaced document shows where it came from (one dim line under its
+// title) and why it won; the collapsed row names it by kind and marks a
+// lone candidate.
+func TestTUI_DocsSourceAndWhy(t *testing.T) {
+	d := docsFromEvent(evMsg{
+		"type": "notification", "kind": "docs", "found": float64(1), "surfaced": float64(1),
+		"docs": []any{map[string]any{
+			"title": "skill docs", "line": "editable docs", "score": float64(1.2e-5),
+			"kind": "skill", "candidates": float64(1),
+			"source": "skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills · claude.ai sync (synced/b1)",
+			"why":    "only candidate · score 1.2e-05",
+		}},
+	})
+	open := d.render(true)
+	for _, want := range []string{"skill docs", "(only candidate · score 1.2e-05)",
+		"~/.claude/skills/synced/b1/docs/SKILL.md · index skills · claude.ai sync (synced/b1)"} {
+		if !strings.Contains(open, want) {
+			t.Errorf("expanded block lacks %q:\n%s", want, open)
+		}
+	}
+	if strings.Contains(open, "0.00") {
+		t.Errorf("a 1e-5 score must not print as 0.00:\n%s", open)
+	}
+	if c := d.render(false); !strings.Contains(c, "· skill docs (only candidate)") {
+		t.Errorf("collapsed row should name the doc and mark it weak: %s", c)
+	}
+}
+
+// An older engine sends no source, why or kind: the block still renders,
+// with the raw score readable and no empty source line.
+func TestTUI_DocsOlderEvent(t *testing.T) {
+	d := docsFromEvent(evMsg{
+		"type": "notification", "kind": "docs", "found": float64(1), "surfaced": float64(1),
+		"docs": []any{map[string]any{"title": "README", "line": "intro", "score": float64(3.4e-5)}},
+	})
+	open := d.render(true)
+	if !strings.Contains(open, "README  (score 3.4e-05)") {
+		t.Errorf("older event: %s", open)
+	}
+	if n := strings.Count(open, "\n"); n != 1 {
+		t.Errorf("older event: want the head and one doc row, got %d lines:\n%s", n+1, open)
+	}
+	if c := d.render(false); strings.Contains(c, "README") {
+		t.Errorf("older event: collapsed row stays as it was: %s", c)
+	}
+}
+
 // The arrow rule for an ordinary folded block: → walks minimized → expanded →
 // raw and stops, ← walks it back, and only a block with nothing left to open
 // hands → to the input. Before this, → left the conversation immediately and

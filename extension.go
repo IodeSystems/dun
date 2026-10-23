@@ -639,6 +639,91 @@ type surfacer struct {
 	finder agent.DocFinder
 	fetch  docBodyFunc
 	from   func(docID string) string // the extension a hit came from
+	idx    *hitIndexes               // the index each hit came from
+	sel    map[string]string         // each extension's attached-index selector
+}
+
+// attached reports whether index is one of the attached indexes of an
+// extension's selector: "<own>:*,<proj>:<idx>,…" names them after the
+// first. Own-project attachments are not in the selector; their hits read
+// as the project's own.
+func (s *surfacer) attached(index string) bool {
+	for _, sel := range s.sel {
+		for _, part := range strings.Split(sel, ",") {
+			if part == index && !strings.HasSuffix(part, ":*") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hitIndexes remembers the index each surfaced hit came from: raglit tags
+// every hit with its index, and agent.DocHit has no field for it.
+type hitIndexes struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+// note records the indexes of a search result's hits. Hits are best first,
+// so a document in two indexes keeps the index of its best hit.
+func (x *hitIndexes) note(raw string) {
+	type hit struct {
+		DocID string `json:"doc_id"`
+		ID    string `json:"id"`
+		Index string `json:"index"`
+	}
+	var rows []hit
+	if s := strings.TrimSpace(raw); strings.HasPrefix(s, "[") {
+		_ = json.Unmarshal([]byte(s), &rows)
+	} else {
+		var wrap struct{ Hits, Results, Documents []hit }
+		_ = json.Unmarshal([]byte(s), &wrap)
+		rows = append(append(wrap.Hits, wrap.Results...), wrap.Documents...)
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.m == nil {
+		x.m = map[string]string{}
+	}
+	done := map[string]bool{}
+	for _, r := range rows {
+		id := firstNonEmptyStr(r.DocID, r.ID)
+		if id == "" || r.Index == "" || done[id] {
+			continue
+		}
+		done[id] = true
+		x.m[id] = r.Index
+	}
+}
+
+func (x *hitIndexes) get(docID string) string {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.m[docID]
+}
+
+// indexedFinder is ragnotify's MCP finder that also records each hit's
+// index in idx.
+type indexedFinder struct {
+	mgr   *mcpmgr.Manager
+	id    string
+	tool  string
+	extra map[string]any
+	idx   *hitIndexes
+}
+
+func (f *indexedFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, error) {
+	args := map[string]any{"query": strings.Join(texts, "\n")}
+	for k, v := range f.extra {
+		args[k] = v
+	}
+	raw, err := f.mgr.CallTool(ctx, f.id, f.tool, args)
+	if err != nil {
+		return nil, fmt.Errorf("surfacer: call %s: %w", f.tool, err)
+	}
+	f.idx.note(raw)
+	return ragnotify.ParseHits(raw)
 }
 
 // sel is each extension's attached-index selector (attach.go), "" for none.
@@ -648,23 +733,24 @@ func newSurfacer(mgr *mcpmgr.Manager, exts []Extension, sel map[string]string) *
 	}
 	finders := make([]agent.DocFinder, len(exts))
 	fetches := map[string]docBodyFunc{}
+	idx := &hitIndexes{}
 	for i, e := range exts {
-		var opts ragnotify.Opts
+		var extra map[string]any
 		getIndex := ""
 		if s := sel[e.ID]; s != "" {
-			opts.ExtraArgs = map[string]any{"index": s}
+			extra = map[string]any{"index": s}
 			if toolTakes(mgr.GetTools(), e.ID, e.Roles.Search.Get, "index") {
 				getIndex = s
 			}
 		}
-		finders[i] = ragnotify.MCPFinder(mgr, e.ID, e.Roles.Search.Tool, opts)
+		finders[i] = &indexedFinder{mgr: mgr, id: e.ID, tool: e.Roles.Search.Tool, extra: extra, idx: idx}
 		if e.Roles.Search.Get != "" {
 			fetches[e.ID] = docsBodyFetcher(mgr, e.ID, e.Roles.Search.Get, getIndex)
 		}
 	}
 	if len(exts) == 1 {
 		id := exts[0].ID
-		return &surfacer{finder: finders[0], fetch: fetches[id], from: func(string) string { return id }}
+		return &surfacer{finder: finders[0], fetch: fetches[id], from: func(string) string { return id }, idx: idx, sel: sel}
 	}
 	m := &multiFinder{ids: make([]string, len(exts)), finders: finders, from: map[string]string{}}
 	for i, e := range exts {
@@ -676,7 +762,7 @@ func newSurfacer(mgr *mcpmgr.Manager, exts []Extension, sel map[string]string) *
 		}
 		return "", false
 	}
-	return &surfacer{finder: m, fetch: fetch, from: m.source}
+	return &surfacer{finder: m, fetch: fetch, from: m.source, idx: idx, sel: sel}
 }
 
 // multiFinder asks every finder and remembers which one answered each hit.

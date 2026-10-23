@@ -23,7 +23,7 @@ func TestDocsPreparer_RecordsSurfacing(t *testing.T) {
 	var notes []DocsNote
 	finder := fixedFinder{{DocID: "d1", Title: "Why X was dropped", Score: 1, Line: "the measurement"}}
 	estimate := func(s string) int { return len(s) / 4 }
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, stats, estimate, nil, nil, nil,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, stats, estimate, nil, nil, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "why was X dropped?", CreatedAt: 1})
@@ -94,7 +94,7 @@ func TestDocsPreparer_OneSlotPerDocument(t *testing.T) {
 		{DocID: "a", Title: "a (text)", Score: 8.9}, // would fail the margin if it counted
 		{DocID: "b", Title: "b", Score: 3},
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, nil, nil,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, nil, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
@@ -115,7 +115,7 @@ func TestDocsPreparer_MarginOverRunnerUp(t *testing.T) {
 	var notes []DocsNote
 	var finder fixedFinder = fixedFinder{{DocID: "a", Score: 4}, {DocID: "b", Score: 3}} // 4 < 1.5×3
 	f := &finder
-	prep := docsPreparer(store, finderFunc(func() []agent.DocHit { return *f }), agent.FinderOpts{}, stats, nil, nil, nil, nil,
+	prep := docsPreparer(store, finderFunc(func() []agent.DocHit { return *f }), agent.FinderOpts{}, stats, nil, nil, nil, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q1", CreatedAt: 1})
 	prep.PrepareNotifications(ctx, "s")
@@ -148,7 +148,7 @@ func TestDocsPreparer_InlinesShortBodies(t *testing.T) {
 		store, _ := openSessionStore("")
 		ctx := context.Background()
 		var notes []DocsNote
-		prep := docsPreparer(store, fixedFinder{{DocID: "n", Title: "n", Score: 5, Line: "q?"}}, agent.FinderOpts{}, nil, nil, tc.fetch, nil, nil,
+		prep := docsPreparer(store, fixedFinder{{DocID: "n", Title: "n", Score: 5, Line: "q?"}}, agent.FinderOpts{}, nil, nil, tc.fetch, nil, nil, nil,
 			func(n DocsNote) { notes = append(notes, n) })
 		store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
 		prep.PrepareNotifications(ctx, "s")
@@ -176,7 +176,7 @@ func TestDocsPreparer_MarginPerGroup(t *testing.T) {
 		}
 		return ""
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, group, nil,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, group, nil, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "should I stash?", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
@@ -213,7 +213,7 @@ func TestDocsPreparer_SkillHitPointsAtTheSkill(t *testing.T) {
 		fetched = fetched || id == "/s/release/SKILL.md"
 		return "", false
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, fetch, docGroup(nil, skill, nil), skill,
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, fetch, docGroup(nil, skill, nil), skill, nil,
 		func(n DocsNote) { notes = append(notes, n) })
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "cut a release", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
@@ -246,7 +246,7 @@ func TestDocsPreparer_SkillReferenceHit(t *testing.T) {
 		}
 		return skillHit{}, false
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, skill, nil), skill, nil)
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, skill, nil), skill, nil, nil)
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "how do I tag", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
 		t.Fatal(err)
@@ -270,12 +270,12 @@ func TestDocsPreparer_OneCandidatePerSkill(t *testing.T) {
 		name := filepath.Base(filepath.Dir(id))
 		return skillHit{Skill: Skill{Name: name, Description: "d"}}, true
 	}
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, skill, nil), skill, nil)
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, skill, nil), skill, nil, nil)
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "x", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
 		t.Fatal(err)
 	}
-	if es := store.docsEntries(); len(es) != 1 || !strings.Contains(es[0], `(2 candidate skill(s)`) || !strings.Contains(es[0], `name="a"`) {
+	if es := store.docsEntries(); len(es) != 1 || !strings.Contains(es[0], `the runner-up (of 2)`) || !strings.Contains(es[0], `name="a"`) {
 		t.Errorf("cue: %q", es)
 	}
 }
@@ -286,12 +286,147 @@ func TestDocsPreparer_RulesHit(t *testing.T) {
 	ctx := context.Background()
 	finder := fixedFinder{{DocID: "/ws/docs/style.md", Title: "style.md", Score: 3, Line: "tabs"}}
 	rules := func(id string) bool { return id == "/ws/docs/style.md" }
-	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, nil, rules), nil, nil)
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, docGroup(nil, nil, rules), nil, nil, nil)
 	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "indent style", CreatedAt: 1})
 	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
 		t.Fatal(err)
 	}
 	if es := store.docsEntries(); len(es) != 1 || !strings.Contains(es[0], "the project's rules import") {
 		t.Errorf("framing: %q", es)
+	}
+}
+
+// Why reads at BM25's small scale (%.2f printed 0.00) and says whether a
+// margin was tested at all.
+func TestDocHitInfo_Why(t *testing.T) {
+	for _, tc := range []struct {
+		d    DocHitInfo
+		want string
+	}{
+		{DocHitInfo{Score: 1.234e-5, Candidates: 1}, "only candidate · score 1.2e-05"},
+		{DocHitInfo{Score: 3e-5, RunnerUp: 1e-5, Candidates: 4}, "3.0× the runner-up (of 4) · score 3e-05"},
+		{DocHitInfo{Score: 0.5}, "score 0.5"}, // an older engine: no candidates known
+	} {
+		if got := tc.d.Why(); got != tc.want {
+			t.Errorf("Why(%+v) = %q, want %q", tc.d, got, tc.want)
+		}
+	}
+}
+
+// Every surfaced item says where it came from — kind, file, index and, for
+// a skill, its root — to the UI and in the model's text; a lone candidate
+// is marked as one.
+func TestDocsPreparer_SourceLabels(t *testing.T) {
+	store, _ := openSessionStore("")
+	ctx := context.Background()
+	var notes []DocsNote
+	home := "/home/u"
+	skillDoc := home + "/.claude/skills/synced/b1/docs/SKILL.md"
+	finder := fixedFinder{
+		{DocID: skillDoc, Title: "SKILL.md", Score: 1.2e-5},
+		{DocID: home + "/.dun/memory/stash.md", Title: "stash", Score: 4e-5},
+		{DocID: home + "/.dun/memory/other.md", Title: "other", Score: 1e-5},
+		{DocID: "/ws/docs/guide.md", Title: "guide", Score: 2, Line: "the guide"},
+		{DocID: "/ws/docs/old.md", Title: "old", Score: 0.5},
+	}
+	skill := func(id string) (skillHit, bool) {
+		if id == skillDoc {
+			return skillHit{Skill: Skill{Name: "docs", Description: "editable docs",
+				Root: skillRootLabel(filepath.Dir(filepath.Dir(skillDoc)), "user")}}, true
+		}
+		return skillHit{}, false
+	}
+	group := func(id string) string {
+		switch {
+		case strings.Contains(id, "/memory/"):
+			return groupMemory
+		case id == skillDoc:
+			return groupSkill
+		}
+		return ""
+	}
+	indexes := map[string]string{skillDoc: "skills", home + "/.dun/memory/stash.md": "memory", "/ws/docs/guide.md": "proja:handbook"}
+	src := &hitSources{
+		index:    func(id string) string { return indexes[id] },
+		attached: func(ix string) bool { return ix == "proja:handbook" },
+		display:  func(p string) string { return displayPath(p, home, "/ws") },
+	}
+	prep := docsPreparer(store, finder, agent.FinderOpts{}, nil, nil, nil, group, skill, src,
+		func(n DocsNote) { notes = append(notes, n) })
+	store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "x", CreatedAt: 1})
+	if err := prep.PrepareNotifications(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || len(notes[0].Docs) != 3 {
+		t.Fatalf("want three surfaced, got %+v", notes)
+	}
+	want := map[string]string{
+		"skill docs": "skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills · claude.ai sync (synced/b1)",
+		"stash":      "memory · ~/.dun/memory/stash.md · index memory",
+		"guide":      "attached doc · docs/guide.md · index proja:handbook",
+	}
+	whys := map[string]string{
+		"skill docs": "only candidate · score 1.2e-05",
+		"stash":      "4.0× the runner-up (of 2) · score 4e-05",
+		"guide":      "4.0× the runner-up (of 2) · score 2",
+	}
+	es := store.docsEntries()
+	for _, d := range notes[0].Docs {
+		if d.Source() != want[d.Title] || d.Why() != whys[d.Title] {
+			t.Errorf("%s: source %q why %q", d.Title, d.Source(), d.Why())
+		}
+		if len(es) != 1 || !strings.Contains(es[0], "Source: "+want[d.Title]) || !strings.Contains(es[0], whys[d.Title]) {
+			t.Errorf("the model's text must carry %q's source and why: %q", d.Title, es)
+		}
+	}
+}
+
+func TestSkillRootLabel(t *testing.T) {
+	home := t.TempDir()
+	defer func(f func() (string, error)) { userHomeDir = f }(userHomeDir)
+	userHomeDir = func() (string, error) { return home, nil }
+	dunSkills := filepath.Join(filepath.Dir(SessionsDir()), "skills")
+	for _, tc := range []struct{ dir, source, want string }{
+		{filepath.Join(home, ".claude", "skills"), "user", "user ~/.claude/skills"},
+		{filepath.Join(home, ".claude", "skills", "synced", "b1"), "user", "claude.ai sync (synced/b1)"},
+		{dunSkills, "user", "dun user skills"},
+		{"/p/.claude/skills", "project", "project .claude/skills"},
+		{"/p/.dun/skills", "project", "project .dun/skills"},
+		{"/x/skills", "extension raglit", "extension raglit"},
+	} {
+		if got := skillRootLabel(tc.dir, tc.source); got != tc.want {
+			t.Errorf("skillRootLabel(%q, %q) = %q, want %q", tc.dir, tc.source, got, tc.want)
+		}
+	}
+}
+
+func TestDisplayPath(t *testing.T) {
+	for _, tc := range []struct{ p, want string }{
+		{"/ws/a/b.md", "a/b.md"},
+		{"/home/u/.dun/memory/n.md", "~/.dun/memory/n.md"},
+		{"/ws2/x.md", "/ws2/x.md"},
+		{"/ws", "/ws"},
+		{"skill://x/SKILL.md", "skill://x/SKILL.md"},
+	} {
+		if got := displayPath(tc.p, "/home/u", "", "/ws"); got != tc.want {
+			t.Errorf("displayPath(%q) = %q, want %q", tc.p, got, tc.want)
+		}
+	}
+}
+
+// raglit tags each hit with its index; the first (best) hit of a document
+// names it.
+func TestHitIndexes_Note(t *testing.T) {
+	var x hitIndexes
+	x.note(`{"hits":[{"index":"skills","doc_id":"/a","score":2},{"index":"default","doc_id":"/a","score":1},{"index":"memory","doc_id":"/b"}]}`)
+	x.note(`[{"index":"proja:handbook","id":"/c"}]`)
+	for id, want := range map[string]string{"/a": "skills", "/b": "memory", "/c": "proja:handbook", "/d": ""} {
+		if got := x.get(id); got != want {
+			t.Errorf("index of %s = %q, want %q", id, got, want)
+		}
+	}
+	s := &surfacer{sel: map[string]string{"raglit": "projb:*,proja:handbook"}}
+	if !s.attached("proja:handbook") || s.attached("projb:*") || s.attached("handbook") {
+		t.Error("attached: only the named indexes after the own wildcard")
 	}
 }

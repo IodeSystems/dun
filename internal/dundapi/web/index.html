@@ -224,7 +224,15 @@ function render(st, log, ev) {
       for (const a of log.querySelectorAll(".ask button")) a.disabled = true;
       break;
     case "notification":
-      if (ev.kind === "docs") add(log, el("div", "msg note", "🔎 " + (ev.surfaced || 0) + " doc(s) surfaced"));
+      if (ev.kind === "docs") {
+        // Each document, why it won and where it came from (an older engine sends neither).
+        const lines = ["🔎 " + (ev.surfaced || 0) + " doc(s) surfaced"];
+        for (const d of ev.docs || []) {
+          lines.push("• " + (d.title || "") + (d.why ? " (" + d.why + ")" : ""));
+          if (d.source) lines.push("  " + d.source);
+        }
+        add(log, el("div", "msg note", lines.join("\n")));
+      }
       else if (ev.text) add(log, el("div", "msg note", "🔔 " + ev.text));
       break;
     case "control": case "server":

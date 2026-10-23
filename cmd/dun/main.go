@@ -646,6 +646,9 @@ func main() {
 		cfg.OnRules = func(msg string) { fmt.Fprintf(os.Stderr, "\n  %s\n", msg) }
 		cfg.OnDocs = func(n dun.DocsNote) {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
+			for _, d := range n.Docs {
+				fmt.Fprintf(os.Stderr, "     %s  (%s)\n       %s\n", d.Title, d.Why(), d.Source())
+			}
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
 		cfg.OnCompaction = func(n dun.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
@@ -1767,7 +1770,9 @@ func jobsProto(js []dun.JobInfo) []proto.JobInfo {
 func docsProto(docs []dun.DocHitInfo) []proto.DocHit {
 	out := make([]proto.DocHit, 0, len(docs))
 	for _, d := range docs {
-		out = append(out, proto.DocHit{Title: d.Title, ID: d.DocID, Line: d.Line, Score: d.Score, Inline: d.Inline})
+		out = append(out, proto.DocHit{Title: d.Title, ID: d.DocID, Line: d.Line, Score: d.Score, Inline: d.Inline,
+			Kind: d.Kind, Path: d.Path, Index: d.Index, Root: d.Root, Candidates: d.Candidates, RunnerUp: d.RunnerUp,
+			Source: d.Source(), Why: d.Why()})
 	}
 	return out
 }

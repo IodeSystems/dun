@@ -276,6 +276,15 @@ type DocHit struct {
 	Line   string  `json:"line"`
 	Score  float64 `json:"score"`
 	Inline bool    `json:"inline"`
+	// Where it came from and why it won; absent from an older engine.
+	Kind       string  `json:"kind,omitempty"`  // skill, memory, rule, mcp-doc, doc, attached doc
+	Path       string  `json:"path,omitempty"`  // ~ for $HOME, relative inside the workspace
+	Index      string  `json:"index,omitempty"` // the raglit index
+	Root       string  `json:"root,omitempty"`  // a skill's root
+	Candidates int     `json:"candidates,omitempty"`
+	RunnerUp   float64 `json:"runner_up,omitempty"`
+	Source     string  `json:"source,omitempty"` // the above on one line, for display
+	Why        string  `json:"why,omitempty"`    // "only candidate · score …" or "N× the runner-up (of K) · score …"
 }
 
 // Recap is a span of the conversation rewritten shorter.

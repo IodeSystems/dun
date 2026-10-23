@@ -176,3 +176,12 @@ test('interrupting is a no-op when idle, and an idle answer clears it', () => {
   const w = apply(v, { type: 'control', id: 'interrupt', message: 'nothing to interrupt: no turn is running' });
   expect(w.status).toBe('');
 });
+
+test('a docs note names each surfaced document, why it won and where it came from', () => {
+  const v = run([{ type: 'notification', kind: 'docs', surfaced: 1, docs: [{ title: 'skill docs', score: 1.2e-5, why: 'only candidate · score 1.2e-05', source: 'skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills' }] }]);
+  const text = (x: View) => x.items.map((i) => (i.kind === 'tool' ? i.title : i.text))[0];
+  expect(text(v)).toBe('🔎 1 doc(s) surfaced\n• skill docs (only candidate · score 1.2e-05)\n  skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills');
+  // An older engine: no why, no source.
+  const w = run([{ type: 'notification', kind: 'docs', surfaced: 1, docs: [{ title: 'README', score: 1 }] }]);
+  expect(text(w)).toBe('🔎 1 doc(s) surfaced\n• README');
+});

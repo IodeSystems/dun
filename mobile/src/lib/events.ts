@@ -60,6 +60,18 @@ export const empty: View = { items: [], streaming: null, busy: false, status: ''
 type Ev = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
+/** What proactive search surfaced: each document, why it won, and where it came from (an older engine sends neither). */
+export function docsNote(ev: Ev): string {
+  const docs = Array.isArray(ev.docs) ? (ev.docs as Ev[]) : [];
+  const lines = [`🔎 ${Number(ev.surfaced ?? 0)} doc(s) surfaced`];
+  for (const d of docs) {
+    const why = str(d.why);
+    lines.push(`• ${str(d.title)}${why ? ` (${why})` : ''}`);
+    if (str(d.source)) lines.push(`  ${str(d.source)}`);
+  }
+  return lines.join('\n');
+}
+
 /** An item before it has a key (Omit spread over each member of the union). */
 type WithoutKey<T> = T extends unknown ? Omit<T, 'key'> : never;
 type NewItem = WithoutKey<Item>;
@@ -154,7 +166,7 @@ export function apply(v: View, ev: Ev): View {
       // The question and the answer are shown from ask_user's call and result.
       return { ...v, ask: null };
     case 'notification':
-      if (ev.kind === 'docs') return push(v, { kind: 'note', text: `🔎 ${Number(ev.surfaced ?? 0)} doc(s) surfaced` });
+      if (ev.kind === 'docs') return push(v, { kind: 'note', text: docsNote(ev) });
       return ev.text ? push(v, { kind: 'note', text: '🔔 ' + str(ev.text) }) : v;
     case 'commands':
       return { ...v, commands: (ev.items as Command[]) ?? [] };

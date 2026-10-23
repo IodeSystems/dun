@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -35,6 +36,119 @@ type DocHitInfo struct {
 	Line   string
 	Score  float64
 	Inline bool // the whole document went into the prompt, not a pointer
+
+	// Where it came from, so a person can see what feeds the agent.
+	Kind  string // skill, memory, rule, mcp-doc, doc or attached doc
+	Path  string // the file: ~ for $HOME, relative inside the workspace
+	Index string // the raglit index of the hit, "" when the server names none
+	Root  string // a skill's root: where it was loaded from
+	// Why it won: the candidates in its group (it counted) and the
+	// runner-up's score, 0 when it was the only candidate.
+	Candidates int
+	RunnerUp   float64
+}
+
+// Why says why a surfaced document won: it was the only candidate in its
+// group (no margin was tested, so it may be weak), or how far it beat the
+// runner-up. The raw score is %.2g: BM25 scores of a small index are in the
+// 1e-5 range, where %.2f prints 0.00.
+func (d DocHitInfo) Why() string {
+	switch {
+	case d.Candidates == 1:
+		return fmt.Sprintf("only candidate · score %.2g", d.Score)
+	case d.RunnerUp > 0:
+		return fmt.Sprintf("%.1f× the runner-up (of %d) · score %.2g", d.Score/d.RunnerUp, d.Candidates, d.Score)
+	}
+	return fmt.Sprintf("score %.2g", d.Score)
+}
+
+// Source is the origin of a surfaced document on one line: kind, file,
+// index and, for a skill, the root it was loaded from.
+func (d DocHitInfo) Source() string {
+	var parts []string
+	for _, p := range []string{d.Kind, d.Path} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if d.Index != "" {
+		parts = append(parts, "index "+d.Index)
+	}
+	if d.Root != "" {
+		parts = append(parts, d.Root)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// hitSources tells docsPreparer where a hit came from. Every field is
+// nil-safe.
+type hitSources struct {
+	index    func(docID string) string // the raglit index of a hit
+	attached func(index string) bool   // an index attached from elsewhere (attach.go)
+	display  func(path string) string  // a path as a person reads it
+}
+
+func (s *hitSources) indexOf(docID string) string {
+	if s == nil || s.index == nil {
+		return ""
+	}
+	return s.index(docID)
+}
+
+func (s *hitSources) isAttached(index string) bool {
+	return s != nil && s.attached != nil && index != "" && s.attached(index)
+}
+
+func (s *hitSources) show(p string) string {
+	if s == nil || s.display == nil {
+		return p
+	}
+	return s.display(p)
+}
+
+// displayPath is p as a person reads it: relative to the first of roots
+// that holds it, else with ~ for home.
+func displayPath(p, home string, roots ...string) string {
+	if !filepath.IsAbs(p) {
+		return p
+	}
+	for _, r := range roots {
+		if r == "" {
+			continue
+		}
+		if rel, err := filepath.Rel(r, p); err == nil && inside(rel) {
+			return rel
+		}
+	}
+	if home != "" {
+		if rel, err := filepath.Rel(home, p); err == nil && inside(rel) {
+			return "~/" + rel
+		}
+	}
+	return p
+}
+
+// inside reports whether a filepath.Rel result is below its base.
+func inside(rel string) bool {
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// docKind is the kind of a hit in group g (see docGroup).
+func docKind(g string, attached bool) string {
+	switch g {
+	case groupSkill:
+		return "skill"
+	case groupMemory:
+		return "memory"
+	case groupRules:
+		return "rule"
+	case groupMCPDocs:
+		return "mcp-doc"
+	}
+	if attached {
+		return "attached doc"
+	}
+	return "doc"
 }
 
 // surfaceMargin is how far the top hit must beat the runner-up to surface.
@@ -93,8 +207,9 @@ type DocsNote struct {
 // not, is recorded in stats (nil-safe); estimate sizes the appended entry;
 // fetch (nil-safe) reads a short document whole so it can be inlined; group
 // (nil-safe: one group) names the corpus a hit came from; skill (nil-safe)
-// names the skill a hit is the SKILL.md of.
-func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, group func(docID string) string, skill func(docID string) (skillHit, bool), onDocs func(DocsNote)) agent.NotificationPreparer {
+// names the skill a hit is the SKILL.md of; src (nil-safe) names the index
+// a hit came from and shows its path.
+func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.FinderOpts, stats *surfacingStats, estimate func(string) int, fetch docBodyFunc, group func(docID string) string, skill func(docID string) (skillHit, bool), src *hitSources, onDocs func(DocsNote)) agent.NotificationPreparer {
 	kinds := opts.Kinds
 	if len(kinds) == 0 {
 		kinds = []agent.EntryKind{agent.KindUser, agent.KindAssistant}
@@ -209,13 +324,20 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 		// memory index and suggest.go 2.3e-5 in the code index for "should I
 		// stash before rebasing" — one ranking let the code file win every time.
 		type win struct {
-			h agent.DocHit
-			n int // candidates in its group
+			h        agent.DocHit
+			n        int     // candidates in its group
+			runnerUp float64 // the second score, 0 when alone
 		}
 		var wins []win
 		for _, g := range groupHits(kept, group) {
-			if len(g) == 1 || g[0].Score >= surfaceMargin*g[1].Score {
-				wins = append(wins, win{g[0], len(g)})
+			// A lone candidate passes with no test at all: there is nothing
+			// to beat, however weak the match. It is marked "only candidate"
+			// in what the model and the person read. A floor for it waits on
+			// plan item "surfacing floor" (embedding scores from raglit).
+			if len(g) == 1 {
+				wins = append(wins, win{g[0], 1, 0})
+			} else if g[0].Score >= surfaceMargin*g[1].Score {
+				wins = append(wins, win{g[0], len(g), g[1].Score})
 			}
 		}
 		if len(wins) > 0 {
@@ -232,13 +354,22 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					b.WriteString("\n\n")
 				}
 				seenIDs[h.DocID] = true
+				g := ""
+				if group != nil {
+					g = group(h.DocID)
+				}
+				index := src.indexOf(h.DocID)
+				info := DocHitInfo{Title: h.Title, DocID: h.DocID, Line: h.Line, Score: h.Score,
+					Path: src.show(h.DocID), Index: index, Candidates: w.n, RunnerUp: w.runnerUp}
 				if sk, ok := lookupSkill(skill, h.DocID); ok {
 					// A skill, not a document: name it and say how to load it.
 					// A quoted fragment of a SKILL.md reads as advice, and the
 					// model acts on the fragment without loading the skill or
 					// the files it names.
-					infos = append(infos, DocHitInfo{Title: "skill " + sk.Name, DocID: h.DocID, Line: sk.Description, Score: h.Score})
-					fmt.Fprintf(&b, "A skill matches what you are working on (%d candidate skill(s); this one clearly ranked first): %q — %s\n", w.n, sk.Name, sk.Description)
+					info.Title, info.Line, info.Kind, info.Root = "skill "+sk.Name, sk.Description, "skill", sk.Root
+					infos = append(infos, info)
+					fmt.Fprintf(&b, "A skill matches what you are working on (%s): %q — %s\n", info.Why(), sk.Name, sk.Description)
+					fmt.Fprintf(&b, "Source: %s\n", info.Source())
 					fmt.Fprintf(&b, "If it applies, call skill name=%q and follow it before you act.", sk.Name)
 					if sk.File != "" {
 						// The match was in a file the skill points at: say
@@ -251,11 +382,8 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 				if fetch != nil {
 					body, inline = fetch(fctx, h.DocID, inlineMaxChars)
 				}
-				infos = append(infos, DocHitInfo{Title: h.Title, DocID: h.DocID, Line: h.Line, Score: h.Score, Inline: inline})
-				g := ""
-				if group != nil {
-					g = group(h.DocID)
-				}
+				info.Inline, info.Kind = inline, docKind(g, src.isAttached(index))
+				infos = append(infos, info)
 				switch g {
 				case groupMemory:
 					// The cue is here because this is the one moment the model
@@ -269,11 +397,13 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					b.WriteString("From a file the project's rules import (they are searchable, not in your instructions; /rules index):\n")
 				}
 				if inline {
-					fmt.Fprintf(&b, "Possibly relevant (%d candidate document(s); this one clearly ranked first): %q (id=%s, score=%.2f)\n", w.n, h.Title, h.DocID, h.Score)
+					fmt.Fprintf(&b, "Possibly relevant (%s): %q (id=%s)\n", info.Why(), h.Title, h.DocID)
+					fmt.Fprintf(&b, "Source: %s\n", info.Source())
 					b.WriteString(strings.TrimSpace(body))
 				} else {
-					fmt.Fprintf(&b, "%d possibly-relevant document(s); surfacing 1:\n", w.n)
-					fmt.Fprintf(&b, "- %q (id=%s, score=%.2f) — %s\n", h.Title, h.DocID, h.Score, h.Line)
+					fmt.Fprintf(&b, "%d possibly-relevant document(s); surfacing 1 (%s):\n", w.n, info.Why())
+					fmt.Fprintf(&b, "- %q (id=%s) — %s\n", h.Title, h.DocID, h.Line)
+					fmt.Fprintf(&b, "Source: %s\n", info.Source())
 					b.WriteString("Call the search tool with an id to read a document if it helps.")
 				}
 			}

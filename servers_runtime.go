@@ -597,8 +597,11 @@ func (h *Harness) rebuildTools() {
 		// a margin over the runner-up instead (see docsPreparer): one
 		// document per pass, inlined when short.
 		group := sf.group(searchers[0].ID, docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc))
+		home, _ := os.UserHomeDir()
+		src := &hitSources{index: sf.idx.get, attached: sf.attached,
+			display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) }}
 		h.Session.Preparer = docsPreparer(h.store, sf.finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
-			sf.fetch, group, h.skillForDoc, cfg.OnDocs)
+			sf.fetch, group, h.skillForDoc, src, cfg.OnDocs)
 	}
 }
 

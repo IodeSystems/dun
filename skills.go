@@ -51,6 +51,9 @@ type Skill struct {
 	URI      string   `json:"-"`
 	Files    []string `json:"-"`
 	UserOnly bool     `json:"userOnly,omitempty"`
+	// Root names the root a skill was loaded from, for a person reading
+	// where a surfaced skill came from (skillRootLabel).
+	Root string `json:"-"`
 }
 
 const (
@@ -99,6 +102,28 @@ func withSynced(roots []struct{ dir, source string }) []struct{ dir, source stri
 	return out
 }
 
+// skillRootLabel names a skill root for a person: the user's
+// ~/.claude/skills, a claude.ai sync bucket under a root, the dun user
+// skills, the project's, or an extension's.
+func skillRootLabel(dir, source string) string {
+	if filepath.Base(filepath.Dir(dir)) == "synced" {
+		return "claude.ai sync (synced/" + filepath.Base(dir) + ")"
+	}
+	switch {
+	case strings.HasPrefix(source, "extension "):
+		return source
+	case source == "project":
+		return "project " + filepath.Join(filepath.Base(filepath.Dir(dir)), filepath.Base(dir))
+	}
+	if home, _ := userHomeDir(); home != "" && dir == filepath.Join(home, ".claude", "skills") {
+		return "user ~/.claude/skills"
+	}
+	if dir == filepath.Join(filepath.Dir(SessionsDir()), "skills") {
+		return "dun user skills"
+	}
+	return source
+}
+
 // loadLocalSkills reads every */SKILL.md under the roots, and under their
 // synced buckets.
 func loadLocalSkills(roots []struct{ dir, source string }) []Skill {
@@ -118,7 +143,7 @@ func loadLocalSkills(roots []struct{ dir, source string }) []Skill {
 				continue
 			}
 			if s, ok := parseSkill(string(b), e.Name()); ok {
-				s.Source, s.Dir = r.source, dir
+				s.Source, s.Dir, s.Root = r.source, dir, skillRootLabel(r.dir, r.source)
 				out = append(out, s)
 			}
 		}
@@ -229,7 +254,7 @@ func discoverMCPSkills(ctx context.Context, rr resourceReader, id string, rs []m
 		if !ok {
 			continue
 		}
-		s.Source, s.Server, s.URI = "mcp:"+id, id, r.URI
+		s.Source, s.Server, s.URI, s.Root = "mcp:"+id, id, r.URI, "mcp server "+id
 		for _, o := range rs {
 			if o.URI != r.URI && strings.HasPrefix(o.URI, dir+"/") {
 				s.Files = append(s.Files, strings.TrimPrefix(o.URI, dir+"/"))

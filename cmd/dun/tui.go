@@ -472,6 +472,10 @@ type docNode struct {
 	title, line string
 	score       float64
 	open        bool
+	// source and why come from the engine ("" from an older one): where the
+	// document came from, and why it won.
+	source, why string
+	kind        string
 }
 
 // docsBlock is a collapsed proactive-RAG summary ("N relevant · M surfaced").
@@ -485,6 +489,35 @@ type docsBlock struct {
 	cur             int  // selected doc when descended
 }
 
+// docsBriefMax is the most the collapsed row adds for the documents; a
+// longer list is left to the expanded block.
+const docsBriefMax = 60
+
+// brief names the surfaced documents on the collapsed row, by kind, each
+// lone candidate marked: " · skill docs (only candidate), memory stash".
+// "" when it would not fit, or from an older engine that sends no kind.
+func (d *docsBlock) brief() string {
+	var parts []string
+	for _, doc := range d.docs {
+		if doc.kind == "" {
+			return ""
+		}
+		p := doc.title
+		if !strings.HasPrefix(p, doc.kind+" ") {
+			p = doc.kind + " " + p
+		}
+		if strings.HasPrefix(doc.why, "only candidate") {
+			p += " (only candidate)"
+		}
+		parts = append(parts, p)
+	}
+	s := strings.Join(parts, ", ")
+	if s == "" || len([]rune(s)) > docsBriefMax {
+		return ""
+	}
+	return " · " + s
+}
+
 func (d *docsBlock) render(open bool) string {
 	glyph := "▸ "
 	if open {
@@ -493,6 +526,9 @@ func (d *docsBlock) render(open bool) string {
 	label := fmt.Sprintf("%s🔎 %d relevant doc(s) · %d surfaced", glyph, d.found, d.surfaced)
 	if d.tokens > 0 {
 		label += commaf(" · ~%d tok", d.tokens)
+	}
+	if !open {
+		label += d.brief()
 	}
 	head := stNote.Render(label)
 	if !open || len(d.docs) == 0 {
@@ -510,7 +546,14 @@ func (d *docsBlock) render(open bool) string {
 		if doc.open {
 			dg = "▾"
 		}
-		lines = append(lines, fmt.Sprintf("   %s%s %s  %s", cursor, dg, title, stDim.Render(fmt.Sprintf("(%.2f)", doc.score))))
+		why := doc.why
+		if why == "" {
+			why = fmt.Sprintf("score %.2g", doc.score)
+		}
+		lines = append(lines, fmt.Sprintf("   %s%s %s  %s", cursor, dg, title, stDim.Render("("+why+")")))
+		if doc.source != "" {
+			lines = append(lines, stDim.Render("        "+doc.source))
+		}
 		if doc.open && doc.line != "" {
 			lines = append(lines, stDim.Render("        "+doc.line))
 		}
@@ -3420,7 +3463,8 @@ func docsFromEvent(ev evMsg) *docsBlock {
 	if arr, ok := ev["docs"].([]any); ok {
 		for _, it := range arr {
 			dm, _ := it.(map[string]any)
-			d.docs = append(d.docs, docNode{title: str(dm["title"]), line: str(dm["line"]), score: floatOf(dm["score"])})
+			d.docs = append(d.docs, docNode{title: str(dm["title"]), line: str(dm["line"]), score: floatOf(dm["score"]),
+				source: str(dm["source"]), why: str(dm["why"]), kind: str(dm["kind"])})
 		}
 	}
 	return d
