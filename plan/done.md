@@ -989,3 +989,76 @@ says "(just type)" while it is highlighted and not yet capturing.
   reference file does not trigger a re-index until the next tool rebuild
   (skillsSig watches SKILL.md). Summary faithfulness is the model's; the
   summary is shown only via /rules token counts, not its text.
+
+## ✅ MCP switches at global, project and session scope (USER, 2026-10-22)
+
+- **What:** every server has an on/off switch, a mode (standalone = dun
+  connects to it; scripted = hosted in mcpshell, called through eval) and
+  per-tool switches, each at three scopes. Resolution: session if set, else
+  project, else global (`mcpscope.go`: `loadCatalog` keeps the global layer
+  — built-ins + `$DUN_HOME/mcp.json` — apart from the project layers — repo
+  dun.json files, `projects/<id>/`, overlay — and `resolve` adds the
+  session's). Global writes go to mcp.json (a switch for a built-in or a
+  repo-defined server is a partial entry there, skipped where nothing
+  defines the server); project writes to `projects/<id>/dun.local.json`
+  (`autostart`, `via`, new `tools: {name: bool}`); session writes to
+  `<session>.mcp.json` beside the `.jsonl` (`LoadSessionServers` at Start).
+  `reloadServers` applies a change (stop / start / restart the shell / rebuild
+  tools); `followServers` runs it at the top of every turn, starting what
+  turned on in the background. A tool resolves session map > project map >
+  project `disable` list (still wholesale) > global `disable`.
+- **Commands:** `/mcp on|off <id> [--global|--project|--session]` (bare:
+  session), `/mcp unset <id> --project|--session`, `/mcp mode <id>
+  standalone|scripted|unset [--scope]` (`via`, `move`, `shell`/`direct`
+  accepted), `/mcp toggle <id> <tool> on|off|unset [--scope]`. `/rag on|off`
+  are session switches; `/rag auto` = project on, `/rag manual` = project off
+  (kept, not deprecated; manual now also stops it, since off is off). Palette
+  completes ids, presets, modes, switches and scope flags.
+- **TUI:** bare `/mcp` opens the table in the pager (`server proto global
+  project session mode → state`); `g` global on/off, `p`/`s` unset→on→off,
+  `m` mode at the mode scope (session; `M` then g/p/s picks it), hint names
+  it. Hotkey letters bold+underlined (`stHotKey`, no color, so the Ascii
+  profile renders the plain word — tested). `/mcp tools <id>` rows show
+  g/p/s marks; g/p/s cycle them, space toggles at session. The TUI no longer
+  re-sends `/rag on` after an engine restart (the engine keeps the switches).
+- **/mcp add:** presets (`mcppresets.go`; Figma's URL marked unverified),
+  `/mcp add <preset>` or typing a preset id prefills; the server row says
+  "remote (HTTP)" or "local command (stdio)"; a command is split with shell
+  quoting (unbalanced quote = form error) and hides bearer/oauth; a masked
+  env row `NAME=value NAME2=$VAR` (an env value that is wholly `$NAME` is
+  read at start, like bearer). No working-directory row: ServerSpec has none.
+- **Also fixed:** /context counted an added server's tools as built-in
+  (`groupTools` keyed by the raw name, not `id__name`).
+- **Live** (tmux, scratch HOME + DUN_HOME, real model local-Qwen3.8-27B,
+  workspace `dunscratch-mcp`, plan/m3/fakemcp.py as `corp`): added corp in
+  the form (bearer masked, "remote (HTTP)") → `on (global)`. `p` twice →
+  `○` project, `off (project)`, stopped, `/mcp tools` listed only shell.
+  `/mcp on corp` → `on (session)`; the model named `corp__lookup_ticket`.
+  `/mcp mode corp scripted` → `scripted (session)`, shell restarted; the
+  model ran `help("corp")` → `corp.lookup_ticket` and said it had no
+  `corp__lookup_ticket`. Killed every scratch process (TUI, scratch dund,
+  launcher, engine) and `dun --continue`: table showed session `●`, mode
+  `scripted (session)`. `m` → `standalone (session)`; /context listed
+  `mcp: corp 46` (after the groupTools fix). `/mcp unset corp --session` →
+  `off (project)`; then the project file was rewritten by hand (another
+  writer): the table still said off until a turn; after one turn `on
+  (global)`, running, and the next turn's model named
+  `corp__lookup_ticket`. `/mcp toggle corp lookup_ticket off --project` →
+  tools view `g● p○ s–`, 0 of 1 on, file holds `"tools":
+  {"lookup_ticket": false}`.
+- **Known / not verified:** a server turned on by another writer joins the
+  tool set one turn after the boundary that started it (it starts in the
+  background). The presets were not started live (npx); Figma's URL is
+  unchecked. Global mode keys and `M` scope picking verified by tests only.
+  A `$` value in env that was meant literally (`KEY=$X`) is now read from
+  the environment. Removing a server leaves its project/session switch
+  entries behind (harmless: skipped). Web and mobile get the text table only.
+- **Assumptions:** the catalog stays where definitions already were —
+  added servers in mcp.json, built-ins in code, a repo's in its dun.json —
+  nothing moved; "migration" is that existing files already mean global
+  (mcp.json) and project (the rest), tested by comparing against the old
+  one-merge resolution. Stored values stay `direct`/`shell`: an older dun
+  rejects any other `via` and would fail to load mcp.json. A shell-placed
+  server with no autostart anywhere counts as on (the shell always hosted
+  it). `Config.Servers` is now the base the files layer over, not a
+  replacement; a child still takes its parent's list as given.

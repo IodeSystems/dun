@@ -98,6 +98,11 @@ full detail archived in `done.md`.
   cut the running turn; the partial reply, a cut call's result and a marker
   (short reasoning note) stay in the transcript; queued messages start the
   next turn. ctrl+c still only quits the TUI. See `done.md`.
+- **MCP switches at three scopes** (2026-10-22) — on/off, mode (standalone ·
+  scripted) and per-tool resolve session > project > global; session values
+  in the session's `.mcp.json`; a running session follows changes at its next
+  turn; `/mcp` is a table with g/p/s/m keys; `/mcp add` presets, quoted
+  commands, env. See `done.md`.
 - **Kill background jobs** (2026-10-22) — `KillJob` ends a job's process group
   (SIGTERM, SIGKILL after 2s; docker: `docker stop`); `exec_monitor kill`,
   `/jobs [kill <n>|kill all]`, `x` in the activity pane; an interrupt lists the

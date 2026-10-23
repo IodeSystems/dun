@@ -24,11 +24,33 @@ should still get a working dun. Turn them on per session, or once for good:
 
 | command | does |
 |---|---|
-| `/rag` · `/lsp` | status: running? autostart? and the command that changes each |
-| `/rag on` · `/lsp on` | start it now, this session |
-| `/rag off` · `/lsp off` | stop it now |
-| `/rag auto` · `/lsp auto` | start it now **and** every future session (saved) |
-| `/rag manual` · `/lsp manual` | stop starting it automatically (leaves it running) |
+| `/rag` · `/lsp` | status: on or off, which switch decided, and the command that changes each |
+| `/rag on` · `/lsp on` | on for this session (kept across a resume) |
+| `/rag off` · `/lsp off` | off for this session |
+| `/rag auto` · `/lsp auto` | on for this project, every session (= `on --project`) |
+| `/rag manual` · `/lsp manual` | off for this project (= `off --project`); it stops now |
+
+**Every server has three switches** — global (`$DUN_HOME/mcp.json`, every
+workspace), project (`$DUN_HOME/projects/<id>/dun.local.json`) and session
+(the session's `.mcp.json` beside its `.jsonl`). The session's wins if set,
+then the project's, then the global one; global is on or off, the other two
+can also be unset. The same three scopes hold a server's **mode** —
+standalone (dun connects to it; every tool schema rides every request) or
+scripted (mcpshell hosts it; the model calls it through `eval`) — and each
+tool's on/off. A running session follows a global or project change at its
+next turn, unless it set that switch itself.
+
+| command | does |
+|---|---|
+| `/mcp` | the table: `server · proto · global · project · session · mode · → state`; in the TUI `g`/`p`/`s` cycle a column, `m` the mode (`M` then `g`/`p`/`s` picks its scope) |
+| `/mcp on\|off <id> [--global\|--project\|--session]` | a switch (bare: this session) |
+| `/mcp unset <id> --project\|--session` | clear one |
+| `/mcp mode <id> standalone\|scripted\|unset [--scope]` | where it runs (`via`, `move`, `shell`/`direct` still work) |
+| `/mcp toggle <id> <tool> on\|off\|unset [--scope]` | one tool |
+| `/mcp add [preset]` | a form; presets: playwright, chrome-devtools, mobile, figma |
+
+A repo's committed `dun.json` `autostart`/`via` is not a fourth scope: it is
+the project value while the project's own switch is unset.
 
 **What `/rag` indexes.** In a git repo, the files git shows (tracked plus
 untracked-not-ignored); outside one, a walk that honors `.gitignore`. Then,
@@ -63,7 +85,7 @@ it costs you that family, not your session.
 
     $DUN_HOME/projects.json                  absolute repo dir → id (minted on first sight)
     $DUN_HOME/projects/<id>/dun.json         optional, yours to write
-    $DUN_HOME/projects/<id>/dun.local.json   what /rag auto, /lsp auto save (0600)
+    $DUN_HOME/projects/<id>/dun.local.json   the project switches (/rag auto, /mcp on --project) (0600)
     $DUN_HOME/projects/<id>/agents_read      the AGENTS.md guard's memory
     $DUN_HOME/projects/<id>/worktrees/       --worktree session trees
     $DUN_HOME/projects/<id>/overlays/<dir>/  one linked worktree's own state
@@ -77,8 +99,12 @@ worktree: a symlink `worktrees/x` points at the real sibling.
 A repo MAY commit `dun.json` or `.dun/dun.json` (the PROJECT — "this repo
 needs a db tool"); dun reads them and never writes them. Precedence:
 
-    built-in defaults  <  $DUN_HOME/mcp.json  <  dun.json  <  .dun/dun.json
-      <  projects/<id>/dun.json, dun.local.json  <  overlay  <  Servers set in Go
+    built-in defaults (or Servers set in Go)  <  $DUN_HOME/mcp.json  <  dun.json
+      <  .dun/dun.json  <  projects/<id>/dun.json, dun.local.json  <  overlay
+      <  the session's switches
+
+(mcp.json is the global scope; everything after it up to the overlay is the
+project scope.)
 
 A `dun.local.json` or `.dun/dun.local.json` in the repo is the older layout:
 still read (just below the project dir), and copied into the project dir the
