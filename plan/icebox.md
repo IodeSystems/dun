@@ -13,6 +13,17 @@
 
 ## Conditional — worth doing when the condition fires
 
+### The real dun index holds Claude Code worktrees (item 26 finding)
+`dun__dun-main` on the 7420 daemon (2026-10-23): 2582 documents, 2174 under
+`.claude/worktrees/` (with `mobile/node_modules`). dun's own ingest skips
+them (`workspaceCopies`, rag_ingest.go), so they came from an older ingest
+or raglit's watch of the repo root. They tie the delta (identical copies,
+identical similarity) and are most of the off-topic false positives in the
+item-26 calibration. Fix is a write to the real index: `/raglit exclude
+**/.claude/worktrees/**` (and `**/node_modules/**`) in the dun checkout.
+**Resume when:** USER approves a write to the 7420 daemon; then re-run the
+code part of the calibration (scratchpad `floor/calib.py`).
+
 ### Attached indexes keep raglit's `shared` namespaces (item 20 follow-up)
 With another project's index attached, dun sends `<own>:*,<proj>:<idx>`
 as the search selector, which replaces raglit's default (own + the config's

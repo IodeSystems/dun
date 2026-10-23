@@ -159,43 +159,8 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
-### ◻ Surfacing floor: a lone weak match should not surface (USER, 2026-10-23)
-
-USER's case: a long query with only one weak match surfaced a claude.ai
-skill as "1 surfaced". A group with one candidate passes the margin test
-with nothing to beat (notify.go, `len(g) == 1`); since item 24 it is
-marked "only candidate" in the UI and the model's text, but it still
-surfaces.
-
-- **Idea (USER):** embeddings give a similarity in a fixed range, so an
-  ABSOLUTE floor is possible; BM25 has none (its scores move with the
-  corpus: 1e-5 in a small index), and its hits carry no term-coverage
-  signal ("3 of 40 query terms matched") that a floor could use instead.
-- **Dependency (raglit, another session's repo):** the MCP `search` tool
-  takes query/siblings/index/path/limit and no `mode`
-  (`cmd/raglit/serve.go`, checked at 08c1551); the daemon's
-  `searchByMode` (`cmd/raglit/daemon.go`) already does `vec|hybrid`. Asked
-  of raglit: `mode` on MCP search, and the similarity on each hit. A
-  term-coverage field on BM25 hits would be an alternative.
-- **Blocking decisions (USER):** (1) floor on what — vec similarity of
-  the lone candidate, a hybrid score, or BM25 term coverage; (2) the
-  floor's value (needs a measurement like M0's on the memory/skills
-  probes); (3) whether the floor applies to every winner or only to lone
-  candidates (the margin already guards the others); (4) an index with no
-  embeddings (no `--embed`): keep today's rule, or never surface a lone
-  candidate.
-- **Evidence (item 24 live, 2026-10-23, raglit 08c1551, BM25):** "Which
-  mirror does a quillpress gazette issue get pushed to?" surfaced 3, each
-  the only candidate of its group: the quillpress skill (9.2e-06, right),
-  a memory note about the tidewater rollback (1e-06, wrong) and the
-  project README (1e-06, wrong). The wrong two are lone candidates, not
-  margin winners.
-- **next:** once raglit has `mode`: call search with `mode=vec` for the
-  lone candidate's group (or hybrid for all), log the similarity of right
-  and wrong lone hits on the M0 probes, propose a floor.
-- **risks:** a second search per pass doubles the turn.before latency; an
-  embedding model that is down must fail open (surface as today).
-- **optional extensions:** show the similarity next to "only candidate".
+### ✅ 27. Surfacing floor — done 2026-10-23, see done.md (open: the coverage
+floor for an index without embeddings, 0.5 + ratio vs 0.67 alone)
 
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 

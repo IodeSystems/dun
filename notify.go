@@ -229,10 +229,10 @@ const surfaceMargin = 1.5
 // Calibrated 2026-10-23 (plan/done.md, "Surfacing floor"): 43 on-topic and
 // 42 off-topic questions over the dun code, skills, memory and rules
 // indexes, nomic-embed-text. On-topic right hits scored 0.62–0.84,
-// off-topic top hits 0.46–0.73 (most under 0.67). 0.68 + 0.01: 22 of 43
-// surfaced the right or a related document, 3 a wrong one, and 1 of 42
+// off-topic top hits 0.47–0.73 (37 of 42 under 0.67). 0.68 + 0.01: 22 of
+// 43 surfaced the right or a related document, 3 a wrong one, and 1 of 42
 // off-topic questions surfaced anything; 0.70 cut that to 0 but surfaced
-// right on 15 of 43. Without embeddings (the same questions, bm25):
+// the right or a related one on 15 of 43. Without embeddings (bm25):
 // coverage 0.5 alone surfaced on 22 of 42 off-topic questions; with the
 // ratio, 6.
 const (

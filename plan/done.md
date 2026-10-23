@@ -1631,3 +1631,242 @@ early data indicates it is correct."
   RETURNS (both events share a timestamp), so a client cannot see a long
   exec start; and the `tool_result` event carries the result before the
   lift, without the message.
+
+## ✅ 27. Surfacing floor: similarity floor + delta; coverage without embeddings (USER, 2026-10-23)
+
+USER: a long query with one weak match surfaced a claude.ai skill as "1
+surfaced". Item 24 live: one question surfaced 3 lone candidates, 2 wrong.
+Two causes: a lone candidate passed with no test, and since raglit's search
+went hybrid by default (raglit e66a3df) the score is RRF (≤ ~0.033), so the
+1.5× ratio almost never passed with two candidates. Design approved by USER
+2026-10-23. Commit `5319618`.
+
+- **What:**
+  - Query (`surfaceQuery`, `surfaceQueryWords` = 50): the newest user
+    message since the last pass, else (a later pass in the turn) the newest
+    entry with text; its first 50 words. Before: all new text joined (the
+    reply since the last pass + the message).
+  - `mode` omitted (raglit: hybrid on an index with embeddings, bm25 on one
+    without; an explicit hybrid/vec skips indexes without).
+  - Index kind: the search role takes `list` (manifest
+    `"list": "list_indexes"`); `indexMeaning` reads `{indexes:[{name,
+    meaning}]}` once per surfacer (rebuilt by applyTools: server restart,
+    attach change) and once more per index the list does not name. An
+    index still unknown: similarity rule if any of its hits this pass has a
+    similarity, else coverage.
+  - `hitIndexes.note` keeps per document the best `similarity`, the most
+    `matched_terms`, and `query_terms`. Candidates sort by similarity, then
+    score (so a skill's best-similarity file represents it).
+  - Rule per group × index kind (notify.go relevance note):
+    - with embeddings: top sim ≥ `surfaceFloor` 0.68; vs a runner-up with a
+      similarity, a lead ≥ `surfaceDelta` 0.01; a lone candidate needs only
+      the floor; no similarity → never surfaces; a runner-up with none sets
+      no bar.
+    - without: top (by score) holds ≥ `coverageFloor` 0.5 of the query's
+      words, and ≥ 1.5× the runner-up's score (kept: see the bm25 table).
+    - raglit before e66a3df (no `query_terms`): the old ratio rule.
+  - Why: `sim 0.71 · 3/4 terms · +0.07 over runner-up (of 4)`, `only
+    candidate · sim 0.66 · 2/3 terms`, `runner-up has no sim (of 2)`;
+    without embeddings `2/3 terms · 2.0× the runner-up (of 3)`; an older
+    raglit or an older event: the item-24 text. proto `DocHit` adds
+    `similarity`, `matched_terms`, `query_terms`, `runner_up_sim`
+    (omitempty). The TUI, `-p`, web and mobile show the `why` string as
+    sent; the source line from item 24 is unchanged.
+- **Calibration** (2026-10-23, read-only `GET /search` and `/indexes`, no
+  mode, n=8, one index per query; scripts in the session scratchpad
+  `floor/`):
+  - Indexes: code = `dun__dun-main` and skills = `dun__skills` on the real
+    7420 daemon (raglit e66a3df). The 7420 daemon has no dun memory or rules
+    index, so memory and rules ran on our own daemon (127.0.0.1:7488, built
+    from `git archive e66a3df`, `--embed`, the same config/embedder) with
+    copies of real files: memory = the 23 zdx-go Claude Code memory notes
+    (`~/.claude/projects/-home-nthalk-local-src-iodesystems-zdx-go/memory`),
+    rules = the 14 files of `~/doc/patterns/*.md`. Identity captions had
+    finished before the run.
+  - Found: `dun__dun-main` holds 2582 documents, 2174 of them under
+    `.claude/worktrees/` (Claude Code worktrees, with `mobile/node_modules`).
+    The duplicates give identical similarities (delta 0) and the
+    node_modules READMEs/CHANGELOGs are most off-topic false positives.
+    Not changed here (see icebox).
+  - Per document: the best similarity of its fragments; skills one
+    candidate per skill. R = right, rel = the project's own plan docs
+    describing the feature (counted apart), W = wrong; `wt:` a worktree
+    copy. The last column is the chosen rule's outcome.
+
+    | idx | kind | question | top-3: sim terms label | 0.68/0.01 |
+    |---|---|---|---|---|
+    | code | on | the model keeps calling the same tool with the same arguments in a loop, what stops it | 0.746 8/8 R loopguard.go; 0.696 6/8 rel wt:plan/plan.md; 0.696 6/8 rel wt:plan/plan.md | right |
+    | code | on | how does dun stub out an older copy of a file it read again | 0.707 8/8 R rehead.go; 0.703 7/8 rel wt:plan/plan.md; 0.703 7/8 rel wt:plan/plan.md | none (miss) |
+    | code | on | what happens when the endpoint refuses the prompt because it is too long | 0.674 6/7 R rescue.go; 0.672 6/7 rel wt:plan/plan.md; 0.672 4/7 rel wt:plan/plan.md | none (miss) |
+    | code | on | measure chars per token instead of dividing bytes by four | 0.751 5/8 rel wt:plan/m0/notes/meter-first-round; 0.717 8/8 R tokencal.go; 0.701 5/8 rel wt:plan/plan.md | related |
+    | code | on | OAuth for a remote MCP server that answers 401 | 0.822 5/6 rel plan/plan.md; 0.765 6/6 rel wt:plan/plan.md; 0.765 6/6 rel wt:plan/plan.md | related |
+    | code | on | how do I kill a runaway background job | 0.716 3/4 rel wt:plan/plan.md; 0.716 3/4 rel wt:plan/plan.md; 0.716 3/4 rel wt:plan/plan.md | none (miss) |
+    | code | on | git push in a child process hangs asking for credentials on the terminal | 0.680 5/8 rel plan/plan.md; 0.670 1/8 rel plan/m0/notes/untracked-files-lost; 0.662 4/8 W ship.go | none (miss) |
+    | code | on | who writes the commit message for worktree commit | 0.719 4/4 R commit.go; 0.704 4/4 W cmd/dun/servers.go; 0.681 4/4 W cmd/dun/commands.go | right |
+    | code | on | how much has this session spent and how close are the rate limits | 0.686 0/7 rel wt:plan/done.md; 0.663 4/7 W proto/events.go; 0.663 3/7 rel plan/plan.md | related |
+    | code | on | save a memory note automatically when the user says to remember something | 0.798 6/8 rel wt:plan/plan.md; 0.792 6/8 rel plan/plan.md; 0.702 4/8 rel plan/icebox.md | none (miss) |
+    | code | ambig | the answer got cut off because the window had no room left for output | 0.740 8/11 rel wt:plan/plan.md; 0.706 8/11 rel wt:plan/plan.md; 0.706 8/11 rel wt:plan/plan.md | related |
+    | code | ambig | make a vague request concrete before the agent acts | 0.673 7/7 R rephrase.go; 0.661 2/7 W node_modules:corsPrivateNetworkPer; 0.654 2/7 W node_modules:corsPreflightAllowPri | none (miss) |
+    | code | ambig | accounting for the llm calls that are not the turn itself | 0.735 6/6 R sidecall.go; 0.695 5/6 W harness.go; 0.675 5/6 W wt:README.md | right |
+    | code | off | how do I bake sourdough bread with a stiff starter | 0.592 0/5 - tools/ttydrive/README.md; 0.586 0/5 - node_modules:README.md; 0.581 0/5 - wt:tools/ttydrive/README.md | none |
+    | code | off | configure nginx as a reverse proxy with letsencrypt certificates | 0.635 1/6 - node_modules:README.md; 0.632 0/6 - node_modules:corsInsecurePrivateNe; 0.628 2/6 - node_modules:README.md | none |
+    | code | off | write a SQL migration that adds an index on the users email column | 0.663 1/8 - node_modules:SECURITY.md; 0.650 2/8 - node_modules:SameSiteWarnStrictLax; 0.648 4/8 - plan/plan.md | none |
+    | code | off | difference between a mutex and a semaphore in rust | 0.649 0/5 - plan/m0/notes/model-invents-ids.md; 0.649 0/5 - wt:plan/m0/notes/model-invents-ids; 0.649 0/5 - wt:plan/m0/notes/model-invents-ids | none |
+    | code | off | plan a three day trip to Lisbon in March | 0.547 1/6 - stories/the-lanterns-of-vell.md; 0.537 1/6 - node_modules:readme.md; 0.536 0/6 - node_modules:SECURITY.md | none |
+    | code | off | why does my react component render twice in strict mode | 0.690 4/7 - node_modules:README.md; 0.647 3/7 - node_modules:README.md; 0.642 3/7 - node_modules:README.md | SURFACED |
+    | code | off | kubernetes pod stuck in CrashLoopBackOff after a deploy | 0.699 1/6 - wt:plan/plan.md; 0.699 1/6 - plan/plan.md; 0.667 0/6 - plan/m0/notes/mcp-stderr-flake.md | none |
+    | code | off | monthly payment on a thirty year mortgage at six percent | 0.555 1/7 - wt:plan/plan.md; 0.555 1/7 - wt:plan/plan.md; 0.555 1/7 - wt:plan/plan.md | none |
+    | code | off | tune postgres autovacuum for a write heavy table | 0.625 0/6 - wt:plan/plan.md; 0.625 1/6 - plan/plan.md; 0.611 1/6 - tools/ttydrive/README.md | none |
+    | code | off | draft the quarterly sales report for the northeast region | 0.578 0/6 - node_modules:README.md; 0.570 1/6 - wt:plan/done.md; 0.570 1/6 - wt:plan/done.md | none |
+    | code | off-ambig | how should I name the variables in this python script | 0.671 1/5 - examples/extensions/poly-lsp/exten; 0.665 1/5 - testdata/extensions/hello/extensio; 0.658 2/5 - node_modules:Readme.md | none |
+    | code | off-ambig | set up a github actions workflow that runs the tests | 0.731 5/7 - node_modules:CHANGELOG.md; 0.729 5/7 - node_modules:CHANGELOG.md; 0.726 5/7 - node_modules:CHANGELOG.md | none |
+    | skills | on | make a powerpoint deck for the quarterly review | 0.674 3/5 R pptx; 0.672 4/5 W google-workspace | none (miss) |
+    | skills | on | fill in the fields of this PDF form | 0.752 4/4 R pdf; 0.650 3/4 W google-workspace | right |
+    | skills | on | edit this Word document and keep tracked changes | 0.715 6/6 W google-workspace; 0.671 6/6 W docs; 0.643 5/6 R docx | WRONG |
+    | skills | on | build a spreadsheet with formulas from this csv | 0.653 4/4 W google-workspace; 0.619 4/4 R xlsx | none (miss) |
+    | skills | on | research the main vector databases and write a report comparing them | 0.681 6/8 R deep-research; 0.665 6/8 W skill-creator; 0.608 5/8 W google-workspace | right |
+    | skills | on | set a breakpoint in IntelliJ and step through the code | 0.668 6/6 R ij-debugger; 0.596 4/6 W google-workspace; 0.563 2/6 W pptx | none (miss) |
+    | skills | on | write a new skill and test whether it triggers | 0.694 6/6 R skill-creator; 0.632 5/6 W google-workspace; 0.626 5/6 W ij-debugger | right |
+    | skills | on | import my memories from ChatGPT | 0.693 4/4 R import-memory; 0.531 2/4 W skill-creator; 0.521 1/4 W computer-use | right |
+    | skills | on | add a chart to my google sheet | 0.699 4/5 R google-workspace | right |
+    | skills | on | click through the login page in my chrome browser | 0.697 4/7 W built-in-browser; 0.686 6/7 R chrome-browser; 0.667 4/7 W computer-use | WRONG |
+    | skills | ambig | give me my brief for today | 0.627 4/5 R morning; 0.583 2/5 W google-workspace; 0.569 3/5 W skill-creator | none (miss) |
+    | skills | ambig | open the settings app on my mac and change the wallpaper | 0.625 3/7 R computer-use; 0.612 5/7 W built-in-browser; 0.589 4/7 W google-workspace | none (miss) |
+    | skills | off | why does the retry loop back off twice after a 429 | 0.561 3/7 - google-workspace; 0.549 3/7 - ij-debugger; 0.542 3/7 - built-in-browser | none |
+    | skills | off | rename this Go function across the package | 0.575 3/5 - google-workspace; 0.560 2/5 - skill-creator; 0.519 3/5 - pptx | none |
+    | skills | off | the session store test is flaky on CI | 0.603 1/5 - built-in-browser; 0.567 2/5 - computer-use; 0.566 1/5 - chrome-browser | none |
+    | skills | off | how do I bake sourdough bread with a stiff starter | 0.550 0/5 - skill-creator; 0.535 0/5 - google-workspace; 0.493 0/5 - morning | none |
+    | skills | off | what does the soft turn budget do when it runs out | 0.577 4/5 - google-workspace; 0.556 2/5 - import-memory; 0.542 2/5 - computer-use | none |
+    | skills | off | fix the nil pointer in the harness when the server stops | 0.594 2/6 - google-workspace; 0.579 1/6 - built-in-browser; 0.573 2/6 - ij-debugger | none |
+    | skills | off | add a column to the users table and backfill it | 0.676 4/5 - google-workspace | none |
+    | skills | off | explain how BM25 scoring works | 0.566 2/4 - computer-use; 0.564 1/4 - google-workspace; 0.561 2/4 - skill-creator | none |
+    | skills | off | kubernetes pod stuck in CrashLoopBackOff after a deploy | 0.554 1/6 - morning; 0.550 1/6 - ij-debugger; 0.546 1/6 - google-workspace | none |
+    | skills | off | commit this with a conventional commit message | 0.544 2/3 - google-workspace; 0.528 1/3 - ij-debugger; 0.517 1/3 - computer-use | none |
+    | skills | off-ambig | summarize this file for me | 0.624 3/3 - import-memory; 0.599 2/3 - skill-creator; 0.581 1/3 - google-workspace | none |
+    | skills | off-ambig | write the release notes for this version | 0.643 3/4 - skill-creator; 0.623 2/4 - morning; 0.621 3/4 - google-workspace | none |
+    | memory | on | the task I claimed depends on other tasks that are not finished, what should I do | 0.746 7/8 R feedback_blocked_task_handling.md; 0.679 4/8 W reference_decompose_todo_close.md; 0.660 1/8 W project_test_failure_policy.md | right |
+    | memory | on | how do I connect to the production database | 0.646 2/3 R reference_prod_db.md; 0.629 1/3 W reference_db_integration_tests.md; 0.595 1/3 W reference_decompose_todo_close.md | none (miss) |
+    | memory | on | where do the database integration tests go and how do they get postgres | 0.821 6/7 R reference_db_integration_tests.md; 0.623 2/7 W project_test_failure_policy.md; 0.612 3/7 W feedback_trace_dont_guess.md | right |
+    | memory | on | what does bin/ship check before it deploys | 0.697 3/4 R project_ship_flow.md; 0.691 2/4 W project_ship_framework.md; 0.657 1/4 W project_env_agent_direction.md | none (miss) |
+    | memory | on | a test was already failing before my change, should I skip it | 0.714 5/8 R project_test_failure_policy.md; 0.638 3/8 W feedback_hil_is_work_avoidance.md; 0.631 2/8 W feedback_blocked_task_handling.md | right |
+    | memory | on | dx todo incomplete says the key is wrong | 0.836 4/6 R reference_dx_todo_incomplete_key.m; 0.746 4/6 W feedback_blocked_task_handling.md; 0.686 6/6 W reference_decompose_todo_close.md | right |
+    | memory | on | should I mark this as human in the loop only | 0.677 5/5 R feedback_hil_is_work_avoidance.md; 0.608 3/5 W feedback_trace_dont_guess.md; 0.603 1/5 W project_maturity_vines.md | none (miss) |
+    | memory | on | how should I close a decompose todo that has no dev done path | 0.827 7/9 R reference_decompose_todo_close.md; 0.741 4/9 W reference_dx_todo_incomplete_key.m; 0.706 4/9 W project_worker_close_codegen.md | right |
+    | memory | on | the worker task touched the schema, do I commit the generated code | 0.779 7/7 R project_worker_close_codegen.md; 0.620 3/7 W project_queue_resident_orchestrati; 0.613 3/7 W feedback_blocked_task_handling.md | right |
+    | memory | on | why does X happen, should I read a few snippets and guess | 0.744 6/7 R feedback_trace_dont_guess.md; 0.641 0/7 W feedback_blocked_task_handling.md; 0.622 0/7 W project_test_failure_policy.md | right |
+    | memory | ambig | who runs deploys and schema dumps for each environment | 0.695 3/6 W project_ship_framework.md; 0.653 3/6 W project_queue_resident_orchestrati; 0.652 6/6 R project_env_agent_direction.md | WRONG |
+    | memory | ambig | should orchestration run in a cron job or a watcher | 0.681 5/6 R project_queue_resident_orchestrati; 0.559 2/6 W feedback_hil_is_work_avoidance.md; 0.538 4/6 W project_flow_observability.md | right |
+    | memory | off | how do I bake sourdough bread with a stiff starter | 0.514 0/5 - project_self_service_todos.md; 0.500 0/5 - project_maturity_vines.md; 0.498 0/5 - project_test_failure_policy.md | none |
+    | memory | off | rename this Go function across the package | 0.571 2/5 - project_env_agent_direction.md; 0.566 1/5 - reference_decompose_todo_close.md; 0.565 1/5 - project_worker_close_codegen.md | none |
+    | memory | off | explain how BM25 scoring works | 0.571 2/4 - project_model.md; 0.559 1/4 - project_llm_quality_umbrella.md; 0.545 1/4 - feedback_visibility_first_llm_pipe | none |
+    | memory | off | make a powerpoint deck for the quarterly review | 0.612 2/5 - project_llm_quality_umbrella.md; 0.599 2/5 - feedback_visibility_first_llm_pipe; 0.577 1/5 - feedback_hil_is_work_avoidance.md | none |
+    | memory | off | why does my react component render twice in strict mode | 0.598 0/7 - feedback_blocked_task_handling.md; 0.575 1/7 - project_test_failure_policy.md; 0.565 0/7 - feedback_trace_dont_guess.md | none |
+    | memory | off | plan a three day trip to Lisbon in March | 0.473 0/6 - feedback_hil_is_work_avoidance.md; 0.464 1/6 - project_model.md; 0.462 1/6 - project_flow_observability.md | none |
+    | memory | off | configure nginx as a reverse proxy with letsencrypt certificates | 0.579 2/6 - reference_prod_db.md; 0.572 0/6 - project_env_agent_direction.md; 0.570 0/6 - project_llm_quality_umbrella.md | none |
+    | memory | off | what does the soft turn budget do when it runs out | 0.560 0/5 - feedback_hil_is_work_avoidance.md; 0.553 0/5 - feedback_blocked_task_handling.md; 0.549 1/5 - feedback_trace_dont_guess.md | none |
+    | memory | off | the OAuth callback for the MCP server fails | 0.666 1/5 - project_test_failure_policy.md; 0.634 0/5 - feedback_blocked_task_handling.md; 0.630 1/5 - project_audit_tool_investigation.m | none |
+    | memory | off | difference between a mutex and a semaphore in rust | 0.628 0/5 - feedback_hil_is_work_avoidance.md; 0.620 1/5 - project_maturity_vines.md; 0.599 0/5 - feedback_trace_dont_guess.md | none |
+    | memory | off-ambig | add a column to the users table and backfill it | 0.619 3/5 - feedback_hil_is_work_avoidance.md; 0.615 1/5 - project_model.md; 0.605 3/5 - project_event_stream.md | none |
+    | memory | off-ambig | the deploy failed, what now | 0.656 1/3 - project_ship_framework.md; 0.637 1/3 - project_test_failure_policy.md; 0.633 1/3 - project_env_agent_direction.md | none |
+    | rules | on | how should a service layer its config and secrets | 0.694 5/6 R config-secrets.md; 0.622 5/6 W README.md; 0.622 5/6 W standards.md | right |
+    | rules | on | which CLI library do we use and what goes in doctor | 0.619 2/6 W observability.md; 0.614 2/6 W README.md; 0.603 3/6 W caveats.md | none (miss) |
+    | rules | on | how do I store passkey credentials | 0.623 3/3 R webauthn.md; 0.560 1/3 W config-secrets.md; 0.541 3/3 W caveats.md | none (miss) |
+    | rules | on | where should the metrics dashboard live | 0.740 3/4 R observability.md; 0.632 3/4 W standards.md; 0.591 2/4 W uploads.md | right |
+    | rules | on | resize uploaded images and serve derivatives | 0.649 5/5 R uploads.md; 0.599 5/5 W standards.md; 0.586 2/5 W observability.md | none (miss) |
+    | rules | on | design tokens a page may use | 0.688 4/5 W caveats.md; 0.681 5/5 R design.md; 0.666 4/5 W uploads.md | none (miss) |
+    | rules | off | how do I bake sourdough bread with a stiff starter | 0.506 0/5 - caveats.md; 0.472 0/5 - config-secrets.md; 0.469 1/5 - standards.md | none |
+    | rules | off | why does the retry loop back off twice after a 429 | 0.593 3/7 - uploads.md; 0.577 3/7 - webauthn.md; 0.575 2/7 - lenny.md | none |
+    | rules | off | plan a three day trip to Lisbon in March | 0.489 2/6 - standards.md; 0.477 2/6 - uploads.md; 0.459 1/6 - caveats.md | none |
+    | rules | off | explain how BM25 scoring works | 0.570 3/4 - george.md; 0.569 3/4 - standards.md; 0.551 3/4 - lenny.md | none |
+    | rules | off | rename this Go function across the package | 0.575 4/5 - uploads.md; 0.554 3/5 - caveats.md; 0.547 2/5 - standards.md | none |
+    | rules | off | kubernetes pod stuck in CrashLoopBackOff after a deploy | 0.612 1/6 - uploads.md; 0.596 1/6 - standards.md; 0.585 1/6 - observability.md | none |
+
+  - Sweep (no duplicate collapse, as built; right / related / wrong / miss
+    of 43 on-topic, surfaced of 42 off-topic):
+
+    | floor / delta | right | rel | wrong | miss | off-topic surfaced |
+    |---|---|---|---|---|---|
+    | 0.66 / 0.01 | 21 | 5 | 3 | 14 | 4 |
+    | 0.68 / 0.00 | 20 | 6 | 4 | 13 | 3 |
+    | **0.68 / 0.01** | **18** | **4** | **3** | **18** | **1** |
+    | 0.68 / 0.02 | 16 | 4 | 2 | 21 | 1 |
+    | 0.70 / 0.01 | 12 | 3 | 1 | 27 | 0 |
+
+    Per kind at 0.68 / 0.01: code 3 R + 4 rel, 0 W, 1 off-topic (react
+    question → a node_modules README, 0.690, lone after duplicates); skills
+    5 R, 2 W (Word → google-workspace 0.715; chrome → built-in-browser
+    0.697), 0 off; memory 8 R, 1 W (ambiguous), 0 off; rules 2 R, 0 off.
+    One floor: the per-kind best floors (memory 0.67, skills 0.68, code
+    0.70 on this polluted index) differ by one or two questions each, which
+    12 questions per kind do not resolve.
+  - A coverage check added to the similarity rule (sim ≥ F AND coverage ≥
+    0.4/0.5) changed nothing at delta 0.01. Not added.
+  - Without embeddings (the same 85 questions, `mode=bm25`, which is what
+    an index without embeddings answers): coverage ≥ 0.5 alone: 36 R, 7 W,
+    22 of 42 off-topic surfaced; + the 1.5× ratio: 14 R, 1 W, 6 off-topic
+    (code: 0 R — a `_test.go` twin scores within 1.5×); coverage ≥ 0.67
+    alone: 33 R, 6 W, 6 off-topic. Built: 0.5 + ratio, as approved (the
+    run supports keeping the ratio over dropping it). 0.67 alone is the
+    open decision below.
+- **Query cap** (8 long messages, 55–92 words, written in the USER's
+  style; code + skills on 7420, memory on 7488; the right document's rank
+  among the candidates of a clean view, n=20): right ranked first for
+  old query (a ~110-word reply + the message) 1/8 (out of the top 20 for
+  4/8), whole message 4/8, first 50 words 4/8, first 30 2/8, first 20
+  0/8, last 30 3/8, first 30 content words 2/8. Mean similarity of the
+  right document: old 0.676, first 50 0.709. Chosen: the first 50 words.
+- **Latency per pass** (all 5 `dun__*` indexes of the real daemon, 24
+  queries each): old query median 4.88 s (p90 5.55 s; over the
+  preparer's 3 s timeout, so those passes failed open), capped query
+  median 1.21 s (p90 1.50 s). `list_indexes` 0.11 s, once per surfacer.
+  The live session's passes (own daemon, 2 small indexes) were not
+  timed.
+- **Tests:** `surfacing_test.go`: Why (new and old texts), note's measures
+  (best similarity, terms, an older raglit), floor, delta (order by
+  similarity, not score), no similarity (lone, and as runner-up), coverage
+  for meaning=false with the ratio, an unlisted index both ways, the query
+  cap and the newest-entry pass. `extension_test.go`: through a fake MCP
+  server, the list is read once per server start and again after a
+  restart; coverage surfaces the meaning=false hit and the floor drops the
+  meaning=true one. `cmd/dun/tui_test.go`: the new why renders, the
+  collapsed row still marks a lone candidate; the item-24 event tests
+  (older why, no why) pass unchanged. `make test` passes.
+- **Live** (tmux `-L dunlive26`, scratch HOME + DUN_HOME, RAGLIT_ROOT and
+  RAGLIT_DAEMON on our own daemon 127.0.0.1:7488 from e66a3df, real model
+  local-Qwen3.8-27B; workspace `proj26` = copies of 16 dun source files;
+  `~/.claude/skills` = copies of pdf, pptx, docx, xlsx, ij-debugger):
+  - "The model keeps calling the same tool … What stops it? Answer in two
+    sentences, without calling any tools." → nothing surfaced: loopguard.go
+    0.722 vs memtrigger.go 0.723 (the instruction words blur the query);
+    the model answered "nothing automatic" (wrong).
+  - "the model keeps calling the same tool with the same arguments in a
+    loop, what stops it" → `🔎 3 relevant doc(s) · 1 surfaced · doc
+    loopguard.go`, opened: `loopguard.go (sim 0.69 · 8/8 terms · +0.03 over
+    runner-up (of 2))` / `doc · loopguard.go · index proj26-main`. The
+    session's docs entry carried the same why and Source line; the model
+    read the file and answered correctly (3 repeats, then ask_user).
+  - "What is a good recipe for sourdough bread …" → no docs block.
+  - "Fill in the fields of this PDF form for me. Which skill applies? …" →
+    `skill pdf (only candidate · sim 0.71 · 8/12 terms)` / `skill ·
+    ~/.claude/skills/pdf/FORMS.md · index skills · user ~/.claude/skills`;
+    the model named pdf.
+  - Captures: `floor/live/capture-ontopic.txt`, `capture-offtopic.txt`,
+    `capture-skill.txt` in the session scratchpad.
+- **Known / not verified:**
+  - The coverage rule (meaning=false) ran only in tests and in the bm25
+    sweep: every live index has embeddings.
+  - Seen live, not changed: on a small code-only index the similarity of
+    a right code file is lower than in the calibration (bgkill.go 0.593
+    with 4/4 terms for "How do I kill a runaway background job?"), so code
+    questions surface less there.
+  - In dun the search spans all the project's indexes merged with
+    limit 8, so a group often has 1–2 candidates; the calibration searched
+    one index at a time.
+  - Web and mobile were not run (they show `why` as sent).
+- **Assumptions:** one embedder for all indexes (similarity comparable
+  across them; the rule still runs per group); "later passes in a turn"
+  = no new user message since the last pass; a document's similarity is
+  its best fragment's.
+- **Open decision (USER):** the coverage floor for an index without
+  embeddings: 0.5 + ratio (built) vs 0.67 alone (more right, 6 vs 1 wrong,
+  same off-topic count). One constant and one branch.
