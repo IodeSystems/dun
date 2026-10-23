@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -19,6 +20,9 @@ func click(m tuiModel, x, y int) tuiModel {
 	m = mouse(m, tea.MouseActionPress, tea.MouseButtonLeft, x, y)
 	return mouse(m, tea.MouseActionRelease, tea.MouseButtonLeft, x, y)
 }
+
+// dclick is a double click: what selects in the conversation.
+func dclick(m tuiModel, x, y int) tuiModel { return click(click(m, x, y), x, y) }
 
 // rowY is the screen row of row k of block i, as the model last laid it out.
 func rowY(m tuiModel, i, k int) int {
@@ -89,7 +93,7 @@ func TestMouse_ClickSelectsTheBlockUnderIt(t *testing.T) {
 			if !onPane(m, i, last) {
 				continue
 			}
-			m = click(m, 5, rowY(m, i, last))
+			m = dclick(m, 5, rowY(m, i, last))
 			clicked[i] = true
 			if m.focus != focusConvo || m.sel != i {
 				t.Fatalf("yoff %d: click on the last row of block %d: focus %d sel %d", yoff, i, m.focus, m.sel)
@@ -117,15 +121,15 @@ func TestMouse_SecondClickToggles(t *testing.T) {
 		m.vp.SetYOffset(m.vp.YOffset - 1)
 	}
 	m.scrollPinned = false
-	m = click(m, 5, rowY(m, tog, 0))
+	m = dclick(m, 5, rowY(m, tog, 0))
 	if m.sel != tog || m.convo[tog].state != viewMinimized {
 		t.Fatalf("first click selects only: sel %d state %v", m.sel, m.convo[tog].state)
 	}
-	m = click(m, 5, rowY(m, tog, 0))
+	m = dclick(m, 5, rowY(m, tog, 0))
 	if m.convo[tog].state == viewMinimized {
 		t.Fatal("second click should toggle the block open")
 	}
-	m = click(m, 5, rowY(m, tog, 0))
+	m = dclick(m, 5, rowY(m, tog, 0))
 	if m.convo[tog].state != viewMinimized {
 		t.Fatalf("third click should toggle it closed, state %v", m.convo[tog].state)
 	}
@@ -140,12 +144,12 @@ func TestMouse_ClickInBoxBodyDescends(t *testing.T) {
 		m.vp.SetYOffset(m.vp.YOffset - 1)
 	}
 	m.scrollPinned = false
-	m = click(m, 5, rowY(m, think, 0))
+	m = dclick(m, 5, rowY(m, think, 0))
 	b := m.convo[think].box
 	if m.sel != think || b.inside {
 		t.Fatalf("header click: sel %d (want %d) inside %v", m.sel, think, b.inside)
 	}
-	m = click(m, 5, rowY(m, think, 2))
+	m = dclick(m, 5, rowY(m, think, 2))
 	if !b.inside || m.insideBox() != b {
 		t.Fatal("a click in the body should descend into the box")
 	}
@@ -155,11 +159,11 @@ func TestMouse_ClickInBoxBodyDescends(t *testing.T) {
 		t.Errorf("inside, the wheel should scroll the box: %d → %d", off, b.off)
 	}
 	// From another block, a body click selects and descends in one go.
-	m = click(m, 5, rowY(m, think-1, 0))
+	m = dclick(m, 5, rowY(m, think-1, 0))
 	if b.inside || m.sel == think {
 		t.Fatalf("selecting another block should leave the box: sel %d inside %v", m.sel, b.inside)
 	}
-	m = click(m, 5, rowY(m, think, 2))
+	m = dclick(m, 5, rowY(m, think, 2))
 	if m.sel != think || !b.inside {
 		t.Errorf("body click from elsewhere: sel %d inside %v", m.sel, b.inside)
 	}
@@ -169,7 +173,7 @@ func TestMouse_ClickInBoxBodyDescends(t *testing.T) {
 // wrapped second row too.
 func TestMouse_ClickFocusesInput(t *testing.T) {
 	m, _, _ := mouseConvo(t)
-	m = click(m, 5, rowY(m, len(m.convo)-1, 0))
+	m = dclick(m, 5, rowY(m, len(m.convo)-1, 0))
 	if m.focus != focusConvo {
 		t.Fatal("precondition: convo focus")
 	}
@@ -443,5 +447,37 @@ func TestYank_InputTypesY(t *testing.T) {
 	v.m = typeStr(v.m, "yay")
 	if got := v.m.input.Value(); got != "yay" {
 		t.Errorf("input %q", got)
+	}
+}
+
+// A single click in the conversation selects nothing and keeps the focus.
+func TestMouse_SingleClickInConvoDoesNothing(t *testing.T) {
+	m, _, _ := mouseConvo(t)
+	before := m.focus
+	m = click(m, 5, rowY(m, len(m.convo)-1, 0))
+	if m.focus != before {
+		t.Errorf("a single click moved focus %d → %d", before, m.focus)
+	}
+	m.lastClickAt = m.lastClickAt.Add(-time.Second) // too slow for a double
+	m = click(m, 5, rowY(m, len(m.convo)-1, 0))
+	if m.focus != before {
+		t.Error("two slow clicks are not a double click")
+	}
+}
+
+// esc backs out of a selection: focus returns to the input, nothing selected.
+func TestEscBacksOutOfConvoSelection(t *testing.T) {
+	m, _, _ := mouseConvo(t)
+	m = dclick(m, 5, rowY(m, len(m.convo)-1, 0))
+	if m.focus != focusConvo || m.sel < 0 {
+		t.Fatal("precondition: a block is selected")
+	}
+	m = key(m, kEsc)
+	if m.focus != focusInput || m.sel != -1 {
+		t.Errorf("esc: focus %d sel %d, want the input and no selection", m.focus, m.sel)
+	}
+	m = typeStr(m, "hi")
+	if m.input.Value() != "hi" {
+		t.Errorf("keys should go to the input, got %q", m.input.Value())
 	}
 }

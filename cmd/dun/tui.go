@@ -602,12 +602,16 @@ type tuiModel struct {
 	// A reconnect that fails (dund not back yet) is retried with backoff
 	// until reconnectFor has passed since reconnSince; reconnTries counts
 	// the attempts, for the status line.
-	reconnTries  int
-	reconnSince  time.Time
-	skipHistory  bool            // a respawned engine replays what is already on screen
-	ctrlCAt      time.Time       // the last ctrl+c that interrupted a turn (a second one quits)
-	offlineShown bool            // the saved conversation was shown from disk while dund was unreachable
-	wantServers  map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
+	reconnTries int
+	reconnSince time.Time
+	skipHistory bool      // a respawned engine replays what is already on screen
+	ctrlCAt     time.Time // the last ctrl+c that interrupted a turn (a second one quits)
+	// lastClickAt/lastClickLine: the last plain click in the conversation,
+	// to tell a double click (mouse.go).
+	lastClickAt   time.Time
+	lastClickLine int
+	offlineShown  bool            // the saved conversation was shown from disk while dund was unreachable
+	wantServers   map[string]bool // /rag, /lsp the user turned on — reapplied after a restart
 	// The viewport's rendered text, cached behind a POINTER on purpose.
 	//
 	// Bubble Tea calls View() after EVERY message — including each streamed
@@ -998,6 +1002,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.paletteSel = 0
 				m.refresh()
 				return m, nil
+			}
+			// The conversation's selection is a level too: esc drops it and
+			// gives the keys back to the input (USER 2026-10-22 — the backout
+			// after a click or ←). Inner levels (a box, docs, search) closed
+			// above.
+			if m.focus == focusConvo && m.insideBox() == nil {
+				m.setFocus(focusInput)
+				m.sel = -1
+				m.refresh()
+				return m, textinput.Blink
 			}
 			// Agent scope is the outermost thing esc can be inside. Quitting dun
 			// from within a child's conversation is not "one level out" by any

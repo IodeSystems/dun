@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -140,8 +141,18 @@ func (m tuiModel) mouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case msg.Action == tea.MouseActionRelease && m.drag.on && !m.drag.held:
 		if !m.drag.moved {
+			// A single click in the conversation does nothing (it took the
+			// focus from the input mid-sentence, USER 2026-10-22); a double
+			// click selects, or toggles the selected block.
 			at := m.drag.a.line
 			m.drag = mouseSel{}
+			now := time.Now()
+			double := now.Sub(m.lastClickAt) <= doubleClick && m.lastClickLine == at
+			m.lastClickAt, m.lastClickLine = now, at
+			if !double {
+				return m, nil
+			}
+			m.lastClickAt = time.Time{} // a third click starts over
 			return m.convoClick(at)
 		}
 		m.drag.held = true
@@ -154,6 +165,9 @@ func (m tuiModel) mouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// doubleClick is how close two clicks on one line are to count as a double.
+const doubleClick = 400 * time.Millisecond
 
 // gutterW is the columns refresh puts left of every block in convo focus.
 func (m tuiModel) gutterW() int {
