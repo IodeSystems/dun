@@ -1484,3 +1484,32 @@ docs (0.00)` with no origin; it was a claude.ai-synced skill
 - **Assumptions:** `path` relative to the workspace first, then the config
   dir; the doc id is the file path (raglit), so `path` is derived from it;
   `index` is per document, from its best hit.
+
+## mobile/ on TypeScript 7 + oxlint type-aware (2026-10-23, X-LINT-2)
+
+### ✅ mobile/: TS 7.0.2, `oxlint --type-aware`, prettier; eslint removed
+- **Gates passed:** (1) `expo config` / `--type public` / with
+  `DUN_VERSION_*` identical on TS 6.0.3 and 7.0.2 (only difference: a Node
+  `stripTypeScriptTypes` ExperimentalWarning on stderr, so require-utils falls
+  back to Node's type stripping on 7.0); tsc, `export:web`, jest pass.
+  (2) eslint-plugin-expo (3 rules) and eslint-plugin-react `no-deprecated`
+  load through oxlint `jsPlugins` (the react one under alias `react-js`);
+  each fires on a bad sample, silent on `mobile/`. (3) eslint-config-expo
+  (72 active rules) gave 0 findings on mobile/; oxlint gave 0 after the
+  fixes below.
+- **Config:** `mobile/.oxlintrc.json` = X-LINT-2 floor + eslint-config-expo
+  rules mapped (react-hooks compiler rules as `react/*`). `import/no-unresolved`
+  not carried (tsc covers it). `react.version` pinned to 19.2.3 (keep in step).
+- **Fixes the type-aware floor forced:** `process.env` is `any` under RN
+  typings (`app.config.ts` now pins it); `String(unknown)` in `api/live.ts`
+  became `scalar()`; promise-returning callbacks wrapped in `void`; one
+  needless `as Item`; `/^closed/.test` -> `startsWith`.
+- **Exception:** `public/sw.js` is outside tsconfig, so type-aware rules see
+  `error` types; an override turns off the type-aware `typescript/*` rules for
+  that one file (other rules stay on). USER to confirm.
+- **Prettier:** none before; `.prettierrc.json` (single quote, width 120)
+  and one `prettier --write` commit.
+- **Times (this box):** lint eslint 2.8-4.0 s -> oxlint 1.2 s; tsc 1.7-2.0 s
+  -> 0.5 s (TS 6 -> 7).
+- **No Makefile/CI target ran mobile lint** (no workflows in the repo);
+  `make web` only runs `export:web`. Nothing to update there.
