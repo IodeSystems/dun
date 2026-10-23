@@ -170,6 +170,10 @@ capture would keep it)
 done.md (open: not run live between two real sessions; busy/started in the
 reply are dund's view at delivery)
 
+### ✅ 31. Scrolling moved the offset but not the text — done 2026-10-23, see
+done.md (open: the clear/sync race is reproduced by a worst-order harness,
+not caught on a real terminal)
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has

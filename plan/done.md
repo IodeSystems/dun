@@ -2027,3 +2027,46 @@ USER mid-work. Commits `6680641` (proto), `bd6d3fe` (dund), `35e6d13`
   dund.
 - Out of scope → icebox: Claude Code sessions (`/integration enable
   claude`).
+
+## ✅ 31. Scrolling moved the offset but not the text (USER, 2026-10-23)
+
+USER report: "sometimes when I'm scrolling, I can scroll below the window,
+and the text doesn't move" — the scroll state changed (overlay, status),
+the conversation rows did not.
+
+- **Cause 1 — a clear that overtook its sync** (`scrollregion.go`
+  `disable`). Every region command runs in its own goroutine, and
+  minRegionGap serialised plan()'s commands — but not `disable`, called
+  straight from `planScrollRegion` when a mode wants the rows back (the
+  band on a selection, a mouse highlight, the pager…). A sync and a
+  disable inside 25ms could land clear-first: the renderer kept ignoring
+  the region's rows while the model had let go of them. View drew the
+  pane, nothing painted it, and every scroll moved the offset and the rows
+  outside the pane but not the text — until the band went away and a
+  re-sync repainted. The reverse (disable, then a sync inside the gap)
+  could land sync-first and leave the renderer painting the blanked rows.
+  Fix: `disable(now)` waits its turn — the model lets go at once (View
+  draws the real rows; the renderer still skips them, harmless), the clear
+  is OWED and sent by one retry when the gap is up; a sync meanwhile
+  supersedes it. `disable` stamps `lastAt`, so the next sync waits too.
+- **Cause 2 — region planned before the height sync** (`tui.go` Update).
+  `planScrollRegion` ran before the block that anchors the bottom across a
+  height change (composer grows/shrinks while scrolled up). The region
+  showed rows from the old offset while View blanked rows for the new one
+  — one row off per composer line, until the next message replanned. Fix:
+  plan last, after the height sync, syncPager, and the pulse.
+- **Tests:** `TestScrollRegionDisableWaitsForTheGap`,
+  `TestScrollRegionSyncWaitsForADisable` (a `regionRace` harness delivers
+  commands issued inside the gap later-first; both fail on the old code),
+  `TestScrollRegionFollowsAHeightChange` (region rows == View's rows after
+  each step of pgup / ctrl+j / backspace / wheel; fails on the old order).
+  `make test` passes.
+- **Assumption:** the race window is a goroutine handoff, well inside
+  minRegionGap (the existing serialisation rests on the same assumption).
+  A band/highlight that starts inside the gap now reaches the screen when
+  the owed clear lands, ≤25ms later.
+- **Not verified live:** the race was not caught on a real terminal; it is
+  reproduced by the harness's worst-case ordering. If it recurs: `/repaint
+  report` while it is frozen — expected vs actual rows, plus the region
+  state in the capture (`live`, `held`, top/bot), say which side diverged:
+  rows frozen with `live:false` = the renderer still ignoring them.
