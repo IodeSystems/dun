@@ -530,9 +530,16 @@ func main() {
 	if os.Getenv("DUN_NO_BROWSER") == "" {
 		cfg.OpenBrowser = dun.OpenBrowser
 	}
+	var peers *peerLink
 	if *prog {
 		em = &emitter{}
 		in = newInputStream()
+		// Under dund, the model can see and message the other live sessions
+		// (peers.go); standalone, the tools are absent.
+		if underDund() {
+			peers = newPeerLink(em)
+			cfg.Peers = peers
+		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
 		// An added server that came up (or did not) after the session started.
@@ -733,7 +740,7 @@ func main() {
 	}
 
 	if *prog {
-		runProgrammatic(ctx, h, em, in, firstTask, closeCtx{workspace: absWS, sessionID: sessionID, wt: wt})
+		runProgrammatic(ctx, h, em, in, peers, firstTask, closeCtx{workspace: absWS, sessionID: sessionID, wt: wt})
 		return
 	}
 	runHuman(ctx, h, firstTask, absWS)
@@ -821,7 +828,7 @@ type closeCtx struct {
 // skillPoll is how often the engine looks for changed skill files.
 var skillPoll = 3 * time.Second
 
-func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, firstTask string, cc closeCtx) {
+func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, peers *peerLink, firstTask string, cc closeCtx) {
 	// Stop the turn in flight (proto.Interrupt, /interrupt). On the reader
 	// goroutine: it only cancels a context, and the turn loop reports the end
 	// with done{reason: interrupted}. Installed before ready, so a client that
@@ -1117,12 +1124,18 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if id == "docker" {
 			em.emit(commandsEvent(h))
 		}
+		// /worktree new moved the session: say where, as at start, so dund's
+		// dun_list shows the worktree and every client the branch.
+		if wt := h.Worktree(); id == "worktree" && action == "new" && wt != nil && wt.Branch != "" {
+			em.emit(&proto.Workspace{Path: wt.Path, Branch: wt.Branch})
+		}
 	}
 	in.setCtrlCmd(ctrlCmd)
 	in.setResetCb(resetCmd)
 	// Agent scope: the human reading a child's conversation, or steering it.
 	// `view` is a PULL — the child's callbacks are nil by design, so its
 	// scrollback is fetched on demand and works for a stopped child too.
+	in.setPeerFn(peerIn(peers, h, em))
 	in.setAgentFn(func(id, action, content string) {
 		n, err := strconv.Atoi(id)
 		if err != nil {
@@ -1352,6 +1365,42 @@ type inputStream struct {
 	// srv and ctrl, so it queues the same way.
 	agentFn      func(id, action, content string)
 	agentPending [][3]string
+	// peerFn handles dund's peer frames (peers.go): a reply to this engine's
+	// dun_list/dun_msg, or another session's message. Inline: a reply is
+	// what a running tool call waits on. Queued until installed, like the
+	// others.
+	peerFn      func(typ string, line []byte)
+	peerPending []peerFrame
+}
+
+type peerFrame struct {
+	typ  string
+	line []byte
+}
+
+// peerCmd runs the installed peer handler, queueing until one exists.
+func (s *inputStream) peerCmd(typ string, line []byte) {
+	s.mu.Lock()
+	fn := s.peerFn
+	if fn == nil {
+		s.peerPending = append(s.peerPending, peerFrame{typ, line})
+	}
+	s.mu.Unlock()
+	if fn != nil {
+		fn(typ, line)
+	}
+}
+
+// setPeerFn installs the handler and drains whatever arrived first.
+func (s *inputStream) setPeerFn(fn func(typ string, line []byte)) {
+	s.mu.Lock()
+	s.peerFn = fn
+	pending := s.peerPending
+	s.peerPending = nil
+	s.mu.Unlock()
+	for _, p := range pending {
+		fn(p.typ, p.line)
+	}
 }
 
 // setMidTurn installs the mid-turn router (see inputStream.mid).
@@ -1517,6 +1566,10 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- ev.Content
 			case "answer":
 				s.answers <- ev.Value
+			case "peer", "peer_reply":
+				// Never an answer: a peer message cannot close an open
+				// ask_user, whatever it says.
+				s.peerCmd(ev.Type, []byte(line))
 			case "interrupt":
 				// Inline: the turn it stops is what blocks the loop.
 				s.mu.Lock()

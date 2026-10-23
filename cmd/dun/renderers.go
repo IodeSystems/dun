@@ -137,6 +137,7 @@ func init() {
 	registerRenderer("agent", rendererFunc(agentRender))
 	registerRenderer("agent_monitor", rendererFunc(agentMonitorRender))
 	registerRenderer("tell_parent", rendererFunc(tellParentRender))
+	registerRenderer("dun_msg", rendererFunc(dunMsgRender))
 	registerRenderer("ask_parent", rendererFunc(askRender))
 	registerRenderer("ask_user", rendererFunc(askRender))
 }
@@ -417,6 +418,20 @@ func tellParentRender(rc renderCtx) (string, string) {
 		return genericRender(rc)
 	}
 	return stDim.Render("  → ") + strings.Join(parts, stDim.Render(" · ")), stDim.Render(rc.result)
+}
+
+// dunMsgRender reads the ARGS for who and what, like tellParentRender; the
+// result only says whether it arrived, so a refusal is shown in red.
+func dunMsgRender(rc renderCtx) (string, string) {
+	to, text := argStr(rc.args, "to"), argStr(rc.args, "text")
+	if to == "" {
+		return genericRender(rc)
+	}
+	head := stNote.Render("✉ "+to+": ") + stDim.Render(clip(oneLine(text), 70))
+	if strings.HasPrefix(rc.result, "ERROR") {
+		head += stErr.Render("  " + clip(oneLine(strings.TrimPrefix(rc.result, "ERROR: ")), 60))
+	}
+	return stDim.Render("  → ") + head, stDim.Render(text + "\n\n" + rc.result)
 }
 
 // askRender is for ask_user and ask_parent: the question is in the args and the

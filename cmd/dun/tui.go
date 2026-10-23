@@ -2294,6 +2294,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			// The turn budget ran out and the grace started: the machinery
 			// speaking, so dim, not a bell.
 			m.append(stDim.Render("⏱ " + oneLine(str(ev["text"]))))
+		case "peer":
+			// Another dun session's dun_msg: not the user, so dim, with the
+			// sender first (the text is "<name> (<id>): <message>").
+			m.append(stDim.Render("✉ dun msg from " + oneLine(str(ev["text"]))))
 		default:
 			m.append(stNote.Render("🔔 " + oneLine(str(ev["text"]))))
 		}

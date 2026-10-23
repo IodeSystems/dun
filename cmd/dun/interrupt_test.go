@@ -76,7 +76,7 @@ func TestEngineInterrupt(t *testing.T) {
 
 	inR, inW := io.Pipe()
 	in := newInputStreamFrom(inR)
-	go runProgrammatic(ctx, h, em, in, "", closeCtx{})
+	go runProgrammatic(ctx, h, em, in, nil, "", closeCtx{})
 
 	events := make(chan map[string]any, 256)
 	go func() {

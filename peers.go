@@ -22,8 +22,10 @@ import (
 // PeerSession is one live session as dun_list shows it.
 type PeerSession struct {
 	ID, Name, Workspace, Branch, State, Task string
-	Attached                                 int
-	You                                      bool
+	// Worktree is the dun worktree it works in, on Branch; "" in place.
+	Worktree string
+	Attached int
+	You      bool
 }
 
 // PeerSent is what a delivery did: the target's id and name, whether it was
@@ -46,8 +48,8 @@ func dunListToolDef() llm.ToolDef {
 	td.Function.Name = "dun_list"
 	td.Function.Description = "List the other dun sessions you can message with dun_msg: your user's sessions " +
 		"that are live in a running engine right now (one only resumable from disk is not listed). Each row: " +
-		"name, id, workspace, branch, idle or busy, attached clients, and its current task. Yours is marked " +
-		"\"you\"."
+		"name (the address dun_msg takes), id, idle or busy, attached clients, workspace, branch (\"wt <branch>\" " +
+		"when it works in a dun worktree), and its current task. Yours is marked \"you\"."
 	td.Function.Parameters = map[string]any{"type": "object", "properties": map[string]any{}}
 	return td
 }
@@ -128,7 +130,10 @@ func peerListing(ps []PeerSession, err error) string {
 			b.WriteString("  (you)")
 		}
 		fmt.Fprintf(&b, "  %d attached  %s", p.Attached, p.Workspace)
-		if p.Branch != "" {
+		switch {
+		case p.Worktree != "":
+			b.WriteString("  wt " + p.Branch)
+		case p.Branch != "":
 			b.WriteString("  ⎇ " + p.Branch)
 		}
 		if p.Task != "" {
