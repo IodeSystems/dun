@@ -74,6 +74,50 @@ Patterns are gitignore syntax and add up across layers. Inside a dependency
 directory only a pattern naming it or a path in it (`node_modules/foo/`)
 reaches; a bare `*.json` does not reopen every `node_modules`.
 
+**More in the index, or less, while it runs.** These act on raglit's side of
+this workspace's index (the `--index` dun serves it with), not on `dun.json`:
+
+| command | does |
+|---|---|
+| `/raglit include FILE\|DIR...` | a directory is **watched**: `raglit watch DIR --index <this index>`, so changed and new files are read; a file is read once (MCP `ingest`) |
+| `/raglit add-document FILE\|DIR...` | read **once**, never watched: a directory's files as they are now |
+| `/raglit exclude GLOB [--keep]` | `manage_index ignore` (no new matches), then `purge` (removes the indexed ones and lists them); `--keep` skips the purge |
+| `/raglit unexclude GLOB` | `manage_index unignore` |
+| `/raglit excludes` | `manage_index status`: the ignore, builtin and allow lists |
+
+A GLOB matches the absolute path (`**/build/**` is a directory anywhere); one
+with no `/` matches the file name (`*.log`). Quote one the shell would
+expand: `/raglit exclude '**/*.log'`.
+
+**Extensions** (`examples/extensions/*/extension.json`; your own in
+`$DUN_HOME/extensions/<id>/`, a project's in `.dun/extensions/<id>/`; `/ext`
+lists them) give their slash command more commands the same way, in the
+manifest — raglit's above are this:
+
+```jsonc
+"slash": {"name": "raglit", "commands": {
+  "include": {"help": "FILE|DIR... — …", "steps": [
+    {"if": "dir",  "cli":  ["watch", "{{path}}", "--index", "{{index}}"]},
+    {"if": "file", "tool": "ingest", "args": {"index": "{{index}}", "paths": "{{paths}}"}}]},
+  "exclude": {"help": "GLOB [--keep] — …", "steps": [
+    {"tool": "manage_index", "args": {"action": "ignore", "index": "{{index}}", "pattern": "{{arg}}"}},
+    {"tool": "manage_index", "args": {"action": "purge", "index": "{{index}}", "pattern": "{{arg}}", "confirm": true},
+     "unless": "--keep"}]},
+  "excludes": {"help": "…", "tool": "manage_index", "args": {"action": "status", "index": "{{index}}"}}}}
+```
+
+A command is one step inline or `steps`, run in order; an error stops the
+rest. A step is `tool` + `args` (a call of the extension's own server — a tool
+in `server.disable` works) or `cli` (argv for `roles.index.cli`, run with the
+serve args' `--home`/`--daemon`/`--project`). `if: file|dir` runs a step with
+only those of the paths typed (by stat, when it runs); `unless: --flag` skips
+it when the flag is typed. Placeholders: `{{arg}}` the text (quotes removed,
+case kept), `{{paths}}` each word as an absolute path (a whole value: a JSON
+array, or one argv element per path), `{{path}}` one path (the step runs once
+per path), `{{index}}`/`{{project}}` the names the server is started with,
+`{{workspace}}`. The answer is each step's reply. Bare `/raglit` and the
+completion list each command with its `help`.
+
 `--rag` / `--lsp` force one on for a single run (`--rag=false` forces it off),
 above whatever is saved. Startup names what is off, so a missing tool family is
 never a silent absence. A server that fails to start is reported and skipped —

@@ -8,7 +8,35 @@
   },
   "slash": {
     "name": "raglit",
-    "description": "docs index (raglit): bare shows status, auto starts it every session"
+    "description": "docs index (raglit): bare shows status, auto starts it every session",
+    "commands": {
+      "include": {
+        "help": "FILE|DIR... — add to this workspace's index and keep up to date: a directory is WATCHED (raglit re-reads changed and new files); a file is read once. add-document reads a directory once, without watching",
+        "steps": [
+          {"if": "dir", "cli": ["watch", "{{path}}", "--index", "{{index}}"]},
+          {"if": "file", "tool": "ingest", "args": {"index": "{{index}}", "paths": "{{paths}}"}}
+        ]
+      },
+      "add-document": {
+        "help": "FILE|DIR... — read into this workspace's index ONCE: a directory's files as they are now; later changes and new files are not read (include watches a directory)",
+        "tool": "ingest", "args": {"index": "{{index}}", "paths": "{{paths}}"}
+      },
+      "exclude": {
+        "help": "GLOB [--keep] — stop indexing paths that match GLOB in this workspace's index, and remove the ones indexed (--keep: only stop new ones). GLOB matches the absolute path (**/build/** is a directory anywhere); a GLOB with no / matches the file name (*.log)",
+        "steps": [
+          {"tool": "manage_index", "args": {"action": "ignore", "index": "{{index}}", "pattern": "{{arg}}"}},
+          {"tool": "manage_index", "args": {"action": "purge", "index": "{{index}}", "pattern": "{{arg}}", "confirm": true}, "unless": "--keep"}
+        ]
+      },
+      "unexclude": {
+        "help": "GLOB — index paths that match GLOB again (an exclude's GLOB, as typed); removed documents come back when they change or are included again",
+        "tool": "manage_index", "args": {"action": "unignore", "index": "{{index}}", "pattern": "{{arg}}"}
+      },
+      "excludes": {
+        "help": "this workspace's index: its exclude GLOBs (ignore), the builtin ones, and allow (exempt from builtin)",
+        "tool": "manage_index", "args": {"action": "status", "index": "{{index}}"}
+      }
+    }
   },
   "roles": {
     "search": {"tool": "search", "get": "get_document"},

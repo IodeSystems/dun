@@ -224,3 +224,70 @@ func TestRunExtCommand_StepsDispatchAndOrder(t *testing.T) {
 		t.Error("a command with no placeholder for text takes none")
 	}
 }
+
+// raglit's include, add-document, exclude, unexclude and excludes: what
+// each asks of raglit, against this workspace's index (the serve args').
+func TestRaglitCommands(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	h, logPath, _ := startFakeRaglit(t, ws, true)
+	ctx := context.Background()
+	idx, proj := raglitIndex(ws), raglitProject(ws)
+	if err := os.MkdirAll(filepath.Join(ws, "Hand Book"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRule(t, filepath.Join(ws, "Notes.md"), "x")
+	run := func(cmd, text string) string {
+		t.Helper()
+		out, err := h.RunExtCommand(ctx, ServerDocs, cmd, text)
+		if err != nil {
+			t.Fatalf("/raglit %s %s: %q %v", cmd, text, out, err)
+		}
+		return out
+	}
+
+	// include: a directory is watched, a file is read once.
+	run("include", `"Hand Book" Notes.md`)
+	logHas(t, logPath, "raglit watch "+filepath.Join(ws, "Hand Book")+" --index "+idx+" --project "+proj)
+	logHas(t, logPath, `call ingest {"index":"`+idx+`","paths":["`+filepath.Join(ws, "Notes.md")+`"]}`)
+	// add-document: a directory too is read once, never watched.
+	before := len(fakeLog(logPath))
+	run("add-document", `"Hand Book"`)
+	logHas(t, logPath, `call ingest {"index":"`+idx+`","paths":["`+filepath.Join(ws, "Hand Book")+`"]}`)
+	for _, l := range fakeLog(logPath)[before:] {
+		if strings.HasPrefix(l, "raglit watch") {
+			t.Errorf("add-document watched: %s", l)
+		}
+	}
+
+	// exclude: ignore, then purge with confirm; --keep only ignores.
+	manage := func() []string {
+		var out []string
+		for _, l := range fakeLog(logPath) {
+			if s, ok := strings.CutPrefix(l, "call manage_index "); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	run("exclude", `'**/*.LOG'`)
+	run("exclude", `Build/** --keep`)
+	run("unexclude", `'**/*.LOG'`)
+	out := run("excludes", "")
+	want := []string{
+		`{"action":"ignore","index":"` + idx + `","pattern":"**/*.LOG"}`,
+		`{"action":"purge","confirm":true,"index":"` + idx + `","pattern":"**/*.LOG"}`,
+		`{"action":"ignore","index":"` + idx + `","pattern":"Build/**"}`,
+		`{"action":"unignore","index":"` + idx + `","pattern":"**/*.LOG"}`,
+		`{"action":"status","index":"` + idx + `"}`,
+	}
+	if got := manage(); !slices.Equal(got, want) {
+		t.Errorf("manage_index calls:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if !strings.Contains(out, `"action": "status"`) {
+		t.Errorf("excludes shows the reply: %s", out)
+	}
+	if _, err := h.RunExtCommand(ctx, ServerDocs, "exclude", "--keep"); err == nil {
+		t.Error("exclude needs a GLOB")
+	}
+}

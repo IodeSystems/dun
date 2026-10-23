@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/proto"
 )
 
 // The TUI has no local copy of an engine command — so none can drift from
@@ -90,6 +91,32 @@ func TestCommandListShowsState(t *testing.T) {
 	}
 }
 
+// raglit's commands are in its completion with their help, and in the usage.
+func TestCommandList_ExtensionCommandsWithHelp(t *testing.T) {
+	var raglit proto.CommandSpec
+	for _, c := range commandList(nil, false).Items {
+		if c.Name == "raglit" {
+			raglit = c
+		}
+	}
+	help := map[string]string{}
+	for _, c := range raglit.Choices {
+		help[c.Value] = c.Description
+	}
+	for _, n := range []string{"include", "add-document", "exclude", "unexclude", "excludes", "watch", "attach", "detach"} {
+		if help[n] == "" {
+			t.Errorf("%s: no help in %v", n, help)
+		}
+		if n != "detach" && !strings.Contains(raglit.Usage, "|"+n) {
+			t.Errorf("usage %q lacks %s", raglit.Usage, n)
+		}
+	}
+	if !strings.Contains(help["include"], "WATCHED") || !strings.Contains(help["add-document"], "ONCE") ||
+		!strings.Contains(help["exclude"], "no / matches the file name") {
+		t.Errorf("include and add-document say how they differ; exclude how a GLOB matches: %v", help)
+	}
+}
+
 func TestRouteSlash(t *testing.T) {
 	type call struct{ kind, a, b string }
 	var calls []call
@@ -131,6 +158,10 @@ func TestRouteSlash(t *testing.T) {
 		"raglit detach x --global":          {"control", "ext", "detach raglit x --global"},
 		"raglit attach":                     {"control", "ext", "attach raglit"},
 		"poly-lsp attach x":                 {"server", "poly-lsp", "attach x"}, // no search role
+		// raglit's manifest commands keep the text as typed.
+		"raglit INCLUDE ~/My Docs Notes.MD": {"control", "ext", "call raglit include ~/My Docs Notes.MD"},
+		"raglit exclude '**/*.LOG' --keep":  {"control", "ext", "call raglit exclude '**/*.LOG' --keep"},
+		"raglit excludes":                   {"control", "ext", "call raglit excludes "},
 	} {
 		calls = nil
 		routeSlash(line, r)

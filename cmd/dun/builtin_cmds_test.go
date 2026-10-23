@@ -91,6 +91,14 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 		step("unset --project", id)
 		step("bounce", "unknown action", "/"+id+" [on|off|unset|restart|auto|manual]")
 	}
+	// Bare /raglit lists its commands with their help.
+	if out := runServerCmd(ctx, h, "raglit", ""); !strings.Contains(out, "commands:") || !strings.Contains(out, "/raglit include ") ||
+		!strings.Contains(out, "/raglit excludes ") || !strings.Contains(out, "/raglit watch ") {
+		t.Errorf("bare /raglit lists its commands:\n%s", out)
+	}
+	if out := runServerCmd(ctx, h, "poly-lsp", ""); strings.Contains(out, "commands:") {
+		t.Errorf("poly-lsp has none:\n%s", out)
+	}
 	l := commandList(h.Servers(), false)
 	names := map[string]bool{}
 	for _, c := range l.Items {
