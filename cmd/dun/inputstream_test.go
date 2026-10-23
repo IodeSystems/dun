@@ -18,7 +18,7 @@ func drain(t *testing.T, s *inputStream) []string {
 			if !ok {
 				return got
 			}
-			got = append(got, c)
+			got = append(got, c.content)
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for the input stream to close")
 		}

@@ -51,6 +51,12 @@ type dunConfig struct {
 	// defaults. Empty = unset; a negative value means unbounded (request scope).
 	RetryBudget     string `json:"retry_budget,omitempty"`
 	TurnRetryBudget string `json:"turn_retry_budget,omitempty"` // "0" disables turn-scope retry
+	// VisionModel describes images for a model that cannot read them (a model
+	// id, on the active provider unless VisionProvider names another
+	// logged-in one). Empty: a message with images to such a model is
+	// refused. See images.go.
+	VisionModel    string `json:"vision_model,omitempty"`
+	VisionProvider string `json:"vision_provider,omitempty"`
 }
 
 // providerConfig is one OpenAI-compatible endpoint: /v1/models and

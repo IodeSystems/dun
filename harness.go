@@ -366,6 +366,10 @@ type Config struct {
 	// — no dund on the other end of the engine's stdio — leaves dun_list and
 	// dun_msg out of the tool set.
 	Peers PeerLink
+	// Vision is what images on a user message need: which model Client runs
+	// (for the vision probe record) and the vision→text model that describes
+	// images for one that cannot read them. See images.go.
+	Vision VisionConfig
 	// OnRules tells the user something about the project's rules that is not
 	// an answer to a command: the offer to make a large rules block cheaper
 	// (rules.go).

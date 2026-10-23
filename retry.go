@@ -304,7 +304,9 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return res, err
 		}
-		if budget <= 0 || !llm.TransientUpstream(err) {
+		// A model refusing an image refuses it on every attempt, even when the
+		// provider says so with a 5xx (llama.cpp without a projector).
+		if budget <= 0 || !llm.TransientUpstream(err) || refusesImages(err) {
 			return res, err
 		}
 		if time.Now().Add(backoff).After(deadline) {

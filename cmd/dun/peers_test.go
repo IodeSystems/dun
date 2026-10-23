@@ -39,7 +39,7 @@ func TestInputStreamRoutesPeerFrames(t *testing.T) {
 	case a := <-s.answers:
 		t.Fatalf("a peer frame answered: %q", a)
 	case u := <-s.users:
-		if u != "after" {
+		if u.content != "after" {
 			t.Fatalf("user %q", u)
 		}
 	case <-time.After(2 * time.Second):

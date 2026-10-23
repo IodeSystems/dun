@@ -523,6 +523,7 @@ func main() {
 		DockerImage:   resolveDockerImage(*docker),
 		DockerNetwork: *dockerNetwork,
 		ExtraMounts:   mounts,
+		Vision:        visionConfig(fc, *url, effKey, *model, spend.Note),
 	}
 	// An OAuth server's login opens a browser on this machine too — unless
 	// DUN_NO_BROWSER is set (a headless box, a test). The URL is shown to
@@ -1156,10 +1157,16 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	// buffered and lifted into the next tool result, so the model reads it inside
 	// the turn it is already running — and several of them batch. Only when no turn
 	// is in flight does a message start one (the channel path below).
-	in.setMidTurn(func(text string) bool {
+	in.setMidTurn(func(msg userMsg) bool {
 		if !turnActive.Load() {
 			return false
 		}
+		if len(msg.images) > 0 {
+			in.hold(msg)
+			em.emit(&proto.Notification{Text: "a message with images waits for this turn to end: an image cannot ride a tool result"})
+			return true
+		}
+		text := msg.content
 		// Echo BEFORE Say: Say can release an exec wait, and the tool_result
 		// that follows is what clears the client's "(queued)" mark. Echoed
 		// after, the mark would land behind the result that delivered it.
@@ -1169,7 +1176,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		return true
 	})
 	if firstTask != "" {
-		turn(ctx, h, em, firstTask)
+		turn(ctx, h, em, firstTask, nil)
 	}
 	users := in.users
 	// A turn that fails must not end the session — the user is still sitting
@@ -1180,6 +1187,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	// background completion), which is exactly when a retry is worth making.
 	autoContinue := true
 	for {
+		// A message with images held during the last turn starts the next.
+		if msg, ok := in.takeHeld(); ok {
+			turn(ctx, h, em, msg.content, msg.images)
+			autoContinue = true
+			continue
+		}
 		// Anything buffered while the last turn ran (or after it failed on the
 		// provider) is delivered now, in ONE turn — including a message the user
 		// sent to nudge a dead session back to life.
@@ -1195,7 +1208,9 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			continue
 		}
 		select {
-		case content, ok := <-users:
+		case <-in.heldCh:
+			// taken at the top of the loop
+		case msg, ok := <-users:
 			if !ok {
 				if in.stopped() {
 					em.emit(&proto.Exit{Reason: "stopped"})
@@ -1206,7 +1221,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				users = nil
 				continue
 			}
-			turn(ctx, h, em, content)
+			turn(ctx, h, em, msg.content, msg.images)
 			autoContinue = true
 		case <-h.Wake():
 			// A background job finished; run a turn to process its notification.
@@ -1334,7 +1349,7 @@ func windowOf(w dun.WindowBudget) proto.Window {
 // closes it too, plain EOF does not. runProgrammatic drains background jobs on
 // EOF but not on an explicit stop.
 type inputStream struct {
-	users   chan string
+	users   chan userMsg
 	answers chan string
 	quit    chan struct{}
 
@@ -1343,7 +1358,11 @@ type inputStream struct {
 	// and blocking it also stalls the `answer` events an ask_user needs. Guarded
 	// because it is set after the harness exists, while the scanner already runs.
 	mu  sync.Mutex
-	mid func(string) bool
+	mid func(userMsg) bool
+	// held is the messages with images that arrived during a turn (see
+	// hold); heldCh says one is waiting.
+	held   []userMsg
+	heldCh chan struct{}
 	// srv handles a `server` event (/raglit, /poly-lsp) inline, for the same reason as
 	// mid: it must work while a turn is running.
 	srv func(alias, action string)
@@ -1404,7 +1423,7 @@ func (s *inputStream) setPeerFn(fn func(typ string, line []byte)) {
 }
 
 // setMidTurn installs the mid-turn router (see inputStream.mid).
-func (s *inputStream) setMidTurn(f func(string) bool) {
+func (s *inputStream) setMidTurn(f func(userMsg) bool) {
 	s.mu.Lock()
 	s.mid = f
 	s.mu.Unlock()
@@ -1502,11 +1521,43 @@ func (s *inputStream) ctrlCmd(id, action string) {
 }
 
 // midTurn offers text to the router, reporting whether it took it.
-func (s *inputStream) midTurn(text string) bool {
+func (s *inputStream) midTurn(msg userMsg) bool {
 	s.mu.Lock()
 	f := s.mid
 	s.mu.Unlock()
-	return f != nil && f(text)
+	return f != nil && f(msg)
+}
+
+// userMsg is one user message off the input: its text and attached images.
+type userMsg struct {
+	content string
+	images  []proto.Image
+}
+
+// hold keeps a message for the turn after the running one. A message with
+// images cannot be lifted into a tool result, and the scanner cannot wait
+// for the loop to take it (the running turn's answers and interrupts come
+// through the scanner).
+func (s *inputStream) hold(msg userMsg) {
+	s.mu.Lock()
+	s.held = append(s.held, msg)
+	s.mu.Unlock()
+	select {
+	case s.heldCh <- struct{}{}:
+	default:
+	}
+}
+
+// takeHeld returns the oldest held message.
+func (s *inputStream) takeHeld() (userMsg, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.held) == 0 {
+		return userMsg{}, false
+	}
+	m := s.held[0]
+	s.held = s.held[1:]
+	return m, true
 }
 
 // stopped reports whether users closed because of an explicit stop/quit event
@@ -1526,7 +1577,8 @@ func newInputStream() *inputStream { return newInputStreamFrom(os.Stdin) }
 // newInputStreamFrom is newInputStream over an arbitrary reader, so a test can
 // drive the event parsing and the EOF-vs-stop distinction without a real stdin.
 func newInputStreamFrom(r io.Reader) *inputStream {
-	s := &inputStream{users: make(chan string), answers: make(chan string), quit: make(chan struct{})}
+	s := &inputStream{users: make(chan userMsg), answers: make(chan string), quit: make(chan struct{}),
+		heldCh: make(chan struct{}, 1)}
 	go func() {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
@@ -1542,6 +1594,8 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				ID      string `json:"id"`     // server/control: which target
 				Action  string `json:"action"` // server/control: action to take
 				Reason  string `json:"reason"` // interrupt: what stopped the turn ("" = the user)
+				// user: attached images (images.go)
+				Images []proto.Image `json:"images"`
 			}
 			if json.Unmarshal([]byte(line), &ev) != nil {
 				continue
@@ -1560,10 +1614,11 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				// loop is the only reader of `answer` events.
 				s.agentCmd(ev.ID, ev.Action, ev.Content)
 			case "user":
-				if s.midTurn(ev.Content) {
-					continue // buffered into the running turn
+				msg := userMsg{content: ev.Content, images: ev.Images}
+				if s.midTurn(msg) {
+					continue // buffered into the running turn, or held for the next
 				}
-				s.users <- ev.Content
+				s.users <- msg
 			case "answer":
 				s.answers <- ev.Value
 			case "peer", "peer_reply":
@@ -1673,7 +1728,15 @@ var turnActive atomic.Bool
 // turn runs one user message to completion. It reports whether the turn
 // succeeded — NOT whether the engine should stop. A failed turn never ends the
 // session: the conversation is on disk and the next message picks up from it.
-func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
+func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []proto.Image) bool {
+	// Known to be refused (no vision, nothing to describe the images): the
+	// message goes back to the user before it is shown as sent.
+	if len(imgs) > 0 {
+		if why := h.ImagesRefused(); why != "" {
+			refuseImages(em, why, task, imgs)
+			return true
+		}
+	}
 	// What the user typed, before any rephrase: every client renders the
 	// message from this, not from what it sent itself.
 	em.emit(&proto.UserEcho{Content: task})
@@ -1681,6 +1744,18 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 	tctx, end := beginTurn(ctx)
 	defer end()
 	turnActive.Store(true)
+	if len(imgs) > 0 {
+		// Not rephrased: a rewrite would move or drop the labels the images
+		// are placed by.
+		res, err := h.AskImages(tctx, task, dunImages(imgs))
+		turnActive.Store(false)
+		var refused *dun.ImageRefusedError
+		if errors.As(err, &refused) {
+			refuseImages(em, refused.Msg, task, imgs)
+			return true
+		}
+		return endTurn(ctx, tctx, h, em, res, err)
+	}
 	if rephraseOn {
 		// Rephrase BEFORE Ask: the store publishes the message it is passed, so
 		// the rephrased text is what the session records and the model acts on.
@@ -1692,6 +1767,11 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string) bool {
 	}
 	res, err := h.Ask(tctx, task)
 	turnActive.Store(false)
+	return endTurn(ctx, tctx, h, em, res, err)
+}
+
+// endTurn reports how a user turn ended (see turn).
+func endTurn(ctx, tctx context.Context, h *dun.Harness, em *emitter, res agent.TurnResult, err error) bool {
 	// turnErr first: a budget cut arrives as an interrupt, and is an error.
 	err = turnErr(tctx, err)
 	if errors.Is(err, dun.ErrInterrupted) {
