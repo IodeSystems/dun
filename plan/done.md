@@ -1106,3 +1106,94 @@ says "(just type)" while it is highlighted and not yet capturing.
   (its test fixtures were renamed). `/mcp on docs` (old id typed) is not
   mapped: only files are. `TestScrollRegionTopRowIsNotBlanked` failed once
   under load, passes alone and on rerun.
+
+## ✅ 21. Extensions: raglit and poly-lsp as bundled manifests (USER, 2026-10-23, branch `ext-manifests`)
+
+- **What:** an extension = an MCP server + `extension.json` (`extension.go`
+  documents the format). Fields: `id` (= server id = directory name),
+  `description`, `server` (the /mcp add ServerSpec, under the global, project
+  and session switches; mode standalone/scripted), `slash` {name,
+  description, commands: {cmd: {tool, arg}}}, `roles` {search {tool, get},
+  index {tool, forget, cli}}, `hooks` [turn.before, workspace.open,
+  memory.save, skills.changed, rules.changed, mcp.docs], `host_hooks`
+  {ENV: agents_md_guard}, `env`, `skills`. Placeholders `{{workspace}}`,
+  `{{project}}`, `{{index}}`, and `{{dir}}` (the extension's own directory,
+  user/project only). Unknown fields and bad values are refused with the
+  field named (`hooks[1]: unknown event "x.y"`).
+  - Bundled: `examples/extensions/{raglit,poly-lsp}/extension.json`, embedded
+    (one copy, no drift). DefaultServers builds their servers from them.
+  - Loaded in order bundled < `$DUN_HOME/extensions/<id>/` <
+    `<repo>/.dun/extensions/<id>/`; the same id replaces. A slash name taken
+    by an earlier extension, or one of dun's own commands (engine or TUI),
+    is dropped from the later one; the extension still loads.
+  - Special cases now lookups: the proactive search = the turn.before
+    extensions' search tool (several are merged; each extension after the
+    first is its own surfacing group); memory = memory.save + a turn.before
+    extension; skills/rules/MCP-docs/workspace indexes = the extension taking
+    that hook, through `indexSink`; the AGENTS.md guard = poly-lsp's
+    `host_hooks.POLY_LSP_HOOK`; `/raglit`, `/poly-lsp` = their `slash`.
+  - **Index seam (`indexSink`):** MCP `{index, paths}` to roles.index.tool
+    and .forget when the tool's schema has `paths` and the forget tool
+    exists; else the `cli` fallback (only `raglit`: the server's own binary,
+    chosen by its base name, with the serve args' store flags). raglit's
+    `ingest` takes one `url` and it has no `forget` (serve.go, 2026-10-23),
+    so raglit is on the CLI. When raglit adds both, dun switches with no
+    code or manifest change.
+  - `/ext`: each extension's source, server state, slash, roles, hooks,
+    host hooks, path; then what did not load. A command of its own, not a
+    column in /mcp: /mcp is servers and switches, /ext is manifests. An
+    extension's server is in /mcp like any other.
+  - `/<slash> <command> <text>` → control `ext` → `RunExtCommand` → the
+    tool with `{arg: text}`; anything else is the server switch.
+- **Tests:** characterization first (`builtin_servers_test.go`,
+  `cmd/dun/builtin_cmds_test.go`, fake raglit/poly-lsp = the test binary
+  re-executed, `fakebin_test.go`), unchanged through the conversion.
+  `extension_test.go`: bundled manifests, field-named errors, sources and
+  overrides, the MCP/CLI index choice, and the test extension
+  (`testdata/extensions/hello`, python3 stdio server: `/hello greet`, and a
+  `find` search whose hit surfaces as an aside). `TestTUIDoesNotShadowEngineCommands`
+  now also covers extension slashes. `make test` passes.
+- **Live** (tmux, scratch HOME + DUN_HOME, workspace `dunscratch-ext`,
+  `--rag --lsp`, real model local-Qwen3.8-27B, shared raglit daemon):
+  - `/ext` listed raglit and poly-lsp (bundled, running) and hello (user,
+    off, its manifest path).
+  - `/hello on` → running · 2 tools; `/hello greet Carl` → `hello, Carl`.
+  - "What flag do zebra deploys need?" → 1 surfaced (hello's `find` hit);
+    the model answered "--frostbite … hangs at 40%" without a tool call.
+  - AGENTS.md guard: `node_read sub/thing.go` (sub/AGENTS.md present) →
+    `[hook] AGENTS.md guard: read sub/AGENTS.md before read-ing thing.go …`.
+  - `/rules index` → 1 file into index "rules"; asked when the deploy
+    password rotates → the aside held "From a file the project's rules
+    import …" for docs/zebra-rules.md; the answer was Thursday 07:15 UTC,
+    team-kestrel (the imported file's fact).
+  - Skill cue: 101 skills, `zz-tarball-signing` sorted last; "sign and
+    verify the release tarball with minisign" → aside "A skill matches …
+    zz-tarball-signing"; the model's first call was
+    `skill name=zz-tarball-signing`.
+- **Known / not verified:**
+  - The MCP index path is tested against a fake only; no real server has
+    a `paths` ingest yet.
+  - `systemFor` still keys raglit's and poly-lsp's prompt text on their ids
+    (`ServerDocs`, `ServerCode`); `--rag`/`--lsp`, `dun doctor` and the
+    docker image's binary list are still raglit/poly-lsp by name.
+    Bundled ids keep bare tool names (`builtinServer`); a user extension's
+    tools are `<id>__<tool>`.
+  - Behaviour change, edge case: the skills and rules indexes now follow
+    "raglit is running" rather than "raglit's `search` tool is visible";
+    with raglit up and `search` hidden, they still sync (memory and
+    surfacing still need `search`).
+  - The workspace ingest now goes through the same sink as the other
+    indexes, so it adds the serve args' `--home`/`--daemon`/`--embedded` when
+    a config sets them (it ignored them before, ingesting into a store the
+    server did not read). Same argv for the default args.
+  - The web/mobile clients get extension commands from the commands event;
+    they were not run. Argument completion for an extension's server
+    switch is keyed on its choices having auto and manual.
+  - Leftover in the shared raglit daemon: project `dunscratch-ext`
+    (workspace, skills, rules, memory indexes) from the live check.
+- **Assumptions:** hooks are a list of event names, not a map (the index
+  events need nothing more than roles.index); a hook to an extension that
+  is not running is not sent; `memory.save` needs a turn.before extension
+  too (a note nobody recalls is not worth writing); shell-command hooks
+  are not in v1; `dun ext init` not built — the examples dir is the
+  template.

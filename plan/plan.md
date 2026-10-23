@@ -106,38 +106,18 @@ full detail archived in `done.md`.
 - **/poly-lsp and /raglit** (2026-10-23) — the slash commands and the server
   ids are named for the servers; old `code`/`docs` config is still read. See
   `done.md`.
+- **Extensions (21)** (2026-10-23) — an extension is an MCP server plus
+  `extension.json` (server, slash, roles, hooks, host_hooks, env, skills);
+  raglit and poly-lsp are bundled manifests (`examples/extensions/`); user
+  and project ones load from `$DUN_HOME/extensions/` and
+  `.dun/extensions/`; `/ext` lists them. Index role on the raglit CLI until
+  raglit's MCP ingest takes `paths` and has `forget`. See `done.md`.
 - **Kill background jobs** (2026-10-22) — `KillJob` ends a job's process group
   (SIGTERM, SIGKILL after 2s; docker: `docker stop`); `exec_monitor kill`,
   `/jobs [kill <n>|kill all]`, `x` in the activity pane; an interrupt lists the
   cut turn's running jobs with the kill command. See `done.md`.
 
 ## Active work
-
-### ◻ 21. Extensions: raglit and poly-lsp as bundled manifests (USER, 2026-10-23)
-
-USER approved: an extension is an MCP server plus a manifest. No
-dun-specific protocol, and no CLI calls.
-- **Manifest:** `server` (the same spec as /mcp add, with the three scopes
-  and the mode), `slash` (`/raglit <sub>` → a tool call), `roles` (lookups
-  dun asks for: `search`, `index`), `hooks` (events dun sends: `turn.before`
-  → search as aside, `skills.changed`/`rules.changed`/`mcp.docs`/
-  `memory.save` → ingest/forget, `workspace.open`), `host_hooks` (the
-  extension calls dun: `POLY_LSP_HOOK` → agents_md_guard), `env`, `skills`.
-- **Where:** bundled in the binary (also written out as examples),
-  `~/.dun/extensions/<id>/`, `.dun/extensions/<id>/`.
-- **Must keep existing behaviour:** before converting, pin tests for
-  surfacing, memory, the skills/rules/MCP-docs indexing and the AGENTS.md
-  guard. They must pass unchanged through the hook path. Then repeat the
-  live checks (skill cue, /rules index, the guard).
-- **next:** after the cleanup and rename branch (/poly-lsp, /raglit)
-  merges.
-- **risks:** raglit's MCP ingest takes one URL; dun sends batches by CLI
-  today. A `paths` list and a forget tool were asked of raglit-dd
-  (2026-10-23). Until then, index hooks stay on the CLI.
-- **blocking decisions:** none. Shell-command hooks (Claude Code style
-  tool.before/after) are not in v1 (recommended; the USER did not object).
-- **optional extensions:** shell-command hooks; replaceable back ends (a
-  second search implementation); git-URL install.
 
 ### ◻ 20. Shared raglit indexes: watch a directory, attach it to a session (USER, 2026-10-22)
 

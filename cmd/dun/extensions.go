@@ -57,15 +57,15 @@ func extListing(h *dun.Harness) string {
 		}
 		var roles []string
 		if r := e.Roles.Search; r != nil {
-			roles = append(roles, "search "+r.Tool)
+			roles = append(roles, "search:"+r.Tool)
 		}
 		if r := e.Roles.Index; r != nil {
-			idx := "index"
+			idx := "index:"
 			if r.Tool != "" {
-				idx += " " + r.Tool + "/" + r.Forget
+				idx += r.Tool + "/" + r.Forget
 			}
 			if r.CLI != "" {
-				idx += " (cli fallback: " + r.CLI + ")"
+				idx += " (cli fallback " + r.CLI + ")"
 			}
 			roles = append(roles, idx)
 		}
