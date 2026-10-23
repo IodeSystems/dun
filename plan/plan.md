@@ -117,7 +117,8 @@ watcher keeps it fresh, and dun only reads it.
   - B. `raglit serve` passes a qualified `proj:idx` through when it is
     readable. Today serveclient.go → nsReadSelector drops any project not in
     the config's Shared list (verified in code, not live).
-  - C. USER feedback: group the verbose root CLI under cobra subcommands.
+  - C. USER feedback: group the verbose root CLI under cobra subcommands;
+    as urgent as A — `--help` hides that A half-exists (config + sync + watch).
 - **dun side:** `/raglit watch <dir> [--index N] [--public]` calls A;
   `/raglit attach|detach <index> [--project|--global]` adds it to the
   model's search calls and the proactive search, with the same three
