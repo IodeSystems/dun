@@ -1439,6 +1439,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, waitReload(m.lc) // re-arm
 
+	case repaintNowMsg:
+		return m, m.repaintNow(msg)
+
 	case repaintDoneMsg:
 		m.repaintDone(msg)
 		return m, nil

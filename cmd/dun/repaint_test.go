@@ -170,9 +170,16 @@ func TestRepaintResetsAndReports(t *testing.T) {
 	v.event(map[string]any{"type": "token", "text": "more"})
 	v.m.View()
 	v.m.convoHold, v.m.convoHoldW = 99, 80
-	cmd := v.m.runSlash("/repaint")
+	if c := v.m.runSlash("/repaint"); c == nil || typeName(c()) != "main.repaintNowMsg" {
+		t.Fatal("/repaint should wait for the frame to settle")
+	}
+	if _, err := os.Stat(filepath.Join(home, "bugreports")); err == nil {
+		t.Fatal("nothing is captured before the settle")
+	}
+	nm, cmd := v.m.Update(repaintNowMsg{})
+	v.m = nm.(tuiModel)
 	if cmd == nil {
-		t.Fatal("/repaint returned no command")
+		t.Fatal("the settled /repaint returned no command")
 	}
 	if v.m.sr.live || !v.m.sr.wait || v.m.convoHold != 0 {
 		t.Fatalf("after /repaint: live=%v wait=%v hold=%d", v.m.sr.live, v.m.sr.wait, v.m.convoHold)
@@ -180,7 +187,7 @@ func TestRepaintResetsAndReports(t *testing.T) {
 	if c := v.m.planScrollRegion(); c != nil {
 		t.Fatalf("the region must wait for the clears, planned %s", typeName(c()))
 	}
-	nm, _ := v.m.Update(repaintDoneMsg{dir: onlyDir(t, home)})
+	nm, _ = v.m.Update(repaintDoneMsg{dir: onlyDir(t, home)})
 	v.m = nm.(tuiModel)
 	if v.m.sr.wait {
 		t.Error("the region should be free again")

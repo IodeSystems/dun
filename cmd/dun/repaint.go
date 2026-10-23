@@ -69,8 +69,22 @@ func repaintSlash(m *tuiModel, args []string) tea.Cmd {
 		m.append(stErr.Render("usage: /repaint [report]"))
 		return nil
 	}
+	return tea.Tick(repaintSettle, func(time.Time) tea.Msg { return repaintNowMsg{report: report} })
+}
+
+// repaintSettle is how long the capture waits: the renderer flushes at most
+// every 1/60 s, so the frame that closed the palette (and anything else in the
+// same burst of keys) is on the terminal by then. Captured at once, the
+// expected screen ran a frame ahead of the terminal — seen live, five rows
+// differed that nothing had mangled.
+const repaintSettle = 50 * time.Millisecond
+
+// repaintNowMsg is the settled moment: capture, then repaint.
+type repaintNowMsg struct{ report bool }
+
+func (m *tuiModel) repaintNow(msg repaintNowMsg) tea.Cmd {
 	dir, err := m.capture(time.Now())
-	return m.repaint(repaintDoneMsg{dir: dir, err: err, report: report})
+	return m.repaint(repaintDoneMsg{dir: dir, err: err, report: msg.report})
 }
 
 // repaint drops every cache and hold between dun's state and the screen and
