@@ -37,7 +37,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 	// the TUI's own: it loads without its slash command, and says so.
 	ext := func(id, slash string) dun.Extension {
 		return dun.Extension{ID: id, Source: dun.ExtUser, Slash: &dun.ExtSlash{Name: slash,
-			Commands: map[string]dun.ExtSlashCmd{"greet": {Tool: "greet", Arg: "name"}}}}
+			Commands: map[string]dun.ExtSlashCmd{"greet": {ExtStep: dun.ExtStep{Tool: "greet", Args: map[string]any{"name": "{{arg}}"}}}}}}
 	}
 	exts, refused := engineExtensions(append(dun.BundledExtensions(), ext("a", "mcp"), ext("b", "help"), ext("c", "ext"), ext("hello", "hello")))
 	if len(refused) != 3 {

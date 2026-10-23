@@ -103,7 +103,18 @@ var raglitFakeTools = map[string]func(map[string]any) string{
 		return string(out)
 	},
 	"ingest": func(a map[string]any) string { return `{"state":"pending"}` },
+	// manage_index answers its arguments; action "boom" is a tool error.
+	"manage_index": func(a map[string]any) string {
+		if a["action"] == "boom" {
+			return fakeToolError + "boom"
+		}
+		b, _ := json.Marshal(a)
+		return string(b)
+	},
 }
+
+// fakeToolError starts a fake tool's answer that is an isError result.
+const fakeToolError = "!error "
 
 // serveFake answers MCP over stdio with the given tools.
 func serveFake(tools map[string]func(map[string]any) string) {
@@ -146,7 +157,8 @@ func serveFake(tools map[string]func(map[string]any) string) {
 			}
 			a, _ := json.Marshal(msg.Params.Arguments)
 			fakeLogf("call %s %s", msg.Params.Name, a)
-			result = map[string]any{"content": []map[string]any{{"type": "text", "text": fn(msg.Params.Arguments)}}}
+			text, isErr := strings.CutPrefix(fn(msg.Params.Arguments), fakeToolError)
+			result = map[string]any{"content": []map[string]any{{"type": "text", "text": text}}, "isError": isErr}
 		case "ping":
 			result = map[string]any{}
 		default:

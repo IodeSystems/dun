@@ -40,8 +40,10 @@ import (
 //	             off by the same global, project and session scopes
 //	slash        {name, description, commands}: /<name> takes the server
 //	             switch's actions (on, off, unset, restart, auto, manual), and
-//	             /<name> <command> <text> calls commands[command].tool with
-//	             {arg: text}
+//	             /<name> <command> <text> runs commands[command]: {help,
+//	             tool+args | cli | steps}, a call of the server's own tool
+//	             or a run of roles.index.cli, with {{arg}}, {{paths}},
+//	             {{path}}, {{index}}, {{project}} filled in (extcmd.go)
 //	roles        lookups dun makes on demand:
 //	               search {tool, get}: tool takes {"query"} and answers hits
 //	                 (raglit's shape); get takes {"path", "max_chars"} and
@@ -118,11 +120,24 @@ type ExtSlash struct {
 	Commands    map[string]ExtSlashCmd `json:"commands,omitempty"`
 }
 
-// ExtSlashCmd maps /<slash> <command> <text> to a tool call.
+// ExtSlashCmd is one /<slash> <command> (extcmd.go): one step written
+// inline, or steps. Help is its line in bare /<slash> and the completion.
 type ExtSlashCmd struct {
-	Tool        string `json:"tool"`
-	Arg         string `json:"arg,omitempty"` // the parameter <text> goes in; none: no arguments
-	Description string `json:"description,omitempty"`
+	Help string `json:"help,omitempty"`
+	ExtStep
+	Steps []ExtStep `json:"steps,omitempty"`
+}
+
+// ExtStep is one thing a command does: a call of the extension's own tool
+// with args, or the index role's CLI with argv cli. If ("file", "dir") runs
+// it with only those of the paths typed; unless ("--flag") skips it when the
+// flag is typed.
+type ExtStep struct {
+	Tool   string         `json:"tool,omitempty"`
+	Args   map[string]any `json:"args,omitempty"`
+	CLI    []string       `json:"cli,omitempty"`
+	If     string         `json:"if,omitempty"`
+	Unless string         `json:"unless,omitempty"`
 }
 
 // ExtRoles are the lookups an extension serves.
@@ -234,8 +249,8 @@ func (e *Extension) validate() error {
 					return fmt.Errorf("slash.commands.%s: is the server switch's action", name)
 				}
 			}
-			if c.Tool == "" {
-				return fmt.Errorf("slash.commands.%s.tool: required", name)
+			if err := c.validate(e.Roles.Index); err != nil {
+				return fmt.Errorf("slash.commands.%s%w", name, err)
 			}
 		}
 	}
@@ -717,25 +732,4 @@ func (s *surfacer) group(first string, inner func(string) string) func(string) s
 		}
 		return inner(docID)
 	}
-}
-
-// RunExtCommand carries out /<slash> <command> <text>: the extension's tool,
-// called with {arg: text} (or no arguments), its result the answer.
-func (h *Harness) RunExtCommand(ctx context.Context, id, command, text string) (string, error) {
-	e, ok := h.extension(id)
-	if !ok || e.Slash == nil {
-		return "", fmt.Errorf("no extension %q with a slash command", id)
-	}
-	c, ok := e.Slash.Commands[command]
-	if !ok {
-		return "", fmt.Errorf("/%s has no command %q", e.Slash.Name, command)
-	}
-	if h.mgr == nil || !h.mgr.ServerStarted(id) {
-		return "", fmt.Errorf("%s is not running — /%s on first", id, e.Slash.Name)
-	}
-	args := map[string]any{}
-	if c.Arg != "" {
-		args[c.Arg] = strings.TrimSpace(text)
-	}
-	return h.mgr.CallTool(ctx, id, c.Tool, args)
 }

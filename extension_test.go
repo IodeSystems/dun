@@ -52,7 +52,7 @@ func TestParseExtension_ErrorsNameTheField(t *testing.T) {
 		`{"id":"a","server":{"command":"x","via":"sideways"}}`:                                              "server.via:",
 		`{"id":"a","server":{"command":"x"},"slash":{"name":"Hi"}}`:                                         "slash.name:",
 		`{"id":"a","server":{"command":"x"},"slash":{"name":"a","commands":{"on":{"tool":"t"}}}}`:           "slash.commands.on:",
-		`{"id":"a","server":{"command":"x"},"slash":{"name":"a","commands":{"go":{}}}}`:                     "slash.commands.go.tool:",
+		`{"id":"a","server":{"command":"x"},"slash":{"name":"a","commands":{"go":{}}}}`:                     "slash.commands.go:",
 		`{"id":"a","server":{"command":"x"},"roles":{"search":{}}}`:                                         "roles.search.tool:",
 		`{"id":"a","server":{"command":"x"},"roles":{"index":{}}}`:                                          "roles.index:",
 		`{"id":"a","server":{"command":"x"},"roles":{"index":{"tool":"i"}}}`:                                "roles.index.forget:",

@@ -5,7 +5,7 @@
   "slash": {
     "name": "hello",
     "description": "the test extension: /hello greet <name>",
-    "commands": {"greet": {"tool": "greet", "arg": "name", "description": "say hello to <name>"}}
+    "commands": {"greet": {"tool": "greet", "args": {"name": "{{arg}}"}, "help": "say hello to <name>"}}
   },
   "roles": {"search": {"tool": "find"}},
   "hooks": ["turn.before"]

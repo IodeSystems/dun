@@ -245,7 +245,7 @@ func TestWatchDir_RunsTheIndexCLI(t *testing.T) {
 		t.Fatalf("watch: %q %q %v", idx, out, err)
 	}
 	b, _ := os.ReadFile(argv)
-	want := "watch " + filepath.Join(ws, "My Notes") + " --project p --daemon http://x --index my-notes"
+	want := "watch " + filepath.Join(ws, "My Notes") + " --index my-notes --project p --daemon http://x"
 	if strings.TrimSpace(string(b)) != want {
 		t.Errorf("argv: %q, want %q", strings.TrimSpace(string(b)), want)
 	}

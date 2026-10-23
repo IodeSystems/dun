@@ -85,26 +85,14 @@ var srvActions = []string{"on", "on for this session (--project, --global for wi
 func extCommand(e dun.Extension, state, detail string) proto.CommandSpec {
 	pairs := append([]string{}, srvActions...)
 	usage := "on|off|unset|restart|auto|manual"
-	names := make([]string, 0, len(e.Slash.Commands))
-	for n := range e.Slash.Commands {
-		names = append(names, n)
+	own := extOwnCommands(e)
+	var names []string
+	for i := 0; i+1 < len(own); i += 2 {
+		names = append(names, own[i])
 	}
-	sort.Strings(names)
-	for _, n := range names {
-		c := e.Slash.Commands[n]
-		pairs = append(pairs, n, firstNonEmpty(c.Description, "calls "+c.Tool))
-		usage += "|" + n
-	}
-	if extIndexVerb(e, "watch") {
-		pairs = append(pairs, "watch", "watch a directory into an index of this project: watch <dir> [--index NAME]")
-		usage += "|watch"
-		names = append(names, "watch")
-	}
-	if extIndexVerb(e, "attach") {
-		pairs = append(pairs, "attach", "search another index too: attach <index>|<project>:<index> [--project|--global]; bare lists",
-			"detach", "stop searching an attached index: detach <index> [--project|--global]")
-		usage += "|attach|detach"
-		names = append(names, "attach")
+	pairs = append(pairs, own...)
+	if len(names) > 0 {
+		usage += "|" + strings.Join(names, "|")
 	}
 	usage = "[" + usage + "] [--global|--project|--session]"
 	if len(names) > 0 {
@@ -113,6 +101,33 @@ func extCommand(e dun.Extension, state, detail string) proto.CommandSpec {
 	return proto.CommandSpec{Name: e.Slash.Name, Usage: usage, Group: "tools", Choices: choices(pairs...),
 		Text: len(names) > 0, State: state, Detail: detail,
 		Description: firstNonEmpty(e.Slash.Description, e.Description)}
+}
+
+// extOwnCommands are e's commands beside the server switch, as name, help
+// pairs: the manifest's (by name), then the index commands its roles give it.
+func extOwnCommands(e dun.Extension) []string {
+	var pairs []string
+	names := make([]string, 0, len(e.Slash.Commands))
+	for n := range e.Slash.Commands {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		c := e.Slash.Commands[n]
+		help := c.Help
+		if help == "" && c.Tool != "" {
+			help = "calls " + c.Tool
+		}
+		pairs = append(pairs, n, help)
+	}
+	if _, own := e.Slash.Commands["watch"]; !own && extIndexVerb(e, "watch") {
+		pairs = append(pairs, "watch", "watch a directory into an index of this project: watch <dir> [--index NAME]")
+	}
+	if _, own := e.Slash.Commands["attach"]; !own && extIndexVerb(e, "attach") {
+		pairs = append(pairs, "attach", "search another index too: attach <index>|<project>:<index> [--project|--global]; bare lists",
+			"detach", "stop searching an attached index: detach <index> [--project|--global]")
+	}
+	return pairs
 }
 
 // ownCommands are dun's own engine commands, which no extension's slash

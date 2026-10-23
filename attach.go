@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -224,18 +223,7 @@ func (h *Harness) WatchDir(ctx context.Context, id, dir, index string) (string, 
 	if err != nil {
 		return "", "", err
 	}
-	if filepath.Base(s.Command) != e.Roles.Index.CLI {
-		return "", "", fmt.Errorf("%s runs %s, not %s: no CLI to watch with", id, s.Command, e.Roles.Index.CLI)
-	}
-	if rest, ok := strings.CutPrefix(dir, "~/"); ok {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, rest)
-		}
-	}
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(h.cfg.Workspace, dir)
-	}
-	dir = filepath.Clean(dir)
+	dir = absPath(dir, h.cfg.Workspace)
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return "", "", fmt.Errorf("%s is not a directory", dir)
 	}
@@ -253,13 +241,8 @@ func (h *Harness) WatchDir(ctx context.Context, id, dir, index string) (string, 
 	if index == "" {
 		return "", "", fmt.Errorf("an index name is letters, digits, - and _")
 	}
-	args := append(append([]string{"watch", dir}, raglitStoreFlags(s.Args)...), "--index", index)
-	out, err := detach(exec.CommandContext(ctx, s.Command, args...)).CombinedOutput()
-	text := strings.TrimSpace(string(out))
-	if err != nil {
-		return index, text, fmt.Errorf("%s watch: %v: %s", e.Roles.Index.CLI, err, text)
-	}
-	return index, text, nil
+	out, err := h.runIndexCLI(ctx, e, s, []string{"watch", dir, "--index", index})
+	return index, out, err
 }
 
 // attachSelectors are the selectors of the search extensions whose search

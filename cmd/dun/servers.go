@@ -503,6 +503,17 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	} else {
 		b.WriteString("\n/" + cmd + " on to start it this session · /" + cmd + " auto to start it in this project every session")
 	}
+	for _, e := range h.Extensions() {
+		if e.ID != id || e.Slash == nil {
+			continue
+		}
+		if own := extOwnCommands(e); len(own) > 0 {
+			b.WriteString("\ncommands:")
+			for i := 0; i+1 < len(own); i += 2 {
+				fmt.Fprintf(&b, "\n  /%s %-12s %s", cmd, own[i], own[i+1])
+			}
+		}
+	}
 	return b.String()
 }
 

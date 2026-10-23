@@ -295,63 +295,8 @@ func mcpFormSpec(id, target, bearer string) (dun.ServerSpec, error) {
 	return spec, nil
 }
 
-// splitShell splits a command line the way a shell would, without expanding
-// anything: 'single quotes' are literal, "double quotes" take \" \\ \$ \`
-// escapes, and outside quotes a backslash escapes the next character. An
-// unbalanced quote or a trailing backslash is an error.
-func splitShell(s string) ([]string, error) {
-	var out []string
-	var cur strings.Builder
-	in := false // a word has started (so "" is an empty argument)
-	rs := []rune(s)
-	for i := 0; i < len(rs); i++ {
-		r := rs[i]
-		switch {
-		case r == '\'':
-			j := i + 1
-			for j < len(rs) && rs[j] != '\'' {
-				j++
-			}
-			if j == len(rs) {
-				return nil, fmt.Errorf("unbalanced ' quote")
-			}
-			cur.WriteString(string(rs[i+1 : j]))
-			i, in = j, true
-		case r == '"':
-			j := i + 1
-			for ; j < len(rs) && rs[j] != '"'; j++ {
-				if rs[j] == '\\' && j+1 < len(rs) && strings.ContainsRune("\"\\$`", rs[j+1]) {
-					j++
-				}
-				cur.WriteRune(rs[j])
-			}
-			if j == len(rs) {
-				return nil, fmt.Errorf("unbalanced \" quote")
-			}
-			i, in = j, true
-		case r == '\\':
-			if i+1 == len(rs) {
-				return nil, fmt.Errorf("a trailing \\ escapes nothing")
-			}
-			i++
-			cur.WriteRune(rs[i])
-			in = true
-		case r == ' ' || r == '\t' || r == '\n':
-			if in {
-				out = append(out, cur.String())
-				cur.Reset()
-				in = false
-			}
-		default:
-			cur.WriteRune(r)
-			in = true
-		}
-	}
-	if in {
-		out = append(out, cur.String())
-	}
-	return out, nil
-}
+// splitShell is dun.SplitShell.
+func splitShell(s string) ([]string, error) { return dun.SplitShell(s) }
 
 // shellJoin is splitShell's inverse, quoting a word only when it needs it.
 func shellJoin(words []string) string {
