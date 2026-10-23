@@ -143,6 +143,10 @@ full detail archived in `done.md`.
   2–10m) later the turn is cut via the interrupt path and the next turn
   reads one line naming what was running. Open: the cut note is a stored
   notification. See `done.md`.
+- **A message frees an exec wait (26)** (2026-10-23) — Say() releases every
+  exec grace wait and agent/agent_monitor `wait`; the job is promoted and
+  the message rides the handoff, so the model can exec_monitor it at once.
+  See `done.md`.
 
 ## Active work
 
@@ -154,23 +158,6 @@ and `/proc` on a live session. A–C closed those, and D (sub-agents) is built
 through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
-
-### ◐ 26. A message typed during an exec wait frees the model (USER, 2026-10-23)
-
-USER: "I'm sitting behind a giant analysis exec, and I want the llm to
-investigate its status and also maybe do something else, like validate that
-early data indicates it is correct."
-
-- **next:** Say() wakes every exec grace wait (and agent/agent_monitor
-  `wait`); the job is promoted, the handoff returns, liftQueued puts the
-  message in the same result. Description line. Tests. Live check.
-- **risks:** a fast command that happens to be in its wait when the user
-  types becomes a job (its output arrives as a notification).
-- **blocking decisions:** none.
-- **assumptions:** a user message ALREADY queued when an exec starts also
-  releases it at once (else a message typed while the model streams an
-  exec(600) waits the full 600 s — the same problem).
-- **optional extensions:** none.
 
 ### ◻ Surfacing floor: a lone weak match should not surface (USER, 2026-10-23)
 

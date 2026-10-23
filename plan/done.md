@@ -1581,3 +1581,53 @@ Commit `751c5fd`.
 - **Seen, not changed:** exec cancelled by the cut hands the command off to
   a background job with "STILL RUNNING after 2m30s" (its configured wait,
   not the 12 s it ran).
+
+## ✅ 26. A message typed during an exec wait frees the model (USER, 2026-10-23)
+
+USER: "I'm sitting behind a giant analysis exec, and I want the llm to
+investigate its status and also maybe do something else, like validate that
+early data indicates it is correct."
+
+- **Mechanism** (`harness.go`): `Say` appends the user message and closes
+  `userWaitCh` (under `noteMu`). `userWaiting()` returns that channel, or an
+  already-closed one when a user message is queued — so a message typed
+  while the model was still writing the call releases the wait too, and no
+  message falls between check and wait. No goroutines.
+- **exec** (`exec.go`): the grace `select` also waits on `userWaiting()`.
+  On wake the job is promoted, the handoff says "Handed over early because
+  the user wrote — their message follows.", and `withLiftedQueue` appends
+  the message to the same result. The handoff now names the time it
+  actually waited (was the configured grace; item 25's "after 2m30s" for
+  12 s).
+- **Other waits:** `agent wait:true` and `agent_monitor wait:true` stop the
+  same way (the child keeps running). Not changed: `exec_monitor` (no
+  wait), `ask_user` (excluded), `ask_parent` (child side; a child gets no
+  Say), MCP tool calls (no job to hand over).
+- **Description:** exec says the user can cut the wait short and that a
+  long job should be checked early with exec_monitor.
+- **TUI** (`cmd/dun/main.go`): the queued `user` echo is now emitted BEFORE
+  `Say`, so the `tool_result` the wake produces always follows it and clears
+  the "(queued)" mark. Known gap: the `queued` count event can still land
+  after that result (window = exec's onCall → liftQueued); the next
+  tool_result or the turn end clears it.
+- **Interrupt today** (confirmed): the turn ctx cancels → the grace select
+  returns → `settle` promotes; the job's ctx is `context.Background`
+  (`newJob`), so it keeps running; the message starts the next turn.
+- **Tests:** `exec_wake_test.go` — Say during the wait (handoff < 3 s,
+  message in the result, job still running); message queued before the
+  call; Say with no waiter queues only; finished command answers inline;
+  two concurrent waits both released, message delivered once;
+  agent_monitor wait. `make test` passes.
+- **Live** (scratch HOME + DUN_HOME with a copy of the config, `dun -p`,
+  real model local-Qwen3.8-27B, plain dir `proj26`; run as a background
+  shell, not tmux — the sandbox refused tmux): exec of the 120-row loop
+  with timeout 600, message typed 10 s in → handoff "STILL RUNNING after
+  11s … Handed over early" at the same instant; the model called
+  exec_monitor(job:1), read rows 1–19, said ~15% done and the rows are in
+  order; job completion notification at 2m0s started a turn that reported
+  row 120. The session file holds "[user] how far along…" in the exec
+  result.
+- **Seen, not changed:** in `-p`, `tool_call` is emitted when the call
+  RETURNS (both events share a timestamp), so a client cannot see a long
+  exec start; and the `tool_result` event carries the result before the
+  lift, without the message.
