@@ -318,6 +318,10 @@ func (n noProvider) ChatStream(context.Context, []llm.Message, []llm.ToolDef, *l
 	return nil, n.why
 }
 
+// Providerless tells the engine there is no provider to pick models from
+// (dun.hasProvider): raglit's setup line stays quiet.
+func (noProvider) Providerless() bool { return true }
+
 // keyNote says whether there is a key, never what it is.
 func keyNote(k string) string {
 	if k == "" {

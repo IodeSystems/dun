@@ -75,6 +75,9 @@ func mcpInfo(in mcpInfoIn) string {
 			if n := len(st.Setup.MissingLSPs()); n > 0 {
 				f = append(f, fact(plural(n, "language server")+" missing")) // /poly-lsp lists them
 			}
+			if st.Setup.CapabilityOff(dun.CapSemantic) {
+				f = append(f, fact("semantic search off")) // /raglit says why, /raglit setup turns it on
+			}
 		}
 		rows = append(rows, "  "+pad(st.ID, idW)+"  "+strings.Join(f, " · "))
 		if st.Via == dun.ViaShell {

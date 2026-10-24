@@ -52,10 +52,16 @@ type SetupLang struct {
 	Install *SetupInstall `json:"install,omitempty"`
 }
 
-// SetupReport is a setup notification's data.
+// SetupReport is a setup notification's data: poly-lsp's languages, or
+// raglit's capabilities, roles and extractors (ragsetup.go).
 type SetupReport struct {
 	Languages []SetupLang `json:"languages"`
 	Missing   int         `json:"missing"`
+
+	Capabilities     []SetupCapability `json:"capabilities,omitempty"`
+	Roles            []SetupRole       `json:"roles,omitempty"`
+	Extractors       []SetupExtractor  `json:"extractors,omitempty"`
+	ExtractorsSeenBy string            `json:"extractorsSeenBy,omitempty"`
 }
 
 // MissingLSPs are the languages whose child LSP is not installed.
@@ -74,7 +80,7 @@ func (r SetupReport) MissingLSPs() []SetupLang {
 const setupLoggerSuffix = "/setup"
 
 // parseSetupNote reads a setup notification's params, ok=false when they
-// are not one (another logger, or no languages).
+// are not one (another logger, or neither languages nor capabilities).
 func parseSetupNote(params map[string]any) (SetupReport, bool) {
 	logger, _ := params["logger"].(string)
 	if !strings.HasSuffix(logger, setupLoggerSuffix) {
@@ -85,7 +91,7 @@ func parseSetupNote(params map[string]any) (SetupReport, bool) {
 		return SetupReport{}, false
 	}
 	var r SetupReport
-	if json.Unmarshal(b, &r) != nil || len(r.Languages) == 0 {
+	if json.Unmarshal(b, &r) != nil || (len(r.Languages) == 0 && len(r.Capabilities) == 0) {
 		return SetupReport{}, false
 	}
 	return r, true
@@ -172,8 +178,12 @@ func LangName(lang string) string {
 // server is in a meaningful part of the project (setupMeaningfulShare). One
 // language: its server, what it adds and the install command, with the
 // toolchain it needs when that is not on PATH. Several: one line naming
-// them, /<slash> for the commands.
+// them, /<slash> for the commands. A capability report's (raglit) is
+// CapabilityLine's.
 func SetupLine(r SetupReport, slash string) string {
+	if len(r.Capabilities) > 0 {
+		return CapabilityLine(r, slash)
+	}
 	total := 0
 	for _, l := range r.Languages {
 		total += l.Files
@@ -238,6 +248,11 @@ func (h *Harness) noteSetup(id string, r SetupReport) string {
 		return ""
 	}
 	line := SetupLine(r, slash)
+	// A capability line points at the person's providers: without a model
+	// client there are none to pick from.
+	if len(r.Capabilities) > 0 && !hasProvider(h.cfg.Client) {
+		line = ""
+	}
 	if line == "" {
 		return ""
 	}
@@ -246,6 +261,16 @@ func (h *Harness) noteSetup(id string, r SetupReport) string {
 	}
 	h.setupSaid[id] = true
 	return line
+}
+
+// hasProvider reports whether c is a model the person logged in to: not
+// nil, and not the stand-in a logged-out dun runs on (it says Providerless).
+func hasProvider(c any) bool {
+	if c == nil {
+		return false
+	}
+	p, ok := c.(interface{ Providerless() bool })
+	return !ok || !p.Providerless()
 }
 
 // SetupTable is every listed language as rows, for /poly-lsp: its files,

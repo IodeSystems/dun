@@ -41,6 +41,7 @@ const (
 	// fakeSetupEnv makes the fake poly-lsp send the setup notification
 	// (setupstate_test.go) as the mode says (fakeSetupReport). Unset, it is
 	// an older build: none.
+	// The fake raglit sends its own ("raglit/setup", fakeRagSetup).
 	fakeSetupEnv = "DUN_FAKE_SETUP"
 	// fakeAnywayEnv makes the fake's `mcp --help` list --index-anyway; the
 	// "notproject" index mode fails without the flag, with the
@@ -97,6 +98,9 @@ func fakeBinMain(persona string) {
 			return
 		}
 		fakeLogf("serve %s", strings.Join(args[1:], " "))
+		if mode := os.Getenv(fakeSetupEnv); mode != "" {
+			fakeAfterInit = func(out *bufio.Writer) { fakeRagSetup(out, mode) }
+		}
 		serveFake(raglitFakeTools)
 	case "poly-lsp":
 		if slices.Contains(args, "--help") {

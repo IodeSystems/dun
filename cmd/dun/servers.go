@@ -115,6 +115,11 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 		return runSwitchCmd(ctx, h, alias, f[0], f[1:])
 	}
 	id, label := alias, alias // addressed by its id
+	// The TUI opens /raglit setup itself (ragsetup.go); another client
+	// reaches here.
+	if action == "setup" && alias == dun.ServerDocs {
+		return label + ": setup is a form in dun's terminal UI — /" + alias + " setup there"
+	}
 	switch action {
 	case "", "status":
 		return serverStatusLine(h, id, label)
@@ -518,7 +523,11 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	if ix := indexStatus(st, cmd); ix != "" {
 		b.WriteString("\n" + ix)
 	}
-	if st.Running && st.Setup != nil {
+	switch {
+	case !st.Running || st.Setup == nil:
+	case len(st.Setup.Capabilities) > 0:
+		b.WriteString("\n" + dun.CapabilityTable(*st.Setup, cmd))
+	default:
 		b.WriteString("\n" + dun.SetupTable(*st.Setup))
 	}
 	if st.Auto {
