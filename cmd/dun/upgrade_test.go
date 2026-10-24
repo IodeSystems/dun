@@ -107,6 +107,39 @@ func TestUpgradeRowInTheTUIAndInterrupt(t *testing.T) {
 	}
 }
 
+// A failed upgrade (a service could not put the new build in place) clears
+// the row and says why, once, in the conversation.
+func TestUpgradeFailedClearsTheRowAndSaysWhy(t *testing.T) {
+	v, _ := busyVtui(t)
+	v.event(pendingEv)
+	v.event(map[string]any{"type": "upgrade", "state": "failed", "version": "d80fc66",
+		"error": "upgrade: the new build fails `serve --check` with the service's flags: exit status 1: bad flag"})
+	if v.m.upgrade != nil {
+		t.Fatal("the row stayed after the upgrade failed")
+	}
+	if got := v.view(); strings.Contains(got, "⟳ dund upgrade") ||
+		!strings.Contains(got, "dund could not upgrade to d80fc66") {
+		t.Fatalf("view:\n%s", got)
+	}
+}
+
+// A service that cannot upgrade itself is told the step that works: a
+// restart only when its unit runs this very binary.
+func TestServiceFix(t *testing.T) {
+	for _, c := range []struct {
+		r    proto.HelloReply
+		want string
+	}{
+		{proto.HelloReply{Exe: "/me/dun"}, "dun dund service restart"},
+		{proto.HelloReply{Exe: "/svc/dun", NoUpgrade: "this user cannot write in /svc"}, "install the service from this build: /me/dun dund service install --start"},
+		{proto.HelloReply{Exe: "/svc/dun"}, "install -m 755 /me/dun /svc/dun.new && mv -f /svc/dun.new /svc/dun"},
+	} {
+		if got := serviceFix(&c.r, "/me/dun"); !strings.Contains(got, c.want) {
+			t.Errorf("%+v: %q, want %q", c.r, got, c.want)
+		}
+	}
+}
+
 // /upgrade now asks dund to restart at once.
 func TestUpgradeNowCommand(t *testing.T) {
 	v, rec := busyVtui(t)

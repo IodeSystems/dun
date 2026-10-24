@@ -255,6 +255,36 @@ foreman the splash's values and the context parts are cut at a word; at 49 the
 view follows the login notice up as the picker opens; personas not run; light
 theme unseen; not run against the real dund)
 
+### ◐ 43. A service's dund upgrades itself (USER, 2026-10-24: "Why make the user do that themselves?")
+
+A dund under systemd/launchd refused every Upgrade, and `service restart` ran
+the unit's binary (`~/.cache/dun/dun`, the launcher's build) — the old build
+again. Now it takes the same coordinated upgrade (pending, quiet point,
+deadline, /upgrade now); at the quiet point it copies the new binary over the
+unit's (temp file beside it, fsync, chmod, `--version` = the asked build,
+`serve --check --handover-from <pid>` with the service's own flags, rename)
+and exits **75** (EX_TEMPFAIL) for the manager to restart it. Any failure:
+nothing replaced, status "failed" + reason to every client, dund runs on
+(`internal/dundcli/handover.go`). New units add `SuccessExitStatus=75` +
+`RestartForceExitStatus=75`; old units (Restart=on-failure) and launchd
+(SuccessfulExit=false) restart on 75 as they are. Can't (binary's directory
+not writable…) → `HelloReply.NoUpgrade`; TUI and doctor give the fix that
+works (`serviceFix`: restart only when the unit runs this very binary).
+
+- **Decision:** copy over the unit's binary, not repoint the unit — the
+  client's binary may be a checkout's or temp file (a unit naming a missing
+  file crash-loops), and a launchd agent cannot rebootstrap itself.
+- **next:** live — the owner's running dund (5f5237b) cannot hand over; one
+  atomic copy to `~/.cache/dun/dun` lets its watchSelf re-exec in place
+  into this build (same PID), after which TUIs upgrade it.
+- **risks:** a build that passes `--check` but dies at start crash-loops
+  (no rollback copy kept); the check beside a live dund skips the HTTP bind
+  and the registry's side effects (ExecStartPre runs the full one); systemd
+  restart path and launchd untested live (fake binaries in tests only);
+  older TUIs show a stuck row on "failed" until they reconnect.
+- **optional extensions:** keep `<exe>.prev` and roll back after N failed
+  starts; mobile banner says the failure (now it just clears).
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has

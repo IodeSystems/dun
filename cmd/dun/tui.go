@@ -2678,6 +2678,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// dund is upgrading (to every connection, no session): a status row
 		// of its own until the reconnect clears it.
 		m.upgrade = parseUpgrade(ev)
+		if m.upgrade.state == "failed" {
+			// Nothing was replaced and dund runs on: said once, no row.
+			m.append(stNote.Render(upgradeFailed(m.upgrade)))
+			m.upgrade = nil
+		}
 		m.refresh()
 	case "persist":
 		// dund's answer to /persist.

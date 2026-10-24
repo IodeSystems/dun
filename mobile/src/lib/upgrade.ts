@@ -9,7 +9,9 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 /** The upgrade event as state; null for anything else. */
 export function parseUpgrade(ev: Record<string, unknown>): Upgrade | null {
-  if (ev.type !== 'upgrade') return null;
+  // 'failed': a service's dund could not put the new build in place and runs
+  // on with nothing pending — the banner goes.
+  if (ev.type !== 'upgrade' || ev.state === 'failed') return null;
   const waiting = Array.isArray(ev.waiting) ? (ev.waiting as Record<string, unknown>[]) : [];
   return {
     state: ev.state === 'restarting' ? 'restarting' : 'pending',

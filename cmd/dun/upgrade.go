@@ -22,16 +22,17 @@ import (
 
 // upgradeState is the last upgrade status dund sent; nil: none pending.
 type upgradeState struct {
-	state    string // pending | restarting
+	state    string // pending | restarting | failed
 	version  string
 	exe      string
 	deadline time.Time
 	waiting  []proto.UpgradeWait
+	err      string // failed: why (nothing was replaced)
 }
 
 // parseUpgrade reads an upgrade event.
 func parseUpgrade(ev evMsg) *upgradeState {
-	u := &upgradeState{state: str(ev["state"]), version: str(ev["version"]), exe: str(ev["exe"])}
+	u := &upgradeState{state: str(ev["state"]), version: str(ev["version"]), exe: str(ev["exe"]), err: str(ev["error"])}
 	if d, ok := ev["deadline"].(float64); ok && d > 0 {
 		u.deadline = time.Unix(int64(d), 0)
 	}
@@ -43,6 +44,12 @@ func parseUpgrade(ev evMsg) *upgradeState {
 			ID: int(id), Detail: str(wm["detail"]), Hint: str(wm["hint"])})
 	}
 	return u
+}
+
+// upgradeFailed is the conversation's note for a failed upgrade: a service's
+// dund could not put the new build in place, and runs on.
+func upgradeFailed(u *upgradeState) string {
+	return "dund could not upgrade to " + buildName(u.version) + " and runs on its own build: " + u.err
 }
 
 func buildName(v string) string {
@@ -225,11 +232,29 @@ func noteDundBuild(ev proto.Event, err error) {
 		w.dundBuild, w.fix = "?", killLine()+", then dun again"
 	case !ok || r.Version == version || r.Version == "dev" || version == "dev":
 	case !r.Upgradable:
-		w.dundBuild, w.fix = r.Version, "dun dund service restart"
+		exe, _ := selfExe()
+		w.dundBuild, w.fix = r.Version, serviceFix(r, exe)
 	case !r.Coordinated:
 		w.dundBuild, w.fix = r.Version, killLine()+", then dun again"
 	}
 	attachNow.Store(w)
+}
+
+// serviceFix is how to bring a service's dund that cannot upgrade itself (r,
+// its hello) to the build at exe, this binary. A restart runs the unit's
+// binary again, so it helps only when that is this file. A dund too old to
+// upgrade itself as a service still restarts into its own file when a new
+// build is renamed over it. One that cannot write there (NoUpgrade) needs the
+// service installed from this binary.
+func serviceFix(r *proto.HelloReply, exe string) string {
+	switch {
+	case r.Exe == "" || exe == "" || r.Exe == exe:
+		return "dun dund service restart"
+	case r.NoUpgrade != "":
+		return "install the service from this build: " + exe + " dund service install --start -- <its serve flags>"
+	}
+	return "put this build where the service runs it, and it restarts into it once nothing is busy: install -m 755 " +
+		exe + " " + r.Exe + ".new && mv -f " + r.Exe + ".new " + r.Exe
 }
 
 // checkDundBuild compares dund's build with this one, after attaching. It
@@ -282,7 +307,11 @@ func checkDundBuild(ac *attachConn, sc *bufio.Scanner) (notes []string, reexec s
 	// This binary is this build and dund is not.
 	if !r.Upgradable {
 		if once("service " + pair) {
-			return []string{"dund (a service) runs build " + r.Version + ", this is " + version + " — dun dund service restart"}, ""
+			why := ""
+			if r.NoUpgrade != "" {
+				why = ", and cannot upgrade itself: " + r.NoUpgrade
+			}
+			return []string{"dund (a service) runs build " + r.Version + ", this is " + version + why + " — " + serviceFix(r, exe)}, ""
 		}
 		return nil, ""
 	}

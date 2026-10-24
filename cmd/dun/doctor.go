@@ -296,14 +296,24 @@ func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
 			d.add("fail", "dund", "runs an older build that predates build checks (and today's fixes)", restart)
 		case r.Version == version || r.Version == "dev" || version == "dev":
 			d.add("ok", "dund", "runs this build ("+r.Version+")", "")
+		// Upgradable, a service too: dun asks it to restart into this build,
+		// and /upgrade now does it at once. A service restart is not offered:
+		// it runs the unit's binary, which need not be this build.
 		case r.Upgradable && r.Busy:
 			d.add("warn", "dund", "runs build "+r.Version+", this is "+version+", and is busy (a turn, a question or a job is running), so it cannot restart yet",
-				"let it finish, interrupt it (ctrl+g), kill its jobs (/jobs kill all) — or "+restart)
+				"let it finish, interrupt it (ctrl+g), kill its jobs (/jobs kill all) — or start dun and /upgrade now (cut work resumes after)")
 		case r.Upgradable:
 			d.add("warn", "dund", "runs build "+r.Version+", this is "+version,
-				"start dun: it asks dund to restart into this build (or "+restart+")")
+				"start dun: it asks dund to restart into this build once nothing is busy")
 		default:
-			d.add("warn", "dund", "the service runs build "+r.Version+", this is "+version, "dun dund service restart")
+			// A service that cannot upgrade itself (an older build, or its
+			// binary where this user cannot write).
+			detail := "the service runs build " + r.Version + ", this is " + version
+			if r.NoUpgrade != "" {
+				detail += ", and cannot upgrade itself: " + r.NoUpgrade
+			}
+			exe, _ := selfExe()
+			d.add("warn", "dund", detail, serviceFix(r, exe))
 		}
 		return
 	}
