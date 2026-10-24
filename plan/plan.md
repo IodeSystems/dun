@@ -184,10 +184,11 @@ stdio poly-lsp processes, 1.14 GB each (the same index twice).
   agree); the installed ~/.local/bin poly-lsp-mcp (9e227d7) has no marker,
   so nothing changes until it is updated (`dun doctor --fix` installs the
   recommended one where it is missing, not over an older one).
-- **next:** poly-lsp is changing (USER decided there) so the daemon admits a
-  proxy's root outside --allow; asked for a second `mcp --help` phrase so
-  dun drops `underHome` only for builds that have it (e9b0020 has the
-  daemon marker and still 403s outside $HOME).
+- **Roots outside $HOME** (poly-lsp 6dab491, USER decided there): its
+  daemon admits a proxy's root outside --allow; `mcp --help` says "a root
+  outside --allow is admitted" (`anyRootMarker`, IndexSupport.AnyRoot), and
+  then dun skips `underHome`. Verified by hand: a /tmp root through the
+  daemon, index ready, the hook cancelled a read. Recommended → 6dab491.
 - **optional:** a real dun session run end to end.
 
 ### ✅ 27. Surfacing floor — done 2026-10-23, see done.md (open: the coverage

@@ -48,7 +48,8 @@ const (
 	// not-a-project reason, and is ready with it.
 	fakeAnywayEnv = "DUN_FAKE_ANYWAY"
 	// fakeDaemonEnv makes the fake's `mcp --help` carry daemonMarker in its
-	// --hook line: a build whose --daemon proxy keeps the hook.
+	// --hook line: a build whose --daemon proxy keeps the hook; "anyroot"
+	// adds anyRootMarker (its daemon admits a root outside $HOME).
 	fakeDaemonEnv = "DUN_FAKE_DAEMON"
 )
 
@@ -117,8 +118,12 @@ func fakeBinMain(persona string) {
 			if os.Getenv(fakeAnywayEnv) != "" {
 				fmt.Println("      --index-anyway")
 			}
-			if os.Getenv(fakeDaemonEnv) != "" {
-				fmt.Println("      --daemon\n      --hook string   host hook (--daemon: the proxy runs it) (default \"/x/hook\")")
+			if mode := os.Getenv(fakeDaemonEnv); mode != "" {
+				d := "      --daemon   proxy to the shared daemon"
+				if mode == "anyroot" {
+					d += "; a root outside --allow is admitted"
+				}
+				fmt.Println(d + "\n      --hook string   host hook (--daemon: the proxy runs it) (default \"/x/hook\")")
 			}
 			return
 		}

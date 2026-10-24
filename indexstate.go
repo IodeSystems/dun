@@ -189,6 +189,7 @@ type IndexSupport struct {
 	Budget   bool // --index-budget (the intermediate build had a file cap)
 	Anyway   bool // --index-anyway (index a root that is not a project)
 	Daemon   bool // --daemon that keeps the file-access hook (daemonMarker)
+	AnyRoot  bool // its daemon admits a root outside --allow (anyRootMarker)
 }
 
 // daemonMarker is in the --hook help of a poly-lsp-mcp whose --daemon proxy
@@ -197,6 +198,11 @@ type IndexSupport struct {
 // a build that says this. A substring: with $POLY_LSP_HOOK set, cobra
 // appends the default to the line.
 const daemonMarker = "--daemon: the proxy runs it"
+
+// anyRootMarker ends the --daemon help of a poly-lsp-mcp whose daemon admits
+// a root a proxy opens outside its --allow (default $HOME) (6dab491). An
+// earlier daemon answers such a root with 403 on every call.
+const anyRootMarker = "a root outside --allow is admitted"
 
 
 // indexProbes caches IndexProtocol by the binary's path, size and mtime: a
@@ -241,6 +247,7 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 	sup.Budget = strings.Contains(help, "--index-budget")
 	sup.Anyway = strings.Contains(help, "--index-anyway")
 	sup.Daemon = strings.Contains(help, daemonMarker)
+	sup.AnyRoot = strings.Contains(help, anyRootMarker)
 	sup.Protocol = sup.Budget || strings.Contains(help, "--index-max-files")
 	indexProbes.Store(key, sup)
 	return sup, resolved, nil

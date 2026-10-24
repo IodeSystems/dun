@@ -410,10 +410,11 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// then a proxy: it stops with the engine, and the daemon releases the
 	// root's LSPs and index after its last client (its --root-lsp-grace,
 	// --idle-roots-mb, --idle-exit). The options above travel with the
-	// proxy's open; different ones rebuild the root. Only for a workspace
-	// under $HOME: the daemon a proxy auto-starts serves roots there alone
-	// (its --allow, default $HOME) and answers any other with 403.
-	if sup.Daemon && underHome(h.cfg.Workspace) && !slices.Contains(args, "--daemon") {
+	// proxy's open; different ones rebuild the root. A daemon before
+	// AnyRoot serves roots under its --allow alone (default $HOME) and
+	// answers any other with 403: such a build gets --daemon only for a
+	// workspace under $HOME.
+	if sup.Daemon && (sup.AnyRoot || underHome(h.cfg.Workspace)) && !slices.Contains(args, "--daemon") {
 		args = append(slices.Clone(args), "--daemon")
 	}
 	h.markIndexBuilding(s.ID, indexes)

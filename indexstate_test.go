@@ -361,10 +361,12 @@ func TestChooseExcludes(t *testing.T) {
 
 // A poly-lsp whose --daemon proxy keeps the hook is started as that proxy,
 // with the project's options and the hook's env, for a workspace under
-// $HOME; one without the marker, or a workspace elsewhere (the daemon would
-// refuse it), is started in-process, as before.
+// $HOME, or anywhere for a build whose daemon admits any root; one without
+// the marker, or an earlier daemon's workspace elsewhere (it would refuse
+// it), is started in-process, as before.
 func TestIndex_DaemonWhenTheHookIsKept(t *testing.T) {
-	for _, c := range []struct{ marker, home, daemon bool }{{true, true, true}, {false, true, false}, {true, false, false}} {
+	for _, c := range []struct{ marker, anyRoot, home, daemon bool }{
+		{true, false, true, true}, {false, false, true, false}, {true, false, false, false}, {true, true, false, true}} {
 		daemon := c.daemon
 		t.Setenv("DUN_HOME", t.TempDir())
 		ws := t.TempDir()
@@ -373,7 +375,10 @@ func TestIndex_DaemonWhenTheHookIsKept(t *testing.T) {
 			t.Setenv("HOME", filepath.Dir(ws))
 		}
 		env := []string{fakeIndexEnv + "=ready"}
-		if c.marker {
+		switch {
+		case c.anyRoot:
+			env = append(env, fakeDaemonEnv+"=anyroot")
+		case c.marker:
 			env = append(env, fakeDaemonEnv+"=1")
 		}
 		h, log, _ := startIndexed(t, ws, env...)

@@ -24,13 +24,13 @@ var Supported = []Tool{
 		Min: "v0.2.0", Recommended: "v0.5.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
-	// tree-sitter, so go install needs Go alone. Recommended e9b0020: git
+	// tree-sitter, so go install needs Go alone. Recommended 6dab491: git
 	// decides the file set, leftOutBy, "not a project", the doctor update
 	// block, and the shared daemon dun runs it through (the proxy keeps the
 	// hook, changed options rebuild a root, roots are released after their
-	// last client). No tag yet.
+	// last client, a root outside $HOME is admitted). No tag yet.
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.0.0-20261024211056-e9b0020d2d10"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.0.0-20261024214805-6dab491b8dd0"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /raglit setup and
 	// doctor read. Recommended v0.1.0 (a32c5db): raglit's first release, its
