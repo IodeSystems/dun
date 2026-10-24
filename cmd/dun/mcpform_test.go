@@ -31,28 +31,27 @@ func TestMCPFormSpec_URLOrCommand(t *testing.T) {
 	}
 }
 
-// The last row is the placement: direct preselected, space switches it to the
-// shell, the panel says what the shell costs, and enter sends via:"shell".
-func TestMCPForm_PlacementDirectByDefault(t *testing.T) {
+// A name and a server are all the form needs: enter on the server row adds
+// it, standalone — the mode is not asked (it is /mcp mode, later), and the
+// optional rows are not walked through.
+func TestMCPForm_EnterOnServerAdds(t *testing.T) {
 	var buf bytes.Buffer
 	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	m.openMCPForm()
 	m.mcpFields[0].SetValue("corp-docs")
 	m.mcpFields[1].SetValue("corp-mcp --stdio")
+	if v := stripANSI(m.mcpFormPanel()); strings.Contains(v, "standalone") || strings.Contains(v, "scripted") {
+		t.Fatalf("the form asks for the mode:\n%s", v)
+	}
 	var cur tea.Model = m
-	for i := 0; i < 3; i++ {
-		cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // name → server
+	if tm := cur.(tuiModel); tm.mcpStep != mcpServer || buf.Len() != 0 {
+		t.Fatalf("enter on the name row: step %d, sent %q", tm.mcpStep, buf.String())
 	}
-	tm := cur.(tuiModel)
-	if tm.mcpStep != mcpViaStep || tm.mcpShell || !strings.Contains(stripANSI(tm.mcpFormPanel()), "(•) standalone") {
-		t.Fatalf("step %d shell %v:\n%s", tm.mcpStep, tm.mcpShell, stripANSI(tm.mcpFormPanel()))
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // server → added
+	if tm := cur.(tuiModel); tm.mcpForm || !strings.Contains(convoText(tm), "adding corp-docs…") {
+		t.Errorf("form open %v, convo:\n%s", tm.mcpForm, convoText(tm))
 	}
-	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
-	tm = cur.(tuiModel)
-	if v := stripANSI(tm.mcpFormPanel()); !tm.mcpShell || !strings.Contains(v, "(•) scripted") || !strings.Contains(v, "no docs indexing") {
-		t.Fatalf("space must switch to the shell and say what it loses:\n%s", v)
-	}
-	cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	var got map[string]string
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("sent %q: %v", buf.String(), err)
@@ -61,7 +60,7 @@ func TestMCPForm_PlacementDirectByDefault(t *testing.T) {
 		t.Fatalf("sent %v", got)
 	}
 	var spec dun.ServerSpec
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(got["action"], "add ")), &spec); err != nil || spec.Via != dun.ViaShell || spec.Command != "corp-mcp" {
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(got["action"], "add ")), &spec); err != nil || spec.Via != "" || spec.Command != "corp-mcp" {
 		t.Errorf("spec %+v %v", spec, err)
 	}
 }
@@ -82,12 +81,10 @@ func TestMCPForm_OAuthRows(t *testing.T) {
 	if tm.mcpStep != mcpClient || !strings.Contains(stripANSI(tm.mcpFormPanel()), "oauth login (optional)") {
 		t.Fatalf("step %d:\n%s", tm.mcpStep, stripANSI(tm.mcpFormPanel()))
 	}
-	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // empty client id: straight to the placement
-	if tm = cur.(tuiModel); tm.mcpStep != mcpViaStep {
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // empty client id: no rows after it
+	if tm = cur.(tuiModel); tm.mcpStep != mcpClient || strings.Contains(stripANSI(tm.mcpFormPanel()), "scopes") {
 		t.Fatalf("an empty client id must skip the oauth rows: step %d", tm.mcpStep)
 	}
-	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	tm = cur.(tuiModel)
 	tm.mcpFields[mcpClient].SetValue("c1")
 	tm.mcpFields[mcpScopes].SetValue("openid, email")
 	tm.mcpFields[mcpSend].SetValue("jwt")
@@ -205,7 +202,7 @@ func TestMCPForm_CommandRowsAndEnv(t *testing.T) {
 	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	tm := cur.(tuiModel)
 	v := stripANSI(tm.mcpFormPanel())
-	if tm.mcpStep != mcpEnv || !strings.Contains(v, "local command (stdio)") || strings.Contains(v, "bearer") || strings.Contains(v, "oauth") {
+	if tm.mcpStep != mcpEnv || !strings.Contains(v, "runs as a command") || strings.Contains(v, "token") || strings.Contains(v, "oauth") {
 		t.Fatalf("step %d:\n%s", tm.mcpStep, v)
 	}
 	tm.mcpFields[mcpEnv].SetValue(`TOKEN=s3cret DSN=$DB_DSN`)
@@ -237,7 +234,7 @@ func TestMCPForm_CommandRowsAndEnv(t *testing.T) {
 	m = newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	m.openMCPForm()
 	m.mcpFields[mcpServer].SetValue("https://x/mcp")
-	if v := stripANSI(m.mcpFormPanel()); !strings.Contains(v, "remote (HTTP)") || strings.Contains(v, "  env  ") {
+	if v := stripANSI(m.mcpFormPanel()); !strings.Contains(v, "a web address") || strings.Contains(v, "  env  ") {
 		t.Errorf("url:\n%s", v)
 	}
 }

@@ -828,7 +828,7 @@ func TestTUI_ScreenDump(t *testing.T) {
 	if !strings.Contains(dump, "busy=true") || !strings.Contains(dump, "w=80 h=24") {
 		t.Fatalf("state header missing/incomplete:\n%s", dump)
 	}
-	if !strings.Contains(dump, "1 tools") {
+	if !strings.Contains(dump, "1 tool") {
 		t.Fatalf("rendered screen not captured:\n%s", dump)
 	}
 	// A second dump appends (history of snapshots).
@@ -2524,7 +2524,7 @@ func TestActivity_TaskTracksTheLastUserMessage(t *testing.T) {
 	v := newVtui(80, 24)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	v.send("formalize the jobs table")
-	for _, row := range screen(v)[:2] {
+	for _, row := range screen(v)[:1] {
 		if strings.Contains(row, "formalize the jobs table") {
 			t.Errorf("the task still has a line of its own: %q", strings.TrimRight(row, " "))
 		}

@@ -58,19 +58,25 @@ func TestPersistAndExit(t *testing.T) {
 	}
 }
 
-// The ready line names a handful of tools, not hundreds.
-func TestReadyLineCapsTheToolNames(t *testing.T) {
-	few := []string{"a", "b", "c"}
-	if got := readyLine(few); got != "ready — 3 tools: a, b, c" {
-		t.Errorf("few: %q", got)
-	}
-	var many []string
+// Ready leaves no tool list in the conversation: the header counts the
+// tools (the same number, kept current), and /mcp lists them.
+func TestReadyNamesNoTools(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.url, m.model = "http://llm/v1", "m1"
+	var tools []any
 	for i := 0; i < 172; i++ {
-		many = append(many, fmt.Sprintf("t%d", i))
+		tools = append(tools, fmt.Sprintf("t%d", i))
 	}
-	got := readyLine(many)
-	if !strings.HasPrefix(got, "ready — 172 tools: t0, t1, t2, t3, t4, t5, t6, t7 … +164 more") || strings.Contains(got, "t8,") {
-		t.Errorf("many: %q", got)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": tools})
+	if txt := convoText(m); strings.Contains(txt, "t0") || strings.Contains(txt, "ready") {
+		t.Errorf("ready wrote:\n%s", txt)
+	}
+	if h := stripANSI(m.headView()); !strings.Contains(h, "· m1") || !strings.Contains(h, "· 172 tools") {
+		t.Errorf("header %q", h)
+	}
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	if h := stripANSI(m.headView()); !strings.Contains(h, "· 1 tool") || strings.Contains(h, "1 tools") {
+		t.Errorf("header %q", h)
 	}
 }
 

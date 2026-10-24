@@ -112,7 +112,7 @@ func TestProviderForm_SavesAndSearchesTheNewProvider(t *testing.T) {
 	}
 	m.providerFields[1].SetValue("")
 	m = pick(m, "https://openrouter.ai/api/v1/", "enter", "sk-or-1", "enter")
-	if m.providerForm || !m.modelPicking || m.modelQuery.Value() != "openrouter " {
+	if m.providerForm || !m.modelPicking || m.modelQuery.Value() != "" { // the only service: no filter
 		t.Fatalf("want the picker filtered to the new provider; form=%v picking=%v q=%q",
 			m.providerForm, m.modelPicking, m.modelQuery.Value())
 	}

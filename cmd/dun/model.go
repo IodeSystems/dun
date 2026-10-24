@@ -2,13 +2,13 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // /model — pick a model from every configured provider, by typing part of its
@@ -87,7 +87,7 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	case len(args) == 1:
 		p, ok := m.providerNamed(m.provider)
 		if !ok && m.url == "" {
-			m.append(stErr.Render("not logged in to a provider — /login <name>"))
+			m.append(stAccent.Render(errNoLogin.Error()))
 			return nil
 		}
 		if p.URL == "" {
@@ -138,12 +138,13 @@ func logoutSlash(m *tuiModel, args []string) tea.Cmd {
 func (m *tuiModel) openModelPicker(query string) tea.Cmd {
 	q := textinput.New()
 	q.Placeholder = "type to search"
+	q.SetWidth(40) // without a width the placeholder shows as its first letter
 	q.Prompt = "/ "
 	q.SetValue(query)
 	q.CursorEnd()
 	q.Focus()
 	m.modelQuery = q
-	m.modelPicking, m.modelSel, m.modelPersist = true, 0, false
+	m.modelPicking, m.modelSel = true, 0
 	m.modelRows, m.modelErrs = nil, nil
 	m.input.Blur()
 	ps := m.pickerProviders()
@@ -266,13 +267,11 @@ func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.modelSel = max(0, min(len(m.filteredModels())-1, m.modelSel+modelWindow))
 		m.refresh()
 		return m, nil
-	case "tab":
-		m.modelPersist = !m.modelPersist
-		m.refresh()
-		return m, nil
 	case "ctrl+a":
 		return m, m.openProviderForm(nil)
-	case "enter":
+	case "enter", "alt+enter":
+		// The pick is the default for later sessions too: what a person picks
+		// is what they expect tomorrow. alt+enter is for this session only.
 		r, ok := m.selectedModel()
 		if !ok {
 			return m, nil
@@ -282,7 +281,7 @@ func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.closeModelPicker()
-		return m, m.switchModel(p, r.id, m.modelPersist)
+		return m, m.switchModel(p, r.id, msg.String() == "enter")
 	}
 	return m.typeModelQuery(msg)
 }
@@ -305,11 +304,6 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	if model == "" {
 		return nil
 	}
-	if model == m.model && p.URL == m.url && !persist {
-		m.append(stDim.Render("already using model " + model))
-		m.refresh()
-		return nil
-	}
 	if persist {
 		cfg := loadConfig()
 		cfg.use(p, model)
@@ -318,15 +312,26 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 			return nil
 		}
 	}
-
-	desc := "this session"
+	note := "using " + model + " on " + p.Name + " — this session only"
 	if persist {
-		desc = "persistently"
+		note = "using " + model + " on " + p.Name + " — saved as default"
 	}
-	m.append(stDim.Render(fmt.Sprintf("switching to %s on %s, %s…", model, p.Name, desc)))
+	if model == m.model && p.URL == m.url { // nothing to restart
+		if persist {
+			m.append(stOK.Render(note))
+		} else {
+			m.append(stDim.Render("already using model " + model))
+		}
+		return nil
+	}
+	// Said once the new engine is ready (afterSwitch): a line written now
+	// would go with the conversation it is about to replace.
+	m.switchNote = note
 
 	// The service restarts the engine on the new endpoint, on this
-	// conversation; its history comes back and is rendered afresh.
+	// conversation; its history comes back and is rendered afresh, with no
+	// "resumed" marker — to the person nothing was resumed.
+	m.quietReplay = true
 	m.convo = nil
 	m.cur, m.pendingTool = "", -1
 	m.sel = -1
@@ -337,6 +342,7 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	m.fatalErr, m.exitAnnounced = "", false
 	m.restarts, m.restartStart = 0, time.Now()
 	m.model, m.url, m.provider, m.keySet = model, p.URL, p.Name, p.Key != ""
+	m.noLogin = p.URL == ""
 	m.skipHistory = false
 	m.refresh()
 
@@ -355,12 +361,10 @@ func (m tuiModel) modelPanel() string {
 	if m.providerForm {
 		return m.providerFormPanel()
 	}
-	persist := " "
-	if m.modelPersist {
-		persist = "✓"
-	}
-	head := stHeader.Render("models") + stDim.Render("  type to search · ↑/↓ choose · enter switch · tab save as default · ctrl+a log in to a provider · esc cancel")
-	rows := []string{head, m.modelQuery.View()}
+	// The keys are on the status line (modelHint), like every other list's.
+	rows := []string{stHeader.Render("pick a model"), m.modelQuery.View()}
+	// One service: its name on every row says nothing.
+	several := len(m.pickerProviders()) > 1 || slices.ContainsFunc(m.modelRows, func(r modelRow) bool { return r.provider != m.modelRows[0].provider })
 
 	shown := m.filteredModels()
 	lo := m.modelSel - modelWindow/2
@@ -384,12 +388,11 @@ func (m tuiModel) modelPanel() string {
 		if r.id == m.model && r.provider == m.provider {
 			mark = stTool.Render("• ") // running now
 		}
-		line := mark + stDim.Render(fmt.Sprintf("%-*s  ", width, r.provider)) + r.id
-		if i == m.modelSel {
-			rows = append(rows, addGutter(line, "▎ ", stSel))
-		} else {
-			rows = append(rows, addGutter(line, "  ", lipgloss.NewStyle()))
+		line := mark
+		if several {
+			line += stDim.Render(fmt.Sprintf("%-*s  ", width, r.provider))
 		}
+		rows = append(rows, listRow(line, r.id, "", i == m.modelSel))
 	}
 
 	var status []string
@@ -400,17 +403,21 @@ func (m tuiModel) modelPanel() string {
 		status = append(status, fmt.Sprintf("%d-%d of %d", lo+1, hi, len(shown)))
 	}
 	if len(m.pickerProviders()) == 0 {
-		status = append(status, "not logged in to a provider — ctrl+a, or /login <name>")
+		status = append(status, "not logged in — ctrl+a to log in")
 	}
 	if m.modelPending > 0 {
-		status = append(status, fmt.Sprintf("fetching from %d provider(s)…", m.modelPending))
+		status = append(status, fmt.Sprintf("asking %s…", plural(m.modelPending, "service")))
 	}
 	rows = append(rows, "  "+stDim.Render(strings.Join(status, " · ")))
 	for _, e := range m.modelErrs {
 		rows = append(rows, "  "+stErr.Render(e))
 	}
-	rows = append(rows, fmt.Sprintf("  [%s] save as default (future sessions)", persist))
 	return strings.Join(rows, "\n")
+}
+
+// modelHint is the picker's status line.
+func modelHint() string {
+	return "model  ·  ↑/↓ choose · enter use · esc cancel · alt+enter this session only · ctrl+a log in"
 }
 
 // ── the add-provider form ──
@@ -426,9 +433,9 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 		return t
 	}
 	m.providerFields = [3]textinput.Model{
-		mk("e.g. openrouter"),
+		mk("what to call it, e.g. work"),
 		mk("e.g. https://openrouter.ai/api/v1"),
-		mk("bearer key (optional)"),
+		mk("if you were given one"),
 	}
 	m.providerFields[2].EchoMode = textinput.EchoPassword
 	m.providerFields[2].EchoCharacter = '•'
@@ -437,7 +444,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 		m.providerEdit = edit.Name
 		m.providerFields[0].SetValue(edit.Name)
 		m.providerFields[1].SetValue(edit.URL)
-		m.providerFields[2].Placeholder = "new bearer key (empty keeps the saved one)"
+		m.providerFields[2].Placeholder = "a new key (empty keeps the saved one)"
 		m.providerStep = 1
 	}
 	m.providerFields[m.providerStep].Focus()
@@ -467,7 +474,7 @@ func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case m.providerStep == 0 && (v == "" || strings.ContainsAny(v, " \t")):
 			m.providerErr = "a name is one word"
 		case m.providerStep == 1 && !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://"):
-			m.providerErr = "the URL starts with http:// or https://"
+			m.providerErr = "the address starts with http:// or https://"
 		case m.providerStep < 2:
 			m.providerErr = ""
 			m.providerFields[m.providerStep].Blur()
@@ -508,27 +515,39 @@ func (m *tuiModel) saveProvider() tea.Cmd {
 		return nil
 	}
 	m.providerForm = false
-	m.append(stDim.Render(msg))
-	return m.openModelPicker(op.Name + " ")
+	m.dropNeedLogin() // no longer true
+	m.append(stOK.Render(msg))
+	// Filtered to the new service — unless it is the only one, when the
+	// filter would only repeat its name.
+	query := op.Name + " "
+	if len(m.pickerProviders()) <= 1 {
+		query = ""
+	}
+	return m.openModelPicker(query)
 }
 
 func (m tuiModel) providerFormPanel() string {
-	labels := [3]string{"name", "url ", "key "}
-	title := "log in to a provider"
+	labels := [3]string{"name", "address", "key"}
+	title := "log in to an AI service"
 	if m.providerEdit != "" {
 		title = "log in to " + m.providerEdit + " again"
 	}
-	rows := []string{stHeader.Render(title) + stDim.Render("  an OpenAI-compatible endpoint, bearer optional · enter next · shift+tab back · esc cancel")}
+	rows := []string{stHeader.Render(title)}
 	for i, f := range m.providerFields {
-		label := stDim.Render("  " + labels[i] + "  ")
-		if i == m.providerStep {
-			label = stSel.Render("▎ " + labels[i] + "  ")
-		}
-		rows = append(rows, label+f.View())
+		rows = append(rows, formRow(labels[i], i == m.providerStep, f.View()))
 	}
 	if m.providerErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.providerErr))
 	}
-	rows = append(rows, "  "+stDim.Render("saved to "+configPath()+" (0600); logging in again under a name replaces it"))
+	rows = append(rows, "  "+stDim.Render("saved to "+tildePath(configPath())+" · the same name again replaces it"))
 	return strings.Join(rows, "\n")
+}
+
+// providerHint is the login form's status line.
+func (m tuiModel) providerHint() string {
+	enter := "enter next"
+	if m.providerStep == len(m.providerFields)-1 {
+		enter = "enter log in"
+	}
+	return "log in  ·  " + enter + " · shift+tab back · esc cancel"
 }

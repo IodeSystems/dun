@@ -12,19 +12,23 @@ import (
 	"github.com/iodesystems/dun"
 )
 
-// /mcp add [preset] — a form for a new MCP server: an id, then where it is —
-// a URL (a remote server over Streamable HTTP) or a command line (a local
-// one over stdio, split with shell-style quoting) — then, for a URL, an
-// optional bearer token and, with no bearer, an optional OAuth login (client
-// id, scopes, issuer, which token to send); for a command, optional
-// environment variables. Last, its mode: standalone (the default) or
-// scripted (hosted in mcpshell, dun.ViaShell). The engine saves it to
-// $DUN_HOME/mcp.json, there in every workspace, and starts it; the result
-// comes back as a server event.
+// /mcp add [preset] — a form for a new MCP server: a name (its id), then
+// where it is — a URL (a remote server over Streamable HTTP) or a command
+// line (a local one over stdio, split with shell-style quoting). Those two
+// are all it needs, and enter on the server row (or any row after it) adds
+// it. The optional rows follow, reached with tab: for a URL, a bearer token
+// and, with no token, an OAuth login (client id, scopes, issuer, which token
+// to send); for a command, environment variables. The engine saves it to
+// $DUN_HOME/mcp.json, there in every workspace, and starts it standalone;
+// the result comes back as a server event.
 //
-// A preset (dun.ServerPresets) fills the id and the server row; typing a
-// preset's id and leaving the row does the same when the server row is
-// empty. Nothing is added until enter on the last row.
+// Scripted (hosted in mcpshell) is not asked here: it is a later choice —
+// /mcp mode <id> scripted, or m in /mcp — and a first server's user cannot
+// answer it.
+//
+// A preset (dun.ServerPresets) fills the name and the server row; typing a
+// preset's name and leaving the row does the same when the server row is
+// empty.
 //
 // The OAuth rows are the common ones. The rest of the oauth block
 // (client_secret, audience, resource, redirect_port, auth_params) is set in
@@ -45,7 +49,7 @@ const (
 	mcpScopes
 	mcpIssuer
 	mcpSend
-	mcpViaStep // the last row: standalone or scripted
+	mcpRows // how many
 )
 
 func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
@@ -55,11 +59,11 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 		t.SetWidth(56)
 		return t
 	}
-	m.mcpFields = [mcpViaStep]textinput.Model{
-		mk("e.g. corp-docs, or a preset: " + presetIDs()),
-		mk("URL (https://…) or command (npx some-mcp --stdio)"),
-		mk("bearer token (empty for none; $NAME reads an env var)"),
-		mk("NAME=value NAME2=$VAR (empty for none; $VAR is read at start)"),
+	m.mcpFields = [mcpRows]textinput.Model{
+		mk("what to call it, e.g. notes"),
+		mk("the command or web address you were given"),
+		mk("if you were given one ($NAME reads an env var)"),
+		mk("NAME=value NAME2=$VAR, if it needs any"),
 		mk("oauth client id (empty: no login)"),
 		mk("scopes, space-separated (empty: what the server asks for)"),
 		mk("issuer (empty: the server names it)"),
@@ -69,7 +73,7 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 		m.mcpFields[i].EchoMode = textinput.EchoPassword
 		m.mcpFields[i].EchoCharacter = '•'
 	}
-	m.mcpStep, m.mcpErr, m.mcpForm, m.mcpShell = 0, "", true, false
+	m.mcpStep, m.mcpErr, m.mcpForm = 0, "", true
 	if len(preset) > 0 && preset[0] != "" {
 		if !m.fillPreset(preset[0]) {
 			m.mcpErr = "no preset " + strconv.Quote(preset[0]) + " — presets: " + presetIDs()
@@ -144,14 +148,14 @@ func (m *tuiModel) mcpRowShown(step int) bool {
 	return true
 }
 
-// mcpNext is the next row that applies after step.
+// mcpNext is the next row that applies after step, or step when none does.
 func (m *tuiModel) mcpNext(step int) int {
-	for next := step + 1; next < mcpViaStep; next++ {
+	for next := step + 1; next < mcpRows; next++ {
 		if m.mcpRowShown(next) {
 			return next
 		}
 	}
-	return mcpViaStep
+	return step
 }
 
 // mcpPrev is the row before step that applies.
@@ -164,6 +168,35 @@ func (m *tuiModel) mcpPrev(step int) int {
 	return 0
 }
 
+// mcpRowErr checks the row the cursor is leaving; "" when it is fine.
+func (m *tuiModel) mcpRowErr() string {
+	v := strings.TrimSpace(m.mcpFields[m.mcpStep].Value())
+	switch m.mcpStep {
+	case mcpID:
+		if !mcpIDOK(v) {
+			return "a name is lowercase letters, digits, - and _ — it prefixes the server's tools"
+		}
+	case mcpServer:
+		if v == "" {
+			return "a command (npx some-mcp --stdio) or a web address (https://…)"
+		}
+		if m.mcpIsCommand() {
+			if _, err := splitShell(v); err != nil {
+				return "command: " + err.Error()
+			}
+		}
+	case mcpEnv:
+		if _, err := parseEnv(v); err != nil {
+			return "env: " + err.Error()
+		}
+	case mcpSend:
+		if v != "" && v != dun.SendAccessToken && v != dun.SendIDToken {
+			return "send is access_token or id_token"
+		}
+	}
+	return ""
+}
+
 func (m tuiModel) updateMCPForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
@@ -171,97 +204,72 @@ func (m tuiModel) updateMCPForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "shift+tab", "up":
 		if m.mcpStep > 0 {
-			if m.mcpStep < len(m.mcpFields) {
-				m.mcpFields[m.mcpStep].Blur()
-			}
+			m.mcpFields[m.mcpStep].Blur()
 			m.mcpStep = m.mcpPrev(m.mcpStep)
 			m.mcpFields[m.mcpStep].Focus()
 		}
 		m.refresh()
 		return m, textinput.Blink
-	case "space", "left", "right", "h", "l":
-		if m.mcpStep == mcpViaStep {
-			m.mcpShell = !m.mcpShell
-			m.refresh()
-			return m, nil
-		}
 	case "enter", "tab", "down":
-		v := ""
-		if m.mcpStep < len(m.mcpFields) {
-			v = strings.TrimSpace(m.mcpFields[m.mcpStep].Value())
-		}
-		// A preset's id with the server row empty fills it in.
+		// A preset's name with the server row empty fills it in.
 		if m.mcpStep == mcpID && strings.TrimSpace(m.mcpFields[mcpServer].Value()) == "" {
-			m.fillPreset(v)
+			m.fillPreset(strings.TrimSpace(m.mcpFields[mcpID].Value()))
 		}
-		var cmdErr, envErr error
-		if m.mcpStep == mcpServer && m.mcpIsCommand() {
-			_, cmdErr = splitShell(v)
+		if m.mcpErr = m.mcpRowErr(); m.mcpErr != "" {
+			m.refresh()
+			return m, textinput.Blink
 		}
-		if m.mcpStep == mcpEnv {
-			_, envErr = parseEnv(v)
+		// enter adds once the name and the server are in; tab goes on to
+		// the optional rows.
+		if msg.String() == "enter" && m.mcpStep >= mcpServer {
+			if m.addMCPServer() {
+				return m, nil
+			}
+			m.refresh()
+			return m, textinput.Blink
 		}
-		switch {
-		case m.mcpStep == mcpID && !mcpIDOK(v):
-			m.mcpErr = "an id is lowercase letters, digits, - and _ — it prefixes the server's tools"
-		case m.mcpStep == mcpServer && v == "":
-			m.mcpErr = "a URL (https://…) or a command (npx some-mcp --stdio)"
-		case cmdErr != nil:
-			m.mcpErr = "command: " + cmdErr.Error()
-		case envErr != nil:
-			m.mcpErr = "env: " + envErr.Error()
-		case m.mcpStep == mcpSend && v != "" && v != dun.SendAccessToken && v != dun.SendIDToken:
-			m.mcpErr = "send is access_token or id_token"
-		case m.mcpStep < mcpViaStep:
-			m.mcpErr = ""
-			m.mcpFields[m.mcpStep].Blur()
-			m.mcpStep = m.mcpNext(m.mcpStep)
-			if m.mcpStep < len(m.mcpFields) {
-				m.mcpFields[m.mcpStep].Focus()
-			}
-		case msg.String() == "enter":
-			spec, err := mcpFormSpec(m.mcpFields[mcpID].Value(), m.mcpFields[mcpServer].Value(), m.mcpFields[mcpBearer].Value())
-			if err != nil {
-				m.mcpErr = "command: " + err.Error()
-				break
-			}
-			if spec.Command != "" {
-				if spec.Env, err = parseEnv(m.mcpFields[mcpEnv].Value()); err != nil {
-					m.mcpErr = "env: " + err.Error()
-					break
-				}
-			}
-			if m.mcpOAuthRows() {
-				spec.OAuth = mcpFormOAuth(m.mcpFields[mcpClient].Value(), m.mcpFields[mcpScopes].Value(),
-					m.mcpFields[mcpIssuer].Value(), m.mcpFields[mcpSend].Value())
-			}
-			if m.mcpShell {
-				if spec.OAuth != nil {
-					m.mcpErr = "an oauth server cannot be scripted — dun holds its token"
-					break
-				}
-				spec.Via = dun.ViaShell
-			}
-			b, _ := json.Marshal(spec)
-			if !m.proc.controlCmd("mcp", "add "+string(b)) {
-				m.mcpErr = "no engine right now — /reconnect first"
-				break
-			}
-			m.closeMCPForm()
-			m.append(stDim.Render("adding " + spec.ID + "…"))
-			return m, nil
-		}
+		m.mcpFields[m.mcpStep].Blur()
+		m.mcpStep = m.mcpNext(m.mcpStep)
+		m.mcpFields[m.mcpStep].Focus()
 		m.refresh()
 		return m, textinput.Blink
 	}
 	return m.typeMCPField(msg)
 }
 
+// addMCPServer sends the form's server to the engine and closes the form;
+// false, with mcpErr set, when it cannot.
+func (m *tuiModel) addMCPServer() bool {
+	spec, err := mcpFormSpec(m.mcpFields[mcpID].Value(), m.mcpFields[mcpServer].Value(), m.mcpFields[mcpBearer].Value())
+	if err != nil {
+		m.mcpErr = "command: " + err.Error()
+		return false
+	}
+	if spec.Command != "" {
+		if spec.Env, err = parseEnv(m.mcpFields[mcpEnv].Value()); err != nil {
+			m.mcpErr = "env: " + err.Error()
+			return false
+		}
+	}
+	if m.mcpOAuthRows() {
+		spec.OAuth = mcpFormOAuth(m.mcpFields[mcpClient].Value(), m.mcpFields[mcpScopes].Value(),
+			m.mcpFields[mcpIssuer].Value(), m.mcpFields[mcpSend].Value())
+	}
+	b, _ := json.Marshal(spec)
+	if !m.proc.controlCmd("mcp", "add "+string(b)) {
+		m.mcpErr = "no engine right now — /reconnect first"
+		return false
+	}
+	m.closeMCPForm()
+	// The result replaces this line (noteMCPAdded): progress, then news,
+	// in one place.
+	m.convo = append(m.convo, convoEntry{collapsed: stDim.Render("adding " + spec.ID + "…"), adding: spec.ID})
+	m.refresh()
+	return true
+}
+
 // typeMCPField is a key or a paste in the add-server form's field.
 func (m tuiModel) typeMCPField(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.mcpStep >= len(m.mcpFields) {
-		return m, nil // the mode row takes no text
-	}
 	var cmd tea.Cmd
 	m.mcpFields[m.mcpStep], cmd = m.mcpFields[m.mcpStep].Update(msg)
 	m.refresh()
@@ -362,52 +370,48 @@ func mcpFormOAuth(clientID, scopes, issuer, send string) *dun.OAuthSpec {
 }
 
 func (m tuiModel) mcpFormPanel() string {
-	labels := [mcpViaStep]string{"id    ", "server", "bearer", "env   ", "client", "scopes", "issuer", "send  "}
-	rows := []string{stHeader.Render("add MCP server") + stDim.Render("  enter next · shift+tab back · esc cancel"),
-		"  " + stDim.Render("presets (type one as the id, or /mcp add <preset>): "+presetIDs())}
+	labels := [mcpRows]string{"name", "server", "token", "env", "client", "scopes", "issuer", "send"}
+	rows := []string{stHeader.Render("add MCP server"),
+		"  " + stDim.Render("presets: "+presetIDs()+" — type one as the name")}
 	for i, f := range m.mcpFields {
 		if !m.mcpRowShown(i) {
 			continue
 		}
 		if i == mcpClient {
-			rows = append(rows, "  "+stDim.Render("oauth login (optional): a client registered with the identity provider, redirect URI"),
+			rows = append(rows, "  "+stDim.Render("oauth login (optional): a client id registered with the identity provider, redirect URI"),
 				"  "+stDim.Render("http://127.0.0.1:"+strconv.Itoa(dun.DefaultOAuthRedirectPort)+"/oauth/callback; secret, audience, resource and the rest go in mcp.json"))
 		}
-		label := stDim.Render("  " + labels[i] + "  ")
-		if i == m.mcpStep {
-			label = stSel.Render("▎ " + labels[i] + "  ")
-		}
-		row := label + f.View()
+		row := formRow(labels[i], i == m.mcpStep, f.View())
 		if i == mcpServer {
 			switch {
 			case m.mcpIsURL():
-				row += stDim.Render("  remote (HTTP)")
+				row += stDim.Render("  a web address")
 			case m.mcpIsCommand():
-				row += stDim.Render("  local command (stdio)")
+				row += stDim.Render("  runs as a command")
 			}
 		}
 		rows = append(rows, row)
 	}
-	label := stDim.Render("  mode    ")
-	if m.mcpStep == mcpViaStep {
-		label = stSel.Render("▎ mode    ")
-	}
-	direct, shell := "( ) standalone", "( ) scripted"
-	if m.mcpShell {
-		shell = "(•) scripted"
-	} else {
-		direct = "(•) standalone"
-	}
-	rows = append(rows, label+direct+"   "+shell+stDim.Render("   space switches"))
-	if m.mcpShell {
-		rows = append(rows, "  "+stDim.Render("scripted: hosted in mcpshell, the model calls it through eval — no tool schemas in every request;"),
-			"  "+stDim.Render("but no docs indexing, prompts, skills or tool switches, and its calls show as eval"))
-	} else {
-		rows = append(rows, "  "+stDim.Render("standalone: its own tools, each schema in every request; docs, prompts, skills and renderers work"))
-	}
 	if m.mcpErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.mcpErr))
 	}
-	rows = append(rows, "  "+stDim.Render("saved to "+dun.UserServersFile()+" (0600), on globally and started now; the same id replaces"))
+	rows = append(rows, "  "+stDim.Render("saved to "+tildePath(dun.UserServersFile())+" for every project, and started now · the same name replaces"))
 	return strings.Join(rows, "\n")
+}
+
+// mcpHint is the form's status line: enter adds once the server row is
+// reached, tab goes on to the optional rows when there are any.
+func (m tuiModel) mcpHint() string {
+	h := "add server  ·  enter next"
+	if m.mcpStep >= mcpServer {
+		h = "add server  ·  enter add"
+	}
+	h += " · esc cancel"
+	if m.mcpStep >= mcpServer && m.mcpNext(m.mcpStep) != m.mcpStep {
+		h += " · tab more options"
+	}
+	if m.mcpStep > 0 {
+		h += " · shift+tab back"
+	}
+	return h
 }

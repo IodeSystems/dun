@@ -251,6 +251,8 @@ type convoEntry struct {
 	provisional     bool
 	provisionalText string // original text, used to restore normal style on delivery
 	userText        string // raw user message text (non-empty for user messages only)
+	needLogin       bool   // the "not logged in" line (onboarding.go): said once, where it was last needed
+	adding          string // the server an "adding …" line is for: the result replaces it (noteServerMsg)
 
 	// blank marks the empty row turnGap() appends when a turn ends, so
 	// consecutive turns read as blocks. It renders as nothing.
@@ -613,11 +615,22 @@ type tuiModel struct {
 	paletteSel   int            // highlighted row in the "/" command palette
 	model, url   string         // this session's LLM settings (for /config)
 	keySet       bool           // whether an API key is configured
-	disableExit  bool           // --disable-exit: ctrl+c/esc don't quit (use /exit)
-	lc           *launcherConn  // launcher registration (nil = no launcher)
-	reloadVer    string         // a newer build the launcher announced ("" = none)
-	reloadReq    bool           // /reload requested → runTUI re-execs after quit
-	upgrade      *upgradeState  // a pending dund upgrade (upgrade.go); nil = none
+	// First run (onboarding.go): a message sent before any login is held,
+	// not sent, and comes back in the composer once a model is picked;
+	// switchNote is the line the restart after a pick confirms it with;
+	// quietReplay drops that restart's "resumed" marker; hintShown is the
+	// off-servers hint, said once per TUI. noLogin: the engine's settings
+	// said it has no AI service.
+	noLogin     bool
+	heldMsg     string
+	switchNote  string
+	quietReplay bool
+	hintShown   bool
+	disableExit bool          // --disable-exit: ctrl+c/esc don't quit (use /exit)
+	lc          *launcherConn // launcher registration (nil = no launcher)
+	reloadVer   string        // a newer build the launcher announced ("" = none)
+	reloadReq   bool          // /reload requested → runTUI re-execs after quit
+	upgrade     *upgradeState // a pending dund upgrade (upgrade.go); nil = none
 	// Engine supervision: the TUI outlives its engine. opts is what respawning
 	// one takes, sessionID reattaches it to the same conversation, and the
 	// restart counters stop a crash loop from spinning forever.
@@ -670,7 +683,6 @@ type tuiModel struct {
 	modelRows    []modelRow      // every provider's models fetched so far
 	modelErrs    []string        // providers that returned no list
 	modelSel     int             // highlighted row of the filtered list
-	modelPersist bool            // save as the default (checkbox)
 	modelPending int             // providers not yet answered
 	// The add-provider form (/model add, ctrl+a in the picker).
 	providerForm   bool
@@ -681,9 +693,8 @@ type tuiModel struct {
 	provider       string // name of the provider the engine runs on
 	// The add-MCP-server form (/mcp add).
 	mcpForm      bool
-	mcpFields    [mcpViaStep]textinput.Model // id, url or command, bearer, then oauth (see mcpform.go)
-	mcpStep      int                         // a field, or mcpViaStep: the placement
-	mcpShell     bool                        // placement: in the shell (true) or direct
+	mcpFields    [mcpRows]textinput.Model // name, url or command, token or env, then oauth (see mcpform.go)
+	mcpStep      int                      // the field with the cursor
 	mcpErr       string
 	mcpToolsWant string // the server whose /mcp tools this TUI asked for (mcptools.go)
 	// mcpServersWant: this TUI asked for the /mcp table (mcpview.go).
@@ -1998,6 +2009,11 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 		m.refresh()
 		return m
 	}
+	// Nothing to send to yet: held, and put back once a model is picked.
+	if !m.loggedIn() && len(imgs) == 0 {
+		m.holdUnsent(v)
+		return m
+	}
 	if !m.proc.send(v, imgs) {
 		m.append(stErr.Render("no engine right now — not sent. /reconnect, then send it again"))
 		m.refresh()
@@ -2130,7 +2146,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				m.tools = append(m.tools, fmt.Sprint(t))
 			}
 		}
-		m.append(stDim.Render(readyLine(m.tools)))
+		// No "ready" line: the status bar says ready and the header counts
+		// the tools. A session with nothing to send to says so when its
+		// settings arrive (the settings case).
 		// Show per-server start times for anything that took >1s.
 		if srvs, ok := ev["servers"].([]any); ok {
 			for _, sv := range srvs {
@@ -2146,9 +2164,13 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		// Say which tool families are off, once. Otherwise the only symptom is
 		// an agent that never navigates code or searches docs, and no reason.
-		if hint := strings.TrimSpace(str(ev["hint"])); hint != "" {
-			m.append(stNote.Render(hint))
+		// Grey: an optional extra being off needs nothing; orange is for what
+		// does. Once per TUI — a restart (a model pick) does not repeat it.
+		if hint := strings.TrimSpace(str(ev["hint"])); hint != "" && !m.hintShown {
+			m.append(stDim.Render(hint))
+			m.hintShown = true
 		}
+		m.afterSwitch()
 		// No servers are turned back on here: a respawned engine reattaches
 		// to this session, whose switches it keeps itself (dun mcpscope.go).
 		m.noteServers(ev)
@@ -2157,7 +2179,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		list, _ := ev["servers"].([]any)
 		opened := str(ev["id"]) == allServers && m.openServerTable(list)
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" && !opened {
-			m.append(stNote.Render(msg))
+			m.noteServerMsg(str(ev["action"]), msg)
 			if m.serversPaging() != nil {
 				m.flashText, m.flashUntil = oneLine(msg), time.Now().Add(flashFor)
 			}
@@ -2493,6 +2515,12 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if p := str(ev["provider"]); p != "" {
 			m.provider = p
 		}
+		// The engine's word on whether it has anything to send to: the first
+		// screen's one line, when it has not.
+		m.noLogin = m.url == ""
+		if m.noLogin && !slices.ContainsFunc(m.convo, func(e convoEntry) bool { return e.needLogin }) {
+			m.sayNeedLogin()
+		}
 		if mode := str(ev["suggest"]); mode != "" {
 			m.suggestMode = mode
 		}
@@ -2586,7 +2614,19 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	case "error":
 		m.endThinking()
 		m.endRun()
-		m.append(stErr.Render("error: " + str(ev["error"])))
+		// A setup step not taken is the next step, not a failure: said as
+		// the one action, with no retry advice — retrying cannot help.
+		setup := false
+		switch str(ev["error"]) {
+		case errNoLogin.Error():
+			m.sayNeedLogin()
+			setup = true
+		case errNoModel.Error():
+			m.append(stAccent.Render(errNoModel.Error()))
+			setup = true
+		default:
+			m.append(stErr.Render("error: " + str(ev["error"])))
+		}
 		// Clear any remaining provisional markers — the engine flushes them on
 		// error too, so they're part of the conversation history.
 		for i := range m.convo {
@@ -2609,7 +2649,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// than saying nothing.
 		if b, _ := ev["fatal"].(bool); b {
 			m.append(stDim.Render("the session ended — resume it with: dun --continue"))
-		} else {
+		} else if !setup {
 			// The conversation is on disk, so the next message pairs off whatever
 			// was interrupted and picks up where this stopped.
 			m.append(stDim.Render("the session is intact — send a message to retry from here"))
@@ -3028,8 +3068,12 @@ func (m tuiModel) headView() string {
 	if m.branch != "" {
 		head += stDim.Render("  ⎇ " + m.branch)
 	}
+	// The model in use, where it can be checked at any time.
+	if m.model != "" && m.url != "" {
+		head += stDim.Render("  · " + m.model)
+	}
 	if n := len(m.tools); n > 0 {
-		head += stDim.Render(fmt.Sprintf("  · %d tools", n))
+		head += stDim.Render("  · " + plural(n, "tool"))
 	}
 	if n := m.liveAgents(); n > 0 {
 		head += stNote.Render(fmt.Sprintf("  · %d agents", n))
@@ -3139,6 +3183,14 @@ func (m tuiModel) drawView() string {
 		status = m.search.View() + stDim.Render(fmt.Sprintf("  (%d matches · enter to navigate)", len(m.matches)))
 	case m.searchActive:
 		status = stDim.Render(fmt.Sprintf("match %d/%d  ·  ↑/↓ prev/next · / new search · esc exit", m.matchPos+1, len(m.matches)))
+	// A form or picker shows its own keys here, never the composer's: two
+	// meanings of enter on one screen was the fault.
+	case m.modelPicking && m.providerForm:
+		status = stDim.Render(m.providerHint())
+	case m.modelPicking:
+		status = stDim.Render(modelHint())
+	case m.mcpForm:
+		status = stDim.Render(m.mcpHint())
 	case m.paletteActive():
 		what := "command"
 		if _, _, ok := m.paletteArgs(); ok {
@@ -3148,7 +3200,12 @@ func (m tuiModel) drawView() string {
 	case m.askParked && m.focus != focusConvo:
 		status = stAsk.Render("❓ a question is waiting") + stDim.Render(" · tab, select it, enter to answer · "+m.exitHint())
 	case m.retry != "":
-		status = stNote.Render("⏳ "+m.retry) + stDim.Render(m.retryCountdown()+"  ("+m.busyHint()+")")
+		// The countdown first: a row too wide for the window loses its end.
+		cd := strings.TrimPrefix(m.retryCountdown(), " · ")
+		if cd != "" {
+			cd += " · "
+		}
+		status = stNote.Render("⏳ "+cd+m.retry) + stDim.Render("  ("+m.busyHint()+")")
 	case m.busy && m.interrupting:
 		status = m.spin.View() + " " + stDim.Render("interrupting…"+m.busyElapsed()+m.queuedHint())
 	case m.busy:
@@ -3179,7 +3236,13 @@ func (m tuiModel) drawView() string {
 	case m.suggestActive():
 		status = stDim.Render(fmt.Sprintf("next?  ·  ↑/↓ cycle · 1–%d pick · enter/right accept · or type · "+m.exitHint(), len(m.suggestions)))
 	default:
-		status = m.spendStatus(time.Now()) + stDim.Render("ready  ·  tab scroll · ↑/↓ edit · alt+enter newline · ctrl+↑/↓ history · enter send · "+m.exitHint())
+		// Most-used first: a narrow window drops hints from the end.
+		// "ready" only when there is something to be ready with.
+		what := "ready"
+		if !m.loggedIn() {
+			what = "not logged in"
+		}
+		status = m.spendStatus(time.Now()) + stDim.Render(what+"  ·  enter send · alt+enter newline · "+m.exitHint()+" · ↑/↓ edit · ctrl+↑/↓ history · tab scroll")
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
@@ -3195,7 +3258,7 @@ func (m tuiModel) drawView() string {
 	if u := m.upgradeView(); u != "" {
 		out = append(out, u) // persistent while dund upgrades
 	}
-	out = append(out, status)
+	out = append(out, fitHints(status, m.w))
 	return strings.Join(out, "\n")
 }
 
@@ -3208,10 +3271,10 @@ func (m tuiModel) lowerView() string {
 		return m.sessionPanel()
 	}
 	if m.modelPicking {
-		return m.modelPanel()
+		return fitRows(m.modelPanel(), m.w)
 	}
 	if m.mcpForm {
-		return m.mcpFormPanel()
+		return fitRows(m.mcpFormPanel(), m.w)
 	}
 	if m.paletteActive() {
 		return m.palettePanel()
@@ -3330,20 +3393,6 @@ func (m *tuiModel) turnGap() {
 		return
 	}
 	m.convo = append(m.convo, convoEntry{collapsed: "", blank: true})
-}
-
-// readyToolsShown is how many tool names the ready line spells out before
-// it summarizes: a session with a large MCP server has hundreds, and every
-// resume used to print them all.
-const readyToolsShown = 8
-
-// readyLine is the line a ready event leaves in the conversation.
-func readyLine(tools []string) string {
-	if len(tools) <= readyToolsShown+4 { // a few more names beat "+3 more"
-		return fmt.Sprintf("ready — %d tools: %s", len(tools), strings.Join(tools, ", "))
-	}
-	return fmt.Sprintf("ready — %d tools: %s … +%d more (/mcp lists them by server)",
-		len(tools), strings.Join(tools[:readyToolsShown], ", "), len(tools)-readyToolsShown)
 }
 
 // showSavedConversation puts the session being resumed on screen from its
@@ -3468,9 +3517,12 @@ func (m *tuiModel) replay(items []any) {
 		}
 	}
 	m.endRun()
-	if n > 0 {
+	// A model pick restarts the engine on the same conversation: nothing was
+	// resumed as far as the person is concerned, so there is no marker.
+	if n > 0 && !m.quietReplay {
 		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(commaf("── resumed %d entries ──", n))})
 	}
+	m.quietReplay = false
 	m.refresh()
 }
 
@@ -4037,11 +4089,11 @@ var slashCommands []slashCmd
 
 func init() {
 	slashCommands = []slashCmd{
+		{"login", "[name]", "connect to an AI service: its address, and a key if it needs one", loginSlash},
+		{"model", "[provider] [name] | use <provider> <id>", "pick the model: a searchable list from every service you are logged in to", modelSlash},
 		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
-		{"config", "", "show this session's LLM settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
-		{"model", "[provider] [name] | use <provider> <id>", "switch model: bare opens a searchable list from every logged-in provider", modelSlash},
-		{"login", "[name]", "log in to an LLM provider: an OpenAI-compatible URL, bearer optional (again under a name replaces it)", loginSlash},
-		{"logout", "<provider>", "log out of an LLM provider: forget its URL and key", logoutSlash},
+		{"config", "", "show this session's model settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
+		{"logout", "<provider>", "log out of an AI service: forget its address and key", logoutSlash},
 		{"context", "", "inspect context usage: tokens, compaction, recaps, truncation", func(m *tuiModel, _ []string) tea.Cmd { m.showContext(); return nil }},
 		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
@@ -4545,25 +4597,38 @@ func (m tuiModel) palettePanel() string {
 	matches := m.paletteMatches()
 	lo, hi := paletteRange(m.paletteSel, len(matches))
 	rows := make([]string, 0, hi-lo+1)
+	// The descriptions in one column: the names padded to the widest one
+	// shown. The arguments are on the row below the list, for the selected
+	// command only — inline they pushed every description to a different
+	// column.
+	nameW := 0
+	for _, c := range matches[lo:hi] {
+		nameW = max(nameW, len(c.name)+1)
+	}
 	for i := lo; i < hi; i++ {
 		c := matches[i]
-		line := stTool.Render("/" + c.name)
-		if c.args != "" {
-			line += " " + stDim.Render(c.args)
-		}
-		line += "  " + stDim.Render(c.desc)
+		pad := strings.Repeat(" ", nameW-len(c.name)-1)
+		name := stTool.Render("/" + c.name)
 		if i == m.paletteSel {
-			rows = append(rows, addGutter(line, "▎ ", stSel))
-		} else {
-			rows = append(rows, addGutter(line, "  ", lipgloss.NewStyle()))
+			name = "/" + c.name // listRow puts it in the accent
 		}
+		rows = append(rows, listRow("", name, pad+"  "+stDim.Render(c.desc), i == m.paletteSel))
 	}
+	// The count first: a usage too long for the row ends in an ellipsis.
+	var foot []string
 	if len(matches) == 0 {
-		rows = append(rows, stDim.Render("  no matching command · /help"))
+		foot = append(foot, "no matching command · /help")
 	} else if lo > 0 || hi < len(matches) {
-		rows = append(rows, stDim.Render(fmt.Sprintf("  %d-%d of %d commands", lo+1, hi, len(matches))))
+		foot = append(foot, fmt.Sprintf("%d-%d of %d commands", lo+1, hi, len(matches)))
 	}
-	return strings.Join(rows, "\n") + "\n" + m.input.View()
+	if m.paletteSel >= 0 && m.paletteSel < len(matches) && matches[m.paletteSel].args != "" {
+		c := matches[m.paletteSel]
+		foot = append(foot, "/"+c.name+" "+c.args)
+	}
+	if len(foot) > 0 {
+		rows = append(rows, stDim.Render("  "+strings.Join(foot, "  ·  ")))
+	}
+	return fitRows(strings.Join(rows, "\n"), m.w) + "\n" + m.input.View()
 }
 
 // ── screen dump (SIGUSR1) ──────────────────────────────────────────
