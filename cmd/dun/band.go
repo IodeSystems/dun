@@ -44,8 +44,8 @@ import (
 const (
 	pulseSteps = 10
 	pulseStep  = 120 * time.Millisecond // 10 × 120ms = a 1.2s cycle
-	pulseLo    = 0.06                   // filter strength at the pulse's ends
-	pulseHi    = 0.14
+	pulseLo    = 0.03                   // filter strength at the pulse's ends: subtle
+	pulseHi    = 0.08                   // (0.06..0.14 drowned dim text: USER 2026-10-24)
 )
 
 type bandMode int
@@ -182,6 +182,7 @@ func (b bandStyle) row(row string, w, phase int) string {
 					cur = next
 					out.WriteString(b.bg(cur, s))
 				}
+				out.WriteString(liftGrey(row[i+2 : j]))
 			}
 			i = j + 1
 			continue
@@ -202,6 +203,33 @@ func (b bandStyle) rows(rows []string, w, phase int) []string {
 		out[i] = b.row(r, w, phase)
 	}
 	return out
+}
+
+// greyLift is how many steps of the 256-colour grey ramp a foreground on the
+// band is raised, so dim text keeps its contrast against the lifted
+// background: the band boosts its content as well as marking it (USER
+// 2026-10-24: "a little of both").
+const greyLift = 6
+
+// liftGrey is the escape that raises a grey-ramp foreground (38;5;232..255)
+// set by params, or "" when params set none.
+func liftGrey(params string) string {
+	ps := strings.Split(params, ";")
+	for i := 0; i+2 < len(ps); i++ {
+		if ps[i] == "38" && ps[i+1] == "5" {
+			if n, err := strconv.Atoi(ps[i+2]); err == nil && n >= 232 && n <= 255 {
+				return fmt.Sprintf("\x1b[38;5;%dm", min(n+greyLift, 255))
+			}
+			i += 2
+		} else if ps[i] == "38" || ps[i] == "48" || ps[i] == "58" {
+			if ps[i+1] == "2" {
+				i += 4
+			} else {
+				i += 2
+			}
+		}
+	}
+	return ""
 }
 
 // sgrBG applies one SGR's parameters to the background state: a reset (bare,

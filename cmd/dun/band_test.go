@@ -205,3 +205,21 @@ func TestBand_OptOutDoesNotTick(t *testing.T) {
 		t.Errorf("no static band: %q", rows[0])
 	}
 }
+
+// On the band a dim grey foreground is raised, so the text keeps its
+// contrast; other colours and backgrounds are left alone.
+func TestBand_LiftsGreyText(t *testing.T) {
+	for params, want := range map[string]string{
+		"38;5;240":          "\x1b[38;5;246m",
+		"1;38;5;250":        "\x1b[38;5;255m",
+		"38;5;212":          "",
+		"48;5;236":          "",
+		"38;2;9;9;9":        "",
+		"0":                 "",
+		"48;5;240;38;5;244": "\x1b[38;5;250m",
+	} {
+		if got := liftGrey(params); got != want {
+			t.Errorf("liftGrey(%q) = %q, want %q", params, got, want)
+		}
+	}
+}
