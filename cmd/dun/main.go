@@ -54,25 +54,42 @@ func resolveDockerImage(raw string) string {
 	return raw
 }
 
-// usage prints the flags as --long-flags.
+// usage prints what dun is and how to start, then the flags by group, as
+// --long-flags.
 //
 // Go's flag package accepts -tui and --tui identically but PRINTS the first,
 // and `-tui` reads like the three short flags -t -u -i. Only genuinely
 // single-letter flags keep one dash.
-func usage() {
-	fmt.Fprint(os.Stderr, `dun — a coding agent that works a task in an isolated workspace.
+func usage() { writeUsage(os.Stderr, flag.CommandLine) }
 
-usage:
-  dun                        interactive TUI in the current directory (the default)
+// flagGroups orders --help; a flag in none of them is listed under the last.
+var flagGroups = []struct {
+	title string
+	names []string
+}{
+	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "serve", "addr", "p", "version"}},
+	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase"}},
+	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp"}},
+	{"shipping", []string{"ship", "no-ship", "pr"}},
+	{"advanced", []string{"d", "force", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
+}
+
+func writeUsage(w io.Writer, fs *flag.FlagSet) {
+	fmt.Fprint(w, `dun — a coding assistant in your terminal: it works a task in your project.
+
+start:
+  cd your-project && dun     open dun there, then /login (enter on the empty prompt
+                             opens it) to connect an AI service, and ask
   dun "fix the flaky test"   run one task headless, print the diff, exit
   dun --continue             reopen the most recent session for this workspace
-  dun -p                     engine mode: line-delimited JSON events on stdin/stdout
   dun doctor [--fix]         check providers, tools, dund and the service; --fix runs what it can
+  dun -p                     engine mode: line-delimited JSON events on stdin/stdout
   dun dund …                 the session service (dun dund --help)
 
-flags:
+  DUN_URL, DUN_MODEL, DUN_LLM_KEY in the environment set the provider without
+  /login (--url, --model, --key for one run).
 `)
-	flag.VisitAll(func(f *flag.Flag) {
+	line := func(f *flag.Flag) {
 		dash := "--"
 		if len(f.Name) == 1 {
 			dash = "-"
@@ -85,8 +102,36 @@ flags:
 		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0s" {
 			help += " (default " + f.DefValue + ")"
 		}
-		fmt.Fprintf(os.Stderr, "%-24s %s\n", head, help)
-	})
+		fmt.Fprintf(w, "%-24s %s\n", head, help)
+	}
+	grouped := map[string]bool{}
+	for _, g := range flagGroups {
+		for _, n := range g.names {
+			grouped[n] = true
+		}
+	}
+	for i, g := range flagGroups {
+		var fl []*flag.Flag
+		for _, n := range g.names {
+			if f := fs.Lookup(n); f != nil {
+				fl = append(fl, f)
+			}
+		}
+		if i == len(flagGroups)-1 {
+			fs.VisitAll(func(f *flag.Flag) {
+				if !grouped[f.Name] {
+					fl = append(fl, f)
+				}
+			})
+		}
+		if len(fl) == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "\n%s:\n", g.title)
+		for _, f := range fl {
+			line(f)
+		}
+	}
 }
 
 func main() {
