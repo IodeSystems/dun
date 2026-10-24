@@ -159,6 +159,26 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
+### ❓ 52. poly-lsp through its shared daemon (`mcp --daemon`) (USER, 2026-10-24)
+
+USER said yes to the switch. Measured: two open dun sessions on this repo hold
+two stdio poly-lsp processes, 1.14 GB each (same index twice); the daemon is
+115 MB idle.
+- **blocked on poly-lsp** (asked poly-lsp-mcp-78, 2026-10-24): (1) the
+  `--daemon` proxy ignores `--hook`/`POLY_LSP_HOOK`, so the AGENTS.md guard
+  would go; (2) index options apply only when a root is first built, so
+  `/poly-lsp exclude|budget` on a warm root may do nothing; (3) a root's LSPs
+  and index must be released after its last client leaves, and the daemon
+  exit with no clients (USER: keeping LSPs for sessions that may come back is
+  excessive; dund's 30-min idle stop already ends non-persistent engines,
+  and so their proxies).
+- **next:** when poly-lsp ships a `mcp --help` marker for (1), `IndexProtocol`
+  checks it and `startServer` adds `--daemon`.
+- **risks:** the daemon's child LSPs run with the daemon's env, not the
+  engine's (PATH); `/poly-lsp restart` restarts the proxy, not the daemon.
+- **also waiting:** raglit's pin in release/supported.go — raglit-a2 needs
+  USER's push OK in its own pane (local HEAD 1a04d32, origin 5d24299).
+
 ### ✅ 27. Surfacing floor — done 2026-10-23, see done.md (open: the coverage
 floor for an index without embeddings, 0.5 + ratio vs 0.67 alone)
 
