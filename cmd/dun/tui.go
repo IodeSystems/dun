@@ -943,7 +943,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and nothing else, and rebuilding one is not free. A height-only
 		// resize (the common one — an ask panel growing) rebuilt it for nothing.
 		if m.md == nil || m.mdWidth != msg.Width {
-			m.md, m.mdWidth = newMarkdown(msg.Width-2), msg.Width
+			// Prose wraps at the question band's edge (bandCap): a 170-column
+			// line on a wide screen is hard to follow back to its start.
+			m.md, m.mdWidth = newMarkdown(min(msg.Width, bandCap)-2), msg.Width
 		}
 		if m.inspecting {
 			m.insp.setSize(m.w, m.h)

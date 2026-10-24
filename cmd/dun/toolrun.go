@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 )
 
 // Tool runs: the tool calls of a turn, and the thinking between them, are ONE
@@ -305,8 +304,10 @@ func groupLine(items []*runItem, w int) string {
 	return stTool.Render("✓ "+label) + stSecondary.Render(list)
 }
 
-// fitRow cuts a styled row to w columns.
-func fitRow(s string, w int) string { return lipgloss.NewStyle().MaxWidth(max(1, w)).Render(s) }
+// fitRow fits a styled row to w columns by the one rule (fitText): it ends
+// at a word with an ellipsis, never mid-word at the edge — a tool call's
+// result cut at 48 columns read "→ Notes: keep the greet".
+func fitRow(s string, w int) string { return fitText(s, max(1, w)) }
 
 // single is the run's one call when that is all it has: it is drawn as that
 // call's line alone, with no summary over it (one call said once). A second
