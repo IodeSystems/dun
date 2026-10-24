@@ -2496,3 +2496,63 @@ region goes instead of being ported.
   status lines drop "esc cancel". (d) a notice that wraps at 48 starts its
   second row with "· key set". (e) prose cap at 100 also caps code blocks
   and tables in answers. (f) personas not run; light theme not seen.
+
+## ✅ 39. A blank screen while poly-lsp started (USER, 2026-10-23)
+
+Live: plain `dun` in the dun repo, phone (49×21), blank pane ~45 s until
+killed. Engine journal: poly-lsp's `started` line (logged after MCP
+initialize) came 54 s after raglit's. Two causes, both fixed:
+
+- **TUI (cmd/dun/tui.go runTUI):** `startDunProc` (attachSession: dial
+  dund, checkDundBuild, Create, Subscribe) ran BEFORE `tea.NewProgram.Run`;
+  dund acks a Create only when the engine emits `session`, which is after
+  `dun.Start` returns. Now runTUI starts with proc nil and Init's existing
+  nil-proc path (`restartEngine` → `attachFn`) attaches behind the first
+  frame. Status: "starting session… · Ns" (no proc), "starting the
+  engine…" (proc, no ready), "starting session… (attempt N): err" on a
+  first-attach failure. Enter before ready keeps the message
+  (startqueue.go: dim "› text (sent when the session is ready)", "N
+  message(s) kept" on the status line), sent at the `settings` after
+  ready, or held for /login (holdUnsent) when there is no login.
+  waitDundStopped no longer prints to stderr (it runs under the alt
+  screen now).
+- **Engine (harness.go Start):** built-ins were `builtins.Wait()`ed.
+  Now every autostart server starts in the background; Start waits for
+  the built-ins up to `serverStartGrace` (1.5 s), for an added server not
+  at all (as before). `Harness.starting` (id → since) feeds
+  `ServerState.Starting/StartingSeconds` (proto too); StartServer and
+  reloadServers skip a server mid-start (no second process). A late
+  server's OnServerStarted sends `ServerEvent{Background: true}`. The TUI
+  shows it in the splash (servers row "X starting…", extras row
+  "poly-lsp is starting…" — id only, fits 49) and the status line
+  ("ready · poly-lsp starting 34s"); on up, the row changes in place and
+  no notice is added (a failure still gets one). `/raglit`, `/mcp` detail
+  and runningSummary say "starting".
+- **Safety:** the Session is published under turnMu (a late server's
+  rebuild runs on its own goroutine); applyTools loops while a rebuild is
+  pending, so a server that comes up while idle joins at once, mid-turn
+  at the turn's end (unchanged). ToolNames reads a snapshot stored at
+  rebuild (it read Session.Tools unlocked). One-shot runs (`dun -p
+  'task'`, `dun 'task'`) call `WaitServers` before the task, so the task
+  keeps every tool it was started with.
+- **Recorded decision?** None by the USER. Commit 7b8552d (agent,
+  2026-10-22) chose "the session waits for its slowest built-in"; this
+  replaces it.
+- **Tests:** slowstart_test.go (fake poly-lsp sleeping 3 s in initialize,
+  `DUN_FAKE_SLOW_MS`: Start < 2 s, Starting reported, a turn runs, tools
+  join, one process; WaitServers), cmd/dun/startframe_test.go (real
+  program at 49×21 with an attach that never answers: alt screen +
+  "starting session…" drawn < 1 s, ctrl+c quits; status wording; kept
+  message sent at ready / held without login; late server: no notice, ≤2
+  rows change, same height). `make test` passes.
+- **Walk:** `bin/ux --size 49x21` →
+  `tmp/ux-run-onboarding-20261023-224616-49x21`: cast shows the alt
+  screen and "starting session" in the first output at 0.15 s, ready at
+  0.47 s. The walk has no slow server (no slow-server variant written).
+- **Open:** (a) not run live against the real dund/poly-lsp (dund not
+  restarted, by rule). (b) a create in flight when ctrl+c quits still
+  makes a session nobody subscribes to (claimed, idle). (c) `/poly-lsp
+  off` during its start does nothing; the start then completes. (d) the
+  status cannot say "indexing": MCP gives no progress before initialize
+  answers. (e) systemctl start output (dundcli) could still print under
+  the alt screen on failure.

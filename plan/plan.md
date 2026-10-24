@@ -235,6 +235,11 @@ call is dim 240)
 done 2026-10-23, see done.md (open: at 48 the palette scrolls the view and
 the tool preview shows three words; personas not run; light theme unseen)
 
+### ✅ 39. No blank screen while a server starts — done 2026-10-23, see
+done.md (TUI draws before the attach; built-ins start in the background,
+1.5 s grace; open: not run live against the real dund, /poly-lsp off
+mid-start is a no-op)
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
