@@ -210,7 +210,7 @@ func TestSplash5_ExtensionsAndServers(t *testing.T) {
 		map[string]any{"name": "deploy", "description": "ship it", "source": "user"},
 		map[string]any{"name": "review", "description": "review a diff", "source": "project"},
 	}})
-	if s := splashText(v); !strings.Contains(s, "skills         2 · /skill\n") {
+	if s := splashText(v); !strings.Contains(s, "skills         2 · /skill info\n") {
 		t.Errorf("skills:\n%s", s)
 	}
 }

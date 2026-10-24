@@ -141,9 +141,9 @@ func TestDivider5_SplitsAtTheContentMiddle(t *testing.T) {
 		up   bool
 		want []int
 	}{
-		{180, false, []int{3, 47, 127, 3}}, // dim ramp, dim to 50, accent, accent ramp
+		{180, false, []int{2, 48, 128, 2}}, // dim ramp, dim to 50, accent, accent ramp
 		{180, true, []int{50, 130}},        // accent to 50 with its ramp, dim with its ramp
-		{49, false, []int{3, 21, 22, 3}},
+		{49, false, []int{2, 22, 23, 2}},
 	} {
 		d := divider(tc.w, tc.up)
 		if got := runs(d); !slices.Equal(got, tc.want) || ansi.StringWidth(d) != tc.w {

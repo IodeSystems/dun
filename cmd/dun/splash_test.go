@@ -139,25 +139,25 @@ func TestHeader_FolderAndModelOnly(t *testing.T) {
 // half too.
 func TestDivider_LeansTowardTheFocusedSide(t *testing.T) {
 	up := divider(10, true)
-	if got := ansi.Strip(up); got != "▄▃▂▁▁▁▁▂▃▄" {
+	if got := ansi.Strip(up); got != "▃▂▁▁▁▁▁▁▂▃" {
 		t.Errorf("up: %q", got)
 	}
-	if !strings.HasPrefix(up, stEdge.Render("▄▃▂▁▁")) || !strings.HasSuffix(up, stDim.Render("▁▁▂▃▄")) {
+	if !strings.HasPrefix(up, stEdge.Render("▃▂▁▁▁")) || !strings.HasSuffix(up, stDim.Render("▁▁▁▂▃")) {
 		t.Errorf("up styles: %q", up)
 	}
 	down := divider(10, false)
-	if got := ansi.Strip(down); got != "▄▅▆▔▔▔▔▆▅▄" {
+	if got := ansi.Strip(down); got != "▅▆▔▔▔▔▔▔▆▅" {
 		t.Errorf("down: %q", got)
 	}
 	// Down, the ramp is the lower blocks reversed: the colour at the top.
-	if !strings.HasPrefix(down, stDim.Reverse(true).Render("▄▅▆")) || !strings.HasSuffix(down, stEdge.Reverse(true).Render("▆▅▄")) {
+	if !strings.HasPrefix(down, stDim.Reverse(true).Render("▅▆")) || !strings.HasSuffix(down, stEdge.Reverse(true).Render("▆▅")) {
 		t.Errorf("down styles: %q", down)
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 20, Height: 10})
 	m = nm.(tuiModel)
 	m.focus = focusActivity
-	if !strings.Contains(ansi.Strip(m.drawView()), "▄▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▃▄") {
+	if !strings.Contains(ansi.Strip(m.drawView()), "▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▃") {
 		t.Errorf("activity focus does not light the upper half:\n%s", ansi.Strip(m.drawView()))
 	}
 }

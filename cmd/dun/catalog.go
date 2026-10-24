@@ -140,6 +140,11 @@ func promptSlash(p catalogPrompt) func(*tuiModel, []string) tea.Cmd {
 // skillSlash is /skill: bare lists the skills; /skill <name> [text] asks the
 // model to use that skill, for the text when there is one.
 func skillSlash(m *tuiModel, args []string) tea.Cmd {
+	// /skill info is the list, as the splash's skills row says — unless a
+	// skill is named info.
+	if len(args) == 1 && args[0] == "info" && !slices.ContainsFunc(m.skills, func(s catalogSkill) bool { return s.Name == "info" }) {
+		args = nil
+	}
 	if len(args) == 0 {
 		if len(m.skills) == 0 {
 			m.append(stDim.Render("no skills — add <name>/SKILL.md under ~/.dun/skills or .dun/skills (Claude Code's ~/.claude/skills is read too)"))
@@ -157,6 +162,9 @@ func skillSlash(m *tuiModel, args []string) tea.Cmd {
 				line += stDim.Render(" · /skill only")
 			}
 			b.WriteString(line + "\n    " + stDim.Render(s.Description))
+		}
+		if tok := m.skillTokens(); tok > 0 {
+			b.WriteString("\n" + stDim.Render("the list costs ~"+tokN(tok)+" tokens in every request; a skill's body is read only when it is used"))
 		}
 		m.append(b.String())
 		return nil

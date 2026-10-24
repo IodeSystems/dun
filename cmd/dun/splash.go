@@ -103,8 +103,9 @@ func (m tuiModel) modelValue() string {
 }
 
 // toolsValue is how many tools the model has — dun's own and every
-// server's — and /mcp info for where they come from and what they cost
-// (USER 2026-10-24: "mcp should probably be just tools"). A server that is
+// server's — what their definitions cost in every request, and /mcp info for
+// where they come from (USER 2026-10-24: "mcp should probably be just tools";
+// "5 (36k) for 5 tool definitions"). A server that is
 // starting or did not start is named: the one thing on the row that is
 // changing, or wrong. Narrow, the hint goes first.
 func (m tuiModel) toolsValue(w int) string {
@@ -122,6 +123,9 @@ func (m tuiModel) toolsValue(w int) string {
 	}
 	sep := stDim.Render(" · ")
 	head := fmt.Sprintf("%d", len(m.tools))
+	if tok := m.toolTokens(); tok > 0 {
+		head += stDim.Render(" (" + tokN(tok) + ")")
+	}
 	for _, t := range trouble {
 		head += sep + t
 	}
@@ -229,7 +233,39 @@ func (m tuiModel) skillsValue() string {
 	if len(m.skills) == 0 {
 		return stDim.Render("none")
 	}
-	return fmt.Sprintf("%d", len(m.skills)) + stDim.Render(" · /skill")
+	v := fmt.Sprintf("%d", len(m.skills))
+	if tok := m.skillTokens(); tok > 0 {
+		v += stDim.Render(" (" + tokN(tok) + ")")
+	}
+	return v + stDim.Render(" · /skill info")
+}
+
+// toolTokens is what every tool definition costs in each request — dun's own
+// with the provider's tool-use overhead, and every server's; 0 while
+// counting.
+func (m tuiModel) toolTokens() int {
+	s := m.ctxStats
+	if s.systemTokens == 0 {
+		return 0
+	}
+	n := s.systemShared
+	for _, p := range s.systemParts {
+		if p.Name != dun.SkillsPart {
+			n += p.Tokens
+		}
+	}
+	return n
+}
+
+// skillTokens is what the skill list costs in each request; 0 while counting.
+func (m tuiModel) skillTokens() int {
+	n := 0
+	for _, p := range m.ctxStats.systemParts {
+		if p.Name == dun.SkillsPart {
+			n += p.Tokens
+		}
+	}
+	return n
 }
 
 // filesValue names the context files the agent reads (rules.go: AGENTS.md,

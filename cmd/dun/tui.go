@@ -189,11 +189,12 @@ var (
 //     place) has them;
 //   - side: a thin line on the cell's edge toward the focused pane, the
 //     bottom edge (▁) for the upper side, the top edge (▔) for the input;
-//   - weight: at both far ends the line thickens toward that pane, in eighths.
+//   - weight: at both far ends the line thickens toward that pane, in eighths,
+//     to 3/8 of the row (owner: half a row left too little room).
 //
-// Growing up uses the lower blocks (▂▃▄). Growing down has no font glyphs
-// for 2/8 and 3/8 from the top, so it is the lower block of the rest in
-// reverse video: ▆ reversed shows the top 2/8 in the colour. Moving focus
+// Growing up uses the lower blocks (▂▃). Growing down has no font glyphs for
+// 2/8 and 3/8 from the top, so it is the lower block of the rest in reverse
+// video: ▆ reversed shows the top 2/8 in the colour. Moving focus
 // moves the thin line from one edge of its row to the other; nothing else.
 // Neither pane's CONTENT changes with focus: the person reads one pane while
 // typing in the other (owner, 2026-10-23).
@@ -206,9 +207,9 @@ func divider(w int, focusUp bool) string {
 	// middle sat inside the text's column, under nothing on one side.
 	half := min(w, bandCap) / 2
 	// ramp is the far ends, outermost first, then the line itself.
-	ramp, rev := []string{"▄", "▃", "▂", "▁"}, false
+	ramp, rev := []string{"▃", "▂", "▁"}, false
 	if !focusUp {
-		ramp, rev = []string{"▄", "▅", "▆", "▔"}, true
+		ramp, rev = []string{"▅", "▆", "▔"}, true
 	}
 	var out strings.Builder
 	run, runSt := "", lipgloss.Style{}
