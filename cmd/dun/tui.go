@@ -153,7 +153,15 @@ var answerFG = *styles.DarkStyleConfig.Document.Color
 
 var (
 	stHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	stDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	// stDim is chrome: rules, arrows, key hints, labels. Not for text the
+	// person reads to follow what happened (240 is 2.5:1 on a dark background).
+	stDim = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	// stSecondary is content one step below the answer: a tool call's result
+	// preview and body, a thought, a group's targets. Showing how an answer
+	// was produced is required, so it is readable: 246 is 5.9:1 on the
+	// renderer's #16181c and 6.9:1 on black. On a light terminal it is 240
+	// (7.1:1 on white), set by initMarkdownStyle.
+	stSecondary = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
 	// stUser is the question band: bold, on a filled band (236), in the
 	// answer's own foreground — the colour glamour gives a reply's text
 	// (answerFG, 8.6:1 on the band) — so the question reads as plainly as

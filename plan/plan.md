@@ -231,6 +231,18 @@ bounce on shrink) — done 2026-10-23, see done.md (open: personas not re-run;
 a model pick still replaces the conversation; the result preview of a tool
 call is dim 240)
 
+### ◐ 38. Readable tool results, neutral previews, the walk at three sizes (USER, 2026-10-23)
+
+- **Scope (owner-approved):** (1) tool-result text in a readable secondary
+  token, not chrome grey 240; (2) orange previews neutral unless the state
+  needs the person; (3) the walk types "work" over the prefilled name;
+  (4) bin/ux walks at 48×24, 100×30, 180×50; (5) run, look, fix the clear
+  faults at 48 and 180.
+- **next:** sizes in bin/ux; run; look at every PNG.
+- **risks:** light theme unseen (secondary is 240 there by rule, untested
+  on a real light terminal).
+- **blocking decisions:** none yet.
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has

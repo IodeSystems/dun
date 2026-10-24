@@ -196,7 +196,7 @@ func (r *toolRun) live() bool {
 func thoughtLine(t *thinkBlock, w int) string {
 	meta := fmt.Sprintf("  (%s, %d words)", thoughtTime(t), len(strings.Fields(t.text)))
 	last, _ := fitPlain(lastSentence(t.text), max(1, w-2-len([]rune(meta))))
-	return stDim.Render("✻ " + last + meta)
+	return stSecondary.Render("✻ " + last + meta)
 }
 
 func thoughtTime(t *thinkBlock) string {
@@ -302,7 +302,7 @@ func groupLine(items []*runItem, w int) string {
 		ts[i] = callTarget(it)
 	}
 	list, _ := fitPlain(strings.Join(ts, ", "), max(1, w-2-len([]rune(label))))
-	return stTool.Render("✓ "+label) + stDim.Render(list)
+	return stTool.Render("✓ "+label) + stSecondary.Render(list)
 }
 
 // fitRow cuts a styled row to w columns.

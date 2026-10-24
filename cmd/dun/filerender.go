@@ -83,7 +83,7 @@ func fileFailed(result string) (string, string, bool) {
 		return "", "", false
 	}
 	why := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(r, "ERROR:"), "ERROR"))
-	return stDim.Render(" → ") + stErr.Render(clip(oneLine(firstLine(why)), 80)), stDim.Render(result), true
+	return stDim.Render(" → ") + stErr.Render(clip(oneLine(firstLine(why)), 80)), stSecondary.Render(result), true
 }
 
 func fileReadRender(rc renderCtx) (string, string) {
@@ -91,17 +91,17 @@ func fileReadRender(rc renderCtx) (string, string) {
 		return p, b
 	}
 	head := firstLine(rc.result)
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	if m := reReadHead.FindStringSubmatch(head); m != nil {
 		from, _ := strconv.Atoi(m[1])
 		to, _ := strconv.Atoi(m[2])
-		return stDim.Render(fmt.Sprintf(":%d-%d (%s of %s)", from, to, plural(to-from+1, "line"), m[3])), body
+		return stSecondary.Render(fmt.Sprintf(":%d-%d (%s of %s)", from, to, plural(to-from+1, "line"), m[3])), body
 	}
 	if m := reReadWhole.FindStringSubmatch(head); m != nil {
 		n, _ := strconv.Atoi(m[1])
-		return stDim.Render(fmt.Sprintf(" (%s)", plural(n, "line"))), body
+		return stSecondary.Render(fmt.Sprintf(" (%s)", plural(n, "line"))), body
 	}
-	return stDim.Render(" → " + clip(oneLine(head), 80)), body
+	return stDim.Render(" → ") + stSecondary.Render(clip(oneLine(head), 80)), body
 }
 
 func fileEditRender(rc renderCtx) (string, string) {
@@ -111,7 +111,7 @@ func fileEditRender(rc renderCtx) (string, string) {
 	if m := reEditHead.FindStringSubmatch(firstLine(rc.result)); m != nil {
 		return " " + diffAdd.Render("+"+m[1]) + " " + diffDel.Render("−"+m[2]), colorizeDiff(rc.result)
 	}
-	return stDim.Render(" → " + clip(oneLine(firstLine(rc.result)), 80)), colorizeDiff(rc.result)
+	return stDim.Render(" → ") + stSecondary.Render(clip(oneLine(firstLine(rc.result)), 80)), colorizeDiff(rc.result)
 }
 
 func fileWriteRender(rc renderCtx) (string, string) {
@@ -119,16 +119,16 @@ func fileWriteRender(rc renderCtx) (string, string) {
 		return p, b
 	}
 	if m := reWriteHead.FindStringSubmatch(firstLine(rc.result)); m != nil {
-		return stDim.Render(" (" + m[1] + ", " + m[2] + ")"), stDim.Render(rc.result)
+		return stSecondary.Render(" (" + m[1] + ", " + m[2] + ")"), stSecondary.Render(rc.result)
 	}
-	return stDim.Render(" → " + clip(oneLine(firstLine(rc.result)), 80)), stDim.Render(rc.result)
+	return stDim.Render(" → ") + stSecondary.Render(clip(oneLine(firstLine(rc.result)), 80)), stSecondary.Render(rc.result)
 }
 
 func fileGrepRender(rc renderCtx) (string, string) {
 	if p, b, ok := fileFailed(rc.result); ok {
 		return p, b
 	}
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	lines := strings.SplitN(rc.result, "\n", 3)
 	head := lines[0]
 	if strings.HasPrefix(head, "searched for ") && len(lines) > 1 { // the literal-fallback note
@@ -136,14 +136,14 @@ func fileGrepRender(rc renderCtx) (string, string) {
 	}
 	switch m := reGrepHead.FindStringSubmatch(head); {
 	case m != nil:
-		return stDim.Render(" → " + m[1] + " " + m[2] + " in " + m[3] + " " + pluralWord(m[3], "file")), body
+		return stDim.Render(" → ") + stSecondary.Render(m[1] + " " + m[2] + " in " + m[3] + " " + pluralWord(m[3], "file")), body
 	case strings.HasPrefix(head, "no matches"):
-		return stDim.Render(" → no matches"), body
+		return stDim.Render(" → ") + stSecondary.Render("no matches"), body
 	}
 	if m := reGrepFiles.FindStringSubmatch(head); m != nil {
-		return stDim.Render(" → " + m[1] + " " + pluralWord(m[1], "file")), body
+		return stDim.Render(" → ") + stSecondary.Render(m[1] + " " + pluralWord(m[1], "file")), body
 	}
-	return stDim.Render(" → " + clip(oneLine(head), 80)), body
+	return stDim.Render(" → ") + stSecondary.Render(clip(oneLine(head), 80)), body
 }
 
 var reListDir = regexp.MustCompile(`^.*/: (\d+ dirs?), (\d+ files?)`)
@@ -153,14 +153,14 @@ func fileListRender(rc renderCtx) (string, string) {
 		return p, b
 	}
 	head := firstLine(rc.result)
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	if m := reListDir.FindStringSubmatch(head); m != nil {
-		return stDim.Render(" → " + m[1] + ", " + m[2]), body
+		return stDim.Render(" → ") + stSecondary.Render(m[1] + ", " + m[2]), body
 	}
 	if m := reGrepFiles.FindStringSubmatch(head); m != nil {
-		return stDim.Render(" → " + m[1] + " " + pluralWord(m[1], "file")), body
+		return stDim.Render(" → ") + stSecondary.Render(m[1] + " " + pluralWord(m[1], "file")), body
 	}
-	return stDim.Render(" → " + clip(oneLine(head), 80)), body
+	return stDim.Render(" → ") + stSecondary.Render(clip(oneLine(head), 80)), body
 }
 
 // fileOtherRender: delete and move say what they did in one line.
@@ -168,7 +168,7 @@ func fileOtherRender(rc renderCtx) (string, string) {
 	if p, b, ok := fileFailed(rc.result); ok {
 		return p, b
 	}
-	return stDim.Render(" ✓"), stDim.Render(rc.result)
+	return stSecondary.Render(" ✓"), stSecondary.Render(rc.result)
 }
 
 // pluralWord is "file" for "1" and "files" for anything else ("2", "10+").

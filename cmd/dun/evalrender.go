@@ -250,12 +250,12 @@ func evalRender(rc renderCtx) (string, string) {
 	}
 	r := strings.TrimRight(rc.result, "\n")
 	if strings.TrimSpace(r) == "" {
-		return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" (no output)"), ""
+		return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" (no output)"), ""
 	}
 	v, parsed := parseShellValue(r)
 	if !parsed {
 		// A string result is shown bare; it is just text.
-		return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" "+evalShape(nil, r)), stDim.Render(r)
+		return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" "+evalShape(nil, r)), stSecondary.Render(r)
 	}
 	w := max(20, rc.width-6)
 	body := ""
@@ -264,7 +264,7 @@ func evalRender(rc renderCtx) (string, string) {
 	} else {
 		body = strings.Join(prettyValue(v, 0, w), "\n")
 	}
-	return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" "+evalShape(v, r)), body
+	return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" "+evalShape(v, r)), body
 }
 
 // evalShape is the preview's word for a result: how many rows, items or
@@ -293,7 +293,7 @@ func evalErrorRender(msg, code string, width int) (string, string) {
 			where = " · line " + m[1]
 		}
 	}
-	preview := stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 80)) + stDim.Render(where)
+	preview := stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 80)) + stSecondary.Render(where)
 	var out []string
 	for _, ln := range strings.Split(strings.TrimRight(msg, "\n"), "\n") {
 		out = append(out, stErr.Render(ln))
@@ -531,7 +531,7 @@ func renderTable(rows []*shellObj, cols []string, w int) string {
 		out = append(out, strings.Join(cs, "  "))
 	}
 	if shown < len(cols) {
-		out = append(out, stDim.Render(fmt.Sprintf("+%d more columns: %s", len(cols)-shown, strings.Join(cols[shown:], ", "))))
+		out = append(out, stSecondary.Render(fmt.Sprintf("+%d more columns: %s", len(cols)-shown, strings.Join(cols[shown:], ", "))))
 	}
 	return strings.Join(out, "\n")
 }

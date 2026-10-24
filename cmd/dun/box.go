@@ -87,7 +87,7 @@ func (b *boxState) wrapBody(body string, w int, plain bool, edge string) {
 	lines := strings.Split(body[b.stable:], "\n")
 	for k, ln := range lines {
 		for _, r := range strings.Split(cellbuf.Wrap(ln, ww, ""), "\n") {
-			b.rows = append(b.rows, edge+stDim.Render(r))
+			b.rows = append(b.rows, edge+stSecondary.Render(r))
 		}
 		if k < len(lines)-1 { // a finished line: its rows will not change
 			b.stable += len(ln) + 1

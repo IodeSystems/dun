@@ -48,16 +48,16 @@ func renderToolResult(rc renderCtx) (preview, full string) {
 // genericRender: a clipped one-line preview + the raw body, diff-colorized when
 // it looks like a unified diff (the prior default behavior, now the fallback).
 func genericRender(rc renderCtx) (string, string) {
-	preview := stDim.Render("  → " + clip(oneLine(rc.result), 100))
+	preview := stDim.Render("  → ") + stSecondary.Render(clip(oneLine(rc.result), 100))
 	if isDiff(rc.result) {
 		return preview, colorizeDiff(rc.result)
 	}
-	return preview, stDim.Render(rc.result)
+	return preview, stSecondary.Render(rc.result)
 }
 
 // diffRender always colorizes; the preview is an add/del line stat.
 func diffRender(rc renderCtx) (string, string) {
-	return stDim.Render("  → " + diffStat(rc.result)), colorizeDiff(rc.result)
+	return stDim.Render("  → ") + stSecondary.Render(diffStat(rc.result)), colorizeDiff(rc.result)
 }
 
 // jsonRender pretty-prints a JSON result; the preview summarizes shape (item
@@ -71,7 +71,7 @@ func jsonRender(rc renderCtx) (string, string) {
 	if err != nil {
 		return genericRender(rc)
 	}
-	return stDim.Render("  → " + jsonSummary(v)), stDim.Render(string(pretty))
+	return stDim.Render("  → ") + stSecondary.Render(jsonSummary(v)), stSecondary.Render(string(pretty))
 }
 
 func jsonSummary(v any) string {
@@ -152,32 +152,32 @@ func init() {
 
 // execRender: did the command work, and if not, why.
 func execRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	if isDiff(rc.result) {
 		body = colorizeDiff(rc.result)
 	}
 	// A background start is not a result — it is a receipt. Say so, and carry
 	// the job id, because that id is the only handle on it afterwards.
 	if job, ok := backgroundJobID(rc.result); ok {
-		return stDim.Render("  → ") + stNote.Render("⏱ background job #"+job) +
-			stDim.Render(" · exec_monitor to check on it"), body
+		return stDim.Render("  → ") + stSecondary.Render("⏱ background job #"+job) +
+			stSecondary.Render(" · exec_monitor to check on it"), body
 	}
 
 	marker, failed := execExitMarker(rc.result)
 	switch {
 	case failed && strings.Contains(marker, "TIMED OUT"):
 		return stDim.Render("  → ") + stErr.Render("⏱ TIMED OUT") +
-			stDim.Render(" · "+clip(oneLine(execTail(rc.result)), 70)), body
+			stSecondary.Render(" · "+clip(oneLine(execTail(rc.result)), 70)), body
 	case failed:
 		return stDim.Render("  → ") + stErr.Render("✗ "+clip(marker, 30)) +
-			stDim.Render(" · "+clip(oneLine(execTail(rc.result)), 70)), body
+			stSecondary.Render(" · "+clip(oneLine(execTail(rc.result)), 70)), body
 	}
 	n := countLines(rc.result)
 	head := stDim.Render("  → ") + stTool.Render("✓")
 	if n == 0 {
-		return head + stDim.Render(" (no output)"), body
+		return head + stSecondary.Render(" (no output)"), body
 	}
-	return head + stDim.Render(fmt.Sprintf(" %s · %s", plural(n, "line"),
+	return head + stSecondary.Render(fmt.Sprintf(" %s · %s", plural(n, "line"),
 		clip(oneLine(firstLine(rc.result)), 70))), body
 }
 
@@ -255,26 +255,26 @@ func backgroundJobID(result string) (string, bool) {
 
 // execMonitorRender: the job listing, or one job's state.
 func execMonitorRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	switch {
 	case strings.HasPrefix(first, "No background jobs"):
-		return stDim.Render("  → no background jobs"), body
+		return stDim.Render("  → ") + stSecondary.Render("no background jobs"), body
 	case strings.HasPrefix(first, "ERROR"):
 		return stDim.Render("  → ") + stErr.Render(clip(first, 90)), body
 	}
 	// A listing is one line per job; a single-job report starts with its state.
 	if n := countMatching(rc.result, "#"); n > 1 && !strings.Contains(first, "monitor:") {
-		return stDim.Render("  → ") + stNote.Render(plural(n, "job")), body
+		return stDim.Render("  → ") + stSecondary.Render(plural(n, "job")), body
 	}
-	return stDim.Render("  → " + clip(oneLine(first), 90)), body
+	return stDim.Render("  → ") + stSecondary.Render(clip(oneLine(first), 90)), body
 }
 
 // shipRender: the verdict, which is the whole reason to read a ship result.
 func shipRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
-	mark, style := "", stDim
+	mark, style := "", stSecondary
 	_ = style // initial value; every case below reassigns
 	switch {
 	case strings.HasPrefix(first, "Shipped"):
@@ -286,7 +286,7 @@ func shipRender(rc renderCtx) (string, string) {
 	case strings.HasPrefix(first, "Checks failed"):
 		mark, style = "✗ "+shipStage(first), stErr
 	case strings.HasPrefix(first, "Nothing to ship"):
-		mark, style = "· nothing to ship", stDim
+		mark, style = "· nothing to ship", stSecondary
 	case strings.HasPrefix(first, "ERROR"), strings.Contains(first, "failed"), strings.Contains(first, "conflict"):
 		mark, style = "✗ "+clip(oneLine(first), 60), stErr
 	default:
@@ -297,7 +297,7 @@ func shipRender(rc renderCtx) (string, string) {
 	detail := shipChecks(rc.result)
 	out := stDim.Render("  → ") + style.Render(mark)
 	if detail != "" {
-		out += stDim.Render(" · " + clip(detail, 70))
+		out += stSecondary.Render(" · " + clip(detail, 70))
 	}
 	return out, body
 }
@@ -341,62 +341,75 @@ func shipChecks(result string) string {
 // agentRender: which child, what state, and what it cost — the spend is the
 // argument for delegating at all, and it is invisible in a clipped line.
 func agentRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	switch {
 	case strings.HasPrefix(first, "ERROR"):
 		return stDim.Render("  → ") + stErr.Render(clip(first, 90)), body
 	case strings.HasPrefix(first, "Started agent"):
-		return stDim.Render("  → ") + stNote.Render("▸ "+clip(strings.TrimSuffix(first, "."), 80)), body
+		return stDim.Render("  → ") + stSecondary.Render("▸ "+clip(strings.TrimSuffix(first, "."), 80)), body
 	}
 	if id, state, cost, ok := agentReportHead(first); ok {
-		style := stNote
-		switch state {
-		case "IDLE":
+		// Orange only for the state that needs the person: a child blocked
+		// on a question. Running and idle are the normal course; a failure
+		// is red.
+		style := stSecondary
+		switch strings.ToUpper(state) {
+		case "IDLE", "RUNNING":
 			style = stTool
 		case "FAILED", "DISMISSED":
 			style = stErr
 		}
+		if strings.Contains(rc.result, "\nBLOCKED, waiting on you") {
+			state, style = "blocked", stNote
+		}
 		out := stDim.Render("  → ") + style.Render(fmt.Sprintf("#%s %s", id, strings.ToLower(state)))
 		if cost != "" {
-			out += stDim.Render(" · " + cost)
+			out += stSecondary.Render(" · " + cost)
 		}
 		return out, body
 	}
 	return genericRender(rc)
 }
 
-// agentReportHead parses "agent #2 IDLE after 3m40s — spent 41.2k tokens…".
+// agentReportHead parses the report's first line, "agent #2 is idle after
+// 3m40s (41.2k tokens) on m" (subAgent.report), and the older "agent #2 IDLE
+// after 3m40s — spent 41.2k tokens…".
 func agentReportHead(first string) (id, state, cost string, ok bool) {
 	f := strings.Fields(first)
 	if len(f) < 3 || f[0] != "agent" || !strings.HasPrefix(f[1], "#") {
 		return "", "", "", false
 	}
 	id, state = strings.TrimPrefix(f[1], "#"), f[2]
+	if state == "is" && len(f) > 3 {
+		state = f[3]
+	}
 	if i := strings.Index(first, "spent "); i >= 0 {
 		cost = clip(oneLine(first[i:]), 40)
+	} else if i, j := strings.Index(first, " ("), strings.Index(first, " tokens)"); i >= 0 && j > i {
+		cost = first[i+2 : j+len(" tokens")]
 	}
 	return id, state, cost, true
 }
 
 // agentMonitorRender: a listing, or one child's report.
 func agentMonitorRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	switch {
 	case strings.HasPrefix(first, "No sub-agents"):
-		return stDim.Render("  → no sub-agents"), body
+		return stDim.Render("  → ") + stSecondary.Render("no sub-agents"), body
 	case strings.HasPrefix(first, "ERROR"), strings.HasPrefix(first, "Could not"):
 		return stDim.Render("  → ") + stErr.Render(clip(first, 90)), body
 	case strings.HasPrefix(first, "Answered"), strings.HasPrefix(first, "Told"),
 		strings.HasPrefix(first, "Dismissed"), strings.HasPrefix(first, "Restarted"):
-		return stDim.Render("  → ") + stNote.Render(clip(oneLine(first), 90)), body
+		return stDim.Render("  → ") + stSecondary.Render(clip(oneLine(first), 90)), body
 	}
 	if strings.HasPrefix(first, "agent ") {
 		return agentRender(rc)
 	}
 	if n := countMatching(rc.result, "#"); n > 0 {
-		return stDim.Render("  → ") + stNote.Render(plural(n, "agent")), body
+		return stDim.Render("  → ") + stSecondary.Render(plural(n, "agent")), body
 	}
 	return genericRender(rc)
 }
@@ -406,18 +419,18 @@ func agentMonitorRender(rc renderCtx) (string, string) {
 func tellParentRender(rc renderCtx) (string, string) {
 	var parts []string
 	if s := argStr(rc.args, "final"); s != "" {
-		parts = append(parts, stTool.Render("✓ final: ")+stDim.Render(clip(oneLine(s), 80)))
+		parts = append(parts, stTool.Render("✓ final: ")+stSecondary.Render(clip(oneLine(s), 80)))
 	}
 	if s := argStr(rc.args, "message"); s != "" {
-		parts = append(parts, stNote.Render("✉ ")+stDim.Render(clip(oneLine(s), 80)))
+		parts = append(parts, stSecondary.Render("✉ ")+stSecondary.Render(clip(oneLine(s), 80)))
 	}
 	if s := argStr(rc.args, "status"); s != "" && len(parts) == 0 {
-		parts = append(parts, stDim.Render("· "+clip(oneLine(s), 80)))
+		parts = append(parts, stSecondary.Render("· "+clip(oneLine(s), 80)))
 	}
 	if len(parts) == 0 {
 		return genericRender(rc)
 	}
-	return stDim.Render("  → ") + strings.Join(parts, stDim.Render(" · ")), stDim.Render(rc.result)
+	return stDim.Render("  → ") + strings.Join(parts, stSecondary.Render(" · ")), stSecondary.Render(rc.result)
 }
 
 // dunMsgRender reads the ARGS for who and what, like tellParentRender; the
@@ -427,11 +440,11 @@ func dunMsgRender(rc renderCtx) (string, string) {
 	if to == "" {
 		return genericRender(rc)
 	}
-	head := stNote.Render("✉ "+to+": ") + stDim.Render(clip(oneLine(text), 70))
+	head := stSecondary.Render("✉ "+to+": ") + stSecondary.Render(clip(oneLine(text), 70))
 	if strings.HasPrefix(rc.result, "ERROR") {
 		head += stErr.Render("  " + clip(oneLine(strings.TrimPrefix(rc.result, "ERROR: ")), 60))
 	}
-	return stDim.Render("  → ") + head, stDim.Render(text + "\n\n" + rc.result)
+	return stDim.Render("  → ") + head, stSecondary.Render(text + "\n\n" + rc.result)
 }
 
 // askRender is for ask_user and ask_parent: the question is in the args and the
@@ -443,9 +456,9 @@ func askRender(rc renderCtx) (string, string) {
 	if strings.HasPrefix(rc.result, "ERROR") {
 		style = stErr
 	}
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	if q != "" {
-		body = stAsk.Render("❓ "+q) + "\n" + stDim.Render(rc.result)
+		body = stAsk.Render("❓ "+q) + "\n" + stSecondary.Render(rc.result)
 	}
 	return stDim.Render("  → ") + style.Render("❝"+clip(ans, 88)+"❞"), body
 }
@@ -460,31 +473,31 @@ func argStr(args map[string]any, key string) string {
 
 // nodeReadRender: what was read and how much.
 func nodeReadRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	n := countLines(rc.result)
 	head := stDim.Render("  → ") + stTool.Render("✓")
 	if n == 0 {
-		return head + stDim.Render(" (empty)"), body
+		return head + stSecondary.Render(" (empty)"), body
 	}
-	return head + stDim.Render(fmt.Sprintf(" %s · %s", plural(n, "line"),
+	return head + stSecondary.Render(fmt.Sprintf(" %s · %s", plural(n, "line"),
 		clip(oneLine(firstLine(rc.result)), 70))), body
 }
 
 // getDocRender: which document, how many pages.
 func getDocRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
 		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
 	}
 	n := countLines(rc.result)
-	return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(fmt.Sprintf(" %s · %s",
+	return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(fmt.Sprintf(" %s · %s",
 		plural(n, "line"), clip(first, 70))), body
 }
 
 // ocrRender: how many pages were extracted.
 func ocrRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
 		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
@@ -492,30 +505,30 @@ func ocrRender(rc renderCtx) (string, string) {
 	// OCR output mentions page counts; fall back to line count.
 	pages := countMatching(rc.result, "page")
 	if pages > 0 {
-		return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" "+plural(pages, "page")), body
+		return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" "+plural(pages, "page")), body
 	}
 	n := countLines(rc.result)
-	return stDim.Render("  → ") + stTool.Render("✓") + stDim.Render(" "+plural(n, "line")), body
+	return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" "+plural(n, "line")), body
 }
 
 // ingestRender: the job id or status.
 func ingestRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
 		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
 	}
-	return stDim.Render("  → ") + stNote.Render("⏱ queued") + stDim.Render(" · "+clip(first, 80)), body
+	return stDim.Render("  → ") + stSecondary.Render("⏱ queued") + stSecondary.Render(" · "+clip(first, 80)), body
 }
 
 // recapRender: what was replaced and how much was saved.
 func recapRender(rc renderCtx) (string, string) {
-	body := stDim.Render(rc.result)
+	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
 		return stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 90)), body
 	}
-	return stDim.Render("  → ") + stNote.Render("↺ recap") + stDim.Render(" · "+clip(first, 80)), body
+	return stDim.Render("  → ") + stSecondary.Render("↺ recap") + stSecondary.Render(" · "+clip(first, 80)), body
 }
 
 func firstLine(s string) string {

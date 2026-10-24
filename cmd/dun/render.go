@@ -36,46 +36,47 @@ var (
 // Update blocks input for as long as the terminal stays silent.
 func initMarkdownStyle() {
 	mdStyleOnce.Do(func() {
-		switch strings.ToLower(strings.TrimSpace(os.Getenv("DUN_MD_STYLE"))) {
-		case "dark":
-			mdStyle = "dark"
-			return
-		case "light":
-			mdStyle = "light"
-			return
-		case "notty", "none":
-			mdStyle = "notty"
-			return
+		mdStyle = resolveMDStyle()
+		if mdStyle == "light" {
+			stSecondary = stSecondary.Foreground(lipgloss.Color("240"))
 		}
-		// COLORFGBG is free when the terminal sets it — no round trip.
-		if fg, bg, ok := parseColorFGBG(os.Getenv("COLORFGBG")); ok {
-			_ = fg
-			mdStyle = "dark"
-			if bg >= 7 {
-				mdStyle = "light"
-			}
-			return
-		}
-		// The OSC background query is OPT-IN, because when the terminal does not
-		// answer it costs a FIVE SECOND stall and there is no way to know in
-		// advance which terminals answer. Measured: 10.6s to reach `ready`
-		// under a silent terminal versus 5.6s with the query skipped, and it
-		// was still 5s of a replay harness that has no business asking anything.
-		//
-		// It only ever helps light-terminal users who do not export COLORFGBG,
-		// and the cost of guessing wrong for them is a slightly-off palette —
-		// against five seconds of everyone else's startup. DUN_MD_STYLE=light
-		// fixes it permanently for them; DUN_MD_QUERY=1 asks the terminal.
-		if os.Getenv("DUN_MD_QUERY") == "1" && lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
-			mdStyle = "dark"
-			return
-		}
-		if os.Getenv("DUN_MD_QUERY") == "1" {
-			mdStyle = "light"
-			return
-		}
-		mdStyle = "dark"
 	})
+}
+
+func resolveMDStyle() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DUN_MD_STYLE"))) {
+	case "dark":
+		return "dark"
+	case "light":
+		return "light"
+	case "notty", "none":
+		return "notty"
+	}
+	// COLORFGBG is free when the terminal sets it — no round trip.
+	if fg, bg, ok := parseColorFGBG(os.Getenv("COLORFGBG")); ok {
+		_ = fg
+		if bg >= 7 {
+			return "light"
+		}
+		return "dark"
+	}
+	// The OSC background query is OPT-IN, because when the terminal does not
+	// answer it costs a FIVE SECOND stall and there is no way to know in
+	// advance which terminals answer. Measured: 10.6s to reach `ready`
+	// under a silent terminal versus 5.6s with the query skipped, and it
+	// was still 5s of a replay harness that has no business asking anything.
+	//
+	// It only ever helps light-terminal users who do not export COLORFGBG,
+	// and the cost of guessing wrong for them is a slightly-off palette —
+	// against five seconds of everyone else's startup. DUN_MD_STYLE=light
+	// fixes it permanently for them; DUN_MD_QUERY=1 asks the terminal.
+	if os.Getenv("DUN_MD_QUERY") == "1" && lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
+		return "dark"
+	}
+	if os.Getenv("DUN_MD_QUERY") == "1" {
+		return "light"
+	}
+	return "dark"
 }
 
 // newMarkdown builds a glamour renderer word-wrapped to width.
