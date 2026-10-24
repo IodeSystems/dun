@@ -332,6 +332,15 @@ func main() {
 		return
 	}
 
+	// A headless task with nothing to send to stops here, before servers,
+	// worktrees or a session: /login cannot be typed here (nologin.go).
+	if !*prog {
+		if err := providerMissing(*url, *model); err != nil {
+			fmt.Fprint(os.Stderr, headlessMissing(err))
+			os.Exit(2)
+		}
+	}
+
 	// Session persistence, scoped by the workspace ROOT (~/.dun/sessions/<root>/).
 	var sessionFile, sessionID string
 	switch {
