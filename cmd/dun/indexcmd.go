@@ -16,7 +16,7 @@ import (
 // excludeVerb reports whether /<slash> <verb> is an exclude command: the
 // code server's, whose index takes --exclude.
 func excludeVerb(id, verb string) bool {
-	return id == dun.ServerCode && (verb == "exclude" || verb == "include" || verb == "budget")
+	return id == dun.ServerCode && (verb == "exclude" || verb == "include" || verb == "budget" || verb == "index-anyway")
 }
 
 // excludeHelp is exclude's and include's lines in the palette and in bare
@@ -24,6 +24,7 @@ func excludeVerb(id, verb string) bool {
 var excludeHelp = []string{
 	"exclude", "DIR — leave a directory (relative to the workspace) out of the code index, for this project; the server restarts. The repository is not changed",
 	"include", "DIR — put an excluded directory back in the code index (the undo of exclude, and of what dun excluded when the index did not fit its budget)",
+	"index-anyway", "on|off — index a root that is not a project (the home directory, a directory of clones) anyway, for this project; the server restarts; bare shows it",
 	"budget", "Nms|Nops|0|default — the code index's startup budget, for this project (0: none; default: the server's, 30000ms); bare shows it",
 }
 
@@ -36,6 +37,9 @@ func runExcludeCmd(ctx context.Context, h *dun.Harness, id, verb, dir string) st
 	dir = strings.TrimSpace(dir)
 	if verb == "budget" {
 		return runBudgetCmd(ctx, h, id, slash, dir)
+	}
+	if verb == "index-anyway" {
+		return runAnywayCmd(ctx, h, id, slash, dir)
 	}
 	if dir == "" {
 		return "usage: /" + slash + " " + verb + " <dir> — " + excludesNow(h, id)
@@ -92,6 +96,34 @@ func runBudgetCmd(ctx context.Context, h *dun.Harness, id, slash, budget string)
 	return msg
 }
 
+// runAnywayCmd applies /<slash> index-anyway [on|off].
+func runAnywayCmd(ctx context.Context, h *dun.Harness, id, slash, arg string) string {
+	cur := h.IndexAnyway(id)
+	state := map[bool]string{true: "on", false: "off"}[cur]
+	arg = strings.ToLower(strings.TrimSpace(arg))
+	if arg != "on" && arg != "off" {
+		return slash + ": index-anyway is " + state + " for this project · /" + slash + " index-anyway on|off sets it"
+	}
+	on := arg == "on"
+	path, changed, err := h.SetIndexAnyway(ctx, id, on)
+	if err != nil && path == "" {
+		return slash + ": " + oneLine(err.Error())
+	}
+	var msg string
+	switch {
+	case !changed:
+		msg = slash + ": index-anyway is already " + state
+	case on:
+		msg = fmt.Sprintf("%s: indexing a root that is not a project, for this project (saved to %s) · undo: /%s index-anyway off", slash, path, slash)
+	default:
+		msg = fmt.Sprintf("%s: index-anyway off, for this project (saved to %s) · redo: /%s index-anyway on", slash, path, slash)
+	}
+	if err != nil {
+		msg += "\nit did not restart: " + oneLine(err.Error())
+	}
+	return msg
+}
+
 // excludesNow is what id's index leaves out now, as a phrase.
 func excludesNow(h *dun.Harness, id string) string {
 	ex := h.IndexExcludes(id)
@@ -116,7 +148,10 @@ func indexStatus(st dun.ServerState, slash string) string {
 	}
 	// What the index left out, by reason: the advanced user's answer to
 	// "why can't it see X"; the conversation says nothing of it.
-	if len(st.IndexLeftOut) > 0 {
+	if len(st.IndexLeftOutBy) > 0 {
+		lines = append(lines, leftOutByLines(st.IndexLeftOutBy, st.IndexLeftOut)...)
+		lines = append(lines, "  a path named inside one is still read · /"+slash+" exclude|include <dir> changes the rest")
+	} else if len(st.IndexLeftOut) > 0 {
 		var order []string
 		by := map[string][]string{}
 		for _, l := range st.IndexLeftOut {
@@ -131,6 +166,12 @@ func indexStatus(st dun.ServerState, slash string) string {
 		}
 		lines = append(lines, "  a path named inside one is still read · /"+slash+" exclude|include <dir> changes the rest")
 	}
+	if st.Index == dun.IndexFailed && strings.HasPrefix(st.IndexErr, "not a project") && !st.IndexAnyway {
+		lines = append(lines, "  /"+slash+" index-anyway on indexes it regardless")
+	}
+	if st.IndexAnyway {
+		lines = append(lines, "index anyway (this project): a root that is not a project is indexed · /"+slash+" index-anyway off undoes it")
+	}
 	if st.IndexBudget != "" {
 		lines = append(lines, "index startup budget (this project): "+st.IndexBudget+" · /"+slash+" budget default goes back to the server's")
 	}
@@ -139,4 +180,51 @@ func indexStatus(st dun.ServerState, slash string) string {
 			" · /"+slash+" include <dir> takes one back")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// leftOutExamples is how many example paths a reason's line names.
+const leftOutExamples = 3
+
+// leftOutByLines is the left-out index by reason, from poly-lsp's own
+// totals: "  minified: 3 files — hint · e.g. a.min.js, b.min.js". The list
+// holds at most 20 entries per reason, so the count is the total's and the
+// examples are a few of the list's.
+func leftOutByLines(by []dun.IndexLeftOutBy, list []dun.IndexLeftOut) []string {
+	lines := []string{"left out of the index:"}
+	for _, r := range by {
+		l := fmt.Sprintf("  %s: %d %s", r.Reason, r.Count, leftOutUnit(r.Reason, r.Count))
+		if r.Hint != "" {
+			l += " — " + r.Hint
+		}
+		var ex []string
+		for _, e := range list {
+			if e.Reason == r.Reason && len(ex) < leftOutExamples {
+				ex = append(ex, e.Dir)
+			}
+		}
+		if len(ex) > 0 {
+			l += " · e.g. " + strings.Join(ex, ", ")
+			if r.Count > len(ex) {
+				l += ", …"
+			}
+		}
+		lines = append(lines, l)
+	}
+	return lines
+}
+
+// leftOutUnit is what a reason counts: directories, links or files.
+func leftOutUnit(reason string, n int) string {
+	unit := "file"
+	switch {
+	case strings.HasPrefix(reason, "symlink"):
+		unit = "link"
+	case reason == "git-ignored", reason == "skipped dir", reason == "excluded", reason == "unreadable",
+		reason == "worktree of this repo", reason == "another repo":
+		unit = "dir"
+	}
+	if n != 1 {
+		unit += "s"
+	}
+	return unit
 }

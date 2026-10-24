@@ -89,11 +89,23 @@ type IndexReport struct {
 	// file set in a repo (poly-lsp 5ad7920), so ignored directories and
 	// nested repositories are named here rather than counted.
 	LeftOut []IndexLeftOut `json:"leftOut,omitempty"`
+	// LeftOutBy is every reason in LeftOut with its true count (LeftOut
+	// holds at most 20 entries per reason) and the way to refine or revert
+	// it. Absent from an older poly-lsp.
+	LeftOutBy []IndexLeftOutBy `json:"leftOutBy,omitempty"`
 }
 
-// IndexLeftOut is one directory the index left out. Reason is one of
+// IndexLeftOutBy is one left-out reason's total and its hint.
+type IndexLeftOutBy struct {
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
+	Hint   string `json:"hint,omitempty"`
+}
+
+// IndexLeftOut is one directory or file the index left out. Reason is one of
 // "git-ignored", "worktree of this repo", "another repo", "excluded",
-// "unreadable".
+// "unreadable", "skipped dir", "over size", "minified", "LFS pointer (not
+// downloaded)", or a "symlink ..." one.
 type IndexLeftOut struct {
 	Dir    string `json:"dir"`
 	Reason string `json:"reason"`
@@ -120,7 +132,17 @@ type indexNote struct {
 	Budget string       `json:"budget,omitempty"` // the budget spent: "30000ms"
 	Read   int          `json:"read,omitempty"`   // files read within it
 	Limit  int          `json:"limit,omitempty"`  // the intermediate build's file cap
+	// A root that is not a project (the home directory, /, a directory of
+	// clones) fails at once with Reason "not a project": Repos are the git
+	// repositories found in it, relative, at most 20; ReposTotal how many
+	// there are. The remedy is --root <repo> or --index-anyway.
+	Reason     string   `json:"reason,omitempty"`
+	Repos      []string `json:"repos,omitempty"`
+	ReposTotal int      `json:"reposTotal,omitempty"`
 }
+
+// reasonNotProject is the Reason of a root poly-lsp refused as no project.
+const reasonNotProject = "not a project"
 
 // indexState is a server's index as dun last heard of it. Guarded by srvMu.
 type indexState struct {
@@ -165,6 +187,7 @@ func asksIndex(s Server) bool {
 type IndexSupport struct {
 	Protocol bool // a background index, its report, and --exclude
 	Budget   bool // --index-budget (the intermediate build had a file cap)
+	Anyway   bool // --index-anyway (index a root that is not a project)
 }
 
 // indexProbes caches IndexProtocol by the binary's path, size and mtime: a
@@ -207,6 +230,7 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 	}
 	help := string(out)
 	sup.Budget = strings.Contains(help, "--index-budget")
+	sup.Anyway = strings.Contains(help, "--index-anyway")
 	sup.Protocol = sup.Budget || strings.Contains(help, "--index-max-files")
 	indexProbes.Store(key, sup)
 	return sup, resolved, nil
@@ -215,19 +239,19 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 // speaksIndex reports whether s, about to be spawned from command, builds
 // its index after the handshake — it said so this session (an index
 // notification), or its binary does (IndexProtocol) — and whether it takes
-// --index-budget. Not under srvMu: it may run a process.
-func (h *Harness) speaksIndex(s Server, command string) (indexes, budget bool) {
+// --index-budget or --index-anyway. Not under srvMu: it may run a process.
+func (h *Harness) speaksIndex(s Server, command string) (indexes, budget, anyway bool) {
 	h.srvMu.Lock()
 	seen := h.indexSeen[s.ID]
 	h.srvMu.Unlock()
 	if !asksIndex(s) {
-		return seen, false
+		return seen, false, false
 	}
 	sup, _, err := IndexProtocol(command)
 	if err != nil {
 		log.Printf("dun: %s: index protocol not known: %v", s.ID, err)
 	}
-	return sup.Protocol || seen, sup.Budget
+	return sup.Protocol || seen, sup.Budget, sup.Anyway
 }
 
 // excludeArgs are --exclude flags for dirs.
@@ -285,6 +309,8 @@ func (h *Harness) afterIndex(id string, n indexNote) {
 	switch {
 	case n.State == IndexReady:
 		msg = h.nestedWarning(id, n.Index)
+	case n.Reason == reasonNotProject:
+		msg = h.askNotProject(id, n)
 	case (n.Budget != "" || n.Limit > 0) && n.Index != nil:
 		msg = h.retryIndex(id, n)
 	default:
@@ -693,6 +719,7 @@ func (h *Harness) indexOf(id string, st *ServerState) {
 		if is.note.Index != nil {
 			st.IndexFiles = is.note.Index.Files
 			st.IndexLeftOut = is.note.Index.LeftOut
+			st.IndexLeftOutBy = is.note.Index.LeftOutBy
 		}
 	}
 }

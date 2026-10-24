@@ -42,6 +42,10 @@ const (
 	// (setupstate_test.go) as the mode says (fakeSetupReport). Unset, it is
 	// an older build: none.
 	fakeSetupEnv = "DUN_FAKE_SETUP"
+	// fakeAnywayEnv makes the fake's `mcp --help` list --index-anyway; the
+	// "notproject" index mode fails without the flag, with the
+	// not-a-project reason, and is ready with it.
+	fakeAnywayEnv = "DUN_FAKE_ANYWAY"
 )
 
 // fakeBin writes dir/name, a wrapper that runs this test binary as persona,
@@ -102,6 +106,9 @@ func fakeBinMain(persona string) {
 				fmt.Println("      --exclude stringArray\n      --index-max-files int   (default 100000)")
 			case mode != "":
 				fmt.Println("      --exclude stringArray\n      --index-budget string   (default \"30000ms\")")
+			}
+			if os.Getenv(fakeAnywayEnv) != "" {
+				fmt.Println("      --index-anyway")
 			}
 			return
 		}
@@ -195,6 +202,16 @@ func fakeIndexReport(out *bufio.Writer, mode string, args []string) {
 	switch mode {
 	case "nested":
 		data["index"] = fakeWorktrees
+	case "leftoutby":
+		data["index"] = fakeLeftOutBy
+	case "notproject":
+		if !slices.Contains(args, "--index-anyway") {
+			level = "error"
+			data = map[string]any{"state": "failed", "ms": 3, "reason": "not a project", "reposTotal": 12,
+				"repos":  []string{"a", "b", "c", "d", "e", "f", "g"},
+				"error":  "not a project: /home/x is the home directory",
+				"remedy": "pass --root <one project> (e.g. --root /home/x/a), or --index-anyway to index /home/x regardless"}
+		}
 	case "budget", "budget-plain":
 		level = "error"
 		rep, read, raise := fakeWorktrees, 4100, "193000ms"
@@ -220,6 +237,19 @@ func fakeIndexReport(out *bufio.Writer, mode string, args []string) {
 	out.Write(append(b, '\n'))
 	out.Flush()
 }
+
+// fakeLeftOutBy is a report whose leftOut list holds fewer entries than
+// leftOutBy counts, as poly-lsp's cap of 20 per reason makes it.
+var fakeLeftOutBy = map[string]any{"files": 455, "bytes": 2 << 20,
+	"leftOut": []map[string]any{
+		{"dir": "node_modules/", "reason": "git-ignored"}, {"dir": "dist/", "reason": "git-ignored"},
+		{"dir": "web/app.min.js", "reason": "minified"},
+	},
+	"leftOutBy": []map[string]any{
+		{"reason": "git-ignored", "count": 8},
+		{"reason": "minified", "count": 1, "hint": "index one anyway: --include <path> or include: in poly-lsp-mcp.yaml"},
+		{"reason": "symlink loop", "count": 2, "hint": "the target is a directory already open on the same path; nothing is lost"},
+	}}
 
 // fakeSetupLangs are setup reports' languages, in poly-lsp's shape.
 var (

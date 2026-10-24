@@ -106,3 +106,37 @@ func TestIndexStatus_LeftOut(t *testing.T) {
 		}
 	}
 }
+
+// With leftOutBy, /poly-lsp gives one line per reason: the true count, the
+// hint, and a few of the listed examples; the list alone is the fallback.
+func TestIndexStatus_LeftOutBy(t *testing.T) {
+	st := dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexReady, IndexFiles: 455,
+		IndexLeftOut: []dun.IndexLeftOut{{Dir: "a/", Reason: "git-ignored"}, {Dir: "b/", Reason: "git-ignored"},
+			{Dir: "c/", Reason: "git-ignored"}, {Dir: "d/", Reason: "git-ignored"}, {Dir: "web/app.min.js", Reason: "minified"}},
+		IndexLeftOutBy: []dun.IndexLeftOutBy{{Reason: "git-ignored", Count: 8},
+			{Reason: "minified", Count: 1, Hint: "index one anyway: --include <path>"},
+			{Reason: "symlink loop", Count: 2, Hint: "nothing is lost"}}}
+	s := indexStatus(st, "poly-lsp")
+	for _, want := range []string{"left out of the index:", "  git-ignored: 8 dirs · e.g. a/, b/, c/, …\n",
+		"  minified: 1 file — index one anyway: --include <path> · e.g. web/app.min.js\n",
+		"  symlink loop: 2 links — nothing is lost\n", "a path named inside one is still read"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("lacks %q:\n%s", want, s)
+		}
+	}
+}
+
+// A not-a-project failure names the way out; index anyway names the undo.
+func TestIndexStatus_NotProjectAndAnyway(t *testing.T) {
+	st := dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexFailed, IndexErr: "not a project: /home/x is the home directory"}
+	if s := indexStatus(st, "poly-lsp"); !strings.Contains(s, "/poly-lsp index-anyway on indexes it regardless") {
+		t.Errorf("no way out:\n%s", s)
+	}
+	st = dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexReady, IndexAnyway: true}
+	if s := indexStatus(st, "poly-lsp"); !strings.Contains(s, "/poly-lsp index-anyway off undoes it") {
+		t.Errorf("no undo:\n%s", s)
+	}
+	if !excludeVerb(dun.ServerCode, "index-anyway") {
+		t.Error("index-anyway is not routed")
+	}
+}

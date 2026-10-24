@@ -130,8 +130,13 @@ type ServerState struct {
 	IndexFiles   int     `json:"indexFiles,omitempty"`
 	// IndexLeftOut is what the index did not look into, and why.
 	IndexLeftOut []IndexLeftOut `json:"indexLeftOut,omitempty"`
-	Exclude      []string       `json:"exclude,omitempty"`
-	IndexBudget  string         `json:"indexBudget,omitempty"` // the project's --index-budget, "" the default
+	// IndexLeftOutBy is each reason's true count and hint.
+	IndexLeftOutBy []IndexLeftOutBy `json:"indexLeftOutBy,omitempty"`
+	// IndexAnyway: this project indexes a root that is not a project
+	// (ServerSpec.IndexAnyway).
+	IndexAnyway bool     `json:"indexAnyway,omitempty"`
+	Exclude     []string `json:"exclude,omitempty"`
+	IndexBudget string   `json:"indexBudget,omitempty"` // the project's --index-budget, "" the default
 	// Setup is the install-hint report the server sent (setupstate.go),
 	// nil from one that sends none.
 	Setup *SetupReport `json:"setup,omitempty"`
@@ -193,7 +198,7 @@ func (h *Harness) Servers() []ServerState {
 			h.indexOf(s.ID, &st)
 			st.Setup = h.setup[s.ID]
 		}
-		st.Exclude, st.IndexBudget = s.Exclude, s.IndexBudget
+		st.Exclude, st.IndexBudget, st.IndexAnyway = s.Exclude, s.IndexBudget, s.IndexAnyway
 		switch {
 		case s.Via == ViaShell:
 			st.Via, st.Namespace, st.Err, st.Tools = ViaShell, ShellNamespace(s.ID), "", 0
@@ -383,15 +388,20 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// "indexing" from its spawn until it says how the build went, and takes
 	// the project's excludes. An older one would refuse --exclude: it gets
 	// none, and no index state.
-	indexes, budgets := false, false
+	indexes, budgets, anyway := false, false, false
 	if s.URL == "" && err == nil {
-		indexes, budgets = h.speaksIndex(s, command)
+		indexes, budgets, anyway = h.speaksIndex(s, command)
 	}
 	if indexes {
 		args = append(slices.Clone(args), excludeArgs(s.Exclude)...)
 		// The project's startup budget, to a build that has one.
 		if budgets && s.IndexBudget != "" {
 			args = append(args, "--index-budget", s.IndexBudget)
+		}
+		// The project's yes to indexing a root that is not a project, to a
+		// build that knows the flag; an older one would refuse it.
+		if anyway && s.IndexAnyway {
+			args = append(args, "--index-anyway")
 		}
 	}
 	h.markIndexBuilding(s.ID, indexes)

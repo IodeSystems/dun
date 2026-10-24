@@ -145,6 +145,11 @@ type ServerSpec struct {
 	// dun when an index runs out of budget with nothing obvious to leave
 	// out.
 	IndexBudget string `json:"index_budget,omitempty"`
+	// IndexAnyway lets the server index a root that is not a project (the
+	// home directory, /, a directory of clones): passed as --index-anyway to
+	// a poly-lsp-mcp that takes it. Written at project scope when the person
+	// answers dun's question (askNotProject) or runs /poly-lsp index-anyway.
+	IndexAnyway bool `json:"index_anyway,omitempty"`
 }
 
 // OAuthSpec is how dun logs in to an OAuth- or OIDC-protected MCP server.
@@ -622,6 +627,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	}
 	if next.IndexBudget != "" {
 		out.IndexBudget = next.IndexBudget
+	}
+	if next.IndexAnyway {
+		out.IndexAnyway = true
 	}
 	return out
 }
