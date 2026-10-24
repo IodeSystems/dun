@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/iodesystems/dun"
@@ -219,4 +220,50 @@ func mcpHelp() string {
 		return strings.Join(rows, "\n")
 	}
 	return ""
+}
+
+// serverActions are the actions /mcp passes to its servers (servers.go,
+// runServerCmd); the others it handles itself.
+var serverActions = map[string]bool{"on": true, "off": true, "unset": true, "restart": true, "auto": true, "manual": true}
+
+// unknownMCPAction is the one answer to /mcp <a> when a is no action: the
+// nearest action when one is a typo away, and where the list is.
+func unknownMCPAction(a string) string {
+	best, bestD := "", 3 // a typo: at most two edits
+	for _, c := range ownCommands(false) {
+		if c.Name != "mcp" {
+			continue
+		}
+		for _, ch := range c.Choices {
+			if d := editDistance(a, ch.Value); d < bestD {
+				best, bestD = ch.Value, d
+			}
+		}
+	}
+	msg := "unknown /mcp action " + strconv.Quote(a)
+	if best != "" {
+		msg += " — did you mean /mcp " + best + "?"
+	}
+	return msg + " /mcp help lists them"
+}
+
+// editDistance is the Levenshtein distance between a and b.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }

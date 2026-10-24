@@ -363,6 +363,12 @@ func routeSlash(line string, r slashRoutes) {
 			}
 			r.server(arg(1), "unset "+arg(2))
 		default:
+			// An action no server knows is answered once, here: sent on, every
+			// server said the same usage line (USER 2026-10-24, "/mcp inf9").
+			if a := arg(0); a != "" && !serverActions[a] {
+				r.reply(unknownMCPAction(a))
+				return
+			}
 			target := allServers
 			if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
 				target = arg(1)
