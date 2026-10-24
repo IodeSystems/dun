@@ -725,10 +725,14 @@ func (m tuiModel) providerFormPanel() string {
 	}
 	// "privately": saveConfig keeps the file 0600 (only you can read it).
 	notes := []string{"saved privately to " + tildePath(configPath())}
-	if n := m.providerName(); n != "" && m.providerEdit == "" {
-		if _, ok := loadConfig().named(n); ok {
+	// Always a row, so the form does not grow as the address is typed.
+	if n := m.providerName(); m.providerEdit == "" {
+		switch _, ok := loadConfig().named(n); {
+		case n == "":
+			notes = append(notes, "the name comes from the address")
+		case ok:
 			notes = append(notes, "as "+n+" — replaces the "+n+" saved before")
-		} else {
+		default:
 			notes = append(notes, "as "+n+" · /login rename changes it")
 		}
 	}
