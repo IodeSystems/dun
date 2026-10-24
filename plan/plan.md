@@ -310,6 +310,12 @@ works (`serviceFix`: restart only when the unit runs this very binary).
 - **optional extensions:** /login rename for a template's name at save time;
   probe hosted services' reachability.
 
+### ✅ 45. Clean-Docker first-run fixes: a missing mcpshell is quiet (doctor
+--fix installs it), headless and --setup say the CLI way in, --help grouped,
+the first exit names dund, /help hides 5 debug commands — done 2026-10-24,
+see done.md (open: old 0755 dirs keep their mode; web/phone ignore `missing`;
+not run in the clean container)
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has

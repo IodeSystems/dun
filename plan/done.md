@@ -2767,3 +2767,52 @@ to move large ctx MCP to shell for ctx savings."
 - **Open:** a scripted server's tokens show "0" — help() output it costs
   per first use is not counted; not run against the real dund; personas not
   run.
+
+## ✅ 45. Clean-Docker first-run fixes: mcpshell, headless, --help, /help (USER, 2026-10-24)
+
+Found by a first run in a clean container (static binary, empty HOME, no
+mcpshell/poly-lsp/raglit/Go). Branch `worktree-agent-ad91bc32cd7380132`.
+
+- **mcpshell missing** (`missing.go`): a server command is looked for on
+  PATH, then beside dun's executable; in neither place it is a
+  `MissingError` (`ServerState.Missing`, proto too). Splash: "shell not
+  installed" in the secondary colour; one line: "shell off: mcpshell is not
+  installed: no eval tool (sandboxed calculations, data, SQL) — dun doctor
+  says how to get it". doctor: warn (not FAIL) with the step; `dun doctor
+  --fix` runs `go install github.com/iodesystems/mcpshell/cmd/mcpshell@latest`
+  when Go is on PATH, with GOBIN = dun's directory when writable.
+  **Decision:** (b)+(c), and the beside-dun lookup half of (a). Not (a)
+  bundling: dun has no release step (no goreleaser, no CI, no GitHub
+  release; "release build" = plain `go install`), and mcpshell's GitHub
+  releases (v0.4.1) carry no binary assets — nothing to bundle from or hook
+  into. go install is the trustworthy source: iodesystems module, built from
+  source, checked against sum.golang.org. Verified: go install of
+  mcpshell@latest builds (v0.4.1).
+- **headless, no provider:** `dun "task"` stops before any server/worktree/
+  session, names `dun --setup` and DUN_URL/DUN_MODEL/DUN_LLM_KEY (or
+  --url/--model/--key), exit 2 (`nologin.go`).
+- **`--setup` with no TTY:** checked first (stdin, or /dev/tty as Bubble Tea
+  opens it); says the env vars; exit 2. Wizard steps untouched.
+- **`--help`:** what dun is, how to start (dun, then /login — enter on the
+  empty prompt opens it), the env vars, then flags in five groups
+  (`flagGroups`; an ungrouped flag lands under advanced).
+- **dund note:** the first TUI exit per dun home (marker
+  `$DUN_HOME/notices/dund-background`, `onceEver`) prints that dund keeps
+  running and the stop command; the launcher's 10-minute idle exit and
+  `dun -d shutdown`. Only when dund answers. Lifecycle unchanged.
+- **/help:** `debugCommands` = perf, repaint, scrolldebug, trace, reload —
+  out of /help and the palette; footer "5 debug commands hidden — /help
+  --debug shows them". Typed in full: shown in the palette and run; a prefix
+  of one is not taken for it.
+- **perms:** sessions dirs 0700 / files 0600 (they made ~/.dun 0755 when
+  first); launcher socket chmod 0600 (it lands in /tmp when DUN_HOME is
+  long); launcher.log 0600.
+- **Verified:** unit tests per item; hermetic live runs (temp HOME/DUN_HOME,
+  ttydrive): splash, /help footer, /exit note once, doctor, headless,
+  --setup under setsid, socket and dir modes.
+- **Open:** (a) dirs an older dun made 0755 keep that mode (no chmod of an
+  existing ~/.dun). (b) the web/phone clients do not read `missing` yet (they
+  show the Err text). (c) --fix installs mcpshell only; poly-lsp-mcp and
+  raglit get the go install line. (d) the stop step says the service's
+  command when a unit is installed, even if DUN_HOME is another home.
+  (e) not run in the clean container itself; personas not run.
