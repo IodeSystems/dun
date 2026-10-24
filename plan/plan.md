@@ -245,6 +245,10 @@ blocks scroll sideways — done 2026-10-23, see done.md (open: ↑ on an empty
 composer vs Termux finger-scroll; a panel covers the newest rows on a phone;
 personas not run; light theme unseen)
 
+### ✅ 42. /mcp info (servers, cost, the shell, what scripting saves) and
+/mcp help — done 2026-10-24, see done.md (open: help() cost of a scripted
+server uncounted; not run against the real dund; personas not run)
+
 ### ✅ 41. Run-5 fixes: the foreman, one-field /mcp add, two-field /login, the
 context in counts — done 2026-10-24, see done.md (open: at 49 beside the
 foreman the splash's values and the context parts are cut at a word; at 49 the

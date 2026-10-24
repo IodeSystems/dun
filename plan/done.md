@@ -2732,3 +2732,38 @@ initialize) came 54 s after raglit's. Two causes, both fixed:
   with another PATH could still fail a command the form accepted. (e) the
   composer's restored question has its caret at the start. (f) personas not
   run; light theme unseen; not run against the real dund.
+
+## ✅ 42. /mcp info and /mcp help (USER, 2026-10-24)
+
+Owner: "/mcp info should print the status, cost of the current config and
+hint at /mcp help for more info — fold in mcpshell details and offer hints
+to move large ctx MCP to shell for ctx savings."
+
+- **Where:** cmd/dun/mcpinfo.go. Engine-side (routeSlash `info` → control
+  `mcpinfo` → ControlEvent), so the TUI and the phone get the same rows; the
+  TUI prints them as any control reply. `/mcp help` is a routeSlash reply
+  built from the command's Choices.
+- **Rows:** per server: state (splash words: running / starting Ns / did
+  not start: why / off; a scripted one "waits for the shell" when the shell
+  is off), mode (standalone / scripted / built-in), tools, tokens. Then the
+  total and its % of the window (when known); the scripted-mode line; the
+  shell's eval tokens, the hosted-sentence tokens, which servers are
+  scripted; hints; `/mcp help for more`.
+- **Numbers:** a server's tokens are the context breakdown's marginal
+  `mcp: <id>` part (what leaving its schemas out saves). A scripted server
+  has no part (mcpshell's eval description is fixed text — mcpshell
+  runtime/shell.go ToolDescription); it costs its namespace in one
+  system-prompt sentence (`dun.HostedLine`, extracted from systemFor).
+  Saving = part − (estimate of the sentence with it − without it), at the
+  engine's 4 chars/token. The shell's eval is not subtracted (already in
+  the request, or the hint says to turn the shell on).
+- **Threshold:** `dun.HeavyServerTokens` (5000), the mark /mcp tools already
+  uses for its "heavy" hint. Skipped: built-ins, servers not running, oauth
+  servers (cannot be scripted — checkOAuth).
+- **Wrap:** facts joined with no-break spaces, so a narrow screen wraps
+  between facts (cellbuf.Wrap breaks on ASCII space only); tested at 49
+  and 100.
+- **Splash:** the mcp row ends `/mcp info`.
+- **Open:** a scripted server's tokens show "0" — help() output it costs
+  per first use is not counted; not run against the real dund; personas not
+  run.
