@@ -391,6 +391,82 @@ not run in the clean container)
 - **optional extensions:** a `/poly-lsp setup` that prints the commands for
   copying.
 
+### ◐ 47. Release builds: a signed manifest, verified installs, daily updates (USER, 2026-10-24)
+
+Owner's design: a release build (a build flag) carries the manifest URL
+and a signing key; dev/source builds have no download paths at all; source
+install stays the fallback.
+
+- **Built:** `release/` (package `release`): `release_on.go`
+  (`//go:build release`: `ManifestURL` = github.com/IodeSystems/dun
+  releases/latest/download/dun-manifest.json, `go:embed` of
+  `minisign.pub` and `deps.json`) and `release_off.go` (empty). `make
+  release` adds `-X main.channel=release`; `isRelease()` needs both.
+  `internal/update`: minisign verify on crypto/ed25519 + x/crypto/blake2b
+  (new direct dep, v0.58.0; legacy and prehashed, global sig over the
+  trusted comment; checked against real minisign output from go-minisign's
+  tests); manifest `{schema, version, published, summary?, key_next?,
+  artifacts: {name: {version, files: {os_arch: {url, sha256, size}}}}}`
+  signed whole (`.minisig` beside it); installer (temp beside the target,
+  size + sha256, the one regular file out of the tar.gz — names compared,
+  never used as paths; `..`/absolute/links refused; 512 MB caps — chmod,
+  fsync, rename); `Origin` from debug/buildinfo (release = `-tags release`,
+  checkout = vcs.revision, go install = a version and no vcs); `Updater`
+  (state `$DUN_HOME/update.json`, at most daily, replay = older manifest
+  version or publication than seen, or older than this build, refused;
+  downgrade refused; installs the new dun over the running binary's file).
+  `cmd/dun/release.go`: doctor `origin` lines for dun and every tool, a
+  `build` line on a release build's updates (placeholder key → warn; last
+  error kept); `--fix` on a release build downloads a missing mcpshell or
+  poly-lsp-mcp from the pinned `release/deps.json`, else go install as
+  before; the TUI (runTUI only) runs the check from Init and, when staged,
+  asks a running coordinated dund to `Upgrade{Exe, Version}`; `/upgrade
+  off|on` → `no_updates` in config.json. `make release` + `tools/mkmanifest`
+  + `.github/workflows/release.yml` (workflow_dispatch only, a draft).
+- **Key rotation:** a manifest's `key_next` = {key line, a .minisig by the
+  manifest's signing key over that line}. A client that verifies it keeps
+  the key in update.json and trusts it from then on. `minisign.pub` may
+  hold several keys (overlap). A client offline across the whole announce
+  window cannot follow: it is told the manifest is signed by a key it does
+  not trust → install a release by hand. So: announce key_next for several
+  releases (weeks) before signing with it.
+- **Decided (assumptions, catchable):** the embedded manifest is the tools
+  only (`release/deps.json`): a binary cannot carry its own sha256, so
+  dun's entry exists only remotely. "Staged" = installed over this
+  binary's file (running processes keep theirs); dund then moves at its
+  quiet point, the TUI re-execs after the reconnect (existing
+  checkDundBuild). Network errors are silent; a failed check (signature,
+  checksum, archive, replay) is one line. Tools are not auto-updated.
+  Release versions are vX.Y.Z only (make release refuses others).
+- **Owner's steps to cut the first release:**
+  1. `minisign -G -W -p release/minisign.pub -s <offline>/dun.key`; commit
+     the public key (replaces the placeholder); keep the secret offline.
+  2. Add the repo secret `MINISIGN_SECRET_KEY` (the secret key file).
+  3. Ask mcpshell and poly-lsp-mcp to publish `<name>_<os>_<arch>.tar.gz`
+     (binary at the top) at a tag; fill `release/deps.json` with their
+     url/sha256/size per platform (Makefile comment says how).
+  4. Pin the workflow's actions to SHAs; enable it; tag vX.Y.Z; run it with
+     the tag (or `make release RELEASE_VERSION=vX.Y.Z MINISIGN_KEY=…`
+     locally and upload `dist/vX.Y.Z/*` by hand).
+- **next:** owner steps 1–4; then one live update between two published
+  releases on a box with a service dund.
+- **risks:** not run against GitHub (redirects to its CDN are followed by
+  net/http; untested); the minisign CLI is not on this box: make release's
+  signing step and `minisign -V` in the workflow are unrun (the verifier
+  is checked against real minisign signatures, not against one made here);
+  the workflow never ran; a binary in a directory the user cannot write
+  never updates (doctor shows the error from update.json); macOS
+  quarantine/Gatekeeper on a downloaded binary is untested (tar.gz over
+  net/http sets no quarantine bit, expected fine); update.json is user
+  writable, so a local attacker can add a trusted key — but such a user
+  can replace the binary anyway.
+- **blocking decisions:** key custody (who holds the secret, CI or a
+  signing box) and whether CI signs at all — the owner's.
+- **optional extensions:** tool updates from the remote manifest;
+  `dun doctor --fix` updating a go-install tool; a chain of endorsements
+  (`keys: [...]`) for clients offline across a rotation; reproducible
+  tarballs (fixed mtime/owner).
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
