@@ -104,6 +104,10 @@ func raglitDocsSink(docs Server) *mcpDocsSink {
 	}
 }
 
+// NoResources is SyncMCPDocs's line for a server with no resources: the
+// answer to /mcp refresh, and nothing to say after /mcp add.
+const NoResources = "serves no resources — nothing to index"
+
 // SyncMCPDocs copies server id's text resources into the docs index and
 // returns a line for the user.
 func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
@@ -117,7 +121,7 @@ func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("%s is not running — /mcp on %s first", id, id)
 	}
 	if _, ok := h.mgr.Capabilities(id)["resources"]; !ok {
-		return "serves no resources — nothing to index", nil
+		return NoResources, nil
 	}
 	// The mcp.docs extension's index: through its CLI fallback, raglit's
 	// need not be running.

@@ -231,13 +231,32 @@ func applyProviderOp(op providerOp) (string, error) {
 	return msg, nil
 }
 
+// What a first run is missing, said as the next step. A turn that failed on
+// one of these is reported with the bare text (emitTurnError): the "agent:
+// chat:" chain it arrives in is the code's path, not the user's.
+var (
+	errNoLogin = errors.New("not logged in — /login to connect to an AI service")
+	errNoModel = errors.New("no model chosen — /model to pick one")
+)
+
+// setupMissing returns the setup error (errNoLogin, errNoModel) err wraps,
+// or nil.
+func setupMissing(err error) error {
+	for _, e := range []error{errNoLogin, errNoModel} {
+		if errors.Is(err, e) {
+			return e
+		}
+	}
+	return nil
+}
+
 // providerMissing says why the engine cannot talk to a model, or nil.
 func providerMissing(url, model string) error {
 	switch {
 	case strings.TrimSpace(url) == "":
-		return errors.New("not logged in to a provider — /login <name> (an OpenAI-compatible URL, bearer optional)")
+		return errNoLogin
 	case strings.TrimSpace(model) == "":
-		return errors.New("no model chosen — /model")
+		return errNoModel
 	}
 	return nil
 }

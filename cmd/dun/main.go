@@ -1813,6 +1813,9 @@ func emitInterrupted(h *dun.Harness, em *emitter, res agent.TurnResult) {
 // already drifted apart once.
 func emitTurnError(sessionCtx context.Context, h *dun.Harness, em *emitter, err error) {
 	h.RecordTurnError(err)
+	if e := setupMissing(err); e != nil {
+		err = e
+	}
 	em.emit(&proto.Error{Error: err.Error(), Fatal: sessionCtx.Err() != nil})
 }
 

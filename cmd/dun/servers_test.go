@@ -50,7 +50,7 @@ func TestServerHint_NamesWhatIsOffAndHow(t *testing.T) {
 	if strings.Contains(hint, dun.ServerShell) {
 		t.Error("a running server should not be in the hint")
 	}
-	if !strings.Contains(hint, "/raglit on") || !strings.Contains(hint, "/raglit auto") {
+	if !strings.Contains(hint, "off: raglit — /raglit on") || !strings.Contains(hint, "auto: every session") {
 		t.Errorf("docs hint should name both commands: %q", hint)
 	}
 	if !strings.Contains(hint, "bad flag") {

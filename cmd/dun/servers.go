@@ -222,14 +222,20 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 			return spec.ID + ": saved to " + path + ", but did not start — " + oneLine(err.Error()) +
 				"\nfix it and /mcp add again (same id replaces), or /mcp remove " + spec.ID
 		}
-		msg := spec.ID + ": saved to " + path + " · " + runningSummary(h, spec.ID)
+		// The news first — it runs, with this many tools. Where it was saved
+		// the form said before it was sent.
+		msg := spec.ID + " · " + runningSummary(h, spec.ID)
 		if elapsed := time.Since(t0); elapsed > time.Second {
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
 		if st, _ := stateOf(h, spec.ID); st.Via == dun.ViaShell {
 			return msg + "\n" + shellPlacementNote
 		}
-		return msg + "\n" + mcpDocsLine(ctx, h, spec.ID)
+		// No docs to index is nothing to say here (/mcp refresh still says it).
+		if docs := mcpDocsLine(ctx, h, spec.ID); docs != dun.NoResources {
+			msg += "\n" + docs
+		}
+		return msg
 	case "mode", "via", "move":
 		return runViaCmd(ctx, h, strings.Fields(arg))
 	case "refresh":
@@ -486,7 +492,7 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	var b strings.Builder
 	b.WriteString(label + ": ")
 	if st.Running {
-		fmt.Fprintf(&b, "running · %d tools", st.Tools)
+		b.WriteString("running · " + plural(st.Tools, "tool"))
 	} else {
 		b.WriteString("stopped")
 	}
@@ -534,7 +540,7 @@ func runningSummary(h *dun.Harness, id string) string {
 	if !ok || !st.Running {
 		return "not running"
 	}
-	return fmt.Sprintf("running · %d tools", st.Tools)
+	return "running · " + plural(st.Tools, "tool")
 }
 
 // hostedSummary is a shell-placed server's state: where the model finds it,
@@ -568,8 +574,11 @@ func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
 // plus the docs server's ingest summary when it autostarted.
 // Shown once, at ready: an agent that silently lacks code navigation is the
 // kind of thing a user only discovers by watching it flail with grep.
+//
+// The servers that are off with a switch share one line, said once: they are
+// optional extras, and two copies of the same sentence was noise.
 func serverHint(states []dun.ServerState) string {
-	var lines []string
+	var lines, off, ons []string
 	for _, st := range states {
 		if st.Running {
 			// An autostarted docs server says what it indexed and skipped.
@@ -588,13 +597,18 @@ func serverHint(states []dun.ServerState) string {
 		case st.Err != "":
 			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, oneLine(st.Err)))
 		case slashOf(st) != "":
-			cmd := slashOf(st)
-			lines = append(lines, fmt.Sprintf("%s off — /%s on to start it, /%s auto to start it every session", st.ID, cmd, cmd))
+			off, ons = append(off, st.ID), append(ons, "/"+slashOf(st)+" on")
 		default:
 			lines = append(lines, st.ID+" off")
 		}
 	}
 	sort.Strings(lines)
+	if len(off) > 0 {
+		sort.Strings(off)
+		sort.Strings(ons)
+		lines = append(lines, fmt.Sprintf("off: %s — %s (auto: every session)",
+			strings.Join(off, ", "), strings.Join(ons, ", ")))
+	}
 	return strings.Join(lines, "\n")
 }
 

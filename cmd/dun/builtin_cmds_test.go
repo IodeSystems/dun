@@ -75,7 +75,7 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 		step("", id+": stopped", "switches: global off, project unset, session unset", "/"+id+" on to start it this session")
 		step("on", id)
 		running(true)
-		step("status", id+": running · 1 tools", "session on", "/"+id+" off to stop it this session")
+		step("status", id+": running · 1 tool", "session on", "/"+id+" off to stop it this session")
 		step("off", id)
 		running(false)
 		step("auto", id)
