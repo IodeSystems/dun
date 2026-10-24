@@ -226,6 +226,11 @@ done.md (its open decisions were settled by the owner in 36)
 done 2026-10-23, see done.md (open: personas not re-run on the new walk;
 tool-call rendering reads as internal; light theme unseen)
 
+### ✅ 37. Onboarding fixes from run 3 (live splash, tool calls in words, no
+bounce on shrink) — done 2026-10-23, see done.md (open: personas not re-run;
+a model pick still replaces the conversation; the result preview of a tool
+call is dim 240)
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has

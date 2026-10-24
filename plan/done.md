@@ -2360,3 +2360,79 @@ region goes instead of being ported.
   heavy rule is 2 px against 1 px in the PNG renderer at 10 px cells.
 - **Not verified:** a real terminal, light theme, dund-attached reuse of an
   idle session (should replay history → no splash).
+
+## ✅ 37. Onboarding fixes from run 3 of the walk (USER, 2026-10-23)
+
+- **Owner's standing rule — no bounce** (and the clarification): on a
+  change that adds rows the view keeps its top row (pinned follows the
+  bottom); on a change that takes rows away the view keeps its top row and
+  blank rows fill in below, only to the bottom of the view as it was, so
+  the furthest scroll is where the view is (`holdShrink`, refresh). A pane
+  that grows because a panel/form/palette closed keeps its top row
+  (`holdTop`, generalized from askpark's holdConvo); a terminal resize (the
+  phone keyboard) still anchors the bottom. Holds end when content reaches
+  them, at a new width, and at reset/restart/new session/repaint
+  (`dropHold`, which also skips the next refresh's shrink check).
+- **Splash (1):** folder, model, servers, extras — always 4 rows, each cut
+  to the width, drawn from live state at every refresh (`liveSplash`); a
+  server event refreshes it. No build, wordmark or tool count (those are in
+  `/status`: build, folder, model, tools, servers, extras — a snapshot).
+- **Extras (2):** "code navigation (poly-lsp) and project search (raglit)
+  are off · /help poly-lsp for more" (on ones say "is on"; "for more"
+  drops first when narrow). `/help <command>`: description, the command's
+  long help (new `proto.CommandSpec.Help` / manifest `slash.help`), usage
+  and choices. raglit / poly-lsp manifests: plain description + help with
+  on / auto / off / manual.
+- **Tool calls (3):** `toolLabel` (server__tool → "server · tool words",
+  `_` → space) in callText, callFull, the group line and the summary. A
+  one-call run is one line (`✓ notes · project notes  → …`), no summary,
+  no `()`, no `×1`; 2+ steps keep the ⚙ header, `×N` only for N>1. The
+  call stays in the turn, expandable (enter → pager) as before. Model-
+  facing names, logs, inspector and copy text keep the real name.
+- **/login (4):** address first, then name (filled in from the host as the
+  address is typed — api.example.com → example, IP/localhost → local —
+  until the name is edited), then key. Re-login steps over the fixed name.
+- **Smaller (5–10):** `appendNotice` — blank row above and below every ✓
+  notice (and the /mcp add "adding…" line it replaces); /mcp add form has
+  no presets line, presets in `/help mcp`; both forms end
+  "the same name again replaces it" (`sameNameNote`); not logged in → the
+  status line is "enter send · / commands · ctrl+c quit"; logged in →
+  "ready · enter send · alt+enter newline · tab scroll · ctrl+↑/↓ history ·
+  ctrl+c quit"; the restored question: status line "your earlier question
+  · enter asks it · or change it first" while unchanged (`restoredMsg`);
+  orange only for attention — `replyLine` (engine replies, /mcp tools,
+  server messages) is plain unless it says failed/error/usage…; kept-
+  question line, /mouse, /trace dim; /mcp, /docker and the other "bare"
+  descriptions in plain words.
+- **Owner decisions folded in:** process visibility — calls stay in the
+  turn, one readable line each (ives.md: never recommend hiding or
+  demoting how an answer was produced). Question band: text in the
+  answer's foreground (`answerFG` = glamour dark document colour 252,
+  8.56:1 on 236), fill capped at 100 columns (`bandCap`); khaki 144 gone.
+- **Tests:** new cmd/dun/bounce_test.go (live splash ×3 scroll positions,
+  block close at bottom + scrolled up + scroll-back bound + refill, one
+  tool call ×2, notice while scrolled up, form close), onboarding4_test.go
+  (nameFromURL, login prefill, form words, /help, plain descriptions,
+  not-logged-in once, restored question, notice spacing, replyLine, band
+  colour + fill at 48/100/180). Both mechanisms were checked to fail with
+  their fix disabled. Old strings updated: splash_test (rows, /status),
+  persist_test (tools in /status), blankrow_test (one call one line),
+  evalrender_test / tui_test (generic call form, "node query"),
+  toolrun_test (summary, group line), model_test / onboarding_test (field
+  order).
+- **Walk:** step 05 types the address, waits for the filled-in name
+  ("local"), enter, key. Run dir:
+  `tmp/ux-run-onboarding-20261023-215018` (worktree
+  agent-a130b1c68680f2037). Every PNG looked at; consecutive-frame row diff
+  (scratchpad r4/shift.py): no row moved; rows that changed changed in
+  place, except 05→06 where the model pick restarts the engine and the
+  conversation is replaced (pre-existing).
+- **Open / for the owner:** the walk's service is now named "local" (the
+  prefill) — keep, or have the walk type "work"? A model pick still
+  replaces the conversation (the question leaves the log for the
+  composer). A one-call run that gets a second step grows from 1 row to 3
+  (the header appears above the first call: growth, the call line moves
+  down one row). The tool-result preview is dim 240 (renderers.go, not
+  changed). Renderer previews (background job, queued, recap) still use
+  orange. The header still repeats the model.
+- **Not verified:** a real terminal, light theme, personas on this run.
