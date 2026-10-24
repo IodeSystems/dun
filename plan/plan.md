@@ -316,39 +316,47 @@ the first exit names dund, /help hides 5 debug commands — done 2026-10-24,
 see done.md (open: old 0755 dirs keep their mode; web/phone ignore `missing`;
 not run in the clean container)
 
-### ◐ 46. poly-lsp indexes in the background; the file cap excludes and retries (USER, 2026-10-24)
+### ◐ 46. poly-lsp indexes in the background; out of budget, dun excludes or raises it (USER, 2026-10-24)
 
-- **Built:** poly-lsp-mcp a019fc7/43e5e4e/4dc0cf5 answer initialize at once
-  and report the build as notifications/message logger `poly-lsp-mcp/index`
-  (ready/failed, `index.heaviest`, `limit` at the hard cap
-  `--index-max-files` 100,000, `large` over `--index-warn-files` 10,000).
+- **Built:** poly-lsp-mcp (a019fc7, 43e5e4e; startup budget fbdf89b)
+  answers initialize at once and reports the build as
+  notifications/message logger `poly-lsp-mcp/index` (ready/failed,
+  `index.heaviest` over every file; out of budget: `budget` "30000ms",
+  `read` files read within it, a remedy naming a budget that fits).
   `indexstate.go`: any `*/index` report sets `ServerState.Index`
   (building/ready/failed) instead of reaching the model; the splash, the
-  status line and /mcp say "poly-lsp indexing 12s". failed+limit →
+  status line and /mcp say "poly-lsp indexing 12s". failed+budget →
   `chooseExcludes` (nestedCheckouts > 0, or share > 0.5 with a generated
-  name; fewest that get under the cap by heaviest's counts; none if they
-  cannot) → saved as `ServerSpec.Exclude` in the project's
-  `dun.local.json` ($DUN_HOME/projects/<id>/) → restart with `--exclude`,
-  once per session; a second failure or nothing obvious is reported with
-  the post-mortem and remedy. ready+large → one quiet line with heaviest
-  and `/poly-lsp exclude <dir>` offered, nothing excluded. ready with a
-  nested checkout → one quiet line. `/poly-lsp exclude|include <dir>`
-  (cmd/dun/indexcmd.go) is the redo/undo. `dun doctor` names the
-  poly-lsp-mcp the engines run (the service's PATH when it sets one) and
-  warns on an older build.
+  name; fewest that bring the files to `read` or under; none if they
+  cannot) → saved as `ServerSpec.Exclude` (JSON `exclude`) → restart with
+  `--exclude`. Nothing obvious → the remedy's budget (else spent × counted
+  / read × 1.2, whole seconds) saved as `ServerSpec.IndexBudget` (JSON
+  `index_budget`) → restart with `--index-budget`. Both in the project's
+  `dun.local.json` ($DUN_HOME/projects/<id>/); once per session; a second
+  failure is reported with the post-mortem and remedy. ready with a nested
+  checkout → one quiet line. `/poly-lsp exclude|include <dir>` and
+  `/poly-lsp budget <Nms|Nops|0|default>` (cmd/dun/indexcmd.go) are the
+  redo/undo. `dun doctor` names the poly-lsp-mcp the engines run (the
+  service's PATH when it sets one) and warns on an older or interim build.
+  The 4dc0cf5 `large` warning is gone with poly-lsp's.
 - **Decided (assumption, catchable):** "building" comes from probing
-  `poly-lsp-mcp mcp --help` for `--index-max-files` (cached by path, size,
-  mtime; LSP_REBUILD_DONE=1 so a dev build does not self-update), because
-  agentkit v0.10.1's mcpmgr drops the initialize result's `index` field.
-  An older binary gets no `--exclude` (it would refuse the flag) and no
-  index state.
+  `poly-lsp-mcp mcp --help` (cached by path, size, mtime;
+  LSP_REBUILD_DONE=1 so a dev build does not self-update), because agentkit
+  v0.10.1's mcpmgr drops the initialize result's `index` field.
+  `--index-budget` → the protocol and the budget flag; only
+  `--index-max-files` → the interim build: state and `--exclude`, no budget
+  flag, a `limit` failure handled like a budget one minus the raise; neither
+  → an older binary: no flags, no index state.
 - **next:** run against the real dun tree (48 worktrees) with a new
   poly-lsp-mcp under dund; check the message wording live.
 - **risks:** not run against the real poly-lsp or dund; a probe costs one
   process per new binary; a dev poly-lsp that self-updates at spawn is
-  probed as the old binary until its first report (the report then sets
-  the state, and `--exclude` is passed from the next spawn); excludes in
-  a linked worktree's session land in that worktree's overlay.
+  probed as the old binary until its first report (the state then
+  follows; `--exclude` from the next spawn, `--index-budget` not until the
+  binary is probed anew); a raised wall-clock budget is machine-specific
+  and saved per project, not per machine (dun.local.json is machine state,
+  so this holds); excludes in a linked worktree's session land in that
+  worktree's overlay.
 - **blocking decisions:** none.
 - **optional extensions:** agentkit exposing the initialize result (drop
   the probe); completion of directory names after `/poly-lsp exclude`.
