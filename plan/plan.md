@@ -361,6 +361,39 @@ not run in the clean container)
 - **optional extensions:** agentkit exposing the initialize result (drop
   the probe); completion of directory names after `/poly-lsp exclude`.
 
+### ◐ 50. poly-lsp's richer index report: leftOutBy, and "not a project" (USER, 2026-10-24)
+
+poly-lsp (76c7e0c and the edge-case commits) reports more. Source read:
+`mcp/async_init.go` (the failed notification carries `reason` "not a
+project", `repos` ≤20 relative, `reposTotal`, `remedy`), `symbols/cost.go`
+(`leftOutBy` [{reason, count, hint}]; `leftOut` ≤20 per reason).
+
+- **Built** (`indexstate.go`, `indexanyway.go`, `cmd/dun/indexcmd.go`):
+  - `/poly-lsp` "left out of the index:" is one line per `leftOutBy` reason —
+    `  minified: 3 files — <hint> · e.g. a, b, c, …` (≤3 examples from
+    `leftOut`); no `leftOutBy` → the old grouping.
+  - Not a project: dun asks ONCE per session through `Config.Ask` (the
+    ask_user picker/`ask` event, not a new UI): "dun is running in ~ — not a
+    project (12 git repos inside). Index all of it anyway, or start dun in one
+    of them? (the code tools need a project)" + a hint line with ≤5
+    `cd <repo> && dun`. Options "index anyway" | "not now" (recommended).
+    Yes → `ServerSpec.IndexAnyway` (`index_anyway`, project scope like
+    exclude), restart with `--index-anyway`. No → server stays failed, no
+    nagging. Undo/redo: `/poly-lsp index-anyway on|off`.
+  - Probe gate: `IndexSupport.Anyway` from `mcp --help` listing
+    `--index-anyway`. Without it (or no `Config.Ask`): one line, no
+    question, no flag passed, `on` refused.
+- **next:** none.
+- **risks:** the question shares `in.answers` with the model's ask_user, so a
+  model question open at the same moment gets the answer meant for the
+  other; the "not now" is per session (asked again next session by design);
+  index-anyway of a home directory can run into the index budget, which the
+  budget retry (item 46) then handles; the picker with a 2-line question
+  was not looked at in a real terminal.
+- **blocking decisions:** none.
+- **optional extensions:** persist "not now" per directory; show the
+  not-a-project state on the splash.
+
 ### ◐ 49. Supported tool versions; doctor installs and updates by origin (USER, 2026-10-24)
 
 Owner: "dun doctor should, if it has a latest release index, do that,
