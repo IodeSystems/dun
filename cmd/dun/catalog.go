@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -42,31 +43,69 @@ func (m *tuiModel) noteCatalog(ev evMsg) {
 	m.skills, m.prompts = c.Skills, c.Prompts
 }
 
-// allSlash is the static commands plus one per MCP prompt.
-func (m tuiModel) allSlash() []slashCmd {
-	if len(m.prompts) == 0 && len(m.engineCmds) == 0 {
-		return slashCommands
+// Commands are listed by group, in this order: a new user's first (setting
+// up: logging in, the model, servers, help), dun's own maintenance
+// last. Within a group, the order they are defined in. An
+// engine command carries its group (proto.CommandSpec.Group); the TUI's own
+// are in tuiGroup. MCP prompts are "prompts".
+var groupOrder = []string{"setup", "tools", "session", "git", "memory", "prompts", "client", "maintenance"}
+
+var tuiGroup = map[string]string{
+	"login": "setup", "model": "setup", "help": "setup", "config": "setup", "logout": "setup",
+	"skill":   "tools",
+	"context": "session", "resume": "session", "new": "session", "persist": "session", "exit": "session",
+	"reconnect": "client", "mouse": "client",
+	"reload": "maintenance", "upgrade": "maintenance", "perf": "maintenance", "repaint": "maintenance",
+	"scrolldebug": "maintenance", "trace": "maintenance",
+}
+
+func groupRank(g string) int {
+	if i := slices.Index(groupOrder, g); i >= 0 {
+		return i
 	}
-	out := append([]slashCmd(nil), slashCommands...)
+	return slices.Index(groupOrder, "client") // an unknown group: before maintenance
+}
+
+// allSlash is the engine's commands, the TUI's, and one per MCP prompt, in
+// group order (within a group, the engine's first).
+func (m tuiModel) allSlash() []slashCmd {
+	type ranked struct {
+		c    slashCmd
+		rank int
+	}
+	var rs []ranked
 	for _, c := range m.engineCmds {
-		out = append(out, slashCmd{c.name, c.usage, c.desc, engineSlash(c.name)})
+		rs = append(rs, ranked{slashCmd{c.name, c.usage, c.desc, engineSlash(c.name)}, groupRank(c.group)})
+	}
+	for _, c := range slashCommands {
+		rs = append(rs, ranked{c, groupRank(tuiGroup[c.name])})
 	}
 	for _, p := range m.prompts {
-		var args []string
-		for _, a := range p.Arguments {
-			if a.Required {
-				args = append(args, "<"+a.Name+">")
-			} else {
-				args = append(args, "["+a.Name+"]")
-			}
-		}
-		desc := p.Description
-		if desc == "" {
-			desc = "prompt from MCP server " + p.Server
-		}
-		out = append(out, slashCmd{p.Server + ":" + p.Name, strings.Join(args, " "), desc, promptSlash(p)})
+		rs = append(rs, ranked{m.promptCmd(p), groupRank("prompts")})
+	}
+	slices.SortStableFunc(rs, func(a, b ranked) int { return a.rank - b.rank })
+	out := make([]slashCmd, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, r.c)
 	}
 	return out
+}
+
+// promptCmd is an MCP prompt as a slash command.
+func (m tuiModel) promptCmd(p catalogPrompt) slashCmd {
+	var args []string
+	for _, a := range p.Arguments {
+		if a.Required {
+			args = append(args, "<"+a.Name+">")
+		} else {
+			args = append(args, "["+a.Name+"]")
+		}
+	}
+	desc := p.Description
+	if desc == "" {
+		desc = "prompt from MCP server " + p.Server
+	}
+	return slashCmd{p.Server + ":" + p.Name, strings.Join(args, " "), desc, promptSlash(p)}
 }
 
 // promptSlash asks the engine to render the prompt; the text comes back as
@@ -212,6 +251,7 @@ func skillMatches(query string, ms []argChoice, total, w int) string {
 // TUI shows and completes it, and the engine carries it out.
 type engineCmd struct {
 	name, usage, desc string
+	group             string         // where it is listed (groupOrder)
 	choices           []engineChoice // the first argument's values
 }
 
@@ -223,7 +263,7 @@ func engineCmdsFromEvent(ev evMsg) []engineCmd {
 	for _, it := range items {
 		c, _ := it.(map[string]any)
 		if n := str(c["name"]); n != "" {
-			ec := engineCmd{name: n, usage: str(c["usage"]), desc: str(c["description"])}
+			ec := engineCmd{name: n, usage: str(c["usage"]), desc: str(c["description"]), group: str(c["group"])}
 			chs, _ := c["choices"].([]any)
 			for _, ch := range chs {
 				if cm, ok := ch.(map[string]any); ok && str(cm["value"]) != "" {

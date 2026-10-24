@@ -41,7 +41,7 @@ func commandsEvent(h *dun.Harness) *proto.Commands {
 }
 
 // commandList builds the list from the state it shows: the extensions'
-// slash commands (the bundled ones when exts is empty), then dun's own.
+// slash commands (the bundled ones when exts is empty), after dun's own.
 func commandList(servers []dun.ServerState, docker bool, exts ...dun.Extension) *proto.Commands {
 	if len(exts) == 0 {
 		exts = dun.BundledExtensions()
@@ -71,7 +71,7 @@ func commandList(servers []dun.ServerState, docker bool, exts ...dun.Extension) 
 		state, detail := serverState(e.ID)
 		items = append(items, extCommand(e, state, detail))
 	}
-	return &proto.Commands{Items: append(items, ownCommands(docker)...)}
+	return &proto.Commands{Items: append(ownCommands(docker), items...)}
 }
 
 // srvActions are the server switch's actions, as an extension's slash
@@ -133,9 +133,9 @@ func extOwnCommands(e dun.Extension) []string {
 // ownCommands are dun's own engine commands, which no extension's slash
 // command may shadow.
 func ownCommands(docker bool) []proto.CommandSpec {
+	// In the order a client lists them within a group: /mcp, which a new
+	// user adds a server with, before /ext, which explains extensions.
 	return []proto.CommandSpec{
-		{Name: "ext", Group: "tools",
-			Description: "extensions: where each comes from (bundled, user, project), its server, slash command, roles and hooks, and manifests that did not load"},
 		{Name: "mcp", Usage: "[add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | mode <id> standalone|scripted|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
 			Choices: choices("add", "add a server: a form — a preset, or an id and a URL or a local command",
 				"on", "turn a server on: this session, or --project / --global", "off", "turn a server off: this session, or --project / --global",
@@ -145,6 +145,8 @@ func ownCommands(docker bool) []proto.CommandSpec {
 				"tools", "what each server's tools cost; with an id, list them and turn some off",
 				"login", "log in to an oauth server in the browser", "logout", "delete (and revoke) an oauth server's token"),
 			Description: "MCP servers: bare shows the switch table (global · project · session · via); add opens a form"},
+		{Name: "ext", Group: "tools",
+			Description: "extensions: where each comes from (bundled, user, project), its server, slash command, roles and hooks, and manifests that did not load"},
 		{Name: "docker", Usage: "[on|off|status]", Group: "tools", Choices: choices("on", "exec in Docker", "off", "exec on the host", "status", ""),
 			State: onOff(docker), Description: "exec backend: on (Docker), off (host), bare shows status"},
 		{Name: "worktree", Usage: "[status|new|commit]", Group: "git", Choices: choices("status", "", "new", "isolate in a new worktree", "commit", "write the message and ask"),
