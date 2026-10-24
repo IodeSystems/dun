@@ -361,6 +361,63 @@ not run in the clean container)
 - **optional extensions:** agentkit exposing the initialize result (drop
   the probe); completion of directory names after `/poly-lsp exclude`.
 
+### ◐ 51. raglit as pleasant to set up as poly-lsp: its setup report, /raglit setup, doctor (USER, 2026-10-24)
+
+Owner: raglit useful with nothing configured (keyword search), each model
+role optional with what it adds and needs. raglit side read from its local
+main 29b52d4..5d24299 (NOT pushed): `cmd/raglit/setupnotify.go`,
+`doctorreport.go`, `settings.go`.
+
+- **Built:**
+  - `ragsetup.go`: "raglit/setup" is a `SetupReport` (capabilities, roles,
+    extractors, extractorsSeenBy beside poly-lsp's languages) on
+    `ServerState.Setup`. One quiet line per session only when semantic
+    search or scanned pages is off and dun has a provider (a logged-out
+    dun's model says `Providerless`): "raglit: semantic search is off —
+    /raglit setup picks an embedding model from your providers" (both:
+    "… semantic search and scanned pages and photos are off — /raglit setup
+    picks the models from your providers"). Extractors never in the
+    conversation. Bare /raglit: `CapabilityTable` (on/off with via or
+    needs+how, raglit's "PUT /api/settings/models" how → "/raglit setup";
+    roles with model / "none → X's model"; programs found/missing + install
+    cmd). /mcp info raglit row: "· semantic search off".
+  - `cmd/dun/ragsetup.go`: /raglit setup (TUI; another client is told it
+    is a TUI form). `raglit doctor --json` → GET /api/settings/models on
+    its `daemon`, else `$RAGLIT_ROOT|~/.raglit/config.json` (the shared
+    daemon's, which dun's `raglit serve` talks to). Screens embed,
+    summaries (identity), vision, segment, audio: pickList over /model's
+    providers' models (modelKind labels; the role's kind first), "keep
+    <current>", "none — off|use X's model"; then a summary, enter saves.
+    New raglit provider per dun provider (reused when raglit has its
+    address), key by `api_key_file` = `$DUN_HOME/keys/<name>.key` (0600,
+    dir 0700). PUT sends every provider and all five roles; no daemon →
+    config.json patched in place (other keys and inline keys kept), 0600.
+    Then raglit is asked again: "on now: … · still off: …".
+  - doctor: `raglit doctor --json` (8s; skipped without --json): each
+    capability off ok + how; each missing program a line (warn unless
+    optional) + install cmd; the update block (`addToolUpdate`, shared
+    with poly-lsp). A go-install raglit's origin line says the web UI is a
+    placeholder (node builds the real one; release tarballs have it).
+- **Decided (assumptions, catchable):** never `api_key_env` — the daemon
+  runs under systemd or was auto-started by another session, so a
+  shell's variable is not reliably visible; a 0600 file is. No-daemon
+  writes the daemon root's config, not doctor's `home` (./.raglit,
+  ~/local/raglit), because dun uses the shared daemon. The engine's
+  report is from raglit serve's start: after a save, /raglit's table is
+  stale until /raglit restart (said in the save's line).
+- **next:** when raglit 5d24299 is pushed, add it to `release/supported.go`
+  (the TODO there names the entry).
+- **risks:** not run against a real raglit daemon (httptest and a shell
+  fake only); a daemon with auth on refuses (403) — dun sends no admin
+  token and says to use the web UI; `doctor --json` capability names are a
+  contract (CapSemantic, CapScans; a rename drops the line, not the table);
+  the panels not looked at in a real terminal at 48 columns.
+- **blocking decisions:** none.
+- **optional extensions:** GET reembed-impact before changing a set embed
+  model (now a static "re-embeds every index" line); refresh the engine's
+  report after a save without a restart; the admin token for an auth'd
+  daemon.
+
 ### ◐ 50. poly-lsp's richer index report: leftOutBy, and "not a project" (USER, 2026-10-24)
 
 poly-lsp (76c7e0c and the edge-case commits) reports more. Source read:
@@ -428,7 +485,7 @@ should note if there are updated releases (similar practice)."
   download goes); elsewhere → "remove <p>, then --fix". dun's line and
   poly-lsp's relayed line can both show (dun's tested version vs poly-lsp's
   latest); --fix runs only dun's, never poly-lsp's `how`. raglit is not in
-  the table (opt-in, needs an embedder).
+  the table yet (item 51: its 5d24299 is not pushed; TODO in supported.go).
 - **next:** publish tags for mcpshell/poly-lsp and move the table to them;
   fill `deps.json` from their releases before the first `make release`.
 - **risks:** go install into GOBIN=<tool dir> not run against the real
