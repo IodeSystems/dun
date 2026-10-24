@@ -292,3 +292,34 @@ func TestNoBounce_FormClosingKeepsTheTopRow(t *testing.T) {
 		t.Errorf("blank rows past the view: max %d, view at %d", got, yoff)
 	}
 }
+
+// On a phone (48×24) typing "/mcp add" opens the palette (the pane shrinks,
+// the view follows the bottom), narrows it (the pane grows and holds blank
+// rows at the bottom), then enter opens the form (the pane shrinks again).
+// That last shrink gives up the blank rows: the top row stays. Anchoring
+// the bottom there pushed the text out of the view and left the pane blank.
+func TestNoBounce_PhoneFormAfterPaletteKeepsTheText(t *testing.T) {
+	v := newVtui(48, 24)
+	v.event(map[string]any{"type": "session", "id": "s1", "resumed": float64(0)})
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": []any{
+		map[string]any{"id": "shell", "running": true, "tools": float64(1)},
+	}})
+	v.event(map[string]any{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
+	v.send("Can you help me with this project?")
+	v.event(map[string]any{"type": "token", "text": "This project is a small command-line tool. The README says it prints a greeting, and main.go holds the whole program. I can read files, run commands in an isolated copy of the project, and use the tools you add. What would you like to change first?"})
+	v.event(map[string]any{"type": "done"})
+	for _, r := range "/mcp add" {
+		v.m = typeStr(v.m, string(r))
+	}
+	yoff, top := v.m.vp.YOffset, shown(v)[0]
+	v.m = key(v.m, kEnter)
+	if !v.m.mcpForm {
+		t.Fatal("the /mcp add form did not open")
+	}
+	if v.m.vp.YOffset != yoff || shown(v)[0] != top {
+		t.Errorf("opening the form moved the view: offset %d -> %d, top %q -> %q", yoff, v.m.vp.YOffset, top, shown(v)[0])
+	}
+	if !strings.Contains(strings.Join(shown(v), "\n"), "change first?") {
+		t.Errorf("the answer left the view:\n%s", strings.Join(shown(v), "\n"))
+	}
+}

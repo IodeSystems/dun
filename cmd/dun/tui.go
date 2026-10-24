@@ -876,8 +876,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// (holdTop): the rows on screen stay where they are and blank
 				// rows take the new space at the bottom until content fills
 				// it. A terminal resize (the keyboard) keeps the bottom.
+				//
+				// A pane that SHRINKS while it holds blank rows at the bottom
+				// (a palette narrowed, then a form opened) gives up those
+				// blank rows first: the top row stays and the hold is cut to
+				// the new bottom of the view. Anchoring the bottom there
+				// pushed the text up and out of the view and left the pane
+				// blank (48×24 walk, 2026-10-23).
 				if got > t.vp.Height && t.vp.YOffset > 0 && !selMode && !resized {
 					t.holdTop(got)
+				} else if got < t.vp.Height && t.convoHold > 0 && !selMode && !resized {
+					yoff := t.vp.YOffset
+					t.convoHold = yoff + got
+					t.vp.setHeight(got)
+					t.refresh()
+					t.vp.SetYOffset(yoff)
 				} else if !t.scrollPinned && !selMode {
 					bottom := t.vp.YOffset + t.vp.Height
 					t.vp.setHeight(got)
