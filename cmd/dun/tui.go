@@ -291,6 +291,9 @@ type convoEntry struct {
 	// width changes, the way userText already does for user messages. Empty
 	// for blocks that are not rendered markdown.
 	mdSource string
+	// wide is the answer's sideways scroll, when a code block or table in it
+	// is wider than the pane (wide.go). nil until one is.
+	wide *wideState
 
 	// Wrapped render, cached. A finalized block's text never changes, but
 	// refresh() runs once per STREAMED TOKEN, so re-wrapping the whole
@@ -913,6 +916,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.focus != focusConvo && t.sel >= 0 && t.sel < len(t.convo) && t.convo[t.sel].box != nil && t.convo[t.sel].box.inside {
 			leaveBox(t.convo[t.sel].box)
 		}
+		if t.focus != focusConvo && t.sel >= 0 && t.sel < len(t.convo) && t.convo[t.sel].wide != nil {
+			t.convo[t.sel].wide.inside = false
+		}
 		// The pulse clock runs while a band is on screen, and only then.
 		if t.pulseWanted() && !t.pulsePending {
 			t.pulsePending = true
@@ -1072,8 +1078,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		}
-		// Descended into a box, the keys scroll it (box.go).
-		if m.insideKeys(msg.String()) {
+		// Descended into a box, the keys scroll it (box.go); into an answer's
+		// wide blocks, they scroll them sideways (wide.go).
+		if m.insideKeys(msg.String()) || m.insideWideKeys(msg.String()) {
 			m.refresh()
 			return m, nil
 		}
@@ -3325,6 +3332,11 @@ func (m tuiModel) drawView() string {
 			switch {
 			case m.insideBox() != nil:
 				status = stDim.Render("inside  ·  ↑/↓ pgup/pgdn g/G scroll · ← leave · enter open")
+			case m.insideWide() != nil:
+				w := m.insideWide()
+				status = stDim.Render(fmt.Sprintf("sideways  ·  ←/→ scroll · home/end edge · esc leave · col %d of %d", w.off+1, w.max+m.vp.Width-wideIndicatorRoom))
+			case m.selWide() != nil && m.selWide().max > 0:
+				status = stDim.Render("convo  ·  ↑/↓ select · → scroll sideways · y copy · / search · tab input")
 			case m.selBox() != nil:
 				status = stDim.Render("convo  ·  ↑/↓ select · → scroll inside · enter open · y copy · / search · tab input")
 			default:
@@ -3658,6 +3670,12 @@ func (m *tuiModel) descendSel() bool {
 		e.box.inside = true
 		return true
 	}
+	// An answer with a block cut at the edge: → descends into it, to
+	// scroll it sideways (wide.go).
+	if e.wide != nil && e.wide.max > 0 {
+		e.wide.inside = true
+		return true
+	}
 	if d := e.docs; d != nil {
 		if d.descended {
 			// Inside the list: → opens the highlighted document. Already open,
@@ -3756,8 +3774,10 @@ func (m *tuiModel) refresh() {
 	for _, e := range m.convo {
 		blocks = append(blocks, e.view())
 	}
+	curAt := -1
 	if replyShown(m.cur) {
-		blocks = append(blocks, renderMarkdown(m.md, m.cur))
+		curAt = len(blocks)
+		blocks = append(blocks, "") // rendered below, once the width is known
 	}
 	// Suggestions live inside the viewport so they don't steal height from the
 	// conversation — the user can still see the last messages above them.
@@ -3782,6 +3802,11 @@ func (m *tuiModel) refresh() {
 		width-- // reserve ONE column for the gutter bar — minimal reflow on focus
 	}
 	wrapW := max(1, width)
+	if curAt >= 0 {
+		// The streaming reply renders the way it will once finished: its
+		// wide blocks cut at the pane, not wrapped (wide.go).
+		blocks[curAt], _ = renderAnswer(m.md, m.proseW(), m.cur, wrapW, 0)
+	}
 	rendered := make([]string, 0, len(m.vp.lines)) // display rows, not blocks
 	frm := frame{
 		// Sized by BLOCKS, not by convo: blocks is the convo plus the streaming
@@ -3821,7 +3846,7 @@ func (m *tuiModel) refresh() {
 			// is true exactly when the current render matches the current width.
 			// A token therefore never pays for a glamour re-render.
 			if e.mdSource != "" && (e.wrapW == 0 || e.wrapW != width) {
-				e.collapsed = renderMarkdown(m.md, e.mdSource)
+				e.collapsed = m.renderEntry(e, wrapW)
 				b = e.view()
 				e.invalidateWrap()
 			}
