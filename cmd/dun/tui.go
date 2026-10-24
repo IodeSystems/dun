@@ -141,6 +141,9 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 			fmt.Fprintf(os.Stderr, "dun: could not restart into %s: %v — run dun again\n", exe, e)
 		}
 	}
+	if tm, ok := fm.(tuiModel); ok && !tm.reloadReq && err == nil {
+		noteBackground(os.Stderr) // the first exit: what stays running (notices.go)
+	}
 	return err
 }
 
