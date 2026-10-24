@@ -215,7 +215,7 @@ func loadCatalog(dir string, base []Server) ([]catalogEntry, error) {
 func switchesOnly(s ServerSpec) bool {
 	return s.Command == "" && s.URL == "" && s.Args == nil && s.Env == nil && s.Headers == nil &&
 		s.Bearer == "" && s.OAuth == nil && s.Timeout == 0 &&
-		(s.Autostart != nil || s.Via != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil)
+		(s.Autostart != nil || s.Via != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Exclude != nil)
 }
 
 // resolve turns a catalog entry and this session's switches into the Server
@@ -301,6 +301,7 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		OAuth:          s.OAuth,
 		Scopes:         sc,
 		Attach:         unionAttach(sc.AttachGlobal, sc.AttachProject, sc.AttachSession),
+		Exclude:        s.Exclude,
 	}, true, nil
 }
 

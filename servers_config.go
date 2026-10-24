@@ -134,6 +134,11 @@ type ServerSpec struct {
 	// Attach names other indexes the server's search role also reads
 	// ("project:index"), at this scope; the scopes add up (attach.go).
 	Attach []string `json:"attach,omitempty"`
+	// Exclude is directories, relative to the workspace, left out of the
+	// server's index: passed as --exclude to a poly-lsp-mcp that takes it
+	// (indexstate.go). Written at project scope by /poly-lsp exclude and by
+	// dun itself when an index stops at its file limit.
+	Exclude []string `json:"exclude,omitempty"`
 }
 
 // OAuthSpec is how dun logs in to an OAuth- or OIDC-protected MCP server.
@@ -605,6 +610,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	out.OAuth = mergeOAuth(prev.OAuth, next.OAuth)
 	if next.Attach != nil {
 		out.Attach = next.Attach
+	}
+	if next.Exclude != nil {
+		out.Exclude = next.Exclude
 	}
 	return out
 }

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,6 +29,14 @@ const (
 	// fakeSlowEnv is milliseconds the fake sleeps before it answers
 	// initialize: poly-lsp indexing a big repo before it says anything.
 	fakeSlowEnv = "DUN_FAKE_SLOW_MS"
+	// fakeIndexEnv makes the fake poly-lsp a build that speaks the index
+	// protocol (indexstate_test.go): its `mcp --help` lists
+	// --index-max-files, and after initialize it reports the build as the
+	// mode says. Unset, it is an older build: no flag, no report.
+	fakeIndexEnv = "DUN_FAKE_INDEX"
+	// fakeIndexOKEnv is a directory: started with --exclude for it, the
+	// build is ready instead of failed.
+	fakeIndexOKEnv = "DUN_FAKE_INDEX_OK"
 )
 
 // fakeBin writes dir/name, a wrapper that runs this test binary as persona,
@@ -81,7 +90,18 @@ func fakeBinMain(persona string) {
 		fakeLogf("serve %s", strings.Join(args[1:], " "))
 		serveFake(raglitFakeTools)
 	case "poly-lsp":
+		if slices.Contains(args, "--help") {
+			fmt.Println("Usage:\n  poly-lsp-mcp mcp [flags]\n\nFlags:\n      --root string")
+			if os.Getenv(fakeIndexEnv) != "" {
+				fmt.Println("      --exclude stringArray\n      --index-max-files int   (default 100000)\n      --index-warn-files int  (default 10000)")
+			}
+			return
+		}
 		fakeLogf("start POLY_LSP_HOOK=%s DUN_AGENTS_STATE=%s", os.Getenv("POLY_LSP_HOOK"), os.Getenv("DUN_AGENTS_STATE"))
+		if mode := os.Getenv(fakeIndexEnv); mode != "" {
+			fakeLogf("args %s", strings.Join(args, " "))
+			fakeAfterInit = func(out *bufio.Writer) { fakeIndexReport(out, mode, args) }
+		}
 		serveFake(map[string]func(map[string]any) string{
 			"node_query": func(map[string]any) string { return "[]" },
 		})
@@ -116,6 +136,61 @@ var raglitFakeTools = map[string]func(map[string]any) string{
 		b, _ := json.Marshal(a)
 		return string(b)
 	},
+}
+
+// fakeAfterInit runs once, after the initialize reply is written.
+var fakeAfterInit func(out *bufio.Writer)
+
+// fakeWorktrees is a report where .claude/worktrees holds most of the files,
+// in other checkouts; fakePlain one with nothing obvious to leave out.
+var (
+	fakeWorktrees = map[string]any{"files": 22012, "bytes": 90 << 20, "heaviest": []map[string]any{
+		{"dir": ".claude/worktrees/", "files": 21557, "bytes": 88 << 20, "share": 0.97, "nestedCheckouts": 48},
+		{"dir": "cmd/", "files": 120, "bytes": 1 << 20, "share": 0.02}}}
+	fakeSmall = map[string]any{"files": 455, "bytes": 2 << 20, "heaviest": []map[string]any{
+		{"dir": "cmd/", "files": 120, "bytes": 1 << 20, "share": 0.5}}}
+	fakePlain = map[string]any{"files": 120000, "bytes": 900 << 20, "heaviest": []map[string]any{
+		{"dir": "src/", "files": 80000, "bytes": 600 << 20, "share": 0.66},
+		{"dir": "docs/", "files": 40000, "bytes": 300 << 20, "share": 0.33}}}
+)
+
+// fakeIndexReport sends the index notification for mode: "ready" (a small
+// tree), "nested" (ready, a checkout inside), "large" (ready over the
+// warning threshold), "limit" (failed at the cap, the worktrees report) or
+// "plain" (failed at the cap, nothing obvious). Started with --exclude
+// $DUN_FAKE_INDEX_OK, a failing mode is ready instead.
+func fakeIndexReport(out *bufio.Writer, mode string, args []string) {
+	if ok := os.Getenv(fakeIndexOKEnv); ok != "" {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "--exclude" && args[i+1] == ok {
+				mode = "ready"
+			}
+		}
+	}
+	data := map[string]any{"state": "ready", "ms": 40, "index": fakeSmall}
+	level := "info"
+	switch mode {
+	case "nested":
+		data["index"] = fakeWorktrees
+	case "large":
+		level = "warning"
+		data["index"] = fakeWorktrees
+		data["large"] = map[string]any{"files": 22012, "threshold": 10000,
+			"message": "large workspace: 22012 indexable files (warning above 10000); see index.heaviest for where they are."}
+	case "limit", "plain":
+		level = "error"
+		rep := fakeWorktrees
+		if mode == "plain" {
+			rep = fakePlain
+		}
+		data = map[string]any{"state": "failed", "ms": 900, "index": rep, "limit": 10000,
+			"error":  "index build failed: index limit: 22012 indexable files, limit 10000",
+			"remedy": "exclude the heavy directories (--exclude <dir>, repeatable, relative to the root; the repository is not changed), or add them to .gitignore, or raise --index-max-files"}
+	}
+	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/message",
+		"params": map[string]any{"level": level, "logger": "poly-lsp-mcp/index", "data": data}})
+	out.Write(append(b, '\n'))
+	out.Flush()
 }
 
 // fakeToolError starts a fake tool's answer that is an isError result.
@@ -181,5 +256,9 @@ func serveFake(tools map[string]func(map[string]any) string) {
 		b, _ := json.Marshal(resp)
 		out.Write(append(b, '\n'))
 		out.Flush()
+		if msg.Method == "initialize" && fakeAfterInit != nil {
+			fakeAfterInit(out)
+			fakeAfterInit = nil
+		}
 	}
 }

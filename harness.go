@@ -73,6 +73,8 @@ type Server struct {
 	OAuth *OAuthSpec
 	// Attach is every scope's attached indexes, merged (attach.go).
 	Attach []string
+	// Exclude is the directories left out of its index (ServerSpec.Exclude).
+	Exclude []string
 }
 
 // raglitProject is the CORPUS: the repository, shared by every worktree of it.
@@ -313,6 +315,11 @@ type Config struct {
 	// the background at session start: err is nil when it is up and its
 	// tools have joined the tool set.
 	OnServerStarted func(id string, err error)
+	// OnServerIndex reports a server's index build ending (indexstate.go):
+	// msg is what to tell the person — what dun left out and how to undo
+	// it, the post-mortem, a nested checkout — or "" when there is nothing
+	// to say beyond the new state in Servers().
+	OnServerIndex func(id, msg string)
 	// OnLogin shows the person the URL that logs in to an OAuth server
 	// (mcpoauth.go); url "" means another session's login is being waited
 	// for. The engine may have no display, so this is the way that always
@@ -479,6 +486,13 @@ type Harness struct {
 	// ready hint, and ingestID the server it went to. Guarded by srvMu.
 	ingestNote string
 	ingestID   string
+	// index is each server's index state (indexstate.go); indexSeen the
+	// servers that sent an index notification this session; indexRetried
+	// the ones dun has restarted with excludes once. Guarded by srvMu.
+	index        map[string]*indexState
+	indexSeen    map[string]bool
+	indexRetried map[string]bool
+	indexLarge   map[string]bool // said "a large workspace" this session
 	// exts are the loaded extensions and extErrs the manifests that did not
 	// load (extension.go). Fixed at Start.
 	exts    []Extension
@@ -1462,6 +1476,12 @@ func (h *Harness) managerFor() (*mcpmgr.Manager, bool) {
 // forwarding them would train the model to skim what it sees here.
 func (h *Harness) noteServerNotification(n mcpmgr.Notification) {
 	if n.Method != "notifications/message" {
+		return
+	}
+	// An index report is the server's state, not news for the model: dun
+	// acts on it and says what it did (indexstate.go).
+	if in, ok := parseIndexNote(n.Params); ok {
+		h.noteIndex(n.ServerID, in)
 		return
 	}
 	text := strings.TrimSpace(n.Text())

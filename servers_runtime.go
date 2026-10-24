@@ -118,6 +118,17 @@ type ServerState struct {
 	// Slash is the extension's slash command ("raglit"), "" for a server
 	// that is not an extension or has none.
 	Slash string `json:"slash,omitempty"`
+	// Index is the index a server builds after its handshake
+	// (indexstate.go): IndexBuilding, IndexReady, IndexFailed, or "" for a
+	// server that builds none or says nothing of it (an older poly-lsp-mcp).
+	// IndexSeconds is how long it has been building, or how long the build
+	// took; IndexErr why it failed; IndexFiles the files it counted.
+	// Exclude is the directories left out of it, for this project.
+	Index        string   `json:"index,omitempty"`
+	IndexSeconds float64  `json:"indexSeconds,omitempty"`
+	IndexErr     string   `json:"indexErr,omitempty"`
+	IndexFiles   int      `json:"indexFiles,omitempty"`
+	Exclude      []string `json:"exclude,omitempty"`
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -172,6 +183,10 @@ func (h *Harness) Servers() []ServerState {
 		if e, ok := h.extension(s.ID); ok {
 			st.Slash = e.SlashName()
 		}
+		if st.Running {
+			h.indexOf(s.ID, &st)
+		}
+		st.Exclude = s.Exclude
 		switch {
 		case s.Via == ViaShell:
 			st.Via, st.Namespace, st.Err, st.Tools = ViaShell, ShellNamespace(s.ID), "", 0
@@ -291,6 +306,7 @@ func (h *Harness) StopServer(id string) error {
 		return nil
 	}
 	h.mgr.StopServer(id)
+	h.markIndexBuilding(id, false)
 	h.applyTools()
 	return nil
 }
@@ -356,6 +372,15 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.URL == "" && command != "" {
 		command, err = FindCommand(command)
 	}
+	// A poly-lsp-mcp that builds its index after the handshake is
+	// "indexing" from its spawn until it says how the build went, and takes
+	// the project's excludes. An older one would refuse --exclude: it gets
+	// none, and no index state.
+	indexes := s.URL == "" && h.speaksIndex(s)
+	if indexes {
+		args = append(slices.Clone(args), excludeArgs(s.Exclude)...)
+	}
+	h.markIndexBuilding(s.ID, indexes)
 	mcfg := mcpmgr.MCPConfig{
 		ID: s.ID, Name: s.ID, Command: command, Args: args,
 		Env: env, Timeout: int(timeout / time.Second),
