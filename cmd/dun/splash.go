@@ -65,7 +65,7 @@ func (m tuiModel) splashSections(w int, short bool) []statusSection {
 	return []statusSection{
 		{label: "folder", value: tildePath(m.workspace)},
 		{label: "model", value: m.modelValue()},
-		{label: "mcp", value: m.mcpValue(vw)},
+		{label: "tools", value: m.toolsValue(vw)},
 		{label: "extensions", value: m.extensionsValue(vw)},
 		{label: "skills", value: m.skillsValue()},
 		{label: files, value: m.filesValue()},
@@ -81,13 +81,11 @@ const (
 	splashValueCol = 2 + splashLabelW + 2
 )
 
-// statusSections are /status's rows: the splash's, with the build and the
-// tool count.
+// statusSections are /status's rows: the splash's, with the build.
 func (m tuiModel) statusSections(w int) []statusSection {
 	secs := m.splashSections(w, false)
-	out := []statusSection{{label: "build", value: version}, secs[0], secs[1]}
-	out = append(out, statusSection{label: "tools", value: fmt.Sprintf("%d", len(m.tools))})
-	return append(out, secs[2:]...)
+	out := []statusSection{{label: "build", value: version}}
+	return append(out, secs...)
 }
 
 func (m tuiModel) modelValue() string {
@@ -104,52 +102,30 @@ func (m tuiModel) modelValue() string {
 	return stDim.Render("none yet")
 }
 
-// mcpValue is the MCP servers that are not optional extensions — the
-// built-in ones (poly-lsp) included — as counts, not names: how many, any
-// that are starting or did not start, their tools and the tokens those tools
-// cost, and /mcp info for the detail. A server starting or failed is named: the
-// one thing on the row that is changing, or wrong (USER 2026-10-24: "people know what mcp is";
-// a list of names cut at a word said less). Narrow, the words go first.
-func (m tuiModel) mcpValue(w int) string {
-	var n, tools int
+// toolsValue is how many tools the model has — dun's own and every
+// server's — and /mcp info for where they come from and what they cost
+// (USER 2026-10-24: "mcp should probably be just tools"). A server that is
+// starting or did not start is named: the one thing on the row that is
+// changing, or wrong. Narrow, the hint goes first.
+func (m tuiModel) toolsValue(w int) string {
 	var trouble []string
-	ids := map[string]bool{}
 	for _, st := range m.splashServers() {
 		if isExtension(st) && st.Err == "" {
 			continue // the extensions row
 		}
-		n++
-		ids[st.ID] = true
 		switch {
 		case st.Starting:
 			trouble = append(trouble, st.ID+stDim.Render(" starting"+m.startedFor(st.ID)))
 		case st.Err != "":
 			trouble = append(trouble, st.ID+" "+stErr.Render("did not start"))
-		case st.Running:
-			tools += st.Tools
-		}
-	}
-	if n == 0 {
-		return stDim.Render("none yet — /mcp add")
-	}
-	head := plural(n, "server")
-	for _, t := range trouble {
-		head += stDim.Render(" · ") + t
-	}
-	tok := 0
-	for _, p := range m.ctxStats.systemParts {
-		if id, ok := strings.CutPrefix(p.Name, "mcp: "); ok && ids[id] {
-			tok += p.Tokens
 		}
 	}
 	sep := stDim.Render(" · ")
-	ts := plural(tools, "tool")
-	if m.ctxStats.systemTokens == 0 {
-		return firstFit(w, head+sep+ts+sep+stDim.Render("/mcp info"), head+sep+ts, head)
+	head := fmt.Sprintf("%d", len(m.tools))
+	for _, t := range trouble {
+		head += sep + t
 	}
-	k := "~" + tokN(tok)
-	return firstFit(w, head+sep+ts+sep+k+" tokens"+sep+stDim.Render("/mcp info"),
-		head+sep+ts+sep+k+sep+stDim.Render("/mcp info"), head+sep+ts+sep+k, head+sep+ts, head)
+	return firstFit(w, head+sep+stDim.Render("/mcp info"), head)
 }
 
 // splashServers are the servers in the order this TUI first saw them: a
@@ -217,39 +193,34 @@ func sortedServers(states []dun.ServerState) []dun.ServerState {
 	return sorted
 }
 
-// extensionsValue is the installed extensions, each on or off, and where to
-// read about the first one that is off:
+// extensionsValue is how many extensions are installed and how many are on,
+// any still starting by name, and /ext info for the list:
 //
-//	raglit off · /help raglit
+//	1 of 2 on · /ext info
 func (m tuiModel) extensionsValue(w int) string {
-	var parts []string
-	first := ""
+	var n, on int
+	var trouble []string
 	for _, st := range m.splashServers() {
 		if !isExtension(st) || st.Err != "" {
 			continue
 		}
+		n++
 		switch {
 		case st.Starting:
-			parts = append(parts, st.ID+stDim.Render(" starting"+m.startedFor(st.ID)))
+			trouble = append(trouble, st.ID+stDim.Render(" starting"+m.startedFor(st.ID)))
 		case st.Running:
-			parts = append(parts, st.ID+" "+stOK.Render("on"))
-		default:
-			parts = append(parts, st.ID+stDim.Render(" off"))
-			if first == "" {
-				first = st.Slash
-			}
+			on++
 		}
 	}
-	if len(parts) == 0 {
+	if n == 0 {
 		return stDim.Render("none")
 	}
-	v := strings.Join(parts, stDim.Render(" · "))
-	if first != "" {
-		if more := stDim.Render(" · /help " + first); ansi.StringWidth(v+more) <= w {
-			v += more
-		}
+	sep := stDim.Render(" · ")
+	head := fmt.Sprintf("%d of %d on", on, n)
+	for _, t := range trouble {
+		head += sep + t
 	}
-	return v
+	return firstFit(w, head+sep+stDim.Render("/ext info"), head)
 }
 
 // skillsValue is how many skills the agent can load, and the command that
@@ -442,10 +413,11 @@ func (m tuiModel) spendValue(w int, now time.Time) string {
 		}
 	}
 	switch {
-	case v == "" && unpriced:
-		return stDim.Render("not reported by " + host)
 	case v == "":
-		return stDim.Render("none yet")
+		// No spend and no budget: the row is left blank, not filled with
+		// "none yet" (USER 2026-10-24); its place is kept, so spend arriving
+		// later fills it without the splash growing.
+		return ""
 	case unpriced:
 		v += stDim.Render(" · not reported by " + host)
 	}
@@ -557,6 +529,10 @@ func sectionsView(secs []statusSection, w int) string {
 	}
 	rows := make([]string, 0, len(secs)+1)
 	for _, s := range secs {
+		if s.value == "" && len(s.more) == 0 {
+			rows = append(rows, "") // a row with nothing to say keeps its place
+			continue
+		}
 		rows = append(rows, fitText("  "+stDim.Render(fmt.Sprintf("%-*s", lw, s.label))+"  "+s.value, w))
 		// In the value column at every width, under the value it belongs to
 		// (at 49 columns it started under the label and read as a row of

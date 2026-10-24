@@ -125,7 +125,7 @@ func TestSplash6_Mascot(t *testing.T) {
 		if !strings.Contains(rows[0], tc.tagline) {
 			t.Errorf("%d: tagline row %q", tc.w, rows[0])
 		}
-		for _, want := range []string{"folder", "model", "mcp", "context", "spend"} {
+		for _, want := range []string{"folder", "model", "tools", "context"} {
 			if !strings.Contains(splashText(v), want) {
 				t.Errorf("%d: the rows lost %q:\n%s", tc.w, want, splashText(v))
 			}
@@ -201,8 +201,8 @@ func TestSplash6_ServersKeepTheirPlaces(t *testing.T) {
 		map[string]any{"id": "raglit", "slash": "raglit"},
 		map[string]any{"id": "poly-lsp", "slash": "poly-lsp", "starting": true},
 	}})
-	if s := splashText(v); !strings.Contains(s, "mcp            3 servers · poly-lsp starting") ||
-		!strings.Contains(s, " · 2 tools · /mcp info\n") {
+	if s := splashText(v); !strings.Contains(s, "tools          1 · poly-lsp starting") ||
+		!strings.Contains(s, " · /mcp info\n") {
 		t.Errorf("order:\n%s", s)
 	}
 }

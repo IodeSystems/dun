@@ -165,7 +165,7 @@ func TestLateServer_JoinsWithoutBounce(t *testing.T) {
 	}
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": servers(true)})
 	v.event(map[string]any{"type": "settings", "model": "m", "url": "http://llm/v1"})
-	if !strings.Contains(stripANSI(convoText(v.m)), "mcp            2 servers · poly-lsp starting") {
+	if !strings.Contains(stripANSI(convoText(v.m)), "tools          1 · poly-lsp starting") {
 		t.Fatalf("the splash does not say it is starting:\n%s", convoText(v.m))
 	}
 	if got := lastRow(v.m); !strings.Contains(got, "ready · poly-lsp starting") {

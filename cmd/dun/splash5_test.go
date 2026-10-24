@@ -152,8 +152,8 @@ func TestSplash5_ContextRow(t *testing.T) {
 // hours' rate, and never says $0 for a provider that reports nothing.
 func TestSplash5_SpendRow(t *testing.T) {
 	v := splash5(t, 100, 30)
-	if s := splashText(v); !strings.Contains(s, "spend          none yet\n") {
-		t.Fatalf("before any call:\n%s", s)
+	if s := splashText(v); strings.Contains(s, "spend") || !strings.HasSuffix(s, "\n\n") {
+		t.Fatalf("before any call the spend row is blank, its place kept:\n%s", s)
 	}
 	for _, tc := range []struct {
 		today, week float64
@@ -185,9 +185,9 @@ func TestSplash5_SpendRow(t *testing.T) {
 	if s := splashText(v); !strings.Contains(s, "spend          2 credits this week\n") {
 		t.Errorf("credits:\n%s", s)
 	}
-	// A provider that reports no cost.
+	// A provider that reports no cost: no spend, so no row.
 	v.event(map[string]any{"type": "spend", "calls": float64(4), "costed_calls": float64(0), "ledger": map[string]any{}})
-	if s := splashText(v); !strings.Contains(s, "spend          not reported by work\n") {
+	if s := splashText(v); strings.Contains(s, "spend") {
 		t.Errorf("not reported:\n%s", s)
 	}
 }
@@ -200,8 +200,8 @@ func TestSplash5_ExtensionsAndServers(t *testing.T) {
 	v.m.srvSince["poly-lsp"] = time.Now().Add(-12 * time.Second)
 	v.m.refresh()
 	s := splashText(v)
-	for _, want := range []string{"mcp            2 servers · poly-lsp starting 12s · 1 tool · /mcp info\n",
-		"extensions     raglit off · /help raglit\n", "skills         none\n"} {
+	for _, want := range []string{"tools          1 · poly-lsp starting 12s · /mcp info\n",
+		"extensions     0 of 1 on · /ext info\n", "skills         none\n"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lacks %q:\n%s", want, s)
 		}

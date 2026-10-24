@@ -150,7 +150,7 @@ func ownCommands(docker bool) []proto.CommandSpec {
 			Help: "/mcp alone opens a table of every server: on or off, and where that is set (this session, this project, every project).\n" +
 				"/mcp add opens a form: a name, and the command or web address you were given. A preset fills the server in from its name: " + presetIDs() + ".\n" +
 				"The same name again replaces it."},
-		{Name: "ext", Group: "tools",
+		{Name: "ext", Usage: "[info]", Group: "tools", Choices: choices("info", "the same list"),
 			Description: "extensions: where each comes from, its server, commands and hooks"},
 		{Name: "docker", Usage: "[on|off|status]", Group: "tools", Choices: choices("on", "exec in Docker", "off", "exec on the host", "status", ""),
 			State: onOff(docker), Description: "where commands run: on, in a Docker container; off, on this machine"},
@@ -310,8 +310,8 @@ func routeSlash(line string, r slashRoutes) {
 	}
 	switch name {
 	case "ext":
-		if len(args) > 0 {
-			r.reply("usage: /ext — lists the extensions")
+		if len(args) > 1 || (len(args) == 1 && arg(0) != "info") {
+			r.reply("usage: /ext [info] — lists the extensions")
 			return
 		}
 		r.control(name, "")

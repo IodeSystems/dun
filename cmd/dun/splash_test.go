@@ -44,13 +44,13 @@ func TestSplash_FreshSessionOnly(t *testing.T) {
 	}
 	s := stripANSI(m.convo[0].collapsed)
 	for _, want := range []string{"  folder         ~/greet\n", "  model          none yet\n",
-		"  mcp            2 servers · 2 tools · /mcp info\n", "  extensions     raglit off · /help raglit\n",
-		"  skills         none\n", "  context files  counting…\n", "  context        counting…\n", "  spend          none yet\n"} {
+		"  tools          2 · /mcp info\n", "  extensions     0 of 1 on · /ext info\n",
+		"  skills         none\n", "  context files  counting…\n", "  context        counting…\n"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("splash lacks %q:\n%s", want, s)
 		}
 	}
-	for _, not := range []string{version, "tools  ", "raglit on", "auto"} {
+	for _, not := range []string{version, "spend", "raglit", "auto"} {
 		if strings.Contains(s, not) {
 			t.Errorf("splash has %q:\n%s", not, s)
 		}
