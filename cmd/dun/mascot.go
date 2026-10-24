@@ -31,7 +31,8 @@ var mascotColors = map[byte]int{
 	'w': 255, // eye
 	'm': 94,  // mustache
 	'B': 18,
-	'b': 25, // shirt
+	'b': 25,  // shirt
+	'u': 255, // undershirt (owner, 2026-10-24: the crew neck)
 }
 
 // mascotBig is 23×20 pixels: 10 rows. For a pane of mascotBigW columns or more.
@@ -53,8 +54,8 @@ var mascotBig = []string{
 	".....dsssssssssssd.....",
 	"......ddsssssssdd......",
 	"........sssssss........",
-	"....bbbbbsscssbbbbb....",
-	"..bbbbbbbbsccsbbbbbbb..",
+	"....bbbbuuuuuuubbbb....",
+	"..bbbbbbbuuuuubbbbbbb..",
 	".bbbbbbbbbbbbbbbbbbbbb.",
 }
 
@@ -69,8 +70,8 @@ var mascotSmall = []string{
 	"..sssmmmmss..",
 	"..ssmmmmmms..",
 	"...dskkksd...",
-	".bbbbsssbbbb.",
-	"bbbbbbcbbbbbb",
+	".bbbuuuuubbb.",
+	"bbbbbbbbbbbbb",
 }
 
 // The taglines: beside the big foreman, beside the small one, and the one
