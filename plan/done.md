@@ -2436,3 +2436,63 @@ region goes instead of being ported.
   changed). Renderer previews (background job, queued, recap) still use
   orange. The header still repeats the model.
 - **Not verified:** a real terminal, light theme, personas on this run.
+
+## ✅ 38. Readable tool results, neutral previews, the walk at three sizes (USER, 2026-10-23)
+
+- **Contrast (1):** new token `stSecondary` (tui.go) = 246 on dark
+  (5.86:1 on the renderer's #16181c, 6.92:1 on black, 4.35:1 on the 236
+  band), 240 on a light terminal (7.11:1 on white; set in
+  initMarkdownStyle). stDim 240 (2.5:1) stays for chrome only: the "→"
+  arrow, rules, hints, labels, box edge, thinking header. Moved to
+  stSecondary: every renderer's preview text and expanded body
+  (renderers.go, filerender.go, evalrender.go shape/where/"+N more
+  columns"), box body rows (thinking text), a finished thought's line,
+  a group's targets. Code comments in highlighted code stay 240.
+- **Orange (2):** neutral now: background job receipt, job/agent counts,
+  "Started agent", agent_monitor acts (Answered/Told/…), tell_parent ✉,
+  dun_msg ✉, ingest "queued", recap. Kept orange: ship "⊘ refused"
+  (verified but NOT pushed — work left local), an agent report that says
+  "BLOCKED, waiting on you". Running/idle children green, failed red.
+  agentReportHead now reads subAgent.report's "agent #N is <state> after …
+  (N tokens)" (it showed "#N is" in orange). Activity strip's idle "✓" in
+  orange (activity.go) not changed — not a tool preview.
+- **Walk realism (3):** /login step erases the filled-in "local" with five
+  backspaces and types "work". Found a product bug: the filled-in name kept
+  its cursor after the first character (textinput SetValue), so the result
+  was "workocal" — fixed (`CursorEnd`, model.go).
+- **Sizes (4):** walk JSON `"sizes": ["48x24","100x30","180x50"]`
+  (cols/rows still work; neither = 100x30); `bin/ux --size WxH`
+  (repeatable) replaces the list. One run dir per size,
+  `tmp/ux-run-<walk>-<stamp>-<cols>x<rows>/`, each its own arrival (fresh
+  HOME + stub); BRIEF says that size and lists only that dir's files
+  (`ux sizes`, `ux assemble -size`). Waits match wrapped text (rows
+  trimmed + joined with a space, whitespace normalized; or joined with
+  nothing for a cut word). Coordinator add: `ux/product.md` copied into
+  every run dir; BRIEF sends every persona to it first and lists it.
+  Tests: tools/ux/sizes_test.go, ttyrec TestScreenHas_Wrapped,
+  TestRecSizeOverride.
+- **Fixed from the 48/180 run (5):** at 48×24 the /mcp add form left the
+  conversation pane blank and the walk stopped (palette narrowing grew the
+  pane with held blank rows; the form's shrink then anchored the bottom of
+  the blanks) — a shrink while holding keeps the top row and cuts the hold
+  (tui.go). Call rows cut mid-word at the edge → fitText (word + …). At
+  180 an answer ran 170 columns → prose wraps at bandCap (100). ttyrec
+  listed "→ Notes: …" as a key hint → hints are ≤4 words, no ":"/".".
+  Tests: bounce_test TestNoBounce_PhoneFormAfterPaletteKeepsTheText,
+  sizes_test.go (cmd/dun), onboarding4 TestLoginForm_FilledInName…,
+  contrast_test.go; each checked to fail without its fix.
+- **Run dirs:** `tmp/ux-run-onboarding-20261023-221704-48x24`,
+  `-100x30`, `-180x50` (worktree agent-aa57da11355044b8e). Every PNG looked
+  at. Consecutive-frame row diff: only the divider (panel heights), the
+  model pick replacing the conversation (05→07, known), and at 48 the
+  palette opening (07→08: conversation moves up 6 rows, the view follows
+  the bottom when the pane shrinks while pinned).
+- **Open / for the owner:** (a) at 48 the palette opening scrolls the
+  conversation up (pinned view follows the bottom) and the splash leaves
+  the view — keep, or hold the top row (then the newest rows hide under
+  the palette)? (b) at 48 the tool result preview shows three words
+  ("→ Notes: keep the…"); wrap it to a second row on narrow screens?
+  (c) at 48 palette descriptions and form notes are cut to ~20 columns;
+  status lines drop "esc cancel". (d) a notice that wraps at 48 starts its
+  second row with "· key set". (e) prose cap at 100 also caps code blocks
+  and tables in answers. (f) personas not run; light theme not seen.
