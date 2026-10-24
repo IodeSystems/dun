@@ -173,7 +173,9 @@ OpenAI-compatible endpoint.
 
 ```sh
 make install   # builds the stamped binary into ~/.local/bin/dun (BINDIR=… to change)
-# mcpshell must be on PATH; poly-lsp-mcp and raglit only if you use /poly-lsp, /raglit
+# mcpshell (the eval tool) is looked for on PATH, then beside dun; without it dun
+# works with one tool less. `dun doctor --fix` installs it (go install, needs Go).
+# poly-lsp-mcp and raglit only if you use /poly-lsp, /raglit
 
 dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
               # URL, bearer optional) and pick a model. In the TUI, web or

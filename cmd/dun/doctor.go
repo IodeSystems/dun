@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
+
+	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/proto"
 	"github.com/spf13/cobra"
@@ -24,12 +28,21 @@ import (
 // service's, which is where launchd differs from a login shell), dund (its
 // socket answers this user — the peer-credential check), the service, and a
 // self-updating build's source tree and Go. Exit 1 when anything fails.
+//
+// `dun doctor --fix` changes one thing: a missing mcpshell is installed with
+// `go install` from its iodesystems module (built from source, checked
+// against the Go checksum database) when Go is on PATH, beside dun when that
+// directory is writable — where the engine looks after PATH (dun.FindCommand).
+// Nothing is downloaded from anywhere else.
 
 type finding struct {
 	level, area, detail, fix string // level: ok, warn, fail
 }
 
-type doctor struct{ found []finding }
+type doctor struct {
+	found []finding
+	fix   bool // --fix: install what fixTools names
+}
 
 func (d *doctor) add(level, area, detail, fix string) {
 	d.found = append(d.found, finding{level, area, detail, fix})
@@ -65,6 +78,7 @@ func doctorCmd() *cobra.Command {
 
 // fixableNames are the fixes --fix runs, for --help.
 var fixableNames = []string{
+	"mcpshell missing: go install it (when Go is here)",
 	"a config file others can read: chmod 600",
 	"a service on another build: dun dund service restart",
 }
@@ -89,7 +103,7 @@ func fixable(f finding) func() error {
 }
 
 func runDoctor(fix bool) int {
-	d := check()
+	d := check(fix) // with fix, tools() installs a missing mcpshell as it checks
 	code := d.report()
 	if !fix {
 		return code
@@ -112,12 +126,12 @@ func runDoctor(fix bool) int {
 	}
 	fmt.Println()
 	time.Sleep(time.Second) // a restarted service answers again
-	return check().report()
+	return check(false).report()
 }
 
-// check runs every check.
-func check() *doctor {
-	d := &doctor{}
+// check runs every check; fix lets tools() install what fixTools names.
+func check(fix bool) *doctor {
+	d := &doctor{fix: fix}
 	d.providers()
 	d.tools()
 	d.dund()
@@ -180,38 +194,117 @@ func (d *doctor) providers() {
 	}
 }
 
-// doctorTools are what the engines run: required, or what needs them.
-var doctorTools = []struct{ name, need string }{
-	{"git", ""},
-	{"mcpshell", ""},
-	{"poly-lsp-mcp", "/poly-lsp"},
-	{"raglit", "/raglit"},
+// doctorTools are what the engines run: required (fail), wanted (warn: dun
+// works without it, minus a tool), or what needs them.
+var doctorTools = []struct{ name, level, need string }{
+	{"git", "fail", ""},
+	{"mcpshell", "warn", ""},
+	{"poly-lsp-mcp", "warn", "/poly-lsp"},
+	{"raglit", "warn", "/raglit"},
+}
+
+// fixTools are the tools --fix installs. poly-lsp-mcp and raglit are opt-in
+// and need more than their binary (language servers, an embedder).
+var fixTools = map[string]bool{"mcpshell": true}
+
+// goInstall installs a module with the go command, beside dun when dun's
+// directory is writable (a test replaces it). It returns where it went.
+var goInstall = func(module string) (string, error) {
+	cmd := exec.Command("go", "install", module)
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	dir := ""
+	if exe, err := os.Executable(); err == nil && unix.Access(filepath.Dir(exe), unix.W_OK) == nil {
+		dir = filepath.Dir(exe)
+		cmd.Env = append(os.Environ(), "GOBIN="+dir)
+	}
+	return dir, cmd.Run()
 }
 
 func (d *doctor) tools() {
 	svcPATH, svcHasPATH := dundcli.ServicePATH(dundcli.ServiceUnit)
 	_, svcInstalled := dundcli.ServiceFile(dundcli.ServiceUnit)
 	for _, t := range doctorTools {
-		level := "fail"
-		if t.need != "" {
-			level = "warn"
-		}
-		p, err := exec.LookPath(t.name)
+		level := t.level
+		p, err := dun.FindCommand(t.name)
 		if err != nil {
-			what := "not on PATH"
+			p, err = d.install(t.name)
+		}
+		if err != nil {
+			what := "not installed (not on PATH or beside dun)"
 			if t.need != "" {
-				what += " (needed only for " + t.need + ")"
+				what += ", needed only for " + t.need
+			} else if inst, ok := dun.ToolInstall[t.name]; ok {
+				what += ": " + inst.Lost
 			}
-			d.add(level, "tool", t.name+": "+what, "install it, or put its directory on PATH")
+			d.add(level, "tool", t.name+": "+what, toolFix(t.name, err))
 			continue
 		}
-		if svcInstalled && svcHasPATH && lookIn(svcPATH, t.name) == "" {
+		if svcInstalled && svcHasPATH && lookIn(svcPATH, t.name) == "" && !besideDun(p) {
 			d.add(level, "tool", t.name+": "+p+", but not on the service's PATH",
 				"reinstall the service from this shell to capture its PATH: dun dund service install -- <flags>")
 			continue
 		}
 		d.add("ok", "tool", t.name+": "+p, "")
 	}
+}
+
+// install runs --fix's install of name, or says why it did not.
+func (d *doctor) install(name string) (string, error) {
+	inst, ok := dun.ToolInstall[name]
+	if !d.fix || !fixTools[name] || !ok {
+		return "", errNotFixed
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		return "", errNoGo
+	}
+	fmt.Fprintf(os.Stderr, "installing %s: go install %s\n", name, inst.Module)
+	dir, err := goInstall(inst.Module)
+	if err != nil {
+		return "", fmt.Errorf("go install %s: %w", inst.Module, err)
+	}
+	p, err := dun.FindCommand(name)
+	if err != nil && dir == "" {
+		return "", fmt.Errorf("installed into go's bin directory (go env GOBIN, else $(go env GOPATH)/bin), which is not on PATH: put it on PATH")
+	}
+	return p, err
+}
+
+var (
+	errNotFixed = errors.New("not asked to fix")
+	errNoGo     = errors.New("go is not on PATH")
+)
+
+// toolFix is the install step for a tool that is not there.
+func toolFix(name string, err error) string {
+	inst, ok := dun.ToolInstall[name]
+	switch {
+	case !ok:
+		return "install it, or put its directory on PATH"
+	case !fixTools[name]:
+		return "go install " + inst.Module + " (needs Go), then put it on PATH or beside dun"
+	case errors.Is(err, errNotFixed):
+		if _, gerr := exec.LookPath("go"); gerr == nil {
+			return "dun doctor --fix (runs go install " + inst.Module + ")"
+		}
+		return "install Go (go.dev/dl), then dun doctor --fix — or " + putBinary(name, inst.Module)
+	case errors.Is(err, errNoGo):
+		return "--fix needs Go (go.dev/dl) — or " + putBinary(name, inst.Module)
+	}
+	return "--fix failed: " + err.Error()
+}
+
+// putBinary is the other way to install name: a build of it, by hand.
+func putBinary(name, module string) string {
+	repo, _, _ := strings.Cut(module, "@")
+	repo = strings.Join(strings.Split(repo, "/")[:3], "/")
+	return "build " + name + " from " + repo + " and put it on PATH or beside dun"
+}
+
+// besideDun reports whether p is in dun's own directory: the engine finds it
+// there whatever the service's PATH is.
+func besideDun(p string) bool {
+	exe, err := os.Executable()
+	return err == nil && filepath.Dir(p) == filepath.Dir(exe)
 }
 
 // lookIn finds name in a PATH that is not this process's.

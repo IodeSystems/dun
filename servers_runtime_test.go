@@ -116,8 +116,8 @@ func TestStartServer_FailureLeavesSessionUsable(t *testing.T) {
 	if h.Session == nil || h.Session.Dispatch == nil {
 		t.Fatal("session was left unusable by a failed start")
 	}
-	if st, _ := serverState(h, ServerDocs); st.Err == "" {
-		t.Error("failure was not recorded for the UI")
+	if st, _ := serverState(h, ServerDocs); st.Err == "" || !st.Missing {
+		t.Errorf("a command that is not installed was not recorded as missing for the UI: %+v", st)
 	}
 }
 

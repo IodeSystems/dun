@@ -378,6 +378,9 @@ type ServerState struct {
 	Auto    bool   `json:"auto"`
 	Tools   int    `json:"tools"`
 	Err     string `json:"err,omitempty"`
+	// Missing: Err says the command is not installed — a setup step, not a
+	// failure.
+	Missing bool `json:"missing,omitempty"`
 	// Auth is a remote server's credentials: its OAuth login state
 	// ("oauth: logged in as … until …", "oauth: needs login …"), "static
 	// bearer", "static header" or "none".

@@ -84,7 +84,8 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 		auto, _ := o["auto"].(bool)
 		running, _ := o["running"].(bool)
 		starting, _ := o["starting"].(bool)
-		out = append(out, dun.ServerState{ID: str(o["id"]), Auto: auto, Running: running, Err: str(o["err"]),
+		missing, _ := o["missing"].(bool)
+		out = append(out, dun.ServerState{ID: str(o["id"]), Auto: auto, Running: running, Err: str(o["err"]), Missing: missing,
 			Starting: starting, StartingSeconds: evNum(o["startingSeconds"]),
 			Via: str(o["via"]), Proto: str(o["proto"]), Global: str(o["global"]), Project: str(o["project"]), Session: str(o["session"]),
 			From: str(o["from"]), ViaGlobal: str(o["viaGlobal"]), ViaProject: str(o["viaProject"]),

@@ -117,6 +117,8 @@ func (m tuiModel) toolsValue(w int) string {
 		switch {
 		case st.Starting:
 			trouble = append(trouble, st.ID+stDim.Render(" starting"+m.startedFor(st.ID)))
+		case st.Missing: // a setup step, not a failure: the line under the splash says it
+			trouble = append(trouble, st.ID+stDim.Render(" not installed"))
 		case st.Err != "":
 			trouble = append(trouble, st.ID+" "+stErr.Render("did not start"))
 		}
@@ -714,6 +716,8 @@ func (m tuiModel) statusDetail(w int) string {
 			state = stDim.Render("starting" + m.startedFor(st.ID))
 		case st.Running:
 			state = stOK.Render("running") + stDim.Render(" · "+plural(st.Tools, "tool"))
+		case st.Missing:
+			state = stDim.Render("not installed")
 		case st.Err != "":
 			state = stErr.Render("did not start")
 		}

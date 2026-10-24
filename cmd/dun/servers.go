@@ -600,6 +600,8 @@ func serverHint(states []dun.ServerState) string {
 			continue
 		}
 		switch {
+		case st.Missing:
+			lines = append(lines, fmt.Sprintf("%s off: %s", st.ID, oneLine(st.Err)))
 		case st.Err != "":
 			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, oneLine(st.Err)))
 		case slashOf(st) != "":
@@ -616,7 +618,7 @@ func serverHint(states []dun.ServerState) string {
 func serversProto(states []dun.ServerState) []proto.ServerState {
 	out := make([]proto.ServerState, 0, len(states))
 	for _, st := range states {
-		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Auth: st.Auth,
+		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Missing: st.Missing, Auth: st.Auth,
 			Via: st.Via, Proto: st.Proto, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
 			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
 			Detail: serverDetail(st), Slash: slashOf(st), Starting: st.Starting, StartingSeconds: st.StartingSeconds})

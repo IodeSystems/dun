@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -72,6 +73,9 @@ type ServerState struct {
 	Auto  bool   `json:"auto"`
 	Tools int    `json:"tools"`
 	Err   string `json:"err,omitempty"` // why the last start attempt failed
+	// Missing: Err is a MissingError — the command is not installed, a setup
+	// step rather than a failure (missing.go).
+	Missing bool `json:"missing,omitempty"`
 	// Starting is a start in flight: launched, not yet answering with its
 	// tools (Running may already be true: the handshake is done, discovery
 	// is not). StartingSeconds is how long it has been at it.
@@ -144,6 +148,7 @@ func (h *Harness) Servers() []ServerState {
 			Auto:         s.Autostart,
 			Tools:        counts[s.ID],
 			Err:          h.lastErr[s.ID],
+			Missing:      h.missing[s.ID],
 			StartSeconds: h.lastStart[s.ID].Seconds(),
 			Cost:         cost[s.ID],
 			Hidden:       hidden[s.ID],
@@ -344,15 +349,21 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
 		env = h.shellEnv(s, env)
 	}
+	// A local command is looked for on PATH, then beside dun (missing.go);
+	// one in neither place is not started at all.
+	command := s.Command
+	var err error
+	if s.URL == "" && command != "" {
+		command, err = FindCommand(command)
+	}
 	mcfg := mcpmgr.MCPConfig{
-		ID: s.ID, Name: s.ID, Command: s.Command, Args: args,
+		ID: s.ID, Name: s.ID, Command: command, Args: args,
 		Env: env, Timeout: int(timeout / time.Second),
 		URL: s.URL, Headers: s.Headers,
 	}
 	// An OAuth server logs in BEFORE it connects: a login takes as long as
 	// the person does, and must not run inside the handshake's timeout.
-	var err error
-	if oc := h.oauthFor(s); oc != nil {
+	if oc := h.oauthFor(s); err == nil && oc != nil {
 		err = oc.ensure(ctx)
 		mcfg.Authorization, mcfg.OnUnauthorized = oc.Authorization, oc.OnUnauthorized
 	}
@@ -377,6 +388,11 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		h.readHosted()
 	}
 	h.srvMu.Lock()
+	if h.missing == nil {
+		h.missing = map[string]bool{}
+	}
+	var miss *MissingError
+	h.missing[s.ID] = errors.As(err, &miss)
 	if err != nil {
 		h.lastErr[s.ID] = err.Error()
 	} else {

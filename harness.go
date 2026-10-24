@@ -11,6 +11,7 @@ package dun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	filetools "github.com/iodesystems/agentkit/files"
 	"log"
@@ -468,6 +469,7 @@ type Harness struct {
 	srvMu     sync.Mutex
 	specs     []Server                 // every configured server, running or not
 	lastErr   map[string]string        // id → why its last start attempt failed
+	missing   map[string]bool          // id → lastErr is a MissingError
 	lastStart map[string]time.Duration // id → how long its last start took
 	// starting is the servers a start is in flight for, and since when: a
 	// slow one (poly-lsp indexing a big repo takes a minute) is said to be
@@ -1248,7 +1250,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		go func() {
 			defer wg.Done()
 			err := h.startServer(ctx, s)
-			if err != nil {
+			var miss *MissingError
+			if err != nil && !errors.As(err, &miss) { // not installed: the UI says it, once
 				log.Printf("dun: %s did not start: %v", s.ID, err)
 			}
 			if cfg.OnServerStarted != nil {

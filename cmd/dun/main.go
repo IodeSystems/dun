@@ -566,7 +566,11 @@ func main() {
 				return
 			}
 			msg := id + ": " + runningSummary(h, id)
-			if err != nil {
+			var miss *dun.MissingError
+			switch {
+			case errors.As(err, &miss): // a setup step, said quietly
+				msg = id + " off: " + oneLine(err.Error())
+			case err != nil:
 				msg = id + ": did not start — " + oneLine(err.Error())
 			}
 			em.emit(&proto.ServerEvent{ID: id, Action: "start", Message: msg,
@@ -781,6 +785,8 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 	for _, st := range h.Servers() {
 		switch {
 		case st.Running:
+		case st.Missing:
+			fmt.Fprintf(os.Stderr, "dun: %s off: %s\n", st.ID, oneLine(st.Err))
 		case st.Err != "":
 			fmt.Fprintf(os.Stderr, "dun: %s did not start: %s\n", st.ID, oneLine(st.Err))
 		default:
