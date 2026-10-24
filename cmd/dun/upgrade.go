@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/dun/internal/dundcli"
@@ -193,6 +194,38 @@ func once(key string) bool {
 	return true
 }
 
+// attachWait is what an attach in flight waits on, for the status line
+// while there is no session yet (startingWhat): dund itself, or the session
+// it is creating — and, when dund is another build, which one and the
+// command that replaces it. An older dund's engine starts every built-in
+// server before it names its session (item 39: ~55 s on poly-lsp, live);
+// the TUI cannot see that wait, so it says what it can.
+type attachWait struct {
+	session   bool   // dund answered; the create is in flight
+	dundBuild string // dund's build when it is not this one ("" when it is)
+	fix       string // the command that brings dund to this build
+}
+
+// attachNow is the attach in flight, or nil. One attach runs at a time
+// (restartEngine); the model reads it on the spinner's tick.
+var attachNow atomic.Pointer[attachWait]
+
+// noteDundBuild records dund's build from its hello reply, before the
+// create: a dund too old to say hello is "an older build" with no number.
+func noteDundBuild(ev proto.Event, err error) {
+	w := &attachWait{session: true}
+	switch r, ok := ev.Payload.(*proto.HelloReply); {
+	case err != nil:
+		w.dundBuild, w.fix = "?", killLine()+", then dun again"
+	case !ok || r.Version == version || r.Version == "dev" || version == "dev":
+	case !r.Upgradable:
+		w.dundBuild, w.fix = r.Version, "dun dund service restart"
+	case !r.Coordinated:
+		w.dundBuild, w.fix = r.Version, killLine()+", then dun again"
+	}
+	attachNow.Store(w)
+}
+
 // checkDundBuild compares dund's build with this one, after attaching. It
 // returns notes for the conversation, and the build to re-exec this TUI into
 // ("" for none). A dund that coordinates upgrades is asked once per build
@@ -200,6 +233,7 @@ func once(key string) bool {
 // dund gets the command that replaces it, once.
 func checkDundBuild(ac *attachConn, sc *bufio.Scanner) (notes []string, reexec string) {
 	ev, err := ac.call(sc, "", &proto.Hello{Version: version})
+	noteDundBuild(ev, err)
 	if err != nil {
 		if once("pre-hello") {
 			return []string{"dund is an older build that cannot be upgraded from here — stop it (" + killLine() +

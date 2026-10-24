@@ -300,6 +300,7 @@ func TestNoBounce_FormClosingKeepsTheTopRow(t *testing.T) {
 // splash at the top stays (USER 2026-10-23; run 4: the conversation went
 // up six rows and the header never came back). Esc puts it all back.
 func TestNoBounce_PhoneFormKeepsTheRowsWhereTheyWere(t *testing.T) {
+	onPath(t, "notes-mcp")
 	v := newVtui(49, 21)
 	v.event(map[string]any{"type": "session", "id": "s1", "resumed": float64(0)})
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": []any{
@@ -343,8 +344,6 @@ func TestNoBounce_PhoneFormKeepsTheRowsWhereTheyWere(t *testing.T) {
 	// Filled in and sent: the form closes with an "adding …" line. The view
 	// moves no further than that line needs — it did jump eight rows.
 	v.m = typeStr(v.m, "/mcp add")
-	v.m = key(v.m, kEnter)
-	v.m = typeStr(v.m, "notes")
 	v.m = key(v.m, kEnter)
 	v.m = typeStr(v.m, "notes-mcp")
 	v.m = key(v.m, kEnter)

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -28,77 +27,6 @@ func TestNameFromURL(t *testing.T) {
 		if got := nameFromURL(in); got != want {
 			t.Errorf("nameFromURL(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-// The login form asks for the address first and fills the name in from it
-// as it is typed; a name the person typed is theirs and is not replaced.
-func TestLoginForm_NameFilledInFromTheAddress(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	m := newTUIModel(nil, ".")
-	m.openProviderForm(nil)
-	if m.providerStep != fieldAddr {
-		t.Fatalf("the form starts at field %d, want the address", m.providerStep)
-	}
-	m = pick(m, "https://api.example.com/v1")
-	if got := m.providerFields[fieldName].Value(); got != "example" {
-		t.Errorf("name %q, want example", got)
-	}
-	panel := stripANSI(m.providerFormPanel())
-	if strings.Index(panel, "address") > strings.Index(panel, "name") {
-		t.Errorf("the address is not first:\n%s", panel)
-	}
-	m = pick(m, "enter")
-	m.providerFields[fieldName].SetValue("work")
-	m = pick(m, "up") // back to the address, and change it
-	m = pick(m, "x")
-	if got := m.providerFields[fieldName].Value(); got != "work" {
-		t.Errorf("an edited name was replaced: %q", got)
-	}
-}
-
-// The filled-in name has its cursor at the end, so erasing it and typing a
-// new one gives the new one. Typed one key at a time, as a person does: the
-// name is filled in at the first key and its cursor stayed after that one
-// character ("local" erased by five backspaces, then "work", was "workocal").
-func TestLoginForm_FilledInNameIsErasedFromTheEnd(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	m := newTUIModel(nil, ".")
-	m.openProviderForm(nil)
-	for _, r := range "http://127.0.0.1:4000/v1" {
-		m = pick(m, string(r))
-	}
-	if got := m.providerFields[fieldName].Value(); got != "local" {
-		t.Fatalf("name %q, want local", got)
-	}
-	m = pick(m, "enter")
-	for range 5 {
-		nm, _ := m.updateModelPicking(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		m = nm.(tuiModel)
-	}
-	m = pick(m, "w", "o", "r", "k")
-	if got := m.providerFields[fieldName].Value(); got != "work" {
-		t.Errorf("name %q after erasing and typing work", got)
-	}
-}
-
-// Both forms say what a name used again does in the same words, and the
-// /mcp add form has no presets line (presets are in /help mcp).
-func TestForms_SameNameWordsAndNoPresetsLine(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	m := newTUIModel(nil, ".")
-	m.openProviderForm(nil)
-	login := stripANSI(m.providerFormPanel())
-	m.providerForm = false
-	m.openMCPForm()
-	mcp := stripANSI(m.mcpFormPanel())
-	for _, p := range []string{login, mcp} {
-		if !strings.Contains(p, sameNameNote) {
-			t.Errorf("form lacks %q:\n%s", sameNameNote, p)
-		}
-	}
-	if strings.Contains(mcp, "presets") {
-		t.Errorf("the /mcp add form still lists presets:\n%s", mcp)
 	}
 }
 
@@ -174,8 +102,8 @@ func TestRestoredQuestion_IsMarked(t *testing.T) {
 	m = typeStr(m, "Can you help?")
 	m = key(m, kEnter)
 	held := m.convo[len(m.convo)-1].collapsed
-	if strings.Contains(held, "214") {
-		t.Errorf("the kept-question line is in the attention colour: %q", held)
+	if !strings.Contains(held, "214") { // an instruction: the attention colour (run 6)
+		t.Errorf("the kept-question line is not in the attention colour: %q", held)
 	}
 	m.switchModel(providerConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})

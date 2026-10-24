@@ -147,6 +147,8 @@ type resumeAt struct {
 // attachSession attaches to the session o names, or creates one, and follows
 // it from after after (the zero value: from the start).
 func attachSession(o tuiOpts, after resumeAt) (*dunProc, error) {
+	attachNow.Store(&attachWait{}) // dund first (checkDundBuild says the rest)
+	defer attachNow.Store(nil)
 	c, err := dialDund()
 	if err != nil {
 		return nil, err

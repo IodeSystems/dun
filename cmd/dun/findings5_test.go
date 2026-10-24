@@ -96,7 +96,7 @@ func TestLines5_WarningMarkAndKeptQuestion(t *testing.T) {
 	m = typeStr(m, "hello")
 	m = key(m, kEnter)
 	last := m.convo[len(m.convo)-1].collapsed
-	if last != "  "+stSecondary.Render("kept your question — type /login, then it comes back") {
+	if last != warnLine("kept your question — type /login, then it comes back") {
 		t.Errorf("kept line %q", last)
 	}
 }

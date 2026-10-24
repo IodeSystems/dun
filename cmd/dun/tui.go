@@ -87,6 +87,7 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	// loop or race the key reader for the reply bytes. See initMarkdownStyle.
 	initMarkdownStyle()
 	setupBand()           // after the style: the band's filter follows dark or light
+	setupMascot()         // after the style: no colour, no foreman
 	loadScriptRenderers() // ~/.dun/renderers/*.star override/extend the built-ins
 	// The attach (dial dund, create or reuse the session, subscribe) runs
 	// behind the running program, from Init: a new engine names its session
@@ -611,20 +612,21 @@ type tuiModel struct {
 	// panelHeld: a panel below (palette, form, picker) shrank the pane and
 	// the pinned view keeps panelYOff while it is open and the conversation
 	// is no longer than panelRows (applyScroll).
-	panelHeld bool
-	panelYOff int
-	panelRows int
-	md        *glamour.TermRenderer // markdown renderer for assistant replies
-	mdWidth   int                   // width md was built for (rebuild only on change)
-	history   []string              // sent inputs, recalled with ctrl+↑/↓
-	histIdx   int                   // cursor into history (== len when not browsing)
-	mouseMode string                // "all" | "cell" | "off" — what /mouse last set
-	focus     int                   // focusInput | focusConvo | focusActivity
-	task      string                // the last user message, for the task line
-	agents    []agentRow            // live sub-agents (activity.go)
-	jobs      []jobRow              // live background jobs (activity.go)
-	actLevel  int                   // actCollapsed | actList — → descends, ← ascends
-	actSel    actKey                // selected activity row, by identity not index
+	panelHeld   bool
+	panelYOff   int
+	panelRows   int
+	panelFollow bool                  // new rows arrived with a panel open, this update: a shrink keeps them in view
+	md          *glamour.TermRenderer // markdown renderer for assistant replies
+	mdWidth     int                   // width md was built for (rebuild only on change)
+	history     []string              // sent inputs, recalled with ctrl+↑/↓
+	histIdx     int                   // cursor into history (== len when not browsing)
+	mouseMode   string                // "all" | "cell" | "off" — what /mouse last set
+	focus       int                   // focusInput | focusConvo | focusActivity
+	task        string                // the last user message, for the task line
+	agents      []agentRow            // live sub-agents (activity.go)
+	jobs        []jobRow              // live background jobs (activity.go)
+	actLevel    int                   // actCollapsed | actList — → descends, ← ascends
+	actSel      actKey                // selected activity row, by identity not index
 	// Agent scope: which child's conversation is on screen (0 = the root's),
 	// and the root's own convo/task stashed while it is.
 	scopeAgent   int
@@ -671,7 +673,8 @@ type tuiModel struct {
 	// starting began, on this clock, for the status line's elapsed time.
 	startQueue  []keptMsg
 	srvSince    map[string]time.Time
-	restoredMsg string // the held message, put back in the composer: the status line says whose it is while it is unchanged
+	srvOrder    []string // server ids in the order first seen: the splash keeps them there (noteServerOrder)
+	restoredMsg string   // the held message, put back in the composer: the status line says whose it is while it is unchanged
 	switchNote  string
 	quietReplay bool
 	hintShown   bool
@@ -734,18 +737,21 @@ type tuiModel struct {
 	modelSel     int             // highlighted row of the filtered list
 	modelPending int             // providers not yet answered
 	// The add-provider form (/model add, ctrl+a in the picker).
-	providerForm   bool
-	providerFields [3]textinput.Model // address, name, key (fieldAddr, fieldName, fieldKey)
-	providerStep   int
-	providerErr    string
-	providerAuto   string // the name the form filled in from the address; replaced while it is unedited
-	providerEdit   string // the provider the form edits; "" adds one
-	provider       string // name of the provider the engine runs on
+	providerForm     bool
+	providerFields   [3]textinput.Model // address, name, key (fieldAddr, fieldName, fieldKey)
+	providerStep     int
+	providerErr      string
+	providerAuto     string // the name the form filled in from the address; replaced while it is unedited
+	providerEdit     string // the provider the form edits; "" adds one
+	providerChecking string // the service just saved, asked for its models before the picker opens (saveProvider)
+	providerNotice   string // its "logged in" notice, said when the answer comes (or esc)
+	provider         string // name of the provider the engine runs on
 	// The add-MCP-server form (/mcp add).
 	mcpForm      bool
 	mcpFields    [mcpRows]textinput.Model // name, url or command, token or env, then oauth (see mcpform.go)
 	mcpStep      int                      // the field with the cursor
 	mcpErr       string
+	mcpAuto      string // the name filled in from the server row; follows it while unedited (mcpFollowName)
 	mcpToolsWant string // the server whose /mcp tools this TUI asked for (mcptools.go)
 	// mcpServersWant: this TUI asked for the /mcp table (mcpview.go).
 	mcpServersWant bool
@@ -914,6 +920,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// closes or new rows arrive (applyScroll).
 				if got < t.vp.Height && t.panelOpen() && t.scrollPinned && !selMode && !resized {
 					yoff := t.vp.YOffset
+					if t.panelFollow {
+						// Rows that came in this update are followed to the
+						// bottom of the smaller pane, not covered.
+						yoff = max(0, len(t.vp.lines)-got)
+					}
+					before := len(t.vp.lines)
 					if t.convoHold > 0 {
 						t.convoHold = yoff + got
 					}
@@ -924,8 +936,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.vp.SetYOffset(yoff)
 					if !t.panelHeld {
 						t.panelHeld, t.panelYOff = true, yoff
+						t.panelRows = len(t.vp.lines)
+					} else {
+						// Held already (one panel gave way to another): only the
+						// hold's blank rows are not new. A line that came with
+						// the change — the login notice, as the form became the
+						// picker — is new, and is followed (applyScroll); taking
+						// it into panelRows put it under the picker (run 5,
+						// 49×21: "· key set").
+						t.panelRows += len(t.vp.lines) - before
 					}
-					t.panelRows = len(t.vp.lines)
 				} else if got > t.vp.Height && t.vp.YOffset > 0 && !selMode && !resized {
 					t.holdTop(got)
 				} else if got < t.vp.Height && t.convoHold > 0 && !selMode && !resized {
@@ -952,6 +972,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.applyScroll(t.focus == focusConvo && !t.asking && len(t.convo) > 0)
 			}
 		}
+		t.panelFollow = false // for this update only (applyScroll)
 		// The block being paged may have grown, and the pane may have moved.
 		t.syncPager()
 		t.syncJobView()
@@ -1019,11 +1040,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case modelFetchMsg:
-		if m.modelPicking {
+		if m.modelPicking && !m.providerForm {
 			m.addModelRows(msg)
 			m.refresh()
 		}
 		return m, nil
+
+	case loginCheckedMsg:
+		return m, m.loginChecked(msg)
 
 	case tea.KeyPressMsg:
 		// Any key clears a mouse highlight; esc does only that.
@@ -1255,6 +1279,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.askParked && m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].askOpen {
 					return m.reopenAsk()
 				}
+				// The "not logged in" line (or the kept question's) does
+				// what it says.
+				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].needLogin && !m.loggedIn() {
+					m.setFocus(focusInput)
+					return m, m.openProviderForm(nil)
+				}
 				// Thinking (and anything else with a page) opens in the pager.
 				if m.openPager(m.sel) {
 					return m, nil
@@ -1297,6 +1327,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the turn it is already running. Before `ready` there is no engine
 			// to receive it: it is kept, and sent at ready (startqueue.go).
 			if v == "" {
+				// Not logged in, enter on an empty composer is the login
+				// the screen asks for (George, run 5: "make Enter open the
+				// login form").
+				if !m.loggedIn() && !m.starting && len(m.input.Images()) == 0 {
+					return m, m.openProviderForm(nil)
+				}
 				return m, nil
 			}
 			if m.starting && m.scopeAgent == 0 {
@@ -2270,6 +2306,7 @@ func (m *tuiModel) noteServers(ev evMsg) {
 	// Every server's id, for /mcp's completion.
 	m.serverIDs = m.serverIDs[:0]
 	m.servers, _ = serverStates(list)
+	m.noteServerOrder()
 	m.noteStarting(list)
 	for _, s := range list {
 		if st, ok := s.(map[string]any); ok && str(st["id"]) != "" {
@@ -3263,7 +3300,7 @@ func (m tuiModel) headView() string {
 	if m.branch != "" {
 		head += stDim.Render(" ⎇ " + m.branch)
 	}
-	if m.model != "" && m.url != "" {
+	if m.model != "" && m.url != "" && !m.splashModelShown() {
 		head += stDim.Render(" · " + m.model)
 	}
 	if n := m.liveAgents(); n > 0 {
@@ -3438,7 +3475,11 @@ func (m tuiModel) drawView() string {
 		// colour), so the status line does not say it again, and names only
 		// what works yet.
 		if !m.loggedIn() {
-			status = stDim.Render("enter send · / commands · " + m.exitHint())
+			enter := "enter send"
+			if strings.TrimSpace(m.input.Value()) == "" {
+				enter = "enter log in" // an empty composer's enter opens the form
+			}
+			status = stDim.Render(enter + " · / commands · " + m.exitHint())
 			break
 		}
 		if m.restoredMsg != "" && m.input.Value() == m.restoredMsg {
@@ -4102,6 +4143,10 @@ func (m *tuiModel) applyScroll(selMode bool) {
 			return
 		}
 		m.panelHeld = false
+		// New rows with a panel still open: they are followed, and if the
+		// panel grows in the same update (a form giving way to a taller
+		// picker), the shrink keeps them in view (Update's funnel).
+		m.panelFollow = true
 	}
 	// Auto-follow new content. When there's a streaming reply (m.cur), don't
 	// GotoBottom() blindly — that scrolls past the user's last message to the
@@ -4992,7 +5037,9 @@ func (m tuiModel) palettePanel() string {
 		foot = append(foot, "/"+c.name+" "+c.args)
 	}
 	if len(foot) > 0 {
-		rows = append(rows, stDim.Render("  "+strings.Join(foot, "  ·  ")))
+		// A blank row first: the count is about the list, not a row of it
+		// (run 5: list, count, input and hints stacked with no gap).
+		rows = append(rows, "", stDim.Render("  "+strings.Join(foot, "  ·  ")))
 	}
 	return fitRows(strings.Join(rows, "\n"), m.w) + "\n" + m.input.View()
 }

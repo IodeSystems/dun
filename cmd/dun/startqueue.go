@@ -88,10 +88,34 @@ func (m tuiModel) startQueuedHint() string {
 	return ""
 }
 
-// startingWhat is what the session waits for before it is ready.
+// startingNamesAfter is how long "starting session…" may spin before it
+// names what it waits for.
+const startingNamesAfter = 3 * time.Second
+
+// startingWhat is what the session waits for before it is ready. Past
+// startingNamesAfter, the attach says what it is waiting on (attachNow):
+// dund, or the session — and when dund is another build, that build and
+// the command that replaces it, since an older dund's engine names its
+// session only once its slowest server is up.
 func (m tuiModel) startingWhat() string {
 	if m.proc == nil {
-		return "starting session…"
+		w := attachNow.Load()
+		if w == nil || m.startingStart.IsZero() || time.Since(m.startingStart) < startingNamesAfter {
+			return "starting session…"
+		}
+		switch {
+		case !w.session:
+			return "waiting for dund, the session service…"
+		case w.dundBuild != "":
+			// Narrow, the words go before the fix does.
+			old := "an older build (" + w.dundBuild + ")"
+			if w.dundBuild == "?" {
+				old = "an older build"
+			}
+			return firstFit(m.w-12, "waiting for the session · dund is "+old+" — "+w.fix,
+				"dund is "+old+" — "+w.fix, "old dund — "+w.fix)
+		}
+		return "waiting for the session · dund is starting its engine…"
 	}
 	if names, _ := m.serversStarting(); names != "" {
 		return "waiting for " + names + "…"

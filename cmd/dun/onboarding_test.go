@@ -36,14 +36,14 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 		t.Fatalf("sent to an engine with nothing to send to: %s", sent.String())
 	}
 	txt = convoText(m)
-	if strings.Contains(txt, "not logged in") || !strings.HasSuffix(stripANSI(txt), "\n  "+heldLine) {
+	if strings.Contains(txt, "not logged in") || !strings.HasSuffix(stripANSI(txt), "\n⚠ "+heldLine) {
 		t.Fatalf("the held line, once, under the question, in place of the not-logged-in line:\n%s", txt)
 	}
 
 	m.openProviderForm(nil)
 	m.providerFields[fieldName].SetValue("work")
 	m.providerFields[fieldAddr].SetValue("http://llm/v1")
-	m.saveProvider()
+	m = finishLogin(m)
 	if txt := convoText(m); strings.Contains(txt, "not logged in") || !strings.Contains(txt, "logged in to work") {
 		t.Errorf("after the login:\n%s", txt)
 	}

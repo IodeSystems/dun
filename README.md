@@ -177,7 +177,9 @@ make install   # builds the stamped binary into ~/.local/bin/dun (BINDIR=… to 
 
 dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
               # URL, bearer optional) and pick a model. In the TUI, web or
-              # app: /login [name], /logout <name>, /model. Saves to
+              # app: /login [name] (asks the address and a key; the name
+              # comes from the address — /login rename <old> <new> changes
+              # it), /logout <name>, /model. Saves to
               # ~/.dun/config.json. There is no built-in provider: dun talks
               # to no model until you log in. Precedence: --flag > env > config.
               # /model [provider] <name> saves the default, as enter in the

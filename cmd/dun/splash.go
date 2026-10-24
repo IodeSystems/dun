@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
@@ -34,16 +35,13 @@ import (
 // at a word, so a change rewrites a row in place and nothing below it moves.
 
 // statusSection is one row of the splash: a label in the label column and
-// its value, already styled. more is a second row in the value column ("" is
-// no second row; a section with more always has it, so its height is fixed).
+// its value, already styled. more are rows under it in the value column (the
+// context's parts); how many depends on the width only, so a section's
+// height never changes with what it says.
 type statusSection struct {
 	label, value string
-	more         *string
+	more         []string
 }
-
-// splashRows is how many rows the splash's sections are, whatever they say:
-// eight sections, the context one two rows.
-const splashRows = 9
 
 // builtinServer are the servers that come with dun and are not optional
 // extensions: they are on the servers row even though they have a switch.
@@ -55,9 +53,14 @@ var builtinServer = map[string]bool{"poly-lsp": true}
 const contextHeavy = 0.60
 
 // splashSections are the splash's rows, in order: always the same ones.
-// w is the row width; each value is fitted to what is left of it.
-func (m tuiModel) splashSections(w int) []statusSection {
-	vw := w - splashValueCol
+// w is the row width; each value is fitted to what is left of it. short is
+// the phone beside the foreman: "files" for "context files", three columns
+// more for every value.
+func (m tuiModel) splashSections(w int, short bool) []statusSection {
+	vw, files := w-splashValueCol, "context files"
+	if short {
+		vw, files = w-(2+len("extensions")+2), "files"
+	}
 	ctx, parts := m.contextValue(vw)
 	return []statusSection{
 		{label: "folder", value: tildePath(m.workspace)},
@@ -65,8 +68,8 @@ func (m tuiModel) splashSections(w int) []statusSection {
 		{label: "servers", value: m.serversValue(vw)},
 		{label: "extensions", value: m.extensionsValue(vw)},
 		{label: "skills", value: m.skillsValue()},
-		{label: "context files", value: m.filesValue()},
-		{label: "context", value: ctx, more: &parts},
+		{label: files, value: m.filesValue()},
+		{label: "context", value: ctx, more: parts},
 		{label: "spend", value: m.spendValue(vw, time.Now())},
 	}
 }
@@ -81,7 +84,7 @@ const (
 // statusSections are /status's rows: the splash's, with the build and the
 // tool count.
 func (m tuiModel) statusSections(w int) []statusSection {
-	secs := m.splashSections(w)
+	secs := m.splashSections(w, false)
 	out := []statusSection{{label: "build", value: version}, secs[0], secs[1]}
 	out = append(out, statusSection{label: "tools", value: fmt.Sprintf("%d", len(m.tools))})
 	return append(out, secs[2:]...)
@@ -107,7 +110,7 @@ func (m tuiModel) modelValue() string {
 // what a narrow row keeps. Narrow, the tool counts go first.
 func (m tuiModel) serversValue(w int) string {
 	var short, shortest, long []string
-	for _, st := range sortedServers(m.servers) {
+	for _, st := range m.splashServers() {
 		if isExtension(st) && st.Err == "" {
 			continue // the extensions row
 		}
@@ -136,26 +139,54 @@ func (m tuiModel) serversValue(w int) string {
 	if len(long) == 0 {
 		return stDim.Render("none yet")
 	}
-	order := func(rows []string) string {
-		// Stable by the rank of the state each row says: starting, failed,
-		// running, off.
-		rank := func(r string) int {
-			p := ansi.Strip(r)
-			switch {
-			case strings.Contains(p, " starting"):
-				return 0
-			case strings.Contains(p, " did not start"):
-				return 1
-			case strings.Contains(p, " running"), strings.HasSuffix(p, " on"):
-				return 2
-			}
-			return 3
+	join := func(rows []string) string { return strings.Join(rows, stDim.Render(" · ")) }
+	return firstFit(w, join(long), join(short), join(shortest))
+}
+
+// splashServers are the servers in the order this TUI first saw them: a
+// server added later goes at the end, and a state changing rewrites a
+// server's words where they are — nothing on the row moves over (run 5:
+// "notes" sorted before "shell" and pushed it right).
+func (m tuiModel) splashServers() []dun.ServerState {
+	out := sortedServers(m.servers)
+	at := func(id string) int {
+		if i := slices.Index(m.srvOrder, id); i >= 0 {
+			return i
 		}
-		rows = slices.Clone(rows)
-		sort.SliceStable(rows, func(a, b int) bool { return rank(rows[a]) < rank(rows[b]) })
-		return strings.Join(rows, stDim.Render(" · "))
+		return len(m.srvOrder)
 	}
-	return firstFit(w, order(long), order(short), order(shortest))
+	sort.SliceStable(out, func(a, b int) bool { return at(out[a].ID) < at(out[b].ID) })
+	return out
+}
+
+// noteServerOrder appends the servers this TUI has not seen before to
+// srvOrder: those seen together by what they are doing — starting, failed,
+// running, off — so a narrow row starts with what works; then by name. A
+// new slice: model copies share the old.
+func (m *tuiModel) noteServerOrder() {
+	var fresh []dun.ServerState
+	for _, st := range sortedServers(m.servers) {
+		if !slices.Contains(m.srvOrder, st.ID) {
+			fresh = append(fresh, st)
+		}
+	}
+	rank := func(st dun.ServerState) int {
+		switch {
+		case st.Starting:
+			return 0
+		case st.Err != "":
+			return 1
+		case st.Running:
+			return 2
+		}
+		return 3
+	}
+	sort.SliceStable(fresh, func(a, b int) bool { return rank(fresh[a]) < rank(fresh[b]) })
+	next := slices.Clone(m.srvOrder)
+	for _, st := range fresh {
+		next = append(next, st.ID)
+	}
+	m.srvOrder = next
 }
 
 // isExtension is a server the extensions row is for: one with a switch
@@ -184,7 +215,7 @@ func sortedServers(states []dun.ServerState) []dun.ServerState {
 func (m tuiModel) extensionsValue(w int) string {
 	var parts []string
 	first := ""
-	for _, st := range sortedServers(m.servers) {
+	for _, st := range m.splashServers() {
 		if !isExtension(st) || st.Err != "" {
 			continue
 		}
@@ -240,17 +271,19 @@ func (m tuiModel) filesValue() string {
 
 // contextValue is the context row: what the context holds before the person
 // types, of the model's window when it is known, and its parts on the second
-// row. "~" marks an estimate; the exact count, when the provider counts,
-// replaces it in place. Orange from contextHeavy of the window.
+// rows. "~" marks an estimate; the exact count, when the provider counts,
+// replaces it in place. Orange from contextHeavy of the window. Every count
+// in tokens (tokN), so one row reads in one precision.
 //
-//	~18.4k of 32k before you type (57%)
-//	system 2.1k · tools 6.8k (mcp 5.2k) · skills 4.0k · context files 5.5k
-func (m tuiModel) contextValue(w int) (string, string) {
+//	~18.4k tokens before you type (of 32k, 57%)
+//	system 2.1k · tools 16 (4.8k) · mcp 1 server (344) · skills 14 (2.1k) · context files 0 (0)
+func (m tuiModel) contextValue(w int) (string, []string) {
 	s := m.ctxStats
+	rows := partsRows(w)
 	if s.systemTokens == 0 {
-		return stDim.Render("counting…"), ""
+		return stDim.Render("counting…"), make([]string, rows)
 	}
-	n := tokK(s.systemTokens)
+	n := tokN(s.systemTokens)
 	if !s.systemExact {
 		n = "~" + n
 	}
@@ -259,54 +292,90 @@ func (m tuiModel) contextValue(w int) (string, string) {
 	if s.window > 0 {
 		pct := float64(s.systemTokens) / float64(s.window)
 		heavy = pct >= contextHeavy
-		p := fmt.Sprintf("(%d%%)", int(math.Round(pct*100)))
-		v = firstFit(w, n+" of "+tokK(s.window)+" before you type "+p, n+" of "+tokK(s.window)+" "+p)
+		of := fmt.Sprintf("of %s, %d%%", tokK(s.window), int(math.Round(pct*100)))
+		v = firstFit(w, n+" tokens before you type ("+of+")", n+" tokens ("+of+")", n+" ("+of+")",
+			fmt.Sprintf("%s (%d%%)", n, int(math.Round(pct*100))))
 	} else {
-		v = firstFit(w, n+" before you type", n)
+		v = firstFit(w, n+" tokens before you type", n+" tokens", n)
 	}
 	if heavy {
 		v = stNote.Render(v)
 	}
-	// The parts may take the whole row under the label when the value
-	// column is too narrow for them (sectionsView).
-	return v, stSecondary.Render(m.contextParts(w + splashValueCol - 2))
+	parts := m.contextParts(w, rows)
+	for i := range parts {
+		parts[i] = stSecondary.Render(parts[i])
+	}
+	return v, parts
 }
 
-// contextParts is the context's parts in words, the longest form that fits
-// w, then cut at a word: the system prompt (without the context files), the
-// tools (with the MCP servers' share), the skill list and the context files.
-func (m tuiModel) contextParts(w int) string {
+// partsTemplate is the context's parts at their widest likely numbers: a
+// width that fits it fits the parts on one row whatever they say, so the
+// row count is the width's alone and a count changing never adds a row.
+const partsTemplate = "system 99.9k · tools 99 (99.9k) · mcp 9 servers (99.9k) · skills 99 (99.9k) · context files 99 (99.9k)"
+
+// partsRows is how many rows the context's parts take in a value column w
+// cells wide: one when the template fits, else two.
+func partsRows(w int) int {
+	if len(partsTemplate) <= w {
+		return 1
+	}
+	return 2
+}
+
+// contextParts is the context's parts in words, each its count and its
+// tokens, zeros included: the system prompt (without the context files),
+// dun's own tools (with the provider's tool-use overhead), the MCP servers'
+// tools, the skill list and the context files. On rows rows of w cells: two
+// rows put the skills and the files on the second; a row too long for w
+// ends at a word.
+func (m tuiModel) contextParts(w, rows int) []string {
 	s := m.ctxStats
-	var builtin, mcp, skills int
+	var builtin, mcp, skills, servers int
 	for _, p := range s.systemParts {
 		switch {
 		case p.Name == dun.SkillsPart:
 			skills += p.Tokens
 		case strings.HasPrefix(p.Name, "mcp: "):
 			mcp += p.Tokens
+			servers++
 		default:
 			builtin += p.Tokens
 		}
 	}
 	system := max(0, s.systemPrompt-s.systemRules)
-	tools := builtin + mcp + s.systemShared
-	form := func(sys, files string, withMCP bool) string {
-		out := []string{sys + " " + tokK(system)}
-		t := "tools " + tokK(tools)
-		if withMCP && mcp > 0 {
-			t += " (mcp " + tokK(mcp) + ")"
-		}
-		out = append(out, t)
-		if skills > 0 {
-			out = append(out, "skills "+tokK(skills))
-		}
-		if s.systemRules > 0 {
-			out = append(out, files+" "+tokK(s.systemRules))
-		}
-		return strings.Join(out, " · ")
+	part := func(name string, n, tok int) string { return fmt.Sprintf("%s %d (%s)", name, n, tokN(tok)) }
+	items := []string{
+		"system " + tokN(system),
+		part("tools", m.builtinToolCount(), builtin+s.systemShared),
+		fmt.Sprintf("mcp %s (%s)", plural(servers, "server"), tokN(mcp)),
+		part("skills", len(m.skills), skills),
+		part("context files", len(s.systemFiles), s.systemRules),
 	}
-	return fitText(firstFit(w, form("system", "context files", true), form("system", "files", true),
-		form("system", "files", false), form("sys", "files", false)), w)
+	short := slices.Clone(items)
+	short[4] = part("files", len(s.systemFiles), s.systemRules)
+	if rows == 1 {
+		return []string{fitText(firstFit(w, strings.Join(items, " · "), strings.Join(short, " · ")), w)}
+	}
+	return []string{
+		fitText(strings.Join(items[:3], " · "), w),
+		fitText(firstFit(w, strings.Join(items[3:], " · "), strings.Join(short[3:], " · ")), w),
+	}
+}
+
+// builtinToolCount is how many of the tools are dun's own: all of them less
+// the skill tool and the running MCP servers' (a server hosted in the shell
+// lists its tools under the shell's).
+func (m tuiModel) builtinToolCount() int {
+	n := len(m.tools)
+	if slices.Contains(m.tools, "skill") {
+		n--
+	}
+	for _, st := range m.servers {
+		if st.Running && st.Via != dun.ViaShell {
+			n -= st.Tools
+		}
+	}
+	return max(0, n)
 }
 
 // firstFit is the first of forms that fits w cells, else the last.
@@ -319,7 +388,19 @@ func firstFit(w int, forms ...string) string {
 	return forms[len(forms)-1]
 }
 
-// tokK is a token count the short way: 940, 18.4k, 128k, 1.05M.
+// tokN is a token count in one precision: plain below 1000, then thousands
+// with one decimal (1.0k, 18.4k, 128.3k), then millions with two.
+func tokN(n int) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%d", n)
+	case n < 1_000_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%.2fM", float64(n)/1e6)
+}
+
+// tokK is a size the short way — a window: 940, 18.4k, 128k, 1.05M.
 func tokK(n int) string {
 	switch {
 	case n < 1000:
@@ -335,13 +416,13 @@ func tokK(n int) string {
 // spendValue is the spend row: the smallest period whose spend is
 // significant (spendPeriod), then what the key has left when the gateway
 // says (orange when it covers a day or less at the key's rate over the last
-// 24 hours). A provider that reports no cost is "not reported by <host>",
+// 24 hours). A provider that reports no cost is "not reported by <service>",
 // never $0.
 //
 //	$0.42 today · $12.30 left on work
 func (m tuiModel) spendValue(w int, now time.Time) string {
 	sp := m.ctxStats.spend
-	host := hostName(m.url)
+	host := m.serviceName()
 	unpriced := sp != nil && sp.Calls > 0 && sp.CostedCalls == 0
 	var v string
 	if sp != nil && sp.Ledger != nil {
@@ -468,21 +549,76 @@ func sectionsView(secs []statusSection, w int) string {
 	rows := make([]string, 0, len(secs)+1)
 	for _, s := range secs {
 		rows = append(rows, fitText("  "+stDim.Render(fmt.Sprintf("%-*s", lw, s.label))+"  "+s.value, w))
-		if s.more != nil {
-			// In the value column; on a phone, where the column is too narrow
-			// for it, from the label column.
-			indent := lw + 4
-			if ansi.StringWidth(*s.more) > w-indent {
-				indent = 2
-			}
-			rows = append(rows, fitText(strings.Repeat(" ", indent)+*s.more, w))
+		// In the value column at every width, under the value it belongs to
+		// (at 49 columns it started under the label and read as a row of
+		// its own: run 5).
+		for _, more := range s.more {
+			rows = append(rows, fitText(strings.Repeat(" ", lw+4)+more, w))
 		}
 	}
 	return strings.Join(rows, "\n") + "\n"
 }
 
-// splashView is the splash as the state is now, at width w.
-func (m tuiModel) splashView(w int) string { return sectionsView(m.splashSections(w), w) }
+// splashView is the splash as the state is now, at width w: the tagline
+// row, then the sections, with the foreman (mascot.go) to their left when
+// the terminal can draw him. He is never taller than the rows beside him
+// (the rows are at least his height; when they are not, blank rows make
+// them so), so the splash's height is the width's alone.
+func (m tuiModel) splashView(w int) string {
+	grid, tag := mascotFor(m.w)
+	tagRow := lipgloss.NewStyle().Bold(true).Render("dun") + stDim.Render(" · ") + stSecondary.Render(tag)
+	if grid == nil {
+		return fitText("  "+tagRow, w) + "\n" + sectionsView(m.splashSections(w, false), w)
+	}
+	art, aw := mascotArt(grid), mascotWidth(grid)
+	rw := max(20, w-aw)
+	body := strings.Split(strings.TrimSuffix(sectionsView(m.splashSections(rw, m.w < mascotSmallW), rw), "\n"), "\n")
+	rows := append([]string{fitText("  "+tagRow, rw)}, body...)
+	out := make([]string, max(len(rows), len(art)))
+	for i := range out {
+		a := strings.Repeat(" ", aw)
+		if i < len(art) {
+			a = art[i]
+		}
+		r := ""
+		if i < len(rows) {
+			r = rows[i]
+		}
+		out[i] = a + r
+	}
+	return strings.Join(out, "\n") + "\n"
+}
+
+// splashModelRow is the live splash's model row: under the tagline and the
+// folder.
+const splashModelRow = 2
+
+// splashModelShown reports whether the live splash's model row is in the
+// view: the header leaves the model out then (run 5: the model three times
+// on one screen — header, splash, notice). Scrolled past it, the header
+// says it again, so the model is always on screen.
+func (m tuiModel) splashModelShown() bool {
+	if len(m.convo) == 0 || !m.convo[0].liveSplash {
+		return false
+	}
+	top := 0
+	if len(m.frame.rowOffset) > 0 {
+		top = m.frame.rowOffset[0]
+	}
+	row := top + splashModelRow
+	return row >= m.vp.YOffset && row < m.vp.YOffset+m.vp.Height
+}
+
+// serviceName is the AI service as the person named it at /login ("local",
+// "work"), or its host when the session has no saved name: a row says the
+// name the person knows, never an address (run 5: "not reported by
+// 127.0.0.1").
+func (m tuiModel) serviceName() string {
+	if m.provider != "" {
+		return m.provider
+	}
+	return hostName(m.url)
+}
 
 // splashW is the width the splash's rows are cut to: one column less than
 // the pane, so the selection gutter never wraps one.
@@ -561,7 +697,7 @@ func (m tuiModel) statusDetail(w int) string {
 			state = stErr.Render("did not start")
 		}
 		if n, ok := tokensOf[st.ID]; ok && st.Running {
-			state += stDim.Render(" · ") + est + tokK(n)
+			state += stDim.Render(" · ") + est + tokN(n)
 		}
 		srv = append(srv, [2]string{st.ID, state})
 	}
@@ -569,7 +705,7 @@ func (m tuiModel) statusDetail(w int) string {
 	// Skills: each one's line in the skill list, estimated.
 	var sk [][2]string
 	for _, k := range m.skills {
-		v := "~" + tokK(estimateTok("\n- "+k.Name+": "+k.Description))
+		v := "~" + tokN(estimateTok("\n- "+k.Name+": "+k.Description))
 		if k.UserOnly {
 			v = stDim.Render("/skill only")
 		}
@@ -578,7 +714,7 @@ func (m tuiModel) statusDetail(w int) string {
 	block("skills", sk)
 	var fl [][2]string
 	for _, f := range s.systemFiles {
-		fl = append(fl, [2]string{f.Name, "~" + tokK(f.Tokens)})
+		fl = append(fl, [2]string{f.Name, "~" + tokN(f.Tokens)})
 	}
 	block("context files", fl)
 	block("spend", m.spendRows())
@@ -593,7 +729,7 @@ func estimateTok(s string) int { return len(s) / 4 }
 // year, this month by model, this session, and the key's budget.
 func (m tuiModel) spendRows() [][2]string {
 	sp := m.ctxStats.spend
-	host := hostName(m.url)
+	host := m.serviceName()
 	var rows [][2]string
 	amt := func(by map[string]float64) string {
 		if len(by) == 0 || moneyIn(by) == "" {

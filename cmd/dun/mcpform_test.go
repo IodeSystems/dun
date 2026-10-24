@@ -31,25 +31,24 @@ func TestMCPFormSpec_URLOrCommand(t *testing.T) {
 	}
 }
 
-// A name and a server are all the form needs: enter on the server row adds
-// it, standalone — the mode is not asked (it is /mcp mode, later), and the
-// optional rows are not walked through.
+// What the person was given is all the form needs: enter on the server row
+// adds it, standalone — the mode is not asked (it is /mcp mode, later), the
+// name is filled in, and the optional rows are not walked through.
 func TestMCPForm_EnterOnServerAdds(t *testing.T) {
+	onPath(t, "corp-mcp")
 	var buf bytes.Buffer
 	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	m.openMCPForm()
-	m.mcpFields[0].SetValue("corp-docs")
-	m.mcpFields[1].SetValue("corp-mcp --stdio")
-	if v := stripANSI(m.mcpFormPanel()); strings.Contains(v, "standalone") || strings.Contains(v, "scripted") {
+	var cur tea.Model = m
+	cur = typeStr(cur.(tuiModel), "corp-mcp --stdio")
+	if v := stripANSI(cur.(tuiModel).mcpFormPanel()); strings.Contains(v, "standalone") || strings.Contains(v, "scripted") {
 		t.Fatalf("the form asks for the mode:\n%s", v)
 	}
-	var cur tea.Model = m
-	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // name → server
-	if tm := cur.(tuiModel); tm.mcpStep != mcpServer || buf.Len() != 0 {
-		t.Fatalf("enter on the name row: step %d, sent %q", tm.mcpStep, buf.String())
+	if tm := cur.(tuiModel); tm.mcpFields[mcpID].Value() != "corp" || buf.Len() != 0 {
+		t.Fatalf("the name is filled in: %q, sent %q", tm.mcpFields[mcpID].Value(), buf.String())
 	}
 	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // server → added
-	if tm := cur.(tuiModel); tm.mcpForm || !strings.Contains(convoText(tm), "adding corp-docs…") {
+	if tm := cur.(tuiModel); tm.mcpForm || !strings.Contains(convoText(tm), "adding corp…") {
 		t.Errorf("form open %v, convo:\n%s", tm.mcpForm, convoText(tm))
 	}
 	var got map[string]string
@@ -192,6 +191,7 @@ func must[T any](v T, _ error) T { return v }
 // A command hides the bearer and oauth rows and asks for env (masked); a
 // URL hides env. The server row says which it is.
 func TestMCPForm_CommandRowsAndEnv(t *testing.T) {
+	onPath(t, "db-mcp")
 	var buf bytes.Buffer
 	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	m.openMCPForm()
@@ -241,6 +241,7 @@ func TestMCPForm_CommandRowsAndEnv(t *testing.T) {
 
 // A preset fills the id and server rows; nothing is sent until enter.
 func TestMCPForm_Preset(t *testing.T) {
+	onPath(t)
 	var buf bytes.Buffer
 	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	m.openMCPForm("playwright")
@@ -254,11 +255,11 @@ func TestMCPForm_Preset(t *testing.T) {
 	if !strings.Contains(m.mcpErr, "no preset") {
 		t.Errorf("unknown preset: %q", m.mcpErr)
 	}
-	// Typing a preset's id fills an empty server row.
+	// A preset's name typed as what you were given becomes what it runs.
 	m.openMCPForm()
-	m.mcpFields[mcpID].SetValue("figma")
+	m.mcpFields[mcpServer].SetValue("figma")
 	cur, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	if tm := cur.(tuiModel); tm.mcpFields[mcpServer].Value() != "http://127.0.0.1:3845/mcp" {
+	if tm := cur.(tuiModel); tm.mcpFields[mcpServer].Value() != "http://127.0.0.1:3845/mcp" || tm.mcpFields[mcpID].Value() != "figma" {
 		t.Errorf("typed preset id: %q", tm.mcpFields[mcpServer].Value())
 	}
 }

@@ -57,12 +57,25 @@ func spendEvent(today, week float64, remaining, last24h float64) map[string]any 
 
 func splashText(v *vtui) string { return stripANSI(v.m.convo[0].collapsed) }
 
-// The splash is splashRows rows at every width and in every state — counting,
-// estimated, exact, spend arriving, a server coming up — and no row is wider
-// than the pane: a change rewrites rows in place.
+// The splash is one height at a width, in every state — counting,
+// estimated, exact, spend arriving, a server coming up — with the foreman
+// and without, and no row is wider than the pane: a change rewrites rows in
+// place.
 func TestSplash5_FixedHeightAtEveryWidth(t *testing.T) {
-	for _, w := range []int{49, 100, 180} {
+	for _, art := range []bool{false, true} {
+		mascotColour = art
+		t.Cleanup(func() { mascotColour = false })
+		for _, w := range []int{49, 100, 120, 180} {
+			fixedHeightAt(t, w)
+		}
+	}
+}
+
+func fixedHeightAt(t *testing.T, w int) {
+	t.Helper()
+	{
 		v := splash5(t, w, 30)
+		want := strings.Count(splashText(v), "\n")
 		steps := []map[string]any{
 			costEvent(false, 32000),
 			costEvent(true, 32000),
@@ -76,8 +89,8 @@ func TestSplash5_FixedHeightAtEveryWidth(t *testing.T) {
 		}
 		check := func(when string) {
 			s := splashText(v)
-			if n := strings.Count(s, "\n"); n != splashRows {
-				t.Errorf("%d cols, %s: %d rows, want %d:\n%s", w, when, n, splashRows, s)
+			if n := strings.Count(s, "\n"); n != want || n < 6 {
+				t.Errorf("%d cols (art %v), %s: %d rows, want %d (at least the small foreman's 6):\n%s", w, mascotColour, when, n, want, s)
 			}
 			for _, r := range strings.Split(s, "\n") {
 				if ansi.StringWidth(r) > v.m.splashW() {
@@ -103,8 +116,8 @@ func TestSplash5_ContextRow(t *testing.T) {
 	v.event(costEvent(false, 32000)) // 13.4k of 32k = 42%
 	s := splashText(v)
 	for _, want := range []string{
-		"context        ~13.4k of 32k before you type (42%)\n",
-		"               system 600 · tools 7.3k (mcp 5.2k) · skills 4k · context files 1.5k\n",
+		"context        ~13.4k tokens before you type (of 32k, 42%)\n",
+		"               system 600 · tools 0 (2.1k) · mcp 1 server (5.2k)\n", "               skills 0 (4.0k) · context files 2 (1.5k)\n",
 		"context files  AGENTS.md, docs/rules.md\n",
 	} {
 		if !strings.Contains(s, want) {
@@ -115,21 +128,21 @@ func TestSplash5_ContextRow(t *testing.T) {
 		t.Error("42% is orange")
 	}
 	v.event(costEvent(true, 20000)) // 67%: exact, heavy
-	if s := splashText(v); !strings.Contains(s, "context        13.4k of 20k before you type (67%)\n") {
+	if s := splashText(v); !strings.Contains(s, "context        13.4k tokens before you type (of 20k, 67%)\n") {
 		t.Errorf("exact:\n%s", s)
 	}
-	if !strings.Contains(v.m.convo[0].collapsed, stNote.Render("13.4k of 20k before you type (67%)")) {
+	if !strings.Contains(v.m.convo[0].collapsed, stNote.Render("13.4k tokens before you type (of 20k, 67%)")) {
 		t.Errorf("67%% is not orange: %q", v.m.convo[0].collapsed)
 	}
 	v.event(costEvent(true, 0))
-	if s := splashText(v); !strings.Contains(s, "context        13.4k before you type\n") {
+	if s := splashText(v); !strings.Contains(s, "context        13.4k tokens before you type\n") {
 		t.Errorf("no window:\n%s", s)
 	}
 	// At 49 the words that carry it stay: the count, the window, the share.
 	p := splash5(t, 49, 21)
 	p.event(costEvent(false, 32000))
 	s = splashText(p)
-	if !strings.Contains(s, "context        ~13.4k of 32k (42%)\n") || !strings.Contains(s, "\n  sys 600 · tools 7.3k · skills 4k · files 1.5k\n") {
+	if !strings.Contains(s, "context        ~13.4k tokens (of 32k, 42%)\n") || !strings.Contains(s, "\n                 system 600 · tools 0 (2.1k)…\n") {
 		t.Errorf("at 49:\n%s", s)
 	}
 }
@@ -174,7 +187,7 @@ func TestSplash5_SpendRow(t *testing.T) {
 	}
 	// A provider that reports no cost.
 	v.event(map[string]any{"type": "spend", "calls": float64(4), "costed_calls": float64(0), "ledger": map[string]any{}})
-	if s := splashText(v); !strings.Contains(s, "spend          not reported by llm.example.com\n") {
+	if s := splashText(v); !strings.Contains(s, "spend          not reported by work\n") {
 		t.Errorf("not reported:\n%s", s)
 	}
 }
@@ -216,7 +229,7 @@ func TestStatus5_Detail(t *testing.T) {
 	v.m.statusSlash()
 	s := stripANSI(v.m.convo[len(v.m.convo)-1].collapsed)
 	for _, want := range []string{
-		"  build          ", "  context        13.4k of 32k before you type (42%)\n",
+		"  build          ", "  context        13.4k tokens before you type (of 32k, 42%)\n",
 		"  servers\n", "    notes  running · 1 tool · 5.2k\n",
 		"  skills\n", "    deploy  ~8\n",
 		"  context files\n", "    AGENTS.md      ~900\n", "    docs/rules.md  ~600\n",

@@ -953,10 +953,15 @@ func (m *multilineInput) text(s wrapSeg) string { return string(m.buf[s.start:s.
 // placeholderView is the empty state. The placeholder shows whether or not the
 // box has focus — a hint that disappears when you click into the field is the
 // wrong way round, and it is where the caret has to live anyway.
+//
+// The caret is on a blank cell before the placeholder, never on its first
+// letter (run 5: the block on the "a" of "ask" read as a typed letter), and
+// the placeholder starts one cell in whether or not the box has focus, so a
+// focus change moves nothing.
 func (m *multilineInput) placeholderView() string {
-	text := stDim.Render(m.placeholder)
+	text := " " + stDim.Render(m.placeholder)
 	if m.focused {
-		text = withCaret(m.placeholder, 0)
+		text = stCaret.Render(" ") + stDim.Render(m.placeholder)
 	}
 	return m.pad("› " + text)
 }

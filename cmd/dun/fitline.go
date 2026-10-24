@@ -170,14 +170,20 @@ func listRow(pre, name, post string, selected bool) string {
 const formLabelW = 7
 
 // formFieldW is a form field's width in a terminal w columns wide: the row
-// less the gutter and the label column, at most 56. A wider field was cut
+// less the gutter and the label column, at most 60 (the /mcp add hint and its leading blank). A wider field was cut
 // at the edge, and its placeholder with it.
 func formFieldW(w int) int {
 	if w <= 0 {
-		return 56
+		return 60
 	}
-	return max(10, min(56, w-(2+formLabelW+2)-3))
+	return max(10, min(60, w-(2+formLabelW+2)-3))
 }
+
+// placeholder is a field's placeholder text as it is set: after one blank
+// cell, which is where an empty focused field's cursor sits. Without it the
+// cursor block covered the first letter, and "e.g." read as a typed "e"
+// (run 5).
+func placeholder(text string) string { return " " + text }
 
 // formNotes ends a form (the login form, /mcp add) the one way: after its
 // fields and any error, a blank row, then its notes, dim, one per row.

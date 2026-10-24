@@ -50,13 +50,13 @@ func TestSplash_FreshSessionOnly(t *testing.T) {
 			t.Errorf("splash lacks %q:\n%s", want, s)
 		}
 	}
-	for _, not := range []string{"dun", version, "tools  ", "raglit on", "auto"} {
+	for _, not := range []string{version, "tools  ", "raglit on", "auto"} {
 		if strings.Contains(s, not) {
 			t.Errorf("splash has %q:\n%s", not, s)
 		}
 	}
-	if n := strings.Count(s, "\n"); n != splashRows {
-		t.Errorf("splash is %d rows, want %d:\n%s", n, splashRows, s)
+	if n := strings.Count(s, "\n"); n != 9+partsRows(m.splashW()-splashValueCol) {
+		t.Errorf("splash is %d rows, want %d:\n%s", n, 9+partsRows(m.splashW()-splashValueCol), s)
 	}
 	if !strings.Contains(stripANSI(m.convo[len(m.convo)-1].collapsed), "not logged in") {
 		t.Errorf("the first-run line is not after the splash:\n%s", convoText(m))

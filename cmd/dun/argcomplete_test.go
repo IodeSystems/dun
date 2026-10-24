@@ -141,7 +141,7 @@ func TestPalette_BoundedHeight(t *testing.T) {
 	m.paletteSel = 0
 	m = typeStr(m, "/")
 	if n := len(m.paletteMatches()); n > paletteWindow {
-		if h := lipgloss.Height(m.palettePanel()); h != paletteWindow+3 { // + the heading
+		if h := lipgloss.Height(m.palettePanel()); h != paletteWindow+4 { // + the heading, the gap, the count
 			t.Errorf("command palette height %d with %d commands", h, n)
 		}
 	}

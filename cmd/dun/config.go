@@ -158,6 +158,9 @@ type providerOp struct {
 	URL   string `json:"url,omitempty"`
 	Key   string `json:"key,omitempty"`   // login: optional; again under a saved name, empty keeps the saved key
 	Model string `json:"model,omitempty"` // use: an id, typed when the list is not there
+	// NewName is rename's new name for Name (the login form fills a name in
+	// from the address; this is how it is changed).
+	NewName string `json:"new_name,omitempty"`
 }
 
 // applyProviderOp changes the logged-in providers and says what it did. It
@@ -222,8 +225,31 @@ func applyProviderOp(op providerOp) (string, error) {
 		}
 		cfg.use(p, model)
 		msg = "default: " + model + " on " + name
+	case "rename":
+		p, ok := cfg.named(name)
+		if !ok {
+			return "", errors.New("not logged in to " + name)
+		}
+		to := strings.TrimSpace(op.NewName)
+		if to == "" || strings.ContainsAny(to, " \t") {
+			return "", errors.New("a provider name is one word")
+		}
+		if _, taken := cfg.named(to); taken {
+			return "", errors.New(to + " is taken — /logout " + to + " first")
+		}
+		wasDefault := cfg.activeName() == name
+		cfg.Providers = cfg.providerList()
+		for i := range cfg.Providers {
+			if cfg.Providers[i].Name == p.Name {
+				cfg.Providers[i].Name = to // in place: the list keeps its order
+			}
+		}
+		if wasDefault {
+			cfg.Provider = to
+		}
+		msg = "renamed " + name + " to " + to
 	default:
-		return "", errors.New("no provider operation " + op.Op + " (login, logout, use)")
+		return "", errors.New("no provider operation " + op.Op + " (login, logout, use, rename)")
 	}
 	if err := saveConfig(cfg); err != nil {
 		return "", fmt.Errorf("failed to save config: %w", err)

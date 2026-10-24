@@ -110,10 +110,17 @@ func (m *tuiModel) dropNeedLogin() {
 func (m *tuiModel) holdUnsent(v string) {
 	m.appendUser(v)
 	m.heldMsg = v
+	m.sayHeld()
+}
+
+// sayHeld puts the kept question's line at the end of the conversation, in
+// place of the not-logged-in line. It is an instruction — what to type
+// next — so it has the warning's shape and colour (run 5: in the secondary
+// grey it was the quietest line on the screen). The login form takes it
+// away when it opens; esc puts it back.
+func (m *tuiModel) sayHeld() {
 	m.dropNeedLogin()
-	// At the body's indent, in the secondary grey: it is about the question
-	// above it, which is there too.
-	m.convo = append(m.convo, convoEntry{collapsed: "  " + stSecondary.Render(heldLine), needLogin: true, hang: true})
+	m.convo = append(m.convo, convoEntry{collapsed: warnLine(heldLine), needLogin: true, hang: true})
 	m.refresh()
 }
 
