@@ -241,7 +241,9 @@ func screenLabels(screen string) []string {
 	}
 	for _, line := range strings.Split(screen, "\n") {
 		for _, frag := range splitRe.Split(strings.TrimSpace(line), -1) {
-			if m := keyHintRe.FindStringSubmatch(frag); m != nil {
+			// A hint says what the key does in a few words; "→ Notes: keep
+			// the greeting short." is a tool call's result, not a hint.
+			if m := keyHintRe.FindStringSubmatch(frag); m != nil && len(strings.Fields(m[2])) <= 4 && !strings.ContainsAny(m[2], ":.") {
 				add("key", m[1]+": "+m[2])
 			}
 		}

@@ -143,6 +143,12 @@ func TestScreenLabels(t *testing.T) {
 			t.Errorf("a path read as a command: %q", got)
 		}
 	}
+	// A tool call's result after its arrow is text, not a key hint.
+	for _, g := range screenLabels("✓ notes · project notes  → Notes: keep the greeting short. Release on Fridays.") {
+		if strings.HasPrefix(g, "[key]") {
+			t.Errorf("a result read as a key: %q", g)
+		}
+	}
 }
 
 // rec drives a program from a script: waits for words, types, presses keys,
