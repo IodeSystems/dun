@@ -139,10 +139,12 @@ These are the owner's calls. Judge only how well they are carried out.
   It is not a fault; do not score it as one. Judge only its execution.
 - Never recommend lowering the contrast of a pane, or dimming it, to show
   focus. The person reads one pane while typing in the other.
-- Showing how an answer was produced (thinking, tool calls, steps, sources)
-  is required; judge how it is shown, never recommend hiding or demoting it.
-  Why: the person may be running a lesser model, and being confident in an
-  answer means being able to see the thinking and the tool calls behind it.
+- Judge in the product's context (canon IVE-6): read the run's `product.md`
+  first — audience, the category's best in class, constraints and aims — and
+  cite the context a fault breaks. dun runs on weaker models whose thinking
+  and tool use cannot be trusted, so showing how an answer was produced
+  (thinking, tool calls, steps, sources) is required and adds value; judge
+  how it is shown, never recommend hiding or demoting it.
 - The question band is a full-width filled band (fill 236, bold, capped at
   100 columns), its text in the answer's foreground. Judge its execution,
   not its existence.
