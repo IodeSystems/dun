@@ -22,7 +22,7 @@
       "actions": [
         {"type": "Can you help me with this project?"},
         {"key": "enter"},
-        {"wait_for": "not logged in", "timeout_ms": 20000}
+        {"wait_for": "kept your question", "timeout_ms": 20000}
       ]
     },
     {
@@ -93,7 +93,7 @@
         {"key": "enter"},
         {"type": "notes-mcp"},
         {"key": "enter"},
-        {"wait_for": "running", "timeout_ms": 30000}
+        {"wait_for": "notes added", "timeout_ms": 30000}
       ]
     },
     {

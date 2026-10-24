@@ -5,7 +5,10 @@ package main
 //
 // llm serves GET /v1/models (and /models) and POST /v1/chat/completions,
 // streamed (SSE) or not. Every answer is canned: the run judges the
-// product's screens, not a model's prose.
+// product's screens, not a model's prose. A question about the team notes is
+// answered the way a real model does it once the notes server is added: a
+// call to its tool first, then an answer from the result — so the walk shows
+// dun's own rendering of a tool call.
 //
 // mcp speaks JSON-RPC 2.0 over stdin/stdout (one message per line) and offers
 // one read-only tool, project_notes, that returns a fixed note.
@@ -77,10 +80,14 @@ func llmHandler(reqLog io.Writer) http.Handler {
 			http.Error(w, `{"error":{"message":"bad json"}}`, http.StatusBadRequest)
 			return
 		}
-		reply := cannedReply(req)
-		fmt.Fprintf(reqLog, "%s POST %s model=%s stream=%v msgs=%d tools=%d\n",
-			time.Now().Format(time.RFC3339), r.URL.Path, req.Model, req.Stream, len(req.Messages), len(req.Tools))
-		usage := map[string]any{"prompt_tokens": 1200, "completion_tokens": len(strings.Fields(reply)), "total_tokens": 1200 + len(strings.Fields(reply))}
+		reply, call := cannedReply(req)
+		fmt.Fprintf(reqLog, "%s POST %s model=%s stream=%v msgs=%d tools=%d call=%s\n",
+			time.Now().Format(time.RFC3339), r.URL.Path, req.Model, req.Stream, len(req.Messages), len(req.Tools), call)
+		usage := map[string]any{"prompt_tokens": 1200, "completion_tokens": len(strings.Fields(reply)) + 1, "total_tokens": 1201 + len(strings.Fields(reply))}
+		if call != "" {
+			toolCall(w, req, call, usage)
+			return
+		}
 		if !req.Stream {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -122,6 +129,55 @@ func llmHandler(reqLog io.Writer) http.Handler {
 	return mux
 }
 
+// toolCall answers with one call to the tool named, with no arguments.
+func toolCall(w http.ResponseWriter, req chatRequest, name string, usage map[string]any) {
+	tc := map[string]any{"index": 0, "id": "call_notes_1", "type": "function",
+		"function": map[string]any{"name": name, "arguments": "{}"}}
+	if !req.Stream {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "stub-1", "object": "chat.completion", "model": req.Model,
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "tool_calls",
+				"message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{tc}}}},
+			"usage": usage,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	fl, _ := w.(http.Flusher)
+	send := func(v any) {
+		b, _ := json.Marshal(v)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		if fl != nil {
+			fl.Flush()
+		}
+	}
+	send(map[string]any{"id": "stub-1", "object": "chat.completion.chunk", "model": req.Model,
+		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "tool_calls": []any{tc}}}}})
+	send(map[string]any{"id": "stub-1", "object": "chat.completion.chunk", "model": req.Model,
+		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": "tool_calls"}}})
+	send(map[string]any{"id": "stub-1", "object": "chat.completion.chunk", "model": req.Model,
+		"choices": []any{}, "usage": usage})
+	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+// notesTool is the name dun gave the notes server's tool in this request
+// ("" when the server is not added): dun prefixes a server's tools with
+// its id, so match on the tool's own name.
+func notesTool(tools []json.RawMessage) string {
+	for _, raw := range tools {
+		var t struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		}
+		if json.Unmarshal(raw, &t) == nil && strings.HasSuffix(t.Function.Name, "project_notes") {
+			return t.Function.Name
+		}
+	}
+	return ""
+}
+
 type chatRequest struct {
 	Model    string            `json:"model"`
 	Stream   bool              `json:"stream"`
@@ -129,10 +185,18 @@ type chatRequest struct {
 	Tools    []json.RawMessage `json:"tools"`
 }
 
-// cannedReply answers the last user message. dun also makes side calls
-// (titles, suggestions); they get a short, neutral line.
-func cannedReply(req chatRequest) string {
-	last := ""
+// cannedReply answers the last user message: a reply, or the name of a tool
+// to call first. dun also makes side calls (titles, suggestions); they get a
+// short, neutral line.
+func cannedReply(req chatRequest) (string, string) {
+	last, lastRole := "", ""
+	if n := len(req.Messages); n > 0 {
+		var m struct {
+			Role string `json:"role"`
+		}
+		_ = json.Unmarshal(req.Messages[n-1], &m)
+		lastRole = m.Role
+	}
 	for i := len(req.Messages) - 1; i >= 0; i-- {
 		var m struct {
 			Role    string `json:"role"`
@@ -148,19 +212,23 @@ func cannedReply(req chatRequest) string {
 		}
 	}
 	if len(req.Tools) == 0 {
-		return "A short answer."
+		return "A short answer.", ""
 	}
-	// The notes server's one note (runMCP), as an answer that read it.
+	// The notes server's one note (runMCP): read with its tool, then
+	// answered from what came back.
 	if strings.Contains(strings.ToLower(last), "notes") {
+		if tool := notesTool(req.Tools); tool != "" && lastRole != "tool" {
+			return "", tool
+		}
 		return "The team notes say to keep the greeting short, and that you release on Fridays. " +
-			"Is there something in greet you want to change before then?"
+			"Is there something in greet you want to change before then?", ""
 	}
 	if strings.Contains(strings.ToLower(last), "project") || strings.Contains(last, "?") {
 		return "This project is a small command-line tool. The README says it prints a greeting, " +
 			"and main.go holds the whole program. I can read files, run commands in an isolated " +
-			"copy of the project, and use the tools you add. What would you like to change first?"
+			"copy of the project, and use the tools you add. What would you like to change first?", ""
 	}
-	return "Done. What would you like to do next?"
+	return "Done. What would you like to do next?", ""
 }
 
 // ---- mcp ----

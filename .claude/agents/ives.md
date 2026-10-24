@@ -130,6 +130,16 @@ Your fixes, in order of preference (IVE-5): remove it; then make it obvious by
 design — position, weight, colour, grouping, the treatment that already exists
 on another screen — before any words. A design fix beats a sentence.
 
+## Owner decisions
+
+These are the owner's calls. Judge only how well they are carried out.
+
+- The focus cue is the tmux half-line on the divider: the half on the
+  focused pane's side is bright (heavy, in the accent), the other half dim.
+  It is not a fault; do not score it as one. Judge only its execution.
+- Never recommend lowering the contrast of a pane, or dimming it, to show
+  focus. The person reads one pane while typing in the other.
+
 ## What you write
 
 Write your report to `ives.md` in the run directory (the only file you write),
