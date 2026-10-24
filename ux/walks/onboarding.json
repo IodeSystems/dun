@@ -46,9 +46,9 @@
       "id": "signed-in-and-shown-the-models",
       "promise": "Once I have signed in with what my colleague gave me, I am shown the models I can use.",
       "actions": [
-        {"type": "work"},
-        {"key": "enter"},
         {"type": "${LLM_URL}", "say": "typed the address my colleague gave me"},
+        {"key": "enter"},
+        {"wait_for": "local", "say": "the name was filled in for me; I kept it"},
         {"key": "enter"},
         {"type": "${LLM_KEY}", "say": "typed the key my colleague gave me"},
         {"key": "enter"},

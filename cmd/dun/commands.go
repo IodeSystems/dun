@@ -99,7 +99,7 @@ func extCommand(e dun.Extension, state, detail string) proto.CommandSpec {
 		usage += " | <command> [text]"
 	}
 	return proto.CommandSpec{Name: e.Slash.Name, Usage: usage, Group: "tools", Choices: choices(pairs...),
-		Text: len(names) > 0, State: state, Detail: detail,
+		Text: len(names) > 0, State: state, Detail: detail, Help: e.Slash.Help,
 		Description: firstNonEmpty(e.Slash.Description, e.Description)}
 }
 
@@ -144,29 +144,32 @@ func ownCommands(docker bool) []proto.CommandSpec {
 				"toggle", "turn one tool on or off, at a scope",
 				"tools", "what each server's tools cost; with an id, list them and turn some off",
 				"login", "log in to an oauth server in the browser", "logout", "delete (and revoke) an oauth server's token"),
-			Description: "MCP servers: bare shows the switch table; add opens a form"},
+			Description: "tool servers (MCP): see them and turn them on or off; /mcp add adds one",
+			Help: "/mcp alone opens a table of every server: on or off, and where that is set (this session, this project, every project).\n" +
+				"/mcp add opens a form: a name, and the command or web address you were given. A preset fills the server in from its name: " + presetIDs() + ".\n" +
+				"The same name again replaces it."},
 		{Name: "ext", Group: "tools",
 			Description: "extensions: where each comes from, its server, commands and hooks"},
 		{Name: "docker", Usage: "[on|off|status]", Group: "tools", Choices: choices("on", "exec in Docker", "off", "exec on the host", "status", ""),
-			State: onOff(docker), Description: "exec backend: on (Docker), off (host), bare shows status"},
+			State: onOff(docker), Description: "where commands run: on, in a Docker container; off, on this machine"},
 		{Name: "worktree", Usage: "[status|new|commit]", Group: "git", Choices: choices("status", "", "new", "isolate in a new worktree", "commit", "write the message and ask"),
-			Description: "git: bare shows status, new isolates in a worktree, commit writes the message and asks"},
+			Description: "git: alone shows status, new isolates in a worktree, commit writes the message and asks"},
 		{Name: "ship", Usage: "[verify|push|pr]", Group: "git", Choices: choices("verify", "fetch, rebase, run checks", "push", "and push", "pr", "and open a PR"),
 			Description: "ship the worktree: fetch, rebase, run checks, push (default: push)"},
 		{Name: "memories", Group: "memory", Description: "this project's saved notes: when written, refined, confirmed or void"},
 		{Name: "remember", Usage: "[text]", Group: "memory", Text: true,
-			Description: "save a note for later sessions on this project (needs /raglit on); bare: the model picks what to keep"},
+			Description: "save a note for later sessions on this project (needs /raglit on); alone: the model picks what to keep"},
 		{Name: "rules", Usage: "[full|summary|index]", Group: "session",
 			Choices: choices("full", "the rules files and their imports, whole, in the system prompt",
 				"summary", "the imports condensed once by the model (root files stay whole)",
 				"index", "the imports in the docs index, surfaced by relevance (needs /raglit on)"),
-			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): bare shows files, cost and mode"},
+			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone shows files, cost and mode"},
 		{Name: "suggest", Usage: "[on|off|auto]", Group: "session", Choices: choices("on", "always", "off", "never", "auto", "when idle"),
-			State: suggestMode, Description: "next-message suggestions: bare asks for some now, on/off/auto set the mode"},
+			State: suggestMode, Description: "next-message suggestions: alone asks for some now, on/off/auto set the mode"},
 		{Name: "rephrase", Usage: "[on|off|status]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", ""),
 			State: onOff(rephraseOn), Description: "rephrase prompts for specificity before acting"},
 		{Name: "jobs", Usage: "[kill <n>|kill all]", Group: "session", Choices: choices("kill", "kill a job and everything it started: a number, or all"),
-			Description: "background jobs: bare lists the running ones, kill <n> ends one and everything it started, kill all ends every one"},
+			Description: "background jobs: alone lists the running ones, kill <n> ends one and everything it started, kill all ends every one"},
 		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
 		{Name: "clear", Group: "session", Description: "clear the conversation and start a fresh session log"},
 		{Name: "close", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript"},

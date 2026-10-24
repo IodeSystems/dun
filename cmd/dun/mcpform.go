@@ -263,7 +263,7 @@ func (m *tuiModel) addMCPServer() bool {
 	m.closeMCPForm()
 	// The result replaces this line (noteMCPAdded): progress, then news,
 	// in one place.
-	m.convo = append(m.convo, convoEntry{collapsed: stDim.Render("adding " + spec.ID + "…"), adding: spec.ID})
+	m.appendNotice(convoEntry{collapsed: stDim.Render("adding " + spec.ID + "…"), adding: spec.ID})
 	m.refresh()
 	return true
 }
@@ -394,8 +394,7 @@ func (m tuiModel) mcpFormPanel() string {
 	if m.mcpErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.mcpErr))
 	}
-	rows = formNotes(rows, "presets: "+presetIDs()+" — type one as the name",
-		"saved to "+tildePath(dun.UserServersFile())+" for every project, and started now · the same name replaces")
+	rows = formNotes(rows, "saved to "+tildePath(dun.UserServersFile())+" for every project, and started now · "+sameNameNote)
 	return strings.Join(rows, "\n")
 }
 

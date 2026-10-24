@@ -41,8 +41,8 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 	}
 
 	m.openProviderForm(nil)
-	m.providerFields[0].SetValue("work")
-	m.providerFields[1].SetValue("http://llm/v1")
+	m.providerFields[fieldName].SetValue("work")
+	m.providerFields[fieldAddr].SetValue("http://llm/v1")
 	m.saveProvider()
 	if txt := convoText(m); strings.Contains(txt, "not logged in") || !strings.Contains(txt, "logged in to work") {
 		t.Errorf("after the login:\n%s", txt)

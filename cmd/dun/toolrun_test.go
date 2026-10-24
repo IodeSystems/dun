@@ -57,7 +57,7 @@ func TestRun_OneBoxThatAppends(t *testing.T) {
 		t.Fatalf("items: %d, first is a thought: %v", len(r.items), r.items[0].think != nil)
 	}
 	head := stripANSI(r.summary())
-	if !strings.Contains(head, "10 steps — exec×4, eval×1") || !strings.Contains(head, "1 failed") {
+	if !strings.Contains(head, "10 steps — exec ×4, eval ·") || !strings.Contains(head, "1 failed") {
 		t.Errorf("header: %q", head)
 	}
 	// A reply ends the run; the next call starts another, below.
@@ -148,7 +148,7 @@ func TestRun_Grouping(t *testing.T) {
 	if n := groupLen(items); n != 4 {
 		t.Fatalf("groupLen = %d, want 4 (the failed one breaks the group)", n)
 	}
-	if got := stripANSI(groupLine(items[:4], 80)); got != "✓ ⚙ read ×4: a.go, b.go, c.go, d.go" {
+	if got := stripANSI(groupLine(items[:4], 80)); got != "✓ read ×4: a.go, b.go, c.go, d.go" {
 		t.Errorf("group line: %q", got)
 	}
 	long := &runItem{tool: "read", args: map[string]any{"path": strings.Repeat("x", 40)}, done: true}

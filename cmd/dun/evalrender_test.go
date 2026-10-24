@@ -61,7 +61,7 @@ func TestEvalCallText(t *testing.T) {
 			t.Errorf("callText(%q)\n got %q\nwant %q", c.code, got, c.want)
 		}
 	}
-	if got := callText("eval", map[string]any{}, 80); !strings.HasPrefix(got, "⚙ eval(") {
+	if got := callText("eval", map[string]any{}, 80); got != "eval" {
 		t.Errorf("no code falls back to the generic form: %q", got)
 	}
 }

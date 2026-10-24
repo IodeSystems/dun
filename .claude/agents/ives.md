@@ -139,6 +139,11 @@ These are the owner's calls. Judge only how well they are carried out.
   It is not a fault; do not score it as one. Judge only its execution.
 - Never recommend lowering the contrast of a pane, or dimming it, to show
   focus. The person reads one pane while typing in the other.
+- Showing how an answer was produced (tool calls, steps, sources) is
+  required; judge how it is shown, never recommend hiding or demoting it.
+- The question band is a full-width filled band (fill 236, bold, capped at
+  100 columns), its text in the answer's foreground. Judge its execution,
+  not its existence.
 
 ## What you write
 

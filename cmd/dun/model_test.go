@@ -101,17 +101,22 @@ func TestProviderForm_SavesAndSearchesTheNewProvider(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	m := newTUIModel(nil, ".")
 	m.openProviderForm(nil)
-	m = pick(m, "open router", "enter")
-	if m.providerErr == "" || m.providerStep != 0 {
-		t.Fatal("a name with a space must be refused")
-	}
-	m.providerFields[0].SetValue("")
-	m = pick(m, "openrouter", "enter", "openrouter.ai", "enter")
-	if m.providerStep != 1 || m.providerErr == "" {
+	m = pick(m, "openrouter.ai", "enter")
+	if m.providerStep != fieldAddr || m.providerErr == "" {
 		t.Fatal("a URL without a scheme must be refused")
 	}
-	m.providerFields[1].SetValue("")
-	m = pick(m, "https://openrouter.ai/api/v1/", "enter", "sk-or-1", "enter")
+	m.providerFields[fieldAddr].SetValue("")
+	m = pick(m, "https://openrouter.ai/api/v1/", "enter")
+	if got := m.providerFields[fieldName].Value(); got != "openrouter" || m.providerStep != fieldName {
+		t.Fatalf("the name is filled in from the address: %q (step %d)", got, m.providerStep)
+	}
+	m.providerFields[fieldName].SetValue("open router")
+	m = pick(m, "enter")
+	if m.providerErr == "" || m.providerStep != fieldName {
+		t.Fatal("a name with a space must be refused")
+	}
+	m.providerFields[fieldName].SetValue("openrouter")
+	m = pick(m, "enter", "sk-or-1", "enter")
 	if m.providerForm || !m.modelPicking || m.modelQuery.Value() != "" { // the only service: no filter
 		t.Fatalf("want the picker filtered to the new provider; form=%v picking=%v q=%q",
 			m.providerForm, m.modelPicking, m.modelQuery.Value())
@@ -216,11 +221,15 @@ func TestProviderForm_LoginAgainKeepsTheKey(t *testing.T) {
 	}
 	m := newTUIModel(nil, ".")
 	loginSlash(&m, []string{"old.example.com"})
-	if !m.providerForm || m.providerEdit != "old.example.com" || m.providerStep != 1 || m.providerFields[1].Value() != "https://old.example.com" {
-		t.Fatalf("edit form: form=%v edit=%q step=%d url=%q", m.providerForm, m.providerEdit, m.providerStep, m.providerFields[1].Value())
+	if !m.providerForm || m.providerEdit != "old.example.com" || m.providerStep != fieldAddr || m.providerFields[fieldAddr].Value() != "https://old.example.com" {
+		t.Fatalf("edit form: form=%v edit=%q step=%d url=%q", m.providerForm, m.providerEdit, m.providerStep, m.providerFields[fieldAddr].Value())
 	}
-	m.providerFields[1].SetValue("")
-	m = pick(m, "https://new.example.com", "enter", "enter")
+	m.providerFields[fieldAddr].SetValue("")
+	m = pick(m, "https://new.example.com", "enter")
+	if m.providerStep != fieldKey || m.providerFields[fieldName].Value() != "old.example.com" {
+		t.Fatalf("the fixed name is stepped over and kept: step %d name %q", m.providerStep, m.providerFields[fieldName].Value())
+	}
+	m = pick(m, "enter")
 	if m.providerForm {
 		t.Fatalf("not saved: %q", m.providerErr)
 	}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -119,7 +121,7 @@ func loginSlash(m *tuiModel, args []string) tea.Cmd {
 			return m.openProviderForm(&p)
 		}
 		cmd := m.openProviderForm(nil)
-		m.providerFields[0].SetValue(args[0])
+		m.providerFields[fieldName].SetValue(args[0])
 		return cmd
 	}
 	return m.openProviderForm(nil)
@@ -354,7 +356,7 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	}
 	if model == m.model && p.URL == m.url { // nothing to restart
 		if persist {
-			m.append(okNotice(note))
+			m.appendNotice(convoEntry{collapsed: okNotice(note)})
 		} else {
 			m.append(stDim.Render("already using model " + model))
 		}
@@ -376,7 +378,7 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	m.sel = -1
 	m.busy, m.starting = false, true
 	m.dropAsk()
-	m.convoHold = 0 // the conversation is about to be replaced
+	m.dropHold() // the conversation is about to be replaced
 	m.startingStart = time.Now()
 	m.fatalErr, m.exitAnnounced = "", false
 	m.restarts, m.restartStart = 0, time.Now()
@@ -477,6 +479,14 @@ func modelHint() string {
 
 // ── the add-provider form ──
 
+// The login form's fields, in the order it asks: the address first, so the
+// name can be filled in from it (nameFromURL) and only edited when wanted.
+const (
+	fieldAddr = iota
+	fieldName
+	fieldKey
+)
+
 // openProviderForm opens the login form, or with edit the form for a provider
 // already logged in: its name fixed, its URL filled in, the key left empty to
 // keep it.
@@ -488,25 +498,39 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 		return t
 	}
 	m.providerFields = [3]textinput.Model{
-		mk("what to call it, e.g. work"),
-		mk("e.g. https://openrouter.ai/api/v1"),
-		mk("if you were given one"),
+		fieldAddr: mk("e.g. https://openrouter.ai/api/v1"),
+		fieldName: mk("what to call it — filled in from the address"),
+		fieldKey:  mk("if you were given one"),
 	}
-	m.providerFields[2].EchoMode = textinput.EchoPassword
-	m.providerFields[2].EchoCharacter = '•'
-	m.providerStep, m.providerErr, m.providerEdit = 0, "", ""
+	m.providerFields[fieldKey].EchoMode = textinput.EchoPassword
+	m.providerFields[fieldKey].EchoCharacter = '•'
+	m.providerStep, m.providerErr, m.providerEdit, m.providerAuto = fieldAddr, "", "", ""
 	if edit != nil {
 		m.providerEdit = edit.Name
-		m.providerFields[0].SetValue(edit.Name)
-		m.providerFields[1].SetValue(edit.URL)
-		m.providerFields[2].Placeholder = "a new key (empty keeps the saved one)"
-		m.providerStep = 1
+		m.providerFields[fieldName].SetValue(edit.Name)
+		m.providerFields[fieldAddr].SetValue(edit.URL)
+		m.providerFields[fieldKey].Placeholder = "a new key (empty keeps the saved one)"
 	}
 	m.providerFields[m.providerStep].Focus()
 	m.providerForm, m.modelPicking = true, true
 	m.input.Blur()
 	m.refresh()
 	return textinput.Blink
+}
+
+// providerMove moves the form's cursor by d fields; the name of a provider
+// being logged in to again is fixed, so it is stepped over.
+func (m *tuiModel) providerMove(d int) {
+	next := m.providerStep + d
+	if m.providerEdit != "" && next == fieldName {
+		next += d
+	}
+	if next < 0 || next >= len(m.providerFields) {
+		return
+	}
+	m.providerFields[m.providerStep].Blur()
+	m.providerStep = next
+	m.providerFields[m.providerStep].Focus()
 }
 
 func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -516,25 +540,19 @@ func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.closeModelPicker()
 		return m, nil
 	case "shift+tab", "up":
-		if m.providerStep > 0 && !(m.providerEdit != "" && m.providerStep == 1) {
-			m.providerFields[m.providerStep].Blur()
-			m.providerStep--
-			m.providerFields[m.providerStep].Focus()
-		}
+		m.providerMove(-1)
 		m.refresh()
 		return m, textinput.Blink
 	case "enter", "tab", "down":
 		v := strings.TrimSpace(m.providerFields[m.providerStep].Value())
 		switch {
-		case m.providerStep == 0 && (v == "" || strings.ContainsAny(v, " \t")):
-			m.providerErr = "a name is one word"
-		case m.providerStep == 1 && !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://"):
+		case m.providerStep == fieldAddr && !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://"):
 			m.providerErr = "the address starts with http:// or https://"
-		case m.providerStep < 2:
+		case m.providerStep == fieldName && (v == "" || strings.ContainsAny(v, " \t")):
+			m.providerErr = "a name is one word"
+		case m.providerStep < fieldKey:
 			m.providerErr = ""
-			m.providerFields[m.providerStep].Blur()
-			m.providerStep++
-			m.providerFields[m.providerStep].Focus()
+			m.providerMove(1)
 		case msg.String() == "enter":
 			return m, m.saveProvider()
 		}
@@ -544,21 +562,52 @@ func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.typeProviderField(msg)
 }
 
-// typeProviderField is a key or a paste in the provider form's field.
+// typeProviderField is a key or a paste in the provider form's field. Typing
+// the address fills in the name as it goes, until the name is edited.
 func (m tuiModel) typeProviderField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.providerFields[m.providerStep], cmd = m.providerFields[m.providerStep].Update(msg)
+	if m.providerStep == fieldAddr && m.providerEdit == "" {
+		name := &m.providerFields[fieldName]
+		if name.Value() == m.providerAuto {
+			m.providerAuto = nameFromURL(m.providerFields[fieldAddr].Value())
+			name.SetValue(m.providerAuto)
+		}
+	}
 	m.refresh()
 	return m, cmd
+}
+
+// nameFromURL is a name for a service, from its address: the host's main
+// label (api.example.com → example, llm.iodesystems.com → iodesystems), and
+// "local" for an IP address or localhost. "" while the address has no host.
+func nameFromURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if !strings.Contains(raw, "://") {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || net.ParseIP(host) != nil {
+		return "local"
+	}
+	labels := strings.Split(strings.Trim(host, "."), ".")
+	if len(labels) == 1 {
+		return labels[0]
+	}
+	return labels[len(labels)-2]
 }
 
 // saveProvider writes the form's provider to the config and opens the picker
 // filtered to it, which is also the check that the URL and key work.
 func (m *tuiModel) saveProvider() tea.Cmd {
 	op := providerOp{Op: "login",
-		Name: strings.TrimSpace(m.providerFields[0].Value()),
-		URL:  m.providerFields[1].Value(),
-		Key:  m.providerFields[2].Value(),
+		Name: strings.TrimSpace(m.providerFields[fieldName].Value()),
+		URL:  m.providerFields[fieldAddr].Value(),
+		Key:  m.providerFields[fieldKey].Value(),
 	}
 	if m.providerEdit != "" {
 		op.Name = m.providerEdit
@@ -571,7 +620,7 @@ func (m *tuiModel) saveProvider() tea.Cmd {
 	}
 	m.providerForm = false
 	m.dropNeedLogin() // no longer true
-	m.append(okNotice(msg))
+	m.appendNotice(convoEntry{collapsed: okNotice(msg)})
 	// Filtered to the new service — unless it is the only one, when the
 	// filter would only repeat its name.
 	query := op.Name + " "
@@ -582,7 +631,7 @@ func (m *tuiModel) saveProvider() tea.Cmd {
 }
 
 func (m tuiModel) providerFormPanel() string {
-	labels := [3]string{"name", "address", "key"}
+	labels := [3]string{fieldAddr: "address", fieldName: "name", fieldKey: "key"}
 	title := "log in to an AI service"
 	if m.providerEdit != "" {
 		title = "log in to " + m.providerEdit + " again"
@@ -594,9 +643,13 @@ func (m tuiModel) providerFormPanel() string {
 	if m.providerErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.providerErr))
 	}
-	rows = formNotes(rows, "saved to "+tildePath(configPath())+" · the same name again replaces it")
+	rows = formNotes(rows, "saved to "+tildePath(configPath())+" · "+sameNameNote)
 	return strings.Join(rows, "\n")
 }
+
+// sameNameNote is what both forms (login, /mcp add) say of a name used
+// again, in the same words.
+const sameNameNote = "the same name again replaces it"
 
 // providerHint is the login form's status line.
 func (m tuiModel) providerHint() string {

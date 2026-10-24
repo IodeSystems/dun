@@ -36,8 +36,8 @@ func TestTUI_WhitespaceReplyTakesNoRow(t *testing.T) {
 	v.event(map[string]any{"type": "tool_call", "tool": "exec", "args": map[string]any{"command": "echo 0"}})
 	v.event(map[string]any{"type": "tool_result", "tool": "exec", "result": "0\n"})
 	after := rowsAfter(v.view(), "end")
-	if len(after) < 2 || !strings.Contains(after[0], "⚙ 1 step") || !strings.Contains(after[1], "echo 0") {
-		t.Fatalf("the rows after the message are %q, want the run and its call\n%s", after[:2], v.view())
+	if len(after) < 2 || !strings.HasPrefix(strings.TrimSpace(after[0]), "✓ $ echo 0") || strings.Contains(v.view(), "1 step") {
+		t.Fatalf("the rows after the message are %q, want the one call, once\n%s", after[:2], v.view())
 	}
 	for _, e := range v.m.convo {
 		if e.mdSource == "" && e.collapsed == "" && !e.blank && e.think == nil && e.run == nil && e.docs == nil {

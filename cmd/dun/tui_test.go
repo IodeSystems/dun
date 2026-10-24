@@ -219,7 +219,7 @@ func TestTUI_EventHandling(t *testing.T) {
 		t.Fatal("tool_call should flush the streamed text")
 	}
 	joined := convoText(m)
-	if !strings.Contains(joined, "looking…") || !strings.Contains(joined, "node_query") {
+	if !strings.Contains(joined, "looking…") || !strings.Contains(joined, "node query") {
 		t.Fatalf("conversation missing streamed text or tool line: %q", joined)
 	}
 
@@ -502,7 +502,7 @@ func TestTUI_HistoryReplay(t *testing.T) {
 		t.Fatalf("expected 5 blocks, got %d", len(m.convo))
 	}
 	txt := convoText(m)
-	for _, want := range []string{"fix the bug", "on it", "node_read", "sel=F", "background job #1", "resumed 4 entries"} {
+	for _, want := range []string{"fix the bug", "on it", "node read", "sel=F", "background job #1", "resumed 4 entries"} {
 		if !strings.Contains(txt, want) {
 			t.Fatalf("replayed scrollback missing %q in:\n%s", want, txt)
 		}
@@ -4173,11 +4173,11 @@ func TestCallText_ExecReadsAsAShellCommand(t *testing.T) {
 		t.Errorf("expanded must keep the script intact: %q", full)
 	}
 	// Every other tool keeps the generic form.
-	if got := callText("node_read", map[string]any{"path": "a.go"}, 80); got != "⚙ node_read(path=a.go)" {
+	if got := callText("node_read", map[string]any{"path": "a.go"}, 80); got != "node read  path=a.go" {
 		t.Errorf("non-exec unchanged: %q", got)
 	}
 	// No command (a malformed call) falls back rather than showing a bare "$".
-	if got := callText("exec", map[string]any{"timeout": 5}, 80); !strings.HasPrefix(got, "⚙ exec(") {
+	if got := callText("exec", map[string]any{"timeout": 5}, 80); got != "exec  timeout=5" {
 		t.Errorf("want the generic form: %q", got)
 	}
 }

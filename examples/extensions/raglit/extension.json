@@ -8,7 +8,8 @@
   },
   "slash": {
     "name": "raglit",
-    "description": "docs index (raglit): bare shows status, auto starts it every session",
+    "description": "project search (raglit): finds the parts of this project that bear on a question",
+    "help": "Project search (raglit) reads this project's files and docs into an index. While it is on, dun gives the model the parts that bear on each question, and the model can search the index itself. It also keeps the notes from /remember.\n/raglit on — turn it on for this session\n/raglit auto — turn it on in every session of this project\n/raglit off, /raglit manual — the same two, to turn it off\n/raglit alone — whether it is on, and what it has read",
     "commands": {
       "include": {
         "help": "FILE|DIR... — add to this workspace's index and keep up to date: a directory is WATCHED (raglit re-reads changed and new files); a file is read once. add-document reads a directory once, without watching",

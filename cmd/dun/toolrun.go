@@ -12,7 +12,7 @@ import (
 // Tool runs: the tool calls of a turn, and the thinking between them, are ONE
 // bounded box (box.go) that only ever grows.
 //
-//	⚙ 5 tool calls — exec×4, eval×1 · 1 failed · thought 12s    ↑ 40 more
+//	⚙ 5 steps — exec ×4, notes · project notes · 1 failed · thought 12s    ↑ 40 more
 //	│ ✻ thought for 2s · 40 words
 //	│ │ the round's reasoning, dimmed
 //	│ ✓ $ go test ./...  → ✓ 12 lines · ok
@@ -105,7 +105,10 @@ func (r *toolRun) summary() string {
 	})
 	parts := make([]string, len(names))
 	for i, n := range names {
-		parts[i] = fmt.Sprintf("%s×%d", n, counts[n])
+		parts[i] = toolLabel(n)
+		if counts[n] > 1 {
+			parts[i] += fmt.Sprintf(" ×%d", counts[n])
+		}
 	}
 	s := stTool.Render(fmt.Sprintf("⚙ %s — %s", plural(len(r.items), "step"), strings.Join(parts, ", ")))
 	if thought > 0 {
@@ -140,7 +143,7 @@ func (it *runItem) line(width int) string {
 //	✻ the overlay is read before the project file   (2s, 60 words)
 //	✗ $ go test ./internal/...  → ✗ 2 failed
 //	    config_test.go:41: want 3 layers, got 2
-//	✓ ⚙ read ×4: a.go, b.go, c.go, d.go
+//	✓ read ×4: a.go, b.go, c.go, d.go
 //	▾ ✻ thinking… 1s · 12 words
 //	  the live thought's text, all of it; the box shows its tail
 //
@@ -284,9 +287,9 @@ func groupLen(items []*runItem) int {
 	return n
 }
 
-// groupLine is a group of calls as one line: `✓ ⚙ read ×4: a.go, b.go, …`.
+// groupLine is a group of calls as one line: `✓ read ×4: a.go, b.go, …`.
 func groupLine(items []*runItem, w int) string {
-	label := "⚙ " + items[0].tool
+	label := toolLabel(items[0].tool)
 	switch {
 	case items[0].tool == "exec":
 		label = "$"
@@ -305,8 +308,42 @@ func groupLine(items []*runItem, w int) string {
 // fitRow cuts a styled row to w columns.
 func fitRow(s string, w int) string { return lipgloss.NewStyle().MaxWidth(max(1, w)).Render(s) }
 
+// single is the run's one call when that is all it has: it is drawn as that
+// call's line alone, with no summary over it (one call said once). A second
+// step turns the line into the summary, the call one row below it.
+func (r *toolRun) single() *runItem {
+	if len(r.items) == 1 && r.items[0].think == nil {
+		return r.items[0]
+	}
+	return nil
+}
+
+// singleHead and singleRows are a one-call run as a box: the call's line as
+// the head, and a failure's lines under it.
+func (r *toolRun) singleHead(it *runItem) string {
+	s := callLine(it)
+	if r.interrupted {
+		s += stDim.Render(" · ⏹ interrupted")
+	}
+	return s
+}
+
+func singleRows(it *runItem, w int) []string {
+	if !it.done || !it.failed {
+		return nil
+	}
+	var rows []string
+	for _, ln := range failLines(it) {
+		rows = append(rows, "    "+fitRow(stErr.Render(ln), max(1, w-4)))
+	}
+	return rows
+}
+
 // plain is the run as text, for search and the screen dump.
 func (r *toolRun) plain() string {
+	if it := r.single(); it != nil {
+		return it.line(80)
+	}
 	lines := []string{stripANSI(r.summary())}
 	for _, it := range r.items {
 		lines = append(lines, it.line(80))

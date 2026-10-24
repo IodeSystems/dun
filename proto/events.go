@@ -559,6 +559,9 @@ type CommandSpec struct {
 	State string `json:"state,omitempty"`
 	// Detail qualifies the state, e.g. "autostart".
 	Detail string `json:"detail,omitempty"`
+	// Help is the command in full, in plain words: what it does and how to
+	// use it, for /help <name>. Empty: the description says it.
+	Help string `json:"help,omitempty"`
 }
 
 type CommandChoice struct {

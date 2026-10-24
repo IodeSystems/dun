@@ -88,7 +88,7 @@ func (m tuiModel) noteMCPTools(ev evMsg) tuiModel {
 		}
 	}
 	if msg != "" {
-		m.append(stNote.Render(msg))
+		m.append(replyLine(msg))
 	}
 	v := m.toolsPaging()
 	switch {

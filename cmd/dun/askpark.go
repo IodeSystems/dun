@@ -117,12 +117,18 @@ func (m *tuiModel) settleAsk() {
 // to the new height (refresh pads to convoHold), and the rows that arrive next
 // fill them. The hold ends when the content reaches it, or at a new width.
 func (m *tuiModel) holdConvo() {
-	yoff := m.vp.YOffset
-	h := m.convoHeightBudget()
-	if yoff == 0 || h <= m.vp.Height {
-		return // nothing above the pane to move down, or the pane did not grow
+	if h := m.convoHeightBudget(); m.vp.YOffset > 0 && h > m.vp.Height {
+		m.holdTop(h)
 	}
-	m.convoHold, m.convoHoldW = yoff+h, m.vp.Width
+}
+
+// holdTop grows the pane to h rows and keeps its top row: whatever closed
+// below the conversation, the rows on screen stay put, and the new rows at
+// the bottom are blank (convoHold) until content takes them. The padding
+// reaches the bottom of the grown view and no further.
+func (m *tuiModel) holdTop(h int) {
+	yoff := m.vp.YOffset
+	m.convoHold, m.convoHoldW = max(m.convoHold, yoff+h), m.vp.Width
 	m.vp.setHeight(h)
 	m.refresh()
 	m.vp.SetYOffset(yoff)
@@ -161,4 +167,30 @@ func (m *tuiModel) restoreDraft() {
 	d.width, d.maxLines, d.lay = m.input.width, m.input.maxLines, m.input.lay
 	m.input, m.askDraft, m.askDraftSet = d, multilineInput{}, false
 	m.input.clampScroll()
+}
+
+// holdShrink is the one rule for a conversation that got shorter — a block
+// closed or collapsed, a line taken away, a live row rewritten: the view keeps
+// its top row. The pane is padded with blank rows up to the bottom of the view
+// as it stands (YOffset + Height) and no further, so the furthest the person
+// can scroll is where they already are and there is never more than a screen
+// of blank. The rows that arrive next fill the padding (refresh drops the hold
+// once the content reaches it); a new width, a reset or a new session drops
+// it (dropHold).
+func (m *tuiModel) holdShrink(n int) {
+	prev := len(m.vp.lines)
+	if prev == 0 || n >= prev || m.frame.width == 0 || m.frame.width != m.vp.Width {
+		return
+	}
+	hold := min(prev, m.vp.YOffset+m.vp.Height)
+	if hold > n && hold > m.convoHold {
+		m.convoHold, m.convoHoldW = hold, m.vp.Width
+	}
+}
+
+// dropHold ends any hold: the conversation is about to be replaced (a reset,
+// a restart, /repaint), so the next refresh starts it over at its own height.
+func (m *tuiModel) dropHold() {
+	m.convoHold, m.convoHoldW = 0, 0
+	m.holdSkip = true
 }

@@ -91,7 +91,7 @@ func (m *tuiModel) repaintNow(msg repaintNowMsg) tea.Cmd {
 // returns the commands that clear and redraw it, in order: the reset reaches
 // the terminal before the full redraw the clear asks for.
 func (m *tuiModel) repaint(done repaintDoneMsg) tea.Cmd {
-	m.convoHold, m.convoHoldW = 0, 0
+	m.dropHold()
 	m.drag = mouseSel{}
 	for i := range m.convo {
 		m.convo[i].invalidateWrap()

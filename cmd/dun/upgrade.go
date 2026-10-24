@@ -281,8 +281,14 @@ const autoResumePrefix = "[automatic] "
 // automatic resume, shown dim as what it is.
 func userRow(text string) string { return userRowAt(text, 0) }
 
-// userRowAt is userRow wrapped to width (0: unwrapped).
+// bandCap is the widest the question band fills: on a wide screen a band to
+// the far edge is mostly empty fill.
+const bandCap = 100
+
+// userRowAt is userRow wrapped to width (0: unwrapped), its band filled to
+// width or bandCap, whichever is less — every wrapped row to the same edge.
 func userRowAt(text string, width int) string {
+	width = min(width, bandCap)
 	st, row := stUser, "› "+text
 	if rest, ok := strings.CutPrefix(text, autoResumePrefix); ok {
 		st, row = stDim, "↻ resumed after the restart — "+rest

@@ -103,6 +103,9 @@ func (b *boxState) wrapBody(body string, w int, plain bool, edge string) {
 func (e *convoEntry) boxContent(w int) (string, []string) {
 	switch {
 	case e.run != nil:
+		if it := e.run.single(); it != nil {
+			return e.run.singleHead(it), singleRows(it, w)
+		}
 		return e.run.summary(), e.run.boxRows(w)
 	case e.think != nil:
 		e.box.wrapBody(strings.TrimSpace(e.think.text), w, true, stDim.Render("│ "))

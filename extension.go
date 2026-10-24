@@ -121,6 +121,7 @@ type Extension struct {
 type ExtSlash struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
+	Help        string                 `json:"help,omitempty"` // the command in full, for /help <name>
 	Commands    map[string]ExtSlashCmd `json:"commands,omitempty"`
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
@@ -23,6 +24,21 @@ var stOK = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 // It starts in column 0 with the mark, apart from the indented answers.
 func okNotice(what string, details ...string) string {
 	return stOK.Render("✓ " + strings.Join(append([]string{what}, details...), " · "))
+}
+
+// appendNotice puts a status notice in the conversation with the one
+// spacing every notice has: a blank row above it and a blank row below it
+// (the turn-gap row, so a turn ending next does not add a second). It
+// returns the notice's index.
+func (m *tuiModel) appendNotice(e convoEntry) int {
+	if n := len(m.convo); n > 0 && !m.convo[n-1].blank && !m.convo[n-1].splash {
+		m.turnGap() // the splash ends in a blank row of its own
+	}
+	m.convo = append(m.convo, e)
+	i := len(m.convo) - 1
+	m.turnGap()
+	m.refresh()
+	return i
 }
 
 // heldLine is said when a question is held for want of a login.
@@ -62,20 +78,21 @@ func (m *tuiModel) holdUnsent(v string) {
 	m.appendUser(v)
 	m.heldMsg = v
 	m.dropNeedLogin()
-	m.convo = append(m.convo, convoEntry{collapsed: stNote.Render(heldLine), needLogin: true})
+	m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(heldLine), needLogin: true})
 	m.refresh()
 }
 
-// noteServerMsg puts a server event's message in the conversation: a line
-// that says a server runs in the success colour, the rest in the notice
-// colour. The result of /mcp add replaces its "adding …" line.
+// noteServerMsg puts a server event's message in the conversation as a
+// notice: a line that says a server runs in the success colour, a failure in
+// the attention colour, the rest plain (replyLine). The result of /mcp add
+// replaces its "adding …" line, in place.
 func (m *tuiModel) noteServerMsg(action, msg string) {
 	lines := strings.Split(msg, "\n")
 	for i, l := range lines {
 		if strings.Contains(l, " · running") {
 			lines[i] = stOK.Render("✓ " + l)
 		} else {
-			lines[i] = stNote.Render(l)
+			lines[i] = replyLine(l)
 		}
 	}
 	out := strings.Join(lines, "\n")
@@ -89,18 +106,31 @@ func (m *tuiModel) noteServerMsg(action, msg string) {
 			}
 		}
 	}
-	m.append(out)
+	m.appendNotice(convoEntry{collapsed: out})
+}
+
+// failWords mark a reply that needs attention: it failed, or was refused.
+var failWords = regexp.MustCompile(`(?i)\b(error|errors|failed|fails|did not|could not|cannot|can't|refused|unknown|no such|not found|not logged in)\b|usage:`)
+
+// replyLine styles a line the engine said back: the attention colour only
+// when it says something failed or is needed; plain otherwise. Orange means
+// "blocked, or needs you" — nothing else.
+func replyLine(l string) string {
+	if failWords.MatchString(l) {
+		return stNote.Render(l)
+	}
+	return l
 }
 
 // afterSwitch runs at the ready that follows a model pick: the pick is
 // confirmed, and a held message is put back in an empty composer.
 func (m *tuiModel) afterSwitch() {
 	if m.switchNote != "" {
-		m.append(okNotice(m.switchNote))
+		m.appendNotice(convoEntry{collapsed: okNotice(m.switchNote)})
 		m.switchNote = ""
 	}
 	if m.heldMsg != "" && m.loggedIn() && m.input.Value() == "" {
 		m.input.SetValue(m.heldMsg)
-		m.heldMsg = ""
+		m.restoredMsg, m.heldMsg = m.heldMsg, ""
 	}
 }

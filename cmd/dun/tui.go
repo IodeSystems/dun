@@ -21,6 +21,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/cellbuf"
 
@@ -146,16 +147,24 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 
 // ── styles ─────────────────────────────────────────────────────────
 
+// answerFG is the foreground of an answer's text: glamour's dark document
+// colour, which every reply is rendered in.
+var answerFG = *styles.DarkStyleConfig.Document.Color
+
 var (
 	stHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	stDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	stUser   = lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("236")).Foreground(lipgloss.Color("144"))
-	stTool   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	stErr    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	stNote   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // proactive notifications
-	stAsk    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
-	stSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // selection gutter
-	stEdge   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused divider half
+	// stUser is the question band: bold, on a filled band (236), in the
+	// answer's own foreground — the colour glamour gives a reply's text
+	// (answerFG, 8.6:1 on the band) — so the question reads as plainly as
+	// the answer does.
+	stUser = lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("236")).Foreground(lipgloss.Color(answerFG))
+	stTool = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	stErr  = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	stNote = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // proactive notifications
+	stAsk  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
+	stSel  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // selection gutter
+	stEdge = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused divider half
 	// stCmd is a command's name in a list (the palette, /help): neutral and
 	// bold. Pink (212) is where you are; green is a thing that worked.
 	stCmd = lipgloss.NewStyle().Bold(true)
@@ -260,6 +269,7 @@ type convoEntry struct {
 	needLogin       bool   // the "not logged in" line (onboarding.go): said once, where it was last needed
 	adding          string // the server an "adding …" line is for: the result replaces it (noteServerMsg)
 	splash          bool   // the splash or a /status block (splash.go): client-only, never in the session log
+	liveSplash      bool   // the splash at the top: drawn again from live state at every refresh
 
 	// blank marks the empty row turnGap() appends when a turn ends, so
 	// consecutive turns read as blocks. It renders as nothing.
@@ -578,6 +588,8 @@ type tuiModel struct {
 	askDraftSet   bool                  // askDraft holds a draft to give back (restoreDraft)
 	convoHold     int                   // the convo pane keeps at least this many rows (holdConvo)
 	convoHoldW    int                   // the pane width convoHold was measured at
+	paneTermH     int                   // the terminal height the pane was last fitted at (a resize, not a panel)
+	holdSkip      bool                  // the next refresh replaces the conversation: no contract hold (dropHold)
 	md            *glamour.TermRenderer // markdown renderer for assistant replies
 	mdWidth       int                   // width md was built for (rebuild only on change)
 	history       []string              // sent inputs, recalled with ctrl+↑/↓
@@ -630,6 +642,7 @@ type tuiModel struct {
 	// said it has no AI service.
 	noLogin     bool
 	heldMsg     string
+	restoredMsg string // the held message, put back in the composer: the status line says whose it is while it is unchanged
 	switchNote  string
 	quietReplay bool
 	hintShown   bool
@@ -693,9 +706,10 @@ type tuiModel struct {
 	modelPending int             // providers not yet answered
 	// The add-provider form (/model add, ctrl+a in the picker).
 	providerForm   bool
-	providerFields [3]textinput.Model // name, url, key
+	providerFields [3]textinput.Model // address, name, key (fieldAddr, fieldName, fieldKey)
 	providerStep   int
 	providerErr    string
+	providerAuto   string // the name the form filled in from the address; replaced while it is unedited
 	providerEdit   string // the provider the form edits; "" adds one
 	provider       string // name of the provider the engine runs on
 	// The add-MCP-server form (/mcp add).
@@ -831,6 +845,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// resume) left a pinned viewport one row short of the bottom, hiding the
 		// newest line until something else happened.
 		if t.h > 0 {
+			resized := t.h != t.paneTermH // the terminal, not a panel below the pane
+			t.paneTermH = t.h
 			if got := t.convoHeight(); got != t.vp.Height {
 				selMode := t.focus == focusConvo && !t.asking && len(t.convo) > 0
 				// ANCHOR THE BOTTOM across a height change.
@@ -846,7 +862,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// bottom already), and a selection owns its own positioning; this
 				// is for the reader who has scrolled somewhere deliberately and
 				// expects to still be looking at it.
-				if !t.scrollPinned && !selMode {
+				//
+				// A pane that GROWS because something below it closed — a
+				// panel, a form, the palette — keeps its top row instead
+				// (holdTop): the rows on screen stay where they are and blank
+				// rows take the new space at the bottom until content fills
+				// it. A terminal resize (the keyboard) keeps the bottom.
+				if got > t.vp.Height && t.vp.YOffset > 0 && !selMode && !resized {
+					t.holdTop(got)
+				} else if !t.scrollPinned && !selMode {
 					bottom := t.vp.YOffset + t.vp.Height
 					t.vp.setHeight(got)
 					t.vp.SetYOffset(bottom - got)
@@ -2015,6 +2039,7 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 	m.history = append(m.history, v)
 	m.histIdx = len(m.history)
 	m.input.Reset()
+	m.restoredMsg = ""
 	m.suggestions = nil
 	m.saveUI()
 	if m.replaying {
@@ -2138,6 +2163,9 @@ func (m *tuiModel) noteServers(ev evMsg) {
 		}
 	}
 	m.noteServerView(list)
+	if len(m.convo) > 0 && m.convo[0].liveSplash {
+		m.refresh() // the splash's servers and extras rows say it now
+	}
 }
 
 func (m tuiModel) handleEvent(ev evMsg) tuiModel {
@@ -2251,7 +2279,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			break
 		}
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
-			m.append(stNote.Render(msg))
+			m.append(replyLine(msg))
 		}
 		if str(ev["id"]) == "interrupt" { // there was no turn to interrupt
 			m.interrupting = false
@@ -2688,7 +2716,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.sel = -1
 		m.busy = false
 		m.dropAsk()
-		m.convoHold = 0                      // nothing left on screen to hold in place
+		m.dropHold()                         // nothing left on screen to hold in place
 		m.suggestions, m.suggestSel = nil, 0 // they were about the conversation just cleared
 		m.settleAsk()
 		m.append(stDim.Render("session cleared — fresh start"))
@@ -3263,11 +3291,21 @@ func (m tuiModel) drawView() string {
 	default:
 		// Most-used first: a narrow window drops hints from the end.
 		// "ready" only when there is something to be ready with.
-		what := "ready"
+		// Not logged in: the conversation's line says so (in the attention
+		// colour), so the status line does not say it again, and names only
+		// what works yet.
 		if !m.loggedIn() {
-			what = "not logged in"
+			status = stDim.Render("enter send · / commands · " + m.exitHint())
+			break
 		}
-		status = m.spendStatus(time.Now()) + stDim.Render(what+"  ·  enter send · alt+enter newline · "+m.exitHint()+" · ↑/↓ edit · ctrl+↑/↓ history · tab scroll")
+		if m.restoredMsg != "" && m.input.Value() == m.restoredMsg {
+			// The composer holds the question asked before the login: say
+			// it is that, not something just typed. The text sent is only
+			// the question.
+			status = m.spendStatus(time.Now()) + stDim.Render("your earlier question  ·  enter asks it · or change it first")
+			break
+		}
+		status = m.spendStatus(time.Now()) + stDim.Render("ready  ·  enter send · alt+enter newline · tab scroll · ctrl+↑/↓ history · "+m.exitHint())
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
@@ -3668,6 +3706,7 @@ func docsFromEvent(ev evMsg) *docsBlock {
 func (m *tuiModel) refresh() {
 	start := time.Now()
 	defer func() { frames.observe(stageRefresh, time.Since(start)) }()
+	m.liveSplashNow()
 	blocks := make([]string, 0, len(m.convo)+1)
 	for _, e := range m.convo {
 		blocks = append(blocks, e.view())
@@ -3808,6 +3847,15 @@ func (m *tuiModel) refresh() {
 			m.convo[i].rowOffset = cumRow
 		}
 		cumRow += h
+	}
+	// A block that got shorter (closed, collapsed, a line taken away) does
+	// not pull the view back: the top row stays and blank rows fill in
+	// below, but never past the bottom of the view as it is now, so the
+	// furthest scroll is where the view already is (holdShrink).
+	if m.holdSkip {
+		m.holdSkip = false
+	} else {
+		m.holdShrink(len(rendered))
 	}
 	// A closed question's rows stay in the pane until new rows take them
 	// (holdConvo): blank rows at the bottom, so nothing above them moves.
@@ -3989,7 +4037,7 @@ func sortedKeys(m map[string]any) []string {
 // only whether motion events are reported at all.
 func mouseSlash(m *tuiModel, args []string) tea.Cmd {
 	if len(args) == 0 {
-		m.append(stNote.Render("mouse: " + m.mouseMode + "  (all|cell|off)\n" +
+		m.append(stDim.Render("mouse: " + m.mouseMode + "  (all|cell|off)\n" +
 			"  click selects a block or focuses the input · drag copies the text (OSC 52; tmux's buffer too)\n" +
 			"  the terminal's own selection: shift+drag (iTerm2: option+drag)\n" +
 			"  tmux taking drags for copy-mode? bind -n MouseDrag1Pane if -F '#{mouse_any_flag}' 'send -M' 'copy-mode -M'"))
@@ -3998,15 +4046,15 @@ func mouseSlash(m *tuiModel, args []string) tea.Cmd {
 	switch args[0] {
 	case "all":
 		m.mouseMode = "all"
-		m.append(stNote.Render("mouse: all-motion — tap-to-type on Termux; ↑/↓ scroll the log"))
+		m.append(stDim.Render("mouse: all-motion — tap-to-type on Termux; ↑/↓ scroll the log"))
 		return nil
 	case "cell":
 		m.mouseMode = "cell"
-		m.append(stNote.Render("mouse: cell-motion — wheel scrolls the log; no tap-to-type on Termux"))
+		m.append(stDim.Render("mouse: cell-motion — wheel scrolls the log; no tap-to-type on Termux"))
 		return nil
 	case "off":
 		m.mouseMode = "off"
-		m.append(stNote.Render("mouse: off — the terminal keeps the pointer (native selection)"))
+		m.append(stDim.Render("mouse: off — the terminal keeps the pointer (native selection)"))
 		return nil
 	}
 	m.append(stErr.Render("mouse: want all|cell|off, got " + args[0]))
@@ -4026,7 +4074,7 @@ func argPreview(args map[string]any, max int) string {
 	return clip(strings.Join(parts, ", "), max)
 }
 
-// callText is the one-line form of a tool call — `⚙ tool(k=v, …)` — for the
+// callText is the one-line form of a tool call — `server · tool  k=v, …` — for the
 // collapsed block and the status line.
 //
 // exec is the exception: a shell command reads as a shell command, so it comes
@@ -4043,7 +4091,28 @@ func callText(tool string, args map[string]any, max int) string {
 	if line, ok := fileCallText(tool, args, max); ok {
 		return line
 	}
-	return "⚙ " + tool + "(" + argPreview(args, max) + ")"
+	line := toolLabel(tool)
+	if p := argPreview(args, max); p != "" {
+		line += "  " + p
+	}
+	return clip(line, max)
+}
+
+// toolLabel is a tool's name as a person reads it: "notes__project_notes"
+// is "notes · project notes", "node_query" is "node query". The one place a
+// tool name is turned into words for the screen; the model, the logs and the
+// inspector keep the real name.
+func toolLabel(tool string) string {
+	words := func(s string) string {
+		return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return r == '_' }), " ")
+	}
+	if srv, name, ok := strings.Cut(tool, "__"); ok && srv != "" && name != "" {
+		return srv + " · " + words(name)
+	}
+	if w := words(tool); w != "" {
+		return w
+	}
+	return tool
 }
 
 // execCallText renders exec's args as a shell prompt line. ok=false when there
@@ -4076,7 +4145,7 @@ func callFull(tool string, args map[string]any) string {
 	if tool == "eval" && evalCode(args) != "" {
 		return evalCallFull(args)
 	}
-	full := stTool.Render("⚙ " + tool)
+	full := stTool.Render(toolLabel(tool))
 	if af := argFull(args); af != "" {
 		full += "\n" + af
 	}
@@ -4116,7 +4185,14 @@ func init() {
 	slashCommands = []slashCmd{
 		{"login", "[name]", "connect to an AI service: its address, and a key if it needs one", loginSlash},
 		{"model", "[provider] [name] [--session] | use <provider> <id>", "pick the model: a searchable list from every service you are logged in to", modelSlash},
-		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
+		{"help", "[command]", "list these commands; /help <command> says one in full", func(m *tuiModel, args []string) tea.Cmd {
+			if len(args) > 0 {
+				m.showCommandHelp(args[0])
+			} else {
+				m.showHelp()
+			}
+			return nil
+		}},
 		{"config", "", "show this session's model settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
 		{"status", "", "this session: build, workspace, model, tools and servers", func(m *tuiModel, _ []string) tea.Cmd { m.statusSlash(); return nil }},
 		{"logout", "<provider>", "log out of an AI service: forget its address and key", logoutSlash},
@@ -4205,7 +4281,7 @@ func init() {
 					fmt.Fprintf(f, "layout %d kind=%s userText=%q rowOffset=%d h=%d\n",
 						i, kind, e.userText, e.rowOffset, h)
 				}
-				m.append(stNote.Render("tracing → " + filepath.Join(m.workspace, path)))
+				m.append(stDim.Render("tracing → " + filepath.Join(m.workspace, path)))
 				return nil
 			}
 			if args[0] == "off" {
@@ -4213,7 +4289,7 @@ func init() {
 					m.traceFile.Close()
 					m.traceFile = nil
 				}
-				m.append(stNote.Render("tracing off"))
+				m.append(stDim.Render("tracing off"))
 				return nil
 			}
 			m.append(stDim.Render("usage: /trace [on|off [file]]"))
@@ -4612,6 +4688,53 @@ func (m *tuiModel) showHelp() {
 		b.WriteString("\n  " + stCmd.Render(usage) + "  " + stDim.Render(c.desc))
 	}
 	m.append(b.String())
+}
+
+// showCommandHelp is /help <command>: its usage, what it does, the long help
+// where the command has one, and the values its first argument takes.
+func (m *tuiModel) showCommandHelp(name string) {
+	name = strings.TrimPrefix(name, "/")
+	var c *slashCmd
+	for _, s := range m.allSlash() {
+		if s.name == name {
+			c = &s
+			break
+		}
+	}
+	if c == nil {
+		m.append(stErr.Render("no command /" + name + " — /help lists them"))
+		return
+	}
+	var ec *engineCmd
+	for i := range m.engineCmds {
+		if m.engineCmds[i].name == name {
+			ec = &m.engineCmds[i]
+		}
+	}
+	usage := "/" + c.name
+	if c.args != "" {
+		usage += " " + c.args
+	}
+	rows := []string{stCmd.Render("/"+c.name) + "  " + c.desc}
+	if ec != nil && ec.help != "" {
+		rows = append(rows, "")
+		for _, l := range strings.Split(ec.help, "\n") {
+			rows = append(rows, "  "+l)
+		}
+	}
+	if ec != nil && len(ec.choices) > 0 {
+		rows = append(rows, "", stDim.Render("  "+usage))
+		w := 0
+		for _, ch := range ec.choices {
+			w = max(w, len(ch.value))
+		}
+		for _, ch := range ec.choices {
+			rows = append(rows, "  "+stCmd.Render(fmt.Sprintf("%-*s", w, ch.value))+"  "+stDim.Render(ch.desc))
+		}
+	} else if c.args != "" {
+		rows = append(rows, stDim.Render("  "+usage))
+	}
+	m.append(strings.Join(rows, "\n"))
 }
 
 // palettePanel renders the live command list above the input (like the ask

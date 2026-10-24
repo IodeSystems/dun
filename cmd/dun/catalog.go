@@ -251,6 +251,7 @@ func skillMatches(query string, ms []argChoice, total, w int) string {
 // TUI shows and completes it, and the engine carries it out.
 type engineCmd struct {
 	name, usage, desc string
+	help              string         // the command in full, for /help <name>
 	group             string         // where it is listed (groupOrder)
 	choices           []engineChoice // the first argument's values
 }
@@ -263,7 +264,7 @@ func engineCmdsFromEvent(ev evMsg) []engineCmd {
 	for _, it := range items {
 		c, _ := it.(map[string]any)
 		if n := str(c["name"]); n != "" {
-			ec := engineCmd{name: n, usage: str(c["usage"]), desc: str(c["description"]), group: str(c["group"])}
+			ec := engineCmd{name: n, usage: str(c["usage"]), desc: str(c["description"]), help: str(c["help"]), group: str(c["group"])}
 			chs, _ := c["choices"].([]any)
 			for _, ch := range chs {
 				if cm, ok := ch.(map[string]any); ok && str(cm["value"]) != "" {
