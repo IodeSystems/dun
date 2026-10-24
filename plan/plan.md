@@ -478,11 +478,12 @@ otherwise, go install latest supported version, after that, polylsp doctor
 should note if there are updated releases (similar practice)."
 
 - **Built:** `release/supported.go` (every build, no tag): per tool {Name,
-  Module, Min, Recommended}. mcpshell min v0.2.0 (oldest tag with
-  `--files-dir` + `--mcp`), recommended `v0.4.2-0.20261023182925-90cda545a60e`
-  (main: `MCPSHELL_TMP_OVERFLOW_DIR`); poly-lsp-mcp min = recommended
-  `v0.0.0-20261024175639-46caee4f6393` (46caee4: index protocol, doctor
-  --json, pure-Go tree-sitter). Never "latest": the proxy's cached @latest
+  Module, Min, Recommended} — the versions and why are in its comments.
+  USER 2026-10-24: once a dep is released, its tag is what dun embeds.
+  Status: raglit v0.1.0 (tag + 4 tarballs in deps.json) · mcpshell v0.5.0
+  (tag, no tarballs: go install only) · poly-lsp-mcp pseudo-version 9e227d7
+  (no release: its release workflow's dry run failed 2026-10-24 on
+  TestForwardsUnknownTextDocumentMethodToChild). Never "latest": the proxy's cached @latest
   for poly-lsp is 9f31d7e, which needs cc. Hand-edited; tests: each is a
   module version, min ≤ recommended, `deps.json` pins = recommended,
   `dun.ToolInstall` modules agree. `--fix` on a missing tool: the release
