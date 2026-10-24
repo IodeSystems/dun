@@ -36,3 +36,48 @@ func TestDoctorLoggedOut(t *testing.T) {
 		t.Fatalf("%+v", d.found)
 	}
 }
+
+// --fix runs only the fixes that are one command; the rest need the person.
+func TestDoctor_Fixable(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act := fixable(finding{"warn", "config", "open", "chmod 600 " + p})
+	if act == nil {
+		t.Fatal("chmod is not fixable")
+	}
+	if err := act(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", st.Mode().Perm())
+	}
+	if fixable(finding{"warn", "dund", "old", "dun dund service restart; sessions are kept"}) == nil {
+		t.Error("the service restart is not fixable")
+	}
+	for _, f := range []finding{
+		{"fail", "model", "no model", "/model in the TUI, web or app"},
+		{"ok", "config", "fine", "chmod 600 " + p},
+	} {
+		if fixable(f) != nil {
+			t.Errorf("fixable: %+v", f)
+		}
+	}
+}
+
+// dun doctor --help says what --fix runs.
+func TestDoctor_Help(t *testing.T) {
+	c := doctorCmd()
+	var out strings.Builder
+	c.SetOut(&out)
+	c.SetArgs([]string{"--help"})
+	if err := c.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"dun doctor [flags]", "--fix", "dun dund service restart", "chmod 600"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("help lacks %q:\n%s", want, out.String())
+		}
+	}
+}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/proto"
+	"github.com/spf13/cobra"
 )
 
 // `dun doctor` checks what dun needs, read-only, and says how to fix what is
@@ -34,13 +35,98 @@ func (d *doctor) add(level, area, detail, fix string) {
 	d.found = append(d.found, finding{level, area, detail, fix})
 }
 
-func runDoctor() int {
+// doctorCmd is `dun doctor`: the checks, and with --fix the fixes that are
+// one command dun can run itself (fixable). The rest are said, as before.
+func doctorCmd() *cobra.Command {
+	var fix bool
+	c := &cobra.Command{
+		Use:   "dun doctor",
+		Short: "check providers, tools, dund and the service; say how to fix what is wrong",
+		Long: "Checks what dun needs, read-only: the providers and their models, the tools the\n" +
+			"engines run (on your PATH and the service's), dund and its build, the service,\n" +
+			"and a self-updating build's source and Go. Exits 1 when a check fails.\n\n" +
+			"--fix runs the fixes that are one command, saying each before it runs, then\n" +
+			"checks again:\n  " + strings.Join(fixableNames, "\n  ") + "\n" +
+			"The others need you: a login, a model pick, an install.",
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(*cobra.Command, []string) error {
+			if code := runDoctor(fix); code != 0 {
+				os.Exit(code)
+			}
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&fix, "fix", false, "run the fixes dun can run itself, then check again")
+	c.Flags().BoolP("help", "h", false, "help for dun doctor")
+	return c
+}
+
+// fixableNames are the fixes --fix runs, for --help.
+var fixableNames = []string{
+	"a config file others can read: chmod 600",
+	"a service on another build: dun dund service restart",
+}
+
+// fixable is the action that applies f's fix, or nil when the fix needs the
+// person. Matched on the fix's words, which say the same command.
+func fixable(f finding) func() error {
+	switch {
+	case f.level == "ok":
+		return nil
+	case strings.HasPrefix(f.fix, "chmod 600 "):
+		p := strings.TrimPrefix(f.fix, "chmod 600 ")
+		return func() error { return os.Chmod(p, 0o600) }
+	case strings.HasPrefix(f.fix, "dun dund service restart"):
+		return func() error {
+			cmd := exec.Command(os.Args[0], "dund", "service", "restart")
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			return cmd.Run()
+		}
+	}
+	return nil
+}
+
+func runDoctor(fix bool) int {
+	d := check()
+	code := d.report()
+	if !fix {
+		return code
+	}
+	ran := 0
+	for _, f := range d.found {
+		act := fixable(f)
+		if act == nil {
+			continue
+		}
+		ran++
+		fmt.Printf("\nfixing %s: %s\n", f.area, f.fix)
+		if err := act(); err != nil {
+			fmt.Printf("  %s %v\n", stErr.Render("did not work:"), err)
+		}
+	}
+	if ran == 0 {
+		fmt.Println("\nnothing here that dun can fix by itself")
+		return code
+	}
+	fmt.Println()
+	time.Sleep(time.Second) // a restarted service answers again
+	return check().report()
+}
+
+// check runs every check.
+func check() *doctor {
 	d := &doctor{}
 	d.providers()
 	d.tools()
 	d.dund()
 	d.build()
+	return d
+}
 
+// report prints the findings; 1 when one failed.
+func (d *doctor) report() int {
 	fmt.Printf("dun doctor — dun %s, %s/%s, home %s\n\n", version, runtime.GOOS, runtime.GOARCH, dunHome())
 	failed := false
 	for _, f := range d.found {
