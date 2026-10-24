@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -124,13 +125,28 @@ func (m tuiModel) startingWhat() string {
 }
 
 // serversStartingTail is " · poly-lsp starting 34s" after "ready" while a
-// server is still starting, or "".
+// server is still starting, " · poly-lsp indexing 12s" while one that is up
+// builds its index, or "".
 func (m tuiModel) serversStartingTail() string {
-	names, since := m.serversStarting()
-	if names == "" {
-		return ""
+	tail := ""
+	if names, since := m.serversStarting(); names != "" {
+		tail = fmt.Sprintf(" · %s starting %s", names, time.Since(since).Round(time.Second))
 	}
-	return fmt.Sprintf(" · %s starting %s", names, time.Since(since).Round(time.Second))
+	for _, st := range sortedServers(m.servers) {
+		if st.Running && st.Index == dun.IndexBuilding {
+			tail += " · " + st.ID + " indexing" + m.indexingFor(st.ID)
+		}
+	}
+	return tail
+}
+
+// indexingFor is " 12s": how long a server's index has been building, on
+// this clock (noteStarting), or "…".
+func (m tuiModel) indexingFor(id string) string {
+	if t, ok := m.idxSince[id]; ok {
+		return fmt.Sprintf(" %ds", int(time.Since(t).Seconds()))
+	}
+	return "…"
 }
 
 // serversStarting names the servers still starting, and when the first of
@@ -157,20 +173,31 @@ func (m tuiModel) serversStarting() (string, time.Time) {
 // clock: the engine says how long it has been at it, and the TUI counts on
 // from there. A new map, not an edit: model copies share the old one.
 func (m *tuiModel) noteStarting(list []any) {
-	next := map[string]time.Time{}
+	next, idx := map[string]time.Time{}, map[string]time.Time{}
 	for _, s := range list {
 		o, ok := s.(map[string]any)
-		if !ok || o["starting"] != true {
+		if !ok {
 			continue
 		}
 		id := str(o["id"])
+		// Indexing, the same way: from the engine's seconds, then on.
+		if o["running"] == true && o["index"] == dun.IndexBuilding {
+			if t, ok := m.idxSince[id]; ok {
+				idx[id] = t
+			} else {
+				idx[id] = time.Now().Add(-time.Duration(evNum(o["indexSeconds"]) * float64(time.Second)))
+			}
+		}
+		if o["starting"] != true {
+			continue
+		}
 		if t, ok := m.srvSince[id]; ok {
 			next[id] = t
 			continue
 		}
 		next[id] = time.Now().Add(-time.Duration(evNum(o["startingSeconds"]) * float64(time.Second)))
 	}
-	m.srvSince = next
+	m.srvSince, m.idxSince = next, idx
 }
 
 // splashSays reports whether a server event is only a server that came up in
@@ -179,5 +206,7 @@ func (m *tuiModel) noteStarting(list []any) {
 // tools" under the resume border as if something had happened (USER
 // 2026-10-24). A failure is still said in the conversation, with its reason.
 func (m tuiModel) splashSays(ev evMsg) bool {
-	return ev["background"] == true && !strings.Contains(str(ev["message"]), "did not start")
+	// An index report is said in the conversation: what dun left out of
+	// the index, a failure's post-mortem, a nested checkout.
+	return ev["background"] == true && ev["action"] != "index" && !strings.Contains(str(ev["message"]), "did not start")
 }

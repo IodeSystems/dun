@@ -408,6 +408,15 @@ type ServerState struct {
 	// tools join when it is up), StartingSeconds how long it has been at it.
 	Starting        bool    `json:"starting,omitempty"`
 	StartingSeconds float64 `json:"startingSeconds,omitempty"`
+	// Index is the index a running server builds after its handshake
+	// (poly-lsp-mcp): "building", "ready" or "failed"; "" for one that
+	// builds none or says nothing of it. IndexSeconds is how long it has
+	// been building, or how long the build took; IndexErr why it failed;
+	// Exclude the directories left out of it, for this project.
+	Index        string   `json:"index,omitempty"`
+	IndexSeconds float64  `json:"indexSeconds,omitempty"`
+	IndexErr     string   `json:"indexErr,omitempty"`
+	Exclude      []string `json:"exclude,omitempty"`
 }
 
 // ServerEvent reports a server command's outcome and the new server set.

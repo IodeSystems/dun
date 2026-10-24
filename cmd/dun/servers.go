@@ -108,6 +108,9 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 	if alias == allServers {
 		return runAllServersCmd(ctx, h, action)
 	}
+	if verb, dir, _ := strings.Cut(strings.TrimSpace(action), " "); excludeVerb(alias, verb) {
+		return runExcludeCmd(ctx, h, alias, verb, dir)
+	}
 	if f := strings.Fields(action); len(f) > 1 || (len(f) == 1 && (f[0] == "unset")) {
 		return runSwitchCmd(ctx, h, alias, f[0], f[1:])
 	}
@@ -467,6 +470,10 @@ func serverDetail(st dun.ServerState) string {
 		s = "not hosted"
 	case st.Starting:
 		s = "starting…"
+	case st.Running && st.Index == dun.IndexBuilding:
+		s = fmt.Sprintf("running · indexing %ds · ", int(st.IndexSeconds+0.5)) + toolCost(st)
+	case st.Running && st.Index == dun.IndexFailed:
+		s = "running · index failed: " + oneLine(st.IndexErr) + " · " + toolCost(st)
 	case st.Running:
 		s = "running · " + toolCost(st)
 	case st.Err != "":
@@ -507,6 +514,9 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	}
 	if st.Running && st.Ingest != "" {
 		b.WriteString("\n" + st.Ingest)
+	}
+	if ix := indexStatus(st, cmd); ix != "" {
+		b.WriteString("\n" + ix)
 	}
 	if st.Auto {
 		b.WriteString("\n/" + cmd + " off to stop it this session · /" + cmd + " manual to keep it off in this project")
@@ -621,7 +631,8 @@ func serversProto(states []dun.ServerState) []proto.ServerState {
 		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Missing: st.Missing, Auth: st.Auth,
 			Via: st.Via, Proto: st.Proto, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
 			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
-			Detail: serverDetail(st), Slash: slashOf(st), Starting: st.Starting, StartingSeconds: st.StartingSeconds})
+			Detail: serverDetail(st), Slash: slashOf(st), Starting: st.Starting, StartingSeconds: st.StartingSeconds,
+			Index: st.Index, IndexSeconds: st.IndexSeconds, IndexErr: st.IndexErr, Exclude: st.Exclude})
 	}
 	return out
 }

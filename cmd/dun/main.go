@@ -636,6 +636,16 @@ func main() {
 			em.emit(catalogEvent(h))
 			em.emit(commandsEvent(h))
 		}
+		// A server's index build ended (dun/indexstate.go): the new state,
+		// and what dun did about it when it did something.
+		cfg.OnServerIndex = func(id, msg string) {
+			h, _ := started.Load().(*dun.Harness)
+			if h == nil {
+				return
+			}
+			em.emit(&proto.ServerEvent{ID: id, Action: "index", Message: msg,
+				Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Background: true})
+		}
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
 			em.emit(&proto.ToolCall{Tool: tool, Args: args})
 			em.emit(&proto.ToolResult{Tool: tool, Result: result})

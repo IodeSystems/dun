@@ -158,6 +158,9 @@ func TestRouteSlash(t *testing.T) {
 		"raglit detach x --global":          {"control", "ext", "detach raglit x --global"},
 		"raglit attach":                     {"control", "ext", "attach raglit"},
 		"poly-lsp attach x":                 {"server", "poly-lsp", "attach x"}, // no search role
+		// the code index's excludes keep a directory's case.
+		"poly-lsp exclude Vendor/X":  {"server", "poly-lsp", "exclude Vendor/X"},
+		"poly-lsp INCLUDE .claude/W": {"server", "poly-lsp", "include .claude/W"},
 		// raglit's manifest commands keep the text as typed.
 		"raglit INCLUDE ~/My Docs Notes.MD": {"control", "ext", "call raglit include ~/My Docs Notes.MD"},
 		"raglit exclude '**/*.LOG' --keep":  {"control", "ext", "call raglit exclude '**/*.LOG' --keep"},

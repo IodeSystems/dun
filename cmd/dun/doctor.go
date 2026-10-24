@@ -134,6 +134,7 @@ func check(fix bool) *doctor {
 	d := &doctor{fix: fix}
 	d.providers()
 	d.tools()
+	d.polyLSP()
 	d.dund()
 	d.build()
 	return d
@@ -305,6 +306,42 @@ func putBinary(name, module string) string {
 func besideDun(p string) bool {
 	exe, err := os.Executable()
 	return err == nil && filepath.Dir(p) == filepath.Dir(exe)
+}
+
+// polyLSP names the poly-lsp-mcp the engines run — the one on the
+// service's PATH when the service sets one, else this shell's — and whether
+// it speaks the index protocol (dun.IndexProtocol): an initialize that
+// answers before the index is built, and --exclude. An older build makes the
+// code server "starting" for as long as its index takes.
+func (d *doctor) polyLSP() {
+	const name = "poly-lsp-mcp"
+	bin, where := "", "this PATH"
+	if _, svc := dundcli.ServiceFile(dundcli.ServiceUnit); svc {
+		if p, ok := dundcli.ServicePATH(dundcli.ServiceUnit); ok {
+			bin, where = lookIn(p, name), "the service's PATH"
+		}
+	}
+	if bin == "" && where == "this PATH" {
+		bin, _ = exec.LookPath(name)
+	}
+	if bin == "" {
+		return // tools() said it is missing
+	}
+	d.polyLSPAt(bin, where)
+}
+
+// polyLSPAt is polyLSP's finding for the binary bin, found on where.
+func (d *doctor) polyLSPAt(bin, where string) {
+	ok, resolved, err := dun.IndexProtocol(bin)
+	switch {
+	case err != nil:
+		d.add("warn", "poly-lsp", resolved+" (on "+where+"): could not ask it: "+oneLine(err.Error()), "update it (poly-lsp: make install)")
+	case !ok:
+		d.add("warn", "poly-lsp", resolved+" (on "+where+") is an older build: startup waits for its index",
+			"update it (poly-lsp: make install)")
+	default:
+		d.add("ok", "poly-lsp", resolved+" (on "+where+"): indexes in the background; takes --exclude", "")
+	}
 }
 
 // lookIn finds name in a PATH that is not this process's.

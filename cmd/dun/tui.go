@@ -717,8 +717,9 @@ type tuiModel struct {
 	// starting began, on this clock, for the status line's elapsed time.
 	startQueue  []keptMsg
 	srvSince    map[string]time.Time
-	srvOrder    []string // server ids in the order first seen: the splash keeps them there (noteServerOrder)
-	restoredMsg string   // the held message, put back in the composer: the status line says whose it is while it is unchanged
+	idxSince    map[string]time.Time // when each running server's index began building, on this clock
+	srvOrder    []string             // server ids in the order first seen: the splash keeps them there (noteServerOrder)
+	restoredMsg string               // the held message, put back in the composer: the status line says whose it is while it is unchanged
 	switchNote  string
 	quietReplay bool
 	hintShown   bool
@@ -1844,7 +1845,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		// A server still starting: the live splash counts its seconds. The
 		// row changes in place; refresh only when its words did.
-		if len(m.srvSince) > 0 && len(m.convo) > 0 && m.convo[0].liveSplash &&
+		if len(m.srvSince)+len(m.idxSince) > 0 && len(m.convo) > 0 && m.convo[0].liveSplash &&
 			m.splashView(m.splashW()) != m.convo[0].collapsed {
 			m.refresh()
 		}

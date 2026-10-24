@@ -121,6 +121,10 @@ func (m tuiModel) toolsValue(w int) string {
 			trouble = append(trouble, st.ID+stDim.Render(" not installed"))
 		case st.Err != "":
 			trouble = append(trouble, st.ID+" "+stErr.Render("did not start"))
+		case st.Running && st.Index == dun.IndexBuilding:
+			trouble = append(trouble, st.ID+stDim.Render(" indexing"+m.indexingFor(st.ID)))
+		case st.Running && st.Index == dun.IndexFailed:
+			trouble = append(trouble, st.ID+" "+stErr.Render("index failed"))
 		}
 	}
 	sep := stDim.Render(" · ")

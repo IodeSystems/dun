@@ -90,7 +90,8 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 			Via: str(o["via"]), Proto: str(o["proto"]), Global: str(o["global"]), Project: str(o["project"]), Session: str(o["session"]),
 			From: str(o["from"]), ViaGlobal: str(o["viaGlobal"]), ViaProject: str(o["viaProject"]),
 			ViaSession: str(o["viaSession"]), ViaFrom: str(o["viaFrom"]),
-			Tools: int(evNum(o["tools"])), Slash: str(o["slash"])})
+			Tools: int(evNum(o["tools"])), Slash: str(o["slash"]),
+			Index: str(o["index"]), IndexSeconds: evNum(o["indexSeconds"]), IndexErr: str(o["indexErr"])})
 		details = append(details, str(o["detail"]))
 	}
 	return out, details

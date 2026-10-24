@@ -123,6 +123,9 @@ func extOwnCommands(e dun.Extension) []string {
 	if _, own := e.Slash.Commands["watch"]; !own && extIndexVerb(e, "watch") {
 		pairs = append(pairs, "watch", "watch a directory into an index of this project: watch <dir> [--index NAME]")
 	}
+	if _, own := e.Slash.Commands["exclude"]; !own && excludeVerb(e.ID, "exclude") {
+		pairs = append(pairs, excludeHelp...)
+	}
 	if _, own := e.Slash.Commands["attach"]; !own && extIndexVerb(e, "attach") {
 		pairs = append(pairs, "attach", "search another index too: attach <index>|<project>:<index> [--project|--global]; bare lists",
 			"detach", "stop searching an attached index: detach <index> [--project|--global]")
@@ -303,6 +306,11 @@ func routeSlash(line string, r slashRoutes) {
 		// index name keep their case.
 		if extIndexVerb(e, arg(0)) {
 			r.control("ext", strings.TrimSpace(arg(0)+" "+e.ID+" "+strings.Join(args[1:], " ")))
+			return
+		}
+		// exclude|include <dir>: the directory keeps its case.
+		if excludeVerb(e.ID, arg(0)) {
+			r.server(e.ID, strings.TrimSpace(arg(0)+" "+strings.Join(args[1:], " ")))
 			return
 		}
 		r.server(e.ID, strings.Join(lowerAll(args), " "))
