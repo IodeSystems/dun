@@ -64,7 +64,7 @@ var tuiGroup = map[string]string{
 // name — a prefix of one is not taken for it. Deciding: does a person using
 // dun on their project ever need it? A redraw timing, a scroll dump, an event
 // trace, a bug-report capture and a launcher rebuild do not.
-var debugCommands = map[string]bool{"perf": true, "repaint": true, "scrolldebug": true, "trace": true, "reload": true}
+var debugCommands = map[string]bool{"perf": true, "repaint": true, "scrolldebug": true, "trace": true}
 
 func groupRank(g string) int {
 	if i := slices.Index(groupOrder, g); i >= 0 {
