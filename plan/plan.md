@@ -285,6 +285,31 @@ works (`serviceFix`: restart only when the unit runs this very binary).
 - **optional extensions:** keep `<exe>.prev` and roll back after N failed
   starts; mobile banner says the failure (now it just clears).
 
+### ◐ 44. /login templates, type-to-filter, check before save (USER, 2026-10-24)
+
+- **Done (branch `worktree-agent-a5ad2eaeecf5a8810`):** /login opens a service
+  picker (`cmd/dun/login.go`, table `loginTemplates`, order = table order):
+  custom first and never filtered away, then OpenRouter, Fireworks, OpenAI,
+  Anthropic, Qwen (DashScope intl), DeepSeek, Groq, Mistral, xAI, Together,
+  Ollama (OLLAMA_HOST), LM Studio, llama.cpp. Typing moves the cursor to the
+  first template match. A key in the template's env var is offered by name,
+  never shown; local servers have no key row and are probed (250 ms) for
+  "running · N models". One `pickList` (`picklist.go`) serves this picker
+  and /model (DES-10); both keep their height while filtering. The form
+  checks the service before saving: a 401/403 says "the key was refused",
+  nothing listening says "is <X> running?", whole, wrapped; nothing saved.
+  A derived name taken by another address is numbered (local-2). Walk picks
+  custom.
+- **next:** Gemini template once agentkit's `chatURL` takes a base not ending
+  in /v1 (its base is …/v1beta/openai; the client appends /v1).
+- **risks:** Anthropic's /v1/models is asked with x-api-key +
+  anthropic-version beside the bearer (not tried against the real API);
+  Qwen's keys page named in words, not a URL; the walk's form screen at 49
+  not captured as its own step; personas not run; light theme unseen.
+- **blocking decisions:** none.
+- **optional extensions:** /login rename for a template's name at save time;
+  probe hosted services' reachability.
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
