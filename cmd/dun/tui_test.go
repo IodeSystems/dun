@@ -533,8 +533,8 @@ func TestTUI_CommandPalette(t *testing.T) {
 	if !m.paletteActive() {
 		t.Fatal("typing / should open the command palette")
 	}
-	if len(m.paletteMatches()) != len(slashCommands) {
-		t.Fatalf("bare / should list all %d commands, got %d", len(slashCommands), len(m.paletteMatches()))
+	if want := len(slashCommands) - len(debugCommands); len(m.paletteMatches()) != want {
+		t.Fatalf("bare / should list all %d commands but the debug ones, got %d", want, len(m.paletteMatches()))
 	}
 	// Filter down to /config.
 	m = typeStr(m, "conf")

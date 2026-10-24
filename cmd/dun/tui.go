@@ -4486,11 +4486,14 @@ func init() {
 		{"mcp add", "", "connect a server you were given — its command or address", func(m *tuiModel, args []string) tea.Cmd {
 			return engineSlash("mcp")(m, append([]string{"add"}, args...))
 		}},
-		{"help", "[command]", "list these commands; /help <command> says one in full", func(m *tuiModel, args []string) tea.Cmd {
-			if len(args) > 0 {
+		{"help", "[command|--debug]", "list these commands; /help <command> says one in full", func(m *tuiModel, args []string) tea.Cmd {
+			switch {
+			case len(args) > 0 && args[0] == "--debug":
+				m.showHelp(true)
+			case len(args) > 0:
 				m.showCommandHelp(args[0])
-			} else {
-				m.showHelp()
+			default:
+				m.showHelp(false)
 			}
 			return nil
 		}},
@@ -4904,6 +4907,9 @@ func (m tuiModel) paletteMatches() []slashCmd {
 			}
 			continue
 		}
+		if debugCommands[c.name] && c.name != word {
+			continue // a debug command shows once its whole name is typed
+		}
 		if strings.HasPrefix(c.name, word) {
 			out = append(out, c)
 		}
@@ -4928,7 +4934,7 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 		if cmds[i].name == name { // exact wins outright
 			return cmds[i].run(m, fields[1:])
 		}
-		if strings.HasPrefix(cmds[i].name, name) {
+		if strings.HasPrefix(cmds[i].name, name) && !debugCommands[cmds[i].name] {
 			hit = &cmds[i]
 			n++
 		}
@@ -5002,16 +5008,25 @@ func (m tuiModel) commandNamed(name string) bool {
 	return false
 }
 
-// showHelp appends the command list to the conversation.
-func (m *tuiModel) showHelp() {
+// showHelp appends the command list to the conversation: without debug, the
+// debug commands left out and counted on the last row.
+func (m *tuiModel) showHelp(debug bool) {
 	var b strings.Builder
 	b.WriteString(stHeader.Render("commands"))
+	hidden := 0
 	for _, c := range m.allSlash() {
+		if debugCommands[c.name] && !debug {
+			hidden++
+			continue
+		}
 		usage := "/" + c.name
 		if c.args != "" {
 			usage += " " + c.args
 		}
 		b.WriteString("\n  " + stCmd.Render(usage) + "  " + stDim.Render(c.desc))
+	}
+	if hidden > 0 {
+		b.WriteString("\n\n  " + stDim.Render(plural(hidden, "debug command")+" hidden — /help --debug shows them"))
 	}
 	m.append(b.String())
 }
