@@ -283,6 +283,15 @@ func (c *dunConfig) use(p providerConfig, model string) {
 	c.Provider, c.URL, c.Key, c.Model = p.Name, p.URL, p.Key, model
 }
 
+// providerLabel is what the ledger calls the provider at u: its saved name,
+// else its host.
+func providerLabel(fc dunConfig, u string) string {
+	if p, ok := fc.providerAt(u); ok && p.Name != "" {
+		return p.Name
+	}
+	return hostName(u)
+}
+
 func hostName(u string) string {
 	if pu, err := neturl.Parse(u); err == nil && pu.Hostname() != "" {
 		return pu.Hostname()
@@ -428,9 +437,10 @@ func decodeModels(resp *http.Response) []string {
 // client, which is also why there is no concurrency cap on sub-agents — the
 // client is where the queueing actually happens.
 //
-// onUsage is set on each client as it is built, before anyone can use it — so
-// a sub-agent's spend reaches the same meter as the parent's (dun/spend.go).
-func clientCache(url, key string, onUsage func(llm.Usage)) func(string) (agent.LLMRunner, error) {
+// usageFor(model) is set on each client as it is built, before anyone can use
+// it — so a sub-agent's spend reaches the same meter as the parent's, and the
+// ledger line names the model it ran on (dun/spend.go, dun/ledger.go).
+func clientCache(url, key string, usageFor func(model string) func(llm.Usage)) func(string) (agent.LLMRunner, error) {
 	var mu sync.Mutex
 	cache := map[string]agent.LLMRunner{}
 	return func(model string) (agent.LLMRunner, error) {
@@ -443,7 +453,7 @@ func clientCache(url, key string, onUsage func(llm.Usage)) func(string) (agent.L
 			return c, nil
 		}
 		c := llm.NewClient(url, key, model)
-		c.OnUsage = onUsage
+		c.OnUsage = usageFor(model)
 		cache[model] = c
 		return c, nil
 	}

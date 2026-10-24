@@ -49,6 +49,11 @@ type SpendMeter struct {
 
 	poke chan struct{}
 	now  func() time.Time
+
+	// The spend ledger every response with a cost is appended to (NoteAs),
+	// and this session's key fingerprint, for its trailing-24-hour rate.
+	ledger    *SpendLedger
+	ledgerKey string
 }
 
 type turnSpend struct {
@@ -157,6 +162,11 @@ type SpendSnapshot struct {
 
 	Limits   llm.RateLimits
 	LimitsAt time.Time
+
+	// Ledger is the machine's spend over time (ledger.go); LedgerOn says a
+	// ledger is wired at all.
+	Ledger   LedgerSummary
+	LedgerOn bool
 }
 
 func (m *SpendMeter) Snapshot() SpendSnapshot {
@@ -164,14 +174,21 @@ func (m *SpendMeter) Snapshot() SpendSnapshot {
 		return SpendSnapshot{}
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return SpendSnapshot{
+	s := SpendSnapshot{
 		Currency: m.currency, Mixed: m.mixed,
 		Session: m.session, Calls: m.calls, CostedCalls: m.costed,
 		LastTurn: m.last.amount, LastTurnCalls: m.last.calls, LastTurnCosted: m.last.costed, TurnEnded: m.last.ended,
 		Budget: m.budget, BudgetAt: m.budgetAt, BudgetUnsupported: m.unsupported, BudgetErr: m.budgetErr,
 		Limits: m.limits, LimitsAt: m.limitsAt,
 	}
+	l, key := m.ledger, m.ledgerKey
+	m.mu.Unlock()
+	// The ledger is read off the meter's lock: it is file IO, and Note must
+	// never wait for it.
+	if l != nil {
+		s.Ledger, s.LedgerOn = l.Summary(key), true
+	}
+	return s
 }
 
 // Poke asks the poller for a read soon (it still honours its minimum gap).

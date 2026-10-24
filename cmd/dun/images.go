@@ -13,7 +13,7 @@ import (
 
 // visionConfig is what the engine running model on url needs for images.
 // The vision model is on the provider vision_provider names, else on url.
-func visionConfig(fc dunConfig, url, key, model string, onUsage func(llm.Usage)) dun.VisionConfig {
+func visionConfig(fc dunConfig, url, key, model string, usageFor func(url, key, model string) func(llm.Usage)) dun.VisionConfig {
 	v := dun.VisionConfig{Key: dun.VisionKey(url, model), Model: model}
 	if fc.VisionModel == "" {
 		return v
@@ -27,7 +27,7 @@ func visionConfig(fc dunConfig, url, key, model string, onUsage func(llm.Usage))
 		vu, vk = p.URL, p.Key
 	}
 	c := llm.NewClient(vu, vk, fc.VisionModel)
-	c.OnUsage = onUsage
+	c.OnUsage = usageFor(vu, vk, fc.VisionModel)
 	v.Describer, v.DescriberModel = c, fc.VisionModel
 	return v
 }

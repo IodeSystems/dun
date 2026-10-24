@@ -182,6 +182,10 @@ type Spend struct {
 	// Limits are the rate-limit windows the latest response reported.
 	Limits   []RateLimit `json:"limits,omitempty"`
 	LimitsAt string      `json:"limits_at,omitempty"` // RFC 3339
+
+	// Ledger is this machine's spend over time, every session and sub-agent
+	// (dun/ledger.go); nil when no ledger is wired.
+	Ledger *SpendLedger `json:"ledger,omitempty"`
 }
 
 // KeyBudget is a key's spend against its budget.
@@ -197,6 +201,19 @@ type KeyBudget struct {
 }
 
 // RateLimit is one rate-limit window.
+// SpendLedger is the ledger's totals, each by currency ("" = not stated).
+type SpendLedger struct {
+	Today   map[string]float64            `json:"today,omitempty"`
+	Week    map[string]float64            `json:"week,omitempty"`
+	Month   map[string]float64            `json:"month,omitempty"`
+	Year    map[string]float64            `json:"year,omitempty"`
+	ByModel map[string]map[string]float64 `json:"by_model,omitempty"` // this month
+	// Last24h is the session key's trailing 24 hours: the rate its budget is
+	// measured against.
+	Last24h map[string]float64 `json:"last_24h,omitempty"`
+	Entries bool               `json:"entries,omitempty"`
+}
+
 type RateLimit struct {
 	Name      string `json:"name"`                // requests, tokens, input tokens, output tokens
 	Limit     *int64 `json:"limit,omitempty"`     // nil: not reported

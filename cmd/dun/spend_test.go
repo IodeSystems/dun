@@ -183,7 +183,8 @@ func TestSpendEventRoundTrip(t *testing.T) {
 // Every client the per-model cache builds reports to the meter.
 func TestClientCacheWiresOnUsage(t *testing.T) {
 	var got int
-	get := clientCache("http://127.0.0.1:1", "k", func(llm.Usage) { got++ })
+	var model string
+	get := clientCache("http://127.0.0.1:1", "k", func(m string) func(llm.Usage) { model = m; return func(llm.Usage) { got++ } })
 	r, err := get("child-model")
 	if err != nil {
 		t.Fatal(err)
@@ -193,8 +194,8 @@ func TestClientCacheWiresOnUsage(t *testing.T) {
 		t.Fatal("cached client has no OnUsage")
 	}
 	c.OnUsage(llm.Usage{})
-	if got != 1 {
-		t.Error("OnUsage is not the meter's")
+	if got != 1 || model != "child-model" {
+		t.Errorf("OnUsage is not the meter's (calls %d, model %q)", got, model)
 	}
 }
 

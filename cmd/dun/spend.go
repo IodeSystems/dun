@@ -64,6 +64,11 @@ func spendProto(s dun.SpendSnapshot, now time.Time) *proto.Spend {
 	if !s.LimitsAt.IsZero() {
 		p.LimitsAt = s.LimitsAt.UTC().Format(time.RFC3339)
 	}
+	if s.LedgerOn {
+		l := s.Ledger
+		p.Ledger = &proto.SpendLedger{Today: l.Today, Week: l.Week, Month: l.Month, Year: l.Year,
+			ByModel: l.ByModel, Last24h: l.Last24h, Entries: l.Entries}
+	}
 	return p
 }
 

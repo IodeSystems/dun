@@ -486,9 +486,16 @@ func main() {
 	// the per-model cache builds reports into one meter, so the session's spend
 	// covers the turn, its side calls and its sub-agents. See dun/spend.go.
 	spend := dun.NewSpendMeter()
-	client.OnUsage = spend.Note
+	// Every response with a cost is also a line in the machine's spend ledger
+	// ($DUN_HOME/spend, dun/ledger.go), billed to the provider, a fingerprint
+	// of the key (never the key) and the model.
+	spend.SetLedger(dun.NewSpendLedger(dun.DefaultLedgerDir()), dun.KeyFingerprint(effKey))
+	usageFor := func(u, k, model string) func(llm.Usage) {
+		return spend.NoteAs(dun.SpendSource{Provider: providerLabel(fc, u), Key: dun.KeyFingerprint(k), Model: model})
+	}
+	client.OnUsage = usageFor(*url, effKey, *model)
 	var runner agent.LLMRunner = client
-	childClients := clientCache(*url, effKey, spend.Note)
+	childClients := clientCache(*url, effKey, func(model string) func(llm.Usage) { return usageFor(*url, effKey, model) })
 	if why := providerMissing(*url, *model); why != nil {
 		runner = noProvider{why}
 		childClients = func(string) (agent.LLMRunner, error) { return nil, why }
@@ -523,7 +530,7 @@ func main() {
 		DockerImage:   resolveDockerImage(*docker),
 		DockerNetwork: *dockerNetwork,
 		ExtraMounts:   mounts,
-		Vision:        visionConfig(fc, *url, effKey, *model, spend.Note),
+		Vision:        visionConfig(fc, *url, effKey, *model, usageFor),
 	}
 	// An OAuth server's login opens a browser on this machine too — unless
 	// DUN_NO_BROWSER is set (a headless box, a test). The URL is shown to
