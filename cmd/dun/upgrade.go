@@ -63,15 +63,19 @@ func upgradeRows(u *upgradeState, session string, width int) []string {
 	}
 	head := "⟳ dund is upgrading to " + buildName(u.version)
 	if len(u.waiting) == 0 {
-		head += " — restarting"
-	} else {
-		head += " — waiting for:"
-		if !u.deadline.IsZero() {
-			head += " (or it restarts at " + u.deadline.Format("15:04") + ")"
-		}
-		head += " · /upgrade now restarts now; cut work resumes after"
+		return []string{fit(head+" — restarting", width)}
 	}
-	rows := []string{fit(head, width)}
+	// The list goes last: a deadline or a hint after "waiting for:" read as
+	// the list, and an empty one (USER 2026-10-23). One wait fits on the row.
+	head += " — restarts"
+	if !u.deadline.IsZero() {
+		head += " at " + u.deadline.Format("15:04") + ","
+	}
+	head += " or now with /upgrade now (cut work resumes after); waiting for"
+	if len(u.waiting) == 1 {
+		return []string{fit(head+" "+waitLine(u.waiting[0], session), width)}
+	}
+	rows := []string{fit(head+":", width)}
 	const most = 4
 	for i, w := range u.waiting {
 		if i == most {

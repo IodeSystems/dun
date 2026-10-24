@@ -45,7 +45,7 @@ var pendingEv = map[string]any{"type": "upgrade", "state": "pending", "version":
 func TestUpgradeStatusRows(t *testing.T) {
 	rows := upgradeRows(parseUpgrade(pendingEv), "here", 200)
 	all := strings.Join(rows, "\n")
-	for _, want := range []string{"⟳ dund is upgrading to d80fc66 — waiting for:", "/upgrade now",
+	for _, want := range []string{"⟳ dund is upgrading to d80fc66 — restarts", "/upgrade now", "waiting for:",
 		"the turn in this session (ctrl+c interrupts)", "job #3 go test ./... (/jobs kill 3)",
 		"a turn in session 20261022-1043 (another client)"} {
 		if !strings.Contains(all, want) {
@@ -56,6 +56,11 @@ func TestUpgradeStatusRows(t *testing.T) {
 		if n := len([]rune(r)); n > 30 {
 			t.Errorf("row of %d runes at width 30: %q", n, r)
 		}
+	}
+	one := upgradeRows(parseUpgrade(map[string]any{"type": "upgrade", "state": "pending", "version": "d80fc66",
+		"waiting": []any{map[string]any{"session": "here", "what": "turn"}}}), "here", 300)
+	if len(one) != 1 || !strings.HasSuffix(one[0], "waiting for the turn in this session (ctrl+c interrupts)") {
+		t.Errorf("one wait goes on the headline: %q", one)
 	}
 	r := upgradeRows(parseUpgrade(map[string]any{"type": "upgrade", "state": "restarting", "version": "d80fc66"}), "here", 200)
 	if len(r) != 1 || !strings.Contains(r[0], "dund is restarting into d80fc66") {
