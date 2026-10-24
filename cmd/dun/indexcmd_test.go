@@ -40,8 +40,9 @@ func TestIndexing_SplashStatusAndReport(t *testing.T) {
 	if got := lastRow(v.m); strings.Contains(got, "indexing") {
 		t.Fatalf("still indexing after ready: %q", got)
 	}
-	if got := stripANSI(convoText(v.m)); !strings.Contains(got, "poly-lsp running") {
-		t.Fatalf("the splash does not say running:\n%s", got)
+	// The splash's tools row names a server only while it is changing or wrong.
+	if got := stripANSI(convoText(v.m)); strings.Contains(got, "poly-lsp indexing") {
+		t.Fatalf("the splash still says indexing:\n%s", got)
 	}
 }
 
