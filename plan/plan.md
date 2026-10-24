@@ -361,6 +361,52 @@ not run in the clean container)
 - **optional extensions:** agentkit exposing the initialize result (drop
   the probe); completion of directory names after `/poly-lsp exclude`.
 
+### ◐ 49. Supported tool versions; doctor installs and updates by origin (USER, 2026-10-24)
+
+Owner: "dun doctor should, if it has a latest release index, do that,
+otherwise, go install latest supported version, after that, polylsp doctor
+should note if there are updated releases (similar practice)."
+
+- **Built:** `release/supported.go` (every build, no tag): per tool {Name,
+  Module, Min, Recommended}. mcpshell min v0.2.0 (oldest tag with
+  `--files-dir` + `--mcp`), recommended `v0.4.2-0.20261023182925-90cda545a60e`
+  (main: `MCPSHELL_TMP_OVERFLOW_DIR`); poly-lsp-mcp min = recommended
+  `v0.0.0-20261024175639-46caee4f6393` (46caee4: index protocol, doctor
+  --json, pure-Go tree-sitter). Never "latest": the proxy's cached @latest
+  for poly-lsp is 9f31d7e, which needs cc. Hand-edited; tests: each is a
+  module version, min ≤ recommended, `deps.json` pins = recommended,
+  `dun.ToolInstall` modules agree. `--fix` on a missing tool: the release
+  pin (release dun) → else `go install module@recommended` (poly-lsp-mcp
+  added to `fixTools`) → else "install Go … or put a release build from
+  <repo>/releases on PATH". `cmd/dun/toolver.go` `planTool`: version from
+  buildinfo (x/mod/semver; pseudo-versions compare); < min warn "too old
+  for this dun", < recommended ok "an update is available"; the fix follows
+  the tool's origin (release → pin download beside dun; go install → go
+  install into the tool's own dir; checkout → "rebuild it in <srcDir>
+  (make install)", srcDir from `-ldflags -X main.srcDir=` in buildinfo);
+  modified checkout / plain build / (devel) → "can't compare", no fix.
+  `--fix` never downgrades, never runs a checkout's rebuild. poly-lsp's
+  `doctor --json` `update` block relayed as one ok line (available → "says
+  an update is available: a → b" + its `how`; no `latest` + a note → the
+  note; else nothing), from the one existing doctor --json call.
+- **Decided (assumptions, catchable):** a go-install update goes into the
+  tool's directory (in place), not beside dun; not writable → said. A
+  release-download update only when the tool is beside dun (where the
+  download goes); elsewhere → "remove <p>, then --fix". dun's line and
+  poly-lsp's relayed line can both show (dun's tested version vs poly-lsp's
+  latest); --fix runs only dun's, never poly-lsp's `how`. raglit is not in
+  the table (opt-in, needs an embedder).
+- **next:** publish tags for mcpshell/poly-lsp and move the table to them;
+  fill `deps.json` from their releases before the first `make release`.
+- **risks:** go install into GOBIN=<tool dir> not run against the real
+  proxy in a test (faked; the go-install-at-a-version path is tested with a
+  file GOPROXY); a release dun with a pinned tool and no Go: an outdated go
+  install build is only said, not replaced by the download.
+- **blocking decisions:** none.
+- **optional extensions:** a `make` step that writes the table from `go
+  list -m`; hide poly-lsp's "modified checkout" note when dun's line says
+  the same.
+
 ### ◐ 48. poly-lsp's install hints: a missing language server, said once (USER, 2026-10-24)
 
 - **Built:** poly-lsp-mcp (f064670) sends `poly-lsp-mcp/setup`
