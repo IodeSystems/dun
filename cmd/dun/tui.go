@@ -4439,7 +4439,7 @@ func init() {
 				return nil
 			}
 			if len(args) == 0 || args[0] != "now" {
-				m.append(m.upgradeView())
+				m.append(stNote.Render(upgradeDetail(m.upgrade, m.sessionID)))
 				return nil
 			}
 			if !m.proc.upgradeNow() {

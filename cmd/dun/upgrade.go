@@ -52,40 +52,50 @@ func buildName(v string) string {
 	return v
 }
 
-// upgradeRows is the pending upgrade as rows, each at most width runes:
-// the headline, then one row per thing dund waits for. session is the one
-// this TUI shows, whose work it can end itself (ctrl+c, /jobs kill).
-func upgradeRows(u *upgradeState, session string, width int) []string {
+// upgradeRow is the pending upgrade's status row, at most width runes. It is
+// one row always (a list that grew and shrank as work ended made the screen
+// bounce), and the way to the detail comes before the detail: a cut at 49
+// columns lost "waiting for …" and left no way to learn why (USER
+// 2026-10-24). /upgrade shows all of it (upgradeDetail).
+func upgradeRow(u *upgradeState, session string, width int) string {
 	if u == nil {
-		return nil
+		return ""
 	}
 	if u.state == "restarting" {
-		return []string{fit("⟳ dund is restarting into "+buildName(u.version)+"… this reconnects", width)}
+		return fit("⟳ dund is restarting into "+buildName(u.version)+"… this reconnects", width)
 	}
-	head := "⟳ dund is upgrading to " + buildName(u.version)
+	head := "⟳ dund upgrade to " + buildName(u.version)
+	switch len(u.waiting) {
+	case 0:
+		return fit(head+" — restarting", width)
+	case 1:
+		return fit(head+" · /upgrade · waits for "+waitLine(u.waiting[0], session), width)
+	}
+	return fit(fmt.Sprintf("%s · /upgrade · waits for %d things: %s, …", head, len(u.waiting),
+		waitLine(u.waiting[0], session)), width)
+}
+
+// upgradeDetail is /upgrade's answer: what dund waits for, each with how to
+// end it, when it restarts anyway, and how to restart now. Plain lines; the
+// conversation wraps them.
+func upgradeDetail(u *upgradeState, session string) string {
+	if u.state == "restarting" {
+		return "dund is restarting into " + buildName(u.version) + "; this client reconnects when it is back"
+	}
+	lines := []string{"dund is upgrading to " + buildName(u.version) + "."}
 	if len(u.waiting) == 0 {
-		return []string{fit(head+" — restarting", width)}
+		return lines[0] + " Nothing is running; it is restarting now."
 	}
-	// The list goes last: a deadline or a hint after "waiting for:" read as
-	// the list, and an empty one (USER 2026-10-23). One wait fits on the row.
-	head += " — restarts"
+	when := "It restarts when nothing below is running"
 	if !u.deadline.IsZero() {
-		head += " at " + u.deadline.Format("15:04") + ","
+		when += ", and at " + u.deadline.Format("15:04") + " at the latest"
 	}
-	head += " or now with /upgrade now (cut work resumes after); waiting for"
-	if len(u.waiting) == 1 {
-		return []string{fit(head+" "+waitLine(u.waiting[0], session), width)}
+	lines = append(lines, when+". Waiting for:")
+	for _, w := range u.waiting {
+		lines = append(lines, "  · "+waitLine(w, session))
 	}
-	rows := []string{fit(head+":", width)}
-	const most = 4
-	for i, w := range u.waiting {
-		if i == most {
-			rows = append(rows, fit(fmt.Sprintf("   · and %d more", len(u.waiting)-most), width))
-			break
-		}
-		rows = append(rows, fit("   · "+waitLine(w, session), width))
-	}
-	return rows
+	lines = append(lines, "/upgrade now restarts it now; the work it cuts resumes after.")
+	return strings.Join(lines, "\n")
 }
 
 // waitLine is one thing dund waits for, and how to end it from here (ctrl+c interrupts a turn, as ctrl+g does).
@@ -131,16 +141,12 @@ func fit(s string, width int) string {
 	return string(r[:width-1]) + "…"
 }
 
-// upgradeView is the pending upgrade's rows, styled; "" when none.
+// upgradeView is the pending upgrade's status row, styled; "" when none.
 func (m tuiModel) upgradeView() string {
-	rows := upgradeRows(m.upgrade, m.sessionID, m.w)
-	if len(rows) == 0 {
-		return ""
+	if r := upgradeRow(m.upgrade, m.sessionID, m.w); r != "" {
+		return stNote.Render(r)
 	}
-	for i := range rows {
-		rows[i] = stNote.Render(rows[i])
-	}
-	return strings.Join(rows, "\n")
+	return ""
 }
 
 // What a TUI does about a dund of another build.

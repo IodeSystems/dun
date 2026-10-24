@@ -40,31 +40,51 @@ var pendingEv = map[string]any{"type": "upgrade", "state": "pending", "version":
 		map[string]any{"session": "20261022-1043", "what": "turn"},
 	}}
 
-// The pending upgrade is a row of its own, naming each thing it waits for
-// and how to end the ones in this session.
-func TestUpgradeStatusRows(t *testing.T) {
-	rows := upgradeRows(parseUpgrade(pendingEv), "here", 200)
-	all := strings.Join(rows, "\n")
-	for _, want := range []string{"⟳ dund is upgrading to d80fc66 — restarts", "/upgrade now", "waiting for:",
+// The pending upgrade is one row of its own; /upgrade, named on it before
+// any detail, says everything: each wait and how to end the ones here.
+func TestUpgradeStatusRow(t *testing.T) {
+	u := parseUpgrade(pendingEv)
+	row := upgradeRow(u, "here", 200)
+	for _, want := range []string{"⟳ dund upgrade to d80fc66 · /upgrade · waits for 3 things: the turn in this session"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("row lacks %q: %q", want, row)
+		}
+	}
+	// At phone width the cut keeps the way to the detail (USER 2026-10-24).
+	phone := upgradeRow(u, "here", 49)
+	if n := len([]rune(phone)); n > 49 || !strings.Contains(phone, "/upgrade") {
+		t.Errorf("phone row (%d runes): %q", n, phone)
+	}
+	d := upgradeDetail(u, "here")
+	for _, want := range []string{"dund is upgrading to d80fc66.", "at the latest", "Waiting for:",
 		"the turn in this session (ctrl+c interrupts)", "job #3 go test ./... (/jobs kill 3)",
-		"a turn in session 20261022-1043 (another client)"} {
-		if !strings.Contains(all, want) {
-			t.Errorf("rows lack %q:\n%s", want, all)
+		"a turn in session 20261022-1043 (another client)", "/upgrade now restarts it now"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("detail lacks %q:\n%s", want, d)
 		}
 	}
-	for _, r := range upgradeRows(parseUpgrade(pendingEv), "here", 30) {
-		if n := len([]rune(r)); n > 30 {
-			t.Errorf("row of %d runes at width 30: %q", n, r)
-		}
-	}
-	one := upgradeRows(parseUpgrade(map[string]any{"type": "upgrade", "state": "pending", "version": "d80fc66",
+	one := upgradeRow(parseUpgrade(map[string]any{"type": "upgrade", "state": "pending", "version": "d80fc66",
 		"waiting": []any{map[string]any{"session": "here", "what": "turn"}}}), "here", 300)
-	if len(one) != 1 || !strings.HasSuffix(one[0], "waiting for the turn in this session (ctrl+c interrupts)") {
-		t.Errorf("one wait goes on the headline: %q", one)
+	if !strings.HasSuffix(one, "/upgrade · waits for the turn in this session (ctrl+c interrupts)") {
+		t.Errorf("one wait: %q", one)
 	}
-	r := upgradeRows(parseUpgrade(map[string]any{"type": "upgrade", "state": "restarting", "version": "d80fc66"}), "here", 200)
-	if len(r) != 1 || !strings.Contains(r[0], "dund is restarting into d80fc66") {
+	r := upgradeRow(parseUpgrade(map[string]any{"type": "upgrade", "state": "restarting", "version": "d80fc66"}), "here", 200)
+	if !strings.Contains(r, "dund is restarting into d80fc66") {
 		t.Errorf("restarting: %q", r)
+	}
+}
+
+// /upgrade at 49 columns shows every wait, wrapped, not cut.
+func TestUpgradeCommandAtPhoneWidth(t *testing.T) {
+	v := newVtui(49, 21)
+	v.m.sessionID = "here"
+	v.event(pendingEv)
+	v.send("/upgrade")
+	flat := strings.Join(strings.Fields(v.view()), " ")
+	for _, want := range []string{"Waiting for:", "(/jobs kill 3)", "(another client)", "/upgrade now restarts it now"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("/upgrade at 49 columns lacks %q:\n%s", want, v.view())
+		}
 	}
 }
 
@@ -74,7 +94,7 @@ func TestUpgradeRowInTheTUIAndInterrupt(t *testing.T) {
 	v, rec := busyVtui(t)
 	v.m.sessionID = "here"
 	v.event(pendingEv)
-	if !strings.Contains(v.view(), "the turn in this session (ctrl+c interrupts)") {
+	if !strings.Contains(v.view(), "⟳ dund upgrade to d80fc66 · /upgrade · waits for 3 things") {
 		t.Fatalf("no upgrade row:\n%s", v.view())
 	}
 	v.m = key(v.m, kCtrlG)
