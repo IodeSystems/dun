@@ -384,9 +384,9 @@ project", `repos` ≤20 relative, `reposTotal`, `remedy`), `symbols/cost.go`
     `--index-anyway`. Without it (or no `Config.Ask`): one line, no
     question, no flag passed, `on` refused.
 - **next:** none.
-- **risks:** the question shares `in.answers` with the model's ask_user, so a
-  model question open at the same moment gets the answer meant for the
-  other; the "not now" is per session (asked again next session by design);
+- **risks:** the question shares `in.answers` with the model's ask_user —
+  fixed: the engine's askers (Ask, Mount) take one lock, so one question is
+  open at a time and the second waits; the "not now" is per session (asked again next session by design);
   index-anyway of a home directory can run into the index budget, which the
   budget retry (item 46) then handles; the picker with a 2-line question
   was not looked at in a real terminal.

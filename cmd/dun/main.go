@@ -707,7 +707,13 @@ func main() {
 				TokensBefore: n.TokensBefore, TokensAfter: n.TokensAfter,
 				Turn: n.Turn, SinceLastSecs: n.SinceLastSecs, Cause: n.Cause})
 		}
+		// askMu: one question open at a time. Every question (the model's
+		// ask_user, a mount, dun's own "not a project") reads the next line of
+		// in.answers; two open at once could each take the other's answer.
+		var askMu sync.Mutex
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {
+			askMu.Lock()
+			defer askMu.Unlock()
 			// Paused for the whole wait: the person deciding is not the turn
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
@@ -730,6 +736,8 @@ func main() {
 			})
 		}
 		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {
+			askMu.Lock()
+			defer askMu.Unlock()
 			return withoutClock(func() (bool, error) {
 				em.emit(&proto.Mount{Source: source, Name: name})
 				select {
