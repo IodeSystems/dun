@@ -801,6 +801,8 @@ type tuiModel struct {
 	providerEnvKey   string     // the template's key variable that is set; "" none
 	providerBack     bool       // esc goes back to the service picker
 	provider         string     // name of the provider the engine runs on
+	// /raglit setup (ragsetup.go); nil when it is not open.
+	rag *ragSetup
 	// The add-MCP-server form (/mcp add).
 	mcpForm      bool
 	mcpFields    [mcpRows]textinput.Model // name, url or command, token or env, then oauth (see mcpform.go)
@@ -1118,6 +1120,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loginCheckedMsg:
 		return m, m.loginChecked(msg)
 
+	case ragLoadedMsg:
+		m.ragLoaded(msg)
+		return m, nil
+	case ragModelsMsg:
+		m.ragModels(msg)
+		return m, nil
+	case ragSavedMsg:
+		m.ragSaved(msg)
+		return m, nil
+
 	case tea.KeyPressMsg:
 		// Any key clears a mouse highlight; esc does only that.
 		if m.drag.on {
@@ -1196,6 +1208,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// So does the add-MCP-server form.
 		if m.mcpForm {
 			return m.updateMCPForm(msg)
+		}
+		// So does /raglit setup.
+		if m.rag != nil {
+			return m.updateRagSetup(msg)
 		}
 		// So does the model picker.
 		if m.modelPicking {
@@ -2062,6 +2078,8 @@ func (m tuiModel) paste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case m.mcpForm:
 		return m.typeMCPField(msg)
+	case m.rag != nil:
+		return m.typeRagQuery(msg)
 	case m.modelPicking && m.loginPicking:
 		return m.typeLoginQuery(msg)
 	case m.modelPicking && m.providerForm:
@@ -3229,7 +3247,7 @@ func (m tuiModel) exitHint() string {
 // panelOpen says a panel the person opened is below the conversation, in
 // the composer's place: the palette, a form, a picker.
 func (m tuiModel) panelOpen() bool {
-	return m.picking || m.modelPicking || m.mcpForm || m.providerForm || m.loginPicking || m.paletteActive()
+	return m.picking || m.modelPicking || m.mcpForm || m.rag != nil || m.providerForm || m.loginPicking || m.paletteActive()
 }
 
 // histBrowsing says plain ↑/↓ walk history: the composer is empty, or holds
@@ -3509,6 +3527,8 @@ func (m tuiModel) drawView() string {
 		status = stDim.Render(modelHint())
 	case m.mcpForm:
 		status = stDim.Render(m.mcpHint())
+	case m.rag != nil:
+		status = stDim.Render(m.ragSetupHint())
 	case m.paletteActive():
 		what := "command"
 		if _, _, ok := m.paletteArgs(); ok {
@@ -3614,6 +3634,9 @@ func (m tuiModel) lowerView() string {
 	}
 	if m.mcpForm {
 		return fitRows(m.mcpFormPanel(), m.w)
+	}
+	if m.rag != nil {
+		return fitRows(m.ragSetupPanel(), m.w)
 	}
 	if m.paletteActive() {
 		return m.palettePanel()

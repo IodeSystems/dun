@@ -98,7 +98,7 @@ func TestPolyUpdate(t *testing.T) {
 		`{"update":{"origin":"release","current":"v1"}}`:                                                                                                         "",
 	} {
 		d := &doctor{}
-		d.addPolyUpdate(parsePolyUpdate([]byte(out)))
+		d.addToolUpdate("poly-lsp-mcp", parsePolyUpdate([]byte(out)))
 		got := ""
 		for _, f := range d.found {
 			got = strings.TrimSpace(f.level + " " + f.detail + " | " + f.fix)

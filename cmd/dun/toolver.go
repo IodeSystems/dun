@@ -128,7 +128,7 @@ func (d *doctor) toolOrigin(name, p string) {
 				fix = "to update: go install " + inst.Module
 			}
 		}
-		d.add("ok", "origin", name+": "+o.String(), fix)
+		d.add("ok", "origin", name+": "+o.String()+originNote(name, o), fix)
 		return
 	}
 	pl := planTool(name, p, o, s, d.toolEnv(name, p))
@@ -139,7 +139,7 @@ func (d *doctor) toolOrigin(name, p string) {
 			pl = planTool(name, p, o, s, d.toolEnv(name, p))
 		}
 	}
-	d.add(pl.level, "origin", pl.detail, pl.fix)
+	d.add(pl.level, "origin", pl.detail+originNote(name, o), pl.fix)
 }
 
 // toolEnv is planTool's view of this dun and machine for the tool at p.
@@ -207,14 +207,29 @@ func parsePolyUpdate(out []byte) *polyUpdate {
 	return r.Update
 }
 
-// addPolyUpdate relays it as one line: an update poly-lsp knows of, or why
-// it cannot tell. Up to date says nothing (the origin line has it).
-func (d *doctor) addPolyUpdate(u *polyUpdate) {
+// addToolUpdate relays a tool's update block (poly-lsp-mcp's shape, which
+// raglit's doctor --json copies) as one line: an update the tool knows of,
+// or why it cannot tell. Up to date says nothing (the origin line has it).
+func (d *doctor) addToolUpdate(name string, u *polyUpdate) {
+	area := name
+	if name == "poly-lsp-mcp" {
+		area = "poly-lsp"
+	}
 	switch {
 	case u == nil:
 	case u.Available && u.Latest != "":
-		d.add("ok", "poly-lsp", "poly-lsp-mcp says an update is available: "+plainLine(u.Current)+" → "+plainLine(u.Latest), plainLine(u.How))
+		d.add("ok", area, name+" says an update is available: "+plainLine(u.Current)+" → "+plainLine(u.Latest), plainLine(u.How))
 	case u.Latest == "" && u.Note != "":
-		d.add("ok", "poly-lsp", "poly-lsp-mcp "+plainLine(u.Current)+": "+plainLine(u.Note), "")
+		d.add("ok", area, name+" "+plainLine(u.Current)+": "+plainLine(u.Note), "")
 	}
+}
+
+// originNote is what the origin line adds about how name was built: a go
+// install raglit embeds a placeholder web UI, because the real one needs
+// node to build; its release tarballs carry it.
+func originNote(name string, o update.Origin) string {
+	if name == "raglit" && o.Kind == update.GoInstall {
+		return "; a go install build serves a placeholder web UI (the real one needs node to build; raglit's release tarballs include it)"
+	}
+	return ""
 }

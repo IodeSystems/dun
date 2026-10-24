@@ -126,6 +126,9 @@ func extOwnCommands(e dun.Extension) []string {
 	if _, own := e.Slash.Commands["exclude"]; !own && excludeVerb(e.ID, "exclude") {
 		pairs = append(pairs, excludeHelp...)
 	}
+	if _, own := e.Slash.Commands["setup"]; !own && e.ID == dun.ServerDocs {
+		pairs = append(pairs, ragSetupHelp...)
+	}
 	if _, own := e.Slash.Commands["attach"]; !own && extIndexVerb(e, "attach") {
 		pairs = append(pairs, "attach", "search another index too: attach <index>|<project>:<index> [--project|--global]; bare lists",
 			"detach", "stop searching an attached index: detach <index> [--project|--global]")

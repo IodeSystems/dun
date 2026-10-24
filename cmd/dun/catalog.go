@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iodesystems/dun"
 )
 
 // The engine's catalog event: the skills in reach and the running MCP
@@ -300,6 +302,9 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 	return func(m *tuiModel, args []string) tea.Cmd {
 		if name == "mcp" && len(args) > 0 && args[0] == "add" {
 			return m.openMCPForm(args[1:]...)
+		}
+		if name == dun.ServerDocs && len(args) == 1 && strings.EqualFold(args[0], "setup") {
+			return m.openRagSetup()
 		}
 		// /interrupt: the same command ctrl+g sends, so the status line says
 		// "interrupting…" for it too.

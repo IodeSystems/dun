@@ -156,6 +156,7 @@ func check(fix bool) *doctor {
 	d.providers()
 	d.tools()
 	d.polyLSP()
+	d.raglit()
 	d.dund()
 	d.build()
 	return d
@@ -387,7 +388,7 @@ func (d *doctor) polyLSPLanguages(bin string) {
 	if rep, ok := dun.ParseDoctorLanguages(out); ok {
 		d.addLanguages(rep)
 	}
-	d.addPolyUpdate(parsePolyUpdate(out))
+	d.addToolUpdate("poly-lsp-mcp", parsePolyUpdate(out))
 }
 
 // addLanguages is a warn per missing language server; a language that is
@@ -403,6 +404,56 @@ func (d *doctor) addLanguages(rep dun.SetupReport) {
 			}
 		}
 		d.add("warn", "poly-lsp", detail, fix)
+	}
+}
+
+// raglit relays `raglit doctor --json` (ragsetup.go): each capability that
+// is off as an ok line with what turns it on, each missing program as a
+// line with its install command (a warn only when it is not optional), and
+// its update block. Silent when raglit is not there or has no --json.
+func (d *doctor) raglit() {
+	if _, err := raglitBin(); err != nil {
+		return // tools() said it is missing
+	}
+	rep, out, err := raglitDoctor(8 * time.Second)
+	if err != nil {
+		return
+	}
+	d.addRaglit(rep)
+	d.addToolUpdate("raglit", parsePolyUpdate(out))
+}
+
+// addRaglit is the findings for one raglit report.
+func (d *doctor) addRaglit(rep dun.RaglitDoctor) {
+	for _, c := range rep.Capabilities {
+		if c.On {
+			continue
+		}
+		detail := "off: " + c.Name
+		if c.Needs != "" {
+			detail += " — needs " + c.Needs
+		}
+		d.add("ok", "raglit", detail, dun.RagHow(c.How, "raglit"))
+	}
+	for _, e := range rep.Extractors {
+		if e.Found {
+			continue
+		}
+		level, detail := "warn", e.Name+" missing"
+		if e.Optional {
+			level, detail = "ok", e.Name+" missing (optional)"
+		}
+		if e.Adds != "" {
+			detail += ": " + e.Adds
+		}
+		if rep.ExtractorsSeenBy != "" {
+			detail += " (as the " + rep.ExtractorsSeenBy + " sees it)"
+		}
+		fix := ""
+		if e.Install != nil {
+			fix = e.Install.Cmd
+		}
+		d.add(level, "raglit", detail, fix)
 	}
 }
 
