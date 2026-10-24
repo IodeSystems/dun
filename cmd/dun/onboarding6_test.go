@@ -202,7 +202,7 @@ func TestSplash6_ServersKeepTheirPlaces(t *testing.T) {
 		map[string]any{"id": "poly-lsp", "slash": "poly-lsp", "starting": true},
 	}})
 	if s := splashText(v); !strings.Contains(s, "mcp            3 servers · poly-lsp starting") ||
-		!strings.Contains(s, " · 2 tools · /mcp\n") {
+		!strings.Contains(s, " · 2 tools · /mcp info\n") {
 		t.Errorf("order:\n%s", s)
 	}
 }

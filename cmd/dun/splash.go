@@ -107,7 +107,7 @@ func (m tuiModel) modelValue() string {
 // mcpValue is the MCP servers that are not optional extensions — the
 // built-in ones (poly-lsp) included — as counts, not names: how many, any
 // that are starting or did not start, their tools and the tokens those tools
-// cost, and /mcp for the list. A server starting or failed is named: the
+// cost, and /mcp info for the detail. A server starting or failed is named: the
 // one thing on the row that is changing, or wrong (USER 2026-10-24: "people know what mcp is";
 // a list of names cut at a word said less). Narrow, the words go first.
 func (m tuiModel) mcpValue(w int) string {
@@ -145,11 +145,11 @@ func (m tuiModel) mcpValue(w int) string {
 	sep := stDim.Render(" · ")
 	ts := plural(tools, "tool")
 	if m.ctxStats.systemTokens == 0 {
-		return firstFit(w, head+sep+ts+sep+stDim.Render("/mcp"), head+sep+ts, head)
+		return firstFit(w, head+sep+ts+sep+stDim.Render("/mcp info"), head+sep+ts, head)
 	}
 	k := "~" + tokN(tok)
-	return firstFit(w, head+sep+ts+sep+k+" tokens"+sep+stDim.Render("/mcp"),
-		head+sep+ts+sep+k+sep+stDim.Render("/mcp"), head+sep+ts+sep+k, head+sep+ts, head)
+	return firstFit(w, head+sep+ts+sep+k+" tokens"+sep+stDim.Render("/mcp info"),
+		head+sep+ts+sep+k+sep+stDim.Render("/mcp info"), head+sep+ts+sep+k, head+sep+ts, head)
 }
 
 // splashServers are the servers in the order this TUI first saw them: a

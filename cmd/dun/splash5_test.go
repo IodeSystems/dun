@@ -200,7 +200,7 @@ func TestSplash5_ExtensionsAndServers(t *testing.T) {
 	v.m.srvSince["poly-lsp"] = time.Now().Add(-12 * time.Second)
 	v.m.refresh()
 	s := splashText(v)
-	for _, want := range []string{"mcp            2 servers · poly-lsp starting 12s · 1 tool · /mcp\n",
+	for _, want := range []string{"mcp            2 servers · poly-lsp starting 12s · 1 tool · /mcp info\n",
 		"extensions     raglit off · /help raglit\n", "skills         none\n"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lacks %q:\n%s", want, s)

@@ -1756,6 +1756,17 @@ var (
 		"clip it again."
 )
 
+// HostedLine is the system prompt's sentence naming the servers hosted in
+// the shell, "" for none: what scripting a server costs in every request
+// (/mcp info prices it).
+func HostedLine(hosted []string) string {
+	if len(hosted) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" MCP servers hosted in the shell, called inside eval as <ns>.<tool>({…}): %s — help(%q) lists one's commands.",
+		strings.Join(hosted, ", "), hosted[0])
+}
+
 // systemFor describes only the tool families actually present. files is the
 // file tools' line (systemFiles), "" when they are off. exec and ask_user
 // are wired by the dispatcher, not MCP, so applyTools appends their lines when
@@ -1792,10 +1803,7 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files str
 	}
 	if have[ServerShell] {
 		b.WriteString(systemShell)
-		if len(hosted) > 0 {
-			fmt.Fprintf(&b, " MCP servers hosted in the shell, called inside eval as <ns>.<tool>({…}): %s — help(%q) lists one's commands.",
-				strings.Join(hosted, ", "), hosted[0])
-		}
+		b.WriteString(HostedLine(hosted))
 	}
 	if have[ServerDocs] {
 		b.WriteString(systemDocs)

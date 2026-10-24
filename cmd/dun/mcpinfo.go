@@ -1,0 +1,222 @@
+package main
+
+import (
+	"fmt"
+	"math"
+	"slices"
+	"strings"
+
+	"github.com/iodesystems/dun"
+)
+
+// /mcp info: every server — what it is doing, its mode, its tools and what
+// they cost in every request — then the total and its share of the window,
+// the shell (scripted mode) and what it costs, and for each standalone
+// server heavy enough, the command that moves it into the shell with what
+// that saves. The engine says it (control "mcpinfo"), so every client gets
+// the same rows; they are plain and the conversation wraps them, so a narrow
+// screen breaks a row between words and never cuts one.
+//
+// The numbers are the context breakdown's (context_tokens.go): a server's
+// "mcp: <id>" part is MARGINAL — what leaving its schemas out saves — which
+// is the question a savings hint answers. A scripted server has no part: its
+// schemas are not in the request (mcpshell's eval description is fixed text),
+// and what it does cost is its name in one sentence of the system prompt
+// (dun.HostedLine), priced here at the engine's four characters a token.
+
+// mcpInfoIn is what /mcp info reads.
+type mcpInfoIn struct {
+	servers []dun.ServerState
+	parts   []dun.ContextPart // the context's parts; a server's is "mcp: <id>"
+	counted bool              // the parts are in: the first count lands after the start
+	exact   bool              // the parts were counted, not estimated
+	window  int               // the model's window; 0 unknown
+}
+
+// mcpInfo is /mcp info's rows.
+func mcpInfo(in mcpInfoIn) string {
+	est := "~"
+	if in.exact {
+		est = ""
+	}
+	cost, total := map[string]int{}, 0
+	for _, p := range in.parts {
+		if id, ok := strings.CutPrefix(p.Name, "mcp: "); ok {
+			cost[id] = p.Tokens
+			total += p.Tokens
+		}
+	}
+	var shell *dun.ServerState
+	idW := 0
+	for i, st := range in.servers {
+		idW = max(idW, len(st.ID))
+		if st.ID == dun.ServerShell {
+			shell = &in.servers[i]
+		}
+	}
+	shellUp := shell != nil && shell.Running
+	rows := []string{"mcp servers"}
+	var scripted, hosted []string
+	for _, st := range in.servers {
+		f := []string{infoState(st, shellUp), infoMode(st.Via)}
+		on := st.Running || (st.Via == dun.ViaShell && st.Auto && shellUp && st.Err == "")
+		if on && st.Tools > 0 {
+			f = append(f, fact(plural(st.Tools, "tool")))
+		}
+		switch {
+		case !in.counted || !on:
+		case st.Via == dun.ViaShell:
+			f = append(f, fact("0 tokens"))
+		default:
+			f = append(f, fact(est+tokN(cost[st.ID])+" tokens"))
+		}
+		rows = append(rows, "  "+pad(st.ID, idW)+"  "+strings.Join(f, " · "))
+		if st.Via == dun.ViaShell {
+			scripted = append(scripted, st.ID)
+			if on {
+				hosted = append(hosted, dun.ShellNamespace(st.ID)) // as hostedNamespaces names them
+			}
+		}
+	}
+	if len(in.servers) == 0 {
+		rows = append(rows, "  none yet — /mcp add")
+	}
+	switch {
+	case !in.counted:
+		rows = append(rows, "  tokens: counting…")
+	case in.window > 0:
+		pct := int(math.Round(float64(total) * 100 / float64(in.window)))
+		rows = append(rows, "  total "+fact(est+tokN(total)+" tokens")+" in every request, "+fact(fmt.Sprintf("%d%% of the %s window", pct, tokK(in.window))))
+	default:
+		rows = append(rows, "  total "+fact(est+tokN(total)+" tokens")+" in every request")
+	}
+	if shell != nil {
+		rows = append(rows, shellRows(shell, shellUp, in, est, cost[dun.ServerShell], scripted, hosted)...)
+	}
+	if hints := scriptHints(in, cost, shellUp, hosted); len(hints) > 0 {
+		rows = append(rows, "to save tokens:")
+		rows = append(rows, hints...)
+	}
+	return strings.Join(append(rows, "/mcp help for more"), "\n")
+}
+
+// shellRows say what scripted mode is and what it costs: the shell's one
+// eval tool, and the sentence that names the servers it hosts.
+func shellRows(shell *dun.ServerState, shellUp bool, in mcpInfoIn, est string, evalTok int, scripted, hosted []string) []string {
+	rows := []string{"scripted mode: the shell (mcpshell) hosts a server's tools in its one eval tool, called as <ns>.<tool>(…); " +
+		"their schemas leave every request, and help(\"<ns>\") lists them when the model asks"}
+	var cost string
+	switch {
+	case !shellUp:
+		cost = "the shell is " + infoState(*shell, false) + " — /mcp on shell"
+	case !in.counted:
+		cost = "the shell's eval: counting…"
+	default:
+		cost = "the shell's eval: " + fact(est+tokN(evalTok)+" tokens")
+		if len(hosted) > 0 {
+			cost += " · the line naming its servers: " + fact("~"+tokN(estimateTok(dun.HostedLine(hosted)))+" tokens")
+		}
+	}
+	if len(scripted) == 0 {
+		cost += " · no server is scripted"
+	} else {
+		cost += " · scripted: " + strings.Join(scripted, ", ")
+	}
+	return append(rows, cost)
+}
+
+// scriptHints are the standalone servers worth moving into the shell, one
+// row each, with what it saves: the server's marginal part, less what naming
+// it in the hosted sentence adds. The shell's own eval is not counted
+// against it — it is in the request already, or the row says to turn it on.
+//
+// The mark is dun.HeavyServerTokens (5000), the one /mcp tools draws its
+// "heavy" hint at, so the two never disagree about which server is heavy.
+// Under it the move is not worth what a scripted server gives up (docs
+// indexing, prompts and skills, the tool deny-list, its call renderers —
+// shellPlacementNote) and help() costs on every first use.
+func scriptHints(in mcpInfoIn, cost map[string]int, shellUp bool, hosted []string) []string {
+	if !in.counted {
+		return nil
+	}
+	var out []string
+	for _, st := range in.servers {
+		n := cost[st.ID]
+		// ViaDirect: an added server; a built-in has no mode. An oauth
+		// server cannot be scripted — dun holds its token (checkOAuth).
+		if st.Via != dun.ViaDirect || !st.Running || n < dun.HeavyServerTokens || isOAuth(st.Auth) {
+			continue
+		}
+		after := append(slices.Clone(hosted), dun.ShellNamespace(st.ID))
+		line := estimateTok(dun.HostedLine(after)) - estimateTok(dun.HostedLine(hosted))
+		row := "  " + fact("/mcp mode "+st.ID+" scripted") + " — saves " + fact("~"+tokN(n-line)+" tokens")
+		if !shellUp {
+			row += ", with the shell on (/mcp on shell)"
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// isOAuth says a server's Auth is an OAuth login state: every other value
+// is a fixed word (authState).
+func isOAuth(auth string) bool {
+	switch auth {
+	case "", "none", "static bearer", "static header":
+		return false
+	}
+	return true
+}
+
+// infoState is what a server is doing, in the splash's words: running,
+// starting (for how long), did not start (and why), or off. A scripted
+// server runs when the shell does.
+func infoState(st dun.ServerState, shellUp bool) string {
+	switch {
+	case st.Starting:
+		if st.StartingSeconds > 0 {
+			return fact(fmt.Sprintf("starting %ds", int(st.StartingSeconds)))
+		}
+		return "starting…"
+	case st.Err != "":
+		return fact("did not start:") + " " + oneLine(st.Err)
+	case st.Via == dun.ViaShell && st.Auto && !shellUp:
+		return "waits for the shell"
+	case st.Via == dun.ViaShell && st.Auto, st.Via != dun.ViaShell && st.Running:
+		return "running"
+	}
+	return "off"
+}
+
+// fact keeps a fact's words on one row: the conversation wraps at a space,
+// and a no-break space is not one ("~1.1k" over "tokens" read as two facts).
+func fact(s string) string { return strings.ReplaceAll(s, " ", "\u00a0") }
+
+// infoMode is a server's mode: standalone, scripted, or built-in (which has
+// no choice).
+func infoMode(via string) string {
+	if via == "" {
+		return "built-in"
+	}
+	return dun.ModeWord(via)
+}
+
+// mcpHelp is /mcp help: the actions, one line each, from the command's own
+// spec — the palette's and /help mcp's words.
+func mcpHelp() string {
+	for _, c := range ownCommands(false) {
+		if c.Name != "mcp" {
+			continue
+		}
+		w := 0
+		for _, ch := range c.Choices {
+			w = max(w, len(ch.Value))
+		}
+		rows := []string{"/mcp alone: a table of every server, on or off, and where that is set"}
+		for _, ch := range c.Choices {
+			rows = append(rows, "  "+pad(ch.Value, w)+"  "+ch.Description)
+		}
+		return strings.Join(rows, "\n")
+	}
+	return ""
+}

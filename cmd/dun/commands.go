@@ -136,8 +136,10 @@ func ownCommands(docker bool) []proto.CommandSpec {
 	// In the order a client lists them within a group: /mcp, which a new
 	// user adds a server with, before /ext, which explains extensions.
 	return []proto.CommandSpec{
-		{Name: "mcp", Usage: "[add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | mode <id> standalone|scripted|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
-			Choices: choices("add", "add a server: a form — a preset, or an id and a URL or a local command",
+		{Name: "mcp", Usage: "[info | help | add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | mode <id> standalone|scripted|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
+			Choices: choices("info", "each server's state, mode, tools and tokens; the shell; what scripting a heavy one saves",
+				"help", "these actions, one line each",
+				"add", "add a server: a form — a preset, or an id and a URL or a local command",
 				"on", "turn a server on: this session, or --project / --global", "off", "turn a server off: this session, or --project / --global",
 				"unset", "clear a server's --project or --session switch", "restart", "restart servers", "remove", "remove a server from the catalog", "refresh", "re-index a server's docs",
 				"mode", "standalone (its own tools, schemas in every request) or scripted (in mcpshell, called through eval), at a scope",
@@ -317,6 +319,14 @@ func routeSlash(line string, r slashRoutes) {
 		switch arg(0) {
 		case "add":
 			r.reply("adding an MCP server takes the form in the TUI (/mcp add) for now")
+		case "info":
+			if len(args) > 1 {
+				r.reply("usage: /mcp info")
+				return
+			}
+			r.control("mcpinfo", "")
+		case "help":
+			r.reply(mcpHelp())
 		case "remove", "rm", "refresh", "login", "logout":
 			if len(args) != 2 {
 				r.reply("usage: /mcp " + arg(0) + " <id>")

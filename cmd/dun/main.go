@@ -1043,6 +1043,17 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
+		// /mcp info: the servers, their cost, the shell and what scripting
+		// saves (mcpinfo.go). Detached, as /mcp tools is: the server list
+		// waits on the server lock a start holds.
+		if id == "mcpinfo" {
+			go func() {
+				bd := h.SystemParts()
+				em.emit(&proto.ControlEvent{ID: id, Message: mcpInfo(mcpInfoIn{servers: h.Servers(), parts: bd.Parts,
+					counted: bd.Total > 0, exact: bd.Exact, window: h.Window().Window})})
+			}()
+			return
+		}
 		// /mcp tools: one server's tools, hidden ones included, or a toggle.
 		// Detached: a toggle writes a file and may rebuild the tool set.
 		if id == "mcptools" {
