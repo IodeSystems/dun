@@ -240,6 +240,11 @@ done.md (TUI draws before the attach; built-ins start in the background,
 1.5 s grace; open: not run live against the real dund, /poly-lsp off
 mid-start is a no-op)
 
+### ✅ 40. Run-4 fixes: the splash says context and spend; a spend ledger; wide
+blocks scroll sideways — done 2026-10-23, see done.md (open: ↑ on an empty
+composer vs Termux finger-scroll; a panel covers the newest rows on a phone;
+personas not run; light theme unseen)
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has

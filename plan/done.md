@@ -2556,3 +2556,91 @@ initialize) came 54 s after raglit's. Two causes, both fixed:
   status cannot say "indexing": MCP gives no progress before initialize
   answers. (e) systemctl start output (dundcli) could still print under
   the alt screen on failure.
+
+## ✅ 40. Run-4 fixes: splash with context and spend, a spend ledger, wide blocks scroll (USER, 2026-10-23)
+
+- **Splash (owner 1):** nine fixed rows, each fitted at a word: folder ·
+  model · servers (poly-lsp is built in: here, "starting Ns" counted on the
+  TUI's clock and redrawn on the spinner tick only when the words change) ·
+  extensions (`raglit off · /help raglit`; the word "extras" is gone) ·
+  skills (`N · /skill` — /skill is the real command) · context files (the
+  rule files dun loads, rules.go: AGENTS.md/CLAUDE.md and their @imports) ·
+  context (`~N of W before you type (P%)`, "~" while estimated, the exact
+  count replaces it in place; second row `system · tools (mcp) · skills ·
+  context files`, from the label column at 49) · spend. Context is orange
+  from **60%** of the window (`contextHeavy`). Engine: the skill tool is
+  its own part (`SkillsPart`), the rules' files travel as
+  `SystemFiles` (each estimated). `/status`: the same rows plus servers
+  (state, tools, their share), skills (each ~tokens of its list line),
+  context files (each ~tokens), spend (today/week/month/year, this month
+  by model, this session, the key's budget).
+- **Spend ledger (owner 3):** `$DUN_HOME/spend/spend-YYYY-MM.jsonl` (0600,
+  dir 0700), one line per response that reported a cost: time, provider
+  (saved name, else host), key fingerprint (first 8 bytes of SHA-256 in
+  hex — never the key), model, cost, currency. Written by
+  `SpendMeter.NoteAs` on every client (main, the per-model cache for
+  sub-agents, vision). Cross-process safe without a lock: O_APPEND, one
+  write, line < 1 KiB (< PIPE_BUF); a reader leaves a partial last line for
+  the next read. Size: one file per month (~150 B a line, 10k responses a
+  day ≈ 45 MB a month); reads are incremental per file; dun never deletes
+  old months. Splash: smallest significant period (**$0.01 / 1 credit**),
+  `· $X left on <provider>` from the key budget, orange when what is left
+  ≤ the key's spend over the last 24 hours (or ≤ 0); a provider with no
+  cost says `not reported by <host>`, never $0.
+- **Wide blocks (owner 2):** cmd/dun/wide.go. A fenced code block or table
+  wider than the prose column renders at its own width (code via a glamour
+  renderer rounded to 20 columns, padding trimmed; a table at its natural
+  width), never wrapped; wider than the pane, each row cut with
+  `… +N cols →` and a dim `…` on the left when scrolled. → on the selected
+  answer descends; ←/→ (h/l) a third of the pane, home/end, ← at the left
+  edge or esc leave. All wide blocks of one answer scroll together. The
+  streaming reply renders the same way, so the finish moves no row.
+- **Run-4 findings (4–9):** `/mcp add` its own row (third, "connect a server
+  you were given — its command or address"); palette heading "commands";
+  descriptions cut at a clause (`fitClause`: `: ; — (` before `,`).
+  A panel opening below (palette, form, picker) keeps the view's top row
+  (`panelHeld`): it takes the blank rows, then covers the newest rows; the
+  hold lasts until the pane has grown back, so a form closing with an
+  "adding …" line moves the view only as far as that line needs. Form
+  fields sized to the pane (`formFieldW`), placeholders that fit 49, notes
+  one per row, "saved privately to ~/.dun/config.json" (saveConfig now
+  chmods 0600 — WriteFile's mode only applied to a new file). One-call
+  tool row: only ✓ green; at ≤ 60 columns the preview takes up to two
+  rows of its own. Status lines ≤ 4 hints; `fitHints` never drops `esc …`
+  / `ctrl+c quit` while another hint can go; forms put esc cancel second.
+  `⚠` (in DejaVu Sans Mono, and dun's other warnings) in column 0 of the
+  not-logged-in line, now "not logged in — type /login to connect" (fits
+  49; errNoLogin's words unchanged, the engine matches them). Kept line:
+  "kept your question — type /login, then it comes back", column 2,
+  stSecondary. Wrapped warning, kept and notice lines hang at column 2.
+  ↑ on an empty composer (or on a recalled entry) walks history, ↓ back to
+  empty; ctrl+↑/↓ unchanged. Divider split at min(w,100)/2 (50 at 180).
+  Walk: the /login step keeps the filled-in name.
+- **Tests:** ledger_test.go (4 processes + 4 goroutines × 300 lines, all
+  whole, 0600; periods; incremental and partial-line read; NoteAs never
+  writes the key), context_tokens_test/rules_test (skills row, files),
+  splash5_test.go (9 rows at 49/100/180 through counting → estimate →
+  exact → spend → servers → skills; context row, 60% orange; period
+  selection, credits floor, budget orange, "not reported"; /status
+  detail), wide_test.go (split, cut not wrapped at 49/100, fits at 180,
+  →/←/esc keys with no row moving, stream = finish), findings5_test.go,
+  bounce_test `TestNoBounce_PhoneFormKeepsTheRowsWhereTheyWere` (49×21:
+  every typed key, the form, esc, add — checked to fail without each fix).
+  Changed for the new rules: the ↑ scroll tests type a draft first (↑ on
+  an empty composer is history now), palette height +1, six-first list.
+- **Walk:** `tmp/ux-run-onboarding-20261023-233726-{49x21,100x30,180x50}`
+  (worktree agent-a767ea5ef1f930ca6); every PNG of the run before it
+  (`…-233154-*`, same words) looked at. Row diff: at 49 the palette covers
+  the lower rows (nothing above moves); 04→05 the login notice and the
+  picker scroll 4 rows (new content while a panel opens); 08→09 two rows
+  (the new notice); 05→07 the model pick replaces the conversation (known).
+- **Open / for the owner:** (a) ↑ on an empty composer now recalls history:
+  on Termux, where a finger-scroll arrives as plain ↑/↓ with mouse tracking
+  off, a swipe on an empty composer walks history instead of scrolling.
+  (b) On a phone a panel covers the newest rows (the answer under /mcp
+  add's form) rather than moving the splash off. (c) At 49 the context
+  parts row starts at column 2 (the value column is too narrow).
+  (d) Skills count includes /skill-only ones. (e) The splash's spend row
+  refreshes on spend/usage events only (not at midnight). (f) The login
+  notice at 49 wraps "key set" under the picker. (g) Personas not run;
+  light theme unseen; no live dund or real provider with a cost.
