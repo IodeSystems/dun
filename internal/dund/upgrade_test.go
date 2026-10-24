@@ -1,10 +1,12 @@
 package dund
 
 import (
+	"errors"
 	"net"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,5 +293,66 @@ func TestResumeMessage(t *testing.T) {
 		if !strings.Contains(m, want) {
 			t.Errorf("%q lacks %q", m, want)
 		}
+	}
+}
+
+// A service's install step runs at the quiet point, after the work ends and
+// before the restart. When it fails, the upgrade ends as "failed" with the
+// reason, nothing is interrupted or flagged, no restart follows, and a later
+// request starts a new upgrade.
+func TestUpgradeInstallRunsAtTheQuietPointAndCanFail(t *testing.T) {
+	fastUpgrade(t)
+	svc, sp, _ := newSvc(t)
+	sock, _ := serve(t, svc)
+	c := dial(t, sock)
+	id := working(t, svc, false)
+	var installs atomic.Int32 // the install runs on dund's goroutine
+	var fail atomic.Bool
+	fail.Store(true)
+	svc.SetUpgradeInstall(func(exe, version string) error {
+		installs.Add(1)
+		if exe != "/x/dun" || version != "v2" {
+			t.Errorf("install %s %s", exe, version)
+		}
+		if fail.Load() {
+			return errors.New("fails serve --check")
+		}
+		return nil
+	})
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	c.until(upgradeOf("pending"))
+	if installs.Load() != 0 {
+		t.Fatal("installed while a turn ran")
+	}
+	_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "finish"}))
+	u := c.until(upgradeOf("failed")).Payload.(*proto.UpgradeStatus)
+	if u.Error != "fails serve --check" || u.Version != "v2" || installs.Load() != 1 {
+		t.Fatalf("failed: %+v, %d installs", u, installs.Load())
+	}
+	if svc.UpgradeStatus() != nil {
+		t.Fatal("still pending after the failure")
+	}
+	select {
+	case <-svc.UpgradeReady():
+		t.Fatal("restarted after a failed install")
+	case <-time.After(50 * time.Millisecond):
+	}
+	for _, g := range sp.received() {
+		if strings.HasPrefix(g, "interrupt ") {
+			t.Fatalf("a failed install interrupted: %q", g)
+		}
+	}
+
+	fail.Store(false)
+	if err := svc.RequestUpgrade("/x/dun", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-svc.UpgradeReady():
+	case <-time.After(5 * time.Second):
+		t.Fatal("never ready")
+	}
+	if installs.Load() != 2 {
+		t.Fatalf("%d installs", installs.Load())
 	}
 }

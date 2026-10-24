@@ -306,6 +306,10 @@ func renderUnit(execPath string, prefix []string, home string, serveArgs, envs [
 	fmt.Fprintf(&b, "ExecStart=%s\n", line("serve"))
 	b.WriteString(`Restart=on-failure
 RestartSec=3
+# 75: dund put a new build in place and exits to be started on it (an
+# upgrade, handover.go) — a restart, not a failure.
+SuccessExitStatus=75
+RestartForceExitStatus=75
 # A stop asks every engine to end (10 s grace each, in parallel) before the
 # socket closes; a turn in flight is cut short and resumes from the transcript.
 TimeoutStopSec=30
@@ -318,16 +322,25 @@ WantedBy=default.target
 
 // check proves `serve` can run with these settings: the state directory is
 // usable, the registry loads, the engine binary is executable, no other dund
-// owns this home, and the HTTP address can be bound.
-func check(l *loader, bin, httpAddr, webRoot string) error {
+// owns this home, and the HTTP address can be bound. handoverFrom (a pid, 0
+// for none) is the live dund this build is to replace (serveCheck): it owns
+// the pidfile and the HTTP port, so those are not held against the check,
+// and the registry is read without New's changes to it.
+func check(l *loader, bin, httpAddr, webRoot string, handoverFrom int) error {
 	if err := os.MkdirAll(l.home, 0o700); err != nil {
 		return fmt.Errorf("home %s: %w", l.home, err)
 	}
-	svc, err := dund.New(filepath.Join(l.home, "dund"), dund.ExecSpawner{Bin: bin})
-	if err != nil {
-		return err
+	if handoverFrom > 0 {
+		if err := dund.CheckRegistry(filepath.Join(l.home, "dund")); err != nil {
+			return err
+		}
+	} else {
+		svc, err := dund.New(filepath.Join(l.home, "dund"), dund.ExecSpawner{Bin: bin})
+		if err != nil {
+			return err
+		}
+		svc.Close()
 	}
-	svc.Close()
 	st, err := os.Stat(bin)
 	if err != nil {
 		if p, lerr := exec.LookPath(bin); lerr == nil {
@@ -337,10 +350,14 @@ func check(l *loader, bin, httpAddr, webRoot string) error {
 	if err != nil || st.IsDir() || st.Mode()&0o111 == 0 {
 		return fmt.Errorf("engine binary %s is not an executable file", bin)
 	}
-	if pid, alive := pidAlive(l.pidfile()); alive && pid != os.Getpid() {
+	if pid, alive := pidAlive(l.pidfile()); alive && pid != os.Getpid() && pid != handoverFrom {
 		return fmt.Errorf("another dund already runs for %s (pid %d) — stop it first", l.home, pid)
 	}
-	if httpAddr != "" {
+	if httpAddr != "" && handoverFrom > 0 {
+		if _, err := net.ResolveTCPAddr("tcp", httpAddr); err != nil {
+			return fmt.Errorf("HTTP address %s: %w", httpAddr, err)
+		}
+	} else if httpAddr != "" {
 		ln, err := net.Listen("tcp", httpAddr)
 		if err != nil {
 			return fmt.Errorf("cannot bind %s: %w", httpAddr, err)

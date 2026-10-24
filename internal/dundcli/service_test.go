@@ -17,6 +17,7 @@ func TestRenderUnit(t *testing.T) {
 		"Environment=DUN_HOME=/home/me/.dun\n",
 		`Environment="X=a b"` + "\n",
 		"Restart=on-failure\n",
+		"RestartForceExitStatus=75\n", // an upgrade's handover (handoverExit)
 		"WantedBy=default.target\n",
 	} {
 		if !strings.Contains(u, want) {

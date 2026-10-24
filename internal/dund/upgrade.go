@@ -51,6 +51,9 @@ type upgrader struct {
 	ready    chan string
 	watchers map[int]func(proto.UpgradeStatus)
 	nextW    int
+	// install, when set, puts the new binary in place at the quiet point,
+	// before anything is interrupted (a service's dund: SetUpgradeInstall).
+	install func(exe, version string) error
 }
 
 func (u *upgrader) init() {
@@ -115,6 +118,16 @@ func (s *Service) UpgradeStatus() *proto.UpgradeStatus {
 // stops the service and execs it.
 func (s *Service) UpgradeReady() <-chan string { return s.up.ready }
 
+// SetUpgradeInstall makes every upgrade call fn once nothing is busy (or on
+// "now", or at the deadline), before the restart: a service's dund copies
+// the new binary over the one its service starts. An error ends the upgrade
+// as "failed" with that error; nothing is interrupted and dund runs on.
+func (s *Service) SetUpgradeInstall(fn func(exe, version string) error) {
+	s.up.mu.Lock()
+	s.up.install = fn
+	s.up.mu.Unlock()
+}
+
 // RequestUpgrade makes an upgrade into exe (of build version, "" when
 // unknown) pending, or retargets the pending one.
 func (s *Service) RequestUpgrade(exe, version string) error {
@@ -163,17 +176,20 @@ func (s *Service) upgradeLoop() {
 		first = false
 		s.up.st.Waiting = waiting
 		if len(waiting) == 0 || forced {
+			if install := s.up.install; install != nil {
+				exe, ver := s.up.st.Exe, s.up.st.Version
+				s.up.mu.Unlock()
+				if err := install(exe, ver); err != nil {
+					s.failUpgrade(err)
+					return
+				}
+				s.up.mu.Lock()
+			}
 			s.up.st.State = "restarting"
 			st, exe := *s.up.snapshot(), s.up.st.Exe
 			s.up.mu.Unlock()
 			s.notifyUpgrade(st)
-			build := st.Version
-			if build == "" {
-				build = "a new build"
-			} else {
-				build = "build " + build
-			}
-			s.PrepareStop("dund restarted into " + build)
+			s.PrepareStop("dund restarted into " + orBuild(st.Version))
 			s.up.ready <- exe
 			return
 		}
@@ -192,6 +208,25 @@ func (s *Service) upgradeLoop() {
 		}
 		t.Stop()
 	}
+}
+
+// failUpgrade ends the pending upgrade without a restart, and says why to
+// every connection; a later request starts a new one.
+func (s *Service) failUpgrade(err error) {
+	s.up.mu.Lock()
+	st := *s.up.snapshot()
+	s.up.st = nil
+	s.up.mu.Unlock()
+	st.State, st.Error, st.Waiting = "failed", err.Error(), nil
+	log.Printf("dund: the upgrade to %s failed, running on: %v", orBuild(st.Version), err)
+	s.notifyUpgrade(st)
+}
+
+func orBuild(v string) string {
+	if v == "" {
+		return "a new build"
+	}
+	return "build " + v
 }
 
 // PrepareStop readies the sessions for a planned stop of dund (why: "dund

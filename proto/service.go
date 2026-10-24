@@ -83,12 +83,16 @@ type Hello struct {
 	Exe     string `json:"exe,omitempty"`
 }
 
-// HelloReply is dund's build. Upgradable: it was started by a client, not a
-// service manager, so an Upgrade will be honoured.
+// HelloReply is dund's build. Upgradable: an Upgrade will be honoured — a
+// dund a client started re-execs into the new binary; one a service manager
+// runs copies it over the binary the service starts, and exits for the
+// manager to restart it. NoUpgrade is why a service's dund cannot ("" when it
+// can, or when an older dund would not say).
 type HelloReply struct {
 	Version    string `json:"version"`
 	Exe        string `json:"exe,omitempty"`
 	Upgradable bool   `json:"upgradable,omitempty"`
+	NoUpgrade  string `json:"no_upgrade,omitempty"`
 	// Busy: a turn, a question, a job or a sub-agent is running somewhere, so
 	// an upgrade waits for it.
 	Busy bool `json:"busy,omitempty"`
@@ -99,10 +103,11 @@ type HelloReply struct {
 	Upgrade *UpgradeStatus `json:"upgrade,omitempty"`
 }
 
-// Upgrade asks a client-started dund to restart into Exe (engines too), as
-// soon as nothing is busy. The executable must be a regular file owned by
-// dund's user. A dund run by a service manager refuses: the service is
-// restarted instead.
+// Upgrade asks dund to restart into Exe (engines too), as soon as nothing is
+// busy. The executable must be a regular file owned by dund's user. A dund
+// run by a service manager copies Exe over the binary its service starts,
+// then exits for the manager to restart it; one that cannot (HelloReply's
+// NoUpgrade) refuses.
 type Upgrade struct {
 	Exe string `json:"exe"`
 	// Version is the build Exe is, when the client knows it (its own).
@@ -119,8 +124,10 @@ type Upgrade struct {
 // dund restarts. A connection made while one is pending gets it at once; a
 // session stream over HTTP carries it too.
 //
-// State: "pending" (waiting for Waiting to end) or "restarting". Version is
-// the target build, "" when dund could not tell.
+// State: "pending" (waiting for Waiting to end), "restarting", or "failed":
+// the new binary could not be put in place (Error says why), nothing was
+// replaced, and dund runs on with no upgrade pending. Version is the target
+// build, "" when dund could not tell.
 type UpgradeStatus struct {
 	State   string        `json:"state"`
 	Version string        `json:"version,omitempty"`
@@ -128,7 +135,8 @@ type UpgradeStatus struct {
 	Waiting []UpgradeWait `json:"waiting,omitempty"`
 	// Deadline (unix seconds) is when dund restarts anyway, interrupting
 	// what it still waits for; those sessions resume after the restart.
-	Deadline int64 `json:"deadline,omitempty"`
+	Deadline int64  `json:"deadline,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // UpgradeWait is one thing a pending upgrade waits for. What: "turn",

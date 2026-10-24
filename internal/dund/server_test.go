@@ -186,11 +186,16 @@ func TestServerHelloAndUpgrade(t *testing.T) {
 			up = func(exe, _ string) error { asked = exe; return nil }
 		}
 		srv.SetBuild("v1", "/bin/dund-v1", up)
+		why := ""
+		if !c.ok {
+			why = "this user cannot write in /bin, where its binary is"
+			srv.SetNoUpgrade(why)
+		}
 		go srv.Serve(ln)
 		cl := dial(t, sock)
 		cl.send("h", "", &proto.Hello{Version: "v2"})
 		r := cl.until(typed("hello")).Payload.(*proto.HelloReply)
-		if r.Version != "v1" || r.Exe != "/bin/dund-v1" || r.Upgradable != c.ok {
+		if r.Version != "v1" || r.Exe != "/bin/dund-v1" || r.Upgradable != c.ok || r.NoUpgrade != why {
 			t.Errorf("%s: hello %+v", c.name, r)
 		}
 		cl.send("u", "", &proto.Upgrade{Exe: "/bin/dun-v2"})
@@ -198,7 +203,7 @@ func TestServerHelloAndUpgrade(t *testing.T) {
 		if c.ok && (a.Error != "" || asked != "/bin/dun-v2") {
 			t.Errorf("%s: upgrade ack %+v asked %q", c.name, a, asked)
 		}
-		if !c.ok && !strings.Contains(a.Error, "service") {
+		if !c.ok && (!strings.Contains(a.Error, "service") || !strings.Contains(a.Error, why)) {
 			t.Errorf("%s: want a service refusal, got %+v", c.name, a)
 		}
 		ln.Close()

@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -44,6 +45,9 @@ func Main(args []string) int {
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "dund:", err)
+		if errors.Is(err, errHandover) {
+			return handoverExit
+		}
 		return 1
 	}
 	return 0
@@ -123,6 +127,7 @@ func serveCmd(l *loader) *cobra.Command {
 	var bin, httpAddr, webRoot, releases string
 	var oidcCfg dundapi.OIDC
 	var checkOnly bool
+	var handoverFrom int
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "run the service",
@@ -133,7 +138,7 @@ func serveCmd(l *loader) *cobra.Command {
 				bin = defaultDun()
 			}
 			if checkOnly {
-				return check(l, bin, httpAddr, webRoot)
+				return check(l, bin, httpAddr, webRoot, handoverFrom)
 			}
 			if (oidcCfg.Issuer == "") != (oidcCfg.ClientID == "") || (oidcCfg.Issuer != "" && len(oidcCfg.Allow) == 0) {
 				return errors.New("sign-in needs --oidc-issuer, --oidc-client-id and at least one --oidc-allow email")
@@ -150,6 +155,10 @@ func serveCmd(l *loader) *cobra.Command {
 	cmd.Flags().StringVar(&webRoot, "web-root", "", "serve this built client at / (mobile: pnpm export:web); default: the built-in stopgap page")
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "prove these settings can run, then exit (the unit's ExecStartPre)")
 	cmd.Flags().StringVar(&httpAddr, "http", "", "also serve HTTP here (e.g. 127.0.0.1:20003); needs a token (dund token)")
+	// The check a service's dund runs on a new build before it hands over
+	// (serveCheck): that live dund owns the pidfile and the HTTP port.
+	cmd.Flags().IntVar(&handoverFrom, "handover-from", 0, "with --check: the live dund (pid) this build replaces")
+	_ = cmd.Flags().MarkHidden("handover-from")
 	return cmd
 }
 
@@ -208,9 +217,33 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	self, _ := os.Executable() // now: after a rebuild it names the deleted file
 	dundapi.Version = Version
 	srv := dund.NewServer(svc, dund.UnixPeer)
+	serveArgs := slices.Clone(os.Args[1:]) // the service's flags, for the new build's check
 	var upgrade func(exe, version string) error
-	if !underServiceManager() {
+	handover := false
+	switch {
+	case !underServiceManager():
 		upgrade = func(exe, version string) error { return requestUpgrade(svc, exe, version) }
+	default:
+		// A service: the upgrade installs the new build where the unit
+		// starts it, and exits for the manager to restart it (handover.go).
+		if why := canHandOver(self); why != nil {
+			srv.SetNoUpgrade(why.Error())
+			break
+		}
+		handover = true
+		upgrade = func(exe, version string) error {
+			ver, err := handoverCandidate(self, exe, version)
+			if err == nil {
+				err = serveCheck(exe, serveArgs) // said now, not at the quiet point
+			}
+			if err != nil {
+				return err
+			}
+			return svc.RequestUpgrade(exe, ver)
+		}
+		svc.SetUpgradeInstall(func(exe, version string) error {
+			return installHandover(self, exe, version, serveArgs)
+		})
 	}
 	srv.SetBuild(Version, self, upgrade)
 	go func() { errc <- srv.Serve(ln) }()
@@ -253,6 +286,13 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	case exe := <-svc.UpgradeReady():
 		// The upgrade's waiting is over (or was cut short and recorded):
 		// restart into the new binary, engines too, so the two agree.
+		if handover {
+			// The new build is already at self: the manager starts it.
+			fmt.Fprintf(os.Stderr, "dund: %s is the new build — exiting %d for the service manager to start it\n", self, handoverExit)
+			err = errHandover
+			srv.Drain(time.Second)
+			break
+		}
 		fmt.Fprintf(os.Stderr, "dund: restarting into %s\n", exe)
 		if exe != self {
 			os.Args = withFlag(os.Args, "--dun", exe)
@@ -278,7 +318,9 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 var Version = "dev"
 
 // underServiceManager reports whether systemd or launchd started this
-// process: then the service is restarted, not re-exec'd at a client's word.
+// process: then an upgrade puts the new build where the unit starts it and
+// exits for the manager to restart it (handover.go), never a re-exec into a
+// client's binary.
 func underServiceManager() bool {
 	return os.Getenv("INVOCATION_ID") != "" || strings.HasPrefix(os.Getenv("XPC_SERVICE_NAME"), "com.iodesystems.")
 }
@@ -363,7 +405,11 @@ const selfCheck = 2 * time.Second
 // watchSelf makes an upgrade pending each time this process's executable is
 // replaced (a rebuild renames a new binary over it), until ctx ends. The
 // upgrade restarts once nothing is busy (see dund.Service.RequestUpgrade);
-// clients reconnect on their own, engines resume on first use.
+// clients reconnect on their own, engines resume on first use. For a service
+// exe is the unit's binary, so a new build put there (the launcher's rebuild,
+// a copy) hands over the same way; `make install` writes ~/.local/bin/dun
+// instead, and reaches the service through the next TUI of that build, which
+// asks it to upgrade.
 func watchSelf(ctx context.Context, svc *dund.Service, exe string) {
 	last, err := os.Stat(exe)
 	if err != nil {

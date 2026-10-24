@@ -50,10 +50,12 @@ type Server struct {
 	principal Principal
 
 	// The build this dund runs, and how to move it to another: set by
-	// SetBuild; a nil upgrade means a service manager owns the process.
-	version string
-	exe     string
-	upgrade func(exe, version string) error
+	// SetBuild; a nil upgrade means a service manager owns the process and
+	// it cannot be upgraded from here (noUpgrade says why).
+	version   string
+	exe       string
+	upgrade   func(exe, version string) error
+	noUpgrade string
 
 	mu    sync.Mutex
 	conns map[*conn]struct{}
@@ -72,6 +74,10 @@ func NewServer(svc *Service, principal Principal) *Server {
 func (s *Server) SetBuild(version, exe string, upgrade func(exe, version string) error) {
 	s.version, s.exe, s.upgrade = version, exe, upgrade
 }
+
+// SetNoUpgrade says why Upgrade is refused (a nil upgrade in SetBuild): in
+// Hello's reply, and in the refusal.
+func (s *Server) SetNoUpgrade(why string) { s.noUpgrade = why }
 
 // broadcastUpgrade queues st for every connection. A connection that cannot
 // take it now gets it dropped rather than stalling the others: the next
@@ -312,14 +318,18 @@ func (c *conn) handle(cmd proto.Command) {
 		c.build = p.Version
 		c.mu.Unlock()
 		c.reply(cmd, "", &proto.HelloReply{Version: c.srv.version, Exe: c.srv.exe, Upgradable: c.srv.upgrade != nil,
-			Busy: svc.Busy(), Coordinated: true, Upgrade: svc.UpgradeStatus()})
+			NoUpgrade: c.srv.noUpgrade, Busy: svc.Busy(), Coordinated: true, Upgrade: svc.UpgradeStatus()})
 	case *proto.Upgrade:
 		if p.Exe == "" && p.Now {
 			c.ack(cmd, "", svc.UpgradeNow())
 			return
 		}
 		if c.srv.upgrade == nil {
-			c.ack(cmd, "", errors.New("a service manager runs this dund: restart the service instead (dun dund service restart)"))
+			why := "a service manager runs this dund"
+			if c.srv.noUpgrade != "" {
+				why += " and it cannot upgrade itself: " + c.srv.noUpgrade
+			}
+			c.ack(cmd, "", errors.New(why+" — restart the service instead (dun dund service restart)"))
 			return
 		}
 		ver := p.Version

@@ -673,6 +673,14 @@ type record struct {
 
 func (s *Service) registryPath() string { return filepath.Join(s.dir, "sessions.json") }
 
+// CheckRegistry reports whether the registry in dir loads, and changes
+// nothing: New drops empty sessions, marks crashed ones and wakes them,
+// which a check run beside a live dund must not do.
+func CheckRegistry(dir string) error {
+	_, err := (&Service{dir: dir}).loadRegistry()
+	return err
+}
+
 func (s *Service) loadRegistry() ([]record, error) {
 	b, err := os.ReadFile(s.registryPath())
 	if errors.Is(err, os.ErrNotExist) {

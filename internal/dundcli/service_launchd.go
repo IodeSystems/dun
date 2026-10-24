@@ -20,6 +20,8 @@ import (
 // `serve --check` runs at install only; dund refuses bad flags at start
 // anyway. A LaunchAgent loads at login, and SuccessfulExit implies
 // RunAtLoad, so an installed dund starts at login: --enable is implied.
+// An upgrade's exit (handoverExit, 75) is not a successful exit, so launchd
+// starts the agent again, on the new build, after ThrottleInterval.
 //
 // Output goes to <home>/dund.log (launchd has no journal for agents); `logs`
 // follows it.
