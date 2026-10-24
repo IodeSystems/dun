@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -63,11 +64,28 @@ type mcpshellServer struct {
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	AuthCmd string            `json:"auth_cmd,omitempty"`
+	// ServerSpec.Shell
+	Categories map[string][]string `json:"categories,omitempty"`
+	Unchecked  []string            `json:"unchecked,omitempty"`
 }
 
 // envRef matches a bearer that is only a variable reference: "$NAME" or
 // "${NAME}".
 var envRef = regexp.MustCompile(`^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$`)
+
+// validGlobs drops the globs path.Match rejects: mcpshell exits on one, which
+// would take the shell and every hosted server down with it.
+func validGlobs(id string, globs []string) []string {
+	var out []string
+	for _, g := range globs {
+		if _, err := path.Match(g, ""); err != nil {
+			log.Printf("dun: server %q: shell glob %q is not valid — left out", id, g)
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
+}
 
 // mcpshellConfig renders the hosted servers as mcpshell's --mcp JSON.
 //
@@ -109,6 +127,18 @@ func mcpshellConfig(hosted []Server) ([]byte, error) {
 					e.Env[k] = v
 				}
 			}
+		}
+		if s.Shell != nil {
+			e.Categories = map[string][]string{}
+			for cat, globs := range s.Shell.Categories {
+				if g := validGlobs(s.ID, globs); len(g) > 0 {
+					e.Categories[cat] = g
+				}
+			}
+			if len(e.Categories) == 0 {
+				e.Categories = nil
+			}
+			e.Unchecked = validGlobs(s.ID, s.Shell.Unchecked)
 		}
 		out[ns] = e
 	}

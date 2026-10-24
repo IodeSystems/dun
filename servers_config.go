@@ -127,6 +127,9 @@ type ServerSpec struct {
 	// inside its one eval tool as a namespace (help("<ns>")), and dun does not
 	// start it at all. A built-in server cannot be placed in the shell.
 	Via string `json:"via,omitempty"`
+	// Shell is passed to mcpshell for a server it hosts (Via "shell") and
+	// ignored for a direct one. A later layer's block replaces a lower one's.
+	Shell *ShellOptions `json:"shell,omitempty"`
 	// OAuth logs in to a remote server instead of sending a fixed Bearer:
 	// the token is obtained in the browser, kept in $DUN_HOME/oauth/<id>.json
 	// and refreshed (see mcpoauth.go). Not with Bearer, and not in the shell.
@@ -150,6 +153,18 @@ type ServerSpec struct {
 	// a poly-lsp-mcp that takes it. Written at project scope when the person
 	// answers dun's question (askNotProject) or runs /poly-lsp index-anyway.
 	IndexAnyway bool `json:"index_anyway,omitempty"`
+}
+
+// ShellOptions are mcpshell's settings for a server it hosts: its --mcp
+// entry's "categories" and "unchecked" (mcpshell README).
+type ShellOptions struct {
+	// Categories groups the server's tools for help("<ns>"): category →
+	// tool-name globs. Empty: mcpshell groups by name prefix.
+	Categories map[string][]string `json:"categories,omitempty"`
+	// Unchecked is tool-name globs whose arguments mcpshell sends as given:
+	// no name, required or type check and no type conversion. For tools
+	// whose schema is wrong; ["*"] is every tool of the server.
+	Unchecked []string `json:"unchecked,omitempty"`
 }
 
 // OAuthSpec is how dun logs in to an OAuth- or OIDC-protected MCP server.
@@ -617,6 +632,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	// back out of the shell.
 	if next.Via != "" {
 		out.Via = next.Via
+	}
+	if next.Shell != nil {
+		out.Shell = next.Shell
 	}
 	out.OAuth = mergeOAuth(prev.OAuth, next.OAuth)
 	if next.Attach != nil {

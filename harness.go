@@ -64,6 +64,9 @@ type Server struct {
 	Via string
 	// Scopes is where Autostart and Via came from (mcpscope.go).
 	Scopes ServerScopes
+	// Shell is mcpshell's settings when it hosts the server
+	// (ServerSpec.Shell).
+	Shell *ShellOptions
 	// Bearer is the token as configured, "$NAME" unexpanded, so a
 	// shell-hosted server can read the variable when it connects instead of
 	// dun writing the token into a file. Headers carries the resolved value.

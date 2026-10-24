@@ -351,7 +351,7 @@ func (e Extension) server() Server {
 	s := e.spec()
 	auto := s.Autostart != nil && *s.Autostart
 	return Server{ID: s.ID, Command: s.Command, Args: s.Args, URL: s.URL, Headers: requestHeaders(s), Bearer: s.Bearer,
-		Env: s.Env, Timeout: s.Timeout, Autostart: auto, Disable: s.Disable, Via: s.Via, OAuth: s.OAuth}
+		Env: s.Env, Timeout: s.Timeout, Autostart: auto, Disable: s.Disable, Via: s.Via, Shell: s.Shell, OAuth: s.OAuth}
 }
 
 // skillsDir is e's skills directory, or "".

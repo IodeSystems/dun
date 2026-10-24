@@ -2816,3 +2816,9 @@ mcpshell/poly-lsp/raglit/Go). Branch `worktree-agent-ad91bc32cd7380132`.
   raglit get the go install line. (d) the stop step says the service's
   command when a unit is installed, even if DUN_HOME is another home.
   (e) not run in the clean container itself; personas not run.
+
+## Shell options for hosted servers (2026-10-24)
+- `ServerSpec.Shell` (`"shell": {"categories": {…}, "unchecked": [globs]}`) is written into a hosted server's mcpshell `--mcp` entry (`shellhost.go`). Needs mcpshell `a09d6ba`+ for `unchecked`.
+- A later layer's block replaces a lower one's (no per-field merge). Ignored for a direct server.
+- Bad globs are dropped with a log line: mcpshell exits on one, which would take the shell down.
+- Change restarts the shell via the existing hostedKey (it marshals the whole Server). Not run in a live session.

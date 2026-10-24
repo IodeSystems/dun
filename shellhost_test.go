@@ -95,6 +95,42 @@ func TestMcpshellConfig_StdioAndURL(t *testing.T) {
 	}
 }
 
+func TestMcpshellConfig_ShellOptions(t *testing.T) {
+	b, err := mcpshellConfig([]Server{
+		{ID: "vay", URL: "https://v/mcp", Shell: &ShellOptions{
+			Categories: map[string][]string{"ci": {"ci-*"}, "bad": {"["}},
+			Unchecked:  []string{"grafana-*", "["},
+		}},
+		{ID: "plain", Command: "p"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root struct {
+		McpServers map[string]mcpshellServer `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(b, &root); err != nil {
+		t.Fatal(err)
+	}
+	v := root.McpServers["vay"]
+	if !slices.Equal(v.Categories["ci"], []string{"ci-*"}) || len(v.Categories) != 1 || !slices.Equal(v.Unchecked, []string{"grafana-*"}) {
+		t.Errorf("shell options (bad globs left out): %+v", v)
+	}
+	if p := root.McpServers["plain"]; p.Categories != nil || p.Unchecked != nil {
+		t.Errorf("a server without shell options writes none: %+v", p)
+	}
+}
+
+func TestMergeSpec_ShellReplaced(t *testing.T) {
+	low := ServerSpec{ID: "x", Shell: &ShellOptions{Unchecked: []string{"a"}}}
+	if got := mergeSpec(low, ServerSpec{ID: "x"}); got.Shell == nil || !slices.Equal(got.Shell.Unchecked, []string{"a"}) {
+		t.Errorf("a layer without a shell block keeps the lower one: %+v", got.Shell)
+	}
+	if got := mergeSpec(low, ServerSpec{ID: "x", Shell: &ShellOptions{Unchecked: []string{"*"}}}); !slices.Equal(got.Shell.Unchecked, []string{"*"}) {
+		t.Errorf("a later shell block replaces: %+v", got.Shell)
+	}
+}
+
 func newServerHarness(t *testing.T, specs ...Server) *Harness {
 	h := newNoteHarness(t)
 	h.mgr, h.lastErr, h.lastStart = mcpmgr.NewManager(), map[string]string{}, map[string]time.Duration{}

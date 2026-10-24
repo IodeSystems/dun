@@ -160,7 +160,7 @@ type catalogEntry struct {
 func specOf(s Server) ServerSpec {
 	auto := s.Autostart
 	return ServerSpec{ID: s.ID, Command: s.Command, Args: s.Args, URL: s.URL, Headers: s.Headers, Bearer: s.Bearer,
-		Env: s.Env, Timeout: s.Timeout, Autostart: &auto, Disable: s.Disable, Via: s.Via, OAuth: s.OAuth}
+		Env: s.Env, Timeout: s.Timeout, Autostart: &auto, Disable: s.Disable, Via: s.Via, Shell: s.Shell, OAuth: s.OAuth}
 }
 
 // loadCatalog merges base (the built-ins, or a caller's Go-level servers),
@@ -297,6 +297,7 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		ProjectTools:   e.project.Tools,
 		SessionTools:   sess.Tools,
 		Via:            via,
+		Shell:          s.Shell,
 		Bearer:         s.Bearer,
 		OAuth:          s.OAuth,
 		Scopes:         sc,
