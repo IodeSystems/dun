@@ -572,6 +572,9 @@ func (m tuiModel) typeProviderField(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if name.Value() == m.providerAuto {
 			m.providerAuto = nameFromURL(m.providerFields[fieldAddr].Value())
 			name.SetValue(m.providerAuto)
+			// SetValue keeps the cursor where the first fill put it (after
+			// one character); a person erasing the name starts at its end.
+			name.CursorEnd()
 		}
 	}
 	m.refresh()

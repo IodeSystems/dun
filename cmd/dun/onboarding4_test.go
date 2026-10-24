@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -53,6 +54,31 @@ func TestLoginForm_NameFilledInFromTheAddress(t *testing.T) {
 	m = pick(m, "x")
 	if got := m.providerFields[fieldName].Value(); got != "work" {
 		t.Errorf("an edited name was replaced: %q", got)
+	}
+}
+
+// The filled-in name has its cursor at the end, so erasing it and typing a
+// new one gives the new one. Typed one key at a time, as a person does: the
+// name is filled in at the first key and its cursor stayed after that one
+// character ("local" erased by five backspaces, then "work", was "workocal").
+func TestLoginForm_FilledInNameIsErasedFromTheEnd(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	m := newTUIModel(nil, ".")
+	m.openProviderForm(nil)
+	for _, r := range "http://127.0.0.1:4000/v1" {
+		m = pick(m, string(r))
+	}
+	if got := m.providerFields[fieldName].Value(); got != "local" {
+		t.Fatalf("name %q, want local", got)
+	}
+	m = pick(m, "enter")
+	for range 5 {
+		nm, _ := m.updateModelPicking(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		m = nm.(tuiModel)
+	}
+	m = pick(m, "w", "o", "r", "k")
+	if got := m.providerFields[fieldName].Value(); got != "work" {
+		t.Errorf("name %q after erasing and typing work", got)
 	}
 }
 
