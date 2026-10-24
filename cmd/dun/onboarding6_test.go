@@ -47,14 +47,14 @@ func withMascot(t *testing.T) {
 
 // ── 1. the foreman ──
 
-// Each grid renders at its fixed size: 23 cells × 10 rows, 13 × 6; ▀ with
+// The grid renders at its fixed size, 13 cells × 6 rows; ▀ with
 // the top pixel's colour on the bottom's, ▄ or a space where a half is the
 // terminal's own background, and every row ends reset.
 func TestMascot_FixedSizeHalfBlocks(t *testing.T) {
 	for _, tc := range []struct {
 		grid       []string
 		w, h, rows int
-	}{{mascotBig, 23, 20, 10}, {mascotSmall, 13, 11, 6}} {
+	}{{mascot, 13, 11, 6}} {
 		if mascotWidth(tc.grid) != tc.w || len(tc.grid) != tc.h {
 			t.Fatalf("grid %d×%d, want %d×%d", mascotWidth(tc.grid), len(tc.grid), tc.w, tc.h)
 		}
@@ -68,18 +68,18 @@ func TestMascot_FixedSizeHalfBlocks(t *testing.T) {
 			}
 		}
 	}
-	big := mascotArt(mascotBig)
-	// Row 0, cell 8: 'y' over 'Y' — the brim's colour on the hat's.
+	big := mascotArt(mascot)
+	// Row 0, cell 4: 'y' over 'Y' — the brim's colour on the hat's.
 	if !strings.Contains(big[0], "\x1b[0;38;5;172;48;5;220m▀") {
 		t.Errorf("both halves: %q", big[0])
 	}
-	// Row 0, cell 6: transparent over 'Y' — ▄ in the hat's colour, no background.
+	// Row 0, cell 3: transparent over 'Y' — ▄ in the hat's colour, no background.
 	if !strings.Contains(big[0], "\x1b[0;38;5;220m▄") {
 		t.Errorf("bottom half only: %q", big[0])
 	}
 	// The small grid's odd last pixel row: ▀ over the terminal's background.
-	if !strings.Contains(mascotArt(mascotSmall)[5], "\x1b[0;38;5;25m▀") {
-		t.Errorf("odd row: %q", mascotArt(mascotSmall)[5])
+	if !strings.Contains(mascotArt(mascot)[5], "\x1b[0;38;5;26m▀") {
+		t.Errorf("odd row: %q", mascotArt(mascot)[5])
 	}
 }
 
@@ -93,8 +93,8 @@ func TestMascot_ColourProfile(t *testing.T) {
 	}
 }
 
-// The fresh session's splash: the big foreman at 120 columns and more, the
-// small one below, beside the rows (which keep their words), the tagline
+// The fresh session's splash: the foreman at every width, the long tagline
+// at 120 columns and more, beside the rows (which keep their words), the tagline
 // first; the splash is never shorter than he is, and no row is wider than
 // the pane.
 func TestSplash6_Mascot(t *testing.T) {
@@ -104,11 +104,11 @@ func TestSplash6_Mascot(t *testing.T) {
 		art     []string
 		tagline string
 	}{
-		{180, mascotArt(mascotBig), "dun · " + taglineBig},
-		{120, mascotArt(mascotBig), "dun · " + taglineBig},
-		{100, mascotArt(mascotSmall), "dun · ain't pretty. gets it dun."},
-		{80, mascotArt(mascotSmall), "dun · ain't pretty. gets it dun."},
-		{49, mascotArt(mascotSmall), "dun · ain't pretty. gets it dun."},
+		{180, mascotArt(mascot), "dun · " + taglineLong},
+		{120, mascotArt(mascot), "dun · " + taglineLong},
+		{100, mascotArt(mascot), "dun · ain't pretty. gets it dun."},
+		{80, mascotArt(mascot), "dun · ain't pretty. gets it dun."},
+		{49, mascotArt(mascot), "dun · ain't pretty. gets it dun."},
 	} {
 		v := splash5(t, tc.w, 30)
 		v.event(costEvent(false, 32000))

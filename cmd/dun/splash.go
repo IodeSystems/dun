@@ -581,7 +581,7 @@ func (m tuiModel) splashView(w int) string {
 	}
 	art, aw := mascotArt(grid), mascotWidth(grid)
 	rw := max(20, w-aw)
-	body := strings.Split(strings.TrimSuffix(sectionsView(m.splashSections(rw, m.w < mascotSmallW), rw), "\n"), "\n")
+	body := strings.Split(strings.TrimSuffix(sectionsView(m.splashSections(rw, m.w < mascotNarrowW), rw), "\n"), "\n")
 	rows := append([]string{fitText("  "+tagRow, rw)}, body...)
 	out := make([]string, max(len(rows), len(art)))
 	for i := range out {

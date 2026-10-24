@@ -26,41 +26,19 @@ var mascotColors = map[byte]int{
 	'h': 230, // shine
 	'k': 236, // outline, brows
 	's': 180, // skin
-	'c': 180, // collar
 	'd': 137, // shadow
 	'w': 255, // eye
 	'm': 94,  // mustache
-	'B': 18,
-	'b': 25,  // shirt
-	'u': 255, // undershirt (owner, 2026-10-24: the crew neck)
+	'b': 26,  // shirt
+	'C': 19,  // collar, a shade darker than the shirt
+	'K': 18,  // the collar's crease
+	'u': 230, // undershirt: two off-white pixels in the V
 }
 
-// mascotBig is 23×20 pixels: 10 rows. For a pane of mascotBigW columns or more.
-var mascotBig = []string{
-	"........yYYYYYy........",
-	"......YYYYyYyYYYY......",
-	".....YYYYhyYyYYYYY.....",
-	"....YYYYhYyYyYYYYYY....",
-	"...YYYYYYYyYyYYYYYYY...",
-	".yyyyyyyyyyyyyyyyyyyyy.",
-	"....sssssssssssssss....",
-	"....skkksssssssskkks...",
-	"....ssskwsssssswksss...",
-	"....ssssssssddssssss...",
-	"....sssssssdddssssss...",
-	"....sssmmmmmmmmmmsss...",
-	"....ssmmmmmmmmmmmmss...",
-	".....sssskkkkkkssss....",
-	".....dsssssssssssd.....",
-	"......ddsssssssdd......",
-	"........sssssss........",
-	"....bbbbuuuuuuubbbb....",
-	"..bbbbbbbuuuuubbbbbbb..",
-	".bbbbbbbbbbbbbbbbbbbbb.",
-}
-
-// mascotSmall is 13×11 pixels: 6 rows.
-var mascotSmall = []string{
+// mascot is the foreman, 13×11 pixels: 6 rows, at every width (owner,
+// 2026-10-24: the small one over the 10-row one). A blue work shirt whose
+// collar stands beside the neck and folds down, the crease the darkest blue.
+var mascot = []string{
 	"....yYYYy....",
 	"...YYyYyYY...",
 	"..YYhYyYYYY..",
@@ -69,23 +47,25 @@ var mascotSmall = []string{
 	"..sswssssws..",
 	"..sssmmmmss..",
 	"..ssmmmmmms..",
-	"...dskkksd...",
-	".bbbuuuuubbb.",
-	"bbbbbbbbbbbbb",
+	"..CdskkksdC..",
+	".bbCKsusKCbb.",
+	"bbbbbKuKbbbbb",
 }
 
-// The taglines: beside the big foreman, beside the small one, and the one
-// line a terminal without 256 colours gets in place of both.
+// The taglines: the long one where it fits, the short one below that, and
+// the one line a terminal without 256 colours gets in place of the foreman.
 const (
-	taglineBig   = "we ain't perfect. we ain't well equipped. but darn it, we'll find a way."
-	taglineSmall = "ain't pretty. gets it dun."
+	taglineLong  = "we ain't perfect. we ain't well equipped. but darn it, we'll find a way."
+	taglineShort = "ain't pretty. gets it dun."
 	mascotPlain  = "git 'er dun"
 )
 
-// The widths a pane needs for each size of foreman.
+// taglineLongW is the pane width from which the long tagline shows;
+// mascotNarrowW the width below which the rows beside him use their short
+// labels.
 const (
-	mascotBigW   = 120
-	mascotSmallW = 80
+	taglineLongW  = 120
+	mascotNarrowW = 80
 )
 
 // mascotArt is a grid rendered: one string per terminal row, each exactly
@@ -157,8 +137,8 @@ func mascotFor(w int) (grid []string, tagline string) {
 	switch {
 	case !mascotColour:
 		return nil, mascotPlain
-	case w >= mascotBigW:
-		return mascotBig, taglineBig
+	case w >= taglineLongW:
+		return mascot, taglineLong
 	}
-	return mascotSmall, taglineSmall
+	return mascot, taglineShort
 }
