@@ -423,8 +423,9 @@ main 29b52d4..5d24299 (NOT pushed): `cmd/raglit/setupnotify.go`,
   ~/local/raglit), because dun uses the shared daemon. The engine's
   report is from raglit serve's start: after a save, /raglit's table is
   stale until /raglit restart (said in the save's line).
-- **pinned** in `release/supported.go`: Min 5d24299, Recommended 1a04d32
-  (pushed 2026-10-24; `CGO_ENABLED=0 go install` of it builds, doctor --json runs).
+- **pinned** in `release/supported.go`: Min 5d24299, Recommended v0.1.0
+  (a32c5db, released 2026-10-24; its 4 tarballs + sha256 in release/deps.json,
+  from the release's SHA256SUMS; tarballs not downloaded or test-extracted here).
 - **next:** a real run of /raglit setup against the live daemon.
 - **risks:** not run against a real raglit daemon (httptest and a shell
   fake only); a daemon with auth on refuses (403) — dun sends no admin

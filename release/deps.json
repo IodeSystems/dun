@@ -2,5 +2,31 @@
   "schema": 1,
   "version": "",
   "published": "",
-  "artifacts": {}
+  "artifacts": {
+    "raglit": {
+      "version": "v0.1.0",
+      "files": {
+        "darwin_amd64": {
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.1.0/raglit_darwin_amd64.tar.gz",
+          "sha256": "6ccf774637f7301d69af1ddb440dcbf28c0b102535e35f6949c0bb8a974ad998",
+          "size": 26230862
+        },
+        "darwin_arm64": {
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.1.0/raglit_darwin_arm64.tar.gz",
+          "sha256": "913659d46e7945ea350f36a640ccb7ec4aa90c20e422e7eba43677b2ca478bfa",
+          "size": 24839733
+        },
+        "linux_amd64": {
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.1.0/raglit_linux_amd64.tar.gz",
+          "sha256": "66d39fac5070a335834def566dcd41bd8cd10da9dc4aa10dd9bbb1fe1899f8c3",
+          "size": 25106917
+        },
+        "linux_arm64": {
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.1.0/raglit_linux_arm64.tar.gz",
+          "sha256": "425b5544bc3d91d6d2bbc75f38fa2c91fed4267179998bbd72941b11751ad131",
+          "size": 23233202
+        }
+      }
+    }
+  }
 }
