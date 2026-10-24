@@ -92,3 +92,17 @@ func TestDoctorPolyLSP(t *testing.T) {
 		t.Errorf("old: %+v", f)
 	}
 }
+
+// /poly-lsp says what the index left out, grouped by reason.
+func TestIndexStatus_LeftOut(t *testing.T) {
+	st := dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexReady, IndexFiles: 1304, IndexSeconds: 0.3,
+		IndexLeftOut: []dun.IndexLeftOut{{Dir: ".claude/worktrees/a/", Reason: "worktree of this repo"},
+			{Dir: "node_modules/", Reason: "git-ignored"}, {Dir: ".claude/worktrees/b/", Reason: "worktree of this repo"}}}
+	s := indexStatus(st, "poly-lsp")
+	for _, want := range []string{"left out of the index:", "  worktree of this repo: .claude/worktrees/a/, .claude/worktrees/b/",
+		"  git-ignored: node_modules/", "a path named inside one is still read"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("lacks %q:\n%s", want, s)
+		}
+	}
+}

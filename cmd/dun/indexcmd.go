@@ -114,6 +114,23 @@ func indexStatus(st dun.ServerState, slash string) string {
 	case st.Index == dun.IndexFailed:
 		lines = append(lines, "index: failed — "+oneLine(st.IndexErr))
 	}
+	// What the index left out, by reason: the advanced user's answer to
+	// "why can't it see X"; the conversation says nothing of it.
+	if len(st.IndexLeftOut) > 0 {
+		var order []string
+		by := map[string][]string{}
+		for _, l := range st.IndexLeftOut {
+			if by[l.Reason] == nil {
+				order = append(order, l.Reason)
+			}
+			by[l.Reason] = append(by[l.Reason], l.Dir)
+		}
+		lines = append(lines, "left out of the index:")
+		for _, r := range order {
+			lines = append(lines, "  "+r+": "+strings.Join(by[r], ", "))
+		}
+		lines = append(lines, "  a path named inside one is still read · /"+slash+" exclude|include <dir> changes the rest")
+	}
 	if st.IndexBudget != "" {
 		lines = append(lines, "index startup budget (this project): "+st.IndexBudget+" · /"+slash+" budget default goes back to the server's")
 	}

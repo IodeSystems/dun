@@ -85,6 +85,18 @@ type IndexReport struct {
 	WallMs   int64      `json:"wallMs"`
 	Heaviest []IndexDir `json:"heaviest"`
 	Hint     string     `json:"hint,omitempty"`
+	// LeftOut is what the build did not look into, and why: git decides the
+	// file set in a repo (poly-lsp 5ad7920), so ignored directories and
+	// nested repositories are named here rather than counted.
+	LeftOut []IndexLeftOut `json:"leftOut,omitempty"`
+}
+
+// IndexLeftOut is one directory the index left out. Reason is one of
+// "git-ignored", "worktree of this repo", "another repo", "excluded",
+// "unreadable".
+type IndexLeftOut struct {
+	Dir    string `json:"dir"`
+	Reason string `json:"reason"`
 }
 
 // IndexDir is one directory's share of a build, its subdirectories in it.
@@ -680,6 +692,7 @@ func (h *Harness) indexOf(id string, st *ServerState) {
 		}
 		if is.note.Index != nil {
 			st.IndexFiles = is.note.Index.Files
+			st.IndexLeftOut = is.note.Index.LeftOut
 		}
 	}
 }

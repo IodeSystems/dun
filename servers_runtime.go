@@ -124,12 +124,14 @@ type ServerState struct {
 	// IndexSeconds is how long it has been building, or how long the build
 	// took; IndexErr why it failed; IndexFiles the files it counted.
 	// Exclude is the directories left out of it, for this project.
-	Index        string   `json:"index,omitempty"`
-	IndexSeconds float64  `json:"indexSeconds,omitempty"`
-	IndexErr     string   `json:"indexErr,omitempty"`
-	IndexFiles   int      `json:"indexFiles,omitempty"`
-	Exclude      []string `json:"exclude,omitempty"`
-	IndexBudget  string   `json:"indexBudget,omitempty"` // the project's --index-budget, "" the default
+	Index        string  `json:"index,omitempty"`
+	IndexSeconds float64 `json:"indexSeconds,omitempty"`
+	IndexErr     string  `json:"indexErr,omitempty"`
+	IndexFiles   int     `json:"indexFiles,omitempty"`
+	// IndexLeftOut is what the index did not look into, and why.
+	IndexLeftOut []IndexLeftOut `json:"indexLeftOut,omitempty"`
+	Exclude      []string       `json:"exclude,omitempty"`
+	IndexBudget  string         `json:"indexBudget,omitempty"` // the project's --index-budget, "" the default
 	// Setup is the install-hint report the server sent (setupstate.go),
 	// nil from one that sends none.
 	Setup *SetupReport `json:"setup,omitempty"`
