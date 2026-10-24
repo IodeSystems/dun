@@ -176,8 +176,6 @@ two stdio poly-lsp processes, 1.14 GB each (same index twice); the daemon is
   checks it and `startServer` adds `--daemon`.
 - **risks:** the daemon's child LSPs run with the daemon's env, not the
   engine's (PATH); `/poly-lsp restart` restarts the proxy, not the daemon.
-- **also waiting:** raglit's pin in release/supported.go — raglit-a2 needs
-  USER's push OK in its own pane (local HEAD 1a04d32, origin 5d24299).
 
 ### ✅ 27. Surfacing floor — done 2026-10-23, see done.md (open: the coverage
 floor for an index without embeddings, 0.5 + ratio vs 0.67 alone)
@@ -425,8 +423,9 @@ main 29b52d4..5d24299 (NOT pushed): `cmd/raglit/setupnotify.go`,
   ~/local/raglit), because dun uses the shared daemon. The engine's
   report is from raglit serve's start: after a save, /raglit's table is
   stale until /raglit restart (said in the save's line).
-- **next:** when raglit 5d24299 is pushed, add it to `release/supported.go`
-  (the TODO there names the entry).
+- **pinned** in `release/supported.go`: Min 5d24299, Recommended 1a04d32
+  (pushed 2026-10-24; `CGO_ENABLED=0 go install` of it builds, doctor --json runs).
+- **next:** a real run of /raglit setup against the live daemon.
 - **risks:** not run against a real raglit daemon (httptest and a shell
   fake only); a daemon with auth on refuses (403) — dun sends no admin
   token and says to use the web UI; `doctor --json` capability names are a
@@ -504,8 +503,8 @@ should note if there are updated releases (similar practice)."
   release-download update only when the tool is beside dun (where the
   download goes); elsewhere → "remove <p>, then --fix". dun's line and
   poly-lsp's relayed line can both show (dun's tested version vs poly-lsp's
-  latest); --fix runs only dun's, never poly-lsp's `how`. raglit is not in
-  the table yet (item 51: its 5d24299 is not pushed; TODO in supported.go).
+  latest); --fix runs only dun's, never poly-lsp's `how`. raglit is in the
+  table (item 51).
 - **next:** publish tags for mcpshell/poly-lsp and move the table to them;
   fill `deps.json` from their releases before the first `make release`.
 - **risks:** go install into GOBIN=<tool dir> not run against the real

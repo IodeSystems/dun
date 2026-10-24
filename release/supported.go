@@ -27,18 +27,12 @@ var Supported = []Tool{
 	// block, and the daemon at parity with stdio. No tag yet.
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
 		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.0.0-20261024183910-9e227d797831"},
-	// TODO(raglit, item 51): add raglit when its 5d24299 is pushed (main,
-	// 2026-10-24: the raglit/setup notification, doctor --json, provider
-	// keys by api_key_file). Then Min = Recommended = that commit's
-	// pseudo-version (GOFLAGS=-mod=mod go list -m
-	// github.com/iodesystems/raglit@5d24299):
-	//
-	//	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-	//		Min: "v0.0.0-2026…-5d24299…", Recommended: "v0.0.0-2026…-5d24299…"},
-	//
-	// Until then raglit has no entry: doctor's origin line names go install
-	// …@latest (toolOrigin), and dun's raglit code reads whatever raglit says
-	// it can do (a build without doctor --json is skipped).
+	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
+	// --json and provider keys by api_key_file, which /raglit setup and
+	// doctor read. Recommended 1a04d32: the same, under the MIT license with
+	// third-party notices. No tag yet.
+	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.0.0-20261024190253-1a04d32e359f"},
 }
 
 // Tool is one Supported entry.
