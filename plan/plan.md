@@ -214,8 +214,8 @@ smoke)
   fails the walk — intended, it shows the stuck screen); only the dark theme
   is rendered; whether "enter switch" saves the model for tomorrow is not
   checked by the walk; mcpshell comes from the host PATH when present.
-- **blocking decisions:** Ives' headline — placeholder "Would I put my name
-  on it?" vs the canon's "Would I put this in front of a customer?".
+- **decided:** Ives is the canon's critic (USER 2026-10-23); headline "Would I
+  put this in front of a customer?".
 - **optional extensions:** a second scenario (LEN-9); a light-theme render
   (DES-12); `ttyrec` as a ttydrive replacement.
 
