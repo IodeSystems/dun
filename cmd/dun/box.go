@@ -69,7 +69,7 @@ func (b *boxState) wrapBody(body string, w int, plain bool, edge string) {
 		if strings.TrimSpace(stripANSI(body)) == "" {
 			return
 		}
-		rows := strings.Split(packSGR(cellbuf.Wrap(body, ww, "")), "\n")
+		rows := strings.Split(cellbuf.Wrap(body, ww, ""), "\n")
 		// A styled body can end in rows that are only padding and escapes.
 		for len(rows) > 0 && strings.TrimSpace(stripANSI(rows[len(rows)-1])) == "" {
 			rows = rows[:len(rows)-1]

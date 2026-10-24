@@ -657,10 +657,10 @@ func TestTUI_SuggestionsAreDimmed(t *testing.T) {
 				other = ln
 			}
 		}
-		if !strings.Contains(other, packSGR(stDim.Render("commit it"))) {
+		if !strings.Contains(other, stDim.Render("commit it")) {
 			t.Errorf("%s: an unselected suggestion is not dim: %q", style, other)
 		}
-		want := packSGR(suggestStyle(true).Render("run the tests"))
+		want := suggestStyle(true).Render("run the tests")
 		if !strings.Contains(sel, want) || want == stDim.Render("run the tests") || want == "run the tests" {
 			t.Errorf("%s: the selected suggestion should be dim but brighter: %q", style, sel)
 		}

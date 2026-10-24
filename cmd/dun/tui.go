@@ -288,13 +288,6 @@ type convoEntry struct {
 	wrapMax   int
 	wrapMaxOK bool
 
-	// packed is e.view() with its redundant colour escapes removed
-	// (sgrpack.go), for the case where the block fits and no wrapping happens.
-	// Cached for the same reason wrapped is: packing every block on every
-	// refresh cost 74µs → 192µs at 200 blocks, and a refresh is every token.
-	packed      string
-	packedState viewState
-
 	// rowOffset is the viewport row (line index) where this entry starts.
 	// Set by refresh() as a cumulative sum of block heights. Used by
 	// scrollOverlay to map vp.YOffset back to conversation entries without
@@ -309,7 +302,6 @@ type convoEntry struct {
 func (e *convoEntry) invalidateWrap() {
 	e.wrapped, e.wrapW = "", 0
 	e.wrapMax, e.wrapMaxOK = 0, false
-	e.packed = ""
 }
 
 func (e convoEntry) expandable() bool { return e.full != "" || e.docs != nil }
@@ -3675,7 +3667,7 @@ func (m *tuiModel) refresh() {
 			switch {
 			case e.userText != "":
 				if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
-					e.wrapped, e.wrapW, e.wrapState = packSGR(userRowAt(e.userText, wrapW)), width, e.state
+					e.wrapped, e.wrapW, e.wrapState = userRowAt(e.userText, wrapW), width, e.state
 				}
 				w = e.wrapped
 			default:
@@ -3693,21 +3685,17 @@ func (m *tuiModel) refresh() {
 				e.wrapW = width
 				switch {
 				case e.wrapMax <= wrapW:
-					// Already fits — no wrapping at this width or any wider. Still
-					// worth packing, and worth caching the packed form.
-					if e.packed == "" || e.packedState != e.state {
-						e.packed, e.packedState = packSGR(b), e.state
-					}
-					w = e.packed
+					// Already fits — no wrapping at this width or any wider.
+					w = b
 				case e.wrapped != "" && e.wrapW == width:
 					w = e.wrapped
 				default:
-					e.wrapped, e.wrapW = packSGR(cellbuf.Wrap(b, wrapW, "")), width
+					e.wrapped, e.wrapW = cellbuf.Wrap(b, wrapW, ""), width
 					w = e.wrapped
 				}
 			}
 		} else {
-			w = packSGR(cellbuf.Wrap(b, wrapW, ""))
+			w = cellbuf.Wrap(b, wrapW, "")
 		}
 		// Never shorter than it has been (convoEntry.maxH). Docs blocks change
 		// only when the person opens or closes something in them.
