@@ -293,13 +293,14 @@ func TestNoBounce_FormClosingKeepsTheTopRow(t *testing.T) {
 	}
 }
 
-// On a phone (48×24) typing "/mcp add" opens the palette (the pane shrinks,
-// the view follows the bottom), narrows it (the pane grows and holds blank
-// rows at the bottom), then enter opens the form (the pane shrinks again).
-// That last shrink gives up the blank rows: the top row stays. Anchoring
-// the bottom there pushed the text out of the view and left the pane blank.
-func TestNoBounce_PhoneFormAfterPaletteKeepsTheText(t *testing.T) {
-	v := newVtui(48, 24)
+// On a phone (49×21, the owner's pane in tmux) typing "/mcp add" opens
+// the palette, narrows it, then enter opens the form: the pane shrinks,
+// grows and shrinks again. Every step keeps the rows where they were — the
+// panel takes the blank rows below, then covers the newest rows; the
+// splash at the top stays (USER 2026-10-23; run 4: the conversation went
+// up six rows and the header never came back). Esc puts it all back.
+func TestNoBounce_PhoneFormKeepsTheRowsWhereTheyWere(t *testing.T) {
+	v := newVtui(49, 21)
 	v.event(map[string]any{"type": "session", "id": "s1", "resumed": float64(0)})
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": []any{
 		map[string]any{"id": "shell", "running": true, "tools": float64(1)},
@@ -308,18 +309,35 @@ func TestNoBounce_PhoneFormAfterPaletteKeepsTheText(t *testing.T) {
 	v.send("Can you help me with this project?")
 	v.event(map[string]any{"type": "token", "text": "This project is a small command-line tool. The README says it prints a greeting, and main.go holds the whole program. I can read files, run commands in an isolated copy of the project, and use the tools you add. What would you like to change first?"})
 	v.event(map[string]any{"type": "done"})
+	yoff, rows := v.m.vp.YOffset, shown(v)
+	same := func(when string) {
+		t.Helper()
+		now := shown(v)
+		if v.m.vp.YOffset != yoff {
+			t.Fatalf("%s: the view moved: offset %d -> %d", when, yoff, v.m.vp.YOffset)
+		}
+		for i := range now {
+			// The rows still shown are the rows that were there.
+			if i < len(rows) && now[i] != rows[i] {
+				t.Fatalf("%s: row %d changed:\n was %q\n now %q", when, i, rows[i], now[i])
+			}
+		}
+	}
 	for _, r := range "/mcp add" {
 		v.m = typeStr(v.m, string(r))
+		same("typed " + string(r))
 	}
-	yoff, top := v.m.vp.YOffset, shown(v)[0]
 	v.m = key(v.m, kEnter)
 	if !v.m.mcpForm {
 		t.Fatal("the /mcp add form did not open")
 	}
-	if v.m.vp.YOffset != yoff || shown(v)[0] != top {
-		t.Errorf("opening the form moved the view: offset %d -> %d, top %q -> %q", yoff, v.m.vp.YOffset, top, shown(v)[0])
+	same("the form open")
+	if !strings.Contains(v.view(), "folder") && strings.Contains(strings.Join(rows, "\n"), "folder") {
+		t.Errorf("the splash left the view:\n%s", v.view())
 	}
-	if !strings.Contains(strings.Join(shown(v), "\n"), "change first?") {
-		t.Errorf("the answer left the view:\n%s", strings.Join(shown(v), "\n"))
+	v.m = key(v.m, kEsc)
+	same("the form closed")
+	if got := strings.Join(shown(v), "\n"); got != strings.Join(rows, "\n") {
+		t.Errorf("closed, the screen is not what it was:\n%s\nwas:\n%s", got, strings.Join(rows, "\n"))
 	}
 }

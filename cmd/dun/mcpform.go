@@ -56,18 +56,20 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 	mk := func(placeholder string) textinput.Model {
 		t := textinput.New()
 		t.Placeholder = placeholder
-		t.SetWidth(56)
+		t.SetWidth(formFieldW(m.w))
 		return t
 	}
+	// Each placeholder fits a phone's field (formFieldW at 49 columns): the
+	// label says what the field is, the placeholder only what to put in it.
 	m.mcpFields = [mcpRows]textinput.Model{
-		mk("what to call it, e.g. notes"),
-		mk("the command or web address you were given"),
-		mk("if you were given one ($NAME reads an env var)"),
-		mk("NAME=value NAME2=$VAR, if it needs any"),
-		mk("oauth client id (empty: no login)"),
-		mk("scopes, space-separated (empty: what the server asks for)"),
-		mk("issuer (empty: the server names it)"),
-		mk("access_token (default) or id_token"),
+		mk("e.g. notes"),
+		mk("command or address you were given"),
+		mk("if you were given one"),
+		mk("NAME=value, if it needs any"),
+		mk("oauth client id (empty: none)"),
+		mk("scopes (empty: what it asks for)"),
+		mk("issuer (empty: the server's)"),
+		mk("access_token or id_token"),
 	}
 	for _, i := range []int{mcpBearer, mcpEnv} {
 		m.mcpFields[i].EchoMode = textinput.EchoPassword
@@ -394,7 +396,7 @@ func (m tuiModel) mcpFormPanel() string {
 	if m.mcpErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.mcpErr))
 	}
-	rows = formNotes(rows, "saved to "+tildePath(dun.UserServersFile())+" for every project, and started now · "+sameNameNote)
+	rows = formNotes(rows, "saved to "+tildePath(dun.UserServersFile())+" for every project", "starts now · "+sameNameNote)
 	return strings.Join(rows, "\n")
 }
 

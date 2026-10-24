@@ -276,7 +276,7 @@ func TestForms_SameShape(t *testing.T) {
 				break
 			}
 		}
-		if blank < 0 || !strings.Contains(strings.Join(rows[blank:], "\n"), "saved to") || strings.Contains(strings.Join(rows[:blank], "\n"), "presets") {
+		if blank < 0 || !strings.Contains(strings.Join(rows[blank:], "\n"), "saved ") || strings.Contains(strings.Join(rows[:blank], "\n"), "presets") {
 			t.Errorf("%s form shape:\n%s", name, p)
 		}
 	}

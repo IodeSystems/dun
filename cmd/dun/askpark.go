@@ -193,4 +193,5 @@ func (m *tuiModel) holdShrink(n int) {
 func (m *tuiModel) dropHold() {
 	m.convoHold, m.convoHoldW = 0, 0
 	m.holdSkip = true
+	m.panelHeld = false
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/cellbuf"
 )
 
 // Tool runs: the tool calls of a turn, and the thinking between them, are ONE
@@ -42,9 +44,12 @@ type runItem struct {
 	done   bool   // the result arrived
 	failed bool   // it was a failure (toolFailed)
 	head   string // the call and its one-line preview, styled
-	output string // the renderer's styled output, for the pager
-	think  *thinkBlock
-	wrap   boxState // a thought's wrapped rows (box.go's line-at-a-time cache)
+	// preview is the result's one-line preview alone ("  → …"), for a
+	// narrow pane, where it takes rows of its own (callPreviewRows).
+	preview string
+	output  string // the renderer's styled output, for the pager
+	think   *thinkBlock
+	wrap    boxState // a thought's wrapped rows (box.go's line-at-a-time cache)
 }
 
 type toolRun struct {
@@ -109,7 +114,9 @@ func (r *toolRun) summary() string {
 			parts[i] += fmt.Sprintf(" ×%d", counts[n])
 		}
 	}
-	s := stTool.Render(fmt.Sprintf("⚙ %s — %s", plural(len(r.items), "step"), strings.Join(parts, ", ")))
+	// Neutral: the green is for ✓ alone, so a run's rows do not outrank the
+	// answer under them (run 4).
+	s := fmt.Sprintf("⚙ %s — %s", plural(len(r.items), "step"), strings.Join(parts, ", "))
 	if thought > 0 {
 		s += stDim.Render(" · thought " + thinkDur(thought))
 	}
@@ -234,7 +241,37 @@ func callLine(it *runItem) string {
 	if it.head != "" {
 		return mark + it.head
 	}
-	return mark + stTool.Render(callText(it.tool, it.args, 80))
+	return mark + callText(it.tool, it.args, 80)
+}
+
+// narrowCall is the widest pane on which a one-call run puts its result's
+// preview on rows of its own, under the call: on a phone the call and the
+// preview on one row left the preview three words ("→ Notes: keep the…").
+const narrowCall = 60
+
+// callPreviewRows is the preview on up to two rows of its own, from column
+// 2, wrapped at a word; the second ends in an ellipsis when there is more.
+func callPreviewRows(preview string, w int) []string {
+	plain := ansi.Strip(preview)
+	at := strings.Index(plain, "→ ")
+	if at < 0 || strings.TrimSpace(plain[:at]) != "" {
+		return nil
+	}
+	start := ansi.StringWidth(plain[:at]) + 2
+	body := ansi.Cut(preview, start, ansi.StringWidth(preview))
+	if strings.TrimSpace(ansi.Strip(body)) == "" {
+		return nil
+	}
+	lines := strings.Split(cellbuf.Wrap(body, max(1, w-4), ""), "\n")
+	if len(lines) > 2 {
+		lines[1] = fitText(lines[1]+" "+lines[2], max(1, w-4))
+		lines = lines[:2]
+	}
+	rows := []string{stDim.Render("  → ") + lines[0]}
+	for _, l := range lines[1:] {
+		rows = append(rows, "    "+l)
+	}
+	return rows
 }
 
 // failLines are up to two lines of a failed call's error.
@@ -301,7 +338,7 @@ func groupLine(items []*runItem, w int) string {
 		ts[i] = callTarget(it)
 	}
 	list, _ := fitPlain(strings.Join(ts, ", "), max(1, w-2-len([]rune(label))))
-	return stTool.Render("✓ "+label) + stSecondary.Render(list)
+	return stTool.Render("✓ ") + label + stSecondary.Render(list)
 }
 
 // fitRow fits a styled row to w columns by the one rule (fitText): it ends
@@ -449,7 +486,8 @@ func (m *tuiModel) runSetResult(i int, tool, result string) {
 	preview, body := renderToolResult(renderCtx{tool: it.tool, args: it.args, result: result, width: m.vp.Width})
 	it.result, it.done, it.output = result, true, body
 	it.failed = toolFailed(it.tool, result)
-	it.head = stTool.Render(callText(it.tool, it.args, 80)) + strings.ReplaceAll(preview, "\n", " ")
+	it.preview = strings.ReplaceAll(preview, "\n", " ")
+	it.head = callText(it.tool, it.args, 80) + it.preview
 	m.touchRun(i)
 }
 

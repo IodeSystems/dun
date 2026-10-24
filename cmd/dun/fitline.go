@@ -17,10 +17,15 @@ import (
 // hintSep separates key hints on a row.
 const hintSep = " · "
 
-// fitHints fits a row of hints to w cells, dropping whole hints from the end.
+// fitHints fits a row of hints to w cells, dropping whole hints from the end
+// — except the way out (esc …, ctrl+c quit), which is never dropped while a
+// hint before it can go instead.
 func fitHints(s string, w int) string {
 	if w <= 0 || ansi.StringWidth(s) <= w {
 		return s
+	}
+	if kept, ok := fitKeepingWayOut(s, w); ok {
+		return kept
 	}
 	plain := ansi.Strip(s)
 	cut := -1
@@ -39,6 +44,84 @@ func fitHints(s string, w int) string {
 		return fitText(s, w)
 	}
 	return ansi.Truncate(s, ansi.StringWidth(plain[:cut]), "")
+}
+
+// wayOut is a hint that leaves: a narrow row keeps it.
+func wayOut(h string) bool {
+	h = strings.TrimSpace(ansi.Strip(h))
+	return strings.HasPrefix(h, "esc ") || strings.HasPrefix(h, "ctrl+c ") || strings.HasPrefix(h, "/exit ")
+}
+
+// fitKeepingWayOut drops hints from the end, skipping the way out, until
+// the row fits. The row is re-styled dim as one (every hint row is dim);
+// a row with a leading part in another style (a spinner, a warning) is not
+// this function's: ok false.
+func fitKeepingWayOut(s string, w int) (string, bool) {
+	plain := ansi.Strip(s)
+	if stDim.Render(plain) != s {
+		return "", false
+	}
+	head, rest, found := strings.Cut(plain, "  ·  ")
+	if !found {
+		head, rest = "", plain
+	}
+	hints := strings.Split(rest, hintSep)
+	keep := -1
+	for i, h := range hints {
+		if wayOut(h) {
+			keep = i
+		}
+	}
+	if keep < 0 {
+		return "", false
+	}
+	join := func(hs []string) string {
+		if head == "" && !found {
+			return strings.Join(hs, hintSep)
+		}
+		return head + "  ·  " + strings.Join(hs, hintSep)
+	}
+	for len(hints) > 1 && ansi.StringWidth(join(hints)) > w {
+		drop := len(hints) - 1
+		for drop >= 0 && wayOut(hints[drop]) {
+			drop--
+		}
+		if drop <= 0 {
+			break // only the first hint and the way out are left
+		}
+		hints = append(hints[:drop:drop], hints[drop+1:]...)
+	}
+	if ansi.StringWidth(join(hints)) > w {
+		return "", false
+	}
+	return stDim.Render(join(hints)), true
+}
+
+// fitClause fits a sentence to w cells by ending it at a clause — before
+// ": ", "; ", " — ", " (" or ", " — so the part kept still means
+// something; with no clause short enough, at a word (fitText).
+func fitClause(s string, w int) string {
+	if w <= 0 || ansi.StringWidth(s) <= w {
+		return s
+	}
+	best := -1
+	for _, sep := range []string{": ", "; ", " — ", " (", ", "} {
+		for i := 0; ; {
+			j := strings.Index(s[i:], sep)
+			if j < 0 {
+				break
+			}
+			at := i + j
+			if ansi.StringWidth(s[:at]) <= w && at > best {
+				best = at
+			}
+			i = at + len(sep)
+		}
+	}
+	if best > 0 {
+		return s[:best]
+	}
+	return fitText(s, w)
 }
 
 // fitText fits s to w cells, ending at a word with an ellipsis.
@@ -82,6 +165,16 @@ func listRow(pre, name, post string, selected bool) string {
 // one width, so their fields start in the same column.
 const formLabelW = 7
 
+// formFieldW is a form field's width in a terminal w columns wide: the row
+// less the gutter and the label column, at most 56. A wider field was cut
+// at the edge, and its placeholder with it.
+func formFieldW(w int) int {
+	if w <= 0 {
+		return 56
+	}
+	return max(10, min(56, w-(2+formLabelW+2)-3))
+}
+
 // formNotes ends a form (the login form, /mcp add) the one way: after its
 // fields and any error, a blank row, then its notes, dim, one per row.
 func formNotes(rows []string, notes ...string) []string {
@@ -93,9 +186,9 @@ func formNotes(rows []string, notes ...string) []string {
 }
 
 // formKeys is a form's status line, the one way: its name, enter's word,
-// the extras, then back and cancel.
+// cancel, back, then the extras — a narrow row loses the extras first.
 func formKeys(name, enter string, extra ...string) string {
-	return name + "  ·  " + strings.Join(append(append([]string{enter}, extra...), "shift+tab back", "esc cancel"), " · ")
+	return name + "  ·  " + strings.Join(append([]string{enter, "esc cancel", "shift+tab back"}, extra...), " · ")
 }
 
 // formRow is one field of a form: its label, marked when it has the cursor,

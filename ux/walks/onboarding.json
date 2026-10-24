@@ -48,9 +48,7 @@
         {"type": "${LLM_URL}", "say": "typed the address my colleague gave me"},
         {"key": "enter"},
         {"wait_for": "local", "say": "the name was filled in for me"},
-        {"key": "backspace backspace backspace backspace backspace", "say": "erased the name it filled in"},
-        {"type": "work", "say": "called it work, as my colleague does"},
-        {"key": "enter"},
+        {"key": "enter", "say": "kept the name it filled in"},
         {"type": "${LLM_KEY}", "say": "typed the key my colleague gave me"},
         {"key": "enter"},
         {"wait_for": "chat-standard"}

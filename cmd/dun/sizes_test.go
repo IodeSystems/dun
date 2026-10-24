@@ -9,8 +9,10 @@ import (
 
 // The walk at 48×24 and 180×50 (plan item 38).
 
-// On a phone a tool call's line is cut at a word with an ellipsis, as every
-// other row is; it was cut mid-word at the edge ("→ Notes: keep the greet").
+// On a phone a one-call run puts the result's preview on rows of its own
+// under the call, wrapped at a word: on one row it was three words ("→
+// Notes: keep the…"), and before that cut mid-word ("→ Notes: keep the
+// greet").
 func TestPhone_CallLineEndsAtAWord(t *testing.T) {
 	v := newVtui(48, 24)
 	v.event(map[string]any{"type": "ready", "tools": []any{"notes__project_notes"}})
@@ -26,8 +28,14 @@ func TestPhone_CallLineEndsAtAWord(t *testing.T) {
 	if row == "" {
 		t.Fatalf("no call row:\n%s", strings.Join(shown(v), "\n"))
 	}
-	if ansi.StringWidth(row) > 48 || !strings.HasSuffix(row, "…") || strings.HasSuffix(row, "greet…") {
-		t.Errorf("call row %q (%d cols): want it cut at a word with …", row, ansi.StringWidth(row))
+	all := strings.Join(shown(v), "\n")
+	if strings.TrimSpace(row) != "✓ notes · project notes" || !strings.Contains(all, "  → Notes: keep the greeting short. Release on\n    Fridays.") {
+		t.Errorf("call row %q, preview:\n%s", row, all)
+	}
+	for _, l := range shown(v) {
+		if ansi.StringWidth(l) > 48 {
+			t.Errorf("row wider than 48: %q", l)
+		}
 	}
 }
 

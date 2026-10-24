@@ -104,6 +104,16 @@ func (e *convoEntry) boxContent(w int) (string, []string) {
 	switch {
 	case e.run != nil:
 		if it := e.run.single(); it != nil {
+			// On a phone the result's preview takes rows of its own.
+			if w <= narrowCall && it.done && !it.failed {
+				if rows := callPreviewRows(it.preview, w); rows != nil {
+					head := stTool.Render("✓ ") + callText(it.tool, it.args, 80)
+					if e.run.interrupted {
+						head += stDim.Render(" · ⏹ interrupted")
+					}
+					return head, rows
+				}
+			}
 			return e.run.singleHead(it), singleRows(it, w)
 		}
 		return e.run.summary(), e.run.boxRows(w)

@@ -160,6 +160,7 @@ func (r *screenRun) peek() snapshot {
 
 func TestScreen_ScrollingMatchesView(t *testing.T) {
 	v := tallConvo(t)
+	v.m.history, v.m.histIdx = nil, 0 // nothing to recall: ↑ on the empty composer scrolls
 	r := startScreen(t, v.m, v.w, v.h)
 	full := r.settle()
 	r.expect("first frame", r.peek())

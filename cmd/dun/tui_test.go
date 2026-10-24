@@ -2008,10 +2008,10 @@ func TestMultilineInput_PastedKeyNameIsText(t *testing.T) {
 	}
 }
 
-// ↑ moves within the composer and, from the top row, scrolls the CONVERSATION
-// rather than recalling history (history is ctrl+↑/↓). On Termux a finger
-// -scroll arrives as a run of plain ↑/↓ keys, and history recall on those made
-// every swipe overwrite the composer.
+// ↑ on an EMPTY composer recalls history, the shell's ↑ (USER 2026-10-23),
+// and ↓ walks back to an empty composer. On text the person typed, ↑ moves
+// within the composer and from the top row scrolls the CONVERSATION (on
+// Termux a finger-scroll arrives as a run of plain ↑/↓ keys).
 func TestMultilineInput_UpAtFirstRowScrollsConvo(t *testing.T) {
 	proc := &dunProc{stdin: discardWC{}}
 	m := newTUIModel(proc, "/ws")
@@ -2023,8 +2023,17 @@ func TestMultilineInput_UpAtFirstRowScrollsConvo(t *testing.T) {
 	m = key(m, kEnter)
 
 	m = key(m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.input.Value() != "first message" {
+		t.Fatalf("up on an empty composer must recall history, got %q", m.input.Value())
+	}
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.input.Value() != "" {
-		t.Fatalf("up from the first row must NOT recall history, got %q", m.input.Value())
+		t.Fatalf("down past the newest must empty the composer, got %q", m.input.Value())
+	}
+	m = typeStr(m, "my draft")
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.input.Value() != "my draft" {
+		t.Fatalf("up on the person's own text must NOT recall history, got %q", m.input.Value())
 	}
 
 	// With the cursor on a LOWER row, up moves the cursor and leaves the text.
@@ -2053,6 +2062,7 @@ func TestVtui_ArrowsScrollConvoFromComposer(t *testing.T) {
 	if bottom == 0 {
 		t.Fatal("test needs a conversation taller than the viewport")
 	}
+	v.m = typeStr(v.m, "draft") // the person's own text: ↑ is not history
 
 	nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	v.m = nm.(tuiModel)
@@ -2062,8 +2072,8 @@ func TestVtui_ArrowsScrollConvoFromComposer(t *testing.T) {
 	if v.m.scrollPinned {
 		t.Fatal("↑ scrolling off the bottom must unpin, like the wheel does")
 	}
-	if v.m.input.Value() != "" {
-		t.Fatalf("↑ must not recall history into the composer, got %q", v.m.input.Value())
+	if v.m.input.Value() != "draft" {
+		t.Fatalf("↑ must not recall history over a draft, got %q", v.m.input.Value())
 	}
 
 	nm, _ = v.m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -2099,7 +2109,9 @@ func TestVtui_ArrowsCyclePickerThenScroll(t *testing.T) {
 	up := func() { nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyUp}); v.m = nm.(tuiModel) }
 	down := func() { nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyDown}); v.m = nm.(tuiModel) }
 
-	// Already at the top of the list: ↑ falls straight through to scrolling.
+	// Already at the top of the list: ↑ falls straight through to scrolling
+	// (with no history to recall: the empty composer's ↑ is history first).
+	v.m.history, v.m.histIdx = nil, 0
 	up()
 	if v.m.suggestSel != 0 {
 		t.Fatalf("↑ at the top of the list must not move the selection, got %d", v.m.suggestSel)
@@ -2191,6 +2203,7 @@ func TestVtui_ScrollJumpShortcuts(t *testing.T) {
 		v.event(map[string]any{"type": "done"})
 	}
 	bottom := v.m.vp.YOffset
+	v.m = typeStr(v.m, "draft") // the person's own text: ↑ scrolls, not history
 
 	for i := 0; i < 4; i++ {
 		nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyUp})

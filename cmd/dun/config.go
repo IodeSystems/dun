@@ -329,7 +329,13 @@ func saveConfig(c dunConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configPath(), append(b, '\n'), 0o600) // key is secret
+	if err := os.WriteFile(configPath(), append(b, '\n'), 0o600); err != nil { // key is secret
+		return err
+	}
+	// WriteFile's mode is for a new file only: one made before (by hand, or
+	// by an older dun) keeps its mode. The login form says "saved
+	// privately", so make it so.
+	return os.Chmod(configPath(), 0o600)
 }
 
 func firstNonEmpty(vs ...string) string {

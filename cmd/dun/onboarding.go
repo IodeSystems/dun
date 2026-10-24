@@ -41,8 +41,15 @@ func (m *tuiModel) appendNotice(e convoEntry) int {
 	return i
 }
 
-// heldLine is said when a question is held for want of a login.
-const heldLine = "kept your question — it comes back after /login"
+// heldLine is said when a question is held for want of a login: what to
+// type, then what happens.
+const heldLine = "kept your question — type /login, then it comes back"
+
+// warnLine is a line that needs the person, in the one shape: the warning
+// mark in column 0 (as ✓ is on a line that worked: the state is not colour
+// alone), the text from column 2, in the attention colour. ⚠ is in DejaVu
+// Sans Mono and in dun's other warnings (/perf, the status line's spend).
+func warnLine(text string) string { return stNote.Render("⚠ " + text) }
 
 // loggedIn reports whether the session has an AI service to send to, as
 // far as the engine has said (its settings event); until it has, yes.
@@ -53,7 +60,7 @@ func (m *tuiModel) loggedIn() bool { return !m.noLogin }
 // now. Nothing else moves while no turn can have run.
 func (m *tuiModel) sayNeedLogin() {
 	m.dropNeedLogin()
-	m.convo = append(m.convo, convoEntry{collapsed: stNote.Render(errNoLogin.Error()), needLogin: true})
+	m.convo = append(m.convo, convoEntry{collapsed: warnLine(errNoLogin.Error()), needLogin: true})
 	m.refresh()
 }
 
@@ -78,7 +85,9 @@ func (m *tuiModel) holdUnsent(v string) {
 	m.appendUser(v)
 	m.heldMsg = v
 	m.dropNeedLogin()
-	m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(heldLine), needLogin: true})
+	// At the body's indent, in the secondary grey: it is about the question
+	// above it, which is there too.
+	m.convo = append(m.convo, convoEntry{collapsed: "  " + stSecondary.Render(heldLine), needLogin: true})
 	m.refresh()
 }
 

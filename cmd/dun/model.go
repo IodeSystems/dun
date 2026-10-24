@@ -96,7 +96,7 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	case len(args) == 1:
 		p, ok := m.providerNamed(m.provider)
 		if !ok && m.url == "" {
-			m.append(stNote.Render(errNoLogin.Error()))
+			m.append(warnLine(errNoLogin.Error()))
 			return nil
 		}
 		if p.URL == "" {
@@ -474,7 +474,7 @@ func (m tuiModel) modelPanel() string {
 
 // modelHint is the picker's status line.
 func modelHint() string {
-	return "model  ·  ↑/↓ choose · enter use · esc cancel · alt+enter this session only · ctrl+a log in"
+	return "model  ·  ↑/↓ choose · enter use · esc cancel · alt+enter this session only · ctrl+a another service"
 }
 
 // ── the add-provider form ──
@@ -494,12 +494,12 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 	mk := func(placeholder string) textinput.Model {
 		t := textinput.New()
 		t.Placeholder = placeholder
-		t.SetWidth(56)
+		t.SetWidth(formFieldW(m.w))
 		return t
 	}
 	m.providerFields = [3]textinput.Model{
 		fieldAddr: mk("e.g. https://openrouter.ai/api/v1"),
-		fieldName: mk("what to call it — filled in from the address"),
+		fieldName: mk("filled in from the address"),
 		fieldKey:  mk("if you were given one"),
 	}
 	m.providerFields[fieldKey].EchoMode = textinput.EchoPassword
@@ -509,7 +509,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 		m.providerEdit = edit.Name
 		m.providerFields[fieldName].SetValue(edit.Name)
 		m.providerFields[fieldAddr].SetValue(edit.URL)
-		m.providerFields[fieldKey].Placeholder = "a new key (empty keeps the saved one)"
+		m.providerFields[fieldKey].Placeholder = "a new key (empty: keep it)"
 	}
 	m.providerFields[m.providerStep].Focus()
 	m.providerForm, m.modelPicking = true, true
@@ -646,7 +646,8 @@ func (m tuiModel) providerFormPanel() string {
 	if m.providerErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.providerErr))
 	}
-	rows = formNotes(rows, "saved to "+tildePath(configPath())+" · "+sameNameNote)
+	// "privately": saveConfig keeps the file 0600 (only you can read it).
+	rows = formNotes(rows, "saved privately to "+tildePath(configPath()), sameNameNote)
 	return strings.Join(rows, "\n")
 }
 

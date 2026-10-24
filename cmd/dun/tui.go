@@ -190,7 +190,10 @@ func divider(w int, focusUp bool) string {
 	if w < 2 {
 		w = 2
 	}
-	half := w / 2
+	// The split is at the middle of the CONTENT, not of the terminal: on a
+	// wide screen the text stops at bandCap, and a split at the terminal's
+	// middle sat inside the text's column, under nothing on one side.
+	half := min(w, bandCap) / 2
 	if focusUp {
 		return stEdge.Render(strings.Repeat("━", half)) + stDim.Render(strings.Repeat("─", w-half))
 	}
@@ -580,39 +583,45 @@ type tuiModel struct {
 	cur        string // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
 	tools         []string
-	branch        string                // worktree branch (from the `workspace` event)
-	starting      bool                  // spawning servers, before `ready`
-	startingStart time.Time             // when the starting phase began
-	busy          bool                  // a turn in flight
-	interrupting  bool                  // an interrupt was sent; the turn has not ended yet
-	confirm       confirmState          // a pending y/n question (jobkill.go)
-	busyStart     time.Time             // when the current busy turn started
-	asking        bool                  // agent is waiting on an ask_user answer
-	askOptions    []string              // the offered options; a trailing "custom" row is implicit
-	askRec        []string              // the options the model recommends (marked, preselected)
-	askSel        int                   // highlighted answer row (== len(askOptions) → the custom row)
-	askNote       string                // optional detail attached to the chosen option ("n")
-	askMulti      bool                  // multi-select: space toggles, enter submits the checked set
-	askChecked    []bool                // per-option checked state (multi mode; len == len(askOptions))
-	noting        bool                  // capturing a detail for the selected option
-	customAnswer  bool                  // capturing a free-text / chat answer
-	askDraft      multilineInput        // the composer as it was when the question took the keys
-	askDraftSet   bool                  // askDraft holds a draft to give back (restoreDraft)
-	convoHold     int                   // the convo pane keeps at least this many rows (holdConvo)
-	convoHoldW    int                   // the pane width convoHold was measured at
-	paneTermH     int                   // the terminal height the pane was last fitted at (a resize, not a panel)
-	holdSkip      bool                  // the next refresh replaces the conversation: no contract hold (dropHold)
-	md            *glamour.TermRenderer // markdown renderer for assistant replies
-	mdWidth       int                   // width md was built for (rebuild only on change)
-	history       []string              // sent inputs, recalled with ctrl+↑/↓
-	histIdx       int                   // cursor into history (== len when not browsing)
-	mouseMode     string                // "all" | "cell" | "off" — what /mouse last set
-	focus         int                   // focusInput | focusConvo | focusActivity
-	task          string                // the last user message, for the task line
-	agents        []agentRow            // live sub-agents (activity.go)
-	jobs          []jobRow              // live background jobs (activity.go)
-	actLevel      int                   // actCollapsed | actList — → descends, ← ascends
-	actSel        actKey                // selected activity row, by identity not index
+	branch        string         // worktree branch (from the `workspace` event)
+	starting      bool           // spawning servers, before `ready`
+	startingStart time.Time      // when the starting phase began
+	busy          bool           // a turn in flight
+	interrupting  bool           // an interrupt was sent; the turn has not ended yet
+	confirm       confirmState   // a pending y/n question (jobkill.go)
+	busyStart     time.Time      // when the current busy turn started
+	asking        bool           // agent is waiting on an ask_user answer
+	askOptions    []string       // the offered options; a trailing "custom" row is implicit
+	askRec        []string       // the options the model recommends (marked, preselected)
+	askSel        int            // highlighted answer row (== len(askOptions) → the custom row)
+	askNote       string         // optional detail attached to the chosen option ("n")
+	askMulti      bool           // multi-select: space toggles, enter submits the checked set
+	askChecked    []bool         // per-option checked state (multi mode; len == len(askOptions))
+	noting        bool           // capturing a detail for the selected option
+	customAnswer  bool           // capturing a free-text / chat answer
+	askDraft      multilineInput // the composer as it was when the question took the keys
+	askDraftSet   bool           // askDraft holds a draft to give back (restoreDraft)
+	convoHold     int            // the convo pane keeps at least this many rows (holdConvo)
+	convoHoldW    int            // the pane width convoHold was measured at
+	paneTermH     int            // the terminal height the pane was last fitted at (a resize, not a panel)
+	holdSkip      bool           // the next refresh replaces the conversation: no contract hold (dropHold)
+	// panelHeld: a panel below (palette, form, picker) shrank the pane and
+	// the pinned view keeps panelYOff while it is open and the conversation
+	// is no longer than panelRows (applyScroll).
+	panelHeld bool
+	panelYOff int
+	panelRows int
+	md        *glamour.TermRenderer // markdown renderer for assistant replies
+	mdWidth   int                   // width md was built for (rebuild only on change)
+	history   []string              // sent inputs, recalled with ctrl+↑/↓
+	histIdx   int                   // cursor into history (== len when not browsing)
+	mouseMode string                // "all" | "cell" | "off" — what /mouse last set
+	focus     int                   // focusInput | focusConvo | focusActivity
+	task      string                // the last user message, for the task line
+	agents    []agentRow            // live sub-agents (activity.go)
+	jobs      []jobRow              // live background jobs (activity.go)
+	actLevel  int                   // actCollapsed | actList — → descends, ← ascends
+	actSel    actKey                // selected activity row, by identity not index
 	// Agent scope: which child's conversation is on screen (0 = the root's),
 	// and the root's own convo/task stashed while it is.
 	scopeAgent   int
@@ -891,7 +900,30 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// the new bottom of the view. Anchoring the bottom there
 				// pushed the text up and out of the view and left the pane
 				// blank (48×24 walk, 2026-10-23).
-				if got > t.vp.Height && t.vp.YOffset > 0 && !selMode && !resized {
+				//
+				// A pane that SHRINKS because a panel opened below it (the
+				// palette, a form, a picker) keeps its top row too: the panel
+				// takes the blank rows at the bottom first, and where there
+				// are not enough, the newest rows go under it — the header and
+				// the splash stay (USER 2026-10-23, run 4 at 49×21: the
+				// conversation moved up six rows and the header never came
+				// back). panelHold keeps the pinned view there until the panel
+				// closes or new rows arrive (applyScroll).
+				if got < t.vp.Height && t.panelOpen() && t.scrollPinned && !selMode && !resized {
+					yoff := t.vp.YOffset
+					if t.convoHold > 0 {
+						t.convoHold = yoff + got
+					}
+					t.vp.setHeight(got)
+					if t.convoHold > 0 {
+						t.refresh()
+					}
+					t.vp.SetYOffset(yoff)
+					if !t.panelHeld {
+						t.panelHeld, t.panelYOff = true, yoff
+					}
+					t.panelRows = len(t.vp.lines)
+				} else if got > t.vp.Height && t.vp.YOffset > 0 && !selMode && !resized {
 					t.holdTop(got)
 				} else if got < t.vp.Height && t.convoHold > 0 && !selMode && !resized {
 					yoff := t.vp.YOffset
@@ -1329,6 +1361,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
+			// ↑ on an EMPTY composer recalls the last thing sent, and on a
+			// recalled one the one before — the shell's ↑ (USER 2026-10-23).
+			// A composer with text of the person's own keeps the rule below.
+			if m.histBrowsing() && m.histIdx > 0 {
+				m.histIdx--
+				m.input.SetValue(m.history[m.histIdx])
+				m.input.CursorEnd()
+				m.refresh()
+				return m, nil
+			}
 			// Plain up moves within the composer until it runs out of buffer;
 			// from the FIRST row it scrolls the CONVERSATION. History lives on
 			// ctrl+↑/↓ instead, because of Termux: with mouse tracking inactive
@@ -1377,6 +1419,19 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.paletteActive() && m.paletteSel < m.paletteRows()-1 {
 				m.paletteSel++
+				m.refresh()
+				return m, nil
+			}
+			// On a recalled entry, ↓ goes forward through history, past the
+			// newest to an empty composer again.
+			if m.histIdx < len(m.history) && m.histBrowsing() {
+				m.histIdx++
+				if m.histIdx == len(m.history) {
+					m.input.SetValue("")
+				} else {
+					m.input.SetValue(m.history[m.histIdx])
+					m.input.CursorEnd()
+				}
 				m.refresh()
 				return m, nil
 			}
@@ -2725,7 +2780,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.sayNeedLogin()
 			setup = true
 		case errNoModel.Error():
-			m.append(stNote.Render(errNoModel.Error()))
+			m.append(warnLine(errNoModel.Error()))
 			setup = true
 		default:
 			m.append(stErr.Render("error: " + str(ev["error"])))
@@ -3035,6 +3090,26 @@ func (m tuiModel) exitHint() string {
 	return "ctrl+c quit"
 }
 
+// panelOpen says a panel the person opened is below the conversation, in
+// the composer's place: the palette, a form, a picker.
+func (m tuiModel) panelOpen() bool {
+	return m.picking || m.modelPicking || m.mcpForm || m.providerForm || m.paletteActive()
+}
+
+// histBrowsing says plain ↑/↓ walk history: the composer is empty, or holds
+// the history entry it was last given, unchanged. Text the person typed is
+// theirs, and ↑/↓ keep their composer/scroll meaning on it.
+func (m tuiModel) histBrowsing() bool {
+	if len(m.history) == 0 || len(m.input.Images()) > 0 {
+		return false
+	}
+	v := m.input.Value()
+	if m.histIdx >= len(m.history) {
+		return v == ""
+	}
+	return m.histIdx >= 0 && v == m.history[m.histIdx]
+}
+
 // viewportCache memoizes one viewport render. Shared by every copy of the
 // model, which is the point — see the vpc field. Bubble Tea drives Update and
 // View from a single goroutine, so this needs no lock.
@@ -3301,7 +3376,7 @@ func (m tuiModel) drawView() string {
 		if _, _, ok := m.paletteArgs(); ok {
 			what = "argument"
 		}
-		status = stDim.Render(what + "  ·  ↑/↓ select · tab complete · enter run · esc/type to edit")
+		status = stDim.Render(what + "  ·  ↑/↓ select · enter run · tab complete · esc close")
 	case m.askParked && m.focus != focusConvo:
 		status = stAsk.Render("❓ a question is waiting") + stDim.Render(" · tab, select it, enter to answer · "+m.exitHint())
 	case m.retry != "":
@@ -3336,11 +3411,11 @@ func (m tuiModel) drawView() string {
 				w := m.insideWide()
 				status = stDim.Render(fmt.Sprintf("sideways  ·  ←/→ scroll · home/end edge · esc leave · col %d of %d", w.off+1, w.max+m.vp.Width-wideIndicatorRoom))
 			case m.selWide() != nil && m.selWide().max > 0:
-				status = stDim.Render("convo  ·  ↑/↓ select · → scroll sideways · y copy · / search · tab input")
+				status = stDim.Render("convo  ·  ↑/↓ select · → scroll sideways · y copy · tab input")
 			case m.selBox() != nil:
-				status = stDim.Render("convo  ·  ↑/↓ select · → scroll inside · enter open · y copy · / search · tab input")
+				status = stDim.Render("convo  ·  ↑/↓ select · → scroll inside · enter open · tab input")
 			default:
-				status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close ▸ · enter open · y copy · / search · tab input")
+				status = stDim.Render("convo  ·  ↑/↓ select · →/← open/close · y copy · tab input")
 			}
 		}
 	case m.suggestActive():
@@ -3362,7 +3437,9 @@ func (m tuiModel) drawView() string {
 			status = m.spendStatus(time.Now()) + stDim.Render("your earlier question  ·  enter asks it · or change it first")
 			break
 		}
-		status = m.spendStatus(time.Now()) + stDim.Render("ready"+m.serversStartingTail()+"  ·  enter send · alt+enter newline · tab scroll · ctrl+↑/↓ history · "+m.exitHint())
+		// Four hints at most: the rest are in /help. The way out is never
+		// the one a narrow row drops (fitHints).
+		status = m.spendStatus(time.Now()) + stDim.Render("ready"+m.serversStartingTail()+"  ·  enter send · alt+enter newline · ↑ history · "+m.exitHint())
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
@@ -3992,6 +4069,21 @@ func (m *tuiModel) applyScroll(selMode bool) {
 	if !m.scrollPinned {
 		return
 	}
+	// A panel below took rows from the pane: the view stays where it was
+	// while the panel is open and nothing new has arrived (see the shrink in
+	// Update). New rows, or the panel gone, end the hold.
+	if m.panelHeld {
+		if len(m.vp.lines) <= m.panelRows {
+			// Still open: stay. Just closed: stay for this frame too — the
+			// pane grows next (Update's funnel) and keeps this top row.
+			m.vp.SetYOffset(m.panelYOff)
+			if !m.panelOpen() {
+				m.panelHeld = false
+			}
+			return
+		}
+		m.panelHeld = false
+	}
 	// Auto-follow new content. When there's a streaming reply (m.cur), don't
 	// GotoBottom() blindly — that scrolls past the user's last message to the
 	// bottom of the growing reply. Instead keep that message visible.
@@ -4255,6 +4347,12 @@ func init() {
 	slashCommands = []slashCmd{
 		{"login", "[name]", "connect to an AI service: its address, and a key if it needs one", loginSlash},
 		{"model", "[provider] [name] [--session] | use <provider> <id>", "pick the model: a searchable list from every service you are logged in to", modelSlash},
+		// /mcp add is a subcommand, listed on its own so a person who was
+		// given a server finds it in the first screen of the list (run 4:
+		// it was only in /mcp's description).
+		{"mcp add", "", "connect a server you were given — its command or address", func(m *tuiModel, args []string) tea.Cmd {
+			return engineSlash("mcp")(m, append([]string{"add"}, args...))
+		}},
 		{"help", "[command]", "list these commands; /help <command> says one in full", func(m *tuiModel, args []string) tea.Cmd {
 			if len(args) > 0 {
 				m.showCommandHelp(args[0])
@@ -4662,8 +4760,17 @@ func (m tuiModel) paletteActive() bool {
 // paletteMatches returns the commands whose name starts with the typed word.
 func (m tuiModel) paletteMatches() []slashCmd {
 	word := strings.TrimPrefix(strings.Fields(m.input.Value() + " ")[0], "/")
+	typed := strings.TrimPrefix(strings.TrimSpace(m.input.Value()), "/")
 	var out []slashCmd
 	for _, c := range m.allSlash() {
+		if strings.Contains(c.name, " ") {
+			// A subcommand listed on its own (/mcp add): matched by all the
+			// words typed, so "/mcp tools" is not it.
+			if strings.HasPrefix(c.name, typed) || strings.HasPrefix(typed, c.name+" ") {
+				out = append(out, c)
+			}
+			continue
+		}
 		if strings.HasPrefix(c.name, word) {
 			out = append(out, c)
 		}
@@ -4682,6 +4789,9 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 	n := 0
 	cmds := m.allSlash()
 	for i := range cmds {
+		if strings.Contains(cmds[i].name, " ") {
+			continue // a subcommand's own palette row: /mcp runs /mcp
+		}
 		if cmds[i].name == name { // exact wins outright
 			return cmds[i].run(m, fields[1:])
 		}
@@ -4729,6 +4839,19 @@ func (m *tuiModel) runPaletteEnter(v string) tea.Cmd {
 	if len(matches) == 0 {
 		// None of the known ones: the engine decides (runSlash hands it on).
 		return m.runSlash(v)
+	}
+	if c := matches[sel]; strings.Contains(c.name, " ") {
+		// A subcommand's row. Typed as the command's word alone and not
+		// chosen with the arrows (/mcp, enter), it is the command itself.
+		first := strings.Fields(c.name)[0]
+		if sel == 0 && len(fields) == 1 && strings.TrimPrefix(fields[0], "/") == first {
+			return m.runSlash(v)
+		}
+		rest := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(v), "/"), c.name)
+		if rest == strings.TrimPrefix(strings.TrimSpace(v), "/") {
+			rest = "" // the name was not typed out: no arguments
+		}
+		return c.run(m, strings.Fields(rest))
 	}
 	args := ""
 	if len(fields) > 1 {
@@ -4815,7 +4938,9 @@ func (m tuiModel) palettePanel() string {
 	}
 	matches := m.paletteMatches()
 	lo, hi := paletteRange(m.paletteSel, len(matches))
-	rows := make([]string, 0, hi-lo+1)
+	rows := make([]string, 0, hi-lo+2)
+	// A heading, as every panel below the conversation has one.
+	rows = append(rows, stHeader.Render("commands"))
 	// The descriptions in one column: the names padded to the widest one
 	// shown. The arguments are on the row below the list, for the selected
 	// command only — inline they pushed every description to a different
@@ -4831,7 +4956,10 @@ func (m tuiModel) palettePanel() string {
 		if i == m.paletteSel {
 			name = "/" + c.name // listRow puts it in the accent
 		}
-		rows = append(rows, listRow("", name, pad+"  "+stDim.Render(c.desc), i == m.paletteSel))
+		// A description too long for the row ends at a clause, so what
+		// is left still says something (fitClause).
+		desc := fitClause(c.desc, m.w-len(listIndent)-nameW-2)
+		rows = append(rows, listRow("", name, pad+"  "+stDim.Render(desc), i == m.paletteSel))
 	}
 	// The count first: a usage too long for the row ends in an ellipsis.
 	var foot []string

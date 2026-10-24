@@ -36,7 +36,7 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 		t.Fatalf("sent to an engine with nothing to send to: %s", sent.String())
 	}
 	txt = convoText(m)
-	if strings.Contains(txt, "not logged in") || !strings.HasSuffix(strings.TrimSpace(stripANSI(txt)), heldLine) {
+	if strings.Contains(txt, "not logged in") || !strings.HasSuffix(stripANSI(txt), "\n  "+heldLine) {
 		t.Fatalf("the held line, once, under the question, in place of the not-logged-in line:\n%s", txt)
 	}
 
@@ -193,7 +193,7 @@ func TestPalette_SetupFirstOneColumn(t *testing.T) {
 	for _, c := range all[:6] {
 		first = append(first, c.name)
 	}
-	if got := strings.Join(first, " "); got != "login model help config logout mcp" {
+	if got := strings.Join(first, " "); got != "login model mcp add help config logout" {
 		t.Errorf("first six: %s", got)
 	}
 	if last := all[len(all)-1].name; tuiGroup[last] != "maintenance" {
@@ -207,6 +207,9 @@ func TestPalette_SetupFirstOneColumn(t *testing.T) {
 		}
 		f := strings.Fields(strings.TrimLeft(row, "▎ "))
 		name := f[0]
+		if name == "/mcp" && len(f) > 1 && f[1] == "add" {
+			name = "/mcp add"
+		}
 		at := strings.Index(row, name) + len(name)
 		for at < len(row) && row[at] == ' ' {
 			at++
