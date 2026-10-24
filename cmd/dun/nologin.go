@@ -1,6 +1,11 @@
 package main
 
-import "errors"
+import (
+	"errors"
+	"os"
+
+	"golang.org/x/term"
+)
 
 // Where /login cannot be typed — a task run headless, `dun --setup` with no
 // terminal — the way in is the command line: --setup in a terminal, or the
@@ -26,3 +31,17 @@ func headlessMissing(err error) string {
 // setupNoTTY is what `dun --setup` says with no terminal to draw its form on.
 const setupNoTTY = "dun --setup needs a terminal, and there is none here. Run it in a terminal,\n" +
 	"or give dun the provider in the environment instead:\n" + envProvider
+
+// haveTTY reports whether a form can be drawn: stdin is a terminal, or the
+// controlling terminal opens (as Bubble Tea opens it when stdin is a pipe).
+func haveTTY() bool {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return true
+	}
+	f, err := os.Open("/dev/tty")
+	if err != nil {
+		return false
+	}
+	f.Close()
+	return true
+}

@@ -232,6 +232,10 @@ func main() {
 		return
 	}
 	if *setup {
+		if !haveTTY() {
+			fmt.Fprint(os.Stderr, setupNoTTY)
+			os.Exit(2)
+		}
 		if err := runSetupTUI(); err != nil {
 			fatal(err)
 		}
