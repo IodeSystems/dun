@@ -411,6 +411,23 @@ func TestFromBuildInfo(t *testing.T) {
 	}
 }
 
+// The checkout a make install build names, from -ldflags as recorded.
+func TestLdflagX(t *testing.T) {
+	for flags, want := range map[string]string{
+		"-X main.version=v1 -X main.srcDir=/home/u/src/tool": "/home/u/src/tool",
+		"-s -w -X=main.srcDir=/a -X main.version=v1":         "/a",
+		"-X main.version=v9 -X 'main.srcDir=/the check out'": "/the check out",
+		`'-X main.srcDir=/q d' -s`:                           "/q d",
+		"-X main.version=v1 -X main.channel=release":         "",
+		"-X main.srcDirX=/no":                                "",
+		"":                                                   "",
+	} {
+		if got := ldflagX(flags, "main.srcDir"); got != want {
+			t.Errorf("%q: got %q, want %q", flags, got, want)
+		}
+	}
+}
+
 // A real binary's build info: built here with go build, in a temp module,
 // as a plain build, a checkout build and a release build.
 func TestOfFile_RealBinaries(t *testing.T) {
@@ -459,6 +476,15 @@ func TestOfFile_RealBinaries(t *testing.T) {
 	o := build(filepath.Join(t.TempDir(), "co"))
 	if o.Kind != Checkout || len(o.Revision) != 7 || o.Modified {
 		t.Errorf("checkout: %+v", o)
+	}
+	// make install's stamp: the checkout it came from, a path with a space
+	// too (the go command records -ldflags as given, quotes and all); and
+	// the version go stamps from the repository (a pseudo-version, no tag).
+	for _, src := range []string{"/the/checkout", "/the check out"} {
+		o := build(filepath.Join(t.TempDir(), "stamped"), "-ldflags", "-X main.version=v9 -X 'main.srcDir="+src+"'")
+		if o.SrcDir != src || o.Kind != Checkout || !strings.HasPrefix(o.Version, "v0.0.0-") {
+			t.Errorf("stamped %q: %+v", src, o)
+		}
 	}
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() { println() }\n"), 0o644)
 	if o := build(filepath.Join(t.TempDir(), "mod")); !o.Modified || !strings.HasSuffix(o.String(), ", modified") {

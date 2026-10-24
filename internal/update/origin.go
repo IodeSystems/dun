@@ -34,6 +34,7 @@ type Origin struct {
 	Revision string // vcs.revision, shortened
 	Modified bool   // vcs.modified
 	CGO      bool   // CGO_ENABLED=1
+	SrcDir   string // -X main.srcDir=…: the checkout a make install build came from
 }
 
 // FromBuildInfo reads an Origin from a binary's build info.
@@ -55,6 +56,7 @@ func FromBuildInfo(bi *debug.BuildInfo) Origin {
 			release = release || slices.Contains(strings.Split(s.Value, ","), "release")
 		case "-ldflags":
 			release = release || strings.Contains(s.Value, "main.channel=release")
+			o.SrcDir = ldflagX(s.Value, "main.srcDir")
 		}
 	}
 	switch {
@@ -66,6 +68,54 @@ func FromBuildInfo(bi *debug.BuildInfo) Origin {
 		o.Kind = GoInstall
 	}
 	return o
+}
+
+// ldflagX is the value -X name=value sets in an -ldflags string, "" when
+// none. The string is recorded as it was given, so a value with spaces is
+// quoted ("-X 'main.srcDir=/a b'"): it is split as the go command splits it,
+// on spaces outside single or double quotes.
+func ldflagX(flags, name string) string {
+	var args []string
+	var cur strings.Builder
+	in, q := false, byte(0)
+	for i := 0; i < len(flags); i++ {
+		c := flags[i]
+		switch {
+		case q != 0 && c == q:
+			q = 0
+		case q != 0:
+			cur.WriteByte(c)
+		case c == '\'' || c == '"':
+			q, in = c, true
+		case c == ' ' || c == '\t' || c == '\n':
+			if in {
+				args, in = append(args, cur.String()), false
+				cur.Reset()
+			}
+		default:
+			cur.WriteByte(c)
+			in = true
+		}
+	}
+	if in {
+		args = append(args, cur.String())
+	}
+	for i, a := range args {
+		switch {
+		case (a == "-X" || a == "--X") && i+1 < len(args):
+			a = args[i+1]
+		case strings.HasPrefix(a, "-X="):
+			a = a[len("-X="):]
+		case strings.HasPrefix(a, "-X "):
+			a = a[len("-X "):]
+		default:
+			continue
+		}
+		if v, ok := strings.CutPrefix(a, name+"="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // OfFile reads the Origin of the binary at path, without running it.
