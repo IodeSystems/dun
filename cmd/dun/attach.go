@@ -69,7 +69,8 @@ func waitDundStopped() error {
 	if !alive {
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "dun: dund (pid %d) is stopping — waiting for it to exit\n", pid)
+	// Nothing printed: this runs behind the TUI's first frame (runTUI),
+	// whose status line says it is starting the session.
 	deadline := time.Now().Add(dundStopWait)
 	for time.Now().Before(deadline) {
 		if _, alive := dundcli.Running(dunHome()); !alive {

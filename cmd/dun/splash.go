@@ -91,6 +91,8 @@ func splashServers(states []dun.ServerState) (running, failed, other []string) {
 		switch {
 		case st.Slash != "" && st.Err == "":
 			continue // an optional extra: the extras row
+		case st.Starting:
+			other = append(other, st.ID+stDim.Render(" starting…"))
 		case st.Running:
 			s := st.ID + " " + stOK.Render("running")
 			if st.Tools > 0 {
@@ -117,7 +119,7 @@ func sortedServers(states []dun.ServerState) []dun.ServerState {
 //
 //	code navigation (poly-lsp) and project search (raglit) are off · /help poly-lsp for more
 func (m tuiModel) extrasValue(w int) string {
-	var on, off []string
+	var on, off, starting []string
 	first := ""
 	for _, st := range sortedServers(m.servers) {
 		if st.Slash == "" || st.Err != "" {
@@ -126,6 +128,12 @@ func (m tuiModel) extrasValue(w int) string {
 		what := st.ID
 		if w, ok := extraWhat[st.ID]; ok {
 			what = w + " (" + st.ID + ")"
+		}
+		if st.Starting {
+			// The id alone: "starting…" must fit a phone's row, and what
+			// it does is said once it is on.
+			starting = append(starting, st.ID)
+			continue
 		}
 		if st.Running {
 			on = append(on, what)
@@ -136,7 +144,7 @@ func (m tuiModel) extrasValue(w int) string {
 			first = st.Slash
 		}
 	}
-	if len(on)+len(off) == 0 {
+	if len(on)+len(off)+len(starting) == 0 {
 		return stDim.Render("none")
 	}
 	say := func(names []string, state string) string {
@@ -149,6 +157,9 @@ func (m tuiModel) extrasValue(w int) string {
 	var parts []string
 	if len(off) > 0 {
 		parts = append(parts, say(off, "off"))
+	}
+	if len(starting) > 0 {
+		parts = append(parts, say(starting, "starting…"))
 	}
 	if len(on) > 0 {
 		parts = append(parts, say(on, stOK.Render("on")))

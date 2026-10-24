@@ -88,12 +88,16 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	initMarkdownStyle()
 	setupBand()           // after the style: the band's filter follows dark or light
 	loadScriptRenderers() // ~/.dun/renderers/*.star override/extend the built-ins
-	// A first engine that will not spawn is NOT a reason to refuse to open. The
-	// UI is where the error is legible and where /reconnect lives; exiting to a
-	// bare shell message just moves the same failure somewhere with fewer
-	// options. Init retries from inside.
-	proc, startErr := startDunProc(o)
-	m := newTUIModel(proc, o.workspace)
+	// The attach (dial dund, create or reuse the session, subscribe) runs
+	// behind the running program, from Init: a new engine names its session
+	// only once it is up, and the screen must not stay blank until then
+	// (live: 54 s of a blank pane while poly-lsp indexed). The first frame
+	// says what it waits for; ctrl+c works; a message typed meanwhile is
+	// kept and sent at ready. An attach that fails is NOT a reason to refuse
+	// to open either: the UI is where the error is legible and where
+	// /reconnect lives. Init retries from inside.
+	m := newTUIModel(nil, o.workspace)
+	m.startingStart = time.Now()
 	m.model, m.url, m.keySet = o.model, o.url, o.key != "" // for /config
 	m.provider = hostName(o.url)
 	if p, ok := loadConfig().providerAt(o.url); ok {
@@ -102,10 +106,6 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	m.disableExit = o.disableExit
 	m.lc = lc
 	m.opts = o // for respawning the engine (see eofMsg)
-	if startErr != nil {
-		m.fatalErr = "engine did not start: " + startErr.Error()
-		m.starting = false
-	}
 	// Alt screen, mouse mode and keyboard enhancements are View fields (View).
 	// Bubble Tea v2 asks for the kitty keyboard protocol (flags=1) and xterm
 	// modifyOtherKeys itself, decodes both, and puts the terminal back at exit.
@@ -113,8 +113,6 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	if tm, ok := fm.(tuiModel); ok {
 		tm.saveUI()     // the draft and sent history, for this user's next client
 		tm.proc.close() // the engine it ENDED with, which may not be the one it started
-	} else {
-		proc.close()
 	}
 	// /reload: bubbletea has restored the terminal by now, so re-exec cleanly
 	// into the (launcher-rebuilt) binary with the same args, preserving the
@@ -278,6 +276,7 @@ type convoEntry struct {
 	adding          string // the server an "adding …" line is for: the result replaces it (noteServerMsg)
 	splash          bool   // the splash or a /status block (splash.go): client-only, never in the session log
 	liveSplash      bool   // the splash at the top: drawn again from live state at every refresh
+	startKept       bool   // a message typed before ready, shown until it is sent (startqueue.go)
 
 	// blank marks the empty row turnGap() appends when a turn ends, so
 	// consecutive turns read as blocks. It renders as nothing.
@@ -648,8 +647,13 @@ type tuiModel struct {
 	// quietReplay drops that restart's "resumed" marker; hintShown is the
 	// off-servers hint, said once per TUI. noLogin: the engine's settings
 	// said it has no AI service.
-	noLogin     bool
-	heldMsg     string
+	noLogin bool
+	heldMsg string
+	// startQueue is what was typed before the session was ready, sent at
+	// its settings (startqueue.go). srvSince is when each server still
+	// starting began, on this clock, for the status line's elapsed time.
+	startQueue  []keptMsg
+	srvSince    map[string]time.Time
 	restoredMsg string // the held message, put back in the composer: the status line says whose it is while it is unchanged
 	switchNote  string
 	quietReplay bool
@@ -785,8 +789,7 @@ func (m tuiModel) Init() tea.Cmd {
 	if m.proc != nil {
 		cmds = append(cmds, waitEvent(m.proc))
 	} else {
-		// The first engine never started. Come up anyway and keep trying —
-		// a TUI that refuses to open cannot even show you the error.
+		// No session yet: attach from here, behind the first frame (runTUI).
 		cmds = append(cmds, restartEngine(m.opts, "", false, resumeAt{}))
 	}
 	return tea.Batch(cmds...)
@@ -1239,10 +1242,13 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Sending while a turn runs is allowed: the engine buffers the message
 			// and lifts it into the next tool result, so the agent reads it inside
-			// the turn it is already running. Still blocked before `ready`, when
-			// there is no engine to receive it.
-			if v == "" || m.starting {
+			// the turn it is already running. Before `ready` there is no engine
+			// to receive it: it is kept, and sent at ready (startqueue.go).
+			if v == "" {
 				return m, nil
+			}
+			if m.starting && m.scopeAgent == 0 {
+				return m.keepUntilReady(v, m.input.Images()), nil
 			}
 			return m.sendUserImages(v, m.input.Images()), nil
 		case "ctrl+up":
@@ -1578,6 +1584,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.fatalErr = fmt.Sprintf("reconnecting… (attempt %d): %v", m.reconnTries+1, msg.err)
+			if !m.everUp {
+				m.fatalErr = fmt.Sprintf("starting session… (attempt %d): %v", m.reconnTries+1, msg.err)
+			}
 			m.refresh()
 			return m, tea.Tick(reconnectDelay(m.reconnTries), func(time.Time) tea.Msg { return retryEngineMsg{} })
 		}
@@ -2180,6 +2189,7 @@ func (m *tuiModel) noteServers(ev evMsg) {
 	// Every server's id, for /mcp's completion.
 	m.serverIDs = m.serverIDs[:0]
 	m.servers, _ = serverStates(list)
+	m.noteStarting(list)
 	for _, s := range list {
 		if st, ok := s.(map[string]any); ok && str(st["id"]) != "" {
 			m.serverIDs = append(m.serverIDs, str(st["id"]))
@@ -2245,7 +2255,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	case "server":
 		list, _ := ev["servers"].([]any)
 		opened := str(ev["id"]) == allServers && m.openServerTable(list)
-		if msg := strings.TrimSpace(str(ev["message"])); msg != "" && !opened {
+		if msg := strings.TrimSpace(str(ev["message"])); msg != "" && !opened && !m.splashSays(ev) {
 			m.noteServerMsg(str(ev["action"]), msg)
 			if m.serversPaging() != nil {
 				m.flashText, m.flashUntil = oneLine(msg), time.Now().Add(flashFor)
@@ -2594,6 +2604,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		}
 		if m.noLogin && !slices.ContainsFunc(m.convo, func(e convoEntry) bool { return e.needLogin }) {
 			m.sayNeedLogin()
+		}
+		if !m.starting {
+			m = m.sendKept()
 		}
 		if mode := str(ev["suggest"]); mode != "" {
 			m.suggestMode = mode
@@ -3232,7 +3245,7 @@ func (m tuiModel) drawView() string {
 	case m.fatalErr != "":
 		status = stErr.Render(m.fatalErr)
 	case m.starting:
-		status = m.spin.View() + stDim.Render(" spawning tool servers…"+m.startingElapsed())
+		status = m.spin.View() + stDim.Render(" "+m.startingWhat()+m.startingElapsed()+m.startQueuedHint())
 	case m.confirm.q != "":
 		status = stAsk.Render("❓ " + m.confirm.q)
 	case m.flashing():
@@ -3328,7 +3341,7 @@ func (m tuiModel) drawView() string {
 			status = m.spendStatus(time.Now()) + stDim.Render("your earlier question  ·  enter asks it · or change it first")
 			break
 		}
-		status = m.spendStatus(time.Now()) + stDim.Render("ready  ·  enter send · alt+enter newline · tab scroll · ctrl+↑/↓ history · "+m.exitHint())
+		status = m.spendStatus(time.Now()) + stDim.Render("ready"+m.serversStartingTail()+"  ·  enter send · alt+enter newline · tab scroll · ctrl+↑/↓ history · "+m.exitHint())
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
@@ -4954,13 +4967,16 @@ func restartEngine(o tuiOpts, sessionID string, reattach bool, after resumeAt) t
 		if !reattach {
 			after = resumeAt{}
 		}
-		p, err := attachSession(o, after)
+		p, err := attachFn(o, after)
 		if err != nil {
 			return engineUpMsg{err: err, reattach: reattach}
 		}
 		return engineUpMsg{proc: p, reattach: reattach}
 	}
 }
+
+// attachFn is attachSession; a test replaces it with a slow or failing one.
+var attachFn = attachSession
 
 // retryEngineMsg is a delayed retry after a failed spawn — an engine that
 // cannot start usually cannot start a millisecond later either.
@@ -5053,9 +5069,7 @@ func procArgs(o tuiOpts, mode string) []string {
 	return args
 }
 
-// startDunProc attaches to the session o names (or a new one) through dund.
 // See attach.go.
-func startDunProc(o tuiOpts) (*dunProc, error) { return attachSession(o, resumeAt{}) }
 
 // The proc methods are nil-safe: between an engine dying and its replacement
 // coming up there is no engine, and the UI stays usable in that window. They
