@@ -60,6 +60,10 @@ func runLauncher() error {
 	if err != nil {
 		return err
 	}
+	if err := os.Chmod(sock, 0o600); err != nil { // as dund's: this user only
+		ln.Close()
+		return err
+	}
 	defer func() { _ = ln.Close(); _ = os.Remove(sock) }()
 
 	exe, _ := os.Executable()

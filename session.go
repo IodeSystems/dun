@@ -55,14 +55,14 @@ func RootDir(root string) string {
 func NewSessionFile(root string) (path, id string) {
 	base := time.Now().Format("20060102-150405")
 	dir := RootDir(root)
-	_ = os.MkdirAll(dir, 0o755)
+	_ = os.MkdirAll(dir, 0o700)
 	for n := 1; n <= 99; n++ {
 		id = base
 		if n > 1 {
 			id = fmt.Sprintf("%s-%d", base, n)
 		}
 		path = filepath.Join(dir, id+".jsonl")
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			f.Close()
 			return path, id
@@ -237,7 +237,7 @@ func MetaFile(root, id string) string {
 // SaveSessionMeta writes the worktree metadata for a session.
 func SaveSessionMeta(root, id string, meta SessionMeta) error {
 	dir := RootDir(root)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	data, err := json.Marshal(meta)
@@ -245,7 +245,7 @@ func SaveSessionMeta(root, id string, meta SessionMeta) error {
 		return err
 	}
 	tmp := MetaFile(root, id) + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, MetaFile(root, id))

@@ -44,7 +44,7 @@ func ensureLauncher() bool {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detached: outlives the client
 	// The launcher rebuilds the shared binary itself; don't let it self-re-exec.
 	cmd.Env = append(os.Environ(), "DUN_NO_AUTOBUILD=1")
-	if f, e := os.OpenFile(filepath.Join(dunHome(), "launcher.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); e == nil {
+	if f, e := os.OpenFile(filepath.Join(dunHome(), "launcher.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); e == nil {
 		cmd.Stdout, cmd.Stderr = f, f
 	}
 	if err := cmd.Start(); err != nil {

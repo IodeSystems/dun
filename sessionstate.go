@@ -111,7 +111,7 @@ func SaveSessionState(sessionFile string, st SessionState) error {
 	if p == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
 	st.UpdatedAt = time.Now()
@@ -120,7 +120,7 @@ func SaveSessionState(sessionFile string, st SessionState) error {
 		return err
 	}
 	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, p)

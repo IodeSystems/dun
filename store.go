@@ -50,7 +50,7 @@ func openSessionStore(path string) (*sessionStore, error) {
 	if path == "" {
 		return s, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	if data, err := os.ReadFile(path); err == nil {
@@ -181,13 +181,13 @@ func (s *sessionStore) blobsDir() string { return filepath.Join(filepath.Dir(s.p
 func (s *sessionStore) writeBlob(content string) (ref string, ok bool) {
 	sum := sha256.Sum256([]byte(content))
 	name := hex.EncodeToString(sum[:])
-	if os.MkdirAll(s.blobsDir(), 0o755) != nil {
+	if os.MkdirAll(s.blobsDir(), 0o700) != nil {
 		return "", false
 	}
 	path := filepath.Join(s.blobsDir(), name+".blob")
 	if _, err := os.Stat(path); err != nil { // write once
 		tmp := path + ".tmp"
-		if os.WriteFile(tmp, []byte(content), 0o644) != nil || os.Rename(tmp, path) != nil {
+		if os.WriteFile(tmp, []byte(content), 0o600) != nil || os.Rename(tmp, path) != nil {
 			return "", false
 		}
 	}
@@ -232,7 +232,7 @@ func (s *sessionStore) saveImages(parts []llm.ContentPart) []llm.ContentPart {
 		path := filepath.Join(s.blobsDir(), name)
 		if _, err := os.Stat(path); err != nil {
 			tmp := path + ".tmp"
-			if os.MkdirAll(s.blobsDir(), 0o755) != nil || os.WriteFile(tmp, data, 0o644) != nil || os.Rename(tmp, path) != nil {
+			if os.MkdirAll(s.blobsDir(), 0o700) != nil || os.WriteFile(tmp, data, 0o600) != nil || os.Rename(tmp, path) != nil {
 				continue
 			}
 		}
@@ -305,7 +305,7 @@ func (s *sessionStore) flushLocked() {
 		_ = enc.Encode(e)
 	}
 	tmp := s.path + ".tmp"
-	if os.WriteFile(tmp, b.Bytes(), 0o644) == nil {
+	if os.WriteFile(tmp, b.Bytes(), 0o600) == nil {
 		_ = os.Rename(tmp, s.path) // atomic replace
 	}
 }
