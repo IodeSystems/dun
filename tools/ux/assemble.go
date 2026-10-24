@@ -14,11 +14,11 @@ import (
 // The walk file, as far as the run directory needs it. ttyrec reads the same
 // file for the actions.
 type walk struct {
-	Name     string `json:"name"`
-	Scenario string `json:"scenario"`
-	Role     string `json:"role"`
-	Goal     string `json:"goal"`
-	Note     string `json:"note"`
+	Name     string   `json:"name"`
+	Scenario string   `json:"scenario"`
+	Role     string   `json:"role"`
+	Goal     string   `json:"goal"`
+	Note     string   `json:"note"`
 	Cols     int      `json:"cols"`
 	Rows     int      `json:"rows"`
 	Sizes    []string `json:"sizes"` // "48x24", …; replaces cols/rows (sizes.go)
@@ -85,6 +85,9 @@ type runFile struct {
 	Cast     string            `json:"cast,omitempty"`
 	Files    []string          `json:"files"`
 	Brief    []string          `json:"brief_files"`
+	// ProductBrief is the product's brief copied into the run directory
+	// (product.md): product context every persona reads before judging.
+	ProductBrief string `json:"product_brief,omitempty"`
 }
 
 type multi []string
@@ -101,6 +104,7 @@ func runAssemble(args []string) error {
 	stamp := fl.String("stamp", "", "the run's time stamp")
 	version := fl.String("version", "", "the dun build walked")
 	cast := fl.String("cast", "", "the cast file name in the run directory")
+	product := fl.String("product", "", "the product brief (ux/product.md), copied into the run directory as product.md")
 	sz := fl.String("size", "", "COLSxROWS this run was recorded at (default: the walk's only size)")
 	var notes multi
 	fl.Var(&notes, "note", "a fact about how the harness set the run up (repeatable)")
@@ -186,6 +190,16 @@ func runAssemble(args []string) error {
 		rf.Steps = append(rf.Steps, st)
 	}
 
+	if *product != "" {
+		pb, err := os.ReadFile(*product)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(*dir, "product.md"), pb, 0o644); err != nil {
+			return err
+		}
+		rf.ProductBrief = "product.md"
+	}
 	if err := os.WriteFile(filepath.Join(*dir, "BRIEF.md"), []byte(brief(w, rf, string(scen))), 0o644); err != nil {
 		return err
 	}
@@ -193,6 +207,9 @@ func runAssemble(args []string) error {
 		return err
 	}
 	rf.Brief = []string{"BRIEF.md"}
+	if rf.ProductBrief != "" {
+		rf.Brief = append(rf.Brief, rf.ProductBrief)
+	}
 	for _, s := range rf.Steps {
 		rf.Brief = append(rf.Brief, s.PNG, s.TXT)
 	}
@@ -236,6 +253,10 @@ func brief(w walk, rf runFile, scenario string) string {
 	fmt.Fprintf(&b, "# %s — what you saw\n\n", w.Name)
 	b.WriteString("You have never seen this product's source code and cannot look at it. " +
 		"**The only files you may read are the ones listed at the bottom of this page, all of them in this directory.**\n\n")
+	if rf.ProductBrief != "" {
+		fmt.Fprintf(&b, "## The product, before you judge\n\nRead `%s` first, and judge against it: who the product is for, "+
+			"what sets its bar, and what it must do. It is the product's brief, written by its owner; it is not its code.\n\n", rf.ProductBrief)
+	}
 	b.WriteString("## What you are looking at\n\n")
 	fmt.Fprintf(&b, "A terminal window, %d columns by %d rows, dark background. Each step below is one moment of it: "+
 		"a picture (`.png`) of the window exactly as it looked, and a text file (`.txt`) with every character that was on it. "+
@@ -260,6 +281,9 @@ func brief(w walk, rf runFile, scenario string) string {
 		fmt.Fprintf(&b, "### %02d · %s\n\nThe promise: %s\n\n- picture: `%s`\n- what it said: `%s`\n\n", s.N, s.ID, s.Promise, s.PNG, s.TXT)
 	}
 	b.WriteString("## Every file you may read\n\n- `BRIEF.md`\n")
+	if rf.ProductBrief != "" {
+		fmt.Fprintf(&b, "- `%s` — read it before you judge\n", rf.ProductBrief)
+	}
 	for _, s := range rf.Steps {
 		fmt.Fprintf(&b, "- `%s`\n- `%s`\n", s.PNG, s.TXT)
 	}

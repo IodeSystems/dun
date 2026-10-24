@@ -10,7 +10,7 @@
 #                           walk's "sizes" (or its cols/rows; neither = 100x30)
 #
 # Output: one run directory per size, tmp/ux-run-<walk>-<stamp>-<cols>x<rows>/
-# — per step NN-<id>.png and NN-<id>.txt, run.json, BRIEF.md, ACTIONS.md, the
+# — product.md (ux/product.md), per step NN-<id>.png and NN-<id>.txt, run.json, BRIEF.md, ACTIONS.md, the
 # recording (<walk>.cast) and <walk>.gif. Each size is its own arrival (a
 # fresh HOME, a fresh stub), and each brief names only its own directory's
 # files, so a persona reads one size as one visit.
@@ -77,6 +77,11 @@ command -v jq >/dev/null || die "jq is not on PATH"
 SCENARIO="$(jq -r .scenario "$WALKFILE")"
 SCENFILE="ux/scenarios/$SCENARIO.md"
 [ -f "$SCENFILE" ] || die "the walk names scenario $SCENARIO but $SCENFILE does not exist"
+# The product brief (audience, best in class, constraints): every persona
+# reads it before judging and Ives judges against it (canon IVE-6). It is
+# product context, not the codebase, so it goes into every run directory.
+PRODUCT="ux/product.md"
+[ -f "$PRODUCT" ] || die "no product brief: $PRODUCT"
 
 SCRATCH="$(mktemp -d /tmp/dun-ux-XXXXXX)"
 BIN="$SCRATCH/bin"
@@ -177,7 +182,7 @@ walk_one() {
   local NOTE_ARGS=()
   for note in "${NOTES[@]}"; do NOTE_ARGS+=(-note "$note"); done
   "$SCRATCH/ux" assemble -walk "$WALKFILE" -scenario "$SCENFILE" -run "$OUT" -result "$RUN/rec.json" \
-    -size "$tag" -stamp "$STAMP" -version "$VERSION" -cast "$WALK.cast" "${NOTE_ARGS[@]}" || die "assemble failed at $tag"
+    -product "$PRODUCT" -size "$tag" -stamp "$STAMP" -version "$VERSION" -cast "$WALK.cast" "${NOTE_ARGS[@]}" || die "assemble failed at $tag"
 }
 
 OUTS=()

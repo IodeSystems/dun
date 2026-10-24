@@ -64,7 +64,8 @@ func TestAssemble_BriefIsTheRunsSize(t *testing.T) {
 		t.Fatalf("two sizes and no -size: err %v", err)
 	}
 	write(filepath.Join(run, "01-first.txt"), "screen")
-	if err := runAssemble(append(args, "-size", "48x24")); err != nil {
+	write(filepath.Join(dir, "product.md"), "who it is for")
+	if err := runAssemble(append(args, "-size", "48x24", "-product", filepath.Join(dir, "product.md"))); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(run, "BRIEF.md"))
@@ -72,6 +73,12 @@ func TestAssemble_BriefIsTheRunsSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	brief := string(b)
+	if !strings.Contains(brief, "Read `product.md` first") {
+		t.Errorf("brief does not send the persona to the product brief:\n%s", brief)
+	}
+	if b, _ := os.ReadFile(filepath.Join(run, "product.md")); string(b) != "who it is for" {
+		t.Errorf("product.md in the run dir: %q", b)
+	}
 	if !strings.Contains(brief, "48 columns by 24 rows") {
 		t.Errorf("brief does not say this run's size:\n%s", brief)
 	}
@@ -80,10 +87,11 @@ func TestAssemble_BriefIsTheRunsSize(t *testing.T) {
 	var named []string
 	for _, ln := range strings.Split(list, "\n") {
 		if f, ok := strings.CutPrefix(strings.TrimSpace(ln), "- `"); ok {
-			named = append(named, strings.TrimSuffix(f, "`"))
+			f, _, _ = strings.Cut(f, "`")
+			named = append(named, f)
 		}
 	}
-	if want := []string{"BRIEF.md", "01-first.png", "01-first.txt"}; !reflect.DeepEqual(named, want) {
+	if want := []string{"BRIEF.md", "product.md", "01-first.png", "01-first.txt"}; !reflect.DeepEqual(named, want) {
 		t.Errorf("brief names %v, want %v", named, want)
 	}
 	for _, f := range named {
