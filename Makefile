@@ -9,8 +9,12 @@
 # DUN_BIN); skip the check with DUN_NO_AUTOBUILD=1.
 #
 # `make build` produces ./dun the same way, stamped. A plain
-# `go install ./cmd/dun` leaves srcDir empty and never updates at all (that's
-# the release build).
+# `go install ./cmd/dun` leaves srcDir empty and never updates itself.
+#
+# `make release` builds the release builds (-tags release, -X main.channel=
+# release): they carry the manifest URL and the minisign key, install tools
+# from the pinned release/deps.json, and update from signed releases. See
+# the release target below and plan item 47.
 
 SRCDIR  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 VERSION := $(shell git -C $(SRCDIR) describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -27,7 +31,7 @@ DUN_BIN := $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/dun/dun
 # Where `make web` installs the built client that dund serves (--web-root).
 WEB_ROOT := $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/dun/web
 
-.PHONY: build install install-launcher run test clean schema web ux
+.PHONY: build install install-launcher run test clean schema web ux release
 
 build: ## build ./dun (version + source stamped)
 	go build -ldflags "$(LDFLAGS)" -o dun ./cmd/dun
@@ -69,6 +73,45 @@ web: ## build the client (mobile/, react-native-web) and install it for dund's -
 	@if [ -d $(WEB_ROOT) ]; then mv $(WEB_ROOT) $(WEB_ROOT).old; fi
 	@mv $(WEB_ROOT).new $(WEB_ROOT) && rm -rf $(WEB_ROOT).old
 	@echo "installed the web client → $(WEB_ROOT)"
+
+# Release builds, for local use: one tar.gz per platform, dun-manifest.json
+# (tools/mkmanifest: dun's entries from these archives, the tools' from
+# release/deps.json) and, when MINISIGN_KEY names a minisign secret key and
+# the minisign CLI is here, its signature. Publishing (a tag, a GitHub
+# release, CI) is the owner's: nothing here uploads anything.
+#
+# release/deps.json is filled by hand from mcpshell's and poly-lsp-mcp's own
+# releases: per tool {"version": "vX.Y.Z", "files": {"linux_amd64": {"url",
+# "sha256", "size"}, …}}, the sha256 and size of each tool's
+# <name>_<os>_<arch>.tar.gz as published (sha256sum, stat -c %s). The release
+# builds embed it, so it is filled BEFORE make release.
+RELEASE_VERSION ?= $(VERSION)
+RELEASE_DIR     := dist/$(RELEASE_VERSION)
+RELEASE_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+RELEASE_URL     := https://github.com/IodeSystems/dun/releases/download/$(RELEASE_VERSION)
+RELEASE_LDFLAGS := -s -w -X main.version=$(RELEASE_VERSION) -X main.channel=release
+RELEASE_SUMMARY ?=
+MINISIGN_KEY    ?=
+
+release: ## release builds + signed dun-manifest.json → dist/<version>/ (RELEASE_VERSION=vX.Y.Z, MINISIGN_KEY=…)
+	@case "$(RELEASE_VERSION)" in v[0-9]*.[0-9]*.[0-9]*-*|*-dirty|*-g*) echo "make release: $(RELEASE_VERSION) is not vX.Y.Z (tag a clean commit, or RELEASE_VERSION=vX.Y.Z)"; exit 1;; v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "make release: $(RELEASE_VERSION) is not vX.Y.Z (tag a clean commit, or RELEASE_VERSION=vX.Y.Z)"; exit 1;; esac
+	@if grep -q PLACEHOLDER release/minisign.pub; then echo; echo "WARNING: release/minisign.pub is the PLACEHOLDER: these builds can never update (plan item 47)"; echo; fi
+	rm -rf $(RELEASE_DIR) && mkdir -p $(RELEASE_DIR)
+	@for t in $(RELEASE_TARGETS); do \
+		os=$${t%/*}; arch=$${t#*/}; d=$(RELEASE_DIR)/dun_$${os}_$${arch}; \
+		echo "build $$os/$$arch"; mkdir -p $$d || exit 1; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -tags release -ldflags "$(RELEASE_LDFLAGS)" -o $$d/dun ./cmd/dun || exit 1; \
+		tar -C $$d -czf $(RELEASE_DIR)/dun_$${os}_$${arch}.tar.gz dun || exit 1; rm -rf $$d; \
+	done
+	go run ./tools/mkmanifest -version $(RELEASE_VERSION) -dist $(RELEASE_DIR) -url $(RELEASE_URL) \
+		-summary "$(RELEASE_SUMMARY)" -o $(RELEASE_DIR)/dun-manifest.json
+	@if [ -n "$(MINISIGN_KEY)" ] && command -v minisign >/dev/null 2>&1; then \
+		minisign -S -s "$(MINISIGN_KEY)" -m $(RELEASE_DIR)/dun-manifest.json -t "dun $(RELEASE_VERSION) manifest" && \
+		echo "signed $(RELEASE_DIR)/dun-manifest.json.minisig"; \
+	else \
+		echo; echo "WARNING: dun-manifest.json is NOT SIGNED (set MINISIGN_KEY and install minisign): no release build will accept it"; echo; \
+	fi
+	@ls -l $(RELEASE_DIR)
 
 clean:
 	rm -f ./dun

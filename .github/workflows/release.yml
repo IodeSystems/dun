@@ -1,0 +1,56 @@
+# DRAFT — a release of dun (plan item 47). It runs only when started by
+# hand (workflow_dispatch), never on a push or a tag. Before the first run
+# the owner must:
+#   - generate the minisign key pair (minisign -G -W: no password, for CI),
+#     commit the PUBLIC key as release/minisign.pub (replacing the
+#     placeholder), and keep the secret key offline;
+#   - add the repository secret MINISIGN_SECRET_KEY (the secret key file's
+#     contents). IT DOES NOT EXIST YET: without it the job stops before
+#     building;
+#   - fill release/deps.json from mcpshell's and poly-lsp-mcp's releases;
+#   - pin the actions below to commit SHAs;
+#   - tag the commit (vX.Y.Z) and start this workflow with that tag.
+name: release (draft)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "the tag to release, vX.Y.Z (it must exist)"
+        required: true
+
+permissions:
+  contents: write # gh release create
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }} # used as "$VERSION": never pasted into a script
+    steps:
+      - name: the version
+        run: echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not vX.Y.Z: $VERSION"; exit 1; }
+      - uses: actions/checkout@v4 # pin to a SHA before enabling
+        with:
+          ref: ${{ inputs.version }}
+      - uses: actions/setup-go@v5 # pin to a SHA before enabling
+        with:
+          go-version-file: go.mod
+      - name: the signing key
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then echo "no MINISIGN_SECRET_KEY secret: see plan item 47"; exit 1; fi
+          if grep -q PLACEHOLDER release/minisign.pub; then echo "release/minisign.pub is the placeholder: see plan item 47"; exit 1; fi
+          sudo apt-get update && sudo apt-get install -y minisign
+          umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/minisign.key"
+      - name: test
+        run: make test
+      - name: build and sign
+        run: make release RELEASE_VERSION="$VERSION" MINISIGN_KEY="$RUNNER_TEMP/minisign.key"
+      - name: verify the signature with the committed key
+        run: minisign -V -p release/minisign.pub -m "dist/$VERSION/dun-manifest.json"
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$VERSION" --verify-tag --title "dun $VERSION" "dist/$VERSION"/*

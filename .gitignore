@@ -14,3 +14,6 @@ dun.local.json
 # Claude Code agent worktrees: whole checkouts of this repo, not its code.
 # Untracked but not ignored, poly-lsp indexed them as dun's own (20k files).
 /.claude/worktrees/
+
+# make release output.
+/dist/
