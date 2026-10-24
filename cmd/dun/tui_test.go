@@ -828,7 +828,7 @@ func TestTUI_ScreenDump(t *testing.T) {
 	if !strings.Contains(dump, "busy=true") || !strings.Contains(dump, "w=80 h=24") {
 		t.Fatalf("state header missing/incomplete:\n%s", dump)
 	}
-	if !strings.Contains(dump, "1 tool") {
+	if !strings.Contains(dump, "dun · ") {
 		t.Fatalf("rendered screen not captured:\n%s", dump)
 	}
 	// A second dump appends (history of snapshots).

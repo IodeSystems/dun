@@ -371,8 +371,7 @@ func mcpFormOAuth(clientID, scopes, issuer, send string) *dun.OAuthSpec {
 
 func (m tuiModel) mcpFormPanel() string {
 	labels := [mcpRows]string{"name", "server", "token", "env", "client", "scopes", "issuer", "send"}
-	rows := []string{stHeader.Render("add MCP server"),
-		"  " + stDim.Render("presets: "+presetIDs()+" — type one as the name")}
+	rows := []string{stHeader.Render("add MCP server")}
 	for i, f := range m.mcpFields {
 		if !m.mcpRowShown(i) {
 			continue
@@ -395,23 +394,21 @@ func (m tuiModel) mcpFormPanel() string {
 	if m.mcpErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.mcpErr))
 	}
-	rows = append(rows, "  "+stDim.Render("saved to "+tildePath(dun.UserServersFile())+" for every project, and started now · the same name replaces"))
+	rows = formNotes(rows, "presets: "+presetIDs()+" — type one as the name",
+		"saved to "+tildePath(dun.UserServersFile())+" for every project, and started now · the same name replaces")
 	return strings.Join(rows, "\n")
 }
 
 // mcpHint is the form's status line: enter adds once the server row is
 // reached, tab goes on to the optional rows when there are any.
 func (m tuiModel) mcpHint() string {
-	h := "add server  ·  enter next"
+	enter := "enter next"
 	if m.mcpStep >= mcpServer {
-		h = "add server  ·  enter add"
+		enter = "enter add"
 	}
-	h += " · esc cancel"
+	var extra []string
 	if m.mcpStep >= mcpServer && m.mcpNext(m.mcpStep) != m.mcpStep {
-		h += " · tab more options"
+		extra = append(extra, "tab more options")
 	}
-	if m.mcpStep > 0 {
-		h += " · shift+tab back"
-	}
-	return h
+	return formKeys("add server", enter, extra...)
 }

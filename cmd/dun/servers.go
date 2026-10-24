@@ -224,7 +224,7 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		}
 		// The news first — it runs, with this many tools. Where it was saved
 		// the form said before it was sent.
-		msg := spec.ID + " · " + runningSummary(h, spec.ID)
+		msg := spec.ID + " added · " + runningSummary(h, spec.ID)
 		if elapsed := time.Since(t0); elapsed > time.Second {
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
@@ -570,15 +570,14 @@ func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
 	return dun.ServerState{}, false
 }
 
-// serverHint is the startup line naming what is NOT running and how to get it,
-// plus the docs server's ingest summary when it autostarted.
-// Shown once, at ready: an agent that silently lacks code navigation is the
-// kind of thing a user only discovers by watching it flail with grep.
+// serverHint is the startup lines naming what did NOT start and why, plus the
+// docs server's ingest summary when it autostarted. Shown once, at ready.
 //
-// The servers that are off with a switch share one line, said once: they are
-// optional extras, and two copies of the same sentence was noise.
+// The optional extras that are simply off (a server with a switch, /raglit,
+// /poly-lsp) are not here: the client's splash and /status say them, with
+// the command that turns each on (proto.ServerState.Slash).
 func serverHint(states []dun.ServerState) string {
-	var lines, off, ons []string
+	var lines []string
 	for _, st := range states {
 		if st.Running {
 			// An autostarted docs server says what it indexed and skipped.
@@ -597,18 +596,12 @@ func serverHint(states []dun.ServerState) string {
 		case st.Err != "":
 			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, oneLine(st.Err)))
 		case slashOf(st) != "":
-			off, ons = append(off, st.ID), append(ons, "/"+slashOf(st)+" on")
+			// an optional extra, off: the splash says it
 		default:
 			lines = append(lines, st.ID+" off")
 		}
 	}
 	sort.Strings(lines)
-	if len(off) > 0 {
-		sort.Strings(off)
-		sort.Strings(ons)
-		lines = append(lines, fmt.Sprintf("off: %s — %s (auto: every session)",
-			strings.Join(off, ", "), strings.Join(ons, ", ")))
-	}
 	return strings.Join(lines, "\n")
 }
 
@@ -619,7 +612,7 @@ func serversProto(states []dun.ServerState) []proto.ServerState {
 		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Auth: st.Auth,
 			Via: st.Via, Proto: st.Proto, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
 			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
-			Detail: serverDetail(st)})
+			Detail: serverDetail(st), Slash: slashOf(st)})
 	}
 	return out
 }

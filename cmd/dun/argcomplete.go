@@ -331,7 +331,7 @@ func paletteRange(sel, n int) (lo, hi int) {
 // hiName renders a choice's label with its matched characters bright.
 func hiName(label string, hits []int) string {
 	if len(hits) == 0 {
-		return stTool.Render(label)
+		return stCmd.Render(label)
 	}
 	on := map[int]bool{}
 	for _, h := range hits {
@@ -342,7 +342,7 @@ func hiName(label string, hits []int) string {
 		if on[i] {
 			b.WriteString(stMatch.Render(string(r)))
 		} else {
-			b.WriteString(stTool.Render(string(r)))
+			b.WriteString(stCmd.Render(string(r)))
 		}
 	}
 	return b.String()

@@ -379,6 +379,9 @@ type ServerState struct {
 	ViaSession string `json:"viaSession,omitempty"`
 	ViaFrom    string `json:"viaFrom,omitempty"`
 	Detail     string `json:"detail,omitempty"`
+	// Slash is the command that switches it ("raglit" for /raglit), for a
+	// server that has one.
+	Slash string `json:"slash,omitempty"`
 }
 
 // ServerEvent reports a server command's outcome and the new server set.

@@ -86,7 +86,8 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 		out = append(out, dun.ServerState{ID: str(o["id"]), Auto: auto, Running: running, Err: str(o["err"]),
 			Via: str(o["via"]), Proto: str(o["proto"]), Global: str(o["global"]), Project: str(o["project"]), Session: str(o["session"]),
 			From: str(o["from"]), ViaGlobal: str(o["viaGlobal"]), ViaProject: str(o["viaProject"]),
-			ViaSession: str(o["viaSession"]), ViaFrom: str(o["viaFrom"])})
+			ViaSession: str(o["viaSession"]), ViaFrom: str(o["viaFrom"]),
+			Tools: int(evNum(o["tools"])), Slash: str(o["slash"])})
 		details = append(details, str(o["detail"]))
 	}
 	return out, details

@@ -156,24 +156,30 @@ var (
 	stAsk    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
 	stSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // selection gutter
 	stEdge   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused divider half
-
+	// stCmd is a command's name in a list (the palette, /help): neutral and
+	// bold. Pink (212) is where you are; green is a thing that worked.
+	stCmd = lipgloss.NewStyle().Bold(true)
+	// stBrand is the wordmark: bold, not the accent — the accent is for
+	// where you are.
+	stBrand = lipgloss.NewStyle().Bold(true)
 )
 
-// paneStyle borders a pane; the focused one is bright (212), else dim (240) —
-// the tmux split-pane look (the bright border is the focused pane's half-edge).
-// divider is the single thin rule between the panes (tmux-minimal, no boxes).
-// The focused pane's half is bright: first half if the top (convo) is focused,
-// last half if the bottom (input/ask) is — the "half-edge" focus cue.
+// divider is the single rule between the panes — the tmux split look, no
+// boxes. The focused pane's half is the focus cue: the first half when the
+// upper side (conversation or activity strip) has the keys, the last half
+// when the input (or a form, picker or question in its place) has them. The
+// active half is the heavy line in the accent, the other the light line, dim.
+// Neither pane's CONTENT changes with focus: the person reads one pane while
+// typing in the other (owner, 2026-10-23).
 func divider(w int, focusUp bool) string {
 	if w < 2 {
 		w = 2
 	}
 	half := w / 2
-	left, right := strings.Repeat("─", half), strings.Repeat("─", w-half)
 	if focusUp {
-		return stEdge.Render(left) + stDim.Render(right)
+		return stEdge.Render(strings.Repeat("━", half)) + stDim.Render(strings.Repeat("─", w-half))
 	}
-	return stDim.Render(left) + stEdge.Render(right)
+	return stDim.Render(strings.Repeat("─", half)) + stEdge.Render(strings.Repeat("━", w-half))
 }
 
 // addGutter prefixes every line of a (possibly multi-line) block with marker,
@@ -253,6 +259,7 @@ type convoEntry struct {
 	userText        string // raw user message text (non-empty for user messages only)
 	needLogin       bool   // the "not logged in" line (onboarding.go): said once, where it was last needed
 	adding          string // the server an "adding …" line is for: the result replaces it (noteServerMsg)
+	splash          bool   // the splash or a /status block (splash.go): client-only, never in the session log
 
 	// blank marks the empty row turnGap() appends when a turn ends, so
 	// consecutive turns read as blocks. It renders as nothing.
@@ -699,17 +706,23 @@ type tuiModel struct {
 	mcpToolsWant string // the server whose /mcp tools this TUI asked for (mcptools.go)
 	// mcpServersWant: this TUI asked for the /mcp table (mcpview.go).
 	mcpServersWant bool
-	engineCmds     []engineCmd     // the engine's slash commands (commands event)
-	skills         []catalogSkill  // from the engine's catalog event
-	serverIDs      []string        // every MCP server's id (ready/servers events), for /mcp completion
-	prompts        []catalogPrompt // MCP prompts, each a slash command
-	replaying      bool            // driven by a trace (--replay), not an engine
-	quitting       bool            // the user is leaving; do not respawn
-	exitAnnounced  bool            // the engine said it was going; it did not crash
-	everUp         bool            // an engine reached `session` once; a retry may reattach
-	suggestions    []suggestion    // predicted next messages (idle-only picker)
-	suggestMode    string          // "on" | "off" | "auto" — /suggest controls this
-	suggestSel     int             // highlighted suggestion in the selector
+	engineCmds     []engineCmd       // the engine's slash commands (commands event)
+	skills         []catalogSkill    // from the engine's catalog event
+	serverIDs      []string          // every MCP server's id (ready/servers events), for /mcp completion
+	servers        []dun.ServerState // the last server states (ready/servers events), for the splash
+	// The splash (splash.go): splashWant shows it at the next settings event
+	// (a fresh session, or a model pick that restarted under one);
+	// splashKeep keeps it through that restart's history; splashDone: a
+	// session already had one.
+	splashWant, splashKeep, splashDone bool
+	prompts                            []catalogPrompt // MCP prompts, each a slash command
+	replaying                          bool            // driven by a trace (--replay), not an engine
+	quitting                           bool            // the user is leaving; do not respawn
+	exitAnnounced                      bool            // the engine said it was going; it did not crash
+	everUp                             bool            // an engine reached `session` once; a retry may reattach
+	suggestions                        []suggestion    // predicted next messages (idle-only picker)
+	suggestMode                        string          // "on" | "off" | "auto" — /suggest controls this
+	suggestSel                         int             // highlighted suggestion in the selector
 	// Idle debounce for the suggestion request. The engine cannot see whether
 	// anyone is typing, so the decision lives here: the clock restarts on every
 	// keystroke and at the end of every turn, and the request goes out only once
@@ -2118,6 +2131,7 @@ func (m *tuiModel) noteServers(ev evMsg) {
 	}
 	// Every server's id, for /mcp's completion.
 	m.serverIDs = m.serverIDs[:0]
+	m.servers, _ = serverStates(list)
 	for _, s := range list {
 		if st, ok := s.(map[string]any); ok && str(st["id"]) != "" {
 			m.serverIDs = append(m.serverIDs, str(st["id"]))
@@ -2137,6 +2151,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// reattach TO, and guessing (--continue) would grab an unrelated session.
 		m.sessionID = str(ev["id"])
 		m.everUp = true
+		if !m.splashDone && evNum(ev["resumed"]) == 0 {
+			m.splashWant = true
+		}
 		m.proc.uiGet() // this user's UI state in the session, kept by dund
 	case "ready":
 		m.starting = false
@@ -2162,10 +2179,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 				}
 			}
 		}
-		// Say which tool families are off, once. Otherwise the only symptom is
-		// an agent that never navigates code or searches docs, and no reason.
-		// Grey: an optional extra being off needs nothing; orange is for what
-		// does. Once per TUI — a restart (a model pick) does not repeat it.
+		// What did not start, and a docs index's ingest summary, once per
+		// TUI: a restart (a model pick) does not repeat it. Which optional
+		// extras are off is in the splash and /status, not a line here.
 		if hint := strings.TrimSpace(str(ev["hint"])); hint != "" && !m.hintShown {
 			m.append(stDim.Render(hint))
 			m.hintShown = true
@@ -2341,6 +2357,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			break
 		}
 		items, _ := ev["items"].([]any)
+		if len(items) > 0 && !m.splashKeep {
+			m.splashWant = false // a conversation to show, not a fresh one
+		}
 		m.replay(items)
 	case "message":
 		// tokens already streamed the reply; nothing to add.
@@ -2518,6 +2537,10 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// The engine's word on whether it has anything to send to: the first
 		// screen's one line, when it has not.
 		m.noLogin = m.url == ""
+		if m.splashWant {
+			m.showSplash()
+			m.splashWant, m.splashKeep, m.splashDone = false, false, true
+		}
 		if m.noLogin && !slices.ContainsFunc(m.convo, func(e convoEntry) bool { return e.needLogin }) {
 			m.sayNeedLogin()
 		}
@@ -2622,7 +2645,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.sayNeedLogin()
 			setup = true
 		case errNoModel.Error():
-			m.append(stAccent.Render(errNoModel.Error()))
+			m.append(stNote.Render(errNoModel.Error()))
 			setup = true
 		default:
 			m.append(stErr.Render("error: " + str(ev["error"])))
@@ -3064,16 +3087,18 @@ func (m tuiModel) headView() string {
 	if overlay := m.scrollOverlay(); overlay != "" {
 		return overlay
 	}
-	head := stHeader.Render("dun") + stDim.Render(" "+version+"  "+m.workspace)
+	// Minimal: the project's folder and the model in use, where they can be
+	// checked at any time. The build, the full path, the tools and the
+	// servers are in the splash and /status (splash.go).
+	head := stBrand.Render("dun")
+	if m.workspace != "" {
+		head += stDim.Render(" · " + filepath.Base(m.workspace))
+	}
 	if m.branch != "" {
-		head += stDim.Render("  ⎇ " + m.branch)
+		head += stDim.Render(" ⎇ " + m.branch)
 	}
-	// The model in use, where it can be checked at any time.
 	if m.model != "" && m.url != "" {
-		head += stDim.Render("  · " + m.model)
-	}
-	if n := len(m.tools); n > 0 {
-		head += stDim.Render("  · " + plural(n, "tool"))
+		head += stDim.Render(" · " + m.model)
 	}
 	if n := m.liveAgents(); n > 0 {
 		head += stNote.Render(fmt.Sprintf("  · %d agents", n))
@@ -3149,7 +3174,7 @@ func (m tuiModel) drawView() string {
 	vp := m.vp
 	vp.setHeight(m.convoHeight())
 	// Focus cue lives entirely in the divider's bright half — no pane borders.
-	div := divider(m.w, m.focus == focusConvo && !m.asking)
+	div := divider(m.w, m.focus != focusInput && !m.asking)
 
 	var status string
 	switch {
@@ -4090,9 +4115,10 @@ var slashCommands []slashCmd
 func init() {
 	slashCommands = []slashCmd{
 		{"login", "[name]", "connect to an AI service: its address, and a key if it needs one", loginSlash},
-		{"model", "[provider] [name] | use <provider> <id>", "pick the model: a searchable list from every service you are logged in to", modelSlash},
+		{"model", "[provider] [name] [--session] | use <provider> <id>", "pick the model: a searchable list from every service you are logged in to", modelSlash},
 		{"help", "", "list these commands", func(m *tuiModel, _ []string) tea.Cmd { m.showHelp(); return nil }},
 		{"config", "", "show this session's model settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
+		{"status", "", "this session: build, workspace, model, tools and servers", func(m *tuiModel, _ []string) tea.Cmd { m.statusSlash(); return nil }},
 		{"logout", "<provider>", "log out of an AI service: forget its address and key", logoutSlash},
 		{"context", "", "inspect context usage: tokens, compaction, recaps, truncation", func(m *tuiModel, _ []string) tea.Cmd { m.showContext(); return nil }},
 		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
@@ -4583,7 +4609,7 @@ func (m *tuiModel) showHelp() {
 		if c.args != "" {
 			usage += " " + c.args
 		}
-		b.WriteString("\n  " + stTool.Render(usage) + "  " + stDim.Render(c.desc))
+		b.WriteString("\n  " + stCmd.Render(usage) + "  " + stDim.Render(c.desc))
 	}
 	m.append(b.String())
 }
@@ -4608,7 +4634,7 @@ func (m tuiModel) palettePanel() string {
 	for i := lo; i < hi; i++ {
 		c := matches[i]
 		pad := strings.Repeat(" ", nameW-len(c.name)-1)
-		name := stTool.Render("/" + c.name)
+		name := stCmd.Render("/" + c.name)
 		if i == m.paletteSel {
 			name = "/" + c.name // listRow puts it in the accent
 		}

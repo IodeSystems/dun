@@ -58,8 +58,9 @@ func TestPersistAndExit(t *testing.T) {
 	}
 }
 
-// Ready leaves no tool list in the conversation: the header counts the
-// tools (the same number, kept current), and /mcp lists them.
+// Ready leaves no tool list in the conversation, and the header is the
+// folder and the model only: the tool count is in the splash and /status
+// (with its label), and /mcp lists the tools.
 func TestReadyNamesNoTools(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.url, m.model = "http://llm/v1", "m1"
@@ -71,12 +72,12 @@ func TestReadyNamesNoTools(t *testing.T) {
 	if txt := convoText(m); strings.Contains(txt, "t0") || strings.Contains(txt, "ready") {
 		t.Errorf("ready wrote:\n%s", txt)
 	}
-	if h := stripANSI(m.headView()); !strings.Contains(h, "· m1") || !strings.Contains(h, "· 172 tools") {
+	if h := stripANSI(m.headView()); h != "dun · ws · m1" {
 		t.Errorf("header %q", h)
 	}
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	if h := stripANSI(m.headView()); !strings.Contains(h, "· 1 tool") || strings.Contains(h, "1 tools") {
-		t.Errorf("header %q", h)
+	if s := stripANSI(m.splashView()); !strings.Contains(s, "tools      1") {
+		t.Errorf("splash:\n%s", s)
 	}
 }
 

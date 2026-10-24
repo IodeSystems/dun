@@ -39,9 +39,10 @@ func TestTristate_UnsetIsNotFalse(t *testing.T) {
 	}
 }
 
-// The hint is the only thing that tells a user a tool family is missing —
-// the alternative symptom is an agent that silently never searches.
-func TestServerHint_NamesWhatIsOffAndHow(t *testing.T) {
+// The hint says what did not start, and why. An optional extra that is only
+// off is not in it: the splash says that (TestSplash_FreshSessionOnly), with
+// the command, from the server's Slash.
+func TestServerHint_NamesWhatFailedNotWhatIsOff(t *testing.T) {
 	hint := serverHint([]dun.ServerState{
 		{ID: dun.ServerShell, Running: true},
 		{ID: dun.ServerDocs},
@@ -50,8 +51,11 @@ func TestServerHint_NamesWhatIsOffAndHow(t *testing.T) {
 	if strings.Contains(hint, dun.ServerShell) {
 		t.Error("a running server should not be in the hint")
 	}
-	if !strings.Contains(hint, "off: raglit — /raglit on") || !strings.Contains(hint, "auto: every session") {
-		t.Errorf("docs hint should name both commands: %q", hint)
+	if strings.Contains(hint, "raglit") || strings.Contains(hint, "off:") {
+		t.Errorf("an extra that is off is the splash's to say: %q", hint)
+	}
+	if ps := serversProto([]dun.ServerState{{ID: dun.ServerDocs}}); ps[0].Slash != "raglit" {
+		t.Errorf("the server state lacks its command: %+v", ps[0])
 	}
 	if !strings.Contains(hint, "bad flag") {
 		t.Errorf("a failed start must say why: %q", hint)

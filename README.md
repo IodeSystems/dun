@@ -180,6 +180,11 @@ dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
               # app: /login [name], /logout <name>, /model. Saves to
               # ~/.dun/config.json. There is no built-in provider: dun talks
               # to no model until you log in. Precedence: --flag > env > config.
+              # /model [provider] <name> saves the default, as enter in the
+              # picker does; add --session (alt+enter in the picker) for this
+              # session only. /status shows the build, workspace, model,
+              # tools and servers (the splash a new session opens with); it
+              # is not saved to the session or sent to the model.
 
 # The stamped binary updates itself from this source tree
 # (cmd/dun/selfupdate.go). A plain `go install ./cmd/dun` leaves srcDir empty

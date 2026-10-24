@@ -58,17 +58,24 @@ func (m tuiModel) providerNamed(name string) (providerConfig, bool) {
 //	/model                      the picker
 //	/model <name>               switch to that model on this provider
 //	/model <provider> <name>    switch to that model on that provider
-//	/model use <provider> <id>  switch and save as default, by id — for a
-//	                            provider that does not list its models
+//	/model use <provider> <id>  the same, by id — for a provider that does
+//	                            not list its models
+//
+// Every form saves the pick as the default, as enter in the picker does;
+// --session (anywhere in the arguments) is for this session only, as
+// alt+enter in the picker is — the scope flag /mcp and the server
+// switches use.
 func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	if m.replaying {
 		m.append(stDim.Render("this is a replay — there is no engine to resume with"))
 		return nil
 	}
+	persist := !slices.Contains(args, "--session")
+	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "--session" })
 	switch {
 	case len(args) >= 1 && args[0] == "use":
 		if len(args) != 3 {
-			m.append(stErr.Render("usage: /model use <provider> <model-id>"))
+			m.append(stErr.Render("usage: /model use <provider> <model-id> [--session]"))
 			return nil
 		}
 		p, ok := loadConfig().named(args[1])
@@ -76,24 +83,24 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 			m.append(stErr.Render("not logged in to " + args[1] + " — /login " + args[1]))
 			return nil
 		}
-		return m.switchModel(p, args[2], true)
+		return m.switchModel(p, args[2], persist)
 	case len(args) == 2:
 		p, ok := m.providerNamed(args[0])
 		if !ok {
 			m.append(stErr.Render("not logged in to " + args[0] + " — /login " + args[0]))
 			return nil
 		}
-		return m.switchModel(p, args[1], false)
+		return m.switchModel(p, args[1], persist)
 	case len(args) == 1:
 		p, ok := m.providerNamed(m.provider)
 		if !ok && m.url == "" {
-			m.append(stAccent.Render(errNoLogin.Error()))
+			m.append(stNote.Render(errNoLogin.Error()))
 			return nil
 		}
 		if p.URL == "" {
 			p = providerConfig{Name: m.provider, URL: m.url, Key: m.opts.key}
 		}
-		return m.switchModel(p, args[0], false)
+		return m.switchModel(p, args[0], persist)
 	}
 	return m.openModelPicker("")
 }
@@ -181,22 +188,50 @@ func (m *tuiModel) addModelRows(msg modelFetchMsg) {
 	for _, id := range msg.ids {
 		m.modelRows = append(m.modelRows, modelRow{msg.provider, id})
 	}
+	// Chat models first, then the rest (modelKind); within each, by name.
 	sort.SliceStable(m.modelRows, func(a, b int) bool {
 		ra, rb := m.modelRows[a], m.modelRows[b]
 		if ra.provider != rb.provider {
 			return order[ra.provider] < order[rb.provider]
 		}
+		if ka, kb := modelKind(ra.id) != "", modelKind(rb.id) != ""; ka != kb {
+			return !ka
+		}
 		return ra.id < rb.id
 	})
-	// Before the user has moved, the cursor rests on the running model.
+	// Before the user has moved, the cursor rests on the running model, else
+	// the saved default, else the first chat model (row 0 after the sort).
 	if !had {
 		cur = modelRow{m.provider, m.model}
+		if m.model == "" {
+			c := loadConfig()
+			cur = modelRow{c.Provider, c.Model}
+		}
 	}
 	for i, r := range m.filteredModels() {
 		if r == cur {
 			m.modelSel = i
 		}
 	}
+}
+
+// modelKind is "" for a model that chats, else what it is for. A model
+// list says nothing about kinds (/v1/models is ids), so this is a guess
+// from the name, and a conservative one: only a name that says it is not
+// for chat is listed after the chat models. A wrong guess moves a row
+// down the list; it never hides one.
+func modelKind(id string) string {
+	l := strings.ToLower(id)
+	for _, k := range []struct{ word, kind string }{
+		{"embed", "embeddings"}, {"rerank", "reranking"}, {"vision", "images"},
+		{"whisper", "speech"}, {"tts", "speech"}, {"transcribe", "speech"},
+		{"moderation", "moderation"}, {"dall-e", "images"},
+	} {
+		if strings.Contains(l, k.word) {
+			return k.kind
+		}
+	}
+	return ""
 }
 
 // filteredModels returns the rows matching every word of the query.
@@ -312,13 +347,14 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 			return nil
 		}
 	}
-	note := "using " + model + " on " + p.Name + " — this session only"
+	// The words of a status notice (okNotice): what happened · its detail.
+	note := "using " + model + " on " + p.Name + " · this session only"
 	if persist {
-		note = "using " + model + " on " + p.Name + " — saved as default"
+		note = "using " + model + " on " + p.Name + " · saved as default"
 	}
 	if model == m.model && p.URL == m.url { // nothing to restart
 		if persist {
-			m.append(stOK.Render(note))
+			m.append(okNotice(note))
 		} else {
 			m.append(stDim.Render("already using model " + model))
 		}
@@ -332,6 +368,9 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	// conversation; its history comes back and is rendered afresh, with no
 	// "resumed" marker — to the person nothing was resumed.
 	m.quietReplay = true
+	if len(m.convo) > 0 && m.convo[0].splash {
+		m.splashWant, m.splashKeep = true, true // said again, with the new model
+	}
 	m.convo = nil
 	m.cur, m.pendingTool = "", -1
 	m.sel = -1
@@ -362,7 +401,8 @@ func (m tuiModel) modelPanel() string {
 		return m.providerFormPanel()
 	}
 	// The keys are on the status line (modelHint), like every other list's.
-	rows := []string{stHeader.Render("pick a model"), m.modelQuery.View()}
+	// One indent (listIndent) for the search line, the rows and the count.
+	rows := []string{stHeader.Render("pick a model"), listIndent + m.modelQuery.View()}
 	// One service: its name on every row says nothing.
 	several := len(m.pickerProviders()) > 1 || slices.ContainsFunc(m.modelRows, func(r modelRow) bool { return r.provider != m.modelRows[0].provider })
 
@@ -378,28 +418,41 @@ func (m tuiModel) modelPanel() string {
 			lo = 0
 		}
 	}
-	width := 0
+	width, idW := 0, 0
 	for _, r := range shown[lo:hi] {
 		width = max(width, len(r.provider))
+		idW = max(idW, len(r.id))
 	}
 	for i := lo; i < hi; i++ {
 		r := shown[i]
-		mark := "  "
-		if r.id == m.model && r.provider == m.provider {
-			mark = stTool.Render("• ") // running now
-		}
-		line := mark
+		pre := ""
 		if several {
-			line += stDim.Render(fmt.Sprintf("%-*s  ", width, r.provider))
+			pre = stDim.Render(fmt.Sprintf("%-*s  ", width, r.provider))
 		}
-		rows = append(rows, listRow(line, r.id, "", i == m.modelSel))
+		var post []string
+		if k := modelKind(r.id); k != "" {
+			post = append(post, k)
+		}
+		if r.id == m.model && r.provider == m.provider {
+			post = append(post, "in use")
+		}
+		tail := ""
+		if len(post) > 0 {
+			tail = strings.Repeat(" ", idW-len(r.id)) + "  " + stDim.Render(strings.Join(post, " · "))
+		}
+		name := r.id
+		if modelKind(r.id) != "" && i != m.modelSel {
+			name = stDim.Render(r.id)
+		}
+		rows = append(rows, listRow(pre, name, tail, i == m.modelSel))
 	}
 
+	// A count only when the list does not all fit: "1-7 of 7" says nothing.
 	var status []string
 	switch {
 	case len(shown) == 0 && m.modelPending == 0 && len(m.modelRows) > 0:
 		status = append(status, "no model matches")
-	case len(shown) > 0:
+	case lo > 0 || hi < len(shown):
 		status = append(status, fmt.Sprintf("%d-%d of %d", lo+1, hi, len(shown)))
 	}
 	if len(m.pickerProviders()) == 0 {
@@ -408,9 +461,11 @@ func (m tuiModel) modelPanel() string {
 	if m.modelPending > 0 {
 		status = append(status, fmt.Sprintf("asking %s…", plural(m.modelPending, "service")))
 	}
-	rows = append(rows, "  "+stDim.Render(strings.Join(status, " · ")))
+	if len(status) > 0 {
+		rows = append(rows, listIndent+stDim.Render(strings.Join(status, " · ")))
+	}
 	for _, e := range m.modelErrs {
-		rows = append(rows, "  "+stErr.Render(e))
+		rows = append(rows, listIndent+stErr.Render(e))
 	}
 	return strings.Join(rows, "\n")
 }
@@ -516,7 +571,7 @@ func (m *tuiModel) saveProvider() tea.Cmd {
 	}
 	m.providerForm = false
 	m.dropNeedLogin() // no longer true
-	m.append(stOK.Render(msg))
+	m.append(okNotice(msg))
 	// Filtered to the new service — unless it is the only one, when the
 	// filter would only repeat its name.
 	query := op.Name + " "
@@ -539,7 +594,7 @@ func (m tuiModel) providerFormPanel() string {
 	if m.providerErr != "" {
 		rows = append(rows, "  "+stErr.Render(m.providerErr))
 	}
-	rows = append(rows, "  "+stDim.Render("saved to "+tildePath(configPath())+" · the same name again replaces it"))
+	rows = formNotes(rows, "saved to "+tildePath(configPath())+" · the same name again replaces it")
 	return strings.Join(rows, "\n")
 }
 
@@ -549,5 +604,5 @@ func (m tuiModel) providerHint() string {
 	if m.providerStep == len(m.providerFields)-1 {
 		enter = "enter log in"
 	}
-	return "log in  ·  " + enter + " · shift+tab back · esc cancel"
+	return formKeys("log in", enter)
 }

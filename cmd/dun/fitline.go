@@ -67,6 +67,10 @@ func fitRows(block string, w int) string {
 // listRow is one row of a list a person picks from — the palette, the model
 // picker: the selected row has the gutter bar and its name in the accent,
 // bold. pre goes before the name, post after it.
+// listIndent is where a list's rows start (after listRow's gutter): a list's
+// search line and its count line up with them.
+const listIndent = "  "
+
 func listRow(pre, name, post string, selected bool) string {
 	if selected {
 		return addGutter(pre+stSel.Render(name)+post, "▎ ", stSel)
@@ -77,6 +81,22 @@ func listRow(pre, name, post string, selected bool) string {
 // formLabelW is the label column of every form (the login form, /mcp add):
 // one width, so their fields start in the same column.
 const formLabelW = 7
+
+// formNotes ends a form (the login form, /mcp add) the one way: after its
+// fields and any error, a blank row, then its notes, dim, one per row.
+func formNotes(rows []string, notes ...string) []string {
+	rows = append(rows, "")
+	for _, n := range notes {
+		rows = append(rows, "  "+stDim.Render(n))
+	}
+	return rows
+}
+
+// formKeys is a form's status line, the one way: its name, enter's word,
+// the extras, then back and cancel.
+func formKeys(name, enter string, extra ...string) string {
+	return name + "  ·  " + strings.Join(append(append([]string{enter}, extra...), "shift+tab back", "esc cancel"), " · ")
+}
 
 // formRow is one field of a form: its label, marked when it has the cursor,
 // then the field.

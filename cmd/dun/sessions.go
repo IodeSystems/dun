@@ -178,6 +178,7 @@ func newSlash(m *tuiModel, _ []string) tea.Cmd {
 	// not fall back to the session just left.
 	m.sessionID, m.everUp = "", false
 	m.skipHistory = false
+	m.splashDone = false // a fresh session opens with its splash
 	m.opts.resume, m.opts.cont, m.opts.fresh = "", false, true
 	m.append(stDim.Render("starting a fresh session…"))
 	m.refresh()

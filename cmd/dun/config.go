@@ -194,7 +194,7 @@ func applyProviderOp(op providerOp) (string, error) {
 		case !loggedIn: // the first login is the default; the model comes next
 			cfg.Provider, cfg.URL, cfg.Key, cfg.Model = p.Name, p.URL, p.Key, ""
 		}
-		msg = fmt.Sprintf("logged in to %s (%s, %s)", name, u, keyNote(p.Key))
+		msg = fmt.Sprintf("logged in to %s · %s · %s", name, u, keyNote(p.Key))
 	case "logout":
 		if _, ok := cfg.named(name); !ok {
 			return "", errors.New("not logged in to " + name)

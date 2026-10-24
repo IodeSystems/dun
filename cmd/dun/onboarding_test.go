@@ -36,8 +36,8 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 		t.Fatalf("sent to an engine with nothing to send to: %s", sent.String())
 	}
 	txt = convoText(m)
-	if strings.Count(txt, "not logged in") != 1 || !strings.HasSuffix(strings.TrimSpace(stripANSI(txt)), "connect to an AI service") {
-		t.Fatalf("the line is said once, under the question:\n%s", txt)
+	if strings.Contains(txt, "not logged in") || !strings.HasSuffix(strings.TrimSpace(stripANSI(txt)), heldLine) {
+		t.Fatalf("the held line, once, under the question, in place of the not-logged-in line:\n%s", txt)
 	}
 
 	m.openProviderForm(nil)
@@ -52,12 +52,12 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}, "hint": "off: raglit — /raglit on (auto: every session)"})
 	m = m.handleEvent(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
 	txt = convoText(m)
-	for _, gone := range []string{"resumed", "not logged in", "off: raglit"} {
+	for _, gone := range []string{"resumed", "not logged in", "kept your question", "off: raglit"} {
 		if strings.Contains(txt, gone) {
 			t.Errorf("after the pick the screen still says %q:\n%s", gone, txt)
 		}
 	}
-	if !strings.Contains(txt, "using chat-standard on work — saved as default") {
+	if !strings.Contains(txt, "using chat-standard on work · saved as default") {
 		t.Errorf("the pick is not confirmed:\n%s", txt)
 	}
 	if got := m.input.Value(); got != "Can you help me with this project?" {
@@ -103,7 +103,7 @@ func TestModelPicker_EnterSavesAltEnterDoesNot(t *testing.T) {
 	if c := loadConfig(); c.Model != "a" || c.Provider != "work" {
 		t.Errorf("enter did not save the default: %+v", c)
 	}
-	if m.switchNote != "using a on work — saved as default" {
+	if m.switchNote != "using a on work · saved as default" {
 		t.Errorf("note %q", m.switchNote)
 	}
 	m.openModelPicker("")
@@ -114,7 +114,7 @@ func TestModelPicker_EnterSavesAltEnterDoesNot(t *testing.T) {
 	if c := loadConfig(); c.Model != "a" {
 		t.Errorf("alt+enter changed the default to %q", c.Model)
 	}
-	if m.switchNote != "using b on work — this session only" {
+	if m.switchNote != "using b on work · this session only" {
 		t.Errorf("note %q", m.switchNote)
 	}
 }
@@ -225,12 +225,12 @@ func TestPalette_SetupFirstOneColumn(t *testing.T) {
 func TestServerMsg_AddReplacesProgress(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.convo = append(m.convo, convoEntry{collapsed: "adding notes…", adding: "notes"})
-	m = m.handleEvent(evMsg{"type": "server", "id": "mcp", "action": "add", "message": "notes · running · 1 tool"})
+	m = m.handleEvent(evMsg{"type": "server", "id": "mcp", "action": "add", "message": "notes added · running · 1 tool"})
 	txt := convoText(m)
-	if strings.Contains(txt, "adding notes") || strings.Count(txt, "notes · running · 1 tool") != 1 {
+	if strings.Contains(txt, "adding notes") || strings.Count(txt, "notes added · running · 1 tool") != 1 {
 		t.Errorf("convo:\n%s", txt)
 	}
-	if last := m.convo[len(m.convo)-1].collapsed; last != stOK.Render("notes · running · 1 tool") {
+	if last := m.convo[len(m.convo)-1].collapsed; last != okNotice("notes added", "running", "1 tool") {
 		t.Errorf("styled %q", last)
 	}
 }
