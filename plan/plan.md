@@ -184,8 +184,11 @@ stdio poly-lsp processes, 1.14 GB each (the same index twice).
   agree); the installed ~/.local/bin poly-lsp-mcp (9e227d7) has no marker,
   so nothing changes until it is updated (`dun doctor --fix` installs the
   recommended one where it is missing, not over an older one).
-- **optional:** workspaces outside $HOME through the daemon (needs a
-  per-user allow decision in poly-lsp); a real dun session run end to end.
+- **next:** poly-lsp is changing (USER decided there) so the daemon admits a
+  proxy's root outside --allow; asked for a second `mcp --help` phrase so
+  dun drops `underHome` only for builds that have it (e9b0020 has the
+  daemon marker and still 403s outside $HOME).
+- **optional:** a real dun session run end to end.
 
 ### ✅ 27. Surfacing floor — done 2026-10-23, see done.md (open: the coverage
 floor for an index without embeddings, 0.5 + ratio vs 0.67 alone)
