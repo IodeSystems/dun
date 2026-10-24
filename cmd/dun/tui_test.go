@@ -4336,3 +4336,34 @@ func TestPasteIsCleaned(t *testing.T) {
 		t.Errorf("input %q", got)
 	}
 }
+
+// Opening or resuming a session and pressing keys does not ask for
+// suggestions: only a turn that finished while this TUI watched does.
+func TestSuggest_NotOnAResumedSessionBeforeATurn(t *testing.T) {
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = nm.(tuiModel)
+	m.starting = false
+	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}} // resumed
+	m = key(m, kUp)
+	m.lastKeyAt = time.Now().Add(-2 * idleSuggestDelay)
+	if _, _ = m.update(idleSuggestMsg{}); strings.Contains(buf.String(), "suggest") {
+		t.Errorf("a resumed session asked for suggestions before any turn: %q", buf.String())
+	}
+}
+
+// A server that came up in the background is not news in the conversation,
+// splash or not (a resumed session has none); a failure still is.
+func TestServerUpInTheBackgroundIsQuiet(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	n := len(m.convo)
+	m = m.handleEvent(evMsg{"type": "server", "background": true, "message": "raglit: running · 4 tools"})
+	if len(m.convo) != n {
+		t.Errorf("a background start was printed: %q", convoText(m))
+	}
+	m = m.handleEvent(evMsg{"type": "server", "background": true, "message": "raglit did not start: exit 1"})
+	if !strings.Contains(stripANSI(convoText(m)), "did not start") {
+		t.Errorf("a background failure was not said: %q", convoText(m))
+	}
+}

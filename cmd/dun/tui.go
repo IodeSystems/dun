@@ -807,6 +807,7 @@ type tuiModel struct {
 	splashWant, splashKeep, splashDone bool
 	prompts                            []catalogPrompt // MCP prompts, each a slash command
 	replaying                          bool            // driven by a trace (--replay), not an engine
+	liveTurnDone                       bool            // a turn finished while this TUI watched: idle suggestions may ask
 	quitting                           bool            // the user is leaving; do not respawn
 	exitAnnounced                      bool            // the engine said it was going; it did not crash
 	everUp                             bool            // an engine reached `session` once; a retry may reattach
@@ -2145,8 +2146,11 @@ func (m *tuiModel) armIdleSuggest() {
 }
 
 // idleSuggestPossible is the cheap precondition: could this session ever ask?
+// Not before a turn has finished in this TUI: opening or resuming a session
+// and pressing a key is not "the human's turn now", and must not spend a
+// model call (USER 2026-10-24).
 func (m tuiModel) idleSuggestPossible() bool {
-	return m.suggestMode != "off" && !m.quitting && m.asked()
+	return m.suggestMode != "off" && !m.quitting && m.liveTurnDone && m.asked()
 }
 
 // asked reports whether the conversation on screen holds a user message.
@@ -2178,7 +2182,7 @@ func (m tuiModel) idleSuggestReady() bool {
 	if m.busy || m.starting || m.asking || m.inspecting || m.searching || m.quitting {
 		return false
 	}
-	if !m.asked() { // nothing to predict from
+	if !m.asked() || !m.liveTurnDone { // nothing to predict from, or nothing new
 		return false
 	}
 	return strings.TrimSpace(m.input.Value()) == "" &&
@@ -2857,6 +2861,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// The agent is idle: separate this turn's output from whatever the
 		// human sends next with a blank row.
 		m.turnGap()
+		m.liveTurnDone = true
 		// The turn is done, so the human's idle starts NOW. This is the only
 		// place a suggestion request can begin — `done` is what "the LLM is
 		// marked done" means on the wire, so nothing can land between a tool

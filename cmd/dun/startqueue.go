@@ -173,12 +173,11 @@ func (m *tuiModel) noteStarting(list []any) {
 	m.srvSince = next
 }
 
-// splashSays reports whether a server event only says what the live splash
-// now shows: a server that came up in the background. A failure is still
-// said in the conversation, with its reason.
+// splashSays reports whether a server event is only a server that came up in
+// the background: not news. The splash's tools row and the status bar say
+// it; a resumed session, which has no splash, printed "raglit: running · 4
+// tools" under the resume border as if something had happened (USER
+// 2026-10-24). A failure is still said in the conversation, with its reason.
 func (m tuiModel) splashSays(ev evMsg) bool {
-	if ev["background"] != true || len(m.convo) == 0 || !m.convo[0].liveSplash {
-		return false
-	}
-	return !strings.Contains(str(ev["message"]), "did not start")
+	return ev["background"] == true && !strings.Contains(str(ev["message"]), "did not start")
 }
