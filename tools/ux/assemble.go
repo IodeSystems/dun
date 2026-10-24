@@ -19,8 +19,9 @@ type walk struct {
 	Role     string `json:"role"`
 	Goal     string `json:"goal"`
 	Note     string `json:"note"`
-	Cols     int    `json:"cols"`
-	Rows     int    `json:"rows"`
+	Cols     int      `json:"cols"`
+	Rows     int      `json:"rows"`
+	Sizes    []string `json:"sizes"` // "48x24", …; replaces cols/rows (sizes.go)
 	Steps    []struct {
 		ID      string `json:"id"`
 		Promise string `json:"promise"`
@@ -100,6 +101,7 @@ func runAssemble(args []string) error {
 	stamp := fl.String("stamp", "", "the run's time stamp")
 	version := fl.String("version", "", "the dun build walked")
 	cast := fl.String("cast", "", "the cast file name in the run directory")
+	sz := fl.String("size", "", "COLSxROWS this run was recorded at (default: the walk's only size)")
 	var notes multi
 	fl.Var(&notes, "note", "a fact about how the harness set the run up (repeatable)")
 	_ = fl.Parse(args)
@@ -110,6 +112,25 @@ func runAssemble(args []string) error {
 	if err := readJSON(*walkPath, &w); err != nil {
 		return err
 	}
+	// The brief describes this run's terminal: one run directory is one size.
+	var at size
+	if *sz != "" {
+		s, err := parseSize(*sz)
+		if err != nil {
+			return err
+		}
+		at = s
+	} else {
+		ss, err := walkSizes(w, nil)
+		if err != nil {
+			return err
+		}
+		if len(ss) != 1 {
+			return fmt.Errorf("the walk has %d sizes: say which this run is with -size", len(ss))
+		}
+		at = ss[0]
+	}
+	w.Cols, w.Rows = at.Cols, at.Rows
 	var rr recResult
 	if err := readJSON(*resPath, &rr); err != nil {
 		return err

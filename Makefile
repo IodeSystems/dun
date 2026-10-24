@@ -53,8 +53,9 @@ test: ## build + vet (Linux and macOS, CLI-14) + test, and the recorder (its own
 	go build ./... && go vet ./... && GOOS=darwin go vet ./... && go test ./...
 	cd tools/ttyrec && go vet ./... && go test ./...
 
-# A UX walk: hermetic dun + stub LLM, recorded; writes tmp/ux-run-<walk>-<stamp>/
-# for the lenny / george / ives agents. Not part of `test` (about a minute).
+# A UX walk: hermetic dun + stub LLM, recorded at each of the walk's sizes;
+# writes tmp/ux-run-<walk>-<stamp>-<cols>x<rows>/ per size
+# for the lenny / george / ives agents. Not part of `test` (about a minute a size).
 WALK ?= onboarding
 ux: ## walk dun as a new user (WALK=onboarding) → tmp/ux-run-*/
 	bin/ux $(WALK)

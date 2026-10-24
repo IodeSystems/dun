@@ -4,6 +4,7 @@
 //	ux llm --port-file F [--log L]   an OpenAI-compatible endpoint (stub.go)
 //	ux mcp                           a stdio MCP server (stub.go); also run as `notes-mcp`
 //	ux assemble …                    write run.json, BRIEF.md, ACTIONS.md (assemble.go)
+//	ux sizes -walk F [-size WxH]…    the sizes a walk runs at, "COLS ROWS" per line (sizes.go)
 package main
 
 import (
@@ -19,7 +20,7 @@ func main() {
 		return
 	}
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: ux llm|mcp|assemble [flags]")
+		fmt.Fprintln(os.Stderr, "usage: ux llm|mcp|assemble|sizes [flags]")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -30,6 +31,11 @@ func main() {
 	case "assemble":
 		if err := runAssemble(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "ux assemble:", err)
+			os.Exit(1)
+		}
+	case "sizes":
+		if err := runSizes(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "ux sizes:", err)
 			os.Exit(1)
 		}
 	default:

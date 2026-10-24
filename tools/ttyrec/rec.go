@@ -188,11 +188,26 @@ func (r *recorder) send(b []byte) error {
 	return err
 }
 
-// screenHas matches against the screen as rows, and as one string with the
-// row breaks removed, so a phrase wrapped by the program still matches.
-func (r *recorder) screenHas(s string) bool {
-	t := r.term.text()
-	return strings.Contains(t, s) || strings.Contains(strings.ReplaceAll(t, "\n", ""), s)
+func (r *recorder) screenHas(s string) bool { return screenHas(r.term.text(), s) }
+
+// screenHas says whether the phrase is on the screen, also when the program
+// wrapped it: on a narrow terminal "kept your question" can be "kept your" at
+// the end of one row and "question" indented on the next, or a long word cut
+// mid-word. So it matches the rows as they are, then the rows trimmed and
+// joined with one space (all whitespace runs one space, in phrase and screen
+// alike), then the rows trimmed and joined with nothing.
+func screenHas(screen, phrase string) bool {
+	if strings.Contains(screen, phrase) {
+		return true
+	}
+	rows := strings.Split(screen, "\n")
+	for i, r := range rows {
+		rows[i] = strings.TrimSpace(r)
+	}
+	norm := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	p := norm(phrase)
+	return strings.Contains(norm(strings.Join(rows, " ")), p) ||
+		strings.Contains(strings.Join(rows, ""), phrase)
 }
 
 func (r *recorder) run(sc *script) ([]stepResult, error) {

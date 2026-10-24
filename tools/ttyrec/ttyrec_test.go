@@ -207,3 +207,37 @@ func TestRecWaitTimeout(t *testing.T) {
 		t.Error("no marker for the failed step")
 	}
 }
+
+// A wait matches a phrase the program wrapped at a narrow width: at a word
+// with the next row indented, and mid-word.
+func TestScreenHas_Wrapped(t *testing.T) {
+	screen := "  kept your\n    question — it comes back\n  chat-stan\n  dard   \n"
+	for _, p := range []string{"kept your question", "question — it comes", "chat-standard", "comes  back"} {
+		if !screenHas(screen, p) {
+			t.Errorf("%q not found in\n%s", p, screen)
+		}
+	}
+	if screenHas(screen, "your chat") {
+		t.Error("matched across unrelated rows")
+	}
+}
+
+// -cols/-rows replace the script's size: one walk runs at several.
+func TestRecSizeOverride(t *testing.T) {
+	dir := t.TempDir()
+	sp := filepath.Join(dir, "s.json")
+	_ = os.WriteFile(sp, []byte(`{"cols": 100, "rows": 30, "steps": [
+	  {"id": "size", "actions": [{"wait_for": "size 24 48", "timeout_ms": 5000}]}
+	]}`), 0o644)
+	res := filepath.Join(dir, "r.json")
+	err := cmdRec([]string{"-script", sp, "-cols", "48", "-rows", "24", "-result", res, "-o", filepath.Join(dir, "r.cast"),
+		"--", "sh", "-c", "echo size $(stty size); sleep 1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rr recResult
+	b, _ := os.ReadFile(res)
+	if err := json.Unmarshal(b, &rr); err != nil || rr.Cols != 48 || rr.Rows != 24 {
+		t.Errorf("result %+v %v", rr, err)
+	}
+}
