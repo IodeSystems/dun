@@ -1,0 +1,40 @@
+{
+  "name": "focus",
+  "scenario": "first-assistant",
+  "role": "someone who has just started dun in their project",
+  "goal": "I want to read the conversation while I type, and know which pane my keys go to.",
+  "note": "Focus walk (2026-10-24): the divider leaning toward the focused pane, and the selection band in the conversation.",
+  "sizes": ["49x21", "100x30"],
+  "typing_ms": 45,
+  "steps": [
+    {
+      "id": "the-input-has-the-keys",
+      "promise": "When I start, it is clear my keys go to the input.",
+      "settle_ms": 1500,
+      "actions": [
+        {"wait_for": "ask dun to do something", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "tab-gives-the-conversation-the-keys",
+      "promise": "Tab moves my keys to the conversation, and the screen shows it without anything moving.",
+      "actions": [
+        {"key": "tab"}
+      ]
+    },
+    {
+      "id": "a-message-is-selected-and-readable",
+      "promise": "The selected message is easy to find and still easy to read.",
+      "actions": [
+        {"key": "up"}
+      ]
+    },
+    {
+      "id": "tab-gives-the-input-the-keys-back",
+      "promise": "Tab gives the input the keys back.",
+      "actions": [
+        {"key": "tab"}
+      ]
+    }
+  ]
+}
