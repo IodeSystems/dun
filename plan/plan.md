@@ -361,6 +361,36 @@ not run in the clean container)
 - **optional extensions:** agentkit exposing the initialize result (drop
   the probe); completion of directory names after `/poly-lsp exclude`.
 
+### ◐ 48. poly-lsp's install hints: a missing language server, said once (USER, 2026-10-24)
+
+- **Built:** poly-lsp-mcp (f064670) sends `poly-lsp-mcp/setup`
+  (notifications/message; `languages[{lang, files, lsp{name,found,path},
+  adds, install{cmd,needs}}]`, `missing`) after bring-up; `doctor --json`
+  has the same list. `setupstate.go`: kept as `ServerState.Setup`;
+  `/poly-lsp` (bare) ends in `SetupTable` (every language, found with path
+  or missing with adds, install command, needs); `/mcp info`'s row appends
+  "· N language server(s) missing"; `dun doctor` runs `poly-lsp-mcp doctor
+  --json --root .` (4 s, silent when the build lacks it) and warns per
+  missing server with the install command. Conversation: one dim line per
+  session (`Config.OnServerSetup` → server event action `setup`), only for a
+  missing server in a language that is ≥ 1/10 of the listed files or ≥ 200
+  files (dun's own 12 Python scripts do not nag); "needs Node" when that
+  toolchain is not on PATH. An older poly-lsp sends none: nothing changes.
+  dun never installs a language server (owner decision).
+- **Decided (assumption, catchable):** the share's denominator is the sum of
+  the listed languages' files (the setup report has no other total); the
+  line's "what it adds" is dun's fixed "references, rename and diagnostics",
+  the report's own `adds` is in the table; no cache of the doctor report
+  across processes (doctor asks the binary each run).
+- **next:** run against the real poly-lsp under dund; check the wording.
+- **risks:** not run against a real poly-lsp; a setup report that lands
+  before the engine's Harness is stored waits up to 30 s for it; doctor in
+  a huge directory times out and says nothing; the `/poly-lsp` status
+  wiring has no harness-level test (the table and the rows do).
+- **blocking decisions:** none.
+- **optional extensions:** a `/poly-lsp setup` that prints the commands for
+  copying.
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
