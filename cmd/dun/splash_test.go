@@ -43,8 +43,8 @@ func TestSplash_FreshSessionOnly(t *testing.T) {
 		t.Fatalf("no splash first:\n%s", convoText(m))
 	}
 	s := stripANSI(m.convo[0].collapsed)
-	for _, want := range []string{"dun " + version, "workspace  ~/greet", "model      none yet — /login",
-		"tools      2", "servers    shell running 2 tools", "off        poly-lsp, raglit — /poly-lsp on, /raglit on"} {
+	for _, want := range []string{"dun " + version, "workspace  ~/greet", "model      none yet\n",
+		"tools      2", "servers    shell running · 2 tools", "off        poly-lsp, raglit — /poly-lsp on, /raglit on"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("splash lacks %q:\n%s", want, s)
 		}

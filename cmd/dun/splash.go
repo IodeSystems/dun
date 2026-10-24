@@ -33,7 +33,7 @@ type statusSection struct {
 func (m tuiModel) statusSections() []statusSection {
 	var out []statusSection
 	out = append(out, statusSection{"workspace", tildePath(m.workspace)})
-	model := stDim.Render("none yet — /login, then /model")
+	model := stDim.Render("none yet")
 	if m.model != "" && m.url != "" {
 		model = m.model
 		if m.provider != "" {
@@ -67,7 +67,7 @@ func splashServers(states []dun.ServerState) (running, failed, off, offOn, other
 		case st.Running:
 			s := st.ID + " " + stOK.Render("running")
 			if st.Tools > 0 {
-				s += stDim.Render(" " + plural(st.Tools, "tool"))
+				s += stDim.Render(" · " + plural(st.Tools, "tool"))
 			}
 			running = append(running, s)
 		case st.Err != "":
