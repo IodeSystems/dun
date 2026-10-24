@@ -20,11 +20,13 @@ var Supported = []Tool{
 	// so over-limit output is saved to a file.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
 		Min: "v0.2.0", Recommended: "v0.4.2-0.20261023182925-90cda545a60e"},
-	// 46caee4 (main, 2026-10-24): the first pushed commit with the index
+	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
-	// tree-sitter, so go install needs Go alone. No tag yet.
+	// tree-sitter, so go install needs Go alone. Recommended 9e227d7: git
+	// decides the file set, leftOutBy, "not a project", the doctor update
+	// block, and the daemon at parity with stdio. No tag yet.
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.0.0-20261024175639-46caee4f6393"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.0.0-20261024183910-9e227d797831"},
 }
 
 // Tool is one Supported entry.

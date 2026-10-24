@@ -1506,6 +1506,15 @@ func (h *Harness) noteServerNotification(n mcpmgr.Notification) {
 		}
 		return
 	}
+	// A server's daemon upgrading, upgraded or failing (poly-lsp-mcp/daemon)
+	// is for the person, one quiet line, not the model: it changes nothing
+	// the model can act on.
+	if msg, ok := parseDaemonNote(n.Params); ok {
+		if h.cfg.OnServerSetup != nil {
+			h.cfg.OnServerSetup(n.ServerID, msg)
+		}
+		return
+	}
 	text := strings.TrimSpace(n.Text())
 	if text == "" {
 		return

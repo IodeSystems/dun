@@ -227,3 +227,15 @@ func TestSetup_ParseDoctorJSON(t *testing.T) {
 		}
 	}
 }
+
+// A daemon notice is one line for the person, not a note for the model.
+func TestParseDaemonNote(t *testing.T) {
+	msg, ok := parseDaemonNote(map[string]any{"logger": "poly-lsp-mcp/daemon", "level": "info",
+		"data": map[string]any{"message": "daemon upgraded to 9e227d7"}})
+	if !ok || msg != "daemon upgraded to 9e227d7" {
+		t.Errorf("got %q %v", msg, ok)
+	}
+	if _, ok := parseDaemonNote(map[string]any{"logger": "poly-lsp-mcp/index", "data": map[string]any{"message": "x"}}); ok {
+		t.Error("an index report read as a daemon notice")
+	}
+}

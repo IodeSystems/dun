@@ -286,3 +286,17 @@ func SetupTable(r SetupReport) string {
 	}
 	return strings.Join(append(rows, "dun does not install them; each needs its own toolchain"), "\n")
 }
+
+// parseDaemonNote reads a "<server>/daemon" notification: the server's
+// shared daemon upgrading, upgraded or failed (poly-lsp-mcp 9e227d7). Its
+// data carries one line in "message".
+func parseDaemonNote(params map[string]any) (string, bool) {
+	logger, _ := params["logger"].(string)
+	if !strings.HasSuffix(logger, "/daemon") {
+		return "", false
+	}
+	data, _ := params["data"].(map[string]any)
+	msg, _ := data["message"].(string)
+	msg = strings.TrimSpace(msg)
+	return msg, msg != ""
+}
