@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -328,6 +329,38 @@ func (d *doctor) polyLSP() {
 		return // tools() said it is missing
 	}
 	d.polyLSPAt(bin, where)
+	d.polyLSPLanguages(bin)
+}
+
+// polyLSPLanguages lists the language servers this directory's project is
+// missing, from `poly-lsp-mcp doctor --json` (setupstate.go). Quick, and
+// silent when it cannot: a build without --json prints an error, a tree too
+// big to count in time is partial. Nothing is installed.
+func (d *doctor) polyLSPLanguages(bin string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "doctor", "--json", "--root", ".")
+	cmd.Env = append(os.Environ(), "LSP_REBUILD_DONE=1")
+	out, _ := cmd.Output() // exit 1 is "found a problem", with the JSON all the same
+	if rep, ok := dun.ParseDoctorLanguages(out); ok {
+		d.addLanguages(rep)
+	}
+}
+
+// addLanguages is a warn per missing language server; a language that is
+// tree-sitter only by design is fine and left out.
+func (d *doctor) addLanguages(rep dun.SetupReport) {
+	for _, l := range rep.MissingLSPs() {
+		detail := fmt.Sprintf("%s missing for %s (%s)", l.LSP.Name, dun.LangName(l.Lang), plural(l.Files, "file"))
+		fix := "install it, or leave it: dun works from tree-sitter alone"
+		if l.Install != nil {
+			fix = l.Install.Cmd
+			if len(l.Install.Needs) > 0 {
+				fix += " (needs " + strings.Join(l.Install.Needs, ", ") + ")"
+			}
+		}
+		d.add("warn", "poly-lsp", detail, fix)
+	}
 }
 
 // polyLSPAt is polyLSP's finding for the binary bin, found on where.

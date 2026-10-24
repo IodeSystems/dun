@@ -646,6 +646,19 @@ func main() {
 			em.emit(&proto.ServerEvent{ID: id, Action: "index", Message: msg,
 				Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Background: true})
 		}
+		// An install hint, once (dun/setupstate.go): said as a quiet line.
+		// It is said once, so a Harness not yet stored is waited for.
+		cfg.OnServerSetup = func(id, msg string) {
+			go func() {
+				for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+					if h, _ := started.Load().(*dun.Harness); h != nil {
+						em.emit(&proto.ServerEvent{ID: id, Action: "setup", Message: msg,
+							Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Background: true})
+						return
+					}
+				}
+			}()
+		}
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
 			em.emit(&proto.ToolCall{Tool: tool, Args: args})
 			em.emit(&proto.ToolResult{Tool: tool, Result: result})

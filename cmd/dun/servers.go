@@ -518,6 +518,9 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	if ix := indexStatus(st, cmd); ix != "" {
 		b.WriteString("\n" + ix)
 	}
+	if st.Running && st.Setup != nil {
+		b.WriteString("\n" + dun.SetupTable(*st.Setup))
+	}
 	if st.Auto {
 		b.WriteString("\n/" + cmd + " off to stop it this session · /" + cmd + " manual to keep it off in this project")
 	} else {

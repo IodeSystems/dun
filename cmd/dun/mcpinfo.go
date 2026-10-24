@@ -71,6 +71,11 @@ func mcpInfo(in mcpInfoIn) string {
 		default:
 			f = append(f, fact(est+tokN(cost[st.ID])+" tokens"))
 		}
+		if st.Running && st.Setup != nil {
+			if n := len(st.Setup.MissingLSPs()); n > 0 {
+				f = append(f, fact(plural(n, "language server")+" missing")) // /poly-lsp lists them
+			}
+		}
 		rows = append(rows, "  "+pad(st.ID, idW)+"  "+strings.Join(f, " · "))
 		if st.Via == dun.ViaShell {
 			scripted = append(scripted, st.ID)

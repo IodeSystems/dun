@@ -38,6 +38,10 @@ const (
 	// fakeIndexOKEnv is a directory, or "budget=X": started with --exclude
 	// for it (--index-budget X), the build is ready instead of failed.
 	fakeIndexOKEnv = "DUN_FAKE_INDEX_OK"
+	// fakeSetupEnv makes the fake poly-lsp send the setup notification
+	// (setupstate_test.go) as the mode says (fakeSetupReport). Unset, it is
+	// an older build: none.
+	fakeSetupEnv = "DUN_FAKE_SETUP"
 )
 
 // fakeBin writes dir/name, a wrapper that runs this test binary as persona,
@@ -105,6 +109,15 @@ func fakeBinMain(persona string) {
 		if mode := os.Getenv(fakeIndexEnv); mode != "" {
 			fakeLogf("args %s", strings.Join(args, " "))
 			fakeAfterInit = func(out *bufio.Writer) { fakeIndexReport(out, mode, args) }
+		}
+		if mode := os.Getenv(fakeSetupEnv); mode != "" {
+			prev := fakeAfterInit
+			fakeAfterInit = func(out *bufio.Writer) {
+				if prev != nil {
+					prev(out)
+				}
+				fakeSetupReport(out, mode)
+			}
 		}
 		serveFake(map[string]func(map[string]any) string{
 			"node_query": func(map[string]any) string { return "[]" },
@@ -204,6 +217,55 @@ func fakeIndexReport(out *bufio.Writer, mode string, args []string) {
 	}
 	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/message",
 		"params": map[string]any{"level": level, "logger": "poly-lsp-mcp/index", "data": data}})
+	out.Write(append(b, '\n'))
+	out.Flush()
+}
+
+// fakeSetupLangs are setup reports' languages, in poly-lsp's shape.
+var (
+	fakeGoMissing = map[string]any{"lang": "go", "files": 412,
+		"lsp":     map[string]any{"name": "gopls", "found": false},
+		"adds":    "resolved references (::in/::out), workspace rename, diagnostics and edit validation",
+		"install": map[string]any{"cmd": "go install golang.org/x/tools/gopls@latest", "needs": []string{"go"}}}
+	fakeGoFound = map[string]any{"lang": "go", "files": 412,
+		"lsp": map[string]any{"name": "gopls", "found": true, "path": "/usr/bin/gopls"}}
+	fakePyMissing = map[string]any{"lang": "python", "files": 12,
+		"lsp":     map[string]any{"name": "pylsp", "found": false},
+		"adds":    "resolved references (::in/::out), workspace rename, diagnostics and edit validation",
+		"install": map[string]any{"cmd": "pipx install python-lsp-server", "needs": []string{"python"}}}
+	fakeTsMissing = map[string]any{"lang": "typescript", "files": 230,
+		"lsp":     map[string]any{"name": "typescript-language-server", "found": false},
+		"adds":    "resolved references (::in/::out), workspace rename, diagnostics and edit validation",
+		"install": map[string]any{"cmd": "npm install -g typescript-language-server typescript", "needs": []string{"node"}}}
+	fakeMdOnly = map[string]any{"lang": "markdown", "files": 40}
+)
+
+// fakeSetupReport sends the setup notification for mode: "go" (gopls missing
+// in a Go-heavy root), "python" (gopls found, pylsp missing for 12 Python
+// files among 412 Go: must stay quiet), "two" (gopls and the TypeScript
+// server missing, and pylsp for 12 files), "ok" (nothing missing).
+func fakeSetupReport(out *bufio.Writer, mode string) {
+	var langs []map[string]any
+	switch mode {
+	case "go":
+		langs = []map[string]any{fakeGoMissing, fakeMdOnly}
+	case "python":
+		langs = []map[string]any{fakeGoFound, fakePyMissing, fakeMdOnly}
+	case "two":
+		langs = []map[string]any{fakeGoMissing, fakeTsMissing, fakePyMissing}
+	default:
+		langs = []map[string]any{fakeGoFound, fakeMdOnly}
+	}
+	missing, level := 0, "info"
+	for _, l := range langs {
+		if lsp, ok := l["lsp"].(map[string]any); ok && lsp["found"] == false {
+			missing++
+			level = "warning"
+		}
+	}
+	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/message",
+		"params": map[string]any{"level": level, "logger": "poly-lsp-mcp/setup",
+			"data": map[string]any{"languages": langs, "missing": missing}}})
 	out.Write(append(b, '\n'))
 	out.Flush()
 }

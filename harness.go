@@ -322,6 +322,9 @@ type Config struct {
 	// it, the post-mortem, a nested checkout — or "" when there is nothing
 	// to say beyond the new state in Servers().
 	OnServerIndex func(id, msg string)
+	// OnServerSetup says a server's install hint (setupstate.go): one
+	// quiet line, at most once per session.
+	OnServerSetup func(id, msg string)
 	// OnLogin shows the person the URL that logs in to an OAuth server
 	// (mcpoauth.go); url "" means another session's login is being waited
 	// for. The engine may have no display, so this is the way that always
@@ -494,6 +497,10 @@ type Harness struct {
 	index        map[string]*indexState
 	indexSeen    map[string]bool
 	indexRetried map[string]bool
+	// setup is each server's install-hint report (setupstate.go); setupSaid
+	// the servers whose one line has been said. Guarded by srvMu.
+	setup     map[string]*SetupReport
+	setupSaid map[string]bool
 	// exts are the loaded extensions and extErrs the manifests that did not
 	// load (extension.go). Fixed at Start.
 	exts    []Extension
@@ -1483,6 +1490,13 @@ func (h *Harness) noteServerNotification(n mcpmgr.Notification) {
 	// acts on it and says what it did (indexstate.go).
 	if in, ok := parseIndexNote(n.Params); ok {
 		h.noteIndex(n.ServerID, in)
+		return
+	}
+	// So is an install-hint report: kept, and said once, quietly.
+	if rep, ok := parseSetupNote(n.Params); ok {
+		if line := h.noteSetup(n.ServerID, rep); line != "" && h.cfg.OnServerSetup != nil {
+			h.cfg.OnServerSetup(n.ServerID, line)
+		}
 		return
 	}
 	text := strings.TrimSpace(n.Text())

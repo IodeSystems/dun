@@ -130,6 +130,9 @@ type ServerState struct {
 	IndexFiles   int      `json:"indexFiles,omitempty"`
 	Exclude      []string `json:"exclude,omitempty"`
 	IndexBudget  string   `json:"indexBudget,omitempty"` // the project's --index-budget, "" the default
+	// Setup is the install-hint report the server sent (setupstate.go),
+	// nil from one that sends none.
+	Setup *SetupReport `json:"setup,omitempty"`
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -186,6 +189,7 @@ func (h *Harness) Servers() []ServerState {
 		}
 		if st.Running {
 			h.indexOf(s.ID, &st)
+			st.Setup = h.setup[s.ID]
 		}
 		st.Exclude, st.IndexBudget = s.Exclude, s.IndexBudget
 		switch {

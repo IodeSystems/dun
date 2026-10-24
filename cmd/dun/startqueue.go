@@ -207,6 +207,7 @@ func (m *tuiModel) noteStarting(list []any) {
 // 2026-10-24). A failure is still said in the conversation, with its reason.
 func (m tuiModel) splashSays(ev evMsg) bool {
 	// An index report is said in the conversation: what dun left out of
-	// the index, a failure's post-mortem, a nested checkout.
-	return ev["background"] == true && ev["action"] != "index" && !strings.Contains(str(ev["message"]), "did not start")
+	// the index, a failure's post-mortem, a nested checkout; so is an install
+	// hint.
+	return ev["background"] == true && ev["action"] != "index" && ev["action"] != "setup" && !strings.Contains(str(ev["message"]), "did not start")
 }

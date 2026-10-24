@@ -131,7 +131,9 @@ func (m *tuiModel) sayHeld() {
 func (m *tuiModel) noteServerMsg(action, msg string) {
 	lines := strings.Split(msg, "\n")
 	for i, l := range lines {
-		if strings.Contains(l, " · running") {
+		if action == "setup" { // an install hint: dim, whatever its words
+			lines[i] = stDim.Render(l)
+		} else if strings.Contains(l, " · running") {
 			lines[i] = stOK.Render("✓ " + l)
 		} else {
 			lines[i] = replyLine(l)
