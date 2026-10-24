@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
 )
@@ -44,12 +44,12 @@ func TestMCPTools_PagerOpensExpandsToggles(t *testing.T) {
 		t.Errorf("hint %q", m.pg.hint())
 	}
 	var cur tea.Model = m
-	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = cur.(tuiModel)
 	if v := stripANSI(m.pg.view(100, 20)); !strings.Contains(v, "Longer detail.") || !strings.Contains(v, `"type": "object"`) {
 		t.Fatalf("enter must open the row:\n%s", v)
 	}
-	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = cur.(tuiModel)
 	sent = nil
 	if err := json.Unmarshal(buf.Bytes(), &sent); err != nil || sent["id"] != "mcptools" || sent["action"] != "toggle el tts_say off" {

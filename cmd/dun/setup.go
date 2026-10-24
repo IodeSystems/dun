@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The `dun --setup` wizard as a small Bubble Tea program (consistent with the
@@ -45,17 +45,17 @@ func newSetupModel(cur dunConfig) setupModel {
 	url.SetValue(cur.URL)
 	url.Placeholder = "https://… (an OpenAI-compatible endpoint)"
 	url.Focus()
-	url.Width = 48
+	url.SetWidth(48)
 
 	key := textinput.New()
 	key.SetValue(cur.Key)
 	key.EchoMode = textinput.EchoPassword
 	key.EchoCharacter = '•'
-	key.Width = 48
+	key.SetWidth(48)
 
 	custom := textinput.New()
 	custom.SetValue(cur.Model)
-	custom.Width = 48
+	custom.SetWidth(48)
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -76,7 +76,7 @@ func (m setupModel) customRow() bool {
 
 func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			return m, tea.Quit // saved stays false
@@ -95,17 +95,10 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Route typing to the active field.
-		var cmd tea.Cmd
-		switch {
-		case m.step == stepURL:
-			m.url, cmd = m.url.Update(msg)
-		case m.step == stepKey:
-			m.key, cmd = m.key.Update(msg)
-		case m.step == stepModel && m.customRow():
-			m.custom, cmd = m.custom.Update(msg)
-		}
-		return m, cmd
+		return m.typeInto(msg)
+
+	case tea.PasteMsg: // a URL or key is pasted more often than typed
+		return m.typeInto(msg)
 
 	case modelsMsg:
 		m.models = []string(msg)
@@ -175,7 +168,23 @@ var (
 	stSetupTool  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 )
 
-func (m setupModel) View() string {
+// typeInto routes typing (or a paste) to the active field.
+func (m setupModel) typeInto(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch {
+	case m.step == stepURL:
+		m.url, cmd = m.url.Update(msg)
+	case m.step == stepKey:
+		m.key, cmd = m.key.Update(msg)
+	case m.step == stepModel && m.customRow():
+		m.custom, cmd = m.custom.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m setupModel) View() tea.View { return tea.NewView(m.viewText()) }
+
+func (m setupModel) viewText() string {
 	var b strings.Builder
 	b.WriteString(stSetupTitle.Render("dun setup") + stSetupLabel.Render("  ·  enter: next · esc: cancel") + "\n\n")
 

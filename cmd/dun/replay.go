@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Session replay: record the engine's event stream, then feed it back to the
@@ -184,12 +184,9 @@ func runReplay(path string, pacing replayPacing, o tuiOpts) error {
 	m.opts = o
 	m.replaying = true
 	m.model, m.url = o.model, o.url
-	// Mouse + kitty keyboard: same wiring as runTUI (see tui.go) — all-motion,
-	// so a replay pane behaves like a session pane under tmux on Termux.
-	if probeKitty(os.Stdin) {
-		defer disableKitty()
-	}
-	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion()).Run()
+	// Same View as a session (alt screen, all-motion mouse), so a replay pane
+	// behaves like a session pane under tmux on Termux.
+	_, err = tea.NewProgram(m).Run()
 	proc.close()
 	return err
 }

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // buildModel makes a TUI with a realistic conversation: n finalized blocks of
@@ -154,7 +154,7 @@ func BenchmarkView(b *testing.B) {
 			m.refresh()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = m.View()
+				_ = m.View().Content
 			}
 		})
 	}
@@ -165,7 +165,7 @@ func BenchmarkView(b *testing.B) {
 // runs at 1/pulseStep while something is selected, so this × ~8/s is its CPU.
 func BenchmarkPulseStep(b *testing.B) {
 	old := band
-	band = newBandStyle(termenv.TrueColor, true, true, true)
+	band = newBandStyle(colorprofile.TrueColor, true, true, true)
 	defer func() { band = old }()
 	m := buildModel(200, 8)
 	m.setFocus(focusConvo)
@@ -174,7 +174,7 @@ func BenchmarkPulseStep(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		nm, _ := m.Update(pulseMsg{})
 		m = nm.(tuiModel)
-		_ = m.View()
+		_ = m.View().Content
 	}
 }
 
@@ -187,7 +187,7 @@ func BenchmarkTokenMessageRoundTrip(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		nm, _ := m.Update(evMsg{"type": "token", "text": "word "})
 		m = nm.(tuiModel)
-		_ = m.View()
+		_ = m.View().Content
 	}
 }
 

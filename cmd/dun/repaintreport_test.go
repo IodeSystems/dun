@@ -198,7 +198,7 @@ func TestRepaintReportAsksForRemoteModel(t *testing.T) {
 	}{{"http://127.0.0.1:8000/v1", false}, {"https://api.example.com/v1", true}} {
 		v := tallConvo(t)
 		v.m.url, v.m.model = c.url, "m1"
-		v.m.View()
+		_ = v.m.View()
 		dir, err := v.m.capture(time.Now().Add(time.Duration(len(c.url)) * time.Second))
 		if err != nil {
 			t.Fatal(err)

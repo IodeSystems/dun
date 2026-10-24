@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Interrupting a turn from the TUI: ctrl+g (or esc, when nothing else takes

@@ -17,11 +17,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/cellbuf"
 
 	"github.com/iodesystems/dun"
@@ -105,39 +105,10 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 		m.fatalErr = "engine did not start: " + startErr.Error()
 		m.starting = false
 	}
-	// Mouse: ALL-motion (1003+1006), which is what Claude Code runs — measured
-	// in a pty from a trusted cwd, claude 2.1.246 writes 1000h 1002h 1003h 1006h.
-	// (A capture taken from an UNtrusted cwd stops at the "trust this folder?"
-	// prompt and shows no mouse mode at all; that artifact is what made 96f9436
-	// drop mouse mode and what made the bb01639-era comment here wrong in the
-	// other direction.)
-	//
-	// 1003 rather than 1002 is the whole point on Termux. tmux forwards the
-	// ACTIVE pane's mouse mode to the outer terminal, and with `mouse on` it
-	// upgrades a pane that asks for nothing to MODE_MOUSE_BUTTON — so a
-	// 1002-or-nothing pane and a 1003 pane hand Termux different sequences.
-	// Measured on the real device: panes running claude (`mouse_all_flag=1`)
-	// raise the soft keyboard on tap; dun's pane (1002, then none) did not.
-	// Matching claude's mode is what makes tap-to-type work.
-	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseAllMotion()}
-	// Kitty keyboard protocol (kitty.go): probe BEFORE raw mode, because raw
-	// mode sets O_NONBLOCK and would swallow the terminal's reply as a key.
-	// Only on a tty, and only if the terminal answers the capability query —
-	// a kitty-less terminal gets exactly the pre-change behaviour.
-	if probeKitty(os.Stdin) {
-		defer disableKitty()
-	}
-	// The shift+enter filter (keyfilter.go) has to see the bytes before
-	// bubbletea's parser reduces the sequence to the letter M — so it goes in as
-	// the input reader. bubbletea only puts the terminal into RAW mode when its
-	// input is a tty *os.File, and a wrapped reader is neither, so raw mode
-	// becomes ours: without it the tty stays canonical and nothing arrives until
-	// the user presses enter. Restored by the deferred call, including on panic.
-	if restore, ok := rawMode(os.Stdin); ok {
-		defer restore()
-		opts = append(opts, tea.WithInput(newKeyFilter(os.Stdin)))
-	}
-	fm, err := tea.NewProgram(m, opts...).Run()
+	// Alt screen, mouse mode and keyboard enhancements are View fields (View).
+	// Bubble Tea v2 asks for the kitty keyboard protocol (flags=1) and xterm
+	// modifyOtherKeys itself, decodes both, and puts the terminal back at exit.
+	fm, err := tea.NewProgram(m).Run()
 	if tm, ok := fm.(tuiModel); ok {
 		tm.saveUI()     // the draft and sent history, for this user's next client
 		tm.proc.close() // the engine it ENDED with, which may not be the one it started
@@ -611,7 +582,6 @@ type tuiModel struct {
 	history       []string              // sent inputs, recalled with ctrl+↑/↓
 	histIdx       int                   // cursor into history (== len when not browsing)
 	mouseMode     string                // "all" | "cell" | "off" — what /mouse last set
-	sr            *scrollRegion         // terminal-native scrolling for the convo pane
 	focus         int                   // focusInput | focusConvo | focusActivity
 	task          string                // the last user message, for the task line
 	agents        []agentRow            // live sub-agents (activity.go)
@@ -769,7 +739,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto", mouseMode: "all", sr: newScrollRegion(), shown: &shownFrame{}, evlog: newEventRing()}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing()}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -806,20 +776,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Timed as a whole: this is what a keystroke queues behind, and it is the
 	// number that decides whether dun warns about itself (see perf.go).
 	start := time.Now()
-	// A burst of typed characters arrives as one KeyRunes per word, and a
-	// KeyRunes' String() is its text: the word "up" typed (or sent over ssh,
-	// tmux, the web terminal) matched case "up" and was eaten as an arrow key.
-	// One rune at a time cannot spell a key name. A paste stays whole.
-	if k, ok := msg.(tea.KeyMsg); ok && k.Type == tea.KeyRunes && !k.Paste && len(k.Runes) > 1 {
-		var cur tea.Model = m
-		var cmds []tea.Cmd
-		for _, r := range k.Runes {
-			var c tea.Cmd
-			cur, c = cur.(tuiModel).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: k.Alt})
-			cmds = append(cmds, c)
-		}
-		return cur, tea.Batch(cmds...)
-	}
+	msg = normalizeKey(msg)
 	kind := msgKind(msg)
 	m.evlog.add(start, kind, msg) // for /repaint (repaint.go)
 	nm, cmd := m.update(msg)
@@ -836,7 +793,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// (asking, searching, the inspector) owns its own keys — this is the one
 	// funnel every key actually passes through.
 	if t, ok := nm.(tuiModel); ok {
-		if _, isKey := msg.(tea.KeyMsg); isKey {
+		switch msg.(type) {
+		case tea.KeyPressMsg, tea.PasteMsg:
 			t.armIdleSuggest()
 		}
 		if t.idleWantTick && !t.idleTickPending {
@@ -894,15 +852,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.pulsePending = true
 			cmd = tea.Batch(cmd, pulseTick())
 		}
-		// Scroll region: computed here rather than in View because View must not
-		// mutate, and here is the one place every state change passes through.
-		// LAST, after the height sync above: that block can move YOffset (it
-		// anchors the bottom), and a region planned before it showed rows from
-		// the old offset while View blanked them for the new one — one row off
-		// per composer line, until the next message replanned.
-		if c := t.planScrollRegion(); c != nil {
-			cmd = tea.Batch(cmd, c)
-		}
 		nm = t
 	}
 	return nm, cmd
@@ -928,7 +877,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp.Width = max(1, msg.Width)
 		}
 		m.input.width = msg.Width - 2
-		m.search.Width = msg.Width - 4
+		m.search.SetWidth(msg.Width - 4)
 		// Only when the WIDTH actually changed: a renderer is word-wrap state
 		// and nothing else, and rebuilding one is not free. A height-only
 		// resize (the common one — an ask panel growing) rebuilt it for nothing.
@@ -959,7 +908,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Any key clears a mouse highlight; esc does only that.
 		if m.drag.on {
 			shown := m.drag.shown()
@@ -1001,8 +950,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// So does the pager, all but ctrl+c: it reads one block in the convo
 		// pane's place, and esc brings the conversation back.
 		if m.paging && msg.String() != "ctrl+c" {
-			if v := m.toolsPaging(); v != nil && (msg.String() == " " || m.toolKey(v, msg.String())) {
-				if msg.String() == " " {
+			if v := m.toolsPaging(); v != nil && (msg.String() == "space" || m.toolKey(v, msg.String())) {
+				if msg.String() == "space" {
 					m.toggleMCPTool(v)
 				}
 				return m, nil
@@ -1211,7 +1160,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Enter submits the message. Alt+Enter inserts a newline in the
 			// multiline buffer (so you can compose multi-line messages).
-			if msg.Type == tea.KeyEnter && msg.Alt {
+			if msg.String() == "alt+enter" {
 				// Alt+Enter → insert newline.
 				m.input = m.input.HandleKey(msg)
 				m.refresh()
@@ -1441,7 +1390,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// ctrl+v: an image on the clipboard goes in as an image token.
 			// Text is pasted by the terminal, as before.
-			if msg.Type == tea.KeyCtrlV {
+			if msg.String() == "ctrl+v" {
 				return m, pasteImageCmd()
 			}
 			m.input = m.input.HandleKey(msg)
@@ -1449,6 +1398,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, nil
 		}
+
+	case tea.PasteMsg:
+		return m.paste(msg)
 
 	case reloadMsg:
 		m.reloadVer = string(msg) // header shows "↻ …"; /reload restarts
@@ -1593,20 +1545,18 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Clicks and drags (mouse.go); everything below is the wheel.
-		if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		if _, wheel := msg.(tea.MouseWheelMsg); !wheel {
 			return m.mouseLeft(msg)
 		}
 		// The wheel scrolls a box only once you are inside it.
 		if b := m.insideBox(); b != nil {
-			if msg.Action == tea.MouseActionPress {
-				switch msg.Button {
-				case tea.MouseButtonWheelUp:
-					b.scroll(-wheelDelta)
-				case tea.MouseButtonWheelDown:
-					b.scroll(wheelDelta)
-				}
-				m.refresh()
+			switch msg.Mouse().Button {
+			case tea.MouseWheelUp:
+				b.scroll(-wheelDelta)
+			case tea.MouseWheelDown:
+				b.scroll(wheelDelta)
 			}
+			m.refresh()
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -1661,7 +1611,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the highlighted option, tab or → opens the option as a custom answer to edit.
 // While typing a detail or a custom answer, keys go to the input; esc backs
 // out of that sub-mode.
-func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	custom := len(m.askOptions) // index of the trailing "custom / chat" row
 	// In multi mode a "✓ done" row follows the custom row (submits the checked
 	// set) — so options toggle on enter without stealing space (a typed char).
@@ -1810,6 +1760,57 @@ func (m tuiModel) updateAsking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// paste routes a bracketed paste to the text field that has the keys, the way
+// a key is routed in update — but only ever as text: a paste is never a
+// command, whatever it spells.
+func (m tuiModel) paste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	m.drag = mouseSel{}
+	var cmd tea.Cmd
+	switch {
+	case m.confirm.q != "", m.paging, m.picking:
+		return m, nil
+	case m.inspecting:
+		if m.insp.searching {
+			m.insp.search, cmd = m.insp.search.Update(msg)
+		}
+		return m, cmd
+	case m.jobViewing:
+		if m.jv.searching {
+			m.jv.search, cmd = m.jv.search.Update(msg)
+		}
+		return m, cmd
+	case m.asking:
+		if !m.noting && !m.customAnswer {
+			if m.askSel != len(m.askOptions) {
+				return m, nil
+			}
+			// The custom row is a text field: pasting on it answers, as typing does.
+			m.customAnswer = true
+			m.input.Reset()
+			m.input.placeholder = "type your answer, or chat…"
+			m.input.Focus()
+			cmd = textinput.Blink
+		}
+		m.input = m.input.HandlePaste(msg.Content)
+		m.refresh()
+		return m, cmd
+	case m.mcpForm:
+		return m.typeMCPField(msg)
+	case m.modelPicking && m.providerForm:
+		return m.typeProviderField(msg)
+	case m.modelPicking:
+		return m.typeModelQuery(msg)
+	case m.searching:
+		return m.typeSearch(msg)
+	case m.focus == focusConvo: // keys don't type into a blurred input
+		return m, nil
+	}
+	m.input = m.input.HandlePaste(msg.Content)
+	m.paletteSel = 0 // typing re-filters the palette; start at the top
+	m.refresh()
+	return m, nil
+}
+
 // askAnswerAt is the answer the option at row i stands for: the option and
 // its detail, or in multi mode the checked options with this one among them.
 func (m tuiModel) askAnswerAt(i int) string {
@@ -1830,16 +1831,32 @@ func (m tuiModel) askAnswerAt(i int) string {
 }
 
 // typedText reports whether a key is the user typing a character, as opposed to
-// driving the UI. Alt-modified keys are commands, not text.
-func typedText(msg tea.KeyMsg) bool {
-	if msg.Alt {
-		return false
-	}
-	switch msg.Type {
-	case tea.KeyRunes, tea.KeySpace:
+// driving the UI. Alt- and ctrl-modified keys are commands, not text — except
+// ctrl+tab, which is how a tab is typed (multiline_input.go).
+func typedText(msg tea.KeyPressMsg) bool {
+	if msg.String() == "ctrl+tab" {
 		return true
 	}
-	return false
+	return msg.Text != "" && !msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModCtrl)
+}
+
+// normalizeKey folds the spellings of shift+enter into ctrl+j, the composer's
+// "insert a newline" key, so it adds a spelling rather than a meaning.
+//
+// Terminals report shift+enter three ways. CSI 13;2u (kitty, foot, wezterm)
+// and CSI 27;2;13~ (xterm modifyOtherKeys) decode as "shift+enter". The common
+// one, SS3 M, is the keypad-enter code, which Bubble Tea names "enter" — left
+// alone it would SEND the message. Bubble Tea never turns on application
+// keypad mode, so a real keypad enter sends CR and arrives as plain enter.
+func normalizeKey(msg tea.Msg) tea.Msg {
+	k, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return msg
+	}
+	if (k.Code == tea.KeyKpEnter && k.Mod == 0) || (k.Code == tea.KeyEnter && k.Mod == tea.ModShift) {
+		return tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
+	}
+	return msg
 }
 
 // suggestion is one predicted next user message (--suggest).
@@ -2024,7 +2041,7 @@ func (m tuiModel) clearAsk() tuiModel {
 // updateSearch drives the "/" query box: keys type into it (matches recompute
 // live and the selection jumps to the first hit), enter commits to match-scroll
 // mode (↑/↓ step between hits), esc cancels.
-func (m tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m tuiModel) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.searching, m.searchActive, m.matches = false, false, nil
@@ -2045,16 +2062,21 @@ func (m tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	default:
-		var cmd tea.Cmd
-		m.search, cmd = m.search.Update(msg)
-		m.matches = m.computeMatches() // live: preview the first hit as you type
-		if len(m.matches) > 0 {
-			m.matchPos = 0
-			m.sel = m.matches[0]
-		}
-		m.refresh()
-		return m, cmd
+		return m.typeSearch(msg)
 	}
+}
+
+// typeSearch is a key or a paste in the "/" query box.
+func (m tuiModel) typeSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.search, cmd = m.search.Update(msg)
+	m.matches = m.computeMatches() // live: preview the first hit as you type
+	if len(m.matches) > 0 {
+		m.matchPos = 0
+		m.sel = m.matches[0]
+	}
+	m.refresh()
+	return m, cmd
 }
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -2902,48 +2924,6 @@ func (m tuiModel) viewportView(vp convoPane) string {
 	return c.out
 }
 
-// planScrollRegion works out what the conversation pane should show and asks
-// the region for the cheapest way to get there. It mirrors View's layout
-// exactly — a row off here paints the conversation over the divider — so it
-// reads the same helpers View does rather than recomputing anything.
-func (m tuiModel) planScrollRegion() tea.Cmd {
-	if m.sr == nil {
-		return nil
-	}
-	// Modes that replace the layout wholesale get the rows back.
-	// The band pulses mid-pane, and a region can only repaint whole; the
-	// renderer's line diff sends just the rows that changed.
-	// So does a mouse highlight: it changes rows in place.
-	if m.inspecting || m.paging || m.jobViewing || m.bandShown() || m.drag.shown() || m.picking || m.modelPicking || m.mcpForm || m.quitting || m.w <= 0 || m.h <= 0 {
-		return m.sr.disable(time.Now())
-	}
-	vp := m.vp
-	vp.setHeight(m.convoHeight())
-	if vp.Height < 4 { // too short to be worth a region, and too short to be safe
-		return m.sr.disable(time.Now())
-	}
-	// Only when the pane is FULL. Short of that the pane pads its bottom with
-	// blank rows, which puts the streaming tail somewhere in the middle where
-	// every token would dirty a region row and force a repaint — measured at 7x
-	// WORSE than no region at all. A pane that is not full also never scrolls,
-	// which is the only thing the region is here to make cheap.
-	if len(vp.lines) < vp.Height {
-		return m.sr.disable(time.Now())
-	}
-	rows := strings.Split(m.viewportView(vp), "\n")
-	if len(rows) != vp.Height { // the pane did not render the height it was given
-		return m.sr.disable(time.Now())
-	}
-	// Row 1 is headView; the activity strip, when it has something to say,
-	// takes the row under it. The region ends one row above the pane's bottom:
-	// that row is the streaming tail (see scrollregion.go).
-	top := 2
-	if m.activityView() != "" {
-		top++
-	}
-	return m.sr.plan(rows[:len(rows)-1], top, top+vp.Height-2, vp.Height, time.Now())
-}
-
 // scrollOverlay returns a one-line bar showing the last user message that
 // is fully above the viewport (the one just scrolled past), or "" when
 // scrolled to bottom or no user message is off-screen. The bar uses the
@@ -3070,12 +3050,43 @@ func (m tuiModel) headView() string {
 
 // View is drawView, remembered: /repaint's expected screen is the last frame
 // the renderer was handed (repaint.go).
-func (m tuiModel) View() string {
+//
+// The terminal modes are declared here too (Bubble Tea v2 diffs them), so
+// /mouse is a field and not a command.
+//
+// Mouse: ALL-motion (1003+1006) by default, which is what Claude Code runs —
+// measured in a pty from a trusted cwd, claude 2.1.246 writes 1000h 1002h
+// 1003h 1006h. (A capture taken from an UNtrusted cwd stops at the "trust
+// this folder?" prompt and shows no mouse mode at all; that artifact is what
+// made 96f9436 drop mouse mode.)
+//
+// 1003 rather than 1002 is the whole point on Termux. tmux forwards the
+// ACTIVE pane's mouse mode to the outer terminal, and with `mouse on` it
+// upgrades a pane that asks for nothing to MODE_MOUSE_BUTTON — so a
+// 1002-or-nothing pane and a 1003 pane hand Termux different sequences.
+// Measured on the real device: panes running claude (`mouse_all_flag=1`)
+// raise the soft keyboard on tap; dun's pane (1002, then none) did not.
+// Matching claude's mode is what makes tap-to-type work.
+func (m tuiModel) View() tea.View {
 	out := m.drawView()
 	if m.shown != nil {
 		m.shown.s = out
 	}
-	return out
+	v := tea.NewView(out)
+	v.AltScreen = true
+	v.MouseMode = mouseModeOf(m.mouseMode)
+	return v
+}
+
+// mouseModeOf is /mouse's setting as the View field.
+func mouseModeOf(mode string) tea.MouseMode {
+	switch mode {
+	case "cell":
+		return tea.MouseModeCellMotion
+	case "off":
+		return tea.MouseModeNone
+	}
+	return tea.MouseModeAllMotion
 }
 
 func (m tuiModel) drawView() string {
@@ -3180,10 +3191,7 @@ func (m tuiModel) drawView() string {
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
-	// The scroll region owns its rows: the renderer skips them, so View passes
-	// blank filler of the right height and the terminal keeps what is already
-	// painted there (see scrollregion.go).
-	convo := blankRegion(m.selOverlay(m.viewportView(vp), vp.YOffset), m.sr.rowsFor(vp.Height))
+	convo := m.selOverlay(m.viewportView(vp), vp.YOffset)
 	if m.paging {
 		convo = m.pg.view(vp.Width, vp.Height)
 	}
@@ -3926,15 +3934,15 @@ func mouseSlash(m *tuiModel, args []string) tea.Cmd {
 	case "all":
 		m.mouseMode = "all"
 		m.append(stNote.Render("mouse: all-motion — tap-to-type on Termux; ↑/↓ scroll the log"))
-		return tea.EnableMouseAllMotion
+		return nil
 	case "cell":
 		m.mouseMode = "cell"
 		m.append(stNote.Render("mouse: cell-motion — wheel scrolls the log; no tap-to-type on Termux"))
-		return tea.EnableMouseCellMotion
+		return nil
 	case "off":
 		m.mouseMode = "off"
 		m.append(stNote.Render("mouse: off — the terminal keeps the pointer (native selection)"))
-		return tea.DisableMouse
+		return nil
 	}
 	m.append(stErr.Render("mouse: want all|cell|off, got " + args[0]))
 	return nil
@@ -4603,7 +4611,7 @@ func (m tuiModel) dumpString() string {
 		fmt.Fprintf(&b, "streaming: %q\n", clip(oneLine(m.cur), 200))
 	}
 	b.WriteString("───\n")
-	b.WriteString(stripANSI(m.View()))
+	b.WriteString(stripANSI(m.drawView()))
 	b.WriteString("\n\n")
 	return b.String()
 }

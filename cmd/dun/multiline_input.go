@@ -6,8 +6,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/iodesystems/dun/proto"
 )
@@ -144,8 +144,6 @@ func (m *multilineInput) SetValue(s string) {
 // the box goes. Escape sequences (colors, OSC links) are stripped; \r\n and
 // a lone \r become \n (a raw \r sends the cursor to column 0 and the line
 // overwrites itself); a tab stays; every other control character goes.
-// ctrlTabRune — ctrl+tab, as the key filter spells it (keyfilter.go) — is a
-// tab: it is how a tab is typed, since plain tab moves between zones.
 func cleanInput(r []rune) []rune {
 	s := string(r)
 	if strings.ContainsRune(s, '\x1b') || strings.ContainsRune(s, '\u009b') {
@@ -159,8 +157,6 @@ func cleanInput(r []rune) []rune {
 			out = append(out, '\n')
 		case c == '\n' || c == '\t':
 			out = append(out, c)
-		case c == ctrlTabRune:
-			out = append(out, '\t')
 		case c < 0x20 || c == 0x7f || (c >= 0x80 && c < 0xa0):
 			// C0, DEL, C1 controls: never text
 		case c == '\u200b' || c == '\ufeff':
@@ -651,103 +647,93 @@ func (m *multilineInput) clampScroll() {
 
 // HandleKey processes one key. Motions and kills follow readline, because that
 // is what every other text field on the machine does.
-func (m *multilineInput) HandleKey(msg tea.KeyMsg) multilineInput {
+//
+// Bindings are matched on String(). A paste is a tea.PasteMsg (HandlePaste),
+// and a typed key is one grapheme, so pasting the word "home" can no longer
+// be read as the Home key.
+func (m *multilineInput) HandleKey(msg tea.KeyPressMsg) multilineInput {
 	if !m.focused {
 		return *m
 	}
 	m.typedAt, m.blinkOn = time.Now(), true
 
-	// Named-key bindings are matched on String(), but ONLY for keys that are not
-	// plain runes: a bracketed paste arrives as KeyRunes, and pasting the word
-	// "home" would otherwise be read as the Home key.
-	if msg.Type != tea.KeyRunes || msg.Alt {
-		switch msg.String() {
-		// A newline has to be typeable: enter submits, so the composer needs its own
-		// key. alt+enter is the common one; ctrl+j is what the terminal actually
-		// sends for it on setups where alt is not sent as a modifier.
-		case "alt+enter", "ctrl+j":
-			m.insert([]rune{'\n'})
-			return *m
-		case "ctrl+a", "home":
-			m.cursor = m.lineStart()
-			m.clampCursor()
-			return *m
-		case "ctrl+e", "end":
-			m.cursor = m.lineEnd()
-			m.clampCursor()
-			return *m
-		case "ctrl+b":
-			m.cursorLeft()
-			return *m
-		case "ctrl+f":
-			m.cursorRight()
-			return *m
-		case "alt+left", "ctrl+left", "alt+b":
-			m.cursor = m.wordLeft()
-			m.clampCursor()
-			return *m
-		case "alt+right", "ctrl+right", "alt+f":
-			m.cursor = m.wordRight()
-			m.clampCursor()
-			return *m
-		case "ctrl+w", "alt+backspace", "ctrl+backspace":
-			m.deleteTo(m.wordLeft())
-			return *m
-		case "alt+d":
-			m.deleteTo(m.wordRight())
-			return *m
-		case "ctrl+k":
-			m.deleteTo(m.lineEnd())
-			return *m
-		case "ctrl+u":
-			m.deleteTo(m.lineStart())
-			return *m
-		case "ctrl+d":
-			m.delete()
-			return *m
-		case "ctrl+o": // open a paste token for editing
-			m.expandPaste()
-			return *m
-		}
-	}
-
-	switch msg.Type {
-	case tea.KeyEnter:
-		// Submit — the caller's business.
-	case tea.KeyUp:
-		m.cursorUp()
-	case tea.KeyDown:
-		m.cursorDown()
-	case tea.KeyLeft:
+	switch msg.String() {
+	// A newline has to be typeable: enter submits, so the composer needs its own
+	// key. alt+enter is the common one; ctrl+j is what the terminal actually
+	// sends for it on setups where alt is not sent as a modifier, and what
+	// shift+enter becomes (normalizeKey).
+	case "alt+enter", "ctrl+j":
+		m.insert([]rune{'\n'})
+	// ctrl+tab types a tab, since plain tab moves between zones. A legacy
+	// terminal sends a plain TAB for it — the same byte — so it arrives as
+	// ctrl+tab only where the terminal reports the modifier (kitty protocol or
+	// modifyOtherKeys, both of which Bubble Tea asks for).
+	case "ctrl+tab":
+		m.insert([]rune{'\t'})
+	case "ctrl+a", "home":
+		m.cursor = m.lineStart()
+		m.clampCursor()
+	case "ctrl+e", "end":
+		m.cursor = m.lineEnd()
+		m.clampCursor()
+	case "ctrl+b", "left":
 		m.cursorLeft()
-	case tea.KeyRight:
+	case "ctrl+f", "right":
 		m.cursorRight()
-	case tea.KeyBackspace:
-		m.backspace()
-	case tea.KeyDelete:
+	case "alt+left", "ctrl+left", "alt+b":
+		m.cursor = m.wordLeft()
+		m.clampCursor()
+	case "alt+right", "ctrl+right", "alt+f":
+		m.cursor = m.wordRight()
+		m.clampCursor()
+	case "ctrl+w", "alt+backspace", "ctrl+backspace":
+		m.deleteTo(m.wordLeft())
+	case "alt+d":
+		m.deleteTo(m.wordRight())
+	case "ctrl+k":
+		m.deleteTo(m.lineEnd())
+	case "ctrl+u":
+		m.deleteTo(m.lineStart())
+	case "ctrl+d", "delete":
 		m.delete()
-	case tea.KeyPgUp:
+	case "ctrl+o": // open a paste token for editing
+		m.expandPaste()
+	case "enter":
+		// Submit — the caller's business.
+	case "up":
+		m.cursorUp()
+	case "down":
+		m.cursorDown()
+	case "backspace":
+		m.backspace()
+	case "pgup":
 		m.pageBy(-m.maxLines)
-	case tea.KeyPgDown:
+	case "pgdown":
 		m.pageBy(m.maxLines)
-	case tea.KeyRunes, tea.KeySpace:
-		r := cleanInput(msg.Runes)
-		if msg.Type == tea.KeySpace {
-			r = []rune{' '}
+	default:
+		if msg.Text != "" && !msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModCtrl) {
+			m.insert(cleanInput([]rune(msg.Text)))
 		}
-		// A paste (bracketed, or several runes at once from a terminal
-		// without it) that names an image file is that image.
-		if msg.Paste || len(r) > 1 {
-			if tok, ok := m.pastedImage(r); ok {
-				m.insert([]rune{tok})
-				return *m
-			}
-		}
-		if msg.Paste && bigPaste(r) {
-			r = []rune{m.addPaste(r)}
-		}
-		m.insert(r)
 	}
+	return *m
+}
+
+// HandlePaste inserts a bracketed paste. A paste that names an image file is
+// that image; a big one becomes a paste token.
+func (m *multilineInput) HandlePaste(text string) multilineInput {
+	if !m.focused {
+		return *m
+	}
+	m.typedAt, m.blinkOn = time.Now(), true
+	r := cleanInput([]rune(text))
+	if tok, ok := m.pastedImage(r); ok {
+		m.insert([]rune{tok})
+		return *m
+	}
+	if bigPaste(r) {
+		r = []rune{m.addPaste(r)}
+	}
+	m.insert(r)
 	return *m
 }
 

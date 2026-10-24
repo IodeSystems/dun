@@ -6,19 +6,19 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-func mouse(m tuiModel, a tea.MouseAction, b tea.MouseButton, x, y int) tuiModel {
-	nm, _ := m.Update(tea.MouseMsg{Action: a, Button: b, X: x, Y: y})
+func mouse(m tuiModel, a mouseAction, b tea.MouseButton, x, y int) tuiModel {
+	nm, _ := m.Update(mouseMsg(a, b, x, y))
 	return nm.(tuiModel)
 }
 
 // click is a left press and release on one cell.
 func click(m tuiModel, x, y int) tuiModel {
-	m = mouse(m, tea.MouseActionPress, tea.MouseButtonLeft, x, y)
-	return mouse(m, tea.MouseActionRelease, tea.MouseButtonLeft, x, y)
+	m = mouse(m, mousePress, tea.MouseLeft, x, y)
+	return mouse(m, mouseRelease, tea.MouseLeft, x, y)
 }
 
 // dclick is a double click: what selects in the conversation.
@@ -154,7 +154,7 @@ func TestMouse_ClickInBoxBodyDescends(t *testing.T) {
 		t.Fatal("a click in the body should descend into the box")
 	}
 	off := b.off
-	m = mouse(m, tea.MouseActionPress, tea.MouseButtonWheelUp, 5, rowY(m, think, 2))
+	m = mouse(m, mousePress, tea.MouseWheelUp, 5, rowY(m, think, 2))
 	if b.off != off-wheelDelta {
 		t.Errorf("inside, the wheel should scroll the box: %d → %d", off, b.off)
 	}
@@ -226,15 +226,15 @@ func TestMouse_DragCopiesAndKeyClears(t *testing.T) {
 	m.vp.SetYOffset(0)
 	m.scrollPinned = false
 	y0, y1 := rowY(m, first, 0), rowY(m, first+1, 0)
-	m = mouse(m, tea.MouseActionPress, tea.MouseButtonLeft, 0, y0)
-	m = mouse(m, tea.MouseActionMotion, tea.MouseButtonLeft, 4, y1)
+	m = mouse(m, mousePress, tea.MouseLeft, 0, y0)
+	m = mouse(m, mouseMotion, tea.MouseLeft, 4, y1)
 	if !m.drag.shown() {
 		t.Fatal("motion off the press cell should start a highlight")
 	}
-	if !strings.Contains(m.View(), "\x1b[0;7m") {
+	if !strings.Contains(m.View().Content, "\x1b[0;7m") {
 		t.Error("the highlight should be drawn")
 	}
-	nm, cmd := m.Update(tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft, X: 4, Y: y1})
+	nm, cmd := m.Update(mouseMsg(mouseRelease, tea.MouseLeft, 4, y1))
 	m = nm.(tuiModel)
 	if m.focus != focusInput {
 		t.Errorf("a drag must not select a block: focus %d sel %d", m.focus, m.sel)
@@ -252,17 +252,17 @@ func TestMouse_DragCopiesAndKeyClears(t *testing.T) {
 	}
 	// esc clears the highlight and does nothing else.
 	m = key(m, kEsc)
-	if m.drag.on || strings.Contains(m.View(), "\x1b[0;7m") {
+	if m.drag.on || strings.Contains(m.View().Content, "\x1b[0;7m") {
 		t.Error("esc should clear the highlight")
 	}
 	if m.flashText != "copied 15 chars → terminal" {
 		t.Errorf("esc did more than clear: flash %q", m.flashText)
 	}
 	// Any other key clears it too, and still does its job.
-	m = mouse(m, tea.MouseActionPress, tea.MouseButtonLeft, 0, y0)
-	m = mouse(m, tea.MouseActionMotion, tea.MouseButtonLeft, 4, y0)
-	m = mouse(m, tea.MouseActionRelease, tea.MouseButtonLeft, 4, y0)
-	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	m = mouse(m, mousePress, tea.MouseLeft, 0, y0)
+	m = mouse(m, mouseMotion, tea.MouseLeft, 4, y0)
+	m = mouse(m, mouseRelease, tea.MouseLeft, 4, y0)
+	m = key(m, runesKey([]rune("z")))
 	if m.drag.on || m.input.Value() != "z" {
 		t.Errorf("a key should clear the highlight and type: on %v input %q", m.drag.on, m.input.Value())
 	}
@@ -273,11 +273,11 @@ func TestMouse_IgnoresMotionAndOtherButtons(t *testing.T) {
 	m, _, _ := mouseConvo(t)
 	y := rowY(m, m.sel+1, 0)
 	for _, ev := range []tea.MouseMsg{
-		{Action: tea.MouseActionMotion, Button: tea.MouseButtonNone, X: 3, Y: y},
-		{Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft, X: 3, Y: y},
-		{Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft, X: 3, Y: y},
-		{Action: tea.MouseActionPress, Button: tea.MouseButtonRight, X: 3, Y: y},
-		{Action: tea.MouseActionPress, Button: tea.MouseButtonMiddle, X: 3, Y: y},
+		mouseMsg(mouseMotion, tea.MouseNone, 3, y),
+		mouseMsg(mouseMotion, tea.MouseLeft, 3, y),
+		mouseMsg(mouseRelease, tea.MouseLeft, 3, y),
+		mouseMsg(mousePress, tea.MouseRight, 3, y),
+		mouseMsg(mousePress, tea.MouseMiddle, 3, y),
 	} {
 		nm, _ := m.Update(ev)
 		m = nm.(tuiModel)
@@ -410,11 +410,11 @@ func TestYank(t *testing.T) {
 	v.event(map[string]any{"type": "turn", "kind": "user"})
 	v.event(map[string]any{"type": "token", "text": "A **bold** reply"})
 	v.event(map[string]any{"type": "done"})
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab}) // the newest block
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyTab}) // the newest block
 	if v.m.focus != focusConvo {
 		t.Fatal("precondition: the conversation has focus")
 	}
-	nm, cmd := v.m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	nm, cmd := v.m.Update(runesKey([]rune{'y'}))
 	if cmd == nil {
 		t.Fatal("y on a selected block should copy")
 	}

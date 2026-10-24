@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
 )
@@ -41,18 +41,18 @@ func TestMCPForm_PlacementDirectByDefault(t *testing.T) {
 	m.mcpFields[1].SetValue("corp-mcp --stdio")
 	var cur tea.Model = m
 	for i := 0; i < 3; i++ {
-		cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+		cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	tm := cur.(tuiModel)
 	if tm.mcpStep != mcpViaStep || tm.mcpShell || !strings.Contains(stripANSI(tm.mcpFormPanel()), "(•) standalone") {
 		t.Fatalf("step %d shell %v:\n%s", tm.mcpStep, tm.mcpShell, stripANSI(tm.mcpFormPanel()))
 	}
-	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	tm = cur.(tuiModel)
 	if v := stripANSI(tm.mcpFormPanel()); !tm.mcpShell || !strings.Contains(v, "(•) scripted") || !strings.Contains(v, "no docs indexing") {
 		t.Fatalf("space must switch to the shell and say what it loses:\n%s", v)
 	}
-	cur.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	var got map[string]string
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("sent %q: %v", buf.String(), err)
@@ -76,31 +76,31 @@ func TestMCPForm_OAuthRows(t *testing.T) {
 	m.mcpFields[mcpServer].SetValue("https://acct.snowflakecomputing.com/mcp")
 	var cur tea.Model = m
 	for i := 0; i < 3; i++ {
-		cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+		cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	tm := cur.(tuiModel)
 	if tm.mcpStep != mcpClient || !strings.Contains(stripANSI(tm.mcpFormPanel()), "oauth login (optional)") {
 		t.Fatalf("step %d:\n%s", tm.mcpStep, stripANSI(tm.mcpFormPanel()))
 	}
-	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab}) // empty client id: straight to the placement
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // empty client id: straight to the placement
 	if tm = cur.(tuiModel); tm.mcpStep != mcpViaStep {
 		t.Fatalf("an empty client id must skip the oauth rows: step %d", tm.mcpStep)
 	}
-	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	tm = cur.(tuiModel)
 	tm.mcpFields[mcpClient].SetValue("c1")
 	tm.mcpFields[mcpScopes].SetValue("openid, email")
 	tm.mcpFields[mcpSend].SetValue("jwt")
 	cur = tm
 	for i := 0; i < 4; i++ {
-		cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+		cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	if tm = cur.(tuiModel); tm.mcpStep != mcpSend || !strings.Contains(tm.mcpErr, "access_token or id_token") {
 		t.Fatalf("step %d err %q", tm.mcpStep, tm.mcpErr)
 	}
 	tm.mcpFields[mcpSend].SetValue("id_token")
-	cur, _ = tm.Update(tea.KeyMsg{Type: tea.KeyTab})
-	cur.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	cur, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	var got map[string]string
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("sent %q: %v", buf.String(), err)
@@ -151,16 +151,14 @@ func TestCatalog_PromptsBecomeSlashCommands(t *testing.T) {
 	}
 }
 
-// A word that is also a key name, arriving as one burst, is text.
+// A word that is also a key name, arriving as one burst (typed fast, sent
+// over ssh, tmux, the web terminal), is text: the decoder hands it over a
+// grapheme at a time.
 func TestBurstOfRunes_KeyNamedWordIsTyped(t *testing.T) {
 	m := newTUIModel(nil, ".")
 	m.input.Focus()
 	var cur tea.Model = m
-	for _, w := range []string{"a", " ", "up", " ", "down", " ", "b"} {
-		k := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(w)}
-		if w == " " {
-			k = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")}
-		}
+	for _, k := range decodeKeys(t, "a up down b") {
 		cur, _ = cur.Update(k)
 	}
 	tm := cur.(tuiModel)
@@ -203,8 +201,8 @@ func TestMCPForm_CommandRowsAndEnv(t *testing.T) {
 	m.mcpFields[mcpID].SetValue("db")
 	m.mcpFields[mcpServer].SetValue("db-mcp --stdio")
 	var cur tea.Model = m
-	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab})
-	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	tm := cur.(tuiModel)
 	v := stripANSI(tm.mcpFormPanel())
 	if tm.mcpStep != mcpEnv || !strings.Contains(v, "local command (stdio)") || strings.Contains(v, "bearer") || strings.Contains(v, "oauth") {
@@ -215,13 +213,13 @@ func TestMCPForm_CommandRowsAndEnv(t *testing.T) {
 		t.Errorf("the env row must be masked:\n%s", v)
 	}
 	tm.mcpFields[mcpEnv].SetValue(`TOKEN='open`)
-	cur, _ = tm.Update(tea.KeyMsg{Type: tea.KeyTab})
+	cur, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if tm = cur.(tuiModel); tm.mcpStep != mcpEnv || !strings.Contains(tm.mcpErr, "unbalanced") {
 		t.Fatalf("a bad env must stop the form: %d %q", tm.mcpStep, tm.mcpErr)
 	}
 	tm.mcpFields[mcpEnv].SetValue(`TOKEN=s3cret DSN=$DB_DSN`)
-	cur, _ = tm.Update(tea.KeyMsg{Type: tea.KeyTab})
-	cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	cur, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	var got map[string]string
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("sent %q: %v", buf.String(), err)
@@ -262,7 +260,7 @@ func TestMCPForm_Preset(t *testing.T) {
 	// Typing a preset's id fills an empty server row.
 	m.openMCPForm()
 	m.mcpFields[mcpID].SetValue("figma")
-	cur, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	cur, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if tm := cur.(tuiModel); tm.mcpFields[mcpServer].Value() != "http://127.0.0.1:3845/mcp" {
 		t.Errorf("typed preset id: %q", tm.mcpFields[mcpServer].Value())
 	}

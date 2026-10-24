@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Killing background jobs from the TUI. The engine does the work (/jobs,
@@ -27,7 +27,7 @@ func (m *tuiModel) askConfirm(q string, yes func(m *tuiModel)) {
 }
 
 // updateConfirm answers the pending question with one key.
-func (m tuiModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m tuiModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	c := m.confirm
 	m.confirm = confirmState{}
 	if k := msg.String(); k == "y" || k == "Y" {

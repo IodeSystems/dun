@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 var (
-	kCtrlK = tea.KeyMsg{Type: tea.KeyCtrlK}
-	kCtrlG = tea.KeyMsg{Type: tea.KeyCtrlG}
+	kCtrlK = tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}
+	kCtrlG = tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}
 )
 
 // busyVtui is a session with a turn running, and a record of what the TUI
@@ -70,7 +70,7 @@ func TestInterrupt_CtrlKBusyStillKillsLine(t *testing.T) {
 	v, rec := busyVtui(t)
 	v.m = typeStr(v.m, "hello world")
 	for range 6 {
-		v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+		v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	}
 	v.m = key(v.m, kCtrlK)
 	if sentInterrupt(rec) {
@@ -89,7 +89,7 @@ func TestInterrupt_CtrlKIdleKillsLine(t *testing.T) {
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.m = typeStr(v.m, "hello world")
 	for range 6 {
-		v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+		v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	}
 	v.m = key(v.m, kCtrlK)
 	if sentInterrupt(rec) {
@@ -183,12 +183,12 @@ func TestInterrupt_EscPrecedence(t *testing.T) {
 // Busy, the first ctrl+c interrupts the turn and the second quits.
 func TestInterrupt_CtrlCInterruptsThenQuits(t *testing.T) {
 	v, rec := busyVtui(t)
-	nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	nm, _ := v.m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	v.m = nm.(tuiModel)
 	if !sentInterrupt(rec) || v.m.quitting {
 		t.Fatalf("first ctrl+c: interrupt=%v quitting=%v", sentInterrupt(rec), v.m.quitting)
 	}
-	nm, cmd := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	nm, cmd := v.m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !nm.(tuiModel).quitting || cmd == nil {
 		t.Fatal("a second ctrl+c should quit the TUI")
 	}
@@ -199,7 +199,7 @@ func TestInterrupt_CtrlCInterruptsThenQuits(t *testing.T) {
 func TestInterrupt_CtrlCLateSecondDoesNotQuit(t *testing.T) {
 	v, _ := busyVtui(t)
 	v.m.ctrlCAt = time.Now().Add(-2 * quitAgain)
-	nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	nm, _ := v.m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if nm.(tuiModel).quitting {
 		t.Fatal("a ctrl+c long after the last one should not quit")
 	}
@@ -211,7 +211,7 @@ func TestInterrupt_CtrlCIdleQuits(t *testing.T) {
 	rec := &bytes.Buffer{}
 	v.m.proc = &dunProc{stdin: bufCloser{rec}}
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
-	nm, cmd := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	nm, cmd := v.m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if sentInterrupt(rec) || !nm.(tuiModel).quitting || cmd == nil {
 		t.Fatalf("idle ctrl+c: interrupt=%v quitting=%v", sentInterrupt(rec), nm.(tuiModel).quitting)
 	}

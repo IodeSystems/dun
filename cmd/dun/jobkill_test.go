@@ -5,13 +5,11 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 var (
-	kX = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}
-	kY = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")}
+	kX = runesKey([]rune("x"))
+	kY = runesKey([]rune("y"))
 )
 
 // jobsVtui is a session with two jobs (one running, one done) and a record of

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // The job view (USER 2026-10-23): the command on top, open by default and
@@ -149,11 +149,11 @@ func TestJobView_ScrollStopsFollowingAndGResumes(t *testing.T) {
 	if v.m.jv.off != off || strings.Contains(v.view(), "output line 100") {
 		t.Fatalf("scrolled up, new output must not move the panel: off %d → %d", off, v.m.jv.off)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyPgUp})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if v.m.jv.off >= off-1 {
 		t.Fatalf("pgup should page up: off %d → %d", off, v.m.jv.off)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	v.m = key(v.m, runesKey([]rune("G")))
 	if !v.m.jv.follow || !strings.Contains(v.view(), "output line 100") {
 		t.Fatalf("G should go to the end and follow again:\n%s", v.view())
 	}

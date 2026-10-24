@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -98,48 +98,52 @@ func (m tuiModel) mouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.inspecting || m.searching || m.confirm.q != "" {
 		return m, nil
 	}
+	mo := msg.Mouse()
+	_, press := msg.(tea.MouseClickMsg)
+	_, motion := msg.(tea.MouseMotionMsg)
+	_, release := msg.(tea.MouseReleaseMsg)
 	switch {
-	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
+	case press && mo.Button == tea.MouseLeft:
 		m.drag = mouseSel{}
 		top, h := m.convoTopRow(), m.convoHeight()
 		switch {
-		case msg.Y >= top && msg.Y < top+h:
+		case mo.Y >= top && mo.Y < top+h:
 			if m.asking || m.picking || m.modelPicking || m.mcpForm {
 				return m, nil
 			}
-			c := m.cellAt(msg.X, msg.Y)
+			c := m.cellAt(mo.X, mo.Y)
 			m.drag = mouseSel{on: true, a: c, b: c}
-		case msg.Y >= m.actTopRow() && msg.Y < top:
-			return m.activityClick(msg.Y - m.actTopRow())
-		case msg.Y >= m.lowerTopRow() && msg.Y < m.lowerTopRow()+lipgloss.Height(m.lowerView()):
+		case mo.Y >= m.actTopRow() && mo.Y < top:
+			return m.activityClick(mo.Y - m.actTopRow())
+		case mo.Y >= m.lowerTopRow() && mo.Y < m.lowerTopRow()+lipgloss.Height(m.lowerView()):
 			if !m.inputShown() {
 				return m, nil
 			}
 			m.setFocus(focusInput)
 			if m.input.Value() != "" {
-				m.input.clickAt(msg.Y-m.lowerTopRow(), msg.X)
+				m.input.clickAt(mo.Y-m.lowerTopRow(), mo.X)
 			}
 			m.refresh()
 			return m, textinput.Blink
 		}
 		return m, nil
-	case msg.Action == tea.MouseActionMotion && msg.Button == tea.MouseButtonLeft && m.drag.on && !m.drag.held:
+	case motion && mo.Button == tea.MouseLeft && m.drag.on && !m.drag.held:
 		// Past the pane's edge, the pane scrolls a row per motion event.
 		top, h := m.convoTopRow(), m.convoHeight()
-		if msg.Y < top {
+		if mo.Y < top {
 			m.vp.SetYOffset(m.vp.YOffset - 1)
 			m.updateScrollPin()
-		} else if msg.Y >= top+h {
+		} else if mo.Y >= top+h {
 			m.vp.SetYOffset(m.vp.YOffset + 1)
 			m.updateScrollPin()
 		}
-		c := m.cellAt(msg.X, msg.Y)
+		c := m.cellAt(mo.X, mo.Y)
 		m.drag.b = c
 		if c != m.drag.a {
 			m.drag.moved = true
 		}
 		return m, nil
-	case msg.Action == tea.MouseActionRelease && m.drag.on && !m.drag.held:
+	case release && m.drag.on && !m.drag.held:
 		if !m.drag.moved {
 			// A single click in the conversation does nothing (it took the
 			// focus from the input mid-sentence, USER 2026-10-22); a double
@@ -193,7 +197,7 @@ func (m tuiModel) convoClick(line int) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		return m.update(tea.KeyMsg{Type: tea.KeyEnter})
+		return m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	}
 	if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].box != nil && m.convo[m.sel].box.inside {
 		leaveBox(m.convo[m.sel].box)

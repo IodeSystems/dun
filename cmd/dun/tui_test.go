@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/cellbuf"
 )
 
@@ -58,7 +58,7 @@ type bufCloser struct{ io.Writer }
 
 func (bufCloser) Close() error { return nil }
 
-func key(m tuiModel, k tea.KeyMsg) tuiModel {
+func key(m tuiModel, k tea.Msg) tuiModel {
 	busy := m.busy
 	nm, _ := m.Update(k)
 	m = nm.(tuiModel)
@@ -101,20 +101,20 @@ func (e *echoWC) echo(m tuiModel, busy bool) tuiModel {
 }
 
 var (
-	kTab   = tea.KeyMsg{Type: tea.KeyTab}
-	kUp    = tea.KeyMsg{Type: tea.KeyUp}
-	kDown  = tea.KeyMsg{Type: tea.KeyDown}
-	kEnter = tea.KeyMsg{Type: tea.KeyEnter}
-	kN     = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
-	kSlash = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")}
-	kEsc   = tea.KeyMsg{Type: tea.KeyEsc}
-	kRight = tea.KeyMsg{Type: tea.KeyRight}
-	kLeft  = tea.KeyMsg{Type: tea.KeyLeft}
+	kTab   = tea.KeyPressMsg{Code: tea.KeyTab}
+	kUp    = tea.KeyPressMsg{Code: tea.KeyUp}
+	kDown  = tea.KeyPressMsg{Code: tea.KeyDown}
+	kEnter = tea.KeyPressMsg{Code: tea.KeyEnter}
+	kN     = runesKey([]rune("n"))
+	kSlash = runesKey([]rune("/"))
+	kEsc   = tea.KeyPressMsg{Code: tea.KeyEscape}
+	kRight = tea.KeyPressMsg{Code: tea.KeyRight}
+	kLeft  = tea.KeyPressMsg{Code: tea.KeyLeft}
 )
 
 func typeStr(m tuiModel, s string) tuiModel {
 	for _, r := range s {
-		m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = key(m, runesKey([]rune{r}))
 	}
 	return m
 }
@@ -167,7 +167,7 @@ func (v *vtui) send(msg string) {
 
 // view returns the full rendered output with ANSI codes stripped.
 func (v *vtui) view() string {
-	return stripANSI(v.m.View())
+	return stripANSI(v.m.View().Content)
 }
 
 // convo returns the conversation text (block views joined by newlines, ANSI stripped).
@@ -459,8 +459,8 @@ func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 		t.Fatalf("call+result should be one run block, got %d", len(m.convo))
 	}
 	// The call line shows the INPUT value, not just the arg key.
-	if !strings.Contains(stripANSI(m.View()), "sel=F") {
-		t.Fatalf("the call line should show the arg value:\n%s", stripANSI(m.View()))
+	if !strings.Contains(stripANSI(m.View().Content), "sel=F") {
+		t.Fatalf("the call line should show the arg value:\n%s", stripANSI(m.View().Content))
 	}
 	// Focus it: enter opens the tree, "i" on the call opens the inspector.
 	m = key(m, kTab)
@@ -471,7 +471,7 @@ func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 	if !m.paging || !m.pg.tree() {
 		t.Fatal("enter on a run should open its tree")
 	}
-	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m = key(m, runesKey([]rune("i")))
 	if !m.inspecting {
 		t.Fatal("i on a call should open the inspector")
 	}
@@ -580,7 +580,7 @@ func TestTUI_Suggestions(t *testing.T) {
 		t.Fatal("picker should be active when idle + empty input")
 	}
 	// digit "1" fills the input with the first suggestion (does not send).
-	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	m = key(m, runesKey([]rune("1")))
 	if m.input.Value() != "run the tests" {
 		t.Fatalf("digit 1 should fill input with first suggestion, got: %q", m.input.Value())
 	}
@@ -602,7 +602,7 @@ func TestTUI_Suggestions(t *testing.T) {
 func TestTUI_NoSuggestionsBeforeTheFirstMessage(t *testing.T) {
 	sugs := evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "run the tests", "prob": 0.7}}}
 	shown := func(m tuiModel) bool {
-		return m.suggestActive() || strings.Contains(stripANSI(m.View()), "run the tests")
+		return m.suggestActive() || strings.Contains(stripANSI(m.View().Content), "run the tests")
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
@@ -637,7 +637,6 @@ func TestTUI_NoSuggestionsBeforeTheFirstMessage(t *testing.T) {
 // highlighted one a step brighter, on dark and light terminals alike; the
 // composer's ghost text stays dim behind the caret.
 func TestTUI_SuggestionsAreDimmed(t *testing.T) {
-	inColour(t)
 	for _, style := range []string{"dark", "light"} {
 		old := mdStyle
 		mdStyle = style
@@ -658,17 +657,17 @@ func TestTUI_SuggestionsAreDimmed(t *testing.T) {
 				other = ln
 			}
 		}
-		if !strings.Contains(other, stDim.Render("commit it")) {
+		if !strings.Contains(other, packSGR(stDim.Render("commit it"))) {
 			t.Errorf("%s: an unselected suggestion is not dim: %q", style, other)
 		}
-		want := suggestStyle(true).Render("run the tests")
+		want := packSGR(suggestStyle(true).Render("run the tests"))
 		if !strings.Contains(sel, want) || want == stDim.Render("run the tests") || want == "run the tests" {
 			t.Errorf("%s: the selected suggestion should be dim but brighter: %q", style, sel)
 		}
 		if g := m.input.ghostView("run the tests"); !strings.Contains(g, stDim.Render("un the tests")) {
 			t.Errorf("%s: the ghost text behind the caret is not dim: %q", style, g)
 		}
-		if !strings.Contains(stripANSI(m.View()), "enter/right accept") {
+		if !strings.Contains(stripANSI(m.View().Content), "enter/right accept") {
 			t.Errorf("%s: the accept hint is gone", style)
 		}
 		mdStyle = old
@@ -678,8 +677,8 @@ func TestTUI_SuggestionsAreDimmed(t *testing.T) {
 // Horizontal arrow axis: left at input-front → convo; right from a plain convo
 // message → input; right from an empty input → suggestion selector (left closes).
 func TestTUI_ArrowNav(t *testing.T) {
-	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
-	kRight := tea.KeyMsg{Type: tea.KeyRight}
+	kLeft := tea.KeyPressMsg{Code: tea.KeyLeft}
+	kRight := tea.KeyPressMsg{Code: tea.KeyRight}
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
@@ -735,13 +734,13 @@ func TestTUI_ArrowNav(t *testing.T) {
 
 // --disable-exit: ctrl+c and esc don't quit, but /quit still does.
 func TestTUI_DisableExit(t *testing.T) {
-	kCtrlC := tea.KeyMsg{Type: tea.KeyCtrlC}
+	kCtrlC := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.disableExit = true
 	if _, cmd := m.Update(kCtrlC); cmd != nil {
 		t.Fatal("ctrl+c should be ignored when disableExit")
 	}
-	if nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc}); nm.(tuiModel).quitting || nm.(tuiModel).flashText != "to exit: /exit" {
+	if nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape}); nm.(tuiModel).quitting || nm.(tuiModel).flashText != "to exit: /exit" {
 		t.Fatalf("esc should not quit, and should say /exit: %q", nm.(tuiModel).flashText)
 	}
 	// /exit is a deliberate exit — still works.
@@ -851,9 +850,9 @@ func TestTUI_Inspector(t *testing.T) {
 	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "eval", "args": map[string]any{"code": "print(x)"}})
 	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "alpha\nbravo\ncharlie\nbravo again"})
 
-	m = key(m, kTab)                                               // focus the block
-	m = key(m, kEnter)                                             // the run's tree
-	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")}) // the call in the inspector
+	m = key(m, kTab)                  // focus the block
+	m = key(m, kEnter)                // the run's tree
+	m = key(m, runesKey([]rune("i"))) // the call in the inspector
 	if !m.inspecting {
 		t.Fatal("inspector should be open")
 	}
@@ -861,7 +860,7 @@ func TestTUI_Inspector(t *testing.T) {
 		t.Fatalf("output frame should start focused, got %d", m.insp.focus)
 	}
 	// The overlay renders both frames without panic.
-	if v := stripANSI(m.View()); !strings.Contains(v, "eval") || !strings.Contains(v, "output") || !strings.Contains(v, "charlie") {
+	if v := stripANSI(m.View().Content); !strings.Contains(v, "eval") || !strings.Contains(v, "output") || !strings.Contains(v, "charlie") {
 		t.Fatalf("inspector view missing tool/frame/content: %q", v)
 	}
 	// tab switches to the input frame; its source is the call's args.
@@ -964,8 +963,8 @@ func TestTUI_DocsNotificationNav(t *testing.T) {
 	}
 
 	m = key(m, kTab) // focus the summary
-	kRight := tea.KeyMsg{Type: tea.KeyRight}
-	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
+	kRight := tea.KeyPressMsg{Code: tea.KeyRight}
+	kLeft := tea.KeyPressMsg{Code: tea.KeyLeft}
 
 	// → is one level per press, all the way down: open the summary, descend into
 	// the list, open a document. It used to take enter to get past the first two.
@@ -1081,7 +1080,7 @@ func TestTUI_DocsOlderEvent(t *testing.T) {
 		"type": "notification", "kind": "docs", "found": float64(1), "surfaced": float64(1),
 		"docs": []any{map[string]any{"title": "README", "line": "intro", "score": float64(3.4e-5)}},
 	})
-	open := d.render(true)
+	open := stripANSI(d.render(true))
 	if !strings.Contains(open, "README  (score 3.4e-05)") {
 		t.Errorf("older event: %s", open)
 	}
@@ -1106,10 +1105,10 @@ func TestTUI_RightDescendsAFoldedBlock(t *testing.T) {
 		{collapsed: "▸ call", full: "the styled body"},
 		{collapsed: "just a message"},
 	}
-	kRight := tea.KeyMsg{Type: tea.KeyRight}
-	kLeft := tea.KeyMsg{Type: tea.KeyLeft}
+	kRight := tea.KeyPressMsg{Code: tea.KeyRight}
+	kLeft := tea.KeyPressMsg{Code: tea.KeyLeft}
 
-	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // input → convo
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyTab}) // input → convo
 	m.sel = 0
 	if m.focus != focusConvo {
 		t.Fatalf("want the conversation, got %d", m.focus)
@@ -1157,10 +1156,10 @@ func TestTUI_RightStopsWhereTheBlockEnds(t *testing.T) {
 	m = nm.(tuiModel)
 	m.convo = []convoEntry{{collapsed: "▸ recap: 9 entries", full: "▾ recap: 9 entries\nreplaced with: …"}}
 
-	m = key(m, tea.KeyMsg{Type: tea.KeyTab}) // into the conversation
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyTab}) // into the conversation
 	m.sel = 0
-	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
-	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyRight})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyRight})
 	if m.convo[0].state != viewExpanded {
 		t.Fatalf("a block with no raw view must stay expanded, got state %d", m.convo[0].state)
 	}
@@ -1237,7 +1236,7 @@ func TestTUI_RetryBanner(t *testing.T) {
 	if m.retryDue.IsZero() {
 		t.Error("no countdown deadline; the banner cannot tick down")
 	}
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(stripANSI(view), "next try in") {
 		t.Errorf("status line has no countdown:\n%s", stripANSI(view))
 	}
@@ -1349,7 +1348,7 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 		t.Error("message should be provisional in convo after queued event")
 	}
 	// The view should show it with "(queued)" suffix.
-	view := stripANSI(m.View())
+	view := stripANSI(m.View().Content)
 	if !strings.Contains(view, "also update the README") {
 		t.Errorf("convo does not show queued message:\n%s", view)
 	}
@@ -1370,8 +1369,8 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	if !found2 {
 		t.Error("second message should be provisional in convo")
 	}
-	if !strings.Contains(stripANSI(m.View()), "2 messages queued") {
-		t.Errorf("second queued message not counted:\n%s", stripANSI(m.View()))
+	if !strings.Contains(stripANSI(m.View().Content), "2 messages queued") {
+		t.Errorf("second queued message not counted:\n%s", stripANSI(m.View().Content))
 	}
 
 	// The turn ending clears the provisional markers.
@@ -1825,7 +1824,7 @@ func TestTUI_ScrollPin(t *testing.T) {
 	}
 
 	// Simulate scrolling up via pgup.
-	m = key(m, tea.KeyMsg{Type: tea.KeyPgUp})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 
 	// Should be unpinned now.
 	if m.scrollPinned {
@@ -1834,7 +1833,7 @@ func TestTUI_ScrollPin(t *testing.T) {
 
 	// Simulate scrolling back down to the bottom with multiple pgdowns.
 	for i := 0; i < 10; i++ {
-		m = key(m, tea.KeyMsg{Type: tea.KeyPgDown})
+		m = key(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	}
 
 	// Should be re-pinned at the bottom.
@@ -1852,7 +1851,7 @@ func TestMultilineInput_Basic(t *testing.T) {
 	in.width = 80
 
 	for _, r := range "hello world" {
-		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		in = in.HandleKey(runesKey([]rune{r}))
 	}
 	if in.Value() != "hello world" {
 		t.Fatalf("expected 'hello world', got %q", in.Value())
@@ -1930,7 +1929,7 @@ func TestMultilineInput_ArrowsDoNotEditTheBuffer(t *testing.T) {
 	in.width = 10
 	in.SetValue("1234567890abcdefghij")
 
-	for _, k := range []tea.KeyMsg{{Type: tea.KeyRight}, {Type: tea.KeyDown}, {Type: tea.KeyUp}, {Type: tea.KeyLeft}} {
+	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyRight}, {Code: tea.KeyDown}, {Code: tea.KeyUp}, {Code: tea.KeyLeft}} {
 		in.cursor = 10 // the wrap point
 		in = in.HandleKey(k)
 		if in.Value() != "1234567890abcdefghij" {
@@ -1946,8 +1945,8 @@ func TestMultilineInput_AltEnterInsertsNewline(t *testing.T) {
 	in.SetValue("first")
 	in.CursorEnd()
 
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("second")})
+	in = in.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
+	in = in.HandleKey(runesKey([]rune("second")))
 	if in.Value() != "first\nsecond" {
 		t.Fatalf("alt+enter should insert a newline, got %q", in.Value())
 	}
@@ -1968,13 +1967,13 @@ func TestMultilineInput_ReadlineEditing(t *testing.T) {
 	cases := []struct {
 		name string
 		in   multilineInput
-		key  tea.KeyMsg
+		key  tea.KeyPressMsg
 		want string
 	}{
-		{"ctrl+w kills the word behind", mk("hello world", 11), tea.KeyMsg{Type: tea.KeyCtrlW}, "hello "},
-		{"ctrl+k kills to end of line", mk("hello world", 5), tea.KeyMsg{Type: tea.KeyCtrlK}, "hello"},
-		{"ctrl+u kills to start of line", mk("hello", 3), tea.KeyMsg{Type: tea.KeyCtrlU}, "lo"},
-		{"ctrl+d deletes forward", mk("hello", 0), tea.KeyMsg{Type: tea.KeyCtrlD}, "ello"},
+		{"ctrl+w kills the word behind", mk("hello world", 11), tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl}, "hello "},
+		{"ctrl+k kills to end of line", mk("hello world", 5), tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, "hello"},
+		{"ctrl+u kills to start of line", mk("hello", 3), tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}, "lo"},
+		{"ctrl+d deletes forward", mk("hello", 0), tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}, "ello"},
 	}
 	for _, c := range cases {
 		got := c.in.HandleKey(c.key)
@@ -1985,25 +1984,25 @@ func TestMultilineInput_ReadlineEditing(t *testing.T) {
 
 	// Motions land on the logical line's bounds, not the buffer's.
 	in := mk("first line\nsecond line", 14)
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	in = in.HandleKey(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	if in.cursor != 11 {
 		t.Errorf("ctrl+a should go to the start of the LINE, got %d", in.cursor)
 	}
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlE})
+	in = in.HandleKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	if in.cursor != len(in.buf) {
 		t.Errorf("ctrl+e should go to the end of the line, got %d", in.cursor)
 	}
 }
 
 // Regression: bindings are matched on Key.String(), and a bracketed paste
-// arrives as KeyRunes — so pasting the word "home" was read as the Home key.
+// arrived as KeyRunes — so pasting the word "home" was read as the Home key.
 func TestMultilineInput_PastedKeyNameIsText(t *testing.T) {
 	in := newMultilineInput()
 	in.width = 80
 	in.SetValue("go ")
 	in.CursorEnd()
 
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("home")})
+	in = in.HandlePaste("home")
 	if in.Value() != "go home" {
 		t.Fatalf("a pasted key name must be typed as text, got %q", in.Value())
 	}
@@ -2023,7 +2022,7 @@ func TestMultilineInput_UpAtFirstRowScrollsConvo(t *testing.T) {
 	m = typeStr(m, "first message")
 	m = key(m, kEnter)
 
-	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.input.Value() != "" {
 		t.Fatalf("up from the first row must NOT recall history, got %q", m.input.Value())
 	}
@@ -2031,7 +2030,7 @@ func TestMultilineInput_UpAtFirstRowScrollsConvo(t *testing.T) {
 	// With the cursor on a LOWER row, up moves the cursor and leaves the text.
 	m.input.SetValue("aaa\nbbb")
 	m.input.CursorEnd()
-	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.input.Value() != "aaa\nbbb" {
 		t.Fatalf("up inside the buffer must not recall history, got %q", m.input.Value())
 	}
@@ -2055,7 +2054,7 @@ func TestVtui_ArrowsScrollConvoFromComposer(t *testing.T) {
 		t.Fatal("test needs a conversation taller than the viewport")
 	}
 
-	nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	v.m = nm.(tuiModel)
 	if v.m.vp.YOffset != bottom-1 {
 		t.Fatalf("↑ from the composer should scroll up one row: %d -> %d", bottom, v.m.vp.YOffset)
@@ -2067,7 +2066,7 @@ func TestVtui_ArrowsScrollConvoFromComposer(t *testing.T) {
 		t.Fatalf("↑ must not recall history into the composer, got %q", v.m.input.Value())
 	}
 
-	nm, _ = v.m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	nm, _ = v.m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	v.m = nm.(tuiModel)
 	if v.m.vp.YOffset != bottom {
 		t.Fatalf("↓ should scroll back down one row: %d -> %d", bottom-1, v.m.vp.YOffset)
@@ -2097,8 +2096,8 @@ func TestVtui_ArrowsCyclePickerThenScroll(t *testing.T) {
 	}
 	bottom := v.m.vp.YOffset
 
-	up := func() { nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyUp}); v.m = nm.(tuiModel) }
-	down := func() { nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyDown}); v.m = nm.(tuiModel) }
+	up := func() { nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyUp}); v.m = nm.(tuiModel) }
+	down := func() { nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyDown}); v.m = nm.(tuiModel) }
 
 	// Already at the top of the list: ↑ falls straight through to scrolling.
 	up()
@@ -2152,8 +2151,8 @@ func TestVtui_AskArrowsWalkOptionsThenScroll(t *testing.T) {
 		t.Fatal("test needs the ask overlay up")
 	}
 	bottom := v.m.vp.YOffset
-	up := func() { nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyUp}); v.m = nm.(tuiModel) }
-	down := func() { nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyDown}); v.m = nm.(tuiModel) }
+	up := func() { nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyUp}); v.m = nm.(tuiModel) }
+	down := func() { nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyDown}); v.m = nm.(tuiModel) }
 
 	up() // already on the first option
 	if v.m.askSel != 0 {
@@ -2194,14 +2193,14 @@ func TestVtui_ScrollJumpShortcuts(t *testing.T) {
 	bottom := v.m.vp.YOffset
 
 	for i := 0; i < 4; i++ {
-		nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 		v.m = nm.(tuiModel)
 	}
 	if v.m.vp.YOffset == bottom || v.m.scrollPinned {
 		t.Fatalf("setup: expected to be scrolled back and unpinned (yoff=%d pinned=%v)", v.m.vp.YOffset, v.m.scrollPinned)
 	}
 
-	nm, _ := v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
 	v.m = nm.(tuiModel)
 	if v.m.vp.YOffset != bottom || !v.m.scrollPinned {
 		t.Fatalf("ctrl+end should return to the newest output and re-pin (yoff=%d want %d, pinned=%v)",
@@ -2224,7 +2223,7 @@ func TestVtui_ScrollJumpShortcuts(t *testing.T) {
 	ref := v.m
 	ref.vp.SetYOffset(want)
 
-	nm, _ = v.m.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	nm, _ = v.m.Update(tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
 	v.m = nm.(tuiModel)
 	if v.m.vp.YOffset != ref.vp.YOffset {
 		t.Fatalf("ctrl+home should jump to the last user message (row %d → yoff %d), got %d",
@@ -2253,7 +2252,7 @@ func TestMultilineInput_HistoryViaCtrl(t *testing.T) {
 		t.Fatalf("history should have 2 entries, got %d", len(m.history))
 	}
 
-	ctrlUp := tea.KeyMsg{Type: tea.KeyCtrlUp}
+	ctrlUp := tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl}
 	m = key(m, ctrlUp)
 	if m.input.Value() != "second message" {
 		t.Fatalf("ctrl+up should recall the last entry, got %q", m.input.Value())
@@ -2262,7 +2261,7 @@ func TestMultilineInput_HistoryViaCtrl(t *testing.T) {
 	if m.input.Value() != "first message" {
 		t.Fatalf("ctrl+up should step back, got %q", m.input.Value())
 	}
-	ctrlDown := tea.KeyMsg{Type: tea.KeyCtrlDown}
+	ctrlDown := tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModCtrl}
 	m = key(m, ctrlDown)
 	if m.input.Value() != "second message" {
 		t.Fatalf("ctrl+down should step forward, got %q", m.input.Value())
@@ -2287,7 +2286,7 @@ func TestMultilineInput_EmptyInput(t *testing.T) {
 	if len(m.convo) > before {
 		t.Fatalf("empty enter should not submit, got %d new entries", len(m.convo)-before)
 	}
-	if !strings.Contains(m.input.View(), "ask dun") {
+	if !strings.Contains(stripANSI(m.input.View()), "ask dun") {
 		t.Fatalf("a focused empty input should show the placeholder: %q", m.input.View())
 	}
 	m.input.Blur()
@@ -2339,11 +2338,11 @@ func TestActivity_EmptyZoneIsSkippedEntirely(t *testing.T) {
 	if v := m.activityView(); v != "" {
 		t.Fatalf("an empty zone must render nothing, got %q", v)
 	}
-	m = key(m, tea.KeyMsg{Type: tea.KeyTab})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.focus != focusConvo {
 		t.Fatalf("tab should reach the conversation, got focus %d", m.focus)
 	}
-	m = key(m, tea.KeyMsg{Type: tea.KeyTab})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.focus != focusInput {
 		t.Fatalf("tab should return to the input, skipping an empty zone, got %d", m.focus)
 	}
@@ -2395,7 +2394,7 @@ func TestActivity_TabOpensTheTableWithAHighlight(t *testing.T) {
 		t.Fatalf("esc should go home and fold the strip, focus=%d level=%d", m.focus, m.actLevel)
 	}
 	// tab away folds it too.
-	m = key(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if m.focus != focusActivity {
 		t.Fatalf("shift+tab from the input should reach the activity zone, got %d", m.focus)
 	}
@@ -2431,7 +2430,7 @@ func TestActivity_AgentScopeSwapsTheConversation(t *testing.T) {
 
 	m.focus, m.actLevel = focusActivity, actList
 	m.actSel = actKey{agent: true, id: 1}
-	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyRight})
 
 	if m.scopeAgent != 1 {
 		t.Fatalf("right on an agent row should enter its scope, got %d", m.scopeAgent)
@@ -2466,7 +2465,7 @@ func TestActivity_AgentScopeSwapsTheConversation(t *testing.T) {
 	// Leaving restores the root conversation exactly.
 	m.focus, m.actLevel = focusActivity, actList
 	m.actSel = parentKey
-	m = key(m, tea.KeyMsg{Type: tea.KeyRight})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyRight})
 	if m.scopeAgent != 0 {
 		t.Fatal("descending into the parent row should leave agent scope")
 	}
@@ -2538,7 +2537,7 @@ func TestFocus_ArrowsStopAtEveryEdge(t *testing.T) {
 	m := withActivity(t)
 	m.convo = []convoEntry{{collapsed: "first"}, {collapsed: "second"}}
 	m.refresh()
-	stay := func(z int, what string, k tea.KeyMsg) {
+	stay := func(z int, what string, k tea.KeyPressMsg) {
 		t.Helper()
 		m = key(m, k)
 		if m.focus != z {
@@ -2546,7 +2545,7 @@ func TestFocus_ArrowsStopAtEveryEdge(t *testing.T) {
 		}
 	}
 	// The input: empty, so the cursor is at both its front and its back.
-	for _, k := range []tea.KeyMsg{kLeft, kRight, kUp, kDown} {
+	for _, k := range []tea.KeyPressMsg{kLeft, kRight, kUp, kDown} {
 		stay(focusInput, "input "+k.String(), k)
 	}
 	m = typeStr(m, "abc")
@@ -2712,7 +2711,7 @@ func TestSuggest_KeystrokeRestartsTheWait(t *testing.T) {
 	m = m.handleEvent(evMsg{"type": "done"})
 
 	// A key arrives now, so the deadline is 3s from now, not from `done`.
-	nm2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	nm2, cmd := m.Update(runesKey([]rune{'h'}))
 	m = nm2.(tuiModel)
 	if cmd == nil {
 		t.Fatal("a keystroke in a suggestible session should keep the debounce armed")
@@ -2734,12 +2733,12 @@ func TestSuggest_KeystrokeRestartsTheWait(t *testing.T) {
 // UI ignores must stay ignored.
 func TestSuggest_NoTimerWhenItCouldNeverFire(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}); cmd != nil {
+	if _, cmd := m.Update(runesKey([]rune{'x'})); cmd != nil {
 		t.Error("an empty conversation has nothing to suggest from — no timer")
 	}
 	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}}
 	m.suggestMode = "off"
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}); cmd != nil {
+	if _, cmd := m.Update(runesKey([]rune{'x'})); cmd != nil {
 		t.Error("suggestions off — no timer")
 	}
 }
@@ -3293,7 +3292,7 @@ func TestVtui_ScrollOverlayViaMouseWheel(t *testing.T) {
 	}
 
 	// Scroll up via mouse wheel (one click = 3 lines by default).
-	msg := tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress}
+	msg := mouseMsg(mousePress, tea.MouseWheelUp, 0, 0)
 	nm, _ := v.m.Update(msg)
 	v.m = nm.(tuiModel)
 
@@ -3533,7 +3532,7 @@ func TestVtui_ScrollOverlaySwitchesViaMouseWheelAfterReplay(t *testing.T) {
 	// One wheel click = 3 lines. Scroll enough to pass both messages.
 	var seen []string
 	for i := 0; i < 30; i++ {
-		msg := tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress}
+		msg := mouseMsg(mousePress, tea.MouseWheelUp, 0, 0)
 		nm, _ := v.m.Update(msg)
 		v.m = nm.(tuiModel)
 
@@ -3636,7 +3635,7 @@ func TestVtui_ScrollOverlayReachesTheScreen(t *testing.T) {
 	// top row before anyone sees it — see screen().
 	var tops []string
 	for i := 0; i < 25; i++ {
-		nm, _ := v.m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+		nm, _ := v.m.Update(mouseMsg(mousePress, tea.MouseWheelUp, 0, 0))
 		v.m = nm.(tuiModel)
 		if top := topRow(v); len(tops) == 0 || tops[len(tops)-1] != top {
 			tops = append(tops, top)
@@ -3935,9 +3934,9 @@ func enterAgentScopeByKeys(t *testing.T) tuiModel {
 func TestActivity_LeavingAgentScope(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		k    tea.KeyMsg
+		k    tea.KeyPressMsg
 	}{
-		{"left", tea.KeyMsg{Type: tea.KeyLeft}},
+		{"left", tea.KeyPressMsg{Code: tea.KeyLeft}},
 		{"esc", kEsc},
 	} {
 		t.Run("from the input, "+tc.name, func(t *testing.T) {
@@ -3963,7 +3962,7 @@ func TestActivity_LeavingAgentScope(t *testing.T) {
 		if m.focus != focusConvo {
 			t.Fatalf("focus=%d, want the conversation", m.focus)
 		}
-		m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
+		m = key(m, tea.KeyPressMsg{Code: tea.KeyLeft})
 		if m.scopeAgent != 0 {
 			t.Error("← from the child's conversation did not go back to the session")
 		}
@@ -3989,7 +3988,7 @@ func TestActivity_LeavingAgentScope(t *testing.T) {
 		if m.focus != focusActivity {
 			t.Fatalf("focus=%d, want the strip", m.focus)
 		}
-		m = key(m, tea.KeyMsg{Type: tea.KeyLeft})
+		m = key(m, tea.KeyPressMsg{Code: tea.KeyLeft})
 		if m.scopeAgent != 0 {
 			t.Error("← in the strip did not leave agent scope")
 		}
@@ -4170,7 +4169,7 @@ func TestCallText_ExecReadsAsAShellCommand(t *testing.T) {
 	if got := callText("exec", args, 80); strings.Contains(got, "\n") {
 		t.Errorf("collapsed line must be one line: %q", got)
 	}
-	if full := callFull("exec", args); !strings.Contains(full, "go build ./...\ngo test ./...") {
+	if full := stripANSI(callFull("exec", args)); !strings.Contains(full, "go build ./...\ngo test ./...") {
 		t.Errorf("expanded must keep the script intact: %q", full)
 	}
 	// Every other tool keeps the generic form.
@@ -4319,7 +4318,7 @@ func TestCleanInput(t *testing.T) {
 func TestPasteIsCleaned(t *testing.T) {
 	v := newVtui(80, 24)
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Paste: true, Runes: []rune("\x1b[32mgo\x1b[0m test\r\n./...")})
+	v.m = key(v.m, tea.PasteMsg{Content: string([]rune("\x1b[32mgo\x1b[0m test\r\n./..."))})
 	if got := v.m.input.Value(); got != "go test\n./..." {
 		t.Errorf("input %q", got)
 	}

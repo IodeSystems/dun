@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -52,8 +52,8 @@ func TestComposer_PathPasteBecomesImage(t *testing.T) {
 		"~/my shot.png",
 	} {
 		in := newMultilineInput()
-		in.HandleKey(paste("see "))
-		in.HandleKey(paste(p))
+		in.HandlePaste(("see "))
+		in.HandlePaste((p))
 		imgs := in.Images()
 		if len(imgs) != 1 || imgs[0].Path != shot {
 			t.Fatalf("%q: images %+v", p, imgs)
@@ -67,7 +67,7 @@ func TestComposer_PathPasteBecomesImage(t *testing.T) {
 	}
 	for _, p := range []string{notImage, fake, filepath.Join(home, "gone.png"), shot + " and more"} {
 		in := newMultilineInput()
-		in.HandleKey(paste(p))
+		in.HandlePaste((p))
 		if len(in.Images()) != 0 || in.Value() != p {
 			t.Fatalf("%q became an image: %q", p, in.Value())
 		}
@@ -81,10 +81,10 @@ func TestComposer_ImageTokenLikePasteToken(t *testing.T) {
 	shot := filepath.Join(dir, "a.png")
 	writeImage(t, shot, 4, 3)
 	in := newMultilineInput()
-	in.HandleKey(paste(shot))
-	in.HandleKey(paste(" x"))
+	in.HandlePaste((shot))
+	in.HandlePaste((" x"))
 	sent := in.Value()
-	in.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	in.HandleKey(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if in.Value() != sent || len(in.Images()) != 1 {
 		t.Fatalf("ctrl+o opened the image: %q", in.Value())
 	}
@@ -97,9 +97,9 @@ func TestComposer_ImageTokenLikePasteToken(t *testing.T) {
 		t.Fatalf("recall: %+v %q", imgs, in.Value())
 	}
 	in.CursorEnd()
-	in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
-	in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
-	in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	in.HandleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	in.HandleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	in.HandleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if in.Value() != "" || len(in.Images()) != 0 {
 		t.Fatalf("backspace over the token: %q", in.Value())
 	}
@@ -138,7 +138,7 @@ func TestClipboardImage_InjectedRunner(t *testing.T) {
 
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.input.width = 80
-	got, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+	got, cmd := m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("ctrl+v read nothing")
 	}

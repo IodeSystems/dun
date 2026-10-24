@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // call feeds one round: a line of thinking, then an exec call and its result.
@@ -178,7 +178,7 @@ func TestRun_DoesNotScrollAReaderWhoScrolledUp(t *testing.T) {
 	v.send("again")
 	call(v, "echo 0", "0\n")
 	call(v, "echo 1", "1\n")
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyPgUp})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if v.m.scrollPinned {
 		t.Fatal("precondition: pgup should unpin")
 	}

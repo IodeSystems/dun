@@ -301,7 +301,7 @@ func prepareReport(dir string, r redactor) error {
 	return os.WriteFile(filepath.Join(dir, "prompt.txt"), []byte(b.String()), 0o600)
 }
 
-const reportPrompt = `You are preparing a bug report for dun, a terminal UI (a coding agent's chat window drawn with Bubble Tea, partly through a terminal scroll region). The user saw the screen mangled and ran /repaint, which saved what dun believes it drew (EXPECTED) and what the terminal really showed (ACTUAL, read back from tmux), plus dun's state and its last UI events. The report must be safe to post publicly, and must still show the mangling.
+const reportPrompt = `You are preparing a bug report for dun, a terminal UI (a coding agent's chat window drawn with Bubble Tea). The user saw the screen mangled and ran /repaint, which saved what dun believes it drew (EXPECTED) and what the terminal really showed (ACTUAL, read back from tmux), plus dun's state and its last UI events. The report must be safe to post publicly, and must still show the mangling.
 
 In the .ansi files the character ` + escMark + ` stands for the ESC byte: copy every ` + escMark + ` sequence exactly as it is. Rows are numbered from 1. A first, mechanical pass already replaced the home directory (~___), the user and host names ([user], [host]), e-mail addresses ([email]) and token-shaped strings ([secret]).
 
@@ -314,7 +314,7 @@ The width rule: pad the placeholder with "_" to the number of characters it repl
 
 TASK 2 — explanation.md, in plain words, for a developer:
 - What looks wrong: which rows, where EXPECTED and ACTUAL diverge (quote the rows from diff.txt, already redacted).
-- The likely cause, from events.jsonl and state.json: for example bytes written to the terminal from outside dun (text no part of dun draws), a resize dun did not see (compare the sizes in state.json), the scroll region (scroll_region in state.json), or a layout height that does not add up. Say how sure you are.
+- The likely cause, from events.jsonl and state.json: for example bytes written to the terminal from outside dun (text no part of dun draws), a resize dun did not see (compare the sizes in state.json), or a layout height that does not add up. Say how sure you are.
 - How to reproduce it, if the events suggest a way. If they do not, say so.
 Use only redacted text in the explanation. Start it with one line "# <short title>".
 

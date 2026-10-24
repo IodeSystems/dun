@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
 )
@@ -43,7 +43,7 @@ func TestSessionPicker_Navigation(t *testing.T) {
 	m := pickerModel(t,
 		dun.SessionInfo{ID: "a"}, dun.SessionInfo{ID: "b"}, dun.SessionInfo{ID: "c"},
 	)
-	down := tea.KeyMsg{Type: tea.KeyDown}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
 	nm, _ := m.Update(down)
 	m = nm.(tuiModel)
 	nm, _ = m.Update(down)
@@ -57,7 +57,7 @@ func TestSessionPicker_Navigation(t *testing.T) {
 		t.Errorf("selection should clamp at the end, got %d", m.pickSel)
 	}
 	// esc leaves without switching.
-	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = nm.(tuiModel)
 	if m.picking || cmd != nil {
 		t.Error("esc should close the picker without resuming anything")

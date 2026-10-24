@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 )
@@ -22,10 +22,9 @@ import (
 // actually shows, then draw everything again from dun's own state.
 //
 // USER 2026-10-23: "I have seen some situations where the screen is just
-// mangled." The causes seen so far are outside dun's line diff: bytes written
-// to the tty by something else, a resize that never reached Update, and the
-// scroll region (scrollregion.go), which draws rows the renderer never
-// compares. A full clear is the only repair that does not depend on knowing
+// mangled." The causes seen so far are outside the renderer's cell diff:
+// bytes written to the tty by something else, and a resize that never reached
+// Update. A full clear is the only repair that does not depend on knowing
 // which one it was. The capture is taken FIRST, so the mangled screen is
 // what gets recorded.
 //
@@ -33,11 +32,12 @@ import (
 //   - the terminal's modes, written straight to the tty: alt screen, SGR,
 //     the G0 charset, scroll margins, origin and insert mode, autowrap — the
 //     state a stray printf leaves behind and Bubble Tea never re-asserts;
-//   - the scroll region (handed back, then synced from scratch), and the
-//     renderer's line cache (ClearScreen), so every row is written again;
+//   - the renderer's screen cache (ClearScreen), so every cell is written again;
 //   - the terminal size, asked for again (a missed SIGWINCH);
 //   - holdConvo's padding, a mouse highlight, the wrap and viewport caches;
-//   - mouse mode (as /mouse last set it), bracketed paste, a hidden cursor.
+//   - mouse mode (as /mouse last set it), bracketed paste, a hidden cursor —
+//     written with the reset, because the renderer sends a mode only when
+//     View changes it, and it believes they are already on.
 //
 // Not reset: a block's grow-only height (convoEntry.maxH). It is the no-shrink
 // rule rather than drawing state, and dropping it would move the conversation.
@@ -55,7 +55,7 @@ const termReset = "\x1b[?1049h" + // alt screen
 	"\x1b[4l" + // insert mode off
 	"\x1b[?7h" // autowrap on
 
-// repaintDoneMsg arrives after the clears: the region may take its rows again.
+// repaintDoneMsg arrives after the clears.
 type repaintDoneMsg struct {
 	dir    string // the capture ("" when it failed)
 	err    error  // why it failed
@@ -88,16 +88,11 @@ func (m *tuiModel) repaintNow(msg repaintNowMsg) tea.Cmd {
 }
 
 // repaint drops every cache and hold between dun's state and the screen and
-// returns the commands that clear and redraw it. In a Sequence, because the
-// order is the point: the region must not sync before the clears have run
-// (minRegionGap explains why Cmds otherwise race).
+// returns the commands that clear and redraw it, in order: the reset reaches
+// the terminal before the full redraw the clear asks for.
 func (m *tuiModel) repaint(done repaintDoneMsg) tea.Cmd {
 	m.convoHold, m.convoHoldW = 0, 0
 	m.drag = mouseSel{}
-	if m.sr != nil {
-		off := m.sr.off
-		*m.sr = scrollRegion{off: off, wait: true}
-	}
 	for i := range m.convo {
 		m.convo[i].invalidateWrap()
 	}
@@ -107,43 +102,29 @@ func (m *tuiModel) repaint(done repaintDoneMsg) tea.Cmd {
 	if m.w > 0 && m.h > 0 {
 		m.refresh()
 	}
-	mouse := tea.EnableMouseAllMotion
-	switch m.mouseMode {
-	case "cell":
-		mouse = tea.EnableMouseCellMotion
-	case "off":
-		mouse = tea.DisableMouse
-	}
-	//nolint:staticcheck // SA1019: deprecated, but v1.3.10 has no replacement - the only scroll-region mechanism
-	clearRegion := tea.ClearScrollArea
 	return tea.Sequence(
-		writeTermReset,
-		clearRegion,
+		tea.Raw(termReset+modeReset(m.mouseMode)),
 		tea.ClearScreen,
-		tea.WindowSize(),
-		mouse,
-		tea.EnableBracketedPaste,
-		tea.HideCursor,
+		tea.RequestWindowSize,
 		func() tea.Msg { return done },
 	)
 }
 
-// writeTermReset writes termReset to the tty. A Cmd, so it runs in the
-// Sequence's order; its write is one syscall, so it lands between two of the
-// renderer's frames, never inside one, and each frame starts by homing the
-// cursor itself.
-func writeTermReset() tea.Msg {
-	if isTTY(os.Stdout) {
-		_, _ = os.Stdout.WriteString(termReset)
+// modeReset re-asserts the modes View declares: mouse as /mouse set it,
+// bracketed paste, a hidden cursor.
+func modeReset(mouse string) string {
+	s := ansi.SetModeBracketedPaste + ansi.HideCursor
+	switch mouseModeOf(mouse) {
+	case tea.MouseModeAllMotion:
+		s += ansi.SetModeMouseAnyEvent + ansi.SetModeMouseExtSgr
+	case tea.MouseModeCellMotion:
+		s += ansi.SetModeMouseButtonEvent + ansi.SetModeMouseExtSgr
 	}
-	return nil
+	return s
 }
 
 // repaintDone runs once the clears are through.
 func (m *tuiModel) repaintDone(msg repaintDoneMsg) {
-	if m.sr != nil {
-		m.sr.wait = false
-	}
 	if msg.err != nil {
 		m.append(stDim.Render("repainted · capture failed: " + msg.err.Error()))
 		return
@@ -171,11 +152,8 @@ type shownFrame struct{ s string }
 // expectedRows rebuilds the screen dun intends, one string per terminal row.
 //
 // It is NOT the current View. The renderer draws the last View, but only
-// after keeping its last h lines and cutting each to the width; and while the
-// scroll region is live, the rows it owns are blank filler in View
-// (blankRegion) and the terminal shows what the region last drew (sr.last).
-// So: the last frame, as the renderer cut it, with the region's rows laid over
-// it.
+// after keeping its last h lines and cutting each to the width. So: the last
+// frame, as the renderer cut it.
 func (m tuiModel) expectedRows() []string {
 	s := ""
 	if m.shown != nil {
@@ -192,13 +170,6 @@ func (m tuiModel) expectedRows() []string {
 	}
 	for len(rows) < m.h {
 		rows = append(rows, "")
-	}
-	if sr := m.sr; sr != nil && sr.live {
-		for i, line := range sr.last {
-			if r := sr.top - 1 + i; r >= 0 && r < len(rows) && r <= sr.bot-1 {
-				rows[r] = line
-			}
-		}
 	}
 	return rows
 }
@@ -276,13 +247,12 @@ func (m tuiModel) capture(now time.Time) (string, error) {
 const captureReadme = `dun /repaint capture
 
 expected.txt   the screen dun believes it drew: its last frame, cut to the
-expected.ansi  terminal size, with the scroll region's rows laid over it (.txt
-               without escape codes, .ansi with them)
+expected.ansi  terminal size (.txt without escape codes, .ansi with them)
 actual.txt     what the terminal shows, from tmux capture-pane (or why it is
 actual.ansi    not available: outside tmux there is no way to read it back)
 diff.txt       the rows where expected and actual differ, both versions
 state.json     sizes (dun, the tty, tmux), terminal env, mouse mode, layout
-               numbers, the scroll region, focus, open pickers, holds, the
+               numbers, focus, open pickers, holds, the
                dun version and the session id (taken as /repaint runs, so
                the composer has already been cleared)
 events.jsonl   the last 200 messages the TUI handled, oldest first: time,
@@ -351,10 +321,8 @@ type captureState struct {
 	Session string            `json:"session"`
 	Size    captureSizes      `json:"size"`
 	Env     map[string]string `json:"env"`
-	Kitty   bool              `json:"kitty_keyboard"`
 	Mouse   string            `json:"mouse"`
 	Layout  captureLayout     `json:"layout"`
-	Region  captureRegion     `json:"scroll_region"`
 	Actual  string            `json:"actual"`
 }
 
@@ -383,23 +351,12 @@ type captureLayout struct {
 	Entries     int    `json:"convo_entries"`
 }
 
-type captureRegion struct {
-	Off   bool `json:"off"`
-	Live  bool `json:"live"`
-	Held  bool `json:"held"`
-	Top   int  `json:"top"`
-	Bot   int  `json:"bot"`
-	PaneH int  `json:"pane_height"`
-	Rows  int  `json:"rows"`
-}
-
 func (m tuiModel) captureState(now time.Time) captureState {
 	st := captureState{
 		Time:    now.Format(time.RFC3339),
 		Version: version,
 		Session: m.sessionID,
 		Env:     map[string]string{},
-		Kitty:   kittyFD >= 0,
 		Mouse:   m.mouseMode,
 	}
 	if st.Session == "" && m.proc != nil {
@@ -439,9 +396,6 @@ func (m tuiModel) captureState(now time.Time) captureState {
 	l.Open = m.openName()
 	l.Hold, l.HoldW = m.convoHold, m.convoHoldW
 	l.Busy, l.Entries = m.busy, len(m.convo)
-	if sr := m.sr; sr != nil {
-		st.Region = captureRegion{Off: sr.off, Live: sr.live, Held: sr.held, Top: sr.top, Bot: sr.bot, PaneH: sr.paneH, Rows: len(sr.last)}
-	}
 	return st
 }
 
@@ -582,16 +536,16 @@ func msgSummary(msg tea.Msg) string {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return strconv.Itoa(msg.Width) + "x" + strconv.Itoa(msg.Height)
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyRunes {
-			if msg.Paste {
-				return "paste " + strconv.Itoa(len(msg.Runes)) + " runes"
-			}
+	case tea.KeyPressMsg:
+		if typedText(msg) {
 			return "rune"
 		}
 		return msg.String()
+	case tea.PasteMsg:
+		return "paste " + strconv.Itoa(utf8.RuneCountInString(msg.Content)) + " runes"
 	case tea.MouseMsg:
-		return msg.String() + " " + strconv.Itoa(msg.X) + "," + strconv.Itoa(msg.Y)
+		mo := msg.Mouse()
+		return msg.String() + " " + strconv.Itoa(mo.X) + "," + strconv.Itoa(mo.Y)
 	case evMsg:
 		switch t, _ := msg["type"].(string); t {
 		case "token", "reasoning":

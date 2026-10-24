@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 func withBand(t *testing.T, b bandStyle) {
@@ -22,7 +22,7 @@ func trueBG(c rgb) string { return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c[0], c[1]
 // OWN background — the span from 236, the plain text from the theme's base —
 // the default comes back after the reset, and the row fills the width.
 func TestBand_FiltersEachSegmentFromItsOwnBackground(t *testing.T) {
-	b := newBandStyle(termenv.TrueColor, true, true, true)
+	b := newBandStyle(colorprofile.TrueColor, true, true, true)
 	s := b.strength(0)
 	line := "plain \x1b[38;5;0;48;5;236mcode\x1b[0m tail"
 	got := b.row(line, 30, 0)
@@ -52,7 +52,7 @@ func TestBand_FiltersEachSegmentFromItsOwnBackground(t *testing.T) {
 // A light theme darkens, and the colour argument of a foreground is not
 // mistaken for a reset.
 func TestBand_LightDarkensAndForegroundZeroIsNotAReset(t *testing.T) {
-	b := newBandStyle(termenv.TrueColor, false, true, true)
+	b := newBandStyle(colorprofile.TrueColor, false, true, true)
 	if f := b.shift(baseLight, 0.1); f[0] >= 255 {
 		t.Errorf("a light theme should darken: %v", f)
 	}
@@ -66,36 +66,36 @@ func TestBand_LightDarkensAndForegroundZeroIsNotAReset(t *testing.T) {
 // 256 colours: filtered to the nearest palette entry, and static. 16 colours:
 // one background where the line has none, its own elsewhere. No colour: none.
 func TestBand_Fallbacks(t *testing.T) {
-	b := newBandStyle(termenv.ANSI256, true, true, true)
+	b := newBandStyle(colorprofile.ANSI256, true, true, true)
 	if b.pulse() {
 		t.Error("256 colours should not pulse")
 	}
 	if got := b.row("x", 1, 0); !strings.HasPrefix(got, "\x1b[48;5;") {
 		t.Errorf("256: %q", got)
 	}
-	b = newBandStyle(termenv.ANSI, true, true, true)
+	b = newBandStyle(colorprofile.ANSI, true, true, true)
 	got := b.row("a\x1b[44mb\x1b[0mc", 3, 0)
 	if got != "\x1b[100ma\x1b[44mb\x1b[0m\x1b[100mc\x1b[49m" {
 		t.Errorf("16 colours: %q", got)
 	}
-	if b := newBandStyle(termenv.Ascii, true, true, true); b.on() {
+	if b := newBandStyle(colorprofile.Ascii, true, true, true); b.on() {
 		t.Error("no colour, no band")
 	}
-	if b := newBandStyle(termenv.TrueColor, true, false, true); b.on() {
+	if b := newBandStyle(colorprofile.TrueColor, true, false, true); b.on() {
 		t.Error("notty style, no band")
 	}
 }
 
 // The pulse moves the strength smoothly between its ends; the opt-out holds it.
 func TestBand_PulseStrengthAndOptOut(t *testing.T) {
-	b := newBandStyle(termenv.TrueColor, true, true, true)
+	b := newBandStyle(colorprofile.TrueColor, true, true, true)
 	if b.strength(0) != pulseLo || b.strength(pulseSteps/2) != pulseHi {
 		t.Errorf("ends: %v %v", b.strength(0), b.strength(pulseSteps/2))
 	}
 	if b.row("x", 1, 0) == b.row("x", 1, 3) {
 		t.Error("the pulse does not change the band")
 	}
-	still := newBandStyle(termenv.TrueColor, true, true, false)
+	still := newBandStyle(colorprofile.TrueColor, true, true, false)
 	if still.pulse() || !still.on() || still.row("x", 1, 0) != still.row("x", 1, 3) {
 		t.Error("DUN_NO_ANIM should give a static band")
 	}
@@ -110,7 +110,7 @@ func selectedRows(m tuiModel) []string {
 // In convo focus the selected block is banded across the pane; the pulse
 // runs while it is shown, repaints only those rows, and stops on leaving.
 func TestBand_PulseRunsOnlyWhileShown(t *testing.T) {
-	withBand(t, newBandStyle(termenv.TrueColor, true, true, true))
+	withBand(t, newBandStyle(colorprofile.TrueColor, true, true, true))
 	v := newVtui(60, 20)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	v.send("hello")
@@ -163,7 +163,7 @@ func TestBand_PulseRunsOnlyWhileShown(t *testing.T) {
 
 // The pager's tree bands its selected node; esc stops the pulse.
 func TestBand_PagerTreeAndEsc(t *testing.T) {
-	withBand(t, newBandStyle(termenv.TrueColor, true, true, true))
+	withBand(t, newBandStyle(colorprofile.TrueColor, true, true, true))
 	v := newVtui(80, 24)
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.send("go")
@@ -193,7 +193,7 @@ func TestBand_PagerTreeAndEsc(t *testing.T) {
 
 // DUN_NO_ANIM: the band is drawn, nothing ticks.
 func TestBand_OptOutDoesNotTick(t *testing.T) {
-	withBand(t, newBandStyle(termenv.TrueColor, true, true, false))
+	withBand(t, newBandStyle(colorprofile.TrueColor, true, true, false))
 	v := newVtui(60, 20)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	v.send("hello")

@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
 )
@@ -52,7 +52,7 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 	mk := func(placeholder string) textinput.Model {
 		t := textinput.New()
 		t.Placeholder = placeholder
-		t.Width = 56
+		t.SetWidth(56)
 		return t
 	}
 	m.mcpFields = [mcpViaStep]textinput.Model{
@@ -164,7 +164,7 @@ func (m *tuiModel) mcpPrev(step int) int {
 	return 0
 }
 
-func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m tuiModel) updateMCPForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.closeMCPForm()
@@ -179,7 +179,7 @@ func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.refresh()
 		return m, textinput.Blink
-	case " ", "left", "right", "h", "l":
+	case "space", "left", "right", "h", "l":
 		if m.mcpStep == mcpViaStep {
 			m.mcpShell = !m.mcpShell
 			m.refresh()
@@ -254,6 +254,11 @@ func (m tuiModel) updateMCPForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, textinput.Blink
 	}
+	return m.typeMCPField(msg)
+}
+
+// typeMCPField is a key or a paste in the add-server form's field.
+func (m tuiModel) typeMCPField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.mcpStep >= len(m.mcpFields) {
 		return m, nil // the mode row takes no text
 	}

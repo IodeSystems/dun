@@ -6,9 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
 )
@@ -42,17 +40,10 @@ func TestServerTable_Plain(t *testing.T) {
 	}
 }
 
-// A hotkey letter is bold and underlined inside its word; with no color
-// (NO_COLOR is lipgloss's Ascii profile) the header is the plain one.
+// A hotkey letter is bold and underlined inside its word, and the styling
+// changes no text. (Without a terminal the renderer drops the styling.)
 func TestServerHeader_HotKeys(t *testing.T) {
-	old := lipgloss.ColorProfile()
-	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
-	lipgloss.SetColorProfile(termenv.Ascii)
 	idW, viaW := tableWidths(tableStates())
-	if got, want := serverHeader(idW, viaW, hotKey), serverHeader(idW, viaW, plainKey); got != want {
-		t.Errorf("no color:\n%q\n%q", got, want)
-	}
-	lipgloss.SetColorProfile(termenv.ANSI256)
 	got := serverHeader(idW, viaW, hotKey)
 	if stripANSI(got) != serverHeader(idW, viaW, plainKey) {
 		t.Errorf("styling changed the text: %q", stripANSI(got))
@@ -96,7 +87,7 @@ func TestMCPServersView_Keys(t *testing.T) {
 		t.Helper()
 		buf.Reset()
 		var cur tea.Model = m
-		cur, _ = cur.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+		cur, _ = cur.Update(runesKey([]rune(k)))
 		m = cur.(tuiModel)
 		if buf.Len() == 0 {
 			return ""

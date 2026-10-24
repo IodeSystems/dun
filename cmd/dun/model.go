@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // /model — pick a model from every configured provider, by typing part of its
@@ -238,7 +238,7 @@ func (m *tuiModel) closeModelPicker() {
 
 // updateModelPicking owns the keys while the model list is open. Printable
 // keys go to the search box, so moving is on the arrows and ctrl+p/ctrl+n.
-func (m tuiModel) updateModelPicking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.providerForm {
 		return m.updateProviderForm(msg)
 	}
@@ -284,6 +284,11 @@ func (m tuiModel) updateModelPicking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closeModelPicker()
 		return m, m.switchModel(p, r.id, m.modelPersist)
 	}
+	return m.typeModelQuery(msg)
+}
+
+// typeModelQuery is a key or a paste in the model search box.
+func (m tuiModel) typeModelQuery(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	before := m.modelQuery.Value()
 	m.modelQuery, cmd = m.modelQuery.Update(msg)
@@ -417,7 +422,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 	mk := func(placeholder string) textinput.Model {
 		t := textinput.New()
 		t.Placeholder = placeholder
-		t.Width = 56
+		t.SetWidth(56)
 		return t
 	}
 	m.providerFields = [3]textinput.Model{
@@ -442,7 +447,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 	return textinput.Blink
 }
 
-func (m tuiModel) updateProviderForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.providerForm = false
@@ -474,6 +479,11 @@ func (m tuiModel) updateProviderForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, textinput.Blink
 	}
+	return m.typeProviderField(msg)
+}
+
+// typeProviderField is a key or a paste in the provider form's field.
+func (m tuiModel) typeProviderField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.providerFields[m.providerStep], cmd = m.providerFields[m.providerStep].Update(msg)
 	m.refresh()

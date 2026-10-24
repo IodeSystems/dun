@@ -3,7 +3,7 @@ package main
 import (
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // A question can be put down and picked up again.

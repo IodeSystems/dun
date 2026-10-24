@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"

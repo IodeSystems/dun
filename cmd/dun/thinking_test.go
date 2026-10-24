@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // think streams n lines of reasoning, one event each, and draws the frame the
@@ -57,7 +57,7 @@ func TestThinking_ToolCallEndsTheRound(t *testing.T) {
 func TestThinking_DoesNotScrollAReaderWhoScrolledUp(t *testing.T) {
 	v := tallConvo(t)
 	v.send("again")
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyPgUp})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if v.m.scrollPinned {
 		t.Fatal("precondition: pgup should unpin")
 	}
@@ -115,7 +115,7 @@ func TestThinking_EnterOpensThePager(t *testing.T) {
 	if v.m.pg.off != 1 {
 		t.Errorf("↓ should scroll one row: off=%d", v.m.pg.off)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyEnd})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnd})
 	if scr := v.view(); !strings.Contains(scr, "step 59 of the plan") {
 		t.Errorf("end did not reach the bottom:\n%s", scr)
 	}

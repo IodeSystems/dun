@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -133,11 +133,11 @@ func TestMultilineInput_ClusterIsOneStep(t *testing.T) {
 	in := newMultilineInput()
 	in.SetValue("é👨‍👩‍👧")
 	in.CursorEnd()
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	in = in.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if in.cursor != 2 {
 		t.Fatalf("left over the family emoji: cursor %d, want 2", in.cursor)
 	}
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	in = in.HandleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if in.Value() != "👨‍👩‍👧" || in.cursor != 0 {
 		t.Fatalf("backspace over é: %q cursor %d", in.Value(), in.cursor)
 	}
@@ -151,9 +151,7 @@ func bigText(lines int) string {
 	return b.String()
 }
 
-func paste(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Paste: true, Runes: []rune(s)}
-}
+func paste(s string) tea.PasteMsg { return tea.PasteMsg{Content: s} }
 
 // A big paste is one token in the box; Value is the full text.
 func TestMultilineInput_BigPasteIsAToken(t *testing.T) {
@@ -162,8 +160,8 @@ func TestMultilineInput_BigPasteIsAToken(t *testing.T) {
 	in.width = 80
 	in.SetValue("see: ")
 	in.CursorEnd()
-	in = in.HandleKey(paste(text))
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")})
+	in = in.HandlePaste((text))
+	in = in.HandleKey(runesKey([]rune("!")))
 
 	if want := "see: " + text + "!"; in.Value() != want {
 		t.Fatalf("Value lost the paste: %d chars, want %d", len(in.Value()), len(want))
@@ -174,15 +172,15 @@ func TestMultilineInput_BigPasteIsAToken(t *testing.T) {
 	}
 
 	// Motions step over it as one unit.
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyLeft})
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	in = in.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	in = in.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if in.cursor != 5 {
 		t.Fatalf("two lefts from the end: cursor %d, want 5 (before the token)", in.cursor)
 	}
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRight})
+	in = in.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
 
 	// Backspace at its end takes the whole paste.
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	in = in.HandleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if in.Value() != "see: !" {
 		t.Fatalf("backspace after the token: %q", in.Value())
 	}
@@ -192,8 +190,8 @@ func TestMultilineInput_BigPasteIsAToken(t *testing.T) {
 func TestMultilineInput_CtrlOExpandsPaste(t *testing.T) {
 	text := bigText(30)
 	in := newMultilineInput()
-	in = in.HandleKey(paste(text))
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	in = in.HandlePaste((text))
+	in = in.HandleKey(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if in.Value() != text || string(in.buf) != text {
 		t.Fatalf("expand changed the text or left the token: buf %d runes", len(in.buf))
 	}
@@ -208,7 +206,7 @@ func TestMultilineInput_CtrlOExpandsPaste(t *testing.T) {
 // A small paste stays inline, as typed text does.
 func TestMultilineInput_SmallPasteInline(t *testing.T) {
 	in := newMultilineInput()
-	in = in.HandleKey(paste("one\ntwo\nthree"))
+	in = in.HandlePaste(("one\ntwo\nthree"))
 	if string(in.buf) != "one\ntwo\nthree" || len(in.pastes) != 0 {
 		t.Fatalf("small paste: buf %q pastes %d", string(in.buf), len(in.pastes))
 	}
@@ -284,7 +282,7 @@ func TestBigPasteSendsFullText(t *testing.T) {
 	if h := v.m.history; len(h) == 0 || h[len(h)-1] != want {
 		t.Fatal("history does not hold the full text")
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyCtrlUp})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl})
 	if v.m.input.Value() != want {
 		t.Fatal("recall lost the text")
 	}
@@ -320,15 +318,15 @@ func TestBigPasteDraftRoundTrips(t *testing.T) {
 func TestMultilineInput_LongLineKeystrokeCost(t *testing.T) {
 	in := newMultilineInput()
 	in.width = 78
-	in = in.HandleKey(paste(strings.Repeat("{\"key\":\"value\",\"n\":12345}", 2000)[:50000]))
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	in = in.HandlePaste((strings.Repeat("{\"key\":\"value\",\"n\":12345}", 2000)[:50000]))
+	in = in.HandleKey(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if len(in.buf) != 50000 {
 		t.Fatalf("precondition: expanded, %d runes", len(in.buf))
 	}
 	const keys = 20
 	start := time.Now()
 	for i := 0; i < keys; i++ {
-		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		in = in.HandleKey(runesKey([]rune{'x'}))
 		_ = in.View()
 	}
 	per := time.Since(start) / keys
@@ -345,7 +343,7 @@ func BenchmarkComposerLongLineKeystroke(b *testing.B) {
 	in.CursorEnd()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		in = in.HandleKey(runesKey([]rune{'x'}))
 		_ = in.View()
 	}
 }
@@ -363,7 +361,7 @@ func BenchmarkComposerLongLineLayout(b *testing.B) {
 func TestMultilineInput_CaretSolidWhileTyping(t *testing.T) {
 	in := newMultilineInput()
 	in.Focus()
-	in = in.HandleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	in = in.HandleKey(runesKey([]rune("a")))
 	in.BlinkTick()
 	if !in.blinkOn {
 		t.Fatal("caret blinked off right after a key")

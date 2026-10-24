@@ -3,8 +3,8 @@ package main
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // convoPane is the window onto the conversation: pre-split display rows plus a
@@ -73,10 +73,8 @@ func (p convoPane) visible() []string {
 	return p.lines[top:min(top+p.Height, len(p.lines))]
 }
 
-// View renders the window, padded to the pane's full size and truncated to it.
-// Padding to the width is not cosmetic: Bubble Tea's renderer diffs against the
-// previous frame line by line, so a row that got shorter has to be written out
-// at full width or the tail of the old row stays on screen.
+// View renders the window, padded to the pane's full size and truncated to it,
+// so every row below the pane lands on the screen row the layout expects.
 func (p convoPane) View() string {
 	return lipgloss.NewStyle().
 		Width(p.Width).MaxWidth(p.Width).
@@ -93,17 +91,14 @@ const wheelDelta = 3
 // scrolling the conversation is entangled with the selection.
 func (p convoPane) Update(msg tea.Msg) (convoPane, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.MouseMsg:
-		if msg.Action != tea.MouseActionPress {
-			return p, nil
-		}
+	case tea.MouseWheelMsg:
 		switch msg.Button {
-		case tea.MouseButtonWheelUp:
+		case tea.MouseWheelUp:
 			p.SetYOffset(p.YOffset - wheelDelta)
-		case tea.MouseButtonWheelDown:
+		case tea.MouseWheelDown:
 			p.SetYOffset(p.YOffset + wheelDelta)
 		}
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "pgup":
 			p.SetYOffset(p.YOffset - p.Height)

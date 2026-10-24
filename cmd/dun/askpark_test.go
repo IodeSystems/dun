@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func askingVtui(t *testing.T, opts ...any) *vtui {
@@ -131,7 +131,7 @@ func TestEsc_ShowsHowToExit(t *testing.T) {
 	if strings.Contains(v.view(), "to exit:") {
 		t.Error("the hint did not go away")
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	v.m = key(v.m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !v.m.quitting {
 		t.Error("ctrl+c should still quit")
 	}
@@ -143,7 +143,7 @@ func TestEsc_ShowsHowToExit(t *testing.T) {
 func TestAsk_ClosingDoesNotMoveTheConversation(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		key  tea.KeyMsg
+		key  tea.KeyPressMsg
 		back int // rows scrolled back first
 	}{{"answer", kEnter, 0}, {"park", kEsc, 0}, {"scrolled back", kEnter, 3}} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -270,8 +270,8 @@ func TestAsk_DraftComesBack(t *testing.T) {
 // tab or → on an option opens it in the custom field to edit, cursor at the
 // end; enter sends the edited text, esc goes back to the options unsent.
 func TestAsk_TabEditsTheOption(t *testing.T) {
-	kRight := tea.KeyMsg{Type: tea.KeyRight}
-	for name, k := range map[string]tea.KeyMsg{"tab": kTab, "right": kRight} {
+	kRight := tea.KeyPressMsg{Code: tea.KeyRight}
+	for name, k := range map[string]tea.KeyPressMsg{"tab": kTab, "right": kRight} {
 		t.Run(name, func(t *testing.T) {
 			v := askingVtui(t, "A", "B", "C")
 			v.m = key(v.m, kDown) // B

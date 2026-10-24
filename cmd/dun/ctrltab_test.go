@@ -2,83 +2,85 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
 // ctrl+tab types a tab, plain tab moves between zones (USER 2026-10-23).
 
-// The spellings a terminal that reports modifiers uses for ctrl+tab become
-// ctrlTabRune; kitty's shift+tab becomes the legacy CSI Z.
-func TestKeyFilter_RewritesCtrlTabAndKittyShiftTab(t *testing.T) {
-	ct := string(ctrlTabRune)
-	cases := []struct{ name, in, want string }{
-		{"ctrl+tab CSI-u (kitty)", "a\x1b[9;5ub", "a" + ct + "b"},
-		{"ctrl+tab modifyOtherKeys", "a\x1b[27;5;9~b", "a" + ct + "b"},
-		{"shift+tab CSI-u (kitty)", "\x1b[9;2u", "\x1b[Z"},
-		{"shift+tab modifyOtherKeys", "\x1b[27;2;9~", "\x1b[Z"},
-		{"a legacy tab is left alone", "a\tb", "a\tb"},
-	}
-	for _, c := range cases {
-		if got := readAll(t, newKeyFilter(strings.NewReader(c.in))); got != c.want {
-			t.Errorf("%s: want %q, got %q", c.name, c.want, got)
-		}
-	}
-}
-
-// keyRec records the keys bubbletea's real parser produces, and quits on q.
-type keyRec struct{ keys []tea.KeyMsg }
+// keyRec records the messages Bubble Tea's real input decoder produces, and
+// quits on ctrl+q.
+type keyRec struct{ msgs []tea.Msg }
 
 func (k *keyRec) Init() tea.Cmd { return nil }
 func (k *keyRec) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if km, ok := msg.(tea.KeyMsg); ok {
-		if km.String() == "ctrl+q" {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+q" {
 			return k, tea.Quit
 		}
-		k.keys = append(k.keys, km)
+		k.msgs = append(k.msgs, msg)
+	case tea.PasteMsg:
+		k.msgs = append(k.msgs, msg)
 	}
 	return k, nil
 }
-func (k *keyRec) View() string { return "" }
+func (k *keyRec) View() tea.View { return tea.NewView("") }
 
-// Through bubbletea's own parser: what the filter emits arrives as keys the
-// TUI can act on — ctrl+tab as a rune the composer turns into \t, kitty's
-// shift+tab as shift+tab, and a bracketed paste with a tab in it with the tab.
-func TestCtrlTab_ThroughTheRealParser(t *testing.T) {
-	in := "a\x1b[9;5ub" + "\x1b[9;2u" + "\x1b[200~x\ty\x1b[201~" + "\x11" // ctrl+q ends it
+// decodeKeys runs raw terminal bytes through Bubble Tea's own decoder.
+func decodeKeys(t *testing.T, in string) []tea.Msg {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	rec := &keyRec{}
-	p := tea.NewProgram(rec, tea.WithInput(newKeyFilter(strings.NewReader(in))),
+	p := tea.NewProgram(rec, tea.WithInput(strings.NewReader(in+"\x11")), // ctrl+q ends it
 		tea.WithOutput(io.Discard), tea.WithoutRenderer(), tea.WithoutSignalHandler(), tea.WithContext(ctx))
 	if _, err := p.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	return rec.msgs
+}
+
+// The spellings terminals use for ctrl+tab, shift+tab and shift+enter, through
+// Bubble Tea's real decoder: they arrive as keys the TUI acts on — ctrl+tab
+// and a bracketed paste's tab as tabs in the composer, kitty's shift+tab as
+// shift+tab, and every shift+enter as a newline rather than a send.
+func TestKeys_ThroughTheRealDecoder(t *testing.T) {
+	in := "a\x1b[9;5ub" + // ctrl+tab, kitty
+		"\x1b[27;5;9~c" + // ctrl+tab, xterm modifyOtherKeys
+		"\x1b[9;2u" + "\x1b[Z" + // shift+tab, kitty and legacy
+		"\x1b[200~x\ty\x1b[201~" + // a bracketed paste with a tab in it
+		"\x1bOM" + "\x1b[13;2u" + "\x1b[27;2;13~" + "d" // shift+enter: SS3 M, kitty, modifyOtherKeys
+	msgs := decodeKeys(t, in)
 	var got []string
-	for _, k := range rec.keys {
-		got = append(got, k.String())
+	for _, k := range msgs {
+		got = append(got, fmt.Sprintf("%T %q", k, k))
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.w = 80
 	m.input.width = 78
-	sawShiftTab := false
-	for _, k := range rec.keys {
-		if k.String() == "shift+tab" {
-			sawShiftTab = true
+	shiftTabs := 0
+	for _, k := range msgs {
+		if k, ok := k.(tea.KeyPressMsg); ok && k.String() == "shift+tab" {
+			shiftTabs++
 			continue // a zone move; checked elsewhere
 		}
 		m = key(m, k)
 	}
-	if !sawShiftTab {
-		t.Errorf("kitty's shift+tab did not arrive as shift+tab: %q", got)
+	if shiftTabs != 2 {
+		t.Errorf("want 2 shift+tabs (kitty and legacy), got %d: %q", shiftTabs, got)
 	}
-	if v := m.input.Value(); v != "a\tbx\ty" {
-		t.Errorf("composer %q, want %q (keys %q)", v, "a\tbx\ty", got)
+	if want := "a\tb\tcx\ty\n\n\nd"; m.input.Value() != want {
+		t.Errorf("composer %q, want %q (msgs %q)", m.input.Value(), want, got)
+	}
+	if len(m.convo) != 0 {
+		t.Errorf("a shift+enter sent the message: %d convo entries", len(m.convo))
 	}
 }
 
@@ -89,7 +91,7 @@ func TestCtrlTab_InsertsATabInTheComposer(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	m = typeStr(m, "a")
-	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ctrlTabRune}})
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModCtrl})
 	m = typeStr(m, "b")
 	if m.focus != focusInput {
 		t.Fatalf("ctrl+tab moved the focus to %d", m.focus)
@@ -111,7 +113,7 @@ func TestPaste_KeepsTabsAndMeasuresThem(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
 	m = nm.(tuiModel)
 	text := "col1\tcol2\tcol3\tcol4\tcol5\tcol6\tcol7\tcol8"
-	m = key(m, tea.KeyMsg{Type: tea.KeyRunes, Paste: true, Runes: []rune(text)})
+	m = key(m, tea.PasteMsg{Content: string([]rune(text))})
 	if v := m.input.Value(); v != text {
 		t.Fatalf("paste lost its tabs: %q", v)
 	}

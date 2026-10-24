@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iodesystems/dun"
 )
@@ -87,7 +87,7 @@ func (m *tuiModel) addServiceSessions() {
 }
 
 // updatePicking owns the keys while the session list is open.
-func (m tuiModel) updatePicking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m tuiModel) updatePicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c", "q":
 		m.picking = false

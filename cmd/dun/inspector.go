@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The tool inspector is a full-screen overlay opened from a tool-call block in
@@ -97,7 +97,7 @@ func wrapToRows(s string, w int) []string {
 // bordered frames (each = 1 label row + viewport + 2 border rows). Input is
 // capped small (it's usually short args); output takes the rest.
 func (ins *inspector) setSize(w, h int) {
-	ins.search.Width = w - 4
+	ins.search.SetWidth(w - 4)
 	innerW := w - 2 // inside the border
 	if innerW < 1 {
 		innerW = 1
@@ -122,8 +122,8 @@ func (ins *inspector) setSize(w, h int) {
 	if outVP < 1 {
 		outVP = 1
 	}
-	ins.panes[inspInput].vp = viewport.New(innerW, inVP)
-	ins.panes[inspOutput].vp = viewport.New(innerW, outVP)
+	ins.panes[inspInput].vp = viewport.New(viewport.WithWidth(innerW), viewport.WithHeight(inVP))
+	ins.panes[inspOutput].vp = viewport.New(viewport.WithWidth(innerW), viewport.WithHeight(outVP))
 	ins.recomputeMatches()
 	ins.render()
 }
@@ -156,7 +156,7 @@ func (ins *inspector) jumpTo(at int) {
 	}
 	ins.at = at
 	p := &ins.panes[ins.focus]
-	off := ins.matches[at] - p.vp.Height/2
+	off := ins.matches[at] - p.vp.Height()/2
 	if off < 0 {
 		off = 0
 	}
@@ -189,7 +189,7 @@ func (ins *inspector) render() {
 
 // update handles a key while the inspector is open. It returns whether the
 // inspector should stay open (false = close back to the conversation).
-func (ins *inspector) update(msg tea.KeyMsg) (open bool, cmd tea.Cmd) {
+func (ins *inspector) update(msg tea.KeyPressMsg) (open bool, cmd tea.Cmd) {
 	if ins.searching {
 		switch msg.String() {
 		case "esc":

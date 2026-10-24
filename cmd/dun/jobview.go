@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/cellbuf"
 )
 
@@ -446,7 +446,7 @@ func (v *jobView) firstMatch() int {
 }
 
 // key handles one key and reports whether the view stays open.
-func (v *jobView) key(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (v *jobView) key(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	if v.searching {
 		switch msg.String() {
 		case "esc":
@@ -488,7 +488,7 @@ func (v *jobView) key(msg tea.KeyMsg) (bool, tea.Cmd) {
 		if v.onCmd {
 			v.cmdOpen = true
 		}
-	case "enter", " ":
+	case "enter", "space":
 		if v.onCmd {
 			v.cmdOpen = !v.cmdOpen
 		}
@@ -538,13 +538,13 @@ func (v *jobView) key(msg tea.KeyMsg) (bool, tea.Cmd) {
 
 // mouse scrolls the output on the wheel.
 func (v *jobView) mouse(msg tea.MouseMsg) {
-	if msg.Action != tea.MouseActionPress {
+	if _, ok := msg.(tea.MouseWheelMsg); !ok {
 		return
 	}
-	switch msg.Button {
-	case tea.MouseButtonWheelUp:
+	switch msg.Mouse().Button {
+	case tea.MouseWheelUp:
 		v.scroll(-wheelDelta)
-	case tea.MouseButtonWheelDown:
+	case tea.MouseWheelDown:
 		v.scroll(wheelDelta)
 	}
 }

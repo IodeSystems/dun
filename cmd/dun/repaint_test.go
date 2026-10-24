@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // fakeTmux stands in for tmux: capture-pane answers with screen, display with
@@ -60,7 +61,7 @@ func TestRepaintCaptureInTmux(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
 	t.Setenv("TMUX_PANE", "%7")
 	v := tallConvo(t)
-	frame := v.m.View() // what the renderer was handed last
+	frame := v.m.View().Content // what the renderer was handed last
 	exp := v.m.expectedRows()
 	act := append([]string(nil), exp...)
 	act[2] = "JUNKJUNKJUNK"
@@ -116,7 +117,7 @@ func TestRepaintCaptureWithoutTmux(t *testing.T) {
 	t.Setenv("TMUX", "")
 	fakeTmux(t, "", "")
 	v := tallConvo(t)
-	v.m.View()
+	_ = v.m.View()
 	dir, err := v.m.capture(time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -132,35 +133,24 @@ func TestRepaintCaptureWithoutTmux(t *testing.T) {
 	}
 }
 
-// While the scroll region is live, View leaves its rows blank; the expected
-// screen has what the region drew there instead, and is exactly h rows.
-func TestRepaintExpectedHasRegionRows(t *testing.T) {
+// The expected screen is the last frame as the renderer cuts it: exactly h
+// rows, each the frame's.
+func TestRepaintExpectedIsTheFrame(t *testing.T) {
 	v := tallConvo(t)
-	// The region as a sync left it (set directly: whether a plan syncs in a
-	// test depends on minRegionGap and the clock).
-	region := []string{"REGION 1", "REGION 2", "REGION 3"}
-	*v.m.sr = scrollRegion{}
-	v.m.sr.sync(region, 3, 5, v.m.vp.Height)
-	frame := strings.Split(v.m.View(), "\n")
-	if frame[3] != "" {
-		t.Fatalf("precondition: View blanks the region's rows, got %q", frame[3])
-	}
+	frame := strings.Split(v.m.View().Content, "\n")
 	exp := v.m.expectedRows()
 	if len(exp) != v.m.h {
 		t.Fatalf("expected %d rows, got %d", v.m.h, len(exp))
 	}
-	for i, line := range region {
-		if exp[2+i] != line {
-			t.Errorf("row %d = %q, want the region's %q", 3+i, exp[2+i], line)
+	for i := range exp {
+		if i < len(frame) && exp[i] != ansi.Truncate(frame[i], v.m.w, "") {
+			t.Errorf("row %d = %q, want the frame's %q cut to the width", i, exp[i], frame[i])
 		}
-	}
-	if exp[0] != frame[0] || exp[5] != frame[5] {
-		t.Error("rows outside the region are the frame's")
 	}
 }
 
-// /repaint drops the region and the hold, keeps the region off until the
-// clears have run, and then says where the capture went.
+// /repaint drops the hold, re-asserts the terminal's modes, and then says
+// where the capture went.
 func TestRepaintResetsAndReports(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DUN_HOME", home)
@@ -168,9 +158,9 @@ func TestRepaintResetsAndReports(t *testing.T) {
 	fakeTmux(t, "", "")
 	v := tallConvo(t)
 	v.event(map[string]any{"type": "token", "text": "more"})
-	v.m.View()
+	_ = v.m.View()
 	v.m.convoHold, v.m.convoHoldW = 99, 80
-	if c := v.m.runSlash("/repaint"); c == nil || typeName(c()) != "main.repaintNowMsg" {
+	if c := v.m.runSlash("/repaint"); c == nil || fmt.Sprintf("%T", c()) != "main.repaintNowMsg" {
 		t.Fatal("/repaint should wait for the frame to settle")
 	}
 	if _, err := os.Stat(filepath.Join(home, "bugreports")); err == nil {
@@ -181,22 +171,29 @@ func TestRepaintResetsAndReports(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("the settled /repaint returned no command")
 	}
-	if v.m.sr.live || !v.m.sr.wait || v.m.convoHold != 0 {
-		t.Fatalf("after /repaint: live=%v wait=%v hold=%d", v.m.sr.live, v.m.sr.wait, v.m.convoHold)
-	}
-	if c := v.m.planScrollRegion(); c != nil {
-		t.Fatalf("the region must wait for the clears, planned %s", typeName(c()))
+	if v.m.convoHold != 0 {
+		t.Fatalf("after /repaint: hold=%d", v.m.convoHold)
 	}
 	nm, _ = v.m.Update(repaintDoneMsg{dir: onlyDir(t, home)})
 	v.m = nm.(tuiModel)
-	if v.m.sr.wait {
-		t.Error("the region should be free again")
-	}
 	if last := stripANSI(v.m.convo[len(v.m.convo)-1].collapsed); !strings.HasPrefix(last, "repainted · capture saved to ") {
 		t.Errorf("last line = %q", last)
 	}
-	if !v.m.sr.live {
-		t.Error("the region should sync again once the clears are done")
+}
+
+// The modes /repaint writes are the ones View declares, mouse as /mouse set it.
+func TestRepaintModeReset(t *testing.T) {
+	for mode, want := range map[string]string{"all": "\x1b[?1003h", "cell": "\x1b[?1002h", "off": ""} {
+		got := modeReset(mode)
+		if !strings.Contains(got, "\x1b[?2004h") || !strings.Contains(got, "\x1b[?25l") {
+			t.Errorf("%s: no bracketed paste or hidden cursor: %q", mode, got)
+		}
+		if want != "" && !strings.Contains(got, want) {
+			t.Errorf("%s: want %q in %q", mode, want, got)
+		}
+		if mode == "off" && strings.Contains(got, "\x1b[?100") {
+			t.Errorf("off: a mouse mode was set: %q", got)
+		}
 	}
 }
 
@@ -223,7 +220,7 @@ func TestEventRingBound(t *testing.T) {
 	if got := r.records()[evlogSize-1].info; len([]rune(got)) > evTextMax+1 {
 		t.Errorf("summary carries %d runes", len([]rune(got)))
 	}
-	r.add(t0, "tea.KeyMsg", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	r.add(t0, "tea.KeyPressMsg", runesKey([]rune("s")))
 	if got := r.records()[evlogSize-1].info; got != "rune" {
 		t.Errorf("a typed key is named, not spelled: %q", got)
 	}
@@ -245,11 +242,11 @@ func TestDiffRows(t *testing.T) {
 func TestEventRingCollapsesTicks(t *testing.T) {
 	r := newEventRing()
 	t0 := time.Now()
-	r.add(t0, "tea.KeyMsg", tea.KeyMsg{Type: tea.KeyEnter})
+	r.add(t0, "tea.KeyPressMsg", tea.KeyPressMsg{Code: tea.KeyEnter})
 	for i := 0; i < 500; i++ {
 		r.add(t0.Add(time.Duration(i)*time.Millisecond), "spinner.TickMsg", struct{}{})
 	}
-	r.add(t0, "tea.KeyMsg", tea.KeyMsg{Type: tea.KeyEnter})
+	r.add(t0, "tea.KeyPressMsg", tea.KeyPressMsg{Code: tea.KeyEnter})
 	recs := r.records()
 	if len(recs) != 3 || recs[1].n != 500 || recs[0].info != "enter" {
 		t.Fatalf("records = %+v", recs)

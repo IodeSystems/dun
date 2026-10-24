@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/iodesystems/dun"
 )
 
@@ -118,21 +118,21 @@ func TestTabFromInputSelectsTheNewest(t *testing.T) {
 		v.event(map[string]any{"type": "done"})
 	}
 	newest := len(v.m.convo) - 1
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyTab})
 	first := v.m.sel
 	if v.m.focus != focusConvo || first < 0 {
 		t.Fatalf("tab did not enter the conversation: focus=%d sel=%d", v.m.focus, first)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyUp})
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyUp})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyUp})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if v.m.sel >= first {
 		t.Fatalf("↑ did not move up: %d → %d", first, v.m.sel)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab}) // back to the input
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyTab}) // back to the input
 	if v.m.focus == focusConvo {
-		v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab})
+		v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyTab})
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyTab})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if v.m.sel != first || first > newest {
 		t.Errorf("second tab selected %d, want the newest (%d)", v.m.sel, first)
 	}

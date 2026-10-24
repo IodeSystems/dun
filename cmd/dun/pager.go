@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The pager is the full-pane reader: one convo block, given the conversation
@@ -219,7 +219,7 @@ func (p *pager) key(k string) bool {
 		} else {
 			p.scroll(1)
 		}
-	case "enter", " ", "right", "l":
+	case "enter", "space", "right", "l":
 		if tree {
 			open := !p.open[p.cur]
 			if k == "right" || k == "l" {
@@ -254,13 +254,13 @@ func (p *pager) key(k string) bool {
 
 // mouse scrolls on the wheel.
 func (p *pager) mouse(msg tea.MouseMsg) {
-	if msg.Action != tea.MouseActionPress {
+	if _, ok := msg.(tea.MouseWheelMsg); !ok {
 		return
 	}
-	switch msg.Button {
-	case tea.MouseButtonWheelUp:
+	switch msg.Mouse().Button {
+	case tea.MouseWheelUp:
 		p.scroll(-wheelDelta)
-	case tea.MouseButtonWheelDown:
+	case tea.MouseWheelDown:
 		p.scroll(wheelDelta)
 	}
 }

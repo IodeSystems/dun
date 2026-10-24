@@ -6,16 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
 )
-
-// inColour renders in truecolor for the test, as a real terminal would.
-func inColour(t *testing.T) {
-	old := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
-}
 
 // The fixtures are real mcpshell eval results, captured from its MCP server
 // (`mcpshell mcp --web --connect lsp=poly-lsp-mcp …`): the code sent and the
@@ -96,7 +88,6 @@ func TestEvalRender_Table(t *testing.T) {
 
 // A value that fits stays one line, coloured; one that does not is laid out.
 func TestEvalRender_Values(t *testing.T) {
-	inColour(t)
 	fx := evalFixtures(t)
 	pv, body := renderFixture(fx["object"])
 	if !strings.Contains(stripANSI(pv), "✓ 4 keys") || stripANSI(body) != fx["object"].Text {
@@ -151,7 +142,6 @@ func TestEvalRender_Errors(t *testing.T) {
 // A long script: its first meaningful line in the step list, the whole thing
 // coloured in the tree.
 func TestEvalRender_LongScript(t *testing.T) {
-	inColour(t)
 	code := evalFixtures(t)["multiline"].Code
 	full := evalCallFull(map[string]any{"code": code})
 	if stripANSI(full) != code {

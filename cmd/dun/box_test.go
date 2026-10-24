@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // thinkLines streams lines from..from+n-1 of a thought and draws the tick.
@@ -135,24 +135,24 @@ func TestBox_DescendScrollAndLeave(t *testing.T) {
 	if b.off != 10 || v.m.sel != think {
 		t.Fatalf("↑ inside should scroll the box: off=%d sel=%d", b.off, v.m.sel)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyPgUp})
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyPgUp})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	v.m = key(v.m, kUp)
 	if b.off != 0 || v.m.sel != think {
 		t.Fatalf("inside, the top of the box is not an exit: off=%d sel=%d", b.off, v.m.sel)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	v.m = key(v.m, runesKey([]rune("G")))
 	if b.off != 11 {
 		t.Errorf("G should go to the end: off=%d", b.off)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	v.m = key(v.m, runesKey([]rune("g")))
 	v.m = key(v.m, kDown)
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	if b.inside || b.off != 1 || b.follow || v.m.sel != think || v.m.focus != focusConvo {
 		t.Fatalf("← should leave, keeping the position: inside=%v off=%d follow=%v sel=%d", b.inside, b.off, b.follow, v.m.sel)
 	}
 	// l descends too; esc leaves (and does not quit).
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	v.m = key(v.m, runesKey([]rune("l")))
 	if !b.inside {
 		t.Fatal("l should descend")
 	}
@@ -187,8 +187,8 @@ func TestBox_TailFollowResumesOnLeave(t *testing.T) {
 	if b.off != 10 {
 		t.Fatalf("scrolled up inside, new lines should not move it: off=%d", b.off)
 	}
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
-	v.m = key(v.m, tea.KeyMsg{Type: tea.KeyLeft})
+	v.m = key(v.m, runesKey([]rune("G")))
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	thinkLines(v, 25, 5)
 	if !b.follow || b.off != b.max || !strings.Contains(v.view(), "line 29 of the thought") {
 		t.Errorf("left at its end, the box should follow its tail: follow=%v off=%d max=%d", b.follow, b.off, b.max)
@@ -203,9 +203,9 @@ func TestBox_WheelOnlyInside(t *testing.T) {
 		v.m = key(v.m, kUp)
 	}
 	b := v.m.convo[think].box
-	wheel := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp}
+	wheel := mouseMsg(mousePress, tea.MouseWheelUp, 0, 0)
 	off, y := b.off, v.m.vp.YOffset
-	nm, _ := v.m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	nm, _ := v.m.Update(mouseMsg(mousePress, tea.MouseWheelDown, 0, 0))
 	v.m = nm.(tuiModel)
 	if b.off != off || v.m.vp.YOffset == y {
 		t.Fatalf("outside, the wheel should scroll the conversation: box %d → %d, yoff %d → %d", off, b.off, y, v.m.vp.YOffset)

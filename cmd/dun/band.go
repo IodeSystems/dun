@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // The selection band: the selected block's rows are drawn through a
@@ -38,7 +38,7 @@ import (
 // pulse — convo focus with a selection, or the pager's tree — and stops the
 // moment there is not (pulseWanted). A step rewrites only the selected rows
 // (repaintBand); everything else in the pane is untouched, and the renderer's
-// line diff sends just those rows. DUN_NO_ANIM=1 keeps the band and drops the
+// cell diff sends just those cells. DUN_NO_ANIM=1 keeps the band and drops the
 // pulse.
 
 const (
@@ -83,20 +83,20 @@ func (b bandStyle) strength(phase int) float64 {
 // setupBand resolves the band for this terminal. Call after
 // initMarkdownStyle, which decides dark or light.
 func setupBand() {
-	band = newBandStyle(lipgloss.ColorProfile(), mdStyle != "light", mdStyle != "notty", os.Getenv("DUN_NO_ANIM") != "1")
+	band = newBandStyle(colorprofile.Detect(os.Stdout, os.Environ()), mdStyle != "light", mdStyle != "notty", os.Getenv("DUN_NO_ANIM") != "1")
 }
 
-func newBandStyle(p termenv.Profile, dark, color, anim bool) bandStyle {
+func newBandStyle(p colorprofile.Profile, dark, color, anim bool) bandStyle {
 	if !color {
 		return bandStyle{}
 	}
 	b := bandStyle{dark: dark, anim: anim}
 	switch p {
-	case termenv.TrueColor:
+	case colorprofile.TrueColor:
 		b.mode = bandTrue
-	case termenv.ANSI256:
+	case colorprofile.ANSI256:
 		b.mode = band256
-	case termenv.ANSI:
+	case colorprofile.ANSI:
 		b.mode = bandANSI
 	}
 	return b

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func paneWith(n, w, h int) convoPane {
@@ -77,27 +77,27 @@ func TestConvoPane_SetLinesRescuesOffset(t *testing.T) {
 func TestConvoPane_WheelAndPageKeys(t *testing.T) {
 	p := paneWith(100, 80, 10)
 	press := func(b tea.MouseButton) {
-		p, _ = p.Update(tea.MouseMsg{Button: b, Action: tea.MouseActionPress})
+		p, _ = p.Update(mouseMsg(mousePress, b, 0, 0))
 	}
-	press(tea.MouseButtonWheelDown)
+	press(tea.MouseWheelDown)
 	if p.YOffset != wheelDelta {
 		t.Errorf("one wheel click down = %d rows, want %d", p.YOffset, wheelDelta)
 	}
-	press(tea.MouseButtonWheelUp)
+	press(tea.MouseWheelUp)
 	if p.YOffset != 0 {
 		t.Errorf("wheel back up left the offset at %d", p.YOffset)
 	}
 	// A release is not a scroll.
-	p, _ = p.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionRelease})
+	p, _ = p.Update(tea.MouseReleaseMsg{Button: tea.MouseWheelDown})
 	if p.YOffset != 0 {
 		t.Errorf("a wheel RELEASE scrolled to %d", p.YOffset)
 	}
 
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if p.YOffset != 10 {
 		t.Errorf("pgdown = %d rows, want one page (10)", p.YOffset)
 	}
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if p.YOffset != 0 {
 		t.Errorf("pgup left the offset at %d", p.YOffset)
 	}

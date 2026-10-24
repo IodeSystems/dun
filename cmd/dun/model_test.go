@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // A config from before providers is one provider; adding one keeps it.
@@ -40,13 +40,13 @@ func pickerWith(rows ...modelRow) tuiModel {
 
 func pick(m tuiModel, keys ...string) tuiModel {
 	for _, k := range keys {
-		var msg tea.KeyMsg
+		var msg tea.KeyPressMsg
 		switch k {
 		case "down", "up", "tab", "enter", "esc":
-			msg = map[string]tea.KeyMsg{"down": {Type: tea.KeyDown}, "up": {Type: tea.KeyUp},
-				"tab": {Type: tea.KeyTab}, "enter": {Type: tea.KeyEnter}, "esc": {Type: tea.KeyEsc}}[k]
+			msg = map[string]tea.KeyPressMsg{"down": {Code: tea.KeyDown}, "up": {Code: tea.KeyUp},
+				"tab": {Code: tea.KeyTab}, "enter": {Code: tea.KeyEnter}, "esc": {Code: tea.KeyEscape}}[k]
 		default:
-			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+			msg = runesKey([]rune(k))
 		}
 		nm, _ := m.updateModelPicking(msg)
 		m = nm.(tuiModel)

@@ -6,9 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Rendering helpers for the TUI: markdown (glamour) for assistant replies, and
@@ -67,7 +66,7 @@ func initMarkdownStyle() {
 		// and the cost of guessing wrong for them is a slightly-off palette —
 		// against five seconds of everyone else's startup. DUN_MD_STYLE=light
 		// fixes it permanently for them; DUN_MD_QUERY=1 asks the terminal.
-		if os.Getenv("DUN_MD_QUERY") == "1" && termenv.HasDarkBackground() {
+		if os.Getenv("DUN_MD_QUERY") == "1" && lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
 			mdStyle = "dark"
 			return
 		}

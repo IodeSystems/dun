@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
-func setupKey(m setupModel, k tea.KeyMsg) setupModel {
+func setupKey(m setupModel, k tea.KeyPressMsg) setupModel {
 	nm, _ := m.Update(k)
 	return nm.(setupModel)
 }
@@ -18,11 +18,11 @@ func TestSetupWizard_pickFromList(t *testing.T) {
 	if m.step != stepURL {
 		t.Fatal("wizard should start on the URL step")
 	}
-	m = setupKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = setupKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.step != stepKey {
 		t.Fatal("enter should advance URL → key")
 	}
-	m = setupKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = setupKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.step != stepModel || !m.fetching {
 		t.Fatalf("enter should advance key → model and start fetching (step=%d fetching=%v)", m.step, m.fetching)
 	}
@@ -36,12 +36,12 @@ func TestSetupWizard_pickFromList(t *testing.T) {
 		t.Fatalf("current model 'b' should be preselected (idx 1), got %d", m.sel)
 	}
 	// View renders without panic and shows the list.
-	if v := stripANSI(m.View()); !strings.Contains(v, "dun setup") || !strings.Contains(v, "c") {
+	if v := stripANSI(m.View().Content); !strings.Contains(v, "dun setup") || !strings.Contains(v, "c") {
 		t.Fatalf("view missing content: %q", v)
 	}
 	// ↓ to 'c', enter → chosen + saved.
-	m = setupKey(m, tea.KeyMsg{Type: tea.KeyDown})
-	m = setupKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = setupKey(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = setupKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.saved || m.chosenModel != "c" {
 		t.Fatalf("expected chosen=c saved=true, got chosen=%q saved=%v", m.chosenModel, m.saved)
 	}
@@ -57,7 +57,7 @@ func TestSetupWizard_customModel(t *testing.T) {
 		t.Fatal("empty model list should land on the custom row")
 	}
 	m.custom.SetValue("qwen3-next")
-	m = setupKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = setupKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.saved || m.chosenModel != "qwen3-next" {
 		t.Fatalf("expected chosen=qwen3-next saved=true, got chosen=%q saved=%v", m.chosenModel, m.saved)
 	}
@@ -65,7 +65,7 @@ func TestSetupWizard_customModel(t *testing.T) {
 
 // esc cancels without saving.
 func TestSetupWizard_cancel(t *testing.T) {
-	m := setupKey(newSetupModel(dunConfig{}), tea.KeyMsg{Type: tea.KeyEsc})
+	m := setupKey(newSetupModel(dunConfig{}), tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.saved {
 		t.Fatal("esc must not save")
 	}
