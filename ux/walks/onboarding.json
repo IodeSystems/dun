@@ -47,8 +47,6 @@
       "actions": [
         {"type": "${LLM_URL}", "say": "typed the address my colleague gave me"},
         {"key": "enter"},
-        {"wait_for": "local", "say": "the name was filled in for me"},
-        {"key": "enter", "say": "kept the name it filled in"},
         {"type": "${LLM_KEY}", "say": "typed the key my colleague gave me"},
         {"key": "enter"},
         {"wait_for": "chat-standard"}
@@ -88,9 +86,7 @@
       "promise": "dun tells me the notes server is added and working.",
       "settle_ms": 1500,
       "actions": [
-        {"type": "notes"},
-        {"key": "enter"},
-        {"type": "notes-mcp"},
+        {"type": "notes-mcp", "say": "typed what my colleague gave me"},
         {"key": "enter"},
         {"wait_for": "notes added", "timeout_ms": 30000}
       ]
