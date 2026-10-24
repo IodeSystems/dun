@@ -14,7 +14,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/proto"
@@ -216,21 +215,4 @@ func (d *doctor) releaseBuild() {
 		return
 	}
 	d.add("ok", "build", detail, "")
-}
-
-// toolOrigin is doctor's line on how a tool at p was built, and, for a go
-// install build, the command that updates it.
-func (d *doctor) toolOrigin(name, p string) {
-	o, err := update.OfFile(p)
-	if err != nil {
-		return // a script, or a binary without build info
-	}
-	fix := ""
-	if o.Kind == update.GoInstall {
-		fix = "to update: go install " + o.Module + "@latest"
-		if inst, ok := dun.ToolInstall[name]; ok {
-			fix = "to update: go install " + inst.Module
-		}
-	}
-	d.add("ok", "origin", name+": "+o.String(), fix)
 }

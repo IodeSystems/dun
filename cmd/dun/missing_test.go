@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -63,19 +64,20 @@ func TestDoctor_MissingShellAndFix(t *testing.T) {
 	}
 	d := &doctor{}
 	d.tools()
-	if f := shell(d); f.level != "warn" || !strings.Contains(f.fix, "dun doctor --fix") || !strings.Contains(f.fix, dun.ToolInstall["mcpshell"].Module) {
+	if f := shell(d); f.level != "warn" || !strings.Contains(f.fix, "dun doctor --fix") || !strings.Contains(f.fix, installModule("mcpshell")) {
 		t.Errorf("without --fix: %+v", f)
 	}
-	var installed string
+	var installed []string
 	old := goInstall
 	defer func() { goInstall = old }()
-	goInstall = func(module string) (string, error) {
-		installed = module
-		return bin, os.WriteFile(filepath.Join(bin, "mcpshell"), []byte("#!/bin/sh\n"), 0o755)
+	goInstall = func(module, _ string) (string, error) {
+		installed = append(installed, module)
+		name, _, _ := strings.Cut(filepath.Base(module), "@")
+		return bin, os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"), 0o755)
 	}
 	d = &doctor{fix: true}
 	d.tools()
-	if f := shell(d); f.level != "ok" || installed != dun.ToolInstall["mcpshell"].Module {
+	if f := shell(d); f.level != "ok" || !slices.Contains(installed, installModule("mcpshell")) || !slices.Contains(installed, installModule("poly-lsp-mcp")) {
 		t.Errorf("--fix: %+v (installed %q)", f, installed)
 	}
 }

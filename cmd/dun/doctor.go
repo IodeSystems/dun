@@ -31,25 +31,28 @@ import (
 // socket answers this user — the peer-credential check), the service, and a
 // self-updating build's source tree and Go. Exit 1 when anything fails.
 //
-// `dun doctor --fix` changes one thing: a missing mcpshell is installed with
-// `go install` from its iodesystems module (built from source, checked
-// against the Go checksum database) when Go is on PATH, beside dun when that
-// directory is writable — where the engine looks after PATH (dun.FindCommand).
-// A release build instead downloads a missing mcpshell or poly-lsp-mcp from
-// the release the build was made with, checked against the sha256 pinned in
-// the build (release.Deps), and falls back to go install for a tool it has
-// no pin for. Nothing is downloaded from anywhere else.
+// `dun doctor --fix` installs a missing mcpshell or poly-lsp-mcp (owner,
+// item 49): a release build downloads it from the release the build was made
+// with, checked against the sha256 pinned in the build (release.Deps); any
+// other build, or a tool the release pins nothing for, runs `go install
+// <module>@<the version this dun supports>` (release.Supported; built from
+// source, checked against the Go checksum database) when Go is on PATH,
+// beside dun when that directory is writable — where the engine looks after
+// PATH (dun.FindCommand). Nothing is downloaded from anywhere else.
 //
 // Each binary's origin is said too (release, go install, a checkout), read
-// from its build info: it decides how that binary updates.
+// from its build info: it decides how that binary updates. A tool older
+// than this dun supports is updated the same way it was installed
+// (toolver.go).
 
 type finding struct {
 	level, area, detail, fix string // level: ok, warn, fail
 }
 
 type doctor struct {
-	found []finding
-	fix   bool // --fix: install what fixTools names
+	found   []finding
+	fix     bool // --fix: install what fixTools names, update what toolver.go may
+	applied int  // installs and updates --fix ran while checking
 }
 
 func (d *doctor) add(level, area, detail, fix string) {
@@ -86,7 +89,7 @@ func doctorCmd() *cobra.Command {
 
 // fixableNames are the fixes --fix runs, for --help.
 var fixableNames = []string{
-	"mcpshell missing: go install it (when Go is here)",
+	"mcpshell, poly-lsp-mcp missing or behind this dun: go install the version it supports (when Go is here)",
 	"a config file others can read: chmod 600",
 	"a service on another build: dun dund service restart",
 }
@@ -96,7 +99,7 @@ func fixNames() []string {
 	if !isRelease() {
 		return fixableNames
 	}
-	return append([]string{"mcpshell, poly-lsp-mcp missing: download the release this build pins (sha256 in the build)"}, fixableNames...)
+	return append([]string{"mcpshell, poly-lsp-mcp missing, or a release download behind: download the release this build pins (sha256 in the build)"}, fixableNames...)
 }
 
 // fixable is the action that applies f's fix, or nil when the fix needs the
@@ -119,7 +122,7 @@ func fixable(f finding) func() error {
 }
 
 func runDoctor(fix bool) int {
-	d := check(fix) // with fix, tools() installs a missing mcpshell as it checks
+	d := check(fix) // with fix, tools() installs and updates tools as it checks
 	code := d.report()
 	if !fix {
 		return code
@@ -137,7 +140,9 @@ func runDoctor(fix bool) int {
 		}
 	}
 	if ran == 0 {
-		fmt.Println("\nnothing here that dun can fix by itself")
+		if d.applied == 0 {
+			fmt.Println("\nnothing here that dun can fix by itself")
+		}
 		return code
 	}
 	fmt.Println()
@@ -220,18 +225,20 @@ var doctorTools = []struct{ name, level, need string }{
 	{"raglit", "warn", "/raglit"},
 }
 
-// fixTools are the tools --fix installs. poly-lsp-mcp and raglit are opt-in
-// and need more than their binary (language servers, an embedder).
-var fixTools = map[string]bool{"mcpshell": true}
+// fixTools are the tools --fix installs: both build with Go alone. raglit
+// is opt-in and needs more than its binary (an embedder).
+var fixTools = map[string]bool{"mcpshell": true, "poly-lsp-mcp": true}
 
-// goInstall installs a module with the go command, beside dun when dun's
-// directory is writable (a test replaces it). It returns where it went.
-var goInstall = func(module string) (string, error) {
+// goInstall installs a module with the go command into dir, or, with dir
+// "", beside dun when dun's directory is writable, else go's own bin
+// directory (a test replaces it). It returns where it went ("" for go's).
+var goInstall = func(module, dir string) (string, error) {
 	cmd := exec.Command("go", "install", module)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-	dir := ""
-	if exe, err := os.Executable(); err == nil && unix.Access(filepath.Dir(exe), unix.W_OK) == nil {
+	if exe, err := os.Executable(); dir == "" && err == nil && unix.Access(filepath.Dir(exe), unix.W_OK) == nil {
 		dir = filepath.Dir(exe)
+	}
+	if dir != "" {
 		cmd.Env = append(os.Environ(), "GOBIN="+dir)
 	}
 	return dir, cmd.Run()
@@ -275,23 +282,25 @@ func (d *doctor) install(name string) (string, error) {
 		return "", errNotFixed
 	}
 	if _, _, ok := pinnedTool(name); ok {
+		d.applied++
 		p, err := installPinned(name)
 		if err != nil {
 			return "", fmt.Errorf("download %s: %w", name, err)
 		}
 		return p, nil
 	}
-	inst, ok := dun.ToolInstall[name]
-	if !fixTools[name] || !ok {
+	if !fixTools[name] {
 		return "", errNotFixed
 	}
 	if _, err := exec.LookPath("go"); err != nil {
 		return "", errNoGo
 	}
-	fmt.Fprintf(os.Stderr, "installing %s: go install %s\n", name, inst.Module)
-	dir, err := goInstall(inst.Module)
+	mod := installModule(name)
+	fmt.Fprintf(os.Stderr, "installing %s: go install %s\n", name, mod)
+	d.applied++
+	dir, err := goInstall(mod, "")
 	if err != nil {
-		return "", fmt.Errorf("go install %s: %w", inst.Module, err)
+		return "", fmt.Errorf("go install %s: %w", mod, err)
 	}
 	p, err := dun.FindCommand(name)
 	if err != nil && dir == "" {
@@ -318,7 +327,7 @@ func toolFix(name string, err error) string {
 		return "go install " + inst.Module + " (needs Go), then put it on PATH or beside dun"
 	case errors.Is(err, errNotFixed):
 		if _, gerr := exec.LookPath("go"); gerr == nil {
-			return "dun doctor --fix (runs go install " + inst.Module + ")"
+			return "dun doctor --fix (runs go install " + installModule(name) + ")"
 		}
 		return "install Go (go.dev/dl), then dun doctor --fix — or " + putBinary(name, inst.Module)
 	case errors.Is(err, errNoGo):
@@ -327,11 +336,11 @@ func toolFix(name string, err error) string {
 	return "--fix failed: " + err.Error()
 }
 
-// putBinary is the other way to install name: a build of it, by hand.
+// putBinary is the other way to install name: a release build of it, put
+// in place by hand (a build that is not a release carries no download
+// location).
 func putBinary(name, module string) string {
-	repo, _, _ := strings.Cut(module, "@")
-	repo = strings.Join(strings.Split(repo, "/")[:3], "/")
-	return "build " + name + " from " + repo + " and put it on PATH or beside dun"
+	return "put a release build of " + name + " from " + repoURL(module) + "/releases on PATH or beside dun"
 }
 
 // besideDun reports whether p is in dun's own directory: the engine finds it
@@ -365,7 +374,8 @@ func (d *doctor) polyLSP() {
 }
 
 // polyLSPLanguages lists the language servers this directory's project is
-// missing, from `poly-lsp-mcp doctor --json` (setupstate.go). Quick, and
+// missing, from `poly-lsp-mcp doctor --json` (setupstate.go), and relays
+// its update block (toolver.go). Quick, and
 // silent when it cannot: a build without --json prints an error, a tree too
 // big to count in time is partial. Nothing is installed.
 func (d *doctor) polyLSPLanguages(bin string) {
@@ -377,6 +387,7 @@ func (d *doctor) polyLSPLanguages(bin string) {
 	if rep, ok := dun.ParseDoctorLanguages(out); ok {
 		d.addLanguages(rep)
 	}
+	d.addPolyUpdate(parsePolyUpdate(out))
 }
 
 // addLanguages is a warn per missing language server; a language that is
