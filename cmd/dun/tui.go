@@ -771,22 +771,28 @@ type tuiModel struct {
 	sessLive    map[string]bool   // id → its engine is running in dund
 	pickSel     int               // highlighted session
 	// Model picker (/model): fetch available models, let the user switch.
-	modelPicking bool            // the model picker owns the keys
-	modelQuery   textinput.Model // its search box
-	modelRows    []modelRow      // every provider's models fetched so far
-	modelErrs    []string        // providers that returned no list
-	modelSel     int             // highlighted row of the filtered list
-	modelPending int             // providers not yet answered
+	modelPicking bool       // the model picker owns the keys
+	models       pickList   // its search box and highlighted row
+	modelRows    []modelRow // every provider's models fetched so far
+	modelErrs    []string   // providers that returned no list
+	modelPending int        // providers not yet answered
+	// The login's service picker (/login): custom, then the templates.
+	loginPicking bool
+	logins       pickList
+	loginProbe   map[string]int // local template id → models it answered with; absent: not answering
 	// The add-provider form (/model add, ctrl+a in the picker).
 	providerForm     bool
 	providerFields   [3]textinput.Model // address, name, key (fieldAddr, fieldName, fieldKey)
 	providerStep     int
 	providerErr      string
-	providerAuto     string // the name the form filled in from the address; replaced while it is unedited
-	providerEdit     string // the provider the form edits; "" adds one
-	providerChecking string // the service just saved, asked for its models before the picker opens (saveProvider)
-	providerNotice   string // its "logged in" notice, said when the answer comes (or esc)
-	provider         string // name of the provider the engine runs on
+	providerAuto     string     // the name the form filled in from the address; replaced while it is unedited
+	providerEdit     string     // the provider the form edits; "" adds one
+	providerChecking string     // the service being checked, asked for its models before it is saved (saveProvider)
+	providerPending  providerOp // what is saved once the check passes
+	providerTmpl     *loginTmpl // the template the form was opened from; nil: custom, or again
+	providerEnvKey   string     // the template's key variable that is set; "" none
+	providerBack     bool       // esc goes back to the service picker
+	provider         string     // name of the provider the engine runs on
 	// The add-MCP-server form (/mcp add).
 	mcpForm      bool
 	mcpFields    [mcpRows]textinput.Model // name, url or command, token or env, then oauth (see mcpform.go)
@@ -1081,8 +1087,15 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 
+	case loginProbeMsg:
+		if m.loginPicking {
+			m.loginProbe[msg.id] = msg.n
+			m.refresh()
+		}
+		return m, nil
+
 	case modelFetchMsg:
-		if m.modelPicking && !m.providerForm {
+		if m.modelPicking && !m.providerForm && !m.loginPicking {
 			m.addModelRows(msg)
 			m.refresh()
 		}
@@ -1325,7 +1338,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// what it says.
 				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].needLogin && !m.loggedIn() {
 					m.setFocus(focusInput)
-					return m, m.openProviderForm(nil)
+					return m, m.openLogin("")
 				}
 				// Thinking (and anything else with a page) opens in the pager.
 				if m.openPager(m.sel) {
@@ -1373,7 +1386,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// the screen asks for (George, run 5: "make Enter open the
 				// login form").
 				if !m.loggedIn() && !m.starting && len(m.input.Images()) == 0 {
-					return m, m.openProviderForm(nil)
+					return m, m.openLogin("")
 				}
 				return m, nil
 			}
@@ -2027,6 +2040,8 @@ func (m tuiModel) paste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case m.mcpForm:
 		return m.typeMCPField(msg)
+	case m.modelPicking && m.loginPicking:
+		return m.typeLoginQuery(msg)
 	case m.modelPicking && m.providerForm:
 		return m.typeProviderField(msg)
 	case m.modelPicking:
@@ -3192,7 +3207,7 @@ func (m tuiModel) exitHint() string {
 // panelOpen says a panel the person opened is below the conversation, in
 // the composer's place: the palette, a form, a picker.
 func (m tuiModel) panelOpen() bool {
-	return m.picking || m.modelPicking || m.mcpForm || m.providerForm || m.paletteActive()
+	return m.picking || m.modelPicking || m.mcpForm || m.providerForm || m.loginPicking || m.paletteActive()
 }
 
 // histBrowsing says plain ↑/↓ walk history: the composer is empty, or holds
@@ -3464,6 +3479,8 @@ func (m tuiModel) drawView() string {
 		status = stDim.Render(fmt.Sprintf("match %d/%d  ·  ↑/↓ prev/next · / new search · esc exit", m.matchPos+1, len(m.matches)))
 	// A form or picker shows its own keys here, never the composer's: two
 	// meanings of enter on one screen was the fault.
+	case m.modelPicking && m.loginPicking:
+		status = stDim.Render(loginHint())
 	case m.modelPicking && m.providerForm:
 		status = stDim.Render(m.providerHint())
 	case m.modelPicking:

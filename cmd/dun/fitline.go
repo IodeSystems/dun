@@ -151,6 +151,21 @@ func fitRows(block string, w int) string {
 	return strings.Join(rows, "\n")
 }
 
+// wholeRows is a message that must be read whole (a failure: the reason is
+// the diagnosis) as rows of a w-wide panel, each after indent and in st:
+// wrapped at words, a word longer than a row (a URL) broken, never cut.
+func wholeRows(s string, w int, indent string, st lipgloss.Style) []string {
+	width := w - ansi.StringWidth(indent)
+	if w <= 0 || width < 10 {
+		return []string{indent + st.Render(s)}
+	}
+	var out []string
+	for _, l := range strings.Split(ansi.Wrap(s, width, ""), "\n") {
+		out = append(out, indent+st.Render(strings.TrimRight(l, " ")))
+	}
+	return out
+}
+
 // listRow is one row of a list a person picks from — the palette, the model
 // picker: the selected row has the gutter bar and its name in the accent,
 // bold. pre goes before the name, post after it.

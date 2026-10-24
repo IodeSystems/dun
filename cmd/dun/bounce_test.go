@@ -277,13 +277,13 @@ func TestNoBounce_FormClosingKeepsTheTopRow(t *testing.T) {
 	v := tallConvo(t)
 	v.m = typeStr(v.m, "/login")
 	v.m = key(v.m, kEnter)
-	if !v.m.providerForm {
-		t.Fatal("the login form did not open")
+	if !v.m.loginPicking {
+		t.Fatal("the login picker did not open")
 	}
 	yoff, top := v.m.vp.YOffset, shown(v)[0]
 	v.m = key(v.m, kEsc)
-	if v.m.providerForm {
-		t.Fatal("esc did not close the form")
+	if v.m.loginPicking || v.m.modelPicking {
+		t.Fatal("esc did not close the picker")
 	}
 	if v.m.vp.YOffset != yoff || shown(v)[0] != top {
 		t.Fatalf("closing the form moved the view: offset %d -> %d, top %q -> %q", yoff, v.m.vp.YOffset, top, shown(v)[0])

@@ -67,7 +67,7 @@ func TestModelPicker_SearchMatchesEveryWord(t *testing.T) {
 	if len(got) != 1 || got[0].id != "anthropic/claude-sonnet-5-5" {
 		t.Fatalf("'sonnet open' → %v", got)
 	}
-	m.modelQuery.SetValue("QWEN")
+	m.models.query.SetValue("QWEN")
 	if n := len(m.filteredModels()); n != 2 {
 		t.Errorf("search ignores case: %d rows", n)
 	}
@@ -111,10 +111,10 @@ func TestProviderForm_SavesAndSearchesTheNewProvider(t *testing.T) {
 		t.Fatalf("the name is filled in from the address and not asked: %q (step %d)", got, m.providerStep)
 	}
 	m = pick(m, "sk-or-1", "enter")
-	m.loginChecked(loginCheckedMsg{notice: m.providerNotice, models: modelFetchMsg{provider: m.providerChecking, ids: []string{"x"}}})
-	if m.providerForm || !m.modelPicking || m.modelQuery.Value() != "" { // the only service: no filter
+	m.loginChecked(loginCheckedMsg{models: modelFetchMsg{provider: m.providerChecking, ids: []string{"x"}}})
+	if m.providerForm || !m.modelPicking || m.models.query.Value() != "" { // the only service: no filter
 		t.Fatalf("want the picker filtered to the new provider; form=%v picking=%v q=%q",
-			m.providerForm, m.modelPicking, m.modelQuery.Value())
+			m.providerForm, m.modelPicking, m.models.query.Value())
 	}
 	p, ok := loadConfig().providerAt("https://openrouter.ai/api/v1")
 	if !ok || p.Name != "openrouter" || p.Key != "sk-or-1" {
@@ -225,9 +225,13 @@ func TestProviderForm_LoginAgainKeepsTheKey(t *testing.T) {
 		t.Fatalf("the fixed name is stepped over and kept: step %d name %q", m.providerStep, m.providerFields[fieldName].Value())
 	}
 	m = pick(m, "enter")
-	if m.providerChecking == "" { // saved, and asking the service for its models
-		t.Fatalf("not saved: %q", m.providerErr)
+	if m.providerChecking == "" { // asking the service for its models
+		t.Fatalf("not checked: %q", m.providerErr)
 	}
+	if c := loadConfig(); c.URL != "https://old.example.com" {
+		t.Fatalf("saved before the check: %q", c.URL)
+	}
+	m.loginChecked(loginCheckedMsg{models: modelFetchMsg{provider: m.providerChecking, ids: []string{"m"}}})
 	if c := loadConfig(); c.URL != "https://new.example.com" || c.Key != "sk-old" || c.activeName() != "old.example.com" {
 		t.Errorf("after login again: url=%q key kept=%v active=%q", c.URL, c.Key == "sk-old", c.activeName())
 	}

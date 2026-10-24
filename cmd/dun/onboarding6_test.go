@@ -33,7 +33,7 @@ func onPath(t *testing.T, names ...string) {
 // model, chat-standard), as the check saveProvider starts would.
 func finishLogin(m tuiModel) tuiModel {
 	m.saveProvider()
-	m.loginChecked(loginCheckedMsg{notice: m.providerNotice,
+	m.loginChecked(loginCheckedMsg{
 		models: modelFetchMsg{provider: m.providerChecking, ids: []string{"chat-standard"}}})
 	return m
 }
@@ -249,9 +249,17 @@ func TestLogin6_TwoFieldsNameInTheNote(t *testing.T) {
 		t.Fatalf("saved %+v", c)
 	}
 	m.openProviderForm(nil)
-	m = pick(m, "https://api.example.com/v2")
+	m = pick(m, "https://api.example.com/v1")
 	if p := stripANSI(m.providerFormPanel()); !strings.Contains(p, "as example — replaces the example saved before") {
-		t.Errorf("a name in use:\n%s", p)
+		t.Errorf("the same address again:\n%s", p)
+	}
+	// Another address that makes the same name is numbered, never saved
+	// over the first (a clean first run: localhost and 127.0.0.1 were both
+	// "local", and the second login replaced the first).
+	m.openProviderForm(nil)
+	m = pick(m, "https://api.example.com/v2")
+	if p := stripANSI(m.providerFormPanel()); !strings.Contains(p, "as example-2 · /login rename changes it") {
+		t.Errorf("a name in use at another address:\n%s", p)
 	}
 }
 
@@ -286,8 +294,8 @@ func TestLogin6_EnterOnEmptyOpensTheForm(t *testing.T) {
 		t.Errorf("status: %q", got)
 	}
 	m = key(m, kEnter)
-	if !m.providerForm {
-		t.Fatal("enter on an empty composer did not open the login form")
+	if !m.loginPicking {
+		t.Fatal("enter on an empty composer did not open the login")
 	}
 	m = key(m, kEsc)
 	m = typeStr(m, "hi")
@@ -306,8 +314,8 @@ func TestLogin6_EnterOnTheLineOpensTheForm(t *testing.T) {
 		t.Fatalf("last entry is not the line: %q", stripANSI(m.convo[m.sel].collapsed))
 	}
 	m = key(m, kEnter)
-	if !m.providerForm || m.focus != focusInput {
-		t.Fatalf("form %v focus %d", m.providerForm, m.focus)
+	if !m.loginPicking || m.focus != focusInput {
+		t.Fatalf("login %v focus %d", m.loginPicking, m.focus)
 	}
 }
 
@@ -323,8 +331,8 @@ func TestLogin6_KeptLineGoesWhenLoginStarts(t *testing.T) {
 	}
 	m = typeStr(m, "/login")
 	m = key(m, kEnter)
-	if !m.providerForm || strings.Contains(stripANSI(convoText(m)), "kept your question") {
-		t.Fatalf("form %v, convo:\n%s", m.providerForm, stripANSI(convoText(m)))
+	if !m.loginPicking || strings.Contains(stripANSI(convoText(m)), "kept your question") {
+		t.Fatalf("login %v, convo:\n%s", m.loginPicking, stripANSI(convoText(m)))
 	}
 	m = key(m, kEsc)
 	if !strings.HasSuffix(stripANSI(convoText(m)), "⚠ "+heldLine) {
@@ -348,8 +356,8 @@ func TestLogin6_PhoneNoticeNotUnderThePicker(t *testing.T) {
 	v.m = key(v.m, kEnter)
 	v.m = typeStr(v.m, "/login")
 	v.m = key(v.m, kEnter)
-	v.m = pick(v.m, "http://127.0.0.1:39155/v1", "enter", "sk-test", "enter")
-	nm, _ := v.m.Update(loginCheckedMsg{notice: v.m.providerNotice, models: modelFetchMsg{provider: v.m.providerChecking,
+	v.m = pick(v.m, "enter", "http://127.0.0.1:39155/v1", "enter", "sk-test", "enter") // custom, first
+	nm, _ := v.m.Update(loginCheckedMsg{models: modelFetchMsg{provider: v.m.providerChecking,
 		ids: []string{"chat-fast", "chat-large", "chat-standard", "code-large", "code-standard", "embed-small", "vision-standard"}}})
 	v.m = nm.(tuiModel)
 	if !v.m.modelPicking || v.m.providerForm {
@@ -376,7 +384,7 @@ func TestPlaceholder6_CursorBeforeTheText(t *testing.T) {
 		t.Errorf("address field: %q", v)
 	}
 	m.openModelPicker("")
-	if v := stripANSI(m.modelQuery.View()); !strings.Contains(v, "/  type to search") {
+	if v := stripANSI(m.models.query.View()); !strings.Contains(v, "/  type to search") {
 		t.Errorf("model search: %q", v)
 	}
 	// The composer: the caret on the blank cell, the placeholder after it,

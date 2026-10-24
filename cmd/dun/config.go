@@ -149,6 +149,26 @@ func (c dunConfig) named(name string) (providerConfig, bool) {
 	return providerConfig{}, false
 }
 
+// freeName is a name for a new login at u: base, unless a saved provider
+// has it for another address, then base-2, base-3… — a second local server
+// is not saved over the first. A login again to the same address keeps the
+// name (and replaces that one).
+func (c dunConfig) freeName(base, u string) string {
+	if base == "" {
+		return ""
+	}
+	same := func(a, b string) bool { return strings.TrimRight(a, "/") == strings.TrimRight(b, "/") }
+	for i := 1; ; i++ {
+		n := base
+		if i > 1 {
+			n = fmt.Sprintf("%s-%d", base, i)
+		}
+		if p, ok := c.named(n); !ok || same(p.URL, u) {
+			return n
+		}
+	}
+}
+
 // providerOp is one change to the logged-in providers, from /login, /logout
 // or /model on any client.
 type providerOp struct {
@@ -397,37 +417,61 @@ func fetchModels(base, key string) []string {
 // body, or the network error — on a corporate network the reason (a 401, a
 // proxy, a certificate) is the whole diagnosis.
 func listModels(base, key string) ([]string, string) {
+	ids, f := askModels(&http.Client{Timeout: 6 * time.Second}, base, key)
+	return ids, f.why
+}
+
+// modelsFail is why a service gave no model list. refused: it answered
+// 401 or 403 (the key). unreachable: no try got an answer at all (nothing
+// listening, no such host, a timeout).
+type modelsFail struct {
+	why         string
+	refused     bool
+	unreachable bool
+}
+
+// askModels is listModels with the reason in parts, on client (the login's
+// check waits longer than a probe of a local server does).
+func askModels(client *http.Client, base, key string) ([]string, modelsFail) {
 	base = strings.TrimRight(base, "/")
-	client := &http.Client{Timeout: 6 * time.Second}
-	why := "no model list"
+	f := modelsFail{why: "no model list", unreachable: true}
 	for _, u := range []string{base + "/v1/models", base + "/models"} {
 		req, err := http.NewRequest(http.MethodGet, u, nil)
 		if err != nil {
-			why = err.Error()
+			f.why = err.Error()
 			continue
 		}
 		if key != "" {
 			req.Header.Set("Authorization", "Bearer "+key)
+			// Anthropic's chat takes the bearer key (its OpenAI-compatible
+			// endpoint); its model list is its own API's, which asks for the
+			// key and a version in headers of its own.
+			if req.URL.Hostname() == "api.anthropic.com" {
+				req.Header.Set("x-api-key", key)
+				req.Header.Set("anthropic-version", "2023-06-01")
+			}
 		}
 		req.Header.Set("Accept", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {
-			why = err.Error()
+			f.why = err.Error()
 			continue
 		}
+		f.unreachable = false
 		if resp.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 160))
 			resp.Body.Close()
-			why = fmt.Sprintf("%s: HTTP %d %s", u, resp.StatusCode, strings.Join(strings.Fields(string(b)), " "))
+			f.why = fmt.Sprintf("%s: HTTP %d %s", u, resp.StatusCode, strings.Join(strings.Fields(string(b)), " "))
+			f.refused = f.refused || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden
 			continue
 		}
 		ids := decodeModels(resp)
 		if len(ids) > 0 {
-			return ids, ""
+			return ids, modelsFail{}
 		}
-		why = u + ": an empty model list (the key may have no models)"
+		f.why = u + ": an empty model list (the key may have no models)"
 	}
-	return nil, why
+	return nil, f
 }
 
 func decodeModels(resp *http.Response) []string {

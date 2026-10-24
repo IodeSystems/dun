@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -107,10 +109,12 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	return m.openModelPicker("")
 }
 
-// loginSlash implements /login [name]: the form (a key typed in the composer
-// would be kept in the sent history), then the picker on that provider. A
-// name already logged in opens with its URL and keeps its key unless a new
-// one is typed. Changes go through applyProviderOp, as they do from the web.
+// loginSlash implements /login [name]: the service picker, then the form (a
+// key typed in the composer would be kept in the sent history), then the
+// model picker on that provider. A name already logged in opens the form
+// with its URL and keeps its key unless a new one is typed; a template's
+// name (/login openai) opens its form. Changes go through applyProviderOp,
+// as they do from the web.
 func loginSlash(m *tuiModel, args []string) tea.Cmd {
 	if len(args) == 3 && args[0] == "rename" {
 		m.loginRename(args[1], args[2])
@@ -124,11 +128,14 @@ func loginSlash(m *tuiModel, args []string) tea.Cmd {
 		if p, ok := loadConfig().named(args[0]); ok {
 			return m.openProviderForm(&p)
 		}
+		if t, ok := templateNamed(args[0]); ok {
+			return m.openTemplateForm(t, false)
+		}
 		cmd := m.openProviderForm(nil)
 		m.providerFields[fieldName].SetValue(args[0])
 		return cmd
 	}
-	return m.openProviderForm(nil)
+	return m.openLogin("")
 }
 
 // logoutSlash implements /logout <name>.
@@ -150,15 +157,8 @@ func logoutSlash(m *tuiModel, args []string) tea.Cmd {
 // provider for its models — but for those answered already (have: the
 // login's own check), whose rows are in it from the start.
 func (m *tuiModel) openModelPicker(query string, have ...modelFetchMsg) tea.Cmd {
-	q := textinput.New()
-	q.Placeholder = placeholder("type to search")
-	q.SetWidth(40) // without a width the placeholder shows as its first letter
-	q.Prompt = "/ "
-	q.SetValue(query)
-	q.CursorEnd()
-	q.Focus()
-	m.modelQuery = q
-	m.modelPicking, m.modelSel = true, 0
+	m.models = newPickList(query, "type to search")
+	m.modelPicking = true
 	m.modelRows, m.modelErrs = nil, nil
 	m.input.Blur()
 	ps := m.pickerProviders()
@@ -221,11 +221,11 @@ func (m *tuiModel) addModelRows(msg modelFetchMsg) {
 	}
 	rows := m.filteredModels()
 	if i := slices.Index(rows, cur); i >= 0 {
-		m.modelSel = i
+		m.models.sel = i
 		return
 	}
 	if !had {
-		m.modelSel = suggestedModel(rows)
+		m.models.sel = suggestedModel(rows)
 	}
 }
 
@@ -265,21 +265,13 @@ func modelKind(id string) string {
 
 // filteredModels returns the rows matching every word of the query.
 func (m tuiModel) filteredModels() []modelRow {
-	words := strings.Fields(strings.ToLower(m.modelQuery.Value()))
+	words := m.models.words()
 	if len(words) == 0 {
 		return m.modelRows
 	}
 	var out []modelRow
 	for _, r := range m.modelRows {
-		hay := strings.ToLower(r.provider + " " + r.id)
-		ok := true
-		for _, w := range words {
-			if !strings.Contains(hay, w) {
-				ok = false
-				break
-			}
-		}
-		if ok {
+		if matchWords(words, r.provider+" "+r.id) {
 			out = append(out, r)
 		}
 	}
@@ -288,15 +280,15 @@ func (m tuiModel) filteredModels() []modelRow {
 
 func (m tuiModel) selectedModel() (modelRow, bool) {
 	rows := m.filteredModels()
-	if m.modelSel < 0 || m.modelSel >= len(rows) {
+	if m.models.sel < 0 || m.models.sel >= len(rows) {
 		return modelRow{}, false
 	}
-	return rows[m.modelSel], true
+	return rows[m.models.sel], true
 }
 
 func (m *tuiModel) closeModelPicker() {
 	m.modelPicking = false
-	m.modelQuery.Blur()
+	m.models.query.Blur()
 	m.input.Focus()
 	m.refresh()
 }
@@ -304,35 +296,22 @@ func (m *tuiModel) closeModelPicker() {
 // updateModelPicking owns the keys while the model list is open. Printable
 // keys go to the search box, so moving is on the arrows and ctrl+p/ctrl+n.
 func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.loginPicking {
+		return m.updateLoginPicker(msg)
+	}
 	if m.providerForm {
 		return m.updateProviderForm(msg)
+	}
+	if m.models.move(msg.String(), len(m.filteredModels()), pickWindow(m.h)) {
+		m.refresh()
+		return m, nil
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.closeModelPicker()
 		return m, nil
-	case "up", "ctrl+p":
-		if m.modelSel > 0 {
-			m.modelSel--
-		}
-		m.refresh()
-		return m, nil
-	case "down", "ctrl+n":
-		if m.modelSel < len(m.filteredModels())-1 {
-			m.modelSel++
-		}
-		m.refresh()
-		return m, nil
-	case "pgup":
-		m.modelSel = max(0, m.modelSel-modelWindow)
-		m.refresh()
-		return m, nil
-	case "pgdown":
-		m.modelSel = max(0, min(len(m.filteredModels())-1, m.modelSel+modelWindow))
-		m.refresh()
-		return m, nil
 	case "ctrl+a":
-		return m, m.openProviderForm(nil)
+		return m, m.openLogin("")
 	case "enter", "alt+enter":
 		// The pick is the default for later sessions too: what a person picks
 		// is what they expect tomorrow. alt+enter is for this session only.
@@ -352,11 +331,9 @@ func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // typeModelQuery is a key or a paste in the model search box.
 func (m tuiModel) typeModelQuery(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	before := m.modelQuery.Value()
-	m.modelQuery, cmd = m.modelQuery.Update(msg)
-	if m.modelQuery.Value() != before {
-		m.modelSel = 0
+	cmd, changed := m.models.typeKey(msg)
+	if changed {
+		m.models.sel = 0
 	}
 	m.refresh()
 	return m, cmd
@@ -422,31 +399,24 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	return nil
 }
 
-const modelWindow = 10
-
 // modelPanel renders the model picker in the lower pane.
 func (m tuiModel) modelPanel() string {
+	if m.loginPicking {
+		return m.loginPanel()
+	}
 	if m.providerForm {
 		return m.providerFormPanel()
 	}
 	// The keys are on the status line (modelHint), like every other list's.
 	// One indent (listIndent) for the search line, the rows and the count.
-	rows := []string{stHeader.Render("pick a model"), listIndent + m.modelQuery.View()}
+	rows := []string{stHeader.Render("pick a model"), listIndent + m.models.query.View()}
 	// One service: its name on every row says nothing.
 	several := len(m.pickerProviders()) > 1 || slices.ContainsFunc(m.modelRows, func(r modelRow) bool { return r.provider != m.modelRows[0].provider })
 
 	shown := m.filteredModels()
-	lo := m.modelSel - modelWindow/2
-	if lo < 0 {
-		lo = 0
-	}
-	hi := lo + modelWindow
-	if hi > len(shown) {
-		hi = len(shown)
-		if lo = hi - modelWindow; lo < 0 {
-			lo = 0
-		}
-	}
+	window := pickWindow(m.h)
+	lo, hi := m.models.span(len(shown), window)
+	var list []string
 	width, idW := 0, 0
 	for _, r := range shown[lo:hi] {
 		width = max(width, len(r.provider))
@@ -470,11 +440,12 @@ func (m tuiModel) modelPanel() string {
 			tail = strings.Repeat(" ", idW-len(r.id)) + "  " + stDim.Render(strings.Join(post, " · "))
 		}
 		name := r.id
-		if modelKind(r.id) != "" && i != m.modelSel {
+		if modelKind(r.id) != "" && i != m.models.sel {
 			name = stDim.Render(r.id)
 		}
-		rows = append(rows, listRow(pre, name, tail, i == m.modelSel))
+		list = append(list, listRow(pre, name, tail, i == m.models.sel))
 	}
+	rows = append(rows, padPick(list, len(m.modelRows), window)...)
 
 	// A count only when the list does not all fit: "1-7 of 7" says nothing.
 	var status []string
@@ -490,11 +461,12 @@ func (m tuiModel) modelPanel() string {
 	if m.modelPending > 0 {
 		status = append(status, fmt.Sprintf("asking %s…", plural(m.modelPending, "service")))
 	}
-	if len(status) > 0 {
-		rows = append(rows, listIndent+stDim.Render(strings.Join(status, " · ")))
-	}
+	// Always a row, said or blank, so a count that comes and goes as the
+	// query narrows the list does not move the rows.
+	rows = append(rows, listIndent+stDim.Render(strings.Join(status, " · ")))
+	// A service's failure is said whole, wrapped, never cut at the edge.
 	for _, e := range m.modelErrs {
-		rows = append(rows, listIndent+stErr.Render(e))
+		rows = append(rows, wholeRows(e, m.w, listIndent, stErr)...)
 	}
 	return strings.Join(rows, "\n")
 }
@@ -508,9 +480,12 @@ func modelHint() string {
 
 // The login form's fields. It asks for two: the address, then the key. The
 // name is not asked (George, run 5: a step nobody needs on a first run): it
-// is filled in from the address as it is typed (nameFromURL), shown in the
+// is filled in from the address as it is typed (nameFromURL) or from the
+// template, numbered when another address has it (freeName), shown in the
 // form's note, and changed later with /login rename <old> <new>. /login
 // <name> names it up front; a service logged in to again keeps its name.
+// From a template the address is filled in and the key is asked first; a
+// local server's form has no key row.
 const (
 	fieldAddr = iota
 	fieldName
@@ -535,7 +510,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 	m.providerFields[fieldKey].EchoMode = textinput.EchoPassword
 	m.providerFields[fieldKey].EchoCharacter = '•'
 	m.providerStep, m.providerErr, m.providerEdit, m.providerAuto = fieldAddr, "", "", ""
-	m.providerChecking = ""
+	m.providerChecking, m.providerTmpl, m.providerEnvKey, m.providerBack = "", nil, "", false
 	// The kept question's line (or the not-logged-in one) said "type /login": done.
 	// esc puts it back (loginCancelled).
 	m.dropNeedLogin()
@@ -546,7 +521,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 		m.providerFields[fieldKey].Placeholder = placeholder("a new key (empty: keep it)")
 	}
 	m.providerFields[m.providerStep].Focus()
-	m.providerForm, m.modelPicking = true, true
+	m.providerForm, m.modelPicking, m.loginPicking = true, true, false
 	m.input.Blur()
 	m.refresh()
 	return textinput.Blink
@@ -559,7 +534,7 @@ func (m *tuiModel) providerMove(d int) {
 	if next == fieldName {
 		next += d
 	}
-	if next < 0 || next >= len(m.providerFields) {
+	if next < 0 || next > m.lastStep() {
 		return
 	}
 	m.providerFields[m.providerStep].Blur()
@@ -570,14 +545,15 @@ func (m *tuiModel) providerMove(d int) {
 func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
-		m.providerForm = false
-		m.closeModelPicker()
-		if m.providerChecking != "" {
-			// Saved already: only the list was not waited for.
-			m.appendNotice(convoEntry{collapsed: okNotice(m.providerNotice)})
-			m.providerChecking = ""
-			return m, nil
+		// Nothing is saved before the check passes: esc while it runs
+		// drops it (loginChecked finds the form gone).
+		m.providerForm, m.providerChecking = false, ""
+		if m.providerBack && msg.String() == "esc" {
+			m.loginPicking = true // the picker as it was left
+			m.refresh()
+			return m, textinput.Blink
 		}
+		m.closeModelPicker()
 		m.loginCancelled()
 		return m, nil
 	case "shift+tab", "up":
@@ -585,6 +561,9 @@ func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, textinput.Blink
 	case "enter", "tab", "down":
+		if m.providerChecking != "" {
+			return m, nil // the check is running
+		}
 		v := strings.TrimSpace(m.providerFields[m.providerStep].Value())
 		name := strings.TrimSpace(m.providerFields[fieldName].Value())
 		switch {
@@ -594,7 +573,7 @@ func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.providerErr = "the address needs a host: https://host/…"
 		case m.providerStep == fieldName && (v == "" || strings.ContainsAny(v, " \t")):
 			m.providerErr = "a name is one word"
-		case m.providerStep < fieldKey:
+		case m.providerStep < m.lastStep():
 			m.providerErr = ""
 			m.providerMove(1)
 		case msg.String() == "enter":
@@ -607,14 +586,21 @@ func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // typeProviderField is a key or a paste in the provider form's field. Typing
-// the address fills in the name as it goes, until the name is edited.
+// the address fills in the name as it goes, until the name is edited: the
+// template's, or one from the address, numbered when another address has
+// it (freeName).
 func (m tuiModel) typeProviderField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.providerFields[m.providerStep], cmd = m.providerFields[m.providerStep].Update(msg)
 	if m.providerStep == fieldAddr && m.providerEdit == "" {
 		name := &m.providerFields[fieldName]
 		if name.Value() == m.providerAuto {
-			m.providerAuto = nameFromURL(m.providerFields[fieldAddr].Value())
+			addr := strings.TrimRight(strings.TrimSpace(m.providerFields[fieldAddr].Value()), "/")
+			base := nameFromURL(addr)
+			if m.providerTmpl != nil {
+				base = m.providerTmpl.id
+			}
+			m.providerAuto = loadConfig().freeName(base, addr)
 			name.SetValue(m.providerAuto)
 			// SetValue keeps the cursor where the first fill put it (after
 			// one character); a person erasing the name starts at its end.
@@ -648,58 +634,81 @@ func nameFromURL(raw string) string {
 	return labels[len(labels)-2]
 }
 
-// saveProvider writes the form's provider to the config and opens the picker
-// filtered to it, which is also the check that the URL and key work.
+// saveProvider checks the form's service before anything is saved: it is
+// asked for its models with the address and key given. A refused key, or
+// nothing answering, is said in the form, which stays with what was typed;
+// an answer saves the login and opens the picker (loginChecked).
 func (m *tuiModel) saveProvider() tea.Cmd {
 	op := providerOp{Op: "login",
-		Name: strings.TrimSpace(m.providerFields[fieldName].Value()),
-		URL:  m.providerFields[fieldAddr].Value(),
-		Key:  m.providerFields[fieldKey].Value(),
+		Name: m.providerName(),
+		URL:  strings.TrimRight(strings.TrimSpace(m.providerFields[fieldAddr].Value()), "/"),
+		Key:  strings.TrimSpace(m.providerFields[fieldKey].Value()),
 	}
-	if m.providerEdit != "" {
-		op.Name = m.providerEdit
+	if op.Key == "" && m.providerEnvKey != "" && m.lastStep() == fieldKey {
+		op.Key = strings.TrimSpace(os.Getenv(m.providerEnvKey))
 	}
-	msg, err := applyProviderOp(op)
-	if err != nil {
-		m.providerErr = err.Error()
-		m.refresh()
-		return nil
+	key := op.Key
+	if p, ok := loadConfig().named(op.Name); ok && key == "" {
+		key = p.Key // again under a saved name: an empty key keeps it
+	}
+	if m.lastStep() == fieldAddr {
+		op.Key, key = "", "" // a local server: no key
 	}
 	// The form stays while the service is asked for its models; the
 	// answer closes it, says the login, and opens the picker already
 	// filled. A picker that opened empty and grew when the list came
 	// covered the login notice it had just pushed up (run 5, 49×21: "· key
 	// set" under the picker).
-	m.providerErr, m.providerChecking, m.providerNotice = "", op.Name, msg
+	m.providerErr, m.providerChecking, m.providerPending = "", op.Name, op
 	m.refresh()
-	p, _ := loadConfig().named(op.Name)
 	return func() tea.Msg {
-		ids, why := listModels(p.URL, p.Key)
-		r := modelFetchMsg{provider: p.Name, ids: ids}
+		ids, f := askModels(&http.Client{Timeout: 6 * time.Second}, op.URL, key)
+		r := loginCheckedMsg{models: modelFetchMsg{provider: op.Name, ids: ids}}
 		if len(ids) == 0 {
-			r = modelFetchMsg{provider: p.Name, err: why + " — /model use " + p.Name + " <model-id>, or /login " + p.Name + " again"}
+			r.models.err = f.why + " — /model use " + op.Name + " <model-id>, or /login " + op.Name + " again"
+			r.fail = f
 		}
-		return loginCheckedMsg{notice: msg, models: r}
+		return r
 	}
 }
 
-// loginCheckedMsg is the logged-in service's model list, asked before the
-// picker opens (saveProvider).
+// loginCheckedMsg is the answer to the login's check (saveProvider): the
+// service's model list, or why there is none.
 type loginCheckedMsg struct {
-	notice string
 	models modelFetchMsg
+	fail   modelsFail
 }
 
-// loginChecked closes the login form: the notice, then the picker with the
-// service's models in it. Filtered to the new service — unless it is the
-// only one, when the filter would only repeat its name.
+// loginChecked takes the check's answer. Refused or unreachable: said in
+// the form, nothing saved. Else the login is saved, the form closes, the
+// notice is said, and the picker opens with the service's models in it —
+// filtered to the new service, unless it is the only one, when the filter
+// would only repeat its name.
 func (m *tuiModel) loginChecked(msg loginCheckedMsg) tea.Cmd {
 	if !m.providerForm || m.providerChecking != msg.models.provider {
 		return nil // cancelled while it was asked
 	}
-	m.providerForm, m.providerChecking = false, ""
+	m.providerChecking = ""
+	if why := m.loginFail(m.providerPending.URL, msg.fail); why != "" {
+		m.providerErr = why
+		if msg.fail.refused && m.providerStep != fieldKey && m.lastStep() == fieldKey {
+			m.providerMove(fieldKey - m.providerStep)
+		}
+		m.refresh()
+		return textinput.Blink
+	}
+	notice, err := applyProviderOp(m.providerPending)
+	if err != nil {
+		m.providerErr = err.Error()
+		m.refresh()
+		return nil
+	}
+	if m.providerEnvKey != "" && strings.TrimSpace(m.providerFields[fieldKey].Value()) == "" {
+		notice += " from $" + m.providerEnvKey
+	}
+	m.providerForm = false
 	m.dropNeedLogin() // no longer true
-	m.appendNotice(convoEntry{collapsed: okNotice(msg.notice)})
+	m.appendNotice(convoEntry{collapsed: okNotice(notice)})
 	query := msg.models.provider + " "
 	if len(m.pickerProviders()) <= 1 {
 		query = ""
@@ -709,22 +718,36 @@ func (m *tuiModel) loginChecked(msg loginCheckedMsg) tea.Cmd {
 
 func (m tuiModel) providerFormPanel() string {
 	labels := [3]string{fieldAddr: "address", fieldName: "name", fieldKey: "key"}
-	title := "log in to an AI service"
-	if m.providerEdit != "" {
+	title := "custom: an OpenAI-compatible service"
+	switch {
+	case m.providerEdit != "":
 		title = "log in to " + m.providerEdit + " again"
+	case m.providerTmpl != nil:
+		title = "log in to " + m.providerTmpl.label
 	}
 	rows := []string{stHeader.Render(title)}
-	for _, i := range []int{fieldAddr, fieldKey} {
-		rows = append(rows, formRow(labels[i], i == m.providerStep, m.providerFields[i].View()))
+	for i := fieldAddr; i <= m.lastStep(); i++ {
+		if i != fieldName {
+			rows = append(rows, formRow(labels[i], i == m.providerStep, m.providerFields[i].View()))
+		}
 	}
 	switch {
 	case m.providerChecking != "":
-		rows = append(rows, "  "+stDim.Render("asking "+m.providerChecking+" for its models…"))
+		rows = append(rows, "  "+stDim.Render("checking "+hostPort(m.providerPending.URL)+"…"))
 	case m.providerErr != "":
-		rows = append(rows, "  "+stErr.Render(m.providerErr))
+		// Said whole: the reason (a 401, a refused connection) is the fix.
+		rows = append(rows, wholeRows(m.providerErr, m.w, "  ", stErr)...)
 	}
 	// "privately": saveConfig keeps the file 0600 (only you can read it).
 	notes := []string{"saved privately to " + tildePath(configPath())}
+	if t := m.providerTmpl; t != nil && m.providerEdit == "" {
+		switch {
+		case t.local():
+			notes = append(notes, t.label+" runs on this computer: no key")
+		case m.providerEnvKey == "" && t.keysAt != "":
+			notes = append(notes, "get a key at "+t.keysAt)
+		}
+	}
 	// Always a row, so the form does not grow as the address is typed.
 	if n := m.providerName(); m.providerEdit == "" {
 		switch _, ok := loadConfig().named(n); {
@@ -752,10 +775,14 @@ func (m tuiModel) providerName() string {
 // providerHint is the login form's status line.
 func (m tuiModel) providerHint() string {
 	enter := "enter next"
-	if m.providerStep == fieldKey {
+	if m.providerStep == m.lastStep() {
 		enter = "enter log in"
 	}
-	return formKeys("log in", enter)
+	keys := formKeys("log in", enter)
+	if m.providerBack {
+		keys = strings.Replace(keys, "esc cancel", "esc back", 1)
+	}
+	return keys
 }
 
 // loginRename is /login rename <old> <new>: the saved service's name, the
