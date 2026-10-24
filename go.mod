@@ -21,6 +21,7 @@ require (
 	github.com/iodesystems/gwag/v2 v2.3.1
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261016124120-4811d7e34ea3
+	golang.org/x/crypto v0.58.0
 	golang.org/x/image v0.45.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.49.0
