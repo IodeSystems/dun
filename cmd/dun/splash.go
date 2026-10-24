@@ -65,7 +65,7 @@ func (m tuiModel) splashSections(w int, short bool) []statusSection {
 	return []statusSection{
 		{label: "folder", value: tildePath(m.workspace)},
 		{label: "model", value: m.modelValue()},
-		{label: "servers", value: m.serversValue(vw)},
+		{label: "mcp", value: m.mcpValue(vw)},
 		{label: "extensions", value: m.extensionsValue(vw)},
 		{label: "skills", value: m.skillsValue()},
 		{label: files, value: m.filesValue()},
@@ -104,43 +104,52 @@ func (m tuiModel) modelValue() string {
 	return stDim.Render("none yet")
 }
 
-// serversValue is every server that is not an optional extension — the
-// built-in ones (poly-lsp) included: starting (for how long), failed,
-// running (with its tools), or off, in that order, so what is changing is
-// what a narrow row keeps. Narrow, the tool counts go first.
-func (m tuiModel) serversValue(w int) string {
-	var short, shortest, long []string
+// mcpValue is the MCP servers that are not optional extensions — the
+// built-in ones (poly-lsp) included — as counts, not names: how many, any
+// that are starting or did not start, their tools and the tokens those tools
+// cost, and /mcp for the list. A server starting or failed is named: the
+// one thing on the row that is changing, or wrong (USER 2026-10-24: "people know what mcp is";
+// a list of names cut at a word said less). Narrow, the words go first.
+func (m tuiModel) mcpValue(w int) string {
+	var n, tools int
+	var trouble []string
+	ids := map[string]bool{}
 	for _, st := range m.splashServers() {
 		if isExtension(st) && st.Err == "" {
 			continue // the extensions row
 		}
-		s := st.ID + " "
-		var tools string
-		on := s // the phone's form: "on" for running
+		n++
+		ids[st.ID] = true
 		switch {
 		case st.Starting:
-			s += stDim.Render("starting" + m.startedFor(st.ID))
-			on = s
+			trouble = append(trouble, st.ID+stDim.Render(" starting"+m.startedFor(st.ID)))
 		case st.Err != "":
-			s += stErr.Render("did not start")
-			on = s
+			trouble = append(trouble, st.ID+" "+stErr.Render("did not start"))
 		case st.Running:
-			s += stOK.Render("running")
-			on += stOK.Render("on")
-			if st.Tools > 0 {
-				tools = stDim.Render(" · " + plural(st.Tools, "tool"))
-			}
-		default:
-			s += stDim.Render("off")
-			on = s
+			tools += st.Tools
 		}
-		short, shortest, long = append(short, s), append(shortest, on), append(long, s+tools)
 	}
-	if len(long) == 0 {
-		return stDim.Render("none yet")
+	if n == 0 {
+		return stDim.Render("none yet — /mcp add")
 	}
-	join := func(rows []string) string { return strings.Join(rows, stDim.Render(" · ")) }
-	return firstFit(w, join(long), join(short), join(shortest))
+	head := plural(n, "server")
+	for _, t := range trouble {
+		head += stDim.Render(" · ") + t
+	}
+	tok := 0
+	for _, p := range m.ctxStats.systemParts {
+		if id, ok := strings.CutPrefix(p.Name, "mcp: "); ok && ids[id] {
+			tok += p.Tokens
+		}
+	}
+	sep := stDim.Render(" · ")
+	ts := plural(tools, "tool")
+	if m.ctxStats.systemTokens == 0 {
+		return firstFit(w, head+sep+ts+sep+stDim.Render("/mcp"), head+sep+ts, head)
+	}
+	k := "~" + tokN(tok)
+	return firstFit(w, head+sep+ts+sep+k+" tokens"+sep+stDim.Render("/mcp"),
+		head+sep+ts+sep+k+sep+stDim.Render("/mcp"), head+sep+ts+sep+k, head+sep+ts, head)
 }
 
 // splashServers are the servers in the order this TUI first saw them: a

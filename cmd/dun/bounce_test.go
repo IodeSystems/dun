@@ -83,12 +83,12 @@ func TestNoBounce_LiveSplashRewritesItsRowsInPlace(t *testing.T) {
 
 			v.event(serversEvent(false))
 			s := stripANSI(v.m.convo[0].collapsed)
-			if !strings.Contains(s, "notes running") {
-				t.Fatalf("the splash does not say notes is running:\n%s", s)
+			if !strings.Contains(s, "mcp            3 servers · 2 tools") {
+				t.Fatalf("the splash does not count notes:\n%s", s)
 			}
 			v.event(serversEvent(true))
 			s = stripANSI(v.m.convo[0].collapsed)
-			if !strings.Contains(s, "extensions     raglit on\n") || !strings.Contains(s, "poly-lsp off") {
+			if !strings.Contains(s, "extensions     raglit on\n") {
 				t.Fatalf("the extensions row does not follow the switch:\n%s", s)
 			}
 			if got := v.m.frame.blockH[0]; got != h {
