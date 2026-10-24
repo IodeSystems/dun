@@ -2346,7 +2346,7 @@ region goes instead of being ported.
   (`TestTUI_ScreenDump` looks for the header, not "1 tool").
 - **Walk:** waits changed — step 02 on "kept your question", step 09 on
   "notes added" ("running" now matches the splash). Run dir:
-  `RUNDIR_PATH`. Every PNG looked at.
+  `tmp/ux-run-onboarding-20261023-212154` (worktree agent-ae92fafa0ca5f6ec1). Every PNG looked at.
 - **Ives brief:** "Owner decisions" — the half-line focus cue is the
   owner's; never recommend dimming a pane for focus.
 - **Open / for the owner:** the notes call renders as `⚙ 1 step —
