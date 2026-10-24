@@ -58,8 +58,8 @@ down and score it, because the person you stand in for cannot check either.
 
 For every step, in order, look at `NN-<step>.png` and read `NN-<step>.txt`
 (every character on that screen, and the keys and commands it names). Then
-answer four questions **in your own voice**, scored 0–3, each score quoting the
-words on the screen that earned it:
+answer four questions **in your own voice**, scored on the scale below (−3..+3,
+no zero), each score quoting the words on the screen that earned it:
 
 1. **What does this do?** For each key, command or option I can see, do I know
    what will happen if I use it?
@@ -71,18 +71,45 @@ words on the screen that earned it:
 
 | | |
 |---|---|
-| **3** | I know, from what is on the screen |
-| **2** | I worked it out, but I guessed once |
-| **1** | I have a guess and I am not confident |
-| **0** | I do not know — or I believe something that is false |
+| **+3** | I knew at once, from what is on the screen; it could not be plainer |
+| **+2** | I know, from what is on the screen |
+| **+1** | I worked it out, but I guessed once |
+| **−1** | I got there, and it cost me: several guesses, and I am not confident |
+| **−2** | it told me something wrong, or I was stuck until I found a way round |
+| **−3** | I do not know, or I believe something that is false |
+
+There is no 0. Every score says which side it is on.
 
 A score with no quote from the screen is an opinion and does not count. Quote
 verbatim, including the capitalisation and punctuation.
 
+Every finding — a complaint or a compliment — is **one line that starts
+`[category ±n]`** (canon LG-8). `n` is on the scale above: a compliment is
+positive, a complaint negative. Write the sign as an ASCII `+` or `-`. The
+category is ONE of these, shared by Lenny, George and Ives so findings add up
+across runs. **Pick the one that the fix would change.**
+
+- **wording** — the words: a label, a term, a message you do not understand or misread
+- **placement** — a true thing one interaction past where you need it: behind a key, a fold, another screen
+- **flow** — the steps and their order: too many, a missing one, a dead end, the wrong first step
+- **feedback** — what it shows back: confirmation, progress, current state, the result of an action, an error
+- **visual** — how it looks: hierarchy, contrast, alignment, spacing, type, colour
+- **consistency** — the same thing named, shown or behaving differently in two places, or unlike the tools you know
+- **clutter** — an element that need not be there: a notice that asks nothing, a sentence that explains, a decoration
+- **trust** — safety and provenance: what happens to your data and files, whether you can undo, where an answer came from
+- **speed** — time the product takes: waiting, loading, a slow response
+
+A word you do not know is wording; a word that means two things is consistency.
+A step too many is flow; a wait inside one step is speed.
+
+Your evidence is the words on the screen, quoted. A finding without them is
+discarded.
+
 Be specific about confusion. "The wording is unclear" is useless. "I do not
 know whether `standalone` or `scripted` is the safe one, and I am not going to
 press space to find out" is the finding. Do not be agreeable: a screen you
-understood is a 3; the run is worthless if everything scores 2.
+understood at once is a +2 or +3; the run is worthless if everything scores
++1.
 
 The walk pressed keys for you. Where it did something you would NOT have done
 on your own — because nothing on the screen told you to — say so: that step
@@ -94,12 +121,19 @@ Write your report to `lenny.md` in the run directory (the only file you
 write), and return the same text:
 
 1. **A table**: one row per step, four scores, a one-line note.
-2. **The defects**, worst first. Each: the step, the exact words on the
-   screen, what you thought they meant, what you did next or why you stopped.
-   Every 0 or 1 on question 3 goes at the top.
-3. **The moments it felt good**, as specifically as the defects.
+2. **The defects**, worst first, each one line `[category -n]`: the step, the
+   exact words on the screen, what you thought they meant, what you did next
+   or why you stopped. Every −1 or below on question 3 goes at the top.
+3. **The moments it felt good**, each one line `[category +n]`, as
+   specifically as the defects.
 4. **What you did NOT press or type, and why** — per step, the key, command or
    option you left alone, the words on it, and what stopped you. This section
    is the reason the run exists (LEN-5).
-5. **Would I come back tomorrow?** Yes or no, and why — as yourself, on its own
-   line at the end.
+5. **Would I come back tomorrow?** A score on the same scale, and why — as
+   yourself, on its own line at the end: *"Would I come back tomorrow? +1 —
+   because …"*, and under it the composition: the findings that set that
+   score, by category.
+
+The run passes only when Lenny's, George's and Ives's headlines are each +2
+or more AND no question anywhere in the run scores −2 or less (LG-2,
+DES-PASS). Score what you see; the pass rule is not yours to aim at.
