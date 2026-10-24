@@ -28,10 +28,14 @@ type State struct {
 	Published string    `json:"published,omitempty"` // and its publication time
 	Keys      []string  `json:"keys,omitempty"`      // next keys endorsed by a trusted one
 	Staged    string    `json:"staged,omitempty"`    // the version last installed
+	Error     string    `json:"error,omitempty"`     // what the last check ran into
 }
 
 // StateFile is the check's state in dun's home.
 func StateFile(home string) string { return filepath.Join(home, "update.json") }
+
+// LoadState reads the check's state ("" fields when there is none).
+func LoadState(path string) State { return loadState(path) }
 
 func loadState(path string) State {
 	var s State
@@ -81,7 +85,7 @@ type Result struct {
 var ErrNotDue = errors.New("checked less than a day ago")
 
 // Run checks once, unless the last check was less than Interval ago.
-func (u *Updater) Run(ctx context.Context) (Result, error) {
+func (u *Updater) Run(ctx context.Context) (res Result, err error) {
 	now := time.Now
 	if u.Now != nil {
 		now = u.Now
@@ -101,7 +105,14 @@ func (u *Updater) Run(ctx context.Context) (Result, error) {
 	if err := saveState(sf, st); err != nil {
 		return Result{}, err
 	}
-	res := Result{Checked: true, From: u.Current}
+	res = Result{Checked: true, From: u.Current}
+	defer func() { // what the last check ran into, for dun doctor
+		st.Error = ""
+		if err != nil {
+			st.Error = err.Error()
+		}
+		_ = saveState(sf, st)
+	}()
 
 	body, err := u.Fetch.Small(ctx, u.ManifestURL, MaxManifest)
 	if err != nil {
@@ -159,8 +170,6 @@ func (u *Updater) Run(ctx context.Context) (Result, error) {
 		return res, err
 	}
 	st.Staged = a.Version
-	_ = saveState(sf, st)
 	res.Staged, res.To, res.Summary = true, a.Version, m.Summary
 	return res, nil
 }
-

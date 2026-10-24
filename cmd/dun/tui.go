@@ -107,6 +107,7 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	m.disableExit = o.disableExit
 	m.lc = lc
 	m.opts = o // for respawning the engine (see eofMsg)
+	m.checkUpdates = true
 	// Alt screen, mouse mode and keyboard enhancements are View fields (View).
 	// Bubble Tea v2 asks for the kitty keyboard protocol (flags=1) and xterm
 	// modifyOtherKeys itself, decodes both, and puts the terminal back at exit.
@@ -728,6 +729,9 @@ type tuiModel struct {
 	reloadVer   string        // a newer build the launcher announced ("" = none)
 	reloadReq   bool          // /reload requested → runTUI re-execs after quit
 	upgrade     *upgradeState // a pending dund upgrade (upgrade.go); nil = none
+	// checkUpdates: a release build's daily check runs behind the first
+	// frame (release.go); set by runTUI only.
+	checkUpdates bool
 	// Engine supervision: the TUI outlives its engine. opts is what respawning
 	// one takes, sessionID reattaches it to the same conversation, and the
 	// restart counters stop a crash loop from spinning forever.
@@ -861,6 +865,9 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spin.Tick, m.input.BlinkTick(), waitForDump(m.dumpSig), waitReload(m.lc)}
+	if m.checkUpdates {
+		cmds = append(cmds, func() tea.Msg { return updateNoteMsg(releaseUpdate()) })
+	}
 	if m.proc != nil {
 		cmds = append(cmds, waitEvent(m.proc))
 	} else {
@@ -872,6 +879,9 @@ func (m tuiModel) Init() tea.Cmd {
 
 // reloadMsg carries a newer build version the launcher announced.
 type reloadMsg string
+
+// updateNoteMsg is the release check's line ("" for none).
+type updateNoteMsg string
 
 // waitReload blocks on the launcher's reload channel (nil-safe) and turns a
 // "new build" push into a reloadMsg. Re-armed after each one.
@@ -1640,6 +1650,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.PasteMsg:
 		return m.paste(msg)
+
+	case updateNoteMsg:
+		// The release check's one line: a new build in place, or a refused one.
+		if msg != "" {
+			m.append(stNote.Render(string(msg)))
+			m.refresh()
+		}
+		return m, nil
 
 	case reloadMsg:
 		m.reloadVer = string(msg) // header shows "↻ …"; /reload restarts
@@ -4506,7 +4524,16 @@ func init() {
 			m.reloadReq = true
 			return tea.Quit
 		}},
-		{"upgrade", "[now]", "dund's pending upgrade: what it waits for; now restarts it at once (cut work resumes after)", func(m *tuiModel, args []string) tea.Cmd {
+		{"upgrade", "[now|off|on]", "dund's pending upgrade: what it waits for; now restarts it at once (cut work resumes after); off|on: a release build's daily update check", func(m *tuiModel, args []string) tea.Cmd {
+			if len(args) > 0 && (args[0] == "off" || args[0] == "on") {
+				line, err := upgradeSwitch(args[0] == "on")
+				if err != nil {
+					m.append(stErr.Render("updates: not saved: " + err.Error()))
+					return nil
+				}
+				m.append(stDim.Render(line))
+				return nil
+			}
 			if m.upgrade == nil {
 				m.append(stDim.Render("no dund upgrade is pending"))
 				return nil

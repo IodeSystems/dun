@@ -57,6 +57,9 @@ type dunConfig struct {
 	// refused. See images.go.
 	VisionModel    string `json:"vision_model,omitempty"`
 	VisionProvider string `json:"vision_provider,omitempty"`
+	// NoUpdates is /upgrade off: a release build does not check for new
+	// releases (release.go). Other builds never do.
+	NoUpdates bool `json:"no_updates,omitempty"`
 }
 
 // providerConfig is one OpenAI-compatible endpoint: /v1/models and

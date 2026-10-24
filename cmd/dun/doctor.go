@@ -19,6 +19,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/proto"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +35,13 @@ import (
 // `go install` from its iodesystems module (built from source, checked
 // against the Go checksum database) when Go is on PATH, beside dun when that
 // directory is writable — where the engine looks after PATH (dun.FindCommand).
-// Nothing is downloaded from anywhere else.
+// A release build instead downloads a missing mcpshell or poly-lsp-mcp from
+// the release the build was made with, checked against the sha256 pinned in
+// the build (release.Deps), and falls back to go install for a tool it has
+// no pin for. Nothing is downloaded from anywhere else.
+//
+// Each binary's origin is said too (release, go install, a checkout), read
+// from its build info: it decides how that binary updates.
 
 type finding struct {
 	level, area, detail, fix string // level: ok, warn, fail
@@ -60,7 +67,7 @@ func doctorCmd() *cobra.Command {
 			"engines run (on your PATH and the service's), dund and its build, the service,\n" +
 			"and a self-updating build's source and Go. Exits 1 when a check fails.\n\n" +
 			"--fix runs the fixes that are one command, saying each before it runs, then\n" +
-			"checks again:\n  " + strings.Join(fixableNames, "\n  ") + "\n" +
+			"checks again:\n  " + strings.Join(fixNames(), "\n  ") + "\n" +
 			"The others need you: a login, a model pick, an install.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -82,6 +89,14 @@ var fixableNames = []string{
 	"mcpshell missing: go install it (when Go is here)",
 	"a config file others can read: chmod 600",
 	"a service on another build: dun dund service restart",
+}
+
+// fixNames is fixableNames, with a release build's downloads.
+func fixNames() []string {
+	if !isRelease() {
+		return fixableNames
+	}
+	return append([]string{"mcpshell, poly-lsp-mcp missing: download the release this build pins (sha256 in the build)"}, fixableNames...)
 }
 
 // fixable is the action that applies f's fix, or nil when the fix needs the
@@ -244,16 +259,30 @@ func (d *doctor) tools() {
 		if svcInstalled && svcHasPATH && lookIn(svcPATH, t.name) == "" && !besideDun(p) {
 			d.add(level, "tool", t.name+": "+p+", but not on the service's PATH",
 				"reinstall the service from this shell to capture its PATH: dun dund service install -- <flags>")
-			continue
+		} else {
+			d.add("ok", "tool", t.name+": "+p, "")
 		}
-		d.add("ok", "tool", t.name+": "+p, "")
+		if t.name != "git" {
+			d.toolOrigin(t.name, p)
+		}
 	}
 }
 
-// install runs --fix's install of name, or says why it did not.
+// install runs --fix's install of name, or says why it did not. A release
+// build installs what its pinned manifest has, and go-installs the rest.
 func (d *doctor) install(name string) (string, error) {
+	if !d.fix {
+		return "", errNotFixed
+	}
+	if _, _, ok := pinnedTool(name); ok {
+		p, err := installPinned(name)
+		if err != nil {
+			return "", fmt.Errorf("download %s: %w", name, err)
+		}
+		return p, nil
+	}
 	inst, ok := dun.ToolInstall[name]
-	if !d.fix || !fixTools[name] || !ok {
+	if !fixTools[name] || !ok {
 		return "", errNotFixed
 	}
 	if _, err := exec.LookPath("go"); err != nil {
@@ -279,6 +308,9 @@ var (
 // toolFix is the install step for a tool that is not there.
 func toolFix(name string, err error) string {
 	inst, ok := dun.ToolInstall[name]
+	if a, _, pinned := pinnedTool(name); pinned && errors.Is(err, errNotFixed) {
+		return "dun doctor --fix (downloads " + name + " " + a.Version + " from its release; the sha256 is pinned in this build)"
+	}
 	switch {
 	case !ok:
 		return "install it, or put its directory on PATH"
@@ -485,9 +517,24 @@ func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
 	}
 }
 
+// build says how this dun was built and how it updates: a release from the
+// signed manifest, a go install build by go install, a checkout's build by
+// rebuilding itself from the checkout.
 func (d *doctor) build() {
-	if srcDir == "" {
-		d.add("ok", "build", "a release build (no self-update)", "")
+	o := selfOrigin()
+	fix := ""
+	if o.Kind == update.GoInstall {
+		fix = "to update: go install github.com/iodesystems/dun/cmd/dun@latest"
+	}
+	d.add("ok", "origin", "dun: "+o.String(), fix)
+	switch {
+	case o.Kind == update.Release:
+		d.releaseBuild()
+		return
+	case srcDir == "" && o.Kind == update.GoInstall:
+		return
+	case srcDir == "":
+		d.add("ok", "build", "it does not update itself", "make install from a checkout builds one that does")
 		return
 	}
 	mod, err := os.ReadFile(filepath.Join(srcDir, "go.mod"))
