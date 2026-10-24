@@ -4,7 +4,7 @@
   "role": "the owner of a small project on your own computer; nobody else has set anything up for you",
   "goal": "I want an assistant in my terminal that can help me with this project.",
   "note": "First walk of dun (2026-10-23). Arrival: dun is installed and has never been run; the project folder is yours, with its history; you start dun inside it.",
-  "sizes": ["48x24", "100x30", "180x50"],
+  "sizes": ["49x22", "100x30", "180x50"],
   "typing_ms": 45,
   "steps": [
     {
