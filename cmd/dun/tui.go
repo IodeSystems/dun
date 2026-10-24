@@ -3926,10 +3926,10 @@ func (m *tuiModel) refresh() {
 	// In convo focus, gutter every block (selected one bright) so the highlight
 	// aligns and the selected message shows a left border down its full height.
 	selMode := m.focus == focusConvo && !m.asking && len(blocks) > 0
-	width := m.vp.Width
-	if selMode {
-		width-- // reserve ONE column for the gutter bar — minimal reflow on focus
-	}
+	// The gutter's column is reserved in every focus, so moving focus never
+	// re-wraps: reserved only in convo focus, a row that filled the pane
+	// broke in two when the conversation took the keys (USER 2026-10-24).
+	width := m.vp.Width - 1
 	wrapW := max(1, width)
 	if curAt >= 0 {
 		// The streaming reply renders the way it will once finished: its
@@ -4025,12 +4025,10 @@ func (m *tuiModel) refresh() {
 		case i == len(m.convo) && replyShown(m.cur):
 			w = holdHeight(w, &m.curMaxH, &m.curMaxKey, heightKey(wrapW, viewMinimized))
 		}
-		if selMode {
-			if i == m.sel {
-				w = addGutter(w, "▎", stSel)
-			} else {
-				w = addGutter(w, " ", lipgloss.NewStyle())
-			}
+		if selMode && i == m.sel {
+			w = addGutter(w, "▎", stSel)
+		} else {
+			w = addGutter(w, " ", lipgloss.NewStyle())
 		}
 		if selMode && i == m.sel && band.on() {
 			// The band is drawn over the finished rows, and they are kept as

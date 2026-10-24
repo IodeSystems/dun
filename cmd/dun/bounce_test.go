@@ -160,7 +160,7 @@ func TestNoBounce_ClosingABlockKeepsTheTopRow(t *testing.T) {
 	if v.m.convoHold != 0 {
 		t.Errorf("the hold outlived the content that passed it: %d", v.m.convoHold)
 	}
-	if last := shown(v)[len(shown(v))-1]; last != "new row 14" {
+	if last := shown(v)[len(shown(v))-1]; strings.TrimSpace(last) != "new row 14" {
 		t.Errorf("the pinned view does not follow the new rows: last row %q", last)
 	}
 }

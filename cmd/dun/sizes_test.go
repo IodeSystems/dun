@@ -29,7 +29,7 @@ func TestPhone_CallLineEndsAtAWord(t *testing.T) {
 		t.Fatalf("no call row:\n%s", strings.Join(shown(v), "\n"))
 	}
 	all := strings.Join(shown(v), "\n")
-	if strings.TrimSpace(row) != "✓ notes · project notes" || !strings.Contains(all, "  → Notes: keep the greeting short. Release on\n    Fridays.") {
+	if strings.TrimSpace(row) != "✓ notes · project notes" || !strings.Contains(all, "   → Notes: keep the greeting short. Release on\n     Fridays.") {
 		t.Errorf("call row %q, preview:\n%s", row, all)
 	}
 	for _, l := range shown(v) {

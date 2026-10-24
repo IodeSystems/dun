@@ -173,13 +173,8 @@ func (m tuiModel) mouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // doubleClick is how close two clicks on one line are to count as a double.
 const doubleClick = 400 * time.Millisecond
 
-// gutterW is the columns refresh puts left of every block in convo focus.
-func (m tuiModel) gutterW() int {
-	if m.focus == focusConvo && !m.asking && len(m.convo) > 0 {
-		return 1
-	}
-	return 0
-}
+// gutterW is the columns refresh puts left of every block, in every focus.
+func (m tuiModel) gutterW() int { return 1 }
 
 // convoClick is a click on pane line `line`.
 func (m tuiModel) convoClick(line int) (tea.Model, tea.Cmd) {

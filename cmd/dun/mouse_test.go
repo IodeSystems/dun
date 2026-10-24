@@ -244,10 +244,10 @@ func TestMouse_DragCopiesAndKeyClears(t *testing.T) {
 	}
 	nm, _ = m.Update(cmd())
 	m = nm.(tuiModel)
-	if m.flashText != "copied 15 chars → terminal" { // "message 0\nmessa"
+	if m.flashText != "copied 14 chars → terminal" { // "message 0\nmess": x 4 is past the gutter column
 		t.Errorf("flash %q", m.flashText)
 	}
-	if len(wrote) != 1 || wrote[0] != osc52("message 0\nmessa") || len(ran) != 0 {
+	if len(wrote) != 1 || wrote[0] != osc52("message 0\nmess") || len(ran) != 0 {
 		t.Errorf("outside tmux, no native tool: OSC 52 only; wrote %q ran %q", wrote, ran)
 	}
 	// esc clears the highlight and does nothing else.
@@ -255,7 +255,7 @@ func TestMouse_DragCopiesAndKeyClears(t *testing.T) {
 	if m.drag.on || strings.Contains(m.View().Content, "\x1b[0;7m") {
 		t.Error("esc should clear the highlight")
 	}
-	if m.flashText != "copied 15 chars → terminal" {
+	if m.flashText != "copied 14 chars → terminal" {
 		t.Errorf("esc did more than clear: flash %q", m.flashText)
 	}
 	// Any other key clears it too, and still does its job.
