@@ -210,7 +210,7 @@ when there are any).
 |---|---|
 | tab / shift+tab | move between zones — the only keys that do. In the `/` palette tab completes first. The activity zone is skipped when it has nothing in it; a finished or failed job keeps it reachable. |
 | ← → ↑ ↓ | act inside the focused zone only (cursor, select, open/close a block, scroll). At an edge they stop. → on an empty composer accepts the suggestion; ← leaves an agent's view. |
-| ctrl+tab | type a literal tab in the composer. Needs a terminal that answers dun's kitty keyboard protocol probe (kitty, ghostty, wezterm, foot; dun then also asks for xterm modifyOtherKeys) and so reports ctrl+tab as its own key. Any other terminal sends plain tab for ctrl+tab, and that cannot be told apart. Through tmux and in the browser (`dun -serve`, where the browser keeps ctrl+tab) it is not verified / not available. A pasted tab is always kept. |
+| ctrl+tab | type a literal tab in the composer. Needs a terminal that reports ctrl+tab as its own key: dun asks for the kitty keyboard protocol and xterm modifyOtherKeys at start (kitty, ghostty, wezterm, foot, xterm). Any other terminal sends plain tab for ctrl+tab, and that cannot be told apart. Inside tmux it needs `set -g extended-keys on` (seen working with `always` and `extended-keys-format csi-u`). In the browser (`dun -serve`) the browser keeps ctrl+tab. A pasted tab is always kept. |
 | alt+enter / shift+enter / ctrl+j | newline in the composer |
 | esc | one level out: a search, a box, the conversation's selection, the activity zone (back to the composer), an agent's view, then interrupt a running turn |
 | → / enter on a job | the job view: the command on top (open; enter/→/← shut and open it), the log under it as a tail that follows while the job runs. ↑/↓ pgup/pgdn g/G scroll, `/` `?` search, `n`/`N` step, ← or esc back. `x` on a job row kills it. |
@@ -296,10 +296,10 @@ names the message type behind the slowest frame. dun also notices its own
 stutter: past a tenth of frames over 16ms it says so once and writes a dump.
 `DUN_PPROF=127.0.0.1:6060` serves `net/http/pprof` from any mode.
 
-**A mangled screen.** `/repaint` clears the screen and the scroll region,
-resets the terminal modes a stray write can change (alt screen, colours,
-charset, margins), asks for the size again and redraws everything from
-dun's state. First it saves a capture to `$DUN_HOME/bugreports/<time>/`
+**A mangled screen.** `/repaint` clears the screen, resets the terminal
+modes a stray write can change (alt screen, colours, charset, margins,
+mouse, bracketed paste, cursor), asks for the size again and redraws
+everything from dun's state. First it saves a capture to `$DUN_HOME/bugreports/<time>/`
 (mode 0700): the screen dun believes it drew, what the terminal shows
 (inside tmux, from `capture-pane`), a row-by-row diff of the two, the
 sizes, layout and terminal settings, and the last 200 UI messages.

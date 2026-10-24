@@ -181,7 +181,12 @@ estimate)
 
 ### ✅ 32. Focus by tab only; ctrl+tab types a tab; the job view — done
 2026-10-23, see done.md (open: not run live in a real terminal; ctrl+tab
-only where the kitty probe succeeds)
+mechanism replaced in 33)
+
+### ✅ 33. Bubble Tea v2; the hand-built scroll region deleted — done
+2026-10-23, see done.md (open: not run live on a real kitty/ghostty/Termux
+terminal, through `dun -serve`, or attached to dund; only a tmux replay
+smoke)
 
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
@@ -1886,6 +1891,8 @@ buffer offsets, which is what makes the display↔offset mapping exact:
   Escape key wait for the next keystroke), and raw mode becomes OURS, because
   bubbletea only raws a tty `*os.File` and a wrapped reader is not one — the
   first attempt left the tty canonical and nothing reached the UI at all.
+  (Superseded by 33: Bubble Tea v2 decodes all three; `keyfilter.go` is gone
+  and `normalizeKey` maps SS3 M / shift+enter to ctrl+j.)
 - **verified:** `ttydrive` against the real binary — single render, growth to
   two rows on wrap, ctrl+w/ctrl+u, alt+enter. Plus 12 tests, three of them
   regressions for the defects above.

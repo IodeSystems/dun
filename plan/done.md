@@ -2199,3 +2199,66 @@ tool+think". Commits `1967864` (focus), `38fc768` (ctrl+tab), `cadb19e`
   `TestLeftFromInputSelectsTheNewest` → `TestTabFromInputSelectsTheNewest`.
 - **Not verified:** not run live in a terminal; ctrl+tab not tried on a
   real kitty/ghostty/tmux; the job view not watched on a real running job.
+
+## ✅ 33. Bubble Tea v2; the hand-built scroll region deleted (USER, 2026-10-23)
+
+USER approved ("rip and tear until it is done"). v1's line renderer is why
+dun grew its own scroll region (item 31's bug class: two owners of what the
+screen shows, Cmds racing). v2's renderer is a cell diff with hard-scroll
+optimisation (ultraviolet `TerminalRenderer`, on in fullscreen), so the
+region goes instead of being ported.
+
+- **Deps:** charm.land/bubbletea/v2 v2.1.0, bubbles/v2 v2.2.1, lipgloss/v2
+  v2.0.6, glamour/v2 v2.0.1; termenv dropped (band: `colorprofile.Detect`;
+  render: `lipgloss.HasDarkBackground`).
+- **Deleted** (lines): `scrollregion.go` 253 + test 251 (DECSTBM region,
+  `minRegionGap`, held/owed rows, `blankRegion`), `planScrollRegion` and the
+  region fields in /repaint's state.json (`scroll_region`, `kitty_keyboard`);
+  `keyfilter.go` 172 + test 92 (byte rewrites ahead of v1's parser, our own
+  raw mode); `kitty.go` 151 + test 132 (probe/enable/disable: v2 pushes
+  kitty flags=1 and modifyOtherKeys=2 itself and pops at exit);
+  `sgrpack.go` 194 + test 64 and the `packed` cache (measured: per-word
+  styled rows 2807 B in / packed 527 B in, 529 B out of the renderer
+  either way); termios test helpers 12; the v1 burst split in Update (v2
+  decodes one grapheme per key). Net for the branch: 73 files,
+  +1277 / −2206; non-test code −815.
+- **Kept, smaller:** `normalizeKey` (tui.go) folds shift+enter to ctrl+j —
+  v2 decodes CSI 13;2u and CSI 27;2;13~ as shift+enter, but SS3 M as keypad
+  enter, which v2 names "enter" and would SEND. ctrl+tab is v2's own
+  "ctrl+tab" key; the composer inserts `\t`.
+- **Paste:** `tea.PasteMsg` → `paste()` routes it to the field that has the
+  keys (composer, ask custom answer, search, model/provider/MCP forms,
+  inspector and job-view search); `multilineInput.HandlePaste` keeps image
+  paths and paste tokens. A paste is never a command (v1 got this from
+  `[...]`-wrapped String()).
+- **/repaint:** `tea.Raw(termReset + modeReset)`, `tea.ClearScreen`,
+  `tea.RequestWindowSize`. Mode re-assert is written with the reset: the
+  renderer only sends a mode when View changes it.
+- **View fields:** alt screen, mouse mode from `/mouse` (`mouseModeOf`).
+- **Tests:** 470 → 450. Deleted with their code: 8 `TestScrollRegion*` /
+  `TestBlankRegion*`, 5 `TestKeyFilter_*`, 5 `TestProbeKitty*`, 3
+  `TestPackSGR*`, `TestKeyFilter_RewritesCtrlTabAndKittyShiftTab`,
+  `TestRepaintExpectedHasRegionRows`. Rewritten: `TestCtrlTab_ThroughTheRealParser`
+  → `TestKeys_ThroughTheRealDecoder` (raw bytes through v2's decoder: both
+  ctrl+tab spellings, kitty + legacy shift+tab, a paste with a tab, the
+  three shift+enter spellings); `TestBurstOfRunes_KeyNamedWordIsTyped`
+  (through the real decoder); `TestRepaintResetsAndReports` (no region);
+  `TestServerHeader_HotKeys` (no Ascii-profile half: lipgloss v2 is pure);
+  `TestMultilineInput_PastedKeyNameIsText` (HandlePaste); 4 tests strip ANSI
+  where v1's Ascii test profile had stripped it. New:
+  `TestRepaintExpectedIsTheFrame`, `TestRepaintModeReset`,
+  `TestScreen_ScrollingMatchesView` (screen_test.go: the real program and
+  renderer into a buffer, replayed through a small emulator that fails on
+  any unknown CSI; checks ↑ one row, a stream, a taller composer; a
+  one-row scroll is 113 B against 808 B for the 80×15 frame — DECSTBM + RI).
+- **Smoke:** `dun --replay` of a synthetic trace in tmux (100×30, temp
+  DUN_HOME, no engine): frames, ↑ scroll and the scroll overlay correct;
+  with `extended-keys always` + `csi-u`, S-Enter is a newline and C-Tab a
+  tab; ctrl+c twice exits to the shell screen; stderr empty.
+- **Risks / not verified:** no real kitty/ghostty/foot/Termux, no
+  `dun -serve` (xterm.js answering v2's kitty/modifyOtherKeys requests), no
+  dund-attached run, mouse not exercised live; an unbracketed paste of an
+  image path is now typed keys, not an image (v2 always turns bracketed
+  paste on); under NO_COLOR (Ascii profile) bold/underline now show (v1
+  dropped them); OSC 52 copy still writes to stdout from a Cmd goroutine,
+  as in v1 (`tea.SetClipboard`/`tea.Raw` would order it with frames).
