@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260303162955-0b88c25f3fff
-	github.com/charmbracelet/x/vt v0.0.0-20260823001701-96af6d2cb5f6
+	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24
 	golang.org/x/image v0.45.0
 )
