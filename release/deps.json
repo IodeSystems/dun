@@ -3,6 +3,31 @@
   "version": "",
   "published": "",
   "artifacts": {
+    "mcpshell": {
+      "version": "v0.5.0",
+      "files": {
+        "darwin_amd64": {
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.5.0/mcpshell_darwin_amd64.tar.gz",
+          "sha256": "f60f01c672eb9dbb99b32c9b0c27842f23fe5238f0170b29a6dc096595d3c091",
+          "size": 13286363
+        },
+        "darwin_arm64": {
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.5.0/mcpshell_darwin_arm64.tar.gz",
+          "sha256": "6a161e70985fdf4aa418c6f52e133906be8641e788fb904ac02457bba3c7c0d8",
+          "size": 12634715
+        },
+        "linux_amd64": {
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.5.0/mcpshell_linux_amd64.tar.gz",
+          "sha256": "5b0c1313ea965cc970a431af697e2367fa182c8a995380301c9802b8f45f0a2f",
+          "size": 13201825
+        },
+        "linux_arm64": {
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.5.0/mcpshell_linux_arm64.tar.gz",
+          "sha256": "f09c018639dd29071f19de9d7d2c2a121874a5409af2a09cd2c7a34baed774c6",
+          "size": 12262707
+        }
+      }
+    },
     "raglit": {
       "version": "v0.1.0",
       "files": {

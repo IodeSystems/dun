@@ -18,8 +18,8 @@ var Supported = []Tool{
 	// v0.2.0: the oldest tag with --files-dir and --mcp, which dun passes.
 	// v0.5.0 (4fc83f1, 2026-10-24): MCPSHELL_TMP_OVERFLOW_DIR, which dun sets
 	// so over-limit output is saved to a file, and per-server unchecked
-	// globs (a09d6ba), which a server spec's "shell" block passes. The
-	// release has no tarballs: every build go-installs it.
+	// globs (a09d6ba), which a server spec's "shell" block passes. Its
+	// tarballs are in deps.json.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
 		Min: "v0.2.0", Recommended: "v0.5.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
