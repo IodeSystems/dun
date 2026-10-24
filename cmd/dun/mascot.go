@@ -32,7 +32,7 @@ var mascotColors = map[byte]int{
 	'b': 26,  // shirt
 	'C': 19,  // collar, a shade darker than the shirt
 	'K': 18,  // the collar's crease
-	'u': 230, // undershirt: two off-white pixels in the V
+	'u': 230, // undershirt: one off-white pixel at the bottom of the V
 }
 
 // mascot is the foreman, 13×11 pixels: 6 rows, at every width (owner,
@@ -48,7 +48,7 @@ var mascot = []string{
 	"..sssmmmmss..",
 	"..ssmmmmmms..",
 	"..CdskkksdC..",
-	".bbCKsusKCbb.",
+	".bbCKsssKCbb.",
 	"bbbbbKuKbbbbb",
 }
 
