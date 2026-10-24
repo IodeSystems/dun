@@ -188,7 +188,7 @@ stdio poly-lsp processes, 1.14 GB each (the same index twice).
   daemon admits a proxy's root outside --allow; `mcp --help` says "a root
   outside --allow is admitted" (`anyRootMarker`, IndexSupport.AnyRoot), and
   then dun skips `underHome`. Verified by hand: a /tmp root through the
-  daemon, index ready, the hook cancelled a read. Recommended → 6dab491.
+  daemon, index ready, the hook cancelled a read. Recommended → v0.1.0 (6dab491).
 - **optional:** a real dun session run end to end.
 
 ### ✅ 27. Surfacing floor — done 2026-10-23, see done.md (open: the coverage
@@ -495,9 +495,8 @@ should note if there are updated releases (similar practice)."
   Module, Min, Recommended} — the versions and why are in its comments.
   USER 2026-10-24: once a dep is released, its tag is what dun embeds.
   Status: raglit v0.1.0 (tag + 4 tarballs in deps.json) · mcpshell v0.5.0
-  (tag + 4 tarballs in deps.json) · poly-lsp-mcp pseudo-version 9e227d7
-  (no release: its release workflow's dry run failed 2026-10-24 on
-  TestForwardsUnknownTextDocumentMethodToChild). Never "latest": the proxy's cached @latest
+  (tag + 4 tarballs in deps.json) · poly-lsp-mcp v0.1.0
+  (6dab491, tag + 4 tarballs). All three released and pinned by tag. Never "latest": the proxy's cached @latest
   for poly-lsp is 9f31d7e, which needs cc. Hand-edited; tests: each is a
   module version, min ≤ recommended, `deps.json` pins = recommended,
   `dun.ToolInstall` modules agree. `--fix` on a missing tool: the release

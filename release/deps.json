@@ -28,6 +28,31 @@
         }
       }
     },
+    "poly-lsp-mcp": {
+      "version": "v0.1.0",
+      "files": {
+        "darwin_amd64": {
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.1.0/poly-lsp-mcp_darwin_amd64.tar.gz",
+          "sha256": "6e003e80a5210ff15ddfcf87c53044ce4158c67f3f1e940ac53adfbb38302fe0",
+          "size": 18597188
+        },
+        "darwin_arm64": {
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.1.0/poly-lsp-mcp_darwin_arm64.tar.gz",
+          "sha256": "ef677b41811c205c44718121d47e422d79f67260ae8a8b00d96c0335a2b69ac7",
+          "size": 17249604
+        },
+        "linux_amd64": {
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.1.0/poly-lsp-mcp_linux_amd64.tar.gz",
+          "sha256": "10f4d29f970be74d06fc2f332e37fbaf2f58f1a620bb9d48389e231eb1949c81",
+          "size": 16992592
+        },
+        "linux_arm64": {
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.1.0/poly-lsp-mcp_linux_arm64.tar.gz",
+          "sha256": "84dcfaa388d78040d5526953776cd49c473de591e55761efb5a10ca3d0fa9764",
+          "size": 15607004
+        }
+      }
+    },
     "raglit": {
       "version": "v0.1.0",
       "files": {
