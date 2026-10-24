@@ -45,6 +45,8 @@
       "id": "signed-in-and-shown-the-models",
       "promise": "Once I have signed in with what my colleague gave me, I am shown the models I can use.",
       "actions": [
+        {"key": "enter", "say": "picked custom, the first row: my colleague gave me an address, not a service name"},
+        {"wait_for": "custom: an OpenAI-compatible service"},
         {"type": "${LLM_URL}", "say": "typed the address my colleague gave me"},
         {"key": "enter"},
         {"type": "${LLM_KEY}", "say": "typed the key my colleague gave me"},
