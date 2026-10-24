@@ -31,8 +31,9 @@ A coding assistant that lives in the terminal. The bar is the best of:
   person check the work, and they add value of their own. Never hidden,
   collapsed away or dimmed below readable contrast.
 - **Read while writing.** The person reads the conversation while typing in
-  the input. Neither pane loses contrast to show focus; focus is the tmux
-  half-line on the divider (heavy and bright on the focused side).
+  the input. Neither pane loses contrast to show focus; focus is the
+  divider: the tmux half-line in the accent on the focused side, leaning
+  toward the focused pane (a thin line on that edge, thicker at the far ends).
 - **No bounce.** Nothing on screen jumps when something opens, closes,
   updates or moves focus. A shrink leaves blank space, at most to the bottom
   of the current view.

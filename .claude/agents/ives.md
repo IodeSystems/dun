@@ -164,9 +164,12 @@ on another screen — before any words. A design fix beats a sentence.
 
 These are the owner's calls. Judge only how well they are carried out.
 
-- The focus cue is the tmux half-line on the divider: the half on the
-  focused pane's side is bright (heavy, in the accent), the other half dim.
-  It is not a fault; do not score it as one. Judge only its execution.
+- The focus cue is the divider, the tmux half-line made to lean: the
+  focused pane's half in the accent, the other dim; the thin line on the
+  edge of its row toward the focused pane (▁ under the conversation, ▔ over
+  the input); both far ends thickening toward that pane. The line moving
+  from one edge of its row to the other on a focus change is meant. It is
+  not a fault; do not score it as one. Judge only its execution.
 - Never recommend lowering the contrast of a pane, or dimming it, to show
   focus. The person reads one pane while typing in the other.
 - Judge in the product's context (canon IVE-6): read the run's `product.md`

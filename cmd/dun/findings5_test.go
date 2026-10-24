@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -126,16 +127,28 @@ func TestToolRow5_OnlyTheMarkIsGreen(t *testing.T) {
 // At 180 columns the divider splits at the middle of the 100-column
 // content, not at the terminal's middle (inside the text's column).
 func TestDivider5_SplitsAtTheContentMiddle(t *testing.T) {
-	d := ansi.Strip(divider(180, false))
-	if !strings.HasPrefix(d, strings.Repeat("─", 50)+"━") || ansi.StringWidth(d) != 180 {
-		t.Errorf("down at 180: split at %d", strings.Index(d, "━")/len("─"))
+	// runs is the width of each styled run: the ramp, the dim and the
+	// accent halves of the line, the ramp.
+	runs := func(d string) []int {
+		var n []int
+		for _, r := range strings.Split(strings.TrimSuffix(d, "\x1b[m"), "\x1b[m") {
+			n = append(n, ansi.StringWidth(r))
+		}
+		return n
 	}
-	u := ansi.Strip(divider(180, true))
-	if !strings.HasPrefix(u, strings.Repeat("━", 50)+"─") {
-		t.Errorf("up at 180: %q", u[:60])
-	}
-	if d := ansi.Strip(divider(49, false)); !strings.HasPrefix(d, strings.Repeat("─", 24)+"━") {
-		t.Errorf("down at 49: %q", d)
+	for _, tc := range []struct {
+		w    int
+		up   bool
+		want []int
+	}{
+		{180, false, []int{3, 47, 127, 3}}, // dim ramp, dim to 50, accent, accent ramp
+		{180, true, []int{50, 130}},        // accent to 50 with its ramp, dim with its ramp
+		{49, false, []int{3, 21, 22, 3}},
+	} {
+		d := divider(tc.w, tc.up)
+		if got := runs(d); !slices.Equal(got, tc.want) || ansi.StringWidth(d) != tc.w {
+			t.Errorf("%d up=%v: runs %v, want %v", tc.w, tc.up, got, tc.want)
+		}
 	}
 }
 

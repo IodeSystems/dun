@@ -2840,7 +2840,7 @@ func TestVtui_PhoneSizeWrapping(t *testing.T) {
 	for i, ln := range lines {
 		plain := stripANSI(ln)
 		// Skip non-convo lines.
-		if strings.HasPrefix(plain, "dun") || strings.HasPrefix(plain, "─") {
+		if strings.HasPrefix(plain, "dun") || strings.HasPrefix(plain, "▄") {
 			continue
 		}
 		if strings.Contains(plain, "ready") || strings.Contains(plain, "scroll") || strings.Contains(plain, "ask dun") {

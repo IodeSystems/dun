@@ -132,25 +132,32 @@ func TestHeader_FolderAndModelOnly(t *testing.T) {
 	}
 }
 
-// The divider keeps the tmux half-line: the focused side's half is the
-// heavy rule in the accent, the other the light rule, dim. The activity
-// strip is above the divider, so it lights the upper half too.
-func TestDivider_HeavyHalfOnTheFocusedSide(t *testing.T) {
+// The divider carries focus three ways: the focused side's half in the
+// accent, the other dim; the thin line on the edge toward the focused pane
+// (▁ for the upper side, ▔ for the input); and both far ends thickening
+// toward it. The activity strip is above the divider, so it lights the upper
+// half too.
+func TestDivider_LeansTowardTheFocusedSide(t *testing.T) {
 	up := divider(10, true)
-	if got := ansi.Strip(up); got != "━━━━━─────" {
+	if got := ansi.Strip(up); got != "▄▃▂▁▁▁▁▂▃▄" {
 		t.Errorf("up: %q", got)
 	}
-	if !strings.HasPrefix(up, stEdge.Render("━━━━━")) || !strings.HasSuffix(up, stDim.Render("─────")) {
+	if !strings.HasPrefix(up, stEdge.Render("▄▃▂▁▁")) || !strings.HasSuffix(up, stDim.Render("▁▁▂▃▄")) {
 		t.Errorf("up styles: %q", up)
 	}
-	if got := ansi.Strip(divider(10, false)); got != "─────━━━━━" {
+	down := divider(10, false)
+	if got := ansi.Strip(down); got != "▄▅▆▔▔▔▔▆▅▄" {
 		t.Errorf("down: %q", got)
+	}
+	// Down, the ramp is the lower blocks reversed: the colour at the top.
+	if !strings.HasPrefix(down, stDim.Reverse(true).Render("▄▅▆")) || !strings.HasSuffix(down, stEdge.Reverse(true).Render("▆▅▄")) {
+		t.Errorf("down styles: %q", down)
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 20, Height: 10})
 	m = nm.(tuiModel)
 	m.focus = focusActivity
-	if !strings.Contains(ansi.Strip(m.drawView()), "━━━━━━━━━━──────────") {
+	if !strings.Contains(ansi.Strip(m.drawView()), "▄▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▃▄") {
 		t.Errorf("activity focus does not light the upper half:\n%s", ansi.Strip(m.drawView()))
 	}
 }
