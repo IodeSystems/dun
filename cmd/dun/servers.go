@@ -465,6 +465,8 @@ func serverDetail(st dun.ServerState) string {
 		s = hostedSummary(st)
 	case st.Via == dun.ViaShell:
 		s = "not hosted"
+	case st.Starting:
+		s = "starting…"
 	case st.Running:
 		s = "running · " + toolCost(st)
 	case st.Err != "":
@@ -491,7 +493,9 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	}
 	var b strings.Builder
 	b.WriteString(label + ": ")
-	if st.Running {
+	if st.Starting {
+		fmt.Fprintf(&b, "starting · %ds", int(st.StartingSeconds+0.5))
+	} else if st.Running {
 		b.WriteString("running · " + plural(st.Tools, "tool"))
 	} else {
 		b.WriteString("stopped")
@@ -536,6 +540,9 @@ func runningSummary(h *dun.Harness, id string) string {
 	st, ok := stateOf(h, id)
 	if ok && st.Via == dun.ViaShell {
 		return hostedSummary(st)
+	}
+	if ok && st.Starting {
+		return "starting… (its tools join when it is up)"
 	}
 	if !ok || !st.Running {
 		return "not running"
@@ -612,7 +619,7 @@ func serversProto(states []dun.ServerState) []proto.ServerState {
 		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Auth: st.Auth,
 			Via: st.Via, Proto: st.Proto, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
 			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
-			Detail: serverDetail(st), Slash: slashOf(st)})
+			Detail: serverDetail(st), Slash: slashOf(st), Starting: st.Starting, StartingSeconds: st.StartingSeconds})
 	}
 	return out
 }

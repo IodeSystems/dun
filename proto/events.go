@@ -382,6 +382,10 @@ type ServerState struct {
 	// Slash is the command that switches it ("raglit" for /raglit), for a
 	// server that has one.
 	Slash string `json:"slash,omitempty"`
+	// Starting is a start in flight (the session is ready without it; its
+	// tools join when it is up), StartingSeconds how long it has been at it.
+	Starting        bool    `json:"starting,omitempty"`
+	StartingSeconds float64 `json:"startingSeconds,omitempty"`
 }
 
 // ServerEvent reports a server command's outcome and the new server set.
@@ -391,6 +395,9 @@ type ServerEvent struct {
 	Message string        `json:"message"`
 	Servers []ServerState `json:"servers"`
 	Tools   []string      `json:"tools"`
+	// Background: no command asked for this — an autostart server that came
+	// up (or did not) after the session was ready.
+	Background bool `json:"background,omitempty"`
 }
 
 // ControlEvent reports a control command's outcome.

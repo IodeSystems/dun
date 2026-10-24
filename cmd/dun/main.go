@@ -543,9 +543,9 @@ func main() {
 		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
-		// An added server that came up (or did not) after the session started.
-		// Before Start returns there is no harness to describe; the ready
-		// event that follows carries the server list instead.
+		// An autostart server that came up (or did not) after the session
+		// was ready. Before Start returns there is no harness to describe;
+		// the ready event that follows carries the server list instead.
 		cfg.OnServerStarted = func(id string, err error) {
 			h, _ := started.Load().(*dun.Harness)
 			if h == nil {
@@ -556,7 +556,7 @@ func main() {
 				msg = id + ": did not start — " + oneLine(err.Error())
 			}
 			em.emit(&proto.ServerEvent{ID: id, Action: "start", Message: msg,
-				Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
+				Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Background: true})
 			em.emit(catalogEvent(h))
 			em.emit(commandsEvent(h))
 		}
@@ -759,6 +759,7 @@ func main() {
 // runHuman streams a single task, then drains any background jobs it started
 // (their completion notifications trigger follow-up turns).
 func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
+	h.WaitServers(ctx) // a one-shot task has every tool it was started with
 	fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n",
 		len(h.ToolNames()), strings.Join(h.ToolNames(), ", "))
 	// Name what is NOT running. A one-shot run has no /raglit to type, so point at
@@ -1176,6 +1177,10 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		return true
 	})
 	if firstTask != "" {
+		// A task given on the command line is the whole run: it waits for
+		// the servers still starting, so it has every tool it was started
+		// with. A person typing waits for nothing (dun.Start).
+		h.WaitServers(ctx)
 		turn(ctx, h, em, firstTask, nil)
 	}
 	users := in.users

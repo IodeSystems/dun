@@ -481,7 +481,7 @@ func (h *Harness) reloadServers(ctx context.Context, wait bool, restart map[stri
 	}
 	for _, n := range next {
 		o, had := old[n.ID]
-		if !direct(n, true) || h.mgr.ServerStarted(n.ID) || (direct(o, had) && !restart[n.ID]) {
+		if !direct(n, true) || h.mgr.ServerStarted(n.ID) || h.isStarting(n.ID) || (direct(o, had) && !restart[n.ID]) {
 			continue
 		}
 		if wait {

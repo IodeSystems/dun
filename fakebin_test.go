@@ -15,14 +15,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
 	fakeBinEnv  = "DUN_FAKE_BIN"  // the persona: raglit, poly-lsp
 	fakeLogEnv  = "DUN_FAKE_LOG"  // where the fake appends what it was asked
 	fakeHitsEnv = "DUN_FAKE_HITS" // raglit: a JSON file of search hits, read per call
+	// fakeSlowEnv is milliseconds the fake sleeps before it answers
+	// initialize: poly-lsp indexing a big repo before it says anything.
+	fakeSlowEnv = "DUN_FAKE_SLOW_MS"
 )
 
 // fakeBin writes dir/name, a wrapper that runs this test binary as persona,
@@ -140,6 +145,9 @@ func serveFake(tools map[string]func(map[string]any) string) {
 		var rpcErr any
 		switch msg.Method {
 		case "initialize":
+			if ms, err := strconv.Atoi(os.Getenv(fakeSlowEnv)); err == nil {
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+			}
 			result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}},
 				"serverInfo": map[string]any{"name": "fake", "version": "1"}}
 		case "tools/list":

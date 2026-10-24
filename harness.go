@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -468,6 +469,10 @@ type Harness struct {
 	specs     []Server                 // every configured server, running or not
 	lastErr   map[string]string        // id → why its last start attempt failed
 	lastStart map[string]time.Duration // id → how long its last start took
+	// starting is the servers a start is in flight for, and since when: a
+	// slow one (poly-lsp indexing a big repo takes a minute) is said to be
+	// starting rather than off, and is not started a second time.
+	starting map[string]time.Time
 	// ingestNote is the last workspace ingest's summary, for /raglit and the
 	// ready hint, and ingestID the server it went to. Guarded by srvMu.
 	ingestNote string
@@ -493,6 +498,8 @@ type Harness struct {
 	// the lock sets applyPending and the turn applies it on the way out.
 	turnMu       sync.Mutex
 	applyPending atomic.Bool
+	// toolNames is the tool set's names as of the last rebuild, sorted.
+	toolNames atomic.Pointer[[]string]
 	// memory is the note store while the docs server runs, else nil. Set by
 	// rebuildTools; read by /remember from another goroutine.
 	memory atomic.Pointer[memoryStore]
@@ -1199,7 +1206,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	store.onNotify = cfg.OnNotify
 	h := &Harness{mgr: mgr, store: store, client: cfg.Client,
 		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
-		cfg: cfg, specs: servers, sessSw: sessSw, exts: exts, extErrs: extErrs, lastErr: map[string]string{}, lastStart: map[string]time.Duration{},
+		cfg: cfg, specs: servers, sessSw: sessSw, exts: exts, extErrs: extErrs, lastErr: map[string]string{}, lastStart: map[string]time.Duration{}, starting: map[string]time.Time{},
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
 	// A resumed session's history is not this session's to act on: the
@@ -1219,37 +1226,37 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// UI reports), but it is not worth refusing to start the session over. The
 	// user can fix the binary and /raglit on without losing the session.
 	//
-	// They start at once, not one after another: a session waits for its
-	// slowest built-in, not for the sum. An ADDED server — often remote, now
-	// and then behind a login gate that answers with a web page and burns the
-	// whole discovery timeout — does not hold the session up at all: it starts
-	// in the background and its tools join the tool set when it is up.
+	// Every server starts in the background, all at once. The session waits
+	// for the built-ins only up to serverStartGrace, and for an added server
+	// (often remote, now and then behind a login gate that burns the whole
+	// discovery timeout) not at all: a built-in that answers by then is in
+	// the first tool set, and one that does not — poly-lsp indexing a big
+	// repo took a minute — does not hold the session up. Its tools join the
+	// tool set when it is up (between turns, applyTools), and
+	// OnServerStarted reports it. Servers() says it is starting until then.
 	var builtins sync.WaitGroup
 	for _, s := range servers {
 		if !s.Autostart || !ownsMgr || s.Via == ViaShell { // the shell starts it
 			continue
 		}
-		if !builtinServer(s.ID) {
-			go func() {
-				err := h.startServer(ctx, s)
-				if err != nil {
-					log.Printf("dun: %s did not start: %v", s.ID, err)
-				}
-				if cfg.OnServerStarted != nil {
-					cfg.OnServerStarted(s.ID, err)
-				}
-			}()
-			continue
+		h.markStarting(s.ID)
+		wg := &sync.WaitGroup{} // an added server's: nobody waits on it
+		if builtinServer(s.ID) {
+			wg = &builtins
 		}
-		builtins.Add(1)
+		wg.Add(1)
 		go func() {
-			defer builtins.Done()
-			if err := h.startServer(ctx, s); err != nil {
+			defer wg.Done()
+			err := h.startServer(ctx, s)
+			if err != nil {
 				log.Printf("dun: %s did not start: %v", s.ID, err)
+			}
+			if cfg.OnServerStarted != nil {
+				cfg.OnServerStarted(s.ID, err)
 			}
 		}()
 	}
-	builtins.Wait()
+	waitGrace(&builtins, serverStartGrace)
 	// Carry the client's own retry narration out to the UI. Without this the
 	// waiting is only ever logged, and a TUI's log is not on screen.
 	applyRetryPolicy(cfg.Client)
@@ -1309,7 +1316,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// must survive folds. Not for a root session: its first message may be
 	// "hi" or a pasted log, and a pinned entry rides every round for good.
 	shaper.Policy.PinFirstUser = h.isChild()
-	h.Session = &agent.Session{
+	sess := &agent.Session{
 		SessionID:            "dun",
 		OnCompactionComplete: h.noteCompaction,
 		Store:                store,
@@ -1338,7 +1345,18 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// Tools, Dispatch, System and Preparer all depend on WHICH servers are
 	// running, and that changes mid-session (/raglit on, /poly-lsp off). applyTools
 	// owns those four fields; nothing else may set them.
-	h.applyTools()
+	//
+	// The Session is published under turnMu: a server still starting in the
+	// background rebuilds the tools from its own goroutine, under the same
+	// lock, and must see either no Session or this one.
+	h.turnMu.Lock()
+	h.Session = sess
+	h.applyPending.Store(false)
+	h.rebuildTools()
+	h.turnMu.Unlock()
+	if h.applyPending.Load() { // a server came up while the lock was held
+		h.applyTools()
+	}
 	// Children of a resumed session are gone as processes but their transcripts
 	// are not. Register them as stopped and SAY so — a model that spawned an
 	// agent last session must not assume it is still working.
@@ -1669,13 +1687,15 @@ func (h *Harness) Ship(ctx context.Context, mode ShipMode) string {
 }
 
 // ToolNames lists the agent's tool names (MCP tools + the built-in exec), sorted.
+//
+// Read from the snapshot rebuildTools leaves, not from Session.Tools: a
+// server that comes up late rebuilds the tools on its own goroutine while
+// a client is asking.
 func (h *Harness) ToolNames() []string {
-	names := make([]string, len(h.Session.Tools))
-	for i, t := range h.Session.Tools {
-		names[i] = t.Function.Name
+	if p := h.toolNames.Load(); p != nil {
+		return slices.Clone(*p)
 	}
-	sort.Strings(names)
-	return names
+	return nil
 }
 
 // dun's coding-agent persona + tool guidance.

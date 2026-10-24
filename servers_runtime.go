@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -68,10 +69,15 @@ type ServerState struct {
 	ID      string `json:"id"`
 	Running bool   `json:"running"`
 	// Auto reports whether this server starts on its own next session.
-	Auto         bool    `json:"auto"`
-	Tools        int     `json:"tools"`
-	Err          string  `json:"err,omitempty"`          // why the last start attempt failed
-	StartSeconds float64 `json:"startSeconds,omitempty"` // how long the last start took, in seconds
+	Auto  bool   `json:"auto"`
+	Tools int    `json:"tools"`
+	Err   string `json:"err,omitempty"` // why the last start attempt failed
+	// Starting is a start in flight: launched, not yet answering with its
+	// tools (Running may already be true: the handshake is done, discovery
+	// is not). StartingSeconds is how long it has been at it.
+	Starting        bool    `json:"starting,omitempty"`
+	StartingSeconds float64 `json:"startingSeconds,omitempty"`
+	StartSeconds    float64 `json:"startSeconds,omitempty"` // how long the last start took, in seconds
 	// Via is an added server's placement: ViaDirect or ViaShell; "" for a
 	// built-in, which has no choice.
 	Via string `json:"via,omitempty"`
@@ -152,6 +158,9 @@ func (h *Harness) Servers() []ServerState {
 			ViaSession:   s.Scopes.ViaSession,
 			ViaFrom:      s.Scopes.ViaFrom,
 		}
+		if t, ok := h.starting[s.ID]; ok {
+			st.Starting, st.StartingSeconds = true, time.Since(t).Seconds()
+		}
 		if s.ID == h.ingestID {
 			st.Ingest = h.ingestNote
 		}
@@ -202,10 +211,67 @@ func (h *Harness) StartServer(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("dun: no server %q (have %s)", id, strings.Join(ServerIDs(h.specs), ", "))
 	}
-	if h.mgr.ServerStarted(id) {
+	if h.mgr.ServerStarted(id) || h.isStarting(id) {
 		return nil
 	}
 	return h.startServer(ctx, spec)
+}
+
+// serverStartGrace is how long a session waits for its autostart servers
+// before it is ready without the ones still starting. Long enough for the
+// shell and a small repo's servers (well under a second each), short enough
+// that the person never waits on a slow one. A var for tests.
+var serverStartGrace = 1500 * time.Millisecond
+
+// waitGrace waits for wg, or for d, whichever is first. The goroutines it
+// stops waiting for keep running.
+func waitGrace(wg *sync.WaitGroup, d time.Duration) {
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
+}
+
+// markStarting records that a start of id is in flight, from now unless one
+// already was.
+func (h *Harness) markStarting(id string) {
+	h.srvMu.Lock()
+	if h.starting == nil {
+		h.starting = map[string]time.Time{}
+	}
+	if _, ok := h.starting[id]; !ok {
+		h.starting[id] = time.Now()
+	}
+	h.srvMu.Unlock()
+}
+
+// WaitServers waits until no server start is in flight, or ctx ends. For a
+// one-shot run, whose single task should have every tool it was started
+// with; an interactive session never waits.
+func (h *Harness) WaitServers(ctx context.Context) {
+	for {
+		h.srvMu.Lock()
+		n := len(h.starting)
+		h.srvMu.Unlock()
+		if n == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// isStarting reports whether a start of id is in flight.
+func (h *Harness) isStarting(id string) bool {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	_, ok := h.starting[id]
+	return ok
 }
 
 // StopServer shuts a server down and rebuilds the tool set without it.
@@ -243,6 +309,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 			s.ID, ShellNamespace(s.ID), s.ID)
 	}
 	t0 := time.Now()
+	h.markStarting(s.ID)
 	timeout := time.Duration(s.Timeout) * time.Second
 	if timeout <= 0 {
 		timeout = 90 * time.Second
@@ -316,6 +383,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		delete(h.lastErr, s.ID)
 		h.lastStart[s.ID] = time.Since(t0)
 	}
+	delete(h.starting, s.ID)
 	h.srvMu.Unlock()
 	h.applyTools()
 	return err
@@ -361,12 +429,17 @@ func waitServerTools(ctx context.Context, mgr *mcpmgr.Manager, id string, timeou
 // Session.Tools under a running turn is a data race.
 func (h *Harness) applyTools() {
 	h.applyPending.Store(true)
-	if !h.turnMu.TryLock() {
-		return // runTurn applies it on the way out
-	}
-	defer h.turnMu.Unlock()
-	if h.applyPending.Swap(false) {
-		h.rebuildTools()
+	// Again while one is pending: a rebuild asked for while another rebuild
+	// held the lock is this caller's to run, not the next turn's — a server
+	// that comes up while the session is idle joins now.
+	for h.applyPending.Load() {
+		if !h.turnMu.TryLock() {
+			return // a turn, or another rebuild, holds it; it applies on the way out
+		}
+		if h.applyPending.Swap(false) {
+			h.rebuildTools()
+		}
+		h.turnMu.Unlock()
 	}
 }
 
@@ -574,6 +647,12 @@ func (h *Harness) rebuildTools() {
 	dispatch = withInterrupt(dispatch)
 
 	h.Session.Tools = toolDefs
+	names := make([]string, len(toolDefs))
+	for i, t := range toolDefs {
+		names[i] = t.Function.Name
+	}
+	sort.Strings(names)
+	h.toolNames.Store(&names)
 	h.Session.Dispatch = dispatch
 	h.Session.System = sys
 	h.Session.OnToolCalls = h.mergeForcedToolCalls
