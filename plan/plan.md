@@ -188,6 +188,37 @@ mechanism replaced in 33)
 terminal, through `dun -serve`, or attached to dund; only a tmux replay
 smoke)
 
+### ◐ 34. bin/ux: Lenny, George and Ives walk onboarding (USER, 2026-10-23)
+
+- **Built:** `tools/ttyrec` (nested module: pty + charmbracelet/x/vt +
+  DejaVu Sans Mono via x/image; `rec` drives a walk → asciicast v2 with "m"
+  markers; `render` → GIF with idle cut to 1.5 s, NN-<id>.png/.txt per marker).
+  `tools/ux` (stub OpenAI-compatible LLM, stub MCP `notes-mcp`, `assemble` →
+  run.json/BRIEF.md/ACTIONS.md). `bin/ux [walk]` / `make ux WALK=…`: scratch
+  HOME + DUN_HOME, env -i, kernel port, processes killed by path. Walk
+  `ux/walks/onboarding.json`, scenario `ux/scenarios/first-assistant.md`.
+  Agents `.claude/agents/{lenny,george,ives}.md` (Read+Write, run dir only).
+- **First run:** 9 steps, all reached: launch → ask (error) → `/` → `/login`
+  form → name/url/key → model list → pick → `/mcp add` → answer.
+- **Seen while scripting (for the personas to confirm or not):** the first
+  screen says "ready" and never mentions a provider; the error that does is
+  "error: agent: chat: not logged in to a provider — /login <name>"; picking a
+  model restarts the session ("── resumed 1 entries ──"), which drops the
+  login confirmation and leaves the first question unanswered; the model
+  search is pre-filled with the provider name; "save as default" is unchecked;
+  `/mcp add` shows "standalone/scripted" and a clipped "saved to" line; the
+  palette's descriptions are cut at 100 columns.
+- **next:** parent runs the three agents on the run dir; triage findings into
+  items (no UI change in this item).
+- **risks:** the walk's text waits are tied to today's wording (a UI rename
+  fails the walk — intended, it shows the stuck screen); only the dark theme
+  is rendered; whether "enter switch" saves the model for tomorrow is not
+  checked by the walk; mcpshell comes from the host PATH when present.
+- **blocking decisions:** Ives' headline — placeholder "Would I put my name
+  on it?" vs the canon's "Would I put this in front of a customer?".
+- **optional extensions:** a second scenario (LEN-9); a light-theme render
+  (DES-12); `ttyrec` as a ttydrive replacement.
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
