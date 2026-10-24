@@ -1,0 +1,104 @@
+{
+  "name": "onboarding",
+  "scenario": "first-assistant",
+  "role": "the owner of a small project on your own computer; nobody else has set anything up for you",
+  "goal": "I want an assistant in my terminal that can help me with this project.",
+  "note": "First walk of dun (2026-10-23). Arrival: dun is installed and has never been run; the project folder is yours, with its history; you start dun inside it.",
+  "cols": 100,
+  "rows": 30,
+  "typing_ms": 45,
+  "steps": [
+    {
+      "id": "first-screen-says-what-it-needs",
+      "promise": "The first screen tells me what dun needs from me before it can help.",
+      "settle_ms": 1500,
+      "actions": [
+        {"wait_for": "ask dun to do something", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "asking-too-early-says-what-to-do",
+      "promise": "If I ask before it is set up, it tells me what to do next, in words I can follow.",
+      "actions": [
+        {"type": "Can you help me with this project?"},
+        {"key": "enter"},
+        {"wait_for": "not logged in", "timeout_ms": 20000}
+      ]
+    },
+    {
+      "id": "the-setup-command-can-be-found",
+      "promise": "I can find the command that connects dun to the service my colleague gave me.",
+      "actions": [
+        {"type": "/"},
+        {"wait_for": "commands"}
+      ]
+    },
+    {
+      "id": "signing-in-asks-one-thing-at-a-time",
+      "promise": "Signing in asks for one thing at a time, and says what each thing is.",
+      "actions": [
+        {"type": "login"},
+        {"key": "enter"},
+        {"wait_for": "log in to a provider"}
+      ]
+    },
+    {
+      "id": "signed-in-and-shown-the-models",
+      "promise": "Once I have signed in with what my colleague gave me, I am shown the models I can use.",
+      "actions": [
+        {"type": "work"},
+        {"key": "enter"},
+        {"type": "${LLM_URL}", "say": "typed the address my colleague gave me"},
+        {"key": "enter"},
+        {"type": "${LLM_KEY}", "say": "typed the key my colleague gave me"},
+        {"key": "enter"},
+        {"wait_for": "chat-standard"}
+      ]
+    },
+    {
+      "id": "picking-a-model-leaves-me-ready",
+      "promise": "Picking the model my colleague named leaves me ready to ask, and tells me it worked.",
+      "settle_ms": 1500,
+      "actions": [
+        {"type": "chat-standard"},
+        {"sleep_ms": 400},
+        {"key": "enter"},
+        {"wait_for": "ask dun to do something", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "adding-the-notes-server-asks-for-what-i-have",
+      "promise": "Adding the notes server my colleague mentioned asks only for what they gave me.",
+      "actions": [
+        {"type": "/mcp add"},
+        {"key": "enter"},
+        {"wait_for": "add MCP server"}
+      ]
+    },
+    {
+      "id": "the-notes-server-is-added-and-working",
+      "promise": "dun tells me the notes server is added and working.",
+      "settle_ms": 1500,
+      "actions": [
+        {"type": "notes"},
+        {"key": "enter"},
+        {"type": "notes-mcp"},
+        {"key": "enter"},
+        {"wait_for": "env"},
+        {"key": "enter", "say": "pressed Enter (left the env line empty)"},
+        {"key": "enter", "say": "pressed Enter (kept the mode it chose)"},
+        {"wait_for": "running", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "my-first-question-gets-an-answer",
+      "promise": "I ask about my project and get an answer I can read.",
+      "settle_ms": 2000,
+      "actions": [
+        {"type": "What is this project?"},
+        {"key": "enter"},
+        {"wait_for": "change first?", "timeout_ms": 60000}
+      ]
+    }
+  ]
+}

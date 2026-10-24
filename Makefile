@@ -27,7 +27,7 @@ DUN_BIN := $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/dun/dun
 # Where `make web` installs the built client that dund serves (--web-root).
 WEB_ROOT := $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/dun/web
 
-.PHONY: build install install-launcher run test clean schema web
+.PHONY: build install install-launcher run test clean schema web ux
 
 build: ## build ./dun (version + source stamped)
 	go build -ldflags "$(LDFLAGS)" -o dun ./cmd/dun
@@ -49,8 +49,15 @@ install-launcher: ## put the self-rebuilding launcher on PATH (dun is always the
 run: ## build + launch the TUI
 	go run -ldflags "$(LDFLAGS)" ./cmd/dun -tui
 
-test: ## build + vet (Linux and macOS, CLI-14) + test
+test: ## build + vet (Linux and macOS, CLI-14) + test, and the recorder (its own module)
 	go build ./... && go vet ./... && GOOS=darwin go vet ./... && go test ./...
+	cd tools/ttyrec && go vet ./... && go test ./...
+
+# A UX walk: hermetic dun + stub LLM, recorded; writes tmp/ux-run-<walk>-<stamp>/
+# for the lenny / george / ives agents. Not part of `test` (about a minute).
+WALK ?= onboarding
+ux: ## walk dun as a new user (WALK=onboarding) → tmp/ux-run-*/
+	bin/ux $(WALK)
 
 schema: ## regenerate mobile/schema.graphql from dund's operations
 	go run ./cmd/dun dund schema > mobile/schema.graphql

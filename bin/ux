@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# bin/ux — walk dun as a person arriving at it, and write down only what they
+# could see.
+#
+#   bin/ux                  the default walk (ux/walks/onboarding.json)
+#   bin/ux <walk>           ux/walks/<walk>.json
+#   bin/ux --list           the walks and scenarios on disk
+#   bin/ux --keep           keep the scratch directory (HOME, logs) for debugging
+#
+# Output: tmp/ux-run-<walk>-<stamp>/ — per step NN-<id>.png and NN-<id>.txt,
+# run.json, BRIEF.md, ACTIONS.md, the recording (<walk>.cast) and <walk>.gif.
+#
+# THE PERSONAS ARE THE CONSTANT (~/doc/patterns/lenny.md LEN-1, george.md,
+# design.md's critic as Ives). Who they are lives in .claude/agents/; the
+# scenario in ux/scenarios/ varies their goal and role and may not soften them.
+#
+# THE OUTPUT IS THE POINT AND IT IS SELF-CONTAINED (LEN-2). BRIEF.md names
+# every file an evaluator may read. An evaluator who has read cmd/dun cannot
+# un-know what "standalone" or "scripted" means, and would pass the
+# vocabulary questions forever.
+#
+# HERMETIC, and never near the real one: a scratch HOME (so ~/.dun is
+# $SCRATCH/home/.dun, with its own dund socket and launcher socket), a clean
+# environment (env -i: no DUN_* or TMUX from the shell running this), a stub
+# LLM on a port asked of the kernel (never raglit's 7420), a stub MCP server,
+# and a dun built from this checkout. Every process the run started is killed
+# by path on exit. Nothing reads or writes ~/.dun or talks to the real dund.
+#
+# THE ARRIVAL IS A REAL ONE (LEN-4). A harness that starts the person in an
+# impossible state fails in the direction that blames the product. So:
+#   - the project is a git repository with history and an author, because
+#     that is what a person who "looks after a program" has; an empty folder
+#     would put dun's "not a repository" path on screen, which nobody arrives at.
+#   - dun is installed and has never run: no ~/.dun at all.
+#   - mcpshell is on PATH when this machine has it, because dun's README says
+#     an install must put it there; raglit and poly-lsp-mcp are not, because
+#     the README says they are only for /raglit and /poly-lsp.
+#   - the walk types a provider address and key (the stub's) and the server
+#     command notes-mcp, which is what the scenario's colleague wrote down.
+#   - the build is stamped with this checkout's version but no source dir, as
+#     a release build is, so dun never tries to update itself mid-walk.
+#
+# NOT part of `make test`: it builds dun and runs it for about a minute.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+WALK="onboarding"
+KEEP=0
+for arg in "$@"; do
+  case "$arg" in
+    --keep) KEEP=1 ;;
+    --list)
+      echo "walks:";     ls ux/walks     2>/dev/null | sed 's/\.json$//;s/^/  /'
+      echo "scenarios:"; ls ux/scenarios 2>/dev/null | sed 's/\.md$//;s/^/  /'
+      exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -*) echo "bin/ux: unknown option $arg" >&2; exit 2 ;;
+    *) WALK="$arg" ;;
+  esac
+done
+
+die() { echo "bin/ux: $*" >&2; exit 1; }
+
+WALKFILE="ux/walks/$WALK.json"
+[ -f "$WALKFILE" ] || die "no such walk: $WALKFILE (bin/ux --list)"
+command -v jq >/dev/null || die "jq is not on PATH"
+SCENARIO="$(jq -r .scenario "$WALKFILE")"
+SCENFILE="ux/scenarios/$SCENARIO.md"
+[ -f "$SCENFILE" ] || die "the walk names scenario $SCENARIO but $SCENFILE does not exist"
+
+# Short, because the socket path must fit in 107 bytes and because it is on
+# screen (the brief tells the reader it belongs to the test).
+SCRATCH="$(mktemp -d /tmp/dun-ux-XXXXXX)"
+BIN="$SCRATCH/bin"
+FAKEHOME="$SCRATCH/home"
+mkdir -p "$BIN" "$FAKEHOME"
+
+cleanup() {
+  [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null || true
+  # dun starts a launcher and dund that outlive the TUI; each runs from $BIN.
+  pkill -TERM -f "^$BIN/" 2>/dev/null || true
+  sleep 0.5
+  pkill -KILL -f "^$BIN/" 2>/dev/null || true
+  if [ "$KEEP" = 1 ]; then echo "bin/ux: kept $SCRATCH" >&2; else rm -rf "$SCRATCH"; fi
+}
+trap cleanup EXIT
+
+VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+echo "bin/ux: building dun $VERSION" >&2
+go build -ldflags "-X main.version=$VERSION" -o "$BIN/dun" ./cmd/dun || die "could not build dun"
+go build -o "$SCRATCH/ux" ./tools/ux || die "could not build tools/ux"
+(cd tools/ttyrec && go build -o "$SCRATCH/ttyrec" .) || die "could not build tools/ttyrec"
+ln -s "$SCRATCH/ux" "$BIN/notes-mcp"
+NOTES=()
+if MS="$(command -v mcpshell)"; then
+  ln -s "$MS" "$BIN/mcpshell"
+  NOTES+=("mcpshell is on PATH (from this machine: $MS), as dun's README requires of an install")
+else
+  NOTES+=("mcpshell is NOT on PATH (this machine has none); dun's README requires it, so its absence is the harness's, not the product's")
+fi
+
+# The project, as its owner has it: a repository with a history.
+PROJECT="$FAKEHOME/greet"
+mkdir -p "$PROJECT"
+printf '# greet\n\nPrints a greeting for the team.\n\n    go run .\n' >"$PROJECT/README.md"
+printf 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("hello, team")\n}\n' >"$PROJECT/main.go"
+printf 'module example.invalid/greet\n\ngo 1.22\n' >"$PROJECT/go.mod"
+(
+  cd "$PROJECT"
+  export HOME="$FAKEHOME" GIT_CONFIG_NOSYSTEM=1
+  export GIT_AUTHOR_NAME=Sam GIT_AUTHOR_EMAIL=sam@example.invalid GIT_COMMITTER_NAME=Sam GIT_COMMITTER_EMAIL=sam@example.invalid
+  git init -q -b main
+  git add README.md go.mod && GIT_AUTHOR_DATE=2026-09-01T10:00:00 GIT_COMMITTER_DATE=2026-09-01T10:00:00 git commit -qm "start greet"
+  git add main.go && GIT_AUTHOR_DATE=2026-09-14T16:20:00 GIT_COMMITTER_DATE=2026-09-14T16:20:00 git commit -qm "say hello to the team"
+) || die "could not seed the project"
+NOTES+=("the project ~/greet is a git repository with 2 commits by its owner; ~/.dun does not exist before the walk")
+
+# The stub LLM, on a port the kernel picks.
+"$SCRATCH/ux" llm --port-file "$SCRATCH/llm.addr" --log "$SCRATCH/llm.log" 2>"$SCRATCH/llm.err" &
+STUB_PID=$!
+for _ in $(seq 1 50); do [ -s "$SCRATCH/llm.addr" ] && break; sleep 0.1; done
+[ -s "$SCRATCH/llm.addr" ] || die "the stub LLM did not start: $(cat "$SCRATCH/llm.err")"
+LLM_URL="http://$(cat "$SCRATCH/llm.addr")/v1"
+NOTES+=("the AI service is a stub on 127.0.0.1 that lists 7 models and gives fixed answers")
+NOTES+=("dun was started as \`dun\` in the project folder, in a ${WALK} walk driven by tools/ttyrec")
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+OUT="tmp/ux-run-$WALK-$STAMP"
+mkdir -p "$OUT"
+OUTABS="$(cd "$OUT" && pwd)"
+
+echo "bin/ux: walking $WALK" >&2
+set +e
+(
+  cd "$PROJECT"
+  env -i HOME="$FAKEHOME" DUN_HOME="$FAKEHOME/.dun" PATH="$BIN:/usr/local/bin:/usr/bin:/bin" \
+    USER=sam LOGNAME=sam SHELL=/bin/bash LANG=C.UTF-8 TERM=xterm-256color COLORTERM=truecolor \
+    DUN_NO_BROWSER=1 DUN_NO_AUTOBUILD=1 GIT_CONFIG_NOSYSTEM=1 \
+    LLM_URL="$LLM_URL" LLM_KEY="sk-team-7f3a" \
+    "$SCRATCH/ttyrec" rec -script "$OLDPWD/$WALKFILE" -result "$SCRATCH/rec.json" \
+      -title "dun — $WALK" -o "$OUTABS/$WALK.cast" -- dun
+)
+REC=$?
+set -e
+[ -f "$SCRATCH/rec.json" ] || die "the recorder wrote no result (exit $REC)"
+
+"$SCRATCH/ttyrec" render -gif "$OUT/$WALK.gif" -marks "$OUT" "$OUT/$WALK.cast" >/dev/null || die "render failed"
+# The harness's own logs, for whoever debugs a run; not in the brief.
+cp "$SCRATCH/llm.log" "$OUT/harness-llm.log" 2>/dev/null || true
+cp "$FAKEHOME/.dun/dund.log" "$OUT/harness-dund.log" 2>/dev/null || true
+NOTE_ARGS=()
+for n in "${NOTES[@]}"; do NOTE_ARGS+=(-note "$n"); done
+"$SCRATCH/ux" assemble -walk "$WALKFILE" -scenario "$SCENFILE" -run "$OUT" -result "$SCRATCH/rec.json" \
+  -stamp "$STAMP" -version "$VERSION" -cast "$WALK.cast" "${NOTE_ARGS[@]}" || die "assemble failed"
+
+cat <<EOF
+
+bin/ux: $OUT$( [ "$REC" = 0 ] || echo "  (THE WALK STOPPED EARLY — see run.json .error)" )
+
+  Hand that directory to the scoped evaluators and nothing else:
+
+      Agent(subagent_type: "lenny",  prompt: "Evaluate the run in $OUT. Read BRIEF.md first.")
+      Agent(subagent_type: "george", prompt: "Evaluate the run in $OUT. Read BRIEF.md first.")
+      Agent(subagent_type: "ives",   prompt: "Evaluate the run in $OUT. Read BRIEF.md first.")
+
+EOF
+exit "$REC"
