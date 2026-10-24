@@ -2262,3 +2262,101 @@ region goes instead of being ported.
   paste on); under NO_COLOR (Ascii profile) bold/underline now show (v1
   dropped them); OSC 52 copy still writes to stdout from a Cmd goroutine,
   as in v1 (`tea.SetClipboard`/`tea.Raw` would order it with frames).
+
+## ✅ 35. Onboarding fixes from run 1 of the walk (USER, 2026-10-23 — "get them all happy")
+
+- **Built** (commits 95f40c5, 6480a1c, d31d453, 7252b9a): first screen says
+  "not logged in — /login to connect to an AI service" (accent) and no tool
+  dump; off-servers hint grey, one line, once per TUI; a question asked
+  before login is held (not sent) and put back in the composer after the
+  model pick; setup errors plain (setupMissing unwraps "agent: chat:");
+  picker: enter = use + save default, alt+enter = this session, no
+  checkbox, confirmation line after the restart, no "resumed" marker, model
+  in the header, no provider column with one service; one form layout
+  (formRow), form keys on the status line; /mcp add: no mode row, enter on
+  server adds, optional rows behind tab; panels end at a word with "…",
+  status lines drop whole hints (most-used first); palette by group
+  (setup → … → maintenance), descriptions in one column, args on the row
+  below; "running" lines green, orange only for attention; /mcp add result
+  replaces "adding …"; "1 tool". Tests: onboarding_test.go (new), and the
+  intended old-string updates in mcpform_test, persist_test, model_test,
+  servers_test, builtin_cmds_test, tui_test.
+- **Walk:** 10 steps now (the held question is step 07; last step asks
+  about the notes; stub answers it). Run dir:
+  `tmp/ux-run-onboarding-20261023-204551`.
+- **next:** parent runs Lenny/George/Ives on the new run dir; then the
+  onboarding demo recording.
+- **risks:** a message is held only once the engine's settings event said
+  it has no URL (before that, it is sent and the engine's plain error
+  shows); held images are not held (sent, engine errors); /mcp add for an
+  OAuth URL no longer walks into the client row — enter adds without
+  OAuth, tab reaches it; `/model <name>` (typed) still switches for this
+  session only, unlike the picker's enter; commands event order changed
+  (dun's own before extensions') — the web client sees that order;
+  checked at 80 and 100 columns only.
+- **blocking decisions (USER):** (a) the half-width pink segment on the
+  divider is the focus cue (tui.go divider()); Ives reads it as
+  decoration — keep, make full-width, or change? Left as is. (b) should a
+  typed `/model <name>` also save the default, like the picker?
+- **assumptions:** "AI service" replaces "provider" on first-run surfaces
+  only (usage strings and /logout still say provider); the off-servers
+  hint stays (grey) because its recorded reason is "an agent that silently
+  lacks code navigation".
+- **optional extensions:** status line "not logged in" could carry
+  "/login"; the header's workspace path could shorten to the folder name.
+
+## ✅ 36. Onboarding fixes from run 2 of the walk (USER, 2026-10-23)
+
+- **Owner decisions implemented:** (1) splash at the top of a fresh
+  session (session event `resumed: 0` and no history): `dun <build>`, then
+  label/value rows — workspace (~), model on its service, tools, servers
+  (running green, failed red), off extras with their `/x on` commands
+  (cmd/dun/splash.go, `statusSections`, so /status can grow sections). The
+  engine's ready hint no longer has the "off:" line; `proto.ServerState`
+  gained `Slash`. A model pick (engine restart) puts the splash back at the
+  top with the new model; /new shows one again. (2) `/status` (owner
+  renamed it from /session): the splash appended client-side — every TUI
+  `m.append` entry is client-only (the engine owns the session log), so
+  nothing new was needed beyond a `splash` flag on convoEntry; session
+  group. (3) header `dun · <folder> [⎇ branch] · <model>`. (4) divider:
+  focused half `━` in 212, other `─` dim; activity focus lights the upper
+  half (it lit the input half before); no pane dimming. (5) typed
+  `/model [provider] <name>` and `/model use` save the default;
+  `--session` = this session only (README).
+- **Findings fixed:** held question → "kept your question — it comes back
+  after /login" in place of the not-logged-in line; stub LLM calls
+  `notes__project_notes` then answers from the result; model list chat
+  first, non-chat by name heuristic (`modelKind`: embed, rerank, vision,
+  whisper/tts/transcribe, moderation, dall-e — /v1/models has no kinds)
+  dim + labelled, cursor on running model → saved default → first chat
+  model, no count when all fit, one indent (`listIndent`); palette and
+  /help command names bold neutral (were green); not-logged-in and
+  no-model lines orange (were pink); status notices one shape `✓ what ·
+  detail` (`okNotice`: login, model pick, `notes added · running · 1
+  tool`); /mcp and /ext descriptions shortened (fit at 100); both forms:
+  fields, blank row, notes (presets moved below), status line via
+  `formKeys` with shift+tab back.
+- **Tests:** new cmd/dun/splash_test.go (splash fresh only, kept through a
+  pick, /status client-side, header, divider, typed /model, model list,
+  palette, forms) and tools/ux/stub_test.go. Old strings updated:
+  onboarding_test (held line, `·` notes, `✓` notice), persist_test
+  (`TestReadyNamesNoTools`: header has no tool count), servers_test
+  (`TestServerHint_NamesWhatIsOffAndHow` →
+  `TestServerHint_NamesWhatFailedNotWhatIsOff`), tui_test
+  (`TestTUI_ScreenDump` looks for the header, not "1 tool").
+- **Walk:** waits changed — step 02 on "kept your question", step 09 on
+  "notes added" ("running" now matches the splash). Run dir:
+  `RUNDIR_PATH`. Every PNG looked at.
+- **Ives brief:** "Owner decisions" — the half-line focus cue is the
+  owner's; never recommend dimming a pane for focus.
+- **Open / for the owner:** the notes call renders as `⚙ 1 step —
+  notes__project_notes×1` / `✓ ⚙ notes__project_notes()  → …`: the
+  internal tool name, a ×1 and two marks — not redesigned here. Green is
+  still the colour of tool calls (⚙ lines, toolrun.go) as well as
+  success. The form titles and the model picker title stay pink (bold),
+  read as "the active surface". The splash says what was true at start;
+  the servers row does not update after /mcp add (/status does). The
+  "1-10 of 36 commands · /login [name]" palette footer is unchanged. The
+  heavy rule is 2 px against 1 px in the PNG renderer at 10 px cells.
+- **Not verified:** a real terminal, light theme, dund-attached reuse of an
+  idle session (should replay history → no splash).
