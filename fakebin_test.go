@@ -47,6 +47,9 @@ const (
 	// "notproject" index mode fails without the flag, with the
 	// not-a-project reason, and is ready with it.
 	fakeAnywayEnv = "DUN_FAKE_ANYWAY"
+	// fakeDaemonEnv makes the fake's `mcp --help` carry daemonMarker in its
+	// --hook line: a build whose --daemon proxy keeps the hook.
+	fakeDaemonEnv = "DUN_FAKE_DAEMON"
 )
 
 // fakeBin writes dir/name, a wrapper that runs this test binary as persona,
@@ -113,6 +116,9 @@ func fakeBinMain(persona string) {
 			}
 			if os.Getenv(fakeAnywayEnv) != "" {
 				fmt.Println("      --index-anyway")
+			}
+			if os.Getenv(fakeDaemonEnv) != "" {
+				fmt.Println("      --daemon\n      --hook string   host hook (--daemon: the proxy runs it) (default \"/x/hook\")")
 			}
 			return
 		}

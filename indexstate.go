@@ -188,7 +188,16 @@ type IndexSupport struct {
 	Protocol bool // a background index, its report, and --exclude
 	Budget   bool // --index-budget (the intermediate build had a file cap)
 	Anyway   bool // --index-anyway (index a root that is not a project)
+	Daemon   bool // --daemon that keeps the file-access hook (daemonMarker)
 }
+
+// daemonMarker is in the --hook help of a poly-lsp-mcp whose --daemon proxy
+// runs the hook itself (poly-lsp-mcp e9b0020). An earlier --daemon dropped
+// the hook, and with it dun's AGENTS.md guard, so dun passes --daemon only to
+// a build that says this. A substring: with $POLY_LSP_HOOK set, cobra
+// appends the default to the line.
+const daemonMarker = "--daemon: the proxy runs it"
+
 
 // indexProbes caches IndexProtocol by the binary's path, size and mtime: a
 // rebuilt binary is asked again, an unchanged one is not.
@@ -231,6 +240,7 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 	help := string(out)
 	sup.Budget = strings.Contains(help, "--index-budget")
 	sup.Anyway = strings.Contains(help, "--index-anyway")
+	sup.Daemon = strings.Contains(help, daemonMarker)
 	sup.Protocol = sup.Budget || strings.Contains(help, "--index-max-files")
 	indexProbes.Store(key, sup)
 	return sup, resolved, nil
@@ -238,20 +248,20 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 
 // speaksIndex reports whether s, about to be spawned from command, builds
 // its index after the handshake — it said so this session (an index
-// notification), or its binary does (IndexProtocol) — and whether it takes
-// --index-budget or --index-anyway. Not under srvMu: it may run a process.
-func (h *Harness) speaksIndex(s Server, command string) (indexes, budget, anyway bool) {
+// notification), or its binary does (IndexProtocol) — and what else of the
+// protocol its binary takes. Not under srvMu: it may run a process.
+func (h *Harness) speaksIndex(s Server, command string) (indexes bool, sup IndexSupport) {
 	h.srvMu.Lock()
 	seen := h.indexSeen[s.ID]
 	h.srvMu.Unlock()
 	if !asksIndex(s) {
-		return seen, false, false
+		return seen, sup
 	}
 	sup, _, err := IndexProtocol(command)
 	if err != nil {
 		log.Printf("dun: %s: index protocol not known: %v", s.ID, err)
 	}
-	return sup.Protocol || seen, sup.Budget, sup.Anyway
+	return sup.Protocol || seen, sup
 }
 
 // excludeArgs are --exclude flags for dirs.

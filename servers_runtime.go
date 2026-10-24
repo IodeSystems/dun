@@ -388,21 +388,33 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// "indexing" from its spawn until it says how the build went, and takes
 	// the project's excludes. An older one would refuse --exclude: it gets
 	// none, and no index state.
-	indexes, budgets, anyway := false, false, false
+	indexes, sup := false, IndexSupport{}
 	if s.URL == "" && err == nil {
-		indexes, budgets, anyway = h.speaksIndex(s, command)
+		indexes, sup = h.speaksIndex(s, command)
 	}
 	if indexes {
 		args = append(slices.Clone(args), excludeArgs(s.Exclude)...)
 		// The project's startup budget, to a build that has one.
-		if budgets && s.IndexBudget != "" {
+		if sup.Budget && s.IndexBudget != "" {
 			args = append(args, "--index-budget", s.IndexBudget)
 		}
 		// The project's yes to indexing a root that is not a project, to a
 		// build that knows the flag; an older one would refuse it.
-		if anyway && s.IndexAnyway {
+		if sup.Anyway && s.IndexAnyway {
 			args = append(args, "--index-anyway")
 		}
+	}
+	// One shared poly-lsp daemon for every session (USER 2026-10-24): one
+	// index and one child-LSP fleet per root instead of one per session
+	// (two sessions on this repo held 1.1 GB each). The process dun runs is
+	// then a proxy: it stops with the engine, and the daemon releases the
+	// root's LSPs and index after its last client (its --root-lsp-grace,
+	// --idle-roots-mb, --idle-exit). The options above travel with the
+	// proxy's open; different ones rebuild the root. Only for a workspace
+	// under $HOME: the daemon a proxy auto-starts serves roots there alone
+	// (its --allow, default $HOME) and answers any other with 403.
+	if sup.Daemon && underHome(h.cfg.Workspace) && !slices.Contains(args, "--daemon") {
+		args = append(slices.Clone(args), "--daemon")
 	}
 	h.markIndexBuilding(s.ID, indexes)
 	mcfg := mcpmgr.MCPConfig{
@@ -1010,4 +1022,21 @@ func (h *Harness) RemoveServer(id string) ([]string, error) {
 		h.applyTools()
 	}
 	return cleared, nil
+}
+
+// underHome reports whether dir is inside the home directory, symlinks
+// resolved on both sides: where poly-lsp's daemon serves roots by default.
+func underHome(dir string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || dir == "" {
+		return false
+	}
+	real := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return filepath.Clean(p)
+	}
+	rel, err := filepath.Rel(real(home), real(dir))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }

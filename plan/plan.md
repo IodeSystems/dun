@@ -159,23 +159,33 @@ through step 5 — the same discipline applied to a new surface: a child that
 answers is IDLE rather than gone, silence is distinguished from failure, and the
 agents pane exists so a resident child is a choice rather than a leak.
 
-### ❓ 52. poly-lsp through its shared daemon (`mcp --daemon`) (USER, 2026-10-24)
+### ✅ 52. poly-lsp through its shared daemon (`mcp --daemon`) (USER, 2026-10-24)
 
-USER said yes to the switch. Measured: two open dun sessions on this repo hold
-two stdio poly-lsp processes, 1.14 GB each (same index twice); the daemon is
-115 MB idle.
-- **blocked on poly-lsp** (asked poly-lsp-mcp-78, 2026-10-24): (1) the
-  `--daemon` proxy ignores `--hook`/`POLY_LSP_HOOK`, so the AGENTS.md guard
-  would go; (2) index options apply only when a root is first built, so
-  `/poly-lsp exclude|budget` on a warm root may do nothing; (3) a root's LSPs
-  and index must be released after its last client leaves, and the daemon
-  exit with no clients (USER: keeping LSPs for sessions that may come back is
-  excessive; dund's 30-min idle stop already ends non-persistent engines,
-  and so their proxies).
-- **next:** when poly-lsp ships a `mcp --help` marker for (1), `IndexProtocol`
-  checks it and `startServer` adds `--daemon`.
-- **risks:** the daemon's child LSPs run with the daemon's env, not the
-  engine's (PATH); `/poly-lsp restart` restarts the proxy, not the daemon.
+USER said yes. Measured before: two open dun sessions on this repo held two
+stdio poly-lsp processes, 1.14 GB each (the same index twice).
+- **Built:** `IndexProtocol` reads `daemonMarker` ("--daemon: the proxy runs
+  it", poly-lsp-mcp e9b0020) from `mcp --help`; `startServer` appends
+  `--daemon` for such a build when the workspace is under $HOME
+  (`underHome`): the daemon a proxy auto-starts allows only $HOME (its
+  `--allow`) and 403s other roots. poly-lsp recommended → e9b0020.
+- **poly-lsp e9b0020 does:** the proxy runs the hook (client env); an open
+  with other index options rebuilds the root (last open wins, a `daemon`
+  notice "rebuilding"); a root's LSPs stop 1 min after its last client
+  (--root-lsp-grace), client-less indexes in an LRU (--idle-roots-mb 1024),
+  the daemon exits after 1 h with no clients (--idle-exit).
+- **Verified by hand** (e9b0020 built CGO-off, isolated HOME and
+  XDG_RUNTIME_DIR): initialize 0.18 s, index and setup notices relayed,
+  the hook cancelled a node_read with its note, gopls stopped ~1 min after
+  the client left, doctor listed the root. A root outside the allowed
+  prefix: 403 on every call (hence `underHome`).
+- **risks:** the daemon's child LSPs run with the daemon's env (PATH), not
+  the engine's; two sessions on one root with different options rebuild it
+  on each reconnect (dun's options are per project, so dun's own sessions
+  agree); the installed ~/.local/bin poly-lsp-mcp (9e227d7) has no marker,
+  so nothing changes until it is updated (`dun doctor --fix` installs the
+  recommended one where it is missing, not over an older one).
+- **optional:** workspaces outside $HOME through the daemon (needs a
+  per-user allow decision in poly-lsp); a real dun session run end to end.
 
 ### ✅ 27. Surfacing floor — done 2026-10-23, see done.md (open: the coverage
 floor for an index without embeddings, 0.5 + ratio vs 0.67 alone)

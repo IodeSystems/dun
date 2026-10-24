@@ -358,3 +358,33 @@ func TestChooseExcludes(t *testing.T) {
 		t.Error("cleanExclude")
 	}
 }
+
+// A poly-lsp whose --daemon proxy keeps the hook is started as that proxy,
+// with the project's options and the hook's env, for a workspace under
+// $HOME; one without the marker, or a workspace elsewhere (the daemon would
+// refuse it), is started in-process, as before.
+func TestIndex_DaemonWhenTheHookIsKept(t *testing.T) {
+	for _, c := range []struct{ marker, home, daemon bool }{{true, true, true}, {false, true, false}, {true, false, false}} {
+		daemon := c.daemon
+		t.Setenv("DUN_HOME", t.TempDir())
+		ws := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		if c.home {
+			t.Setenv("HOME", filepath.Dir(ws))
+		}
+		env := []string{fakeIndexEnv + "=ready"}
+		if c.marker {
+			env = append(env, fakeDaemonEnv+"=1")
+		}
+		h, log, _ := startIndexed(t, ws, env...)
+		waitIndex(t, h, IndexReady)
+		args := argLines(log)
+		if len(args) != 1 || strings.HasSuffix(args[0], " --daemon") != daemon {
+			t.Errorf("%+v: spawns %q", c, args)
+		}
+		if !strings.Contains(strings.Join(fakeLog(log), "\n"), "start POLY_LSP_HOOK=/") {
+			t.Errorf("%+v: no hook in the env:\n%s", c, strings.Join(fakeLog(log), "\n"))
+		}
+		h.Close()
+	}
+}
