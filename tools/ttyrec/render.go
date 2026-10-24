@@ -229,7 +229,7 @@ func screenLabels(screen string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(kind, s string) {
-		s = strings.TrimSpace(s)
+		s = strings.TrimRight(strings.TrimSpace(s), " ·") // a hint cut at the window edge keeps its separator
 		if s == "" {
 			return
 		}
