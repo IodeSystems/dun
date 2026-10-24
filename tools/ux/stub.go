@@ -150,6 +150,11 @@ func cannedReply(req chatRequest) string {
 	if len(req.Tools) == 0 {
 		return "A short answer."
 	}
+	// The notes server's one note (runMCP), as an answer that read it.
+	if strings.Contains(strings.ToLower(last), "notes") {
+		return "The team notes say to keep the greeting short, and that you release on Fridays. " +
+			"Is there something in greet you want to change before then?"
+	}
 	if strings.Contains(strings.ToLower(last), "project") || strings.Contains(last, "?") {
 		return "This project is a small command-line tool. The README says it prints a greeting, " +
 			"and main.go holds the whole program. I can read files, run commands in an isolated " +

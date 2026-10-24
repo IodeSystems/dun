@@ -39,7 +39,7 @@
       "actions": [
         {"type": "login"},
         {"key": "enter"},
-        {"wait_for": "log in to a provider"}
+        {"wait_for": "log in to an AI service"}
       ]
     },
     {
@@ -63,7 +63,16 @@
         {"type": "chat-standard"},
         {"sleep_ms": 400},
         {"key": "enter"},
-        {"wait_for": "ask dun to do something", "timeout_ms": 30000}
+        {"wait_for": "using chat-standard", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "my-first-question-gets-an-answer",
+      "promise": "The question I asked before I was set up is still there, and I get an answer I can read.",
+      "settle_ms": 2000,
+      "actions": [
+        {"key": "enter", "say": "pressed Enter (the input line held my first question)"},
+        {"wait_for": "change first?", "timeout_ms": 60000}
       ]
     },
     {
@@ -84,20 +93,17 @@
         {"key": "enter"},
         {"type": "notes-mcp"},
         {"key": "enter"},
-        {"wait_for": "env"},
-        {"key": "enter", "say": "pressed Enter (left the env line empty)"},
-        {"key": "enter", "say": "pressed Enter (kept the mode it chose)"},
         {"wait_for": "running", "timeout_ms": 30000}
       ]
     },
     {
-      "id": "my-first-question-gets-an-answer",
-      "promise": "I ask about my project and get an answer I can read.",
+      "id": "it-can-read-the-team-notes",
+      "promise": "I ask about the team notes and get an answer that came from them.",
       "settle_ms": 2000,
       "actions": [
-        {"type": "What is this project?"},
+        {"type": "What do the team notes say?"},
         {"key": "enter"},
-        {"wait_for": "change first?", "timeout_ms": 60000}
+        {"wait_for": "release on Fridays", "timeout_ms": 60000}
       ]
     }
   ]
