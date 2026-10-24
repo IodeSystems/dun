@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
 )
 
@@ -35,6 +36,7 @@ func (m *tuiModel) appendNotice(e convoEntry) int {
 	if n := len(m.convo); n > 0 && !m.convo[n-1].blank && !m.convo[n-1].splash {
 		m.turnGap() // the splash ends in a blank row of its own
 	}
+	e.hang = true // a notice that wraps continues under its words, not its ✓
 	m.convo = append(m.convo, e)
 	i := len(m.convo) - 1
 	m.turnGap()
@@ -58,8 +60,13 @@ func hangWrap(s string, w int) string {
 		return s
 	}
 	rest := strings.Split(cellbuf.Wrap(strings.Join(rows[1:], " "), max(1, w-2), ""), "\n")
-	for i := range rest {
-		rest[i] = "  " + strings.TrimLeft(rest[i], " ")
+	for i, r := range rest {
+		r = strings.TrimLeft(r, " ")
+		// A row does not start with the separator of a notice's details.
+		if strings.HasPrefix(ansi.Strip(r), "· ") {
+			r = ansi.Cut(r, 2, ansi.StringWidth(r))
+		}
+		rest[i] = "  " + r
 	}
 	return strings.Join(append(rows[:1], rest...), "\n")
 }

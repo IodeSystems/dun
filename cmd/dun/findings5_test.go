@@ -179,3 +179,14 @@ func TestForms5_FitAPhone(t *testing.T) {
 		}
 	}
 }
+
+// A notice that wraps on a phone continues under its words, not under ✓
+// (run 4: "· key set" alone at column 0).
+func TestNotice5_WrapsUnderItsWords(t *testing.T) {
+	v := newVtui(49, 21)
+	v.m.appendNotice(convoEntry{collapsed: okNotice("logged in to local", "http://127.0.0.1:42299/v1", "key set")})
+	all := strings.Join(shown(v), "\n")
+	if !strings.Contains(all, "✓ logged in to local · http://127.0.0.1:42299/v1\n  key set") {
+		t.Errorf("notice:\n%s", all)
+	}
+}
