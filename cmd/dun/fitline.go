@@ -104,22 +104,26 @@ func fitClause(s string, w int) string {
 	if w <= 0 || ansi.StringWidth(s) <= w {
 		return s
 	}
-	best := -1
-	for _, sep := range []string{": ", "; ", " — ", " (", ", "} {
-		for i := 0; ; {
-			j := strings.Index(s[i:], sep)
-			if j < 0 {
-				break
+	// The strong breaks first (a colon, a semicolon, a dash, a bracket): a
+	// comma may end a clause or only a list item ("run: on, in a …").
+	for _, tier := range [][]string{{": ", "; ", " — ", " ("}, {", "}} {
+		best := -1
+		for _, sep := range tier {
+			for i := 0; ; {
+				j := strings.Index(s[i:], sep)
+				if j < 0 {
+					break
+				}
+				at := i + j
+				if ansi.StringWidth(s[:at]) <= w && at > best {
+					best = at
+				}
+				i = at + len(sep)
 			}
-			at := i + j
-			if ansi.StringWidth(s[:at]) <= w && at > best {
-				best = at
-			}
-			i = at + len(sep)
 		}
-	}
-	if best > 0 {
-		return s[:best]
+		if best > 0 {
+			return s[:best]
+		}
 	}
 	return fitText(s, w)
 }

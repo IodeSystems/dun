@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/cellbuf"
 )
 
 // The first run: dun with no AI service logged in. The screen's one
@@ -45,6 +46,24 @@ func (m *tuiModel) appendNotice(e convoEntry) int {
 // type, then what happens.
 const heldLine = "kept your question — type /login, then it comes back"
 
+// needLoginLine is the first-run line: what dun needs, and the command.
+// Short enough for a phone's row with its mark (errNoLogin is the engine's
+// error, matched by its words, and stays as it is).
+const needLoginLine = "not logged in — type /login to connect"
+
+// hangWrap wraps s at w with every row after the first at column 2.
+func hangWrap(s string, w int) string {
+	rows := strings.Split(cellbuf.Wrap(s, max(1, w), ""), "\n")
+	if len(rows) == 1 {
+		return s
+	}
+	rest := strings.Split(cellbuf.Wrap(strings.Join(rows[1:], " "), max(1, w-2), ""), "\n")
+	for i := range rest {
+		rest[i] = "  " + strings.TrimLeft(rest[i], " ")
+	}
+	return strings.Join(append(rows[:1], rest...), "\n")
+}
+
 // warnLine is a line that needs the person, in the one shape: the warning
 // mark in column 0 (as ✓ is on a line that worked: the state is not colour
 // alone), the text from column 2, in the attention colour. ⚠ is in DejaVu
@@ -60,7 +79,7 @@ func (m *tuiModel) loggedIn() bool { return !m.noLogin }
 // now. Nothing else moves while no turn can have run.
 func (m *tuiModel) sayNeedLogin() {
 	m.dropNeedLogin()
-	m.convo = append(m.convo, convoEntry{collapsed: warnLine(errNoLogin.Error()), needLogin: true})
+	m.convo = append(m.convo, convoEntry{collapsed: warnLine(needLoginLine), needLogin: true, hang: true})
 	m.refresh()
 }
 
@@ -87,7 +106,7 @@ func (m *tuiModel) holdUnsent(v string) {
 	m.dropNeedLogin()
 	// At the body's indent, in the secondary grey: it is about the question
 	// above it, which is there too.
-	m.convo = append(m.convo, convoEntry{collapsed: "  " + stSecondary.Render(heldLine), needLogin: true})
+	m.convo = append(m.convo, convoEntry{collapsed: "  " + stSecondary.Render(heldLine), needLogin: true, hang: true})
 	m.refresh()
 }
 

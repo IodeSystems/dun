@@ -96,7 +96,7 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	case len(args) == 1:
 		p, ok := m.providerNamed(m.provider)
 		if !ok && m.url == "" {
-			m.append(warnLine(errNoLogin.Error()))
+			m.append(warnLine(needLoginLine))
 			return nil
 		}
 		if p.URL == "" {
@@ -474,7 +474,7 @@ func (m tuiModel) modelPanel() string {
 
 // modelHint is the picker's status line.
 func modelHint() string {
-	return "model  ·  ↑/↓ choose · enter use · esc cancel · alt+enter this session only · ctrl+a another service"
+	return "model  ·  enter use · esc cancel · alt+enter this session only · ctrl+a another service"
 }
 
 // ── the add-provider form ──

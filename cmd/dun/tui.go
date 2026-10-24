@@ -280,6 +280,9 @@ type convoEntry struct {
 	splash          bool   // the splash or a /status block (splash.go): client-only, never in the session log
 	liveSplash      bool   // the splash at the top: drawn again from live state at every refresh
 	startKept       bool   // a message typed before ready, shown until it is sent (startqueue.go)
+	// hang: a line that wraps continues at column 2, under its text, not
+	// under its mark (⚠ …, the kept-question line).
+	hang bool
 
 	// blank marks the empty row turnGap() appends when a turn ends, so
 	// consecutive turns read as blocks. It renders as nothing.
@@ -939,6 +942,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.vp.setHeight(got)
 				}
 				t.applyScroll(selMode)
+			}
+			// A panel that closed has given its rows back by now (holdTop
+			// above kept the top row): its hold is done.
+			if t.panelHeld && !t.panelOpen() {
+				t.panelHeld = false
+				// Rows that came with the close (an "adding …" line) are
+				// followed now, as far as they reach and no further.
+				t.applyScroll(t.focus == focusConvo && !t.asking && len(t.convo) > 0)
 			}
 		}
 		// The block being paged may have grown, and the pane may have moved.
@@ -3953,7 +3964,11 @@ func (m *tuiModel) refresh() {
 				case e.wrapped != "" && e.wrapW == width:
 					w = e.wrapped
 				default:
-					e.wrapped, e.wrapW = cellbuf.Wrap(b, wrapW, ""), width
+					if e.hang {
+						e.wrapped, e.wrapW = hangWrap(b, wrapW), width
+					} else {
+						e.wrapped, e.wrapW = cellbuf.Wrap(b, wrapW, ""), width
+					}
 					w = e.wrapped
 				}
 			}
@@ -4073,13 +4088,17 @@ func (m *tuiModel) applyScroll(selMode bool) {
 	// while the panel is open and nothing new has arrived (see the shrink in
 	// Update). New rows, or the panel gone, end the hold.
 	if m.panelHeld {
-		if len(m.vp.lines) <= m.panelRows {
-			// Still open: stay. Just closed: stay for this frame too — the
-			// pane grows next (Update's funnel) and keeps this top row.
+		switch {
+		case !m.panelOpen():
+			// Just closed — with a line added or not (the /mcp add
+			// "adding …" line comes with the close): stay until the pane
+			// has grown back (Update's funnel keeps this top row and then
+			// ends the hold); after that, new rows move the view only as
+			// far as they need.
 			m.vp.SetYOffset(m.panelYOff)
-			if !m.panelOpen() {
-				m.panelHeld = false
-			}
+			return
+		case len(m.vp.lines) <= m.panelRows:
+			m.vp.SetYOffset(m.panelYOff) // still open, nothing new: stay
 			return
 		}
 		m.panelHeld = false

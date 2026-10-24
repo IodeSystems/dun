@@ -340,4 +340,26 @@ func TestNoBounce_PhoneFormKeepsTheRowsWhereTheyWere(t *testing.T) {
 	if got := strings.Join(shown(v), "\n"); got != strings.Join(rows, "\n") {
 		t.Errorf("closed, the screen is not what it was:\n%s\nwas:\n%s", got, strings.Join(rows, "\n"))
 	}
+	// Filled in and sent: the form closes with an "adding …" line. The view
+	// moves no further than that line needs — it did jump eight rows.
+	v.m = typeStr(v.m, "/mcp add")
+	v.m = key(v.m, kEnter)
+	v.m = typeStr(v.m, "notes")
+	v.m = key(v.m, kEnter)
+	v.m = typeStr(v.m, "notes-mcp")
+	v.m = key(v.m, kEnter)
+	if v.m.mcpForm {
+		t.Fatal("the form did not close on add")
+	}
+	content := 0 // the conversation's own rows, not the blank ones holding the view
+	for _, h := range v.m.frame.blockH {
+		content += h
+	}
+	need := max(0, content-(yoff+v.m.vp.Height))
+	if v.m.vp.YOffset > yoff+need {
+		t.Errorf("adding moved the view %d rows; the new line needs %d", v.m.vp.YOffset-yoff, need)
+	}
+	if v.m.vp.YOffset+v.m.vp.Height < content {
+		t.Errorf("the new line is under the fold: view %d+%d, content %d", v.m.vp.YOffset, v.m.vp.Height, content)
+	}
 }

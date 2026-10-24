@@ -26,7 +26,7 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 		"hint": "off: raglit — /raglit on (auto: every session)"})
 	m = m.handleEvent(evMsg{"type": "settings", "model": "", "url": ""})
 	txt := convoText(m)
-	if !strings.Contains(txt, "not logged in — /login to connect to an AI service") || strings.Contains(txt, "ready") {
+	if !strings.Contains(txt, "⚠ not logged in — type /login to connect") || strings.Contains(txt, "ready") {
 		t.Fatalf("first screen:\n%s", txt)
 	}
 

@@ -77,8 +77,12 @@ func TestHints5_TheWayOutStays(t *testing.T) {
 // the kept-question line is at the body's indent in the secondary grey and
 // says what to type first.
 func TestLines5_WarningMarkAndKeptQuestion(t *testing.T) {
-	if got := warnLine(errNoLogin.Error()); got != stNote.Render("⚠ not logged in — /login to connect to an AI service") {
+	if got := warnLine(needLoginLine); got != stNote.Render("⚠ not logged in — type /login to connect") {
 		t.Errorf("warn line %q", got)
+	}
+	// A line that wraps on a phone continues under its text, not its mark.
+	if got := ansi.Strip(hangWrap("  "+heldLine, 49)); got != "  kept your question — type /login, then it comes\n  back" {
+		t.Errorf("hang wrap %q", got)
 	}
 	t.Setenv("DUN_HOME", t.TempDir())
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
