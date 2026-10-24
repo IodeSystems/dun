@@ -88,8 +88,8 @@ func TestNoBounce_LiveSplashRewritesItsRowsInPlace(t *testing.T) {
 			}
 			v.event(serversEvent(true))
 			s = stripANSI(v.m.convo[0].collapsed)
-			if !strings.Contains(s, "project search (raglit) is on") || !strings.Contains(s, "code navigation (poly-lsp) is off") {
-				t.Fatalf("the extras row does not follow the switch:\n%s", s)
+			if !strings.Contains(s, "extensions     raglit on\n") || !strings.Contains(s, "poly-lsp off") {
+				t.Fatalf("the extensions row does not follow the switch:\n%s", s)
 			}
 			if got := v.m.frame.blockH[0]; got != h {
 				t.Errorf("the splash went from %d rows to %d", h, got)

@@ -165,7 +165,7 @@ func TestLateServer_JoinsWithoutBounce(t *testing.T) {
 	}
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": servers(true)})
 	v.event(map[string]any{"type": "settings", "model": "m", "url": "http://llm/v1"})
-	if !strings.Contains(convoText(v.m), "is starting…") {
+	if !strings.Contains(stripANSI(convoText(v.m)), "servers        poly-lsp starting 3s · shell on\n") {
 		t.Fatalf("the splash does not say it is starting:\n%s", convoText(v.m))
 	}
 	if got := lastRow(v.m); !strings.Contains(got, "ready · poly-lsp starting") {
@@ -188,7 +188,7 @@ func TestLateServer_JoinsWithoutBounce(t *testing.T) {
 			changed++
 		}
 	}
-	// The extras row, and the status line's tail.
+	// The servers row, and the status line's tail.
 	if changed > 2 {
 		t.Fatalf("%d rows changed:\nbefore:\n%s\nafter:\n%s", changed, strings.Join(before, "\n"), strings.Join(after, "\n"))
 	}

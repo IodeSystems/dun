@@ -1675,6 +1675,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		// A server still starting: the live splash counts its seconds. The
+		// row changes in place; refresh only when its words did.
+		if len(m.srvSince) > 0 && len(m.convo) > 0 && m.convo[0].liveSplash &&
+			m.splashView(m.splashW()) != m.convo[0].collapsed {
+			m.refresh()
+		}
 		return m, cmd
 	}
 	return m, nil
@@ -2273,6 +2279,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.noteServers(ev)
 	case "catalog":
 		m.noteCatalog(ev)
+		m.refresh() // the splash's skills row
 	case "mcp_tools":
 		m = m.noteMCPTools(ev)
 	case "mcp_login":
