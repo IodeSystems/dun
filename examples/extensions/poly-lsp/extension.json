@@ -8,7 +8,7 @@
   "slash": {
     "name": "poly-lsp",
     "description": "code navigation (poly-lsp): lets the model find definitions and uses, and rename",
-    "help": "Code navigation (poly-lsp) lets the model find where a name is defined and where it is used, read a function by its name, and rename it across files. It uses each language's own tools (gopls, tsserver, pylsp) where they are installed.\n/poly-lsp on — turn it on for this session\n/poly-lsp auto — turn it on in every session of this project\n/poly-lsp off, /poly-lsp manual — the same two, to turn it off\n/poly-lsp exclude <dir> — leave a directory out of the index, for this project (dun does this itself when the index stops at its file limit, and says so)\n/poly-lsp include <dir> — put it back\n/poly-lsp alone — whether it is on, its index, and what it leaves out"
+    "help": "Code navigation (poly-lsp) lets the model find where a name is defined and where it is used, read a function by its name, and rename it across files. It uses each language's own tools (gopls, tsserver, pylsp) where they are installed.\n/poly-lsp on — turn it on for this session\n/poly-lsp auto — turn it on in every session of this project\n/poly-lsp off, /poly-lsp manual — the same two, to turn it off\n/poly-lsp exclude <dir> — leave a directory out of the index, for this project (dun does this itself when the index does not fit its startup budget, and says so)\n/poly-lsp include <dir> — put it back\n/poly-lsp budget <Nms|Nops|0|default> — the index's startup budget, for this project (dun raises it itself when nothing is obvious to leave out, and says so)\n/poly-lsp alone — whether it is on, its index, and what it leaves out"
   },
   "host_hooks": {"POLY_LSP_HOOK": "agents_md_guard"}
 }

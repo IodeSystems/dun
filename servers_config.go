@@ -137,8 +137,14 @@ type ServerSpec struct {
 	// Exclude is directories, relative to the workspace, left out of the
 	// server's index: passed as --exclude to a poly-lsp-mcp that takes it
 	// (indexstate.go). Written at project scope by /poly-lsp exclude and by
-	// dun itself when an index stops at its file limit.
+	// dun itself when an index does not fit its startup budget.
 	Exclude []string `json:"exclude,omitempty"`
+	// IndexBudget is the server's index startup budget, as poly-lsp-mcp's
+	// --index-budget takes it ("48000ms", "20000ops", "0" unbounded); ""
+	// is its default. Written at project scope by /poly-lsp budget and by
+	// dun when an index runs out of budget with nothing obvious to leave
+	// out.
+	IndexBudget string `json:"index_budget,omitempty"`
 }
 
 // OAuthSpec is how dun logs in to an OAuth- or OIDC-protected MCP server.
@@ -613,6 +619,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	}
 	if next.Exclude != nil {
 		out.Exclude = next.Exclude
+	}
+	if next.IndexBudget != "" {
+		out.IndexBudget = next.IndexBudget
 	}
 	return out
 }

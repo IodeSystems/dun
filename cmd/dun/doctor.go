@@ -332,15 +332,18 @@ func (d *doctor) polyLSP() {
 
 // polyLSPAt is polyLSP's finding for the binary bin, found on where.
 func (d *doctor) polyLSPAt(bin, where string) {
-	ok, resolved, err := dun.IndexProtocol(bin)
+	sup, resolved, err := dun.IndexProtocol(bin)
 	switch {
 	case err != nil:
 		d.add("warn", "poly-lsp", resolved+" (on "+where+"): could not ask it: "+oneLine(err.Error()), "update it (poly-lsp: make install)")
-	case !ok:
+	case !sup.Protocol:
 		d.add("warn", "poly-lsp", resolved+" (on "+where+") is an older build: startup waits for its index",
 			"update it (poly-lsp: make install)")
+	case !sup.Budget:
+		d.add("warn", "poly-lsp", resolved+" (on "+where+"): indexes in the background, but caps files instead of a startup budget (an interim build)",
+			"update it (poly-lsp: make install)")
 	default:
-		d.add("ok", "poly-lsp", resolved+" (on "+where+"): indexes in the background; takes --exclude", "")
+		d.add("ok", "poly-lsp", resolved+" (on "+where+"): indexes in the background; takes --exclude and --index-budget", "")
 	}
 }
 

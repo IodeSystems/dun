@@ -31,10 +31,10 @@ func TestIndexing_SplashStatusAndReport(t *testing.T) {
 		t.Fatalf("status: %q", got)
 	}
 	n := len(v.m.convo)
-	msg := "poly-lsp: a large workspace — 22,012 indexable files (it warns above 10,000). The index is built."
+	msg := "poly-lsp: the index holds .claude/worktrees/ (21,557 files, 97% of the index, 48 other git checkouts). To leave it out: /poly-lsp exclude .claude/worktrees"
 	v.event(map[string]any{"type": "server", "id": "poly-lsp", "action": "index", "background": true,
 		"message": msg, "servers": servers(dun.IndexReady), "tools": []any{"eval", "node_query"}})
-	if len(v.m.convo) <= n || !strings.Contains(stripANSI(convoText(v.m)), "a large workspace") {
+	if len(v.m.convo) <= n || !strings.Contains(stripANSI(convoText(v.m)), "the index holds .claude/worktrees/") {
 		t.Fatalf("the report is not in the conversation:\n%s", convoText(v.m))
 	}
 	if got := lastRow(v.m); strings.Contains(got, "indexing") {
@@ -71,16 +71,21 @@ func TestDoctorPolyLSP(t *testing.T) {
 		}
 		return p
 	}
-	newer := write("new", "      --index-max-files int")
+	newer := write("new", "      --index-budget string")
 	older := write("old", "      --root string")
+	interim := write("interim", "      --index-max-files int")
 	d := &doctor{}
 	d.polyLSPAt(newer, "this PATH")
 	d.polyLSPAt(older, "the service's PATH")
-	if len(d.found) != 2 {
+	d.polyLSPAt(interim, "this PATH")
+	if len(d.found) != 3 {
 		t.Fatalf("%+v", d.found)
 	}
-	if f := d.found[0]; f.level != "ok" || !strings.Contains(f.detail, newer+" (on this PATH): indexes in the background") {
+	if f := d.found[0]; f.level != "ok" || !strings.Contains(f.detail, newer+" (on this PATH): indexes in the background; takes --exclude and --index-budget") {
 		t.Errorf("new: %+v", f)
+	}
+	if f := d.found[2]; f.level != "warn" || !strings.Contains(f.detail, "caps files instead of a startup budget (an interim build)") {
+		t.Errorf("interim: %+v", f)
 	}
 	if f := d.found[1]; f.level != "warn" || !strings.Contains(f.detail, older+" (on the service's PATH) is an older build: startup waits for its index") ||
 		f.fix != "update it (poly-lsp: make install)" {

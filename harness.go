@@ -73,8 +73,10 @@ type Server struct {
 	OAuth *OAuthSpec
 	// Attach is every scope's attached indexes, merged (attach.go).
 	Attach []string
-	// Exclude is the directories left out of its index (ServerSpec.Exclude).
-	Exclude []string
+	// Exclude is the directories left out of its index (ServerSpec.Exclude),
+	// IndexBudget its index startup budget (ServerSpec.IndexBudget).
+	Exclude     []string
+	IndexBudget string
 }
 
 // raglitProject is the CORPUS: the repository, shared by every worktree of it.
@@ -492,7 +494,6 @@ type Harness struct {
 	index        map[string]*indexState
 	indexSeen    map[string]bool
 	indexRetried map[string]bool
-	indexLarge   map[string]bool // said "a large workspace" this session
 	// exts are the loaded extensions and extErrs the manifests that did not
 	// load (extension.go). Fixed at Start.
 	exts    []Extension

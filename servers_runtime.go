@@ -129,6 +129,7 @@ type ServerState struct {
 	IndexErr     string   `json:"indexErr,omitempty"`
 	IndexFiles   int      `json:"indexFiles,omitempty"`
 	Exclude      []string `json:"exclude,omitempty"`
+	IndexBudget  string   `json:"indexBudget,omitempty"` // the project's --index-budget, "" the default
 }
 
 // Servers reports every configured server and whether it is up, in config
@@ -186,7 +187,7 @@ func (h *Harness) Servers() []ServerState {
 		if st.Running {
 			h.indexOf(s.ID, &st)
 		}
-		st.Exclude = s.Exclude
+		st.Exclude, st.IndexBudget = s.Exclude, s.IndexBudget
 		switch {
 		case s.Via == ViaShell:
 			st.Via, st.Namespace, st.Err, st.Tools = ViaShell, ShellNamespace(s.ID), "", 0
@@ -376,9 +377,16 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// "indexing" from its spawn until it says how the build went, and takes
 	// the project's excludes. An older one would refuse --exclude: it gets
 	// none, and no index state.
-	indexes := s.URL == "" && h.speaksIndex(s)
+	indexes, budgets := false, false
+	if s.URL == "" && err == nil {
+		indexes, budgets = h.speaksIndex(s, command)
+	}
 	if indexes {
 		args = append(slices.Clone(args), excludeArgs(s.Exclude)...)
+		// The project's startup budget, to a build that has one.
+		if budgets && s.IndexBudget != "" {
+			args = append(args, "--index-budget", s.IndexBudget)
+		}
 	}
 	h.markIndexBuilding(s.ID, indexes)
 	mcfg := mcpmgr.MCPConfig{

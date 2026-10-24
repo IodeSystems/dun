@@ -161,6 +161,7 @@ func TestRouteSlash(t *testing.T) {
 		// the code index's excludes keep a directory's case.
 		"poly-lsp exclude Vendor/X":  {"server", "poly-lsp", "exclude Vendor/X"},
 		"poly-lsp INCLUDE .claude/W": {"server", "poly-lsp", "include .claude/W"},
+		"poly-lsp budget 48000ms":    {"server", "poly-lsp", "budget 48000ms"},
 		// raglit's manifest commands keep the text as typed.
 		"raglit INCLUDE ~/My Docs Notes.MD": {"control", "ext", "call raglit include ~/My Docs Notes.MD"},
 		"raglit exclude '**/*.LOG' --keep":  {"control", "ext", "call raglit exclude '**/*.LOG' --keep"},

@@ -30,12 +30,13 @@ const (
 	// initialize: poly-lsp indexing a big repo before it says anything.
 	fakeSlowEnv = "DUN_FAKE_SLOW_MS"
 	// fakeIndexEnv makes the fake poly-lsp a build that speaks the index
-	// protocol (indexstate_test.go): its `mcp --help` lists
-	// --index-max-files, and after initialize it reports the build as the
-	// mode says. Unset, it is an older build: no flag, no report.
+	// protocol (indexstate_test.go): its `mcp --help` lists --index-budget
+	// (a "limit" mode: the interim build's --index-max-files), and after
+	// initialize it reports the build as the mode says (fakeIndexReport).
+	// Unset, it is an older build: no flag, no report.
 	fakeIndexEnv = "DUN_FAKE_INDEX"
-	// fakeIndexOKEnv is a directory: started with --exclude for it, the
-	// build is ready instead of failed.
+	// fakeIndexOKEnv is a directory, or "budget=X": started with --exclude
+	// for it (--index-budget X), the build is ready instead of failed.
 	fakeIndexOKEnv = "DUN_FAKE_INDEX_OK"
 )
 
@@ -92,8 +93,11 @@ func fakeBinMain(persona string) {
 	case "poly-lsp":
 		if slices.Contains(args, "--help") {
 			fmt.Println("Usage:\n  poly-lsp-mcp mcp [flags]\n\nFlags:\n      --root string")
-			if os.Getenv(fakeIndexEnv) != "" {
-				fmt.Println("      --exclude stringArray\n      --index-max-files int   (default 100000)\n      --index-warn-files int  (default 10000)")
+			switch mode := os.Getenv(fakeIndexEnv); {
+			case strings.HasPrefix(mode, "limit"): // the interim build
+				fmt.Println("      --exclude stringArray\n      --index-max-files int   (default 100000)")
+			case mode != "":
+				fmt.Println("      --exclude stringArray\n      --index-budget string   (default \"30000ms\")")
 			}
 			return
 		}
@@ -155,14 +159,20 @@ var (
 )
 
 // fakeIndexReport sends the index notification for mode: "ready" (a small
-// tree), "nested" (ready, a checkout inside), "large" (ready over the
-// warning threshold), "limit" (failed at the cap, the worktrees report) or
-// "plain" (failed at the cap, nothing obvious). Started with --exclude
-// $DUN_FAKE_INDEX_OK, a failing mode is ready instead.
+// tree), "nested" (ready, a checkout inside), "budget" (out of its startup
+// budget, the worktrees report), "budget-plain" (out of budget, nothing
+// obvious), "limit" or "limit-plain" (the interim build: failed at its file
+// cap). $DUN_FAKE_INDEX_OK makes a failing mode ready when it was started
+// with --exclude for that directory, or, as "budget=X", with
+// --index-budget X.
 func fakeIndexReport(out *bufio.Writer, mode string, args []string) {
 	if ok := os.Getenv(fakeIndexOKEnv); ok != "" {
+		flag, want := "--exclude", ok
+		if b, isBudget := strings.CutPrefix(ok, "budget="); isBudget {
+			flag, want = "--index-budget", b
+		}
 		for i := 0; i+1 < len(args); i++ {
-			if args[i] == "--exclude" && args[i+1] == ok {
+			if args[i] == flag && args[i+1] == want {
 				mode = "ready"
 			}
 		}
@@ -172,15 +182,20 @@ func fakeIndexReport(out *bufio.Writer, mode string, args []string) {
 	switch mode {
 	case "nested":
 		data["index"] = fakeWorktrees
-	case "large":
-		level = "warning"
-		data["index"] = fakeWorktrees
-		data["large"] = map[string]any{"files": 22012, "threshold": 10000,
-			"message": "large workspace: 22012 indexable files (warning above 10000); see index.heaviest for where they are."}
-	case "limit", "plain":
+	case "budget", "budget-plain":
+		level = "error"
+		rep, read, raise := fakeWorktrees, 4100, "193000ms"
+		if mode == "budget-plain" {
+			rep, read, raise = fakePlain, 90000, "48000ms"
+		}
+		data = map[string]any{"state": "failed", "ms": 30000, "index": rep, "budget": "30000ms", "read": read,
+			"error": fmt.Sprintf("index build failed: index budget 30000ms spent after %d of %d indexable files", read, rep["files"]),
+			"remedy": "get under budget: exclude the heavy directories above (--exclude <dir>, repeatable, relative to the root; " +
+				"the repository is not changed) or add them to .gitignore. Or raise it: --index-budget " + raise + " (now 30000ms)."}
+	case "limit", "limit-plain":
 		level = "error"
 		rep := fakeWorktrees
-		if mode == "plain" {
+		if mode == "limit-plain" {
 			rep = fakePlain
 		}
 		data = map[string]any{"state": "failed", "ms": 900, "index": rep, "limit": 10000,

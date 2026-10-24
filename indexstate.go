@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,39 +29,44 @@ import (
 //
 //	{"state": "ready"|"failed", "ms": N, "index": {files, bytes, cached,
 //	 wallMs, heaviest: [{dir, files, bytes, costMs, share,
-//	 nestedCheckouts}], hint}, "error", "remedy", "limit",
-//	 "large": {files, threshold, message}}
+//	 nestedCheckouts}], hint}, "error", "remedy", "budget", "read"}
 //
-// "large" is on a ready build over --index-warn-files (default 10,000):
-// built, but big. "limit" is on a build that stopped at the hard cap,
-// --index-max-files (default 100,000). Past the cap the walk goes on
-// counting, so heaviest is the whole post-mortem: where the files are.
+// "budget" is on a build that ran out of its startup budget,
+// --index-budget (node_query's terms: "30000ms" wall-clock, the default, or
+// "Nops", one per file read); "read" is the files it read within it. Past
+// the budget the walk goes on counting, so heaviest covers every file: where
+// they are. The remedy names a budget that would have fitted
+// ("--index-budget 48000ms (now 30000ms)"). A short-lived build before it
+// failed at a file cap instead (--index-max-files, "limit"); dun reads that
+// too.
 //
 // What dun does with it:
 //
 //   - building: the server is up but its index is not; Servers() says
 //     Index "building" and for how long ("poly-lsp indexing 12s").
-//   - ready: Index "ready". A large one gets one quiet line, once per
-//     session: its size, heaviest, and the command that leaves the obvious
-//     directories out — offered, not done. Otherwise a directory in
-//     heaviest that holds other git checkouts gets one quiet line, with the
-//     same command.
-//   - failed at the limit: dun picks the obvious directories to leave out
-//     (chooseExcludes), saves them in the project's server config
-//     (ServerSpec.Exclude, $DUN_HOME/projects/<id>/dun.local.json) so a
-//     later start does not hit the limit again, restarts the server with
-//     --exclude for each, and says what it left out, why, and how to undo
-//     it (/poly-lsp include <dir>). Once per session; a second failure is
-//     reported, not retried. With nothing obvious it changes nothing and
-//     reports the post-mortem and the remedy.
+//   - ready: Index "ready". A directory in heaviest that holds other git
+//     checkouts gets one quiet line, with the command that leaves it out.
+//   - failed, out of budget: dun picks the obvious directories to leave out
+//     (chooseExcludes: as few as bring the files under what was read in
+//     budget), saves them in the project's server config
+//     (ServerSpec.Exclude, $DUN_HOME/projects/<id>/dun.local.json), and
+//     restarts the server with --exclude for each. With nothing obvious it
+//     raises the budget instead — the remedy's, else the spent one scaled by
+//     files counted over files read, plus a fifth — saved as
+//     ServerSpec.IndexBudget. Either way it says what it did, why, and how
+//     to undo it (/poly-lsp include <dir>, /poly-lsp budget default). Once
+//     per session; a second failure is reported, not retried.
+//   - failed at the file cap (the intermediate build): the same excludes;
+//     with nothing obvious it changes nothing and reports.
 //
 // The initialize result also says "index": {"state": "building"}, but
 // agentkit's mcpmgr (v0.10.1) keeps only the capabilities of that result.
-// So "building" comes from the binary instead: a poly-lsp-mcp whose
-// `mcp --help` lists --index-max-files speaks this protocol (IndexProtocol).
-// An older one builds before it answers (Starting covers it), sends no
-// notification, and rejects --exclude; dun passes it no excludes and shows
-// no index state — it behaves as before. Any server that sends a
+// So "building" comes from the binary instead (IndexProtocol): a
+// poly-lsp-mcp whose `mcp --help` lists --index-budget or --index-max-files
+// speaks this protocol and takes --exclude; only the first takes
+// --index-budget. An older one builds before it answers (Starting covers
+// it), sends no notification, and rejects --exclude; dun passes it neither
+// and shows no index state — it behaves as before. Any server that sends a
 // "<name>/index" notification gets the same state, whatever its binary.
 
 // Index states, as ServerState.Index says them.
@@ -97,16 +105,9 @@ type indexNote struct {
 	Index  *IndexReport `json:"index,omitempty"`
 	Error  string       `json:"error,omitempty"`
 	Remedy string       `json:"remedy,omitempty"`
-	Limit  int          `json:"limit,omitempty"`
-	Large  *indexLarge  `json:"large,omitempty"`
-}
-
-// indexLarge is a ready build over --index-warn-files: the workspace is
-// large, the index was built anyway.
-type indexLarge struct {
-	Files     int    `json:"files"`
-	Threshold int    `json:"threshold"`
-	Message   string `json:"message"`
+	Budget string       `json:"budget,omitempty"` // the budget spent: "30000ms"
+	Read   int          `json:"read,omitempty"`   // files read within it
+	Limit  int          `json:"limit,omitempty"`  // the intermediate build's file cap
 }
 
 // indexState is a server's index as dun last heard of it. Guarded by srvMu.
@@ -148,34 +149,41 @@ func asksIndex(s Server) bool {
 	return s.URL == "" && s.Command != "" && (filepath.Base(s.Command) == polyLSPCommand || s.ID == ServerCode)
 }
 
+// IndexSupport is what a poly-lsp-mcp binary takes of the index protocol.
+type IndexSupport struct {
+	Protocol bool // a background index, its report, and --exclude
+	Budget   bool // --index-budget (the intermediate build had a file cap)
+}
+
 // indexProbes caches IndexProtocol by the binary's path, size and mtime: a
 // rebuilt binary is asked again, an unchanged one is not.
-var indexProbes sync.Map // key → bool
+var indexProbes sync.Map // key → IndexSupport
 
 // indexProbeTimeout bounds the `mcp --help` IndexProtocol runs.
 const indexProbeTimeout = 5 * time.Second
 
-// IndexProtocol reports whether the poly-lsp-mcp named by command (a path,
-// or a name looked up on PATH) speaks the index protocol: its initialize
-// answers before the index is built, the build's end is a notification,
-// and it takes --exclude and --index-max-files. It runs `<command> mcp
-// --help` — a read: LSP_REBUILD_DONE stops a dev build's self-update — and
-// looks for --index-max-files. resolved is the binary that was asked.
-func IndexProtocol(command string) (ok bool, resolved string, err error) {
+// IndexProtocol reports what the poly-lsp-mcp named by command (a path, or a
+// name looked up on PATH) takes of the index protocol: its initialize
+// answers before the index is built, the build's end is a notification, and
+// it takes --exclude; with Budget, --index-budget too. It runs `<command>
+// mcp --help` — a read: LSP_REBUILD_DONE stops a dev build's self-update —
+// and looks for --index-budget, or the intermediate build's
+// --index-max-files. resolved is the binary that was asked.
+func IndexProtocol(command string) (sup IndexSupport, resolved string, err error) {
 	resolved, err = exec.LookPath(command)
 	if err != nil {
-		return false, "", err
+		return sup, "", err
 	}
 	if abs, err := filepath.Abs(resolved); err == nil {
 		resolved = abs
 	}
 	st, err := os.Stat(resolved)
 	if err != nil {
-		return false, resolved, err
+		return sup, resolved, err
 	}
 	key := fmt.Sprintf("%s|%d|%d", resolved, st.Size(), st.ModTime().UnixNano())
 	if v, hit := indexProbes.Load(key); hit {
-		return v.(bool), resolved, nil
+		return v.(IndexSupport), resolved, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), indexProbeTimeout)
 	defer cancel()
@@ -183,32 +191,31 @@ func IndexProtocol(command string) (ok bool, resolved string, err error) {
 	cmd.Env = append(os.Environ(), "LSP_REBUILD_DONE=1")
 	out, runErr := cmd.CombinedOutput()
 	if len(out) == 0 && runErr != nil {
-		return false, resolved, fmt.Errorf("%s mcp --help: %w", resolved, runErr)
+		return sup, resolved, fmt.Errorf("%s mcp --help: %w", resolved, runErr)
 	}
-	ok = strings.Contains(string(out), "--index-max-files")
-	indexProbes.Store(key, ok)
-	return ok, resolved, nil
+	help := string(out)
+	sup.Budget = strings.Contains(help, "--index-budget")
+	sup.Protocol = sup.Budget || strings.Contains(help, "--index-max-files")
+	indexProbes.Store(key, sup)
+	return sup, resolved, nil
 }
 
-// speaksIndex reports whether s, as it is about to be spawned, builds its
-// index after the handshake: it said so this session (an index
-// notification), or its binary does (IndexProtocol). Not under srvMu: it may
-// run a process.
-func (h *Harness) speaksIndex(s Server) bool {
+// speaksIndex reports whether s, about to be spawned from command, builds
+// its index after the handshake — it said so this session (an index
+// notification), or its binary does (IndexProtocol) — and whether it takes
+// --index-budget. Not under srvMu: it may run a process.
+func (h *Harness) speaksIndex(s Server, command string) (indexes, budget bool) {
 	h.srvMu.Lock()
 	seen := h.indexSeen[s.ID]
 	h.srvMu.Unlock()
-	if seen {
-		return true
-	}
 	if !asksIndex(s) {
-		return false
+		return seen, false
 	}
-	ok, _, err := IndexProtocol(s.Command)
+	sup, _, err := IndexProtocol(command)
 	if err != nil {
 		log.Printf("dun: %s: index protocol not known: %v", s.ID, err)
 	}
-	return ok
+	return sup.Protocol || seen, sup.Budget
 }
 
 // excludeArgs are --exclude flags for dirs.
@@ -264,12 +271,10 @@ func (h *Harness) noteIndex(id string, n indexNote) {
 func (h *Harness) afterIndex(id string, n indexNote) {
 	msg := ""
 	switch {
-	case n.State == IndexReady && n.Large != nil:
-		msg = h.largeWarning(id, n)
 	case n.State == IndexReady:
 		msg = h.nestedWarning(id, n.Index)
-	case n.Limit > 0 && n.Index != nil:
-		msg = h.retryWithExcludes(id, n)
+	case (n.Budget != "" || n.Limit > 0) && n.Index != nil:
+		msg = h.retryIndex(id, n)
 	default:
 		msg = fmt.Sprintf("%s: the index was not built — %s", id, oneLine(n.Error, 300))
 		if n.Remedy != "" {
@@ -279,7 +284,7 @@ func (h *Harness) afterIndex(id string, n indexNote) {
 	if msg != "" && n.State == IndexFailed {
 		// The model's poly-lsp calls answer with the failure, or a
 		// restart changes what they see: it hears what dun did, once. A
-		// warning on a working index is the person's, not the model's.
+		// notice on a working index is the person's, not the model's.
 		h.Aside("[" + id + " index] " + msg)
 	}
 	if cb := h.cfg.OnServerIndex; cb != nil {
@@ -287,14 +292,28 @@ func (h *Harness) afterIndex(id string, n indexNote) {
 	}
 }
 
-// retryWithExcludes is a build that stopped at its file limit: leave out the
-// obvious directories and start again, once per session; else report.
-func (h *Harness) retryWithExcludes(id string, n indexNote) string {
-	what := fmt.Sprintf("%s indexable files, limit %s", Grouped(n.Index.Files), Grouped(n.Limit))
-	dirs := chooseExcludes(*n.Index, n.Limit)
+// retryIndex is a build that ran out of budget (or, from the intermediate
+// build, hit its file cap): leave out the obvious directories, else raise
+// the budget, and start again — once per session; else report.
+func (h *Harness) retryIndex(id string, n indexNote) string {
+	rep := *n.Index
+	// The files that fit: what was read within the budget, or the cap.
+	what, target := "", n.Limit
+	if n.Budget != "" {
+		what = fmt.Sprintf("the index did not fit its startup budget — %s read %s of %s indexable files",
+			n.Budget, Grouped(n.Read), Grouped(rep.Files))
+		target = n.Read
+	} else {
+		what = fmt.Sprintf("the index stopped at its limit — %s indexable files, limit %s", Grouped(rep.Files), Grouped(n.Limit))
+	}
+	dirs := chooseExcludes(rep, target)
+	raise := ""
+	if len(dirs) == 0 && n.Budget != "" {
+		raise = raisedBudget(n)
+	}
 	h.srvMu.Lock()
 	retried := h.indexRetried[id]
-	if len(dirs) > 0 && !retried {
+	if (len(dirs) > 0 || raise != "") && !retried {
 		if h.indexRetried == nil {
 			h.indexRetried = map[string]bool{}
 		}
@@ -304,11 +323,18 @@ func (h *Harness) retryWithExcludes(id string, n indexNote) string {
 	slash := h.slashFor(id)
 	switch {
 	case retried:
-		return fmt.Sprintf("%s: the index failed again, with this project's excludes (%s) — %s.\n%s\nremedy: %s; /%s exclude <dir> leaves another directory out, /%s include <dir> takes one back",
-			id, strings.Join(h.excludesOf(id), ", "), what, indexPostMortem(*n.Index), n.Remedy, slash, slash)
-	case len(dirs) == 0:
-		return fmt.Sprintf("%s: the index stopped at its limit — %s. No directory is an obvious one to leave out, so dun changed nothing; the code tools answer with this error until one is.\n%s\nremedy: %s; in dun, /%s exclude <dir> (saved for this project)",
-			id, what, indexPostMortem(*n.Index), n.Remedy, slash)
+		return fmt.Sprintf("%s: %s, again, after dun's change (%s).\n%s\nremedy: %s\nin dun, for this project: /%s exclude <dir>, /%s include <dir>, /%s budget <Nms|Nops|default>",
+			id, what, h.indexConfigNow(id), indexPostMortem(rep), n.Remedy, slash, slash, slash)
+	case len(dirs) == 0 && raise == "":
+		return fmt.Sprintf("%s: %s. No directory is an obvious one to leave out, so dun changed nothing; the code tools answer with this error until one is.\n%s\nremedy: %s; in dun, /%s exclude <dir> (saved for this project)",
+			id, what, indexPostMortem(rep), n.Remedy, slash)
+	case raise != "":
+		saved, err := h.editIndexSpec(context.Background(), id, false, func(s *ServerSpec) { s.IndexBudget = raise })
+		if err != nil {
+			return fmt.Sprintf("%s: %s. dun would raise the budget to %s, but could not save that: %v\n%s", id, what, raise, err, indexPostMortem(rep))
+		}
+		return fmt.Sprintf("%s: %s, and no directory is an obvious one to leave out. dun raised the budget to %s, for this project; %s is restarting with it. Saved in %s.\n%s\nTo undo: /%s budget default. To leave a directory out instead: /%s exclude <dir>.",
+			id, what, raise, id, saved, indexPostMortem(rep), slash, slash)
 	}
 	var keep []string
 	for _, d := range dirs {
@@ -316,11 +342,11 @@ func (h *Harness) retryWithExcludes(id string, n indexNote) string {
 	}
 	saved, err := h.addExcludes(id, keep)
 	if err != nil {
-		return fmt.Sprintf("%s: the index stopped at its limit — %s. dun would leave out %s, but could not save that: %v\n%s",
-			id, what, strings.Join(keep, ", "), err, indexPostMortem(*n.Index))
+		return fmt.Sprintf("%s: %s. dun would leave out %s, but could not save that: %v\n%s",
+			id, what, strings.Join(keep, ", "), err, indexPostMortem(rep))
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s: the index stopped at its limit — %s. dun left out, for this project:", id, what)
+	fmt.Fprintf(&b, "%s: %s. dun left out, for this project:", id, what)
 	for _, d := range dirs {
 		fmt.Fprintf(&b, "\n  %s — %s", d.Dir, excludeReason(d))
 	}
@@ -331,6 +357,47 @@ func (h *Harness) retryWithExcludes(id string, n indexNote) string {
 	}
 	fmt.Fprintf(&b, "\nTo undo: %s.", strings.Join(undo, ", "))
 	return b.String()
+}
+
+// indexConfigNow is id's index settings for this project, as a phrase.
+func (h *Harness) indexConfigNow(id string) string {
+	var parts []string
+	if ex := h.excludesOf(id); len(ex) > 0 {
+		parts = append(parts, "excluded: "+strings.Join(ex, ", "))
+	}
+	if b := h.IndexBudget(id); b != "" {
+		parts = append(parts, "budget "+b)
+	}
+	if len(parts) == 0 {
+		return "nothing set"
+	}
+	return strings.Join(parts, "; ")
+}
+
+// remedyBudget is the budget poly-lsp's remedy names: "--index-budget
+// 48000ms (now 30000ms)".
+var remedyBudget = regexp.MustCompile(`--index-budget (\d+(?:ms|ops)?) \(now`)
+
+// budgetPattern is a budget as --index-budget takes it.
+var budgetPattern = regexp.MustCompile(`^(\d+)(ms|ops)?$`)
+
+// raisedBudget is a budget that would have fitted the build in n: the one
+// its remedy names, else the spent one scaled by files counted over files
+// read, plus a fifth (poly-lsp's own rule), in whole seconds.
+func raisedBudget(n indexNote) string {
+	if m := remedyBudget.FindStringSubmatch(n.Remedy); m != nil {
+		return m[1]
+	}
+	m := budgetPattern.FindStringSubmatch(n.Budget)
+	if m == nil || n.Index == nil {
+		return ""
+	}
+	v, _ := strconv.Atoi(m[1])
+	scale := float64(n.Index.Files) / float64(max(n.Read, 1)) * 1.2
+	if m[2] == "ops" {
+		return fmt.Sprintf("%dops", int(float64(v)*scale)+1)
+	}
+	return fmt.Sprintf("%dms", int(math.Ceil(float64(v)*scale/1000))*1000)
 }
 
 // them is "it" or "them".
@@ -378,42 +445,6 @@ func (h *Harness) nestedWarning(id string, rep *IndexReport) string {
 	return fmt.Sprintf("%s: the index holds %s. To leave it out: %s", id, strings.Join(parts, "; "), strings.Join(cmds, ", "))
 }
 
-// largeWarning is the quiet line for a ready index over the server's
-// warning threshold, once per session: the size, where the files are, and
-// the command that leaves the obvious directories out. Nothing is excluded
-// on a warning: the index is built, and working.
-func (h *Harness) largeWarning(id string, n indexNote) string {
-	h.srvMu.Lock()
-	said := h.indexLarge[id]
-	if h.indexLarge == nil {
-		h.indexLarge = map[string]bool{}
-	}
-	h.indexLarge[id] = true
-	h.srvMu.Unlock()
-	if said {
-		return ""
-	}
-	slash := h.slashFor(id)
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s: a large workspace — %s indexable files (it warns above %s). The index is built.",
-		id, Grouped(n.Large.Files), Grouped(n.Large.Threshold))
-	if n.Index != nil && len(n.Index.Heaviest) > 0 {
-		b.WriteString("\n" + indexPostMortem(*n.Index))
-	}
-	var cmds []string
-	if n.Index != nil {
-		for _, d := range obviousExcludes(*n.Index) {
-			cmds = append(cmds, "/"+slash+" exclude "+cleanExclude(d.Dir))
-		}
-	}
-	if len(cmds) > 0 {
-		fmt.Fprintf(&b, "\nTo leave out the obvious ones, for this project: %s (/%s include <dir> undoes it).", strings.Join(cmds, ", "), slash)
-	} else {
-		fmt.Fprintf(&b, "\nTo leave a directory out, for this project: /%s exclude <dir> (/%s include <dir> undoes it).", slash, slash)
-	}
-	return b.String()
-}
-
 // indexPostMortem is the report as rows, for a person: share, directory,
 // files, bytes, nested checkouts.
 func indexPostMortem(r IndexReport) string {
@@ -450,12 +481,13 @@ func looksGenerated(dir string) bool {
 // must hold to be left out on its name alone.
 const dominantShare = 0.5
 
-// chooseExcludes picks the directories to leave out of an index that
-// stopped at limit: the obvious ones (a directory holding other git
-// checkouts; one over half of the index whose name says it is generated —
-// looksGenerated), largest first, as few as bring the count under the limit
-// by heaviest's figures. None when the obvious ones together do not: a
-// retry that is sure to fail again only adds a second report.
+// chooseExcludes picks the directories to leave out of an index that did
+// not fit — limit is the files that do: those read within the budget, or
+// the cap. The obvious ones (a directory holding other git checkouts; one
+// over half of the index whose name says it is generated — looksGenerated),
+// largest first, as few as bring the count to limit or under by heaviest's
+// figures. None when the obvious ones together do not: a retry that is sure
+// to fail again only adds a second report.
 func chooseExcludes(r IndexReport, limit int) []IndexDir {
 	cands := obviousExcludes(r)
 	left := r.Files
@@ -557,16 +589,53 @@ func (h *Harness) SetIndexExclude(ctx context.Context, id, dir string, on bool) 
 	return p, err == nil, err
 }
 
-// editExcludes rewrites id's project excludes and applies them: a running
-// server restarts with them (waited for when wait).
+// IndexBudget is id's index startup budget for this project, "" for the
+// server's default.
+func (h *Harness) IndexBudget(id string) string {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	s, _ := h.spec(id)
+	return s.IndexBudget
+}
+
+// SetIndexBudget sets id's index startup budget for this project, as
+// --index-budget takes it ("48000ms", "20000ops", a bare number of ms, "0"
+// unbounded); "" or "default" goes back to the server's default. A running
+// server restarts with it. It reports the file written and whether anything
+// changed.
+func (h *Harness) SetIndexBudget(ctx context.Context, id, budget string) (string, bool, error) {
+	b := strings.ToLower(strings.TrimSpace(budget))
+	if b == "default" {
+		b = ""
+	}
+	if b != "" && !budgetPattern.MatchString(b) {
+		return "", false, fmt.Errorf("%q: want Nms (wall-clock; a bare number is ms), Nops (files read), 0 (unbounded) or default", budget)
+	}
+	if _, err := h.knownServer(id); err != nil {
+		return "", false, err
+	}
+	if h.IndexBudget(id) == b {
+		return "", false, nil
+	}
+	p, err := h.editIndexSpec(ctx, id, true, func(s *ServerSpec) { s.IndexBudget = b })
+	return p, err == nil, err
+}
+
+// editExcludes rewrites id's project excludes and applies them (editIndexSpec).
 func (h *Harness) editExcludes(ctx context.Context, id string, wait bool, edit func([]string) []string) (string, error) {
 	next := edit(h.excludesOf(id))
-	p, err := updateLocalServer(h.configDir(), id, func(s *ServerSpec) {
+	return h.editIndexSpec(ctx, id, wait, func(s *ServerSpec) {
 		s.Exclude = next
 		if len(next) == 0 {
 			s.Exclude = nil // the entry goes when nothing else is in it
 		}
 	})
+}
+
+// editIndexSpec edits id's project entry and applies it: a running server
+// restarts (waited for when wait).
+func (h *Harness) editIndexSpec(ctx context.Context, id string, wait bool, edit func(*ServerSpec)) (string, error) {
+	p, err := updateLocalServer(h.configDir(), id, edit)
 	if err != nil {
 		return "", err
 	}
@@ -588,7 +657,7 @@ func (h *Harness) editExcludes(ctx context.Context, id string, wait bool, edit f
 			time.Sleep(50 * time.Millisecond)
 		}
 		if err := apply(false); err != nil {
-			log.Printf("dun: %s: not restarted with its excludes: %v", id, err)
+			log.Printf("dun: %s: not restarted with its index settings: %v", id, err)
 		}
 	}()
 	return p, nil
