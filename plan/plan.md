@@ -219,6 +219,48 @@ smoke)
 - **optional extensions:** a second scenario (LEN-9); a light-theme render
   (DES-12); `ttyrec` as a ttydrive replacement.
 
+### ◐ 35. Onboarding fixes from run 1 of the walk (USER, 2026-10-23 — "get them all happy")
+
+- **Built** (commits 95f40c5, 6480a1c, d31d453, 7252b9a): first screen says
+  "not logged in — /login to connect to an AI service" (accent) and no tool
+  dump; off-servers hint grey, one line, once per TUI; a question asked
+  before login is held (not sent) and put back in the composer after the
+  model pick; setup errors plain (setupMissing unwraps "agent: chat:");
+  picker: enter = use + save default, alt+enter = this session, no
+  checkbox, confirmation line after the restart, no "resumed" marker, model
+  in the header, no provider column with one service; one form layout
+  (formRow), form keys on the status line; /mcp add: no mode row, enter on
+  server adds, optional rows behind tab; panels end at a word with "…",
+  status lines drop whole hints (most-used first); palette by group
+  (setup → … → maintenance), descriptions in one column, args on the row
+  below; "running" lines green, orange only for attention; /mcp add result
+  replaces "adding …"; "1 tool". Tests: onboarding_test.go (new), and the
+  intended old-string updates in mcpform_test, persist_test, model_test,
+  servers_test, builtin_cmds_test, tui_test.
+- **Walk:** 10 steps now (the held question is step 07; last step asks
+  about the notes; stub answers it). Run dir:
+  `tmp/ux-run-onboarding-20261023-204551`.
+- **next:** parent runs Lenny/George/Ives on the new run dir; then the
+  onboarding demo recording.
+- **risks:** a message is held only once the engine's settings event said
+  it has no URL (before that, it is sent and the engine's plain error
+  shows); held images are not held (sent, engine errors); /mcp add for an
+  OAuth URL no longer walks into the client row — enter adds without
+  OAuth, tab reaches it; `/model <name>` (typed) still switches for this
+  session only, unlike the picker's enter; commands event order changed
+  (dun's own before extensions') — the web client sees that order;
+  checked at 80 and 100 columns only.
+- **blocking decisions (USER):** (a) the half-width pink segment on the
+  divider is the focus cue (tui.go divider()); Ives reads it as
+  decoration — keep, make full-width, or change? Left as is. (b) should a
+  typed `/model <name>` also save the default, like the picker?
+- **assumptions:** "AI service" replaces "provider" on first-run surfaces
+  only (usage strings and /logout still say provider); the off-servers
+  hint stays (grey) because its recorded reason is "an agent that silently
+  lacks code navigation".
+- **optional extensions:** status line "not logged in" could carry
+  "/login"; the header's workspace path could shorten to the folder name.
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
