@@ -2220,8 +2220,8 @@ region goes instead of being ported.
   `sgrpack.go` 194 + test 64 and the `packed` cache (measured: per-word
   styled rows 2807 B in / packed 527 B in, 529 B out of the renderer
   either way); termios test helpers 12; the v1 burst split in Update (v2
-  decodes one grapheme per key). Net for the branch: 73 files,
-  +1277 / −2206; non-test code −815.
+  decodes one grapheme per key). Net for the branch (code + tests, no docs):
+  72 files, +1272 / −2201; non-test code +420 / −1235.
 - **Kept, smaller:** `normalizeKey` (tui.go) folds shift+enter to ctrl+j —
   v2 decodes CSI 13;2u and CSI 27;2;13~ as shift+enter, but SS3 M as keypad
   enter, which v2 names "enter" and would SEND. ctrl+tab is v2's own
