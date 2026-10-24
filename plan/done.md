@@ -2644,3 +2644,91 @@ initialize) came 54 s after raglit's. Two causes, both fixed:
   refreshes on spend/usage events only (not at midnight). (f) The login
   notice at 49 wraps "key set" under the picker. (g) Personas not run;
   light theme unseen; no live dund or real provider with a cost.
+
+## ✅ 41. Run-5 fixes: the foreman, one-field /mcp add, two-field /login, the context in counts (USER, 2026-10-23/24)
+
+- **Foreman (owner 1):** cmd/dun/mascot.go — the owner-approved grids
+  (`big` 23×20 px → 10 rows, `small` 13×11 → 6) ported verbatim, rendered
+  as half blocks (▀ fg = top pixel, bg = bottom; ▄ / space where a half is
+  transparent = the terminal's background; every row ends reset). Fresh
+  session's splash only: ≥ 120 columns big, below small, left of the rows;
+  the rows keep the label/value columns at the art's right. First row is the
+  tagline: big `dun · we ain't perfect. we ain't well equipped. but darn it,
+  we'll find a way.` (one row — a three-row tagline would push the info rows
+  down; decided here, see the PNGs), small `dun · ain't pretty. gets it dun.`
+  `colorprofile.Detect` < ANSI256 (or notty): no art, `dun · git 'er dun`.
+  Height is the width's alone (never shorter than the art; blank rows pad).
+  Not on /status; a resumed session has no splash. At < 80 the label
+  "context files" is "files" beside the art.
+- **/mcp add (owner 2):** one field, "what you were given — a command, an
+  address or a preset" (placeholder; "what you were given" where the field
+  is narrower). Enter adds. A command's first word must resolve on the TUI's
+  PATH (`mcpLookPath`): else `notes isn't a command here — paste the full
+  command or address`, in place. A preset name becomes its command/address;
+  a preset name that is also a command on PATH is said ("… is a preset and a
+  command here — /mcp add x for the preset, or the command's full path").
+  The name (`mcpNameFrom`: basename less mcp/server words, the package for
+  npx/uvx/…, an address's host label, a preset's id) is filled in on the row
+  below while unedited; tab reaches it. "replaces the x there now" only for
+  an id in use. Field width cap 56 → 60 (both forms) for the hint.
+- **/login (owner 3):** address, key. Name from the address (nameFromURL,
+  as before), said in the note ("as local · /login rename changes it";
+  "— replaces the local saved before" when that name exists; "the name comes
+  from the address" while empty, so the form never grows).
+  `/login rename <old> <new>` (providerOp `rename`, in place, default
+  follows; README). Not logged in: enter on an empty composer, or on the
+  not-logged-in / kept line in the conversation, opens the form; status
+  line "enter log in · / commands · ctrl+c quit" while the composer is empty.
+- **Context row (owner 4):** `~5.9k tokens before you type (of 32k, 18%)`
+  (narrower: `(of 32k, 18%)` forms); parts `system 1.1k · tools 15 (3.8k) ·
+  mcp 1 server (344) · skills 0 (0) · context files 0 (0)` — disjoint (tools
+  = dun's own + provider overhead; mcp = servers' tools), zeros included,
+  `tokN` one decimal from 1000. One row when a widest-numbers template fits
+  the value column, else two (width-decided, so no growth). Always in the
+  value column.
+- **Starting (owner 5):** `attachNow` (upgrade.go) records the attach's
+  stage; from 3 s the status line says `waiting for dund, the session
+  service…`, `waiting for the session · dund is starting its engine…`, or
+  with another dund build `waiting for the session · dund is an older build
+  (5f5237b) — dun dund service restart` (not upgradable → that fix; not
+  coordinated / no hello → the kill line). Narrow: `old dund — <fix>`.
+- **Run-5 findings (6):** kept line = `warnLine` (⚠, attention colour),
+  removed when the login form opens, back on esc. Spend row: `not reported
+  by <login name>`. Header leaves the model out while the splash's model
+  row is in view. Servers row: first-seen order (`srvOrder`; those seen
+  together by state then name), an added server goes last. Phone login
+  notice: the form now asks the service for its models before closing
+  (`loginCheckedMsg`; "asking local for its models…"), the picker opens
+  full, and a pinned view follows rows that arrived with a panel open in
+  the same update (`panelFollow`; panelRows no longer absorbs them) — the
+  notice wraps at a word and both rows are in view. Placeholders start
+  after a blank cell (`placeholder()`; composer too) — the caret is never on
+  a letter. Blank row above the palette's count line. Model picker with
+  nothing running/saved starts on the first chat model named default, else
+  standard, else chat (`suggestedModel`; walk: chat-standard).
+- **Tests:** onboarding6_test.go (art size/cells, profile, splash per width
+  with art, plain line, not on /status or resume, tokN, zero parts, server
+  order, header, login two fields + notes, rename, enter on empty / on the
+  line, kept line, phone notice under the picker — checked to fail without
+  panelFollow, placeholders, palette gap, suggestedModel, mcpNameFrom, the
+  one field, startingWhat). Changed for the new rules: splash5 (fixed height
+  per width with and without art, new context words, order), splash_test,
+  findings5/onboarding/onboarding4 (kept line, async login; three name-row
+  tests removed), model_test, mcpform_test (`onPath`), bounce_test (one
+  field), argcomplete (palette +1), startframe (order).
+- **Walk:** steps 05 (address, key) and 09 (`notes-mcp`, enter). Run dirs
+  `tmp/ux-run-onboarding-20261024-002820-{49x21,100x30,180x50}` (worktree
+  agent-a225c91997a466013); every PNG of this and the run before it
+  (`…-001932-*`, `…-002520-*`) looked at. Row diff: at 100/180 only the
+  divider and the known model-pick replacement (05→06); at 49 04→05 the
+  view follows the login notice up 4 rows as the picker opens, and later
+  steps follow new answers/notices.
+- **Open / for the owner:** (a) at 49 beside the small foreman the values
+  get ~19 columns: servers, model and the context parts are cut at a word
+  ("system 1.0k · tools…") — keep the art at < 80, or drop it there? (b) at
+  49 04→05 the view moves up to show the login notice (all of it, per the
+  instruction) — the alternative is the notice under the picker. (c) the
+  big tagline is one row, not three. (d) PATH is the TUI's: a dund service
+  with another PATH could still fail a command the form accepted. (e) the
+  composer's restored question has its caret at the start. (f) personas not
+  run; light theme unseen; not run against the real dund.

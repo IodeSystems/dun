@@ -245,6 +245,12 @@ blocks scroll sideways — done 2026-10-23, see done.md (open: ↑ on an empty
 composer vs Termux finger-scroll; a panel covers the newest rows on a phone;
 personas not run; light theme unseen)
 
+### ✅ 41. Run-5 fixes: the foreman, one-field /mcp add, two-field /login, the
+context in counts — done 2026-10-24, see done.md (open: at 49 beside the
+foreman the splash's values and the context parts are cut at a word; at 49 the
+view follows the login notice up as the picker opens; personas not run; light
+theme unseen; not run against the real dund)
+
 ### ◐ 19. Sessions: reuse the idle one, no early suggestions, resume a long one (USER, 2026-10-22)
 
 - **Reuse:** plain `dun` attaches to the workspace's newest session that has
