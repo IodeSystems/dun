@@ -2033,6 +2033,11 @@ func systemCost(bd dun.SystemBreakdown, total int) proto.SystemCost {
 	for _, p := range bd.Parts {
 		parts = append(parts, proto.ContextPart{Name: p.Name, Tokens: p.Tokens})
 	}
+	files := make([]proto.ContextPart, 0, len(bd.Files))
+	for _, p := range bd.Files {
+		files = append(files, proto.ContextPart{Name: p.Name, Tokens: p.Tokens})
+	}
 	return proto.SystemCost{SystemTokens: total, SystemExact: bd.Exact, SystemPrompt: bd.Prompt,
-		SystemShared: bd.Shared, SystemParts: parts, SystemRules: bd.Rules, SystemRulesMode: bd.RulesMode}
+		SystemShared: bd.Shared, SystemParts: parts, SystemRules: bd.Rules, SystemRulesMode: bd.RulesMode,
+		SystemFiles: files}
 }

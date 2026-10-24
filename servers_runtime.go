@@ -661,9 +661,14 @@ func (h *Harness) rebuildTools() {
 	// so /context is never empty; the exact counts replace them when they
 	// arrive. See context_tokens.go for why this is not one number, why
 	// exactness is all-or-nothing, and why the measurement cannot block here.
-	h.setSystemBreakdown(measureSystem(context.Background(), nil, sys, rules, rulesMode, toolDefs, tools))
+	files := rulesSet.files(rulesMode)
+	est := measureSystem(context.Background(), nil, sys, rules, rulesMode, toolDefs, tools)
+	est.Files = files
+	h.setSystemBreakdown(est)
 	go func() {
-		h.setSystemBreakdown(measureSystem(context.Background(), h.client, sys, rules, rulesMode, toolDefs, tools))
+		bd := measureSystem(context.Background(), h.client, sys, rules, rulesMode, toolDefs, tools)
+		bd.Files = files
+		h.setSystemBreakdown(bd)
 	}()
 	// The rules index follows the mode: filled in index mode, emptied of an
 	// earlier session's files otherwise. A root session's job, off the lock.

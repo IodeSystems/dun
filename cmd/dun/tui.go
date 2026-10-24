@@ -405,6 +405,8 @@ type contextStats struct {
 	// no rules).
 	systemRules     int
 	systemRulesMode string
+	// systemFiles are the context files in systemRules, each estimated.
+	systemFiles []dun.ContextPart
 
 	// Out-of-band delivery: messages typed mid-turn that were queued into
 	// a running turn rather than starting a new one.
@@ -5207,6 +5209,7 @@ func (s *contextStats) readSystemCost(ev map[string]any) {
 	s.systemParts = evParts(ev["system_parts"])
 	s.systemRules = int(evNum(ev["system_rules"]))
 	s.systemRulesMode = str(ev["system_rules_mode"])
+	s.systemFiles = evParts(ev["system_files"])
 }
 
 // readWindow decodes the window division off an event carrying it — context_cost

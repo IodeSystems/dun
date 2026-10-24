@@ -107,6 +107,8 @@ type SystemCost struct {
 	// The project rules block's share of SystemPrompt, and its /rules mode.
 	SystemRules     int    `json:"system_rules,omitempty"`
 	SystemRulesMode string `json:"system_rules_mode,omitempty"`
+	// SystemFiles are the context files in SystemRules, each estimated.
+	SystemFiles []ContextPart `json:"system_files,omitempty"`
 }
 
 type ContextPart struct {

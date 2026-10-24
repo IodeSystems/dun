@@ -196,3 +196,21 @@ func TestTheTokenizerIsAskedOncePerPart(t *testing.T) {
 		t.Errorf("CountPrompt called %d times, want %d (base+system+whole+3 groups)", c.calls, want)
 	}
 }
+
+// TestBreakdownSkillsAreTheirOwnRow: the skill tool carries the skill list
+// in its description, so its cost is the skills' — the splash says "skills"
+// apart from "tools".
+func TestBreakdownSkillsAreTheirOwnRow(t *testing.T) {
+	sys, defs, mcp := fixture()
+	defs = append(defs, skillToolDef("\n- deploy: ship it"))
+	for _, counter := range []any{&fakeCounter{}, nil} {
+		bd := measureSystem(context.Background(), counter, sys, "", "", defs, mcp)
+		var names []string
+		for _, p := range bd.Parts {
+			names = append(names, p.Name)
+		}
+		if got := strings.Join(names, ","); got != "built-in tools,skills,mcp: chrome,mcp: corp" {
+			t.Errorf("exact=%v parts %s", bd.Exact, got)
+		}
+	}
+}

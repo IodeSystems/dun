@@ -344,3 +344,22 @@ func TestSyncRulesIndex(t *testing.T) {
 		t.Error("a forgotten import is still known")
 	}
 }
+
+// TestRulesFiles names every context file with its share, by mode.
+func TestRulesFiles(t *testing.T) {
+	ws := t.TempDir()
+	writeRule(t, filepath.Join(ws, "AGENTS.md"), "root rules\n@docs/a.md")
+	writeRule(t, filepath.Join(ws, "docs", "a.md"), strings.Repeat("a fact. ", 50))
+	set := loadRules(ws)
+	full := set.files(RulesFull)
+	if len(full) != 2 || full[0].Name != "AGENTS.md" || full[1].Name != "docs/a.md" || full[1].Tokens < 90 {
+		t.Errorf("full: %v", full)
+	}
+	idx := set.files(RulesIndex)
+	if len(idx) != 2 || idx[1].Name != "1 imports, in the index" || idx[1].Tokens > 10 {
+		t.Errorf("index: %v", idx)
+	}
+	if (rulesSet{}).files(RulesFull) != nil {
+		t.Error("no root file: no files")
+	}
+}

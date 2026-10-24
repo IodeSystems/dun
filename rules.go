@@ -346,6 +346,44 @@ func (d rulesDoc) noteLine() string {
 	return "\n\n(" + d.Name + ", imported by " + d.From + ": " + d.Note + ")"
 }
 
+// files is each context file's share of the block in mode, estimated: the
+// root files and, in full mode, each import; in summary or index mode the
+// imports are one row (the list, with the condensed text or the pointer to
+// the index). Nil when there is no root file.
+func (s rulesSet) files(mode string) []ContextPart {
+	if len(s.Roots) == 0 {
+		return nil
+	}
+	var out []ContextPart
+	for _, d := range s.Roots {
+		out = append(out, ContextPart{Name: d.Name, Tokens: estimateTokens(d.heading() + "\n\n" + d.Text)})
+	}
+	if len(s.Imports) == 0 {
+		return out
+	}
+	switch mode {
+	case RulesSummary, RulesIndex:
+		what := "imports, condensed"
+		if mode == RulesIndex {
+			what = "imports, in the index"
+		}
+		n := 0
+		for _, d := range s.Imports {
+			n += estimateTokens("\n- " + d.Name)
+		}
+		out = append(out, ContextPart{Name: fmt.Sprintf("%d %s", len(s.Imports), what), Tokens: n})
+	default:
+		for _, d := range s.Imports {
+			text := d.noteLine()
+			if d.Text != "" {
+				text = d.heading() + "\n\n" + d.Text
+			}
+			out = append(out, ContextPart{Name: d.Name, Tokens: estimateTokens(text)})
+		}
+	}
+	return out
+}
+
 // render is the system-prompt block in mode: full, summary (with the cached
 // summary text) or index. "" when there is no root file.
 func (s rulesSet) render(mode, summary string) string {

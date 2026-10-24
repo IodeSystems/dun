@@ -60,6 +60,10 @@ type SystemBreakdown struct {
 	// RulesMode the mode it was rendered in; "" when there are no rules.
 	Rules     int
 	RulesMode string
+	// Files are the context files in Rules (the rule files and what they
+	// import, rules.go), each with its share — always an estimate: the
+	// marginal count of one file is not worth N more requests.
+	Files []ContextPart
 }
 
 // promptCounter is agentkit's structured-count capability, named as an interface
@@ -90,8 +94,12 @@ type toolGroup struct {
 	bytes []byte // the same schemas as wire JSON, for the estimate path
 }
 
-// groupTools splits tool definitions by owner: dun's own, then one group per MCP
-// server via mcpmgr.MCPTool.ServerID.
+// SkillsPart is the part name of the skill tool, whose description carries
+// the skill list (skills.go): skills are their own row, not built-in tools.
+const SkillsPart = "skills"
+
+// groupTools splits tool definitions by owner: dun's own, the skill list,
+// then one group per MCP server via mcpmgr.MCPTool.ServerID.
 func groupTools(defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) []toolGroup {
 	const builtin = "built-in tools"
 	server := make(map[string]string, len(mcpTools))
@@ -104,6 +112,8 @@ func groupTools(defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) []toolGroup {
 		owner := builtin
 		if id := server[d.Function.Name]; id != "" {
 			owner = "mcp: " + id
+		} else if d.Function.Name == "skill" {
+			owner = SkillsPart
 		}
 		g, seen := byName[owner]
 		if !seen {
@@ -116,9 +126,18 @@ func groupTools(defs []llm.ToolDef, mcpTools []mcpmgr.MCPTool) []toolGroup {
 			g.bytes = append(g.bytes, raw...)
 		}
 	}
+	rank := func(n string) int {
+		switch n {
+		case builtin:
+			return 0
+		case SkillsPart:
+			return 1
+		}
+		return 2
+	}
 	sort.Slice(order, func(i, j int) bool {
-		if (order[i] == builtin) != (order[j] == builtin) {
-			return order[i] == builtin // built-ins first, then servers by name
+		if ri, rj := rank(order[i]), rank(order[j]); ri != rj {
+			return ri < rj // built-ins first, then the skills, then servers by name
 		}
 		return order[i] < order[j]
 	})
