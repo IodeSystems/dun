@@ -84,7 +84,9 @@ web: ## build the client (mobile/, react-native-web) and install it for dund's -
 # releases: per tool {"version": "vX.Y.Z", "files": {"linux_amd64": {"url",
 # "sha256", "size"}, …}}, the sha256 and size of each tool's
 # <name>_<os>_<arch>.tar.gz as published (sha256sum, stat -c %s). The release
-# builds embed it, so it is filled BEFORE make release.
+# builds embed it, so it is filled BEFORE make release. Each version must be
+# the tool's Recommended in release/supported.go (every build's table; a
+# test checks the two agree), so set that first.
 RELEASE_VERSION ?= $(VERSION)
 RELEASE_DIR     := dist/$(RELEASE_VERSION)
 RELEASE_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
