@@ -32,6 +32,13 @@ type mcpInfoIn struct {
 	counted bool              // the parts are in: the first count lands after the start
 	exact   bool              // the parts were counted, not estimated
 	window  int               // the model's window; 0 unknown
+	// What the schemas cost over the stats ledger's recent rounds, and the
+	// endpoint's measured prefill speed (dun/roundstats.go); zero when
+	// nothing has been recorded or measured.
+	usage       dun.StatsSummary
+	usageDays   int
+	speed       float64
+	speedRounds int
 }
 
 // mcpInfo is /mcp info's rows.
@@ -66,6 +73,8 @@ func mcpInfo(in mcpInfoIn) string {
 		}
 		switch {
 		case !in.counted || !on:
+		case st.Via == dun.ViaShell && st.Standalone > 0:
+			f = append(f, fact("0 tokens")+" (standalone "+fact("~"+tokN(st.Standalone))+")")
 		case st.Via == dun.ViaShell:
 			f = append(f, fact("0 tokens"))
 		default:
@@ -98,6 +107,9 @@ func mcpInfo(in mcpInfoIn) string {
 		rows = append(rows, "  total "+fact(est+tokN(total)+" tokens")+" in every request, "+fact(fmt.Sprintf("%d%% of the %s window", pct, tokK(in.window))))
 	default:
 		rows = append(rows, "  total "+fact(est+tokN(total)+" tokens")+" in every request")
+	}
+	if in.counted {
+		rows = append(rows, costRows(in, cost)...)
 	}
 	if shell != nil {
 		rows = append(rows, shellRows(shell, shellUp, in, est, cost[dun.ServerShell], scripted, hosted)...)
@@ -274,4 +286,67 @@ func editDistance(a, b string) int {
 		prev = cur
 	}
 	return prev[len(b)]
+}
+
+// costRows say what each server's schemas cost over the recorded rounds, in
+// tokens, time and money, and what scripting saved (USER 2026-10-24: an
+// excessive server is an anti-pattern; scripting keeps its tools without
+// paying for the ones a turn does not need). Only the rounds that processed
+// the prefix count: a cached prefix is nearly free to reuse, so counting
+// every request would overstate it. The worst case, every request
+// uncached, is the last row, at the measured speed.
+func costRows(in mcpInfoIn, cost map[string]int) []string {
+	u := in.usage
+	var rows []string
+	price := 0.0
+	if u.CostTokens > 0 {
+		price = u.Cost / float64(u.CostTokens)
+	}
+	spent := func(tok int) string {
+		var out []string
+		if in.speed > 0 {
+			out = append(out, fact("~"+secs(float64(tok)/in.speed*1000)))
+		}
+		if price > 0 {
+			out = append(out, fact("~"+turnMoney(float64(tok)*price, u.Currency)))
+		}
+		if len(out) == 0 {
+			return ""
+		}
+		return " · " + strings.Join(out, " · ")
+	}
+	for _, st := range in.servers {
+		su := u.Servers[st.ID]
+		switch {
+		case st.Via == dun.ViaShell && st.Standalone > 0:
+			row := "  " + st.ID + ": scripted, saves " + fact("~"+tokN(st.Standalone)+" tokens") + " in every request"
+			if su != nil && su.SavedRounds > 0 {
+				row += "; " + fact(plural(su.SavedRounds, "request")) + " would have processed them: " + fact("~"+tokN(su.Saved)+" tokens") + spent(su.Saved)
+			}
+			if st.Help > 0 {
+				row += " · help(\"" + dun.ShellNamespace(st.ID) + "\") " + fact("~"+tokN(st.Help)) + " once, when the model asks"
+			}
+			rows = append(rows, row)
+		case st.Via != dun.ViaShell && cost[st.ID] > 0 && su != nil && su.Processed > 0:
+			rows = append(rows, "  "+st.ID+": its "+fact("~"+tokN(cost[st.ID]))+" of schemas, processed in "+fact(plural(su.Processed, "request"))+": "+
+				fact("~"+tokN(su.Tokens)+" tokens")+spent(su.Tokens))
+		}
+	}
+	if len(rows) > 0 {
+		head := fmt.Sprintf("what the schemas cost, last %d days (%s, %s processed the prefix; the rest reused it from the cache):",
+			in.usageDays, plural(u.Rounds, "request"), fact(fmt.Sprintf("%d", u.Processed)))
+		rows = append([]string{head}, rows...)
+	}
+	total := 0
+	for _, n := range cost {
+		total += n
+	}
+	switch {
+	case in.speed > 0 && total > 0:
+		rows = append(rows, "an uncached request processes all "+fact("~"+tokN(total)+" tokens")+" of tool schemas: "+
+			fact("~"+secs(float64(total)/in.speed*1000))+" at "+fact(rate(in.speed))+" (measured over "+plural(in.speedRounds, "request")+")")
+	case in.speed == 0 && u.Rounds > 0:
+		rows = append(rows, "prefill speed: not measured — the endpoint reports no timings (llama.cpp does)")
+	}
+	return rows
 }

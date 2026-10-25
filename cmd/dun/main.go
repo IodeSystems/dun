@@ -1154,8 +1154,15 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if id == "mcpinfo" {
 			go func() {
 				bd := h.SystemParts()
+				// The session's own speed, else the ledger's recent rounds'.
+				usage := h.StatsSummary(time.Now().AddDate(0, 0, -mcpInfoDays))
+				speed, n := h.PrefillSpeed()
+				if n == 0 {
+					speed, n = usage.Speed, usage.SpeedRounds
+				}
 				em.emit(&proto.ControlEvent{ID: id, Message: mcpInfo(mcpInfoIn{servers: h.Servers(), parts: bd.Parts,
-					counted: bd.Total > 0, exact: bd.Exact, window: h.Window().Window})})
+					counted: bd.Total > 0, exact: bd.Exact, window: h.Window().Window,
+					usage: usage, usageDays: mcpInfoDays, speed: speed, speedRounds: n})})
 			}()
 			return
 		}
@@ -1454,6 +1461,9 @@ func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
 		TurnStats: turnStatsProto(h),
 	}
 }
+
+// mcpInfoDays is how far back /mcp info totals what the schemas cost.
+const mcpInfoDays = 7
 
 func turnStatsProto(h *dun.Harness) *proto.TurnStats {
 	t := h.EndTurnStats()

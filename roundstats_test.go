@@ -73,3 +73,32 @@ func TestRoundStats_TurnSpeedAndLedger(t *testing.T) {
 		t.Errorf("not reset: %+v", ts)
 	}
 }
+
+// The ledger's summary: per server, the rounds that processed its schemas
+// and what scripted servers would have cost; side models do not count.
+func TestStatsLedger_Summary(t *testing.T) {
+	l := NewStatsLedger(t.TempDir())
+	now := time.Now()
+	for _, r := range []RoundStat{
+		{Time: now.Add(-30 * 24 * time.Hour), Role: RoleMain, Prefix: 100, Schemas: map[string]int{"a": 50}}, // too old
+		{Time: now, Role: RoleMain, Prompt: 1000, Prefix: 100, Schemas: map[string]int{"a": 50}, Scripted: map[string]int{"s": 400},
+			PromptN: 1000, PromptMS: 200, Costed: true, Cost: 0.2, Currency: "USD", Completion: 0},
+		{Time: now, Role: RoleMain, Prompt: 1000, Cached: 900, Prefix: 100, Schemas: map[string]int{"a": 50}, Scripted: map[string]int{"s": 400}},
+		{Time: now, Role: RoleModel, Prompt: 300},
+	} {
+		if err := l.Append(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := l.Summary(now.Add(-7 * 24 * time.Hour))
+	a, sc := s.Servers["a"], s.Servers["s"]
+	if s.Rounds != 2 || s.Processed != 1 || a == nil || a.Rounds != 2 || a.Processed != 1 || a.Tokens != 50 {
+		t.Errorf("summary %+v, a %+v", s, a)
+	}
+	if sc == nil || sc.SavedRounds != 1 || sc.Saved != 400 {
+		t.Errorf("scripted %+v", sc)
+	}
+	if s.Speed != 5000 || s.SpeedRounds != 1 || s.Cost != 0.2 || s.CostTokens != 1000 {
+		t.Errorf("speed/cost %+v", s)
+	}
+}

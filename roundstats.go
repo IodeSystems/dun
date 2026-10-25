@@ -289,3 +289,112 @@ func (l *StatsLedger) Append(r RoundStat) error {
 	_, err = f.Write(append(b, '\n'))
 	return err
 }
+
+// ServerUsage is what one server's schemas cost over the ledger's rounds.
+type ServerUsage struct {
+	Rounds    int // main rounds whose request carried the server's schemas
+	Processed int // of them, rounds that processed the prefix (not cached)
+	Tokens    int // schema tokens in those processed rounds
+	// For a scripted server: what it would have cost standalone over the
+	// processed rounds — what scripting saved.
+	SavedRounds int
+	Saved       int
+}
+
+// StatsSummary is the ledger since a time: per server, and the totals a
+// price per token is read from.
+type StatsSummary struct {
+	Since     time.Time
+	Rounds    int // main rounds
+	Processed int // main rounds that processed their prefix
+	Servers   map[string]*ServerUsage
+	// Money: the cost of the rounds that reported one, over the tokens they
+	// processed (new prompt tokens plus completion), for a price per token.
+	Cost       float64
+	Currency   string
+	CostTokens int
+	// Speed is the prefill speed over the window's rounds that had
+	// llama.cpp's timings (median of the last speedWindow), as PrefillSpeed.
+	Speed       float64
+	SpeedRounds int
+}
+
+// Summary reads the ledger's main-session rounds since t (this month's file
+// and the one before, which covers any window up to a month).
+func (l *StatsLedger) Summary(since time.Time) (s StatsSummary) {
+	s = StatsSummary{Since: since, Servers: map[string]*ServerUsage{}}
+	if l == nil {
+		return s
+	}
+	now := time.Now().UTC()
+	months := []string{now.AddDate(0, -1, 0).Format("2006-01"), now.Format("2006-01")}
+	var speeds []float64
+	defer func() {
+		if len(speeds) > speedWindow {
+			speeds = speeds[len(speeds)-speedWindow:]
+		}
+		if len(speeds) > 0 {
+			slices.Sort(speeds)
+			s.Speed, s.SpeedRounds = speeds[len(speeds)/2], len(speeds)
+		}
+	}()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, mo := range months {
+		b, err := os.ReadFile(filepath.Join(l.dir, "rounds-"+mo+".jsonl"))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			var r RoundStat
+			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Time.Before(since) {
+				continue
+			}
+			if r.PromptN >= speedMinTokens && r.PromptMS > 0 {
+				speeds = append(speeds, float64(r.PromptN)/(r.PromptMS/1000))
+			}
+			if r.Costed && (s.Currency == "" || s.Currency == r.Currency) {
+				s.Currency = r.Currency
+				s.Cost += r.Cost
+				s.CostTokens += r.Prompt - r.Cached + r.Completion
+			}
+			if r.Role != RoleMain {
+				continue
+			}
+			s.Rounds++
+			proc := r.PrefixProcessed()
+			if proc {
+				s.Processed++
+			}
+			use := func(id string) *ServerUsage {
+				u := s.Servers[id]
+				if u == nil {
+					u = &ServerUsage{}
+					s.Servers[id] = u
+				}
+				return u
+			}
+			for id, tok := range r.Schemas {
+				u := use(id)
+				u.Rounds++
+				if proc {
+					u.Processed++
+					u.Tokens += tok
+				}
+			}
+			for id, tok := range r.Scripted {
+				u := use(id)
+				if proc {
+					u.SavedRounds++
+					u.Saved += tok
+				}
+			}
+		}
+	}
+	return s
+}
+
+// StatsSummary is the session's stats ledger since t; empty without one.
+func (h *Harness) StatsSummary(since time.Time) StatsSummary {
+	return h.rounds.ledger.Summary(since)
+}

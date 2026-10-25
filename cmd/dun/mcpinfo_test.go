@@ -201,3 +201,31 @@ func TestRouteSlash_MCPUnknownActionOnce(t *testing.T) {
 		t.Errorf("restart is still a server action: %q", got)
 	}
 }
+
+// With recorded rounds and a measured speed, /mcp info says what each
+// server's schemas cost over the requests that processed them, what a
+// scripted server saved (and its help, once), and the uncached worst case.
+func TestMCPInfo_Savings(t *testing.T) {
+	servers := infoServers()
+	servers[3].Standalone, servers[3].Help = 38000, 1600
+	usage := dun.StatsSummary{Rounds: 412, Processed: 31, Cost: 0.5, Currency: "USD", CostTokens: 1_000_000,
+		Servers: map[string]*dun.ServerUsage{"notes": {Rounds: 412, Processed: 31, Tokens: 161200}, "corp": {SavedRounds: 31, Saved: 1_178_000}}}
+	s := plainInfo(mcpInfoIn{servers: servers, parts: infoParts(), counted: true, window: 32000,
+		usage: usage, usageDays: 7, speed: 6700, speedRounds: 20})
+	for _, want := range []string{
+		"running · scripted · 30 tools · 0 tokens (standalone ~38.0k)",
+		"what the schemas cost, last 7 days (412 requests, 31 processed the prefix; the rest reused it from the cache):",
+		"  notes: its ~5.2k of schemas, processed in 31 requests: ~161.2k tokens · ~24.1s · ~$0.08",
+		`  corp: scripted, saves ~38.0k tokens in every request; 31 requests would have processed them: ~1.18M tokens · ~175.8s · ~$0.59 · help("corp") ~1.6k once, when the model asks`,
+		"an uncached request processes all ~6.6k tokens of tool schemas: ~985ms at 6.7k/s (measured over 20 requests)",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("lacks %q:\n%s", want, s)
+		}
+	}
+	// No timings: the time is not guessed.
+	s = plainInfo(mcpInfoIn{servers: servers, parts: infoParts(), counted: true, usage: usage, usageDays: 7})
+	if !strings.Contains(s, "prefill speed: not measured") || strings.Contains(s, "~24.1s") {
+		t.Errorf("no speed:\n%s", s)
+	}
+}
