@@ -48,9 +48,10 @@ conversation). Tests: `bounce_test.go`, `noshrink_test.go`, `pane_test.go`,
 - A **screen** is an ordered list of panes, with one focused. The head and
   status rows stay outside the panes, as chrome.
 - **Screens stack.** The base screen is activity, conversation, lower area.
-  `/mcp` pushes a screen: the table (fill 2), the log of the selected row
-  (fill 1), and the lower area, so a typed command still works. esc in a
-  pushed screen's top pane pops it. The inspector is a screen with one pane.
+  `/mcp` pushes a screen: the table (fill 2) and the log of the selected row
+  (fill 1). The lower area goes away while it is up (owner, 2026-10-25), so
+  tab moves between the table and the log. esc in a pushed screen pops it.
+  The inspector is a screen with one pane.
 - **Dividers** are drawn between adjacent panes. A divider next to the
   focused pane leans toward it, as now (the ▁/▄ and ▔/▀ mirror pairs). A
   divider with focus on neither side is dim, with no bump.
@@ -87,9 +88,8 @@ conversation). Tests: `bounce_test.go`, `noshrink_test.go`, `pane_test.go`,
   not drawn while the screen is up, so it must keep its offset, not
   re-anchor, when the screen pops.
 
-## Decisions for the owner
+## Decisions
 
-- Under a pushed screen, does the lower area stay (type a command while
-  `/mcp` is open), or does the screen take the whole height?
-- With three panes, does tab visit the lower area, or only the screen's own
-  panes?
+- Under a pushed screen the lower area goes away: the screen takes the
+  height between the head and status rows, and tab visits its own panes
+  only (owner, 2026-10-25).
