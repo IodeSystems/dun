@@ -43,7 +43,11 @@ Order: agentkit, then the three tools (independent of each other), then dun.
    set `Recommended` (and `Min` if needed) with a comment saying what the
    version brings, fill `deps.json` from the published tarballs, run
    `go test ./release/` and `make test`.
-4. **dun.** Commit the pins (`chore(release): …`). Tagging dun is Carl's call;
-   the first signed release waits on key custody (aw4 i_1m5r9bx5a53x000taq6xar).
+4. **dun.** Commit the pins (`chore(release): …`). Tagging dun is Carl's call.
+   Then `gh workflow run release.yml -f version=vX.Y.Z`: it tests with the
+   pinned tools, signs with the MINISIGN_SECRET_KEY secret and publishes.
+   Check the published manifest with `minisign -V -p release/minisign.pub`.
+   v0.1.1 (2026-10-25) was the first signed release; v0.1.0 is a tag with no
+   release (its run failed in tests).
 
 Nothing in the cascade pushes or tags without Carl saying so for that repo.
