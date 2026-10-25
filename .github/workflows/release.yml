@@ -1,4 +1,4 @@
-# DRAFT — a release of dun (plan item 47). It runs only when started by
+# DRAFT — a release of dun (aw4 issue i_1m5r9bx5a53x000taq6xar). It runs only when started by
 # hand (workflow_dispatch), never on a push or a tag. Before the first run
 # the owner must:
 #   - generate the minisign key pair (minisign -G -W: no password, for CI),
@@ -7,7 +7,7 @@
 #   - add the repository secret MINISIGN_SECRET_KEY (the secret key file's
 #     contents). IT DOES NOT EXIST YET: without it the job stops before
 #     building;
-#   - fill release/deps.json from mcpshell's and poly-lsp-mcp's releases;
+#   - (release/deps.json is filled: all three tools have release tarballs);
 #   - pin the actions below to commit SHAs;
 #   - tag the commit (vX.Y.Z) and start this workflow with that tag.
 name: release (draft)
@@ -29,7 +29,8 @@ jobs:
       VERSION: ${{ inputs.version }} # used as "$VERSION": never pasted into a script
     steps:
       - name: the version
-        run: echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not vX.Y.Z: $VERSION"; exit 1; }
+        run: |
+          echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not vX.Y.Z: $VERSION"; exit 1; }
       - uses: actions/checkout@v4 # pin to a SHA before enabling
         with:
           ref: ${{ inputs.version }}
