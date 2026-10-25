@@ -484,9 +484,13 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		delete(h.lastErr, s.ID)
 		h.lastStart[s.ID] = time.Since(t0)
 	}
+	h.srvMu.Unlock()
+	// The tools join before the start stops counting as in flight: WaitServers
+	// returns once nothing is starting, and its caller wants the tools in.
+	h.applyTools()
+	h.srvMu.Lock()
 	delete(h.starting, s.ID)
 	h.srvMu.Unlock()
-	h.applyTools()
 	return err
 }
 
