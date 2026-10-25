@@ -79,7 +79,7 @@ export function ModelPicker({
             </Pressable>
           );
         }}
-        ListEmptyComponent={providers ? <Muted>no model matches</Muted> : null}
+        ListEmptyComponent={providers ? <Muted>no model matches</Muted> : undefined}
       />
       <Text style={{ color: c.text, fontSize: font.sm, fontWeight: '600' }}>Providers</Text>
       {(providers ?? []).map((p) => (
