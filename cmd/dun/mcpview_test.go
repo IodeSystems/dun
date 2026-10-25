@@ -137,3 +137,28 @@ func TestPalette_MCPScopeCompletion(t *testing.T) {
 		}
 	}
 }
+
+// A server's detail says what it is and what it says about itself, whether
+// it is on and which switch decided, in words, and how to list its tools.
+func TestServerBody_InWords(t *testing.T) {
+	st := dun.ServerState{ID: "poly-lsp", Auto: false, Global: "off", From: dun.ScopeGlobal,
+		Description: "semantic code navigation and edits (poly-lsp-mcp)"}
+	b := serverBody(st, "stopped")
+	for _, want := range []string{"semantic code navigation and edits (poly-lsp-mcp)",
+		"off: switched off for every project, nothing set for this project or session — g every project · p this project · s this session", "stopped"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("lacks %q:\n%s", want, b)
+		}
+	}
+	st = dun.ServerState{ID: "vay", Auto: true, Running: true, Global: "off", Session: "on", From: dun.ScopeSession,
+		Via: dun.ViaShell, ViaFrom: dun.ScopeProject, Tools: 112, Standalone: 38000,
+		Title: "Vay Platform", Version: "2.3.1", Instructions: "Use vay to query orders.\nPrefer batch calls."}
+	b = serverBody(st, "")
+	for _, want := range []string{"Vay Platform", "version 2.3.1", "it says: Use vay to query orders.\n  Prefer batch calls.",
+		"on: switched on for this session", "mode: scripted: its tools are called inside the shell's eval as vay.<tool>(…)",
+		"(set for this project) — m changes it", "112 tools inside the shell's eval, 0 tokens in every request (~38.0k standalone) — t lists them, type to filter"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("lacks %q:\n%s", want, b)
+		}
+	}
+}

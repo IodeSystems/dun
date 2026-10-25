@@ -49,13 +49,7 @@ func (v *mcpServersView) page() pageDoc {
 	idW, viaW := tableWidths(v.rows)
 	nodes := make([]pageNode, 0, len(v.rows))
 	for i, st := range v.rows {
-		body := "switches: global " + cellWord(st.Global) + " · project " + cellWord(st.Project) +
-			" · session " + cellWord(st.Session) + " → " + stateCell(st)
-		if st.Via != "" {
-			body += "\nmode: global " + modeWord(st.ViaGlobal) + " · project " + modeWord(st.ViaProject) +
-				" · session " + modeWord(st.ViaSession) + " → " + viaCell(st)
-		}
-		body += "\n" + v.details[i]
+		body := serverBody(st, v.details[i])
 		nodes = append(nodes, pageNode{head: serverRow(st, idW, viaW, v.details[i]), body: body, err: st.Err != "", pre: true})
 	}
 	return pageDoc{title: "mcp servers · " + switchLegend, header: serverHeader(idW, viaW, hotKey), nodes: nodes}
@@ -69,7 +63,7 @@ func (v *mcpServersView) hint() string {
 	}
 	return hotKey("global", "g") + stDim.Render(" on/off · ") + hotKey("project", "p") + stDim.Render("/") +
 		hotKey("session", "s") + stDim.Render(" unset→on→off · ") + hotKey("mode", "m") +
-		stDim.Render(" at "+v.viaScope+" (M+g/p/s: scope) · enter details · esc back")
+		stDim.Render(" at "+v.viaScope+" (M+g/p/s: scope) · ") + hotKey("tools", "t") + stDim.Render(" · enter details · esc back")
 }
 
 // serverStates reads a server event's list.
@@ -91,7 +85,9 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 			From: str(o["from"]), ViaGlobal: str(o["viaGlobal"]), ViaProject: str(o["viaProject"]),
 			ViaSession: str(o["viaSession"]), ViaFrom: str(o["viaFrom"]),
 			Tools: int(evNum(o["tools"])), Slash: str(o["slash"]),
-			Index: str(o["index"]), IndexSeconds: evNum(o["indexSeconds"]), IndexErr: str(o["indexErr"])})
+			Index: str(o["index"]), IndexSeconds: evNum(o["indexSeconds"]), IndexErr: str(o["indexErr"]),
+			Cost: int(evNum(o["cost"])), Standalone: int(evNum(o["standalone"])),
+			Description: str(o["description"]), Title: str(o["title"]), Version: str(o["version"]), Instructions: str(o["instructions"])})
 		details = append(details, str(o["detail"]))
 	}
 	return out, details
@@ -173,6 +169,16 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 		v.pickVia = true
 		return true
 	}
+	if k == "t" { // its tools, in their own filterable view (mcptools.go)
+		if m.pg.cur >= 0 && m.pg.cur < len(v.rows) {
+			id := v.rows[m.pg.cur].ID
+			m.openMCPTools(id)
+			if !m.proc.controlCmd("mcptools", id) {
+				m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
+			}
+		}
+		return true
+	}
 	if k != "g" && k != "p" && k != "s" && k != "m" {
 		return false
 	}
@@ -211,4 +217,89 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 	}
 	m.flashText, m.flashUntil = "/"+line, time.Now().Add(flashFor)
 	return true
+}
+
+// serverBody is a server's detail under its row, in words: what it is (dun's
+// line for it, and what it says about itself while it runs), whether it is
+// on and which switch decided, its mode, its tools and what they cost, and
+// the detail line the engine sent.
+func serverBody(st dun.ServerState, detail string) string {
+	var rows []string
+	what := st.Description
+	if st.Title != "" && !strings.EqualFold(st.Title, st.ID) {
+		what = strings.TrimSpace(st.Title + " — " + what)
+	}
+	if what != "" {
+		rows = append(rows, what)
+	}
+	if st.Version != "" {
+		rows = append(rows, "version "+st.Version)
+	}
+	if ins := st.Instructions; ins != "" {
+		lines := strings.Split(ins, "\n")
+		if len(lines) > 4 {
+			lines = append(lines[:4], "…")
+		}
+		rows = append(rows, "it says: "+strings.Join(lines, "\n  "))
+	}
+	rows = append(rows, switchSentence(st))
+	if st.Via != "" {
+		rows = append(rows, "mode: "+modeSentence(st))
+	}
+	if st.Tools > 0 {
+		t := plural(st.Tools, "tool")
+		switch {
+		case st.Via == dun.ViaShell:
+			t += " inside the shell's eval, 0 tokens in every request"
+			if st.Standalone > 0 {
+				t += " (~" + tokN(st.Standalone) + " standalone)"
+			}
+		case st.Cost > 0:
+			t += ", ~" + tokN(st.Cost) + " tokens in every request"
+		}
+		rows = append(rows, t+" — t lists them, type to filter")
+	}
+	if detail != "" {
+		rows = append(rows, detail)
+	}
+	return strings.Join(rows, "\n")
+}
+
+// switchSentence says whether a server is on and which switch decided, in
+// words, and the switches that did not.
+func switchSentence(st dun.ServerState) string {
+	where := map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project",
+		dun.ScopeSession: "for this session", "flag": "by this run's flags"}
+	s := onOff(st.Auto)
+	if w, ok := where[st.From]; ok {
+		s += ": switched " + onOff(st.Auto) + " " + w
+	}
+	var also []string
+	if st.Project != "" && st.From != dun.ScopeProject {
+		also = append(also, "this project says "+st.Project)
+	}
+	if st.Session != "" && st.From != dun.ScopeSession {
+		also = append(also, "this session says "+st.Session)
+	}
+	if st.From == dun.ScopeGlobal && len(also) == 0 {
+		s += ", nothing set for this project or session"
+	}
+	if len(also) > 0 {
+		s += " (" + strings.Join(also, ", ") + ")"
+	}
+	return s + " — g every project · p this project · s this session"
+}
+
+// modeSentence is a placed server's mode, in words.
+func modeSentence(st dun.ServerState) string {
+	s := dun.ModeWord(st.Via)
+	if st.Via == dun.ViaShell {
+		s += ": its tools are called inside the shell's eval as " + dun.ShellNamespace(st.ID) + ".<tool>(…), and their schemas stay out of every request"
+	} else {
+		s += ": its tools are sent with every request"
+	}
+	if st.ViaFrom != "" {
+		s += " (set " + map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project", dun.ScopeSession: "for this session"}[st.ViaFrom] + ")"
+	}
+	return s + " — m changes it"
 }

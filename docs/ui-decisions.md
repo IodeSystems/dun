@@ -66,6 +66,13 @@ are in `decisions.md`.
   `/login` takes an address and a key; the name is derived from the address.
   `/mcp add` takes one field ("what you were given": a command, an address or a
   preset).
+- **Slash commands: bare opens the view, complete acts, partial opens the view
+  at that place** (USER 2026-10-24). `/<command>` alone opens its status and
+  config view (as `/mcp` opens the switch table). Arguments are operations on
+  the config: when they are complete the command does the thing with no view
+  (`/mcp off vay --project`); when they are not, it opens the view at that
+  section with what was given filled in (`/mcp add` with no target opens the
+  add form). New commands (`/skill`, `/context-file`) follow it.
 - **Splash rows are fixed height per width,** so the layout never grows as
   facts arrive (counted estimate, then exact, then spend). Context turns orange
   at 60% of the window (`contextHeavy`).

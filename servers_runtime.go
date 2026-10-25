@@ -147,7 +147,18 @@ type ServerState struct {
 	// Setup is the install-hint report the server sent (setupstate.go),
 	// nil from one that sends none.
 	Setup *SetupReport `json:"setup,omitempty"`
+	// What the server is: Description is dun's own line for it (a built-in's
+	// or an extension's manifest); Title, Version and Instructions are what
+	// the server said about itself in the handshake (serverInfo, and its
+	// instructions on what it is for), while it runs.
+	Description  string `json:"description,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
 }
+
+// shellDescription is the shell's line: it is a built-in with no manifest.
+const shellDescription = "sandboxed scripting (mcpshell): one eval tool for calculations, data, files and SQL, and the host for scripted servers"
 
 // Servers reports every configured server and whether it is up, in config
 // order. Servers a config file disabled outright are not listed — they are not
@@ -191,6 +202,10 @@ func (h *Harness) Servers() []ServerState {
 			ViaProject:   s.Scopes.ViaProject,
 			ViaSession:   s.Scopes.ViaSession,
 			ViaFrom:      s.Scopes.ViaFrom,
+		}
+		st.Description = h.describe(s.ID)
+		if info, ok := h.mgr.ServerInfo(s.ID); ok && st.Running {
+			st.Title, st.Version, st.Instructions = info.Title, info.Version, strings.TrimSpace(info.Instructions)
 		}
 		if t, ok := h.starting[s.ID]; ok {
 			st.Starting, st.StartingSeconds = true, time.Since(t).Seconds()
@@ -1048,4 +1063,19 @@ func underHome(dir string) bool {
 	}
 	rel, err := filepath.Rel(real(home), real(dir))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
+}
+
+// describe is dun's own line for a server: the shell's, or its extension
+// manifest's description; "" for a server added with /mcp add (what it says
+// about itself in the handshake is its description then).
+func (h *Harness) describe(id string) string {
+	if id == ServerShell {
+		return shellDescription
+	}
+	for _, e := range h.exts {
+		if e.ID == id {
+			return e.Description
+		}
+	}
+	return ""
 }
