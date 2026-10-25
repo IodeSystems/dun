@@ -1859,6 +1859,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		// /mcp's rows still starting turn with it.
+		if v := m.serversPaging(); v != nil && v.starting() {
+			v.spin = m.spin.View()
+			m.syncPager()
+		}
 		// A server still starting: the live splash counts its seconds. The
 		// row changes in place; refresh only when its words did.
 		if len(m.srvSince)+len(m.idxSince) > 0 && len(m.convo) > 0 && m.convo[0].liveSplash &&

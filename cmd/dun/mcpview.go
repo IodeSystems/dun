@@ -43,6 +43,33 @@ type mcpServersView struct {
 	details  []string
 	viaScope string // the scope m writes
 	pickVia  bool   // M was pressed: the next g/p/s picks viaScope
+	spin     string // the spinner's frame, for a row still starting
+}
+
+// stDisconnected is a server that is not connected: yellow, not the
+// attention orange (USER 2026-10-25: a spinner while it starts, a green dot
+// once connected, a yellow hollow circle when not).
+var stDisconnected = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+
+// connMark is a row's first cell: is it connected, or on its way.
+func (v *mcpServersView) connMark(st dun.ServerState) string {
+	switch {
+	case st.Starting: // the status spinner's frame, its trailing space cut
+		return strings.TrimRight(v.spin, " ")
+	case st.Running || st.Hosted:
+		return stOK.Render("●")
+	}
+	return stDisconnected.Render("○")
+}
+
+// starting reports whether a row is still starting: the spinner turns.
+func (v *mcpServersView) starting() bool {
+	for _, st := range v.rows {
+		if st.Starting {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *mcpServersView) page() pageDoc {
@@ -50,9 +77,9 @@ func (v *mcpServersView) page() pageDoc {
 	nodes := make([]pageNode, 0, len(v.rows))
 	for i, st := range v.rows {
 		body := serverBody(st, v.details[i])
-		nodes = append(nodes, pageNode{head: serverRow(st, idW, viaW, v.details[i]), body: body, err: st.Err != "", pre: true})
+		nodes = append(nodes, pageNode{head: v.connMark(st) + " " + serverRow(st, idW, viaW, v.details[i]), body: body, err: st.Err != "", pre: true})
 	}
-	return pageDoc{title: "mcp servers · " + switchLegend, header: serverHeader(idW, viaW, hotKey), nodes: nodes}
+	return pageDoc{title: "mcp servers · " + switchLegend, header: "  " + serverHeader(idW, viaW, hotKey), nodes: nodes}
 }
 
 // hint is the status line: the keys, with the scope m writes to.
@@ -76,10 +103,19 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 			continue
 		}
 		auto, _ := o["auto"].(bool)
+		hosted, _ := o["hosted"].(bool)
 		running, _ := o["running"].(bool)
 		starting, _ := o["starting"].(bool)
 		missing, _ := o["missing"].(bool)
-		out = append(out, dun.ServerState{ID: str(o["id"]), Auto: auto, Running: running, Err: str(o["err"]), Missing: missing,
+		var log []dun.ServerLogLine
+		if ls, ok := o["log"].([]any); ok {
+			for _, l := range ls {
+				lo, _ := l.(map[string]any)
+				se, _ := lo["stderr"].(bool)
+				log = append(log, dun.ServerLogLine{At: time.UnixMilli(int64(evNum(lo["at"]))), Text: str(lo["text"]), Stderr: se})
+			}
+		}
+		out = append(out, dun.ServerState{ID: str(o["id"]), Auto: auto, Running: running, Hosted: hosted, Log: log, Err: str(o["err"]), Missing: missing,
 			Starting: starting, StartingSeconds: evNum(o["startingSeconds"]),
 			Via: str(o["via"]), Proto: str(o["proto"]), Global: str(o["global"]), Project: str(o["project"]), Session: str(o["session"]),
 			From: str(o["from"]), ViaGlobal: str(o["viaGlobal"]), ViaProject: str(o["viaProject"]),
@@ -125,7 +161,7 @@ func (m *tuiModel) openServerTable(list []any) bool {
 	if len(rows) == 0 {
 		return false
 	}
-	m.pg = newPager(-1, &mcpServersView{rows: rows, details: details, viaScope: dun.ScopeSession})
+	m.pg = newPager(-1, &mcpServersView{rows: rows, details: details, viaScope: dun.ScopeSession, spin: m.spin.View()})
 	m.paging = true
 	m.syncPager()
 	return true
@@ -261,6 +297,29 @@ func serverBody(st dun.ServerState, detail string) string {
 	}
 	if detail != "" {
 		rows = append(rows, detail)
+	}
+	if lines := logLines(st.Log, serverBodyLog); lines != "" {
+		rows = append(rows, "activity:\n"+lines)
+	}
+	return strings.Join(rows, "\n")
+}
+
+// serverBodyLog is how many of a server's newest log lines its detail shows.
+const serverBodyLog = 8
+
+// logLines is a server's newest n log lines, one a row: the time, then the
+// line; what it wrote on stderr is marked so.
+func logLines(log []dun.ServerLogLine, n int) string {
+	if len(log) > n {
+		log = log[len(log)-n:]
+	}
+	rows := make([]string, 0, len(log))
+	for _, l := range log {
+		text := l.Text
+		if l.Stderr {
+			text = "stderr: " + text
+		}
+		rows = append(rows, "  "+stDim.Render(l.At.Format("15:04:05"))+" "+text)
 	}
 	return strings.Join(rows, "\n")
 }
