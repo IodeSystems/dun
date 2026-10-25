@@ -321,6 +321,9 @@ type convoEntry struct {
 	provisional     bool
 	provisionalText string // original text, used to restore normal style on delivery
 	userText        string // raw user message text (non-empty for user messages only)
+	// stats is the cost of the turn this message started (turnstats.go):
+	// shown under it when it is opened.
+	stats string
 	needLogin       bool   // the "not logged in" line (onboarding.go): said once, where it was last needed
 	adding          string // the server an "adding …" line is for: the result replaces it (noteServerMsg)
 	splash          bool   // the splash or a /status block (splash.go): client-only, never in the session log
@@ -385,13 +388,13 @@ func (e *convoEntry) invalidateWrap() {
 	e.wrapMax, e.wrapMaxOK = 0, false
 }
 
-func (e convoEntry) expandable() bool { return e.full != "" || e.docs != nil }
+func (e convoEntry) expandable() bool { return e.full != "" || e.docs != nil || e.stats != "" }
 
 // deeper is the next view state that shows something NEW, for →: expanded,
 // when the block has a full form. Next() wraps, which is right for enter (a
 // cycle) and wrong for → (a direction): → must not close what it opened.
 func (e convoEntry) deeper() (viewState, bool) {
-	if e.state == viewMinimized && (e.full != "" || e.docs != nil) {
+	if e.state == viewMinimized && (e.full != "" || e.docs != nil || e.stats != "") {
 		return viewExpanded, true
 	}
 	return e.state, false
@@ -509,6 +512,9 @@ func (e convoEntry) view() string {
 	}
 	if e.state == viewExpanded && e.full != "" {
 		return e.full
+	}
+	if e.state == viewExpanded && e.stats != "" {
+		return e.collapsed + "\n" + e.stats
 	}
 	return e.collapsed
 }
@@ -2867,6 +2873,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.ctxStats.readSurfacing(ev)
 		m.ctxStats.readCache(ev)
 		m.ctxStats.readSpend(ev)
+		m.noteTurnStats(ev)
 		if v := evNum(ev["forced_calls"]); v > 0 {
 			m.ctxStats.forcedToolCalls = int(v)
 		}
@@ -4096,6 +4103,11 @@ func (m *tuiModel) refresh() {
 			case e.userText != "":
 				if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
 					e.wrapped, e.wrapW, e.wrapState = userRowAt(e.userText, wrapW), width, e.state
+					if e.state == viewExpanded && e.stats != "" {
+						for _, l := range strings.Split(e.stats, "\n") {
+							e.wrapped += "\n" + hangWrap(l, wrapW)
+						}
+					}
 				}
 				w = e.wrapped
 			default:
