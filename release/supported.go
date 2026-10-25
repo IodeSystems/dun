@@ -16,12 +16,13 @@ package release
 // build's deps.json must name these same versions (supported_test.go).
 var Supported = []Tool{
 	// v0.2.0: the oldest tag with --files-dir and --mcp, which dun passes.
-	// v0.5.0 (4fc83f1, 2026-10-24): MCPSHELL_TMP_OVERFLOW_DIR, which dun sets
-	// so over-limit output is saved to a file, and per-server unchecked
-	// globs (a09d6ba), which a server spec's "shell" block passes. Its
-	// tarballs are in deps.json.
+	// v0.5.1 (2026-10-24): MCPSHELL_TMP_OVERFLOW_DIR, which dun sets so
+	// over-limit output is saved to a file; per-server unchecked globs, which
+	// a server spec's "shell" block passes; and each hosted server's schema
+	// and help sizes, which /mcp info's savings read. Its tarballs are in
+	// deps.json.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.5.0"},
+		Min: "v0.2.0", Recommended: "v0.5.1"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. Recommended v0.1.0

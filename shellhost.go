@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -268,12 +269,18 @@ type hostedState struct {
 	Connected bool
 	Tools     int
 	Err       string
+	// SchemaBytes is what the server's tools/list entries would put in every
+	// request standalone ({name, description, inputSchema} per tool, as JSON),
+	// and HelpBytes what help("<ns>") returns, paid once when the model asks
+	// (mcpshell v0.5.1). 0: an older mcpshell, which does not say.
+	SchemaBytes, HelpBytes int
 }
 
 // The lines mcpshell writes to stderr per upstream (mcp/toolkit.go
 // InstallClients). Pinned by a test; a reworded line reads as "unknown".
 var (
 	reUpConnected = regexp.MustCompile(`upstream "([^"]+)" connected \(.*\) — (\d+) tool`)
+	reUpSizes     = regexp.MustCompile(`, schema (\d+) bytes, help (\d+) bytes`)
 	reUpFailed    = regexp.MustCompile(`(?:failed to connect upstream "([^"]+)": |upstream "([^"]+)" tools/list failed: |skipping upstream "([^"]+)" — )(.*)`)
 )
 
@@ -289,7 +296,12 @@ func parseHosted(stderr string, hosted []Server) map[string]hostedState {
 		if m := reUpConnected.FindStringSubmatch(line); m != nil {
 			if id, ok := byNS[m[1]]; ok {
 				n, _ := strconv.Atoi(m[2])
-				out[id] = hostedState{Connected: true, Tools: n}
+				hs := hostedState{Connected: true, Tools: n}
+				if sz := reUpSizes.FindStringSubmatch(line); sz != nil {
+					hs.SchemaBytes, _ = strconv.Atoi(sz[1])
+					hs.HelpBytes, _ = strconv.Atoi(sz[2])
+				}
+				out[id] = hs
 			}
 			continue
 		}
@@ -374,4 +386,14 @@ func (h *Harness) MoveServer(ctx context.Context, id, scope, via string) (bool, 
 		return false, err
 	}
 	return h.mgr.ServerStarted(ServerShell) && hosted() != before, nil
+}
+
+// bytesToTokens is n bytes of JSON or text in tokens, at the session's
+// measured chars-per-token ratio (the meter's prior until a round has
+// measured it).
+func (h *Harness) bytesToTokens(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return int(math.Ceil(float64(n) / h.meter.CharsPerToken()))
 }

@@ -242,12 +242,17 @@ func TestMoveServer_BothWays(t *testing.T) {
 func TestParseHosted(t *testing.T) {
 	tail := `mcpshell mcp: file toolkit enabled (read-write: /ws)
 mcpshell mcp: upstream "corp_docs" connected (corp) — 7 tool(s)
+mcpshell mcp: upstream "vay" connected (vay) — 112 tool(s), schema 152000 bytes, help 6400 bytes
 mcpshell mcp: failed to connect upstream "el": dial: refused
 mcpshell mcp: skipping upstream "me" — it identifies as mcpshell; wiring it in would let eval recurse into itself
 mcpshell mcp: serving on stdio`
-	got := parseHosted(tail, []Server{{ID: "corp-docs"}, {ID: "el"}, {ID: "me"}, {ID: "quiet"}})
-	if c := got["corp-docs"]; !c.Connected || c.Tools != 7 {
+	got := parseHosted(tail, []Server{{ID: "corp-docs"}, {ID: "el"}, {ID: "me"}, {ID: "quiet"}, {ID: "vay"}})
+	if c := got["corp-docs"]; !c.Connected || c.Tools != 7 || c.SchemaBytes != 0 {
 		t.Errorf("connected: %+v", c)
+	}
+	// mcpshell v0.5.1 adds the sizes: what scripting saves, and help's once.
+	if v := got["vay"]; !v.Connected || v.Tools != 112 || v.SchemaBytes != 152000 || v.HelpBytes != 6400 {
+		t.Errorf("sizes: %+v", v)
 	}
 	if e := got["el"]; e.Connected || e.Err != "dial: refused" {
 		t.Errorf("failed: %+v", e)

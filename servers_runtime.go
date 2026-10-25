@@ -94,6 +94,13 @@ type ServerState struct {
 	// toolTokens); Hidden is how many discovered tools Disable hides.
 	Cost   int `json:"cost,omitempty"`
 	Hidden int `json:"hidden,omitempty"`
+	// For a hosted server, in tokens at the session's measured ratio:
+	// Standalone is what its schemas would cost in every request were it not
+	// scripted (what scripting saves), Help what help("<ns>") costs once,
+	// when the model asks. 0 when the shell does not say (before mcpshell
+	// v0.5.1).
+	Standalone int `json:"standalone,omitempty"`
+	Help       int `json:"help,omitempty"`
 	// Global, Project and Session are the on/off switch at each scope
 	// ("on", "off", "" unset; Global is never unset); From is the scope that
 	// decided Auto. ViaGlobal, ViaProject and ViaSession are the placement at
@@ -204,6 +211,7 @@ func (h *Harness) Servers() []ServerState {
 			st.Via, st.Namespace, st.Err, st.Tools = ViaShell, ShellNamespace(s.ID), "", 0
 			if hs, ok := h.hosted[s.ID]; ok && shellUp {
 				st.Hosted, st.Tools, st.Err = hs.Connected, hs.Tools, hs.Err
+				st.Standalone, st.Help = h.bytesToTokens(hs.SchemaBytes), h.bytesToTokens(hs.HelpBytes)
 			}
 		case !builtinServer(s.ID):
 			st.Via = ViaDirect
