@@ -273,7 +273,7 @@ func (p pager) view(w, h int) string {
 	if len(p.rows) > bodyH {
 		pos = fmt.Sprintf("%d–%d of %d", off+1, min(off+bodyH, len(p.rows)), len(p.rows))
 	}
-	title, _ := fitPlain(p.doc.title, max(1, w/2))
+	title, _ := fitPlain(p.doc.title, max(1, w-len(pos)-2))
 	head := stHeader.Render(title) + stDim.Render("  "+pos)
 	rows := append([]string{head}, p.rows[off:min(off+bodyH, len(p.rows))]...)
 	return lipgloss.NewStyle().Width(w).MaxWidth(w).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
@@ -282,7 +282,7 @@ func (p pager) view(w, h int) string {
 // hint is the status line while the pager is open.
 func (p pager) hint() string {
 	if p.toggles {
-		return "↑/↓ select · enter/→ open · ← close · space on/off (session) · g global · p project · s session · esc back"
+		return "type to filter · ↑/↓ select · enter/→ open · ← close · space on/off (session) · ctrl+g global · ctrl+p project · ctrl+s session · esc clear, back"
 	}
 	if p.tree() {
 		return "↑/↓ select · enter/→ open · ← close · i inspect a call · pgup/pgdn scroll · esc back"

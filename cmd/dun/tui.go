@@ -1178,7 +1178,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// So does the pager, all but ctrl+c: it reads one block in the convo
 		// pane's place, and esc brings the conversation back.
 		if m.paging && msg.String() != "ctrl+c" {
-			if v := m.toolsPaging(); v != nil && (msg.String() == "space" || m.toolKey(v, msg.String())) {
+			if v := m.toolsPaging(); v != nil && (msg.String() == "space" || m.toolKey(v, msg.String()) || m.filterKey(v, msg.String(), msg.Text)) {
 				if msg.String() == "space" {
 					m.toggleMCPTool(v)
 				}

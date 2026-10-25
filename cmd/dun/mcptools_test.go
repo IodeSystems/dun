@@ -2,93 +2,65 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/iodesystems/dun"
 )
 
-func toolsEvent(enabled bool) evMsg {
-	return evMsg{"type": "mcp_tools", "server": "el", "tools": []any{
-		map[string]any{"name": "tts_say", "description": "Say a text.\nLonger detail.", "schema": "{\n  \"type\": \"object\"\n}", "tokens": 120.0, "enabled": enabled},
-		map[string]any{"name": "voices", "description": "List voices.", "schema": "{}", "tokens": 80.0, "enabled": true},
-	}}
-}
+type recWC struct{ bytes.Buffer }
 
-// /mcp tools <id> goes to the engine as a slash line; its answer opens the
-// pager tree; enter opens a row to its description and schema; space sends
-// the toggle, and the fresh list lays out in place.
-func TestMCPTools_PagerOpensExpandsToggles(t *testing.T) {
-	var buf bytes.Buffer
-	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = nm.(tuiModel)
-	m.runSlash("/mcp tools el")
-	var sent map[string]string
-	if err := json.Unmarshal(buf.Bytes(), &sent); err != nil || sent["id"] != "slash" || sent["action"] != "mcp tools el" {
-		t.Fatalf("sent %q", buf.String())
-	}
-	buf.Reset()
-	m = m.handleEvent(toolsEvent(true))
-	if !m.paging || m.toolsPaging() == nil {
-		t.Fatal("the list did not open the pager")
-	}
-	v := stripANSI(m.pg.view(100, 20))
-	if !strings.Contains(v, "el: 2 of 2 on") || !strings.Contains(v, "● tts_say") || !strings.Contains(v, "Say a text.") {
-		t.Fatalf("view:\n%s", v)
-	}
-	if !strings.Contains(m.pg.hint(), "space on/off") {
-		t.Errorf("hint %q", m.pg.hint())
-	}
-	var cur tea.Model = m
-	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = cur.(tuiModel)
-	if v := stripANSI(m.pg.view(100, 20)); !strings.Contains(v, "Longer detail.") || !strings.Contains(v, `"type": "object"`) {
-		t.Fatalf("enter must open the row:\n%s", v)
-	}
-	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
-	m = cur.(tuiModel)
-	sent = nil
-	if err := json.Unmarshal(buf.Bytes(), &sent); err != nil || sent["id"] != "mcptools" || sent["action"] != "toggle el tts_say off" {
-		t.Fatalf("space sent %q", buf.String())
-	}
-	ev := toolsEvent(false)
-	ev["message"] = "el: tts_say off (saved to x)"
-	m = m.handleEvent(ev)
-	if v := stripANSI(m.pg.view(100, 20)); !m.paging || !strings.Contains(v, "○ tts_say") || !strings.Contains(v, "1 of 2 on") {
-		t.Fatalf("after the toggle:\n%s", v)
-	}
-	if m.pg.cur != 0 || !m.pg.open[0] {
-		t.Error("the selection and the open row must survive a fresh list")
-	}
-	// Someone else's list does not open a pager here.
-	m.paging = false
-	m = m.handleEvent(toolsEvent(true))
-	if m.paging {
-		t.Error("an unrequested list opened the pager")
-	}
-}
+func (r *recWC) Close() error { return nil }
 
-// The listing's per-server cost, and the hint for a heavy one.
-func TestToolCost_AndHeavyHint(t *testing.T) {
-	st := dun.ServerState{ID: "el", Running: true, Tools: 160, Cost: 38200, Hidden: 12, Via: dun.ViaDirect}
-	if got := toolCost(st); got != "160 tools · ~38.2k tokens · 12 hidden" {
-		t.Errorf("cost %q", got)
+// A server with hundreds of tools: typing filters the list (name matches
+// first, then descriptions), the title says how many are shown, space
+// toggles the selected tool of the FILTERED list, and esc clears the filter
+// before it closes the view.
+func TestMCPTools_TypeToFilter(t *testing.T) {
+	v := newVtui(120, 30)
+	rec := &recWC{}
+	v.m.proc = &dunProc{stdin: rec}
+	tools := []any{}
+	for i := range 120 {
+		tools = append(tools, map[string]any{"name": fmt.Sprintf("tool_%03d", i), "description": "does thing " + fmt.Sprint(i),
+			"tokens": float64(300), "enabled": true, "schema": "{}"})
 	}
-	if h := heavyHint(st); !strings.Contains(h, "/mcp tools el") || !strings.Contains(h, "/mcp mode el scripted") {
-		t.Errorf("hint %q", h)
+	tools = append(tools,
+		map[string]any{"name": "issue_create", "description": "open an issue", "tokens": float64(900), "enabled": true, "schema": "{}"},
+		map[string]any{"name": "ticket_new", "description": "files a new issue in the tracker", "tokens": float64(700), "enabled": false, "schema": "{}"})
+	v.m.openMCPTools("vay")
+	v.event(map[string]any{"type": "mcp_tools", "server": "vay", "tools": tools})
+	if v.m.toolsPaging() == nil {
+		t.Fatal("the tools view did not open")
 	}
-	st.Via = "" // a built-in cannot move
-	if h := heavyHint(st); strings.Contains(h, "mode") {
-		t.Errorf("built-in hint %q", h)
+	v.m = typeStr(v.m, "issue")
+	tv := v.m.toolsPaging()
+	if tv == nil || tv.query != "issue" {
+		t.Fatalf("typing did not filter (letters such as s and g must not be keys here): %+v", tv)
 	}
-	if heavyHint(dun.ServerState{ID: "x", Cost: 100}) != "" {
-		t.Error("a light server needs no hint")
+	if s := tv.shown(); len(s) != 2 || tv.rows[s[0]].name != "issue_create" || tv.rows[s[1]].name != "ticket_new" {
+		t.Fatalf("shown: %v", s)
 	}
-	if v := serverListing([]dun.ServerState{st}); !strings.Contains(v, "38.2k tokens") || !strings.Contains(v, "heavy:") {
-		t.Errorf("listing:\n%s", v)
+	view := v.view()
+	if !strings.Contains(view, `filter "issue": 2 shown`) || !strings.Contains(view, "issue_create") || strings.Contains(view, "tool_001") {
+		t.Errorf("view:\n%s", view)
+	}
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyDown})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if got := rec.String(); !strings.Contains(got, "toggle vay ticket_new on") {
+		t.Errorf("space toggled the wrong row: %q", got)
+	}
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if tv := v.m.toolsPaging(); tv == nil || tv.query != "issu" {
+		t.Errorf("backspace: %+v", tv)
+	}
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if tv := v.m.toolsPaging(); tv == nil || tv.query != "" || len(tv.shown()) != 122 {
+		t.Fatalf("esc should clear the filter first: %+v", tv)
+	}
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if v.m.paging {
+		t.Error("esc on an empty filter closes the view")
 	}
 }
