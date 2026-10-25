@@ -21,7 +21,8 @@ import (
 
 // TestMain keeps every test off the real $DUN_HOME and ~/.claude: LoadServers reads the
 // user server list from it, and a server someone added with /mcp add must
-// not change what a test sees.
+// not change what a test sees. It keeps them off the user's shared tool
+// daemons too (isolateTools).
 func TestMain(m *testing.M) {
 	if persona := os.Getenv(fakeBinEnv); persona != "" {
 		fakeBinMain(persona) // a fake server or CLI (fakebin_test.go), not a test run
@@ -33,6 +34,7 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv("DUN_HOME", home)
 	userHomeDir = func() (string, error) { return home, nil } // and ~/.claude/skills
+	isolateTools(home)
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
@@ -198,4 +200,16 @@ func TestRemoveServer_ClearsProjectAndSessionEntries(t *testing.T) {
 	if sw := LoadSessionServers(h.cfg.SessionFile); len(sw) != 0 {
 		t.Errorf("session entries: %+v", sw)
 	}
+}
+
+// isolateTools points the tools a test may start at dir instead of the user's
+// shared daemons: a real poly-lsp-mcp (1be97d0 on) proxies to the per-user
+// daemon under ~/.poly-lsp and $XDG_RUNTIME_DIR unless told not to, and
+// raglit's config root is ~/.raglit. Without this, a test that reached a real
+// binary would use — and could upgrade or restart — the user's own.
+func isolateTools(dir string) {
+	os.Setenv("POLY_LSP_NO_DAEMON", "1")
+	os.Setenv("POLY_LSP_HOME", dir+"/poly-lsp") // the daemon's own dir, once poly-lsp reads it
+	os.Setenv("XDG_RUNTIME_DIR", dir)
+	os.Setenv("RAGLIT_ROOT", dir+"/raglit")
 }

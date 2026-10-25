@@ -14,6 +14,12 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("DUN_HOME", home)
+	// Off the user's shared tool daemons, as the dun package's TestMain:
+	// a real poly-lsp-mcp would proxy to ~/.poly-lsp's, raglit read ~/.raglit.
+	os.Setenv("POLY_LSP_NO_DAEMON", "1")
+	os.Setenv("POLY_LSP_HOME", home+"/poly-lsp")
+	os.Setenv("XDG_RUNTIME_DIR", home)
+	os.Setenv("RAGLIT_ROOT", home+"/raglit")
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
