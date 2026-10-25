@@ -278,6 +278,9 @@ type Config struct {
 	// Client and every client ClientFor builds — since only it constructs them.
 	// nil → no spend accounting.
 	Spend *SpendMeter
+	// StatsLedger is where the root session's round stats go (roundstats.go);
+	// nil writes none. cmd/dun points it at $DUN_HOME/stats.
+	StatsLedger *StatsLedger
 	// ChildModel is the default model for spawned sub-agents. Empty = the
 	// parent's. A spawn may override it.
 	ChildModel string
@@ -433,8 +436,12 @@ type Harness struct {
 	// Sub-agents (see subagent.go and docs/decisions.md, "Sub-agents"). agMu guards both.
 	// ownsMgr is false for a CHILD: it shares its parent's manager, and closing
 	// that from a child would stop the servers out from under the parent.
-	agMu    sync.Mutex
-	agSeq   int
+	agMu  sync.Mutex
+	agSeq int
+
+	// rounds is what each model round cost, the open turn's totals and the
+	// endpoint's prefill speed (roundstats.go). The root session's only.
+	rounds  roundStats
 	agents  map[int]*subAgent
 	ownsMgr bool
 	parent  *Harness  // nil for a root
@@ -1243,6 +1250,13 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// A resumed session's history is not this session's to act on: the
 	// memory triggers look only at what arrives from here on.
 	h.markTriggerScan()
+	// Every response the engine's clients get reaches the root session's
+	// round stats, and its stats ledger (roundstats.go). A child shares the
+	// parent's meter and leaves the hook to it.
+	if cfg.Parent == nil && cfg.Spend != nil {
+		h.rounds.ledger = cfg.StatsLedger
+		cfg.Spend.SetRoundHook(h.noteRound)
+	}
 
 	// Server→client push. Only the OWNER registers: a child shares its
 	// parent's manager, and registering again would replace the parent's sink

@@ -149,6 +149,39 @@ type Usage struct {
 	// Spend is the session's money and limits as of this turn's end. Nil when
 	// no meter is wired.
 	Spend *Spend `json:"spend,omitempty"`
+	// TurnStats is what this turn cost; nil from an engine that does not say.
+	TurnStats *TurnStats `json:"turn_stats,omitempty"`
+}
+
+// TurnStats is one turn's cost: every model round between its start and its
+// end, sub-agents and side calls included (dun/roundstats.go). The timings
+// fields are llama.cpp's own report and are set only when Timed rounds had
+// one; Cost only when Costed rounds reported one. PrefillTPS is the
+// endpoint's measured prompt-processing speed (tokens a second, the median of
+// PrefillRounds recent rounds), 0 when unmeasured.
+type TurnStats struct {
+	Rounds     int   `json:"rounds"`
+	WallMS     int64 `json:"wall_ms"`
+	ModelMS    int64 `json:"model_ms"`
+	Prompt     int   `json:"prompt"`
+	Cached     int   `json:"cached"`
+	Completion int   `json:"completion"`
+
+	Timed    int     `json:"timed,omitempty"`
+	PromptN  int     `json:"prompt_n,omitempty"`
+	PromptMS float64 `json:"prompt_ms,omitempty"`
+	GenN     int     `json:"gen_n,omitempty"`
+	GenMS    float64 `json:"gen_ms,omitempty"`
+
+	Cost     float64 `json:"cost,omitempty"`
+	Currency string  `json:"cur,omitempty"`
+	Costed   int     `json:"costed,omitempty"`
+	Mixed    bool    `json:"mixed,omitempty"`
+
+	SubAgents int `json:"sub_agents,omitempty"`
+
+	PrefillTPS    float64 `json:"prefill_tps,omitempty"`
+	PrefillRounds int     `json:"prefill_rounds,omitempty"`
 }
 
 // Spend is what the gateway reported about money and limits: the session's

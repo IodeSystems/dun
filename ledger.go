@@ -251,9 +251,31 @@ func bump[K comparable](m map[K]map[string]float64, k K, cur string, v float64) 
 }
 
 // SpendSource is who a client's responses are billed to: the ledger's
-// provider, key fingerprint and model.
+// provider, key fingerprint and model; Role is which client it is (RoleMain,
+// RoleModel, RoleVision), for the round stats (roundstats.go).
 type SpendSource struct {
 	Provider, Key, Model string
+	Role                 string
+}
+
+// A client's role: the session's own model, a model a sub-agent or side
+// call named (the per-model cache), or the vision fallback.
+const (
+	RoleMain   = "main"
+	RoleModel  = "model"
+	RoleVision = "vision"
+)
+
+// SetRoundHook gives every response, with its source, to f as well: the root
+// session's round stats (Harness.noteRound). One hook; a later call replaces
+// it.
+func (m *SpendMeter) SetRoundHook(f func(SpendSource, llm.Usage)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.onRound = f
+	m.mu.Unlock()
 }
 
 // SetLedger points the meter at a ledger; key is the session's key
@@ -272,7 +294,16 @@ func (m *SpendMeter) SetLedger(l *SpendLedger, key string) {
 func (m *SpendMeter) NoteAs(src SpendSource) func(u llm.Usage) {
 	return func(u llm.Usage) {
 		m.Note(u)
-		if m == nil || !u.Cost.Reported {
+		if m == nil {
+			return
+		}
+		m.mu.Lock()
+		hook := m.onRound
+		m.mu.Unlock()
+		if hook != nil {
+			hook(src, u)
+		}
+		if !u.Cost.Reported {
 			return
 		}
 		m.mu.Lock()

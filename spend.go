@@ -47,6 +47,8 @@ type SpendMeter struct {
 	unsupported bool   // the endpoint has no budget this client can read
 	budgetErr   string // the last poll's failure, when it failed
 
+	onRound func(SpendSource, llm.Usage) // SetRoundHook
+
 	poke chan struct{}
 	now  func() time.Time
 

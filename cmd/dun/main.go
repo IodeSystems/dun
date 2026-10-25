@@ -555,12 +555,12 @@ func main() {
 	// ($DUN_HOME/spend, dun/ledger.go), billed to the provider, a fingerprint
 	// of the key (never the key) and the model.
 	spend.SetLedger(dun.NewSpendLedger(dun.DefaultLedgerDir()), dun.KeyFingerprint(effKey))
-	usageFor := func(u, k, model string) func(llm.Usage) {
-		return spend.NoteAs(dun.SpendSource{Provider: providerLabel(fc, u), Key: dun.KeyFingerprint(k), Model: model})
+	usageFor := func(u, k, model, role string) func(llm.Usage) {
+		return spend.NoteAs(dun.SpendSource{Provider: providerLabel(fc, u), Key: dun.KeyFingerprint(k), Model: model, Role: role})
 	}
-	client.OnUsage = usageFor(*url, effKey, *model)
+	client.OnUsage = usageFor(*url, effKey, *model, dun.RoleMain)
 	var runner agent.LLMRunner = client
-	childClients := clientCache(*url, effKey, func(model string) func(llm.Usage) { return usageFor(*url, effKey, model) })
+	childClients := clientCache(*url, effKey, func(model string) func(llm.Usage) { return usageFor(*url, effKey, model, dun.RoleModel) })
 	if why := providerMissing(*url, *model); why != nil {
 		runner = noProvider{why}
 		childClients = func(string) (agent.LLMRunner, error) { return nil, why }
@@ -572,8 +572,11 @@ func main() {
 		// cmd/dun knows the endpoint and the key — hence a factory rather than a
 		// second client. Cached per model so N children on one model share one
 		// client, and therefore one retry policy and one rate limit.
-		ClientFor:   childClients,
-		Spend:       spend,
+		ClientFor: childClients,
+		Spend:     spend,
+		// Each round's tokens, time and cost, for the turn's stats and what a
+		// tool server costs (dun/roundstats.go).
+		StatsLedger: dun.NewStatsLedger(dun.DefaultStatsDir()),
 		ChildModel:  *childModel,
 		Exec:        backend,
 		Worktree:    wt,
@@ -595,7 +598,7 @@ func main() {
 		DockerImage:   resolveDockerImage(*docker),
 		DockerNetwork: *dockerNetwork,
 		ExtraMounts:   mounts,
-		Vision:        visionConfig(fc, *url, effKey, *model, usageFor),
+		Vision:        visionConfig(fc, *url, effKey, *model, func(u, k, m string) func(llm.Usage) { return usageFor(u, k, m, dun.RoleVision) }),
 	}
 	// An OAuth server's login opens a browser on this machine too — unless
 	// DUN_NO_BROWSER is set (a headless box, a test). The URL is shown to
@@ -1396,6 +1399,7 @@ func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
 // events.
 func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 	em.emit(&proto.Turn{Kind: "continue"})
+	h.BeginTurnStats()
 	tctx, end := beginTurn(ctx)
 	defer end()
 	turnActive.Store(true)
@@ -1445,7 +1449,20 @@ func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
 		// Money and limits. The turn is closed here, in the one place both
 		// turn paths pass through, so "last turn" means the same on both.
 		Spend: endTurnSpend(h),
+		// What the turn cost in rounds, time, tokens and money, and the
+		// endpoint's prefill speed (dun/roundstats.go).
+		TurnStats: turnStatsProto(h),
 	}
+}
+
+func turnStatsProto(h *dun.Harness) *proto.TurnStats {
+	t := h.EndTurnStats()
+	speed, n := h.PrefillSpeed()
+	return &proto.TurnStats{Rounds: t.Rounds, WallMS: t.WallMS, ModelMS: t.ModelMS,
+		Prompt: t.Prompt, Cached: t.Cached, Completion: t.Completion,
+		Timed: t.Timed, PromptN: t.PromptN, PromptMS: t.PromptMS, GenN: t.GenN, GenMS: t.GenMS,
+		Cost: t.Cost, Currency: t.Currency, Costed: t.Costed, Mixed: t.Mixed, SubAgents: t.SubAgents,
+		PrefillTPS: speed, PrefillRounds: n}
 }
 
 func endTurnSpend(h *dun.Harness) *proto.Spend {
@@ -1866,6 +1883,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []
 	// message from this, not from what it sent itself.
 	em.emit(&proto.UserEcho{Content: task})
 	em.emit(&proto.Turn{Kind: "user"})
+	h.BeginTurnStats()
 	tctx, end := beginTurn(ctx)
 	defer end()
 	turnActive.Store(true)
