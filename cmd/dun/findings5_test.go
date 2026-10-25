@@ -127,8 +127,7 @@ func TestToolRow5_OnlyTheMarkIsGreen(t *testing.T) {
 // At 180 columns the divider splits at the middle of the 100-column
 // content, not at the terminal's middle (inside the text's column).
 func TestDivider5_SplitsAtTheContentMiddle(t *testing.T) {
-	// runs is the width of each styled run: the ramp, the dim and the
-	// accent halves of the line, the ramp.
+	// runs is the width of each styled run: the dim and the accent halves.
 	runs := func(d string) []int {
 		var n []int
 		for _, r := range strings.Split(strings.TrimSuffix(d, "\x1b[m"), "\x1b[m") {
@@ -141,9 +140,9 @@ func TestDivider5_SplitsAtTheContentMiddle(t *testing.T) {
 		up   bool
 		want []int
 	}{
-		{180, false, []int{2, 48, 128, 2}}, // dim ramp, dim to 50, accent, accent ramp
-		{180, true, []int{50, 130}},        // accent to 50 with its ramp, dim with its ramp
-		{49, false, []int{2, 22, 23, 2}},
+		{180, false, []int{50, 130}}, // dim to 50, accent
+		{180, true, []int{50, 130}},  // accent to 50, dim
+		{49, false, []int{24, 25}},
 	} {
 		d := divider(tc.w, tc.up)
 		if got := runs(d); !slices.Equal(got, tc.want) || ansi.StringWidth(d) != tc.w {

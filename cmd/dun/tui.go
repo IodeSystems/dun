@@ -185,23 +185,22 @@ var (
 )
 
 // divider is the single rule between the panes — the tmux split look, no
-// boxes. It carries focus three ways (owner, 2026-10-24):
+// boxes. It carries focus two ways (owner, 2026-10-24):
 //
 //   - colour: the focused pane's half in the accent, the other dim — the
 //     first half when the upper side (conversation or activity strip) has the
 //     keys, the last when the input (or a form, picker or question in its
 //     place) has them;
 //   - side: a thin line on the cell's edge toward the focused pane, the
-//     bottom edge (▁) for the upper side, the top edge (▔) for the input;
-//   - weight: at both far ends the line thickens toward that pane, in eighths,
-//     to 3/8 of the row (owner: half a row left too little room).
+//     bottom edge (▁) for the upper side, the top edge (▔) for the input.
 //
-// Growing up uses the lower blocks (▂▃). Growing down has no font glyphs for
-// 2/8 and 3/8 from the top, so it is the lower block of the rest in reverse
-// video: ▆ reversed shows the top 2/8 in the colour. Moving focus
-// moves the thin line from one edge of its row to the other; nothing else.
-// Neither pane's CONTENT changes with focus: the person reads one pane while
-// typing in the other (owner, 2026-10-23).
+// The two are mirror images, 1/8 of a row each (owner, 2026-10-25: the
+// ends used to thicken to 3/8, and the downward ramp, lower blocks in
+// reverse video, drew much taller than the upward one; fonts have no upper
+// 2/8 or 3/8 block to mirror it with). Moving focus moves the line from one
+// edge of its row to the other; nothing else. Neither pane's CONTENT changes
+// with focus: the person reads one pane while typing in the other (owner,
+// 2026-10-23).
 func divider(w int, focusUp bool) string {
 	if w < 2 {
 		w = 2
@@ -210,42 +209,15 @@ func divider(w int, focusUp bool) string {
 	// wide screen the text stops at bandCap, and a split at the terminal's
 	// middle sat inside the text's column, under nothing on one side.
 	half := min(w, bandCap) / 2
-	// ramp is the far ends, outermost first, then the line itself.
-	ramp, rev := []string{"▃", "▂", "▁"}, false
+	g := "▁"
 	if !focusUp {
-		ramp, rev = []string{"▅", "▆", "▔"}, true
+		g = "▔"
 	}
-	var out strings.Builder
-	run, runSt := "", lipgloss.Style{}
-	flush := func() {
-		if run != "" {
-			out.WriteString(runSt.Render(run))
-		}
+	first, rest := stDim, stEdge
+	if focusUp {
+		first, rest = stEdge, stDim
 	}
-	for i := range w {
-		st := stDim
-		if (i < half) == focusUp {
-			st = stEdge
-		}
-		g := ramp[len(ramp)-1]
-		if d := min(i, w-1-i); d < len(ramp)-1 {
-			g = ramp[d]
-			// ▔ is a glyph of its own; only the ramp's blocks are reversed.
-			st = st.Reverse(rev)
-		}
-		if !sameStyle(st, runSt) {
-			flush()
-			run, runSt = "", st
-		}
-		run += g
-	}
-	flush()
-	return out.String()
-}
-
-// sameStyle: a and b draw alike (the divider's runs: colour and reverse).
-func sameStyle(a, b lipgloss.Style) bool {
-	return a.GetForeground() == b.GetForeground() && a.GetReverse() == b.GetReverse()
+	return first.Render(strings.Repeat(g, half)) + rest.Render(strings.Repeat(g, w-half))
 }
 
 func addGutter(block, marker string, style lipgloss.Style) string {
