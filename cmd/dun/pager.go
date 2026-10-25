@@ -318,7 +318,11 @@ func (m *tuiModel) syncPager() {
 	}
 	if v, ok := m.pg.id.(interface{ page() pageDoc }); ok { // not a convo block: its own page
 		m.pg.phase = m.pulse
-		m.pg.layout(v.page(), m.vp.Width, m.convoHeight())
+		h := m.convoHeight()
+		if s := m.activeScreen(); s != nil { // its pane on the screen (panes.go)
+			h = m.paneHeight(s, 0)
+		}
+		m.pg.layout(v.page(), m.vp.Width, h)
 		return
 	}
 	if m.pg.src < 0 || m.pg.src >= len(m.convo) || m.convo[m.pg.src].pageID() != m.pg.id {

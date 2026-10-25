@@ -163,6 +163,7 @@ func (m *tuiModel) openServerTable(list []any) bool {
 	}
 	m.pg = newPager(-1, &mcpServersView{rows: rows, details: details, viaScope: dun.ScopeSession, spin: m.spin.View()})
 	m.paging = true
+	m.scr = mcpScreen() // the table over the selected server's log (panes.go)
 	m.syncPager()
 	return true
 }
@@ -297,29 +298,6 @@ func serverBody(st dun.ServerState, detail string) string {
 	}
 	if detail != "" {
 		rows = append(rows, detail)
-	}
-	if lines := logLines(st.Log, serverBodyLog); lines != "" {
-		rows = append(rows, "activity:\n"+lines)
-	}
-	return strings.Join(rows, "\n")
-}
-
-// serverBodyLog is how many of a server's newest log lines its detail shows.
-const serverBodyLog = 8
-
-// logLines is a server's newest n log lines, one a row: the time, then the
-// line; what it wrote on stderr is marked so.
-func logLines(log []dun.ServerLogLine, n int) string {
-	if len(log) > n {
-		log = log[len(log)-n:]
-	}
-	rows := make([]string, 0, len(log))
-	for _, l := range log {
-		text := l.Text
-		if l.Stderr {
-			text = "stderr: " + text
-		}
-		rows = append(rows, "  "+stDim.Render(l.At.Format("15:04:05"))+" "+text)
 	}
 	return strings.Join(rows, "\n")
 }

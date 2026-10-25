@@ -676,6 +676,7 @@ type tuiModel struct {
 	bandRaw      []string       // the selected block's rows before the band, for a pulse step
 	bandAt       int            // the pane row they start at
 	pg           pager          // the pager (valid while paging)
+	scr          *paneScreen        // a pushed screen over the pager (panes.go), or nil
 	jobViewing   bool           // a job's view has the convo pane (jobview.go; owns the keys)
 	jv           jobView        // the job view (valid while jobViewing)
 	jvGen        int            // which opening of the job view its read timer belongs to
@@ -1148,6 +1149,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		}
+		// A pushed screen (panes.go) has every key but ctrl+c: tab moves
+		// between its panes, the focused one takes the rest.
+		if s := m.activeScreen(); s != nil && msg.String() != "ctrl+c" {
+			s.key(&m, msg)
+			if m.paging {
+				m.syncPager()
+			}
+			return m, nil
+		}
+		m.scr = nil
 		// So does the pager, all but ctrl+c: it reads one block in the convo
 		// pane's place, and esc brings the conversation back.
 		if m.paging && msg.String() != "ctrl+c" {
@@ -3485,6 +3496,8 @@ func (m tuiModel) drawView() string {
 		status = stAsk.Render("❓ " + m.confirm.q)
 	case m.flashing():
 		status = stNote.Render(m.flashText)
+	case m.activeScreen() != nil:
+		status = m.scr.hint(&m)
 	case m.jobViewing:
 		status = stDim.Render(m.jv.hint())
 	case m.paging:
@@ -3606,6 +3619,9 @@ func (m tuiModel) drawView() string {
 	}
 	out := append([]string{m.headView()}, top...)
 	out = append(out, convo, div, lower)
+	if s := m.activeScreen(); s != nil { // it takes the rows the base screen had
+		out = []string{m.headView(), s.view(&m, m.w, m.screenRows())}
+	}
 	if u := m.upgradeView(); u != "" {
 		out = append(out, u) // persistent while dund upgrades
 	}

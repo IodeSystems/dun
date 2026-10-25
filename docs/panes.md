@@ -1,4 +1,4 @@
-# Panes (design, not built yet)
+# Panes
 
 USER 2026-10-25: the TUI needs panes that come and go on alternate screens.
 The first case is `/mcp`: the server table on top, the selected server's
@@ -66,14 +66,17 @@ conversation). Tests: `bounce_test.go`, `noshrink_test.go`, `pane_test.go`,
 
 ## Order of work
 
-1. The types and the layout, with the three current regions wrapped as panes
-   and no change in behaviour. The layout tests above pass unchanged. The
-   divider takes N panes.
-2. The pager's views become pushed screens. `/mcp` gets the log pane, the
-   first new use.
+1. Done (USER 2026-10-25): pushed screens and their panes (`cmd/dun/panes.go`),
+   `/mcp` the first: the table pane (the pager with its table) over the
+   selected server's log pane. The base screen is not on panes yet: it holds
+   the owner rules above, so it moves last.
+2. The other pager views (`/mcp tools`, `/skill`, `/context-file`, a
+   block) become screens where a second pane earns its place.
 3. The job view and the inspector move onto screens.
-4. `update`'s if-chain is replaced by the screen's dispatch. Lower-area
-   modes (ask, pickers, forms, palette) stay variants of the lower pane.
+4. The base screen's regions become panes, with no change in behaviour and
+   the layout tests passing unchanged; `update`'s if-chain is replaced by the
+   screen's dispatch. Lower-area modes (ask, pickers, forms, palette) stay
+   variants of the lower pane.
 
 ## Risks
 
