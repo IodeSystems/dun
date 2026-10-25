@@ -622,7 +622,7 @@ func (h *Harness) rebuildTools() {
 	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
 	// a child never receives `agent`, so depth-1 holds with no counter to get
 	// wrong, and a root never receives `tell_parent`, so it is absent rather
-	// than being a tool that errors when called. See plan/subagents.md.
+	// than being a tool that errors when called. See docs/decisions.md, "Sub-agents".
 	if h.isChild() {
 		toolDefs = append(toolDefs, tellParentToolDef(), askParentToolDef())
 		dispatch = withTellParent(dispatch, h, report)

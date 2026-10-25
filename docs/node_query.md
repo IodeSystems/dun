@@ -34,7 +34,7 @@ func:empty(::in)                       # dead code (no callers)
 
 ```
 path=harness.go ::grep('-E Server|Harness')   # regex lines
-path=plan/plan.md ::grep('sub-agent')          # literal in markdown
+path=docs/design.md ::grep('dund')             # literal in markdown
 path=*.go ::grep('-w TODO')                    # across all .go files
 ```
 
@@ -45,11 +45,11 @@ ONE quoted arg — no inner quotes. Flags: `-E` (regex), `-w` (word), `-i` (case
 Markdown files have a heading tree. Headings are queryable like any other symbol:
 
 ```
-path=plan/plan.md > *                   # all children (headings)
-path=plan/plan.md > * > *               # two levels deep
+path=docs/design.md > *                 # all children (headings)
+path=docs/design.md > * > *             # two levels deep
 ```
 
-The `in` field shows the full hierarchy: `plan/plan.md#dun — plan.Active work.✅ D  Slice 5`.
+The `in` field shows the full hierarchy: `docs/design.md#dun: design.Architecture`.
 
 Use this to navigate docs, plans, and specs — then `node_read` the section.
 

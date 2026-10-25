@@ -37,7 +37,7 @@ import (
 // "ask @carl" from reading as an import, a token must contain a '/' or a '.'.
 //
 // Both root files are read (USER 2026-10-22: CLAUDE.md as well — an
-// assumption recorded in plan/done.md, reversible). When they are one file
+// an assumption, reversible). When they are one file
 // (a symlink) or have the same bytes, the content goes in once.
 //
 // Imports can be large, and the block rides every request. Past

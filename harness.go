@@ -5,7 +5,7 @@
 //
 // Slice 1 is the headless composition: spawn the servers, bridge their tools
 // into an agent.Session, run the tool loop. The Bubble Tea TUI and the Docker +
-// git-worktree isolation layer on top (see plan/plan.md).
+// git-worktree isolation layer on top (see docs/design.md).
 package dun
 
 import (
@@ -430,7 +430,7 @@ type Harness struct {
 	// must still find it (see bgkill.go).
 	bgLive map[*bgJob]struct{}
 
-	// Sub-agents (see subagent.go and plan/subagents.md). agMu guards both.
+	// Sub-agents (see subagent.go and docs/decisions.md, "Sub-agents"). agMu guards both.
 	// ownsMgr is false for a CHILD: it shares its parent's manager, and closing
 	// that from a child would stop the servers out from under the parent.
 	agMu    sync.Mutex
@@ -1448,7 +1448,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 // Close stops this harness's children, then its servers.
 //
 // Children first, and unconditionally: a session that ends KILLS them (see
-// plan/subagents.md), and a child left running after its parent's servers are
+// docs/decisions.md, "Sub-agents"), and a child left running after its parent's servers are
 // gone would keep working against tools that no longer answer.
 func (h *Harness) Close() {
 	h.closeAgents()

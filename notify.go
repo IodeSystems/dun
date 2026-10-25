@@ -226,7 +226,7 @@ const surfaceMargin = 1.5
 // and, against a runner-up, has surfaceMargin × its score. See the
 // relevance note in docsPreparer.
 //
-// Calibrated 2026-10-23 (plan/done.md, "Surfacing floor"): 43 on-topic and
+// Calibrated 2026-10-23 (docs/surfacing.md): 43 on-topic and
 // 42 off-topic questions over the dun code, skills, memory and rules
 // indexes, nomic-embed-text. On-topic right hits scored 0.62–0.84,
 // off-topic top hits 0.47–0.73 (37 of 42 under 0.67). 0.68 + 0.01: 22 of
@@ -361,7 +361,7 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 		// later pass in a turn) the newest entry; its first words only. The
 		// whole new text was the query before (the reply since the last pass
 		// joined to the message): a long query blurs what it is about. See
-		// the measurement at surfaceQueryWords' value in plan/done.md.
+		// the measurement at surfaceQueryWords' value in docs/surfacing.md.
 		var newest, newestUser string
 		maxObserved := mark
 		for _, e := range entries {
@@ -484,8 +484,7 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 		//     coverage alone let 22 of 42 off-topic questions surface.
 		//   - a raglit older than e66a3df (no similarity, no terms): the
 		//     ratio, as before.
-		// The values and the run they came from: plan/done.md, "Surfacing
-		// floor".
+		// The values and the run they came from: docs/surfacing.md.
 		//
 		// The rule runs once per GROUP (memory notes, skills, rules,
 		// everything else) and index kind, because a score is only comparable

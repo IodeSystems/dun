@@ -204,7 +204,6 @@ const daemonMarker = "--daemon: the proxy runs it"
 // earlier daemon answers such a root with 403 on every call.
 const anyRootMarker = "a root outside --allow is admitted"
 
-
 // indexProbes caches IndexProtocol by the binary's path, size and mtime: a
 // rebuilt binary is asked again, an unchanged one is not.
 var indexProbes sync.Map // key → IndexSupport

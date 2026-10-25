@@ -499,7 +499,7 @@ it falls back to the base branch, and with no remote for that either the checks
 are the whole of ship. What an agent may do is declared with `allow`, not by
 guessing from branch names.
 
-Next: run the MCP servers inside the container too. See `plan/plan.md`.
+Next: run the MCP servers inside the container too.
 
 ### File tools
 

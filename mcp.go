@@ -41,8 +41,8 @@ var toolDocs = map[string]string{
 		"  #Start::in.call > * path=cmd/dun/main.go  // …only the callers in one file: a bare attr after a space FILTERS\n" +
 		"  path=harness.go ::grep('-E Server|Harness')  // text search. ONE quoted arg — no inner \"quotes\", that matches nothing\n" +
 		"  func name~=^Start                       // ~= is the regex op; = ^= $= *= are literal\n" +
-		"  path=plan/plan.md ::grep('sub-agent')  // find a line in a markdown file\n" +
-		"  path=plan/plan.md > *                   // the heading tree of a markdown file\n" +
+		"  path=docs/design.md ::grep('dund')     // find a line in a markdown file\n" +
+		"  path=docs/design.md > *                 // the heading tree of a markdown file\n" +
 		"Attribute brackets are optional: path=a/b.go ≡ [path=a/b.go]. Types are a fixed set (func method type struct file dir import …) — you cannot invent one.\n" +
 		"Markdown headings are structured nodes with full hierarchy in the `in` field — use them to navigate docs, plans, and specs.",
 	// node_read: the auto-cap hint is useful but doesn't say when to use what.
