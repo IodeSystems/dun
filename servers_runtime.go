@@ -292,6 +292,20 @@ func waitGrace(wg *sync.WaitGroup, d time.Duration) {
 	}
 }
 
+// cancelStart stops a start of id in flight, saying why; false when none is.
+func (h *Harness) cancelStart(id string, why error) bool {
+	h.srvMu.Lock()
+	stop, ok := h.startStop[id]
+	h.srvMu.Unlock()
+	if ok {
+		stop(why)
+	}
+	return ok
+}
+
+// errSwitchedOff is why a start stops when its server is switched off.
+var errSwitchedOff = errors.New("switched off while it started")
+
 // markStarting records that a start of id is in flight, from now unless one
 // already was.
 func (h *Harness) markStarting(id string) {
@@ -370,6 +384,17 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	}
 	t0 := time.Now()
 	h.markStarting(s.ID)
+	// A start can be stopped (cancelStart): switched off while it starts,
+	// it does not hold anything up for the rest of its timeout.
+	parent := ctx
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	h.srvMu.Lock()
+	if h.startStop == nil {
+		h.startStop = map[string]context.CancelCauseFunc{}
+	}
+	h.startStop[s.ID] = stop
+	h.srvMu.Unlock()
 	timeout := time.Duration(s.Timeout) * time.Second
 	if timeout <= 0 {
 		timeout = 90 * time.Second
@@ -504,7 +529,11 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if err == nil && s.ID == ServerShell {
 		h.readHosted()
 	}
+	if why := context.Cause(ctx); err != nil && parent.Err() == nil && why != nil && why != context.Canceled {
+		err = fmt.Errorf("start stopped: %w", why)
+	}
 	h.srvMu.Lock()
+	delete(h.startStop, s.ID)
 	if h.missing == nil {
 		h.missing = map[string]bool{}
 	}
@@ -1043,7 +1072,7 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	if err := h.reloadServers(ctx, true, restart); err != nil {
 		return path, err
 	}
-	if s, err := h.knownServer(spec.ID); err == nil && s.Autostart && s.Via != ViaShell && !h.mgr.ServerStarted(s.ID) {
+	if s, err := h.knownServer(spec.ID); err == nil && s.Autostart && s.Via != ViaShell && !h.mgr.ServerStarted(s.ID) && !h.isStarting(s.ID) {
 		return path, h.startServer(ctx, s)
 	}
 	return path, nil

@@ -993,13 +993,11 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(catalogEvent(h))
 			em.emit(commandsEvent(h))
 		}
-		// Starting an OAuth server may wait minutes on a person in a
-		// browser: not on the reader goroutine, which answers asks.
-		if h.HasOAuth(alias) {
-			go run()
-			return
-		}
-		run()
+		// Never on the reader goroutine, which answers asks and takes the
+		// next message: a start takes up to its timeout (an OAuth one, a
+		// person in a browser), and a switch changed while it starts (off)
+		// must not wait behind it (USER 2026-10-25).
+		go run()
 	}
 	in.setServerCmd(srvCmd)
 	// A skill added, removed or edited on disk reaches the model's skill

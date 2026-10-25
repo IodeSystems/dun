@@ -505,7 +505,13 @@ type Harness struct {
 	starting map[string]time.Time
 	// srvLogs is each server's activity log (serverlog.go); closed is closed
 	// by Close, which ends the log's stderr readers.
-	srvLogs   serverLogs
+	srvLogs serverLogs
+	// startStop cancels a start in flight (startServer), with why: a
+	// server switched off while it starts stops starting.
+	startStop map[string]context.CancelCauseFunc
+	// reloads counts reloadServers calls in flight, starts included: what
+	// follows a reload (indexstate.go's retry) waits for none to be.
+	reloads atomic.Int32
 	closed    chan struct{}
 	closeOnce sync.Once
 	// ingestNote is the last workspace ingest's summary, for /raglit and the

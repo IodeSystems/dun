@@ -714,8 +714,10 @@ func (h *Harness) editIndexSpec(ctx context.Context, id string, wait bool, edit 
 	go func() {
 		// The report can land before the start that spawned the server
 		// has finished (its tools listed): a restart under it would be
-		// skipped as "already starting". Let that start end first.
-		for deadline := time.Now().Add(time.Minute); h.isStarting(id) && time.Now().Before(deadline); {
+		// skipped as "already starting". Let that start end first, and the
+		// reload that ran it: the starts run outside reconMu, and this
+		// must not overtake the change that reload was making.
+		for deadline := time.Now().Add(time.Minute); (h.isStarting(id) || h.reloads.Load() > 0) && time.Now().Before(deadline); {
 			time.Sleep(50 * time.Millisecond)
 		}
 		if err := apply(false); err != nil {

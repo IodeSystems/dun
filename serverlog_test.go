@@ -129,3 +129,50 @@ func TestServerLog_ASlowStartSaysItIsStillAtIt(t *testing.T) {
 		t.Errorf("log:\n%s", log)
 	}
 }
+
+// Switched off while it starts, a server stops starting: the off does not
+// wait out the start's timeout, and the log says why (USER 2026-10-25: a
+// toggle waited behind a start).
+func TestServerLog_OffWhileStartingStopsTheStart(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	h, err := Start(context.Background(), Config{Workspace: ws, Client: &scriptRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	slow, _ := fakeBin(t, "slow-mcp", "poly-lsp", fakeSlowEnv+"=20000")
+	added := make(chan error, 1)
+	go func() {
+		_, err := h.AddServer(context.Background(), ServerSpec{ID: "slow", Command: slow, Args: []string{"mcp", "--root", ws}, Timeout: 30})
+		added <- err
+	}()
+	for deadline := time.Now().Add(5 * time.Second); !h.isStarting("slow"); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the start never began")
+		}
+	}
+	off := false
+	t0 := time.Now()
+	if _, err := h.SetServerOn(context.Background(), "slow", ScopeGlobal, &off); err != nil {
+		t.Fatalf("off: %v", err)
+	}
+	if d := time.Since(t0); d > 3*time.Second {
+		t.Errorf("off took %s: it waited behind the start", d)
+	}
+	select {
+	case err := <-added:
+		if err == nil || !strings.Contains(err.Error(), "switched off while it started") {
+			t.Errorf("the add's start: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the start did not stop")
+	}
+	st, _ := serverState(h, "slow")
+	if log := logText(st); !strings.Contains(log, "start stopped after") || !strings.Contains(log, "switched off while it started") {
+		t.Errorf("log:\n%s", log)
+	}
+	if st.Starting || st.Running {
+		t.Errorf("still starting or running: %+v", st)
+	}
+}

@@ -194,7 +194,11 @@ func (h *Harness) noteStartDone(ctx context.Context, id string, t0 time.Time, er
 		}
 		h.noteServer(id, "ready · %d tool%s · %s", n, map[bool]string{true: "", false: "s"}[n == 1], secs(time.Since(t0)))
 	case ctx.Err() != nil:
-		h.noteServer(id, "start cancelled after %s", secs(time.Since(t0)))
+		why := "cancelled"
+		if c := context.Cause(ctx); c != nil && c != context.Canceled {
+			why = c.Error()
+		}
+		h.noteServer(id, "start stopped after %s: %s", secs(time.Since(t0)), why)
 	default:
 		h.noteServer(id, "did not start after %s: %s", secs(time.Since(t0)), oneLine(err.Error(), 400))
 	}

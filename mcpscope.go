@@ -435,18 +435,51 @@ func (h *Harness) reloadServers(ctx context.Context, wait bool, restart map[stri
 	if h.parent != nil || h.mgr == nil {
 		return nil
 	}
+	h.reloads.Add(1)
+	defer h.reloads.Add(-1)
+	changed, starts, firstErr, err := h.reconcileServers(ctx, restart)
+	if err != nil || !changed {
+		return err
+	}
+	// The starts run outside reconMu: a start can take its whole timeout,
+	// and a switch changed meanwhile (off, while it starts) must not wait
+	// for it. Each is marked starting under the lock, so no other reconcile
+	// starts it again.
+	for _, n := range starts {
+		if wait {
+			if err := h.startServer(ctx, n); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		go func() {
+			if err := h.startServer(ctx, n); err != nil {
+				log.Printf("dun: %s did not start: %v", n.ID, err)
+			}
+		}()
+	}
+	h.applyTools()
+	return firstErr
+}
+
+// reconcileServers, under reconMu, takes the switches' new server set: it
+// stops what is no longer on (and stops the starts of what was switched off
+// while starting), restarts the shell when what it hosts changed, and says
+// which servers to start, marked starting. changed is false when the set is
+// what it was and nothing is to restart: there is nothing to rebuild.
+func (h *Harness) reconcileServers(ctx context.Context, restart map[string]bool) (changed bool, starts []Server, shellErr, err error) {
 	h.reconMu.Lock()
 	defer h.reconMu.Unlock()
 	next, err := h.resolveSpecs()
 	if err != nil {
-		return err
+		return false, nil, nil, err
 	}
 	h.srvMu.Lock()
 	prev := h.specs
 	h.specs = next
 	h.srvMu.Unlock()
 	if reflect.DeepEqual(prev, next) && len(restart) == 0 {
-		return nil
+		return false, nil, nil, nil
 	}
 	old := map[string]Server{}
 	for _, s := range prev {
@@ -475,6 +508,10 @@ func (h *Harness) reloadServers(ctx context.Context, wait bool, restart map[stri
 		n, ok := now[id]
 		if h.mgr.ServerStarted(id) && direct(o, true) && (!direct(n, ok) || restart[id]) {
 			h.mgr.StopServer(id)
+			h.noteServer(id, "stopped")
+		}
+		if direct(o, true) && !direct(n, ok) {
+			h.cancelStart(id, errSwitchedOff)
 		}
 	}
 	var firstErr error
@@ -488,20 +525,10 @@ func (h *Harness) reloadServers(ctx context.Context, wait bool, restart map[stri
 		if !direct(n, true) || h.mgr.ServerStarted(n.ID) || h.isStarting(n.ID) || (direct(o, had) && !restart[n.ID]) {
 			continue
 		}
-		if wait {
-			if err := h.startServer(ctx, n); err != nil && firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		go func() {
-			if err := h.startServer(ctx, n); err != nil {
-				log.Printf("dun: %s did not start: %v", n.ID, err)
-			}
-		}()
+		h.markStarting(n.ID)
+		starts = append(starts, n)
 	}
-	h.applyTools()
-	return firstErr
+	return true, starts, firstErr, nil
 }
 
 // knownServer finds id among the resolved servers.
@@ -573,7 +600,7 @@ func (h *Harness) SetServerOn(ctx context.Context, id, scope string, on *bool) (
 	}
 	// Asked for by name: a server that is on but not up (it failed before)
 	// is tried again.
-	if s, err := h.knownServer(id); err == nil && s.Autostart && s.Via != ViaShell && !h.mgr.ServerStarted(id) {
+	if s, err := h.knownServer(id); err == nil && s.Autostart && s.Via != ViaShell && !h.mgr.ServerStarted(id) && !h.isStarting(id) {
 		return path, h.startServer(ctx, s)
 	}
 	return path, nil
