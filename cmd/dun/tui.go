@@ -676,7 +676,7 @@ type tuiModel struct {
 	bandRaw      []string       // the selected block's rows before the band, for a pulse step
 	bandAt       int            // the pane row they start at
 	pg           pager          // the pager (valid while paging)
-	scr          *paneScreen        // a pushed screen over the pager (panes.go), or nil
+	scr          *paneScreen    // a pushed screen over the pager (panes.go), or nil
 	jobViewing   bool           // a job's view has the convo pane (jobview.go; owns the keys)
 	jv           jobView        // the job view (valid while jobViewing)
 	jvGen        int            // which opening of the job view its read timer belongs to
@@ -4672,7 +4672,6 @@ func init() {
 			m.append(stDim.Render("reconnecting…"))
 			return restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 		}},
-		{"context-file", "[on|off|unset <file|glob> [--global|--project|--session] | mode full|summary|index|unset [--scope]]", "context files: bare opens the list of AGENTS.md, CLAUDE.md and what they import — type to filter, each one's tokens in every request, on/off at each scope, and the mode (full, summary, index); a file switched off is out of every request and still found through the docs index; on/off/unset and mode change it directly", contextFileSlash},
 		{"skill", "[name] [text] | on|off|unset <name|glob> [--global|--project|--session] | mode listed|surfaced|unset [--scope]", "skills: bare opens the list (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers) — type to filter, each one's cost, on/off at each scope, and the mode (listed in every request, or surfaced when a turn fits); on/off/unset and mode change it directly; with a name, asks the model to use it; with part of a name, lists the matches", skillSlash},
 		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
@@ -4909,7 +4908,7 @@ func (m *tuiModel) showContext() {
 
 	b.WriteString("\n\n  " + stHeader.Render("system"))
 	if s.systemTokens > 0 {
-		how := " (estimated at ~4 chars/token)"
+		how := " (estimated)"
 		if s.systemExact {
 			how = " (counted by the model's tokenizer)"
 		}

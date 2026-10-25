@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 
 	"github.com/iodesystems/dun"
@@ -31,7 +32,7 @@ func switchesEvent(h *dun.Harness, action string) *proto.Switches {
 		return &proto.Switches{Kind: kind, Message: "no such kind of switches: " + kind}
 	}
 	ev := &proto.Switches{Kind: v.Kind, Items: []proto.SwitchItem{}, Mode: v.Mode, ModeFrom: v.ModeFrom,
-		Modes: v.Modes, About: v.About, Order: v.Order, Note: v.Note, Message: msg}
+		Modes: v.Modes, About: v.About, Order: v.Order, Note: v.Note, Message: msg, Slash: v.Slash, Status: v.Status}
 	for _, it := range v.Items {
 		ev.Items = append(ev.Items, proto.SwitchItem{Name: it.Name, Description: it.Description, Source: it.Source,
 			Detail: it.Detail, Tokens: it.Tokens, On: it.On, From: it.From,
@@ -77,5 +78,26 @@ type usageErr string
 func (u usageErr) Error() string { return string(u) }
 
 func errUsage(kind, usage string) error {
-	return usageErr("usage: /" + strings.TrimSuffix(kind, "s") + " " + usage)
+	slash := strings.TrimSuffix(kind, "s")
+	if kind == "rules" {
+		slash = "rules"
+	}
+	return usageErr("usage: /" + slash + " " + usage)
+}
+
+// rulesCmd is /rules' engine side, for every client: "" the files, their
+// cost and the mode; a bare mode word sets the project's mode (as /rules
+// always did) or, with a scope, that scope's; the rest are the switches'.
+func rulesCmd(ctx context.Context, h *dun.Harness, action string) (string, error) {
+	f := strings.Fields(action)
+	switch {
+	case len(f) == 0:
+		return h.RulesStatus(), nil
+	case f[0] == dun.RulesFull || f[0] == dun.RulesSummary || f[0] == dun.RulesIndex:
+		if len(f) == 1 {
+			return h.SetRulesMode(ctx, f[0])
+		}
+		return switchOp(h, "rules", append([]string{"mode"}, f...))
+	}
+	return switchOp(h, "rules", f)
 }

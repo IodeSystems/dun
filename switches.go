@@ -12,9 +12,9 @@ import (
 
 // Scoped switches: a kind of thing the person turns on and off at the three
 // scopes /mcp has (mcpscope.go), with a mode for the kind as a whole. Skills
-// are the first kind (skills.go); context files are next. /mcp keeps its own
+// (skills.go) and the rules files (contextfiles.go) are its kinds. /mcp keeps its own
 // storage, in the server specs (USER 2026-10-24: /mcp, /skill and
-// /context-file follow one pattern — make it one).
+// /rules follow one pattern — make it one).
 //
 //	global   $DUN_HOME/<kind>.json
 //	project  the project's state dir, <kind>.json
@@ -57,12 +57,17 @@ type SwitchState struct {
 
 // switchKind is what a kind tells the generic part.
 type switchKind struct {
-	name    string                   // "skills": the files' name
+	name    string                   // "skills"
+	file    string                   // its files' name, when not name
+	slash   string                   // the command a person types: "skill"
 	modes   []string                 // the modes it takes, the default first
 	items   func() []SwitchItem      // what it switches, now
 	changed func()                   // after a change: rebuild what it feeds
 	about   map[string]string        // each mode in words, for a UI
 	note    func(mode string) string // what to say about the mode in force, or ""
+	// status is facts for a UI's status pane, a sentence each: what the
+	// kind depends on and whether it is there (raglit for the rules).
+	status func(mode string) []string
 	// prepare, when set, runs before a mode is saved: what the mode needs
 	// (a summary written), or why it cannot be set.
 	prepare func(mode string) error
@@ -74,6 +79,9 @@ var switchScopes = []string{ScopeSession, ScopeProject, ScopeGlobal}
 // switchFile is a kind's file at scope, "" when the scope has none here (an
 // in-memory session, a workspace with no project state).
 func (h *Harness) switchFile(kind, scope string) string {
+	if kind == rulesKind {
+		kind = rulesKindFiles
+	}
 	switch scope {
 	case ScopeGlobal:
 		return filepath.Join(DunHome(), kind+".json")
@@ -173,12 +181,14 @@ type SwitchView struct {
 	About    map[string]string `json:"about,omitempty"` // mode → what it means
 	Order    []string          `json:"order,omitempty"` // the modes, the default first
 	Note     string            `json:"note,omitempty"`
+	Slash    string            `json:"slash,omitempty"` // the command: "skill", "rules"
+	Status   []string          `json:"status,omitempty"`
 }
 
 // switchView builds a kind's view.
 func (h *Harness) switchView(k switchKind) SwitchView {
 	set := h.switchSet(k.name)
-	v := SwitchView{Kind: k.name, Modes: map[string]string{}, About: k.about, Order: k.modes}
+	v := SwitchView{Kind: k.name, Modes: map[string]string{}, About: k.about, Order: k.modes, Slash: k.slashName()}
 	v.Mode, v.ModeFrom = set.mode(k.modes[0])
 	for _, sc := range switchScopes {
 		v.Modes[sc] = set[sc].Mode
@@ -190,6 +200,9 @@ func (h *Harness) switchView(k switchKind) SwitchView {
 	}
 	if k.note != nil {
 		v.Note = k.note(v.Mode)
+	}
+	if k.status != nil {
+		v.Status = k.status(v.Mode)
 	}
 	return v
 }
@@ -210,7 +223,7 @@ func (h *Harness) setSwitch(k switchKind, pattern, scope string, on *bool) (stri
 		}
 	}
 	if on != nil && matched == 0 {
-		return "", fmt.Errorf("nothing matches %q (/%s lists them)", pattern, strings.TrimSuffix(k.name, "s"))
+		return "", fmt.Errorf("nothing matches %q (/%s lists them)", pattern, k.slashName())
 	}
 	if err := h.editSwitchFile(k.name, scope, func(f *SwitchFile) {
 		if on == nil {
@@ -231,7 +244,11 @@ func (h *Harness) setSwitch(k switchKind, pattern, scope string, on *bool) (stri
 	if on != nil {
 		what = onOffWord(*on)
 	}
-	n := fmt.Sprintf("%d %s", matched, strings.TrimSuffix(k.name, "s"))
+	noun := strings.TrimSuffix(k.name, "s")
+	if k.name == rulesKind {
+		noun = "file"
+	}
+	n := fmt.Sprintf("%d %s", matched, noun)
 	if matched != 1 {
 		n += "s"
 	}
@@ -304,7 +321,16 @@ func containsStr(list []string, s string) bool {
 
 // switchKinds are the kinds a client can switch, by name.
 func (h *Harness) switchKinds() map[string]switchKind {
-	return map[string]switchKind{"skills": h.skillKind(), contextFilesKind: h.contextFileKind()}
+	return map[string]switchKind{"skills": h.skillKind(), rulesKind: h.rulesSwitchKind()}
+}
+
+// slashName is the command for the kind: its slash, or its name less the
+// plural.
+func (k switchKind) slashName() string {
+	if k.slash != "" {
+		return k.slash
+	}
+	return strings.TrimSuffix(k.name, "s")
 }
 
 // SwitchView is a kind's view for a UI; ok=false for an unknown kind.

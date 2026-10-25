@@ -34,6 +34,7 @@ type pageNode struct {
 	body string
 	err  bool        // marks the head as a failure
 	pre  bool        // the head's spacing is kept (a table row), not collapsed
+	sub  string      // a second line under the head, dim: what a narrow screen moves off it
 	insp *inspSource // a call: "i" opens it in the inspector
 }
 
@@ -151,6 +152,10 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 			r = band.row(r, p.w, p.phase)
 		}
 		p.rows = append(p.rows, r)
+		if n.sub != "" { // the head's second line (a narrow screen's)
+			sub, _ := fitPlain(n.sub, p.w-5)
+			p.rows = append(p.rows, gutter+"    "+stDim.Render(sub))
+		}
 		if p.open[i] {
 			for _, r := range wrapRows(n.body, p.w-4) {
 				p.rows = append(p.rows, "    "+r)
@@ -320,7 +325,10 @@ func (m *tuiModel) syncPager() {
 		m.pg.phase = m.pulse
 		h := m.convoHeight()
 		if s := m.activeScreen(); s != nil { // its pane on the screen (panes.go)
-			h = m.paneHeight(s, 0)
+			h = m.paneHeight(s, s.pagerPane())
+		}
+		if sw, ok := m.pg.id.(interface{ setWidth(int) }); ok { // a narrow screen's rows are two lines
+			sw.setWidth(m.vp.Width)
 		}
 		m.pg.layout(v.page(), m.vp.Width, h)
 		return

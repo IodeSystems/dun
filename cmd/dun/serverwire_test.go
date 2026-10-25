@@ -80,7 +80,7 @@ func TestMCPScreen_TableOverTheLog(t *testing.T) {
 	}
 	view := m.drawView()
 	plain := ansi.Strip(view)
-	for _, want := range []string{"mcp servers", "activity · sh", "01:53:43 running sh slow.sh", "stderr: slow: loading config"} {
+	for _, want := range []string{"/mcp · 1 server · 0 connected · 1 starting", "activity · sh", "01:53:43 running sh slow.sh", "stderr: slow: loading config"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("screen lacks %q:\n%s", want, plain)
 		}
@@ -93,7 +93,7 @@ func TestMCPScreen_TableOverTheLog(t *testing.T) {
 	}
 	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = nm.(tuiModel)
-	if m.scr == nil || m.scr.focus != 1 || !strings.Contains(ansi.Strip(m.scr.hint(&m)), "end follows") {
+	if m.scr == nil || m.scr.focus != 2 || !strings.Contains(ansi.Strip(m.scr.hint(&m)), "end follows") {
 		t.Fatalf("tab did not move to the log")
 	}
 	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -107,14 +107,56 @@ func TestMCPScreen_TableOverTheLog(t *testing.T) {
 }
 
 func TestScreen_Heights(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	s := mcpScreen()
-	for _, rows := range []int{5, 8, 23, 60} {
-		hs := s.heights(rows)
-		if rows >= 8 && hs[0]+hs[1]+1 != rows {
-			t.Errorf("%d rows: %v and a divider", rows, hs)
+	for _, rows := range []int{12, 23, 60} {
+		hs := s.heights(&m, 80, rows)
+		if hs[0]+hs[1]+hs[2]+2 != rows {
+			t.Errorf("%d rows: %v and two dividers", rows, hs)
 		}
-		if hs[0] < 4 || hs[1] < 3 {
+		if hs[1] < 4 || hs[2] < 3 {
 			t.Errorf("%d rows: %v under the minimums", rows, hs)
+		}
+	}
+}
+
+// /rules: a status pane over the list says the mode, what is on costs,
+// whether raglit is on and the warning; the warning is not a row; on a
+// narrow terminal a row is the name over its switches and cost (USER
+// 2026-10-25).
+func TestRulesScreen_StatusPaneAndNarrowRows(t *testing.T) {
+	ev := evMsg{"type": "switches", "kind": "rules", "slash": "rules", "mode": "full", "order": []any{"full", "summary", "index"},
+		"note":   "the docs index is off (/raglit on): a file switched off is then not searchable, only named",
+		"status": []any{"docs index (raglit): off · /raglit on to search files switched off, and for mode index"},
+		"items": []any{
+			map[string]any{"name": "CLAUDE.md", "source": "root", "tokens": float64(1200), "on": true},
+			map[string]any{"name": "docs/design.md", "source": "import", "tokens": float64(3100), "on": false, "project": "off"},
+		}}
+	for _, w := range []int{100, 48} {
+		m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+		nm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
+		m = nm.(tuiModel)
+		m.switchesWant = "rules"
+		m = m.noteSwitches(ev)
+		if m.activeScreen() == nil {
+			t.Fatalf("%d: no screen", w)
+		}
+		plain := ansi.Strip(m.drawView())
+		for _, want := range []string{"/rules · 1 of 2 on · mode full", "~1.2k tokens in every request", "docs index (raglit): off", "⚠ the docs index is off"} {
+			if !strings.Contains(strings.ReplaceAll(plain, "\n", " "), want) {
+				t.Errorf("%d: status lacks %q:\n%s", w, want, plain)
+			}
+		}
+		if strings.Contains(plain, "▸ ⚠") {
+			t.Errorf("%d: the warning is a row:\n%s", w, plain)
+		}
+		two := false
+		for _, l := range strings.Split(plain, "\n") {
+			two = two || strings.HasSuffix(strings.TrimSpace(l), "● CLAUDE.md")
+		}
+		two = two && strings.Contains(plain, "g– p– s– · ~1.2k tok · root")
+		if (w < narrowW) != two {
+			t.Errorf("%d: two-line rows %v:\n%s", w, two, plain)
 		}
 	}
 }

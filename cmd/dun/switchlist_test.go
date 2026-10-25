@@ -35,12 +35,12 @@ func TestSwitchList_Skills(t *testing.T) {
 	if v.m.switchesPaging() == nil {
 		t.Fatal("the list did not open")
 	}
-	if got := v.view(); !strings.Contains(got, "skills · 60 of 61 on · listed · ~1.5k tokens in every request") {
+	if got := v.view(); !strings.Contains(got, "/skill · 60 of 61 on · mode listed") || !strings.Contains(got, "~1.5k tokens in every request") {
 		t.Errorf("title:\n%s", got)
 	}
 	v.m = typeStr(v.m, "pdf")
 	got := v.view()
-	if !strings.Contains(got, `filter "pdf": 1 shown`) || !strings.Contains(got, "○ pdf-fill") || strings.Contains(got, "tool-01") {
+	if !strings.Contains(got, `filter "pdf": 1 of 61 shown`) || !strings.Contains(got, "○ pdf-fill") || strings.Contains(got, "tool-01") {
 		t.Errorf("filtered:\n%s", got)
 	}
 	rec.Reset()

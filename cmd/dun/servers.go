@@ -332,7 +332,7 @@ func toolCostListing(states []dun.ServerState) string {
 
 // toolCost is "160 tools · ~38k tokens · 12 hidden".
 func toolCost(st dun.ServerState) string {
-	s := fmt.Sprintf("%d tools · ~%s tokens", st.Tools, kTokens(st.Cost))
+	s := plural(st.Tools, "tool") + " · ~" + kTokens(st.Cost) + " tokens"
 	if st.Hidden > 0 {
 		s += fmt.Sprintf(" · %d hidden", st.Hidden)
 	}

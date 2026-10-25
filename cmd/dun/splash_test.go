@@ -43,9 +43,9 @@ func TestSplash_FreshSessionOnly(t *testing.T) {
 		t.Fatalf("no splash first:\n%s", convoText(m))
 	}
 	s := stripANSI(m.convo[0].collapsed)
-	for _, want := range []string{"  folder         ~/greet\n", "  model          none yet\n",
-		"  tools          2 · /mcp info\n", "  extensions     0 of 1 on · /ext info\n",
-		"  skills         none\n", "  context files  counting…\n", "  context        counting…\n"} {
+	for _, want := range []string{"  folder      ~/greet\n", "  model       none yet\n",
+		"  tools       2 · /mcp info\n", "  extensions  0 of 1 on · /ext info\n",
+		"  skills      none\n", "  rules       counting…\n", "  context     counting…\n"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("splash lacks %q:\n%s", want, s)
 		}
@@ -87,7 +87,7 @@ func TestSplash_KeptThroughAModelPick(t *testing.T) {
 	if len(m.convo) == 0 || !m.convo[0].splash {
 		t.Fatalf("splash gone after the pick:\n%s", convoText(m))
 	}
-	if s := stripANSI(m.convo[0].collapsed); !strings.Contains(s, "model          chat-standard on work") {
+	if s := stripANSI(m.convo[0].collapsed); !strings.Contains(s, "model       chat-standard on work") {
 		t.Errorf("splash model:\n%s", s)
 	}
 	n := 0
@@ -111,7 +111,7 @@ func TestStatus_WritesTheSplashClientSide(t *testing.T) {
 	m = typeStr(m, "/status")
 	m = key(m, kEnter)
 	last := m.convo[len(m.convo)-1]
-	if !last.splash || !strings.Contains(stripANSI(last.collapsed), "build          "+version) || !strings.Contains(stripANSI(last.collapsed), "tools          2") {
+	if !last.splash || !strings.Contains(stripANSI(last.collapsed), "build       "+version) || !strings.Contains(stripANSI(last.collapsed), "tools       2") {
 		t.Fatalf("/status wrote:\n%s", convoText(m))
 	}
 	if got := sent.String()[before:]; strings.Contains(got, "status") || strings.Contains(got, `"type":"user"`) {

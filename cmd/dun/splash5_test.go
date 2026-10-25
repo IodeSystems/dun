@@ -110,15 +110,15 @@ func fixedHeightAt(t *testing.T, w int) {
 // its parts on the second row; orange from 60% of the window.
 func TestSplash5_ContextRow(t *testing.T) {
 	v := splash5(t, 100, 30)
-	if s := splashText(v); !strings.Contains(s, "context        counting…\n") {
+	if s := splashText(v); !strings.Contains(s, "context     counting…\n") {
 		t.Fatalf("before the count:\n%s", s)
 	}
 	v.event(costEvent(false, 32000)) // 13.4k of 32k = 42%
 	s := splashText(v)
 	for _, want := range []string{
-		"context        ~13.4k tokens before you type (of 32k, 42%)\n",
-		"               system 600 · tools 0 (2.1k) · mcp 1 server (5.2k)\n", "               skills 0 (4.0k) · context files 2 (1.5k)\n",
-		"context files  AGENTS.md, docs/rules.md\n",
+		"context     ~13.4k tokens before you type (of 32k, 42%)\n",
+		"            system 600 · tools 0 (2.1k) · mcp 1 server (5.2k)\n", "            skills 0 (4.0k) · rules 2 (1.5k)\n",
+		"rules       AGENTS.md, docs/rules.md\n",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lacks %q:\n%s", want, s)
@@ -128,21 +128,21 @@ func TestSplash5_ContextRow(t *testing.T) {
 		t.Error("42% is orange")
 	}
 	v.event(costEvent(true, 20000)) // 67%: exact, heavy
-	if s := splashText(v); !strings.Contains(s, "context        13.4k tokens before you type (of 20k, 67%)\n") {
+	if s := splashText(v); !strings.Contains(s, "context     13.4k tokens before you type (of 20k, 67%)\n") {
 		t.Errorf("exact:\n%s", s)
 	}
 	if !strings.Contains(v.m.convo[0].collapsed, stNote.Render("13.4k tokens before you type (of 20k, 67%)")) {
 		t.Errorf("67%% is not orange: %q", v.m.convo[0].collapsed)
 	}
 	v.event(costEvent(true, 0))
-	if s := splashText(v); !strings.Contains(s, "context        13.4k tokens before you type\n") {
+	if s := splashText(v); !strings.Contains(s, "context     13.4k tokens before you type\n") {
 		t.Errorf("no window:\n%s", s)
 	}
 	// At 49 the words that carry it stay: the count, the window, the share.
 	p := splash5(t, 49, 21)
 	p.event(costEvent(false, 32000))
 	s = splashText(p)
-	if !strings.Contains(s, "context        ~13.4k tokens (of 32k, 42%)\n") || !strings.Contains(s, "\n                 system 600 · tools 0 (2.1k)…\n") {
+	if !strings.Contains(s, "context     ~13.4k tokens (of 32k, 42%)\n") || !strings.Contains(s, "\n              system 600 · tools 0 (2.1k)…\n") {
 		t.Errorf("at 49:\n%s", s)
 	}
 }
@@ -164,12 +164,12 @@ func TestSplash5_SpendRow(t *testing.T) {
 		{0.0, 0.009, "< $0.01 this year"},
 	} {
 		v.event(spendEvent(tc.today, tc.week, -1, 0))
-		if s := splashText(v); !strings.Contains(s, "spend          "+tc.want+"\n") {
+		if s := splashText(v); !strings.Contains(s, "spend       "+tc.want+"\n") {
 			t.Errorf("today %v week %v: want %q:\n%s", tc.today, tc.week, tc.want, s)
 		}
 	}
 	v.event(spendEvent(0.42, 3.10, 12.30, 1.0))
-	if s := splashText(v); !strings.Contains(s, "spend          $0.42 today · $12.30 left on work\n") {
+	if s := splashText(v); !strings.Contains(s, "spend       $0.42 today · $12.30 left on work\n") {
 		t.Errorf("budget:\n%s", s)
 	}
 	if strings.Contains(v.m.convo[0].collapsed, "38;5;214m$12.30") {
@@ -182,7 +182,7 @@ func TestSplash5_SpendRow(t *testing.T) {
 	// Credits: one is the floor.
 	v.event(map[string]any{"type": "spend", "calls": float64(1), "costed_calls": float64(1),
 		"ledger": map[string]any{"today": map[string]any{"credits": 0.5}, "week": map[string]any{"credits": 2.0}, "entries": true}})
-	if s := splashText(v); !strings.Contains(s, "spend          2 credits this week\n") {
+	if s := splashText(v); !strings.Contains(s, "spend       2 credits this week\n") {
 		t.Errorf("credits:\n%s", s)
 	}
 	// A provider that reports no cost: no spend, so no row.
@@ -200,8 +200,8 @@ func TestSplash5_ExtensionsAndServers(t *testing.T) {
 	v.m.srvSince["poly-lsp"] = time.Now().Add(-12 * time.Second)
 	v.m.refresh()
 	s := splashText(v)
-	for _, want := range []string{"tools          1 · poly-lsp starting 12s · /mcp info\n",
-		"extensions     0 of 1 on · /ext info\n", "skills         none\n"} {
+	for _, want := range []string{"tools       1 · poly-lsp starting 12s · /mcp info\n",
+		"extensions  0 of 1 on · /ext info\n", "skills      none\n"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lacks %q:\n%s", want, s)
 		}
@@ -210,7 +210,7 @@ func TestSplash5_ExtensionsAndServers(t *testing.T) {
 		map[string]any{"name": "deploy", "description": "ship it", "source": "user"},
 		map[string]any{"name": "review", "description": "review a diff", "source": "project"},
 	}})
-	if s := splashText(v); !strings.Contains(s, "skills         2 · /skill info\n") {
+	if s := splashText(v); !strings.Contains(s, "skills      2 · /skill info\n") {
 		t.Errorf("skills:\n%s", s)
 	}
 }
@@ -229,10 +229,10 @@ func TestStatus5_Detail(t *testing.T) {
 	v.m.statusSlash()
 	s := stripANSI(v.m.convo[len(v.m.convo)-1].collapsed)
 	for _, want := range []string{
-		"  build          ", "  context        13.4k tokens before you type (of 32k, 42%)\n",
+		"  build       ", "  context     13.4k tokens before you type (of 32k, 42%)\n",
 		"  servers\n", "    notes  running · 1 tool · 5.2k\n",
 		"  skills\n", "    deploy  ~8\n",
-		"  context files\n", "    AGENTS.md      ~900\n", "    docs/rules.md  ~600\n",
+		"  rules\n", "    AGENTS.md      ~900\n", "    docs/rules.md  ~600\n",
 		"  spend\n", "    today          $0.42\n", "    this week      $3.10\n", "    this year      $3.10\n",
 		"    chat-standard  $3.10 this month\n", "    this session   $0.42 · 3 priced calls\n", "    work key       $12.30 left\n",
 	} {

@@ -72,7 +72,11 @@ are in `decisions.md`.
   the config: when they are complete the command does the thing with no view
   (`/mcp off vay --project`); when they are not, it opens the view at that
   section with what was given filled in (`/mcp add` with no target opens the
-  add form). New commands (`/skill`, `/context-file`) follow it.
+  add form). `/skill` and `/rules` follow it (`/rules` took over
+  `/context-file`, USER 2026-10-25: one name for the rules files). A list's
+  status (mode, cost, what it depends on, a warning) is a pane above it,
+  never a row; under 80 columns a row is two lines, the name above its
+  switches and cost.
 - **Splash rows are fixed height per width,** so the layout never grows as
   facts arrive (counted estimate, then exact, then spend). Context turns orange
   at 60% of the window (`contextHeavy`).

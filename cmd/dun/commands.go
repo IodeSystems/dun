@@ -167,11 +167,13 @@ func ownCommands(docker bool) []proto.CommandSpec {
 		{Name: "memories", Group: "memory", Description: "this project's saved notes: when written, refined, confirmed or void"},
 		{Name: "remember", Usage: "[text]", Group: "memory", Text: true,
 			Description: "save a note for later sessions on this project (needs /raglit on); alone: the model picks what to keep"},
-		{Name: "rules", Usage: "[full|summary|index]", Group: "session",
+		{Name: "rules", Usage: "[full|summary|index [--scope] | on|off|unset <file|glob> [--scope]]", Group: "session",
 			Choices: choices("full", "the rules files and their imports, whole, in the system prompt",
 				"summary", "the imports condensed once by the model (root files stay whole)",
-				"index", "the imports in the docs index, surfaced by relevance (needs /raglit on)"),
-			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone shows files, cost and mode"},
+				"index", "the imports in the docs index, surfaced by relevance (needs /raglit on)",
+				"on", "a file (or glob) back in every request", "off", "a file (or glob) out of every request, still found through the docs index",
+				"unset", "a file's switch at a scope, back to the one below"),
+			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone, each file's cost, its switch at each scope and the mode; a mode word sets the project's mode"},
 		{Name: "suggest", Usage: "[on|off|auto]", Group: "session", Choices: choices("on", "always", "off", "never", "auto", "when idle"),
 			State: suggestMode, Description: "next-message suggestions: alone asks for some now, on/off/auto set the mode"},
 		{Name: "rephrase", Usage: "[on|off|status]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", ""),
@@ -429,10 +431,13 @@ func routeSlash(line string, r slashRoutes) {
 		switch {
 		case len(args) == 0:
 			r.control(name, "")
-		case len(args) == 1 && (arg(0) == dun.RulesFull || arg(0) == dun.RulesSummary || arg(0) == dun.RulesIndex):
-			r.control(name, arg(0))
+		case (arg(0) == dun.RulesFull || arg(0) == dun.RulesSummary || arg(0) == dun.RulesIndex) &&
+			(len(args) == 1 || len(args) == 2 && strings.HasPrefix(args[1], "--")):
+			r.control(name, strings.Join(append([]string{arg(0)}, args[1:]...), " "))
+		case (arg(0) == "on" || arg(0) == "off" || arg(0) == "unset" || arg(0) == "mode") && len(args) >= 2:
+			r.control(name, strings.Join(append([]string{arg(0)}, args[1:]...), " "))
 		default:
-			r.reply("usage: /rules [full|summary|index]")
+			r.reply("usage: /rules [full|summary|index [--scope] | on|off|unset <file|glob> [--global|--project|--session] | mode <mode|unset> [--scope]]")
 		}
 	case "memories", "close", "interrupt":
 		r.control(name, "")

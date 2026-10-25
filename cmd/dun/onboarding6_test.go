@@ -181,8 +181,8 @@ func TestSplash6_ContextPartsWithZeros(t *testing.T) {
 		"window":       float64(32000)})
 	s := splashText(v)
 	for _, want := range []string{
-		"context        ~5.9k tokens before you type (of 32k, 18%)\n",
-		"system 1.1k · tools 0 (4.8k) · mcp 0 servers (0) · skills 0 (0) · context files 0 (0)\n",
+		"context     ~5.9k tokens before you type (of 32k, 18%)\n",
+		"system 1.1k · tools 0 (4.8k) · mcp 0 servers (0) · skills 0 (0) · rules 0 (0)\n",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lacks %q:\n%s", want, s)
@@ -201,7 +201,7 @@ func TestSplash6_ServersKeepTheirPlaces(t *testing.T) {
 		map[string]any{"id": "raglit", "slash": "raglit"},
 		map[string]any{"id": "poly-lsp", "slash": "poly-lsp", "starting": true},
 	}})
-	if s := splashText(v); !strings.Contains(s, "tools          1 · poly-lsp starting") ||
+	if s := splashText(v); !strings.Contains(s, "tools       1 · poly-lsp starting") ||
 		!strings.Contains(s, " · /mcp info\n") {
 		t.Errorf("order:\n%s", s)
 	}

@@ -34,6 +34,15 @@ type screenPane struct {
 	body   paneBody
 	weight int // its share of the height
 	min    int // rows it keeps however small the terminal
+	// fixed: its height is its content's (statusLines), up to half the
+	// screen, before the others share the rest. A fixed pane takes no focus.
+	fixed bool
+}
+
+// statusBody is a fixed pane's content: its lines at width w.
+type statusBody interface {
+	paneBody
+	lines(m *tuiModel, w int) []string
 }
 
 type paneScreen struct {
@@ -62,39 +71,63 @@ func (m tuiModel) screenRows() int {
 	return max(1, h)
 }
 
-// heights splits rows among the panes, a divider between each two: each
-// gets its min, then what is left goes by weight, the remainder to the
-// first.
-func (s *paneScreen) heights(rows int) []int {
+// heights splits rows among the panes, a divider between each two: a fixed
+// pane gets its content's rows (half the screen at most), the others their
+// min, then what is left goes by weight, the remainder to the first that
+// has a weight.
+func (s *paneScreen) heights(m *tuiModel, w, rows int) []int {
 	n := len(s.panes)
 	hs := make([]int, n)
 	free := rows - (n - 1)
-	weights := 0
+	weights, first := 0, -1
 	for i, p := range s.panes {
-		hs[i] = p.min
-		free -= p.min
-		weights += p.weight
+		if p.fixed {
+			if sb, ok := p.body.(statusBody); ok {
+				hs[i] = max(1, min(len(sb.lines(m, w)), rows/2))
+			}
+		} else {
+			hs[i] = p.min
+			weights += p.weight
+			if first < 0 {
+				first = i
+			}
+		}
+		free -= hs[i]
 	}
 	if free <= 0 || weights == 0 {
 		return hs
 	}
 	given := 0
 	for i, p := range s.panes {
+		if p.fixed {
+			continue
+		}
 		add := free * p.weight / weights
 		hs[i] += add
 		given += add
 	}
-	hs[0] += free - given
+	hs[first] += free - given
 	return hs
 }
 
 // paneHeight is pane i's rows on the screen now.
 func (m tuiModel) paneHeight(s *paneScreen, i int) int {
-	return s.heights(m.screenRows())[i]
+	return s.heights(&m, m.w, m.screenRows())[i]
+}
+
+// pagerPane is the pane the pager draws in: the first one that is not
+// fixed.
+func (s *paneScreen) pagerPane() int {
+	for i, p := range s.panes {
+		if !p.fixed {
+			return i
+		}
+	}
+	return 0
 }
 
 func (s *paneScreen) view(m *tuiModel, w, rows int) string {
-	hs := s.heights(rows)
+	hs := s.heights(m, w, rows)
 	out := make([]string, 0, 2*len(s.panes))
 	for i, p := range s.panes {
 		if i > 0 {
@@ -117,17 +150,49 @@ func paneDivider(w, i, focus int) string {
 	return stDim.Render(strings.Repeat("▁", max(2, w)))
 }
 
+// focusables is the panes tab visits, in order.
+func (s *paneScreen) focusables() []int {
+	var out []int
+	for i, p := range s.panes {
+		if !p.fixed {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// moveFocus steps the focus d places through the focusable panes.
+func (s *paneScreen) moveFocus(d int) {
+	f := s.focusables()
+	if len(f) == 0 {
+		return
+	}
+	at := 0
+	for i, p := range f {
+		if p == s.focus {
+			at = i
+		}
+	}
+	s.focus = f[(at+d+len(f))%len(f)]
+}
+
 // key routes a key on the screen: tab and shift+tab move the focus, the
 // rest go to the focused pane; esc it does not take pops the screen. True:
 // the screen had the key.
 func (s *paneScreen) key(m *tuiModel, msg tea.KeyPressMsg) bool {
+	// With one pane to focus, tab is that pane's (a switch list cycles its
+	// mode with it).
 	switch msg.String() {
 	case "tab":
-		s.focus = (s.focus + 1) % len(s.panes)
-		return true
+		if len(s.focusables()) > 1 {
+			s.moveFocus(1)
+			return true
+		}
 	case "shift+tab":
-		s.focus = (s.focus + len(s.panes) - 1) % len(s.panes)
-		return true
+		if len(s.focusables()) > 1 {
+			s.moveFocus(-1)
+			return true
+		}
 	}
 	if s.panes[s.focus].body.key(m, msg) {
 		return true
@@ -140,7 +205,7 @@ func (s *paneScreen) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 
 func (s *paneScreen) hint(m *tuiModel) string {
 	h := s.panes[s.focus].body.hint(m)
-	if len(s.panes) > 1 {
+	if len(s.focusables()) > 1 {
 		h += stDim.Render(" · tab next pane")
 	}
 	return h
@@ -158,10 +223,34 @@ func (m *tuiModel) popScreen() {
 // mcpScreen is the server table over the selected server's log.
 func mcpScreen() *paneScreen {
 	return &paneScreen{
-		panes: []screenPane{{body: tablePane{}, weight: 3, min: 4}, {body: &serverLogPane{follow: true}, weight: 2, min: 3}},
+		panes: []screenPane{{body: mcpStatusPane{}, fixed: true}, {body: tablePane{}, weight: 3, min: 4},
+			{body: &serverLogPane{follow: true}, weight: 2, min: 3}},
+		focus: 1,
 		valid: func(m *tuiModel) bool { return m.serversPaging() != nil },
 	}
 }
+
+// mcpStatusPane is /mcp's status: the servers, how many are up, what they
+// cost.
+type mcpStatusPane struct{}
+
+func (mcpStatusPane) lines(m *tuiModel, w int) []string {
+	if v := m.serversPaging(); v != nil {
+		return v.lines(m, w)
+	}
+	return nil
+}
+
+func (p mcpStatusPane) view(m *tuiModel, w, h int) string {
+	rows := p.lines(m, w)
+	if len(rows) > h {
+		rows = rows[:h]
+	}
+	return lipgloss.NewStyle().Width(w).MaxWidth(w).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
+}
+
+func (mcpStatusPane) key(*tuiModel, tea.KeyPressMsg) bool { return false }
+func (mcpStatusPane) hint(*tuiModel) string               { return "" }
 
 // tablePane is the pager showing /mcp's table; its keys are the pager's
 // and the table's (mcpview.go).
@@ -277,4 +366,57 @@ func (p *serverLogPane) scroll(d int) {
 
 func (p *serverLogPane) hint(*tuiModel) string {
 	return stDim.Render("↑/↓ pgup/pgdn scroll · g/G start, end (end follows) · esc back")
+}
+
+// ── a switch list (/rules, /skill) ──────────────────────────────────
+
+// switchScreen is a kind's status pane over its list.
+func switchScreen() *paneScreen {
+	return &paneScreen{
+		panes: []screenPane{{body: switchStatusPane{}, fixed: true}, {body: switchListPane{}, weight: 1, min: 3}},
+		focus: 1,
+		valid: func(m *tuiModel) bool { return m.switchesPaging() != nil },
+	}
+}
+
+// switchStatusPane is the kind's status: what it is, its mode, the cost of
+// what is on, its facts and its warning.
+type switchStatusPane struct{}
+
+func (switchStatusPane) lines(m *tuiModel, w int) []string {
+	if v := m.switchesPaging(); v != nil {
+		return v.lines(m, w)
+	}
+	return nil
+}
+
+func (p switchStatusPane) view(m *tuiModel, w, h int) string {
+	rows := p.lines(m, w)
+	if len(rows) > h {
+		rows = rows[:h]
+	}
+	return lipgloss.NewStyle().Width(w).MaxWidth(w).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
+}
+
+func (switchStatusPane) key(*tuiModel, tea.KeyPressMsg) bool { return false }
+func (switchStatusPane) hint(*tuiModel) string               { return "" }
+
+// switchListPane is the pager showing the list; its keys are the list's
+// (switchlist.go) and the pager's.
+type switchListPane struct{}
+
+func (switchListPane) view(m *tuiModel, w, h int) string { return m.pg.view(w, h) }
+
+func (switchListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
+	if v := m.switchesPaging(); v != nil && m.switchKey(v, msg.String(), msg.Text) {
+		return true
+	}
+	return m.pg.key(msg.String())
+}
+
+func (switchListPane) hint(m *tuiModel) string {
+	if v := m.switchesPaging(); v != nil {
+		return stDim.Render(v.hint())
+	}
+	return ""
 }

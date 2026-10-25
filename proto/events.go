@@ -753,6 +753,8 @@ type Switches struct {
 	Order    []string          `json:"order,omitempty"` // the modes, the default first
 	Note     string            `json:"note,omitempty"`
 	Message  string            `json:"message,omitempty"`
+	Slash    string            `json:"slash,omitempty"`  // the command: "skill", "rules"
+	Status   []string          `json:"status,omitempty"` // facts for the status pane
 }
 
 // SwitchItem is one item of a Switches event.

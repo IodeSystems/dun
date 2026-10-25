@@ -19,7 +19,7 @@ order of the if-chain in `update`:
 | flag | replaces |
 |---|---|
 | `inspecting` | the whole screen |
-| `paging` (`/mcp`, `/mcp tools`, `/skill`, `/context-file`, `pg.id` holds the view) | the conversation |
+| `paging` (`/mcp`, `/mcp tools`, `/skill`, `/rules`, `pg.id` holds the view) | the conversation |
 | `jobViewing` | the conversation |
 | `asking`, `picking`, `modelPicking`, `mcpForm`, `rag`, the palette | the lower area |
 | `searching`, `confirm`, flash | the status row |
@@ -70,7 +70,7 @@ conversation). Tests: `bounce_test.go`, `noshrink_test.go`, `pane_test.go`,
    `/mcp` the first: the table pane (the pager with its table) over the
    selected server's log pane. The base screen is not on panes yet: it holds
    the owner rules above, so it moves last.
-2. The other pager views (`/mcp tools`, `/skill`, `/context-file`, a
+2. The other pager views (`/mcp tools`, a
    block) become screens where a second pane earns its place.
 3. The job view and the inspector move onto screens.
 4. The base screen's regions become panes, with no change in behaviour and

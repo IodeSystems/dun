@@ -727,6 +727,12 @@ func (h *Harness) skillKind() switchKind {
 			}
 			return ""
 		},
+		status: func(string) []string {
+			if h.skillsSearchable() {
+				return []string{"skills index (raglit): on · in mode surfaced a skill is hinted when a turn fits"}
+			}
+			return []string{"skills index (raglit): off · mode surfaced needs it (/raglit on)"}
+		},
 	}
 }
 

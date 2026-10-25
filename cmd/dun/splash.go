@@ -54,12 +54,12 @@ const contextHeavy = 0.60
 
 // splashSections are the splash's rows, in order: always the same ones.
 // w is the row width; each value is fitted to what is left of it. short is
-// the phone beside the foreman: "files" for "context files", three columns
-// more for every value.
+// the phone beside the foreman: a narrower label column, more for every
+// value.
 func (m tuiModel) splashSections(w int, short bool) []statusSection {
-	vw, files := w-splashValueCol, "context files"
+	vw, files := w-splashValueCol, "rules"
 	if short {
-		vw, files = w-(2+len("extensions")+2), "files"
+		vw = w - (2 + len("extensions") + 2)
 	}
 	ctx, parts := m.contextValue(vw)
 	return []statusSection{
@@ -74,10 +74,11 @@ func (m tuiModel) splashSections(w int, short bool) []statusSection {
 	}
 }
 
-// splashLabelW is the label column's width ("context files"), and
-// splashValueCol where the values start: two spaces, the label, two spaces.
+// splashLabelW is the label column's width ("extensions", the longest
+// label; sectionsView measures it the same way), and splashValueCol where
+// the values start: two spaces, the label, two spaces.
 const (
-	splashLabelW   = len("context files")
+	splashLabelW   = len("extensions")
 	splashValueCol = 2 + splashLabelW + 2
 )
 
@@ -298,7 +299,7 @@ func (m tuiModel) filesValue() string {
 // in tokens (tokN), so one row reads in one precision.
 //
 //	~18.4k tokens before you type (of 32k, 57%)
-//	system 2.1k · tools 16 (4.8k) · mcp 1 server (344) · skills 14 (2.1k) · context files 0 (0)
+//	system 2.1k · tools 16 (4.8k) · mcp 1 server (344) · skills 14 (2.1k) · rules 0 (0)
 func (m tuiModel) contextValue(w int) (string, []string) {
 	s := m.ctxStats
 	rows := partsRows(w)
@@ -333,7 +334,7 @@ func (m tuiModel) contextValue(w int) (string, []string) {
 // partsTemplate is the context's parts at their widest likely numbers: a
 // width that fits it fits the parts on one row whatever they say, so the
 // row count is the width's alone and a count changing never adds a row.
-const partsTemplate = "system 99.9k · tools 99 (99.9k) · mcp 9 servers (99.9k) · skills 99 (99.9k) · context files 99 (99.9k)"
+const partsTemplate = "system 99.9k · tools 99 (99.9k) · mcp 9 servers (99.9k) · skills 99 (99.9k) · rules 99 (99.9k)"
 
 // partsRows is how many rows the context's parts take in a value column w
 // cells wide: one when the template fits, else two.
@@ -371,7 +372,7 @@ func (m tuiModel) contextParts(w, rows int) []string {
 		part("tools", m.builtinToolCount(), builtin+s.systemShared),
 		fmt.Sprintf("mcp %s (%s)", plural(servers, "server"), tokN(mcp)),
 		part("skills", len(m.skills), skills),
-		part("context files", len(s.systemFiles), s.systemRules),
+		part("rules", len(s.systemFiles), s.systemRules),
 	}
 	short := slices.Clone(items)
 	short[4] = part("files", len(s.systemFiles), s.systemRules)
@@ -745,7 +746,7 @@ func (m tuiModel) statusDetail(w int) string {
 	for _, f := range s.systemFiles {
 		fl = append(fl, [2]string{f.Name, "~" + tokN(f.Tokens)})
 	}
-	block("context files", fl)
+	block("rules", fl)
 	block("spend", m.spendRows())
 	return b.String()
 }

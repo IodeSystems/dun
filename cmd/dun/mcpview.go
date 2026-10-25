@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -44,6 +45,44 @@ type mcpServersView struct {
 	viaScope string // the scope m writes
 	pickVia  bool   // M was pressed: the next g/p/s picks viaScope
 	spin     string // the spinner's frame, for a row still starting
+	width    int    // the pane's; under narrowW a row is two lines
+}
+
+func (v *mcpServersView) setWidth(w int) { v.width = w }
+
+// lines is /mcp's status pane: how many servers, how many are up, what
+// their schemas cost in every request, and how to read the marks.
+func (v *mcpServersView) lines(_ *tuiModel, w int) []string {
+	up, starting, failed, cost, scripted := 0, 0, 0, 0, 0
+	for _, st := range v.rows {
+		switch {
+		case st.Starting:
+			starting++
+		case st.Running || st.Hosted:
+			up++
+		case st.Auto && st.Err != "":
+			failed++
+		}
+		cost += st.Cost
+		if st.Via == dun.ViaShell && st.Hosted {
+			scripted++
+		}
+	}
+	head := fmt.Sprintf("%s · %d connected", plural(len(v.rows), "server"), up)
+	if starting > 0 {
+		head += fmt.Sprintf(" · %d starting", starting)
+	}
+	costLine := fmt.Sprintf("tool schemas: ~%s tokens in every request", tokN(cost))
+	if scripted > 0 {
+		costLine += fmt.Sprintf(" · %d scripted, 0 in every request", scripted)
+	}
+	out := wrapToRows(stHeader.Render("/mcp")+stDim.Render(" · ")+head, w)
+	out = append(out, wrapToRows(costLine, w)...)
+	out = append(out, wrapToRows(stDim.Render(switchLegend), w)...)
+	if failed > 0 {
+		out = append(out, wrapToRows(stNote.Render(fmt.Sprintf("⚠ %d on but not running: its row's log says why", failed)), w)...)
+	}
+	return out
 }
 
 // stDisconnected is a server that is not connected: yellow, not the
@@ -74,12 +113,22 @@ func (v *mcpServersView) starting() bool {
 
 func (v *mcpServersView) page() pageDoc {
 	idW, viaW := tableWidths(v.rows)
+	if v.width > 0 && v.width < narrowW { // the id and its state above, the switches below
+		nodes := make([]pageNode, 0, len(v.rows))
+		for i, st := range v.rows {
+			sub := fmt.Sprintf("%s %s %s · %s · %s", hotKey("g", "g")+cellMark(st.Global), hotKey("p", "p")+cellMark(st.Project),
+				hotKey("s", "s")+cellMark(st.Session), viaCell(st), st.Proto)
+			nodes = append(nodes, pageNode{head: v.connMark(st) + " " + st.ID + " · " + v.details[i], sub: sub,
+				body: serverBody(st, v.details[i]), err: st.Err != "", pre: true})
+		}
+		return pageDoc{title: "servers", nodes: nodes}
+	}
 	nodes := make([]pageNode, 0, len(v.rows))
 	for i, st := range v.rows {
 		body := serverBody(st, v.details[i])
 		nodes = append(nodes, pageNode{head: v.connMark(st) + " " + serverRow(st, idW, viaW, v.details[i]), body: body, err: st.Err != "", pre: true})
 	}
-	return pageDoc{title: "mcp servers · " + switchLegend, header: "  " + serverHeader(idW, viaW, hotKey), nodes: nodes}
+	return pageDoc{title: "servers", header: "  " + serverHeader(idW, viaW, hotKey), nodes: nodes}
 }
 
 // hint is the status line: the keys, with the scope m writes to.

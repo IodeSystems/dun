@@ -5,25 +5,32 @@ import (
 	"fmt"
 )
 
-// Context files: the workspace's root AGENTS.md and CLAUDE.md and what they
-// import (rules.go), as a kind of scoped switches (switches.go) — USER
-// 2026-10-24: "/context-file should have the same beautiful behavior as /mcp
-// -- global, project, session, mode".
+// The rules files: the workspace's root AGENTS.md and CLAUDE.md and what
+// they import (rules.go), as a kind of scoped switches (switches.go) — USER
+// 2026-10-24: "the same beautiful behavior as /mcp -- global, project,
+// session, mode"; 2026-10-25: one command, /rules (it was /context-file
+// beside it).
 //
 // A file that is on is in the system prompt, as the mode says: full (copied),
 // summary (the imports condensed once by the model) or index (the imports in
 // the docs index, surfaced by relevance). A file that is off is out of every
 // request: the block names it, and it is in the rules index whenever the docs
 // server runs, so it is still found. The mode resolves session, project,
-// global like any kind; with none of them set, /rules' saved mode (the
-// project's rules.json) is used, so nothing set before is lost.
+// global like any kind; with none of them set, the mode /rules saved in the
+// project's rules.json before is used, so nothing set before is lost.
 
-// contextFilesKind is the kind's name, and its files' name.
-const contextFilesKind = "context-files"
+// rulesKind is the kind's name; its files keep the name they had as
+// /context-file's (rules.json is the project's summary and old mode).
+const (
+	rulesKind      = "rules"
+	rulesKindFiles = "context-files"
+)
 
-func (h *Harness) contextFileKind() switchKind {
+func (h *Harness) rulesSwitchKind() switchKind {
 	return switchKind{
-		name:  contextFilesKind,
+		name:  rulesKind,
+		file:  rulesKindFiles,
+		slash: "rules",
 		modes: []string{RulesFull, RulesSummary, RulesIndex},
 		items: func() []SwitchItem {
 			set := loadRules(h.cfg.Workspace)
@@ -61,11 +68,14 @@ func (h *Harness) contextFileKind() switchKind {
 			}
 			return nil
 		},
-		note: func(mode string) string {
-			if !h.hookStarted(HookRulesChanged) {
-				return "the docs index is off (/raglit on): a file switched off is then not searchable, only named"
+		// No note: the status line says whether the docs index is on, and
+		// what that changes; the same thing twice was the warning (USER
+		// 2026-10-25).
+		status: func(string) []string {
+			if h.hookStarted(HookRulesChanged) {
+				return []string{"docs index (raglit): on · files switched off are still found by relevance"}
 			}
-			return ""
+			return []string{"docs index (raglit): off · /raglit on to search files switched off, and for mode index"}
 		},
 	}
 }
@@ -73,7 +83,7 @@ func (h *Harness) contextFileKind() switchKind {
 // switchRules moves the files switched off from set's roots and imports to
 // set.Off.
 func (h *Harness) switchRules(set rulesSet) rulesSet {
-	sw := h.switchSet(contextFilesKind)
+	sw := h.switchSet(rulesKind)
 	keep := func(ds []rulesDoc) []rulesDoc {
 		var out []rulesDoc
 		for _, d := range ds {
@@ -92,7 +102,7 @@ func (h *Harness) switchRules(set rulesSet) rulesSet {
 // contextFileMode is the rules mode in force: the kind's, when a scope sets
 // one, else saved (what /rules last set for the project).
 func (h *Harness) contextFileMode(saved string) string {
-	if m, from := h.switchSet(contextFilesKind).mode(RulesFull); from != "" {
+	if m, from := h.switchSet(rulesKind).mode(RulesFull); from != "" {
 		if m == RulesFull {
 			return ""
 		}

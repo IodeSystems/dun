@@ -1200,19 +1200,18 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go func() { em.emit(switchesEvent(h, action)) }()
 			return
 		}
-		// /rules: bare reports; a mode is saved and the system rebuilt.
-		// Detached: summary is a model round trip, and every mode rebuilds
+		// /rules: bare reports; "full|summary|index" saves the project's
+		// mode (with a scope, that scope's); on|off|unset <file> and mode
+		// <mode> [--scope] are the rules switches' (switchesengine.go).
+		// Detached: summary is a model round trip, and every change rebuilds
 		// the tool set, which waits for a running turn.
 		if id == "rules" {
 			go func() {
-				msg := h.RulesStatus()
-				if action != "" {
-					var err error
-					if msg, err = h.SetRulesMode(ctx, action); err != nil {
-						msg = "rules: " + err.Error()
-					} else {
-						h.Aside("[control/rules] " + msg)
-					}
+				msg, err := rulesCmd(ctx, h, action)
+				if err != nil {
+					msg = "rules: " + err.Error()
+				} else if action != "" {
+					h.Aside("[control/rules] " + msg)
 				}
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			}()

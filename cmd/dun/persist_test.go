@@ -76,7 +76,7 @@ func TestReadyNamesNoTools(t *testing.T) {
 		t.Errorf("header %q", h)
 	}
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	if s := stripANSI(sectionsView(m.statusSections(100), 100)); !strings.Contains(s, "tools          1 · /mcp info\n") {
+	if s := stripANSI(sectionsView(m.statusSections(100), 100)); !strings.Contains(s, "tools       1 · /mcp info\n") {
 		t.Errorf("/status:\n%s", s)
 	}
 }

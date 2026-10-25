@@ -80,7 +80,7 @@ type rulesDoc struct {
 }
 
 // rulesSet is the root files and, in reading order, what they import. Off
-// is the files /context-file switched off (contextfiles.go): out of every
+// is the files /rules switched off (contextfiles.go): out of every
 // request, named in the block, and in the rules index when there is one.
 type rulesSet struct {
 	Roots   []rulesDoc
@@ -449,7 +449,7 @@ func (s rulesSet) offSection() string {
 	}
 	var b strings.Builder
 	b.WriteString("\n\n### Rule files kept out of these instructions\n\nThe user switched these files off " +
-		"(/context-file): they are not copied here. They are in the docs index when it runs, so a part that " +
+		"(/rules): they are not copied here. They are in the docs index when it runs, so a part that " +
 		"matches what you are doing is surfaced to you; read one when you need it.")
 	for _, d := range s.Off {
 		b.WriteString("\n- " + d.Name)
@@ -560,7 +560,7 @@ func (h *Harness) rulesBlock(docsOn bool) (string, string, rulesSet) {
 			if st.Offered != hash {
 				_ = h.updateRulesState(func(s *rulesState) { s.Offered = hash })
 				h.cfg.OnRules(fmt.Sprintf("project rules: %s with %d imported file(s) cost ~%s tokens on every request. "+
-					"/rules summary condenses the imports, /rules index makes them searchable instead; /context-file switches one file out of every request and shows what each costs.",
+					"/rules summary condenses the imports, /rules index makes them searchable instead; /rules alone shows what each file costs and switches one out of every request.",
 					set.rootNames(), len(set.Imports), Grouped(n)))
 			}
 		}
@@ -685,6 +685,7 @@ func (h *Harness) RulesStatus() string {
 	st := h.readRulesState()
 	h.rulesMu.Unlock()
 	docsOn := h.hookStarted(HookRulesChanged)
+	st.Mode = h.contextFileMode(st.Mode)
 	mode := effectiveMode(st, set, docsOn)
 	saved := firstNonEmptyStr(st.Mode, RulesFull)
 	var b strings.Builder
@@ -761,15 +762,15 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 	default:
 		return "", fmt.Errorf("usage: /rules [full|summary|index]")
 	}
-	if err := h.updateRulesState(func(s *rulesState) {
-		s.Mode = mode
-		if mode == RulesFull {
-			s.Mode = ""
-		}
-	}); err != nil {
+	// The project's mode is the rules switches' (contextfiles.go): saved at
+	// project scope, and the mode rules.json held before is cleared, so a
+	// mode has one home per scope.
+	if _, err := h.setSwitchMode(h.rulesSwitchKind(), mode, ScopeProject); err != nil {
 		return "", err
 	}
-	h.applyTools()
+	if err := h.updateRulesState(func(s *rulesState) { s.Mode = "" }); err != nil {
+		return "", err
+	}
 	st := h.readRulesState()
 	sum := ""
 	if st.Summary != nil {

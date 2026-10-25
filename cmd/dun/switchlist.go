@@ -10,7 +10,7 @@ import (
 )
 
 // A kind of scoped switches in the pager (dun/switches.go: skills now,
-// context files next): a row per item with its cost and its switch at each
+// the rules files): a row per item with its cost and its switch at each
 // scope, the kind's mode in the title. It is the /mcp tools view
 // (mcptools.go) for any kind:
 //
@@ -37,18 +37,25 @@ type switchRow struct {
 
 type switchListView struct {
 	kind     string // "skills"
+	slash    string // its command: "skill", "rules"
 	rows     []switchRow
 	mode     string
 	modeFrom string
 	modes    map[string]string // scope → its mode
 	about    map[string]string // mode → what it means
 	order    []string          // the modes, the default first
-	note     string
+	note     string            // a warning, in the status pane
+	status   []string          // the kind's facts (raglit on or off), in the status pane
 	query    string
+	width    int // the pane's; under narrowW a row is two lines
 }
 
-// slash is the command a person types for the kind: "skill".
-func (v *switchListView) slash() string { return strings.TrimSuffix(v.kind, "s") }
+// narrowW is the width under which a list's rows take two lines: the name
+// (and its mark) above, its switches and cost below (USER 2026-10-25: a
+// phone's terminal).
+const narrowW = 80
+
+func (v *switchListView) setWidth(w int) { v.width = w }
 
 // shown is the rows the filter keeps, as indexes into rows.
 func (v *switchListView) shown() []int {
@@ -80,7 +87,10 @@ func (v *switchListView) row(cur int) *switchRow {
 	return &v.rows[s[cur]]
 }
 
-func (v *switchListView) page() pageDoc {
+// lines is the status pane above the list: what it is, the mode, what the
+// items that are on cost, the kind's facts, and a warning when there is one
+// (USER 2026-10-25: a warning is not an item).
+func (v *switchListView) lines(_ *tuiModel, w int) []string {
 	on, cost := 0, 0
 	for _, r := range v.rows {
 		if r.on {
@@ -93,20 +103,34 @@ func (v *switchListView) page() pageDoc {
 		mode += " (" + v.modeFrom + ")"
 	}
 	// What the items that are on cost, in the kind's default mode (the
-	// first): another mode sends less, and the row says so.
+	// first): another mode sends less.
 	cost0 := fmt.Sprintf("~%s tokens in every request", kTokens(cost))
 	if len(v.order) > 0 && v.mode != v.order[0] {
 		cost0 = fmt.Sprintf("~%s tokens in mode %s", kTokens(cost), v.order[0])
 	}
-	title := fmt.Sprintf("%s · %d of %d on · %s · %s", v.kind, on, len(v.rows), mode, cost0)
-	shown := v.shown()
-	if v.query != "" {
-		title = fmt.Sprintf("%s · filter %q: %d shown · %d of %d on · %s · %s", v.kind, v.query, len(shown), on, len(v.rows), mode, cost0)
+	var out []string
+	out = append(out, wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+fmt.Sprintf("%d of %d on · mode %s", on, len(v.rows), mode), w)...)
+	out = append(out, wrapToRows(cost0, w)...)
+	if about := v.about[v.mode]; about != "" {
+		out = append(out, wrapToRows(stDim.Render(v.mode+": "+about), w)...)
 	}
-	nodes := make([]pageNode, 0, len(shown)+1)
+	for _, s := range v.status {
+		out = append(out, wrapToRows(stDim.Render(s), w)...)
+	}
 	if v.note != "" {
-		nodes = append(nodes, pageNode{head: "⚠ " + v.note, err: true})
+		out = append(out, wrapToRows(stNote.Render("⚠ "+v.note), w)...)
 	}
+	return out
+}
+
+func (v *switchListView) page() pageDoc {
+	shown := v.shown()
+	title := fmt.Sprintf("%d %s", len(v.rows), map[bool]string{true: "file", false: strings.TrimSuffix(v.kind, "s")}[v.kind == "rules"]+"s")
+	if v.query != "" {
+		title = fmt.Sprintf("filter %q: %d of %d shown", v.query, len(shown), len(v.rows))
+	}
+	narrow := v.width > 0 && v.width < narrowW
+	nodes := make([]pageNode, 0, len(shown)+1)
 	for _, i := range shown {
 		r := v.rows[i]
 		mark := "○"
@@ -114,8 +138,13 @@ func (v *switchListView) page() pageDoc {
 			mark = "●"
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
-		head := fmt.Sprintf("%s %s  ~%s tok  g%s p%s s%s  %s  %s", mark, r.name, kTokens(r.tokens),
-			cellMark(r.global), cellMark(r.project), cellMark(r.session), r.source, first)
+		cells := fmt.Sprintf("g%s p%s s%s", cellMark(r.global), cellMark(r.project), cellMark(r.session))
+		head := fmt.Sprintf("%s %s  ~%s tok  %s  %s  %s", mark, r.name, kTokens(r.tokens), cells, r.source, first)
+		sub := ""
+		if narrow { // the name alone above; switches, cost and where it is from below
+			head = mark + " " + r.name
+			sub = fmt.Sprintf("%s · ~%s tok · %s", cells, kTokens(r.tokens), r.source)
+		}
 		body := onOff(r.on)
 		if r.from != "" {
 			body += " (switched " + scopeIn(r.from) + ")"
@@ -124,7 +153,7 @@ func (v *switchListView) page() pageDoc {
 			body += "\n" + r.detail
 		}
 		body += "\n\n" + strings.TrimSpace(r.desc)
-		nodes = append(nodes, pageNode{head: head, body: body})
+		nodes = append(nodes, pageNode{head: head, sub: sub, body: body})
 	}
 	if v.query != "" && len(shown) == 0 {
 		nodes = append(nodes, pageNode{head: fmt.Sprintf("nothing matches %q — backspace or esc", v.query)})
@@ -176,8 +205,16 @@ func (m *tuiModel) switchesPaging() *switchListView {
 // list this TUI asked for, or (nothing open) the answer as a line.
 func (m tuiModel) noteSwitches(ev evMsg) tuiModel {
 	kind, msg := str(ev["kind"]), strings.TrimSpace(str(ev["message"]))
-	fresh := &switchListView{kind: kind, mode: str(ev["mode"]), modeFrom: str(ev["modeFrom"]), note: str(ev["note"]),
+	fresh := &switchListView{kind: kind, slash: str(ev["slash"]), mode: str(ev["mode"]), modeFrom: str(ev["modeFrom"]), note: str(ev["note"]),
 		modes: strMap(ev["modes"]), about: strMap(ev["about"])}
+	if fresh.slash == "" {
+		fresh.slash = strings.TrimSuffix(kind, "s")
+	}
+	if st, ok := ev["status"].([]any); ok {
+		for _, x := range st {
+			fresh.status = append(fresh.status, str(x))
+		}
+	}
 	if o, ok := ev["order"].([]any); ok {
 		for _, x := range o {
 			fresh.order = append(fresh.order, str(x))
@@ -195,9 +232,9 @@ func (m tuiModel) noteSwitches(ev evMsg) tuiModel {
 	v := m.switchesPaging()
 	switch {
 	case v != nil && v.kind == kind:
-		q := v.query
+		q, w := v.query, v.width
 		*v = *fresh
-		v.query = q
+		v.query, v.width = q, w
 		if msg != "" {
 			m.flashText, m.flashUntil = msg, time.Now().Add(flashFor)
 		}
@@ -209,6 +246,7 @@ func (m tuiModel) noteSwitches(ev evMsg) tuiModel {
 		}
 		m.pg = newPager(-1, fresh)
 		m.paging = true
+		m.scr = switchScreen() // the status pane over the list (panes.go)
 		m.syncPager()
 	case msg != "":
 		m.append(replyLine(msg))
