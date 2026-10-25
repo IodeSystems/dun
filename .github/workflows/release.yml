@@ -8,7 +8,6 @@
 #     contents). IT DOES NOT EXIST YET: without it the job stops before
 #     building;
 #   - (release/deps.json is filled: all three tools have release tarballs);
-#   - pin the actions below to commit SHAs;
 #   - tag the commit (vX.Y.Z) and start this workflow with that tag.
 name: release (draft)
 
@@ -31,18 +30,18 @@ jobs:
       - name: the version
         run: |
           echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not vX.Y.Z: $VERSION"; exit 1; }
-      - uses: actions/checkout@v4 # pin to a SHA before enabling
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.version }}
-      - uses: actions/setup-go@v5 # pin to a SHA before enabling
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: the signing key
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
         run: |
-          if [ -z "$MINISIGN_SECRET_KEY" ]; then echo "no MINISIGN_SECRET_KEY secret: see plan item 47"; exit 1; fi
-          if grep -q PLACEHOLDER release/minisign.pub; then echo "release/minisign.pub is the placeholder: see plan item 47"; exit 1; fi
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then echo "no MINISIGN_SECRET_KEY secret: see aw4 issue i_1m5r9bx5a53x000taq6xar"; exit 1; fi
+          if grep -q PLACEHOLDER release/minisign.pub; then echo "release/minisign.pub is the placeholder: see aw4 issue i_1m5r9bx5a53x000taq6xar"; exit 1; fi
           sudo apt-get update && sudo apt-get install -y minisign
           umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/minisign.key"
       - name: test

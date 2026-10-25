@@ -97,7 +97,7 @@ MINISIGN_KEY    ?=
 
 release: ## release builds + signed dun-manifest.json → dist/<version>/ (RELEASE_VERSION=vX.Y.Z, MINISIGN_KEY=…)
 	@case "$(RELEASE_VERSION)" in v[0-9]*.[0-9]*.[0-9]*-*|*-dirty|*-g*) echo "make release: $(RELEASE_VERSION) is not vX.Y.Z (tag a clean commit, or RELEASE_VERSION=vX.Y.Z)"; exit 1;; v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "make release: $(RELEASE_VERSION) is not vX.Y.Z (tag a clean commit, or RELEASE_VERSION=vX.Y.Z)"; exit 1;; esac
-	@if grep -q PLACEHOLDER release/minisign.pub; then echo; echo "WARNING: release/minisign.pub is the PLACEHOLDER: these builds can never update (plan item 47)"; echo; fi
+	@if grep -q PLACEHOLDER release/minisign.pub; then echo; echo "WARNING: release/minisign.pub is the PLACEHOLDER: these builds can never update (aw4 issue i_1m5r9bx5a53x000taq6xar)"; echo; fi
 	rm -rf $(RELEASE_DIR) && mkdir -p $(RELEASE_DIR)
 	@for t in $(RELEASE_TARGETS); do \
 		os=$${t%/*}; arch=$${t#*/}; d=$(RELEASE_DIR)/dun_$${os}_$${arch}; \
