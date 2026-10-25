@@ -139,19 +139,20 @@ func TestHeader_FolderAndModelOnly(t *testing.T) {
 // half too.
 func TestDivider_LeansTowardTheFocusedSide(t *testing.T) {
 	up := divider(10, true)
-	if want := stEdge.Render("▁▁▁▁▁") + stDim.Render("▁▁▁▁▁"); up != want {
+	if want := stEdge.Render("▁▁▁▄▄") + stDim.Render("▁▁▁▁▁"); up != want {
 		t.Errorf("up: %q, want %q", up, want)
 	}
-	// Down is up's mirror: the top edge, the lit half the other one.
+	// Down is up's mirror: the top edge, the lit half and the bump past the
+	// center.
 	down := divider(10, false)
-	if want := stDim.Render("▔▔▔▔▔") + stEdge.Render("▔▔▔▔▔"); down != want {
+	if want := stDim.Render("▔▔▔▔▔") + stEdge.Render("▀▀▔▔▔"); down != want {
 		t.Errorf("down: %q, want %q", down, want)
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 20, Height: 10})
 	m = nm.(tuiModel)
 	m.focus = focusActivity
-	if !strings.Contains(ansi.Strip(m.drawView()), "▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁") {
+	if !strings.Contains(ansi.Strip(m.drawView()), "▁▁▁▁▁▁▁▄▄▄▁▁▁▁▁▁▁▁▁▁") {
 		t.Errorf("activity focus does not light the upper half:\n%s", ansi.Strip(m.drawView()))
 	}
 }

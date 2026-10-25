@@ -194,13 +194,14 @@ var (
 //   - side: a thin line on the cell's edge toward the focused pane, the
 //     bottom edge (▁) for the upper side, the top edge (▔) for the input.
 //
-// The two are mirror images, 1/8 of a row each (owner, 2026-10-25: the
-// ends used to thicken to 3/8, and the downward ramp, lower blocks in
-// reverse video, drew much taller than the upward one; fonts have no upper
-// 2/8 or 3/8 block to mirror it with). Moving focus moves the line from one
-// edge of its row to the other; nothing else. Neither pane's CONTENT changes
-// with focus: the person reads one pane while typing in the other (owner,
-// 2026-10-23).
+// The two are mirror images (owner, 2026-10-25): a line 1/8 of a row, and
+// beside the center, on the lit side, a short bump of half a row (▄ left of
+// center for the upper side, ▀ right of it for the input). The ends used to
+// thicken to 3/8, and downward that was lower blocks in reverse video, which
+// drew much taller than the upward ramp; ▁/▔ and ▄/▀ are the mirror pairs
+// fonts have. Moving focus moves the line from one edge of its row to the
+// other; nothing else. Neither pane's CONTENT changes with focus: the person
+// reads one pane while typing in the other (owner, 2026-10-23).
 func divider(w int, focusUp bool) string {
 	if w < 2 {
 		w = 2
@@ -209,15 +210,14 @@ func divider(w int, focusUp bool) string {
 	// wide screen the text stops at bandCap, and a split at the terminal's
 	// middle sat inside the text's column, under nothing on one side.
 	half := min(w, bandCap) / 2
-	g := "▁"
-	if !focusUp {
-		g = "▔"
-	}
-	first, rest := stDim, stEdge
+	bump := min(max(half/3, 2), 8)
 	if focusUp {
-		first, rest = stEdge, stDim
+		return stEdge.Render(strings.Repeat("▁", half-bump)+strings.Repeat("▄", bump)) +
+			stDim.Render(strings.Repeat("▁", w-half))
 	}
-	return first.Render(strings.Repeat(g, half)) + rest.Render(strings.Repeat(g, w-half))
+	bump = min(bump, w-half)
+	return stDim.Render(strings.Repeat("▔", half)) +
+		stEdge.Render(strings.Repeat("▀", bump)+strings.Repeat("▔", w-half-bump))
 }
 
 func addGutter(block, marker string, style lipgloss.Style) string {
