@@ -511,7 +511,7 @@ type Harness struct {
 	startStop map[string]context.CancelCauseFunc
 	// reloads counts reloadServers calls in flight, starts included: what
 	// follows a reload (indexstate.go's retry) waits for none to be.
-	reloads atomic.Int32
+	reloads   atomic.Int32
 	closed    chan struct{}
 	closeOnce sync.Once
 	// ingestNote is the last workspace ingest's summary, for /raglit and the
