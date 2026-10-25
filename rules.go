@@ -560,7 +560,7 @@ func (h *Harness) rulesBlock(docsOn bool) (string, string, rulesSet) {
 			if st.Offered != hash {
 				_ = h.updateRulesState(func(s *rulesState) { s.Offered = hash })
 				h.cfg.OnRules(fmt.Sprintf("project rules: %s with %d imported file(s) cost ~%s tokens on every request. "+
-					"/rules summary condenses the imports, /rules index makes them searchable instead; /rules shows the files.",
+					"/rules summary condenses the imports, /rules index makes them searchable instead; /context-file switches one file out of every request and shows what each costs.",
 					set.rootNames(), len(set.Imports), Grouped(n)))
 			}
 		}
