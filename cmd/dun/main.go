@@ -1037,6 +1037,10 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// extension's slash command, a tool call — detached, as any server
 		// round trip is. "watch|attach|detach <id> <args>" are the index
 		// commands (extIndexCmd).
+		if id == "ext" && action == "view" { // the /ext list (extview.go)
+			go func() { em.emit(extensionsEvent(h)) }()
+			return
+		}
 		if id == "ext" {
 			go func() {
 				msg := extListing(h)

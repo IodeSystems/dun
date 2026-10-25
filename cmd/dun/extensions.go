@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/proto"
 )
 
 // Extensions as the engine's commands see them (dun/extension.go): each
@@ -103,6 +106,39 @@ func extListing(h *dun.Harness) string {
 	}
 	fmt.Fprintf(&b, "\nadd one: %s/<id>/%s, or .dun/extensions/<id>/ in a project (examples/extensions in dun's repo)", dun.UserExtensionsDir(), dun.ExtensionFile)
 	return b.String()
+}
+
+// extensionsEvent is every extension for a UI's /ext list.
+func extensionsEvent(h *dun.Harness) *proto.Extensions {
+	exts, refused := engineExtensions(h.Extensions())
+	ev := &proto.Extensions{Items: []proto.ExtItem{}, Errors: refused,
+		AddPath: dun.UserExtensionsDir() + "/<id>/" + dun.ExtensionFile}
+	for _, e := range h.ExtensionErrors() {
+		ev.Errors = append(ev.Errors, e.Error())
+	}
+	for _, e := range exts {
+		it := proto.ExtItem{ID: e.ID, Source: e.Source, Path: e.Path, Description: e.Description, Slash: e.SlashName(), Hooks: e.Hooks}
+		if e.Slash != nil {
+			for _, n := range slices.Sorted(maps.Keys(e.Slash.Commands)) {
+				it.Commands = append(it.Commands, proto.ExtVerb{Name: n, Help: e.Slash.Commands[n].Help})
+			}
+		}
+		if r := e.Roles.Search; r != nil {
+			it.Roles = append(it.Roles, "search:"+r.Tool)
+		}
+		if r := e.Roles.Index; r != nil {
+			idx := "index"
+			if r.Tool != "" {
+				idx += ":" + r.Tool + "/" + r.Forget
+			}
+			it.Roles = append(it.Roles, idx)
+		}
+		for _, k := range slices.Sorted(maps.Keys(e.HostHooks)) {
+			it.HostHooks = append(it.HostHooks, k+"="+e.HostHooks[k])
+		}
+		ev.Items = append(ev.Items, it)
+	}
+	return ev
 }
 
 // extIndexVerb reports whether /<slash> <verb> is one of the index commands

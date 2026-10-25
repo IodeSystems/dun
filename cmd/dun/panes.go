@@ -223,34 +223,12 @@ func (m *tuiModel) popScreen() {
 // mcpScreen is the server table over the selected server's log.
 func mcpScreen() *paneScreen {
 	return &paneScreen{
-		panes: []screenPane{{body: mcpStatusPane{}, fixed: true}, {body: tablePane{}, weight: 3, min: 4},
+		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: tablePane{}, weight: 3, min: 4},
 			{body: &serverLogPane{follow: true}, weight: 2, min: 3}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.serversPaging() != nil },
 	}
 }
-
-// mcpStatusPane is /mcp's status: the servers, how many are up, what they
-// cost.
-type mcpStatusPane struct{}
-
-func (mcpStatusPane) lines(m *tuiModel, w int) []string {
-	if v := m.serversPaging(); v != nil {
-		return v.lines(m, w)
-	}
-	return nil
-}
-
-func (p mcpStatusPane) view(m *tuiModel, w, h int) string {
-	rows := p.lines(m, w)
-	if len(rows) > h {
-		rows = rows[:h]
-	}
-	return lipgloss.NewStyle().Width(w).MaxWidth(w).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
-}
-
-func (mcpStatusPane) key(*tuiModel, tea.KeyPressMsg) bool { return false }
-func (mcpStatusPane) hint(*tuiModel) string               { return "" }
 
 // tablePane is the pager showing /mcp's table; its keys are the pager's
 // and the table's (mcpview.go).
@@ -282,13 +260,18 @@ type serverLogPane struct {
 	lastEnd int // the last view's end offset: scrolling to it follows again
 }
 
-// selected is the table's selected server.
+// serverPicker is a view whose rows are servers: the log pane shows the
+// selected one's.
+type serverPicker interface {
+	selectedServer(cur int) (dun.ServerState, bool)
+}
+
+// selected is the list's selected server.
 func (p *serverLogPane) selected(m *tuiModel) (dun.ServerState, bool) {
-	v := m.serversPaging()
-	if v == nil || m.pg.cur < 0 || m.pg.cur >= len(v.rows) {
-		return dun.ServerState{}, false
+	if v, ok := m.pg.id.(serverPicker); ok && m.paging {
+		return v.selectedServer(m.pg.cur)
 	}
-	return v.rows[m.pg.cur], true
+	return dun.ServerState{}, false
 }
 
 // lines is the selected server's log, wrapped to w.
@@ -373,24 +356,29 @@ func (p *serverLogPane) hint(*tuiModel) string {
 // switchScreen is a kind's status pane over its list.
 func switchScreen() *paneScreen {
 	return &paneScreen{
-		panes: []screenPane{{body: switchStatusPane{}, fixed: true}, {body: switchListPane{}, weight: 1, min: 3}},
+		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: switchListPane{}, weight: 1, min: 3}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.switchesPaging() != nil },
 	}
 }
 
-// switchStatusPane is the kind's status: what it is, its mode, the cost of
-// what is on, its facts and its warning.
-type switchStatusPane struct{}
+// viewStatusPane is a list's status pane: the lines its view (the pager's)
+// gives, the mode, the cost, the facts and a warning.
+type viewStatusPane struct{}
 
-func (switchStatusPane) lines(m *tuiModel, w int) []string {
-	if v := m.switchesPaging(); v != nil {
+// statusLiner is a view with a status pane.
+type statusLiner interface {
+	lines(m *tuiModel, w int) []string
+}
+
+func (viewStatusPane) lines(m *tuiModel, w int) []string {
+	if v, ok := m.pg.id.(statusLiner); ok && m.paging {
 		return v.lines(m, w)
 	}
 	return nil
 }
 
-func (p switchStatusPane) view(m *tuiModel, w, h int) string {
+func (p viewStatusPane) view(m *tuiModel, w, h int) string {
 	rows := p.lines(m, w)
 	if len(rows) > h {
 		rows = rows[:h]
@@ -398,8 +386,8 @@ func (p switchStatusPane) view(m *tuiModel, w, h int) string {
 	return lipgloss.NewStyle().Width(w).MaxWidth(w).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
 }
 
-func (switchStatusPane) key(*tuiModel, tea.KeyPressMsg) bool { return false }
-func (switchStatusPane) hint(*tuiModel) string               { return "" }
+func (viewStatusPane) key(*tuiModel, tea.KeyPressMsg) bool { return false }
+func (viewStatusPane) hint(*tuiModel) string             { return "" }
 
 // switchListPane is the pager showing the list; its keys are the list's
 // (switchlist.go) and the pager's.

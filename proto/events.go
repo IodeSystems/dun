@@ -51,6 +51,7 @@ func init() {
 	event[McpTools]("mcp_tools")
 	event[McpLogin]("mcp_login")
 	event[Switches]("switches")
+	event[Extensions]("extensions")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -769,4 +770,34 @@ type SwitchItem struct {
 	Global      string `json:"global,omitempty"`
 	Project     string `json:"project,omitempty"`
 	Session     string `json:"session,omitempty"`
+}
+
+// Extensions is every extension, for a UI's /ext list: the control command
+// "ext" with the action "view" asks for it. Each one's server state is in
+// the server events, by its id.
+type Extensions struct {
+	Items []ExtItem `json:"items"`
+	// Errors are the manifests that did not load, and the parts refused.
+	Errors []string `json:"errors,omitempty"`
+	// AddPath is where a user's own extension goes.
+	AddPath string `json:"addPath,omitempty"`
+}
+
+// ExtItem is one extension.
+type ExtItem struct {
+	ID          string    `json:"id"`
+	Source      string    `json:"source"` // bundled, user or project
+	Path        string    `json:"path,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Slash       string    `json:"slash,omitempty"` // its command, without the /
+	Commands    []ExtVerb `json:"commands,omitempty"`
+	Roles       []string  `json:"roles,omitempty"`     // "search:<tool>", "index:<tool>/<forget>"
+	Hooks       []string  `json:"hooks,omitempty"`     // the dun hooks it subscribes to
+	HostHooks   []string  `json:"hostHooks,omitempty"` // "<name>=<what>"
+}
+
+// ExtVerb is one of an extension's slash commands.
+type ExtVerb struct {
+	Name string `json:"name"`
+	Help string `json:"help,omitempty"`
 }

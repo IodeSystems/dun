@@ -677,6 +677,7 @@ type tuiModel struct {
 	bandAt       int            // the pane row they start at
 	pg           pager          // the pager (valid while paging)
 	scr          *paneScreen    // a pushed screen over the pager (panes.go), or nil
+	extWant      bool           // /ext asked for the list (extview.go)
 	jobViewing   bool           // a job's view has the convo pane (jobview.go; owns the keys)
 	jv           jobView        // the job view (valid while jobViewing)
 	jvGen        int            // which opening of the job view its read timer belongs to
@@ -1875,6 +1876,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.spin = m.spin.View()
 			m.syncPager()
 		}
+		if v := m.extPaging(); v != nil && v.starting() {
+			v.spin = m.spin.View()
+			m.syncPager()
+		}
 		// A server still starting: the live splash counts its seconds. The
 		// row changes in place; refresh only when its words did.
 		if len(m.srvSince)+len(m.idxSince) > 0 && len(m.convo) > 0 && m.convo[0].liveSplash &&
@@ -2412,6 +2417,7 @@ func (m *tuiModel) noteServers(ev evMsg) {
 		}
 	}
 	m.noteServerView(list)
+	m.noteExtServers()
 	if len(m.convo) > 0 && m.convo[0].liveSplash {
 		m.refresh() // the splash's servers and extras rows say it now
 	}
@@ -2492,6 +2498,8 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m = m.noteMCPTools(ev)
 	case "switches":
 		m = m.noteSwitches(ev)
+	case "extensions":
+		m = m.noteExtensions(ev)
 	case "mcp_login":
 		// Whole, not oneLine'd or clipped: the URL is to be copied.
 		m.append(stNote.Render("🔑 " + loginLine(str(ev["server"]), str(ev["url"]))))

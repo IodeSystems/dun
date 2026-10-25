@@ -50,6 +50,13 @@ type mcpServersView struct {
 
 func (v *mcpServersView) setWidth(w int) { v.width = w }
 
+func (v *mcpServersView) selectedServer(cur int) (dun.ServerState, bool) {
+	if cur < 0 || cur >= len(v.rows) {
+		return dun.ServerState{}, false
+	}
+	return v.rows[cur], true
+}
+
 // lines is /mcp's status pane: how many servers, how many are up, what
 // their schemas cost in every request, and how to read the marks.
 func (v *mcpServersView) lines(_ *tuiModel, w int) []string {
@@ -274,14 +281,8 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 	st := v.rows[m.pg.cur]
 	var line string
 	switch k {
-	case "g":
-		line = "mcp " + map[bool]string{true: "off", false: "on"}[st.Global == "on"] + " " + st.ID + " --global"
-	case "p", "s":
-		scope, cur := dun.ScopeProject, st.Project
-		if k == "s" {
-			scope, cur = dun.ScopeSession, st.Session
-		}
-		line = "mcp " + nextTri(cur) + " " + st.ID + " --" + scope
+	case "g", "p", "s":
+		line = switchLine(st, k)
 	case "m":
 		if st.Via == "" {
 			m.flashText, m.flashUntil = st.ID+" is built in: it is always standalone", time.Now().Add(flashFor)
@@ -303,6 +304,20 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 	}
 	m.flashText, m.flashUntil = "/"+line, time.Now().Add(flashFor)
 	return true
+}
+
+// switchLine is the command g, p or s sends for a server: g turns its
+// global switch on or off, p and s cycle the project's and the session's
+// unset → on → off.
+func switchLine(st dun.ServerState, k string) string {
+	if k == "g" {
+		return "mcp " + map[bool]string{true: "off", false: "on"}[st.Global == "on"] + " " + st.ID + " --global"
+	}
+	scope, cur := dun.ScopeProject, st.Project
+	if k == "s" {
+		scope, cur = dun.ScopeSession, st.Session
+	}
+	return "mcp " + nextTri(cur) + " " + st.ID + " --" + scope
 }
 
 // serverBody is a server's detail under its row, in words: what it is (dun's
