@@ -1,15 +1,11 @@
-# DRAFT — a release of dun (aw4 issue i_1m5r9bx5a53x000taq6xar). It runs only when started by
-# hand (workflow_dispatch), never on a push or a tag. Before the first run
-# the owner must:
-#   - generate the minisign key pair (minisign -G -W: no password, for CI),
-#     commit the PUBLIC key as release/minisign.pub (replacing the
-#     placeholder), and keep the secret key offline;
-#   - add the repository secret MINISIGN_SECRET_KEY (the secret key file's
-#     contents). IT DOES NOT EXIST YET: without it the job stops before
-#     building;
-#   - (release/deps.json is filled: all three tools have release tarballs);
-#   - tag the commit (vX.Y.Z) and start this workflow with that tag.
-name: release (draft)
+# A release of dun. It runs only when started by hand (workflow_dispatch),
+# never on a push or a tag: tag a commit vX.Y.Z, then
+#   gh workflow run release.yml -f version=vX.Y.Z
+# It signs with the repository secret MINISIGN_SECRET_KEY (key 2CC27A171DE03D42,
+# set 2026-10-25), whose public half is release/minisign.pub, and verifies the
+# manifest with the committed key before publishing. release/deps.json must
+# name the tools' Recommended versions (docs/dependencies.md).
+name: release
 
 on:
   workflow_dispatch:

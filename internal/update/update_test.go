@@ -50,15 +50,19 @@ func TestMinisign_RealVectors(t *testing.T) {
 	}
 }
 
-// The committed placeholder key is no key: a release build carrying it
-// cannot verify anything.
+// The placeholder that release/minisign.pub held before the owner's key is
+// no key: a release build carrying it cannot verify anything. The committed
+// file is now one real key.
 func TestParseKeys_Placeholder(t *testing.T) {
+	if _, err := ParseKeys("untrusted comment: PLACEHOLDER - not a key.\nPLACEHOLDER\n"); err == nil {
+		t.Fatal("the placeholder parsed as a key")
+	}
 	b, err := os.ReadFile("../../release/minisign.pub")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ParseKeys(string(b)); err == nil {
-		t.Fatal("the placeholder parsed as a key")
+	if keys, err := ParseKeys(string(b)); err != nil || len(keys) != 1 {
+		t.Fatalf("release/minisign.pub: %d keys, %v", len(keys), err)
 	}
 	k := newKey(t)
 	keys, err := ParseKeys("untrusted comment: minisign public key\n" + k.pub.Line() + "\n")
