@@ -43,11 +43,12 @@ type RoundStat struct {
 	Provider string    `json:"provider,omitempty"`
 	Model    string    `json:"model,omitempty"`
 
-	Prompt     int     `json:"prompt"`             // the provider's prompt tokens
-	Cached     int     `json:"cached,omitempty"`   // of them, reused from its cache
-	Completion int     `json:"completion"`         // generated, reasoning included
-	LatencyMS  int64   `json:"latency_ms"`         // the round's wall clock, client side
-	PromptN    int     `json:"prompt_n,omitempty"` // llama.cpp: prompt tokens evaluated
+	Prompt     int     `json:"prompt"`                // the provider's prompt tokens
+	Cached     int     `json:"cached,omitempty"`      // of them, reused from its cache
+	CacheWrite int     `json:"cache_write,omitempty"` // written to its cache (Anthropic bills these above the base rate)
+	Completion int     `json:"completion"`            // generated, reasoning included
+	LatencyMS  int64   `json:"latency_ms"`            // the round's wall clock, client side
+	PromptN    int     `json:"prompt_n,omitempty"`    // llama.cpp: prompt tokens evaluated
 	PromptMS   float64 `json:"prompt_ms,omitempty"`
 	GenN       int     `json:"gen_n,omitempty"` // llama.cpp: tokens generated
 	GenMS      float64 `json:"gen_ms,omitempty"`
@@ -77,6 +78,7 @@ type TurnStats struct {
 	ModelMS    int64 `json:"model_ms"` // the rounds' wall clocks, summed
 	Prompt     int   `json:"prompt"`
 	Cached     int   `json:"cached"`
+	CacheWrite int   `json:"cache_write,omitempty"`
 	Completion int   `json:"completion"`
 
 	// From llama.cpp's timings, when every round had them (Timed = Rounds):
@@ -116,7 +118,8 @@ const (
 // noteRound folds one response in. It is the spend meter's round hook.
 func (h *Harness) noteRound(src SpendSource, u llm.Usage) {
 	r := RoundStat{Time: time.Now(), Session: h.sessionName(), Role: src.Role, Provider: src.Provider, Model: src.Model,
-		Prompt: u.PromptTokens, Cached: u.CachedPromptTokens(), Completion: u.CompletionTokens, LatencyMS: u.LatencyMS}
+		Prompt: u.PromptTokens, Cached: u.CachedPromptTokens(), CacheWrite: u.CacheCreationInputTokens,
+		Completion: u.CompletionTokens, LatencyMS: u.LatencyMS}
 	if t := u.Timings; t != nil {
 		r.PromptN, r.PromptMS, r.GenN, r.GenMS = t.PromptN, t.PromptMS, t.PredictedN, t.PredictedMS
 	}
@@ -153,6 +156,7 @@ func (rs *roundStats) add(r RoundStat) {
 	t.ModelMS += r.LatencyMS
 	t.Prompt += r.Prompt
 	t.Cached += r.Cached
+	t.CacheWrite += r.CacheWrite
 	t.Completion += r.Completion
 	if r.PromptMS > 0 || r.GenMS > 0 {
 		t.Timed++
@@ -307,6 +311,9 @@ type StatsSummary struct {
 	Since     time.Time
 	Rounds    int // main rounds
 	Processed int // main rounds that processed their prefix
+	// Prompt and Cached are the main rounds' prompt tokens and, of them, the
+	// ones reused from the cache: the conversation's hit rate.
+	Prompt, Cached int
 	Servers   map[string]*ServerUsage
 	// Money: the cost of the rounds that reported one, over the tokens they
 	// processed (new prompt tokens plus completion), for a price per token.
@@ -362,6 +369,8 @@ func (l *StatsLedger) Summary(since time.Time) (s StatsSummary) {
 				continue
 			}
 			s.Rounds++
+			s.Prompt += r.Prompt
+			s.Cached += r.Cached
 			proc := r.PrefixProcessed()
 			if proc {
 				s.Processed++

@@ -51,8 +51,11 @@ func turnStatsLine(ts map[string]any, background bool) string {
 		timeRow += " · tools and waits " + secs(rest)
 	}
 	tokens := []string{tokN(int(n("prompt"))) + " in"}
-	if c := int(n("cached")); c > 0 {
-		tokens[0] += " (" + tokN(c) + " cached)"
+	if c, p := int(n("cached")), n("prompt"); c > 0 && p > 0 {
+		tokens[0] += fmt.Sprintf(" (%s cached, %d%%)", tokN(c), int(float64(c)*100/p))
+	}
+	if w := int(n("cache_write")); w > 0 {
+		tokens = append(tokens, tokN(w)+" written to the cache")
 	}
 	tokens = append(tokens, tokN(int(n("completion")))+" out")
 	if costed := int(n("costed")); costed > 0 {

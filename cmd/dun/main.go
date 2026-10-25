@@ -1469,7 +1469,7 @@ func turnStatsProto(h *dun.Harness) *proto.TurnStats {
 	t := h.EndTurnStats()
 	speed, n := h.PrefillSpeed()
 	return &proto.TurnStats{Rounds: t.Rounds, WallMS: t.WallMS, ModelMS: t.ModelMS,
-		Prompt: t.Prompt, Cached: t.Cached, Completion: t.Completion,
+		Prompt: t.Prompt, Cached: t.Cached, CacheWrite: t.CacheWrite, Completion: t.Completion,
 		Timed: t.Timed, PromptN: t.PromptN, PromptMS: t.PromptMS, GenN: t.GenN, GenMS: t.GenMS,
 		Cost: t.Cost, Currency: t.Currency, Costed: t.Costed, Mixed: t.Mixed, SubAgents: t.SubAgents,
 		PrefillTPS: speed, PrefillRounds: n}

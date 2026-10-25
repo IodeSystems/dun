@@ -41,7 +41,7 @@ func TestTurnStats_OnTheMessage(t *testing.T) {
 	}
 	got := v.convo()
 	for _, want := range []string{"turn · 6 rounds · 41.2s: model 29.8s (prefill 9.1s, 61.0k at 6.7k/s · generate 20.7s, 1.4k) · tools and waits 11.4s",
-		"412.0k in (351.0k cached) · 1.4k out · $0.0031 · incl. 1 sub-agent"} {
+		"412.0k in (351.0k cached, 85%) · 1.4k out · $0.0031 · incl. 1 sub-agent"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q:\n%s", want, got)
 		}

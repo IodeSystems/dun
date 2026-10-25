@@ -333,8 +333,12 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 		}
 	}
 	if len(rows) > 0 {
-		head := fmt.Sprintf("what the schemas cost, last %d days (%s, %s processed the prefix; the rest reused it from the cache):",
-			in.usageDays, plural(u.Rounds, "request"), fact(fmt.Sprintf("%d", u.Processed)))
+		hit := ""
+		if u.Prompt > 0 {
+			hit = fmt.Sprintf("; the cache reused %d%% of all prompt tokens", u.Cached*100/u.Prompt)
+		}
+		head := fmt.Sprintf("what the schemas cost, last %d days (%s, %s processed the prefix, the rest reused it from the cache%s):",
+			in.usageDays, plural(u.Rounds, "request"), fact(fmt.Sprintf("%d", u.Processed)), hit)
 		rows = append([]string{head}, rows...)
 	}
 	total := 0

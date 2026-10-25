@@ -165,6 +165,7 @@ type TurnStats struct {
 	ModelMS    int64 `json:"model_ms"`
 	Prompt     int   `json:"prompt"`
 	Cached     int   `json:"cached"`
+	CacheWrite int   `json:"cache_write,omitempty"`
 	Completion int   `json:"completion"`
 
 	Timed    int     `json:"timed,omitempty"`
