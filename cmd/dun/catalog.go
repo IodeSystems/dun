@@ -154,6 +154,23 @@ func skillSlash(m *tuiModel, args []string) tea.Cmd {
 	if len(args) == 1 && args[0] == "info" && !slices.ContainsFunc(m.skills, func(s catalogSkill) bool { return s.Name == "info" }) {
 		args = nil
 	}
+	// The switches (switchlist.go): bare opens the list; on|off|unset with a
+	// name or glob, or mode with a mode, does it; one that is missing what
+	// it needs opens the list (docs/ui-decisions.md). A skill named like a
+	// verb is still run by /skill <name> with arguments after it.
+	if len(args) > 0 && skillVerb(m.skills, args[0]) {
+		if len(args) >= 2 { // a name or glob, or a mode: complete
+			if !m.proc.controlCmd("switches", "skills "+strings.Join(args, " ")) {
+				m.append(stErr.Render("no engine right now — /reconnect first"))
+			}
+			return nil
+		}
+		args = nil
+	}
+	if len(args) == 0 && len(m.skills) > 0 {
+		m.openSwitches("skills")
+		return nil
+	}
 	if len(args) == 0 {
 		if len(m.skills) == 0 {
 			m.append(stDim.Render("no skills — add <name>/SKILL.md under ~/.dun/skills or .dun/skills (Claude Code's ~/.claude/skills is read too)"))
@@ -333,4 +350,14 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// skillVerb reports whether /skill's arguments are a switch operation, not a
+// skill to run: on, off, unset or mode, and no skill of that name.
+func skillVerb(skills []catalogSkill, a string) bool {
+	switch a {
+	case "on", "off", "unset", "mode":
+		return !slices.ContainsFunc(skills, func(s catalogSkill) bool { return s.Name == a })
+	}
+	return false
 }

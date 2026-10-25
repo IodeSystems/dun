@@ -1,0 +1,269 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+)
+
+// A kind of scoped switches in the pager (dun/switches.go: skills now,
+// context files next): a row per item with its cost and its switch at each
+// scope, the kind's mode in the title. It is the /mcp tools view
+// (mcptools.go) for any kind:
+//
+//	type        filter: every word in the name, the description or the source,
+//	            name matches first; backspace takes a letter back
+//	↑/↓ enter   select, open (the description in full and what decided)
+//	space       on/off for this session
+//	ctrl+g/p/s  cycle the global, project or session switch
+//	tab         the kind's mode for this session (listed → surfaced → unset)
+//	esc         clear the filter, then close
+//
+// Every key sends the command a person could type (/skill off pdf-* --global)
+// through the engine (control "switches"), and the answer refreshes the rows
+// in place. A bare /<kind> opens it; a complete /<kind> on|off|mode … just
+// does it (docs/ui-decisions.md).
+
+type switchRow struct {
+	name, desc, source, detail string
+	global, project, session   string // "on", "off", "" unset
+	from                       string // the scope that decided on
+	tokens                     int
+	on                         bool
+}
+
+type switchListView struct {
+	kind     string // "skills"
+	rows     []switchRow
+	mode     string
+	modeFrom string
+	modes    map[string]string // scope → its mode
+	about    map[string]string // mode → what it means
+	note     string
+	query    string
+}
+
+// slash is the command a person types for the kind: "skill".
+func (v *switchListView) slash() string { return strings.TrimSuffix(v.kind, "s") }
+
+// shown is the rows the filter keeps, as indexes into rows.
+func (v *switchListView) shown() []int {
+	words := strings.Fields(strings.ToLower(v.query))
+	var byName, other []int
+	for i, r := range v.rows {
+		name, rest := strings.ToLower(r.name), strings.ToLower(r.desc+" "+r.source)
+		inName, all := true, true
+		for _, w := range words {
+			n := strings.Contains(name, w)
+			inName = inName && n
+			all = all && (n || strings.Contains(rest, w))
+		}
+		switch {
+		case inName:
+			byName = append(byName, i)
+		case all:
+			other = append(other, i)
+		}
+	}
+	return append(byName, other...)
+}
+
+func (v *switchListView) row(cur int) *switchRow {
+	s := v.shown()
+	if cur < 0 || cur >= len(s) {
+		return nil
+	}
+	return &v.rows[s[cur]]
+}
+
+func (v *switchListView) page() pageDoc {
+	on, cost := 0, 0
+	for _, r := range v.rows {
+		if r.on {
+			on++
+			cost += r.tokens
+		}
+	}
+	mode := v.mode
+	if v.modeFrom != "" {
+		mode += " (" + v.modeFrom + ")"
+	}
+	cost0 := fmt.Sprintf("~%s tokens in every request", kTokens(cost))
+	if v.kind == "skills" && v.mode != "listed" {
+		cost0 = "0 tokens in every request (~" + kTokens(cost) + " when listed)"
+	}
+	title := fmt.Sprintf("%s · %d of %d on · %s · %s", v.kind, on, len(v.rows), mode, cost0)
+	shown := v.shown()
+	if v.query != "" {
+		title = fmt.Sprintf("%s · filter %q: %d shown · %d of %d on · %s · %s", v.kind, v.query, len(shown), on, len(v.rows), mode, cost0)
+	}
+	nodes := make([]pageNode, 0, len(shown)+1)
+	if v.note != "" {
+		nodes = append(nodes, pageNode{head: "⚠ " + v.note, err: true})
+	}
+	for _, i := range shown {
+		r := v.rows[i]
+		mark := "○"
+		if r.on {
+			mark = "●"
+		}
+		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
+		head := fmt.Sprintf("%s %s  ~%s tok  g%s p%s s%s  %s  %s", mark, r.name, kTokens(r.tokens),
+			cellMark(r.global), cellMark(r.project), cellMark(r.session), r.source, first)
+		body := onOff(r.on)
+		if r.from != "" {
+			body += " (switched " + scopeIn(r.from) + ")"
+		}
+		if r.detail != "" {
+			body += "\n" + r.detail
+		}
+		body += "\n\n" + strings.TrimSpace(r.desc)
+		nodes = append(nodes, pageNode{head: head, body: body})
+	}
+	if v.query != "" && len(shown) == 0 {
+		nodes = append(nodes, pageNode{head: fmt.Sprintf("nothing matches %q — backspace or esc", v.query)})
+	}
+	return pageDoc{title: title, nodes: nodes}
+}
+
+// hint is the status line while the view is open.
+func (v *switchListView) hint() string {
+	about := v.about[v.mode]
+	if about != "" {
+		about = " · " + v.mode + ": " + about
+	}
+	return "type to filter · space on/off (session) · ctrl+g/p/s global/project/session · tab mode · esc clear, back" + about
+}
+
+// scopeIn is "for this project".
+func scopeIn(scope string) string {
+	switch scope {
+	case "global":
+		return "for every project"
+	case "project":
+		return "for this project"
+	case "session":
+		return "for this session"
+	}
+	return scope
+}
+
+// openSwitches asks the engine for a kind's view; it opens when it arrives.
+func (m *tuiModel) openSwitches(kind string) {
+	m.switchesWant = kind
+	if !m.proc.controlCmd("switches", kind) {
+		m.switchesWant = ""
+		m.append(stErr.Render("no engine right now — /reconnect first"))
+	}
+}
+
+// switchesPaging is the switch list the pager shows, if it shows one.
+func (m *tuiModel) switchesPaging() *switchListView {
+	if !m.paging {
+		return nil
+	}
+	v, _ := m.pg.id.(*switchListView)
+	return v
+}
+
+// noteSwitches takes a switches event: a fresh view for the open list, the
+// list this TUI asked for, or (nothing open) the answer as a line.
+func (m tuiModel) noteSwitches(ev evMsg) tuiModel {
+	kind, msg := str(ev["kind"]), strings.TrimSpace(str(ev["message"]))
+	fresh := &switchListView{kind: kind, mode: str(ev["mode"]), modeFrom: str(ev["modeFrom"]), note: str(ev["note"]),
+		modes: strMap(ev["modes"]), about: strMap(ev["about"])}
+	if items, ok := ev["items"].([]any); ok {
+		for _, it := range items {
+			o, _ := it.(map[string]any)
+			on, _ := o["on"].(bool)
+			fresh.rows = append(fresh.rows, switchRow{name: str(o["name"]), desc: str(o["description"]), source: str(o["source"]),
+				detail: str(o["detail"]), tokens: int(evNum(o["tokens"])), on: on, from: str(o["from"]),
+				global: str(o["global"]), project: str(o["project"]), session: str(o["session"])})
+		}
+	}
+	v := m.switchesPaging()
+	switch {
+	case v != nil && v.kind == kind:
+		q := v.query
+		*v = *fresh
+		v.query = q
+		if msg != "" {
+			m.flashText, m.flashUntil = msg, time.Now().Add(flashFor)
+		}
+		m.syncPager()
+	case kind != "" && kind == m.switchesWant:
+		m.switchesWant = ""
+		if msg != "" {
+			m.append(replyLine(msg))
+		}
+		m.pg = newPager(-1, fresh)
+		m.paging = true
+		m.syncPager()
+	case msg != "":
+		m.append(replyLine(msg))
+	}
+	return m
+}
+
+func strMap(v any) map[string]string {
+	o, _ := v.(map[string]any)
+	out := map[string]string{}
+	for k, x := range o {
+		out[k] = str(x)
+	}
+	return out
+}
+
+// switchKey handles a key in the switch list; false: not its key.
+func (m *tuiModel) switchKey(v *switchListView, k, text string) bool {
+	send := func(op string) {
+		if !m.proc.controlCmd("switches", v.kind+" "+op) {
+			m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
+		}
+	}
+	switch k {
+	case "space":
+		if r := v.row(m.pg.cur); r != nil {
+			send(map[bool]string{true: "off", false: "on"}[r.on] + " " + r.name + " --session")
+		}
+		return true
+	case "ctrl+g", "ctrl+p", "ctrl+s":
+		r := v.row(m.pg.cur)
+		if r == nil {
+			return true
+		}
+		switch k {
+		case "ctrl+g":
+			send(nextTri(r.global) + " " + r.name + " --global")
+		case "ctrl+p":
+			send(nextTri(r.project) + " " + r.name + " --project")
+		case "ctrl+s":
+			send(nextTri(r.session) + " " + r.name + " --session")
+		}
+		return true
+	case "tab":
+		next := map[string]string{"": "listed", "listed": "surfaced", "surfaced": "unset"}[v.modes["session"]]
+		send("mode " + next + " --session")
+		return true
+	case "backspace":
+		if v.query != "" {
+			_, size := utf8.DecodeLastRuneInString(v.query)
+			v.query = v.query[:len(v.query)-size]
+		}
+	case "esc":
+		if v.query == "" {
+			return false
+		}
+		v.query = ""
+	default:
+		if text == "" || utf8.RuneCountInString(text) != 1 || !unicode.IsPrint([]rune(text)[0]) {
+			return false
+		}
+		v.query += text
+	}
+	m.pg.cur, m.pg.off = 0, 0
+	m.syncPager()
+	return true
+}

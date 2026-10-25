@@ -323,12 +323,12 @@ type convoEntry struct {
 	userText        string // raw user message text (non-empty for user messages only)
 	// stats is the cost of the turn this message started (turnstats.go):
 	// shown under it when it is opened.
-	stats string
-	needLogin       bool   // the "not logged in" line (onboarding.go): said once, where it was last needed
-	adding          string // the server an "adding …" line is for: the result replaces it (noteServerMsg)
-	splash          bool   // the splash or a /status block (splash.go): client-only, never in the session log
-	liveSplash      bool   // the splash at the top: drawn again from live state at every refresh
-	startKept       bool   // a message typed before ready, shown until it is sent (startqueue.go)
+	stats      string
+	needLogin  bool   // the "not logged in" line (onboarding.go): said once, where it was last needed
+	adding     string // the server an "adding …" line is for: the result replaces it (noteServerMsg)
+	splash     bool   // the splash or a /status block (splash.go): client-only, never in the session log
+	liveSplash bool   // the splash at the top: drawn again from live state at every refresh
+	startKept  bool   // a message typed before ready, shown until it is sent (startqueue.go)
 	// hang: a line that wraps continues at column 2, under its text, not
 	// under its mark (⚠ …, the kept-question line).
 	hang bool
@@ -816,6 +816,7 @@ type tuiModel struct {
 	mcpErr       string
 	mcpAuto      string // the name filled in from the server row; follows it while unedited (mcpFollowName)
 	mcpToolsWant string // the server whose /mcp tools this TUI asked for (mcptools.go)
+	switchesWant string // the kind whose switch list this TUI asked for (switchlist.go)
 	// mcpServersWant: this TUI asked for the /mcp table (mcpview.go).
 	mcpServersWant bool
 	engineCmds     []engineCmd       // the engine's slash commands (commands event)
@@ -1182,6 +1183,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.String() == "space" {
 					m.toggleMCPTool(v)
 				}
+				return m, nil
+			}
+			if v := m.switchesPaging(); v != nil && m.switchKey(v, msg.String(), msg.Text) {
 				return m, nil
 			}
 			if v := m.serversPaging(); v != nil && m.serverKey(v, msg.String()) {
@@ -2498,6 +2502,8 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.refresh() // the splash's skills row
 	case "mcp_tools":
 		m = m.noteMCPTools(ev)
+	case "switches":
+		m = m.noteSwitches(ev)
 	case "mcp_login":
 		// Whole, not oneLine'd or clipped: the URL is to be copied.
 		m.append(stNote.Render("🔑 " + loginLine(str(ev["server"]), str(ev["url"]))))
@@ -3507,6 +3513,8 @@ func (m tuiModel) drawView() string {
 	case m.paging:
 		if v := m.serversPaging(); v != nil {
 			status = v.hint() // styled itself: its hotkeys are marked
+		} else if v := m.switchesPaging(); v != nil {
+			status = stDim.Render(v.hint())
 		} else {
 			status = stDim.Render(m.pg.hint())
 		}
@@ -4671,7 +4679,7 @@ func init() {
 			m.append(stDim.Render("reconnecting…"))
 			return restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 		}},
-		{"skill", "[name] [text]", "skills: bare lists them (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers), or counts them by source when there are many; with a name, asks the model to use it; with part of a name, lists the matches", skillSlash},
+		{"skill", "[name] [text] | on|off|unset <name|glob> [--global|--project|--session] | mode listed|surfaced|unset [--scope]", "skills: bare opens the list (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers) — type to filter, each one's cost, on/off at each scope, and the mode (listed in every request, or surfaced when a turn fits); on/off/unset and mode change it directly; with a name, asks the model to use it; with part of a name, lists the matches", skillSlash},
 		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
 		}},

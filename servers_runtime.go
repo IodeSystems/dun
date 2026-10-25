@@ -682,9 +682,17 @@ func (h *Harness) rebuildTools() {
 	}
 	// skill, when any skill is in reach: the list rides the tool's
 	// description, the body comes back from the tool.
-	if list := skillList(h.Skills()); list != "" {
-		toolDefs = append(toolDefs, skillToolDef(list))
-		dispatch = withSkill(dispatch, h, report)
+	// The skills that are on; listed, or left to the proactive search
+	// (skillKind).
+	if skills := h.enabledSkills(); len(skills) > 0 {
+		list := skillList(skills)
+		if h.skillMode() == SkillsSurfaced {
+			list = skillSurfacedNote
+		}
+		if list != "" {
+			toolDefs = append(toolDefs, skillToolDef(list))
+			dispatch = withSkill(dispatch, h, report)
+		}
 	}
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
 	// the moment churn is created rather than whenever usage is next measured.

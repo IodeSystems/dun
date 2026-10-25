@@ -299,3 +299,61 @@ func TestSyncSkillIndex_ReferenceFiles(t *testing.T) {
 		t.Errorf("removal: %q", got)
 	}
 }
+
+// A skill switched off is not in the list, not loadable and not indexed; the
+// view says which scope decided and what each skill costs listed.
+func TestSkills_Switches(t *testing.T) {
+	home := t.TempDir()
+	defer func(f func() (string, error)) { userHomeDir = f }(userHomeDir)
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Setenv("DUN_HOME", filepath.Join(home, ".dun"))
+	proj := t.TempDir()
+	writeSkill(t, filepath.Join(home, ".dun", "skills"), "pdf-fill", "---\nname: pdf-fill\ndescription: fill PDF forms\n---\nbody")
+	writeSkill(t, filepath.Join(home, ".dun", "skills"), "pdf-merge", "---\nname: pdf-merge\ndescription: merge PDFs\n---\nbody")
+	writeSkill(t, filepath.Join(home, ".dun", "skills"), "deploy", "---\nname: deploy\ndescription: ship it\n---\nbody")
+	h := newNoteHarness(t)
+	h.mgr, h.cfg.ConfigDir = mcpmgr.NewManager(), proj
+	if err := h.editSwitchFile("skills", ScopeGlobal, func(f *SwitchFile) { f.On = map[string]bool{"pdf-*": false} }); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.editSwitchFile("skills", ScopeProject, func(f *SwitchFile) { f.On = map[string]bool{"pdf-merge": true} }); err != nil {
+		t.Fatal(err)
+	}
+	var on []string
+	for _, s := range h.enabledSkills() {
+		on = append(on, s.Name)
+	}
+	if strings.Join(on, ",") != "deploy,pdf-merge" {
+		t.Fatalf("enabled: %v", on)
+	}
+	if l := skillList(h.enabledSkills()); strings.Contains(l, "pdf-fill") || !strings.Contains(l, "pdf-merge") {
+		t.Errorf("list:\n%s", l)
+	}
+	if out := h.loadSkill(context.Background(), "pdf-fill", ""); !strings.Contains(out, "switched off") || !strings.Contains(out, "/skill on pdf-fill") {
+		t.Errorf("an off skill loads: %q", out)
+	}
+	v, ok := h.SwitchView("skills")
+	if !ok || v.Mode != SkillsListed || len(v.Items) != 3 {
+		t.Fatalf("view: %+v", v)
+	}
+	for _, it := range v.Items {
+		if it.Tokens <= 0 {
+			t.Errorf("%s costs nothing listed: %+v", it.Name, it)
+		}
+		if it.Name == "pdf-fill" && (it.On || it.From != ScopeGlobal || it.Global != "off") {
+			t.Errorf("pdf-fill: %+v", it)
+		}
+		if it.Name == "pdf-merge" && (!it.On || it.From != ScopeProject || it.Global != "off" || it.Project != "on") {
+			t.Errorf("pdf-merge: %+v", it)
+		}
+	}
+	if err := h.editSwitchFile("skills", ScopeProject, func(f *SwitchFile) { f.Mode = SkillsSurfaced }); err != nil {
+		t.Fatal(err)
+	}
+	if h.skillMode() != SkillsSurfaced {
+		t.Error("mode not read")
+	}
+	if v, _ := h.SwitchView("skills"); !strings.Contains(v.Note, "needs raglit") {
+		t.Errorf("surfaced with no raglit should say so: %q", v.Note)
+	}
+}

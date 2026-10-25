@@ -50,6 +50,7 @@ func init() {
 	event[Models]("models")
 	event[McpTools]("mcp_tools")
 	event[McpLogin]("mcp_login")
+	event[Switches]("switches")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -711,4 +712,35 @@ type Snapshot struct {
 	After uint64        `json:"after"`
 	Items []HistoryItem `json:"items"`
 	State []Event       `json:"state"`
+}
+
+// Switches is a kind of scoped switches (skills; dun/switches.go): every item
+// with its switch at each scope, the kind's mode at each scope and in force,
+// what each mode means, and the answer to the command that asked (Message).
+// A client asks with the control command "switches" and the kind as its
+// action, optionally followed by "on|off|unset <name or glob> [--scope]" or
+// "mode <mode|unset> [--scope]".
+type Switches struct {
+	Kind     string            `json:"kind"`
+	Items    []SwitchItem      `json:"items"`
+	Mode     string            `json:"mode"`
+	ModeFrom string            `json:"modeFrom,omitempty"`
+	Modes    map[string]string `json:"modes,omitempty"`
+	About    map[string]string `json:"about,omitempty"`
+	Note     string            `json:"note,omitempty"`
+	Message  string            `json:"message,omitempty"`
+}
+
+// SwitchItem is one item of a Switches event.
+type SwitchItem struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+	Tokens      int    `json:"tokens"`
+	On          bool   `json:"on"`
+	From        string `json:"from,omitempty"`
+	Global      string `json:"global,omitempty"`
+	Project     string `json:"project,omitempty"`
+	Session     string `json:"session,omitempty"`
 }

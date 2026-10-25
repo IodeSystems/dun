@@ -314,7 +314,7 @@ type StatsSummary struct {
 	// Prompt and Cached are the main rounds' prompt tokens and, of them, the
 	// ones reused from the cache: the conversation's hit rate.
 	Prompt, Cached int
-	Servers   map[string]*ServerUsage
+	Servers        map[string]*ServerUsage
 	// Money: the cost of the rounds that reported one, over the tokens they
 	// processed (new prompt tokens plus completion), for a price per token.
 	Cost       float64

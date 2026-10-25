@@ -1172,6 +1172,13 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go func() { em.emit(mcpToolsEvent(h, action)) }()
 			return
 		}
+		// A kind of scoped switches (skills): its view, after an operation
+		// on it when the action has one (switches.go). Detached: a change
+		// rebuilds the tool set, which waits for a running turn.
+		if id == "switches" {
+			go func() { em.emit(switchesEvent(h, action)) }()
+			return
+		}
 		// /rules: bare reports; a mode is saved and the system rebuilt.
 		// Detached: summary is a model round trip, and every mode rebuilds
 		// the tool set, which waits for a running turn.

@@ -492,7 +492,8 @@ func (h *Harness) syncSkillIndex(sink *mcpDocsSink) {
 			docs[p] = hit
 		}
 	}
-	for _, s := range h.Skills() {
+	// A skill that is off is not surfaced: it leaves the index.
+	for _, s := range h.enabledSkills() {
 		if s.Dir == "" || s.UserOnly {
 			continue
 		}
@@ -623,10 +624,13 @@ func (h *Harness) loadSkill(ctx context.Context, name, file string) string {
 	}
 	if s == nil {
 		var names []string
-		for _, k := range h.Skills() {
+		for _, k := range h.enabledSkills() {
 			names = append(names, k.Name)
 		}
 		return fmt.Sprintf("ERROR: no skill %q (have: %s)", name, strings.Join(names, ", "))
+	}
+	if !h.skillAllowed(s.Name) {
+		return fmt.Sprintf("ERROR: the skill %q is switched off (the user can turn it on with /skill on %s)", s.Name, s.Name)
 	}
 	if s.Server != "" {
 		uri := s.URI
@@ -692,3 +696,77 @@ func withSkill(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		return out, nil
 	}
 }
+
+// skillKind is skills as a kind of scoped switches (switches.go): each skill
+// on or off, and the list listed in the skill tool's description or left to
+// the proactive search.
+func (h *Harness) skillKind() switchKind {
+	return switchKind{
+		name:  "skills",
+		modes: []string{SkillsListed, SkillsSurfaced},
+		items: func() []SwitchItem {
+			var out []SwitchItem
+			for _, s := range h.Skills() {
+				it := SwitchItem{Name: s.Name, Description: s.Description, Source: s.Source,
+					Tokens: h.meter.Estimate(skillList([]Skill{s}))}
+				if s.UserOnly {
+					it.Detail = "only you can run it (/skill " + s.Name + "): not in the model's list"
+				}
+				out = append(out, it)
+			}
+			return out
+		},
+		changed: h.applyTools,
+		about: map[string]string{
+			SkillsListed:   "every skill that is on is listed in the skill tool, in every request",
+			SkillsSurfaced: "no list: a skill is offered beside the turn when it fits, and the model may load one by name",
+		},
+		note: func(mode string) string {
+			if mode == SkillsSurfaced && !h.skillsSearchable() {
+				return "surfaced needs raglit (/raglit on): without it the model sees no skills unless it names one"
+			}
+			return ""
+		},
+	}
+}
+
+// Skill modes (skillKind).
+const (
+	SkillsListed   = "listed"
+	SkillsSurfaced = "surfaced"
+)
+
+// skillMode is the skills' mode in force.
+func (h *Harness) skillMode() string {
+	m, _ := h.switchSet("skills").mode(SkillsListed)
+	return m
+}
+
+// enabledSkills is the skills that are on.
+func (h *Harness) enabledSkills() []Skill {
+	set := h.switchSet("skills")
+	var out []Skill
+	for _, s := range h.Skills() {
+		if on, _, _ := set.on(s.Name); on {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// skillAllowed reports whether the skill tool may load name.
+func (h *Harness) skillAllowed(name string) bool {
+	on, _, _ := h.switchSet("skills").on(name)
+	return on
+}
+
+// skillsSearchable reports whether skills reach the proactive search: an
+// extension that takes the skills index is running.
+func (h *Harness) skillsSearchable() bool {
+	_, ok := hookExt(h.extensions(), HookSkillsChanged, h.mgr.GetTools())
+	return ok
+}
+
+// skillSurfacedNote is the skill tool's description tail in surfaced mode.
+const skillSurfacedNote = " (Not listed here: when a skill fits the task it is offered beside the turn as a hint; " +
+	"call this tool with its name to load it.)"

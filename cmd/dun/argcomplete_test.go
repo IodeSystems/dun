@@ -149,22 +149,31 @@ func TestPalette_BoundedHeight(t *testing.T) {
 
 func lastText(m tuiModel) string { return stripANSI(m.convo[len(m.convo)-1].view()) }
 
-// Bare /skill: one by one for a few, a summary by source for many.
-func TestSkillSlash_BareSummaryOrList(t *testing.T) {
-	m, _ := skillModel(t, 5)
+// Bare /skill opens the switch list (switchlist.go); a complete on/off/unset
+// or mode just does it; one missing its argument opens the list; a skill
+// named like a verb still runs.
+func TestSkillSlash_BareOpensTheSwitches(t *testing.T) {
+	m, buf := skillModel(t, 200)
 	skillSlash(&m, nil)
-	if v := lastText(m); !strings.Contains(v, "code-review") || !strings.Contains(v, "tool-004") {
-		t.Errorf("a few are listed:\n%s", v)
+	if !strings.Contains(buf.String(), `"switches"`) || !strings.Contains(buf.String(), `"skills"`) || m.switchesWant != "skills" {
+		t.Fatalf("bare: %s (want %q)", buf.String(), m.switchesWant)
 	}
-	m, _ = skillModel(t, 200)
-	skillSlash(&m, nil)
-	v := lastText(m)
-	if strings.Contains(v, "tool-004") || !strings.Contains(v, "200 skills") ||
-		!strings.Contains(v, "mcp:corp") || !strings.Contains(v, "/skill <part of a name>") {
-		t.Errorf("many are summarised:\n%s", v)
+	buf.Reset()
+	skillSlash(&m, []string{"off", "tool-1*", "--global"})
+	if !strings.Contains(buf.String(), `skills off tool-1* --global`) {
+		t.Errorf("complete: %s", buf.String())
 	}
-	if !strings.Contains(v, "198") { // user: code-review + 197 tools
-		t.Errorf("per-source count:\n%s", v)
+	buf.Reset()
+	m.switchesWant = ""
+	skillSlash(&m, []string{"mode"})
+	if m.switchesWant != "skills" {
+		t.Errorf("partial should open the list: %s", buf.String())
+	}
+	m, buf = skillModel(t, 0)
+	m.skills = []catalogSkill{{Name: "mode", Description: "a skill named mode"}}
+	skillSlash(&m, []string{"mode", "now"})
+	if !strings.Contains(buf.String(), "Use the skill mode") {
+		t.Errorf("a skill named like a verb runs: %s", buf.String())
 	}
 }
 
