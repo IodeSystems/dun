@@ -333,6 +333,10 @@ type Config struct {
 	// OnServerSetup says a server's install hint (setupstate.go): one
 	// quiet line, at most once per session.
 	OnServerSetup func(id, msg string)
+	// OnServerActivity says id's activity log has a new line (serverlog.go):
+	// a step of a start, a line of its stderr. Often, during a start; a UI
+	// coalesces.
+	OnServerActivity func(id string)
 	// OnLogin shows the person the URL that logs in to an OAuth server
 	// (mcpoauth.go); url "" means another session's login is being waited
 	// for. The engine may have no display, so this is the way that always
@@ -499,6 +503,11 @@ type Harness struct {
 	// slow one (poly-lsp indexing a big repo takes a minute) is said to be
 	// starting rather than off, and is not started a second time.
 	starting map[string]time.Time
+	// srvLogs is each server's activity log (serverlog.go); closed is closed
+	// by Close, which ends the log's stderr readers.
+	srvLogs   serverLogs
+	closed    chan struct{}
+	closeOnce sync.Once
 	// ingestNote is the last workspace ingest's summary, for /raglit and the
 	// ready hint, and ingestID the server it went to. Guarded by srvMu.
 	ingestNote string
@@ -1244,7 +1253,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	store.onNotify = cfg.OnNotify
 	h := &Harness{mgr: mgr, store: store, client: cfg.Client,
 		onRetry: cfg.OnRetry, wake: make(chan struct{}, 16),
-		cfg: cfg, specs: servers, sessSw: sessSw, exts: exts, extErrs: extErrs, lastErr: map[string]string{}, lastStart: map[string]time.Duration{}, starting: map[string]time.Time{},
+		cfg: cfg, specs: servers, sessSw: sessSw, exts: exts, extErrs: extErrs, lastErr: map[string]string{}, lastStart: map[string]time.Duration{}, starting: map[string]time.Time{}, closed: make(chan struct{}),
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
 	// A resumed session's history is not this session's to act on: the
@@ -1465,6 +1474,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 // docs/decisions.md, "Sub-agents"), and a child left running after its parent's servers are
 // gone would keep working against tools that no longer answer.
 func (h *Harness) Close() {
+	h.markClosed()
 	h.closeAgents()
 	// The shell this harness owns. A child's is its own (see childConfig), so
 	// closing it here does not touch the parent's.

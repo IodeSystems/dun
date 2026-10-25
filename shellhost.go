@@ -339,6 +339,14 @@ func (h *Harness) readHosted() {
 	h.srvMu.Lock()
 	h.hosted = got
 	h.srvMu.Unlock()
+	for id, hs := range got {
+		switch {
+		case hs.Connected:
+			h.noteServer(id, "hosted in the shell · %d tools", hs.Tools)
+		case hs.Err != "":
+			h.noteServer(id, "the shell could not host it: %s", oneLine(hs.Err, 300))
+		}
+	}
 }
 
 // hostedNamespaces are the namespaces the model can call in the running

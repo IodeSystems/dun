@@ -82,6 +82,8 @@ type ServerState struct {
 	Starting        bool    `json:"starting,omitempty"`
 	StartingSeconds float64 `json:"startingSeconds,omitempty"`
 	StartSeconds    float64 `json:"startSeconds,omitempty"` // how long the last start took, in seconds
+	// Log is the newest of its activity log (serverlog.go), oldest first.
+	Log []ServerLogLine `json:"log,omitempty"`
 	// Via is an added server's placement: ViaDirect or ViaShell; "" for a
 	// built-in, which has no choice.
 	Via string `json:"via,omitempty"`
@@ -204,6 +206,7 @@ func (h *Harness) Servers() []ServerState {
 			ViaFrom:      s.Scopes.ViaFrom,
 		}
 		st.Description = h.describe(s.ID)
+		st.Log = h.serverLogTail(s.ID, serverLogShown)
 		if info, ok := h.mgr.ServerInfo(s.ID); ok && st.Running {
 			st.Title, st.Version, st.Instructions = info.Title, info.Version, strings.TrimSpace(info.Instructions)
 		}
@@ -341,6 +344,7 @@ func (h *Harness) StopServer(id string) error {
 		return nil
 	}
 	h.mgr.StopServer(id)
+	h.noteServer(id, "stopped")
 	h.markIndexBuilding(id, false)
 	h.applyTools()
 	return nil
@@ -370,6 +374,13 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if timeout <= 0 {
 		timeout = 90 * time.Second
 	}
+	// The activity log (serverlog.go): each step as it happens, its stderr
+	// as it comes, and "still …" while a step takes its time.
+	phase := &startPhase{}
+	phase.set("starting")
+	done := make(chan struct{})
+	defer close(done)
+	go h.watchStart(s.ID, phase, timeout, done)
 	ext, isExt := h.extension(s.ID)
 	// raglit answers nothing until the workspace is in its index, so ingest
 	// belongs to STARTING the server (hook workspace.open), not to starting
@@ -407,6 +418,12 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.URL == "" && command != "" {
 		command, err = FindCommand(command)
 	}
+	switch {
+	case err != nil:
+		h.noteServer(s.ID, "%s", oneLine(err.Error(), 400))
+	case s.URL != "":
+		h.noteServer(s.ID, "connecting to %s (timeout %s)", logURL(s.URL), secs(timeout))
+	}
 	// A poly-lsp-mcp that builds its index after the handshake is
 	// "indexing" from its spawn until it says how the build went, and takes
 	// the project's excludes. An older one would refuse --exclude: it gets
@@ -441,24 +458,39 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		args = append(slices.Clone(args), "--daemon")
 	}
 	h.markIndexBuilding(s.ID, indexes)
+	if s.URL == "" && err == nil {
+		h.noteServer(s.ID, "running %s (timeout %s)", commandLine(command, args), secs(timeout))
+	}
 	mcfg := mcpmgr.MCPConfig{
 		ID: s.ID, Name: s.ID, Command: command, Args: args,
 		Env: env, Timeout: int(timeout / time.Second),
 		URL: s.URL, Headers: s.Headers,
+		OnStderr: func(line string) { h.addServerLines(s.ID, []string{line}, true) },
 	}
 	// An OAuth server logs in BEFORE it connects: a login takes as long as
 	// the person does, and must not run inside the handshake's timeout.
 	if oc := h.oauthFor(s); err == nil && oc != nil {
+		phase.set("logging in (OAuth)")
+		h.noteServer(s.ID, "OAuth: checking the login")
 		err = oc.ensure(ctx)
 		mcfg.Authorization, mcfg.OnUnauthorized = oc.Authorization, oc.OnUnauthorized
 	}
 	if err == nil {
+		phase.set("waiting for the handshake")
+		th := time.Now()
 		err = h.mgr.StartServer(ctx, mcfg)
 		if err != nil {
 			err = explainStartErr(ctx, s, err)
+		} else {
+			who := ""
+			if info, ok := h.mgr.ServerInfo(s.ID); ok && (info.Name != "" || info.Version != "") {
+				who = " · " + strings.TrimSpace(info.Name+" "+info.Version)
+			}
+			h.noteServer(s.ID, "handshake done · %s%s", secs(time.Since(th)), who)
 		}
 	}
 	if err == nil {
+		phase.set("waiting for its tools")
 		err = waitServerTools(ctx, h.mgr, s.ID, timeout)
 		if err != nil {
 			h.mgr.StopServer(s.ID) // half-started is worse than not started
@@ -485,6 +517,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		h.lastStart[s.ID] = time.Since(t0)
 	}
 	h.srvMu.Unlock()
+	h.noteStartDone(ctx, s.ID, t0, err)
 	// The tools join before the start stops counting as in flight: WaitServers
 	// returns once nothing is starting, and its caller wants the tools in.
 	h.applyTools()

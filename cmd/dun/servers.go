@@ -644,7 +644,17 @@ func serversProto(states []dun.ServerState) []proto.ServerState {
 			Via: st.Via, Proto: st.Proto, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
 			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
 			Detail: serverDetail(st), Slash: slashOf(st), Starting: st.Starting, StartingSeconds: st.StartingSeconds,
-			Index: st.Index, IndexSeconds: st.IndexSeconds, IndexErr: st.IndexErr, Exclude: st.Exclude})
+			Index: st.Index, IndexSeconds: st.IndexSeconds, IndexErr: st.IndexErr, Exclude: st.Exclude,
+			Hosted: st.Hosted, Cost: st.Cost, Standalone: st.Standalone, Description: st.Description, Title: st.Title,
+			Version: st.Version, Instructions: st.Instructions, Log: logProto(st.Log)})
+	}
+	return out
+}
+
+func logProto(lines []dun.ServerLogLine) []proto.ServerLogLine {
+	out := make([]proto.ServerLogLine, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, proto.ServerLogLine{At: l.At.UnixMilli(), Text: l.Text, Stderr: l.Stderr})
 	}
 	return out
 }
@@ -859,3 +869,7 @@ func runShipCmd(ctx context.Context, h *dun.Harness, action string) string {
 	})
 	return "ship queued — running on next turn"
 }
+
+// activityEvery is how often, at most, a server's activity sends the server
+// list again (main.go's OnServerActivity).
+const activityEvery = 150 * time.Millisecond

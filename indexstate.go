@@ -313,6 +313,14 @@ func (h *Harness) noteIndex(id string, n indexNote) {
 	}
 	h.index[id] = st
 	h.srvMu.Unlock()
+	switch {
+	case n.State == IndexBuilding && (prev == nil || prev.state != IndexBuilding):
+		h.noteServer(id, "building its index")
+	case n.State == IndexReady:
+		h.noteServer(id, "index ready")
+	case n.State == IndexFailed:
+		h.noteServer(id, "index failed: %s", oneLine(n.Error, 300))
+	}
 	if n.State == IndexBuilding {
 		return
 	}

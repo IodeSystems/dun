@@ -452,6 +452,29 @@ type ServerState struct {
 	IndexSeconds float64  `json:"indexSeconds,omitempty"`
 	IndexErr     string   `json:"indexErr,omitempty"`
 	Exclude      []string `json:"exclude,omitempty"`
+	// What /mcp's detail says of it: its schemas' cost in every request
+	// (Cost), what they would cost were it not scripted (Standalone), dun's
+	// line for it (Description) and what it says of itself while it runs
+	// (Title, Version, Instructions).
+	// Hosted: a scripted server the running shell connected.
+	Hosted       bool   `json:"hosted,omitempty"`
+	Cost         int    `json:"cost,omitempty"`
+	Standalone   int    `json:"standalone,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+	// Log is the newest of its activity log, oldest first: dun's steps with
+	// it and the lines it wrote on stderr.
+	Log []ServerLogLine `json:"log,omitempty"`
+}
+
+// ServerLogLine is one line of a server's activity log. At is unix
+// milliseconds.
+type ServerLogLine struct {
+	At     int64  `json:"at"`
+	Text   string `json:"text"`
+	Stderr bool   `json:"stderr,omitempty"`
 }
 
 // ServerEvent reports a server command's outcome and the new server set.

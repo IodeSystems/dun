@@ -639,6 +639,29 @@ func main() {
 			em.emit(catalogEvent(h))
 			em.emit(commandsEvent(h))
 		}
+		// A line in a server's activity log (dun/serverlog.go): the server
+		// list again, so a client shows a start while it is in flight. A
+		// start writes many lines at once (its stderr): one event per
+		// activityEvery at most.
+		var actMu sync.Mutex
+		actDue := false
+		cfg.OnServerActivity = func(string) {
+			actMu.Lock()
+			defer actMu.Unlock()
+			if actDue {
+				return
+			}
+			actDue = true
+			time.AfterFunc(activityEvery, func() {
+				actMu.Lock()
+				actDue = false
+				actMu.Unlock()
+				if h, _ := started.Load().(*dun.Harness); h != nil {
+					em.emit(&proto.ServerEvent{Action: "activity", Servers: serversProto(h.Servers()),
+						Tools: h.ToolNames(), Background: true})
+				}
+			})
+		}
 		// A server's index build ended (dun/indexstate.go): the new state,
 		// and what dun did about it when it did something.
 		cfg.OnServerIndex = func(id, msg string) {
