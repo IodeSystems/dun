@@ -40,6 +40,21 @@ jobs:
           if grep -q PLACEHOLDER release/minisign.pub; then echo "release/minisign.pub is the placeholder: see aw4 issue i_1m5r9bx5a53x000taq6xar"; exit 1; fi
           sudo apt-get update && sudo apt-get install -y minisign
           umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/minisign.key"
+      # The tests start the tools (mcpshell above all), so they run against
+      # the versions this release ships: deps.json's linux_amd64 tarballs,
+      # checked against its sha256.
+      - name: the tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          for t in mcpshell poly-lsp-mcp raglit; do
+            url=$(jq -r --arg t "$t" '.artifacts[$t].files.linux_amd64.url' release/deps.json)
+            sum=$(jq -r --arg t "$t" '.artifacts[$t].files.linux_amd64.sha256' release/deps.json)
+            curl -fsSL -o "$RUNNER_TEMP/$t.tar.gz" "$url"
+            echo "$sum  $RUNNER_TEMP/$t.tar.gz" | sha256sum -c -
+            mkdir -p "$RUNNER_TEMP/$t" && tar -xzf "$RUNNER_TEMP/$t.tar.gz" -C "$RUNNER_TEMP/$t"
+            install -m 0755 "$RUNNER_TEMP/$t/$t" "$RUNNER_TEMP/bin/$t"
+          done
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: test
         run: make test
       - name: build and sign
