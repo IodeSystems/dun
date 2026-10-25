@@ -63,6 +63,9 @@ type switchKind struct {
 	changed func()                   // after a change: rebuild what it feeds
 	about   map[string]string        // each mode in words, for a UI
 	note    func(mode string) string // what to say about the mode in force, or ""
+	// prepare, when set, runs before a mode is saved: what the mode needs
+	// (a summary written), or why it cannot be set.
+	prepare func(mode string) error
 }
 
 // switchScopes is precedence, highest first.
@@ -168,13 +171,14 @@ type SwitchView struct {
 	ModeFrom string            `json:"modeFrom,omitempty"`
 	Modes    map[string]string `json:"modes,omitempty"` // scope → its mode, "" unset
 	About    map[string]string `json:"about,omitempty"` // mode → what it means
+	Order    []string          `json:"order,omitempty"` // the modes, the default first
 	Note     string            `json:"note,omitempty"`
 }
 
 // switchView builds a kind's view.
 func (h *Harness) switchView(k switchKind) SwitchView {
 	set := h.switchSet(k.name)
-	v := SwitchView{Kind: k.name, Modes: map[string]string{}, About: k.about}
+	v := SwitchView{Kind: k.name, Modes: map[string]string{}, About: k.about, Order: k.modes}
 	v.Mode, v.ModeFrom = set.mode(k.modes[0])
 	for _, sc := range switchScopes {
 		v.Modes[sc] = set[sc].Mode
@@ -239,6 +243,11 @@ func (h *Harness) setSwitchMode(k switchKind, mode, scope string) (string, error
 	if mode != "" && !containsStr(k.modes, mode) {
 		return "", fmt.Errorf("mode %q: want %s", mode, strings.Join(k.modes, " or "))
 	}
+	if k.prepare != nil && mode != "" {
+		if err := k.prepare(mode); err != nil {
+			return "", err
+		}
+	}
 	if err := h.editSwitchFile(k.name, scope, func(f *SwitchFile) { f.Mode = mode }); err != nil {
 		return "", err
 	}
@@ -295,7 +304,7 @@ func containsStr(list []string, s string) bool {
 
 // switchKinds are the kinds a client can switch, by name.
 func (h *Harness) switchKinds() map[string]switchKind {
-	return map[string]switchKind{"skills": h.skillKind()}
+	return map[string]switchKind{"skills": h.skillKind(), contextFilesKind: h.contextFileKind()}
 }
 
 // SwitchView is a kind's view for a UI; ok=false for an unknown kind.

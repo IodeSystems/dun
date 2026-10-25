@@ -727,6 +727,7 @@ type Switches struct {
 	ModeFrom string            `json:"modeFrom,omitempty"`
 	Modes    map[string]string `json:"modes,omitempty"`
 	About    map[string]string `json:"about,omitempty"`
+	Order    []string          `json:"order,omitempty"` // the modes, the default first
 	Note     string            `json:"note,omitempty"`
 	Message  string            `json:"message,omitempty"`
 }

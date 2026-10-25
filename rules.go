@@ -79,10 +79,13 @@ type rulesDoc struct {
 	Note string // why it is missing, unread or cut
 }
 
-// rulesSet is the root files and, in reading order, what they import.
+// rulesSet is the root files and, in reading order, what they import. Off
+// is the files /context-file switched off (contextfiles.go): out of every
+// request, named in the block, and in the rules index when there is one.
 type rulesSet struct {
 	Roots   []rulesDoc
 	Imports []rulesDoc
+	Off     []rulesDoc
 }
 
 // rulesLoader reads one rulesSet.
@@ -388,7 +391,7 @@ func (s rulesSet) files(mode string) []ContextPart {
 // summary text) or index. "" when there is no root file.
 func (s rulesSet) render(mode, summary string) string {
 	if len(s.Roots) == 0 {
-		return ""
+		return s.offSection() // every root switched off: only their names
 	}
 	var b strings.Builder
 	b.WriteString("\n\n## Project rules (" + s.rootNames() + ")\n\n" +
@@ -434,6 +437,22 @@ func (s rulesSet) render(mode, summary string) string {
 				b.WriteString("\n\n(" + d.Note + ")")
 			}
 		}
+	}
+	b.WriteString(s.offSection())
+	return b.String()
+}
+
+// offSection names the files switched off, "" when none is.
+func (s rulesSet) offSection() string {
+	if len(s.Off) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n### Rule files kept out of these instructions\n\nThe user switched these files off " +
+		"(/context-file): they are not copied here. They are in the docs index when it runs, so a part that " +
+		"matches what you are doing is surfaced to you; read one when you need it.")
+	for _, d := range s.Off {
+		b.WriteString("\n- " + d.Name)
 	}
 	return b.String()
 }
@@ -515,13 +534,14 @@ func effectiveMode(st rulesState, set rulesSet, docsOn bool) string {
 // the docs server runs (index mode needs it). On a root session it also
 // makes the size offer.
 func (h *Harness) rulesBlock(docsOn bool) (string, string, rulesSet) {
-	set := loadRules(h.cfg.Workspace)
-	if len(set.Roots) == 0 {
+	set := h.switchRules(loadRules(h.cfg.Workspace))
+	if len(set.Roots) == 0 && len(set.Off) == 0 {
 		return "", "", set
 	}
 	h.rulesMu.Lock()
 	st := h.readRulesState()
 	h.rulesMu.Unlock()
+	st.Mode = h.contextFileMode(st.Mode)
 	mode := effectiveMode(st, set, docsOn)
 	summary := ""
 	if mode == RulesSummary {
@@ -552,6 +572,13 @@ func (h *Harness) rulesBlock(docsOn bool) (string, string, rulesSet) {
 // read, in index mode, else nothing.
 func rulesIndexWant(set rulesSet, mode string) map[string]string {
 	want := map[string]string{}
+	// A file switched off is indexed whatever the mode: that is how it is
+	// still found.
+	for _, d := range set.Off {
+		if st, err := os.Stat(d.Path); err == nil && d.Text != "" {
+			want[d.Path] = fmt.Sprintf("%d %d", st.Size(), st.ModTime().UnixNano())
+		}
+	}
 	if mode != RulesIndex {
 		return want
 	}
@@ -728,25 +755,8 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 			return "", fmt.Errorf("index mode needs the docs index: /raglit on first")
 		}
 	case RulesSummary:
-		if !set.importedText() {
-			return "", fmt.Errorf("the root rules import no files: there is nothing to condense")
-		}
-		h.rulesMu.Lock()
-		st := h.readRulesState()
-		h.rulesMu.Unlock()
-		if st.Summary == nil || st.Summary.Hash != set.importsHash() {
-			text, err := h.summarizeRules(ctx, set)
-			if err != nil {
-				return "", err
-			}
-			full := h.meter.Estimate(set.render(RulesFull, ""))
-			if cond := h.meter.Estimate(set.render(RulesSummary, text)); cond >= full {
-				return "", fmt.Errorf("the summary (~%s tokens) is not smaller than the files (~%s): kept mode full", Grouped(cond), Grouped(full))
-			}
-			hash := set.importsHash()
-			if err := h.updateRulesState(func(s *rulesState) { s.Summary = &rulesSummary{Hash: hash, Text: text} }); err != nil {
-				return "", err
-			}
+		if err := h.ensureRulesSummary(ctx, set); err != nil {
+			return "", err
 		}
 	default:
 		return "", fmt.Errorf("usage: /rules [full|summary|index]")
@@ -818,4 +828,28 @@ func (h *Harness) summarizeRules(ctx context.Context, set rulesSet) (string, err
 		return "", fmt.Errorf("the model returned no summary")
 	}
 	return text, nil
+}
+
+// ensureRulesSummary writes the imports' summary when there is none for
+// their current content. It does not change the mode.
+func (h *Harness) ensureRulesSummary(ctx context.Context, set rulesSet) error {
+	if !set.importedText() {
+		return fmt.Errorf("the root rules import no files: there is nothing to condense")
+	}
+	h.rulesMu.Lock()
+	st := h.readRulesState()
+	h.rulesMu.Unlock()
+	if st.Summary != nil && st.Summary.Hash == set.importsHash() {
+		return nil
+	}
+	text, err := h.summarizeRules(ctx, set)
+	if err != nil {
+		return err
+	}
+	full := h.meter.Estimate(set.render(RulesFull, ""))
+	if cond := h.meter.Estimate(set.render(RulesSummary, text)); cond >= full {
+		return fmt.Errorf("the summary (~%s tokens) is not smaller than the files (~%s): kept mode full", Grouped(cond), Grouped(full))
+	}
+	hash := set.importsHash()
+	return h.updateRulesState(func(s *rulesState) { s.Summary = &rulesSummary{Hash: hash, Text: text} })
 }

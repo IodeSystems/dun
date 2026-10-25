@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -41,6 +42,7 @@ type switchListView struct {
 	modeFrom string
 	modes    map[string]string // scope → its mode
 	about    map[string]string // mode → what it means
+	order    []string          // the modes, the default first
 	note     string
 	query    string
 }
@@ -90,9 +92,11 @@ func (v *switchListView) page() pageDoc {
 	if v.modeFrom != "" {
 		mode += " (" + v.modeFrom + ")"
 	}
+	// What the items that are on cost, in the kind's default mode (the
+	// first): another mode sends less, and the row says so.
 	cost0 := fmt.Sprintf("~%s tokens in every request", kTokens(cost))
-	if v.kind == "skills" && v.mode != "listed" {
-		cost0 = "0 tokens in every request (~" + kTokens(cost) + " when listed)"
+	if len(v.order) > 0 && v.mode != v.order[0] {
+		cost0 = fmt.Sprintf("~%s tokens in mode %s", kTokens(cost), v.order[0])
 	}
 	title := fmt.Sprintf("%s · %d of %d on · %s · %s", v.kind, on, len(v.rows), mode, cost0)
 	shown := v.shown()
@@ -174,6 +178,11 @@ func (m tuiModel) noteSwitches(ev evMsg) tuiModel {
 	kind, msg := str(ev["kind"]), strings.TrimSpace(str(ev["message"]))
 	fresh := &switchListView{kind: kind, mode: str(ev["mode"]), modeFrom: str(ev["modeFrom"]), note: str(ev["note"]),
 		modes: strMap(ev["modes"]), about: strMap(ev["about"])}
+	if o, ok := ev["order"].([]any); ok {
+		for _, x := range o {
+			fresh.order = append(fresh.order, str(x))
+		}
+	}
 	if items, ok := ev["items"].([]any); ok {
 		for _, it := range items {
 			o, _ := it.(map[string]any)
@@ -243,8 +252,17 @@ func (m *tuiModel) switchKey(v *switchListView, k, text string) bool {
 			send(nextTri(r.session) + " " + r.name + " --session")
 		}
 		return true
-	case "tab":
-		next := map[string]string{"": "listed", "listed": "surfaced", "surfaced": "unset"}[v.modes["session"]]
+	case "tab": // the session's mode: each in turn, then unset
+		if len(v.order) == 0 {
+			return true
+		}
+		next := v.order[0]
+		if i := slices.Index(v.order, v.modes["session"]); i >= 0 {
+			next = "unset"
+			if i+1 < len(v.order) {
+				next = v.order[i+1]
+			}
+		}
 		send("mode " + next + " --session")
 		return true
 	case "backspace":

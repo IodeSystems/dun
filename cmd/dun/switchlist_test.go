@@ -26,7 +26,7 @@ func TestSwitchList_Skills(t *testing.T) {
 	items = append(items, map[string]any{"name": "pdf-fill", "description": "fill PDF forms", "source": "user",
 		"tokens": float64(40), "on": false, "from": "global", "global": "off"})
 	ev := map[string]any{"type": "switches", "kind": "skills", "mode": "listed", "items": items,
-		"about": map[string]any{"listed": "in every request", "surfaced": "offered when a turn fits"}}
+		"about": map[string]any{"listed": "in every request", "surfaced": "offered when a turn fits"}, "order": []any{"listed", "surfaced"}}
 	v.m.openSwitches("skills")
 	if !strings.Contains(rec.String(), `"switches"`) {
 		t.Fatalf("not asked: %s", rec.String())

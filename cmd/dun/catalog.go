@@ -54,7 +54,7 @@ var groupOrder = []string{"setup", "tools", "session", "git", "memory", "prompts
 
 var tuiGroup = map[string]string{
 	"login": "setup", "model": "setup", "mcp add": "setup", "help": "setup", "config": "setup", "logout": "setup",
-	"skill":  "tools",
+	"skill": "tools", "context-file": "tools",
 	"status": "session", "context": "session", "resume": "session", "new": "session", "persist": "session", "exit": "session",
 	"reconnect": "client", "mouse": "client",
 	"reload": "maintenance", "upgrade": "maintenance", "perf": "maintenance", "repaint": "maintenance",
@@ -360,4 +360,22 @@ func skillVerb(skills []catalogSkill, a string) bool {
 		return !slices.ContainsFunc(skills, func(s catalogSkill) bool { return s.Name == a })
 	}
 	return false
+}
+
+// contextFileSlash is /context-file: bare opens the switch list; on|off|unset
+// with a file or glob, or mode with a mode, does it; one missing what it needs
+// opens the list (switchlist.go, docs/ui-decisions.md).
+func contextFileSlash(m *tuiModel, args []string) tea.Cmd {
+	if len(args) >= 2 && slices.Contains([]string{"on", "off", "unset", "mode"}, args[0]) {
+		if !m.proc.controlCmd("switches", "context-files "+strings.Join(args, " ")) {
+			m.append(stErr.Render("no engine right now — /reconnect first"))
+		}
+		return nil
+	}
+	if len(args) > 0 && !slices.Contains([]string{"on", "off", "unset", "mode", "info"}, args[0]) {
+		m.append(stErr.Render("usage: /context-file [on|off|unset <file|glob> [--scope] | mode full|summary|index|unset [--scope]]"))
+		return nil
+	}
+	m.openSwitches("context-files")
+	return nil
 }
