@@ -109,10 +109,15 @@ func (v *switchListView) lines(_ *tuiModel, w int) []string {
 		cost0 = fmt.Sprintf("~%s tokens in mode %s", kTokens(cost), v.order[0])
 	}
 	var out []string
-	out = append(out, wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+fmt.Sprintf("%d of %d on · mode %s", on, len(v.rows), mode), w)...)
-	out = append(out, wrapToRows(cost0, w)...)
-	if about := v.about[v.mode]; about != "" {
-		out = append(out, wrapToRows(stDim.Render(v.mode+": "+about), w)...)
+	if w < narrowW { // two rows on a phone: what it is and what it costs, then its facts
+		out = append(out, wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+
+			fmt.Sprintf("%d/%d on · %s · ~%s tok", on, len(v.rows), mode, kTokens(cost)), w)...)
+	} else {
+		out = append(out, wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+fmt.Sprintf("%d of %d on · mode %s", on, len(v.rows), mode), w)...)
+		out = append(out, wrapToRows(cost0, w)...)
+		if about := v.about[v.mode]; about != "" {
+			out = append(out, wrapToRows(stDim.Render(v.mode+": "+about), w)...)
+		}
 	}
 	for _, s := range v.status {
 		out = append(out, wrapToRows(stDim.Render(s), w)...)
@@ -141,13 +146,26 @@ func (v *switchListView) page() pageDoc {
 		cells := fmt.Sprintf("g%s p%s s%s", cellMark(r.global), cellMark(r.project), cellMark(r.session))
 		head := fmt.Sprintf("%s %s  ~%s tok  %s  %s  %s", mark, r.name, kTokens(r.tokens), cells, r.source, first)
 		sub := ""
-		if narrow { // the name alone above; switches, cost and where it is from below
+		if narrow {
+			// The name above; below, what it costs, where it is from and
+			// what it is. The switch is said only when one is set: an
+			// unset row is on by default, and three dashes on every row
+			// were noise (USER 2026-10-25, a phone).
 			head = mark + " " + r.name
-			sub = fmt.Sprintf("%s · ~%s tok · %s", cells, kTokens(r.tokens), r.source)
+			sub = fmt.Sprintf("~%s tok · %s", kTokens(r.tokens), r.source)
+			if r.from != "" {
+				sub = onOff(r.on) + " " + scopeIn(r.from) + " · " + sub
+			}
+			if first != "" {
+				sub += " · " + first
+			}
 		}
 		body := onOff(r.on)
 		if r.from != "" {
 			body += " (switched " + scopeIn(r.from) + ")"
+		}
+		if narrow { // each scope's switch, in words: the row's second line has only the one that decided
+			body += "\nglobal " + cellWord(r.global) + " · project " + cellWord(r.project) + " · session " + cellWord(r.session)
 		}
 		if r.detail != "" {
 			body += "\n" + r.detail
@@ -161,8 +179,12 @@ func (v *switchListView) page() pageDoc {
 	return pageDoc{title: title, nodes: nodes}
 }
 
-// hint is the status line while the view is open.
+// hint is the status line while the view is open; narrow, the keys alone,
+// short enough to fit a phone (fitHints would keep only the first and last).
 func (v *switchListView) hint() string {
+	if v.width > 0 && v.width < narrowW {
+		return "␣ on/off · ^g ^p ^s scopes · tab mode · esc"
+	}
 	about := v.about[v.mode]
 	if about != "" {
 		about = " · " + v.mode + ": " + about

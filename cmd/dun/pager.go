@@ -275,7 +275,11 @@ func (p pager) view(w, h int) string {
 	bodyH := max(1, h-1)
 	off := min(max(p.off, 0), max(0, len(p.rows)-bodyH))
 	pos := "all"
-	if len(p.rows) > bodyH {
+	switch {
+	case len(p.rows) <= bodyH:
+	case p.tree() && len(p.doc.nodes) > 0: // where the selection is, in items, not rows
+		pos = fmt.Sprintf("%d of %d", p.cur+1, len(p.doc.nodes))
+	default:
 		pos = fmt.Sprintf("%d–%d of %d", off+1, min(off+bodyH, len(p.rows)), len(p.rows))
 	}
 	title, _ := fitPlain(p.doc.title, max(1, w-len(pos)-2))

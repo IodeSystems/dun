@@ -130,7 +130,7 @@ func TestRulesScreen_StatusPaneAndNarrowRows(t *testing.T) {
 		"status": []any{"docs index (raglit): off · /raglit on to search files switched off, and for mode index"},
 		"items": []any{
 			map[string]any{"name": "CLAUDE.md", "source": "root", "tokens": float64(1200), "on": true},
-			map[string]any{"name": "docs/design.md", "source": "import", "tokens": float64(3100), "on": false, "project": "off"},
+			map[string]any{"name": "docs/design.md", "source": "import", "tokens": float64(3100), "on": false, "project": "off", "from": "project"},
 		}}
 	for _, w := range []int{100, 48} {
 		m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
@@ -142,7 +142,11 @@ func TestRulesScreen_StatusPaneAndNarrowRows(t *testing.T) {
 			t.Fatalf("%d: no screen", w)
 		}
 		plain := ansi.Strip(m.drawView())
-		for _, want := range []string{"/rules · 1 of 2 on · mode full", "~1.2k tokens in every request", "docs index (raglit): off", "⚠ the docs index is off"} {
+		wants := []string{"/rules · 1 of 2 on · mode full", "~1.2k tokens in every request", "docs index (raglit): off", "⚠ the docs index is off"}
+		if w < narrowW { // two rows: what it is and costs, then its facts
+			wants = []string{"/rules · 1/2 on · full · ~1.2k tok", "docs index (raglit): off", "⚠ the docs index is off"}
+		}
+		for _, want := range wants {
 			if !strings.Contains(strings.ReplaceAll(plain, "\n", " "), want) {
 				t.Errorf("%d: status lacks %q:\n%s", w, want, plain)
 			}
@@ -154,7 +158,9 @@ func TestRulesScreen_StatusPaneAndNarrowRows(t *testing.T) {
 		for _, l := range strings.Split(plain, "\n") {
 			two = two || strings.HasSuffix(strings.TrimSpace(l), "● CLAUDE.md")
 		}
-		two = two && strings.Contains(plain, "g– p– s– · ~1.2k tok · root")
+		// Narrow, the second line: cost and source, and the switch only
+		// where one is set.
+		two = two && strings.Contains(plain, "    ~1.2k tok · root") && strings.Contains(plain, "off for this project · ~3.1k tok · import")
 		if (w < narrowW) != two {
 			t.Errorf("%d: two-line rows %v:\n%s", w, two, plain)
 		}
