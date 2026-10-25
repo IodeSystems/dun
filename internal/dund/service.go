@@ -158,6 +158,13 @@ func (s *Service) isClosing() bool {
 // resume, when set, adopts that existing conversation; if the service already
 // has it, its id comes back (to a member) and nothing is spawned.
 func (s *Service) Create(principal, workspace string, args []string, resume string) (string, error) {
+	return s.create(principal, workspace, args, resume, false)
+}
+
+// create is Create; claimed hands the new session out as taken (claim), set
+// before it is in s.sessions where CreateOrReuse looks: claimed after, a
+// second client asking in between got the same session.
+func (s *Service) create(principal, workspace string, args []string, resume string, claimed bool) (string, error) {
 	if err := checkArgs(args); err != nil {
 		return "", err
 	}
@@ -238,7 +245,13 @@ func (s *Service) Create(principal, workspace string, args []string, resume stri
 		ses.log.Append(ev)
 	}
 	ses.attach(eng, sc)
+	if claimed {
+		ses.claimed = time.Now()
+	}
 	ses.mu.Unlock()
+	if claimed {
+		ses.touch() // as claim does: the hold counts from now
+	}
 
 	s.mu.Lock()
 	s.sessions[n.id] = ses
@@ -284,13 +297,8 @@ func (s *Service) CreateOrReuse(principal, workspace string, args []string) (id 
 	if pick != nil {
 		return pick.id, true, nil
 	}
-	id, err = s.Create(principal, workspace, args, "")
-	if err == nil {
-		// A new session is taken too, until its creator subscribes.
-		if ses, gerr := s.Get(principal, id); gerr == nil {
-			ses.claim()
-		}
-	}
+	// A new session is taken too, until its creator subscribes.
+	id, err = s.create(principal, workspace, args, "", true)
 	return id, false, err
 }
 
