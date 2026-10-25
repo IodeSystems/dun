@@ -25,14 +25,18 @@ var Supported = []Tool{
 		Min: "v0.2.0", Recommended: "v0.5.1"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
-	// tree-sitter, so go install needs Go alone. Recommended v0.1.0
-	// (6dab491), its first release, tarballs in deps.json: git decides the
-	// file set, leftOutBy, "not a project", the doctor update block, and the
-	// shared daemon dun runs it through (the proxy keeps the hook, changed
-	// options rebuild a root, roots are released after their last client, a
-	// root outside $HOME is admitted).
+	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
+	// release: git decides the file set, leftOutBy, "not a project", the
+	// doctor update block, and the shared daemon dun runs it through (the
+	// proxy keeps the hook, changed options rebuild a root, roots are
+	// released after their last client, a root outside $HOME is admitted).
+	// Recommended v0.2.0 (16f2a76, 2026-10-24), tarballs in deps.json: daemon
+	// mode is the default (dun still passes --daemon; in-process-only flags
+	// are ignored with a log line, and a daemon that cannot start falls back
+	// to in-process), and --daemon-home / $POLY_LSP_HOME, which dun's tests
+	// set.
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.1.0"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.2.0"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /raglit setup and
 	// doctor read. Recommended v0.1.0 (a32c5db): raglit's first release, its
