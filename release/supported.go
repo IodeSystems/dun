@@ -43,10 +43,13 @@ var Supported = []Tool{
 		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.2.0"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /raglit setup and
-	// doctor read. Recommended v0.1.0 (a32c5db): raglit's first release, its
-	// tarballs in deps.json.
+	// doctor read. v0.1.0 (a32c5db): raglit's first release. Recommended
+	// v0.2.0 (574d91e, 2026-10-25), tarballs in deps.json: no flag, MCP tool,
+	// notification or doctor --json change; /api/settings/models, which
+	// /raglit setup uses, is unchanged; a Markdown file's first heading is
+	// its title on (re)ingest.
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.1.0"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.2.0"},
 }
 
 // Tool is one Supported entry.
