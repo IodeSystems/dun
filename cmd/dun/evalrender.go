@@ -245,17 +245,19 @@ func evalFailLines(result string) []string {
 }
 
 func evalRender(rc renderCtx) (string, string) {
-	if msg, failed := evalError(rc.result); failed {
-		return evalErrorRender(msg, evalCode(rc.args), rc.width)
+	result, warns := evalWarnings(rc.result)
+	if msg, failed := evalError(result); failed {
+		pv, body := evalErrorRender(msg, evalCode(rc.args), rc.width)
+		return pv, withWarnings(body, warns)
 	}
-	r := strings.TrimRight(rc.result, "\n")
+	r := strings.TrimRight(result, "\n")
 	if strings.TrimSpace(r) == "" {
-		return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" (no output)"), ""
+		return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" (no output)"), withWarnings("", warns)
 	}
 	v, parsed := parseShellValue(r)
 	if !parsed {
 		// A string result is shown bare; it is just text.
-		return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" "+evalShape(nil, r)), stSecondary.Render(r)
+		return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" "+evalShape(nil, r)), withWarnings(stSecondary.Render(r), warns)
 	}
 	w := max(20, rc.width-6)
 	body := ""
@@ -264,7 +266,33 @@ func evalRender(rc renderCtx) (string, string) {
 	} else {
 		body = strings.Join(prettyValue(v, 0, w), "\n")
 	}
-	return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" "+evalShape(v, r)), body
+	return stDim.Render("  → ") + stTool.Render("✓") + stSecondary.Render(" "+evalShape(v, r)), withWarnings(body, warns)
+}
+
+// evalWarnings takes the "warning: line N: …" lines mcpshell (v0.6.0)
+// appends after a value or an error off the end of a result, so the value
+// still parses (a table stays a table).
+func evalWarnings(result string) (string, []string) {
+	lines := strings.Split(strings.TrimRight(result, "\n"), "\n")
+	end := len(lines)
+	for end > 0 && strings.HasPrefix(lines[end-1], "warning: line ") {
+		end--
+	}
+	if end == len(lines) {
+		return result, nil
+	}
+	return strings.Join(lines[:end], "\n"), lines[end:]
+}
+
+// withWarnings is body with the warnings under it, in the attention colour.
+func withWarnings(body string, warns []string) string {
+	for _, w := range warns {
+		if body != "" {
+			body += "\n"
+		}
+		body += stNote.Render(w)
+	}
+	return body
 }
 
 // evalShape is the preview's word for a result: how many rows, items or

@@ -177,3 +177,17 @@ func TestEvalFailLines(t *testing.T) {
 		t.Errorf("runtime error: %q", got)
 	}
 }
+
+// mcpshell v0.6.0 may end a result with "warning: line N: …" lines: the
+// value still parses (a table stays a table) and the warnings show under it.
+func TestEvalRender_TrailingWarnings(t *testing.T) {
+	f := evalFixtures(t)["records"]
+	res := asDunSees(f) + "\nwarning: line 1: 'all' shadows a built-in"
+	pv, body := evalRender(renderCtx{tool: "eval", args: map[string]any{"code": f.Code}, result: res, width: 100})
+	if !strings.Contains(stripANSI(pv), "✓ 3 rows") || !strings.Contains(stripANSI(body), "warning: line 1: 'all' shadows a built-in") {
+		t.Errorf("preview %q\nbody:\n%s", stripANSI(pv), stripANSI(body))
+	}
+	if r, w := evalWarnings("ERROR: boom\nwarning: line 2: x"); r != "ERROR: boom" || len(w) != 1 {
+		t.Errorf("after an error: %q %q", r, w)
+	}
+}
