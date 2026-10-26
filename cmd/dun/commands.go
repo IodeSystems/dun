@@ -174,6 +174,11 @@ func ownCommands(docker bool) []proto.CommandSpec {
 				"on", "a file (or glob) back in every request", "off", "a file (or glob) out of every request, still found through the docs index",
 				"unset", "a file's switch at a scope, back to the one below"),
 			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone, each file's cost, its switch at each scope and the mode; a mode word sets the project's mode"},
+		{Name: "effort", Usage: "[default|off|low|medium|high]", Group: "session",
+			Choices: choices(dun.EffortDefault, dun.EffortAbout[dun.EffortDefault], dun.EffortOff, dun.EffortAbout[dun.EffortOff],
+				dun.EffortLow, dun.EffortAbout[dun.EffortLow], dun.EffortMedium, dun.EffortAbout[dun.EffortMedium],
+				dun.EffortHigh, dun.EffortAbout[dun.EffortHigh]),
+			State: effortLevel, Description: "how much the model thinks before it answers: alone picks a level; saved for every session"},
 		{Name: "suggest", Usage: "[on|off|auto]", Group: "session", Choices: choices("on", "always", "off", "never", "auto", "when idle"),
 			State: suggestMode, Description: "next-message suggestions: alone asks for some now, on/off/auto set the mode"},
 		{Name: "rephrase", Usage: "[on|off|status]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", ""),
@@ -408,6 +413,8 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("rephrase: " + onOff(rephraseOn))
 		}
+	case "effort":
+		r.control(name, arg(0))
 	case "suggest":
 		r.control(name, arg(0))
 		switch arg(0) {

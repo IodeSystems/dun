@@ -1208,6 +1208,23 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go func() { em.emit(switchesEvent(h, action)) }()
 			return
 		}
+		// /effort: bare says the level; a level is set, saved, and applies
+		// from the next request (dun/effort.go).
+		if id == "effort" {
+			msg := "effort: " + h.Effort() + " — " + dun.EffortAbout[h.Effort()]
+			if action != "" {
+				if err := h.SetEffort(action); err != nil {
+					msg = "effort: " + err.Error()
+				} else {
+					effortLevel = h.Effort()
+					msg = "effort: " + effortLevel + " — " + dun.EffortAbout[effortLevel] + " (saved; from the next request)"
+					h.Aside("[control/effort] " + msg)
+				}
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			em.emit(commandsEvent(h))
+			return
+		}
 		// /rules: bare reports; "full|summary|index" saves the project's
 		// mode (with a scope, that scope's); on|off|unset <file> and mode
 		// <mode> [--scope] are the rules switches' (switchesengine.go).
@@ -1889,6 +1906,9 @@ var rephraseOn bool
 // (idle with an empty input). One value per session, shared by every client;
 // /suggest on|off|auto sets it.
 var suggestMode = "auto"
+
+// effortLevel is /effort's level, for the command list's state (dun/effort.go).
+var effortLevel = dun.LoadEffort()
 
 // engineModel, engineURL and engineProvider are what this engine runs on, for
 // the settings event. Set once at start.

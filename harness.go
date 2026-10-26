@@ -511,7 +511,9 @@ type Harness struct {
 	startStop map[string]context.CancelCauseFunc
 	// reloads counts reloadServers calls in flight, starts included: what
 	// follows a reload (indexstate.go's retry) waits for none to be.
-	reloads   atomic.Int32
+	reloads atomic.Int32
+	// effort is /effort's level (effort.go), applied on every request.
+	effort    atomic.Value
 	closed    chan struct{}
 	closeOnce sync.Once
 	// ingestNote is the last workspace ingest's summary, for /raglit and the
@@ -1262,6 +1264,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		cfg: cfg, specs: servers, sessSw: sessSw, exts: exts, extErrs: extErrs, lastErr: map[string]string{}, lastStart: map[string]time.Duration{}, starting: map[string]time.Time{}, closed: make(chan struct{}),
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
+	h.effort.Store(LoadEffort()) // /effort's saved level (effort.go)
 	// A resumed session's history is not this session's to act on: the
 	// memory triggers look only at what arrives from here on.
 	h.markTriggerScan()
@@ -2392,6 +2395,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		// window from startup, the prompt from the line above. See outbudget.go.
 		window := h.windowTokens()
 		gen, ok := applyGeneration(h.Session.ChatOpts, window, est)
+		applyEffort(h.Session.ChatOpts, h.Effort()) // /effort: thinking on, off or the server's
 		room := "no window known, response uncapped"
 		if window > 0 {
 			room = fmt.Sprintf("response capped at %d (%d left in the %d window)",
