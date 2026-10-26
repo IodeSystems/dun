@@ -31,7 +31,7 @@ DUN_BIN := $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/dun/dun
 # Where `make web` installs the built client that dund serves (--web-root).
 WEB_ROOT := $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/dun/web
 
-.PHONY: build install install-launcher run test clean schema web ux release
+.PHONY: build install install-launcher run test clean schema web ux release site site-push
 
 build: ## build ./dun (version + source stamped)
 	go build -ldflags "$(LDFLAGS)" -o dun ./cmd/dun
@@ -114,6 +114,25 @@ release: ## release builds + signed dun-manifest.json → dist/<version>/ (RELEA
 		echo; echo "WARNING: dun-manifest.json is NOT SIGNED (set MINISIGN_KEY and install minisign): no release build will accept it"; echo; \
 	fi
 	@ls -l $(RELEASE_DIR)
+
+# dun.iodesystems.com (docs/registry.md), served by hz as a static service:
+# the page and the registry index, signed with the release key. hz's API is
+# on the home network, so the push runs here, not in CI. The entries'
+# sources are not published, only the index.
+SITE_DIR := dist/site
+
+site: ## the site and the signed registry → dist/site (MINISIGN_KEY=…, minisign on PATH)
+	@test -n "$(MINISIGN_KEY)" || { echo "make site: MINISIGN_KEY names the release key's secret file"; exit 1; }
+	rm -rf $(SITE_DIR) && mkdir -p $(SITE_DIR)
+	cp -r site/. $(SITE_DIR)/
+	rm -rf $(SITE_DIR)/registry/v1/extensions $(SITE_DIR)/registry/v1/presets $(SITE_DIR)/registry/v1/tools
+	go run ./tools/mkregistry -src site/registry/v1 -root . -o $(SITE_DIR)/registry/v1/index.json
+	minisign -S -s "$(MINISIGN_KEY)" -m $(SITE_DIR)/registry/v1/index.json -t "dun registry"
+	minisign -V -p release/minisign.pub -m $(SITE_DIR)/registry/v1/index.json
+
+site-push: site ## build, sign and push dist/site to hz (HZ_URL, HZ_TOKEN: the site service's; hz-client on PATH)
+	@test -n "$$HZ_URL" && test -n "$$HZ_TOKEN" || { echo "make site-push: HZ_URL and HZ_TOKEN (the site service's Integration panel in hz)"; exit 1; }
+	hz-client site push $(SITE_DIR)
 
 clean:
 	rm -f ./dun

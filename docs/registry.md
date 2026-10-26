@@ -3,8 +3,9 @@
 USER 2026-10-26: a site for dun, like homelab-horizon.iodesystems.com, that
 is also where dun gets its extension manifests, MCP presets and tool pins
 from, so a change to one of them is not a dun release. Owner's calls:
-GitHub Pages, source in `site/` in this repo, and the registry carries
-extensions, MCP presets and tool pins.
+served by hz, as homelab-horizon's own page is (first GitHub Pages; the
+owner changed it the same day), source in `site/` in this repo, and the
+registry carries extensions, MCP presets and tool pins.
 
 ## Why
 
@@ -82,12 +83,15 @@ key (`release/minisign.pub`, with the updater's key rotation).
   `presets/playwright/1.0.0.json`, `tools/raglit/1.0.0.json`).
   `tools/mkregistry` checks each against this dun (it parses, its ranges
   parse, an extension manifest loads) and writes `index.json`.
-- `.github/workflows/site.yml`: on a push to main that touches `site/`, or
-  by hand: build the registry, sign it with `MINISIGN_SECRET_KEY`, verify
-  it with the committed key, and deploy to GitHub Pages.
-- Owner's steps: turn on Pages for the repo with GitHub Actions as its
-  source and `dun.iodesystems.com` as its domain, and add the DNS record
-  (CNAME `dun.iodesystems.com` → `iodesystems.github.io`).
+- `make site` builds `dist/site` (the page, the index), signs the index
+  with the release key (`MINISIGN_KEY`) and verifies it with
+  `release/minisign.pub`; `make site-push` uploads it with `hz-client site
+  push` (`HZ_URL`, `HZ_TOKEN`), an atomic swap with rollback. It runs here:
+  hz's API is on the home network, out of CI's reach.
+- Owner's step, once: in hz, a static service `dun-site` with domain
+  `dun.iodesystems.com`, `external_dns` on and
+  `"proxy": {"static_root": "/var/lib/homelab-horizon/dun"}`; its token is
+  in the service's Integration panel.
 
 ## Order of work
 
@@ -103,8 +107,8 @@ key (`release/minisign.pub`, with the updater's key rotation).
 3. Done: `site/index.html`; the entries for today's built-in manifests
    (by `manifest_file`, so the repo's file is the one source), presets and
    pins (downloads `files_from` release/deps.json); `tools/mkregistry`,
-   whose test builds the real entries in `make test`; and
-   `.github/workflows/site.yml`. Checked locally: the built index signed
-   with the minisign CLI verifies with dun's own verifier.
-4. The owner turns on Pages and adds the DNS record; then the first
-   registry is published and checked from a dun build.
+   whose test builds the real entries in `make test`; `make site` and
+   `make site-push`. Checked locally: the built index signed with the
+   minisign CLI verifies with dun's own verifier.
+4. The owner adds the hz static service; then `make site-push` publishes
+   the first registry, and a dun build is checked against it.
