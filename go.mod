@@ -33,6 +33,7 @@ require (
 require (
 	connectrpc.com/connect v1.21.1 // indirect
 	github.com/IodeSystems/graphql-go/v2 v2.0.1 // indirect
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect

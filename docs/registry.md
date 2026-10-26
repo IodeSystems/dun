@@ -1,4 +1,4 @@
-# dun.iodesystems.com and the registry (design)
+# dun.iodesystems.com and the registry
 
 USER 2026-10-26: a site for dun, like homelab-horizon.iodesystems.com, that
 is also where dun gets its extension manifests, MCP presets and tool pins
@@ -63,6 +63,12 @@ key (`release/minisign.pub`, with the updater's key rotation).
   built-in ones (never lowers them); `dun doctor --fix` downloads from its
   files, sha256 checked, as from deps.json now.
 - A dev build (`dun dev`) takes entries regardless of their `dun` range.
+- Every build reads the registry, a dev build too (you run one): the key
+  and the registry's address are compiled into all builds
+  (`release/key.go`). That is not the download location the release-only
+  rule keeps out of dev builds: the tool files an entry names are
+  downloaded by release builds only, as deps.json's are; a dev build's
+  `doctor --fix` keeps using `go install`.
 - `/ext` and `dun doctor` say where each manifest came from: built in, or
   registry entry and version.
 
@@ -85,7 +91,8 @@ key (`release/minisign.pub`, with the updater's key rotation).
 
 ## Order of work
 
-1. `internal/registry`: the format, npm ranges, verify, cache, resolve.
+1. Done: `internal/registry`: the format, npm ranges (Masterminds/semver),
+   verify, the cache, which entry fits.
 2. dun reads it: extensions, presets, tool pins, and says where each came
    from.
 3. `site/`: the page, the entries for today's built-in manifests, presets
