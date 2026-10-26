@@ -20,9 +20,13 @@ var Supported = []Tool{
 	// over-limit output is saved to a file; per-server unchecked globs, which
 	// a server spec's "shell" block passes; and each hosted server's schema
 	// and help sizes, which /mcp info's savings read. Its tarballs are in
-	// deps.json.
+	// deps.json. v0.6.0 (de7d047, 2026-10-25), tarballs in deps.json:
+	// help("ns") lists every tool (up to 16 KB, so /mcp info's help cost
+	// grows); a truncated value is kept as $rN; results may end with
+	// "warning: line N: …" lines, which dun's eval renderer shows under the
+	// value; round(2.5) = 3. No flag or env var changed.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.5.1"},
+		Min: "v0.2.0", Recommended: "v0.6.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
