@@ -7,6 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.1.0
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
+	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/cellbuf v0.0.15
@@ -17,7 +18,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/iodesystems/agentkit v0.12.0
+	github.com/iodesystems/agentkit v0.13.0
 	github.com/iodesystems/gwag/v2 v2.3.1
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
@@ -33,7 +34,6 @@ require (
 require (
 	connectrpc.com/connect v1.21.1 // indirect
 	github.com/IodeSystems/graphql-go/v2 v2.0.1 // indirect
-	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
