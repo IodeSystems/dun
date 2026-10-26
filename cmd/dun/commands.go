@@ -174,6 +174,12 @@ func ownCommands(docker bool) []proto.CommandSpec {
 				"on", "a file (or glob) back in every request", "off", "a file (or glob) out of every request, still found through the docs index",
 				"unset", "a file's switch at a scope, back to the one below"),
 			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone, each file's cost, its switch at each scope and the mode; a mode word sets the project's mode"},
+		{Name: "retry", Usage: "[default|patient|stubborn | attempts N | budget <dur>|unbounded|default | turn <dur>|off|default]", Group: "session",
+			Choices: choices("status", "the settings now", "default", retryPresets[0].about, "patient", retryPresets[1].about,
+				"stubborn", retryPresets[2].about, "attempts", "how many times a 5xx is retried: attempts N",
+				"budget", "how long one request keeps retrying: budget 15m, unbounded or default",
+				"turn", "how long a turn whose stream died is re-run: turn 30m, off or default"),
+			Description: "how hard dun keeps at a flaky provider: alone picks a preset; saved for every session"},
 		{Name: "effort", Usage: "[default|off|low|medium|high]", Group: "session",
 			Choices: choices(dun.EffortDefault, dun.EffortAbout[dun.EffortDefault], dun.EffortOff, dun.EffortAbout[dun.EffortOff],
 				dun.EffortLow, dun.EffortAbout[dun.EffortLow], dun.EffortMedium, dun.EffortAbout[dun.EffortMedium],
@@ -415,6 +421,8 @@ func routeSlash(line string, r slashRoutes) {
 		}
 	case "effort":
 		r.control(name, arg(0))
+	case "retry":
+		r.control(name, strings.Join(args, " "))
 	case "suggest":
 		r.control(name, arg(0))
 		switch arg(0) {

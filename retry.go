@@ -352,3 +352,10 @@ func sleepOrCancel(ctx context.Context, d time.Duration) bool {
 		return false
 	}
 }
+
+// LLMClient is the session's client when it is an *llm.Client (/retry tunes
+// its retry settings live); nil for any other runner.
+func (h *Harness) LLMClient() *llm.Client {
+	c, _ := h.cfg.Client.(*llm.Client)
+	return c
+}

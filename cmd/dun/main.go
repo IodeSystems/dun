@@ -544,6 +544,9 @@ func main() {
 	} else {
 		client.SetReasoningDialect(d)
 	}
+	if fc.Retry5xxAttempts > 0 {
+		client.Retry5xxAttempts = fc.Retry5xxAttempts // /retry attempts; the env wins, below
+	}
 	if rb, tb, reqSet, turnSet := parseRetryBudgets(fc); reqSet || turnSet {
 		if reqSet {
 			client.RetryBudget = rb
@@ -1214,6 +1217,26 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// rebuilds the tool set, which waits for a running turn.
 		if id == "switches" {
 			go func() { em.emit(switchesEvent(h, action)) }()
+			return
+		}
+		// /retry: bare says the settings; a preset or a knob is set on the
+		// client at once and saved (retrycmd.go).
+		if id == "retry" {
+			c := h.LLMClient()
+			if c == nil {
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "retry: this session's model client has no retry settings"})
+				return
+			}
+			msg, save, err := retryCmd(c, action)
+			if err != nil {
+				msg = "retry: " + err.Error()
+			} else if save != nil {
+				if err := saveConfig(*save); err != nil {
+					msg += " — but not saved: " + err.Error()
+				}
+				h.Aside("[control/retry] " + msg)
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
 		// /effort: bare says the level; a level is set, saved, and applies

@@ -52,6 +52,9 @@ type dunConfig struct {
 	// defaults. Empty = unset; a negative value means unbounded (request scope).
 	RetryBudget     string `json:"retry_budget,omitempty"`
 	TurnRetryBudget string `json:"turn_retry_budget,omitempty"` // "0" disables turn-scope retry
+	// Retry5xxAttempts is how many times a 5xx is retried (/retry attempts);
+	// 0 is agentkit's default (5). DUN_RETRY_5XX_ATTEMPTS wins over it.
+	Retry5xxAttempts int `json:"retry_5xx_attempts,omitempty"`
 	// VisionModel describes images for a model that cannot read them (a model
 	// id, on the active provider unless VisionProvider names another
 	// logged-in one). Empty: a message with images to such a model is
