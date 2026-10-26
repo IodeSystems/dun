@@ -36,7 +36,7 @@
     "expo-secure-store": "~58.0.2",
     "expo-status-bar": "~58.0.4",
     "expo-web-browser": "~58.0.6",
-    "graphql": "^16.14.2",
+    "graphql": "^17.0.0",
     "graphql-request": "^7.4.0",
     "graphql-ws": "^6.4.1",
     "react": "19.3.0",
