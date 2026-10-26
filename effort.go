@@ -16,7 +16,8 @@ import (
 // A level asks for it on every request (agentkit's EnableThinking, sent as
 // chat_template_kwargs.enable_thinking, and a reasoning budget):
 //
-//	default  nothing sent: the server's default (what dun did before)
+//	default  nothing sent: the server's default (what dun did before; an
+//	         OpenRouter model may then think and send none of it back)
 //	off      thinking off
 //	low      on, at most 1,024 tokens of it
 //	medium   on, at most 4,096
@@ -95,18 +96,21 @@ func (h *Harness) Effort() string {
 }
 
 // applyEffort sets level's thinking knobs on opts; default clears them.
+// agentkit sends them in the endpoint's dialect: chat_template_kwargs and a
+// budget to llama.cpp, a `reasoning` object to OpenRouter (the effort, or
+// the budget as max_tokens), a thinking budget to Anthropic.
 func applyEffort(opts *llm.ChatOpts, level string) {
 	if opts == nil {
 		return
 	}
-	opts.EnableThinking, opts.ReasoningBudgetTokens = nil, nil
+	opts.EnableThinking, opts.ReasoningBudgetTokens, opts.ReasoningEffort = nil, nil, ""
 	switch level {
 	case EffortOff:
 		f := false
-		opts.EnableThinking = &f
+		opts.EnableThinking, opts.ReasoningEffort = &f, "none"
 	case EffortLow, EffortMedium, EffortHigh:
 		t := true
-		opts.EnableThinking = &t
+		opts.EnableThinking, opts.ReasoningEffort = &t, level
 		if n, ok := effortBudget[level]; ok {
 			opts.ReasoningBudgetTokens = &n
 		}

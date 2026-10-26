@@ -10,6 +10,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,30 @@ type dunConfig struct {
 	// NoUpdates is /upgrade off: a release build does not check for new
 	// releases (release.go). Other builds never do.
 	NoUpdates bool `json:"no_updates,omitempty"`
+	// Reasoning is providerConfig.Reasoning for a config with no providers.
+	Reasoning string `json:"reasoning,omitempty"`
+}
+
+// reasoningDialects are the values a provider's "reasoning" takes.
+var reasoningDialects = []string{llm.DialectOpenAI, llm.DialectOpenRouter, llm.DialectLlamaCpp, llm.DialectAnthropic}
+
+// reasoningDialect is how the endpoint at url is asked to think:
+// DUN_REASONING, else the active provider's "reasoning" when it is that
+// endpoint, else the config's; "" detects it.
+func reasoningDialect(fc dunConfig, url string) (string, error) {
+	d := os.Getenv("DUN_REASONING")
+	if d == "" {
+		if p, ok := fc.active(); ok && strings.TrimRight(p.URL, "/") == strings.TrimRight(url, "/") {
+			d = p.Reasoning
+		}
+	}
+	if d == "" {
+		d = fc.Reasoning
+	}
+	if d != "" && !slices.Contains(reasoningDialects, d) {
+		return "", fmt.Errorf("reasoning %q: want %s (or leave it unset to detect)", d, strings.Join(reasoningDialects, ", "))
+	}
+	return d, nil
 }
 
 // providerConfig is one OpenAI-compatible endpoint: /v1/models and
@@ -69,6 +94,10 @@ type providerConfig struct {
 	Kind string `json:"kind,omitempty"` // "" is providerOpenAI
 	URL  string `json:"url"`
 	Key  string `json:"key,omitempty"`
+	// Reasoning is how the endpoint is asked to think (/effort): "" detects
+	// it from the address and model; openai (reasoning_effort, what a LiteLLM
+	// proxy maps per provider), openrouter, llamacpp or anthropic name it.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // providerList returns the logged-in providers. A config from before

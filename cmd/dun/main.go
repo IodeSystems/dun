@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -536,6 +537,13 @@ func main() {
 	var em *emitter
 	var in *inputStream
 	client := llm.NewClient(*url, effKey, *model)
+	// How /effort's level reaches the model (agentkit's reasoning dialects):
+	// a LiteLLM proxy in front of OpenRouter names neither in its address.
+	if d, err := reasoningDialect(fc, *url); err != nil {
+		log.Printf("dun: %v; detecting it", err)
+	} else {
+		client.SetReasoningDialect(d)
+	}
 	if rb, tb, reqSet, turnSet := parseRetryBudgets(fc); reqSet || turnSet {
 		if reqSet {
 			client.RetryBudget = rb
