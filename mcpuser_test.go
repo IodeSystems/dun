@@ -209,6 +209,7 @@ func TestRemoveServer_ClearsProjectAndSessionEntries(t *testing.T) {
 // binary would use — and could upgrade or restart — the user's own.
 func isolateTools(dir string) {
 	os.Setenv("POLY_LSP_NO_DAEMON", "1")
+	os.Setenv("DUN_REGISTRY", "off")
 	os.Setenv("POLY_LSP_HOME", dir+"/poly-lsp") // the daemon's own dir, once poly-lsp reads it
 	os.Setenv("XDG_RUNTIME_DIR", dir)
 	os.Setenv("RAGLIT_ROOT", dir+"/raglit")

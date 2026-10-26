@@ -94,7 +94,7 @@ func extListing(h *dun.Harness) string {
 			b.WriteString("\n    " + e.Description)
 		}
 	}
-	errs := h.ExtensionErrors()
+	errs := append(h.ExtensionErrors(), dun.RegistryErrors()...)
 	if len(errs) > 0 || len(refused) > 0 {
 		b.WriteString("\nnot loaded:")
 		for _, e := range errs {
@@ -114,6 +114,9 @@ func extensionsEvent(h *dun.Harness) *proto.Extensions {
 	ev := &proto.Extensions{Items: []proto.ExtItem{}, Errors: refused,
 		AddPath: dun.UserExtensionsDir() + "/<id>/" + dun.ExtensionFile}
 	for _, e := range h.ExtensionErrors() {
+		ev.Errors = append(ev.Errors, e.Error())
+	}
+	for _, e := range dun.RegistryErrors() { // an entry that fit and did not load: the built-in one is in use
 		ev.Errors = append(ev.Errors, e.Error())
 	}
 	for _, e := range exts {

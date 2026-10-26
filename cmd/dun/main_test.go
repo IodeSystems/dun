@@ -20,6 +20,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("POLY_LSP_HOME", home+"/poly-lsp")
 	os.Setenv("XDG_RUNTIME_DIR", home)
 	os.Setenv("RAGLIT_ROOT", home+"/raglit")
+	os.Setenv("DUN_REGISTRY", "off") // never the network
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)

@@ -119,7 +119,7 @@ func (d *doctor) toolOrigin(name, p string) {
 	if err != nil {
 		return // a script, or a binary without build info
 	}
-	s, ok := release.SupportedTool(name)
+	s, ok := supportedTool(name)
 	if !ok {
 		fix := ""
 		if o.Kind == update.GoInstall {
@@ -169,10 +169,28 @@ func (d *doctor) update(name, p string, s release.Tool, pl toolPlan) error {
 	return errors.New("no update to run")
 }
 
+// supportedTool is name's entry in release.Supported, its Min and
+// Recommended raised by the registry's pin for this dun (never lowered).
+func supportedTool(name string) (release.Tool, bool) {
+	s, ok := release.SupportedTool(name)
+	if !ok {
+		return s, false
+	}
+	if t, rok := dun.RegistryTool(name); rok {
+		if semver.Compare(t.Min, s.Min) > 0 {
+			s.Min = t.Min
+		}
+		if semver.Compare(t.Recommended, s.Recommended) > 0 {
+			s.Recommended = t.Recommended
+		}
+	}
+	return s, true
+}
+
 // installModule is what go install builds for a missing name: the version
 // this dun supports, else the module's latest.
 func installModule(name string) string {
-	if s, ok := release.SupportedTool(name); ok {
+	if s, ok := supportedTool(name); ok {
 		return s.Module + "@" + s.Recommended
 	}
 	return dun.ToolInstall[name].Module

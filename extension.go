@@ -98,6 +98,7 @@ const (
 )
 
 // ExtensionFile is the manifest's name in an extension's directory.
+
 const ExtensionFile = "extension.json"
 
 // Extension is one loaded manifest.
@@ -362,12 +363,20 @@ func (e Extension) skillsDir() string {
 	return filepath.Join(filepath.Dir(e.Path), e.Skills)
 }
 
-// BundledExtensions are raglit and poly-lsp, in bundledOrder. A broken
-// embedded manifest is a build defect, caught by the tests.
+// BundledExtensions are raglit and poly-lsp, in bundledOrder: the
+// registry's manifest for one where an entry fits (registry.go), else the
+// embedded one. A broken embedded manifest is a build defect, caught by
+// the tests.
 func BundledExtensions() []Extension { return append([]Extension{}, bundled()...) }
 
-// bundled parses the embedded manifests once.
-var bundled = sync.OnceValue(func() []Extension {
+// bundled is the bundled extensions as this process uses them.
+func bundled() []Extension {
+	exts, _ := withRegistry(embeddedExtensions())
+	return exts
+}
+
+// embeddedExtensions parses the embedded manifests once.
+var embeddedExtensions = sync.OnceValue(func() []Extension {
 	out := make([]Extension, 0, len(bundledOrder))
 	for _, id := range bundledOrder {
 		b, err := bundledFS.ReadFile(path.Join("examples/extensions", id, ExtensionFile))

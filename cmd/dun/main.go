@@ -141,6 +141,9 @@ func main() {
 		dundcli.Version = version
 		os.Exit(dundcli.Main(os.Args[2:]))
 	}
+	// The registry's manifests, presets and pins, as cached (registry.go):
+	// before anything reads a manifest.
+	useRegistry()
 	// `dun doctor`: what dun needs, checked (doctor.go); --fix applies the
 	// fixes it can run itself.
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
@@ -511,6 +514,7 @@ func main() {
 	// charged to dun's budget (see turnclock.go).
 	turnGrace = *timeoutGrace
 	if *prog {
+		go refreshRegistry(ctx) // for the next start
 		turnTimeout = *timeout
 	} else {
 		run := newTurnClock(ctx, *timeout, graceFor(*timeout))

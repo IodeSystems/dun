@@ -33,7 +33,7 @@ import (
 // /mcp mode <id> scripted, or m in /mcp — and a first server's user cannot
 // answer it.
 //
-// A preset (dun.ServerPresets) fills the name and the server row; typing a
+// A preset (dun.Presets()) fills the name and the server row; typing a
 // preset's name and leaving the row does the same when the server row is
 // empty.
 //
@@ -100,8 +100,8 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 
 // presetIDs lists the presets for a hint.
 func presetIDs() string {
-	ids := make([]string, len(dun.ServerPresets))
-	for i, p := range dun.ServerPresets {
+	ids := make([]string, len(dun.Presets()))
+	for i, p := range dun.Presets() {
 		ids[i] = p.ID
 	}
 	return strings.Join(ids, ", ")
@@ -236,7 +236,7 @@ func (m *tuiModel) mcpFollowName() {
 		return
 	}
 	m.mcpAuto = mcpNameFrom(m.mcpFields[mcpServer].Value())
-	for _, p := range dun.ServerPresets {
+	for _, p := range dun.Presets() {
 		target := p.URL
 		if target == "" {
 			target = shellJoin(append([]string{p.Command}, p.Args...))

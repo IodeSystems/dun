@@ -164,7 +164,7 @@ func mcpArgCands(m *tuiModel, kind string) ([]argChoice, string) {
 		}
 		return out, "servers"
 	case "preset":
-		for _, p := range dun.ServerPresets {
+		for _, p := range dun.Presets() {
 			add(p.ID, p.Description)
 		}
 		return out, "presets"

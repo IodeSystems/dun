@@ -27,7 +27,7 @@ var ServerPresets = []ServerPreset{
 
 // Preset finds a preset by id.
 func Preset(id string) (ServerPreset, bool) {
-	for _, p := range ServerPresets {
+	for _, p := range Presets() {
 		if p.ID == id {
 			return p, true
 		}

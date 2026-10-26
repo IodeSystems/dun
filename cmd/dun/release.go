@@ -14,6 +14,9 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/mod/semver"
+
+	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/proto"
@@ -60,11 +63,20 @@ var pinnedTool = func(name string) (update.Artifact, update.File, bool) {
 	if !isRelease() {
 		return update.Artifact{}, update.File{}, false
 	}
+	plat := update.Platform(runtime.GOOS, runtime.GOARCH)
 	m, err := update.ParseManifest(release.Deps)
 	if err != nil {
 		return update.Artifact{}, update.File{}, false
 	}
-	return m.File(name, update.Platform(runtime.GOOS, runtime.GOARCH))
+	a, f, ok := m.File(name, plat)
+	// A newer pin in the registry (signed by the same key) wins, when it has
+	// this platform's file: a tool's point release without a dun release.
+	if t, rok := dun.RegistryTool(name); rok {
+		if rf, fok := t.Files[plat]; fok && (!ok || semver.Compare(t.Recommended, a.Version) > 0) {
+			return update.Artifact{Version: t.Recommended, Files: t.Files}, rf, true
+		}
+	}
+	return a, f, ok
 }
 
 // installPinned installs name from the pinned manifest beside dun, where

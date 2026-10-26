@@ -93,8 +93,13 @@ key (`release/minisign.pub`, with the updater's key rotation).
 
 1. Done: `internal/registry`: the format, npm ranges (Masterminds/semver),
    verify, the cache, which entry fits.
-2. dun reads it: extensions, presets, tool pins, and says where each came
-   from.
+2. Done: dun reads it (`registry.go`, `cmd/dun/registry.go`). The cached
+   index is installed at process start; an engine refreshes it in the
+   background for the next start, so a session's manifests never change
+   under it. Only the bundled extensions' ids are overlaid (a registry
+   entry for another id is not loaded). `/ext` shows a manifest's source
+   (`registry: raglit 1.2.0 (for raglit ~0.2.1)`) and an entry that fit but
+   did not load.
 3. `site/`: the page, the entries for today's built-in manifests, presets
    and pins, `mkregistry`, the workflow.
 4. The owner turns on Pages and adds the DNS record; then the first

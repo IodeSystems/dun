@@ -387,7 +387,7 @@ func (p viewStatusPane) view(m *tuiModel, w, h int) string {
 }
 
 func (viewStatusPane) key(*tuiModel, tea.KeyPressMsg) bool { return false }
-func (viewStatusPane) hint(*tuiModel) string             { return "" }
+func (viewStatusPane) hint(*tuiModel) string               { return "" }
 
 // switchListPane is the pager showing the list; its keys are the list's
 // (switchlist.go) and the pager's.
