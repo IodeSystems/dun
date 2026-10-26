@@ -1,0 +1,12 @@
+{
+ "id": "playwright",
+ "version": "1.0.0",
+ "dun": ">=0.1.3",
+ "description": "browser automation (Playwright), headless and isolated",
+ "command": "npx",
+ "args": [
+  "@playwright/mcp@latest",
+  "--headless",
+  "--isolated"
+ ]
+}

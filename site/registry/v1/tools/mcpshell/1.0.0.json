@@ -1,0 +1,8 @@
+{
+ "id": "mcpshell",
+ "version": "1.0.0",
+ "dun": ">=0.1.3",
+ "min": "v0.2.0",
+ "recommended": "v0.6.0",
+ "files_from": "release/deps.json"
+}

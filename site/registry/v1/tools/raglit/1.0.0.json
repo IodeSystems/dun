@@ -1,0 +1,8 @@
+{
+ "id": "raglit",
+ "version": "1.0.0",
+ "dun": ">=0.1.3",
+ "min": "v0.0.0-20261024184452-5d24299365a3",
+ "recommended": "v0.2.1",
+ "files_from": "release/deps.json"
+}

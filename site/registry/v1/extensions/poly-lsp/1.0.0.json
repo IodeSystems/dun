@@ -1,0 +1,2 @@
+{"id": "poly-lsp", "version": "1.0.0", "dun": ">=0.1.3", "tools": ">=0.1.0 <0.3.0",
+ "manifest_file": "examples/extensions/poly-lsp/extension.json"}

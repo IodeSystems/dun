@@ -1,0 +1,8 @@
+{
+ "id": "poly-lsp-mcp",
+ "version": "1.0.0",
+ "dun": ">=0.1.3",
+ "min": "v0.0.0-20261024175639-46caee4f6393",
+ "recommended": "v0.2.0",
+ "files_from": "release/deps.json"
+}

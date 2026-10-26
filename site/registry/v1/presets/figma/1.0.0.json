@@ -1,0 +1,7 @@
+{
+ "id": "figma",
+ "version": "1.0.0",
+ "dun": ">=0.1.3",
+ "description": "the Figma desktop app's local server (Dev Mode MCP; the app must be running)",
+ "url": "http://127.0.0.1:3845/mcp"
+}

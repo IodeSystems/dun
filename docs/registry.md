@@ -100,7 +100,11 @@ key (`release/minisign.pub`, with the updater's key rotation).
    entry for another id is not loaded). `/ext` shows a manifest's source
    (`registry: raglit 1.2.0 (for raglit ~0.2.1)`) and an entry that fit but
    did not load.
-3. `site/`: the page, the entries for today's built-in manifests, presets
-   and pins, `mkregistry`, the workflow.
+3. Done: `site/index.html`; the entries for today's built-in manifests
+   (by `manifest_file`, so the repo's file is the one source), presets and
+   pins (downloads `files_from` release/deps.json); `tools/mkregistry`,
+   whose test builds the real entries in `make test`; and
+   `.github/workflows/site.yml`. Checked locally: the built index signed
+   with the minisign CLI verifies with dun's own verifier.
 4. The owner turns on Pages and adds the DNS record; then the first
    registry is published and checked from a dun build.

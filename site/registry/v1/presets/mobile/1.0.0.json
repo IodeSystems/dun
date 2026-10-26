@@ -1,0 +1,10 @@
+{
+ "id": "mobile",
+ "version": "1.0.0",
+ "dun": ">=0.1.3",
+ "description": "iOS and Android devices and simulators (mobile-mcp)",
+ "command": "npx",
+ "args": [
+  "@mobilenext/mobile-mcp@latest"
+ ]
+}

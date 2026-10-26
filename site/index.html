@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dun — a coding agent that gets things dun</title>
+<meta name="description" content="dun is an open-source coding agent for the terminal, written in Go. It works a task in your project with any OpenAI-compatible model, keeps what enters the context window small, and runs its tool servers as switches you control.">
+<meta name="author" content="IodeSystems">
+<link rel="canonical" href="https://dun.iodesystems.com/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="dun">
+<meta property="og:title" content="dun — a coding agent that gets things dun">
+<meta property="og:description" content="An open-source coding agent for the terminal: any OpenAI-compatible model, a bounded context window, tool servers you switch on and off.">
+<meta property="og:url" content="https://dun.iodesystems.com/">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "dun",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux, macOS",
+  "description": "An open-source coding agent for the terminal, written in Go.",
+  "url": "https://dun.iodesystems.com/",
+  "codeRepository": "https://github.com/IodeSystems/dun",
+  "license": "https://opensource.org/licenses/MIT",
+  "author": { "@type": "Organization", "name": "IodeSystems", "url": "https://github.com/IodeSystems" },
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --fg:#e6edf3;
+    --muted:#9da7b3; --accent:#ff7ab6; --accent2:#7ee787; --max:1040px;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .wrap { max-width:var(--max); margin:0 auto; padding:0 24px; }
+  header.hero { text-align:center; padding:88px 24px 56px; border-bottom:1px solid var(--border);
+    background:radial-gradient(ellipse at top,#2a1424 0%,var(--bg) 70%); }
+  header.hero h1 { font-size:clamp(2.4rem,6vw,3.6rem); margin:0 0 .3em; line-height:1.1; }
+  header.hero p.lead { color:var(--muted); font-size:1.15rem; max-width:680px; margin:0 auto 28px; }
+  .cta a { display:inline-block; margin:6px; padding:10px 20px; border-radius:8px; border:1px solid var(--border); }
+  .cta a.primary { background:var(--accent); color:#1a0d14; border-color:var(--accent); font-weight:600; }
+  section { padding:56px 0; border-bottom:1px solid var(--border); }
+  h2 { font-size:1.6rem; margin:0 0 .6em; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:20px; }
+  .card h3 { margin:0 0 .4em; font-size:1.1rem; }
+  .card p { margin:0; color:var(--muted); }
+  .num { color:var(--accent2); font-weight:600; }
+  pre { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:16px;
+    overflow-x:auto; font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  footer { padding:32px 0 48px; color:var(--muted); text-align:center; font-size:.9rem; }
+  @media (max-width:560px) { header.hero { padding:56px 16px 40px; } .wrap { padding:0 16px; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>dun</h1>
+  <p class="lead">A coding agent for your terminal. It works a task in your project with any
+    OpenAI-compatible model, keeps what enters the context window small, and runs its tools as
+    switches you can see and turn off.</p>
+  <div class="cta">
+    <a class="primary" href="#install">Install</a>
+    <a href="https://github.com/IodeSystems/dun">GitHub</a>
+    <a href="https://github.com/IodeSystems/dun/releases/latest">Latest release</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section>
+  <h2>What it does</h2>
+  <div class="grid">
+    <div class="card"><h3>Any model you can reach</h3>
+      <p>dun talks to any OpenAI-compatible endpoint: a hosted provider, a gateway, or a model
+        on your own machine. There is no built-in provider; you log in to the one you use.</p></div>
+    <div class="card"><h3>A bounded context window</h3>
+      <p>Command output over 20,000 characters is cut to its start and end, with the whole of it
+        saved to a file the model can read. On one measured task that took the tokens sent from
+        <span class="num">456,772</span> to <span class="num">32,916</span>.</p></div>
+    <div class="card"><h3>Tool servers as switches</h3>
+      <p>Every MCP server has a global, a project and a session switch, and a mode: standalone, or
+        scripted inside mcpshell, where its tool schemas leave every request. <code>/mcp</code> shows
+        what each one costs and what it is doing, live.</p></div>
+    <div class="card"><h3>Your rules and skills, priced</h3>
+      <p><code>/rules</code> and <code>/skill</code> list every file and skill with its token cost.
+        Switch one off for a session or a project, or have it surfaced only when a turn fits.</p></div>
+    <div class="card"><h3>Sessions that outlive the terminal</h3>
+      <p>A local service keeps sessions running. Close the terminal and pick the session up again,
+        from another terminal or a browser.</p></div>
+    <div class="card"><h3>Signed releases</h3>
+      <p>Every release manifest is signed with minisign. dun checks the signature before it
+        updates itself, and checks every tool it downloads against a sha256 pinned in the build.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>The tools it works with</h2>
+  <div class="grid">
+    <div class="card"><h3><a href="https://github.com/IodeSystems/mcpshell">mcpshell</a></h3>
+      <p>Sandboxed compute: one <code>eval</code> tool for arithmetic, data and SQL, and the host
+        for MCP servers run in scripted mode.</p></div>
+    <div class="card"><h3><a href="https://github.com/IodeSystems/poly-lsp-mcp">poly-lsp-mcp</a></h3>
+      <p>Semantic code: navigate, call graphs, edits with live diagnostics, from language servers
+        and tree-sitter. One shared daemon for every session.</p></div>
+    <div class="card"><h3><a href="https://github.com/IodeSystems/raglit">raglit</a></h3>
+      <p>Search over your project's files and docs, and the parts of them that bear on a question,
+        offered while you work. Optional.</p></div>
+  </div>
+</section>
+
+<section id="install">
+  <h2>Install</h2>
+  <p>Download the release for your platform (<code>linux_amd64</code>, <code>linux_arm64</code>,
+    <code>darwin_amd64</code>, <code>darwin_arm64</code>), put <code>dun</code> on your PATH, and let
+    <code>dun doctor</code> fetch the tools it uses.</p>
+<pre>curl -fsSLO https://github.com/IodeSystems/dun/releases/latest/download/dun_linux_amd64.tar.gz
+tar -xzf dun_linux_amd64.tar.gz &amp;&amp; install dun ~/.local/bin/
+dun doctor --fix     # mcpshell, and poly-lsp-mcp and raglit when you want them
+dun --setup          # log in to a model: an address, a key if it needs one
+cd your-project &amp;&amp; dun</pre>
+  <p>To check a download by hand: <code>dun-manifest.json</code> in each release lists every file's
+    sha256, and <code>dun-manifest.json.minisig</code> is its signature by the key in
+    <a href="https://github.com/IodeSystems/dun/blob/main/release/minisign.pub">release/minisign.pub</a>.</p>
+</section>
+
+<section>
+  <h2>The registry</h2>
+  <p>dun's extension manifests, <code>/mcp add</code> presets and tool versions are published here,
+    signed, at <a href="/registry/v1/index.json">/registry/v1/index.json</a>. Each entry names the
+    dun versions and tool versions it works with, in npm's range syntax, so a tool's point release
+    does not wait for a dun release. dun reads it once a day and falls back to what it was built with.</p>
+</section>
+
+</main>
+
+<footer>
+  dun is MIT licensed · <a href="https://github.com/IodeSystems/dun">source</a> ·
+  <a href="https://github.com/IodeSystems">IodeSystems</a>
+</footer>
+
+</body>
+</html>
