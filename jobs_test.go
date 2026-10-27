@@ -175,3 +175,34 @@ func TestJobs_AliasesDispatch(t *testing.T) {
 		}
 	}
 }
+
+// Asked the same thing again with nothing changed (only the clock), the
+// third read of a running command waits for it instead of answering the
+// same again: a poll cannot loop (USER 2026-10-27: the loop guard stopped
+// a session polling agent_monitor).
+func TestJobs_ARepeatedPollWaits(t *testing.T) {
+	h := testHarness(t)
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	j := h.newJobStarted(be, "sleep 1.5; echo at-last")
+	q := fmt.Sprintf(`{"job":%d}`, j.id)
+	for i := 0; i < 2; i++ {
+		if out := jobsCall(t, h, "jobs", q); !strings.Contains(out, "RUNNING") || strings.Contains(out, "waited") {
+			t.Fatalf("read %d: %s", i+1, out)
+		}
+	}
+	start := time.Now()
+	out := jobsCall(t, h, "jobs", q)
+	if time.Since(start) < 500*time.Millisecond || !strings.Contains(out, "waited until it did") || !strings.Contains(out, "at-last") {
+		t.Errorf("the third read did not wait (%s): %s", time.Since(start), out)
+	}
+	// A different question in between is not a repeat.
+	j2 := h.newJobStarted(be, "sleep 30")
+	t.Cleanup(func() { j2.killAndWait("test") })
+	q2 := fmt.Sprintf(`{"job":%d}`, j2.id)
+	jobsCall(t, h, "jobs", q2)
+	jobsCall(t, h, "jobs", `{}`)
+	if out := jobsCall(t, h, "jobs", q2); strings.Contains(out, "waited") {
+		t.Errorf("a read after another question waited: %s", out)
+	}
+}

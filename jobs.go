@@ -96,12 +96,63 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 		var a jobsArgs
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
 		a.Kill = a.Kill || a.Quit
+		// A poll asked again with nothing changed waits instead (USER
+		// 2026-10-27: a session polled agent_monitor until the loop guard
+		// stopped the turn, 10 identical rounds). The same plain question
+		// can only get the same answer until the job moves, so this call
+		// blocks until it does; a new message still breaks the wait.
+		sig, plain := a.pollSig()
+		waited := false
+		if plain && sig != "" && h.jobsRepeat(sig) {
+			a.Wait, waited = true, true
+		}
 		out := runJobs(ctx, h, a)
+		if plain {
+			h.jobsNote(sig, out)
+		}
+		if waited {
+			out = "Nothing had changed since you last asked, so this call waited until it did.\n" + out
+		}
 		if onCall != nil {
 			onCall("jobs", a.reported(), out)
 		}
 		return out, nil
 	}
+}
+
+// pollSig is a read of one job (no wait, kill, tell, resume or tuning) as a
+// key; plain is false for anything else, which never turns into a wait.
+func (a jobsArgs) pollSig() (string, bool) {
+	if a.Wait || a.Kill || a.Tell != "" || a.Resume || a.Grep != nil || a.BufferBytes != nil || a.Ignore != nil {
+		return "", false
+	}
+	switch {
+	case a.Job != nil:
+		return fmt.Sprintf("job:%d:%d", *a.Job, a.Tail), true
+	case a.Agent != nil:
+		return fmt.Sprintf("agent:%d:%d", *a.Agent, a.Tail), true
+	}
+	return "", true // the list: noted, but never waited on (no one job to wait for)
+}
+
+var pollDigits = regexp.MustCompile(`[0-9]+`)
+
+// jobsRepeat reports whether sig is the question asked last, and its answer
+// has not changed since.
+func (h *Harness) jobsRepeat(sig string) bool {
+	h.jobsPollMu.Lock()
+	defer h.jobsPollMu.Unlock()
+	return h.jobsPollSig == sig && h.jobsPollSame
+}
+
+// jobsNote records a plain read and whether it answered as the one before.
+func (h *Harness) jobsNote(sig, out string) {
+	h.jobsPollMu.Lock()
+	defer h.jobsPollMu.Unlock()
+	// Numbers masked: "RUNNING for 12s" and "for 14s" are the same answer.
+	out = pollDigits.ReplaceAllString(out, "#")
+	h.jobsPollSame = sig == h.jobsPollSig && out == h.jobsPollOut
+	h.jobsPollSig, h.jobsPollOut = sig, out
 }
 
 // reported is the argument map the UI shows: what was sent, no zeros.
