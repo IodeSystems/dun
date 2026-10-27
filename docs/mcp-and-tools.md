@@ -39,6 +39,9 @@ estimate, not the exact `/context` count (which covers enabled tools only). At
 5k tokens or more a hint suggests hiding some or moving the server into the
 shell. Engine control `mcptools` ("<id>" or "toggle <id> <tool> on|off")
 answers with an `mcp_tools` event, so TUI and web share it.
+Engine control `skillfile` (JSON `{"skill", "file"}`) answers with
+a `skill_file` event: one file of a skill for the /skill reader, confined
+to the skill's folder, with the folder's file list and its @includes' text.
 
 - Disable entries may be globs (`path.Match`). Re-enabling a tool a glob hides
   is refused (edit the glob).

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/iodesystems/dun"
@@ -100,4 +101,25 @@ func rulesCmd(ctx context.Context, h *dun.Harness, action string) (string, error
 		return switchOp(h, "rules", append([]string{"mode"}, f...))
 	}
 	return switchOp(h, "rules", f)
+}
+
+// skillFileEvent answers the control command "skillfile": action is JSON
+// {"skill", "file"}; the file is read by the engine, confined to the
+// skill's folder (dun.SkillFile), so a client attached through dund reads
+// the engine's disk, not its own.
+func skillFileEvent(ctx context.Context, h *dun.Harness, action string) *proto.SkillFile {
+	var req struct{ Skill, File string }
+	if err := json.Unmarshal([]byte(action), &req); err != nil {
+		return &proto.SkillFile{Error: "skillfile: the action is JSON {skill, file}: " + err.Error()}
+	}
+	v, err := h.SkillFile(ctx, req.Skill, req.File)
+	ev := &proto.SkillFile{Skill: req.Skill, File: v.File, Name: v.Name, Description: v.Description, Text: v.Text,
+		Clipped: v.Clipped, Files: v.Files, Includes: v.Includes}
+	if err != nil {
+		ev.File, ev.Error = req.File, err.Error()
+		if ev.File == "" {
+			ev.File = "SKILL.md"
+		}
+	}
+	return ev
 }

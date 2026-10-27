@@ -1346,6 +1346,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go func() { em.emit(switchesEvent(h, action)) }()
 			return
 		}
+		// One file of a skill, for the /skill browser (skillpane.go).
+		// Detached: the skill list waits on the server lock.
+		if id == "skillfile" {
+			go func() { em.emit(skillFileEvent(ctx, h, action)) }()
+			return
+		}
 		// /context config [--max N] [--compact-buffer N] [--tool-lod N]
 		// [--recap-nudge N]: saved for this model (dun/window.go); bare, the
 		// settings in force.

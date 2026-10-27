@@ -16,7 +16,8 @@ import (
 //
 //	type        filter: every word in the name, the description or the source,
 //	            name matches first; backspace takes a letter back
-//	↑/↓ enter   select, open (the description in full and what decided)
+//	↑/↓ enter   select, open (the description in full and what decided;
+//	            a skill opens in the reader below, skillpane.go)
 //	space       on/off for this session
 //	ctrl+g/p/s  cycle the global, project or session switch
 //	tab         the kind's mode for this session (listed → surfaced → unset)
@@ -353,6 +354,14 @@ func (m *tuiModel) switchKey(v *switchListView, k, text string) bool {
 			}
 		}
 		send("mode " + next + " --session")
+		return true
+	case "enter": // a skill: read it in a pane below (skillpane.go)
+		if v.kind != "skills" {
+			return false
+		}
+		if r := v.row(m.pg.cur); r != nil {
+			m.openSkill(r.name)
+		}
 		return true
 	case "backspace":
 		if v.query != "" {
