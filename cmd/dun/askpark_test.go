@@ -318,8 +318,8 @@ func TestAsk_TabEditsTheOption(t *testing.T) {
 		v.m = key(v.m, kDown)
 		v.m = key(v.m, kDown) // highlight C
 		v.m = key(v.m, kTab)
-		if v.m.input.Value() != "A, C" {
-			t.Errorf("composer = %q, want the checked set with the highlighted one", v.m.input.Value())
+		if v.m.input.Value() != "C" { // its own text (USER 2026-10-27: edit every option)
+			t.Errorf("composer = %q, want the highlighted option's text", v.m.input.Value())
 		}
 	})
 	t.Run("custom row", func(t *testing.T) {

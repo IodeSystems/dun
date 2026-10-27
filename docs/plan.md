@@ -44,7 +44,7 @@ owner's call before work starts.
   termux-clipboard-get).
 - [ ] Messages between agents in boxes like thinking: from whom, to whom,
   what was said.
-- [ ] Multi-choice questions: a clear way to select, unselect and edit; tab
+- [~] Multi-choice questions: a clear way to select, unselect and edit; tab
   edits a choice, as in single choice.
 - [ ] Collapse only under scroll pressure: a block folds as the scroll pushes
   it, never ahead of it, so no blank rows are left (owner: not yielding

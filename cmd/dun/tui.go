@@ -627,6 +627,10 @@ type tuiModel struct {
 	askNote       string         // optional detail attached to the chosen option ("n")
 	askMulti      bool           // multi-select: space toggles, enter submits the checked set
 	askChecked    []bool         // per-option checked state (multi mode; len == len(askOptions))
+	// askEdit is the option the text field edits in multi mode: an index, or
+	// len(askOptions) for a new one (the custom row); enter keeps it,
+	// checked, instead of sending (USER 2026-10-27).
+	askEdit int
 	noting        bool           // capturing a detail for the selected option
 	customAnswer  bool           // capturing a free-text / chat answer
 	askDraft      multilineInput // the composer as it was when the question took the keys
@@ -1964,6 +1968,25 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.input.Blur()
 			m.refresh()
 			return m, nil
+		case m.customAnswer && m.askMulti:
+			// Multi: the field edits an option or adds one; enter keeps it,
+			// checked, and goes back to the list. Done sends the checked set.
+			v := strings.TrimSpace(m.input.Value())
+			if v != "" {
+				if m.askEdit >= 0 && m.askEdit < len(m.askOptions) {
+					m.askOptions[m.askEdit], m.askChecked[m.askEdit] = v, true
+					m.askSel = m.askEdit
+				} else {
+					m.askOptions = append(m.askOptions, v)
+					m.askChecked = append(m.askChecked, true)
+					m.askSel = len(m.askOptions) - 1
+				}
+			}
+			m.customAnswer = false
+			m.input.Reset()
+			m.input.Blur()
+			m.refresh()
+			return m, nil
 		case m.customAnswer:
 			v := strings.TrimSpace(m.input.Value())
 			if v == "" {
@@ -1975,9 +1998,12 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, nil
 		case m.askSel == custom: // open free-text / chat entry
-			m.customAnswer = true
+			m.customAnswer, m.askEdit = true, custom
 			m.input.Reset()
 			m.input.placeholder = "type your answer, or chat…"
+			if m.askMulti {
+				m.input.placeholder = "another option: enter adds it, checked"
+			}
 			m.input.Focus()
 			m.refresh()
 			return m, textinput.Blink
@@ -2037,8 +2063,17 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// holding what enter would send from here. Esc goes back to the
 		// options; nothing is sent.
 		if !m.noting && !m.customAnswer && m.askSel < custom {
-			m.customAnswer = true
+			m.customAnswer, m.askEdit = true, m.askSel
 			m.input.Reset()
+			if m.askMulti {
+				// Edit this option's own text; enter keeps it, checked.
+				m.input.SetValue(m.askOptions[m.askSel])
+				m.input.CursorEnd()
+				m.input.placeholder = "this option, as you want it"
+				m.input.Focus()
+				m.refresh()
+				return m, textinput.Blink
+			}
 			m.input.SetValue(m.askAnswerAt(m.askSel))
 			m.input.CursorEnd()
 			m.input.placeholder = "type your answer, or chat…"
@@ -2063,9 +2098,12 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// key that types into it. Enter still opens it empty, and every other row
 	// keeps its bindings (`n` types an n HERE, but still starts a detail there).
 	if !m.noting && !m.customAnswer && m.askSel == custom && typedText(msg) {
-		m.customAnswer = true
+		m.customAnswer, m.askEdit = true, custom
 		m.input.Reset()
 		m.input.placeholder = "type your answer, or chat…"
+		if m.askMulti {
+			m.input.placeholder = "another option: enter adds it, checked"
+		}
 		m.input.Focus()
 		m.input = m.input.HandleKey(msg)
 		m.refresh()
@@ -3584,6 +3622,8 @@ func (m tuiModel) drawView() string {
 		status = stAsk.Render("❓ type your answer · enter send · esc answer later")
 	case m.asking && m.noting:
 		status = stAsk.Render("❓ type a detail · enter keep it · esc back to the options")
+	case m.asking && m.customAnswer && m.askMulti:
+		status = stAsk.Render("❓ type the option · enter keep it, checked · esc back to the options")
 	case m.asking && m.customAnswer:
 		status = stAsk.Render("❓ type your answer · enter send · esc back to the options")
 	case m.asking && m.askMulti:
