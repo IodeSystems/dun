@@ -68,6 +68,10 @@ owner's call before work starts.
   and `dun "thing"` is the one-shot, so this changes what `-p` means.
 - [ ] `--no-tools`, `--no-rag`, `--no-lsp`.
 - [ ] `--media <file>` with a prompt.
+- [ ] `dun --no-dir`: a session attached to no directory, to talk with dun,
+  its skills and its MCP tools; servers that need a working directory
+  (poly-lsp, raglit's project index, the file tools, exec's workspace) are
+  left out. (Relayed by corrallm-f2, 2026-10-27.)
 
 ## Workspace and tools
 
@@ -81,8 +85,9 @@ owner's call before work starts.
 
 ## Other projects (sent to their sessions)
 
-- [ ] corrallm: remove a handpicked model (a UI fix, triaged); add and remove
-  keys (the approve flow: committed in b7d8b7c, not deployed), so a shared
-  network does not spend the owner's key.
+- [x] corrallm: hand-declared models can be deleted; dashboard keys are live
+  (2bd1e96); a caller with no key gets 403 on every paid account; a 429
+  names the budget that refused, its spend and when it has room again.
 - [ ] poly-lsp-mcp: find language servers installed with pnpm (aw4
-  i_1m5ze4k2581r4sbxy4h9g5); Swift (in progress there).
+  i_1m5ze4k2581r4sbxy4h9g5; committed there, waiting on the owner). Swift
+  is pushed (6e5ef86, untagged).
