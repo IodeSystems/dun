@@ -1,0 +1,70 @@
+{
+  "name": "dun",
+  "icon": "👷",
+  "description": "An open-source coding agent for the terminal, written in Go. Works with any OpenAI-compatible model.",
+  "homepage": "https://dun.iodesystems.com/",
+  "repository": "https://github.com/IodeSystems/dun",
+  "license": "MIT",
+  "language": "Go",
+  "install": {
+    "releases": "https://github.com/IodeSystems/dun/releases/latest",
+    "platforms": {
+      "linux_amd64": "https://github.com/IodeSystems/dun/releases/latest/download/dun_linux_amd64.tar.gz",
+      "linux_arm64": "https://github.com/IodeSystems/dun/releases/latest/download/dun_linux_arm64.tar.gz",
+      "darwin_amd64": "https://github.com/IodeSystems/dun/releases/latest/download/dun_darwin_amd64.tar.gz",
+      "darwin_arm64": "https://github.com/IodeSystems/dun/releases/latest/download/dun_darwin_arm64.tar.gz"
+    },
+    "steps": [
+      "Download dun_<os>_<arch>.tar.gz for your platform and extract it",
+      "Put the dun binary on PATH",
+      "dun doctor --fix",
+      "dun --setup",
+      "cd your-project && dun"
+    ],
+    "verify": {
+      "manifest": "https://github.com/IodeSystems/dun/releases/latest/download/dun-manifest.json",
+      "signature": "https://github.com/IodeSystems/dun/releases/latest/download/dun-manifest.json.minisig",
+      "public_key": "https://github.com/IodeSystems/dun/blob/main/release/minisign.pub",
+      "method": "minisign verifies dun-manifest.json; the manifest lists each file's sha256"
+    },
+    "from_source": {
+      "requires": ["Go"],
+      "steps": [
+        "git clone https://github.com/IodeSystems/dun",
+        "cd dun",
+        "make install"
+      ]
+    }
+  },
+  "platforms": ["linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64"],
+  "capabilities": [
+    "models: any OpenAI-compatible endpoint (hosted, gateway, or local); no built-in provider",
+    "models: reasoning effort per dialect (llama.cpp, OpenRouter, OpenAI-style via LiteLLM, Anthropic)",
+    "tools: exec in the host or in Docker",
+    "tools: file tools read, grep, list, edit, write",
+    "tools: ask_user",
+    "tools: sub-agents",
+    "tools: recap (replaces churn in the context with an account of it)",
+    "tools: session state",
+    "tools: harness info (version, session, model)",
+    "mcp: stdio and HTTP servers",
+    "mcp: OAuth",
+    "mcp: global, project and session on/off switches per server",
+    "mcp: scripted mode inside mcpshell (tool schemas leave every request)",
+    "mcp: per-tool on/off",
+    "context: window learned from the server or set per model",
+    "context: compaction",
+    "context: tool-result stubbing",
+    "context: command output over 20,000 characters cut to start and end, whole saved to a file",
+    "sessions: run in a local service (dund)",
+    "sessions: resume and persist",
+    "sessions: web and phone clients",
+    "sessions: worktree isolation",
+    "interfaces: TUI",
+    "interfaces: one-shot dun \"task\"",
+    "interfaces: JSON engine dun -p",
+    "interfaces: dun session <id> info",
+    "rules and skills: listed with token cost, switched per session, project or global",
+    "releases: signed with minisign"
+  ]
+}
