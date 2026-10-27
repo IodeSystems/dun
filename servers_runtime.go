@@ -782,6 +782,7 @@ func (h *Harness) rebuildTools() {
 		if h.cfg.NoDir {
 			sys += noDirSystem
 		}
+		sys += h.cfg.SystemNote
 		// The workspace's root AGENTS.md and CLAUDE.md, and what they import,
 		// are standing context: the model needs the project's rules from the
 		// first message, and a system block survives compaction so a fold

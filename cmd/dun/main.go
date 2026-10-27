@@ -281,6 +281,12 @@ func main() {
 	effShip := (*shipFlag && !*noShip) || *pr
 	ship := &effShip
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
+	// dun -p "task": a one-shot whose answer alone goes to stdout (answer.go);
+	// dun -p with no task stays the JSON engine.
+	answerMode := *prog && firstTask != ""
+	if answerMode {
+		*prog = false
+	}
 
 	if *ver {
 		fmt.Println("dun " + version)
@@ -822,6 +828,10 @@ func main() {
 		}
 	} else {
 		cfg.OnToken = func(s string) { fmt.Print(s) }
+		if answerMode {
+			cfg.OnToken = func(s string) { fmt.Fprint(os.Stderr, s) } // the work; the answer is printed after
+			cfg.SystemNote = answerSystem
+		}
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
 			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), clip(oneLine(result), 200))
 		}
@@ -920,7 +930,10 @@ func main() {
 		runProgrammatic(ctx, h, em, in, peers, firstTask, closeCtx{workspace: absWS, sessionID: sessionID, wt: wt})
 		return
 	}
-	runHuman(ctx, h, firstTask, absWS)
+	reply := runHuman(ctx, h, firstTask, absWS)
+	if answerMode {
+		fmt.Println(answerOf(reply))
+	}
 
 	// Report the changes the agent made in the isolated worktree.
 	if wt != nil && wt.Branch != "" {
@@ -934,7 +947,7 @@ func main() {
 
 // runHuman streams a single task, then drains any background jobs it started
 // (their completion notifications trigger follow-up turns).
-func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
+func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) (reply string) {
 	h.WaitServers(ctx) // a one-shot task has every tool it was started with
 	fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n",
 		len(h.ToolNames()), strings.Join(h.ToolNames(), ", "))
@@ -961,6 +974,7 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 		fatal(turnErr(ctx, err))
 	}
 	fmt.Fprint(os.Stderr, commaf("\n\n--- done (%d tokens) ---\n", res.Usage.Total))
+	reply = res.Reply
 
 	for {
 		if h.BackgroundRunning() == 0 {
@@ -977,8 +991,12 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) {
 			}
 		}
 		fmt.Fprintf(os.Stderr, "\n--- background job finished; continuing ---\n")
-		if _, err := h.Continue(ctx); err != nil {
+		r, err := h.Continue(ctx)
+		if err != nil {
 			return
+		}
+		if strings.TrimSpace(r.Reply) != "" {
+			reply = r.Reply
 		}
 	}
 }

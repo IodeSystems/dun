@@ -341,6 +341,9 @@ type Config struct {
 	// window set for a model is filed under it, and an OpenAI-compatible
 	// model list is asked with it (window.go).
 	Endpoint Endpoint
+	// SystemNote is appended to the system prompt: what this run's caller
+	// expects (dun -p "task": an answer after a delimiter, answer.go).
+	SystemNote string
 	// NoDir is a session attached to no directory (dun --no-dir, nodir.go):
 	// no file tools, no rules, and no server that needs a project directory.
 	NoDir bool
