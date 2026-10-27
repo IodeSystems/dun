@@ -24,9 +24,12 @@ var Supported = []Tool{
 	// help("ns") lists every tool (up to 16 KB, so /mcp info's help cost
 	// grows); a truncated value is kept as $rN; results may end with
 	// "warning: line N: …" lines, which dun's eval renderer shows under the
-	// value; round(2.5) = 3. No flag or env var changed.
+	// value; round(2.5) = 3. No flag or env var changed. Recommended v0.6.1
+	// (5ca5898, 2026-10-27), tarballs in deps.json: built -tags release, so
+	// dun doctor calls it a release (v0.6.0's said "built from a checkout");
+	// typeof of an undeclared name is "undefined"; golang.org/x/net v0.62.0.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.6.0"},
+		Min: "v0.2.0", Recommended: "v0.6.1"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
