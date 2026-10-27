@@ -415,7 +415,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// The guard used to be `RaglitHome != ""`, which silently became "never"
 	// the moment the per-session temp home was removed — the ingest was still
 	// called, from a branch that could no longer be taken.
-	if isExt && ext.Subscribes(HookWorkspaceOpen) {
+	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed {
 		dir := h.cfg.ConfigDir
 		if dir == "" {
 			dir = h.cfg.Workspace

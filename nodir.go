@@ -9,7 +9,7 @@ import (
 // dun --no-dir (USER 2026-10-27): a session attached to no directory, to
 // talk with dun, its skills and its MCP tools. It runs in one directory dun
 // keeps for these sessions ($DUN_HOME/nodir, NoDirWorkspace), which is not a
-// project: no rules, no file tools, no poly-lsp, no raglit project index,
+// project: no rules, no file tools, no poly-lsp, raglit without the workspace,
 // and no MCP server whose command names the workspace or the project. The
 // shell's eval and exec run there; --continue and --resume find these
 // sessions there as any workspace's.
@@ -24,8 +24,11 @@ func NoDirWorkspace() (string, error) {
 // (they index one), or a server whose command, arguments or environment
 // name the workspace.
 func needsDir(s Server, workspace string) bool {
-	if s.ID == ServerCode || s.ID == ServerDocs {
+	if s.ID == ServerCode {
 		return true
+	}
+	if s.ID == ServerDocs {
+		return false // other indexes, memory and skills; the workspace is not read (ragworkspace.go)
 	}
 	if s.ID == ServerShell {
 		return false // its --files-dir is the session's directory, which it has

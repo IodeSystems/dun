@@ -3,7 +3,7 @@ package dun
 import "testing"
 
 // A --no-dir session keeps the shell and servers that need no directory,
-// and leaves out poly-lsp, raglit and any server that names the workspace.
+// and raglit, and leaves out poly-lsp and any server that names the workspace.
 func TestNoDir_ServersThatNeedADirectoryAreLeftOut(t *testing.T) {
 	ws := "/home/u/.dun/nodir"
 	servers := []Server{
@@ -19,7 +19,8 @@ func TestNoDir_ServersThatNeedADirectoryAreLeftOut(t *testing.T) {
 	for _, s := range got {
 		ids[s.ID] = true
 	}
-	if !ids[ServerShell] || !ids["playwright"] || !ids["remote"] || ids[ServerCode] || ids[ServerDocs] || ids["repo-notes"] {
+	// raglit stays, for other indexes, without the workspace (ragworkspace.go).
+	if !ids[ServerShell] || !ids["playwright"] || !ids["remote"] || !ids[ServerDocs] || ids[ServerCode] || ids["repo-notes"] {
 		t.Errorf("kept %v", ids)
 	}
 	if n := len(withoutDirServers(servers, Config{Workspace: ws})); n != len(servers) {

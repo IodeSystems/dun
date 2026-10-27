@@ -159,6 +159,7 @@ func TestRouteSlash(t *testing.T) {
 		"raglit ATTACH Other:Idx --project": {"control", "ext", "attach raglit Other:Idx --project"},
 		"raglit detach x --global":          {"control", "ext", "detach raglit x --global"},
 		"raglit attach":                     {"control", "ext", "attach raglit"},
+		"raglit workspace off --global":     {"control", "ext", "workspace raglit off --global"},
 		"poly-lsp attach x":                 {"server", "poly-lsp", "attach x"}, // no search role
 		// the code index's excludes keep a directory's case.
 		"poly-lsp exclude Vendor/X":  {"server", "poly-lsp", "exclude Vendor/X"},

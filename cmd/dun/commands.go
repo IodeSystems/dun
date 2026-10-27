@@ -133,6 +133,9 @@ func extOwnCommands(e dun.Extension) []string {
 		pairs = append(pairs, "attach", "search another index too: attach <index>|<project>:<index> [--project|--global]; bare lists",
 			"detach", "stop searching an attached index: detach <index> [--project|--global]")
 	}
+	if _, own := e.Slash.Commands["workspace"]; !own && extIndexVerb(e, "workspace") {
+		pairs = append(pairs, "workspace", "whether this workspace is read into an index: workspace [on|off] [--session|--project|--global]; off keeps search on other indexes")
+	}
 	return pairs
 }
 

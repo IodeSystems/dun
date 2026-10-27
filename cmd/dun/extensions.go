@@ -154,6 +154,8 @@ func extIndexVerb(e dun.Extension, verb string) bool {
 		return e.Roles.Index != nil && e.Roles.Index.CLI != ""
 	case "attach", "detach":
 		return e.Roles.Search != nil
+	case "workspace": // whether the workspace is read into an index (dun/ragworkspace.go)
+		return e.Roles.Search != nil && e.Subscribes(dun.HookWorkspaceOpen)
 	}
 	return false
 }
@@ -231,6 +233,8 @@ func extIndexCmd(ctx context.Context, h *dun.Harness, verb, id, rest string) str
 		}
 		return out + "\nwatched into index " + index + " — /" + slash + " attach " + index +
 			" to search it in this session (" + h.AttachName(id, index) + " from another project's)"
+	case "workspace":
+		return workspaceCmd(h, slash, args)
 	case "attach", "detach":
 		index, scope, list, err := parseAttach(args)
 		if err != nil {
@@ -275,4 +279,45 @@ func attachListing(h *dun.Harness, id, slash string) string {
 		fmt.Fprintf(&b, "\n  %-28s %s", a.Index, strings.Join(a.Scopes, ", "))
 	}
 	return b.String()
+}
+
+// workspaceCmd is /<slash> workspace [on|off] [--session|--project|--global]:
+// whether the workspace is read into an index; bare says. The scope is the
+// project's unless named (USER 2026-10-27).
+func workspaceCmd(h *dun.Harness, slash string, args []string) string {
+	usage := "usage: /" + slash + " workspace [on|off] [--session|--project|--global]"
+	scope, set := dun.ScopeProject, ""
+	for _, a := range args {
+		switch {
+		case a == "on" || a == "off":
+			set = a
+		case strings.HasPrefix(a, "-"):
+			s, ok := dun.ParseScope(a)
+			if !ok {
+				return usage + " — unknown flag " + a
+			}
+			scope = s
+		default:
+			return usage
+		}
+	}
+	if set == "" {
+		on, from := h.WorkspaceIndexed()
+		if from == "" {
+			from = "the default"
+		}
+		state := "read into this project's index"
+		if !on {
+			state = "not read; search reads the project's own indexes and attached ones"
+		}
+		return fmt.Sprintf("workspace: %s (%s) — /%s workspace on|off [--session|--project|--global]", state, from, slash)
+	}
+	msg, err := h.SetWorkspaceIndexed(set == "on", scope)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	if set == "on" {
+		msg += "; read when " + slash + " next starts"
+	}
+	return msg
 }

@@ -1087,7 +1087,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if id == "ext" {
 			go func() {
 				msg := extListing(h)
-				if f := strings.SplitN(action, " ", 3); len(f) >= 2 && (f[0] == "watch" || f[0] == "attach" || f[0] == "detach") {
+				if f := strings.SplitN(action, " ", 3); len(f) >= 2 && (f[0] == "watch" || f[0] == "attach" || f[0] == "detach" || f[0] == "workspace") {
 					rest := ""
 					if len(f) == 3 {
 						rest = f[2]
