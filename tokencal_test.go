@@ -262,3 +262,25 @@ func TestMeter_FirstRoundCountsToolSchemas(t *testing.T) {
 		t.Errorf("whole-prompt estimate should be near the 4830 counted: %d", est)
 	}
 }
+
+// The logged estimate is the one the shaper used, tool schemas included:
+// it compared the messages alone with the whole request (aw4
+// i_1m5zn6acw0app5r5da9fjh: "estimate 2251 (-69%)" for 7,346 vs 7,274).
+func TestObservation_EstimateIncludesTheSchemas(t *testing.T) {
+	m := &promptMeter{}
+	m.noteToolChars(20000)
+	m.noteBuild(8800, 7346)
+	obs, _ := m.noteUsage(agent.TokenUsage{Processed: 7274})
+	if obs.Estimated != 7346 {
+		t.Errorf("estimated %d, want the builder's 7346", obs.Estimated)
+	}
+	if d := obs.Drift(); d < 0 || d > 0.02 {
+		t.Errorf("drift %+.2f, want about +1%%", d)
+	}
+	m2 := &promptMeter{}
+	m2.noteToolChars(20000)
+	m2.noteBuild(8000, 0)
+	if obs, _ := m2.noteUsage(agent.TokenUsage{Processed: 7000}); obs.Estimated != 7000 {
+		t.Errorf("without the builder's figure: %d, want (8000+20000)/4", obs.Estimated)
+	}
+}

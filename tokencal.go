@@ -303,7 +303,7 @@ func (m *promptMeter) noteUsage(u agent.TokenUsage) (observation, bool) {
 		// "N chars → M tokens (R chars/token)" divides the numbers it shows.
 		Chars:        m.built + m.toolChars,
 		PromptTokens: round,
-		Estimated:    int(math.Ceil(float64(m.built) / prior)),
+		Estimated:    m.claimed(prior),
 		Ratio:        float64(m.built+m.toolChars) / float64(round),
 		First:        m.ratio <= 0,
 	}
@@ -324,6 +324,19 @@ func (m *promptMeter) noteUsage(u agent.TokenUsage) (observation, bool) {
 	m.fitLocked()
 	obs.Slope, obs.Overhead = m.slope, m.intercept
 	return obs, true
+}
+
+// claimed is what this round's prompt was estimated to cost: the builder's
+// own figure (overhead, i.e. tool schemas, included) when it gave one, else
+// the whole request's chars at the prior ratio. It used to be the messages'
+// chars alone at a ratio measured over messages AND schemas, so the log said
+// "estimate 2251 (-69%)" for a prompt the shaper had put at 7,346 of 7,274
+// (aw4 i_1m5zn6acw0app5r5da9fjh). Caller holds mu.
+func (m *promptMeter) claimed(prior float64) int {
+	if m.builtTokens > 0 {
+		return m.builtTokens
+	}
+	return int(math.Ceil(float64(m.built+m.toolChars) / prior))
 }
 
 // lastBuiltChars is the size of the prompt most recently built, for a caller
