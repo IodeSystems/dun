@@ -1276,6 +1276,15 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
+		// Up with messages queued (the TUI): take back the ones the running
+		// turn has not taken, for the composer.
+		if id == "unqueue" {
+			texts := h.Unqueue()
+			b, _ := json.Marshal(texts)
+			em.emit(&proto.ControlEvent{ID: id, Action: string(b)})
+			em.emit(&proto.Queued{Count: h.Queued()})
+			return
+		}
 		// /retry: bare says the settings; a preset or a knob is set on the
 		// client at once and saved (retrycmd.go).
 		if id == "retry" {

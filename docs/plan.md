@@ -31,7 +31,7 @@ owner's call before work starts.
 - [~] Daemon notices (`🔔 [shell] {"servers":…}`) off by default: a notice
   that is JSON goes to the server's activity log (`/mcp`), not the
   conversation or the model.
-- [ ] Up with queued messages: take them out of the queue, merged, into the
+- [~] Up with queued messages: take them out of the queue, merged, into the
   composer to fix and send again.
 - [~] `/splash`: clear the screen and show the splash again.
 - [~] `/rephrase prompt [text|default]`: show, set or reset the rephrasing

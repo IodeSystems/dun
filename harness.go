@@ -1044,6 +1044,26 @@ func (h *Harness) Pending() int {
 	return h.store.pending() + buffered + forced
 }
 
+// Unqueue takes back the person's messages the running turn has not taken
+// yet and returns them, oldest first (USER 2026-10-27: up with queued
+// messages loads them back into the composer, merged, to fix: "enter oops
+// fix"). One the turn already took stays where it is.
+func (h *Harness) Unqueue() []string {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	var out []string
+	kept := h.queue[:0]
+	for _, q := range h.queue {
+		if q.kind == queuedUser {
+			out = append(out, q.text)
+			continue
+		}
+		kept = append(kept, q)
+	}
+	h.queue = kept
+	return out
+}
+
 // Queued reports how many buffered messages are waiting to reach the model, so a
 // UI can say "1 queued" rather than leaving the user wondering whether what they
 // typed went anywhere.

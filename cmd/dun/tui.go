@@ -1488,6 +1488,16 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 				return m, nil
 			}
+			// ↑ with messages queued for the running turn takes them back into
+			// the composer, merged, to fix and send again (USER 2026-10-27).
+			// Once: the queue is then empty, and the next ↑ is history or the
+			// scroll, as before.
+			if m.queuedMsgs > 0 && m.input.AtFirstLine() && !m.paletteActive() {
+				if m.proc.controlCmd("unqueue", "") {
+					m.queuedMsgs = 0
+				}
+				return m, nil
+			}
 			// ↑ on an EMPTY composer recalls the last thing sent, and on a
 			// recalled one the one before — the shell's ↑ (USER 2026-10-23).
 			// A composer with text of the person's own keeps the rule below.
@@ -2546,7 +2556,34 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.ctxStats.charsRecapped += int(chars)
 		}
 	case "control":
-		// /repaint report's answer: the TUI finishes it (repaintreport.go).
+		// The queued messages taken back: out of the conversation's
+		// "(queued)" lines and into the composer, ahead of what is there.
+		if str(ev["id"]) == "unqueue" {
+			var texts []string
+			_ = json.Unmarshal([]byte(str(ev["action"])), &texts)
+			if len(texts) == 0 {
+				m.flashText, m.flashUntil = "nothing to take back: the turn already took them", time.Now().Add(flashFor)
+				break
+			}
+			for _, t := range texts {
+				for i := len(m.convo) - 1; i >= 0; i-- {
+					if m.convo[i].provisional && m.convo[i].provisionalText == t {
+						m.convo = append(m.convo[:i], m.convo[i+1:]...)
+						break
+					}
+				}
+			}
+			merged := strings.Join(texts, "\n")
+			if cur := m.input.Value(); strings.TrimSpace(cur) != "" {
+				merged += "\n" + cur
+			}
+			m.input.SetValue(merged)
+			m.input.CursorEnd()
+			m.focus = focusInput
+			m.refresh()
+			break
+		}
+				// /repaint report's answer: the TUI finishes it (repaintreport.go).
 		if str(ev["id"]) == "repaint" {
 			m.reportEvent(str(ev["action"]), str(ev["message"]))
 			break

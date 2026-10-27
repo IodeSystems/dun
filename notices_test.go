@@ -43,3 +43,24 @@ func TestRephrasePrompt(t *testing.T) {
 		t.Error("default did not go back")
 	}
 }
+
+// Unqueue gives back the person's queued messages, oldest first, and
+// leaves the rest of the queue (an aside) alone.
+func TestUnqueue(t *testing.T) {
+	h := &Harness{}
+	h.Say("fix the typo")
+	h.Say("in main.go")
+	h.noteMu.Lock()
+	h.queue = append(h.queue, queued{kind: queuedAside, text: "an aside"})
+	h.noteMu.Unlock()
+	got := h.Unqueue()
+	if len(got) != 2 || got[0] != "fix the typo" || got[1] != "in main.go" {
+		t.Errorf("unqueued %v", got)
+	}
+	if len(h.queue) != 1 || h.queue[0].kind != queuedAside {
+		t.Errorf("left %+v", h.queue)
+	}
+	if again := h.Unqueue(); len(again) != 0 {
+		t.Errorf("twice: %v", again)
+	}
+}
