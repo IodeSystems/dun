@@ -110,8 +110,8 @@ key (`release/minisign.pub`, with the updater's key rotation).
    whose test builds the real entries in `make test`; `make site` and
    `make site-push`. Checked locally: the built index signed with the
    minisign CLI verifies with dun's own verifier.
-4. Done 2026-10-27: the hz static service `dun`; the page and harness.json
-   are live (pushed with hz-client, no registry: the signing key's password
-   is the owner's).
-5. The owner runs `make site-push` (MINISIGN_KEY=~/.minisign/dun.key) to
-   publish the first registry; then a dun build is checked against it.
+4. Done 2026-10-27: the hz static service `dun`; `make site-push` (its
+   settings in ~/.deploy/dun.env; the release key has no password)
+   published the page, harness.json and the first registry. Checked: the
+   live index verifies with release/minisign.pub, and dun's own Store
+   fetches, verifies, caches and reloads it (raglit's entry fits v0.1.4).
