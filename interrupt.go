@@ -248,7 +248,7 @@ func (h *Harness) recordInterrupt(ctx context.Context) {
 		}
 		note += " Background jobs this turn started are STILL RUNNING — the interrupt does not stop them: " +
 			strings.Join(list, ", ") + ". The user can stop one with /jobs kill N; leave them running " +
-			"unless the user asks you to stop them (exec_monitor kill)."
+			"unless the user asks you to stop them (jobs kill)."
 	}
 	switch {
 	case reason == "":

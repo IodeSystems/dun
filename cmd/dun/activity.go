@@ -7,8 +7,8 @@ package main
 //
 // Both halves exist for the same reason. Sub-agents are spawned by the MODEL,
 // stay resident until dismissed, and have no concurrency cap; background jobs
-// outlive the turn that started them and are silent by design. agent_monitor
-// and exec_monitor are the MODEL's view of those two. This is the human's, and
+// outlive the turn that started them and are silent by design. The jobs tool
+// is the MODEL's view of those two. This is the human's, and
 // without it a forgotten child or a job that died in its second second is
 // invisible rather than merely idle.
 //

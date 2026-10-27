@@ -75,7 +75,7 @@ func TestSubAgent_IdleIsNotDismissed(t *testing.T) {
 	if state != agentIdle || final != "42" {
 		t.Fatalf("want idle with an answer, got %s / %q", state, final)
 	}
-	if r := sa.report(); !strings.Contains(r, "42") || !strings.Contains(r, "re-askable") {
+	if r := sa.report(); !strings.Contains(r, "42") || !strings.Contains(r, "still resident") {
 		t.Errorf("the report must lead with the answer and say it is still there: %q", r)
 	}
 }
@@ -102,7 +102,7 @@ func TestSubAgent_HeartbeatRemindsAboutAnIdleChild(t *testing.T) {
 		}
 		return false
 	})
-	if !strings.Contains(seen, "quit:true") {
+	if !strings.Contains(seen, "kill:true") {
 		t.Errorf("a reminder about an idle child must say how to dismiss it: %q", seen)
 	}
 }
@@ -222,9 +222,13 @@ func TestRoleSystem_TellsEachSideWhatItMayDo(t *testing.T) {
 	if strings.Contains(child, "ask_user") {
 		t.Error("a child must not be told about a tool it does not have")
 	}
-	root := roleSystem(false)
-	if !strings.Contains(root, "agent_monitor") || !strings.Contains(root, "Dismiss") {
-		t.Errorf("a root must be told how to steer and to clean up: %q", root)
+	// A root's side is said once, in the agent tool's description.
+	if root := roleSystem(false); root != "" {
+		t.Errorf("a root's role is the agent tool's description, not the prompt: %q", root)
+	}
+	desc := agentToolDef("").Function.Description
+	if !strings.Contains(desc, "jobs(agent:N, kill:true)") || !strings.Contains(desc, "nothing cleans it up") {
+		t.Errorf("agent must say how to clean up a child: %q", desc)
 	}
 }
 

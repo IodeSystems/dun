@@ -36,7 +36,7 @@ import (
 // running job is exactly the thing whose log keeps growing.
 //
 // The log is the file the engine writes and names in the jobs event (bgjob.go
-// openLogLocked) — the one exec_monitor reads. It is read here in increments
+// openLogLocked) — the one jobs(job:N) reads. It is read here in increments
 // on a timer while the view is open (jobTailEvery), never round-tripped
 // through the engine.
 

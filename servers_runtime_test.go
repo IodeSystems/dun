@@ -24,14 +24,15 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 	if !strings.Contains(shellOnly, "mcpshell") {
 		t.Error("dropped the family that IS running")
 	}
-	// exec and ask_user are dispatcher-side, so they are described whenever they
-	// exist rather than per running server.
-	if !strings.Contains(shellOnly, "ask_user") || !strings.Contains(shellOnly, "- exec:") {
-		t.Error("built-in tools should always be described")
+	// dun's own tools are described by their definitions, once: the system
+	// prompt does not repeat them. What is not about one tool stays: the clip.
+	for _, own := range []string{"ask_user", "- exec:", "- recap:", "jobs"} {
+		if strings.Contains(shellOnly, own) {
+			t.Errorf("the system prompt repeats a tool's description (%q)", own)
+		}
 	}
-
-	if !strings.Contains(shellOnly, "exec_monitor") {
-		t.Error("a model that cannot be told about exec_monitor will never call it")
+	if !strings.Contains(shellOnly, "recap reads the rest") {
+		t.Error("with exec, the prompt must say a large result is clipped and where the rest is")
 	}
 	// No worktree or Docker → no containment line.
 	if strings.Contains(shellOnly, "Containment:") {
@@ -59,7 +60,7 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 	// No backend, no exec tool — so describing one invites a call to something
 	// that is not there. Same rule as the MCP families.
 	none := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "")
-	if strings.Contains(none, "- exec:") || strings.Contains(none, "exec_monitor") {
+	if strings.Contains(none, "clipped") {
 		t.Errorf("described exec with no backend configured:\n%s", none)
 	}
 }
@@ -334,8 +335,7 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 // which do not come and go with a server.
 func serverToolNames(h *Harness) []string {
 	builtin := map[string]bool{
-		"exec": true, "exec_monitor": true, "ask_user": true,
-		"agent": true, "agent_monitor": true,
+		"exec": true, "jobs": true, "ask_user": true, "agent": true,
 		"tell_parent": true, "ask_parent": true, "recap": true, "session": true,
 	}
 	var out []string

@@ -77,9 +77,11 @@ const loopResultHead = 600
 // their failure mode, and guarding them would break the only way dun waits for
 // anything.
 var pollingTools = map[string]bool{
+	"jobs":     true,
+	"ask_user": true,
+	// jobs' old names, which still dispatch (jobs.go)
 	"exec_monitor":  true,
 	"agent_monitor": true,
-	"ask_user":      true,
 }
 
 // loopRepeats is the threshold in force.

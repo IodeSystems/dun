@@ -384,7 +384,7 @@ FinderPreparer). **Background work:** an `exec` that is still running after 30s 
 to a background job (the full test suite, a long build); when it finishes the
 agent is notified and reacts on its own — no blocking, nothing is killed. Their output
 streams to a log file whose path the agent gets (so a big log is grepped, not
-pasted into the context), and `exec_monitor` tunes what a running job reports —
+pasted into the context), and `jobs` tunes what a running job reports —
 `buffer_bytes` to hear from it periodically, `grep` to hear only matching lines,
 `ignore` to mute it, `kill` to end it and everything it started. A job says
 nothing until it exits unless asked to. You stop one with `/jobs kill <n>` (bare
@@ -399,7 +399,7 @@ its tool servers (no second index), runs on `--child-model` if you set one, and
 cannot spawn agents of its own or reach you directly. It reports with
 `tell_parent` (a `status` that overwrites, a `message` that accumulates, a
 `final` answer) and can ask the parent — never the human — with `ask_parent`.
-Children stay resident after answering, so `agent_monitor` can tell one a
+Children stay resident after answering, so `jobs(agent:N)` can tell one a
 follow-up far more cheaply than spawning another; it also peeks, dismisses, and
 restarts children left stopped by a previous session. The TUI lists them live
 with what each has spent.

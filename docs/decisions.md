@@ -374,7 +374,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   server could not notify the parent. In process, `tell_parent` is a direct
   `h.Notify` onto the lift path.
 - **Tool sets are chosen by role, and that is the enforcement.** Root gets
-  `agent` and `agent_monitor`; a child gets `tell_parent` and `ask_parent` and
+  `agent` (and `jobs` with its agent params); a child gets `tell_parent` and `ask_parent` and
   no `ask_user`. Depth 1 holds because a child is never handed `agent`; a child
   cannot reach the human because `ask_user` is absent (`applyTools`).
 - **Decided (USER, 2026-07-31):** `tell_parent(status, message)`: status
@@ -412,6 +412,32 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `exec("sleep 3")` and polled `agent_monitor` four times in a row; both now
   have `wait`. A nil-harness child would have panicked from its own goroutine;
   it now fails that one agent.
+- **One `jobs` tool for both kinds of background work (USER, 2026-10-27).**
+  `exec` and `agent` stay separate launchers; each hands back a numbered,
+  typed job ("background job #N", "agent #N") that `jobs(job:N)` or
+  `jobs(agent:N)` watches. `wait`, `tail` and `kill` are common (kill ends a
+  command's process group, or dismisses an agent); `tell`/`resume` are an
+  agent's, `grep`/`buffer_bytes`/`ignore` a command's, and the wrong kind is
+  an error naming what applies. While a `wait` is on a command, its finish
+  notice is not sent, so the outcome is not said twice. A child gets `jobs`
+  for its own commands, with no agent params, and its agent list is its own
+  (empty). `exec_monitor` and `agent_monitor` still dispatch, hidden, for
+  resumed sessions and habit (`quit` is `kill`).
+- **One `session` tool for what runs the model and the task's state (USER,
+  2026-10-27).** `harness` and `session_state` both answered "what is this
+  session"; `session` returns `{harness, state}` as JSON, reads with no
+  arguments and merges any of goal/plan/todo/status. The old names still
+  dispatch, hidden. `dun session <id> info` and the harness file are
+  unchanged.
+- **Each fact once (USER, 2026-10-27: "reduce the verbosity and
+  duplication").** The system prompt no longer repeats dun's tool
+  descriptions (exec, exec_monitor, ask_user, recap, the sub-agent
+  paragraph); it keeps the role, containment, which tool to use for files,
+  the clip rule, how to work, and lines for MCP servers whose descriptions
+  dun does not write. dun writes agentkit's `{OUTPUT}` note itself, shorter
+  (`OmitSlotInstructions`). First request, empty dir, no servers but the
+  shell: system prompt 5,025 → 1,780 chars, tool definitions 16,182 →
+  12,722 JSON bytes, 14 → 12 tools.
 
 ## Tool servers and extensions
 

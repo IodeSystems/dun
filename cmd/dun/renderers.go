@@ -132,8 +132,11 @@ func init() {
 
 	// dun's own tools. Each of these was a clipped sentence that hid its verdict.
 	registerRenderer("exec", rendererFunc(execRender))
-	registerRenderer("exec_monitor", rendererFunc(execMonitorRender))
+	registerRenderer("jobs", rendererFunc(jobsRender))
 	registerRenderer("agent", rendererFunc(agentRender))
+	registerRenderer("session", rendererFunc(sessionRender))
+	// The tools jobs replaced, for transcripts written before it.
+	registerRenderer("exec_monitor", rendererFunc(execMonitorRender))
 	registerRenderer("agent_monitor", rendererFunc(agentMonitorRender))
 	registerRenderer("tell_parent", rendererFunc(tellParentRender))
 	registerRenderer("dun_msg", rendererFunc(dunMsgRender))
@@ -159,7 +162,7 @@ func execRender(rc renderCtx) (string, string) {
 	// the job id, because that id is the only handle on it afterwards.
 	if job, ok := backgroundJobID(rc.result); ok {
 		return stDim.Render("  → ") + stSecondary.Render("⏱ background job #"+job) +
-			stSecondary.Render(" · exec_monitor to check on it"), body
+			stSecondary.Render(" · jobs(job:"+job+") to check on it"), body
 	}
 
 	marker, failed := execExitMarker(rc.result)
@@ -237,14 +240,20 @@ func informative(line string) bool {
 	return strings.Contains(line, ":") || len(line) > 20
 }
 
-// backgroundJobID pulls the id out of exec's background receipt.
+// backgroundJobID pulls the id out of exec's background receipt: "It is now
+// background job #N" (bgJob.handoffNotice), or the older "Started background
+// job #N".
 func backgroundJobID(result string) (string, bool) {
-	const prefix = "Started background job #"
-	i := strings.Index(result, prefix)
-	if i < 0 {
+	rest := ""
+	for _, prefix := range []string{"is now background job #", "Started background job #"} {
+		if i := strings.Index(result, prefix); i >= 0 {
+			rest = result[i+len(prefix):]
+			break
+		}
+	}
+	if rest == "" {
 		return "", false
 	}
-	rest := result[i+len(prefix):]
 	end := strings.IndexAny(rest, ":. \n")
 	if end <= 0 {
 		return "", false
@@ -267,6 +276,78 @@ func execMonitorRender(rc renderCtx) (string, string) {
 		return stDim.Render("  → ") + stSecondary.Render(plural(n, "job")), body
 	}
 	return stDim.Render("  → ") + stSecondary.Render(clip(oneLine(first), 90)), body
+}
+
+// jobsRender: the jobs tool answers for a command's job (job:N), a
+// sub-agent (agent:N), or lists both kinds ("job #…" and "agent #…" lines).
+func jobsRender(rc renderCtx) (string, string) {
+	body := stSecondary.Render(rc.result)
+	first := firstLine(rc.result)
+	switch {
+	case strings.HasPrefix(first, "No background jobs"):
+		return stDim.Render("  → ") + stSecondary.Render("no background jobs"), body
+	case strings.HasPrefix(first, "ERROR"):
+		return stDim.Render("  → ") + stErr.Render(clip(first, 90)), body
+	}
+	jobs, agents, other := 0, 0, false
+	for _, ln := range strings.Split(strings.TrimSpace(rc.result), "\n") {
+		switch {
+		case strings.HasPrefix(ln, "job #"):
+			jobs++
+		case strings.HasPrefix(ln, "agent #"):
+			agents++
+		default:
+			other = true
+		}
+	}
+	if !other && jobs+agents > 0 {
+		var parts []string
+		if jobs > 0 {
+			parts = append(parts, plural(jobs, "job"))
+		}
+		if agents > 0 {
+			parts = append(parts, plural(agents, "agent"))
+		}
+		return stDim.Render("  → ") + stSecondary.Render(strings.Join(parts, " · ")), body
+	}
+	if _, ok := rc.args["agent"]; ok || strings.HasPrefix(first, "agent ") {
+		return agentMonitorRender(rc)
+	}
+	return execMonitorRender(rc)
+}
+
+// sessionRender: the session tool returns {harness, state} as JSON. A call
+// that set the state shows the state; a read shows what is running.
+func sessionRender(rc renderCtx) (string, string) {
+	var v struct {
+		Harness struct {
+			Version string `json:"version"`
+			Model   string `json:"model"`
+		} `json:"harness"`
+		State struct {
+			Goal   string `json:"goal"`
+			Status string `json:"status"`
+		} `json:"state"`
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(rc.result)), &v) != nil {
+		return genericRender(rc)
+	}
+	body := stSecondary.Render(rc.result)
+	if v.Error != "" {
+		return stDim.Render("  → ") + stErr.Render(clip(v.Error, 90)), body
+	}
+	if len(rc.args) > 0 {
+		var parts []string
+		if v.State.Status != "" {
+			parts = append(parts, v.State.Status)
+		}
+		if v.State.Goal != "" {
+			parts = append(parts, v.State.Goal)
+		}
+		return stDim.Render("  → ") + stSecondary.Render("state: "+clip(oneLine(strings.Join(parts, " · ")), 90)), body
+	}
+	return stDim.Render("  → ") + stSecondary.Render(clip("dun "+v.Harness.Version+" · "+v.Harness.Model, 90)), body
 }
 
 // agentRender: which child, what state, and what it cost — the spend is the

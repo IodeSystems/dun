@@ -664,7 +664,7 @@ func (h *Harness) rebuildTools() {
 	h.srvMu.Unlock()
 	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
 	if cfg.Exec != nil {
-		toolDefs = append(toolDefs, execToolDef(), execMonitorToolDef())
+		toolDefs = append(toolDefs, execToolDef())
 		// ONE backend for everything. A long command used to need a stateless
 		// backend of its own so it would not hold the shell that every other
 		// command serializes on; now it donates that shell when it is promoted
@@ -674,7 +674,6 @@ func (h *Harness) rebuildTools() {
 			return h.startJob(cfg.Exec, command)
 		}
 		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting)
-		dispatch = withExecMonitor(dispatch, h, report)
 	}
 	// File tools, rooted at the working tree. Rebuilt with the tool set, so a
 	// worktree switch (Rehoist) moves their root with exec's.
@@ -722,9 +721,15 @@ func (h *Harness) rebuildTools() {
 		dispatch = withTellParent(dispatch, h, report)
 		dispatch = withAskParent(dispatch, h, report)
 	} else {
-		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel), agentMonitorToolDef())
+		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel))
 		dispatch = withAgent(dispatch, h, report)
-		dispatch = withAgentMonitor(dispatch, h, report)
+	}
+	// jobs watches both kinds of background work (jobs.go): a command exec
+	// handed off, and a sub-agent. A child gets it for its own commands; it
+	// has no agents, so the agent params are not in its definition.
+	if cfg.Exec != nil || !h.isChild() {
+		toolDefs = append(toolDefs, jobsToolDef(cfg.Exec != nil, !h.isChild()))
+		dispatch = withJobs(dispatch, h, report)
 	}
 	// recap is available to BOTH roles, and behaves identically in both: it
 	// applies and then reports. It used to ask a root's human first — see the
@@ -794,6 +799,11 @@ func (h *Harness) rebuildTools() {
 		_, rulesIndexed := hookExt(exts, HookRulesChanged, tools)
 		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
+	}
+	// agentkit's own {OUTPUT} note is off (OmitSlotInstructions); this is
+	// the shorter one, on the same terms: only when there are tools.
+	if len(toolDefs) > 0 {
+		sys += systemSlots
 	}
 	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {
 		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."

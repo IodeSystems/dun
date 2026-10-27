@@ -73,7 +73,7 @@ func TestExec_SlowCommandBecomesAJob(t *testing.T) {
 	if !strings.Contains(out, "STILL RUNNING") || !strings.Contains(out, "NOT killed") {
 		t.Fatalf("the notice must say the command is alive: %q", out)
 	}
-	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "exec_monitor(job:1)") {
+	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "jobs(job:1)") {
 		t.Fatalf("the notice must name the job and where to look: %q", out)
 	}
 

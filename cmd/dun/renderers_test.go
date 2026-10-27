@@ -405,3 +405,53 @@ func TestBackgroundJobID(t *testing.T) {
 		t.Errorf("job 7: got %q ok=%v", id, ok)
 	}
 }
+
+// jobs answers for both kinds: a list counts each, a command's report and an
+// agent's report read as they did under exec_monitor and agent_monitor.
+func TestJobsRender_BothKinds(t *testing.T) {
+	list, _ := renderToolResult(renderCtx{tool: "jobs",
+		result: "job #1 RUNNING for 3s (0 bytes out) — `sleep 9`\nagent #2 idle for 4s — task: x"})
+	if !strings.Contains(list, "1 job") || !strings.Contains(list, "1 agent") {
+		t.Errorf("a list counts each kind: %q", list)
+	}
+	empty, _ := renderToolResult(renderCtx{tool: "jobs", result: "No background jobs or sub-agents."})
+	if !strings.Contains(empty, "no background jobs") {
+		t.Errorf("empty: %q", empty)
+	}
+	agent, _ := renderToolResult(renderCtx{tool: "jobs", args: map[string]any{"agent": 2},
+		result: "agent #2 is idle after 3m40s (41.2k tokens)\ntask: read the log"})
+	if !strings.Contains(agent, "#2 idle") || !strings.Contains(agent, "41.2k tokens") {
+		t.Errorf("an agent's report: %q", agent)
+	}
+	job, _ := renderToolResult(renderCtx{tool: "jobs", args: map[string]any{"job": 1},
+		result: "#1 succeeded in 2s — `make`\nmonitor: completion notice on, no progress reports\nok"})
+	if !strings.Contains(job, "#1 succeeded") {
+		t.Errorf("a command's report: %q", job)
+	}
+	bad, _ := renderToolResult(renderCtx{tool: "jobs", result: "ERROR: give job or agent, not both."})
+	if !strings.Contains(bad, "not both") {
+		t.Errorf("an error: %q", bad)
+	}
+}
+
+// exec's handoff names the job and the call that looks at it.
+func TestExecRender_HandoffNamesTheJob(t *testing.T) {
+	got, _ := renderToolResult(renderCtx{tool: "exec",
+		result: "`make` is STILL RUNNING after 30s — it was NOT killed and has NOT failed. It is now background job #4 and it runs"})
+	if !strings.Contains(got, "#4") || !strings.Contains(got, "jobs(job:4)") {
+		t.Errorf("handoff: %q", got)
+	}
+}
+
+// session: a read shows what runs; a merge shows the state set.
+func TestSessionRender(t *testing.T) {
+	const out = `{"harness":{"name":"dun","version":"v1.2","model":"m"},"state":{"goal":"ship","status":"done"}}`
+	read, _ := renderToolResult(renderCtx{tool: "session", result: out})
+	if !strings.Contains(read, "dun v1.2 · m") {
+		t.Errorf("read: %q", read)
+	}
+	set, _ := renderToolResult(renderCtx{tool: "session", args: map[string]any{"status": "done"}, result: out})
+	if !strings.Contains(set, "state: done · ship") {
+		t.Errorf("merge: %q", set)
+	}
+}
