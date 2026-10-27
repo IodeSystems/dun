@@ -71,8 +71,26 @@ var flagGroups = []struct {
 	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "serve", "addr", "p", "version"}},
 	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase"}},
 	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp"}},
-	{"shipping", []string{"ship", "no-ship", "pr"}},
 	{"advanced", []string{"d", "force", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
+}
+
+// removedFlags are flags that no longer do anything. They stay accepted
+// because an older TUI or dund passes them to a newer engine and a script may
+// too; --help does not list them.
+var removedFlags = map[string]bool{"ship": true, "no-ship": true, "pr": true}
+
+// warnShipRemoved prints one line to stderr when a removed ship flag was given
+// on a direct command line.
+func warnShipRemoved() {
+	given := false
+	flag.Visit(func(f *flag.Flag) {
+		if removedFlags[f.Name] {
+			given = true
+		}
+	})
+	if given {
+		fmt.Fprintln(os.Stderr, "dun: ship was removed; --ship, --pr and --no-ship do nothing. The repo's own rules for shipping apply.")
+	}
 }
 
 func writeUsage(w io.Writer, fs *flag.FlagSet) {
@@ -106,6 +124,9 @@ start:
 		fmt.Fprintf(w, "%-24s %s\n", head, help)
 	}
 	grouped := map[string]bool{}
+	for n := range removedFlags {
+		grouped[n] = true // accepted, hidden
+	}
 	for _, g := range flagGroups {
 		for _, n := range g.names {
 			grouped[n] = true
@@ -178,13 +199,12 @@ func main() {
 	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
-	pr := flag.Bool("pr", false, "shorthand for --ship with mode pr (verify, push, then report the gh pr create command)")
-	// Ship is ON by default: an agent that finishes work and cannot land it has
-	// done half a job, and the modes in ship.allow are the real policy surface —
-	// a repo that does not want pushes says so there, not by withholding the
-	// tool. --no-ship is the opt-out for a session that should only ever look.
-	shipFlag := flag.Bool("ship", true, "let the agent ship work (fetch+rebase+checks+push) when done")
-	noShip := flag.Bool("no-ship", false, "withhold the ship tool entirely (overrides --ship)")
+	// ship was removed 2026-10-27: repos state their own shipping rules. The
+	// flags stay accepted and do nothing, because an older TUI or dund passes
+	// them to this engine and a script may too.
+	flag.Bool("pr", false, "removed; does nothing")
+	flag.Bool("ship", true, "removed; does nothing")
+	flag.Bool("no-ship", false, "removed; does nothing")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
 	noDir := flag.Bool("no-dir", false, "a session attached to no directory: talk with dun, its skills and MCP tools; no project files, rules, code or document index (sessions live in $DUN_HOME/nodir)")
@@ -277,9 +297,9 @@ func main() {
 		}
 		os.Exit(cmd.ProcessState.ExitCode())
 	}
-	// --pr implies shipping: it is a ship MODE, not a separate ability.
-	effShip := (*shipFlag && !*noShip) || *pr
-	ship := &effShip
+	if !*prog {
+		warnShipRemoved()
+	}
 	firstTask := strings.TrimSpace(strings.Join(flag.Args(), " "))
 	// dun -p "task": a one-shot whose answer alone goes to stdout (answer.go);
 	// dun -p with no task stays the JSON engine.
@@ -391,7 +411,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -401,7 +421,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -490,10 +510,9 @@ func main() {
 		if !isRepo && !*prog {
 			fmt.Fprintf(os.Stderr, "dun: %s is not a git repo — working in place (no isolation)\n", absWS)
 		}
-	} else if *ship || *pr {
-		// --ship/--pr without --worktree: create a pass-through worktree so
-		// the ship tool is available. The agent works in the checked-out
-		// directory; ship's pipeline (rebase + checks) still runs.
+	} else {
+		// Without --worktree: a pass-through worktree on the checked-out
+		// directory, so branch and status are known.
 		wt, _ = dun.WorktreeInPlace(absWS)
 	}
 
@@ -627,8 +646,6 @@ func main() {
 		ChildModel:  *childModel,
 		Exec:        backend,
 		Worktree:    wt,
-		EnableShip:  *ship || *pr,
-		ShipCfg:     shipConfig(absWS, *pr),
 		CommitCfg:   dun.LoadCommit(absWS),
 		Files:       filesConfig(absWS, *noDir),
 		NoDir:       *noDir,

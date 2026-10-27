@@ -460,45 +460,6 @@ dun --no-worktree ...                               # work in place (no isolatio
 The container is the sandbox, so model-authored commands can't reach the host —
 no per-action approval prompts, the isolation does the work.
 
-The agent gets one way to land work — a `ship` tool that fetches origin, rebases
-onto the base branch, runs the project's checks, and *then* pushes. The order is
-the point: what gets verified is exactly what gets pushed. `--pr` is shorthand
-for `pr` mode, which pushes and then reports the `gh pr create` line for you to
-run. dun does not invoke `gh` itself — an expired gh token does not fail, it
-silently starts an OAuth device flow and polls for a code no one is reading,
-which is a hang, not an error.
-
-Ship is ON by default, because an agent that finishes work and cannot land it
-has done half a job. What a repo is willing to allow is declared in `ship.allow`
-below, which is the real policy surface; `--no-ship` withholds the tool entirely,
-for a session that should only ever look.
-
-Modes are the terminal state — `verify` (checks only, pushes nothing), `push`,
-`pr` — and a repo declares which ones are allowed:
-
-```jsonc
-// dun.json
-"ship": {
-  "allow":   ["verify", "pr"],       // this repo's agents land branches for review, they don't push the base
-  "default": "pr",
-  "checks": [                        // serial waves; each object runs in parallel
-    {"compile": "go build ./..."},
-    {"lint": "golangci-lint run", "vet": "go vet ./..."},
-    {"smoke": "go test -short ./..."}
-  ]
-}
-```
-
-Ship requires a clean tree (an untracked file is usually one the agent forgot to
-add), resumes a conflicted rebase on its own, and re-verifies if origin moved
-while the checks were running.
-
-It ships the branch you are ON, against that branch's own upstream — dun never
-switches branches. A branch with no upstream has nothing to verify against, so
-it falls back to the base branch, and with no remote for that either the checks
-are the whole of ship. What an agent may do is declared with `allow`, not by
-guessing from branch names.
-
 Next: run the MCP servers inside the container too.
 
 ### File tools

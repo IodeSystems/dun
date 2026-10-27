@@ -165,8 +165,6 @@ func ownCommands(docker bool) []proto.CommandSpec {
 			State: onOff(docker), Description: "where commands run: on, in a Docker container; off, on this machine"},
 		{Name: "worktree", Usage: "[status|new|commit]", Group: "git", Choices: choices("status", "", "new", "isolate in a new worktree", "commit", "write the message and ask"),
 			Description: "git: alone shows status, new isolates in a worktree, commit writes the message and asks"},
-		{Name: "ship", Usage: "[verify|push|pr]", Group: "git", Choices: choices("verify", "fetch, rebase, run checks", "push", "and push", "pr", "and open a PR"),
-			Description: "ship the worktree: fetch, rebase, run checks, push (default: push)"},
 		{Name: "memories", Group: "memory", Description: "this project's saved notes: when written, refined, confirmed or void"},
 		{Name: "remember", Usage: "[text]", Group: "memory", Text: true,
 			Description: "save a note for later sessions on this project (needs /raglit on); alone: the model picks what to keep"},
@@ -446,7 +444,7 @@ func routeSlash(line string, r slashRoutes) {
 		case "on", "off", "auto":
 			r.reply("suggestions: " + arg(0))
 		}
-	case "docker", "worktree", "ship":
+	case "docker", "worktree":
 		r.control(name, arg(0))
 	case "jobs":
 		switch {

@@ -25,7 +25,7 @@ Other docs: `README.md` (use), `decisions.md` (why the code is the way it is),
 - **raglit**: knowledge. `search` and `ingest`, plus proactive suggestions.
 
 dun adds what none of them has: the TUI, the session service, the worktree and
-Docker lifecycle, the `exec` and `ship` tools, sub-agents, and system-prompt
+Docker lifecycle, the `exec` tool, sub-agents, and system-prompt
 composition. The tool composition itself is small: `mcpToolDefs` and
 `mcpDispatcher` (`mcp.go`) merge the servers' tools into one agentkit session.
 
@@ -44,7 +44,7 @@ engine: `dun -p` — one process per session (harness.go)
    ├─ mcpmgr spawns tool servers on the host over stdio JSON-RPC:
    │     poly-lsp-mcp · mcpshell (--files-dir) · raglit serve · user-added
    ├─ exec tool: on the host, or in a Docker container when docker is on
-   └─ end: ship (fetch, rebase, checks, push) → branch/PR
+   └─ end: the repo's own shipping rules (dun has no ship tool)
 ```
 
 - The engine is headless. The TUI is a client of its event protocol, so the UI
@@ -67,12 +67,11 @@ engine: `dun -p` — one process per session (harness.go)
   spend ledger, bug-report captures.
 - Safety model: isolation, not per-action approval prompts. The worktree
   contains file changes to a branch. A Docker container contains `exec`. The
-  agent lands work only through `ship`, whose allowed modes the repo declares.
+  repo states its own shipping rules; dun has no ship tool.
 
 ## The gap it fills
 
 None of the three composed tools runs arbitrary commands. mcpshell is
 sandboxed, and poly-lsp gives diagnostics only. A coding agent must build,
 test and use git. dun's `exec` tool is that command runner. Docker and the
-worktree make it safe to give the model. `ship` makes landing the work
-verified: nothing is pushed that was not checked in the state it will land in.
+worktree make it safe to give the model.

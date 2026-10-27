@@ -60,8 +60,6 @@ type tuiOpts struct {
 	workspace, model, url, key, docker string
 	dockerNetwork                      bool
 	worktree                           bool
-	pr                                 bool
-	ship                               bool
 	cont                               bool   // --continue: resume the latest session
 	resume                             string // --resume <id>: resume a specific session
 	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /exit)
@@ -449,7 +447,7 @@ type contextStats struct {
 	// rather than triggering their own turn).
 	notificationsSmuggled int
 
-	// Tool calls injected by the host (e.g. /ship) that appear as if the
+	// Tool calls injected by the host that appear as if the
 	// model made them.
 	forcedToolCalls int
 
@@ -5586,15 +5584,6 @@ func procArgs(o tuiOpts, mode string) []string {
 	}
 	if o.worktree {
 		args = append(args, "--worktree")
-	}
-	if o.pr {
-		args = append(args, "--pr")
-	}
-	// Ship is on by default in the engine too, so the flag that has to survive
-	// the re-exec is the OPT-OUT. Passing nothing when o.ship is false would
-	// silently hand the child the default and undo --no-ship.
-	if !o.ship {
-		args = append(args, "--no-ship")
 	}
 	if o.rephrase {
 		args = append(args, "--rephrase")

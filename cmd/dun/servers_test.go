@@ -7,9 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -325,128 +323,6 @@ func (e *testExecBackend) Run(ctx context.Context, command string, w io.Writer) 
 		result.Err = err.Error()
 	}
 	return result
-}
-
-func TestRunShipCmd_VerifyMode(t *testing.T) {
-	origin := t.TempDir()
-	runGit(t, origin, "init", "--bare", "-q")
-
-	repo := t.TempDir()
-	runGit(t, repo, "init", "-q")
-	runGit(t, repo, "config", "user.email", "t@t")
-	runGit(t, repo, "config", "user.name", "t")
-	runGit(t, repo, "remote", "add", "origin", origin)
-	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hello\n"), 0o644)
-	runGit(t, repo, "add", ".")
-	runGit(t, repo, "commit", "-qm", "init")
-	runGit(t, repo, "push", "-q", "-u", "origin", "HEAD")
-
-	// NewWorktree creates a git worktree on branch dun/<ts> from HEAD.
-	// The worktree lives in $DUN_HOME/projects/<id>/worktrees/ — commits made there
-	// are visible to the main repo immediately.
-	wt, isRepo, err := dun.NewWorktree(repo, nil)
-	if err != nil || !isRepo {
-		t.Fatalf("NewWorktree: %v", err)
-	}
-	t.Cleanup(wt.Cleanup)
-
-	// Make a commit inside the worktree (this is how dun actually works)
-	os.WriteFile(filepath.Join(wt.Path, "feature.txt"), []byte("new\n"), 0o644)
-	runGit(t, wt.Path, "add", ".")
-	runGit(t, wt.Path, "commit", "-qm", "feat: add feature")
-
-	cfg := dun.Config{
-		Workspace: wt.Path,
-		Worktree:  wt,
-		Exec:      &testExecBackend{dir: wt.Path},
-		ShipCfg:   &dun.ShipConfig{},
-	}
-	harness, err := dun.Start(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(harness.Close)
-
-	out := runShipCmd(context.Background(), harness, "verify")
-	if !strings.Contains(out, "ship queued") {
-		t.Fatalf("expected ship queued message, got: %s", out)
-	}
-
-	// Verify the forced tool call was queued with correct name + arguments
-	// by running the OnToolCalls callback (which drains the queue).
-	tcs := harness.Session.OnToolCalls(nil)
-	if len(tcs) != 1 {
-		t.Fatalf("expected 1 forced tool call, got %d", len(tcs))
-	}
-	if tcs[0].Function.Name != "ship" {
-		t.Fatalf("expected tool name ship, got %s", tcs[0].Function.Name)
-	}
-	if !strings.Contains(tcs[0].Function.Arguments, `"mode":"verify"`) {
-		t.Fatalf("expected verify mode in arguments, got: %s", tcs[0].Function.Arguments)
-	}
-}
-
-func TestRunShipCmd_PushMode(t *testing.T) {
-	origin := t.TempDir()
-	runGit(t, origin, "init", "--bare", "-q")
-
-	repo := t.TempDir()
-	runGit(t, repo, "init", "-q")
-	runGit(t, repo, "config", "user.email", "t@t")
-	runGit(t, repo, "config", "user.name", "t")
-	runGit(t, repo, "remote", "add", "origin", origin)
-	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hello\n"), 0o644)
-	runGit(t, repo, "add", ".")
-	runGit(t, repo, "commit", "-qm", "init")
-	runGit(t, repo, "push", "-q", "-u", "origin", "HEAD")
-
-	// NewWorktree creates a git worktree on branch dun/<ts> from HEAD.
-	wt, isRepo, err := dun.NewWorktree(repo, nil)
-	if err != nil || !isRepo {
-		t.Fatalf("NewWorktree: %v", err)
-	}
-	t.Cleanup(wt.Cleanup)
-
-	// Make a commit inside the worktree
-	os.WriteFile(filepath.Join(wt.Path, "feature.txt"), []byte("new\n"), 0o644)
-	runGit(t, wt.Path, "add", ".")
-	runGit(t, wt.Path, "commit", "-qm", "feat: add feature")
-
-	cfg := dun.Config{
-		Workspace: wt.Path,
-		Worktree:  wt,
-		Exec:      &testExecBackend{dir: wt.Path},
-		ShipCfg:   &dun.ShipConfig{},
-	}
-	harness, err := dun.Start(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(harness.Close)
-
-	out := runShipCmd(context.Background(), harness, "push")
-	if !strings.Contains(out, "ship queued") {
-		t.Fatalf("expected ship queued message, got: %s", out)
-	}
-
-	// Verify the forced tool call was queued with correct name + arguments
-	tcs := harness.Session.OnToolCalls(nil)
-	if len(tcs) != 1 {
-		t.Fatalf("expected 1 forced tool call, got %d", len(tcs))
-	}
-	if tcs[0].Function.Name != "ship" {
-		t.Fatalf("expected tool name ship, got %s", tcs[0].Function.Name)
-	}
-	if !strings.Contains(tcs[0].Function.Arguments, `"mode":"push"`) {
-		t.Fatalf("expected push mode in arguments, got: %s", tcs[0].Function.Arguments)
-	}
-}
-
-func TestRunShipCmd_UnknownAction(t *testing.T) {
-	out := runShipCmd(context.Background(), nil, "bounce")
-	if !strings.Contains(out, "unknown action") {
-		t.Fatalf("expected unknown action error, got: %q", out)
-	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

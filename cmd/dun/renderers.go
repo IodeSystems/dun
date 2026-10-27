@@ -133,7 +133,6 @@ func init() {
 	// dun's own tools. Each of these was a clipped sentence that hid its verdict.
 	registerRenderer("exec", rendererFunc(execRender))
 	registerRenderer("exec_monitor", rendererFunc(execMonitorRender))
-	registerRenderer("ship", rendererFunc(shipRender))
 	registerRenderer("agent", rendererFunc(agentRender))
 	registerRenderer("agent_monitor", rendererFunc(agentMonitorRender))
 	registerRenderer("tell_parent", rendererFunc(tellParentRender))
@@ -268,74 +267,6 @@ func execMonitorRender(rc renderCtx) (string, string) {
 		return stDim.Render("  → ") + stSecondary.Render(plural(n, "job")), body
 	}
 	return stDim.Render("  → ") + stSecondary.Render(clip(oneLine(first), 90)), body
-}
-
-// shipRender: the verdict, which is the whole reason to read a ship result.
-func shipRender(rc renderCtx) (string, string) {
-	body := stSecondary.Render(rc.result)
-	first := firstLine(rc.result)
-	mark, style := "", stSecondary
-	_ = style // initial value; every case below reassigns
-	switch {
-	case strings.HasPrefix(first, "Shipped"):
-		mark, style = "✓ shipped", stTool
-	case strings.HasPrefix(first, "Verified, but NOT pushed"), strings.HasPrefix(first, "Verified, but a pull request"):
-		mark, style = "⊘ refused", stNote
-	case strings.HasPrefix(first, "Verified"):
-		mark, style = "✓ verified", stTool
-	case strings.HasPrefix(first, "Checks failed"):
-		mark, style = "✗ "+shipStage(first), stErr
-	case strings.HasPrefix(first, "Nothing to ship"):
-		mark, style = "· nothing to ship", stSecondary
-	case strings.HasPrefix(first, "ERROR"), strings.Contains(first, "failed"), strings.Contains(first, "conflict"):
-		mark, style = "✗ "+clip(oneLine(first), 60), stErr
-	default:
-		return genericRender(rc)
-	}
-	// Name the checks: "verified" without saying what ran is a claim ship has
-	// not earned, and the collapsed line is where that claim is read.
-	detail := shipChecks(rc.result)
-	out := stDim.Render("  → ") + style.Render(mark)
-	if detail != "" {
-		out += stSecondary.Render(" · " + clip(detail, 70))
-	}
-	return out, body
-}
-
-// shipStage turns "Checks failed at stage 1 of 3." into "checks failed 1/3".
-func shipStage(first string) string {
-	f := strings.Fields(first)
-	for i, w := range f {
-		if w == "stage" && i+3 < len(f) {
-			return fmt.Sprintf("checks failed %s/%s", f[i+1], strings.TrimSuffix(f[i+3], "."))
-		}
-	}
-	return "checks failed"
-}
-
-// shipChecks pulls the check names out of a ship result — the "passed: a, b."
-// line, or the FAILED names when it failed.
-func shipChecks(result string) string {
-	var failed []string
-	for _, ln := range strings.Split(result, "\n") {
-		if name, ok := strings.CutPrefix(ln, "FAILED "); ok {
-			if i := strings.Index(name, ":"); i > 0 {
-				failed = append(failed, name[:i])
-			}
-		}
-		// checkSummary embeds this MID-SENTENCE ("…and passed: compile, vet."),
-		// so it is found by index, not by prefix.
-		if i := strings.Index(ln, "passed: "); i >= 0 && len(failed) == 0 {
-			return "passed " + strings.TrimSuffix(ln[i+len("passed: "):], ".")
-		}
-		if strings.Contains(ln, "ran NO checks") {
-			return "NO checks configured"
-		}
-	}
-	if len(failed) > 0 {
-		return "failed: " + strings.Join(failed, ", ")
-	}
-	return ""
 }
 
 // agentRender: which child, what state, and what it cost — the spend is the

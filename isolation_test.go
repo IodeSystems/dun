@@ -140,11 +140,6 @@ func TestExecResult_OutputCannotFakeAFailure(t *testing.T) {
 	if out.Failed() {
 		t.Errorf("a command that PRINTS the marker exited 0 and passed: %+v", out)
 	}
-	cfg := &ShipConfig{Checks: []map[string]string{{"compile": "printer"}}}
-	exec := func(context.Context, string) ExecResult { return out }
-	if fail := runChecks(context.Background(), cfg, exec); fail != "" {
-		t.Errorf("runChecks failed a passing check on its own output:\n%s", fail)
-	}
 }
 
 // Streaming is what makes a background job watchable: the tee sees bytes while

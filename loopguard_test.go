@@ -82,7 +82,7 @@ func TestLoopGuard_RefusalCarriesThePreviousResult(t *testing.T) {
 	}
 }
 
-// Legitimate repetition, from the same session: `ship {"mode":"push"}` eight
+// Legitimate repetition, from the same session: `land {"mode":"push"}` eight
 // times and one `git log` three times, every pair separated by other work. The
 // run is what is being counted, not the total.
 func TestLoopGuard_LeavesSeparatedRepeatsAlone(t *testing.T) {
@@ -91,8 +91,8 @@ func TestLoopGuard_LeavesSeparatedRepeatsAlone(t *testing.T) {
 	d := withLoopGuard(inner.dispatch, h)
 
 	for i := 0; i < 8; i++ {
-		if out, _ := d(context.Background(), call("ship", `{"mode":"push"}`)); strings.HasPrefix(out, "ERROR") {
-			t.Fatalf("ship #%d was refused; separated repeats are normal work", i)
+		if out, _ := d(context.Background(), call("land", `{"mode":"push"}`)); strings.HasPrefix(out, "ERROR") {
+			t.Fatalf("land #%d was refused; separated repeats are normal work", i)
 		}
 		if out, _ := d(context.Background(), call("exec", `{"command":"go test ./..."}`)); strings.HasPrefix(out, "ERROR") {
 			t.Fatalf("exec #%d was refused", i)

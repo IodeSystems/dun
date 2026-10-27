@@ -792,26 +792,8 @@ func (h *Harness) rebuildTools() {
 		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
 	}
-	// ship is the only way work leaves the worktree. It needs a repo, not a
-	// branch: a --no-worktree session sits on the base branch, and the pipeline
-	// (rebase + checks) is worth running there too — it just refuses to push.
-	if cfg.EnableShip && cfg.Worktree != nil && cfg.Worktree.IsRepo() {
-		toolDefs = append(toolDefs, shipToolDef(cfg.ShipCfg))
-		execFn := func(ctx context.Context, command string) ExecResult {
-			if cfg.Exec != nil {
-				return cfg.Exec.Run(ctx, command, nil)
-			}
-			// No backend is a FAILED check, not a passing one: ship must never
-			// report "verified" for commands it could not run.
-			return ExecResult{Code: -1, Err: "no exec backend configured"}
-		}
-		dispatch = withShip(dispatch, cfg.Worktree, cfg.ShipCfg, execFn, report)
-		sys += "\n\nWhen the task is complete, commit everything (including new files) and call ship. It fetches origin, rebases onto " +
-			cfg.Worktree.BaseBranch + ", runs the project's checks, and lands the result in mode " +
-			string(cfg.ShipCfg.defaultMode()) + " unless you name another. Do not push by hand with exec — ship is what verifies before it pushes."
-		if cfg.Worktree.Branch != "" {
-			sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
-		}
+	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {
+		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
 	}
 
 	// The session's durable state, when there is any, goes into the system
@@ -821,7 +803,7 @@ func (h *Harness) rebuildTools() {
 		sys += block
 	}
 
-	// Outermost of all, so it sees every tool including ship and recap — recap
+	// Outermost of all, so it sees every tool including recap — recap
 	// being the one the measurement caught looping twelve deep. It must wrap the
 	// wrappers rather than be wrapped by them: a call it refuses never runs, and
 	// a refusal is the LAST thing that should be reconsidered.

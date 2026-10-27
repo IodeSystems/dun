@@ -292,14 +292,12 @@ type Config struct {
 	// index), reports to it, and gets the child tool set instead of the root's.
 	Parent *Harness
 	// AgentID is this child's id within its parent. Zero for a root.
-	AgentID    int
-	System     string      // nil → defaultSystem
-	Exec       ExecBackend // nil → no exec tool; else adds the built-in exec tool
-	Ask        AskFunc     // nil → no ask_user tool; else adds the human-in-the-loop tool
-	Mount      MountFunc   // nil → no mount tool; else adds the mount (host path → container) tool
-	Worktree   *Worktree   // the session worktree (for ship)
-	EnableShip bool        // add the ship tool (enabled by default)
-	ShipCfg    *ShipConfig // ship policy + checks; nil = permissive defaults, no checks
+	AgentID  int
+	System   string      // nil → defaultSystem
+	Exec     ExecBackend // nil → no exec tool; else adds the built-in exec tool
+	Ask      AskFunc     // nil → no ask_user tool; else adds the human-in-the-loop tool
+	Mount    MountFunc   // nil → no mount tool; else adds the mount (host path → container) tool
+	Worktree *Worktree   // the session worktree
 	// CommitCfg is how /worktree commit writes its message. nil = the
 	// conventional-commits default.
 	CommitCfg   *CommitConfig
@@ -497,7 +495,7 @@ type Harness struct {
 	// cache files each round's cache hit under the kind of build that preceded
 	// it, and counts prefix rewrites by cause — see cachestats.go.
 	cache *cacheStats
-	// forcedToolCalls are tool calls queued by the host (e.g. /ship) that
+	// forcedToolCalls are tool calls queued by the host  that
 	// should be injected into the next LLM response's tool_calls, so they
 	// appear as if the model made them. Guarded by noteMu.
 	forcedToolCalls []llm.ToolCall
@@ -915,8 +913,8 @@ func (h *Harness) Aside(text string) {
 // and the Turn loop dispatches it normally.
 //
 // This is the mechanism for host-initiated actions that must look like the
-// model's own decisions — e.g. /ship forces the assistant to call the ship
-// tool, so the exchange is a proper tool call/result pair, not a disembodied
+// model's own decisions — a forced call makes
+// the exchange a proper tool call/result pair, not a disembodied
 // Aside notification.
 func (h *Harness) ForceToolCall(tc llm.ToolCall) {
 	h.noteMu.Lock()
@@ -1791,40 +1789,6 @@ func (h *Harness) SetWorktree(wt *Worktree) {
 	h.cfg.Worktree = wt
 	h.srvMu.Unlock()
 	h.applyTools()
-}
-
-// Ship runs the ship pipeline (fetch, rebase, checks, push/verify/pr).
-// The mode is resolved from the action string ("verify", "push", "pr") or
-// falls back to the ShipConfig default. Returns the result message.
-func (h *Harness) Ship(ctx context.Context, mode ShipMode) string {
-	h.srvMu.Lock()
-	wt := h.cfg.Worktree
-	cfg := h.cfg.ShipCfg
-	exec := h.cfg.Exec
-	h.srvMu.Unlock()
-	if wt == nil || !wt.IsRepo() {
-		return "ERROR: ship needs a git repository"
-	}
-	if exec == nil {
-		return "ERROR: ship requires an exec backend (no exec tool configured)"
-	}
-	if cfg == nil {
-		cfg = &ShipConfig{}
-	}
-	if mode == "" {
-		mode = cfg.defaultMode()
-	}
-	if !cfg.permits(mode) {
-		names := make([]string, 0, len(cfg.allowed()))
-		for _, a := range cfg.allowed() {
-			names = append(names, string(a))
-		}
-		return fmt.Sprintf("ERROR: mode %q is not permitted in this repository. Permitted: %s.",
-			mode, strings.Join(names, ", "))
-	}
-	return doShip(ctx, wt, cfg, func(ctx context.Context, command string) ExecResult {
-		return exec.Run(ctx, command, nil)
-	}, mode)
 }
 
 // ToolNames lists the agent's tool names (MCP tools + the built-in exec), sorted.

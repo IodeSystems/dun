@@ -281,7 +281,7 @@ func TestPeerNameOfAWorktreeSession(t *testing.T) {
 	if ps[1].Name != "myrepo:"+timeOfID(inWt) || ps[1].Worktree != wt || ps[1].Branch != "dun/1761234567" {
 		t.Errorf("worktree: %+v", ps[1])
 	}
-	// The in-place Workspace event --ship sends names the workspace: no worktree.
+	// The in-place Workspace event a session without --worktree sends names the workspace: no worktree.
 	_ = svc.Send(alice, inWt, proto.NewCommand("", &proto.User{Content: "moved " + repo + " main"}))
 	next(t, sub, "workspace")
 	if p := svc.Peers(alice, inPlace)[1]; p.Worktree != "" || p.Branch != "main" {

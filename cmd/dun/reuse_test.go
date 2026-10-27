@@ -86,7 +86,7 @@ func TestAttachReusesTheIdleSession(t *testing.T) {
 // --new is the client's choice: it reaches the --tui a served terminal runs,
 // never the engine (whose flags dund checks).
 func TestNewFlagStaysWithTheClient(t *testing.T) {
-	o := tuiOpts{workspace: "/ws", fresh: true, ship: true}
+	o := tuiOpts{workspace: "/ws", fresh: true}
 	if slices.Contains(engineArgs(o), "--new") {
 		t.Errorf("engine args: %v", engineArgs(o))
 	}

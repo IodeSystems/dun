@@ -71,9 +71,9 @@ owner's call before work starts.
 
 - [ ] `dun --usage`: total use, what is left, per-agent use, tokens
   processed and generated, cache rate, cost; without opening a session.
-- [ ] **decide** `dun -p "thing"` runs in text and exits with the answer;
-  `dun -p` alone is the JSON engine (`--no-tui`). Today `-p` is the engine
-  and `dun "thing"` is the one-shot, so this changes what `-p` means.
+- [~] `dun -p "thing"`: the model is told to answer after a `# RESPONSE
+  BELOW` line; stdout is the answer alone, the work goes to stderr.
+  `dun -p` with no task is the JSON engine, as before.
 - [ ] `--no-tools`, `--no-rag`, `--no-lsp`.
 - [ ] `--media <file>` with a prompt.
 - [~] `dun --no-dir`: a session attached to no directory, to talk with dun,
@@ -90,8 +90,9 @@ owner's call before work starts.
   shell", not off; the effort is shown.
 
 - [ ] `/docker` becomes `/isolate` (worktree and Docker together).
-- [ ] **decide** Remove `/ship` and its prompt lines: repos state their own
-  shipping rules, and dun's read as the blessed path.
+- [~] `/ship` removed (owner, 2026-10-27): repos state their own shipping
+  rules. `--ship`, `--pr`, `--no-ship` are accepted and do nothing; a
+  `ship` section in dun.json is ignored.
 - [~] `/file add|remove <path>`, `/file`: a file or directory outside the
   workspace becomes readable and editable by dun's file tools for the
   session; refused one, the model is told to ask for `/file add <path>`.
