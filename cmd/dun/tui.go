@@ -2781,7 +2781,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			// sender first (the text is "<name> (<id>): <message>").
 			m.append(stDim.Render("✉ dun msg from " + oneLine(str(ev["text"]))))
 		default:
-			m.append(stNote.Render("🔔 " + oneLine(str(ev["text"]))))
+			m.append(noticeLine(str(ev["text"]), m.noticeW()))
 		}
 	case "ask":
 		m.endThinking()
@@ -3990,7 +3990,7 @@ func (m *tuiModel) replay(items []any) {
 			n++
 		case "notification":
 			m.endRun()
-			m.convo = append(m.convo, convoEntry{collapsed: stNote.Render("🔔 " + oneLine(str(im["content"])))})
+			m.convo = append(m.convo, convoEntry{collapsed: noticeLine(str(im["content"]), m.noticeW())})
 			n++
 		case "reasoning":
 			m.addThought(&thinkBlock{text: str(im["content"])})
