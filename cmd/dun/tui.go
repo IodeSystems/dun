@@ -1854,6 +1854,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case copiedMsg:
 		return m, m.flash(copiedNote(msg))
 
+	case upgradeSelfMsg:
+		if msg.err != nil {
+			m.append(stErr.Render("upgrade: " + msg.err.Error()))
+		}
+		return m, nil
+
 	case clipTextMsg:
 		if msg.err != nil {
 			return m, m.flash(msg.err.Error())
@@ -2583,7 +2589,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			m.refresh()
 			break
 		}
-				// /repaint report's answer: the TUI finishes it (repaintreport.go).
+		// /repaint report's answer: the TUI finishes it (repaintreport.go).
 		if str(ev["id"]) == "repaint" {
 			m.reportEvent(str(ev["action"]), str(ev["message"]))
 			break
@@ -4648,7 +4654,20 @@ func init() {
 				return nil
 			}
 			if m.upgrade == nil {
-				m.append(stDim.Render("no dund upgrade is pending"))
+				// A source build: nothing tells dund there is a newer build
+				// (the launcher reloads the TUI only), so dund and its
+				// engines keep the one they started with. now moves them to
+				// the build this TUI runs (USER 2026-10-27: /upgrade on a
+				// source build was a dead end).
+				if len(args) > 0 && args[0] == "now" {
+					m.append(stDim.Render("asking dund to restart into this build (" + version + ") — running turns are interrupted and resume after"))
+					return upgradeIntoSelfCmd(m.proc)
+				}
+				line := "no dund upgrade is pending"
+				if !isRelease() {
+					line += " · dund and its engines keep the build they started with; /upgrade now restarts them into this one (" + version + ")"
+				}
+				m.append(stDim.Render(line))
 				return nil
 			}
 			if len(args) == 0 || args[0] != "now" {

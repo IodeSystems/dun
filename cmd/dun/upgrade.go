@@ -3,12 +3,15 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/proto"
@@ -367,3 +370,25 @@ func userRowAt(text string, width int) string {
 	}
 	return st.Render(row)
 }
+
+// upgradeIntoSelfCmd asks dund to upgrade into this TUI's own binary and to
+// restart now: a source build's /upgrade now, which nothing else triggers
+// (the launcher's rebuild reloads TUIs, not dund).
+func upgradeIntoSelfCmd(p *dunProc) tea.Cmd {
+	return func() tea.Msg {
+		exe, err := selfExe()
+		if err != nil {
+			return upgradeSelfMsg{err: err}
+		}
+		if !askDundUpgrade(exe, version) {
+			return upgradeSelfMsg{err: errors.New("dund did not take it: it is not running here, or a service manager owns it (dun dund status says)")}
+		}
+		if !p.upgradeNow() {
+			return upgradeSelfMsg{err: errors.New("dund took the upgrade but the restart could not be asked for: it starts when nothing is busy")}
+		}
+		return upgradeSelfMsg{}
+	}
+}
+
+// upgradeSelfMsg is upgradeIntoSelfCmd's answer.
+type upgradeSelfMsg struct{ err error }
