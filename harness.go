@@ -345,6 +345,9 @@ type Config struct {
 	// NoDir is a session attached to no directory (dun --no-dir, nodir.go):
 	// no file tools, no rules, and no server that needs a project directory.
 	NoDir bool
+	// NoTools is a plain chat (dun --no-tools): no tool of any kind reaches
+	// the model, no server starts, and a call to a tool is refused.
+	NoTools bool
 	// Version and Provider are what the harness tool and dun session info
 	// say (harnessinfo.go): the build and the provider's name.
 	Version, Provider string

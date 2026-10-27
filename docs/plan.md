@@ -74,8 +74,8 @@ owner's call before work starts.
 - [~] `dun -p "thing"`: the model is told to answer after a `# RESPONSE
   BELOW` line; stdout is the answer alone, the work goes to stderr.
   `dun -p` with no task is the JSON engine, as before.
-- [ ] `--no-tools`, `--no-rag`, `--no-lsp`.
-- [ ] `--media <file>` with a prompt.
+- [x] `--no-tools`, `--no-rag`, `--no-lsp`.
+- [x] `--media <file>` with a prompt (one-shot only).
 - [~] `dun --no-dir`: a session attached to no directory, to talk with dun,
   its skills and its MCP tools; servers that need a working directory
   (poly-lsp, raglit's project index, the file tools, exec's workspace) are

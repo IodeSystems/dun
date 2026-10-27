@@ -75,6 +75,7 @@ var allowedFlags = map[string]bool{
 	"--model": true, "--url": true, "--worktree": true, "--docker": true,
 	"--docker-network": true, "--pr": true, "--ship": true, "--no-ship": true, "--rag": true,
 	"--lsp": true, "--rephrase": true, "--no-suggest": true, "--no-dir": true,
+	"--no-tools": true,
 }
 
 // takesValue are the allowed flags whose value may be the next argument.

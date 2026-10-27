@@ -78,6 +78,10 @@ type tuiOpts struct {
 	// noDir is --no-dir: passed to the engine, whose workspace is dun's
 	// directory for such sessions (dun/nodir.go).
 	noDir bool
+	// noTools is --no-tools: a plain chat. Passed to the engine, and so
+	// through dund (internal/dund allowedFlags). --no-rag and --no-lsp are
+	// here as rag/lsp = "false".
+	noTools bool
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -5566,6 +5570,9 @@ func procArgs(o tuiOpts, mode string) []string {
 	}
 	if o.lsp != "" {
 		args = append(args, "--lsp="+o.lsp)
+	}
+	if o.noTools {
+		args = append(args, "--no-tools")
 	}
 	if o.model != "" {
 		args = append(args, "--model", o.model)

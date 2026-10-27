@@ -619,6 +619,10 @@ func (h *Harness) rebuildTools() {
 	if h.Session == nil {
 		return // autostart runs before the Session exists; Start applies it after
 	}
+	if h.cfg.NoTools {
+		h.useNoTools()
+		return
+	}
 	tools := filterTools(h.mgr.GetTools(), h.specs)
 	hostedNS := h.hostedNamespaces()
 	moved := map[string]string{} // id → namespace, for servers now in the shell
@@ -1147,4 +1151,30 @@ func (h *Harness) describe(id string) string {
 		}
 	}
 	return ""
+}
+
+// noToolsSystem is the system prompt of a --no-tools session.
+const noToolsSystem = "You are dun, in a plain chat: this session has no tools. You cannot run commands, read or " +
+	"change files, or search; answer from what you know and from what the user tells or pastes."
+
+// useNoTools is rebuildTools for --no-tools: nothing is offered to the model
+// (no built-ins, no servers, no agent, no recap) and a call that arrives
+// anyway is refused. Callers hold turnMu, as for rebuildTools.
+func (h *Harness) useNoTools() {
+	h.toolsInit = true
+	h.Tools = nil
+	sys := h.cfg.System
+	if sys == "" {
+		sys = noToolsSystem + h.identityLine() + replyFormatSystem + h.cfg.SystemNote
+	}
+	h.Session.Tools = nil
+	h.Session.Dispatch = func(_ context.Context, tc llm.ToolCall) (string, error) {
+		return "", fmt.Errorf("no tool %q: this session has no tools", tc.Function.Name)
+	}
+	h.Session.System = sys
+	names := []string{}
+	h.toolNames.Store(&names)
+	h.docsPrep = nil
+	h.Session.Preparer = h.withBudgetNotice(nil)
+	h.setSystemBreakdown(measureSystem(context.Background(), nil, sys, "", "", nil, nil))
 }

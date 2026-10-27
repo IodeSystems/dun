@@ -119,8 +119,11 @@ per path), `{{index}}`/`{{project}}` the names the server is started with,
 `{{workspace}}`. The answer is each step's reply. Bare `/raglit` and the
 completion list each command with its `help`.
 
-`--rag` / `--lsp` force one on for a single run (`--rag=false` forces it off),
-above whatever is saved. Startup names what is off, so a missing tool family is
+`--rag` / `--lsp` force one on for a single run (`--rag=false` forces it off,
+and `--no-rag` / `--no-lsp` say the same), above whatever is saved. `--no-tools`
+is a plain chat: the model gets no tools at all (no commands, files, servers,
+agents) and no server starts. `--media <file>` (repeat for more) attaches a png,
+jpeg, gif or webp to a one-shot task: `dun --media shot.png "what is wrong here"`. Startup names what is off, so a missing tool family is
 never a silent absence. A server that fails to start is reported and skipped —
 it costs you that family, not your session.
 
