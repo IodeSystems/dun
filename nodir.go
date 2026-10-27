@@ -44,6 +44,9 @@ func needsDir(s Server, workspace string) bool {
 // withoutDirServers is servers less those that need a directory, for a
 // --no-dir session; servers as they are otherwise.
 func withoutDirServers(servers []Server, cfg Config) []Server {
+	if cfg.NoTools {
+		return nil // --no-tools: no server starts (see also noToolsSystem)
+	}
 	if !cfg.NoDir {
 		return servers
 	}

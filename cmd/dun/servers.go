@@ -90,6 +90,20 @@ func autostartOverrides(rag, lsp tristate) map[string]bool {
 	return out
 }
 
+// noAutostart applies --no-rag / --no-lsp: the same as --rag=false /
+// --lsp=false, so the two spellings cannot drift. Both together with the
+// positive flag (--rag --no-rag) is an error, not a guess.
+func noAutostart(t *tristate, no bool, name string) error {
+	if !no {
+		return nil
+	}
+	if t.set && t.val {
+		return fmt.Errorf("--%s and --no-%s contradict", name, name)
+	}
+	t.set, t.val = true, false
+	return nil
+}
+
 // allServers is the id /mcp uses to address every configured server at once.
 // Not a legal server id (ids come from config and from dun.DefaultServers), so
 // it cannot collide with one.

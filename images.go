@@ -122,6 +122,13 @@ func prepareImage(path string) (mime string, data []byte, err error) {
 	return scaleImage(raw)
 }
 
+// CheckImage says whether path is an image dun can send (png, jpeg, gif,
+// webp), without sending it. The error names the accepted types.
+func CheckImage(path string) error {
+	_, _, err := prepareImage(path)
+	return err
+}
+
 func scaleImage(raw []byte) (mime string, data []byte, err error) {
 	src, format, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {

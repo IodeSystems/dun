@@ -70,7 +70,7 @@ var flagGroups = []struct {
 }{
 	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "serve", "addr", "p", "version"}},
 	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase"}},
-	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp"}},
+	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp", "no-rag", "no-lsp", "no-tools", "media"}},
 	{"advanced", []string{"d", "force", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
 }
 
@@ -231,7 +231,27 @@ func main() {
 	var ragFlag, lspFlag tristate
 	flag.Var(&ragFlag, "rag", "start the docs server (raglit) this run: --rag or --rag=false (default: the saved setting)")
 	flag.Var(&lspFlag, "lsp", "start the code server (poly-lsp-mcp) this run: --lsp or --lsp=false (default: the saved setting)")
+	// --no-rag and --no-lsp are --rag=false and --lsp=false (noAutostart).
+	noRag := flag.Bool("no-rag", false, "do not start the docs server (raglit) this run; same as --rag=false")
+	noLsp := flag.Bool("no-lsp", false, "do not start the code server (poly-lsp-mcp) this run; same as --lsp=false")
+	noTools := flag.Bool("no-tools", false, "a plain chat: the model gets no tools at all, and no tool server starts")
+	var media mediaFlag
+	flag.Var(&media, "media", "attach an image (png, jpeg, gif, webp) to the task's first message; repeat for more: dun --media shot.png \"what is wrong here\"")
 	flag.Parse()
+	if err := noAutostart(&ragFlag, *noRag, "rag"); err != nil {
+		fatal(err)
+	}
+	if err := noAutostart(&lspFlag, *noLsp, "lsp"); err != nil {
+		fatal(err)
+	}
+	if len(media) > 0 {
+		if *docker != "" {
+			fatal(fmt.Errorf("--media does not work with --docker: the file is outside the container"))
+		}
+		if err := media.resolve(); err != nil {
+			fatal(err)
+		}
+	}
 
 	// Full Docker mode: when --docker is set and we are NOT already inside a
 	// container, re-exec the ENTIRE process (agent + MCP servers) inside one.
@@ -306,6 +326,10 @@ func main() {
 	answerMode := *prog && firstTask != ""
 	if answerMode {
 		*prog = false
+	}
+
+	if len(media) > 0 && (*prog || firstTask == "" || *tui || *serve) {
+		fatal(fmt.Errorf("--media attaches to a one-shot task: dun --media shot.png \"what is wrong here\""))
 	}
 
 	if *ver {
@@ -411,7 +435,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -421,7 +445,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -649,6 +673,7 @@ func main() {
 		CommitCfg:   dun.LoadCommit(absWS),
 		Files:       filesConfig(absWS, *noDir),
 		NoDir:       *noDir,
+		NoTools:     *noTools,
 		SessionFile: sessionFile,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.
@@ -947,7 +972,7 @@ func main() {
 		runProgrammatic(ctx, h, em, in, peers, firstTask, closeCtx{workspace: absWS, sessionID: sessionID, wt: wt})
 		return
 	}
-	reply := runHuman(ctx, h, firstTask, absWS)
+	reply := runHuman(ctx, h, firstTask, absWS, media.inputs(), *noTools)
 	if answerMode {
 		fmt.Println(answerOf(reply))
 	}
@@ -964,10 +989,14 @@ func main() {
 
 // runHuman streams a single task, then drains any background jobs it started
 // (their completion notifications trigger follow-up turns).
-func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) (reply string) {
+func runHuman(ctx context.Context, h *dun.Harness, task, workspace string, imgs []dun.ImageInput, noTools bool) (reply string) {
 	h.WaitServers(ctx) // a one-shot task has every tool it was started with
-	fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n",
-		len(h.ToolNames()), strings.Join(h.ToolNames(), ", "))
+	if noTools {
+		fmt.Fprintln(os.Stderr, "dun: no tools (--no-tools): a plain chat")
+	} else {
+		fmt.Fprintf(os.Stderr, "dun: %d tools ready: %s\n",
+			len(h.ToolNames()), strings.Join(h.ToolNames(), ", "))
+	}
 	// Name what is NOT running. A one-shot run has no /raglit to type, so point at
 	// the flags instead of the commands.
 	for _, st := range h.Servers() {
@@ -982,7 +1011,10 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string) (repl
 		}
 	}
 	fmt.Fprintf(os.Stderr, "\ntask: %s\n\n", task)
-	res, err := h.Ask(ctx, task)
+	if why := h.ImagesRefused(); len(imgs) > 0 && why != "" {
+		fatal(errors.New(why))
+	}
+	res, err := h.AskImages(ctx, task, imgs)
 	if err != nil {
 		// The conversation is on disk, so this is recoverable — say how, since the
 		// retries already visible above have run out and the alternative is a user
