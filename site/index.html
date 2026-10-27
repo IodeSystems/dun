@@ -151,6 +151,43 @@
   .bars div { height:8px; border-radius:2px; background:var(--border2); }
   .bars div.after { background:var(--accent); min-width:3px; }
 
+
+  /* savings at a glance */
+  .save-grid { display:grid; gap:20px; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); }
+  .save { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:24px; }
+  .save .label { font:12px/1.3 var(--mono); color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
+  .save .hero-n { font:800 clamp(2.2rem,7vw,3.2rem)/1.05 var(--mono); color:var(--accent); margin:12px 0 2px; letter-spacing:-.03em; }
+  .save .hero-n small { font-size:.4em; line-height:1.3; font-weight:500; color:var(--muted); letter-spacing:0; margin:.5em 0 0; display:block; }
+  .save .sub { color:var(--muted); font-size:.94rem; margin:0 0 18px; }
+  .stack { display:grid; gap:12px; margin:0; padding:0; list-style:none; }
+  .stack .row { display:grid; gap:5px; font:13px/1.3 var(--mono); color:var(--muted); }
+  .stack .row .top { display:flex; justify-content:space-between; gap:10px; }
+  .stack .row .top b { color:var(--fg); font-weight:600; }
+  .stack .track { display:flex; height:22px; border-radius:4px; overflow:hidden; background:var(--bg); }
+  .stack .kept { background:var(--border2); height:100%; }
+  .stack .gone { height:100%; display:flex; align-items:center; justify-content:center; font:600 11px/1 var(--mono); color:var(--accent); overflow:hidden; white-space:nowrap;
+    background:repeating-linear-gradient(135deg,var(--accent-soft) 0 6px,transparent 6px 12px); border:1px dashed var(--accent); border-left:0; }
+  .stack .row.us .kept { background:var(--accent); }
+  .stack .row.us .top b { color:var(--accent); }
+  .stack .row.us .track { background:transparent; }
+  .save .note { color:var(--dim); font-size:.82rem; margin:14px 0 0; }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 16px; font:12px/1.3 var(--mono); color:var(--muted); margin:0 0 14px; }
+  .legend i { display:inline-block; width:12px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+  .legend .k i { background:var(--border2); }
+  .legend .g i { border:1px dashed var(--accent); background:var(--accent-soft); }
+  .session { margin-top:20px; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:24px; }
+  .session table { width:100%; border-collapse:collapse; font:14px/1.3 var(--mono); }
+  .session th, .session td { text-align:right; padding:10px 8px; border-bottom:1px solid var(--border); }
+  .session th:first-child, .session td:first-child { text-align:left; }
+  .session th { color:var(--dim); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+  .session td { color:var(--accent); font-weight:700; }
+  .session td:first-child { color:var(--muted); font-weight:400; }
+  .session tr:last-child td { border-bottom:0; }
+  .why { display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); margin-top:20px; }
+  .why div { border-left:2px solid var(--accent); padding:2px 0 2px 14px; color:var(--muted); font-size:.94rem; }
+  .why b { display:block; color:var(--fg); font-family:var(--mono); font-size:.9rem; margin-bottom:2px; }
+  @media (max-width:600px) { .save-grid { grid-template-columns:minmax(0,1fr); } .session th, .session td { padding:9px 4px; font-size:12.5px; } .session th { font-size:10.5px; } }
+
   /* split feature rows */
   .split { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:56px; align-items:center; }
   .split + .split { margin-top:96px; }
@@ -288,6 +325,54 @@
 </header>
 
 <main id="main">
+
+<section id="savings" class="measured" aria-labelledby="savings-h">
+  <div class="wrap">
+    <p class="eyebrow">savings</p>
+    <h2 id="savings-h">Tokens you stop paying for, on every request</h2>
+    <p class="intro">Tool schemas and skill lists ride along with every request, used or not. dun leaves them out and keeps what they offered: the same tools, the same skills. Less to pay for, less for the model to read, more room in the context window for the actual work.</p>
+    <div class="save-grid">
+      <div class="save">
+        <div class="label">scripted MCP tools · playwright + poly-lsp</div>
+        <div class="hero-n">&minus;5,017<small>tokens, every request (41%)</small></div>
+        <p class="sub">42 tool definitions sent become 17. The model still drives Playwright, through <code>eval</code>.</p>
+        <p class="legend" aria-hidden="true"><span class="k"><i></i>still sent</span><span class="g"><i></i>no longer sent</span></p>
+        <ul class="stack" aria-label="tokens before you type with the same MCP servers: 12,220 direct, 7,203 scripted">
+          <li class="row"><span class="top"><span>servers connected directly</span><b>12,220</b></span><span class="track" aria-hidden="true"><span class="kept" style="width:100%"></span></span></li>
+          <li class="row us"><span class="top"><span>Playwright scripted</span><b>7,203</b></span><span class="track" aria-hidden="true"><span class="kept" style="width:58.9%"></span><span class="gone" style="width:41.1%">&minus;5,017</span></span></li>
+        </ul>
+      </div>
+      <div class="save">
+        <div class="label">surfaced skills · 14 real skills</div>
+        <div class="hero-n">&minus;941<small>tokens, every request</small></div>
+        <p class="sub">No skill list in the request. A skill is offered beside a turn when it fits (raglit does the matching) and the model loads one by name. Listing costs about 67 tokens per skill and grows with each one installed; surfaced stays flat.</p>
+        <p class="legend" aria-hidden="true"><span class="k"><i></i>still sent</span><span class="g"><i></i>no longer sent</span></p>
+        <ul class="stack" aria-label="tokens before you type with 14 skills: 6,496 listed, 5,555 surfaced">
+          <li class="row"><span class="top"><span>skills listed</span><b>6,496</b></span><span class="track" aria-hidden="true"><span class="kept" style="width:100%"></span></span></li>
+          <li class="row us"><span class="top"><span>skills surfaced</span><b>5,555</b></span><span class="track" aria-hidden="true"><span class="kept" style="width:85.5%"></span><span class="gone" style="width:14.5%">&minus;941</span></span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="session">
+      <p class="label" style="font:12px/1.3 var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:0 0 12px">tokens not sent over a session</p>
+      <table>
+        <thead><tr><th scope="col">requests</th><th scope="col">scripted MCP</th><th scope="col">surfaced skills</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>5,017</td><td>941</td></tr>
+          <tr><td>10</td><td>50,170</td><td>9,410</td></tr>
+          <tr><td>50</td><td>250,850</td><td>47,050</td></tr>
+        </tbody>
+      </table>
+      <p class="fine" style="color:var(--dim);font-size:.82rem;margin:14px 0 0">This table is arithmetic, not a separate measurement: each measured per-request saving multiplied by the number of requests. The two savings were measured in separate setups, so the columns are not added together.</p>
+    </div>
+    <div class="why">
+      <div><b>cost</b>Fewer input tokens on every call.</div>
+      <div><b>speed</b>A shorter prompt is less for the model to read before it answers.</div>
+      <div><b>room</b>The window holds your task, not a catalogue of tools you did not use.</div>
+    </div>
+    <p class="fine" style="color:var(--dim);font-size:.82rem;margin:20px 0 0;max-width:820px">How measured: each setup's first request, after "hi", from an empty folder, tokens counted by one model (Qwen 27B on llama.cpp, its chat template included), clean installs, 2026-10-27. MCP: dun with Playwright MCP and poly-lsp connected directly (12,220 tokens, 42 tools) versus Playwright scripted in mcpshell (7,203 tokens, 17 tools); capability checked live. Skills: dun with 14 skills, listed (6,496) versus surfaced (5,555). The method is <code>tools/promptsize</code> in the repository.</p>
+  </div>
+</section>
 
 <section class="measured" aria-labelledby="measured-h">
   <div class="wrap">
