@@ -51,6 +51,7 @@ func init() {
 	event[McpTools]("mcp_tools")
 	event[McpLogin]("mcp_login")
 	event[Switches]("switches")
+	event[SkillFile]("skill_file")
 	event[Extensions]("extensions")
 	// The protocol's own.
 	event[Ack]("ack")
@@ -777,6 +778,25 @@ type Switches struct {
 	Message  string            `json:"message,omitempty"`
 	Slash    string            `json:"slash,omitempty"`  // the command: "skill", "rules"
 	Status   []string          `json:"status,omitempty"` // facts for the status pane
+}
+
+// SkillFile answers the control command "skillfile", whose action is JSON
+// {"skill": name, "file": path}: one file of a skill, for a person to read
+// (the /skill browser). File "" is SKILL.md, whose front matter comes apart
+// (Name, Description) from its body (Text). The path is confined to the
+// skill's folder; Error says why a file was not read. Files is every file
+// in the folder, to tell a link from a broken one; Includes is the text of
+// each file an @path in it includes, to depth 3, by its path.
+type SkillFile struct {
+	Skill       string            `json:"skill"`
+	File        string            `json:"file"`
+	Name        string            `json:"name,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Text        string            `json:"text"`
+	Clipped     bool              `json:"clipped,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Files       []string          `json:"files,omitempty"`
+	Includes    map[string]string `json:"includes,omitempty"`
 }
 
 // SwitchItem is one item of a Switches event.
