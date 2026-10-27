@@ -96,3 +96,22 @@ So pi, like dun's scripted mode, keeps MCP schemas out of the request by
 default, and with a smaller base: 2,448 against dun's 7,203 (where dun keeps
 its built-in poly-lsp direct, ~1.8k). The 0.82.1 figures above predate
 this.
+
+## dun after the prompt cuts (2026-10-27, 6fdf11c)
+
+`session` replaced harness and session_state, `jobs` replaced exec_monitor
+and agent_monitor, and the system prompt stopped repeating the tools'
+descriptions. Same method:
+
+| dun | before | after | tools |
+|---|---:|---:|---:|
+| no MCP servers | 5,204 | 3,925 | 12 |
+| Playwright + poly-lsp, direct | 12,220 | 10,806 | 40 |
+| Playwright scripted, poly-lsp direct | 7,203 | 5,923 | 15 |
+
+Capability smoke test, local Qwen 27B, two runs each, the same task (a
+command that becomes a background job, a file written meanwhile, then wait
+for the job and report): both builds 2 of 2 correct. The new build called
+`jobs` (wait) once or twice, which the old could not do for a command, so
+the task took more rounds and more tokens in all (17.5k and 22.5k against
+11.5k and 11.5k) though each request was smaller.
