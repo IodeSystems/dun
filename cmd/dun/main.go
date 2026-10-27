@@ -1110,6 +1110,33 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// so it does not go through runControlCmd. The TUI already echoed the
 		// command to the user; this event keeps the engine's and the TUI's
 		// knowledge in sync (a bare /rephrase from the TUI still round-trips).
+		if id == "rephrase" && strings.HasPrefix(action, "prompt") {
+			text := strings.TrimSpace(strings.TrimPrefix(action, "prompt"))
+			var msg string
+			switch text {
+			case "":
+				p, own := dun.RephrasePrompt()
+				who := "dun's"
+				if own {
+					who = "yours"
+				}
+				msg = "rephrase prompt (" + who + "; /rephrase prompt <text> sets it, /rephrase prompt default goes back):\n" + strings.TrimSuffix(p, "\n\nUser's message:\n")
+			case "default":
+				if err := dun.SetRephrasePrompt(""); err != nil {
+					msg = "rephrase prompt: " + err.Error()
+				} else {
+					msg = "rephrase prompt: dun's again"
+				}
+			default:
+				if err := dun.SetRephrasePrompt(text); err != nil {
+					msg = "rephrase prompt: " + err.Error()
+				} else {
+					msg = "rephrase prompt: saved (" + dun.Grouped(len(text)) + " chars); the user's message follows it"
+				}
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: "prompt", Message: msg})
+			return
+		}
 		if id == "rephrase" {
 			rephraseOn = action == "on"
 			em.emit(settingsEvent())

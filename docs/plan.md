@@ -28,17 +28,20 @@ owner's call before work starts.
 
 ## The TUI
 
-- [ ] Daemon notices (`🔔 [shell] {"servers":…}`) off by default; a switch
-  turns them on.
+- [~] Daemon notices (`🔔 [shell] {"servers":…}`) off by default: a notice
+  that is JSON goes to the server's activity log (`/mcp`), not the
+  conversation or the model.
 - [ ] Up with queued messages: take them out of the queue, merged, into the
   composer to fix and send again.
-- [ ] `/splash`: clear the screen and show the splash again.
-- [ ] `/rephrase prompt [text]`: show or set the rephrasing prompt.
-- [ ] `/close` exits.
+- [~] `/splash`: clear the screen and show the splash again.
+- [~] `/rephrase prompt [text|default]`: show, set or reset the rephrasing
+  prompt ($DUN_HOME/rephrase.txt).
+- [~] `/close` exits; discarding a session for good is now `/discard`.
 - [ ] The splash says where each row is set: a row's command (`tools` →
   `/tools`, a hint that it is one).
 - [ ] The spend row: requests, tokens processed and generated, cache rate.
-- [ ] ctrl+p pastes (beside ctrl+k, ctrl+u).
+- [~] ctrl+p pastes the clipboard's text (wl-paste, xclip, pbpaste,
+  termux-clipboard-get).
 - [ ] Messages between agents in boxes like thinking: from whom, to whom,
   what was said.
 - [ ] Multi-choice questions: a clear way to select, unselect and edit; tab
@@ -77,6 +80,8 @@ owner's call before work starts.
 
 ## Other projects (sent to their sessions)
 
-- [ ] corrallm: remove a handpicked model; add and remove keys (the approve
-  flow), so a shared network does not spend the owner's key.
-- [ ] poly-lsp-mcp: find language servers installed with pnpm; Swift.
+- [ ] corrallm: remove a handpicked model (a UI fix, triaged); add and remove
+  keys (the approve flow: committed in b7d8b7c, not deployed), so a shared
+  network does not spend the owner's key.
+- [ ] poly-lsp-mcp: find language servers installed with pnpm (aw4
+  i_1m5ze4k2581r4sbxy4h9g5); Swift (in progress there).

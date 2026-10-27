@@ -1653,6 +1653,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "ctrl+v" {
 				return m, pasteImageCmd()
 			}
+			// ctrl+p: the clipboard's text, read by dun (USER 2026-10-27: no
+			// paste key beside ctrl+k and ctrl+u); a terminal's own paste is
+			// a PasteMsg, as before.
+			if msg.String() == "ctrl+p" {
+				return m, pasteTextCmd()
+			}
 			m.input = m.input.HandleKey(msg)
 			m.paletteSel = 0 // typing re-filters the palette; start at the top
 			m.refresh()
@@ -1837,6 +1843,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case copiedMsg:
 		return m, m.flash(copiedNote(msg))
+
+	case clipTextMsg:
+		if msg.err != nil {
+			return m, m.flash(msg.err.Error())
+		}
+		return m.paste(tea.PasteMsg{Content: msg.text})
 
 	case clipImageMsg:
 		switch {
@@ -4702,6 +4714,19 @@ func init() {
 		}},
 		{"skill", "[name] [text] | on|off|unset <name|glob> [--global|--project|--session] | mode listed|surfaced|unset [--scope]", "skills: bare opens the list (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers) — type to filter, each one's cost, on/off at each scope, and the mode (listed in every request, or surfaced when a turn fits); on/off/unset and mode change it directly; with a name, asks the model to use it; with part of a name, lists the matches", skillSlash},
 		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
+			return m.exit()
+		}},
+		// /splash: a clean screen with the splash on it (USER 2026-10-27:
+		// "it's fun"). The conversation is the engine's and stays; only what
+		// this screen shows is cleared, and a /resume shows it again.
+		{"splash", "", "clear the screen and show the splash again (the conversation is kept)", func(m *tuiModel, _ []string) tea.Cmd {
+			m.convo, m.sel, m.paging, m.scr = nil, -1, false, nil
+			m.showSplash()
+			return tea.ClearScreen
+		}},
+		// /close exits, as /exit (USER 2026-10-27); discarding a session for
+		// good is /discard.
+		{"close", "", "exit dun, as /exit (to discard the session for good: /discard)", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
 		}},
 		{"persist", "[on|off|status]", "keep this session running after /exit (bare: on, or the status if already on)", func(m *tuiModel, args []string) tea.Cmd {

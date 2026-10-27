@@ -129,6 +129,34 @@ var clipboardCmds = [][]string{
 
 var pngMagic = []byte("\x89PNG\r\n\x1a\n")
 
+// clipboardTextCmds read the clipboard as text, for ctrl+p (USER
+// 2026-10-27): Wayland, X11, macOS, Termux.
+var clipboardTextCmds = [][]string{
+	{"wl-paste", "--no-newline"},
+	{"xclip", "-selection", "clipboard", "-o"},
+	{"pbpaste"},
+	{"termux-clipboard-get"},
+}
+
+// clipTextMsg is ctrl+p's answer: the clipboard's text, or why there is none.
+type clipTextMsg struct {
+	text string
+	err  error
+}
+
+// pasteTextCmd reads the clipboard's text off the UI goroutine.
+func pasteTextCmd() tea.Cmd {
+	return func() tea.Msg {
+		for _, c := range clipboardTextCmds {
+			out, err := clipboardRun(c[0], c[1:]...)
+			if err == nil && len(out) > 0 && !bytes.HasPrefix(out, pngMagic) {
+				return clipTextMsg{text: string(out)}
+			}
+		}
+		return clipTextMsg{err: fmt.Errorf("nothing to paste: no text on the clipboard, or no wl-paste, xclip, pbpaste or termux-clipboard-get to read it with")}
+	}
+}
+
 // clipboardImage returns the PNG on the clipboard, or false when there is
 // none (or no tool to read it with).
 func clipboardImage() ([]byte, bool) {

@@ -150,7 +150,9 @@ func TestRouteSlash(t *testing.T) {
 		"remember Tests Are Slow":              {"control", "remember", "Tests Are Slow"},
 		"memories":                             {"control", "memories", ""},
 		"clear":                                {"reset", "", ""},
-		"close":                                {"control", "close", ""},
+		"discard":                              {"control", "close", ""},
+		"rephrase prompt Be Terse, Please":     {"control", "rephrase", "prompt Be Terse, Please"},
+		"rephrase prompt":                      {"control", "rephrase", "prompt"},
 		"interrupt":                            {"control", "interrupt", ""},
 		// raglit's index commands keep a path's and a name's case.
 		"raglit watch ~/My Docs --index Hb": {"control", "ext", "watch raglit ~/My Docs --index Hb"},

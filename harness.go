@@ -1568,6 +1568,15 @@ func (h *Harness) noteServerNotification(n mcpmgr.Notification) {
 	if text == "" {
 		return
 	}
+	// A notice that is JSON is a server's state for a program to read
+	// (mcpshell's hosted sizes, which dun reads from its stderr), not news:
+	// it goes to the server's activity log, which /mcp shows, not into the
+	// conversation (USER 2026-10-27: spurious, keep it available, off by
+	// default).
+	if (strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[")) && json.Valid([]byte(text)) {
+		h.noteServer(n.ServerID, "notice: %s", oneLine(text, 400))
+		return
+	}
 	// Name the server. Several are usually running, and "a merge conflict
 	// appeared" is a different fact depending on which workspace said it.
 	h.Notify(fmt.Sprintf("[%s] %s", n.ServerID, text))

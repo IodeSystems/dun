@@ -187,13 +187,13 @@ func ownCommands(docker bool) []proto.CommandSpec {
 			State: effortLevel, Description: "how much the model thinks before it answers: alone picks a level; saved for every session"},
 		{Name: "suggest", Usage: "[on|off|auto]", Group: "session", Choices: choices("on", "always", "off", "never", "auto", "when idle"),
 			State: suggestMode, Description: "next-message suggestions: alone asks for some now, on/off/auto set the mode"},
-		{Name: "rephrase", Usage: "[on|off|status]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", ""),
+		{Name: "rephrase", Usage: "[on|off|status | prompt [text|default]]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", "", "prompt", "show the rephrasing prompt; prompt <text> sets it, prompt default goes back to dun's"),
 			State: onOff(rephraseOn), Description: "rephrase prompts for specificity before acting"},
 		{Name: "jobs", Usage: "[kill <n>|kill all]", Group: "session", Choices: choices("kill", "kill a job and everything it started: a number, or all"),
 			Description: "background jobs: alone lists the running ones, kill <n> ends one and everything it started, kill all ends every one"},
 		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
 		{Name: "clear", Group: "session", Description: "clear the conversation and start a fresh session log"},
-		{Name: "close", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript"},
+		{Name: "discard", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript (it was /close; /close now exits, USER 2026-10-27)"},
 	}
 }
 
@@ -416,6 +416,8 @@ func routeSlash(line string, r slashRoutes) {
 		case "on", "off":
 			r.control(name, arg(0))
 			r.reply("rephrase: " + arg(0))
+		case "prompt": // show it, set it (the rest of the line, as typed), or default
+			r.control(name, strings.TrimSpace("prompt "+strings.Join(args[1:], " ")))
 		default:
 			r.reply("rephrase: " + onOff(rephraseOn))
 		}
@@ -454,8 +456,10 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("usage: /rules [full|summary|index [--scope] | on|off|unset <file|glob> [--global|--project|--session] | mode <mode|unset> [--scope]]")
 		}
-	case "memories", "close", "interrupt":
+	case "memories", "interrupt":
 		r.control(name, "")
+	case "discard": // the engine's control is still "close"
+		r.control("close", "")
 	case "remember":
 		r.control(name, strings.Join(args, " "))
 	case "clear":

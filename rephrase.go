@@ -2,6 +2,8 @@ package dun
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -46,6 +48,33 @@ Rules:
 User's message:
 `
 
+// rephraseFile is where a person's own rephrasing prompt is kept (/rephrase
+// prompt <text>, USER 2026-10-27); with none, rephraseInstruction.
+func rephraseFile() string { return filepath.Join(DunHome(), "rephrase.txt") }
+
+// RephrasePrompt is the rephrasing prompt in force, and whether it is the
+// person's own.
+func RephrasePrompt() (string, bool) {
+	if b, err := os.ReadFile(rephraseFile()); err == nil && strings.TrimSpace(string(b)) != "" {
+		return strings.TrimRight(string(b), "\n") + "\n\nUser's message:\n", true
+	}
+	return rephraseInstruction, false
+}
+
+// SetRephrasePrompt saves the person's prompt; "" goes back to dun's.
+func SetRephrasePrompt(text string) error {
+	if strings.TrimSpace(text) == "" {
+		if err := os.Remove(rephraseFile()); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(DunHome(), 0o700); err != nil {
+		return err
+	}
+	return writeFileAtomic(rephraseFile(), []byte(strings.TrimSpace(text)+"\n"), 0o600)
+}
+
 // Rephrase rewrites the user's message with specificity, ready to be acted on.
 // It returns the original message (unchanged) on any error — rephrasing is
 // best-effort and must never block the turn.
@@ -63,7 +92,7 @@ func (h *Harness) Rephrase(ctx context.Context, task string) (string, error) {
 
 	start := time.Now()
 	ch, err := untee(h.Session.Runner).ChatStream(ctx,
-		[]llm.Message{{Role: "user", Content: rephraseInstruction + task}}, nil, nil)
+		[]llm.Message{{Role: "user", Content: func() string { p, _ := RephrasePrompt(); return p }() + task}}, nil, nil)
 	if err != nil {
 		return task, nil
 	}
