@@ -1,18 +1,14 @@
 package dun
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/iodesystems/agentkit/agent"
-	"github.com/iodesystems/agentkit/llm"
 )
 
-// session_state — durable, model-managed state for the SESSION, not the
+// Session state — durable, model-managed state for the SESSION, not the
 // conversation.
 //
 // The conversation is already durable: it is the JSONL on disk, and recap /
@@ -24,7 +20,7 @@ import (
 // re-derivation is where a long task quietly goes off the rails: it resumes
 // from the last twenty messages and forgets why it started.
 //
-// session_state is the thing the log does not carry. It is small, structured,
+// The state is the thing the log does not carry. It is small, structured,
 // and written by the model itself: a goal, a plan, a todo list, and a status.
 // It is persisted to a .state.json sidecar next to the session's .jsonl, keyed
 // by session id, so it survives the process the same way the conversation does.
@@ -34,11 +30,10 @@ import (
 // and remaining steps without the user re-stating them. Absent state is not an
 // error: a session that never sets one simply has no block.
 //
-// The tool is idempotent by design. The parameters are all optional and
-// MERGE: a call with just {status: "done"} changes the status and leaves the
-// goal, plan, and todo intact. Saving the same values again updates the
-// timestamp and nothing else. A call with NO parameters is a READ — it returns
-// the current state, so the model can consult it without a shell or a file.
+// The model reads and sets it with the session tool (session_tool.go). The
+// parameters are all optional and MERGE: a call with just {status: "done"}
+// changes the status and leaves the goal, plan, and todo intact. A call with
+// NO parameters is a READ.
 
 // SessionState is the durable, model-managed state for one session.
 //
@@ -51,7 +46,7 @@ type SessionState struct {
 	Plan      []string  `json:"plan,omitempty"`
 	Todo      []string  `json:"todo,omitempty"`
 	Status    string    `json:"status,omitempty"`
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }
 
 // empty reports whether nothing has been set. A state with only a timestamp is
@@ -137,10 +132,7 @@ func renderState(st SessionState) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n\n# Session state\n")
-	b.WriteString("The session's durable goal and plan, set with the session_state tool. ")
-	b.WriteString("Adopt it: this is what the session is for and what remains. ")
-	b.WriteString("Update it as the work changes — it is the first thing a resumed or ")
-	b.WriteString("compacted session reads, and the last thing a stale one forgives.\n")
+	b.WriteString("What this session is for and what remains, set with the session tool. Keep it current.\n")
 	if st.Goal != "" {
 		b.WriteString("- goal: " + st.Goal + "\n")
 	}
@@ -165,96 +157,16 @@ func renderState(st SessionState) string {
 	return b.String()
 }
 
-// sessionStateToolDef is the MCP tool the model calls to read or update the
-// session's durable state. All parameters are optional: omit them all to read,
-// or send any subset to merge. There is no "required" field because an
-// empty call is a legal read, and that is the whole point — the model can
-// consult the state without a shell.
-func sessionStateToolDef() llm.ToolDef {
-	var td llm.ToolDef
-	td.Type = "function"
-	td.Function.Name = "session_state"
-	td.Function.Description = "Read or update the session's durable state: goal, plan, todo, status. " +
-		"ALL parameters are optional and MERGE — a call with just {status} changes the status and " +
-		"leaves the goal, plan, and todo intact. A call with NO parameters reads the current state. " +
-		"Use it to keep a long task honest: set the goal and plan when you start, update the todo " +
-		"as steps close, and set status as the work progresses. The state is persisted per session " +
-		"and re-injected into the system prompt on resume, so a resumed session wakes up knowing " +
-		"what it is for. Idempotent: saving the same values again only updates the timestamp."
-	td.Function.Parameters = map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"goal": map[string]any{
-				"type":        "string",
-				"description": "the task the session is for — the 'why', in one line",
-			},
-			"plan": map[string]any{
-				"type":        "array",
-				"items":       map[string]any{"type": "string"},
-				"description": "the approach, as an ordered list of steps — the 'how'",
-			},
-			"todo": map[string]any{
-				"type":        "array",
-				"items":       map[string]any{"type": "string"},
-				"description": "the steps still open — the 'what is left'; drop items as they close",
-			},
-			"status": map[string]any{
-				"type":        "string",
-				"description": "where the work stands, e.g. 'in_progress', 'blocked', 'done'",
-			},
-		},
-	}
-	return td
-}
-
-// sessionStateArgs is the tool's argument shape. Goal and Status are
-// pointers so an omitted field is distinct from an empty string — an empty
-// string is a legal value ("clear the status"), and a merge must not write
-// zeros over the parts the call did not touch.
+// sessionStateArgs is the state half of the session tool's arguments
+// (session_tool.go). Goal and Status are pointers so an omitted field is
+// distinct from an empty string — an empty string is a legal value ("clear
+// the status"), and a merge must not write zeros over the parts the call did
+// not touch.
 type sessionStateArgs struct {
 	Goal   *string  `json:"goal"`
 	Plan   []string `json:"plan"`
 	Todo   []string `json:"todo"`
 	Status *string  `json:"status"`
-}
-
-// withSessionState wraps a dispatcher so session_state is handled locally;
-// everything else routes onward. It follows withRecap/withAsk exactly: parse
-// the arguments, do the work, report through onCall, return a string result —
-// errors are returned as strings, not as a non-nil error, so a failed call
-// never aborts the turn.
-func withSessionState(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		if tc.Function.Name != "session_state" {
-			return inner(ctx, tc)
-		}
-		var args sessionStateArgs
-		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-
-		// A read: no parameters at all.
-		if args.Goal == nil && args.Status == nil && len(args.Plan) == 0 && len(args.Todo) == 0 {
-			out := h.stateString()
-			if onCall != nil {
-				onCall("session_state", map[string]any{"read": true}, out)
-			}
-			return out, nil
-		}
-
-		st := h.stateMerge(args.Goal, args.Plan, args.Todo, args.Status)
-		if err := SaveSessionState(h.cfg.SessionFile, st); err != nil {
-			// A write failure is fed back, not fatal: the state is still held
-			// in memory and round-trips to the model this turn.
-			if onCall != nil {
-				onCall("session_state", stateArgsMap(args), "state updated in memory (persist failed: "+err.Error()+")")
-			}
-			return "state updated in memory; persist failed: " + err.Error(), nil
-		}
-		out := "state updated and saved.\n" + renderState(st)
-		if onCall != nil {
-			onCall("session_state", stateArgsMap(args), out)
-		}
-		return out, nil
-	}
 }
 
 // stateArgsMap builds the onCall argument map, omitting fields that were not
@@ -276,9 +188,14 @@ func stateArgsMap(args sessionStateArgs) map[string]any {
 	return m
 }
 
-// stateMerge returns the current state with the provided fields applied.
-// Only non-nil / non-empty arguments change the state; the rest carry over,
-// which is what makes the tool idempotent and partial-safe.
+// stateMerge applies the provided fields to the session's state, keeps the
+// result, and returns it. Only non-nil / non-empty arguments change the
+// state; the rest carry over, which is what makes the tool idempotent and
+// partial-safe.
+//
+// It used to return the merge without keeping it, so a second call merged
+// onto the state from before the first: {goal} then {status} saved a state
+// with no goal.
 func (h *Harness) stateMerge(goal *string, plan, todo []string, status *string) SessionState {
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
@@ -295,19 +212,16 @@ func (h *Harness) stateMerge(goal *string, plan, todo []string, status *string) 
 	if status != nil {
 		st.Status = *status
 	}
+	st.UpdatedAt = time.Now()
+	h.state = st
 	return st
 }
 
-// stateString renders the current in-memory state for a read call, or says
-// plainly that none has been set.
-func (h *Harness) stateString() string {
+// currentState is the session's state now.
+func (h *Harness) currentState() SessionState {
 	h.stateMu.Lock()
-	st := h.state
-	h.stateMu.Unlock()
-	if st.empty() {
-		return "no session state set yet. Use session_state to set a goal, plan, todo, and status."
-	}
-	return renderState(st)
+	defer h.stateMu.Unlock()
+	return h.state
 }
 
 // applySessionState loads any persisted state for this session into the

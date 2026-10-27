@@ -7,16 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/iodesystems/agentkit/agent"
-	"github.com/iodesystems/agentkit/llm"
 )
 
 // What dun is, for whoever has to say (USER 2026-10-27, critical): a
 // repo's rules often ask a PR or a commit to name the agent, its model and
 // version. dun does not read those rules; it says what it is three ways:
 //
-//	the harness tool                the model asks (this file)
+//	the session tool                the model asks (session_tool.go)
 //	dun session <id> info [--context]   a person or a script; reads <session>.harness.json
 //	DUN_SESSION_ID                  in the environment of every command dun runs
 //
@@ -126,34 +123,6 @@ func (h *Harness) writeHarnessInfo() {
 	_ = writeFileAtomic(HarnessInfoFile(h.cfg.SessionFile), append(b, '\n'), 0o600)
 }
 
-// harnessToolDef is the tool the model asks what dun is.
-func harnessToolDef() llm.ToolDef {
-	var td llm.ToolDef
-	td.Type = "function"
-	td.Function.Name = "harness"
-	td.Function.Description = "What is running you: the harness (dun), its version, this session's id, the workspace, " +
-		"the model and provider, the effort, the git branch and base, and the context window settings, as JSON. " +
-		"Use it when a project's rules ask a commit, PR or report to name the agent, model or version: copy the " +
-		"values, do not guess them."
-	td.Function.Parameters = map[string]any{"type": "object", "properties": map[string]any{}}
-	return td
-}
-
-// withHarness answers the harness tool locally.
-func withHarness(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		if tc.Function.Name != "harness" {
-			return inner(ctx, tc)
-		}
-		b, _ := json.MarshalIndent(h.HarnessInfo(), "", "  ")
-		out := string(b)
-		if onCall != nil {
-			onCall("harness", map[string]any{}, out)
-		}
-		return out, nil
-	}
-}
-
 // identityLine introduces dun in the system prompt: its icon, its session,
 // and where the rest is (USER 2026-10-27: asked for a one-character icon,
 // the model answered 👷; say so, and the session).
@@ -166,5 +135,5 @@ func (h *Harness) identityLine() string {
 		who += ", version " + h.cfg.Version
 	}
 	return "\n\n" + who + ". When a project's rules ask a commit, PR or report to name the agent, its model or " +
-		"version, call harness and copy what it says."
+		"version, copy them from the session tool."
 }

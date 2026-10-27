@@ -11,7 +11,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 )
 
-// What dun is, three ways: the harness tool, the file dun session info
+// What dun is, three ways: the session tool, the file dun session info
 // reads, and the system prompt's line (USER 2026-10-27).
 func TestHarnessInfo(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
@@ -26,17 +26,17 @@ func TestHarnessInfo(t *testing.T) {
 		t.Errorf("info: %+v", in)
 	}
 	line := h.identityLine()
-	for _, want := range []string{"You are dun (👷)", "session 20261027-101500", "version v0.1.3", "call harness"} {
+	for _, want := range []string{"You are dun (👷)", "session 20261027-101500", "version v0.1.3", "the session tool"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("identity lacks %q: %s", want, line)
 		}
 	}
-	d := withHarness(func(context.Context, llm.ToolCall) (string, error) { return "other", nil }, h, nil)
+	d := withSession(func(context.Context, llm.ToolCall) (string, error) { return "other", nil }, h, nil)
 	var call llm.ToolCall
-	call.Function.Name = "harness"
+	call.Function.Name = "session"
 	out, _ := d(context.Background(), call)
-	var got HarnessInfo
-	if err := json.Unmarshal([]byte(out), &got); err != nil || got.SessionID != "20261027-101500" {
+	var got sessionReply
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got.Harness.SessionID != "20261027-101500" {
 		t.Errorf("tool: %v %s", err, out)
 	}
 	h.writeHarnessInfo()

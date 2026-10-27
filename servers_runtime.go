@@ -731,14 +731,13 @@ func (h *Harness) rebuildTools() {
 	// rules at the top of recap.go for why that prompt was removed.
 	toolDefs = append(toolDefs, recapToolDef())
 	dispatch = withRecap(dispatch, h, report)
-	// session_state is available to BOTH roles and, like recap, always on: it
-	// is how a long task keeps its goal, plan, and open steps across context
-	// pressure and process restarts. The state it manages is per-session, so a
-	// child shares its parent's session file and thus its state.
-	toolDefs = append(toolDefs, sessionStateToolDef())
-	dispatch = withSessionState(dispatch, h, report)
-	toolDefs = append(toolDefs, harnessToolDef()) // what dun is, for a repo's PR rules (harnessinfo.go)
-	dispatch = withHarness(dispatch, h, report)
+	// session is available to BOTH roles and, like recap, always on: what
+	// runs the model (for a repo's PR rules) and how a long task keeps its
+	// goal, plan, and open steps across context pressure and process restarts
+	// (session_tool.go). It also answers the old names harness and
+	// session_state, which are not in the list.
+	toolDefs = append(toolDefs, sessionToolDef())
+	dispatch = withSession(dispatch, h, report)
 	// memory only while a memory.save extension runs AND a turn.before one
 	// does: a note is worth writing only because the proactive search brings
 	// it back (see memory.go).

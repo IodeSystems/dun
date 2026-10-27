@@ -11,7 +11,7 @@ owner's call before work starts.
   (OpenRouter, vLLM, LiteLLM) when there is no `/props`; `/context config`
   (a picker, or `--max --compact-buffer --tool-lod --recap-nudge`) sets the
   window and the compaction knobs per model. v0.1.4.
-- [x] **What dun is.** The `harness` tool, `dun session [<id>] info
+- [x] **What dun is.** The `session` tool (was `harness`), `dun session [<id>] info
   [--context]`, `DUN_SESSION_ID` in every command dun runs, and "You are dun
   (👷), session …" in the prompt; for a repo's PR rules, which dun does not
   read. v0.1.4.
