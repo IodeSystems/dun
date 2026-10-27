@@ -2,59 +2,111 @@ package main
 
 import (
 	"bytes"
-	"flag"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/iodesystems/agentkit/llm"
 )
 
-// --help opens with what dun is and how to start, then the flags by group:
-// each flag once, one not in a group under advanced.
-func TestUsage_StartsWithHowToStartThenGroups(t *testing.T) {
-	fs := flag.NewFlagSet("dun", flag.ContinueOnError)
-	fs.Bool("setup", false, "the wizard")
-	fs.String("model", "", "chat model")
-	fs.Bool("pr", false, "removed; does nothing")
-	fs.Bool("d", false, "the launcher")
-	fs.Bool("brand-new", false, "a flag no group names")
-	var b bytes.Buffer
-	writeUsage(&b, fs)
-	s := b.String()
-	if !strings.HasPrefix(s, "dun — a coding assistant") || !strings.Contains(s[:400], "/login") {
-		t.Errorf("head:\n%s", s)
+func writeLedger(t *testing.T, lines ...string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("DUN_HOME", home)
+	dir := filepath.Join(home, "stats")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	at := func(sub string) int {
-		i := strings.Index(s, sub)
-		if i < 0 {
-			t.Fatalf("lacks %q:\n%s", sub, s)
-		}
-		return i
-	}
-	if !(at("start and sessions:\n") < at("--setup") && at("--setup") < at("model and provider:\n") &&
-		at("--model") < at("advanced:\n") && at("advanced:\n") < at("  -d ") && at("-d ") < at("--brand-new")) {
-		t.Errorf("groups:\n%s", s)
-	}
-	if strings.Contains(s, "workspace and isolation:") {
-		t.Errorf("an empty group is listed:\n%s", s)
-	}
-	for _, f := range []string{"--setup", "--model", "--brand-new"} {
-		if n := strings.Count(s, "  "+f+" "); n != 1 {
-			t.Errorf("%s listed %d times", f, n)
-		}
+	if err := os.WriteFile(filepath.Join(dir, "rounds-2026-10.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// ship was removed; its flags stay accepted but are not advertised.
-func TestUsage_HidesRemovedShipFlags(t *testing.T) {
-	fs := flag.NewFlagSet("dun", flag.ContinueOnError)
-	fs.Bool("pr", false, "removed; does nothing")
-	fs.Bool("ship", true, "removed; does nothing")
-	fs.Bool("no-ship", false, "removed; does nothing")
-	fs.String("model", "", "chat model")
-	var b bytes.Buffer
-	writeUsage(&b, fs)
-	for _, f := range []string{"--pr", "--ship", "--no-ship", "shipping"} {
-		if strings.Contains(b.String(), f) {
-			t.Errorf("--help lists removed %q:\n%s", f, b.String())
+func ledgerLine(ago time.Duration, role, model string, prompt, cached, comp int, cost float64) string {
+	ts := time.Now().Add(-ago).UTC().Format(time.RFC3339)
+	c := ""
+	if cost > 0 {
+		c = fmt.Sprintf(`,"cost":%v,"cur":"USD","costed":true`, cost)
+	}
+	return fmt.Sprintf(`{"t":%q,"role":%q,"provider":"p","model":%q,"prompt":%d,"cached":%d,"completion":%d%s}`, ts, role, model, prompt, cached, comp, c)
+}
+
+func TestUsageReport(t *testing.T) {
+	writeLedger(t,
+		ledgerLine(time.Hour, "main", "m1", 1000, 600, 100, 0.5),
+		ledgerLine(2*time.Hour, "model", "m2", 200, 0, 50, 0),
+		ledgerLine(3*24*time.Hour, "main", "m1", 1000, 0, 100, 0.25),
+		ledgerLine(40*24*time.Hour, "main", "m1", 500, 0, 10, 0),
+		"{torn")
+	var out, errb bytes.Buffer
+	if rc := usageCmd([]string{"--json", "--no-net"}, &out, &errb); rc != 0 {
+		t.Fatal(rc, errb.String())
+	}
+	var rep usageReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	all := rep.Periods[2]
+	if all.Requests != 4 || all.Prompt != 2700 || all.Cached != 600 || all.Completion != 260 || all.Costed != 2 {
+		t.Fatalf("all time: %+v", all)
+	}
+	if got := all.Cost["USD"]; got != 0.75 {
+		t.Fatalf("cost %v", got)
+	}
+	if w := rep.Periods[1]; w.Requests != 3 || w.Prompt != 2200 {
+		t.Fatalf("week: %+v", w)
+	}
+	if d := rep.Periods[0]; d.Requests != 2 && d.Requests != 1 { // 2h ago may cross midnight
+		t.Fatalf("today: %+v", d)
+	}
+	if rep.ByRole["main"].Requests != 3 || rep.ByRole["model"].Requests != 1 {
+		t.Fatalf("roles: %+v", rep.ByRole)
+	}
+	if rep.ByModel["p/m1"].Requests != 3 || rep.ByModel["p/m2"] == nil {
+		t.Fatalf("models: %+v", rep.ByModel)
+	}
+	if rep.Budget.Status != "skipped" {
+		t.Fatalf("budget: %+v", rep.Budget)
+	}
+}
+
+func TestUsageText(t *testing.T) {
+	writeLedger(t, ledgerLine(time.Minute, "main", "m1", 1000, 500, 100, 0.5))
+	t.Setenv("DUN_URL", "http://example.invalid")
+	old := budgetFetcher
+	defer func() { budgetFetcher = old }()
+	budgetFetcher = func(context.Context, string, string, string) (llm.KeyBudget, error) {
+		return llm.KeyBudget{Reported: true, HasLimit: true, Limit: 10, HasRemaining: true, Remaining: 4, Spend: 6, Currency: "USD", Interval: "monthly"}, nil
+	}
+	var out, errb bytes.Buffer
+	if rc := usageCmd(nil, &out, &errb); rc != 0 {
+		t.Fatal(rc, errb.String())
+	}
+	s := out.String()
+	for _, want := range []string{"all time", "p/m1", "50%", "0.5000 USD", "4.0000 USD remaining of 10.0000 (40%)", "main: session model"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
 		}
+	}
+	budgetFetcher = func(context.Context, string, string, string) (llm.KeyBudget, error) {
+		return llm.KeyBudget{}, llm.ErrBudgetUnsupported
+	}
+	out.Reset()
+	usageCmd(nil, &out, &errb)
+	if !strings.Contains(out.String(), "left: not known: the endpoint does not report") {
+		t.Errorf("unsupported:\n%s", out.String())
+	}
+}
+
+func TestUsageEmptyLedger(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	var out, errb bytes.Buffer
+	if rc := usageCmd([]string{"--no-net"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), "no rounds recorded") {
+		t.Fatal(rc, out.String())
 	}
 }
