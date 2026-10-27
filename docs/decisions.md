@@ -374,10 +374,23 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   carries `tell`, `resume`, `quit`. Spawn is async; `wait:true` opts out. A
   child going idle fires the monitor, which is news and drives a turn.
   Children are resident until dismissed and re-askable, with no concurrency
-  cap. Worktree: the parent's by default; a child there may write, unenforced.
-  Model per spawn with a config default. Session end kills children; on resume
-  they report stopped and restart via `agent_monitor(resume:)`. The human gets
-  a dedicated agents pane. Children do not get `ship`'s landing modes.
+  cap. Model per spawn with a config default. Session end kills children; on
+  resume they report stopped and restart via `agent_monitor(resume:)`. The
+  human gets a dedicated agents pane. Children do not get `ship`'s landing
+  modes. Worktree: see the next bullet.
+- **A child may be given its own worktree — `agent({worktree:true})` (USER,
+  2026-10-26).** Default stays the parent's tree (cheap side: no new tree, no
+  second index). Opted in, the child gets a fresh `dun/<ts>` tree off the
+  parent's **current HEAD**, its own `HostShell` there, and its file tools
+  rooted there — so its writes never reach the parent's tree and `ship` cannot
+  find dirt that is not the parent's. It still shares the parent's MCP manager
+  (the index answers about the same repo), and its branch and path are reported
+  in `report()` so the parent can review, commit, or cherry-pick the result.
+  Forking HEAD rather than the base branch is deliberate: the parent's work is
+  usually the context the child is asked to build on, and a tree off the base
+  would make the child re-derive it or hand back a patch that conflicts.
+  A resume must REUSE the existing tree, never create a second one — the
+  child's commits are in it.
 - **Known risks:** resident children with no cap accumulate; the pane makes it
   visible, nothing prevents it. A shared-tree child writing freely means the
   parent's `ship` can find dirt that is not its own. Children do not use the
