@@ -23,6 +23,7 @@ func spendProto(s dun.SpendSnapshot, now time.Time) *proto.Spend {
 	p := &proto.Spend{
 		Currency: s.Currency, Mixed: s.Mixed,
 		Calls: s.Calls, CostedCalls: s.CostedCalls,
+		Prompt: s.Prompt, Cached: s.Cached, Completion: s.Completion, CacheReported: s.CacheReported,
 		LastTurnCalls: s.LastTurnCalls, LastTurnCosted: s.LastTurnCosted,
 		KeyUnsupported: s.BudgetUnsupported, KeyError: s.BudgetErr,
 	}

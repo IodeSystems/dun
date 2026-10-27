@@ -204,6 +204,12 @@ type Spend struct {
 	Session     *float64 `json:"session_cost,omitempty"`
 	Calls       int      `json:"calls"`
 	CostedCalls int      `json:"costed_calls"`
+	// The session's tokens over all calls: the prompt, of it the cached part
+	// (CacheReported: the provider said so at least once), and the completion.
+	Prompt        int  `json:"prompt_tokens,omitempty"`
+	Cached        int  `json:"cached_tokens,omitempty"`
+	Completion    int  `json:"completion_tokens,omitempty"`
+	CacheReported bool `json:"cache_reported,omitempty"`
 	// LastTurn is the cost since the turn before it ended (side calls between
 	// turns included); nil when none of those calls reported one.
 	LastTurn       *float64 `json:"last_turn_cost,omitempty"`
