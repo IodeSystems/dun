@@ -171,6 +171,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "session" {
 		os.Exit(sessionCmd(os.Args[2:]))
 	}
+	// `dun --usage [--json] [--no-net]`: what dun has used, from the stats
+	// ledger, and what the provider says is left (usage.go). No session.
+	if len(os.Args) > 1 && (os.Args[1] == "--usage" || os.Args[1] == "-usage") {
+		os.Exit(usageCmd(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	// `dun doctor`: what dun needs, checked (doctor.go); --fix applies the
 	// fixes it can run itself.
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {

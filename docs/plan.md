@@ -69,8 +69,10 @@ owner's call before work starts.
 
 ## The CLI
 
-- [ ] `dun --usage`: total use, what is left, per-agent use, tokens
+- [~] `dun --usage [--json] [--no-net]`: total use, what is left, per-agent use, tokens
   processed and generated, cache rate, cost; without opening a session.
+  Built (cmd/dun/usage.go, from the stats ledger). Open: the ledger cannot
+  tell root from same-model sub-agents (both role main).
 - [~] `dun -p "thing"`: the model is told to answer after a `# RESPONSE
   BELOW` line; stdout is the answer alone, the work goes to stderr.
   `dun -p` with no task is the JSON engine, as before.
