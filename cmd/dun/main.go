@@ -1346,6 +1346,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			em.emit(commandsEvent(h))
+			em.emit(settingsEvent())
 			return
 		}
 		// /rules: bare reports; "full|summary|index" saves the project's
@@ -2040,7 +2041,7 @@ var engineModel, engineURL, engineProvider string
 // settingsEvent is the session's shared toggles.
 func settingsEvent() *proto.Settings {
 	ev := &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
-		Rephrase: rephraseOn, Suggest: suggestMode}
+		Rephrase: rephraseOn, Suggest: suggestMode, Effort: effortLevel}
 	if h, _ := engineHarness.Load().(*dun.Harness); h != nil {
 		max, from, buf, lod, nudge := h.ContextSettings()
 		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge}

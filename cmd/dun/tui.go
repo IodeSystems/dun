@@ -679,6 +679,7 @@ type tuiModel struct {
 	scr          *paneScreen    // a pushed screen over the pager (panes.go), or nil
 	extWant      bool           // /ext asked for the list (extview.go)
 	ctxSettings  map[string]any // /context config's settings in force, from the settings event
+	effort       string         // /effort's level, from the settings event
 	jobViewing   bool           // a job's view has the convo pane (jobview.go; owns the keys)
 	jv           jobView        // the job view (valid while jobViewing)
 	jvGen        int            // which opening of the job view its read timer belongs to
@@ -2883,6 +2884,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		if c, ok := ev["context"].(map[string]any); ok {
 			m.ctxSettings = c
 		}
+		m.effort = str(ev["effort"])
 		if p := str(ev["provider"]); p != "" {
 			m.provider = p
 		}

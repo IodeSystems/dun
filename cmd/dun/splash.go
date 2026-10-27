@@ -86,7 +86,21 @@ const (
 func (m tuiModel) statusSections(w int) []statusSection {
 	secs := m.splashSections(w, false)
 	out := []statusSection{{label: "build", value: version}}
-	return append(out, secs...)
+	out = append(out, secs...)
+	// The effort the model is asked for (/effort; USER 2026-10-27: /status
+	// did not say), after the model it applies to.
+	eff := m.effort
+	if eff == "" {
+		eff = dun.EffortDefault
+	}
+	for i, s := range out {
+		if s.label == "model" {
+			row := statusSection{label: "effort", value: eff + stDim.Render(" · "+dun.EffortAbout[eff]+" · /effort")}
+			out = append(out[:i+1], append([]statusSection{row}, out[i+1:]...)...)
+			break
+		}
+	}
+	return out
 }
 
 func (m tuiModel) modelValue() string {
@@ -717,6 +731,10 @@ func (m tuiModel) statusDetail(w int) string {
 	for _, st := range sortedServers(m.servers) {
 		state := stDim.Render("off")
 		switch {
+		case st.Via == dun.ViaShell && st.Hosted: // scripted: its tools are in the shell's eval (USER 2026-10-27: was "off")
+			state = stOK.Render("scripted in the shell") + stDim.Render(" · "+plural(st.Tools, "tool"))
+		case st.Via == dun.ViaShell && st.Auto:
+			state = stDim.Render("scripted · not hosted (the shell is down, or could not start it)")
 		case st.Starting:
 			state = stDim.Render("starting" + m.startedFor(st.ID))
 		case st.Running:
