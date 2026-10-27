@@ -39,7 +39,8 @@ import (
 // them already.
 
 // attachName is what an attachment may be once qualified.
-var attachName = regexp.MustCompile(`^[a-z0-9_-]+:[a-z0-9_-]+$`)
+// ":<index>" is a global index (raglit 359f049).
+var attachName = regexp.MustCompile(`^[a-z0-9_-]*:[a-z0-9_-]+$`)
 
 // qualifyAttach is index as stored: lowercased, "<own>:" in front of a bare
 // name. An error names what is wrong with it.

@@ -102,6 +102,16 @@ func (v *switchListView) lines(_ *tuiModel, w int) []string {
 	if v.modeFrom != "" {
 		mode += " (" + v.modeFrom + ")"
 	}
+	if len(v.order) == 0 { // a kind with no modes (the indexes): what is on, and its facts
+		out := wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+fmt.Sprintf("%d of %d attached", on, len(v.rows)), w)
+		for _, s := range v.status {
+			out = append(out, wrapToRows(stDim.Render(s), w)...)
+		}
+		if v.note != "" {
+			out = append(out, wrapToRows(stNote.Render("⚠ "+v.note), w)...)
+		}
+		return out
+	}
 	// What the items that are on cost, in the kind's default mode (the
 	// first): another mode sends less.
 	cost0 := fmt.Sprintf("~%s tokens in every request", kTokens(cost))
@@ -130,7 +140,14 @@ func (v *switchListView) lines(_ *tuiModel, w int) []string {
 
 func (v *switchListView) page() pageDoc {
 	shown := v.shown()
-	title := fmt.Sprintf("%d %s", len(v.rows), map[bool]string{true: "file", false: strings.TrimSuffix(v.kind, "s")}[v.kind == "rules"]+"s")
+	noun := strings.TrimSuffix(v.kind, "s") + "s"
+	switch v.kind {
+	case "rules":
+		noun = "files"
+	case "indexes":
+		noun = "indexes"
+	}
+	title := fmt.Sprintf("%d %s", len(v.rows), noun)
 	if v.query != "" {
 		title = fmt.Sprintf("filter %q: %d of %d shown", v.query, len(shown), len(v.rows))
 	}
@@ -145,6 +162,9 @@ func (v *switchListView) page() pageDoc {
 		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
 		cells := fmt.Sprintf("g%s p%s s%s", cellMark(r.global), cellMark(r.project), cellMark(r.session))
 		head := fmt.Sprintf("%s %s  ~%s tok  %s  %s  %s", mark, r.name, kTokens(r.tokens), cells, r.source, first)
+		if len(v.order) == 0 { // no cost to show: the indexes
+			head = fmt.Sprintf("%s %s  %s  %s  %s", mark, r.name, cells, r.source, first)
+		}
 		sub := ""
 		if narrow {
 			// The name above; below, what it costs, where it is from and
@@ -153,6 +173,9 @@ func (v *switchListView) page() pageDoc {
 			// were noise (USER 2026-10-25, a phone).
 			head = mark + " " + r.name
 			sub = fmt.Sprintf("~%s tok · %s", kTokens(r.tokens), r.source)
+			if len(v.order) == 0 {
+				sub = r.source
+			}
 			if r.from != "" {
 				sub = onOff(r.on) + " " + scopeIn(r.from) + " · " + sub
 			}
@@ -182,6 +205,12 @@ func (v *switchListView) page() pageDoc {
 // hint is the status line while the view is open; narrow, the keys alone,
 // short enough to fit a phone (fitHints would keep only the first and last).
 func (v *switchListView) hint() string {
+	if len(v.order) == 0 {
+		if v.width > 0 && v.width < narrowW {
+			return "␣ session · ^g ^p ^s scopes · esc"
+		}
+		return "type to search · space attach/detach (session) · ctrl+g/p/s global/project/session · enter details · esc clear, back"
+	}
 	if v.width > 0 && v.width < narrowW {
 		return "␣ on/off · ^g ^p ^s scopes · tab mode · esc"
 	}

@@ -17,12 +17,13 @@ func TestQualifyAttach(t *testing.T) {
 		"other:handbk": "other:handbk",
 		"OTHER:Handbk": "other:handbk",
 		"own:my_idx-2": "own:my_idx-2",
+		":code":        ":code", // a global index (raglit 359f049)
 	} {
 		if got, err := qualifyAttach("own", in); err != nil || got != want {
 			t.Errorf("%q: %q %v, want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "a:b:c", "other:*", "x/y", "other:", ":idx"} {
+	for _, bad := range []string{"", "a:b:c", "other:*", "x/y", "other:", ":"} {
 		if got, err := qualifyAttach("own", bad); err == nil {
 			t.Errorf("%q: accepted as %q", bad, got)
 		}

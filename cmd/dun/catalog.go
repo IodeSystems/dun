@@ -346,6 +346,13 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			m.openSwitches("rules")
 			return nil
 		}
+		// Bare /raglit attach: every index, to search and attach at a scope
+		// (dun/indexkind.go; USER 2026-10-27: "I don't know the index name
+		// OR format, but could choose it if I can see/search for it").
+		if name == "raglit" && len(args) == 1 && args[0] == "attach" {
+			m.openSwitches("indexes")
+			return nil
+		}
 		// Bare /effort and /retry: the picker, which is the palette's choices
 		// for it (USER 2026-10-26: empty shows the modes).
 		if (name == "effort" || name == "retry") && len(args) == 0 {

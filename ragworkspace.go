@@ -35,7 +35,7 @@ func (h *Harness) SetWorkspaceIndexed(on bool, scope string) (string, error) {
 		return "", err
 	}
 	now, from := h.WorkspaceIndexed()
-	msg := fmt.Sprintf("workspace indexing %s %s", onOffWord(on), scopeWords(scope))
+	msg := fmt.Sprintf("workspace indexing %s for %s", onOffWord(on), scopeWords(scope))
 	if now != on {
 		msg += fmt.Sprintf(" — but %s still says %s", from, onOffWord(now))
 	}

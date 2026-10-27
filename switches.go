@@ -71,6 +71,10 @@ type switchKind struct {
 	// prepare, when set, runs before a mode is saved: what the mode needs
 	// (a summary written), or why it cannot be set.
 	prepare func(mode string) error
+	// view and set, when set, replace the switch files: a kind whose state
+	// lives elsewhere (the attached indexes, indexkind.go).
+	view func() SwitchView
+	set  func(name, scope string, on *bool) (string, error)
 }
 
 // switchScopes is precedence, highest first.
@@ -187,6 +191,9 @@ type SwitchView struct {
 
 // switchView builds a kind's view.
 func (h *Harness) switchView(k switchKind) SwitchView {
+	if k.view != nil {
+		return k.view()
+	}
 	set := h.switchSet(k.name)
 	v := SwitchView{Kind: k.name, Modes: map[string]string{}, About: k.about, Order: k.modes, Slash: k.slashName()}
 	v.Mode, v.ModeFrom = set.mode(k.modes[0])
@@ -212,6 +219,9 @@ func (h *Harness) switchView(k switchKind) SwitchView {
 func (h *Harness) setSwitch(k switchKind, pattern, scope string, on *bool) (string, error) {
 	if pattern == "" {
 		return "", fmt.Errorf("which one? a name or a glob (pdf-*)")
+	}
+	if k.set != nil {
+		return k.set(pattern, scope, on)
 	}
 	if _, err := path.Match(pattern, ""); err != nil {
 		return "", fmt.Errorf("%q is not a glob: %v", pattern, err)
@@ -257,6 +267,9 @@ func (h *Harness) setSwitch(k switchKind, pattern, scope string, on *bool) (stri
 
 // setSwitchMode sets the kind's mode at scope; "" unsets it there.
 func (h *Harness) setSwitchMode(k switchKind, mode, scope string) (string, error) {
+	if len(k.modes) == 0 {
+		return "", fmt.Errorf("%s have no modes", k.name)
+	}
 	if mode != "" && !containsStr(k.modes, mode) {
 		return "", fmt.Errorf("mode %q: want %s", mode, strings.Join(k.modes, " or "))
 	}
@@ -321,7 +334,7 @@ func containsStr(list []string, s string) bool {
 
 // switchKinds are the kinds a client can switch, by name.
 func (h *Harness) switchKinds() map[string]switchKind {
-	return map[string]switchKind{"skills": h.skillKind(), rulesKind: h.rulesSwitchKind()}
+	return map[string]switchKind{"skills": h.skillKind(), rulesKind: h.rulesSwitchKind(), indexesKind: h.indexesSwitchKind()}
 }
 
 // slashName is the command for the kind: its slash, or its name less the
