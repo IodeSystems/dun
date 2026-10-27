@@ -5130,8 +5130,17 @@ func (m *tuiModel) runPaletteEnter(v string) tea.Cmd {
 	// An argument choice highlighted: run the command with it.
 	if cmd, l, ok := m.paletteArgs(); ok && len(l.choices) > 0 {
 		sel := min(max(m.paletteSel, 0), len(l.choices)-1)
-		m.input.Reset()
 		m.paletteSel = 0
+		// A choice that wants a value after it (a flag: --max) is filled in,
+		// as tab does, not run without one (USER 2026-10-27: enter on --max
+		// ran "--max" and said it needs a value).
+		if l.choices[sel].more {
+			m.input.SetValue("/" + cmd + " " + l.choices[sel].value + " ")
+			m.input.CursorEnd()
+			m.refresh()
+			return nil
+		}
+		m.input.Reset()
 		return m.runSlash("/" + cmd + " " + l.choices[sel].value)
 	}
 	fields := strings.Fields(v)

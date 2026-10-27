@@ -28,6 +28,9 @@ import (
 type argChoice struct {
 	value, label, source, desc string
 	hits                       []int
+	// more: the choice wants a value typed after it (a flag), so enter
+	// fills it in as tab does instead of running it.
+	more bool
 }
 
 // argList is a completer's answer: the matches, best first, out of total
@@ -444,6 +447,7 @@ func contextChoices(m *tuiModel, arg string) *argList {
 			continue
 		}
 		c.value = strings.Join(append(append([]string{"config"}, done...), c.value), " ")
+		c.more = true
 		out = append(out, c)
 	}
 	return &argList{choices: out, total: len(flags), noun: "settings"}
