@@ -130,7 +130,7 @@ func TestAskRecommended(t *testing.T) {
 // (seen: every question one pick, one recommendation).
 func TestAskToolDef_TeachesMulti(t *testing.T) {
 	td := askToolDef()
-	for _, want := range []string{"Pick several (`multi`: true)", "include, fix, enable", "Pick one"} {
+	for _, want := range []string{"Pick several (`multi`: true)", "which of these to fix", "Pick one"} {
 		if !strings.Contains(td.Function.Description, want) {
 			t.Errorf("description lacks %q", want)
 		}

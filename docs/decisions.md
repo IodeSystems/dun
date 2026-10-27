@@ -437,7 +437,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   dun does not write. dun writes agentkit's `{OUTPUT}` note itself, shorter
   (`OmitSlotInstructions`). First request, empty dir, no servers but the
   shell: system prompt 5,025 → 1,780 chars, tool definitions 16,182 →
-  12,722 JSON bytes, 14 → 12 tools.
+  12,720 JSON bytes, 14 → 12 tools.
 
 ## Tool servers and extensions
 

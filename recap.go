@@ -515,33 +515,27 @@ func recapToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "recap"
-	td.Function.Description = "Manage your own context. TWO modes. (1) READ BACK a result that was too big to " +
-		"show whole: recap({ref:\"r3\", grep:\"ERROR\"}) — also head, tail, or full (still bounded). The ref " +
-		"is printed in the gap where the output was clipped, and works for background job logs too; it is read " +
-		"directly, so it works with no shell and inside a container. (2) REPLACE a stretch of this conversation " +
-		"with a corrected account of it. Use it after " +
-		"churn — a huge tool result you no longer need, several failed attempts at the same thing, a " +
-		"misunderstanding that was cleared up later. `from` is a phrase from the message the churn started " +
-		"AFTER (quoted exactly); everything since is replaced by `summary`, which should read as the account " +
-		"you WISH the conversation had, including the correct conclusion. Name any tool calls whose results " +
-		"still matter in `keep` and they survive verbatim. `user` rewrites the anchoring user message when it " +
-		"was ambiguous and you now know what was meant. Nothing is deleted — it moves to a file — but the " +
-		"tokens leave your context, so use this when a span is costing you more than it is worth."
+	td.Function.Description = "Two uses. Read back a clipped result by its `ref` (printed in the gap; a job's " +
+		"log has one too) with grep, head, tail or full. Or replace a span of this conversation with a summary, " +
+		"as soon as it stops being worth its context: a big result you have taken what you need from, failed " +
+		"attempts before one worked, a misunderstanding cleared up later. The span is moved to a file, not " +
+		"deleted, but your summary is all that stays in context, so make it accurate: do not round numbers or " +
+		"guess at what you did not read."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"ref":     map[string]any{"type": "string", "description": "read mode: a saved result's ref, as printed where its output was clipped"},
-			"grep":    map[string]any{"type": "string", "description": "read mode: only lines matching this regexp"},
-			"head":    map[string]any{"type": "integer", "description": "read mode: the first N lines"},
-			"tail":    map[string]any{"type": "integer", "description": "read mode: the last N lines"},
-			"full":    map[string]any{"type": "boolean", "description": "read mode: as much as the cap allows"},
-			"from":    map[string]any{"type": "string", "description": "exact phrase from the message the churn began after"},
-			"summary": map[string]any{"type": "string", "description": "what actually happened and what is true now, written to stand alone"},
+			"ref":     map[string]any{"type": "string", "description": "read: the clipped result's ref"},
+			"grep":    map[string]any{"type": "string", "description": "read: only lines matching this regexp"},
+			"head":    map[string]any{"type": "integer", "description": "read: the first N lines"},
+			"tail":    map[string]any{"type": "integer", "description": "read: the last N lines"},
+			"full":    map[string]any{"type": "boolean", "description": "read: as much as the cap allows"},
+			"from":    map[string]any{"type": "string", "description": "replace: an exact phrase from the message the span starts after"},
+			"summary": map[string]any{"type": "string", "description": "replace: what happened and what is true now, standing on its own"},
 			"keep": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
-				"description": "which tool results to keep verbatim: a tool NAME (\"exec\") or a phrase from its arguments (\"grep -c\"). Everything else in the span goes.",
+				"description": "replace: results to keep verbatim, by tool name (\"exec\") or a phrase from the call (\"grep -c\"), not by id",
 			},
-			"user": map[string]any{"type": "string", "description": "optional: a clearer wording of the anchoring user message"},
+			"user": map[string]any{"type": "string", "description": "replace: a clearer wording of the user message `from` quotes"},
 		},
 	}
 	return td
