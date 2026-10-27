@@ -139,7 +139,7 @@
   .compare { margin-top:28px; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:24px; }
   .compare .label { font:12px/1.3 var(--mono); color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin:0 0 14px; }
   .cmp { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
-  .cmp li { display:grid; grid-template-columns:minmax(0,13rem) minmax(0,1fr) 4.5rem; align-items:center; gap:12px; font:14px/1.3 var(--mono); color:var(--muted); }
+  .cmp li { display:grid; grid-template-columns:minmax(0,13rem) minmax(0,1fr) 9rem; align-items:center; gap:12px; font:14px/1.3 var(--mono); color:var(--muted); }
   .cmp .bar { height:10px; background:var(--bg); border-radius:5px; overflow:hidden; }
   .cmp .bar span { display:block; height:100%; background:var(--dim); border-radius:5px; }
   .cmp .n { text-align:right; color:var(--fg); }
@@ -147,7 +147,7 @@
   .cmp li.us .bar span { background:var(--accent); }
   .cmp li.us .n { color:var(--accent); }
   .compare .fine { color:var(--dim); font-size:.82rem; margin:16px 0 0; }
-  @media (max-width:600px) { .cmp li { grid-template-columns:1fr 4.5rem; } .cmp .bar { grid-column:1 / -1; grid-row:2; } }
+  @media (max-width:600px) { .cmp li { grid-template-columns:1fr 9rem; } .cmp .bar { grid-column:1 / -1; grid-row:2; } }
   .bars { margin-top:16px; display:grid; gap:6px; }
   .bars div { height:8px; border-radius:2px; background:var(--border2); }
   .bars div.after { background:var(--accent); min-width:3px; }
@@ -432,30 +432,26 @@
       </div>
     </div>
     <div class="compare">
-      <p class="label">tokens before you type · the same two MCP servers · clean installs</p>
-      <ul class="cmp" aria-label="tokens before you type, same MCP servers">
-        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">19,959</span></li>
-        <li><span class="who">Claude Code 2.1.311 ¹</span><span class="bar"><span style="width:58.3%"></span></span><span class="n">11,643</span></li>
-        <li><span class="who">dun, servers direct</span><span class="bar"><span style="width:54.1%"></span></span><span class="n">10,806</span></li>
-        <li><span class="who">pi 1.4.0, servers direct</span><span class="bar"><span style="width:40.9%"></span></span><span class="n">8,158</span></li>
-        <li class="us"><span class="who">dun, Playwright scripted</span><span class="bar"><span style="width:29.7%"></span></span><span class="n">5,923</span></li>
-        <li><span class="who">pi 1.4.0, default (codemode) ²</span><span class="bar"><span style="width:12.3%"></span></span><span class="n">2,448</span></li>
+      <p class="label">tokens before you type · the same two MCP servers · clean installs · dun = 1.0×</p>
+      <ul class="cmp" aria-label="tokens before you type, same MCP servers, relative to dun">
+        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">3.4× · 19,959</span></li>
+        <li><span class="who">Claude Code 2.1.311 ¹</span><span class="bar"><span style="width:58.3%"></span></span><span class="n">2.0× · 11,643</span></li>
+        <li><span class="who">dun, servers direct</span><span class="bar"><span style="width:54.1%"></span></span><span class="n">1.8× · 10,806</span></li>
+        <li class="us"><span class="who">dun, Playwright scripted</span><span class="bar"><span style="width:29.7%"></span></span><span class="n">1.0× · 5,923</span></li>
       </ul>
-      <p class="fine">Each agent's first request after "hi", from an empty folder, counted by one model (Qwen 27B on llama.cpp, its chat template included), 2026-10-27. Servers: Playwright MCP 0.0.83 and poly-lsp-mcp. ¹ Claude Code sends MCP tools as names and loads a schema when the model searches for it. ² pi 1.4.0 has built-in MCP and by default puts MCP tools behind its codemode scripting tool, so their schemas are not sent either. In dun's scripted run, poly-lsp stays direct (it cannot be scripted). The method is <code>tools/promptsize</code> in the repository.</p>
+      <p class="fine">Each agent's first request after "hi", from an empty folder, counted by one model (Qwen 27B on llama.cpp, its chat template included), 2026-10-27. Servers: Playwright MCP 0.0.83 and poly-lsp-mcp. ¹ Claude Code sends MCP tools as names and loads a schema when the model searches for it. In dun's scripted run, poly-lsp stays direct (it cannot be scripted). The method is <code>tools/promptsize</code> in the repository.</p>
     </div>
     <div class="compare">
-      <p class="label">tokens before you type · no MCP servers · clean installs</p>
-      <ul class="cmp" aria-label="tokens before you type, no MCP servers">
-        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">13,704</span></li>
-        <li><span class="who">Claude Code 2.1.311</span><span class="bar"><span style="width:82.9%"></span></span><span class="n">11,366</span></li>
-        <li class="us"><span class="who">dun, 12 tools</span><span class="bar"><span style="width:28.6%"></span></span><span class="n">3,925</span></li>
-        <li><span class="who">pi 1.4.0, 4 tools</span><span class="bar"><span style="width:13%"></span></span><span class="n">1,783</span></li>
+      <p class="label">tokens before you type · no MCP servers · clean installs · dun = 1.0×</p>
+      <ul class="cmp" aria-label="tokens before you type, no MCP servers, relative to dun">
+        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">3.5× · 13,704</span></li>
+        <li><span class="who">Claude Code 2.1.311</span><span class="bar"><span style="width:82.9%"></span></span><span class="n">2.9× · 11,366</span></li>
+        <li class="us"><span class="who">dun, 12 tools</span><span class="bar"><span style="width:28.6%"></span></span><span class="n">1.0× · 3,925</span></li>
       </ul>
       <p class="fine">dun was 5,204 tokens before the latest prompt cuts.</p>
     </div>
     <div class="why">
-      <div><b>credit to pi</b>pi keeps MCP schemas out of the request too, by default, and sends less in all: 2,448 tokens with both servers against dun's 5,923. dun is not the leanest, and not the only one.</div>
-      <div><b>ahead of the rest</b>With the same servers, dun scripted sends about 70% less than opencode and about half of Claude Code. Claude Code's tool search keeps schemas out too, on a base of 11,366.</div>
+      <div><b>with the same servers</b>opencode sends 3.4 times what dun sends, and Claude Code twice as much, before you type a word. Claude Code's tool search keeps MCP schemas out too, on a base of 11,366.</div>
     </div>
   </div>
 </section>
