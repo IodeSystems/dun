@@ -37,9 +37,9 @@ owner's call before work starts.
 - [~] `/rephrase prompt [text|default]`: show, set or reset the rephrasing
   prompt ($DUN_HOME/rephrase.txt).
 - [~] `/close` exits; discarding a session for good is now `/discard`.
-- [ ] The splash says where each row is set: a row's command (`tools` →
+- [~] The splash says where each row is set: a row's command (`tools` →
   `/tools`, a hint that it is one).
-- [ ] The spend row: requests, tokens processed and generated, cache rate.
+- [~] The spend row: requests, tokens processed and generated, cache rate.
 - [~] ctrl+p pastes the clipboard's text (wl-paste, xclip, pbpaste,
   termux-clipboard-get).
 - [ ] Messages between agents in boxes like thinking: from whom, to whom,

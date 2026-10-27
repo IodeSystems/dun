@@ -116,9 +116,9 @@ func TestSplash5_ContextRow(t *testing.T) {
 	v.event(costEvent(false, 32000)) // 13.4k of 32k = 42%
 	s := splashText(v)
 	for _, want := range []string{
-		"context     ~13.4k tokens before you type (of 32k, 42%)\n",
+		"context     ~13.4k tokens before you type (of 32k, 42%) · /context config\n",
 		"            system 600 · tools 0 (2.1k) · mcp 1 server (5.2k)\n", "            skills 0 (4.0k) · rules 2 (1.5k)\n",
-		"rules       AGENTS.md, docs/rules.md\n",
+		"rules       AGENTS.md, docs/rules.md · /rules\n",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lacks %q:\n%s", want, s)
@@ -128,14 +128,14 @@ func TestSplash5_ContextRow(t *testing.T) {
 		t.Error("42% is orange")
 	}
 	v.event(costEvent(true, 20000)) // 67%: exact, heavy
-	if s := splashText(v); !strings.Contains(s, "context     13.4k tokens before you type (of 20k, 67%)\n") {
+	if s := splashText(v); !strings.Contains(s, "context     13.4k tokens before you type (of 20k, 67%) · /context config\n") {
 		t.Errorf("exact:\n%s", s)
 	}
 	if !strings.Contains(v.m.convo[0].collapsed, stNote.Render("13.4k tokens before you type (of 20k, 67%)")) {
 		t.Errorf("67%% is not orange: %q", v.m.convo[0].collapsed)
 	}
 	v.event(costEvent(true, 0))
-	if s := splashText(v); !strings.Contains(s, "context     13.4k tokens before you type\n") {
+	if s := splashText(v); !strings.Contains(s, "context     13.4k tokens before you type · /context config\n") {
 		t.Errorf("no window:\n%s", s)
 	}
 	// At 49 the words that carry it stay: the count, the window, the share.
@@ -152,8 +152,8 @@ func TestSplash5_ContextRow(t *testing.T) {
 // hours' rate, and never says $0 for a provider that reports nothing.
 func TestSplash5_SpendRow(t *testing.T) {
 	v := splash5(t, 100, 30)
-	if s := splashText(v); strings.Contains(s, "spend") || !strings.HasSuffix(s, "\n\n") {
-		t.Fatalf("before any call the spend row is blank, its place kept:\n%s", s)
+	if s := splashText(v); !strings.Contains(s, "spend       no requests yet\n") {
+		t.Fatalf("before any call the spend row says so:\n%s", s)
 	}
 	for _, tc := range []struct {
 		today, week float64
@@ -164,12 +164,12 @@ func TestSplash5_SpendRow(t *testing.T) {
 		{0.0, 0.009, "< $0.01 this year"},
 	} {
 		v.event(spendEvent(tc.today, tc.week, -1, 0))
-		if s := splashText(v); !strings.Contains(s, "spend       "+tc.want+"\n") {
+		if s := splashText(v); !strings.Contains(s, "spend       3 requests · "+tc.want+"\n") {
 			t.Errorf("today %v week %v: want %q:\n%s", tc.today, tc.week, tc.want, s)
 		}
 	}
 	v.event(spendEvent(0.42, 3.10, 12.30, 1.0))
-	if s := splashText(v); !strings.Contains(s, "spend       $0.42 today · $12.30 left on work\n") {
+	if s := splashText(v); !strings.Contains(s, "spend       3 requests · $0.42 today · $12.30 left on work\n") {
 		t.Errorf("budget:\n%s", s)
 	}
 	if strings.Contains(v.m.convo[0].collapsed, "38;5;214m$12.30") {
@@ -182,12 +182,12 @@ func TestSplash5_SpendRow(t *testing.T) {
 	// Credits: one is the floor.
 	v.event(map[string]any{"type": "spend", "calls": float64(1), "costed_calls": float64(1),
 		"ledger": map[string]any{"today": map[string]any{"credits": 0.5}, "week": map[string]any{"credits": 2.0}, "entries": true}})
-	if s := splashText(v); !strings.Contains(s, "spend       2 credits this week\n") {
+	if s := splashText(v); !strings.Contains(s, "spend       1 request · 2 credits this week\n") {
 		t.Errorf("credits:\n%s", s)
 	}
 	// A provider that reports no cost: no spend, so no row.
 	v.event(map[string]any{"type": "spend", "calls": float64(4), "costed_calls": float64(0), "ledger": map[string]any{}})
-	if s := splashText(v); strings.Contains(s, "spend") {
+	if s := splashText(v); !strings.Contains(s, "spend       4 requests · cost not reported by work\n") {
 		t.Errorf("not reported:\n%s", s)
 	}
 }
@@ -229,7 +229,7 @@ func TestStatus5_Detail(t *testing.T) {
 	v.m.statusSlash()
 	s := stripANSI(v.m.convo[len(v.m.convo)-1].collapsed)
 	for _, want := range []string{
-		"  build       ", "  context     13.4k tokens before you type (of 32k, 42%)\n",
+		"  build       ", "  context     13.4k tokens before you type (of 32k, 42%) · /context config\n",
 		"  servers\n", "    notes  running · 1 tool · 5.2k\n",
 		"  skills\n", "    deploy  ~8\n",
 		"  rules\n", "    AGENTS.md      ~900\n", "    docs/rules.md  ~600\n",

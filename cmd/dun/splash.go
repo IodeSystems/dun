@@ -64,11 +64,11 @@ func (m tuiModel) splashSections(w int, short bool) []statusSection {
 	ctx, parts := m.contextValue(vw)
 	return []statusSection{
 		{label: "folder", value: m.folderValue()},
-		{label: "model", value: m.modelValue()},
+		{label: "model", value: m.modelValue(vw)},
 		{label: "tools", value: m.toolsValue(vw)},
 		{label: "extensions", value: m.extensionsValue(vw)},
-		{label: "skills", value: m.skillsValue()},
-		{label: files, value: m.filesValue()},
+		{label: "skills", value: m.skillsValue(vw)},
+		{label: files, value: m.filesValue(vw)},
 		{label: "context", value: ctx, more: parts},
 		{label: "spend", value: m.spendValue(vw, time.Now())},
 	}
@@ -103,14 +103,14 @@ func (m tuiModel) statusSections(w int) []statusSection {
 	return out
 }
 
-func (m tuiModel) modelValue() string {
+func (m tuiModel) modelValue(w int) string {
 	switch {
 	case m.model != "" && m.url != "":
 		v := m.model
 		if m.provider != "" {
 			v += stDim.Render(" on ") + m.provider
 		}
-		return v
+		return hinted(w, v, "/model")
 	case m.url != "":
 		return stDim.Render("none yet — /model")
 	}
@@ -250,7 +250,7 @@ func (m tuiModel) extensionsValue(w int) string {
 
 // skillsValue is how many skills the agent can load, and the command that
 // lists them.
-func (m tuiModel) skillsValue() string {
+func (m tuiModel) skillsValue(w int) string {
 	if len(m.skills) == 0 {
 		return stDim.Render("none")
 	}
@@ -258,7 +258,7 @@ func (m tuiModel) skillsValue() string {
 	if tok := m.skillTokens(); tok > 0 {
 		v += stDim.Render(" (" + tokN(tok) + ")")
 	}
-	return v + stDim.Render(" · /skill info")
+	return hinted(w, v, "/skill info")
 }
 
 // toolTokens is what every tool definition costs in each request — dun's own
@@ -291,7 +291,7 @@ func (m tuiModel) skillTokens() int {
 
 // filesValue names the context files the agent reads (rules.go: AGENTS.md,
 // CLAUDE.md and what they import), in reading order.
-func (m tuiModel) filesValue() string {
+func (m tuiModel) filesValue(w int) string {
 	s := m.ctxStats
 	if s.systemTokens == 0 {
 		return stDim.Render("counting…")
@@ -303,7 +303,7 @@ func (m tuiModel) filesValue() string {
 	for i, f := range s.systemFiles {
 		names[i] = f.Name
 	}
-	return strings.Join(names, stDim.Render(", "))
+	return hinted(w, strings.Join(names, stDim.Render(", ")), "/rules")
 }
 
 // contextValue is the context row: what the context holds before the person
@@ -338,6 +338,7 @@ func (m tuiModel) contextValue(w int) (string, []string) {
 	if heavy {
 		v = stNote.Render(v)
 	}
+	v = hinted(w, v, "/context config")
 	parts := m.contextParts(w, rows)
 	for i := range parts {
 		parts[i] = stSecondary.Render(parts[i])
@@ -415,6 +416,12 @@ func (m tuiModel) builtinToolCount() int {
 	return max(0, n)
 }
 
+// hinted is v with the command that sets it after it, dim, when both fit w
+// cells; else v alone — the hint goes before the value would wrap.
+func hinted(w int, v, cmd string) string {
+	return firstFit(w, v+stDim.Render(" · "+cmd), v)
+}
+
 // firstFit is the first of forms that fits w cells, else the last.
 func firstFit(w int, forms ...string) string {
 	for _, f := range forms {
@@ -450,46 +457,87 @@ func tokK(n int) string {
 	return strings.TrimSuffix(fmt.Sprintf("%.2f", float64(n)/1e6), ".00") + "M"
 }
 
-// spendValue is the spend row: the smallest period whose spend is
-// significant (spendPeriod), then what the key has left when the gateway
-// says (orange when it covers a day or less at the key's rate over the last
-// 24 hours). A provider that reports no cost is "not reported by <service>",
-// never $0.
+// spendValue is the spend row: this session's requests, tokens processed
+// (the prompt) and generated (the completion) and, when the provider reports
+// cached prompt tokens, the cache rate; then the smallest period whose
+// spend is significant (spendPeriod), then what the key has left when the
+// gateway says (orange when it covers a day or less at the key's rate over
+// the last 24 hours). A provider that reports no cost is "cost not reported
+// by <service>", never $0. Narrow, the usage shortens and the money goes
+// before the value would wrap.
 //
-//	$0.42 today · $12.30 left on work
+//	12 requests · 41.3k in · 2.1k out · 82% cached · $0.42 today · $12.30 left on work
 func (m tuiModel) spendValue(w int, now time.Time) string {
 	sp := m.ctxStats.spend
-	host := m.serviceName()
-	unpriced := sp != nil && sp.Calls > 0 && sp.CostedCalls == 0
+	if sp == nil || sp.Calls == 0 {
+		// A session that can make requests says none were made; one that
+		// cannot yet (no model) keeps the row blank, as the first-run
+		// splash has no spend (its place is kept).
+		if m.model != "" && m.url != "" {
+			return stDim.Render("no requests yet")
+		}
+		return ""
+	}
+	sep := stDim.Render(" · ")
+	req := plural(sp.Calls, "request")
+	usage := []string{req}
+	if sp.Prompt > 0 || sp.Completion > 0 {
+		reqs := fmt.Sprintf("%d req", sp.Calls)
+		short := reqs + " · " + tokN(sp.Prompt) + " in · " + tokN(sp.Completion) + " out"
+		full := req + " · " + tokN(sp.Prompt) + " in · " + tokN(sp.Completion) + " out"
+		usage = []string{full, short, reqs}
+		if sp.CacheReported && sp.Prompt > 0 {
+			pct := fmt.Sprintf(" · %d%% cached", int(math.Round(float64(sp.Cached)*100/float64(sp.Prompt))))
+			usage = []string{full + pct, short + pct, reqs + " · " + tokN(sp.Prompt) + " in" + pct, short, reqs}
+		}
+	}
+	for i := range usage {
+		usage[i] = stDim.Render(usage[i])
+	}
 	var v string
-	if sp != nil && sp.Ledger != nil {
+	if sp.Ledger != nil {
 		if amt, period, ok := spendPeriod(sp.Ledger); ok {
 			v = amt + " " + period
 		} else if sp.Ledger.Entries {
 			v = "< $0.01 this year"
 		}
 	}
-	switch {
-	case v == "":
-		// No spend and no budget: the row is left blank, not filled with
-		// "none yet" (USER 2026-10-24); its place is kept, so spend arriving
-		// later fills it without the splash growing.
-		return ""
-	case unpriced:
-		v += stDim.Render(" · not reported by " + host)
+	if sp.CostedCalls == 0 {
+		if v != "" {
+			v += " · "
+		}
+		v += stDim.Render("cost not reported by " + m.serviceName())
 	}
-	left, low, ok := budgetLeft(sp)
-	if !ok {
-		return v
+	var money []string
+	if v != "" {
+		money = append(money, v)
 	}
-	tail := left + " left"
-	if m.provider != "" && ansi.StringWidth(v+" · "+tail+" on "+m.provider) <= w {
-		tail += " on " + m.provider
+	if left, low, ok := budgetLeft(sp); ok {
+		tail := left + " left"
+		if m.provider != "" && ansi.StringWidth(v+" · "+tail+" on "+m.provider) <= w {
+			tail += " on " + m.provider
+		}
+		if low {
+			tail = stNote.Render(tail)
+		}
+		if v == "" {
+			money = []string{tail}
+		} else {
+			money = []string{v + sep + tail, v}
+		}
 	}
-	if low {
-		tail = stNote.Render(tail)
+	money = append(money, "")
+	var forms []string
+	for _, u := range usage {
+		for _, mo := range money {
+			if mo == "" {
+				forms = append(forms, u)
+			} else {
+				forms = append(forms, u+sep+mo)
+			}
+		}
 	}
-	return v + stDim.Render(" · ") + tail
+	return firstFit(w, forms...)
 }
 
 // spendPeriods are the periods the spend row picks from, smallest first.
@@ -805,6 +853,13 @@ func (m tuiModel) spendRows() [][2]string {
 		rows = append(rows, [2]string{"this session", stDim.Render(fmt.Sprintf("not reported by %s (%s)", host, plural(sp.Calls, "call")))})
 	default:
 		rows = append(rows, [2]string{"this session", moneyOf(*sp.Session, sp.Currency) + stDim.Render(" · "+plural(sp.CostedCalls, "priced call"))})
+	}
+	if sp != nil && (sp.Prompt > 0 || sp.Completion > 0) {
+		v := tokN(sp.Prompt) + " processed · " + tokN(sp.Completion) + " generated"
+		if sp.CacheReported && sp.Prompt > 0 {
+			v += fmt.Sprintf(" · %d%% of the prompt cached", int(math.Round(float64(sp.Cached)*100/float64(sp.Prompt))))
+		}
+		rows = append(rows, [2]string{"tokens", v})
 	}
 	if left, low, ok := budgetLeft(sp); ok {
 		v := left + " left"
