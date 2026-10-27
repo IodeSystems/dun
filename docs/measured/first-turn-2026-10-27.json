@@ -1,0 +1,94 @@
+[
+ {
+  "agent": "pi",
+  "request": "001.json",
+  "system_chars": 2753,
+  "tools": 4,
+  "tool_names": [
+   "read",
+   "bash",
+   "edit",
+   "write"
+  ],
+  "tool_schema_chars": 3023,
+  "tokens_total": 1613,
+  "tokens_tools": 917,
+  "tokens_without_tools": 696,
+  "messages": 1
+ },
+ {
+  "agent": "opencode",
+  "request": "002.json",
+  "system_chars": 22525,
+  "tools": 10,
+  "tool_names": [
+   "bash",
+   "edit",
+   "glob",
+   "grep",
+   "read",
+   "skill",
+   "task",
+   "todowrite",
+   "webfetch",
+   "write"
+  ],
+  "tool_schema_chars": 32571,
+  "tokens_total": 13704,
+  "tokens_tools": 7806,
+  "tokens_without_tools": 5898,
+  "messages": 1
+ },
+ {
+  "agent": "claude",
+  "request": "001.json",
+  "system_chars": 15145,
+  "tools": 12,
+  "tool_names": [
+   "Agent",
+   "Bash",
+   "Edit",
+   "ListAgents",
+   "Read",
+   "ReportFindings",
+   "ScheduleWakeup",
+   "Skill",
+   "ToolSearch",
+   "Workflow",
+   "DeferredToolPlaceholder",
+   "Write"
+  ],
+  "tool_schema_chars": 30711,
+  "tokens_total": 11366,
+  "tokens_tools": 7602,
+  "tokens_without_tools": 3764,
+  "messages": 1
+ },
+ {
+  "agent": "dun",
+  "request": "008.json",
+  "system_chars": 4762,
+  "tools": 14,
+  "tool_names": [
+   "eval",
+   "exec",
+   "exec_monitor",
+   "file_read",
+   "file_edit",
+   "file_write",
+   "file_grep",
+   "file_list",
+   "ask_user",
+   "agent",
+   "agent_monitor",
+   "recap",
+   "session_state",
+   "harness"
+  ],
+  "tool_schema_chars": 15720,
+  "tokens_total": 5204,
+  "tokens_tools": 4026,
+  "tokens_without_tools": 1178,
+  "messages": 1
+ }
+]
