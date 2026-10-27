@@ -84,6 +84,7 @@ func (h *Harness) SetEffort(level string) error {
 		return err
 	}
 	h.effort.Store(level)
+	h.writeHarnessInfo()
 	return nil
 }
 

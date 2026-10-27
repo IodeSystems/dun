@@ -302,6 +302,7 @@ func (h *Harness) ConfigureContext(ctx context.Context, changes map[string]int) 
 			return "", err
 		}
 	}
+	h.writeHarnessInfo()
 	return h.ContextStatus() + " (saved for " + e.Model + "; from the next request)", nil
 }
 

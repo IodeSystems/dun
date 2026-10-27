@@ -341,6 +341,9 @@ type Config struct {
 	// window set for a model is filed under it, and an OpenAI-compatible
 	// model list is asked with it (window.go).
 	Endpoint Endpoint
+	// Version and Provider are what the harness tool and dun session info
+	// say (harnessinfo.go): the build and the provider's name.
+	Version, Provider string
 	// OnLogin shows the person the URL that logs in to an OAuth server
 	// (mcpoauth.go); url "" means another session's login is being waited
 	// for. The engine may have no display, so this is the way that always
@@ -1441,6 +1444,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		h.Aside(note)
 		h.agentsChanged()
 	}
+	// What dun is in this session, for dun session <id> info (harnessinfo.go).
+	go h.writeHarnessInfo()
 	return h, nil
 }
 

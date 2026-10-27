@@ -732,6 +732,8 @@ func (h *Harness) rebuildTools() {
 	// child shares its parent's session file and thus its state.
 	toolDefs = append(toolDefs, sessionStateToolDef())
 	dispatch = withSessionState(dispatch, h, report)
+	toolDefs = append(toolDefs, harnessToolDef()) // what dun is, for a repo's PR rules (harnessinfo.go)
+	dispatch = withHarness(dispatch, h, report)
 	// memory only while a memory.save extension runs AND a turn.before one
 	// does: a note is worth writing only because the proactive search brings
 	// it back (see memory.go).
@@ -775,6 +777,7 @@ func (h *Harness) rebuildTools() {
 	if sys == "" {
 		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), hostedNS...)
 		sys += roleSystem(h.isChild())
+		sys += h.identityLine()
 		// The workspace's root AGENTS.md and CLAUDE.md, and what they import,
 		// are standing context: the model needs the project's rules from the
 		// first message, and a system block survives compaction so a fold

@@ -145,6 +145,11 @@ func main() {
 	// The registry's manifests, presets and pins, as cached (registry.go):
 	// before anything reads a manifest.
 	useRegistry()
+	// `dun session <id> info [--context]`: what dun is in that session, as
+	// JSON (sessioninfo.go).
+	if len(os.Args) > 1 && os.Args[1] == "session" {
+		os.Exit(sessionCmd(os.Args[2:]))
+	}
 	// `dun doctor`: what dun needs, checked (doctor.go); --fix applies the
 	// fixes it can run itself.
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
@@ -407,6 +412,9 @@ func main() {
 	if sessionFile == "" {
 		sessionFile, sessionID = dun.NewSessionFile(absWS)
 	}
+	// Every command dun runs knows the session it runs in: dun session info
+	// with no id reads it (sessioninfo.go).
+	_ = os.Setenv("DUN_SESSION_ID", sessionID)
 	// No per-session raglit home. It used to be an os.MkdirTemp deleted on exit,
 	// which re-embedded the whole workspace every session and discarded it —
 	// and made a durable index impossible by construction. raglit now resolves
@@ -584,6 +592,8 @@ func main() {
 		// The context window set for this model is filed under it, and an
 		// OpenAI-compatible model list is asked with it (dun/window.go).
 		Endpoint: dun.Endpoint{URL: *url, Key: effKey, Model: *model},
+		// What the harness tool and dun session info say (dun/harnessinfo.go).
+		Version: version, Provider: engineProvider,
 		Workspace: effWS,
 		Client:    runner,
 		// Sub-agents may run on a different model than their parent, and only
