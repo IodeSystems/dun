@@ -52,6 +52,10 @@ owner's call before work starts.
 
 ## Sessions and agents
 
+- [~] Sub-agents in isolation: the agent tool's `isolation` is none,
+  worktree (its own git worktree and branch; the parent merges), docker
+  (the same, commands in a container) or nodir. Several run at once.
+
 - [ ] Persist carries the sub-agents: a persisted root resumes its children;
   toggling persist toggles theirs.
 - [ ] Descend into a sub-agent from the activity strip and come back out.
@@ -75,6 +79,12 @@ owner's call before work starts.
 
 ## Workspace and tools
 
+- [~] `/raglit workspace on|off [--scope]`: raglit for other indexes without
+  reading the workspace; bare `/raglit attach` is every index of every
+  project, searchable, attached per scope (needs raglit v0.3.0).
+- [~] `/status`: a server scripted in mcpshell reads "scripted in the
+  shell", not off; the effort is shown.
+
 - [ ] `/docker` becomes `/isolate` (worktree and Docker together).
 - [ ] **decide** Remove `/ship` and its prompt lines: repos state their own
   shipping rules, and dun's read as the blessed path.
@@ -82,6 +92,17 @@ owner's call before work starts.
   workspace becomes readable and editable by dun's file tools for the
   session; refused one, the model is told to ask for `/file add <path>`.
   poly-lsp does not see added paths yet.
+
+## The site (dun.iodesystems.com)
+
+- [x] Product page, install, capabilities, `harness.json`, the signed
+  registry; served by hz (public). Screenshots of the current build, the
+  dun man as favicon.
+- [x] Measured: first-turn prompt sizes of pi, dun, Claude Code, opencode,
+  and with the same two MCP servers (docs/measured/first-turn.md); the
+  MCP tool scripting section.
+- [ ] Make the savings visible (owner: hard to see what scripting and
+  surfaced skills save).
 
 ## Other projects (sent to their sessions)
 
