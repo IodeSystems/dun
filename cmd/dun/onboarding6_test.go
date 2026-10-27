@@ -181,7 +181,7 @@ func TestSplash6_ContextPartsWithZeros(t *testing.T) {
 		"window":       float64(32000)})
 	s := splashText(v)
 	for _, want := range []string{
-		"context     ~5.9k tokens before you type (of 32k, 18%)\n",
+		"context     ~5.9k tokens before you type (of 32k, 18%) · /context config\n",
 		"system 1.1k · tools 0 (4.8k) · mcp 0 servers (0) · skills 0 (0) · rules 0 (0)\n",
 	} {
 		if !strings.Contains(s, want) {

@@ -34,6 +34,13 @@ type SpendMeter struct {
 	calls    int // responses seen
 	costed   int // responses that reported a cost
 
+	// Tokens over every response: the prompt, of it what the provider
+	// reported as served from its cache (cacheSeen: some response reported
+	// the field at all; a provider that does not must not read as 0% cached),
+	// and the completion.
+	prompt, cached, completion int
+	cacheSeen                  bool
+
 	turn       float64 // since the last EndTurn
 	turnCalls  int
 	turnCosted int
@@ -78,6 +85,12 @@ func (m *SpendMeter) Note(u llm.Usage) {
 	now := m.now()
 	m.calls++
 	m.turnCalls++
+	m.prompt += u.PromptTokens
+	m.completion += u.CompletionTokens
+	m.cached += u.CachedPromptTokens()
+	if u.PromptTokensDetails != nil || u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
+		m.cacheSeen = true
+	}
 	if u.Cost.Reported {
 		switch {
 		case m.costed == 0:
@@ -152,6 +165,11 @@ type SpendSnapshot struct {
 	Calls       int
 	CostedCalls int // 0 → the session's spend is not reported
 
+	// Prompt, Cached and Completion are the session's tokens over all calls;
+	// CacheReported: the provider reported cached tokens at least once.
+	Prompt, Cached, Completion int
+	CacheReported              bool
+
 	LastTurn       float64
 	LastTurnCalls  int
 	LastTurnCosted int
@@ -179,6 +197,7 @@ func (m *SpendMeter) Snapshot() SpendSnapshot {
 	s := SpendSnapshot{
 		Currency: m.currency, Mixed: m.mixed,
 		Session: m.session, Calls: m.calls, CostedCalls: m.costed,
+		Prompt: m.prompt, Cached: m.cached, Completion: m.completion, CacheReported: m.cacheSeen,
 		LastTurn: m.last.amount, LastTurnCalls: m.last.calls, LastTurnCosted: m.last.costed, TurnEnded: m.last.ended,
 		Budget: m.budget, BudgetAt: m.budgetAt, BudgetUnsupported: m.unsupported, BudgetErr: m.budgetErr,
 		Limits: m.limits, LimitsAt: m.limitsAt,
