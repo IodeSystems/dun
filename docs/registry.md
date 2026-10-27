@@ -88,10 +88,12 @@ key (`release/minisign.pub`, with the updater's key rotation).
   `release/minisign.pub`; `make site-push` uploads it with `hz-client site
   push` (`HZ_URL`, `HZ_TOKEN`), an atomic swap with rollback. It runs here:
   hz's API is on the home network, out of CI's reach.
-- Owner's step, once: in hz, a static service `dun-site` with domain
-  `dun.iodesystems.com`, `external_dns` on and
-  `"proxy": {"static_root": "/var/lib/homelab-horizon/dun"}`; its token is
-  in the service's Integration panel.
+- Owner's step, once: in hz, a static service `dun` with domain
+  `dun.iodesystems.com`, `external_dns` on, static root
+  `/var/lib/homelab-horizon/web/dun` (hz's choice), and NOT internal-only:
+  internal-only answers 403 to every visitor off the LAN and the VPN
+  (2026-10-27: the laptop of the person showing the site). Its token is in
+  the service's Integration panel; `~/.deploy/dun.env` holds it here.
 
 ## Order of work
 
