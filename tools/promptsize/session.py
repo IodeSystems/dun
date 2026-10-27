@@ -66,6 +66,12 @@ def run_agent(kind, path, run_dir, repo, port):
         env.update(XDG_CONFIG_HOME=os.path.join(home, "cfg"), XDG_DATA_HOME=os.path.join(home, "data"),
                    XDG_STATE_HOME=os.path.join(home, "state"))
         cmd = ["opencode", "run", "-m", "bench/" + MODEL, TASK]
+    elif kind == "claude":
+        # Anthropic's API, through the gateway's /v1/messages (corrallm be50ca1). The model is set by env:
+        # unknown claude-* names are refused there.
+        env.update(ANTHROPIC_BASE_URL=base, ANTHROPIC_API_KEY="sk-ant-bench", ANTHROPIC_MODEL=MODEL,
+                   ANTHROPIC_SMALL_FAST_MODEL=MODEL, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
+        cmd = [path or "claude", "-p", TASK, "--allowedTools", "Bash,Read,Edit,Write,Grep,Glob"]  # the task first: --allowedTools takes several values
     else:
         raise SystemExit("unknown agent " + kind)
     t0 = time.time()
@@ -82,7 +88,8 @@ def summarize(log):
     if os.path.exists(log):
         for line in open(log):
             r = json.loads(line)
-            if not r["path"].split("?")[0].endswith("/chat/completions"):
+            p = r["path"].split("?")[0]
+            if not (p.endswith("/chat/completions") or p.endswith("/messages")):
                 continue  # the agent's token counting or model listing, not a turn
             u = r.get("usage") or {}
             reqs.append(u.get("prompt_tokens") or 0)

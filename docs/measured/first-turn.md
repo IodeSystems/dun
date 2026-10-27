@@ -129,7 +129,11 @@ every request's usage. Clean homes; 3 runs each.
 | pi 1.4.0 | 3 of 3 | 5–6 | 1,831 | 3,000–4,472 | 12.9k–16.9k |
 | dun (2f9fc8d) | 3 of 3 | 5 | 3,986 | 5,131–6,393 | 23.1k–27.1k |
 | opencode 1.15.3 | 3 of 3 | 6–8 | 595 (a title call) | 15.3k–17.7k | 73.5k–110.5k |
+| Claude Code 2.1.311 | 3 of 3 | 5–15 | 12,489 | 14.6k–63.0k | 82.9k–262.3k |
 
 A short task: no agent reached ten requests, so growth over a long session
-is not measured by it. Claude Code is not in it: the gateway has no
-Anthropic-format endpoint (requested from corrallm).
+is not measured by it. Claude Code ran through the gateway's Anthropic
+endpoint (corrallm be50ca1, /v1/messages, the same `chat` lane, the same
+sampling); its prompt is input + cache reads + cache writes. corrallm cuts
+Claude Code's per-request billing line from its system prompt (for the
+cache). One of its runs read the log whole: 63k tokens on its last request.

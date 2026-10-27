@@ -202,5 +202,82 @@
    15359,
    15448
   ]
+ },
+ {
+  "agent": "claude",
+  "run": 1,
+  "rc": 0,
+  "secs": 23,
+  "done": true,
+  "check": "OK",
+  "requests": 6,
+  "first": 12489,
+  "tenth": null,
+  "last": 17824,
+  "largest": 17824,
+  "total": 98755,
+  "cached": 80911,
+  "per_request": [
+   12489,
+   16454,
+   16775,
+   17470,
+   17743,
+   17824
+  ]
+ },
+ {
+  "agent": "claude",
+  "run": 2,
+  "rc": 0,
+  "secs": 206,
+  "done": true,
+  "check": "OK",
+  "requests": 15,
+  "first": 12491,
+  "tenth": 0,
+  "last": 14644,
+  "largest": 14644,
+  "total": 82866,
+  "cached": 55715,
+  "per_request": [
+   12491,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   13074,
+   13900,
+   14210,
+   14547,
+   14644
+  ]
+ },
+ {
+  "agent": "claude",
+  "run": 3,
+  "rc": 0,
+  "secs": 48,
+  "done": true,
+  "check": "OK",
+  "requests": 5,
+  "first": 12490,
+  "tenth": null,
+  "last": 62988,
+  "largest": 62988,
+  "total": 262256,
+  "cached": 199252,
+  "per_request": [
+   12490,
+   61470,
+   62487,
+   62821,
+   62988
+  ]
  }
 ]
