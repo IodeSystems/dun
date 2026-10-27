@@ -77,3 +77,22 @@ poly-lsp-mcp (`mcp --root <dir>`) added to each agent, the same way:
 - `~/.local/bin/node` here is a shim that finds node under `$HOME/.nvm`, so
   a clean HOME breaks it (and pi, which runs on it): the servers were given
   node's absolute path.
+
+## pi 1.4.0 (2026-10-27): built-in MCP and codemode
+
+pi 1.4.0 has built-in MCP (`~/.pi/agent/mcp.json`) and a `codemode` tool: a
+QuickJS script calls pi's tools; MCP tools default to `codemode` exposure,
+so their schemas are not sent and scripts find them with `searchTools()`.
+The same two servers, same method (its MCP is an extension: run without
+`--no-extensions`):
+
+| pi 1.4.0 | total tokens | tools sent | tool tokens |
+|---|---:|---:|---:|
+| no MCP servers | 1,783 | 4 | 916 |
+| both servers, default exposure (codemode) | 2,448 | 5 | 1,479 |
+| both servers, `"exposure": "direct"` | 8,158 | 32 | 7,291 |
+
+So pi, like dun's scripted mode, keeps MCP schemas out of the request by
+default, and with a smaller base: 2,448 against dun's 7,203 (where dun keeps
+its built-in poly-lsp direct, ~1.8k). The 0.82.1 figures above predate
+this.

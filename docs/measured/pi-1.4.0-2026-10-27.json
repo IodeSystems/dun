@@ -1,0 +1,82 @@
+[
+ {
+  "agent": "pi-none",
+  "request": "001.json",
+  "system_chars": 3081,
+  "tools": 4,
+  "tool_names": [
+   "read",
+   "bash",
+   "edit",
+   "write"
+  ],
+  "tool_schema_chars": 2956,
+  "tokens_total": 1783,
+  "tokens_tools": 916,
+  "tokens_without_tools": 867,
+  "messages": 1
+ },
+ {
+  "agent": "pi-codemode",
+  "request": "001.json",
+  "system_chars": 3463,
+  "tools": 5,
+  "tool_names": [
+   "read",
+   "bash",
+   "edit",
+   "write",
+   "codemode"
+  ],
+  "tool_schema_chars": 4997,
+  "tokens_total": 2448,
+  "tokens_tools": 1479,
+  "tokens_without_tools": 969,
+  "messages": 1
+ },
+ {
+  "agent": "pi-direct",
+  "request": "001.json",
+  "system_chars": 3081,
+  "tools": 32,
+  "tool_names": [
+   "read",
+   "bash",
+   "edit",
+   "write",
+   "mcp__poly_lsp__node_edit",
+   "mcp__poly_lsp__node_query",
+   "mcp__poly_lsp__node_read",
+   "mcp__playwright__browser_close",
+   "mcp__playwright__browser_resize",
+   "mcp__playwright__browser_console_messages",
+   "mcp__playwright__browser_handle_dialog",
+   "mcp__playwright__browser_emulate_media",
+   "mcp__playwright__browser_evaluate",
+   "mcp__playwright__browser_file_upload",
+   "mcp__playwright__browser_drop",
+   "mcp__playwright__browser_find",
+   "mcp__playwright__browser_fill_form",
+   "mcp__playwright__browser_press_key",
+   "mcp__playwright__browser_type",
+   "mcp__playwright__browser_navigate",
+   "mcp__playwright__browser_navigate_back",
+   "mcp__playwright__browser_network_requests",
+   "mcp__playwright__browser_network_request",
+   "mcp__playwright__browser_run_code_unsafe",
+   "mcp__playwright__browser_take_screenshot",
+   "mcp__playwright__browser_snapshot",
+   "mcp__playwright__browser_click",
+   "mcp__playwright__browser_drag",
+   "mcp__playwright__browser_hover",
+   "mcp__playwright__browser_select_option",
+   "mcp__playwright__browser_tabs",
+   "mcp__playwright__browser_wait_for"
+  ],
+  "tool_schema_chars": 28011,
+  "tokens_total": 8158,
+  "tokens_tools": 7291,
+  "tokens_without_tools": 867,
+  "messages": 1
+ }
+]
