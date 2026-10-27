@@ -77,6 +77,9 @@ type tuiOpts struct {
 	// fresh is --new (and /new): a new session even when the workspace has
 	// one nobody is attached to. Without it a plain `dun` reuses that one.
 	fresh bool
+	// noDir is --no-dir: passed to the engine, whose workspace is dun's
+	// directory for such sessions (dun/nodir.go).
+	noDir bool
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -5519,6 +5522,9 @@ func procArgs(o tuiOpts, mode string) []string {
 	}
 	if o.rag != "" {
 		args = append(args, "--rag="+o.rag)
+	}
+	if o.noDir {
+		args = append(args, "--no-dir")
 	}
 	if o.lsp != "" {
 		args = append(args, "--lsp="+o.lsp)

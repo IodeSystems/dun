@@ -68,7 +68,7 @@ owner's call before work starts.
   and `dun "thing"` is the one-shot, so this changes what `-p` means.
 - [ ] `--no-tools`, `--no-rag`, `--no-lsp`.
 - [ ] `--media <file>` with a prompt.
-- [ ] `dun --no-dir`: a session attached to no directory, to talk with dun,
+- [~] `dun --no-dir`: a session attached to no directory, to talk with dun,
   its skills and its MCP tools; servers that need a working directory
   (poly-lsp, raglit's project index, the file tools, exec's workspace) are
   left out. (Relayed by corrallm-f2, 2026-10-27.)

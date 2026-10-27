@@ -187,6 +187,7 @@ func main() {
 	noShip := flag.Bool("no-ship", false, "withhold the ship tool entirely (overrides --ship)")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
+	noDir := flag.Bool("no-dir", false, "a session attached to no directory: talk with dun, its skills and MCP tools; no project files, rules, code or document index (sessions live in $DUN_HOME/nodir)")
 	fresh := flag.Bool("new", false, "start a new session, even when this workspace has one no client is attached to (which plain dun resumes)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
@@ -342,6 +343,16 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	// --no-dir: dun's own directory for such sessions, not this one
+	// (dun/nodir.go). A worktree or Docker needs a project to isolate.
+	if *noDir {
+		if *worktree || *docker != "" {
+			fatal(fmt.Errorf("--no-dir has no project to put in a worktree or a container"))
+		}
+		if absWS, err = dun.NoDirWorkspace(); err != nil {
+			fatal(err)
+		}
+	}
 
 	if *listSessions {
 		ids := dun.ListSessions(absWS)
@@ -374,7 +385,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -384,7 +395,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *pr, *ship, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -426,7 +437,9 @@ func main() {
 	// older dun left in its .dun/. Everything dun keeps about it lives in
 	// $DUN_HOME/projects/<id>/, never in the repo. Not fatal: without it dun
 	// still reads the repo's own config, it only cannot save anything.
-	if _, err := dun.EnsureProject(absWS); err != nil {
+	if *noDir {
+		// not a project: nothing to register
+	} else if _, err := dun.EnsureProject(absWS); err != nil {
 		fmt.Fprintf(os.Stderr, "dun: %v\n", err)
 	}
 
@@ -611,7 +624,8 @@ func main() {
 		EnableShip:  *ship || *pr,
 		ShipCfg:     shipConfig(absWS, *pr),
 		CommitCfg:   dun.LoadCommit(absWS),
-		Files:       dun.LoadFiles(absWS),
+		Files:       filesConfig(absWS, *noDir),
+		NoDir:       *noDir,
 		SessionFile: sessionFile,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.
@@ -2411,4 +2425,13 @@ func systemCost(bd dun.SystemBreakdown, total int) proto.SystemCost {
 	return proto.SystemCost{SystemTokens: total, SystemExact: bd.Exact, SystemPrompt: bd.Prompt,
 		SystemShared: bd.Shared, SystemParts: parts, SystemRules: bd.Rules, SystemRulesMode: bd.RulesMode,
 		SystemFiles: files}
+}
+
+// filesConfig is the workspace's file-tool settings; none for a --no-dir
+// session, which has no project files (dun/nodir.go).
+func filesConfig(ws string, noDir bool) *dun.FilesConfig {
+	if noDir {
+		return &dun.FilesConfig{Tools: []string{}}
+	}
+	return dun.LoadFiles(ws)
 }

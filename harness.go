@@ -341,6 +341,9 @@ type Config struct {
 	// window set for a model is filed under it, and an OpenAI-compatible
 	// model list is asked with it (window.go).
 	Endpoint Endpoint
+	// NoDir is a session attached to no directory (dun --no-dir, nodir.go):
+	// no file tools, no rules, and no server that needs a project directory.
+	NoDir bool
 	// Version and Provider are what the harness tool and dun session info
 	// say (harnessinfo.go): the build and the provider's name.
 	Version, Provider string
@@ -1273,6 +1276,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		sessSw = LoadSessionServers(cfg.SessionFile)
 		var err error
 		servers, err = resolveServers(dir, cfg.Workspace, cfg.RaglitHome, base, sessSw, cfg.AutostartOverride)
+		servers = withoutDirServers(servers, cfg)
 		if err != nil {
 			return nil, err
 		}

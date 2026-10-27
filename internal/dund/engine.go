@@ -74,7 +74,7 @@ func (e *execEngine) Kill() {
 var allowedFlags = map[string]bool{
 	"--model": true, "--url": true, "--worktree": true, "--docker": true,
 	"--docker-network": true, "--pr": true, "--no-ship": true, "--rag": true,
-	"--lsp": true, "--rephrase": true, "--no-suggest": true,
+	"--lsp": true, "--rephrase": true, "--no-suggest": true, "--no-dir": true,
 }
 
 // takesValue are the allowed flags whose value may be the next argument.

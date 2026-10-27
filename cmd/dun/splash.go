@@ -63,7 +63,7 @@ func (m tuiModel) splashSections(w int, short bool) []statusSection {
 	}
 	ctx, parts := m.contextValue(vw)
 	return []statusSection{
-		{label: "folder", value: tildePath(m.workspace)},
+		{label: "folder", value: m.folderValue()},
 		{label: "model", value: m.modelValue()},
 		{label: "tools", value: m.toolsValue(vw)},
 		{label: "extensions", value: m.extensionsValue(vw)},
@@ -818,4 +818,12 @@ func (m tuiModel) spendRows() [][2]string {
 		rows = append(rows, [2]string{name, v})
 	}
 	return rows
+}
+
+// folderValue is the workspace, or that there is none (--no-dir).
+func (m tuiModel) folderValue() string {
+	if m.opts.noDir {
+		return "none" + stDim.Render(" · --no-dir: no project files, rules or index")
+	}
+	return tildePath(m.workspace)
 }

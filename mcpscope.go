@@ -413,7 +413,8 @@ func (h *Harness) resolveSpecs() ([]Server, error) {
 		sess[id] = s
 	}
 	h.srvMu.Unlock()
-	return resolveServers(h.configDir(), h.cfg.Workspace, h.cfg.RaglitHome, h.baseServers(), sess, h.cfg.AutostartOverride)
+	servers, err := resolveServers(h.configDir(), h.cfg.Workspace, h.cfg.RaglitHome, h.baseServers(), sess, h.cfg.AutostartOverride)
+	return withoutDirServers(servers, h.cfg), err
 }
 
 // followServers is the turn boundary's re-read: a global or project change
