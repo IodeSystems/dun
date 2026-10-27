@@ -115,3 +115,21 @@ for the job and report): both builds 2 of 2 correct. The new build called
 `jobs` (wait) once or twice, which the old could not do for a command, so
 the task took more rounds and more tokens in all (17.5k and 22.5k against
 11.5k and 11.5k) though each request was smaller.
+
+## A whole task, three agents (2026-10-27)
+
+tools/promptsize/session.py: each agent runs one task on a fresh fixture
+(fixture.py: a Python repo whose CI failed; ci.log is 218 KB with the real
+error buried; done = `python3 -m unittest` passes after), through a relay
+(relay.py) to the same model (`chat` on llm.iodesystems.com) that records
+every request's usage. Clean homes; 3 runs each.
+
+| agent | done | requests | first request | last request | whole task |
+|---|---|---:|---:|---:|---:|
+| pi 1.4.0 | 3 of 3 | 5–6 | 1,831 | 3,000–4,472 | 12.9k–16.9k |
+| dun (2f9fc8d) | 3 of 3 | 5 | 3,986 | 5,131–6,393 | 23.1k–27.1k |
+| opencode 1.15.3 | 3 of 3 | 6–8 | 595 (a title call) | 15.3k–17.7k | 73.5k–110.5k |
+
+A short task: no agent reached ten requests, so growth over a long session
+is not measured by it. Claude Code is not in it: the gateway has no
+Anthropic-format endpoint (requested from corrallm).
