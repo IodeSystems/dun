@@ -66,6 +66,9 @@ func maxOutputTokens() int {
 			return n
 		}
 	}
+	if n := ctxOverride.compactBuffer.Load(); n > 0 { // /context config --compact-buffer
+		return int(n)
+	}
 	return defaultMaxOutputTokens
 }
 

@@ -581,6 +581,9 @@ func main() {
 		childClients = func(string) (agent.LLMRunner, error) { return nil, why }
 	}
 	cfg := dun.Config{
+		// The context window set for this model is filed under it, and an
+		// OpenAI-compatible model list is asked with it (dun/window.go).
+		Endpoint: dun.Endpoint{URL: *url, Key: effKey, Model: *model},
 		Workspace: effWS,
 		Client:    runner,
 		// Sub-agents may run on a different model than their parent, and only
@@ -830,6 +833,7 @@ func main() {
 	h, err := dun.Start(ctx, cfg)
 	if h != nil {
 		started.Store(h)
+		engineHarness.Store(h)
 		// The budget's two marks (turnclock.go): tell the model, then cut.
 		budgetHooks.Store(&budgetMarks{
 			spent: func(budget, grace time.Duration) {
@@ -1217,6 +1221,22 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// rebuilds the tool set, which waits for a running turn.
 		if id == "switches" {
 			go func() { em.emit(switchesEvent(h, action)) }()
+			return
+		}
+		// /context config [--max N] [--compact-buffer N] [--tool-lod N]
+		// [--recap-nudge N]: saved for this model (dun/window.go); bare, the
+		// settings in force.
+		if id == "ctxconfig" {
+			go func() {
+				msg, changed, err := contextConfigCmd(ctx, h, action)
+				if err != nil {
+					msg = "context config: " + err.Error()
+				} else if changed {
+					h.Aside("[control/context] " + msg)
+				}
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+				em.emit(settingsEvent())
+			}()
 			return
 		}
 		// /retry: bare says the settings; a preset or a knob is set on the
@@ -1947,8 +1967,52 @@ var engineModel, engineURL, engineProvider string
 
 // settingsEvent is the session's shared toggles.
 func settingsEvent() *proto.Settings {
-	return &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
+	ev := &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
 		Rephrase: rephraseOn, Suggest: suggestMode}
+	if h, _ := engineHarness.Load().(*dun.Harness); h != nil {
+		max, from, buf, lod, nudge := h.ContextSettings()
+		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge}
+	}
+	return ev
+}
+
+// engineHarness is this engine's harness, once started, for settingsEvent.
+var engineHarness atomic.Value
+
+// contextConfigCmd is /context config's engine side: "" the settings in
+// force; "--max 256k --compact-buffer 32k --tool-lod 4k --recap-nudge 20k",
+// any of them, each a number of tokens (characters for --tool-lod), or
+// default.
+func contextConfigCmd(ctx context.Context, h *dun.Harness, action string) (string, bool, error) {
+	f := strings.Fields(action)
+	if len(f) == 0 {
+		return h.ContextStatus(), false, nil
+	}
+	changes := map[string]int{}
+	for i := 0; i < len(f); i++ {
+		k, v, hasEq := strings.Cut(strings.TrimLeft(f[i], "-"), "=")
+		if !strings.HasPrefix(f[i], "--") || !slices.Contains(dun.ContextKeys, k) {
+			return "", false, fmt.Errorf("%q: want --%s", f[i], strings.Join(dun.ContextKeys, ", --"))
+		}
+		if !hasEq {
+			if i+1 >= len(f) {
+				return "", false, fmt.Errorf("--%s needs a value (a number like 128k, or default)", k)
+			}
+			i++
+			v = f[i]
+		}
+		if v == "default" || v == "auto" {
+			changes[k] = 0
+			continue
+		}
+		n, err := dun.ParseTokens(v)
+		if err != nil {
+			return "", false, fmt.Errorf("--%s: %v", k, err)
+		}
+		changes[k] = n
+	}
+	msg, err := h.ConfigureContext(ctx, changes)
+	return msg, true, err
 }
 
 // turnTimeout is --timeout applied PER TURN (interactive engine only; 0 = none).

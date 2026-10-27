@@ -693,7 +693,8 @@ const repeatCalls = 3
 // call to remove. Below this the suggestion is noise — see recapCueFor.
 const repeatWorthRemoving = 4000
 
-// recapNudgeTokens is the window size that earns the fallback reminder.
+// recapNudgeTokens is the window size that earns the fallback reminder, unless
+// /context config --recap-nudge sets another (recapNudgeAt).
 const recapNudgeTokens = 20000
 
 // recapNudgeGrowth is how much the window must grow before saying it again.
@@ -777,7 +778,7 @@ func (h *Harness) watchRecap(tool string, size int) {
 
 // maybeNudgeRecap is the window-size fallback, for churn with no shape.
 func (h *Harness) maybeNudgeRecap(active int) {
-	if active < recapNudgeTokens {
+	if active < recapNudgeAt() { // /context config --recap-nudge
 		return
 	}
 	h.recapMu.Lock()

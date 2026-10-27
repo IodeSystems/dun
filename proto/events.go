@@ -630,6 +630,19 @@ type Settings struct {
 	URL      string `json:"url"`
 	Rephrase bool   `json:"rephrase"`
 	Suggest  string `json:"suggest"` // on | off | auto
+	// Context is /context config's settings in force.
+	Context *ContextSettings `json:"context,omitempty"`
+}
+
+// ContextSettings is /context config's settings in force: the window (0
+// unknown) and where it came from, the reply's buffer, the tool-result stub
+// length and the recap reminder's size.
+type ContextSettings struct {
+	Max           int    `json:"max"`
+	MaxFrom       string `json:"maxFrom,omitempty"`
+	CompactBuffer int    `json:"compactBuffer"`
+	ToolLOD       int    `json:"toolLod"`
+	RecapNudge    int    `json:"recapNudge"`
 }
 
 // Commands is the slash commands a session takes, as data, for every client:

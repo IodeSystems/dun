@@ -337,6 +337,10 @@ type Config struct {
 	// a step of a start, a line of its stderr. Often, during a start; a UI
 	// coalesces.
 	OnServerActivity func(id string)
+	// Endpoint is the model in use and its address and key: the context
+	// window set for a model is filed under it, and an OpenAI-compatible
+	// model list is asked with it (window.go).
+	Endpoint Endpoint
 	// OnLogin shows the person the URL that logs in to an OAuth server
 	// (mcpoauth.go); url "" means another session's login is being waited
 	// for. The engine may have no display, so this is the way that always
@@ -513,7 +517,9 @@ type Harness struct {
 	// follows a reload (indexstate.go's retry) waits for none to be.
 	reloads atomic.Int32
 	// effort is /effort's level (effort.go), applied on every request.
-	effort    atomic.Value
+	effort atomic.Value
+	// windowSrc is where the window in force came from (window.go).
+	windowSrc string
 	closed    chan struct{}
 	closeOnce sync.Once
 	// ingestNote is the last workspace ingest's summary, for /raglit and the
@@ -1265,6 +1271,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
 	h.effort.Store(LoadEffort()) // /effort's saved level (effort.go)
+	if cfg.Parent == nil {
+		applyContextConfig(savedContext(cfg.Endpoint)) // /context config, saved for this model (window.go)
+	}
 	// A resumed session's history is not this session's to act on: the
 	// memory triggers look only at what arrives from here on.
 	h.markTriggerScan()
@@ -1330,7 +1339,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// every build, the response's cap on every round. It is ASKED for here and,
 	// when the endpoint cannot say yet, asked again as the session runs — see
 	// ensureWindow for why one missed request must not disarm a whole session.
-	h.window.Store(int64(contextWindow(ctx, cfg.Client)))
+	h.window.Store(int64(h.contextWindow(ctx, cfg.Client)))
 	if h.windowTokens() == 0 {
 		h.windowRunner = cfg.Client
 	}
@@ -2210,8 +2219,9 @@ func (h *Harness) ensureWindow(ctx context.Context) {
 		return
 	}
 	h.windowAsks++
-	if n, src := askWindow(ctx, h.windowRunner); n > 0 {
+	if n, src := h.askWindow(ctx, h.windowRunner); n > 0 {
 		h.window.Store(int64(n))
+		h.windowSrc = src
 		h.windowRunner = nil
 		log.Printf("dun: context window resolved mid-session (ask %d since startup) — shaping "+
 			"and the generation cap are armed from this round on", h.windowAsks)
@@ -2230,7 +2240,7 @@ func (h *Harness) ensureWindow(ctx context.Context) {
 // askWindow asks for the window and says WHERE the answer came from, or returns
 // 0 when nobody could state one. Silent, because it is asked repeatedly: the
 // callers below do the logging, once per outcome rather than once per attempt.
-func askWindow(ctx context.Context, runner any) (int, string) {
+func (h *Harness) askWindow(ctx context.Context, runner any) (int, string) {
 	if v := os.Getenv("DUN_CONTEXT_TOKENS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
@@ -2239,6 +2249,9 @@ func askWindow(ctx context.Context, runner any) (int, string) {
 			return n, "DUN_CONTEXT_TOKENS"
 		}
 	}
+	if n := savedWindow(h.cfg.Endpoint); n > 0 {
+		return n, "the window set for " + h.cfg.Endpoint.Model + " (/context config --max)"
+	}
 	if w, ok := runner.(contextWindower); ok {
 		cctx, cancel := context.WithTimeout(ctx, contextWindowTimeout)
 		defer cancel()
@@ -2246,19 +2259,25 @@ func askWindow(ctx context.Context, runner any) (int, string) {
 			return n, "the server's /props"
 		}
 	}
+	cctx, cancel := context.WithTimeout(ctx, contextWindowTimeout)
+	defer cancel()
+	if n := listedWindow(cctx, h.cfg.Endpoint); n > 0 {
+		return n, "the server's model list"
+	}
 	return 0, ""
 }
 
 // contextWindow is the startup ask: the whole window, prompt and response
 // together. 0 = nobody could say YET, which leaves shaping and generation caps
 // unavailable until ensureWindow gets an answer.
-func contextWindow(ctx context.Context, runner any) int {
-	if n, src := askWindow(ctx, runner); n > 0 {
+func (h *Harness) contextWindow(ctx context.Context, runner any) int {
+	if n, src := h.askWindow(ctx, runner); n > 0 {
+		h.windowSrc = src
 		return logWindow(n, src)
 	}
-	log.Printf("dun: no context window known — DUN_CONTEXT_TOKENS unset and the server states " +
-		"none; no shaping and no generation cap until it answers, which is asked again on the " +
-		"next build")
+	log.Printf("dun: no context window known — none set for this model (/context config --max), " +
+		"and the server states none; no shaping and no generation cap until it answers, which " +
+		"is asked again on the next build")
 	return 0
 }
 
@@ -2318,7 +2337,7 @@ func shaperPolicy(window int) agent.ShaperPolicy {
 		BudgetTokens:          shapingBudget(window),
 		VerbatimToolResults:   verbatimToolResults(),
 		ToolFormat:            toolFormat(),
-		LODTruncateAboveChars: 4000,
+		LODTruncateAboveChars: lodChars(), // /context config --tool-lod
 		PreserveLastMessages:  6,
 		PreserveLastToolCalls: 4,
 		// One result, wherever it sits: LOD skips the preserved tail, so a huge
@@ -2356,6 +2375,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 				shaper.Policy.BudgetTokens = b
 			}
 		}
+		shaper.Policy.LODTruncateAboveChars = lodChars() // /context config --tool-lod, live
 		msgs, err := shaper.Build(ctx, sessionID, system)
 		if err != nil {
 			return msgs, err

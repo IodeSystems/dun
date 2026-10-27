@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+
+	"github.com/iodesystems/dun"
 )
 
 // /retry: presets and knobs set the client at once, and the config saved
@@ -39,6 +42,34 @@ func TestRetryCmd(t *testing.T) {
 	}
 	for _, bad := range []string{"attempts 0", "budget soon", "turn -5m", "fast"} {
 		if _, _, err := retryCmd(c, bad); err == nil {
+			t.Errorf("%q was taken", bad)
+		}
+	}
+}
+
+// /context config: flags in either form, values in tokens or default; the
+// settings are in force at once and saved for the model.
+func TestContextConfigCmd(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	t.Setenv("DUN_MAX_OUTPUT_TOKENS", "")
+	h := dun.NewTestHarness(dun.Endpoint{URL: "https://litellm.corp/v1", Model: "deepseek-1017"})
+	t.Cleanup(func() {
+		_, _, _ = contextConfigCmd(context.Background(), h, "--compact-buffer default --tool-lod default --recap-nudge default")
+	})
+	msg, changed, err := contextConfigCmd(context.Background(), h, "--max 256k --compact-buffer=24k --tool-lod 8k --recap-nudge 30k")
+	if err != nil || !changed {
+		t.Fatalf("%q %v", msg, err)
+	}
+	for _, want := range []string{"max 256,000", "compact-buffer 24,000", "tool-lod 8,000", "recap-nudge 30,000", "saved for deepseek-1017"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("lacks %q: %s", want, msg)
+		}
+	}
+	if _, _, err := contextConfigCmd(context.Background(), h, "--compact-buffer 1k"); err == nil {
+		t.Error("a buffer too small for a reply was taken")
+	}
+	for _, bad := range []string{"--max", "--size 3", "max 3", "--max lots"} {
+		if _, _, err := contextConfigCmd(context.Background(), h, bad); err == nil {
 			t.Errorf("%q was taken", bad)
 		}
 	}

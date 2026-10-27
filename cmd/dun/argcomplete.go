@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -263,6 +264,9 @@ func (m tuiModel) completerFor(name string) argCompleter {
 	if name == "skill" {
 		return skillChoices
 	}
+	if name == "context" {
+		return contextChoices
+	}
 	for _, c := range m.engineCmds {
 		if c.name == name && len(c.choices) > 0 {
 			return engineChoices(c)
@@ -388,4 +392,59 @@ func (m tuiModel) argPanel(cmd string, l *argList) string {
 	}
 	rows = append(rows, stDim.Render(count+" · /"+cmd))
 	return strings.Join(rows, "\n")
+}
+
+// contextChoices completes /context: "config", then its flags with the
+// value each has now (USER 2026-10-26: /context config opens a picker).
+func contextChoices(m *tuiModel, arg string) *argList {
+	f := strings.Fields(arg)
+	// "config" still being typed: it alone, so enter opens the picker.
+	if len(f) == 0 || (len(f) == 1 && !strings.HasSuffix(arg, " ") && strings.HasPrefix("config", f[0])) {
+		return &argList{choices: []argChoice{{value: "config", label: "config",
+			desc: "the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model"}}, total: 1, noun: "settings"}
+	}
+	if f[0] != "config" {
+		return nil
+	}
+	// The list is for choosing a flag: none right after one (its value is
+	// typed) or while a value is typed (enter runs the line as it is).
+	last, ended := f[len(f)-1], strings.HasSuffix(arg, " ")
+	prefix := ""
+	switch {
+	case ended && strings.HasPrefix(last, "--") && len(f) > 1:
+		return nil
+	case !ended && len(f) > 1 && !strings.HasPrefix(last, "-"):
+		return nil
+	case !ended && len(f) > 1:
+		prefix = last // a flag being typed: the ones it begins
+	}
+	num := func(k string) string {
+		if v, ok := m.ctxSettings[k].(float64); ok && v > 0 {
+			return fmt.Sprintf("%d", int(v))
+		}
+		return "unknown"
+	}
+	max := num("max")
+	if from, _ := m.ctxSettings["maxFrom"].(string); from != "" {
+		max += " (" + from + ")"
+	}
+	flags := []argChoice{
+		{value: "--max", label: "--max", desc: "the context window, tokens · now " + max},
+		{value: "--compact-buffer", label: "--compact-buffer", desc: "room kept for the reply; compaction starts past it · now " + num("compactBuffer")},
+		{value: "--tool-lod", label: "--tool-lod", desc: "an older tool result over this many characters is stubbed · now " + num("toolLod")},
+		{value: "--recap-nudge", label: "--recap-nudge", desc: "conversation tokens before the recap reminder · now " + num("recapNudge")},
+	}
+	done := f[1:]
+	if prefix != "" {
+		done = f[1 : len(f)-1]
+	}
+	var out []argChoice
+	for _, c := range flags {
+		if slices.Contains(done, c.value) || !strings.HasPrefix(c.value, prefix) {
+			continue
+		}
+		c.value = strings.Join(append(append([]string{"config"}, done...), c.value), " ")
+		out = append(out, c)
+	}
+	return &argList{choices: out, total: len(flags), noun: "settings"}
 }

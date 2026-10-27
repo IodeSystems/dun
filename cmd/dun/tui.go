@@ -678,6 +678,7 @@ type tuiModel struct {
 	pg           pager          // the pager (valid while paging)
 	scr          *paneScreen    // a pushed screen over the pager (panes.go), or nil
 	extWant      bool           // /ext asked for the list (extview.go)
+	ctxSettings  map[string]any // /context config's settings in force, from the settings event
 	jobViewing   bool           // a job's view has the convo pane (jobview.go; owns the keys)
 	jv           jobView        // the job view (valid while jobViewing)
 	jvGen        int            // which opening of the job view its read timer belongs to
@@ -2824,6 +2825,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.engineCmds = engineCmdsFromEvent(ev)
 	case "settings":
 		m.model, m.url = str(ev["model"]), str(ev["url"])
+		if c, ok := ev["context"].(map[string]any); ok {
+			m.ctxSettings = c
+		}
 		if p := str(ev["provider"]); p != "" {
 			m.provider = p
 		}
@@ -4563,7 +4567,23 @@ func init() {
 		{"config", "", "show this session's model settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
 		{"status", "", "this session: build, workspace, model, tools and servers", func(m *tuiModel, _ []string) tea.Cmd { m.statusSlash(); return nil }},
 		{"logout", "<provider>", "log out of an AI service: forget its address and key", logoutSlash},
-		{"context", "", "inspect context usage: tokens, compaction, recaps, truncation", func(m *tuiModel, _ []string) tea.Cmd { m.showContext(); return nil }},
+		{"context", "[config [--max N] [--compact-buffer N] [--tool-lod N] [--recap-nudge N]]", "inspect context usage: tokens, compaction, recaps, truncation; config: the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model", func(m *tuiModel, args []string) tea.Cmd {
+			if len(args) > 0 && strings.EqualFold(args[0], "config") {
+				// Bare: the picker (the flags with their values, contextChoices).
+				if len(args) == 1 {
+					m.input.SetValue("/context config ")
+					m.input.CursorEnd()
+					m.paletteSel = 0
+					return nil
+				}
+				if !m.proc.controlCmd("ctxconfig", strings.Join(args[1:], " ")) {
+					m.append(stErr.Render("no engine right now — /reconnect first"))
+				}
+				return nil
+			}
+			m.showContext()
+			return nil
+		}},
 		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
 			return tea.Quit
