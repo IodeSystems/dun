@@ -111,38 +111,6 @@ func TestExecRender_BackgroundIsAReceipt(t *testing.T) {
 	}
 }
 
-func TestShipRender_NamesTheVerdictAndTheChecks(t *testing.T) {
-	cases := []struct{ result, want string }{
-		{"Shipped. dun/1 pushed to origin.\npassed: compile, lint.", "✓ shipped"},
-		{"Verified. Rebased onto origin/main and passed: compile, vet.\nNothing pushed (mode: verify).", "✓ verified"},
-		{"Verified, but NOT pushed: you are on main…", "⊘ refused"},
-		{"Nothing to ship — dun/1 already matches origin/dun/1.", "nothing to ship"},
-	}
-	for _, c := range cases {
-		got, _ := renderToolResult(renderCtx{tool: "ship", result: c.result})
-		if !strings.Contains(got, c.want) {
-			t.Errorf("ship %q → %q, want %q", firstLine(c.result), got, c.want)
-		}
-	}
-
-	// "verified" without saying what ran is a claim ship has not earned, and
-	// the collapsed line is exactly where that claim gets read.
-	v, _ := renderToolResult(renderCtx{tool: "ship",
-		result: "Verified. Rebased onto origin/main and passed: compile, lint.\nNothing pushed (mode: verify)."})
-	if !strings.Contains(v, "compile, lint") {
-		t.Errorf("the preview must name the checks: %q", v)
-	}
-
-	f, _ := renderToolResult(renderCtx{tool: "ship",
-		result: "Checks failed at stage 1 of 3. Fix these, commit, then ship again.\n\nFAILED compile: go build ./...\nboom\n\nFAILED lint: golangci-lint run\nmeh"})
-	if !strings.Contains(f, "1/3") {
-		t.Errorf("say which stage failed: %q", f)
-	}
-	if !strings.Contains(f, "compile") || !strings.Contains(f, "lint") {
-		t.Errorf("name every failing check — they are one turn's work, not two: %q", f)
-	}
-}
-
 func TestAgentRender_ShowsStateAndSpend(t *testing.T) {
 	started, _ := renderToolResult(renderCtx{tool: "agent",
 		result: "Started agent #1: `count the callers`.\nTranscript: /s/1.sub1.jsonl"})

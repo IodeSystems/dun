@@ -41,8 +41,8 @@ func RepoRoot(dir string) string {
 
 // WorktreeInPlace creates a pass-through Worktree pointing at repoDir itself.
 // It detects the git repo root and current branch without creating an actual
-// git worktree. Used when --ship is passed without --worktree: the agent works
-// in the checked-out directory but still needs ship's verify pipeline.
+// git worktree. Used when --worktree is not passed: the agent works
+// in the checked-out directory and branch and status are still known.
 func WorktreeInPlace(repoDir string) (wt *Worktree, isRepo bool) {
 	top, terr := git("", "-C", repoDir, "rev-parse", "--show-toplevel")
 	if terr != nil {
@@ -227,7 +227,7 @@ func (w *Worktree) Cleanup() {
 }
 
 // IsClean reports whether the worktree has no uncommitted changes (tracked or
-// untracked). Ship requires a clean tree.
+// untracked).
 func (w *Worktree) IsClean() bool {
 	if w.repoRoot == "" {
 		return true
@@ -237,7 +237,7 @@ func (w *Worktree) IsClean() bool {
 }
 
 // UncommittedStatus returns the porcelain status of uncommitted changes, or ""
-// when clean. Used by ship to report what needs committing first.
+// when clean. Reports what needs committing.
 func (w *Worktree) UncommittedStatus() string {
 	if w.repoRoot == "" {
 		return ""
@@ -275,7 +275,7 @@ func (w *Worktree) Commit(message string) string {
 }
 
 // Upstream is the remote-tracking branch of branch ("origin/main"), or "" when
-// it has none. This is what decides whether ship has anything to verify
+// it has none. This is what decides whether there is anything to verify
 // against: a branch nobody has pushed has no remote history to rebase onto.
 func (w *Worktree) Upstream(branch string) string {
 	if w.repoRoot == "" {
@@ -333,9 +333,9 @@ func (w *Worktree) RebaseContinue() string {
 	return strings.TrimSpace(out)
 }
 
-// IsRepo reports whether this worktree is inside a git repo. Ship needs one;
+// IsRepo reports whether this worktree is inside a git repo. A repo is required for most work;
 // the branch it is ON is a separate question (a --no-worktree session sits on
-// the base branch, which ship still verifies).
+// the base branch, which is a valid place to work).
 func (w *Worktree) IsRepo() bool { return w.repoRoot != "" }
 
 // RepoRoot returns the top-level directory of the git repo, or "" when not a
@@ -344,8 +344,8 @@ func (w *Worktree) IsRepo() bool { return w.repoRoot != "" }
 func (w *Worktree) RepoRoot() string { return w.repoRoot }
 
 // CurrentBranch is the branch HEAD is on, or "" when detached or not a repo.
-// Ship asks git rather than trusting w.Branch: the agent can switch branches
-// with exec, and shipping the wrong ref is not a recoverable mistake.
+// Callers ask git rather than trusting w.Branch: the agent can switch branches
+// with exec, and acting on the wrong ref is not a recoverable mistake.
 func (w *Worktree) CurrentBranch() string {
 	if w.repoRoot == "" {
 		return ""
@@ -361,7 +361,7 @@ func (w *Worktree) CurrentBranch() string {
 }
 
 // RebaseInProgress reports whether a rebase is stopped mid-way. This is what
-// lets ship RESUME instead of making the model declare that it should.
+// lets a caller RESUME instead of making the model declare that it should.
 func (w *Worktree) RebaseInProgress() bool {
 	if w.repoRoot == "" {
 		return false
@@ -383,7 +383,7 @@ func (w *Worktree) RebaseInProgress() bool {
 }
 
 // RemoteHead is the sha of origin/<branch>, or "" if there is no such ref.
-// Ship compares it before and after the checks to catch a base that moved.
+// Callers compare it before and after the checks to catch a base that moved.
 func (w *Worktree) RemoteHead(branch string) string {
 	if w.repoRoot == "" {
 		return ""

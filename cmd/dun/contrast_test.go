@@ -56,10 +56,6 @@ func TestToolResult_OrangeOnlyForAttention(t *testing.T) {
 	if !strings.Contains(blocked, sgrOrange) || !strings.Contains(stripANSI(blocked), "#2 blocked") {
 		t.Errorf("a blocked child does not ask for attention: %q", blocked)
 	}
-	refused, _ := renderToolResult(renderCtx{tool: "ship", result: "Verified, but NOT pushed: no remote."})
-	if !strings.Contains(refused, sgrOrange) {
-		t.Errorf("a ship that left the work local is not marked: %q", refused)
-	}
 }
 
 // The report's first line as subAgent.report writes it.

@@ -46,7 +46,7 @@ are in `decisions.md`.
 - **Contrast.** `stSecondary` (246 on dark, 240 on light) is for content one
   step below the answer: previews and expanded bodies. `stDim` (240, 2.5:1) is
   for chrome only (arrows, rules, hints, labels). Orange means attention
-  (ship refused, an agent blocked on you, not-logged-in); neutral facts are not
+  (an agent blocked on you, not-logged-in); neutral facts are not
   orange. Answer prose wraps at `bandCap` (100) columns.
 - **Wide blocks scroll sideways, never wrap** (`wide.go`): a code block or
   table wider than the prose column renders at its own width, is cut at the pane
@@ -138,8 +138,7 @@ are in `decisions.md`.
   the composer is a literal tab.
 - **ask_user is one question at a time** (the answer to one guides the next).
   A turn that ends for any reason closes and settles its open question.
-- **Where trust shows.** Ship's preview names the checks that ran (a bare
-  "verified" is a claim not earned). Agent previews show state and spend.
+- **Where trust shows.** Agent previews show state and spend.
   Exec shows the verdict and the last informative line, not a bare `FAIL`.
 
 ## Why the scroll bugs hid

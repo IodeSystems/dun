@@ -268,6 +268,14 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 
 ## Worktrees and ship
 
+- **Ship was removed (USER, 2026-10-27: "remove ship").** Repos state their
+  own shipping rules; a built-in ship tool and its prompt lines read as the
+  blessed path. The `ship` tool, `/ship`, the `ship` section of dun.json and
+  the `--ship`/`--pr`/`--no-ship` effects are gone. The flags are still
+  accepted and do nothing (an older TUI or dund passes them), and a `ship`
+  section in dun.json is ignored. The entries below that describe ship are
+  history.
+
 - **Isolation, not approval prompts.** The agent works in a git worktree on a
   fresh `dun/<ts>` branch (opt out with `--no-worktree`). dun never switches
   branches in the user's checkout.

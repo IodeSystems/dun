@@ -73,7 +73,7 @@ func (e *execEngine) Kill() {
 // service's to set.
 var allowedFlags = map[string]bool{
 	"--model": true, "--url": true, "--worktree": true, "--docker": true,
-	"--docker-network": true, "--pr": true, "--no-ship": true, "--rag": true,
+	"--docker-network": true, "--pr": true, "--ship": true, "--no-ship": true, "--rag": true,
 	"--lsp": true, "--rephrase": true, "--no-suggest": true,
 }
 

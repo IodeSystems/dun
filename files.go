@@ -53,7 +53,7 @@ type FilesConfig struct {
 }
 
 // LoadFiles resolves the effective files config for a workspace across the
-// same layers as LoadShip. nil means no section anywhere: the defaults.
+// same layers as LoadCommit. nil means no section anywhere: the defaults.
 func LoadFiles(dir string) *FilesConfig {
 	var out *FilesConfig
 	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {

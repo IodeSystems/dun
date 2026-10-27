@@ -100,7 +100,7 @@ func (s *session) track(ev proto.Event) {
 	case *proto.Answered:
 		s.asking = false
 	case *proto.Workspace:
-		// The in-place Worktree that --ship makes reports the workspace
+		// The in-place Worktree that a session without --worktree makes reports the workspace
 		// itself: that is no worktree.
 		s.worktree, s.branch = "", p.Branch
 		if filepath.Clean(p.Path) != filepath.Clean(s.workspace) {

@@ -28,7 +28,7 @@ import (
 // sentences; the tokens that produced them die with it. Every default here is
 // therefore the cheap side: a child inherits its parent's worktree and MCP
 // manager (no second index, no second server), runs on a configured child model,
-// and gets no ship and no ask_user.
+// and gets no ask_user.
 //
 // Role picks the tool set (see rebuildTools), and THAT is the enforcement, not a
 // convenience: a child never receives `agent`, so depth-1 holds with no counter
@@ -381,9 +381,7 @@ func childSessionFile(parent string, num int) string {
 //
 // Everything cheap is inherited and everything expensive is dropped: the
 // parent's worktree (so no new tree and no new servers), its exec backend, its
-// tool servers. Ship and ask_user are NOT inherited — landing work and
-// interrupting the human are the root's, which is the same rule ship.allow
-// already encodes.
+// tool servers. ask_user is NOT inherited — interrupting the human is the root's.
 func childConfig(parent *Harness, num int, model string, client agent.LLMRunner) Config {
 	cfg := parent.cfg
 	// The exception to inheriting the exec backend: a child gets its OWN shell
@@ -401,7 +399,6 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner)
 	cfg.ChildModel = model
 	cfg.SessionFile = childSessionFile(parent.cfg.SessionFile, num)
 	cfg.Servers = parent.specs // shared manager; nothing is spawned from these
-	cfg.EnableShip = false
 	cfg.Ask = nil
 	cfg.Peers = nil // other sessions talk to the root, not to its children
 	// A child's tokens, retries and compactions are its own business. Forwarding

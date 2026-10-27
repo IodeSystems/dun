@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
 )
@@ -667,17 +666,15 @@ func ctrlCmdAsks(id, action string) bool {
 	return id == "worktree" && action == "commit"
 }
 
-// runControlCmd handles /docker, /worktree, and /ship control commands.
+// runControlCmd handles /docker and /worktree control commands.
 func runControlCmd(ctx context.Context, h *dun.Harness, id, action string) string {
 	switch id {
 	case "docker":
 		return runDockerCmd(ctx, h, action)
 	case "worktree":
 		return runWorktreeCmd(ctx, h, action)
-	case "ship":
-		return runShipCmd(ctx, h, action)
 	default:
-		return "unknown control target " + strconv.Quote(id) + " — try /docker, /worktree, or /ship"
+		return "unknown control target " + strconv.Quote(id) + " — try /docker or /worktree"
 	}
 }
 
@@ -831,43 +828,6 @@ func indentLines(s, prefix string) string {
 		lines[i] = prefix + l
 	}
 	return strings.Join(lines, "\n")
-}
-
-// runShipCmd handles /ship [verify|push|pr].
-//
-// It does NOT run ship directly. Instead it queues a forced tool call that will
-// be injected into the next LLM response's tool_calls (via Harness.ForceToolCall
-// + Session.OnToolCalls). The Turn loop then persists it as assistant(tool_calls)
-// → tool(result) and dispatches it through withShip, making the exchange look
-// like the model's own decision.
-//
-// If no turn is running, the caller should trigger one (e.g. by sending a
-// mid-turn message or starting a Continue turn) so the injection happens.
-func runShipCmd(ctx context.Context, h *dun.Harness, action string) string {
-	var mode dun.ShipMode
-	switch strings.ToLower(action) {
-	case "", "push":
-		mode = dun.ShipPush
-	case "verify":
-		mode = dun.ShipVerify
-	case "pr":
-		mode = dun.ShipPR
-	default:
-		return "unknown action " + strconv.Quote(action) + " — try /ship [verify|push|pr]"
-	}
-	args, _ := json.Marshal(map[string]string{"mode": string(mode)})
-	h.ForceToolCall(llm.ToolCall{
-		ID:   "call_ship_" + strconv.FormatInt(time.Now().UnixNano(), 10),
-		Type: "function",
-		Function: struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		}{
-			Name:      "ship",
-			Arguments: string(args),
-		},
-	})
-	return "ship queued — running on next turn"
 }
 
 // activityEvery is how often, at most, a server's activity sends the server
