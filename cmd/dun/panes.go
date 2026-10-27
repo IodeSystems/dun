@@ -37,6 +37,9 @@ type screenPane struct {
 	// fixed: its height is its content's (statusLines), up to half the
 	// screen, before the others share the rest. A fixed pane takes no focus.
 	fixed bool
+	// zoomUnder: on a screen narrower than this, the pane takes the whole
+	// screen and the others are not drawn (a phone: the skill reader).
+	zoomUnder int
 }
 
 // statusBody is a fixed pane's content: its lines at width w.
@@ -126,7 +129,20 @@ func (s *paneScreen) pagerPane() int {
 	return 0
 }
 
+// zoomed is the pane that takes the whole screen at width w, or -1.
+func (s *paneScreen) zoomed(w int) int {
+	for i, p := range s.panes {
+		if w < p.zoomUnder {
+			return i
+		}
+	}
+	return -1
+}
+
 func (s *paneScreen) view(m *tuiModel, w, rows int) string {
+	if z := s.zoomed(w); z >= 0 {
+		return s.panes[z].body.view(m, w, rows)
+	}
 	hs := s.heights(m, w, rows)
 	out := make([]string, 0, 2*len(s.panes))
 	for i, p := range s.panes {
@@ -181,7 +197,17 @@ func (s *paneScreen) moveFocus(d int) {
 // the screen had the key.
 func (s *paneScreen) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 	// With one pane to focus, tab is that pane's (a switch list cycles its
-	// mode with it).
+	// mode with it), and a pane that takes tab has it (the skill reader's
+	// next link).
+	if t, ok := s.panes[s.focus].body.(interface{ takesTab() bool }); ok && t.takesTab() {
+		if s.panes[s.focus].body.key(m, msg) {
+			return true
+		}
+		if msg.String() == "esc" || msg.String() == "q" {
+			m.popScreen()
+		}
+		return true
+	}
 	switch msg.String() {
 	case "tab":
 		if len(s.focusables()) > 1 {
@@ -205,6 +231,9 @@ func (s *paneScreen) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 
 func (s *paneScreen) hint(m *tuiModel) string {
 	h := s.panes[s.focus].body.hint(m)
+	if t, ok := s.panes[s.focus].body.(interface{ takesTab() bool }); ok && t.takesTab() {
+		return h
+	}
 	if len(s.focusables()) > 1 {
 		h += stDim.Render(" · tab next pane")
 	}

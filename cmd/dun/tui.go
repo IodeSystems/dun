@@ -2571,6 +2571,8 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m = m.noteMCPTools(ev)
 	case "switches":
 		m = m.noteSwitches(ev)
+	case "skill_file":
+		m = m.noteSkillFile(ev)
 	case "extensions":
 		m = m.noteExtensions(ev)
 	case "mcp_login":

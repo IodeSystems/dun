@@ -77,6 +77,14 @@ are in `decisions.md`.
   status (mode, cost, what it depends on, a warning) is a pane above it,
   never a row; under 80 columns a row is two lines, the name above its
   switches and cost.
+- **The skill reader is a pane below the list** (owner, 2026-10-27): enter
+  on a skill opens it; the reader has the keys (tab is its next link, not
+  the next pane) until esc on the skill itself closes it. Under 80 columns
+  it takes the whole screen instead of a split: at 48 columns a split left
+  about ten rows of text, too few to read a skill. References are read the
+  way authors already write them, no new syntax: a path to a file in the
+  skill's folder is a link, an `@path` (Claude Code's import) is inlined
+  (dun/skillview.go). The model's view of a skill does not change.
 - **Splash rows are fixed height per width,** so the layout never grows as
   facts arrive (counted estimate, then exact, then spend). Context turns orange
   at 60% of the window (`contextHeavy`).

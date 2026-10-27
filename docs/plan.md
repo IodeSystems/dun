@@ -50,6 +50,14 @@ owner's call before work starts.
   && cat > x.mjs <<'EOF' …`) shows its command as highlighted shell, its
   lines and heredoc as written, not flattened into one line (owner,
   2026-10-27: part of the code highlighting).
+- [~] The skill reader (owner, 2026-10-27): enter on a skill in `/skill`
+  opens a pane below the list with the skill rendered (glamour, the front
+  matter a header). A path to a file in the skill's folder is a link (n/p or
+  tab/shift+tab, enter opens, backspace/esc back; a missing file is struck
+  through, ✗); an `@path` is inlined between dim rules, 3 deep, each file
+  once; `/` searches the text and the links' targets. Under 80 columns the
+  pane takes the screen. The engine reads the files (control `skillfile`,
+  event `skill_file`), confined to the skill's folder. Display only.
 - [ ] Collapse only under scroll pressure: a block folds as the scroll pushes
   it, never ahead of it, so no blank rows are left (owner: not yielding
   matters most).
