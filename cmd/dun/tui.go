@@ -613,32 +613,32 @@ type tuiModel struct {
 	cur        string // streaming assistant text (not yet finalized); string, not
 	//                    strings.Builder — Bubble Tea copies the model each Update.
 	tools         []string
-	branch        string         // worktree branch (from the `workspace` event)
-	starting      bool           // spawning servers, before `ready`
-	startingStart time.Time      // when the starting phase began
-	busy          bool           // a turn in flight
-	interrupting  bool           // an interrupt was sent; the turn has not ended yet
-	confirm       confirmState   // a pending y/n question (jobkill.go)
-	busyStart     time.Time      // when the current busy turn started
-	asking        bool           // agent is waiting on an ask_user answer
-	askOptions    []string       // the offered options; a trailing "custom" row is implicit
-	askRec        []string       // the options the model recommends (marked, preselected)
-	askSel        int            // highlighted answer row (== len(askOptions) → the custom row)
-	askNote       string         // optional detail attached to the chosen option ("n")
-	askMulti      bool           // multi-select: space toggles, enter submits the checked set
-	askChecked    []bool         // per-option checked state (multi mode; len == len(askOptions))
+	branch        string       // worktree branch (from the `workspace` event)
+	starting      bool         // spawning servers, before `ready`
+	startingStart time.Time    // when the starting phase began
+	busy          bool         // a turn in flight
+	interrupting  bool         // an interrupt was sent; the turn has not ended yet
+	confirm       confirmState // a pending y/n question (jobkill.go)
+	busyStart     time.Time    // when the current busy turn started
+	asking        bool         // agent is waiting on an ask_user answer
+	askOptions    []string     // the offered options; a trailing "custom" row is implicit
+	askRec        []string     // the options the model recommends (marked, preselected)
+	askSel        int          // highlighted answer row (== len(askOptions) → the custom row)
+	askNote       string       // optional detail attached to the chosen option ("n")
+	askMulti      bool         // multi-select: space toggles, enter submits the checked set
+	askChecked    []bool       // per-option checked state (multi mode; len == len(askOptions))
 	// askEdit is the option the text field edits in multi mode: an index, or
 	// len(askOptions) for a new one (the custom row); enter keeps it,
 	// checked, instead of sending (USER 2026-10-27).
-	askEdit int
-	noting        bool           // capturing a detail for the selected option
-	customAnswer  bool           // capturing a free-text / chat answer
-	askDraft      multilineInput // the composer as it was when the question took the keys
-	askDraftSet   bool           // askDraft holds a draft to give back (restoreDraft)
-	convoHold     int            // the convo pane keeps at least this many rows (holdConvo)
-	convoHoldW    int            // the pane width convoHold was measured at
-	paneTermH     int            // the terminal height the pane was last fitted at (a resize, not a panel)
-	holdSkip      bool           // the next refresh replaces the conversation: no contract hold (dropHold)
+	askEdit      int
+	noting       bool           // capturing a detail for the selected option
+	customAnswer bool           // capturing a free-text / chat answer
+	askDraft     multilineInput // the composer as it was when the question took the keys
+	askDraftSet  bool           // askDraft holds a draft to give back (restoreDraft)
+	convoHold    int            // the convo pane keeps at least this many rows (holdConvo)
+	convoHoldW   int            // the pane width convoHold was measured at
+	paneTermH    int            // the terminal height the pane was last fitted at (a resize, not a panel)
+	holdSkip     bool           // the next refresh replaces the conversation: no contract hold (dropHold)
 	// panelHeld: a panel below (palette, form, picker) shrank the pane and
 	// the pinned view keeps panelYOff while it is open and the conversation
 	// is no longer than panelRows (applyScroll).

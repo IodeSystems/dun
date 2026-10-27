@@ -79,7 +79,10 @@ func NewWorktree(repoDir string, mounts []MountSpec) (wt *Worktree, isRepo bool,
 	if err != nil {
 		return nil, false, err
 	}
-	branch := fmt.Sprintf("dun/%d", time.Now().Unix())
+	// The temp directory's suffix makes the name unique: worktrees made in
+	// the same second (sub-agents started together, subisolation.go) took
+	// the same dun/<unix> name, and the second git worktree add failed.
+	branch := fmt.Sprintf("dun/%d-%s", time.Now().Unix(), strings.TrimPrefix(filepath.Base(dir), "dun-worktree-"))
 	if _, err := git("", "-C", root, "worktree", "add", "-b", branch, dir, "HEAD"); err != nil {
 		os.RemoveAll(dir)
 		return nil, false, fmt.Errorf("dun: git worktree add: %w", err)

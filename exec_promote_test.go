@@ -178,7 +178,7 @@ func TestChildConfig_ChildGetsItsOwnShell(t *testing.T) {
 	own := &HostShell{Dir: dir}
 	parent := &Harness{cfg: Config{Exec: own}}
 
-	cfg := childConfig(parent, 1, "", nil)
+	cfg := childConfig(parent, 1, "", nil, isolation{})
 	child, ok := cfg.Exec.(*HostShell)
 	if !ok {
 		t.Fatalf("the child lost the shell backend: %T", cfg.Exec)

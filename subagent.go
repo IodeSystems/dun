@@ -61,6 +61,7 @@ type subAgent struct {
 	prompt string
 	model  string
 	parent *Harness
+	iso    isolation // where it works, when not in its parent's tree (subisolation.go)
 
 	mu sync.Mutex
 	h  *Harness // nil for a stopped child until it is resumed
@@ -315,6 +316,7 @@ func (s *subAgent) report() string {
 		b.WriteString("\nBLOCKED, waiting on you: " + q +
 			"\nAnswer with agent_monitor(agent:" + strconv.Itoa(s.num) + ", tell:\"…\").")
 	}
+	b.WriteString(s.iso.status())
 	b.WriteString("\nIt is still resident and re-askable — agent_monitor(agent:" + strconv.Itoa(s.num) +
 		", tell:\"…\"), or quit:true when you are done with it.")
 	return b.String()
@@ -384,7 +386,7 @@ func childSessionFile(parent string, num int) string {
 // tool servers. Ship and ask_user are NOT inherited — landing work and
 // interrupting the human are the root's, which is the same rule ship.allow
 // already encodes.
-func childConfig(parent *Harness, num int, model string, client agent.LLMRunner) Config {
+func childConfig(parent *Harness, num int, model string, client agent.LLMRunner, iso isolation) Config {
 	cfg := parent.cfg
 	// The exception to inheriting the exec backend: a child gets its OWN shell
 	// on the same directory. The persistent shell is shared by POINTER, so
@@ -415,6 +417,7 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner)
 	cfg.OnCompaction = nil
 	cfg.OnAgents = nil
 	cfg.OnJobs = nil
+	iso.apply(&cfg) // after the shell: an isolated child's exec is on its own tree
 	return cfg
 }
 
@@ -434,7 +437,11 @@ func (h *Harness) clientFor(model string) (agent.LLMRunner, string) {
 
 // spawnAgent starts a child and registers it. The child is RUNNING when this
 // returns; the caller decides whether to wait for it.
-func (h *Harness) spawnAgent(ctx context.Context, prompt, model string) (*subAgent, error) {
+func (h *Harness) spawnAgent(ctx context.Context, prompt, model, mode string) (*subAgent, error) {
+	iso, err := h.newIsolation(mode)
+	if err != nil {
+		return nil, err
+	}
 	h.agMu.Lock()
 	h.agSeq++
 	num := h.agSeq
@@ -447,17 +454,20 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model string) (*subAge
 		model = h.cfg.ChildModel
 	}
 	client, name := h.clientFor(model)
-	sa := &subAgent{num: num, prompt: prompt, model: name, parent: h, hb: newHeartbeat()}
+	sa := &subAgent{num: num, prompt: prompt, model: name, parent: h, hb: newHeartbeat(), iso: iso}
 
 	// Start on a background context: a child outlives the TURN that spawned it
 	// (that is the whole point of an async spawn), so tying it to the caller's
 	// context would kill it the moment the parent's turn ended.
 	runCtx, cancel := context.WithCancel(context.Background())
-	child, err := Start(runCtx, childConfig(h, num, name, client))
+	ccfg := childConfig(h, num, name, client, iso)
+	child, err := Start(runCtx, ccfg)
 	if err != nil {
 		cancel()
+		iso.release()
 		return nil, err
 	}
+	saveIsolation(ccfg.SessionFile, iso)
 	// self is how the child's own callbacks reach its record here — noteUsage
 	// reads it after every chat round. Written before any turn can run.
 	child.self = sa
@@ -480,7 +490,7 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model string) (*subAge
 	h.agMu.Unlock()
 	h.agentsChanged()
 
-	go sa.run(runCtx, prompt)
+	go sa.run(runCtx, prompt+iso.brief())
 	go sa.heartbeat()
 	return sa, nil
 }
@@ -631,10 +641,11 @@ func (s *subAgent) quit() string {
 		h.Close()
 	}
 	s.settle(agentDismissed)
+	rel := s.iso.release()
 	if path := s.transcript(); path != "" {
-		return fmt.Sprintf("Dismissed agent #%d. Its transcript is at %s.", s.num, path)
+		return fmt.Sprintf("Dismissed agent #%d. Its transcript is at %s.%s", s.num, path, rel)
 	}
-	return fmt.Sprintf("Dismissed agent #%d.", s.num)
+	return fmt.Sprintf("Dismissed agent #%d.%s", s.num, rel)
 }
 
 // peek reads the last n lines of the child's transcript, which is the only way
@@ -710,7 +721,7 @@ func (h *Harness) restoreAgents() {
 		}
 		sa := &subAgent{
 			num: num, parent: h, state: agentStopped, restore: path,
-			prompt: firstUserEntry(path),
+			prompt: firstUserEntry(path), iso: loadIsolation(path),
 		}
 		h.agents[num] = sa
 		if num > h.agSeq {
@@ -770,7 +781,7 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 
 	client, name := h.clientFor(model)
 	ctx, cancel := context.WithCancel(context.Background())
-	child, err := Start(ctx, childConfig(h, sa.num, name, client))
+	child, err := Start(ctx, childConfig(h, sa.num, name, client, sa.iso))
 	if err != nil {
 		cancel()
 		return fmt.Sprintf("agent #%d could not be resumed: %v", sa.num, err)
@@ -894,6 +905,11 @@ func agentToolDef(defaultModel string) llm.ToolDef {
 			"prompt": map[string]any{"type": "string", "description": "the task, complete on its own — the child cannot see your conversation"},
 			"model":  map[string]any{"type": "string", "description": "run this child on a specific model"},
 			"wait":   map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
+			"isolation": map[string]any{"type": "string", "enum": []string{IsoNone, IsoWorktree, IsoDocker, IsoNoDir},
+				"description": "where the child works. none (default): this tree. worktree: its own git worktree branched " +
+					"from this tree's last commit (uncommitted changes are not in it); it commits there and you merge its " +
+					"branch — use it for children that edit at the same time. docker: the same, its commands in a " +
+					"container. nodir: no project, no file tools; for research and summaries."},
 		},
 		"required": []string{"prompt"},
 	}
@@ -906,12 +922,13 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			return inner(ctx, tc)
 		}
 		var args struct {
-			Prompt string `json:"prompt"`
-			Model  string `json:"model"`
-			Wait   bool   `json:"wait"`
+			Prompt    string `json:"prompt"`
+			Model     string `json:"model"`
+			Wait      bool   `json:"wait"`
+			Isolation string `json:"isolation"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		out := spawnTool(ctx, h, args.Prompt, args.Model, args.Wait)
+		out := spawnTool(ctx, h, args.Prompt, args.Model, args.Isolation, args.Wait)
 		if onCall != nil {
 			onCall("agent", map[string]any{"prompt": args.Prompt, "model": args.Model, "wait": args.Wait}, out)
 		}
@@ -919,18 +936,25 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 	}
 }
 
-func spawnTool(ctx context.Context, h *Harness, prompt, model string, wait bool) string {
+func spawnTool(ctx context.Context, h *Harness, prompt, model, isolation string, wait bool) string {
 	if strings.TrimSpace(prompt) == "" {
 		return "ERROR: agent requires a non-empty prompt."
 	}
-	sa, err := h.spawnAgent(ctx, prompt, model)
+	sa, err := h.spawnAgent(ctx, prompt, model, isolation)
 	if err != nil {
 		return "ERROR: could not start the agent: " + err.Error()
 	}
 	if !wait {
-		return fmt.Sprintf("Started agent #%d on %s. It is working; you will be told when it finishes. "+
+		where := ""
+		if sa.iso.isolated() {
+			where = " in " + sa.iso.Mode + " isolation at " + sa.iso.Path
+			if sa.iso.Branch != "" {
+				where += " (branch " + sa.iso.Branch + ")"
+			}
+		}
+		return fmt.Sprintf("Started agent #%d on %s%s. It is working; you will be told when it finishes. "+
 			"Carry on with something else, or agent_monitor(agent:%d, wait:true) if you have nothing to do "+
-			"until it answers.", sa.num, sa.model, sa.num)
+			"until it answers.", sa.num, sa.model, where, sa.num)
 	}
 	select {
 	case <-sa.waitCh():
