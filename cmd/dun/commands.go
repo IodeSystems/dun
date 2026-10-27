@@ -180,6 +180,8 @@ func ownCommands(docker bool) []proto.CommandSpec {
 				"budget", "how long one request keeps retrying: budget 15m, unbounded or default",
 				"turn", "how long a turn whose stream died is re-run: turn 30m, off or default"),
 			Description: "how hard dun keeps at a flaky provider: alone picks a preset; saved for every session"},
+		{Name: "file", Usage: "[add|remove <path>]", Group: "tools", Choices: choices("add", "a file or directory outside the workspace that dun's file tools may read and change, for this session", "remove", "take one back"),
+			Description: "files outside the workspace dun may read and change: alone lists them; add <path> grants one (a file grants that file alone), remove <path> takes it back"},
 		{Name: "effort", Usage: "[default|off|low|medium|high]", Group: "session",
 			Choices: choices(dun.EffortDefault, dun.EffortAbout[dun.EffortDefault], dun.EffortOff, dun.EffortAbout[dun.EffortOff],
 				dun.EffortLow, dun.EffortAbout[dun.EffortLow], dun.EffortMedium, dun.EffortAbout[dun.EffortMedium],
@@ -423,6 +425,16 @@ func routeSlash(line string, r slashRoutes) {
 		}
 	case "effort":
 		r.control(name, arg(0))
+	case "file":
+		// The path as typed: its case matters.
+		switch {
+		case len(args) == 0:
+			r.control("files", "")
+		case (arg(0) == "add" || arg(0) == "remove") && len(args) >= 2:
+			r.control("files", arg(0)+" "+strings.Join(args[1:], " "))
+		default:
+			r.reply("usage: /file [add|remove <path>]")
+		}
 	case "retry":
 		r.control(name, strings.Join(args, " "))
 	case "suggest":

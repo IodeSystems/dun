@@ -148,7 +148,7 @@ func (h *Harness) fileTools() *filetools.Toolset {
 // absolute path: scratch output, a test's log, a command's dump all land there,
 // and refusing the path exec just printed sends the model back to cat (USER
 // 2026-10-23). Reads only — a change to /tmp still goes through exec.
-func tmpRoots() []string {
+var tmpRoots = func() []string { // a var: a test whose dirs are in /tmp turns it off
 	roots := []string{"/tmp"}
 	if d := os.TempDir(); filepath.Clean(d) != "/tmp" {
 		roots = append(roots, d)
@@ -218,16 +218,23 @@ func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args strin
 }
 
 // withFiles routes the file tools to the toolset and reports each call.
-func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp, added []*filetools.Toolset, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if !ts.Handles(tc.Function.Name) {
 			return inner(ctx, tc)
 		}
 		route := ts
+		out := ""
 		if t := tmpReader(ts, tmp, tc.Function.Name, tc.Function.Arguments); t != nil {
 			route = t
+		} else if t := addedRoute(ts, added, tc.Function.Arguments); t != nil {
+			route = t // a path the person added (/file add, fileadd.go)
+		} else if hint := outsideHint(ts, tc.Function.Name, tc.Function.Arguments); hint != "" {
+			out = hint
 		}
-		out := route.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
+		if out == "" {
+			out = route.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
+		}
 		if onCall != nil {
 			var args map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
@@ -248,7 +255,7 @@ func systemFiles(ts *filetools.Toolset) string {
 		return ""
 	}
 	line := "\n- " + strings.Join(names, ", ") + ": read, search and change files in the working tree, by paths relative to it " +
-		"(read, grep and list also take an absolute path under /tmp). " +
+		"(read, grep and list also take an absolute path under /tmp, and all of them a path the user added with /file add). " +
 		"Prefer them to exec for reading files (not cat/head/sed), searching (not grep/rg/find)"
 	if ts.Handles(ts.Name(filetools.Edit)) {
 		line += " and editing (not sed or heredocs)"
@@ -256,4 +263,25 @@ func systemFiles(ts *filetools.Toolset) string {
 	line += ": reads are line-numbered and paged, searches respect .gitignore, and edits return the diff. " +
 		"Read before you edit; copy edit anchors from what " + ts.Name(filetools.Read) + " returned, without the line numbers."
 	return line
+}
+
+// addedRoute is the added path's toolset for a call whose path is absolute
+// and under one the person added; nil otherwise.
+func addedRoute(ts *filetools.Toolset, added []*filetools.Toolset, args string) *filetools.Toolset {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(args), &a) != nil || !filepath.IsAbs(strings.TrimSpace(a.Path)) {
+		return nil
+	}
+	p := filepath.Clean(strings.TrimSpace(a.Path))
+	if _, err := filetools.Under(ts.Root(), p); err == nil {
+		return nil
+	}
+	for _, t := range added {
+		if _, err := filetools.Under(t.Root(), p); err == nil {
+			return t
+		}
+	}
+	return nil
 }

@@ -241,13 +241,14 @@ func TestFileTools_ReadTmp(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "new.txt")); err == nil {
 		t.Error("the write landed in /tmp")
 	}
-	if out := dispatchFile(t, h, "file_read", `{"path":"/etc/hostname"}`); !strings.Contains(out, "outside the root") {
+	// Refused, with how to ask for it (/file add, fileadd.go).
+	if out := dispatchFile(t, h, "file_read", `{"path":"/etc/hostname"}`); !strings.Contains(out, "outside this workspace") || !strings.Contains(out, "/file add /etc/hostname") {
 		t.Errorf("a read outside the tree and /tmp:\n%s", out)
 	}
 	// A link in /tmp that points out of it is not followed.
 	link := filepath.Join(dir, "out")
 	if err := os.Symlink("/etc", link); err == nil {
-		if out := dispatchFile(t, h, "file_read", `{"path":"`+link+`/hostname"}`); !strings.Contains(out, "outside the root") {
+		if out := dispatchFile(t, h, "file_read", `{"path":"`+link+`/hostname"}`); !strings.HasPrefix(out, "ERROR") || !strings.Contains(out, "outside") {
 			t.Errorf("read through a link out of /tmp:\n%s", out)
 		}
 	}

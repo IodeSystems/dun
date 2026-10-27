@@ -74,9 +74,10 @@ owner's call before work starts.
 - [ ] `/docker` becomes `/isolate` (worktree and Docker together).
 - [ ] **decide** Remove `/ship` and its prompt lines: repos state their own
   shipping rules, and dun's read as the blessed path.
-- [ ] `/file add <path>`: a file or directory outside the workspace becomes
-  readable and editable by dun's file tools and poly-lsp; when the model is
-  refused one, it says to use `/file add`.
+- [~] `/file add|remove <path>`, `/file`: a file or directory outside the
+  workspace becomes readable and editable by dun's file tools for the
+  session; refused one, the model is told to ask for `/file add <path>`.
+  poly-lsp does not see added paths yet.
 
 ## Other projects (sent to their sessions)
 

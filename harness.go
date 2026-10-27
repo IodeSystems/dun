@@ -523,6 +523,8 @@ type Harness struct {
 	effort atomic.Value
 	// windowSrc is where the window in force came from (window.go).
 	windowSrc string
+	// added is the paths the person granted the file tools (/file add, fileadd.go); nil until loaded.
+	added     map[string]bool
 	closed    chan struct{}
 	closeOnce sync.Once
 	// ingestNote is the last workspace ingest's summary, for /raglit and the
