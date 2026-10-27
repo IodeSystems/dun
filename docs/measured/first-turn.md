@@ -49,3 +49,31 @@ The tools each one sent:
     tools/promptsize/capture.py OUT/<agent> <port>     # one per agent
     # point the agent at http://127.0.0.1:<port>, send "hi"
     KEY=… tools/promptsize/measure.py <url> <model> OUT/*
+
+## With the same two MCP servers (2026-10-27)
+
+Playwright MCP 0.0.83 (`node cli.js --headless`, from the npx cache) and
+poly-lsp-mcp (`mcp --root <dir>`) added to each agent, the same way:
+
+| agent | total tokens | tools sent | tool tokens |
+|---|---:|---:|---:|
+| opencode 1.15.3 | 19,959 | 38 | 14,059 |
+| dun, both servers direct | 12,220 | 42 | 10,802 |
+| Claude Code 2.1.311 | 11,643 | 12 | 7,602 |
+| dun, Playwright scripted in mcpshell | 7,203 | 17 | 5,929 |
+
+- Scripted, Playwright's tool schemas leave the request: the model gets
+  `eval` and one line in the system prompt naming the servers hosted in the
+  shell and `help("<ns>")`. 12,220 → 7,203 is 41% less on every request.
+- dun's built-in poly-lsp cannot be scripted (its file guard needs it
+  direct); it stays direct in both dun runs.
+- Claude Code sends MCP tools as names behind its ToolSearch tool and loads
+  a schema when the model asks: its count barely moves (11,366 → 11,643).
+- The capability, checked live: dun with Playwright scripted and the local
+  Qwen 27B was asked to open https://dun.iodesystems.com/ and report its
+  title and first heading. It called `playwright.browser_navigate` and
+  `playwright.browser_evaluate` inside `eval` and answered correctly, first
+  try, without calling help().
+- `~/.local/bin/node` here is a shim that finds node under `$HOME/.nvm`, so
+  a clean HOME breaks it (and pi, which runs on it): the servers were given
+  node's absolute path.

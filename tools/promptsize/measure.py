@@ -81,8 +81,8 @@ def first_turn(d):
             continue
         cap = json.load(open(os.path.join(d, name)))
         body = cap.get("body") or {}
-        if not isinstance(body, dict):
-            continue
+        if not isinstance(body, dict) or "count_tokens" in cap.get("path", ""):
+            continue  # a token count the agent asked for, not a turn
         msgs, tools = to_openai(body)
         if not msgs:
             continue
