@@ -46,6 +46,10 @@ owner's call before work starts.
   what was said.
 - [~] Multi-choice questions: a clear way to select, unselect and edit; tab
   edits a choice, as in single choice.
+- [ ] A background job's notice (`🔔 background job #2 succeeded — cd /tmp
+  && cat > x.mjs <<'EOF' …`) shows its command as highlighted shell, its
+  lines and heredoc as written, not flattened into one line (owner,
+  2026-10-27: part of the code highlighting).
 - [ ] Collapse only under scroll pressure: a block folds as the scroll pushes
   it, never ahead of it, so no blank rows are left (owner: not yielding
   matters most).
