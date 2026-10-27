@@ -27,8 +27,7 @@ import (
 //     something that has been running all afternoon.
 //
 // It carries no output. One line saying what it is and how long it has been
-// quiet; reading what it actually produced stays an explicit ask (exec_monitor,
-// agent_monitor).
+// quiet; reading what it actually produced stays an explicit ask (jobs).
 
 // hbSchedule is how long silence must last before each successive reminder.
 var hbSchedule = []time.Duration{

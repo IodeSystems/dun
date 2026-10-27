@@ -2341,7 +2341,7 @@ func (m tuiModel) sendUser(v string) tuiModel { return m.sendUserImages(v, nil) 
 // sendUserImages is sendUser for a message with the composer's images.
 func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 	// In agent scope the input steers that CHILD instead of the session. Same
-	// gesture the parent's agent_monitor(tell:) makes, same code path in the
+	// gesture the parent's jobs(agent:N, tell:) makes, same code path in the
 	// engine — there is one definition of what telling a child means.
 	if m.scopeAgent != 0 && len(imgs) > 0 {
 		// A child's tell is text: sent without its images, the message would

@@ -109,7 +109,7 @@ func (r ExecResult) Render() string {
 // The cap is generous on purpose: the model ASKED for this output, so the
 // budget is "enough to work with" rather than "enough to notice something went
 // wrong". What does not fit is still on disk and grep-able, which is the same
-// bargain exec_monitor already offers for a long build.
+// bargain jobs already offers for a long build.
 const execInlineMax = 20000
 
 // execHeadShare is how much of the budget goes to the START of the output. A
@@ -766,20 +766,13 @@ func execToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "exec"
-	td.Function.Description = "Run a shell command (build, test, git, ls, …) in the workspace's " +
-		"project directory. Each call starts in the project root — you do not need to cd into it — " +
-		"but a variable you `export` in one call persists into the next for this agent. Returns " +
-		"combined stdout+stderr; a non-zero exit is shown as [exit: …]. Use this to verify edits " +
-		"(build/test) and to run git.\n" +
-		"A command still running after 30s is NOT killed and does NOT block you: it becomes a " +
-		"background job and you get its number back immediately. From then on the job reports to " +
-		"you — a notification when it finishes, and exec_monitor(job:N) whenever you want to see " +
-		"what it has produced so far. Set `timeout` to wait longer or shorter before that handover. " +
-		"If the user writes during the wait, the handover happens at once and their message is in the " +
-		"result. On a long job, check it early with exec_monitor and confirm the first output looks " +
-		"right instead of waiting for the end. " +
-		"Never run anything interactive: it has no terminal and no input, so it will sit there " +
-		"doing nothing until the handover."
+	td.Function.Description = "Run a shell command (build, test, git, …) in the project root. Each call starts " +
+		"there; a variable you `export` persists into the next call. Returns stdout and stderr together; a " +
+		"non-zero exit is shown as [exit: …].\n" +
+		"A command still running after `timeout` (30s) is not killed: it becomes background job #N and you " +
+		"are notified when it finishes. If the user writes while you wait, it becomes a job at once and their " +
+		"message is in the result. On a long job, check its first output early with jobs(job:N). " +
+		"Do not run anything interactive: there is no terminal and no input, so it can only hang."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{

@@ -259,17 +259,17 @@ func TestKillJob_AlreadyFinished(t *testing.T) {
 	}
 }
 
-// The model kills a job with exec_monitor kill:true; the job says the model
-// did it.
-func TestExecMonitor_Kill(t *testing.T) {
+// The model kills a job with jobs kill:true (or the old exec_monitor); the
+// job says the model did it.
+func TestJobs_KillCommand(t *testing.T) {
 	h := testHarness(t)
 	be := &HostShell{Dir: t.TempDir()}
 	t.Cleanup(be.Close)
 	j := h.newJobStarted(be, "sleep 30")
-	mon := withExecMonitor(nil, h, nil)
+	mon := withJobs(nil, h, nil)
 	call := func(args string) string {
 		var tc llm.ToolCall
-		tc.Function.Name, tc.Function.Arguments = "exec_monitor", args
+		tc.Function.Name, tc.Function.Arguments = "jobs", args
 		out, err := mon(context.Background(), tc)
 		if err != nil {
 			t.Fatal(err)
@@ -281,10 +281,11 @@ func TestExecMonitor_Kill(t *testing.T) {
 	}
 	out := call(fmt.Sprintf(`{"job":%d,"kill":true}`, j.id))
 	if !strings.Contains(out, "killed by the model after") {
-		t.Errorf("exec_monitor kill: %q", out)
+		t.Errorf("jobs kill: %q", out)
 	}
-	if !strings.Contains(execMonitorToolDef().Function.Description, "ends the job and everything it started") {
-		t.Error("the tool description must say what kill does")
+	kill := jobsToolDef(true, false).Function.Parameters.(map[string]any)["properties"].(map[string]any)["kill"].(map[string]any)
+	if !strings.Contains(kill["description"].(string), "ends a command and everything it started") {
+		t.Error("the tool definition must say what kill does")
 	}
 }
 

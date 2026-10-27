@@ -2,7 +2,6 @@ package dun
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,9 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/iodesystems/agentkit/agent"
-	"github.com/iodesystems/agentkit/llm"
 )
 
 // Background jobs — what a long command looks like while it is still running.
@@ -97,6 +93,11 @@ type bgJob struct {
 	// long the job had run then. Set once, by kill.
 	killedBy  string
 	killAfter time.Duration
+
+	// waiters counts jobs(job:N, wait:true) calls blocked on this job. While
+	// one waits, the finish notice is not sent: the waiter's result carries
+	// the outcome, and sending both would say it twice.
+	waiters int
 }
 
 // bgEarlyMax bounds the in-memory buffer a not-yet-promoted job keeps. Its
@@ -229,7 +230,7 @@ func (j *bgJob) finish(res ExecResult) {
 func (j *bgJob) completionNote() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.mon.Ignore {
+	if j.mon.Ignore || j.waiters > 0 {
 		return ""
 	}
 	return fmt.Sprintf("background job #%d %s — `%s` (%s)\n%s\n%s",
@@ -321,9 +322,8 @@ func (j *bgJob) handoffNotice(waited time.Duration) string {
 	return fmt.Sprintf(
 		"`%s` is STILL RUNNING after %s — it was NOT killed and has NOT failed. It is now "+
 			"background job #%d and it runs to completion on its own.\n%s\n"+
-			"Do NOT re-run it and do NOT poll it: you will be notified when it finishes. Until "+
-			"then exec_monitor(job:%d) is where you look — it can show you what the job has "+
-			"produced so far, grep it, or mute it. Get on with other work in the meantime.",
+			"Do not re-run it or poll it: you will be notified when it finishes. jobs(job:%d) shows "+
+			"what it has produced so far. Do other work in the meantime.",
 		j.command, roundDur(waited), j.id, j.logLine(), j.id)
 }
 
@@ -540,7 +540,7 @@ func (j *bgJob) heartbeat() {
 			j.h.notifyQuietly(fmt.Sprintf(
 				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n"+
 					"Nothing is necessarily wrong; this is so a wedged job does not look like a working one. "+
-					"exec_monitor(job:%d) to see what it has produced.",
+					"jobs(job:%d) to see what it has produced.",
 				j.id, roundDur(quiet), j.command, out, j.logLine(), j.id))
 		},
 	)
@@ -563,7 +563,7 @@ type JobInfo struct {
 	Started int64  `json:"started"`
 	Ended   int64  `json:"ended,omitempty"` // 0 while running
 	Code    int    `json:"code,omitempty"`
-	// Muted is exec_monitor's `ignore` — a job whose completion the model asked
+	// Muted is jobs' `ignore` — a job whose completion the model asked
 	// not to hear about. Shown because a silenced job is a choice, and an
 	// invisible silenced job is indistinguishable from a lost one.
 	Muted bool `json:"muted,omitempty"`
@@ -642,7 +642,7 @@ func (h *Harness) spillExec(command, output string) string {
 	return path
 }
 
-// bgJobByID looks a job up for the monitor tool.
+// bgJobByID looks a job up for the jobs tool.
 func (h *Harness) bgJobByID(id int) *bgJob {
 	h.bgMu.Lock()
 	defer h.bgMu.Unlock()
@@ -661,69 +661,8 @@ func (h *Harness) bgJobList() []*bgJob {
 	return out
 }
 
-// execMonitorToolDef is how the model tunes the chatter it gets from a job.
-func execMonitorToolDef() llm.ToolDef {
-	var td llm.ToolDef
-	td.Type = "function"
-	td.Function.Name = "exec_monitor"
-	td.Function.Description = "Change how a background job reports: `buffer_bytes` fires once that many bytes accumulate, " +
-		"`grep` limits to matching lines, `ignore` mutes entirely including completion (the job keeps running). " +
-		"`kill: true` ends the job and everything it started (SIGTERM, then SIGKILL); you still get its completion notice, which says it was killed. " +
-		"Do NOT use this to poll — you will be notified when the job finishes. " +
-		"Every job also writes a log file — grep THAT with exec rather than asking for a big log here."
-	td.Function.Parameters = map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"job":          map[string]any{"type": "integer", "description": "job id; omit to list every job"},
-			"buffer_bytes": map[string]any{"type": "integer", "description": "report progress once this many matching bytes accumulate (0 = never)"},
-			"grep":         map[string]any{"type": "string", "description": "only report lines matching this regexp (empty string clears it)"},
-			"ignore":       map[string]any{"type": "boolean", "description": "mute this job completely, including its completion notice"},
-			"kill":         map[string]any{"type": "boolean", "description": "true ends the job and everything it started"},
-		},
-	}
-	return td
-}
-
-func withExecMonitor(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		if tc.Function.Name != "exec_monitor" {
-			return inner(ctx, tc)
-		}
-		var args struct {
-			Job         *int    `json:"job"`
-			BufferBytes *int    `json:"buffer_bytes"`
-			Grep        *string `json:"grep"`
-			Ignore      *bool   `json:"ignore"`
-			Kill        bool    `json:"kill"`
-		}
-		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		var out string
-		switch {
-		case args.Kill && args.Job == nil:
-			out = "ERROR: kill needs the job id: exec_monitor({job:N, kill:true})."
-		case args.Kill:
-			msg, err := h.KillJob(*args.Job, "model")
-			if err != nil {
-				msg = "ERROR: " + err.Error()
-			}
-			out = msg
-		default:
-			out = execMonitor(h, args.Job, args.BufferBytes, args.Grep, args.Ignore)
-		}
-		if onCall != nil {
-			a := map[string]any{}
-			if args.Job != nil {
-				a["job"] = *args.Job
-			}
-			if args.Kill {
-				a["kill"] = true
-			}
-			onCall("exec_monitor", a, out)
-		}
-		return out, nil
-	}
-}
-
+// execMonitor tunes job id and reports on it, or lists every job when id is
+// nil: the command half of the jobs tool (jobs.go).
 func execMonitor(h *Harness, id, bufferBytes *int, grep *string, ignore *bool) string {
 	if id == nil {
 		jobs := h.bgJobList()
@@ -740,52 +679,10 @@ func execMonitor(h *Harness, id, bufferBytes *int, grep *string, ignore *bool) s
 	if j == nil {
 		return fmt.Sprintf("ERROR: no background job #%d.", *id)
 	}
-
-	j.mu.Lock()
-	if bufferBytes != nil {
-		j.mon.BufferBytes = *bufferBytes
+	if msg := tuneJob(h, j, bufferBytes, grep, ignore); msg != "" {
+		return msg
 	}
-	if ignore != nil {
-		j.mon.Ignore = *ignore
-	}
-	if grep != nil {
-		if strings.TrimSpace(*grep) == "" {
-			j.mon.Grep, j.re = "", nil
-		} else {
-			re, err := regexp.Compile(*grep)
-			if err != nil {
-				j.mu.Unlock()
-				return fmt.Sprintf("ERROR: grep %q is not a valid regexp: %v", *grep, err)
-			}
-			j.mon.Grep, j.re = *grep, re
-		}
-	}
-	tuned := bufferBytes != nil || ignore != nil || grep != nil
-	mon, done, res, logPath := j.mon, j.done, j.res, j.logPath
-	// Hand back whatever has accumulated, whether or not it met the threshold —
-	// an explicit ask is not the same as a scheduled report.
-	pending := string(j.pending)
-	j.pending = nil
-	j.mu.Unlock()
-	if tuned {
-		h.jobsChanged() // muting/unmuting changes what the row says about itself
-	}
-
-	var b strings.Builder
-	b.WriteString(j.status())
-	b.WriteString("\n" + describeMonitor(mon))
-	if logPath != "" {
-		b.WriteString("\nlog: " + logPath)
-	}
-	switch {
-	case done:
-		b.WriteString("\n" + tailOf(res.Output, bgTailBytes))
-	case pending != "":
-		b.WriteString("\nsince the last report:\n" + strings.TrimRight(pending, "\n"))
-	default:
-		b.WriteString("\n(nothing new since the last report)")
-	}
-	return b.String()
+	return jobReport(j, 0)
 }
 
 func describeMonitor(m bgMonitor) string {

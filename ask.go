@@ -38,17 +38,13 @@ func askToolDef() llm.ToolDef {
 	// Models left `multi` off even for "which of these should I fix?" while
 	// the text spoke only of one pick and one recommendation. So the two kinds
 	// of question are named side by side, each with what it is for.
-	td.Function.Description = "Ask the user ONE question when the task is ambiguous or a decision is theirs " +
-		"to make (rather than guessing). Give at least two concrete `options`; the user can still answer " +
-		"in their own words. First decide which kind of question it is:\n" +
-		"- Pick several (`multi`: true): the options do not exclude each other and the user may want any " +
-		"combination of them — which of these to include, fix, enable, install, remove, test. Use this " +
-		"instead of asking one question per item or forcing one pick from such a list. `recommended` is " +
-		"the list of options you recommend checking (it may be empty).\n" +
-		"- Pick one (`multi`: false, the default): the options are alternatives and only one can be chosen " +
-		"— which approach, which file, yes or no. `recommended` is the one option you recommend.\n" +
-		"Say why you recommend what you do in the question. Ask one question at a time — the answer to " +
-		"one often guides the next. Returns the user's answer (several picks come back comma-separated)."
+	td.Function.Description = "Ask the user one question when the task is ambiguous or the decision is theirs, " +
+		"instead of guessing. Give at least two concrete `options` and say in the question why you recommend " +
+		"what you do; the user can also answer in their own words.\n" +
+		"- Pick several (`multi`: true) when the options do not exclude each other (which of these to fix, " +
+		"enable, remove): ask once for the list, not once per item.\n" +
+		"- Pick one (the default) when only one can be chosen (which approach, yes or no).\n" +
+		"Returns the answer; several picks come back comma-separated."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -57,20 +53,18 @@ func askToolDef() llm.ToolDef {
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
 				"minItems":    askMinOptions,
-				"description": "at least two concrete choices; the user may still type their own answer",
+				"description": "at least two concrete choices",
 			},
 			"recommended": map[string]any{
 				"anyOf": []any{
 					map[string]any{"type": "string"},
 					map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				},
-				"description": "pick one: the option you recommend; pick several: an array of the options " +
-					"you recommend checking — each exactly as written in options",
+				"description": "the option you recommend, or for multi an array of them, each as written in options",
 			},
 			"multi": map[string]any{
-				"type": "boolean",
-				"description": "true when the options are not mutually exclusive and the user may choose " +
-					"several (which of these to include/fix/enable); false (default) when exactly one applies",
+				"type":        "boolean",
+				"description": "true: the user may pick several",
 			},
 		},
 		"required": []string{"question", "options", "recommended"},

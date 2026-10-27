@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,10 +89,10 @@ func TestSessionState_MergeLeavesUntouchedFields(t *testing.T) {
 		t.Errorf("status not updated: %q", got.Status)
 	}
 
-	// A new todo replaces the list; the goal survives.
+	// A new todo replaces the list; the goal and the status just set survive.
 	got2 := h.stateMerge(nil, nil, []string{"Just test"}, nil)
-	if got2.Goal != "Fix bug" || got2.Status != "in_progress" {
-		t.Errorf("todo merge lost the goal or reset status: %+v", got2)
+	if got2.Goal != "Fix bug" || got2.Status != "done" {
+		t.Errorf("todo merge lost the goal or the status set before it: %+v", got2)
 	}
 	if len(got2.Todo) != 1 || got2.Todo[0] != "Just test" {
 		t.Errorf("todo not replaced: %+v", got2.Todo)
@@ -199,9 +200,9 @@ func TestSessionState_NoStateIsClean(t *testing.T) {
 	}
 }
 
-// The tool is registered on a real session and routes by name: a session_state
-// call is handled, anything else falls through to the inner dispatcher.
-func TestSessionState_ToolRegistered(t *testing.T) {
+// The tool is registered on a real session, its old names are not in the
+// list, and anything else falls through to the inner dispatcher.
+func TestSession_ToolRegistered(t *testing.T) {
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir, SessionFile: filepath.Join(dir, "s.jsonl"),
@@ -211,21 +212,21 @@ func TestSessionState_ToolRegistered(t *testing.T) {
 	}
 	defer h.Close()
 
-	found := false
+	names := map[string]bool{}
 	for _, td := range h.Session.Tools {
-		if td.Function.Name == "session_state" {
-			found = true
-		}
+		names[td.Function.Name] = true
 	}
-	if !found {
-		t.Fatal("session_state is not registered as a tool")
+	if !names["session"] {
+		t.Fatal("session is not registered as a tool")
+	}
+	if names["session_state"] || names["harness"] {
+		t.Errorf("an old name is in the tool list: %v", names)
 	}
 
-	// A call for a different tool must fall through to the inner dispatcher.
 	inner := func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		return "inner:" + tc.Function.Name, nil
 	}
-	d := withSessionState(inner, h, nil)
+	d := withSession(inner, h, nil)
 	var tc llm.ToolCall
 	tc.Function.Name = "some_other_tool"
 	tc.Function.Arguments = "{}"
@@ -234,6 +235,54 @@ func TestSessionState_ToolRegistered(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out != "inner:some_other_tool" {
-		t.Fatalf("a non-session_state call must fall through, got %q", out)
+		t.Fatalf("a non-session call must fall through, got %q", out)
+	}
+}
+
+// session: no arguments reads both halves; a field merges and is saved; the
+// old names dispatch — harness reads, session_state merges its arguments.
+func TestSession_ReadMergeAliases(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "20261027-101500.jsonl")
+	h := &Harness{cfg: Config{Workspace: dir, SessionFile: file, Version: "v9", Endpoint: Endpoint{Model: "m1"}}}
+	d := withSession(func(context.Context, llm.ToolCall) (string, error) { return "inner", nil }, h, nil)
+	call := func(name, args string) sessionReply {
+		t.Helper()
+		var tc llm.ToolCall
+		tc.Function.Name, tc.Function.Arguments = name, args
+		out, err := d(context.Background(), tc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var r sessionReply
+		if err := json.Unmarshal([]byte(out), &r); err != nil {
+			t.Fatalf("%s: not JSON: %v\n%s", name, err, out)
+		}
+		return r
+	}
+
+	r := call("session", "{}")
+	if r.Harness.Name != "dun" || r.Harness.Version != "v9" || r.Harness.Model != "m1" || !r.State.empty() {
+		t.Errorf("read: %+v", r)
+	}
+	r = call("session", `{"goal":"ship it","todo":["test"]}`)
+	if r.State.Goal != "ship it" || len(r.State.Todo) != 1 || r.Harness.SessionID != "20261027-101500" {
+		t.Errorf("merge: %+v", r)
+	}
+	r = call("session", `{"status":"in_progress"}`)
+	if r.State.Goal != "ship it" || r.State.Status != "in_progress" || len(r.State.Todo) != 1 {
+		t.Errorf("second merge lost the first: %+v", r.State)
+	}
+	if got := LoadSessionState(file); got.Goal != "ship it" || got.Status != "in_progress" {
+		t.Errorf("saved: %+v", got)
+	}
+
+	r = call("session_state", `{"status":"done"}`)
+	if r.State.Status != "done" || r.State.Goal != "ship it" {
+		t.Errorf("session_state alias: %+v", r.State)
+	}
+	r = call("harness", `{"status":"ignored"}`)
+	if r.Harness.Version != "v9" || r.State.Status != "done" {
+		t.Errorf("harness alias: %+v", r)
 	}
 }

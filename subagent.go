@@ -139,11 +139,11 @@ func (s *subAgent) heartbeat() {
 			}
 			switch {
 			case s.blockedOn() != "":
-				line += fmt.Sprintf("\nIt asked: %s\nAnswer with agent_monitor(agent:%d, tell:\"…\").",
+				line += fmt.Sprintf("\nIt asked: %s\nAnswer with jobs(agent:%d, tell:\"…\").",
 					s.blockedOn(), s.num)
 			case state == agentIdle:
 				line += fmt.Sprintf("\nIt is holding its context open. Give it work with "+
-					"agent_monitor(agent:%d, tell:\"…\") or dismiss it with quit:true.", s.num)
+					"jobs(agent:%d, tell:\"…\") or dismiss it with kill:true.", s.num)
 			default:
 				// Check if the child is possibly wedged: it is agentRunning but
 				// has not shown any internal activity (tool call, chat round) for
@@ -155,11 +155,11 @@ func (s *subAgent) heartbeat() {
 				s.mu.Unlock()
 				if inactive > quiet {
 					line += fmt.Sprintf("\nIt has not made progress for %s and may be wedged. "+
-						"agent_monitor(agent:%d, tail:40) to see what it was doing.",
+						"jobs(agent:%d, tail:40) to see what it was doing.",
 						roundDur(inactive), s.num)
 				} else {
 					line += fmt.Sprintf("\nNothing is necessarily wrong; this is so a wedged agent does not "+
-						"look like a working one. agent_monitor(agent:%d, tail:40) to see what it is doing.", s.num)
+						"look like a working one. jobs(agent:%d, tail:40) to see what it is doing.", s.num)
 				}
 			}
 			// Not s.notify: the reminder must not reset the silence it is
@@ -293,7 +293,7 @@ func (s *subAgent) line() string {
 }
 
 // report is what the parent's model reads when a child goes idle, and what
-// agent_monitor answers with. It leads with the ANSWER, because that is the
+// jobs(agent:N) answers with. It leads with the ANSWER, because that is the
 // only reason the child was spawned.
 func (s *subAgent) report() string {
 	state, status, final, since := s.snapshot()
@@ -309,16 +309,16 @@ func (s *subAgent) report() string {
 	if final != "" {
 		b.WriteString("\nanswer: " + final)
 	} else if state == agentIdle {
-		b.WriteString("\nanswer: (it stopped without calling tell_parent — use agent_monitor(agent:" +
+		b.WriteString("\nanswer: (it stopped without calling tell_parent — use jobs(agent:" +
 			strconv.Itoa(s.num) + ", tail:40) to read what it did)")
 	}
 	if q := s.blockedOn(); q != "" {
 		b.WriteString("\nBLOCKED, waiting on you: " + q +
-			"\nAnswer with agent_monitor(agent:" + strconv.Itoa(s.num) + ", tell:\"…\").")
+			"\nAnswer with jobs(agent:" + strconv.Itoa(s.num) + ", tell:\"…\").")
 	}
 	b.WriteString(s.iso.status())
-	b.WriteString("\nIt is still resident and re-askable — agent_monitor(agent:" + strconv.Itoa(s.num) +
-		", tell:\"…\"), or quit:true when you are done with it.")
+	b.WriteString("\nIt is still resident: jobs(agent:" + strconv.Itoa(s.num) +
+		", tell:\"…\") gives it more work, kill:true dismisses it.")
 	return b.String()
 }
 
@@ -545,7 +545,7 @@ func (s *subAgent) releaseAskLocked() {
 	}
 }
 
-// ask blocks the CHILD until the parent answers via agent_monitor(tell:). The
+// ask blocks the CHILD until the parent answers via jobs(agent:N, tell:). The
 // bool is false when the child was cancelled or the session ended instead.
 func (s *subAgent) ask(ctx context.Context, question string) (string, bool) {
 	ch := make(chan string, 1)
@@ -557,7 +557,7 @@ func (s *subAgent) ask(ctx context.Context, question string) (string, bool) {
 	// the human immediately rather than waiting for the next poll.
 	s.parent.agentsChanged()
 	s.notify(fmt.Sprintf("agent #%d is BLOCKED waiting on you: %s\n"+
-		"Answer with agent_monitor(agent:%d, tell:\"…\").", s.num, question, s.num))
+		"Answer with jobs(agent:%d, tell:\"…\").", s.num, question, s.num))
 
 	select {
 	case ans, ok := <-ch:
@@ -585,11 +585,11 @@ func (s *subAgent) tell(msg string) string {
 	if s.state == agentRunning {
 		s.mu.Unlock()
 		return fmt.Sprintf("agent #%d is still running — wait for its report before telling it something new "+
-			"(agent_monitor(agent:%d, wait:true)).", s.num, s.num)
+			"(jobs(agent:%d, wait:true)).", s.num, s.num)
 	}
 	if s.h == nil {
 		s.mu.Unlock()
-		return fmt.Sprintf("agent #%d is stopped. Restart it with agent_monitor(agent:%d, resume:true) first.", s.num, s.num)
+		return fmt.Sprintf("agent #%d is stopped. Restart it with jobs(agent:%d, resume:true) first.", s.num, s.num)
 	}
 	// A new task is a new RUN: the clock and the answer both reset, or the next
 	// report describes the previous task.
@@ -615,7 +615,7 @@ func (s *subAgent) tell(msg string) string {
 		s.notify(s.report())
 	}()
 	return fmt.Sprintf("Told agent #%d. It is working; you will hear when it is done "+
-		"(or agent_monitor(agent:%d, wait:true)).", s.num, s.num)
+		"(or jobs(agent:%d, wait:true)).", s.num, s.num)
 }
 
 // quit dismisses a child for good. Children are resident until this is called,
@@ -798,7 +798,7 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 	sa.mu.Unlock()
 	h.agentsChanged()
 	return fmt.Sprintf("agent #%d is back, idle, with its transcript loaded. "+
-		"Give it work with agent_monitor(agent:%d, tell:\"…\").", sa.num, sa.num)
+		"Give it work with jobs(agent:%d, tell:\"…\").", sa.num, sa.num)
 }
 
 // closeAgents stops every child. Called before the parent's servers go, because
@@ -857,11 +857,12 @@ func (h *Harness) stoppedAgentsNote() string {
 		return ""
 	}
 	return "Sub-agents from the resumed session are STOPPED — their transcripts survived, their processes did not: " +
-		strings.Join(stopped, ", ") + ". Restart one with agent_monitor(agent:N, resume:true) if you still need it."
+		strings.Join(stopped, ", ") + ". Restart one with jobs(agent:N, resume:true) if you still need it."
 }
 
 // roleSystem is the part of the system prompt that depends on which side of the
-// relationship this harness is on.
+// relationship this harness is on. A child is told its role; a root has
+// nothing to add to the agent tool's description.
 func roleSystem(child bool) string {
 	if child {
 		return "\n\nYou are a SUB-AGENT working for another agent, not for a human. Do the task you were given and " +
@@ -873,13 +874,8 @@ func roleSystem(child bool) string {
 			"You cannot reach the human and you cannot spawn agents of your own. If the task turns out to " +
 			"need either, say so in `final` rather than working around it."
 	}
-	return "\n\nYou can delegate to SUB-AGENTS with `agent`. Use one when the work would cost you a lot of context " +
-		"for a small answer — reading a long log, scanning a large file, checking something you only need one " +
-		"line from. The child spends its own context and returns a summary; what it read never enters yours. " +
-		"Spawning is asynchronous: keep working and you will be told when it finishes, or pass wait:true when " +
-		"you have nothing to do until then. Children stay resident and re-askable — agent_monitor(agent:N, " +
-		"tell:\"…\") gives one more work, quit:true dismisses it. Dismiss them when you are done; nothing " +
-		"cleans them up for you."
+	// A root's side is the agent tool's description: said once, there.
+	return ""
 }
 
 // ── the tools ───────────────────────────────────────────────────────
@@ -892,10 +888,11 @@ func agentToolDef(defaultModel string) llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "agent"
-	td.Function.Description = "Delegate a task to a sub-agent. It runs in this worktree with the same tools, spends " +
-		"its OWN context, and reports back — so use it for work whose inputs are large and whose answer is " +
-		"small. Returns immediately; you are notified when the child finishes, unless wait:true. Default model: " +
-		model + "."
+	td.Function.Description = "Delegate a task to a sub-agent: for work that would cost you a lot of context for a " +
+		"small answer (reading a long log, scanning a large file). It has your tools, spends its own context, and " +
+		"returns an answer; what it read never enters yours. It returns at once and you are notified when the " +
+		"child finishes, unless wait:true. It stays resident until you dismiss it with jobs(agent:N, kill:true); " +
+		"nothing cleans it up for you. Default model: " + model + "."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -950,8 +947,8 @@ func spawnTool(ctx context.Context, h *Harness, prompt, model, isolation string,
 			}
 		}
 		return fmt.Sprintf("Started agent #%d on %s%s. It is working; you will be told when it finishes. "+
-			"Carry on with something else, or agent_monitor(agent:%d, wait:true) if you have nothing to do "+
-			"until it answers.", sa.num, sa.model, where, sa.num)
+			"Do other work, or jobs(agent:%d, wait:true) if you have nothing to do until it answers.",
+			sa.num, sa.model, where, sa.num)
 	}
 	select {
 	case <-sa.waitCh():
@@ -964,61 +961,9 @@ func spawnTool(ctx context.Context, h *Harness, prompt, model, isolation string,
 	return sa.report()
 }
 
-func agentMonitorToolDef() llm.ToolDef {
-	var td llm.ToolDef
-	td.Type = "function"
-	td.Function.Name = "agent_monitor"
-	td.Function.Description = "Check on sub-agents and steer them. With no `agent`, lists them all. With one, " +
-		"reports its state, its spend and its answer. `tail` reads that many lines of its transcript — what it " +
-		"actually did, not what it chose to report. `tell` gives a resident child new work, and is also how you " +
-		"answer one that is blocked on ask_parent. `wait` blocks until it settles. `resume` restarts a stopped " +
-		"child (one from a resumed session) from its transcript. `quit` dismisses it " +
-		"for good when you no longer need it (agents stay resident until you do). An agent left over from a " +
-		"finished task costs nothing to dismiss and is not free to keep."
-	td.Function.Parameters = map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"agent":  map[string]any{"type": "integer", "description": "agent id; omit to list every agent"},
-			"tail":   map[string]any{"type": "integer", "description": "read this many lines from the end of its transcript"},
-			"tell":   map[string]any{"type": "string", "description": "give it new work, or answer the question it is blocked on"},
-			"wait":   map[string]any{"type": "boolean", "description": "block until it settles"},
-			"resume": map[string]any{"type": "boolean", "description": "restart a stopped agent from its transcript"},
-			"quit":   map[string]any{"type": "boolean", "description": "dismiss it for good"},
-		},
-	}
-	return td
-}
-
-func withAgentMonitor(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		if tc.Function.Name != "agent_monitor" {
-			return inner(ctx, tc)
-		}
-		var args struct {
-			Agent  *int   `json:"agent"`
-			Tail   int    `json:"tail"`
-			Tell   string `json:"tell"`
-			Wait   bool   `json:"wait"`
-			Resume bool   `json:"resume"`
-			Quit   bool   `json:"quit"`
-		}
-		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		out := agentMonitor(ctx, h, args.Agent, args.Tail, args.Tell, args.Wait, args.Resume, args.Quit)
-		if onCall != nil {
-			a := map[string]any{}
-			if args.Agent != nil {
-				a["agent"] = *args.Agent
-			}
-			if args.Tell != "" {
-				a["tell"] = args.Tell
-			}
-			onCall("agent_monitor", a, out)
-		}
-		return out, nil
-	}
-}
-
-func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell string, wait, resume, quit bool) string {
+// agentMonitor is the agent half of the jobs tool (jobs.go): list, or one
+// child's report after a kill, resume, tell or wait.
+func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell string, wait, resume, kill bool) string {
 	if id == nil {
 		agents := h.agentList()
 		if len(agents) == 0 {
@@ -1034,7 +979,7 @@ func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell strin
 	if sa == nil {
 		return fmt.Sprintf("ERROR: no agent #%d.", *id)
 	}
-	if quit {
+	if kill {
 		return sa.quit()
 	}
 	if resume {
@@ -1065,7 +1010,7 @@ func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell strin
 				// parent's answer, but the parent is blocked here — a mutual
 				// deadlock with no auto-unblock. Breaking on a pending
 				// question lets report() surface it so the model can answer
-				// via agent_monitor(tell:) on the next turn.
+				// via jobs(agent:N, tell:) on the next turn.
 				if sa.blockedOn() != "" {
 					break waitLoop
 				}
@@ -1266,7 +1211,7 @@ func (h *Harness) AgentHistory(id int) ([]HistoryItem, bool) {
 }
 
 // AgentTell is the human steering a child directly, which is the same gesture
-// the parent's agent_monitor(tell:) makes — deliberately the same code path, so
+// the parent's jobs(agent:N, tell:) makes — deliberately the same code path, so
 // there is one definition of what telling a child means.
 func (h *Harness) AgentTell(id int, text string) string {
 	sa := h.agentByID(id)

@@ -9,7 +9,7 @@ import (
 
 // Killing a background job.
 //
-// A job used to be unkillable: exec_monitor could mute one, not stop it, and
+// A job used to be unkillable: the model could mute one, not stop it, and
 // an interrupt leaves the turn's jobs running on purpose. So a runaway
 // `go test ./...` burned the machine until it finished on its own.
 //

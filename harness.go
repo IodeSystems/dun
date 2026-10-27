@@ -377,10 +377,10 @@ type Config struct {
 	OnCompaction func(CompactionNote)
 	// OnAgents fires whenever a sub-agent changes — spawned, status, settled,
 	// dismissed. The human's only view of what children are costing, since
-	// agent_monitor is model-facing and there is no concurrency cap.
+	// jobs is model-facing and there is no concurrency cap.
 	OnAgents func([]AgentInfo)
 	// OnJobs fires when a background job starts, finishes, or is re-tuned. Same
-	// argument as OnAgents: exec_monitor is model-facing, so without this a job
+	// argument as OnAgents: jobs is model-facing, so without this a job
 	// the human can see running has no place to be seen from.
 	OnJobs func([]JobInfo)
 	// OnSystemBreakdown fires when the pre-conversation cost is (re)measured:
@@ -1423,7 +1423,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// "hi" or a pasted log, and a pinned entry rides every round for good.
 	shaper.Policy.PinFirstUser = h.isChild()
 	sess := &agent.Session{
-		SessionID:            "dun",
+		SessionID: "dun",
+		// dun writes the {OUTPUT} convention itself, shorter (systemSlots).
+		OmitSlotInstructions: true,
 		OnCompactionComplete: h.noteCompaction,
 		Store:                store,
 		Runner:               h.teeTurn(cfg.Client, cfg.OnReasoning),
@@ -1806,63 +1808,43 @@ func (h *Harness) ToolNames() []string {
 	return nil
 }
 
-// dun's coding-agent persona + tool guidance.
+// dun's coding-agent persona and what is not about one tool.
 //
 // Assembled per session rather than fixed, because the tool families are not
 // fixed: code and docs are opt-in and can come and go mid-session. Describing a
 // family whose tools are absent is worse than saying nothing — the model plans
 // around node_query, calls it, and gets "unknown tool".
+//
+// Each fact is said ONCE (USER 2026-10-27: "reduce the verbosity and
+// duplication"). What a dun tool does is in its own description; the system
+// prompt keeps the role, the containment, how to choose between tools, how to
+// work, and the lines for MCP servers whose descriptions dun does not write.
 const (
 	systemPreamble = `You are dun, a coding agent working inside an isolated workspace.`
 	systemCode     = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
 	systemShell    = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops."
 	systemDocs     = "\n- docs (raglit): search the document/knowledge index; get_document to read a full hit."
-	systemAsk      = "\n- ask_user: when the task is ambiguous or a decision is the user's to make (which approach, which file, is this OK to change), call ask_user with a clear question and optional options INSTEAD of guessing."
 
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
 
-	// The habit that bites, stated concretely because the general version does
-	// not fire. Measured: a `cat` of a log cost 255,720 characters and 64k of
-	// active window to answer a question whose answer was "30", and the model
-	// only recapped when a human told it to in the task.
-	systemRecap = "\n- recap: replace a stretch of this conversation with a corrected account of it. Call it as soon " +
-		"as a span has stopped earning its place: a big tool result you have taken what you need from (a log " +
-		"you grepped, a file you have read), several attempts that failed before one worked, or a " +
-		"misunderstanding that was cleared up later. Give `from` an exact phrase from the message the churn " +
-		"started after, and `summary` the account you WISH the conversation had — what happened and what is " +
-		"true now. Name results still worth having in `keep` by TOOL NAME or a phrase from the call " +
-		"(\"grep -c\"), not by id. Nothing is lost: it moves to a file. But your summary becomes the only " +
-		"record in context, so it must be accurate — do not round numbers or guess at what you did not read."
-
 	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed."
 	systemWork     = "\n\nWork step by step: read what you need before changing it, make minimal precise edits, and verify by running the build/tests with exec. Be concise. When the task is done, briefly summarize what you changed."
+
+	// systemSlots replaces agentkit's SlotSystemNote (OmitSlotInstructions):
+	// the same convention in two sentences instead of six.
+	systemSlots = "\n\nTo show the user a tool's output verbatim, write {OUTPUT} (the latest tool result) or {name} " +
+		"(a section the tool wrapped in <name>…</name>) instead of retyping it. The user sees the complete output " +
+		"there, even when your view of it was clipped."
 )
 
-// The exec pair are vars, not consts, because the deadline they quote is one
-// number that must not be duplicated: a prompt that promises a limit the code
-// does not enforce is worse than one that says nothing.
-var (
-	systemExec = "\n- exec: run a shell command (build/test/git/ls) in the workspace. The working directory is " +
-		"the isolated worktree root — edits you make are visible to exec. Use it to VERIFY your edits — e.g. run " +
-		"the build and tests after changing code — and to run git. A command still running after 30s is NOT killed and does NOT " +
-		"block you: it becomes a background job with no time limit. Never run anything " +
-		"interactive: it has no terminal and no input, so it can only hang."
-
-	systemMount = "\n- mount: ask the user to mount a host directory inside the Docker container. " +
-		"Use this when a build needs access to a path outside the worktree " +
-		"(e.g. a go.mod replace directive pointing to a sibling module like ../agentkit). " +
-		"The user must approve before the mount is added."
-	systemMonitor = "\n- exec_monitor: change what a background job tells you (buffer_bytes, grep, ignore), " +
-		"or end it (kill: true ends the job and everything it started). " +
-		"A job stays silent until it finishes and you will be notified — do NOT poll it. " +
-		"Only call exec_monitor to tune output, mute a job, or kill one that is no longer wanted. " +
-		"Its full output is on disk — grep the log path with exec rather than pulling a large log in whole."
-	systemExecCap = "\n\nANY tool result larger than " + fmt.Sprintf("%d", execInlineMax) + " characters is CLIPPED " +
-		"to its start and end before you see it, and the whole thing is saved under a short REF printed in the " +
-		"gap. That is not an error and the command did not fail. Do not claim you saw what was elided — read " +
-		"it instead: recap({ref:\"r1\", grep:\"…\"}), or head/tail/full. Re-running the command will only " +
-		"clip it again."
-)
+// systemExecCap quotes the clip limit, which must be the one number the code
+// enforces. Only with exec: the ref it names is read with recap, and the
+// clipping is exec's (execInlineMax).
+//
+// "Do not claim" stays: models reported what was in the elided middle.
+var systemExecCap = "\n\nA tool result over " + fmt.Sprintf("%d", execInlineMax) + " characters reaches you clipped " +
+	"to its start and end; the gap names a ref, and recap reads the rest. That is not a failure, and re-running " +
+	"only clips it again. Do not claim to have seen the clipped part."
 
 // HostedLine is the system prompt's sentence naming the servers hosted in
 // the shell, "" for none: what scripting a server costs in every request
@@ -1876,10 +1858,9 @@ func HostedLine(hosted []string) string {
 }
 
 // systemFor describes only the tool families actually present. files is the
-// file tools' line (systemFiles), "" when they are off. exec and ask_user
-// are wired by the dispatcher, not MCP, so applyTools appends their lines when
-// the corresponding Config hooks are set — here they are assumed, since every
-// caller that has a workspace has exec.
+// file tools' line (systemFiles), "" when they are off. dun's own tools
+// (exec, ask_user, recap, agent, jobs, session) are described by their
+// definitions alone.
 //
 // hosted are the MCP servers the shell carries as eval namespaces. mcpshell's
 // eval description is fixed text that names none of them, so without this
@@ -1904,28 +1885,24 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files str
 	} else {
 		b.WriteString(".")
 	}
-	b.WriteString("\n\nYour tools:")
-	b.WriteString(files)
+	var fam strings.Builder
 	if have[ServerCode] {
-		b.WriteString(systemCode)
+		fam.WriteString(systemCode)
 	}
 	if have[ServerShell] {
-		b.WriteString(systemShell)
-		b.WriteString(HostedLine(hosted))
+		fam.WriteString(systemShell)
+		fam.WriteString(HostedLine(hosted))
 	}
 	if have[ServerDocs] {
-		b.WriteString(systemDocs)
+		fam.WriteString(systemDocs)
 	}
+	if fam.Len() > 0 {
+		b.WriteString("\n\nTool servers:" + fam.String())
+	}
+	b.WriteString(files)
 	if exec != nil {
-		b.WriteString(systemExec)
 		b.WriteString(systemExecCap)
-		b.WriteString(systemMonitor)
-		if _, ok := exec.(DockerExec); ok {
-			b.WriteString(systemMount)
-		}
 	}
-	b.WriteString(systemAsk)
-	b.WriteString(systemRecap)
 	if have[ServerDocs] {
 		b.WriteString(systemDocsNote)
 	}
@@ -1984,7 +1961,7 @@ const compactionThrashTurns = 2
 // not just when a turn finishes, which is what makes the parent's view of a
 // child move while the child is still working.
 //
-// Why it matters more than it sounds: agent_monitor's report is the only thing a
+// Why it matters more than it sounds: jobs(agent:N)'s report is the only thing a
 // parent has to judge a child by, and its two moving parts are elapsed time and
 // tokens. With both frozen, "still working" and "stopped making progress" print
 // the same line — which is exactly how a wedged child went unnoticed for 15

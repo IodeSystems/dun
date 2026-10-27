@@ -244,8 +244,9 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp, added []*
 	}
 }
 
-// systemFiles is the system prompt's line for the file tools, naming only the
-// ones this session holds.
+// systemFiles is the system prompt's line for the file tools: when to use
+// them rather than exec, and the paths they take beyond the tree. What each
+// one does is in its own description.
 func systemFiles(ts *filetools.Toolset) string {
 	if ts == nil {
 		return ""
@@ -254,15 +255,21 @@ func systemFiles(ts *filetools.Toolset) string {
 	if len(names) == 0 {
 		return ""
 	}
-	line := "\n- " + strings.Join(names, ", ") + ": read, search and change files in the working tree, by paths relative to it " +
-		"(read, grep and list also take an absolute path under /tmp, and all of them a path the user added with /file add). " +
-		"Prefer them to exec for reading files (not cat/head/sed), searching (not grep/rg/find)"
+	line := "\n\nUse " + strings.Join(names, ", ") + ", not exec, to read files (not cat/head/sed) and search them (not grep/rg/find)"
 	if ts.Handles(ts.Name(filetools.Edit)) {
-		line += " and editing (not sed or heredocs)"
+		line += ", and to edit them (not sed or heredocs)"
 	}
-	line += ": reads are line-numbered and paged, searches respect .gitignore, and edits return the diff. " +
-		"Read before you edit; copy edit anchors from what " + ts.Name(filetools.Read) + " returned, without the line numbers."
-	return line
+	line += ". Paths are relative to the working tree, or one the user added with /file add"
+	var tmp []string
+	for _, bare := range []string{filetools.Read, filetools.Grep, filetools.List} {
+		if ts.Handles(ts.Name(bare)) {
+			tmp = append(tmp, ts.Name(bare))
+		}
+	}
+	if len(tmp) > 0 {
+		line += "; " + strings.Join(tmp, ", ") + " also take an absolute path under /tmp"
+	}
+	return line + "."
 }
 
 // addedRoute is the added path's toolset for a call whose path is absolute

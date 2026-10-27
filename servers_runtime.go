@@ -664,7 +664,7 @@ func (h *Harness) rebuildTools() {
 	h.srvMu.Unlock()
 	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
 	if cfg.Exec != nil {
-		toolDefs = append(toolDefs, execToolDef(), execMonitorToolDef())
+		toolDefs = append(toolDefs, execToolDef())
 		// ONE backend for everything. A long command used to need a stateless
 		// backend of its own so it would not hold the shell that every other
 		// command serializes on; now it donates that shell when it is promoted
@@ -674,7 +674,6 @@ func (h *Harness) rebuildTools() {
 			return h.startJob(cfg.Exec, command)
 		}
 		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting)
-		dispatch = withExecMonitor(dispatch, h, report)
 	}
 	// File tools, rooted at the working tree. Rebuilt with the tool set, so a
 	// worktree switch (Rehoist) moves their root with exec's.
@@ -722,23 +721,28 @@ func (h *Harness) rebuildTools() {
 		dispatch = withTellParent(dispatch, h, report)
 		dispatch = withAskParent(dispatch, h, report)
 	} else {
-		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel), agentMonitorToolDef())
+		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel))
 		dispatch = withAgent(dispatch, h, report)
-		dispatch = withAgentMonitor(dispatch, h, report)
+	}
+	// jobs watches both kinds of background work (jobs.go): a command exec
+	// handed off, and a sub-agent. A child gets it for its own commands; it
+	// has no agents, so the agent params are not in its definition.
+	if cfg.Exec != nil || !h.isChild() {
+		toolDefs = append(toolDefs, jobsToolDef(cfg.Exec != nil, !h.isChild()))
+		dispatch = withJobs(dispatch, h, report)
 	}
 	// recap is available to BOTH roles, and behaves identically in both: it
 	// applies and then reports. It used to ask a root's human first — see the
 	// rules at the top of recap.go for why that prompt was removed.
 	toolDefs = append(toolDefs, recapToolDef())
 	dispatch = withRecap(dispatch, h, report)
-	// session_state is available to BOTH roles and, like recap, always on: it
-	// is how a long task keeps its goal, plan, and open steps across context
-	// pressure and process restarts. The state it manages is per-session, so a
-	// child shares its parent's session file and thus its state.
-	toolDefs = append(toolDefs, sessionStateToolDef())
-	dispatch = withSessionState(dispatch, h, report)
-	toolDefs = append(toolDefs, harnessToolDef()) // what dun is, for a repo's PR rules (harnessinfo.go)
-	dispatch = withHarness(dispatch, h, report)
+	// session is available to BOTH roles and, like recap, always on: what
+	// runs the model (for a repo's PR rules) and how a long task keeps its
+	// goal, plan, and open steps across context pressure and process restarts
+	// (session_tool.go). It also answers the old names harness and
+	// session_state, which are not in the list.
+	toolDefs = append(toolDefs, sessionToolDef())
+	dispatch = withSession(dispatch, h, report)
 	// memory only while a memory.save extension runs AND a turn.before one
 	// does: a note is worth writing only because the proactive search brings
 	// it back (see memory.go).
@@ -795,6 +799,11 @@ func (h *Harness) rebuildTools() {
 		_, rulesIndexed := hookExt(exts, HookRulesChanged, tools)
 		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
+	}
+	// agentkit's own {OUTPUT} note is off (OmitSlotInstructions); this is
+	// the shorter one, on the same terms: only when there are tools.
+	if len(toolDefs) > 0 {
+		sys += systemSlots
 	}
 	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {
 		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."

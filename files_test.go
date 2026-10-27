@@ -57,11 +57,11 @@ func TestFileTools_Config(t *testing.T) {
 	}{
 		{"defaults", nil,
 			[]string{"file_edit", "file_grep", "file_list", "file_read", "file_write"},
-			[]string{"file_read, file_edit, file_write, file_grep, file_list:", "Prefer them to exec", "editing (not sed"}, nil},
+			[]string{"Use file_read, file_edit, file_write, file_grep, file_list, not exec", "edit them (not sed"}, nil},
 		{"off", &FilesConfig{Tools: []string{}}, nil, nil, []string{"file_read"}},
 		{"read-only", &FilesConfig{ReadOnly: &yes},
 			[]string{"file_grep", "file_list", "file_read"},
-			[]string{"file_read, file_grep, file_list:"}, []string{"editing (not sed", "file_edit"}},
+			[]string{"Use file_read, file_grep, file_list, not exec"}, []string{"edit them (not sed", "file_edit"}},
 		{"read-only false is the default", &FilesConfig{ReadOnly: &no},
 			[]string{"file_edit", "file_grep", "file_list", "file_read", "file_write"}, nil, nil},
 		{"delete and move opt in", &FilesConfig{Tools: []string{"read", "delete", "move"}},
