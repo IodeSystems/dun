@@ -68,7 +68,8 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 	props["tail"] = map[string]any{"type": "integer", "description": "show the last N lines of " + strings.Join(tail, " or ")}
 	props["kill"] = map[string]any{"type": "boolean", "description": "true " + strings.Join(kill, ", or ")}
 	td.Function.Description = "Background work: " + strings.Join(kinds, " and ") + ". You are notified when one " +
-		"finishes, so do not poll. With no number, lists them all."
+		"finishes, so do not poll: asking about one again before it changes waits until it does. " +
+		"With no number, lists them all."
 	td.Function.Parameters = map[string]any{"type": "object", "properties": props}
 	return td
 }
