@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 )
 
@@ -819,6 +820,10 @@ func (h *Harness) rebuildTools() {
 	// being the one the measurement caught looping twelve deep. It must wrap the
 	// wrappers rather than be wrapped by them: a call it refuses never runs, and
 	// a refusal is the LAST thing that should be reconsidered.
+	// A call that leaves out a required parameter is answered with its
+	// tool's whole signature (toolargs.go).
+	finalDefs := toolDefs
+	dispatch = withRequiredArgs(dispatch, func() []llm.ToolDef { return finalDefs })
 	dispatch = withLoopGuard(dispatch, h)
 	// Outside everything: a call the turn reaches after an interrupt is not
 	// run at all (interrupt.go).

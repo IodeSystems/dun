@@ -569,9 +569,29 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		// job — deciding what is in your context — but they are told apart by
 		// what was asked for, never by a mode flag the model has to remember.
 		var out string
-		if strings.TrimSpace(args.Ref) != "" {
+		switch {
+		case strings.TrimSpace(args.Ref) != "":
 			out = h.readSpill(args.Ref, args.Grep, args.Head, args.Tail, args.At, args.Full)
-		} else {
+		case strings.TrimSpace(args.Summary) == "" || strings.TrimSpace(args.From) == "":
+			// Neither mode's call: say both shapes and what was sent, not one
+			// missing word (USER 2026-10-27: three failed calls on "needs a
+			// summary", then the model gave up on recap).
+			var sent map[string]any
+			_ = json.Unmarshal([]byte(tc.Function.Arguments), &sent)
+			miss := "summary"
+			if strings.TrimSpace(args.From) == "" {
+				miss = "from"
+				if strings.TrimSpace(args.Summary) == "" {
+					miss = "from and summary"
+				}
+			}
+			out = "ERROR: recap was called without " + miss + ", and without ref.\n" +
+				"To replace a span: recap {from: string, summary: string, keep?: string[], user?: string} — " +
+				"from is an exact phrase from the message the span starts after; summary is the account that " +
+				"replaces it (required); keep names tool results in the span to keep word for word.\n" +
+				"To read a saved result: recap {ref: string, grep?: string, head?: integer, tail?: integer, full?: boolean}.\n" +
+				"You sent " + sentSig(sent) + "."
+		default:
 			out = h.runRecap(ctx, args.From, args.Summary, args.Keep, args.User)
 		}
 		if onCall != nil {

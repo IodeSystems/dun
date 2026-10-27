@@ -154,7 +154,6 @@ func withHarness(inner agent.ToolDispatcher, h *Harness, onCall func(string, map
 	}
 }
 
-
 // identityLine introduces dun in the system prompt: its icon, its session,
 // and where the rest is (USER 2026-10-27: asked for a one-character icon,
 // the model answered 👷; say so, and the session).
