@@ -89,7 +89,26 @@ type usageReport struct {
 	ByModel map[string]*usageTotals `json:"by_model"` // all time, key "provider/model"
 	ByRole  map[string]*usageTotals `json:"by_role"`  // all time: main, model, vision
 	Budget  usageBudget             `json:"budget"`
-	Notes   []string                `json:"notes,omitempty"`
+	// Scripted is, per MCP server hosted in mcpshell, what its schemas
+	// would have added to the requests that went out without them (the
+	// ledger's "scripted" field: the server's standalone schema tokens on
+	// each round). USER 2026-10-27: "how much I'm saving with my corp's 112
+	// tools being embedded in mcpshell".
+	Scripted map[string]*scriptedSaving `json:"scripted,omitempty"`
+	// PromptPrice is the average price of a prompt token over the rounds
+	// that reported a cost: the full rate, cache discounts not separated.
+	PromptPrice float64  `json:"prompt_price,omitempty"`
+	Currency    string   `json:"currency,omitempty"`
+	Notes       []string `json:"notes,omitempty"`
+}
+
+// scriptedSaving is one scripted server's schemas left out of requests.
+type scriptedSaving struct {
+	Requests int       `json:"requests"`
+	Tokens   int       `json:"tokens"`         // summed over those requests
+	Latest   int       `json:"latest"`         // its standalone size on the latest one
+	First    time.Time `json:"first"`
+	Last     time.Time `json:"last"`
 }
 
 // roleNote says what each ledger role holds, as far as the ledger knows.
@@ -101,7 +120,8 @@ var roleNote = map[string]string{
 
 // readUsage totals every ledger line in dir, relative to now.
 func readUsage(dir string, now time.Time) usageReport {
-	rep := usageReport{Now: now, ByModel: map[string]*usageTotals{}, ByRole: map[string]*usageTotals{}}
+	rep := usageReport{Now: now, ByModel: map[string]*usageTotals{}, ByRole: map[string]*usageTotals{}, Scripted: map[string]*scriptedSaving{}}
+	costSum, costPrompt := 0.0, 0
 	y, m, d := now.Date()
 	today := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 	week := now.AddDate(0, 0, -7)
@@ -125,6 +145,25 @@ func readUsage(dir string, now time.Time) usageReport {
 				continue
 			}
 			pa.add(r)
+			if r.Costed && r.Prompt > 0 {
+				costSum += r.Cost
+				costPrompt += r.Prompt
+				if rep.Currency == "" {
+					rep.Currency = r.Currency
+				}
+			}
+			for id, n := range r.Scripted {
+				s := rep.Scripted[id]
+				if s == nil {
+					s = &scriptedSaving{First: r.Time}
+					rep.Scripted[id] = s
+				}
+				s.Requests++
+				s.Tokens += n
+				if !r.Time.Before(s.Last) {
+					s.Last, s.Latest = r.Time, n
+				}
+			}
 			if rep.Since.IsZero() || r.Time.Before(rep.Since) {
 				rep.Since = r.Time
 			}
@@ -150,6 +189,9 @@ func readUsage(dir string, now time.Time) usageReport {
 		}
 	}
 	rep.Periods = []usagePeriod{{"today", *pt}, {"last 7 days", *pw}, {"all time", *pa}}
+	if costPrompt > 0 {
+		rep.PromptPrice = costSum / float64(costPrompt)
+	}
 	if pa.Requests == 0 {
 		rep.Notes = append(rep.Notes, "no rounds recorded in "+dir)
 		return rep
@@ -307,6 +349,24 @@ func renderUsage(r usageReport) string {
 				fmt.Fprintf(&b, "    %s: %s\n", k, roleNote[k])
 			}
 		}
+	}
+	if len(r.Scripted) > 0 {
+		b.WriteString("\nscripted in mcpshell: schemas left out of requests\n")
+		ids := make([]string, 0, len(r.Scripted))
+		for id := range r.Scripted {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			s := r.Scripted[id]
+			line := fmt.Sprintf("  %-*s ~%s tokens a request now · %s requests · ~%s tokens not sent",
+				w-2, id, grouped(s.Latest), grouped(s.Requests), grouped(s.Tokens))
+			if r.PromptPrice > 0 {
+				line += fmt.Sprintf(" · ≤ %.4f %s at the full prompt rate", float64(s.Tokens)*r.PromptPrice, r.Currency)
+			}
+			b.WriteString(line + "\n")
+		}
+		b.WriteString("    the window room is saved on every request; money less than shown where the provider caches the prompt (cached tokens cost less)\n")
 	}
 	b.WriteString("\nleft: ")
 	bd := r.Budget

@@ -110,3 +110,29 @@ func TestUsageEmptyLedger(t *testing.T) {
 		t.Fatal(rc, out.String())
 	}
 }
+
+// A server scripted in mcpshell: what its schemas would have added, per
+// request and in total, and money only as an upper bound (USER 2026-10-27).
+func TestUsage_ScriptedSavings(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	lines := []string{
+		`{"t":"2026-10-26T10:00:00Z","model":"m","prompt":100000,"completion":10,"cost":0.01,"cur":"USD","costed":true,"scripted":{"vay":82000}}`,
+		`{"t":"2026-10-27T10:00:00Z","model":"m","prompt":100000,"completion":10,"cost":0.01,"cur":"USD","costed":true,"scripted":{"vay":82900}}`,
+		`{"t":"2026-10-27T11:00:00Z","model":"m","prompt":1000,"completion":10}`,
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rounds-2026-10.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep := readUsage(dir, now)
+	s := rep.Scripted["vay"]
+	if s == nil || s.Requests != 2 || s.Tokens != 164900 || s.Latest != 82900 {
+		t.Fatalf("scripted: %+v", s)
+	}
+	out := renderUsage(rep)
+	for _, want := range []string{"scripted in mcpshell", "~82,900 tokens a request now", "2 requests", "~164,900 tokens not sent", "≤ 0.0165 USD at the full prompt rate", "cached tokens cost less"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+}
