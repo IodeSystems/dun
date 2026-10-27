@@ -1445,7 +1445,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		h.agentsChanged()
 	}
 	// What dun is in this session, for dun session <id> info (harnessinfo.go).
-	go h.writeHarnessInfo()
+	// Not on a goroutine: a write landing after the caller closed the session
+	// (a test's temp dir removed) fails its cleanup.
+	h.writeHarnessInfo()
 	return h, nil
 }
 
