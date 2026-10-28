@@ -17,9 +17,11 @@ import (
 //	dun · dun ⎇ main · chat          ctx 41.3k/131k · cache 96% · ttft 0.8s · pp 1.2k/s · tg 45/s
 //
 // The figures are the last turn round's (dun/reqstats.go says what each one
-// measures and where); tg and ctx move while a reply streams. A request's
-// start clears ttft, pp, tg and cache to "–" until the new figures arrive;
-// nothing is cleared at its end.
+// measures and where); tg and ctx move while a reply streams. Each keeps its
+// last value until a new one arrives: a request's start used to clear them to
+// "–", so between requests — most of the time — the bar said nothing (USER
+// 2026-10-28). pp and tg also show the session's average, weighted by tokens
+// (processed for pp, generated for tg), after a "~": tg  45/s ~41.
 //
 // No bounce: every piece has a fixed width (its number padded), so a number
 // changing never moves the others, and which pieces fit depends only on the
@@ -33,6 +35,14 @@ type reqBar struct {
 	seen      bool // a request event arrived
 	r         proto.Request
 	cacheSeen bool // some request reported the cache field
+
+	// The last value of each figure, kept across requests.
+	ttft     int64
+	pp, tg   float64
+	cachePct int
+	cacheHas bool
+	// Token-weighted sums for the averages: Σ rate·tokens and Σ tokens.
+	ppSum, ppN, tgSum, tgN float64
 }
 
 // requestEvent is the engine's figures as the protocol's event.
@@ -56,6 +66,35 @@ func (b *reqBar) noteRequest(ev evMsg) {
 	if r.CacheReported {
 		b.cacheSeen = true
 	}
+	if r.TTFTMS > 0 {
+		b.ttft = r.TTFTMS
+	}
+	if r.PPS > 0 {
+		b.pp = r.PPS
+	}
+	if r.TGS > 0 {
+		b.tg = r.TGS
+	}
+	if r.Phase != "done" {
+		return
+	}
+	if r.CacheReported && r.Prompt > 0 {
+		b.cachePct, b.cacheHas = int(math.Round(float64(r.Cached)*100/float64(r.Prompt))), true
+	}
+	if n := float64(r.Prompt - r.Cached); r.PPS > 0 && n > 0 {
+		b.ppSum, b.ppN = b.ppSum+r.PPS*n, b.ppN+n
+	}
+	if n := float64(r.Gen); r.TGS > 0 && n > 0 {
+		b.tgSum, b.tgN = b.tgSum+r.TGS*n, b.tgN+n
+	}
+}
+
+// avg is a token-weighted average, "" before there is one.
+func avg(sum, n float64) string {
+	if n <= 0 {
+		return ""
+	}
+	return "~" + tokK(int(sum/n))
 }
 
 // reqPiece is one stat: its label and its value padded to a fixed width.
@@ -90,17 +129,16 @@ func (b reqBar) pieces() []reqPiece {
 	}
 	out := []reqPiece{ctx}
 	if b.cacheSeen {
-		done := r.Phase != "start" && r.Phase != "live" && r.CacheReported && r.Prompt > 0
-		pct := ""
-		if done {
-			pct = fmt.Sprintf("%d%%", int(math.Round(float64(r.Cached)*100/float64(r.Prompt))))
-		}
-		out = append(out, reqPiece{label: "cache", value: dash(done, pct), width: 4, drop: 2})
+		out = append(out, reqPiece{label: "cache", value: dash(b.cacheHas, fmt.Sprintf("%d%%", b.cachePct)), width: 4, drop: 2})
+	}
+	// A rate and its average, each padded, so neither moves the other.
+	withAvg := func(v float64, a string, w int) string {
+		return fmt.Sprintf("%*s %5s", w, dash(v > 0, rate(v)), a)
 	}
 	out = append(out,
-		reqPiece{label: "ttft", value: dash(r.TTFTMS > 0, ttftText(r.TTFTMS)), width: 5, drop: 1},
-		reqPiece{label: "pp", value: dash(r.PPS > 0, rate(r.PPS)), width: 7, drop: 0},
-		reqPiece{label: "tg", value: dash(r.TGS > 0, rate(r.TGS)), width: 6, drop: 4},
+		reqPiece{label: "ttft", value: dash(b.ttft > 0, ttftText(b.ttft)), width: 5, drop: 1},
+		reqPiece{label: "pp", value: withAvg(b.pp, avg(b.ppSum, b.ppN), 7), width: 13, drop: 0},
+		reqPiece{label: "tg", value: withAvg(b.tg, avg(b.tgSum, b.tgN), 6), width: 12, drop: 4},
 	)
 	return out
 }

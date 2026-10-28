@@ -46,9 +46,9 @@ func TestReqBar_Widths(t *testing.T) {
 		w    int
 		want string // the stats, as plain text
 	}{
-		{120, "ctx 41.3k/131k · cache  96% · ttft  0.8s · pp  1.2k/s · tg   45/s"},
-		{100, "ctx 41.3k/131k · cache  96% · ttft  0.8s · tg   45/s"},
-		{80, "ctx 41.3k/131k · tg   45/s"},
+		{120, "ctx 41.3k/131k · cache  96% · ttft  0.8s · pp  1.2k/s ~1.2k · tg   45/s   ~45"},
+		{100, "ctx 41.3k/131k · cache  96% · tg   45/s   ~45"},
+		{80, "ctx 41.3k/131k · tg   45/s   ~45"},
 		{48, ""},
 	}
 	const title = "dun · ws ⎇ worktree-agent-a257eaba · chat"
@@ -74,8 +74,9 @@ func TestReqBar_Widths(t *testing.T) {
 }
 
 // No bounce: a live update with other numbers draws the stats at the same
-// width, so nothing moves; the start of the next request clears the old
-// figures to dashes in place.
+// width, so nothing moves. The start of the next request keeps the last
+// figures (it used to clear them to dashes, so between requests the bar said
+// nothing — USER 2026-10-28); a live update replaces only what it measured.
 func TestReqBar_NoBounce(t *testing.T) {
 	m := barModel(t, 120, reqDone)
 	a := stripANSI(m.headView())
@@ -86,17 +87,29 @@ func TestReqBar_NoBounce(t *testing.T) {
 	if len([]rune(a)) != len([]rune(b)) || len([]rune(b)) != len([]rune(c)) {
 		t.Errorf("widths moved:\n%q\n%q\n%q", a, b, c)
 	}
-	if !strings.HasSuffix(b, "ctx 41.7k/131k · cache    – · ttft     – · pp       – · tg      –") {
+	if !strings.HasSuffix(b, "ctx 41.7k/131k · cache  96% · ttft  0.8s · pp  1.2k/s ~1.2k · tg   45/s   ~45") {
 		t.Errorf("at start %q", b)
 	}
-	if !strings.HasSuffix(c, "ttft 12.3s · pp       – · tg  150/s") {
+	if !strings.HasSuffix(c, "ttft 12.3s · pp  1.2k/s ~1.2k · tg  150/s   ~45") {
 		t.Errorf("live %q", c)
 	}
 	// After the request ends the figures stay.
 	m = m.handleEvent(reqEv(t, reqDone))
 	m = m.handleEvent(evMsg{"type": "done"})
-	if d := stripANSI(m.headView()); !strings.HasSuffix(d, "tg   45/s") {
+	if d := stripANSI(m.headView()); !strings.HasSuffix(d, "tg   45/s   ~45") {
 		t.Errorf("after the turn %q", d)
+	}
+}
+
+// The average is weighted by tokens: a long reply at 30/s and a short one at
+// 90/s average near 30, not 60.
+func TestReqBar_AverageIsTokenWeighted(t *testing.T) {
+	long, short := reqDone, reqDone
+	long.TGS, long.Gen = 30, 900
+	short.TGS, short.Gen = 90, 100
+	m := barModel(t, 120, long, short)
+	if head := stripANSI(m.headView()); !strings.HasSuffix(head, "tg   90/s   ~36") {
+		t.Errorf("bar %q, want the last (90/s) and the weighted average (~36)", head)
 	}
 }
 
@@ -110,7 +123,7 @@ func TestReqBar_CacheNeverReported(t *testing.T) {
 	if strings.Contains(head, "cache") {
 		t.Errorf("cache shown though never reported: %q", head)
 	}
-	if !strings.HasSuffix(head, "ctx 41.3k · ttft  0.8s · pp  1.2k/s · tg   45/s") {
+	if !strings.HasSuffix(head, "ctx 41.3k · ttft  0.8s · pp  1.2k/s ~1.2k · tg   45/s   ~45") {
 		t.Errorf("bar %q", head)
 	}
 	// Reported once, 0% is a figure.
