@@ -76,7 +76,9 @@ func New(dir string, spawner Spawner) (*Service, error) {
 		s.mu.Lock()
 		ses := s.sessions[id]
 		s.mu.Unlock()
-		return ses != nil && ses.busy()
+		// Loaded too: busy is read from the engine's events, and an engine
+		// stopped mid-turn sent no done to clear it.
+		return ses != nil && ses.loaded() && ses.busy()
 	}
 	sched.deliver = s.deliverScheduled
 	recs, err := s.loadRegistry()

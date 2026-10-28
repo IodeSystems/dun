@@ -332,6 +332,20 @@ func TestSchedLoopFiringAndDefault(t *testing.T) {
 	if e, _ := svc.sched.get(alice, id); e.Awaiting || e.At.IsZero() || e.Iteration != 1 {
 		t.Errorf("after the default: %+v", e)
 	}
+	// A new engine for a session with a loop is told at once, not at the
+	// loop's next firing.
+	_ = svc.Stop(alice, a)
+	n := len(sp.received())
+	if err := ses.ensureRunning(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for indexOf(sp.received()[n:], "loops "+a+": 1") < 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if indexOf(sp.received()[n:], "loops "+a+": 1") < 0 {
+		t.Errorf("restarted engine not told: %q", sp.received()[n:])
+	}
 }
 
 func indexOf(ss []string, s string) int {
@@ -377,6 +391,25 @@ func TestSchedToAnotherSession(t *testing.T) {
 	}
 	if rep := schedReq(t, svc, sp, a, proto.SchedReq{Action: "add", At: time.Now(), To: "nobody", Text: "x"}); !strings.Contains(rep.Error, "no session") {
 		t.Errorf("unknown target: %+v", rep)
+	}
+}
+
+// An engine stopped mid-turn sends no done; the session is not left "in a
+// turn" for the scheduler (or dun_list) to wait on.
+func TestStopMidTurnIsNotBusy(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	a, _ := svc.Create(alice, t.TempDir(), nil, "")
+	ses, _ := svc.Get(alice, a)
+	_, sub, _ := ses.log.Subscribe(ses.log.Last(), 100)
+	defer sub.Close()
+	_ = svc.Send(alice, a, proto.NewCommand("", &proto.User{Content: "slow"}))
+	next(t, sub, "turn")
+	_ = svc.Stop(alice, a)
+	if err := ses.ensureRunning(); err != nil {
+		t.Fatal(err)
+	}
+	if ses.busy() || svc.sched.busy(a) {
+		t.Error("still in the turn the stop cut")
 	}
 }
 

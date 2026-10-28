@@ -336,9 +336,13 @@ func whenShown(e proto.SchedEntry, now time.Time) string {
 	if y, m, d := e.At.Local().Date(); y != now.Year() || m != now.Month() || d != now.Day() {
 		abs = e.At.Local().Format("Mon Jan 2 15:04")
 	}
-	rel := e.At.Sub(now).Round(time.Minute)
-	if rel <= 0 {
+	raw := e.At.Sub(now)
+	rel := raw.Round(time.Minute)
+	switch {
+	case raw <= 0:
 		return abs + " (due now)"
+	case rel <= 0:
+		return abs + " (in <1m)"
 	}
 	return abs + " (in " + shortDur(rel) + ")"
 }
