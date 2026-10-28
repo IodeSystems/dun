@@ -1756,6 +1756,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		return m.paste(msg)
 
+	case versionLatestMsg:
+		m.append(stDim.Render(msg.line))
+		m.refresh()
+		return m, nil
+
 	case updateNoteMsg:
 		// The release check's one line: a new build in place, or a refused one.
 		if msg != "" {
@@ -4964,6 +4969,7 @@ func init() {
 			m.append(stDim.Render("asked dund to restart now — running turns are interrupted and resume after"))
 			return nil
 		}},
+		{"version", "", "which dun this is, the newest release, and whether this build updates itself, and from where", versionSlash},
 		{"keys", "[reload|preset <name>]", "the key map: every rebindable action and its keys; yours go in ~/.dun/keys.json", keysSlash},
 		{"perf", "", "redraw timings for this session (and how to get a profile)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())

@@ -57,7 +57,7 @@ var tuiGroup = map[string]string{
 	"skill":  "tools",
 	"status": "session", "context": "session", "resume": "session", "new": "session", "persist": "session", "exit": "session", "close": "session", "splash": "session",
 	"reconnect": "client", "mouse": "client",
-	"reload": "maintenance", "upgrade": "maintenance", "perf": "maintenance", "repaint": "maintenance",
+	"reload": "maintenance", "upgrade": "maintenance", "version": "maintenance", "perf": "maintenance", "repaint": "maintenance",
 	"scrolldebug": "maintenance", "trace": "maintenance",
 }
 

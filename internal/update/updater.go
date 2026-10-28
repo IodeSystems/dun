@@ -173,3 +173,25 @@ func (u *Updater) Run(ctx context.Context) (res Result, err error) {
 	res.Staged, res.To, res.Summary = true, a.Version, m.Summary
 	return res, nil
 }
+
+// Latest fetches and verifies the newest release's manifest at url, with the
+// keys this build trusts and any next key endorsed before (in StateFile), and
+// installs nothing and records nothing: what /version shows as "latest".
+func Latest(ctx context.Context, f *Fetcher, url string, keys []PublicKey, home string) (*Manifest, error) {
+	body, err := f.Small(ctx, url, MaxManifest)
+	if err != nil {
+		return nil, err
+	}
+	sig, err := f.Small(ctx, url+".minisig", MaxSig)
+	if err != nil {
+		return nil, err
+	}
+	keys = append([]PublicKey(nil), keys...)
+	for _, line := range loadState(StateFile(home)).Keys {
+		if k, err := ParsePublicKey(line); err == nil {
+			keys = append(keys, k)
+		}
+	}
+	m, _, err := VerifyManifest(body, string(sig), keys)
+	return m, err
+}
