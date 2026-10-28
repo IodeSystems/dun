@@ -3593,6 +3593,27 @@ func (m tuiModel) viewportView(vp convoPane) string {
 // streams (applyScroll), so this is where it stays readable. An older message
 // would replace the title bar for the whole of a long session.
 func (m tuiModel) scrollOverlay() string {
+	text := m.overlayQuestion()
+	if text == "" {
+		return ""
+	}
+	return m.overlayBar(text, max(1, m.vp.Width))
+}
+
+// overlayBar is the question as a one-row band w cells wide.
+func (m tuiModel) overlayBar(text string, w int) string {
+	// Exactly one row, always. clip() overshoots — it appends the ellipsis to n
+	// characters rather than fitting inside n — so "› " + clip(text, width-2)
+	// came to width+1 cells and lipgloss wrapped the bar onto a second line.
+	// That put the frame a row over the terminal, which costs the top row: this
+	// bar. fitPlain is the width-aware fit the task line right below already
+	// uses, and oneLine keeps an embedded newline from doing the same thing.
+	text, _ = fitPlain(oneLine(text), max(0, w-2))
+	return stUser.Width(max(1, w)).Render("› " + text)
+}
+
+// overlayQuestion is the user message the overlay names, "" for none.
+func (m tuiModel) overlayQuestion() string {
 	if m.vp.YOffset == 0 || (m.scrollPinned && !m.busy) {
 		return "" // at top, or following with no turn running — nothing to show
 	}
@@ -3635,17 +3656,7 @@ func (m tuiModel) scrollOverlay() string {
 			closestText = e.userText
 		}
 	}
-	if closestText == "" {
-		return ""
-	}
-	// Exactly one row, always. clip() overshoots — it appends the ellipsis to n
-	// characters rather than fitting inside n — so "› " + clip(text, width-2)
-	// came to width+1 cells and lipgloss wrapped the bar onto a second line.
-	// That put the frame a row over the terminal, which costs the top row: this
-	// bar. fitPlain is the width-aware fit the task line right below already
-	// uses, and oneLine keeps an embedded newline from doing the same thing.
-	text, _ := fitPlain(oneLine(closestText), max(0, m.vp.Width-2))
-	return stUser.Width(max(1, m.vp.Width)).Render("› " + text)
+	return closestText
 }
 
 // convoHeight is the number of rows the conversation viewport actually gets
@@ -3698,8 +3709,18 @@ func (m tuiModel) convoHeight() int {
 // is the row the renderer drops first when a frame overdraws, so a head that
 // wrapped would delete itself.
 func (m tuiModel) headView() string {
-	if overlay := m.scrollOverlay(); overlay != "" {
-		return overlay
+	if q := m.overlayQuestion(); q != "" {
+		// The question shares the row with the request metrics, which a turn
+		// is when they matter (USER 2026-10-28: the question "leaving the dun
+		// status header out of view"). The metrics get at most half the row,
+		// dropping their least pieces first; the question the rest.
+		w := max(1, m.vp.Width)
+		stats := m.reqs.view(m.w, w/2-2)
+		if stats == "" {
+			return m.overlayBar(q, w)
+		}
+		sw := ansi.StringWidth(stats)
+		return m.overlayBar(q, w-sw-2) + "  " + stats
 	}
 	// Minimal: the project's folder and the model in use, where they can be
 	// checked at any time. The build, the full path, the tools and the

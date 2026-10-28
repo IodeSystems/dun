@@ -4367,3 +4367,33 @@ func TestActivity_FoldsWhenAQuestionTakesTheFocus(t *testing.T) {
 		t.Fatalf("after the question the strip should be one line, got %d lines (level %d):\n%s", n, m.actLevel, m.activityView())
 	}
 }
+
+// While a turn runs and its question is scrolled off, the top row is the
+// question AND the request metrics, still one row the terminal's width
+// (USER 2026-10-28: the question was "leaving the dun status header out of
+// view").
+func TestHeadView_QuestionKeepsTheMetrics(t *testing.T) {
+	v := newVtui(110, 20)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.m = v.m.handleEvent(reqEv(t, reqDone))
+	long := ""
+	for i := 0; i < 60; i++ {
+		long += fmt.Sprintf("line %d of the answer\n\n", i)
+	}
+	v.event(map[string]any{"type": "history", "items": []any{
+		map[string]any{"kind": "user", "content": "why is the build slow on arm64"},
+		map[string]any{"kind": "assistant", "content": long}}})
+	v.m.busy = true
+	v.setScrollPin(true)
+	v.setYOffset(1 << 20) // following the bottom, the question long gone
+	if v.m.overlayQuestion() == "" {
+		t.Fatalf("no question to show; yOffset %d", v.m.vp.YOffset)
+	}
+	head := stripANSI(v.m.headView())
+	if !strings.Contains(head, "› why is the build") || !strings.Contains(head, "ctx") {
+		t.Errorf("top row: %q", head)
+	}
+	if w := lipgloss.Width(v.m.headView()); w > 110 || strings.Contains(v.m.headView(), "\n") {
+		t.Errorf("top row is %d cells / wraps: %q", w, head)
+	}
+}
