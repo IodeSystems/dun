@@ -18,7 +18,8 @@ func init() {
 }
 
 // PeerRequest is an engine asking dund to list the live sessions (Op
-// "list") or to deliver Text to session To (Op "msg"). RID pairs it with
+// "list"), to deliver Text to session To (Op "msg"), or to run a scheduler
+// operation (Op "sched", schedule.go). RID pairs it with
 // its PeerReply. dund does not log it: it is plumbing, and the tool call
 // that made it is in the log already.
 type PeerRequest struct {
@@ -27,6 +28,8 @@ type PeerRequest struct {
 	To   string `json:"to,omitempty"`
 	Text string `json:"text,omitempty"`
 	Wake bool   `json:"wake,omitempty"`
+	// Sched is the operation for Op "sched" (schedule.go).
+	Sched *SchedReq `json:"sched,omitempty"`
 }
 
 // PeerReply answers a PeerRequest. Error is set when it failed. For "list",
@@ -41,6 +44,7 @@ type PeerReply struct {
 	Name     string        `json:"name,omitempty"`
 	Busy     bool          `json:"busy,omitempty"`
 	Started  bool          `json:"started,omitempty"`
+	Sched    *SchedReply   `json:"sched,omitempty"`
 }
 
 // PeerSession is one live session, as dun_list shows it. Name is its

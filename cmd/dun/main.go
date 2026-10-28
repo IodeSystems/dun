@@ -739,6 +739,7 @@ func main() {
 		if underDund() {
 			peers = newPeerLink(em)
 			cfg.Peers = peers
+			cfg.Loops = peers
 		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
@@ -1219,6 +1220,29 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			interruptCmd("")
 			return
 		}
+		// /schedule and /loop (schedule.go): dund keeps them, so the answer
+		// is a round-trip over the peer link — detached, because dund's reply
+		// comes in on this reader goroutine.
+		if id == "schedule" || id == "loop" {
+			go func() {
+				if peers == nil {
+					em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "/" + id + " " + noDund})
+					return
+				}
+				if id == "loop" {
+					em.emit(&proto.ControlEvent{ID: id, Action: action, Message: loopCmd(ctx, peers.sched, action, time.Now())})
+					return
+				}
+				msg, edit := schedCmd(ctx, peers.sched, action, time.Now())
+				if edit != "" {
+					// The TUI that asked puts it in its composer (tui.go).
+					em.emit(&proto.ControlEvent{ID: "schedule-edit", Action: edit, Message: msg})
+					return
+				}
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			}()
+			return
+		}
 		// /jobs: list or kill background jobs. Detached: a kill waits up to a
 		// few seconds for the job's process group to be gone.
 		if id == "jobs" {
@@ -1592,6 +1616,9 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	// Agent scope: the human reading a child's conversation, or steering it.
 	// `view` sends the scrollback (a stopped child's too) and starts the
 	// watch that forwards its new entries; `leave` ends it.
+	if peers != nil {
+		peers.onLoops = h.SetLoops
+	}
 	in.setPeerFn(peerIn(peers, h, em))
 	in.setAgentFn(func(id, action, content string) {
 		n, err := strconv.Atoi(id)
@@ -2100,7 +2127,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- msg
 			case "answer":
 				s.answers <- ev.Value
-			case "peer", "peer_reply", "peers":
+			case "peer", "peer_reply", "peers", "loops":
 				// Never an answer: a peer message cannot close an open
 				// ask_user, whatever it says.
 				s.peerCmd(ev.Type, []byte(line))

@@ -247,10 +247,22 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) 
 			}
 			s.track(ev)
 			s.log.Append(ev)
+			switch ev.Payload.(type) {
+			case *proto.Done, *proto.Error:
+				s.svc.loopTurnEnded(s)
+			}
 		}
 	}
 	err := eng.Wait()
 	s.exited(eng, err)
+	// What it was doing ended with it. dund's own "stopped" goes to the log,
+	// not through track, so without this a turn cut by a stop stayed "in a
+	// turn" until the next engine finished one (found live: a loop waited on
+	// it, and busy() said so to dun_list too).
+	s.track(proto.NewEvent(&proto.EngineState{State: "stopped"}))
+	// An engine gone mid-turn (stopped by /exit, crashed) never sends that
+	// turn's done: for a self-paced loop waiting on it, this is its end.
+	s.svc.loopTurnEnded(s)
 	close(done)
 }
 
@@ -347,6 +359,14 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 	s.log.Append(proto.NewEvent(&proto.EngineState{State: "started"}))
 	go s.readEvents(eng, s.engDone, sc)
 	go s.svc.announcePeers(s.owner) // not under mu: it locks each session's
+	// A session with a loop: the new engine lists loop_ctl from its first
+	// turn, not only from the loop's next firing (schedule.go). Off this
+	// goroutine: mu is held here, and a write waits for the engine to read.
+	if s.svc.sched != nil {
+		if n := s.svc.sched.loops(s.id); n > 0 {
+			go func() { _ = s.sendLoaded(proto.NewCommand("", &proto.Loops{Active: n})) }()
+		}
+	}
 }
 
 // send writes a command to the engine, starting it first if need be.

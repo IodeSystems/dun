@@ -701,8 +701,15 @@ type tuiModel struct {
 	drag         mouseSel        // a left-button click or drag in the convo pane (mouse.go)
 	curMaxH      int             // maxH for the streaming reply (see convoEntry.maxH)
 	curMaxKey    int
-	askParked    bool           // a question is open but its picker was put away (askpark.go)
-	flashText    string         // a short status-line note (askpark.go)
+	askParked    bool   // a question is open but its picker was put away (askpark.go)
+	flashText    string // a short status-line note (askpark.go)
+	// slashLine is the slash line being run, as typed: /schedule and /loop
+	// send their text with its spacing and newlines, which the fields every
+	// command gets have lost. schedEditAsk is the entry a bare
+	// "/schedule edit <id>" from THIS client asked for: only that client's
+	// composer takes the text back (every client sees the event).
+	slashLine    string
+	schedEditAsk string
 	flashUntil   time.Time      // when it goes
 	pulsePending bool           // a pulse tick is scheduled
 	bandRaw      []string       // the selected block's rows before the band, for a pulse step
@@ -876,8 +883,8 @@ type tuiModel struct {
 	// screen (not logged in) is one they are looking at as dun opens, so the
 	// tab shows it but the bell does not ring.
 	attnLive bool
-	tmux      *tmuxSync
-	iterm     *itermTab
+	tmux     *tmuxSync
+	iterm    *itermTab
 	// reqs is the last request's figures, for the top bar (reqbar.go).
 	reqs reqBar
 }
@@ -2726,6 +2733,19 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.refresh()
 			break
 		}
+		// /schedule edit <id>: the entry's text, into the composer to be
+		// changed — in the client that asked; the others show the line.
+		if str(ev["id"]) == "schedule-edit" {
+			want := m.schedEditAsk
+			m.schedEditAsk = ""
+			if f := strings.Fields(str(ev["action"])); want != "" && len(f) >= 3 && f[2] == want {
+				m.input.SetValue(str(ev["action"]))
+				m.input.CursorEnd()
+				m.focus = focusInput
+				m.refresh()
+				break
+			}
+		}
 		// /repaint report's answer: the TUI finishes it (repaintreport.go).
 		if str(ev["id"]) == "repaint" {
 			m.reportEvent(str(ev["action"]), str(ev["message"]))
@@ -2894,6 +2914,10 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			// The turn budget ran out and the grace started: the machinery
 			// speaking, so dim, not a bell.
 			m.append(stDim.Render("⏱ " + oneLine(str(ev["text"]))))
+		case "schedule":
+			// The scheduler speaking (a loop paced, or defaulted): dim, as
+			// the machinery is.
+			m.append(stDim.Render("⏲ " + oneLine(str(ev["text"]))))
 		case "peer":
 			// Another dun session's dun_msg: a message box, the sender first
 			// (the text is "<name> (<id>): <message>").
@@ -5327,6 +5351,7 @@ func (m tuiModel) paletteMatches() []slashCmd {
 
 // runSlash dispatches "/name args…" by exact name or a unique prefix.
 func (m *tuiModel) runSlash(v string) tea.Cmd {
+	m.slashLine = v
 	fields := strings.Fields(v)
 	if len(fields) == 0 {
 		return nil

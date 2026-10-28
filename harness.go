@@ -418,6 +418,9 @@ type Config struct {
 	// — no dund on the other end of the engine's stdio — leaves dun_list and
 	// dun_msg out of the tool set.
 	Peers PeerLink
+	// Loops reaches dund's scheduler, for loop_ctl (loopctl.go). nil with
+	// Peers: no dund, no loops.
+	Loops LoopLink
 	// Vision is what images on a user message need: which model Client runs
 	// (for the vision probe record) and the vision→text model that describes
 	// images for one that cannot read them. See images.go.
@@ -446,6 +449,9 @@ type Harness struct {
 	// hadPeers: another live session of this owner was seen, or messaged
 	// this one, so dun_list and dun_msg are in the tool set (peers.go).
 	hadPeers atomic.Bool
+	// hasLoops: this session has a /loop, so loop_ctl is in the tool set
+	// (loopctl.go).
+	hasLoops atomic.Bool
 	// The last plain jobs read and its answer (jobs.go): a repeat that
 	// answered the same is turned into a wait.
 	jobsPollMu   sync.Mutex

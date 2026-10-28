@@ -54,6 +54,16 @@ func (s *Service) handlePeer(from *session, req proto.PeerRequest) {
 			rep.Error = err.Error()
 		}
 		rep.ID, rep.Name, rep.Busy, rep.Started = d.ID, d.Name, d.Busy, d.Started
+	case "sched":
+		if req.Sched == nil {
+			rep.Error = "sched: no operation"
+			break
+		}
+		r, err := s.schedOp(from, *req.Sched)
+		if err != nil {
+			rep.Error = err.Error()
+		}
+		rep.Sched = &r
 	default:
 		rep.Error = fmt.Sprintf("unknown peer op %q", req.Op)
 	}

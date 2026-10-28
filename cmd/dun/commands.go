@@ -207,6 +207,21 @@ func ownCommands(iso string) []proto.CommandSpec {
 			State: onOff(rephraseOn), Description: "rephrase prompts for specificity before acting"},
 		{Name: "jobs", Usage: "[kill <n>|kill all]", Group: "session", Choices: choices("kill", "kill a job and everything it started: a number, or all"),
 			Description: "background jobs: alone lists the running ones, kill <n> ends one and everything it started, kill all ends every one"},
+		{Name: "schedule", Usage: "[<when> [--to <session>] <text> | list | push <id> <when>|+<dur> | edit <id> [text] | cancel <id>]", Group: "session", Text: true,
+			Choices: choices("list", "what is scheduled, loops too", "push", "move one: push <id> 15:00, or +1h past its time",
+				"edit", "replace one's text; edit <id> alone puts it in the composer", "cancel", "drop one"),
+			Description: "send a message later, to this session or another: /schedule 10m <text>, 15:00, tomorrow 9:00; alone lists",
+			Help: "/schedule <when> <text> sends <text> to this session at <when>, as if you typed it then; it arrives marked as scheduled.\n" +
+				"<when>: 10m or 2h30m from now, 15:00 (today, or tomorrow once it has passed), tomorrow 9:00, or an RFC3339 time. Your local time.\n" +
+				"--to <session> sends it to another of your sessions, by the name /sessions and dun_list give it, or its id.\n" +
+				"It arrives with no client attached and after dund restarts: dund keeps it and starts the session if it stopped. A busy session reads it in its running turn.\n" +
+				"/schedule lists every pending message and loop; push <id> <when> moves one (+1h: an hour past its time), edit <id> <text> replaces its text, cancel <id> drops it."},
+		{Name: "loop", Usage: "[[interval] <prompt> | stop [id]]", Group: "session", Text: true,
+			Choices:     choices("stop", "end this session's loop, or loop <id>"),
+			Description: "run a prompt again and again: /loop 10m <prompt>; no interval, the model paces it; alone lists",
+			Help: "/loop 10m <prompt> runs <prompt> now and then every 10 minutes (1m to 24h), until stopped.\n" +
+				"/loop <prompt>, with no interval, lets the model pace it: while a loop runs it has a loop_ctl tool to set the next run or stop; a run that ends without it waits 20m.\n" +
+				"A run waits while the session is in a turn. /loop lists the loops, /loop stop [id] ends one; /schedule push|edit|cancel work on loops too."},
 		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
 		{Name: "clear", Group: "session", Description: "clear the conversation and start a fresh session log"},
 		{Name: "discard", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript (it was /close; /close now exits, USER 2026-10-27)"},
@@ -501,6 +516,11 @@ func routeSlash(line string, r slashRoutes) {
 		r.control("close", "")
 	case "remember":
 		r.control(name, strings.Join(args, " "))
+	case "schedule", "loop":
+		// The rest of the line as typed: a message keeps its case, spacing
+		// and newlines. The engine parses it (schedule.go).
+		_, rest := cutFields(strings.TrimPrefix(strings.TrimSpace(line), "/"), 1)
+		r.control(name, rest)
 	case "clear":
 		r.reset()
 	default:

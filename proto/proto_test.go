@@ -43,6 +43,10 @@ func fill(v reflect.Value) {
 				Type: "token", Payload: &Token{Text: "t"}}))
 			return
 		}
+		if v.Type() == reflect.TypeFor[time.Time]() {
+			v.Set(reflect.ValueOf(time.Date(2026, 10, 27, 15, 0, 0, 0, time.UTC)))
+			return
+		}
 		for i := 0; i < v.NumField(); i++ {
 			fill(v.Field(i))
 		}

@@ -388,6 +388,7 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner,
 	cfg.Servers = parent.specs // shared manager; nothing is spawned from these
 	cfg.Ask = nil
 	cfg.Peers = nil // other sessions talk to the root, not to its children
+	cfg.Loops = nil // and a loop fires into the root
 	// A child's tokens, retries and compactions are its own business. Forwarding
 	// them to the parent's UI would interleave N children's streams into one
 	// conversation, which is the context re-merge the split exists to prevent.

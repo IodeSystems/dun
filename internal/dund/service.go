@@ -51,6 +51,9 @@ type Service struct {
 
 	up upgrader // a pending restart into a new build (upgrade.go)
 
+	// sched holds and fires the scheduled messages and loops (schedule.go).
+	sched *scheduler
+
 	// peerSent is when each (sender, target) pair's recent dun_msg went, for
 	// the rate limit (peer.go). Guarded by mu.
 	peerSent map[[2]string][]time.Time
@@ -64,6 +67,20 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	}
 	s := &Service{dir: dir, spawner: spawner, sessions: map[string]*session{}, done: make(chan struct{})}
 	s.up.init()
+	sched, err := loadScheduler(filepath.Join(dir, "schedule.json"), time.Now)
+	if err != nil {
+		return nil, err
+	}
+	s.sched = sched
+	sched.busy = func(id string) bool {
+		s.mu.Lock()
+		ses := s.sessions[id]
+		s.mu.Unlock()
+		// Loaded too: busy is read from the engine's events, and an engine
+		// stopped mid-turn sent no done to clear it.
+		return ses != nil && ses.loaded() && ses.busy()
+	}
+	sched.deliver = s.deliverScheduled
 	recs, err := s.loadRegistry()
 	if err != nil {
 		return nil, err
@@ -74,7 +91,7 @@ func New(dir string, spawner Spawner) (*Service, error) {
 			members: r.Members, args: r.Args, persist: r.Persist, resume: r.Resume, log: proto.NewLog(r.ID, logCapacity)}
 		// A session nothing was ever asked in is not kept (USER 2026-10-22);
 		// no engine runs yet, so it can simply be left out.
-		if !ses.persist && !ses.hasMessages() {
+		if !ses.persist && !ses.hasMessages() && !sched.has(r.ID) {
 			ses.log.Close()
 			dropped++
 			continue
@@ -96,6 +113,7 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	}
 	go s.reapIdle()
 	go s.resumeFlagged()
+	go sched.run(s.done)
 	return s, nil
 }
 
@@ -498,6 +516,7 @@ func (s *Service) Forget(principal, id string) error {
 	s.mu.Lock()
 	delete(s.sessions, id)
 	s.mu.Unlock()
+	s.sched.dropSession(id)
 	if err := os.RemoveAll(filepath.Join(s.dir, "ui", id)); err != nil {
 		return err
 	}
@@ -597,8 +616,10 @@ func (s *Service) Leave(principal, id string) error {
 
 // dropIfEmpty forgets a stopped session that holds no user message and does
 // not persist: an engine started and left without anything asked in it.
+// One with a message scheduled into it is kept: that message is what will be
+// asked in it.
 func (s *Service) dropIfEmpty(ses *session) {
-	if ses.persists() || ses.hasMessages() {
+	if ses.persists() || ses.hasMessages() || s.sched.has(ses.id) {
 		return
 	}
 	ses.log.Close()
