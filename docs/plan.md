@@ -142,6 +142,5 @@ owner's call before work starts.
 - [x] corrallm: hand-declared models can be deleted; dashboard keys are live
   (2bd1e96); a caller with no key gets 403 on every paid account; a 429
   names the budget that refused, its spend and when it has room again.
-- [ ] poly-lsp-mcp: find language servers installed with pnpm (aw4
-  i_1m5ze4k2581r4sbxy4h9g5; committed there, waiting on the owner). Swift
-  is pushed (6e5ef86, untagged).
+- [x] poly-lsp-mcp: language servers found outside PATH (pnpm, npm -g, volta,
+  bun, go, cargo, homebrew), and Swift: v0.3.1, pinned in dun v0.1.7.
