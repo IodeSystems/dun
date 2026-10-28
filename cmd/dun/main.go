@@ -713,6 +713,7 @@ func main() {
 		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
+		cfg.OnRequest = func(r dun.RequestStat) { em.emit(requestEvent(r)) }
 		// An autostart server that came up (or did not) after the session
 		// was ready. Before Start returns there is no harness to describe;
 		// the ready event that follows carries the server list instead.

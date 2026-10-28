@@ -841,6 +841,8 @@ type tuiModel struct {
 	tracePrevYOff     int      // last recorded YOffset (avoid duplicates)
 	// Context stats (for /context)
 	ctxStats contextStats
+	// reqs is the last request's figures, for the top bar (reqbar.go).
+	reqs reqBar
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
@@ -2573,6 +2575,8 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m = m.noteSwitches(ev)
 	case "skill_file":
 		m = m.noteSkillFile(ev)
+	case "request":
+		m.reqs.noteRequest(ev)
 	case "extensions":
 		m = m.noteExtensions(ev)
 	case "mcp_login":
@@ -3530,7 +3534,7 @@ func (m tuiModel) headView() string {
 	if m.reloadVer != "" {
 		head += "  " + stNote.Render("↻ "+m.reloadVer+" (/reload)")
 	}
-	return head
+	return m.reqs.withStats(head, m.w)
 }
 
 // View is drawView, remembered: /repaint's expected screen is the last frame
