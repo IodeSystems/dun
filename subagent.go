@@ -296,10 +296,34 @@ func (s *subAgent) line() string {
 	if n := s.spent(); n > 0 {
 		out += " · " + tokenCount(n)
 	}
+	if c := s.ctxLine(); c != "" {
+		out += " · " + c
+	}
 	if status != "" {
 		out += " — " + status
 	}
 	return out
+}
+
+// ctxLine is how full the child's context is: the last prompt it built,
+// against its window ("ctx 12.3k of 131.1k tokens"), so the parent can tell a
+// child near its limit (USER 2026-10-28: "when it's an agent, we give ctx
+// length info"). "" before its first request.
+func (s *subAgent) ctxLine() string {
+	s.mu.Lock()
+	h := s.h
+	s.mu.Unlock()
+	if h == nil {
+		return ""
+	}
+	used, win := h.meter.lastPromptTokens(), h.windowTokens()
+	if used <= 0 {
+		return ""
+	}
+	if win <= 0 {
+		return "ctx " + tokenCount(used)
+	}
+	return fmt.Sprintf("ctx %s of %s (%d%%)", strings.TrimSuffix(tokenCount(used), " tokens"), tokenCount(win), 100*used/win)
 }
 
 // report is what the parent's model reads when a child goes idle, and what
@@ -311,6 +335,9 @@ func (s *subAgent) report() string {
 	fmt.Fprintf(&b, "agent #%d is %s after %s (%s)", s.num, state, roundDur(since), tokenCount(s.spent()))
 	if s.model != "" {
 		fmt.Fprintf(&b, " on %s", s.model)
+	}
+	if c := s.ctxLine(); c != "" {
+		b.WriteString("\n" + c)
 	}
 	b.WriteString("\ntask: " + oneLine(s.prompt, 200))
 	if status != "" {

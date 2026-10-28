@@ -243,3 +243,33 @@ func TestJobs_AgentAndJobSaysWhoseJobItIs(t *testing.T) {
 		}
 	}
 }
+
+// jobs lists what this agent started — its commands and its sub-agents —
+// and nothing of anyone else's: a parent does not see its child's commands,
+// a child sees neither its parent's nor (having no agents) any agent. An
+// agent's row says how full its context is (USER 2026-10-28).
+func TestJobs_ListsOnlyWhatThisAgentStarted(t *testing.T) {
+	h := startParentOf(t, &scriptRunner{rounds: []roundFn{textRound("done")}})
+	sa := spawnKid(t, h, "say done")
+	waitIdle(t, sa)
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	mine := h.newJobStarted(be, "sleep 31")
+	t.Cleanup(func() { mine.killAndWait("test") })
+	kb := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(kb.Close)
+	theirs := sa.h.newJobStarted(kb, "sleep 32")
+	t.Cleanup(func() { theirs.killAndWait("test") })
+
+	parent := jobsCall(t, h, "jobs", `{}`)
+	if !strings.Contains(parent, "sleep 31") || !strings.Contains(parent, "agent #1") || strings.Contains(parent, "sleep 32") {
+		t.Errorf("the parent's list:\n%s", parent)
+	}
+	if !strings.Contains(parent, "ctx ") {
+		t.Errorf("an agent's row should say how full its context is:\n%s", parent)
+	}
+	child := jobsCall(t, sa.h, "jobs", `{}`)
+	if !strings.Contains(child, "sleep 32") || strings.Contains(child, "sleep 31") || strings.Contains(child, "agent #") {
+		t.Errorf("the child's list:\n%s", child)
+	}
+}
