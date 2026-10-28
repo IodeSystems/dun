@@ -28,6 +28,8 @@ type reasoningTee struct {
 	// save (interrupt.go). Every ChatStream call through the tee is a round of
 	// the turn: side calls untee first.
 	round *roundCapture
+	// req, when set, measures each round's speed (reqstats.go).
+	req *reqMeter
 }
 
 // teeTurn is the turn's runner: teed for live reasoning (when on is set) and
@@ -36,7 +38,8 @@ func (h *Harness) teeTurn(r agent.LLMRunner, on func(string)) agent.LLMRunner {
 	if r == nil {
 		return r
 	}
-	return &reasoningTee{LLMRunner: r, on: on, round: &h.round}
+	h.req = h.newReqMeter()
+	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req}
 }
 
 // teeReasoning wraps r so on sees each reasoning delta. nil on → r itself, so
@@ -62,8 +65,10 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	t.req.begin() // the request is sent from here: ttft counts from now
 	in, err := t.LLMRunner.ChatStream(ctx, msgs, tools, opts)
 	if err != nil || in == nil {
+		t.req.end()
 		return in, err
 	}
 	if t.round != nil {
@@ -72,11 +77,13 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 	out := make(chan llm.StreamChunk, cap(in))
 	go func() {
 		defer close(out)
+		defer t.req.end()
 		sawDone := false
 		for c := range in {
 			if t.round != nil {
 				t.round.add(c)
 			}
+			t.req.chunk(c)
 			if c.Reasoning != "" && t.on != nil {
 				t.on(c.Reasoning)
 			}

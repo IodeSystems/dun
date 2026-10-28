@@ -15,6 +15,7 @@ func init() {
 	event[ToolCall]("tool_call")
 	event[ToolResult]("tool_result")
 	event[Done]("done")
+	event[Request]("request")
 	event[Usage]("usage")
 	event[ContextCost]("context_cost")
 	event[Spend]("spend")
@@ -98,6 +99,30 @@ type ToolResult struct {
 type Done struct {
 	Reason string `json:"reason,omitempty"`
 	Detail string `json:"detail,omitempty"`
+}
+
+// Request is one turn round's speed and size (dun/reqstats.go), for a status
+// bar. Phase "start" when the request is sent, "live" while it streams (at
+// most about 4 a second), "done" with the provider's figures, and "ctx" when
+// a recap or compaction moved the context. The turn's own rounds only: side
+// calls and sub-agents are not counted. A rate is 0 (absent) until measured;
+// *_server says it is the server's own timing (llama.cpp). Exact: gen is the
+// provider's count, not the live estimate. CacheReported: the provider sent
+// the cached-tokens field, so cached 0 means 0% rather than unknown.
+type Request struct {
+	Phase         string  `json:"phase"`
+	TTFTMS        int64   `json:"ttft_ms,omitempty"`
+	Prompt        int     `json:"prompt,omitempty"`
+	Cached        int     `json:"cached,omitempty"`
+	CacheReported bool    `json:"cache_reported,omitempty"`
+	PPS           float64 `json:"pp,omitempty"`
+	PPSServer     bool    `json:"pp_server,omitempty"`
+	Gen           int     `json:"gen,omitempty"`
+	TGS           float64 `json:"tg,omitempty"`
+	TGSServer     bool    `json:"tg_server,omitempty"`
+	Exact         bool    `json:"exact,omitempty"`
+	Ctx           int     `json:"ctx,omitempty"`
+	Window        int     `json:"window,omitempty"`
 }
 
 // SystemCost is what the context costs before the conversation.
