@@ -58,6 +58,15 @@ owner's call before work starts.
   once; `/` searches the text and the links' targets. Under 80 columns the
   pane takes the screen. The engine reads the files (control `skillfile`,
   event `skill_file`), confined to the skill's folder. Display only.
+- [~] tmux window mark (owner, 2026-10-27): in tmux the TUI sets the window
+  options `@dun_icon` (⚙ working, ❓ question or login waiting, ✓ a turn
+  ended unseen, unset when idle) and `@dun_state`; ✓ clears on the next key
+  or a focus-in; both unset at exit. Calls are off the UI goroutine,
+  coalesced, 300 ms apart at most, 1 s timeout. A question rings the bell
+  once (`DUN_BELL=off`). `dun tmux` prints the tmux.conf lines and says
+  whether this tmux shows the icon. Never renames a window. Experimental,
+  iTerm2 only: `--exp-iterm-tabcontrol` titles and colours the tab by the
+  same states (tested by the bytes; not seen in iTerm2).
 - [ ] Collapse only under scroll pressure: a block folds as the scroll pushes
   it, never ahead of it, so no blank rows are left (owner: not yielding
   matters most).

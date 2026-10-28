@@ -227,6 +227,33 @@ when there are any).
 | esc | one level out: a search, a box, the conversation's selection, the activity zone (back to the composer), an agent's view, then interrupt a running turn |
 | → / enter on a job | the job view: the command on top (open; enter/→/← shut and open it), the log under it as a tail that follows while the job runs. ↑/↓ pgup/pgdn g/G scroll, `/` `?` search, `n`/`N` step, ← or esc back. `x` on a job row kills it. |
 
+**tmux.** In tmux the TUI marks its own window with the window options
+`@dun_icon` (⚙ a turn is running, ❓ a question or a login waits for you,
+✓ a turn ended while you were away; unset when idle) and `@dun_state`
+(`working`, `question`, `done`, `idle`). ✓ clears on your next key press, or
+when the terminal reports focus. tmux shows the icon only when the window
+list asks for it: `dun tmux` prints the lines to add to `~/.tmux.conf`,
+built on your current formats, and says whether this tmux shows it already:
+
+```
+set -g window-status-format '#{?@dun_icon,#{@dun_icon} ,}#I:#W#{?window_flags,#{window_flags}, }'
+set -g window-status-current-format '#{?@dun_icon,#{@dun_icon} ,}#I:#W#{?window_flags,#{window_flags}, }'
+```
+
+dun never renames a window or edits tmux.conf. A question also rings the
+terminal bell once, which tmux flags in the window list with no
+configuration and which works outside tmux too; `DUN_BELL=off` turns it off.
+
+**iTerm2 tabs** (experimental, iTerm2 only: `--exp-iterm-tabcontrol`; off by
+default). With the flag, in iTerm2 (`TERM_PROGRAM=iTerm.app` or
+`LC_TERMINAL=iTerm2`), the same states title the tab (`⚙ dun · <workspace>`)
+and colour it: amber working, pink question, green done, the default when
+idle. A question also asks iTerm2 for attention (the dock icon bounces;
+`DUN_BELL=off` turns that off with the bell). The title and colour are put
+back at exit. Inside tmux the escapes need `set -g allow-passthrough on`
+(`dun tmux` says so under iTerm2); without it the `@dun_icon` mark is what
+shows.
+
 The engine speaks a small JSON event protocol (`-p`): out `ready`/`token`/
 `tool_call`/`tool_result`/`message`/`usage`/`done`/`error` + `ask`/`notification`/
 `retry`/`queued`; in `{"type":"user",...}` / `{"type":"answer","value":...}` /
