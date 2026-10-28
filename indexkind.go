@@ -76,6 +76,12 @@ func (h *Harness) indexesView() SwitchView {
 		return v
 	}
 	own := h.ownProject(s)
+	// The provider first (USER 2026-10-28): raglit itself, its switch the
+	// same as /mcp's, the indexes under it.
+	provider := SwitchState{SwitchItem: SwitchItem{Name: ServerDocs, Description: h.describe(ServerDocs)},
+		On: s.Autostart, From: s.Scopes.OnFrom,
+		Global: onOffWord(s.Scopes.GlobalOn(s.Via)), Project: tri(s.Scopes.Project), Session: tri(s.Scopes.Session)}
+	v.Items = append(v.Items, provider)
 	scopes := map[string]map[string]string{}
 	mark := func(list []string, scope, val string) {
 		for _, n := range list {
@@ -96,6 +102,7 @@ func (h *Harness) indexesView() SwitchView {
 	add := func(it SwitchItem) {
 		seen[it.Name] = true
 		m := scopes[it.Name]
+		it.Parent = ServerDocs
 		st := SwitchState{SwitchItem: it, Global: m[ScopeGlobal], Project: m[ScopeProject], Session: m[ScopeSession]}
 		p, _, _ := strings.Cut(it.Name, ":")
 		st.On = p == own // unset everywhere: this project's own are on
@@ -153,6 +160,14 @@ func (h *Harness) indexesView() SwitchView {
 			add(SwitchItem{Name: n, Source: "switched", Description: "not in raglit's list"})
 		}
 	}
+	state := "off"
+	switch {
+	case h.mgr.ServerStarted(ServerDocs):
+		state = "running"
+	case s.Autostart:
+		state = "on, not running"
+	}
+	v.Items[0].Source = fmt.Sprintf("rag provider · %s · %d indexes", state, len(v.Items)-1)
 	on, from := h.WorkspaceIndexed()
 	if from == "" {
 		from = "the default"
@@ -167,6 +182,9 @@ func (h *Harness) indexesView() SwitchView {
 
 // setIndexAttach is a switch on an index at scope: on, off, or unset (nil).
 func (h *Harness) setIndexAttach(name, scope string, on *bool) (string, error) {
+	if name == ServerDocs { // the provider row: /mcp's switch on raglit
+		return h.SetServerOn(context.Background(), ServerDocs, scope, on)
+	}
 	got, _, changed, err := h.SetIndex(context.Background(), ServerDocs, name, scope, on)
 	if err != nil {
 		return "", err

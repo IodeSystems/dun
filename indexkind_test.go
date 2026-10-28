@@ -37,9 +37,13 @@ func TestIndexesKind_ListAttachDetach(t *testing.T) {
 	defer func() { listIndexes = old }()
 
 	v, ok := h.SwitchView(indexesKind)
-	if !ok || len(v.Items) != 2 || v.Items[0].On || v.Items[0].Source != "2304 docs" {
+	// [0] is the provider, raglit itself, its switch /mcp's; the indexes
+	// sit under it (USER 2026-10-28).
+	if !ok || len(v.Items) != 3 || v.Items[0].Name != ServerDocs || v.Items[0].Source != "rag provider · off · 2 indexes" ||
+		v.Items[1].On || v.Items[1].Source != "2304 docs" || v.Items[1].Parent != ServerDocs {
 		t.Fatalf("view: %+v", v.Items)
 	}
+	v.Items = v.Items[1:]
 	if _, err := h.SetSwitch(indexesKind, "aw4:aw4-main", ScopeProject, ptr(true)); err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +51,7 @@ func TestIndexesKind_ListAttachDetach(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, _ = h.SwitchView(indexesKind)
+	v.Items = v.Items[1:]
 	if !v.Items[0].On || v.Items[0].Project != "on" || v.Items[0].From != ScopeProject || !v.Items[1].On || v.Items[1].Session != "on" {
 		t.Fatalf("after attach: %+v", v.Items)
 	}
@@ -59,11 +64,18 @@ func TestIndexesKind_ListAttachDetach(t *testing.T) {
 	for _, it := range v.Items {
 		byName[it.Name] = it
 	}
-	if a := byName["aw4:aw4-main"]; len(v.Items) != 2 || a.On || a.Project != "off" || !byName[":code"].On || !strings.Contains(v.Note, "unknown flag") {
+	if a := byName["aw4:aw4-main"]; len(v.Items) != 3 || a.On || a.Project != "off" || !byName[":code"].On || !strings.Contains(v.Note, "unknown flag") {
 		t.Fatalf("fallback: %+v note %q", v.Items, v.Note)
 	}
 	if _, err := h.SetSwitchMode(indexesKind, "x", ScopeSession); err == nil {
 		t.Error("a mode was taken")
+	}
+	// The provider row's switch is /mcp's switch on raglit.
+	if _, err := h.SetSwitch(indexesKind, ServerDocs, ScopeSession, ptr(false)); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := h.knownServer(ServerDocs); s.Scopes.Session == nil || *s.Scopes.Session {
+		t.Errorf("raglit's session switch: %+v", s.Scopes.Session)
 	}
 }
 

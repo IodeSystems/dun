@@ -182,7 +182,7 @@ func TestFilePaths_ScopesModeAndPrecedence(t *testing.T) {
 	if len(es) != 1 || !es[0].On || !es[0].Write || es[0].From != ScopeGlobal || es[0].Scopes[ScopeGlobal] != "on" {
 		t.Errorf("entries: %+v", es)
 	}
-	if v, ok := h.SwitchView(pathsKind); !ok || len(v.Items) != 1 || !strings.Contains(v.Items[0].Source, "read and write") {
+	if v, ok := h.SwitchView(pathsKind); !ok || len(v.Items) != 2 || !strings.Contains(v.Items[1].Source, "read and write") { // [0]: the workspace
 		t.Errorf("table: %+v", v.Items)
 	}
 }
@@ -249,5 +249,41 @@ func TestFilePaths_IndexedDirectoryIsOnInRag(t *testing.T) {
 	s, _ = h.knownServer(ServerDocs)
 	if slices.Contains(s.Attach, name) || !slices.Contains(s.Detach, name) {
 		t.Errorf("index off should switch it off in /rag: on %v off %v", s.Attach, s.Detach)
+	}
+}
+
+// The /file table's first row is the workspace, always open; its mode is
+// switchable per scope, and a read-only workspace refuses edits (USER
+// 2026-10-28).
+func TestFilePaths_WorkspaceRow(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	os.WriteFile(filepath.Join(ws, "a.txt"), []byte("one\n"), 0o644)
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Client: &scriptRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	v := h.pathsView()
+	if len(v.Items) == 0 || v.Items[0].Name != filepath.Clean(ws) || !v.Items[0].On || !strings.HasPrefix(v.Items[0].Source, "read and write · this workspace") {
+		t.Fatalf("first row: %+v", v.Items)
+	}
+	if _, err := h.setPathSwitch(ws, ScopeSession, new(bool)); err == nil {
+		t.Error("the workspace was switched off")
+	}
+	if _, err := h.SetPathMode(".", ScopeProject, "read"); err != nil {
+		t.Fatal(err)
+	}
+	if v := h.pathsView(); !strings.HasPrefix(v.Items[0].Source, "read · this workspace") || v.Items[0].From != ScopeProject {
+		t.Errorf("after read at project: %+v", v.Items[0])
+	}
+	if out := fileCall(t, h, "file_edit", map[string]any{"path": "a.txt", "edits": []map[string]any{{"old": "one", "new": "two"}}}); !strings.Contains(out, "ERROR") {
+		t.Errorf("a read-only workspace took an edit: %s", out)
+	}
+	if _, err := h.SetPathMode(ws, ScopeSession, "write"); err != nil { // the nearer scope wins
+		t.Fatal(err)
+	}
+	if out := fileCall(t, h, "file_edit", map[string]any{"path": "a.txt", "edits": []map[string]any{{"old": "one", "new": "two"}}}); strings.Contains(out, "ERROR") {
+		t.Errorf("write at session: %s", out)
 	}
 }

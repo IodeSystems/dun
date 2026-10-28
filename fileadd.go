@@ -46,6 +46,10 @@ type PathEntry struct {
 
 type pathsFile struct {
 	Paths map[string]PathEntry `json:"paths,omitempty"`
+	// Workspace is this scope's mode for the session's own working tree,
+	// "read" or "write" ("" unset): the /file table's first row (USER
+	// 2026-10-28). Unset at every scope, dun.json's files.read_only decides.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // AddedPath is a path as the scopes decide it.
@@ -62,7 +66,9 @@ type AddedPath struct {
 
 func (h *Harness) pathsFile(scope string) string { return h.switchFile(pathsKind, scope) }
 
-func (h *Harness) loadPaths(scope string) map[string]PathEntry {
+func (h *Harness) loadPaths(scope string) map[string]PathEntry { return h.loadPathsFile(scope).Paths }
+
+func (h *Harness) loadPathsFile(scope string) pathsFile {
 	if scope == ScopeSession {
 		h.migrateAdded()
 	}
@@ -75,7 +81,52 @@ func (h *Harness) loadPaths(scope string) map[string]PathEntry {
 	if f.Paths == nil {
 		f.Paths = map[string]PathEntry{}
 	}
-	return f.Paths
+	return f
+}
+
+// workspaceWrite is whether the file tools may change the working tree, and
+// the scope that decided it ("" : dun.json's files.read_only, or the default).
+func (h *Harness) workspaceWrite() (write bool, from string) {
+	for _, sc := range []string{ScopeSession, ScopeProject, ScopeGlobal} {
+		if p := h.pathsFile(sc); p == "" {
+			continue
+		}
+		if m := h.loadPathsFile(sc).Workspace; m != "" {
+			return m == "write", sc
+		}
+	}
+	c := h.cfg.Files
+	return c == nil || c.ReadOnly == nil || !*c.ReadOnly, ""
+}
+
+// SetWorkspaceMode sets the working tree's mode at scope: "read", "write",
+// or "" to unset it there.
+func (h *Harness) SetWorkspaceMode(scope, mode string) (string, error) {
+	if mode != "read" && mode != "write" && mode != "" {
+		return "", fmt.Errorf("mode %q: want read or write", mode)
+	}
+	if err := h.editPathsFile(scope, func(f *pathsFile) { f.Workspace = mode }); err != nil {
+		return "", err
+	}
+	h.applyTools()
+	write, from := h.workspaceWrite()
+	what := map[bool]string{true: "read and write", false: "read only"}[write]
+	if from == "" {
+		from = "dun.json"
+	} else {
+		from = scopeWords(from)
+	}
+	return fmt.Sprintf("files: the workspace %s is %s (decided %s)", h.cfg.Workspace, what, from), nil
+}
+
+// isWorkspace reports whether p (as typed) names the session's working tree.
+func (h *Harness) isWorkspace(p string) bool {
+	p = strings.TrimSpace(p)
+	if p == "." || p == "./" {
+		return true
+	}
+	abs, err := cleanAdded(p)
+	return err == nil && h.cfg.Workspace != "" && abs == filepath.Clean(h.cfg.Workspace)
 }
 
 func (h *Harness) editPaths(scope string, edit func(map[string]PathEntry)) error {
@@ -83,9 +134,17 @@ func (h *Harness) editPaths(scope string, edit func(map[string]PathEntry)) error
 	if p == "" {
 		return fmt.Errorf("there is no %s scope here (an in-memory session)", scope)
 	}
-	m := h.loadPaths(scope)
-	edit(m)
-	b, err := json.MarshalIndent(pathsFile{Paths: m}, "", "  ")
+	return h.editPathsFile(scope, func(f *pathsFile) { edit(f.Paths) })
+}
+
+func (h *Harness) editPathsFile(scope string, edit func(*pathsFile)) error {
+	p := h.pathsFile(scope)
+	if p == "" {
+		return fmt.Errorf("there is no %s scope here (an in-memory session)", scope)
+	}
+	f := h.loadPathsFile(scope)
+	edit(&f)
+	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -276,6 +335,9 @@ func (h *Harness) SetPathOn(p, scope string, on bool) (string, error) {
 func (h *Harness) SetPathMode(p, scope, mode string) (string, error) {
 	if mode != "read" && mode != "write" {
 		return "", fmt.Errorf("mode %q: want read or write", mode)
+	}
+	if h.isWorkspace(p) {
+		return h.SetWorkspaceMode(scope, mode)
 	}
 	abs, err := cleanAdded(p)
 	if err != nil {
@@ -470,6 +532,15 @@ func (h *Harness) pathsSwitchKind() switchKind {
 
 func (h *Harness) pathsView() SwitchView {
 	v := SwitchView{Kind: pathsKind, Slash: "file", Modes: map[string]string{}}
+	// The working tree first: always open, its mode switchable.
+	if ws := h.cfg.Workspace; ws != "" {
+		write, from := h.workspaceWrite()
+		src := map[bool]string{true: "read and write", false: "read"}[write] + " · this workspace, always open"
+		if from == "" {
+			src += " · mode from dun.json"
+		}
+		v.Items = append(v.Items, SwitchState{SwitchItem: SwitchItem{Name: filepath.Clean(ws), Source: src}, On: true, From: from})
+	}
 	for _, a := range h.AddedEntries() {
 		src := "read"
 		if a.Write {
@@ -501,6 +572,9 @@ func (h *Harness) pathsView() SwitchView {
 // setPathSwitch is the table's switch on a path at scope: on, off, or unset
 // (nil: the scope no longer names it).
 func (h *Harness) setPathSwitch(name, scope string, on *bool) (string, error) {
+	if h.isWorkspace(name) {
+		return "", fmt.Errorf("the workspace is always open — ctrl+w, or /file mode . read|write, sets what the tools may do in it")
+	}
 	if on == nil {
 		return h.RemovePath(name, scope)
 	}

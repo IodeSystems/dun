@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"slices"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ import (
 
 type switchRow struct {
 	name, desc, source, detail string
+	parent                     string // the row it sits under (an index under raglit)
 	global, project, session   string // "on", "off", "" unset
 	from                       string // the scope that decided on
 	tokens                     int
@@ -186,6 +188,12 @@ func (v *switchListView) page() pageDoc {
 				sub += " · " + first
 			}
 		}
+		if r.parent != "" { // under its provider, dim while the provider is off
+			head = "  " + head
+			if p := v.byName(r.parent); p != nil && !p.on {
+				head = stDim.Render(ansi.Strip(head))
+			}
+		}
 		body := onOff(r.on)
 		if r.from != "" {
 			body += " (switched " + scopeIn(r.from) + ")"
@@ -285,7 +293,7 @@ func (m tuiModel) noteSwitches(ev evMsg) tuiModel {
 			o, _ := it.(map[string]any)
 			on, _ := o["on"].(bool)
 			fresh.rows = append(fresh.rows, switchRow{name: str(o["name"]), desc: str(o["description"]), source: str(o["source"]),
-				detail: str(o["detail"]), tokens: int(evNum(o["tokens"])), on: on, from: str(o["from"]),
+				detail: str(o["detail"]), parent: str(o["parent"]), tokens: int(evNum(o["tokens"])), on: on, from: str(o["from"]),
 				global: str(o["global"]), project: str(o["project"]), session: str(o["session"])})
 		}
 	}
@@ -423,4 +431,13 @@ func (m *tuiModel) fileTableCmd(action string) {
 	if !m.proc.controlCmd("files", action) || !m.proc.controlCmd("switches", "paths") {
 		m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
 	}
+}
+
+func (v *switchListView) byName(name string) *switchRow {
+	for i := range v.rows {
+		if v.rows[i].name == name {
+			return &v.rows[i]
+		}
+	}
+	return nil
 }

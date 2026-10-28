@@ -140,10 +140,13 @@ func (h *Harness) fileTools() *filetools.Toolset {
 		h.files, h.filesKey = nil, ""
 		return nil
 	}
+	write, _ := h.workspaceWrite() // the /file table's workspace row (fileadd.go)
+	cfg.ReadOnly = !write
 	key, _ := json.Marshal(struct {
-		Root string
-		Cfg  *FilesConfig
-	}{h.cfg.Workspace, h.cfg.Files})
+		Root  string
+		Cfg   *FilesConfig
+		Write bool
+	}{h.cfg.Workspace, h.cfg.Files, write})
 	if h.files != nil && h.filesKey == string(key) {
 		return h.files
 	}

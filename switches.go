@@ -41,6 +41,9 @@ type SwitchItem struct {
 	// Tokens is what the item costs in every request while it is on and the
 	// kind's mode sends it.
 	Tokens int `json:"tokens"`
+	// Parent names the row this one sits under (an index under its rag
+	// provider); a client indents it, and dims it while the parent is off.
+	Parent string `json:"parent,omitempty"`
 }
 
 // SwitchState is an item with its switches.
