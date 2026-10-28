@@ -13,14 +13,16 @@ package main
 // moves up by the rows it gave back (refresh), so every visible row stays
 // where it was. Scrolling back up shows it folded.
 //
-// Not while something else holds the view (a closed question's blank rows,
-// a panel's hold, a mouse highlight, a width change): those keep offsets of
-// their own, and the fold waits for a later refresh.
+// Not while something else keeps an offset of its own (a panel's hold, a
+// mouse highlight, a width or pane-height change: the callers that resize the
+// pane put the old top row back after the refresh), and the fold waits for a
+// later refresh. A hold of blank rows at the bottom (convoHold) moves up with
+// the rows.
 
 // foldAboveOK says this refresh may fold the blocks above the view.
 func (m *tuiModel) foldAboveOK() bool {
-	return m.frame.width != 0 && m.frame.width == m.vp.Width && m.vp.Height > 0 &&
-		m.convoHold == 0 && !m.panelHeld && !m.panelOpen() && !m.drag.on && !m.holdSkip
+	return m.frame.width != 0 && m.frame.width == m.vp.Width && m.frame.paneH == m.vp.Height &&
+		m.vp.Height > 0 && !m.panelHeld && !m.panelOpen() && !m.drag.on && !m.holdSkip
 }
 
 // aboveView says entry i was wholly above the view's top row y at the last

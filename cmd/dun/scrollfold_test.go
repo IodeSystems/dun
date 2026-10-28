@@ -313,3 +313,49 @@ func TestScrollFold_NoBlankRowsWhenACallTakesTheThought(t *testing.T) {
 		}
 	}
 }
+
+// Under a hold of blank rows at the bottom (a block closed, a question went),
+// a block above the view still folds; the view and the hold move up together,
+// so the rows on screen and the blank rows under them stay as they were.
+func TestScrollFold_UnderABottomHold(t *testing.T) {
+	f := newFoldSession(t, 49, 21)
+	for q := 0; q < 3; q++ {
+		f.turn(fmt.Sprintf("question %d", q), 1)
+	}
+	r := -1
+	for i, e := range f.v.m.convo {
+		if e.run != nil && r < 0 {
+			r = i
+		}
+	}
+	m := &f.v.m
+	// Reopen the first run (it folded when the stream pushed it off), with
+	// folding held off by a mouse press, and hold blank rows at the bottom.
+	m.drag.on = true
+	for _, it := range m.convo[r].run.items {
+		it.folded = false
+	}
+	m.convo[r].run.ver++
+	m.refresh()
+	m.convoHold, m.convoHoldW = len(m.vp.lines)+3, m.vp.Width
+	m.refresh()
+	m.drag.on = false
+	m.scrollPinned = false
+	m.vp.GotoBottom() // the view down into the blank rows
+	if e := m.convo[r]; e.rowOffset+e.lastH > m.vp.YOffset || runFolded(e) {
+		t.Fatalf("precondition: an open run above the view (%d+%d, view at %d)", e.rowOffset, e.lastH, m.vp.YOffset)
+	}
+	a := snap(f.v)
+	below := len(m.vp.lines) - m.vp.YOffset
+	m.refresh()
+	stay(t, "fold under a hold", a, snap(f.v))
+	if !runFolded(m.convo[r]) || m.foldedRows == 0 {
+		t.Fatalf("the run above the view did not fold")
+	}
+	if got := len(m.vp.lines) - m.vp.YOffset; got != below {
+		t.Errorf("the rows from the view's top to the end went %d → %d", below, got)
+	}
+	if blank := shown(f.v); strings.TrimSpace(blank[len(blank)-1]) != "" {
+		t.Errorf("the hold's blank rows are gone:\n%s", f.v.view())
+	}
+}

@@ -81,8 +81,9 @@ owner's call before work starts.
   matters most). Built (cmd/dun/scrollfold.go): a run's finished thought stays
   open on screen and folds once the run is wholly above the view; held
   heights (maxH, box peak) are released there too, and the view's top moves
-  up by the rows removed. Open: the end of a turn still re-pins a reader
-  who scrolled up (tui.go, "Force scroll to bottom").
+  up by the rows removed. Open (older, aw4 i_1m6044bc8cj8y3spm3390k): the
+  reply's first token snaps the view back to the last user message, and the
+  end of a turn re-pins a reader who scrolled up.
 
 ## Sessions and agents
 

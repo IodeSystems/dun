@@ -19,21 +19,22 @@ are in `decisions.md`.
   row and cuts the hold (a held form at 48 columns once left the pane blank).
 - **Total height never decreases (USER, 2026-10-22).** A tool run and the
   thinking between its calls form one grow-only box; every block is held at the
-  most rows it has drawn (`maxH`; property test `noshrink_test.go`).
+  most rows it has drawn (`maxH`; property test `noshrink_test.go`). Thinking
+  is a bounded box (USER: "expand to some reasonable size, and subscroll
+  there"): it grows to min(10, pane/3) rows, then scrolls inside, following the
+  tail while live.
 - **Fold only under scroll pressure (owner, 2026-10-27: "not yielding matters
   most").** A block on screen keeps its full height and its content. It folds
   only once it is wholly above the view: a run's finished thought becomes its
   one line, and the held height (`maxH`, a box's `peak`) is released. The
-  same refresh moves the view's top up by the rows removed, so no visible row
-  moves (`cmd/dun/scrollfold.go`, `scrollfold_test.go`). Before, a thought
-  folded to one line when the next call came, on screen, and the rows it gave
-  back were blank or showed older steps. Not while a hold, a panel, a mouse
-  drag or a new width keeps its own offsets; not the selected block. A block
-  the person opened stays open. The total height drops only by these rows
-  (`foldedRows`). Thinking
-  is a bounded box (USER: "expand to some reasonable size, and subscroll
-  there"): it grows to min(10, pane/3) rows, then scrolls inside, following the
-  tail while live.
+  same refresh moves the view's top up by the rows removed, and a bottom hold
+  (`convoHold`) with it, so no visible row moves (`cmd/dun/scrollfold.go`,
+  `scrollfold_test.go`). Before, a thought folded to one line when the next
+  call came, on screen, and the rows it gave back were blank or showed older
+  steps. Not while a panel, a mouse drag, a new width or a new pane height
+  keeps its own offsets; not the selected block. A block the person opened
+  stays open. The total height drops only by these rows (`foldedRows`, the
+  exception to the rule above). Replayed history comes back folded.
 - **Focus moves by tab only (USER, 2026-10-23).** Quote: "the movement between
   panes is incredibly obnoxious ... arrow key back shouldn't go between the
   focus groups. it should be tab, and ctrl+tab should be the insert raw tab".

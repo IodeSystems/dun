@@ -54,6 +54,7 @@ type frame struct {
 	blockH    []int    // rendered height of block i
 	height    int      // rows the convo viewport gets
 	width     int      // the wrap width this layout was built at
+	paneH     int      // the pane's height when it was built (scrollfold.go)
 }
 
 type tuiOpts struct {
@@ -4238,6 +4239,7 @@ func (m *tuiModel) refresh() {
 		blockH:    make([]int, len(blocks)), // cache block heights for scroll math
 		height:    m.convoHeightBudget(),
 		width:     m.vp.Width,
+		paneH:     m.vp.Height,
 	}
 
 	// Render all blocks. For user messages, re-render with full-width
@@ -4354,6 +4356,9 @@ func (m *tuiModel) refresh() {
 			m.convo[i].rowOffset, m.convo[i].lastH = cumRow, h
 		}
 		cumRow += h
+	}
+	if shift != 0 && m.convoHold > 0 {
+		m.convoHold -= shift // it counts rows from the top, the folded ones too
 	}
 	// A block that got shorter (closed, collapsed, a line taken away) does
 	// not pull the view back: the top row stays and blank rows fill in
