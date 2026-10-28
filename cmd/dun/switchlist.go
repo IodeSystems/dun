@@ -104,7 +104,7 @@ func (v *switchListView) lines(_ *tuiModel, w int) []string {
 		mode += " (" + v.modeFrom + ")"
 	}
 	if len(v.order) == 0 { // a kind with no modes (the indexes): what is on, and its facts
-		out := wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+fmt.Sprintf("%d of %d attached", on, len(v.rows)), w)
+		out := wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+fmt.Sprintf("%d of %d on", on, len(v.rows)), w)
 		for _, s := range v.status {
 			out = append(out, wrapToRows(stDim.Render(s), w)...)
 		}

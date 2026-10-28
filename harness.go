@@ -49,7 +49,7 @@ type Server struct {
 	// Timeout in seconds for tool discovery; 0 uses dun's default.
 	Timeout int
 	// Autostart spawns this server when the session starts. Off means the
-	// server is available but idle until asked for (/poly-lsp on, /raglit on).
+	// server is available but idle until asked for (/poly-lsp on, /rag on).
 	Autostart bool
 	// Disable is the GLOBAL deny-list of tool names to hide from the model.
 	// When empty, all tools discovered from this server are passed through.
@@ -75,8 +75,9 @@ type Server struct {
 	// OAuth, when set, logs in to the server and sends the token it gets
 	// (mcpoauth.go) instead of a fixed Bearer.
 	OAuth *OAuthSpec
-	// Attach is every scope's attached indexes, merged (attach.go).
-	Attach []string
+	// Attach and Detach are the indexes switched on and off, the nearest
+	// scope deciding each (attach.go).
+	Attach, Detach []string
 	// Exclude is the directories left out of its index (ServerSpec.Exclude),
 	// IndexBudget its index startup budget (ServerSpec.IndexBudget).
 	Exclude     []string
@@ -189,7 +190,7 @@ func normalizeProject(name string) string {
 // repo, and raglit needs the workspace ingested before it answers anything.
 // A session that is going to run a couple of shell commands should not pay for
 // either, and — more to the point — a machine missing one of those binaries
-// should still get a working dun. Persist a preference with /raglit auto or
+// should still get a working dun. Persist a preference with /rag auto or
 // /poly-lsp auto (see SetServerOn).
 //
 // poly-lsp and raglit are bundled extensions: their servers are their
@@ -227,13 +228,13 @@ func bundledServer(e Extension, workspace, raglitHome string) Server {
 }
 
 // Server ids dun knows by name. The id of poly-lsp-mcp and of raglit is the
-// name of the thing and of its command: /poly-lsp, /raglit. Their tools are
+// name of the thing and of its command: /poly-lsp, /rag. Their tools are
 // still unprefixed (see modelToolName). Config written before the rename says
 // "code" and "docs"; canonicalServerID reads those as the new ids.
 const (
 	ServerCode  = "poly-lsp" // poly-lsp-mcp — /poly-lsp
 	ServerShell = "shell"    // mcpshell
-	ServerDocs  = "raglit"   // raglit — /raglit
+	ServerDocs  = "raglit"   // raglit — /rag
 )
 
 // legacyServerIDs are the ids the two optional servers had before they were
@@ -266,7 +267,7 @@ type Config struct {
 	ConfigDir string
 	// AutostartOverride forces a server's autostart for THIS run only
 	// (dun --rag / --lsp), above both the built-in default and the config
-	// files. Nothing is persisted — that is what /raglit auto is for.
+	// files. Nothing is persisted — that is what /rag auto is for.
 	AutostartOverride map[string]bool
 	Client            agent.LLMRunner // the LLM (e.g. *llm.Client)
 	// ClientFor builds a runner for a NAMED model, so a sub-agent can run on a
@@ -533,7 +534,7 @@ type Harness struct {
 	// appear as if the model made them. Guarded by noteMu.
 	forcedToolCalls []llm.ToolCall
 
-	// Servers can start and stop mid-session (/raglit on, /poly-lsp off), which means
+	// Servers can start and stop mid-session (/rag on, /poly-lsp off), which means
 	// the tool set is not fixed at construction: srvMu guards the spec list and
 	// the last-error map, and every change ends in applyTools rebuilding the
 	// Session's tools, dispatcher, system prompt and doc preparer.
@@ -564,7 +565,7 @@ type Harness struct {
 	added     map[string]bool
 	closed    chan struct{}
 	closeOnce sync.Once
-	// ingestNote is the last workspace ingest's summary, for /raglit and the
+	// ingestNote is the last workspace ingest's summary, for /rag and the
 	// ready hint, and ingestID the server it went to. Guarded by srvMu.
 	ingestNote string
 	ingestID   string
@@ -922,7 +923,7 @@ func (h *Harness) userWaiting() <-chan struct{} {
 }
 
 // Aside hands the model context about the session itself — today, that the tool
-// set changed under it (/raglit on, /poly-lsp off).
+// set changed under it (/rag on, /poly-lsp off).
 //
 // It rides the same buffer as Notify and Say, and differs in exactly one way:
 // it will never CAUSE a turn. The three ways it can reach the model, cheapest
@@ -1368,7 +1369,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// Autostart is best-effort by design: a missing binary or a server that
 	// refuses to run is worth SAYING (it lands in Servers()[i].Err, which the
 	// UI reports), but it is not worth refusing to start the session over. The
-	// user can fix the binary and /raglit on without losing the session.
+	// user can fix the binary and /rag on without losing the session.
 	//
 	// Every server starts in the background, all at once. The session waits
 	// for the built-ins only up to serverStartGrace, and for an added server
@@ -1490,7 +1491,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// conversation; a fresh or in-memory session has none and renders nothing.
 	h.applySessionState()
 	// Tools, Dispatch, System and Preparer all depend on WHICH servers are
-	// running, and that changes mid-session (/raglit on, /poly-lsp off). applyTools
+	// running, and that changes mid-session (/rag on, /poly-lsp off). applyTools
 	// owns those four fields; nothing else may set them.
 	//
 	// The Session is published under turnMu: a server still starting in the

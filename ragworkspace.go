@@ -2,7 +2,7 @@ package dun
 
 import "fmt"
 
-// /raglit workspace off|on (USER 2026-10-27): raglit for other indexes
+// /rag workspace off|on (USER 2026-10-27): raglit for other indexes
 // (attached ones, memory, skills) without reading this workspace into an
 // index. Off, the workspace.open ingest is skipped; search still reads the
 // project's own indexes and the attached ones. Kept at the scopes of the

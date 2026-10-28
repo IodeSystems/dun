@@ -50,7 +50,7 @@ func TestHelp_OneCommandInFull(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.engineCmds = engineCmdsNow(t)
 	for name, wants := range map[string][]string{
-		"raglit":   {"Project search (raglit)", "/raglit on — turn it on for this session", "/raglit auto — turn it on in every session", "include"},
+		"rag":      {"Project search (raglit)", "/rag on — turn it on for this session", "/rag auto — turn it on in every session", "include"},
 		"poly-lsp": {"Code navigation (poly-lsp)", "/poly-lsp auto"},
 		"/mcp":     {"preset", "playwright", "same name again replaces it", "add"},
 		"login":    {"/login", "connect"},

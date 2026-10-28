@@ -28,7 +28,7 @@ import (
 // whole difficulty here — an agent.Session's Tools, Dispatch, System and
 // Preparer are all derived from which servers are up, so every start/stop ends
 // in applyTools recomputing the four together. Anything that sets one of them
-// directly will be silently reverted by the next /raglit or /poly-lsp.
+// directly will be silently reverted by the next /rag or /poly-lsp.
 //
 // Failure is not fatal, ever. A missing binary or a server that refuses to run
 // is reported (ServerState.Err) and the session carries on without that

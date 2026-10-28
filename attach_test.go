@@ -35,16 +35,45 @@ func TestUnionAttachAndSelector(t *testing.T) {
 	if !slices.Equal(u, []string{"a:x", "b:y", "own:z", "c:w"}) {
 		t.Errorf("union: %v", u)
 	}
-	if s := attachSelector("own", u); s != "own:*,a:x,b:y,c:w" {
+	if s := attachSelector("own", u, nil, nil); s != "own:*,a:x,b:y,c:w" {
 		t.Errorf("selector: %q", s)
 	}
 	// This project's own indexes are read by "<own>:*" already: no selector,
 	// so raglit's default (with the config's shared namespaces) stays.
-	if s := attachSelector("own", []string{"own:z"}); s != "" {
+	if s := attachSelector("own", []string{"own:z"}, nil, nil); s != "" {
 		t.Errorf("own only: %q", s)
 	}
-	if s := attachSelector("own", nil); s != "" {
+	if s := attachSelector("own", nil, nil, nil); s != "" {
 		t.Errorf("none: %q", s)
+	}
+	// One of its own switched off: its own named one by one, less that one
+	// (USER 2026-10-28: /rag); before the list is known, all of its own.
+	ownIdx := []string{"own:main", "own:memory", "own:skills"}
+	if s := attachSelector("own", nil, []string{"own:memory"}, ownIdx); s != "own:main,own:skills" {
+		t.Errorf("own off: %q", s)
+	}
+	if s := attachSelector("own", []string{"a:x"}, []string{"own:memory"}, ownIdx); s != "own:main,own:skills,a:x" {
+		t.Errorf("own off, other on: %q", s)
+	}
+	if s := attachSelector("own", nil, []string{"own:memory"}, nil); s != "own:*" {
+		t.Errorf("own off, list unknown: %q", s)
+	}
+	if s := attachSelector("own", nil, ownIdx, ownIdx); s != "own:-" {
+		t.Errorf("all off: %q", s)
+	}
+}
+
+// The nearest scope that names an index decides it.
+func TestEffectiveIndexes_NearestScopeDecides(t *testing.T) {
+	sc := ServerScopes{
+		AttachGlobal: []string{"a:x", "own:m"}, DetachSession: []string{"a:x"},
+		DetachProject: []string{"own:m"}, AttachSession: []string{"own:m", "b:y"},
+	}
+	if on := effectiveIndexes(sc, true); !slices.Equal(on, []string{"own:m", "b:y"}) {
+		t.Errorf("on: %v", on)
+	}
+	if off := effectiveIndexes(sc, false); !slices.Equal(off, []string{"a:x"}) {
+		t.Errorf("off: %v", off)
 	}
 }
 
@@ -190,8 +219,8 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	if _, _, changed, _ := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeSession, true); changed {
 		t.Error("attached twice")
 	}
-	// Project scope adds a second place it is set; detaching the session's
-	// leaves the project's.
+	// Project scope adds a second place it is set; unsetting the session's
+	// leaves the project's to decide (the nearest scope that says decides).
 	_, path, changed, err := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeProject, true)
 	if err != nil {
 		t.Fatal(err)
@@ -199,15 +228,26 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	if !changed || filepath.Base(path) != LocalServersFile {
 		t.Errorf("project attach: %v %q", changed, path)
 	}
-	if _, _, changed, _ := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeSession, false); !changed {
-		t.Error("detach session")
+	if _, _, changed, _ := h.SetIndex(ctx, ServerDocs, "other:handbook", ScopeSession, nil); !changed {
+		t.Error("unset session")
 	}
 	callTool(t, h, "search", map[string]any{"query": q()})
 	if c := last("search"); !strings.Contains(c, `"index":"`+sel+`"`) {
 		t.Errorf("still attached at project: %s", c)
 	}
-	if _, _, changed, _ := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeProject, false); !changed {
-		t.Error("detach project")
+	// Off at the session wins over on at the project.
+	if _, _, changed, _ := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeSession, false); !changed {
+		t.Error("off at session")
+	}
+	callTool(t, h, "search", map[string]any{"query": q()})
+	if c := last("search"); strings.Contains(c, `"index"`) {
+		t.Errorf("off at the session: %s", c)
+	}
+	if _, _, changed, _ := h.SetIndex(ctx, ServerDocs, "other:handbook", ScopeSession, nil); !changed {
+		t.Error("unset session again")
+	}
+	if _, _, changed, _ := h.SetIndex(ctx, ServerDocs, "other:handbook", ScopeProject, nil); !changed {
+		t.Error("unset project")
 	}
 	callTool(t, h, "search", map[string]any{"query": q()})
 	if c := last("search"); strings.Contains(c, `"index"`) {
@@ -221,7 +261,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	}
 }
 
-// /raglit watch runs the index CLI: `<cli> watch <abs dir> <store flags>
+// /rag watch runs the index CLI: `<cli> watch <abs dir> <store flags>
 // --index <name>`, the name defaulting to the directory's.
 func TestWatchDir_RunsTheIndexCLI(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
@@ -256,5 +296,43 @@ func TestWatchDir_RunsTheIndexCLI(t *testing.T) {
 	// A name is spelled as raglit stores it, so the one reported attaches.
 	if idx, _, err := h.WatchDir(context.Background(), ServerDocs, "My Notes", "Hand.Book"); err != nil || idx != "handbook" {
 		t.Errorf("name: %q %v", idx, err)
+	}
+}
+
+// One of this project's own indexes switched off: the model's search names
+// the others one by one (USER 2026-10-28: /rag). The list is raglit's,
+// cached; until it is known the search reads all of its own.
+func TestSetIndex_OwnIndexOffNarrowsTheSearch(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	var calls []string
+	var mu sync.Mutex
+	ts := fakeIndexMCP(t, &calls, &mu)
+	ws := t.TempDir()
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{{ID: ServerDocs, URL: ts.URL, Timeout: 10}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	ctx := context.Background()
+	if err := h.StartServer(ctx, ServerDocs); err != nil {
+		t.Fatal(err)
+	}
+	own := raglitProject(ws)
+	old := listIndexes
+	listIndexes = func(context.Context, string, string) ([]raglitIndexRow, error) {
+		return []raglitIndexRow{{Project: own, Index: "main"}, {Project: own, Index: "memory"}, {Project: "x", Index: "y"}}, nil
+	}
+	t.Cleanup(func() { listIndexes = old; ownIdxCache.Delete(own) })
+	noteOwnIndexes(own, []raglitIndexRow{{Project: own, Index: "main"}, {Project: own, Index: "memory"}})
+
+	if _, _, changed, err := h.SetIndex(ctx, ServerDocs, "memory", ScopeSession, ptr(false)); err != nil || !changed {
+		t.Fatalf("off: %v %v", changed, err)
+	}
+	callTool(t, h, "search", map[string]any{"query": "zzz"})
+	mu.Lock()
+	last := calls[len(calls)-1]
+	mu.Unlock()
+	if !strings.Contains(last, `"index":"`+own+`:main"`) {
+		t.Fatalf("own memory off: %s", last)
 	}
 }

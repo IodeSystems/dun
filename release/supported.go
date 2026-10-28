@@ -51,15 +51,15 @@ var Supported = []Tool{
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
 		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.3.1"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
-	// --json and provider keys by api_key_file, which /raglit setup and
+	// --json and provider keys by api_key_file, which /rag setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,
 	// 2026-10-25): no flag, MCP tool, notification or doctor --json change;
-	// /api/settings/models, which /raglit setup uses, is unchanged; a
+	// /api/settings/models, which /rag setup uses, is unchanged; a
 	// Markdown file's first heading is its title on (re)ingest. Recommended
 	// v0.2.1 (c4df764, 2026-10-26): its version string comes from the build
 	// info (v0.2.0's said 0.1.0). Recommended v0.3.0 (e434555, 2026-10-27),
 	// tarballs in deps.json: `index --list --json`, every project's indexes,
-	// which bare /raglit attach lists (dun/indexkind.go); ":<index>" reads a
+	// which bare /rag attach lists (dun/indexkind.go); ":<index>" reads a
 	// global index. MCP tools, notifications and doctor --json unchanged;
 	// search ranks per document and new files get smaller fragments.
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",

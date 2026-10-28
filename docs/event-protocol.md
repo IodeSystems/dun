@@ -13,7 +13,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `workspace` | Engine starts, reports worktree | `branch` |
 | `session` | Session created/resumed | `id` |
 | `ready` | Servers spawned, tools available | `tools[]`, `servers[]`, `hint` |
-| `server` | Server status changed (`/raglit`, `/poly-lsp`) | `id`, `action`, `message`, `tools[]`, `servers[]` |
+| `server` | Server status changed (`/rag`, `/poly-lsp`) | `id`, `action`, `message`, `tools[]`, `servers[]` |
 | `token` | Streaming assistant text | `text` (chunk) |
 | `tool_call` | Agent invoking a tool | `tool`, `args` |
 | `tool_result` | Tool returned | `tool`, `result` |
@@ -62,7 +62,7 @@ When the user types while a turn is running, the engine buffers the message
 |------|---------|--------|
 | `user` | Send a message | `content`, `images[]` (optional: `{path, label}` — a file on the engine's machine and the text in `content` that stands for it) |
 | `answer` | Respond to `ask_user` | `value` |
-| `server` | Control a server (`/raglit`, `/poly-lsp`) | `id`, `action` (`status`/`on`/`off`/`auto`/`manual`) |
+| `server` | Control a server (`/rag`, `/poly-lsp`) | `id`, `action` (`status`/`on`/`off`/`auto`/`manual`) |
 | `reset` | Clear the session store | — |
 | `interrupt` | Stop the turn in flight, keep the session (see below) | `reason` (optional: what stopped it, when not the user) |
 | `stop` | Stop processing, exit | — |

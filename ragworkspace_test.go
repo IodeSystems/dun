@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// /raglit workspace: on by default; a scope's off holds until a nearer
+// /rag workspace: on by default; a scope's off holds until a nearer
 // scope says on; a --no-dir session is always off and cannot be set.
 func TestWorkspaceIndexed_Scopes(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())

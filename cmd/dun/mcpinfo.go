@@ -85,7 +85,7 @@ func mcpInfo(in mcpInfoIn) string {
 				f = append(f, fact(plural(n, "language server")+" missing")) // /poly-lsp lists them
 			}
 			if st.Setup.CapabilityOff(dun.CapSemantic) {
-				f = append(f, fact("semantic search off")) // /raglit says why, /raglit setup turns it on
+				f = append(f, fact("semantic search off")) // /rag says why, /rag setup turns it on
 			}
 		}
 		rows = append(rows, "  "+pad(st.ID, idW)+"  "+strings.Join(f, " · "))

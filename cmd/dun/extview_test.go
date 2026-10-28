@@ -24,7 +24,7 @@ func TestExtScreen(t *testing.T) {
 		}
 		m = m.noteExtensions(evMsg{"type": "extensions", "addPath": "~/.dun/extensions/<id>/extension.json",
 			"errors": []any{"bad: extension.json: unknown field"},
-			"items": []any{map[string]any{"id": "raglit", "source": "bundled", "slash": "raglit", "description": "search and ingest",
+			"items": []any{map[string]any{"id": "raglit", "source": "bundled", "slash": "rag", "description": "search and ingest",
 				"roles":    []any{"search:search", "index:ingest/forget"},
 				"commands": []any{map[string]any{"name": "setup", "help": "pick an embedding provider"}}}}})
 		if m.activeScreen() == nil {
@@ -37,7 +37,7 @@ func TestExtScreen(t *testing.T) {
 				t.Errorf("%d: lacks %q:\n%s", w, want, plain)
 			}
 		}
-		if w < narrowW && !strings.Contains(plain, "    bundled · /raglit · search:search") {
+		if w < narrowW && !strings.Contains(plain, "    bundled · /rag · search:search") {
 			t.Errorf("%d: not two lines:\n%s", w, plain)
 		}
 		rec.Reset()

@@ -126,8 +126,8 @@ func TestScreen_Heights(t *testing.T) {
 // 2026-10-25).
 func TestRulesScreen_StatusPaneAndNarrowRows(t *testing.T) {
 	ev := evMsg{"type": "switches", "kind": "rules", "slash": "rules", "mode": "full", "order": []any{"full", "summary", "index"},
-		"note":   "the docs index is off (/raglit on): a file switched off is then not searchable, only named",
-		"status": []any{"docs index (raglit): off · /raglit on to search files switched off, and for mode index"},
+		"note":   "the docs index is off (/rag on): a file switched off is then not searchable, only named",
+		"status": []any{"docs index (raglit): off · /rag on to search files switched off, and for mode index"},
 		"items": []any{
 			map[string]any{"name": "CLAUDE.md", "source": "root", "tokens": float64(1200), "on": true},
 			map[string]any{"name": "docs/design.md", "source": "import", "tokens": float64(3100), "on": false, "project": "off", "from": "project"},

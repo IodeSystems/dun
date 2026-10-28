@@ -70,8 +70,10 @@ type ServerScopes struct {
 	ViaGlobal, ViaProject    string // "", ViaDirect, ViaShell
 	ViaSession               string
 	ViaFrom                  string // the scope that decided Via; "" for a built-in
-	// Attached indexes at each scope (attach.go); Server.Attach is their union.
+	// Indexes switched on (attached) and off (detached) at each scope
+	// (attach.go); Server.Attach and Server.Detach are the result.
 	AttachGlobal, AttachProject, AttachSession []string
+	DetachGlobal, DetachProject, DetachSession []string
 }
 
 // GlobalOn is the global switch as shown: unset is off, except for a server
@@ -89,10 +91,11 @@ type SessionServer struct {
 	Via    string          `json:"via,omitempty"`
 	Tools  map[string]bool `json:"tools,omitempty"`
 	Attach []string        `json:"attach,omitempty"`
+	Detach []string        `json:"detach,omitempty"`
 }
 
 func (s SessionServer) empty() bool {
-	return s.On == nil && s.Via == "" && len(s.Tools) == 0 && len(s.Attach) == 0
+	return s.On == nil && s.Via == "" && len(s.Tools) == 0 && len(s.Attach) == 0 && len(s.Detach) == 0
 }
 
 // SessionServersFile is the session's switch sidecar, "" for an in-memory
@@ -215,7 +218,7 @@ func loadCatalog(dir string, base []Server) ([]catalogEntry, error) {
 func switchesOnly(s ServerSpec) bool {
 	return s.Command == "" && s.URL == "" && s.Args == nil && s.Env == nil && s.Headers == nil &&
 		s.Bearer == "" && s.OAuth == nil && s.Timeout == 0 &&
-		(s.Autostart != nil || s.Via != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Exclude != nil || s.IndexBudget != "" || s.IndexAnyway)
+		(s.Autostart != nil || s.Via != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Detach != nil || s.Exclude != nil || s.IndexBudget != "" || s.IndexAnyway)
 }
 
 // resolve turns a catalog entry and this session's switches into the Server
@@ -233,7 +236,8 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		return Server{}, false, fmt.Errorf("dun: server %q has no command or url (declare one, or remove the entry)", s.ID)
 	}
 	sc := ServerScopes{Global: e.global.Autostart, Project: e.project.Autostart, Session: sess.On,
-		AttachGlobal: e.global.Attach, AttachProject: e.project.Attach, AttachSession: sess.Attach}
+		AttachGlobal: e.global.Attach, AttachProject: e.project.Attach, AttachSession: sess.Attach,
+		DetachGlobal: e.global.Detach, DetachProject: e.project.Detach, DetachSession: sess.Detach}
 	var err error
 	for _, v := range []struct {
 		in  string
@@ -301,7 +305,8 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		Bearer:         s.Bearer,
 		OAuth:          s.OAuth,
 		Scopes:         sc,
-		Attach:         unionAttach(sc.AttachGlobal, sc.AttachProject, sc.AttachSession),
+		Attach:         effectiveIndexes(sc, true),
+		Detach:         effectiveIndexes(sc, false),
 		Exclude:        s.Exclude,
 		IndexBudget:    s.IndexBudget,
 		IndexAnyway:    s.IndexAnyway,

@@ -121,7 +121,7 @@ func rememberInstruction(what string) string {
 func (h *Harness) Remember(ctx context.Context, what string) (string, error) {
 	m := h.memoryStore()
 	if m == nil {
-		return "", fmt.Errorf("memory needs the docs index — /raglit on first (a note nothing can search for is never read again)")
+		return "", fmt.Errorf("memory needs the docs index — /rag on first (a note nothing can search for is never read again)")
 	}
 	results, err := h.fork(ctx, "remember", rememberInstruction(what), memoryToolDef(), func(args string) string {
 		return h.memoryCall(m, args)

@@ -24,11 +24,11 @@ should still get a working dun. Turn them on per session, or once for good:
 
 | command | does |
 |---|---|
-| `/raglit` · `/poly-lsp` | status: on or off, which switch decided, and the command that changes each |
-| `/raglit on` · `/poly-lsp on` | on for this session (kept across a resume) |
-| `/raglit off` · `/poly-lsp off` | off for this session |
-| `/raglit auto` · `/poly-lsp auto` | on for this project, every session (= `on --project`) |
-| `/raglit manual` · `/poly-lsp manual` | off for this project (= `off --project`); it stops now |
+| `/rag` · `/poly-lsp` | status: on or off, which switch decided, and the command that changes each |
+| `/rag on` · `/poly-lsp on` | on for this session (kept across a resume) |
+| `/rag off` · `/poly-lsp off` | off for this session |
+| `/rag auto` · `/poly-lsp auto` | on for this project, every session (= `on --project`) |
+| `/rag manual` · `/poly-lsp manual` | off for this project (= `off --project`); it stops now |
 
 **Every server has three switches** — global (`$DUN_HOME/mcp.json`, every
 workspace), project (`$DUN_HOME/projects/<id>/dun.local.json`) and session
@@ -52,14 +52,14 @@ next turn, unless it set that switch itself.
 A repo's committed `dun.json` `autostart`/`via` is not a fourth scope: it is
 the project value while the project's own switch is unset.
 
-**What `/raglit` indexes.** In a git repo, the files git shows (tracked plus
+**What `/rag` indexes.** In a git repo, the files git shows (tracked plus
 untracked-not-ignored); outside one, a walk that honors `.gitignore`. Then,
 automatically skipped: dependency, build and cache directories by name
 (`node_modules`, `.venv`, `dist`, `build`, `__pycache__`, `target` beside a
 `Cargo.toml`/`pom.xml`, ...), any directory whose files add up to more than
 5,000 or 200 MB (skipped whole, at the highest such directory — never the
-workspace root), files over 1 MB, and binary files. `/raglit on`, the ready line
-and a bare `/raglit` say what was skipped:
+workspace root), files over 1 MB, and binary files. `/rag on`, the ready line
+and a bare `/rag` say what was skipped:
 
     docs: indexing 1,234 files · skipped node_modules/ (dependencies), data/ (12,345 files, 2.3 GB),
     14 files over 1 MB (largest: dump.json 310 MB) — to include one: "rag": {"include": ["data/"]} in dun.json
@@ -79,16 +79,16 @@ this workspace's index (the `--index` dun serves it with), not on `dun.json`:
 
 | command | does |
 |---|---|
-| `/raglit include FILE\|DIR...` | a directory is **watched**: `raglit watch DIR --index <this index>`, so changed and new files are read; a file is read once (MCP `ingest`) |
-| `/raglit add-document FILE\|DIR...` | read **once**, never watched: a directory's files as they are now |
-| `/raglit exclude GLOB [--keep]` | `manage_index ignore` (no new matches), then `purge` (removes the indexed ones and lists them); `--keep` skips the purge |
-| `/raglit unexclude GLOB` | `manage_index unignore` |
-| `/raglit excludes` | `manage_index status`: the ignore, builtin and allow lists |
-| `/raglit prune [--yes]` | documents whose file is gone (a removed worktree or directory) are already out of search; this lists them per directory (`manage_index prune`), and `--yes` removes them. Every index at once: `raglit prune [--yes]` |
+| `/rag include FILE\|DIR...` | a directory is **watched**: `raglit watch DIR --index <this index>`, so changed and new files are read; a file is read once (MCP `ingest`) |
+| `/rag add-document FILE\|DIR...` | read **once**, never watched: a directory's files as they are now |
+| `/rag exclude GLOB [--keep]` | `manage_index ignore` (no new matches), then `purge` (removes the indexed ones and lists them); `--keep` skips the purge |
+| `/rag unexclude GLOB` | `manage_index unignore` |
+| `/rag excludes` | `manage_index status`: the ignore, builtin and allow lists |
+| `/rag prune [--yes]` | documents whose file is gone (a removed worktree or directory) are already out of search; this lists them per directory (`manage_index prune`), and `--yes` removes them. Every index at once: `raglit prune [--yes]` |
 
 A GLOB matches the absolute path (`**/build/**` is a directory anywhere); one
 with no `/` matches the file name (`*.log`). Quote one the shell would
-expand: `/raglit exclude '**/*.log'`.
+expand: `/rag exclude '**/*.log'`.
 
 **Extensions** (`examples/extensions/*/extension.json`; your own in
 `$DUN_HOME/extensions/<id>/`, a project's in `.dun/extensions/<id>/`; `/ext`
@@ -116,7 +116,7 @@ it when the flag is typed, and `with: --flag` runs it only then. Placeholders: `
 case kept), `{{paths}}` each word as an absolute path (a whole value: a JSON
 array, or one argv element per path), `{{path}}` one path (the step runs once
 per path), `{{index}}`/`{{project}}` the names the server is started with,
-`{{workspace}}`. The answer is each step's reply. Bare `/raglit` and the
+`{{workspace}}`. The answer is each step's reply. Bare `/rag` and the
 completion list each command with its `help`.
 
 `--rag` / `--lsp` force one on for a single run (`--rag=false` forces it off,
@@ -133,7 +133,7 @@ it costs you that family, not your session.
 
     $DUN_HOME/projects.json                  absolute repo dir → id (minted on first sight)
     $DUN_HOME/projects/<id>/dun.json         optional, yours to write
-    $DUN_HOME/projects/<id>/dun.local.json   the project switches (/raglit auto, /mcp on --project) (0600)
+    $DUN_HOME/projects/<id>/dun.local.json   the project switches (/rag auto, /mcp on --project) (0600)
     $DUN_HOME/projects/<id>/agents_read      the AGENTS.md guard's memory
     $DUN_HOME/projects/<id>/worktrees/       --worktree session trees
     $DUN_HOME/projects/<id>/overlays/<dir>/  one linked worktree's own state
@@ -178,7 +178,7 @@ OpenAI-compatible endpoint.
 make install   # builds the stamped binary into ~/.local/bin/dun (BINDIR=… to change)
 # mcpshell (the eval tool) is looked for on PATH, then beside dun; without it dun
 # works with one tool less. `dun doctor --fix` installs it (go install, needs Go).
-# poly-lsp-mcp and raglit only if you use /poly-lsp, /raglit
+# poly-lsp-mcp and raglit only if you use /poly-lsp, /rag
 
 dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
               # URL, bearer optional) and pick a model. In the TUI, web or
@@ -288,7 +288,7 @@ engine stays up and the next message starts a fresh turn.
 
 If the engine dies anyway — crash, OOM, kill, or a config it refuses to start
 with — the TUI restarts it, reattaches to the same session id, keeps your
-scrollback, and turns your `/raglit` and `/poly-lsp` servers back on. That includes the
+scrollback, and turns your `/rag` and `/poly-lsp` servers back on. That includes the
 *first* engine: a TUI that will not open is a TUI that cannot show you the
 error, so it comes up regardless and retries from inside. Three attempts per two
 minutes, then it stops and waits for `/reconnect` (`dun --continue` still has

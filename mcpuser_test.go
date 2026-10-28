@@ -56,7 +56,7 @@ func TestLoadServers_UserListAndBearer(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"gone","disabled":true}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,5 +212,5 @@ func isolateTools(dir string) {
 	os.Setenv("DUN_REGISTRY", "off")
 	os.Setenv("POLY_LSP_HOME", dir+"/poly-lsp") // the daemon's own dir, once poly-lsp reads it
 	os.Setenv("XDG_RUNTIME_DIR", dir)
-	os.Setenv("RAGLIT_ROOT", dir+"/raglit")
+	os.Setenv("RAGLIT_ROOT", dir+"/rag")
 }

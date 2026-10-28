@@ -104,12 +104,12 @@ func docsSetup(t *testing.T, h *Harness) *SetupReport {
 }
 
 // Semantic search off, with a provider to pick from: one quiet line, once
-// per session; the report is kept for /raglit and /mcp info.
+// per session; the report is kept for /rag and /mcp info.
 func TestRagSetup_SemanticOffIsSaidOnce(t *testing.T) {
 	h, lines := startRagSetup(t, "nosemantic", &scriptRunner{})
 	select {
 	case l := <-lines:
-		if want := "raglit: semantic search is off — /raglit setup picks an embedding model from your providers"; l != want {
+		if want := "rag: semantic search is off — /rag setup picks an embedding model from your providers"; l != want {
 			t.Errorf("line:\n got %q\nwant %q", l, want)
 		}
 	case <-time.After(15 * time.Second):
@@ -129,8 +129,8 @@ func TestRagSetup_LineNamesBoth(t *testing.T) {
 	var r SetupReport
 	b, _ := json.Marshal(fakeRagData("off"))
 	_ = json.Unmarshal(b, &r)
-	want := "raglit: semantic search and scanned pages and photos are off — /raglit setup picks the models from your providers"
-	if got := SetupLine(r, "raglit"); got != want {
+	want := "rag: semantic search and scanned pages and photos are off — /rag setup picks the models from your providers"
+	if got := SetupLine(r, "rag"); got != want {
 		t.Errorf("got %q\nwant %q", got, want)
 	}
 }
@@ -150,17 +150,17 @@ func TestRagSetup_QuietCases(t *testing.T) {
 	noLine(t, lines)
 }
 
-// The /raglit table: every capability on or off (raglit's own "how" for a
+// The /rag table: every capability on or off (raglit's own "how" for a
 // role is dun's command), the roles with their model or fallback, and the
 // programs found or missing with the install command.
 func TestRagSetup_Table(t *testing.T) {
 	var r SetupReport
 	b, _ := json.Marshal(fakeRagData("nosemantic"))
 	_ = json.Unmarshal(b, &r)
-	got := CapabilityTable(r, "raglit")
+	got := CapabilityTable(r, "rag")
 	for _, want := range []string{
 		"  on   keyword search over text, markdown and code · built in (SQLite FTS5)",
-		"  off  semantic and hybrid search · needs an embedding model (embed role) · /raglit setup",
+		"  off  semantic and hybrid search · needs an embedding model (embed role) · /rag setup",
 		"  off  PDF text · needs poppler (pdftotext, pdftoppm) · sudo apt-get install poppler-utils",
 		"  on   scanned pages and photos · tesseract (no model: plain OCR, no figure descriptions)",
 		"models, by role:",
@@ -171,7 +171,7 @@ func TestRagSetup_Table(t *testing.T) {
 		"  pdftotext missing · adds PDF text · sudo apt-get install poppler-utils",
 		"  pandoc missing (optional) · adds Word, EPUB and ODT text",
 		"  tesseract found",
-		"/raglit setup picks a model for each role",
+		"/rag setup picks a model for each role",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("table lacks %q:\n%s", want, got)
@@ -183,7 +183,7 @@ func TestRagSetup_Table(t *testing.T) {
 	var on SetupReport
 	b, _ = json.Marshal(fakeRagData("on"))
 	_ = json.Unmarshal(b, &on)
-	if got := CapabilityTable(on, "raglit"); !strings.Contains(got, "  embed      openrouter text-embedding-3-small · semantic") {
+	if got := CapabilityTable(on, "rag"); !strings.Contains(got, "  embed      openrouter text-embedding-3-small · semantic") {
 		t.Errorf("a set role:\n%s", got)
 	}
 }

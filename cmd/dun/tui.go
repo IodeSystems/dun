@@ -848,7 +848,7 @@ type tuiModel struct {
 	providerEnvKey   string     // the template's key variable that is set; "" none
 	providerBack     bool       // esc goes back to the service picker
 	provider         string     // name of the provider the engine runs on
-	// /raglit setup (ragsetup.go); nil when it is not open.
+	// /rag setup (ragsetup.go); nil when it is not open.
 	rag *ragSetup
 	// The add-MCP-server form (/mcp add).
 	mcpForm      bool
@@ -1279,7 +1279,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mcpForm {
 			return m.updateMCPForm(msg)
 		}
-		// So does /raglit setup.
+		// So does /rag setup.
 		if m.rag != nil {
 			return m.updateRagSetup(msg)
 		}
@@ -2553,7 +2553,7 @@ func (m tuiModel) computeMatches() []int {
 }
 
 // noteServers records which switchable servers are up, so a restart can put
-// them back. Only ones with a command (/raglit, /poly-lsp) — the rest are the config's
+// them back. Only ones with a command (/rag, /poly-lsp) — the rest are the config's
 // business, and the new engine reads the same config.
 func (m *tuiModel) noteServers(ev evMsg) {
 	list, ok := ev["servers"].([]any)

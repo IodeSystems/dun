@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// The "indexes" switch kind (USER 2026-10-27): bare /raglit attach is the
+// The "indexes" switch kind (USER 2026-10-27, /rag 2026-10-28): /rag is the
 // switch screen of every index raglit has, of every project, searchable,
-// with each one's attachment at the global, project and session scopes. An
-// index is attached where a scope says on (switching one off detaches it
-// there; an attachment has no "off" of its own), so unlike the other kinds
-// a row is off unless a scope attaches it. The list is raglit's
-// `index --list --json`; attached indexes it does not list are shown too.
+// with each one on, off or unset at the global, project and session scopes;
+// the nearest scope that says decides (attach.go). Unset everywhere, this
+// project's own indexes are on and every other one off. The list is
+// raglit's `index --list --json`; indexes a scope names that it does not
+// list are shown too.
 
 const indexesKind = "indexes"
 
@@ -65,36 +65,43 @@ func firstLine(s string) string {
 
 // indexesKind is the kind; it has no modes.
 func (h *Harness) indexesSwitchKind() switchKind {
-	return switchKind{name: indexesKind, slash: ServerDocs + " attach", view: h.indexesView, set: h.setIndexAttach}
+	return switchKind{name: indexesKind, slash: "rag", view: h.indexesView, set: h.setIndexAttach}
 }
 
 func (h *Harness) indexesView() SwitchView {
-	v := SwitchView{Kind: indexesKind, Slash: ServerDocs + " attach", Modes: map[string]string{}}
-	at, err := h.Attachments(ServerDocs)
+	v := SwitchView{Kind: indexesKind, Slash: "rag", Modes: map[string]string{}}
+	s, err := h.knownServer(ServerDocs)
 	if err != nil {
 		v.Note = err.Error()
 		return v
 	}
+	own := h.ownProject(s)
 	scopes := map[string]map[string]string{}
-	for _, a := range at {
-		m := map[string]string{}
-		for _, sc := range a.Scopes {
-			m[sc] = "on"
+	mark := func(list []string, scope, val string) {
+		for _, n := range list {
+			if scopes[n] == nil {
+				scopes[n] = map[string]string{}
+			}
+			scopes[n][scope] = val
 		}
-		scopes[a.Index] = m
 	}
-	own := raglitProject(h.cfg.Workspace)
-	if s, err := h.knownServer(ServerDocs); err == nil {
-		own = h.ownProject(s)
-	}
+	sc := s.Scopes
+	mark(sc.AttachGlobal, ScopeGlobal, "on")
+	mark(sc.DetachGlobal, ScopeGlobal, "off")
+	mark(sc.AttachProject, ScopeProject, "on")
+	mark(sc.DetachProject, ScopeProject, "off")
+	mark(sc.AttachSession, ScopeSession, "on")
+	mark(sc.DetachSession, ScopeSession, "off")
 	seen := map[string]bool{}
 	add := func(it SwitchItem) {
 		seen[it.Name] = true
 		m := scopes[it.Name]
 		st := SwitchState{SwitchItem: it, Global: m[ScopeGlobal], Project: m[ScopeProject], Session: m[ScopeSession]}
-		for _, sc := range switchScopes {
-			if m[sc] == "on" {
-				st.On, st.From = true, sc
+		p, _, _ := strings.Cut(it.Name, ":")
+		st.On = p == own // unset everywhere: this project's own are on
+		for _, scope := range switchScopes {
+			if v := m[scope]; v != "" {
+				st.On, st.From = v == "on", scope
 				break
 			}
 		}
@@ -106,7 +113,9 @@ func (h *Harness) indexesView() SwitchView {
 	}
 	rows, err := listIndexes(context.Background(), cli, h.cfg.Workspace)
 	if err != nil {
-		v.Note = err.Error() + " — only the attached indexes are shown"
+		v.Note = err.Error() + " — only the indexes a scope names are shown"
+	} else {
+		noteOwnIndexes(own, rows) // what a selector names when one of these is off
 	}
 	for _, r := range rows {
 		name := strings.ToLower(r.Selector)
@@ -129,7 +138,7 @@ func (h *Harness) indexesView() SwitchView {
 			det = append(det, "root "+r.Root)
 		}
 		if r.Project == own {
-			det = append(det, "this project's own: search reads it already; attaching it changes nothing")
+			det = append(det, "this project's own: on unless a scope switches it off")
 		}
 		if r.Ambient {
 			det = append(det, "ambient: every search reads it")
@@ -139,32 +148,33 @@ func (h *Harness) indexesView() SwitchView {
 		}
 		add(SwitchItem{Name: name, Description: desc, Source: src, Detail: strings.Join(det, "\n")})
 	}
-	for _, a := range at {
-		if !seen[a.Index] {
-			add(SwitchItem{Name: a.Index, Source: "attached", Description: "not in raglit's list"})
+	for n := range scopes {
+		if !seen[n] {
+			add(SwitchItem{Name: n, Source: "switched", Description: "not in raglit's list"})
 		}
 	}
 	on, from := h.WorkspaceIndexed()
 	if from == "" {
 		from = "the default"
 	}
-	ws := "this workspace is read into " + own + "'s index (" + from + ") — /" + ServerDocs + " workspace off to stop"
+	ws := "this workspace is read into " + own + "'s index (" + from + ") — /rag workspace off to stop"
 	if !on {
-		ws = "this workspace is not indexed (" + from + ") — search reads " + own + "'s own indexes and the attached ones"
+		ws = "this workspace is not indexed (" + from + ") — search reads the indexes switched on"
 	}
-	v.Status = []string{ws, "an index attached at any scope is searched; ctrl+g/p/s attach or detach there"}
+	v.Status = []string{ws, "the nearest scope that switches an index decides; unset, this project's are on · ctrl+g/p/s on → off → unset"}
 	return v
 }
 
-// setIndexAttach is a switch on an index: on attaches it at scope, off or
-// unset detaches it there.
+// setIndexAttach is a switch on an index at scope: on, off, or unset (nil).
 func (h *Harness) setIndexAttach(name, scope string, on *bool) (string, error) {
-	attach := on != nil && *on
-	got, _, changed, err := h.AttachIndex(context.Background(), ServerDocs, name, scope, attach)
+	got, _, changed, err := h.SetIndex(context.Background(), ServerDocs, name, scope, on)
 	if err != nil {
 		return "", err
 	}
-	verb := map[bool]string{true: "attached", false: "detached"}[attach]
+	verb := "unset"
+	if on != nil {
+		verb = map[bool]string{true: "on", false: "off"}[*on]
+	}
 	if !changed {
 		return fmt.Sprintf("%s was already %s for %s", got, verb, scopeWords(scope)), nil
 	}

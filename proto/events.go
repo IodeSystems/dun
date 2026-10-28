@@ -470,7 +470,7 @@ type ServerState struct {
 	ViaSession string `json:"viaSession,omitempty"`
 	ViaFrom    string `json:"viaFrom,omitempty"`
 	Detail     string `json:"detail,omitempty"`
-	// Slash is the command that switches it ("raglit" for /raglit), for a
+	// Slash is the command that switches it ("raglit" for /rag), for a
 	// server that has one.
 	Slash string `json:"slash,omitempty"`
 	// Starting is a start in flight (the session is ready without it; its

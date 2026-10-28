@@ -97,7 +97,7 @@ func TestStart_FailingAutostartIsNotFatal(t *testing.T) {
 	}
 }
 
-// /raglit on for a server that cannot start reports and carries on; the session
+// /rag on for a server that cannot start reports and carries on; the session
 // keeps whatever tools it already had.
 func TestStartServer_FailureLeavesSessionUsable(t *testing.T) {
 	dir := t.TempDir()

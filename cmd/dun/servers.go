@@ -13,13 +13,13 @@ import (
 	"github.com/iodesystems/dun/proto"
 )
 
-// Tool servers the user can turn on and off: /raglit (the docs index) and
+// Tool servers the user can turn on and off: /rag (the docs index) and
 // /poly-lsp (semantic code). Neither starts on its own — see
 // dun.DefaultServers for why — so this is how a session gets them, and how a
 // machine that wants them every time says so once.
 //
 // The command is an extension's slash command (its manifest's slash.name):
-// /raglit switches the server raglit, /poly-lsp the server poly-lsp.
+// /rag switches the server raglit, /poly-lsp the server poly-lsp.
 
 // slashOf is the slash command of st's extension, or "" for a server with
 // none. A state built without one (a test's) falls back to the bundled
@@ -109,7 +109,7 @@ func noAutostart(t *tristate, no bool, name string) error {
 // it cannot collide with one.
 const allServers = "*"
 
-// runServerCmd applies one /raglit or /poly-lsp action and returns the line to show the
+// runServerCmd applies one /rag or /poly-lsp action and returns the line to show the
 // user. A failure to start is a RETURNED MESSAGE, never a fatal error: a
 // misconfigured raglit should cost you search, not your session.
 //
@@ -128,7 +128,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 		return runSwitchCmd(ctx, h, alias, f[0], f[1:])
 	}
 	id, label := alias, alias // addressed by its id
-	// The TUI opens /raglit setup itself (ragsetup.go); another client
+	// The TUI opens /rag setup itself (ragsetup.go); another client
 	// reaches here.
 	if action == "setup" && alias == dun.ServerDocs {
 		return label + ": setup is a form in dun's terminal UI — /" + alias + " setup there"
@@ -184,7 +184,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 }
 
 // runAllServersCmd is /mcp: the whole server set at once, rather than one
-// server at a time the way /raglit and /poly-lsp address theirs.
+// server at a time the way /rag and /poly-lsp address theirs.
 //
 // A bare /mcp LISTS — including the stopped ones, which is the question you
 // actually have ("which of these is even up?") and which no per-server command
@@ -385,7 +385,7 @@ func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
 // line), when it was written, and what has happened to it since.
 func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 	if !on {
-		return "memories: the docs index is off — /raglit on (notes are kept on disk either way)"
+		return "memories: the docs index is off — /rag on (notes are kept on disk either way)"
 	}
 	if len(ms) == 0 {
 		return "memories: none for this project yet — /remember, or say \"remember, …\""
@@ -505,7 +505,7 @@ func serverDetail(st dun.ServerState) string {
 	return s
 }
 
-// serverStatusLine is the bare "/raglit" report: what it is doing now, what it
+// serverStatusLine is the bare "/rag" report: what it is doing now, what it
 // will do next session, and the one command that changes each.
 func serverStatusLine(h *dun.Harness, id, label string) string {
 	st, ok := stateOf(h, id)
@@ -615,7 +615,7 @@ func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
 // serverHint is the startup lines naming what did NOT start and why, plus the
 // docs server's ingest summary when it autostarted. Shown once, at ready.
 //
-// The optional extras that are simply off (a server with a switch, /raglit,
+// The optional extras that are simply off (a server with a switch, /rag,
 // /poly-lsp) are not here: the client's splash and /status say them, with
 // the command that turns each on (proto.ServerState.Slash).
 func serverHint(states []dun.ServerState) string {

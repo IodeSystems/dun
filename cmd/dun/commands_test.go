@@ -51,7 +51,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 		}
 		got[c.Name] = true
 	}
-	if !got["hello"] || !got["raglit"] || !got["poly-lsp"] {
+	if !got["hello"] || !got["rag"] || !got["poly-lsp"] {
 		t.Errorf("extension commands: %v", got)
 	}
 	for _, c := range commandList(nil, "", exts...).Items {
@@ -86,7 +86,7 @@ func TestCommandListShowsState(t *testing.T) {
 	for _, c := range l.Items {
 		got[c.Name] = c.State + "/" + c.Detail
 	}
-	if got["raglit"] != "on/autostart" || got["poly-lsp"] != "off/not configured" || got["isolate"] != "docker/" {
+	if got["rag"] != "on/autostart" || got["poly-lsp"] != "off/not configured" || got["isolate"] != "docker/" {
 		t.Fatalf("states: %v", got)
 	}
 }
@@ -95,7 +95,7 @@ func TestCommandListShowsState(t *testing.T) {
 func TestCommandList_ExtensionCommandsWithHelp(t *testing.T) {
 	var raglit proto.CommandSpec
 	for _, c := range commandList(nil, "").Items {
-		if c.Name == "raglit" {
+		if c.Name == "rag" {
 			raglit = c
 		}
 	}
@@ -127,7 +127,7 @@ func TestRouteSlash(t *testing.T) {
 		reply:   func(m string) { calls = append(calls, call{"reply", m, ""}) },
 	}
 	for line, want := range map[string]call{
-		"raglit on":                            {"server", "raglit", "on"},
+		"rag on":                               {"server", "raglit", "on"},
 		"/poly-lsp":                            {"server", "poly-lsp", ""},
 		"mcp refresh docs":                     {"control", "mcp", "refresh docs"},
 		"mcp login snow":                       {"control", "mcp", "login snow"},
@@ -140,7 +140,7 @@ func TestRouteSlash(t *testing.T) {
 		"mcp off corp":                         {"server", "corp", "off"},
 		"mcp unset corp --session":             {"server", "corp", "unset --session"},
 		"mcp toggle corp Tool_X off --project": {"control", "mcptools", "toggle corp Tool_X off --project"},
-		"raglit on --project":                  {"server", "raglit", "on --project"},
+		"rag on --project":                     {"server", "raglit", "on --project"},
 		"mcp tools el":                         {"control", "mcptools", "el"},
 		"mcp tools":                            {"control", "mcptools", ""},
 		"mcp restart":                          {"server", allServers, "restart"},
@@ -161,20 +161,20 @@ func TestRouteSlash(t *testing.T) {
 		"worklog write 2":                      {"control", "worklog", "write 2"},
 		"worklog frob":                         {"reply", "usage: /worklog [start <title> | end [done|dropped|blocked] <why> | view [n] | write [n]]", ""},
 		// raglit's index commands keep a path's and a name's case.
-		"raglit watch ~/My Docs --index Hb": {"control", "ext", "watch raglit ~/My Docs --index Hb"},
-		"raglit ATTACH Other:Idx --project": {"control", "ext", "attach raglit Other:Idx --project"},
-		"raglit detach x --global":          {"control", "ext", "detach raglit x --global"},
-		"raglit attach":                     {"control", "ext", "attach raglit"},
-		"raglit workspace off --global":     {"control", "ext", "workspace raglit off --global"},
-		"poly-lsp attach x":                 {"server", "poly-lsp", "attach x"}, // no search role
+		"rag watch ~/My Docs --index Hb": {"control", "ext", "watch raglit ~/My Docs --index Hb"},
+		"rag ATTACH Other:Idx --project": {"control", "ext", "attach raglit Other:Idx --project"},
+		"rag detach x --global":          {"control", "ext", "detach raglit x --global"},
+		"rag attach":                     {"control", "ext", "attach raglit"},
+		"rag workspace off --global":     {"control", "ext", "workspace raglit off --global"},
+		"poly-lsp attach x":              {"server", "poly-lsp", "attach x"}, // no search role
 		// the code index's excludes keep a directory's case.
 		"poly-lsp exclude Vendor/X":  {"server", "poly-lsp", "exclude Vendor/X"},
 		"poly-lsp INCLUDE .claude/W": {"server", "poly-lsp", "include .claude/W"},
 		"poly-lsp budget 48000ms":    {"server", "poly-lsp", "budget 48000ms"},
 		// raglit's manifest commands keep the text as typed.
-		"raglit INCLUDE ~/My Docs Notes.MD": {"control", "ext", "call raglit include ~/My Docs Notes.MD"},
-		"raglit exclude '**/*.LOG' --keep":  {"control", "ext", "call raglit exclude '**/*.LOG' --keep"},
-		"raglit excludes":                   {"control", "ext", "call raglit excludes "},
+		"rag INCLUDE ~/My Docs Notes.MD": {"control", "ext", "call raglit include ~/My Docs Notes.MD"},
+		"rag exclude '**/*.LOG' --keep":  {"control", "ext", "call raglit exclude '**/*.LOG' --keep"},
+		"rag excludes":                   {"control", "ext", "call raglit excludes "},
 	} {
 		calls = nil
 		routeSlash(line, r)

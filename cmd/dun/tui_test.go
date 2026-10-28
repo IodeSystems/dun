@@ -1437,7 +1437,7 @@ func TestTUI_QueuedMessagesOnError(t *testing.T) {
 	}
 }
 
-// /raglit and /poly-lsp are forwarded to the engine (which owns the harness), and the
+// /rag and /poly-lsp are forwarded to the engine (which owns the harness), and the
 // `server` event it sends back is rendered into the conversation. The TUI must
 // not try to interpret the action itself.
 func TestTUI_ServerSlashCommands(t *testing.T) {
@@ -1446,14 +1446,14 @@ func TestTUI_ServerSlashCommands(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 
-	m = typeStr(m, "/raglit auto")
+	m = typeStr(m, "/rag auto")
 	m = key(m, kEnter)
 	var got map[string]string
 	if err := json.Unmarshal(sent.Bytes(), &got); err != nil {
 		t.Fatalf("did not send a command: %q (%v)", sent.String(), err)
 	}
 	// The line goes to the engine's router, as from every client.
-	if got["type"] != "control" || got["id"] != "slash" || got["action"] != "raglit auto" {
+	if got["type"] != "control" || got["id"] != "slash" || got["action"] != "rag auto" {
 		t.Fatalf("wrong event: %v", got)
 	}
 
@@ -1477,8 +1477,8 @@ func TestTUI_ReadyHint(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
-		"hint": "docs off — /raglit on to start it, /raglit auto to start it every session"})
-	if !strings.Contains(convoText(m), "/raglit auto") {
+		"hint": "docs off — /rag on to start it, /rag auto to start it every session"})
+	if !strings.Contains(convoText(m), "/rag auto") {
 		t.Fatalf("ready hint not shown: %s", convoText(m))
 	}
 }
@@ -1703,7 +1703,7 @@ func TestTUI_RestartCapGivesUp(t *testing.T) {
 }
 
 // A respawned engine keeps the session's server switches itself, so the TUI
-// sends none: a "/raglit on" from here would pin a session switch the user never
+// sends none: a "/rag on" from here would pin a session switch the user never
 // set.
 func TestTUI_RestartSendsNoServerSwitches(t *testing.T) {
 	var sent bytes.Buffer
@@ -1764,7 +1764,7 @@ func TestTUI_NoEngineIsSurvivable(t *testing.T) {
 		t.Errorf("a dropped message must be reported: %s", convoText(m))
 	}
 	// And the slash commands that talk to the engine say so rather than panic.
-	m.runSlash("/raglit on")
+	m.runSlash("/rag on")
 	if !strings.Contains(convoText(m), "no engine") {
 		t.Errorf("server command should report the missing engine: %s", convoText(m))
 	}

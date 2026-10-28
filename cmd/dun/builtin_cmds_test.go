@@ -41,7 +41,7 @@ func fakeToolServer(t *testing.T, tool string) *httptest.Server {
 	return ts
 }
 
-// /raglit and /poly-lsp: bare reports, on and off switch this session,
+// /rag and /poly-lsp: bare reports, on and off switch this session,
 // auto and manual the project, unset clears a scope, restart bounces. Each
 // line names the server and the next command.
 func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T) {
@@ -57,6 +57,10 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 	}
 	defer h.Close()
 	for _, id := range []string{"raglit", "poly-lsp"} {
+		slash := map[string]string{"raglit": "rag"}[id] // the command; the server keeps its id
+		if slash == "" {
+			slash = id
+		}
 		step := func(action string, want ...string) {
 			t.Helper()
 			out := runServerCmd(ctx, h, id, action)
@@ -72,10 +76,10 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 				t.Errorf("%s running = %v, want %v", id, st.Running, want)
 			}
 		}
-		step("", id+": stopped", "switches: global off, project unset, session unset", "/"+id+" on to start it this session")
+		step("", id+": stopped", "switches: global off, project unset, session unset", "/"+slash+" on to start it this session")
 		step("on", id)
 		running(true)
-		step("status", id+": running · 1 tool", "session on", "/"+id+" off to stop it this session")
+		step("status", id+": running · 1 tool", "session on", "/"+slash+" off to stop it this session")
 		step("off", id)
 		running(false)
 		step("auto", id)
@@ -91,10 +95,10 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 		step("unset --project", id)
 		step("bounce", "unknown action", "/"+id+" [on|off|unset|restart|auto|manual]")
 	}
-	// Bare /raglit lists its commands with their help.
-	if out := runServerCmd(ctx, h, "raglit", ""); !strings.Contains(out, "commands:") || !strings.Contains(out, "/raglit include ") ||
-		!strings.Contains(out, "/raglit excludes ") || !strings.Contains(out, "/raglit watch ") {
-		t.Errorf("bare /raglit lists its commands:\n%s", out)
+	// Bare /rag lists its commands with their help.
+	if out := runServerCmd(ctx, h, "raglit", ""); !strings.Contains(out, "commands:") || !strings.Contains(out, "/rag include ") ||
+		!strings.Contains(out, "/rag excludes ") || !strings.Contains(out, "/rag watch ") {
+		t.Errorf("bare /rag lists its commands:\n%s", out)
 	}
 	// poly-lsp's are its index's excludes (indexcmd.go).
 	if out := runServerCmd(ctx, h, "poly-lsp", ""); !strings.Contains(out, "/poly-lsp exclude ") || !strings.Contains(out, "/poly-lsp include ") {
@@ -105,7 +109,7 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 	for _, c := range l.Items {
 		names[c.Name] = true
 	}
-	if !names["raglit"] || !names["poly-lsp"] {
+	if !names["rag"] || !names["poly-lsp"] {
 		t.Errorf("both are engine commands: %v", names)
 	}
 }

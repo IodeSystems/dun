@@ -24,7 +24,7 @@ import (
 	"github.com/iodesystems/dun"
 )
 
-// /raglit setup — a model for each of raglit's roles, from the person's own
+// /rag setup — a model for each of raglit's roles, from the person's own
 // providers (USER 2026-10-24: raglit "as pleasant to install as poly-lsp").
 //
 // One screen per role (embed, summaries, vision, segment, audio), each the
@@ -44,9 +44,9 @@ import (
 // reads at each use. Not api_key_env: the daemon is usually started by
 // systemd or by another session, and neither sees this shell's variables.
 //
-// Undo: /raglit setup again, and none for the role.
+// Undo: /rag setup again, and none for the role.
 
-// ragSetupHelp is setup's line in the palette and in bare /raglit.
+// ragSetupHelp is setup's line in the palette and in bare /rag.
 var ragSetupHelp = []string{"setup", "pick a model for each role (embeddings, summaries, vision, segment, audio) from your providers; none turns one off"}
 
 // ragSetupOrder is the order of the screens: the one that matters most
@@ -482,7 +482,7 @@ func ragOnNow(before, after dun.SetupReport) string {
 
 // ── the screens ──
 
-// ragSetup is the open /raglit setup.
+// ragSetup is the open /rag setup.
 type ragSetup struct {
 	loading bool // asking raglit; the screens open when it answers
 	doc     dun.RaglitDoctor
@@ -538,7 +538,7 @@ func loadRagSetup() tea.Msg {
 	return msg
 }
 
-// openRagSetup is /raglit setup: the panel opens at once, saying it is
+// openRagSetup is /rag setup: the panel opens at once, saying it is
 // asking, and every provider is asked for its models while raglit answers.
 func (m *tuiModel) openRagSetup() tea.Cmd {
 	if _, err := raglitBin(); err != nil {
@@ -798,7 +798,7 @@ func (r *ragSetup) save() tea.Cmd {
 		if d, _, err := raglitDoctor(10 * time.Second); err == nil {
 			line += "\n" + ragOnNow(before, d.SetupReport)
 		}
-		return ragSavedMsg{line: line + "\n/raglit restart refreshes /raglit's table · /raglit setup again, with none, to undo"}
+		return ragSavedMsg{line: line + "\n/rag restart refreshes /rag's table · /rag setup again, with none, to undo"}
 	}
 }
 
@@ -922,7 +922,7 @@ func (m tuiModel) ragSetupPanel() string {
 		status = append(status, fmt.Sprintf("asking %s…", plural(r.pending, "service")))
 	}
 	if len(r.provs) == 0 {
-		status = append(status, "not logged in — /login, then /raglit setup")
+		status = append(status, "not logged in — /login, then /rag setup")
 	}
 	rows = append(rows, listIndent+stDim.Render(strings.Join(status, " · ")))
 	for _, e := range r.errs {

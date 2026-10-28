@@ -218,7 +218,7 @@ func TestRulesMode_PersistAndSummaryInvalidation(t *testing.T) {
 	r := &cannedRephraseRunner{reply: "SHORT SUMMARY"}
 	h.Session = &agent.Session{SessionID: "dun", Store: h.store, Runner: r}
 
-	if _, err := h.SetRulesMode(context.Background(), RulesIndex); err == nil || !strings.Contains(err.Error(), "/raglit on") {
+	if _, err := h.SetRulesMode(context.Background(), RulesIndex); err == nil || !strings.Contains(err.Error(), "/rag on") {
 		t.Errorf("index with rag off: %v", err)
 	}
 	msg, err := h.SetRulesMode(context.Background(), RulesSummary)

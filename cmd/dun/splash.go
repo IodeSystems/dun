@@ -201,7 +201,7 @@ func (m *tuiModel) noteServerOrder() {
 }
 
 // isExtension is a server the extensions row is for: one with a switch
-// (/raglit) that is not a built-in server.
+// (/rag) that is not a built-in server.
 func isExtension(st dun.ServerState) bool { return st.Slash != "" && !builtinServer[st.ID] }
 
 // startedFor is " 12s": how long a starting server has been at it, on this

@@ -4,6 +4,17 @@ Why the tool-server layer is built the way it is. Short rules on startup,
 rebuilds and config files: "Tool servers and extensions" in `decisions.md`.
 Switch scopes (session, project, global): `mcpscope.go`.
 
+`/rag` (USER 2026-10-28; it was `/raglit`) is the search indexes as a switch
+table: every index raglit lists (`raglit index --list --json`), each on, off
+or unset at the global, project and session scopes, the nearest scope that
+says deciding (`attach.go`, `indexkind.go`). Unset everywhere, this project's
+own indexes are on and every other one off. What is on is what the model's
+`search`/`get_document` read when they name no index, and what proactive
+surfacing reads. One of the project's own switched off turns `<project>:*`
+into its indexes named one by one (raglit's list, cached). The raglit
+server's own switch stays in `/mcp`; its verbs (`setup`, `watch`, `include`,
+`workspace`, …) are `/rag <verb>`, and `/rag status` is the capability report.
+
 A global switch (on/off, mode, a tool, a server added or removed) is a write
 of `~/.dun/mcp.json`, and every session follows it. A turn re-reads the
 layers at its start (`followServers`), and under dund the write is also

@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/iodesystems/dun"
 )
 
 // The engine's catalog event: the skills in reach and the running MCP
@@ -320,7 +318,7 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 		if name == "mcp" && len(args) > 0 && args[0] == "add" {
 			return m.openMCPForm(args[1:]...)
 		}
-		if name == dun.ServerDocs && len(args) == 1 && strings.EqualFold(args[0], "setup") {
+		if name == "rag" && len(args) == 1 && strings.EqualFold(args[0], "setup") {
 			return m.openRagSetup()
 		}
 		// /interrupt: the same command ctrl+g sends, so the status line says
@@ -346,10 +344,10 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			m.openSwitches("rules")
 			return nil
 		}
-		// Bare /raglit attach: every index, to search and attach at a scope
-		// (dun/indexkind.go; USER 2026-10-27: "I don't know the index name
-		// OR format, but could choose it if I can see/search for it").
-		if name == "raglit" && len(args) == 1 && args[0] == "attach" {
+		// Bare /rag attach: every index, to search and attach at a scope
+		// (dun/indexkind.go; USER 2026-10-27/28: "a /mcp like interface for
+		// /rag"). Bare /rag is it; /rag status is the capability report.
+		if name == "rag" && (len(args) == 0 || len(args) == 1 && args[0] == "attach") {
 			m.openSwitches("indexes")
 			return nil
 		}

@@ -16,7 +16,7 @@ import (
 )
 
 // --rag=false (force off for this run) must be distinguishable from not passing
-// --rag at all (use whatever /raglit auto saved). A plain bool cannot say that.
+// --rag at all (use whatever /rag auto saved). A plain bool cannot say that.
 func TestTristate_UnsetIsNotFalse(t *testing.T) {
 	var rag, lsp tristate
 	if got := autostartOverrides(rag, lsp); got != nil {
@@ -52,7 +52,7 @@ func TestServerHint_NamesWhatFailedNotWhatIsOff(t *testing.T) {
 	if strings.Contains(hint, "raglit") || strings.Contains(hint, "off:") {
 		t.Errorf("an extra that is off is the splash's to say: %q", hint)
 	}
-	if ps := serversProto([]dun.ServerState{{ID: dun.ServerDocs}}); ps[0].Slash != "raglit" {
+	if ps := serversProto([]dun.ServerState{{ID: dun.ServerDocs}}); ps[0].Slash != "rag" {
 		t.Errorf("the server state lacks its command: %+v", ps[0])
 	}
 	if !strings.Contains(hint, "bad flag") {

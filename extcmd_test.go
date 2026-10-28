@@ -242,7 +242,7 @@ func TestRaglitCommands(t *testing.T) {
 		t.Helper()
 		out, err := h.RunExtCommand(ctx, ServerDocs, cmd, text)
 		if err != nil {
-			t.Fatalf("/raglit %s %s: %q %v", cmd, text, out, err)
+			t.Fatalf("/rag %s %s: %q %v", cmd, text, out, err)
 		}
 		return out
 	}

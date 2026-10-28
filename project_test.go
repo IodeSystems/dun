@@ -128,11 +128,11 @@ func TestProject_GitWorktreeMapsToSource_OverlayWins(t *testing.T) {
 	writeJSON(t, src.StateDir, LocalServersFile, `{"servers":[{"id":"docs","autostart":true},{"id":"db","command":"dbtool"}]}`)
 	writeJSON(t, w.OverlayDir, LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
 
-	inRepo, err := LoadServers(repo, "/ws", "/raglit")
+	inRepo, err := LoadServers(repo, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
-	inWt, err := LoadServers(wt, "/ws", "/raglit")
+	inWt, err := LoadServers(wt, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestProject_GitWorktreeMapsToSource_OverlayWins(t *testing.T) {
 	if byID(inWt)["db"].Command != "dbtool" {
 		t.Error("the worktree must still see the project's state under the overlay")
 	}
-	// A /raglit auto in the worktree is that worktree's.
+	// A /rag auto in the worktree is that worktree's.
 	path, err := setAutostart(wt, "raglit", true)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestProject_ConfigPrecedence_CommittedRepoFilesReadNotWritten(t *testing.T)
 	gitrun(t, repo, "commit", "-qm", "dun config")
 	committed, _ := os.ReadFile(filepath.Join(repo, DunDir, ProjectServersFile))
 
-	got, err := LoadServers(repo, "/ws", "/raglit")
+	got, err := LoadServers(repo, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestProject_ConfigPrecedence_CommittedRepoFilesReadNotWritten(t *testing.T)
 	if _, err := setAutostart(repo, "db", true); err != nil {
 		t.Fatal(err)
 	}
-	got, err = LoadServers(repo, "/ws", "/raglit")
+	got, err = LoadServers(repo, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestProject_ImportsLegacyState(t *testing.T) {
 			t.Errorf("%s imported as %q, want %q", name, b, orig)
 		}
 	}
-	got, _ := LoadServers(repo, "/ws", "/raglit")
+	got, _ := LoadServers(repo, "/ws", "/rag")
 	if !byID(got)["raglit"].Autostart {
 		t.Error("the imported setting must take effect")
 	}
@@ -243,7 +243,7 @@ func TestProject_ImportsLegacyState(t *testing.T) {
 	if _, err := EnsureProject(repo); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = LoadServers(repo, "/ws", "/raglit")
+	got, _ = LoadServers(repo, "/ws", "/rag")
 	if byID(got)["raglit"].Autostart {
 		t.Error("the project's own state must win over the repo's old copy")
 	}

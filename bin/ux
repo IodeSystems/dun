@@ -39,7 +39,7 @@
 #   - dun is installed and has never run: no ~/.dun at all.
 #   - mcpshell is on PATH when this machine has it, because dun's README says
 #     an install must put it there; raglit and poly-lsp-mcp are not, because
-#     the README says they are only for /raglit and /poly-lsp.
+#     the README says they are only for /rag and /poly-lsp.
 #   - the walk types a provider address and key (the stub's) and the server
 #     command notes-mcp, which is what the scenario's colleague wrote down.
 #   - the build is stamped with this checkout's version but no source dir, as

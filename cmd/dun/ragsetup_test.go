@@ -216,7 +216,7 @@ func TestRagSetup_FlowSavesToTheDaemon(t *testing.T) {
 		"raglit: saved to the daemon at " + d.srv.URL + " (it reloads when no job is running)",
 		"providers: openrouter (key read from " + keyPath + ") — raglit's config holds the file's path, never the key",
 		"on now: semantic and hybrid search (text-embedding-3-small) · still off: PDF text",
-		"/raglit setup again, with none, to undo",
+		"/rag setup again, with none, to undo",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("said lacks %q:\n%s", want, out)
@@ -365,7 +365,7 @@ func TestDoctor_Raglit(t *testing.T) {
 	}
 	all := strings.Join(got, "\n")
 	for _, want := range []string{
-		"ok raglit off: semantic and hybrid search — needs an embedding model (embed role) | /raglit setup",
+		"ok raglit off: semantic and hybrid search — needs an embedding model (embed role) | /rag setup",
 		"ok raglit off: PDF text — needs poppler (pdftotext, pdftoppm) | sudo apt-get install poppler-utils",
 		"warn raglit pdftotext missing: PDF text (as the daemon (pid 42) sees it) | sudo apt-get install poppler-utils",
 		"ok raglit pandoc missing (optional): Word, EPUB and ODT text (as the daemon (pid 42) sees it) | ",

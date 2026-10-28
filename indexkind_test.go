@@ -55,7 +55,11 @@ func TestIndexesKind_ListAttachDetach(t *testing.T) {
 	}
 	listErr = errString("raglit index --list --json: unknown flag")
 	v, _ = h.SwitchView(indexesKind)
-	if len(v.Items) != 1 || v.Items[0].Name != ":code" || !strings.Contains(v.Note, "unknown flag") {
+	byName := map[string]SwitchState{}
+	for _, it := range v.Items {
+		byName[it.Name] = it
+	}
+	if a := byName["aw4:aw4-main"]; len(v.Items) != 2 || a.On || a.Project != "off" || !byName[":code"].On || !strings.Contains(v.Note, "unknown flag") {
 		t.Fatalf("fallback: %+v note %q", v.Items, v.Note)
 	}
 	if _, err := h.SetSwitchMode(indexesKind, "x", ScopeSession); err == nil {

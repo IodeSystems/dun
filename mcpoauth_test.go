@@ -556,7 +556,7 @@ func TestOAuthSpec_ConfigRoundTripAndMerge(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"snow","oauth":{"issuer":"https://idp.example","scopes":["a","b"]}}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}

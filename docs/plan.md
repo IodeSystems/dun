@@ -130,8 +130,8 @@ owner's call before work starts.
 
 ## Workspace and tools
 
-- [~] `/raglit workspace on|off [--scope]`: raglit for other indexes without
-  reading the workspace; bare `/raglit attach` is every index of every
+- [~] `/rag workspace on|off [--scope]`: raglit for other indexes without
+  reading the workspace; bare `/rag attach` is every index of every
   project, searchable, attached per scope (needs raglit v0.3.0).
 - [~] `/status`: a server scripted in mcpshell reads "scripted in the
   shell", not off; the effort is shown.

@@ -46,7 +46,7 @@ import (
 // condensed version the model writes once (cached under the project's state
 // dir, keyed by a hash of the imports), "index" puts them in the raglit index
 // "rules" so they surface by relevance. The root files stay verbatim in every
-// mode. A summary whose sources changed, or an index with /raglit off, falls
+// mode. A summary whose sources changed, or an index with /rag off, falls
 // back to full.
 
 const (
@@ -696,7 +696,7 @@ func (h *Harness) RulesStatus() string {
 			why = "no summary yet"
 		}
 		if saved == RulesIndex {
-			why = "the docs index is off (/raglit on)"
+			why = "the docs index is off (/rag on)"
 		}
 		fmt.Fprintf(&b, " (saved: %s, but %s)", saved, why)
 	}
@@ -753,7 +753,7 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 			return "", fmt.Errorf("the root rules import no files: there is nothing to index")
 		}
 		if !h.hookStarted(HookRulesChanged) {
-			return "", fmt.Errorf("index mode needs the docs index: /raglit on first")
+			return "", fmt.Errorf("index mode needs the docs index: /rag on first")
 		}
 	case RulesSummary:
 		if err := h.ensureRulesSummary(ctx, set); err != nil {

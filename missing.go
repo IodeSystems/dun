@@ -21,7 +21,7 @@ import (
 var ToolInstall = map[string]struct{ Module, Lost string }{
 	"mcpshell":     {"github.com/iodesystems/mcpshell/cmd/mcpshell@latest", "no eval tool (sandboxed calculations, data, SQL)"},
 	"poly-lsp-mcp": {"github.com/iodesystems/poly-lsp-mcp@latest", "no semantic code tools (/poly-lsp)"},
-	"raglit":       {"github.com/iodesystems/raglit/cmd/raglit@latest", "no docs search or memories (/raglit)"},
+	"raglit":       {"github.com/iodesystems/raglit/cmd/raglit@latest", "no docs search or memories (/rag)"},
 }
 
 // MissingError is a server command found neither on PATH nor beside dun.

@@ -27,7 +27,7 @@ func byID(servers []Server) map[string]Server {
 // No config files: the built-in trio is a working default, and most projects
 // should never need to write a config at all.
 func TestLoadServers_DefaultsWithNoFiles(t *testing.T) {
-	got, err := LoadServers(t.TempDir(), "/ws", "/raglit")
+	got, err := LoadServers(t.TempDir(), "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestLoadServers_DefaultsWithNoFiles(t *testing.T) {
 func TestLoadServers_OverrideByIDKeepsSiblings(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"code","command":"/opt/bin/poly-lsp-mcp"}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestLoadServers_AddsProjectServer(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, ProjectServersFile,
 		`{"servers":[{"id":"db","command":"db-mcp","args":["stdio","--root","{{workspace}}"],"env":["DSN=x"]}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestLoadServers_LocalBeatsProject(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"db","command":"db-mcp","args":["stdio"]}]}`)
 	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"db","command":"/home/me/bin/db-mcp"}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestLoadServers_LocalBeatsProject(t *testing.T) {
 func TestLoadServers_Disable(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"docs","disabled":true}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestLoadServers_LocalCannotUndisable(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"docs","disabled":true}]}`)
 	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"docs","disabled":false}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestLoadServers_LocalCannotUndisable(t *testing.T) {
 func TestLoadServers_ParseErrorNamesTheFile(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":`)
-	_, err := LoadServers(dir, "/ws", "/raglit")
+	_, err := LoadServers(dir, "/ws", "/rag")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -161,7 +161,7 @@ func TestLoadServers_ParseErrorNamesTheFile(t *testing.T) {
 func TestLoadServers_RejectsCommandlessServer(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"ghost"}]}`)
-	if _, err := LoadServers(dir, "/ws", "/raglit"); err == nil {
+	if _, err := LoadServers(dir, "/ws", "/rag"); err == nil {
 		t.Error("a server with no command should be rejected")
 	}
 }
@@ -169,7 +169,7 @@ func TestLoadServers_RejectsCommandlessServer(t *testing.T) {
 // Only shell autostarts. code and docs cost real startup time and a machine
 // may not even have their binaries — a session must not depend on them.
 func TestLoadServers_OnlyShellAutostartsByDefault(t *testing.T) {
-	got, err := LoadServers(t.TempDir(), "/ws", "/raglit")
+	got, err := LoadServers(t.TempDir(), "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestLoadServers_DunDirLocalWinsOverRoot(t *testing.T) {
 	}
 	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"docs","autostart":true}]}`)
 	writeJSON(t, filepath.Join(dir, DunDir), LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 		if p := ResolveProject(dir); p == nil || filepath.Dir(path) != p.StateDir {
 			t.Errorf("wrote outside the project state dir: %s", path)
 		}
-		got, err := LoadServers(dir, "/ws", "/raglit")
+		got, err := LoadServers(dir, "/ws", "/rag")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -539,7 +539,7 @@ func TestLegacyServerIDs_ReadAsTheNewOnes(t *testing.T) {
 
 	// dun.json, mcp.json: a definition and a switch under the old ids.
 	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"docs","autostart":true},{"id":"code","command":"/opt/bin/lsp"}]}`)
-	got, err := LoadServers(dir, "/ws", "/raglit")
+	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,16 +554,16 @@ func TestLegacyServerIDs_ReadAsTheNewOnes(t *testing.T) {
 		t.Errorf("code override must read as poly-lsp and inherit its args: %+v", m["poly-lsp"])
 	}
 
-	// Project state (what /raglit auto wrote): old id off, then new id on, wins.
+	// Project state (what /rag auto wrote): old id off, then new id on, wins.
 	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
-	got, _ = LoadServers(dir, "/ws", "/raglit")
+	got, _ = LoadServers(dir, "/ws", "/rag")
 	if byID(got)["raglit"].Autostart {
 		t.Error("project state docs=false must read as raglit=false")
 	}
 	if _, err := setAutostart(dir, "raglit", true); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = LoadServers(dir, "/ws", "/raglit")
+	got, _ = LoadServers(dir, "/ws", "/rag")
 	if !byID(got)["raglit"].Autostart {
 		t.Error("a new write under the new id must be read")
 	}

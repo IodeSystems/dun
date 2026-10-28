@@ -26,8 +26,8 @@ import (
 //
 // What dun does with it: one quiet line per session, only when a core
 // capability a model from the person's own providers turns on is off
-// (semantic search, scanned pages); /raglit has the table; /mcp info says
-// "semantic search off"; /raglit setup (cmd/dun/ragsetup.go) picks the
+// (semantic search, scanned pages); /rag has the table; /mcp info says
+// "semantic search off"; /rag setup (cmd/dun/ragsetup.go) picks the
 // models. Extractors are never said in the conversation: installing poppler
 // is a system package, not a choice in a chat, and doctor lists them.
 
@@ -127,7 +127,7 @@ func RagHow(how, slash string) string {
 	return strings.ReplaceAll(how, ragSetRoles, "/"+slash+" setup")
 }
 
-// CapabilityTable is the report as rows, for bare /raglit: each capability
+// CapabilityTable is the report as rows, for bare /rag: each capability
 // on (with what provides it) or off (with what it needs and how), each role
 // with its model or what it falls back to, and each extractor found or
 // missing with its install command.

@@ -1,5 +1,5 @@
 {
-  "//": "Copy to dun.json (committed, describes the PROJECT) or .dun/dun.local.json (gitignored, describes THIS MACHINE). Both are optional; with neither, dun knows three servers — poly-lsp (poly-lsp-mcp), shell (mcpshell), raglit — and starts only shell. Config that still says code or docs is read as poly-lsp and raglit. /raglit auto and /poly-lsp auto write the autostart flag below. Here autostart and via are the PROJECT switch's starting value: the project's own switch (/mcp on|off --project, saved under $DUN_HOME/projects/<id>/) overrides them, and a session's switch overrides that.",
+  "//": "Copy to dun.json (committed, describes the PROJECT) or .dun/dun.local.json (gitignored, describes THIS MACHINE). Both are optional; with neither, dun knows three servers — poly-lsp (poly-lsp-mcp), shell (mcpshell), raglit — and starts only shell. Config that still says code or docs is read as poly-lsp and raglit. /rag auto and /poly-lsp auto write the autostart flag below. Here autostart and via are the PROJECT switch's starting value: the project's own switch (/mcp on|off --project, saved under $DUN_HOME/projects/<id>/) overrides them, and a session's switch overrides that.",
 
   "servers": [
     {
@@ -48,7 +48,7 @@
     "ignore": []
   },
 
-  "//rag": "What /raglit gives the docs index (raglit). Skipped automatically: dependency, build and cache directories by name (node_modules, .venv, dist, build, target beside a Cargo.toml or pom.xml, ...), any directory whose files add up to more than max_dir_files or max_dir_mb (skipped whole, at the highest such directory; the workspace root never), files over max_file_kb, and binary files. Each skip is named in the /raglit on message. Merged field-by-field; include and exclude from every layer add up.",
+  "//rag": "What /rag gives the docs index (raglit). Skipped automatically: dependency, build and cache directories by name (node_modules, .venv, dist, build, target beside a Cargo.toml or pom.xml, ...), any directory whose files add up to more than max_dir_files or max_dir_mb (skipped whole, at the highest such directory; the workspace root never), files over max_file_kb, and binary files. Each skip is named in the /rag on message. Merged field-by-field; include and exclude from every layer add up.",
   "rag": {
     "//include": "gitignore-syntax patterns that override every automatic skip. Inside a dependency or build directory, only a pattern naming it or a path in it (\"node_modules/foo/\") reaches; a bare \"*.json\" does not.",
     "include": [],

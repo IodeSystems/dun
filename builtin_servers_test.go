@@ -249,7 +249,7 @@ func TestRaglit_RulesIndexModeIngestsTheImportsAndSurfacesThem(t *testing.T) {
 	imp := filepath.Join(ws, "docs", "zebra.md")
 	writeRule(t, imp, "the zebra fact: always pass --frostbite")
 	h, logPath, hits := startFakeRaglit(t, ws, false)
-	if _, err := h.SetRulesMode(context.Background(), RulesIndex); err == nil || !strings.Contains(err.Error(), "/raglit on") {
+	if _, err := h.SetRulesMode(context.Background(), RulesIndex); err == nil || !strings.Contains(err.Error(), "/rag on") {
 		t.Errorf("index mode without raglit: %v", err)
 	}
 	if err := h.StartServer(context.Background(), ServerDocs); err != nil {

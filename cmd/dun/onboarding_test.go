@@ -23,7 +23,7 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
-		"hint": "off: raglit — /raglit on (auto: every session)"})
+		"hint": "off: raglit — /rag on (auto: every session)"})
 	m = m.handleEvent(evMsg{"type": "settings", "model": "", "url": ""})
 	txt := convoText(m)
 	if !strings.Contains(txt, "⚠ not logged in — type /login to connect") || strings.Contains(txt, "ready") {
@@ -49,7 +49,7 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 	}
 	m.switchModel(providerConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
 	m = m.handleEvent(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "earlier"}}})
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}, "hint": "off: raglit — /raglit on (auto: every session)"})
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}, "hint": "off: raglit — /rag on (auto: every session)"})
 	m = m.handleEvent(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
 	txt = convoText(m)
 	for _, gone := range []string{"resumed", "not logged in", "kept your question", "off: raglit"} {

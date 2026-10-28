@@ -107,7 +107,7 @@ type ServerSpec struct {
 	// Autostart controls whether dun spawns this server at startup. A pointer
 	// because, unlike Disabled, this layer must be able to say "false"
 	// explicitly: turning autostart back OFF is a normal thing to do
-	// (/raglit manual) and must not require deleting the entry that turned it on.
+	// (/rag manual) and must not require deleting the entry that turned it on.
 	// nil = inherit the layer below.
 	Autostart *bool `json:"autostart,omitempty"`
 	// Disable is a deny-list of tool names to hide from the model. When empty,
@@ -134,9 +134,11 @@ type ServerSpec struct {
 	// the token is obtained in the browser, kept in $DUN_HOME/oauth/<id>.json
 	// and refreshed (see mcpoauth.go). Not with Bearer, and not in the shell.
 	OAuth *OAuthSpec `json:"oauth,omitempty"`
-	// Attach names other indexes the server's search role also reads
-	// ("project:index"), at this scope; the scopes add up (attach.go).
+	// Attach names indexes the server's search role reads ("project:index")
+	// and Detach ones it does not, at this scope; the nearest scope that
+	// names an index decides it (attach.go).
 	Attach []string `json:"attach,omitempty"`
+	Detach []string `json:"detach,omitempty"`
 	// Exclude is directories, relative to the workspace, left out of the
 	// server's index: passed as --exclude to a poly-lsp-mcp that takes it
 	// (indexstate.go). Written at project scope by /poly-lsp exclude and by
@@ -592,6 +594,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	out.OAuth = mergeOAuth(prev.OAuth, next.OAuth)
 	if next.Attach != nil {
 		out.Attach = next.Attach
+	}
+	if next.Detach != nil {
+		out.Detach = next.Detach
 	}
 	if next.Exclude != nil {
 		out.Exclude = next.Exclude

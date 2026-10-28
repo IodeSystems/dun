@@ -223,7 +223,7 @@ var doctorTools = []struct{ name, level, need string }{
 	{"git", "fail", ""},
 	{"mcpshell", "warn", ""},
 	{"poly-lsp-mcp", "warn", "/poly-lsp"},
-	{"raglit", "warn", "/raglit"},
+	{"raglit", "warn", "/rag"},
 }
 
 // fixTools are the tools --fix installs: both build with Go alone. raglit
@@ -433,7 +433,7 @@ func (d *doctor) addRaglit(rep dun.RaglitDoctor) {
 		if c.Needs != "" {
 			detail += " — needs " + c.Needs
 		}
-		d.add("ok", "raglit", detail, dun.RagHow(c.How, "raglit"))
+		d.add("ok", "raglit", detail, dun.RagHow(c.How, "rag"))
 	}
 	for _, e := range rep.Extractors {
 		if e.Found {

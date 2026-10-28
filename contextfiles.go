@@ -64,7 +64,7 @@ func (h *Harness) rulesSwitchKind() switchKind {
 				return h.ensureRulesSummary(context.Background(), loadRules(h.cfg.Workspace))
 			}
 			if mode == RulesIndex && !h.hookStarted(HookRulesChanged) {
-				return fmt.Errorf("index mode needs the docs index: /raglit on first")
+				return fmt.Errorf("index mode needs the docs index: /rag on first")
 			}
 			return nil
 		},
@@ -75,7 +75,7 @@ func (h *Harness) rulesSwitchKind() switchKind {
 			if h.hookStarted(HookRulesChanged) {
 				return []string{"docs index (raglit): on · files switched off are still found by relevance"}
 			}
-			return []string{"docs index (raglit): off · /raglit on to search files switched off, and for mode index"}
+			return []string{"docs index (raglit): off · /rag on to search files switched off, and for mode index"}
 		},
 	}
 }

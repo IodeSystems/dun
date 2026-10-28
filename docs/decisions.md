@@ -525,7 +525,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `WaitServers` so the task keeps every tool it started with.
 - **The tool set is mutable; four fields derive from it.** `Session.Tools`,
   `Dispatch`, `System` and `Preparer` are recomputed together by
-  `Harness.applyTools`, never set individually, or the next `/raglit` reverts
+  `Harness.applyTools`, never set individually, or the next `/rag` reverts
   them. A rebuild that lands while a turn holds `turnMu` is deferred to the
   turn boundary (swapping tools under a running turn is a data race).
 - **A spawned server's stderr is evidence.** agentkit's `mcpmgr` keeps a
@@ -573,7 +573,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   refuses a summary that is not smaller; `/rules index` puts imports in raglit.
   One offer, once per hash, when the block exceeds ~4000 tokens.
 - **Shared raglit indexes** (`attach.go`): raglit's daemon is shared and its
-  watcher keeps indexes fresh; dun only reads. `/raglit attach` adds a
+  watcher keeps indexes fresh; dun only reads. `/rag attach` adds a
   qualified `proj:idx` to the search selector at session, project or global
   scope (union). Attached indexes are read-only from dun. Known risk: with a
   foreign index attached, the selector replaces raglit's default, so the

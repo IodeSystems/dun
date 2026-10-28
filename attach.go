@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -18,25 +20,26 @@ import (
 // sessions read it.
 //
 // raglit's daemon is shared, so an index one project fills serves every
-// session that names it. `/raglit watch <dir> [--index N]` has raglit watch
+// session that names it. `/rag watch <dir> [--index N]` has raglit watch
 // a directory into an index of this project (raglit keeps it fresh; dun only
-// reads it). `/raglit attach <index>` adds it to what this session's search
+// reads it). `/rag attach <index>` adds it to what this session's search
 // reads: the model's search and get calls that name no index, and the
 // proactive search (turn.before).
 //
-// An attachment is "project:index", a bare index being this project's. It is
-// kept at the same three scopes as the server switches (mcpscope.go) — the
-// session's .mcp.json, the project's dun.local.json, the global mcp.json —
-// under the extension's server id, and the scopes ADD UP: an index attached
-// anywhere is read.
+// An index is "project:index", a bare index being this project's. Each scope
+// — the session's .mcp.json, the project's dun.local.json, the global
+// mcp.json, under the extension's server id — may switch it on (attach) or
+// off (detach), and the nearest scope that names it decides, as /mcp's
+// switches do (USER 2026-10-28: /rag). Unset everywhere, this project's own
+// indexes are on and every other one off.
 //
-// With another project's index attached, the search's `index` argument is
+// With another project's index on, the search's `index` argument is
 // "<own>:*,<project>:<index>,…" (raglit's read selector: its own indexes,
-// plus one named index of any project). raglit expands "all" only as the
-// whole selector, so this selector drops the `shared` namespaces of raglit's
-// project config while something is attached (risk recorded in the plan).
-// Attachments of this project's own indexes change nothing: "<own>:*" reads
-// them already.
+// plus one named index of any project). With one of its own off, "<own>:*"
+// becomes its own indexes named one by one, less those (the list is
+// raglit's, cached: ownIndexes). raglit expands "all" only as the whole
+// selector, so a selector drops the `shared` namespaces of raglit's project
+// config while it is in force (risk recorded in the plan).
 
 // attachName is what an attachment may be once qualified.
 // ":<index>" is a global index (raglit 359f049).
@@ -109,18 +112,66 @@ func (h *Harness) AttachName(id, index string) string {
 	return index
 }
 
+// effectiveIndexes is the indexes switched on (on) or off (!on): for each
+// index a scope names, the nearest scope decides — session, then project,
+// then global.
+func effectiveIndexes(sc ServerScopes, on bool) []string {
+	layers := []struct{ attach, detach []string }{
+		{sc.AttachSession, sc.DetachSession}, {sc.AttachProject, sc.DetachProject}, {sc.AttachGlobal, sc.DetachGlobal},
+	}
+	var out []string
+	for _, name := range unionAttach(sc.AttachGlobal, sc.AttachProject, sc.AttachSession,
+		sc.DetachGlobal, sc.DetachProject, sc.DetachSession) {
+		for _, l := range layers {
+			if slices.Contains(l.attach, name) {
+				if on {
+					out = append(out, name)
+				}
+				break
+			}
+			if slices.Contains(l.detach, name) {
+				if !on {
+					out = append(out, name)
+				}
+				break
+			}
+		}
+	}
+	return out
+}
+
 // attachSelector is the `index` argument a search with no index of its own
-// gets: own's indexes plus the attached ones of other projects; "" when
-// there are none (the server's default reads its own already).
-func attachSelector(own string, attach []string) string {
-	parts := []string{own + ":*"}
+// gets: own's indexes (all of them, "<own>:*", or ownIdx less the ones
+// switched off) plus the switched-on ones of other projects; "" when that
+// is just own's own (the server's default reads them already).
+func attachSelector(own string, attach, detach, ownIdx []string) string {
+	var parts []string
+	ownOff := false
+	for _, d := range detach {
+		if p, _, _ := strings.Cut(d, ":"); p == own {
+			ownOff = true
+		}
+	}
+	switch {
+	case !ownOff || len(ownIdx) == 0: // nothing off, or own's list unknown yet
+		parts = append(parts, own+":*")
+	default:
+		for _, i := range ownIdx {
+			if !slices.Contains(detach, i) {
+				parts = append(parts, i)
+			}
+		}
+	}
 	for _, a := range attach {
 		if p, _, _ := strings.Cut(a, ":"); p != own {
 			parts = append(parts, a)
 		}
 	}
-	if len(parts) == 1 {
+	if !ownOff && len(parts) == 1 {
 		return ""
+	}
+	if len(parts) == 0 {
+		return own + ":-" // every index of its own off, nothing else on: no index raglit has
 	}
 	return strings.Join(parts, ",")
 }
@@ -156,11 +207,17 @@ func (h *Harness) Attachments(id string) ([]Attachment, error) {
 	return out, nil
 }
 
-// AttachIndex attaches (on) or detaches index for server id's search at
-// scope. It returns the attachment as stored, the file written ("" when
-// nothing changed or the session is in memory) and whether it changed. The
-// model's tools and the proactive search follow at once.
+// AttachIndex attaches (on) or detaches (off) index for server id's search
+// at scope (SetIndex).
 func (h *Harness) AttachIndex(ctx context.Context, id, index, scope string, on bool) (string, string, bool, error) {
+	return h.SetIndex(ctx, id, index, scope, &on)
+}
+
+// SetIndex switches index on or off for server id's search at scope, or
+// unsets it there (nil). It returns the index as stored, the file written
+// ("" when nothing changed or the session is in memory) and whether it
+// changed. The model's tools and the proactive search follow at once.
+func (h *Harness) SetIndex(ctx context.Context, id, index, scope string, on *bool) (string, string, bool, error) {
 	e, ok := h.extension(id)
 	if !ok || e.Roles.Search == nil {
 		return "", "", false, fmt.Errorf("%s has no search role to attach an index to", id)
@@ -173,37 +230,41 @@ func (h *Harness) AttachIndex(ctx context.Context, id, index, scope string, on b
 	if err != nil {
 		return "", "", false, err
 	}
-	var cur []string
+	var att, det []string
 	switch scope {
 	case ScopeGlobal:
-		cur = s.Scopes.AttachGlobal
+		att, det = s.Scopes.AttachGlobal, s.Scopes.DetachGlobal
 	case ScopeProject:
-		cur = s.Scopes.AttachProject
+		att, det = s.Scopes.AttachProject, s.Scopes.DetachProject
 	case ScopeSession:
-		cur = s.Scopes.AttachSession
+		att, det = s.Scopes.AttachSession, s.Scopes.DetachSession
 	default:
 		return "", "", false, fmt.Errorf("scope %q: want global, project or session", scope)
 	}
-	var next []string
-	had := false
-	for _, a := range cur {
-		if a == name {
-			had = true
-			continue
+	without := func(l []string) []string {
+		var out []string
+		for _, a := range l {
+			if a != name {
+				out = append(out, a)
+			}
 		}
-		next = append(next, a)
+		return out
 	}
-	if on {
-		next = append(next, name)
+	nextAtt, nextDet := without(att), without(det)
+	switch {
+	case on != nil && *on:
+		nextAtt = append(nextAtt, name)
+	case on != nil:
+		nextDet = append(nextDet, name)
 	}
-	if had == on {
+	if slices.Equal(nextAtt, att) && slices.Equal(nextDet, det) {
 		return name, "", false, nil
 	}
-	edit := func(l *[]string) { *l = next }
+	set := func(a, d *[]string) { *a, *d = nextAtt, nextDet }
 	path, err := h.writeScope(id, scope,
-		func(sp *ServerSpec) { edit(&sp.Attach) },
-		func(sp *ServerSpec) { edit(&sp.Attach) },
-		func(ss *SessionServer) { edit(&ss.Attach) })
+		func(sp *ServerSpec) { set(&sp.Attach, &sp.Detach) },
+		func(sp *ServerSpec) { set(&sp.Attach, &sp.Detach) },
+		func(ss *SessionServer) { set(&ss.Attach, &ss.Detach) })
 	if err != nil {
 		return name, "", false, err
 	}
@@ -254,10 +315,12 @@ func (h *Harness) attachSelectors(exts []Extension, tools []mcpmgr.MCPTool) map[
 	defer h.srvMu.Unlock()
 	for _, e := range exts {
 		s, ok := h.spec(e.ID)
-		if !ok || len(s.Attach) == 0 || !toolTakes(tools, e.ID, e.Roles.Search.Tool, "index") {
+		if !ok || len(s.Attach)+len(s.Detach) == 0 || !toolTakes(tools, e.ID, e.Roles.Search.Tool, "index") {
 			continue
 		}
-		if sel := attachSelector(h.ownProject(s), s.Attach); sel != "" {
+		own := h.ownProject(s)
+		ownIdx := h.ownIndexes(e, s, own)
+		if sel := attachSelector(own, s.Attach, s.Detach, ownIdx); sel != "" {
 			out[e.ID] = sel
 		}
 	}
@@ -319,18 +382,68 @@ func describeAttached(defs []llm.ToolDef, exts []Extension, specs []Server, sel 
 		if sel[e.ID] == "" {
 			continue
 		}
-		var attach []string
+		var attach, detach []string
 		for _, s := range specs {
 			if s.ID == e.ID {
-				attach = s.Attach
+				attach, detach = s.Attach, s.Detach
 			}
+		}
+		var say []string
+		if len(attach) > 0 {
+			say = append(say, "searched with this project's: "+strings.Join(attach, ", "))
+		}
+		if len(detach) > 0 {
+			say = append(say, "switched off: "+strings.Join(detach, ", "))
 		}
 		name := modelToolName(mcpmgr.MCPTool{ServerID: e.ID, Name: e.Roles.Search.Tool})
 		for i := range defs {
 			if defs[i].Function.Name == name {
-				defs[i].Function.Description += " Attached indexes, searched with this project's when `index` is empty: " +
-					strings.Join(attach, ", ") + ". Name one (\"project:index\") in `index` to search only it."
+				defs[i].Function.Description += " When `index` is empty — indexes " + strings.Join(say, "; ") +
+					". Name one (\"project:index\") in `index` to search only it."
 			}
 		}
 	}
+}
+
+// ownIdxCache is a project's own indexes, as raglit listed them, by project:
+// what a selector names one by one when one of them is switched off.
+// Listing runs the index CLI (seconds), so it never runs under the lock a
+// tool rebuild holds: a miss starts it in the background and the rebuild
+// after it uses the list.
+var ownIdxCache, ownIdxListing sync.Map // project → []string ("project:index"); project → listing now
+
+// ownIndexes is own's indexes, qualified, or nil until they are known.
+func (h *Harness) ownIndexes(e Extension, s Server, own string) []string {
+	if v, ok := ownIdxCache.Load(own); ok {
+		return v.([]string)
+	}
+	cli := "raglit"
+	if e.Roles.Index != nil && e.Roles.Index.CLI != "" {
+		cli = e.Roles.Index.CLI
+	}
+	if _, busy := ownIdxListing.LoadOrStore(own, true); busy {
+		return nil
+	}
+	ws := h.cfg.Workspace
+	go func() {
+		defer ownIdxListing.Delete(own)
+		rows, err := listIndexes(context.Background(), cli, ws)
+		if err != nil {
+			return
+		}
+		noteOwnIndexes(own, rows)
+		h.applyTools()
+	}()
+	return nil
+}
+
+// noteOwnIndexes caches own's indexes from a listing.
+func noteOwnIndexes(own string, rows []raglitIndexRow) {
+	var idx []string
+	for _, r := range rows {
+		if strings.ToLower(r.Project) == own && r.Index != "" {
+			idx = append(idx, own+":"+strings.ToLower(r.Index))
+		}
+	}
+	ownIdxCache.Store(own, idx)
 }
