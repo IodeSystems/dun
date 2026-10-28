@@ -275,6 +275,7 @@ func (s *session) exited(eng Engine, err error) {
 		return
 	}
 	s.eng, s.running = nil, false
+	go s.svc.announcePeers(s.owner)
 	reason := "engine exited"
 	if err != nil {
 		reason = "engine exited: " + err.Error()
@@ -345,6 +346,7 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 	s.running, s.stopping, s.gaveUp = true, false, false
 	s.log.Append(proto.NewEvent(&proto.EngineState{State: "started"}))
 	go s.readEvents(eng, s.engDone, sc)
+	go s.svc.announcePeers(s.owner) // not under mu: it locks each session's
 }
 
 // send writes a command to the engine, starting it first if need be.

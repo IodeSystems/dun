@@ -123,6 +123,11 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			// it labelled (dun.PeerLabel).
 			em.emit(&proto.Notification{Kind: "peer", Text: m.FromName + " (" + m.From + "): " + m.Text})
 			h.PeerMessage(m.From, m.FromName, m.Text, m.Wake)
+		case "peers":
+			var p proto.PeerPresence
+			if json.Unmarshal(line, &p) == nil && p.Others > 0 {
+				h.NotePeers()
+			}
 		}
 	}
 }

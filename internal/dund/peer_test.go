@@ -288,3 +288,15 @@ func TestPeerNameOfAWorktreeSession(t *testing.T) {
 		t.Errorf("in-place worktree: %+v", p)
 	}
 }
+
+// Each engine hears how many other live sessions its owner has, when one
+// starts or stops; another owner's sessions do not count.
+func TestPeerPresenceIsAnnounced(t *testing.T) {
+	svc, sp, _ := newSvc(t)
+	a1, _ := svc.Create(alice, t.TempDir(), nil, "")
+	waitRecord(t, sp, "peers "+a1+": 0")
+	_, _ = svc.Create(bob, t.TempDir(), nil, "")
+	a2, _ := svc.Create(alice, t.TempDir(), nil, "")
+	waitRecord(t, sp, "peers "+a1+": 1")
+	waitRecord(t, sp, "peers "+a2+": 1")
+}

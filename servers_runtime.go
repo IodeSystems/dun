@@ -707,9 +707,13 @@ func (h *Harness) rebuildTools() {
 		}
 	}
 	// dun_list and dun_msg: a root under dund only (cfg.Peers is nil
-	// otherwise, and always for a child — see childConfig).
+	// otherwise, and always for a child — see childConfig). Listed only once
+	// another live session was seen (USER 2026-10-27: "conditional
+	// list/msg"); like jobs, the dispatch is always there.
 	if cfg.Peers != nil && !h.isChild() {
-		toolDefs = append(toolDefs, dunListToolDef(), dunMsgToolDef())
+		if h.hadPeers.Load() {
+			toolDefs = append(toolDefs, dunListToolDef(), dunMsgToolDef())
+		}
 		dispatch = withPeers(dispatch, cfg.Peers, report)
 	}
 	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
