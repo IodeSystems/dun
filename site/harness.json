@@ -1,12 +1,13 @@
 {
   "name": "dun",
   "icon": "👷",
-  "description": "An open-source coding agent for the terminal, written in Go. Works with any OpenAI-compatible model.",
+  "description": "An open-source coding agent for the terminal, for long working sessions on any OpenAI-compatible model. Written in Go.",
   "homepage": "https://dun.iodesystems.com/",
   "repository": "https://github.com/IodeSystems/dun",
   "license": "MIT",
   "language": "Go",
   "install": {
+    "script": "curl -fsSL https://dun.iodesystems.com/install.sh | sh",
     "releases": "https://github.com/IodeSystems/dun/releases/latest",
     "platforms": {
       "linux_amd64": "https://github.com/IodeSystems/dun/releases/latest/download/dun_linux_amd64.tar.gz",
@@ -15,8 +16,7 @@
       "darwin_arm64": "https://github.com/IodeSystems/dun/releases/latest/download/dun_darwin_arm64.tar.gz"
     },
     "steps": [
-      "Download dun_<os>_<arch>.tar.gz for your platform and extract it",
-      "Put the dun binary on PATH",
+      "curl -fsSL https://dun.iodesystems.com/install.sh | sh  (or download dun_<os>_<arch>.tar.gz and put dun on PATH)",
       "dun doctor --fix",
       "dun --setup",
       "cd your-project && dun"
@@ -28,7 +28,9 @@
       "method": "minisign verifies dun-manifest.json; the manifest lists each file's sha256"
     },
     "from_source": {
-      "requires": ["Go"],
+      "requires": [
+        "Go"
+      ],
       "steps": [
         "git clone https://github.com/IodeSystems/dun",
         "cd dun",
@@ -36,7 +38,12 @@
       ]
     }
   },
-  "platforms": ["linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64"],
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64",
+    "darwin/amd64",
+    "darwin/arm64"
+  ],
   "capabilities": [
     "models: any OpenAI-compatible endpoint (hosted, gateway, or local); no built-in provider",
     "models: reasoning effort per dialect (llama.cpp, OpenRouter, OpenAI-style via LiteLLM, Anthropic)",

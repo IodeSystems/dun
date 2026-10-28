@@ -125,6 +125,7 @@ site: ## the site and the signed registry → dist/site (MINISIGN_KEY=…, minis
 	@test -n "$(MINISIGN_KEY)" || { echo "make site: MINISIGN_KEY names the release key's secret file"; exit 1; }
 	rm -rf $(SITE_DIR) && mkdir -p $(SITE_DIR)
 	cp -r site/. $(SITE_DIR)/
+	python3 tools/promptsize/benchpage.py $(SITE_DIR)/bench
 	rm -rf $(SITE_DIR)/registry/v1/extensions $(SITE_DIR)/registry/v1/presets $(SITE_DIR)/registry/v1/tools
 	go run ./tools/mkregistry -src site/registry/v1 -root . -o $(SITE_DIR)/registry/v1/index.json
 	minisign -S -s "$(MINISIGN_KEY)" -m $(SITE_DIR)/registry/v1/index.json -t "dun registry"
