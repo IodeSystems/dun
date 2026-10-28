@@ -4240,6 +4240,17 @@ func (m *tuiModel) replayItems(items []any, run int) int {
 			n++
 		case "reasoning":
 			m.addThought(&thinkBlock{text: str(im["content"])})
+		case "command":
+			// A command the person ran and dun's answer (dun/usercommand.go):
+			// the line dim, as typed, and the reply under it.
+			m.endRun()
+			line, reply, _ := strings.Cut(str(im["content"]), "\n")
+			text := stDim.Render("› " + line)
+			if reply != "" {
+				text += "\n" + replyLine(reply)
+			}
+			m.convo = append(m.convo, convoEntry{collapsed: text})
+			n++
 		}
 	}
 	return n

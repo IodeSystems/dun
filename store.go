@@ -372,6 +372,23 @@ func (s *sessionStore) contextLocked() []agent.Entry {
 		// pointer to removed churn that itself cost context would be absurd.
 		// A recorded turn error is the same shape of thing for the same reason
 		// (see kindTurnError).
+		// The person's commands (usercommand.go) are theirs: kept, replayed
+		// to them, never the model's.
+		if e.Kind == kindRecap || e.Kind == kindTurnError || e.Kind == kindCommand {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// History is the conversation as the person sees it on resume: Context, and
+// the commands they ran (kindCommand).
+func (s *sessionStore) History() []agent.Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]agent.Entry, 0, len(s.entries))
+	for _, e := range s.entries {
 		if e.Kind == kindRecap || e.Kind == kindTurnError {
 			continue
 		}

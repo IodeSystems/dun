@@ -788,11 +788,7 @@ type HistoryItem struct {
 // tool-call arguments are decoded from the stored JSON so the client renders
 // them like a live call.
 func (h *Harness) History() []HistoryItem {
-	entries, err := h.store.Context(context.Background(), "dun")
-	if err != nil {
-		return nil
-	}
-	return historyItems(entries)
+	return historyItems(h.store.History())
 }
 
 // SessionHistory is History read straight from a session file, with no
@@ -803,11 +799,7 @@ func SessionHistory(sessionFile string) []HistoryItem {
 	if err != nil {
 		return nil
 	}
-	entries, err := st.Context(context.Background(), "dun")
-	if err != nil {
-		return nil
-	}
-	return historyItems(entries)
+	return historyItems(st.History())
 }
 
 func historyItems(entries []agent.Entry) []HistoryItem {
@@ -842,6 +834,8 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: e.Content})
 		case agent.KindNotification:
 			out = append(out, HistoryItem{Kind: "notification", Content: e.Content})
+		case kindCommand:
+			out = append(out, HistoryItem{Kind: "command", Content: e.Content})
 		}
 	}
 	return out

@@ -1592,6 +1592,9 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		}
 	}
 	in.setPeerFn(peerIn(peers, h, em))
+	em.mu.Lock()
+	em.onReply = recordReplies(h) // the person's commands, kept in the session
+	em.mu.Unlock()
 	in.setAgentFn(func(id, action, content string) {
 		n, err := strconv.Atoi(id)
 		if err != nil {
@@ -2404,12 +2407,14 @@ type emitter struct {
 	w       io.Writer // nil → stdout; a test points this at a buffer
 	enc     *json.Encoder
 	session string
+	// onReply sees every event after it is written: what keeps the person's
+	// commands in the session (recordReplies).
+	onReply func(payload any)
 }
 
 func (e *emitter) emit(payload any) {
 	ev := proto.NewEvent(payload)
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	ev.Session, ev.TS = e.session, time.Now()
 	if e.enc == nil {
 		w := e.w
@@ -2419,6 +2424,62 @@ func (e *emitter) emit(payload any) {
 		e.enc = json.NewEncoder(w)
 	}
 	_ = e.enc.Encode(ev)
+	onReply := e.onReply
+	e.mu.Unlock()
+	// After the lock: keeping a command appends to the session, which may
+	// emit an event of its own.
+	if onReply != nil {
+		onReply(payload)
+	}
+}
+
+// recordReplies keeps the person's commands, and what dun answered, in the
+// session (dun/usercommand.go): the replies to what they typed or toggled,
+// spelled as typed. Views, pickers and the engine's own server starts are
+// not commands.
+func recordReplies(h *dun.Harness) func(payload any) {
+	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", dun.ServerDocs: "rag"}
+	kindSlash := map[string]string{"indexes": "rag", "paths": "file", "skills": "skill", "rules": "rules"}
+	commands := map[string]bool{"slash": true, "files": true, "switches": true, "mcp": true, "ext": true, "jobs": true,
+		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "suggest": true,
+		"worklog": true, "memories": true, "interrupt": true, "ctxconfig": true, "repaint": true}
+	return func(payload any) {
+		switch p := payload.(type) {
+		case *proto.ControlEvent:
+			if !commands[p.ID] || strings.TrimSpace(p.Message) == "" || (p.ID == "ext" && p.Action == "view") {
+				return
+			}
+			line := "/" + p.Action
+			switch {
+			case p.ID == "switches":
+				kind, rest, _ := strings.Cut(p.Action, " ")
+				if s := kindSlash[kind]; s != "" {
+					kind = s
+				}
+				line = "/" + kind + " " + rest
+			case p.ID != "slash":
+				id := p.ID
+				if s := slashOf[id]; s != "" {
+					id = s
+				}
+				line = strings.TrimSpace("/" + id + " " + p.Action)
+			}
+			h.RecordCommand(line, p.Message)
+		case *proto.ServerEvent:
+			switch p.Action {
+			case "", "start", "index", "setup", "activity":
+				return
+			}
+			if p.Background || strings.TrimSpace(p.Message) == "" {
+				return
+			}
+			id := p.ID
+			if s := slashOf[id]; s != "" {
+				id = s
+			}
+			h.RecordCommand("/"+id+" "+p.Action, p.Message)
+		}
+	}
 }
 
 // setSession stamps every later event with the session id. Events before it
