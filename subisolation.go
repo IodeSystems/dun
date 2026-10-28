@@ -90,10 +90,7 @@ func (iso isolation) apply(cfg *Config) {
 		cfg.Workspace = iso.Path
 		cfg.Worktree = &Worktree{Path: iso.Path, Branch: iso.Branch, repoRoot: iso.Repo, Mounts: cfg.ExtraMounts}
 		if iso.Mode == IsoDocker {
-			image := cfg.DockerImage
-			if image == "" {
-				image = "golang:1.23" // Rehoist's default
-			}
+			image := dockerImageOrDefault(cfg.DockerImage)
 			cfg.Exec = DockerExec{Dir: iso.Path, Image: image, Network: true, ExtraMounts: cfg.ExtraMounts}
 		} else {
 			cfg.Exec = &HostShell{Dir: iso.Path}

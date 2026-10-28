@@ -677,7 +677,7 @@ func logProto(lines []dun.ServerLogLine) []proto.ServerLogLine {
 // caller in main.go. Kept beside the commands themselves so adding an asking
 // one is a change in this file, not a hang found in production.
 func ctrlCmdAsks(id, action string) bool {
-	return id == "worktree" && action == "commit"
+	return id == "worktree" && action == "commit" || isolateBuilds(id, action)
 }
 
 // runControlCmd handles /isolate, its old words /docker and /worktree new,

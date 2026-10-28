@@ -484,7 +484,7 @@ mounted and no network:
 
 ```sh
 dun --workspace ./repo --docker=true             # entire process in bundled docker image
-dun --workspace ./repo --docker golang:1.26      # entire process in a specific image
+dun --workspace ./repo                              # then /isolate docker image golang:1.26 (or a Dockerfile): commands only, in your image
 dun --workspace ./repo                        # exec runs on the host
 dun --no-worktree ...                               # work in place (no isolation)
 ```

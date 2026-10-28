@@ -297,6 +297,21 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `/docker [on|off|status]` and `/worktree new` still route, each with one line
   naming `/isolate`, and are not in the command list. Docker missing is
   `exec.LookPath`, as for sub-agents (cmd/dun/isolate.go: dockerProbe).
+- **`/isolate docker image <image | Dockerfile | dir>`: a custom image is for
+  exec only (USER, aw4 i_1m603tq13c2h6bb67b3c3e).** `--docker IMAGE` re-runs
+  the host dun inside the container; only the bundled image holds it (the host
+  binary is not mounted and is cgo, so it cannot run on musl). Startup now
+  refuses any `--docker` value but the bundled one (`checkDockerFlag`) and
+  names this command. `/isolate docker image` shows the image
+  (`Harness.DockerImage`, `golang:1.23` until chosen); with an image name it
+  sets `Config.DockerImage` (`SetDockerImage`: a session already in Docker
+  switches at once; sub-agents with isolation docker read the same field). An
+  existing file or a directory holding a `Dockerfile` is built with
+  `docker build`, tag `dun-iso-<12 hex of sha256(Dockerfile)>`, skipped when
+  the tag exists; the tag covers the Dockerfile text, not the rest of the build
+  context. The build runs off the reader goroutine (`isolateBuilds`). Not
+  persisted: neither the isolation mode nor the image is stored with the
+  session, so a resumed session is back to the default image.
 - **A commit message is written by the model and approved by the human (USER,
   2026-08-03).** `/worktree commit` once committed with the literal string
   "/worktree commit". Now one throwaway session (`Harness.CommitMessage`,
