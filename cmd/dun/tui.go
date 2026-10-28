@@ -2531,8 +2531,12 @@ func (m *tuiModel) noteServers(ev evMsg) {
 func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	switch ev["type"] {
 	case "workspace":
+		// An empty branch is /isolate off: back in place, no worktree; the
+		// control reply already said so.
 		m.branch = str(ev["branch"])
-		m.append(stDim.Render("worktree branch: " + m.branch))
+		if m.branch != "" {
+			m.append(stDim.Render("worktree branch: " + m.branch))
+		}
 	case "session":
 		// Remembered so a respawned engine reattaches to THIS conversation
 		// rather than starting a new one. Before this point there is nothing to

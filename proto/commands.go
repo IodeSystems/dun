@@ -42,7 +42,7 @@ type ServerCmd struct {
 	Action string `json:"action"`
 }
 
-// ControlCmd is a slash command the engine runs: /docker, /worktree, /mcp, …
+// ControlCmd is a slash command the engine runs: /isolate, /worktree, /mcp, …
 type ControlCmd struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`

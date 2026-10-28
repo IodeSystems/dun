@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"strconv"
@@ -37,12 +38,12 @@ func onOff(b bool) string {
 // commandsEvent is the list, with the current state of each toggle.
 func commandsEvent(h *dun.Harness) *proto.Commands {
 	exts, _ := engineExtensions(h.Extensions())
-	return commandList(h.Servers(), h.IsDocker(), exts...)
+	return commandList(h.Servers(), isolationMode(h), exts...)
 }
 
 // commandList builds the list from the state it shows: the extensions'
 // slash commands (the bundled ones when exts is empty), after dun's own.
-func commandList(servers []dun.ServerState, docker bool, exts ...dun.Extension) *proto.Commands {
+func commandList(servers []dun.ServerState, iso string, exts ...dun.Extension) *proto.Commands {
 	if len(exts) == 0 {
 		exts = dun.BundledExtensions()
 	}
@@ -71,7 +72,7 @@ func commandList(servers []dun.ServerState, docker bool, exts ...dun.Extension) 
 		state, detail := serverState(e.ID)
 		items = append(items, extCommand(e, state, detail))
 	}
-	return &proto.Commands{Items: append(ownCommands(docker), items...)}
+	return &proto.Commands{Items: append(ownCommands(iso), items...)}
 }
 
 // srvActions are the server switch's actions, as an extension's slash
@@ -141,7 +142,7 @@ func extOwnCommands(e dun.Extension) []string {
 
 // ownCommands are dun's own engine commands, which no extension's slash
 // command may shadow.
-func ownCommands(docker bool) []proto.CommandSpec {
+func ownCommands(iso string) []proto.CommandSpec {
 	// In the order a client lists them within a group: /mcp, which a new
 	// user adds a server with, before /ext, which explains extensions.
 	return []proto.CommandSpec{
@@ -161,10 +162,17 @@ func ownCommands(docker bool) []proto.CommandSpec {
 				"The same name again replaces it."},
 		{Name: "ext", Usage: "[info]", Group: "tools", Choices: choices("info", "the same list"),
 			Description: "extensions: where each comes from, its server, commands and hooks"},
-		{Name: "docker", Usage: "[on|off|status]", Group: "tools", Choices: choices("on", "exec in Docker", "off", "exec on the host", "status", ""),
-			State: onOff(docker), Description: "where commands run: on, in a Docker container; off, on this machine"},
-		{Name: "worktree", Usage: "[status|new|commit]", Group: "git", Choices: choices("status", "", "new", "isolate in a new worktree", "commit", "write the message and ask"),
-			Description: "git: alone shows status, new isolates in a worktree, commit writes the message and asks"},
+		// /docker and /worktree new are /isolate's old words: still routed
+		// (routeSlash, isolateAlias), not listed.
+		{Name: "isolate", Usage: "[none|worktree|docker|off]", Group: "tools", Choices: isolateChoices,
+			State: cmp.Or(iso, dun.IsoNone), Description: "where dun's edits and commands are: in place, a fresh git worktree, or a worktree with commands in Docker; alone shows which",
+			Help: "/isolate alone says where this session works now: in place (the checkout itself), a worktree (its path and branch), or docker (a worktree, its commands in a container; the image).\n" +
+				"/isolate worktree moves the session into a fresh git worktree on a new branch: your checkout is not touched.\n" +
+				"/isolate docker does the same and runs its commands in Docker on the worktree. A container on your own checkout would still change your files, so docker always brings a worktree.\n" +
+				"/isolate off (or none) goes back to the checkout. The worktree is kept on disk and the reply says where: merge its branch, or remove it yourself.\n" +
+				"Both need a git repository; docker needs Docker installed."},
+		{Name: "worktree", Usage: "[status|commit]", Group: "git", Choices: choices("status", "", "commit", "write the message and ask"),
+			Description: "git: alone shows status, commit writes the message and asks; /isolate worktree makes a worktree"},
 		{Name: "memories", Group: "memory", Description: "this project's saved notes: when written, refined, confirmed or void"},
 		{Name: "remember", Usage: "[text]", Group: "memory", Text: true,
 			Description: "save a note for later sessions on this project (needs /raglit on); alone: the model picks what to keep"},
@@ -444,7 +452,7 @@ func routeSlash(line string, r slashRoutes) {
 		case "on", "off", "auto":
 			r.reply("suggestions: " + arg(0))
 		}
-	case "docker", "worktree":
+	case "isolate", "docker", "worktree": // docker, worktree new: isolateAlias
 		r.control(name, arg(0))
 	case "jobs":
 		switch {

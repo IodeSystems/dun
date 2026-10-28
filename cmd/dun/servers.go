@@ -680,46 +680,21 @@ func ctrlCmdAsks(id, action string) bool {
 	return id == "worktree" && action == "commit"
 }
 
-// runControlCmd handles /docker and /worktree control commands.
+// runControlCmd handles /isolate, its old words /docker and /worktree new,
+// and /worktree's own status and commit.
 func runControlCmd(ctx context.Context, h *dun.Harness, id, action string) string {
+	if iso, note, ok := isolateAlias(id, action); ok {
+		return note + "\n" + runIsolateCmd(h, iso)
+	}
 	switch id {
+	case "isolate":
+		return runIsolateCmd(h, action)
 	case "docker":
-		return runDockerCmd(ctx, h, action)
+		return "unknown action " + strconv.Quote(action) + " — /docker is /isolate now: /isolate [none|worktree|docker|off]"
 	case "worktree":
 		return runWorktreeCmd(ctx, h, action)
 	default:
-		return "unknown control target " + strconv.Quote(id) + " — try /docker or /worktree"
-	}
-}
-
-// runDockerCmd handles /docker [on|off|status].
-func runDockerCmd(ctx context.Context, h *dun.Harness, action string) string {
-	switch action {
-	case "", "status":
-		if h.IsDocker() {
-			backend := h.ExecBackend().(dun.DockerExec)
-			netStr := "no network"
-			if backend.Network {
-				netStr = "network on"
-			}
-			return "docker: on (image: " + backend.Image + ", " + netStr + ")"
-		}
-		return "docker: off (exec runs on host)"
-	case "on":
-		// Rehoist: keep current workspace + worktree, switch exec to Docker.
-		h.Rehoist(h.Workspace(), h.Worktree(), true)
-		image := h.ExecBackend().(dun.DockerExec).Image
-		netStr := "no network"
-		if h.ExecBackend().(dun.DockerExec).Network {
-			netStr = "network on"
-		}
-		return "docker: on (image: " + image + ", " + netStr + ")"
-	case "off":
-		// Rehoist: keep current workspace + worktree, switch exec to host.
-		h.Rehoist(h.Workspace(), h.Worktree(), false)
-		return "docker: off (exec runs on host)"
-	default:
-		return "unknown action " + strconv.Quote(action) + " — try /docker [on|off|status]"
+		return "unknown control target " + strconv.Quote(id) + " — try /isolate or /worktree"
 	}
 }
 
@@ -741,10 +716,9 @@ func gitView(h *dun.Harness) (wt *dun.Worktree, dedicated bool) {
 	return inPlace, false
 }
 
-// runWorktreeCmd handles /worktree [status|new|commit].
+// runWorktreeCmd handles /worktree [status|commit]. /worktree new is
+// /isolate worktree (isolateAlias).
 func runWorktreeCmd(ctx context.Context, h *dun.Harness, action string) string {
-	wt := h.Worktree()
-	dockerOn := h.IsDocker()
 	switch action {
 	case "", "status":
 		view, dedicated := gitView(h)
@@ -756,34 +730,10 @@ func runWorktreeCmd(ctx context.Context, h *dun.Harness, action string) string {
 			head = fmt.Sprintf("worktree: %s (base %s)", view.Path, view.BaseBranch)
 		}
 		return head + "\n" + view.Status()
-	case "new":
-		if wt != nil && wt.Branch != "" {
-			return "worktree: already on branch " + wt.Branch
-		}
-		// Create a new worktree. NewWorktree resolves the repo root itself.
-		//
-		// The mounts are the session's, not nil. A worktree lives under
-		// $DUN_HOME/projects/<id>/worktrees/, so a go.mod "replace =>
-		// ../agentkit" resolves through a symlink NewWorktree puts beside it —
-		// and passing nil here meant a worktree made with /worktree new had no
-		// such symlink, so the first build inside it failed on a dependency
-		// that resolves fine at startup.
-		// Same list Docker mounts, so both isolation tiers see one set of paths.
-		newWt, isRepo, err := dun.NewWorktree(h.Workspace(), h.Mounts())
-		if err != nil {
-			return "worktree: failed to create — " + oneLine(err.Error())
-		}
-		if !isRepo {
-			return "worktree: not a git repo — cannot create worktree"
-		}
-		// Rehoist: move workspace + exec to the new worktree directory,
-		// preserving the current docker setting.
-		h.Rehoist(newWt.Path, newWt, dockerOn)
-		return fmt.Sprintf("worktree: created %s (branch %s)", newWt.Path, newWt.Branch)
 	case "commit":
 		return runWorktreeCommit(ctx, h)
 	default:
-		return "unknown action " + strconv.Quote(action) + " — try /worktree [status|new|commit]"
+		return "unknown action " + strconv.Quote(action) + " — try /worktree [status|commit]; /isolate worktree makes one"
 	}
 }
 

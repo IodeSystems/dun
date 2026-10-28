@@ -100,7 +100,7 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 	if out := runServerCmd(ctx, h, "poly-lsp", ""); !strings.Contains(out, "/poly-lsp exclude ") || !strings.Contains(out, "/poly-lsp include ") {
 		t.Errorf("bare /poly-lsp lists exclude and include:\n%s", out)
 	}
-	l := commandList(h.Servers(), false)
+	l := commandList(h.Servers(), "")
 	names := map[string]bool{}
 	for _, c := range l.Items {
 		names[c.Name] = true

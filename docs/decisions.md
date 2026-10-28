@@ -289,6 +289,15 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   directory ../agentkit does not exist` without. It reuses the session's
   resolved mount list so symlinks and Docker volumes cannot describe different
   sets.
+- **`/isolate none|worktree|docker|off` replaces `/docker` and `/worktree new`
+  (plan, 2026-10-27).** The sub-agents' isolation words (subisolation.go).
+  `docker` always brings a worktree: a container on the checkout runs the
+  commands elsewhere but still edits the developer's files. `off` (= `none`)
+  rehoists to `Harness.Home()` (the pinned ConfigDir) and keeps the worktree,
+  naming its path; the startup prune removes it only when it holds nothing.
+  `/docker [on|off|status]` and `/worktree new` still route, each with one line
+  naming `/isolate`, and are not in the command list. Docker missing is
+  `exec.LookPath`, as for sub-agents (cmd/dun/isolate.go: dockerProbe).
 - **A commit message is written by the model and approved by the human (USER,
   2026-08-03).** `/worktree commit` once committed with the literal string
   "/worktree commit". Now one throwaway session (`Harness.CommitMessage`,

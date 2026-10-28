@@ -167,7 +167,7 @@ func TestRouteSlash_MCPInfoHelp(t *testing.T) {
 // The palette offers info and help after /mcp.
 func TestPalette_MCPInfoCompletion(t *testing.T) {
 	m, _ := skillModel(t, 0)
-	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(commandList(nil, false).Items)})
+	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(commandList(nil, "").Items)})
 	for q, want := range map[string]string{"/mcp inf": "info", "/mcp hel": "help"} {
 		mm := typeStr(m, q)
 		if _, l, ok := mm.paletteArgs(); !ok || len(l.choices) == 0 || l.choices[0].value != want {

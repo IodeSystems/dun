@@ -225,7 +225,7 @@ func infoMode(via string) string {
 // mcpHelp is /mcp help: the actions, one line each, from the command's own
 // spec — the palette's and /help mcp's words.
 func mcpHelp() string {
-	for _, c := range ownCommands(false) {
+	for _, c := range ownCommands("") {
 		if c.Name != "mcp" {
 			continue
 		}
@@ -250,7 +250,7 @@ var serverActions = map[string]bool{"on": true, "off": true, "unset": true, "res
 // nearest action when one is a typo away, and where the list is.
 func unknownMCPAction(a string) string {
 	best, bestD := "", 3 // a typo: at most two edits
-	for _, c := range ownCommands(false) {
+	for _, c := range ownCommands("") {
 		if c.Name != "mcp" {
 			continue
 		}
