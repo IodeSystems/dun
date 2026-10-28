@@ -25,20 +25,21 @@ import (
 //
 // Config, in any dun.json layer:
 //
-//	{"files": {"tools": ["read","edit","write","grep","list"],
+//	{"files": {"tools": ["read","edit","write"],
 //	           "read_only": false, "read_max": 65536, "ignore": ["gen/"]}}
 //
-// tools: [] turns them all off. delete and move are available but off unless
-// listed.
+// tools: [] turns them all off. grep, list, delete and move are available but
+// off unless listed: read lists a directory and, with grep, searches a file
+// or a tree, so grep and list only add definitions to every request.
 
 // FilesConfig is the "files" section of dun.json.
 type FilesConfig struct {
 	// Tools enables tools by name: read, edit, write, grep, list, delete,
-	// move. nil inherits (default: read, edit, write, grep, list); an empty
-	// list turns the file tools off.
+	// move. nil inherits (default: DefaultFileTools); an empty list turns the
+	// file tools off.
 	// No omitempty: null inherits and [] is off, and both must round-trip.
 	Tools []string `json:"tools"`
-	// ReadOnly keeps read, grep and list only. A pointer so a higher layer can
+	// ReadOnly keeps read, grep and list only (of those enabled). A pointer so a higher layer can
 	// say false.
 	ReadOnly *bool `json:"read_only,omitempty"`
 	// Caps; 0 inherits agentkit's defaults (64KB ranged read, 8KB unranged,
@@ -51,6 +52,15 @@ type FilesConfig struct {
 	// of .gitignore. Accumulated across layers, not replaced.
 	Ignore []string `json:"ignore,omitempty"`
 }
+
+// DefaultFileTools are the file tools a session gets when no config names
+// any. Not agentkit's default, which also has grep and list: read does both
+// (on a directory it lists; with grep it searches), and each tool's
+// definition rides every request. A benchmark (2026-10-27) had the model
+// read the last 120 lines of a 218KB CI log, ~5.8k tokens carried for four
+// more requests, where another agent's grep of it returned 265 bytes; one
+// tool that reads and searches is the one a model reaches for.
+var DefaultFileTools = []string{filetools.Read, filetools.Edit, filetools.Write}
 
 // LoadFiles resolves the effective files config for a workspace across the
 // same layers as LoadCommit. nil means no section anywhere: the defaults.
@@ -101,14 +111,16 @@ func mergeFiles(prev, next FilesConfig) FilesConfig {
 
 // toolsetConfig is the agentkit config for root. ok=false: file tools off.
 func (c *FilesConfig) toolsetConfig(root string) (filetools.Config, bool) {
-	cfg := filetools.Config{Root: root}
+	cfg := filetools.Config{Root: root, Tools: DefaultFileTools}
 	if c == nil {
 		return cfg, root != ""
 	}
 	if c.Tools != nil && len(c.Tools) == 0 {
 		return cfg, false
 	}
-	cfg.Tools = c.Tools
+	if c.Tools != nil {
+		cfg.Tools = c.Tools
+	}
 	cfg.ReadOnly = c.ReadOnly != nil && *c.ReadOnly
 	cfg.ReadMax, cfg.UnrangedMax = c.ReadMax, c.UnrangedMax
 	cfg.GrepMax, cfg.ListMax = c.GrepMax, c.ListMax
@@ -256,6 +268,10 @@ func systemFiles(ts *filetools.Toolset) string {
 		return ""
 	}
 	line := "\n\nUse " + strings.Join(names, ", ") + ", not exec, to read files (not cat/head/sed) and search them (not grep/rg/find)"
+	if !ts.Handles(ts.Name(filetools.Grep)) && ts.Handles(ts.Name(filetools.Read)) {
+		line = "\n\nUse " + strings.Join(names, ", ") + ", not exec, to read files and directories (not cat/head/sed/ls) and search them (" +
+			ts.Name(filetools.Read) + " with grep, not grep/rg/find)"
+	}
 	if ts.Handles(ts.Name(filetools.Edit)) {
 		line += ", and to edit them (not sed or heredocs)"
 	}
@@ -267,7 +283,11 @@ func systemFiles(ts *filetools.Toolset) string {
 		}
 	}
 	if len(tmp) > 0 {
-		line += "; " + strings.Join(tmp, ", ") + " also take an absolute path under /tmp"
+		verb := " also take"
+		if len(tmp) == 1 {
+			verb = " also takes"
+		}
+		line += "; " + strings.Join(tmp, ", ") + verb + " an absolute path under /tmp"
 	}
 	return line + "."
 }

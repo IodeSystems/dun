@@ -57,6 +57,13 @@ func TestFileToolStepLines(t *testing.T) {
 		{"file_grep", map[string]any{"pattern": "needle", "files": true}, "grep /needle/ → 2 files", false},
 		{"file_list", map[string]any{}, "list → 2 dirs, 2 files", false},
 		{"file_list", map[string]any{"glob": "**/*.go"}, "list **/*.go → 2 files", false},
+		// file_read searches with grep and lists a directory (agentkit v0.14).
+		{"file_read", map[string]any{"path": ".", "grep": "needle"}, "grep /needle/ → 2 matches in 2 files", false},
+		{"file_read", map[string]any{"path": "internal", "grep": "needle", "glob": "*.go"}, "grep /needle/ in internal *.go → 1 match in 1 file", false},
+		{"file_read", map[string]any{"path": "internal/b.go", "grep": "needle", "context": 1}, "grep /needle/ in internal/b.go → 1 match in 1 file", false},
+		{"file_read", map[string]any{"path": "one.txt", "grep": "absent"}, "grep /absent/ in one.txt → no matches", false},
+		{"file_read", map[string]any{"path": "internal"}, "read internal → 0 dirs, 2 files", false},
+		{"file_read", map[string]any{"path": ".", "glob": "**/*.go"}, "read . → 2 files", false},
 		{"file_move", map[string]any{"path": "one.txt", "to": "two.txt"}, "move one.txt → two.txt ✓", false},
 		{"file_delete", map[string]any{"path": "two.txt"}, "delete two.txt ✓", false},
 	}

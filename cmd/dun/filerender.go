@@ -16,6 +16,11 @@ import (
 //	✓ grep /needle/ → 12 matches in 3 files
 //	✓ list internal/ → 2 dirs, 9 files
 //
+// file_read also lists a directory and, with grep, searches (agentkit
+// v0.14): a read with grep is drawn as a grep, a read of a directory as a
+// list. file_grep and file_list keep their renderers, for configs that name
+// them and for older transcripts.
+//
 // The call half comes from fileCallText (callText), the outcome half from
 // the renderer's preview, parsed from the result's first line — the line
 // agentkit/files writes for the model, so the two cannot drift apart
@@ -33,6 +38,13 @@ func fileCallText(tool string, args map[string]any, max int) (string, bool) {
 	}
 	verb := strings.TrimPrefix(tool, filePrefix)
 	path := argStr(args, "path")
+	if verb == "read" && readGrep(args) != "" {
+		verb = "grep"
+		if path == "." {
+			path = ""
+		}
+		args = map[string]any{"pattern": readGrep(args), "path": path, "glob": argStr(args, "glob")}
+	}
 	switch verb {
 	case "read", "edit", "write", "delete":
 		if path == "" {
@@ -67,6 +79,14 @@ func fileCallText(tool string, args map[string]any, max int) (string, bool) {
 	return "", false
 }
 
+// readGrep is a file_read call's search: grep, or grep's own name for it.
+func readGrep(args map[string]any) string {
+	if g := argStr(args, "grep"); g != "" {
+		return g
+	}
+	return argStr(args, "pattern")
+}
+
 var (
 	reReadHead  = regexp.MustCompile(`^.*: lines (\d+)-(\d+) of (\d+)$`)
 	reReadWhole = regexp.MustCompile(`^.*: (\d+) lines?$`)
@@ -90,6 +110,9 @@ func fileReadRender(rc renderCtx) (string, string) {
 	if p, b, ok := fileFailed(rc.result); ok {
 		return p, b
 	}
+	if readGrep(rc.args) != "" {
+		return fileGrepRender(rc)
+	}
 	head := firstLine(rc.result)
 	body := stSecondary.Render(rc.result)
 	if m := reReadHead.FindStringSubmatch(head); m != nil {
@@ -101,7 +124,7 @@ func fileReadRender(rc renderCtx) (string, string) {
 		n, _ := strconv.Atoi(m[1])
 		return stSecondary.Render(fmt.Sprintf(" (%s)", plural(n, "line"))), body
 	}
-	return stDim.Render(" → ") + stSecondary.Render(clip(oneLine(head), 80)), body
+	return fileListRender(rc) // a directory; its fallback is the clipped head
 }
 
 func fileEditRender(rc renderCtx) (string, string) {

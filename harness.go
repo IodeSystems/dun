@@ -285,7 +285,7 @@ type Config struct {
 	// parent's. A spawn may override it.
 	ChildModel string
 	// Files configures the built-in file tools (files.go); nil = the defaults
-	// (read, edit, write, grep, list), rooted at Workspace.
+	// (DefaultFileTools: read, edit, write), rooted at Workspace.
 	Files *FilesConfig
 	// Parent, when set, makes this harness a CHILD of that one: it shares the
 	// parent's MCP manager (same worktree root ⇒ same servers, so no second

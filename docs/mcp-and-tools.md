@@ -136,8 +136,8 @@ on refresh; servers saved for every project; HTTP transport built in agentkit.
 ## File tools
 
 `agentkit/files` is mounted in `rebuildTools` next to exec (`files.go`):
-`file_read`, `file_edit`, `file_write`, `file_grep`, `file_list` on by default,
-`file_delete` and `file_move` opt in. USER wanted a toolset "minimal,
+`file_read`, `file_edit`, `file_write` on by default; `file_grep`,
+`file_list`, `file_delete` and `file_move` opt in. USER wanted a toolset "minimal,
 configurable, but efficient and complete". Why: without them the model reads
 with `cat`, edits with `sed` and heredocs, and searches with `grep -r` through
 exec, with unbounded output, no line numbers and an exit code as the only
@@ -153,6 +153,16 @@ receipt of an edit.
 - `AfterWrite` is not wired: poly-lsp-mcp watches the tree itself (fsnotify,
   200 ms debounce), with `Index.LookupExisting` as the backstop for a missed
   event.
+- **grep and list are not defaults** (2026-10-27, agentkit v0.14): `file_read`
+  lists a directory and, with `grep`, searches a file or a tree, with the same
+  engines and output. USER: "I thought it would be file_read(path, grep)". A
+  benchmark had dun's model read the last 120 lines of a 218 KB CI log (~5.8k
+  tokens, carried for four more requests) where pi's model grepped it for 265
+  chars; a search in the tool the model already reaches for is one it makes,
+  and two fewer definitions ride every request. A head or tail read of a file
+  of 64 KB or more ends with a one-line note to grep it. A config that names
+  grep or list still gets them, and the TUI renders `file_grep`/`file_list`
+  steps as before.
 - Sub-agents get the same set; no read-only research role exists to hook.
   The system prompt has one line naming the held file tools and preferring them
   to exec.

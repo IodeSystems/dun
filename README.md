@@ -467,15 +467,17 @@ Next: run the MCP servers inside the container too.
 
 ### File tools
 
-`file_read`, `file_edit`, `file_write`, `file_grep` and `file_list` are built
-in (agentkit's `files` package), rooted at the session's working tree — the
-worktree when there is one. A path that climbs out, by `..`, an absolute path
-or a symlink, is refused — except that `file_read`, `file_grep` and `file_list`
-also take an absolute path under `/tmp` (and `$TMPDIR`), read only. Reads are line-numbered and capped (8KB with no
-range, 64KB with one, and the result says how to page); edits replace text that
-must match exactly once and return the diff; grep respects `.gitignore` and uses
-`rg` when it is on PATH. `file_delete` and `file_move` exist but are off unless
-listed:
+`file_read`, `file_edit` and `file_write` are built in (agentkit's `files`
+package), rooted at the session's working tree — the worktree when there is
+one. A path that climbs out, by `..`, an absolute path or a symlink, is refused
+— except that `file_read` also takes an absolute path under `/tmp` (and
+`$TMPDIR`), read only. Reads are line-numbered and capped (8KB with no range,
+64KB with one, and the result says how to page); a read of a directory lists
+it, and a read with `grep` searches a file or a tree (respecting `.gitignore`,
+with `rg` when it is on PATH). A head or tail read of a file of 64KB or more
+ends with a note to search it instead. Edits replace text that must match
+exactly once and return the diff. `file_grep`, `file_list`, `file_delete` and
+`file_move` exist but are off unless listed:
 
 ```jsonc
 // dun.json
