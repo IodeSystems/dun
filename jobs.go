@@ -62,7 +62,7 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 		tail = append(tail, "an agent's transcript")
 		kill = append(kill, "dismisses an agent")
 		props["agent"] = map[string]any{"type": "integer", "description": "a sub-agent's number"}
-		props["tell"] = map[string]any{"type": "string", "description": "agent only: new work, or the answer to its question"}
+		props["tell"] = map[string]any{"type": "string", "description": "agent only: its next message — the answer, if it ended its turn with a question, or new work"}
 		props["resume"] = map[string]any{"type": "boolean", "description": "agent only: restart a stopped agent from its transcript"}
 	}
 	props["tail"] = map[string]any{"type": "integer", "description": "show the last N lines of " + strings.Join(tail, " or ")}

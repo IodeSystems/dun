@@ -121,9 +121,8 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   2026-08-03).** It went through `notifyAndWake`, so each reminder cost a full
   model call (and a suggestion call) to say nothing happened, starting at one
   minute. Reminders use `notifyQuietly` (`bgjob.go`): `Aside` plus the
-  `onNotify` ping so the human still sees the line. One exception: a child
-  blocked on `ask_parent` waits for an answer only the parent can give, so its
-  note must wake the parent.
+  `onNotify` ping so the human still sees the line. (The one exception, a
+  child blocked on `ask_parent`, is gone: a child asks by ending its turn.)
 - **A request nobody asked for must be visible before it is defensible (USER,
   2026-08-03).** One user message cost two LLM calls. The second was
   `Suggestions()`, fired at the end of every turn. It used the default context
@@ -374,7 +373,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   server could not notify the parent. In process, `tell_parent` is a direct
   `h.Notify` onto the lift path.
 - **Tool sets are chosen by role, and that is the enforcement.** Root gets
-  `agent` (and `jobs` with its agent params); a child gets `tell_parent` and `ask_parent` and
+  `agent` (and `jobs` with its agent params); a child gets `tell_parent` and
   no `ask_user`. Depth 1 holds because a child is never handed `agent`; a child
   cannot reach the human because `ask_user` is absent (`applyTools`).
 - **Decided (USER, 2026-07-31):** `tell_parent(status, message)`: status
@@ -423,6 +422,21 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   for its own commands, with no agent params, and its agent list is its own
   (empty). `exec_monitor` and `agent_monitor` still dispatch, hidden, for
   resumed sessions and habit (`quit` is `kill`).
+- **Sub-agents ask by ending their turn (USER, 2026-10-27).** Sub-agent
+  messages go out of band, like dun↔dun ones, which arrive as notifications.
+  `ask_parent` blocked the child inside a tool call on an answer channel, and
+  that needed its own machinery: a BLOCKED state in the report, the pane and
+  the heartbeat, a heartbeat that had to buy a turn, and a 2s poll in
+  `jobs(agent:N, wait:true)` to break a parent-waits-on-child-waits-on-parent
+  deadlock. None of it is needed when a question is a reply that ends a turn:
+  every turn end already notifies the parent with the child's `final`, or
+  else its reply, and `jobs(agent:N, tell:…)` on an idle child already starts
+  its next turn with its context intact. `tell_parent` stays (status,
+  message, final). `ask_parent` is unlisted; it still dispatches, as
+  `tell_parent(final: question)` with a result that says to end the turn, so
+  an old transcript or a model's habit gets the same out-of-band exchange
+  and never blocks. Old transcripts still render `ask_parent` and a BLOCKED
+  report.
 - **One `session` tool for what runs the model and the task's state (USER,
   2026-10-27).** `harness` and `session_state` both answered "what is this
   session"; `session` returns `{harness, state}` as JSON, reads with no

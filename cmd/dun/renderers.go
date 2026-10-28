@@ -362,9 +362,9 @@ func agentRender(rc renderCtx) (string, string) {
 		return stDim.Render("  → ") + stSecondary.Render("▸ "+clip(strings.TrimSuffix(first, "."), 80)), body
 	}
 	if id, state, cost, ok := agentReportHead(first); ok {
-		// Orange only for the state that needs the person: a child blocked
-		// on a question. Running and idle are the normal course; a failure
-		// is red.
+		// Running and idle are the normal course; a failure is red. Orange is
+		// for an OLD transcript's blocked child (ask_parent used to block;
+		// a child now asks by ending its turn, so no live report says this).
 		style := stSecondary
 		switch strings.ToUpper(state) {
 		case "IDLE", "RUNNING":
@@ -459,8 +459,9 @@ func dunMsgRender(rc renderCtx) (string, string) {
 	return stDim.Render("  → ") + head, stSecondary.Render(text + "\n\n" + rc.result)
 }
 
-// askRender is for ask_user and ask_parent: the question is in the args and the
-// ANSWER is the result, so show the answer and keep both in the body.
+// askRender is for ask_user and ask_parent (a hidden alias now; old
+// transcripts still show it): the question is in the args and the ANSWER is
+// the result, so show the answer and keep both in the body.
 func askRender(rc renderCtx) (string, string) {
 	q := argStr(rc.args, "question")
 	ans := oneLine(rc.result)

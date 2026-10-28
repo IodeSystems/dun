@@ -46,7 +46,7 @@ are in `decisions.md`.
 - **Contrast.** `stSecondary` (246 on dark, 240 on light) is for content one
   step below the answer: previews and expanded bodies. `stDim` (240, 2.5:1) is
   for chrome only (arrows, rules, hints, labels). Orange means attention
-  (an agent blocked on you, not-logged-in); neutral facts are not
+  (a failed job, not-logged-in; an old transcript's blocked agent); neutral facts are not
   orange. Answer prose wraps at `bandCap` (100) columns.
 - **Wide blocks scroll sideways, never wrap** (`wide.go`): a code block or
   table wider than the prose column renders at its own width, is cut at the pane

@@ -717,8 +717,10 @@ func (h *Harness) rebuildTools() {
 	// wrong, and a root never receives `tell_parent`, so it is absent rather
 	// than being a tool that errors when called. See docs/decisions.md, "Sub-agents".
 	if h.isChild() {
-		toolDefs = append(toolDefs, tellParentToolDef(), askParentToolDef())
+		toolDefs = append(toolDefs, tellParentToolDef())
 		dispatch = withTellParent(dispatch, h, report)
+		// ask_parent is not listed: a child asks by ending its turn. The
+		// dispatch stays as a hidden alias for old transcripts and habit.
 		dispatch = withAskParent(dispatch, h, report)
 	} else {
 		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel))

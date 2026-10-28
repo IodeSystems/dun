@@ -77,12 +77,8 @@ type subAgent struct {
 	ended   time.Time
 	tokens  int
 	cancel  context.CancelFunc
-	// answer is non-nil exactly while the child is blocked in ask_parent, which
-	// is the one state that never resolves itself.
-	answer   chan string
-	question string
-	done     chan struct{} // closed when the current run settles
-	restore  string        // transcript path, for a stopped child
+	done    chan struct{} // closed when the current run settles
+	restore string        // transcript path, for a stopped child
 	// hb is the "still there" reminder (heartbeat.go), debounced by anything
 	// this child says — which is why every notification goes through s.notify.
 	hb *heartbeat
@@ -109,9 +105,7 @@ func (s *subAgent) notify(text string) {
 //
 // Not only a RUNNING one. An idle child is resident until dismissed and there
 // is no cap on how many, so a forgotten one costs its harness forever — and
-// "idle for 40 minutes" is precisely the shape of a leak. A child blocked on
-// ask_parent is the loudest case: it will never resolve itself, and the parent
-// is the only thing that can.
+// "idle for 40 minutes" is precisely the shape of a leak.
 func (s *subAgent) heartbeat() {
 	if s.hb == nil {
 		return
@@ -125,8 +119,6 @@ func (s *subAgent) heartbeat() {
 			state, status, _, _ := s.snapshot()
 			what := "is still running"
 			switch {
-			case s.blockedOn() != "":
-				what = "is WAITING FOR YOU to answer it"
 			case state == agentIdle:
 				what = "has been idle"
 			case state == agentStopped:
@@ -138,9 +130,6 @@ func (s *subAgent) heartbeat() {
 				line += "\nlast status: " + status
 			}
 			switch {
-			case s.blockedOn() != "":
-				line += fmt.Sprintf("\nIt asked: %s\nAnswer with jobs(agent:%d, tell:\"…\").",
-					s.blockedOn(), s.num)
 			case state == agentIdle:
 				line += fmt.Sprintf("\nIt is holding its context open. Give it work with "+
 					"jobs(agent:%d, tell:\"…\") or dismiss it with kill:true.", s.num)
@@ -163,17 +152,9 @@ func (s *subAgent) heartbeat() {
 				}
 			}
 			// Not s.notify: the reminder must not reset the silence it is
-			// reporting on.
-			//
-			// A BLOCKED child is the one reminder that has to buy a turn. It is
-			// waiting on an answer only the parent can give, so a note the parent
-			// reads "next time it runs a turn anyway" is a note it may never read
-			// — the child waits forever for a parent that has nothing else to do.
-			// Every other case is the absence of news, and pays nothing for it.
-			if s.blockedOn() != "" {
-				s.parent.notifyAndWake(line)
-				return
-			}
+			// reporting on. A reminder is the absence of news, so it never buys
+			// a turn. (A child that asked something is idle, and its question
+			// was the report that already woke the parent.)
 			s.parent.notifyQuietly(line)
 		},
 	)
@@ -312,23 +293,11 @@ func (s *subAgent) report() string {
 		b.WriteString("\nanswer: (it stopped without calling tell_parent — use jobs(agent:" +
 			strconv.Itoa(s.num) + ", tail:40) to read what it did)")
 	}
-	if q := s.blockedOn(); q != "" {
-		b.WriteString("\nBLOCKED, waiting on you: " + q +
-			"\nAnswer with jobs(agent:" + strconv.Itoa(s.num) + ", tell:\"…\").")
-	}
 	b.WriteString(s.iso.status())
-	b.WriteString("\nIt is still resident: jobs(agent:" + strconv.Itoa(s.num) +
-		", tell:\"…\") gives it more work, kill:true dismisses it.")
+	b.WriteString("\nIt is still resident and keeps its context. jobs(agent:" + strconv.Itoa(s.num) +
+		", tell:\"…\") is its next message: your answer, if it asked you something, or more work. " +
+		"kill:true dismisses it.")
 	return b.String()
-}
-
-func (s *subAgent) blockedOn() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.answer == nil {
-		return ""
-	}
-	return s.question
 }
 
 func (s *subAgent) spent() int {
@@ -523,12 +492,6 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 			s.setFinal(oneLine(reply, 2000))
 		}
 	}
-	// Release anyone blocked on ask_parent: a child that has stopped will never
-	// answer, and a parent waiting on it would wait forever.
-	s.mu.Lock()
-	s.releaseAskLocked()
-	s.mu.Unlock()
-
 	s.settle(agentIdle)
 	s.notify(s.report())
 }
@@ -539,51 +502,14 @@ func (s *subAgent) finalIsEmpty() bool {
 	return s.final == ""
 }
 
-// releaseAskLocked closes an outstanding ask_parent. Caller holds mu.
-func (s *subAgent) releaseAskLocked() {
-	if s.answer != nil {
-		close(s.answer)
-		s.answer, s.question = nil, ""
-	}
-}
-
-// ask blocks the CHILD until the parent answers via jobs(agent:N, tell:). The
-// bool is false when the child was cancelled or the session ended instead.
-func (s *subAgent) ask(ctx context.Context, question string) (string, bool) {
-	ch := make(chan string, 1)
-	s.mu.Lock()
-	s.releaseAskLocked() // a second question replaces the first
-	s.answer, s.question = ch, question
-	s.mu.Unlock()
-	// Blocked is the one state that never resolves itself, so it is pushed to
-	// the human immediately rather than waiting for the next poll.
-	s.parent.agentsChanged()
-	s.notify(fmt.Sprintf("agent #%d is BLOCKED waiting on you: %s\n"+
-		"Answer with jobs(agent:%d, tell:\"…\").", s.num, question, s.num))
-
-	select {
-	case ans, ok := <-ch:
-		return ans, ok
-	case <-ctx.Done():
-		s.mu.Lock()
-		s.releaseAskLocked()
-		s.mu.Unlock()
-		return "", false
-	}
-}
-
-// tell re-asks a resident child, or answers the question it is blocked on.
-// Those are the same gesture from the parent's side, which is why one argument
-// covers both.
+// tell is the child's next message: more work, or the answer to the question
+// its last turn ended with. Those are one gesture — a question is a reply that
+// ends a turn, and the answer starts the next turn with the child's context
+// intact — so one argument covers both. Nothing blocks on either side: a
+// child never waits inside a tool for its parent (docs/decisions.md,
+// "Sub-agents ask by ending their turn").
 func (s *subAgent) tell(msg string) string {
 	s.mu.Lock()
-	if s.answer != nil {
-		s.answer <- msg
-		s.answer, s.question = nil, ""
-		s.mu.Unlock()
-		s.parent.agentsChanged()
-		return fmt.Sprintf("Answered agent #%d. It is working again.", s.num)
-	}
 	if s.state == agentRunning {
 		s.mu.Unlock()
 		return fmt.Sprintf("agent #%d is still running — wait for its report before telling it something new "+
@@ -633,7 +559,6 @@ func (s *subAgent) quit() string {
 		s.restore = h.cfg.SessionFile
 	}
 	s.h = nil
-	s.releaseAskLocked()
 	s.mu.Unlock()
 	s.stop()
 	if h != nil {
@@ -819,7 +744,6 @@ func (h *Harness) closeAgents() {
 		sa.mu.Lock()
 		child := sa.h
 		sa.h = nil
-		sa.releaseAskLocked()
 		sa.mu.Unlock()
 		if child != nil {
 			child.Close()
@@ -872,8 +796,8 @@ func roleSystem(child bool) string {
 			"nothing else. Report with tell_parent: set `status` as you go (it overwrites, so keep it short and " +
 			"current), and call it with `final` when you are done — `final` is the ANSWER, and it is the only " +
 			"thing your parent reliably reads, so make it complete on its own. Everything you looked at to " +
-			"produce it stays in your context and dies with you; that is the point of you. If you need a " +
-			"decision only your parent can make, ask_parent blocks until it answers. " +
+			"produce it stays in your context and dies with you; that is the point of you. To ask your " +
+			"parent something, end your turn with the question; its answer arrives as your next message. " +
 			"You cannot reach the human and you cannot spawn agents of your own. If the task turns out to " +
 			"need either, say so in `final` rather than working around it."
 	}
@@ -893,8 +817,9 @@ func agentToolDef(defaultModel string) llm.ToolDef {
 	td.Function.Name = "agent"
 	td.Function.Description = "Delegate a task to a sub-agent: for work that would cost you a lot of context for a " +
 		"small answer (reading a long log, scanning a large file). It has your tools, spends its own context, and " +
-		"returns an answer; what it read never enters yours. It returns at once and you are notified when the " +
-		"child finishes, unless wait:true. It stays resident until you dismiss it with jobs(agent:N, kill:true); " +
+		"returns an answer; what it read never enters yours. It returns at once and you are notified each time " +
+		"the child ends a turn, unless wait:true. If it ends with a question, answer with " +
+		"jobs(agent:N, tell:\"…\"). It stays resident until you dismiss it with jobs(agent:N, kill:true); " +
 		"nothing cleans it up for you. Default model: " + model + "."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
@@ -949,9 +874,14 @@ func spawnTool(ctx context.Context, h *Harness, prompt, model, isolation string,
 				where += " (branch " + sa.iso.Branch + ")"
 			}
 		}
-		return fmt.Sprintf("Started agent #%d on %s%s. It is working; you will be told when it finishes. "+
+		// No model name when the child runs on the parent's own client: it
+		// read "Started agent #1 on ." live.
+		if sa.model != "" {
+			where = " on " + sa.model + where
+		}
+		return fmt.Sprintf("Started agent #%d%s. It is working; you will be told when it finishes or asks you something. "+
 			"Do other work, or jobs(agent:%d, wait:true) if you have nothing to do until it answers.",
-			sa.num, sa.model, where, sa.num)
+			sa.num, where, sa.num)
 	}
 	select {
 	case <-sa.waitCh():
@@ -994,30 +924,15 @@ func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell strin
 		b.WriteString(sa.tell(tell) + "\n")
 	}
 	if wait {
-		user := h.userWaiting()
-	waitLoop:
-		for {
-			ch := sa.waitCh()
-			select {
-			case <-ch:
-				break waitLoop
-			case <-ctx.Done():
-				break waitLoop
-			case <-user:
-				// A message arrived: stop waiting so it rides this
-				// result. The child keeps running.
-				b.WriteString("Stopped waiting because a message arrived (the user wrote, or another dun session did) — it follows.\n")
-				break waitLoop
-			case <-time.After(2 * time.Second):
-				// Poll: a child that called ask_parent is blocked on the
-				// parent's answer, but the parent is blocked here — a mutual
-				// deadlock with no auto-unblock. Breaking on a pending
-				// question lets report() surface it so the model can answer
-				// via jobs(agent:N, tell:) on the next turn.
-				if sa.blockedOn() != "" {
-					break waitLoop
-				}
-			}
+		// No poll for a question: a child asks by ENDING its turn, which
+		// closes waitCh like any other turn end.
+		select {
+		case <-sa.waitCh():
+		case <-ctx.Done():
+		case <-h.userWaiting():
+			// A message arrived: stop waiting so it rides this
+			// result. The child keeps running.
+			b.WriteString("Stopped waiting because a message arrived (the user wrote, or another dun session did) — it follows.\n")
 		}
 	}
 	b.WriteString(sa.report())
@@ -1092,23 +1007,13 @@ func tellParent(h *Harness, status, message, final string) string {
 	return strings.Join(did, "; ") + "."
 }
 
-func askParentToolDef() llm.ToolDef {
-	var td llm.ToolDef
-	td.Type = "function"
-	td.Function.Name = "ask_parent"
-	td.Function.Description = "Ask the agent that spawned you for a decision you cannot make. BLOCKS until it " +
-		"answers, so use it only when you genuinely cannot continue — a question you could have answered by " +
-		"looking is a question that cost your parent a turn."
-	td.Function.Parameters = map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"question": map[string]any{"type": "string", "description": "what you need decided, with the context to decide it"},
-		},
-		"required": []string{"question"},
-	}
-	return td
-}
-
+// ask_parent is a HIDDEN alias, kept for old transcripts and for a model's
+// habit; it is not in a child's tool list. A child asks by ending its turn with
+// the question (USER 2026-10-27: sub-agent messages go out of band, like
+// dun↔dun ones). The alias is tell_parent(final: question) plus an instruction
+// to end the turn: the question becomes the child's report, the turn end
+// delivers it to the parent, and the parent's tell starts the next turn. It
+// never blocks — there is no answer channel to wait on.
 func withAskParent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "ask_parent" {
@@ -1118,7 +1023,7 @@ func withAskParent(inner agent.ToolDispatcher, h *Harness, onCall func(string, m
 			Question string `json:"question"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		out := askParent(ctx, h, args.Question)
+		out := askParent(h, args.Question)
 		if onCall != nil {
 			onCall("ask_parent", map[string]any{"question": args.Question}, out)
 		}
@@ -1126,20 +1031,14 @@ func withAskParent(inner agent.ToolDispatcher, h *Harness, onCall func(string, m
 	}
 }
 
-func askParent(ctx context.Context, h *Harness, question string) string {
-	self := h.self
-	if self == nil || h.parent == nil {
-		return "ERROR: you have no parent to ask."
-	}
+func askParent(h *Harness, question string) string {
 	if strings.TrimSpace(question) == "" {
 		return "ERROR: ask_parent requires a question."
 	}
-	ans, ok := self.ask(ctx, question)
-	if !ok {
-		return "Your parent did not answer (the session ended or you were dismissed). " +
-			"Do the best you can and report what you decided with tell_parent."
+	if out := tellParent(h, "", "", question); strings.HasPrefix(out, "ERROR") {
+		return out
 	}
-	return "Your parent says: " + ans
+	return "Your question is your report to your parent. End your turn now; its answer arrives as your next message."
 }
 
 // ── the human's view ────────────────────────────────────────────────
@@ -1153,9 +1052,6 @@ type AgentInfo struct {
 	Prompt  string `json:"prompt"`
 	Tokens  int    `json:"tokens"`
 	Seconds int    `json:"seconds"`
-	// Blocked means it is waiting on an ask_parent answer. Called out on its own
-	// because it is the one state that never resolves itself.
-	Blocked bool `json:"blocked,omitempty"`
 }
 
 // Agents is every child of this session, oldest first.
@@ -1167,7 +1063,6 @@ func (h *Harness) Agents() []AgentInfo {
 		out = append(out, AgentInfo{
 			ID: sa.num, Model: sa.model, State: string(state), Status: status,
 			Prompt: sa.prompt, Tokens: sa.spent(), Seconds: int(since.Seconds()),
-			Blocked: sa.blockedOn() != "",
 		})
 	}
 	return out

@@ -425,7 +425,9 @@ of yours — read a huge log, fetch and digest a page, survey how something is u
 its tool servers (no second index), runs on `--child-model` if you set one, and
 cannot spawn agents of its own or reach you directly. It reports with
 `tell_parent` (a `status` that overwrites, a `message` that accumulates, a
-`final` answer) and can ask the parent — never the human — with `ask_parent`.
+`final` answer). To ask the parent — never the human — it ends its turn with the
+question; the parent is notified and answers with `jobs(agent:N, tell:"…")`,
+which starts the child's next turn.
 Children stay resident after answering, so `jobs(agent:N)` can tell one a
 follow-up far more cheaply than spawning another; it also peeks, dismisses, and
 restarts children left stopped by a previous session. The TUI lists them live

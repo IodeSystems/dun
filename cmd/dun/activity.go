@@ -57,8 +57,8 @@ type actRow struct {
 	style  lipgloss.Style
 	label  string // "#1 running 2m 6.5kt" — identity and cost
 	detail string // what it is doing
-	// attn marks a row that will not resolve itself: a child blocked on
-	// ask_parent, or a job that failed. It survives clipping (see actLine).
+	// attn marks a row that will not resolve itself: a job that failed. It
+	// survives clipping (see actLine).
 	attn bool
 }
 
@@ -71,7 +71,6 @@ type agentRow struct {
 	model   string
 	tokens  int
 	seconds int
-	blocked bool
 }
 
 // jobRow is one background job as the TUI shows it. Times are UNIX SECONDS
@@ -102,7 +101,6 @@ func agentRowsFromEvent(ev evMsg) []agentRow {
 			id: num(m["id"]), state: str(m["state"]), status: str(m["status"]),
 			prompt: str(m["prompt"]), model: str(m["model"]),
 			tokens: num(m["tokens"]), seconds: num(m["seconds"]),
-			blocked: m["blocked"] == true,
 		})
 	}
 	return out
@@ -171,12 +169,8 @@ func (m tuiModel) actRows() []actRow {
 }
 
 func agentActRow(a agentRow) actRow {
-	// A blocked child is the one state that never resolves itself, so it gets
-	// the loud colour and says what it is waiting for.
 	mark, style := "·", stDim
 	switch {
-	case a.blocked:
-		mark, style = "?", stAsk
 	case a.state == "running":
 		mark, style = "▸", stTool
 	case a.state == "idle":
@@ -196,12 +190,9 @@ func agentActRow(a agentRow) actRow {
 	if detail == "" {
 		detail = a.prompt
 	}
-	if a.blocked {
-		detail = "waiting on you — answer it"
-	}
 	return actRow{
 		key: actKey{agent: true, id: a.id}, mark: mark, style: style,
-		label: label, detail: detail, attn: a.blocked,
+		label: label, detail: detail,
 	}
 }
 

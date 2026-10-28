@@ -2401,7 +2401,7 @@ func agentsProto(as []dun.AgentInfo) []proto.AgentInfo {
 	out := make([]proto.AgentInfo, 0, len(as))
 	for _, a := range as {
 		out = append(out, proto.AgentInfo{ID: a.ID, Model: a.Model, State: a.State, Status: a.Status,
-			Prompt: a.Prompt, Tokens: a.Tokens, Seconds: a.Seconds, Blocked: a.Blocked})
+			Prompt: a.Prompt, Tokens: a.Tokens, Seconds: a.Seconds})
 	}
 	return out
 }

@@ -85,6 +85,11 @@ owner's call before work starts.
 - [~] Sub-agents in isolation: the agent tool's `isolation` is none,
   worktree (its own git worktree and branch; the parent merges), docker
   (the same, commands in a container) or nodir. Several run at once.
+- [~] A sub-agent asks by ending its turn (owner, 2026-10-27): its question
+  reaches the parent as the turn-end notification, the parent answers with
+  `jobs(agent:N, tell:…)`. `ask_parent` is unlisted (a hidden alias that
+  makes the question the report) and nothing blocks; the TUI has no live
+  blocked state.
 
 - [ ] Persist carries the sub-agents: a persisted root resumes its children;
   toggling persist toggles theirs.
