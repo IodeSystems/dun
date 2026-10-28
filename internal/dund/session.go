@@ -72,7 +72,7 @@ type session struct {
 	inTurn     bool
 	asking     bool
 	jobs       []proto.JobInfo   // the running ones
-	agents     []proto.AgentInfo // the running or blocked ones
+	agents     []proto.AgentInfo // the running ones
 	// resume is the message a restart left for this session's agent: it was
 	// working when dund stopped, and is woken with it on the next start
 	// (persisted in the registry). Guarded by actMu, a leaf lock.
@@ -118,7 +118,7 @@ func (s *session) track(ev proto.Event) {
 	case *proto.Agents:
 		s.agents = nil
 		for _, a := range p.Agents {
-			if a.State == "running" || a.Blocked {
+			if a.State == "running" {
 				s.agents = append(s.agents, a)
 			}
 		}

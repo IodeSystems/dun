@@ -576,7 +576,6 @@ type AgentInfo struct {
 	Prompt  string `json:"prompt"`
 	Tokens  int    `json:"tokens"`
 	Seconds int    `json:"seconds"`
-	Blocked bool   `json:"blocked"`
 }
 
 // Jobs is every background job, the whole list each time. Times are unix
