@@ -862,6 +862,7 @@ type tuiModel struct {
 	// out, 0 never said). tmux and iterm are nil when not in one.
 	attnState string
 	attnDone  bool
+	attnErr   bool // the last turn failed; cleared by a key or the next turn
 	attnFocus int8
 	tmux      *tmuxSync
 	iterm     *itermTab
@@ -3086,6 +3087,7 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			setup = true
 		default:
 			m.append(stErr.Render("error: " + str(ev["error"])))
+			m.attnErr = true // the window's "!" (tmux.go)
 		}
 		// Clear any remaining provisional markers — the engine flushes them on
 		// error too, so they're part of the conversation history.

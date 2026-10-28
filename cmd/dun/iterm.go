@@ -75,6 +75,7 @@ var itermColors = map[string][3]int{
 	attnWorking:  {200, 150, 60},  // amber
 	attnQuestion: {220, 110, 160}, // dun's pink accent, muted
 	attnDone:     {90, 170, 100},  // green
+	attnError:    {210, 80, 70},   // red
 }
 
 // tabColor is OSC 6 for one state; idle resets it.

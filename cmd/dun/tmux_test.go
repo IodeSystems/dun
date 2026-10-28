@@ -24,6 +24,10 @@ func TestAttnStateOf(t *testing.T) {
 		{"login", tuiModel{convo: []convoEntry{{needLogin: true}}}, attnQuestion},
 		{"done", tuiModel{attnDone: true}, attnDone},
 		{"working over done", tuiModel{busy: true, attnDone: true}, attnWorking},
+		{"confirmation", tuiModel{busy: true, confirm: confirmState{q: "kill every running job? (y/n)"}}, attnQuestion},
+		{"error", tuiModel{attnErr: true}, attnError},
+		{"error over done", tuiModel{attnErr: true, attnDone: true}, attnError},
+		{"question over error", tuiModel{attnErr: true, asking: true}, attnQuestion},
 	}
 	for _, c := range cases {
 		if got := attnStateOf(c.m); got != c.want {
@@ -241,5 +245,26 @@ func TestWebEnvDropsTerminal(t *testing.T) {
 	got := webEnv([]string{"PATH=/bin", "TMUX=/tmp/s,1,0", "TMUX_PANE=%1", "TERM_PROGRAM=iTerm.app", "LC_TERMINAL=iTerm2", "HOME=/h"})
 	if !slices.Equal(got, []string{"PATH=/bin", "HOME=/h"}) {
 		t.Fatalf("%v", got)
+	}
+}
+
+// A failed turn shows "!" and rings; a key, or the next turn, clears it
+// (USER 2026-10-27).
+func TestAttnErrorShowsAndClears(t *testing.T) {
+	if attnIcon(attnError) != "!" {
+		t.Fatalf("icon %q", attnIcon(attnError))
+	}
+	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
+	m.busy = true
+	prev := m
+	m = m.handleEvent(evMsg{"type": "error", "error": "provider: 502 bad gateway"})
+	m, _ = syncAttn(prev, m, nil)
+	if m.attnState != attnError {
+		t.Fatalf("after a failed turn: %q", m.attnState)
+	}
+	prev = m
+	m, _ = syncAttn(prev, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if m.attnErr || m.attnState == attnError {
+		t.Errorf("a key did not clear it: %q", m.attnState)
 	}
 }

@@ -34,6 +34,7 @@ const (
 	attnWorking  = "working"
 	attnQuestion = "question"
 	attnDone     = "done"
+	attnError    = "error" // a turn failed (USER 2026-10-27: "! for error or problem")
 )
 
 // attnIcon is @dun_icon for a state.
@@ -45,6 +46,8 @@ func attnIcon(state string) string {
 		return "❓"
 	case attnDone:
 		return "✓"
+	case attnError:
+		return "!"
 	}
 	return ""
 }
@@ -53,10 +56,14 @@ func attnIcon(state string) string {
 // first: it is the one state that stops the agent until the person acts.
 func attnStateOf(m tuiModel) string {
 	switch {
-	case m.asking || slices.ContainsFunc(m.convo, func(e convoEntry) bool { return e.needLogin }):
+	// Anything waiting on the person is a question: ask_user, a login, a
+	// yes/no confirmation.
+	case m.asking || m.confirm.q != "" || slices.ContainsFunc(m.convo, func(e convoEntry) bool { return e.needLogin }):
 		return attnQuestion
 	case m.busy:
 		return attnWorking
+	case m.attnErr:
+		return attnError
 	case m.attnDone:
 		return attnDone
 	}
@@ -75,7 +82,10 @@ func syncAttn(prev, t tuiModel, msg tea.Msg) (tuiModel, tea.Cmd) {
 	case tea.BlurMsg:
 		t.attnFocus = -1
 	case tea.KeyPressMsg, tea.PasteMsg:
-		t.attnDone = false
+		t.attnDone, t.attnErr = false, false
+	}
+	if t.busy && !prev.busy {
+		t.attnErr = false // a new turn: the last one's failure is old news
 	}
 	// A turn that ended without a question: done, unless the terminal has
 	// said the person is looking at this pane right now.
@@ -88,7 +98,7 @@ func syncAttn(prev, t tuiModel, msg tea.Msg) (tuiModel, tea.Cmd) {
 	}
 	t.attnState = state
 	t.tmux.show(state)
-	ring := state == attnQuestion && bellOn()
+	ring := (state == attnQuestion || state == attnError) && bellOn()
 	out := t.iterm.show(state, ring)
 	if ring {
 		out = bel + out
