@@ -208,11 +208,17 @@ func (v *switchListView) page() pageDoc {
 // hint is the status line while the view is open; narrow, the keys alone,
 // short enough to fit a phone (fitHints would keep only the first and last).
 func (v *switchListView) hint() string {
+	if v.kind == "paths" { // /file: add from the filter, read/write per row
+		if v.width > 0 && v.width < narrowW {
+			return "⏎ add · ␣ on/off · ^w write · ^g ^p ^s scopes · esc"
+		}
+		return "type a path, enter adds it (session, read only) · space on/off (session) · ctrl+w read/write · ctrl+g/p/s global/project/session · esc clear, back"
+	}
 	if len(v.order) == 0 {
 		if v.width > 0 && v.width < narrowW {
 			return "␣ session · ^g ^p ^s scopes · esc"
 		}
-		return "type to search · space attach/detach (session) · ctrl+g/p/s global/project/session · enter details · esc clear, back"
+		return "type to search · space on/off (session) · ctrl+g/p/s global/project/session · enter details · esc clear, back"
 	}
 	if v.width > 0 && v.width < narrowW {
 		return "␣ on/off · ^g ^p ^s scopes · tab mode · esc"
@@ -357,7 +363,32 @@ func (m *tuiModel) switchKey(v *switchListView, k, text string) bool {
 		}
 		send("mode " + next + " --session")
 		return true
+	case "ctrl+w": // /file: the row's path read only ↔ read and write, where it is decided
+		if v.kind != "paths" {
+			return false
+		}
+		if r := v.row(m.pg.cur); r != nil {
+			mode := "write"
+			if strings.HasPrefix(r.source, "read and write") {
+				mode = "read"
+			}
+			scope := r.from
+			if scope == "" {
+				scope = "session"
+			}
+			m.fileTableCmd("mode " + r.name + " " + mode + " --" + scope)
+		}
+		return true
 	case "enter": // a skill: read it in a pane below (skillpane.go)
+		if v.kind == "paths" { // /file: the filter is a path to add
+			if q := strings.TrimSpace(v.query); q != "" {
+				m.fileTableCmd("add " + q + " --session")
+				v.query = ""
+				m.pg.cur, m.pg.off = 0, 0
+				m.syncPager()
+			}
+			return true
+		}
 		if v.kind != "skills" {
 			return false
 		}
@@ -384,4 +415,12 @@ func (m *tuiModel) switchKey(v *switchListView, k, text string) bool {
 	m.pg.cur, m.pg.off = 0, 0
 	m.syncPager()
 	return true
+}
+
+// fileTableCmd runs a /file command from the paths table, then asks for the
+// table again so it shows the change in place.
+func (m *tuiModel) fileTableCmd(action string) {
+	if !m.proc.controlCmd("files", action) || !m.proc.controlCmd("switches", "paths") {
+		m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
+	}
 }

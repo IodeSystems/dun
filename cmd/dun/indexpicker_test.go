@@ -63,3 +63,32 @@ func TestFilePicker_BareFileOpensTheTable(t *testing.T) {
 		}
 	}
 }
+
+// In the /file table, a typed path and enter adds it for the session, and
+// ctrl+w flips the row read only ↔ read and write where it is decided; the
+// hint names both (USER 2026-10-28: "no obvious hotkey that says add").
+func TestFilePicker_AddAndWriteKeys(t *testing.T) {
+	v := newVtui(160, 30)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	rec := &recWC{}
+	v.m.proc = &dunProc{stdin: rec}
+	v.m = typeStr(v.m, "/file")
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	v.event(map[string]any{"type": "switches", "kind": "paths", "slash": "file", "items": []any{
+		map[string]any{"name": "/home/me/notes", "source": "read · indexed", "on": true, "from": "global", "global": "on"},
+	}})
+	if got := v.view(); !strings.Contains(got, "enter adds it") || !strings.Contains(got, "ctrl+w read/write") {
+		t.Errorf("hint lacks add/write:\n%s", got)
+	}
+	rec.Reset()
+	v.m = key(v.m, tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	if s := rec.String(); !strings.Contains(s, "mode /home/me/notes write --global") || !strings.Contains(s, `"paths"`) {
+		t.Errorf("ctrl+w sent %s", s)
+	}
+	rec.Reset()
+	v.m = typeStr(v.m, "~/src")
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if s := rec.String(); !strings.Contains(s, "add ~/src --session") {
+		t.Errorf("enter sent %s", s)
+	}
+}
