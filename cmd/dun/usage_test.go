@@ -27,8 +27,18 @@ func writeLedger(t *testing.T, lines ...string) {
 	}
 }
 
+// noon fixes the report's clock at midday local time, so "an hour ago" is
+// always today, whenever the test runs.
+func noon(t *testing.T) {
+	t.Helper()
+	y, m, d := time.Now().Date()
+	at := time.Date(y, m, d, 12, 0, 0, 0, time.Local)
+	usageNow = func() time.Time { return at }
+	t.Cleanup(func() { usageNow = time.Now })
+}
+
 func ledgerLine(ago time.Duration, role, model string, prompt, cached, comp int, cost float64) string {
-	ts := time.Now().Add(-ago).UTC().Format(time.RFC3339)
+	ts := usageNow().Add(-ago).UTC().Format(time.RFC3339)
 	c := ""
 	if cost > 0 {
 		c = fmt.Sprintf(`,"cost":%v,"cur":"USD","costed":true`, cost)
@@ -37,6 +47,7 @@ func ledgerLine(ago time.Duration, role, model string, prompt, cached, comp int,
 }
 
 func TestUsageReport(t *testing.T) {
+	noon(t)
 	writeLedger(t,
 		ledgerLine(time.Hour, "main", "m1", 1000, 600, 100, 0.5),
 		ledgerLine(2*time.Hour, "model", "m2", 200, 0, 50, 0),
@@ -61,7 +72,7 @@ func TestUsageReport(t *testing.T) {
 	if w := rep.Periods[1]; w.Requests != 3 || w.Prompt != 2200 {
 		t.Fatalf("week: %+v", w)
 	}
-	if d := rep.Periods[0]; d.Requests != 2 && d.Requests != 1 { // 2h ago may cross midnight
+	if d := rep.Periods[0]; d.Requests != 2 {
 		t.Fatalf("today: %+v", d)
 	}
 	if rep.ByRole["main"].Requests != 3 || rep.ByRole["model"].Requests != 1 {
@@ -76,6 +87,7 @@ func TestUsageReport(t *testing.T) {
 }
 
 func TestUsageText(t *testing.T) {
+	noon(t)
 	writeLedger(t, ledgerLine(time.Minute, "main", "m1", 1000, 500, 100, 0.5))
 	t.Setenv("DUN_URL", "http://example.invalid")
 	old := budgetFetcher
@@ -104,6 +116,7 @@ func TestUsageText(t *testing.T) {
 }
 
 func TestUsageEmptyLedger(t *testing.T) {
+	noon(t)
 	t.Setenv("DUN_HOME", t.TempDir())
 	var out, errb bytes.Buffer
 	if rc := usageCmd([]string{"--no-net"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), "no rounds recorded") {
@@ -114,6 +127,7 @@ func TestUsageEmptyLedger(t *testing.T) {
 // A server scripted in mcpshell: what its schemas would have added, per
 // request and in total, and money only as an upper bound (USER 2026-10-27).
 func TestUsage_ScriptedSavings(t *testing.T) {
+	noon(t)
 	dir := t.TempDir()
 	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
 	lines := []string{

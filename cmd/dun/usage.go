@@ -256,7 +256,7 @@ func usageCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: dun --usage [--json] [--no-net]")
 		return 2
 	}
-	rep := readUsage(dun.DefaultStatsDir(), time.Now())
+	rep := readUsage(dun.DefaultStatsDir(), usageNow())
 	rep.Budget = readBudget(*noNet)
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -401,3 +401,7 @@ func renderUsage(r usageReport) string {
 	}
 	return b.String()
 }
+
+// usageNow is the report's clock; a test sets it (the v0.1.6 release run,
+// at 00:48 UTC, found "1h ago" was yesterday).
+var usageNow = time.Now
