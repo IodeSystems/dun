@@ -684,10 +684,9 @@ type tuiModel struct {
 	actLevel    int                   // actCollapsed | actList — → descends, ← ascends
 	actSel      actKey                // selected activity row, by identity not index
 	// Agent scope: which child's conversation is on screen (0 = the root's),
-	// and the root's own convo/task stashed while it is.
+	// and the root's own conversation, stashed while it is (activity.go).
 	scopeAgent   int
-	rootConvo    []convoEntry
-	rootTask     string
+	rootView     convoView
 	sel          int             // selected message index (convo focus); -1 = none
 	search       textinput.Model // vim-style "/" message search box
 	searching    bool            // typing a search query
@@ -2366,7 +2365,9 @@ func (m tuiModel) idleSuggestReady() bool {
 // requires that the input is empty (the default). In "on" mode it shows even
 // when the user is typing (so suggestions are always visible).
 func (m tuiModel) suggestActive() bool {
-	if m.suggestMode == "off" || !m.asked() {
+	// The root's predictions are not a child's: inside a child's view
+	// there are none to pick.
+	if m.suggestMode == "off" || !m.asked() || m.scopeAgent != 0 {
 		return false
 	}
 	return m.focus == focusInput && !m.busy && !m.starting && !m.asking &&
@@ -2392,13 +2393,21 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 		return m
 	}
 	if m.scopeAgent != 0 {
+		// A child takes a tell between its turns only (subagent.go, tell):
+		// sent now, it would be refused and the words gone. The draft stays.
+		if a := m.agentByID(m.scopeAgent); a != nil && a.state == "running" {
+			m.flash(fmt.Sprintf("agent #%d is working — tell it when its turn ends (the draft is kept)", m.scopeAgent))
+			return m
+		}
 		m.history = append(m.history, v)
 		m.histIdx = len(m.history)
 		m.input.Reset()
-		m.appendUser(v)
+		// Not echoed here: the child's transcript takes it, and its
+		// agent_entry shows it, on every client watching.
 		if !m.proc.agentCmd(m.scopeAgent, "tell", v) {
 			m.append(stErr.Render("no engine right now — not sent"))
 		}
+		m.scrollPinned = true
 		m.refresh()
 		return m
 	}
@@ -2537,7 +2546,38 @@ func (m *tuiModel) noteServers(ev evMsg) {
 	}
 }
 
+// handleEvent applies one engine event. Inside a child's scope the root's
+// events still belong to the root's conversation: it is put back on the
+// model for them and stashed again after, so nothing it receives is lost and
+// none of it lands in the child's view. A question needs the screen, so it
+// leaves the scope first.
 func (m tuiModel) handleEvent(ev evMsg) tuiModel {
+	if m.scopeAgent == 0 {
+		return m.applyEvent(ev)
+	}
+	switch ev["type"] {
+	case "agents", "jobs", "agent_history", "agent_entry", "agent_told":
+		return m.applyEvent(ev)
+	case "ask", "mount":
+		m.leaveAgentScope()
+		return m.applyEvent(ev)
+	}
+	child := m.takeView()
+	m.putView(m.rootView)
+	m = m.applyEvent(ev)
+	if m.scopeAgent == 0 { // the event ended the scope (a reset, an exit)
+		return m
+	}
+	m.rootView = m.takeView()
+	m.putView(child)
+	if ev["type"] == "ready" {
+		// A restarted engine: the watch went with the old one.
+		m.proc.agentCmd(m.scopeAgent, "view", "")
+	}
+	return m
+}
+
+func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 	switch ev["type"] {
 	case "workspace":
 		// An empty branch is /isolate off: back in place, no worktree; the
@@ -2819,12 +2859,23 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		// child currently on screen: a late reply for a scope we have already
 		// left would paste someone else's conversation over this one.
 		if num(ev["agent"]) == m.scopeAgent && m.scopeAgent != 0 {
-			m.convo = nil
+			m.convo, m.cur, m.pendingTool = nil, "", -1
+			m.dropHold()
 			if p := str(ev["prompt"]); p != "" {
 				m.task = p
 			}
 			items, _ := ev["items"].([]any)
-			m.replay(items)
+			// Not replay: no resume marker, and the last run stays open, since
+			// a child at work gets its call's result as the next agent_entry.
+			m.replayItems(items, -1)
+			m.refresh()
+		}
+	case "agent_entry":
+		// The watched child's new transcript entries, live. Only for the child
+		// on screen, for the same reason as agent_history.
+		if num(ev["agent"]) == m.scopeAgent && m.scopeAgent != 0 {
+			items, _ := ev["items"].([]any)
+			m.replayLive(items)
 		}
 	case "agent_told":
 		if msg := str(ev["message"]); msg != "" {
@@ -2926,11 +2977,11 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		on, changed := ev["on"] == true, ev["changed"] == true
 		switch {
 		case on && changed:
-			m.append(stDim.Render("persist: on — this session keeps running after /exit · /persist off to undo"))
+			m.append(stDim.Render("persist: on — this session and its sub-agents keep running after /exit, and come back after a restart · /persist off to undo"))
 		case on:
 			m.append(stDim.Render("persist: on — /exit leaves this session running · /persist off to let /exit stop it"))
 		case changed:
-			m.append(stDim.Render("persist: off — /exit stops this session's engine (the conversation is kept)"))
+			m.append(stDim.Render("persist: off — /exit stops this session's engine; its sub-agents come back stopped (the conversation is kept)"))
 		default:
 			m.append(stDim.Render("persist: off — /exit stops this session's engine · /persist to keep it running"))
 		}
@@ -3748,7 +3799,7 @@ func (m tuiModel) drawView() string {
 	case m.focus == focusActivity:
 		status = stDim.Render("activity  ·  ↑/↓ select · →/enter open (agent = its view) · x kill job · tab next zone · esc input")
 	case m.scopeAgent != 0:
-		status = stDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it · tab activity · ←/esc back to the session", m.scopeAgent))
+		status = stDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it (its next message) · ←/esc back to the session", m.scopeAgent))
 	case m.focus == focusConvo:
 		if d := m.selDocs(); d != nil && d.descended {
 			status = stDim.Render("docs  ·  ↑/↓ doc · → open · ← close, then out · ctrl+c quit")
@@ -4039,8 +4090,41 @@ func replyShown(cur string) bool { return strings.TrimSpace(cur) != "" }
 // call/result blocks, notifications. No turn runs — this is pure display. A
 // trailing dim marker delimits the resumed history from new activity.
 func (m *tuiModel) replay(items []any) {
+	n := m.replayItems(items, -1)
+	m.endRun()
+	// A model pick restarts the engine on the same conversation: nothing was
+	// resumed as far as the person is concerned, so there is no marker.
+	if n > 0 && !m.quietReplay {
+		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(commaf("── resumed %d entries ──", n))})
+	}
+	m.quietReplay = false
+	// History was never on screen: its thoughts come back folded
+	// (scrollfold.go). Not in replayLive: a watched child's new entries are.
+	for i := range m.convo {
+		if r := m.convo[i].run; r != nil {
+			for _, it := range r.items {
+				if it.think != nil && !it.think.live {
+					it.folded = true
+				}
+			}
+			r.ver++
+		}
+	}
+	m.refresh()
+}
+
+// replayLive appends a watched child's new entries (agent_entry) as they
+// come: a call and its result arrive apart, so the open run is carried
+// across events and left open for the next call.
+func (m *tuiModel) replayLive(items []any) {
+	m.replayItems(items, m.openRun())
+	m.refresh()
+}
+
+// replayItems renders history items onto the conversation, the next
+// tool_result going to run; it returns how many entries it added.
+func (m *tuiModel) replayItems(items []any, run int) int {
 	n := 0
-	run := -1 // the run the next tool_result belongs to
 	for _, it := range items {
 		im, _ := it.(map[string]any)
 		switch str(im["kind"]) {
@@ -4088,25 +4172,7 @@ func (m *tuiModel) replay(items []any) {
 			m.addThought(&thinkBlock{text: str(im["content"])})
 		}
 	}
-	m.endRun()
-	// A model pick restarts the engine on the same conversation: nothing was
-	// resumed as far as the person is concerned, so there is no marker.
-	if n > 0 && !m.quietReplay {
-		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(commaf("── resumed %d entries ──", n))})
-	}
-	m.quietReplay = false
-	// History was never on screen: its thoughts come back folded.
-	for i := range m.convo {
-		if r := m.convo[i].run; r != nil {
-			for _, it := range r.items {
-				if it.think != nil && !it.think.live {
-					it.folded = true
-				}
-			}
-			r.ver++
-		}
-	}
-	m.refresh()
+	return n
 }
 
 // selDocs returns the docsBlock of the selected entry, or nil.

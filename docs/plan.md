@@ -96,9 +96,13 @@ owner's call before work starts.
   makes the question the report) and nothing blocks; the TUI has no live
   blocked state.
 
-- [ ] Persist carries the sub-agents: a persisted root resumes its children;
-  toggling persist toggles theirs.
-- [ ] Descend into a sub-agent from the activity strip and come back out.
+- [~] Persist carries the sub-agents: a persisted root resumes its children;
+  toggling persist toggles theirs. Built: dund passes --persist at each
+  engine start; running/idle children restart idle with their isolation,
+  dismissed stay dismissed (<sub>.agent.json; decisions.md).
+- [~] Descend into a sub-agent from the activity strip and come back out.
+  Built: live view (agent_entry while watched), header, esc restores the
+  root's scroll, typing tells the child (ui-decisions.md).
 - [~] `/worklog`: start a task, fork a subtask, end one with why, view;
   the model reads a closed worklog (input, events, recaps) and writes it up
   as a clean account, with the model, effort, harness and version.

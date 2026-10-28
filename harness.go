@@ -384,6 +384,13 @@ type Config struct {
 	// dismissed. The human's only view of what children are costing, since
 	// jobs is model-facing and there is no concurrency cap.
 	OnAgents func([]AgentInfo)
+	// OnAgentEntry fires for each entry a WATCHED sub-agent's transcript gets
+	// (Harness.AgentWatch): a person is reading that child's conversation.
+	OnAgentEntry func(id int, items []HistoryItem)
+	// Persist: the session persists (dund's /persist). Its sub-agents carry
+	// the setting: a resume restarts the ones that were running or idle,
+	// idle, instead of leaving them stopped (subagent.go, restoreAgents).
+	Persist bool
 	// OnJobs fires when a background job starts, finishes, or is re-tuned. Same
 	// argument as OnAgents: jobs is model-facing, so without this a job
 	// the human can see running has no place to be seen from.
@@ -1495,13 +1502,14 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		h.applyTools()
 	}
 	// Children of a resumed session are gone as processes but their transcripts
-	// are not. Register them as stopped and SAY so — a model that spawned an
-	// agent last session must not assume it is still working.
+	// are not. Register them (restarted, in a session that persists; else
+	// stopped) and SAY so — a model that spawned an agent last session must
+	// not assume it is still working.
 	if !ownsMgr {
 		return h, nil // a child does not have children: depth stays at 1
 	}
-	h.restoreAgents()
-	if note := h.stoppedAgentsNote(); note != "" {
+	// Once, at start: which children came back, and how.
+	if note := h.restoredAgentsNote(h.restoreAgents()); note != "" {
 		h.Aside(note)
 		h.agentsChanged()
 	}

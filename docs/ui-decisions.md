@@ -137,6 +137,29 @@ are in `decisions.md`.
 
 ## Interaction details with a reason
 
+- **Descending into a sub-agent (2026-10-27).** Enter or → on an agent row
+  in the activity strip shows that child's conversation in the conversation
+  pane, rendered like the root's and live while it runs (its history, then
+  each transcript entry, through dund for every client). The strip becomes
+  the header `↰ agent #N · <task> · ← esc back`; under 60 columns it is
+  `↰ #N · <task> · ← esc`, and the task is what is cut, never the way back.
+  The task is secondary, not dim: it is content. esc (or ←) returns to the
+  root's conversation at the row the reader left it; the root's events that
+  arrived meanwhile were applied to it, not to the child's view. A question
+  from the root (ask_user) leaves the child's view, because it needs the
+  screen.
+- **Typing while descended tells the child** (a `jobs tell`: its next
+  message), and the placeholder says so. Chosen over a read-only view
+  because the reason to open a child is usually to correct it, and the
+  other way (go back, ask the root to tell it) costs a root turn and the
+  root's context to relay one sentence. The message is shown when the
+  child's transcript takes it, as the root's are, so every client shows the
+  same. The parent is told too, as an aside before the child's next report:
+  live, a parent that was not took the report for "a leftover instruction".
+  A running child takes no tell (the engine refuses one between turns
+  only): the draft stays in the composer and the status line says to wait
+  for its turn to end, rather than sending words that would be dropped.
+
 - **Interrupt.** ctrl+g interrupts a busy turn (`interruptKey`; ctrl+k was
   tried first and took the composer's kill-to-end-of-line, USER 2026-10-22).
   esc interrupts after every other esc consumer. ctrl+c interrupts too; a

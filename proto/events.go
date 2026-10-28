@@ -39,6 +39,7 @@ func init() {
 	event[Agents]("agents")
 	event[Jobs]("jobs")
 	event[AgentHistory]("agent_history")
+	event[AgentEntry]("agent_entry")
 	event[AgentTold]("agent_told")
 	event[Suggestions]("suggestions")
 	event[Exit]("exit")
@@ -601,6 +602,13 @@ type AgentHistory struct {
 	Agent  int           `json:"agent"`
 	Prompt string        `json:"prompt"`
 	Items  []HistoryItem `json:"items"`
+}
+
+// AgentEntry is new entries in a watched sub-agent's conversation, after the
+// AgentHistory that opened the view: it follows the child live.
+type AgentEntry struct {
+	Agent int           `json:"agent"`
+	Items []HistoryItem `json:"items"`
 }
 
 // AgentTold answers an agent tell.

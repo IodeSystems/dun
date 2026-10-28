@@ -318,12 +318,24 @@ func (s *session) ensureRunning() error {
 	if s.svc.isClosing() {
 		return errors.New("service is shutting down")
 	}
-	eng, err := s.svc.spawner.Spawn(s.workspace, append(slices.Clone(s.args), "--resume", s.id))
+	eng, err := s.svc.spawner.Spawn(s.workspace, s.spawnArgs())
 	if err != nil {
 		return err
 	}
 	s.attach(eng, newScanner(eng.Stdout()))
 	return nil
+}
+
+// spawnArgs is how an engine is started on this conversation. --persist
+// carries the setting to the engine, whose sub-agents follow it: a persisted
+// session's running and idle children are restarted with it. Called with mu
+// held.
+func (s *session) spawnArgs() []string {
+	args := append(slices.Clone(s.args), "--resume", s.id)
+	if s.persist {
+		args = append(args, "--persist")
+	}
+	return args
 }
 
 // attach makes eng this session's engine and starts reading it. Called with

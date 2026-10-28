@@ -51,7 +51,7 @@ type ControlCmd struct {
 // AgentCmd views or steers a sub-agent. ID is its number, as a string.
 type AgentCmd struct {
 	ID      string `json:"id"`
-	Action  string `json:"action"` // view | tell
+	Action  string `json:"action"` // view (history, then agent_entry events) | leave (ends the view) | tell
 	Content string `json:"content,omitempty"`
 }
 

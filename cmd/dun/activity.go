@@ -234,6 +234,9 @@ func (m tuiModel) activityView() string {
 		return ""
 	}
 	if m.actLevel == actCollapsed {
+		if m.scopeAgent != 0 {
+			return m.scopeHeader()
+		}
 		return m.actLine(rows)
 	}
 	return m.actTable(rows)
@@ -610,24 +613,63 @@ const jobLogTail = 256 * 1024
 
 // ── agent scope ─────────────────────────────────────────────────────
 //
-// Descending into an agent is a SCOPE SWITCH, not an overlay: the task line
-// becomes the child's prompt, the conversation becomes the child's, and the
-// activity strip becomes a `↰ parent` row that takes you back. Depth-1 in
-// practice, since children cannot spawn children, but the model is recursive
-// and costs nothing extra.
+// Descending into an agent is a SCOPE SWITCH, not an overlay: the
+// conversation pane shows the child's, the strip becomes a header that names
+// it and the way back, and the input tells the child. Depth-1 in practice,
+// since children cannot spawn children.
 //
-// The input stays live and routes to that child. This is a new human→child
-// channel that children were deliberately denied (they have no ask_user), and
-// the parent only learns of it when the child next reports. Accepted on
-// purpose: the human is not the model, and the point of the pane is that a
-// child is steerable rather than merely observable.
+// The view is live: entering sends "view", and the engine answers with the
+// child's history (agent_history), then each new entry of its transcript
+// (agent_entry) until "leave". Through dund that is the same for every
+// client, and the root's own events keep going to the root's conversation,
+// which waits stashed in rootView (handleEvent).
+//
+// The input stays live and routes to that child (docs/ui-decisions.md). This
+// is a human→child channel that children were deliberately denied (they have
+// no ask_user), and the parent only learns of it when the child next reports.
+// Accepted on purpose: the human is not the model, and the point of the pane
+// is that a child is steerable rather than merely observable.
 
 // parentKey is the `↰ parent` row — an agent row with no id, since agent ids
 // start at 1.
 var parentKey = actKey{agent: true, id: 0}
 
+// convoView is one conversation as the pane holds it: its blocks, the reply
+// streaming into it, and where the view of it is. The root's waits in
+// rootView while a child's is on screen, and keeps taking the root's events.
+type convoView struct {
+	convo                 []convoEntry
+	cur                   string
+	curMaxH, curMaxKey    int
+	pendingTool           int
+	task                  string
+	sel                   int
+	lines                 []string
+	yoff                  int
+	pinned                bool
+	frame                 frame
+	convoHold, convoHoldW int
+}
+
+// takeView reads the conversation on screen.
+func (m *tuiModel) takeView() convoView {
+	return convoView{convo: m.convo, cur: m.cur, curMaxH: m.curMaxH, curMaxKey: m.curMaxKey,
+		pendingTool: m.pendingTool, task: m.task, sel: m.sel, lines: m.vp.lines, yoff: m.vp.YOffset,
+		pinned: m.scrollPinned, frame: m.frame, convoHold: m.convoHold, convoHoldW: m.convoHoldW}
+}
+
+// putView puts v on screen exactly as it was taken, pane rows and scroll
+// included; nothing is rendered.
+func (m *tuiModel) putView(v convoView) {
+	m.convo, m.cur, m.curMaxH, m.curMaxKey = v.convo, v.cur, v.curMaxH, v.curMaxKey
+	m.pendingTool, m.task, m.sel = v.pendingTool, v.task, v.sel
+	m.vp.lines, m.vp.YOffset, m.scrollPinned = v.lines, v.yoff, v.pinned
+	m.frame, m.convoHold, m.convoHoldW = v.frame, v.convoHold, v.convoHoldW
+}
+
 // enterAgentScope swaps the conversation for a child's and asks the engine for
-// it. The child's scrollback arrives later as an agent_history event.
+// it. The child's scrollback arrives as an agent_history event, then its new
+// entries as agent_entry events.
 func (m *tuiModel) enterAgentScope(id int) tea.Cmd {
 	a := m.agentByID(id)
 	if a == nil {
@@ -636,32 +678,40 @@ func (m *tuiModel) enterAgentScope(id int) tea.Cmd {
 	if m.scopeAgent == 0 {
 		// Only the ROOT conversation is stashed; scope does not nest, so a
 		// second descent must not overwrite the way home.
-		m.rootConvo, m.rootTask = m.convo, m.task
+		m.rootView = m.takeView()
+	} else {
+		m.proc.agentCmd(m.scopeAgent, "leave", "")
 	}
 	m.scopeAgent = id
-	m.convo = nil
-	m.task = a.prompt
+	m.putView(convoView{pendingTool: -1, sel: -1, pinned: true, task: a.prompt})
+	m.dropHold() // a different conversation: no hold from the root's
 	m.actLevel = actCollapsed
 	m.actSel = parentKey
 	m.setFocus(focusInput)
-	m.input.placeholder = fmt.Sprintf("tell agent #%d…", id)
+	m.input.placeholder = fmt.Sprintf("tell agent #%d (its next message)…", id)
 	m.refresh()
 	m.proc.agentCmd(id, "view", "")
 	return textinput.Blink
 }
 
-// leaveAgentScope restores the root conversation.
+// leaveAgentScope puts the root conversation back as it was left: the same
+// rows, the same scroll, plus whatever arrived for it meanwhile.
 func (m *tuiModel) leaveAgentScope() tea.Cmd {
 	if m.scopeAgent == 0 {
 		return nil
 	}
+	m.proc.agentCmd(m.scopeAgent, "leave", "")
 	m.scopeAgent = 0
-	m.convo, m.task = m.rootConvo, m.rootTask
-	m.rootConvo, m.rootTask = nil, ""
+	m.putView(m.rootView)
+	m.rootView = convoView{}
 	m.actLevel = actCollapsed
 	m.input.placeholder = "ask dun to do something…"
 	m.setFocus(focusInput)
+	yoff, pinned := m.vp.YOffset, m.scrollPinned
 	m.refresh()
+	if !pinned {
+		m.vp.SetYOffset(yoff) // a reader who had scrolled up is put back there
+	}
 	return textinput.Blink
 }
 
@@ -680,4 +730,32 @@ func (m tuiModel) scopeRows() []actRow {
 		key: parentKey, mark: "↰", style: stNote,
 		label: label + ")", detail: "← or enter to go back",
 	}}
+}
+
+// scopeHeader is the strip, collapsed, inside a child: which agent, its task,
+// and the way back — `↰ agent #N · <task> · ← esc back`. Under 60 columns (a
+// phone) it shortens to `↰ #N · <task> · ← esc`; the task is what gives way,
+// never the way back. The task is content, so it is secondary, not dim.
+func (m tuiModel) scopeHeader() string {
+	a := m.agentByID(m.scopeAgent)
+	label, tail := fmt.Sprintf("agent #%d", m.scopeAgent), " · ← esc back"
+	if m.w < 60 {
+		label, tail = fmt.Sprintf("#%d", m.scopeAgent), " · ← esc"
+	}
+	style, task := stNote, m.task
+	if a != nil {
+		style = agentActRow(*a).style
+		task = a.prompt
+	}
+	budget := m.w - 1
+	head := "↰ " + label
+	used := lipgloss.Width(head) + lipgloss.Width(tail)
+	var b strings.Builder
+	b.WriteString(stDim.Render("↰ ") + style.Render(label))
+	if avail := budget - used - 3; avail >= 4 && task != "" {
+		t, _ := fitPlain(oneLine(task), avail)
+		b.WriteString(stDim.Render(" · ") + stSecondary.Render(t))
+	}
+	b.WriteString(stDim.Render(tail))
+	return b.String()
 }
