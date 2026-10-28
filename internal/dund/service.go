@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/iodesystems/dun/internal/procstat"
 	"os"
 	"path/filepath"
 	"slices"
@@ -53,6 +54,8 @@ type Service struct {
 
 	// sched holds and fires the scheduled messages and loops (schedule.go).
 	sched *scheduler
+	// procs samples running jobs' process groups for job_usage (jobusage.go).
+	procs procstat.Sampler
 
 	// peerSent is when each (sender, target) pair's recent dun_msg went, for
 	// the rate limit (peer.go). Guarded by mu.

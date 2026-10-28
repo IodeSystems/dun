@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -334,6 +335,20 @@ func jobReport(j *bgJob, tail int) string {
 
 	var b strings.Builder
 	b.WriteString(j.status())
+	if !done {
+		j.mu.Lock()
+		since := j.outAt
+		if since.IsZero() {
+			since = j.started
+		}
+		j.mu.Unlock()
+		if line, verdict, ok := j.usage(time.Since(since)); ok {
+			b.WriteString("\nprocesses: " + line)
+			if verdict != "" {
+				b.WriteString(" — " + verdict)
+			}
+		}
+	}
 	b.WriteString("\n" + describeMonitor(mon))
 	if logPath != "" {
 		b.WriteString("\nlog: " + logPath)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -462,4 +463,29 @@ func TestBgJob_CompletionStillWakesATurn(t *testing.T) {
 	default:
 		t.Error("a finished job must wake the turn loop")
 	}
+}
+
+// A running job's reply says what its processes are doing (USER 2026-10-28):
+// a sleeping command reads as idle, with its fds and where it waits.
+func TestJobs_ReplyCarriesProcessUsage(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the full set is read from /proc")
+	}
+	h := testHarness(t)
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	j := h.newJobStarted(be, "sleep 30")
+	t.Cleanup(func() { j.killAndWait("test") })
+	deadline := time.Now().Add(3 * time.Second)
+	for j.info().PGID == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if j.info().PGID == 0 {
+		t.Fatal("the job never learned its process group")
+	}
+	out := jobReport(j, 0)
+	if !strings.Contains(out, "processes: cpu 0%") || !strings.Contains(out, "fds") || !strings.Contains(out, "idle") {
+		t.Fatalf("no usage in the reply:\n%s", out)
+	}
+	t.Log(out)
 }

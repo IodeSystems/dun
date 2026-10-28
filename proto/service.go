@@ -1,5 +1,7 @@
 package proto
 
+import "github.com/iodesystems/dun/internal/procstat"
+
 // The service's own frames: what a client says to dund rather than to one
 // session's engine, and what dund says back. A command naming a session in
 // its envelope goes to that session; the ones here are about sessions.
@@ -16,6 +18,7 @@ func init() {
 	command[Leave]("leave")
 	command[Hello]("hello")
 	command[Upgrade]("upgrade")
+	command[JobUsageReq]("job_usage")
 
 	event[SessionList]("sessions")
 	event[EngineState]("engine")
@@ -23,6 +26,26 @@ func init() {
 	event[PersistState]("persist")
 	event[HelloReply]("hello")
 	event[UpgradeStatus]("upgrade")
+	event[JobUsage]("job_usage")
+}
+
+// JobUsageReq asks what background job Job's processes are doing: their
+// state, CPU, memory, threads, open files, IO and where they wait. dund
+// answers it for the session in the envelope (it samples the job's process
+// group, from the session's jobs event), and so does an engine run without
+// dund. The answer goes to the asker only: it is not in the session's log.
+type JobUsageReq struct {
+	Job int `json:"job"`
+}
+
+// JobUsage answers a JobUsageReq. Error is set when the job is not running
+// or its processes cannot be read (a docker job). Verdict reads the sample:
+// busy, waiting on IO, idle.
+type JobUsage struct {
+	Job     int            `json:"job"`
+	Usage   procstat.Usage `json:"usage"`
+	Verdict string         `json:"verdict,omitempty"`
+	Error   string         `json:"error,omitempty"`
 }
 
 // ListSessions asks for the sessions the caller is a member of.

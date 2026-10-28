@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	filetools "github.com/iodesystems/agentkit/files"
+	"github.com/iodesystems/dun/internal/procstat"
 	"log"
 	"os"
 	"os/exec"
@@ -443,6 +444,8 @@ var CompactionPause func() (resume func())
 type Harness struct {
 	// recapsSince counts recaps applied since the last main round's stat.
 	recapsSince atomic.Int32
+	// procs samples background jobs' process groups (bgjob.go usage).
+	procs procstat.Sampler
 	// The last plain jobs read and its answer (jobs.go): a repeat that
 	// answered the same is turned into a wait.
 	jobsPollMu   sync.Mutex

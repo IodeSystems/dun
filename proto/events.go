@@ -595,6 +595,7 @@ type JobInfo struct {
 	Ended   int64  `json:"ended"`
 	Code    int    `json:"code"`
 	Muted   bool   `json:"muted"`
+	PGID    int    `json:"pgid,omitempty"` // its process group, for job_usage; 0 unknown
 }
 
 // AgentHistory is a sub-agent's conversation, answering an agent view.

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/iodesystems/dun/internal/procstat"
+	"github.com/iodesystems/dun/proto"
 	"io"
 	"os"
 	"strings"
@@ -43,6 +45,10 @@ import (
 // jobTailEvery is how often an open job view reads the log for new output.
 const jobTailEvery = 500 * time.Millisecond
 
+// jobUsageEvery is how often an open view of a running job asks what its
+// processes are doing.
+const jobUsageEvery = 2 * time.Second
+
 // jobTabStop: a tab in a log draws as spaces to the next multiple of this, as
 // the terminal the command was written for would show it.
 const jobTabStop = 8
@@ -51,6 +57,13 @@ type jobView struct {
 	id      int
 	cmdOpen bool // the command item is open (the default)
 	onCmd   bool // the selection is on the command item, not the output
+
+	// What the job's processes are doing (USER 2026-10-28): asked of dund
+	// every jobUsageEvery while the job runs (jobusage.go there), answered
+	// with a job_usage event. procsOpen shows the per-process table (p).
+	usage     *proto.JobUsage
+	usageAt   time.Time
+	procsOpen bool
 
 	// The output panel's window.
 	off    int
@@ -283,6 +296,9 @@ func (v *jobView) layout(j jobRow, w, h int, now time.Time) {
 		}
 	}
 
+	// The processes: one line, the verdict, and with p a row per process.
+	procRows := v.procRows(j)
+
 	footer := ""
 	switch {
 	case v.searching:
@@ -292,7 +308,7 @@ func (v *jobView) layout(j jobRow, w, h int, now time.Time) {
 	case v.query != "":
 		footer = stDim.Render(fmt.Sprintf("no match for %q · esc clear", v.query))
 	}
-	panelH := v.h - 1 - len(cmdRows) - 1
+	panelH := v.h - 1 - len(cmdRows) - len(procRows) - 1
 	if footer != "" {
 		panelH--
 	}
@@ -344,6 +360,7 @@ func (v *jobView) layout(j jobRow, w, h int, now time.Time) {
 	out := make([]string, 0, v.h)
 	out = append(out, row.style.Bold(true).Render(t)+stDim.Render("  "+pos))
 	out = append(out, cmdRows...)
+	out = append(out, procRows...)
 	out = append(out, fitRow(panelHead, v.w))
 	if note != "" {
 		out = append(out, "   "+stDim.Render(note))
@@ -388,7 +405,7 @@ func (v jobView) view(w, h int) string {
 // hint is the status line while the view is open.
 func (v jobView) hint() string {
 	if v.onCmd {
-		return "job  ·  enter/→/← open/shut the command · ↓ output · / ? search · esc back"
+		return "job  ·  enter/→/← open/shut the command · ↓ output · p procs · / ? search · esc back"
 	}
 	return "job  ·  ↑/↓ pgup/pgdn g/G scroll · / ? search · n/N next · ← or esc back"
 }
@@ -466,6 +483,10 @@ func (v *jobView) key(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			v.search, cmd = v.search.Update(msg)
 			return true, cmd
 		}
+		return true, nil
+	}
+	if msg.String() == "p" {
+		v.procsOpen = !v.procsOpen
 		return true, nil
 	}
 	page := max(1, v.shown-1)
@@ -594,7 +615,60 @@ func (m *tuiModel) jobTail(msg jobTailMsg) tea.Cmd {
 	}
 	if j := m.jobByID(m.jv.id); j != nil {
 		m.jv.load(j.log)
+		if j.state == "running" && time.Since(m.jv.usageAt) >= jobUsageEvery {
+			m.jv.usageAt = time.Now()
+			m.proc.jobUsage(j.id)
+		}
 	}
 	m.syncJobView()
 	return jobTailTick(msg.gen)
+}
+
+// procRows is the processes item: the group in one line and the verdict,
+// then, opened with p, a row per process. None for a job that has ended.
+func (v *jobView) procRows(j jobRow) []string {
+	if j.state != "running" {
+		return nil
+	}
+	head := stDim.Render("  ") + stDim.Render(map[bool]string{true: "▾ ", false: "▸ "}[v.procsOpen]) + stTool.Render("processes") + stDim.Render(" (p)") + "  "
+	u := v.usage
+	switch {
+	case u == nil:
+		return []string{fitRow(head+stDim.Render("reading…"), v.w)}
+	case u.Error != "":
+		return []string{fitRow(head+stDim.Render(u.Error), v.w)}
+	}
+	rows := []string{fitRow(head+stSecondary.Render(u.Usage.Line()), v.w)}
+	if u.Verdict != "" {
+		st := stDim
+		if strings.Contains(u.Verdict, "stuck") || strings.Contains(u.Verdict, "waiting on disk") || strings.Contains(u.Verdict, "zombies") {
+			st = stAsk
+		}
+		rows = append(rows, fitRow("    "+st.Render(u.Verdict), v.w))
+	}
+	if !v.procsOpen {
+		return rows
+	}
+	rows = append(rows, fitRow("    "+stDim.Render(fmt.Sprintf("%7s %2s %5s %7s %4s %4s %15s  %-18s %s",
+		"pid", "st", "cpu", "rss", "thr", "fds", "io r/w a sec", "waiting in", "name")), v.w))
+	limit := max(1, (v.h-1)/3)
+	for i, p := range u.Usage.Procs {
+		if i == limit {
+			rows = append(rows, "    "+stDim.Render(fmt.Sprintf("… %d more", len(u.Usage.Procs)-limit)))
+			break
+		}
+		cpu, fds, io := "–", "–", "–"
+		if p.CPU >= 0 {
+			cpu = fmt.Sprintf("%.0f%%", p.CPU)
+		}
+		if p.FDs >= 0 {
+			fds = fmt.Sprint(p.FDs)
+		}
+		if p.ReadBps >= 0 {
+			io = procstat.Bytes(p.ReadBps) + "/" + procstat.Bytes(p.WritBps)
+		}
+		rows = append(rows, fitRow("    "+fmt.Sprintf("%7d %2s %5s %7s %4d %4s %15s  %-18s %s",
+			p.PID, p.State, cpu, procstat.Bytes(float64(p.RSS)), p.Threads, fds, io, p.WChan, p.Name), v.w))
+	}
+	return rows
 }

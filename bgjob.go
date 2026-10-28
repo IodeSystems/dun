@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iodesystems/dun/internal/procstat"
 )
 
 // Background jobs — what a long command looks like while it is still running.
@@ -89,6 +91,12 @@ type bgJob struct {
 	ended   time.Time
 	last    string // the last non-empty complete line of output (/jobs shows it)
 
+	// pgid is the process group the command runs in, once a host backend
+	// reported it (notePGID); 0 unknown (docker). usage reads it.
+	pgid int
+	// outAt is when the command last printed anything; zero before it has.
+	outAt time.Time
+
 	// killedBy is who asked for the kill ("user", "model"), and killAfter how
 	// long the job had run then. Set once, by kill.
 	killedBy  string
@@ -118,6 +126,7 @@ func (j *bgJob) Write(p []byte) (int, error) {
 		j.early = append(j.early, p...)
 	}
 	j.written += int64(len(p))
+	j.outAt = time.Now()
 
 	j.partial = append(j.partial, p...)
 	if i := lastNewline(j.partial); i >= 0 {
@@ -475,8 +484,13 @@ func (h *Harness) newJob(command string) *bgJob {
 	j := &bgJob{
 		command: command, started: time.Now(), h: h, hb: newHeartbeat(),
 		promoteCh: make(chan struct{}), doneCh: make(chan struct{}),
-		ctx: ctx, cancel: cancel,
+		cancel: cancel,
 	}
+	j.ctx = withPGIDSink(ctx, func(pgid int) {
+		j.mu.Lock()
+		j.pgid = pgid
+		j.mu.Unlock()
+	})
 	h.bgMu.Lock()
 	if h.bgLive == nil {
 		h.bgLive = map[*bgJob]struct{}{}
@@ -537,14 +551,23 @@ func (j *bgJob) heartbeat() {
 			if written > 0 {
 				out = fmt.Sprintf("%d bytes of output, none new", written)
 			}
+			// What its processes are doing tells working from wedged better
+			// than silence does (USER 2026-10-28): busy on CPU, waiting on
+			// IO, or every process asleep.
+			read := "Nothing is necessarily wrong; this is so a wedged job does not look like a working one."
+			if line, verdict, ok := j.usage(quiet); ok {
+				read = "Its processes: " + line + "."
+				if verdict != "" {
+					read += " " + verdict + "."
+				}
+			}
 			// notifyQuietly, NOT j.notify: the reminder must not reset the
 			// silence it is reporting on, and must not buy a turn to report it
 			// — a job being quiet is not a reason to call the model.
 			j.h.notifyQuietly(fmt.Sprintf(
-				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n"+
-					"Nothing is necessarily wrong; this is so a wedged job does not look like a working one. "+
+				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n%s "+
 					"jobs(job:%d) to see what it has produced.",
-				j.id, roundDur(quiet), j.command, out, j.logLine(), j.id))
+				j.id, roundDur(quiet), j.command, out, j.logLine(), read, j.id))
 		},
 	)
 }
@@ -572,6 +595,9 @@ type JobInfo struct {
 	Muted bool `json:"muted,omitempty"`
 	// Last is the job's last line of output so far.
 	Last string `json:"last,omitempty"`
+	// PGID is the process group the command runs in, for inspecting it
+	// (internal/procstat); 0 unknown.
+	PGID int `json:"pgid,omitempty"`
 }
 
 // info snapshots a job under its lock.
@@ -580,7 +606,7 @@ func (j *bgJob) info() JobInfo {
 	defer j.mu.Unlock()
 	out := JobInfo{
 		ID: j.id, Command: j.command, Log: j.logPath, State: "running",
-		Bytes: j.written, Started: j.started.Unix(), Muted: j.mon.Ignore, Last: j.last,
+		Bytes: j.written, Started: j.started.Unix(), Muted: j.mon.Ignore, Last: j.last, PGID: j.pgid,
 	}
 	if j.done {
 		out.State, out.Code, out.Ended = jobState(j.res), j.res.Code, j.ended.Unix()
@@ -702,4 +728,43 @@ func describeMonitor(m bgMonitor) string {
 		parts = append(parts, "matching /"+m.Grep+"/")
 	}
 	return "monitor: " + strings.Join(parts, ", ")
+}
+
+// usage is what the job's processes are doing, for the model: the group's
+// line and a verdict (internal/procstat). quiet is how long it has printed
+// nothing. A first sample has no rates, so it samples again a moment later.
+// ok is false when the group is unknown (a docker job) or the job is done.
+func (j *bgJob) usage(quiet time.Duration) (line, verdict string, ok bool) {
+	j.mu.Lock()
+	pgid, done := j.pgid, j.done
+	j.mu.Unlock()
+	if pgid == 0 || done {
+		return "", "", false
+	}
+	u := j.h.procs.Sample(pgid)
+	if !u.Rated && len(u.Procs) > 0 {
+		time.Sleep(300 * time.Millisecond)
+		u = j.h.procs.Sample(pgid)
+	}
+	return u.Line(), u.Verdict(quiet), true
+}
+
+// JobUsage samples background job id's processes for a client's job view:
+// the usage and a verdict, or why it cannot.
+func (h *Harness) JobUsage(id int) (procstat.Usage, string, error) {
+	j := h.bgJobByID(id)
+	if j == nil {
+		return procstat.Usage{}, "", fmt.Errorf("no background job #%d", id)
+	}
+	j.mu.Lock()
+	pgid, done, since := j.pgid, j.done, j.outAt
+	if since.IsZero() {
+		since = j.started
+	}
+	j.mu.Unlock()
+	if done || pgid == 0 {
+		return procstat.Usage{}, "", fmt.Errorf("job #%d is not running, or its processes cannot be read (a docker job)", id)
+	}
+	u := h.procs.Sample(pgid)
+	return u, u.Verdict(time.Since(since)), nil
 }

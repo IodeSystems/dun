@@ -225,6 +225,22 @@ const shellFlags = "-c"
 // throwaway workspace — there is no sandbox.
 type HostExec struct{ Dir string }
 
+// pgidKey carries a job's "here is my process group" callback in the context
+// a command runs under: a host backend calls it once the group exists, so the
+// job can be inspected (internal/procstat). A command not run as a job has
+// none, and nothing is called.
+type pgidKey struct{}
+
+func withPGIDSink(ctx context.Context, f func(pgid int)) context.Context {
+	return context.WithValue(ctx, pgidKey{}, f)
+}
+
+func notePGID(ctx context.Context, pgid int) {
+	if f, ok := ctx.Value(pgidKey{}).(func(int)); ok && pgid > 0 {
+		f(pgid)
+	}
+}
+
 func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResult {
 	cmd := exec.CommandContext(ctx, "sh", shellFlags, command)
 	cmd.Dir = h.Dir
@@ -232,7 +248,7 @@ func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResu
 	// dun's terminal — see detach.go. killGroup is also what makes the deadline
 	// bite: it kills the whole process group, not just the `sh` that spawned it.
 	killGroup(detach(cmd))
-	return finish(ctx, w, cmd)
+	return finishNoting(ctx, w, cmd)
 }
 
 // HostShell is a persistent-shell exec backend: ONE long-lived shell process
@@ -326,6 +342,10 @@ func (h *HostShell) RunPromotable(ctx context.Context, command string, w io.Writ
 		if err := h.start(); err != nil {
 			return ExecResult{Code: -1, Err: "persistent shell: " + err.Error()}
 		}
+	}
+	// The shell leads its group (setsid) and the command runs in it.
+	if h.p.cmd != nil && h.p.cmd.Process != nil {
+		notePGID(ctx, h.p.cmd.Process.Pid)
 	}
 
 	h.seq++
@@ -729,13 +749,29 @@ func dockerStop(name string) *exec.Cmd {
 // two separate-but-equivalent writers would silently get two goroutines racing
 // on the buffer.
 func finish(ctx context.Context, w io.Writer, cmd *exec.Cmd) ExecResult {
+	return runCmd(ctx, w, cmd, false)
+}
+
+// finishNoting is finish for a command that leads its own process group (a
+// host command): the group is reported to the job running it (notePGID).
+func finishNoting(ctx context.Context, w io.Writer, cmd *exec.Cmd) ExecResult {
+	return runCmd(ctx, w, cmd, true)
+}
+
+func runCmd(ctx context.Context, w io.Writer, cmd *exec.Cmd, note bool) ExecResult {
 	var buf bytes.Buffer
 	sink := io.Writer(&buf)
 	if w != nil {
 		sink = io.MultiWriter(&buf, w)
 	}
 	cmd.Stdout, cmd.Stderr = sink, sink
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		if note {
+			notePGID(ctx, cmd.Process.Pid)
+		}
+		err = cmd.Wait()
+	}
 
 	res := ExecResult{Output: buf.String()}
 	if err != nil {

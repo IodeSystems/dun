@@ -124,6 +124,20 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			// it labelled (dun.PeerLabel).
 			em.emit(&proto.Notification{Kind: "peer", Text: m.FromName + " (" + m.From + "): " + m.Text})
 			h.PeerMessage(m.From, m.FromName, m.Text, m.Wake)
+		case "job_usage":
+			// Asked of the engine only when no dund answers it (dund samples
+			// a job itself — internal/dund/jobusage.go).
+			var req proto.JobUsageReq
+			if json.Unmarshal(line, &req) != nil {
+				return
+			}
+			out := &proto.JobUsage{Job: req.Job}
+			if u, verdict, err := h.JobUsage(req.Job); err != nil {
+				out.Error = err.Error()
+			} else {
+				out.Usage, out.Verdict = u, verdict
+			}
+			em.emit(out)
 		case "servers":
 			// Another session wrote the global server file: re-read it now if
 			// idle; a running turn's next one does at its start.

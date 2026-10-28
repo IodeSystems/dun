@@ -2131,7 +2131,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- msg
 			case "answer":
 				s.answers <- ev.Value
-			case "peer", "peer_reply", "servers":
+			case "peer", "peer_reply", "servers", "job_usage":
 				// Never an answer: a peer message cannot close an open
 				// ask_user, whatever it says.
 				s.peerCmd(ev.Type, []byte(line))
@@ -2493,7 +2493,7 @@ func jobsProto(js []dun.JobInfo) []proto.JobInfo {
 	out := make([]proto.JobInfo, 0, len(js))
 	for _, j := range js {
 		out = append(out, proto.JobInfo{ID: j.ID, Command: j.Command, Log: j.Log, State: j.State,
-			Bytes: j.Bytes, Started: j.Started, Ended: j.Ended, Code: j.Code, Muted: j.Muted})
+			Bytes: j.Bytes, Started: j.Started, Ended: j.Ended, Code: j.Code, Muted: j.Muted, PGID: j.PGID})
 	}
 	return out
 }

@@ -276,3 +276,39 @@ func TestJobView_LoadKeepsTheTail(t *testing.T) {
 		t.Errorf("a replaced log should be read again: %q rows %q", v.data, v.rows)
 	}
 }
+
+// A running job's view asks what its processes are doing and shows it under
+// the command: one line, the verdict, and with p a row per process
+// (USER 2026-10-28).
+func TestJobView_ShowsWhatItsProcessesAreDoing(t *testing.T) {
+	var rec strings.Builder
+	v := jobVtui(t, jobLog(t, 3), "go test ./...", "running", 0)
+	v.m.proc = &dunProc{stdin: bufCloser{&rec}}
+	v.m.jv.usageAt = time.Time{}
+	tick(v)
+	if !strings.Contains(rec.String(), `"type":"job_usage"`) || !strings.Contains(rec.String(), `"job":3`) {
+		t.Fatalf("an open running job should ask for its usage: %q", rec.String())
+	}
+	if !strings.Contains(v.view(), "processes (p)  reading…") {
+		t.Errorf("before the answer:\n%s", v.view())
+	}
+	v.event(map[string]any{"type": "job_usage", "job": 3.0, "verdict": "idle: every process sleeping, no CPU, no IO, no output for 4m — looks stuck",
+		"usage": map[string]any{"rated": true, "cpu": 0.0, "rss": 9e6, "threads": 2.0, "fds": 6.0, "read_bps": 0.0, "write_bps": 0.0,
+			"procs": []any{
+				map[string]any{"pid": 4100.0, "state": "S", "cpu": 0.0, "rss": 2e6, "threads": 1.0, "fds": 3.0, "read_bps": 0.0, "write_bps": 0.0, "wchan": "do_wait", "name": "sh"},
+				map[string]any{"pid": 4101.0, "state": "S", "cpu": 0.0, "rss": 7e6, "threads": 1.0, "fds": 3.0, "read_bps": 0.0, "write_bps": 0.0, "wchan": "futex_wait", "name": "go"},
+			}}})
+	view := v.view()
+	for _, want := range []string{"cpu 0% · 2 procs (S2)", "6 fds", "looks stuck"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("lacks %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "futex_wait") {
+		t.Error("the table is shut until p")
+	}
+	v.m = key(v.m, runesKey([]rune("p")))
+	if view = v.view(); !strings.Contains(view, "futex_wait") || !strings.Contains(view, "4101") {
+		t.Errorf("p should open a row per process:\n%s", view)
+	}
+}

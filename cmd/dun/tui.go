@@ -2918,6 +2918,16 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// tokens already streamed the reply; nothing to add.
 	case "agents":
 		m.agents = agentRowsFromEvent(ev)
+	case "job_usage":
+		// What an open job view asked for (jobview.go): dund's sample of the
+		// job's processes.
+		if b, err := json.Marshal(ev); err == nil && m.jobViewing {
+			var u proto.JobUsage
+			if json.Unmarshal(b, &u) == nil && u.Job == m.jv.id {
+				m.jv.usage = &u
+				m.syncJobView()
+			}
+		}
 	case "jobs":
 		m.jobs = jobRowsFromEvent(ev)
 	case "agent_history":
