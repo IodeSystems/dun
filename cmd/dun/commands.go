@@ -183,6 +183,10 @@ func ownCommands(docker bool) []proto.CommandSpec {
 			Description: "how hard dun keeps at a flaky provider: alone picks a preset; saved for every session"},
 		{Name: "file", Usage: "[add|remove <path>]", Group: "tools", Choices: choices("add", "a file or directory outside the workspace that dun's file tools may read and change, for this session", "remove", "take one back"),
 			Description: "files outside the workspace dun may read and change: alone lists them; add <path> grants one (a file grants that file alone), remove <path> takes it back"},
+		{Name: "worklog", Usage: "[start <title> | end [done|dropped|blocked] <why> | view [n] | write [n]]", Group: "session",
+			Choices: choices("start", "open a task; under an open task, a subtask", "end", "close the open task: done, dropped or blocked, and why",
+				"view", "one task's events: inputs, tool calls, recaps, notes", "write", "the model writes a closed task's account to a file"),
+			Description: "this session's tasks: alone, the tree with times and outcomes"},
 		{Name: "effort", Usage: "[default|off|low|medium|high]", Group: "session",
 			Choices: choices(dun.EffortDefault, dun.EffortAbout[dun.EffortDefault], dun.EffortOff, dun.EffortAbout[dun.EffortOff],
 				dun.EffortLow, dun.EffortAbout[dun.EffortLow], dun.EffortMedium, dun.EffortAbout[dun.EffortMedium],
@@ -423,6 +427,14 @@ func routeSlash(line string, r slashRoutes) {
 			r.control(name, strings.TrimSpace("prompt "+strings.Join(args[1:], " ")))
 		default:
 			r.reply("rephrase: " + onOff(rephraseOn))
+		}
+	case "worklog":
+		// The title and the why as typed.
+		switch arg(0) {
+		case "", "start", "end", "view", "write":
+			r.control(name, strings.TrimSpace(arg(0)+" "+strings.Join(args[min(1, len(args)):], " ")))
+		default:
+			r.reply("usage: /worklog [start <title> | end [done|dropped|blocked] <why> | view [n] | write [n]]")
 		}
 	case "effort":
 		r.control(name, arg(0))

@@ -444,6 +444,10 @@ type Harness struct {
 	jobsPollSame bool
 	// The turn in flight's cancel and what its round has streamed (interrupt.go).
 	interruptState
+	// The session's worklog (worklog.go), read from its sidecar on first use.
+	wlMu   sync.Mutex
+	wl     *Worklog
+	wlFile string
 
 	mgr     *mcpmgr.Manager
 	Session *agent.Session
@@ -847,6 +851,7 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 //
 // OnNotify still fires immediately so a UI shows the job finishing in real time.
 func (h *Harness) Notify(text string) {
+	h.workNote(text)
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedNotification, text: text})
 	h.noteMu.Unlock()
@@ -871,6 +876,7 @@ func (h *Harness) Notify(text string) {
 // message for as long as it waits — an hour, for exec timeout:3600. So Say
 // also releases those waits: see userWaiting.
 func (h *Harness) Say(text string) {
+	h.workInput(text)
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedUser, text: text})
 	if h.userWaitCh != nil {
@@ -1514,6 +1520,7 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 	defer end()
 	h.clearBudgetNotes()
 	h.prepareTurn(ctx)
+	h.workInput(task)
 	h.store.publish(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
