@@ -2007,8 +2007,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// A server still starting: the live splash counts its seconds. The
 		// row changes in place; refresh only when its words did.
-		if len(m.srvSince)+len(m.idxSince) > 0 && len(m.convo) > 0 && m.convo[0].liveSplash &&
-			m.splashView(m.splashW()) != m.convo[0].collapsed {
+		if i := m.liveSplashAt(); len(m.srvSince)+len(m.idxSince) > 0 && i >= 0 &&
+			m.splashView(m.splashW()) != m.convo[i].collapsed {
 			m.refresh()
 		}
 		return m, cmd
@@ -2587,7 +2587,7 @@ func (m *tuiModel) noteServers(ev evMsg) {
 	}
 	m.noteServerView(list)
 	m.noteExtServers()
-	if len(m.convo) > 0 && m.convo[0].liveSplash {
+	if m.liveSplashAt() >= 0 {
 		m.refresh() // the splash's servers and extras rows say it now
 	}
 }
@@ -5072,10 +5072,10 @@ func init() {
 		// /splash: a clean screen with the splash on it (USER 2026-10-27:
 		// "it's fun"). The conversation is the engine's and stays; only what
 		// this screen shows is cleared, and a /resume shows it again.
-		{"splash", "", "clear the screen and show the splash again (the conversation is kept)", func(m *tuiModel, _ []string) tea.Cmd {
-			m.convo, m.sel, m.paging, m.scr = nil, -1, false, nil
-			m.showSplash()
-			return tea.ClearScreen
+		{"splash", "", "show the splash again at the top of a clear screen (what was above is still there, scrolled back)", func(m *tuiModel, _ []string) tea.Cmd {
+			m.sel, m.paging, m.scr = -1, false, nil
+			m.splashAgain()
+			return nil
 		}},
 		// /close exits, as /exit (USER 2026-10-27); discarding a session for
 		// good is /discard.

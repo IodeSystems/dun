@@ -374,7 +374,7 @@ func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea
 	// conversation; its history comes back and is rendered afresh, with no
 	// "resumed" marker — to the person nothing was resumed.
 	m.quietReplay = true
-	if len(m.convo) > 0 && m.convo[0].splash {
+	if m.liveSplashAt() >= 0 || (len(m.convo) > 0 && m.convo[0].splash) {
 		m.splashWant, m.splashKeep = true, true // said again, with the new model
 	}
 	m.convo = nil

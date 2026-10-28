@@ -688,12 +688,13 @@ const splashModelRow = 2
 // on one screen — header, splash, notice). Scrolled past it, the header
 // says it again, so the model is always on screen.
 func (m tuiModel) splashModelShown() bool {
-	if len(m.convo) == 0 || !m.convo[0].liveSplash {
+	i := m.liveSplashAt()
+	if i < 0 {
 		return false
 	}
 	top := 0
-	if len(m.frame.rowOffset) > 0 {
-		top = m.frame.rowOffset[0]
+	if i < len(m.frame.rowOffset) {
+		top = m.frame.rowOffset[i]
 	}
 	row := top + splashModelRow
 	return row >= m.vp.YOffset && row < m.vp.YOffset+m.vp.Height
@@ -724,13 +725,47 @@ func (m *tuiModel) showSplash() {
 // liveSplashNow brings the live splash up to date; refresh calls it before
 // it draws. A changed row is the same row with new words.
 func (m *tuiModel) liveSplashNow() {
-	if len(m.convo) == 0 || !m.convo[0].liveSplash {
+	i := m.liveSplashAt()
+	if i < 0 {
 		return
 	}
-	if v := m.splashView(m.splashW()); v != m.convo[0].collapsed {
-		m.convo[0].collapsed = v
-		m.convo[0].invalidateWrap()
+	if v := m.splashView(m.splashW()); v != m.convo[i].collapsed {
+		m.convo[i].collapsed = v
+		m.convo[i].invalidateWrap()
 	}
+}
+
+// liveSplashAt is the index of the splash that still says what is true now:
+// the first entry of a fresh session, or the last /splash. -1 if none.
+func (m tuiModel) liveSplashAt() int {
+	for i := len(m.convo) - 1; i >= 0; i-- {
+		if m.convo[i].liveSplash {
+			return i
+		}
+	}
+	return -1
+}
+
+// splashAgain is /splash: the splash at the top of a clear screen, the way a
+// terminal's clear looks, with everything before it still there above. It
+// used to empty the scrollback and clear the terminal, so what was above could
+// not be scrolled back to and looked gone (USER 2026-10-28). The splash goes
+// at the end and the pane is held one screen past its top: blank rows below
+// it, which the next rows fill. An earlier splash stops updating; this one is
+// the live one.
+func (m *tuiModel) splashAgain() {
+	for i := range m.convo {
+		m.convo[i].liveSplash = false
+	}
+	m.convo = append(m.convo, convoEntry{collapsed: m.splashView(m.splashW()), splash: true, liveSplash: true})
+	m.refresh()
+	if i := len(m.convo) - 1; i < len(m.frame.rowOffset) {
+		// The height the pane will have, not the one it has: typing /splash
+		// opened the command palette, which closes as the command runs.
+		m.convoHold, m.convoHoldW = m.frame.rowOffset[i]+m.convoHeightBudget(), m.vp.Width
+	}
+	m.scrollPinned = true
+	m.refresh()
 }
 
 // statusSlash is /status: everything, as of now, at the end of the

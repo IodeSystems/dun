@@ -451,3 +451,44 @@ func TestBottomCue_ClickOrKeyGoesToTheNewest(t *testing.T) {
 		t.Fatalf("ctrl+end: offset %d of %d, pinned %v", v.m.vp.YOffset, v.m.vp.maxYOffset(), v.m.scrollPinned)
 	}
 }
+
+// /splash is a terminal's clear: the splash at the top of the screen, blank
+// rows below it, and everything before it still there to scroll back to. It
+// used to empty the scrollback, so what was above looked gone (USER
+// 2026-10-28). The new splash is the live one; the old one stops updating.
+func TestSplash_AgainKeepsTheScrollback(t *testing.T) {
+	v := splashConvo(t)
+	before := len(v.m.convo)
+	v.m = typeStr(v.m, "/splash")
+	v.m = key(v.m, kEnter)
+	if len(v.m.convo) <= before || !strings.Contains(v.convo(), "answer 5") {
+		t.Fatalf("the conversation before /splash is gone:\n%s", v.convo())
+	}
+	last := len(v.m.convo) - 1
+	if !v.m.convo[last].liveSplash || v.m.convo[0].liveSplash || v.m.liveSplashAt() != last {
+		t.Fatalf("the new splash should be the live one: live at %d of %d", v.m.liveSplashAt(), last)
+	}
+	top := v.m.frame.rowOffset[last]
+	if v.m.vp.YOffset != top || !v.m.scrollPinned {
+		t.Fatalf("the splash should be at the top of the screen: offset %d, splash at %d, pinned %v", v.m.vp.YOffset, top, v.m.scrollPinned)
+	}
+	rows := shown(v)
+	if h := v.m.frame.blockH[last]; h < len(rows) && strings.TrimSpace(strings.Join(rows[h+1:], "")) != "" {
+		t.Errorf("below the splash should be blank:\n%s", strings.Join(rows, "\n"))
+	}
+	// Scrolling back reaches what came before.
+	v.setScrollPin(false)
+	v.setYOffset(0)
+	v.m.refresh()
+	if !strings.Contains(strings.Join(shown(v), "\n"), "question 0") {
+		t.Errorf("scrolled to the top, the old conversation is not there:\n%s", strings.Join(shown(v), "\n"))
+	}
+	// A new message fills the blank rows; the splash does not move.
+	v.m.scrollToEnd()
+	v.m.refresh()
+	v.send("after the splash")
+	v.m.refresh()
+	if v.m.vp.YOffset != top {
+		t.Errorf("a short message moved the splash: offset %d -> %d", top, v.m.vp.YOffset)
+	}
+}
