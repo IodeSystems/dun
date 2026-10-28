@@ -92,7 +92,7 @@ type tuiOpts struct {
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
 // lc (may be nil) is the launcher registration — its reload channel drives the
 // "update ready" indicator + /reload.
-func runTUI(o tuiOpts, lc *launcherConn) error {
+func runTUI(o tuiOpts) error {
 	// Before the program starts, so the terminal query cannot block the input
 	// loop or race the key reader for the reply bytes. See initMarkdownStyle.
 	initMarkdownStyle()
@@ -115,7 +115,6 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 		m.provider = p.Name
 	}
 	m.disableExit = o.disableExit
-	m.lc = lc
 	m.opts = o // for respawning the engine (see eofMsg)
 	m.checkUpdates = true
 	// The window and tab marks (tmux.go, iterm.go). Unset at exit, and on a
@@ -139,10 +138,10 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 		tm.proc.close() // the engine it ENDED with, which may not be the one it started
 	}
 	// /reload: bubbletea has restored the terminal by now, so re-exec cleanly
-	// into the (launcher-rebuilt) binary with the same args, preserving the
-	// session so the conversation is replayed on reconnect.
+	// into the binary on disk (after a `make install`, the new one) with the
+	// same args, preserving the session so the conversation is replayed on
+	// reconnect.
 	if tm, ok := fm.(tuiModel); ok && tm.reloadReq && err == nil {
-		lc.close() // drop the old registration; the new process re-registers
 		exe, e := os.Executable()
 		if e == nil {
 			args := os.Args
@@ -775,8 +774,6 @@ type tuiModel struct {
 	quietReplay bool
 	hintShown   bool
 	disableExit bool          // --disable-exit: ctrl+c/esc don't quit (use /exit)
-	lc          *launcherConn // launcher registration (nil = no launcher)
-	reloadVer   string        // a newer build the launcher announced ("" = none)
 	reloadReq   bool          // /reload requested → runTUI re-execs after quit
 	upgrade     *upgradeState // a pending dund upgrade (upgrade.go); nil = none
 	// checkUpdates: a release build's daily check runs behind the first
@@ -936,7 +933,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spin.Tick, m.input.BlinkTick(), waitForDump(m.dumpSig), waitReload(m.lc)}
+	cmds := []tea.Cmd{m.spin.Tick, m.input.BlinkTick(), waitForDump(m.dumpSig)}
 	if m.checkUpdates {
 		cmds = append(cmds, func() tea.Msg { return updateNoteMsg(releaseUpdate()) })
 	}
@@ -949,26 +946,8 @@ func (m tuiModel) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// reloadMsg carries a newer build version the launcher announced.
-type reloadMsg string
-
 // updateNoteMsg is the release check's line ("" for none).
 type updateNoteMsg string
-
-// waitReload blocks on the launcher's reload channel (nil-safe) and turns a
-// "new build" push into a reloadMsg. Re-armed after each one.
-func waitReload(lc *launcherConn) tea.Cmd {
-	if lc == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		v, ok := <-lc.reload
-		if !ok {
-			return nil
-		}
-		return reloadMsg(v)
-	}
-}
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Timed as a whole: this is what a keystroke queues behind, and it is the
@@ -1784,11 +1763,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 		}
 		return m, nil
-
-	case reloadMsg:
-		m.reloadVer = string(msg) // header shows "↻ …"; /reload restarts
-		m.refresh()
-		return m, waitReload(m.lc) // re-arm
 
 	case repaintNowMsg:
 		return m, m.repaintNow(msg)
@@ -3738,9 +3712,6 @@ func (m tuiModel) headView() string {
 	if n := m.liveAgents(); n > 0 {
 		head += stNote.Render(fmt.Sprintf("  · %d agents", n))
 	}
-	if m.reloadVer != "" {
-		head += "  " + stNote.Render("↻ "+m.reloadVer+" (/reload)")
-	}
 	return m.reqs.withStats(head, m.w)
 }
 
@@ -4951,7 +4922,7 @@ func init() {
 			m.showContext()
 			return nil
 		}},
-		{"reload", "", "restart into the latest build (the launcher rebuilds on source change)", func(m *tuiModel, _ []string) tea.Cmd {
+		{"reload", "", "restart this TUI into the dun binary on disk (after make install), on the same session", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
 			return tea.Quit
 		}},
@@ -4966,8 +4937,8 @@ func init() {
 				return nil
 			}
 			if m.upgrade == nil {
-				// A source build: nothing tells dund there is a newer build
-				// (the launcher reloads the TUI only), so dund and its
+				// A source build: nothing tells dund there is a newer build,
+				// so dund and its
 				// engines keep the one they started with. now moves them to
 				// the build this TUI runs (USER 2026-10-27: /upgrade on a
 				// source build was a dead end).

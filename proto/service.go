@@ -32,8 +32,9 @@ func init() {
 // JobUsageReq asks what background job Job's processes are doing: their
 // state, CPU, memory, threads, open files, IO and where they wait. dund
 // answers it for the session in the envelope (it samples the job's process
-// group, from the session's jobs event), and so does an engine run without
-// dund. The answer goes to the asker only: it is not in the session's log.
+// group, from the session's jobs event). The answer goes to the asker only:
+// it is not in the session's log. The model gets the same reading in its
+// jobs replies (bgjob.go usage).
 type JobUsageReq struct {
 	Job int `json:"job"`
 }

@@ -53,8 +53,7 @@ engine: `dun -p` — one process per session (harness.go)
   lets any number of clients attach, send commands and follow live. A session
   belongs to the principal that created it. dund also routes dun-to-dun
   messages (`dun_list`, `dun_msg`); an engine lists those two tools only once
-  dund reports another live session of its owner, or one messages it. `dun -d` (the launcher, `cmd/dun/launcher.go`)
-  is a separate supervisor for source rebuild and hot reload.
+  dund reports another live session of its owner, or one messages it.
 - Tool servers are sibling MCP servers bridged into one session. They are not
   nested inside mcpshell's `--mcp` composition, because the model should call
   `node_edit` and `search` directly. A server can instead be hosted inside

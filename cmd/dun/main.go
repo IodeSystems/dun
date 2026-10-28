@@ -83,7 +83,7 @@ var flagGroups = []struct {
 	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase"}},
 	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp", "no-rag", "no-lsp", "no-tools", "media"}},
 	{"experimental", []string{"exp-iterm-tabcontrol"}},
-	{"advanced", []string{"d", "force", "persist", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
+	{"advanced", []string{"persist", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
 }
 
 // removedFlags are flags that no longer do anything. They stay accepted
@@ -250,8 +250,6 @@ func main() {
 	itermTabs := flag.Bool("exp-iterm-tabcontrol", false, "experimental, iTerm2 only: title and colour the tab by what dun waits on (working, question, done)")
 	rephrase := flag.Bool("rephrase", false, "rephrase each user prompt for specificity before acting on it (toggle at runtime: /rephrase on)")
 
-	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
-	force := flag.Bool("force", false, "-d shutdown: proceed even with sessions attached")
 	timeout := flag.Duration("timeout", 30*time.Minute, "overall timeout")
 	timeoutGrace := flag.Duration("timeout-grace", 0, "after --timeout, time the model gets to wrap up before the cut (0 = 20% of --timeout, 2m-10m; negative = none)")
 	replay := flag.String("replay", "", "replay a recorded session trace into the TUI (record one with DUN_TRACE=path)")
@@ -383,22 +381,6 @@ func main() {
 		}
 		return
 	}
-	// Launcher daemon (supervisor): `dun -d` runs it; `dun -d status|shutdown` query.
-	if *daemon {
-		switch firstTask {
-		case "status":
-			printLauncherStatus()
-		case "shutdown":
-			shutdownLauncher(*force)
-		case "":
-			if err := runLauncher(); err != nil {
-				fatal(err)
-			}
-		default:
-			fatal(fmt.Errorf("dun -d: unknown subcommand %q (status|shutdown|<none>)", firstTask))
-		}
-		return
-	}
 	// Every mode, not just the TUI: the engine is where a turn burns CPU, and
 	// it is the process a TUI session would want to profile. Opt-in, loopback.
 	startPprof()
@@ -470,9 +452,7 @@ func main() {
 	// one mode you had to ask for. A positional task still runs headless: that
 	// is the scripting path and scripts must not suddenly open a UI.
 	if *tui || (firstTask == "" && !*prog && !*serve) {
-		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
-		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools, *itermTabs}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools, *itermTabs}); err != nil {
 			fatal(err)
 		}
 		return
@@ -480,8 +460,6 @@ func main() {
 
 	// Serve mode: the TUI over xterm.js; each browser tab spawns a web session.
 	if *serve {
-		lc := registerSession("serve", absWS)
-		defer lc.close()
 		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools, false}, *addr); err != nil {
 			fatal(err)
 		}
@@ -2135,7 +2113,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- msg
 			case "answer":
 				s.answers <- ev.Value
-			case "peer", "peer_reply", "servers", "job_usage":
+			case "peer", "peer_reply", "servers":
 				// Never an answer: a peer message cannot close an open
 				// ask_user, whatever it says.
 				s.peerCmd(ev.Type, []byte(line))

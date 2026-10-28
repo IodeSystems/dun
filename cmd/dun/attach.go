@@ -468,8 +468,8 @@ func dundSessions() ([]proto.SessionSummary, error) {
 	return l.Items, nil
 }
 
-// jobUsage asks what background job id's processes are doing; dund (or the
-// engine, without one) answers with a job_usage event (jobview.go).
+// jobUsage asks what background job id's processes are doing; dund answers
+// with a job_usage event (jobview.go).
 func (p *dunProc) jobUsage(id int) bool {
 	if p == nil {
 		return false

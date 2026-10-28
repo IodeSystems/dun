@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/iodesystems/dun/internal/procstat"
 )
 
 // Background jobs — what a long command looks like while it is still running.
@@ -747,24 +745,4 @@ func (j *bgJob) usage(quiet time.Duration) (line, verdict string, ok bool) {
 		u = j.h.procs.Sample(pgid)
 	}
 	return u.Line(), u.Verdict(quiet), true
-}
-
-// JobUsage samples background job id's processes for a client's job view:
-// the usage and a verdict, or why it cannot.
-func (h *Harness) JobUsage(id int) (procstat.Usage, string, error) {
-	j := h.bgJobByID(id)
-	if j == nil {
-		return procstat.Usage{}, "", fmt.Errorf("no background job #%d", id)
-	}
-	j.mu.Lock()
-	pgid, done, since := j.pgid, j.done, j.outAt
-	if since.IsZero() {
-		since = j.started
-	}
-	j.mu.Unlock()
-	if done || pgid == 0 {
-		return procstat.Usage{}, "", fmt.Errorf("job #%d is not running, or its processes cannot be read (a docker job)", id)
-	}
-	u := h.procs.Sample(pgid)
-	return u, u.Verdict(time.Since(since)), nil
 }

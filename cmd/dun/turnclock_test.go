@@ -184,3 +184,15 @@ func TestTUI_BudgetSpentLine(t *testing.T) {
 		t.Fatalf("budget line: %q", got)
 	}
 }
+
+// waitUntil polls cond for up to two seconds.
+func waitUntil(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if cond() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}

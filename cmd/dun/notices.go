@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/iodesystems/dun/internal/dundcli"
 )
@@ -29,8 +31,8 @@ func onceEver(key string) bool {
 	return true
 }
 
-// noteBackground is said after the first /exit: dund and the launcher stay
-// up after the TUI is gone, and nothing on screen said so.
+// noteBackground is said after the first /exit: dund stays up after the TUI
+// is gone, and nothing on screen said so.
 func noteBackground(w io.Writer) {
 	if !dialOK(dundcli.Socket(dunHome())) || !onceEver("dund-background") {
 		return
@@ -39,6 +41,15 @@ func noteBackground(w io.Writer) {
 	if _, svc := dundcli.ServiceFile(dundcli.ServiceUnit); svc {
 		stop = "dun dund service stop"
 	}
-	fmt.Fprintf(w, "dun: dund, the session service, keeps running in the background; stop it: %s\n"+
-		"     (the launcher, dun -d, exits after %d idle minutes; dun -d shutdown stops it now)\n", stop, int(idleTTL.Minutes()))
+	fmt.Fprintf(w, "dun: dund, the session service, keeps running in the background; stop it: %s\n", stop)
+}
+
+// dialOK reports whether something answers on the unix socket sock.
+func dialOK(sock string) bool {
+	c, err := net.DialTimeout("unix", sock, 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }

@@ -46,7 +46,7 @@ func TestNoteBackground_OncePerHome(t *testing.T) {
 	// The stop step is the pidfile's, or the service's on a machine with
 	// the service installed (ServiceFile reads the real unit directory).
 	stop := strings.Contains(s, "dund.pid") || strings.Contains(s, "dun dund service stop")
-	if !strings.Contains(s, "keeps running in the background") || !stop || !strings.Contains(s, "dun -d shutdown") {
+	if !strings.Contains(s, "keeps running in the background") || !stop || strings.Contains(s, "dun -d") {
 		t.Errorf("first exit:\n%s", s)
 	}
 	b.Reset()
