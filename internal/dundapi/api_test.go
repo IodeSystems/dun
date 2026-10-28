@@ -193,16 +193,19 @@ func TestGraphQLRunsTheOperations(t *testing.T) {
 	}
 }
 
-// The page is open (it holds nothing) and is HTML.
-func TestPageIsServedWithoutAToken(t *testing.T) {
+// A source build has no web app: / is open (it holds nothing), renders
+// nothing, and says where the app is (USER 2026-10-28: two renderers, the
+// TUI and the web app; dund renders neither).
+func TestPageWithoutTheAppSaysWhereItIs(t *testing.T) {
 	srv, _, _ := setup(t)
 	resp, err := http.Get(srv.URL + "/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 || !strings.Contains(string(b), "dun dund token") {
-		t.Fatalf("page: %d %.80s", resp.StatusCode, b)
+	if resp.StatusCode != 200 || !strings.Contains(string(b), "built without the web app") ||
+		!strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") {
+		t.Fatalf("page: %d %s %.80s", resp.StatusCode, resp.Header.Get("Content-Type"), b)
 	}
 }
 

@@ -57,6 +57,16 @@ jobs:
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: test
         run: make test
+      # The web app is embedded in the release builds (make release runs make
+      # webapp: mobile/ exported for the web).
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          version: 10
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
       - name: build and sign
         run: make release RELEASE_VERSION="$VERSION" MINISIGN_KEY="$RUNNER_TEMP/minisign.key"
       - name: verify the signature with the committed key

@@ -18,3 +18,4 @@ dun.local.json
 # make release output.
 /dist/
 /.poly-lsp-mcp/
+/internal/dundapi/webdist/

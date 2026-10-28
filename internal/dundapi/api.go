@@ -16,13 +16,14 @@ package dundapi
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -69,8 +70,8 @@ type Options struct {
 	// Owner is the principal the local token stands for (unix:<uid>).
 	Owner string
 	// WebRoot, when set, is the built client (mobile: expo export --platform
-	// web) served at / from the filesystem (WEB-5); without it / is the
-	// embedded stopgap page.
+	// web) served at / from the filesystem (WEB-5); without it, a release
+	// build serves the copy it embeds and a source build a page saying so.
 	WebRoot string
 	// OIDC, when its issuer and client id are set, turns on sign-in with
 	// the identity provider (oidc.go).
@@ -91,20 +92,27 @@ func Handler(svc *dund.Service, o Options) (http.Handler, error) {
 	return newRouter(svc, o, true)
 }
 
-// spa serves webRoot's files, and its index.html for any other path: a
-// client route (/session/…) is the app's shell, which routes itself.
-func spa(webRoot string) http.HandlerFunc {
-	files := http.FileServer(http.Dir(webRoot))
+// spa serves app's files, and its index.html for any other path: a client
+// route (/session/…) is the app's shell, which routes itself.
+func spa(app fs.FS) http.HandlerFunc {
+	files := http.FileServerFS(app)
 	return func(w http.ResponseWriter, req *http.Request) {
-		p := filepath.Join(webRoot, filepath.Clean("/"+req.URL.Path))
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+		p := strings.TrimPrefix(path.Clean("/"+req.URL.Path), "/")
+		if st, err := fs.Stat(app, p); err == nil && !st.IsDir() {
 			files.ServeHTTP(w, req)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-cache")
-		http.ServeFile(w, req, filepath.Join(webRoot, "index.html"))
+		http.ServeFileFS(w, req, app, "index.html")
 	}
 }
+
+// noApp is / when this dund has no web app: a source build without
+// --web-root. The two renderers are the TUI and the web app (USER
+// 2026-10-28); this page renders nothing, it says where the app is.
+const noApp = "This dund was built without the web app.\n\n" +
+	"Release builds include it. From a checkout: make webapp, then dun dund serve --web-experimental <addr> " +
+	"--web-root mobile/dist.\nThe HTTP API is here as usual: /api/v1/hello.\n"
 
 // SDL is the GraphQL schema, for client codegen (WEB-4). No service runs:
 // building the schema calls no handler.
@@ -132,9 +140,9 @@ func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 		r.Use(s.authenticate)
 	}
 	page := func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(indexHTML)
+		_, _ = w.Write([]byte(noApp))
 	}
 	if s.sso != nil {
 		r.Get(loginPath, s.sso.login)
@@ -144,10 +152,13 @@ func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 		r.Handle(releasesPath+"/*", http.StripPrefix(releasesPath, releaseFiles(o.Releases)))
 		r.Get(apkPath, s.latestAPK)
 	}
+	app, embedded := embeddedApp()
 	switch {
-	case webRoot != "":
-		r.NotFound(spa(webRoot))
-	case auth: // the stopgap page, when there is no built client
+	case webRoot != "": // --web-root wins: a client being worked on
+		r.NotFound(spa(os.DirFS(webRoot)))
+	case embedded: // a release build carries the app (webapp_release.go)
+		r.NotFound(spa(app))
+	case auth: // a source build without one: a page that says so
 		r.Get("/", page)
 		r.Get("/index.html", page)
 	}
@@ -174,12 +185,6 @@ func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 // client (pages and assets, which hold no data) and is open too; it asks for
 // the token and calls the API with it.
 var open = map[string]bool{"/api/v1/hello": true}
-
-// indexHTML is the stopgap browser client (web/index.html). Embedded: dund is
-// a tool binary with no slot model (WEB-5's exception).
-//
-//go:embed web/index.html
-var indexHTML []byte
 
 // authenticate 401s a request without the local token, except to the open
 // paths, and puts the caller's principal in the request context — which is

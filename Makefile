@@ -31,7 +31,7 @@ DUN_BIN := $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/dun/dun
 # Where `make web` installs the built client that dund serves (--web-root).
 WEB_ROOT := $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/dun/web
 
-.PHONY: build install install-launcher run test clean schema web ux release site site-push
+.PHONY: build install install-launcher run test clean schema web ux webapp release site site-push
 
 build: ## build ./dun (version + source stamped)
 	go build -ldflags "$(LDFLAGS)" -o dun ./cmd/dun
@@ -95,7 +95,11 @@ RELEASE_LDFLAGS := -s -w -X main.version=$(RELEASE_VERSION) -X main.channel=rele
 RELEASE_SUMMARY ?=
 MINISIGN_KEY    ?=
 
-release: ## release builds + signed dun-manifest.json → dist/<version>/ (RELEASE_VERSION=vX.Y.Z, MINISIGN_KEY=…)
+webapp: ## the web app (mobile/, exported for the web) → internal/dundapi/webdist, which a release build embeds (pnpm, node)
+	cd mobile && pnpm install --frozen-lockfile && pnpm run export:web
+	rm -rf internal/dundapi/webdist && cp -r mobile/dist internal/dundapi/webdist
+
+release: webapp ## release builds + signed dun-manifest.json → dist/<version>/ (RELEASE_VERSION=vX.Y.Z, MINISIGN_KEY=…)
 	@case "$(RELEASE_VERSION)" in v[0-9]*.[0-9]*.[0-9]*-*|*-dirty|*-g*) echo "make release: $(RELEASE_VERSION) is not vX.Y.Z (tag a clean commit, or RELEASE_VERSION=vX.Y.Z)"; exit 1;; v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "make release: $(RELEASE_VERSION) is not vX.Y.Z (tag a clean commit, or RELEASE_VERSION=vX.Y.Z)"; exit 1;; esac
 	@if grep -q PLACEHOLDER release/minisign.pub; then echo; echo "WARNING: release/minisign.pub is the PLACEHOLDER: these builds can never update (aw4 issue i_1m5r9bx5a53x000taq6xar)"; echo; fi
 	rm -rf $(RELEASE_DIR) && mkdir -p $(RELEASE_DIR)
