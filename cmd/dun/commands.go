@@ -170,6 +170,7 @@ func ownCommands(iso string) []proto.CommandSpec {
 				"/isolate worktree moves the session into a fresh git worktree on a new branch: your checkout is not touched.\n" +
 				"/isolate docker does the same and runs its commands in Docker on the worktree. A container on your own checkout would still change your files, so docker always brings a worktree.\n" +
 				"/isolate off (or none) goes back to the checkout. The worktree is kept on disk and the reply says where: merge its branch, or remove it yourself.\n" +
+				"/isolate docker image shows the image docker uses (golang:1.23 until you choose). /isolate docker image <image> sets it; a path to a Dockerfile, or to a directory holding one, is built with docker build (tag dun-iso-<hash of the Dockerfile>, not rebuilt while that tag exists) and that tag is set. Sub-agents with isolation docker use it too. Only commands run in it: dun itself stays on the host. Not kept for the next session.\n" +
 				"Both need a git repository; docker needs Docker installed."},
 		{Name: "worktree", Usage: "[status|commit]", Group: "git", Choices: choices("status", "", "commit", "write the message and ask"),
 			Description: "git: alone shows status, commit writes the message and asks; /isolate worktree makes a worktree"},
@@ -465,6 +466,11 @@ func routeSlash(line string, r slashRoutes) {
 			r.reply("suggestions: " + arg(0))
 		}
 	case "isolate", "docker", "worktree": // docker, worktree new: isolateAlias
+		if name == "isolate" && arg(0) == "docker" && arg(1) == "image" {
+			// The image or path keeps its case and its words.
+			r.control(name, strings.Join(append([]string{"docker", "image"}, args[2:]...), " "))
+			break
+		}
 		r.control(name, arg(0))
 	case "jobs":
 		switch {

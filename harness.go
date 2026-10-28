@@ -1679,10 +1679,7 @@ func (h *Harness) Rehoist(workspace string, wt *Worktree, dockerOn bool) {
 	h.srvMu.Lock()
 	h.cfg.Workspace = workspace
 	h.cfg.Worktree = wt
-	image := h.cfg.DockerImage
-	if image == "" {
-		image = "golang:1.23"
-	}
+	image := dockerImageOrDefault(h.cfg.DockerImage)
 	// The outgoing backend's shell is nobody's now. Closed in the background
 	// because Close waits on the shell's lock, and a command may still be
 	// running in it — rehoisting must not block on someone else's build.
@@ -1832,6 +1829,41 @@ func (h *Harness) Home() string {
 
 // NoDir reports a session attached to no directory (dun --no-dir).
 func (h *Harness) NoDir() bool { return h.cfg.NoDir }
+
+// DefaultIsolationImage is the image /isolate docker uses until
+// /isolate docker image names another.
+const DefaultIsolationImage = "golang:1.23"
+
+func dockerImageOrDefault(image string) string {
+	if image == "" {
+		return DefaultIsolationImage
+	}
+	return image
+}
+
+// DockerImage is the image /isolate docker runs commands in (and sub-agents
+// with isolation docker), the default when none was chosen.
+func (h *Harness) DockerImage() string {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	return dockerImageOrDefault(h.cfg.DockerImage)
+}
+
+// SetDockerImage chooses the image for /isolate docker and for sub-agents. A
+// session already running commands in Docker switches to it at once.
+func (h *Harness) SetDockerImage(image string) {
+	h.srvMu.Lock()
+	h.cfg.DockerImage = image
+	d, isDocker := h.cfg.Exec.(DockerExec)
+	if isDocker {
+		d.Image = image
+		h.cfg.Exec = d
+	}
+	h.srvMu.Unlock()
+	if isDocker {
+		h.applyTools()
+	}
+}
 
 // IsDocker reports whether the current exec backend is DockerExec.
 func (h *Harness) IsDocker() bool {

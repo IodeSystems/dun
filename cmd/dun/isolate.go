@@ -1,8 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -57,8 +62,12 @@ func isolationMode(h *dun.Harness) string {
 	return dun.IsoNone
 }
 
-// runIsolateCmd handles /isolate [none|worktree|docker|off].
+// runIsolateCmd handles /isolate [none|worktree|docker|off] and
+// /isolate docker image [<image | Dockerfile | directory>].
 func runIsolateCmd(h *dun.Harness, action string) string {
+	if rest, ok := strings.CutPrefix(action, "docker image"); ok && (rest == "" || rest[0] == ' ') {
+		return isolateImage(h, strings.TrimSpace(rest))
+	}
 	switch action {
 	case "", "status":
 		return isolateStatus(h) + "\n" + isolateUsage
@@ -73,7 +82,121 @@ func runIsolateCmd(h *dun.Harness, action string) string {
 	}
 }
 
-const isolateUsage = "/isolate worktree: a fresh git worktree · /isolate docker: a worktree, commands in Docker · /isolate off: back in place"
+const isolateUsage = "/isolate worktree: a fresh git worktree · /isolate docker: a worktree, commands in Docker · " +
+	"/isolate docker image <image | Dockerfile>: the image for docker · /isolate off: back in place"
+
+// Image tags dun builds from a Dockerfile: dun-iso-<12 hex of the file's sha256>.
+const isoImagePrefix = "dun-iso-"
+
+// dockerImageExists and dockerBuild run docker. Vars so tests need no docker.
+var dockerImageExists = func(tag string) bool {
+	return exec.Command("docker", "image", "inspect", tag).Run() == nil
+}
+
+var dockerBuild = func(tag, dockerfile, contextDir string) (string, error) {
+	out, err := exec.Command("docker", "build", "-t", tag, "-f", dockerfile, contextDir).CombinedOutput()
+	return string(out), err
+}
+
+// imageArg is what /isolate docker image was given: an image to use as is, or
+// a Dockerfile to build (Tag is then its deterministic tag).
+type imageArg struct {
+	Image      string // as given, when nothing is built
+	Dockerfile string // absolute path; "" when Image is used as is
+	Context    string // build context: the Dockerfile's directory
+	Tag        string
+}
+
+// parseImageArg decides what arg is. An existing file is a Dockerfile; a
+// directory must hold one; a path-looking word (starts with . / ~) that does
+// not exist is an error, not an image name; anything else is an image.
+func parseImageArg(arg, base string) (imageArg, error) {
+	if strings.HasPrefix(arg, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			arg = filepath.Join(home, arg[2:])
+		}
+	}
+	path := arg
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(base, path)
+	}
+	fi, err := os.Stat(path)
+	switch {
+	case err == nil && fi.IsDir():
+		df := filepath.Join(path, "Dockerfile")
+		if st, err := os.Stat(df); err != nil || st.IsDir() {
+			return imageArg{}, fmt.Errorf("%s is a directory with no Dockerfile in it", path)
+		}
+		path = df
+	case err == nil:
+	case strings.HasPrefix(arg, ".") || strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "~"):
+		return imageArg{}, fmt.Errorf("%s does not exist", path)
+	case errors.Is(err, os.ErrNotExist):
+		return imageArg{Image: arg}, nil
+	default:
+		return imageArg{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return imageArg{}, err
+	}
+	return imageArg{Dockerfile: path, Context: filepath.Dir(path), Tag: isoImageTag(data)}, nil
+}
+
+// isoImageTag is the same for the same Dockerfile text.
+func isoImageTag(dockerfile []byte) string {
+	sum := sha256.Sum256(dockerfile)
+	return isoImagePrefix + hex.EncodeToString(sum[:])[:12]
+}
+
+// isolateBuilds reports whether a control command may run a long docker build;
+// like one that asks, it must not run on the reader goroutine.
+func isolateBuilds(id, action string) bool {
+	return id == "isolate" && strings.HasPrefix(action, "docker image ")
+}
+
+// isolateImage handles /isolate docker image [arg].
+func isolateImage(h *dun.Harness, arg string) string {
+	if arg == "" {
+		return "isolate: docker image " + h.DockerImage()
+	}
+	a, err := parseImageArg(arg, h.Workspace())
+	if err != nil {
+		return "isolate: docker image refused — " + err.Error()
+	}
+	if a.Dockerfile == "" {
+		h.SetDockerImage(a.Image)
+		return "isolate: docker image " + a.Image + "\n" + imageNote(h)
+	}
+	if err := dockerProbe(); err != nil {
+		return "isolate: docker image refused — " + err.Error()
+	}
+	if dockerImageExists(a.Tag) {
+		h.SetDockerImage(a.Tag)
+		return "isolate: docker image " + a.Tag + " (built before from " + a.Dockerfile + ")\n" + imageNote(h)
+	}
+	if out, err := dockerBuild(a.Tag, a.Dockerfile, a.Context); err != nil {
+		return "isolate: docker build of " + a.Dockerfile + " failed — " + oneLine(err.Error()) + "\n" + tailLines(out, 15)
+	}
+	h.SetDockerImage(a.Tag)
+	return "isolate: docker image " + a.Tag + " (built from " + a.Dockerfile + ")\n" + imageNote(h)
+}
+
+// imageNote says what the new image affects now.
+func imageNote(h *dun.Harness) string {
+	if h.IsDocker() {
+		return "commands now run in it"
+	}
+	return "used by /isolate docker and by sub-agents with isolation docker"
+}
+
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
 
 // isolateStatus is one line: where the files are and where commands run.
 func isolateStatus(h *dun.Harness) string {
@@ -100,7 +223,7 @@ func dockerImage(h *dun.Harness) string {
 	if d, ok := h.ExecBackend().(dun.DockerExec); ok {
 		return d.Image
 	}
-	return ""
+	return h.DockerImage()
 }
 
 // isolateWorktree moves the session into a worktree (a fresh one unless it is

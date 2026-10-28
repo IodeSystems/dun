@@ -55,6 +55,17 @@ func resolveDockerImage(raw string) string {
 	return raw
 }
 
+// checkDockerFlag refuses a --docker image other than the bundled one: the
+// whole of dun runs in that container, and only the bundled image holds it.
+func checkDockerFlag(image string) error {
+	if image == "" || image == defaultDockerImage {
+		return nil
+	}
+	return fmt.Errorf("%q is not the bundled image. --docker runs dun itself in the container, "+
+		"which only the bundled image (--docker, or --docker=true) can hold. "+
+		"To run commands in your own image, start dun without --docker and use: /isolate docker image %s", image, image)
+}
+
 // usage prints what dun is and how to start, then the flags by group, as
 // --long-flags.
 //
@@ -206,7 +217,7 @@ func main() {
 	// is resolved after parse (flag > env > config).
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
-	docker := flag.String("docker", "", "run the entire process in a Docker container (--docker=true for bundled image, --docker=IMAGE for a specific one); in a session, /isolate docker")
+	docker := flag.String("docker", "", "run the entire process in the bundled Docker image (--docker=true); for commands in your own image, start a session and use /isolate docker image <image|Dockerfile>")
 	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place); in a session, /isolate worktree")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
@@ -282,8 +293,13 @@ func main() {
 		// writes on the host but exec runs in a separate container.
 		//
 		// When dockerImg is the bundled image (dun:local), we build it from
-		// the Dockerfile if it doesn't exist yet. Any other image name is used
-		// as-is (the user is responsible for having it available).
+		// the Dockerfile if it doesn't exist yet. Any other image cannot run
+		// the host dun binary (it is not mounted, and is cgo), so it is
+		// refused: /isolate docker image uses a custom image for exec only.
+		if err := checkDockerFlag(dockerImg); err != nil {
+			fmt.Fprintf(os.Stderr, "dun: --docker: %v\n", err)
+			os.Exit(2)
+		}
 		if dockerImg == defaultDockerImage {
 			dockerImg = "dun:local"
 			if err := ensureDunImage(); err != nil {
@@ -1554,6 +1570,9 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// unblocks on ctx, so nothing is left hanging.
 		if ctrlCmdAsks(id, action) {
 			go func() {
+				if isolateBuilds(id, action) {
+					em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "isolate: setting the docker image (a Dockerfile is built; this can take a while) ..."})
+				}
 				msg := runControlCmd(ctx, h, id, action)
 				h.Aside("[control/" + id + "] " + msg)
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
