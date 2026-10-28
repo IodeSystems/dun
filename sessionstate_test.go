@@ -216,8 +216,10 @@ func TestSession_ToolRegistered(t *testing.T) {
 	for _, td := range h.Session.Tools {
 		names[td.Function.Name] = true
 	}
-	if !names["session"] {
-		t.Fatal("session is not registered as a tool")
+	// Hidden (USER 2026-10-27): not listed, still dispatched; the identity
+	// line tells the model to call it.
+	if names["session"] {
+		t.Fatal("session is listed; it is hidden")
 	}
 	if names["session_state"] || names["harness"] {
 		t.Errorf("an old name is in the tool list: %v", names)

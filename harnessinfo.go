@@ -127,13 +127,11 @@ func (h *Harness) writeHarnessInfo() {
 // and where the rest is (USER 2026-10-27: asked for a one-character icon,
 // the model answered 👷; say so, and the session).
 func (h *Harness) identityLine() string {
-	who := "You are dun (" + Icon + ")"
-	if id := h.SessionID(); h.cfg.SessionFile != "" && id != "" {
-		who += ", session " + id
-	}
-	if h.cfg.Version != "" {
-		who += ", version " + h.cfg.Version
-	}
-	return "\n\n" + who + ". When a project's rules ask a commit, PR or report to name the agent, its model or " +
-		"version, copy them from the session tool."
+	// The tool is not listed (USER 2026-10-27: "session should be hidden,
+	// and the system prompt should be 'call session() for harness info'"):
+	// this line is how the model learns it is there. No session id or
+	// version in the line itself, so the prompt's text is the same in every
+	// session (the provider's cache) and nothing here goes stale.
+	return "\n\nYou are dun (" + Icon + "). Call session() for harness info (version, session, model, branch), " +
+		"and copy from it when a project's rules ask a commit, PR or report to name the agent, model or version."
 }

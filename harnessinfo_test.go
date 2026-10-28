@@ -26,7 +26,9 @@ func TestHarnessInfo(t *testing.T) {
 		t.Errorf("info: %+v", in)
 	}
 	line := h.identityLine()
-	for _, want := range []string{"You are dun (👷)", "session 20261027-101500", "version v0.1.3", "the session tool"} {
+	// The session tool is not listed; the line says to call it, and carries no
+	// session id or version (the same text in every session, for the cache).
+	for _, want := range []string{"You are dun (👷)", "Call session() for harness info"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("identity lacks %q: %s", want, line)
 		}

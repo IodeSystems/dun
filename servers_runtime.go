@@ -747,7 +747,7 @@ func (h *Harness) rebuildTools() {
 	// goal, plan, and open steps across context pressure and process restarts
 	// (session_tool.go). It also answers the old names harness and
 	// session_state, which are not in the list.
-	toolDefs = append(toolDefs, sessionToolDef())
+	// Not listed: the identity line tells the model to call it (harnessinfo.go).
 	dispatch = withSession(dispatch, h, report)
 	// memory only while a memory.save extension runs AND a turn.before one
 	// does: a note is worth writing only because the proactive search brings
