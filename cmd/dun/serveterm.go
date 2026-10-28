@@ -21,7 +21,7 @@ import (
 // kick-warning.
 var activeWeb int64
 
-// dun serve — the bubbletea TUI in the browser via xterm.js. On a WebSocket
+// dun --web-tui — the bubbletea TUI in the browser via xterm.js. On a WebSocket
 // connect the server spawns `dun -tui` in a pseudo-terminal and pipes raw bytes
 // both ways, so the browser shows the REAL terminal: a resize sends the new size
 // over the socket, the PTY delivers SIGWINCH, and bubbletea reflows exactly as
@@ -49,7 +49,7 @@ func runServe(o tuiOpts, addr string) error {
 		return err
 	}
 	for _, u := range reachableURLs(ln.Addr().String()) {
-		log.Printf("dun serve → %s", u)
+		log.Printf("dun --web-tui → %s", u)
 	}
 	if !loopbackOnly(addr) {
 		log.Print("⚠ bound to a non-loopback address — no auth; anyone who can reach it can drive this agent")
@@ -105,7 +105,8 @@ func termWS(w http.ResponseWriter, r *http.Request, o tuiOpts) {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("pty error: "+err.Error()))
 		return
 	}
-	// Kill the whole process group (dun -tui AND its dun -p child) on disconnect.
+	// Kill the TUI's whole process group on disconnect. Its session lives on
+	// in dund; only this browser's view of it goes.
 	defer func() {
 		_ = ptmx.Close()
 		if cmd.Process != nil {

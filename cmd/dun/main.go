@@ -79,7 +79,7 @@ var flagGroups = []struct {
 	title string
 	names []string
 }{
-	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "serve", "addr", "p", "version"}},
+	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "web-tui", "addr", "p", "version"}},
 	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase"}},
 	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp", "no-rag", "no-lsp", "no-tools", "media"}},
 	{"experimental", []string{"exp-iterm-tabcontrol"}},
@@ -237,8 +237,12 @@ func main() {
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
-	serve := flag.Bool("serve", false, "serve the TUI over the web (xterm.js) at --addr")
-	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
+	// --web-tui: this terminal TUI in a browser tab, byte for byte through a
+	// pty (serveterm.go). Not dund's web app (dund --http), which is its own
+	// client of the same sessions; this is the passthrough (USER 2026-10-28:
+	// "the web terminal should be --web-tui").
+	serve := flag.Bool("web-tui", false, "the terminal TUI in a browser tab (xterm.js over a pty) at --addr")
+	addr := flag.String("addr", "127.0.0.1:8734", "web-tui: HTTP listen address")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /exit)")
 	noSuggest := flag.Bool("no-suggest", false, "disable next-message suggestions (on by default)")
 	// A TUI flag: it changes only this client's terminal, so procArgs does

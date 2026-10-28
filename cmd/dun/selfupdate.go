@@ -14,7 +14,7 @@ import (
 // Dev self-update — a source-stamped `dun` rebuilds itself in place when the
 // tree changed, then re-execs the fresh binary. This kills the "my installed
 // dun is out of date" problem: edit source, run `dun` again, and you transparently
-// get the new build (dun re-execs itself for -p/-tui/-serve, so the whole tree
+// get the new build (dun re-execs itself for -p/-tui/-web-tui, so the whole tree
 // is consistent). Guards:
 //
 //   - srcDir is stamped ONLY by `make build|install` (-ldflags -X main.srcDir).
