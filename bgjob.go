@@ -209,7 +209,10 @@ func (j *bgJob) finish(res ExecResult) {
 	j.h.bgMu.Lock()
 	delete(j.h.bgLive, j)
 	j.h.bgMu.Unlock()
-	close(j.doneCh)
+	// doneCh closes LAST: whoever it wakes (a kill waiting on the job) may look
+	// for the completion notice at once. Closed before the notice was queued,
+	// the kill's caller sometimes found none under load.
+	defer close(j.doneCh)
 	if !bg {
 		return
 	}
