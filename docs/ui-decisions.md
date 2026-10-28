@@ -17,6 +17,16 @@ are in `decisions.md`.
   anchors the bottom. Holds end when content reaches them, at a new width, and
   on reset, session switch and repaint. A shrink while holding keeps the top
   row and cuts the hold (a held form at 48 columns once left the pane blank).
+- **The view moves by itself only to follow the bottom (USER, 2026-10-28).**
+  A pinned view follows new output and nothing else: it no longer holds the
+  last user message on screen while a reply streams (that pulled a reader who
+  scrolled to the bottom back up, and swung between the message and the
+  bottom around tool calls). The turn's message shows as the head bar while
+  the turn runs. A turn ending, an error and a delivered message never
+  re-pin; only sending, ctrl+end and the cue do. Scrolled up, the divider's
+  right end reads "↓ newest · ctrl+end" and is clickable; it is on the
+  divider so showing it changes no row count. ctrl+g was the first choice for
+  the key, but it interrupts a turn (`interrupt.go`).
 - **Total height never decreases (USER, 2026-10-22).** A tool run and the
   thinking between its calls form one grow-only box; every block is held at the
   most rows it has drawn (`maxH`; property test `noshrink_test.go`). Thinking

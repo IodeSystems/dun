@@ -115,6 +115,10 @@ func (m tuiModel) mouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.drag = mouseSel{on: true, a: c, b: c}
 		case mo.Y >= m.actTopRow() && mo.Y < top:
 			return m.activityClick(mo.Y - m.actTopRow())
+		case mo.Y == top+h && m.onBottomCue(mo.X): // the divider's "↓ newest"
+			m.scrollToEnd()
+			m.refresh()
+			return m, nil
 		case mo.Y >= m.lowerTopRow() && mo.Y < m.lowerTopRow()+lipgloss.Height(m.lowerView()):
 			if !m.inputShown() {
 				return m, nil

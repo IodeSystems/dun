@@ -23,6 +23,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
 
 	"github.com/iodesystems/dun"
@@ -239,6 +240,29 @@ func divider(w int, focusUp bool) string {
 	bump = min(bump, w-half)
 	return stDim.Render(strings.Repeat("▔", half)) +
 		stEdge.Render(strings.Repeat("▀", bump)+strings.Repeat("▔", w-half-bump))
+}
+
+// bottomCue is drawn over the divider's right end while the conversation is
+// scrolled away from its newest output: the way back, clickable, with its key.
+// On the divider because that row is always there, so showing it moves nothing
+// (a row of its own would shrink the view as you scroll — a bounce of its own).
+const bottomCue = " ↓ newest · ctrl+end "
+
+// withBottomCue puts bottomCue at the right end of a divider of width w, or
+// returns the divider unchanged when it is too narrow to keep the focus half.
+func withBottomCue(div string, w int) string {
+	cw := lipgloss.Width(bottomCue)
+	if w < 2*cw {
+		return div
+	}
+	return ansi.Truncate(div, w-cw, "") + stNote.Render(bottomCue)
+}
+
+// onBottomCue reports whether a click at column x on the divider row lands on
+// the cue.
+func (m tuiModel) onBottomCue(x int) bool {
+	cw := lipgloss.Width(bottomCue)
+	return !m.scrollPinned && m.w >= 2*cw && x >= m.w-cw
 }
 
 func addGutter(block, marker string, style lipgloss.Style) string {
@@ -2852,12 +2876,9 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.convo[i].invalidateWrap()
 			}
 		}
-		// Delivered messages are worth bringing into view; a tool result on its
-		// own is not, and pinning on every one dragged a reader who had
-		// scrolled up back to the bottom once per call.
-		if m.queuedMsgs > 0 {
-			m.scrollPinned = true
-		}
+		// Never re-pinned here: a delivered message was in view when it was
+		// sent (sending pins), and a reader who has scrolled up since stays
+		// where they are (USER 2026-10-28: zero bounce).
 		m.queuedMsgs = 0
 		m.refresh()
 	case "history":
@@ -3170,8 +3191,8 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.convo[i].invalidateWrap()
 			}
 		}
-		// Force scroll to bottom so the delivered messages are visible.
-		m.scrollPinned = true
+		// Not re-pinned: a reader who scrolled up stays where they are (USER
+		// 2026-10-28: zero bounce); a pinned one already follows.
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
 		m.clearRetry()
@@ -3213,8 +3234,8 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.convo[i].invalidateWrap()
 			}
 		}
-		// Force scroll to bottom so the delivered messages are visible.
-		m.scrollPinned = true
+		// Not re-pinned: a reader who scrolled up stays where they are (USER
+		// 2026-10-28: zero bounce); a pinned one already follows.
 		m.busy, m.queuedMsgs = false, 0
 		m.busyStart = time.Time{}
 		m.clearRetry()
@@ -3556,9 +3577,20 @@ func (m tuiModel) viewportView(vp convoPane) string {
 // scrolled to bottom or no user message is off-screen. The bar uses the
 // user message style so it's visually distinct from the conversation
 // content below it.
+//
+// Following the tail, it shows only while a turn runs, and only that turn's
+// message: the view no longer holds the message on screen while the reply
+// streams (applyScroll), so this is where it stays readable. An older message
+// would replace the title bar for the whole of a long session.
 func (m tuiModel) scrollOverlay() string {
-	if m.vp.YOffset == 0 || m.scrollPinned {
-		return "" // at top or pinned to bottom — nothing to show
+	if m.vp.YOffset == 0 || (m.scrollPinned && !m.busy) {
+		return "" // at top, or following with no turn running — nothing to show
+	}
+	lastUser := -1
+	for i := range m.convo {
+		if m.convo[i].userText != "" {
+			lastUser = i
+		}
 	}
 	yOff := m.vp.YOffset
 	// Each entry's rowOffset (set by refresh()) is the viewport line where
@@ -3576,7 +3608,7 @@ func (m tuiModel) scrollOverlay() string {
 	var closestText string
 	closestBottom := -1
 	for i, e := range m.convo {
-		if e.userText == "" {
+		if e.userText == "" || (m.scrollPinned && i != lastUser) {
 			continue
 		}
 		h := 0
@@ -3748,6 +3780,9 @@ func (m tuiModel) drawView() string {
 	vp.setHeight(m.convoHeight())
 	// Focus cue lives entirely in the divider's bright half — no pane borders.
 	div := divider(m.w, m.focus != focusInput && !m.asking)
+	if !m.scrollPinned {
+		div = withBottomCue(div, m.w)
+	}
 
 	var status string
 	switch {
@@ -4597,26 +4632,14 @@ func (m *tuiModel) applyScroll(selMode bool) {
 		// picker), the shrink keeps them in view (Update's funnel).
 		m.panelFollow = true
 	}
-	// Auto-follow new content. When there's a streaming reply (m.cur), don't
-	// GotoBottom() blindly — that scrolls past the user's last message to the
-	// bottom of the growing reply. Instead keep that message visible.
-	lastUserRow := -1
-	if replyShown(m.cur) {
-		ro := m.frame.rowOffset
-		for i := range m.convo {
-			if m.convo[i].userText != "" && i < len(ro) {
-				lastUserRow = ro[i]
-			}
-		}
-	}
-	switch {
-	case lastUserRow < 0:
-		m.vp.GotoBottom()
-	case lastUserRow >= m.vp.YOffset+vh: // below the fold — bring it near the top
-		m.vp.SetYOffset(lastUserRow - 1)
-	case lastUserRow < m.vp.YOffset:
-		m.vp.SetYOffset(lastUserRow)
-	}
+	// Follow the tail, and only the tail. This used to hold the last user
+	// message on screen while a reply streamed, and that moved the view on its
+	// own: a reader who scrolled down to the bottom was re-pinned and pulled
+	// back up to the message, and between a reply's text and its tool calls
+	// the view swung from the message to the bottom and back (USER
+	// 2026-10-28: zero bounce). The message stays readable as the head bar
+	// (scrollOverlay) instead.
+	m.vp.GotoBottom()
 }
 
 // scrollToEnd jumps to the newest output and re-pins, so the view follows the

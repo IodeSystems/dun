@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // bounce_test.go: nothing on screen moves when something updates. The rule
@@ -360,5 +362,92 @@ func TestNoBounce_PhoneFormKeepsTheRowsWhereTheyWere(t *testing.T) {
 	}
 	if v.m.vp.YOffset+v.m.vp.Height < content {
 		t.Errorf("the new line is under the fold: view %d+%d, content %d", v.m.vp.YOffset, v.m.vp.Height, content)
+	}
+}
+
+// A reply taller than the view, with a tool call between its parts: a
+// following view stays at the bottom the whole time. It used to hold the
+// question on screen while text streamed, then jump to the bottom for the
+// tool call and back up for the next text (USER 2026-10-28: zero bounce).
+// The question stays readable as the head bar while the turn runs.
+func TestNoBounce_FollowingAReplyStaysAtTheBottom(t *testing.T) {
+	v := tallConvo(t)
+	v.send("the long one")
+	v.event(map[string]any{"type": "turn", "kind": "user"})
+	atBottom := func(when string) {
+		t.Helper()
+		v.m.refresh() // a token only marks the frame due; the render tick draws it
+		if !v.m.scrollPinned || v.m.vp.YOffset != v.m.vp.maxYOffset() {
+			t.Fatalf("%s: offset %d of %d, pinned %v", when, v.m.vp.YOffset, v.m.vp.maxYOffset(), v.m.scrollPinned)
+		}
+	}
+	v.event(map[string]any{"type": "token", "text": strings.Repeat("first part\n\n", 12)})
+	atBottom("first text")
+	v.event(map[string]any{"type": "tool_call", "tool": "exec", "id": "c1", "args": `{"command":"ls"}`})
+	v.event(map[string]any{"type": "tool_result", "tool": "exec", "id": "c1", "result": "a\nb"})
+	atBottom("tool call")
+	v.event(map[string]any{"type": "token", "text": strings.Repeat("second part\n\n", 12)})
+	atBottom("second text")
+	if head := stripANSI(v.m.headView()); !strings.Contains(head, "the long one") {
+		t.Errorf("the head bar should show the question while the turn runs: %q", head)
+	}
+	v.event(map[string]any{"type": "done"})
+	atBottom("done")
+	if head := stripANSI(v.m.headView()); strings.Contains(head, "the long one") {
+		t.Errorf("after the turn the head is the title bar again: %q", head)
+	}
+}
+
+// The turn ending, or failing, leaves a reader who scrolled up where they
+// are. Both used to re-pin and drag them to the bottom.
+func TestNoBounce_TurnEndLeavesAScrolledUpReader(t *testing.T) {
+	for _, end := range []map[string]any{
+		{"type": "done"},
+		{"type": "error", "error": "provider: 502 bad gateway"},
+	} {
+		t.Run(end["type"].(string), func(t *testing.T) {
+			v := tallConvo(t)
+			v.send("one more")
+			v.event(map[string]any{"type": "turn", "kind": "user"})
+			v.event(map[string]any{"type": "token", "text": "working on it"})
+			v.setScrollPin(false)
+			v.setYOffset(2)
+			yoff, rows := v.m.vp.YOffset, shown(v)
+			v.event(end)
+			if v.m.scrollPinned || v.m.vp.YOffset != yoff || strings.Join(shown(v), "\n") != strings.Join(rows, "\n") {
+				t.Errorf("the turn's end moved the reader: offset %d -> %d, pinned %v", yoff, v.m.vp.YOffset, v.m.scrollPinned)
+			}
+		})
+	}
+}
+
+// Scrolled up, the divider's right end says how to get back; clicking it
+// or ctrl+end goes to the newest output and follows again. It is drawn on the
+// divider, so showing it changes no row count.
+func TestBottomCue_ClickOrKeyGoesToTheNewest(t *testing.T) {
+	v := tallConvo(t)
+	if strings.Contains(v.view(), "↓ newest") {
+		t.Fatal("following the bottom: no cue")
+	}
+	h := v.m.convoHeight()
+	v.setScrollPin(false)
+	v.setYOffset(2)
+	v.m.refresh()
+	if !strings.Contains(v.view(), "↓ newest · ctrl+end") {
+		t.Fatalf("scrolled up: no cue on the divider:\n%s", v.view())
+	}
+	if v.m.convoHeight() != h {
+		t.Errorf("showing the cue changed the pane: %d rows -> %d", h, v.m.convoHeight())
+	}
+	divY := v.m.convoTopRow() + v.m.convoHeight()
+	v.m = click(v.m, v.w-3, divY)
+	if !v.m.scrollPinned || v.m.vp.YOffset != v.m.vp.maxYOffset() {
+		t.Fatalf("clicking the cue: offset %d of %d, pinned %v", v.m.vp.YOffset, v.m.vp.maxYOffset(), v.m.scrollPinned)
+	}
+	v.setScrollPin(false)
+	v.setYOffset(2)
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	if !v.m.scrollPinned || v.m.vp.YOffset != v.m.vp.maxYOffset() {
+		t.Fatalf("ctrl+end: offset %d of %d, pinned %v", v.m.vp.YOffset, v.m.vp.maxYOffset(), v.m.scrollPinned)
 	}
 }
