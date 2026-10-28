@@ -609,13 +609,15 @@ func recapToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "recap"
-	// "Mid-task": with the description leading on replacing a span, 2 of 8
-	// benchmark runs recapped the whole task once it was done, then checked
-	// the work again (5-6 more requests; USER 2026-10-27 benchmark).
-	td.Function.Description = "Mid-task, to make room for the work still ahead: replace a span of this " +
+	// A recap at the end of a turn costs a request and pays back on every later
+	// one, so it is worth it only when the conversation goes on: in 2 of 8
+	// one-shot benchmark runs it cost 3-6 requests for nothing (USER 2026-10-27
+	// benchmark); in a long conversation it is the turn's last chance, since a
+	// span cannot reach back past a user message (USER 2026-10-28).
+	td.Function.Description = "To make room for what comes next: replace a span of this " +
 		"conversation with a summary once it stops being worth its context: a big result you have taken what " +
-		"you need from, failed attempts before one worked, a misunderstanding cleared up later. Not as a last " +
-		"step: when the task is done, answer. It covers this turn only, from the user's latest message; what the " +
+		"you need from, failed attempts before one worked, a misunderstanding cleared up later. Recap is not " +
+		"recommended if you do not expect continued conversation. It covers this turn only, from the user's latest message; what the " +
 		"user typed in it is kept word for word. The span is moved to a file, not deleted, but your summary is " +
 		"all that stays in context, so make it accurate: do not round numbers or guess at what you did not read."
 	td.Function.Parameters = map[string]any{

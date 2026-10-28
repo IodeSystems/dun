@@ -172,3 +172,7 @@ recap run and the read loop among them). The released
 description says "Mid-task… Not as a last step". 8 runs on it: all done,
 5–7 requests, no recaps, the whole task 19.3k–36.5k tokens (median 26.3k),
 86% served from the prompt cache (session-short-v0.1.8-2026-10-27.json).
+After v0.1.8 (not measured yet): a recap stays inside the current turn, its
+result says "If the task is done, answer now", and the hint says recap is not
+recommended if no continued conversation is expected. In a long conversation
+the end of a turn is its last chance to recap that turn.
