@@ -3,6 +3,7 @@ package dun
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -110,6 +111,9 @@ func TestSubAgent_PersistedResumeRestartsLiveChildren(t *testing.T) {
 	want := map[int]string{1: "idle", 2: "dismissed", 3: "idle"}
 	if got := agentStates(h); len(got) != 3 || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
 		t.Fatalf("states %v, want %v", got, want)
+	}
+	if !slices.Contains(toolNamesOf(h), "jobs") {
+		t.Errorf("a resumed session with children must list jobs: %v", toolNamesOf(h))
 	}
 	one, two, three := h.agentByID(1), h.agentByID(2), h.agentByID(3)
 	if one.harness() == nil || three.harness() == nil || two.harness() != nil {

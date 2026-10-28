@@ -660,6 +660,7 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 	sort.Strings(matches)
 	cut = map[int]bool{}
 	var wake []*subAgent
+	live := false
 	h.agMu.Lock()
 	if h.agents == nil {
 		h.agents = map[int]*subAgent{}
@@ -687,14 +688,18 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 			}
 		}
 		h.agents[num] = sa
-		if sa.state != agentDismissed {
-			h.hadJobs.Store(true) // a resumed session's children: jobs lists and resumes them
-		}
+		live = live || sa.state != agentDismissed
 		if num > h.agSeq {
 			h.agSeq = num
 		}
 	}
 	h.agMu.Unlock()
+	if live {
+		// A resumed session's children: jobs lists, tells and resumes them.
+		// noteBackground, not a bare flag: the tools were built before this
+		// ran, and jobs must join them now.
+		h.noteBackground()
+	}
 	for _, sa := range wake {
 		h.resumeAgent(sa)
 		if sa.harness() != nil {
