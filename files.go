@@ -241,6 +241,10 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp, added []*
 			route = t
 		} else if t := addedRoute(ts, added, tc.Function.Arguments); t != nil {
 			route = t // a path the person added (/file add, fileadd.go)
+		} else if args, t := addedViaLink(ts, added, tc.Function.Arguments); t != nil {
+			// The same, named through a symlink: an added path is kept
+			// resolved, and the model writes the path the person typed.
+			route, tc.Function.Arguments = t, args
 		} else if hint := outsideHint(ts, tc.Function.Name, tc.Function.Arguments); hint != "" {
 			out = hint
 		}
@@ -294,6 +298,50 @@ func systemFiles(ts *filetools.Toolset) string {
 
 // addedRoute is the added path's toolset for a call whose path is absolute
 // and under one the person added; nil otherwise.
+// addedViaLink is addedRoute for a path that reaches an added one through a
+// symlink: /file add keeps the real path (cleanAdded), and a path under the
+// link the person typed matched no added root (USER 2026-10-28: "/file add
+// DIRECTORY doesn't let the edit tool edit a file of a subdirectory"). It
+// returns the arguments with the path resolved, and the toolset.
+func addedViaLink(ts *filetools.Toolset, added []*filetools.Toolset, args string) (string, *filetools.Toolset) {
+	var a map[string]any
+	if json.Unmarshal([]byte(args), &a) != nil {
+		return "", nil
+	}
+	p, _ := a["path"].(string)
+	p = strings.TrimSpace(p)
+	if !filepath.IsAbs(p) {
+		return "", nil
+	}
+	real := resolveExisting(filepath.Clean(p))
+	if real == filepath.Clean(p) {
+		return "", nil
+	}
+	a["path"] = real
+	b, _ := json.Marshal(a)
+	if t := addedRoute(ts, added, string(b)); t != nil {
+		return string(b), t
+	}
+	return "", nil
+}
+
+// resolveExisting is p with its symlinks resolved: the longest part of it
+// that exists, resolved, and the rest (a file about to be written) after it.
+func resolveExisting(p string) string {
+	rest := ""
+	for cur := p; ; {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
+}
+
 func addedRoute(ts *filetools.Toolset, added []*filetools.Toolset, args string) *filetools.Toolset {
 	var a struct {
 		Path string `json:"path"`
