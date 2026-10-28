@@ -4347,3 +4347,23 @@ func TestServerUpInTheBackgroundIsQuiet(t *testing.T) {
 		t.Errorf("a background failure was not said: %q", convoText(m))
 	}
 }
+
+// Open in the jobs table, a question takes the keys and is answered: the
+// strip is one line again. It stayed a table, rows of the screen and all,
+// because answering set the focus without folding it (USER 2026-10-28).
+func TestActivity_FoldsWhenAQuestionTakesTheFocus(t *testing.T) {
+	m := withActivity(t)
+	m = key(m, kTab)
+	m = key(m, kTab)
+	if m.focus != focusActivity || len(strings.Split(m.activityView(), "\n")) < 3 {
+		t.Fatalf("precondition: the table is open, focus=%d", m.focus)
+	}
+	m = m.handleEvent(evMsg{"type": "ask", "question": "Which one?", "options": []any{"A", "B"}, "recommended": "A"})
+	m = key(m, kEnter)
+	if m.asking {
+		t.Fatal("precondition: the question was answered")
+	}
+	if n := len(strings.Split(m.activityView(), "\n")); n != 1 || m.actLevel != actCollapsed {
+		t.Fatalf("after the question the strip should be one line, got %d lines (level %d):\n%s", n, m.actLevel, m.activityView())
+	}
+}

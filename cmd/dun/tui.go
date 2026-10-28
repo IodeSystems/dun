@@ -2504,7 +2504,7 @@ func (m tuiModel) sendAnswer(v string) tuiModel {
 // clearAsk returns to the input pane with no question open. The answer is
 // rendered from the engine's `answered` event.
 func (m tuiModel) clearAsk() tuiModel {
-	m.focus = focusInput
+	m.setFocus(focusInput)
 	m.dropAsk()
 	m.askOptions, m.askSel, m.askNote = nil, 0, ""
 	m.askMulti, m.askChecked = false, nil
@@ -2774,7 +2774,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			}
 			m.input.SetValue(merged)
 			m.input.CursorEnd()
-			m.focus = focusInput
+			m.setFocus(focusInput)
 			m.refresh()
 			break
 		}
@@ -2786,7 +2786,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			if f := strings.Fields(str(ev["action"])); want != "" && len(f) >= 3 && f[2] == want {
 				m.input.SetValue(str(ev["action"]))
 				m.input.CursorEnd()
-				m.focus = focusInput
+				m.setFocus(focusInput)
 				m.refresh()
 				break
 			}

@@ -68,7 +68,7 @@ func (m tuiModel) parkAsk() (tea.Model, tea.Cmd) {
 	if i := m.askEntry(); i >= 0 {
 		m.convo[i].renderAsk(true)
 	}
-	m.focus = focusInput
+	m.setFocus(focusInput)
 	m.dropAsk()
 	m.askParked = true
 	m.refresh()

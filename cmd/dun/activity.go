@@ -233,7 +233,10 @@ func (m tuiModel) activityView() string {
 	if len(rows) == 0 || m.w < 20 {
 		return ""
 	}
-	if m.actLevel == actCollapsed {
+	// The table only while the zone has the keys: whatever took the focus
+	// away (a question, a click, an edit put back in the composer), the strip
+	// is one line again (USER 2026-10-28: it stayed open).
+	if m.actLevel == actCollapsed || m.focus != focusActivity {
 		if m.scopeAgent != 0 {
 			return m.scopeHeader()
 		}
