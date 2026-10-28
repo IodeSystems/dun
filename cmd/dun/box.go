@@ -18,10 +18,11 @@ import (
 //	│ followed as they stream
 //
 // The header stays on top and says what is hidden. While live the box follows
-// its tail; done, it keeps its height, scrolled to the end. A box never gets
-// shorter: it is drawn at the most rows it has reached (peak), and when its
-// content gets shorter — a run's finished step folds to one line — the rows
-// given back show earlier content, or stay blank when there is none.
+// its tail; done, it keeps its height, scrolled to the end. A box on screen
+// never gets shorter: it is drawn at the most rows it has reached (peak), and
+// when its content gets shorter the rows given back show earlier content, or
+// stay blank when there is none. Once the box is above the view, the peak is
+// released (scrollfold.go).
 // Selecting a box never scrolls it: in convo focus ↑/↓ step from block to
 // block, boxes included. To scroll one you DESCEND into it (→ or l); inside,
 // ↑/↓, pgup/pgdn, g/G and the wheel scroll its contents, the header says so,

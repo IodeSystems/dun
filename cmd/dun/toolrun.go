@@ -21,10 +21,11 @@ import (
 //	│ │ the newest lines, followed while live
 //
 // Every new thought or call is APPENDED inside the box; nothing above it is
-// removed, folded or shrunk, because the conversation's height never goes
-// down while a session runs (the no-screen-jump rule — tested as a property
-// over mixed event streams, see noshrink_test.go). The header carries the
-// summary and changes in place.
+// removed, folded or shrunk while the run is on screen (the no-screen-jump
+// rule — tested as a property over mixed event streams, see
+// noshrink_test.go). Its finished thoughts fold to one line only once the run
+// has scrolled off the top of the view (scrollfold.go). The header carries
+// the summary and changes in place.
 //
 // A run is OPEN while it is the last block and the round's reply has not
 // begun: thoughts and calls go into it. A reply, a user message, a
@@ -50,6 +51,11 @@ type runItem struct {
 	output  string // the renderer's styled output, for the pager
 	think   *thinkBlock
 	wrap    boxState // a thought's wrapped rows (box.go's line-at-a-time cache)
+	// folded: a finished thought is drawn as its one line. It stays open,
+	// as it was while it streamed, until the run has scrolled off the top of
+	// the view (foldAbove, scrollfold.go): folding it on screen left blank
+	// rows where its text was.
+	folded bool
 }
 
 type toolRun struct {
@@ -153,11 +159,10 @@ func (it *runItem) line(width int) string {
 //	▾ ✻ thinking… 1s · 12 words
 //	  the live thought's text, all of it; the box shows its tail
 //
-// Finished steps are one line (a failure keeps up to two lines of its
-// error); only the ACTIVE step — the thought still streaming — is open. The
-// box windows the tail of this, so the active step gets the rows left under
-// the cap, and when it finishes and folds to one line the rows it gives back
-// show earlier steps instead: the box never shrinks (renderBox).
+// Finished calls are one line (a failure keeps up to two lines of its
+// error). A thought is open while it streams and stays open once finished,
+// until the run has scrolled off the top of the view; then it folds to one
+// line (runItem.folded, scrollfold.go). The box windows the tail of this.
 func (r *toolRun) boxRows(w int) []string {
 	if r.rows != nil && r.rowsVer == r.ver && r.rowsW == w && !r.live() {
 		return r.rows
@@ -167,7 +172,7 @@ func (r *toolRun) boxRows(w int) []string {
 	for k := 0; k < len(r.items); k++ {
 		it := r.items[k]
 		switch {
-		case it.think != nil && it.think.live:
+		case it.think != nil && (it.think.live || !it.folded):
 			rows = append(rows, "  "+stDim.Render("▾ "+thinkHeader(it.think)))
 			it.wrap.wrapBody(strings.TrimSpace(it.think.text), w, true, "    ")
 			rows = append(rows, it.wrap.rows...)

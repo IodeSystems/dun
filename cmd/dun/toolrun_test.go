@@ -68,9 +68,10 @@ func TestRun_OneBoxThatAppends(t *testing.T) {
 	}
 }
 
-// Finished steps are one line; the active one — a thought still streaming —
-// is open, and the box shows its tail.
-func TestRun_ActiveStepOpenFinishedOneLine(t *testing.T) {
+// A finished thought stays open while its run is on screen: the box shows
+// it as it streamed, under its "thought for" header. Once the run has
+// scrolled off the top of the view, the thought folds to its last sentence.
+func TestRun_FinishedThoughtOpenUntilScrolledOff(t *testing.T) {
 	v := newVtui(100, 40)
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.send("go")
@@ -79,19 +80,33 @@ func TestRun_ActiveStepOpenFinishedOneLine(t *testing.T) {
 	nm, _ := v.m.Update(renderTickMsg{})
 	v.m = nm.(tuiModel)
 	scr := v.view()
-	for _, want := range []string{"✻ Then check it.  (", "✓ $ echo 0", "▾ ✻ thinking…", "second line of it"} {
+	for _, want := range []string{"▾ ✻ thought for", "next: echo 0. Then check it.", "✓ $ echo 0", "▾ ✻ thinking…", "second line of it"} {
 		if !strings.Contains(scr, want) {
 			t.Errorf("missing %q:\n%s", want, scr)
 		}
 	}
-	if strings.Contains(scr, "next: echo 0.") {
-		t.Errorf("a finished thought should show only its last sentence:\n%s", scr)
+	// Push the run off the top, then read back up to it.
+	v.event(map[string]any{"type": "done"})
+	for i := 0; i < 6; i++ {
+		v.send(fmt.Sprintf("question %d", i))
+		v.event(map[string]any{"type": "token", "text": "answer\n\nmore\n\nand more\n\nand more"})
+		v.event(map[string]any{"type": "done"})
+	}
+	r := runIdx(v.m)
+	if top := v.m.frame.rowOffset[r]; top+v.m.frame.blockH[r] > v.m.vp.YOffset {
+		t.Fatalf("precondition: the run is above the view (%d+%d, view at %d)", top, v.m.frame.blockH[r], v.m.vp.YOffset)
+	}
+	v.setScrollPin(false)
+	v.setYOffset(v.m.frame.rowOffset[r])
+	scr = v.view()
+	if !strings.Contains(scr, "✻ Then check it.  (") || strings.Contains(scr, "next: echo 0.") {
+		t.Errorf("scrolled off and back, the finished thought should be its last sentence:\n%s", scr)
 	}
 }
 
-// When the active step folds to one line, the box keeps its height and the
-// rows it gave back show earlier steps.
-func TestRun_GrowOnlyWhenAStepFolds(t *testing.T) {
+// When the active step finishes, the box keeps its height and its rows: the
+// thought's text stays where it was, and the next call comes in under it.
+func TestRun_FinishedThoughtKeepsItsRows(t *testing.T) {
 	v := newVtui(100, 40) // cap 10: 9 body rows
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.send("go")
@@ -110,15 +125,16 @@ func TestRun_GrowOnlyWhenAStepFolds(t *testing.T) {
 	if before != boxCap(v.m.h) {
 		t.Fatalf("precondition: box at its cap, %d", before)
 	}
-	if strings.Contains(v.view(), "$ echo 2") {
-		t.Fatalf("precondition: earlier steps hidden under the open thought:\n%s", v.view())
-	}
 	v.event(map[string]any{"type": "tool_call", "tool": "exec", "args": map[string]any{"command": "echo 6"}})
 	if h := v.m.frame.blockH[r]; h != before {
-		t.Fatalf("the box changed height when the thought folded: %d → %d", before, h)
+		t.Fatalf("the box changed height when the thought finished: %d → %d", before, h)
 	}
-	if !strings.Contains(v.view(), "$ echo 2") {
-		t.Errorf("the rows given back should show earlier steps:\n%s", v.view())
+	scr := v.view()
+	if !strings.Contains(scr, "a long line 19 of thought") || !strings.Contains(scr, "$ echo 6") {
+		t.Errorf("the finished thought's rows should stay, the call under them:\n%s", scr)
+	}
+	if strings.Contains(scr, "$ echo 2") {
+		t.Errorf("the thought folded on screen: earlier steps took its rows:\n%s", scr)
 	}
 }
 

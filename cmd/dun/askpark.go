@@ -177,12 +177,15 @@ func (m *tuiModel) restoreDraft() {
 // of blank. The rows that arrive next fill the padding (refresh drops the hold
 // once the content reaches it); a new width, a reset or a new session drops
 // it (dropHold).
-func (m *tuiModel) holdShrink(n int) {
-	prev := len(m.vp.lines)
-	if prev == 0 || n >= prev || m.frame.width == 0 || m.frame.width != m.vp.Width {
+//
+// shift is the rows folded away above the view in this refresh
+// (scrollfold.go): the old rows and the view are measured without them.
+func (m *tuiModel) holdShrink(n, shift int) {
+	prev := len(m.vp.lines) - shift
+	if prev <= 0 || n >= prev || m.frame.width == 0 || m.frame.width != m.vp.Width {
 		return
 	}
-	hold := min(prev, m.vp.YOffset+m.vp.Height)
+	hold := min(prev, m.vp.YOffset-shift+m.vp.Height)
 	if hold > n && hold > m.convoHold {
 		m.convoHold, m.convoHoldW = hold, m.vp.Width
 	}
