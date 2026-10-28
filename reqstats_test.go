@@ -104,6 +104,17 @@ func TestReqMeter_ScriptedRequest(t *testing.T) {
 	}
 }
 
+// The prefix measured at startup is the floor of the start's estimate.
+func TestReqMeter_FirstStartFloor(t *testing.T) {
+	log := &reqLog{}
+	m := testMeter(&fakeClock{t: time.Unix(1000, 0)}, log)
+	m.floor = func() int { return 4700 }
+	m.begin()
+	if s := log.all()[0]; s.Ctx != 4700 {
+		t.Errorf("first start ctx %d, want the 4700 prefix", s.Ctx)
+	}
+}
+
 // llama.cpp's own timings win over the client's clock.
 func TestReqMeter_ServerTimings(t *testing.T) {
 	clk := &fakeClock{t: time.Unix(1000, 0)}

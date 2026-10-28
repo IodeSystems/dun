@@ -58,6 +58,15 @@ owner's call before work starts.
   once; `/` searches the text and the links' targets. Under 80 columns the
   pane takes the screen. The engine reads the files (control `skillfile`,
   event `skill_file`), confined to the skill's folder. Display only.
+- [~] Request stats on the top bar (owner, 2026-10-27), right side when
+  there is room: `ctx 6.3k · cache 96% · ttft 0.9s · pp 477/s · tg 121/s`
+  (`ctx 6.3k/131k` when the window is known). The turn's own rounds, not
+  side calls or sub-agents (dun/reqstats.go): ttft client side; pp and tg
+  from llama.cpp's timings, else client side; tg and ctx live at ~4 Hz from
+  the streamed chars; cache only once the provider reports it; ctx drops at
+  once on a recap or compaction. Event `request`. Fixed-width pieces; they
+  go pp → ttft → cache → ctx → tg as the width shrinks, none under 80
+  columns.
 - [ ] Collapse only under scroll pressure: a block folds as the scroll pushes
   it, never ahead of it, so no blank rows are left (owner: not yielding
   matters most).

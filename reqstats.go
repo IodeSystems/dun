@@ -33,7 +33,8 @@ import (
 //   - cache: the request's cached prompt tokens over its prompt tokens; only
 //     when the provider reported the cache field (CacheReported).
 //   - ctx: what the conversation fills of the window. At the start, the
-//     engine's estimate of the prompt just built; while streaming, plus the
+//     engine's estimate of the prompt just built, at least the measured
+//     prefix (system prompt and tool schemas); while streaming, plus the
 //     tokens generated so far; at the end, the provider's prompt tokens plus
 //     its completion tokens (the reply is context for the next round). A
 //     recap or compaction moves it at once by what it removed (adjustCtx).
@@ -73,10 +74,12 @@ type reqMeter struct {
 	mu sync.Mutex
 	on func(RequestStat)
 	// cpt is the chars-per-token for the live estimate, window the window,
-	// est the estimate of the prompt just built; all read at begin.
+	// est the estimate of the prompt just built, and floor the prefix
+	// (system prompt and tool schemas) as last measured.
 	cpt    func() float64
 	window func() int
 	est    func() int
+	floor  func() int
 	now    func() time.Time
 
 	cur      RequestStat
@@ -98,7 +101,15 @@ func (m *reqMeter) begin() {
 	m.mu.Lock()
 	now := m.now()
 	m.sent, m.first, m.last, m.lastEmit, m.chars, m.usage, m.open = now, time.Time{}, time.Time{}, time.Time{}, 0, nil, true
+	// The prefix is the floor: before the ratio is measured, the build's
+	// estimate leaves out the tool schemas (live, 2026-10-27: 468 estimated,
+	// 5.7k reported on the first request; 5.5k against 5.9k once measured).
+	// Correcting by the last request's error does not work: the estimate
+	// is recalibrated between the two, and the correction counts it twice.
 	m.base = m.est()
+	if m.floor != nil {
+		m.base = max(m.base, m.floor())
+	}
 	m.cur = RequestStat{Phase: "start", Ctx: m.base, Window: m.window()}
 	ev := m.cur
 	m.mu.Unlock()
@@ -224,6 +235,7 @@ func (h *Harness) newReqMeter() *reqMeter {
 		cpt:    h.meter.CharsPerToken,
 		window: h.windowTokens,
 		est:    h.meter.lastPromptTokens,
+		floor:  func() int { return h.SystemParts().Total },
 		now:    time.Now,
 	}
 }
