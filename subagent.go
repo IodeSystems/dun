@@ -1298,7 +1298,15 @@ func (h *Harness) AgentTell(id int, text string) string {
 	if sa == nil {
 		return fmt.Sprintf("no agent #%d", id)
 	}
-	return sa.tell(text)
+	out := sa.tell(text)
+	if strings.HasPrefix(out, "Told agent") {
+		// The parent reads the child's next report, and without this it
+		// is an answer to something it never asked (live: "a leftover
+		// instruction from its pre-restart transcript"). An aside: news
+		// for the turn that report starts, not a turn of its own.
+		h.Aside(fmt.Sprintf("The user told agent #%d directly: %q. Its next report answers that.", id, oneLine(text, 300)))
+	}
+	return out
 }
 
 // AgentPrompt is what a child was asked to do, for the UI's task line.

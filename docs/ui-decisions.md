@@ -142,7 +142,9 @@ are in `decisions.md`.
   other way (go back, ask the root to tell it) costs a root turn and the
   root's context to relay one sentence. The message is shown when the
   child's transcript takes it, as the root's are, so every client shows the
-  same. A running child takes no tell (the engine refuses one between turns
+  same. The parent is told too, as an aside before the child's next report:
+  live, a parent that was not took the report for "a leftover instruction".
+  A running child takes no tell (the engine refuses one between turns
   only): the draft stays in the composer and the status line says to wait
   for its turn to end, rather than sending words that would be dropped.
 

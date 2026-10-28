@@ -229,6 +229,23 @@ func TestSubAgent_WatchStreamsEntries(t *testing.T) {
 	}
 }
 
+// A person telling a child from its view is news to the parent, which reads
+// the child's next report: it is told, as an aside, before that report.
+func TestAgentTell_TellsTheParentToo(t *testing.T) {
+	h := startParentOf(t, &scriptRunner{rounds: []roundFn{textRound("first"), textRound("second")}})
+	sa := spawnKid(t, h, "do a thing")
+	waitIdle(t, sa)
+	h.notes()
+	if out := h.AgentTell(1, "now the other thing"); !strings.HasPrefix(out, "Told agent #1") {
+		t.Fatalf("tell: %s", out)
+	}
+	waitIdle(t, sa)
+	notes := h.notes()
+	if len(notes) == 0 || !strings.Contains(notes[0], "The user told agent #1 directly: \"now the other thing\"") {
+		t.Errorf("the parent must hear of it first: %q", notes)
+	}
+}
+
 func llmText(msgs []llm.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
