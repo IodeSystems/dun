@@ -36,10 +36,10 @@
     "instruction": ""
   },
 
-  "//files": "The built-in file tools (file_read, file_edit, file_write, file_grep, file_list; file_delete and file_move when listed), rooted at the session's working tree. Omit for the defaults. Merged field-by-field; ignore patterns from every layer add up.",
+  "//files": "The built-in file tools (file_read, file_edit, file_write; file_grep, file_list, file_delete and file_move when listed — file_read already lists directories and, with grep, searches), rooted at the session's working tree. Omit for the defaults. Merged field-by-field; ignore patterns from every layer add up.",
   "files": {
-    "//tools": "Which tools. [] turns them all off. delete and move are off unless listed.",
-    "tools": ["read", "edit", "write", "grep", "list"],
+    "//tools": "Which tools. [] turns them all off. grep, list, delete and move are off unless listed.",
+    "tools": ["read", "edit", "write"],
     "//read_only": "Keep read, grep and list only.",
     "read_only": false,
     "//read_max": "Bytes one ranged read returns (default 65536); unranged_max, grep_max and list_max work the same way.",

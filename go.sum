@@ -88,10 +88,8 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/iodesystems/agentkit v0.13.0 h1:n8ausXrw91q/E8iLNx448DNlnBdkBrDwXj2tAG6Ziyk=
-github.com/iodesystems/agentkit v0.13.0/go.mod h1:3YrLqwl305SCujUXQkim8INHf7y3kaXsqjaUUipGtks=
-github.com/iodesystems/agentkit v0.13.1 h1:PEYChlWuhl/KTfLvGfVOcV7bMrX3b8xXIA35fEkm7J0=
-github.com/iodesystems/agentkit v0.13.1/go.mod h1:3YrLqwl305SCujUXQkim8INHf7y3kaXsqjaUUipGtks=
+github.com/iodesystems/agentkit v0.14.0 h1:105mk1jxhcuCCYqchekBRJ3Frc94UEzL72sW0f3HeTE=
+github.com/iodesystems/agentkit v0.14.0/go.mod h1:3YrLqwl305SCujUXQkim8INHf7y3kaXsqjaUUipGtks=
 github.com/iodesystems/gwag/v2 v2.3.1 h1:KaMWT1XDxQegVL9fAjTde6KQDvOWaWvDRkVgJqBH26g=
 github.com/iodesystems/gwag/v2 v2.3.1/go.mod h1:DhwtM+vBI1xKDCmJf5Up85GwhBoSZI3mSrYSCwXRqHk=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

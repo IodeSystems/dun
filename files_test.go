@@ -55,15 +55,25 @@ func TestFileTools_Config(t *testing.T) {
 		inSystem []string
 		notSys   []string
 	}{
+		// grep and list are not defaults: file_read lists and, with grep, searches.
 		{"defaults", nil,
-			[]string{"file_edit", "file_grep", "file_list", "file_read", "file_write"},
-			[]string{"Use file_read, file_edit, file_write, file_grep, file_list, not exec", "edit them (not sed"}, nil},
+			[]string{"file_edit", "file_read", "file_write"},
+			[]string{"Use file_read, file_edit, file_write, not exec", "(file_read with grep, not grep/rg/find)",
+				"edit them (not sed", "file_read also takes an absolute path under /tmp"},
+			[]string{"file_grep", "file_list"}},
 		{"off", &FilesConfig{Tools: []string{}}, nil, nil, []string{"file_read"}},
 		{"read-only", &FilesConfig{ReadOnly: &yes},
-			[]string{"file_grep", "file_list", "file_read"},
-			[]string{"Use file_read, file_grep, file_list, not exec"}, []string{"edit them (not sed", "file_edit"}},
+			[]string{"file_read"},
+			[]string{"Use file_read, not exec"}, []string{"edit them (not sed", "file_edit"}},
 		{"read-only false is the default", &FilesConfig{ReadOnly: &no},
-			[]string{"file_edit", "file_grep", "file_list", "file_read", "file_write"}, nil, nil},
+			[]string{"file_edit", "file_read", "file_write"}, nil, nil},
+		{"a config that names grep and list gets them", &FilesConfig{Tools: []string{"read", "edit", "write", "grep", "list"}},
+			[]string{"file_edit", "file_grep", "file_list", "file_read", "file_write"},
+			[]string{"Use file_read, file_edit, file_write, file_grep, file_list, not exec", "search them (not grep/rg/find)",
+				"file_read, file_grep, file_list also take an absolute path"},
+			[]string{"file_read with grep"}},
+		{"read-only with grep named", &FilesConfig{Tools: []string{"read", "grep", "edit"}, ReadOnly: &yes},
+			[]string{"file_grep", "file_read"}, []string{"Use file_read, file_grep, not exec"}, []string{"file_edit"}},
 		{"delete and move opt in", &FilesConfig{Tools: []string{"read", "delete", "move"}},
 			[]string{"file_delete", "file_move", "file_read"}, nil, []string{"file_grep"}},
 		{"unknown tool turns them off, not the session", &FilesConfig{Tools: []string{"chmod"}}, nil, nil, []string{"file_read"}},
@@ -229,10 +239,10 @@ func TestFileTools_ReadTmp(t *testing.T) {
 	if out := dispatchFile(t, h, "file_read", `{"path":"`+log+`"}`); !strings.Contains(out, "needle beta") || !strings.Contains(out, log) {
 		t.Errorf("read of %s:\n%s", log, out)
 	}
-	if out := dispatchFile(t, h, "file_grep", `{"pattern":"needle","path":"`+dir+`"}`); !strings.Contains(out, "needle beta") {
+	if out := dispatchFile(t, h, "file_read", `{"grep":"needle","path":"`+dir+`"}`); !strings.Contains(out, "needle beta") {
 		t.Errorf("grep under %s:\n%s", dir, out)
 	}
-	if out := dispatchFile(t, h, "file_list", `{"path":"`+dir+`"}`); !strings.Contains(out, "run.log") {
+	if out := dispatchFile(t, h, "file_read", `{"path":"`+dir+`"}`); !strings.Contains(out, "run.log") {
 		t.Errorf("list of %s:\n%s", dir, out)
 	}
 	if out := dispatchFile(t, h, "file_write", `{"path":"`+filepath.Join(dir, "new.txt")+`","content":"x"}`); !strings.Contains(out, "ERROR") {
