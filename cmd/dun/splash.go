@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strings"
@@ -661,6 +662,8 @@ func (m tuiModel) splashView(w int) string {
 		return fitText("  "+tagRow, w) + "\n" + sectionsView(m.splashSections(w, false), w)
 	}
 	art, aw := mascotArt(grid), mascotWidth(grid)
+	// Under the foreman: which dun this is, and the motto (USER 2026-10-28).
+	art = append(art, splashBadge(aw)...)
 	rw := max(20, w-aw)
 	body := strings.Split(strings.TrimSuffix(sectionsView(m.splashSections(rw, m.w < mascotNarrowW), rw), "\n"), "\n")
 	rows := append([]string{fitText("  "+tagRow, rw)}, body...)
@@ -677,6 +680,59 @@ func (m tuiModel) splashView(w int) string {
 		out[i] = a + r
 	}
 	return strings.Join(out, "\n") + "\n"
+}
+
+// splashBadge is the rows under the mascot, each centred in w cells: the
+// release ("v0.1.9"), or "dev" and the commit for a source build, then the
+// motto in dun's pink.
+func splashBadge(w int) []string {
+	ver := version
+	if !isRelease() {
+		ver = "dev"
+		if rev := buildRev(); rev != "" {
+			ver += " " + rev
+		}
+	}
+	center := func(text string, st lipgloss.Style) string {
+		text, _ = fitPlain(text, w)
+		pad := (w - lipgloss.Width(text)) / 2
+		return strings.Repeat(" ", pad) + st.Render(text) + strings.Repeat(" ", w-pad-lipgloss.Width(text))
+	}
+	return []string{center(ver, stDim), center("git'r dun!", stEdge)}
+}
+
+// buildRev is the commit this binary was built from, 7 characters, with a
+// "*" when the tree had changes; from the build info, else from a version
+// that git describe stamped ("v0.1.9-12-gb8596f1-dirty").
+func buildRev() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		rev, dirty := "", false
+		for _, st := range bi.Settings {
+			switch st.Key {
+			case "vcs.revision":
+				rev = st.Value
+			case "vcs.modified":
+				dirty = st.Value == "true"
+			}
+		}
+		if len(rev) >= 7 {
+			if dirty {
+				return rev[:7] + "*"
+			}
+			return rev[:7]
+		}
+	}
+	if i := strings.LastIndex(version, "-g"); i >= 0 {
+		rev := strings.TrimSuffix(version[i+2:], "-dirty")
+		if len(rev) > 7 {
+			rev = rev[:7]
+		}
+		if strings.HasSuffix(version, "-dirty") {
+			rev += "*"
+		}
+		return rev
+	}
+	return ""
 }
 
 // splashModelRow is the live splash's model row: under the tagline and the
