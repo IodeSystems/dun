@@ -18,7 +18,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/iodesystems/agentkit v0.14.0
+	github.com/iodesystems/agentkit v0.14.1
 	github.com/iodesystems/gwag/v2 v2.3.1
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
