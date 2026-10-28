@@ -96,7 +96,7 @@ RELEASE_SUMMARY ?=
 MINISIGN_KEY    ?=
 
 webapp: ## the web app (mobile/, exported for the web) → internal/dundapi/webdist, which a release build embeds (pnpm, node)
-	cd mobile && pnpm install --frozen-lockfile && pnpm run export:web
+	cd mobile && pnpm install --frozen-lockfile && pnpm run gen && pnpm run export:web
 	rm -rf internal/dundapi/webdist && cp -r mobile/dist internal/dundapi/webdist
 
 release: webapp ## release builds + signed dun-manifest.json → dist/<version>/ (RELEASE_VERSION=vX.Y.Z, MINISIGN_KEY=…)
