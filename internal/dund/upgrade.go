@@ -25,6 +25,13 @@ import (
 // sessions with a message that says what happened (resumeFlagged). Other
 // planned stops (SIGTERM, a service restart) record and resume the same way
 // (PrepareStop).
+//
+// The busy sessions are told (USER 2026-10-28): each one with a turn, a
+// question, jobs or sub-agents gets a notice, once, that an upgrade waits
+// for it — finish the step, end the turn — and wakes for it if idle. After
+// the restart, one that wrapped up is woken with "done, resume"; one the
+// restart cut short gets the resume message that says what was cut. If the
+// upgrade fails, they are told to carry on.
 
 // Variables so tests can shorten them.
 var (
@@ -176,6 +183,15 @@ func (s *Service) upgradeLoop() {
 		first = false
 		s.up.st.Waiting = waiting
 		if len(waiting) == 0 || forced {
+			// The noticed sessions that wrapped up: woken once dund is back.
+			for _, ses := range s.all() {
+				ses.actMu.Lock()
+				if ses.noticed && ses.resume == "" {
+					ses.resume = resumePrefix + "dun was upgraded (" + strings.TrimPrefix(orBuild(s.up.st.Version), "build ") +
+						"). You wrapped up for it; the work can go on: resume the task."
+				}
+				ses.actMu.Unlock()
+			}
 			if install := s.up.install; install != nil {
 				exe, ver := s.up.st.Exe, s.up.st.Version
 				s.up.mu.Unlock()
@@ -194,10 +210,12 @@ func (s *Service) upgradeLoop() {
 			return
 		}
 		st := *s.up.snapshot()
+		left := upgradeGrace - time.Since(s.up.since)
 		s.up.mu.Unlock()
 		if changed {
 			s.notifyUpgrade(st)
 		}
+		s.noticeBusy(st.Version, left)
 		t := time.NewTimer(upgradePoll)
 		select {
 		case <-s.done:
@@ -220,6 +238,41 @@ func (s *Service) failUpgrade(err error) {
 	st.State, st.Error, st.Waiting = "failed", err.Error(), nil
 	log.Printf("dund: the upgrade to %s failed, running on: %v", orBuild(st.Version), err)
 	s.notifyUpgrade(st)
+	for _, ses := range s.all() { // told to wrap up: told it is off
+		ses.actMu.Lock()
+		was := ses.noticed
+		ses.noticed, ses.resume = false, ""
+		ses.actMu.Unlock()
+		if was {
+			_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Text: "The dun upgrade you were told about did not happen (" +
+				err.Error() + "); dun keeps running as it was. Carry on."}))
+		}
+	}
+}
+
+// noticeBusy tells each session the pending upgrade waits for, once, to wrap
+// up: what is coming, how long it waits, and what happens to unfinished
+// work. left is the time until it stops waiting.
+func (s *Service) noticeBusy(version string, left time.Duration) {
+	for _, ses := range s.all() {
+		if len(ses.waiting()) == 0 {
+			continue
+		}
+		ses.actMu.Lock()
+		if ses.noticed {
+			ses.actMu.Unlock()
+			continue
+		}
+		ses.noticed = true
+		ses.actMu.Unlock()
+		mins := int(left.Minutes() + 0.5)
+		text := fmt.Sprintf("dun is about to be upgraded to %s: dund restarts as soon as this session is idle — no turn "+
+			"running, no background jobs or sub-agents — or in about %d minutes, when a running turn is interrupted and "+
+			"background jobs are killed. Finish the step you are on, leave the work where it resumes cleanly, let your "+
+			"background jobs finish or stop the ones you do not need, and end your turn. You will be told when it is done.",
+			strings.TrimPrefix(orBuild(version), "build "), max(1, mins))
+		_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Text: text}))
+	}
 }
 
 func orBuild(v string) string {
@@ -250,6 +303,11 @@ func (s *Service) PrepareStop(why string) {
 		}()
 	}
 	wg.Wait()
+	for _, ses := range s.all() { // also the ones told to wrap up, which did
+		if ses.resumeNote() != "" && len(ses.waiting()) == 0 {
+			flagged++
+		}
+	}
 	if flagged > 0 {
 		if err := s.saveRegistry(); err != nil {
 			log.Printf("dund: could not record the sessions to resume: %v", err)

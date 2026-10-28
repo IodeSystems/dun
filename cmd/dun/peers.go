@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,6 +125,13 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			// it labelled (dun.PeerLabel).
 			em.emit(&proto.Notification{Kind: "peer", Text: m.FromName + " (" + m.From + "): " + m.Text})
 			h.PeerMessage(m.From, m.FromName, m.Text, m.Wake)
+		case "service_notice":
+			// dund about the service itself: an upgrade to wrap up for, or done.
+			var n proto.ServiceNotice
+			if json.Unmarshal(line, &n) == nil && strings.TrimSpace(n.Text) != "" {
+				em.emit(&proto.Notification{Kind: "service", Text: n.Text})
+				h.ServiceNotice(n.Text)
+			}
 		case "servers":
 			// Another session wrote the global server file: re-read it now if
 			// idle; a running turn's next one does at its start.

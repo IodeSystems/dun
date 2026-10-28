@@ -19,6 +19,7 @@ func init() {
 	command[Hello]("hello")
 	command[Upgrade]("upgrade")
 	command[JobUsageReq]("job_usage")
+	command[ServiceNotice]("service_notice")
 
 	event[SessionList]("sessions")
 	event[EngineState]("engine")
@@ -27,6 +28,14 @@ func init() {
 	event[HelloReply]("hello")
 	event[UpgradeStatus]("upgrade")
 	event[JobUsage]("job_usage")
+}
+
+// ServiceNotice is dund's word to a session's engine about the service
+// itself (internal/dund/upgrade.go): an upgrade is coming and the session
+// should wrap up its work, or the upgrade is done and it can resume. The
+// engine hands it to the model, labelled as dun's, and wakes it if idle.
+type ServiceNotice struct {
+	Text string `json:"text"`
 }
 
 // JobUsageReq asks what background job Job's processes are doing: their

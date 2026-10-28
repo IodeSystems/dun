@@ -26,7 +26,7 @@ func TestUnderDundUnsetsItself(t *testing.T) {
 // message cannot answer an open ask_user.
 func TestInputStreamRoutesPeerFrames(t *testing.T) {
 	in := `{"type":"peer","from":"a","from_name":"dun:1","text":"yes","wake":true}` + "\n" +
-		`{"type":"peer_reply","rid":"p1"}` + "\n" + `{"type":"servers"}` + "\n" + `{"type":"user","content":"after"}` + "\n"
+		`{"type":"peer_reply","rid":"p1"}` + "\n" + `{"type":"servers"}` + "\n" + `{"type":"service_notice","text":"x"}` + "\n" + `{"type":"user","content":"after"}` + "\n"
 	s := newInputStreamFrom(strings.NewReader(in))
 	var mu sync.Mutex
 	var got []string
@@ -47,7 +47,7 @@ func TestInputStreamRoutesPeerFrames(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if strings.Join(got, ",") != "peer,peer_reply,servers" {
+	if strings.Join(got, ",") != "peer,peer_reply,servers,service_notice" {
 		t.Fatalf("peer frames %v", got)
 	}
 }

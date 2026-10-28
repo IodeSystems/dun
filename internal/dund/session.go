@@ -77,6 +77,9 @@ type session struct {
 	// working when dund stopped, and is woken with it on the next start
 	// (persisted in the registry). Guarded by actMu, a leaf lock.
 	resume string
+	// noticed: told that the pending upgrade waits for it (upgrade.go
+	// noticeBusy), so it is told again when the upgrade is done or off.
+	noticed bool
 	// worktree and branch are the worktree the engine reported working in
 	// (empty: in place, in workspace), and lastUser the last message it
 	// took: dun_list's worktree column and task (peer.go).

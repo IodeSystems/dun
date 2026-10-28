@@ -711,6 +711,7 @@ const (
 	queuedAside                          // context worth knowing, never worth a turn
 	queuedPeer                           // another dun session's dun_msg (peers.go)
 	queuedPeerQuiet                      // the same, sent with wake:false
+	queuedService                        // dund about the service itself: an upgrade coming, or done
 
 	// queuedKindCount is a sentinel — keep it last. It exists so a test can
 	// walk every kind and assert it has a queuedPolicies entry, since the
@@ -754,6 +755,9 @@ var queuedPolicies = map[queuedKind]queuedPolicy{
 	// same flushed as lifted: never as the user.
 	queuedPeer:      {prefix: "[peer] ", entryKind: agent.KindNotification, causesTurn: true},
 	queuedPeerQuiet: {prefix: "[peer] ", entryKind: agent.KindNotification, causesTurn: false},
+	// dund's own word to the session (an upgrade), labelled so it is never
+	// read as the person's.
+	queuedService: {prefix: "[dun] ", entryKind: agent.KindNotification, causesTurn: true},
 }
 
 // policy returns the kind's entry in the table. An unregistered kind falls back

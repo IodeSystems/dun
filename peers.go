@@ -181,3 +181,21 @@ func (h *Harness) PeerMessage(fromID, fromName, text string, wake bool) {
 		}
 	}
 }
+
+// ServiceNotice is dund telling this session's model about the service
+// itself: an upgrade it should wrap up for, or one that is done (dund
+// upgrade.go). It reaches a running turn in the next tool result, and wakes
+// an idle session for a turn of its own.
+func (h *Harness) ServiceNotice(text string) {
+	h.noteMu.Lock()
+	h.queue = append(h.queue, queued{kind: queuedService, text: text})
+	if h.userWaitCh != nil {
+		close(h.userWaitCh)
+		h.userWaitCh = nil
+	}
+	h.noteMu.Unlock()
+	select {
+	case h.wake <- struct{}{}:
+	default: // a turn is already due
+	}
+}

@@ -134,10 +134,47 @@ func TestUpgradePendingIsBroadcastAndFollowsTheWork(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("never ready")
 	}
-	// Nothing was cut short: nothing is flagged to resume.
+	// Nothing was cut short. The session was told the upgrade was coming,
+	// once, and is woken after it with "done, resume" (USER 2026-10-28).
 	ses, _ := svc.Get(alice, id)
-	if ses.resumeNote() != "" {
-		t.Fatalf("an idle restart flagged %s: %q", id, ses.resumeNote())
+	if n := ses.resumeNote(); !strings.Contains(n, "dun was upgraded (v2)") || !strings.Contains(n, "resume the task") || strings.Contains(n, "interrupted") {
+		t.Fatalf("after a clean restart: %q", n)
+	}
+}
+
+// While an upgrade is pending, each busy session's model is told, once, to
+// wrap up; a failed upgrade tells it to carry on.
+func TestUpgradeTellsBusySessionsToWrapUp(t *testing.T) {
+	fastUpgrade(t)
+	svc, sp, _ := newSvc(t)
+	id := working(t, svc, true)
+	idle, _ := svc.Create(alice, t.TempDir(), nil, "")
+	svc.SetUpgradeInstall(func(string, string) error { return errors.New("no room on disk") })
+	if err := svc.RequestUpgrade("/x/dun", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	got := waitRecord(t, sp, "notice "+id+": ")
+	if !strings.Contains(got, "upgraded to v2") || !strings.Contains(got, "end your turn") || !strings.Contains(got, "minutes") {
+		t.Errorf("notice: %q", got)
+	}
+	time.Sleep(3 * upgradePoll)
+	n := 0
+	for _, r := range sp.received() {
+		if strings.HasPrefix(r, "notice "+id+": ") {
+			n++
+		}
+		if strings.HasPrefix(r, "notice "+idle+": ") {
+			t.Errorf("an idle session was told: %q", r)
+		}
+	}
+	if n != 1 {
+		t.Errorf("told %d times", n)
+	}
+	// The work ends; the install fails: the session is told to carry on.
+	_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "finish"}))
+	_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "endjob"}))
+	if got := waitRecord(t, sp, "notice "+id+": The dun upgrade you were told about did not happen"); !strings.Contains(got, "Carry on") {
+		t.Errorf("failed: %q", got)
 	}
 }
 

@@ -187,3 +187,21 @@ func TestPeerMessage_DoesNotAnswerAnAsk(t *testing.T) {
 		t.Fatalf("want the user's answer, then the peer message: %q", out)
 	}
 }
+
+// dund's word about the service reaches the model labelled as dun's, and
+// is news worth a turn.
+func TestServiceNotice_QueuedAsDunsAndWakes(t *testing.T) {
+	h := testHarness(t)
+	h.ServiceNotice("dun is about to be upgraded")
+	h.noteMu.Lock()
+	q := append([]queued(nil), h.queue...)
+	h.noteMu.Unlock()
+	if len(q) != 1 || q[0].kind != queuedService || q[0].policy().prefix != "[dun] " || !q[0].policy().causesTurn {
+		t.Fatalf("queued: %+v", q)
+	}
+	select {
+	case <-h.wake:
+	default:
+		t.Error("an idle session should be woken for it")
+	}
+}
