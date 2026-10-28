@@ -366,9 +366,6 @@ func (p *peerLink) sched(ctx context.Context, req proto.SchedReq) (proto.SchedRe
 	if rep.Sched == nil {
 		return proto.SchedReply{}, errors.New("dund answered without a schedule (an older dund? restart it: /upgrade)")
 	}
-	if p.onLoops != nil {
-		p.onLoops(rep.Sched.Loops)
-	}
 	return *rep.Sched, nil
 }
 

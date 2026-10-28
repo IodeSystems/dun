@@ -493,12 +493,11 @@ func (s *Service) schedOp(from *session, req proto.SchedReq) (proto.SchedReply, 
 	sc, owner := s.sched, from.owner
 	var e schedEntry
 	var err error
-	touched := from.id // the session whose loop count may have changed
 	switch req.Action {
 	case "add":
 		e, err = s.schedAdd(from, req)
 	case "list":
-		return proto.SchedReply{Entries: s.schedShown(owner, sc.list(owner)), Self: from.id, Loops: sc.loops(from.id)}, nil
+		return proto.SchedReply{Entries: s.schedShown(owner, sc.list(owner)), Self: from.id}, nil
 	case "get":
 		e, err = sc.get(owner, req.ID)
 	case "push":
@@ -515,19 +514,8 @@ func (s *Service) schedOp(from *session, req proto.SchedReq) (proto.SchedReply, 
 	if err != nil {
 		return proto.SchedReply{}, err
 	}
-	if e.Session != "" {
-		touched = e.Session
-	}
-	// Another session's loop count changed (a loop put there, or cancelled
-	// from here): its engine lists or drops loop_ctl now, not at its next
-	// firing. The asker learns its own from the reply.
-	if touched != from.id && e.Loop() {
-		if ses, err := s.Get(owner, touched); err == nil {
-			_ = ses.sendLoaded(proto.NewCommand("", &proto.Loops{Active: sc.loops(touched)}))
-		}
-	}
 	shown := s.schedShown(owner, []schedEntry{e})[0]
-	return proto.SchedReply{Entry: &shown, Self: from.id, Loops: sc.loops(from.id)}, nil
+	return proto.SchedReply{Entry: &shown, Self: from.id}, nil
 }
 
 // schedAdd checks and stores a new entry from session from.
@@ -627,11 +615,6 @@ func (s *Service) deliverScheduled(e schedEntry) error {
 	ses, err := s.Get(e.Owner, e.Session)
 	if err != nil {
 		return err
-	}
-	if e.Loop() {
-		if err := ses.send(proto.NewCommand("", &proto.Loops{Active: s.sched.loops(e.Session)})); err != nil {
-			return err
-		}
 	}
 	return ses.send(proto.NewCommand("", &proto.User{Content: scheduledText(e, e.Fired, e.By == e.Session)}))
 }

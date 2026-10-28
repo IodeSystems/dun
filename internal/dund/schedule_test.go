@@ -291,9 +291,6 @@ func TestSchedDeliversToABusySession(t *testing.T) {
 	_ = svc.Send(alice, a, proto.NewCommand("", &proto.User{Content: "slow"}))
 	next(t, sub, "turn")
 	rep = schedReq(t, svc, sp, a, proto.SchedReq{Action: "add", At: time.Now().Add(-time.Second), Every: proto.SelfPaced, Text: "poll"})
-	if rep.Sched.Loops != 1 {
-		t.Errorf("loops after a /loop: %+v", rep.Sched)
-	}
 	svc.sched.fireDue()
 	time.Sleep(50 * time.Millisecond)
 	for _, r := range sp.received() {
@@ -308,9 +305,8 @@ func TestSchedDeliversToABusySession(t *testing.T) {
 	}
 }
 
-// A self-paced loop's firing tells the engine it has a loop first (so
-// loop_ctl is listed for the turn), and the turn ending without loop_ctl
-// sets the default and says so in the session.
+// A self-paced loop's turn ending without loop_ctl sets the default and
+// says so in the session.
 func TestSchedLoopFiringAndDefault(t *testing.T) {
 	svc, sp, _ := newSvc(t)
 	a, _ := svc.Create(alice, t.TempDir(), nil, "")
@@ -321,30 +317,12 @@ func TestSchedLoopFiringAndDefault(t *testing.T) {
 	id := rep.Sched.Entry.ID
 	svc.sched.fireDue()
 	waitRecord(t, sp, "user "+a+": [loop ")
-	rs := sp.received()
-	if i, j := indexOf(rs, "loops "+a+": 1"), indexPrefix(rs, "user "+a+": [loop "); i < 0 || i > j {
-		t.Errorf("loops not before the firing: %q", rs)
-	}
 	ev := next(t, sub, "notification")
 	if n := ev.Payload.(*proto.Notification); n.Kind != "schedule" || !strings.Contains(n.Text, "loop_ctl was not called") {
 		t.Errorf("notice %+v", n)
 	}
 	if e, _ := svc.sched.get(alice, id); e.Awaiting || e.At.IsZero() || e.Iteration != 1 {
 		t.Errorf("after the default: %+v", e)
-	}
-	// A new engine for a session with a loop is told at once, not at the
-	// loop's next firing.
-	_ = svc.Stop(alice, a)
-	n := len(sp.received())
-	if err := ses.ensureRunning(); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for indexOf(sp.received()[n:], "loops "+a+": 1") < 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if indexOf(sp.received()[n:], "loops "+a+": 1") < 0 {
-		t.Errorf("restarted engine not told: %q", sp.received()[n:])
 	}
 }
 

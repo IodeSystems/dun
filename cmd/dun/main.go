@@ -1617,7 +1617,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	// `view` sends the scrollback (a stopped child's too) and starts the
 	// watch that forwards its new entries; `leave` ends it.
 	if peers != nil {
-		peers.onLoops = h.SetLoops
 		// A global server change made here reaches the owner's other
 		// sessions (proto.ServersChanged); not waited for.
 		dun.OnUserServersWritten = func() {
@@ -2132,7 +2131,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- msg
 			case "answer":
 				s.answers <- ev.Value
-			case "peer", "peer_reply", "peers", "loops", "servers":
+			case "peer", "peer_reply", "servers":
 				// Never an answer: a peer message cannot close an open
 				// ask_user, whatever it says.
 				s.peerCmd(ev.Type, []byte(line))

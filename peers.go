@@ -163,7 +163,6 @@ func PeerLabel(fromID, fromName, text string) string {
 // channel alone, and a lifted message travels in a tool result, after the
 // question's own.
 func (h *Harness) PeerMessage(fromID, fromName, text string, wake bool) {
-	h.NotePeers() // a message to answer: dun_msg must be there to answer it
 	kind := queuedPeer
 	if !wake {
 		kind = queuedPeerQuiet
@@ -180,15 +179,5 @@ func (h *Harness) PeerMessage(fromID, fromName, text string, wake bool) {
 		case h.wake <- struct{}{}:
 		default: // a turn is already due
 		}
-	}
-}
-
-// NotePeers is called when dund says another live session exists, or one
-// messages this one: the first time, dun_list and dun_msg join the tool set.
-// They stay once listed, also when the other session goes: dropping them
-// would change the tool list, and so the cached prompt prefix, for nothing.
-func (h *Harness) NotePeers() {
-	if h.hadPeers.CompareAndSwap(false, true) {
-		h.applyTools()
 	}
 }

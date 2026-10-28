@@ -485,10 +485,6 @@ func (h *Harness) registerSpill(kind, path string) string {
 	ref := fmt.Sprintf("%s%d", kind, h.spillSeq)
 	h.spills[ref] = path
 	h.recapMu.Unlock()
-	if h.hadSpills.CompareAndSwap(false, true) {
-		h.toolsGrew.Store(true)
-		h.applyTools()
-	}
 	return ref
 }
 
@@ -986,11 +982,6 @@ func withRecapWatch(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		// start with "{" to reopen the hole.
 		out = h.capOnce(tc.Function.Name+" "+oneLine(tc.Function.Arguments, 120), out)
 		h.watchRecap(tc.Function.Name, len(out))
-		// A tool this call added (see Harness.toolsGrew) joins now. This is
-		// the turn's goroutine, which holds turnMu, so no other rebuild runs.
-		if h.toolsGrew.Swap(false) && h.applyPending.Swap(false) {
-			h.rebuildTools()
-		}
 		return out, err
 	}
 }

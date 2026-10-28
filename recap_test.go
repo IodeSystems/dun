@@ -720,20 +720,17 @@ func TestReadSpill_GrepWindowsAMatchInsideAHugeLine(t *testing.T) {
 	}
 }
 
-// read_saved joins the tool set with the first saved result, and needs ref.
-func TestReadSaved_ListedOnceSomethingIsSaved(t *testing.T) {
+// read_saved is listed from the first request (a tool joining later changed
+// the prompt's prefix — USER 2026-10-28), and needs ref.
+func TestReadSaved_ListedAndNeedsRef(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if slices.Contains(h.ToolNames(), "read_saved") {
-		t.Fatalf("listed before anything was saved: %v", h.ToolNames())
-	}
-	h.registerSpill("r", filepath.Join(t.TempDir(), "x"))
 	if !slices.Contains(h.ToolNames(), "read_saved") {
-		t.Fatalf("not listed after a save: %v", h.ToolNames())
+		t.Fatalf("not listed: %v", h.ToolNames())
 	}
 	d := withRecap(nil, h, nil)
 	var tc llm.ToolCall

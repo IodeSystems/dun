@@ -3,6 +3,7 @@ package dun
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -207,35 +208,38 @@ func TestJobs_ARepeatedPollWaits(t *testing.T) {
 	}
 }
 
-// jobs is not offered until something goes to the background; then it is,
-// for the rest of the session (USER 2026-10-27).
-func TestJobs_OfferedOnceSomethingIsInTheBackground(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
+// jobs is listed from the first request (a tool joining at the first
+// background job changed the prompt's prefix — USER 2026-10-28); with
+// nothing running it says so.
+func TestJobs_ListedFromTheStart(t *testing.T) {
 	ws := t.TempDir()
 	h, err := Start(context.Background(), Config{Workspace: ws, Client: &scriptRunner{}, Exec: &HostShell{Dir: ws}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	has := func() bool {
-		for _, d := range h.Session.Tools {
-			if d.Function.Name == "jobs" {
-				return true
-			}
-		}
-		return false
-	}
-	if has() {
-		t.Fatal("jobs offered before anything was in the background")
+	if !slices.Contains(h.ToolNames(), "jobs") {
+		t.Fatalf("jobs not listed: %v", h.ToolNames())
 	}
 	if out := jobsCall(t, h, "jobs", `{}`); out != "No background jobs or sub-agents." {
-		t.Errorf("a call by name still answers: %q", out)
+		t.Errorf("with nothing running: %q", out)
 	}
-	be := &HostShell{Dir: t.TempDir()}
-	t.Cleanup(be.Close)
-	j := h.newJobStarted(be, "sleep 30")
-	t.Cleanup(func() { j.killAndWait("test") })
-	if !has() {
-		t.Errorf("jobs not offered after a command went to the background")
+}
+
+// agent and job together: refused, and the answer says whose job numbers are
+// whose and how to reach a sub-agent's (a model asked the parent for a
+// child's job #9, seen in the child's report).
+func TestJobs_AgentAndJobSaysWhoseJobItIs(t *testing.T) {
+	ws := t.TempDir()
+	h, err := Start(context.Background(), Config{Workspace: ws, Client: &scriptRunner{}, Exec: &HostShell{Dir: ws}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	out := jobsCall(t, h, "jobs", `{"agent":1,"job":9}`)
+	for _, want := range []string{"not both", "jobs(job:9) is your own job #9", "jobs(agent:1, tell:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q: %q", want, out)
+		}
 	}
 }

@@ -121,15 +121,6 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 	}
 }
 
-// noteBackground is called when a command goes to the background or a
-// sub-agent starts: the first time, jobs joins the tool set.
-func (h *Harness) noteBackground() {
-	if h.hadJobs.CompareAndSwap(false, true) {
-		h.toolsGrew.Store(true)
-		h.applyTools()
-	}
-}
-
 // pollSig is a read of one job (no wait, kill, tell, resume or tuning) as a
 // key; plain is false for anything else, which never turns into a wait.
 func (a jobsArgs) pollSig() (string, bool) {
@@ -202,7 +193,13 @@ func runJobs(ctx context.Context, h *Harness, a jobsArgs) string {
 	agentOnly := a.Tell != "" || a.Resume
 	switch {
 	case a.Job != nil && a.Agent != nil:
-		return "ERROR: give job or agent, not both."
+		// The model saw "background job #N" in an agent's report or tail and
+		// asked for it through the parent: job numbers belong to whoever
+		// started the job, and a sub-agent's jobs are its own.
+		return fmt.Sprintf("ERROR: give job or agent, not both. Job numbers belong to whoever started the job: "+
+			"jobs(job:%d) is your own job #%d; a job agent #%d started is its own — ask it with "+
+			"jobs(agent:%d, tell:\"…\"), or read what it did with jobs(agent:%d, tail:40).",
+			*a.Job, *a.Job, *a.Agent, *a.Agent, *a.Agent)
 	case a.Job == nil && a.Agent == nil:
 		if commandOnly || agentOnly || a.Wait || a.Tail > 0 || a.Kill {
 			return "ERROR: name the job: job:N for a command, agent:N for a sub-agent. With no arguments, jobs lists them."

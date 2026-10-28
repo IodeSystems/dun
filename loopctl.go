@@ -39,14 +39,6 @@ type LoopLink interface {
 	LoopCtl(ctx context.Context, nextIn time.Duration, stop bool, reason string) (LoopState, error)
 }
 
-// SetLoops is how many loops this session has; loop_ctl is listed while it
-// is more than none.
-func (h *Harness) SetLoops(n int) {
-	if h.hasLoops.Swap(n > 0) != (n > 0) {
-		h.applyTools()
-	}
-}
-
 func loopCtlToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"

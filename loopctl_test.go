@@ -21,26 +21,18 @@ func (f *fakeLoops) LoopCtl(_ context.Context, nextIn time.Duration, stop bool, 
 	return LoopState{ID: 4, Next: time.Now().Add(nextIn), Stopped: stop}, nil
 }
 
-// loop_ctl is in the tool list only while the session has a loop: no loop,
-// no tokens for it (every first request is measured), and it goes again
-// with the last loop.
-func TestLoopCtl_ListedOnlyWhileALoopExists(t *testing.T) {
+// loop_ctl is listed from the first request for a root under dund: a tool
+// that joined when a loop began changed the prompt's prefix, a full re-read
+// (USER 2026-10-28).
+func TestLoopCtl_ListedForARootUnderDund(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}, Peers: &fakePeers{}, Loops: &fakeLoops{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if slices.Contains(h.ToolNames(), "loop_ctl") {
-		t.Fatalf("listed with no loop: %v", h.ToolNames())
-	}
-	h.SetLoops(1)
 	if !slices.Contains(h.ToolNames(), "loop_ctl") {
-		t.Fatalf("not listed with a loop: %v", h.ToolNames())
-	}
-	h.SetLoops(0)
-	if slices.Contains(h.ToolNames(), "loop_ctl") {
-		t.Fatalf("still listed after the last loop: %v", h.ToolNames())
+		t.Fatalf("not listed: %v", h.ToolNames())
 	}
 	// A child never has it: a loop fires into the root.
 	parent := testHarness(t)

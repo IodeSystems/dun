@@ -14,7 +14,6 @@ func init() {
 	event[PeerRequest]("peer_request")
 	command[PeerReply]("peer_reply")
 	command[PeerMsg]("peer")
-	command[PeerPresence]("peers")
 	command[ServersChanged]("servers")
 }
 
@@ -75,14 +74,6 @@ type PeerMsg struct {
 	FromName string `json:"from_name"`
 	Text     string `json:"text"`
 	Wake     bool   `json:"wake,omitempty"`
-}
-
-// PeerPresence tells an engine how many other live sessions its owner has,
-// whenever that changes (an engine starts or exits). The engine lists
-// dun_list and dun_msg only once there was another: alone, they cost tokens
-// and answer nothing.
-type PeerPresence struct {
-	Others int `json:"others"`
 }
 
 // ServersChanged tells an engine that another session of its owner wrote the

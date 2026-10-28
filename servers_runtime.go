@@ -706,22 +706,25 @@ func (h *Harness) rebuildTools() {
 			}, report)
 		}
 	}
+	// Every tool a session can use is listed from its first request. They
+	// used to join when they first had a use (jobs at the first background,
+	// read_saved at the first saved result, dun_list/dun_msg once another
+	// session ran, loop_ctl while a loop did), and a tool joining changes the
+	// prompt's prefix: the chat template renders the tools in the system
+	// message, so the server re-reads the whole conversation — measured once
+	// as 0 of 5,049 characters kept. A few cached tokens a request are worth
+	// less than one uncached re-read of a long session, and on llama.cpp that
+	// re-read is a stall (USER 2026-10-28).
+	//
 	// dun_list and dun_msg: a root under dund only (cfg.Peers is nil
-	// otherwise, and always for a child — see childConfig). Listed only once
-	// another live session was seen (USER 2026-10-27: "conditional
-	// list/msg"); like jobs, the dispatch is always there.
+	// otherwise, and always for a child — see childConfig).
 	if cfg.Peers != nil && !h.isChild() {
-		if h.hadPeers.Load() {
-			toolDefs = append(toolDefs, dunListToolDef(), dunMsgToolDef())
-		}
+		toolDefs = append(toolDefs, dunListToolDef(), dunMsgToolDef())
 		dispatch = withPeers(dispatch, cfg.Peers, report)
 	}
-	// loop_ctl: listed only while this session has a loop (loopctl.go); the
-	// dispatch stays, so a call after the last loop went still answers.
+	// loop_ctl: a root under dund (its scheduler runs /loop).
 	if cfg.Loops != nil && !h.isChild() {
-		if h.hasLoops.Load() {
-			toolDefs = append(toolDefs, loopCtlToolDef())
-		}
+		toolDefs = append(toolDefs, loopCtlToolDef())
 		dispatch = withLoopCtl(dispatch, cfg.Loops, report)
 	}
 	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
@@ -741,24 +744,15 @@ func (h *Harness) rebuildTools() {
 	// jobs watches both kinds of background work (jobs.go): a command exec
 	// handed off, and a sub-agent. A child gets it for its own commands; it
 	// has no agents, so the agent params are not in its definition.
-	// Its definition joins only once something went to the background
-	// (USER 2026-10-27: "the monitor can come after anything gets
-	// backgrounded"); before that it is nothing but tokens. The dispatch is
-	// always there, so a call by name (or an old alias) still answers.
 	if cfg.Exec != nil || !h.isChild() {
-		if h.hadJobs.Load() {
-			toolDefs = append(toolDefs, jobsToolDef(cfg.Exec != nil, !h.isChild()))
-		}
+		toolDefs = append(toolDefs, jobsToolDef(cfg.Exec != nil, !h.isChild()))
 		dispatch = withJobs(dispatch, h, report)
 	}
 	// recap is available to BOTH roles, and behaves identically in both: it
 	// applies and then reports. It used to ask a root's human first — see the
 	// rules at the top of recap.go for why that prompt was removed.
 	toolDefs = append(toolDefs, recapToolDef())
-	// read_saved only once a result was saved under a ref (registerSpill).
-	if h.hadSpills.Load() {
-		toolDefs = append(toolDefs, readSavedToolDef())
-	}
+	toolDefs = append(toolDefs, readSavedToolDef())
 	dispatch = withRecap(dispatch, h, report)
 	// session is available to BOTH roles and, like recap, always on: what
 	// runs the model (for a repo's PR rules) and how a long task keeps its

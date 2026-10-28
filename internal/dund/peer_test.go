@@ -292,15 +292,6 @@ func TestPeerNameOfAWorktreeSession(t *testing.T) {
 
 // Each engine hears how many other live sessions its owner has, when one
 // starts or stops; another owner's sessions do not count.
-func TestPeerPresenceIsAnnounced(t *testing.T) {
-	svc, sp, _ := newSvc(t)
-	a1, _ := svc.Create(alice, t.TempDir(), nil, "")
-	waitRecord(t, sp, "peers "+a1+": 0")
-	_, _ = svc.Create(bob, t.TempDir(), nil, "")
-	a2, _ := svc.Create(alice, t.TempDir(), nil, "")
-	waitRecord(t, sp, "peers "+a1+": 1")
-	waitRecord(t, sp, "peers "+a2+": 1")
-}
 
 // A global server change made in one session reaches the owner's other
 // loaded sessions, and nobody else's: the engine that wrote mcp.json asks
@@ -310,7 +301,10 @@ func TestServersChangedReachesTheOwnersOtherSessions(t *testing.T) {
 	a1, _ := svc.Create(alice, t.TempDir(), nil, "")
 	a2, _ := svc.Create(alice, t.TempDir(), nil, "")
 	b1, _ := svc.Create(bob, t.TempDir(), nil, "")
-	waitRecord(t, sp, "peers "+a2+": 1")
+	for _, id := range []string{a1, a2} { // both engines up
+		_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "hello"}))
+		waitRecord(t, sp, "user "+id+": hello")
+	}
 	js, _ := json.Marshal(proto.PeerRequest{RID: "r", Op: "servers"})
 	if err := svc.Send(alice, a1, proto.NewCommand("", &proto.User{Content: "peer-request " + string(js)})); err != nil {
 		t.Fatal(err)

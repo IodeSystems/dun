@@ -10,7 +10,6 @@ import "time"
 // its session has with a loops command, which is what lists loop_ctl.
 
 func init() {
-	command[Loops]("loops")
 }
 
 // SelfPaced is an Every that means "a loop the model paces with loop_ctl".
@@ -64,16 +63,9 @@ func (e SchedEntry) Loop() bool { return e.Every != 0 }
 
 // SchedReply answers a SchedReq: Entry is the one it made or changed (for
 // cancel and a stop, as it was), Entries the list. Self is the asking
-// session's id, and Loops how many loops it has after the operation.
+// session's id.
 type SchedReply struct {
 	Entry   *SchedEntry  `json:"entry,omitempty"`
 	Entries []SchedEntry `json:"entries,omitempty"`
 	Self    string       `json:"self"`
-	Loops   int          `json:"loops"`
-}
-
-// Loops tells an engine how many loops its session has: loop_ctl is in its
-// tool set while Active > 0, and only then.
-type Loops struct {
-	Active int `json:"active"`
 }

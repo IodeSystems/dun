@@ -489,7 +489,6 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model, mode string) (*
 	sa.hook(child)
 	sa.saveState()
 	h.agentsChanged()
-	h.noteBackground()
 
 	go sa.run(runCtx, prompt+iso.brief())
 	go sa.heartbeat()
@@ -706,12 +705,6 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 		}
 	}
 	h.agMu.Unlock()
-	if live {
-		// A resumed session's children: jobs lists, tells and resumes them.
-		// noteBackground, not a bare flag: the tools were built before this
-		// ran, and jobs must join them now.
-		h.noteBackground()
-	}
 	for _, sa := range wake {
 		h.resumeAgent(sa)
 		if sa.harness() != nil {

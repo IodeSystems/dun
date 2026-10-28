@@ -443,15 +443,6 @@ var CompactionPause func() (resume func())
 type Harness struct {
 	// recapsSince counts recaps applied since the last main round's stat.
 	recapsSince atomic.Int32
-	// hadJobs: something went to the background this session (a command
-	// handed off, a sub-agent), so the jobs tool is in the tool set (jobs.go).
-	hadJobs atomic.Bool
-	// hadPeers: another live session of this owner was seen, or messaged
-	// this one, so dun_list and dun_msg are in the tool set (peers.go).
-	hadPeers atomic.Bool
-	// hasLoops: this session has a /loop, so loop_ctl is in the tool set
-	// (loopctl.go).
-	hasLoops atomic.Bool
 	// The last plain jobs read and its answer (jobs.go): a repeat that
 	// answered the same is turned into a wait.
 	jobsPollMu   sync.Mutex
@@ -607,16 +598,6 @@ type Harness struct {
 	// the lock sets applyPending and the turn applies it on the way out.
 	turnMu       sync.Mutex
 	applyPending atomic.Bool
-	// toolsGrew: a tool joined the set from inside a turn (jobs on the first
-	// background, read_saved on the first saved result). The dispatcher runs
-	// on the turn's goroutine, between rounds, so withRecapWatch rebuilds
-	// there rather than at the turn's end: the next round lists the tool the
-	// result just told the model to call. Under heredoc the grammar admits
-	// only listed tools, so at the turn's end would be too late.
-	toolsGrew atomic.Bool
-	// hadSpills: a result was saved under a ref, so read_saved is in the
-	// tool set (recap.go).
-	hadSpills atomic.Bool
 	// toolNames is the tool set's names as of the last rebuild, sorted.
 	toolNames atomic.Pointer[[]string]
 	// memory is the note store while the docs server runs, else nil. Set by

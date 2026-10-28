@@ -355,18 +355,3 @@ func (s *Service) announceServers(from *session) {
 		}
 	}
 }
-
-// announcePeers tells each of owner's loaded sessions how many others are
-// loaded (proto.PeerPresence): an engine lists dun_list and dun_msg only once
-// there was another. Called when an engine starts or exits.
-func (s *Service) announcePeers(owner string) {
-	var live []*session
-	for _, ses := range s.all() {
-		if ses.isMember(owner) && ses.loaded() {
-			live = append(live, ses)
-		}
-	}
-	for _, ses := range live {
-		_ = ses.sendLoaded(proto.NewCommand("", &proto.PeerPresence{Others: len(live) - 1}))
-	}
-}

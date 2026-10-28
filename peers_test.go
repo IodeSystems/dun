@@ -35,25 +35,20 @@ func peerCall(name, args string) llm.ToolCall {
 
 func TestPeerTools_OnlyForARootWithALink(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	start := func(p PeerLink, others bool) []string {
+	start := func(p PeerLink) []string {
 		h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}, Peers: p})
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer h.Close()
-		if others {
-			h.NotePeers()
-		}
 		return h.ToolNames()
 	}
-	// Alone under dund: not listed until another session is seen.
-	if names := start(&fakePeers{}, false); slices.Contains(names, "dun_list") || slices.Contains(names, "dun_msg") {
-		t.Errorf("under dund, alone: %v", names)
+	// Under dund: listed from the first request, alone or not (a tool that
+	// joined later changed the prompt's prefix — USER 2026-10-28).
+	if names := start(&fakePeers{}); !slices.Contains(names, "dun_list") || !slices.Contains(names, "dun_msg") {
+		t.Errorf("under dund: %v", names)
 	}
-	if names := start(&fakePeers{}, true); !slices.Contains(names, "dun_list") || !slices.Contains(names, "dun_msg") {
-		t.Errorf("under dund, with another session: %v", names)
-	}
-	if names := start(nil, true); slices.Contains(names, "dun_list") || slices.Contains(names, "dun_msg") {
+	if names := start(nil); slices.Contains(names, "dun_list") || slices.Contains(names, "dun_msg") {
 		t.Errorf("standalone: %v", names)
 	}
 	// A sub-agent never gets them: the link is the root's.

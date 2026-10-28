@@ -287,7 +287,6 @@ func (s *session) exited(eng Engine, err error) {
 		return
 	}
 	s.eng, s.running = nil, false
-	go s.svc.announcePeers(s.owner)
 	reason := "engine exited"
 	if err != nil {
 		reason = "engine exited: " + err.Error()
@@ -358,15 +357,6 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 	s.running, s.stopping, s.gaveUp = true, false, false
 	s.log.Append(proto.NewEvent(&proto.EngineState{State: "started"}))
 	go s.readEvents(eng, s.engDone, sc)
-	go s.svc.announcePeers(s.owner) // not under mu: it locks each session's
-	// A session with a loop: the new engine lists loop_ctl from its first
-	// turn, not only from the loop's next firing (schedule.go). Off this
-	// goroutine: mu is held here, and a write waits for the engine to read.
-	if s.svc.sched != nil {
-		if n := s.svc.sched.loops(s.id); n > 0 {
-			go func() { _ = s.sendLoaded(proto.NewCommand("", &proto.Loops{Active: n})) }()
-		}
-	}
 }
 
 // send writes a command to the engine, starting it first if need be.
