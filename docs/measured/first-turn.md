@@ -162,10 +162,13 @@ a loop does. First request, same method
 | Playwright scripted, poly-lsp direct | 5,274 | 4,909 | 11 |
 
 The short task. The first split build's recap description led with
-"Replace a span…": 2 of 8 runs recapped the whole task once it was done and
-checked the work again, 11–12 requests and 50k and 100k tokens
-(session-short-recap-split-2026-10-27.json; one other run there repeated a
-whole-file read of ci.log until the loop guard stopped it). The released
+"Replace a span…": in 2 of 8 runs, once the tests passed, the next response
+was only a recap call whose span began at the user's request; its result
+said "Continue from here", so the model checked the work again before it
+answered: 11 and 8 requests, 50k and 37k tokens. A third run (12 requests,
+100k) repeated a whole-file read of ci.log until the loop guard stopped it.
+session-short-recap-split-2026-10-27.json has 5 of the 8 runs (the first
+recap run and the read loop among them). The released
 description says "Mid-task… Not as a last step". 8 runs on it: all done,
 5–7 requests, no recaps, the whole task 19.3k–36.5k tokens (median 26.3k),
 86% served from the prompt cache (session-short-v0.1.8-2026-10-27.json).
