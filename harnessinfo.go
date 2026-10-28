@@ -127,9 +127,9 @@ func (h *Harness) writeHarnessInfo() {
 // and where the rest is (USER 2026-10-27: asked for a one-character icon,
 // the model answered 👷; say so, and the session).
 func (h *Harness) identityLine() string {
-	// The tool is not listed (USER 2026-10-27: "session should be hidden,
-	// and the system prompt should be 'call session() for harness info'"):
-	// this line is how the model learns it is there. No session id or
+	// The tool was hidden at first (USER 2026-10-27) and is listed again with
+	// a one-line description (USER 2026-10-28): a hidden tool cannot be
+	// called under a grammar. No session id or
 	// version in the line itself, so the prompt's text is the same in every
 	// session (the provider's cache) and nothing here goes stale.
 	return "\n\nYou are dun (" + Icon + "). Call session() for harness info (version, session, model, branch), " +

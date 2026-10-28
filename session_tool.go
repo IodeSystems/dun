@@ -30,19 +30,14 @@ func sessionToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "session"
-	td.Function.Description = "This session as JSON: `harness` is what runs you (dun, its version, the model, " +
-		"the session id, the git branch), and `state` is the task's goal, plan, todo and status. When a project's " +
-		"rules ask a commit, PR or report to name the agent, model or version, copy them from `harness`; do not " +
-		"guess. On a long task keep `state` current: a field you send replaces that field and the others are " +
-		"kept. You see the state again after a restart or a compaction. No arguments reads."
+	// One line: it is listed in every request (servers_runtime.go).
+	td.Function.Description = "What runs you (dun, version, model, session id, branch) and the task's " +
+		"goal/plan/todo/status, as JSON. Send a field to set it; no arguments reads."
+	str := map[string]any{"type": "string"}
+	list := map[string]any{"type": "array", "items": str}
 	td.Function.Parameters = map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"goal":   map[string]any{"type": "string", "description": "what the task is for, in one line"},
-			"plan":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "the steps, in order"},
-			"todo":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "the steps still open"},
-			"status": map[string]any{"type": "string", "description": "where the work is, e.g. in_progress, blocked, done"},
-		},
+		"type":       "object",
+		"properties": map[string]any{"goal": str, "plan": list, "todo": list, "status": str},
 	}
 	return td
 }

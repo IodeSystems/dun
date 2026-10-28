@@ -765,7 +765,12 @@ func (h *Harness) rebuildTools() {
 	// goal, plan, and open steps across context pressure and process restarts
 	// (session_tool.go). It also answers the old names harness and
 	// session_state, which are not in the list.
-	// Not listed: the identity line tells the model to call it (harnessinfo.go).
+	//
+	// Listed, with a one-line description. Hidden, the identity line's "call
+	// session()" named a tool the model could not call: llama.cpp's grammar
+	// (and heredoc mode) admits listed names only, so a model tried it in
+	// eval and mcpshell said "Unknown command 'session'" (USER 2026-10-28).
+	toolDefs = append(toolDefs, sessionToolDef())
 	dispatch = withSession(dispatch, h, report)
 	// memory only while a memory.save extension runs AND a turn.before one
 	// does: a note is worth writing only because the proactive search brings
