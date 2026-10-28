@@ -147,3 +147,25 @@ jobs is offered only once something is in the background. dun's first
 request: 3,276 tokens, 9 tools (was 3,925 with 12). The same short task, 5
 runs: all done, 5–6 requests, the whole task 25.1k–32.9k tokens (was
 38.6k–49.4k). pi 1.4.0 on the same task: 12.8k–17.3k.
+
+### v0.1.8 (2026-10-27)
+
+recap split (`read_saved` listed from the first saved result), `dun_list`
+and `dun_msg` listed only once another session runs, `loop_ctl` only while
+a loop does. First request, same method
+(first-turn-v0.1.8-2026-10-27.json):
+
+| dun | v0.1.7 | v0.1.8 | tools |
+|---|---:|---:|---:|
+| no MCP servers | 3,276 | 2,911 | 8 |
+| Playwright + poly-lsp, direct | 10,157 | 9,751 | 36 |
+| Playwright scripted, poly-lsp direct | 5,274 | 4,909 | 11 |
+
+The short task. The first split build's recap description led with
+"Replace a span…": 2 of 8 runs recapped the whole task once it was done and
+checked the work again, 11–12 requests and 50k and 100k tokens
+(session-short-recap-split-2026-10-27.json; one other run there repeated a
+whole-file read of ci.log until the loop guard stopped it). The released
+description says "Mid-task… Not as a last step". 8 runs on it: all done,
+5–7 requests, no recaps, the whole task 19.3k–36.5k tokens (median 26.3k),
+86% served from the prompt cache (session-short-v0.1.8-2026-10-27.json).

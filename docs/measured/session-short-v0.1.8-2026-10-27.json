@@ -1,0 +1,182 @@
+[
+ {
+  "agent": "dun",
+  "run": 1,
+  "rc": 0,
+  "secs": 10,
+  "done": true,
+  "check": "OK",
+  "requests": 5,
+  "first": 2961,
+  "tenth": null,
+  "last": 5327,
+  "largest": 5327,
+  "total": 22138,
+  "cached": 16795,
+  "per_request": [
+   2961,
+   4240,
+   4465,
+   5145,
+   5327
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 2,
+  "rc": 0,
+  "secs": 10,
+  "done": true,
+  "check": "OK",
+  "requests": 5,
+  "first": 2961,
+  "tenth": null,
+  "last": 5387,
+  "largest": 5387,
+  "total": 23090,
+  "cached": 20132,
+  "per_request": [
+   2961,
+   4282,
+   5139,
+   5321,
+   5387
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 3,
+  "rc": 0,
+  "secs": 12,
+  "done": true,
+  "check": "OK",
+  "requests": 7,
+  "first": 2961,
+  "tenth": null,
+  "last": 6030,
+  "largest": 6030,
+  "total": 32948,
+  "cached": 29339,
+  "per_request": [
+   2961,
+   3117,
+   4335,
+   4972,
+   5652,
+   5881,
+   6030
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 4,
+  "rc": 0,
+  "secs": 8,
+  "done": true,
+  "check": "OK",
+  "requests": 6,
+  "first": 2961,
+  "tenth": null,
+  "last": 5489,
+  "largest": 5489,
+  "total": 27666,
+  "cached": 24602,
+  "per_request": [
+   2961,
+   4240,
+   4478,
+   5158,
+   5340,
+   5489
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 5,
+  "rc": 0,
+  "secs": 7,
+  "done": true,
+  "check": "OK",
+  "requests": 5,
+  "first": 2961,
+  "tenth": null,
+  "last": 4444,
+  "largest": 4444,
+  "total": 19317,
+  "cached": 17302,
+  "per_request": [
+   2961,
+   3524,
+   4093,
+   4295,
+   4444
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 6,
+  "rc": 0,
+  "secs": 11,
+  "done": true,
+  "check": "OK",
+  "requests": 5,
+  "first": 2961,
+  "tenth": null,
+  "last": 6588,
+  "largest": 6588,
+  "total": 27446,
+  "cached": 23287,
+  "per_request": [
+   2961,
+   5335,
+   6190,
+   6372,
+   6588
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 7,
+  "rc": 0,
+  "secs": 10,
+  "done": true,
+  "check": "OK",
+  "requests": 5,
+  "first": 2961,
+  "tenth": null,
+  "last": 6100,
+  "largest": 6100,
+  "total": 25229,
+  "cached": 21558,
+  "per_request": [
+   2961,
+   4282,
+   5852,
+   6034,
+   6100
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 8,
+  "rc": 0,
+  "secs": 13,
+  "done": true,
+  "check": "OK",
+  "requests": 6,
+  "first": 2961,
+  "tenth": null,
+  "last": 7815,
+  "largest": 7815,
+  "total": 36476,
+  "cached": 31086,
+  "per_request": [
+   2961,
+   3117,
+   7267,
+   7567,
+   7749,
+   7815
+  ]
+ }
+]

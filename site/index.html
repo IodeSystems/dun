@@ -335,12 +335,12 @@
     <div class="save-grid">
       <div class="save">
         <div class="label">scripted MCP tools · playwright + poly-lsp</div>
-        <div class="hero-n">&minus;4,883<small>tokens, every request (48%)</small></div>
-        <p class="sub">37 tool definitions sent become 12. The model still drives Playwright, through <code>eval</code>. poly-lsp stays direct.</p>
+        <div class="hero-n">&minus;4,842<small>tokens, every request (50%)</small></div>
+        <p class="sub">36 tool definitions sent become 11. The model still drives Playwright, through <code>eval</code>. poly-lsp stays direct.</p>
         <p class="legend" aria-hidden="true"><span class="k"><i></i>still sent</span><span class="g"><i></i>no longer sent</span></p>
-        <ul class="stack" aria-label="tokens before you type with the same MCP servers: 10,157 direct, 5,274 scripted">
-          <li class="row"><span class="top"><span>servers connected directly</span><b>10,157</b></span><span class="track" aria-hidden="true"><span class="kept" style="width:100%"></span></span></li>
-          <li class="row us"><span class="top"><span>Playwright scripted</span><b>5,274</b></span><span class="track" aria-hidden="true"><span class="kept" style="width:51.9%"></span><span class="gone" style="width:48.1%">&minus;4,883</span></span></li>
+        <ul class="stack" aria-label="tokens before you type with the same MCP servers: 9,751 direct, 4,909 scripted">
+          <li class="row"><span class="top"><span>servers connected directly</span><b>9,751</b></span><span class="track" aria-hidden="true"><span class="kept" style="width:100%"></span></span></li>
+          <li class="row us"><span class="top"><span>Playwright scripted</span><b>4,909</b></span><span class="track" aria-hidden="true"><span class="kept" style="width:50.3%"></span><span class="gone" style="width:49.7%">&minus;4,842</span></span></li>
         </ul>
       </div>
       <div class="save">
@@ -359,9 +359,9 @@
       <table>
         <thead><tr><th scope="col">requests</th><th scope="col">scripted MCP</th><th scope="col">surfaced skills</th></tr></thead>
         <tbody>
-          <tr><td>1</td><td>4,883</td><td>941</td></tr>
-          <tr><td>10</td><td>48,830</td><td>9,410</td></tr>
-          <tr><td>50</td><td>244,150</td><td>47,050</td></tr>
+          <tr><td>1</td><td>4,842</td><td>941</td></tr>
+          <tr><td>10</td><td>48,420</td><td>9,410</td></tr>
+          <tr><td>50</td><td>242,100</td><td>47,050</td></tr>
         </tbody>
       </table>
       <p class="fine" style="color:var(--dim);font-size:.82rem;margin:14px 0 0">This table is arithmetic, not a separate measurement: each measured per-request saving multiplied by the number of requests. The two savings were measured in separate setups, so the columns are not added together.</p>
@@ -371,7 +371,7 @@
       <div><b>less to process</b>A shorter prompt is less for the model to work through before it answers. Speed was not measured.</div>
       <div><b>room</b>The window holds your task, not a catalogue of tools you did not use.</div>
     </div>
-    <p class="fine" style="color:var(--dim);font-size:.82rem;margin:20px 0 0;max-width:820px">How measured: each setup's first request, after "hi", from an empty folder, tokens counted by one model (Qwen 27B on llama.cpp, its chat template included), clean installs, 2026-10-27. MCP: dun with Playwright MCP and poly-lsp connected directly (10,157 tokens, 37 tools) versus Playwright scripted in mcpshell, poly-lsp direct (5,274 tokens, 12 tools); capability checked live. Skills: 14 real skills listed cost 941 tokens a request; surfaced, none. The skills figure was measured before the latest prompt cuts; the per-request difference still holds. The method is <code>tools/promptsize</code> in the repository.</p>
+    <p class="fine" style="color:var(--dim);font-size:.82rem;margin:20px 0 0;max-width:820px">How measured: each setup's first request, after "hi", from an empty folder, tokens counted by one model (Qwen 27B on llama.cpp, its chat template included), clean installs, 2026-10-27. MCP: dun with Playwright MCP and poly-lsp connected directly (9,751 tokens, 36 tools) versus Playwright scripted in mcpshell, poly-lsp direct (4,909 tokens, 11 tools); capability checked live. Skills: 14 real skills listed cost 941 tokens a request; surfaced, none. The skills figure was measured before the latest prompt cuts; the per-request difference still holds. The method is <code>tools/promptsize</code> in the repository.</p>
   </div>
 </section>
 
@@ -410,9 +410,9 @@
     <div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(235px,1fr))">
       <div class="stat">
         <div class="label">playwright + poly-lsp · every request</div>
-        <div class="big"><span class="from">10,157</span><span class="arrow">→</span><span class="to">5,274</span></div>
-        <div class="bars" aria-hidden="true"><div style="width:100%"></div><div class="after" style="width:54.8%"></div></div>
-        <p>Tokens before you type, with Playwright's MCP server connected directly, then scripted (poly-lsp stays direct). 48% less, on every request of the session.</p>
+        <div class="big"><span class="from">9,751</span><span class="arrow">→</span><span class="to">4,909</span></div>
+        <div class="bars" aria-hidden="true"><div style="width:100%"></div><div class="after" style="width:50.3%"></div></div>
+        <p>Tokens before you type, with Playwright's MCP server connected directly, then scripted (poly-lsp stays direct). 50% less, on every request of the session.</p>
       </div>
       <div class="stat">
         <div class="label">a 112-tool internal MCP server · from one real setup</div>
@@ -434,33 +434,33 @@
     <div class="compare">
       <p class="label">tokens before you type · the same two MCP servers · clean installs · dun = 1.0×</p>
       <ul class="cmp" aria-label="tokens before you type, same MCP servers, relative to dun">
-        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">3.8× · 19,959</span></li>
-        <li><span class="who">Claude Code 2.1.311 ¹</span><span class="bar"><span style="width:58.3%"></span></span><span class="n">2.2× · 11,643</span></li>
-        <li><span class="who">dun, servers direct</span><span class="bar"><span style="width:50.9%"></span></span><span class="n">1.9× · 10,157</span></li>
-        <li class="us"><span class="who">dun, Playwright scripted</span><span class="bar"><span style="width:26.4%"></span></span><span class="n">1.0× · 5,274</span></li>
+        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">4.1× · 19,959</span></li>
+        <li><span class="who">Claude Code 2.1.311 ¹</span><span class="bar"><span style="width:58.3%"></span></span><span class="n">2.4× · 11,643</span></li>
+        <li><span class="who">dun, servers direct</span><span class="bar"><span style="width:48.9%"></span></span><span class="n">2.0× · 9,751</span></li>
+        <li class="us"><span class="who">dun, Playwright scripted</span><span class="bar"><span style="width:24.6%"></span></span><span class="n">1.0× · 4,909</span></li>
       </ul>
       <p class="fine">Each agent's first request after "hi", from an empty folder, counted by one model (Qwen 27B on llama.cpp, its chat template included), 2026-10-27. Servers: Playwright MCP 0.0.83 and poly-lsp-mcp. ¹ Claude Code sends MCP tools as names and loads a schema when the model searches for it. In dun's scripted run, poly-lsp stays direct (it cannot be scripted). The method is <code>tools/promptsize</code> in the repository.</p>
     </div>
     <div class="compare">
       <p class="label">tokens before you type · no MCP servers · clean installs · dun = 1.0×</p>
       <ul class="cmp" aria-label="tokens before you type, no MCP servers, relative to dun">
-        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">4.2× · 13,704</span></li>
-        <li><span class="who">Claude Code 2.1.311</span><span class="bar"><span style="width:82.9%"></span></span><span class="n">3.5× · 11,366</span></li>
-        <li class="us"><span class="who">dun, 9 tools</span><span class="bar"><span style="width:23.9%"></span></span><span class="n">1.0× · 3,276</span></li>
+        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">4.7× · 13,704</span></li>
+        <li><span class="who">Claude Code 2.1.311</span><span class="bar"><span style="width:82.9%"></span></span><span class="n">3.9× · 11,366</span></li>
+        <li class="us"><span class="who">dun, 8 tools</span><span class="bar"><span style="width:21.2%"></span></span><span class="n">1.0× · 2,911</span></li>
       </ul>
-      <p class="fine">dun v0.1.7. It was 5,204 tokens before this week's prompt cuts.</p>
+      <p class="fine">dun v0.1.8. It was 5,204 tokens before this week's prompt cuts. A tool joins the request when it has a use: <code>jobs</code> once something runs in the background, <code>read_saved</code> once a result is saved, <code>dun_list</code> and <code>dun_msg</code> once another session runs, <code>loop_ctl</code> while a loop does.</p>
     </div>
     <div class="why">
-      <div><b>with the same servers</b>opencode sends 3.8 times what dun sends, and Claude Code 2.2 times, before you type a word. Claude Code's tool search keeps MCP schemas out too, on a base of 11,366.</div>
+      <div><b>with the same servers</b>opencode sends 4.1 times what dun sends, and Claude Code 2.4 times, before you type a word. Claude Code's tool search keeps MCP schemas out too, on a base of 11,366.</div>
     </div>
     <div class="compare">
-      <p class="label">a whole task · tokens the model processed, start to finish · same model, 3–5 runs each</p>
+      <p class="label">a whole task · tokens the model processed, start to finish · same model, 3–8 runs each</p>
       <ul class="cmp" aria-label="tokens for a whole task, relative to dun">
-        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">2.8× · 74–89k</span></li>
-        <li><span class="who">Claude Code 2.1.311</span><span class="bar"><span style="width:89.9%"></span></span><span class="n">2.5× · 67–80k</span></li>
-        <li class="us"><span class="who">dun v0.1.7</span><span class="bar"><span style="width:35.6%"></span></span><span class="n">1.0× · 25–33k</span></li>
+        <li><span class="who">opencode 1.15.3</span><span class="bar"><span style="width:100%"></span></span><span class="n">2.9× · 74–89k</span></li>
+        <li><span class="who">Claude Code 2.1.311</span><span class="bar"><span style="width:89.9%"></span></span><span class="n">2.6× · 67–80k</span></li>
+        <li class="us"><span class="who">dun v0.1.8</span><span class="bar"><span style="width:40.4%"></span></span><span class="n">1.0× · 19–36k</span></li>
       </ul>
-      <p class="fine">The task: a repository whose CI failed, a 218 KB log with the real error buried in it, an off-by-one to fix, done when the tests pass. Every run of every agent got it done. Each agent ran on a fresh copy, through a relay that recorded every request's usage, on the same model (Qwen 27B through llama.cpp), 2026-10-27; the ratio compares midpoints. The provider's prompt cache served 89% of dun's prompt tokens, 82% of opencode's and 80% of Claude Code's. The method is <code>tools/promptsize/session.py</code> in the repository.</p>
+      <p class="fine">The task: a repository whose CI failed, a 218 KB log with the real error buried in it, an off-by-one to fix, done when the tests pass. Every run of every agent got it done. Each agent ran on a fresh copy, through a relay that recorded every request's usage, on the same model (Qwen 27B through llama.cpp), 2026-10-27; the ratio compares midpoints. The provider's prompt cache served 86% of dun's prompt tokens, 82% of opencode's and 80% of Claude Code's. The method is <code>tools/promptsize/session.py</code> in the repository.</p>
     </div>
   </div>
 </section>
@@ -472,13 +472,15 @@
     <p class="intro">More auto-context discovery, less every-time cost. And a few things that keep a long session, and a weak model, under control.</p>
     <div class="grid">
       <div class="card"><span class="cmd">discovery</span><h3>Context surfaced when a turn needs it</h3>
-        <p><code>/remember</code> notes (<code>/memories</code> lists them),, surfaced when a turn needs them. raglit's index of your docs and files, kept outside the request and searched when a turn fits. Skills, offered only when they fit. poly-lsp for code navigation by definition and reference.</p></div>
+        <p><code>/remember</code> notes (<code>/memories</code> lists them), surfaced when a turn needs them. raglit's index of your docs and files, kept outside the request and searched when a turn fits. Skills, offered only when they fit. poly-lsp for code navigation by definition and reference.</p></div>
       <div class="card"><span class="cmd">loop detection</span><h3>We have loop detection</h3>
         <p>For killing runaway LLMs and tool-call loops. An identical call repeated is refused. An exchange that keeps returning the same result is warned once, and the warning says when the turn will be stopped; it is stopped there, not after more identical round-trips. A poll asked again with nothing changed waits instead of looping.</p></div>
       <div class="card"><span class="cmd">context control</span><h3>A window that stays bounded</h3>
         <p>Output over 20,000 characters is cut to its start and end, with the whole kept on disk (456,772 → 32,916 tokens on one task). Recap replaces churn (65,056 → 1,057).</p></div>
       <div class="card"><span class="cmd">sub-agents</span><h3>In parallel, each in isolation</h3>
-        <p>Sub-agents run at the same time. Each gets its own git worktree and branch, a Docker container, or no project.</p></div>
+        <p>Sub-agents run at the same time. Each gets its own git worktree and branch, a Docker container, or no project. <code>/isolate docker image</code> takes an image or a Dockerfile.</p></div>
+      <div class="card"><span class="cmd">/schedule · /loop</span><h3>Messages that wait for their time</h3>
+        <p>Schedule a message into a session for later, then push its time or edit it before it goes. dund sends it with no terminal open. <code>/loop</code> repeats a prompt on an interval, or lets the model set the pace with <code>loop_ctl</code>.</p></div>
       <div class="card"><span class="cmd">dund</span><h3>Sessions that outlive the terminal</h3>
         <p>A local service keeps your sessions. Resume one from another terminal, a browser or a phone.</p></div>
       <div class="card"><span class="cmd">visible work</span><h3>Every step on screen</h3>
@@ -600,7 +602,7 @@
         <li>Reasoning effort per dialect: llama.cpp, OpenRouter, OpenAI-style via LiteLLM, Anthropic</li>
       </ul></dd></div>
       <div><dt>tools</dt><dd><ul>
-        <li>exec in the host or in Docker</li>
+        <li>exec in the host or in Docker (your image or Dockerfile)</li>
         <li>File tools: read, grep, list, edit, write</li>
         <li><code>ask_user</code></li>
         <li>Sub-agents in parallel: worktree, Docker or no project</li>
@@ -629,6 +631,8 @@
         <li>Resume and persist</li>
         <li>Web and phone clients</li>
         <li>Worktree isolation</li>
+        <li>Scheduled messages: <code>/schedule</code>, push, edit, cancel</li>
+        <li><code>/loop</code>, paced by interval or by the model</li>
       </ul></dd></div>
       <div><dt>interfaces</dt><dd><ul>
         <li>TUI</li>
