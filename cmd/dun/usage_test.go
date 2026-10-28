@@ -150,3 +150,28 @@ func TestUsage_ScriptedSavings(t *testing.T) {
 		}
 	}
 }
+
+// The first recap of each session: after which request, at what prompt
+// size, and how much it removed (USER 2026-10-27).
+func TestUsage_FirstRecap(t *testing.T) {
+	noon(t)
+	dir := t.TempDir()
+	at := usageNow().Add(-time.Hour).UTC()
+	line := func(i int, sess string, prompt, recaps int) string {
+		return fmt.Sprintf(`{"t":%q,"session":%q,"role":"main","model":"m","prompt":%d,"completion":1,"recaps":%d}`,
+			at.Add(time.Duration(i)*time.Second).Format(time.RFC3339), sess, prompt, recaps)
+	}
+	lines := []string{line(1, "a", 1000, 0), line(2, "a", 9000, 0), line(3, "a", 3000, 1), line(4, "a", 3500, 1),
+		line(5, "b", 800, 0), line(6, "b", 900, 0)}
+	if err := os.WriteFile(filepath.Join(dir, "rounds-x.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep := readUsage(dir, usageNow())
+	rc := rep.Recap
+	if rc.Sessions != 2 || rc.Recapped != 1 || rc.AtRound[0] != 2 || rc.Before[0] != 9000 || rc.Removed[0] != 6000 {
+		t.Fatalf("%+v", rc)
+	}
+	if out := renderUsage(rep); !strings.Contains(out, "recap: 1 of 2 sessions recapped; the first after request 2 (median), at 9,000 tokens of prompt, removing 6,000") {
+		t.Errorf("%s", out)
+	}
+}

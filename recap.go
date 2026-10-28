@@ -271,6 +271,7 @@ func (h *Harness) applyRecap(sp recapSpan, summary, userEdit string) (string, er
 	}
 	h.store.recap(sp.Subsumes, replacement, citation, anchorID, userEdit)
 	h.cache.noteRecap()
+	h.recapsSince.Add(1) // the next round's stat says a recap happened (roundstats.go)
 	return citation.Content, nil
 }
 

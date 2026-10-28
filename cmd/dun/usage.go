@@ -95,11 +95,26 @@ type usageReport struct {
 	// each round). USER 2026-10-27: "how much I'm saving with my corp's 112
 	// tools being embedded in mcpshell".
 	Scripted map[string]*scriptedSaving `json:"scripted,omitempty"`
+	// Recap is when sessions first recap (the ledger's "recaps" field on
+	// the round after one): USER 2026-10-27, keep stats about the first
+	// recap.
+	Recap recapStats `json:"recap"`
 	// PromptPrice is the average price of a prompt token over the rounds
 	// that reported a cost: the full rate, cache discounts not separated.
 	PromptPrice float64  `json:"prompt_price,omitempty"`
 	Currency    string   `json:"currency,omitempty"`
 	Notes       []string `json:"notes,omitempty"`
+}
+
+// recapStats is, over sessions with main rounds, how many recapped and
+// where the first recap came: the request it followed, the prompt just
+// before it, and how much the next prompt was smaller.
+type recapStats struct {
+	Sessions int   `json:"sessions"`
+	Recapped int   `json:"recapped"`
+	AtRound  []int `json:"at_round,omitempty"` // per recapping session
+	Before   []int `json:"before,omitempty"`   // prompt tokens of the round before the first recap
+	Removed  []int `json:"removed,omitempty"`  // that prompt less the next one
 }
 
 // scriptedSaving is one scripted server's schemas left out of requests.
@@ -122,6 +137,8 @@ var roleNote = map[string]string{
 func readUsage(dir string, now time.Time) usageReport {
 	rep := usageReport{Now: now, ByModel: map[string]*usageTotals{}, ByRole: map[string]*usageTotals{}, Scripted: map[string]*scriptedSaving{}}
 	costSum, costPrompt := 0.0, 0
+	type sess struct{ rounds, prev, first int }
+	sessions := map[string]*sess{}
 	y, m, d := now.Date()
 	today := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 	week := now.AddDate(0, 0, -7)
@@ -151,6 +168,21 @@ func readUsage(dir string, now time.Time) usageReport {
 				if rep.Currency == "" {
 					rep.Currency = r.Currency
 				}
+			}
+			if r.Session != "" && r.Role == "main" {
+				ss := sessions[r.Session]
+				if ss == nil {
+					ss = &sess{}
+					sessions[r.Session] = ss
+				}
+				ss.rounds++
+				if r.Recaps > 0 && ss.first == 0 {
+					ss.first = ss.rounds
+					rep.Recap.AtRound = append(rep.Recap.AtRound, ss.rounds-1)
+					rep.Recap.Before = append(rep.Recap.Before, ss.prev)
+					rep.Recap.Removed = append(rep.Recap.Removed, ss.prev-r.Prompt)
+				}
+				ss.prev = r.Prompt
 			}
 			for id, n := range r.Scripted {
 				s := rep.Scripted[id]
@@ -189,6 +221,8 @@ func readUsage(dir string, now time.Time) usageReport {
 		}
 	}
 	rep.Periods = []usagePeriod{{"today", *pt}, {"last 7 days", *pw}, {"all time", *pa}}
+	rep.Recap.Sessions = len(sessions)
+	rep.Recap.Recapped = len(rep.Recap.AtRound)
 	if costPrompt > 0 {
 		rep.PromptPrice = costSum / float64(costPrompt)
 	}
@@ -368,6 +402,14 @@ func renderUsage(r usageReport) string {
 		}
 		b.WriteString("    the window room is saved on every request; money less than shown where the provider caches the prompt (cached tokens cost less)\n")
 	}
+	if rc := r.Recap; rc.Sessions > 0 {
+		fmt.Fprintf(&b, "\nrecap: %d of %d sessions recapped", rc.Recapped, rc.Sessions)
+		if rc.Recapped > 0 {
+			fmt.Fprintf(&b, "; the first after request %s (median), at %s tokens of prompt, removing %s",
+				grouped(median(rc.AtRound)), grouped(median(rc.Before)), grouped(median(rc.Removed)))
+		}
+		b.WriteString("\n")
+	}
 	b.WriteString("\nleft: ")
 	bd := r.Budget
 	if bd.Status != "reported" {
@@ -405,3 +447,13 @@ func renderUsage(r usageReport) string {
 // usageNow is the report's clock; a test sets it (the v0.1.6 release run,
 // at 00:48 UTC, found "1h ago" was yesterday).
 var usageNow = time.Now
+
+// median of xs (0 for none).
+func median(xs []int) int {
+	if len(xs) == 0 {
+		return 0
+	}
+	c := append([]int(nil), xs...)
+	sort.Ints(c)
+	return c[len(c)/2]
+}

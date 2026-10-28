@@ -64,6 +64,11 @@ type RoundStat struct {
 	Prefix   int            `json:"prefix,omitempty"`
 	Schemas  map[string]int `json:"schemas,omitempty"`
 	Scripted map[string]int `json:"scripted,omitempty"`
+	// Recaps is how many recaps were applied since the session's previous
+	// round: this round's prompt is after them, the previous one's before.
+	// When a session first recaps, and at what size (USER 2026-10-27: keep
+	// stats about the first recap). Main-session rounds only.
+	Recaps int `json:"recaps,omitempty"`
 }
 
 // PrefixProcessed reports whether this round processed its prefix rather than
@@ -138,6 +143,7 @@ func (h *Harness) noteRound(src SpendSource, u llm.Usage) {
 			}
 		}
 		r.Scripted = h.scriptedStandalone()
+		r.Recaps = int(h.recapsSince.Swap(0))
 	}
 	rs := &h.rounds
 	rs.mu.Lock()

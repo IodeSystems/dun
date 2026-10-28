@@ -431,6 +431,8 @@ var CompactionPause func() (resume func())
 
 // Harness is a running dun: the MCP manager + an agent Session over its tools.
 type Harness struct {
+	// recapsSince counts recaps applied since the last main round's stat.
+	recapsSince atomic.Int32
 	// hadJobs: something went to the background this session (a command
 	// handed off, a sub-agent), so the jobs tool is in the tool set (jobs.go).
 	hadJobs atomic.Bool
