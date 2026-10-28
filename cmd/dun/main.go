@@ -1432,27 +1432,13 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
-		// /file [add|remove <path>]: paths outside the workspace the file
-		// tools may use, for this session (dun/fileadd.go).
+		// /file: paths outside the workspace the file tools may use, at a
+		// scope, each read or write and indexed or not (dun/fileadd.go).
 		if id == "files" {
-			verb, path, _ := strings.Cut(strings.TrimSpace(action), " ")
-			var msg string
-			var err error
-			switch verb {
-			case "add":
-				msg, err = h.AddPath(path)
-			case "remove":
-				msg, err = h.RemovePath(path)
-			default:
-				if ps := h.AddedPaths(); len(ps) > 0 {
-					msg = "files outside the workspace dun may read and change (this session):\n  " + strings.Join(ps, "\n  ") + "\n/file remove <path> takes one back"
-				} else {
-					msg = "no files outside the workspace are open to dun · /file add <path> opens one for this session"
-				}
-			}
+			msg, err := fileCmd(h, action)
 			if err != nil {
 				msg = "file: " + err.Error()
-			} else if verb != "" {
+			} else if strings.TrimSpace(action) != "" {
 				h.Aside("[control/file] " + msg)
 			}
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})

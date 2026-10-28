@@ -351,6 +351,12 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			m.openSwitches("indexes")
 			return nil
 		}
+		// Bare /file: the paths outside the workspace, as a table like
+		// /mcp's (dun/fileadd.go; USER 2026-10-28).
+		if name == "file" && len(args) == 0 {
+			m.openSwitches("paths")
+			return nil
+		}
 		// Bare /effort and /retry: the picker, which is the palette's choices
 		// for it (USER 2026-10-26: empty shows the modes).
 		if (name == "effort" || name == "retry") && len(args) == 0 {

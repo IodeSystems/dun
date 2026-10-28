@@ -680,7 +680,8 @@ func (h *Harness) rebuildTools() {
 	ft := h.fileTools()
 	if ft != nil {
 		toolDefs = append(toolDefs, ft.Defs()...)
-		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h.addedWriters(), report)
+		added, readOnly := h.addedWriters()
+		dispatch = withFiles(dispatch, ft, h.tmpReaders(), added, readOnly, report)
 	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())

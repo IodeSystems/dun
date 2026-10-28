@@ -15,6 +15,18 @@ into its indexes named one by one (raglit's list, cached). The raglit
 server's own switch stays in `/mcp`; its verbs (`setup`, `watch`, `include`,
 `workspace`, …) are `/rag <verb>`, and `/rag status` is the capability report.
 
+`/file` (USER 2026-10-28) is the paths outside the workspace the file tools
+may use, switched the same way (`fileadd.go`): each scope (`paths.json`
+global, project, and the session's sidecar) may name a path, with on/off, a
+mode (read, the default, or write) and, for a directory, index (on by
+default). The nearest scope that sets a field decides it. A read-only path
+refuses `file_edit` and `file_write` with the command that opens it for
+writing (`withFiles`). An indexed directory is watched by raglit into an
+index of its own (`file-<name>-<hash>` in this project's namespace) and
+switched on in `/rag` at the same scope; index off switches it off there and
+keeps it. A session's old `<session>.files.json` list (read and write) is
+read into its `paths.json` once.
+
 A global switch (on/off, mode, a tool, a server added or removed) is a write
 of `~/.dun/mcp.json`, and every session follows it. A turn re-reads the
 layers at its start (`followServers`), and under dund the write is also

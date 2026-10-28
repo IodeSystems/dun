@@ -3,6 +3,7 @@ package dun
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -230,7 +231,7 @@ func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args strin
 }
 
 // withFiles routes the file tools to the toolset and reports each call.
-func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp, added []*filetools.Toolset, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp, added []*filetools.Toolset, readOnly map[*filetools.Toolset]bool, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if !ts.Handles(tc.Function.Name) {
 			return inner(ctx, tc)
@@ -247,6 +248,11 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp, added []*
 			route, tc.Function.Arguments = t, args
 		} else if hint := outsideHint(ts, tc.Function.Name, tc.Function.Arguments); hint != "" {
 			out = hint
+		}
+		// A path open for reading only (/file, mode read): no edit, no write.
+		if out == "" && readOnly[route] && (tc.Function.Name == ts.Name(filetools.Edit) || tc.Function.Name == ts.Name(filetools.Write)) {
+			out = fmt.Sprintf("ERROR: %s is open to dun for reading only. To change it the user runs /file mode %s write "+
+				"(the path, or the directory added). Do not work around this with exec.", route.Root(), route.Root())
 		}
 		if out == "" {
 			out = route.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)

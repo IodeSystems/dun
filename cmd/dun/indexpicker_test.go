@@ -40,3 +40,26 @@ func TestIndexPicker_RaglitAttach(t *testing.T) {
 		t.Errorf("sent %s", rec.String())
 	}
 }
+
+// Bare /file is the paths table (USER 2026-10-28): each path, its scopes,
+// and read or write and indexed in its row.
+func TestFilePicker_BareFileOpensTheTable(t *testing.T) {
+	v := newVtui(140, 30)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	rec := &recWC{}
+	v.m.proc = &dunProc{stdin: rec}
+	v.m = typeStr(v.m, "/file")
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(rec.String(), `"paths"`) || v.m.switchesWant != "paths" {
+		t.Fatalf("not asked: %s", rec.String())
+	}
+	v.event(map[string]any{"type": "switches", "kind": "paths", "slash": "file", "items": []any{
+		map[string]any{"name": "/home/me/notes", "source": "read · indexed (p:file-notes-a1b2c3)", "on": true, "from": "global", "global": "on"},
+	}})
+	got := v.view()
+	for _, want := range []string{"/file · 1 of 1 on", "1 paths", "● /home/me/notes", "read · indexed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lacks %q:\n%s", want, got)
+		}
+	}
+}
