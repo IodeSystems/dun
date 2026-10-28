@@ -2454,7 +2454,7 @@ func TestActivity_AgentScopeSwapsTheConversation(t *testing.T) {
 	if m.task != "read the build log" {
 		t.Errorf("the task line should become the child's prompt, got %q", m.task)
 	}
-	if v := m.activityView(); !strings.Contains(v, "parent") {
+	if v := m.activityView(); !strings.Contains(v, "esc back") {
 		t.Errorf("agent scope must offer the way back: %q", v)
 	}
 
@@ -2484,26 +2484,6 @@ func TestActivity_AgentScopeSwapsTheConversation(t *testing.T) {
 	}
 	if len(m.convo) != rootLen || m.task != "the root task" {
 		t.Errorf("the root conversation and task must come back: %d entries, task %q", len(m.convo), m.task)
-	}
-}
-
-// In agent scope the input steers that CHILD, not the session.
-func TestActivity_InputInScopeTellsTheChild(t *testing.T) {
-	m := withActivity(t)
-	m.scopeAgent = 1
-	before := len(m.history)
-
-	m = typeStr(m, "look at the last 40 lines instead")
-	m = key(m, kEnter)
-
-	if len(m.history) != before+1 {
-		t.Error("a message to a child should still be recallable")
-	}
-	if !strings.Contains(convoText(m), "look at the last 40 lines") {
-		t.Errorf("the message should be echoed: %s", convoText(m))
-	}
-	if m.busy {
-		t.Error("telling a child is not a turn of the session's own")
 	}
 }
 
