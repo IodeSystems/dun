@@ -50,6 +50,9 @@ const (
 	WorkTool  = "tool"
 	WorkRecap = "recap"
 	WorkNote  = "note"
+	// WorkReply is the model's answer at a turn's end: the account can say
+	// what was answered, not only infer it from tool results.
+	WorkReply = "reply"
 )
 
 // Bounds on what one event keeps, and on what one account's prompt carries.
@@ -254,6 +257,8 @@ func (e WorkEvent) line(max int) string {
 	switch e.Kind {
 	case WorkInput:
 		return "you: " + workClip(e.Text, max)
+	case WorkReply:
+		return "dun: " + workClip(e.Text, max)
 	case WorkTool:
 		if e.Result == "" {
 			return "tool " + e.Text
@@ -348,6 +353,8 @@ func (e WorkEvent) eventText() string {
 	switch e.Kind {
 	case WorkInput:
 		return at + " INPUT: " + e.Text
+	case WorkReply:
+		return at + " REPLY: " + e.Text
 	case WorkRecap:
 		return at + " RECAP: " + e.Text
 	case WorkTool:
@@ -511,6 +518,13 @@ func (h *Harness) workRecord(kind, text, result string) {
 
 func (h *Harness) workInput(text string) {
 	h.workRecord(WorkInput, clipBlock(text, workInputMax), "")
+}
+
+// workReply records a turn's final reply, bounded as an input is.
+func (h *Harness) workReply(text string) {
+	if strings.TrimSpace(text) != "" {
+		h.workRecord(WorkReply, clipBlock(text, workInputMax), "")
+	}
 }
 
 func (h *Harness) workTool(name, result string) {

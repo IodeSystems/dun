@@ -1533,6 +1533,7 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error) {
 	res, err := h.runTurnWithRescue(ctx, h.Session.Turn)
 	if err == nil {
+		h.workReply(res.Reply) // the worklog's open task (worklog.go)
 		// Not the turn's ctx: the caller cancels it once the turn returns,
 		// which is before the fork has started (live, every trigger failed
 		// "context canceled").

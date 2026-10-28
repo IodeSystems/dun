@@ -216,3 +216,22 @@ func TestBoundLines(t *testing.T) {
 		t.Errorf("under the bound, all kept: %d", len(got))
 	}
 }
+
+// A turn's final reply is an event of the open task, so the account can say
+// what was answered.
+func TestWorklog_RecordsTheReply(t *testing.T) {
+	h := worklogHarness(t, &cannedRephraseRunner{})
+	mustWork(t, h, "start Count lines")
+	h.workReply("notes.txt has 1 line.")
+	h.workReply("   ") // an empty reply is not an event
+	ev := h.worklogLocked().task(1).Events
+	if len(ev) != 1 || ev[0].Kind != WorkReply || ev[0].Text != "notes.txt has 1 line." {
+		t.Fatalf("events: %+v", ev)
+	}
+	if v := mustWork(t, h, "view"); !strings.Contains(v, "dun: notes.txt has 1 line.") {
+		t.Errorf("view:\n%s", v)
+	}
+	if got := ev[0].eventText(); !strings.Contains(got, "REPLY: notes.txt has 1 line.") {
+		t.Errorf("prompt text: %q", got)
+	}
+}
