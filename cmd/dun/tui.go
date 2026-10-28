@@ -82,6 +82,9 @@ type tuiOpts struct {
 	// through dund (internal/dund allowedFlags). --no-rag and --no-lsp are
 	// here as rag/lsp = "false".
 	noTools bool
+	// itermTabs is --exp-iterm-tabcontrol: title and colour the iTerm2 tab
+	// (iterm.go). This client's terminal only; procArgs leaves it out.
+	itermTabs bool
 }
 
 // runTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
@@ -113,10 +116,22 @@ func runTUI(o tuiOpts, lc *launcherConn) error {
 	m.lc = lc
 	m.opts = o // for respawning the engine (see eofMsg)
 	m.checkUpdates = true
+	// The window and tab marks (tmux.go, iterm.go). Unset at exit, and on a
+	// panic through here by the defer.
+	m.tmux = newTmuxSync(os.Getenv, execTmux)
+	m.iterm = newItermTab(o.itermTabs, os.Getenv, o.workspace)
+	restoreTab := func() {
+		m.tmux.close()
+		if r := m.iterm.restore(); r != "" {
+			os.Stdout.WriteString(r) // the program has ended: nobody else writes
+		}
+	}
+	defer restoreTab()
 	// Alt screen, mouse mode and keyboard enhancements are View fields (View).
 	// Bubble Tea v2 asks for the kitty keyboard protocol (flags=1) and xterm
 	// modifyOtherKeys itself, decodes both, and puts the terminal back at exit.
 	fm, err := tea.NewProgram(m).Run()
+	restoreTab() // before a /reload's exec, which skips the defer
 	if tm, ok := fm.(tuiModel); ok {
 		tm.saveUI()     // the draft and sent history, for this user's next client
 		tm.proc.close() // the engine it ENDED with, which may not be the one it started
@@ -841,6 +856,15 @@ type tuiModel struct {
 	tracePrevYOff     int      // last recorded YOffset (avoid duplicates)
 	// Context stats (for /context)
 	ctxStats contextStats
+
+	// What the window or tab shows (tmux.go, iterm.go): the last state sent,
+	// a turn that ended unseen, and the terminal's focus report (1 in, -1
+	// out, 0 never said). tmux and iterm are nil when not in one.
+	attnState string
+	attnDone  bool
+	attnFocus int8
+	tmux      *tmuxSync
+	iterm     *itermTab
 }
 
 func newTUIModel(proc *dunProc, workspace string) tuiModel {
@@ -922,6 +946,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = tea.Batch(cmd, idleSuggestTick(idleSuggestDelay))
 		}
 		t.idleWantTick = false
+		// The window's mark (tmux.go): after the message, for the same reason.
+		var attnCmd tea.Cmd
+		if t, attnCmd = syncAttn(m, t, msg); attnCmd != nil {
+			cmd = tea.Batch(cmd, attnCmd)
+		}
 		// Leave Update with the viewport's height equal to the height View is
 		// about to draw it at. AtBottom, GotoBottom and YOffset clamping all
 		// measure against m.vp.Height, so a value left over from a frame that
@@ -3560,6 +3589,7 @@ func (m tuiModel) View() tea.View {
 	v := tea.NewView(out)
 	v.AltScreen = true
 	v.MouseMode = mouseModeOf(m.mouseMode)
+	v.ReportFocus = true // a focus-in clears the done mark (tmux.go)
 	return v
 }
 

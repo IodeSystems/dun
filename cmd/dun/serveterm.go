@@ -99,8 +99,8 @@ func termWS(w http.ResponseWriter, r *http.Request, o tuiOpts) {
 	atomic.AddInt64(&activeWeb, 1)
 	defer atomic.AddInt64(&activeWeb, -1)
 	cmd := exec.Command(exe, procArgs(o, "--tui")...)
-	cmd.Env = append(os.Environ(), "DUN_CHILD=1") // spawned TUI never self-rebuilds
-	ptmx, err := pty.Start(cmd)                   // pty.Start makes the child a session leader
+	cmd.Env = append(webEnv(os.Environ()), "DUN_CHILD=1") // spawned TUI never self-rebuilds
+	ptmx, err := pty.Start(cmd)                           // pty.Start makes the child a session leader
 	if err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("pty error: "+err.Error()))
 		return
@@ -206,4 +206,20 @@ func loopbackOnly(addr string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// webEnv is the environment for a web session's TUI: without the server's
+// tmux and terminal, which the browser's terminal is not, so the TUI marks
+// no tmux window and sends no iTerm2 escapes (tmux.go, iterm.go).
+func webEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		switch k {
+		case "TMUX", "TMUX_PANE", "TERM_PROGRAM", "LC_TERMINAL":
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }

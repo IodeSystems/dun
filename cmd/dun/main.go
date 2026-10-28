@@ -71,6 +71,7 @@ var flagGroups = []struct {
 	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "serve", "addr", "p", "version"}},
 	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase"}},
 	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp", "no-rag", "no-lsp", "no-tools", "media"}},
+	{"experimental", []string{"exp-iterm-tabcontrol"}},
 	{"advanced", []string{"d", "force", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
 }
 
@@ -102,6 +103,7 @@ start:
   dun "fix the flaky test"   run one task headless, print the diff, exit
   dun --continue             reopen the most recent session for this workspace
   dun doctor [--fix]         check providers, tools, dund and the service; --fix runs what it can
+  dun tmux                   the tmux.conf lines that show dun's state in the window list
   dun -p                     engine mode: line-delimited JSON events on stdin/stdout
   dun dund …                 the session service (dun dund --help)
 
@@ -187,6 +189,10 @@ func main() {
 		}
 		os.Exit(0)
 	}
+	// `dun tmux`: the tmux.conf lines that show dun's window mark (tmux.go).
+	if len(os.Args) > 1 && os.Args[1] == "tmux" {
+		os.Exit(tmuxCmd(os.Stdout, os.Getenv("TMUX") != "", os.Getenv("LC_TERMINAL") == "iTerm2", execTmuxQuery))
+	}
 	flag.Usage = usage
 	ver := flag.Bool("version", false, "print version and exit")
 	setup := flag.Bool("setup", false, "run the interactive setup wizard (LLM url/model/key) and exit")
@@ -221,6 +227,9 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8734", "serve: HTTP listen address")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /exit)")
 	noSuggest := flag.Bool("no-suggest", false, "disable next-message suggestions (on by default)")
+	// A TUI flag: it changes only this client's terminal, so procArgs does
+	// not pass it to the engine or dund (iterm.go).
+	itermTabs := flag.Bool("exp-iterm-tabcontrol", false, "experimental, iTerm2 only: title and colour the tab by what dun waits on (working, question, done)")
 	rephrase := flag.Bool("rephrase", false, "rephrase each user prompt for specificity before acting on it (toggle at runtime: /rephrase on)")
 
 	daemon := flag.Bool("d", false, "run/query the launcher daemon: dun -d (run), dun -d status, dun -d shutdown")
@@ -440,7 +449,7 @@ func main() {
 	if *tui || (firstTask == "" && !*prog && !*serve) {
 		lc := registerSession(selfKind(false), absWS) // supervisor registry + reload
 		defer lc.close()
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools}, lc); err != nil {
+		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools, *itermTabs}, lc); err != nil {
 			fatal(err)
 		}
 		return
@@ -450,7 +459,7 @@ func main() {
 	if *serve {
 		lc := registerSession("serve", absWS)
 		defer lc.close()
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools}, *addr); err != nil {
+		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools, false}, *addr); err != nil {
 			fatal(err)
 		}
 		return
