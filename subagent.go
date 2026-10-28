@@ -874,9 +874,14 @@ func spawnTool(ctx context.Context, h *Harness, prompt, model, isolation string,
 				where += " (branch " + sa.iso.Branch + ")"
 			}
 		}
-		return fmt.Sprintf("Started agent #%d on %s%s. It is working; you will be told when it finishes or asks you something. "+
+		// No model name when the child runs on the parent's own client: it
+		// read "Started agent #1 on ." live.
+		if sa.model != "" {
+			where = " on " + sa.model + where
+		}
+		return fmt.Sprintf("Started agent #%d%s. It is working; you will be told when it finishes or asks you something. "+
 			"Do other work, or jobs(agent:%d, wait:true) if you have nothing to do until it answers.",
-			sa.num, sa.model, where, sa.num)
+			sa.num, where, sa.num)
 	}
 	select {
 	case <-sa.waitCh():
