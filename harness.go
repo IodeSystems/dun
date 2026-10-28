@@ -318,7 +318,12 @@ type Config struct {
 	// streams, for the turn's own rounds only (see reasoning.go). nil → the
 	// stream is not teed at all.
 	OnReasoning func(string)
-	OnToolCall  func(tool string, args map[string]any, result string)
+	// OnRequest fires with each turn round's speed and size figures
+	// (reqstats.go): at its start, about 4 times a second while it streams,
+	// at its end, and when a recap or compaction moves the context. The
+	// turn's own rounds only. nil → not measured.
+	OnRequest  func(RequestStat)
+	OnToolCall func(tool string, args map[string]any, result string)
 	// OnServerStarted reports an added (non-built-in) server that started in
 	// the background at session start: err is nil when it is up and its
 	// tools have joined the tool set.
@@ -644,6 +649,9 @@ type Harness struct {
 	// context is shaped to and the window size reported to the user are the same
 	// number by construction. See tokencal.go.
 	meter promptMeter
+	// req measures the turn's requests for a status bar (reqstats.go); nil
+	// when nothing listens.
+	req *reqMeter
 	// window is the endpoint's whole context, prompt and response together, or 0
 	// when nobody could state one. Kept because the response's budget is the
 	// window MINUS this round's prompt, which is a per-round subtraction the
@@ -2046,6 +2054,8 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 	h.compactMu.Unlock()
 
 	log.Printf("dun: %s", note)
+	// The bar's context figure drops now, not at the next request.
+	h.req.adjustCtx(ci.TokensAfter - ci.TokensBefore)
 	switch {
 	case thrash && fromOverflow:
 		log.Printf("dun: %d folds in one turn, driven by the endpoint cutting replies short — "+

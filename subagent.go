@@ -408,6 +408,7 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner,
 	// conversation, which is the context re-merge the split exists to prevent.
 	cfg.OnToken = nil
 	cfg.OnReasoning = nil
+	cfg.OnRequest = nil
 	cfg.OnToolCall = nil
 	cfg.OnNotify = nil
 	cfg.OnDocs = nil

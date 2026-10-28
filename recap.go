@@ -639,6 +639,9 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
+	// The bar's context figure drops now: the removed entries' characters
+	// at the measured ratio, less the summary that replaced them.
+	h.req.adjustCtx(h.meter.Estimate(summary) - int(float64(sp.Chars)/h.meter.CharsPerToken()+0.5))
 	if h.cfg.OnRecap != nil {
 		h.cfg.OnRecap(RecapNote{
 			Entries: len(sp.Subsumes), Chars: sp.Chars, Note: note,
