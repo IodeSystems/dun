@@ -154,6 +154,12 @@ func TestRouteSlash(t *testing.T) {
 		"rephrase prompt Be Terse, Please":     {"control", "rephrase", "prompt Be Terse, Please"},
 		"rephrase prompt":                      {"control", "rephrase", "prompt"},
 		"interrupt":                            {"control", "interrupt", ""},
+		"worklog":                              {"control", "worklog", ""},
+		"worklog START Fix The Bug":            {"control", "worklog", "start Fix The Bug"},
+		"worklog end blocked No Log":           {"control", "worklog", "end blocked No Log"},
+		"worklog view 2":                       {"control", "worklog", "view 2"},
+		"worklog write 2":                      {"control", "worklog", "write 2"},
+		"worklog frob":                         {"reply", "usage: /worklog [start <title> | end [done|dropped|blocked] <why> | view [n] | write [n]]", ""},
 		// raglit's index commands keep a path's and a name's case.
 		"raglit watch ~/My Docs --index Hb": {"control", "ext", "watch raglit ~/My Docs --index Hb"},
 		"raglit ATTACH Other:Idx --project": {"control", "ext", "attach raglit Other:Idx --project"},

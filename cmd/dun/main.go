@@ -1378,6 +1378,31 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
+		// /worklog: the session's tree of tasks (dun/worklog.go). The engine
+		// owns it; write is detached, since it waits on one model call.
+		if id == "worklog" {
+			verb, rest, _ := strings.Cut(strings.TrimSpace(action), " ")
+			if strings.EqualFold(verb, "write") {
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "worklog: writing the account…"})
+				go func() {
+					msg := ""
+					path, err := h.WriteWorklog(ctx, rest)
+					if err != nil {
+						msg = "worklog: " + err.Error()
+					} else {
+						msg = "worklog: account written to " + path
+					}
+					em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+				}()
+				return
+			}
+			msg, err := h.WorklogCmd(action)
+			if err != nil {
+				msg = "worklog: " + err.Error()
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			return
+		}
 		// /file [add|remove <path>]: paths outside the workspace the file
 		// tools may use, for this session (dun/fileadd.go).
 		if id == "files" {

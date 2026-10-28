@@ -94,9 +94,12 @@ owner's call before work starts.
 - [ ] Persist carries the sub-agents: a persisted root resumes its children;
   toggling persist toggles theirs.
 - [ ] Descend into a sub-agent from the activity strip and come back out.
-- [ ] `/worklog`: start a task, fork a subtask, end one with why, view;
+- [~] `/worklog`: start a task, fork a subtask, end one with why, view;
   the model reads a closed worklog (input, events, recaps) and writes it up
   as a clean account, with the model, effort, harness and version.
+  Built (worklog.go; `<session>.worklog.json`, accounts in
+  `<session>.worklog/<n>-<slug>.md`). Person-driven only. Possible
+  extension: let the model open and close tasks too (a tool).
 
 ## The CLI
 

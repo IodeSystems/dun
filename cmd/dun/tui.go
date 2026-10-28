@@ -4955,6 +4955,7 @@ func sideCallBlock(s *contextStats) string {
 		"commit":   "commit messages (/worktree commit)",
 		"rescue":   "context rescue compaction",
 		"repaint":  "bug report redaction (/repaint report)",
+		"worklog":  "task accounts (/worklog write)",
 	}
 
 	var b strings.Builder
