@@ -121,6 +121,14 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 	}
 }
 
+// noteBackground is called when a command goes to the background or a
+// sub-agent starts: the first time, jobs joins the tool set.
+func (h *Harness) noteBackground() {
+	if h.hadJobs.CompareAndSwap(false, true) {
+		h.applyTools()
+	}
+}
+
 // pollSig is a read of one job (no wait, kill, tell, resume or tuning) as a
 // key; plain is false for anything else, which never turns into a wait.
 func (a jobsArgs) pollSig() (string, bool) {

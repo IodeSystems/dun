@@ -281,6 +281,7 @@ func (j *bgJob) settle() (ExecResult, bool) {
 	// exec gets a fresh shell instead of queueing behind this one.
 	close(j.promoteCh)
 	j.h.jobsChanged()
+	j.h.noteBackground()
 	go j.heartbeat()
 	return ExecResult{}, false
 }

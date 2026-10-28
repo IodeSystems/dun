@@ -727,8 +727,14 @@ func (h *Harness) rebuildTools() {
 	// jobs watches both kinds of background work (jobs.go): a command exec
 	// handed off, and a sub-agent. A child gets it for its own commands; it
 	// has no agents, so the agent params are not in its definition.
+	// Its definition joins only once something went to the background
+	// (USER 2026-10-27: "the monitor can come after anything gets
+	// backgrounded"); before that it is nothing but tokens. The dispatch is
+	// always there, so a call by name (or an old alias) still answers.
 	if cfg.Exec != nil || !h.isChild() {
-		toolDefs = append(toolDefs, jobsToolDef(cfg.Exec != nil, !h.isChild()))
+		if h.hadJobs.Load() {
+			toolDefs = append(toolDefs, jobsToolDef(cfg.Exec != nil, !h.isChild()))
+		}
 		dispatch = withJobs(dispatch, h, report)
 	}
 	// recap is available to BOTH roles, and behaves identically in both: it

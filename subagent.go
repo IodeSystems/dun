@@ -486,6 +486,7 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model, mode string) (*
 	h.agents[num] = sa
 	h.agMu.Unlock()
 	h.agentsChanged()
+	h.noteBackground()
 
 	go sa.run(runCtx, prompt+iso.brief())
 	go sa.heartbeat()
@@ -721,6 +722,7 @@ func (h *Harness) restoreAgents() {
 			prompt: firstUserEntry(path), iso: loadIsolation(path),
 		}
 		h.agents[num] = sa
+		h.hadJobs.Store(true) // a resumed session's children: jobs lists and resumes them
 		if num > h.agSeq {
 			h.agSeq = num
 		}

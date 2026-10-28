@@ -206,3 +206,36 @@ func TestJobs_ARepeatedPollWaits(t *testing.T) {
 		t.Errorf("a read after another question waited: %s", out)
 	}
 }
+
+// jobs is not offered until something goes to the background; then it is,
+// for the rest of the session (USER 2026-10-27).
+func TestJobs_OfferedOnceSomethingIsInTheBackground(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	h, err := Start(context.Background(), Config{Workspace: ws, Client: &scriptRunner{}, Exec: &HostShell{Dir: ws}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	has := func() bool {
+		for _, d := range h.Session.Tools {
+			if d.Function.Name == "jobs" {
+				return true
+			}
+		}
+		return false
+	}
+	if has() {
+		t.Fatal("jobs offered before anything was in the background")
+	}
+	if out := jobsCall(t, h, "jobs", `{}`); out != "No background jobs or sub-agents." {
+		t.Errorf("a call by name still answers: %q", out)
+	}
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	j := h.newJobStarted(be, "sleep 30")
+	t.Cleanup(func() { j.killAndWait("test") })
+	if !has() {
+		t.Errorf("jobs not offered after a command went to the background")
+	}
+}
