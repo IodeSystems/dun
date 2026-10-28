@@ -23,8 +23,10 @@ owner's call before work starts.
 - [x] `/retry` (presets and knobs for a flaky provider). v0.1.4.
 - [~] A call missing a required parameter gets the tool's signature; recap's
   error shows both of its shapes.
-- [ ] **decide** Split recap into `recap {after, rewrite, keep_results?}` and
-  `read_saved {ref, …}`, so a half call cannot be made.
+- [~] recap split: `recap {from, summary, keep?, user?}` (from and summary
+  required) and `read_saved {ref, grep?, head?, tail?, at?, full?}`, listed
+  from the first saved result. A tool added mid-turn (read_saved, jobs) joins
+  between rounds, not at the turn's end. `recap {ref}` still reads.
 
 ## The TUI
 

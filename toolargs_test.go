@@ -45,14 +45,15 @@ func TestRequiredArgs(t *testing.T) {
 	}
 }
 
-// recap with from and no summary: both modes' shapes and what was sent.
-func TestRecap_SaysBothShapes(t *testing.T) {
+// recap with from and no summary: its shape, where reading went, and what
+// was sent.
+func TestRecap_SaysItsShape(t *testing.T) {
 	h := &Harness{}
 	d := withRecap(func(context.Context, llm.ToolCall) (string, error) { return "", nil }, h, nil)
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = "recap", `{"from": "was reported towed", "keep": null}`
 	out, _ := d(context.Background(), tc)
-	for _, want := range []string{"without summary", "{from: string, summary: string, keep?: string[], user?: string}", "{ref: string", "You sent {from, keep}"} {
+	for _, want := range []string{"without summary", "{from: string, summary: string, keep?: string[], user?: string}", "read_saved {ref}", "You sent {from, keep}"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}

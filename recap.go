@@ -366,7 +366,7 @@ func boundRead(ref, out string) string {
 		return out
 	}
 	return fmt.Sprintf("%s\n[that read was %d characters, too big to return whole — page it instead: "+
-		"recap({ref:%q, at:0}), then the offset each page reports]", capExecOutput(out, "", nil), len(out), ref)
+		"read_saved({ref:%q, at:0}), then the offset each page reports]", capExecOutput(out, "", nil), len(out), ref)
 }
 
 // pageOf returns one window of a result that cannot be read any other way, and
@@ -386,21 +386,26 @@ func pageOf(ref, body string, at int) string {
 	page := safeCutFront(safeCut(body[at:end]))
 	more := ""
 	if end < len(body) {
-		more = fmt.Sprintf(" — next page: recap({ref:%q, at:%d})", ref, end)
+		more = fmt.Sprintf(" — next page: read_saved({ref:%q, at:%d})", ref, end)
 	}
 	return fmt.Sprintf("%s: characters %d–%d of %d%s\n%s", ref, at, end, len(body), more, page)
 }
 
 // registerSpill files a path under a short ref and returns it.
+// The first one puts read_saved in the tool set.
 func (h *Harness) registerSpill(kind, path string) string {
 	h.recapMu.Lock()
-	defer h.recapMu.Unlock()
 	if h.spills == nil {
 		h.spills = map[string]string{}
 	}
 	h.spillSeq++
 	ref := fmt.Sprintf("%s%d", kind, h.spillSeq)
 	h.spills[ref] = path
+	h.recapMu.Unlock()
+	if h.hadSpills.CompareAndSwap(false, true) {
+		h.toolsGrew.Store(true)
+		h.applyTools()
+	}
 	return ref
 }
 
@@ -410,7 +415,7 @@ func (h *Harness) spillPath(ref string) string {
 	return h.spills[strings.TrimSpace(ref)]
 }
 
-// readSpill answers recap({ref: …}): the clipped result, or a job log, read
+// readSpill answers read_saved({ref: …}): the clipped result, or a job log, read
 // without a shell and without leaving the process.
 func (h *Harness) readSpill(ref, grep string, head, tail, at int, full bool) string {
 	path := h.spillPath(ref)
@@ -512,39 +517,61 @@ func (h *Harness) readSpill(ref, grep string, head, tail, at int, full bool) str
 
 // ── the tool ────────────────────────────────────────────────────────
 
+// recap and read_saved were one tool, told apart by which fields a call
+// filled. Every field was optional, so a call could fill neither shape
+// ({from} alone), and a model that did so three times gave up on recap
+// (USER 2026-10-27). Split, each states what it requires.
+
 func recapToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "recap"
-	td.Function.Description = "Two uses. Read back a clipped result by its `ref` (printed in the gap; a job's " +
-		"log has one too) with grep, head, tail or full. Or replace a span of this conversation with a summary, " +
-		"as soon as it stops being worth its context: a big result you have taken what you need from, failed " +
-		"attempts before one worked, a misunderstanding cleared up later. The span is moved to a file, not " +
-		"deleted, but your summary is all that stays in context, so make it accurate: do not round numbers or " +
-		"guess at what you did not read."
+	td.Function.Description = "Replace a span of this conversation with a summary, as soon as it stops being " +
+		"worth its context: a big result you have taken what you need from, failed attempts before one worked, " +
+		"a misunderstanding cleared up later. The span is moved to a file, not deleted, but your summary is all " +
+		"that stays in context, so make it accurate: do not round numbers or guess at what you did not read."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"ref":     map[string]any{"type": "string", "description": "read: the clipped result's ref"},
-			"grep":    map[string]any{"type": "string", "description": "read: only lines matching this regexp"},
-			"head":    map[string]any{"type": "integer", "description": "read: the first N lines"},
-			"tail":    map[string]any{"type": "integer", "description": "read: the last N lines"},
-			"full":    map[string]any{"type": "boolean", "description": "read: as much as the cap allows"},
-			"from":    map[string]any{"type": "string", "description": "replace: an exact phrase from the message the span starts after"},
-			"summary": map[string]any{"type": "string", "description": "replace: what happened and what is true now, standing on its own"},
+			"from":    map[string]any{"type": "string", "description": "an exact phrase from the message the span starts after"},
+			"summary": map[string]any{"type": "string", "description": "what happened and what is true now, standing on its own"},
 			"keep": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
-				"description": "replace: results to keep verbatim, by tool name (\"exec\") or a phrase from the call (\"grep -c\"), not by id",
+				"description": "results to keep verbatim, by tool name (\"exec\") or a phrase from the call (\"grep -c\"), not by id",
 			},
-			"user": map[string]any{"type": "string", "description": "replace: a clearer wording of the user message `from` quotes"},
+			"user": map[string]any{"type": "string", "description": "a clearer wording of the user message `from` quotes"},
 		},
+		"required": []string{"from", "summary"},
+	}
+	return td
+}
+
+// readSavedToolDef is listed once something was saved under a ref (a
+// clipped result, a job's log): before that it has nothing to read.
+func readSavedToolDef() llm.ToolDef {
+	var td llm.ToolDef
+	td.Type = "function"
+	td.Function.Name = "read_saved"
+	td.Function.Description = "Read back a saved result by its `ref` (printed where a result was clipped; a " +
+		"job's log has one too): grep, head, tail, a page at an offset, or full."
+	td.Function.Parameters = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"ref":  map[string]any{"type": "string", "description": "the saved result's ref"},
+			"grep": map[string]any{"type": "string", "description": "only lines matching this regexp"},
+			"head": map[string]any{"type": "integer", "description": "the first N lines"},
+			"tail": map[string]any{"type": "integer", "description": "the last N lines"},
+			"at":   map[string]any{"type": "integer", "description": "a page starting at this character offset"},
+			"full": map[string]any{"type": "boolean", "description": "as much as the cap allows"},
+		},
+		"required": []string{"ref"},
 	}
 	return td
 }
 
 func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		if tc.Function.Name != "recap" {
+		if tc.Function.Name != "recap" && tc.Function.Name != "read_saved" {
 			return inner(ctx, tc)
 		}
 		var args struct {
@@ -560,13 +587,14 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			User    string   `json:"user"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		// A ref means READ. The two modes share a tool because they are the same
-		// job — deciding what is in your context — but they are told apart by
-		// what was asked for, never by a mode flag the model has to remember.
+		// A ref means READ, also as recap: the old single tool's habit and old
+		// transcripts still answer.
 		var out string
 		switch {
 		case strings.TrimSpace(args.Ref) != "":
 			out = h.readSpill(args.Ref, args.Grep, args.Head, args.Tail, args.At, args.Full)
+		case tc.Function.Name == "read_saved":
+			out = "ERROR: read_saved needs ref: the ref printed where the result was saved."
 		case strings.TrimSpace(args.Summary) == "" || strings.TrimSpace(args.From) == "":
 			// Neither mode's call: say both shapes and what was sent, not one
 			// missing word (USER 2026-10-27: three failed calls on "needs a
@@ -580,11 +608,11 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 					miss = "from and summary"
 				}
 			}
-			out = "ERROR: recap was called without " + miss + ", and without ref.\n" +
-				"To replace a span: recap {from: string, summary: string, keep?: string[], user?: string} — " +
+			out = "ERROR: recap was called without " + miss + ".\n" +
+				"recap {from: string, summary: string, keep?: string[], user?: string} — " +
 				"from is an exact phrase from the message the span starts after; summary is the account that " +
-				"replaces it (required); keep names tool results in the span to keep word for word.\n" +
-				"To read a saved result: recap {ref: string, grep?: string, head?: integer, tail?: integer, full?: boolean}.\n" +
+				"replaces it; keep names tool results in the span to keep word for word. " +
+				"To read a saved result, use read_saved {ref}.\n" +
 				"You sent " + sentSig(sent) + "."
 		default:
 			out = h.runRecap(ctx, args.From, args.Summary, args.Keep, args.User)
@@ -615,7 +643,7 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			} else {
 				a["from"], a["summary"], a["keep"] = args.From, args.Summary, args.Keep
 			}
-			onCall("recap", a, out)
+			onCall(tc.Function.Name, a, out)
 		}
 		return out, nil
 	}
@@ -865,6 +893,11 @@ func withRecapWatch(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		// start with "{" to reopen the hole.
 		out = h.capOnce(tc.Function.Name+" "+oneLine(tc.Function.Arguments, 120), out)
 		h.watchRecap(tc.Function.Name, len(out))
+		// A tool this call added (see Harness.toolsGrew) joins now. This is
+		// the turn's goroutine, which holds turnMu, so no other rebuild runs.
+		if h.toolsGrew.Swap(false) && h.applyPending.Swap(false) {
+			h.rebuildTools()
+		}
 		return out, err
 	}
 }

@@ -341,7 +341,7 @@ func (j *bgJob) logLine() string {
 	if j.logRef == "" {
 		return "full output: " + j.logPath
 	}
-	return fmt.Sprintf("full output: ref %q — read it with recap({ref:%q, grep:\"…\"}), or head/tail",
+	return fmt.Sprintf("full output: ref %q — read it with read_saved({ref:%q, grep:\"…\"}), or head/tail",
 		j.logRef, j.logRef)
 }
 

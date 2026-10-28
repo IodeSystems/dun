@@ -170,7 +170,7 @@ func TestStartBackground_LogsAndReportsTheExitCode(t *testing.T) {
 	// A REF, not a path. "grep it with exec" names a host file the model's
 	// container cannot open under --docker, and one it has no shell for when
 	// there is no exec backend at all.
-	if !strings.Contains(notes[0], `ref "job1"`) || !strings.Contains(notes[0], "recap({ref:") {
+	if !strings.Contains(notes[0], `ref "job1"`) || !strings.Contains(notes[0], "read_saved({ref:") {
 		t.Errorf("the notice must name a readable ref, not a path: %q", notes[0])
 	}
 	if strings.Contains(notes[0], "grep it with exec") {

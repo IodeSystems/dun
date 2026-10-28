@@ -125,6 +125,7 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 // sub-agent starts: the first time, jobs joins the tool set.
 func (h *Harness) noteBackground() {
 	if h.hadJobs.CompareAndSwap(false, true) {
+		h.toolsGrew.Store(true)
 		h.applyTools()
 	}
 }

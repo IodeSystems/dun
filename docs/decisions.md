@@ -46,7 +46,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   back as a window around it with its offset. The cap must hold through
   `recap`'s own door (`tail:100` once returned a whole blob).
 - **Line-based readers are useless on output with no lines.** Minified
-  documents defeat grep, head and tail. `recap({ref, at:N})` pages by offset
+  documents defeat grep, head and tail. `read_saved({ref, at:N})` pages by offset
   and each page says where the next begins. "Unlined" means the longest line,
   not the line count.
 - **An unset budget is unbudgeted, not a budget of zero.** agentkit's Shaper

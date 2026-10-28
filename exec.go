@@ -156,9 +156,9 @@ func capExecOutput(out, command string, spill func(command, output string) strin
 			// dead-ends; paging is the only way in.
 			if longestLine(out) > execInlineMax {
 				where = fmt.Sprintf("ref %q — ONE long line, so grep/head/tail cannot help: page it with "+
-					"recap({ref:%q, at:0}), then the offset each page reports", ref, ref)
+					"read_saved({ref:%q, at:0}), then the offset each page reports", ref, ref)
 			} else {
-				where = fmt.Sprintf("ref %q — read it with recap({ref:%q, grep:\"…\"}), or head/tail/full/at", ref, ref)
+				where = fmt.Sprintf("ref %q — read it with read_saved({ref:%q, grep:\"…\"}), or head/tail/full/at", ref, ref)
 			}
 		}
 	}

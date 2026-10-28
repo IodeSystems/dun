@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -479,7 +480,7 @@ func TestRecapWatch_CapsEveryTool(t *testing.T) {
 	}
 	// A REF, not a path — under --docker a host path is not openable by the
 	// model at all.
-	if !strings.Contains(out, `recap({ref:`) {
+	if !strings.Contains(out, `read_saved({ref:`) {
 		t.Errorf("the gap must say how to read the rest: %q", out[len(out)-300:])
 	}
 
@@ -536,7 +537,7 @@ func TestReadSpill_PagesOutputWithNoLines(t *testing.T) {
 	if !strings.Contains(first, "characters 0–") {
 		t.Fatalf("full on an unlined blob should page from the start: %q", first[:120])
 	}
-	if !strings.Contains(first, "next page: recap({ref:") {
+	if !strings.Contains(first, "next page: read_saved({ref:") {
 		t.Fatalf("a page must say where the next one starts: %q", first[:200])
 	}
 	if len(first) > execInlineMax+400 {
@@ -658,5 +659,28 @@ func TestReadSpill_GrepWindowsAMatchInsideAHugeLine(t *testing.T) {
 	// more than the window.
 	if !strings.Contains(out, "@") {
 		t.Errorf("a windowed match must carry its offset: %q", out[:200])
+	}
+}
+
+// read_saved joins the tool set with the first saved result, and needs ref.
+func TestReadSaved_ListedOnceSomethingIsSaved(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if slices.Contains(h.ToolNames(), "read_saved") {
+		t.Fatalf("listed before anything was saved: %v", h.ToolNames())
+	}
+	h.registerSpill("r", filepath.Join(t.TempDir(), "x"))
+	if !slices.Contains(h.ToolNames(), "read_saved") {
+		t.Fatalf("not listed after a save: %v", h.ToolNames())
+	}
+	d := withRecap(nil, h, nil)
+	var tc llm.ToolCall
+	tc.Function.Name, tc.Function.Arguments = "read_saved", `{}`
+	if out, _ := d(context.Background(), tc); !strings.Contains(out, "needs ref") {
+		t.Errorf("no ref: %q", out)
 	}
 }
