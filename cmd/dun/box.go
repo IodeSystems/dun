@@ -17,6 +17,12 @@ import (
 //	│ the newest lines of the thought,
 //	│ followed as they stream
 //
+// The cap (USER 2026-10-28): the free rows from the box's top to the bottom
+// of the pane, which it fills without moving anything, then at most boxPush
+// rows more, which push the conversation up; never more than the pane. The
+// person can give it more: scrolling down (wheel, pgdown) while the view's
+// last row is a box's hands that box the rows instead (grant).
+//
 // The header stays on top and says what is hidden. While live the box follows
 // its tail; done, it keeps its height, scrolled to the end. A box on screen
 // never gets shorter: it is drawn at the most rows it has reached (peak), and
@@ -36,6 +42,11 @@ type boxState struct {
 	shown  int  // body rows shown, as of the last render
 	peak   int  // the most body rows it has shown at peakW: it never shows fewer
 	peakW  int
+	grant  int // rows the person gave it by scrolling down at its last row
+	// capAt is its cap without the grant, measured once, when it first drew
+	// at this width. Measured every frame, a box grew whenever something
+	// above it folded: its top moved up, so it had more free rows below.
+	capAt  int
 	inside bool // descended into: the keys scroll it (box.go, insideBox)
 
 	// The wrapped body, cached by source and width. A box that only grew —
@@ -49,10 +60,18 @@ type boxState struct {
 	stableRows int
 }
 
-// boxCap is a box's height, header included, for a terminal of h rows: ten
-// rows, or about a third of a short one, never under three. The terminal and
-// not the pane, so a composer or a question growing cannot shrink a box.
-func boxCap(h int) int { return max(3, min(10, h/3)) }
+// boxPush is the most rows a box may push the conversation up by, past the
+// free rows it fills: 15, or half a short pane (a phone's).
+func boxPush(paneH int) int { return min(15, max(2, paneH/2)) }
+
+// boxCap is a box's height, header included, when its top is at row top of
+// a pane of paneH rows whose content reaches at least bottom rows (the pane,
+// or a hold's blank rows): the free rows below its top, plus boxPush, plus
+// what it was granted; within [3, paneH].
+func boxCap(top, bottom, paneH, grant int) int {
+	free := max(0, max(bottom, paneH)-top)
+	return max(3, min(paneH, free+boxPush(paneH)+grant))
+}
 
 // boxed says the entry is drawn as a box right now.
 func (e convoEntry) boxed() bool { return e.box != nil && e.state == viewMinimized }
@@ -129,14 +148,25 @@ func (e *convoEntry) boxContent(w int) (string, []string) {
 	return e.collapsed, nil
 }
 
-// renderBox draws the box at width w for a terminal of termH rows.
-func renderBox(e *convoEntry, w, termH int) string {
+// boxCapFor is e's box cap for a box whose top is at row top: measured the
+// first time (capAt), then that plus the grant, within the pane.
+func boxCapFor(e *convoEntry, w, top, bottom, paneH int) int {
+	b := e.box
+	if b.capAt == 0 || b.peakW != w {
+		b.capAt = boxCap(top, bottom, paneH, 0)
+	}
+	return max(3, min(paneH, b.capAt+b.grant))
+}
+
+// renderBox draws the box at width w, at most capRows rows tall with its
+// header (boxCapFor).
+func renderBox(e *convoEntry, w, capRows int) string {
 	b := e.box
 	head, rows := e.boxContent(w)
 	if b.peakW != w { // a resize re-wraps; that is the one time a box may shrink
-		b.peak, b.peakW = 0, w
+		b.peak, b.peakW = 0, w // capAt was re-measured for w by boxCapFor
 	}
-	b.peak = max(b.peak, min(len(rows), boxCap(termH)-1))
+	b.peak = max(b.peak, min(len(rows), capRows-1))
 	b.shown = b.peak
 	b.max = max(0, len(rows)-b.shown)
 	if b.follow || b.off > b.max {
@@ -171,6 +201,34 @@ func renderBox(e *convoEntry, w, termH int) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// grantBaseline gives n rows to the box whose rows end the view, when the
+// view is already at the bottom: scrolling down there has nowhere to go, so
+// it makes the box taller instead (up to the pane; boxCap). It reports
+// whether it did.
+func (m *tuiModel) grantBaseline(n int) bool {
+	if !m.vp.AtBottom() {
+		return false
+	}
+	last := m.vp.YOffset + m.vp.Height - 1
+	for i := range m.convo {
+		if i >= len(m.frame.rowOffset) || !m.convo[i].boxed() {
+			continue
+		}
+		top := m.frame.rowOffset[i]
+		if last < top || last >= top+m.frame.blockH[i] {
+			continue
+		}
+		b := m.convo[i].box
+		if b.shown+1 >= m.vp.Height || b.max == 0 {
+			return false // as tall as the pane, or nothing hidden to show
+		}
+		b.grant += n
+		m.refresh()
+		return true
+	}
+	return false
 }
 
 // selBox is the selected block's box, if it is drawn as one, in convo focus.

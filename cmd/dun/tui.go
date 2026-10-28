@@ -1431,6 +1431,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, textinput.Blink
 		case "pgup", "pgdown":
+			if msg.String() == "pgdown" && m.grantBaseline(max(1, m.vp.Height-1)) {
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.vp, cmd = m.vp.Update(msg)
 			m.updateScrollPin()
@@ -1940,6 +1943,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				b.scroll(wheelDelta)
 			}
 			m.refresh()
+			return m, nil
+		}
+		if msg.Mouse().Button == tea.MouseWheelDown && m.grantBaseline(wheelDelta) {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -4447,7 +4453,7 @@ func (m *tuiModel) refresh() {
 		} else if i < len(m.convo) && m.convo[i].boxed() {
 			// A bounded box: its own cache, so a token re-wraps only the box
 			// that grew (box.go).
-			w = renderBox(&m.convo[i], wrapW, m.h)
+			w = renderBox(&m.convo[i], wrapW, boxCapFor(&m.convo[i], wrapW, cumRow, m.convoHold, frm.height))
 		} else if i < len(m.convo) && m.convo[i].docs == nil {
 			e := &m.convo[i]
 			// Rendered markdown bakes in the wrap width it was produced at, and a

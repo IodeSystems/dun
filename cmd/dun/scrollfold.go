@@ -48,7 +48,7 @@ func (e *convoEntry) foldEntry() {
 		}
 	}
 	if e.box != nil {
-		e.box.peak = 0
+		e.box.peak, e.box.grant, e.box.capAt = 0, 0, 0
 	}
 	e.maxH = 0
 }

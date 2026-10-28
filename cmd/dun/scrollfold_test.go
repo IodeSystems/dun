@@ -139,6 +139,9 @@ func TestScrollFold_PinnedStreaming(t *testing.T) {
 			for q := 0; q < 4; q++ {
 				f.turn(fmt.Sprintf("question %d", q), 1+2*(q%2))
 			}
+			// A block pushed above the view folds at the next refresh
+			// (scrollfold.go): the frame after the turn's last event.
+			f.v.m.refresh()
 			m := f.v.m
 			if m.foldedRows <= 0 {
 				t.Fatalf("nothing folded above the view: %d rows", m.foldedRows)

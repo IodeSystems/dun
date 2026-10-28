@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -169,6 +170,7 @@ func TestAgentMsg_Replay(t *testing.T) {
 func TestAgentMsg_LongFolds(t *testing.T) {
 	v := newVtui(60, 30)
 	v.event(map[string]any{"type": "ready"})
+	fillScreen(v)
 	v.send("go")
 	var b strings.Builder
 	for i := 0; i < 40; i++ {
@@ -176,7 +178,12 @@ func TestAgentMsg_LongFolds(t *testing.T) {
 	}
 	v.event(map[string]any{"type": "notification", "text": "agent #2: " + b.String()})
 	scr := v.view()
-	if !strings.Contains(scr, "✉ agent #2 → you") || !strings.Contains(scr, "↓ 31 more") {
+	mi := len(v.m.convo) - 1
+	for mi >= 0 && v.m.convo[mi].msg == nil {
+		mi--
+	}
+	mb := v.m.convo[mi].box
+	if !strings.Contains(scr, "✉ agent #2 → you") || !strings.Contains(scr, fmt.Sprintf("↓ %d more", 40-mb.shown)) {
 		t.Errorf("a long message should fold under its header:\n%s", scr)
 	}
 	t.Logf("folded:\n%s", scr)

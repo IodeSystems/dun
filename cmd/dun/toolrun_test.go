@@ -107,8 +107,9 @@ func TestRun_FinishedThoughtOpenUntilScrolledOff(t *testing.T) {
 // When the active step finishes, the box keeps its height and its rows: the
 // thought's text stays where it was, and the next call comes in under it.
 func TestRun_FinishedThoughtKeepsItsRows(t *testing.T) {
-	v := newVtui(100, 40) // cap 10: 9 body rows
+	v := newVtui(100, 40)
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	fillScreen(v) // no free rows: the box is at its push cap, short of all its steps
 	v.send("go")
 	for i := 0; i < 6; i++ {
 		call(v, fmt.Sprintf("echo %d", i), "ok\n")
@@ -122,7 +123,7 @@ func TestRun_FinishedThoughtKeepsItsRows(t *testing.T) {
 	v.m = nm.(tuiModel)
 	r := runIdx(v.m)
 	before := v.m.frame.blockH[r]
-	if before != boxCap(v.m.h) {
+	if before != capOf(v.m, r) {
 		t.Fatalf("precondition: box at its cap, %d", before)
 	}
 	v.event(map[string]any{"type": "tool_call", "tool": "exec", "args": map[string]any{"command": "echo 6"}})

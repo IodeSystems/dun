@@ -19,30 +19,43 @@ func thinkLines(v *vtui, from, n int) {
 
 func boxH(m tuiModel, i int) int { return m.frame.blockH[i] }
 
+// fillScreen sends short exchanges until the conversation is taller than the
+// pane, so a box after it has no free rows and its cap is the push alone.
+func fillScreen(v *vtui) {
+	for k := 0; k < 40 && v.m.vp.maxYOffset() < v.m.vp.Height; k++ {
+		v.send(fmt.Sprintf("earlier %d", k))
+		v.event(map[string]any{"type": "token", "text": fmt.Sprintf("reply %d", k)})
+		v.event(map[string]any{"type": "done"})
+	}
+}
+
+// capOf is block i's box cap as the layout computed it.
+func capOf(m tuiModel, i int) int {
+	b := m.convo[i].box
+	return max(3, min(m.frame.height, b.capAt+b.grant))
+}
+
 // The box grows with its content up to the cap, then holds its height and
 // shows the newest lines (tail-follow), with a header saying what is hidden.
 func TestBox_GrowsToTheCapThenFollowsItsTail(t *testing.T) {
-	v := newVtui(80, 40) // pane ~36 rows: cap 10
+	v := newVtui(80, 40)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	v.send("plan it")
-	cap := boxCap(v.m.h)
-	if cap != 10 {
-		t.Fatalf("precondition: cap %d", cap)
-	}
 	thinkLines(v, 0, 3)
 	i := thinkIdx(v.m)
 	if h := boxH(v.m, i); h != 4 {
 		t.Errorf("a 3-line thought should be header + 3 rows, got %d", h)
 	}
-	thinkLines(v, 3, 40)
+	thinkLines(v, 3, 100)
+	cap := capOf(v.m, i)
 	if h := boxH(v.m, i); h != cap {
-		t.Fatalf("box grew past its cap: %d > %d", h, cap)
+		t.Fatalf("box is not at its cap: %d, cap %d", h, cap)
 	}
 	scr := v.view()
-	if !strings.Contains(scr, "line 42 of the thought") || strings.Contains(scr, "line 30 of the thought") {
+	if !strings.Contains(scr, "line 102 of the thought") || strings.Contains(scr, "line 30 of the thought") {
 		t.Errorf("the box does not show its tail:\n%s", scr)
 	}
-	if !strings.Contains(scr, "✻ thinking…") || !strings.Contains(scr, "↑ 34 more") {
+	if !strings.Contains(scr, "✻ thinking…") || !strings.Contains(scr, fmt.Sprintf("↑ %d more", 103-(cap-1))) {
 		t.Errorf("header or hidden-count missing:\n%s", scr)
 	}
 }
@@ -52,6 +65,7 @@ func TestBox_GrowsToTheCapThenFollowsItsTail(t *testing.T) {
 func TestBox_DoneKeepsTheHeight(t *testing.T) {
 	v := newVtui(80, 40)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	fillScreen(v)
 	v.send("plan it")
 	thinkLines(v, 0, 40)
 	i := thinkIdx(v.m)
@@ -73,13 +87,14 @@ func boxConvo(t *testing.T, h int) (v *vtui, think, run int) {
 	t.Helper()
 	v = newVtui(80, h)
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	fillScreen(v)
 	v.send("plan it")
-	thinkLines(v, 0, 20) // 20 rows, 9 shown: 11 hidden above
+	thinkLines(v, 0, 40) // more than any cap: rows hidden above
 	v.event(map[string]any{"type": "token", "text": "the reply"})
 	v.event(map[string]any{"type": "done"})
 	think = thinkIdx(v.m)
 	v.send("now run")
-	for i := 0; i < 12; i++ {
+	for i := 0; i < 30; i++ {
 		call(v, fmt.Sprintf("echo %d", i), "ok\n")
 	}
 	v.event(map[string]any{"type": "token", "text": "ran them"})
@@ -124,25 +139,27 @@ func TestBox_DescendScrollAndLeave(t *testing.T) {
 		v.m = key(v.m, kUp)
 	}
 	b := v.m.convo[think].box
-	if v.m.sel != think || b.off != 11 {
-		t.Fatalf("precondition: think selected at its end: sel=%d off=%d", v.m.sel, b.off)
+	end := b.max
+	if v.m.sel != think || end < 3 || b.off != end {
+		t.Fatalf("precondition: think selected at its end: sel=%d off=%d max=%d", v.m.sel, b.off, end)
 	}
 	v.m = key(v.m, kRight)
 	if !b.inside || !strings.Contains(v.view(), "scrolling — ← to leave") || !strings.Contains(v.view(), "inside  ·  ↑/↓") {
 		t.Fatalf("→ did not descend, or no cue:\n%s", v.view())
 	}
 	v.m = key(v.m, kUp)
-	if b.off != 10 || v.m.sel != think {
+	if b.off != end-1 || v.m.sel != think {
 		t.Fatalf("↑ inside should scroll the box: off=%d sel=%d", b.off, v.m.sel)
 	}
-	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgUp})
-	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	for k := 0; k < 10; k++ {
+		v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	}
 	v.m = key(v.m, kUp)
 	if b.off != 0 || v.m.sel != think {
 		t.Fatalf("inside, the top of the box is not an exit: off=%d sel=%d", b.off, v.m.sel)
 	}
 	v.m = key(v.m, runesKey([]rune("G")))
-	if b.off != 11 {
+	if b.off != end {
 		t.Errorf("G should go to the end: off=%d", b.off)
 	}
 	v.m = key(v.m, runesKey([]rune("g")))
@@ -173,8 +190,9 @@ func TestBox_DescendScrollAndLeave(t *testing.T) {
 func TestBox_TailFollowResumesOnLeave(t *testing.T) {
 	v := newVtui(80, 40)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	fillScreen(v)
 	v.send("plan it")
-	thinkLines(v, 0, 20)
+	thinkLines(v, 0, 40)
 	i := thinkIdx(v.m)
 	b := v.m.convo[i].box
 	v.m = key(v.m, kTab) // the live thought is the newest block
@@ -183,14 +201,15 @@ func TestBox_TailFollowResumesOnLeave(t *testing.T) {
 	}
 	v.m = key(v.m, kRight)
 	v.m = key(v.m, kUp)
-	thinkLines(v, 20, 5)
-	if b.off != 10 {
+	up := b.off
+	thinkLines(v, 40, 5)
+	if b.off != up {
 		t.Fatalf("scrolled up inside, new lines should not move it: off=%d", b.off)
 	}
 	v.m = key(v.m, runesKey([]rune("G")))
 	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyLeft})
-	thinkLines(v, 25, 5)
-	if !b.follow || b.off != b.max || !strings.Contains(v.view(), "line 29 of the thought") {
+	thinkLines(v, 45, 5)
+	if !b.follow || b.off != b.max || !strings.Contains(v.view(), "line 49 of the thought") {
 		t.Errorf("left at its end, the box should follow its tail: follow=%v off=%d max=%d", b.follow, b.off, b.max)
 	}
 }
@@ -243,11 +262,22 @@ func TestBox_RunDescends(t *testing.T) {
 	}
 }
 
-// The cap on a short terminal is a third of it, never under three.
+// The cap (USER 2026-10-28): the free rows below the box's top, then at most
+// 15 rows of push (half a short pane), plus what was granted; within
+// [3, pane].
 func TestBox_CapRule(t *testing.T) {
-	for _, c := range []struct{ h, want int }{{40, 10}, {24, 8}, {12, 4}, {6, 3}, {2, 3}} {
-		if got := boxCap(c.h); got != c.want {
-			t.Errorf("boxCap(%d) = %d, want %d", c.h, got, c.want)
+	for _, c := range []struct{ top, bottom, pane, grant, want int }{
+		{50, 0, 36, 0, 15},  // a long conversation: no free rows, 15 of push
+		{10, 0, 36, 0, 36},  // a short one: 26 free + 15, at most the pane
+		{30, 0, 36, 0, 21},  // 6 free + 15
+		{50, 70, 36, 0, 35}, // a /splash hold: 20 blank rows + 15
+		{50, 0, 17, 0, 8},   // a phone's pane: half of it
+		{50, 0, 4, 0, 3},    // never under three
+		{50, 0, 36, 5, 20},  // granted 5 by scrolling down
+		{50, 0, 36, 99, 36}, // never more than the pane
+	} {
+		if got := boxCap(c.top, c.bottom, c.pane, c.grant); got != c.want {
+			t.Errorf("boxCap(%d, %d, %d, %d) = %d, want %d", c.top, c.bottom, c.pane, c.grant, got, c.want)
 		}
 	}
 }
@@ -282,11 +312,60 @@ func TestBox_Replay(t *testing.T) {
 		map[string]any{"kind": "assistant", "content": "hello"},
 	}})
 	i := thinkIdx(v.m)
-	if i < 0 || !v.m.convo[i].boxed() || boxH(v.m, i) != boxCap(v.m.h) {
-		t.Fatalf("no capped box from history: %d", i)
+	if i < 0 || !v.m.convo[i].boxed() || boxH(v.m, i) != min(31, capOf(v.m, i)) {
+		t.Fatalf("no capped box from history: %d (h %d, cap %d)", i, boxH(v.m, i), capOf(v.m, i))
 	}
 	scr := v.view()
 	if !strings.Contains(scr, "✻ thought · ") || !strings.Contains(scr, "past line 29") || strings.Contains(scr, "past line 5\n") {
 		t.Errorf("replayed box: header or tail wrong:\n%s", scr)
+	}
+}
+
+// In a short conversation a box takes the free rows below it first, which
+// moves nothing; in a full one it pushes at most 15 rows (USER 2026-10-28).
+func TestBox_FillsFreeRowsThenPushesAtMost15(t *testing.T) {
+	v := newVtui(80, 40)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.send("plan it")
+	thinkLines(v, 0, 25)
+	i := thinkIdx(v.m)
+	if v.m.vp.YOffset != 0 || boxH(v.m, i) != 26 {
+		t.Fatalf("free rows: the box should fill them without moving the view: offset %d, box %d rows", v.m.vp.YOffset, boxH(v.m, i))
+	}
+
+	v = newVtui(80, 40)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	fillScreen(v)
+	v.send("plan it")
+	thinkLines(v, 0, 60)
+	i = thinkIdx(v.m)
+	if h := boxH(v.m, i); h != 15 {
+		t.Fatalf("a full screen: the box pushes at most 15 rows, got %d", h)
+	}
+}
+
+// At the bottom, with a box's rows ending the view, scrolling down gives the
+// box rows instead of doing nothing: a wheel step's worth, or a page; never
+// more than the pane.
+func TestBox_ScrollingDownAtItsLastRowGrowsIt(t *testing.T) {
+	v := newVtui(80, 40)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	fillScreen(v)
+	v.send("plan it")
+	thinkLines(v, 0, 80)
+	i := thinkIdx(v.m)
+	before := boxH(v.m, i)
+	nm, _ := v.m.Update(mouseMsg(mousePress, tea.MouseWheelDown, 0, 0))
+	v.m = nm.(tuiModel)
+	if h := boxH(v.m, i); h != before+wheelDelta || !v.m.scrollPinned {
+		t.Fatalf("wheel down at its last row: %d → %d rows, pinned %v", before, h, v.m.scrollPinned)
+	}
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if h := boxH(v.m, i); h != v.m.vp.Height {
+		t.Fatalf("page down twice should reach the pane's height (%d), got %d", v.m.vp.Height, h)
+	}
+	if !strings.Contains(v.view(), "line 79 of the thought") {
+		t.Errorf("the grown box should still show its newest line:\n%s", v.view())
 	}
 }
