@@ -88,6 +88,17 @@ type subAgent struct {
 	// a child blocked in Go (compaction that never returns, a channel read
 	// with no writer) will stop updating this while remaining agentRunning.
 	lastActivity time.Time
+	// closed: the parent is shutting down. A run cut by that is not the
+	// child's state, so nothing more is saved (saveState).
+	closed bool
+
+	// A person reading this child's conversation (AgentWatch): its entries
+	// are forwarded while watchers > 0, from after watchFrom (the store seq
+	// the history they were sent is current to). watchMu orders the history
+	// before the entries.
+	watchMu   sync.Mutex
+	watchers  int
+	watchFrom uint64
 }
 
 // notify is every word this child says to its parent, and the ONE place the
@@ -198,6 +209,11 @@ func (s *subAgent) settle(state agentState) {
 	if s.ended.IsZero() {
 		s.ended = time.Now()
 	}
+	s.mu.Unlock()
+	// Saved before the run is over to a waiter: one that resumes the
+	// session right after reads the state this run ended in.
+	s.saveState()
+	s.mu.Lock()
 	if s.done != nil {
 		select {
 		case <-s.done:
@@ -383,6 +399,7 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner,
 	cfg.OnDocs = nil
 	cfg.OnCompaction = nil
 	cfg.OnAgents = nil
+	cfg.OnAgentEntry = nil
 	cfg.OnJobs = nil
 	iso.apply(&cfg) // after the shell: an isolated child's exec is on its own tree
 	return cfg
@@ -455,6 +472,8 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model, mode string) (*
 	h.agMu.Lock()
 	h.agents[num] = sa
 	h.agMu.Unlock()
+	sa.hook(child)
+	sa.saveState()
 	h.agentsChanged()
 	h.noteBackground()
 
@@ -530,6 +549,7 @@ func (s *subAgent) tell(msg string) string {
 		s.cancel = cancel
 	}
 	s.mu.Unlock()
+	s.saveState()
 	s.parent.agentsChanged()
 
 	go func() {
@@ -626,14 +646,20 @@ func oneLine(s string, max int) string {
 }
 
 // restoreAgents registers the children of a RESUMED session. Their processes
-// are gone; their transcripts are not.
-func (h *Harness) restoreAgents() {
+// are gone; their transcripts are not. A dismissed child stays dismissed. In
+// a session that persists (Config.Persist) the ones that were running or idle
+// are restarted from their transcripts and isolation, idle; otherwise, and
+// for one that was already stopped, they come back stopped. It returns the
+// restarted ones, and which of those were cut off mid-task.
+func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 	base := h.cfg.SessionFile
 	if base == "" {
-		return
+		return nil, nil
 	}
 	matches, _ := filepath.Glob(strings.TrimSuffix(base, ".jsonl") + ".sub*.jsonl")
 	sort.Strings(matches)
+	cut = map[int]bool{}
+	var wake []*subAgent
 	h.agMu.Lock()
 	if h.agents == nil {
 		h.agents = map[int]*subAgent{}
@@ -643,17 +669,89 @@ func (h *Harness) restoreAgents() {
 		if !ok || h.agents[num] != nil {
 			continue
 		}
+		rec := loadAgentState(path)
 		sa := &subAgent{
 			num: num, parent: h, state: agentStopped, restore: path,
-			prompt: firstUserEntry(path), iso: loadIsolation(path),
+			prompt: rec.Prompt, iso: loadIsolation(path), model: rec.Model,
+		}
+		if sa.prompt == "" {
+			sa.prompt = firstUserEntry(path)
+		}
+		switch agentState(rec.State) {
+		case agentDismissed:
+			sa.state = agentDismissed
+		case agentRunning, agentIdle:
+			if h.cfg.Persist {
+				wake = append(wake, sa)
+				cut[num] = agentState(rec.State) == agentRunning
+			}
 		}
 		h.agents[num] = sa
-		h.hadJobs.Store(true) // a resumed session's children: jobs lists and resumes them
+		if sa.state != agentDismissed {
+			h.hadJobs.Store(true) // a resumed session's children: jobs lists and resumes them
+		}
 		if num > h.agSeq {
 			h.agSeq = num
 		}
 	}
 	h.agMu.Unlock()
+	for _, sa := range wake {
+		h.resumeAgent(sa)
+		if sa.harness() != nil {
+			resumed = append(resumed, sa)
+		}
+	}
+	return resumed, cut
+}
+
+// agentRecord is what a child's sidecar (<sub>.agent.json) keeps of it for a
+// resume: its state when last settled, its model and its task.
+type agentRecord struct {
+	State  string `json:"state"`
+	Model  string `json:"model,omitempty"`
+	Prompt string `json:"prompt,omitempty"` // as asked: the transcript's first message has the isolation brief too
+}
+
+func agentFile(sessionFile string) string {
+	if sessionFile == "" {
+		return ""
+	}
+	return strings.TrimSuffix(sessionFile, ".jsonl") + ".agent.json"
+}
+
+// saveState writes the child's state beside its transcript. Skipped once the
+// parent is closing: a run cut by the shutdown is not the child's state, and
+// a child that was running then must resume as one that was.
+func (s *subAgent) saveState() {
+	s.mu.Lock()
+	rec, closed := agentRecord{State: string(s.state), Model: s.model, Prompt: s.prompt}, s.closed
+	path := s.restore
+	if s.h != nil {
+		path = s.h.cfg.SessionFile
+	}
+	s.mu.Unlock()
+	if closed || path == "" {
+		return
+	}
+	if b, err := json.Marshal(rec); err == nil {
+		_ = writeFileAtomic(agentFile(path), b, 0o600)
+	}
+}
+
+// loadAgentState reads a child's sidecar. A transcript from before the
+// sidecar existed has none: it comes back stopped, as it always did.
+func loadAgentState(sessionFile string) agentRecord {
+	var rec agentRecord
+	if b, err := os.ReadFile(agentFile(sessionFile)); err == nil {
+		_ = json.Unmarshal(b, &rec)
+	}
+	return rec
+}
+
+func (s *subAgent) harness() *Harness {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.h
 }
 
 // subNumFromPath recovers a child's id from its transcript filename.
@@ -724,6 +822,8 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 	sa.state = agentIdle
 	sa.started, sa.ended = time.Time{}, time.Time{}
 	sa.mu.Unlock()
+	sa.hook(child)
+	sa.saveState()
 	h.agentsChanged()
 	return fmt.Sprintf("agent #%d is back, idle, with its transcript loaded. "+
 		"Give it work with jobs(agent:%d, tell:\"…\").", sa.num, sa.num)
@@ -740,6 +840,9 @@ func (h *Harness) closeAgents() {
 	h.agMu.Unlock()
 
 	for _, sa := range agents {
+		sa.mu.Lock()
+		sa.closed = true
+		sa.mu.Unlock()
 		sa.stop()
 		sa.mu.Lock()
 		child := sa.h
@@ -772,19 +875,34 @@ func (h *Harness) agentByID(id int) *subAgent {
 // isChild is what rebuildTools switches the tool set on.
 func (h *Harness) isChild() bool { return h != nil && h.parent != nil }
 
-// stoppedAgentsNote tells a resumed session which children it used to have.
-func (h *Harness) stoppedAgentsNote() string {
+// restoredAgentsNote tells a resumed session which children it used to have:
+// the ones restarted with it, and the ones that are stopped. Dismissed ones
+// are not mentioned.
+func (h *Harness) restoredAgentsNote(resumed []*subAgent, cut map[int]bool) string {
+	var parts []string
+	if len(resumed) > 0 {
+		names := make([]string, 0, len(resumed))
+		for _, sa := range resumed {
+			n := fmt.Sprintf("#%d (%s)", sa.num, oneLine(sa.prompt, 80))
+			if cut[sa.num] {
+				n += " — it was working when the session stopped and its run was cut off"
+			}
+			names = append(names, n)
+		}
+		parts = append(parts, "Sub-agents resumed with this session (it persists), idle, with their transcripts: "+
+			strings.Join(names, ", ")+". Give one work, or tell it to carry on, with jobs(agent:N, tell:\"…\").")
+	}
 	var stopped []string
 	for _, sa := range h.agentList() {
 		if state, _, _, _ := sa.snapshot(); state == agentStopped {
 			stopped = append(stopped, fmt.Sprintf("#%d (%s)", sa.num, oneLine(sa.prompt, 80)))
 		}
 	}
-	if len(stopped) == 0 {
-		return ""
+	if len(stopped) > 0 {
+		parts = append(parts, "Sub-agents from the resumed session are STOPPED — their transcripts survived, their processes did not: "+
+			strings.Join(stopped, ", ")+". Restart one with jobs(agent:N, resume:true) if you still need it.")
 	}
-	return "Sub-agents from the resumed session are STOPPED — their transcripts survived, their processes did not: " +
-		strings.Join(stopped, ", ") + ". Restart one with jobs(agent:N, resume:true) if you still need it."
+	return strings.Join(parts, "\n")
 }
 
 // roleSystem is the part of the system prompt that depends on which side of the
@@ -1106,6 +1224,65 @@ func (h *Harness) AgentHistory(id int) ([]HistoryItem, bool) {
 		return nil, true
 	}
 	return (&Harness{store: st}).History(), true
+}
+
+// hook forwards the child's new transcript entries to whoever watches it.
+// A new harness's store counts from zero, so the watch starts over with it.
+func (s *subAgent) hook(child *Harness) {
+	s.watchMu.Lock()
+	s.watchFrom = 0
+	s.watchMu.Unlock()
+	child.store.setOnEntry(func(e agent.Entry, seq uint64) {
+		s.watchMu.Lock()
+		defer s.watchMu.Unlock()
+		if s.watchers == 0 || seq <= s.watchFrom {
+			return
+		}
+		cb := s.parent.cfg.OnAgentEntry
+		if items := historyItems([]agent.Entry{e}); cb != nil && len(items) > 0 {
+			cb(s.num, items)
+		}
+	})
+}
+
+// AgentWatch is a person opening a child's conversation: send gets its
+// history now, and OnAgentEntry gets each entry after it until AgentUnwatch.
+// One call each way per viewer; the watch is a count, so two viewers do not
+// end each other's. A stopped child's history is its transcript; it has no
+// entries to follow until it is resumed.
+//
+// PUSH only while watched: a child's callbacks stay nil (childConfig), so N
+// children nobody looks at cost nothing.
+func (h *Harness) AgentWatch(id int, send func([]HistoryItem)) bool {
+	sa := h.agentByID(id)
+	if sa == nil {
+		return false
+	}
+	sa.watchMu.Lock()
+	defer sa.watchMu.Unlock()
+	if child := sa.harness(); child != nil {
+		entries, seq := child.store.contextAt()
+		sa.watchFrom = seq
+		send(historyItems(entries))
+	} else {
+		items, _ := h.AgentHistory(id)
+		send(items)
+	}
+	sa.watchers++
+	return true
+}
+
+// AgentUnwatch is a viewer leaving a child's conversation.
+func (h *Harness) AgentUnwatch(id int) {
+	sa := h.agentByID(id)
+	if sa == nil {
+		return
+	}
+	sa.watchMu.Lock()
+	if sa.watchers > 0 {
+		sa.watchers--
+	}
+	sa.watchMu.Unlock()
 }
 
 // AgentTell is the human steering a child directly, which is the same gesture

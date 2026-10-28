@@ -279,6 +279,11 @@ func (s *session) prepareStop(why string) {
 			}
 		}
 	}
+	if s.persists() {
+		// The engine restarts these and says so itself (dun's
+		// restoredAgentsNote): saying "stopped" here would be wrong.
+		agents = nil
+	}
 	s.setResume(resumeMessage(why, turn || asking, asking, jobs, agents))
 }
 

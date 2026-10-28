@@ -437,6 +437,31 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   an old transcript or a model's habit gets the same out-of-band exchange
   and never blocks. Old transcripts still render `ask_parent` and a BLOCKED
   report.
+- **Persist carries the sub-agents (2026-10-27).** A child has no persist
+  setting of its own: it follows its root's. dund passes `--persist` at
+  every engine start of a persisted session (`spawnArgs`), as it passes
+  `--resume`, and a client cannot. The engine reads it only when it
+  restores children (`restoreAgents`): with it, a child that was running or
+  idle is restarted from its transcript and isolation, idle; without it, it
+  comes back stopped, as before. So toggling persist on the root toggles it
+  on its children with nothing to propagate, and no runtime command to the
+  engine is needed. A child's state is kept in `<sub>.agent.json` (state,
+  model, prompt), written whenever it settles, and not by the shutdown that
+  cuts its run: a child running at the stop resumes as one that was running,
+  and the root is told its run was cut off. A dismissed child stays
+  dismissed. The root is told once, in an aside at start, which children
+  came back; with persist, dund's own restart message leaves them out
+  rather than call them stopped. A transcript with no sidecar comes back
+  stopped. Children come back idle, not re-run: re-running a cut task
+  without the parent's word could repeat its side effects.
+- **A watched child's entries are pushed (2026-10-27).** The TUI's view of
+  a child was a pull of its history; it is now the history and then each
+  entry its transcript gets (`agent_entry`), while someone watches
+  (`agent view` / `agent leave`, a count, so two viewers do not end each
+  other's watch). Entry, not token, granularity: the store's append hook
+  already sees every entry, and a child's callbacks stay nil, so a child
+  nobody watches costs nothing. A viewer that disconnects without `leave`
+  leaves the count up; the cost is forwarded events, not state.
 - **One `session` tool for what runs the model and the task's state (USER,
   2026-10-27).** `harness` and `session_state` both answered "what is this
   session"; `session` returns `{harness, state}` as JSON, reads with no

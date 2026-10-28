@@ -41,6 +41,11 @@ type sessionStore struct {
 	unclaimed int
 	path      string // "" = memory only
 	onNotify  func(string)
+	// onEntry sees every entry appended, with its number (seq): a sub-agent's
+	// store forwards them to a person watching it (subagent.go, watch).
+	// Called outside mu.
+	onEntry func(e agent.Entry, seq uint64)
+	seq     uint64 // entries appended since open; never goes back
 }
 
 // openSessionStore opens (loading any existing) session file at path; path ""
@@ -325,7 +330,12 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 	s.entries = append(s.entries, e)
 	s.flushLocked()
 	cb := s.onNotify
+	s.seq++
+	seq, onEntry := s.seq, s.onEntry
 	s.mu.Unlock()
+	if onEntry != nil {
+		onEntry(e, seq)
+	}
 	// Docs notifications drive a structured UI path (onDocs); skip the plain ping.
 	if e.Kind == agent.KindNotification && e.Tag != tagDocs && cb != nil {
 		cb(e.Content)
@@ -336,6 +346,25 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 func (s *sessionStore) Context(_ context.Context, _ string) ([]agent.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.contextLocked(), nil
+}
+
+// contextAt is Context and the seq it is current to, read together: a
+// watcher that starts from it skips the entries it already holds.
+func (s *sessionStore) contextAt() ([]agent.Entry, uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.contextLocked(), s.seq
+}
+
+// setOnEntry installs the entry hook (see onEntry).
+func (s *sessionStore) setOnEntry(fn func(agent.Entry, uint64)) {
+	s.mu.Lock()
+	s.onEntry = fn
+	s.mu.Unlock()
+}
+
+func (s *sessionStore) contextLocked() []agent.Entry {
 	out := make([]agent.Entry, 0, len(s.entries))
 	for _, e := range s.entries {
 		// A recap citation is a note to whoever reads the log, not conversation:
@@ -348,7 +377,7 @@ func (s *sessionStore) Context(_ context.Context, _ string) ([]agent.Entry, erro
 		}
 		out = append(out, e)
 	}
-	return out, nil
+	return out
 }
 
 // recap replaces a span of the conversation with one entry, records a citation,
@@ -546,10 +575,15 @@ func (s *sessionStore) Reset() {
 // injected into the conversation).
 func (s *sessionStore) publish(e agent.Entry) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.entries = append(s.entries, e)
 	s.unclaimed++
 	s.flushLocked()
+	s.seq++
+	seq, onEntry := s.seq, s.onEntry
+	s.mu.Unlock()
+	if onEntry != nil {
+		onEntry(e, seq)
+	}
 }
 
 // appendSilent adds an entry WITHOUT marking it an inbox arrival and without
@@ -559,9 +593,14 @@ func (s *sessionStore) publish(e agent.Entry) {
 // turn (see Harness.Aside).
 func (s *sessionStore) appendSilent(e agent.Entry) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.entries = append(s.entries, e)
 	s.flushLocked()
+	s.seq++
+	seq, onEntry := s.seq, s.onEntry
+	s.mu.Unlock()
+	if onEntry != nil {
+		onEntry(e, seq)
+	}
 }
 
 // pending reports how many inbox arrivals have not been claimed by a turn.

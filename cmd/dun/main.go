@@ -72,7 +72,7 @@ var flagGroups = []struct {
 	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase"}},
 	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp", "no-rag", "no-lsp", "no-tools", "media"}},
 	{"experimental", []string{"exp-iterm-tabcontrol"}},
-	{"advanced", []string{"d", "force", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
+	{"advanced", []string{"d", "force", "persist", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
 }
 
 // removedFlags are flags that no longer do anything. They stay accepted
@@ -218,6 +218,9 @@ func main() {
 	flag.Bool("no-ship", false, "removed; does nothing")
 	cont := flag.Bool("continue", false, "resume the most recent session for this workspace")
 	resume := flag.String("resume", "", "resume a specific session id (see --sessions)")
+	// Set by dund, like --resume: the session persists, so its sub-agents
+	// do too.
+	persistFlag := flag.Bool("persist", false, "set by dund: the session persists, so resuming it restarts its running and idle sub-agents")
 	noDir := flag.Bool("no-dir", false, "a session attached to no directory: talk with dun, its skills and MCP tools; no project files, rules, code or document index (sessions live in $DUN_HOME/nodir)")
 	fresh := flag.Bool("new", false, "start a new session, even when this workspace has one no client is attached to (which plain dun resumes)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
@@ -689,6 +692,7 @@ func main() {
 		NoDir:       *noDir,
 		NoTools:     *noTools,
 		SessionFile: sessionFile,
+		Persist:     *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.
 		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") == "0",
@@ -806,6 +810,9 @@ func main() {
 		// UI that has to reconstruct state from deltas gets it wrong the first
 		// time an event is dropped.
 		cfg.OnAgents = func(as []dun.AgentInfo) { em.emit(&proto.Agents{Agents: agentsProto(as)}) }
+		cfg.OnAgentEntry = func(id int, items []dun.HistoryItem) {
+			em.emit(&proto.AgentEntry{Agent: id, Items: historyProto(items)})
+		}
 		cfg.OnJobs = func(js []dun.JobInfo) { em.emit(&proto.Jobs{Jobs: jobsProto(js)}) }
 		// started is filled in once dun.Start returns. The breakdown callback is
 		// installed BEFORE the Harness exists and fires after it does, and the
@@ -1543,8 +1550,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	in.setCtrlCmd(ctrlCmd)
 	in.setResetCb(resetCmd)
 	// Agent scope: the human reading a child's conversation, or steering it.
-	// `view` is a PULL — the child's callbacks are nil by design, so its
-	// scrollback is fetched on demand and works for a stopped child too.
+	// `view` sends the scrollback (a stopped child's too) and starts the
+	// watch that forwards its new entries; `leave` ends it.
 	in.setPeerFn(peerIn(peers, h, em))
 	in.setAgentFn(func(id, action, content string) {
 		n, err := strconv.Atoi(id)
@@ -1553,11 +1560,13 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		}
 		switch action {
 		case "view":
-			items, ok := h.AgentHistory(n)
-			if !ok {
-				return
-			}
-			em.emit(&proto.AgentHistory{Agent: n, Prompt: h.AgentPrompt(n), Items: historyProto(items)})
+			// The history, then each new entry as an agent_entry until
+			// "leave": what makes the view live while the child works.
+			h.AgentWatch(n, func(items []dun.HistoryItem) {
+				em.emit(&proto.AgentHistory{Agent: n, Prompt: h.AgentPrompt(n), Items: historyProto(items)})
+			})
+		case "leave":
+			h.AgentUnwatch(n)
 		case "tell":
 			em.emit(&proto.AgentTold{Agent: n, Message: h.AgentTell(n, content)})
 		}
