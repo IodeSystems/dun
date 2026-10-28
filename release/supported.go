@@ -41,9 +41,15 @@ var Supported = []Tool{
 	// mode is the default (dun still passes --daemon; in-process-only flags
 	// are ignored with a log line, and a daemon that cannot start falls back
 	// to in-process), and --daemon-home / $POLY_LSP_HOME, which dun's tests
-	// set.
+	// set. Recommended v0.3.1 (4f1fd74, 2026-10-27), tarballs in
+	// deps.json: Swift (sourcekit-lsp); child LSPs found outside PATH (pnpm,
+	// npm -g, volta, bun, go, cargo, homebrew); node_read/node_edit on own
+	// files under --allow-path (default $TMPDIR, /tmp), parse-only;
+	// --validate-wait; a clean edit by a server not trusted for clean
+	// diagnostics (sourcekit-lsp, typescript) reports validated:false,
+	// validationSkipped:"lsp-unconfirmed". MCP tool names unchanged.
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.2.0"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.3.1"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /raglit setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,
