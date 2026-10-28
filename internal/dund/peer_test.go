@@ -1,6 +1,7 @@
 package dund
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -299,4 +300,26 @@ func TestPeerPresenceIsAnnounced(t *testing.T) {
 	a2, _ := svc.Create(alice, t.TempDir(), nil, "")
 	waitRecord(t, sp, "peers "+a1+": 1")
 	waitRecord(t, sp, "peers "+a2+": 1")
+}
+
+// A global server change made in one session reaches the owner's other
+// loaded sessions, and nobody else's: the engine that wrote mcp.json asks
+// with Op "servers", and dund forwards proto.ServersChanged.
+func TestServersChangedReachesTheOwnersOtherSessions(t *testing.T) {
+	svc, sp, _ := newSvc(t)
+	a1, _ := svc.Create(alice, t.TempDir(), nil, "")
+	a2, _ := svc.Create(alice, t.TempDir(), nil, "")
+	b1, _ := svc.Create(bob, t.TempDir(), nil, "")
+	waitRecord(t, sp, "peers "+a2+": 1")
+	js, _ := json.Marshal(proto.PeerRequest{RID: "r", Op: "servers"})
+	if err := svc.Send(alice, a1, proto.NewCommand("", &proto.User{Content: "peer-request " + string(js)})); err != nil {
+		t.Fatal(err)
+	}
+	waitRecord(t, sp, "servers "+a2)
+	waitRecord(t, sp, "reply "+a1+": ")
+	for _, r := range sp.received() {
+		if r == "servers "+a1 || r == "servers "+b1 {
+			t.Errorf("told the wrong session: %q", r)
+		}
+	}
 }

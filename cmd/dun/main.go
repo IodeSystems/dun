@@ -1618,6 +1618,11 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	// watch that forwards its new entries; `leave` ends it.
 	if peers != nil {
 		peers.onLoops = h.SetLoops
+		// A global server change made here reaches the owner's other
+		// sessions (proto.ServersChanged); not waited for.
+		dun.OnUserServersWritten = func() {
+			go func() { _, _ = peers.call(context.Background(), proto.PeerRequest{Op: "servers"}) }()
+		}
 	}
 	in.setPeerFn(peerIn(peers, h, em))
 	in.setAgentFn(func(id, action, content string) {
@@ -2127,7 +2132,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- msg
 			case "answer":
 				s.answers <- ev.Value
-			case "peer", "peer_reply", "peers", "loops":
+			case "peer", "peer_reply", "peers", "loops", "servers":
 				// Never an answer: a peer message cannot close an open
 				// ask_user, whatever it says.
 				s.peerCmd(ev.Type, []byte(line))

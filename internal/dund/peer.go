@@ -64,6 +64,8 @@ func (s *Service) handlePeer(from *session, req proto.PeerRequest) {
 			rep.Error = err.Error()
 		}
 		rep.Sched = &r
+	case "servers":
+		s.announceServers(from)
 	default:
 		rep.Error = fmt.Sprintf("unknown peer op %q", req.Op)
 	}
@@ -342,6 +344,16 @@ func (s *session) sendLoaded(c proto.Command) error {
 		return errors.New("engine not running")
 	}
 	return s.write(c)
+}
+
+// announceServers passes on that from wrote the global server file: every
+// other loaded session of its owner is told (proto.ServersChanged).
+func (s *Service) announceServers(from *session) {
+	for _, ses := range s.all() {
+		if ses != from && ses.isMember(from.owner) && ses.loaded() {
+			_ = ses.sendLoaded(proto.NewCommand("", &proto.ServersChanged{}))
+		}
+	}
 }
 
 // announcePeers tells each of owner's loaded sessions how many others are

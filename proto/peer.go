@@ -15,6 +15,7 @@ func init() {
 	command[PeerReply]("peer_reply")
 	command[PeerMsg]("peer")
 	command[PeerPresence]("peers")
+	command[ServersChanged]("servers")
 }
 
 // PeerRequest is an engine asking dund to list the live sessions (Op
@@ -83,3 +84,11 @@ type PeerMsg struct {
 type PeerPresence struct {
 	Others int `json:"others"`
 }
+
+// ServersChanged tells an engine that another session of its owner wrote the
+// global server file (~/.dun/mcp.json): an on/off, a mode, a tool switch, a
+// server added or removed. The engine sends a PeerRequest with Op "servers"
+// after the write; dund forwards this to the owner's other loaded sessions. An
+// idle one re-reads its servers now; a busy one does at its next turn, as it
+// would anyway (USER 2026-10-28: a global mode change reaches every session).
+type ServersChanged struct{}

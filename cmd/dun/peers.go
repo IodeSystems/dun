@@ -132,6 +132,17 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			if json.Unmarshal(line, &p) == nil && p.Others > 0 {
 				h.NotePeers()
 			}
+		case "servers":
+			// Another session wrote the global server file: re-read it now if
+			// idle; a running turn's next one does at its start.
+			// The clients get the new states quietly, as a server's activity
+			// does: the splash and /mcp say the mode now.
+			go func() {
+				if h.FollowServersIfIdle(context.Background()) {
+					em.emit(&proto.ServerEvent{Action: "activity", Servers: serversProto(h.Servers()),
+						Tools: h.ToolNames(), Background: true})
+				}
+			}()
 		case "loops":
 			var l proto.Loops
 			if json.Unmarshal(line, &l) == nil {

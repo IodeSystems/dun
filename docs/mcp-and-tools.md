@@ -4,6 +4,16 @@ Why the tool-server layer is built the way it is. Short rules on startup,
 rebuilds and config files: "Tool servers and extensions" in `decisions.md`.
 Switch scopes (session, project, global): `mcpscope.go`.
 
+A global switch (on/off, mode, a tool, a server added or removed) is a write
+of `~/.dun/mcp.json`, and every session follows it. A turn re-reads the
+layers at its start (`followServers`), and under dund the write is also
+announced: the engine sends a `servers` peer request, dund forwards
+`ServersChanged` to the owner's other loaded sessions, and an idle one
+re-reads at once and sends its clients the new states
+(`FollowServersIfIdle`). A busy one waits for its next turn, because
+reconciling can restart the shell and kill an `eval` in flight. A session or
+project switch still wins where it is set (USER 2026-10-28).
+
 ## Servers: direct or in the shell
 
 (USER 2026-10-22.) Default is direct. A user-added server may instead be

@@ -426,6 +426,19 @@ func (h *Harness) followServers(ctx context.Context) {
 	}
 }
 
+// FollowServersIfIdle re-reads the server layers now when no turn is running,
+// and reports whether it did. A running turn is left alone: reconciling can
+// restart the shell, which kills an eval in flight, and the next turn re-reads
+// at its start (followServers) anyway.
+func (h *Harness) FollowServersIfIdle(ctx context.Context) bool {
+	if !h.turnMu.TryLock() {
+		return false
+	}
+	h.turnMu.Unlock()
+	h.followServers(ctx)
+	return true
+}
+
 // reloadServers re-resolves the servers and applies the difference: a server
 // whose resolved state turned off is stopped, one that turned on is started
 // (waiting for it when wait), a change to what the shell hosts restarts the

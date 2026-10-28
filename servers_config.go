@@ -700,6 +700,11 @@ func UpsertUserServer(id string, edit func(*ServerSpec)) (string, error) {
 	return path, writeUserServers(path, f)
 }
 
+// OnUserServersWritten is called after every write of the global server
+// file. The engine under dund sets it to tell the owner's other sessions
+// (proto.ServersChanged); nothing else needs it.
+var OnUserServersWritten func()
+
 func writeUserServers(path string, f *ServersFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -708,7 +713,13 @@ func writeUserServers(path string, f *ServersFile) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o600)
+	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+		return err
+	}
+	if OnUserServersWritten != nil {
+		OnUserServersWritten()
+	}
+	return nil
 }
 
 // expandPlaceholders substitutes the paths a config file cannot know.

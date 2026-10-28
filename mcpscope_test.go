@@ -255,3 +255,36 @@ func TestEnvRefs(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 }
+
+// A write of the global server file says so (the engine under dund tells the
+// owner's other sessions), and an idle session re-reads at once; one inside a
+// turn is left to its next turn, which re-reads at its start.
+func TestFollowServersIfIdle_ReachesAnIdleSessionNow(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ts := fakeMCPTools(t, "a")
+	h := newServerHarness(t)
+	ctx := context.Background()
+	if _, err := h.AddServer(ctx, ServerSpec{ID: "el", URL: ts.URL}); err != nil {
+		t.Fatal(err)
+	}
+	writes := 0
+	OnUserServersWritten = func() { writes++ }
+	t.Cleanup(func() { OnUserServersWritten = nil })
+	if _, err := UpsertUserServer("el", func(s *ServerSpec) { s.Autostart = boolp(false) }); err != nil {
+		t.Fatal(err)
+	}
+	if writes != 1 {
+		t.Fatalf("the write was announced %d times", writes)
+	}
+	h.turnMu.Lock() // a turn is running
+	if h.FollowServersIfIdle(ctx) {
+		t.Fatal("re-read during a turn")
+	}
+	h.turnMu.Unlock()
+	if !h.mgr.ServerStarted("el") {
+		t.Fatal("the busy session changed anyway")
+	}
+	if !h.FollowServersIfIdle(ctx) || h.mgr.ServerStarted("el") {
+		t.Fatal("the idle session did not follow the global off")
+	}
+}
