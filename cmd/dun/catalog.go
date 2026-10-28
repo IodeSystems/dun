@@ -371,6 +371,14 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			m.openMCPServers()
 		}
 		line := strings.TrimSpace(name + " " + strings.Join(args, " "))
+		// /schedule and /loop carry a message: the rest of the line as typed.
+		if name == "schedule" || name == "loop" {
+			_, rest := cutFields(strings.TrimPrefix(strings.TrimSpace(m.slashLine), "/"), 1)
+			line = name + " " + rest
+			if len(args) == 2 && strings.EqualFold(args[0], "edit") {
+				m.schedEditAsk = strings.TrimPrefix(args[1], "#")
+			}
+		}
 		if !m.proc.controlCmd("slash", line) {
 			m.append(stErr.Render("no engine right now — /reconnect first"))
 		}

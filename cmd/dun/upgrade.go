@@ -365,6 +365,11 @@ func userRowAt(text string, width int) string {
 	if rest, ok := strings.CutPrefix(text, autoResumePrefix); ok {
 		st, row = stDim, "↻ resumed after the restart — "+rest
 	}
+	// Sent by dund's scheduler, not typed now (internal/dund scheduledText):
+	// the bracket says when it was set, so the mark is all the row adds.
+	if strings.HasPrefix(text, "[scheduled ") || strings.HasPrefix(text, "[loop ") {
+		row = "⏲ " + text
+	}
 	if width > 0 {
 		st = st.Width(width)
 	}

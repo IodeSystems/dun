@@ -34,6 +34,9 @@ var peerTimeout = 15 * time.Second
 
 type peerLink struct {
 	em *emitter
+	// onLoops is told this session's loop count from every scheduler reply
+	// (schedule.go): set once the harness exists.
+	onLoops func(n int)
 
 	mu      sync.Mutex
 	seq     int
@@ -104,8 +107,9 @@ func (p *peerLink) Send(ctx context.Context, to, text string, wake bool) (dun.Pe
 	return dun.PeerSent{ID: rep.ID, Name: rep.Name, Busy: rep.Busy, Started: rep.Started}, nil
 }
 
-// peerIn routes the two peer frames the input reader gets: dund's reply to
-// this engine's request, and another session's message.
+// peerIn routes the peer frames the input reader gets: dund's reply to this
+// engine's request, another session's message, and this session's loop
+// count (schedule.go).
 func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line []byte) {
 	return func(typ string, line []byte) {
 		switch typ {
@@ -123,6 +127,11 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			// it labelled (dun.PeerLabel).
 			em.emit(&proto.Notification{Kind: "peer", Text: m.FromName + " (" + m.From + "): " + m.Text})
 			h.PeerMessage(m.From, m.FromName, m.Text, m.Wake)
+		case "loops":
+			var l proto.Loops
+			if json.Unmarshal(line, &l) == nil {
+				h.SetLoops(l.Active)
+			}
 		}
 	}
 }

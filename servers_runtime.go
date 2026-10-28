@@ -712,6 +712,14 @@ func (h *Harness) rebuildTools() {
 		toolDefs = append(toolDefs, dunListToolDef(), dunMsgToolDef())
 		dispatch = withPeers(dispatch, cfg.Peers, report)
 	}
+	// loop_ctl: listed only while this session has a loop (loopctl.go); the
+	// dispatch stays, so a call after the last loop went still answers.
+	if cfg.Loops != nil && !h.isChild() {
+		if h.hasLoops.Load() {
+			toolDefs = append(toolDefs, loopCtlToolDef())
+		}
+		dispatch = withLoopCtl(dispatch, cfg.Loops, report)
+	}
 	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
 	// a child never receives `agent`, so depth-1 holds with no counter to get
 	// wrong, and a root never receives `tell_parent`, so it is absent rather

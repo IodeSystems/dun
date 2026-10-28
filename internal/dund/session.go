@@ -247,6 +247,10 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) 
 			}
 			s.track(ev)
 			s.log.Append(ev)
+			switch ev.Payload.(type) {
+			case *proto.Done, *proto.Error:
+				s.svc.loopTurnEnded(s)
+			}
 		}
 	}
 	err := eng.Wait()

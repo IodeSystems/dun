@@ -134,6 +134,8 @@ func (e *fakeEngine) run(id string) {
 			e.emit(enc, &proto.Done{})
 		case *proto.PeerMsg:
 			e.sp.record(fmt.Sprintf("peer %s: from %s (%s) wake=%v: %s", id, p.FromName, p.From, p.Wake, p.Text))
+		case *proto.Loops:
+			e.sp.record(fmt.Sprintf("loops %s: %d", id, p.Active))
 		case *proto.PeerReply:
 			b, _ := json.Marshal(p)
 			e.sp.record("reply " + id + ": " + string(b))
