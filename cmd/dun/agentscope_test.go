@@ -78,19 +78,22 @@ func TestAgentScope_HeaderNamesTheChildAndTheWayBack(t *testing.T) {
 }
 
 // The child's view is its history, then its entries live: a call and its
-// result that arrive apart fold into one run, like the root's.
+// result that arrive apart fold into one run, like the root's — also when
+// the call came in the history and the result live.
 func TestAgentScope_ShowsHistoryThenLiveEntries(t *testing.T) {
 	m, _ := scopeModel(t, 100)
 	m.enterAgentScope(1)
 	m = m.handleEvent(evMsg{"type": "agent_history", "agent": 1.0, "prompt": "read the build log", "items": []any{
 		map[string]any{"kind": "user", "content": "read the build log"},
+		map[string]any{"kind": "tool_call", "tool": "exec", "call_id": "c1", "args": map[string]any{"command": "tail build.log"}},
 	}})
 	if !strings.Contains(convoText(m), "read the build log") || strings.Contains(convoText(m), "resumed") {
 		t.Fatalf("the child's history, without a resume marker: %s", convoText(m))
 	}
-	m = m.handleEvent(evMsg{"type": "agent_entry", "agent": 1.0, "items": []any{
-		map[string]any{"kind": "tool_call", "tool": "exec", "call_id": "c1", "args": map[string]any{"command": "tail build.log"}},
-	}})
+	m.suggestions = []suggestion{{text: "the root's prediction"}}
+	if m.suggestActive() {
+		t.Error("the root's suggestions must not show in a child's view")
+	}
 	m = m.handleEvent(evMsg{"type": "agent_entry", "agent": 2.0, "items": []any{
 		map[string]any{"kind": "assistant", "content": "another child's words"},
 	}})

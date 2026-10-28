@@ -2356,7 +2356,9 @@ func (m tuiModel) idleSuggestReady() bool {
 // requires that the input is empty (the default). In "on" mode it shows even
 // when the user is typing (so suggestions are always visible).
 func (m tuiModel) suggestActive() bool {
-	if m.suggestMode == "off" || !m.asked() {
+	// The root's predictions are not a child's: inside a child's view
+	// there are none to pick.
+	if m.suggestMode == "off" || !m.asked() || m.scopeAgent != 0 {
 		return false
 	}
 	return m.focus == focusInput && !m.busy && !m.starting && !m.asking &&
@@ -2840,8 +2842,10 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.task = p
 			}
 			items, _ := ev["items"].([]any)
-			m.quietReplay = true // a child's conversation, not a resumed session
-			m.replay(items)
+			// Not replay: no resume marker, and the last run stays open, since
+			// a child at work gets its call's result as the next agent_entry.
+			m.replayItems(items, -1)
+			m.refresh()
 		}
 	case "agent_entry":
 		// The watched child's new transcript entries, live. Only for the child
