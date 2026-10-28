@@ -1,0 +1,178 @@
+{
+  "name": "keys",
+  "scenario": "first-assistant",
+  "role": "the owner of a small project on your own computer; nobody else has set anything up for you",
+  "goal": "I want to know which keys do what, and get back to the newest output after reading back.",
+  "note": "Keys walk (2026-10-28): /keys, the divider's way back to the newest output, ctrl+end.",
+  "sizes": [
+    "49x21",
+    "100x30"
+  ],
+  "typing_ms": 45,
+  "steps": [
+    {
+      "id": "first-screen-says-what-it-needs",
+      "promise": "The first screen tells me what dun needs from me before it can help.",
+      "settle_ms": 1500,
+      "actions": [
+        {
+          "wait_for": "ask dun to do something",
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "id": "asking-too-early-says-what-to-do",
+      "promise": "If I ask before it is set up, it tells me what to do next, in words I can follow.",
+      "actions": [
+        {
+          "type": "Can you help me with this project?"
+        },
+        {
+          "key": "enter"
+        },
+        {
+          "wait_for": "kept your question",
+          "timeout_ms": 20000
+        }
+      ]
+    },
+    {
+      "id": "the-setup-command-can-be-found",
+      "promise": "I can find the command that connects dun to the service my colleague gave me.",
+      "actions": [
+        {
+          "type": "/"
+        },
+        {
+          "wait_for": "commands"
+        }
+      ]
+    },
+    {
+      "id": "signing-in-asks-one-thing-at-a-time",
+      "promise": "Signing in asks for one thing at a time, and says what each thing is.",
+      "actions": [
+        {
+          "type": "login"
+        },
+        {
+          "key": "enter"
+        },
+        {
+          "wait_for": "log in to an AI service"
+        }
+      ]
+    },
+    {
+      "id": "signed-in-and-shown-the-models",
+      "promise": "Once I have signed in with what my colleague gave me, I am shown the models I can use.",
+      "actions": [
+        {
+          "key": "enter",
+          "say": "picked custom, the first row: my colleague gave me an address, not a service name"
+        },
+        {
+          "wait_for": "custom: an OpenAI-compatible service"
+        },
+        {
+          "type": "${LLM_URL}",
+          "say": "typed the address my colleague gave me"
+        },
+        {
+          "key": "enter"
+        },
+        {
+          "type": "${LLM_KEY}",
+          "say": "typed the key my colleague gave me"
+        },
+        {
+          "key": "enter"
+        },
+        {
+          "wait_for": "chat-standard"
+        }
+      ]
+    },
+    {
+      "id": "picking-a-model-leaves-me-ready",
+      "promise": "Picking the model my colleague named leaves me ready to ask, and tells me it worked.",
+      "settle_ms": 1500,
+      "actions": [
+        {
+          "type": "chat-standard"
+        },
+        {
+          "sleep_ms": 400
+        },
+        {
+          "key": "enter"
+        },
+        {
+          "wait_for": "using chat-standard",
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "id": "my-first-question-gets-an-answer",
+      "promise": "The question I asked before I was set up is still there, and I get an answer I can read.",
+      "settle_ms": 2000,
+      "actions": [
+        {
+          "key": "enter",
+          "say": "pressed Enter (the input line held my first question)"
+        },
+        {
+          "wait_for": "change first?",
+          "timeout_ms": 60000
+        }
+      ]
+    },
+    {
+      "id": "the-key-map-is-listed",
+      "promise": "/keys lists what each key does and how to change it.",
+      "settle_ms": 800,
+      "actions": [
+        {
+          "type": "/keys"
+        },
+        {
+          "key": "enter"
+        },
+        {
+          "wait_for": "turn.interrupt"
+        }
+      ]
+    },
+    {
+      "id": "scrolled-up-the-way-back-is-shown",
+      "promise": "When I scroll up, I am shown how to get back to the newest output.",
+      "settle_ms": 800,
+      "actions": [
+        {
+          "key": "pgup"
+        },
+        {
+          "key": "pgup"
+        },
+        {
+          "wait_for": "newest"
+        }
+      ]
+    },
+    {
+      "id": "ctrl-end-brings-me-back",
+      "promise": "ctrl+end brings me back to the newest output.",
+      "settle_ms": 800,
+      "actions": [
+        {
+          "key": "ctrl+end"
+        },
+        {
+          "sleep_ms": 500
+        }
+      ]
+    }
+  ]
+}

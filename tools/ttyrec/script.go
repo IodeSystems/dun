@@ -94,7 +94,7 @@ var namedKeys = map[string]string{
 	"space": " ", "backspace": "\x7f", "delete": "\x1b[3~",
 	"up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
 	"home": "\x1b[H", "end": "\x1b[F", "pgup": "\x1b[5~", "pgdn": "\x1b[6~",
-	"alt+enter": "\x1b\r",
+	"alt+enter": "\x1b\r", "ctrl+end": "\x1b[1;5F", "ctrl+home": "\x1b[1;5H",
 }
 
 // keyBytes encodes space-separated key names: the names above, ctrl+<letter>.
