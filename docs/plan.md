@@ -42,7 +42,7 @@ owner's call before work starts.
 - [~] The spend row: requests, tokens processed and generated, cache rate.
 - [~] ctrl+p pastes the clipboard's text (wl-paste, xclip, pbpaste,
   termux-clipboard-get).
-- [ ] Messages between agents in boxes like thinking: from whom, to whom,
+- [~] Messages between agents in boxes like thinking: from whom, to whom,
   what was said.
 - [~] Multi-choice questions: a clear way to select, unselect and edit; tab
   edits a choice, as in single choice.

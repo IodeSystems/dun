@@ -424,6 +424,8 @@ func yankText(e convoEntry) string {
 		return e.mdSource
 	case e.think != nil:
 		return strings.TrimSpace(e.think.text)
+	case e.msg != nil:
+		return strings.TrimSpace(e.msg.text)
 	case e.run != nil:
 		var parts []string
 		for _, it := range e.run.items {

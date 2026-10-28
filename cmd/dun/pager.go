@@ -66,6 +66,8 @@ func (e convoEntry) pageID() any {
 		return e.think
 	case e.run != nil:
 		return e.run
+	case e.msg != nil:
+		return e.msg
 	}
 	return nil
 }
@@ -84,6 +86,12 @@ func (e convoEntry) page() (pageDoc, bool) {
 		return pageDoc{title: title, nodes: []pageNode{{body: strings.TrimSpace(e.think.text)}}}, true
 	case e.run != nil:
 		return e.run.page(), true
+	case e.msg != nil:
+		body := strings.TrimSpace(e.msg.text)
+		if r := strings.TrimSpace(e.msg.result); r != "" {
+			body += "\n\n" + r
+		}
+		return pageDoc{title: stripANSI(e.msg.header()), nodes: []pageNode{{body: body}}}, true
 	}
 	return pageDoc{}, false
 }

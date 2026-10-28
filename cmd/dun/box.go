@@ -120,6 +120,10 @@ func (e *convoEntry) boxContent(w int) (string, []string) {
 	case e.think != nil:
 		e.box.wrapBody(strings.TrimSpace(e.think.text), w, true, stDim.Render("│ "))
 		return stDim.Render(thinkHeader(e.think)), e.box.rows
+	case e.msg != nil:
+		edge := stDim.Render("│ ")
+		e.box.wrapBody(e.msg.body(max(1, w-lipgloss.Width(edge))), w, false, edge)
+		return e.msg.header(), e.box.rows
 	}
 	return e.collapsed, nil
 }
@@ -159,6 +163,11 @@ func renderBox(e *convoEntry, w, termH int) string {
 	out = append(out, rows[b.off:min(len(rows), b.off+b.shown)]...)
 	for len(out) < 1+b.shown { // held height: what the content gave back
 		out = append(out, "")
+	}
+	if e.msg != nil { // a sent message's status, under the box (agentmsg.go)
+		if f := e.msg.footer(); f != "" {
+			out = append(out, fitRow(f, w))
+		}
 	}
 	return strings.Join(out, "\n")
 }

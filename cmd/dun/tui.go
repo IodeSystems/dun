@@ -291,6 +291,7 @@ type convoEntry struct {
 	docs      *docsBlock  // proactive-RAG summary (nil for normal blocks)
 	think     *thinkBlock // a round's reasoning (thinking.go) → enter opens the pager
 	run       *toolRun    // a run of tool calls and thinking (toolrun.go) → enter opens the pager
+	msg       *agentMsg   // a message between agents (agentmsg.go) → enter opens the pager
 	// box draws a thinking block or a run bounded, scrolling inside itself
 	// (box.go). nil = not boxed.
 	box *boxState
@@ -2735,17 +2736,27 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 		m.endThinking()
 		m.flushCur()
 		args, _ := ev["args"].(map[string]any)
-		// Into the run's box (toolrun.go): appended, nothing above it moves.
-		m.pendingTool = m.runAddCall(str(ev["tool"]), args)
+		if a := carriedMsg(str(ev["tool"]), args); a != nil {
+			// A message to another agent: its own box (agentmsg.go).
+			m.pendingTool = m.addMsg(a)
+		} else {
+			// Into the run's box (toolrun.go): appended, nothing above it moves.
+			m.pendingTool = m.runAddCall(str(ev["tool"]), args)
+		}
 		m.activeTool = callText(str(ev["tool"]), args, 40)
 		m.refresh()
 	case "tool_result":
 		result := str(ev["result"])
 		idx := m.pendingTool
-		if idx < 0 || idx >= len(m.convo) || m.convo[idx].run == nil {
-			idx = m.runAddCall(str(ev["tool"]), nil) // a result with no call seen
+		if idx >= 0 && idx < len(m.convo) && m.convo[idx].msg != nil && !m.convo[idx].msg.done {
+			m.convo[idx].msg.setResult(result)
+			m.touchMsg(idx)
+		} else {
+			if idx < 0 || idx >= len(m.convo) || m.convo[idx].run == nil {
+				idx = m.runAddCall(str(ev["tool"]), nil) // a result with no call seen
+			}
+			m.runSetResult(idx, str(ev["tool"]), result)
 		}
-		m.runSetResult(idx, str(ev["tool"]), result)
 		m.pendingTool = -1
 		m.activeTool = ""
 		// Track tool result stats for /context
@@ -2817,10 +2828,21 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 			// speaking, so dim, not a bell.
 			m.append(stDim.Render("⏱ " + oneLine(str(ev["text"]))))
 		case "peer":
-			// Another dun session's dun_msg: not the user, so dim, with the
-			// sender first (the text is "<name> (<id>): <message>").
+			// Another dun session's dun_msg: a message box, the sender first
+			// (the text is "<name> (<id>): <message>").
+			if a := noticeMsg("peer", str(ev["text"])); a != nil {
+				m.addMsg(a)
+				m.refresh()
+				break
+			}
 			m.append(stDim.Render("✉ dun msg from " + oneLine(str(ev["text"]))))
 		default:
+			// A sub-agent's tell_parent message ("agent #2: …") is a box.
+			if a := noticeMsg("", str(ev["text"])); a != nil {
+				m.addMsg(a)
+				m.refresh()
+				break
+			}
 			m.append(noticeLine(str(ev["text"]), m.noticeW()))
 		}
 	case "ask":
@@ -4021,10 +4043,21 @@ func (m *tuiModel) replay(items []any) {
 			m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src})
 			n++
 		case "tool_call":
-			// The same path as a live call: into the run's box (toolrun.go).
+			// The same path as a live call: into the run's box (toolrun.go),
+			// or a message's own (agentmsg.go).
 			args, _ := im["args"].(map[string]any)
+			if a := carriedMsg(str(im["tool"]), args); a != nil {
+				run = m.addMsg(a)
+				break
+			}
 			run = m.runAddCall(str(im["tool"]), args)
 		case "tool_result":
+			if run >= 0 && run < len(m.convo) && m.convo[run].msg != nil && !m.convo[run].msg.done {
+				m.convo[run].msg.setResult(str(im["content"]))
+				m.touchMsg(run)
+				n++
+				break
+			}
 			if run < 0 || run >= len(m.convo) || m.convo[run].run == nil {
 				run = m.runAddCall(str(im["tool"]), nil) // a result with no call seen
 			}
@@ -4032,6 +4065,11 @@ func (m *tuiModel) replay(items []any) {
 			n++
 		case "notification":
 			m.endRun()
+			if a := noticeMsg("", str(im["content"])); a != nil {
+				m.addMsg(a)
+				n++
+				break
+			}
 			m.convo = append(m.convo, convoEntry{collapsed: noticeLine(str(im["content"]), m.noticeW())})
 			n++
 		case "reasoning":
