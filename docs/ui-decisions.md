@@ -26,7 +26,19 @@ are in `decisions.md`.
   re-pin; only sending, ctrl+end and the cue do. Scrolled up, the divider's
   right end reads "↓ newest · ctrl+end" and is clickable; it is on the
   divider so showing it changes no row count. ctrl+g was the first choice for
-  the key, but it interrupts a turn (`interrupt.go`).
+  the key, but it interrupts a turn (`interrupt.go`); with a key map, a
+  person can move both (below).
+- **Key maps translate; the handlers keep their keys (USER, 2026-10-28).**
+  `cmd/dun/keymap.go` is one table of rebindable actions (scope, defaults).
+  The key pressed in the conversation or composer is looked up and the
+  action's own key is delivered, so no handler changed; a default whose action
+  was moved is dropped. A key bound twice in a scope is refused at load and
+  the error names both actions; a key that types text cannot be bound there.
+  `~/.dun/keys.json` holds a preset (emacs, the defaults; vscode) and your own
+  bindings; a broken file is said once and the defaults stay. The interrupt is
+  global and asked for by name, never translated: ctrl+g is "global switch" in
+  the MCP lists. Pagers, pickers, forms, "/", "y" and esc keep fixed keys. Not
+  built: a modal (vim) composer, which is a different composer, not a table.
 - **Total height never decreases (USER, 2026-10-22).** A tool run and the
   thinking between its calls form one grow-only box; every block is held at the
   most rows it has drawn (`maxH`; property test `noshrink_test.go`). Thinking

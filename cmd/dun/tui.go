@@ -246,22 +246,27 @@ func divider(w int, focusUp bool) string {
 // scrolled away from its newest output: the way back, clickable, with its key.
 // On the divider because that row is always there, so showing it moves nothing
 // (a row of its own would shrink the view as you scroll — a bounce of its own).
-const bottomCue = " ↓ newest · ctrl+end "
+func (m tuiModel) bottomCue() string {
+	if k := m.keys.label("scroll.bottom"); k != "" {
+		return " ↓ newest · " + k + " "
+	}
+	return " ↓ newest "
+}
 
-// withBottomCue puts bottomCue at the right end of a divider of width w, or
+// withBottomCue puts the cue at the right end of a divider of width w, or
 // returns the divider unchanged when it is too narrow to keep the focus half.
-func withBottomCue(div string, w int) string {
-	cw := lipgloss.Width(bottomCue)
+func withBottomCue(div, cue string, w int) string {
+	cw := lipgloss.Width(cue)
 	if w < 2*cw {
 		return div
 	}
-	return ansi.Truncate(div, w-cw, "") + stNote.Render(bottomCue)
+	return ansi.Truncate(div, w-cw, "") + stNote.Render(cue)
 }
 
 // onBottomCue reports whether a click at column x on the divider row lands on
 // the cue.
 func (m tuiModel) onBottomCue(x int) bool {
-	cw := lipgloss.Width(bottomCue)
+	cw := lipgloss.Width(m.bottomCue())
 	return !m.scrollPinned && m.w >= 2*cw && x >= m.w-cw
 }
 
@@ -858,6 +863,8 @@ type tuiModel struct {
 	switchesWant string // the kind whose switch list this TUI asked for (switchlist.go)
 	// mcpServersWant: this TUI asked for the /mcp table (mcpview.go).
 	mcpServersWant bool
+	keys           keyMap            // keymap.go: the key pressed → the key the handlers match
+	keysErr        error             // keys.json would not load: said once, defaults in use
 	engineCmds     []engineCmd       // the engine's slash commands (commands event)
 	skills         []catalogSkill    // from the engine's catalog event
 	serverIDs      []string          // every MCP server's id (ready/servers events), for /mcp completion
@@ -924,7 +931,8 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	// the TUI is showing, so an out-of-band `kill -USR1 <pid>` snapshots it.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing()}
+	keys, keysErr := loadKeyMap()
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -967,6 +975,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// number that decides whether dun warns about itself (see perf.go).
 	start := time.Now()
 	msg = normalizeKey(msg)
+	if msg = m.keys.translate(m.keyScope(), msg); msg == nil {
+		return m, nil // a default key whose action was bound elsewhere (keymap.go)
+	}
 	kind := msgKind(msg)
 	m.evlog.add(start, kind, msg) // for /repaint (repaint.go)
 	nm, cmd := m.update(msg)
@@ -1208,7 +1219,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// ctrl+g while a turn runs interrupts it, whatever has the keys. Idle it
 		// does nothing; ctrl+k stays the input's kill-to-end-of-line, busy or not.
-		if msg.String() == interruptKey && m.turnRunning() {
+		if m.keys.is("turn.interrupt", msg.String()) && m.turnRunning() {
 			return m.interrupt()
 		}
 		// ctrl+c while a turn runs interrupts it too; a second ctrl+c within
@@ -2633,6 +2644,10 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.proc.uiGet() // this user's UI state in the session, kept by dund
 	case "ready":
 		m.starting = false
+		if m.keysErr != nil { // said once, where the person is looking
+			m.append(warnLine("keys: " + m.keysErr.Error() + " — using the defaults (/keys)"))
+			m.keysErr = nil
+		}
 		m.tools = nil
 		if ts, ok := ev["tools"].([]any); ok {
 			for _, t := range ts {
@@ -3781,7 +3796,7 @@ func (m tuiModel) drawView() string {
 	// Focus cue lives entirely in the divider's bright half — no pane borders.
 	div := divider(m.w, m.focus != focusInput && !m.asking)
 	if !m.scrollPinned {
-		div = withBottomCue(div, m.w)
+		div = withBottomCue(div, m.bottomCue(), m.w)
 	}
 
 	var status string
@@ -3906,7 +3921,7 @@ func (m tuiModel) drawView() string {
 		}
 		// Four hints at most: the rest are in /help. The way out is never
 		// the one a narrow row drops (fitHints).
-		status = m.spendStatus(time.Now()) + stDim.Render("ready"+m.serversStartingTail()+"  ·  enter send · alt+enter newline · ↑ history · "+m.exitHint())
+		status = m.spendStatus(time.Now()) + stDim.Render("ready"+m.serversStartingTail()+"  ·  "+m.composeHint()+m.exitHint())
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.
@@ -4962,6 +4977,7 @@ func init() {
 			m.append(stDim.Render("asked dund to restart now — running turns are interrupted and resume after"))
 			return nil
 		}},
+		{"keys", "[reload|preset <name>]", "the key map: every rebindable action and its keys; yours go in ~/.dun/keys.json", keysSlash},
 		{"perf", "", "redraw timings for this session (and how to get a profile)", func(m *tuiModel, _ []string) tea.Cmd {
 			m.append(stHeader.Render("render performance") + "\n" + frames.report())
 			return nil

@@ -54,10 +54,14 @@ func (m tuiModel) interrupt() (tea.Model, tea.Cmd) {
 
 // busyHint is the key hint on the busy status line: what each key does.
 func (m tuiModel) busyHint() string {
-	if m.disableExit {
-		return "ctrl+c or ctrl+g interrupt · /exit to exit"
+	keys := "ctrl+c"
+	if k := m.keys.label("turn.interrupt"); k != "" {
+		keys += " or " + k
 	}
-	return "ctrl+c or ctrl+g interrupt · ctrl+c twice quits"
+	if m.disableExit {
+		return keys + " interrupt · /exit to exit"
+	}
+	return keys + " interrupt · ctrl+c twice quits"
 }
 
 // markInterrupted folds the turn's open blocks as cut: the live thought says
