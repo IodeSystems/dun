@@ -116,24 +116,25 @@ for the job and report): both builds 2 of 2 correct. The new build called
 the task took more rounds and more tokens in all (17.5k and 22.5k against
 11.5k and 11.5k) though each request was smaller.
 
-## A whole task, three agents (2026-10-27)
+## A whole task, four agents (2026-10-27)
 
 tools/promptsize/session.py: each agent runs one task on a fresh fixture
 (fixture.py: a Python repo whose CI failed; ci.log is 218 KB with the real
 error buried; done = `python3 -m unittest` passes after), through a relay
-(relay.py) to the same model (`chat` on llm.iodesystems.com) that records
-every request's usage. Clean homes; 3 runs each.
+(relay.py) to the same model (`chat` on llm.iodesystems.com, after corrallm
+c5a3e9c applied the model's sampling profile and thinking budget on every
+route: runs from before it are not comparable and were replaced) that
+records every request's usage. Clean homes; 3 runs each. Claude Code goes
+through the gateway's Anthropic endpoint (/v1/messages, the same lane);
+its prompt is input + cache reads + cache writes, and corrallm cuts its
+per-request billing line from its system prompt (for the cache).
 
 | agent | done | requests | first request | last request | whole task |
 |---|---|---:|---:|---:|---:|
-| pi 1.4.0 | 3 of 3 | 5–6 | 1,831 | 3,000–4,472 | 12.9k–16.9k |
-| dun (2f9fc8d) | 3 of 3 | 5 | 3,986 | 5,131–6,393 | 23.1k–27.1k |
-| opencode 1.15.3 | 3 of 3 | 6–8 | 595 (a title call) | 15.3k–17.7k | 73.5k–110.5k |
-| Claude Code 2.1.311 | 3 of 3 | 5–15 | 12,489 | 14.6k–63.0k | 82.9k–262.3k |
+| pi 1.4.0 | 3 of 3 | 5–7 | 1,827 | 3,089–3,393 | 12.8k–17.3k |
+| dun (v0.1.5 + skill reader) | 3 of 3 | 6 | 3,986 | 7,443–10,573 | 38.6k–49.4k |
+| Claude Code 2.1.311 | 3 of 3 | 5–6 | 12,499 | 13,896–14,415 | 66.5k–80.0k |
+| opencode 1.15.3 | 3 of 3 | 6–7 | 595 (a title call) | 15,356–15,630 | 73.6k–89.4k |
 
 A short task: no agent reached ten requests, so growth over a long session
-is not measured by it. Claude Code ran through the gateway's Anthropic
-endpoint (corrallm be50ca1, /v1/messages, the same `chat` lane, the same
-sampling); its prompt is input + cache reads + cache writes. corrallm cuts
-Claude Code's per-request billing line from its system prompt (for the
-cache). One of its runs read the log whole: 63k tokens on its last request.
+is not measured by it.
