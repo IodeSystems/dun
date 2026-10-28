@@ -203,7 +203,17 @@ func (s *subAgent) noteActivity() {
 }
 
 // settle ends the current run.
-func (s *subAgent) settle(state agentState) {
+func (s *subAgent) settle(state agentState) { s.settleThen(state, nil) }
+
+// settleReporting ends the run and reports it to the parent BEFORE a waiter
+// is released: closed first, a waiter (jobs wait, a test) could look for the
+// report before it was queued (flaky 1 in 10–20; the same order as the bg
+// job's doneCh, 2755d6f).
+func (s *subAgent) settleReporting(state agentState) {
+	s.settleThen(state, func() { s.notify(s.report()) })
+}
+
+func (s *subAgent) settleThen(state agentState, before func()) {
 	s.mu.Lock()
 	s.state = state
 	if s.ended.IsZero() {
@@ -213,6 +223,9 @@ func (s *subAgent) settle(state agentState) {
 	// Saved before the run is over to a waiter: one that resumes the
 	// session right after reads the state this run ended in.
 	s.saveState()
+	if before != nil {
+		before()
+	}
 	s.mu.Lock()
 	if s.done != nil {
 		select {
@@ -512,8 +525,7 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 			s.setFinal(oneLine(reply, 2000))
 		}
 	}
-	s.settle(agentIdle)
-	s.notify(s.report())
+	s.settleReporting(agentIdle)
 }
 
 func (s *subAgent) finalIsEmpty() bool {
@@ -560,8 +572,7 @@ func (s *subAgent) tell(msg string) string {
 		} else if reply := strings.TrimSpace(res.Reply); reply != "" && s.finalIsEmpty() {
 			s.setFinal(oneLine(reply, 2000))
 		}
-		s.settle(agentIdle)
-		s.notify(s.report())
+		s.settleReporting(agentIdle)
 	}()
 	return fmt.Sprintf("Told agent #%d. It is working; you will hear when it is done "+
 		"(or jobs(agent:%d, wait:true)).", s.num, s.num)
