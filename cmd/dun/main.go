@@ -206,9 +206,9 @@ func main() {
 	// is resolved after parse (flag > env > config).
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
 	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
-	docker := flag.String("docker", "", "run the entire process in a Docker container (--docker=true for bundled image, --docker=IMAGE for a specific one)")
+	docker := flag.String("docker", "", "run the entire process in a Docker container (--docker=true for bundled image, --docker=IMAGE for a specific one); in a session, /isolate docker")
 	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
-	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place)")
+	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place); in a session, /isolate worktree")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
 	// ship was removed 2026-10-27: repos state their own shipping rules. The
 	// flags stay accepted and do nothing, because an older TUI or dund passes
@@ -697,7 +697,7 @@ func main() {
 		// worktree this session works in.
 		ConfigDir:         absWS,
 		AutostartOverride: autostartOverrides(ragFlag, lspFlag),
-		// Stored so /docker on and /worktree new can rehoist with the right
+		// Stored so /isolate can rehoist with the right
 		// image and mounts without the TUI knowing about them.
 		DockerImage:   resolveDockerImage(*docker),
 		DockerNetwork: *dockerNetwork,
@@ -1553,16 +1553,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
+		wsBefore, isoBefore := h.Workspace(), isolationMode(h)
 		msg := runControlCmd(ctx, h, id, action)
 		h.Aside("[control/" + id + "] " + msg)
 		em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
-		if id == "docker" {
-			em.emit(commandsEvent(h))
-		}
-		// /worktree new moved the session: say where, as at start, so dund's
-		// dun_list shows the worktree and every client the branch.
-		if wt := h.Worktree(); id == "worktree" && action == "new" && wt != nil && wt.Branch != "" {
-			em.emit(&proto.Workspace{Path: wt.Path, Branch: wt.Branch})
+		for _, ev := range isolateEvents(h, wsBefore, isoBefore) {
+			em.emit(ev)
 		}
 	}
 	in.setCtrlCmd(ctrlCmd)

@@ -248,7 +248,7 @@ func TestPalette_NeutralNamesNoClipAt100(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = nm.(tuiModel)
-	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(commandList(nil, false).Items)})
+	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(commandList(nil, "").Items)})
 	m = typeStr(m, "/")
 	panel := m.palettePanel()
 	if strings.Contains(panel, stTool.Render("/model")) {

@@ -302,7 +302,7 @@ type Config struct {
 	// conventional-commits default.
 	CommitCfg   *CommitConfig
 	SessionFile string // persist the conversation here (resumable); "" = in-memory only
-	// DockerImage is the image used when /docker on is toggled mid-session.
+	// DockerImage is the image used when /isolate docker is chosen mid-session.
 	// Set from the --docker flag at construction so the runtime toggle has
 	// a default. Empty → "golang:1.23".
 	DockerImage string
@@ -1289,6 +1289,10 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if extDir == "" {
 		extDir = cfg.Workspace
 	}
+	// Pinned: every reader of ConfigDir falls back to Workspace, and
+	// Rehoist (/isolate) moves Workspace into a worktree; the config, and
+	// the directory /isolate off goes back to, stay the checkout's.
+	cfg.ConfigDir = extDir
 	// Extensions: the bundled ones and the user's and project's manifests
 	// (extension.go). Their servers join the base the files layer over.
 	exts, extErrs := LoadExtensions(extDir)
@@ -1805,6 +1809,18 @@ func (h *Harness) AskUser(ctx context.Context, question string, options []string
 	}
 	return ask(ctx, question, options, false, rec)
 }
+
+// Home is the directory the session works in when it is in place: the
+// developer's checkout (Config.ConfigDir), not a worktree it moved into.
+// /isolate off goes back here.
+func (h *Harness) Home() string {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	return h.configDir()
+}
+
+// NoDir reports a session attached to no directory (dun --no-dir).
+func (h *Harness) NoDir() bool { return h.cfg.NoDir }
 
 // IsDocker reports whether the current exec backend is DockerExec.
 func (h *Harness) IsDocker() bool {

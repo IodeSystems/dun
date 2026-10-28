@@ -33,7 +33,7 @@ func TestNameFromURL(t *testing.T) {
 // engineCmdsNow is the engine's command list as the TUI receives it.
 func engineCmdsNow(t *testing.T) []engineCmd {
 	t.Helper()
-	b, err := json.Marshal(commandList(nil, false))
+	b, err := json.Marshal(commandList(nil, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

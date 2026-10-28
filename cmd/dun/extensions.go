@@ -25,7 +25,7 @@ import (
 // command; refused says which.
 func engineExtensions(all []dun.Extension) (ok []dun.Extension, refused []string) {
 	taken := map[string]bool{}
-	for _, c := range ownCommands(false) {
+	for _, c := range ownCommands("") {
 		taken[c.Name] = true
 	}
 	for _, c := range slashCommands {

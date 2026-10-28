@@ -17,7 +17,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 	for _, c := range slashCommands {
 		local[c.name] = true
 	}
-	for _, c := range commandList(nil, false).Items {
+	for _, c := range commandList(nil, "").Items {
 		if local[c.Name] {
 			t.Errorf("/%s is both a local TUI command and an engine command", c.Name)
 		}
@@ -45,7 +45,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 		t.Errorf("refused: %v", refused)
 	}
 	got := map[string]bool{}
-	for _, c := range commandList(nil, false, exts...).Items {
+	for _, c := range commandList(nil, "", exts...).Items {
 		if got[c.Name] {
 			t.Errorf("/%s listed twice", c.Name)
 		}
@@ -54,7 +54,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 	if !got["hello"] || !got["raglit"] || !got["poly-lsp"] {
 		t.Errorf("extension commands: %v", got)
 	}
-	for _, c := range commandList(nil, false, exts...).Items {
+	for _, c := range commandList(nil, "", exts...).Items {
 		if c.Name == "hello" && !strings.Contains(c.Usage, "greet") {
 			t.Errorf("hello's usage lacks its command: %q", c.Usage)
 		}
@@ -81,12 +81,12 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 }
 
 func TestCommandListShowsState(t *testing.T) {
-	l := commandList([]dun.ServerState{{ID: dun.ServerDocs, Running: true, Auto: true}}, true)
+	l := commandList([]dun.ServerState{{ID: dun.ServerDocs, Running: true, Auto: true}}, dun.IsoDocker)
 	got := map[string]string{}
 	for _, c := range l.Items {
 		got[c.Name] = c.State + "/" + c.Detail
 	}
-	if got["raglit"] != "on/autostart" || got["poly-lsp"] != "off/not configured" || got["docker"] != "on/" {
+	if got["raglit"] != "on/autostart" || got["poly-lsp"] != "off/not configured" || got["isolate"] != "docker/" {
 		t.Fatalf("states: %v", got)
 	}
 }
@@ -94,7 +94,7 @@ func TestCommandListShowsState(t *testing.T) {
 // raglit's commands are in its completion with their help, and in the usage.
 func TestCommandList_ExtensionCommandsWithHelp(t *testing.T) {
 	var raglit proto.CommandSpec
-	for _, c := range commandList(nil, false).Items {
+	for _, c := range commandList(nil, "").Items {
 		if c.Name == "raglit" {
 			raglit = c
 		}

@@ -27,7 +27,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `error` | Turn failed | `error`, `fatal` |
 | `retry` | Provider outage, retrying | `note`, `due`, `seen` |
 | `reset` | Store cleared (`/clear`) | — |
-| `control` | Control action done (`/docker`, `/prompt`) | `id`, `action`, `message` |
+| `control` | Control action done (`/isolate`, `/prompt`) | `id`, `action`, `message` |
 | `compaction` | Context compacted | `text` |
 | `exit` | Engine leaving voluntarily | `reason` |
 | `image_refused` | A message with images not sent (no vision, no `vision_model`; or an unreadable image) | `message`, `content`, `images[]` — the client puts the message back in the composer; `done` follows |

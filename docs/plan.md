@@ -125,7 +125,10 @@ owner's call before work starts.
 - [~] `/status`: a server scripted in mcpshell reads "scripted in the
   shell", not off; the effort is shown.
 
-- [ ] `/docker` becomes `/isolate` (worktree and Docker together).
+- [~] `/docker` becomes `/isolate` (worktree and Docker together):
+  `/isolate [none|worktree|docker|off]` (cmd/dun/isolate.go); `/docker`,
+  `/worktree new` kept as aliases, out of the list. Open: not driven in a
+  live TUI with a real Docker.
 - [~] `/ship` removed (owner, 2026-10-27): repos state their own shipping
   rules. `--ship`, `--pr`, `--no-ship` are accepted and do nothing; a
   `ship` section in dun.json is ignored.
