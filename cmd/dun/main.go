@@ -238,7 +238,7 @@ func main() {
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	// --web-tui: this terminal TUI in a browser tab, byte for byte through a
-	// pty (serveterm.go). Not dund's web app (dund --http), which is its own
+	// pty (serveterm.go). Not dund's web app (dund --web-experimental), which is its own
 	// client of the same sessions; this is the passthrough (USER 2026-10-28:
 	// "the web terminal should be --web-tui").
 	serve := flag.Bool("web-tui", false, "the terminal TUI in a browser tab (xterm.js over a pty) at --addr")

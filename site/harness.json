@@ -66,7 +66,7 @@
     "context: command output over 20,000 characters cut to start and end, whole saved to a file",
     "sessions: run in a local service (dund)",
     "sessions: resume and persist",
-    "sessions: web and phone clients",
+    "sessions: web and phone clients (experimental, untested)",
     "sessions: worktree isolation",
     "sessions: scheduled messages (/schedule; push, edit, cancel before sending)",
     "sessions: /loop, paced by interval or by the model (loop_ctl)",

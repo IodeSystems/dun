@@ -20,7 +20,7 @@ import (
 // service` and `aw4 service`.
 //
 // Without a service, dund runs only while some TUI has started it, and never
-// with --http — so dun.iodesystems.com has nothing behind it after a reboot.
+// with --web-experimental — so the web app has nothing behind it after a reboot.
 
 // ServiceUnit is the service name a TUI looks for before starting dund itself.
 const ServiceUnit = "dund"

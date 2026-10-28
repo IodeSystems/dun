@@ -152,9 +152,14 @@ func serveCmd(l *loader) *cobra.Command {
 	cmd.Flags().StringArrayVar(&oidcCfg.Allow, "oidc-allow", nil, "sign-in: an email that may sign in (repeatable); each sees the owner's sessions")
 	cmd.Flags().StringVar(&oidcCfg.Redirect, "oidc-redirect", "", "sign-in: the callback URL (default: /auth/callback on the address the browser used)")
 	cmd.Flags().StringVar(&releases, "releases", "", "serve Android releases from here (tools/release-android): /releases, /dun.apk, announced in /api/v1/hello")
-	cmd.Flags().StringVar(&webRoot, "web-root", "", "serve this built client at / (mobile: pnpm export:web); default: the built-in stopgap page")
+	cmd.Flags().StringVar(&webRoot, "web-root", "", "with --web-experimental: serve this built client at / (mobile: pnpm export:web); default: the built-in stopgap page")
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "prove these settings can run, then exit (the unit's ExecStartPre)")
-	cmd.Flags().StringVar(&httpAddr, "http", "", "also serve HTTP here (e.g. 127.0.0.1:20003); needs a token (dund token)")
+	// The web app and its HTTP API are not tested yet (USER 2026-10-28: "it's
+	// not ready, it's not tested"), so the flag says so. --http was its name:
+	// still accepted, with a warning, so an installed service keeps running.
+	cmd.Flags().StringVar(&httpAddr, "web-experimental", "", "EXPERIMENTAL, untested: serve the web app and its HTTP API here (e.g. 127.0.0.1:20003); needs a token (dund token)")
+	cmd.Flags().StringVar(&httpAddr, "http", "", "")
+	_ = cmd.Flags().MarkDeprecated("http", "use --web-experimental (the web app is not tested yet)")
 	// The check a service's dund runs on a new build before it hands over
 	// (serveCheck): that live dund owns the pidfile and the HTTP port.
 	cmd.Flags().IntVar(&handoverFrom, "handover-from", 0, "with --check: the live dund (pid) this build replaces")
