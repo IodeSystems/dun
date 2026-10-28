@@ -369,6 +369,9 @@ type convoEntry struct {
 	// scrollOverlay to map vp.YOffset back to conversation entries without
 	// re-rendering.
 	rowOffset int
+	// lastH is the rows this entry drew at the last refresh (0 before the
+	// first): with rowOffset, where it was in the view (foldAbove).
+	lastH int
 }
 
 // invalidateWrap drops everything refresh() cached about how this entry
@@ -656,6 +659,10 @@ type tuiModel struct {
 	convoHoldW   int            // the pane width convoHold was measured at
 	paneTermH    int            // the terminal height the pane was last fitted at (a resize, not a panel)
 	holdSkip     bool           // the next refresh replaces the conversation: no contract hold (dropHold)
+	// foldedRows is the rows folded away above the view this session
+	// (scrollfold.go): the conversation's height plus it never goes down.
+	foldedRows int
+
 	// panelHeld: a panel below (palette, form, picker) shrank the pane and
 	// the pinned view keeps panelYOff while it is open and the conversation
 	// is no longer than panelRows (applyScroll).
@@ -4045,6 +4052,17 @@ func (m *tuiModel) replay(items []any) {
 		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(commaf("── resumed %d entries ──", n))})
 	}
 	m.quietReplay = false
+	// History was never on screen: its thoughts come back folded.
+	for i := range m.convo {
+		if r := m.convo[i].run; r != nil {
+			for _, it := range r.items {
+				if it.think != nil && !it.think.live {
+					it.folded = true
+				}
+			}
+			r.ver++
+		}
+	}
 	m.refresh()
 }
 
@@ -4226,8 +4244,15 @@ func (m *tuiModel) refresh() {
 	// background style (ignoring the pre-styled collapsed from e.view()).
 	cumRow := 0 // running row offset for scrollOverlay mapping
 	m.bandRaw = nil
+	// Blocks wholly above the view fold now, and the view's top moves up by
+	// the rows they gave back (scrollfold.go).
+	foldOK, foldY, shift := m.foldAboveOK(), m.vp.YOffset, 0
 	for i, b := range blocks {
 		var w string
+		folding := foldOK && i < len(m.convo) && m.aboveView(i, foldY, selMode)
+		if folding {
+			m.convo[i].foldEntry()
+		}
 		if i < len(m.convo) && m.convo[i].blank {
 			// The turn-gap row: exactly one empty line, nothing to measure.
 			w = ""
@@ -4323,7 +4348,10 @@ func (m *tuiModel) refresh() {
 			// The entry keeps its own copy for the trace/replay path and for
 			// scrollOverlay's row mapping; the frame is the authoritative one
 			// that View and applyScroll read.
-			m.convo[i].rowOffset = cumRow
+			if folding {
+				shift += m.convo[i].lastH - h
+			}
+			m.convo[i].rowOffset, m.convo[i].lastH = cumRow, h
 		}
 		cumRow += h
 	}
@@ -4334,7 +4362,7 @@ func (m *tuiModel) refresh() {
 	if m.holdSkip {
 		m.holdSkip = false
 	} else {
-		m.holdShrink(len(rendered))
+		m.holdShrink(len(rendered), shift)
 	}
 	// A closed question's rows stay in the pane until new rows take them
 	// (holdConvo): blank rows at the bottom, so nothing above them moves.
@@ -4351,6 +4379,10 @@ func (m *tuiModel) refresh() {
 	// it to split them back was ~12ms of every refresh on a long conversation —
 	// and every streamed token is a refresh.
 	m.vp.SetLines(rendered)
+	if shift != 0 {
+		m.vp.SetYOffset(foldY - shift)
+		m.foldedRows += shift
+	}
 	m.contentGen++
 	// The frame is now the single geometry truth. refresh is the ONLY writer:
 	// it populated frm above and stored it, so every reader (View, convoHeight,

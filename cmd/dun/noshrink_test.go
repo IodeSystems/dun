@@ -8,7 +8,9 @@ import (
 )
 
 // The no-screen-jump rule: while a session runs, the conversation's total
-// rendered height never goes down. Only the person may shrink it — /clear,
+// rendered height never goes down, apart from the rows folded away ABOVE the
+// view (scrollfold.go, counted in foldedRows: the view moves up by as many,
+// so nothing on screen moves). Only the person may shrink it — /clear,
 // closing something they opened, a resize (which re-wraps). Events alone —
 // thinking, replies, tool runs, retries, errors, questions — only add.
 //
@@ -49,7 +51,7 @@ func (c *shrinkCheck) ev(ev map[string]any) {
 	if len(c.log) > 12 {
 		c.log = c.log[1:]
 	}
-	h := totalHeight(c.v.m)
+	h := totalHeight(c.v.m) + c.v.m.foldedRows
 	if h < c.last {
 		c.t.Fatalf("step %d: the conversation shrank %d → %d rows after:\n  %s\n%s",
 			c.step, c.last, h, strings.Join(c.log, "\n  "), c.v.view())

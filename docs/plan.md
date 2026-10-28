@@ -76,9 +76,13 @@ owner's call before work starts.
   once on a recap or compaction. Event `request`. Fixed-width pieces; they
   go pp → ttft → cache → ctx → tg as the width shrinks, none under 80
   columns.
-- [ ] Collapse only under scroll pressure: a block folds as the scroll pushes
+- [~] Collapse only under scroll pressure: a block folds as the scroll pushes
   it, never ahead of it, so no blank rows are left (owner: not yielding
-  matters most).
+  matters most). Built (cmd/dun/scrollfold.go): a run's finished thought stays
+  open on screen and folds once the run is wholly above the view; held
+  heights (maxH, box peak) are released there too, and the view's top moves
+  up by the rows removed. Open: the end of a turn still re-pins a reader
+  who scrolled up (tui.go, "Force scroll to bottom").
 
 ## Sessions and agents
 
