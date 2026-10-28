@@ -138,3 +138,12 @@ per-request billing line from its system prompt (for the cache).
 
 A short task: no agent reached ten requests, so growth over a long session
 is not measured by it.
+
+### dun after file_read took grep (2026-10-27, 137bd56, agentkit v0.14.1)
+
+file_grep and file_list folded into file_read (grep, directories); a read of
+a file over 64 KB with no range returns a 2 KB head and a note to grep it;
+jobs is offered only once something is in the background. dun's first
+request: 3,276 tokens, 9 tools (was 3,925 with 12). The same short task, 5
+runs: all done, 5–6 requests, the whole task 25.1k–32.9k tokens (was
+38.6k–49.4k). pi 1.4.0 on the same task: 12.8k–17.3k.

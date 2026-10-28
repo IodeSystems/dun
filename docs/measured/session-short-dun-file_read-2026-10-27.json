@@ -1,0 +1,116 @@
+[
+ {
+  "agent": "dun",
+  "run": 1,
+  "rc": 0,
+  "secs": 9,
+  "done": true,
+  "check": "OK",
+  "requests": 6,
+  "first": 3325,
+  "tenth": null,
+  "last": 5884,
+  "largest": 5884,
+  "total": 30016,
+  "cached": 26921,
+  "per_request": [
+   3325,
+   4646,
+   4873,
+   5553,
+   5735,
+   5884
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 2,
+  "rc": 0,
+  "secs": 9,
+  "done": true,
+  "check": "OK",
+  "requests": 6,
+  "first": 3325,
+  "tenth": null,
+  "last": 5850,
+  "largest": 5850,
+  "total": 30057,
+  "cached": 26947,
+  "per_request": [
+   3325,
+   4646,
+   4886,
+   5566,
+   5784,
+   5850
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 3,
+  "rc": 0,
+  "secs": 9,
+  "done": true,
+  "check": "OK",
+  "requests": 6,
+  "first": 3325,
+  "tenth": null,
+  "last": 6447,
+  "largest": 6447,
+  "total": 32857,
+  "cached": 29150,
+  "per_request": [
+   3325,
+   5235,
+   5436,
+   6116,
+   6298,
+   6447
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 4,
+  "rc": 0,
+  "secs": 10,
+  "done": true,
+  "check": "OK",
+  "requests": 5,
+  "first": 3325,
+  "tenth": null,
+  "last": 5872,
+  "largest": 5872,
+  "total": 25107,
+  "cached": 21979,
+  "per_request": [
+   3325,
+   4646,
+   5541,
+   5723,
+   5872
+  ]
+ },
+ {
+  "agent": "dun",
+  "run": 5,
+  "rc": 0,
+  "secs": 10,
+  "done": true,
+  "check": "OK",
+  "requests": 6,
+  "first": 3325,
+  "tenth": null,
+  "last": 6106,
+  "largest": 6106,
+  "total": 31056,
+  "cached": 27690,
+  "per_request": [
+   3325,
+   4836,
+   5076,
+   5756,
+   5957,
+   6106
+  ]
+ }
+]
