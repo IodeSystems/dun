@@ -105,8 +105,8 @@ type usageReport struct {
 // scriptedSaving is one scripted server's schemas left out of requests.
 type scriptedSaving struct {
 	Requests int       `json:"requests"`
-	Tokens   int       `json:"tokens"`         // summed over those requests
-	Latest   int       `json:"latest"`         // its standalone size on the latest one
+	Tokens   int       `json:"tokens"` // summed over those requests
+	Latest   int       `json:"latest"` // its standalone size on the latest one
 	First    time.Time `json:"first"`
 	Last     time.Time `json:"last"`
 }
