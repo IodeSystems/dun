@@ -60,7 +60,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   produces a TUI line, stderr and a `-p` event, with a per-turn counter so
   thrashing names itself.
 - **The model may rewrite its own recent history (`recap`, `recap.go`),
-  under three constraints.** It replaces a span with the account the
+  under four constraints.** It replaces a span with the account the
   conversation should have had: cheaper than compaction (no summarizer call),
   more accurate (the whole span is in view), and it fixes the record, so a
   misunderstanding stops misleading later turns.
@@ -75,10 +75,20 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   3. Tool pairs stay whole. A call without its result is the one shape a
      provider rejects, so the span is planned before it is applied, and the
      live recap call is never inside its own span.
+  4. It stays inside the current turn (USER, 2026-10-28). The span starts at
+     or after the latest user message and never crosses one; `from` is
+     optional and only starts it later. A correction typed between turns is a
+     user message, so it cannot become the model's paraphrase. Words typed
+     mid-turn ride a tool result (`liftQueued`); when that result is
+     recapped, they are copied into the summary verbatim. The `user` field,
+     which let the model reword the user's message, is gone for the same
+     reason. Earlier turns are finished work: making them smaller is
+     compaction's and LOD's job, by policy. The churn stays visible to the
+     human (scrollback line, sidecar) without the model paying for it.
 - **A `keep` term must mean what the model meant.** `keep:["exec"]` kept every
   exec call, including the 255k `cat` the recap existed to remove, because the
   model gives the tool name it knows. A bare tool name keeps only that tool's
-  most recent call. The anchor prefers a user message; an assistant turn that
+  most recent call. A `from` prefers the user message; an assistant turn that
   echoes the phrase collapsed a span to 85 characters.
 - **A context-management nudge must name what to remove and arrive when the
   churn happens.** A prompt line describing `recap` got zero uses. A

@@ -53,7 +53,7 @@ func TestRecap_SaysItsShape(t *testing.T) {
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = "recap", `{"from": "was reported towed", "keep": null}`
 	out, _ := d(context.Background(), tc)
-	for _, want := range []string{"without summary", "{from: string, summary: string, keep?: string[], user?: string}", "read_saved {ref}", "You sent {from, keep}"} {
+	for _, want := range []string{"without summary", "{summary: string, from?: string, keep?: string[]}", "read_saved {ref}", "You sent {from, keep}"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}

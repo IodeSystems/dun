@@ -380,13 +380,13 @@ func (s *sessionStore) contextLocked() []agent.Entry {
 	return out
 }
 
-// recap replaces a span of the conversation with one entry, records a citation,
-// and optionally rewrites the anchoring user message.
+// recap replaces a span of the conversation with one entry and records a
+// citation.
 //
 // Built on the same primitive as Compact — drop a set, insert a marker, rewrite
 // the file atomically — because it is the same operation with a different
 // author: the model writes this summary instead of a summarizer LLM.
-func (s *sessionStore) recap(subsumes []agent.Entry, replacement, citation agent.Entry, anchorID, userEdit string) {
+func (s *sessionStore) recap(subsumes []agent.Entry, replacement, citation agent.Entry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	drop := map[string]bool{}
@@ -405,9 +405,6 @@ func (s *sessionStore) recap(subsumes []agent.Entry, replacement, citation agent
 				inserted = true
 			}
 			continue
-		}
-		if userEdit != "" && e.ID == anchorID {
-			e.Content = userEdit
 		}
 		kept = append(kept, e)
 	}

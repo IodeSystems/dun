@@ -88,11 +88,13 @@ func TestPlanRecap_RefusesWhatItCannotAnchor(t *testing.T) {
 	if _, err := planRecap(convo(), "a phrase nobody said", nil); err == nil {
 		t.Error("an unmatched anchor must be an error, not a silent whole-conversation wipe")
 	}
-	if _, err := planRecap(convo(), "", nil); err == nil {
-		t.Error("an empty anchor must be refused")
+	// No from: the span starts at the user's latest message.
+	sp, err := planRecap(convo(), "", nil)
+	if err != nil || sp.Anchor == nil || sp.Anchor.Kind != agent.KindUser {
+		t.Fatalf("no from should anchor on the latest user message, got %+v %v", sp.Anchor, err)
 	}
 	// The anchor is matched from the END backwards, so the most recent wins.
-	sp, err := planRecap(convo(), "go test", nil)
+	sp, err = planRecap(convo(), "go test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +123,7 @@ func TestRecap_MovesChurnToDiskAndOutOfContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	note, err := h.applyRecap(sp, "The parser needed a stack, not a regex. Done and tested.", "")
+	note, err := h.applyRecap(sp, "The parser needed a stack, not a regex. Done and tested.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,24 +174,83 @@ func TestRecap_MovesChurnToDiskAndOutOfContext(t *testing.T) {
 	}
 }
 
-// Recapping the user's own message is the point of `user`: a request that was
-// ambiguous is rewritten to what it turned out to mean.
-func TestRecap_RewritesTheAnchoringUserMessage(t *testing.T) {
+// Recap stays in the current turn: a span never crosses a user message, so a
+// correction typed between turns can never become the model's paraphrase.
+func TestPlanRecap_StaysInTheCurrentTurn(t *testing.T) {
+	entries := append(convo()[:7:7],
+		agent.Entry{ID: "u2", Kind: agent.KindUser, Content: "no — keep the regex for single quotes"},
+		agent.Entry{ID: "a2", Kind: agent.KindAssistant, Content: "ok"},
+		agent.Entry{ID: "t2", Kind: agent.KindToolCall, Content: `{"command":"go vet"}`, ToolCallID: "c3", ToolName: "exec"},
+		agent.Entry{ID: "r2", Kind: agent.KindToolResult, Content: "vet ok", ToolCallID: "c3", ToolName: "exec"},
+		agent.Entry{ID: "a3", Kind: agent.KindAssistant, Content: "recapping"},
+		agent.Entry{ID: "t9", Kind: agent.KindToolCall, Content: `{}`, ToolCallID: "c9", ToolName: "recap"},
+	)
+	sp, err := planRecap(entries, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp.Anchor == nil || sp.Anchor.ID != "u2" {
+		t.Fatalf("the span should start after the latest user message, got %+v", sp.Anchor)
+	}
+	for _, e := range sp.Subsumes {
+		if e.Kind == agent.KindUser || strings.Contains(e.Content, "FAIL output") {
+			t.Fatalf("the span reached into an earlier turn: %+v", e)
+		}
+	}
+	_, err = planRecap(entries, "nested quotes", nil)
+	if err == nil || !strings.Contains(err.Error(), "current turn") {
+		t.Fatalf("a from before the latest user message must be refused and say why, got %v", err)
+	}
+	// The user's message itself may be quoted: it is the turn's start.
+	if sp, err := planRecap(entries, "keep the regex", nil); err != nil || sp.Anchor.ID != "u2" {
+		t.Fatalf("quoting the latest user message should anchor on it, got %+v %v", sp.Anchor, err)
+	}
+}
+
+// Words the user typed mid-turn ride a tool result (liftQueued). When that
+// result is recapped they go into the summary word for word, in order, and
+// nothing else lifted with them does.
+func TestRecap_KeepsWhatTheUserSaidMidTurnVerbatim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	st, _ := openSessionStore(path)
+	h := &Harness{store: st, cfg: Config{SessionFile: path}}
+	entries := convo()
+	entries[3].Content += "\n\n[user] not the lexer — the parser\nline two" +
+		"\n\n[background] job 2 finished" +
+		"\n\n[user] and keep it under 100 lines"
+	for _, e := range entries {
+		st.appendSilent(e)
+	}
+	out := h.runRecap(context.Background(), "", "Switched to a stack; tests pass.", nil)
+	if strings.Contains(out, "ERROR") {
+		t.Fatal(out)
+	}
+	after, _ := st.Context(context.Background(), "dun")
+	var summary string
+	for _, e := range after {
+		if strings.Contains(e.Content, "Switched to a stack") {
+			summary = e.Content
+		}
+	}
+	want := "Switched to a stack; tests pass.\n\nThe user said, during this span (verbatim):\n" +
+		"1. \"not the lexer — the parser\\nline two\"\n2. \"and keep it under 100 lines\""
+	if summary != want {
+		t.Fatalf("summary as stored:\n%s\nwant:\n%s", summary, want)
+	}
+}
+
+// After the task is done, a recap result that says "continue" sent the model
+// back to check its work again (USER 2026-10-27 benchmark).
+func TestRecap_ResultSaysToAnswerWhenDone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	st, _ := openSessionStore(path)
 	h := &Harness{store: st, cfg: Config{SessionFile: path}}
 	for _, e := range convo() {
 		st.appendSilent(e)
 	}
-	before, _ := st.Context(context.Background(), "dun")
-	sp, _ := planRecap(before, "nested quotes", nil)
-
-	if _, err := h.applyRecap(sp, "done", "make the parser handle nested quotes INSIDE attribute values"); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := st.Context(context.Background(), "dun")
-	if !strings.Contains(after[0].Content, "INSIDE attribute values") {
-		t.Fatalf("the user message should be clarified, got %q", after[0].Content)
+	out := h.runRecap(context.Background(), "", "done", nil)
+	if !strings.Contains(out, "If the task is done, answer now") || strings.Contains(out, "Continue from here") {
+		t.Fatalf("result: %q", out)
 	}
 }
 
@@ -213,7 +274,7 @@ func TestRecap_AppliesWithoutAskingAndReports(t *testing.T) {
 	}
 	before, _ := st.Context(context.Background(), "dun")
 
-	out := h.runRecap(context.Background(), "nested quotes", "a summary", nil, "")
+	out := h.runRecap(context.Background(), "nested quotes", "a summary", nil)
 	if strings.Contains(out, "ERROR") || strings.Contains(out, "declined") {
 		t.Fatalf("recap should have applied: %q", out)
 	}
@@ -240,7 +301,7 @@ func TestRecap_ChildRecapsWithoutAsking(t *testing.T) {
 	for _, e := range convo() {
 		st.appendSilent(e)
 	}
-	out := h.runRecap(context.Background(), "nested quotes", "the answer is a stack", nil, "")
+	out := h.runRecap(context.Background(), "nested quotes", "the answer is a stack", nil)
 	if strings.Contains(out, "ERROR") || strings.Contains(out, "declined") {
 		t.Fatalf("a child should recap freely: %q", out)
 	}
@@ -304,7 +365,7 @@ func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
 	if len(invented.Unmatched) != 1 || invented.Unmatched[0] != "exec_2" {
 		t.Fatalf("an unmatched keep term must be reported, got %v", invented.Unmatched)
 	}
-	if !strings.Contains(invented.report("s", ""), "matched nothing") {
+	if !strings.Contains(invented.report("s"), "matched nothing") {
 		t.Error("the human must be told a keep term was not honoured")
 	}
 }
@@ -385,8 +446,8 @@ func TestRecapCue_NeverRepeatsItself(t *testing.T) {
 	if len(first) != 1 {
 		t.Fatalf("the first superseded large result should be raised, got %d", len(first))
 	}
-	if !strings.Contains(first[0], "recap({from:") || !strings.Contains(first[0], "count the errors in big.log") {
-		t.Errorf("the suggestion must carry the call and an anchor: %q", first[0])
+	if !strings.Contains(first[0], "recap({summary:") || strings.Contains(first[0], "from:") {
+		t.Errorf("the suggestion must carry the call, with no anchor to misquote: %q", first[0])
 	}
 	h.watchRecap("eval", 20)
 	if n := h.notes(); len(n) != 0 {
@@ -419,10 +480,7 @@ func TestRecapNudge_ArrivesWhenItIsExpensiveAndNamesTheOffender(t *testing.T) {
 	if !strings.Contains(msg, "~40000 tokens") {
 		t.Errorf("the fallback is about SIZE, so it must say the size: %q", msg)
 	}
-	if !strings.Contains(msg, "how many lines in big.log") {
-		t.Errorf("it must hand over an anchor the model can quote back: %q", msg)
-	}
-	if !strings.Contains(msg, "recap({from:") {
+	if !strings.Contains(msg, "recap({summary:") {
 		t.Errorf("it must show the call, not just mention the idea: %q", msg)
 	}
 
@@ -682,5 +740,19 @@ func TestReadSaved_ListedOnceSomethingIsSaved(t *testing.T) {
 	tc.Function.Name, tc.Function.Arguments = "read_saved", `{}`
 	if out, _ := d(context.Background(), tc); !strings.Contains(out, "needs ref") {
 		t.Errorf("no ref: %q", out)
+	}
+}
+
+// A suggestion names only what recap can reach: a big result from an earlier
+// turn is compaction's, so it raises nothing.
+func TestRecapCue_OnlyForThisTurn(t *testing.T) {
+	entries := []agent.Entry{
+		{Kind: agent.KindUser, Content: "read big.log"},
+		{ID: "old", Kind: agent.KindToolResult, ToolName: "exec", Content: strings.Repeat("x", 300000)},
+		{Kind: agent.KindUser, Content: "now fix the test"},
+		{Kind: agent.KindToolCall, ToolName: "exec", Content: "{}"},
+	}
+	if cue, ok := recapCueFor(entries, "exec", 20); ok {
+		t.Errorf("a big result from an earlier turn raised %q", cue.detail)
 	}
 }

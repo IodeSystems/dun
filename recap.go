@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -50,6 +51,13 @@ import (
 //   - Tool calls keep their PAIRS. A call whose result is dropped (or the
 //     reverse) is the one shape a provider rejects outright, so the span is
 //     checked before it is applied and refused if it would orphan one.
+//   - It stays inside the CURRENT TURN. The span starts at or after the latest
+//     user message and never crosses one, and words the user typed mid-turn
+//     (lifted into a tool result) are carried into the summary verbatim. The
+//     user's words are the record of intent; a paraphrase of a correction is
+//     how a correction gets lost. Earlier turns are finished work, and making
+//     them smaller is compaction's job, run by policy, not the model's
+//     mid-task judgment (USER 2026-10-28).
 
 // kindRecap is the citation left in the transcript: which sidecar holds what
 // was removed. Filtered out of Context, so it costs the model nothing and never
@@ -62,6 +70,9 @@ type recapSpan struct {
 	Kept     []agent.Entry // preserved inside the span (tool pairs named by keep)
 	Anchor   *agent.Entry  // the entry the phrase matched; nil = start of session
 	Chars    int
+	// Said is what the user typed mid-turn inside the span (lifted into tool
+	// results), in order, word for word: it goes into the summary unparaphrased.
+	Said []string
 	// Unmatched are keep terms that named nothing. Reported rather than
 	// ignored: a model that asked to keep a result and silently lost it has
 	// been told the opposite of the truth.
@@ -71,15 +82,14 @@ type recapSpan struct {
 
 // planRecap works out which entries a recap would replace.
 //
-// from is matched against entry content from the END backwards, so the phrase a
-// model remembers most recently is the one it gets. Everything AFTER the match
-// is in the span, except the tool call currently executing (this recap) — which
-// must survive, or its own result is orphaned the moment it returns.
+// The span is everything after the latest user message, or, with from, after
+// the entry in this turn that from quotes — matched from the END backwards, so
+// the phrase a model remembers most recently is the one it gets. It never
+// reaches before the latest user message. The tool call currently executing
+// (this recap) is never in it: its own result would be orphaned the moment it
+// returns.
 func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, error) {
 	var sp recapSpan
-	if strings.TrimSpace(from) == "" {
-		return sp, fmt.Errorf("recap needs `from`: a phrase from the message the churn started after")
-	}
 	// Search BELOW the live call. The recap call's own arguments contain `from`
 	// verbatim, so a plain backward search always matches the recap itself,
 	// making every span empty. Found by the first end-to-end test.
@@ -92,30 +102,38 @@ func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, er
 			}
 		}
 	}
-	// Prefer a USER message. The nudge hands the model a phrase from the last
-	// user message, and the model then echoes that phrase in its own assistant
-	// turns — so "the last entry containing it" is an echo three lines back, and
-	// the span collapses to nothing. Live: it recapped 1 entry of 85 characters
-	// while a 255,720-character result sat untouched.
-	start := -1
-	for i := limit - 1; i >= 0; i-- {
-		if entries[i].Kind == agent.KindUser && strings.Contains(entries[i].Content, from) {
-			start = i
-			break
-		}
-	}
-	if start < 0 {
-		for i := limit - 1; i >= 0; i-- {
-			if strings.Contains(entries[i].Content, from) {
-				start = i
-				break
+	turn := turnStart(entries[:limit])
+	start := turn
+	if from = strings.TrimSpace(from); from != "" {
+		// The user message first. A model quoting the user's words echoes them
+		// in its own turns too, so "the last entry containing it" was an echo
+		// three lines back and the span collapsed to nothing. Live: it recapped
+		// 1 entry of 85 characters while a 255,720-character result sat untouched.
+		start = -2
+		if turn >= 0 && strings.Contains(entries[turn].Content, from) {
+			start = turn
+		} else {
+			for i := limit - 1; i > turn; i-- {
+				if strings.Contains(entries[i].Content, from) {
+					start = i
+					break
+				}
 			}
 		}
+		if start == -2 {
+			for i := turn - 1; i >= 0; i-- {
+				if strings.Contains(entries[i].Content, from) {
+					return sp, fmt.Errorf("%q is before the user's latest message; recap covers only the "+
+						"current turn — leave out `from` to start at the user's latest message", from)
+				}
+			}
+			return sp, fmt.Errorf("no entry contains %q — quote a phrase exactly as it appears, or leave "+
+				"out `from` to start at the user's latest message", from)
+		}
 	}
-	if start < 0 {
-		return sp, fmt.Errorf("no entry contains %q — quote a phrase exactly as it appears", from)
+	if start >= 0 {
+		sp.Anchor = &entries[start]
 	}
-	sp.Anchor = &entries[start]
 
 	// A keep term may be a tool_call id, a tool NAME, or a substring of the
 	// call's arguments — because the model cannot see call ids. They are
@@ -177,12 +195,84 @@ func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, er
 		default:
 			sp.Subsumes = append(sp.Subsumes, e)
 			sp.Chars += len(e.Content)
+			if e.Kind == agent.KindToolResult {
+				sp.Said = append(sp.Said, liftedUserWords(e.Content)...)
+			}
 		}
 	}
 	if len(sp.Subsumes) == 0 {
-		return sp, fmt.Errorf("nothing to recap after %q — the span is already clean", from)
+		return sp, fmt.Errorf("nothing to recap in this turn — the span is already clean")
 	}
 	return sp, nil
+}
+
+// turnStart is the index of the latest user message: the current turn's start.
+// -1 when there is none, so the turn is the whole session.
+func turnStart(entries []agent.Entry) int {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Kind == agent.KindUser {
+			return i
+		}
+	}
+	return -1
+}
+
+// liftedUserWords finds what the user typed mid-turn in a tool result: liftQueued
+// appends each buffered item after a blank line, under its kind's prefix. An
+// item runs to the next lifted item or to the end.
+func liftedUserWords(result string) []string {
+	userPrefix := queuedPolicies[queuedUser].prefix
+	var out []string
+	for _, item := range liftedItems(result) {
+		if t, ok := strings.CutPrefix(item, userPrefix); ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// liftedItems splits the lifted tail of a result into its items, prefix and all.
+func liftedItems(result string) []string {
+	starts := []int{}
+	for _, p := range queuedPolicies {
+		for off := 0; ; {
+			i := strings.Index(result[off:], "\n\n"+p.prefix)
+			if i < 0 {
+				break
+			}
+			starts = append(starts, off+i+2)
+			off += i + 2
+		}
+		if strings.HasPrefix(result, p.prefix) {
+			starts = append(starts, 0) // lifted into an empty result
+		}
+	}
+	sort.Ints(starts)
+	starts = slices.Compact(starts)
+	var out []string
+	for k, a := range starts {
+		b := len(result)
+		if k+1 < len(starts) {
+			b = starts[k+1] - 2
+		}
+		out = append(out, result[a:b])
+	}
+	return out
+}
+
+// withSaid is the summary as stored: the model's account, then the user's own
+// words from the span, unparaphrased and in order.
+func withSaid(summary string, said []string) string {
+	if len(said) == 0 {
+		return summary
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(summary, "\n"))
+	b.WriteString("\n\nThe user said, during this span (verbatim):")
+	for i, t := range said {
+		fmt.Fprintf(&b, "\n%d. %q", i+1, t)
+	}
+	return b.String()
 }
 
 // liveCallID is the tool call still awaiting a result: the recap call itself.
@@ -220,7 +310,7 @@ func hasPendingCall(entries []agent.Entry, e agent.Entry) bool {
 // replaced it. Nothing here is a question — the recap has already applied — so
 // it is written as an account, and it carries the replacement text in full,
 // because "9 entries removed" alone is a number, not visibility.
-func (sp recapSpan) report(summary, userEdit string) string {
+func (sp recapSpan) report(summary string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Removed %d entries (~%d characters) from the model's context.\n", len(sp.Subsumes), sp.Chars)
 	if n := len(sp.KeptCalls); n > 0 {
@@ -229,10 +319,7 @@ func (sp recapSpan) report(summary, userEdit string) string {
 	if len(sp.Unmatched) > 0 {
 		fmt.Fprintf(&b, "NOTE: %q matched nothing and was NOT kept.\n", strings.Join(sp.Unmatched, ", "))
 	}
-	b.WriteString("\nReplaced with:\n" + indent(summary))
-	if userEdit != "" && sp.Anchor != nil {
-		b.WriteString("\n\nAnd your message now reads:\n" + indent(userEdit))
-	}
+	b.WriteString("\nReplaced with:\n" + indent(withSaid(summary, sp.Said)))
 	b.WriteString("\n\nWhat was removed is on disk; it left the model's context, not the record.")
 	return b.String()
 }
@@ -247,7 +334,7 @@ func indent(s string) string {
 
 // applyRecap rewrites the store: the span's entries move to a sidecar, one
 // assistant entry takes their place, and a citation records where they went.
-func (h *Harness) applyRecap(sp recapSpan, summary, userEdit string) (string, error) {
+func (h *Harness) applyRecap(sp recapSpan, summary string) (string, error) {
 	sidecar := h.nextRecapFile()
 	if sidecar != "" {
 		if err := writeSidecar(sidecar, sp.Subsumes); err != nil {
@@ -259,17 +346,13 @@ func (h *Harness) applyRecap(sp recapSpan, summary, userEdit string) (string, er
 	now := time.Now().UnixNano()
 	replacement := agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindAssistant,
-		Content: summary, CreatedAt: now,
+		Content: withSaid(summary, sp.Said), CreatedAt: now,
 	}
 	citation := agent.Entry{
 		ID: uuid.New().String(), Kind: kindRecap, CreatedAt: now + 1,
 		Content: fmt.Sprintf("recap: %d entries (~%d chars) → %s", len(sp.Subsumes), sp.Chars, sidecarName(sidecar)),
 	}
-	anchorID := ""
-	if userEdit != "" && sp.Anchor != nil {
-		anchorID = sp.Anchor.ID
-	}
-	h.store.recap(sp.Subsumes, replacement, citation, anchorID, userEdit)
+	h.store.recap(sp.Subsumes, replacement, citation)
 	h.cache.noteRecap()
 	h.recapsSince.Add(1) // the next round's stat says a recap happened (roundstats.go)
 	return citation.Content, nil
@@ -532,20 +615,21 @@ func recapToolDef() llm.ToolDef {
 	td.Function.Description = "Mid-task, to make room for the work still ahead: replace a span of this " +
 		"conversation with a summary once it stops being worth its context: a big result you have taken what " +
 		"you need from, failed attempts before one worked, a misunderstanding cleared up later. Not as a last " +
-		"step: when the task is done, answer. The span is moved to a file, not deleted, but your summary is all " +
-		"that stays in context, so make it accurate: do not round numbers or guess at what you did not read."
+		"step: when the task is done, answer. It covers this turn only, from the user's latest message; what the " +
+		"user typed in it is kept word for word. The span is moved to a file, not deleted, but your summary is " +
+		"all that stays in context, so make it accurate: do not round numbers or guess at what you did not read."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"from":    map[string]any{"type": "string", "description": "an exact phrase from the message the span starts after"},
+			"from": map[string]any{"type": "string", "description": "only to start later than the user's latest " +
+				"message: an exact phrase from the entry in this turn the span starts after"},
 			"summary": map[string]any{"type": "string", "description": "what happened and what is true now, standing on its own"},
 			"keep": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
 				"description": "results to keep verbatim, by tool name (\"exec\") or a phrase from the call (\"grep -c\"), not by id",
 			},
-			"user": map[string]any{"type": "string", "description": "a clearer wording of the user message `from` quotes"},
 		},
-		"required": []string{"from", "summary"},
+		"required": []string{"summary"},
 	}
 	return td
 }
@@ -588,7 +672,6 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			From    string   `json:"from"`
 			Summary string   `json:"summary"`
 			Keep    []string `json:"keep"`
-			User    string   `json:"user"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		// A ref means READ, also as recap: the old single tool's habit and old
@@ -599,27 +682,20 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			out = h.readSpill(args.Ref, args.Grep, args.Head, args.Tail, args.At, args.Full)
 		case tc.Function.Name == "read_saved":
 			out = "ERROR: read_saved needs ref: the ref printed where the result was saved."
-		case strings.TrimSpace(args.Summary) == "" || strings.TrimSpace(args.From) == "":
-			// Neither mode's call: say both shapes and what was sent, not one
-			// missing word (USER 2026-10-27: three failed calls on "needs a
-			// summary", then the model gave up on recap).
+		case strings.TrimSpace(args.Summary) == "":
+			// Say the shape and what was sent, not one missing word (USER
+			// 2026-10-27: three failed calls on "needs a summary", then the
+			// model gave up on recap).
 			var sent map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &sent)
-			miss := "summary"
-			if strings.TrimSpace(args.From) == "" {
-				miss = "from"
-				if strings.TrimSpace(args.Summary) == "" {
-					miss = "from and summary"
-				}
-			}
-			out = "ERROR: recap was called without " + miss + ".\n" +
-				"recap {from: string, summary: string, keep?: string[], user?: string} — " +
-				"from is an exact phrase from the message the span starts after; summary is the account that " +
-				"replaces it; keep names tool results in the span to keep word for word. " +
+			out = "ERROR: recap was called without summary.\n" +
+				"recap {summary: string, from?: string, keep?: string[]} — summary is the account that " +
+				"replaces this turn's work since the user's latest message; from starts the span later, after " +
+				"an exact phrase from this turn; keep names tool results in the span to keep word for word. " +
 				"To read a saved result, use read_saved {ref}.\n" +
 				"You sent " + sentSig(sent) + "."
 		default:
-			out = h.runRecap(ctx, args.From, args.Summary, args.Keep, args.User)
+			out = h.runRecap(ctx, args.From, args.Summary, args.Keep)
 		}
 		if onCall != nil {
 			// Report what was actually ASKED. Read-mode calls used to display as
@@ -653,7 +729,7 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 	}
 }
 
-func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []string, userEdit string) string {
+func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []string) string {
 	if strings.TrimSpace(summary) == "" {
 		return "ERROR: recap needs a summary — the account that replaces what it removes."
 	}
@@ -668,7 +744,7 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 
 	// No confirmation. Recap applies and then says what it did — see the rules
 	// at the top of this file.
-	note, err := h.applyRecap(sp, summary, userEdit)
+	note, err := h.applyRecap(sp, summary)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
@@ -679,11 +755,18 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 	if h.cfg.OnRecap != nil {
 		h.cfg.OnRecap(RecapNote{
 			Entries: len(sp.Subsumes), Chars: sp.Chars, Note: note,
-			Detail: sp.report(summary, userEdit),
+			Detail: sp.report(summary),
 		})
 	}
-	out := fmt.Sprintf("Done — %s. Everything since %q now reads as the summary you gave; "+
-		"the removed entries are on disk and out of your context. Continue from here.", note, from)
+	// Not "Continue from here": a recap made as the task's last step read that
+	// as a reason to check the work again (USER 2026-10-27 benchmark).
+	since := "the user's latest message"
+	if strings.TrimSpace(from) != "" {
+		since = fmt.Sprintf("%q", from)
+	}
+	out := fmt.Sprintf("Done — %s. Everything since %s now reads as the summary you gave; "+
+		"the removed entries are on disk and out of your context. If the task is done, answer now; "+
+		"otherwise continue.", note, since)
 	if len(sp.Unmatched) > 0 {
 		// Said plainly, because the model asked to keep something and did not
 		// get it. Silence here is how it learns the wrong lesson.
@@ -777,6 +860,9 @@ func recapCueFor(entries []agent.Entry, tool string, size int) (recapCue, bool) 
 			cost += len(e.Content)
 			continue
 		}
+		if e.Kind == agent.KindUser {
+			break // recap cannot reach before it
+		}
 		if e.Kind != agent.KindToolCall {
 			continue
 		}
@@ -793,8 +879,8 @@ func recapCueFor(entries []agent.Entry, tool string, size int) (recapCue, bool) 
 		}, true
 	}
 	// 2. Something large that the model has already moved past — moving past it
-	// is exactly what this call proves.
-	for i := len(entries) - 1; i >= 0; i-- {
+	// is exactly what this call proves. In this turn: recap cannot reach before.
+	for i := len(entries) - 1; i > turnStart(entries); i-- {
 		e := entries[i]
 		if e.Kind != agent.KindToolResult || len(e.Content) < largeResultChars {
 			continue
@@ -805,7 +891,7 @@ func recapCueFor(entries []agent.Entry, tool string, size int) (recapCue, bool) 
 		}
 		return recapCue{
 			key: "big:" + e.ID,
-			detail: fmt.Sprintf("the %d-character %s result earlier in this conversation is still in your "+
+			detail: fmt.Sprintf("the %d-character %s result earlier in this turn is still in your "+
 				"context, and you have moved on from it", len(e.Content), name),
 		}, true
 	}
@@ -824,7 +910,7 @@ func (h *Harness) watchRecap(tool string, size int) {
 	if !ok || !h.claimCue(cue.key) {
 		return
 	}
-	h.Aside(recapAdvice(cue.detail, lastUserPhrase(entries)))
+	h.Aside(recapAdvice(cue.detail))
 }
 
 // maybeNudgeRecap is the window-size fallback, for churn with no shape.
@@ -844,7 +930,7 @@ func (h *Harness) maybeNudgeRecap(active int) {
 	if err != nil || len(entries) == 0 {
 		return
 	}
-	big := biggestEntry(entries)
+	big := biggestEntry(entries[turnStart(entries)+1:]) // recap cannot reach before the turn
 	if len(big.Content) < 4000 {
 		return // nothing specific to point at; that is compaction's problem
 	}
@@ -853,16 +939,17 @@ func (h *Harness) maybeNudgeRecap(active int) {
 	if big.ToolName != "" {
 		what += " from " + big.ToolName
 	}
-	h.Aside(recapAdvice(what, lastUserPhrase(entries)))
+	h.Aside(recapAdvice(what))
 }
 
 // recapAdvice is the one wording, so every trigger says it the same way: the
-// reason, then the call, pre-filled with an anchor the model can quote back.
-func recapAdvice(detail, anchor string) string {
+// reason, then the call. No `from`: the span defaults to this turn, which is
+// the commonest call and the one that cannot be misquoted.
+func recapAdvice(detail string) string {
 	return fmt.Sprintf("Context note — %s. If you no longer need it verbatim, remove it: "+
-		"recap({from: %q, summary: \"…what happened and what is true now…\"}), keeping anything still "+
-		"load-bearing with keep:[\"<tool name or a phrase from the call>\"]. Nothing is lost; it moves "+
-		"to a file and leaves your context.", detail, anchor)
+		"recap({summary: \"…what happened and what is true now…\"}), keeping anything still "+
+		"needed with keep:[\"<tool name or a phrase from the call>\"]. Nothing is lost; it moves "+
+		"to a file and leaves your context.", detail)
 }
 
 // claimCue reports whether this suggestion has not been made before.
@@ -977,19 +1064,4 @@ func biggestEntry(entries []agent.Entry) agent.Entry {
 		}
 	}
 	return big
-}
-
-// lastUserPhrase is an anchor the model can quote back: the opening of the most
-// recent user message. Handing it one removes the commonest way `from` fails.
-func lastUserPhrase(entries []agent.Entry) string {
-	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].Kind == agent.KindUser {
-			words := strings.Fields(entries[i].Content)
-			if len(words) > 8 {
-				words = words[:8]
-			}
-			return strings.Join(words, " ")
-		}
-	}
-	return ""
 }
