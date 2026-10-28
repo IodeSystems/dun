@@ -96,6 +96,19 @@ func TestAttnBell(t *testing.T) {
 	if _, cmd := syncAttn(m, m, tea.KeyPressMsg{Code: 'j'}); cmd != nil {
 		t.Fatal("the same question rang again")
 	}
+	// Not logged in as dun opens: the tab shows the question, no bell. A
+	// login asked for after a key or a turn rings.
+	login := tuiModel{convo: []convoEntry{{needLogin: true}}}
+	m, cmd = syncAttn(tuiModel{}, login, nil)
+	if m.attnState != attnQuestion || strings.Contains(rawOf(t, cmd), "\a") {
+		t.Fatalf("login at launch: state %q, wrote %q", m.attnState, rawOf(t, cmd))
+	}
+	typed, _ := syncAttn(tuiModel{}, tuiModel{}, tea.KeyPressMsg{Code: 'j'})
+	later := typed
+	later.convo = login.convo
+	if _, cmd := syncAttn(typed, later, nil); rawOf(t, cmd) != "\a" {
+		t.Fatalf("login after a key: wrote %q, want a bell", rawOf(t, cmd))
+	}
 	t.Setenv("DUN_BELL", "off")
 	if _, cmd := syncAttn(prev, ask, nil); cmd != nil {
 		t.Fatal("DUN_BELL=off rang")

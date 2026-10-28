@@ -63,7 +63,7 @@ owner's call before work starts.
   ended unseen, unset when idle) and `@dun_state`; ✓ clears on the next key
   or a focus-in; both unset at exit. Calls are off the UI goroutine,
   coalesced, 300 ms apart at most, 1 s timeout. A question rings the bell
-  once (`DUN_BELL=off`). `dun tmux` prints the tmux.conf lines and says
+  once (`DUN_BELL=off`); not for one already on screen as dun opens (not logged in). `dun tmux` prints the tmux.conf lines and says
   whether this tmux shows the icon. Never renames a window. Experimental,
   iTerm2 only: `--exp-iterm-tabcontrol` titles and colours the tab by the
   same states (tested by the bytes; not seen in iTerm2).

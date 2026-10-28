@@ -73,7 +73,8 @@ func attnStateOf(m tuiModel) string {
 // syncAttn is called once per Update, after the message is handled: it
 // notes a turn that ended (prev is the model before the message), clears
 // the done mark on the person's return, and on a change of state tells tmux
-// and the iTerm2 tab (iterm.go), and rings the bell when a question arrives.
+// and the iTerm2 tab (iterm.go), and rings the bell when a question arrives
+// (not for one already there as dun opens: see attnLive).
 func syncAttn(prev, t tuiModel, msg tea.Msg) (tuiModel, tea.Cmd) {
 	switch msg.(type) {
 	case tea.FocusMsg:
@@ -83,6 +84,10 @@ func syncAttn(prev, t tuiModel, msg tea.Msg) (tuiModel, tea.Cmd) {
 		t.attnFocus = -1
 	case tea.KeyPressMsg, tea.PasteMsg:
 		t.attnDone, t.attnErr = false, false
+		t.attnLive = true
+	}
+	if t.busy || prev.busy {
+		t.attnLive = true
 	}
 	if t.busy && !prev.busy {
 		t.attnErr = false // a new turn: the last one's failure is old news
@@ -98,7 +103,7 @@ func syncAttn(prev, t tuiModel, msg tea.Msg) (tuiModel, tea.Cmd) {
 	}
 	t.attnState = state
 	t.tmux.show(state)
-	ring := (state == attnQuestion || state == attnError) && bellOn()
+	ring := (state == attnQuestion || state == attnError) && t.attnLive && bellOn()
 	out := t.iterm.show(state, ring)
 	if ring {
 		out = bel + out

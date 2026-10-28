@@ -872,6 +872,10 @@ type tuiModel struct {
 	attnDone  bool
 	attnErr   bool // the last turn failed; cleared by a key or the next turn
 	attnFocus int8
+	// attnLive: the person typed or a turn ran. Before that, a question on
+	// screen (not logged in) is one they are looking at as dun opens, so the
+	// tab shows it but the bell does not ring.
+	attnLive bool
 	tmux      *tmuxSync
 	iterm     *itermTab
 	// reqs is the last request's figures, for the top bar (reqbar.go).
