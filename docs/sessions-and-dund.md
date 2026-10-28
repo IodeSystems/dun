@@ -154,6 +154,13 @@ Decided by the USER 2026-10-21, modelled on corrallm (`internal/dundapi/oidc.go`
 - corrallm probes the authorize endpoint (302 good; 400 app-not-found or
   redirect-uri-missing bad) as a preflight. dund does not.
 
+## Scheduled messages and loops
+
+dund keeps `/schedule` and `/loop` entries (`<dund dir>/schedule.json`) and
+fires them as user messages through `session.send`, so they arrive with no
+client attached, wake a reaped engine and survive a dund restart. Reasoning:
+`scheduling.md`.
+
 ## Slash commands are data
 
 The engine publishes its commands in a `commands` event (name, usage,
