@@ -518,6 +518,10 @@ type ServerEvent struct {
 	Message string        `json:"message"`
 	Servers []ServerState `json:"servers"`
 	Tools   []string      `json:"tools"`
+	// Builtins is a row per group of dun's own tools ("dun:files"), for
+	// /mcp's table only: switchable like a server, never started or
+	// stopped. Sent with the replies to /mcp and the server commands.
+	Builtins []ServerState `json:"builtins,omitempty"`
 	// Background: no command asked for this — an autostart server that came
 	// up (or did not) after the session was ready.
 	Background bool `json:"background,omitempty"`

@@ -202,6 +202,9 @@ func stateCell(st dun.ServerState) string {
 
 // viaCell is "scripted (global)": the mode, and which switch said so.
 func viaCell(st dun.ServerState) string {
+	if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+		return "dun's own tools"
+	}
 	if st.Via == "" {
 		return "standalone (built-in)"
 	}

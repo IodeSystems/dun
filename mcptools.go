@@ -47,6 +47,9 @@ func (h *Harness) toolTokens(t mcpmgr.MCPTool) int {
 // ServerTools lists every tool a running, directly connected server
 // discovered, hidden ones included, in discovery order.
 func (h *Harness) ServerTools(id string) ([]ToolInfo, error) {
+	if g, ok := builtinID(id); ok {
+		return h.builtinTools(g)
+	}
 	h.srvMu.Lock()
 	s, ok := h.spec(id)
 	h.srvMu.Unlock()

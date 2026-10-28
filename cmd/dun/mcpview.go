@@ -60,8 +60,14 @@ func (v *mcpServersView) selectedServer(cur int) (dun.ServerState, bool) {
 // lines is /mcp's status pane: how many servers, how many are up, what
 // their schemas cost in every request, and how to read the marks.
 func (v *mcpServersView) lines(_ *tuiModel, w int) []string {
-	up, starting, failed, cost, scripted := 0, 0, 0, 0, 0
+	up, starting, failed, cost, scripted, servers, groups := 0, 0, 0, 0, 0, 0, 0
 	for _, st := range v.rows {
+		cost += st.Cost
+		if strings.HasPrefix(st.ID, dun.BuiltinPrefix) { // dun's own tools: a group, not a server
+			groups++
+			continue
+		}
+		servers++
 		switch {
 		case st.Starting:
 			starting++
@@ -70,12 +76,14 @@ func (v *mcpServersView) lines(_ *tuiModel, w int) []string {
 		case st.Auto && st.Err != "":
 			failed++
 		}
-		cost += st.Cost
 		if st.Via == dun.ViaShell && st.Hosted {
 			scripted++
 		}
 	}
-	head := fmt.Sprintf("%s · %d connected", plural(len(v.rows), "server"), up)
+	head := fmt.Sprintf("%s · %d connected", plural(servers, "server"), up)
+	if groups > 0 {
+		head += fmt.Sprintf(" · %d of dun's own", groups)
+	}
 	if starting > 0 {
 		head += fmt.Sprintf(" · %d starting", starting)
 	}
@@ -185,6 +193,17 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 	return out, details
 }
 
+// withBuiltins is the /mcp table's rows: the servers, then the groups of
+// dun's own tools (dun builtins.go) when the event carries them. Only the
+// table shows those; the splash and the start queue see servers alone.
+func withBuiltins(ev evMsg, list []any) []any {
+	b, _ := ev["builtins"].([]any)
+	if len(b) == 0 {
+		return list
+	}
+	return append(append([]any(nil), list...), b...)
+}
+
 // openMCPServers asks for the table; it opens when the listing arrives.
 func (m *tuiModel) openMCPServers() { m.mcpServersWant = true }
 
@@ -284,6 +303,10 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 	case "g", "p", "s":
 		line = switchLine(st, k)
 	case "m":
+		if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+			m.flashText, m.flashUntil = st.ID+" is dun's own tools: they have no mode — t lists them", time.Now().Add(flashFor)
+			return true
+		}
 		if st.Via == "" {
 			m.flashText, m.flashUntil = st.ID+" is built in: it is always standalone", time.Now().Add(flashFor)
 			return true

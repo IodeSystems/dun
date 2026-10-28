@@ -2570,7 +2570,7 @@ func (m *tuiModel) noteServers(ev evMsg) {
 			m.serverIDs = append(m.serverIDs, str(st["id"]))
 		}
 	}
-	m.noteServerView(list)
+	m.noteServerView(withBuiltins(ev, list))
 	m.noteExtServers()
 	if m.liveSplashAt() >= 0 {
 		m.refresh() // the splash's servers and extras rows say it now
@@ -2669,7 +2669,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		return m
 	case "server":
 		list, _ := ev["servers"].([]any)
-		opened := str(ev["id"]) == allServers && m.openServerTable(list)
+		opened := str(ev["id"]) == allServers && m.openServerTable(withBuiltins(ev, list))
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" && !opened && !m.splashSays(ev) {
 			m.noteServerMsg(str(ev["action"]), msg)
 			if m.serversPaging() != nil {

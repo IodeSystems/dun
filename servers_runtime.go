@@ -663,6 +663,7 @@ func (h *Harness) rebuildTools() {
 	describeAttached(toolDefs, searchers, h.specs, attached)
 	h.srvMu.Unlock()
 	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
+	mcpDefs := len(toolDefs) // after these: dun's own (builtins.go)
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef())
 		// ONE backend for everything. A long command used to need a stateless
@@ -798,6 +799,9 @@ func (h *Harness) rebuildTools() {
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
 	// the moment churn is created rather than whenever usage is next measured.
 	dispatch = withRecapWatch(dispatch, h)
+	// The built-ins switched off in /mcp (builtins.go): left out, and refused.
+	own, dispatch := h.withBuiltinsOff(toolDefs[mcpDefs:], dispatch)
+	toolDefs = append(toolDefs[:mcpDefs:mcpDefs], own...)
 
 	// Outermost wrapper: whatever the tool returns, carry any notification that
 	// arrived while it was running back inside the result. A background job that

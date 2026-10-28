@@ -238,3 +238,17 @@ anyone. Code: `project.go`, `servers_config.go` (`serverConfigPaths`).
   overlay); pruning a session tree also removes its overlay.
 - poly-lsp-mcp still writes `<root>/.poly-lsp-mcp/cache.gob` into the repo; it
   has no flag to put it elsewhere and is owned by another project.
+
+## dun's own tools in /mcp (2026-10-28)
+
+/mcp lists dun's built-in tools as groups beside the servers — `dun:core`,
+`dun:files`, `dun:agents`, `dun:peers`, `dun:loops`, `dun:recap`,
+`dun:memory`, `dun:skills`, `dun:mount` — each switched on, off or unset per
+scope like a server (`/mcp off dun:peers --project`), and each of its tools
+alone from `t` (`/mcp toggle dun:files file_write off`). The nearest scope
+decides: a tool's own switch, then its group's; unset everywhere, on.
+`dun:core` (exec, ask_user, session, read_saved) is shown but cannot be
+switched off. A tool switched off leaves the definitions and is refused if
+called. Stored in `builtins.json` at each scope (builtins.go). A switch
+changes the listed tools, the prompt's prefix: the server re-reads the
+conversation once.

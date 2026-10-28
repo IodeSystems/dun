@@ -1120,7 +1120,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		run := func() {
 			msg := runServerCmd(ctx, h, alias, action)
 			em.emit(&proto.ServerEvent{ID: alias, Action: action, Message: msg,
-				Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
+				Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Builtins: serversProto(h.BuiltinGroups())})
 			em.emit(catalogEvent(h))
 			em.emit(commandsEvent(h))
 		}
@@ -1318,7 +1318,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				msg := runMCPCmd(ctx, h, action)
 				h.Aside("[control/mcp] " + msg)
 				em.emit(&proto.ServerEvent{ID: "mcp", Action: verb, Message: msg,
-					Servers: serversProto(h.Servers()), Tools: h.ToolNames()})
+					Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Builtins: serversProto(h.BuiltinGroups())})
 				em.emit(catalogEvent(h))
 				em.emit(commandsEvent(h))
 			}()

@@ -538,12 +538,16 @@ type Harness struct {
 	// the tool set is not fixed at construction: srvMu guards the spec list and
 	// the last-error map, and every change ends in applyTools rebuilding the
 	// Session's tools, dispatcher, system prompt and doc preparer.
-	cfg       Config
-	srvMu     sync.Mutex
-	specs     []Server                 // every configured server, running or not
-	lastErr   map[string]string        // id → why its last start attempt failed
-	missing   map[string]bool          // id → lastErr is a MissingError
-	lastStart map[string]time.Duration // id → how long its last start took
+	cfg   Config
+	srvMu sync.Mutex
+	// builtinMu guards builtinDefs: dun's own tool definitions at the last
+	// rebuild, switched off or not, for /mcp's built-in rows (builtins.go).
+	builtinMu   sync.Mutex
+	builtinDefs []llm.ToolDef
+	specs       []Server                 // every configured server, running or not
+	lastErr     map[string]string        // id → why its last start attempt failed
+	missing     map[string]bool          // id → lastErr is a MissingError
+	lastStart   map[string]time.Duration // id → how long its last start took
 	// starting is the servers a start is in flight for, and since when: a
 	// slow one (poly-lsp indexing a big repo takes a minute) is said to be
 	// starting rather than off, and is not started a second time.

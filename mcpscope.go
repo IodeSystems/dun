@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -601,6 +602,12 @@ func (h *Harness) writeScope(id, scope string, global, project func(*ServerSpec)
 // global, which is on or off). The change applies now: the server starts
 // (and is waited for) or stops. It returns the file written.
 func (h *Harness) SetServerOn(ctx context.Context, id, scope string, on *bool) (string, error) {
+	if g, ok := builtinID(id); ok { // a group of dun's own tools (builtins.go)
+		if on == nil && scope == ScopeGlobal {
+			return "", fmt.Errorf("the global switch is on or off — it has no unset")
+		}
+		return h.setBuiltin(g, "", scope, on)
+	}
 	if _, err := h.knownServer(id); err != nil {
 		return "", err
 	}
@@ -628,6 +635,9 @@ func (h *Harness) SetServerOn(ctx context.Context, id, scope string, on *bool) (
 // SetServerVia places id at scope: ViaShell, ViaDirect, or "" to unset (not
 // at global, where unset is direct). It returns the file written.
 func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (string, error) {
+	if _, ok := builtinID(id); ok {
+		return "", fmt.Errorf("%s is dun's own: it has no mode", id)
+	}
 	s, err := h.knownServer(id)
 	if err != nil {
 		return "", err
@@ -666,6 +676,29 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 // deny-list in mcp.json. It reports the file written and whether the switch
 // changed; the model sees the change from its next turn.
 func (h *Harness) SetToolOn(id, tool, scope string, on *bool) (string, bool, error) {
+	if g, ok := builtinID(id); ok {
+		tools, err := h.builtinTools(g)
+		if err != nil {
+			return "", false, err
+		}
+		i := slices.IndexFunc(tools, func(t ToolInfo) bool { return t.Name == tool })
+		if i < 0 {
+			return "", false, fmt.Errorf("%s has no tool %q", id, tool)
+		}
+		want := ""
+		if on != nil {
+			want = onOffWord(*on)
+		}
+		cur := map[string]string{ScopeGlobal: tools[i].Global, ScopeProject: tools[i].Project, ScopeSession: tools[i].Session}[scope]
+		if cur == want {
+			return "", false, nil
+		}
+		if g == builtinCore {
+			return "", false, fmt.Errorf("dun:core is always on")
+		}
+		path, err := h.setBuiltin(g, tool, scope, on)
+		return path, err == nil, err
+	}
 	tools, err := h.ServerTools(id)
 	if err != nil {
 		return "", false, err

@@ -604,7 +604,7 @@ const shellPlacementNote = "scripted, its schemas leave every request, but dun n
 	"lists its prompts or skills, applies its tool deny-list, or renders its calls — they show as eval"
 
 func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
-	for _, st := range h.Servers() {
+	for _, st := range append(h.Servers(), h.BuiltinGroups()...) {
 		if st.ID == id {
 			return st, true
 		}
