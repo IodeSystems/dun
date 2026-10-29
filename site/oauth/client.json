@@ -1,0 +1,9 @@
+{
+  "client_id": "https://dun.iodesystems.com/oauth/client.json",
+  "client_name": "dun",
+  "client_uri": "https://dun.iodesystems.com",
+  "redirect_uris": ["http://127.0.0.1:33418/oauth/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}

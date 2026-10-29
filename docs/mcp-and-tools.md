@@ -101,6 +101,12 @@ and corporate tools behind a login gate.
   must cover the server URL, path prefix allowed; otherwise the login is
   refused, so one server cannot obtain a login meant for another) -> first
   authorization server -> its metadata.
+- **Client metadata document**: an authorization server that says
+  `client_id_metadata_document_supported` (ElevenLabs, with no registration
+  endpoint) takes a URL as the client id and fetches it. dun's is
+  `site/oauth/client.json`, served at
+  `https://dun.iodesystems.com/oauth/client.json`; its redirect URI is the
+  default port's. Set as `client_id`, it needs no registration.
 - **Redirect**: a loopback listener on a fixed port (default 33418,
   `redirect_port`), `127.0.0.1:<port>/oauth/callback`, because the redirect is
   registered exactly. If the port is busy, another session is logging in and
