@@ -37,7 +37,7 @@ func TestCostBlockAlignedAndGrouped(t *testing.T) {
 		"cost & limits",
 		"session spend", "1,234.50 USD · 12 of 14 calls priced",
 		"last turn", "0.00 USD (0.0042)",
-		"key spend", "45.50 USD · as of 2m ago",
+		"key spend", "45.50 USD · this budget period · as of 2m ago",
 		"key limit", "50.00 USD",
 		"key remaining", "4.50 USD (9%)",
 		"key resets", "in 9d 12h · 2026-11-01 00:00 UTC · every 30d",
@@ -222,5 +222,44 @@ func TestCostBlock_NoCostHint(t *testing.T) {
 		if out := stripANSI(costBlock(&contextStats{spend: sp}, now)); strings.Contains(out, "sends no cost") || strings.Contains(out, "include_cost") {
 			t.Errorf("hint shown for %+v:\n%s", sp, out)
 		}
+	}
+}
+
+// The rollups (USER 2026-10-28): the session's hour, day and interval, and
+// the machine's hour, day, week, month and interval under its all-time
+// total; the interval is the key's period when stated, else the last 7 days.
+// A key with no reset says its spend is all time.
+func TestCostBlockRollups(t *testing.T) {
+	sp := fullSpend()
+	sp.SessionHour, sp.SessionToday, sp.SessionInterval = ptr(0.25), ptr(1.5), ptr(1234.5)
+	sp.Interval, sp.IntervalOfKey = "30d", true
+	sp.Ledger = &proto.SpendLedger{Entries: true, Hour: map[string]float64{"USD": 1}, Today: map[string]float64{"USD": 2},
+		Week: map[string]float64{"USD": 3}, Month: map[string]float64{"USD": 4}, Interval: map[string]float64{"USD": 5},
+		Total: map[string]float64{"USD": 26.43, "credits": 3}}
+	out := stripANSI(costBlock(&contextStats{spend: sp}, spendNow))
+	// Each row's label and amount, spaces collapsed.
+	flat := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"calls priced this hour 0.25 USD today 1.50 USD key period (30d) 1,234.50 USD last turn",
+		"machine spend 26.43 USD + 3 credits · all time",
+		"this hour 1.00 USD today 2.00 USD this week 3.00 USD this month 4.00 USD key period (30d) 5.00 USD",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		if r := []rune(line); len(r) < valueEnd || r[valueEnd-1] == ' ' {
+			t.Errorf("value not in its column: %q", line)
+		}
+	}
+	sp.IntervalOfKey, sp.Interval = false, "7d"
+	sp.Key = &proto.KeyBudget{Spend: 2, Currency: "USD"}
+	out = stripANSI(costBlock(&contextStats{spend: sp}, spendNow))
+	if !strings.Contains(out, "last 7d") || !strings.Contains(out, "all time (no reset stated)") {
+		t.Errorf("no 7d interval or all-time key spend:\n%s", out)
 	}
 }

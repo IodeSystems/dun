@@ -85,7 +85,7 @@ func TestLedger_ConcurrentAppendsAreWhole(t *testing.T) {
 		t.Errorf("lines %d, want %d", n, want)
 	}
 	l := NewSpendLedger(dir)
-	if got := l.Summary("").Today["USD"]; got < 23.99 || got > 24.01 {
+	if got := l.Summary("", time.Time{}).Today["USD"]; got < 23.99 || got > 24.01 {
 		t.Errorf("today %v, want 24", got)
 	}
 }
@@ -108,7 +108,7 @@ func TestLedger_PeriodsAndIncrementalRead(t *testing.T) {
 	add(time.Date(2026, 2, 1, 12, 0, 0, 0, time.Local), "a", 4.00, "USD")   // this year
 	add(time.Date(2025, 12, 30, 12, 0, 0, 0, time.Local), "a", 8.00, "USD") // last year: in no period
 	add(now.Add(-2*time.Hour), "c", 3, "credits")
-	s := l.Summary("fp1")
+	s := l.Summary("fp1", time.Time{})
 	for name, got := range map[string]float64{"today": s.Today["USD"], "week": s.Week["USD"], "month": s.Month["USD"], "year": s.Year["USD"]} {
 		want := map[string]float64{"today": 0.5, "week": 1.5, "month": 3.5, "year": 7.5}[name]
 		if got != want {
@@ -129,22 +129,22 @@ func TestLedger_PeriodsAndIncrementalRead(t *testing.T) {
 	if err := other.Append(SpendEntry{Time: now.Add(-time.Minute), Provider: "work", Key: "fp2", Model: "a", Cost: 0.25, Currency: "USD"}); err != nil {
 		t.Fatal(err)
 	}
-	s = l.Summary("fp1")
+	s = l.Summary("fp1", time.Time{})
 	if s.Today["USD"] != 0.75 || s.Last24h["USD"] != 0.5 {
 		t.Errorf("after another writer: today %v (want 0.75), fp1's 24h %v (want 0.5)", s.Today["USD"], s.Last24h["USD"])
 	}
-	if s = l.Summary("fp1"); s.Today["USD"] != 0.75 {
+	if s = l.Summary("fp1", time.Time{}); s.Today["USD"] != 0.75 {
 		t.Errorf("a read twice counts twice: %v", s.Today["USD"])
 	}
 	// A partial last line (a write in flight) waits for its newline.
 	f, _ := os.OpenFile(l.file(now), os.O_WRONLY|os.O_APPEND, 0)
 	f.WriteString(`{"t":"2026-10-23T14:00:00Z","cost":1`)
-	if s = l.Summary(""); s.Today["USD"] != 0.75 {
+	if s = l.Summary("", time.Time{}); s.Today["USD"] != 0.75 {
 		t.Errorf("a partial line was read: %v", s.Today["USD"])
 	}
 	f.WriteString(`,"cur":"USD"}` + "\n")
 	f.Close()
-	if s = l.Summary(""); s.Today["USD"] != 1.75 {
+	if s = l.Summary("", time.Time{}); s.Today["USD"] != 1.75 {
 		t.Errorf("the finished line was not read: %v", s.Today["USD"])
 	}
 }
@@ -177,5 +177,29 @@ func TestLedger_NoteAsWritesCostedResponsesWithoutTheKey(t *testing.T) {
 	s := m.Snapshot()
 	if !s.LedgerOn || s.Ledger.Today["USD"] != 0.02 || s.Calls != 3 || s.CostedCalls != 2 {
 		t.Errorf("snapshot %+v", s)
+	}
+}
+
+// This hour, all time (last year's line too) and an interval, over every key.
+func TestLedger_HourTotalAndInterval(t *testing.T) {
+	now := time.Date(2026, 10, 23, 15, 30, 0, 0, time.Local)
+	l := NewSpendLedger(t.TempDir())
+	l.now = func() time.Time { return now }
+	for _, e := range []struct {
+		at   time.Time
+		key  string
+		cost float64
+	}{{now.Add(-10 * time.Minute), "fp1", 0.125}, {now.Add(-2 * time.Hour), "fp2", 0.5},
+		{now.AddDate(0, 0, -3), "fp1", 1}, {time.Date(2025, 12, 30, 12, 0, 0, 0, time.Local), "fp1", 8}} {
+		if err := l.Append(SpendEntry{Time: e.at, Provider: "work", Key: e.key, Model: "a", Cost: e.cost, Currency: "USD"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := l.Summary("fp1", now.AddDate(0, 0, -4))
+	if s.Hour["USD"] != 0.125 || s.Total["USD"] != 9.625 || s.Interval["USD"] != 1.625 {
+		t.Errorf("hour %v total %v interval %v", s.Hour, s.Total, s.Interval)
+	}
+	if s = l.Summary("fp1", time.Time{}); len(s.Interval) != 0 {
+		t.Errorf("no interval asked, got %v", s.Interval)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,11 @@ func spendProto(s dun.SpendSnapshot, now time.Time) *proto.Spend {
 	}
 	if s.CostedCalls > 0 {
 		p.Session = ptr(s.Session)
+		p.SessionHour, p.SessionToday, p.SessionInterval = ptr(s.SessionHour), ptr(s.SessionToday), ptr(s.SessionInterval)
+	}
+	if !s.IntervalStart.IsZero() {
+		p.Interval, p.IntervalOfKey = s.IntervalLen, s.IntervalOfKey
+		p.IntervalStart = s.IntervalStart.UTC().Format(time.RFC3339)
 	}
 	if s.TurnEnded && s.LastTurnCosted > 0 {
 		p.LastTurn = ptr(s.LastTurn)
@@ -67,8 +73,8 @@ func spendProto(s dun.SpendSnapshot, now time.Time) *proto.Spend {
 	}
 	if s.LedgerOn {
 		l := s.Ledger
-		p.Ledger = &proto.SpendLedger{Today: l.Today, Week: l.Week, Month: l.Month, Year: l.Year,
-			ByModel: l.ByModel, Last24h: l.Last24h, Entries: l.Entries}
+		p.Ledger = &proto.SpendLedger{Hour: l.Hour, Today: l.Today, Week: l.Week, Month: l.Month, Year: l.Year,
+			Total: l.Total, Interval: l.Interval, ByModel: l.ByModel, Last24h: l.Last24h, Entries: l.Entries}
 	}
 	return p
 }
@@ -158,6 +164,36 @@ func parseRFC3339(s string) (time.Time, bool) {
 }
 
 // costBlock is /context's "cost & limits" section.
+// intervalLabel names the interval rollup: the key budget's period when the
+// gateway states it, else the last 7 days.
+func intervalLabel(sp *proto.Spend) string {
+	switch {
+	case sp.IntervalOfKey:
+		return "key period (" + sp.Interval + ")"
+	case sp.Interval != "":
+		return "last " + sp.Interval
+	}
+	return "last 7d"
+}
+
+// ledgerRow is one ledger total: the first currency in the value column,
+// any others after it.
+func ledgerRow(label string, by map[string]float64, tail string) string {
+	curs := make([]string, 0, len(by))
+	for c := range by {
+		curs = append(curs, c)
+	}
+	sort.Strings(curs)
+	if len(curs) == 0 {
+		return ctxRow(label, ctxMoney(0), tail)
+	}
+	note := curNote(by[curs[0]], curs[0])
+	for _, c := range curs[1:] {
+		note += " + " + moneyOf(by[c], c)
+	}
+	return ctxRow(label, ctxMoney(by[curs[0]]), note+tail)
+}
+
 // noCostHint says why calls came back with no cost, and what would change
 // that: the answer depends on the gateway.
 func noCostHint(sp *proto.Spend) string {
@@ -197,6 +233,15 @@ func costBlock(s *contextStats, now time.Time) string {
 			note += " · mixed currencies"
 		}
 		b.WriteString(ctxRow("session spend", ctxMoney(*sp.Session), note))
+		cur := curNote(0, sp.Currency)
+		for _, r := range []struct {
+			label string
+			v     *float64
+		}{{"  this hour", sp.SessionHour}, {"  today", sp.SessionToday}, {"  " + intervalLabel(sp), sp.SessionInterval}} {
+			if r.v != nil {
+				b.WriteString(ctxRow(r.label, ctxMoney(*r.v), cur))
+			}
+		}
 	} else {
 		notReported("session spend", commaf(" (%d calls, none priced)", sp.Calls))
 	}
@@ -222,7 +267,13 @@ func costBlock(s *contextStats, now time.Time) string {
 				src = " · as of " + until(t, now)
 			}
 		}
-		b.WriteString(ctxRow("key spend", ctxMoney(k.Spend), curNote(k.Spend, k.Currency)+src))
+		// agentkit's KeyBudget.Spend is the current budget period's, or all
+		// time when the budget does not reset.
+		period := " · this budget period"
+		if k.ResetAt == "" && k.Interval == "" {
+			period = " · all time (no reset stated)"
+		}
+		b.WriteString(ctxRow("key spend", ctxMoney(k.Spend), curNote(k.Spend, k.Currency)+period+src))
 		if k.Limit != nil {
 			b.WriteString(ctxRow("key limit", ctxMoney(*k.Limit), curNote(*k.Limit, k.Currency)))
 		} else {
@@ -254,6 +305,18 @@ func costBlock(s *contextStats, now time.Time) string {
 		notReported("key budget", " (read failed: "+clip(sp.KeyError, 60)+")")
 	default:
 		notReported("key budget", "")
+	}
+
+	// Every session's and sub-agent's on this machine, from the ledger.
+	if l := sp.Ledger; l != nil && l.Entries {
+		b.WriteString(ledgerRow("machine spend", l.Total, " · all time, every session on this machine"))
+		for _, r := range []struct {
+			label string
+			by    map[string]float64
+		}{{"this hour", l.Hour}, {"today", l.Today}, {"this week", l.Week}, {"this month", l.Month},
+			{intervalLabel(sp), l.Interval}} {
+			b.WriteString(ledgerRow("  "+r.label, r.by, ""))
+		}
 	}
 
 	// Rate limits, as the latest response reported them.

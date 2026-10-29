@@ -228,9 +228,20 @@ type Spend struct {
 	Mixed    bool   `json:"mixed,omitempty"`
 	// Session is the summed cost of every response that reported one; nil when
 	// none did. Calls / CostedCalls say how much of the session that covers.
-	Session     *float64 `json:"session_cost,omitempty"`
-	Calls       int      `json:"calls"`
-	CostedCalls int      `json:"costed_calls"`
+	Session *float64 `json:"session_cost,omitempty"`
+	// The session's spend this hour, today and over the interval (Interval);
+	// nil when Session is.
+	SessionHour     *float64 `json:"session_hour,omitempty"`
+	SessionToday    *float64 `json:"session_today,omitempty"`
+	SessionInterval *float64 `json:"session_interval,omitempty"`
+	// Interval is the period the interval sums cover: the key budget's
+	// ("30d") when the gateway states it (IntervalOfKey), else "7d".
+	// IntervalStart is when it began, RFC 3339.
+	Interval      string `json:"interval,omitempty"`
+	IntervalStart string `json:"interval_start,omitempty"`
+	IntervalOfKey bool   `json:"interval_of_key,omitempty"`
+	Calls         int    `json:"calls"`
+	CostedCalls   int    `json:"costed_calls"`
 	// The session's tokens over all calls: the prompt, of it the cached part
 	// (CacheReported: the provider said so at least once), and the completion.
 	Prompt        int  `json:"prompt_tokens,omitempty"`
@@ -272,11 +283,15 @@ type KeyBudget struct {
 // RateLimit is one rate-limit window.
 // SpendLedger is the ledger's totals, each by currency ("" = not stated).
 type SpendLedger struct {
-	Today   map[string]float64            `json:"today,omitempty"`
-	Week    map[string]float64            `json:"week,omitempty"`
-	Month   map[string]float64            `json:"month,omitempty"`
-	Year    map[string]float64            `json:"year,omitempty"`
-	ByModel map[string]map[string]float64 `json:"by_model,omitempty"` // this month
+	Hour  map[string]float64 `json:"hour,omitempty"`
+	Today map[string]float64 `json:"today,omitempty"`
+	Week  map[string]float64 `json:"week,omitempty"`
+	Month map[string]float64 `json:"month,omitempty"`
+	Year  map[string]float64 `json:"year,omitempty"`
+	Total map[string]float64 `json:"total,omitempty"` // all time
+	// Interval is since Spend.IntervalStart, every key.
+	Interval map[string]float64            `json:"interval,omitempty"`
+	ByModel  map[string]map[string]float64 `json:"by_model,omitempty"` // this month
 	// Last24h is the session key's trailing 24 hours: the rate its budget is
 	// measured against.
 	Last24h map[string]float64 `json:"last_24h,omitempty"`

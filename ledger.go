@@ -32,10 +32,9 @@ import (
 //
 // Size: one file per month (spend-YYYY-MM.jsonl), so no file grows past a
 // month of responses — about 150 bytes a line, so 10,000 responses a day
-// is ~45 MB a month. Summary reads only the months that the year, the week
-// and the trailing 24 hours touch, and each file only past what it read
-// last time. Old months are never deleted by dun; deleting one only takes
-// it out of the year's total.
+// is ~45 MB a month. Summary reads every month (the all-time total needs
+// them), each file only past what it read last time. Old months are never
+// deleted by dun; deleting one only takes it out of the totals.
 
 const ledgerLineMax = 1024
 
@@ -69,13 +68,14 @@ type SpendLedger struct {
 	days  map[string]map[string]float64            // "2006-01-02" (local) → currency → amount
 	model map[string]map[string]map[string]float64 // "2006-01" → model → currency → amount
 	hours map[string]map[int64]map[string]float64  // key fingerprint → unix hour → currency → amount
+	total map[string]float64                       // currency → amount, all time
 }
 
 // NewSpendLedger is the ledger in dir ($DUN_HOME/spend).
 func NewSpendLedger(dir string) *SpendLedger {
 	return &SpendLedger{dir: dir, now: time.Now, read: map[string]int64{},
 		days: map[string]map[string]float64{}, model: map[string]map[string]map[string]float64{},
-		hours: map[string]map[int64]map[string]float64{}}
+		hours: map[string]map[int64]map[string]float64{}, total: map[string]float64{}}
 }
 
 // DefaultLedgerDir is $DUN_HOME/spend.
@@ -125,7 +125,11 @@ func (l *SpendLedger) Append(e SpendEntry) error {
 
 // LedgerSummary is the ledger's totals as of one moment, by currency.
 type LedgerSummary struct {
-	Today, Week, Month, Year map[string]float64
+	// Hour is since the hour began (local); Total is all time.
+	Hour, Today, Week, Month, Year, Total map[string]float64
+	// Interval is every key's spend since the interval began (Summary's
+	// since), counted from the start of that hour.
+	Interval map[string]float64
 	// ByModel is this month's spend by model.
 	ByModel map[string]map[string]float64
 	// Last24h is the trailing 24 hours' spend of the key asked about.
@@ -134,9 +138,10 @@ type LedgerSummary struct {
 }
 
 // Summary scans what was appended since the last call (by any process) and
-// sums the periods around now: today (since local midnight), this week
-// (since Monday), this month, this year; key's trailing 24 hours.
-func (l *SpendLedger) Summary(key string) LedgerSummary {
+// sums the periods around now: this hour, today (since local midnight), this
+// week (since Monday), this month, this year, all time, the interval since
+// `since` (zero: none); key's trailing 24 hours.
+func (l *SpendLedger) Summary(key string, since time.Time) LedgerSummary {
 	if l == nil {
 		return LedgerSummary{}
 	}
@@ -150,8 +155,9 @@ func (l *SpendLedger) Summary(key string) LedgerSummary {
 	week := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
 	month := time.Date(y, mo, 1, 0, 0, 0, 0, loc)
 	year := time.Date(y, 1, 1, 0, 0, 0, 0, loc)
-	s := LedgerSummary{Today: map[string]float64{}, Week: map[string]float64{}, Month: map[string]float64{},
-		Year: map[string]float64{}, ByModel: map[string]map[string]float64{}, Last24h: map[string]float64{}}
+	s := LedgerSummary{Hour: map[string]float64{}, Today: map[string]float64{}, Week: map[string]float64{},
+		Month: map[string]float64{}, Year: map[string]float64{}, Total: map[string]float64{},
+		Interval: map[string]float64{}, ByModel: map[string]map[string]float64{}, Last24h: map[string]float64{}}
 	add := func(m map[string]float64, by map[string]float64) {
 		for c, v := range by {
 			m[c] += v
@@ -186,15 +192,26 @@ func (l *SpendLedger) Summary(key string) LedgerSummary {
 			add(s.Last24h, by)
 		}
 	}
+	add(s.Total, l.total)
+	thisHour := now.Unix() / 3600
+	for _, hh := range l.hours {
+		for h, by := range hh {
+			if h == thisHour {
+				add(s.Hour, by)
+			}
+			if !since.IsZero() && h >= since.Unix()/3600 {
+				add(s.Interval, by)
+			}
+		}
+	}
 	return s
 }
 
-// scan reads the months this year (and last December, for a week that
-// starts in it), each from where it stopped.
+// scan reads every month's file, each from where it stopped.
 func (l *SpendLedger) scan(now time.Time) {
-	start := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
-	for t := start; !t.After(now); t = t.AddDate(0, 1, 0) {
-		l.scanFile(l.file(t), now)
+	files, _ := filepath.Glob(filepath.Join(l.dir, "spend-*.jsonl"))
+	for _, f := range files {
+		l.scanFile(f, now)
 	}
 }
 
@@ -225,6 +242,7 @@ func (l *SpendLedger) scanFile(path string, now time.Time) {
 			continue
 		}
 		lt := e.Time.In(loc)
+		l.total[e.Currency] += e.Cost
 		bump(l.days, lt.Format("2006-01-02"), e.Currency, e.Cost)
 		mm := l.model[lt.Format("2006-01")]
 		if mm == nil {

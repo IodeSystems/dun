@@ -184,3 +184,58 @@ func TestSpendMeterFromLiteLLMResponse(t *testing.T) {
 		t.Errorf("limits = %+v", s.Limits)
 	}
 }
+
+// The interval is the key budget's period when the gateway states its reset
+// and length, else the last 7 days (USER 2026-10-28).
+func TestBudgetInterval(t *testing.T) {
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	reset := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		b     llm.KeyBudget
+		start time.Time
+		name  string
+		ofKey bool
+	}{
+		{llm.KeyBudget{Reported: true, ResetAt: reset, Interval: "30d"}, reset.AddDate(0, 0, -30), "30d", true},
+		{llm.KeyBudget{Reported: true, ResetAt: reset, Interval: "monthly"}, reset.AddDate(0, -1, 0), "monthly", true},
+		{llm.KeyBudget{Reported: true, ResetAt: reset, Interval: "1mo"}, reset.AddDate(0, -1, 0), "1mo", true},
+		{llm.KeyBudget{Reported: true, ResetAt: now.Add(time.Hour), Interval: "24h"}, now.Add(-23 * time.Hour), "24h", true},
+		// No length, an unknown one, a past reset, or a period that would
+		// start after now: the default.
+		{llm.KeyBudget{Reported: true, ResetAt: reset}, now.Add(-7 * 24 * time.Hour), "7d", false},
+		{llm.KeyBudget{Reported: true, ResetAt: reset, Interval: "fortnightly"}, now.Add(-7 * 24 * time.Hour), "7d", false},
+		{llm.KeyBudget{Reported: true, ResetAt: now.Add(-time.Hour), Interval: "1d"}, now.Add(-7 * 24 * time.Hour), "7d", false},
+		{llm.KeyBudget{Reported: true, ResetAt: reset, Interval: "1h"}, now.Add(-7 * 24 * time.Hour), "7d", false},
+		{llm.KeyBudget{}, now.Add(-7 * 24 * time.Hour), "7d", false},
+	} {
+		start, name, ofKey := BudgetInterval(c.b, now)
+		if !start.Equal(c.start) || name != c.name || ofKey != c.ofKey {
+			t.Errorf("%+v: %v %q %v, want %v %q %v", c.b, start, name, ofKey, c.start, c.name, c.ofKey)
+		}
+	}
+}
+
+// The session's hour, today and interval rollups, and the ledger's
+// summed over the same interval.
+func TestSpendMeterRollups(t *testing.T) {
+	now := time.Date(2026, 10, 28, 15, 30, 0, 0, time.Local)
+	m := NewSpendMeter()
+	at := now
+	m.now = func() time.Time { return at }
+	m.SetBudget(llm.KeyBudget{Reported: true, ResetAt: now.Add(48 * time.Hour), Interval: "3d"}, nil)
+	for _, c := range []struct {
+		ago  time.Duration
+		cost float64
+	}{{10 * time.Minute, 0.25}, {3 * time.Hour, 0.5}, {20 * time.Hour, 1}, {30 * time.Hour, 2}} {
+		at = now.Add(-c.ago)
+		m.Note(costed(c.cost, llm.CurrencyUSD))
+	}
+	at = now
+	s := m.Snapshot()
+	if s.SessionHour != 0.25 || s.SessionToday != 0.75 || s.SessionInterval != 1.75 || s.Session != 3.75 {
+		t.Errorf("hour %v today %v interval %v total %v", s.SessionHour, s.SessionToday, s.SessionInterval, s.Session)
+	}
+	if !s.IntervalOfKey || s.IntervalLen != "3d" || !s.IntervalStart.Equal(now.Add(-24*time.Hour)) {
+		t.Errorf("interval %v %q %v", s.IntervalStart, s.IntervalLen, s.IntervalOfKey)
+	}
+}

@@ -3,6 +3,8 @@ package dun
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +42,8 @@ type SpendMeter struct {
 	// and the completion.
 	prompt, cached, completion int
 	cacheSeen                  bool
+
+	hours map[int64]float64 // the session's cost by unix hour, in its currency
 
 	turn       float64 // since the last EndTurn
 	turnCalls  int
@@ -102,6 +106,10 @@ func (m *SpendMeter) Note(u llm.Usage) {
 		m.turnCosted++
 		m.session += u.Cost.Amount
 		m.turn += u.Cost.Amount
+		if m.hours == nil {
+			m.hours = map[int64]float64{}
+		}
+		m.hours[now.Unix()/3600] += u.Cost.Amount
 	}
 	if u.Limits.Reported {
 		m.limits, m.limitsAt = u.Limits, now
@@ -161,7 +169,18 @@ type SpendSnapshot struct {
 	Currency string
 	Mixed    bool
 
-	Session     float64
+	Session float64
+	// The session's spend this hour, today (local) and over the interval
+	// (IntervalStart on, counted from the start of that hour).
+	SessionHour, SessionToday, SessionInterval float64
+	// IntervalStart is when the interval began: the key budget's period
+	// when the gateway states its reset and its length, else the last 7
+	// days (USER 2026-10-28). IntervalLen names it ("30d", "7d");
+	// IntervalOfKey: it is the key's period.
+	IntervalStart time.Time
+	IntervalLen   string
+	IntervalOfKey bool
+
 	Calls       int
 	CostedCalls int // 0 → the session's spend is not reported
 
@@ -202,14 +221,93 @@ func (m *SpendMeter) Snapshot() SpendSnapshot {
 		Budget: m.budget, BudgetAt: m.budgetAt, BudgetUnsupported: m.unsupported, BudgetErr: m.budgetErr,
 		Limits: m.limits, LimitsAt: m.limitsAt,
 	}
+	now := m.now()
+	s.IntervalStart, s.IntervalLen, s.IntervalOfKey = BudgetInterval(m.budget, now)
+	y, mo, d := now.Date()
+	today := time.Date(y, mo, d, 0, 0, 0, 0, now.Location()).Unix() / 3600
+	for h, v := range m.hours {
+		if h == now.Unix()/3600 {
+			s.SessionHour += v
+		}
+		if h >= today {
+			s.SessionToday += v
+		}
+		if h >= s.IntervalStart.Unix()/3600 {
+			s.SessionInterval += v
+		}
+	}
 	l, key := m.ledger, m.ledgerKey
 	m.mu.Unlock()
 	// The ledger is read off the meter's lock: it is file IO, and Note must
 	// never wait for it.
 	if l != nil {
-		s.Ledger, s.LedgerOn = l.Summary(key), true
+		s.Ledger, s.LedgerOn = l.Summary(key, s.IntervalStart), true
 	}
 	return s
+}
+
+// defaultInterval is the interval when the key states no period of its own.
+const defaultInterval = 7 * 24 * time.Hour
+
+// BudgetInterval is when the current interval began: one period before the
+// key budget's next reset, when the gateway states both the reset and the
+// period's length; else the last 7 days. len names the period; ofKey says
+// it is the key's.
+func BudgetInterval(b llm.KeyBudget, now time.Time) (start time.Time, name string, ofKey bool) {
+	if b.Reported && b.ResetAt.After(now) {
+		if back, ok := intervalBack(b.Interval); ok {
+			if st := back(b.ResetAt); !st.After(now) {
+				return st, b.Interval, true
+			}
+		}
+	}
+	return now.Add(-defaultInterval), "7d", false
+}
+
+// intervalBack reads a gateway's period ("30d", "1mo", "12h", "monthly")
+// as a step back from a time; ok=false for one it does not know.
+func intervalBack(iv string) (func(time.Time) time.Time, bool) {
+	iv = strings.ToLower(strings.TrimSpace(iv))
+	switch iv {
+	case "hourly":
+		iv = "1h"
+	case "daily":
+		iv = "1d"
+	case "weekly":
+		iv = "1w"
+	case "monthly":
+		iv = "1mo"
+	case "yearly", "annually":
+		iv = "1y"
+	}
+	i := 0
+	for i < len(iv) && iv[i] >= '0' && iv[i] <= '9' {
+		i++
+	}
+	n, err := strconv.Atoi(iv[:i])
+	if err != nil || n <= 0 {
+		return nil, false
+	}
+	dur := func(d time.Duration) (func(time.Time) time.Time, bool) {
+		return func(t time.Time) time.Time { return t.Add(-time.Duration(n) * d) }, true
+	}
+	switch iv[i:] {
+	case "s":
+		return dur(time.Second)
+	case "m", "min":
+		return dur(time.Minute) // LiteLLM's "30m" is minutes
+	case "h":
+		return dur(time.Hour)
+	case "d":
+		return dur(24 * time.Hour)
+	case "w":
+		return dur(7 * 24 * time.Hour)
+	case "mo":
+		return func(t time.Time) time.Time { return t.AddDate(0, -n, 0) }, true
+	case "y":
+		return func(t time.Time) time.Time { return t.AddDate(-n, 0, 0) }, true
+	}
+	return nil, false
 }
 
 // Poke asks the poller for a read soon (it still honours its minimum gap).
