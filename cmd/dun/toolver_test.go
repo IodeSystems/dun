@@ -246,3 +246,13 @@ func fakeModule(t *testing.T, proxy, mod, v string) {
 	l.WriteString(v + "\n")
 	l.Close()
 }
+
+// A missing tool's install step names the version this dun was tested with,
+// never @latest (the proxy caches it).
+func TestToolInstallIsPinned(t *testing.T) {
+	for _, s := range release.Supported {
+		if m := dun.ToolInstall[s.Name].Module; m != s.Module+"@"+s.Recommended {
+			t.Errorf("%s: ToolInstall %q, want @%s", s.Name, m, s.Recommended)
+		}
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/iodesystems/dun/release"
 )
 
 // A server whose command is not installed is a setup step, not a failure:
@@ -17,11 +19,22 @@ import (
 // ToolInstall is how to get the commands dun's own servers run: each is a Go
 // module of the iodesystems project (go install builds it from source, checked
 // against the Go checksum database — no binary from elsewhere), and what a
-// session lacks without it.
+// session lacks without it. Module carries the version this dun was tested
+// with (release.Supported), never @latest: the proxy caches @latest, and a
+// cached one can be a build that no longer works.
 var ToolInstall = map[string]struct{ Module, Lost string }{
-	"mcpshell":     {"github.com/iodesystems/mcpshell/cmd/mcpshell@latest", "no eval tool (sandboxed calculations, data, SQL)"},
-	"poly-lsp-mcp": {"github.com/iodesystems/poly-lsp-mcp@latest", "no semantic code tools (/poly-lsp)"},
-	"raglit":       {"github.com/iodesystems/raglit/cmd/raglit@latest", "no docs search or memories (/rag)"},
+	"mcpshell":     {pinned("mcpshell"), "no eval tool (sandboxed calculations, data, SQL)"},
+	"poly-lsp-mcp": {pinned("poly-lsp-mcp"), "no semantic code tools (/poly-lsp)"},
+	"raglit":       {pinned("raglit"), "no docs search or memories (/rag)"},
+}
+
+// pinned is name's module at its recommended version.
+func pinned(name string) string {
+	t, ok := release.SupportedTool(name)
+	if !ok {
+		panic("dun: " + name + " is not in release.Supported")
+	}
+	return t.Module + "@" + t.Recommended
 }
 
 // MissingError is a server command found neither on PATH nor beside dun.
