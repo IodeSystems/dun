@@ -51,7 +51,7 @@ var keyActions = []keyAction{
 	{"focus.prev", "main", "the previous zone", []string{"shift+tab"}},
 
 	{"scroll.bottom", "main", "the newest output, following again", []string{"ctrl+end"}},
-	{"scroll.turn", "main", "the top of your last message", []string{"ctrl+home"}},
+	{"scroll.turn", "main", "the top of your last message; again, the one before", []string{"ctrl+home"}},
 	{"page.up", "main", "a page up", []string{"pgup"}},
 	{"page.down", "main", "a page down", []string{"pgdown"}},
 	{"history.prev", "main", "the previous message you sent", []string{"ctrl+up"}},

@@ -2267,6 +2267,37 @@ func TestVtui_ScrollJumpShortcuts(t *testing.T) {
 	}
 }
 
+// Pressed again, ctrl+home steps back one user message at a time, and stops at
+// the first; moving the view starts over from the last.
+func TestVtui_CtrlHomeStepsBackThroughUserMessages(t *testing.T) {
+	v := tallConvo(t)
+	var users []int
+	for i := range v.m.convo {
+		if v.m.convo[i].userText != "" {
+			users = append(users, i)
+		}
+	}
+	home := func() string {
+		nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
+		v.m = nm.(tuiModel)
+		return v.m.convo[v.m.userJump].userText
+	}
+	for k := len(users) - 1; k >= 0; k-- {
+		if got, want := home(), v.m.convo[users[k]].userText; got != want {
+			t.Fatalf("press %d: on %q, want %q", len(users)-k, got, want)
+		}
+	}
+	yoff := v.m.vp.YOffset
+	if got := home(); got != "msg 0" || v.m.vp.YOffset != yoff {
+		t.Fatalf("past the first: on %q at %d, want msg 0 at %d", got, v.m.vp.YOffset, yoff)
+	}
+	nm, _ := v.m.Update(tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	v.m = nm.(tuiModel)
+	if got := home(); got != "msg 7" {
+		t.Fatalf("after ctrl+end: on %q, want msg 7", got)
+	}
+}
+
 func TestMultilineInput_HistoryViaCtrl(t *testing.T) {
 	proc := &dunProc{stdin: discardWC{}}
 	m := newTUIModel(proc, "/ws")

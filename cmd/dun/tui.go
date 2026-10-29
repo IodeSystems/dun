@@ -894,9 +894,12 @@ type tuiModel struct {
 	queuedMsgs        int       // messages typed mid-turn, buffered for the running turn
 	w, h              int
 	fatalErr          string
-	scrollPinned      bool     // true when viewport should auto-follow (at bottom)
-	traceFile         *os.File // /trace on: recording events+scroll to this file
-	tracePrevYOff     int      // last recorded YOffset (avoid duplicates)
+	scrollPinned      bool // true when viewport should auto-follow (at bottom)
+	// userJump is the convo index ctrl+home last parked on, and userJumpAt the
+	// offset it left; a press with the view still there steps further back.
+	userJump, userJumpAt int
+	traceFile            *os.File // /trace on: recording events+scroll to this file
+	tracePrevYOff        int      // last recorded YOffset (avoid duplicates)
 	// Context stats (for /context)
 	ctxStats contextStats
 
@@ -929,7 +932,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
 	keys, keysErr := loadKeyMap()
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, userJump: -1, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -4685,26 +4688,33 @@ func (m *tuiModel) applyScroll(selMode bool) {
 // stream again — the way ctrl+end ends a scroll-back everywhere else.
 func (m *tuiModel) scrollToEnd() {
 	m.vp.GotoBottom()
-	m.scrollPinned = true
+	m.scrollPinned, m.userJump = true, -1
 	m.traceScroll()
 }
 
 // scrollToLastUser jumps to the top of the most recent user message: the start
 // of the current exchange, which is what you want after reading back — "show me
-// what I asked and everything since". Unpins, because it is a position the
-// stream would otherwise scroll away from.
+// what I asked and everything since". Pressed again with the view still where
+// it put it, it goes one user message further back, so repeated presses read
+// what you asked in a session (USER 2026-10-29). Unpins, because it is a
+// position the stream would otherwise scroll away from.
 func (m *tuiModel) scrollToLastUser() {
 	ro := m.frame.rowOffset
-	row := -1
-	for i := range m.convo {
-		if m.convo[i].userText != "" && i < len(ro) {
-			row = ro[i]
+	before := len(m.convo)
+	if m.userJump >= 0 && m.vp.YOffset == m.userJumpAt {
+		before = m.userJump
+	}
+	at := -1
+	for i := 0; i < before && i < len(ro); i++ {
+		if m.convo[i].userText != "" {
+			at = i
 		}
 	}
-	if row < 0 {
-		return
+	if at < 0 {
+		return // at the first one already, or none
 	}
-	m.vp.SetYOffset(row)
+	m.vp.SetYOffset(ro[at])
+	m.userJump, m.userJumpAt = at, m.vp.YOffset
 	m.updateScrollPin()
 }
 
