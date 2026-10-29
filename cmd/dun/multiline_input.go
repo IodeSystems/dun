@@ -690,10 +690,21 @@ func (m *multilineInput) HandleKey(msg tea.KeyPressMsg) multilineInput {
 		m.deleteTo(m.wordLeft())
 	case "alt+d":
 		m.deleteTo(m.wordRight())
+	// At the line's edge (an empty line is at both) there is nothing left to
+	// kill, so the key takes the newline: ctrl+u joins this line to the end of
+	// the one above, ctrl+k joins the one below to this.
 	case "ctrl+k":
-		m.deleteTo(m.lineEnd())
+		if end := m.lineEnd(); end > m.cursor {
+			m.deleteTo(end)
+		} else {
+			m.deleteTo(m.cursor + 1)
+		}
 	case "ctrl+u":
-		m.deleteTo(m.lineStart())
+		if start := m.lineStart(); start < m.cursor {
+			m.deleteTo(start)
+		} else {
+			m.deleteTo(m.cursor - 1)
+		}
 	case "ctrl+d", "delete":
 		m.delete()
 	case "ctrl+o": // open a paste token for editing

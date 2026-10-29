@@ -1974,11 +1974,28 @@ func TestMultilineInput_ReadlineEditing(t *testing.T) {
 		{"ctrl+k kills to end of line", mk("hello world", 5), tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, "hello"},
 		{"ctrl+u kills to start of line", mk("hello", 3), tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}, "lo"},
 		{"ctrl+d deletes forward", mk("hello", 0), tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}, "ello"},
+		// On an empty line there is nothing to kill: the key takes the newline.
+		{"ctrl+u on an empty line goes to the end of the line above", mk("ab\n\ncd", 3), tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}, "ab\ncd"},
+		{"ctrl+k on an empty line goes to the start of the line below", mk("ab\n\ncd", 3), tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, "ab\ncd"},
+		{"ctrl+u at a line's start joins it to the line above", mk("ab\ncd", 3), tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}, "abcd"},
+		{"ctrl+k at a line's end joins the line below", mk("ab\ncd", 2), tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, "abcd"},
+		{"ctrl+u at the buffer's start does nothing", mk("ab", 0), tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}, "ab"},
+		{"ctrl+k at the buffer's end does nothing", mk("ab", 2), tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, "ab"},
 	}
 	for _, c := range cases {
 		got := c.in.HandleKey(c.key)
 		if got.Value() != c.want {
 			t.Errorf("%s: want %q, got %q", c.name, c.want, got.Value())
+		}
+	}
+	for _, c := range []struct {
+		key  rune
+		want int
+	}{{'u', 2}, {'k', 3}} {
+		in := mk("ab\n\ncd", 3)
+		in = in.HandleKey(tea.KeyPressMsg{Code: c.key, Mod: tea.ModCtrl})
+		if in.cursor != c.want {
+			t.Errorf("ctrl+%c on the empty line: cursor %d, want %d", c.key, in.cursor, c.want)
 		}
 	}
 
