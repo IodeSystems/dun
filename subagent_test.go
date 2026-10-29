@@ -111,14 +111,21 @@ func TestSubAgent_HeartbeatRemindsAboutAnIdleChild(t *testing.T) {
 // exactly the one that should never be asked whether it is alive.
 func TestSubAgent_HeartbeatIsDebouncedByStatus(t *testing.T) {
 	h, sa := testAgent(t, 6, "long job")
+	// A window 20x the status cadence: with fastHeartbeat's 10 ms against a
+	// 5 ms sleep, one sleep stretched by a loaded machine fired a reminder
+	// (aw4 i_1m5zvaep308gaan8x30pkw).
+	sa.hb = &heartbeat{sched: []time.Duration{100 * time.Millisecond}, every: 100 * time.Millisecond}
 	sa.mu.Lock()
 	sa.startRunLocked()
 	sa.mu.Unlock()
 
+	// Spoken before the loop starts, so its first window opens now, not
+	// when the agent was built.
+	sa.setStatus("starting")
 	go sa.heartbeat()
 	defer sa.settle(agentDismissed)
 
-	deadline := time.Now().Add(120 * time.Millisecond)
+	deadline := time.Now().Add(300 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		sa.setStatus("still reading")
 		time.Sleep(5 * time.Millisecond)
