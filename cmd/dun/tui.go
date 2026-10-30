@@ -2936,7 +2936,11 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.replayLive(items)
 		}
 	case "agent_told":
-		if msg := str(ev["message"]); msg != "" {
+		// The ack says nothing the child's view does not, and it came first:
+		// the told message reaches the transcript (agent_entry) only once the
+		// child takes it, so "↳ Told agent" sat above what was told. Only a
+		// refusal (the child is running, or stopped) is shown.
+		if msg := str(ev["message"]); msg != "" && !strings.HasPrefix(msg, "Told agent") {
 			m.append(stNote.Render("↳ " + oneLine(msg)))
 		}
 	case "notification":

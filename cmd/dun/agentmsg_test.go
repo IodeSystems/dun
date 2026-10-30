@@ -195,3 +195,18 @@ func TestAgentMsg_LongFolds(t *testing.T) {
 		t.Error("enter should open the whole message in the pager")
 	}
 }
+
+// A tell's ack is not shown: it arrived before the told message reached the
+// child's transcript, so it sat above it. A refusal is shown.
+func TestAgentTold_OnlyARefusalIsShown(t *testing.T) {
+	v := newVtui(100, 20)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	v.event(map[string]any{"type": "agent_told", "agent": float64(1), "message": "Told agent #1. It is working; you will hear when it is done (or jobs(agent:1, wait:true))."})
+	if got := v.view(); strings.Contains(got, "Told agent") {
+		t.Errorf("the ack is shown:\n%s", got)
+	}
+	v.event(map[string]any{"type": "agent_told", "agent": float64(1), "message": "agent #1 is stopped. Restart it with jobs(agent:1, resume:true) first."})
+	if got := v.view(); !strings.Contains(got, "agent #1 is stopped") {
+		t.Errorf("the refusal is not shown:\n%s", got)
+	}
+}
