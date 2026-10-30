@@ -3743,7 +3743,7 @@ func (m tuiModel) headView() string {
 		head += stDim.Render(" · " + m.model)
 	}
 	if n := m.liveAgents(); n > 0 {
-		head += stNote.Render("  · "+plural(n, "agent"))
+		head += stNote.Render("  · " + plural(n, "agent"))
 	}
 	return m.reqs.withStats(head, m.w)
 }
@@ -4518,22 +4518,25 @@ func (m *tuiModel) refresh() {
 				// block fits and no wrap happens: a block that fits at 96 also
 				// fits at any wider width, so the fast path below stays correct —
 				// but wrapW must say WHERE it was measured, or a consumer cannot
-				// tell "fits here" from "never looked".
-				e.wrapW = width
+				// tell "fits here" from "never looked". Recorded after the cache
+				// is checked: stamped first, it made every cached wrap look
+				// current, and a notice wrapped at 48 columns stayed so after the
+				// pane widened (aw4 i_1m604n7h2551hy4fzhjmcb).
 				switch {
 				case e.wrapMax <= wrapW:
 					// Already fits — no wrapping at this width or any wider.
-					w = b
+					w, e.wrapped = b, ""
 				case e.wrapped != "" && e.wrapW == width:
 					w = e.wrapped
 				default:
 					if e.hang {
-						e.wrapped, e.wrapW = hangWrap(b, wrapW), width
+						e.wrapped = hangWrap(b, wrapW)
 					} else {
-						e.wrapped, e.wrapW = cellbuf.Wrap(b, wrapW, ""), width
+						e.wrapped = cellbuf.Wrap(b, wrapW, "")
 					}
 					w = e.wrapped
 				}
+				e.wrapW = width
 			}
 		} else {
 			w = cellbuf.Wrap(b, wrapW, "")
