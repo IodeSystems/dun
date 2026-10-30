@@ -46,6 +46,9 @@ type oauthWorld struct {
 	clientAuth    []string // how each token request authenticated: none, basic, post
 	revoked       []string
 	mcpAuth       []string // the Authorization of each MCP request
+	cimd          bool     // client_id_metadata_document_supported
+	dcr           bool     // a registration_endpoint (RFC 7591)
+	registered    []map[string]any
 }
 
 func newOAuthWorld(t *testing.T) *oauthWorld {
@@ -64,11 +67,23 @@ func (w *oauthWorld) serveIdP(rw http.ResponseWriter, r *http.Request) {
 	defer w.mu.Unlock()
 	switch r.URL.Path {
 	case "/.well-known/oauth-authorization-server":
-		writeJSONResp(rw, map[string]any{"issuer": w.idp.URL,
+		md := map[string]any{"issuer": w.idp.URL,
 			"authorization_endpoint": w.idp.URL + "/authorize", "token_endpoint": w.idp.URL + "/token",
 			"revocation_endpoint":                   w.idp.URL + "/revoke",
 			"token_endpoint_auth_methods_supported": w.authMethods,
-			"code_challenge_methods_supported":      []string{"S256"}})
+			"code_challenge_methods_supported":      []string{"S256"},
+			"client_id_metadata_document_supported": w.cimd}
+		if w.dcr {
+			md["registration_endpoint"] = w.idp.URL + "/register"
+		}
+		writeJSONResp(rw, md)
+	case "/register":
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.registered = append(w.registered, body)
+		w.clientID = fmt.Sprintf("reg-%d", len(w.registered))
+		rw.WriteHeader(http.StatusCreated)
+		writeJSONResp(rw, map[string]any{"client_id": w.clientID})
 	case "/authorize":
 		q := r.URL.Query()
 		w.authorizeQ = append(w.authorizeQ, q)
@@ -570,7 +585,6 @@ func TestOAuthSpec_ConfigRoundTripAndMerge(t *testing.T) {
 		want string
 	}{
 		{ServerSpec{ID: "x", Command: "x", OAuth: &OAuthSpec{ClientID: "c"}}, "", "remote server"},
-		{ServerSpec{ID: "x", URL: "https://x", OAuth: &OAuthSpec{}}, "", "client_id"},
 		{ServerSpec{ID: "x", URL: "https://x", Bearer: "t", OAuth: &OAuthSpec{ClientID: "c"}}, "", "both bearer and oauth"},
 		{ServerSpec{ID: "x", URL: "https://x", OAuth: &OAuthSpec{ClientID: "c", Send: "jwt"}}, "", "send"},
 	} {

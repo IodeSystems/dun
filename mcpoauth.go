@@ -36,7 +36,7 @@ import (
 //   - the authorization-code flow with PKCE (S256), a state, and a nonce when
 //     openid is asked for, redirected to a loopback listener on a FIXED port
 //     (http://127.0.0.1:<port>/oauth/callback) so it can be registered
-//     exactly — there is no dynamic client registration;
+//     exactly; with no client_id, dun picks the client (oauthauto.go);
 //   - the login URL is SURFACED (Config.OnLogin → an mcp_login event) as well
 //     as opened in a browser: the engine runs under dund, often with no
 //     display, and the person is wherever the TUI is;
@@ -144,6 +144,9 @@ type oauthClient struct {
 	tokMod time.Time // the file's mtime when tok was read
 	// deadRefresh is a refresh token the server refused: not tried again.
 	deadRefresh string
+	// auto is the client dun chose when the spec names none (oauthauto.go):
+	// its URL, or a registration.
+	auto autoClient
 	lastLogin   time.Time
 
 	loginMu   sync.Mutex  // one interactive login at a time
@@ -211,7 +214,10 @@ func (c *oauthClient) current() *oauthToken {
 		c.tok = &t
 	}
 	t := c.tok
-	if t.ClientID != c.spec.ClientID ||
+	if c.spec.ClientID == "" && t.ClientID != "" && c.auto.ID == "" {
+		c.auto = loadAutoClient(c.id, t.ClientID)
+	}
+	if t.ClientID != c.clientID() ||
 		(c.spec.Issuer != "" && strings.TrimSuffix(t.Issuer, "/") != strings.TrimSuffix(c.spec.Issuer, "/")) {
 		return nil
 	}
@@ -398,6 +404,9 @@ func (c *oauthClient) redirectPort() int {
 // clientSecret resolves the spec's secret: "$NAME" or "${NAME}" from the
 // environment, anything else as written.
 func (c *oauthClient) clientSecret() string {
+	if c.spec.ClientID == "" {
+		return c.auto.Secret // a registration's, when it was given one
+	}
 	s := c.spec.ClientSecret
 	if m := envRef.FindStringSubmatch(s); m != nil {
 		return os.Getenv(m[1] + m[2])
@@ -444,6 +453,16 @@ func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) error {
 		return c.waitOtherLogin(ctx, port, err)
 	}
 	redirect := fmt.Sprintf("http://127.0.0.1:%d/oauth/callback", port)
+	if c.spec.ClientID == "" {
+		ac, err := c.chooseClient(ctx, md, redirect, port)
+		if err != nil {
+			ln.Close()
+			return err
+		}
+		c.mu.Lock()
+		c.auto = ac
+		c.mu.Unlock()
+	}
 	verifier, state := randomToken(32), randomToken(16)
 	nonce := ""
 	if slices.Contains(as.scopes, "openid") {
@@ -452,7 +471,7 @@ func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) error {
 	sum := sha256.Sum256([]byte(verifier))
 	q := url.Values{
 		"response_type":         {"code"},
-		"client_id":             {c.spec.ClientID},
+		"client_id":             {c.clientID()},
 		"redirect_uri":          {redirect},
 		"state":                 {state},
 		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
@@ -547,7 +566,7 @@ func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) error {
 	if err != nil {
 		return err
 	}
-	t := &oauthToken{ClientID: c.spec.ClientID, Issuer: md.Issuer, TokenEndpoint: md.TokenEndpoint,
+	t := &oauthToken{ClientID: c.clientID(), Issuer: md.Issuer, TokenEndpoint: md.TokenEndpoint,
 		RevocationEndpoint: md.RevocationEndpoint, AuthMethod: method, Resource: as.resource}
 	tr.apply(t, c.now())
 	if t.IDToken != "" {
@@ -558,8 +577,8 @@ func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) error {
 		if nonce != "" && cl.Nonce != nonce {
 			return fmt.Errorf("the id_token's nonce does not match this login — refusing it")
 		}
-		if !slices.Contains(cl.Aud, c.spec.ClientID) {
-			return fmt.Errorf("the id_token is for %v, not client %s — refusing it", []string(cl.Aud), c.spec.ClientID)
+		if !slices.Contains(cl.Aud, c.clientID()) {
+			return fmt.Errorf("the id_token is for %v, not client %s — refusing it", []string(cl.Aud), c.clientID())
 		}
 	}
 	if v, _ := c.value(t); v == "" {
@@ -632,9 +651,9 @@ func (r tokenResponse) apply(t *oauthToken, now time.Time) {
 func (c *oauthClient) postForm(ctx context.Context, endpoint, method string, form url.Values) (int, []byte, error) {
 	switch method {
 	case "none":
-		form.Set("client_id", c.spec.ClientID)
+		form.Set("client_id", c.clientID())
 	case "client_secret_post":
-		form.Set("client_id", c.spec.ClientID)
+		form.Set("client_id", c.clientID())
 		form.Set("client_secret", c.clientSecret())
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
@@ -645,7 +664,7 @@ func (c *oauthClient) postForm(ctx context.Context, endpoint, method string, for
 	req.Header.Set("Accept", "application/json")
 	if method == "client_secret_basic" {
 		// RFC 6749 §2.3.1: form-encoded before base64.
-		req.SetBasicAuth(url.QueryEscape(c.spec.ClientID), url.QueryEscape(c.clientSecret()))
+		req.SetBasicAuth(url.QueryEscape(c.clientID()), url.QueryEscape(c.clientSecret()))
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {

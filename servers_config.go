@@ -170,11 +170,12 @@ type ShellOptions struct {
 }
 
 // OAuthSpec is how dun logs in to an OAuth- or OIDC-protected MCP server.
-// There is no dynamic client registration: the client is registered with the
-// identity provider by hand, with the redirect URI
-// http://127.0.0.1:<redirect_port>/oauth/callback, and named here.
+// A client registered with the identity provider by hand, with the redirect
+// URI http://127.0.0.1:<redirect_port>/oauth/callback, is named here; with
+// none, dun picks one (oauthauto.go).
 type OAuthSpec struct {
-	// ClientID is the registered client. Required.
+	// ClientID is the registered client. Empty: dun's client metadata URL
+	// where the server takes one, else a client dun registers (RFC 7591).
 	ClientID string `json:"client_id,omitempty"`
 	// ClientSecret makes it a confidential client; empty is a public one
 	// (PKCE only). "$NAME" or "${NAME}" is read from the environment, as
@@ -265,8 +266,6 @@ func checkOAuth(s ServerSpec, via string) error {
 	switch {
 	case s.URL == "":
 		return fmt.Errorf("oauth is for a remote server (a url), not a command")
-	case strings.TrimSpace(o.ClientID) == "":
-		return fmt.Errorf("oauth needs a client_id (dun does no dynamic client registration)")
 	case s.Bearer != "":
 		return fmt.Errorf("has both bearer and oauth — keep one")
 	case o.Send != "" && o.Send != SendAccessToken && o.Send != SendIDToken:

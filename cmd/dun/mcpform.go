@@ -77,7 +77,7 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 		mk("filled in from what you were given"),
 		mk("if you were given one"),
 		mk("NAME=value, if it needs any"),
-		mk("oauth client id (empty: none)"),
+		mk("oauth client id (empty: dun picks one)"),
 		mk("scopes (empty: what it asks for)"),
 		mk("issuer (empty: the server's)"),
 		mk("access_token or id_token"),
@@ -519,11 +519,13 @@ func envName(k string) bool {
 	return true
 }
 
-// mcpFormOAuth is the oauth block from the form's rows; nil without a client
-// id. Scopes split on spaces or commas.
+// mcpFormOAuth is the oauth block from the form's rows; nil when every row
+// is empty (a server that answers with an OAuth challenge still gets one,
+// AddServer). An empty client id is dun's choice (dun/oauthauto.go). Scopes
+// split on spaces or commas.
 func mcpFormOAuth(clientID, scopes, issuer, send string) *dun.OAuthSpec {
 	clientID = strings.TrimSpace(clientID)
-	if clientID == "" {
+	if clientID == "" && strings.TrimSpace(scopes+issuer+send) == "" {
 		return nil
 	}
 	o := &dun.OAuthSpec{ClientID: clientID, Issuer: strings.TrimSpace(issuer), Send: strings.TrimSpace(send)}
@@ -542,8 +544,8 @@ func (m tuiModel) mcpFormPanel() string {
 			continue
 		}
 		if i == mcpClient {
-			rows = append(rows, "  "+stDim.Render("oauth login (optional): a client id registered with the identity provider, redirect URI"),
-				"  "+stDim.Render("http://127.0.0.1:"+strconv.Itoa(dun.DefaultOAuthRedirectPort)+"/oauth/callback; secret, audience, resource and the rest go in mcp.json"))
+			rows = append(rows, "  "+stDim.Render("oauth login: empty, dun uses its own client where the server takes it, or registers one; else a client id"),
+				"  "+stDim.Render("registered by hand, redirect URI http://127.0.0.1:"+strconv.Itoa(dun.DefaultOAuthRedirectPort)+"/oauth/callback; secret, audience and the rest go in mcp.json"))
 		}
 		row := formRow(labels[i], i == m.mcpStep, f.View())
 		if i == mcpServer {

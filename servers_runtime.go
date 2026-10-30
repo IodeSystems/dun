@@ -1092,6 +1092,11 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 		return "", err
 	}
 	spec.Via = via
+	// A remote server with no credentials that answers with an OAuth
+	// challenge logs in with OAuth; dun picks the client (oauthauto.go).
+	if spec.OAuth == nil && wantsOAuth(ctx, spec) {
+		spec.OAuth = &OAuthSpec{}
+	}
 	if err := checkOAuth(spec, via); err != nil {
 		return "", err
 	}

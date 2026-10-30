@@ -77,7 +77,7 @@ func TestMCPForm_OAuthRows(t *testing.T) {
 		cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	tm := cur.(tuiModel)
-	if tm.mcpStep != mcpClient || !strings.Contains(stripANSI(tm.mcpFormPanel()), "oauth login (optional)") {
+	if tm.mcpStep != mcpClient || !strings.Contains(stripANSI(tm.mcpFormPanel()), "dun uses its own client") {
 		t.Fatalf("step %d:\n%s", tm.mcpStep, stripANSI(tm.mcpFormPanel()))
 	}
 	cur, _ = cur.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // empty client id: no rows after it

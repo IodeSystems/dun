@@ -3,6 +3,8 @@ package dun
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -144,5 +146,90 @@ func TestOAuthTokenHere(t *testing.T) {
 	retried, err := OAuthTokenHere(ctx, s, true, br.notify, nil)
 	if err != nil || retried == a || br.count() != 1 {
 		t.Errorf("retry: %q (was %q) %v, %d logins", retried, a, err, br.count())
+	}
+}
+
+// With no client_id, dun registers itself (RFC 7591) once and logs in as
+// that client; the next login reuses the registration.
+func TestOAuthAuto_RegistersOnce(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	w := newOAuthWorld(t)
+	w.dcr, w.clientID = true, "not-yet"
+	port := freePort(t)
+	b := &browser{}
+	c := newOAuthClient(Server{ID: "lin", URL: w.mcpURL(), OAuth: &OAuthSpec{RedirectPort: port}}, b.notify, nil)
+	ctx := context.Background()
+	if err := c.ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.registered) != 1 || w.authorizeQ[0].Get("client_id") != "reg-1" {
+		t.Fatalf("registered %v, authorize %v", w.registered, w.authorizeQ)
+	}
+	if r := w.registered[0]; r["token_endpoint_auth_method"] != "none" ||
+		fmt.Sprint(r["redirect_uris"]) != fmt.Sprintf("[http://127.0.0.1:%d/oauth/callback]", port) {
+		t.Errorf("registration: %v", r)
+	}
+	if a, _ := c.Authorization(ctx); a == "" {
+		t.Fatal("no token")
+	}
+	// A new client on the same files: the token is the registered client's.
+	c2 := newOAuthClient(Server{ID: "lin", URL: w.mcpURL(), OAuth: &OAuthSpec{RedirectPort: port}}, b.notify, nil)
+	if a, _ := c2.Authorization(ctx); a == "" || c2.clientID() != "reg-1" {
+		t.Errorf("a new client: %q as %q", a, c2.clientID())
+	}
+	if err := c2.Login(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.registered) != 1 {
+		t.Errorf("registered again: %d", len(w.registered))
+	}
+}
+
+// A server that takes a client URL gets dun's, with the default port.
+func TestOAuthAuto_MetadataDocument(t *testing.T) {
+	if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", DefaultOAuthRedirectPort)); err != nil {
+		t.Skipf("port %d is in use here", DefaultOAuthRedirectPort)
+	} else {
+		ln.Close()
+	}
+	t.Setenv("DUN_HOME", t.TempDir())
+	w := newOAuthWorld(t)
+	w.cimd, w.dcr, w.clientID = true, true, DunClientMetadataURL
+	b := &browser{}
+	c := newOAuthClient(Server{ID: "eleven", URL: w.mcpURL(), OAuth: &OAuthSpec{}}, b.notify, nil)
+	if err := c.ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if w.authorizeQ[0].Get("client_id") != DunClientMetadataURL || len(w.registered) != 0 {
+		t.Errorf("authorize %v, registered %v", w.authorizeQ[0], w.registered)
+	}
+}
+
+// Neither: the error says to set a client id, and the redirect URI.
+func TestOAuthAuto_NeitherAsksForAClientID(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	w := newOAuthWorld(t)
+	port := freePort(t)
+	c := newOAuthClient(Server{ID: "snow", URL: w.mcpURL(), OAuth: &OAuthSpec{RedirectPort: port}}, (&browser{}).notify, nil)
+	err := c.ensure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "set oauth.client_id") ||
+		!strings.Contains(err.Error(), fmt.Sprintf("http://127.0.0.1:%d/oauth/callback", port)) {
+		t.Errorf("err: %v", err)
+	}
+	if len(w.authorizeQ) != 0 {
+		t.Error("a login was opened")
+	}
+}
+
+// Adding a server that answers with an OAuth challenge gives it an oauth
+// block; dun then picks the client.
+func TestAddServer_DetectsOAuth(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	w := newOAuthWorld(t)
+	if !wantsOAuth(context.Background(), ServerSpec{ID: "snow", URL: w.mcpURL()}) {
+		t.Error("the challenge was not seen")
+	}
+	if wantsOAuth(context.Background(), ServerSpec{ID: "snow", URL: w.mcpURL(), Bearer: "x"}) {
+		t.Error("a server with a bearer is not an oauth one")
 	}
 }

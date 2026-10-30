@@ -101,12 +101,19 @@ and corporate tools behind a login gate.
   must cover the server URL, path prefix allowed; otherwise the login is
   refused, so one server cannot obtain a login meant for another) -> first
   authorization server -> its metadata.
-- **Client metadata document**: an authorization server that says
-  `client_id_metadata_document_supported` (ElevenLabs, with no registration
-  endpoint) takes a URL as the client id and fetches it. dun's is
-  `site/oauth/client.json`, served at
-  `https://dun.iodesystems.com/oauth/client.json`; its redirect URI is the
-  default port's. Set as `client_id`, it needs no registration.
+- **The client** (`oauthauto.go`; USER 2026-10-29: "auto-register dun, if
+  that doesn't work, we ask for clientId"). A `client_id` in the oauth block
+  is used as given. With none, in order: an authorization server that says
+  `client_id_metadata_document_supported` (ElevenLabs) gets dun's URL,
+  `https://dun.iodesystems.com/oauth/client.json` (`site/oauth/client.json`;
+  its redirect URI is the default port's, so only with that port); one with
+  a `registration_endpoint` gets a public client dun registers once (RFC
+  7591) and keeps in `$DUN_HOME/oauth/<id>.client.json`; neither, and the
+  login fails with the redirect URI to register and "set oauth.client_id".
+  `/mcp add` of a URL with no credentials that answers with a 401 Bearer
+  challenge naming `resource_metadata` gets an empty oauth block, so a
+  person types only the URL. Google has neither: its client is registered
+  by hand.
 - **Redirect**: a loopback listener on a fixed port (default 33418,
   `redirect_port`), `127.0.0.1:<port>/oauth/callback`, because the redirect is
   registered exactly. If the port is busy, another session is logging in and
