@@ -40,7 +40,7 @@ type lspLanguage struct {
 	} `json:"install"`
 	OffByDefault bool   `json:"offByDefault"`
 	FormatOnEdit bool   `json:"formatOnEdit"`
-	Child        string `json:"child"` // running | stopped | down, when the root has state
+	Child        string `json:"child"` // running | stopped | down; absent until the language is used on an open root
 }
 
 // lspCLITimeout bounds one `lsp list|add|remove`.
@@ -151,8 +151,13 @@ func lspItem(l lspLanguage) SwitchItem {
 	if l.FormatOnEdit {
 		src += " · format on edit"
 	}
-	if l.Child != "" {
+	// The child's state comes from a running poly-lsp that has this root
+	// open, and only once the language was used: none is "not started".
+	switch {
+	case l.Child != "":
 		src += " · " + l.Child
+	case l.LSP.Found:
+		src += " · not started"
 	}
 	exts := make([]string, len(l.Extensions))
 	for i, e := range l.Extensions {

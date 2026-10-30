@@ -17,7 +17,7 @@ func fakeLSPList(t *testing.T, calls *[][]string) {
 			return []byte("added zig\n"), nil
 		}
 		return []byte(`{"languages":[
-			{"name":"go","extensions":["go"],"source":"builtin","lsp":{"name":"gopls","found":true,"path":"/bin/gopls"}},
+			{"name":"go","extensions":["go"],"source":"builtin","lsp":{"name":"gopls","found":true,"path":"/bin/gopls"},"child":"running"},
 			{"name":"python","extensions":["py"],"source":"builtin","lsp":{"name":"pylsp","found":false},"install":{"cmd":"pipx install python-lsp-server"}},
 			{"name":"java","extensions":["java"],"source":"user","lsp":{"name":"jdtls","found":true},"offByDefault":true,"formatOnEdit":true}
 		]}`), nil
@@ -59,10 +59,16 @@ func TestLSPKind_TableAndFlags(t *testing.T) {
 	if !byName["go"].On || !byName["python"].On || byName["java"].On {
 		t.Errorf("defaults: %+v", v.Items)
 	}
+	if s := byName["go"].Source; s != "builtin · running" {
+		t.Errorf("go source: %q", s)
+	}
+	if s := byName["python"].Source; s != "builtin" {
+		t.Errorf("python source (not installed, so no child state): %q", s)
+	}
 	if d := byName["python"].Description; !strings.Contains(d, "not installed (pipx install python-lsp-server)") || !strings.Contains(d, ".py") {
 		t.Errorf("python row: %q", d)
 	}
-	if s := byName["java"].Source; s != "user · off by default · format on edit" {
+	if s := byName["java"].Source; s != "user · off by default · format on edit · not started" {
 		t.Errorf("java source: %q", s)
 	}
 
