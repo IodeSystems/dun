@@ -28,8 +28,13 @@ var Supported = []Tool{
 	// (5ca5898, 2026-10-27), tarballs in deps.json: built -tags release, so
 	// dun doctor calls it a release (v0.6.0's said "built from a checkout");
 	// typeof of an undeclared name is "undefined"; golang.org/x/net v0.62.0.
+	// Recommended v0.7.0 (d14b745, 2026-10-29), tarballs in deps.json: on
+	// the 401 re-run only, auth_cmd gets MCPSHELL_AUTH_RETRY=1 and
+	// MCPSHELL_AUTH_REJECTED=<the refused token>, which `dun oauth token`
+	// reads so dund refreshes a refused token (oauthbroker.go); regexp2
+	// v2.12.0.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.6.1"},
+		Min: "v0.2.0", Recommended: "v0.7.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first

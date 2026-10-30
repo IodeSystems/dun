@@ -161,7 +161,7 @@ and corporate tools behind a login gate.
   bearer. mcpshell runs it at first use, 60 s before a JWT expires, and after
   a 401; `dun oauth token` asks dund over its socket (`oauth` command), or,
   with no dund, refreshes from the token file itself. On the 401 retry
-  mcpshell (d14b745, planned v0.7.0) sets `MCPSHELL_AUTH_RETRY=1` and
+  mcpshell (v0.7.0) sets `MCPSHELL_AUTH_RETRY=1` and
   `MCPSHELL_AUTH_REJECTED`; without them an opaque token refused before its
   expiry is handed back unchanged. Each hosted OAuth server is logged in
   before the shell starts, since mcpshell gives auth_cmd 30 s.
