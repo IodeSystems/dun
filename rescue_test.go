@@ -30,10 +30,12 @@ type summaryRunner struct {
 	t        *testing.T
 	calls    int
 	lastUser string
+	lastOpts *llm.ChatOpts
 }
 
-func (r *summaryRunner) ChatStream(ctx context.Context, msgs []llm.Message, _ []llm.ToolDef, _ *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+func (r *summaryRunner) ChatStream(ctx context.Context, msgs []llm.Message, _ []llm.ToolDef, opts *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
 	r.calls++
+	r.lastOpts = opts
 	for i, m := range msgs {
 		if m.Role == "user" {
 			r.lastUser = m.Content

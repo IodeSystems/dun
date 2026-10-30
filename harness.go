@@ -1484,6 +1484,10 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// Stub the older copy of a read made again — once, just before a fold,
 		// when the prefix is rewritten anyway. See rehead.go.
 		Rehead: h.rehead,
+		// A fold thinks nothing and is told the session's state and what is
+		// in flight; its summary is sized by agentkit to the fold (fold.go).
+		SummaryOpts: foldOpts(),
+		TaskFunc:    h.foldTask,
 	}
 	// A sub-agent's first user message IS its task (the parent's brief), so it
 	// must survive folds. Not for a root session: its first message may be

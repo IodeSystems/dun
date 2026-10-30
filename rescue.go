@@ -160,7 +160,17 @@ func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error)
 		return 0, nil
 	}
 
-	summary, err := h.summarizeRescue(ctx, older)
+	// The handoff is sized to what it folds and what stays beside it, like
+	// agentkit's own folds (fold.go).
+	folded, whole := 0, 0
+	for _, e := range entries {
+		whole += h.meter.Estimate(e.Content)
+	}
+	for _, e := range older {
+		folded += h.meter.Estimate(e.Content)
+	}
+	budget := agent.DefaultSummaryTokens(folded, max(whole-folded, 0), h.windowTokens())
+	summary, err := h.summarizeRescue(ctx, older, budget)
 	if err != nil {
 		return 0, fmt.Errorf("summarize: %w", err)
 	}
@@ -202,15 +212,23 @@ func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error)
 // that loses what the user is still waiting for (open asks) or where the work
 // actually stands (what is done, and what WOULD have been done next had there
 // been room) produces a session that confidently goes in the wrong direction.
-func (h *Harness) summarizeRescue(ctx context.Context, older []agent.Entry) (string, error) {
+//
+// budget is the handoff's size in tokens (agent.DefaultSummaryTokens); the
+// completion is capped to match and thinks nothing (fold.go).
+func (h *Harness) summarizeRescue(ctx context.Context, older []agent.Entry, budget int) (string, error) {
 	var b strings.Builder
-	b.WriteString("The conversation below is being compacted because it no longer fits this endpoint's context window. " +
-		"Write a state handoff in <= 800 tokens that lets the agent CONTINUE without re-reading it. It must contain:\n" +
-		"1. OPEN ASKS — every user request that has not yet been fully satisfied, verbatim where short.\n" +
-		"2. STATE OF WORK — what is done and verified (files changed, commands run, tests passing/failing), with the specifics: paths, names, values.\n" +
-		"3. NEXT STEPS — the work that would have been done next had there been enough context: the concrete plan, in order.\n" +
-		"4. DECISIONS & CONSTRAINTS — choices made and why, plus anything the user forbade or required.\n" +
-		"Drop tool-call payloads; keep only what they established. Output the handoff only — no preamble.\n\n")
+	if task := h.foldTask(); task != "" {
+		b.WriteString("The session these events belong to has this task:\n<task>\n" + task + "\n</task>\n\n")
+	}
+	fmt.Fprintf(&b, "The conversation below is being compacted because it no longer fits this endpoint's context window. "+
+		"Write a state handoff in about %d tokens, no more, that lets the agent CONTINUE without re-reading it. It must contain:\n"+
+		"1. OPEN ASKS — every user request that has not yet been fully satisfied, verbatim where short.\n"+
+		"2. STATE OF WORK — what is done and verified (files changed, commands run, tests passing/failing), with the specifics: paths, names, values.\n"+
+		"3. IN FLIGHT — what was started and not finished: agents and jobs still running and what each was asked, changes not yet committed.\n"+
+		"4. DISCOVERIES — facts learned, causes found, approaches tried and ruled out, and why.\n"+
+		"5. NEXT STEPS — the work that would have been done next had there been enough context: the concrete plan, in order.\n"+
+		"6. DECISIONS & CONSTRAINTS — choices made and why, plus anything the user forbade or required.\n"+
+		"Drop tool-call payloads; keep only what they established. Output the handoff only — no preamble.\n\n", budget)
 	for i, e := range older {
 		label := string(e.Kind)
 		if e.Tag != "" {
@@ -224,10 +242,12 @@ func (h *Harness) summarizeRescue(ctx context.Context, older []agent.Entry) (str
 	}
 
 	start := time.Now()
+	opts := foldOpts()
+	opts.MaxTokens = agent.SummaryCap(budget)
 	ch, err := h.client.ChatStream(ctx, []llm.Message{
 		{Role: "system", Content: "You are a compaction worker. Produce the state handoff only."},
 		{Role: "user", Content: b.String()},
-	}, nil, nil)
+	}, nil, opts)
 	if err != nil {
 		return "", err
 	}
