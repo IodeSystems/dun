@@ -1,6 +1,9 @@
 package dun
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
@@ -44,3 +47,33 @@ func TestEffort(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// corrallm states what a request that sends no thinking settings gets
+// (thinking_* beside context_length); /effort default says it, and says
+// "the server decides" when the list does not (USER 2026-10-30).
+func TestServerThinking_DefaultInWords(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"data":[{"id":"chat","context_length":86016,"thinking_default":"on","thinking_modes":["off","on"],
+			"thinking_effort":"medium","thinking_budget":{"fraction_of_remaining":0.2,"min":2048,"max":8192}},
+			{"id":"quiet","thinking_default":"off"},{"id":"fw","context_length":1048576}]}`))
+	}))
+	defer srv.Close()
+	for model, want := range map[string]string{
+		"chat":  "nothing sent: the server thinks at medium, up to 20% of what is left (2k–8k tokens)",
+		"quiet": "nothing sent: the server does not think",
+		"fw":    EffortAbout[EffortDefault],
+	} {
+		h := &Harness{cfg: Config{Endpoint: Endpoint{URL: srv.URL + "/v1", Model: model}}}
+		h.LearnServerThinking(context.Background())
+		if got := h.EffortWords(EffortDefault); got != want {
+			t.Errorf("%s: %q, want %q", model, got, want)
+		}
+		if got := h.EffortWords(EffortHigh); got != EffortAbout[EffortHigh] {
+			t.Errorf("%s: high is %q", model, got)
+		}
+	}
+}

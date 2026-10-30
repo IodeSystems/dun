@@ -567,6 +567,9 @@ type Harness struct {
 	reloads atomic.Int32
 	// effort is /effort's level (effort.go), applied on every request.
 	effort atomic.Value
+	// thinking is what the server's model list says /effort default does
+	// (effort.go); nil until it says.
+	thinking atomic.Pointer[ServerThinking]
 	// windowSrc is where the window in force came from (window.go).
 	windowSrc string
 	closed    chan struct{}

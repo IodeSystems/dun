@@ -96,7 +96,11 @@ func (m tuiModel) statusSections(w int) []statusSection {
 	}
 	for i, s := range out {
 		if s.label == "model" {
-			row := statusSection{label: "effort", value: eff + stDim.Render(" · "+dun.EffortAbout[eff]+" · /effort")}
+			words := m.effortWords
+			if words == "" {
+				words = dun.EffortAbout[eff]
+			}
+			row := statusSection{label: "effort", value: eff + stDim.Render(" · "+words+" · /effort")}
 			out = append(out[:i+1], append([]statusSection{row}, out[i+1:]...)...)
 			break
 		}

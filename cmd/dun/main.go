@@ -993,6 +993,18 @@ func main() {
 		em.emit(sp)
 	}
 
+	// What /effort default does on this server, when its model list says
+	// (corrallm's thinking_* fields): the settings and the command list
+	// again once it is known.
+	if *prog && providerMissing(*url, *model) == nil {
+		go func() {
+			if h.LearnServerThinking(ctx) {
+				em.emit(settingsEvent())
+				em.emit(commandsEvent(h))
+			}
+		}()
+	}
+
 	// The key's budget: read at start, every few minutes and after a turn, on
 	// its own goroutine — never on the turn path. An endpoint with none stops
 	// the poller after one probe per documented path.
@@ -1491,13 +1503,13 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// /effort: bare says the level; a level is set, saved, and applies
 		// from the next request (dun/effort.go).
 		if id == "effort" {
-			msg := "effort: " + h.Effort() + " — " + dun.EffortAbout[h.Effort()]
+			msg := "effort: " + h.Effort() + " — " + h.EffortWords(h.Effort())
 			if action != "" {
 				if err := h.SetEffort(action); err != nil {
 					msg = "effort: " + err.Error()
 				} else {
 					effortLevel = h.Effort()
-					msg = "effort: " + effortLevel + " — " + dun.EffortAbout[effortLevel] + " (saved; from the next request)"
+					msg = "effort: " + effortLevel + " — " + h.EffortWords(effortLevel) + " (saved; from the next request)"
 					h.Aside("[control/effort] " + msg)
 				}
 			}
@@ -2218,10 +2230,20 @@ var effortLevel = dun.LoadEffort()
 // the settings event. Set once at start.
 var engineModel, engineURL, engineProvider string
 
+// effortWords is an effort level in words: for default, what this
+// engine's server does when its model list says (dun.Harness.EffortWords).
+func effortWords(level string) string {
+	if h, _ := engineHarness.Load().(*dun.Harness); h != nil {
+		return h.EffortWords(level)
+	}
+	return dun.EffortAbout[level]
+}
+
 // settingsEvent is the session's shared toggles.
 func settingsEvent() *proto.Settings {
 	ev := &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
 		Rephrase: rephraseOn, Suggest: suggestMode, Effort: effortLevel}
+	ev.EffortWords = effortWords(effortLevel)
 	if h, _ := engineHarness.Load().(*dun.Harness); h != nil {
 		max, from, buf, lod, nudge := h.ContextSettings()
 		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge}

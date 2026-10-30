@@ -1,6 +1,7 @@
 package dun
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -116,4 +117,94 @@ func applyEffort(opts *llm.ChatOpts, level string) {
 			opts.ReasoningBudgetTokens = &n
 		}
 	}
+}
+
+// ServerThinking is what the model list says the session's model does when
+// a request sends no thinking settings: corrallm's thinking_* fields beside
+// context_length (USER 2026-10-30: report the default effort). Each is
+// absent when the server does not know; Default "" is "not stated".
+type ServerThinking struct {
+	Default string   `json:"thinking_default"` // on | off
+	Modes   []string `json:"thinking_modes"`
+	Effort  string   `json:"thinking_effort"`
+	// Budget applies to a thinking request that sends no budget.
+	Budget *struct {
+		Fraction float64 `json:"fraction_of_remaining"`
+		Min      int     `json:"min"`
+		Max      int     `json:"max"`
+	} `json:"thinking_budget"`
+}
+
+// listedThinking is e's model's entry's thinking fields in /models.
+func listedThinking(ctx context.Context, e Endpoint) (ServerThinking, bool) {
+	if e.URL == "" || e.Model == "" {
+		return ServerThinking{}, false
+	}
+	var models struct {
+		Data []struct {
+			ID string `json:"id"`
+			ServerThinking
+		} `json:"data"`
+	}
+	if !getListed(ctx, e, strings.TrimRight(e.URL, "/")+"/models", &models) {
+		return ServerThinking{}, false
+	}
+	for _, m := range models.Data {
+		if m.ID == e.Model {
+			t := m.ServerThinking
+			return t, t.Default != "" || t.Effort != "" || t.Budget != nil
+		}
+	}
+	return ServerThinking{}, false
+}
+
+// LearnServerThinking asks the model list what the default effort does;
+// it reports whether the server said. Off the turn path: one GET.
+func (h *Harness) LearnServerThinking(ctx context.Context) bool {
+	cctx, cancel := context.WithTimeout(ctx, contextWindowTimeout)
+	defer cancel()
+	t, ok := listedThinking(cctx, h.cfg.Endpoint)
+	if ok {
+		h.thinking.Store(&t)
+	}
+	return ok
+}
+
+// EffortWords is level in words; for default, what the server does when
+// its model list says (else EffortAbout's "the server decides").
+func (h *Harness) EffortWords(level string) string {
+	if t := h.thinking.Load(); level == EffortDefault && t != nil {
+		return t.words()
+	}
+	return EffortAbout[level]
+}
+
+// words is the server's default, e.g. "nothing sent: the server thinks at
+// medium, up to 20% of what is left (2k–8k tokens)".
+func (t ServerThinking) words() string {
+	switch t.Default {
+	case "off":
+		return "nothing sent: the server does not think"
+	case "":
+		return EffortAbout[EffortDefault]
+	}
+	w := "nothing sent: the server thinks"
+	if t.Effort != "" {
+		w += " at " + t.Effort
+	}
+	if b := t.Budget; b != nil && b.Fraction > 0 {
+		w += fmt.Sprintf(", up to %d%% of what is left", int(b.Fraction*100+0.5))
+		if b.Min > 0 && b.Max > 0 {
+			w += fmt.Sprintf(" (%s–%s tokens)", tokK(b.Min), tokK(b.Max))
+		}
+	}
+	return w
+}
+
+// tokK is a token count the way the levels say it: 2048 is "2k".
+func tokK(n int) string {
+	if n >= 1024 && n%1024 == 0 {
+		return fmt.Sprintf("%dk", n/1024)
+	}
+	return fmt.Sprint(n)
 }

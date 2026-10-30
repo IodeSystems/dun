@@ -200,7 +200,7 @@ func ownCommands(iso string) []proto.CommandSpec {
 				"view", "one task's events: inputs, tool calls, recaps, notes", "write", "the model writes a closed task's account to a file"),
 			Description: "this session's tasks: alone, the tree with times and outcomes"},
 		{Name: "effort", Usage: "[default|off|low|medium|high]", Group: "session",
-			Choices: choices(dun.EffortDefault, dun.EffortAbout[dun.EffortDefault], dun.EffortOff, dun.EffortAbout[dun.EffortOff],
+			Choices: choices(dun.EffortDefault, effortWords(dun.EffortDefault), dun.EffortOff, dun.EffortAbout[dun.EffortOff],
 				dun.EffortLow, dun.EffortAbout[dun.EffortLow], dun.EffortMedium, dun.EffortAbout[dun.EffortMedium],
 				dun.EffortHigh, dun.EffortAbout[dun.EffortHigh]),
 			State: effortLevel, Description: "how much the model thinks before it answers: alone picks a level; saved for every session"},

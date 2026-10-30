@@ -747,6 +747,7 @@ type tuiModel struct {
 	extWant      bool           // /ext asked for the list (extview.go)
 	ctxSettings  map[string]any // /context config's settings in force, from the settings event
 	effort       string         // /effort's level, from the settings event
+	effortWords  string         // what that level does, from the settings event (the server's default, when it says)
 	jobViewing   bool           // a job's view has the convo pane (jobview.go; owns the keys)
 	jv           jobView        // the job view (valid while jobViewing)
 	jvGen        int            // which opening of the job view its read timer belongs to
@@ -3114,7 +3115,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		if c, ok := ev["context"].(map[string]any); ok {
 			m.ctxSettings = c
 		}
-		m.effort = str(ev["effort"])
+		m.effort, m.effortWords = str(ev["effort"]), str(ev["effortWords"])
 		if p := str(ev["provider"]); p != "" {
 			m.provider = p
 		}

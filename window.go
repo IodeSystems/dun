@@ -125,6 +125,27 @@ func recapNudgeAt() int {
 
 var windowHTTP = &http.Client{Timeout: contextWindowTimeout}
 
+// getListed reads one of e's model-list endpoints into v.
+func getListed(ctx context.Context, e Endpoint, u string, v any) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return false
+	}
+	if e.Key != "" {
+		req.Header.Set("Authorization", "Bearer "+e.Key)
+	}
+	resp, err := windowHTTP.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	return err == nil && json.Unmarshal(b, v) == nil
+}
+
 // listedWindow is the window e's model list states for its model: the
 // OpenAI-style /models (OpenRouter, vLLM), else LiteLLM's /model/info.
 func listedWindow(ctx context.Context, e Endpoint) int {
@@ -132,25 +153,7 @@ func listedWindow(ctx context.Context, e Endpoint) int {
 		return 0
 	}
 	base := strings.TrimRight(e.URL, "/")
-	get := func(u string, v any) bool {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		if err != nil {
-			return false
-		}
-		if e.Key != "" {
-			req.Header.Set("Authorization", "Bearer "+e.Key)
-		}
-		resp, err := windowHTTP.Do(req)
-		if err != nil {
-			return false
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return false
-		}
-		b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-		return err == nil && json.Unmarshal(b, v) == nil
-	}
+	get := func(u string, v any) bool { return getListed(ctx, e, u, v) }
 	var models struct {
 		Data []struct {
 			ID            string `json:"id"`

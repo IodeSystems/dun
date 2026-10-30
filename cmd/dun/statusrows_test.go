@@ -30,3 +30,15 @@ func TestStatus_EffortAndScriptedServers(t *testing.T) {
 		}
 	}
 }
+
+// /status says what effort default does on this server when the engine
+// learned it (the settings event's effortWords).
+func TestStatus_EffortDefaultFromTheServer(t *testing.T) {
+	m := buildModel(2, 2)
+	m = m.handleEvent(evMsg{"type": "settings", "model": "chat", "url": "https://llm/v1", "effort": "default",
+		"effortWords": "nothing sent: the server thinks at medium"})
+	m.statusSlash()
+	if s := stripANSI(m.convo[len(m.convo)-1].collapsed); !strings.Contains(s, "effort      default · nothing sent: the server thinks at medium · /effort") {
+		t.Errorf("/status:\n%s", s)
+	}
+}

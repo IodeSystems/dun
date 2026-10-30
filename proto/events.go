@@ -707,8 +707,10 @@ type Settings struct {
 	Suggest  string `json:"suggest"` // on | off | auto
 	// Context is /context config's settings in force.
 	Context *ContextSettings `json:"context,omitempty"`
-	// Effort is /effort's level.
-	Effort string `json:"effort,omitempty"`
+	// Effort is /effort's level; EffortWords says what it does (for
+	// default, what the server does when its model list says).
+	Effort      string `json:"effort,omitempty"`
+	EffortWords string `json:"effortWords,omitempty"`
 }
 
 // ContextSettings is /context config's settings in force: the window (0
