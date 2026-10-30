@@ -71,6 +71,18 @@ type agentRow struct {
 	model   string
 	tokens  int
 	seconds int
+	// at is when the engine said seconds. It pushes agents on a change, not
+	// every second, so a running child's time is counted on from there, as a
+	// job's is (jobRow).
+	at time.Time
+}
+
+// elapsed is the child's run time, counted to now while it runs.
+func (a agentRow) elapsed(now time.Time) int {
+	if a.state != "running" || a.at.IsZero() || now.Before(a.at) {
+		return a.seconds
+	}
+	return a.seconds + int(now.Sub(a.at)/time.Second)
 }
 
 // jobRow is one background job as the TUI shows it. Times are UNIX SECONDS
@@ -92,6 +104,7 @@ type jobRow struct {
 func agentRowsFromEvent(ev evMsg) []agentRow {
 	raw, _ := ev["agents"].([]any)
 	out := make([]agentRow, 0, len(raw))
+	at := time.Now()
 	for _, r := range raw {
 		m, ok := r.(map[string]any)
 		if !ok {
@@ -100,7 +113,7 @@ func agentRowsFromEvent(ev evMsg) []agentRow {
 		out = append(out, agentRow{
 			id: num(m["id"]), state: str(m["state"]), status: str(m["status"]),
 			prompt: str(m["prompt"]), model: str(m["model"]),
-			tokens: num(m["tokens"]), seconds: num(m["seconds"]),
+			tokens: num(m["tokens"]), seconds: num(m["seconds"]), at: at,
 		})
 	}
 	return out
@@ -160,7 +173,7 @@ func (m tuiModel) actRows() []actRow {
 	now := time.Now()
 	rows := make([]actRow, 0, len(m.agents)+len(m.jobs))
 	for _, a := range m.agents {
-		rows = append(rows, agentActRow(a))
+		rows = append(rows, agentActRow(a, now))
 	}
 	for _, j := range m.jobs {
 		rows = append(rows, jobActRow(j, now))
@@ -168,7 +181,7 @@ func (m tuiModel) actRows() []actRow {
 	return rows
 }
 
-func agentActRow(a agentRow) actRow {
+func agentActRow(a agentRow, now time.Time) actRow {
 	mark, style := "·", stDim
 	switch {
 	case a.state == "running":
@@ -179,8 +192,8 @@ func agentActRow(a agentRow) actRow {
 		mark = "⏸"
 	}
 	label := fmt.Sprintf("#%d %s", a.id, a.state)
-	if a.seconds > 0 {
-		label += " " + compactDur(a.seconds)
+	if s := a.elapsed(now); s > 0 {
+		label += " " + compactDur(s)
 	}
 	if a.tokens > 0 {
 		label += " " + compactTokens(a.tokens)
@@ -747,7 +760,7 @@ func (m tuiModel) scopeHeader() string {
 	}
 	style, task := stNote, m.task
 	if a != nil {
-		style = agentActRow(*a).style
+		style = agentActRow(*a, time.Now()).style
 		task = a.prompt
 	}
 	budget := m.w - 1
