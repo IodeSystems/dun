@@ -376,6 +376,16 @@ func (s *session) send(c proto.Command) error {
 	return s.write(c)
 }
 
+// sendIfRunning writes a command to a running engine and starts none.
+func (s *session) sendIfRunning(c proto.Command) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.eng == nil || !s.running {
+		return errors.New("engine not running")
+	}
+	return s.write(c)
+}
+
 // write puts one command on the engine's stdin. Called with mu held and an
 // engine attached.
 func (s *session) write(c proto.Command) error {

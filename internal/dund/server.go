@@ -168,6 +168,10 @@ type conn struct {
 	mu    sync.Mutex
 	subs  map[string]*proto.Subscription // by session id
 	build string                         // the client's, from its Hello
+	// views are the sub-agent views this connection opened and has not
+	// left, by session then agent id: a client that goes without "leave"
+	// would otherwise keep the engine streaming that child's entries.
+	views map[string]map[string]int
 }
 
 func (c *conn) close() {
@@ -179,7 +183,12 @@ func (c *conn) close() {
 			sub.Close()
 		}
 		c.subs = map[string]*proto.Subscription{}
+		views := c.views
+		c.views = nil
 		c.mu.Unlock()
+		for ses := range views {
+			c.leaveViews(ses, views[ses])
+		}
 		c.srv.mu.Lock()
 		delete(c.srv.conns, c)
 		c.srv.mu.Unlock()
@@ -360,7 +369,10 @@ func (c *conn) handle(cmd proto.Command) {
 			sub.Close()
 			delete(c.subs, cmd.Session)
 		}
+		views := c.views[cmd.Session]
+		delete(c.views, cmd.Session)
 		c.mu.Unlock()
+		c.leaveViews(cmd.Session, views)
 		go func() { c.ack(cmd, cmd.Session, svc.Leave(c.who, cmd.Session)) }()
 	default:
 		// Anything else is for the session's engine.
@@ -372,7 +384,50 @@ func (c *conn) handle(cmd proto.Command) {
 		if err == nil {
 			err = ses.send(cmd)
 		}
+		if a, ok := p.(*proto.AgentCmd); ok && err == nil {
+			c.countView(cmd.Session, a)
+		}
 		c.ack(cmd, cmd.Session, err)
+	}
+}
+
+// countView keeps the connection's open sub-agent views: a view opens one,
+// a leave closes one.
+func (c *conn) countView(session string, a *proto.AgentCmd) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch a.Action {
+	case "view":
+		if c.views == nil {
+			c.views = map[string]map[string]int{}
+		}
+		if c.views[session] == nil {
+			c.views[session] = map[string]int{}
+		}
+		c.views[session][a.ID]++
+	case "leave":
+		if n := c.views[session][a.ID]; n > 1 {
+			c.views[session][a.ID] = n - 1
+		} else {
+			delete(c.views[session], a.ID)
+		}
+	}
+}
+
+// leaveViews sends the leaves a departed client did not, to a running
+// engine only: a stopped one has no watchers left to drop.
+func (c *conn) leaveViews(session string, views map[string]int) {
+	if len(views) == 0 {
+		return
+	}
+	ses, err := c.srv.svc.Get(c.who, session)
+	if err != nil {
+		return
+	}
+	for id, n := range views {
+		for range n {
+			_ = ses.sendIfRunning(proto.NewCommand("", &proto.AgentCmd{ID: id, Action: "leave"}))
+		}
 	}
 }
 

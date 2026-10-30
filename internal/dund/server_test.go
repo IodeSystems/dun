@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -238,4 +239,49 @@ func TestResumeWithALongBacklog(t *testing.T) {
 	// Still connected: a command is answered.
 	c.send("l", "", &proto.ListSessions{})
 	c.until(typed("sessions"))
+}
+
+// A client that goes while viewing a sub-agent never sends "leave", and the
+// engine went on streaming that child's entries to nobody. dund sends the
+// leaves the connection still owed; ones it sent itself are not repeated.
+func TestServerLeavesTheViewsOfAClientThatWent(t *testing.T) {
+	svc, sp, _ := newSvc(t)
+	sock := filepath.Join(t.TempDir(), "dund.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go NewServer(svc, UnixPeer).Serve(ln)
+
+	a := dial(t, sock)
+	a.send("c1", "", &proto.Create{Workspace: t.TempDir()})
+	id := a.until(ackOf("c1")).Session
+	a.send("c2", id, &proto.Subscribe{})
+	a.until(ackOf("c2"))
+	for i, act := range []struct{ action, agent string }{{"view", "1"}, {"leave", "1"}, {"view", "2"}} {
+		cid := "v" + strconv.Itoa(i)
+		a.send(cid, id, &proto.AgentCmd{ID: act.agent, Action: act.action})
+		a.until(ackOf(cid))
+	}
+	a.c.Close()
+
+	want := []string{"agent " + id + ": view 1", "agent " + id + ": leave 1", "agent " + id + ": view 2", "agent " + id + ": leave 2"}
+	deadline := time.Now().Add(5 * time.Second)
+	var got []string
+	for time.Now().Before(deadline) {
+		got = got[:0]
+		for _, r := range sp.received() {
+			if strings.HasPrefix(r, "agent ") {
+				got = append(got, r)
+			}
+		}
+		if len(got) >= len(want) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("the engine received %q, want %q", got, want)
+	}
 }

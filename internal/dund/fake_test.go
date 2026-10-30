@@ -134,6 +134,8 @@ func (e *fakeEngine) run(id string) {
 			e.emit(enc, &proto.Done{})
 		case *proto.PeerMsg:
 			e.sp.record(fmt.Sprintf("peer %s: from %s (%s) wake=%v: %s", id, p.FromName, p.From, p.Wake, p.Text))
+		case *proto.AgentCmd:
+			e.sp.record("agent " + id + ": " + p.Action + " " + p.ID)
 		case *proto.ServersChanged:
 			e.sp.record("servers " + id)
 		case *proto.ServiceNotice:
