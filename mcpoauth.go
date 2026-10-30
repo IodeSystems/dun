@@ -146,8 +146,8 @@ type oauthClient struct {
 	deadRefresh string
 	// auto is the client dun chose when the spec names none (oauthauto.go):
 	// its URL, or a registration.
-	auto autoClient
-	lastLogin   time.Time
+	auto      autoClient
+	lastLogin time.Time
 
 	loginMu   sync.Mutex  // one interactive login at a time
 	loggingIn atomic.Bool // a login is waiting on the person
