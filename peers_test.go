@@ -54,7 +54,7 @@ func TestPeerTools_OnlyForARootWithALink(t *testing.T) {
 	// A sub-agent never gets them: the link is the root's.
 	parent := testHarness(t)
 	parent.cfg.Peers = &fakePeers{}
-	if childConfig(parent, 1, "", nil, isolation{}).Peers != nil {
+	if childConfig(parent, 1, childRun{}, isolation{}).Peers != nil {
 		t.Error("a child inherits the peer link")
 	}
 }

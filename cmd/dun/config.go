@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -15,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun"
 )
 
 // Config — persisted LLM settings so you don't re-pass --url/--model/--key every
@@ -72,11 +73,14 @@ var reasoningDialects = []string{llm.DialectOpenAI, llm.DialectOpenRouter, llm.D
 
 // reasoningDialect is how the endpoint at url is asked to think:
 // DUN_REASONING, else the active provider's "reasoning" when it is that
-// endpoint, else the config's; "" detects it.
+// endpoint, else the saved provider's at url, else the config's; "" detects
+// it.
 func reasoningDialect(fc dunConfig, url string) (string, error) {
 	d := os.Getenv("DUN_REASONING")
 	if d == "" {
 		if p, ok := fc.active(); ok && strings.TrimRight(p.URL, "/") == strings.TrimRight(url, "/") {
+			d = p.Reasoning
+		} else if p, ok := fc.providerAt(url); ok {
 			d = p.Reasoning
 		}
 	}
@@ -534,8 +538,11 @@ func decodeModels(resp *http.Response) []string {
 	return ids
 }
 
-// clientCache builds LLM runners by model name, one per model, for the lifetime
-// of the process.
+// clientCache builds LLM runners by provider and model name, one per model on
+// each endpoint, for the lifetime of the process. Provider "" is the session's
+// own (url, key); another is a logged-in provider by name, so a session on the
+// Claude API can run its children on a smaller model elsewhere (USER
+// 2026-10-30).
 //
 // Cached rather than constructed per call because a client owns a retry policy
 // and its backpressure state: two clients on the same model would each think
@@ -544,25 +551,71 @@ func decodeModels(resp *http.Response) []string {
 // client, which is also why there is no concurrency cap on sub-agents — the
 // client is where the queueing actually happens.
 //
-// usageFor(model) is set on each client as it is built, before anyone can use
-// it — so a sub-agent's spend reaches the same meter as the parent's, and the
-// ledger line names the model it ran on (dun/spend.go, dun/ledger.go).
-func clientCache(url, key string, usageFor func(model string) func(llm.Usage)) func(string) (agent.LLMRunner, error) {
+// tune and usageFor are applied to each client as it is built, before anyone
+// can use it — so a child is asked to think in its endpoint's dialect, with the
+// configured retries, and its spend reaches the same meter as the parent's, the
+// ledger line naming the provider and model it ran on (dun/spend.go,
+// dun/ledger.go).
+func clientCache(fc dunConfig, url, key string, tune func(c *llm.Client, url string), usageFor func(url, key, model string) func(llm.Usage)) func(provider, model string) (dun.ChildClient, error) {
 	var mu sync.Mutex
-	cache := map[string]agent.LLMRunner{}
-	return func(model string) (agent.LLMRunner, error) {
+	cache := map[string]dun.ChildClient{}
+	return func(provider, model string) (dun.ChildClient, error) {
 		if strings.TrimSpace(model) == "" {
-			return nil, fmt.Errorf("no model named")
+			return dun.ChildClient{}, fmt.Errorf("no model named")
 		}
+		u, k := url, key
+		if provider != "" {
+			p, ok := fc.named(provider)
+			if !ok {
+				var names []string
+				for _, p := range fc.providerList() {
+					names = append(names, p.Name)
+				}
+				return dun.ChildClient{}, fmt.Errorf("provider %q is not logged in (logged in: %s)", provider, strings.Join(names, ", "))
+			}
+			u, k = p.URL, p.Key
+		}
+		id := strings.TrimRight(u, "/") + "\x00" + model
 		mu.Lock()
 		defer mu.Unlock()
-		if c, ok := cache[model]; ok {
+		if c, ok := cache[id]; ok {
 			return c, nil
 		}
-		c := llm.NewClient(url, key, model)
-		c.OnUsage = usageFor(model)
-		cache[model] = c
-		return c, nil
+		c := llm.NewClient(u, k, model)
+		if tune != nil {
+			tune(c, u)
+		}
+		c.OnUsage = usageFor(u, k, model)
+		cc := dun.ChildClient{Runner: c, Endpoint: dun.Endpoint{URL: u, Key: k, Model: model}}
+		cache[id] = cc
+		return cc, nil
+	}
+}
+
+// tuneClient sets what the config says about a client on url: how it is asked
+// to think (/effort) and its retries.
+func tuneClient(fc dunConfig, c *llm.Client, url string) {
+	// How /effort's level reaches the model (agentkit's reasoning dialects):
+	// a LiteLLM proxy in front of OpenRouter names neither in its address.
+	if d, err := reasoningDialect(fc, url); err != nil {
+		log.Printf("dun: %v; detecting it", err)
+	} else {
+		c.SetReasoningDialect(d)
+	}
+	if fc.Retry5xxAttempts > 0 {
+		c.Retry5xxAttempts = fc.Retry5xxAttempts // /retry attempts; the env wins, in dun.Start (retry.go)
+	}
+	if rb, tb, reqSet, turnSet := parseRetryBudgets(fc); reqSet || turnSet {
+		if reqSet {
+			c.RetryBudget = rb
+		}
+		if turnSet {
+			if tb == 0 {
+				c.DisableTurnRetry = true
+			} else {
+				c.TurnRetryBudget = tb
+			}
+		}
 	}
 }
 

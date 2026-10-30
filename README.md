@@ -423,7 +423,11 @@ ones still running, with the kill command.
 of yours — read a huge log, fetch and digest a page, survey how something is used
 — and hand back the conclusion. A child works in the parent's worktree and shares
 its tool servers (no second index), runs on `--child-model` if you set one, and
-cannot spawn agents of its own or reach you directly. It reports with
+cannot spawn agents of its own or reach you directly. With more than one provider
+logged in, a child can run on another one: `agent{prompt, provider, model}`, or
+`--child-provider` with `--child-model` for the default — a session on the Claude
+API can hand work to a smaller model on a local server. Its tokens count in the
+session's spend, billed to its own provider and key. It reports with
 `tell_parent` (a `status` that overwrites, a `message` that accumulates, a
 `final` answer). To ask the parent — never the human — it ends its turn with the
 question; the parent is notified and answers with `jobs(agent:N, tell:"…")`,

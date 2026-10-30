@@ -745,7 +745,7 @@ func (h *Harness) rebuildTools() {
 		// dispatch stays as a hidden alias for old transcripts and habit.
 		dispatch = withAskParent(dispatch, h, report)
 	} else {
-		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel))
+		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel, cfg.ChildProvider, cfg.Providers))
 		dispatch = withAgent(dispatch, h, report)
 	}
 	// jobs watches both kinds of background work (jobs.go): a command exec

@@ -271,10 +271,16 @@ type Config struct {
 	AutostartOverride map[string]bool
 	Client            agent.LLMRunner // the LLM (e.g. *llm.Client)
 	// ClientFor builds a runner for a NAMED model, so a sub-agent can run on a
-	// cheaper one than its parent. A factory rather than a client, because the
-	// dun package does not know the endpoint or the key — cmd/dun does. nil, or
-	// an error, means the child falls back to Client.
-	ClientFor func(model string) (agent.LLMRunner, error)
+	// cheaper one than its parent, on this session's provider ("") or another
+	// logged-in one (USER 2026-10-30: run the Claude API and manage smaller
+	// models). A factory rather than a client, because the dun package does
+	// not know the endpoints or the keys — cmd/dun does. nil, or an error, on
+	// the session's own provider means the child falls back to Client; on
+	// another provider the spawn fails, since it would be billed elsewhere.
+	ClientFor func(provider, model string) (ChildClient, error)
+	// Providers are the logged-in providers a spawn may name, for the agent
+	// tool's description.
+	Providers []string
 	// Spend totals what the gateway reports about money and limits (see
 	// spend.go). The CALLER points each llm.Client's OnUsage at Spend.Note —
 	// Client and every client ClientFor builds — since only it constructs them.
@@ -286,6 +292,8 @@ type Config struct {
 	// ChildModel is the default model for spawned sub-agents. Empty = the
 	// parent's. A spawn may override it.
 	ChildModel string
+	// ChildProvider is the provider ChildModel is on; empty = this session's.
+	ChildProvider string
 	// Files configures the built-in file tools (files.go); nil = the defaults
 	// (DefaultFileTools: read, edit, write), rooted at Workspace.
 	Files *FilesConfig

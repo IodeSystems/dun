@@ -57,11 +57,12 @@ const (
 
 // subAgent is one child: its harness, what it is doing, and what it has cost.
 type subAgent struct {
-	num    int
-	prompt string
-	model  string
-	parent *Harness
-	iso    isolation // where it works, when not in its parent's tree (subisolation.go)
+	num      int
+	prompt   string
+	model    string
+	provider string // "" is the parent session's
+	parent   *Harness
+	iso      isolation // where it works, when not in its parent's tree (subisolation.go)
 
 	mu sync.Mutex
 	h  *Harness // nil for a stopped child until it is resumed
@@ -333,8 +334,8 @@ func (s *subAgent) report() string {
 	state, status, final, since := s.snapshot()
 	var b strings.Builder
 	fmt.Fprintf(&b, "agent #%d is %s after %s (%s)", s.num, state, roundDur(since), tokenCount(s.spent()))
-	if s.model != "" {
-		fmt.Fprintf(&b, " on %s", s.model)
+	if w := s.where(); w != "" {
+		fmt.Fprintf(&b, " on %s", w)
 	}
 	if c := s.ctxLine(); c != "" {
 		b.WriteString("\n" + c)
@@ -404,12 +405,29 @@ func childSessionFile(parent string, num int) string {
 	return fmt.Sprintf("%s.sub%d.jsonl", strings.TrimSuffix(parent, ".jsonl"), num)
 }
 
+// where is what the child runs on: its model, and its provider when that is
+// not the session's.
+func (s *subAgent) where() string {
+	if s.provider == "" {
+		return s.model
+	}
+	return s.model + " (" + s.provider + ")"
+}
+
+// ChildClient is what Config.ClientFor builds: the runner, and the endpoint
+// it talks to, so the child learns its own model's context window and not
+// its parent's.
+type ChildClient struct {
+	Runner   agent.LLMRunner
+	Endpoint Endpoint
+}
+
 // childConfig derives a child's Config from its parent's.
 //
 // Everything cheap is inherited and everything expensive is dropped: the
 // parent's worktree (so no new tree and no new servers), its exec backend, its
 // tool servers. ask_user is NOT inherited — interrupting the human is the root's.
-func childConfig(parent *Harness, num int, model string, client agent.LLMRunner, iso isolation) Config {
+func childConfig(parent *Harness, num int, cc childRun, iso isolation) Config {
 	cfg := parent.cfg
 	// The exception to inheriting the exec backend: a child gets its OWN shell
 	// on the same directory. The persistent shell is shared by POINTER, so
@@ -422,8 +440,16 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner,
 	}
 	cfg.Parent = parent
 	cfg.AgentID = num
-	cfg.Client = client
-	cfg.ChildModel = model
+	cfg.Client = cc.client
+	cfg.ChildModel = cc.model
+	if cc.provider != "" {
+		// A child on another provider: its grandchildren default to it too,
+		// and it reports its own endpoint and provider.
+		cfg.ChildProvider, cfg.Provider = cc.provider, cc.provider
+	}
+	if cc.endpoint != (Endpoint{}) {
+		cfg.Endpoint = cc.endpoint
+	}
 	cfg.SessionFile = childSessionFile(parent.cfg.SessionFile, num)
 	cfg.Servers = parent.specs // shared manager; nothing is spawned from these
 	cfg.Ask = nil
@@ -446,23 +472,55 @@ func childConfig(parent *Harness, num int, model string, client agent.LLMRunner,
 	return cfg
 }
 
+// childRun is what a child runs on, as clientFor resolved it.
+type childRun struct {
+	client          agent.LLMRunner
+	provider, model string
+	endpoint        Endpoint // zero: the parent's
+}
+
 // clientFor resolves the runner for a named model, falling back to the parent's
-// own. The name is returned too, so the report can say what it actually ran on
-// rather than what was asked for.
-func (h *Harness) clientFor(model string) (agent.LLMRunner, string) {
-	if model == "" || h.cfg.ClientFor == nil {
-		return h.cfg.Client, h.cfg.ChildModel
+// own. The names are returned too, so the report can say what it actually ran
+// on rather than what was asked for. A model on another provider has no
+// fallback: an error is the spawn's.
+func (h *Harness) clientFor(provider, model string) (childRun, error) {
+	parent := childRun{client: h.cfg.Client, model: h.cfg.ChildModel}
+	if provider == "" {
+		if model == "" || h.cfg.ClientFor == nil {
+			return parent, nil
+		}
+		c, err := h.cfg.ClientFor("", model)
+		if err != nil || c.Runner == nil {
+			return parent, nil
+		}
+		return childRun{client: c.Runner, model: model, endpoint: c.Endpoint}, nil
 	}
-	c, err := h.cfg.ClientFor(model)
-	if err != nil || c == nil {
-		return h.cfg.Client, h.cfg.ChildModel
+	if model == "" {
+		return childRun{}, fmt.Errorf("provider %q needs a model: name one of its models", provider)
 	}
-	return c, model
+	if h.cfg.ClientFor == nil {
+		return childRun{}, fmt.Errorf("this session cannot run a child on another provider")
+	}
+	c, err := h.cfg.ClientFor(provider, model)
+	if err != nil {
+		return childRun{}, err
+	}
+	if c.Runner == nil {
+		return childRun{}, fmt.Errorf("provider %q: no client for %s", provider, model)
+	}
+	return childRun{client: c.Runner, provider: provider, model: model, endpoint: c.Endpoint}, nil
 }
 
 // spawnAgent starts a child and registers it. The child is RUNNING when this
 // returns; the caller decides whether to wait for it.
-func (h *Harness) spawnAgent(ctx context.Context, prompt, model, mode string) (*subAgent, error) {
+func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, mode string) (*subAgent, error) {
+	if provider == "" && model == "" {
+		provider, model = h.cfg.ChildProvider, h.cfg.ChildModel
+	}
+	run, err := h.clientFor(provider, model)
+	if err != nil {
+		return nil, err
+	}
 	iso, err := h.newIsolation(mode)
 	if err != nil {
 		return nil, err
@@ -475,17 +533,13 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, model, mode string) (*
 	}
 	h.agMu.Unlock()
 
-	if model == "" {
-		model = h.cfg.ChildModel
-	}
-	client, name := h.clientFor(model)
-	sa := &subAgent{num: num, prompt: prompt, model: name, parent: h, hb: newHeartbeat(), iso: iso}
+	sa := &subAgent{num: num, prompt: prompt, model: run.model, provider: run.provider, parent: h, hb: newHeartbeat(), iso: iso}
 
 	// Start on a background context: a child outlives the TURN that spawned it
 	// (that is the whole point of an async spawn), so tying it to the caller's
 	// context would kill it the moment the parent's turn ended.
 	runCtx, cancel := context.WithCancel(context.Background())
-	ccfg := childConfig(h, num, name, client, iso)
+	ccfg := childConfig(h, num, run, iso)
 	child, err := Start(runCtx, ccfg)
 	if err != nil {
 		cancel()
@@ -711,7 +765,7 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 		rec := loadAgentState(path)
 		sa := &subAgent{
 			num: num, parent: h, state: agentStopped, restore: path,
-			prompt: rec.Prompt, iso: loadIsolation(path), model: rec.Model,
+			prompt: rec.Prompt, iso: loadIsolation(path), model: rec.Model, provider: rec.Provider,
 		}
 		if sa.prompt == "" {
 			sa.prompt = firstUserEntry(path)
@@ -744,9 +798,10 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 // agentRecord is what a child's sidecar (<sub>.agent.json) keeps of it for a
 // resume: its state when last settled, its model and its task.
 type agentRecord struct {
-	State  string `json:"state"`
-	Model  string `json:"model,omitempty"`
-	Prompt string `json:"prompt,omitempty"` // as asked: the transcript's first message has the isolation brief too
+	State    string `json:"state"`
+	Model    string `json:"model,omitempty"`
+	Provider string `json:"provider,omitempty"` // "" is the parent session's
+	Prompt   string `json:"prompt,omitempty"`   // as asked: the transcript's first message has the isolation brief too
 }
 
 func agentFile(sessionFile string) string {
@@ -761,7 +816,7 @@ func agentFile(sessionFile string) string {
 // a child that was running then must resume as one that was.
 func (s *subAgent) saveState() {
 	s.mu.Lock()
-	rec, closed := agentRecord{State: string(s.state), Model: s.model, Prompt: s.prompt}, s.closed
+	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Prompt: s.prompt}, s.closed
 	path := s.restore
 	if s.h != nil {
 		path = s.h.cfg.SessionFile
@@ -836,12 +891,15 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 		sa.mu.Unlock()
 		return fmt.Sprintf("agent #%d is already running.", sa.num)
 	}
-	model := sa.model
+	provider, model := sa.provider, sa.model
 	sa.mu.Unlock()
 
-	client, name := h.clientFor(model)
+	run, err := h.clientFor(provider, model)
+	if err != nil {
+		return fmt.Sprintf("agent #%d could not be resumed: %v", sa.num, err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	child, err := Start(ctx, childConfig(h, sa.num, name, client, sa.iso))
+	child, err := Start(ctx, childConfig(h, sa.num, run, sa.iso))
 	if err != nil {
 		cancel()
 		return fmt.Sprintf("agent #%d could not be resumed: %v", sa.num, err)
@@ -852,7 +910,7 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 	}
 
 	sa.mu.Lock()
-	sa.h, sa.cancel, sa.model = child, cancel, name
+	sa.h, sa.cancel, sa.model, sa.provider = child, cancel, run.model, run.provider
 	// IDLE, not running, and with a ZEROED clock: a restored child has not been
 	// asked anything yet, and leaving `started` set made it show a growing age
 	// in the field that means "how long its last run took".
@@ -962,10 +1020,15 @@ func roleSystem(child bool) string {
 
 // ── the tools ───────────────────────────────────────────────────────
 
-func agentToolDef(defaultModel string) llm.ToolDef {
+// agentToolDef is the agent tool. providers are the logged-in ones; with
+// more than one, a spawn may name another.
+func agentToolDef(defaultModel, defaultProvider string, providers []string) llm.ToolDef {
 	model := "the session's child model"
 	if defaultModel != "" {
 		model = defaultModel
+	}
+	if defaultProvider != "" {
+		model += " on provider " + defaultProvider
 	}
 	var td llm.ToolDef
 	td.Type = "function"
@@ -990,6 +1053,13 @@ func agentToolDef(defaultModel string) llm.ToolDef {
 		},
 		"required": []string{"prompt"},
 	}
+	if len(providers) > 1 {
+		td.Function.Parameters.(map[string]any)["properties"].(map[string]any)["provider"] = map[string]any{
+			"type": "string", "enum": providers,
+			"description": "run this child on another logged-in provider (then name one of its models); " +
+				"omitted, it runs on this session's provider",
+		}
+	}
 	return td
 }
 
@@ -1000,24 +1070,29 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		}
 		var args struct {
 			Prompt    string `json:"prompt"`
+			Provider  string `json:"provider"`
 			Model     string `json:"model"`
 			Wait      bool   `json:"wait"`
 			Isolation string `json:"isolation"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		out := spawnTool(ctx, h, args.Prompt, args.Model, args.Isolation, args.Wait)
+		out := spawnTool(ctx, h, args.Prompt, args.Provider, args.Model, args.Isolation, args.Wait)
 		if onCall != nil {
-			onCall("agent", map[string]any{"prompt": args.Prompt, "model": args.Model, "wait": args.Wait}, out)
+			call := map[string]any{"prompt": args.Prompt, "model": args.Model, "wait": args.Wait}
+			if args.Provider != "" {
+				call["provider"] = args.Provider
+			}
+			onCall("agent", call, out)
 		}
 		return out, nil
 	}
 }
 
-func spawnTool(ctx context.Context, h *Harness, prompt, model, isolation string, wait bool) string {
+func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, isolation string, wait bool) string {
 	if strings.TrimSpace(prompt) == "" {
 		return "ERROR: agent requires a non-empty prompt."
 	}
-	sa, err := h.spawnAgent(ctx, prompt, model, isolation)
+	sa, err := h.spawnAgent(ctx, prompt, provider, model, isolation)
 	if err != nil {
 		return "ERROR: could not start the agent: " + err.Error()
 	}
@@ -1031,8 +1106,8 @@ func spawnTool(ctx context.Context, h *Harness, prompt, model, isolation string,
 		}
 		// No model name when the child runs on the parent's own client: it
 		// read "Started agent #1 on ." live.
-		if sa.model != "" {
-			where = " on " + sa.model + where
+		if w := sa.where(); w != "" {
+			where = " on " + w + where
 		}
 		return fmt.Sprintf("Started agent #%d%s. It is working; you will be told when it finishes or asks you something. "+
 			"Do other work, or jobs(agent:%d, wait:true) if you have nothing to do until it answers.",
@@ -1216,7 +1291,7 @@ func (h *Harness) Agents() []AgentInfo {
 	for _, sa := range list {
 		state, status, _, since := sa.snapshot()
 		out = append(out, AgentInfo{
-			ID: sa.num, Model: sa.model, State: string(state), Status: status,
+			ID: sa.num, Model: sa.where(), State: string(state), Status: status,
 			Prompt: sa.prompt, Tokens: sa.spent(), Seconds: int(since.Seconds()),
 		})
 	}

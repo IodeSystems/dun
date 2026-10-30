@@ -37,7 +37,7 @@ func TestLoopCtl_ListedForARootUnderDund(t *testing.T) {
 	// A child never has it: a loop fires into the root.
 	parent := testHarness(t)
 	parent.cfg.Loops = &fakeLoops{}
-	if childConfig(parent, 1, "", nil, isolation{}).Loops != nil {
+	if childConfig(parent, 1, childRun{}, isolation{}).Loops != nil {
 		t.Error("a child inherits the loop link")
 	}
 }

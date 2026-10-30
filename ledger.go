@@ -313,16 +313,23 @@ func (m *SpendMeter) SetLedger(l *SpendLedger, key string) {
 }
 
 // NoteAs is the llm.Client.OnUsage hook for a client billed to src: Note,
-// and a ledger line when the response reported a cost.
+// and a ledger line when the response reported a cost. A response on another
+// key than the session's (a child on another provider, a vision model) counts
+// toward the session's spend, but its key's budget and limits are not the
+// session key's, so they are left out.
 func (m *SpendMeter) NoteAs(src SpendSource) func(u llm.Usage) {
 	return func(u llm.Usage) {
-		m.Note(u)
 		if m == nil {
 			return
 		}
 		m.mu.Lock()
-		hook := m.onRound
+		hook, own := m.onRound, src.Key == m.ledgerKey
 		m.mu.Unlock()
+		noted := u
+		if !own {
+			noted.Limits, noted.KeyBudget = llm.RateLimits{}, llm.KeyBudget{}
+		}
+		m.Note(noted)
 		if hook != nil {
 			hook(src, u)
 		}

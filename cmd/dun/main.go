@@ -16,7 +16,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -226,6 +225,7 @@ func main() {
 	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place); in a session, /isolate worktree")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
+	childProvider := flag.String("child-provider", "", "logged-in provider --child-model is on (default: this session's)")
 	// ship was removed 2026-10-27: repos state their own shipping rules. The
 	// flags stay accepted and do nothing, because an older TUI or dund passes
 	// them to this engine and a script may too.
@@ -627,28 +627,7 @@ func main() {
 	var em *emitter
 	var in *inputStream
 	client := llm.NewClient(*url, effKey, *model)
-	// How /effort's level reaches the model (agentkit's reasoning dialects):
-	// a LiteLLM proxy in front of OpenRouter names neither in its address.
-	if d, err := reasoningDialect(fc, *url); err != nil {
-		log.Printf("dun: %v; detecting it", err)
-	} else {
-		client.SetReasoningDialect(d)
-	}
-	if fc.Retry5xxAttempts > 0 {
-		client.Retry5xxAttempts = fc.Retry5xxAttempts // /retry attempts; the env wins, below
-	}
-	if rb, tb, reqSet, turnSet := parseRetryBudgets(fc); reqSet || turnSet {
-		if reqSet {
-			client.RetryBudget = rb
-		}
-		if turnSet {
-			if tb == 0 {
-				client.DisableTurnRetry = true
-			} else {
-				client.TurnRetryBudget = tb
-			}
-		}
-	}
+	tuneClient(fc, client, *url) // its /effort dialect and retries; the env wins, below
 	// Logged out, or no model chosen: a stand-in that refuses every call with
 	// what to do, so the engine still starts (a client can /login through it)
 	// and nothing is contacted.
@@ -665,10 +644,15 @@ func main() {
 	}
 	client.OnUsage = usageFor(*url, effKey, *model, dun.RoleMain)
 	var runner agent.LLMRunner = client
-	childClients := clientCache(*url, effKey, func(model string) func(llm.Usage) { return usageFor(*url, effKey, model, dun.RoleModel) })
+	childClients := clientCache(fc, *url, effKey, func(c *llm.Client, u string) { tuneClient(fc, c, u) },
+		func(u, k, model string) func(llm.Usage) { return usageFor(u, k, model, dun.RoleModel) })
 	if why := providerMissing(*url, *model); why != nil {
 		runner = noProvider{why}
-		childClients = func(string) (agent.LLMRunner, error) { return nil, why }
+		childClients = func(string, string) (dun.ChildClient, error) { return dun.ChildClient{}, why }
+	}
+	var providerNames []string
+	for _, p := range fc.providerList() {
+		providerNames = append(providerNames, p.Name)
 	}
 	cfg := dun.Config{
 		// The context window set for this model is filed under it, and an
@@ -683,19 +667,21 @@ func main() {
 		// second client. Cached per model so N children on one model share one
 		// client, and therefore one retry policy and one rate limit.
 		ClientFor: childClients,
+		Providers: providerNames,
 		Spend:     spend,
 		// Each round's tokens, time and cost, for the turn's stats and what a
 		// tool server costs (dun/roundstats.go).
-		StatsLedger: dun.NewStatsLedger(dun.DefaultStatsDir()),
-		ChildModel:  *childModel,
-		Exec:        backend,
-		Worktree:    wt,
-		CommitCfg:   dun.LoadCommit(absWS),
-		Files:       filesConfig(absWS, *noDir),
-		NoDir:       *noDir,
-		NoTools:     *noTools,
-		SessionFile: sessionFile,
-		Persist:     *persistFlag,
+		StatsLedger:   dun.NewStatsLedger(dun.DefaultStatsDir()),
+		ChildModel:    *childModel,
+		ChildProvider: *childProvider,
+		Exec:          backend,
+		Worktree:      wt,
+		CommitCfg:     dun.LoadCommit(absWS),
+		Files:         filesConfig(absWS, *noDir),
+		NoDir:         *noDir,
+		NoTools:       *noTools,
+		SessionFile:   sessionFile,
+		Persist:       *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.
 		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") == "0",

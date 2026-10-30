@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
 
@@ -39,7 +38,7 @@ func persistFixture(t *testing.T) (ws, sessionFile string, runners map[string]*s
 		"c": {rounds: []roundFn{cancellableBlock}},
 	}
 	h := startWith(t, ws, sessionFile, runners, true)
-	one, err := h.spawnAgent(context.Background(), "find the config", "a", IsoNoDir)
+	one, err := h.spawnAgent(context.Background(), "find the config", "", "a", IsoNoDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,10 +60,10 @@ func startWith(t *testing.T, ws, sessionFile string, runners map[string]*scriptR
 	var mu sync.Mutex
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Servers: []Server{}, Client: &scriptRunner{}, Exec: &HostShell{Dir: ws},
-		ClientFor: func(model string) (agent.LLMRunner, error) {
+		ClientFor: func(_, model string) (ChildClient, error) {
 			mu.Lock()
 			defer mu.Unlock()
-			return runners[model], nil
+			return ChildClient{Runner: runners[model]}, nil
 		},
 		SessionFile: sessionFile, Persist: persist,
 	})
@@ -76,7 +75,7 @@ func startWith(t *testing.T, ws, sessionFile string, runners map[string]*scriptR
 
 func spawnKidOn(t *testing.T, h *Harness, prompt, model string) *subAgent {
 	t.Helper()
-	sa, err := h.spawnAgent(context.Background(), prompt, model, "")
+	sa, err := h.spawnAgent(context.Background(), prompt, "", model, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +183,7 @@ func TestSubAgent_WatchStreamsEntries(t *testing.T) {
 	var live []HistoryItem
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Servers: []Server{}, Client: &scriptRunner{},
-		ClientFor:   func(string) (agent.LLMRunner, error) { return kid, nil },
+		ClientFor:   func(string, string) (ChildClient, error) { return ChildClient{Runner: kid}, nil },
 		SessionFile: filepath.Join(ws, "s.jsonl"),
 		OnAgentEntry: func(id int, items []HistoryItem) {
 			mu.Lock()

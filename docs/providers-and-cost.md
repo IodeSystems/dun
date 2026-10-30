@@ -32,8 +32,15 @@ model reads").
   machine: events carry "key set", not the key, and a typed line containing a
   key is refused on the web. Provider ops and listings run under one lock, or a
   stale listing could land after an edit.
-- Sub-agents use the parent's provider: `clientCache` is built from the
-  parent's url and key and picks only a model.
+- Sub-agents use the parent's provider unless the spawn names another
+  logged-in one (`agent{provider, model}`, `--child-provider`; USER
+  2026-10-30). `clientCache` keys its clients by endpoint and model, so
+  children on one model share one client and one rate limit. A named provider
+  that is not logged in fails the spawn: there is no fallback to the parent's
+  client, which would run, and bill, where nobody asked. The child gets its own
+  `Endpoint`, so its context window is its model's, not its parent's. Its
+  usage counts in the session's spend, but its key's budget and limits are
+  dropped (`NoteAs`): they are not the session key's.
 - `dun doctor` is read-only and prints a fix per finding: providers (logged in,
   model chosen, each model list with its real failure), tools on PATH and on
   the service's PATH, whether dund's socket answers this user (tests peer

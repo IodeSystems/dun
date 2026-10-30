@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
 
@@ -29,7 +28,7 @@ func startParentOf(t *testing.T, child *scriptRunner) *Harness {
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir, Servers: []Server{}, Client: &scriptRunner{},
-		ClientFor:   func(string) (agent.LLMRunner, error) { return child, nil },
+		ClientFor:   func(string, string) (ChildClient, error) { return ChildClient{Runner: child}, nil },
 		SessionFile: filepath.Join(dir, "s.jsonl"),
 	})
 	if err != nil {
@@ -41,7 +40,7 @@ func startParentOf(t *testing.T, child *scriptRunner) *Harness {
 
 func spawnKid(t *testing.T, h *Harness, prompt string) *subAgent {
 	t.Helper()
-	sa, err := h.spawnAgent(context.Background(), prompt, "kid", "")
+	sa, err := h.spawnAgent(context.Background(), prompt, "", "kid", "")
 	if err != nil {
 		t.Fatal(err)
 	}
