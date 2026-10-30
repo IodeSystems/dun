@@ -233,3 +233,29 @@ func TestAddServer_DetectsOAuth(t *testing.T) {
 		t.Error("a server with a bearer is not an oauth one")
 	}
 }
+
+// Two clients sharing a token (two mcpshells) both get a 401 and both ask
+// again naming it: one refresh, and the second gets the first's new token.
+func TestOAuthBroker_TwoRetriesOneRefresh(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	w := newOAuthWorld(t)
+	b := NewOAuthBroker(nil)
+	req := OAuthRequest{ID: "snow", URL: w.mcpURL(), Spec: OAuthSpec{ClientID: w.clientID, RedirectPort: freePort(t)}}
+	br := &browser{}
+	ctx := context.Background()
+	req.Op = "ensure"
+	first, err := b.Do(ctx, req, br.notify)
+	if err != nil || first.Authorization == "" {
+		t.Fatalf("ensure: %+v %v", first, err)
+	}
+	tokens := len(w.tokenForms)
+	req.Op, req.Rejected = "unauthorized", first.Authorization
+	a, err := b.Do(ctx, req, br.notify)
+	if err != nil || a.Authorization == first.Authorization {
+		t.Fatalf("first retry: %+v %v", a, err)
+	}
+	c, err := b.Do(ctx, req, br.notify)
+	if err != nil || c.Authorization != a.Authorization || len(w.tokenForms)-tokens != 1 {
+		t.Errorf("second retry: %q (first got %q), %d refreshes", c.Authorization, a.Authorization, len(w.tokenForms)-tokens)
+	}
+}
