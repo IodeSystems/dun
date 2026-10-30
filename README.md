@@ -359,8 +359,8 @@ or a LAN name), dun asks before sending. It prints the `gh issue create
 
 **Switch sessions without leaving.** `/resume` opens a picker of every saved
 session for the workspace — newest first, each with its age, entry count and
-**opening message**, because an id is a timestamp and a timestamp says when but
-never which. `/resume <id>` goes straight there. Switching restarts the engine on
+**opening message** and its latest one, because an id is a timestamp and a
+timestamp says when but never which. `/resume <id>` goes straight there. Switching restarts the engine on
 that conversation and replays its transcript; the scrollback you were looking at
 is cleared, since it belongs to the session you just left.
 

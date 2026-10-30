@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -157,6 +158,10 @@ type SessionInfo struct {
 	ModTime time.Time
 	Entries int
 	Preview string
+	// Last is the latest user message, when it is not the opening one: what
+	// the session was about by the end (USER 2026-10-29). "" when the end of
+	// the file holds none.
+	Last string
 }
 
 // previewScanLimit bounds the work a picker does. Sessions are append-only
@@ -185,6 +190,9 @@ func ListSessionInfo(root string) []SessionInfo {
 		// stays listed.
 		if !unreadable && info.Preview == "" {
 			continue
+		}
+		if last := lastUserMessage(path); last != info.Preview {
+			info.Last = last
 		}
 		out = append(out, info)
 	}
@@ -220,6 +228,46 @@ func scanSession(path string) (entries int, preview string, unreadable bool) {
 		preview = strings.Join(strings.Fields(e.Content), " ")
 	}
 	return entries, preview, unreadable || sc.Err() != nil
+}
+
+// lastTailBytes is how much of a session's end lastUserMessage reads: a
+// session can be megabytes, and its last ask is near the end.
+const lastTailBytes = 512 << 10
+
+// lastUserMessage is the latest user message in the last lastTailBytes of
+// a session file; "" when there is none there.
+func lastUserMessage(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	off := max(0, st.Size()-lastTailBytes)
+	buf := make([]byte, st.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return ""
+	}
+	lines := strings.Split(string(buf), "\n")
+	if off > 0 {
+		lines = lines[1:] // starts mid-line
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		var e struct {
+			Kind    string `json:"Kind"`
+			Content string `json:"Content"`
+		}
+		if json.Unmarshal([]byte(lines[i]), &e) != nil || e.Kind != string(agent.KindUser) {
+			continue
+		}
+		if c := strings.Join(strings.Fields(e.Content), " "); c != "" {
+			return c
+		}
+	}
+	return ""
 }
 
 // SessionMeta stores the worktree info alongside a session so that resume

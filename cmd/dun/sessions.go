@@ -20,7 +20,9 @@ import (
 // A session id is a timestamp, which says when but never WHICH — so the picker
 // leads with the opening ask. That is how people actually recognise a
 // conversation, and it is why this is a picker and not a `/resume <id>` alone
-// (which also works, for scripts and for when you know the id).
+// (which also works, for scripts and for when you know the id). Under it is
+// the latest ask, when it differs: with many sessions open, the end says
+// what each became.
 
 // resumeSlash implements /resume: bare opens the picker, an argument switches
 // straight to that session.
@@ -190,8 +192,12 @@ func (m tuiModel) sessionPanel() string {
 	rows := make([]string, 0, len(m.sessions)+1)
 	rows = append(rows, stHeader.Render("sessions")+stDim.Render("  ↑/↓ choose · enter resume · esc cancel"))
 	// A long history should not push the input off the screen; show a window
-	// around the selection.
-	const window = 8
+	// around the selection: up to 8 sessions of up to three rows each, fewer
+	// on a short terminal.
+	window := 8
+	if m.h > 0 {
+		window = min(8, max(3, (m.h-8)/3))
+	}
 	lo := m.pickSel - window/2
 	if lo < 0 {
 		lo = 0
@@ -221,6 +227,10 @@ func (m tuiModel) sessionPanel() string {
 			line += "\n     " + clip(p, max(20, m.w-12))
 		} else {
 			line += "\n     " + stDim.Render("(no opening message — compacted or empty)")
+		}
+		// The latest ask under the opening one: what it was about by the end.
+		if l := s.Last; l != "" {
+			line += "\n     " + stDim.Render("last: ") + clip(l, max(20, m.w-18))
 		}
 		if i == m.pickSel {
 			rows = append(rows, addGutter(line, "▎ ", stSel))

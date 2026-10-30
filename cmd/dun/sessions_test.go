@@ -22,12 +22,12 @@ func pickerModel(t *testing.T, sessions ...dun.SessionInfo) tuiModel {
 // the opening ask because that is how a conversation is recognised.
 func TestSessionPanel_ShowsWhatIdentifiesASession(t *testing.T) {
 	m := pickerModel(t,
-		dun.SessionInfo{ID: "20260730-153842", ModTime: time.Now().Add(-2 * time.Hour), Entries: 17, Preview: "why is compaction thrashing"},
+		dun.SessionInfo{ID: "20260730-153842", ModTime: time.Now().Add(-2 * time.Hour), Entries: 17, Preview: "why is compaction thrashing", Last: "ship the fix"},
 		dun.SessionInfo{ID: "20260729-195624", ModTime: time.Now().Add(-26 * time.Hour), Entries: 50},
 	)
 	m.sessionID = "20260729-195624"
-	panel := m.sessionPanel()
-	for _, want := range []string{"20260730-153842", "2h ago", "17 entries", "why is compaction thrashing"} {
+	panel := stripANSI(m.sessionPanel())
+	for _, want := range []string{"20260730-153842", "2h ago", "17 entries", "why is compaction thrashing", "last: ship the fix"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("picker is missing %q:\n%s", want, panel)
 		}

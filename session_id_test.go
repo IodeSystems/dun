@@ -91,3 +91,23 @@ func TestListSessionInfo_SkipsSessionsWithNoUserMessage(t *testing.T) {
 		t.Errorf("listed %v; want the asked one and the unreadable one", ids)
 	}
 }
+
+// A session's latest user message is listed under its opening one; a
+// session with one ask has none.
+func TestListSessionInfo_LastUserMessage(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "20261029-100000.jsonl"), []byte(`{"Kind":"user","Content":"fix the tests"}`+"\n"+
+		`{"Kind":"assistant","Content":"done"}`+"\n"+`{"Kind":"user","Content":"now  release\nit"}`+"\n"+
+		`{"Kind":"assistant","Content":"released"}`+"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "20261029-100001.jsonl"), []byte(`{"Kind":"user","Content":"one ask"}`+"\n"), 0o644)
+	got := map[string]string{}
+	for _, s := range ListSessionInfo(ws) {
+		got[s.ID] = s.Last
+	}
+	if got["20261029-100000"] != "now release it" || got["20261029-100001"] != "" {
+		t.Errorf("last: %q", got)
+	}
+}
