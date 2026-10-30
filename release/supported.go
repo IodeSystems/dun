@@ -48,8 +48,13 @@ var Supported = []Tool{
 	// --validate-wait; a clean edit by a server not trusted for clean
 	// diagnostics (sourcekit-lsp, typescript) reports validated:false,
 	// validationSkipped:"lsp-unconfirmed". MCP tool names unchanged.
-	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.3.1"},
+	// Recommended v0.4.0 (80f6d1d, 2026-10-29), tarballs in deps.json: `lsp
+	// list|add|remove` (the /lsp table), per-client --lsp-off / --lsp-on and
+	// --format-on-edit / --no-format-on-edit; the shared daemon reads a
+	// config only from an absolute --config, so custom servers reach it
+	// through `lsp add` (servers.yaml).
+	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/lsp-mcp",
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.4.0"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /rag setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,
