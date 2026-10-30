@@ -984,6 +984,15 @@ func main() {
 		}
 	}
 
+	// The last known spend, before any request and before the budget read
+	// below: the machine's ledger, the key's last budget, and this month's
+	// usage (the splash's spend row).
+	if *prog {
+		sp := spendProto(h.Spend(), time.Now())
+		sp.Month = monthUsage(h, time.Now())
+		em.emit(sp)
+	}
+
 	// The key's budget: read at start, every few minutes and after a turn, on
 	// its own goroutine — never on the turn path. An endpoint with none stops
 	// the poller after one probe per documented path.
@@ -1808,6 +1817,18 @@ func turnStatsProto(h *dun.Harness) *proto.TurnStats {
 		Timed: t.Timed, PromptN: t.PromptN, PromptMS: t.PromptMS, GenN: t.GenN, GenMS: t.GenMS,
 		Cost: t.Cost, Currency: t.Currency, Costed: t.Costed, Mixed: t.Mixed, SubAgents: t.SubAgents,
 		PrefillTPS: speed, PrefillRounds: n}
+}
+
+// monthUsage is the stats ledger's main rounds since the start of now's
+// month; nil when there were none.
+func monthUsage(h *dun.Harness, now time.Time) *proto.UsageMonth {
+	since := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	s := h.StatsSummary(since)
+	if s.Rounds == 0 {
+		return nil
+	}
+	return &proto.UsageMonth{Since: since.UTC().Format(time.RFC3339), Rounds: s.Rounds,
+		Prompt: s.Prompt, Cached: s.Cached, PrefillTPS: s.Speed}
 }
 
 func endTurnSpend(h *dun.Harness) *proto.Spend {

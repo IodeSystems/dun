@@ -302,8 +302,13 @@ func (m *SpendMeter) SetLedger(l *SpendLedger, key string) {
 	if m == nil {
 		return
 	}
+	// The key's last budget, until this session reads its own.
+	b, at, ok := l.LoadKeyBudget(key)
 	m.mu.Lock()
 	m.ledger, m.ledgerKey = l, key
+	if ok && !m.budget.Reported {
+		m.budget, m.budgetAt = b, at
+	}
 	m.mu.Unlock()
 }
 
@@ -330,4 +335,46 @@ func (m *SpendMeter) NoteAs(src SpendSource) func(u llm.Usage) {
 		_ = l.Append(SpendEntry{Time: now, Provider: src.Provider, Key: src.Key, Model: src.Model,
 			Cost: u.Cost.Amount, Currency: u.Cost.Currency})
 	}
+}
+
+// The key's last budget read, kept beside the ledger per key fingerprint
+// (key-<fp>.json), so a session shows what the key had left before its own
+// first read lands (USER 2026-10-29: "on splash, we should show the last
+// known spend details"). It carries when it was read: shown, it is dated.
+type savedKeyBudget struct {
+	Budget llm.KeyBudget `json:"budget"`
+	At     time.Time     `json:"at"`
+}
+
+func (l *SpendLedger) keyFile(fp string) string { return filepath.Join(l.dir, "key-"+fp+".json") }
+
+// SaveKeyBudget keeps b, read at at, as key fp's last budget.
+func (l *SpendLedger) SaveKeyBudget(fp string, b llm.KeyBudget, at time.Time) error {
+	if l == nil || fp == "" || !b.Reported {
+		return nil
+	}
+	data, err := json.Marshal(savedKeyBudget{Budget: b, At: at.UTC()})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(l.dir, 0o700); err != nil {
+		return err
+	}
+	return writeFileAtomic(l.keyFile(fp), append(data, '\n'), 0o600)
+}
+
+// LoadKeyBudget is key fp's last budget and when it was read.
+func (l *SpendLedger) LoadKeyBudget(fp string) (llm.KeyBudget, time.Time, bool) {
+	if l == nil || fp == "" {
+		return llm.KeyBudget{}, time.Time{}, false
+	}
+	b, err := os.ReadFile(l.keyFile(fp))
+	if err != nil {
+		return llm.KeyBudget{}, time.Time{}, false
+	}
+	var s savedKeyBudget
+	if json.Unmarshal(b, &s) != nil || !s.Budget.Reported {
+		return llm.KeyBudget{}, time.Time{}, false
+	}
+	return s.Budget, s.At, true
 }

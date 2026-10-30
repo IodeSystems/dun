@@ -149,7 +149,7 @@ func (m *SpendMeter) SetBudget(b llm.KeyBudget, err error) {
 		return
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var save func()
 	switch {
 	case errors.Is(err, llm.ErrBudgetUnsupported):
 		m.unsupported, m.budgetErr = true, ""
@@ -158,6 +158,13 @@ func (m *SpendMeter) SetBudget(b llm.KeyBudget, err error) {
 	default:
 		m.budget, m.budgetAt = b, m.now()
 		m.unsupported, m.budgetErr = false, ""
+		l, key, at := m.ledger, m.ledgerKey, m.budgetAt
+		save = func() { _ = l.SaveKeyBudget(key, b, at) }
+	}
+	m.mu.Unlock()
+	// Kept for the next session's splash; written off the lock (file IO).
+	if save != nil {
+		save()
 	}
 }
 

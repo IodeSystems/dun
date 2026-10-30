@@ -266,6 +266,22 @@ type Spend struct {
 	// Ledger is this machine's spend over time, every session and sub-agent
 	// (dun/ledger.go); nil when no ledger is wired.
 	Ledger *SpendLedger `json:"ledger,omitempty"`
+
+	// Month is this machine's main rounds this calendar month (dun's stats
+	// ledger), sent once at start: what the splash shows before the
+	// session's first request. A later Spend without it keeps the last.
+	Month *UsageMonth `json:"month,omitempty"`
+}
+
+// UsageMonth is the main rounds since Since (RFC 3339): their prompt
+// tokens, of them the cached ones, and the median prefill speed in tokens a
+// second (0: no round had timings).
+type UsageMonth struct {
+	Since      string  `json:"since"`
+	Rounds     int     `json:"rounds"`
+	Prompt     int     `json:"prompt_tokens"`
+	Cached     int     `json:"cached_tokens"`
+	PrefillTPS float64 `json:"prefill_tps,omitempty"`
 }
 
 // KeyBudget is a key's spend against its budget.

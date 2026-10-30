@@ -203,3 +203,26 @@ func TestLedger_HourTotalAndInterval(t *testing.T) {
 		t.Errorf("no interval asked, got %v", s.Interval)
 	}
 }
+
+// The key's last budget is kept per key fingerprint, and a new meter on the
+// same ledger starts with it, dated as read.
+func TestSpendLedger_KeyBudgetCarriesToTheNextSession(t *testing.T) {
+	dir := t.TempDir()
+	at := time.Now().Add(-2 * time.Hour)
+	m := NewSpendMeter()
+	m.SetLedger(NewSpendLedger(dir), "fp1")
+	m.now = func() time.Time { return at }
+	m.SetBudget(llm.KeyBudget{Spend: 1, Remaining: 9, HasRemaining: true, Currency: "USD", Reported: true}, nil)
+
+	next := NewSpendMeter()
+	next.SetLedger(NewSpendLedger(dir), "fp1")
+	s := next.Snapshot()
+	if !s.Budget.Reported || s.Budget.Remaining != 9 || !s.BudgetAt.Equal(at.UTC()) {
+		t.Errorf("budget %+v at %v", s.Budget, s.BudgetAt)
+	}
+	other := NewSpendMeter()
+	other.SetLedger(NewSpendLedger(dir), "fp2")
+	if other.Snapshot().Budget.Reported {
+		t.Error("another key's budget was taken")
+	}
+}

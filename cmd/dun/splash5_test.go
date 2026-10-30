@@ -241,3 +241,29 @@ func TestStatus5_Detail(t *testing.T) {
 		}
 	}
 }
+
+// Before the session's first request the spend row is the last known spend
+// the engine sends at start: this month's usage, the machine's ledger and
+// the key's last budget, dated when it is old. A later spend event without
+// the month keeps it.
+func TestSplash5_SpendRowBeforeTheFirstRequest(t *testing.T) {
+	v := splash5(t, 120, 30)
+	old := time.Now().Add(-3 * time.Hour).UTC().Format(time.RFC3339)
+	v.event(map[string]any{"type": "spend", "calls": float64(0), "costed_calls": float64(0),
+		"ledger": map[string]any{"week": map[string]any{"USD": 3.10}, "year": map[string]any{"USD": 3.10}, "entries": true},
+		"key":    map[string]any{"spend": 1.0, "remaining": 12.30, "currency": "USD", "source": "openrouter", "as_of": old},
+		"month":  map[string]any{"since": "2026-10-01T00:00:00Z", "rounds": float64(40), "prompt_tokens": float64(4200000), "cached_tokens": float64(3822000), "prefill_tps": float64(850)}})
+	want := "spend       this month 4.20M in · 91% cached · 850 tok/s · $3.10 this week · $12.30 left as of 3h ago on work\n"
+	if s := splashText(v); !strings.Contains(s, want) {
+		t.Errorf("want %q:\n%s", want, s)
+	}
+	v.event(map[string]any{"type": "spend", "calls": float64(0), "costed_calls": float64(0), "ledger": map[string]any{}})
+	if s := splashText(v); !strings.Contains(s, "spend       this month 4.20M in · 91% cached · 850 tok/s\n") {
+		t.Errorf("the month went with a later event:\n%s", s)
+	}
+	v.m.statusSlash()
+	s := stripANSI(v.m.convo[len(v.m.convo)-1].collapsed)
+	if !strings.Contains(s, "    usage         40 rounds · 4.20M in · 91% cached · 850 tok/s prefill this month, as of this session's start\n") {
+		t.Errorf("/status:\n%s", s)
+	}
+}

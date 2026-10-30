@@ -99,6 +99,9 @@ func (s *contextStats) readSpend(ev map[string]any) {
 	if json.Unmarshal(b, &sp) != nil {
 		return
 	}
+	if sp.Month == nil && s.spend != nil {
+		sp.Month = s.spend.Month // sent once, at start
+	}
 	s.spend = &sp
 }
 

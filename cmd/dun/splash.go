@@ -470,19 +470,27 @@ func tokK(n int) string {
 //	12 requests · 41.3k in · 2.1k out · 82% cached · $0.42 today · $12.30 left on work
 func (m tuiModel) spendValue(w int, now time.Time) string {
 	sp := m.ctxStats.spend
-	if sp == nil || sp.Calls == 0 {
-		// A session that can make requests says none were made; one that
-		// cannot yet (no model) keeps the row blank, as the first-run
-		// splash has no spend (its place is kept).
-		if m.model != "" && m.url != "" {
-			return stDim.Render("no requests yet")
-		}
+	// Before the session's first request the row is the last known spend
+	// (USER 2026-10-29): the machine's ledger, the key's last budget and
+	// this month's usage, which the engine sends at start. A session that
+	// cannot make requests yet (no model) keeps the row blank, as the
+	// first-run splash has no spend (its place is kept).
+	fresh := sp == nil || sp.Calls == 0
+	if fresh && (m.model == "" || m.url == "") {
 		return ""
+	}
+	if sp == nil {
+		return stDim.Render("no requests yet")
 	}
 	sep := stDim.Render(" · ")
 	req := plural(sp.Calls, "request")
 	usage := []string{req}
-	if sp.Prompt > 0 || sp.Completion > 0 {
+	switch {
+	case fresh && sp.Month != nil:
+		usage = monthForms(sp.Month)
+	case fresh:
+		usage = []string{"no requests yet"}
+	case sp.Prompt > 0 || sp.Completion > 0:
 		reqs := fmt.Sprintf("%d req", sp.Calls)
 		short := reqs + " · " + tokN(sp.Prompt) + " in · " + tokN(sp.Completion) + " out"
 		full := req + " · " + tokN(sp.Prompt) + " in · " + tokN(sp.Completion) + " out"
@@ -503,7 +511,7 @@ func (m tuiModel) spendValue(w int, now time.Time) string {
 			v = "< $0.01 this year"
 		}
 	}
-	if sp.CostedCalls == 0 {
+	if sp.CostedCalls == 0 && !fresh {
 		if v != "" {
 			v += " · "
 		}
@@ -515,6 +523,9 @@ func (m tuiModel) spendValue(w int, now time.Time) string {
 	}
 	if left, low, ok := budgetLeft(sp); ok {
 		tail := left + " left"
+		if age := keyAge(sp.Key, now); age != "" {
+			tail += stDim.Render(" as of " + age)
+		}
 		if m.provider != "" && ansi.StringWidth(v+" · "+tail+" on "+m.provider) <= w {
 			tail += " on " + m.provider
 		}
@@ -539,6 +550,36 @@ func (m tuiModel) spendValue(w int, now time.Time) string {
 		}
 	}
 	return firstFit(w, forms...)
+}
+
+// monthForms are this month's usage for the spend row, widest first.
+func monthForms(u *proto.UsageMonth) []string {
+	head := "this month " + tokN(u.Prompt) + " in"
+	forms := []string{head}
+	if u.Cached > 0 && u.Prompt > 0 {
+		head += fmt.Sprintf(" · %d%% cached", int(math.Round(float64(u.Cached)*100/float64(u.Prompt))))
+		forms = append([]string{head}, forms...)
+	}
+	if u.PrefillTPS > 0 {
+		forms = append([]string{head + commaf(" · %.0f tok/s", u.PrefillTPS)}, forms...)
+	}
+	return forms
+}
+
+// keyStale is how old the key's budget read may be before the row dates it:
+// one from a past session, or a read that has been failing.
+const keyStale = 10 * time.Minute
+
+// keyAge is how long ago k was read, when that is past keyStale; "" else.
+func keyAge(k *proto.KeyBudget, now time.Time) string {
+	if k == nil || k.AsOf == "" {
+		return ""
+	}
+	at, err := time.Parse(time.RFC3339, k.AsOf)
+	if err != nil || now.Sub(at) < keyStale {
+		return ""
+	}
+	return relTime(at)
 }
 
 // spendPeriods are the periods the spend row picks from, smallest first.
@@ -952,8 +993,22 @@ func (m tuiModel) spendRows() [][2]string {
 		}
 		rows = append(rows, [2]string{"tokens", v})
 	}
+	if sp != nil && sp.Month != nil {
+		u := sp.Month
+		v := plural(u.Rounds, "round") + " · " + tokN(u.Prompt) + " in"
+		if u.Cached > 0 && u.Prompt > 0 {
+			v += fmt.Sprintf(" · %d%% cached", int(math.Round(float64(u.Cached)*100/float64(u.Prompt))))
+		}
+		if u.PrefillTPS > 0 {
+			v += commaf(" · %.0f tok/s prefill", u.PrefillTPS)
+		}
+		rows = append(rows, [2]string{"usage", v + stDim.Render(" this month, as of this session's start")})
+	}
 	if left, low, ok := budgetLeft(sp); ok {
 		v := left + " left"
+		if age := keyAge(sp.Key, time.Now()); age != "" {
+			v += stDim.Render(" as of " + age)
+		}
 		if low {
 			v = stNote.Render(v + " · a day or less at the last 24 hours' rate")
 		}
