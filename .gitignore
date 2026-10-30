@@ -19,3 +19,6 @@ dun.local.json
 /dist/
 /.poly-lsp-mcp/
 /internal/dundapi/webdist/
+
+# the site service token for make site-push
+.hz_token
