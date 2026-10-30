@@ -32,9 +32,11 @@ var Supported = []Tool{
 	// the 401 re-run only, auth_cmd gets MCPSHELL_AUTH_RETRY=1 and
 	// MCPSHELL_AUTH_REJECTED=<the refused token>, which `dun oauth token`
 	// reads so dund refreshes a refused token (oauthbroker.go); regexp2
-	// v2.12.0.
+	// v2.12.0. Recommended v0.7.1 (185037c, 2026-10-29): reading a let from
+	// an earlier eval says a let lasts one eval (it was "Unknown command",
+	// or the builtin of that name); 1/0 shows Infinity.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.7.0"},
+		Min: "v0.2.0", Recommended: "v0.7.1"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
