@@ -84,7 +84,8 @@ func TestMCPInfo_Quiet(t *testing.T) {
 }
 
 // A heavy server with the shell off still gets its hint, and the hint says
-// the shell must be on; an oauth server gets none (it cannot be scripted).
+// the shell must be on; an oauth server gets one too (dund mints its token
+// for mcpshell, oauthbroker.go).
 func TestMCPInfo_ShellOff(t *testing.T) {
 	srv := infoServers()
 	srv[0].Running = false
@@ -101,8 +102,8 @@ func TestMCPInfo_ShellOff(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", want, s)
 		}
 	}
-	if strings.Contains(s, "mode snow") {
-		t.Errorf("an oauth server hinted:\n%s", s)
+	if !strings.Contains(s, "/mcp mode snow scripted") {
+		t.Errorf("the oauth server is not hinted:\n%s", s)
 	}
 }
 

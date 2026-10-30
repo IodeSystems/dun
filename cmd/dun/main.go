@@ -184,6 +184,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "session" {
 		os.Exit(sessionCmd(os.Args[2:]))
 	}
+	// `dun oauth token --spec …`: an OAuth MCP server's bearer, for
+	// mcpshell's auth_cmd (oauthcmd.go).
+	if len(os.Args) > 1 && os.Args[1] == "oauth" {
+		os.Exit(oauthCmd(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	// `dun --usage [--json] [--no-net]`: what dun has used, from the stats
 	// ledger, and what the provider says is left (usage.go). No session.
 	if len(os.Args) > 1 && (os.Args[1] == "--usage" || os.Args[1] == "-usage") {
@@ -722,6 +727,7 @@ func main() {
 			peers = newPeerLink(em)
 			cfg.Peers = peers
 			cfg.Loops = peers
+			cfg.OAuthBroker = peers.oauth // dund holds the OAuth tokens
 		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }

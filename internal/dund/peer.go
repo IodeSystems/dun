@@ -1,6 +1,7 @@
 package dund
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -66,6 +67,13 @@ func (s *Service) handlePeer(from *session, req proto.PeerRequest) {
 		rep.Sched = &r
 	case "servers":
 		s.announceServers(from)
+	case "oauth":
+		if req.OAuth == nil {
+			rep.Error = "oauth: no request"
+			break
+		}
+		rep.OAuth = s.OAuth(context.Background(), from, *req.OAuth)
+		rep.Error = rep.OAuth.Error
 	default:
 		rep.Error = fmt.Sprintf("unknown peer op %q", req.Op)
 	}

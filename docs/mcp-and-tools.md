@@ -131,10 +131,33 @@ and corporate tools behind a login gate.
 - **Storage**: `$DUN_HOME/oauth/<id>.json`, 0600, with issuer, token and
   revocation endpoints, auth method and resource, so a refresh needs no
   discovery. One OAuth client per server id; the file is shared by every
-  session of the user. Tokens are plaintext (no keyring).
+  session of the user, and under dund only dund writes it. Tokens are
+  plaintext (no keyring).
 - **Refresh**: 60 s before expiry and on a 401; if refresh fails, interactive
   login bounded at 5 min. **A 401 within 30 s of a login is an error, not
   another browser tab.**
+- **dund holds the tokens** (`oauthbroker.go`, `internal/dund/oauth.go`; USER
+  2026-10-29). Under dund, an engine runs no OAuth client of its own: it asks
+  dund over its stdio (peer op `oauth`: token, ensure, unauthorized, login,
+  logout, status), and dund keeps one client per server for every session.
+  So one process refreshes (a server that rotates its refresh token cannot
+  lose one to two engines racing), and one login serves every session. The
+  login's URL goes to the asking session as an `mcp_login` event, and to a
+  browser on dund's machine; the login finishes there (the redirect is its
+  loopback). The engine keeps the token until it is about to expire or is
+  refused; an `unauthorized` names the refused token, and dund refreshes only
+  when that is still its current one, so ten engines' 401s are one refresh.
+  With no dund (a test, a bare `dun -p`) the engine's own client works on the
+  token file as before.
+- **Scripted OAuth servers** (in mcpshell): their entry has `auth_cmd:
+  '<dun>' oauth token --spec <base64 id, url, oauth> --session <id>`, never a
+  bearer. mcpshell runs it at first use, 60 s before a JWT expires, and after
+  a 401; `dun oauth token` asks dund over its socket (`oauth` command), or,
+  with no dund, refreshes from the token file itself. On the 401 retry
+  mcpshell (d14b745, planned v0.7.0) sets `MCPSHELL_AUTH_RETRY=1` and
+  `MCPSHELL_AUTH_REJECTED`; without them an opaque token refused before its
+  expiry is handed back unchanged. Each hosted OAuth server is logged in
+  before the shell starts, since mcpshell gives auth_cmd 30 s.
 - **Login gate diagnosis** (`mcpgate.go`): a server behind Google IAP,
   Cloudflare Access or oauth2-proxy answers with a redirect or an HTML login
   page, which used to surface as a JSON decode error or a discovery timeout.

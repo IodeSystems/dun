@@ -163,9 +163,8 @@ func scriptHints(in mcpInfoIn, cost map[string]int, shellUp bool, hosted []strin
 	var out []string
 	for _, st := range in.servers {
 		n := cost[st.ID]
-		// ViaDirect: an added server; a built-in has no mode. An oauth
-		// server cannot be scripted — dun holds its token (checkOAuth).
-		if st.Via != dun.ViaDirect || !st.Running || n < dun.HeavyServerTokens || isOAuth(st.Auth) {
+		// ViaDirect: an added server; a built-in has no mode.
+		if st.Via != dun.ViaDirect || !st.Running || n < dun.HeavyServerTokens {
 			continue
 		}
 		after := append(slices.Clone(hosted), dun.ShellNamespace(st.ID))
@@ -177,16 +176,6 @@ func scriptHints(in mcpInfoIn, cost map[string]int, shellUp bool, hosted []strin
 		out = append(out, row)
 	}
 	return out
-}
-
-// isOAuth says a server's Auth is an OAuth login state: every other value
-// is a fixed word (authState).
-func isOAuth(auth string) bool {
-	switch auth {
-	case "", "none", "static bearer", "static header":
-		return false
-	}
-	return true
 }
 
 // infoState is what a server is doing, in the splash's words: running,

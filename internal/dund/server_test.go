@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -284,4 +285,52 @@ func TestServerLeavesTheViewsOfAClientThatWent(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("the engine received %q, want %q", got, want)
 	}
+}
+
+// `dun oauth token` reaches the broker over the socket; an engine's peer
+// request reaches the same one (dun/oauthbroker.go).
+func TestServerOAuthCommand(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	svc, sp, _ := newSvc(t)
+	sock := filepath.Join(t.TempDir(), "dund.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go NewServer(svc, UnixPeer).Serve(ln)
+
+	a := dial(t, sock)
+	spec := dun.MarshalOAuthSpec(dun.OAuthSpec{ClientID: "c"})
+	a.send("o1", "", &proto.OAuthCmd{OAuthReq: proto.OAuthReq{Op: "status", ID: "eleven", URL: "https://x.example/mcp", Spec: spec}})
+	ev := a.until(func(ev proto.Event) bool { return ev.Re == "o1" })
+	r, ok := ev.Payload.(*proto.OAuthResult)
+	if !ok || r.Error != "" || dun.UnmarshalOAuthStatus(r.Status).LoggedIn {
+		t.Fatalf("status: %+v", ev.Payload)
+	}
+	a.send("o2", "nope", &proto.OAuthCmd{OAuthReq: proto.OAuthReq{Op: "status", ID: "eleven", URL: "https://x.example/mcp", Spec: spec}})
+	if p, ok := a.until(ackOf("o2")).Payload.(*proto.Ack); !ok || !strings.Contains(p.Error, "no such session") {
+		t.Errorf("another's session: %+v", p)
+	}
+
+	// The engine's way: a peer request, answered on its stdin.
+	a.send("c1", "", &proto.Create{Workspace: t.TempDir()})
+	id := a.until(ackOf("c1")).Session
+	a.send("c2", id, &proto.Subscribe{})
+	a.until(ackOf("c2"))
+	req, _ := json.Marshal(proto.PeerRequest{RID: "r1", Op: "oauth", OAuth: &proto.OAuthReq{Op: "status", ID: "eleven", URL: "https://x.example/mcp", Spec: spec}})
+	a.send("c3", id, &proto.User{Content: "peer-request " + string(req)})
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, g := range sp.received() {
+			if strings.HasPrefix(g, "reply "+id+": ") && strings.Contains(g, `"rid":"r1"`) {
+				if !strings.Contains(g, `"oauth":{"status":`) || strings.Contains(g, `"error"`) {
+					t.Fatalf("peer reply: %s", g)
+				}
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no peer reply: %q", sp.received())
 }

@@ -15,6 +15,8 @@ func init() {
 	command[PeerReply]("peer_reply")
 	command[PeerMsg]("peer")
 	command[ServersChanged]("servers")
+	command[OAuthCmd]("oauth")
+	event[OAuthResult]("oauth_result")
 }
 
 // PeerRequest is an engine asking dund to list the live sessions (Op
@@ -30,6 +32,10 @@ type PeerRequest struct {
 	Wake bool   `json:"wake,omitempty"`
 	// Sched is the operation for Op "sched" (schedule.go).
 	Sched *SchedReq `json:"sched,omitempty"`
+	// OAuth is the operation for Op "oauth": dund holds every OAuth
+	// server's token and is the one process that refreshes it or logs in
+	// (dun/oauthbroker.go).
+	OAuth *OAuthReq `json:"oauth,omitempty"`
 }
 
 // PeerReply answers a PeerRequest. Error is set when it failed. For "list",
@@ -45,6 +51,41 @@ type PeerReply struct {
 	Busy     bool          `json:"busy,omitempty"`
 	Started  bool          `json:"started,omitempty"`
 	Sched    *SchedReply   `json:"sched,omitempty"`
+	OAuth    *OAuthResult  `json:"oauth,omitempty"`
+}
+
+// OAuthReq asks dund for an OAuth server's token (Op "token"), for one
+// after a login if it has none ("ensure"), for a new one because the
+// server refused the last ("unauthorized"), or to log in, log out or say
+// the login's state ("login", "logout", "status"). Spec is the server's
+// oauth block as dun.OAuthSpec, its client secret resolved. A login's URL
+// goes to the asking session as an mcp_login event.
+type OAuthReq struct {
+	Op  string `json:"op"`
+	ID  string `json:"id"`
+	URL string `json:"url"`
+	WWW string `json:"www,omitempty"` // the 401's WWW-Authenticate
+	// Rejected is, for "unauthorized", the Authorization the server
+	// refused; dund refreshes only when it is still dund's current one.
+	Rejected string `json:"rejected,omitempty"`
+	Spec     string `json:"spec"` // JSON
+}
+
+// OAuthResult answers an OAuthReq: the Authorization header value ("" for
+// none), the login's state as dun.OAuthStatus, and for "logout" whether a
+// token was revoked.
+type OAuthResult struct {
+	Authorization string `json:"authorization,omitempty"`
+	Status        string `json:"status,omitempty"` // JSON
+	Revoked       bool   `json:"revoked,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// OAuthCmd is OAuthReq from a client of dund's socket: `dun oauth token`,
+// which mcpshell runs for a scripted OAuth server's bearer. Session, when
+// set, is where a login's URL is shown.
+type OAuthCmd struct {
+	OAuthReq
 }
 
 // PeerSession is one live session, as dun_list shows it. Name is its

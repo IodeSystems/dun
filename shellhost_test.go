@@ -61,7 +61,7 @@ func TestMcpshellConfig_StdioAndURL(t *testing.T) {
 		{ID: "lit", URL: "https://lit/mcp", Bearer: "abc", Headers: map[string]string{"Authorization": "Bearer abc"}},
 		{ID: "unset", URL: "https://u/mcp", Bearer: "${NOPE_NOT_SET}"},
 		{ID: "9x", Command: "n"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestMcpshellConfig_StdioAndURL(t *testing.T) {
 	if _, ok := s["_9x"]; !ok {
 		t.Errorf("namespaces must be identifiers: %v", s)
 	}
-	if _, err := mcpshellConfig([]Server{{ID: "a-b", Command: "x"}, {ID: "a_b", Command: "y"}}); err == nil {
+	if _, err := mcpshellConfig([]Server{{ID: "a-b", Command: "x"}, {ID: "a_b", Command: "y"}}, nil); err == nil {
 		t.Error("two servers on one namespace must be refused")
 	}
 }
@@ -102,7 +102,7 @@ func TestMcpshellConfig_ShellOptions(t *testing.T) {
 			Unchecked:  []string{"grafana-*", "["},
 		}},
 		{ID: "plain", Command: "p"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

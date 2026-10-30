@@ -15,23 +15,37 @@ import (
 // The harness side of OAuth servers: one oauthClient per server, the
 // /mcp login and /mcp logout commands, and the auth column of /mcp.
 
-// oauthFor is s's login, or nil when s does not log in with OAuth. The client
-// is kept across restarts; a changed oauth block replaces it.
-func (h *Harness) oauthFor(s Server) *oauthClient {
+// oauthFor is s's login, or nil when s does not log in with OAuth: dund's
+// (Config.OAuthBroker, oauthbroker.go) when the engine runs under it, else
+// the engine's own client. It is kept across restarts; a changed oauth
+// block replaces it.
+func (h *Harness) oauthFor(s Server) oauthSource {
 	if s.OAuth == nil || s.URL == "" {
 		return nil
 	}
 	h.oauthMu.Lock()
 	defer h.oauthMu.Unlock()
-	if oc := h.oauth[s.ID]; oc != nil && oc.url == s.URL && reflect.DeepEqual(oc.spec, *s.OAuth) {
-		return oc
+	if o := h.oauth[s.ID]; o.src != nil && o.url == s.URL && reflect.DeepEqual(o.spec, *s.OAuth) {
+		return o.src
 	}
 	if h.oauth == nil {
-		h.oauth = map[string]*oauthClient{}
+		h.oauth = map[string]oauthEntry{}
 	}
-	oc := newOAuthClient(s, h.cfg.OnLogin, h.cfg.OpenBrowser)
-	h.oauth[s.ID] = oc
-	return oc
+	var src oauthSource
+	if h.cfg.OAuthBroker != nil {
+		src = newBrokered(s, h.cfg.OAuthBroker)
+	} else {
+		src = newOAuthClient(s, h.cfg.OnLogin, h.cfg.OpenBrowser)
+	}
+	h.oauth[s.ID] = oauthEntry{url: s.URL, spec: *s.OAuth, src: src}
+	return src
+}
+
+// oauthEntry is a server's login and the config it was made for.
+type oauthEntry struct {
+	url  string
+	spec OAuthSpec
+	src  oauthSource
 }
 
 // HasOAuth reports whether server id logs in with OAuth — whose start may

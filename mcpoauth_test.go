@@ -572,7 +572,6 @@ func TestOAuthSpec_ConfigRoundTripAndMerge(t *testing.T) {
 		{ServerSpec{ID: "x", Command: "x", OAuth: &OAuthSpec{ClientID: "c"}}, "", "remote server"},
 		{ServerSpec{ID: "x", URL: "https://x", OAuth: &OAuthSpec{}}, "", "client_id"},
 		{ServerSpec{ID: "x", URL: "https://x", Bearer: "t", OAuth: &OAuthSpec{ClientID: "c"}}, "", "both bearer and oauth"},
-		{ServerSpec{ID: "x", URL: "https://x", OAuth: &OAuthSpec{ClientID: "c"}}, ViaShell, "shell"},
 		{ServerSpec{ID: "x", URL: "https://x", OAuth: &OAuthSpec{ClientID: "c", Send: "jwt"}}, "", "send"},
 	} {
 		if err := checkOAuth(c.s, c.via); err == nil || !strings.Contains(err.Error(), c.want) {

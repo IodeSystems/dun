@@ -638,8 +638,7 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 	if _, ok := builtinID(id); ok {
 		return "", fmt.Errorf("%s is dun's own: it has no mode", id)
 	}
-	s, err := h.knownServer(id)
-	if err != nil {
+	if _, err := h.knownServer(id); err != nil {
 		return "", err
 	}
 	if builtinServer(id) {
@@ -653,9 +652,6 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 	case ViaDirect, ViaShell:
 	default:
 		return "", fmt.Errorf("mode %q: want standalone or scripted", via)
-	}
-	if via == ViaShell && s.OAuth != nil {
-		return "", fmt.Errorf("%q logs in with oauth, and dun holds its token: it cannot be scripted", id)
 	}
 	stored := via
 	if scope == ScopeGlobal && via == ViaDirect {

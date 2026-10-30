@@ -46,6 +46,27 @@ func newPeerLink(em *emitter) *peerLink {
 }
 
 func (p *peerLink) call(ctx context.Context, req proto.PeerRequest) (proto.PeerReply, error) {
+	return p.callFor(ctx, req, peerTimeout)
+}
+
+// oauthTimeout bounds an OAuth request to dund: one may wait on a person's
+// login in a browser, which dund bounds at five minutes.
+var oauthTimeout = 6 * time.Minute
+
+// oauth asks dund for an OAuth server's token, or to log in or out
+// (dun/oauthbroker.go).
+func (p *peerLink) oauth(ctx context.Context, req dun.OAuthRequest) (dun.OAuthResult, error) {
+	rep, err := p.callFor(ctx, proto.PeerRequest{Op: "oauth", OAuth: &proto.OAuthReq{
+		Op: req.Op, ID: req.ID, URL: req.URL, WWW: req.WWW, Rejected: req.Rejected, Spec: dun.MarshalOAuthSpec(req.Spec)}}, oauthTimeout)
+	var res dun.OAuthResult
+	if rep.OAuth != nil {
+		res = dun.OAuthResult{Authorization: rep.OAuth.Authorization, Revoked: rep.OAuth.Revoked,
+			Status: dun.UnmarshalOAuthStatus(rep.OAuth.Status)}
+	}
+	return res, err
+}
+
+func (p *peerLink) callFor(ctx context.Context, req proto.PeerRequest, timeout time.Duration) (proto.PeerReply, error) {
 	ch := make(chan proto.PeerReply, 1)
 	p.mu.Lock()
 	p.seq++
@@ -58,7 +79,7 @@ func (p *peerLink) call(ctx context.Context, req proto.PeerRequest) (proto.PeerR
 		p.mu.Unlock()
 	}()
 	p.em.emit(&req)
-	t := time.NewTimer(peerTimeout)
+	t := time.NewTimer(timeout)
 	defer t.Stop()
 	select {
 	case rep := <-ch:
@@ -67,7 +88,7 @@ func (p *peerLink) call(ctx context.Context, req proto.PeerRequest) (proto.PeerR
 		}
 		return rep, nil
 	case <-t.C:
-		return proto.PeerReply{}, fmt.Errorf("dund did not answer within %s", peerTimeout)
+		return proto.PeerReply{}, fmt.Errorf("dund did not answer within %s", timeout)
 	case <-ctx.Done():
 		return proto.PeerReply{}, ctx.Err()
 	}

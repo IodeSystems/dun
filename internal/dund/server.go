@@ -1,6 +1,7 @@
 package dund
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -361,6 +362,17 @@ func (c *conn) handle(cmd proto.Command) {
 			return
 		}
 		c.reply(cmd, cmd.Session, &proto.PersistState{On: on, Changed: changed})
+	case *proto.OAuthCmd:
+		// `dun oauth token`, for mcpshell: it may wait on a login.
+		var ses *session
+		if cmd.Session != "" {
+			var err error
+			if ses, err = svc.Get(c.who, cmd.Session); err != nil {
+				c.ack(cmd, cmd.Session, err)
+				return
+			}
+		}
+		go func() { c.reply(cmd, cmd.Session, svc.OAuth(context.Background(), ses, p.OAuthReq)) }()
 	case *proto.Leave:
 		// This connection's subscription goes first, so the service counts the
 		// clients still attached without it.

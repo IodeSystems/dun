@@ -94,8 +94,11 @@ func validGlobs(id string, globs []string) []string {
 // variable: mcpshell inherits dun's environment, so the token is read when it
 // connects and never written out. Any other bearer, and every header, goes in
 // resolved — mcpshell does not expand variables in headers — which is why the
-// file is 0600, like the mcp.json the value came from.
-func mcpshellConfig(hosted []Server) ([]byte, error) {
+// file is 0600, like the mcp.json the value came from. An OAuth server's
+// auth_cmd is oauthCmd's: `dun oauth token`, which asks dund for the token
+// (oauthbroker.go); mcpshell runs it at first use, before a JWT expires, and
+// after a 401.
+func mcpshellConfig(hosted []Server, oauthCmd func(Server) string) ([]byte, error) {
 	out := map[string]mcpshellServer{}
 	for _, s := range hosted {
 		ns := ShellNamespace(s.ID)
@@ -109,7 +112,10 @@ func mcpshellConfig(hosted []Server) ([]byte, error) {
 			for k, v := range s.Headers {
 				headers[k] = v
 			}
-			if m := envRef.FindStringSubmatch(s.Bearer); m != nil {
+			if s.OAuth != nil && oauthCmd != nil {
+				delete(headers, "Authorization")
+				e.AuthCmd = oauthCmd(s)
+			} else if m := envRef.FindStringSubmatch(s.Bearer); m != nil {
 				name := m[1] + m[2]
 				delete(headers, "Authorization")
 				if os.Getenv(name) != "" { // unset: no Authorization, as direct
@@ -232,7 +238,7 @@ func (h *Harness) shellArgsHosted(s Server) []string {
 		log.Printf("dun: no project state dir — the shell starts without its hosted servers")
 		return s.Args
 	}
-	b, err := mcpshellConfig(hosted)
+	b, err := mcpshellConfig(hosted, h.oauthAuthCmd)
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(path), 0o700)
 	}
@@ -404,4 +410,38 @@ func (h *Harness) bytesToTokens(n int) int {
 		return 0
 	}
 	return int(math.Ceil(float64(n) / h.meter.CharsPerToken()))
+}
+
+// oauthAuthCmd is a hosted OAuth server's auth_cmd: this binary's `oauth
+// token`, with the server's spec and the session a login is shown in.
+func (h *Harness) oauthAuthCmd(s Server) string {
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "dun"
+	}
+	cmd := shellQuote(exe) + " oauth token --spec " + EncodeOAuthAuthSpec(OAuthAuthSpec{ID: s.ID, URL: s.URL, OAuth: *s.OAuth})
+	if id := h.SessionID(); id != "" {
+		cmd += " --session " + shellQuote(id)
+	}
+	return cmd
+}
+
+// loginHosted gets a token for each hosted OAuth server before the shell
+// starts, as a direct server's start does: a login waits on a person, and
+// mcpshell gives auth_cmd 30 s. One that does not log in is noted; the
+// shell starts anyway, and that server's calls fail until /mcp login.
+func (h *Harness) loginHosted(ctx context.Context, shell string, phase *startPhase) {
+	h.srvMu.Lock()
+	hosted := h.hostedSpecs()
+	h.srvMu.Unlock()
+	for _, hs := range hosted {
+		src := h.oauthFor(hs)
+		if src == nil {
+			continue
+		}
+		phase.set("logging in (OAuth) to " + hs.ID)
+		if err := src.ensure(ctx); err != nil {
+			h.noteServer(shell, "%s: no OAuth login: %s", hs.ID, oneLine(err.Error(), 300))
+		}
+	}
 }

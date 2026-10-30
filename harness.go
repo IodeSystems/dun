@@ -364,6 +364,10 @@ type Config struct {
 	// works; OpenBrowser, when set, also tries to open it here.
 	OnLogin     func(server, url string)
 	OpenBrowser func(url string) error
+	// OAuthBroker, when set, is dund: it holds every OAuth server's token,
+	// refreshes it and runs the login (oauthbroker.go); OnLogin and
+	// OpenBrowser are then dund's to do.
+	OAuthBroker func(ctx context.Context, req OAuthRequest) (OAuthResult, error)
 	// OnNotify fires when a plain notification (KindNotification) is injected
 	// into the conversation (e.g. a background job's completion).
 	OnNotify func(text string)
@@ -597,7 +601,7 @@ type Harness struct {
 	// so a cached token and a running login are not lost. Its own lock:
 	// Servers() reads it while holding srvMu.
 	oauthMu sync.Mutex
-	oauth   map[string]*oauthClient
+	oauth   map[string]oauthEntry
 	// turnMu is held for the length of a turn. A server command arrives on
 	// another goroutine (the -p reader), and swapping the Session's tools out
 	// from under a running turn is a data race — so a rebuild that cannot take

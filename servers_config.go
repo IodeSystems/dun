@@ -269,8 +269,6 @@ func checkOAuth(s ServerSpec, via string) error {
 		return fmt.Errorf("oauth needs a client_id (dun does no dynamic client registration)")
 	case s.Bearer != "":
 		return fmt.Errorf("has both bearer and oauth — keep one")
-	case via == ViaShell:
-		return fmt.Errorf("an oauth server cannot be scripted (run in the shell): dun holds its token (remove \"via\")")
 	case o.Send != "" && o.Send != SendAccessToken && o.Send != SendIDToken:
 		return fmt.Errorf("oauth send %q: want %q or %q", o.Send, SendAccessToken, SendIDToken)
 	case o.RedirectPort < 0 || o.RedirectPort > 65535:
