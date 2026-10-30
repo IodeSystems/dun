@@ -226,6 +226,7 @@ func main() {
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place); in a session, /isolate worktree")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
 	childProvider := flag.String("child-provider", "", "logged-in provider --child-model is on (default: this session's)")
+	childEffort := flag.String("child-effort", "", "effort for spawned sub-agents: default, off, low, medium, high (default: the saved /effort level)")
 	// ship was removed 2026-10-27: repos state their own shipping rules. The
 	// flags stay accepted and do nothing, because an older TUI or dund passes
 	// them to this engine and a script may too.
@@ -674,6 +675,7 @@ func main() {
 		StatsLedger:   dun.NewStatsLedger(dun.DefaultStatsDir()),
 		ChildModel:    *childModel,
 		ChildProvider: *childProvider,
+		ChildEffort:   *childEffort,
 		Exec:          backend,
 		Worktree:      wt,
 		CommitCfg:     dun.LoadCommit(absWS),

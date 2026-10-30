@@ -50,7 +50,7 @@ func TestSubAgent_WorktreeIsolation(t *testing.T) {
 	}
 	defer h.Close()
 
-	sa, err := h.spawnAgent(context.Background(), "edit a.txt", "", "", IsoWorktree)
+	sa, err := h.spawnAgent(context.Background(), "edit a.txt", "", "", "", IsoWorktree)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestSubAgent_WorktreeIsolation(t *testing.T) {
 		t.Errorf("a worktree with work was removed: %v", err)
 	}
 
-	empty, err := h.spawnAgent(context.Background(), "look only", "", "", IsoWorktree)
+	empty, err := h.spawnAgent(context.Background(), "look only", "", "", "", IsoWorktree)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,10 +102,10 @@ func TestSubAgent_WorktreeIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer plain.Close()
-	if _, err := plain.spawnAgent(context.Background(), "x", "", "", IsoWorktree); err == nil || !strings.Contains(err.Error(), "needs a git repository") {
+	if _, err := plain.spawnAgent(context.Background(), "x", "", "", "", IsoWorktree); err == nil || !strings.Contains(err.Error(), "needs a git repository") {
 		t.Errorf("a non-repository: %v", err)
 	}
-	if _, err := plain.spawnAgent(context.Background(), "x", "", "", "sideways"); err == nil {
+	if _, err := plain.spawnAgent(context.Background(), "x", "", "", "", "sideways"); err == nil {
 		t.Error("an unknown isolation was taken")
 	}
 }
@@ -120,7 +120,7 @@ func TestSubAgent_NoDirIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	sa, err := h.spawnAgent(context.Background(), "summarize", "", "", IsoNoDir)
+	sa, err := h.spawnAgent(context.Background(), "summarize", "", "", "", IsoNoDir)
 	if err != nil {
 		t.Fatal(err)
 	}

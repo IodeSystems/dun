@@ -61,6 +61,7 @@ type subAgent struct {
 	prompt   string
 	model    string
 	provider string // "" is the parent session's
+	effort   string // "" is the saved /effort level
 	parent   *Harness
 	iso      isolation // where it works, when not in its parent's tree (subisolation.go)
 
@@ -405,13 +406,20 @@ func childSessionFile(parent string, num int) string {
 	return fmt.Sprintf("%s.sub%d.jsonl", strings.TrimSuffix(parent, ".jsonl"), num)
 }
 
-// where is what the child runs on: its model, and its provider when that is
-// not the session's.
+// where is what the child runs on: its model, its provider when that is not
+// the session's, and its effort when it was given one.
 func (s *subAgent) where() string {
-	if s.provider == "" {
-		return s.model
+	w := s.model
+	if s.provider != "" {
+		w += " (" + s.provider + ")"
 	}
-	return s.model + " (" + s.provider + ")"
+	if s.effort != "" {
+		if w != "" {
+			w += ", "
+		}
+		w += "effort " + s.effort
+	}
+	return w
 }
 
 // ChildClient is what Config.ClientFor builds: the runner, and the endpoint
@@ -442,6 +450,7 @@ func childConfig(parent *Harness, num int, cc childRun, iso isolation) Config {
 	cfg.AgentID = num
 	cfg.Client = cc.client
 	cfg.ChildModel = cc.model
+	cfg.Effort = cc.effort
 	if cc.provider != "" {
 		// A child on another provider: its grandchildren default to it too,
 		// and it reports its own endpoint and provider.
@@ -476,6 +485,7 @@ func childConfig(parent *Harness, num int, cc childRun, iso isolation) Config {
 type childRun struct {
 	client          agent.LLMRunner
 	provider, model string
+	effort          string   // "": the saved /effort level
 	endpoint        Endpoint // zero: the parent's
 }
 
@@ -513,14 +523,22 @@ func (h *Harness) clientFor(provider, model string) (childRun, error) {
 
 // spawnAgent starts a child and registers it. The child is RUNNING when this
 // returns; the caller decides whether to wait for it.
-func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, mode string) (*subAgent, error) {
+func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effort, mode string) (*subAgent, error) {
 	if provider == "" && model == "" {
 		provider, model = h.cfg.ChildProvider, h.cfg.ChildModel
+	}
+	if effort == "" {
+		effort = h.cfg.ChildEffort
+	}
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort != "" && !validEffort(effort) {
+		return nil, fmt.Errorf("effort %q: want %s", effort, strings.Join(EffortLevels, ", "))
 	}
 	run, err := h.clientFor(provider, model)
 	if err != nil {
 		return nil, err
 	}
+	run.effort = effort
 	iso, err := h.newIsolation(mode)
 	if err != nil {
 		return nil, err
@@ -533,7 +551,7 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, mode 
 	}
 	h.agMu.Unlock()
 
-	sa := &subAgent{num: num, prompt: prompt, model: run.model, provider: run.provider, parent: h, hb: newHeartbeat(), iso: iso}
+	sa := &subAgent{num: num, prompt: prompt, model: run.model, provider: run.provider, effort: run.effort, parent: h, hb: newHeartbeat(), iso: iso}
 
 	// Start on a background context: a child outlives the TURN that spawned it
 	// (that is the whole point of an async spawn), so tying it to the caller's
@@ -765,7 +783,7 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 		rec := loadAgentState(path)
 		sa := &subAgent{
 			num: num, parent: h, state: agentStopped, restore: path,
-			prompt: rec.Prompt, iso: loadIsolation(path), model: rec.Model, provider: rec.Provider,
+			prompt: rec.Prompt, iso: loadIsolation(path), model: rec.Model, provider: rec.Provider, effort: rec.Effort,
 		}
 		if sa.prompt == "" {
 			sa.prompt = firstUserEntry(path)
@@ -801,6 +819,7 @@ type agentRecord struct {
 	State    string `json:"state"`
 	Model    string `json:"model,omitempty"`
 	Provider string `json:"provider,omitempty"` // "" is the parent session's
+	Effort   string `json:"effort,omitempty"`   // "" is the saved /effort level
 	Prompt   string `json:"prompt,omitempty"`   // as asked: the transcript's first message has the isolation brief too
 }
 
@@ -816,7 +835,7 @@ func agentFile(sessionFile string) string {
 // a child that was running then must resume as one that was.
 func (s *subAgent) saveState() {
 	s.mu.Lock()
-	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Prompt: s.prompt}, s.closed
+	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Effort: s.effort, Prompt: s.prompt}, s.closed
 	path := s.restore
 	if s.h != nil {
 		path = s.h.cfg.SessionFile
@@ -891,13 +910,14 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 		sa.mu.Unlock()
 		return fmt.Sprintf("agent #%d is already running.", sa.num)
 	}
-	provider, model := sa.provider, sa.model
+	provider, model, effort := sa.provider, sa.model, sa.effort
 	sa.mu.Unlock()
 
 	run, err := h.clientFor(provider, model)
 	if err != nil {
 		return fmt.Sprintf("agent #%d could not be resumed: %v", sa.num, err)
 	}
+	run.effort = effort
 	ctx, cancel := context.WithCancel(context.Background())
 	child, err := Start(ctx, childConfig(h, sa.num, run, sa.iso))
 	if err != nil {
@@ -1022,13 +1042,17 @@ func roleSystem(child bool) string {
 
 // agentToolDef is the agent tool. providers are the logged-in ones; with
 // more than one, a spawn may name another.
-func agentToolDef(defaultModel, defaultProvider string, providers []string) llm.ToolDef {
+func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers []string) llm.ToolDef {
 	model := "the session's child model"
 	if defaultModel != "" {
 		model = defaultModel
 	}
 	if defaultProvider != "" {
 		model += " on provider " + defaultProvider
+	}
+	effort := "the session's /effort level"
+	if defaultEffort != "" {
+		effort = defaultEffort
 	}
 	var td llm.ToolDef
 	td.Type = "function"
@@ -1038,13 +1062,15 @@ func agentToolDef(defaultModel, defaultProvider string, providers []string) llm.
 		"returns an answer; what it read never enters yours. It returns at once and you are notified each time " +
 		"the child ends a turn, unless wait:true. If it ends with a question, answer with " +
 		"jobs(agent:N, tell:\"…\"). It stays resident until you dismiss it with jobs(agent:N, kill:true); " +
-		"nothing cleans it up for you. Default model: " + model + "."
+		"nothing cleans it up for you. Default model: " + model + ". Default effort: " + effort + "."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"prompt": map[string]any{"type": "string", "description": "the task, complete on its own — the child cannot see your conversation"},
 			"model":  map[string]any{"type": "string", "description": "run this child on a specific model"},
-			"wait":   map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
+			"effort": map[string]any{"type": "string", "enum": EffortLevels,
+				"description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server"},
+			"wait": map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
 			"isolation": map[string]any{"type": "string", "enum": []string{IsoNone, IsoWorktree, IsoDocker, IsoNoDir},
 				"description": "where the child works. none (default): this tree. worktree: its own git worktree branched " +
 					"from this tree's last commit (uncommitted changes are not in it); it commits there and you merge its " +
@@ -1072,15 +1098,19 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			Prompt    string `json:"prompt"`
 			Provider  string `json:"provider"`
 			Model     string `json:"model"`
+			Effort    string `json:"effort"`
 			Wait      bool   `json:"wait"`
 			Isolation string `json:"isolation"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		out := spawnTool(ctx, h, args.Prompt, args.Provider, args.Model, args.Isolation, args.Wait)
+		out := spawnTool(ctx, h, args.Prompt, args.Provider, args.Model, args.Effort, args.Isolation, args.Wait)
 		if onCall != nil {
 			call := map[string]any{"prompt": args.Prompt, "model": args.Model, "wait": args.Wait}
 			if args.Provider != "" {
 				call["provider"] = args.Provider
+			}
+			if args.Effort != "" {
+				call["effort"] = args.Effort
 			}
 			onCall("agent", call, out)
 		}
@@ -1088,11 +1118,11 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 	}
 }
 
-func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, isolation string, wait bool) string {
+func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort, isolation string, wait bool) string {
 	if strings.TrimSpace(prompt) == "" {
 		return "ERROR: agent requires a non-empty prompt."
 	}
-	sa, err := h.spawnAgent(ctx, prompt, provider, model, isolation)
+	sa, err := h.spawnAgent(ctx, prompt, provider, model, effort, isolation)
 	if err != nil {
 		return "ERROR: could not start the agent: " + err.Error()
 	}

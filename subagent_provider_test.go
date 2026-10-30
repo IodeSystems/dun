@@ -44,7 +44,7 @@ func startParentOn(t *testing.T, kid *scriptRunner, asked *[]askedFor) *Harness 
 func TestSubAgent_OnAnotherProvider(t *testing.T) {
 	var asked []askedFor
 	h := startParentOn(t, &scriptRunner{rounds: []roundFn{textRound("done")}}, &asked)
-	sa, err := h.spawnAgent(context.Background(), "say done", "local", "qwen3-8b", "")
+	sa, err := h.spawnAgent(context.Background(), "say done", "local", "qwen3-8b", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,13 +76,13 @@ func TestSubAgent_OnAnotherProvider(t *testing.T) {
 func TestSubAgent_AnotherProviderFailsInsteadOfFallingBack(t *testing.T) {
 	var asked []askedFor
 	h := startParentOn(t, &scriptRunner{}, &asked)
-	if _, err := h.spawnAgent(context.Background(), "x", "gone", "m", ""); err == nil || !strings.Contains(err.Error(), "not logged in") {
+	if _, err := h.spawnAgent(context.Background(), "x", "gone", "m", "", ""); err == nil || !strings.Contains(err.Error(), "not logged in") {
 		t.Errorf("unknown provider: %v", err)
 	}
-	if _, err := h.spawnAgent(context.Background(), "x", "local", "", ""); err == nil || !strings.Contains(err.Error(), "needs a model") {
+	if _, err := h.spawnAgent(context.Background(), "x", "local", "", "", ""); err == nil || !strings.Contains(err.Error(), "needs a model") {
 		t.Errorf("provider with no model: %v", err)
 	}
-	if out := spawnTool(context.Background(), h, "x", "gone", "m", "", false); !strings.HasPrefix(out, "ERROR:") {
+	if out := spawnTool(context.Background(), h, "x", "gone", "m", "", "", false); !strings.HasPrefix(out, "ERROR:") {
 		t.Errorf("the tool must report the failure: %q", out)
 	}
 	if n := len(h.Agents()); n != 0 {
@@ -96,12 +96,12 @@ func TestSubAgent_ChildProviderDefault(t *testing.T) {
 	var asked []askedFor
 	h := startParentOn(t, &scriptRunner{rounds: []roundFn{textRound("a"), textRound("b")}}, &asked)
 	h.cfg.ChildProvider, h.cfg.ChildModel = "local", "qwen3-8b"
-	a, err := h.spawnAgent(context.Background(), "a", "", "", "")
+	a, err := h.spawnAgent(context.Background(), "a", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitIdle(t, a)
-	b, err := h.spawnAgent(context.Background(), "b", "", "haiku", "")
+	b, err := h.spawnAgent(context.Background(), "b", "", "haiku", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,10 +118,10 @@ func TestAgentToolDef_ProviderOnlyWithSeveral(t *testing.T) {
 	props := func(td llm.ToolDef) map[string]any {
 		return td.Function.Parameters.(map[string]any)["properties"].(map[string]any)
 	}
-	if _, ok := props(agentToolDef("", "", []string{"claude"}))["provider"]; ok {
+	if _, ok := props(agentToolDef("", "", "", []string{"claude"}))["provider"]; ok {
 		t.Error("one provider: nothing to choose")
 	}
-	td := agentToolDef("qwen3-8b", "local", []string{"claude", "local"})
+	td := agentToolDef("qwen3-8b", "local", "", []string{"claude", "local"})
 	p, ok := props(td)["provider"].(map[string]any)
 	if !ok || strings.Join(p["enum"].([]string), ",") != "claude,local" {
 		t.Errorf("provider argument %v", props(td)["provider"])
@@ -148,5 +148,57 @@ func TestSpendMeter_OtherKeysBudgetIsNotTheSessions(t *testing.T) {
 	own(llm.Usage{KeyBudget: llm.KeyBudget{Reported: true, Currency: "USD"}})
 	if !m.budget.Reported {
 		t.Error("the session key's own budget was dropped")
+	}
+}
+
+// A child spawned with an effort thinks at that level, keeps it in its
+// record, and does not save it: /effort's saved level is every session's.
+func TestSubAgent_OwnEffort(t *testing.T) {
+	var asked []askedFor
+	h := startParentOn(t, &scriptRunner{rounds: []roundFn{textRound("a"), textRound("b")}}, &asked)
+	sa, err := h.spawnAgent(context.Background(), "a", "local", "qwen3-8b", "Low", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, sa)
+	if got := sa.h.Effort(); got != EffortLow {
+		t.Errorf("child effort %q", got)
+	}
+	if got := h.Effort(); got != EffortDefault {
+		t.Errorf("the parent's effort moved to %q", got)
+	}
+	if got := LoadEffort(); got != EffortDefault {
+		t.Errorf("the child's effort was saved: %q", got)
+	}
+	if r := sa.report(); !strings.Contains(r, "on qwen3-8b (local), effort low") {
+		t.Errorf("report %q", r)
+	}
+	if rec := loadAgentState(sa.h.cfg.SessionFile); rec.Effort != EffortLow {
+		t.Errorf("record %+v", rec)
+	}
+	// --child-effort is the default; a spawn with none and no default has
+	// the saved level.
+	h.cfg.ChildEffort = EffortOff
+	b, err := h.spawnAgent(context.Background(), "b", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, b)
+	if got := b.h.Effort(); got != EffortOff {
+		t.Errorf("default child effort %q", got)
+	}
+	if _, err := h.spawnAgent(context.Background(), "c", "", "", "huge", ""); err == nil || !strings.Contains(err.Error(), "want default, off") {
+		t.Errorf("bad effort: %v", err)
+	}
+}
+
+func TestAgentToolDef_Effort(t *testing.T) {
+	td := agentToolDef("", "", EffortLow, nil)
+	p := td.Function.Parameters.(map[string]any)["properties"].(map[string]any)["effort"].(map[string]any)
+	if strings.Join(p["enum"].([]string), ",") != strings.Join(EffortLevels, ",") {
+		t.Errorf("effort enum %v", p["enum"])
+	}
+	if !strings.Contains(td.Function.Description, "Default effort: low.") {
+		t.Errorf("description %q", td.Function.Description)
 	}
 }

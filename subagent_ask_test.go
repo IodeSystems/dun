@@ -40,7 +40,7 @@ func startParentOf(t *testing.T, child *scriptRunner) *Harness {
 
 func spawnKid(t *testing.T, h *Harness, prompt string) *subAgent {
 	t.Helper()
-	sa, err := h.spawnAgent(context.Background(), prompt, "", "kid", "")
+	sa, err := h.spawnAgent(context.Background(), prompt, "", "kid", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

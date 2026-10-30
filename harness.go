@@ -294,6 +294,12 @@ type Config struct {
 	ChildModel string
 	// ChildProvider is the provider ChildModel is on; empty = this session's.
 	ChildProvider string
+	// ChildEffort is the default effort for spawned sub-agents; empty = the
+	// saved /effort level. A spawn may override it.
+	ChildEffort string
+	// Effort is this harness's own effort level, in place of the saved one;
+	// a child spawned with an effort has it. Empty = the saved level.
+	Effort string
 	// Files configures the built-in file tools (files.go); nil = the defaults
 	// (DefaultFileTools: read, edit, write), rooted at Workspace.
 	Files *FilesConfig
@@ -1358,7 +1364,13 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		cfg: cfg, specs: servers, sessSw: sessSw, exts: exts, extErrs: extErrs, lastErr: map[string]string{}, lastStart: map[string]time.Duration{}, starting: map[string]time.Time{}, closed: make(chan struct{}),
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
-	h.effort.Store(LoadEffort()) // /effort's saved level (effort.go)
+	// /effort's saved level (effort.go), unless this harness was given its
+	// own: a child spawned with an effort keeps it, and does not save it.
+	if cfg.Effort != "" {
+		h.effort.Store(cfg.Effort)
+	} else {
+		h.effort.Store(LoadEffort())
+	}
 	if cfg.Parent == nil {
 		applyContextConfig(savedContext(cfg.Endpoint)) // /context config, saved for this model (window.go)
 	}

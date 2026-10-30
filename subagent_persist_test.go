@@ -38,7 +38,7 @@ func persistFixture(t *testing.T) (ws, sessionFile string, runners map[string]*s
 		"c": {rounds: []roundFn{cancellableBlock}},
 	}
 	h := startWith(t, ws, sessionFile, runners, true)
-	one, err := h.spawnAgent(context.Background(), "find the config", "", "a", IsoNoDir)
+	one, err := h.spawnAgent(context.Background(), "find the config", "", "a", "", IsoNoDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func startWith(t *testing.T, ws, sessionFile string, runners map[string]*scriptR
 
 func spawnKidOn(t *testing.T, h *Harness, prompt, model string) *subAgent {
 	t.Helper()
-	sa, err := h.spawnAgent(context.Background(), prompt, "", model, "")
+	sa, err := h.spawnAgent(context.Background(), prompt, "", model, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

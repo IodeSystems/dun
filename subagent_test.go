@@ -210,7 +210,7 @@ func TestRoleSystem_TellsEachSideWhatItMayDo(t *testing.T) {
 	if root := roleSystem(false); root != "" {
 		t.Errorf("a root's role is the agent tool's description, not the prompt: %q", root)
 	}
-	desc := agentToolDef("", "", nil).Function.Description
+	desc := agentToolDef("", "", "", nil).Function.Description
 	if !strings.Contains(desc, "jobs(agent:N, kill:true)") || !strings.Contains(desc, "nothing cleans it up") {
 		t.Errorf("agent must say how to clean up a child: %q", desc)
 	}
