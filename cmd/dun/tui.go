@@ -3739,7 +3739,7 @@ func (m tuiModel) headView() string {
 		head += stDim.Render(" · " + m.model)
 	}
 	if n := m.liveAgents(); n > 0 {
-		head += stNote.Render(fmt.Sprintf("  · %d agents", n))
+		head += stNote.Render("  · "+plural(n, "agent"))
 	}
 	return m.reqs.withStats(head, m.w)
 }
