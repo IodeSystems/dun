@@ -146,7 +146,7 @@ func skillChoices(m *tuiModel, arg string) *argList {
 
 // mcpArgs is what each /mcp subcommand takes after it, position by
 // position: a server id, a preset, a mode, a tool switch, a scope flag, or
-// "" for free text (a tool name). The /rag and /poly-lsp switches take a scope.
+// "" for free text (a tool name). The /rag and /lsp switches take a scope.
 var mcpArgs = map[string][]string{
 	"tools": {"id"}, "remove": {"id"}, "rm": {"id"}, "refresh": {"id"}, "login": {"id"}, "logout": {"id"}, "restart": {"id"},
 	"on": {"id", "scope"}, "off": {"id", "scope"}, "unset": {"id", "unsetScope"},

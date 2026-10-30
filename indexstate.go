@@ -54,7 +54,7 @@ import (
 //     raises the budget instead — the remedy's, else the spent one scaled by
 //     files counted over files read, plus a fifth — saved as
 //     ServerSpec.IndexBudget. Either way it says what it did, why, and how
-//     to undo it (/poly-lsp include <dir>, /poly-lsp budget default). Once
+//     to undo it (/lsp include <dir>, /lsp budget default). Once
 //     per session; a second failure is reported, not retried.
 //   - failed at the file cap (the intermediate build): the same excludes;
 //     with nothing obvious it changes nothing and reports.
@@ -190,6 +190,7 @@ type IndexSupport struct {
 	Anyway   bool // --index-anyway (index a root that is not a project)
 	Daemon   bool // --daemon that keeps the file-access hook (daemonMarker)
 	AnyRoot  bool // its daemon admits a root outside --allow (anyRootMarker)
+	LSP      bool // --lsp-off / --lsp-on: the /lsp language switches (v0.4.0)
 }
 
 // daemonMarker is in the --hook help of a poly-lsp-mcp whose --daemon proxy
@@ -247,6 +248,7 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 	sup.Anyway = strings.Contains(help, "--index-anyway")
 	sup.Daemon = strings.Contains(help, daemonMarker)
 	sup.AnyRoot = strings.Contains(help, anyRootMarker)
+	sup.LSP = lspFlagsKnown(help)
 	sup.Protocol = sup.Budget || strings.Contains(help, "--index-max-files")
 	indexProbes.Store(key, sup)
 	return sup, resolved, nil

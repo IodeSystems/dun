@@ -222,7 +222,7 @@ func (d *doctor) providers() {
 var doctorTools = []struct{ name, level, need string }{
 	{"git", "fail", ""},
 	{"mcpshell", "warn", ""},
-	{"poly-lsp-mcp", "warn", "/poly-lsp"},
+	{"poly-lsp-mcp", "warn", "/lsp"},
 	{"raglit", "warn", "/rag"},
 }
 

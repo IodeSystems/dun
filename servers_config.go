@@ -141,19 +141,19 @@ type ServerSpec struct {
 	Detach []string `json:"detach,omitempty"`
 	// Exclude is directories, relative to the workspace, left out of the
 	// server's index: passed as --exclude to a poly-lsp-mcp that takes it
-	// (indexstate.go). Written at project scope by /poly-lsp exclude and by
+	// (indexstate.go). Written at project scope by /lsp exclude and by
 	// dun itself when an index does not fit its startup budget.
 	Exclude []string `json:"exclude,omitempty"`
 	// IndexBudget is the server's index startup budget, as poly-lsp-mcp's
 	// --index-budget takes it ("48000ms", "20000ops", "0" unbounded); ""
-	// is its default. Written at project scope by /poly-lsp budget and by
+	// is its default. Written at project scope by /lsp budget and by
 	// dun when an index runs out of budget with nothing obvious to leave
 	// out.
 	IndexBudget string `json:"index_budget,omitempty"`
 	// IndexAnyway lets the server index a root that is not a project (the
 	// home directory, /, a directory of clones): passed as --index-anyway to
 	// a poly-lsp-mcp that takes it. Written at project scope when the person
-	// answers dun's question (askNotProject) or runs /poly-lsp index-anyway.
+	// answers dun's question (askNotProject) or runs /lsp index-anyway.
 	IndexAnyway bool `json:"index_anyway,omitempty"`
 }
 

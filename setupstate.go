@@ -24,7 +24,7 @@ import (
 // list under "languages" (ParseDoctorLanguages).
 //
 // What dun does with it: keeps the report on the server (ServerState.Setup:
-// /poly-lsp shows the table, /mcp info counts the missing), and says one
+// /lsp shows the table, /mcp info counts the missing), and says one
 // quiet line per session about the missing servers worth it (SetupLine).
 // It never installs anything: the servers need their own toolchains, and
 // the install is the person's. An older poly-lsp sends none, and nothing
@@ -117,7 +117,7 @@ func ParseDoctorLanguages(out []byte) (SetupReport, bool) {
 // languages' files (which are the indexed files), or at least 200 files. A
 // share, not a count: dun's own tree has 12 Python helper scripts among
 // ~1,300 files, and a missing pylsp must not nag there, while 12 files in a
-// 60-file project are a fifth of it. /poly-lsp lists every language
+// 60-file project are a fifth of it. /lsp lists every language
 // regardless.
 const (
 	setupMeaningfulShare = 10 // one in this many (a tenth)
@@ -125,7 +125,7 @@ const (
 )
 
 // setupAdds is what a child LSP adds, in a line's words; the report's own
-// "adds" (poly-lsp's terms) is in the /poly-lsp table.
+// "adds" (poly-lsp's terms) is in the /lsp table.
 const setupAdds = "references, rename and diagnostics"
 
 // toolchainBins are the programs a "needs" word stands for, any one of
@@ -273,7 +273,7 @@ func hasProvider(c any) bool {
 	return !ok || !p.Providerless()
 }
 
-// SetupTable is every listed language as rows, for /poly-lsp: its files,
+// SetupTable is every listed language as rows, for /lsp: its files,
 // its language server found (and where) or missing, what a missing one
 // adds, the install command and what that needs.
 func SetupTable(r SetupReport) string {

@@ -21,7 +21,7 @@ func TestBundledExtensions_AreRaglitAndPolyLsp(t *testing.T) {
 	for _, e := range BundledExtensions() {
 		ids = append(ids, e.ID+"/"+e.SlashName()+"/"+e.Source)
 	}
-	if strings.Join(ids, " ") != "raglit/rag/bundled poly-lsp/poly-lsp/bundled" {
+	if strings.Join(ids, " ") != "raglit/rag/bundled poly-lsp/lsp/bundled" {
 		t.Fatalf("bundled: %v", ids)
 	}
 	raglit, _ := bundledExt(ServerDocs)

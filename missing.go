@@ -24,7 +24,7 @@ import (
 // cached one can be a build that no longer works.
 var ToolInstall = map[string]struct{ Module, Lost string }{
 	"mcpshell":     {pinned("mcpshell"), "no eval tool (sandboxed calculations, data, SQL)"},
-	"poly-lsp-mcp": {pinned("poly-lsp-mcp"), "no semantic code tools (/poly-lsp)"},
+	"poly-lsp-mcp": {pinned("poly-lsp-mcp"), "no semantic code tools (/lsp)"},
 	"raglit":       {pinned("raglit"), "no docs search or memories (/rag)"},
 }
 

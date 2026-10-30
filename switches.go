@@ -337,7 +337,7 @@ func containsStr(list []string, s string) bool {
 
 // switchKinds are the kinds a client can switch, by name.
 func (h *Harness) switchKinds() map[string]switchKind {
-	return map[string]switchKind{"skills": h.skillKind(), rulesKind: h.rulesSwitchKind(), indexesKind: h.indexesSwitchKind(), pathsKind: h.pathsSwitchKind()}
+	return map[string]switchKind{"skills": h.skillKind(), rulesKind: h.rulesSwitchKind(), indexesKind: h.indexesSwitchKind(), pathsKind: h.pathsSwitchKind(), lspKind: h.lspSwitchKind()}
 }
 
 // slashName is the command for the kind: its slash, or its name less the

@@ -116,12 +116,12 @@ input dund_AnswerInputBodyInput {
 
 input dund_ControlInputBodyInput {
   action: String!
-  """control: /isolate, /worktree, /mcp…; server: /raglit, /poly-lsp"""
+  """control: /isolate, /worktree, /mcp…; server: /rag, /lsp"""
   kind: dund_ControlInputBodyKind!
   target: String!
 }
 
-"""control: /isolate, /worktree, /mcp…; server: /raglit, /poly-lsp"""
+"""control: /isolate, /worktree, /mcp…; server: /rag, /lsp"""
 enum dund_ControlInputBodyKind {
   control
   server

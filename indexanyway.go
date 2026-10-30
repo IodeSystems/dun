@@ -19,7 +19,7 @@ import (
 // puts (Config.Ask: the picker in the TUI, an `ask` event for a client):
 //
 //   - "index anyway": ServerSpec.IndexAnyway is saved for this project and
-//     the server restarts with --index-anyway. Undo: /poly-lsp index-anyway
+//     the server restarts with --index-anyway. Undo: /lsp index-anyway
 //     off.
 //   - "not now": the code server stays failed for the session and dun does
 //     not ask again; the line says which repository to start dun in.

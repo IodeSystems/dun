@@ -72,7 +72,7 @@ func TestIndexAnyway_AskedAndAccepted(t *testing.T) {
 	if got := strings.Join(a.opts[0], "|"); got != "index anyway|not now" {
 		t.Errorf("options %q", got)
 	}
-	for _, want := range []string{"poly-lsp: indexing ~ anyway, for this project (saved to ", "undo: /poly-lsp index-anyway off"} {
+	for _, want := range []string{"poly-lsp: indexing ~ anyway, for this project (saved to ", "undo: /lsp index-anyway off"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the line lacks %q:\n%s", want, msg)
 		}
@@ -129,7 +129,7 @@ func TestIndexAnyway_NotNowAsksOnce(t *testing.T) {
 	msg := nextMsg(t, msgs)
 	for _, want := range []string{"poly-lsp: off for this session — " + ws + " is not a project; the rest of dun works.",
 		"cd a && dun · cd b && dun · cd c && dun · cd d && dun · cd e && dun · and 7 more",
-		"/poly-lsp index-anyway on indexes " + ws + " regardless."} {
+		"/lsp index-anyway on indexes " + ws + " regardless."} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the line lacks %q:\n%s", want, msg)
 		}
@@ -194,7 +194,7 @@ func TestIndexAnyway_NoAsker(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	_, _, msgs := startNotProject(t, t.TempDir(), nil, fakeAnywayEnv+"=1")
 	msg := nextMsg(t, msgs)
-	if !strings.Contains(msg, "cd a && dun") || !strings.Contains(msg, "/poly-lsp index-anyway on indexes it regardless") {
+	if !strings.Contains(msg, "cd a && dun") || !strings.Contains(msg, "/lsp index-anyway on indexes it regardless") {
 		t.Fatalf("%q", msg)
 	}
 }

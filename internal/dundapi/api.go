@@ -285,7 +285,7 @@ type AnswerInput struct {
 type ControlInput struct {
 	SessionPath
 	Body struct {
-		Kind   string `json:"kind" enum:"control,server" doc:"control: /isolate, /worktree, /mcp…; server: /rag, /poly-lsp"`
+		Kind   string `json:"kind" enum:"control,server" doc:"control: /isolate, /worktree, /mcp…; server: /rag, /lsp"`
 		Target string `json:"target"`
 		Action string `json:"action"`
 	}

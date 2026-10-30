@@ -66,7 +66,7 @@ type tuiOpts struct {
 	resume                             string // --resume <id>: resume a specific session
 	disableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /exit)
 	suggest                            bool   // --no-suggest=false: engine emits suggestions after each turn
-	// rag/poly-lsp are --rag/--lsp as typed: "" (unset, use the saved setting),
+	// rag/lsp are --rag/--lsp as typed: "" (unset, use the saved setting),
 	// "true" or "false". Passed through to the -p engine verbatim.
 	rag, lsp string
 	// rephrase is --rephrase: rephrase each user prompt for specificity
@@ -2556,7 +2556,7 @@ func (m tuiModel) computeMatches() []int {
 }
 
 // noteServers records which switchable servers are up, so a restart can put
-// them back. Only ones with a command (/rag, /poly-lsp) — the rest are the config's
+// them back. Only ones with a command (/rag, /lsp) — the rest are the config's
 // business, and the new engine reads the same config.
 func (m *tuiModel) noteServers(ev evMsg) {
 	list, ok := ev["servers"].([]any)

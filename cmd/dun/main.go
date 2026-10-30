@@ -256,7 +256,7 @@ func main() {
 	replaySpeed := flag.Float64("replay-speed", 1, "replay: pacing multiplier over the recorded timing (2 = twice as fast)")
 	inputDelay := flag.Duration("input-delay", -1, "replay: fixed gap between events, overriding the recording (0 = no delay); negative = use the recorded timing")
 	maxGap := flag.Duration("max-gap", 2*time.Second, "replay: compress idle gaps longer than this (0 = replay the recording verbatim)")
-	// Tri-state: unset means "whatever /rag auto or /poly-lsp auto saved", which a
+	// Tri-state: unset means "whatever /rag auto or /lsp auto saved", which a
 	// plain bool cannot express (its zero value would silently mean "off").
 	var ragFlag, lspFlag tristate
 	flag.Var(&ragFlag, "rag", "start the docs server (raglit) this run: --rag or --rag=false (default: the saved setting)")
@@ -1112,7 +1112,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	em.emit(catalogEvent(h))
 	em.emit(settingsEvent())
 	em.emit(commandsEvent(h))
-	// Server commands (/rag, /poly-lsp) are handled on the READER's goroutine, not
+	// Server commands (/rag, /lsp) are handled on the READER's goroutine, not
 	// here: this loop is blocked inside a turn most of the time, and "turn the
 	// docs server on" should not queue behind a five-minute agent run. The
 	// harness defers the actual tool-set swap to a turn boundary.
@@ -1844,7 +1844,7 @@ type inputStream struct {
 	// hold); heldCh says one is waiting.
 	held   []userMsg
 	heldCh chan struct{}
-	// srv handles a `server` event (/rag, /poly-lsp) inline, for the same reason as
+	// srv handles a `server` event (/rag, /lsp) inline, for the same reason as
 	// mid: it must work while a turn is running.
 	srv func(alias, action string)
 	// srvPending holds server commands that arrived before the handler was
@@ -2439,7 +2439,7 @@ func (e *emitter) emit(payload any) {
 // not commands.
 func recordReplies(h *dun.Harness) func(payload any) {
 	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", dun.ServerDocs: "rag"}
-	kindSlash := map[string]string{"indexes": "rag", "paths": "file", "skills": "skill", "rules": "rules"}
+	kindSlash := map[string]string{"indexes": "rag", "paths": "file", "lsp": "lsp", "skills": "skill", "rules": "rules"}
 	commands := map[string]bool{"slash": true, "files": true, "switches": true, "mcp": true, "ext": true, "jobs": true,
 		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "suggest": true,
 		"worklog": true, "memories": true, "interrupt": true, "ctxconfig": true, "repaint": true}

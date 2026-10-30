@@ -258,3 +258,34 @@ switched off. A tool switched off leaves the definitions and is refused if
 called. Stored in `builtins.json` at each scope (builtins.go). A switch
 changes the listed tools, the prompt's prefix: the server re-reads the
 conversation once.
+
+## /lsp: the language servers (2026-10-29)
+
+(USER 2026-10-28.) `/poly-lsp` became `/lsp` (`/poly-lsp` still routes to
+it), and bare `/lsp` is a table like `/mcp`'s and `/rag`'s: one row per
+language poly-lsp-mcp knows (`poly-lsp-mcp lsp list --json --root <ws>`,
+v0.4.0), its child language server found or not (with the install hint),
+where the language comes from (builtin, user, project), off by default,
+format on edit.
+
+- **Switches** (`lspkind.go`): each language on, off or unset at the global,
+  project and session scopes, in `lsp.json` like the other kinds
+  (switches.go). Unset, a language is on unless poly-lsp-mcp has it off by
+  default. At spawn, a language switched off becomes `--lsp-off`, one off by
+  default and switched on `--lsp-on`, to a build whose `mcp --help` lists
+  them (`IndexSupport.LSP`). A change restarts a running code server. With no
+  switch at any scope, `lsp list` is not run at spawn.
+- **Custom servers** are poly-lsp-mcp's: `/lsp add <name> …` and `/lsp
+  remove <name>` run `poly-lsp-mcp lsp add|remove` with the arguments as
+  typed, which writes `servers.yaml` in its daemon home. dun never writes
+  that file. Since v0.4.0 the shared daemon reads no `poly-lsp-mcp.yaml`
+  from its start directory, so `lsp add` is the only way a custom server
+  reaches it.
+- `/lsp on <language>` is a language; `/lsp on` alone, or with a scope flag,
+  is still the code server itself. exclude, include, budget, index-anyway
+  and restart are the code index's, as before; `/lsp status` is its report.
+- Not built: the per-client `--format-on-edit` / `--no-format-on-edit`
+  switches (format on edit is shown, set by `lsp add --format-on-edit`), and
+  the edit row's formatted / formatSkipped. Upstream limits: `--lsp-off` does
+  not apply to node selectors or `/query`, and `--root-marker` is stored but
+  unused.

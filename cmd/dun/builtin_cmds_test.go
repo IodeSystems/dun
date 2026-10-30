@@ -57,7 +57,7 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 	}
 	defer h.Close()
 	for _, id := range []string{"raglit", "poly-lsp"} {
-		slash := map[string]string{"raglit": "rag"}[id] // the command; the server keeps its id
+		slash := map[string]string{"raglit": "rag", "poly-lsp": "lsp"}[id] // the command; the server keeps its id
 		if slash == "" {
 			slash = id
 		}
@@ -101,15 +101,15 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 		t.Errorf("bare /rag lists its commands:\n%s", out)
 	}
 	// poly-lsp's are its index's excludes (indexcmd.go).
-	if out := runServerCmd(ctx, h, "poly-lsp", ""); !strings.Contains(out, "/poly-lsp exclude ") || !strings.Contains(out, "/poly-lsp include ") {
-		t.Errorf("bare /poly-lsp lists exclude and include:\n%s", out)
+	if out := runServerCmd(ctx, h, "poly-lsp", ""); !strings.Contains(out, "/lsp exclude ") || !strings.Contains(out, "/lsp include ") {
+		t.Errorf("bare /lsp lists exclude and include:\n%s", out)
 	}
 	l := commandList(h.Servers(), "")
 	names := map[string]bool{}
 	for _, c := range l.Items {
 		names[c.Name] = true
 	}
-	if !names["rag"] || !names["poly-lsp"] {
+	if !names["rag"] || !names["lsp"] {
 		t.Errorf("both are engine commands: %v", names)
 	}
 }

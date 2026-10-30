@@ -51,7 +51,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 		}
 		got[c.Name] = true
 	}
-	if !got["hello"] || !got["rag"] || !got["poly-lsp"] {
+	if !got["hello"] || !got["rag"] || !got["lsp"] {
 		t.Errorf("extension commands: %v", got)
 	}
 	for _, c := range commandList(nil, "", exts...).Items {
@@ -86,7 +86,7 @@ func TestCommandListShowsState(t *testing.T) {
 	for _, c := range l.Items {
 		got[c.Name] = c.State + "/" + c.Detail
 	}
-	if got["rag"] != "on/autostart" || got["poly-lsp"] != "off/not configured" || got["isolate"] != "docker/" {
+	if got["rag"] != "on/autostart" || got["lsp"] != "off/not configured" || got["isolate"] != "docker/" {
 		t.Fatalf("states: %v", got)
 	}
 }
@@ -171,6 +171,11 @@ func TestRouteSlash(t *testing.T) {
 		"poly-lsp exclude Vendor/X":  {"server", "poly-lsp", "exclude Vendor/X"},
 		"poly-lsp INCLUDE .claude/W": {"server", "poly-lsp", "include .claude/W"},
 		"poly-lsp budget 48000ms":    {"server", "poly-lsp", "budget 48000ms"},
+		// /lsp is the code server's command now; /poly-lsp still routes to it.
+		"lsp exclude Vendor/X":                  {"server", "poly-lsp", "exclude Vendor/X"},
+		"lsp OFF Go --project":                  {"server", "poly-lsp", "off go --project"},
+		"lsp add Zig --ext .zig --cmd /Opt/zls": {"server", "poly-lsp", "add Zig --ext .zig --cmd /Opt/zls"},
+		"lsp remove Zig":                        {"server", "poly-lsp", "remove Zig"},
 		// raglit's manifest commands keep the text as typed.
 		"rag INCLUDE ~/My Docs Notes.MD": {"control", "ext", "call raglit include ~/My Docs Notes.MD"},
 		"rag exclude '**/*.LOG' --keep":  {"control", "ext", "call raglit exclude '**/*.LOG' --keep"},

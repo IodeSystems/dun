@@ -82,7 +82,7 @@ func mcpInfo(in mcpInfoIn) string {
 		}
 		if st.Running && st.Setup != nil {
 			if n := len(st.Setup.MissingLSPs()); n > 0 {
-				f = append(f, fact(plural(n, "language server")+" missing")) // /poly-lsp lists them
+				f = append(f, fact(plural(n, "language server")+" missing")) // /lsp lists them
 			}
 			if st.Setup.CapabilityOff(dun.CapSemantic) {
 				f = append(f, fact("semantic search off")) // /rag says why, /rag setup turns it on

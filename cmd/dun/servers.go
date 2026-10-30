@@ -14,12 +14,12 @@ import (
 )
 
 // Tool servers the user can turn on and off: /rag (the docs index) and
-// /poly-lsp (semantic code). Neither starts on its own — see
+// /lsp (semantic code). Neither starts on its own — see
 // dun.DefaultServers for why — so this is how a session gets them, and how a
 // machine that wants them every time says so once.
 //
 // The command is an extension's slash command (its manifest's slash.name):
-// /rag switches the server raglit, /poly-lsp the server poly-lsp.
+// /rag switches the server raglit, /lsp the server poly-lsp.
 
 // slashOf is the slash command of st's extension, or "" for a server with
 // none. A state built without one (a test's) falls back to the bundled
@@ -109,7 +109,7 @@ func noAutostart(t *tristate, no bool, name string) error {
 // it cannot collide with one.
 const allServers = "*"
 
-// runServerCmd applies one /rag or /poly-lsp action and returns the line to show the
+// runServerCmd applies one /rag or /lsp action and returns the line to show the
 // user. A failure to start is a RETURNED MESSAGE, never a fatal error: a
 // misconfigured raglit should cost you search, not your session.
 //
@@ -123,6 +123,13 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 	}
 	if verb, dir, _ := strings.Cut(strings.TrimSpace(action), " "); excludeVerb(alias, verb) {
 		return runExcludeCmd(ctx, h, alias, verb, dir)
+	}
+	if f := strings.Fields(action); alias == dun.ServerCode && lspLanguageCmd(f) {
+		msg, err := switchOp(h, "lsp", f)
+		if err != nil {
+			return "lsp: " + err.Error()
+		}
+		return msg
 	}
 	if f := strings.Fields(action); len(f) > 1 || (len(f) == 1 && (f[0] == "unset")) {
 		return runSwitchCmd(ctx, h, alias, f[0], f[1:])
@@ -184,7 +191,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 }
 
 // runAllServersCmd is /mcp: the whole server set at once, rather than one
-// server at a time the way /rag and /poly-lsp address theirs.
+// server at a time the way /rag and /lsp address theirs.
 //
 // A bare /mcp LISTS — including the stopped ones, which is the question you
 // actually have ("which of these is even up?") and which no per-server command
@@ -616,7 +623,7 @@ func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
 // docs server's ingest summary when it autostarted. Shown once, at ready.
 //
 // The optional extras that are simply off (a server with a switch, /rag,
-// /poly-lsp) are not here: the client's splash and /status say them, with
+// /lsp) are not here: the client's splash and /status say them, with
 // the command that turns each on (proto.ServerState.Slash).
 func serverHint(states []dun.ServerState) string {
 	var lines []string
@@ -797,3 +804,19 @@ func indentLines(s, prefix string) string {
 // activityEvery is how often, at most, a server's activity sends the server
 // list again (main.go's OnServerActivity).
 const activityEvery = 150 * time.Millisecond
+
+// lspLanguageCmd reports whether /lsp's words address a language rather than
+// the code server itself: on|off|unset followed by a name (the server's
+// switch takes a scope flag there, or nothing), or add|remove.
+func lspLanguageCmd(f []string) bool {
+	if len(f) == 0 {
+		return false
+	}
+	switch f[0] {
+	case "add", "remove":
+		return true
+	case "on", "off", "unset":
+		return len(f) > 1 && !strings.HasPrefix(f[1], "-")
+	}
+	return false
+}

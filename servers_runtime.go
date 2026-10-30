@@ -28,7 +28,7 @@ import (
 // whole difficulty here — an agent.Session's Tools, Dispatch, System and
 // Preparer are all derived from which servers are up, so every start/stop ends
 // in applyTools recomputing the four together. Anything that sets one of them
-// directly will be silently reverted by the next /rag or /poly-lsp.
+// directly will be silently reverted by the next /rag or /lsp.
 //
 // Failure is not fatal, ever. A missing binary or a server that refuses to run
 // is reported (ServerState.Err) and the session carries on without that
@@ -469,6 +469,10 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		if sup.Anyway && s.IndexAnyway {
 			args = append(args, "--index-anyway")
 		}
+	}
+	// The /lsp language switches, to a build that takes them (lspkind.go).
+	if sup.LSP && s.ID == ServerCode {
+		args = append(slices.Clone(args), h.codeLSPArgs()...)
 	}
 	// One shared poly-lsp daemon for every session (USER 2026-10-24): one
 	// index and one child-LSP fleet per root instead of one per session

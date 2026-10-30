@@ -45,6 +45,9 @@ func switchesEvent(h *dun.Harness, action string) *proto.Switches {
 // switchOp runs one operation on a kind.
 func switchOp(h *dun.Harness, kind string, f []string) (string, error) {
 	verb, rest := f[0], f[1:]
+	if kind == "lsp" && (verb == "add" || verb == "remove") {
+		return h.LSPEdit(context.Background(), verb, rest)
+	}
 	if verb == "mode" {
 		if len(rest) == 0 {
 			return "", errUsage(kind, "mode <mode|unset> [--global|--project|--session]")

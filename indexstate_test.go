@@ -85,7 +85,7 @@ func TestIndex_BudgetExcludesAndRetries(t *testing.T) {
 	msg := nextMsg(t, msgs)
 	for _, want := range []string{"the index did not fit its startup budget — 30000ms read 4,100 of 22,012 indexable files",
 		".claude/worktrees/ — 21,557 files, 97% of the index, 48 other git checkouts",
-		"restarting without it", "To undo: /poly-lsp include .claude/worktrees."} {
+		"restarting without it", "To undo: /lsp include .claude/worktrees."} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the report lacks %q:\n%s", want, msg)
 		}
@@ -142,7 +142,7 @@ func TestIndex_BudgetRaisedWhenNothingObvious(t *testing.T) {
 	msg := nextMsg(t, msgs)
 	for _, want := range []string{"30000ms read 90,000 of 120,000 indexable files, and no directory is an obvious one to leave out",
 		"dun raised the budget to 48000ms, for this project; poly-lsp is restarting with it.", "src/", "docs/",
-		"To undo: /poly-lsp budget default. To leave a directory out instead: /poly-lsp exclude <dir>."} {
+		"To undo: /lsp budget default. To leave a directory out instead: /lsp exclude <dir>."} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the report lacks %q:\n%s", want, msg)
 		}
@@ -193,7 +193,7 @@ func TestIndex_RetryFailsReports(t *testing.T) {
 	}
 	m := nextMsg(t, msgs)
 	for _, want := range []string{"did not fit its startup budget", "again, after dun's change (excluded: .claude/worktrees)",
-		"remedy: get under budget", "/poly-lsp exclude <dir>, /poly-lsp include <dir>, /poly-lsp budget <Nms|Nops|default>"} {
+		"remedy: get under budget", "/lsp exclude <dir>, /lsp include <dir>, /lsp budget <Nms|Nops|default>"} {
 		if !strings.Contains(m, want) {
 			t.Errorf("second report lacks %q:\n%s", want, m)
 		}
@@ -230,7 +230,7 @@ func TestIndex_InterimLimit(t *testing.T) {
 	ws = t.TempDir()
 	h, log, msgs = startIndexed(t, ws, fakeIndexEnv+"=limit-plain")
 	m := nextMsg(t, msgs)
-	for _, want := range []string{"No directory is an obvious one", "src/", "docs/", "remedy:", "/poly-lsp exclude <dir>"} {
+	for _, want := range []string{"No directory is an obvious one", "src/", "docs/", "remedy:", "/lsp exclude <dir>"} {
 		if !strings.Contains(m, want) {
 			t.Errorf("report lacks %q:\n%s", want, m)
 		}
@@ -268,7 +268,7 @@ func TestIndex_NestedCheckoutWarning(t *testing.T) {
 	ws := t.TempDir()
 	_, _, msgs := startIndexed(t, ws, fakeIndexEnv+"=nested")
 	m := nextMsg(t, msgs)
-	if !strings.Contains(m, "the index holds .claude/worktrees/") || !strings.Contains(m, "To leave it out: /poly-lsp exclude .claude/worktrees") ||
+	if !strings.Contains(m, "the index holds .claude/worktrees/") || !strings.Contains(m, "To leave it out: /lsp exclude .claude/worktrees") ||
 		strings.Contains(m, "\n") {
 		t.Fatalf("warning: %q", m)
 	}

@@ -151,6 +151,8 @@ func (v *switchListView) page() pageDoc {
 		noun = "indexes"
 	case "paths":
 		noun = "paths"
+	case "lsp":
+		noun = "languages"
 	}
 	title := fmt.Sprintf("%d %s", len(v.rows), noun)
 	if v.query != "" {

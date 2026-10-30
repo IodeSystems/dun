@@ -8,7 +8,7 @@ import (
 	"github.com/iodesystems/dun"
 )
 
-// /poly-lsp exclude <dir> and /poly-lsp include <dir>: what the code
+// /lsp exclude <dir> and /lsp include <dir>: what the code
 // server's index leaves out, for this project (dun/indexstate.go). The
 // same list dun writes when an index does not fit its budget, so include
 // is the undo of what dun decided, and exclude the redo of what it offered.
@@ -20,7 +20,7 @@ func excludeVerb(id, verb string) bool {
 }
 
 // excludeHelp is exclude's and include's lines in the palette and in bare
-// /poly-lsp.
+// /lsp.
 var excludeHelp = []string{
 	"exclude", "DIR — leave a directory (relative to the workspace) out of the code index, for this project; the server restarts. The repository is not changed",
 	"include", "DIR — put an excluded directory back in the code index (the undo of exclude, and of what dun excluded when the index did not fit its budget)",
@@ -133,7 +133,7 @@ func excludesNow(h *dun.Harness, id string) string {
 	return "excluded: " + strings.Join(ex, ", ")
 }
 
-// indexStatus is bare /poly-lsp's lines on the index: its state and what it
+// indexStatus is bare /lsp's lines on the index: its state and what it
 // leaves out, or "" for a server with neither.
 func indexStatus(st dun.ServerState, slash string) string {
 	var lines []string

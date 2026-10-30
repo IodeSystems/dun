@@ -255,7 +255,7 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 	// the last turn reaches this session here, before the lock: a rebuild
 	// it causes applies now rather than after the turn.
 	h.followServers(ctx)
-	// Held for the whole turn so a concurrent /rag or /poly-lsp cannot swap the
+	// Held for the whole turn so a concurrent /rag or /lsp cannot swap the
 	// Session's tools mid-flight; the deferred unlock applies whatever the
 	// command deferred (see Harness.applyTools).
 	h.turnMu.Lock()

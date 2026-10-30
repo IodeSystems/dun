@@ -31,7 +31,7 @@ func TestIndexing_SplashStatusAndReport(t *testing.T) {
 		t.Fatalf("status: %q", got)
 	}
 	n := len(v.m.convo)
-	msg := "poly-lsp: the index holds .claude/worktrees/ (21,557 files, 97% of the index, 48 other git checkouts). To leave it out: /poly-lsp exclude .claude/worktrees"
+	msg := "poly-lsp: the index holds .claude/worktrees/ (21,557 files, 97% of the index, 48 other git checkouts). To leave it out: /lsp exclude .claude/worktrees"
 	v.event(map[string]any{"type": "server", "id": "poly-lsp", "action": "index", "background": true,
 		"message": msg, "servers": servers(dun.IndexReady), "tools": []any{"eval", "node_query"}})
 	if len(v.m.convo) <= n || !strings.Contains(stripANSI(convoText(v.m)), "the index holds .claude/worktrees/") {
@@ -52,8 +52,8 @@ func TestIndexDetailAndStatus(t *testing.T) {
 	if d := serverDetail(st); !strings.Contains(d, "running · index failed: index limit") {
 		t.Errorf("detail: %q", d)
 	}
-	s := indexStatus(st, "poly-lsp")
-	if !strings.Contains(s, "index: failed — index limit") || !strings.Contains(s, "excluded from the index (this project): .claude/worktrees · /poly-lsp include <dir> takes one back") {
+	s := indexStatus(st, "lsp")
+	if !strings.Contains(s, "index: failed — index limit") || !strings.Contains(s, "excluded from the index (this project): .claude/worktrees · /lsp include <dir> takes one back") {
 		t.Errorf("status: %q", s)
 	}
 	if d := serverDetail(dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexBuilding, IndexSeconds: 4}); !strings.HasPrefix(d, "running · indexing 4s · ") {
@@ -93,12 +93,12 @@ func TestDoctorPolyLSP(t *testing.T) {
 	}
 }
 
-// /poly-lsp says what the index left out, grouped by reason.
+// /lsp says what the index left out, grouped by reason.
 func TestIndexStatus_LeftOut(t *testing.T) {
 	st := dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexReady, IndexFiles: 1304, IndexSeconds: 0.3,
 		IndexLeftOut: []dun.IndexLeftOut{{Dir: ".claude/worktrees/a/", Reason: "worktree of this repo"},
 			{Dir: "node_modules/", Reason: "git-ignored"}, {Dir: ".claude/worktrees/b/", Reason: "worktree of this repo"}}}
-	s := indexStatus(st, "poly-lsp")
+	s := indexStatus(st, "lsp")
 	for _, want := range []string{"left out of the index:", "  worktree of this repo: .claude/worktrees/a/, .claude/worktrees/b/",
 		"  git-ignored: node_modules/", "a path named inside one is still read"} {
 		if !strings.Contains(s, want) {
@@ -107,7 +107,7 @@ func TestIndexStatus_LeftOut(t *testing.T) {
 	}
 }
 
-// With leftOutBy, /poly-lsp gives one line per reason: the true count, the
+// With leftOutBy, /lsp gives one line per reason: the true count, the
 // hint, and a few of the listed examples; the list alone is the fallback.
 func TestIndexStatus_LeftOutBy(t *testing.T) {
 	st := dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexReady, IndexFiles: 455,
@@ -116,7 +116,7 @@ func TestIndexStatus_LeftOutBy(t *testing.T) {
 		IndexLeftOutBy: []dun.IndexLeftOutBy{{Reason: "git-ignored", Count: 8},
 			{Reason: "minified", Count: 1, Hint: "index one anyway: --include <path>"},
 			{Reason: "symlink loop", Count: 2, Hint: "nothing is lost"}}}
-	s := indexStatus(st, "poly-lsp")
+	s := indexStatus(st, "lsp")
 	for _, want := range []string{"left out of the index:", "  git-ignored: 8 dirs · e.g. a/, b/, c/, …\n",
 		"  minified: 1 file — index one anyway: --include <path> · e.g. web/app.min.js\n",
 		"  symlink loop: 2 links — nothing is lost\n", "a path named inside one is still read"} {
@@ -129,11 +129,11 @@ func TestIndexStatus_LeftOutBy(t *testing.T) {
 // A not-a-project failure names the way out; index anyway names the undo.
 func TestIndexStatus_NotProjectAndAnyway(t *testing.T) {
 	st := dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexFailed, IndexErr: "not a project: /home/x is the home directory"}
-	if s := indexStatus(st, "poly-lsp"); !strings.Contains(s, "/poly-lsp index-anyway on indexes it regardless") {
+	if s := indexStatus(st, "lsp"); !strings.Contains(s, "/lsp index-anyway on indexes it regardless") {
 		t.Errorf("no way out:\n%s", s)
 	}
 	st = dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexReady, IndexAnyway: true}
-	if s := indexStatus(st, "poly-lsp"); !strings.Contains(s, "/poly-lsp index-anyway off undoes it") {
+	if s := indexStatus(st, "lsp"); !strings.Contains(s, "/lsp index-anyway off undoes it") {
 		t.Errorf("no undo:\n%s", s)
 	}
 	if !excludeVerb(dun.ServerCode, "index-anyway") {

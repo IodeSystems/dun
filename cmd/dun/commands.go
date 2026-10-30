@@ -332,6 +332,9 @@ func routeSlash(line string, r slashRoutes) {
 		return
 	}
 	name, args := strings.ToLower(f[0]), f[1:]
+	if name == "poly-lsp" { // its name until /lsp (2026-10-29)
+		name = "lsp"
+	}
 	arg := func(i int) string {
 		if i < len(args) {
 			return strings.ToLower(args[i])
@@ -361,6 +364,11 @@ func routeSlash(line string, r slashRoutes) {
 		// exclude|include <dir>: the directory keeps its case.
 		if excludeVerb(e.ID, arg(0)) {
 			r.server(e.ID, strings.TrimSpace(arg(0)+" "+strings.Join(args[1:], " ")))
+			return
+		}
+		// /lsp add|remove: a command line for poly-lsp-mcp, its case kept.
+		if e.ID == dun.ServerCode && (arg(0) == "add" || arg(0) == "remove") {
+			r.server(e.ID, arg(0)+" "+strings.Join(args[1:], " "))
 			return
 		}
 		r.server(e.ID, strings.Join(lowerAll(args), " "))

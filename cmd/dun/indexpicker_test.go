@@ -92,3 +92,34 @@ func TestFilePicker_AddAndWriteKeys(t *testing.T) {
 		t.Errorf("enter sent %s", s)
 	}
 }
+
+// Bare /lsp is the languages table (USER 2026-10-28): each language's
+// server on or off; ctrl+g switches the row under the filter for every
+// project (on → off → unset).
+func TestLSPPicker_BareLSPOpensTheTable(t *testing.T) {
+	v := newVtui(140, 30)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	rec := &recWC{}
+	v.m.proc = &dunProc{stdin: rec}
+	v.m = typeStr(v.m, "/lsp")
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(rec.String(), `"lsp"`) || v.m.switchesWant != "lsp" {
+		t.Fatalf("not asked: %s", rec.String())
+	}
+	v.event(map[string]any{"type": "switches", "kind": "lsp", "slash": "lsp", "items": []any{
+		map[string]any{"name": "go", "description": "gopls · found · .go", "source": "builtin", "on": true},
+		map[string]any{"name": "java", "description": "jdtls · found · .java", "source": "user · off by default"},
+	}})
+	got := v.view()
+	for _, want := range []string{"/lsp · 1 of 2 on", "2 languages", "● go", "○ java", "gopls · found"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lacks %q:\n%s", want, got)
+		}
+	}
+	v.m = typeStr(v.m, "go")
+	rec.Reset()
+	v.m = key(v.m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if !strings.Contains(rec.String(), "lsp on go --global") {
+		t.Errorf("sent %s", rec.String())
+	}
+}

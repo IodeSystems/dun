@@ -51,7 +51,7 @@ func TestHelp_OneCommandInFull(t *testing.T) {
 	m.engineCmds = engineCmdsNow(t)
 	for name, wants := range map[string][]string{
 		"rag":      {"Project search (raglit)", "/rag on — turn it on for this session", "/rag auto — turn it on in every session", "include"},
-		"poly-lsp": {"Code navigation (poly-lsp)", "/poly-lsp auto"},
+		"lsp":      {"Code navigation (poly-lsp)", "/lsp auto", "/lsp add <name>"},
 		"/mcp":     {"preset", "playwright", "same name again replaces it", "add"},
 		"login":    {"/login", "connect"},
 	} {

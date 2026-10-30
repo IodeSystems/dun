@@ -24,11 +24,11 @@ should still get a working dun. Turn them on per session, or once for good:
 
 | command | does |
 |---|---|
-| `/rag` · `/poly-lsp` | status: on or off, which switch decided, and the command that changes each |
-| `/rag on` · `/poly-lsp on` | on for this session (kept across a resume) |
-| `/rag off` · `/poly-lsp off` | off for this session |
-| `/rag auto` · `/poly-lsp auto` | on for this project, every session (= `on --project`) |
-| `/rag manual` · `/poly-lsp manual` | off for this project (= `off --project`); it stops now |
+| `/rag` · `/lsp` | status: on or off, which switch decided, and the command that changes each |
+| `/rag on` · `/lsp on` | on for this session (kept across a resume) |
+| `/rag off` · `/lsp off` | off for this session |
+| `/rag auto` · `/lsp auto` | on for this project, every session (= `on --project`) |
+| `/rag manual` · `/lsp manual` | off for this project (= `off --project`); it stops now |
 
 **Every server has three switches** — global (`$DUN_HOME/mcp.json`, every
 workspace), project (`$DUN_HOME/projects/<id>/dun.local.json`) and session
@@ -178,7 +178,7 @@ OpenAI-compatible endpoint.
 make install   # builds the stamped binary into ~/.local/bin/dun (BINDIR=… to change)
 # mcpshell (the eval tool) is looked for on PATH, then beside dun; without it dun
 # works with one tool less. `dun doctor --fix` installs it (go install, needs Go).
-# poly-lsp-mcp and raglit only if you use /poly-lsp, /rag
+# poly-lsp-mcp and raglit only if you use /lsp, /rag
 
 dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
               # URL, bearer optional) and pick a model. In the TUI, web or
@@ -288,7 +288,7 @@ engine stays up and the next message starts a fresh turn.
 
 If the engine dies anyway — crash, OOM, kill, or a config it refuses to start
 with — the TUI restarts it, reattaches to the same session id, keeps your
-scrollback, and turns your `/rag` and `/poly-lsp` servers back on. That includes the
+scrollback, and turns your `/rag` and `/lsp` servers back on. That includes the
 *first* engine: a TUI that will not open is a TUI that cannot show you the
 error, so it comes up regardless and retries from inside. Three attempts per two
 minutes, then it stops and waits for `/reconnect` (`dun --continue` still has
