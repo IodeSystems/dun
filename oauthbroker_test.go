@@ -259,3 +259,15 @@ func TestOAuthBroker_TwoRetriesOneRefresh(t *testing.T) {
 		t.Errorf("second retry: %q (first got %q), %d refreshes", c.Authorization, a.Authorization, len(w.tokenForms)-tokens)
 	}
 }
+
+// A scripted OAuth server with no client_id (dun picks the client) still
+// gets its token through `dun oauth token --spec`.
+func TestDecodeOAuthAuthSpec_NoClientID(t *testing.T) {
+	enc := EncodeOAuthAuthSpec(OAuthAuthSpec{ID: "eleven", URL: "https://x/mcp"})
+	if got, err := DecodeOAuthAuthSpec(enc); err != nil || got.ID != "eleven" {
+		t.Errorf("spec: %+v %v", got, err)
+	}
+	if _, err := DecodeOAuthAuthSpec(EncodeOAuthAuthSpec(OAuthAuthSpec{ID: "eleven"})); err == nil {
+		t.Error("a spec with no url was taken")
+	}
+}

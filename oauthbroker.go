@@ -331,8 +331,8 @@ func DecodeOAuthAuthSpec(v string) (OAuthAuthSpec, error) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return s, fmt.Errorf("--spec: %w", err)
 	}
-	if s.ID == "" || s.URL == "" || s.OAuth.ClientID == "" {
-		return s, fmt.Errorf("--spec: an id, a url and an oauth client_id are needed")
+	if s.ID == "" || s.URL == "" {
+		return s, fmt.Errorf("--spec: an id and a url are needed")
 	}
 	return s, nil
 }
