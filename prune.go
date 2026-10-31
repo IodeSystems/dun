@@ -388,8 +388,9 @@ func dropIndexFor(repoRoot, path, branch string) {
 	if name == "" {
 		return
 	}
-	out, err := exec.Command("raglit", "drop-index",
-		"--project", raglitProject(repoRoot), "--index", name).CombinedOutput()
+	cmd := exec.Command("raglit", "drop-index", "--project", raglitProject(repoRoot), "--index", name)
+	cmd.Env = append(os.Environ(), RaglitTokenEnv()...)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("dun: raglit drop-index %s: %v: %s", name, err, strings.TrimSpace(string(out)))
 	}

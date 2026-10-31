@@ -35,6 +35,7 @@ func (r raglitRun) token() string {
 func fakeRaglit(t *testing.T) (*[]raglitRun, Server) {
 	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
+	t.Setenv("DUN_RAGLIT_KEYS", "1")
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "raglit"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -109,9 +110,15 @@ func TestRaglitAuth_NeedsLoginThenMintsOneSessionKey(t *testing.T) {
 	}
 }
 
-// A raglit without keys is left as it was.
+// A raglit without keys is left as it was, and so is one with keys while
+// dun's support is not switched on.
 func TestRaglitAuth_OlderRaglitIsUntouched(t *testing.T) {
 	_, docs := fakeRaglit(t)
+	t.Setenv("DUN_RAGLIT_KEYS", "")
+	if env, err := testHarness(t).raglitAuth(context.Background(), docs); env != nil || err != nil {
+		t.Errorf("switched off: %v, %v", env, err)
+	}
+	t.Setenv("DUN_RAGLIT_KEYS", "1")
 	raglitHasKeys = func(string) bool { return false }
 	h := testHarness(t)
 	if env, err := h.raglitAuth(context.Background(), docs); env != nil || err != nil {

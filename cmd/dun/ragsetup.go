@@ -81,7 +81,9 @@ func raglitDoctor(timeout time.Duration, args ...string) (dun.RaglitDoctor, []by
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	out, _ := exec.CommandContext(ctx, bin, append([]string{"doctor", "--json"}, args...)...).Output()
+	cmd := exec.CommandContext(ctx, bin, append([]string{"doctor", "--json"}, args...)...)
+	cmd.Env = append(os.Environ(), dun.RaglitTokenEnv()...) // a raglit with keys (dun/raglitauth.go)
+	out, _ := cmd.Output()
 	d, ok := dun.ParseRaglitDoctor(out)
 	if !ok {
 		if ctx.Err() != nil {

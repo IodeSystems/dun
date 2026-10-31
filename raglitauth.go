@@ -89,6 +89,11 @@ var raglitHasKeys = func(command string) bool {
 // raglitKeyed is the resolved raglit command when s is the docs server and
 // its raglit has keys.
 func raglitKeyed(s Server) (string, bool) {
+	// Opt-in until Carl hands never-open to dun (raglit-a2, 2026-10-30): a
+	// dun rebuilt from this tree must not start asking for /rag login.
+	if os.Getenv("DUN_RAGLIT_KEYS") != "1" {
+		return "", false
+	}
 	if s.ID != ServerDocs || s.URL != "" || filepath.Base(s.Command) != "raglit" {
 		return "", false
 	}
@@ -170,6 +175,16 @@ func (h *Harness) raglitSessionKey(ctx context.Context, command string) (string,
 		return "", errors.New("raglit key mint --session printed no key")
 	}
 	return r.ragKey, nil
+}
+
+// RaglitTokenEnv is RAGLIT_TOKEN set to dun's token, for a raglit run that
+// is no session's (setup, doctor, a worktree's index drop); nil when not
+// logged in, and raglit then finds its own credential as before.
+func RaglitTokenEnv() []string {
+	if t := loadRaglitToken(); t != "" {
+		return []string{"RAGLIT_TOKEN=" + t}
+	}
+	return nil
 }
 
 func loadRaglitToken() string {
