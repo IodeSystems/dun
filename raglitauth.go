@@ -35,7 +35,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -181,10 +180,6 @@ func loadRaglitToken() string {
 	return strings.TrimSpace(string(b))
 }
 
-// mintedID reads the key id from key mint --out's report:
-// "wrote principal key <id> (dun) to <file>".
-var mintedID = regexp.MustCompile(`wrote \S+ key (\S+)`)
-
 // raglitLogin mints dun's raglit token with the caller's own credential.
 func (h *Harness) raglitLogin(ctx context.Context, s Server) (string, error) {
 	command, ok := raglitKeyed(s)
@@ -196,13 +191,20 @@ func (h *Harness) raglitLogin(ctx context.Context, s Server) (string, error) {
 		return "", err
 	}
 	host, _ := os.Hostname()
-	_, errOut, err := runRaglit(ctx, command, h.cfg.Workspace, nil, "",
-		"key", "mint", "--principal", "dun", "--label", "dun@"+host, "--out", file)
+	// --json with --out: the token goes only to the file, and stdout is
+	// {"key": {"id", ...}} (raglit d7a5e69). The id is what revoking takes.
+	out, _, err := runRaglit(ctx, command, h.cfg.Workspace, nil, "",
+		"key", "mint", "--principal", "dun", "--label", "dun@"+host, "--out", file, "--json")
 	if err != nil {
 		return "", err
 	}
-	if m := mintedID.FindStringSubmatch(errOut); m != nil {
-		_ = os.WriteFile(raglitKeyIDFile(), []byte(m[1]+"\n"), 0o600)
+	var minted struct {
+		Key struct {
+			ID string `json:"id"`
+		} `json:"key"`
+	}
+	if json.Unmarshal([]byte(out), &minted) == nil && minted.Key.ID != "" {
+		_ = os.WriteFile(raglitKeyIDFile(), []byte(minted.Key.ID+"\n"), 0o600)
 	}
 	// The next start mints a session key from the new token.
 	r := h.ragRoot()

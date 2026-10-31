@@ -48,11 +48,11 @@ func fakeRaglit(t *testing.T) (*[]raglitRun, Server) {
 		a := strings.Join(args, " ")
 		switch {
 		case strings.HasPrefix(a, "key mint --principal"):
-			out := args[len(args)-1]
+			out := args[len(args)-2] // --out FILE --json
 			if err := os.WriteFile(out, []byte("tok-dun\n"), 0o600); err != nil {
 				return "", "", err
 			}
-			return "", "wrote principal key k_dun (dun) to " + out + "\n", nil
+			return `{"key":{"id":"k_dun","kind":"principal","principal":"dun"}}`, "wrote principal key k_dun (dun) to " + out + "\n", nil
 		case strings.HasPrefix(a, "key mint --session"):
 			if r.token() != "tok-dun" {
 				return "", "", errors.New("401")
