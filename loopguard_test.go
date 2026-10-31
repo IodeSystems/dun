@@ -103,30 +103,24 @@ func TestLoopGuard_LeavesSeparatedRepeatsAlone(t *testing.T) {
 	}
 }
 
-// Polling IS repetition: exec_monitor, agent_monitor and ask_user exist to be
-// called again with the same arguments. Guarding them would break the only way
-// dun waits for anything.
-func TestLoopGuard_ExemptsPollingTools(t *testing.T) {
+// No tool is exempt: a model polling costs a round per poll, whichever tool it
+// polls (USER 2026-10-31).
+func TestLoopGuard_RefusesPollingToo(t *testing.T) {
 	h := newNoteHarness(t)
-	inner := &counting{}
-	d := withLoopGuard(inner.dispatch, h)
-
-	for name := range pollingTools {
-		inner.calls = nil
-		for i := 0; i < 10; i++ {
-			if out, _ := d(context.Background(), call(name, `{"id":1}`)); strings.HasPrefix(out, "ERROR") {
-				t.Fatalf("%s poll #%d was refused", name, i)
-			}
+	for _, name := range []string{"jobs", "ask_user", "exec_monitor", "agent_monitor"} {
+		inner := &counting{}
+		d := withLoopGuard(inner.dispatch, h)
+		for i := 0; i < 5; i++ {
+			d(context.Background(), call(name, `{"id":1}`))
 		}
-		if len(inner.calls) != 10 {
-			t.Errorf("%s: %d polls ran, want 10", name, len(inner.calls))
+		if len(inner.calls) != defaultLoopRepeats-1 {
+			t.Errorf("%s: %d polls ran, want %d", name, len(inner.calls), defaultLoopRepeats-1)
 		}
 	}
 }
 
-// A poll between two identical calls means something was being waited on, which
-// is exactly the "the world changed in between" the run is looking for.
-func TestLoopGuard_APollBreaksTheRun(t *testing.T) {
+// Any other call between two identical ones ends the run.
+func TestLoopGuard_AnotherCallBreaksTheRun(t *testing.T) {
 	h := newNoteHarness(t)
 	inner := &counting{}
 	d := withLoopGuard(inner.dispatch, h)
@@ -136,7 +130,7 @@ func TestLoopGuard_APollBreaksTheRun(t *testing.T) {
 		d(context.Background(), call("exec_monitor", `{"id":1}`))
 	}
 	if len(inner.calls) != 12 {
-		t.Errorf("%d calls ran, want 12 — a poll must reset the run", len(inner.calls))
+		t.Errorf("%d calls ran, want 12 — another call must reset the run", len(inner.calls))
 	}
 }
 

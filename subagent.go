@@ -1192,7 +1192,7 @@ func agentMonitor(ctx context.Context, h *Harness, id *int, tail int, tell strin
 		case <-h.userWaiting():
 			// A message arrived: stop waiting so it rides this
 			// result. The child keeps running.
-			b.WriteString("Stopped waiting because a message arrived (the user wrote, or another dun session did) — it follows.\n")
+			b.WriteString(jobsMessageStop + "\n")
 		}
 	}
 	b.WriteString(sa.report())

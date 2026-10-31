@@ -42,6 +42,9 @@ import (
 //	                           folded ONE, writing recap17 through recap26 —
 //	                           2,523 bytes apiece, all of them nothing.
 //
+// No tool is exempt (USER 2026-10-31: a model in a poll loop wastes a round per
+// poll). A wait costs no round: jobs blocks until the answer changes (jobs.go).
+//
 // Consecutiveness is what makes it precise. The same session called `ship` with
 // identical arguments 8 times and `git log …` 3 times, all legitimate, and all
 // separated by gaps of 3 to 48 calls. Zero false positives at any threshold
@@ -70,19 +73,6 @@ const loopAskAfter = 2
 // remind the model what it already got; not so much that a refusal costs as much
 // context as the call would have.
 const loopResultHead = 600
-
-// pollingTools are the tools whose whole purpose is to be called again with the
-// same arguments: "is that background job done yet", "what is the sub-agent
-// doing", "the human has not answered". Repetition is their success mode, not
-// their failure mode, and guarding them would break the only way dun waits for
-// anything.
-var pollingTools = map[string]bool{
-	"jobs":     true,
-	"ask_user": true,
-	// jobs' old names, which still dispatch (jobs.go)
-	"exec_monitor":  true,
-	"agent_monitor": true,
-}
 
 // loopRepeats is the threshold in force.
 func loopRepeats() int {
@@ -204,11 +194,7 @@ func withLoopGuard(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher 
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		limit := loopRepeats()
 		name := tc.Function.Name
-		if limit <= 0 || pollingTools[name] {
-			// Polling tools still reset the run: a poll between two identical
-			// calls means something was being waited on, which is exactly the
-			// "something happened in between" this guard is looking for.
-			h.loop.observe("", "")
+		if limit <= 0 {
 			return inner(ctx, tc)
 		}
 

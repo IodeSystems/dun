@@ -103,17 +103,25 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 		// stopped the turn, 10 identical rounds). The same plain question
 		// can only get the same answer until the job moves, so this call
 		// blocks until it does; a new message still breaks the wait.
+		//
+		// The read comes first because a job's report hands over its pending
+		// output: anything new makes the answer differ, and it is returned.
 		sig, plain := a.pollSig()
-		waited := false
-		if plain && sig != "" && h.jobsRepeat(sig) {
-			a.Wait, waited = true, true
-		}
 		out := runJobs(ctx, h, a)
+		waited := plain && sig != "" && h.jobsRepeat(sig, out)
+		if waited {
+			a.Wait = true
+			out = runJobs(ctx, h, a)
+		}
 		if plain {
 			h.jobsNote(sig, out)
 		}
 		if waited {
 			out = "Nothing had changed since you last asked, so this call waited until it did.\n" + out
+		}
+		// A message is what the run of identical calls says did not happen.
+		if strings.Contains(out, jobsMessageStop) {
+			h.loop.observe("", "")
 		}
 		if onCall != nil {
 			onCall("jobs", a.reported(), out)
@@ -134,27 +142,28 @@ func (a jobsArgs) pollSig() (string, bool) {
 	case a.Agent != nil:
 		return fmt.Sprintf("agent:%d:%d", *a.Agent, a.Tail), true
 	}
-	return "", true // the list: noted, but never waited on (no one job to wait for)
+	return "", true // the list: noted, but never waited on (it is a look, with no one job to wait for)
 }
+
+// jobsMessageStop is what a wait broken by a message says.
+const jobsMessageStop = "Stopped waiting because a message arrived (the user wrote, or another dun session did) — it follows."
 
 var pollDigits = regexp.MustCompile(`[0-9]+`)
 
-// jobsRepeat reports whether sig is the question asked last, and its answer
-// has not changed since.
-func (h *Harness) jobsRepeat(sig string) bool {
+// jobsRepeat reports whether sig is the question asked last and out is the
+// answer it got. Numbers are masked: "RUNNING for 12s" and "for 14s" are the
+// same answer.
+func (h *Harness) jobsRepeat(sig, out string) bool {
 	h.jobsPollMu.Lock()
 	defer h.jobsPollMu.Unlock()
-	return h.jobsPollSig == sig && h.jobsPollSame
+	return h.jobsPollSig == sig && pollDigits.ReplaceAllString(out, "#") == h.jobsPollOut
 }
 
-// jobsNote records a plain read and whether it answered as the one before.
+// jobsNote records a plain read.
 func (h *Harness) jobsNote(sig, out string) {
 	h.jobsPollMu.Lock()
 	defer h.jobsPollMu.Unlock()
-	// Numbers masked: "RUNNING for 12s" and "for 14s" are the same answer.
-	out = pollDigits.ReplaceAllString(out, "#")
-	h.jobsPollSame = sig == h.jobsPollSig && out == h.jobsPollOut
-	h.jobsPollSig, h.jobsPollOut = sig, out
+	h.jobsPollSig, h.jobsPollOut = sig, pollDigits.ReplaceAllString(out, "#")
 }
 
 // reported is the argument map the UI shows: what was sent, no zeros.
@@ -279,7 +288,7 @@ func (j *bgJob) wait(ctx context.Context, h *Harness) string {
 	case <-ctx.Done():
 		note = fmt.Sprintf("job #%d is still running; the turn was cancelled.", j.id)
 	case <-h.userWaiting():
-		note = "Stopped waiting because a message arrived (the user wrote, or another dun session did) — it follows."
+		note = jobsMessageStop
 	}
 	j.mu.Lock()
 	j.waiters--

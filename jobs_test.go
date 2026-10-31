@@ -178,24 +178,23 @@ func TestJobs_AliasesDispatch(t *testing.T) {
 }
 
 // Asked the same thing again with nothing changed (only the clock), the
-// third read of a running command waits for it instead of answering the
-// same again: a poll cannot loop (USER 2026-10-27: the loop guard stopped
-// a session polling agent_monitor).
+// second read of a running command waits for it instead of answering the
+// same again: a poll cannot loop, and it waits before the loop guard's third
+// call would be refused (USER 2026-10-27: the loop guard stopped a session
+// polling agent_monitor).
 func TestJobs_ARepeatedPollWaits(t *testing.T) {
 	h := testHarness(t)
 	be := &HostShell{Dir: t.TempDir()}
 	t.Cleanup(be.Close)
 	j := h.newJobStarted(be, "sleep 1.5; echo at-last")
 	q := fmt.Sprintf(`{"job":%d}`, j.id)
-	for i := 0; i < 2; i++ {
-		if out := jobsCall(t, h, "jobs", q); !strings.Contains(out, "RUNNING") || strings.Contains(out, "waited") {
-			t.Fatalf("read %d: %s", i+1, out)
-		}
+	if out := jobsCall(t, h, "jobs", q); !strings.Contains(out, "RUNNING") || strings.Contains(out, "waited") {
+		t.Fatalf("first read: %s", out)
 	}
 	start := time.Now()
 	out := jobsCall(t, h, "jobs", q)
 	if time.Since(start) < 500*time.Millisecond || !strings.Contains(out, "waited until it did") || !strings.Contains(out, "at-last") {
-		t.Errorf("the third read did not wait (%s): %s", time.Since(start), out)
+		t.Errorf("the second read did not wait (%s): %s", time.Since(start), out)
 	}
 	// A different question in between is not a repeat.
 	j2 := h.newJobStarted(be, "sleep 30")
@@ -205,6 +204,34 @@ func TestJobs_ARepeatedPollWaits(t *testing.T) {
 	jobsCall(t, h, "jobs", `{}`)
 	if out := jobsCall(t, h, "jobs", q2); strings.Contains(out, "waited") {
 		t.Errorf("a read after another question waited: %s", out)
+	}
+}
+
+// A wait a message broke ends the run of identical calls: the loop guard must
+// not refuse the wait that follows it as a call nothing happened between.
+func TestJobs_AMessageEndsTheRun(t *testing.T) {
+	h := testHarness(t)
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	j := h.newJobStarted(be, "sleep 30")
+	t.Cleanup(func() { j.killAndWait("test") })
+	q := fmt.Sprintf(`{"job":%d,"wait":true}`, j.id)
+	h.loop.observe("jobs", q)
+	h.loop.observe("jobs", q)
+	out := make(chan string, 1)
+	go func() { out <- jobsCall(t, h, "jobs", q) }()
+	time.Sleep(200 * time.Millisecond)
+	h.Say("status?")
+	select {
+	case r := <-out:
+		if !strings.Contains(r, jobsMessageStop) {
+			t.Fatalf("not stopped by the message: %s", r)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the wait did not stop for the message")
+	}
+	if n := h.loop.observe("jobs", q); n != 1 {
+		t.Errorf("run is %d after the message, want 1", n)
 	}
 }
 

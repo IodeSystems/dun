@@ -467,10 +467,9 @@ type Harness struct {
 	procs procstat.Sampler
 	// The last plain jobs read and its answer (jobs.go): a repeat that
 	// answered the same is turned into a wait.
-	jobsPollMu   sync.Mutex
-	jobsPollSig  string
-	jobsPollOut  string
-	jobsPollSame bool
+	jobsPollMu  sync.Mutex
+	jobsPollSig string
+	jobsPollOut string
 	// The turn in flight's cancel and what its round has streamed (interrupt.go).
 	interruptState
 	// The session's worklog (worklog.go), read from its sidecar on first use.
