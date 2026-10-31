@@ -364,9 +364,9 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			m.openSwitches("lsp")
 			return nil
 		}
-		// Bare /effort and /retry: the picker, which is the palette's choices
-		// for it (USER 2026-10-26: empty shows the modes).
-		if (name == "effort" || name == "retry") && len(args) == 0 {
+		// Bare /effort, /retry and /loops: the picker, which is the palette's
+		// choices for it (USER 2026-10-26: empty shows the modes).
+		if (name == "effort" || name == "retry" || name == "loops") && len(args) == 0 {
 			m.input.SetValue("/" + name + " ")
 			m.input.CursorEnd()
 			m.paletteSel = 0

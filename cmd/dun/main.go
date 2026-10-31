@@ -1488,6 +1488,21 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
+		// /loops: bare says the settings and what was found; a mode or a knob
+		// applies from the next reply and is saved (loopscmd.go).
+		if id == "loops" {
+			msg, save, err := loopWatch.command(action)
+			if err != nil {
+				msg = "loops: " + err.Error()
+			} else if save != nil {
+				if err := saveConfig(*save); err != nil {
+					msg += " — but not saved: " + err.Error()
+				}
+				h.Aside("[control/loops] " + msg)
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			return
+		}
 		// /effort: bare says the level; a level is set, saved, and applies
 		// from the next request (dun/effort.go).
 		if id == "effort" {
@@ -2478,7 +2493,7 @@ func recordReplies(h *dun.Harness) func(payload any) {
 	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", dun.ServerDocs: "rag"}
 	kindSlash := map[string]string{"indexes": "rag", "paths": "file", "lsp": "lsp", "skills": "skill", "rules": "rules"}
 	commands := map[string]bool{"slash": true, "files": true, "switches": true, "mcp": true, "ext": true, "jobs": true,
-		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "suggest": true,
+		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "loops": true, "suggest": true,
 		"worklog": true, "memories": true, "interrupt": true, "ctxconfig": true, "repaint": true}
 	return func(payload any) {
 		switch p := payload.(type) {

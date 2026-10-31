@@ -491,6 +491,24 @@ With none set, a message with images to such a model is not sent: the TUI says
 why and puts the message back in the composer. A message with images sent
 during a turn waits for the turn to end (an image cannot ride a tool result).
 
+## Loop detection
+
+`/loops` says what agentkit's loop detector has found in the model's replies,
+thinking and tool calls, and sets how far it goes, for every session:
+
+| command | does |
+|---|---|
+| `/loops off` | only the guard on the same bytes back to back |
+| `/loops count` | the default: find and count loops, cut only what that guard cuts |
+| `/loops cut` | cut a reply that continues a loop; the round is retried |
+| `/loops tolerance N` · `default` | the loop count that cuts (3) |
+| `/loops tools N` · `count` · `default` | the same for tool calls; `count` never cuts them |
+
+`DUN_LOOP_DETECT` (`off`, `count`, `cut`) wins at start. `"loops"` in
+`config.json` also takes `window`, `min_share`, `similarity` and `tool_window`.
+The refusal of a third identical tool call is separate: `DUN_LOOP_REPEATS`
+sets it, and no tool is exempt.
+
 ## Isolation
 
 dun works in an isolated **git worktree** (a fresh `dun/<ts>` branch off HEAD),

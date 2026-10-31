@@ -55,6 +55,8 @@ type dunConfig struct {
 	// Retry5xxAttempts is how many times a 5xx is retried (/retry attempts);
 	// 0 is agentkit's default (5). DUN_RETRY_5XX_ATTEMPTS wins over it.
 	Retry5xxAttempts int `json:"retry_5xx_attempts,omitempty"`
+	// Loops is /loops: how far dun's loop detection goes (loopscmd.go).
+	Loops loopConfig `json:"loops,omitzero"`
 	// VisionModel describes images for a model that cannot read them (a model
 	// id, on the active provider unless VisionProvider names another
 	// logged-in one). Empty: a message with images to such a model is
@@ -617,6 +619,7 @@ func tuneClient(fc dunConfig, c *llm.Client, url string) {
 			}
 		}
 	}
+	loopWatch.install(c, fc.Loops)
 }
 
 // parseRetryBudgets interprets the persisted retry budgets: request scope (a

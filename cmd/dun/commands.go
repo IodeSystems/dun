@@ -184,6 +184,13 @@ func ownCommands(iso string) []proto.CommandSpec {
 				"on", "a file (or glob) back in every request", "off", "a file (or glob) out of every request, still found through the docs index",
 				"unset", "a file's switch at a scope, back to the one below"),
 			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone, each file's cost, its switch at each scope and the mode; a mode word sets the project's mode"},
+		{Name: "loops", Usage: "[off|count|cut | tolerance N|default | tools N|count|default]", Group: "session",
+			Choices: choices("status", "the settings now, and what has been found", "off", "only the guard on the same bytes back to back",
+				"count", "find loops and count them; cut nothing the guard would not",
+				"cut", "cut a reply that continues a loop, which retries it",
+				"tolerance", "the loop count that cuts: tolerance N or default",
+				"tools", "the same for tool calls: tools N, count or default"),
+			Description: "loop detection in the model's replies: alone says what it has found; saved for every session"},
 		{Name: "retry", Usage: "[default|patient|stubborn | attempts N | budget <dur>|unbounded|default | turn <dur>|off|default]", Group: "session",
 			Choices: choices("status", "the settings now", "default", retryPresets[0].about, "patient", retryPresets[1].about,
 				"stubborn", retryPresets[2].about, "attempts", "how many times a 5xx is retried: attempts N",
@@ -483,7 +490,7 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("usage: /file [add|remove <path>]")
 		}
-	case "retry":
+	case "retry", "loops":
 		r.control(name, strings.Join(args, " "))
 	case "suggest":
 		r.control(name, arg(0))
