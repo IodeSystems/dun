@@ -89,11 +89,6 @@ var raglitHasKeys = func(command string) bool {
 // raglitKeyed is the resolved raglit command when s is the docs server and
 // its raglit has keys.
 func raglitKeyed(s Server) (string, bool) {
-	// Opt-in until Carl hands never-open to dun (raglit-a2, 2026-10-30): a
-	// dun rebuilt from this tree must not start asking for /rag login.
-	if os.Getenv("DUN_RAGLIT_KEYS") != "1" {
-		return "", false
-	}
 	if s.ID != ServerDocs || s.URL != "" || filepath.Base(s.Command) != "raglit" {
 		return "", false
 	}

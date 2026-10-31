@@ -171,7 +171,7 @@ func attachSelector(own string, attach, detach, ownIdx []string) string {
 		return ""
 	}
 	if len(parts) == 0 {
-		return own + ":-" // every index of its own off, nothing else on: no index raglit has
+		return own + ":-*" // every index of its own off, nothing else on: a glob that matches none (a plain name raglit lacks is a 404)
 	}
 	return strings.Join(parts, ",")
 }

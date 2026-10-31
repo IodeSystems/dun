@@ -58,7 +58,7 @@ func TestUnionAttachAndSelector(t *testing.T) {
 	if s := attachSelector("own", nil, []string{"own:memory"}, nil); s != "own:*" {
 		t.Errorf("own off, list unknown: %q", s)
 	}
-	if s := attachSelector("own", nil, ownIdx, ownIdx); s != "own:-" {
+	if s := attachSelector("own", nil, ownIdx, ownIdx); s != "own:-*" {
 		t.Errorf("all off: %q", s)
 	}
 }
