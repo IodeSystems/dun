@@ -74,8 +74,14 @@ var Supported = []Tool{
 	// which bare /rag attach lists (dun/indexkind.go); ":<index>" reads a
 	// global index. MCP tools, notifications and doctor --json unchanged;
 	// search ranks per document and new files get smaller fragments.
+	// Recommended v0.4.0 (9c539ee, 2026-10-31), tarballs in deps.json: never
+	// open (a token or 401), keys (/rag login, a key per session, a child key
+	// per session branch: dun/raglitauth.go), ingest --identity, and key mint
+	// --json. A plain name it lacks is a 404, so all-off is the glob <own>:-*
+	// (dun/attach.go). --embedded, --db and --embed are gone; ingest --now is
+	// an alias of --wait. Older raglits still work: dun probes `help key`.
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.3.0"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.4.0"},
 }
 
 // Tool is one Supported entry.
