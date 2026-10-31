@@ -219,7 +219,7 @@ func withLoopGuard(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher 
 		// being drained — and the queue is where a message the user typed
 		// mid-turn is waiting. Stranding that behind a loop the user is probably
 		// typing ABOUT is the worst possible moment to drop it.
-		return h.liftQueued(loopRefusal(name, n, h.loop.previous())), nil
+		return h.liftQueued(loopRefusal(name, h.loop.previous())), nil
 	}
 }
 
@@ -228,14 +228,14 @@ func withLoopGuard(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher 
 // Says three things, in this order: that the call did not run, why running it
 // could not have helped, and what to do instead. The middle one is load-bearing
 // — a model told only "refused" treats it as a transport failure and retries,
-// which is the loop.
-func loopRefusal(tool string, n int, previous string) string {
+// which is the loop. It holds no count: a refusal that differs each time is a
+// result that changed, and agentkit's loop detector would start counting again.
+func loopRefusal(tool, previous string) string {
 	var b strings.Builder
 	b.WriteString("ERROR: this call was NOT run. You have now called `")
 	b.WriteString(tool)
-	b.WriteString("` with byte-identical arguments ")
-	b.WriteString(strconv.Itoa(n))
-	b.WriteString(" times in a row, with no other tool call in between. Nothing has changed since " +
+	b.WriteString("` with byte-identical arguments again and again, with no other tool call in between. " +
+		"Nothing has changed since " +
 		"the last one, so this call cannot return anything the previous one did not.")
 	if p := strings.TrimSpace(previous); p != "" {
 		b.WriteString("\n\nWhat that call returned:\n")
