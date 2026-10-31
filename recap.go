@@ -353,6 +353,10 @@ func (h *Harness) applyRecap(sp recapSpan, summary string) (string, error) {
 		Content: fmt.Sprintf("recap: %d entries (~%d chars) → %s", len(sp.Subsumes), sp.Chars, sidecarName(sidecar)),
 	}
 	h.store.recap(sp.Subsumes, replacement, citation)
+	// Searchable after it leaves the context (raglitauth.go); a recap is
+	// applied whether or not it is put.
+	_ = agent.PutSpan(context.Background(), h.sessionIndex(), agent.SessionDocRecap,
+		"recap-"+replacement.ID, "", summary, sp.Subsumes)
 	h.cache.noteRecap()
 	h.recapsSince.Add(1) // the next round's stat says a recap happened (roundstats.go)
 	return citation.Content, nil

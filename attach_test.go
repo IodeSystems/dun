@@ -319,7 +319,7 @@ func TestSetIndex_OwnIndexOffNarrowsTheSearch(t *testing.T) {
 	}
 	own := raglitProject(ws)
 	old := listIndexes
-	listIndexes = func(context.Context, string, string) ([]raglitIndexRow, error) {
+	listIndexes = func(context.Context, string, string, []string) ([]raglitIndexRow, error) {
 		return []raglitIndexRow{{Project: own, Index: "main"}, {Project: own, Index: "memory"}, {Project: "x", Index: "y"}}, nil
 	}
 	t.Cleanup(func() { listIndexes = old; ownIdxCache.Delete(own) })

@@ -181,6 +181,10 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
 		return msg + ingestLine(h, id)
+	case "login", "logout":
+		// /rag login: dun's raglit token (dun/raglitauth.go); the same as
+		// /mcp login <id> for an OAuth server.
+		return runMCPCmd(ctx, h, action+" "+id)
 	case "auto":
 		return runSwitchCmd(ctx, h, alias, "on", []string{"--project"})
 	case "manual":

@@ -29,6 +29,7 @@ should still get a working dun. Turn them on per session, or once for good:
 | `/rag off` · `/lsp off` | off for this session |
 | `/rag auto` · `/lsp auto` | on for this project, every session (= `on --project`) |
 | `/rag manual` · `/lsp manual` | off for this project (= `off --project`); it stops now |
+| `/rag login` · `/rag logout` | a raglit with keys: mint dun's own raglit token, or revoke it |
 
 **Every server has three switches** — global (`$DUN_HOME/mcp.json`, every
 workspace), project (`$DUN_HOME/projects/<id>/dun.local.json`) and session
@@ -51,6 +52,16 @@ next turn, unless it set that switch itself.
 
 A repo's committed `dun.json` `autostart`/`via` is not a fourth scope: it is
 the project value while the project's own switch is unset.
+
+**A raglit with keys needs `/rag login` once.** raglit's daemon answers no
+request without a credential. `/rag login` mints a token for dun with your own
+(on this machine raglit finds its admin token; elsewhere `$RAGLIT_TOKEN`) and
+keeps it in `$DUN_HOME/oauth/raglit.token`. Each session then mints its own
+key from it, and searches with that key. What a fold or a recap takes out of
+the context goes into the session's own branch of the sessions index, so a
+search still finds it; raglit deletes the branch 7 days after its last write.
+`/rag logout` revokes the token and every session key under it. An older
+raglit, without keys, needs none of this.
 
 **What `/rag` indexes.** In a git repo, the files git shows (tracked plus
 untracked-not-ignored); outside one, a walk that honors `.gitignore`. Then,

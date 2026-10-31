@@ -598,7 +598,7 @@ func (h *Harness) indexSink(e Extension) *mcpDocsSink {
 		}
 	}
 	if r.CLI != "" && filepath.Base(spec.Command) == r.CLI {
-		return raglitDocsSink(spec)
+		return raglitDocsSink(spec, h.raglitEnv())
 	}
 	return nil
 }

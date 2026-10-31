@@ -408,6 +408,9 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	defer close(done)
 	go h.watchStart(s.ID, phase, timeout, done)
 	ext, isExt := h.extension(s.ID)
+	// A raglit with keys starts with the session's key, or not at all
+	// (raglitauth.go).
+	ragEnv, authErr := h.raglitAuth(ctx, s)
 	// raglit answers nothing until the workspace is in its index, so ingest
 	// belongs to STARTING the server (hook workspace.open), not to starting
 	// dun: a session that never turns rag on never pays for it.
@@ -415,7 +418,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// The guard used to be `RaglitHome != ""`, which silently became "never"
 	// the moment the per-session temp home was removed — the ingest was still
 	// called, from a branch that could no longer be taken.
-	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed {
+	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed && authErr == nil {
 		dir := h.cfg.ConfigDir
 		if dir == "" {
 			dir = h.cfg.Workspace
@@ -425,7 +428,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		h.ingestNote, h.ingestID = note, s.ID
 		h.srvMu.Unlock()
 	}
-	env := slices.Clone(s.Env) // appended to below; never the spec's own slice
+	env := append(slices.Clone(s.Env), ragEnv...) // appended to below; never the spec's own slice
 	// Host hooks: the extension calls back into dun. poly-lsp's arms the
 	// AGENTS.md guard, a file-access hook that cancels reads/edits until the
 	// model has seen the project's rules.
@@ -441,8 +444,8 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// A local command is looked for on PATH, then beside dun (missing.go);
 	// one in neither place is not started at all.
 	command := s.Command
-	var err error
-	if s.URL == "" && command != "" {
+	err := authErr
+	if err == nil && s.URL == "" && command != "" {
 		command, err = FindCommand(command)
 	}
 	switch {

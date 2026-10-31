@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -33,7 +34,7 @@ type raglitIndexRow struct {
 }
 
 // listIndexes runs the search extension's index CLI for every index.
-var listIndexes = func(ctx context.Context, cli, dir string) ([]raglitIndexRow, error) {
+var listIndexes = func(ctx context.Context, cli, dir string, env []string) ([]raglitIndexRow, error) {
 	p, err := FindCommand(cli)
 	if err != nil {
 		return nil, err
@@ -42,6 +43,7 @@ var listIndexes = func(ctx context.Context, cli, dir string) ([]raglitIndexRow, 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, p, "index", "--list", "--json")
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
@@ -118,7 +120,7 @@ func (h *Harness) indexesView() SwitchView {
 	if e, ok := h.extension(ServerDocs); ok && e.Roles.Index != nil && e.Roles.Index.CLI != "" {
 		cli = e.Roles.Index.CLI
 	}
-	rows, err := listIndexes(context.Background(), cli, h.cfg.Workspace)
+	rows, err := listIndexes(context.Background(), cli, h.cfg.Workspace, h.raglitEnv())
 	if err != nil {
 		v.Note = err.Error() + " — only the indexes a scope names are shown"
 	} else {

@@ -80,7 +80,7 @@ type mcpDocsSink struct {
 // raglitDocsSink runs the raglit CLI against the docs server's store — an
 // index role's cli fallback (indexSink) — or returns nil when the docs
 // server is not raglit.
-func raglitDocsSink(docs Server) *mcpDocsSink {
+func raglitDocsSink(docs Server, env []string) *mcpDocsSink {
 	if filepath.Base(docs.Command) != "raglit" {
 		return nil
 	}
@@ -91,7 +91,9 @@ func raglitDocsSink(docs Server) *mcpDocsSink {
 			if verb == "ingest" {
 				args = append(args, "--now")
 			}
-			out, err := detach(exec.Command(docs.Command, append(args, batch...)...)).CombinedOutput()
+			cmd := detach(exec.Command(docs.Command, append(args, batch...)...))
+			cmd.Env = append(os.Environ(), env...)
+			out, err := cmd.CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("raglit %s: %v: %s", verb, err, strings.TrimSpace(string(out)))
 			}

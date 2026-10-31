@@ -25,7 +25,7 @@ func TestIndexesKind_ListAttachDetach(t *testing.T) {
 	defer h.Close()
 	listErr := error(nil)
 	old := listIndexes
-	listIndexes = func(context.Context, string, string) ([]raglitIndexRow, error) {
+	listIndexes = func(context.Context, string, string, []string) ([]raglitIndexRow, error) {
 		if listErr != nil {
 			return nil, listErr
 		}

@@ -619,6 +619,9 @@ type Harness struct {
 	// Servers() reads it while holding srvMu.
 	oauthMu sync.Mutex
 	oauth   map[string]oauthEntry
+	// raglit's keys for this session, on the root (raglitauth.go).
+	ragMu                            sync.Mutex
+	ragSession, ragKey, ragBranchKey string
 	// turnMu is held for the length of a turn. A server command arrives on
 	// another goroutine (the -p reader), and swapping the Session's tools out
 	// from under a running turn is a data race — so a rebuild that cannot take
@@ -1488,6 +1491,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// in flight; its summary is sized by agentkit to the fold (fold.go).
 		SummaryOpts: foldOpts(),
 		TaskFunc:    h.foldTask,
+		// What a fold deletes stays searchable in the session's raglit
+		// branch (raglitauth.go); nil without a raglit that has keys.
+		Index: lateSessionIndex{h},
 	}
 	// A sub-agent's first user message IS its task (the parent's brief), so it
 	// must survive folds. Not for a root session: its first message may be

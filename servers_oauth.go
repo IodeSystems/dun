@@ -59,6 +59,12 @@ func (h *Harness) HasOAuth(id string) bool {
 
 // authState is the /mcp listing's auth column for s.
 func (h *Harness) authState(s Server) string {
+	if _, keyed := raglitKeyed(s); keyed { // raglitauth.go
+		if loadRaglitToken() == "" {
+			return "needs /rag login"
+		}
+		return "dun token"
+	}
 	switch {
 	case s.URL == "":
 		return ""
@@ -85,14 +91,23 @@ func (h *Harness) LoginServer(ctx context.Context, id string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no server %q", id)
 	}
-	oc := h.oauthFor(s)
-	if oc == nil {
-		return "", fmt.Errorf("%s has no oauth block — add one (client_id, …) to its entry in %s", id, UserServersFile())
+	var msg string
+	if _, keyed := raglitKeyed(s); keyed {
+		m, err := h.raglitLogin(ctx, s)
+		if err != nil {
+			return "", err
+		}
+		msg = m
+	} else {
+		oc := h.oauthFor(s)
+		if oc == nil {
+			return "", fmt.Errorf("%s has no oauth block — add one (client_id, …) to its entry in %s", id, UserServersFile())
+		}
+		if err := oc.Login(ctx, ""); err != nil {
+			return "", err
+		}
+		msg = oc.status().String()
 	}
-	if err := oc.Login(ctx, ""); err != nil {
-		return "", err
-	}
-	msg := oc.status().String()
 	if h.mgr.ServerStarted(id) {
 		return msg, nil // its next request sends the new token
 	}
@@ -112,19 +127,28 @@ func (h *Harness) LogoutServer(ctx context.Context, id string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no server %q", id)
 	}
-	oc := h.oauthFor(s)
-	if oc == nil {
-		return "", fmt.Errorf("%s does not log in with oauth", id)
+	var msg string
+	if _, keyed := raglitKeyed(s); keyed {
+		m, err := h.raglitLogout(ctx, s)
+		if err != nil {
+			return "", err
+		}
+		msg = m
+	} else {
+		oc := h.oauthFor(s)
+		if oc == nil {
+			return "", fmt.Errorf("%s does not log in with oauth", id)
+		}
+		revoked, err := oc.Logout(ctx)
+		if err != nil {
+			return "", err
+		}
+		msg = "logged out (token deleted"
+		if revoked {
+			msg += " and revoked"
+		}
+		msg += ")"
 	}
-	revoked, err := oc.Logout(ctx)
-	if err != nil {
-		return "", err
-	}
-	msg := "logged out (token deleted"
-	if revoked {
-		msg += " and revoked"
-	}
-	msg += ")"
 	if h.mgr.ServerStarted(id) {
 		h.mgr.StopServer(id)
 		h.applyTools()

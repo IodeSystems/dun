@@ -424,10 +424,10 @@ func (h *Harness) ownIndexes(e Extension, s Server, own string) []string {
 	if _, busy := ownIdxListing.LoadOrStore(own, true); busy {
 		return nil
 	}
-	ws := h.cfg.Workspace
+	ws, env := h.cfg.Workspace, h.raglitEnv()
 	go func() {
 		defer ownIdxListing.Delete(own)
-		rows, err := listIndexes(context.Background(), cli, ws)
+		rows, err := listIndexes(context.Background(), cli, ws, env)
 		if err != nil {
 			return
 		}
