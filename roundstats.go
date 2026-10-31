@@ -340,7 +340,10 @@ func (l *StatsLedger) Summary(since time.Time) (s StatsSummary) {
 		return s
 	}
 	now := time.Now().UTC()
-	months := []string{now.AddDate(0, -1, 0).Format("2006-01"), now.Format("2006-01")}
+	// From the 1st: AddDate(0, -1, 0) on the 31st lands in THIS month
+	// (Oct 31 → "Sep 31" → Oct 1), and the month was read twice.
+	prev := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+	months := []string{prev.Format("2006-01"), now.Format("2006-01")}
 	var speeds []float64
 	defer func() {
 		if len(speeds) > speedWindow {
