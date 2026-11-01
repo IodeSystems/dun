@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	shim "github.com/iodesystems/openai-claude-api-shim"
 	"github.com/iodesystems/dun"
 )
 
@@ -620,6 +621,33 @@ func tuneClient(fc dunConfig, c *llm.Client, url string) {
 		}
 	}
 	loopWatch.install(c, fc.Loops)
+	c.ClaudePrices = loadPrices()
+}
+
+// pricesPath is $DUN_HOME/prices.json: dun's own override of the price list its
+// Claude cost estimates come from, in USD per million tokens, by model or model
+// prefix:
+//
+//	{"claude-opus-5-5": {"input": 4, "write_5m": 5, "write_1h": 8, "read": 0.2, "output": 20}}
+//
+// It wins over the list shipped in openai-claude-api-shim and is read at start.
+// It is dun's, not shared: corrallm has its own, because either may be installed
+// without the other.
+func pricesPath() string { return filepath.Join(dunHome(), "prices.json") }
+
+// loadPrices reads it. No file is no override; a bad one is logged and ignored,
+// because a cost estimate is no reason not to start.
+func loadPrices() shim.Prices {
+	b, err := os.ReadFile(pricesPath())
+	if err != nil {
+		return nil
+	}
+	var p shim.Prices
+	if err := json.Unmarshal(b, &p); err != nil {
+		log.Printf("dun: ignoring %s: %v", pricesPath(), err)
+		return nil
+	}
+	return p
 }
 
 // dropKeyEnv takes dun's LLM keys out of this process's environment, so that

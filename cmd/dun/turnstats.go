@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/agentkit/llm"
 )
 
 // A turn's cost, under the message that started it (USER 2026-10-24: "how
@@ -91,8 +93,10 @@ func turnMoney(v float64, cur string) string {
 	if v > 0 && v < 0.01 {
 		s := fmt.Sprintf("%.4f", v)
 		switch cur {
-		case "USD":
+		case llm.CurrencyUSD:
 			return "$" + s
+		case llm.CurrencyUSDEstimate:
+			return "~$" + s + " est"
 		case "":
 			return s
 		}

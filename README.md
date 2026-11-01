@@ -509,6 +509,20 @@ thinking and tool calls, and sets how far it goes, for every session:
 The refusal of a third identical tool call is separate: `DUN_LOOP_REPEATS`
 sets it, and no tool is exempt.
 
+## Claude costs
+
+Anthropic reports tokens and no money, so dun estimates a Claude cost from a price list.
+An estimate is labelled `~$… est` wherever it is shown, and it is its own currency in the
+spend ledger: it is never added to an amount a provider reported. The Console is the real
+figure.
+
+`$DUN_HOME/prices.json` overrides the list, in USD per million tokens, by model or model
+prefix; it is read at start:
+
+```json
+{"claude-opus-5-5": {"input": 4, "write_5m": 5, "write_1h": 8, "read": 0.2, "output": 20}}
+```
+
 ## Isolation
 
 dun works in an isolated **git worktree** (a fresh `dun/<ts>` branch off HEAD),

@@ -11,6 +11,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
 )
@@ -635,8 +636,10 @@ func moneyIn(by map[string]float64) string {
 // moneyOf is one amount in its currency.
 func moneyOf(v float64, cur string) string {
 	switch cur {
-	case "USD":
+	case llm.CurrencyUSD:
 		return "$" + money(v)
+	case llm.CurrencyUSDEstimate:
+		return "~$" + money(v) + " est"
 	case "credits":
 		return strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0") + " credits"
 	case "":

@@ -66,6 +66,39 @@ func TestDropKeyEnv(t *testing.T) {
 	}
 }
 
+// dun's own price file overrides the estimates; a bad one is ignored.
+func TestLoadPrices(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	if loadPrices() != nil {
+		t.Error("no file should be no override")
+	}
+	if err := os.WriteFile(pricesPath(), []byte(`{"claude-opus-5-5":{"input":1,"output":2}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if p := loadPrices(); p["claude-opus-5-5"].Input != 1 || p["claude-opus-5-5"].Output != 2 {
+		t.Errorf("prices %+v", p)
+	}
+	if err := os.WriteFile(pricesPath(), []byte(`{not json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if loadPrices() != nil {
+		t.Error("a bad file was used")
+	}
+}
+
+// An estimate says so wherever an amount is shown.
+func TestEstimatesSaySo(t *testing.T) {
+	if got := moneyOf(1.5, llm.CurrencyUSDEstimate); got != "~$1.50 est" {
+		t.Errorf("moneyOf %q", got)
+	}
+	if got := turnMoney(0.0042, llm.CurrencyUSDEstimate); got != "~$0.0042 est" {
+		t.Errorf("turnMoney %q", got)
+	}
+	if got := moneyIn(map[string]float64{llm.CurrencyUSD: 1, llm.CurrencyUSDEstimate: 2}); got != "$1.00 + ~$2.00 est" {
+		t.Errorf("moneyIn %q", got)
+	}
+}
+
 // /context config: flags in either form, values in tokens or default; the
 // settings are in force at once and saved for the model.
 func TestContextConfigCmd(t *testing.T) {
