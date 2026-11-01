@@ -86,8 +86,8 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/iodesystems/agentkit v0.20.0 h1:Lv0iKpHTuByG7W6U3V21Q4lqZ1mT57OmxI/hK3yIX6A=
-github.com/iodesystems/agentkit v0.20.0/go.mod h1:8+FOriwcOi+xKv2y4nFXrCpAVVhWps1qh5t0SLykm+8=
+github.com/iodesystems/agentkit v0.20.1 h1:EpRazF7GngTbRB8BcE1pbGrwZqybZGXWXGFyl5hIPqM=
+github.com/iodesystems/agentkit v0.20.1/go.mod h1:8+FOriwcOi+xKv2y4nFXrCpAVVhWps1qh5t0SLykm+8=
 github.com/iodesystems/gwag/v2 v2.3.1 h1:KaMWT1XDxQegVL9fAjTde6KQDvOWaWvDRkVgJqBH26g=
 github.com/iodesystems/gwag/v2 v2.3.1/go.mod h1:DhwtM+vBI1xKDCmJf5Up85GwhBoSZI3mSrYSCwXRqHk=
 github.com/iodesystems/openai-claude-api-shim v0.2.0 h1:5yKw5mSlDu8y/3en5oh9oQhoZ9vsnvV4Bu8bn3tY6nM=

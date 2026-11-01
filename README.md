@@ -535,8 +535,10 @@ dun spend budget 100      # a monthly budget in USD; Anthropic has no balance to
 dun spend logout
 ```
 
-The figure is org-wide and usually within 5 minutes. Without either credential, dun shows
-estimates. The budget left is your figure minus that spend, not a balance from Anthropic.
+The figure is org-wide and usually within 5 minutes. Anthropic's Admin API is not available
+to individual accounts, which get 403 even when logged in. Then, or with no credential, dun
+shows `~$… est` from its own ledger, which covers only what went through this dun. The budget
+left is your figure minus that spend, not a balance from Anthropic.
 
 ## Isolation
 

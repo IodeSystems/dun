@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/anthropicadmin"
+	"github.com/iodesystems/agentkit/llm"
 
 	"github.com/iodesystems/dun"
 )
@@ -57,23 +58,39 @@ func spendSource(ctx context.Context) anthropicadmin.Source {
 	return anthropicadmin.Source{KeyFile: spendKeyFile(), Ant: antPath(ctx)}
 }
 
-// spendLine is what is known, in words.
+// spendLine is what is known, in words. With no report it falls back on dun's own
+// ledger, which covers what went through this dun and is an estimate.
 func spendLine(ctx context.Context, s anthropicadmin.Source, budget float64, now time.Time) string {
+	estimate := func(why string) string {
+		spent := estimatedThisMonth()
+		line := fmt.Sprintf("spend: ~$%.2f est this month, through this dun only", spent)
+		if budget > 0 {
+			line += fmt.Sprintf(" · ~$%.2f est left of your $%.2f budget", budget-spent, budget)
+		}
+		return line + "\n" + why
+	}
 	if s.How() == "" {
-		return "spend: estimates only: no admin credential. dun spend login, after dun doctor --fix, or an Admin key in " + spendKeyFile()
+		return estimate("for the billed figure: dun spend login, after dun doctor --fix, or an Admin key in " + spendKeyFile())
 	}
 	got, err := s.MonthToDate(ctx, now)
-	if errors.Is(err, anthropicadmin.ErrNoCredential) {
-		return "spend: estimates only: not logged in. Run dun spend login"
-	}
-	if err != nil {
-		return "spend: could not read the cost report: " + err.Error()
+	switch {
+	case errors.Is(err, anthropicadmin.ErrNotPermitted):
+		return estimate("Anthropic has no billed figure for this account: an individual account has no Admin API. The Console shows it")
+	case errors.Is(err, anthropicadmin.ErrNoCredential):
+		return estimate("for the billed figure: dun spend login")
+	case err != nil:
+		return estimate("could not read the cost report: " + err.Error())
 	}
 	line := fmt.Sprintf("spend: $%.2f billed since %s (org-wide, usually within 5 minutes)", got.USD, got.Since.Format("Jan 2"))
 	if budget > 0 {
 		line += fmt.Sprintf(" · $%.2f left of your $%.2f budget", budget-got.USD, budget)
 	}
 	return line
+}
+
+// estimatedThisMonth is the ledger's estimates this month, on every key.
+var estimatedThisMonth = func() float64 {
+	return dun.NewSpendLedger(dun.DefaultLedgerDir()).Summary("", time.Time{}).Month[llm.CurrencyUSDEstimate]
 }
 
 // setSpendBudget saves action's budget and says so.

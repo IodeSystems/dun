@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,15 +28,36 @@ func fakeAntBin(t *testing.T, script string) string {
 func TestSpendLine_Neither(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	got := spendLine(context.Background(), anthropicadmin.Source{KeyFile: spendKeyFile()}, 0, time.Now())
-	if !strings.Contains(got, "estimates only") || !strings.Contains(got, "dun spend login") {
+	if !strings.Contains(got, "est this month") || !strings.Contains(got, "dun spend login") {
 		t.Errorf("%q", got)
+	}
+}
+
+// An account Anthropic refuses gets the estimate, labelled, and the reason.
+func TestSpendLine_IndividualAccount(t *testing.T) {
+	old := estimatedThisMonth
+	estimatedThisMonth = func() float64 { return 12.5 }
+	t.Cleanup(func() { estimatedThisMonth = old })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+	s := anthropicadmin.Source{Ant: fakeAntBin(t, "echo tok"), Base: srv.URL}
+	got := spendLine(context.Background(), s, 100, time.Now())
+	for _, want := range []string{"~$12.50 est", "~$87.50 est left of your $100.00", "individual account"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in %q", want, got)
+		}
+	}
+	if strings.Contains(got, "billed since") {
+		t.Errorf("an estimate read as billed: %q", got)
 	}
 }
 
 func TestSpendLine_NotLoggedIn(t *testing.T) {
 	ant := fakeAntBin(t, `exit 1`)
 	got := spendLine(context.Background(), anthropicadmin.Source{Ant: ant}, 0, time.Now())
-	if !strings.Contains(got, "not logged in") {
+	if !strings.Contains(got, "dun spend login") || strings.Contains(got, "billed since") {
 		t.Errorf("%q", got)
 	}
 }
