@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
-	shim "github.com/iodesystems/openai-claude-api-shim"
 	"github.com/iodesystems/dun"
+	shim "github.com/iodesystems/openai-claude-api-shim"
 )
 
 // Config — persisted LLM settings so you don't re-pass --url/--model/--key every
@@ -56,6 +56,9 @@ type dunConfig struct {
 	// Retry5xxAttempts is how many times a 5xx is retried (/retry attempts);
 	// 0 is agentkit's default (5). DUN_RETRY_5XX_ATTEMPTS wins over it.
 	Retry5xxAttempts int `json:"retry_5xx_attempts,omitempty"`
+	// SpendBudget is the monthly budget, in USD, that dun spend counts down.
+	// Anthropic has no balance to read, so it is a figure the user sets; 0 is none.
+	SpendBudget float64 `json:"spend_budget_usd,omitempty"`
 	// Loops is /loops: how far dun's loop detection goes (loopscmd.go).
 	Loops loopConfig `json:"loops,omitzero"`
 	// VisionModel describes images for a model that cannot read them (a model

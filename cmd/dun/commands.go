@@ -184,6 +184,8 @@ func ownCommands(iso string) []proto.CommandSpec {
 				"on", "a file (or glob) back in every request", "off", "a file (or glob) out of every request, still found through the docs index",
 				"unset", "a file's switch at a scope, back to the one below"),
 			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone, each file's cost, its switch at each scope and the mode; a mode word sets the project's mode"},
+		{Name: "spend", Usage: "[budget <usd>|off]", Group: "session",
+			Description: "real Anthropic spend this month and the budget left, from an admin login or key; estimates need neither"},
 		{Name: "loops", Usage: "[off|count|cut | tolerance N|default | tools N|count|default]", Group: "session",
 			Choices: choices("status", "the settings now, and what has been found", "off", "only the guard on the same bytes back to back",
 				"count", "find loops and count them; cut nothing the guard would not",
@@ -490,7 +492,7 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("usage: /file [add|remove <path>]")
 		}
-	case "retry", "loops":
+	case "retry", "loops", "spend":
 		r.control(name, strings.Join(args, " "))
 	case "suggest":
 		r.control(name, arg(0))

@@ -195,6 +195,9 @@ func main() {
 	}
 	// `dun doctor`: what dun needs, checked (doctor.go); --fix applies the
 	// fixes it can run itself.
+	if len(os.Args) > 1 && os.Args[1] == "spend" {
+		os.Exit(spendCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		c := doctorCmd()
 		c.SetArgs(os.Args[2:])
@@ -1504,6 +1507,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
+		// /spend: real spend and the budget; the login needs a terminal, so it
+		// says the command (spendcmd.go).
+		if id == "spend" {
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: spendControl(ctx, action)})
+			return
+		}
 		// /effort: bare says the level; a level is set, saved, and applies
 		// from the next request (dun/effort.go).
 		if id == "effort" {
@@ -2494,7 +2503,7 @@ func recordReplies(h *dun.Harness) func(payload any) {
 	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", dun.ServerDocs: "rag"}
 	kindSlash := map[string]string{"indexes": "rag", "paths": "file", "lsp": "lsp", "skills": "skill", "rules": "rules"}
 	commands := map[string]bool{"slash": true, "files": true, "switches": true, "mcp": true, "ext": true, "jobs": true,
-		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "loops": true, "suggest": true,
+		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "loops": true, "spend": true, "suggest": true,
 		"worklog": true, "memories": true, "interrupt": true, "ctxconfig": true, "repaint": true}
 	return func(payload any) {
 		switch p := payload.(type) {

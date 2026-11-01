@@ -523,6 +523,21 @@ prefix; it is read at start:
 {"claude-opus-5-5": {"input": 4, "write_5m": 5, "write_1h": 8, "read": 0.2, "output": 20}}
 ```
 
+**Real spend.** Anthropic's replies carry no money, and a Console org has no read-only
+credential: reading its cost report takes full admin. `dun spend login` runs Anthropic's
+`ant` CLI so you log in through the browser and dun keeps no admin key; `dun doctor --fix`
+installs `ant` when a provider is Anthropic. Or put an Admin key in
+`$DUN_HOME/oauth/anthropic-admin.key` (mode 0600), which wins if both exist.
+
+```
+dun spend                 # billed this month, budget left
+dun spend budget 100      # a monthly budget in USD; Anthropic has no balance to read
+dun spend logout
+```
+
+The figure is org-wide and usually within 5 minutes. Without either credential, dun shows
+estimates. The budget left is your figure minus that spend, not a balance from Anthropic.
+
 ## Isolation
 
 dun works in an isolated **git worktree** (a fresh `dun/<ts>` branch off HEAD),

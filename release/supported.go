@@ -15,6 +15,13 @@ package release
 // no longer works (poly-lsp-mcp's 9f31d7e needs a C compiler). A release
 // build's deps.json must name these same versions (supported_test.go).
 var Supported = []Tool{
+	// Anthropic's CLI, for one thing: an admin login, so dun can read real
+	// Anthropic spend with no admin key to keep (agentkit anthropicadmin). dun
+	// works without it, with estimates. Not ours, so only the pin moves. Linux
+	// tarballs in deps.json; macOS ships zips, which update cannot read, so it
+	// go-installs. Module path needs /v2: without it the proxy stops at v1.44.0.
+	{Name: "ant", Module: "github.com/anthropics/anthropic-cli/v2/cmd/ant",
+		Min: "v2.4.0", Recommended: "v2.4.0"},
 	// v0.2.0: the oldest tag with --files-dir and --mcp, which dun passes.
 	// v0.5.1 (2026-10-24): MCPSHELL_TMP_OVERFLOW_DIR, which dun sets so
 	// over-limit output is saved to a file; per-server unchecked globs, which
