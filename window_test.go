@@ -19,6 +19,7 @@ func TestListedWindow(t *testing.T) {
 		"openrouter": {"/v1/models", `{"data":[{"id":"other","context_length":1},{"id":"deepseek/x","context_length":163840}]}`, 163840},
 		"top":        {"/v1/models", `{"data":[{"id":"deepseek/x","top_provider":{"context_length":65536}}]}`, 65536},
 		"vllm":       {"/v1/models", `{"data":[{"id":"deepseek/x","max_model_len":32768}]}`, 32768},
+		"anthropic":  {"/v1/models", `{"data":[{"id":"deepseek/x","max_input_tokens":1000000,"max_tokens":128000}]}`, 1000000},
 		"litellm":    {"/model/info", `{"data":[{"model_name":"deepseek/x","model_info":{"max_input_tokens":128000,"max_tokens":8192}}]}`, 128000},
 		"none":       {"/v1/models", `{"data":[{"id":"deepseek/x"}]}`, 0},
 	} {

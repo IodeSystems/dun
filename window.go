@@ -21,7 +21,8 @@ import (
 //	DUN_CONTEXT_TOKENS                     this run
 //	the window set for this model          /context config --max N, saved in $DUN_HOME/context.json
 //	the server's /props                    llama.cpp, corrallm
-//	the model list                         /models (OpenRouter context_length, vLLM max_model_len),
+//	the model list                         /models (OpenRouter context_length, vLLM max_model_len,
+//	                                       Anthropic max_input_tokens),
 //	                                       /model/info (LiteLLM max_input_tokens)
 
 // Endpoint is the model in use and where it is: the key the saved window
@@ -134,6 +135,10 @@ func getListed(ctx context.Context, e Endpoint, u string, v any) bool {
 	if e.Key != "" {
 		req.Header.Set("Authorization", "Bearer "+e.Key)
 	}
+	// Anthropic's own /models refuses a request that names no version.
+	if req.URL.Hostname() == "api.anthropic.com" {
+		req.Header.Set("anthropic-version", "2023-06-01")
+	}
 	resp, err := windowHTTP.Do(req)
 	if err != nil {
 		return false
@@ -160,6 +165,7 @@ func listedWindow(ctx context.Context, e Endpoint) int {
 			ContextLength int    `json:"context_length"`
 			MaxModelLen   int    `json:"max_model_len"`
 			ContextWindow int    `json:"context_window"`
+			MaxInputToks  int    `json:"max_input_tokens"` // Anthropic's own /models
 			TopProvider   struct {
 				ContextLength int `json:"context_length"`
 			} `json:"top_provider"`
@@ -170,7 +176,7 @@ func listedWindow(ctx context.Context, e Endpoint) int {
 			if m.ID != e.Model {
 				continue
 			}
-			for _, n := range []int{m.ContextLength, m.TopProvider.ContextLength, m.MaxModelLen, m.ContextWindow} {
+			for _, n := range []int{m.ContextLength, m.TopProvider.ContextLength, m.MaxModelLen, m.ContextWindow, m.MaxInputToks} {
 				if n > 0 {
 					return n
 				}
