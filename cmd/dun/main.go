@@ -921,6 +921,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "dun: spawning tool servers for %s …\n", absWS)
 	}
 
+	dropKeyEnv(fc, effKey)
 	h, err := dun.Start(ctx, cfg)
 	if h != nil {
 		started.Store(h)

@@ -622,6 +622,36 @@ func tuneClient(fc dunConfig, c *llm.Client, url string) {
 	loopWatch.install(c, fc.Loops)
 }
 
+// dropKeyEnv takes dun's LLM keys out of this process's environment, so that
+// nothing it starts inherits them: exec, MCP servers, anything the model can make
+// print `env`. Run in the engine once its clients hold the keys. A variable whose
+// value is one of them goes too, whatever its name (ANTHROPIC_API_KEY); every
+// other variable stays, because a project's own tools need theirs.
+//
+// This stops a key leaking by accident. It is no boundary: exec runs as the user
+// and can read config.json. Isolation is --docker.
+func dropKeyEnv(fc dunConfig, key string) {
+	keys := map[string]bool{}
+	for _, k := range append([]string{key, fc.Key}, providerKeys(fc)...) {
+		if k != "" {
+			keys[k] = true
+		}
+	}
+	for _, kv := range os.Environ() {
+		if name, value, ok := strings.Cut(kv, "="); ok && (name == "DUN_LLM_KEY" || keys[value]) {
+			os.Unsetenv(name)
+		}
+	}
+}
+
+func providerKeys(fc dunConfig) []string {
+	var out []string
+	for _, p := range fc.Providers {
+		out = append(out, p.Key)
+	}
+	return out
+}
+
 // parseRetryBudgets interprets the persisted retry budgets: request scope (a
 // negative value means unbounded) and turn scope ("0" disables the turn-scope
 // retry, same as DUN_TURN_RETRY_BUDGET). Empty = unset. Junk is ignored with a

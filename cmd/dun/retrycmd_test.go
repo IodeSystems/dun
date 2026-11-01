@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,24 @@ func TestRetryCmd(t *testing.T) {
 		if _, _, err := retryCmd(c, bad); err == nil {
 			t.Errorf("%q was taken", bad)
 		}
+	}
+}
+
+// The engine's children inherit no LLM key, by name or by value; a project's own
+// variables stay.
+func TestDropKeyEnv(t *testing.T) {
+	t.Setenv("DUN_LLM_KEY", "k-active")
+	t.Setenv("ANTHROPIC_API_KEY", "k-active")
+	t.Setenv("OTHER_KEY", "k-saved")
+	t.Setenv("PROJECT_TOKEN", "mine")
+	dropKeyEnv(dunConfig{Providers: []providerConfig{{Name: "a", Key: "k-saved"}, {Name: "b"}}}, "k-active")
+	for _, name := range []string{"DUN_LLM_KEY", "ANTHROPIC_API_KEY", "OTHER_KEY"} {
+		if v, ok := os.LookupEnv(name); ok {
+			t.Errorf("%s=%s is still set", name, v)
+		}
+	}
+	if os.Getenv("PROJECT_TOKEN") != "mine" {
+		t.Error("a project's variable went too")
 	}
 }
 
