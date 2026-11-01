@@ -18,7 +18,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/iodesystems/agentkit v0.18.1
+	github.com/iodesystems/agentkit v0.18.2
 	github.com/iodesystems/gwag/v2 v2.3.1
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
@@ -51,7 +51,7 @@ require (
 	github.com/go-openapi/jsonpointer v1.0.2 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/iodesystems/openai-claude-api-shim v0.1.0 // indirect
+	github.com/iodesystems/openai-claude-api-shim v0.1.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
