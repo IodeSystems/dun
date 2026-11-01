@@ -3,21 +3,6 @@
   "version": "",
   "published": "",
   "artifacts": {
-    "ant": {
-      "version": "v2.4.0",
-      "files": {
-        "linux_amd64": {
-          "url": "https://github.com/anthropics/anthropic-cli/releases/download/v2.4.0/ant_2.4.0_linux_amd64.tar.gz",
-          "sha256": "45434d2721f801638340cc6f12277af32791c8cf3707134f690557e58a14d447",
-          "size": 13596487
-        },
-        "linux_arm64": {
-          "url": "https://github.com/anthropics/anthropic-cli/releases/download/v2.4.0/ant_2.4.0_linux_arm64.tar.gz",
-          "sha256": "88cc2d3d582e20a5aa17234f2409596a70b5e8afd6a35372d6a784e7a708c5a3",
-          "size": 12623788
-        }
-      }
-    },
     "mcpshell": {
       "version": "v0.7.1",
       "files": {

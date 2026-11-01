@@ -523,22 +523,20 @@ prefix; it is read at start:
 {"claude-opus-5-5": {"input": 4, "write_5m": 5, "write_1h": 8, "read": 0.2, "output": 20}}
 ```
 
-**Real spend.** Anthropic's replies carry no money, and a Console org has no read-only
-credential: reading its cost report takes full admin. `dun spend login` runs Anthropic's
-`ant` CLI so you log in through the browser and dun keeps no admin key; `dun doctor --fix`
-installs `ant` when a provider is Anthropic. Or put an Admin key in
-`$DUN_HOME/oauth/anthropic-admin.key` (mode 0600), which wins if both exist.
+**Spend this month.** Anthropic's replies carry exact tokens and no money, so `dun spend` is a
+ledger: those tokens times the prices, labelled as an estimate. It covers what went through
+this dun.
 
 ```
-dun spend                 # billed this month, budget left
-dun spend budget 100      # a monthly budget in USD; Anthropic has no balance to read
-dun spend logout
+dun spend                  # ~$… est this month, and the budget left
+dun spend budget 100       # a monthly budget in USD
+dun spend reconcile 41.20  # the real figure off the Console; only what follows is estimated
 ```
 
-The figure is org-wide and usually within 5 minutes. Anthropic's Admin API is not available
-to individual accounts, which get 403 even when logged in. Then, or with no credential, dun
-shows `~$… est` from its own ledger, which covers only what went through this dun. The budget
-left is your figure minus that spend, not a balance from Anthropic.
+Reading Anthropic's own cost report takes full admin on an organization account, and an
+individual account cannot have it. If yours can, `dun spend login` runs Anthropic's `ant` CLI,
+or put an Admin key in `$DUN_HOME/oauth/anthropic-admin.key` (mode 0600), and `dun spend` shows
+the billed figure. Nothing else needs it.
 
 ## Isolation
 

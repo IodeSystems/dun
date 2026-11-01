@@ -224,12 +224,11 @@ var doctorTools = []struct{ name, level, need string }{
 	{"mcpshell", "warn", ""},
 	{"poly-lsp-mcp", "warn", "/lsp"},
 	{"raglit", "warn", "/rag"},
-	{"ant", "warn", "real Anthropic spend (dun spend)"},
 }
 
 // fixTools are the tools --fix installs: both build with Go alone. raglit
 // is opt-in and needs more than its binary (an embedder).
-var fixTools = map[string]bool{"mcpshell": true, "poly-lsp-mcp": true, "ant": true}
+var fixTools = map[string]bool{"mcpshell": true, "poly-lsp-mcp": true}
 
 // goInstall installs a module with the go command into dir, or, with dir
 // "", beside dun when dun's directory is writable, else go's own bin
@@ -250,9 +249,6 @@ func (d *doctor) tools() {
 	svcPATH, svcHasPATH := dundcli.ServicePATH(dundcli.ServiceUnit)
 	_, svcInstalled := dundcli.ServiceFile(dundcli.ServiceUnit)
 	for _, t := range doctorTools {
-		if t.name == "ant" && !usesAnthropic(loadConfig()) {
-			continue // only a Claude provider has anything for it to read
-		}
 		level := t.level
 		p, err := dun.FindCommand(t.name)
 		if err != nil {
@@ -273,10 +269,6 @@ func (d *doctor) tools() {
 				"reinstall the service from this shell to capture its PATH: dun dund service install -- <flags>")
 		} else {
 			d.add("ok", "tool", t.name+": "+p, "")
-		}
-		if t.name == "ant" {
-			d.antChecks(p)
-			continue
 		}
 		if t.name != "git" {
 			d.toolOrigin(t.name, p)

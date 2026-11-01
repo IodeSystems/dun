@@ -26,7 +26,6 @@ var ToolInstall = map[string]struct{ Module, Lost string }{
 	"mcpshell":     {pinned("mcpshell"), "no eval tool (sandboxed calculations, data, SQL)"},
 	"poly-lsp-mcp": {pinned("poly-lsp-mcp"), "no semantic code tools (/lsp)"},
 	"raglit":       {pinned("raglit"), "no docs search or memories (/rag)"},
-	"ant":          {pinned("ant"), "Anthropic costs stay estimates (dun spend)"},
 }
 
 // pinned is name's module at its recommended version.

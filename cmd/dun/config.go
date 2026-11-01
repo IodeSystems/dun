@@ -59,6 +59,8 @@ type dunConfig struct {
 	// SpendBudget is the monthly budget, in USD, that dun spend counts down.
 	// Anthropic has no balance to read, so it is a figure the user sets; 0 is none.
 	SpendBudget float64 `json:"spend_budget_usd,omitempty"`
+	// SpendKnown is the last real figure the user read off the Console.
+	SpendKnown spendKnown `json:"spend_known,omitzero"`
 	// Loops is /loops: how far dun's loop detection goes (loopscmd.go).
 	Loops loopConfig `json:"loops,omitzero"`
 	// VisionModel describes images for a model that cannot read them (a model
