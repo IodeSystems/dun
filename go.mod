@@ -18,7 +18,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/iodesystems/agentkit v0.17.0
+	github.com/iodesystems/agentkit v0.18.0
 	github.com/iodesystems/gwag/v2 v2.3.1
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
@@ -35,13 +35,9 @@ require (
 	connectrpc.com/connect v1.21.1 // indirect
 	github.com/IodeSystems/graphql-go/v2 v2.0.1 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
-	github.com/anthropics/anthropic-sdk-go v1.84.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
-	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/bufbuild/protocompile v0.14.1 // indirect
-	github.com/buger/jsonparser v1.1.2 // indirect
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20261023060817-a45b7c86333f // indirect
 	github.com/charmbracelet/x/exp/slice v0.1.0 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -52,36 +48,24 @@ require (
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dlclark/regexp2/v2 v2.10.0 // indirect
 	github.com/getkin/kin-openapi v0.152.0 // indirect
-	github.com/go-logr/logr v1.4.4 // indirect
-	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v1.0.2 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/invopop/jsonschema v0.14.0 // indirect
+	github.com/iodesystems/openai-claude-api-shim v0.1.0 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
-	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
-	github.com/tidwall/gjson v1.18.0 // indirect
-	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.1 // indirect
-	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect
 	github.com/yuin/goldmark v1.8.6 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
-	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel v1.47.0 // indirect
-	go.opentelemetry.io/otel/log v1.47.0 // indirect
-	go.opentelemetry.io/otel/metric v1.47.0 // indirect
-	go.opentelemetry.io/otel/trace v1.47.0 // indirect
-	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
