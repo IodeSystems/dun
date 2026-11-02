@@ -837,18 +837,19 @@ type tuiModel struct {
 	logins       pickList
 	loginProbe   map[string]int // local template id → models it answered with; absent: not answering
 	// The add-provider form (/model add, ctrl+a in the picker).
-	providerForm     bool
-	providerFields   [3]textinput.Model // address, name, key (fieldAddr, fieldName, fieldKey)
-	providerStep     int
-	providerErr      string
-	providerAuto     string     // the name the form filled in from the address; replaced while it is unedited
-	providerEdit     string     // the provider the form edits; "" adds one
-	providerChecking string     // the service being checked, asked for its models before it is saved (saveProvider)
-	providerPending  providerOp // what is saved once the check passes
-	providerTmpl     *loginTmpl // the template the form was opened from; nil: custom, or again
-	providerEnvKey   string     // the template's key variable that is set; "" none
-	providerBack     bool       // esc goes back to the service picker
-	provider         string     // name of the provider the engine runs on
+	providerForm       bool
+	providerFields     [3]textinput.Model // address, name, key (fieldAddr, fieldName, fieldKey)
+	providerStep       int
+	providerErr        string
+	providerAuto       string     // the name the form filled in from the address; replaced while it is unedited
+	providerEdit       string     // the provider the form edits; "" adds one
+	providerChecking   string     // the service being checked, asked for its models before it is saved (saveProvider)
+	providerPending    providerOp // what is saved once the check passes
+	providerTmpl       *loginTmpl // the template the form was opened from; nil: custom, or again
+	providerKeysOpened bool       // the keys page was opened for this form
+	providerEnvKey     string     // the template's key variable that is set; "" none
+	providerBack       bool       // esc goes back to the service picker
+	provider           string     // name of the provider the engine runs on
 	// /rag setup (ragsetup.go); nil when it is not open.
 	rag *ragSetup
 	// The add-MCP-server form (/mcp add).

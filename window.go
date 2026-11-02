@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+
+	shim "github.com/iodesystems/openai-claude-api-shim"
 )
 
 // The context window, when the server will not state it (USER 2026-10-26,
@@ -166,14 +168,26 @@ func listedWindow(ctx context.Context, e Endpoint) int {
 			MaxModelLen   int    `json:"max_model_len"`
 			ContextWindow int    `json:"context_window"`
 			MaxInputToks  int    `json:"max_input_tokens"` // Anthropic's own /models
+			Line          string `json:"line"`
+			CreatedAt     string `json:"created_at"`
 			TopProvider   struct {
 				ContextLength int `json:"context_length"`
 			} `json:"top_provider"`
 		} `json:"data"`
 	}
 	if get(base+"/models", &models) {
+		want := e.Model
+		if shim.IsAlias(want) {
+			var list []shim.Model
+			for _, m := range models.Data {
+				list = append(list, shim.Model{ID: m.ID, Line: m.Line, CreatedAt: m.CreatedAt})
+			}
+			if id, ok := shim.Latest(list, want); ok {
+				want = id
+			}
+		}
 		for _, m := range models.Data {
-			if m.ID != e.Model {
+			if m.ID != want {
 				continue
 			}
 			for _, n := range []int{m.ContextLength, m.TopProvider.ContextLength, m.MaxModelLen, m.ContextWindow, m.MaxInputToks} {

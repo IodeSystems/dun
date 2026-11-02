@@ -11,6 +11,8 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iodesystems/dun"
 )
 
 // /login starts with a picker of services: custom (any OpenAI-compatible
@@ -27,6 +29,7 @@ type loginTmpl struct {
 	url     string   // its OpenAI-compatible base
 	keyEnv  []string // where a key usually is, in order; nil: a local server, no key
 	keysAt  string   // where to get a key, in a few words
+	keysURL string   // that page, when the form can open it
 	hostEnv string   // a variable that moves a local server (OLLAMA_HOST)
 }
 
@@ -43,7 +46,7 @@ var loginTemplates = []loginTmpl{
 	{id: "openrouter", label: "OpenRouter", url: "https://openrouter.ai/api/v1", keyEnv: []string{"OPENROUTER_API_KEY"}, keysAt: "openrouter.ai/keys"},
 	{id: "fireworks", label: "Fireworks", url: "https://api.fireworks.ai/inference/v1", keyEnv: []string{"FIREWORKS_API_KEY"}, keysAt: "fireworks.ai/account/api-keys"},
 	{id: "openai", label: "OpenAI", url: "https://api.openai.com/v1", keyEnv: []string{"OPENAI_API_KEY"}, keysAt: "platform.openai.com/api-keys"},
-	{id: "anthropic", label: "Anthropic", url: "https://api.anthropic.com/v1", keyEnv: []string{"ANTHROPIC_API_KEY"}, keysAt: "console.anthropic.com/settings/keys"},
+	{id: "anthropic", label: "Anthropic", url: "https://api.anthropic.com/v1", keyEnv: []string{"ANTHROPIC_API_KEY"}, keysAt: "platform.claude.com/settings/keys", keysURL: "https://platform.claude.com/settings/keys"},
 	{id: "qwen", label: "Qwen", url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", keyEnv: []string{"DASHSCOPE_API_KEY"}, keysAt: "Alibaba Cloud Model Studio"},
 	{id: "deepseek", label: "DeepSeek", url: "https://api.deepseek.com/v1", keyEnv: []string{"DEEPSEEK_API_KEY"}, keysAt: "platform.deepseek.com/api_keys"},
 	{id: "groq", label: "Groq", url: "https://api.groq.com/openai/v1", keyEnv: []string{"GROQ_API_KEY"}, keysAt: "console.groq.com/keys"},
@@ -295,6 +298,7 @@ func (m *tuiModel) openTemplateForm(t loginTmpl, back bool) tea.Cmd {
 		m.providerFields[fieldKey].Placeholder = placeholder("found in $" + m.providerEnvKey + " — enter to use it")
 	} else {
 		m.providerFields[fieldKey].Placeholder = placeholder("paste your " + t.label + " key")
+		m.providerKeysOpened = t.keysURL != "" && openKeysPage(t.keysURL)
 	}
 	if !t.local() { // the address is right already: the key is what is asked
 		m.providerFields[fieldAddr].Blur()
@@ -321,6 +325,9 @@ func (m tuiModel) lastStep() int {
 func (m tuiModel) loginFail(u string, f modelsFail) string {
 	switch {
 	case f.refused:
+		if t := m.providerTmpl; t != nil && t.id == "anthropic" {
+			return "the key was refused — " + f.why + "\n" + anthropicNoSubscription
+		}
 		return "the key was refused — " + f.why
 	case f.unreachable:
 		what := "the service"
@@ -340,4 +347,21 @@ func hostOnly(raw string) string {
 		return u.Hostname()
 	}
 	return ""
+}
+
+// anthropicNoSubscription is said where a Claude subscriber would otherwise be
+// stuck: a plan is not an API account, and Anthropic does not allow a third-party
+// app to use a plan's login, so a key is the way in.
+const anthropicNoSubscription = "a Claude Pro, Max or Ultra plan has no key: this needs an API account"
+
+// anthropicBilling is said once, at login.
+const anthropicBilling = "billed per token to your API account, separate from any Claude plan"
+
+// openKeysPage opens where keys are made, and reports whether it tried. Not over
+// ssh, where the browser would be on the wrong machine; the form says the address.
+var openKeysPage = func(url string) bool {
+	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "" {
+		return false
+	}
+	return dun.OpenBrowser(url) == nil
 }

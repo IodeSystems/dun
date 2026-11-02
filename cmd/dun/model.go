@@ -13,6 +13,8 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+
+	shim "github.com/iodesystems/openai-claude-api-shim"
 )
 
 // /model — pick a model from every configured provider, by typing part of its
@@ -199,11 +201,20 @@ func (m *tuiModel) addModelRows(msg modelFetchMsg) {
 	for _, id := range msg.ids {
 		m.modelRows = append(m.modelRows, modelRow{msg.provider, id})
 	}
-	// Chat models first, then the rest (modelKind); within each, by name.
+	if m.anthropicProvider(msg.provider) {
+		for _, alias := range anthropicAliases {
+			m.modelRows = append(m.modelRows, modelRow{msg.provider, alias})
+		}
+	}
+	// Claude's picks first, then chat models, then the rest (modelKind); within
+	// each, by name.
 	sort.SliceStable(m.modelRows, func(a, b int) bool {
 		ra, rb := m.modelRows[a], m.modelRows[b]
 		if ra.provider != rb.provider {
 			return order[ra.provider] < order[rb.provider]
+		}
+		if pa, pb := claudeRank(ra.id), claudeRank(rb.id); pa != pb {
+			return pa < pb
 		}
 		if ka, kb := modelKind(ra.id) != "", modelKind(rb.id) != ""; ka != kb {
 			return !ka
@@ -234,6 +245,9 @@ func (m *tuiModel) addModelRows(msg modelFetchMsg) {
 // the standard one, else a chat one; else the first row. A list of ids says
 // nothing else (run 5: it started on chat-fast, the first by name).
 func suggestedModel(rows []modelRow) int {
+	if i := slices.IndexFunc(rows, func(r modelRow) bool { return r.id == claudeDefault }); i >= 0 {
+		return i
+	}
 	for _, word := range []string{"default", "standard", "chat"} {
 		for i, r := range rows {
 			if modelKind(r.id) == "" && strings.Contains(strings.ToLower(r.id), word) {
@@ -435,6 +449,9 @@ func (m tuiModel) modelPanel() string {
 		if r.id == m.model && r.provider == m.provider {
 			post = append(post, "in use")
 		}
+		if n := claudeNote(r.id); n != "" {
+			post = append(post, n)
+		}
 		tail := ""
 		if len(post) > 0 {
 			tail = strings.Repeat(" ", idW-len(r.id)) + "  " + stDim.Render(strings.Join(post, " · "))
@@ -511,6 +528,7 @@ func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
 	m.providerFields[fieldKey].EchoCharacter = '•'
 	m.providerStep, m.providerErr, m.providerEdit, m.providerAuto = fieldAddr, "", "", ""
 	m.providerChecking, m.providerTmpl, m.providerEnvKey, m.providerBack = "", nil, "", false
+	m.providerKeysOpened = false
 	// The kept question's line (or the not-logged-in one) said "type /login": done.
 	// esc puts it back (loginCancelled).
 	m.dropNeedLogin()
@@ -544,6 +562,12 @@ func (m *tuiModel) providerMove(d int) {
 
 func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "ctrl+o":
+		if t := m.providerTmpl; t != nil && t.keysURL != "" {
+			m.providerKeysOpened = openKeysPage(t.keysURL)
+			m.refresh()
+		}
+		return m, nil
 	case "esc", "ctrl+c":
 		// Nothing is saved before the check passes: esc while it runs
 		// drops it (loginChecked finds the form gone).
@@ -708,6 +732,9 @@ func (m *tuiModel) loginChecked(msg loginCheckedMsg) tea.Cmd {
 	}
 	m.providerForm = false
 	m.dropNeedLogin() // no longer true
+	if t := m.providerTmpl; t != nil && t.id == "anthropic" {
+		notice += " · " + anthropicBilling
+	}
 	m.appendNotice(convoEntry{collapsed: okNotice(notice)})
 	query := msg.models.provider + " "
 	if len(m.pickerProviders()) <= 1 {
@@ -744,8 +771,16 @@ func (m tuiModel) providerFormPanel() string {
 		switch {
 		case t.local():
 			notes = append(notes, t.label+" runs on this computer: no key")
+		case m.providerKeysOpened:
+			notes = append(notes, "opened "+t.keysAt+" in your browser · ctrl+o opens it again")
 		case m.providerEnvKey == "" && t.keysAt != "":
 			notes = append(notes, "get a key at "+t.keysAt)
+		}
+		if t.id == "anthropic" {
+			if m.providerEnvKey == "" {
+				notes = append(notes, anthropicNoSubscription)
+			}
+			notes = append(notes, anthropicBilling)
 		}
 	}
 	// Always a row, so the form does not grow as the address is typed.
@@ -810,4 +845,51 @@ func (m *tuiModel) loginCancelled() {
 		return
 	}
 	m.sayNeedLogin()
+}
+
+// claudeDefault is what the picker starts on at Anthropic: Opus 5.5, at the effort
+// it defaults to, medium (Carl, 2026-11-01). Change it with the model.
+const claudeDefault = "claude-opus-5-5"
+
+// claudePicks lead the list, and anthropicAliases follow them: an alias goes to the
+// newest model in that line (agentkit resolves it from the model list).
+var (
+	claudePicks      = []string{claudeDefault, "claude-sonnet-5-5", "claude-haiku-5-5"}
+	anthropicAliases = []string{"opus-latest", "sonnet-latest", "haiku-latest", "fable-latest"}
+)
+
+// claudeRank orders the picks and the aliases ahead of everything else.
+func claudeRank(id string) int {
+	if i := slices.Index(claudePicks, id); i >= 0 {
+		return i
+	}
+	if i := slices.Index(anthropicAliases, id); i >= 0 {
+		return len(claudePicks) + i
+	}
+	return len(claudePicks) + len(anthropicAliases)
+}
+
+// claudeNote is what the picker says beside a Claude model: its price, from the
+// same list as the estimates.
+func claudeNote(id string) string {
+	if shim.IsAlias(id) && slices.Contains(anthropicAliases, id) {
+		return "the newest " + strings.TrimSuffix(id, "-latest")
+	}
+	p, ok := shim.PriceOf(loadPrices(), id)
+	if !ok {
+		return ""
+	}
+	note := fmt.Sprintf("~$%g / $%g per million tokens", p.Input, p.Output)
+	if id == claudeDefault {
+		note = "recommended · " + note
+	}
+	return note
+}
+
+// anthropicProvider reports whether name is Anthropic's own endpoint.
+func (m tuiModel) anthropicProvider(name string) bool {
+	if p, ok := m.providerNamed(name); ok {
+		return strings.Contains(p.URL, "api.anthropic.com")
+	}
+	return false
 }
