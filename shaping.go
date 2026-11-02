@@ -309,7 +309,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		}
 		h.cache.noteBuild(msgs, h.Session.Tools, time.Now())
 		if tb, err := json.Marshal(h.Session.Tools); err == nil {
-			meter.noteToolChars(len(tb))
+			meter.NoteToolChars(len(tb))
 		}
 		total, biggest, biggestRole := 0, 0, ""
 		for _, m := range msgs {
@@ -332,7 +332,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		// the pairing is positional. This builder is the last thing to run
 		// before streamChat, on the same goroutine, which is what makes that
 		// safe. See tokencal.go.
-		meter.noteBuild(total, est)
+		meter.NoteBuild(total, est)
 		how := "estimated at 4 chars/token"
 		if meter.Measured() {
 			how = fmt.Sprintf("measured at %.2f chars/token", meter.CharsPerToken())

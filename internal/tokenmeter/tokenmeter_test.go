@@ -1,4 +1,4 @@
-package dun
+package tokenmeter
 
 // The meter is the foundation the rest of the context work stands on: every
 // budget below is denominated in its ratio, so a meter that quietly falls back
@@ -18,7 +18,7 @@ import (
 // default did. A new estimator that starts somewhere else changes every existing
 // session's shaping on upgrade for no measured reason.
 func TestMeter_FallsBackToCharsByFour(t *testing.T) {
-	var m promptMeter
+	var m Meter
 	if m.Measured() {
 		t.Error("a fresh meter must not claim to have measured anything")
 	}
@@ -35,9 +35,9 @@ func TestMeter_FallsBackToCharsByFour(t *testing.T) {
 // and chars/4 called the same text 15,000 — the 31% error that let a 188k window
 // fill without anything noticing.
 func TestMeter_CalibratesFromTheProvider(t *testing.T) {
-	var m promptMeter
-	m.noteBuild(60000, 0)
-	obs, ok := m.noteUsage(agent.TokenUsage{Processed: 21636})
+	var m Meter
+	m.NoteBuild(60000, 0)
+	obs, ok := m.NoteUsage(agent.TokenUsage{Processed: 21636})
 	if !ok {
 		t.Fatalf("a plain report should calibrate; got %+v", obs)
 	}
@@ -67,9 +67,9 @@ func TestMeter_CalibratesFromTheProvider(t *testing.T) {
 // without bound: round 5 of a stable conversation would look five times denser
 // than round 1 and the budget would collapse.
 func TestMeter_DifferencesCumulativeUsage(t *testing.T) {
-	var m promptMeter
-	m.noteBuild(40000, 0)
-	if _, ok := m.noteUsage(agent.TokenUsage{Cached: 5000, Processed: 5000}); !ok {
+	var m Meter
+	m.NoteBuild(40000, 0)
+	if _, ok := m.NoteUsage(agent.TokenUsage{Cached: 5000, Processed: 5000}); !ok {
 		t.Fatal("round 1 should calibrate")
 	}
 	if got := m.CharsPerToken(); got < 3.99 || got > 4.01 {
@@ -77,8 +77,8 @@ func TestMeter_DifferencesCumulativeUsage(t *testing.T) {
 	}
 	// Round 2: the prompt grew to 44k chars, so the running total is 21k — of
 	// which 11k is this round.
-	m.noteBuild(44000, 0)
-	if _, ok := m.noteUsage(agent.TokenUsage{Cached: 15000, Processed: 6000}); !ok {
+	m.NoteBuild(44000, 0)
+	if _, ok := m.NoteUsage(agent.TokenUsage{Cached: 15000, Processed: 6000}); !ok {
 		t.Fatal("round 2 should calibrate")
 	}
 	if got := m.CharsPerToken(); got < 3.99 || got > 4.01 {
@@ -90,13 +90,13 @@ func TestMeter_DifferencesCumulativeUsage(t *testing.T) {
 // same request — a proxy that rewrote the body, a cached prefix billed oddly.
 // Shaping the context to that is worse than shaping it to the last good number.
 func TestMeter_RefusesAnImplausibleRatio(t *testing.T) {
-	var m promptMeter
-	m.noteBuild(40000, 0)
-	m.noteUsage(agent.TokenUsage{Processed: 10000}) // 4.0, good
+	var m Meter
+	m.NoteBuild(40000, 0)
+	m.NoteUsage(agent.TokenUsage{Processed: 10000}) // 4.0, good
 	// Round 2 bills 10 tokens for the same 40,000 chars: 4000 chars/token, far
 	// outside the ceiling.
-	m.noteBuild(40000, 0)
-	obs, ok := m.noteUsage(agent.TokenUsage{Processed: 10010})
+	m.NoteBuild(40000, 0)
+	obs, ok := m.NoteUsage(agent.TokenUsage{Processed: 10010})
 	if ok {
 		t.Errorf("ratio %.1f should have been refused", obs.Ratio)
 	}
@@ -108,9 +108,9 @@ func TestMeter_RefusesAnImplausibleRatio(t *testing.T) {
 // A provider that reports no usage teaches nothing, and must not be mistaken for
 // one reporting zero tokens.
 func TestMeter_IgnoresASilentProvider(t *testing.T) {
-	var m promptMeter
-	m.noteBuild(40000, 0)
-	if _, ok := m.noteUsage(agent.TokenUsage{}); ok {
+	var m Meter
+	m.NoteBuild(40000, 0)
+	if _, ok := m.NoteUsage(agent.TokenUsage{}); ok {
 		t.Error("no reported prompt tokens is not a measurement")
 	}
 	if m.Measured() {
@@ -128,15 +128,15 @@ var liveRounds = [][2]int{
 	{9258, 5577}, {5012, 3816}, {8152, 5221},
 }
 
-// feed replays rounds of (chars, tokens). noteBuild's second argument is what
+// feed replays rounds of (chars, tokens). NoteBuild's second argument is what
 // the build was ESTIMATED at, which is carried for /context to display and plays
 // no part in the ratio — these tests are about the ratio, so it is left at 0.
-func feed(m *promptMeter, rounds [][2]int) {
+func feed(m *Meter, rounds [][2]int) {
 	cumulative := 0
 	for _, r := range rounds {
-		m.noteBuild(r[0], 0)
+		m.NoteBuild(r[0], 0)
 		cumulative += r[1]
-		m.noteUsage(agent.TokenUsage{Processed: cumulative})
+		m.NoteUsage(agent.TokenUsage{Processed: cumulative})
 	}
 }
 
@@ -147,7 +147,7 @@ func feed(m *promptMeter, rounds [][2]int) {
 // Fitted as two terms it predicts 132,699, and the marginal ratio lands next to
 // an independent /tokenize measurement of the same corpus (2.77).
 func TestMeter_SeparatesPerRequestOverheadFromText(t *testing.T) {
-	var m promptMeter
+	var m Meter
 	feed(&m, liveRounds)
 
 	if got := m.Overhead(); got < 1400 || got > 1900 {
@@ -173,7 +173,7 @@ func TestMeter_SeparatesPerRequestOverheadFromText(t *testing.T) {
 // the Shaper calls that per message and sums, and a 400-message prompt would pay
 // the tool schemas four hundred times.
 func TestMeter_OverheadIsNotChargedPerMessage(t *testing.T) {
-	var m promptMeter
+	var m Meter
 	feed(&m, liveRounds)
 
 	whole := m.Estimate(strings.Repeat("x", 30000))
@@ -191,14 +191,14 @@ func TestMeter_OverheadIsNotChargedPerMessage(t *testing.T) {
 // stays in charge and no overhead is claimed. A fitted constant nobody measured
 // shrinks the context for no reason.
 func TestMeter_WithholdsAnUnearnedFit(t *testing.T) {
-	var m promptMeter
+	var m Meter
 	feed(&m, liveRounds[:2])
 	if got := m.Overhead(); got != 0 {
 		t.Errorf("overhead = %d after 2 rounds; want 0 until the fit is earned", got)
 	}
 	// Points all the same size have no slope to recover: the fit would put
 	// everything in the intercept.
-	var flat promptMeter
+	var flat Meter
 	feed(&flat, [][2]int{{5000, 4000}, {5000, 4000}, {5000, 4000}, {5000, 4000}})
 	if got := flat.Overhead(); got != 0 {
 		t.Errorf("overhead = %d from collinear points; want 0", got)
@@ -243,10 +243,10 @@ func TestObservation_Drift(t *testing.T) {
 // 2026-10-20: 4910 message chars → 4830 tokens read as 1.02 chars/token,
 // because ~10k chars of schemas were in the count and not in the chars.
 func TestMeter_FirstRoundCountsToolSchemas(t *testing.T) {
-	var m promptMeter
-	m.noteToolChars(10000)
-	m.noteBuild(4910, 0)
-	if _, ok := m.noteUsage(agent.TokenUsage{Processed: 4830}); !ok {
+	var m Meter
+	m.NoteToolChars(10000)
+	m.NoteBuild(4910, 0)
+	if _, ok := m.NoteUsage(agent.TokenUsage{Processed: 4830}); !ok {
 		t.Fatal("round should be observed")
 	}
 	if got := m.CharsPerToken(); got < 3.0 || got > 3.1 {
@@ -267,20 +267,20 @@ func TestMeter_FirstRoundCountsToolSchemas(t *testing.T) {
 // it compared the messages alone with the whole request (aw4
 // i_1m5zn6acw0app5r5da9fjh: "estimate 2251 (-69%)" for 7,346 vs 7,274).
 func TestObservation_EstimateIncludesTheSchemas(t *testing.T) {
-	m := &promptMeter{}
-	m.noteToolChars(20000)
-	m.noteBuild(8800, 7346)
-	obs, _ := m.noteUsage(agent.TokenUsage{Processed: 7274})
+	m := &Meter{}
+	m.NoteToolChars(20000)
+	m.NoteBuild(8800, 7346)
+	obs, _ := m.NoteUsage(agent.TokenUsage{Processed: 7274})
 	if obs.Estimated != 7346 {
 		t.Errorf("estimated %d, want the builder's 7346", obs.Estimated)
 	}
 	if d := obs.Drift(); d < 0 || d > 0.02 {
 		t.Errorf("drift %+.2f, want about +1%%", d)
 	}
-	m2 := &promptMeter{}
-	m2.noteToolChars(20000)
-	m2.noteBuild(8000, 0)
-	if obs, _ := m2.noteUsage(agent.TokenUsage{Processed: 7000}); obs.Estimated != 7000 {
+	m2 := &Meter{}
+	m2.NoteToolChars(20000)
+	m2.NoteBuild(8000, 0)
+	if obs, _ := m2.NoteUsage(agent.TokenUsage{Processed: 7000}); obs.Estimated != 7000 {
 		t.Errorf("without the builder's figure: %d, want (8000+20000)/4", obs.Estimated)
 	}
 }

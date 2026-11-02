@@ -100,7 +100,7 @@ func (h *Harness) onOverflow(ctx context.Context, o agent.Overflow) agent.Overfl
 	// whose 31% error let the window fill unnoticed in the first place.
 	prompt := o.PromptTokens
 	if prompt <= 0 {
-		prompt = int(float64(h.meter.lastBuiltChars()) / h.meter.CharsPerToken())
+		prompt = int(float64(h.meter.LastBuiltChars()) / h.meter.CharsPerToken())
 		note.PromptTokens = prompt
 	}
 	if window > 0 {

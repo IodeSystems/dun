@@ -321,7 +321,7 @@ func (s *subAgent) ctxLine() string {
 	if h == nil {
 		return ""
 	}
-	used, win := h.meter.lastPromptTokens(), h.windowTokens()
+	used, win := h.meter.LastPromptTokens(), h.windowTokens()
 	if used <= 0 {
 		return ""
 	}

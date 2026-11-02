@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun/internal/tokenmeter"
+
 	"github.com/iodesystems/agentkit/llm"
 )
 
@@ -151,7 +153,7 @@ func (m *reqMeter) chunk(c llm.StreamChunk) {
 	m.cur.Phase = "live"
 	cpt := m.cpt()
 	if cpt <= 0 {
-		cpt = fallbackCharsPerToken
+		cpt = tokenmeter.FallbackCharsPerToken
 	}
 	m.cur.Gen = int(float64(m.chars)/cpt + 0.5)
 	if dt := now.Sub(m.first).Seconds(); dt > 0 {
@@ -234,7 +236,7 @@ func (h *Harness) newReqMeter() *reqMeter {
 		on:     h.cfg.OnRequest,
 		cpt:    h.meter.CharsPerToken,
 		window: h.windowTokens,
-		est:    h.meter.lastPromptTokens,
+		est:    h.meter.LastPromptTokens,
 		floor:  func() int { return h.SystemParts().Total },
 		now:    time.Now,
 	}

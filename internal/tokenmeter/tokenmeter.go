@@ -1,4 +1,6 @@
-package dun
+// Package tokenmeter estimates prompt tokens from characters, fitted to the
+// provider's own usage reports.
+package tokenmeter
 
 import (
 	"log"
@@ -30,11 +32,11 @@ import (
 // prompt_tokens on every single round and we already know how many chars we
 // sent it, so the ratio is a division. This is that division, remembered.
 
-// fallbackCharsPerToken is what to assume before the provider has answered
+// FallbackCharsPerToken is what to assume before the provider has answered
 // once. Kept at agentkit's 4 deliberately: it is the number every previous
 // session ran on, so an uncalibrated dun behaves exactly as it did before rather
 // than jumping to some new guess that is differently wrong.
-const fallbackCharsPerToken = 4.0
+const FallbackCharsPerToken = 4.0
 
 // ratioFloor and ratioCeil bound what a measurement is allowed to claim.
 //
@@ -50,7 +52,7 @@ const (
 	ratioCeil  = 8.0
 )
 
-// promptMeter is an agent.TokenEstimator fitted to the provider's own usage
+// Meter is an agent.TokenEstimator fitted to the provider's own usage
 // reports.
 //
 // The model is AFFINE, not a single ratio, and that is a correction the first
@@ -77,7 +79,7 @@ const (
 // So: Estimate reports the MARGINAL cost of text, which is what the Shaper is
 // deciding about when it decides what to keep. The fixed term is published
 // separately (Overhead) and charged once, against the budget.
-type promptMeter struct {
+type Meter struct {
 	mu sync.RWMutex
 	// ratio is chars per token from the LAST observation alone — the one-point
 	// model, still used until the fit has enough spread to beat it.
@@ -90,13 +92,13 @@ type promptMeter struct {
 	n, sx, sy, sxx, sxy float64
 	// built is the size of the most recently BUILT prompt, in chars, and
 	// builtTokens is what that came to under the ratio then in force. Set by
-	// noteBuild immediately before the round they belong to.
+	// NoteBuild immediately before the round they belong to.
 	built       int
 	builtTokens int
 	// toolChars is the size of the tool schemas sent with that prompt, as wire
 	// JSON. Not part of `built`: the fit's x is message text, which is what the
 	// Shaper decides about. Used only while the fit is not yet trusted — see
-	// noteToolChars.
+	// NoteToolChars.
 	toolChars int
 	// prompted is the cumulative prompt-token count at the last observation, so
 	// a per-round figure can be differenced out of agent.TokenUsage's running
@@ -127,7 +129,7 @@ const maxOverhead = 20000.0
 // called per message and summed, so a per-request constant added here would be
 // charged once per message — on a 400-message prompt, four hundred times. See
 // Overhead for where the constant is charged instead.
-func (m *promptMeter) Estimate(s string) int {
+func (m *Meter) Estimate(s string) int {
 	if len(s) == 0 {
 		return 0
 	}
@@ -137,14 +139,14 @@ func (m *promptMeter) Estimate(s string) int {
 // CharsPerToken is the marginal ratio in force: the fit's slope once it is
 // trustworthy, the last single observation before that, and 4 before anything
 // has been measured at all.
-func (m *promptMeter) CharsPerToken() float64 {
+func (m *Meter) CharsPerToken() float64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.slope > 0 {
 		return 1 / m.slope
 	}
 	if m.ratio <= 0 {
-		return fallbackCharsPerToken
+		return FallbackCharsPerToken
 	}
 	return m.ratio
 }
@@ -156,7 +158,7 @@ func (m *promptMeter) CharsPerToken() float64 {
 // 0 until the fit is trustworthy, which is the honest answer rather than a
 // conservative one: a guessed overhead subtracted from the budget shrinks the
 // context for a reason nobody measured.
-func (m *promptMeter) Overhead() int {
+func (m *Meter) Overhead() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.slope > 0 && m.intercept > 0 {
@@ -178,7 +180,7 @@ func (m *promptMeter) Overhead() int {
 //
 // A rejected fit is not an error. It leaves the one-point ratio in charge, which
 // is what was in charge before the fit existed.
-func (m *promptMeter) fitLocked() {
+func (m *Meter) fitLocked() {
 	if m.n < minFitPoints {
 		return
 	}
@@ -203,17 +205,17 @@ func (m *promptMeter) fitLocked() {
 // Measured reports whether the ratio came from the provider rather than from the
 // fallback. Callers that PUBLISH a token number use this to say which it is —
 // the same discipline SystemBreakdown.Exact enforces for /context.
-func (m *promptMeter) Measured() bool {
+func (m *Meter) Measured() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.ratio > 0
 }
 
-// noteBuild records the size of the prompt just built, in chars and in the
+// NoteBuild records the size of the prompt just built, in chars and in the
 // tokens they were estimated at. Called from the context builder, which runs
 // immediately before the chat round whose usage will price it — that adjacency
 // is what lets the two numbers be divided at all.
-// noteToolChars records the size of the tool schemas sent with the next round.
+// NoteToolChars records the size of the tool schemas sent with the next round.
 //
 // Why: before the fit has three points, the one-point ratio divided the
 // MESSAGE chars by a token count that also covers the tool schemas. Measured
@@ -222,29 +224,29 @@ func (m *promptMeter) Measured() bool {
 // /context, surfacing stats) ran ~4× high until the fit split the constant
 // out. The schema bytes are known exactly, so the one-point ratio counts them
 // too — no endpoint token-counting needed (this endpoint does not offer it).
-func (m *promptMeter) noteToolChars(n int) {
+func (m *Meter) NoteToolChars(n int) {
 	m.mu.Lock()
 	m.toolChars = n
 	m.mu.Unlock()
 }
 
-func (m *promptMeter) noteBuild(chars, tokens int) {
+func (m *Meter) NoteBuild(chars, tokens int) {
 	m.mu.Lock()
 	m.built, m.builtTokens = chars, tokens
 	m.mu.Unlock()
 }
 
-// lastPromptTokens is what the most recent build was estimated to cost,
+// LastPromptTokens is what the most recent build was estimated to cost,
 // overhead included. What /context shows as "in use".
-func (m *promptMeter) lastPromptTokens() int {
+func (m *Meter) LastPromptTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.builtTokens
 }
 
-// rounds is how many observations the ratio rests on, so a reader can tell one
+// Rounds is how many observations the ratio rests on, so a reader can tell one
 // measurement from forty.
-func (m *promptMeter) rounds() int {
+func (m *Meter) Rounds() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.obs
@@ -274,7 +276,7 @@ func (o observation) Drift() float64 {
 	return float64(o.Estimated-o.PromptTokens) / float64(o.PromptTokens)
 }
 
-// noteUsage folds a round's reported usage into the ratio and returns what the
+// NoteUsage folds a round's reported usage into the ratio and returns what the
 // round showed. ok is false when there is nothing to learn from — no build to
 // pair with, or a provider that reports no prompt tokens.
 //
@@ -283,7 +285,7 @@ func (o observation) Drift() float64 {
 // breakdown puts all of it in Processed), and both accumulate across the
 // session. Subtracting the previous observation is what turns them back into
 // this round's number.
-func (m *promptMeter) noteUsage(u agent.TokenUsage) (observation, bool) {
+func (m *Meter) NoteUsage(u agent.TokenUsage) (observation, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -296,7 +298,7 @@ func (m *promptMeter) noteUsage(u agent.TokenUsage) (observation, bool) {
 
 	prior := m.ratio
 	if prior <= 0 {
-		prior = fallbackCharsPerToken
+		prior = FallbackCharsPerToken
 	}
 	obs := observation{
 		// The whole request's chars, schemas included, so the logged
@@ -332,22 +334,22 @@ func (m *promptMeter) noteUsage(u agent.TokenUsage) (observation, bool) {
 // chars alone at a ratio measured over messages AND schemas, so the log said
 // "estimate 2251 (-69%)" for a prompt the shaper had put at 7,346 of 7,274
 // (aw4 i_1m5zn6acw0app5r5da9fjh). Caller holds mu.
-func (m *promptMeter) claimed(prior float64) int {
+func (m *Meter) claimed(prior float64) int {
 	if m.builtTokens > 0 {
 		return m.builtTokens
 	}
 	return int(math.Ceil(float64(m.built+m.toolChars) / prior))
 }
 
-// lastBuiltChars is the size of the prompt most recently built, for a caller
+// LastBuiltChars is the size of the prompt most recently built, for a caller
 // sizing the room left in the window against it.
-func (m *promptMeter) lastBuiltChars() int {
+func (m *Meter) LastBuiltChars() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.built
 }
 
-// logObservation says, once per round, what the estimate claimed and what the
+// LogObservation says, once per round, what the estimate claimed and what the
 // provider counted.
 //
 // One line, on every round, because the failure this exists to catch is silent
@@ -355,7 +357,7 @@ func (m *promptMeter) lastBuiltChars() int {
 // no wrong-looking output — it produces a context ladder that never runs and a
 // generation that dies at the wall twenty minutes later. The only way that shows
 // up in a log is if the log prints both numbers side by side.
-func logObservation(o observation, ok bool) {
+func LogObservation(o observation, ok bool) {
 	switch {
 	case !ok && o.PromptTokens == 0:
 		return // nothing reported; not worth a line every round
@@ -366,7 +368,7 @@ func logObservation(o observation, ok bool) {
 	case o.First:
 		log.Printf("dun: calibrated: prompt %d chars → %d tokens (%.2f chars/token); the %.0f "+
 			"chars/token default had estimated %d (%+.0f%%). Shaping now uses the measured ratio.",
-			o.Chars, o.PromptTokens, o.Ratio, fallbackCharsPerToken, o.Estimated, o.Drift()*100)
+			o.Chars, o.PromptTokens, o.Ratio, FallbackCharsPerToken, o.Estimated, o.Drift()*100)
 	case o.Fitted():
 		log.Printf("dun: prompt %d chars → %d tokens; estimate %d (%+.0f%%); fit: %.2f chars/token "+
 			"marginal + %.0f tokens per request",

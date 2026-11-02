@@ -199,11 +199,11 @@ func (h *Harness) Window() WindowBudget {
 		Window:        window,
 		Reserved:      outputReserve(),
 		Cap:           maxOutputTokens(),
-		Prompt:        h.meter.lastPromptTokens(),
+		Prompt:        h.meter.LastPromptTokens(),
 		Overhead:      h.meter.Overhead(),
 		CharsPerToken: h.meter.CharsPerToken(),
 		Measured:      h.meter.Measured(),
-		Rounds:        h.meter.rounds(),
+		Rounds:        h.meter.Rounds(),
 	}
 	if window > 0 {
 		b.PromptBudget = shapingBudget(window) - b.Overhead

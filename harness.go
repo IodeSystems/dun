@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iodesystems/dun/internal/tokenmeter"
+
 	"github.com/iodesystems/dun/internal/mounttool"
 
 	filetools "github.com/iodesystems/agentkit/files"
@@ -471,7 +473,7 @@ type Harness struct {
 	// reports. It is the Shaper's estimator AND the Session's, so the budget the
 	// context is shaped to and the window size reported to the user are the same
 	// number by construction. See tokencal.go.
-	meter promptMeter
+	meter tokenmeter.Meter
 	// req measures the turn's requests for a status bar (reqstats.go); nil
 	// when nothing listens.
 	req *reqMeter
