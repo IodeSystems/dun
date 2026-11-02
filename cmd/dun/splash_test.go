@@ -8,6 +8,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/buildinfo"
 )
 
 // startFresh is a first start: no session before, the engine's events in
@@ -50,7 +52,7 @@ func TestSplash_FreshSessionOnly(t *testing.T) {
 			t.Errorf("splash lacks %q:\n%s", want, s)
 		}
 	}
-	for _, not := range []string{version, "spend", "raglit", "auto"} {
+	for _, not := range []string{buildinfo.Version, "spend", "raglit", "auto"} {
 		if strings.Contains(s, not) {
 			t.Errorf("splash has %q:\n%s", not, s)
 		}
@@ -61,7 +63,7 @@ func TestSplash_FreshSessionOnly(t *testing.T) {
 	if !strings.Contains(stripANSI(m.convo[len(m.convo)-1].collapsed), "not logged in") {
 		t.Errorf("the first-run line is not after the splash:\n%s", convoText(m))
 	}
-	if strings.Contains(sent.String(), "dun "+version) {
+	if strings.Contains(sent.String(), "dun "+buildinfo.Version) {
 		t.Error("the splash went to the engine")
 	}
 
@@ -111,7 +113,7 @@ func TestStatus_WritesTheSplashClientSide(t *testing.T) {
 	m = typeStr(m, "/status")
 	m = key(m, kEnter)
 	last := m.convo[len(m.convo)-1]
-	if !last.splash || !strings.Contains(stripANSI(last.collapsed), "build       "+version) || !strings.Contains(stripANSI(last.collapsed), "tools       2") {
+	if !last.splash || !strings.Contains(stripANSI(last.collapsed), "build       "+buildinfo.Version) || !strings.Contains(stripANSI(last.collapsed), "tools       2") {
 		t.Fatalf("/status wrote:\n%s", convoText(m))
 	}
 	if got := sent.String()[before:]; strings.Contains(got, "status") || strings.Contains(got, `"type":"user"`) {

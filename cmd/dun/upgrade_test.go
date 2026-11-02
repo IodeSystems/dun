@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dund"
 	"github.com/iodesystems/dun/proto"
 )
@@ -175,9 +176,9 @@ func TestAutoResumeRow(t *testing.T) {
 // A dund from before coordinated upgrades (hello, no broadcast) gets the
 // command that replaces it, once, and is never asked to upgrade.
 func TestCheckDundBuildOldDund(t *testing.T) {
-	old := version
-	version = "new"
-	defer func() { version = old }()
+	old := buildinfo.Version
+	buildinfo.Version = "new"
+	defer func() { buildinfo.Version = old }()
 	upgradeAsked = map[string]bool{}
 	sock := filepath.Join(t.TempDir(), "d.sock")
 	ln, err := net.Listen("unix", sock)
@@ -229,9 +230,9 @@ func TestCheckDundBuildOldDund(t *testing.T) {
 // back the same old build once; and a TUI whose file is now dund's build
 // re-execs instead of asking dund to move back.
 func TestCheckDundBuild(t *testing.T) {
-	old, oldProbe := version, probeSelf
-	version = "new"
-	defer func() { version, probeSelf = old, oldProbe }()
+	old, oldProbe := buildinfo.Version, probeSelf
+	buildinfo.Version = "new"
+	defer func() { buildinfo.Version, probeSelf = old, oldProbe }()
 	upgradeAsked = map[string]bool{}
 	disk := "new"
 	probeSelf = func(string) string { return disk }

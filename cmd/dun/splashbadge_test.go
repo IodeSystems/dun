@@ -5,14 +5,16 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/buildinfo"
 )
 
 // Under the foreman: which dun this is, then the motto, each centred in his
 // width (USER 2026-10-28). A source build says "dev" and its commit.
 func TestSplash_BadgeUnderTheMascot(t *testing.T) {
-	old, oldColour := version, mascotColour
-	t.Cleanup(func() { version, mascotColour = old, oldColour })
-	version, mascotColour = "v0.1.9-12-gb8596f1-dirty", true
+	old, oldColour := buildinfo.Version, mascotColour
+	t.Cleanup(func() { buildinfo.Version, mascotColour = old, oldColour })
+	buildinfo.Version, mascotColour = "v0.1.9-12-gb8596f1-dirty", true
 
 	rows := splashBadge(13)
 	if len(rows) != 2 {

@@ -17,11 +17,13 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/proto"
-	"github.com/spf13/cobra"
 )
 
 // `dun doctor` checks what dun needs, read-only, and says how to fix what is
@@ -96,7 +98,7 @@ var fixableNames = []string{
 
 // fixNames is fixableNames, with a release build's downloads.
 func fixNames() []string {
-	if !isRelease() {
+	if !buildinfo.IsRelease() {
 		return fixableNames
 	}
 	return append([]string{"mcpshell, poly-lsp-mcp missing, or a release download behind: download the release this build pins (sha256 in the build)"}, fixableNames...)
@@ -164,7 +166,7 @@ func check(fix bool) *doctor {
 
 // report prints the findings; 1 when one failed.
 func (d *doctor) report() int {
-	fmt.Printf("dun doctor — dun %s, %s/%s, home %s\n\n", version, runtime.GOOS, runtime.GOARCH, dunHome())
+	fmt.Printf("dun doctor — dun %s, %s/%s, home %s\n\n", buildinfo.Version, runtime.GOOS, runtime.GOARCH, dunHome())
 	failed := false
 	for _, f := range d.found {
 		mark := map[string]string{"ok": stTool.Render("ok  "), "warn": stDim.Render("warn"), "fail": stErr.Render("FAIL")}[f.level]
@@ -542,7 +544,7 @@ func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
 	if _, svc := dundcli.ServiceFile(dundcli.ServiceUnit); svc {
 		restart = "dun dund service restart; sessions are kept"
 	}
-	if err := json.NewEncoder(c).Encode(proto.NewCommand("doctor-hello", &proto.Hello{Version: version})); err != nil {
+	if err := json.NewEncoder(c).Encode(proto.NewCommand("doctor-hello", &proto.Hello{Version: buildinfo.Version})); err != nil {
 		return
 	}
 	for sc.Scan() {
@@ -554,25 +556,25 @@ func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
 		switch {
 		case !ok:
 			d.add("fail", "dund", "runs an older build that predates build checks (and today's fixes)", restart)
-		case r.Version == version || r.Version == "dev" || version == "dev":
+		case r.Version == buildinfo.Version || r.Version == "dev" || buildinfo.Version == "dev":
 			d.add("ok", "dund", "runs this build ("+r.Version+")", "")
 		// Upgradable, a service too: dun asks it to restart into this build,
 		// and /upgrade now does it at once. A service restart is not offered:
 		// it runs the unit's binary, which need not be this build.
 		case r.Upgradable && r.Busy:
-			d.add("warn", "dund", "runs build "+r.Version+", this is "+version+", and is busy (a turn, a question or a job is running), so it cannot restart yet",
+			d.add("warn", "dund", "runs build "+r.Version+", this is "+buildinfo.Version+", and is busy (a turn, a question or a job is running), so it cannot restart yet",
 				"let it finish, interrupt it (ctrl+g), kill its jobs (/jobs kill all) — or start dun and /upgrade now (cut work resumes after)")
 		case r.Upgradable:
-			d.add("warn", "dund", "runs build "+r.Version+", this is "+version,
+			d.add("warn", "dund", "runs build "+r.Version+", this is "+buildinfo.Version,
 				"start dun: it asks dund to restart into this build once nothing is busy")
 		default:
 			// A service that cannot upgrade itself (an older build, or its
 			// binary where this user cannot write).
-			detail := "the service runs build " + r.Version + ", this is " + version
+			detail := "the service runs build " + r.Version + ", this is " + buildinfo.Version
 			if r.NoUpgrade != "" {
 				detail += ", and cannot upgrade itself: " + r.NoUpgrade
 			}
-			exe, _ := selfExe()
+			exe, _ := buildinfo.SelfExe()
 			d.add("warn", "dund", detail, serviceFix(r, exe))
 		}
 		return
@@ -583,7 +585,7 @@ func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
 // signed manifest, a go install build by go install, a checkout's build by
 // rebuilding itself from the checkout.
 func (d *doctor) build() {
-	o := selfOrigin()
+	o := buildinfo.SelfOrigin()
 	fix := ""
 	if o.Kind == update.GoInstall {
 		fix = "to update: go install github.com/iodesystems/dun/cmd/dun@latest"
@@ -593,15 +595,15 @@ func (d *doctor) build() {
 	case o.Kind == update.Release:
 		d.releaseBuild()
 		return
-	case srcDir == "" && o.Kind == update.GoInstall:
+	case buildinfo.SrcDir == "" && o.Kind == update.GoInstall:
 		return
-	case srcDir == "":
+	case buildinfo.SrcDir == "":
 		d.add("ok", "build", "it does not update itself", "make install from a checkout builds one that does")
 		return
 	}
-	mod, err := os.ReadFile(filepath.Join(srcDir, "go.mod"))
+	mod, err := os.ReadFile(filepath.Join(buildinfo.SrcDir, "go.mod"))
 	if err != nil {
-		d.add("warn", "build", "self-updating from "+srcDir+", which is gone", "make install from a checkout")
+		d.add("warn", "build", "self-updating from "+buildinfo.SrcDir+", which is gone", "make install from a checkout")
 		return
 	}
 	want := ""
@@ -612,16 +614,16 @@ func (d *doctor) build() {
 	}
 	out, err := exec.Command("go", "env", "GOVERSION").Output()
 	if err != nil {
-		d.add("warn", "build", "self-updating from "+srcDir+", but go is not on PATH: it cannot rebuild", "install Go "+want+" or newer")
+		d.add("warn", "build", "self-updating from "+buildinfo.SrcDir+", but go is not on PATH: it cannot rebuild", "install Go "+want+" or newer")
 		return
 	}
 	have := strings.TrimPrefix(strings.TrimSpace(string(out)), "go")
 	if want != "" && versionLess(have, want) {
-		d.add("warn", "build", fmt.Sprintf("go %s, but %s/go.mod needs %s (it will try to download it)", have, srcDir, want),
+		d.add("warn", "build", fmt.Sprintf("go %s, but %s/go.mod needs %s (it will try to download it)", have, buildinfo.SrcDir, want),
 			"install Go "+want+" or newer")
 		return
 	}
-	d.add("ok", "build", fmt.Sprintf("self-updating from %s with go %s", srcDir, have), "")
+	d.add("ok", "build", fmt.Sprintf("self-updating from %s with go %s", buildinfo.SrcDir, have), "")
 }
 
 // versionLess compares dotted versions numerically ("1.26.2" < "1.26.10").

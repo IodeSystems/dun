@@ -8,6 +8,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iodesystems/dun/internal/buildinfo"
 )
 
 // mouseSlash switches mouse reporting at runtime.
@@ -227,12 +229,12 @@ func init() {
 				// the build this TUI runs (USER 2026-10-27: /upgrade on a
 				// source build was a dead end).
 				if len(args) > 0 && args[0] == "now" {
-					m.append(stDim.Render("asking dund to restart into this build (" + version + ") — running turns are interrupted and resume after"))
+					m.append(stDim.Render("asking dund to restart into this build (" + buildinfo.Version + ") — running turns are interrupted and resume after"))
 					return upgradeIntoSelfCmd(m.proc)
 				}
 				line := "no dund upgrade is pending"
-				if !isRelease() {
-					line += " · dund and its engines keep the build they started with; /upgrade now restarts them into this one (" + version + ")"
+				if !buildinfo.IsRelease() {
+					line += " · dund and its engines keep the build they started with; /upgrade now restarts them into this one (" + buildinfo.Version + ")"
 				}
 				m.append(stDim.Render(line))
 				return nil

@@ -4,21 +4,23 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/buildinfo"
 )
 
 // /version says which dun this is and whether it updates itself, and from
 // where; a source build says it does not look releases up (USER 2026-10-28).
 func TestVersion_SourceBuildSaysItsPolicy(t *testing.T) {
-	oldV, oldSrc := version, srcDir
-	t.Cleanup(func() { version, srcDir = oldV, oldSrc })
-	version = "v0.1.11-3-gabcdef1-dirty"
+	oldV, oldSrc := buildinfo.Version, buildinfo.SrcDir
+	t.Cleanup(func() { buildinfo.Version, buildinfo.SrcDir = oldV, oldSrc })
+	buildinfo.Version = "v0.1.11-3-gabcdef1-dirty"
 
-	srcDir = ""
+	buildinfo.SrcDir = ""
 	lines := versionLines(time.Now())
 	if !strings.HasPrefix(lines[0], "dun dev abcdef1* · source build") || !strings.Contains(lines[1], "updates: none") {
 		t.Errorf("plain build:\n%s", strings.Join(lines, "\n"))
 	}
-	srcDir = "/src/dun"
+	buildinfo.SrcDir = "/src/dun"
 	t.Setenv("DUN_NO_AUTOBUILD", "")
 	if l := versionLines(time.Now())[1]; !strings.Contains(l, "rebuilds itself from /src/dun") || !strings.Contains(l, "releases are not looked up") {
 		t.Errorf("checkout build: %q", l)

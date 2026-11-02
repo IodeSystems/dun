@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -13,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/proto"
 )
@@ -183,15 +183,6 @@ func buildDecision(mine, dund, onDisk string) buildAction {
 	return buildsDiffer
 }
 
-// selfExe is this binary's file, symlinks resolved.
-func selfExe() (string, error) {
-	exe, err := os.Executable()
-	if err == nil {
-		exe, err = filepath.EvalSymlinks(exe)
-	}
-	return exe, err
-}
-
 // probeSelf asks this binary's file which build it is now (a variable for
 // the tests).
 var probeSelf = func(exe string) string { return dundcli.ProbeVersion(exe) }
@@ -233,9 +224,9 @@ func noteDundBuild(ev proto.Event, err error) {
 	switch r, ok := ev.Payload.(*proto.HelloReply); {
 	case err != nil:
 		w.dundBuild, w.fix = "?", killLine()+", then dun again"
-	case !ok || r.Version == version || r.Version == "dev" || version == "dev":
+	case !ok || r.Version == buildinfo.Version || r.Version == "dev" || buildinfo.Version == "dev":
 	case !r.Upgradable:
-		exe, _ := selfExe()
+		exe, _ := buildinfo.SelfExe()
 		w.dundBuild, w.fix = r.Version, serviceFix(r, exe)
 	case !r.Coordinated:
 		w.dundBuild, w.fix = r.Version, killLine()+", then dun again"
@@ -266,7 +257,7 @@ func serviceFix(r *proto.HelloReply, exe string) string {
 // pair to move to this binary and then followed by its broadcasts; an older
 // dund gets the command that replaces it, once.
 func checkDundBuild(ac *attachConn, sc *bufio.Scanner) (notes []string, reexec string) {
-	ev, err := ac.call(sc, "", &proto.Hello{Version: version})
+	ev, err := ac.call(sc, "", &proto.Hello{Version: buildinfo.Version})
 	noteDundBuild(ev, err)
 	if err != nil {
 		if once("pre-hello") {
@@ -276,33 +267,33 @@ func checkDundBuild(ac *attachConn, sc *bufio.Scanner) (notes []string, reexec s
 		return nil, ""
 	}
 	r, ok := ev.Payload.(*proto.HelloReply)
-	if !ok || r.Version == version || r.Version == "dev" || version == "dev" {
+	if !ok || r.Version == buildinfo.Version || r.Version == "dev" || buildinfo.Version == "dev" {
 		return nil, ""
 	}
-	pair := r.Version + "→" + version
+	pair := r.Version + "→" + buildinfo.Version
 	if !r.Coordinated {
 		if once("old " + pair) {
-			return []string{"dund runs build " + r.Version + " (this is " + version + "), too old to coordinate an upgrade: stop it (" +
+			return []string{"dund runs build " + r.Version + " (this is " + buildinfo.Version + "), too old to coordinate an upgrade: stop it (" +
 				killLine() + ") and start dun again — sessions are kept; a running turn is cut"}, ""
 		}
 		return nil, ""
 	}
-	exe, err := selfExe()
+	exe, err := buildinfo.SelfExe()
 	if err != nil {
 		if once("exe " + pair) {
-			return []string{"dund runs build " + r.Version + ", this is " + version + "; cannot name this binary to upgrade it: " + err.Error()}, ""
+			return []string{"dund runs build " + r.Version + ", this is " + buildinfo.Version + "; cannot name this binary to upgrade it: " + err.Error()}, ""
 		}
 		return nil, ""
 	}
 	onDisk := probeSelf(exe)
-	switch buildDecision(version, r.Version, onDisk) {
+	switch buildDecision(buildinfo.Version, r.Version, onDisk) {
 	case buildsAgree:
 		return nil, ""
 	case reexecSelf:
 		return []string{"dund runs build " + r.Version + " and " + exe + " is that build now — restarting this TUI into it, same session"}, r.Version
 	case buildsDiffer:
 		if once("differ " + pair + " " + onDisk) {
-			return []string{"dund runs build " + r.Version + ", this TUI is " + version + ", and " + exe + " is now " + onDisk +
+			return []string{"dund runs build " + r.Version + ", this TUI is " + buildinfo.Version + ", and " + exe + " is now " + onDisk +
 				" — run dun again to use one build"}, ""
 		}
 		return nil, ""
@@ -314,7 +305,7 @@ func checkDundBuild(ac *attachConn, sc *bufio.Scanner) (notes []string, reexec s
 			if r.NoUpgrade != "" {
 				why = ", and cannot upgrade itself: " + r.NoUpgrade
 			}
-			return []string{"dund (a service) runs build " + r.Version + ", this is " + version + why + " — " + serviceFix(r, exe)}, ""
+			return []string{"dund (a service) runs build " + r.Version + ", this is " + buildinfo.Version + why + " — " + serviceFix(r, exe)}, ""
 		}
 		return nil, ""
 	}
@@ -326,13 +317,13 @@ func checkDundBuild(ac *attachConn, sc *bufio.Scanner) (notes []string, reexec s
 		// the old build: the binary it was handed is not this build.
 		if once("stale " + pair) {
 			return []string{"dund still runs build " + r.Version + " after restarting into " + exe +
-				" — that file is not build " + version + ": stop dund (" + killLine() + ") and run dun from the build you want"}, ""
+				" — that file is not build " + buildinfo.Version + ": stop dund (" + killLine() + ") and run dun from the build you want"}, ""
 		}
 		return nil, ""
 	}
 	upgradeAsked[pair] = true
-	if _, err := ac.call(sc, "", &proto.Upgrade{Exe: exe, Version: version}); err != nil {
-		return []string{"dund runs build " + r.Version + ", this is " + version + "; it would not upgrade: " + err.Error()}, ""
+	if _, err := ac.call(sc, "", &proto.Upgrade{Exe: exe, Version: buildinfo.Version}); err != nil {
+		return []string{"dund runs build " + r.Version + ", this is " + buildinfo.Version + "; it would not upgrade: " + err.Error()}, ""
 	}
 	return nil, "" // the broadcast that follows says what it waits for
 }
@@ -381,11 +372,11 @@ func userRowAt(text string, width int) string {
 // (the launcher's rebuild reloads TUIs, not dund).
 func upgradeIntoSelfCmd(p *dunProc) tea.Cmd {
 	return func() tea.Msg {
-		exe, err := selfExe()
+		exe, err := buildinfo.SelfExe()
 		if err != nil {
 			return upgradeSelfMsg{err: err}
 		}
-		if !askDundUpgrade(exe, version) {
+		if !askDundUpgrade(exe, buildinfo.Version) {
 			return upgradeSelfMsg{err: errors.New("dund did not take it: it is not running here, or a service manager owns it (dun dund status says)")}
 		}
 		if !p.upgradeNow() {

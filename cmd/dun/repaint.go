@@ -16,6 +16,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
+
+	"github.com/iodesystems/dun/internal/buildinfo"
 )
 
 // /repaint: capture what dun believes is on screen and what the terminal
@@ -354,7 +356,7 @@ type captureLayout struct {
 func (m tuiModel) captureState(now time.Time) captureState {
 	st := captureState{
 		Time:    now.Format(time.RFC3339),
-		Version: version,
+		Version: buildinfo.Version,
 		Session: m.sessionID,
 		Env:     map[string]string{},
 		Mouse:   m.mouseMode,

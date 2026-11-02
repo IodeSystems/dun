@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/iodesystems/dun/internal/buildinfo"
 )
 
 // Dev self-update — a source-stamped `dun` rebuilds itself in place when the
@@ -30,7 +32,7 @@ import (
 var srcDir = ""
 
 func selfUpdate() {
-	if srcDir == "" ||
+	if buildinfo.SrcDir == "" ||
 		os.Getenv("DUN_CHILD") != "" ||
 		os.Getenv("DUN_AUTOBUILD_DONE") != "" ||
 		os.Getenv("DUN_NO_AUTOBUILD") == "1" {
@@ -41,12 +43,12 @@ func selfUpdate() {
 		return
 	}
 	st, err := os.Stat(exe)
-	if err != nil || !sourceNewerThan(srcDir, st.ModTime()) {
+	if err != nil || !sourceNewerThan(buildinfo.SrcDir, st.ModTime()) {
 		return // up to date (or can't tell) — proceed normally
 	}
 
 	fmt.Fprintln(os.Stderr, "dun: source changed — rebuilding…")
-	if _, err := rebuildDun(srcDir, exe); err != nil {
+	if _, err := rebuildDun(buildinfo.SrcDir, exe); err != nil {
 		fmt.Fprintf(os.Stderr, "dun: rebuild failed (%v) — running the current binary\n", err)
 		return
 	}

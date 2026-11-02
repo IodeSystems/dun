@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"time"
 	"unicode"
@@ -17,6 +16,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/proto"
@@ -34,33 +34,11 @@ import (
 // channel is "release" in a release build, stamped by make release.
 var channel = ""
 
-// isRelease: stamped release AND built with the tag that carries the
-// manifest's location and the key.
-func isRelease() bool { return channel == "release" && release.Built }
-
-// selfOrigin is how this binary was built.
-func selfOrigin() update.Origin {
-	o := update.Origin{Kind: update.GoBuild}
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		o = update.FromBuildInfo(bi)
-	}
-	switch {
-	case channel == "release":
-		o.Kind, o.Version = update.Release, version
-	case srcDir != "":
-		o.Kind = update.Checkout
-		if o.Revision == "" {
-			o.Revision = version
-		}
-	}
-	return o
-}
-
 // pinnedTool is name's download for this platform in the tools manifest
 // this release build was made with; false on any other build. A variable
 // for the tests.
 var pinnedTool = func(name string) (update.Artifact, update.File, bool) {
-	if !isRelease() {
+	if !buildinfo.IsRelease() {
 		return update.Artifact{}, update.File{}, false
 	}
 	plat := update.Platform(runtime.GOOS, runtime.GOARCH)
@@ -86,7 +64,7 @@ var installPinned = func(name string) (string, error) {
 	if !ok {
 		return "", errNotPinned
 	}
-	exe, err := selfExe()
+	exe, err := buildinfo.SelfExe()
 	if err != nil {
 		return "", err
 	}
@@ -100,18 +78,18 @@ var errNotPinned = errors.New("not in this release's tools manifest")
 
 // newUpdater is this release build's daily check; nil when it has none.
 var newUpdater = func() *update.Updater {
-	if !isRelease() {
+	if !buildinfo.IsRelease() {
 		return nil
 	}
 	keys, err := update.ParseKeys(release.PublicKey)
 	if err != nil {
 		return nil // the placeholder key: dun doctor says so
 	}
-	exe, err := selfExe()
+	exe, err := buildinfo.SelfExe()
 	if err != nil {
 		return nil
 	}
-	return &update.Updater{ManifestURL: release.ManifestURL, Keys: keys, Current: version, Exe: exe,
+	return &update.Updater{ManifestURL: release.ManifestURL, Keys: keys, Current: buildinfo.Version, Exe: exe,
 		Home: dunHome(), Platform: update.Platform(runtime.GOOS, runtime.GOARCH), Fetch: &update.Fetcher{}}
 }
 
@@ -172,7 +150,7 @@ var askDundUpgrade = func(exe, ver string) bool {
 	sc := bufio.NewScanner(c)
 	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
 	ac := &attachConn{c: c, wait: 10 * time.Second}
-	ev, err := ac.call(sc, "", &proto.Hello{Version: version})
+	ev, err := ac.call(sc, "", &proto.Hello{Version: buildinfo.Version})
 	if err != nil {
 		return false
 	}
@@ -196,8 +174,8 @@ func upgradeSwitch(on bool) (string, error) {
 	if on {
 		line = "updates on — dun checks for a new release once a day · /upgrade off to stop"
 	}
-	if !isRelease() {
-		line += " (this dun is " + selfOrigin().String() + ": it does not update from releases)"
+	if !buildinfo.IsRelease() {
+		line += " (this dun is " + buildinfo.SelfOrigin().String() + ": it does not update from releases)"
 	}
 	return line, nil
 }

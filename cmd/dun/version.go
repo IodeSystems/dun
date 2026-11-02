@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
 )
@@ -22,7 +24,7 @@ type versionLatestMsg struct{ line string }
 func versionSlash(m *tuiModel, _ []string) tea.Cmd {
 	m.append(stDim.Render(strings.Join(versionLines(time.Now()), "\n")))
 	m.refresh()
-	if !isRelease() {
+	if !buildinfo.IsRelease() {
 		return nil // only release builds carry a download location
 	}
 	return func() tea.Msg { return versionLatestMsg{line: latestLine()} }
@@ -32,28 +34,28 @@ func versionSlash(m *tuiModel, _ []string) tea.Cmd {
 func versionLines(now time.Time) []string {
 	plat := runtime.GOOS + "/" + runtime.GOARCH
 	var out []string
-	if isRelease() {
-		out = append(out, fmt.Sprintf("dun %s · release build · %s", version, plat))
+	if buildinfo.IsRelease() {
+		out = append(out, fmt.Sprintf("dun %s · release build · %s", buildinfo.Version, plat))
 	} else {
 		cur := "dev"
 		if rev := buildRev(); rev != "" {
 			cur += " " + rev
 		}
-		out = append(out, fmt.Sprintf("dun %s · source build (%s) · %s", cur, version, plat))
+		out = append(out, fmt.Sprintf("dun %s · source build (%s) · %s", cur, buildinfo.Version, plat))
 	}
 	return append(out, "updates: "+updatePolicy(now))
 }
 
 // updatePolicy says whether this build updates itself, and from where.
 func updatePolicy(now time.Time) string {
-	if !isRelease() {
+	if !buildinfo.IsRelease() {
 		switch {
-		case srcDir == "":
+		case buildinfo.SrcDir == "":
 			return "none — not a release build, and not built from a checkout (make install stamps one)"
 		case os.Getenv("DUN_NO_AUTOBUILD") == "1":
-			return "none — a source build from " + srcDir + "; rebuilding on start is off (DUN_NO_AUTOBUILD=1)"
+			return "none — a source build from " + buildinfo.SrcDir + "; rebuilding on start is off (DUN_NO_AUTOBUILD=1)"
 		}
-		return "a source build: rebuilds itself from " + srcDir + " when its source changed, at start; releases are not looked up"
+		return "a source build: rebuilds itself from " + buildinfo.SrcDir + " when its source changed, at start; releases are not looked up"
 	}
 	if newUpdater() == nil {
 		return "none — this build carries no release key (dun doctor says why)"
@@ -72,7 +74,7 @@ func updatePolicy(now time.Time) string {
 	if st.Error != "" {
 		line += " · it ran into: " + plainLine(st.Error)
 	}
-	if st.Staged != "" && st.Staged != version {
+	if st.Staged != "" && st.Staged != buildinfo.Version {
 		line += " · " + st.Staged + " is in place and takes over when dun next starts"
 	}
 	return line
@@ -90,7 +92,7 @@ func latestLine() string {
 	if err != nil {
 		return "latest: could not look it up — " + plainLine(err.Error())
 	}
-	cur, cerr := update.ParseVersion(version)
+	cur, cerr := update.ParseVersion(buildinfo.Version)
 	lat, lerr := update.ParseVersion(man.Version)
 	switch {
 	case cerr == nil && lerr == nil && lat.Compare(cur) <= 0:

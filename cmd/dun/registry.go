@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/buildinfo"
 	dunreg "github.com/iodesystems/dun/internal/registry"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
@@ -50,7 +51,7 @@ func useRegistry() {
 		return
 	}
 	if ix, err := s.Load(); err == nil {
-		dun.UseRegistry(ix, version)
+		dun.UseRegistry(ix, buildinfo.Version)
 	}
 }
 

@@ -11,8 +11,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -87,7 +89,7 @@ const (
 // statusSections are /status's rows: the splash's, with the build.
 func (m tuiModel) statusSections(w int) []statusSection {
 	secs := m.splashSections(w, false)
-	out := []statusSection{{label: "build", value: version}}
+	out := []statusSection{{label: "build", value: buildinfo.Version}}
 	out = append(out, secs...)
 	// The effort the model is asked for (/effort; USER 2026-10-27: /status
 	// did not say), after the model it applies to.
@@ -734,8 +736,8 @@ func (m tuiModel) splashView(w int) string {
 // release ("v0.1.9"), or "dev" and the commit for a source build, then the
 // motto in dun's pink.
 func splashBadge(w int) []string {
-	ver := version
-	if !isRelease() {
+	ver := buildinfo.Version
+	if !buildinfo.IsRelease() {
 		ver = "dev"
 		if rev := buildRev(); rev != "" {
 			ver += " " + rev
@@ -770,12 +772,12 @@ func buildRev() string {
 			return rev[:7]
 		}
 	}
-	if i := strings.LastIndex(version, "-g"); i >= 0 {
-		rev := strings.TrimSuffix(version[i+2:], "-dirty")
+	if i := strings.LastIndex(buildinfo.Version, "-g"); i >= 0 {
+		rev := strings.TrimSuffix(buildinfo.Version[i+2:], "-dirty")
 		if len(rev) > 7 {
 			rev = rev[:7]
 		}
-		if strings.HasSuffix(version, "-dirty") {
+		if strings.HasSuffix(buildinfo.Version, "-dirty") {
 			rev += "*"
 		}
 		return rev

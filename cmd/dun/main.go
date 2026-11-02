@@ -26,6 +26,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/openurl"
@@ -37,6 +38,10 @@ import (
 // Makefile). "dev" for a plain `go build`. Shown by `dun -version` and in the
 // TUI header so a stale on-PATH binary is visible at a glance.
 var version = "dev"
+
+func init() {
+	buildinfo.Version, buildinfo.Channel, buildinfo.SrcDir = version, channel, srcDir
+}
 
 // defaultDockerImage is the container used when --docker is passed without an
 // explicit image. Ubuntu 24.04 is the least surprising environment for an LLM:
@@ -168,7 +173,7 @@ func main() {
 	// `dun dund …` is the session service (internal/dundcli), in this binary
 	// so the service and the engines it runs are always the same build.
 	if len(os.Args) > 1 && os.Args[1] == "dund" {
-		dundcli.Version = version
+		dundcli.Version = buildinfo.Version
 		os.Exit(dundcli.Main(os.Args[2:]))
 	}
 	// The registry's manifests, presets and pins, as cached (registry.go):
@@ -373,7 +378,7 @@ func main() {
 	}
 
 	if *ver {
-		fmt.Println("dun " + version)
+		fmt.Println("dun " + buildinfo.Version)
 		return
 	}
 	if *setup {
@@ -659,7 +664,7 @@ func main() {
 		// OpenAI-compatible model list is asked with it (dun/window.go).
 		Endpoint: dun.Endpoint{URL: *url, Key: effKey, Model: *model},
 		// What the harness tool and dun session info say (dun/harnessinfo.go).
-		Version: version, Provider: engineProvider,
+		Version: buildinfo.Version, Provider: engineProvider,
 		Workspace: effWS,
 		Client:    runner,
 		// Sub-agents may run on a different model than their parent, and only

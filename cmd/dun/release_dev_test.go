@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/release"
 )
 
@@ -20,7 +21,7 @@ func TestDevBuildHasNoDownloadPaths(t *testing.T) {
 	if release.Built || release.ManifestURL != "" || release.PublicKey != "" || release.Deps != nil {
 		t.Fatal("a dev build carries release data")
 	}
-	if isRelease() || newUpdater() != nil {
+	if buildinfo.IsRelease() || newUpdater() != nil {
 		t.Fatal("a dev build would check for updates")
 	}
 	if _, _, ok := pinnedTool("mcpshell"); ok {
