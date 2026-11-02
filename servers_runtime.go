@@ -805,6 +805,12 @@ func (h *Harness) rebuildTools() {
 			dispatch = withSkill(dispatch, h, report)
 		}
 	}
+	// plan, for a root session: the task plan (plan.go). A child gets none yet.
+	if !h.isChild() {
+		def, handle := h.planTool()
+		toolDefs = append(toolDefs, def)
+		dispatch = withPlan(dispatch, h, handle, report)
+	}
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
 	// the moment churn is created rather than whenever usage is next measured.
 	dispatch = withRecapWatch(dispatch, h)
@@ -861,6 +867,13 @@ func (h *Harness) rebuildTools() {
 	// tool's whole signature (toolargs.go).
 	finalDefs := toolDefs
 	dispatch = withRequiredArgs(dispatch, func() []llm.ToolDef { return finalDefs })
+	// Plan mode (plan.go): outside the wrappers so a refused call never runs,
+	// inside the loop guard so a model that keeps calling it is told to stop.
+	serverOf := make(map[string]string, len(tools))
+	for _, t := range tools {
+		serverOf[modelToolName(t)] = t.ServerID
+	}
+	dispatch = withPlanGate(dispatch, h, serverOf)
 	dispatch = withLoopGuard(dispatch, h)
 	// Outside everything: a call the turn reaches after an interrupt is not
 	// run at all (interrupt.go).

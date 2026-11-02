@@ -55,6 +55,7 @@ var builtinGroups = []builtinGroup{
 	{"loops", "the session's /loop and /schedule runs", []string{"loop_ctl"}},
 	{"recap", "fold a finished stretch of the turn into a recap", []string{"recap"}},
 	{"memory", "notes that the project search brings back", []string{"memory"}},
+	{"plan", "the task plan: nodes the model keeps and you can review, edit and approve (/plan)", []string{"plan"}},
 	{"skills", "load a skill's instructions", []string{"skill"}},
 	{"mount", "mount a directory into the docker sandbox", []string{"mount"}},
 }

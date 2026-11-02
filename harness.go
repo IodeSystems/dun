@@ -130,6 +130,9 @@ type Config struct {
 	// it, the post-mortem, a nested checkout — or "" when there is nothing
 	// to say beyond the new state in Servers().
 	OnServerIndex func(id, msg string)
+	// OnPlan says the task plan changed (plan.go), whoever changed it: a
+	// screen reads it again with Plan().
+	OnPlan func()
 	// OnServerSetup says a server's install hint (setupstate.go): one
 	// quiet line, at most once per session.
 	OnServerSetup func(id, msg string)
@@ -257,6 +260,9 @@ type Harness struct {
 	wlMu   sync.Mutex
 	wl     *Worklog
 	wlFile string
+	// The session's task plan (plan.go), read from its sidecar on first use.
+	planMu sync.Mutex
+	plan   *planState
 
 	mgr     *mcpmgr.Manager
 	Session *agent.Session
