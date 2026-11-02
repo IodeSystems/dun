@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -165,7 +167,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 		}
 		t0 := time.Now()
 		if err := h.StartServer(ctx, id); err != nil {
-			return label + ": did not come back — " + oneLine(err.Error()) +
+			return label + ": did not come back — " + textfmt.OneLine(err.Error()) +
 				"\nit is STOPPED now; /mcp restart " + id + " to retry"
 		}
 		elapsed := time.Since(t0)
@@ -251,7 +253,7 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 			return "mcp add: " + err.Error()
 		}
 		if err != nil {
-			return spec.ID + ": saved to " + path + ", but did not start — " + oneLine(err.Error()) +
+			return spec.ID + ": saved to " + path + ", but did not start — " + textfmt.OneLine(err.Error()) +
 				"\nfix it and /mcp add again (same id replaces), or /mcp remove " + spec.ID
 		}
 		// The news first — it runs, with this many tools. Where it was saved
@@ -281,7 +283,7 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		}
 		msg, err := h.LoginServer(ctx, arg)
 		if err != nil {
-			return arg + ": login failed — " + oneLine(err.Error())
+			return arg + ": login failed — " + textfmt.OneLine(err.Error())
 		}
 		return arg + ": " + msg + " · " + runningSummary(h, arg)
 	case "logout":
@@ -356,7 +358,7 @@ func toolCostListing(states []dun.ServerState) string {
 
 // toolCost is "160 tools · ~38k tokens · 12 hidden".
 func toolCost(st dun.ServerState) string {
-	s := plural(st.Tools, "tool") + " · ~" + kTokens(st.Cost) + " tokens"
+	s := textfmt.Plural(st.Tools, "tool") + " · ~" + numfmt.KTokens(st.Cost) + " tokens"
 	if st.Hidden > 0 {
 		s += fmt.Sprintf(" · %d hidden", st.Hidden)
 	}
@@ -375,19 +377,12 @@ func heavyHint(st dun.ServerState) string {
 	return hint
 }
 
-func kTokens(n int) string {
-	if n >= 1000 {
-		return fmt.Sprintf("%.1fk", float64(n)/1000)
-	}
-	return strconv.Itoa(n)
-}
-
 // mcpDocsLine syncs a server's documentation into the docs index and says
 // what happened.
 func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
 	msg, err := h.SyncMCPDocs(ctx, id)
 	if err != nil {
-		return "docs: not indexed — " + oneLine(err.Error())
+		return "docs: not indexed — " + textfmt.OneLine(err.Error())
 	}
 	return msg
 }
@@ -430,7 +425,7 @@ func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 			tags = append(tags, "confirmed before a later change")
 		}
 		if m.Void {
-			tags = append(tags, "void: "+oneLine(m.VoidWhy))
+			tags = append(tags, "void: "+textfmt.OneLine(m.VoidWhy))
 		}
 		fmt.Fprintf(&b, "\n  %s  · %s", title, strings.Join(tags, " · "))
 	}
@@ -482,8 +477,8 @@ func serverListing(states []dun.ServerState) string {
 		}
 	}
 	if direct > 0 {
-		b.WriteString("\n  tool definitions: ~" + kTokens(total) + " tokens in every request, from " +
-			plural(direct, "running server") + " (/context shows the whole prompt)")
+		b.WriteString("\n  tool definitions: ~" + numfmt.KTokens(total) + " tokens in every request, from " +
+			textfmt.Plural(direct, "running server") + " (/context shows the whole prompt)")
 	}
 	b.WriteString("\n  /mcp on|off <id> [--global|--project|--session] (bare: this session) · /mcp unset <id> --project|--session · /mcp mode <id> standalone|scripted")
 	return b.String()
@@ -502,11 +497,11 @@ func serverDetail(st dun.ServerState) string {
 	case st.Running && st.Index == dun.IndexBuilding:
 		s = fmt.Sprintf("running · indexing %ds · ", int(st.IndexSeconds+0.5)) + toolCost(st)
 	case st.Running && st.Index == dun.IndexFailed:
-		s = "running · index failed: " + oneLine(st.IndexErr) + " · " + toolCost(st)
+		s = "running · index failed: " + textfmt.OneLine(st.IndexErr) + " · " + toolCost(st)
 	case st.Running:
 		s = "running · " + toolCost(st)
 	case st.Err != "":
-		s = "stopped · last error: " + oneLine(st.Err)
+		s = "stopped · last error: " + textfmt.OneLine(st.Err)
 	default:
 		s = "stopped"
 	}
@@ -532,14 +527,14 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	if st.Starting {
 		fmt.Fprintf(&b, "starting · %ds", int(st.StartingSeconds+0.5))
 	} else if st.Running {
-		b.WriteString("running · " + plural(st.Tools, "tool"))
+		b.WriteString("running · " + textfmt.Plural(st.Tools, "tool"))
 	} else {
 		b.WriteString("stopped")
 	}
 	b.WriteString(" · " + stateCell(st) + " · switches: global " + cellWord(st.Global) +
 		", project " + cellWord(st.Project) + ", session " + cellWord(st.Session))
 	if st.Err != "" {
-		b.WriteString("\nlast start failed: " + oneLine(st.Err))
+		b.WriteString("\nlast start failed: " + textfmt.OneLine(st.Err))
 	}
 	if st.Running && st.Ingest != "" {
 		b.WriteString("\n" + st.Ingest)
@@ -593,7 +588,7 @@ func runningSummary(h *dun.Harness, id string) string {
 	if !ok || !st.Running {
 		return "not running"
 	}
-	return "running · " + plural(st.Tools, "tool")
+	return "running · " + textfmt.Plural(st.Tools, "tool")
 }
 
 // hostedSummary is a shell-placed server's state: where the model finds it,
@@ -604,7 +599,7 @@ func hostedSummary(st dun.ServerState) string {
 	case st.Hosted:
 		return s + fmt.Sprintf(" · %d tools · 0 tokens per request (its schemas stay in the shell)", st.Tools)
 	case st.Err != "":
-		return s + " · not connected: " + oneLine(st.Err)
+		return s + " · not connected: " + textfmt.OneLine(st.Err)
 	}
 	return s
 }
@@ -641,15 +636,15 @@ func serverHint(states []dun.ServerState) string {
 		}
 		if st.Via == dun.ViaShell {
 			if st.Err != "" {
-				lines = append(lines, fmt.Sprintf("%s (scripted) did not connect: %s", st.ID, oneLine(st.Err)))
+				lines = append(lines, fmt.Sprintf("%s (scripted) did not connect: %s", st.ID, textfmt.OneLine(st.Err)))
 			}
 			continue
 		}
 		switch {
 		case st.Missing:
-			lines = append(lines, fmt.Sprintf("%s off: %s", st.ID, oneLine(st.Err)))
+			lines = append(lines, fmt.Sprintf("%s off: %s", st.ID, textfmt.OneLine(st.Err)))
 		case st.Err != "":
-			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, oneLine(st.Err)))
+			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, textfmt.OneLine(st.Err)))
 		case slashOf(st) != "":
 			// an optional extra, off: the splash says it
 		default:
@@ -773,7 +768,7 @@ func runWorktreeCommit(ctx context.Context, h *dun.Harness) string {
 	for round := 1; ; round++ {
 		msg, err := h.CommitMessage(ctx, view)
 		if err != nil {
-			return "worktree: could not write a commit message — " + oneLine(err.Error())
+			return "worktree: could not write a commit message — " + textfmt.OneLine(err.Error())
 		}
 		q := "Commit these changes?\n\n" + indentLines(msg, "  ") + "\n\n" + indentLines(view.Status(), "  ")
 		options := []string{"commit", "regenerate", "cancel"}
@@ -782,7 +777,7 @@ func runWorktreeCommit(ctx context.Context, h *dun.Harness) string {
 		}
 		ans, err := h.AskUser(ctx, q, options, "commit")
 		if err != nil {
-			return "worktree: not committed — " + oneLine(err.Error())
+			return "worktree: not committed — " + textfmt.OneLine(err.Error())
 		}
 		switch strings.ToLower(strings.TrimSpace(ans)) {
 		case "commit":

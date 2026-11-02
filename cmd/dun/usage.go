@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // `dun --usage`: what dun has used, read from the stats ledger
@@ -330,7 +331,7 @@ func rateText(t usageTotals) string {
 }
 
 func usageRow(b *strings.Builder, w int, name string, t usageTotals) {
-	fmt.Fprintf(b, "  %-*s %8s %12s %11s %6s  %s\n", w, name, grouped(t.Requests), grouped(t.Prompt), grouped(t.Completion), rateText(t), costText(t))
+	fmt.Fprintf(b, "  %-*s %8s %12s %11s %6s  %s\n", w, name, numfmt.Grouped(t.Requests), numfmt.Grouped(t.Prompt), numfmt.Grouped(t.Completion), rateText(t), costText(t))
 }
 
 func usageHead(b *strings.Builder, w int, first string) {
@@ -394,7 +395,7 @@ func renderUsage(r usageReport) string {
 		for _, id := range ids {
 			s := r.Scripted[id]
 			line := fmt.Sprintf("  %-*s ~%s tokens a request now · %s requests · ~%s tokens not sent",
-				w-2, id, grouped(s.Latest), grouped(s.Requests), grouped(s.Tokens))
+				w-2, id, numfmt.Grouped(s.Latest), numfmt.Grouped(s.Requests), numfmt.Grouped(s.Tokens))
 			if r.PromptPrice > 0 {
 				line += fmt.Sprintf(" · ≤ %.4f %s at the full prompt rate", float64(s.Tokens)*r.PromptPrice, r.Currency)
 			}
@@ -406,7 +407,7 @@ func renderUsage(r usageReport) string {
 		fmt.Fprintf(&b, "\nrecap: %d of %d sessions recapped", rc.Recapped, rc.Sessions)
 		if rc.Recapped > 0 {
 			fmt.Fprintf(&b, "; the first after request %s (median), at %s tokens of prompt, removing %s",
-				grouped(median(rc.AtRound)), grouped(median(rc.Before)), grouped(median(rc.Removed)))
+				numfmt.Grouped(median(rc.AtRound)), numfmt.Grouped(median(rc.Before)), numfmt.Grouped(median(rc.Removed)))
 		}
 		b.WriteString("\n")
 	}

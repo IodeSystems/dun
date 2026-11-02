@@ -2,12 +2,16 @@ package main
 
 import (
 	"fmt"
-	"github.com/charmbracelet/x/ansi"
 	"slices"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // A kind of scoped switches in the pager (dun/switches.go: skills now,
@@ -117,14 +121,14 @@ func (v *switchListView) lines(_ *tuiModel, w int) []string {
 	}
 	// What the items that are on cost, in the kind's default mode (the
 	// first): another mode sends less.
-	cost0 := fmt.Sprintf("~%s tokens in every request", kTokens(cost))
+	cost0 := fmt.Sprintf("~%s tokens in every request", numfmt.KTokens(cost))
 	if len(v.order) > 0 && v.mode != v.order[0] {
-		cost0 = fmt.Sprintf("~%s tokens in mode %s", kTokens(cost), v.order[0])
+		cost0 = fmt.Sprintf("~%s tokens in mode %s", numfmt.KTokens(cost), v.order[0])
 	}
 	var out []string
 	if w < narrowW { // two rows on a phone: what it is and what it costs, then its facts
 		out = append(out, wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+
-			fmt.Sprintf("%d/%d on · %s · ~%s tok", on, len(v.rows), mode, kTokens(cost)), w)...)
+			fmt.Sprintf("%d/%d on · %s · ~%s tok", on, len(v.rows), mode, numfmt.KTokens(cost)), w)...)
 	} else {
 		out = append(out, wrapToRows(stHeader.Render("/"+v.slash)+stDim.Render(" · ")+fmt.Sprintf("%d of %d on · mode %s", on, len(v.rows), mode), w)...)
 		out = append(out, wrapToRows(cost0, w)...)
@@ -168,7 +172,7 @@ func (v *switchListView) page() pageDoc {
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
 		cells := fmt.Sprintf("g%s p%s s%s", cellMark(r.global), cellMark(r.project), cellMark(r.session))
-		head := fmt.Sprintf("%s %s  ~%s tok  %s  %s  %s", mark, r.name, kTokens(r.tokens), cells, r.source, first)
+		head := fmt.Sprintf("%s %s  ~%s tok  %s  %s  %s", mark, r.name, numfmt.KTokens(r.tokens), cells, r.source, first)
 		if len(v.order) == 0 { // no cost to show: the indexes
 			head = fmt.Sprintf("%s %s  %s  %s  %s", mark, r.name, cells, r.source, first)
 		}
@@ -179,12 +183,12 @@ func (v *switchListView) page() pageDoc {
 			// unset row is on by default, and three dashes on every row
 			// were noise (USER 2026-10-25, a phone).
 			head = mark + " " + r.name
-			sub = fmt.Sprintf("~%s tok · %s", kTokens(r.tokens), r.source)
+			sub = fmt.Sprintf("~%s tok · %s", numfmt.KTokens(r.tokens), r.source)
 			if len(v.order) == 0 {
 				sub = r.source
 			}
 			if r.from != "" {
-				sub = onOff(r.on) + " " + scopeIn(r.from) + " · " + sub
+				sub = textfmt.OnOff(r.on) + " " + scopeIn(r.from) + " · " + sub
 			}
 			if first != "" {
 				sub += " · " + first
@@ -196,7 +200,7 @@ func (v *switchListView) page() pageDoc {
 				head = stDim.Render(ansi.Strip(head))
 			}
 		}
-		body := onOff(r.on)
+		body := textfmt.OnOff(r.on)
 		if r.from != "" {
 			body += " (switched " + scopeIn(r.from) + ")"
 		}

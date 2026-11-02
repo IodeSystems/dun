@@ -9,6 +9,8 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Messages between agents: a box like a thought's (box.go), with who sent it
@@ -183,7 +185,7 @@ func (a *agentMsg) setResult(result string) {
 	a.result, a.done = result, true
 	first := strings.TrimSpace(firstLine(strings.TrimSpace(result)))
 	if strings.HasPrefix(first, "ERROR") {
-		a.failed, a.status = true, clip(strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(first, "ERROR"), ":")), 120)
+		a.failed, a.status = true, textfmt.Clip(strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(first, "ERROR"), ":")), 120)
 		return
 	}
 	switch a.tool {
@@ -193,11 +195,11 @@ func (a *agentMsg) setResult(result string) {
 			return
 		}
 		// Refused: still running, or stopped. Its first sentence says which.
-		a.failed, a.status = true, clip(first, 120)
+		a.failed, a.status = true, textfmt.Clip(first, 120)
 	case "dun_msg":
 		mm := dunSentRe.FindStringSubmatch(first)
 		if mm == nil {
-			a.status = clip(first, 120)
+			a.status = textfmt.Clip(first, 120)
 			return
 		}
 		a.to = "dun:" + mm[1] // the name, where the call may have used the id

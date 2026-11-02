@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // The pager is the full-pane reader: one convo block, given the conversation
@@ -146,7 +148,7 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 		if p.open[i] {
 			mark = "▾ "
 		}
-		h := oneLine(n.head)
+		h := textfmt.OneLine(n.head)
 		if n.pre {
 			h = strings.ReplaceAll(n.head, "\n", " ")
 		}

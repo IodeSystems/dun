@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Argument completion in the "/" palette.
@@ -365,7 +366,7 @@ func choiceLine(c argChoice, w int) string {
 	if c.source != "" {
 		line += stDim.Render("  " + c.source)
 	}
-	if d := oneLine(c.desc); d != "" {
+	if d := textfmt.OneLine(c.desc); d != "" {
 		if room := w - lipgloss.Width(line) - 2; room > 1 {
 			line += "  " + stDim.Render(ansi.Truncate(d, room, "…"))
 		}

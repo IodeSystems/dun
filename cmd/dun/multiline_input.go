@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -272,7 +274,7 @@ func (m *multilineInput) pasteLabel(tok rune) string {
 	if n == 1 {
 		unit = "line"
 	}
-	return commaf("[pasted %d %s · %d chars]", n, unit, len(p))
+	return numfmt.Commaf("[pasted %d %s · %d chars]", n, unit, len(p))
 }
 
 // expandPaste (ctrl+o) puts a token's text back into the buffer for editing:

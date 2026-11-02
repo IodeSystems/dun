@@ -12,6 +12,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -215,7 +216,7 @@ func shortArgs(args map[string]any) string {
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%s", k, clip(fmt.Sprint(args[k]), 40)))
+		parts = append(parts, fmt.Sprintf("%s=%s", k, textfmt.Clip(fmt.Sprint(args[k]), 40)))
 	}
 	return strings.Join(parts, ", ")
 }

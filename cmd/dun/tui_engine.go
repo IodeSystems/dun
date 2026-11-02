@@ -14,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -47,7 +48,7 @@ func (m tuiModel) dumpString() string {
 	fmt.Fprintf(&b, "focus=%d busy=%v starting=%v asking=%v(multi=%v) inspecting=%v searching=%v sel=%d convo=%d w=%d h=%d\n",
 		m.focus, m.busy, m.starting, m.asking, m.askMulti, m.inspecting, m.searching, m.sel, len(m.convo), m.w, m.h)
 	if m.cur != "" {
-		fmt.Fprintf(&b, "streaming: %q\n", clip(oneLine(m.cur), 200))
+		fmt.Fprintf(&b, "streaming: %q\n", textfmt.Clip(textfmt.OneLine(m.cur), 200))
 	}
 	b.WriteString("───\n")
 	b.WriteString(stripANSI(m.drawView()))

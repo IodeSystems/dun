@@ -8,6 +8,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /mcp in the TUI — the switch table in the pager: a row per server, enter
@@ -80,14 +82,14 @@ func (v *mcpServersView) lines(_ *tuiModel, w int) []string {
 			scripted++
 		}
 	}
-	head := fmt.Sprintf("%s · %d connected", plural(servers, "server"), up)
+	head := fmt.Sprintf("%s · %d connected", textfmt.Plural(servers, "server"), up)
 	if groups > 0 {
 		head += fmt.Sprintf(" · %d of dun's own", groups)
 	}
 	if starting > 0 {
 		head += fmt.Sprintf(" · %d starting", starting)
 	}
-	costLine := fmt.Sprintf("tool schemas: ~%s tokens in every request", tokN(cost))
+	costLine := fmt.Sprintf("tool schemas: ~%s tokens in every request", numfmt.TokN(cost))
 	if scripted > 0 {
 		costLine += fmt.Sprintf(" · %d scripted, 0 in every request", scripted)
 	}
@@ -371,15 +373,15 @@ func serverBody(st dun.ServerState, detail string) string {
 		rows = append(rows, "mode: "+modeSentence(st))
 	}
 	if st.Tools > 0 {
-		t := plural(st.Tools, "tool")
+		t := textfmt.Plural(st.Tools, "tool")
 		switch {
 		case st.Via == dun.ViaShell:
 			t += " inside the shell's eval, 0 tokens in every request"
 			if st.Standalone > 0 {
-				t += " (~" + tokN(st.Standalone) + " standalone)"
+				t += " (~" + numfmt.TokN(st.Standalone) + " standalone)"
 			}
 		case st.Cost > 0:
-			t += ", ~" + tokN(st.Cost) + " tokens in every request"
+			t += ", ~" + numfmt.TokN(st.Cost) + " tokens in every request"
 		}
 		rows = append(rows, t+" — t lists them, type to filter")
 	}
@@ -394,9 +396,9 @@ func serverBody(st dun.ServerState, detail string) string {
 func switchSentence(st dun.ServerState) string {
 	where := map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project",
 		dun.ScopeSession: "for this session", "flag": "by this run's flags"}
-	s := onOff(st.Auto)
+	s := textfmt.OnOff(st.Auto)
 	if w, ok := where[st.From]; ok {
-		s += ": switched " + onOff(st.Auto) + " " + w
+		s += ": switched " + textfmt.OnOff(st.Auto) + " " + w
 	}
 	var also []string
 	if st.Project != "" && st.From != dun.ScopeProject {

@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // The no-screen-jump rule: while a session runs, the conversation's total
@@ -47,7 +49,7 @@ func (c *shrinkCheck) ev(ev map[string]any) {
 	nm, _ := c.v.m.Update(renderTickMsg{})
 	c.v.m = nm.(tuiModel)
 	c.step++
-	c.log = append(c.log, fmt.Sprintf("%v %q", ev["type"], clip(oneLine(fmt.Sprint(ev["text"], ev["result"])), 30)))
+	c.log = append(c.log, fmt.Sprintf("%v %q", ev["type"], textfmt.Clip(textfmt.OneLine(fmt.Sprint(ev["text"], ev["result"])), 30)))
 	if len(c.log) > 12 {
 		c.log = c.log[1:]
 	}

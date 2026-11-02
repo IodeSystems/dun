@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -127,7 +128,7 @@ func waitLine(w proto.UpgradeWait, session string) string {
 		}
 		return "a question " + where
 	case "job":
-		s := fmt.Sprintf("job #%d %s", w.ID, oneLine(w.Detail))
+		s := fmt.Sprintf("job #%d %s", w.ID, textfmt.OneLine(w.Detail))
 		if here {
 			return s + fmt.Sprintf(" (/jobs kill %d)", w.ID)
 		}

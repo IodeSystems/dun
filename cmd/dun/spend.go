@@ -8,7 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/dun/internal/numfmt"
+
 	"github.com/iodesystems/dun/internal/spendmeter"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -105,21 +108,8 @@ func (s *contextStats) readSpend(ev map[string]any) {
 	s.spend = &sp
 }
 
-// money is an amount with thousands separators and two decimals.
-func money(f float64) string {
-	cents := int64(math.Round(f * 100))
-	return fmt.Sprintf("%s.%02d", grouped(cents/100), abs64(cents%100))
-}
-
-func abs64(n int64) int64 {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
-
 // ctxMoney is an amount for a /context row, right-aligned with ctxNum's column.
-func ctxMoney(f float64) string { return fmt.Sprintf("%9s", money(f)) }
+func ctxMoney(f float64) string { return fmt.Sprintf("%9s", numfmt.Money(f)) }
 
 // curNote is the currency after a money value, and what a sub-cent amount
 // rounds away.
@@ -129,7 +119,7 @@ func curNote(f float64, cur string) string {
 	}
 	n := " " + cur
 	if f > 0 && f < 0.005 {
-		n += commaf(" (%.4f)", f)
+		n += numfmt.Commaf(" (%.4f)", f)
 	}
 	return n
 }
@@ -192,7 +182,7 @@ func ledgerRow(label string, by map[string]float64, tail string) string {
 	}
 	note := curNote(by[curs[0]], curs[0])
 	for _, c := range curs[1:] {
-		note += " + " + moneyOf(by[c], c)
+		note += " + " + numfmt.MoneyOf(by[c], c)
 	}
 	return ctxRow(label, ctxMoney(by[curs[0]]), note+tail)
 }
@@ -230,7 +220,7 @@ func costBlock(s *contextStats, now time.Time) string {
 	if sp.Session != nil {
 		note := curNote(*sp.Session, sp.Currency)
 		if sp.CostedCalls < sp.Calls {
-			note += commaf(" · %d of %d calls priced", sp.CostedCalls, sp.Calls)
+			note += numfmt.Commaf(" · %d of %d calls priced", sp.CostedCalls, sp.Calls)
 		}
 		if sp.Mixed {
 			note += " · mixed currencies"
@@ -246,7 +236,7 @@ func costBlock(s *contextStats, now time.Time) string {
 			}
 		}
 	} else {
-		notReported("session spend", commaf(" (%d calls, none priced)", sp.Calls))
+		notReported("session spend", numfmt.Commaf(" (%d calls, none priced)", sp.Calls))
 	}
 	if sp.Session == nil && sp.Calls > 0 {
 		b.WriteString("\n    " + stDim.Render(noCostHint(sp)))
@@ -254,7 +244,7 @@ func costBlock(s *contextStats, now time.Time) string {
 	if sp.LastTurn != nil {
 		note := curNote(*sp.LastTurn, sp.Currency)
 		if sp.LastTurnCosted < sp.LastTurnCalls {
-			note += commaf(" · %d of %d calls priced", sp.LastTurnCosted, sp.LastTurnCalls)
+			note += numfmt.Commaf(" · %d of %d calls priced", sp.LastTurnCosted, sp.LastTurnCalls)
 		}
 		b.WriteString(ctxRow("last turn", ctxMoney(*sp.LastTurn), note))
 	} else {
@@ -285,7 +275,7 @@ func costBlock(s *contextStats, now time.Time) string {
 		if k.Remaining != nil {
 			note := curNote(*k.Remaining, k.Currency)
 			if k.Limit != nil && *k.Limit > 0 {
-				note += commaf(" (%.0f%%)", 100**k.Remaining / *k.Limit)
+				note += numfmt.Commaf(" (%.0f%%)", 100**k.Remaining / *k.Limit)
 			}
 			b.WriteString(ctxRow("key remaining", ctxMoney(*k.Remaining), note))
 		} else {
@@ -305,7 +295,7 @@ func costBlock(s *contextStats, now time.Time) string {
 	case sp.KeyUnsupported:
 		notReported("key budget", " (the endpoint has none)")
 	case sp.KeyError != "":
-		notReported("key budget", " (read failed: "+clip(sp.KeyError, 60)+")")
+		notReported("key budget", " (read failed: "+textfmt.Clip(sp.KeyError, 60)+")")
 	default:
 		notReported("key budget", "")
 	}
@@ -334,9 +324,9 @@ func costBlock(s *contextStats, now time.Time) string {
 		}
 		note := ""
 		if r.Limit != nil {
-			note = commaf(" of %d", *r.Limit)
+			note = numfmt.Commaf(" of %d", *r.Limit)
 			if *r.Limit > 0 {
-				note += commaf(" (%.0f%%)", 100*float64(*r.Remaining)/float64(*r.Limit))
+				note += numfmt.Commaf(" (%.0f%%)", 100*float64(*r.Remaining)/float64(*r.Limit))
 			}
 		}
 		if t, ok := parseRFC3339(r.ResetAt); ok {
@@ -346,7 +336,7 @@ func costBlock(s *contextStats, now time.Time) string {
 				note += " · resets " + until(t, now)
 			}
 		}
-		b.WriteString(ctxRow(label, fmt.Sprintf("%9s", grouped(*r.Remaining)), note))
+		b.WriteString(ctxRow(label, fmt.Sprintf("%9s", numfmt.Grouped(*r.Remaining)), note))
 	}
 	return b.String()
 }

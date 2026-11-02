@@ -31,6 +31,7 @@ import (
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/openurl"
 	"github.com/iodesystems/dun/internal/spendmeter"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -736,9 +737,9 @@ func main() {
 			var miss *dun.MissingError
 			switch {
 			case errors.As(err, &miss): // a setup step, said quietly
-				msg = id + " off: " + oneLine(err.Error())
+				msg = id + " off: " + textfmt.OneLine(err.Error())
 			case err != nil:
-				msg = id + ": did not start — " + oneLine(err.Error())
+				msg = id + ": did not start — " + textfmt.OneLine(err.Error())
 			}
 			em.emit(&proto.ServerEvent{ID: id, Action: "start", Message: msg,
 				Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Background: true})
@@ -894,11 +895,11 @@ func main() {
 			cfg.SystemNote = answerSystem
 		}
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
-			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), clip(oneLine(result), 200))
+			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), textfmt.Clip(textfmt.OneLine(result), 200))
 		}
-		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", clip(oneLine(text), 200)) }
+		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", textfmt.Clip(textfmt.OneLine(text), 200)) }
 		cfg.OnLogin = func(server, url string) { fmt.Fprintf(os.Stderr, "\n  🔑 %s\n", loginLine(server, url)) }
-		cfg.OnMemoryTrigger = func(msg string) { fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", clip(oneLine(msg), 200)) }
+		cfg.OnMemoryTrigger = func(msg string) { fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", textfmt.Clip(textfmt.OneLine(msg), 200)) }
 		cfg.OnRules = func(msg string) { fmt.Fprintf(os.Stderr, "\n  %s\n", msg) }
 		cfg.OnDocs = func(n dun.DocsNote) {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
@@ -1021,7 +1022,7 @@ func main() {
 	// Report the changes the agent made in the isolated worktree.
 	if wt != nil && wt.Branch != "" {
 		if d := strings.TrimSpace(wt.Diff()); d != "" {
-			fmt.Fprintf(os.Stderr, "\ndun: changes on branch %s (worktree %s):\n%s\n", wt.Branch, effWS, clip(d, 4000))
+			fmt.Fprintf(os.Stderr, "\ndun: changes on branch %s (worktree %s):\n%s\n", wt.Branch, effWS, textfmt.Clip(d, 4000))
 		} else {
 			fmt.Fprintf(os.Stderr, "\ndun: no file changes. remove the worktree with: git worktree remove %s\n", effWS)
 		}
@@ -1050,14 +1051,8 @@ type closeCtx struct {
 	wt        *dun.Worktree
 }
 
-func oneLine(s string) string   { return strings.Join(strings.Fields(s), " ") }
 func humanBytes(n int64) string { return numfmt.HumanBytes(n) }
-func clip(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
+
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "dun: %v\n", err)
 	os.Exit(1)

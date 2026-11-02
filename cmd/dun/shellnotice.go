@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // A multi-line command (a heredoc, a script) is shown as highlighted shell
@@ -61,13 +63,13 @@ var jobNoticeRe = regexp.MustCompile("(?s)^(background job #\\d+ [^`]*?— )`(.*
 // the head, the command as shell rows, and the rest of the notice.
 func noticeLine(text string, w int) string {
 	if m := jobNoticeRe.FindStringSubmatch(text); m != nil && strings.Contains(strings.TrimSpace(m[2]), "\n") {
-		out := []string{stNote.Render("🔔 " + oneLine(m[1]))}
+		out := []string{stNote.Render("🔔 " + textfmt.OneLine(m[1]))}
 		for _, r := range shellBlock(m[2], w) {
 			out = append(out, r)
 		}
-		return strings.Join(append(out, stNote.Render("  "+oneLine(strings.TrimPrefix(m[3], " ")))), "\n")
+		return strings.Join(append(out, stNote.Render("  "+textfmt.OneLine(strings.TrimPrefix(m[3], " ")))), "\n")
 	}
-	return stNote.Render("🔔 " + oneLine(text))
+	return stNote.Render("🔔 " + textfmt.OneLine(text))
 }
 
 // noticeW is the width a notice's command rows are cut to.

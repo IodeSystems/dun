@@ -8,6 +8,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Tool runs: the tool calls of a turn, and the thinking between them, are ONE
@@ -122,7 +124,7 @@ func (r *toolRun) summary() string {
 	}
 	// Neutral: the green is for ✓ alone, so a run's rows do not outrank the
 	// answer under them (run 4).
-	s := fmt.Sprintf("⚙ %s — %s", plural(len(r.items), "step"), strings.Join(parts, ", "))
+	s := fmt.Sprintf("⚙ %s — %s", textfmt.Plural(len(r.items), "step"), strings.Join(parts, ", "))
 	if thought > 0 {
 		s += stDim.Render(" · thought " + thinkDur(thought))
 	}
@@ -219,7 +221,7 @@ func thoughtTime(t *thinkBlock) string {
 
 // lastSentence is the final sentence of a thought, on one line.
 func lastSentence(s string) string {
-	s = strings.TrimSpace(oneLine(s))
+	s = strings.TrimSpace(textfmt.OneLine(s))
 	body := strings.TrimRight(s, ".!?…")
 	cut := -1
 	for i := len(body) - 1; i > 0; i-- {
@@ -308,7 +310,7 @@ func callTarget(it *runItem) string {
 	default:
 		return ""
 	}
-	v = oneLine(v)
+	v = textfmt.OneLine(v)
 	if v == "" || len(v) > 30 {
 		return ""
 	}

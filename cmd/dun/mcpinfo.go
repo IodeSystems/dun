@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /mcp info: every server — what it is doing, its mode, its tools and what
@@ -69,26 +71,26 @@ func mcpInfo(in mcpInfoIn) string {
 		f := []string{infoState(st, shellUp), infoMode(st.Via)}
 		on := st.Running || (st.Via == dun.ViaShell && st.Auto && shellUp && st.Err == "")
 		if on && st.Tools > 0 {
-			f = append(f, fact(plural(st.Tools, "tool")))
+			f = append(f, fact(textfmt.Plural(st.Tools, "tool")))
 		}
 		switch {
 		case !in.counted || !on:
 		case st.Via == dun.ViaShell && st.Standalone > 0:
-			f = append(f, fact("0 tokens")+" (standalone "+fact("~"+tokN(st.Standalone))+")")
+			f = append(f, fact("0 tokens")+" (standalone "+fact("~"+numfmt.TokN(st.Standalone))+")")
 		case st.Via == dun.ViaShell:
 			f = append(f, fact("0 tokens"))
 		default:
-			f = append(f, fact(est+tokN(cost[st.ID])+" tokens"))
+			f = append(f, fact(est+numfmt.TokN(cost[st.ID])+" tokens"))
 		}
 		if st.Running && st.Setup != nil {
 			if n := len(st.Setup.MissingLSPs()); n > 0 {
-				f = append(f, fact(plural(n, "language server")+" missing")) // /lsp lists them
+				f = append(f, fact(textfmt.Plural(n, "language server")+" missing")) // /lsp lists them
 			}
 			if st.Setup.CapabilityOff(dun.CapSemantic) {
 				f = append(f, fact("semantic search off")) // /rag says why, /rag setup turns it on
 			}
 		}
-		rows = append(rows, "  "+pad(st.ID, idW)+"  "+strings.Join(f, " · "))
+		rows = append(rows, "  "+textfmt.Pad(st.ID, idW)+"  "+strings.Join(f, " · "))
 		if st.Via == dun.ViaShell {
 			scripted = append(scripted, st.ID)
 			if on {
@@ -104,9 +106,9 @@ func mcpInfo(in mcpInfoIn) string {
 		rows = append(rows, "  tokens: counting…")
 	case in.window > 0:
 		pct := int(math.Round(float64(total) * 100 / float64(in.window)))
-		rows = append(rows, "  total "+fact(est+tokN(total)+" tokens")+" in every request, "+fact(fmt.Sprintf("%d%% of the %s window", pct, tokK(in.window))))
+		rows = append(rows, "  total "+fact(est+numfmt.TokN(total)+" tokens")+" in every request, "+fact(fmt.Sprintf("%d%% of the %s window", pct, numfmt.TokK(in.window))))
 	default:
-		rows = append(rows, "  total "+fact(est+tokN(total)+" tokens")+" in every request")
+		rows = append(rows, "  total "+fact(est+numfmt.TokN(total)+" tokens")+" in every request")
 	}
 	if in.counted {
 		rows = append(rows, costRows(in, cost)...)
@@ -133,9 +135,9 @@ func shellRows(shell *dun.ServerState, shellUp bool, in mcpInfoIn, est string, e
 	case !in.counted:
 		cost = "the shell's eval: counting…"
 	default:
-		cost = "the shell's eval: " + fact(est+tokN(evalTok)+" tokens")
+		cost = "the shell's eval: " + fact(est+numfmt.TokN(evalTok)+" tokens")
 		if len(hosted) > 0 {
-			cost += " · the line naming its servers: " + fact("~"+tokN(estimateTok(dun.HostedLine(hosted)))+" tokens")
+			cost += " · the line naming its servers: " + fact("~"+numfmt.TokN(numfmt.EstimateTok(dun.HostedLine(hosted)))+" tokens")
 		}
 	}
 	if len(scripted) == 0 {
@@ -168,8 +170,8 @@ func scriptHints(in mcpInfoIn, cost map[string]int, shellUp bool, hosted []strin
 			continue
 		}
 		after := append(slices.Clone(hosted), dun.ShellNamespace(st.ID))
-		line := estimateTok(dun.HostedLine(after)) - estimateTok(dun.HostedLine(hosted))
-		row := "  " + fact("/mcp mode "+st.ID+" scripted") + " — saves " + fact("~"+tokN(n-line)+" tokens")
+		line := numfmt.EstimateTok(dun.HostedLine(after)) - numfmt.EstimateTok(dun.HostedLine(hosted))
+		row := "  " + fact("/mcp mode "+st.ID+" scripted") + " — saves " + fact("~"+numfmt.TokN(n-line)+" tokens")
 		if !shellUp {
 			row += ", with the shell on (/mcp on shell)"
 		}
@@ -189,7 +191,7 @@ func infoState(st dun.ServerState, shellUp bool) string {
 		}
 		return "starting…"
 	case st.Err != "":
-		return fact("did not start:") + " " + oneLine(st.Err)
+		return fact("did not start:") + " " + textfmt.OneLine(st.Err)
 	case st.Via == dun.ViaShell && st.Auto && !shellUp:
 		return "waits for the shell"
 	case st.Via == dun.ViaShell && st.Auto, st.Via != dun.ViaShell && st.Running:
@@ -224,7 +226,7 @@ func mcpHelp() string {
 		}
 		rows := []string{"/mcp alone: a table of every server, on or off, and where that is set"}
 		for _, ch := range c.Choices {
-			rows = append(rows, "  "+pad(ch.Value, w)+"  "+ch.Description)
+			rows = append(rows, "  "+textfmt.Pad(ch.Value, w)+"  "+ch.Description)
 		}
 		return strings.Join(rows, "\n")
 	}
@@ -294,10 +296,10 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 	spent := func(tok int) string {
 		var out []string
 		if in.speed > 0 {
-			out = append(out, fact("~"+secs(float64(tok)/in.speed*1000)))
+			out = append(out, fact("~"+numfmt.Secs(float64(tok)/in.speed*1000)))
 		}
 		if price > 0 {
-			out = append(out, fact("~"+turnMoney(float64(tok)*price, u.Currency)))
+			out = append(out, fact("~"+numfmt.TurnMoney(float64(tok)*price, u.Currency)))
 		}
 		if len(out) == 0 {
 			return ""
@@ -308,17 +310,17 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 		su := u.Servers[st.ID]
 		switch {
 		case st.Via == dun.ViaShell && st.Standalone > 0:
-			row := "  " + st.ID + ": scripted, saves " + fact("~"+tokN(st.Standalone)+" tokens") + " in every request"
+			row := "  " + st.ID + ": scripted, saves " + fact("~"+numfmt.TokN(st.Standalone)+" tokens") + " in every request"
 			if su != nil && su.SavedRounds > 0 {
-				row += "; " + fact(plural(su.SavedRounds, "request")) + " would have processed them: " + fact("~"+tokN(su.Saved)+" tokens") + spent(su.Saved)
+				row += "; " + fact(textfmt.Plural(su.SavedRounds, "request")) + " would have processed them: " + fact("~"+numfmt.TokN(su.Saved)+" tokens") + spent(su.Saved)
 			}
 			if st.Help > 0 {
-				row += " · help(\"" + dun.ShellNamespace(st.ID) + "\") " + fact("~"+tokN(st.Help)) + " once, when the model asks"
+				row += " · help(\"" + dun.ShellNamespace(st.ID) + "\") " + fact("~"+numfmt.TokN(st.Help)) + " once, when the model asks"
 			}
 			rows = append(rows, row)
 		case st.Via != dun.ViaShell && cost[st.ID] > 0 && su != nil && su.Processed > 0:
-			rows = append(rows, "  "+st.ID+": its "+fact("~"+tokN(cost[st.ID]))+" of schemas, processed in "+fact(plural(su.Processed, "request"))+": "+
-				fact("~"+tokN(su.Tokens)+" tokens")+spent(su.Tokens))
+			rows = append(rows, "  "+st.ID+": its "+fact("~"+numfmt.TokN(cost[st.ID]))+" of schemas, processed in "+fact(textfmt.Plural(su.Processed, "request"))+": "+
+				fact("~"+numfmt.TokN(su.Tokens)+" tokens")+spent(su.Tokens))
 		}
 	}
 	if len(rows) > 0 {
@@ -327,7 +329,7 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 			hit = fmt.Sprintf("; the cache reused %d%% of all prompt tokens", u.Cached*100/u.Prompt)
 		}
 		head := fmt.Sprintf("what the schemas cost, last %d days (%s, %s processed the prefix, the rest reused it from the cache%s):",
-			in.usageDays, plural(u.Rounds, "request"), fact(fmt.Sprintf("%d", u.Processed)), hit)
+			in.usageDays, textfmt.Plural(u.Rounds, "request"), fact(fmt.Sprintf("%d", u.Processed)), hit)
 		rows = append([]string{head}, rows...)
 	}
 	total := 0
@@ -336,8 +338,8 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 	}
 	switch {
 	case in.speed > 0 && total > 0:
-		rows = append(rows, "an uncached request processes all "+fact("~"+tokN(total)+" tokens")+" of tool schemas: "+
-			fact("~"+secs(float64(total)/in.speed*1000))+" at "+fact(rate(in.speed))+" (measured over "+plural(in.speedRounds, "request")+")")
+		rows = append(rows, "an uncached request processes all "+fact("~"+numfmt.TokN(total)+" tokens")+" of tool schemas: "+
+			fact("~"+numfmt.Secs(float64(total)/in.speed*1000))+" at "+fact(numfmt.Rate(in.speed))+" (measured over "+textfmt.Plural(in.speedRounds, "request")+")")
 	case in.speed == 0 && u.Rounds > 0:
 		rows = append(rows, "prefill speed: not measured — the endpoint reports no timings (llama.cpp does)")
 	}

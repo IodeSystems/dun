@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
 )
@@ -134,7 +135,7 @@ func (d *doctor) toolOrigin(name, p string) {
 	pl := planTool(name, p, o, s, d.toolEnv(name, p))
 	if d.fix && pl.act != "" {
 		if err := d.update(name, p, s, pl); err != nil {
-			pl.fix = "--fix failed: " + oneLine(err.Error())
+			pl.fix = "--fix failed: " + textfmt.OneLine(err.Error())
 		} else if o, err = update.OfFile(p); err == nil {
 			pl = planTool(name, p, o, s, d.toolEnv(name, p))
 		}
@@ -236,9 +237,9 @@ func (d *doctor) addToolUpdate(name string, u *polyUpdate) {
 	switch {
 	case u == nil:
 	case u.Available && u.Latest != "":
-		d.add("ok", area, name+" says an update is available: "+plainLine(u.Current)+" → "+plainLine(u.Latest), plainLine(u.How))
+		d.add("ok", area, name+" says an update is available: "+textfmt.PlainLine(u.Current)+" → "+textfmt.PlainLine(u.Latest), textfmt.PlainLine(u.How))
 	case u.Latest == "" && u.Note != "":
-		d.add("ok", area, name+" "+plainLine(u.Current)+": "+plainLine(u.Note), "")
+		d.add("ok", area, name+" "+textfmt.PlainLine(u.Current)+": "+textfmt.PlainLine(u.Note), "")
 	}
 }
 

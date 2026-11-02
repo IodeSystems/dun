@@ -22,6 +22,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /rag setup — a model for each of raglit's roles, from the person's own
@@ -577,7 +578,7 @@ func (m *tuiModel) ragLoaded(msg ragLoadedMsg) {
 	}
 	if msg.err != nil {
 		m.closeRagSetup()
-		m.append(stErr.Render("raglit setup: " + oneLine(msg.err.Error())))
+		m.append(stErr.Render("raglit setup: " + textfmt.OneLine(msg.err.Error())))
 		return
 	}
 	r := m.rag
@@ -811,7 +812,7 @@ func (m *tuiModel) ragSaved(msg ragSavedMsg) {
 	}
 	m.closeRagSetup()
 	if msg.err != nil {
-		m.append(stErr.Render("raglit setup: not saved — " + oneLine(msg.err.Error())))
+		m.append(stErr.Render("raglit setup: not saved — " + textfmt.OneLine(msg.err.Error())))
 		return
 	}
 	m.append(stDim.Render(msg.line))
@@ -921,7 +922,7 @@ func (m tuiModel) ragSetupPanel() string {
 		status = append(status, fmt.Sprintf("%d-%d of %d", lo+1, hi, len(cs)))
 	}
 	if r.pending > 0 {
-		status = append(status, fmt.Sprintf("asking %s…", plural(r.pending, "service")))
+		status = append(status, fmt.Sprintf("asking %s…", textfmt.Plural(r.pending, "service")))
 	}
 	if len(r.provs) == 0 {
 		status = append(status, "not logged in — /login, then /rag setup")

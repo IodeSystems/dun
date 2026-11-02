@@ -18,6 +18,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -270,7 +271,7 @@ func reusedLine(workspace, id string) string {
 	}
 	age := "nothing saved yet"
 	if st, err := os.Stat(dun.SessionFile(workspace, id)); err == nil {
-		age = relTime(st.ModTime())
+		age = textfmt.RelTime(st.ModTime())
 	}
 	unit := "messages"
 	if n == 1 {

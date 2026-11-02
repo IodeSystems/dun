@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
 )
@@ -72,7 +73,7 @@ func updatePolicy(now time.Time) string {
 		line += " · last checked " + until(st.Checked, now)
 	}
 	if st.Error != "" {
-		line += " · it ran into: " + plainLine(st.Error)
+		line += " · it ran into: " + textfmt.PlainLine(st.Error)
 	}
 	if st.Staged != "" && st.Staged != buildinfo.Version {
 		line += " · " + st.Staged + " is in place and takes over when dun next starts"
@@ -90,7 +91,7 @@ func latestLine() string {
 	defer cancel()
 	man, err := update.Latest(ctx, &update.Fetcher{}, release.ManifestURL, keys, dunHome())
 	if err != nil {
-		return "latest: could not look it up — " + plainLine(err.Error())
+		return "latest: could not look it up — " + textfmt.PlainLine(err.Error())
 	}
 	cur, cerr := update.ParseVersion(buildinfo.Version)
 	lat, lerr := update.ParseVersion(man.Version)
@@ -102,7 +103,7 @@ func latestLine() string {
 	if t := man.PublishedAt(); !t.IsZero() {
 		line += ", published " + until(t, time.Now())
 	}
-	if s := plainLine(man.Summary); s != "" {
+	if s := textfmt.PlainLine(man.Summary); s != "" {
 		line += " — " + fit(s, 100)
 	}
 	return line

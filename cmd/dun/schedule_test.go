@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -40,11 +41,11 @@ func TestParseWhen(t *testing.T) {
 }
 
 func TestCutFieldsKeepsTheRest(t *testing.T) {
-	f, rest := cutFields("  10m   line one\n  line two  ", 1)
+	f, rest := textfmt.CutFields("  10m   line one\n  line two  ", 1)
 	if len(f) != 1 || f[0] != "10m" || rest != "line one\n  line two  " {
 		t.Errorf("%q %q", f, rest)
 	}
-	if f, rest := cutFields("edit", 2); len(f) != 1 || rest != "" {
+	if f, rest := textfmt.CutFields("edit", 2); len(f) != 1 || rest != "" {
 		t.Errorf("short: %q %q", f, rest)
 	}
 }

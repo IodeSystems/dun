@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/openurl"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /login starts with a picker of services: custom (any OpenAI-compatible
@@ -248,7 +249,7 @@ func (m tuiModel) loginPanel() string {
 		if !t.custom() {
 			what = hostPort(t.addr())
 			if n := m.loginProbe[t.id]; n > 0 {
-				what = "running · " + plural(n, "model") + " · " + what
+				what = "running · " + textfmt.Plural(n, "model") + " · " + what
 			}
 		}
 		name := fmt.Sprintf("%-*s", loginLabelW(), t.label)

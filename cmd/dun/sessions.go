@@ -9,6 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Switching sessions from inside the TUI.
@@ -216,7 +218,7 @@ func (m tuiModel) sessionPanel() string {
 			mark = stTool.Render("• ") // where you are now
 		}
 		line := fmt.Sprintf("%s%s  %s  %s",
-			mark, s.ID, stDim.Render(relTime(s.ModTime)), stDim.Render(commaf("%d entries", s.Entries)))
+			mark, s.ID, stDim.Render(textfmt.RelTime(s.ModTime)), stDim.Render(numfmt.Commaf("%d entries", s.Entries)))
 		if m.sessLive[s.ID] {
 			line += stTool.Render("  running")
 		}
@@ -224,13 +226,13 @@ func (m tuiModel) sessionPanel() string {
 			line += stDim.Render("  " + ws)
 		}
 		if p := s.Preview; p != "" {
-			line += "\n     " + clip(p, max(20, m.w-12))
+			line += "\n     " + textfmt.Clip(p, max(20, m.w-12))
 		} else {
 			line += "\n     " + stDim.Render("(no opening message — compacted or empty)")
 		}
 		// The latest ask under the opening one: what it was about by the end.
 		if l := s.Last; l != "" {
-			line += "\n     " + stDim.Render("last: ") + clip(l, max(20, m.w-18))
+			line += "\n     " + stDim.Render("last: ") + textfmt.Clip(l, max(20, m.w-18))
 		}
 		if i == m.pickSel {
 			rows = append(rows, addGutter(line, "▎ ", stSel))
@@ -242,24 +244,4 @@ func (m tuiModel) sessionPanel() string {
 		rows = append(rows, stDim.Render(fmt.Sprintf("     %d-%d of %d", lo+1, hi, len(m.sessions))))
 	}
 	return strings.Join(rows, "\n")
-}
-
-// relTime renders an age the way a person reads one.
-func relTime(t time.Time) string {
-	if t.IsZero() {
-		return "unknown"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	case d < 7*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	default:
-		return t.Format("Jan 2")
-	}
 }

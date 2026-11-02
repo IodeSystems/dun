@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -82,26 +83,6 @@ func clockOf(s string) (h, m int, ok bool) {
 	return h, m, true
 }
 
-// cutFields takes n whitespace-separated fields off the front of s and
-// returns them with the rest as typed (its newlines and spacing kept: it is
-// a message).
-func cutFields(s string, n int) ([]string, string) {
-	var out []string
-	s = strings.TrimLeft(s, " \t\n")
-	for range n {
-		if s == "" {
-			break
-		}
-		i := strings.IndexAny(s, " \t\n")
-		if i < 0 {
-			out, s = append(out, s), ""
-			break
-		}
-		out, s = append(out, s[:i]), strings.TrimLeft(s[i:], " \t\n")
-	}
-	return out, s
-}
-
 // schedAsk is one scheduler operation through the link.
 type schedAsk func(ctx context.Context, req proto.SchedReq) (proto.SchedReply, error)
 
@@ -109,13 +90,13 @@ type schedAsk func(ctx context.Context, req proto.SchedReq) (proto.SchedReply, e
 // as typed. edit, when set, is a line for the composer: /schedule edit <id>
 // with no text puts the current text there to be changed.
 func schedCmd(ctx context.Context, ask schedAsk, action string, now time.Time) (msg, edit string) {
-	head, rest := cutFields(action, 1)
+	head, rest := textfmt.CutFields(action, 1)
 	verb := ""
 	if len(head) == 1 {
 		verb = strings.ToLower(head[0])
 	}
 	idArg := func() (int, string, error) {
-		f, r := cutFields(rest, 1)
+		f, r := textfmt.CutFields(rest, 1)
 		if len(f) == 0 {
 			return 0, "", errors.New("needs an entry id (/schedule lists them)")
 		}
@@ -145,7 +126,7 @@ func schedCmd(ctx context.Context, ask schedAsk, action string, now time.Time) (
 		case "rm":
 			req.Action = "cancel"
 		case "push":
-			f, _ := cutFields(r, 3)
+			f, _ := textfmt.CutFields(r, 3)
 			if len(f) > 0 && strings.HasPrefix(f[0], "+") {
 				d, err := time.ParseDuration(f[0][1:])
 				if err != nil || d <= 0 {
@@ -187,14 +168,14 @@ func schedCmd(ctx context.Context, ask schedAsk, action string, now time.Time) (
 		return fmt.Sprintf("schedule %d: now %s", e.ID, whenShown(e, now)), ""
 	}
 	// /schedule <when> [--to <session>] <text>
-	f, _ := cutFields(action, 2)
+	f, _ := textfmt.CutFields(action, 2)
 	at, n, err := parseWhen(f, now)
 	if err != nil {
 		return "schedule: " + err.Error() + "\n" + schedUsage, ""
 	}
-	_, text := cutFields(action, n)
+	_, text := textfmt.CutFields(action, n)
 	to := ""
-	if t, r := cutFields(text, 2); len(t) == 2 && t[0] == "--to" {
+	if t, r := textfmt.CutFields(text, 2); len(t) == 2 && t[0] == "--to" {
 		to, text = t[1], r
 	}
 	if strings.TrimSpace(text) == "" {
@@ -216,7 +197,7 @@ func schedCmd(ctx context.Context, ask schedAsk, action string, now time.Time) (
 // anything else starts one — its first run now, then every interval, or
 // self-paced (no interval) by the model with loop_ctl.
 func loopCmd(ctx context.Context, ask schedAsk, action string, now time.Time) string {
-	f, rest := cutFields(action, 1)
+	f, rest := textfmt.CutFields(action, 1)
 	if len(f) == 0 {
 		rep, err := ask(ctx, proto.SchedReq{Action: "list"})
 		if err != nil {
@@ -227,7 +208,7 @@ func loopCmd(ctx context.Context, ask schedAsk, action string, now time.Time) st
 	// "stop" and "list" are verbs only alone or before an id: "/loop stop
 	// the server if it is idle" is a prompt.
 	if verb := strings.ToLower(f[0]); verb == "stop" || verb == "list" {
-		g, more := cutFields(rest, 1)
+		g, more := textfmt.CutFields(rest, 1)
 		_, isID := idOf(g)
 		if strings.TrimSpace(more) == "" && (len(g) == 0 || isID) {
 			if verb == "list" {

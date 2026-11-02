@@ -6,6 +6,9 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /mcp tools <id> — one server's tools in the pager: a row per tool (name,
@@ -88,11 +91,11 @@ func (v *mcpToolsView) page() pageDoc {
 			mark = "●"
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
-		head := fmt.Sprintf("%s %s  ~%s tok  g%s p%s s%s  %s", mark, r.name, kTokens(r.tokens),
+		head := fmt.Sprintf("%s %s  ~%s tok  g%s p%s s%s  %s", mark, r.name, numfmt.KTokens(r.tokens),
 			cellMark(r.global), cellMark(r.project), cellMark(r.session), first)
 		body := strings.TrimSpace(r.desc)
 		if r.from != "" {
-			body = onOff(r.enabled) + " (" + r.from + ")\n\n" + body
+			body = textfmt.OnOff(r.enabled) + " (" + r.from + ")\n\n" + body
 		}
 		if r.hiddenBy != "" {
 			body = "hidden by " + r.hiddenBy + "\n\n" + body
@@ -100,9 +103,9 @@ func (v *mcpToolsView) page() pageDoc {
 		body += "\n\nparameters:\n" + r.schema
 		nodes = append(nodes, pageNode{head: head, body: body})
 	}
-	title := fmt.Sprintf("mcp tools · %s: %d of %d on · ~%s tokens", v.server, on, len(v.rows), kTokens(cost))
+	title := fmt.Sprintf("mcp tools · %s: %d of %d on · ~%s tokens", v.server, on, len(v.rows), numfmt.KTokens(cost))
 	if v.query != "" {
-		title = fmt.Sprintf("mcp tools · %s · filter %q: %d shown · %d of %d on · ~%s tokens", v.server, v.query, len(shown), on, len(v.rows), kTokens(cost))
+		title = fmt.Sprintf("mcp tools · %s · filter %q: %d shown · %d of %d on · ~%s tokens", v.server, v.query, len(shown), on, len(v.rows), numfmt.KTokens(cost))
 		if len(shown) == 0 {
 			nodes = append(nodes, pageNode{head: "no tool matches " + strconvQuote(v.query) + " — backspace or esc"})
 		}

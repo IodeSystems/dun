@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -132,7 +133,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" && !opened && !m.splashSays(ev) {
 			m.noteServerMsg(str(ev["action"]), msg)
 			if m.serversPaging() != nil {
-				m.flashText, m.flashUntil = oneLine(msg), time.Now().Add(flashFor)
+				m.flashText, m.flashUntil = textfmt.OneLine(msg), time.Now().Add(flashFor)
 			}
 		}
 		// The tool list changed; keep /help's count and the status bar honest.
@@ -397,7 +398,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// child takes it, so "↳ Told agent" sat above what was told. Only a
 		// refusal (the child is running, or stopped) is shown.
 		if msg := str(ev["message"]); msg != "" && !strings.HasPrefix(msg, "Told agent") {
-			m.append(stNote.Render("↳ " + oneLine(msg)))
+			m.append(stNote.Render("↳ " + textfmt.OneLine(msg)))
 		}
 	case "notification":
 		switch str(ev["kind"]) {
@@ -407,11 +408,11 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		case "budget":
 			// The turn budget ran out and the grace started: the machinery
 			// speaking, so dim, not a bell.
-			m.append(stDim.Render("⏱ " + oneLine(str(ev["text"]))))
+			m.append(stDim.Render("⏱ " + textfmt.OneLine(str(ev["text"]))))
 		case "schedule":
 			// The scheduler speaking (a loop paced, or defaulted): dim, as
 			// the machinery is.
-			m.append(stDim.Render("⏲ " + oneLine(str(ev["text"]))))
+			m.append(stDim.Render("⏲ " + textfmt.OneLine(str(ev["text"]))))
 		case "peer":
 			// Another dun session's dun_msg: a message box, the sender first
 			// (the text is "<name> (<id>): <message>").
@@ -420,7 +421,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.refresh()
 				break
 			}
-			m.append(stDim.Render("✉ dun msg from " + oneLine(str(ev["text"]))))
+			m.append(stDim.Render("✉ dun msg from " + textfmt.OneLine(str(ev["text"]))))
 		default:
 			// A sub-agent's tell_parent message ("agent #2: …") is a box.
 			if a := noticeMsg("", str(ev["text"])); a != nil {

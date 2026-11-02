@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -26,13 +27,6 @@ func choices(pairs ...string) []proto.CommandChoice {
 		out = append(out, proto.CommandChoice{Value: pairs[i], Description: pairs[i+1]})
 	}
 	return out
-}
-
-func onOff(b bool) string {
-	if b {
-		return "on"
-	}
-	return "off"
 }
 
 // commandsEvent is the list, with the current state of each toggle.
@@ -62,7 +56,7 @@ func commandList(servers []dun.ServerState, iso string, exts ...dun.Extension) *
 		if st.Auto {
 			detail = "autostart"
 		}
-		return onOff(st.Running), detail
+		return textfmt.OnOff(st.Running), detail
 	}
 	var items []proto.CommandSpec
 	for _, e := range exts {
@@ -216,7 +210,7 @@ func ownCommands(iso string) []proto.CommandSpec {
 		{Name: "suggest", Usage: "[on|off|auto]", Group: "session", Choices: choices("on", "always", "off", "never", "auto", "when idle"),
 			State: suggestMode, Description: "next-message suggestions: alone asks for some now, on/off/auto set the mode"},
 		{Name: "rephrase", Usage: "[on|off|status | prompt [text|default]]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", "", "prompt", "show the rephrasing prompt; prompt <text> sets it, prompt default goes back to dun's"),
-			State: onOff(rephraseOn), Description: "rephrase prompts for specificity before acting"},
+			State: textfmt.OnOff(rephraseOn), Description: "rephrase prompts for specificity before acting"},
 		{Name: "jobs", Usage: "[kill <n>|kill all]", Group: "session", Choices: choices("kill", "kill a job and everything it started: a number, or all"),
 			Description: "background jobs: alone lists the running ones, kill <n> ends one and everything it started, kill all ends every one"},
 		{Name: "schedule", Usage: "[<when> [--to <session>] <text> | list | push <id> <when>|+<dur> | edit <id> [text] | cancel <id>]", Group: "session", Text: true,
@@ -470,7 +464,7 @@ func routeSlash(line string, r slashRoutes) {
 		case "prompt": // show it, set it (the rest of the line, as typed), or default
 			r.control(name, strings.TrimSpace("prompt "+strings.Join(args[1:], " ")))
 		default:
-			r.reply("rephrase: " + onOff(rephraseOn))
+			r.reply("rephrase: " + textfmt.OnOff(rephraseOn))
 		}
 	case "worklog":
 		// The title and the why as typed.
@@ -539,7 +533,7 @@ func routeSlash(line string, r slashRoutes) {
 	case "schedule", "loop":
 		// The rest of the line as typed: a message keeps its case, spacing
 		// and newlines. The engine parses it (schedule.go).
-		_, rest := cutFields(strings.TrimPrefix(strings.TrimSpace(line), "/"), 1)
+		_, rest := textfmt.CutFields(strings.TrimPrefix(strings.TrimSpace(line), "/"), 1)
 		r.control(name, rest)
 	case "clear":
 		r.reset()

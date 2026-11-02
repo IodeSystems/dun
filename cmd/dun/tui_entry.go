@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // convoEntry is one conversation block. A block with a full form opens and
@@ -206,7 +208,7 @@ func (d *docsBlock) render(open bool) string {
 	}
 	label := fmt.Sprintf("%s🔎 %d relevant doc(s) · %d surfaced", glyph, d.found, d.surfaced)
 	if d.tokens > 0 {
-		label += commaf(" · ~%d tok", d.tokens)
+		label += numfmt.Commaf(" · ~%d tok", d.tokens)
 	}
 	if !open {
 		label += d.brief()

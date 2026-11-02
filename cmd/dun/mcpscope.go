@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // The server switches as commands and as a table (dun mcpscope.go has the
@@ -69,7 +70,7 @@ func runSwitchCmd(ctx context.Context, h *dun.Harness, alias, verb string, flags
 	path, err := h.SetServerOn(ctx, id, scope, on)
 	st, _ := stateOf(h, id)
 	if path == "" && err != nil {
-		return label + ": " + oneLine(err.Error())
+		return label + ": " + textfmt.OneLine(err.Error())
 	}
 	msg := label + ": " + scope + " " + verb
 	if path != "" {
@@ -80,7 +81,7 @@ func runSwitchCmd(ctx context.Context, h *dun.Harness, alias, verb string, flags
 		msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 	}
 	if err != nil {
-		msg += "\ndid not start — " + oneLine(err.Error()) + "\ncarrying on without it; fix and /mcp on " + id + " again"
+		msg += "\ndid not start — " + textfmt.OneLine(err.Error()) + "\ncarrying on without it; fix and /mcp on " + id + " again"
 	}
 	// Said, because the switch the user just set is not the one that decides.
 	if st.From != scope && st.From != "" {
@@ -195,9 +196,9 @@ func stateCell(st dun.ServerState) string {
 		from = "this run"
 	}
 	if from == "" {
-		return onOff(st.Auto)
+		return textfmt.OnOff(st.Auto)
 	}
-	return onOff(st.Auto) + " (" + from + ")"
+	return textfmt.OnOff(st.Auto) + " (" + from + ")"
 }
 
 // viaCell is "scripted (global)": the mode, and which switch said so.
@@ -244,7 +245,7 @@ func tableWidths(states []dun.ServerState) (idW, viaW int) {
 // serverHeader is the table's header row.
 func serverHeader(idW, viaW int, key keyStyle) string {
 	var b strings.Builder
-	b.WriteString(pad("server", idW) + "  " + pad("proto", protoW))
+	b.WriteString(textfmt.Pad("server", idW) + "  " + textfmt.Pad("proto", protoW))
 	for i, c := range tableCols {
 		b.WriteString("  ")
 		w := len([]rune(c.word))
@@ -266,8 +267,8 @@ func serverHeader(idW, viaW int, key keyStyle) string {
 // and what it is doing.
 func serverRow(st dun.ServerState, idW, viaW int, detail string) string {
 	cell := func(v string) string { return "   " + cellMark(v) + "   " }
-	return pad(st.ID, idW) + "  " + pad(st.Proto, protoW) + "  " + cell(st.Global) + "  " + cell(st.Project) + "  " + cell(st.Session) +
-		"  " + pad(viaCell(st), viaW) + "  " + stateCell(st) + " · " + detail
+	return textfmt.Pad(st.ID, idW) + "  " + textfmt.Pad(st.Proto, protoW) + "  " + cell(st.Global) + "  " + cell(st.Project) + "  " + cell(st.Session) +
+		"  " + textfmt.Pad(viaCell(st), viaW) + "  " + stateCell(st) + " · " + detail
 }
 
 // serverTable is the header and a row per server, indented.
@@ -282,10 +283,3 @@ func serverTable(states []dun.ServerState, key keyStyle) string {
 
 // protoW is the proto column: stdio, https, http.
 const protoW = 5
-
-func pad(s string, w int) string {
-	if n := len([]rune(s)); n < w {
-		return s + strings.Repeat(" ", w-n)
-	}
-	return s
-}

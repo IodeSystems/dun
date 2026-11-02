@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iodesystems/dun/internal/textfmt"
 	shim "github.com/iodesystems/openai-claude-api-shim"
 )
 
@@ -476,7 +477,7 @@ func (m tuiModel) modelPanel() string {
 		status = append(status, "not logged in — ctrl+a to log in")
 	}
 	if m.modelPending > 0 {
-		status = append(status, fmt.Sprintf("asking %s…", plural(m.modelPending, "service")))
+		status = append(status, fmt.Sprintf("asking %s…", textfmt.Plural(m.modelPending, "service")))
 	}
 	// Always a row, said or blank, so a count that comes and goes as the
 	// query narrows the list does not move the rows.

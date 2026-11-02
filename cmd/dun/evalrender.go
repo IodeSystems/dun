@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // mcpshell's eval, rendered from what it actually emits (fixtures in
@@ -68,9 +70,9 @@ func evalCallText(args map[string]any, max int) (string, bool) {
 			return strings.TrimSpace("help " + m[1] + m[2]), true
 		}
 		if m := reHosted.FindStringSubmatch(code); m != nil {
-			return clip("◇ "+m[1]+"."+m[2]+"  "+hostedArgs(m[3]), max), true
+			return textfmt.Clip("◇ "+m[1]+"."+m[2]+"  "+hostedArgs(m[3]), max), true
 		}
-		return clip(code, max), true
+		return textfmt.Clip(code, max), true
 	}
 	lines := strings.Split(code, "\n")
 	first, rest := "", 0
@@ -83,9 +85,9 @@ func evalCallText(args map[string]any, max int) (string, bool) {
 		break
 	}
 	if rest > 0 {
-		return clip(first, max) + fmt.Sprintf("  +%d lines", rest), true
+		return textfmt.Clip(first, max) + fmt.Sprintf("  +%d lines", rest), true
 	}
-	return clip(first, max), true
+	return textfmt.Clip(first, max), true
 }
 
 // hostedArgs is a hosted call's arguments as k=v: a single object literal is
@@ -103,7 +105,7 @@ func hostedArgs(s string) string {
 			continue
 		}
 		k = strings.Trim(strings.TrimSpace(k), `"'`)
-		parts = append(parts, k+"="+clip(strings.TrimSpace(v), 24))
+		parts = append(parts, k+"="+textfmt.Clip(strings.TrimSpace(v), 24))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -301,13 +303,13 @@ func evalShape(v any, raw string) string {
 	switch x := v.(type) {
 	case []any:
 		if _, _, ok := asTable(x); ok {
-			return plural(len(x), "row")
+			return textfmt.Plural(len(x), "row")
 		}
-		return plural(len(x), "item")
+		return textfmt.Plural(len(x), "item")
 	case *shellObj:
-		return plural(len(x.keys), "key")
+		return textfmt.Plural(len(x.keys), "key")
 	}
-	return clip(oneLine(firstLine(raw)), 70)
+	return textfmt.Clip(textfmt.OneLine(firstLine(raw)), 70)
 }
 
 func evalErrorRender(msg, code string, width int) (string, string) {
@@ -321,7 +323,7 @@ func evalErrorRender(msg, code string, width int) (string, string) {
 			where = " · line " + m[1]
 		}
 	}
-	preview := stDim.Render("  → ") + stErr.Render("✗ "+clip(first, 80)) + stSecondary.Render(where)
+	preview := stDim.Render("  → ") + stErr.Render("✗ "+textfmt.Clip(first, 80)) + stSecondary.Render(where)
 	var out []string
 	for _, ln := range strings.Split(strings.TrimRight(msg, "\n"), "\n") {
 		out = append(out, stErr.Render(ln))
@@ -523,7 +525,7 @@ func renderTable(rows []*shellObj, cols []string, w int) string {
 		if !ok {
 			return ""
 		}
-		return oneLine(compactValue(v))
+		return textfmt.OneLine(compactValue(v))
 	}
 	widths := make([]int, len(cols))
 	for i, c := range cols {

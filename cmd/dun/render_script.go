@@ -13,6 +13,8 @@ import (
 	"go.starlark.net/syntax"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Runtime-loaded tool-result renderers, written in Starlark. Scripts live in
@@ -176,7 +178,7 @@ func clipBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, k
 	if err := starlark.UnpackArgs("clip", args, kwargs, "s", &s, "n", &n); err != nil {
 		return nil, err
 	}
-	return starlark.String(clip(s, n)), nil
+	return starlark.String(textfmt.Clip(s, n)), nil
 }
 
 // goToStarlark converts a decoded-JSON Go value (tool args) to a Starlark value.

@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // mouseSlash switches mouse reporting at runtime.
@@ -55,9 +56,9 @@ func argPreview(args map[string]any, max int) string {
 	}
 	parts := make([]string, 0, len(args))
 	for _, k := range sortedKeys(args) {
-		parts = append(parts, k+"="+clip(oneLine(fmt.Sprint(args[k])), 48))
+		parts = append(parts, k+"="+textfmt.Clip(textfmt.OneLine(fmt.Sprint(args[k])), 48))
 	}
-	return clip(strings.Join(parts, ", "), max)
+	return textfmt.Clip(strings.Join(parts, ", "), max)
 }
 
 // callText is the one-line form of a tool call — `server · tool  k=v, …` — for the
@@ -69,7 +70,7 @@ func argPreview(args map[string]any, max int) string {
 // shows, in parentheses after the command.
 func callText(tool string, args map[string]any, max int) string {
 	if line, ok := execCallText(args, 40); ok && tool == "exec" {
-		return clip(oneLine(line), max)
+		return textfmt.Clip(textfmt.OneLine(line), max)
 	}
 	if line, ok := evalCallText(args, max); ok && tool == "eval" {
 		return line
@@ -81,7 +82,7 @@ func callText(tool string, args map[string]any, max int) string {
 	if p := argPreview(args, max); p != "" {
 		line += "  " + p
 	}
-	return clip(line, max)
+	return textfmt.Clip(line, max)
 }
 
 // toolLabel is a tool's name as a person reads it: "notes__project_notes"
@@ -522,7 +523,7 @@ func (m *tuiModel) showHelp(debug bool) {
 		b.WriteString("\n  " + stCmd.Render(usage) + "  " + stDim.Render(c.desc))
 	}
 	if hidden > 0 {
-		b.WriteString("\n\n  " + stDim.Render(plural(hidden, "debug command")+" hidden — /help --debug shows them"))
+		b.WriteString("\n\n  " + stDim.Render(textfmt.Plural(hidden, "debug command")+" hidden — /help --debug shows them"))
 	}
 	m.append(b.String())
 }

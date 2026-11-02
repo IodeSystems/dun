@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // ── helpers ────────────────────────────────────────────────────────
@@ -153,7 +154,7 @@ func (m *tuiModel) replay(items []any) {
 	// A model pick restarts the engine on the same conversation: nothing was
 	// resumed as far as the person is concerned, so there is no marker.
 	if n > 0 && !m.quietReplay {
-		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(commaf("── resumed %d entries ──", n))})
+		m.convo = append(m.convo, convoEntry{collapsed: stDim.Render(numfmt.Commaf("── resumed %d entries ──", n))})
 	}
 	m.quietReplay = false
 	// History was never on screen: its thoughts come back folded

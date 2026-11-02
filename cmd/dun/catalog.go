@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // The engine's catalog event: the skills in reach and the running MCP
@@ -188,7 +191,7 @@ func skillSlash(m *tuiModel, args []string) tea.Cmd {
 			b.WriteString(line + "\n    " + stDim.Render(s.Description))
 		}
 		if tok := m.skillTokens(); tok > 0 {
-			b.WriteString("\n" + stDim.Render("the list costs ~"+tokN(tok)+" tokens in every request; a skill's body is read only when it is used"))
+			b.WriteString("\n" + stDim.Render("the list costs ~"+numfmt.TokN(tok)+" tokens in every request; a skill's body is read only when it is used"))
 		}
 		m.append(b.String())
 		return nil
@@ -255,9 +258,9 @@ func skillSummary(skills []catalogSkill) string {
 		w = max(w, len(src))
 	}
 	var b strings.Builder
-	b.WriteString(stHeader.Render(commaf("%d skills", len(skills))))
+	b.WriteString(stHeader.Render(numfmt.Commaf("%d skills", len(skills))))
 	for _, src := range order {
-		b.WriteString("\n  " + stDim.Render(fmt.Sprintf("%-*s", w, src)) + "  " + stTool.Render(commaf("%d", count[src])))
+		b.WriteString("\n  " + stDim.Render(fmt.Sprintf("%-*s", w, src)) + "  " + stTool.Render(numfmt.Commaf("%d", count[src])))
 	}
 	b.WriteString("\n" + stDim.Render("type /skill <part of a name> to search — the palette lists the matches as you type"))
 	return b.String()
@@ -384,7 +387,7 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 		line := strings.TrimSpace(name + " " + strings.Join(args, " "))
 		// /schedule and /loop carry a message: the rest of the line as typed.
 		if name == "schedule" || name == "loop" {
-			_, rest := cutFields(strings.TrimPrefix(strings.TrimSpace(m.slashLine), "/"), 1)
+			_, rest := textfmt.CutFields(strings.TrimPrefix(strings.TrimSpace(m.slashLine), "/"), 1)
 			line = name + " " + rest
 			if len(args) == 2 && strings.EqualFold(args[0], "edit") {
 				m.schedEditAsk = strings.TrimPrefix(args[1], "#")

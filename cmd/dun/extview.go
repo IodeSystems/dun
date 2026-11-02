@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /ext in the TUI: a screen (panes.go) with a status pane (how many there
@@ -64,7 +65,7 @@ func (v *extView) lines(_ *tuiModel, w int) []string {
 	}
 	out = append(out, wrapToRows(stDim.Render(add), w)...)
 	if n := len(v.errors); n > 0 {
-		out = append(out, wrapToRows(stNote.Render(fmt.Sprintf("⚠ %s did not load: the last rows say why", plural(n, "manifest"))), w)...)
+		out = append(out, wrapToRows(stNote.Render(fmt.Sprintf("⚠ %s did not load: the last rows say why", textfmt.Plural(n, "manifest"))), w)...)
 	}
 	return out
 }
@@ -77,7 +78,7 @@ func (v *extView) state(st dun.ServerState, ok bool) string {
 	case st.Starting:
 		return "starting"
 	case st.Running:
-		return "running · " + plural(st.Tools, "tool")
+		return "running · " + textfmt.Plural(st.Tools, "tool")
 	case st.Auto && st.Err != "":
 		return "on, not running"
 	}
@@ -128,7 +129,7 @@ func (v *extView) page() pageDoc {
 	for _, e := range v.errors {
 		nodes = append(nodes, pageNode{head: "✗ " + e, body: e, err: true})
 	}
-	return pageDoc{title: plural(len(v.items), "extension"), nodes: nodes}
+	return pageDoc{title: textfmt.Plural(len(v.items), "extension"), nodes: nodes}
 }
 
 func (v *extView) hint() string {

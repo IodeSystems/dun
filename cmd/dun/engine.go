@@ -15,6 +15,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -950,13 +951,13 @@ func closeSession(workspace, sessionID string, wt *dun.Worktree) string {
 // An abandoned worktree is the one thing here a human has to decide about.
 func reportHousekeeping(res dun.PruneResult, sessions []string) {
 	if n := len(res.Pruned); n > 0 {
-		fmt.Fprintf(os.Stderr, "dun: pruned %s (%s)\n", plural(n, "stale worktree"), humanBytes(res.Freed))
+		fmt.Fprintf(os.Stderr, "dun: pruned %s (%s)\n", textfmt.Plural(n, "stale worktree"), humanBytes(res.Freed))
 	}
 	if n := len(sessions); n > 0 {
-		fmt.Fprintf(os.Stderr, "dun: pruned %s\n", plural(n, "old session"))
+		fmt.Fprintf(os.Stderr, "dun: pruned %s\n", textfmt.Plural(n, "old session"))
 	}
 	if n := len(res.Abandoned); n > 0 {
-		fmt.Fprintf(os.Stderr, "dun: %s still hold work —\n", plural(n, "abandoned worktree"))
+		fmt.Fprintf(os.Stderr, "dun: %s still hold work —\n", textfmt.Plural(n, "abandoned worktree"))
 		for _, w := range res.Abandoned {
 			fmt.Fprintf(os.Stderr, "  %s\n", w.Summary())
 		}

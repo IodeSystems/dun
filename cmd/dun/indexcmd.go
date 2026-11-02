@@ -7,6 +7,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /lsp exclude <dir> and /lsp include <dir>: what the code
@@ -48,7 +49,7 @@ func runExcludeCmd(ctx context.Context, h *dun.Harness, id, verb, dir string) st
 	on := verb == "exclude"
 	path, changed, err := h.SetIndexExclude(ctx, id, dir, on)
 	if err != nil && path == "" {
-		return slash + ": " + oneLine(err.Error())
+		return slash + ": " + textfmt.OneLine(err.Error())
 	}
 	d := strings.TrimSuffix(dir, "/")
 	var msg string
@@ -63,7 +64,7 @@ func runExcludeCmd(ctx context.Context, h *dun.Harness, id, verb, dir string) st
 		msg = fmt.Sprintf("%s: %s back in the index, for this project (saved to %s) · undo: /%s exclude %s", slash, d, path, slash, d)
 	}
 	if err != nil {
-		msg += "\nit did not restart: " + oneLine(err.Error())
+		msg += "\nit did not restart: " + textfmt.OneLine(err.Error())
 	}
 	return msg
 }
@@ -79,7 +80,7 @@ func runBudgetCmd(ctx context.Context, h *dun.Harness, id, slash, budget string)
 	}
 	path, changed, err := h.SetIndexBudget(ctx, id, budget)
 	if err != nil && path == "" {
-		return slash + ": " + oneLine(err.Error())
+		return slash + ": " + textfmt.OneLine(err.Error())
 	}
 	now := h.IndexBudget(id)
 	var msg string
@@ -92,7 +93,7 @@ func runBudgetCmd(ctx context.Context, h *dun.Harness, id, slash, budget string)
 		msg = fmt.Sprintf("%s: index startup budget %s, for this project (saved to %s) · undo: /%s budget default", slash, now, path, slash)
 	}
 	if err != nil {
-		msg += "\nit did not restart: " + oneLine(err.Error())
+		msg += "\nit did not restart: " + textfmt.OneLine(err.Error())
 	}
 	return msg
 }
@@ -108,7 +109,7 @@ func runAnywayCmd(ctx context.Context, h *dun.Harness, id, slash, arg string) st
 	on := arg == "on"
 	path, changed, err := h.SetIndexAnyway(ctx, id, on)
 	if err != nil && path == "" {
-		return slash + ": " + oneLine(err.Error())
+		return slash + ": " + textfmt.OneLine(err.Error())
 	}
 	var msg string
 	switch {
@@ -120,7 +121,7 @@ func runAnywayCmd(ctx context.Context, h *dun.Harness, id, slash, arg string) st
 		msg = fmt.Sprintf("%s: index-anyway off, for this project (saved to %s) · redo: /%s index-anyway on", slash, path, slash)
 	}
 	if err != nil {
-		msg += "\nit did not restart: " + oneLine(err.Error())
+		msg += "\nit did not restart: " + textfmt.OneLine(err.Error())
 	}
 	return msg
 }
@@ -145,7 +146,7 @@ func indexStatus(st dun.ServerState, slash string) string {
 	case st.Index == dun.IndexReady:
 		lines = append(lines, fmt.Sprintf("index: ready · %s files · %.1fs", numfmt.Grouped(st.IndexFiles), st.IndexSeconds))
 	case st.Index == dun.IndexFailed:
-		lines = append(lines, "index: failed — "+oneLine(st.IndexErr))
+		lines = append(lines, "index: failed — "+textfmt.OneLine(st.IndexErr))
 	}
 	// What the index left out, by reason: the advanced user's answer to
 	// "why can't it see X"; the conversation says nothing of it.

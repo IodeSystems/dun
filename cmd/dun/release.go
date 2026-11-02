@@ -9,15 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
-	"unicode"
 
 	"golang.org/x/mod/semver"
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/proto"
 	"github.com/iodesystems/dun/release"
@@ -106,7 +105,7 @@ func releaseUpdate() string {
 	res, err := u.Run(ctx)
 	switch {
 	case err != nil && update.IsVerify(err):
-		return "update refused: " + plainLine(err.Error()) + " — nothing was installed · /upgrade off to stop checking"
+		return "update refused: " + textfmt.PlainLine(err.Error()) + " — nothing was installed · /upgrade off to stop checking"
 	case err != nil || !res.Staged:
 		return ""
 	}
@@ -117,7 +116,7 @@ func releaseUpdate() string {
 // over, and how to opt out.
 func stagedLine(res update.Result, asked bool) string {
 	what := "was " + res.From
-	if s := plainLine(res.Summary); s != "" {
+	if s := textfmt.PlainLine(res.Summary); s != "" {
 		what += ": " + fit(s, 80)
 	}
 	when := "it takes over when dun next starts"
@@ -125,17 +124,6 @@ func stagedLine(res update.Result, asked bool) string {
 		when = "it takes over at the next quiet moment"
 	}
 	return "dun " + res.To + " is ready (" + what + "); " + when + " · /upgrade off to stop updates"
-}
-
-// plainLine is s on one line, without control characters: a manifest's
-// words reach the screen.
-func plainLine(s string) string {
-	return oneLine(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, s))
 }
 
 // askDundUpgrade asks a running dund that coordinates upgrades to move to
@@ -198,10 +186,10 @@ func (d *doctor) releaseBuild() {
 	detail := "checks for a new release daily"
 	st := update.LoadState(update.StateFile(dunHome()))
 	if !st.Checked.IsZero() {
-		detail += ", last " + relTime(st.Checked)
+		detail += ", last " + textfmt.RelTime(st.Checked)
 	}
 	if st.Error != "" {
-		d.add("warn", "build", detail+": "+oneLine(st.Error), "it tries again a day after the last check")
+		d.add("warn", "build", detail+": "+textfmt.OneLine(st.Error), "it tries again a day after the last check")
 		return
 	}
 	d.add("ok", "build", detail, "")

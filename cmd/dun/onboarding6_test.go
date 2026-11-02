@@ -11,6 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // Round 6 of the onboarding walk (plan item 41).
@@ -167,7 +169,7 @@ func TestSplash6_MascotNotOnStatusOrResume(t *testing.T) {
 func TestTokN_OnePrecision(t *testing.T) {
 	for n, want := range map[int]string{0: "0", 344: "344", 999: "999", 1000: "1.0k", 1100: "1.1k",
 		18400: "18.4k", 128300: "128.3k", 2_500_000: "2.50M"} {
-		if got := tokN(n); got != want {
+		if got := numfmt.TokN(n); got != want {
 			t.Errorf("tokN(%d) = %q, want %q", n, got, want)
 		}
 	}

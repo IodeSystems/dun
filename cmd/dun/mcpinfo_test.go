@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // infoServers: the shell, a heavy standalone server, a light one, a
@@ -36,11 +38,11 @@ func TestMCPInfo_Rows(t *testing.T) {
 	// Moving notes adds ", notes" to the hosted sentence: what it saves is
 	// its part less that.
 	hosted := []string{"corp"}
-	line := estimateTok(dun.HostedLine(append(hosted, "notes"))) - estimateTok(dun.HostedLine(hosted))
+	line := numfmt.EstimateTok(dun.HostedLine(append(hosted, "notes"))) - numfmt.EstimateTok(dun.HostedLine(hosted))
 	if line <= 0 || line > 3 {
 		t.Fatalf("naming one more server costs %d tokens", line)
 	}
-	save := "  /mcp mode notes scripted — saves ~" + tokN(5200-line) + " tokens\n"
+	save := "  /mcp mode notes scripted — saves ~" + numfmt.TokN(5200-line) + " tokens\n"
 	for _, want := range []string{
 		"mcp servers\n",
 		"  shell   running · built-in · 1 tool · ~1.1k tokens\n",
@@ -50,7 +52,7 @@ func TestMCPInfo_Rows(t *testing.T) {
 		"  figma   did not start: connect: connection refused · standalone\n",
 		"  raglit  off · built-in\n",
 		"  total ~6.6k tokens in every request, 21% of the 32k window\n",
-		"the shell's eval: ~1.1k tokens · the line naming its servers: ~" + tokN(estimateTok(dun.HostedLine(hosted))) + " tokens · scripted: corp\n",
+		"the shell's eval: ~1.1k tokens · the line naming its servers: ~" + numfmt.TokN(numfmt.EstimateTok(dun.HostedLine(hosted))) + " tokens · scripted: corp\n",
 		"to save tokens:\n" + save,
 	} {
 		if !strings.Contains(s, want) {
@@ -92,11 +94,11 @@ func TestMCPInfo_ShellOff(t *testing.T) {
 	srv = append(srv, dun.ServerState{ID: "snow", Running: true, Auto: true, Tools: 40, Via: dun.ViaDirect, Auth: "logged in"})
 	parts := append(infoParts(), dun.ContextPart{Name: "mcp: snow", Tokens: 9000})
 	s := plainInfo(mcpInfoIn{servers: srv, parts: parts, counted: true})
-	line := estimateTok(dun.HostedLine([]string{"notes"}))
+	line := numfmt.EstimateTok(dun.HostedLine([]string{"notes"}))
 	for _, want := range []string{
 		"  corp    waits for the shell · scripted\n",
 		"the shell is off — /mcp on shell · scripted: corp\n",
-		"  /mcp mode notes scripted — saves ~" + tokN(5200-line) + " tokens, with the shell on (/mcp on shell)\n",
+		"  /mcp mode notes scripted — saves ~" + numfmt.TokN(5200-line) + " tokens, with the shell on (/mcp on shell)\n",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lacks %q:\n%s", want, s)

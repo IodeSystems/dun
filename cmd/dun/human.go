@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // runHuman streams a single task, then drains any background jobs it started
@@ -29,9 +31,9 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string, imgs 
 		switch {
 		case st.Running:
 		case st.Missing:
-			fmt.Fprintf(os.Stderr, "dun: %s off: %s\n", st.ID, oneLine(st.Err))
+			fmt.Fprintf(os.Stderr, "dun: %s off: %s\n", st.ID, textfmt.OneLine(st.Err))
 		case st.Err != "":
-			fmt.Fprintf(os.Stderr, "dun: %s did not start: %s\n", st.ID, oneLine(st.Err))
+			fmt.Fprintf(os.Stderr, "dun: %s did not start: %s\n", st.ID, textfmt.OneLine(st.Err))
 		default:
 			fmt.Fprintf(os.Stderr, "dun: %s off (--%s to start it this run)\n", st.ID, flagOf(st.ID))
 		}
@@ -48,7 +50,7 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string, imgs 
 		fmt.Fprintf(os.Stderr, "\ndun: resume with: dun --continue --workspace %s \"<what to do next>\"\n", workspace)
 		fatal(turnErr(ctx, err))
 	}
-	fmt.Fprint(os.Stderr, commaf("\n\n--- done (%d tokens) ---\n", res.Usage.Total))
+	fmt.Fprint(os.Stderr, numfmt.Commaf("\n\n--- done (%d tokens) ---\n", res.Usage.Total))
 	reply = res.Reply
 
 	for {

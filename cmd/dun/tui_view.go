@@ -11,6 +11,8 @@ import (
 	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // ── styles ─────────────────────────────────────────────────────────
@@ -221,7 +223,7 @@ func (m tuiModel) overlayBar(text string, w int) string {
 	// That put the frame a row over the terminal, which costs the top row: this
 	// bar. fitPlain is the width-aware fit the task line right below already
 	// uses, and oneLine keeps an embedded newline from doing the same thing.
-	text, _ = fitPlain(oneLine(text), max(0, w-2))
+	text, _ = fitPlain(textfmt.OneLine(text), max(0, w-2))
 	return stUser.Width(max(1, w)).Render("› " + text)
 }
 
@@ -349,7 +351,7 @@ func (m tuiModel) headView() string {
 		head += stDim.Render(" · " + m.model)
 	}
 	if n := m.liveAgents(); n > 0 {
-		head += stNote.Render("  · " + plural(n, "agent"))
+		head += stNote.Render("  · " + textfmt.Plural(n, "agent"))
 	}
 	return m.reqs.withStats(head, m.w)
 }

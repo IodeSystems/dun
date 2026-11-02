@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
-	"github.com/iodesystems/dun/internal/procstat"
-	"github.com/iodesystems/dun/proto"
 	"io"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/procstat"
+	"github.com/iodesystems/dun/internal/textfmt"
+	"github.com/iodesystems/dun/proto"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -254,7 +257,7 @@ func (v *jobView) layout(j jobRow, w, h int, now time.Time) {
 	row := jobActRow(j, now)
 	title := fmt.Sprintf("%s job %d · %s · %s", row.mark, j.id, jobStatus(j), compactDur(j.elapsed(now)))
 	if j.bytes > 0 {
-		title += commaf(" · %d bytes", j.bytes)
+		title += numfmt.Commaf(" · %d bytes", j.bytes)
 	}
 	if j.muted {
 		title += " · muted"
@@ -276,7 +279,7 @@ func (v *jobView) layout(j jobRow, w, h int, now time.Time) {
 	cmd := strings.TrimSpace(j.command)
 	// A command that fits on its head is all head; one that does not opens
 	// to the whole of it, and the head is then just the item's name.
-	headText, cut := fitPlain("$ "+oneLine(cmd), v.w-3)
+	headText, cut := fitPlain("$ "+textfmt.OneLine(cmd), v.w-3)
 	long := cut || strings.Contains(cmd, "\n")
 	if v.cmdOpen && long {
 		headText = "command"
@@ -336,7 +339,7 @@ func (v *jobView) layout(j jobRow, w, h int, now time.Time) {
 
 	var ind []string
 	if v.cut {
-		ind = append(ind, "last "+commaf("%d bytes", jobLogTail))
+		ind = append(ind, "last "+numfmt.Commaf("%d bytes", jobLogTail))
 	}
 	if v.off > 0 {
 		ind = append(ind, fmt.Sprintf("↑ %d more", v.off))

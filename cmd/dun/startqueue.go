@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -71,7 +72,7 @@ func (m tuiModel) sendKept() tuiModel {
 	}
 	for _, k := range q {
 		if !m.proc.send(k.text, k.imgs) {
-			m.append(stErr.Render("no engine right now — not sent: " + oneLine(k.text)))
+			m.append(stErr.Render("no engine right now — not sent: " + textfmt.OneLine(k.text)))
 			continue
 		}
 		m.busy = true
@@ -84,7 +85,7 @@ func (m tuiModel) sendKept() tuiModel {
 // startQueuedHint is the status line's count of kept messages, or "".
 func (m tuiModel) startQueuedHint() string {
 	if n := len(m.startQueue); n > 0 {
-		return " · " + plural(n, "message") + " kept"
+		return " · " + textfmt.Plural(n, "message") + " kept"
 	}
 	return ""
 }

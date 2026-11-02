@@ -22,6 +22,7 @@ import (
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/proto"
 )
@@ -397,7 +398,7 @@ func (d *doctor) polyLSPLanguages(bin string) {
 // tree-sitter only by design is fine and left out.
 func (d *doctor) addLanguages(rep dun.SetupReport) {
 	for _, l := range rep.MissingLSPs() {
-		detail := fmt.Sprintf("%s missing for %s (%s)", l.LSP.Name, dun.LangName(l.Lang), plural(l.Files, "file"))
+		detail := fmt.Sprintf("%s missing for %s (%s)", l.LSP.Name, dun.LangName(l.Lang), textfmt.Plural(l.Files, "file"))
 		fix := "install it, or leave it: dun works from tree-sitter alone"
 		if l.Install != nil {
 			fix = l.Install.Cmd
@@ -464,7 +465,7 @@ func (d *doctor) polyLSPAt(bin, where string) {
 	sup, resolved, err := dun.IndexProtocol(bin)
 	switch {
 	case err != nil:
-		d.add("warn", "poly-lsp", resolved+" (on "+where+"): could not ask it: "+oneLine(err.Error()), "update it (poly-lsp: make install)")
+		d.add("warn", "poly-lsp", resolved+" (on "+where+"): could not ask it: "+textfmt.OneLine(err.Error()), "update it (poly-lsp: make install)")
 	case !sup.Protocol:
 		d.add("warn", "poly-lsp", resolved+" (on "+where+") is an older build: startup waits for its index",
 			"update it (poly-lsp: make install)")

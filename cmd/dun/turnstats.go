@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // A turn's cost, under the message that started it (USER 2026-10-24: "how
@@ -38,30 +38,30 @@ func turnStatsLine(ts map[string]any, background bool) string {
 	if background {
 		head = "then on its own"
 	}
-	head += " · " + plural(rounds, "round") + " · " + secs(wall)
-	timeRow := ": model " + secs(model)
+	head += " · " + textfmt.Plural(rounds, "round") + " · " + numfmt.Secs(wall)
+	timeRow := ": model " + numfmt.Secs(model)
 	if timed := int(n("timed")); timed > 0 && timed == rounds {
 		pn, pms, gn, gms := n("prompt_n"), n("prompt_ms"), n("gen_n"), n("gen_ms")
-		parts := []string{"prefill " + secs(pms) + ", " + tokN(int(pn))}
+		parts := []string{"prefill " + numfmt.Secs(pms) + ", " + numfmt.TokN(int(pn))}
 		if pms > 0 && pn > 0 {
-			parts[0] += " at " + rate(pn/(pms/1000))
+			parts[0] += " at " + numfmt.Rate(pn/(pms/1000))
 		}
-		parts = append(parts, "generate "+secs(gms)+", "+tokN(int(gn)))
+		parts = append(parts, "generate "+numfmt.Secs(gms)+", "+numfmt.TokN(int(gn)))
 		timeRow += " (" + strings.Join(parts, " · ") + ")"
 	}
 	if rest := wall - model; wall > 0 && rest >= 500 {
-		timeRow += " · tools and waits " + secs(rest)
+		timeRow += " · tools and waits " + numfmt.Secs(rest)
 	}
-	tokens := []string{tokN(int(n("prompt"))) + " in"}
+	tokens := []string{numfmt.TokN(int(n("prompt"))) + " in"}
 	if c, p := int(n("cached")), n("prompt"); c > 0 && p > 0 {
-		tokens[0] += fmt.Sprintf(" (%s cached, %d%%)", tokN(c), int(float64(c)*100/p))
+		tokens[0] += fmt.Sprintf(" (%s cached, %d%%)", numfmt.TokN(c), int(float64(c)*100/p))
 	}
 	if w := int(n("cache_write")); w > 0 {
-		tokens = append(tokens, tokN(w)+" written to the cache")
+		tokens = append(tokens, numfmt.TokN(w)+" written to the cache")
 	}
-	tokens = append(tokens, tokN(int(n("completion")))+" out")
+	tokens = append(tokens, numfmt.TokN(int(n("completion")))+" out")
 	if costed := int(n("costed")); costed > 0 {
-		c := turnMoney(n("cost"), str(ts["cur"]))
+		c := numfmt.TurnMoney(n("cost"), str(ts["cur"]))
 		if ts["mixed"] == true {
 			c += " and more in another currency"
 		}
@@ -71,38 +71,9 @@ func turnStatsLine(ts map[string]any, background bool) string {
 		tokens = append(tokens, c)
 	}
 	if sa := int(n("sub_agents")); sa > 0 {
-		tokens = append(tokens, "incl. "+plural(sa, "sub-agent"))
+		tokens = append(tokens, "incl. "+textfmt.Plural(sa, "sub-agent"))
 	}
 	return stDim.Render(head+timeRow) + "\n" + stDim.Render("     "+strings.Join(tokens, " · "))
-}
-
-// secs is milliseconds as "41.2s", or "850ms" under a second.
-func secs(ms float64) string {
-	if ms < 1000 {
-		return fmt.Sprintf("%dms", int(ms))
-	}
-	return fmt.Sprintf("%.1fs", (time.Duration(ms) * time.Millisecond).Seconds())
-}
-
-// rate is a speed in tokens a second, the short way: "6.7k/s".
-func rate(tps float64) string { return tokK(int(tps)) + "/s" }
-
-// turnMoney is a turn's cost: a turn is often under a cent, which two
-// decimals would show as nothing.
-func turnMoney(v float64, cur string) string {
-	if v > 0 && v < 0.01 {
-		s := fmt.Sprintf("%.4f", v)
-		switch cur {
-		case llm.CurrencyUSD:
-			return "$" + s
-		case llm.CurrencyUSDEstimate:
-			return "~$" + s + " est"
-		case "":
-			return s
-		}
-		return s + " " + cur
-	}
-	return moneyOf(v, cur)
 }
 
 // noteTurnStats puts a turn's cost on the message that started it: the last

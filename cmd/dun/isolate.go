@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -176,7 +177,7 @@ func isolateImage(h *dun.Harness, arg string) string {
 		return "isolate: docker image " + a.Tag + " (built before from " + a.Dockerfile + ")\n" + imageNote(h)
 	}
 	if out, err := dockerBuild(a.Tag, a.Dockerfile, a.Context); err != nil {
-		return "isolate: docker build of " + a.Dockerfile + " failed — " + oneLine(err.Error()) + "\n" + tailLines(out, 15)
+		return "isolate: docker build of " + a.Dockerfile + " failed — " + textfmt.OneLine(err.Error()) + "\n" + tailLines(out, 15)
 	}
 	h.SetDockerImage(a.Tag)
 	return "isolate: docker image " + a.Tag + " (built from " + a.Dockerfile + ")\n" + imageNote(h)
@@ -260,7 +261,7 @@ func isolateWorktree(h *dun.Harness, docker bool) string {
 	// mounts, so both see one set of paths.
 	newWt, isRepo, err := dun.NewWorktree(h.Workspace(), h.Mounts())
 	if err != nil {
-		return "isolate: " + mode + " failed — " + oneLine(err.Error())
+		return "isolate: " + mode + " failed — " + textfmt.OneLine(err.Error())
 	}
 	if !isRepo {
 		return "isolate: " + mode + " refused — " + h.Workspace() + " is not in a git repository, and a worktree needs one"

@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /repaint: capture what dun believes is on screen and what the terminal
@@ -559,7 +560,7 @@ func msgSummary(msg tea.Msg) string {
 		default:
 			for _, k := range []string{"text", "content", "message", "question"} {
 				if s, ok := msg[k].(string); ok && s != "" {
-					return clipRunes(oneLine(s), evTextMax)
+					return clipRunes(textfmt.OneLine(s), evTextMax)
 				}
 			}
 		}

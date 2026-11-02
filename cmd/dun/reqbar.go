@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
 	dun "github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -94,7 +96,7 @@ func avg(sum, n float64) string {
 	if n <= 0 {
 		return ""
 	}
-	return "~" + tokK(int(sum/n))
+	return "~" + numfmt.TokK(int(sum/n))
 }
 
 // reqPiece is one stat: its label and its value padded to a fixed width.
@@ -121,10 +123,10 @@ func (b reqBar) pieces() []reqPiece {
 		}
 		return s
 	}
-	ctx := reqPiece{label: "ctx", value: tokK(r.Ctx), width: 5, drop: 3}
+	ctx := reqPiece{label: "ctx", value: numfmt.TokK(r.Ctx), width: 5, drop: 3}
 	if r.Window > 0 {
-		w := tokK(r.Window)
-		ctx.value = fmt.Sprintf("%5s/%s", tokK(r.Ctx), w)
+		w := numfmt.TokK(r.Window)
+		ctx.value = fmt.Sprintf("%5s/%s", numfmt.TokK(r.Ctx), w)
 		ctx.width = 6 + len(w)
 	}
 	out := []reqPiece{ctx}
@@ -133,7 +135,7 @@ func (b reqBar) pieces() []reqPiece {
 	}
 	// A rate and its average, each padded, so neither moves the other.
 	withAvg := func(v float64, a string, w int) string {
-		return fmt.Sprintf("%*s %5s", w, dash(v > 0, rate(v)), a)
+		return fmt.Sprintf("%*s %5s", w, dash(v > 0, numfmt.Rate(v)), a)
 	}
 	out = append(out,
 		reqPiece{label: "ttft", value: dash(b.ttft > 0, ttftText(b.ttft)), width: 5, drop: 1},

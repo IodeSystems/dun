@@ -11,6 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // Mouse: the wheel scrolls (tui.go, pane.go, pager.go); the left button
@@ -405,11 +407,11 @@ func copyCmd(text string) tea.Cmd {
 
 // copiedNote is the flash after a copy: how much, and where it went.
 func copiedNote(c copiedMsg) string {
-	s := commaf("copied %d chars", c.n)
+	s := numfmt.Commaf("copied %d chars", c.n)
 	if len(c.via) > 0 {
 		s += " → " + strings.Join(c.via, " + ")
 	} else {
-		s = commaf("could not copy %d chars: no clipboard route worked", c.n)
+		s = numfmt.Commaf("could not copy %d chars: no clipboard route worked", c.n)
 	}
 	if c.hint != "" {
 		s += " · " + c.hint

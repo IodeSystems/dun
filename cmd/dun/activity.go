@@ -25,6 +25,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Descent levels within the zone. Focus alone does not expand it — → does,
@@ -373,10 +375,10 @@ func actCounts(rows []actRow) string {
 	}
 	parts := make([]string, 0, 2)
 	if agents > 0 {
-		parts = append(parts, plural(agents, "agent"))
+		parts = append(parts, textfmt.Plural(agents, "agent"))
 	}
 	if jobs > 0 {
-		parts = append(parts, plural(jobs, "job"))
+		parts = append(parts, textfmt.Plural(jobs, "job"))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -769,7 +771,7 @@ func (m tuiModel) scopeHeader() string {
 	var b strings.Builder
 	b.WriteString(stDim.Render("↰ ") + style.Render(label))
 	if avail := budget - used - 3; avail >= 4 && task != "" {
-		t, _ := fitPlain(oneLine(task), avail)
+		t, _ := fitPlain(textfmt.OneLine(task), avail)
 		b.WriteString(stDim.Render(" · ") + stSecondary.Render(t))
 	}
 	b.WriteString(stDim.Render(tail))

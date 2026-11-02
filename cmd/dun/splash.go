@@ -12,9 +12,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -153,7 +154,7 @@ func (m tuiModel) toolsValue(w int) string {
 	sep := stDim.Render(" · ")
 	head := fmt.Sprintf("%d", len(m.tools))
 	if tok := m.toolTokens(); tok > 0 {
-		head += stDim.Render(" (" + tokN(tok) + ")")
+		head += stDim.Render(" (" + numfmt.TokN(tok) + ")")
 	}
 	for _, t := range trouble {
 		head += sep + t
@@ -264,7 +265,7 @@ func (m tuiModel) skillsValue(w int) string {
 	}
 	v := fmt.Sprintf("%d", len(m.skills))
 	if tok := m.skillTokens(); tok > 0 {
-		v += stDim.Render(" (" + tokN(tok) + ")")
+		v += stDim.Render(" (" + numfmt.TokN(tok) + ")")
 	}
 	return hinted(w, v, "/skill info")
 }
@@ -328,7 +329,7 @@ func (m tuiModel) contextValue(w int) (string, []string) {
 	if s.systemTokens == 0 {
 		return stDim.Render("counting…"), make([]string, rows)
 	}
-	n := tokN(s.systemTokens)
+	n := numfmt.TokN(s.systemTokens)
 	if !s.systemExact {
 		n = "~" + n
 	}
@@ -337,7 +338,7 @@ func (m tuiModel) contextValue(w int) (string, []string) {
 	if s.window > 0 {
 		pct := float64(s.systemTokens) / float64(s.window)
 		heavy = pct >= contextHeavy
-		of := fmt.Sprintf("of %s, %d%%", tokK(s.window), int(math.Round(pct*100)))
+		of := fmt.Sprintf("of %s, %d%%", numfmt.TokK(s.window), int(math.Round(pct*100)))
 		v = firstFit(w, n+" tokens before you type ("+of+")", n+" tokens ("+of+")", n+" ("+of+")",
 			fmt.Sprintf("%s (%d%%)", n, int(math.Round(pct*100))))
 	} else {
@@ -389,11 +390,11 @@ func (m tuiModel) contextParts(w, rows int) []string {
 		}
 	}
 	system := max(0, s.systemPrompt-s.systemRules)
-	part := func(name string, n, tok int) string { return fmt.Sprintf("%s %d (%s)", name, n, tokN(tok)) }
+	part := func(name string, n, tok int) string { return fmt.Sprintf("%s %d (%s)", name, n, numfmt.TokN(tok)) }
 	items := []string{
-		"system " + tokN(system),
+		"system " + numfmt.TokN(system),
 		part("tools", m.builtinToolCount(), builtin+s.systemShared),
-		fmt.Sprintf("mcp %s (%s)", plural(servers, "server"), tokN(mcp)),
+		fmt.Sprintf("mcp %s (%s)", textfmt.Plural(servers, "server"), numfmt.TokN(mcp)),
 		part("skills", len(m.skills), skills),
 		part("rules", len(s.systemFiles), s.systemRules),
 	}
@@ -440,31 +441,6 @@ func firstFit(w int, forms ...string) string {
 	return forms[len(forms)-1]
 }
 
-// tokN is a token count in one precision: plain below 1000, then thousands
-// with one decimal (1.0k, 18.4k, 128.3k), then millions with two.
-func tokN(n int) string {
-	switch {
-	case n < 1000:
-		return fmt.Sprintf("%d", n)
-	case n < 1_000_000:
-		return fmt.Sprintf("%.1fk", float64(n)/1000)
-	}
-	return fmt.Sprintf("%.2fM", float64(n)/1e6)
-}
-
-// tokK is a size the short way — a window: 940, 18.4k, 128k, 1.05M.
-func tokK(n int) string {
-	switch {
-	case n < 1000:
-		return fmt.Sprintf("%d", n)
-	case n < 100_000:
-		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1000), ".0") + "k"
-	case n < 1_000_000:
-		return fmt.Sprintf("%dk", int(math.Round(float64(n)/1000)))
-	}
-	return strings.TrimSuffix(fmt.Sprintf("%.2f", float64(n)/1e6), ".00") + "M"
-}
-
 // spendValue is the spend row: this session's requests, tokens processed
 // (the prompt) and generated (the completion) and, when the provider reports
 // cached prompt tokens, the cache rate; then the smallest period whose
@@ -490,7 +466,7 @@ func (m tuiModel) spendValue(w int, now time.Time) string {
 		return stDim.Render("no requests yet")
 	}
 	sep := stDim.Render(" · ")
-	req := plural(sp.Calls, "request")
+	req := textfmt.Plural(sp.Calls, "request")
 	usage := []string{req}
 	switch {
 	case fresh && sp.Month != nil:
@@ -499,12 +475,12 @@ func (m tuiModel) spendValue(w int, now time.Time) string {
 		usage = []string{"no requests yet"}
 	case sp.Prompt > 0 || sp.Completion > 0:
 		reqs := fmt.Sprintf("%d req", sp.Calls)
-		short := reqs + " · " + tokN(sp.Prompt) + " in · " + tokN(sp.Completion) + " out"
-		full := req + " · " + tokN(sp.Prompt) + " in · " + tokN(sp.Completion) + " out"
+		short := reqs + " · " + numfmt.TokN(sp.Prompt) + " in · " + numfmt.TokN(sp.Completion) + " out"
+		full := req + " · " + numfmt.TokN(sp.Prompt) + " in · " + numfmt.TokN(sp.Completion) + " out"
 		usage = []string{full, short, reqs}
 		if sp.CacheReported && sp.Prompt > 0 {
 			pct := fmt.Sprintf(" · %d%% cached", int(math.Round(float64(sp.Cached)*100/float64(sp.Prompt))))
-			usage = []string{full + pct, short + pct, reqs + " · " + tokN(sp.Prompt) + " in" + pct, short, reqs}
+			usage = []string{full + pct, short + pct, reqs + " · " + numfmt.TokN(sp.Prompt) + " in" + pct, short, reqs}
 		}
 	}
 	for i := range usage {
@@ -561,14 +537,14 @@ func (m tuiModel) spendValue(w int, now time.Time) string {
 
 // monthForms are this month's usage for the spend row, widest first.
 func monthForms(u *proto.UsageMonth) []string {
-	head := "this month " + tokN(u.Prompt) + " in"
+	head := "this month " + numfmt.TokN(u.Prompt) + " in"
 	forms := []string{head}
 	if u.Cached > 0 && u.Prompt > 0 {
 		head += fmt.Sprintf(" · %d%% cached", int(math.Round(float64(u.Cached)*100/float64(u.Prompt))))
 		forms = append([]string{head}, forms...)
 	}
 	if u.PrefillTPS > 0 {
-		forms = append([]string{head + commaf(" · %.0f tok/s", u.PrefillTPS)}, forms...)
+		forms = append([]string{head + numfmt.Commaf(" · %.0f tok/s", u.PrefillTPS)}, forms...)
 	}
 	return forms
 }
@@ -586,7 +562,7 @@ func keyAge(k *proto.KeyBudget, now time.Time) string {
 	if err != nil || now.Sub(at) < keyStale {
 		return ""
 	}
-	return relTime(at)
+	return textfmt.RelTime(at)
 }
 
 // spendPeriods are the periods the spend row picks from, smallest first.
@@ -630,24 +606,9 @@ func moneyIn(by map[string]float64) string {
 	sort.Strings(curs)
 	out := make([]string, 0, len(curs))
 	for _, c := range curs {
-		out = append(out, moneyOf(by[c], c))
+		out = append(out, numfmt.MoneyOf(by[c], c))
 	}
 	return strings.Join(out, " + ")
-}
-
-// moneyOf is one amount in its currency.
-func moneyOf(v float64, cur string) string {
-	switch cur {
-	case llm.CurrencyUSD:
-		return "$" + money(v)
-	case llm.CurrencyUSDEstimate:
-		return "~$" + money(v) + " est"
-	case "credits":
-		return strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0") + " credits"
-	case "":
-		return money(v)
-	}
-	return money(v) + " " + cur
 }
 
 // budgetLeft is what the key has left, in its currency, and whether that is
@@ -671,7 +632,7 @@ func budgetLeft(sp *proto.Spend) (string, bool, bool) {
 		rate = sp.Ledger.Last24h[k.Currency]
 	}
 	low := left <= 0 || (rate > 0 && left <= rate)
-	return moneyOf(max(0, left), k.Currency), low, true
+	return numfmt.MoneyOf(max(0, left), k.Currency), low, true
 }
 
 // sectionsView is rows of label + value — a label column (dim) and a value
@@ -921,20 +882,20 @@ func (m tuiModel) statusDetail(w int) string {
 		state := stDim.Render("off")
 		switch {
 		case st.Via == dun.ViaShell && st.Hosted: // scripted: its tools are in the shell's eval (USER 2026-10-27: was "off")
-			state = stOK.Render("scripted in the shell") + stDim.Render(" · "+plural(st.Tools, "tool"))
+			state = stOK.Render("scripted in the shell") + stDim.Render(" · "+textfmt.Plural(st.Tools, "tool"))
 		case st.Via == dun.ViaShell && st.Auto:
 			state = stDim.Render("scripted · not hosted (the shell is down, or could not start it)")
 		case st.Starting:
 			state = stDim.Render("starting" + m.startedFor(st.ID))
 		case st.Running:
-			state = stOK.Render("running") + stDim.Render(" · "+plural(st.Tools, "tool"))
+			state = stOK.Render("running") + stDim.Render(" · "+textfmt.Plural(st.Tools, "tool"))
 		case st.Missing:
 			state = stDim.Render("not installed")
 		case st.Err != "":
 			state = stErr.Render("did not start")
 		}
 		if n, ok := tokensOf[st.ID]; ok && st.Running {
-			state += stDim.Render(" · ") + est + tokN(n)
+			state += stDim.Render(" · ") + est + numfmt.TokN(n)
 		}
 		srv = append(srv, [2]string{st.ID, state})
 	}
@@ -942,7 +903,7 @@ func (m tuiModel) statusDetail(w int) string {
 	// Skills: each one's line in the skill list, estimated.
 	var sk [][2]string
 	for _, k := range m.skills {
-		v := "~" + tokN(estimateTok("\n- "+k.Name+": "+k.Description))
+		v := "~" + numfmt.TokN(numfmt.EstimateTok("\n- "+k.Name+": "+k.Description))
 		if k.UserOnly {
 			v = stDim.Render("/skill only")
 		}
@@ -951,16 +912,12 @@ func (m tuiModel) statusDetail(w int) string {
 	block("skills", sk)
 	var fl [][2]string
 	for _, f := range s.systemFiles {
-		fl = append(fl, [2]string{f.Name, "~" + tokN(f.Tokens)})
+		fl = append(fl, [2]string{f.Name, "~" + numfmt.TokN(f.Tokens)})
 	}
 	block("rules", fl)
 	block("spend", m.spendRows())
 	return b.String()
 }
-
-// estimateTok is the four-characters-per-token estimate the engine uses
-// when it cannot count (dun/context_tokens.go).
-func estimateTok(s string) int { return len(s) / 4 }
 
 // spendRows are /status's spend rows: today, this week, this month, this
 // year, this month by model, this session, and the key's budget.
@@ -991,12 +948,12 @@ func (m tuiModel) spendRows() [][2]string {
 	case sp == nil || sp.Calls == 0:
 		rows = append(rows, [2]string{"this session", stDim.Render("none yet")})
 	case sp.Session == nil:
-		rows = append(rows, [2]string{"this session", stDim.Render(fmt.Sprintf("not reported by %s (%s)", host, plural(sp.Calls, "call")))})
+		rows = append(rows, [2]string{"this session", stDim.Render(fmt.Sprintf("not reported by %s (%s)", host, textfmt.Plural(sp.Calls, "call")))})
 	default:
-		rows = append(rows, [2]string{"this session", moneyOf(*sp.Session, sp.Currency) + stDim.Render(" · "+plural(sp.CostedCalls, "priced call"))})
+		rows = append(rows, [2]string{"this session", numfmt.MoneyOf(*sp.Session, sp.Currency) + stDim.Render(" · "+textfmt.Plural(sp.CostedCalls, "priced call"))})
 	}
 	if sp != nil && (sp.Prompt > 0 || sp.Completion > 0) {
-		v := tokN(sp.Prompt) + " processed · " + tokN(sp.Completion) + " generated"
+		v := numfmt.TokN(sp.Prompt) + " processed · " + numfmt.TokN(sp.Completion) + " generated"
 		if sp.CacheReported && sp.Prompt > 0 {
 			v += fmt.Sprintf(" · %d%% of the prompt cached", int(math.Round(float64(sp.Cached)*100/float64(sp.Prompt))))
 		}
@@ -1004,12 +961,12 @@ func (m tuiModel) spendRows() [][2]string {
 	}
 	if sp != nil && sp.Month != nil {
 		u := sp.Month
-		v := plural(u.Rounds, "round") + " · " + tokN(u.Prompt) + " in"
+		v := textfmt.Plural(u.Rounds, "round") + " · " + numfmt.TokN(u.Prompt) + " in"
 		if u.Cached > 0 && u.Prompt > 0 {
 			v += fmt.Sprintf(" · %d%% cached", int(math.Round(float64(u.Cached)*100/float64(u.Prompt))))
 		}
 		if u.PrefillTPS > 0 {
-			v += commaf(" · %.0f tok/s prefill", u.PrefillTPS)
+			v += numfmt.Commaf(" · %.0f tok/s prefill", u.PrefillTPS)
 		}
 		rows = append(rows, [2]string{"usage", v + stDim.Render(" this month, as of this session's start")})
 	}
