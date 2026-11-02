@@ -433,7 +433,8 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.refresh()
 				break
 			}
-			m.append(noticeLine(str(ev["text"]), m.noticeW()))
+			m.convo = append(m.convo, noticeEntry(str(ev["text"]), m.noticeW()))
+			m.refresh()
 		}
 	case "ask":
 		m.endThinking()

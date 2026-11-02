@@ -213,7 +213,7 @@ func (m *tuiModel) replayItems(items []any, run int) int {
 				n++
 				break
 			}
-			m.convo = append(m.convo, convoEntry{collapsed: noticeLine(str(im["content"]), m.noticeW())})
+			m.convo = append(m.convo, noticeEntry(str(im["content"]), m.noticeW()))
 			n++
 		case "reasoning":
 			m.addThought(&thinkBlock{text: str(im["content"])})

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -22,6 +23,7 @@ func noticeRows(t *testing.T, w int, text string) []string {
 	m := mm.(tuiModel)
 	m = m.handleEvent(evMsg{"type": "notification", "kind": "job", "text": text})
 	e := m.convo[len(m.convo)-1]
+	e.state = viewExpanded
 	return strings.Split(ansi.Strip(e.view()), "\n")
 }
 
@@ -46,10 +48,53 @@ func TestNotice_HeredocKeepsLines(t *testing.T) {
 	}
 }
 
-func TestNotice_OneLineStaysOne(t *testing.T) {
-	rows := noticeRows(t, 100, jobNotice("make test"))
-	if len(rows) != 1 || !strings.Contains(rows[0], "`make test`") {
-		t.Fatalf("rows: %q", rows)
+// Whatever a notice carries, it is one row until it is opened.
+func TestNotice_FoldedToOneRow(t *testing.T) {
+	big := "background job #6 succeeded — `go test ./...` (3m2s)\nlog: /tmp/j6.log\n" + strings.Repeat("ok  pkg\n", 400)
+	for _, text := range []string{big, jobNotice(heredocCmd), jobNotice("make test")} {
+		for _, w := range []int{100, 30} {
+			e := noticeEntry(text, w)
+			if rows := strings.Split(e.view(), "\n"); len(rows) != 1 {
+				t.Fatalf("w=%d: %d rows folded", w, len(rows))
+			} else if ansi.StringWidth(rows[0]) > w {
+				t.Errorf("w=%d: wider than the pane: %q", w, ansi.Strip(rows[0]))
+			}
+			if !e.expandable() {
+				t.Errorf("w=%d: nothing to open", w)
+			}
+		}
+	}
+	line := ansi.Strip(noticeEntry(big, 100).view())
+	if !strings.Contains(line, "job #6 succeeded (3m2s) · $ go test ./...") {
+		t.Errorf("line %q", line)
+	}
+	if got := ansi.Strip(noticeEntry(jobNotice(heredocCmd), 200).view()); !strings.Contains(got, " lines)") {
+		t.Errorf("a multi-line command should say so: %q", got)
+	}
+}
+
+// Opened, the output keeps its lines.
+func TestNotice_OpensWithItsLines(t *testing.T) {
+	rows := noticeRows(t, 100, "background job #6 failed — `make test` (2s)\nlog: /tmp/j.log\nfirst\nsecond")
+	all := strings.Join(rows, "\n")
+	for _, want := range []string{"make test", "log: /tmp/j.log", "first", "second"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no %q in:\n%s", want, all)
+		}
+	}
+	if !slices.Contains(rows, "first") {
+		t.Errorf("output flattened:\n%s", all)
+	}
+}
+
+// A notice that isn't a job's folds too, and one that fits has nothing to open.
+func TestNotice_Plain(t *testing.T) {
+	if e := noticeEntry("[para] proposal p1 decided", 100); e.expandable() {
+		t.Error("a short notice should not open")
+	}
+	e := noticeEntry("[para] one\ntwo", 100)
+	if !e.expandable() || strings.Contains(e.view(), "two") {
+		t.Errorf("view %q", e.view())
 	}
 }
 

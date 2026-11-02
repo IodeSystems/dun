@@ -10,10 +10,9 @@ import (
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
-// A multi-line command (a heredoc, a script) is shown as highlighted shell
-// with its lines as written, through the same glamour renderer as a ```sh
-// fence in a reply. A one-line command stays on its line. The model's text is
-// not touched: this is display only.
+// A command in a notice opens as highlighted shell with its lines as written,
+// through the same glamour renderer as a ```sh fence in a reply. The model's text
+// is not touched: this is display only.
 
 // shellMaxLines caps a command shown in a notice, so one cannot flood the
 // conversation.
@@ -58,18 +57,44 @@ func shellBlock(cmd string, w int) []string {
 // followed by " (" (the duration or "still running").
 var jobNoticeRe = regexp.MustCompile("(?s)^(background job #\\d+ [^`]*?— )`(.*?)`( \\(.*)$")
 
-// noticeLine renders a notification for the conversation: one flattened line
-// as always, unless it is a job notice whose command has several lines; then
-// the head, the command as shell rows, and the rest of the notice.
-func noticeLine(text string, w int) string {
-	if m := jobNoticeRe.FindStringSubmatch(text); m != nil && strings.Contains(strings.TrimSpace(m[2]), "\n") {
-		out := []string{stNote.Render("🔔 " + textfmt.OneLine(m[1]))}
-		for _, r := range shellBlock(m[2], w) {
-			out = append(out, r)
+// noticeEntry is a notification for the conversation: one line, whatever came
+// in, because a finished job's notice carries its output's tail and that used to
+// flatten into a wall. Enter on it shows the rest: the command as shell rows, and
+// the output with its lines as written.
+func noticeEntry(text string, w int) convoEntry {
+	if m := jobNoticeRe.FindStringSubmatch(text); m != nil {
+		head := strings.TrimSuffix(strings.TrimSpace(m[1]), "—")
+		took, rest, _ := strings.Cut(strings.TrimPrefix(m[3], " "), "\n")
+		cmd := strings.TrimSpace(m[2])
+		first, _, several := strings.Cut(cmd, "\n")
+		line := head + took + " · $ " + first
+		if several {
+			line += fmt.Sprintf(" (+%d lines)", strings.Count(cmd, "\n"))
 		}
-		return strings.Join(append(out, stNote.Render("  "+textfmt.OneLine(strings.TrimPrefix(m[3], " ")))), "\n")
+		out := []string{stNote.Render("🔔 " + strings.TrimSpace(head) + " " + took)}
+		out = append(out, shellBlock(m[2], w)...)
+		if rest = strings.TrimRight(rest, "\n"); rest != "" {
+			for _, l := range strings.Split(rest, "\n") {
+				out = append(out, StDim.Render(l))
+			}
+		}
+		return convoEntry{collapsed: noticeRow(line, w), full: strings.Join(out, "\n")}
 	}
-	return stNote.Render("🔔 " + textfmt.OneLine(text))
+	first, _, several := strings.Cut(strings.TrimSpace(text), "\n")
+	e := convoEntry{collapsed: noticeRow(first, w)}
+	if several || (w > 0 && ansi.StringWidth("🔔 "+first) > w) {
+		e.full = stNote.Render("🔔 " + strings.TrimSpace(text))
+	}
+	return e
+}
+
+// noticeRow is a notice's one row, cut to w columns (w <= 0: not cut).
+func noticeRow(text string, w int) string {
+	line := "🔔 " + textfmt.OneLine(text)
+	if w > 0 {
+		line = ansi.Truncate(line, w, "…")
+	}
+	return stNote.Render(line)
 }
 
 // noticeW is the width a notice's command rows are cut to.
