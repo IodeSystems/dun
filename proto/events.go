@@ -55,6 +55,7 @@ func init() {
 	event[Switches]("switches")
 	event[SkillFile]("skill_file")
 	event[Extensions]("extensions")
+	event[Plan]("plan")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -911,4 +912,40 @@ type ExtItem struct {
 type ExtVerb struct {
 	Name string `json:"name"`
 	Help string `json:"help,omitempty"`
+}
+
+// Plan is the session's task plan (dun/plan.go), as the tree a person reads:
+// answering the control command "plan" with the action "view", and sent again
+// whenever the plan changes, whoever changed it (the model's plan tool or a
+// person). Rows are in tree order; a node with several parents has a row
+// under each, the later ones with Repeat set.
+type Plan struct {
+	Mode     bool       `json:"mode,omitempty"`     // plan mode is on
+	Approved bool       `json:"approved,omitempty"` // the person approved the plan
+	Total    int        `json:"total"`
+	Done     int        `json:"done"`
+	Rows     []PlanNode `json:"rows"`
+	// Message answers the command that asked, when it was not the view.
+	Message string `json:"message,omitempty"`
+}
+
+// PlanNode is one row of a Plan.
+type PlanNode struct {
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Goal     string   `json:"goal,omitempty"`
+	Status   string   `json:"status"` // todo, doing, done, blocked, dropped
+	DoneWhen string   `json:"done_when,omitempty"`
+	Needs    []string `json:"needs,omitempty"`
+	Owner    string   `json:"owner,omitempty"`
+	Files    []string `json:"files,omitempty"`
+	Replaces string   `json:"replaces,omitempty"`
+	Notes    string   `json:"notes,omitempty"`
+	Why      string   `json:"why,omitempty"`     // why it is blocked or dropped
+	Account  string   `json:"account,omitempty"` // how done_when was met
+	// Waiting is why a todo node cannot start, from its edges.
+	Waiting []string `json:"waiting,omitempty"`
+	Ready   bool     `json:"ready,omitempty"`
+	Depth   int      `json:"depth,omitempty"`
+	Repeat  bool     `json:"repeat,omitempty"`
 }

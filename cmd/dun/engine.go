@@ -360,6 +360,22 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
+		// /plan: the task plan (dun/plan.go). "view" is the screen's
+		// data; the rest are the person's changes, answered with the plan
+		// again so an open screen refreshes.
+		if id == "plan" {
+			if action == "view" {
+				em.emit(planEvent(h, ""))
+				return
+			}
+			msg, err := h.PlanCmd(ctx, action)
+			if err != nil {
+				msg = "plan: " + err.Error()
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			em.emit(planEvent(h, ""))
+			return
+		}
 		// /file: paths outside the workspace the file tools may use, at a
 		// scope, each read or write and indexed or not (dun/fileadd.go).
 		if id == "files" {

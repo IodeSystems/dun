@@ -267,6 +267,16 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("usage: /worklog [start <title> | end [done|dropped|blocked] <why> | view [n] | write [n]]")
 		}
+	case "plan":
+		// Text as typed: a title or a reason keeps its case.
+		switch arg(0) {
+		case "":
+			r.control(name, "view")
+		case "mode", "approve", "edit", "drop":
+			r.control(name, strings.TrimSpace(arg(0)+" "+strings.Join(args[min(1, len(args)):], " ")))
+		default:
+			r.reply("usage: /plan [mode on|off | approve | edit <id> title|goal <text> | drop <id> [why]]")
+		}
 	case "effort":
 		r.control(name, arg(0))
 	case "file":

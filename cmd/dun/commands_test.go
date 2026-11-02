@@ -44,10 +44,16 @@ func TestExtensionsDoNotShadowCommands(t *testing.T) {
 		reply:   func(m string) { calls = append(calls, call{"reply", m, ""}) },
 	}
 	for line, want := range map[string]call{
-		"hello greet World": {"control", "ext", "call hello greet World"},
-		"hello on":          {"server", "hello", "on"},
-		"mcp on a":          {"server", "a", "on"},
-		"ext":               {"control", "ext", ""},
+		"hello greet World":                {"control", "ext", "call hello greet World"},
+		"hello on":                         {"server", "hello", "on"},
+		"mcp on a":                         {"server", "a", "on"},
+		"ext":                              {"control", "ext", ""},
+		"plan":                             {"control", "plan", "view"},
+		"plan mode ON":                     {"control", "plan", "mode ON"},
+		"plan approve":                     {"control", "plan", "approve"},
+		"plan edit 2 title Fix The Parser": {"control", "plan", "edit 2 title Fix The Parser"},
+		"plan drop 3 not needed":           {"control", "plan", "drop 3 not needed"},
+		"plan frob":                        {"reply", "usage: /plan [mode on|off | approve | edit <id> title|goal <text> | drop <id> [why]]", ""},
 	} {
 		calls = nil
 		routeSlash(line, r)

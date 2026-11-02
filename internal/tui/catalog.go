@@ -380,6 +380,11 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			m.openExtensions()
 			return nil
 		}
+		// Bare /plan: the graph, in its screen (planview.go).
+		if name == "plan" && len(args) == 0 {
+			m.openPlan()
+			return nil
+		}
 		// Bare /mcp: the listing opens as the switch table (mcpview.go).
 		if name == "mcp" && (len(args) == 0 || len(args) == 1 && (args[0] == "list" || args[0] == "status")) {
 			m.openMCPServers()

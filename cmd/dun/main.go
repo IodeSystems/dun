@@ -782,6 +782,12 @@ func main() {
 			em.emit(&proto.ServerEvent{ID: id, Action: "index", Message: msg,
 				Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Background: true})
 		}
+		// The task plan changed (dun/plan.go): a screen reads it again.
+		cfg.OnPlan = func() {
+			if h, _ := started.Load().(*dun.Harness); h != nil {
+				em.emit(planEvent(h, ""))
+			}
+		}
 		// An install hint, once (dun/setupstate.go): said as a quiet line.
 		// It is said once, so a Harness not yet stored is waited for.
 		cfg.OnServerSetup = func(id, msg string) {

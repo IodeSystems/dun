@@ -159,6 +159,8 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.reqs.noteRequest(ev)
 	case "extensions":
 		m = m.noteExtensions(ev)
+	case "plan":
+		m = m.notePlan(ev)
 	case "mcp_login":
 		// Whole, not oneLine'd or clipped: the URL is to be copied.
 		m.append(stNote.Render("🔑 " + enginecmd.LoginLine(str(ev["server"]), str(ev["url"]))))

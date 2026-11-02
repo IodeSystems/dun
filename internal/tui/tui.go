@@ -253,6 +253,7 @@ type tuiModel struct {
 	pg           pager          // the pager (valid while paging)
 	scr          *paneScreen    // a pushed screen over the pager (panes.go), or nil
 	extWant      bool           // /ext asked for the list (extview.go)
+	planWant     bool           // /plan asked for the plan (planview.go)
 	ctxSettings  map[string]any // /context config's settings in force, from the settings event
 	effort       string         // /effort's level, from the settings event
 	effortWords  string         // what that level does, from the settings event (the server's default, when it says)

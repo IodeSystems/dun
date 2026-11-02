@@ -75,14 +75,31 @@ folds and resume. A session with no file (an in-memory session) keeps it in memo
 ## The person
 
 `/plan` opens a screen with the graph as a tree. A node with several parents shows
-under each, marked as a repeat. From it a person can approve the plan, or edit, drop
-or re-order nodes. What they change reaches the model as a notification.
+under each, marked as a repeat ("again"). From it a person can approve the plan, edit
+a node's title or goal, or drop a node. Re-ordering is not built: order is the edges,
+and the screen does not edit them (not built). `e`, `g` and `d` fill the composer with
+`/plan edit|drop …` to finish, so a drop is typed, not a keystroke. What the person
+changes reaches the model as a note: an approval as a notification that wakes it,
+the rest as asides that ride its next turn. The engine sends the graph as a `plan`
+event (control `plan` `view`, then again on every change by anyone); the screen
+never works out what can start.
 
 **Plan mode.** Approval is asked for only in plan mode: `/plan mode on|off`, off by
 default, so a small task stays free of it. In plan mode, tool calls that change the
 workspace are refused until the plan is approved, with a result saying so.
-`/plan approve` approves. Editing an approved plan through the tool keeps it
-approved; the person sees the change.
+`/plan approve` approves (an empty plan has nothing to approve). Editing an approved
+plan through the tool keeps it approved; the person sees the change. Turning the mode
+on again takes the approval back. Mode and approval are the host's, kept in the
+sidecar beside the graph; the gate is a dispatcher wrapper (`withPlanGate`).
+
+Refused: `exec` (a command cannot be told read-only), `file_edit`, `file_write`,
+`file_delete`, `file_move`, `agent` (a child has all of them), `mount`, `loop_ctl`
+(schedules runs of its own), `dun_msg` (acts in another session), every tool of the
+shell server, and an MCP tool whose name has a write verb (write, edit, delete,
+rename, create, apply, commit, push, run, …: a guess, since MCP tools do not say
+whether they are read-only). Allowed: `file_read`, `file_grep`, `file_list`, `plan`,
+`ask_user`, `session`, `read_saved`, `recap`, `skill`, `memory`, `jobs`,
+`tell_parent`, `dun_list`, and other MCP tools.
 
 ## Directing the agent
 
@@ -106,6 +123,6 @@ parallel with worktree isolation.
 ## Build order
 
 1. `internal/taskgraph`, the tool, storage, the group. ✅
-2. `/plan` in the TUI, plan mode and approval. ◐
+2. `/plan` in the TUI, plan mode and approval. ✅
 3. Delegation.
 4. Parallel runs and per-node models.
