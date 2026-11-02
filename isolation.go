@@ -3,6 +3,8 @@ package dun
 import (
 	"fmt"
 	"path/filepath"
+
+	"github.com/iodesystems/dun/internal/mounttool"
 )
 
 // SetExec swaps the exec backend at runtime (e.g. host ↔ Docker) and rebuilds
@@ -52,7 +54,7 @@ func (h *Harness) AddMount(source, name string) error {
 	if h.cfg.Worktree != nil {
 		repoRoot = h.cfg.Worktree.RepoRoot()
 	}
-	resolved, err := resolveMountSource(source, repoRoot)
+	resolved, err := mounttool.ResolveSource(source, repoRoot)
 	if err != nil {
 		return err
 	}

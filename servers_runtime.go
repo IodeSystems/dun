@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun/internal/mounttool"
+
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
@@ -701,8 +703,8 @@ func (h *Harness) rebuildTools() {
 	if cfg.Mount != nil && cfg.Exec != nil {
 		_, isDocker := cfg.Exec.(DockerExec)
 		if isDocker {
-			toolDefs = append(toolDefs, mountToolDef())
-			dispatch = withMount(dispatch, func(ctx context.Context, source, name string) (bool, error) {
+			toolDefs = append(toolDefs, mounttool.Def())
+			dispatch = mounttool.Wrap(dispatch, func(ctx context.Context, source, name string) (bool, error) {
 				// Ask the user first, then apply the mount if approved.
 				ok, err := cfg.Mount(ctx, source, name)
 				if err != nil || !ok {

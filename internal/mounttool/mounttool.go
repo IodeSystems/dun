@@ -1,4 +1,6 @@
-package dun
+// Package mounttool is the mount tool: the agent asks the user to mount a host
+// path inside the Docker container.
+package mounttool
 
 import (
 	"context"
@@ -22,14 +24,14 @@ import (
 // DockerExec backend is reconfigured with the new volume, and a symlink is
 // created in the worktree parent directory so go.mod replace resolves.
 
-// MountFunc asks the user whether to mount a host path inside the container.
+// Func asks the user whether to mount a host path inside the container.
 // source is the host path (absolute or relative to repo root), name is the
 // mount point name (the path will be available at /<name> inside the container
 // and as a symlink named <name> in the worktree parent). It blocks until the
 // user answers or ctx is done.
-type MountFunc func(ctx context.Context, source, name string) (approved bool, err error)
+type Func func(ctx context.Context, source, name string) (approved bool, err error)
 
-func mountToolDef() llm.ToolDef {
+func Def() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "mount"
@@ -56,9 +58,9 @@ func mountToolDef() llm.ToolDef {
 	return td
 }
 
-// withMount wraps a dispatcher so the mount tool is handled locally; everything
+// Wrap wraps a dispatcher so the mount tool is handled locally; everything
 // else routes onward.
-func withMount(inner agent.ToolDispatcher, ask MountFunc, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+func Wrap(inner agent.ToolDispatcher, ask Func, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "mount" {
 			return inner(ctx, tc)
@@ -91,10 +93,10 @@ func withMount(inner agent.ToolDispatcher, ask MountFunc, onCall func(string, ma
 	}
 }
 
-// resolveMountSource resolves a mount source path to an absolute path.
+// ResolveSource resolves a mount source path to an absolute path.
 // Relative paths are resolved against repoRoot. Returns an error if the
 // resolved path does not exist or is not a directory.
-func resolveMountSource(source, repoRoot string) (string, error) {
+func ResolveSource(source, repoRoot string) (string, error) {
 	if !filepath.IsAbs(source) {
 		source = filepath.Join(repoRoot, source)
 	}

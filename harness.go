@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iodesystems/dun/internal/mounttool"
+
 	filetools "github.com/iodesystems/agentkit/files"
 	"github.com/iodesystems/dun/internal/procstat"
 
@@ -88,11 +90,11 @@ type Config struct {
 	Parent *Harness
 	// AgentID is this child's id within its parent. Zero for a root.
 	AgentID  int
-	System   string      // nil → defaultSystem
-	Exec     ExecBackend // nil → no exec tool; else adds the built-in exec tool
-	Ask      AskFunc     // nil → no ask_user tool; else adds the human-in-the-loop tool
-	Mount    MountFunc   // nil → no mount tool; else adds the mount (host path → container) tool
-	Worktree *Worktree   // the session worktree
+	System   string         // nil → defaultSystem
+	Exec     ExecBackend    // nil → no exec tool; else adds the built-in exec tool
+	Ask      AskFunc        // nil → no ask_user tool; else adds the human-in-the-loop tool
+	Mount    mounttool.Func // nil → no mount tool; else adds the mount (host path → container) tool
+	Worktree *Worktree      // the session worktree
 	// CommitCfg is how /worktree commit writes its message. nil = the
 	// conventional-commits default.
 	CommitCfg   *CommitConfig
