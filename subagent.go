@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun/internal/heartbeat"
+
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/fsutil"
@@ -82,9 +84,9 @@ type subAgent struct {
 	cancel  context.CancelFunc
 	done    chan struct{} // closed when the current run settles
 	restore string        // transcript path, for a stopped child
-	// hb is the "still there" reminder (heartbeat.go), debounced by anything
+	// hb is the "still there" reminder (internal/heartbeat), debounced by anything
 	// this child says — which is why every notification goes through s.notify.
-	hb *heartbeat
+	hb *heartbeat.Beat
 	// lastActivity is the last time the child showed any sign of life inside
 	// its harness: a tool call, a chat round completing, or a transcript entry.
 	// This is the cheap signal that distinguishes "working" from "wedged" —
@@ -110,7 +112,7 @@ type subAgent struct {
 // itself deliberately does not go through here.
 func (s *subAgent) notify(text string) {
 	if s.hb != nil {
-		s.hb.spoke()
+		s.hb.Spoke()
 	}
 	s.parent.notifyAndWake(text)
 }
@@ -124,7 +126,7 @@ func (s *subAgent) heartbeat() {
 	if s.hb == nil {
 		return
 	}
-	s.hb.run(
+	s.hb.Run(
 		func() bool {
 			state, _, _, _ := s.snapshot()
 			return state == agentDismissed
@@ -263,7 +265,7 @@ func (s *subAgent) setStatus(status string) {
 	// debounces the reminder. A child narrating its progress is exactly the
 	// case that should never be asked whether it is alive.
 	if s.hb != nil {
-		s.hb.spoke()
+		s.hb.Spoke()
 	}
 	s.parent.agentsChanged()
 }
@@ -552,7 +554,7 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effor
 	}
 	h.agMu.Unlock()
 
-	sa := &subAgent{num: num, prompt: prompt, model: run.model, provider: run.provider, effort: run.effort, parent: h, hb: newHeartbeat(), iso: iso}
+	sa := &subAgent{num: num, prompt: prompt, model: run.model, provider: run.provider, effort: run.effort, parent: h, hb: heartbeat.New(), iso: iso}
 
 	// Start on a background context: a child outlives the TURN that spawned it
 	// (that is the whole point of an async spawn), so tying it to the caller's

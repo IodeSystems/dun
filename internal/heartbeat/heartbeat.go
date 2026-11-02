@@ -1,4 +1,6 @@
-package dun
+// Package heartbeat is the "still there" reminder for work that runs outside a
+// turn: a background job or a sub-agent.
+package heartbeat
 
 import (
 	"sync"
@@ -29,61 +31,61 @@ import (
 // It carries no output. One line saying what it is and how long it has been
 // quiet; reading what it actually produced stays an explicit ask (jobs).
 
-// hbSchedule is how long silence must last before each successive reminder.
-var hbSchedule = []time.Duration{
+// schedule is how long silence must last before each successive reminder.
+var schedule = []time.Duration{
 	time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour,
 }
 
-// hbEvery is the interval once the schedule above is exhausted.
-const hbEvery = time.Hour
+// every is the interval once the schedule above is exhausted.
+const every = time.Hour
 
-// heartbeat tracks when something last spoke and fires while it does not.
+// Beat tracks when something last spoke and fires while it does not.
 //
 // The schedule is per-instance rather than read from the package vars at fire
 // time: a test shortens it by constructing one, never by writing to a global
 // that a running goroutine is reading. The first version did the latter and
 // -race caught it.
-type heartbeat struct {
-	sched []time.Duration
-	every time.Duration
+type Beat struct {
+	Sched []time.Duration
+	Every time.Duration
 
 	mu   sync.Mutex
-	last time.Time
-	// gen is bumped only by spoke(), so the loop can tell "it said something
+	Last time.Time
+	// gen is bumped only by Spoke(), so the loop can tell "it said something
 	// while I was waiting" (reset the backoff) from "I fired" (advance it).
 	gen int
 }
 
-func newHeartbeat() *heartbeat {
-	return &heartbeat{sched: hbSchedule, every: hbEvery, last: time.Now()}
+func New() *Beat {
+	return &Beat{Sched: schedule, Every: every, Last: time.Now()}
 }
 
-// spoke records that the thing produced something on its own, which resets both
+// Spoke records that the thing produced something on its own, which resets both
 // the timer and the backoff — it has just proved it is alive, so the next
 // silence deserves the same early attention as the first.
-func (b *heartbeat) spoke() {
+func (b *Beat) Spoke() {
 	b.mu.Lock()
-	b.last, b.gen = time.Now(), b.gen+1
+	b.Last, b.gen = time.Now(), b.gen+1
 	b.mu.Unlock()
 }
 
 // interval is how much silence the nth reminder waits for.
-func (b *heartbeat) interval(step int) time.Duration {
-	if len(b.sched) == 0 {
-		return b.every
+func (b *Beat) interval(step int) time.Duration {
+	if len(b.Sched) == 0 {
+		return b.Every
 	}
-	if step < len(b.sched) {
-		return b.sched[step]
+	if step < len(b.Sched) {
+		return b.Sched[step]
 	}
-	return b.sched[len(b.sched)-1] + time.Duration(step-len(b.sched)+1)*b.every
+	return b.Sched[len(b.Sched)-1] + time.Duration(step-len(b.Sched)+1)*b.Every
 }
 
-// run fires until done reports true. fire is given how long the thing has been
+// Run fires until done reports true. fire is given how long the thing has been
 // quiet, which is the only number the reminder is actually about.
-func (b *heartbeat) run(done func() bool, fire func(quiet time.Duration)) {
+func (b *Beat) Run(done func() bool, fire func(quiet time.Duration)) {
 	for step := 0; ; {
 		b.mu.Lock()
-		last, gen := b.last, b.gen
+		last, gen := b.Last, b.gen
 		b.mu.Unlock()
 
 		iv := b.interval(step)
@@ -99,8 +101,8 @@ func (b *heartbeat) run(done func() bool, fire func(quiet time.Duration)) {
 		if !spoke {
 			// Measure the NEXT interval from this reminder, not from the silence
 			// that earned it, or the backoff would fire the whole schedule at
-			// once. Not a spoke(): the thing itself still has not said anything.
-			b.last = time.Now()
+			// once. Not a Spoke(): the thing itself still has not said anything.
+			b.Last = time.Now()
 		}
 		b.mu.Unlock()
 		if spoke {

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iodesystems/dun/internal/heartbeat"
 )
 
 // Background jobs — what a long command looks like while it is still running.
@@ -57,9 +59,9 @@ type bgJob struct {
 	started time.Time
 	h       *Harness
 
-	// hb is the "still running" reminder (heartbeat.go). Debounced by anything
+	// hb is the "still running" reminder (internal/heartbeat). Debounced by anything
 	// this job says, which is why every notification goes through j.notify.
-	hb *heartbeat
+	hb *heartbeat.Beat
 
 	// promoteCh is closed when the job goes background; it is what donates the
 	// shell (HostShell.RunPromotable). doneCh is closed when the command
@@ -154,7 +156,7 @@ func (j *bgJob) Write(p []byte) (int, error) {
 // silence it is reporting on.
 func (j *bgJob) notify(text string) {
 	if j.hb != nil {
-		j.hb.spoke()
+		j.hb.Spoke()
 	}
 	j.h.notifyAndWake(text)
 }
@@ -480,7 +482,7 @@ func (h *Harness) newJobStarted(backend ExecBackend, command string) *bgJob {
 func (h *Harness) newJob(command string) *bgJob {
 	ctx, cancel := context.WithCancel(context.Background())
 	j := &bgJob{
-		command: command, started: time.Now(), h: h, hb: newHeartbeat(),
+		command: command, started: time.Now(), h: h, hb: heartbeat.New(),
 		promoteCh: make(chan struct{}), doneCh: make(chan struct{}),
 		cancel: cancel,
 	}
@@ -529,7 +531,7 @@ func (j *bgJob) heartbeat() {
 	if j.hb == nil {
 		return
 	}
-	j.hb.run(
+	j.hb.Run(
 		func() bool {
 			j.mu.Lock()
 			defer j.mu.Unlock()

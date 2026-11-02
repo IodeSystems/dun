@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/heartbeat"
 )
 
 // testHarness is the smallest Harness a background job needs: a store (Notify
@@ -230,11 +232,11 @@ func TestBgJob_HeartbeatRespectsMute(t *testing.T) {
 // fastHeartbeat is the real schedule compressed, so a reminder test runs in
 // milliseconds. Per-instance, never a global: writing the package schedule
 // while a loop reads it is a data race, which is how the first version failed.
-func fastHeartbeat() *heartbeat {
-	return &heartbeat{
-		sched: []time.Duration{10 * time.Millisecond},
-		every: 20 * time.Millisecond,
-		last:  time.Now(),
+func fastHeartbeat() *heartbeat.Beat {
+	return &heartbeat.Beat{
+		Sched: []time.Duration{10 * time.Millisecond},
+		Every: 20 * time.Millisecond,
+		Last:  time.Now(),
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/heartbeat"
 )
 
 // testAgent is a child with no harness — enough to exercise the state machine,
@@ -114,7 +116,7 @@ func TestSubAgent_HeartbeatIsDebouncedByStatus(t *testing.T) {
 	// A window 20x the status cadence: with fastHeartbeat's 10 ms against a
 	// 5 ms sleep, one sleep stretched by a loaded machine fired a reminder
 	// (aw4 i_1m5zvaep308gaan8x30pkw).
-	sa.hb = &heartbeat{sched: []time.Duration{100 * time.Millisecond}, every: 100 * time.Millisecond}
+	sa.hb = &heartbeat.Beat{Sched: []time.Duration{100 * time.Millisecond}, Every: 100 * time.Millisecond}
 	sa.mu.Lock()
 	sa.startRunLocked()
 	sa.mu.Unlock()
