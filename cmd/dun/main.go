@@ -34,6 +34,7 @@ import (
 	"github.com/iodesystems/dun/internal/openurl"
 	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/internal/textfmt"
+	"github.com/iodesystems/dun/internal/tui"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -249,7 +250,7 @@ func main() {
 	fresh := flag.Bool("new", false, "start a new session, even when this workspace has one no client is attached to (which plain dun resumes)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
-	tui := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
+	tuiFlag := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	// --web-tui: this terminal TUI in a browser tab, byte for byte through a
 	// pty (serveterm.go). Not dund's web app (dund --web-experimental), which is its own
 	// client of the same sessions; this is the passthrough (USER 2026-10-28:
@@ -376,7 +377,7 @@ func main() {
 		*prog = false
 	}
 
-	if len(media) > 0 && (*prog || firstTask == "" || *tui || *serve) {
+	if len(media) > 0 && (*prog || firstTask == "" || *tuiFlag || *serve) {
 		fatal(fmt.Errorf("--media attaches to a one-shot task: dun --media shot.png \"what is wrong here\""))
 	}
 
@@ -389,7 +390,7 @@ func main() {
 			fmt.Fprint(os.Stderr, setupNoTTY)
 			os.Exit(2)
 		}
-		if err := runSetupTUI(); err != nil {
+		if err := tui.RunSetupTUI(); err != nil {
 			fatal(err)
 		}
 		return
@@ -451,8 +452,8 @@ func main() {
 	// no subprocess, the same events with the same gaps — which is what makes a
 	// UI performance number reproducible instead of anecdotal.
 	if *replay != "" {
-		pacing := replayPacing{speed: *replaySpeed, delay: *inputDelay, maxGap: *maxGap}
-		if err := runReplay(*replay, pacing, tuiOpts{workspace: absWS, model: *model, url: *url}); err != nil {
+		pacing := tui.ReplayPacing{Speed: *replaySpeed, Delay: *inputDelay, MaxGap: *maxGap}
+		if err := tui.RunReplay(*replay, pacing, tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url}); err != nil {
 			fatal(err)
 		}
 		return
@@ -464,8 +465,8 @@ func main() {
 	// made the interactive UI — the thing you want nine times out of ten — the
 	// one mode you had to ask for. A positional task still runs headless: that
 	// is the scripting path and scripts must not suddenly open a UI.
-	if *tui || (firstTask == "" && !*prog && !*serve) {
-		if err := runTUI(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools, *itermTabs}); err != nil {
+	if *tuiFlag || (firstTask == "" && !*prog && !*serve) {
+		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs}); err != nil {
 			fatal(err)
 		}
 		return
@@ -473,7 +474,7 @@ func main() {
 
 	// Serve mode: the TUI over xterm.js; each browser tab spawns a web session.
 	if *serve {
-		if err := runServe(tuiOpts{absWS, *model, *url, effKey, resolveDockerImage(*docker), *dockerNetwork, *worktree, *cont, *resume, *disableExit, !*noSuggest, ragFlag.String(), lspFlag.String(), *rephrase, *fresh, *noDir, *noTools, false}, *addr); err != nil {
+		if err := runServe(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools}, *addr); err != nil {
 			fatal(err)
 		}
 		return

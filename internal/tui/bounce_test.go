@@ -1,0 +1,494 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+// bounce_test.go: nothing on screen moves when something updates. The rule
+// (owner, 2026-10-23): on a change that adds rows the view keeps its top row
+// (and a pinned view follows the bottom, as always); on a change that takes
+// rows away the view does not snap back either — the top row stays and blank
+// rows fill in below, but only to the bottom of the view as it was, so the
+// furthest scroll is where the view already is. New rows take the blank rows
+// up again.
+
+// shown is the pane's visible rows, without styling.
+func shown(v *vtui) []string {
+	vis := v.m.vp.visible()
+	out := make([]string, len(vis))
+	for i, l := range vis {
+		out[i] = strings.TrimRight(stripANSI(l), " ")
+	}
+	return out
+}
+
+// splashConvo is a fresh, logged-in session with its splash and enough
+// conversation under it to scroll.
+func splashConvo(t *testing.T) *vtui {
+	t.Helper()
+	v := newVtui(100, 20)
+	v.event(map[string]any{"type": "session", "id": "s1", "resumed": float64(0)})
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": []any{
+		map[string]any{"id": "shell", "running": true, "tools": float64(1)},
+		map[string]any{"id": "raglit", "slash": "raglit"},
+		map[string]any{"id": "poly-lsp", "slash": "poly-lsp"},
+	}})
+	v.event(map[string]any{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
+	if len(v.m.convo) == 0 || !v.m.convo[0].liveSplash {
+		t.Fatalf("no live splash:\n%s", v.convo())
+	}
+	for i := 0; i < 6; i++ {
+		v.send(fmt.Sprintf("question %d", i))
+		v.event(map[string]any{"type": "token", "text": fmt.Sprintf("answer %d\n\nmore\n\nand more", i)})
+		v.event(map[string]any{"type": "done"})
+	}
+	if v.m.vp.maxYOffset() < 10 {
+		t.Fatalf("the conversation is too short to scroll: max offset %d", v.m.vp.maxYOffset())
+	}
+	return v
+}
+
+// serversEvent says the servers are now these: shell, notes (running),
+// and the two extras, raglit on or off.
+func serversEvent(raglitOn bool) map[string]any {
+	return map[string]any{"type": "server", "servers": []any{
+		map[string]any{"id": "shell", "running": true, "tools": float64(1)},
+		map[string]any{"id": "notes", "running": true, "tools": float64(1)},
+		map[string]any{"id": "raglit", "slash": "raglit", "running": raglitOn},
+		map[string]any{"id": "poly-lsp", "slash": "poly-lsp"},
+	}}
+}
+
+// The splash says what is true now — a server added, an extra turned on —
+// by rewriting its rows in place: the same number of rows, the view where
+// it was, whether the splash is on screen or scrolled away.
+func TestNoBounce_LiveSplashRewritesItsRowsInPlace(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		at   func(v *vtui) int // the offset to read from; -1 pinned at the bottom
+	}{
+		{"splash on screen", func(*vtui) int { return 0 }},
+		{"scrolled part way", func(v *vtui) int { return v.m.vp.maxYOffset() / 2 }},
+		{"at the bottom", func(*vtui) int { return -1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := splashConvo(t)
+			if y := tc.at(v); y >= 0 {
+				v.setScrollPin(false)
+				v.setYOffset(y)
+			}
+			yoff, rows, h := v.m.vp.YOffset, shown(v), v.m.frame.blockH[0]
+
+			v.event(serversEvent(false))
+			s := stripANSI(v.m.convo[0].collapsed)
+			if !strings.Contains(s, "tools       1 · /mcp info") || strings.Contains(s, "starting") {
+				t.Fatalf("the splash does not say the servers are up:\n%s", s)
+			}
+			v.event(serversEvent(true))
+			s = stripANSI(v.m.convo[0].collapsed)
+			if !strings.Contains(s, "extensions  1 of 1 on · /ext info\n") {
+				t.Fatalf("the extensions row does not follow the switch:\n%s", s)
+			}
+			if got := v.m.frame.blockH[0]; got != h {
+				t.Errorf("the splash went from %d rows to %d", h, got)
+			}
+			if v.m.vp.YOffset != yoff {
+				t.Errorf("the view moved: offset %d -> %d", yoff, v.m.vp.YOffset)
+			}
+			now := shown(v)
+			for i := range rows {
+				// Only the splash's own rows may say something new.
+				if i+yoff < h {
+					continue
+				}
+				if i >= len(now) || now[i] != rows[i] {
+					t.Fatalf("row %d moved:\n was %q\n now %q", i, rows[i], now[min(i, len(now)-1)])
+				}
+			}
+		})
+	}
+}
+
+// expandedTail is a conversation that ends in a tall block, open.
+func expandedTail(t *testing.T) (*vtui, int) {
+	t.Helper()
+	v := tallConvo(t)
+	full := strings.TrimSpace(strings.Repeat("detail row\n", 6))
+	v.m.convo = append(v.m.convo, convoEntry{collapsed: "▸ a block, closed", full: full, state: viewExpanded})
+	v.m.refresh()
+	return v, len(v.m.convo) - 1
+}
+
+// A tall block closing at the bottom of the view: the view keeps its top
+// row; the rows the block gave back are blank; the view cannot be scrolled
+// past where it is; scrolling up and back down finds no more blank; new rows
+// take the blank rows.
+func TestNoBounce_ClosingABlockKeepsTheTopRow(t *testing.T) {
+	v, i := expandedTail(t)
+	if !v.m.vp.AtBottom() {
+		t.Fatal("precondition: pinned at the bottom")
+	}
+	yoff, top := v.m.vp.YOffset, shown(v)[0]
+
+	v.m.convo[i].state = viewMinimized
+	v.m.refresh()
+	if v.m.vp.YOffset != yoff || shown(v)[0] != top {
+		t.Fatalf("closing moved the view: offset %d -> %d, top %q -> %q", yoff, v.m.vp.YOffset, top, shown(v)[0])
+	}
+	if got := v.m.vp.maxYOffset(); got > yoff {
+		t.Errorf("blank rows past the view: the furthest scroll is %d, the view was at %d", got, yoff)
+	}
+	if n := len(v.m.vp.lines); n > yoff+v.m.vp.Height {
+		t.Errorf("padded to %d rows, past the bottom of the view (%d)", n, yoff+v.m.vp.Height)
+	}
+
+	// Up and back down: no more blank than before.
+	v.setScrollPin(false)
+	v.setYOffset(yoff - 4)
+	v.m.vp.GotoBottom()
+	if v.m.vp.YOffset != yoff {
+		t.Errorf("scrolling back down went to %d, not %d", v.m.vp.YOffset, yoff)
+	}
+
+	// New rows fill the blank rows; once past them the hold is gone.
+	v.setScrollPin(true)
+	for k := 0; k < 15; k++ {
+		v.m.append(fmt.Sprintf("new row %d", k))
+	}
+	if v.m.convoHold != 0 {
+		t.Errorf("the hold outlived the content that passed it: %d", v.m.convoHold)
+	}
+	if last := shown(v)[len(shown(v))-1]; strings.TrimSpace(last) != "new row 14" {
+		t.Errorf("the pinned view does not follow the new rows: last row %q", last)
+	}
+}
+
+// The same block closing while the person reads further up: the view does
+// not move at all.
+func TestNoBounce_ClosingABlockScrolledUp(t *testing.T) {
+	v, i := expandedTail(t)
+	v.setScrollPin(false)
+	v.setYOffset(v.m.vp.maxYOffset() - 3) // the block's top rows still on screen
+	yoff, rows := v.m.vp.YOffset, shown(v)
+
+	v.m.convo[i].state = viewMinimized
+	v.m.refresh()
+	if v.m.vp.YOffset != yoff {
+		t.Fatalf("closing moved the view: offset %d -> %d", yoff, v.m.vp.YOffset)
+	}
+	now := shown(v)
+	for k, r := range rows {
+		if strings.Contains(r, "detail row") || strings.Contains(r, "a block") {
+			break // from the block on, its rows change
+		}
+		if now[k] != r {
+			t.Fatalf("row %d moved: %q -> %q", k, r, now[k])
+		}
+	}
+	if got := v.m.vp.maxYOffset(); got > yoff {
+		t.Errorf("blank rows past the view: max %d, view at %d", got, yoff)
+	}
+}
+
+// One tool call is one line, in words, that stays one line when its result
+// comes: no summary over it, no "×1", no "()". Neither the call nor its
+// result moves the view, scrolled up or at the bottom.
+func TestNoBounce_OneToolCallIsOneLine(t *testing.T) {
+	for _, pinned := range []bool{true, false} {
+		t.Run(fmt.Sprintf("pinned=%v", pinned), func(t *testing.T) {
+			v := tallConvo(t)
+			v.send("what do the notes say?")
+			v.event(map[string]any{"type": "turn"})
+			v.event(map[string]any{"type": "tool_call", "tool": "notes__project_notes", "args": map[string]any{}})
+			if !pinned {
+				v.setScrollPin(false)
+				v.setYOffset(v.m.vp.maxYOffset() - 3)
+			}
+			i := runIdx(v.m)
+			yoff, h := v.m.vp.YOffset, v.m.frame.blockH[i]
+			v.event(map[string]any{"type": "tool_result", "tool": "notes__project_notes", "result": "keep the greeting short"})
+			if got := v.m.frame.blockH[i]; got != 1 || h != 1 {
+				t.Errorf("the call is %d rows, then %d; want 1 and 1", h, got)
+			}
+			if v.m.vp.YOffset != yoff {
+				t.Errorf("the result moved the view: %d -> %d", yoff, v.m.vp.YOffset)
+			}
+			line := v.m.vp.lines[v.m.frame.rowOffset[i]]
+			line = strings.TrimSpace(stripANSI(line))
+			if !strings.HasPrefix(line, "✓ notes · project notes") || !strings.Contains(line, "keep the greeting short") {
+				t.Errorf("the call reads %q", line)
+			}
+			for _, bad := range []string{"()", "×1", "1 step", "⚙", "__"} {
+				if strings.Contains(v.view(), bad) {
+					t.Errorf("the screen shows %q:\n%s", bad, v.view())
+				}
+			}
+		})
+	}
+}
+
+// A second step makes the run a group: a summary in words over the steps.
+func TestRun_TwoStepsAreAGroupInWords(t *testing.T) {
+	v := tallConvo(t)
+	v.send("go")
+	v.event(map[string]any{"type": "turn"})
+	v.event(map[string]any{"type": "tool_call", "tool": "notes__project_notes", "args": map[string]any{}})
+	v.event(map[string]any{"type": "tool_result", "tool": "notes__project_notes", "result": "a"})
+	v.event(map[string]any{"type": "tool_call", "tool": "notes__project_notes", "args": map[string]any{}})
+	v.event(map[string]any{"type": "tool_result", "tool": "notes__project_notes", "result": "b"})
+	head := stripANSI(v.m.convo[runIdx(v.m)].run.summary())
+	if head != "⚙ 2 steps — notes · project notes ×2" {
+		t.Errorf("summary %q", head)
+	}
+}
+
+func TestToolLabel(t *testing.T) {
+	for in, want := range map[string]string{
+		"notes__project_notes": "notes · project notes",
+		"node_query":           "node query",
+		"eval":                 "eval",
+		"a__b":                 "a · b",
+		"__x":                  "x",
+	} {
+		if got := toolLabel(in); got != want {
+			t.Errorf("toolLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A notice arriving while the person reads further up does not move the
+// view.
+func TestNoBounce_NoticeWhileScrolledUp(t *testing.T) {
+	v := tallConvo(t)
+	v.setScrollPin(false)
+	v.setYOffset(2)
+	yoff, rows := v.m.vp.YOffset, shown(v)
+	v.m.appendNotice(convoEntry{collapsed: okNotice("notes added", "running")})
+	if v.m.vp.YOffset != yoff || strings.Join(shown(v), "\n") != strings.Join(rows, "\n") {
+		t.Errorf("the notice moved the view: offset %d -> %d", yoff, v.m.vp.YOffset)
+	}
+}
+
+// A form closing grows the pane: the view keeps its top row, and the new
+// rows at the bottom are blank until content takes them.
+func TestNoBounce_FormClosingKeepsTheTopRow(t *testing.T) {
+	v := tallConvo(t)
+	v.m = typeStr(v.m, "/login")
+	v.m = key(v.m, kEnter)
+	if !v.m.loginPicking {
+		t.Fatal("the login picker did not open")
+	}
+	yoff, top := v.m.vp.YOffset, shown(v)[0]
+	v.m = key(v.m, kEsc)
+	if v.m.loginPicking || v.m.modelPicking {
+		t.Fatal("esc did not close the picker")
+	}
+	if v.m.vp.YOffset != yoff || shown(v)[0] != top {
+		t.Fatalf("closing the form moved the view: offset %d -> %d, top %q -> %q", yoff, v.m.vp.YOffset, top, shown(v)[0])
+	}
+	if got := v.m.vp.maxYOffset(); got > yoff {
+		t.Errorf("blank rows past the view: max %d, view at %d", got, yoff)
+	}
+}
+
+// On a phone (49×21, the owner's pane in tmux) typing "/mcp add" opens
+// the palette, narrows it, then enter opens the form: the pane shrinks,
+// grows and shrinks again. Every step keeps the rows where they were — the
+// panel takes the blank rows below, then covers the newest rows; the
+// splash at the top stays (USER 2026-10-23; run 4: the conversation went
+// up six rows and the header never came back). Esc puts it all back.
+func TestNoBounce_PhoneFormKeepsTheRowsWhereTheyWere(t *testing.T) {
+	onPath(t, "notes-mcp")
+	v := newVtui(49, 21)
+	v.event(map[string]any{"type": "session", "id": "s1", "resumed": float64(0)})
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": []any{
+		map[string]any{"id": "shell", "running": true, "tools": float64(1)},
+	}})
+	v.event(map[string]any{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
+	v.send("Can you help me with this project?")
+	v.event(map[string]any{"type": "token", "text": "This project is a small command-line tool. The README says it prints a greeting, and main.go holds the whole program. I can read files, run commands in an isolated copy of the project, and use the tools you add. What would you like to change first?"})
+	v.event(map[string]any{"type": "done"})
+	yoff, rows := v.m.vp.YOffset, shown(v)
+	same := func(when string) {
+		t.Helper()
+		now := shown(v)
+		if v.m.vp.YOffset != yoff {
+			t.Fatalf("%s: the view moved: offset %d -> %d", when, yoff, v.m.vp.YOffset)
+		}
+		for i := range now {
+			// The rows still shown are the rows that were there.
+			if i < len(rows) && now[i] != rows[i] {
+				t.Fatalf("%s: row %d changed:\n was %q\n now %q", when, i, rows[i], now[i])
+			}
+		}
+	}
+	for _, r := range "/mcp add" {
+		v.m = typeStr(v.m, string(r))
+		same("typed " + string(r))
+	}
+	v.m = key(v.m, kEnter)
+	if !v.m.mcpForm {
+		t.Fatal("the /mcp add form did not open")
+	}
+	same("the form open")
+	if !strings.Contains(v.view(), "folder") && strings.Contains(strings.Join(rows, "\n"), "folder") {
+		t.Errorf("the splash left the view:\n%s", v.view())
+	}
+	v.m = key(v.m, kEsc)
+	same("the form closed")
+	if got := strings.Join(shown(v), "\n"); got != strings.Join(rows, "\n") {
+		t.Errorf("closed, the screen is not what it was:\n%s\nwas:\n%s", got, strings.Join(rows, "\n"))
+	}
+	// Filled in and sent: the form closes with an "adding …" line. The view
+	// moves no further than that line needs — it did jump eight rows.
+	v.m = typeStr(v.m, "/mcp add")
+	v.m = key(v.m, kEnter)
+	v.m = typeStr(v.m, "notes-mcp")
+	v.m = key(v.m, kEnter)
+	if v.m.mcpForm {
+		t.Fatal("the form did not close on add")
+	}
+	content := 0 // the conversation's own rows, not the blank ones holding the view
+	for _, h := range v.m.frame.blockH {
+		content += h
+	}
+	need := max(0, content-(yoff+v.m.vp.Height))
+	if v.m.vp.YOffset > yoff+need {
+		t.Errorf("adding moved the view %d rows; the new line needs %d", v.m.vp.YOffset-yoff, need)
+	}
+	if v.m.vp.YOffset+v.m.vp.Height < content {
+		t.Errorf("the new line is under the fold: view %d+%d, content %d", v.m.vp.YOffset, v.m.vp.Height, content)
+	}
+}
+
+// A reply taller than the view, with a tool call between its parts: a
+// following view stays at the bottom the whole time. It used to hold the
+// question on screen while text streamed, then jump to the bottom for the
+// tool call and back up for the next text (USER 2026-10-28: zero bounce).
+// The question stays readable as the head bar while the turn runs.
+func TestNoBounce_FollowingAReplyStaysAtTheBottom(t *testing.T) {
+	v := tallConvo(t)
+	v.send("the long one")
+	v.event(map[string]any{"type": "turn", "kind": "user"})
+	atBottom := func(when string) {
+		t.Helper()
+		v.m.refresh() // a token only marks the frame due; the render tick draws it
+		if !v.m.scrollPinned || v.m.vp.YOffset != v.m.vp.maxYOffset() {
+			t.Fatalf("%s: offset %d of %d, pinned %v", when, v.m.vp.YOffset, v.m.vp.maxYOffset(), v.m.scrollPinned)
+		}
+	}
+	v.event(map[string]any{"type": "token", "text": strings.Repeat("first part\n\n", 12)})
+	atBottom("first text")
+	v.event(map[string]any{"type": "tool_call", "tool": "exec", "id": "c1", "args": `{"command":"ls"}`})
+	v.event(map[string]any{"type": "tool_result", "tool": "exec", "id": "c1", "result": "a\nb"})
+	atBottom("tool call")
+	v.event(map[string]any{"type": "token", "text": strings.Repeat("second part\n\n", 12)})
+	atBottom("second text")
+	if head := stripANSI(v.m.headView()); !strings.Contains(head, "the long one") {
+		t.Errorf("the head bar should show the question while the turn runs: %q", head)
+	}
+	v.event(map[string]any{"type": "done"})
+	atBottom("done")
+	if head := stripANSI(v.m.headView()); strings.Contains(head, "the long one") {
+		t.Errorf("after the turn the head is the title bar again: %q", head)
+	}
+}
+
+// The turn ending, or failing, leaves a reader who scrolled up where they
+// are. Both used to re-pin and drag them to the bottom.
+func TestNoBounce_TurnEndLeavesAScrolledUpReader(t *testing.T) {
+	for _, end := range []map[string]any{
+		{"type": "done"},
+		{"type": "error", "error": "provider: 502 bad gateway"},
+	} {
+		t.Run(end["type"].(string), func(t *testing.T) {
+			v := tallConvo(t)
+			v.send("one more")
+			v.event(map[string]any{"type": "turn", "kind": "user"})
+			v.event(map[string]any{"type": "token", "text": "working on it"})
+			v.setScrollPin(false)
+			v.setYOffset(2)
+			yoff, rows := v.m.vp.YOffset, shown(v)
+			v.event(end)
+			if v.m.scrollPinned || v.m.vp.YOffset != yoff || strings.Join(shown(v), "\n") != strings.Join(rows, "\n") {
+				t.Errorf("the turn's end moved the reader: offset %d -> %d, pinned %v", yoff, v.m.vp.YOffset, v.m.scrollPinned)
+			}
+		})
+	}
+}
+
+// Scrolled up, the divider's right end says how to get back; clicking it
+// or ctrl+end goes to the newest output and follows again. It is drawn on the
+// divider, so showing it changes no row count.
+func TestBottomCue_ClickOrKeyGoesToTheNewest(t *testing.T) {
+	v := tallConvo(t)
+	if strings.Contains(v.view(), "↓ newest") {
+		t.Fatal("following the bottom: no cue")
+	}
+	h := v.m.convoHeight()
+	v.setScrollPin(false)
+	v.setYOffset(2)
+	v.m.refresh()
+	if !strings.Contains(v.view(), "↓ newest · ctrl+end") {
+		t.Fatalf("scrolled up: no cue on the divider:\n%s", v.view())
+	}
+	if v.m.convoHeight() != h {
+		t.Errorf("showing the cue changed the pane: %d rows -> %d", h, v.m.convoHeight())
+	}
+	divY := v.m.convoTopRow() + v.m.convoHeight()
+	v.m = click(v.m, v.w-3, divY)
+	if !v.m.scrollPinned || v.m.vp.YOffset != v.m.vp.maxYOffset() {
+		t.Fatalf("clicking the cue: offset %d of %d, pinned %v", v.m.vp.YOffset, v.m.vp.maxYOffset(), v.m.scrollPinned)
+	}
+	v.setScrollPin(false)
+	v.setYOffset(2)
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	if !v.m.scrollPinned || v.m.vp.YOffset != v.m.vp.maxYOffset() {
+		t.Fatalf("ctrl+end: offset %d of %d, pinned %v", v.m.vp.YOffset, v.m.vp.maxYOffset(), v.m.scrollPinned)
+	}
+}
+
+// /splash is a terminal's clear: the splash at the top of the screen, blank
+// rows below it, and everything before it still there to scroll back to. It
+// used to empty the scrollback, so what was above looked gone (USER
+// 2026-10-28). The new splash is the live one; the old one stops updating.
+func TestSplash_AgainKeepsTheScrollback(t *testing.T) {
+	v := splashConvo(t)
+	before := len(v.m.convo)
+	v.m = typeStr(v.m, "/splash")
+	v.m = key(v.m, kEnter)
+	if len(v.m.convo) <= before || !strings.Contains(v.convo(), "answer 5") {
+		t.Fatalf("the conversation before /splash is gone:\n%s", v.convo())
+	}
+	last := len(v.m.convo) - 1
+	if !v.m.convo[last].liveSplash || v.m.convo[0].liveSplash || v.m.liveSplashAt() != last {
+		t.Fatalf("the new splash should be the live one: live at %d of %d", v.m.liveSplashAt(), last)
+	}
+	top := v.m.frame.rowOffset[last]
+	if v.m.vp.YOffset != top || !v.m.scrollPinned {
+		t.Fatalf("the splash should be at the top of the screen: offset %d, splash at %d, pinned %v", v.m.vp.YOffset, top, v.m.scrollPinned)
+	}
+	rows := shown(v)
+	if h := v.m.frame.blockH[last]; h < len(rows) && strings.TrimSpace(strings.Join(rows[h+1:], "")) != "" {
+		t.Errorf("below the splash should be blank:\n%s", strings.Join(rows, "\n"))
+	}
+	// Scrolling back reaches what came before.
+	v.setScrollPin(false)
+	v.setYOffset(0)
+	v.m.refresh()
+	if !strings.Contains(strings.Join(shown(v), "\n"), "question 0") {
+		t.Errorf("scrolled to the top, the old conversation is not there:\n%s", strings.Join(shown(v), "\n"))
+	}
+	// A new message fills the blank rows; the splash does not move.
+	v.m.scrollToEnd()
+	v.m.refresh()
+	v.send("after the splash")
+	v.m.refresh()
+	if v.m.vp.YOffset != top {
+		t.Errorf("a short message moved the splash: offset %d -> %d", top, v.m.vp.YOffset)
+	}
+}

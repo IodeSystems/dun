@@ -57,31 +57,8 @@ func TestEmitterFramesEvents(t *testing.T) {
 	}
 }
 
-// The TUI's command encoders decode into the proto commands.
-func TestProtoCoversTUICommands(t *testing.T) {
-	var buf bytes.Buffer
-	p := &dunProc{stdin: nopCloser{&buf}}
-	p.send("hi [image 1: a.png 2×1]", []proto.Image{{Path: "/tmp/a.png", Label: "[image 1: a.png 2×1]"}})
-	p.sendReset()
-	p.serverCmd("rag", "on")
-	p.controlCmd("docker", "on")
-	p.answer("yes")
-	p.agentCmd(3, "tell", "go on")
-	cs := decodeStrict[proto.Command](t, buf.Bytes())
-	if len(cs) != 6 {
-		t.Fatalf("decoded %d of 6 commands", len(cs))
-	}
-	if u := cs[0].Payload.(*proto.User); len(u.Images) != 1 || u.Images[0].Path != "/tmp/a.png" {
-		t.Errorf("user: %+v", u)
-	}
-	if a := cs[5].Payload.(*proto.AgentCmd); a.ID != "3" || a.Content != "go on" {
-		t.Errorf("agent: %+v", a)
-	}
-}
-
-// Reasoning goes out as its own event, decodes strictly, and the TUI reads
-// the wire shape it was sent in.
-func TestReasoningEventReachesTheTUI(t *testing.T) {
+// Reasoning goes out as its own event and decodes strictly.
+func TestReasoningEventDecodes(t *testing.T) {
 	var buf bytes.Buffer
 	em := &emitter{w: &buf}
 	em.emit(&proto.Reasoning{Text: "weighing it"})
@@ -91,14 +68,5 @@ func TestReasoningEventReachesTheTUI(t *testing.T) {
 	}
 	if r := evs[0].Payload.(*proto.Reasoning); r.Text != "weighing it" {
 		t.Errorf("reasoning: %+v", r)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &raw); err != nil {
-		t.Fatal(err)
-	}
-	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg(raw))
-	if i := m.liveThinking(); i < 0 || m.convo[i].think.text != "weighing it" {
-		t.Errorf("the TUI did not take the event: %d", i)
 	}
 }

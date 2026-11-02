@@ -10,33 +10,9 @@ import (
 	"github.com/iodesystems/dun/proto"
 )
 
-// The TUI has no local copy of an engine command — so none can drift from
-// what the other clients run — and it shows and completes the engine's list
-// once the commands event arrives.
-func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
-	local := map[string]bool{}
-	for _, c := range slashCommands {
-		local[c.name] = true
-	}
-	for _, c := range enginecmd.CommandList(nil, "").Items {
-		if local[c.Name] {
-			t.Errorf("/%s is both a local TUI command and an engine command", c.Name)
-		}
-	}
-	m := tuiModel{}
-	m.engineCmds = engineCmdsFromEvent(evMsg{"items": []any{map[string]any{"name": "raglit", "usage": "[on|off]", "description": "docs"}}})
-	found := false
-	for _, c := range m.allSlash() {
-		if c.name == "raglit" && c.args == "[on|off]" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("the engine's commands are not in the TUI's palette")
-	}
-
-	// A user's extension cannot shadow a command either — the engine's or
-	// the TUI's own: it loads without its slash command, and says so.
+// A user's extension cannot shadow a command either — the engine's or
+// the TUI's own: it loads without its slash command, and says so.
+func TestExtensionsDoNotShadowCommands(t *testing.T) {
 	ext := func(id, slash string) dun.Extension {
 		return dun.Extension{ID: id, Source: dun.ExtUser, Slash: &dun.ExtSlash{Name: slash,
 			Commands: map[string]dun.ExtSlashCmd{"greet": {ExtStep: dun.ExtStep{Tool: "greet", Args: map[string]any{"name": "{{arg}}"}}}}}}

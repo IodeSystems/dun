@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -44,26 +43,6 @@ func TestNoRagNoLsp_AreTheOffSpelling(t *testing.T) {
 	// --rag=false --no-rag says the same twice: fine.
 	if err := noAutostart(&off, true, "rag"); err != nil {
 		t.Error(err)
-	}
-}
-
-// The flags reach the engine's argv, and dund's argv filter, for the TUI.
-func TestFlags_PassToTheEngine(t *testing.T) {
-	o := tuiOpts{workspace: "/ws", suggest: true, rag: "false", lsp: "false", noTools: true}
-	for _, mode := range []string{"-p", "--tui"} {
-		args := procArgs(o, mode)
-		for _, want := range []string{"--no-tools", "--rag=false", "--lsp=false"} {
-			if !slices.Contains(args, want) {
-				t.Errorf("%s argv lacks %s: %v", mode, want, args)
-			}
-		}
-	}
-	eng := engineArgs(o)
-	if !slices.Contains(eng, "--no-tools") || !slices.Contains(eng, "--rag=false") {
-		t.Errorf("dund engine args: %v", eng)
-	}
-	if slices.Contains(procArgs(tuiOpts{workspace: "/ws", suggest: true}, "-p"), "--no-tools") {
-		t.Error("--no-tools without being asked")
 	}
 }
 

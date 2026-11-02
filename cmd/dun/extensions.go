@@ -10,6 +10,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/tui"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -29,8 +30,8 @@ func engineExtensions(all []dun.Extension) (ok []dun.Extension, refused []string
 	for _, c := range enginecmd.OwnCommands("") {
 		taken[c.Name] = true
 	}
-	for _, c := range slashCommands {
-		taken[c.name] = true
+	for _, c := range tui.SlashCommands {
+		taken[c.Name] = true
 	}
 	for _, e := range all {
 		if n := e.SlashName(); n != "" && e.Source != dun.ExtBundled && taken[n] {

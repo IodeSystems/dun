@@ -21,7 +21,7 @@ func TestDevBuildHasNoDownloadPaths(t *testing.T) {
 	if release.Built || release.ManifestURL != "" || release.PublicKey != "" || release.Deps != nil {
 		t.Fatal("a dev build carries release data")
 	}
-	if buildinfo.IsRelease() || newUpdater() != nil {
+	if buildinfo.IsRelease() {
 		t.Fatal("a dev build would check for updates")
 	}
 	if _, _, ok := pinnedTool("mcpshell"); ok {

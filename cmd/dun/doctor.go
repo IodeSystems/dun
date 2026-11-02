@@ -24,6 +24,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/textfmt"
+	"github.com/iodesystems/dun/internal/tui"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/proto"
 )
@@ -140,7 +141,7 @@ func runDoctor(fix bool) int {
 		ran++
 		fmt.Printf("\nfixing %s: %s\n", f.area, f.fix)
 		if err := act(); err != nil {
-			fmt.Printf("  %s %v\n", stErr.Render("did not work:"), err)
+			fmt.Printf("  %s %v\n", tui.StErr.Render("did not work:"), err)
 		}
 	}
 	if ran == 0 {
@@ -171,10 +172,10 @@ func (d *doctor) report() int {
 	fmt.Printf("dun doctor — dun %s, %s/%s, home %s\n\n", buildinfo.Version, runtime.GOOS, runtime.GOARCH, dunconfig.DunHome())
 	failed := false
 	for _, f := range d.found {
-		mark := map[string]string{"ok": stTool.Render("ok  "), "warn": stDim.Render("warn"), "fail": stErr.Render("FAIL")}[f.level]
+		mark := map[string]string{"ok": tui.StTool.Render("ok  "), "warn": tui.StDim.Render("warn"), "fail": tui.StErr.Render("FAIL")}[f.level]
 		fmt.Printf("  %s  %-10s %s\n", mark, f.area, f.detail)
 		if f.fix != "" {
-			fmt.Printf("  %s  %-10s %s\n", "    ", "", stDim.Render("→ "+f.fix))
+			fmt.Printf("  %s  %-10s %s\n", "    ", "", tui.StDim.Render("→ "+f.fix))
 		}
 		failed = failed || f.level == "fail"
 	}
@@ -416,10 +417,10 @@ func (d *doctor) addLanguages(rep dun.SetupReport) {
 // line with its install command (a warn only when it is not optional), and
 // its update block. Silent when raglit is not there or has no --json.
 func (d *doctor) raglit() {
-	if _, err := raglitBin(); err != nil {
+	if _, err := tui.RaglitBin(); err != nil {
 		return // tools() said it is missing
 	}
-	rep, out, err := raglitDoctor(8 * time.Second)
+	rep, out, err := tui.RaglitDoctor(8 * time.Second)
 	if err != nil {
 		return
 	}
@@ -577,7 +578,7 @@ func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
 				detail += ", and cannot upgrade itself: " + r.NoUpgrade
 			}
 			exe, _ := buildinfo.SelfExe()
-			d.add("warn", "dund", detail, serviceFix(r, exe))
+			d.add("warn", "dund", detail, tui.ServiceFix(r, exe))
 		}
 		return
 	}

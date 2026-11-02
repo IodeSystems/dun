@@ -15,6 +15,8 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+
+	"github.com/iodesystems/dun/internal/tui"
 )
 
 // activeWeb counts live browser sessions (open PTYs), for the shutdown
@@ -43,7 +45,7 @@ var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(*http.Request) bool { return true },
 }
 
-func runServe(o tuiOpts, addr string) error {
+func runServe(o tui.TuiOpts, addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -81,7 +83,7 @@ func watchShutdown() {
 	os.Exit(0)
 }
 
-func termWS(w http.ResponseWriter, r *http.Request, o tuiOpts) {
+func termWS(w http.ResponseWriter, r *http.Request, o tui.TuiOpts) {
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -95,10 +97,10 @@ func termWS(w http.ResponseWriter, r *http.Request, o tuiOpts) {
 	// Web sessions disable ctrl+c/esc quit — you leave by closing the tab (which
 	// drops the socket and reaps the process group). Avoids an accidental ctrl+c
 	// killing the session.
-	o.disableExit = true
+	o.DisableExit = true
 	atomic.AddInt64(&activeWeb, 1)
 	defer atomic.AddInt64(&activeWeb, -1)
-	cmd := exec.Command(exe, procArgs(o, "--tui")...)
+	cmd := exec.Command(exe, tui.ProcArgs(o, "--tui")...)
 	cmd.Env = append(webEnv(os.Environ()), "DUN_CHILD=1") // spawned TUI never self-rebuilds
 	ptmx, err := pty.Start(cmd)                           // pty.Start makes the child a session leader
 	if err != nil {
