@@ -1,4 +1,4 @@
-package main
+package enginecmd
 
 import (
 	"fmt"
@@ -27,30 +27,30 @@ import (
 // and what it does cost is its name in one sentence of the system prompt
 // (dun.HostedLine), priced here at the engine's four characters a token.
 
-// mcpInfoIn is what /mcp info reads.
-type mcpInfoIn struct {
-	servers []dun.ServerState
-	parts   []dun.ContextPart // the context's parts; a server's is "mcp: <id>"
-	counted bool              // the parts are in: the first count lands after the start
-	exact   bool              // the parts were counted, not estimated
-	window  int               // the model's window; 0 unknown
+// McpInfoIn is what /mcp info reads.
+type McpInfoIn struct {
+	Servers []dun.ServerState
+	Parts   []dun.ContextPart // the context's parts; a server's is "mcp: <id>"
+	Counted bool              // the parts are in: the first count lands after the start
+	Exact   bool              // the parts were counted, not estimated
+	Window  int               // the model's window; 0 unknown
 	// What the schemas cost over the stats ledger's recent rounds, and the
 	// endpoint's measured prefill speed (dun/roundstats.go); zero when
 	// nothing has been recorded or measured.
-	usage       dun.StatsSummary
-	usageDays   int
-	speed       float64
-	speedRounds int
+	Usage       dun.StatsSummary
+	UsageDays   int
+	Speed       float64
+	SpeedRounds int
 }
 
-// mcpInfo is /mcp info's rows.
-func mcpInfo(in mcpInfoIn) string {
+// McpInfo is /mcp info's rows.
+func McpInfo(in McpInfoIn) string {
 	est := "~"
-	if in.exact {
+	if in.Exact {
 		est = ""
 	}
 	cost, total := map[string]int{}, 0
-	for _, p := range in.parts {
+	for _, p := range in.Parts {
 		if id, ok := strings.CutPrefix(p.Name, "mcp: "); ok {
 			cost[id] = p.Tokens
 			total += p.Tokens
@@ -58,23 +58,23 @@ func mcpInfo(in mcpInfoIn) string {
 	}
 	var shell *dun.ServerState
 	idW := 0
-	for i, st := range in.servers {
+	for i, st := range in.Servers {
 		idW = max(idW, len(st.ID))
 		if st.ID == dun.ServerShell {
-			shell = &in.servers[i]
+			shell = &in.Servers[i]
 		}
 	}
 	shellUp := shell != nil && shell.Running
 	rows := []string{"mcp servers"}
 	var scripted, hosted []string
-	for _, st := range in.servers {
+	for _, st := range in.Servers {
 		f := []string{infoState(st, shellUp), infoMode(st.Via)}
 		on := st.Running || (st.Via == dun.ViaShell && st.Auto && shellUp && st.Err == "")
 		if on && st.Tools > 0 {
 			f = append(f, fact(textfmt.Plural(st.Tools, "tool")))
 		}
 		switch {
-		case !in.counted || !on:
+		case !in.Counted || !on:
 		case st.Via == dun.ViaShell && st.Standalone > 0:
 			f = append(f, fact("0 tokens")+" (standalone "+fact("~"+numfmt.TokN(st.Standalone))+")")
 		case st.Via == dun.ViaShell:
@@ -98,19 +98,19 @@ func mcpInfo(in mcpInfoIn) string {
 			}
 		}
 	}
-	if len(in.servers) == 0 {
+	if len(in.Servers) == 0 {
 		rows = append(rows, "  none yet — /mcp add")
 	}
 	switch {
-	case !in.counted:
+	case !in.Counted:
 		rows = append(rows, "  tokens: counting…")
-	case in.window > 0:
-		pct := int(math.Round(float64(total) * 100 / float64(in.window)))
-		rows = append(rows, "  total "+fact(est+numfmt.TokN(total)+" tokens")+" in every request, "+fact(fmt.Sprintf("%d%% of the %s window", pct, numfmt.TokK(in.window))))
+	case in.Window > 0:
+		pct := int(math.Round(float64(total) * 100 / float64(in.Window)))
+		rows = append(rows, "  total "+fact(est+numfmt.TokN(total)+" tokens")+" in every request, "+fact(fmt.Sprintf("%d%% of the %s window", pct, numfmt.TokK(in.Window))))
 	default:
 		rows = append(rows, "  total "+fact(est+numfmt.TokN(total)+" tokens")+" in every request")
 	}
-	if in.counted {
+	if in.Counted {
 		rows = append(rows, costRows(in, cost)...)
 	}
 	if shell != nil {
@@ -125,14 +125,14 @@ func mcpInfo(in mcpInfoIn) string {
 
 // shellRows say what scripted mode is and what it costs: the shell's one
 // eval tool, and the sentence that names the servers it hosts.
-func shellRows(shell *dun.ServerState, shellUp bool, in mcpInfoIn, est string, evalTok int, scripted, hosted []string) []string {
+func shellRows(shell *dun.ServerState, shellUp bool, in McpInfoIn, est string, evalTok int, scripted, hosted []string) []string {
 	rows := []string{"scripted mode: the shell (mcpshell) hosts a server's tools in its one eval tool, called as <ns>.<tool>(…); " +
 		"their schemas leave every request, and help(\"<ns>\") lists them when the model asks"}
 	var cost string
 	switch {
 	case !shellUp:
 		cost = "the shell is " + infoState(*shell, false) + " — /mcp on shell"
-	case !in.counted:
+	case !in.Counted:
 		cost = "the shell's eval: counting…"
 	default:
 		cost = "the shell's eval: " + fact(est+numfmt.TokN(evalTok)+" tokens")
@@ -158,12 +158,12 @@ func shellRows(shell *dun.ServerState, shellUp bool, in mcpInfoIn, est string, e
 // Under it the move is not worth what a scripted server gives up (docs
 // indexing, prompts and skills, the tool deny-list, its call renderers —
 // shellPlacementNote) and help() costs on every first use.
-func scriptHints(in mcpInfoIn, cost map[string]int, shellUp bool, hosted []string) []string {
-	if !in.counted {
+func scriptHints(in McpInfoIn, cost map[string]int, shellUp bool, hosted []string) []string {
+	if !in.Counted {
 		return nil
 	}
 	var out []string
-	for _, st := range in.servers {
+	for _, st := range in.Servers {
 		n := cost[st.ID]
 		// ViaDirect: an added server; a built-in has no mode.
 		if st.Via != dun.ViaDirect || !st.Running || n < dun.HeavyServerTokens {
@@ -213,10 +213,10 @@ func infoMode(via string) string {
 	return dun.ModeWord(via)
 }
 
-// mcpHelp is /mcp help: the actions, one line each, from the command's own
+// McpHelp is /mcp help: the actions, one line each, from the command's own
 // spec — the palette's and /help mcp's words.
-func mcpHelp() string {
-	for _, c := range ownCommands("") {
+func McpHelp() string {
+	for _, c := range OwnCommands("") {
 		if c.Name != "mcp" {
 			continue
 		}
@@ -233,15 +233,15 @@ func mcpHelp() string {
 	return ""
 }
 
-// serverActions are the actions /mcp passes to its servers (servers.go,
+// ServerActions are the actions /mcp passes to its servers (servers.go,
 // runServerCmd); the others it handles itself.
-var serverActions = map[string]bool{"on": true, "off": true, "unset": true, "restart": true, "auto": true, "manual": true}
+var ServerActions = map[string]bool{"on": true, "off": true, "unset": true, "restart": true, "auto": true, "manual": true}
 
-// unknownMCPAction is the one answer to /mcp <a> when a is no action: the
+// UnknownMCPAction is the one answer to /mcp <a> when a is no action: the
 // nearest action when one is a typo away, and where the list is.
-func unknownMCPAction(a string) string {
+func UnknownMCPAction(a string) string {
 	best, bestD := "", 3 // a typo: at most two edits
-	for _, c := range ownCommands("") {
+	for _, c := range OwnCommands("") {
 		if c.Name != "mcp" {
 			continue
 		}
@@ -286,8 +286,8 @@ func editDistance(a, b string) int {
 // the prefix count: a cached prefix is nearly free to reuse, so counting
 // every request would overstate it. The worst case, every request
 // uncached, is the last row, at the measured speed.
-func costRows(in mcpInfoIn, cost map[string]int) []string {
-	u := in.usage
+func costRows(in McpInfoIn, cost map[string]int) []string {
+	u := in.Usage
 	var rows []string
 	price := 0.0
 	if u.CostTokens > 0 {
@@ -295,8 +295,8 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 	}
 	spent := func(tok int) string {
 		var out []string
-		if in.speed > 0 {
-			out = append(out, fact("~"+numfmt.Secs(float64(tok)/in.speed*1000)))
+		if in.Speed > 0 {
+			out = append(out, fact("~"+numfmt.Secs(float64(tok)/in.Speed*1000)))
 		}
 		if price > 0 {
 			out = append(out, fact("~"+numfmt.TurnMoney(float64(tok)*price, u.Currency)))
@@ -306,7 +306,7 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 		}
 		return " · " + strings.Join(out, " · ")
 	}
-	for _, st := range in.servers {
+	for _, st := range in.Servers {
 		su := u.Servers[st.ID]
 		switch {
 		case st.Via == dun.ViaShell && st.Standalone > 0:
@@ -329,7 +329,7 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 			hit = fmt.Sprintf("; the cache reused %d%% of all prompt tokens", u.Cached*100/u.Prompt)
 		}
 		head := fmt.Sprintf("what the schemas cost, last %d days (%s, %s processed the prefix, the rest reused it from the cache%s):",
-			in.usageDays, textfmt.Plural(u.Rounds, "request"), fact(fmt.Sprintf("%d", u.Processed)), hit)
+			in.UsageDays, textfmt.Plural(u.Rounds, "request"), fact(fmt.Sprintf("%d", u.Processed)), hit)
 		rows = append([]string{head}, rows...)
 	}
 	total := 0
@@ -337,10 +337,10 @@ func costRows(in mcpInfoIn, cost map[string]int) []string {
 		total += n
 	}
 	switch {
-	case in.speed > 0 && total > 0:
+	case in.Speed > 0 && total > 0:
 		rows = append(rows, "an uncached request processes all "+fact("~"+numfmt.TokN(total)+" tokens")+" of tool schemas: "+
-			fact("~"+numfmt.Secs(float64(total)/in.speed*1000))+" at "+fact(numfmt.Rate(in.speed))+" (measured over "+textfmt.Plural(in.speedRounds, "request")+")")
-	case in.speed == 0 && u.Rounds > 0:
+			fact("~"+numfmt.Secs(float64(total)/in.Speed*1000))+" at "+fact(numfmt.Rate(in.Speed))+" (measured over "+textfmt.Plural(in.SpeedRounds, "request")+")")
+	case in.Speed == 0 && u.Rounds > 0:
 		rows = append(rows, "prefill speed: not measured — the endpoint reports no timings (llama.cpp does)")
 	}
 	return rows

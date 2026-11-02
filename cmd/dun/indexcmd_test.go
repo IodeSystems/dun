@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/mcptable"
 )
 
 // A running poly-lsp whose index builds says indexing on the splash and the
@@ -49,14 +51,14 @@ func TestIndexing_SplashStatusAndReport(t *testing.T) {
 func TestIndexDetailAndStatus(t *testing.T) {
 	st := dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexFailed, IndexErr: "index limit: 22012 indexable files, limit 10000",
 		Exclude: []string{".claude/worktrees"}}
-	if d := serverDetail(st); !strings.Contains(d, "running · index failed: index limit") {
+	if d := mcptable.ServerDetail(st); !strings.Contains(d, "running · index failed: index limit") {
 		t.Errorf("detail: %q", d)
 	}
 	s := indexStatus(st, "lsp")
 	if !strings.Contains(s, "index: failed — index limit") || !strings.Contains(s, "excluded from the index (this project): .claude/worktrees · /lsp include <dir> takes one back") {
 		t.Errorf("status: %q", s)
 	}
-	if d := serverDetail(dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexBuilding, IndexSeconds: 4}); !strings.HasPrefix(d, "running · indexing 4s · ") {
+	if d := mcptable.ServerDetail(dun.ServerState{ID: "poly-lsp", Running: true, Index: dun.IndexBuilding, IndexSeconds: 4}); !strings.HasPrefix(d, "running · indexing 4s · ") {
 		t.Errorf("detail: %q", d)
 	}
 }
@@ -136,7 +138,7 @@ func TestIndexStatus_NotProjectAndAnyway(t *testing.T) {
 	if s := indexStatus(st, "lsp"); !strings.Contains(s, "/lsp index-anyway off undoes it") {
 		t.Errorf("no undo:\n%s", s)
 	}
-	if !excludeVerb(dun.ServerCode, "index-anyway") {
+	if !enginecmd.ExcludeVerb(dun.ServerCode, "index-anyway") {
 		t.Error("index-anyway is not routed")
 	}
 }

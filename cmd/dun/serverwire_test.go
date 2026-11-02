@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // What /mcp's table and detail read reaches the TUI through the wire: the
@@ -21,7 +22,7 @@ func TestServerState_ThroughTheWire(t *testing.T) {
 		Description: "the vay server", Title: "Vay", Version: "1.2.0", Instructions: "use it for vay",
 		Starting: true, StartingSeconds: 2,
 		Log: []dun.ServerLogLine{{At: at, Text: "running vay"}, {At: at, Text: "warming up", Stderr: true}}}
-	b, err := json.Marshal(serversProto([]dun.ServerState{in}))
+	b, err := json.Marshal(enginecmd.ServersProto([]dun.ServerState{in}))
 	if err != nil {
 		t.Fatal(err)
 	}

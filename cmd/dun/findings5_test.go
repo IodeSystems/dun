@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // Run 4 of the walk, findings 4–8 (plan item 40).
@@ -22,7 +23,7 @@ func TestPalette5_MCPAddHeadingAndClauses(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 49, Height: 21})
 	m = nm.(tuiModel)
-	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(commandList(nil, "").Items)})
+	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(enginecmd.CommandList(nil, "").Items)})
 	m = typeStr(m, "/")
 	rows := strings.Split(stripANSI(m.palettePanel()), "\n")
 	if rows[0] != "commands" {

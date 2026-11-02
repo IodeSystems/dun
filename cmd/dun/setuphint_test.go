@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // Install hints (dun/setupstate.go) in /mcp info and in doctor.
@@ -31,7 +32,7 @@ func TestMCPInfo_LanguageServerMissing(t *testing.T) {
 		{nil, "  poly-lsp  running · built-in · 4 tools · ~300 tokens\n"},
 	} {
 		srv := []dun.ServerState{{ID: "poly-lsp", Running: true, Auto: true, Tools: 4, Setup: c.setup}}
-		s := plainInfo(mcpInfoIn{servers: srv, parts: []dun.ContextPart{{Name: "mcp: poly-lsp", Tokens: 300}}, counted: true})
+		s := plainInfo(enginecmd.McpInfoIn{Servers: srv, Parts: []dun.ContextPart{{Name: "mcp: poly-lsp", Tokens: 300}}, Counted: true})
 		if !strings.Contains(s, c.want) {
 			t.Errorf("want %q in:\n%s", c.want, s)
 		}

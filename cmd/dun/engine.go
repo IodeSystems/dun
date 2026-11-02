@@ -15,6 +15,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -34,8 +35,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		}
 	}
 	in.setInterrupt(interruptCmd)
-	em.emit(&proto.Ready{Tools: h.ToolNames(), Servers: serversProto(h.Servers()),
-		Hint: serverHint(h.Servers())})
+	em.emit(&proto.Ready{Tools: h.ToolNames(), Servers: enginecmd.ServersProto(h.Servers()),
+		Hint: enginecmd.ServerHint(h.Servers())})
 	em.emit(catalogEvent(h))
 	em.emit(settingsEvent())
 	em.emit(commandsEvent(h))
@@ -47,7 +48,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		run := func() {
 			msg := runServerCmd(ctx, h, alias, action)
 			em.emit(&proto.ServerEvent{ID: alias, Action: action, Message: msg,
-				Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Builtins: serversProto(h.BuiltinGroups())})
+				Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Builtins: enginecmd.ServersProto(h.BuiltinGroups())})
 			em.emit(catalogEvent(h))
 			em.emit(commandsEvent(h))
 		}
@@ -190,7 +191,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			return
 		}
 		if id == "rephrase" {
-			rephraseOn = action == "on"
+			enginecmd.RephraseOn = action == "on"
 			em.emit(settingsEvent())
 			em.emit(commandsEvent(h))
 			return
@@ -213,7 +214,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		if id == "suggest" {
 			switch action {
 			case "on", "off", "auto":
-				suggestMode = action
+				enginecmd.SuggestMode = action
 				em.emit(settingsEvent())
 				em.emit(commandsEvent(h))
 			default:
@@ -245,7 +246,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				msg := runMCPCmd(ctx, h, action)
 				h.Aside("[control/mcp] " + msg)
 				em.emit(&proto.ServerEvent{ID: "mcp", Action: verb, Message: msg,
-					Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Builtins: serversProto(h.BuiltinGroups())})
+					Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Builtins: enginecmd.ServersProto(h.BuiltinGroups())})
 				em.emit(catalogEvent(h))
 				em.emit(commandsEvent(h))
 			}()
@@ -293,9 +294,9 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				if n == 0 {
 					speed, n = usage.Speed, usage.SpeedRounds
 				}
-				em.emit(&proto.ControlEvent{ID: id, Message: mcpInfo(mcpInfoIn{servers: h.Servers(), parts: bd.Parts,
-					counted: bd.Total > 0, exact: bd.Exact, window: h.Window().Window,
-					usage: usage, usageDays: mcpInfoDays, speed: speed, speedRounds: n})})
+				em.emit(&proto.ControlEvent{ID: id, Message: enginecmd.McpInfo(enginecmd.McpInfoIn{Servers: h.Servers(), Parts: bd.Parts,
+					Counted: bd.Total > 0, Exact: bd.Exact, Window: h.Window().Window,
+					Usage: usage, UsageDays: mcpInfoDays, Speed: speed, SpeedRounds: n})})
 			}()
 			return
 		}
@@ -429,8 +430,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				if err := h.SetEffort(action); err != nil {
 					msg = "effort: " + err.Error()
 				} else {
-					effortLevel = h.Effort()
-					msg = "effort: " + effortLevel + " — " + h.EffortWords(effortLevel) + " (saved; from the next request)"
+					enginecmd.EffortLevel = h.Effort()
+					msg = "effort: " + enginecmd.EffortLevel + " — " + h.EffortWords(enginecmd.EffortLevel) + " (saved; from the next request)"
 					h.Aside("[control/effort] " + msg)
 				}
 			}
@@ -711,49 +712,21 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 // suggestions after `done` when set. On by default.
 var suggestEnabled bool
 
-// rephraseOn is the engine-side /rephrase toggle: when true, every user message
-// is rephrased for specificity before it starts a turn (see dun.Harness.
-// Rephrase). Off by default — the extra LLM round-trip is only worth it when
-// asked for. Set by the `rephrase` control command and --rephrase; the TUI keeps
-// its own copy for the bare /rephrase status, so the engine's copy only has to
-// be right when a turn actually runs.
-var rephraseOn bool
-
-// suggestMode is when a client shows suggestions: on (always), off, auto
-// (idle with an empty input). One value per session, shared by every client;
-// /suggest on|off|auto sets it.
-var suggestMode = "auto"
-
-// effortLevel is /effort's level, for the command list's state (dun/effort.go).
-var effortLevel = dun.LoadEffort()
-
 // engineModel, engineURL and engineProvider are what this engine runs on, for
 // the settings event. Set once at start.
 var engineModel, engineURL, engineProvider string
 
-// effortWords is an effort level in words: for default, what this
-// engine's server does when its model list says (dun.Harness.EffortWords).
-func effortWords(level string) string {
-	if h, _ := engineHarness.Load().(*dun.Harness); h != nil {
-		return h.EffortWords(level)
-	}
-	return dun.EffortAbout[level]
-}
-
 // settingsEvent is the session's shared toggles.
 func settingsEvent() *proto.Settings {
 	ev := &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
-		Rephrase: rephraseOn, Suggest: suggestMode, Effort: effortLevel}
-	ev.EffortWords = effortWords(effortLevel)
-	if h, _ := engineHarness.Load().(*dun.Harness); h != nil {
+		Rephrase: enginecmd.RephraseOn, Suggest: enginecmd.SuggestMode, Effort: enginecmd.EffortLevel}
+	ev.EffortWords = enginecmd.EffortWords(enginecmd.EffortLevel)
+	if h, _ := enginecmd.EngineHarness.Load().(*dun.Harness); h != nil {
 		max, from, buf, lod, nudge := h.ContextSettings()
 		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge}
 	}
 	return ev
 }
-
-// engineHarness is this engine's harness, once started, for settingsEvent.
-var engineHarness atomic.Value
 
 // contextConfigCmd is /context config's engine side: "" the settings in
 // force; "--max 256k --compact-buffer 32k --tool-lod 4k --recap-nudge 20k",
@@ -835,7 +808,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []
 		}
 		return endTurn(ctx, tctx, h, em, res, err)
 	}
-	if rephraseOn {
+	if enginecmd.RephraseOn {
 		// Rephrase BEFORE Ask: the store publishes the message it is passed, so
 		// the rephrased text is what the session records and the model acts on.
 		// The TUI still shows what the user typed. Best-effort — a failure

@@ -10,6 +10,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -130,7 +131,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		return m
 	case "server":
 		list, _ := ev["servers"].([]any)
-		opened := str(ev["id"]) == allServers && m.openServerTable(withBuiltins(ev, list))
+		opened := str(ev["id"]) == enginecmd.AllServers && m.openServerTable(withBuiltins(ev, list))
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" && !opened && !m.splashSays(ev) {
 			m.noteServerMsg(str(ev["action"]), msg)
 			if m.serversPaging() != nil {
@@ -160,7 +161,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m = m.noteExtensions(ev)
 	case "mcp_login":
 		// Whole, not oneLine'd or clipped: the URL is to be copied.
-		m.append(stNote.Render("🔑 " + loginLine(str(ev["server"]), str(ev["url"]))))
+		m.append(stNote.Render("🔑 " + enginecmd.LoginLine(str(ev["server"]), str(ev["url"]))))
 	case "prompt":
 		// An MCP prompt the user ran as a slash command, rendered by the
 		// engine: it goes in as their message.

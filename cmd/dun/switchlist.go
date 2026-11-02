@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -171,7 +172,7 @@ func (v *switchListView) page() pageDoc {
 			mark = "●"
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
-		cells := fmt.Sprintf("g%s p%s s%s", cellMark(r.global), cellMark(r.project), cellMark(r.session))
+		cells := fmt.Sprintf("g%s p%s s%s", mcptable.CellMark(r.global), mcptable.CellMark(r.project), mcptable.CellMark(r.session))
 		head := fmt.Sprintf("%s %s  ~%s tok  %s  %s  %s", mark, r.name, numfmt.KTokens(r.tokens), cells, r.source, first)
 		if len(v.order) == 0 { // no cost to show: the indexes
 			head = fmt.Sprintf("%s %s  %s  %s  %s", mark, r.name, cells, r.source, first)
@@ -205,7 +206,7 @@ func (v *switchListView) page() pageDoc {
 			body += " (switched " + scopeIn(r.from) + ")"
 		}
 		if narrow { // each scope's switch, in words: the row's second line has only the one that decided
-			body += "\nglobal " + cellWord(r.global) + " · project " + cellWord(r.project) + " · session " + cellWord(r.session)
+			body += "\nglobal " + mcptable.CellWord(r.global) + " · project " + mcptable.CellWord(r.project) + " · session " + mcptable.CellWord(r.session)
 		}
 		if r.detail != "" {
 			body += "\n" + r.detail

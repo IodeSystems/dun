@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -17,7 +18,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 	for _, c := range slashCommands {
 		local[c.name] = true
 	}
-	for _, c := range commandList(nil, "").Items {
+	for _, c := range enginecmd.CommandList(nil, "").Items {
 		if local[c.Name] {
 			t.Errorf("/%s is both a local TUI command and an engine command", c.Name)
 		}
@@ -45,7 +46,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 		t.Errorf("refused: %v", refused)
 	}
 	got := map[string]bool{}
-	for _, c := range commandList(nil, "", exts...).Items {
+	for _, c := range enginecmd.CommandList(nil, "", exts...).Items {
 		if got[c.Name] {
 			t.Errorf("/%s listed twice", c.Name)
 		}
@@ -54,7 +55,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 	if !got["hello"] || !got["rag"] || !got["lsp"] {
 		t.Errorf("extension commands: %v", got)
 	}
-	for _, c := range commandList(nil, "", exts...).Items {
+	for _, c := range enginecmd.CommandList(nil, "", exts...).Items {
 		if c.Name == "hello" && !strings.Contains(c.Usage, "greet") {
 			t.Errorf("hello's usage lacks its command: %q", c.Usage)
 		}
@@ -81,7 +82,7 @@ func TestTUIDoesNotShadowEngineCommands(t *testing.T) {
 }
 
 func TestCommandListShowsState(t *testing.T) {
-	l := commandList([]dun.ServerState{{ID: dun.ServerDocs, Running: true, Auto: true}}, dun.IsoDocker)
+	l := enginecmd.CommandList([]dun.ServerState{{ID: dun.ServerDocs, Running: true, Auto: true}}, dun.IsoDocker)
 	got := map[string]string{}
 	for _, c := range l.Items {
 		got[c.Name] = c.State + "/" + c.Detail
@@ -94,7 +95,7 @@ func TestCommandListShowsState(t *testing.T) {
 // raglit's commands are in its completion with their help, and in the usage.
 func TestCommandList_ExtensionCommandsWithHelp(t *testing.T) {
 	var raglit proto.CommandSpec
-	for _, c := range commandList(nil, "").Items {
+	for _, c := range enginecmd.CommandList(nil, "").Items {
 		if c.Name == "rag" {
 			raglit = c
 		}
@@ -143,7 +144,7 @@ func TestRouteSlash(t *testing.T) {
 		"rag on --project":                     {"server", "raglit", "on --project"},
 		"mcp tools el":                         {"control", "mcptools", "el"},
 		"mcp tools":                            {"control", "mcptools", ""},
-		"mcp restart":                          {"server", allServers, "restart"},
+		"mcp restart":                          {"server", enginecmd.AllServers, "restart"},
 		"mcp off github":                       {"server", "github", "off"},
 		"docker OFF":                           {"control", "docker", "off"},
 		"worktree new":                         {"control", "worktree", "new"},

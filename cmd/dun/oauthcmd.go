@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -51,7 +52,7 @@ func oauthCmd(args []string, stdout, stderr io.Writer) int {
 	if errors.Is(err, errNoDund) {
 		s := dun.Server{ID: spec.ID, URL: spec.URL, OAuth: &spec.OAuth}
 		auth, err = dun.OAuthTokenHere(ctx, s, retry,
-			func(id, url string) { fmt.Fprintln(stderr, loginLine(id, url)) }, nil)
+			func(id, url string) { fmt.Fprintln(stderr, enginecmd.LoginLine(id, url)) }, nil)
 	}
 	if err == nil && auth == "" {
 		err = fmt.Errorf("%s: no token — log in with /mcp login %s", spec.ID, spec.ID)

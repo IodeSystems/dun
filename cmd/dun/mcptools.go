@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -92,7 +93,7 @@ func (v *mcpToolsView) page() pageDoc {
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
 		head := fmt.Sprintf("%s %s  ~%s tok  g%s p%s s%s  %s", mark, r.name, numfmt.KTokens(r.tokens),
-			cellMark(r.global), cellMark(r.project), cellMark(r.session), first)
+			mcptable.CellMark(r.global), mcptable.CellMark(r.project), mcptable.CellMark(r.session), first)
 		body := strings.TrimSpace(r.desc)
 		if r.from != "" {
 			body = textfmt.OnOff(r.enabled) + " (" + r.from + ")\n\n" + body

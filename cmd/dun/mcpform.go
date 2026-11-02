@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // /mcp add [preset] — a form for a new MCP server. It asks one thing: what
@@ -89,22 +90,13 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 	m.mcpStep, m.mcpErr, m.mcpForm, m.mcpAuto = mcpServer, "", true, ""
 	if len(preset) > 0 && preset[0] != "" {
 		if !m.fillPreset(preset[0]) {
-			m.mcpErr = "no preset " + strconv.Quote(preset[0]) + " — presets: " + presetIDs()
+			m.mcpErr = "no preset " + strconv.Quote(preset[0]) + " — presets: " + enginecmd.PresetIDs()
 		}
 	}
 	m.mcpFields[m.mcpStep].Focus()
 	m.input.Blur()
 	m.refresh()
 	return textinput.Blink
-}
-
-// presetIDs lists the presets for a hint.
-func presetIDs() string {
-	ids := make([]string, len(dun.Presets()))
-	for i, p := range dun.Presets() {
-		ids[i] = p.ID
-	}
-	return strings.Join(ids, ", ")
 }
 
 // fillPreset fills the id and server rows from a preset.

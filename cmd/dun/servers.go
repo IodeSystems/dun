@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -22,21 +24,6 @@ import (
 //
 // The command is an extension's slash command (its manifest's slash.name):
 // /rag switches the server raglit, /lsp the server poly-lsp.
-
-// slashOf is the slash command of st's extension, or "" for a server with
-// none. A state built without one (a test's) falls back to the bundled
-// extension of its id.
-func slashOf(st dun.ServerState) string {
-	if st.Slash != "" {
-		return st.Slash
-	}
-	for _, e := range dun.BundledExtensions() {
-		if e.ID == st.ID {
-			return e.SlashName()
-		}
-	}
-	return ""
-}
 
 // flagOf is the --rag / --lsp flag that starts a server for one run.
 func flagOf(id string) string {
@@ -106,11 +93,6 @@ func noAutostart(t *tristate, no bool, name string) error {
 	return nil
 }
 
-// allServers is the id /mcp uses to address every configured server at once.
-// Not a legal server id (ids come from config and from dun.DefaultServers), so
-// it cannot collide with one.
-const allServers = "*"
-
 // runServerCmd applies one /rag or /lsp action and returns the line to show the
 // user. A failure to start is a RETURNED MESSAGE, never a fatal error: a
 // misconfigured raglit should cost you search, not your session.
@@ -120,10 +102,10 @@ const allServers = "*"
 // "restart", "auto" (the project switch on) and "manual" (the project switch
 // off; it was "stop starting it here", which off at project scope is).
 func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) string {
-	if alias == allServers {
+	if alias == enginecmd.AllServers {
 		return runAllServersCmd(ctx, h, action)
 	}
-	if verb, dir, _ := strings.Cut(strings.TrimSpace(action), " "); excludeVerb(alias, verb) {
+	if verb, dir, _ := strings.Cut(strings.TrimSpace(action), " "); enginecmd.ExcludeVerb(alias, verb) {
 		return runExcludeCmd(ctx, h, alias, verb, dir)
 	}
 	if f := strings.Fields(action); alias == dun.ServerCode && lspLanguageCmd(f) {
@@ -348,21 +330,12 @@ func toolCostListing(states []dun.ServerState) string {
 		if !st.Running {
 			continue
 		}
-		b.WriteString("\n  " + st.ID + ": " + toolCost(st))
+		b.WriteString("\n  " + st.ID + ": " + mcptable.ToolCost(st))
 		if hint := heavyHint(st); hint != "" {
 			b.WriteString("\n    " + hint)
 		}
 	}
 	return b.String() + "\n/mcp tools <id> lists one server's tools, to turn some off"
-}
-
-// toolCost is "160 tools · ~38k tokens · 12 hidden".
-func toolCost(st dun.ServerState) string {
-	s := textfmt.Plural(st.Tools, "tool") + " · ~" + numfmt.KTokens(st.Cost) + " tokens"
-	if st.Hidden > 0 {
-		s += fmt.Sprintf(" · %d hidden", st.Hidden)
-	}
-	return s
 }
 
 // heavyHint names the two ways to make a heavy server cheaper.
@@ -450,22 +423,14 @@ func catalogEvent(h *dun.Harness) *proto.Catalog {
 	return c
 }
 
-// loginLine is the line that asks the person to log in to an OAuth server.
-func loginLine(server, url string) string {
-	if url == "" {
-		return server + ": waiting for a login to it that another session started"
-	}
-	return "open to log in to " + server + ": " + url
-}
-
 // serverListing renders every server and its state, one per line.
 // mcpAddHint ends a bare /mcp: how to add one is otherwise invisible.
 const mcpAddHint = "add one: /mcp add — a form: an id, then a URL (https://…) or a command (e.g. npx some-mcp), then a bearer token or an oauth client for a URL"
 
 func serverListing(states []dun.ServerState) string {
 	var b strings.Builder
-	b.WriteString("mcp servers — " + switchLegend)
-	b.WriteString("\n" + serverTable(states, plainKey))
+	b.WriteString("mcp servers — " + mcptable.SwitchLegend)
+	b.WriteString("\n" + mcptable.ServerTable(states, mcptable.PlainKey))
 	total, direct := 0, 0
 	for _, st := range states {
 		if st.Running && st.Via != dun.ViaShell {
@@ -484,33 +449,6 @@ func serverListing(states []dun.ServerState) string {
 	return b.String()
 }
 
-// serverDetail is what a server is doing now, after its state column.
-func serverDetail(st dun.ServerState) string {
-	var s string
-	switch {
-	case st.Via == dun.ViaShell && st.Auto:
-		s = hostedSummary(st)
-	case st.Via == dun.ViaShell:
-		s = "not hosted"
-	case st.Starting:
-		s = "starting…"
-	case st.Running && st.Index == dun.IndexBuilding:
-		s = fmt.Sprintf("running · indexing %ds · ", int(st.IndexSeconds+0.5)) + toolCost(st)
-	case st.Running && st.Index == dun.IndexFailed:
-		s = "running · index failed: " + textfmt.OneLine(st.IndexErr) + " · " + toolCost(st)
-	case st.Running:
-		s = "running · " + toolCost(st)
-	case st.Err != "":
-		s = "stopped · last error: " + textfmt.OneLine(st.Err)
-	default:
-		s = "stopped"
-	}
-	if st.Auth != "" {
-		s += " · " + st.Auth
-	}
-	return s
-}
-
 // serverStatusLine is the bare "/rag" report: what it is doing now, what it
 // will do next session, and the one command that changes each.
 func serverStatusLine(h *dun.Harness, id, label string) string {
@@ -519,7 +457,7 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 		return label + ": not configured"
 	}
 	cmd := id
-	if s := slashOf(st); s != "" {
+	if s := enginecmd.SlashOf(st); s != "" {
 		cmd = s
 	}
 	var b strings.Builder
@@ -531,8 +469,8 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	} else {
 		b.WriteString("stopped")
 	}
-	b.WriteString(" · " + stateCell(st) + " · switches: global " + cellWord(st.Global) +
-		", project " + cellWord(st.Project) + ", session " + cellWord(st.Session))
+	b.WriteString(" · " + mcptable.StateCell(st) + " · switches: global " + mcptable.CellWord(st.Global) +
+		", project " + mcptable.CellWord(st.Project) + ", session " + mcptable.CellWord(st.Session))
 	if st.Err != "" {
 		b.WriteString("\nlast start failed: " + textfmt.OneLine(st.Err))
 	}
@@ -558,7 +496,7 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 		if e.ID != id || e.Slash == nil {
 			continue
 		}
-		if own := extOwnCommands(e); len(own) > 0 {
+		if own := enginecmd.ExtOwnCommands(e); len(own) > 0 {
 			b.WriteString("\ncommands:")
 			for i := 0; i+1 < len(own); i += 2 {
 				fmt.Fprintf(&b, "\n  /%s %-12s %s", cmd, own[i], own[i+1])
@@ -580,7 +518,7 @@ func ingestLine(h *dun.Harness, id string) string {
 func runningSummary(h *dun.Harness, id string) string {
 	st, ok := stateOf(h, id)
 	if ok && st.Via == dun.ViaShell {
-		return hostedSummary(st)
+		return mcptable.HostedSummary(st)
 	}
 	if ok && st.Starting {
 		return "starting… (its tools join when it is up)"
@@ -589,19 +527,6 @@ func runningSummary(h *dun.Harness, id string) string {
 		return "not running"
 	}
 	return "running · " + textfmt.Plural(st.Tools, "tool")
-}
-
-// hostedSummary is a shell-placed server's state: where the model finds it,
-// and whether the running shell connected it.
-func hostedSummary(st dun.ServerState) string {
-	s := fmt.Sprintf("scripted as %s (eval: help(%q))", st.Namespace, st.Namespace)
-	switch {
-	case st.Hosted:
-		return s + fmt.Sprintf(" · %d tools · 0 tokens per request (its schemas stay in the shell)", st.Tools)
-	case st.Err != "":
-		return s + " · not connected: " + textfmt.OneLine(st.Err)
-	}
-	return s
 }
 
 // shellPlacementNote is what a server gives up in the shell; said where the
@@ -616,66 +541,6 @@ func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
 		}
 	}
 	return dun.ServerState{}, false
-}
-
-// serverHint is the startup lines naming what did NOT start and why, plus the
-// docs server's ingest summary when it autostarted. Shown once, at ready.
-//
-// The optional extras that are simply off (a server with a switch, /rag,
-// /lsp) are not here: the client's splash and /status say them, with
-// the command that turns each on (proto.ServerState.Slash).
-func serverHint(states []dun.ServerState) string {
-	var lines []string
-	for _, st := range states {
-		if st.Running {
-			// An autostarted docs server says what it indexed and skipped.
-			if st.Ingest != "" {
-				lines = append(lines, st.Ingest)
-			}
-			continue
-		}
-		if st.Via == dun.ViaShell {
-			if st.Err != "" {
-				lines = append(lines, fmt.Sprintf("%s (scripted) did not connect: %s", st.ID, textfmt.OneLine(st.Err)))
-			}
-			continue
-		}
-		switch {
-		case st.Missing:
-			lines = append(lines, fmt.Sprintf("%s off: %s", st.ID, textfmt.OneLine(st.Err)))
-		case st.Err != "":
-			lines = append(lines, fmt.Sprintf("%s did not start: %s", st.ID, textfmt.OneLine(st.Err)))
-		case slashOf(st) != "":
-			// an optional extra, off: the splash says it
-		default:
-			lines = append(lines, st.ID+" off")
-		}
-	}
-	sort.Strings(lines)
-	return strings.Join(lines, "\n")
-}
-
-// serversProto renders server states for an event.
-func serversProto(states []dun.ServerState) []proto.ServerState {
-	out := make([]proto.ServerState, 0, len(states))
-	for _, st := range states {
-		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Missing: st.Missing, Auth: st.Auth,
-			Via: st.Via, Proto: st.Proto, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
-			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
-			Detail: serverDetail(st), Slash: slashOf(st), Starting: st.Starting, StartingSeconds: st.StartingSeconds,
-			Index: st.Index, IndexSeconds: st.IndexSeconds, IndexErr: st.IndexErr, Exclude: st.Exclude,
-			Hosted: st.Hosted, Cost: st.Cost, Standalone: st.Standalone, Description: st.Description, Title: st.Title,
-			Version: st.Version, Instructions: st.Instructions, Log: logProto(st.Log)})
-	}
-	return out
-}
-
-func logProto(lines []dun.ServerLogLine) []proto.ServerLogLine {
-	out := make([]proto.ServerLogLine, 0, len(lines))
-	for _, l := range lines {
-		out = append(out, proto.ServerLogLine{At: l.At.UnixMilli(), Text: l.Text, Stderr: l.Stderr})
-	}
-	return out
 }
 
 // ctrlCmdAsks reports whether a control command may put a question to the human

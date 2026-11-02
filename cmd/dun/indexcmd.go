@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -15,26 +16,11 @@ import (
 // same list dun writes when an index does not fit its budget, so include
 // is the undo of what dun decided, and exclude the redo of what it offered.
 
-// excludeVerb reports whether /<slash> <verb> is an exclude command: the
-// code server's, whose index takes --exclude.
-func excludeVerb(id, verb string) bool {
-	return id == dun.ServerCode && (verb == "exclude" || verb == "include" || verb == "budget" || verb == "index-anyway")
-}
-
-// excludeHelp is exclude's and include's lines in the palette and in bare
-// /lsp.
-var excludeHelp = []string{
-	"exclude", "DIR — leave a directory (relative to the workspace) out of the code index, for this project; the server restarts. The repository is not changed",
-	"include", "DIR — put an excluded directory back in the code index (the undo of exclude, and of what dun excluded when the index did not fit its budget)",
-	"index-anyway", "on|off — index a root that is not a project (the home directory, a directory of clones) anyway, for this project; the server restarts; bare shows it",
-	"budget", "Nms|Nops|0|default — the code index's startup budget, for this project (0: none; default: the server's, 30000ms); bare shows it",
-}
-
 // runExcludeCmd applies /<slash> exclude|include <dir>.
 func runExcludeCmd(ctx context.Context, h *dun.Harness, id, verb, dir string) string {
 	slash := id
-	if st, ok := stateOf(h, id); ok && slashOf(st) != "" {
-		slash = slashOf(st)
+	if st, ok := stateOf(h, id); ok && enginecmd.SlashOf(st) != "" {
+		slash = enginecmd.SlashOf(st)
 	}
 	dir = strings.TrimSpace(dir)
 	if verb == "budget" {

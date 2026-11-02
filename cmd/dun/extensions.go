@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -25,7 +26,7 @@ import (
 // command; refused says which.
 func engineExtensions(all []dun.Extension) (ok []dun.Extension, refused []string) {
 	taken := map[string]bool{}
-	for _, c := range ownCommands("") {
+	for _, c := range enginecmd.OwnCommands("") {
 		taken[c.Name] = true
 	}
 	for _, c := range slashCommands {
@@ -142,22 +143,6 @@ func extensionsEvent(h *dun.Harness) *proto.Extensions {
 		ev.Items = append(ev.Items, it)
 	}
 	return ev
-}
-
-// extIndexVerb reports whether /<slash> <verb> is one of the index commands
-// e's roles give it (dun/attach.go): watch with an index CLI, attach and
-// detach with a search role. An extension's own command of the same name
-// wins (routeSlash asks it first).
-func extIndexVerb(e dun.Extension, verb string) bool {
-	switch verb {
-	case "watch":
-		return e.Roles.Index != nil && e.Roles.Index.CLI != ""
-	case "attach", "detach":
-		return e.Roles.Search != nil
-	case "workspace": // whether the workspace is read into an index (dun/ragworkspace.go)
-		return e.Roles.Search != nil && e.Subscribes(dun.HookWorkspaceOpen)
-	}
-	return false
 }
 
 // parseWatch reads "<dir> [--index N]"; the dir may hold spaces.

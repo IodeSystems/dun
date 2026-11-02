@@ -40,13 +40,6 @@ var dockerProbe = func() error {
 	return nil
 }
 
-// isolateChoices are /isolate's values, for the palette and /help.
-var isolateChoices = choices(
-	dun.IsoNone, "in place: the checkout itself, commands on this machine",
-	dun.IsoWorktree, "a fresh git worktree on a new branch; commands on this machine",
-	dun.IsoDocker, "a fresh git worktree, its commands in a Docker container on it",
-	"off", "back in place, as none; a worktree is kept on disk, never deleted")
-
 // isolationMode is the session's isolation now: none, worktree or docker.
 func isolationMode(h *dun.Harness) string {
 	if wt := h.Worktree(); wt != nil && wt.Branch != "" {

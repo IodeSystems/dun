@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -160,7 +161,7 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			// does: the splash and /mcp say the mode now.
 			go func() {
 				if h.FollowServersIfIdle(context.Background()) {
-					em.emit(&proto.ServerEvent{Action: "activity", Servers: serversProto(h.Servers()),
+					em.emit(&proto.ServerEvent{Action: "activity", Servers: enginecmd.ServersProto(h.Servers()),
 						Tools: h.ToolNames(), Background: true})
 				}
 			}()

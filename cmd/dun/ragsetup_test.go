@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/update"
 )
 
@@ -392,7 +393,7 @@ func TestMCPInfo_SemanticOff(t *testing.T) {
 	var rep dun.SetupReport
 	_ = json.Unmarshal([]byte(ragDoctorJSON("", "")), &rep)
 	st := []dun.ServerState{{ID: "raglit", Slash: "raglit", Running: true, Auto: true, Tools: 4, Setup: &rep}}
-	if s := plainInfo(mcpInfoIn{servers: st}); !strings.Contains(s, "  raglit  running · built-in · 4 tools · semantic search off\n") {
+	if s := plainInfo(enginecmd.McpInfoIn{Servers: st}); !strings.Contains(s, "  raglit  running · built-in · 4 tools · semantic search off\n") {
 		t.Errorf("%s", s)
 	}
 }

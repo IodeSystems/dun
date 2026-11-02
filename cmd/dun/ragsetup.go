@@ -48,9 +48,6 @@ import (
 //
 // Undo: /rag setup again, and none for the role.
 
-// ragSetupHelp is setup's line in the palette and in bare /rag.
-var ragSetupHelp = []string{"setup", "pick a model for each role (embeddings, summaries, vision, segment, audio) from your providers; none turns one off"}
-
 // ragSetupOrder is the order of the screens: the one that matters most
 // first (semantic search), then what reads documents.
 var ragSetupOrder = []string{"embed", "identity", "vision", "segment", "audio"}

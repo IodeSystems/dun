@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // mcpshell not installed (a binary-only install) is a setup step, not a
@@ -27,7 +28,7 @@ func TestSplash_MissingShellIsQuiet(t *testing.T) {
 	m = m.handleEvent(evMsg{"type": "session", "id": "s1"})
 	err := (&dun.MissingError{Command: "mcpshell"}).Error()
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"read"},
-		"hint":    serverHint([]dun.ServerState{{ID: dun.ServerShell, Err: err, Missing: true}}),
+		"hint":    enginecmd.ServerHint([]dun.ServerState{{ID: dun.ServerShell, Err: err, Missing: true}}),
 		"servers": []any{map[string]any{"id": "shell", "err": err, "missing": true}}})
 	m = m.handleEvent(evMsg{"type": "settings", "model": "", "url": ""})
 	s := stripANSI(convoText(m))

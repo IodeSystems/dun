@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // fakeToolServer is a Streamable HTTP MCP server with one tool.
@@ -104,7 +105,7 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 	if out := runServerCmd(ctx, h, "poly-lsp", ""); !strings.Contains(out, "/lsp exclude ") || !strings.Contains(out, "/lsp include ") {
 		t.Errorf("bare /lsp lists exclude and include:\n%s", out)
 	}
-	l := commandList(h.Servers(), "")
+	l := enginecmd.CommandList(h.Servers(), "")
 	names := map[string]bool{}
 	for _, c := range l.Items {
 		names[c.Name] = true

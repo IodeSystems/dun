@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // --rag=false (force off for this run) must be distinguishable from not passing
@@ -41,7 +42,7 @@ func TestTristate_UnsetIsNotFalse(t *testing.T) {
 // off is not in it: the splash says that (TestSplash_FreshSessionOnly), with
 // the command, from the server's Slash.
 func TestServerHint_NamesWhatFailedNotWhatIsOff(t *testing.T) {
-	hint := serverHint([]dun.ServerState{
+	hint := enginecmd.ServerHint([]dun.ServerState{
 		{ID: dun.ServerShell, Running: true},
 		{ID: dun.ServerDocs},
 		{ID: dun.ServerCode, Err: "mcp: initialize code: transport closed\nsome-lsp: bad flag"},
@@ -52,7 +53,7 @@ func TestServerHint_NamesWhatFailedNotWhatIsOff(t *testing.T) {
 	if strings.Contains(hint, "raglit") || strings.Contains(hint, "off:") {
 		t.Errorf("an extra that is off is the splash's to say: %q", hint)
 	}
-	if ps := serversProto([]dun.ServerState{{ID: dun.ServerDocs}}); ps[0].Slash != "rag" {
+	if ps := enginecmd.ServersProto([]dun.ServerState{{ID: dun.ServerDocs}}); ps[0].Slash != "rag" {
 		t.Errorf("the server state lacks its command: %+v", ps[0])
 	}
 	if !strings.Contains(hint, "bad flag") {
@@ -67,7 +68,7 @@ func TestServerHint_NamesWhatFailedNotWhatIsOff(t *testing.T) {
 // skipped — a skipped node_modules is otherwise invisible.
 func TestServerHint_CarriesIngestSummary(t *testing.T) {
 	sum := `docs: indexing 12 files · skipped node_modules/ (dependencies) — to include one: "rag": {"include": ["node_modules/"]} in dun.json`
-	hint := serverHint([]dun.ServerState{
+	hint := enginecmd.ServerHint([]dun.ServerState{
 		{ID: dun.ServerShell, Running: true},
 		{ID: dun.ServerDocs, Running: true, Ingest: sum},
 	})
@@ -240,7 +241,7 @@ func TestRunAllServersCmd_RestartsRunningOnesAndSkipsTheRest(t *testing.T) {
 		t.Fatalf("shell should be up with tools before the restart: %+v", before)
 	}
 
-	out := runServerCmd(ctx, h, allServers, "restart")
+	out := runServerCmd(ctx, h, enginecmd.AllServers, "restart")
 
 	if !strings.Contains(out, "restarted") {
 		t.Errorf("the running server should report a restart: %q", out)

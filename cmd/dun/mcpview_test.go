@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/mcptable"
 )
 
 func tableStates() []dun.ServerState {
@@ -24,7 +26,7 @@ func tableStates() []dun.ServerState {
 // The text listing every client gets: the columns, a mark per switch, the
 // mode and the state each with the scope that decided it.
 func TestServerTable_Plain(t *testing.T) {
-	out := serverTable(tableStates(), plainKey)
+	out := mcptable.ServerTable(tableStates(), mcptable.PlainKey)
 	lines := strings.Split(out, "\n")
 	if want := "  server      proto  global   project  session  mode                   → state"; lines[0] != want {
 		t.Errorf("header:\n%q\n%q", lines[0], want)
@@ -43,9 +45,9 @@ func TestServerTable_Plain(t *testing.T) {
 // A hotkey letter is bold and underlined inside its word, and the styling
 // changes no text. (Without a terminal the renderer drops the styling.)
 func TestServerHeader_HotKeys(t *testing.T) {
-	idW, viaW := tableWidths(tableStates())
-	got := serverHeader(idW, viaW, hotKey)
-	if stripANSI(got) != serverHeader(idW, viaW, plainKey) {
+	idW, viaW := mcptable.TableWidths(tableStates())
+	got := mcptable.ServerHeader(idW, viaW, hotKey)
+	if stripANSI(got) != mcptable.ServerHeader(idW, viaW, mcptable.PlainKey) {
 		t.Errorf("styling changed the text: %q", stripANSI(got))
 	}
 	for _, k := range []string{"g", "p", "s", "m"} {
@@ -65,12 +67,12 @@ func TestMCPServersView_Keys(t *testing.T) {
 	m.openMCPServers()
 	list := []any{}
 	for _, st := range tableStates() {
-		b, _ := json.Marshal(serversProto([]dun.ServerState{st})[0])
+		b, _ := json.Marshal(enginecmd.ServersProto([]dun.ServerState{st})[0])
 		var o map[string]any
 		_ = json.Unmarshal(b, &o)
 		list = append(list, o)
 	}
-	m = m.handleEvent(evMsg{"type": "server", "id": allServers, "message": "mcp servers …", "servers": list})
+	m = m.handleEvent(evMsg{"type": "server", "id": enginecmd.AllServers, "message": "mcp servers …", "servers": list})
 	if m.serversPaging() == nil {
 		t.Fatal("bare /mcp must open the table")
 	}

@@ -29,6 +29,7 @@ import (
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/openurl"
 	"github.com/iodesystems/dun/internal/spendmeter"
@@ -397,9 +398,9 @@ func main() {
 	// it is the process a TUI session would want to profile. Opt-in, loopback.
 	startPprof()
 	suggestEnabled = !*noSuggest // the UI may ASK for next-message suggestions (on by default)
-	rephraseOn = *rephrase
+	enginecmd.RephraseOn = *rephrase
 	if !suggestEnabled {
-		suggestMode = "off"
+		enginecmd.SuggestMode = "off"
 	}
 	engineModel, engineURL = *model, *url
 	if p, ok := fc.ProviderAt(*url); ok {
@@ -743,7 +744,7 @@ func main() {
 				msg = id + ": did not start — " + textfmt.OneLine(err.Error())
 			}
 			em.emit(&proto.ServerEvent{ID: id, Action: "start", Message: msg,
-				Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Background: true})
+				Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Background: true})
 			em.emit(catalogEvent(h))
 			em.emit(commandsEvent(h))
 		}
@@ -765,7 +766,7 @@ func main() {
 				actDue = false
 				actMu.Unlock()
 				if h, _ := started.Load().(*dun.Harness); h != nil {
-					em.emit(&proto.ServerEvent{Action: "activity", Servers: serversProto(h.Servers()),
+					em.emit(&proto.ServerEvent{Action: "activity", Servers: enginecmd.ServersProto(h.Servers()),
 						Tools: h.ToolNames(), Background: true})
 				}
 			})
@@ -778,7 +779,7 @@ func main() {
 				return
 			}
 			em.emit(&proto.ServerEvent{ID: id, Action: "index", Message: msg,
-				Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Background: true})
+				Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Background: true})
 		}
 		// An install hint, once (dun/setupstate.go): said as a quiet line.
 		// It is said once, so a Harness not yet stored is waited for.
@@ -787,7 +788,7 @@ func main() {
 				for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 					if h, _ := started.Load().(*dun.Harness); h != nil {
 						em.emit(&proto.ServerEvent{ID: id, Action: "setup", Message: msg,
-							Servers: serversProto(h.Servers()), Tools: h.ToolNames(), Background: true})
+							Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Background: true})
 						return
 					}
 				}
@@ -899,7 +900,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), textfmt.Clip(textfmt.OneLine(result), 200))
 		}
 		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", textfmt.Clip(textfmt.OneLine(text), 200)) }
-		cfg.OnLogin = func(server, url string) { fmt.Fprintf(os.Stderr, "\n  🔑 %s\n", loginLine(server, url)) }
+		cfg.OnLogin = func(server, url string) { fmt.Fprintf(os.Stderr, "\n  🔑 %s\n", enginecmd.LoginLine(server, url)) }
 		cfg.OnMemoryTrigger = func(msg string) { fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", textfmt.Clip(textfmt.OneLine(msg), 200)) }
 		cfg.OnRules = func(msg string) { fmt.Fprintf(os.Stderr, "\n  %s\n", msg) }
 		cfg.OnDocs = func(n dun.DocsNote) {
@@ -931,7 +932,7 @@ func main() {
 	h, err := dun.Start(ctx, cfg)
 	if h != nil {
 		started.Store(h)
-		engineHarness.Store(h)
+		enginecmd.EngineHarness.Store(h)
 		// The budget's two marks (turnclock.go): tell the model, then cut.
 		budgetHooks.Store(&budgetMarks{
 			spent: func(budget, grace time.Duration) {

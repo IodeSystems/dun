@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -29,12 +30,14 @@ func infoParts() []dun.ContextPart {
 }
 
 // plainInfo is /mcp info with its no-break spaces as spaces.
-func plainInfo(in mcpInfoIn) string { return strings.ReplaceAll(mcpInfo(in), " ", " ") }
+func plainInfo(in enginecmd.McpInfoIn) string {
+	return strings.ReplaceAll(enginecmd.McpInfo(in), " ", " ")
+}
 
 // /mcp info: a row per server, the total of the window, the shell, the
 // hint for the heavy server only, and /mcp help last.
 func TestMCPInfo_Rows(t *testing.T) {
-	s := plainInfo(mcpInfoIn{servers: infoServers(), parts: infoParts(), counted: true, window: 32000})
+	s := plainInfo(enginecmd.McpInfoIn{Servers: infoServers(), Parts: infoParts(), Counted: true, Window: 32000})
 	// Moving notes adds ", notes" to the hosted sentence: what it saves is
 	// its part less that.
 	hosted := []string{"corp"}
@@ -70,7 +73,7 @@ func TestMCPInfo_Rows(t *testing.T) {
 // Nothing heavy, nothing said about saving; no window, no share; before the
 // count, no tokens at all.
 func TestMCPInfo_Quiet(t *testing.T) {
-	in := mcpInfoIn{servers: infoServers(), parts: infoParts()[:2], counted: true, exact: true}
+	in := enginecmd.McpInfoIn{Servers: infoServers(), Parts: infoParts()[:2], Counted: true, Exact: true}
 	s := plainInfo(in)
 	if strings.Contains(s, "save") || strings.Contains(s, "window") {
 		t.Errorf("nothing heavy, no window:\n%s", s)
@@ -78,7 +81,7 @@ func TestMCPInfo_Quiet(t *testing.T) {
 	if !strings.Contains(s, "  total 1.1k tokens in every request\n") {
 		t.Errorf("exact total:\n%s", s)
 	}
-	in.counted = false
+	in.Counted = false
 	s = plainInfo(in)
 	if !strings.Contains(s, "  tokens: counting…\n") || strings.Contains(s, " tokens\n") {
 		t.Errorf("before the count:\n%s", s)
@@ -93,7 +96,7 @@ func TestMCPInfo_ShellOff(t *testing.T) {
 	srv[0].Running = false
 	srv = append(srv, dun.ServerState{ID: "snow", Running: true, Auto: true, Tools: 40, Via: dun.ViaDirect, Auth: "logged in"})
 	parts := append(infoParts(), dun.ContextPart{Name: "mcp: snow", Tokens: 9000})
-	s := plainInfo(mcpInfoIn{servers: srv, parts: parts, counted: true})
+	s := plainInfo(enginecmd.McpInfoIn{Servers: srv, Parts: parts, Counted: true})
 	line := numfmt.EstimateTok(dun.HostedLine([]string{"notes"}))
 	for _, want := range []string{
 		"  corp    waits for the shell · scripted\n",
@@ -113,7 +116,7 @@ func TestMCPInfo_ShellOff(t *testing.T) {
 // between words, never cut — every fact is there whole and no row is wider
 // than the screen.
 func TestMCPInfo_Wraps(t *testing.T) {
-	msg := mcpInfo(mcpInfoIn{servers: infoServers(), parts: infoParts(), counted: true, window: 32000})
+	msg := enginecmd.McpInfo(enginecmd.McpInfoIn{Servers: infoServers(), Parts: infoParts(), Counted: true, Window: 32000})
 	for _, w := range []int{49, 100} {
 		v := newVtui(w, 60)
 		v.event(map[string]any{"type": "control", "id": "mcpinfo", "message": msg})
@@ -170,7 +173,7 @@ func TestRouteSlash_MCPInfoHelp(t *testing.T) {
 // The palette offers info and help after /mcp.
 func TestPalette_MCPInfoCompletion(t *testing.T) {
 	m, _ := skillModel(t, 0)
-	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(commandList(nil, "").Items)})
+	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(enginecmd.CommandList(nil, "").Items)})
 	for q, want := range map[string]string{"/mcp inf": "info", "/mcp hel": "help"} {
 		mm := typeStr(m, q)
 		if _, l, ok := mm.paletteArgs(); !ok || len(l.choices) == 0 || l.choices[0].value != want {
@@ -213,8 +216,8 @@ func TestMCPInfo_Savings(t *testing.T) {
 	servers[3].Standalone, servers[3].Help = 38000, 1600
 	usage := dun.StatsSummary{Rounds: 412, Processed: 31, Prompt: 4_000_000, Cached: 3_600_000, Cost: 0.5, Currency: "USD", CostTokens: 1_000_000,
 		Servers: map[string]*dun.ServerUsage{"notes": {Rounds: 412, Processed: 31, Tokens: 161200}, "corp": {SavedRounds: 31, Saved: 1_178_000}}}
-	s := plainInfo(mcpInfoIn{servers: servers, parts: infoParts(), counted: true, window: 32000,
-		usage: usage, usageDays: 7, speed: 6700, speedRounds: 20})
+	s := plainInfo(enginecmd.McpInfoIn{Servers: servers, Parts: infoParts(), Counted: true, Window: 32000,
+		Usage: usage, UsageDays: 7, Speed: 6700, SpeedRounds: 20})
 	for _, want := range []string{
 		"running · scripted · 30 tools · 0 tokens (standalone ~38.0k)",
 		"what the schemas cost, last 7 days (412 requests, 31 processed the prefix, the rest reused it from the cache; the cache reused 90% of all prompt tokens):",
@@ -227,7 +230,7 @@ func TestMCPInfo_Savings(t *testing.T) {
 		}
 	}
 	// No timings: the time is not guessed.
-	s = plainInfo(mcpInfoIn{servers: servers, parts: infoParts(), counted: true, usage: usage, usageDays: 7})
+	s = plainInfo(enginecmd.McpInfoIn{Servers: servers, Parts: infoParts(), Counted: true, Usage: usage, UsageDays: 7})
 	if !strings.Contains(s, "prefill speed: not measured") || strings.Contains(s, "~24.1s") {
 		t.Errorf("no speed:\n%s", s)
 	}

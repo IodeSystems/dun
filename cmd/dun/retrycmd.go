@@ -8,6 +8,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // /retry: how hard dun keeps at a flaky provider (USER 2026-10-26: "my corp
@@ -22,18 +23,6 @@ import (
 //
 // The backoff between tries is agentkit's own: 1s, doubling, to 30s, with
 // jitter, and a provider's Retry-After wins over it.
-
-type retryPreset struct {
-	name, about  string
-	attempts     int
-	budget, turn time.Duration
-}
-
-var retryPresets = []retryPreset{
-	{"default", "5 tries · a request up to 5m · a dead stream re-run for 5m", 0, 0, 0},
-	{"patient", "10 tries · a request up to 15m · a dead stream re-run for 30m", 10, 15 * time.Minute, 30 * time.Minute},
-	{"stubborn", "20 tries · a request up to 1h · a dead stream re-run for 2h", 20, time.Hour, 2 * time.Hour},
-}
 
 // retryLine is the client's retry settings in words.
 func retryLine(c *llm.Client) string {
@@ -66,10 +55,10 @@ func retryCmd(c *llm.Client, action string) (string, *dunconfig.DunConfig, error
 	if len(f) == 0 || f[0] == "status" {
 		return retryLine(c), nil, nil
 	}
-	for _, p := range retryPresets {
-		if f[0] == p.name && len(f) == 1 {
-			c.Retry5xxAttempts, c.RetryBudget, c.TurnRetryBudget, c.DisableTurnRetry = p.attempts, p.budget, p.turn, false
-			return retryLine(c) + " (" + p.name + ", saved)", saveRetry(c), nil
+	for _, p := range enginecmd.RetryPresets {
+		if f[0] == p.Name && len(f) == 1 {
+			c.Retry5xxAttempts, c.RetryBudget, c.TurnRetryBudget, c.DisableTurnRetry = p.Attempts, p.Budget, p.Turn, false
+			return retryLine(c) + " (" + p.Name + ", saved)", saveRetry(c), nil
 		}
 	}
 	if len(f) != 2 {

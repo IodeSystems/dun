@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // Round 4 of the onboarding walk (plan item 37).
@@ -35,7 +36,7 @@ func TestNameFromURL(t *testing.T) {
 // engineCmdsNow is the engine's command list as the TUI receives it.
 func engineCmdsNow(t *testing.T) []engineCmd {
 	t.Helper()
-	b, err := json.Marshal(commandList(nil, ""))
+	b, err := json.Marshal(enginecmd.CommandList(nil, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

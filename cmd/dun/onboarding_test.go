@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/enginecmd"
 )
 
 // A first run: the engine says it has no AI service, and the screen's one
@@ -148,7 +149,7 @@ func TestFit_PanelsAtTheWalkWidths(t *testing.T) {
 		m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 		nm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
 		m = nm.(tuiModel)
-		m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(commandList(nil, "").Items)})
+		m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(enginecmd.CommandList(nil, "").Items)})
 		check := func(what string, mm tuiModel) {
 			for _, row := range strings.Split(mm.View().Content, "\n") {
 				if ansi.StringWidth(row) > w {
@@ -189,7 +190,7 @@ func TestPalette_SetupFirstOneColumn(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
-	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(commandList(nil, "").Items)})
+	m.engineCmds = engineCmdsFromEvent(evMsg{"items": toAny(enginecmd.CommandList(nil, "").Items)})
 	all := m.allSlash()
 	var first []string
 	for _, c := range all[:6] {
