@@ -51,7 +51,7 @@ const (
 	// systemThinking makes reasoning skimmable: the TUI shows a thought as one
 	// line, the latest heading while it streams and the summary after
 	// (thinkHeadline). Fixed text, so it keeps the cache.
-	systemThinking = " In your reasoning, start each step with a line `# Thinking: <what, in a few words>`, and end with `# Summary: <what you concluded, in one line>`."
+	systemThinking = " While you think, before you reply, title each step with a line `# Thinking: <what, in a few words>` and end with a line `# Summary: <what you concluded>`. These lines are for your private thinking only: never put them in your reply to the user."
 
 	systemCode  = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
 	systemShell = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops."
