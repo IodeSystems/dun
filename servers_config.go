@@ -157,6 +157,10 @@ type ServerSpec struct {
 	// a poly-lsp-mcp that takes it. Written at project scope when the person
 	// answers dun's question (askNotProject) or runs /lsp index-anyway.
 	IndexAnyway bool `json:"index_anyway,omitempty"`
+	// Wake lets the server's messages start a turn on an idle session
+	// (serverwake.go). Each wake is a turn someone pays for, so it is off
+	// unless set here.
+	Wake bool `json:"wake,omitempty"`
 }
 
 // ShellOptions are mcpshell's settings for a server it hosts: its --mcp
@@ -605,6 +609,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	}
 	if next.IndexAnyway {
 		out.IndexAnyway = true
+	}
+	if next.Wake {
+		out.Wake = true
 	}
 	return out
 }

@@ -179,6 +179,12 @@ substituted at spawn.
 
 See `dun.example.json`.
 
+A server's `notifications/message` reaches the model in its next tool result, so an idle
+session does not hear it until someone types. `"wake": true` on a server lets its messages
+start a turn: at most one every 30 seconds and 20 an hour, per server, and anything over that
+waits for the next turn. Each wake is a turn you pay for, so it is off by default. Index, setup
+and daemon reports, and JSON notices, never wake a session.
+
 ## Status
 
 **Slice 1 (headless composition) works.** dun spawns the three MCP tool servers,

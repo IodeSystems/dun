@@ -58,6 +58,8 @@ type Server struct {
 	IndexBudget string
 	// IndexAnyway indexes a root that is not a project (ServerSpec.IndexAnyway).
 	IndexAnyway bool
+	// Wake: its messages may start a turn on an idle session (ServerSpec.Wake).
+	Wake bool
 }
 
 // raglitProject is the CORPUS: the repository, shared by every worktree of it.

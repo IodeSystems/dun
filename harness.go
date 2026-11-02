@@ -271,6 +271,7 @@ type Harness struct {
 	ticketMu sync.Mutex
 	ticket   string
 	wake     chan struct{} // signals a driver to run a Continue turn (bg job done)
+	wakes    serverWakes   // servers that may start a turn (serverwake.go)
 	bgMu     sync.Mutex
 	bgSeq    int
 	bgRun    int            // background jobs still running

@@ -432,6 +432,7 @@ func (h *Harness) noteServerNotification(n mcpmgr.Notification) {
 	// Name the server. Several are usually running, and "a merge conflict
 	// appeared" is a different fact depending on which workspace said it.
 	h.Notify(fmt.Sprintf("[%s] %s", n.ServerID, text))
+	h.wakeForServer(n.ServerID)
 }
 
 // withLiftedQueue appends anything buffered during a tool call to that tool's
