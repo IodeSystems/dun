@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/x/cellbuf"
 )
 
-// Boxes: a round's thinking, and a run of tool calls (toolrun.go), are drawn
-// in a box that grows with its content up to a cap and then scrolls INSIDE
+// Boxes: a round's thinking (once unfolded, ctrl+t; folded it is the one
+// line of thinking.go), and a run of tool calls (toolrun.go), are drawn in a box that grows with its content up to a cap and then scrolls INSIDE
 // itself, so a long stream never moves the conversation by more than the
 // box's own growth.
 //
@@ -28,7 +28,8 @@ import (
 // never gets shorter: it is drawn at the most rows it has reached (peak), and
 // when its content gets shorter the rows given back show earlier content, or
 // stay blank when there is none. Once the box is above the view, the peak is
-// released (scrollfold.go).
+// released (scrollfold.go), and so is it when ctrl+t unfolds or folds the
+// thoughts (toggleThinking). A folded thought has no body, so no peak.
 // Selecting a box never scrolls it: in convo focus ↑/↓ step from block to
 // block, boxes included. To scroll one you DESCEND into it (→ or l); inside,
 // ↑/↓, pgup/pgdn, g/G and the wheel scroll its contents, the header says so,
@@ -137,6 +138,8 @@ func (e *convoEntry) boxContent(w int) (string, []string) {
 			return e.run.singleHead(it), singleRows(it, w)
 		}
 		return e.run.summary(), e.run.boxRows(w)
+	case e.think != nil && !e.think.full:
+		return thoughtLine(e.think, w), nil
 	case e.think != nil:
 		e.box.wrapBody(strings.TrimSpace(e.think.text), w, true, StDim.Render("│ "))
 		return StDim.Render(thinkHeader(e.think)), e.box.rows

@@ -39,6 +39,7 @@ func capOf(m tuiModel, i int) int {
 // shows the newest lines (tail-follow), with a header saying what is hidden.
 func TestBox_GrowsToTheCapThenFollowsItsTail(t *testing.T) {
 	v := newVtui(80, 40)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	v.send("plan it")
 	thinkLines(v, 0, 3)
@@ -64,6 +65,7 @@ func TestBox_GrowsToTheCapThenFollowsItsTail(t *testing.T) {
 // fold, no shrink — and only the header changes.
 func TestBox_DoneKeepsTheHeight(t *testing.T) {
 	v := newVtui(80, 40)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	fillScreen(v)
 	v.send("plan it")
@@ -86,6 +88,7 @@ func TestBox_DoneKeepsTheHeight(t *testing.T) {
 func boxConvo(t *testing.T, h int) (v *vtui, think, run int) {
 	t.Helper()
 	v = newVtui(80, h)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	fillScreen(v)
 	v.send("plan it")
@@ -189,6 +192,7 @@ func TestBox_DescendScrollAndLeave(t *testing.T) {
 // stays where the person put it.
 func TestBox_TailFollowResumesOnLeave(t *testing.T) {
 	v := newVtui(80, 40)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	fillScreen(v)
 	v.send("plan it")
@@ -302,6 +306,7 @@ func TestBox_StreamingMovesTheScreenAtMostTheCap(t *testing.T) {
 // Resumed history renders the same boxes, done.
 func TestBox_Replay(t *testing.T) {
 	v := newVtui(80, 40)
+	v.m.thinkFull = true
 	thought := make([]string, 30)
 	for k := range thought {
 		thought[k] = fmt.Sprintf("past line %d", k)
@@ -325,6 +330,7 @@ func TestBox_Replay(t *testing.T) {
 // moves nothing; in a full one it pushes at most 15 rows (USER 2026-10-28).
 func TestBox_FillsFreeRowsThenPushesAtMost15(t *testing.T) {
 	v := newVtui(80, 40)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	v.send("plan it")
 	thinkLines(v, 0, 25)
@@ -334,6 +340,7 @@ func TestBox_FillsFreeRowsThenPushesAtMost15(t *testing.T) {
 	}
 
 	v = newVtui(80, 40)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	fillScreen(v)
 	v.send("plan it")
@@ -349,6 +356,7 @@ func TestBox_FillsFreeRowsThenPushesAtMost15(t *testing.T) {
 // more than the pane.
 func TestBox_ScrollingDownAtItsLastRowGrowsIt(t *testing.T) {
 	v := newVtui(80, 40)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	fillScreen(v)
 	v.send("plan it")

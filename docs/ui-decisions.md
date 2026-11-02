@@ -201,6 +201,13 @@ are in `decisions.md`.
   "pick several"; models never set it before the description named the cases.
 - **ctrl+tab types a tab.** Pasted tabs are kept (bracketed paste); a tab in
   the composer is a literal tab.
+- **Thinking is one line; ctrl+t shows all of it.** Reading it all was too
+  much. The prompt asks for `# Thinking: <what>` steps and a `# Summary:`;
+  a thought is one row (headline, time, words): the latest step while it
+  streams, the summary after, else the last step or first line. ctrl+t flips
+  every thought, in tool runs too, for the session. Folded from the start, so
+  the end of a round moves nothing; a flip keeps the view's top row. Search
+  and enter (pager) always have the full text.
 - **ask_user is one question at a time** (the answer to one guides the next).
   A turn that ends for any reason closes and settles its open question.
 - **Where trust shows.** Agent previews show state and spend.

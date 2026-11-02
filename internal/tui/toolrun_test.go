@@ -68,10 +68,10 @@ func TestRun_OneBoxThatAppends(t *testing.T) {
 	}
 }
 
-// A finished thought stays open while its run is on screen: the box shows
-// it as it streamed, under its "thought for" header. Once the run has
-// scrolled off the top of the view, the thought folds to its last sentence.
-func TestRun_FinishedThoughtOpenUntilScrolledOff(t *testing.T) {
+// A thought in a run is one line, live and finished; ctrl+t opens them all,
+// the finished ones under their "thought for" header and the live one as it
+// streams.
+func TestRun_ThoughtIsALineUntilUnfolded(t *testing.T) {
 	v := newVtui(100, 40)
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.send("go")
@@ -80,27 +80,20 @@ func TestRun_FinishedThoughtOpenUntilScrolledOff(t *testing.T) {
 	nm, _ := v.m.Update(renderTickMsg{})
 	v.m = nm.(tuiModel)
 	scr := v.view()
-	for _, want := range []string{"▾ ✻ thought for", "next: echo 0. Then check it.", "✓ $ echo 0", "▾ ✻ thinking…", "second line of it"} {
+	for _, want := range []string{"✻ next: echo 0. Then check it.", "✓ $ echo 0", "✻ first part.", "…, "} {
 		if !strings.Contains(scr, want) {
-			t.Errorf("missing %q:\n%s", want, scr)
+			t.Errorf("folded: missing %q:\n%s", want, scr)
 		}
 	}
-	// Push the run off the top, then read back up to it.
-	v.event(map[string]any{"type": "done"})
-	for i := 0; i < 6; i++ {
-		v.send(fmt.Sprintf("question %d", i))
-		v.event(map[string]any{"type": "token", "text": "answer\n\nmore\n\nand more\n\nand more"})
-		v.event(map[string]any{"type": "done"})
+	if strings.Contains(scr, "second line of it") || strings.Contains(scr, "thought for") {
+		t.Errorf("folded: the thought's body shows:\n%s", scr)
 	}
-	r := runIdx(v.m)
-	if top := v.m.frame.rowOffset[r]; top+v.m.frame.blockH[r] > v.m.vp.YOffset {
-		t.Fatalf("precondition: the run is above the view (%d+%d, view at %d)", top, v.m.frame.blockH[r], v.m.vp.YOffset)
-	}
-	v.setScrollPin(false)
-	v.setYOffset(v.m.frame.rowOffset[r])
+	v.m = key(v.m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	scr = v.view()
-	if !strings.Contains(scr, "✻ Then check it.  (") || strings.Contains(scr, "next: echo 0.") {
-		t.Errorf("scrolled off and back, the finished thought should be its last sentence:\n%s", scr)
+	for _, want := range []string{"▾ ✻ thought for", "next: echo 0. Then check it.", "✓ $ echo 0", "▾ ✻ thinking…", "second line of it"} {
+		if !strings.Contains(scr, want) {
+			t.Errorf("unfolded: missing %q:\n%s", want, scr)
+		}
 	}
 }
 
@@ -108,6 +101,7 @@ func TestRun_FinishedThoughtOpenUntilScrolledOff(t *testing.T) {
 // thought's text stays where it was, and the next call comes in under it.
 func TestRun_FinishedThoughtKeepsItsRows(t *testing.T) {
 	v := newVtui(100, 40)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	fillScreen(v) // no free rows: the box is at its push cap, short of all its steps
 	v.send("go")
@@ -171,21 +165,6 @@ func TestRun_Grouping(t *testing.T) {
 	long := &runItem{tool: "read", args: map[string]any{"path": strings.Repeat("x", 40)}, done: true}
 	if groupLen([]*runItem{items[0], long}) != 1 {
 		t.Error("a long target should not group")
-	}
-}
-
-func TestLastSentence(t *testing.T) {
-	for in, want := range map[string]string{
-		"First. Then the second one.":           "Then the second one.",
-		"one\nsentence across lines":            "one sentence across lines",
-		"Ends with a question? And an answer!":  "And an answer!",
-		"version 1.2 is fine. so load it last.": "so load it last.",
-		"  trailing space.  ":                   "trailing space.",
-		"":                                      "",
-	} {
-		if got := lastSentence(in); got != want {
-			t.Errorf("lastSentence(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 

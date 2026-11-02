@@ -157,18 +157,6 @@ func (m *tuiModel) replay(items []any) {
 		m.convo = append(m.convo, convoEntry{collapsed: StDim.Render(numfmt.Commaf("── resumed %d entries ──", n))})
 	}
 	m.quietReplay = false
-	// History was never on screen: its thoughts come back folded
-	// (scrollfold.go). Not in replayLive: a watched child's new entries are.
-	for i := range m.convo {
-		if r := m.convo[i].run; r != nil {
-			for _, it := range r.items {
-				if it.think != nil && !it.think.live {
-					it.folded = true
-				}
-			}
-			r.ver++
-		}
-	}
 	m.refresh()
 }
 

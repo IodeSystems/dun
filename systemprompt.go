@@ -47,9 +47,15 @@ func (h *Harness) SystemParts() SystemBreakdown {
 // work, and the lines for MCP servers whose descriptions dun does not write.
 const (
 	systemPreamble = `You are dun, a coding agent working inside an isolated workspace.`
-	systemCode     = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
-	systemShell    = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops."
-	systemDocs     = "\n- docs (raglit): search the document/knowledge index; get_document to read a full hit."
+
+	// systemThinking makes reasoning skimmable: the TUI shows a thought as one
+	// line, the latest heading while it streams and the summary after
+	// (thinkHeadline). Fixed text, so it keeps the cache.
+	systemThinking = " In your reasoning, start each step with a line `# Thinking: <what, in a few words>`, and end with `# Summary: <what you concluded, in one line>`."
+
+	systemCode  = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
+	systemShell = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops."
+	systemDocs  = "\n- docs (raglit): search the document/knowledge index; get_document to read a full hit."
 
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
 
@@ -111,6 +117,7 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files str
 	} else {
 		b.WriteString(".")
 	}
+	b.WriteString(systemThinking)
 	var fam strings.Builder
 	if have[ServerCode] {
 		fam.WriteString(systemCode)

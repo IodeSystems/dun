@@ -16,18 +16,16 @@ import (
 // bounded box (box.go) that only ever grows.
 //
 //	⚙ 5 steps — exec ×4, notes · project notes · 1 failed · thought 12s    ↑ 40 more
-//	│ ✻ thought for 2s · 40 words
-//	│ │ the round's reasoning, dimmed
+//	│ ✻ the overlay is read first  (2s, 40 words)
 //	│ ✓ $ go test ./...  → ✓ 12 lines · ok
-//	│ ✻ thinking… 1s · 12 words
-//	│ │ the newest lines, followed while live
+//	│ ✻ checking the build  (1s…, 12 words)
 //
 // Every new thought or call is APPENDED inside the box; nothing above it is
-// removed, folded or shrunk while the run is on screen (the no-screen-jump
-// rule — tested as a property over mixed event streams, see
-// noshrink_test.go). Its finished thoughts fold to one line only once the run
-// has scrolled off the top of the view (scrollfold.go). The header carries
-// the summary and changes in place.
+// removed or shrunk while the run is on screen (the no-screen-jump rule —
+// tested as a property over mixed event streams, see noshrink_test.go). A
+// thought is one line (thoughtLine), live and finished, unless the person
+// unfolded thinking (ctrl+t, thinking.go): then it is open as the sketch
+// shows. The header carries the summary and changes in place.
 //
 // A run is OPEN while it is the last block and the round's reply has not
 // begun: thoughts and calls go into it. A reply, a user message, a
@@ -53,11 +51,6 @@ type runItem struct {
 	output  string // the renderer's styled output, for the pager
 	think   *thinkBlock
 	wrap    boxState // a thought's wrapped rows (box.go's line-at-a-time cache)
-	// folded: a finished thought is drawn as its one line. It stays open,
-	// as it was while it streamed, until the run has scrolled off the top of
-	// the view (foldAbove, scrollfold.go): folding it on screen left blank
-	// rows where its text was.
-	folded bool
 }
 
 type toolRun struct {
@@ -154,7 +147,7 @@ func (it *runItem) line(width int) string {
 
 // boxRows is the run's box body at width w, a step per line:
 //
-//	✻ the overlay is read before the project file   (2s, 60 words)
+//	✻ the overlay is read before the project file  (2s, 60 words)
 //	✗ $ go test ./internal/...  → ✗ 2 failed
 //	    config_test.go:41: want 3 layers, got 2
 //	✓ read ×4: a.go, b.go, c.go, d.go
@@ -162,9 +155,8 @@ func (it *runItem) line(width int) string {
 //	  the live thought's text, all of it; the box shows its tail
 //
 // Finished calls are one line (a failure keeps up to two lines of its
-// error). A thought is open while it streams and stays open once finished,
-// until the run has scrolled off the top of the view; then it folds to one
-// line (runItem.folded, scrollfold.go). The box windows the tail of this.
+// error). A thought is its headline (thoughtLine), or open as drawn above
+// when unfolded. The box windows the tail of this.
 func (r *toolRun) boxRows(w int) []string {
 	if r.rows != nil && r.rowsVer == r.ver && r.rowsW == w && !r.live() {
 		return r.rows
@@ -174,7 +166,7 @@ func (r *toolRun) boxRows(w int) []string {
 	for k := 0; k < len(r.items); k++ {
 		it := r.items[k]
 		switch {
-		case it.think != nil && (it.think.live || !it.folded):
+		case it.think != nil && it.think.full:
 			rows = append(rows, "  "+StDim.Render("▾ "+thinkHeader(it.think)))
 			it.wrap.wrapBody(strings.TrimSpace(it.think.text), w, true, "    ")
 			rows = append(rows, it.wrap.rows...)
@@ -202,38 +194,6 @@ func (r *toolRun) boxRows(w int) []string {
 func (r *toolRun) live() bool {
 	n := len(r.items)
 	return n > 0 && r.items[n-1].think != nil && r.items[n-1].think.live
-}
-
-// thoughtLine is a finished thought as one line: its LAST sentence — where it
-// landed — then how long and how much.
-func thoughtLine(t *thinkBlock, w int) string {
-	meta := fmt.Sprintf("  (%s, %d words)", thoughtTime(t), len(strings.Fields(t.text)))
-	last, _ := fitPlain(lastSentence(t.text), max(1, w-2-len([]rune(meta))))
-	return stSecondary.Render("✻ " + last + meta)
-}
-
-func thoughtTime(t *thinkBlock) string {
-	if t.end.IsZero() || t.start.IsZero() {
-		return "–"
-	}
-	return thinkDur(t.end.Sub(t.start))
-}
-
-// lastSentence is the final sentence of a thought, on one line.
-func lastSentence(s string) string {
-	s = strings.TrimSpace(textfmt.OneLine(s))
-	body := strings.TrimRight(s, ".!?…")
-	cut := -1
-	for i := len(body) - 1; i > 0; i-- {
-		if (body[i-1] == '.' || body[i-1] == '!' || body[i-1] == '?') && body[i] == ' ' {
-			cut = i
-			break
-		}
-	}
-	if cut < 0 {
-		return s
-	}
-	return strings.TrimSpace(s[cut:])
 }
 
 // callLine is a call: its mark, short form and outcome preview.

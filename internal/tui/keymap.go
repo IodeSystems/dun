@@ -58,6 +58,8 @@ var keyActions = []keyAction{
 	{"history.prev", "main", "the previous message you sent", []string{"ctrl+up"}},
 	{"history.next", "main", "the next message you sent", []string{"ctrl+down"}},
 
+	{"thinking.fold", "main", "all thinking: one line each, or in full", []string{"ctrl+t"}},
+
 	{"move.up", "main", "up: a line, a block, or history at the input's top", []string{"up"}},
 	{"move.down", "main", "down", []string{"down"}},
 	{"move.left", "main", "left", []string{"left", "ctrl+b"}},

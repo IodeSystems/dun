@@ -318,6 +318,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+end": // end a scroll-back: newest output, following again
 			m.scrollToEnd()
 			return m, nil
+		case "ctrl+t": // every thought: its one line, or in full
+			m.toggleThinking()
+			return m, nil
 		case "ctrl+home": // top of the last user message: the current exchange
 			m.scrollToLastUser()
 			return m, nil

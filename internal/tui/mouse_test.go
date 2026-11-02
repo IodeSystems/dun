@@ -405,6 +405,7 @@ func TestYank(t *testing.T) {
 	var wrote, ran []string
 	fakeClip(t, map[string]string{}, &wrote, &ran, nil)
 	v := newVtui(80, 24)
+	v.m.thinkFull = true
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.event(map[string]any{"type": "user", "content": "hello there"})
 	v.event(map[string]any{"type": "turn", "kind": "user"})

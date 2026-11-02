@@ -2,16 +2,14 @@ package tui
 
 // Folding under scroll pressure (owner: "not yielding matters most").
 //
-// A block gets shorter in two ways: its content folds (a run's finished
-// thought becomes one line), or it holds rows it no longer fills (maxH, a
-// box's peak — the blank rows that keep the conversation from moving). Both
-// wait until the block is above the view: a block on screen keeps its full
-// height and its content, so the rows the person is reading never move and
-// no blank rows open among them. Once the scroll has pushed a block off the
-// top — the stream pinned to the bottom, or the person scrolling down — the
-// next refresh folds it and draws it at its own height, and the view's top
-// moves up by the rows it gave back (refresh), so every visible row stays
-// where it was. Scrolling back up shows it folded.
+// A block holds rows it no longer fills (maxH, a box's peak — the blank rows
+// that keep the conversation from moving). It lets them go only once the
+// block is above the view: a block on screen keeps its height, so the rows
+// the person is reading never move and no blank rows open among them. Once
+// the scroll has pushed a block off the top — the stream pinned to the
+// bottom, or the person scrolling down — the next refresh draws it at its
+// own height, and the view's top moves up by the rows it gave back
+// (refresh), so every visible row stays where it was.
 //
 // Not while something else keeps an offset of its own (a panel's hold, a
 // mouse highlight, a width or pane-height change: the callers that resize the
@@ -36,17 +34,9 @@ func (m *tuiModel) aboveView(i, y int, selMode bool) bool {
 	return e.rowOffset+e.lastH <= y
 }
 
-// foldEntry readies entry i, above the view, to draw at its own height: a
-// run's finished thoughts fold to one line, and the held heights start over.
+// foldEntry readies entry i, above the view, to draw at its own height: the
+// held heights start over.
 func (e *convoEntry) foldEntry() {
-	if e.run != nil {
-		for _, it := range e.run.items {
-			if it.think != nil && !it.think.live && !it.folded {
-				it.folded = true
-				e.run.ver++
-			}
-		}
-	}
 	if e.box != nil {
 		e.box.peak, e.box.grant, e.box.capAt = 0, 0, 0
 	}
