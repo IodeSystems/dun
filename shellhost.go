@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Shell-placed MCP servers.
@@ -243,7 +245,7 @@ func (h *Harness) shellArgsHosted(s Server) []string {
 		err = os.MkdirAll(filepath.Dir(path), 0o700)
 	}
 	if err == nil {
-		err = writeFileAtomic(path, append(b, '\n'), 0o600)
+		err = fsutil.WriteAtomic(path, append(b, '\n'), 0o600)
 	}
 	if err != nil {
 		log.Printf("dun: the shell starts without its hosted servers: %v", err)

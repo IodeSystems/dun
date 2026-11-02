@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Prompt rephrasing — make a vague request concrete BEFORE the agent acts on it.
@@ -72,7 +73,7 @@ func SetRephrasePrompt(text string) error {
 	if err := os.MkdirAll(DunHome(), 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(rephraseFile(), []byte(strings.TrimSpace(text)+"\n"), 0o600)
+	return fsutil.WriteAtomic(rephraseFile(), []byte(strings.TrimSpace(text)+"\n"), 0o600)
 }
 
 // Rephrase rewrites the user's message with specificity, ready to be acted on.

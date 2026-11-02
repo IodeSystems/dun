@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr/mcpauth"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // OAuth for remote MCP servers (ServerSpec.OAuth).
@@ -230,7 +231,7 @@ func (c *oauthClient) save(t *oauthToken) error {
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomic(c.path, append(b, '\n'), 0o600); err != nil {
+	if err := fsutil.WriteAtomic(c.path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	c.tok = t

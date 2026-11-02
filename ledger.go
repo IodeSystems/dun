@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // The spend ledger: what every session and sub-agent on this machine spent,
@@ -367,7 +368,7 @@ func (l *SpendLedger) SaveKeyBudget(fp string, b llm.KeyBudget, at time.Time) er
 	if err := os.MkdirAll(l.dir, 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(l.keyFile(fp), append(data, '\n'), 0o600)
+	return fsutil.WriteAtomic(l.keyFile(fp), append(data, '\n'), 0o600)
 }
 
 // LoadKeyBudget is key fp's last budget and when it was read.

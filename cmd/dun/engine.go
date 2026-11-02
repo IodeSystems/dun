@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -180,7 +181,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				if err := dun.SetRephrasePrompt(text); err != nil {
 					msg = "rephrase prompt: " + err.Error()
 				} else {
-					msg = "rephrase prompt: saved (" + dun.Grouped(len(text)) + " chars); the user's message follows it"
+					msg = "rephrase prompt: saved (" + numfmt.Grouped(len(text)) + " chars); the user's message follows it"
 				}
 			}
 			em.emit(&proto.ControlEvent{ID: id, Action: "prompt", Message: msg})

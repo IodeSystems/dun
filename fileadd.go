@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	filetools "github.com/iodesystems/agentkit/files"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // /file (USER 2026-10-27, scoped 2026-10-28): files and directories outside
@@ -151,7 +152,7 @@ func (h *Harness) editPathsFile(scope string, edit func(*pathsFile)) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(p, append(b, '\n'), 0o600)
+	return fsutil.WriteAtomic(p, append(b, '\n'), 0o600)
 }
 
 // migrateAdded reads the old <session>.files.json list into the session's
@@ -184,7 +185,7 @@ func (h *Harness) migrateAdded() {
 		}
 	}
 	nb, _ := json.MarshalIndent(f, "", "  ")
-	if writeFileAtomic(p, append(nb, '\n'), 0o600) == nil {
+	if fsutil.WriteAtomic(p, append(nb, '\n'), 0o600) == nil {
 		_ = os.Remove(old)
 	}
 }

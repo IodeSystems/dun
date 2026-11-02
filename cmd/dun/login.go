@@ -12,7 +12,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/openurl"
 )
 
 // /login starts with a picker of services: custom (any OpenAI-compatible
@@ -363,5 +363,5 @@ var openKeysPage = func(url string) bool {
 	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "" {
 		return false
 	}
-	return dun.OpenBrowser(url) == nil
+	return openurl.Open(url) == nil
 }

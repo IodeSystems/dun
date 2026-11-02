@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Declarative MCP server configuration.
@@ -810,7 +812,7 @@ func updateLocalServer(dir, id string, edit func(*ServerSpec)) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("dun: encode %s: %w", path, err)
 	}
-	if err := writeFileAtomic(path, append(b, '\n'), 0o600); err != nil {
+	if err := fsutil.WriteAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -852,7 +854,7 @@ func removeLocalServer(dir, id string) ([]string, error) {
 		if err != nil {
 			return changed, fmt.Errorf("dun: encode %s: %w", path, err)
 		}
-		if err := writeFileAtomic(path, append(b, '\n'), 0o600); err != nil {
+		if err := fsutil.WriteAtomic(path, append(b, '\n'), 0o600); err != nil {
 			return changed, err
 		}
 		changed = append(changed, path)

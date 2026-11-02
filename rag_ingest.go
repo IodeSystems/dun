@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // What the docs index is given (USER 2026-10-22: "a problem with extremely
@@ -477,9 +479,9 @@ const summaryDirs = 5
 // why, and the include that brings a skipped path back.
 func (p IngestPlan) Summary() string {
 	var b strings.Builder
-	b.WriteString("docs: indexing " + Grouped(len(p.Files)) + " file" + plural(len(p.Files)))
+	b.WriteString("docs: indexing " + numfmt.Grouped(len(p.Files)) + " file" + plural(len(p.Files)))
 	if p.Huge {
-		fmt.Fprintf(&b, " (%s, over the directory limit — the workspace itself is large)", HumanBytes(p.KeptBytes))
+		fmt.Fprintf(&b, " (%s, over the directory limit — the workspace itself is large)", numfmt.HumanBytes(p.KeptBytes))
 	}
 	var skips []string
 	var shown []SkippedDir
@@ -497,7 +499,7 @@ func (p IngestPlan) Summary() string {
 		if d.Reason != "" {
 			names = append(names, d.Rel+"/ ("+d.Reason+")")
 		} else {
-			names = append(names, fmt.Sprintf("%s/ (%s files, %s)", d.Rel, Grouped(d.Files), HumanBytes(d.Bytes)))
+			names = append(names, fmt.Sprintf("%s/ (%s files, %s)", d.Rel, numfmt.Grouped(d.Files), numfmt.HumanBytes(d.Bytes)))
 		}
 	}
 	if len(names) > 0 {
@@ -509,13 +511,13 @@ func (p IngestPlan) Summary() string {
 			if i == 3 {
 				break
 			}
-			big = append(big, path.Base(f.Rel)+" "+HumanBytes(f.Bytes))
+			big = append(big, path.Base(f.Rel)+" "+numfmt.HumanBytes(f.Bytes))
 		}
 		skips = append(skips, fmt.Sprintf("%s %s over %s (largest: %s)",
-			Grouped(n), "file"+plural(n), HumanBytes(p.MaxFile), strings.Join(big, ", ")))
+			numfmt.Grouped(n), "file"+plural(n), numfmt.HumanBytes(p.MaxFile), strings.Join(big, ", ")))
 	}
 	if p.Binary > 0 {
-		skips = append(skips, Grouped(p.Binary)+" binary file"+plural(p.Binary))
+		skips = append(skips, numfmt.Grouped(p.Binary)+" binary file"+plural(p.Binary))
 	}
 	if len(skips) == 0 {
 		return b.String()

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/numfmt"
 	shim "github.com/iodesystems/openai-claude-api-shim"
 )
 
@@ -88,7 +90,7 @@ func saveContext(e Endpoint, c ContextConfig) error {
 	if err := os.MkdirAll(DunHome(), 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(contextFile(), append(b, '\n'), 0o600)
+	return fsutil.WriteAtomic(contextFile(), append(b, '\n'), 0o600)
 }
 
 // savedWindow is the window set for e, 0 when none is.
@@ -243,7 +245,7 @@ func (h *Harness) SetWindow(ctx context.Context, n int) (string, error) {
 	if n > 0 {
 		h.window.Store(int64(n))
 		h.windowRunner, h.windowSrc = nil, "the window set for "+e.Model+" (/context config --max)"
-		return fmt.Sprintf("context window: %s tokens for %s (saved; compaction and the response cap use it from the next request)", Grouped(n), e.Model), nil
+		return fmt.Sprintf("context window: %s tokens for %s (saved; compaction and the response cap use it from the next request)", numfmt.Grouped(n), e.Model), nil
 	}
 	cctx, cancel := context.WithTimeout(ctx, 2*contextWindowTimeout)
 	defer cancel()
@@ -255,7 +257,7 @@ func (h *Harness) SetWindow(ctx context.Context, n int) (string, error) {
 		return "context window: auto — the server states none; /context config --max <tokens> sets it", nil
 	}
 	h.windowRunner = nil
-	return fmt.Sprintf("context window: auto — %s tokens, from %s", Grouped(got), src), nil
+	return fmt.Sprintf("context window: auto — %s tokens, from %s", numfmt.Grouped(got), src), nil
 }
 
 // WindowStatus is the window in force and where it came from.
@@ -299,7 +301,7 @@ func (h *Harness) ConfigureContext(ctx context.Context, changes map[string]int) 
 			// SetWindow saves it and resolves the window now.
 		case "compact-buffer":
 			if v > 0 && v < minOutputTokens {
-				return "", fmt.Errorf("--compact-buffer: at least %s tokens (a reply needs room)", Grouped(minOutputTokens))
+				return "", fmt.Errorf("--compact-buffer: at least %s tokens (a reply needs room)", numfmt.Grouped(minOutputTokens))
 			}
 			c.CompactBuffer = v
 		case "tool-lod":
@@ -334,10 +336,10 @@ func (h *Harness) ContextStatus() string {
 	n, src := h.WindowStatus()
 	max := "unknown (set it: --max)"
 	if n > 0 {
-		max = Grouped(n) + " tokens, from " + src
+		max = numfmt.Grouped(n) + " tokens, from " + src
 	}
 	return fmt.Sprintf("context: max %s · compact-buffer %s · tool-lod %s chars · recap-nudge %s",
-		max, Grouped(maxOutputTokens()), Grouped(lodChars()), Grouped(recapNudgeAt()))
+		max, numfmt.Grouped(maxOutputTokens()), numfmt.Grouped(lodChars()), numfmt.Grouped(recapNudgeAt()))
 }
 
 // ContextSettings is the settings in force, for a client.

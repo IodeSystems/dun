@@ -1,4 +1,4 @@
-package dun
+package numfmt
 
 import (
 	"fmt"

@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Sub-agent isolation (USER 2026-10-27: "subagents working simultaneously …
@@ -192,7 +194,7 @@ func saveIsolation(sessionFile string, iso isolation) {
 		return
 	}
 	if b, err := json.Marshal(iso); err == nil {
-		_ = writeFileAtomic(p, b, 0o600)
+		_ = fsutil.WriteAtomic(p, b, 0o600)
 	}
 }
 

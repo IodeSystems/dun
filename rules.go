@@ -19,6 +19,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // The project's rules: the workspace's root AGENTS.md and CLAUDE.md, and the
@@ -501,7 +503,7 @@ func (h *Harness) writeRulesState(st rulesState) error {
 	if p == "" {
 		return fmt.Errorf("no project state dir")
 	}
-	return writeFileAtomic(p, mustJSON(st), 0o600)
+	return fsutil.WriteAtomic(p, mustJSON(st), 0o600)
 }
 
 // updateRulesState applies f to the saved state under the lock.
@@ -561,7 +563,7 @@ func (h *Harness) rulesBlock(docsOn bool) (string, string, rulesSet) {
 				_ = h.updateRulesState(func(s *rulesState) { s.Offered = hash })
 				h.cfg.OnRules(fmt.Sprintf("project rules: %s with %d imported file(s) cost ~%s tokens on every request. "+
 					"/rules summary condenses the imports, /rules index makes them searchable instead; /rules alone shows what each file costs and switches one out of every request.",
-					set.rootNames(), len(set.Imports), Grouped(n)))
+					set.rootNames(), len(set.Imports), numfmt.Grouped(n)))
 			}
 		}
 	}
@@ -706,7 +708,7 @@ func (h *Harness) RulesStatus() string {
 			b.WriteString(d.Note)
 			return
 		}
-		fmt.Fprintf(&b, "%7s  ~%s tokens", HumanBytes(int64(d.Size)), Grouped(h.meter.Estimate(d.Text)))
+		fmt.Fprintf(&b, "%7s  ~%s tokens", numfmt.HumanBytes(int64(d.Size)), numfmt.Grouped(h.meter.Estimate(d.Text)))
 		if d.Also != "" {
 			b.WriteString("  (also " + d.Also + ")")
 		}
@@ -724,15 +726,15 @@ func (h *Harness) RulesStatus() string {
 		row(d)
 	}
 	full := h.meter.Estimate(set.render(RulesFull, ""))
-	fmt.Fprintf(&b, "\n  block: ~%s tokens in mode full", Grouped(full))
+	fmt.Fprintf(&b, "\n  block: ~%s tokens in mode full", numfmt.Grouped(full))
 	if mode != RulesFull {
 		sum := ""
 		if st.Summary != nil {
 			sum = st.Summary.Text
 		}
-		fmt.Fprintf(&b, ", ~%s in mode %s", Grouped(h.meter.Estimate(set.render(mode, sum))), mode)
+		fmt.Fprintf(&b, ", ~%s in mode %s", numfmt.Grouped(h.meter.Estimate(set.render(mode, sum))), mode)
 	} else if st.Summary != nil && st.Summary.Hash == set.importsHash() {
-		fmt.Fprintf(&b, ", ~%s with the saved summary", Grouped(h.meter.Estimate(set.render(RulesSummary, st.Summary.Text))))
+		fmt.Fprintf(&b, ", ~%s with the saved summary", numfmt.Grouped(h.meter.Estimate(set.render(RulesSummary, st.Summary.Text))))
 	}
 	b.WriteString(" (estimated)")
 	if len(set.Imports) == 0 {
@@ -777,9 +779,9 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 		sum = st.Summary.Text
 	}
 	full := h.meter.Estimate(set.render(RulesFull, ""))
-	msg := fmt.Sprintf("rules: mode %s · ~%s tokens", mode, Grouped(full))
+	msg := fmt.Sprintf("rules: mode %s · ~%s tokens", mode, numfmt.Grouped(full))
 	if mode != RulesFull {
-		msg = fmt.Sprintf("rules: mode %s · ~%s tokens, was ~%s in mode full", mode, Grouped(h.meter.Estimate(set.render(mode, sum))), Grouped(full))
+		msg = fmt.Sprintf("rules: mode %s · ~%s tokens, was ~%s in mode full", mode, numfmt.Grouped(h.meter.Estimate(set.render(mode, sum))), numfmt.Grouped(full))
 	}
 	if mode == RulesIndex {
 		msg += fmt.Sprintf(" · %d file(s) going into index %q", len(rulesIndexWant(set, RulesIndex)), rulesIndex)
@@ -849,7 +851,7 @@ func (h *Harness) ensureRulesSummary(ctx context.Context, set rulesSet) error {
 	}
 	full := h.meter.Estimate(set.render(RulesFull, ""))
 	if cond := h.meter.Estimate(set.render(RulesSummary, text)); cond >= full {
-		return fmt.Errorf("the summary (~%s tokens) is not smaller than the files (~%s): kept mode full", Grouped(cond), Grouped(full))
+		return fmt.Errorf("the summary (~%s tokens) is not smaller than the files (~%s): kept mode full", numfmt.Grouped(cond), numfmt.Grouped(full))
 	}
 	hash := set.importsHash()
 	return h.updateRulesState(func(s *rulesState) { s.Summary = &rulesSummary{Hash: hash, Text: text} })

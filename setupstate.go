@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // Install hints, from poly-lsp-mcp (commit f064670).
@@ -223,7 +225,7 @@ func filesOf(n int) string {
 	if n == 1 {
 		return "1 file"
 	}
-	return Grouped(n) + " files"
+	return numfmt.Grouped(n) + " files"
 }
 
 // joinAnd is "a", "a and b", "a, b and c".

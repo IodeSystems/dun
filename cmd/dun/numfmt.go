@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	dun "github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // Numbers people read — token counts, chars, bytes — carry thousands
@@ -12,10 +12,10 @@ import (
 // 1234567 (USER 2026-10-22). Reports format with commaf instead of
 // fmt.Sprintf; ids, ports and years are not written with it.
 
-// grouped writes an integer with thousands separators (dun.Grouped, the one
+// grouped writes an integer with thousands separators (numfmt.Grouped, the one
 // implementation).
 func grouped[T ~int | ~int32 | ~int64 | ~uint | ~uint32 | ~uint64](n T) string {
-	return dun.Grouped(n)
+	return numfmt.Grouped(n)
 }
 
 // commaf is fmt.Sprintf, except an integer given to %d is written with

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // /lsp exclude <dir> and /lsp include <dir>: what the code
@@ -142,7 +143,7 @@ func indexStatus(st dun.ServerState, slash string) string {
 	case st.Index == dun.IndexBuilding:
 		lines = append(lines, fmt.Sprintf("index: building · %ds", int(st.IndexSeconds+0.5)))
 	case st.Index == dun.IndexReady:
-		lines = append(lines, fmt.Sprintf("index: ready · %s files · %.1fs", dun.Grouped(st.IndexFiles), st.IndexSeconds))
+		lines = append(lines, fmt.Sprintf("index: ready · %s files · %.1fs", numfmt.Grouped(st.IndexFiles), st.IndexSeconds))
 	case st.Index == dun.IndexFailed:
 		lines = append(lines, "index: failed — "+oneLine(st.IndexErr))
 	}

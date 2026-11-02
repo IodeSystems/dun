@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/openurl"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -24,7 +25,7 @@ func oauthBroker() *dun.OAuthBroker {
 	brokerOnce.Do(func() {
 		var open func(string) error
 		if os.Getenv("DUN_NO_BROWSER") == "" {
-			open = dun.OpenBrowser
+			open = openurl.Open
 		}
 		broker = dun.NewOAuthBroker(open)
 	})

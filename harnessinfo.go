@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // What dun is, for whoever has to say (USER 2026-10-27, critical): a
@@ -120,7 +122,7 @@ func (h *Harness) writeHarnessInfo() {
 	if err != nil {
 		return
 	}
-	_ = writeFileAtomic(HarnessInfoFile(h.cfg.SessionFile), append(b, '\n'), 0o600)
+	_ = fsutil.WriteAtomic(HarnessInfoFile(h.cfg.SessionFile), append(b, '\n'), 0o600)
 }
 
 // identityLine introduces dun in the system prompt: its icon, its session,

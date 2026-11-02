@@ -8,6 +8,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Scoped switches: a kind of thing the person turns on and off at the three
@@ -310,7 +312,7 @@ func (h *Harness) editSwitchFile(kind, scope string, edit func(*SwitchFile)) err
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(p, append(b, '\n'), 0o600)
+	return fsutil.WriteAtomic(p, append(b, '\n'), 0o600)
 }
 
 // scopeWords is a scope as a phrase.

@@ -27,6 +27,8 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/openurl"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -699,7 +701,7 @@ func main() {
 	// DUN_NO_BROWSER is set (a headless box, a test). The URL is shown to
 	// the person either way.
 	if os.Getenv("DUN_NO_BROWSER") == "" {
-		cfg.OpenBrowser = dun.OpenBrowser
+		cfg.OpenBrowser = openurl.Open
 	}
 	var peers *peerLink
 	if *prog {
@@ -1043,7 +1045,7 @@ type closeCtx struct {
 }
 
 func oneLine(s string) string   { return strings.Join(strings.Fields(s), " ") }
-func humanBytes(n int64) string { return dun.HumanBytes(n) }
+func humanBytes(n int64) string { return numfmt.HumanBytes(n) }
 func clip(s string, n int) string {
 	if len(s) <= n {
 		return s

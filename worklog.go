@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // /worklog: a per-session tree of tasks the person opens and closes, and the
@@ -496,7 +497,7 @@ func (h *Harness) saveWorklogLocked() error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(WorklogFile(h.cfg.SessionFile), append(b, '\n'), 0o600)
+	return fsutil.WriteAtomic(WorklogFile(h.cfg.SessionFile), append(b, '\n'), 0o600)
 }
 
 // workRecord adds an event to the open task. Sub-agents record nothing: the
@@ -670,7 +671,7 @@ func (h *Harness) WriteWorklog(ctx context.Context, arg string) (string, error) 
 		dir = filepath.Join(os.TempDir(), "dun-worklog")
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%d-%s.md", t.N, slug(t.Title)))
-	if err := writeFileAtomic(path, []byte(text), 0o600); err != nil {
+	if err := fsutil.WriteAtomic(path, []byte(text), 0o600); err != nil {
 		return "", err
 	}
 	h.wlMu.Lock()

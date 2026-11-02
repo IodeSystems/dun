@@ -11,6 +11,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // dun's own tools in /mcp (USER 2026-10-28: "it's odd that we don't see
@@ -108,7 +109,7 @@ func (h *Harness) editBuiltins(scope string, edit func(*builtinsFile)) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(p, append(b, '\n'), 0o600)
+	return fsutil.WriteAtomic(p, append(b, '\n'), 0o600)
 }
 
 // builtinScopes is every scope's file, nearest first.

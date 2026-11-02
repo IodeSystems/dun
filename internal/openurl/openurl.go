@@ -1,4 +1,4 @@
-package dun
+package openurl
 
 import "os/exec"
 

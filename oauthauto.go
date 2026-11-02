@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/agentkit/mcpmgr/mcpauth"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // The client dun logs in as when an oauth block names no client_id (USER
@@ -86,7 +87,7 @@ func (c *oauthClient) chooseClient(ctx context.Context, md *mcpauth.AuthServerMe
 		if err := os.MkdirAll(OAuthDir(), 0o700); err != nil {
 			return a, err
 		}
-		return a, writeFileAtomic(autoClientFile(c.id), append(b, '\n'), 0o600)
+		return a, fsutil.WriteAtomic(autoClientFile(c.id), append(b, '\n'), 0o600)
 	}
 	why := "offers neither dynamic client registration nor client ID metadata documents"
 	if md.ClientIDMetadataDocumentSupported {

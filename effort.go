@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Effort: how much the model thinks before it answers, set with /effort
@@ -81,7 +82,7 @@ func (h *Harness) SetEffort(level string) error {
 	if err := os.MkdirAll(DunHome(), 0o700); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(effortFile(), append(b, '\n'), 0o600); err != nil {
+	if err := fsutil.WriteAtomic(effortFile(), append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	h.effort.Store(level)

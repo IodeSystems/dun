@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Sub-agents — spending someone else's context.
@@ -845,7 +846,7 @@ func (s *subAgent) saveState() {
 		return
 	}
 	if b, err := json.Marshal(rec); err == nil {
-		_ = writeFileAtomic(agentFile(path), b, 0o600)
+		_ = fsutil.WriteAtomic(agentFile(path), b, 0o600)
 	}
 }
 

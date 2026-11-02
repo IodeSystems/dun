@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // A server's index, after its handshake (plan item 46).
@@ -365,10 +367,10 @@ func (h *Harness) retryIndex(id string, n indexNote) string {
 	what, target := "", n.Limit
 	if n.Budget != "" {
 		what = fmt.Sprintf("the index did not fit its startup budget — %s read %s of %s indexable files",
-			n.Budget, Grouped(n.Read), Grouped(rep.Files))
+			n.Budget, numfmt.Grouped(n.Read), numfmt.Grouped(rep.Files))
 		target = n.Read
 	} else {
-		what = fmt.Sprintf("the index stopped at its limit — %s indexable files, limit %s", Grouped(rep.Files), Grouped(n.Limit))
+		what = fmt.Sprintf("the index stopped at its limit — %s indexable files, limit %s", numfmt.Grouped(rep.Files), numfmt.Grouped(n.Limit))
 	}
 	dirs := chooseExcludes(rep, target)
 	raise := ""
@@ -475,7 +477,7 @@ func them(n int) string {
 // excludeReason says why a directory was left out: its files, its share of
 // the index, and the checkouts in it.
 func excludeReason(d IndexDir) string {
-	s := fmt.Sprintf("%s files, %d%% of the index", Grouped(d.Files), int(d.Share*100+0.5))
+	s := fmt.Sprintf("%s files, %d%% of the index", numfmt.Grouped(d.Files), int(d.Share*100+0.5))
 	switch {
 	case d.NestedCheckouts == 1:
 		s += ", another git checkout"
@@ -513,9 +515,9 @@ func (h *Harness) nestedWarning(id string, rep *IndexReport) string {
 // files, bytes, nested checkouts.
 func indexPostMortem(r IndexReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "index: %s files, %s", Grouped(r.Files), HumanBytes(r.Bytes))
+	fmt.Fprintf(&b, "index: %s files, %s", numfmt.Grouped(r.Files), numfmt.HumanBytes(r.Bytes))
 	for _, d := range r.Heaviest {
-		fmt.Fprintf(&b, "\n  %3d%%  %-24s %8s files  %8s", int(d.Share*100+0.5), d.Dir, Grouped(d.Files), HumanBytes(d.Bytes))
+		fmt.Fprintf(&b, "\n  %3d%%  %-24s %8s files  %8s", int(d.Share*100+0.5), d.Dir, numfmt.Grouped(d.Files), numfmt.HumanBytes(d.Bytes))
 		if d.NestedCheckouts > 0 {
 			fmt.Fprintf(&b, "  %d nested checkout(s)", d.NestedCheckouts)
 		}

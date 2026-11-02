@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Three scopes of server switches.
@@ -150,7 +152,7 @@ func saveSessionServers(sessionFile string, sw map[string]SessionServer) (string
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return "", err
 	}
-	return p, writeFileAtomic(p, append(b, '\n'), 0o600)
+	return p, fsutil.WriteAtomic(p, append(b, '\n'), 0o600)
 }
 
 // catalogEntry is one server across the layers: def is every layer merged
