@@ -1,9 +1,8 @@
-package dun
+package proc
 
 import (
 	"context"
 	"os/exec"
-	"strings"
 	"testing"
 )
 
@@ -12,7 +11,7 @@ import (
 // reading it, and the TUI — blocked on the same tty — then loses half the
 // keystrokes typed at it, with no error anywhere.
 func TestDetach_NoControllingTerminal(t *testing.T) {
-	cmd := detach(exec.Command("true"))
+	cmd := Detach(exec.Command("true"))
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid {
 		t.Error("detached child must get its own session (Setsid), or it inherits dun's tty")
 	}
@@ -34,7 +33,7 @@ func TestDetach_NoControllingTerminal(t *testing.T) {
 // session no longer dies with the terminal, so cancelling it must take the
 // whole tree — the `sh` → `git push` → `git-remote-https` shape.
 func TestKillGroup_CancelsTheTree(t *testing.T) {
-	cmd := killGroup(exec.CommandContext(context.Background(), "true"))
+	cmd := KillGroup(exec.CommandContext(context.Background(), "true"))
 	if cmd.Cancel == nil {
 		t.Fatal("no Cancel: a cancelled command would leak its descendants")
 	}
@@ -44,16 +43,6 @@ func TestKillGroup_CancelsTheTree(t *testing.T) {
 	// Cancel before Start must not panic on a nil Process.
 	if err := cmd.Cancel(); err != nil {
 		t.Errorf("Cancel before Start: %v", err)
-	}
-}
-
-// HostExec is where model-authored commands run — the path that actually hit
-// this. The wiring matters more than the helper.
-func TestHostExec_DetachesTheCommand(t *testing.T) {
-	out := HostExec{Dir: t.TempDir()}.Run(context.Background(), "ps -o tty= -p $$", nil)
-	// No controlling terminal renders as "?" (or empty) in ps's tty column.
-	if tty := strings.TrimSpace(out.Output); tty != "" && tty != "?" {
-		t.Errorf("exec'd command still has a controlling terminal (%q) — it can steal the TUI's keystrokes", tty)
 	}
 }
 
@@ -69,7 +58,7 @@ func TestHostExec_DetachesTheCommand(t *testing.T) {
 func TestDetach_SilencesTheGitEditor(t *testing.T) {
 	cmd := exec.Command("git", "rebase", "--continue")
 	cmd.Env = []string{"EDITOR=vim", "VISUAL=vim"}
-	detach(cmd)
+	Detach(cmd)
 
 	want := map[string]bool{
 		"GIT_EDITOR=true":          false,

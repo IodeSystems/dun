@@ -18,6 +18,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/iodesystems/dun/internal/proc"
+
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
@@ -245,9 +247,9 @@ func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResu
 	cmd := exec.CommandContext(ctx, "sh", shellFlags, command)
 	cmd.Dir = h.Dir
 	// Model-authored commands run git, ssh and friends. None of them may reach
-	// dun's terminal — see detach.go. killGroup is also what makes the deadline
+	// dun's terminal — see internal/proc. killGroup is also what makes the deadline
 	// bite: it kills the whole process group, not just the `sh` that spawned it.
-	killGroup(detach(cmd))
+	proc.KillGroup(proc.Detach(cmd))
 	return finishNoting(ctx, w, cmd)
 }
 
@@ -384,7 +386,7 @@ func (h *HostShell) RunPromotable(ctx context.Context, command string, w io.Writ
 		// second termGroup on a group already gone is a no-op.)
 		h.p = nil
 		if !p.exited() && p.cmd != nil && p.cmd.Process != nil {
-			go termGroup(p.cmd.Process.Pid, killTermGrace)
+			go proc.TermGroup(p.cmd.Process.Pid, proc.KillTermGrace)
 		}
 		return res
 	}
@@ -433,7 +435,7 @@ func (p *shellProc) readUntil(ctx context.Context, w io.Writer, sentinel string,
 				return ExecResult{Output: buf.String(), Code: -1, Err: "canceled"}, donated
 			}
 			go func() {
-				termGroup(p.cmd.Process.Pid, killTermGrace)
+				proc.TermGroup(p.cmd.Process.Pid, proc.KillTermGrace)
 				close(termDone)
 			}()
 
@@ -514,7 +516,7 @@ func (h *HostShell) start() error {
 	h.teardown()
 	cmd := exec.Command("sh")
 	cmd.Dir = h.Dir
-	detach(cmd)
+	proc.Detach(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -584,7 +586,7 @@ func (p *shellProc) kill() {
 	// Wait a second time.
 	select {
 	case <-p.dead:
-	case <-time.After(killGroupDelay):
+	case <-time.After(proc.KillGroupDelay):
 	}
 }
 
@@ -711,13 +713,13 @@ func (d DockerExec) runArgs(name, command string) []string {
 
 func (d DockerExec) Run(ctx context.Context, command string, w io.Writer) ExecResult {
 	name := containerName()
-	cmd := killGroup(detach(exec.CommandContext(ctx, "docker", d.runArgs(name, command)...)))
+	cmd := proc.KillGroup(proc.Detach(exec.CommandContext(ctx, "docker", d.runArgs(name, command)...)))
 	// Stop the CONTAINER on cancel, then let killGroup take the client. Best
 	// effort and deliberately unchecked: if the daemon is gone or the container
 	// already exited, there is nothing to report and nothing to do about it.
 	kill := cmd.Cancel
 	cmd.Cancel = func() error {
-		_ = detach(dockerStop(name)).Run()
+		_ = proc.Detach(dockerStop(name)).Run()
 		return kill()
 	}
 	return finish(ctx, w, cmd)

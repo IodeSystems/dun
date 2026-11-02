@@ -1,4 +1,6 @@
-package dun
+// Package proc starts child processes detached from dun's terminal and ends
+// their process groups.
+package proc
 
 import (
 	"os"
@@ -23,7 +25,7 @@ import (
 // that wants a password does the same thing. The fix has to be at the spawn
 // site, for every spawn.
 
-// detach severs cmd from dun's controlling terminal. Setsid puts it in a new
+// Detach severs cmd from dun's controlling terminal. Setsid puts it in a new
 // session with no ctty, so open("/dev/tty") fails and the child can never race
 // the TUI for input. GIT_TERMINAL_PROMPT=0 is the same guarantee said in a
 // language git will quote back in a readable error, rather than failing on a
@@ -48,8 +50,8 @@ import (
 // readable error instead of waiting, so the hang is invisible in CI and on any
 // machine whose operator does not set one.
 //
-// Callers that spawn with CommandContext should pair this with killGroup.
-func detach(cmd *exec.Cmd) *exec.Cmd {
+// Callers that spawn with CommandContext should pair this with KillGroup.
+func Detach(cmd *exec.Cmd) *exec.Cmd {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -65,24 +67,24 @@ func detach(cmd *exec.Cmd) *exec.Cmd {
 	return cmd
 }
 
-// killGroupDelay bounds how long Wait tolerates a child that ignored the kill
+// KillGroupDelay bounds how long Wait tolerates a child that ignored the kill
 // (or grandchildren still holding the output pipe) before giving up on it.
-const killGroupDelay = 5 * time.Second
+const KillGroupDelay = 5 * time.Second
 
-// killTermGrace is how long a process group gets to exit on SIGTERM before it
+// KillTermGrace is how long a process group gets to exit on SIGTERM before it
 // gets SIGKILL. Short: whoever asked for the kill wants the job gone.
-const killTermGrace = 2 * time.Second
+const KillTermGrace = 2 * time.Second
 
-// killGroup makes context cancellation end the child's whole process group
+// KillGroup makes context cancellation end the child's whole process group
 // rather than just the child: SIGTERM now, SIGKILL to whatever is left after
-// killTermGrace.
+// KillTermGrace.
 //
 // This is the other half of detach, not a separate nicety: a detached child no
 // longer dies when the terminal hangs up, so without it a cancelled `sh -lc`
 // would leave behind the descendants that were doing the real work — exactly
 // the `sh` → `git push` → `git-remote-https` tree that motivated this. Setsid
 // makes the child its own group leader, so -pid addresses the whole tree.
-func killGroup(cmd *exec.Cmd) *exec.Cmd {
+func KillGroup(cmd *exec.Cmd) *exec.Cmd {
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
@@ -93,18 +95,18 @@ func killGroup(cmd *exec.Cmd) *exec.Cmd {
 			// The leader can exit on SIGTERM while a grandchild that ignores
 			// it lives on. The escalation goes to the GROUP, so it reaches
 			// that grandchild after the leader is gone.
-			go escalateGroup(pgid, killTermGrace)
+			go escalateGroup(pgid, KillTermGrace)
 		}
 		return err
 	}
-	cmd.WaitDelay = killGroupDelay
+	cmd.WaitDelay = KillGroupDelay
 	return cmd
 }
 
-// termGroup ends process group pgid the same way: SIGTERM, then SIGKILL to
+// TermGroup ends process group pgid the same way: SIGTERM, then SIGKILL to
 // what is left after grace. It returns once the group is gone or has been
 // sent SIGKILL. syscall.Kill(-pgid, …) is the same call on Linux and macOS.
-func termGroup(pgid int, grace time.Duration) {
+func TermGroup(pgid int, grace time.Duration) {
 	if pgid <= 0 || syscall.Kill(-pgid, syscall.SIGTERM) != nil {
 		return // no such group: already gone
 	}

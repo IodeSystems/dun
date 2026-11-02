@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/iodesystems/dun/internal/proc"
+
 	"github.com/iodesystems/agentkit/mcpmgr"
 )
 
@@ -91,7 +93,7 @@ func raglitDocsSink(docs Server, env []string) *mcpDocsSink {
 			if verb == "ingest" {
 				args = append(args, "--now")
 			}
-			cmd := detach(exec.Command(docs.Command, append(args, batch...)...))
+			cmd := proc.Detach(exec.Command(docs.Command, append(args, batch...)...))
 			cmd.Env = append(os.Environ(), env...)
 			out, err := cmd.CombinedOutput()
 			if err != nil {

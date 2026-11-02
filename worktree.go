@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/internal/proc"
 )
 
 // Isolation, tier 1 — the git worktree.
@@ -442,7 +444,7 @@ func git(dir string, args ...string) (string, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	detach(cmd) // fetch/push must never reach dun's terminal — see detach.go
+	proc.Detach(cmd) // fetch/push must never reach dun's terminal — see internal/proc
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)

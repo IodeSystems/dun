@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun/internal/proc"
+
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
@@ -146,7 +148,7 @@ func TestKillJob_EscalatesToSIGKILL(t *testing.T) {
 	if msg, _ := h.KillJob(j.id, "user"); !strings.Contains(msg, "killed by the user") {
 		t.Errorf("answer: %q", msg)
 	}
-	if took := time.Since(start); took < killTermGrace {
+	if took := time.Since(start); took < proc.KillTermGrace {
 		t.Errorf("ended in %s: SIGTERM was not ignored, so this tested nothing", took)
 	}
 	waitGone(t, pids)

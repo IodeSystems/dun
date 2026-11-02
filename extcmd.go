@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/proc"
 )
 
 // An extension's own slash commands (manifest slash.commands): a small
@@ -445,7 +447,7 @@ func (h *Harness) runIndexCLI(ctx context.Context, e Extension, s Server, argv [
 		return "", fmt.Errorf("%s runs %s, not %s: no CLI to run", e.ID, s.Command, cli)
 	}
 	args := append(append([]string{}, argv...), raglitStoreFlags(s.Args)...)
-	out, err := detach(exec.CommandContext(ctx, s.Command, args...)).CombinedOutput()
+	out, err := proc.Detach(exec.CommandContext(ctx, s.Command, args...)).CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
 		return "", fmt.Errorf("%s %s: %v: %s", cli, argv[0], err, text)

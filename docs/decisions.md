@@ -240,7 +240,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `git rebase --continue` launched `$EDITOR`, and vim held a rebase for ten
   minutes until Go's test timeout killed the tree. `setsid` does not save you;
   an editor with nowhere to draw may block somewhere else. `GIT_EDITOR=true`
-  and `GIT_SEQUENCE_EDITOR=true` (`detach.go`). It is invisible in CI because,
+  and `GIT_SEQUENCE_EDITOR=true` (`internal/proc`). It is invisible in CI because,
   with `EDITOR` unset, git refuses with a readable error.
 - **No child of dun may keep dun's controlling terminal.** `git push` to an
   https remote opens `/dev/tty` directly for credentials; stdin at `/dev/null`

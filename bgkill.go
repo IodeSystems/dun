@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/internal/proc"
 )
 
 // Killing a background job.
@@ -18,7 +20,7 @@ import (
 //
 //   - HostShell (the default): the shell is a setsid group leader and the
 //     command runs in its group, so termGroup sends SIGTERM to the group,
-//     then SIGKILL to what is left after killTermGrace.
+//     then SIGKILL to what is left after proc.KillTermGrace.
 //   - HostExec: the same, through killGroup on the exec.Cmd.
 //   - DockerExec: `docker stop --time 2` on the named container (SIGTERM to
 //     its PID 1, SIGKILL after 2s, which ends every process in it), then the
@@ -29,7 +31,7 @@ import (
 
 // jobKillWait bounds how long a kill waits for the job to report that it is
 // gone: the SIGTERM grace, plus time for docker stop and the output drain.
-const jobKillWait = killTermGrace + 4*time.Second
+const jobKillWait = proc.KillTermGrace + 4*time.Second
 
 // kill asks the job to end and records who asked. It reports false when the
 // job had already finished. Calling it again is harmless: the first caller's
@@ -83,7 +85,7 @@ func (j *bgJob) name() string {
 }
 
 // KillJob ends background job id and everything it started: SIGTERM to its
-// process group, SIGKILL after killTermGrace. by is who asked ("user",
+// process group, SIGKILL after proc.KillTermGrace. by is who asked ("user",
 // "model"); the job's log and its completion notice name them. A job that
 // already finished answers so; only an unknown id is an error.
 func (h *Harness) KillJob(id int, by string) (string, error) {

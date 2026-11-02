@@ -39,6 +39,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun/internal/proc"
+
 	"github.com/iodesystems/agentkit/agent"
 )
 
@@ -56,7 +58,7 @@ var errRaglitLogin = errors.New("raglit needs a login — /rag login")
 var runRaglit = func(ctx context.Context, command, dir string, env []string, stdin string, args ...string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := detach(exec.CommandContext(ctx, command, args...))
+	cmd := proc.Detach(exec.CommandContext(ctx, command, args...))
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	if stdin != "" {
