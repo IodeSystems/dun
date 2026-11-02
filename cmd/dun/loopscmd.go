@@ -10,6 +10,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/loopdetector"
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // /loops: agentkit's loop detection on the model's output, on every client
@@ -29,51 +30,14 @@ import (
 // settings are read from "loops" in config.json at start, and the counters
 // start again when a setting changes.
 
-// loopConfig is config.json's "loops". Zero means agentkit's default.
-type loopConfig struct {
-	Mode          string  `json:"mode,omitempty"`           // off, count or cut; "" is count
-	Tolerance     int     `json:"tolerance,omitempty"`      // the loop count that cuts
-	ToolTolerance int     `json:"tool_tolerance,omitempty"` // the same for tool calls; negative counts them only
-	Window        int     `json:"window,omitempty"`         // recent sentences compared
-	MinShare      float64 `json:"min_share,omitempty"`      // the share of them that must repeat
-	Similarity    float64 `json:"similarity,omitempty"`     // BM25 share that makes two sentences one; negative: exact only
-	ToolWindow    int     `json:"tool_window,omitempty"`    // recent tool calls compared
-}
-
 const (
-	loopsOff   = "off"
-	loopsCount = "count"
-	loopsCut   = "cut"
+	loopsCut = "cut"
 )
-
-// mode is cfg's mode with the default filled in.
-func (cfg loopConfig) mode() string {
-	if cfg.Mode == "" {
-		return loopsCount
-	}
-	return cfg.Mode
-}
-
-func (cfg loopConfig) detector() *loopdetector.LoopDetector {
-	c := loopdetector.Config{
-		Off:           cfg.mode() == loopsOff,
-		Tolerance:     cfg.Tolerance,
-		ToolTolerance: cfg.ToolTolerance,
-		Window:        cfg.Window,
-		MinShare:      cfg.MinShare,
-		Similarity:    cfg.Similarity,
-		ToolWindow:    cfg.ToolWindow,
-	}
-	if cfg.mode() == loopsCount {
-		c.Tolerance, c.ToolTolerance = -1, -1
-	}
-	return loopdetector.New(c)
-}
 
 // loopWatcher is the settings every client's streams read when they begin.
 type loopWatcher struct {
 	mu     sync.Mutex
-	cfg    loopConfig
+	cfg    dunconfig.LoopConfig
 	d      *loopdetector.LoopDetector
 	loaded bool
 }
@@ -82,7 +46,7 @@ type loopWatcher struct {
 var loopWatch = &loopWatcher{}
 
 // load takes the config once, the first client's; DUN_LOOP_DETECT wins.
-func (l *loopWatcher) load(cfg loopConfig) {
+func (l *loopWatcher) load(cfg dunconfig.LoopConfig) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.loaded {
@@ -92,25 +56,25 @@ func (l *loopWatcher) load(cfg loopConfig) {
 	if env := os.Getenv("DUN_LOOP_DETECT"); env != "" {
 		cfg.Mode = env
 	}
-	if m := cfg.Mode; m != "" && m != loopsOff && m != loopsCount && m != loopsCut {
+	if m := cfg.Mode; m != "" && m != dunconfig.LoopsOff && m != dunconfig.LoopsCount && m != loopsCut {
 		log.Printf("dun: ignoring unknown loop detection mode %q", m)
 		cfg.Mode = ""
 	}
-	l.cfg, l.d = cfg, cfg.detector()
+	l.cfg, l.d = cfg, cfg.Detector()
 }
 
 // install makes c's streams ask l what to watch with.
-func (l *loopWatcher) install(c *llm.Client, cfg loopConfig) {
+func (l *loopWatcher) install(c *llm.Client, cfg dunconfig.LoopConfig) {
 	l.load(cfg)
 	c.Watch = func(history []llm.Message) llm.StreamWatcher { return l.begin(c, history) }
 }
 
 func (l *loopWatcher) begin(c *llm.Client, history []llm.Message) llm.StreamWatcher {
 	l.mu.Lock()
-	mode, d := l.cfg.mode(), l.d
+	mode, d := l.cfg.EffectiveMode(), l.d
 	l.mu.Unlock()
 	switch mode {
-	case loopsOff:
+	case dunconfig.LoopsOff:
 		return llm.NewStreamWatcher(c.Repetition)
 	case loopsCut:
 		return d.Begin(history)
@@ -140,15 +104,15 @@ func (l *loopWatcher) line() string {
 	cfg, d := l.cfg, l.d
 	l.mu.Unlock()
 	var b strings.Builder
-	switch cfg.mode() {
-	case loopsOff:
+	switch cfg.EffectiveMode() {
+	case dunconfig.LoopsOff:
 		b.WriteString("loops: off · only the same bytes back to back are cut")
-	case loopsCount:
+	case dunconfig.LoopsCount:
 		b.WriteString("loops: counting · only the same bytes back to back are cut")
 	case loopsCut:
 		fmt.Fprintf(&b, "loops: cutting at %s · tool calls at %s", tolerance(cfg.Tolerance, 3), toolTolerance(cfg))
 	}
-	if d == nil || cfg.mode() == loopsOff {
+	if d == nil || cfg.EffectiveMode() == dunconfig.LoopsOff {
 		return b.String()
 	}
 	n := d.Counters()
@@ -163,7 +127,7 @@ func tolerance(n, def int) string {
 	return strconv.Itoa(n)
 }
 
-func toolTolerance(cfg loopConfig) string {
+func toolTolerance(cfg dunconfig.LoopConfig) string {
 	if cfg.ToolTolerance < 0 {
 		return "never"
 	}
@@ -189,7 +153,7 @@ func kinds(m map[string]int64) string {
 
 // command runs /loops's action and returns what to say and the config to save
 // (nil when nothing changed).
-func (l *loopWatcher) command(action string) (string, *dunConfig, error) {
+func (l *loopWatcher) command(action string) (string, *dunconfig.DunConfig, error) {
 	f := strings.Fields(strings.ToLower(action))
 	if len(f) == 0 || f[0] == "status" {
 		return l.line(), nil, nil
@@ -198,7 +162,7 @@ func (l *loopWatcher) command(action string) (string, *dunConfig, error) {
 	cfg := l.cfg
 	l.mu.Unlock()
 	switch {
-	case len(f) == 1 && (f[0] == loopsOff || f[0] == loopsCount || f[0] == loopsCut):
+	case len(f) == 1 && (f[0] == dunconfig.LoopsOff || f[0] == dunconfig.LoopsCount || f[0] == loopsCut):
 		cfg.Mode = f[0]
 	case len(f) == 2 && f[0] == "tolerance":
 		n, err := loopNumber(f[1])
@@ -206,7 +170,7 @@ func (l *loopWatcher) command(action string) (string, *dunConfig, error) {
 			return "", nil, fmt.Errorf("tolerance: %w", err)
 		}
 		cfg.Tolerance = n
-	case len(f) == 2 && f[0] == "tools" && f[1] == loopsCount:
+	case len(f) == 2 && f[0] == "tools" && f[1] == dunconfig.LoopsCount:
 		cfg.ToolTolerance = -1
 	case len(f) == 2 && f[0] == "tools":
 		n, err := loopNumber(f[1])
@@ -218,9 +182,9 @@ func (l *loopWatcher) command(action string) (string, *dunConfig, error) {
 		return "", nil, fmt.Errorf("usage: /loops [off|count|cut | tolerance N|default | tools N|count|default]")
 	}
 	l.mu.Lock()
-	l.cfg, l.d, l.loaded = cfg, cfg.detector(), true
+	l.cfg, l.d, l.loaded = cfg, cfg.Detector(), true
 	l.mu.Unlock()
-	fc := loadConfig()
+	fc := dunconfig.LoadConfig()
 	fc.Loops = cfg
 	return l.line() + " (saved)", &fc, nil
 }

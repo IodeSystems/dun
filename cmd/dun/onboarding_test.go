@@ -9,6 +9,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // A first run: the engine says it has no AI service, and the screen's one
@@ -47,7 +49,7 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 	if txt := convoText(m); strings.Contains(txt, "not logged in") || !strings.Contains(txt, "logged in to work") {
 		t.Errorf("after the login:\n%s", txt)
 	}
-	m.switchModel(providerConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
+	m.switchModel(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
 	m = m.handleEvent(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "earlier"}}})
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}, "hint": "off: raglit — /rag on (auto: every session)"})
 	m = m.handleEvent(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
@@ -74,11 +76,11 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 // The engine's own not-logged-in error (another client, or a model with no
 // URL) is the next step, not "error: agent: chat: …" with retry advice.
 func TestOnboarding_SetupErrorIsTheNextStep(t *testing.T) {
-	if e := setupMissing(fmt.Errorf("agent: chat: %w", errNoLogin)); e != errNoLogin {
+	if e := dunconfig.SetupMissing(fmt.Errorf("agent: chat: %w", dunconfig.ErrNoLogin)); e != dunconfig.ErrNoLogin {
 		t.Fatalf("setupMissing = %v", e)
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m = m.handleEvent(evMsg{"type": "error", "error": errNoLogin.Error()})
+	m = m.handleEvent(evMsg{"type": "error", "error": dunconfig.ErrNoLogin.Error()})
 	txt := convoText(m)
 	if strings.Contains(txt, "error:") || strings.Contains(txt, "session is intact") || !strings.Contains(txt, "/login") {
 		t.Errorf("convo:\n%s", txt)
@@ -89,9 +91,9 @@ func TestOnboarding_SetupErrorIsTheNextStep(t *testing.T) {
 // only. No checkbox, and tab toggles nothing.
 func TestModelPicker_EnterSavesAltEnterDoesNot(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	cfg := loadConfig()
-	cfg.putProvider(providerConfig{Name: "work", URL: "http://llm/v1"})
-	if err := saveConfig(cfg); err != nil {
+	cfg := dunconfig.LoadConfig()
+	cfg.PutProvider(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"})
+	if err := dunconfig.SaveConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
 	m := pickerWith(modelRow{"work", "a"}, modelRow{"work", "b"})
@@ -100,7 +102,7 @@ func TestModelPicker_EnterSavesAltEnterDoesNot(t *testing.T) {
 		t.Errorf("panel:\n%s", v)
 	}
 	m = pick(m, "tab", "enter")
-	if c := loadConfig(); c.Model != "a" || c.Provider != "work" {
+	if c := dunconfig.LoadConfig(); c.Model != "a" || c.Provider != "work" {
 		t.Errorf("enter did not save the default: %+v", c)
 	}
 	if m.switchNote != "using a on work · saved as default" {
@@ -111,7 +113,7 @@ func TestModelPicker_EnterSavesAltEnterDoesNot(t *testing.T) {
 	m = pick(m, "down")
 	nm, _ := m.updateModelPicking(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	m = nm.(tuiModel)
-	if c := loadConfig(); c.Model != "a" {
+	if c := dunconfig.LoadConfig(); c.Model != "a" {
 		t.Errorf("alt+enter changed the default to %q", c.Model)
 	}
 	if m.switchNote != "using b on work · this session only" {

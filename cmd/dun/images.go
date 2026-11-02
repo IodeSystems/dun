@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -13,14 +14,14 @@ import (
 
 // visionConfig is what the engine running model on url needs for images.
 // The vision model is on the provider vision_provider names, else on url.
-func visionConfig(fc dunConfig, url, key, model string, usageFor func(url, key, model string) func(llm.Usage)) dun.VisionConfig {
+func visionConfig(fc dunconfig.DunConfig, url, key, model string, usageFor func(url, key, model string) func(llm.Usage)) dun.VisionConfig {
 	v := dun.VisionConfig{Key: dun.VisionKey(url, model), Model: model}
 	if fc.VisionModel == "" {
 		return v
 	}
 	vu, vk := url, key
 	if fc.VisionProvider != "" {
-		p, ok := fc.named(fc.VisionProvider)
+		p, ok := fc.Named(fc.VisionProvider)
 		if !ok {
 			return v // a provider not logged in: as if none were set
 		}

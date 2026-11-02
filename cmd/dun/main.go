@@ -27,6 +27,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/openurl"
@@ -218,10 +219,10 @@ func main() {
 	setup := flag.Bool("setup", false, "run the interactive setup wizard (LLM url/model/key) and exit")
 	// Flag defaults come from env then the saved config — so a CLI flag still
 	// overrides for a one-off run. There is no built-in provider. See config.go.
-	fc := loadConfig()
-	act, _ := fc.active()
-	url := flag.String("url", firstNonEmpty(os.Getenv("DUN_URL"), act.URL), "LLM base URL (default: the logged-in provider; /login)")
-	model := flag.String("model", firstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model), "chat model (must support tool calls; default: the saved one, /model)")
+	fc := dunconfig.LoadConfig()
+	act, _ := fc.Active()
+	url := flag.String("url", dunconfig.FirstNonEmpty(os.Getenv("DUN_URL"), act.URL), "LLM base URL (default: the logged-in provider; /login)")
+	model := flag.String("model", dunconfig.FirstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model), "chat model (must support tool calls; default: the saved one, /model)")
 	// Key default stays empty so `dun -h` never prints the secret; the real value
 	// is resolved after parse (flag > env > config).
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
@@ -401,17 +402,17 @@ func main() {
 		suggestMode = "off"
 	}
 	engineModel, engineURL = *model, *url
-	if p, ok := fc.providerAt(*url); ok {
+	if p, ok := fc.ProviderAt(*url); ok {
 		engineProvider = p.Name
 	}
 	// Resolve the effective key: explicit flag > env > saved config.
 	// The saved key is the one of the provider at --url, so a --url naming
 	// another configured provider gets that provider's key.
 	savedKey := fc.Key
-	if p, ok := fc.providerAt(*url); ok {
+	if p, ok := fc.ProviderAt(*url); ok {
 		savedKey = p.Key
 	}
-	effKey := firstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), savedKey)
+	effKey := dunconfig.FirstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), savedKey)
 	// Dev self-update: if this is a source-stamped build and the tree changed,
 	// rebuild in place and re-exec the fresh binary. Skipped for spawned children
 	// (DUN_CHILD) and the -p engine mode; no-op for released binaries (srcDir="").
@@ -480,7 +481,7 @@ func main() {
 	// A headless task with nothing to send to stops here, before servers,
 	// worktrees or a session: /login cannot be typed here (nologin.go).
 	if !*prog {
-		if err := providerMissing(*url, *model); err != nil {
+		if err := dunconfig.ProviderMissing(*url, *model); err != nil {
 			fmt.Fprint(os.Stderr, headlessMissing(err))
 			os.Exit(2)
 		}
@@ -652,12 +653,12 @@ func main() {
 	var runner agent.LLMRunner = client
 	childClients := clientCache(fc, *url, effKey, func(c *llm.Client, u string) { tuneClient(fc, c, u) },
 		func(u, k, model string) func(llm.Usage) { return usageFor(u, k, model, spendmeter.RoleModel) })
-	if why := providerMissing(*url, *model); why != nil {
+	if why := dunconfig.ProviderMissing(*url, *model); why != nil {
 		runner = noProvider{why}
 		childClients = func(string, string) (dun.ChildClient, error) { return dun.ChildClient{}, why }
 	}
 	var providerNames []string
-	for _, p := range fc.providerList() {
+	for _, p := range fc.ProviderList() {
 		providerNames = append(providerNames, p.Name)
 	}
 	cfg := dun.Config{
@@ -990,7 +991,7 @@ func main() {
 	// What /effort default does on this server, when its model list says
 	// (corrallm's thinking_* fields): the settings and the command list
 	// again once it is known.
-	if *prog && providerMissing(*url, *model) == nil {
+	if *prog && dunconfig.ProviderMissing(*url, *model) == nil {
 		go func() {
 			if h.LearnServerThinking(ctx) {
 				em.emit(settingsEvent())
@@ -1002,7 +1003,7 @@ func main() {
 	// The key's budget: read at start, every few minutes and after a turn, on
 	// its own goroutine — never on the turn path. An endpoint with none stops
 	// the poller after one probe per documented path.
-	if providerMissing(*url, *model) == nil {
+	if dunconfig.ProviderMissing(*url, *model) == nil {
 		go spend.PollBudget(ctx, client, spendmeter.BudgetPollEvery, spendmeter.BudgetPollGap, func() {
 			if em != nil {
 				em.emit(spendProto(h.Spend(), time.Now()))

@@ -9,6 +9,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // Run 4 of the walk, findings 4–8 (plan item 40).
@@ -160,7 +162,7 @@ func TestConfig5_SavedPrivately(t *testing.T) {
 	if err := os.WriteFile(p, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveConfig(dunConfig{Key: "sk-secret"}); err != nil {
+	if err := dunconfig.SaveConfig(dunconfig.DunConfig{Key: "sk-secret"}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := os.Stat(p)

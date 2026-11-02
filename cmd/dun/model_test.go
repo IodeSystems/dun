@@ -7,26 +7,28 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // A config from before providers is one provider; adding one keeps it.
 func TestProviders_LegacyConfigIsOneProvider(t *testing.T) {
-	c := dunConfig{URL: "https://llm.example.com", Key: "sk-1", Model: "m"}
-	if got, ok := c.active(); !ok || got.Name != "llm.example.com" || got.Key != "sk-1" {
+	c := dunconfig.DunConfig{URL: "https://llm.example.com", Key: "sk-1", Model: "m"}
+	if got, ok := c.Active(); !ok || got.Name != "llm.example.com" || got.Key != "sk-1" {
 		t.Fatalf("legacy active = %+v", got)
 	}
-	c.putProvider(providerConfig{Name: "openrouter", URL: "https://openrouter.ai/api/v1", Key: "sk-or"})
-	if len(c.Providers) != 2 || c.activeName() != "llm.example.com" {
+	c.PutProvider(dunconfig.ProviderConfig{Name: "openrouter", URL: "https://openrouter.ai/api/v1", Key: "sk-or"})
+	if len(c.Providers) != 2 || c.ActiveName() != "llm.example.com" {
 		t.Fatalf("add must keep the legacy provider active: %+v", c.Providers)
 	}
-	if p, ok := c.providerAt("https://openrouter.ai/api/v1/"); !ok || p.Key != "sk-or" {
+	if p, ok := c.ProviderAt("https://openrouter.ai/api/v1/"); !ok || p.Key != "sk-or" {
 		t.Errorf("providerAt ignores a trailing slash; got %+v %v", p, ok)
 	}
-	c.use(c.Providers[1], "anthropic/x")
-	if c.activeName() != "openrouter" || c.URL != "https://openrouter.ai/api/v1" || c.Key != "sk-or" || c.Model != "anthropic/x" {
+	c.Use(c.Providers[1], "anthropic/x")
+	if c.ActiveName() != "openrouter" || c.URL != "https://openrouter.ai/api/v1" || c.Key != "sk-or" || c.Model != "anthropic/x" {
 		t.Errorf("use must set the default and the top-level fields: %+v", c)
 	}
-	if !c.removeProvider("llm.example.com") || len(c.Providers) != 1 {
+	if !c.RemoveProvider("llm.example.com") || len(c.Providers) != 1 {
 		t.Errorf("remove: %+v", c.Providers)
 	}
 }
@@ -116,11 +118,11 @@ func TestProviderForm_SavesAndSearchesTheNewProvider(t *testing.T) {
 		t.Fatalf("want the picker filtered to the new provider; form=%v picking=%v q=%q",
 			m.providerForm, m.modelPicking, m.models.query.Value())
 	}
-	p, ok := loadConfig().providerAt("https://openrouter.ai/api/v1")
+	p, ok := dunconfig.LoadConfig().ProviderAt("https://openrouter.ai/api/v1")
 	if !ok || p.Name != "openrouter" || p.Key != "sk-or-1" {
 		t.Errorf("saved %+v %v", p, ok)
 	}
-	if c := loadConfig(); len(c.Providers) != 1 || c.activeName() != "openrouter" {
+	if c := dunconfig.LoadConfig(); len(c.Providers) != 1 || c.ActiveName() != "openrouter" {
 		t.Errorf("the first login is the only provider and the default: %+v", c.Providers)
 	}
 }
@@ -129,15 +131,15 @@ func TestProviderForm_SavesAndSearchesTheNewProvider(t *testing.T) {
 // operations every client uses log in, switch and log out.
 func TestApplyProviderOp(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	if ps := loadConfig().providerList(); len(ps) != 0 {
+	if ps := dunconfig.LoadConfig().ProviderList(); len(ps) != 0 {
 		t.Fatalf("an empty config must have no provider (no built-in fallback): %+v", ps)
 	}
-	if _, ok := loadConfig().active(); ok {
+	if _, ok := dunconfig.LoadConfig().Active(); ok {
 		t.Fatal("an empty config must be logged out")
 	}
-	do := func(op providerOp) string {
+	do := func(op dunconfig.ProviderOp) string {
 		t.Helper()
-		msg, err := applyProviderOp(op)
+		msg, err := dunconfig.ApplyProviderOp(op)
 		if err != nil {
 			t.Fatalf("%+v: %v", op, err)
 		}
@@ -147,39 +149,39 @@ func TestApplyProviderOp(t *testing.T) {
 		return msg
 	}
 	// The first login is the default, bearer optional, model not yet chosen.
-	do(providerOp{Op: "login", Name: "local", URL: "http://127.0.0.1:8080/"})
-	if c := loadConfig(); c.activeName() != "local" || c.URL != "http://127.0.0.1:8080" || c.Key != "" || c.Model != "" {
+	do(dunconfig.ProviderOp{Op: "login", Name: "local", URL: "http://127.0.0.1:8080/"})
+	if c := dunconfig.LoadConfig(); c.ActiveName() != "local" || c.URL != "http://127.0.0.1:8080" || c.Key != "" || c.Model != "" {
 		t.Fatalf("first login: %+v", c)
 	}
-	do(providerOp{Op: "login", Name: "corp", URL: "https://litellm.corp.example/v1/", Key: "sk-corp"})
-	if c := loadConfig(); c.activeName() != "local" || c.Providers[1].Kind != providerOpenAI {
+	do(dunconfig.ProviderOp{Op: "login", Name: "corp", URL: "https://litellm.corp.example/v1/", Key: "sk-corp"})
+	if c := dunconfig.LoadConfig(); c.ActiveName() != "local" || c.Providers[1].Kind != dunconfig.ProviderOpenAI {
 		t.Fatalf("a second login must not take the default: %+v", c)
 	}
-	do(providerOp{Op: "use", Name: "corp", Model: "gpt-x"})
-	if c := loadConfig(); c.activeName() != "corp" || c.URL != "https://litellm.corp.example/v1" || c.Model != "gpt-x" {
+	do(dunconfig.ProviderOp{Op: "use", Name: "corp", Model: "gpt-x"})
+	if c := dunconfig.LoadConfig(); c.ActiveName() != "corp" || c.URL != "https://litellm.corp.example/v1" || c.Model != "gpt-x" {
 		t.Fatalf("use: %+v", c)
 	}
 	// Logging in again with no key keeps it; the default follows the new URL.
-	do(providerOp{Op: "login", Name: "corp", URL: "https://litellm2.corp.example"})
-	if c := loadConfig(); c.URL != "https://litellm2.corp.example" || c.Key != "sk-corp" || c.Model != "gpt-x" {
+	do(dunconfig.ProviderOp{Op: "login", Name: "corp", URL: "https://litellm2.corp.example"})
+	if c := dunconfig.LoadConfig(); c.URL != "https://litellm2.corp.example" || c.Key != "sk-corp" || c.Model != "gpt-x" {
 		t.Fatalf("login again: %+v", c)
 	}
 	// Logging out of the default moves it, with no model until one is picked.
-	if msg := do(providerOp{Op: "logout", Name: "corp"}); !strings.Contains(msg, "local") {
+	if msg := do(dunconfig.ProviderOp{Op: "logout", Name: "corp"}); !strings.Contains(msg, "local") {
 		t.Errorf("logout answer: %q", msg)
 	}
-	if c := loadConfig(); c.activeName() != "local" || c.Model != "" {
+	if c := dunconfig.LoadConfig(); c.ActiveName() != "local" || c.Model != "" {
 		t.Fatalf("after logging out of the default: %+v", c)
 	}
 	// Logging out of the last leaves no provider at all.
-	do(providerOp{Op: "logout", Name: "local"})
-	if c := loadConfig(); len(c.providerList()) != 0 || c.URL != "" || c.Key != "" || c.Model != "" {
+	do(dunconfig.ProviderOp{Op: "logout", Name: "local"})
+	if c := dunconfig.LoadConfig(); len(c.ProviderList()) != 0 || c.URL != "" || c.Key != "" || c.Model != "" {
 		t.Fatalf("after the last logout: %+v", c)
 	}
-	for _, bad := range []providerOp{{Op: "logout", Name: "nope"}, {Op: "login", Name: "a b", URL: "https://x"},
+	for _, bad := range []dunconfig.ProviderOp{{Op: "logout", Name: "nope"}, {Op: "login", Name: "a b", URL: "https://x"},
 		{Op: "login", Name: "x", URL: "x.example"}, {Op: "login", Name: "x", URL: "https://x", Kind: "anthropic"},
 		{Op: "use", Name: "nope", Model: "m"}, {Op: "add", Name: "x", URL: "https://x"}} {
-		if _, err := applyProviderOp(bad); err == nil {
+		if _, err := dunconfig.ApplyProviderOp(bad); err == nil {
 			t.Errorf("%+v accepted", bad)
 		}
 	}
@@ -199,10 +201,10 @@ func TestListModelsSaysWhy(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-x"}]}`))
 	}))
 	defer srv.Close()
-	if ids, why := listModels(srv.URL+"/v1", "good"); len(ids) != 1 || why != "" {
+	if ids, why := dunconfig.ListModels(srv.URL+"/v1", "good"); len(ids) != 1 || why != "" {
 		t.Errorf("a /v1 base: %v %q", ids, why)
 	}
-	if _, why := listModels(srv.URL, "bad"); !strings.Contains(why, "401") || !strings.Contains(why, "invalid key") {
+	if _, why := dunconfig.ListModels(srv.URL, "bad"); !strings.Contains(why, "401") || !strings.Contains(why, "invalid key") {
 		t.Errorf("why = %q", why)
 	}
 }
@@ -211,7 +213,7 @@ func TestListModelsSaysWhy(t *testing.T) {
 // empty key keeps the saved one.
 func TestProviderForm_LoginAgainKeepsTheKey(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	if err := saveConfig(dunConfig{URL: "https://old.example.com", Key: "sk-old", Model: "m"}); err != nil {
+	if err := dunconfig.SaveConfig(dunconfig.DunConfig{URL: "https://old.example.com", Key: "sk-old", Model: "m"}); err != nil {
 		t.Fatal(err)
 	}
 	m := newTUIModel(nil, ".")
@@ -228,11 +230,11 @@ func TestProviderForm_LoginAgainKeepsTheKey(t *testing.T) {
 	if m.providerChecking == "" { // asking the service for its models
 		t.Fatalf("not checked: %q", m.providerErr)
 	}
-	if c := loadConfig(); c.URL != "https://old.example.com" {
+	if c := dunconfig.LoadConfig(); c.URL != "https://old.example.com" {
 		t.Fatalf("saved before the check: %q", c.URL)
 	}
 	m.loginChecked(loginCheckedMsg{models: modelFetchMsg{provider: m.providerChecking, ids: []string{"m"}}})
-	if c := loadConfig(); c.URL != "https://new.example.com" || c.Key != "sk-old" || c.activeName() != "old.example.com" {
-		t.Errorf("after login again: url=%q key kept=%v active=%q", c.URL, c.Key == "sk-old", c.activeName())
+	if c := dunconfig.LoadConfig(); c.URL != "https://new.example.com" || c.Key != "sk-old" || c.ActiveName() != "old.example.com" {
+		t.Errorf("after login again: url=%q key kept=%v active=%q", c.URL, c.Key == "sk-old", c.ActiveName())
 	}
 }

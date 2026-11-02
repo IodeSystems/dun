@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dund"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/proto"
@@ -112,11 +113,11 @@ type testDund struct {
 
 func startTestDund(t *testing.T) *testDund {
 	t.Helper()
-	svc, err := dund.New(filepath.Join(dunHome(), "dund"), &echoSpawner{})
+	svc, err := dund.New(filepath.Join(dunconfig.DunHome(), "dund"), &echoSpawner{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("unix", dundcli.Socket(dunHome()))
+	ln, err := net.Listen("unix", dundcli.Socket(dunconfig.DunHome()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +131,7 @@ func startTestDund(t *testing.T) *testDund {
 // the engines, and (by exiting) end every client connection.
 func (d *testDund) stop() {
 	_ = d.ln.Close()
-	_ = os.Remove(dundcli.Socket(dunHome()))
+	_ = os.Remove(dundcli.Socket(dunconfig.DunHome()))
 	d.svc.Close()
 	d.ln.closeAll()
 }

@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -127,7 +129,7 @@ func TestClipboardImage_InjectedRunner(t *testing.T) {
 	if got, err := os.ReadFile(msg.path); err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("kept %s: %v", msg.path, err)
 	}
-	if filepath.Dir(msg.path) != filepath.Join(dunHome(), "images") {
+	if filepath.Dir(msg.path) != filepath.Join(dunconfig.DunHome(), "images") {
 		t.Fatalf("kept outside $DUN_HOME/images: %s", msg.path)
 	}
 

@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -126,7 +127,7 @@ func (m *tuiModel) showConfig() {
 	b.WriteString("\n  " + stDim.Render("url:   ") + m.url)
 	b.WriteString("\n  " + stDim.Render("model: ") + stTool.Render(m.model))
 	b.WriteString("\n  " + stDim.Render("key:   ") + key)
-	b.WriteString("\n  " + stDim.Render("saved: ") + configPath())
+	b.WriteString("\n  " + stDim.Render("saved: ") + dunconfig.ConfigPath())
 	b.WriteString("\n" + stDim.Render("use /model to switch models, or `dun --setup` to reconfigure"))
 	m.append(b.String())
 }

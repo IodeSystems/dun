@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/openurl"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -157,7 +158,7 @@ type loginProbeMsg struct {
 
 func probeLocal(t loginTmpl) tea.Cmd {
 	return func() tea.Msg {
-		ids, _ := askModels(&http.Client{Timeout: 250 * time.Millisecond}, t.addr(), "")
+		ids, _ := dunconfig.AskModels(&http.Client{Timeout: 250 * time.Millisecond}, t.addr(), "")
 		if len(ids) == 0 {
 			return loginProbeMsg{t.id, -1}
 		}
@@ -292,7 +293,7 @@ func (m *tuiModel) openTemplateForm(t loginTmpl, back bool) tea.Cmd {
 	addr := t.addr()
 	m.providerFields[fieldAddr].SetValue(addr)
 	m.providerFields[fieldAddr].CursorEnd()
-	m.providerAuto = loadConfig().freeName(t.id, addr)
+	m.providerAuto = dunconfig.LoadConfig().FreeName(t.id, addr)
 	m.providerFields[fieldName].SetValue(m.providerAuto)
 	m.providerEnvKey = t.envKey()
 	if m.providerEnvKey != "" {
@@ -323,14 +324,14 @@ func (m tuiModel) lastStep() int {
 // refused, or nothing answered — for a local server, whether it is running.
 // "" when the service answered (even without a model list: it is saved, and
 // the picker says what is missing).
-func (m tuiModel) loginFail(u string, f modelsFail) string {
+func (m tuiModel) loginFail(u string, f dunconfig.ModelsFail) string {
 	switch {
-	case f.refused:
+	case f.Refused:
 		if t := m.providerTmpl; t != nil && t.id == "anthropic" {
-			return "the key was refused — " + f.why + "\n" + anthropicNoSubscription
+			return "the key was refused — " + f.Why + "\n" + anthropicNoSubscription
 		}
-		return "the key was refused — " + f.why
-	case f.unreachable:
+		return "the key was refused — " + f.Why
+	case f.Unreachable:
 		what := "the service"
 		if m.providerTmpl != nil {
 			what = m.providerTmpl.label
@@ -338,7 +339,7 @@ func (m tuiModel) loginFail(u string, f modelsFail) string {
 		if h := hostOnly(u); h == "localhost" || net.ParseIP(h) != nil {
 			return "nothing is answering at " + hostPort(u) + " — is " + what + " running?"
 		}
-		return "could not reach " + hostPort(u) + " — " + f.why
+		return "could not reach " + hostPort(u) + " — " + f.Why
 	}
 	return ""
 }

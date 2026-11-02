@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -37,7 +38,7 @@ const (
 
 // dialDund connects to the service, starting it when nothing listens.
 func dialDund() (net.Conn, error) {
-	sock := dundcli.Socket(dunHome())
+	sock := dundcli.Socket(dunconfig.DunHome())
 	if c, err := net.Dial("unix", sock); err == nil {
 		return c, nil
 	}
@@ -54,19 +55,17 @@ func dialDund() (net.Conn, error) {
 			return c, nil
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("dund did not come up at %s (see %s): %w", sock, dundLog(), err)
+			return nil, fmt.Errorf("dund did not come up at %s (see %s): %w", sock, dunconfig.DundLog(), err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
-func dundLog() string { return dunHome() + "/dund.log" }
-
 // waitDundStopped waits for a dund that is alive but not answering — one
 // stopping its engines — to exit, so the one started next is not refused as
 // "already running".
 func waitDundStopped() error {
-	pid, alive := dundcli.Running(dunHome())
+	pid, alive := dundcli.Running(dunconfig.DunHome())
 	if !alive {
 		return nil
 	}
@@ -74,17 +73,17 @@ func waitDundStopped() error {
 	// whose status line says it is starting the session.
 	deadline := time.Now().Add(dundStopWait)
 	for time.Now().Before(deadline) {
-		if _, alive := dundcli.Running(dunHome()); !alive {
+		if _, alive := dundcli.Running(dunconfig.DunHome()); !alive {
 			return nil
 		}
-		if c, err := net.Dial("unix", dundcli.Socket(dunHome())); err == nil {
+		if c, err := net.Dial("unix", dundcli.Socket(dunconfig.DunHome())); err == nil {
 			c.Close() // it came back (a re-exec): use it
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("dund (pid %d) holds %s but has not answered for %s — it is stuck stopping: kill -9 %d, then start dun again (see %s)",
-		pid, filepath.Join(dunHome(), "dund.pid"), dundStopWait, pid, dundLog())
+		pid, filepath.Join(dunconfig.DunHome(), "dund.pid"), dundStopWait, pid, dunconfig.DundLog())
 }
 
 // startDund starts the service: the installed one (a systemd unit, or a
@@ -92,17 +91,17 @@ func waitDundStopped() error {
 // --web-experimental included, apply; else `dun dund serve` from this binary, in its own
 // session so it outlives the TUI, output to dund.log.
 func startDund() error {
-	if dundcli.ServiceServes(dundcli.ServiceUnit, dunHome()) {
+	if dundcli.ServiceServes(dundcli.ServiceUnit, dunconfig.DunHome()) {
 		return dundcli.StartService(dundcli.ServiceUnit)
 	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dunHome(), 0o700); err != nil {
+	if err := os.MkdirAll(dunconfig.DunHome(), 0o700); err != nil {
 		return err
 	}
-	logf, err := os.OpenFile(dundLog(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	logf, err := os.OpenFile(dunconfig.DundLog(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -358,7 +357,7 @@ func (a *attachConn) call(sc *bufio.Scanner, session string, payload any) (proto
 	if err := sc.Err(); err != nil {
 		return proto.Event{}, err
 	}
-	return proto.Event{}, errors.New("dund closed the connection (if it crashed, the reason is in " + dundLog() + ")")
+	return proto.Event{}, errors.New("dund closed the connection (if it crashed, the reason is in " + dunconfig.DundLog() + ")")
 }
 
 // restartWith asks the service to restart this session's engine with new
@@ -450,7 +449,7 @@ func (m tuiModel) applyUI(v any) tuiModel {
 // dundSessions lists this user's sessions in dund, every workspace. It does
 // not start dund: no service means no sessions beyond the files.
 func dundSessions() ([]proto.SessionSummary, error) {
-	c, err := net.DialTimeout("unix", dundcli.Socket(dunHome()), time.Second)
+	c, err := net.DialTimeout("unix", dundcli.Socket(dunconfig.DunHome()), time.Second)
 	if err != nil {
 		return nil, err
 	}

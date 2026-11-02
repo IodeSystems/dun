@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -687,11 +688,11 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// the one action, with no retry advice — retrying cannot help.
 		setup := false
 		switch str(ev["error"]) {
-		case errNoLogin.Error():
+		case dunconfig.ErrNoLogin.Error():
 			m.sayNeedLogin()
 			setup = true
-		case errNoModel.Error():
-			m.append(warnLine(errNoModel.Error()))
+		case dunconfig.ErrNoModel.Error():
+			m.append(warnLine(dunconfig.ErrNoModel.Error()))
 			setup = true
 		default:
 			m.append(stErr.Render("error: " + str(ev["error"])))

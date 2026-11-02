@@ -8,6 +8,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/proto"
 )
@@ -185,7 +186,7 @@ func TestSpendEventRoundTrip(t *testing.T) {
 func TestClientCacheWiresOnUsage(t *testing.T) {
 	var got int
 	var model string
-	get := clientCache(dunConfig{}, "http://127.0.0.1:1", "k", nil, func(_, _, m string) func(llm.Usage) { model = m; return func(llm.Usage) { got++ } })
+	get := clientCache(dunconfig.DunConfig{}, "http://127.0.0.1:1", "k", nil, func(_, _, m string) func(llm.Usage) { model = m; return func(llm.Usage) { got++ } })
 	r, err := get("", "child-model")
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +206,7 @@ func TestClientCacheWiresOnUsage(t *testing.T) {
 // same endpoint and model; a provider not logged in is an error naming the
 // ones that are.
 func TestClientCache_AnotherProvider(t *testing.T) {
-	fc := dunConfig{Provider: "claude", Providers: []providerConfig{
+	fc := dunconfig.DunConfig{Provider: "claude", Providers: []dunconfig.ProviderConfig{
 		{Name: "claude", URL: "https://api.anthropic.com/v1", Key: "ck"},
 		{Name: "local", URL: "http://127.0.0.1:2/v1", Key: "lk", Reasoning: llm.DialectLlamaCpp},
 	}}
@@ -248,7 +249,7 @@ func TestClientCache_AnotherProvider(t *testing.T) {
 // not the active one: a child there is asked to think in its dialect.
 func TestReasoningDialect_SavedProviderAtURL(t *testing.T) {
 	t.Setenv("DUN_REASONING", "")
-	fc := dunConfig{Provider: "claude", URL: "https://api.anthropic.com/v1", Providers: []providerConfig{
+	fc := dunconfig.DunConfig{Provider: "claude", URL: "https://api.anthropic.com/v1", Providers: []dunconfig.ProviderConfig{
 		{Name: "claude", URL: "https://api.anthropic.com/v1", Reasoning: llm.DialectAnthropic},
 		{Name: "local", URL: "http://127.0.0.1:2/v1", Reasoning: llm.DialectLlamaCpp},
 	}}

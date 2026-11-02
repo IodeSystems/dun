@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -247,7 +248,7 @@ func TestLogin6_TwoFieldsNameInTheNote(t *testing.T) {
 		t.Fatalf("enter on the address goes to the key, at %d", m.providerStep)
 	}
 	m = finishLogin(pick(m, "sk-1", "enter"))
-	if c, _ := loadConfig().named("example"); c.Key != "sk-1" {
+	if c, _ := dunconfig.LoadConfig().Named("example"); c.Key != "sk-1" {
 		t.Fatalf("saved %+v", c)
 	}
 	m.openProviderForm(nil)
@@ -274,9 +275,9 @@ func TestLogin6_Rename(t *testing.T) {
 	m = finishLogin(pick(m, "http://127.0.0.1:4000/v1", "enter", "enter"))
 	m.provider = "local"
 	loginSlash(&m, []string{"rename", "local", "work"})
-	c := loadConfig()
-	if _, ok := c.named("work"); !ok || c.activeName() != "work" || m.provider != "work" {
-		t.Errorf("renamed: %+v active %q provider %q", c.providerList(), c.activeName(), m.provider)
+	c := dunconfig.LoadConfig()
+	if _, ok := c.Named("work"); !ok || c.ActiveName() != "work" || m.provider != "work" {
+		t.Errorf("renamed: %+v active %q provider %q", c.ProviderList(), c.ActiveName(), m.provider)
 	}
 	if !strings.Contains(stripANSI(convoText(m)), "renamed local to work") {
 		t.Errorf("no notice:\n%s", stripANSI(convoText(m)))

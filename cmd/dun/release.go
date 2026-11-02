@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
@@ -89,7 +90,7 @@ var newUpdater = func() *update.Updater {
 		return nil
 	}
 	return &update.Updater{ManifestURL: release.ManifestURL, Keys: keys, Current: buildinfo.Version, Exe: exe,
-		Home: dunHome(), Platform: update.Platform(runtime.GOOS, runtime.GOARCH), Fetch: &update.Fetcher{}}
+		Home: dunconfig.DunHome(), Platform: update.Platform(runtime.GOOS, runtime.GOARCH), Fetch: &update.Fetcher{}}
 }
 
 // releaseUpdate runs the daily check, in the background of the TUI, and
@@ -97,7 +98,7 @@ var newUpdater = func() *update.Updater {
 // checks not due are silent; a refused download is said.
 func releaseUpdate() string {
 	u := newUpdater()
-	if u == nil || os.Getenv("DUN_CHILD") != "" || loadConfig().NoUpdates {
+	if u == nil || os.Getenv("DUN_CHILD") != "" || dunconfig.LoadConfig().NoUpdates {
 		return ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -130,7 +131,7 @@ func stagedLine(res update.Result, asked bool) string {
 // exe (build ver) once nothing is busy. It never starts dund: one that is
 // not running starts on the new file anyway. A variable for the tests.
 var askDundUpgrade = func(exe, ver string) bool {
-	c, err := net.DialTimeout("unix", dundcli.Socket(dunHome()), 2*time.Second)
+	c, err := net.DialTimeout("unix", dundcli.Socket(dunconfig.DunHome()), 2*time.Second)
 	if err != nil {
 		return false
 	}
@@ -153,9 +154,9 @@ var askDundUpgrade = func(exe, ver string) bool {
 // upgradeSwitch is /upgrade off|on: release updates for every dun of this
 // user (the global config).
 func upgradeSwitch(on bool) (string, error) {
-	c := loadConfig()
+	c := dunconfig.LoadConfig()
 	c.NoUpdates = !on
-	if err := saveConfig(c); err != nil {
+	if err := dunconfig.SaveConfig(c); err != nil {
 		return "", err
 	}
 	line := "updates off — dun no longer checks for new releases · /upgrade on to check again"
@@ -179,12 +180,12 @@ func (d *doctor) releaseBuild() {
 			"install a published release")
 		return
 	}
-	if loadConfig().NoUpdates {
+	if dunconfig.LoadConfig().NoUpdates {
 		d.add("ok", "build", "release updates off", "/upgrade on in the TUI to check daily")
 		return
 	}
 	detail := "checks for a new release daily"
-	st := update.LoadState(update.StateFile(dunHome()))
+	st := update.LoadState(update.StateFile(dunconfig.DunHome()))
 	if !st.Checked.IsZero() {
 		detail += ", last " + textfmt.RelTime(st.Checked)
 	}

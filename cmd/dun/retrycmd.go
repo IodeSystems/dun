@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // /retry: how hard dun keeps at a flaky provider (USER 2026-10-26: "my corp
@@ -60,7 +61,7 @@ func retryLine(c *llm.Client) string {
 
 // retryCmd runs /retry's action on the client and returns what to say and
 // the config to save (nil when nothing changed).
-func retryCmd(c *llm.Client, action string) (string, *dunConfig, error) {
+func retryCmd(c *llm.Client, action string) (string, *dunconfig.DunConfig, error) {
 	f := strings.Fields(strings.ToLower(action))
 	if len(f) == 0 || f[0] == "status" {
 		return retryLine(c), nil, nil
@@ -115,8 +116,8 @@ func retryCmd(c *llm.Client, action string) (string, *dunConfig, error) {
 
 // saveRetry is the config with the client's retry settings in it, in the
 // fields parseRetryBudgets reads.
-func saveRetry(c *llm.Client) *dunConfig {
-	fc := loadConfig()
+func saveRetry(c *llm.Client) *dunconfig.DunConfig {
+	fc := dunconfig.LoadConfig()
 	fc.Retry5xxAttempts = c.Retry5xxAttempts
 	fc.RetryBudget = ""
 	switch {

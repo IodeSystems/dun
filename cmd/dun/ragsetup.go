@@ -22,6 +22,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -248,7 +249,7 @@ func sameBase(a, b string) bool { return strings.TrimRight(a, "/") == strings.Tr
 // directory, and returns its path. raglit reads it at each use, so a key
 // changed by /login again reaches raglit at the next setup.
 func keyFile(name, key string) (string, error) {
-	dir := filepath.Join(dunHome(), "keys")
+	dir := filepath.Join(dunconfig.DunHome(), "keys")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -275,7 +276,7 @@ type ragPlan struct {
 // provider whose base URL raglit already has reuses that provider (and
 // gets a key file only when it has no key); another gets a new one, named
 // after it. Key files are written here.
-func planRagSetup(cur ragSettings, picks map[string]ragPick, dunProvs []providerConfig) (ragPlan, error) {
+func planRagSetup(cur ragSettings, picks map[string]ragPick, dunProvs []dunconfig.ProviderConfig) (ragPlan, error) {
 	pl := ragPlan{providers: slices.Clone(cur.Providers), roles: map[string]ragRole{}}
 	for r, v := range cur.Roles {
 		pl.roles[r] = v
@@ -307,18 +308,18 @@ func planRagSetup(cur ragSettings, picks map[string]ragPick, dunProvs []provider
 	return pl, nil
 }
 
-func findProvider(ps []providerConfig, name string) (providerConfig, bool) {
+func findProvider(ps []dunconfig.ProviderConfig, name string) (dunconfig.ProviderConfig, bool) {
 	for _, p := range ps {
 		if p.Name == name {
 			return p, true
 		}
 	}
-	return providerConfig{}, false
+	return dunconfig.ProviderConfig{}, false
 }
 
 // provide is the raglit provider for dun's dp, added when raglit has none
 // at its address.
-func (pl *ragPlan) provide(dp providerConfig) (string, error) {
+func (pl *ragPlan) provide(dp dunconfig.ProviderConfig) (string, error) {
 	for i, p := range pl.providers {
 		if !sameBase(p.BaseURL, dp.URL) {
 			continue
@@ -494,7 +495,7 @@ type ragSetup struct {
 	roles   []dun.SetupRole // the screens, in ragSetupOrder
 	step    int             // the role on screen; len(roles) is the summary
 	picks   map[string]ragPick
-	provs   []providerConfig // dun's, as /model lists them
+	provs   []dunconfig.ProviderConfig // dun's, as /model lists them
 	list    pickList
 	rows    []modelRow // every provider's models so far
 	errs    []string
@@ -554,7 +555,7 @@ func (m *tuiModel) openRagSetup() tea.Cmd {
 	cmds := []tea.Cmd{loadRagSetup, textinput.Blink}
 	for _, p := range ps {
 		cmds = append(cmds, func() tea.Msg {
-			ids, why := listModels(p.URL, p.Key)
+			ids, why := dunconfig.ListModels(p.URL, p.Key)
 			if len(ids) == 0 {
 				return ragModelsMsg{modelFetchMsg{provider: p.Name, err: why}}
 			}
@@ -646,7 +647,7 @@ func (r *ragSetup) ragChoices() []ragChoice {
 	return out
 }
 
-func (r *ragSetup) dunProvider(name string) (providerConfig, bool) {
+func (r *ragSetup) dunProvider(name string) (dunconfig.ProviderConfig, bool) {
 	return findProvider(r.provs, name)
 }
 

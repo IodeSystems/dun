@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // `dun session <id> info [--context]` (USER 2026-10-27): what dun is in a
@@ -48,10 +49,10 @@ func sessionCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "dun session info: which session? give its id, or run it from a command dun runs ($DUN_SESSION_ID)")
 		return 2
 	}
-	matches, _ := filepath.Glob(filepath.Join(dunHome(), "sessions", "*", id+".harness.json"))
+	matches, _ := filepath.Glob(filepath.Join(dunconfig.DunHome(), "sessions", "*", id+".harness.json"))
 	if len(matches) == 0 {
 		fmt.Fprintf(os.Stderr, "dun session info: no session %s with harness facts in %s (a session started before this dun keeps none)\n",
-			id, filepath.Join(dunHome(), "sessions"))
+			id, filepath.Join(dunconfig.DunHome(), "sessions"))
 		return 1
 	}
 	b, err := os.ReadFile(matches[0])

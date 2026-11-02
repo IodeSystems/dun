@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // loginWith is the service picker, opened at w×h with no saved login and no
@@ -205,7 +207,7 @@ func TestLogin_CheckBeforeSave(t *testing.T) {
 	if !m.providerForm || !strings.HasPrefix(m.providerErr, "the key was refused") || m.providerStep != fieldKey {
 		t.Fatalf("form %v err %q step %d", m.providerForm, m.providerErr, m.providerStep)
 	}
-	if _, ok := loadConfig().named("local"); ok || m.providerFields[fieldKey].Value() != "sk-bad" {
+	if _, ok := dunconfig.LoadConfig().Named("local"); ok || m.providerFields[fieldKey].Value() != "sk-bad" {
 		t.Errorf("saved a refused login, or lost the key typed")
 	}
 	// Said whole at 49: every word of it is on the screen, no row too wide.
@@ -234,8 +236,8 @@ func TestLogin_CheckBeforeSave(t *testing.T) {
 	if !strings.Contains(m.providerErr, "nothing is answering at "+hostPort(dead)+" — is llama.cpp running?") {
 		t.Errorf("err %q", m.providerErr)
 	}
-	if len(loadConfig().providerList()) != 0 {
-		t.Errorf("saved: %+v", loadConfig().providerList())
+	if len(dunconfig.LoadConfig().ProviderList()) != 0 {
+		t.Errorf("saved: %+v", dunconfig.LoadConfig().ProviderList())
 	}
 }
 
@@ -250,7 +252,7 @@ func TestLogin_TemplateSavesUnderItsName(t *testing.T) {
 	m.providerFields[fieldAddr].SetValue(srv.URL + "/v1")
 	cmd := m.saveProvider()
 	m.loginChecked(cmd().(loginCheckedMsg))
-	if p, ok := loadConfig().named("ollama"); !ok || p.URL != srv.URL+"/v1" || p.Key != "" {
+	if p, ok := dunconfig.LoadConfig().Named("ollama"); !ok || p.URL != srv.URL+"/v1" || p.Key != "" {
 		t.Fatalf("saved %+v %v (err %q)", p, ok, m.providerErr)
 	}
 	if m.providerForm || !m.modelPicking || len(m.modelRows) != 1 {

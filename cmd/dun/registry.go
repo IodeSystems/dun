@@ -8,6 +8,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	dunreg "github.com/iodesystems/dun/internal/registry"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
@@ -31,7 +32,7 @@ func registryStore() *dunreg.Store {
 		return nil
 	}
 	// A next key the update check took on (key rotation) signs registries too.
-	for _, l := range update.LoadState(update.StateFile(dunHome())).Keys {
+	for _, l := range update.LoadState(update.StateFile(dunconfig.DunHome())).Keys {
 		if k, err := update.ParsePublicKey(l); err == nil {
 			keys = append(keys, k)
 		}
@@ -40,7 +41,7 @@ func registryStore() *dunreg.Store {
 	if v := os.Getenv("DUN_REGISTRY_URL"); v != "" {
 		u = v
 	}
-	return &dunreg.Store{Dir: filepath.Join(dunHome(), "registry"), URL: u, Keys: keys,
+	return &dunreg.Store{Dir: filepath.Join(dunconfig.DunHome(), "registry"), URL: u, Keys: keys,
 		Fetch: &update.Fetcher{}, MaxAge: dunreg.DefaultMaxAge}
 }
 

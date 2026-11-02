@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
@@ -61,10 +62,10 @@ func updatePolicy(now time.Time) string {
 	if newUpdater() == nil {
 		return "none — this build carries no release key (dun doctor says why)"
 	}
-	if loadConfig().NoUpdates {
+	if dunconfig.LoadConfig().NoUpdates {
 		return "off (/upgrade on to check daily again)"
 	}
-	st := update.LoadState(update.StateFile(dunHome()))
+	st := update.LoadState(update.StateFile(dunconfig.DunHome()))
 	line := "daily, from " + release.ManifestURL + " (signed; verified with the key built into this build)"
 	switch {
 	case st.Checked.IsZero():
@@ -89,7 +90,7 @@ func latestLine() string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	man, err := update.Latest(ctx, &update.Fetcher{}, release.ManifestURL, keys, dunHome())
+	man, err := update.Latest(ctx, &update.Fetcher{}, release.ManifestURL, keys, dunconfig.DunHome())
 	if err != nil {
 		return "latest: could not look it up — " + textfmt.PlainLine(err.Error())
 	}

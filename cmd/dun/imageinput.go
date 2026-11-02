@@ -18,8 +18,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/iodesystems/dun/proto"
 	_ "golang.org/x/image/webp"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/proto"
 )
 
 // imageinput.go — images into the composer.
@@ -174,7 +176,7 @@ func clipboardImage() ([]byte, bool) {
 // one file.
 func saveClipboardImage(data []byte) (string, error) {
 	sum := sha256.Sum256(data)
-	dir := filepath.Join(dunHome(), "images")
+	dir := filepath.Join(dunconfig.DunHome(), "images")
 	path := filepath.Join(dir, hex.EncodeToString(sum[:])+".png")
 	if _, err := os.Stat(path); err == nil {
 		return path, nil

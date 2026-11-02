@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 )
 
@@ -19,7 +20,7 @@ import (
 // home, and records it. A home it cannot write to says nothing: a notice
 // repeated on every run is worse than one not said.
 func onceEver(key string) bool {
-	dir := filepath.Join(dunHome(), "notices")
+	dir := filepath.Join(dunconfig.DunHome(), "notices")
 	if os.MkdirAll(dir, 0o700) != nil {
 		return false
 	}
@@ -34,7 +35,7 @@ func onceEver(key string) bool {
 // noteBackground is said after the first /exit: dund stays up after the TUI
 // is gone, and nothing on screen said so.
 func noteBackground(w io.Writer) {
-	if !dialOK(dundcli.Socket(dunHome())) || !onceEver("dund-background") {
+	if !dialOK(dundcli.Socket(dunconfig.DunHome())) || !onceEver("dund-background") {
 		return
 	}
 	stop := killLine()

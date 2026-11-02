@@ -8,6 +8,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // Round 4 of the onboarding walk (plan item 37).
@@ -105,7 +107,7 @@ func TestRestoredQuestion_IsMarked(t *testing.T) {
 	if !strings.Contains(held, "214") { // an instruction: the attention colour (run 6)
 		t.Errorf("the kept-question line is not in the attention colour: %q", held)
 	}
-	m.switchModel(providerConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
+	m.switchModel(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m = m.handleEvent(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
 	if m.input.Value() != "Can you help?" {

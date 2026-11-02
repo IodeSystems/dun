@@ -13,6 +13,7 @@ import (
 	"charm.land/glamour/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // The TUI is a CLIENT of the `-p` JSON event protocol: it re-execs `dun -p`,
@@ -94,8 +95,8 @@ func runTUI(o tuiOpts) error {
 	m := newTUIModel(nil, o.workspace)
 	m.startingStart = time.Now()
 	m.model, m.url, m.keySet = o.model, o.url, o.key != "" // for /config
-	m.provider = hostName(o.url)
-	if p, ok := loadConfig().providerAt(o.url); ok {
+	m.provider = dunconfig.HostName(o.url)
+	if p, ok := dunconfig.LoadConfig().ProviderAt(o.url); ok {
 		m.provider = p.Name
 	}
 	m.disableExit = o.disableExit
@@ -347,15 +348,15 @@ type tuiModel struct {
 	providerFields     [3]textinput.Model // address, name, key (fieldAddr, fieldName, fieldKey)
 	providerStep       int
 	providerErr        string
-	providerAuto       string     // the name the form filled in from the address; replaced while it is unedited
-	providerEdit       string     // the provider the form edits; "" adds one
-	providerChecking   string     // the service being checked, asked for its models before it is saved (saveProvider)
-	providerPending    providerOp // what is saved once the check passes
-	providerTmpl       *loginTmpl // the template the form was opened from; nil: custom, or again
-	providerKeysOpened bool       // the keys page was opened for this form
-	providerEnvKey     string     // the template's key variable that is set; "" none
-	providerBack       bool       // esc goes back to the service picker
-	provider           string     // name of the provider the engine runs on
+	providerAuto       string               // the name the form filled in from the address; replaced while it is unedited
+	providerEdit       string               // the provider the form edits; "" adds one
+	providerChecking   string               // the service being checked, asked for its models before it is saved (saveProvider)
+	providerPending    dunconfig.ProviderOp // what is saved once the check passes
+	providerTmpl       *loginTmpl           // the template the form was opened from; nil: custom, or again
+	providerKeysOpened bool                 // the keys page was opened for this form
+	providerEnvKey     string               // the template's key variable that is set; "" none
+	providerBack       bool                 // esc goes back to the service picker
+	provider           string               // name of the provider the engine runs on
 	// /rag setup (ragsetup.go); nil when it is not open.
 	rag *ragSetup
 	// The add-MCP-server form (/mcp add).

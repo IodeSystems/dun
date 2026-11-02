@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -189,7 +190,7 @@ func buildDecision(mine, dund, onDisk string) buildAction {
 var probeSelf = func(exe string) string { return dundcli.ProbeVersion(exe) }
 
 func killLine() string {
-	return "kill $(cat " + filepath.Join(dunHome(), "dund.pid") + ")"
+	return "kill $(cat " + filepath.Join(dunconfig.DunHome(), "dund.pid") + ")"
 }
 
 // once reports whether key is new (and records it): a note about a build

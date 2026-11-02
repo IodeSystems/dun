@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // The same block, enough copies for the guard, as stream deltas.
@@ -35,7 +36,7 @@ func TestLoops_CountKeepsTheGuard(t *testing.T) {
 	l := &loopWatcher{}
 	c := llm.NewClient("http://x/v1", "", "m")
 	t.Setenv("DUN_LOOP_DETECT", "")
-	l.install(c, loopConfig{})
+	l.install(c, dunconfig.LoopConfig{})
 	if r := exactLoop(c.Watch(nil)); r == nil {
 		t.Error("the same bytes back to back were not cut")
 	}
@@ -52,7 +53,7 @@ func TestLoops_CutAndOff(t *testing.T) {
 	t.Setenv("DUN_LOOP_DETECT", "")
 	l := &loopWatcher{}
 	c := llm.NewClient("http://x/v1", "", "m")
-	l.install(c, loopConfig{})
+	l.install(c, dunconfig.LoopConfig{})
 	msg, save, err := l.command("cut")
 	if err != nil || save == nil || save.Loops.Mode != loopsCut || !strings.Contains(msg, "cutting at 3") {
 		t.Fatalf("cut: %q %+v %v", msg, save, err)
@@ -81,7 +82,7 @@ func TestLoops_Command(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	t.Setenv("DUN_LOOP_DETECT", "")
 	l := &loopWatcher{}
-	l.load(loopConfig{})
+	l.load(dunconfig.LoopConfig{})
 	if msg, save, err := l.command(""); err != nil || save != nil || !strings.HasPrefix(msg, "loops: counting") {
 		t.Fatalf("status: %q %v", msg, err)
 	}
@@ -102,14 +103,14 @@ func TestLoops_Command(t *testing.T) {
 func TestLoops_Load(t *testing.T) {
 	t.Setenv("DUN_LOOP_DETECT", "cut")
 	l := &loopWatcher{}
-	l.load(loopConfig{Mode: loopsOff})
-	if l.cfg.mode() != loopsCut {
-		t.Errorf("env: %q", l.cfg.mode())
+	l.load(dunconfig.LoopConfig{Mode: dunconfig.LoopsOff})
+	if l.cfg.EffectiveMode() != loopsCut {
+		t.Errorf("env: %q", l.cfg.EffectiveMode())
 	}
 	t.Setenv("DUN_LOOP_DETECT", "")
 	l = &loopWatcher{}
-	l.load(loopConfig{Mode: "sometimes"})
-	if l.cfg.mode() != loopsCount {
-		t.Errorf("junk: %q", l.cfg.mode())
+	l.load(dunconfig.LoopConfig{Mode: "sometimes"})
+	if l.cfg.EffectiveMode() != dunconfig.LoopsCount {
+		t.Errorf("junk: %q", l.cfg.EffectiveMode())
 	}
 }

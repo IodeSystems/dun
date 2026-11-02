@@ -21,6 +21,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
@@ -167,7 +168,7 @@ func check(fix bool) *doctor {
 
 // report prints the findings; 1 when one failed.
 func (d *doctor) report() int {
-	fmt.Printf("dun doctor — dun %s, %s/%s, home %s\n\n", buildinfo.Version, runtime.GOOS, runtime.GOARCH, dunHome())
+	fmt.Printf("dun doctor — dun %s, %s/%s, home %s\n\n", buildinfo.Version, runtime.GOOS, runtime.GOARCH, dunconfig.DunHome())
 	failed := false
 	for _, f := range d.found {
 		mark := map[string]string{"ok": stTool.Render("ok  "), "warn": stDim.Render("warn"), "fail": stErr.Render("FAIL")}[f.level]
@@ -184,17 +185,17 @@ func (d *doctor) report() int {
 }
 
 func (d *doctor) providers() {
-	if st, err := os.Stat(configPath()); err == nil && st.Mode().Perm()&0o077 != 0 {
-		d.add("warn", "config", fmt.Sprintf("%s is %v: it holds keys", configPath(), st.Mode().Perm()), "chmod 600 "+configPath())
+	if st, err := os.Stat(dunconfig.ConfigPath()); err == nil && st.Mode().Perm()&0o077 != 0 {
+		d.add("warn", "config", fmt.Sprintf("%s is %v: it holds keys", dunconfig.ConfigPath(), st.Mode().Perm()), "chmod 600 "+dunconfig.ConfigPath())
 	}
-	cfg := loadConfig()
-	ps := cfg.providerList()
+	cfg := dunconfig.LoadConfig()
+	ps := cfg.ProviderList()
 	if len(ps) == 0 {
 		d.add("fail", "provider", "not logged in to a provider: dun talks to no model",
 			"/login <name> in the TUI, web or app, or `dun --setup` (an OpenAI-compatible URL, bearer optional)")
 		return
 	}
-	def := cfg.activeName()
+	def := cfg.ActiveName()
 	if cfg.Model == "" {
 		d.add("fail", "model", "no model chosen on "+def, "/model in the TUI, web or app")
 	}
@@ -203,15 +204,15 @@ func (d *doctor) providers() {
 		if name == def {
 			name += " (default)"
 		}
-		ids, why := listModels(p.URL, p.Key)
+		ids, why := dunconfig.ListModels(p.URL, p.Key)
 		switch {
 		case len(ids) == 0:
-			d.add("warn", "provider", fmt.Sprintf("%s at %s, %s: %s", name, p.URL, keyNote(p.Key), why),
+			d.add("warn", "provider", fmt.Sprintf("%s at %s, %s: %s", name, p.URL, dunconfig.KeyNote(p.Key), why),
 				"a wrong key: /login "+p.Name+" again; a gateway that lists nothing: /model use "+p.Name+" <id>")
 		case p.Name == def && cfg.Model != "" && !slices.Contains(ids, cfg.Model):
 			d.add("warn", "model", fmt.Sprintf("%s is not among %s's %d models", cfg.Model, p.Name, len(ids)), "/model to pick one it lists")
 		default:
-			detail := fmt.Sprintf("%s at %s, %s: %d models", name, p.URL, keyNote(p.Key), len(ids))
+			detail := fmt.Sprintf("%s at %s, %s: %d models", name, p.URL, dunconfig.KeyNote(p.Key), len(ids))
 			if p.Name == def && cfg.Model != "" {
 				detail += "; model " + cfg.Model
 			}
@@ -499,7 +500,7 @@ func (d *doctor) dund() {
 	} else {
 		d.add("ok", "service", "not installed (optional: the TUI starts dund itself)", "")
 	}
-	sock := dundcli.Socket(dunHome())
+	sock := dundcli.Socket(dunconfig.DunHome())
 	c, err := net.DialTimeout("unix", sock, 2*time.Second)
 	if err != nil {
 		fix := "start it: run dun (the TUI starts it)"
@@ -533,14 +534,14 @@ func (d *doctor) dund() {
 		}
 	}
 	d.add("fail", "dund", "no answer at "+sock+" (it identifies you by the kernel's peer credentials)",
-		"dun dund service logs (or "+dundLog()+")")
+		"dun dund service logs (or "+dunconfig.DundLog()+")")
 }
 
 // dundBuild compares the running dund's build with this binary's: a dund left
 // running from an older build keeps its old behaviour (and its old bugs) until
 // it restarts.
 func (d *doctor) dundBuild(c net.Conn, sc *bufio.Scanner) {
-	pid := filepath.Join(dunHome(), "dund.pid")
+	pid := filepath.Join(dunconfig.DunHome(), "dund.pid")
 	restart := "stop it — kill $(cat " + pid + ") — and start dun again; sessions are kept"
 	if _, svc := dundcli.ServiceFile(dundcli.ServiceUnit); svc {
 		restart = "dun dund service restart; sessions are kept"

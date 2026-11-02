@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -189,7 +190,7 @@ var ttySize = func() (int, int, error) { return term.GetSize(int(os.Stdout.Fd())
 
 // capture writes $DUN_HOME/bugreports/<ts>/ and returns its path.
 func (m tuiModel) capture(now time.Time) (string, error) {
-	root := filepath.Join(dunHome(), "bugreports")
+	root := filepath.Join(dunconfig.DunHome(), "bugreports")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return "", err
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -56,7 +57,7 @@ func TestDropKeyEnv(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "k-active")
 	t.Setenv("OTHER_KEY", "k-saved")
 	t.Setenv("PROJECT_TOKEN", "mine")
-	dropKeyEnv(dunConfig{Providers: []providerConfig{{Name: "a", Key: "k-saved"}, {Name: "b"}}}, "k-active")
+	dropKeyEnv(dunconfig.DunConfig{Providers: []dunconfig.ProviderConfig{{Name: "a", Key: "k-saved"}, {Name: "b"}}}, "k-active")
 	for _, name := range []string{"DUN_LLM_KEY", "ANTHROPIC_API_KEY", "OTHER_KEY"} {
 		if v, ok := os.LookupEnv(name); ok {
 			t.Errorf("%s=%s is still set", name, v)
@@ -70,19 +71,19 @@ func TestDropKeyEnv(t *testing.T) {
 // dun's own price file overrides the estimates; a bad one is ignored.
 func TestLoadPrices(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	if loadPrices() != nil {
+	if dunconfig.LoadPrices() != nil {
 		t.Error("no file should be no override")
 	}
-	if err := os.WriteFile(pricesPath(), []byte(`{"claude-opus-5-5":{"input":1,"output":2}}`), 0o600); err != nil {
+	if err := os.WriteFile(dunconfig.PricesPath(), []byte(`{"claude-opus-5-5":{"input":1,"output":2}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if p := loadPrices(); p["claude-opus-5-5"].Input != 1 || p["claude-opus-5-5"].Output != 2 {
+	if p := dunconfig.LoadPrices(); p["claude-opus-5-5"].Input != 1 || p["claude-opus-5-5"].Output != 2 {
 		t.Errorf("prices %+v", p)
 	}
-	if err := os.WriteFile(pricesPath(), []byte(`{not json`), 0o600); err != nil {
+	if err := os.WriteFile(dunconfig.PricesPath(), []byte(`{not json`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if loadPrices() != nil {
+	if dunconfig.LoadPrices() != nil {
 		t.Error("a bad file was used")
 	}
 }

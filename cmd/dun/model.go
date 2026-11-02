@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/textfmt"
 	shim "github.com/iodesystems/openai-claude-api-shim"
 )
@@ -41,22 +42,22 @@ type modelFetchMsg struct {
 
 // pickerProviders returns the providers /model lists: the saved ones, plus
 // the running one when it came from a flag or env var and is not saved.
-func (m tuiModel) pickerProviders() []providerConfig {
-	cfg := loadConfig()
-	ps := append([]providerConfig(nil), cfg.providerList()...)
-	if _, ok := cfg.providerAt(m.url); !ok && m.url != "" {
-		ps = append(ps, providerConfig{Name: hostName(m.url), URL: m.url, Key: m.opts.key})
+func (m tuiModel) pickerProviders() []dunconfig.ProviderConfig {
+	cfg := dunconfig.LoadConfig()
+	ps := append([]dunconfig.ProviderConfig(nil), cfg.ProviderList()...)
+	if _, ok := cfg.ProviderAt(m.url); !ok && m.url != "" {
+		ps = append(ps, dunconfig.ProviderConfig{Name: dunconfig.HostName(m.url), URL: m.url, Key: m.opts.key})
 	}
 	return ps
 }
 
-func (m tuiModel) providerNamed(name string) (providerConfig, bool) {
+func (m tuiModel) providerNamed(name string) (dunconfig.ProviderConfig, bool) {
 	for _, p := range m.pickerProviders() {
 		if p.Name == name {
 			return p, true
 		}
 	}
-	return providerConfig{}, false
+	return dunconfig.ProviderConfig{}, false
 }
 
 // modelSlash implements /model — picking among the logged-in providers'
@@ -85,7 +86,7 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 			m.append(stErr.Render("usage: /model use <provider> <model-id> [--session]"))
 			return nil
 		}
-		p, ok := loadConfig().named(args[1])
+		p, ok := dunconfig.LoadConfig().Named(args[1])
 		if !ok {
 			m.append(stErr.Render("not logged in to " + args[1] + " — /login " + args[1]))
 			return nil
@@ -105,7 +106,7 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 			return nil
 		}
 		if p.URL == "" {
-			p = providerConfig{Name: m.provider, URL: m.url, Key: m.opts.key}
+			p = dunconfig.ProviderConfig{Name: m.provider, URL: m.url, Key: m.opts.key}
 		}
 		return m.switchModel(p, args[0], persist)
 	}
@@ -128,7 +129,7 @@ func loginSlash(m *tuiModel, args []string) tea.Cmd {
 		return nil
 	}
 	if len(args) == 1 {
-		if p, ok := loadConfig().named(args[0]); ok {
+		if p, ok := dunconfig.LoadConfig().Named(args[0]); ok {
 			return m.openProviderForm(&p)
 		}
 		if t, ok := templateNamed(args[0]); ok {
@@ -147,7 +148,7 @@ func logoutSlash(m *tuiModel, args []string) tea.Cmd {
 		m.append(stErr.Render("usage: /logout <provider>"))
 		return nil
 	}
-	msg, err := applyProviderOp(providerOp{Op: "logout", Name: args[0]})
+	msg, err := dunconfig.ApplyProviderOp(dunconfig.ProviderOp{Op: "logout", Name: args[0]})
 	if err != nil {
 		m.append(stErr.Render(err.Error()))
 		return nil
@@ -173,7 +174,7 @@ func (m *tuiModel) openModelPicker(query string, have ...modelFetchMsg) tea.Cmd 
 			continue
 		}
 		cmds = append(cmds, func() tea.Msg {
-			ids, why := listModels(p.URL, p.Key)
+			ids, why := dunconfig.ListModels(p.URL, p.Key)
 			if len(ids) == 0 {
 				return modelFetchMsg{provider: p.Name, err: why + " — /model use " + p.Name + " <model-id>, or /login " + p.Name + " again"}
 			}
@@ -227,7 +228,7 @@ func (m *tuiModel) addModelRows(msg modelFetchMsg) {
 	if !had {
 		cur = modelRow{m.provider, m.model}
 		if m.model == "" {
-			c := loadConfig()
+			c := dunconfig.LoadConfig()
 			cur = modelRow{c.Provider, c.Model}
 		}
 	}
@@ -356,14 +357,14 @@ func (m tuiModel) typeModelQuery(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // switchModel restarts the engine on provider p with model. If persist is
 // true, p and model become the saved defaults.
-func (m *tuiModel) switchModel(p providerConfig, model string, persist bool) tea.Cmd {
+func (m *tuiModel) switchModel(p dunconfig.ProviderConfig, model string, persist bool) tea.Cmd {
 	if model == "" {
 		return nil
 	}
 	if persist {
-		cfg := loadConfig()
-		cfg.use(p, model)
-		if err := saveConfig(cfg); err != nil {
+		cfg := dunconfig.LoadConfig()
+		cfg.Use(p, model)
+		if err := dunconfig.SaveConfig(cfg); err != nil {
 			m.append(stErr.Render("failed to save config: " + err.Error()))
 			return nil
 		}
@@ -513,7 +514,7 @@ const (
 // openProviderForm opens the login form, or with edit the form for a provider
 // already logged in: its name fixed, its URL filled in, the key left empty to
 // keep it.
-func (m *tuiModel) openProviderForm(edit *providerConfig) tea.Cmd {
+func (m *tuiModel) openProviderForm(edit *dunconfig.ProviderConfig) tea.Cmd {
 	mk := func(text string) textinput.Model {
 		t := textinput.New()
 		t.Placeholder = placeholder(text)
@@ -625,7 +626,7 @@ func (m tuiModel) typeProviderField(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.providerTmpl != nil {
 				base = m.providerTmpl.id
 			}
-			m.providerAuto = loadConfig().freeName(base, addr)
+			m.providerAuto = dunconfig.LoadConfig().FreeName(base, addr)
 			name.SetValue(m.providerAuto)
 			// SetValue keeps the cursor where the first fill put it (after
 			// one character); a person erasing the name starts at its end.
@@ -664,7 +665,7 @@ func nameFromURL(raw string) string {
 // nothing answering, is said in the form, which stays with what was typed;
 // an answer saves the login and opens the picker (loginChecked).
 func (m *tuiModel) saveProvider() tea.Cmd {
-	op := providerOp{Op: "login",
+	op := dunconfig.ProviderOp{Op: "login",
 		Name: m.providerName(),
 		URL:  strings.TrimRight(strings.TrimSpace(m.providerFields[fieldAddr].Value()), "/"),
 		Key:  strings.TrimSpace(m.providerFields[fieldKey].Value()),
@@ -673,7 +674,7 @@ func (m *tuiModel) saveProvider() tea.Cmd {
 		op.Key = strings.TrimSpace(os.Getenv(m.providerEnvKey))
 	}
 	key := op.Key
-	if p, ok := loadConfig().named(op.Name); ok && key == "" {
+	if p, ok := dunconfig.LoadConfig().Named(op.Name); ok && key == "" {
 		key = p.Key // again under a saved name: an empty key keeps it
 	}
 	if m.lastStep() == fieldAddr {
@@ -687,10 +688,10 @@ func (m *tuiModel) saveProvider() tea.Cmd {
 	m.providerErr, m.providerChecking, m.providerPending = "", op.Name, op
 	m.refresh()
 	return func() tea.Msg {
-		ids, f := askModels(&http.Client{Timeout: 6 * time.Second}, op.URL, key)
+		ids, f := dunconfig.AskModels(&http.Client{Timeout: 6 * time.Second}, op.URL, key)
 		r := loginCheckedMsg{models: modelFetchMsg{provider: op.Name, ids: ids}}
 		if len(ids) == 0 {
-			r.models.err = f.why + " — /model use " + op.Name + " <model-id>, or /login " + op.Name + " again"
+			r.models.err = f.Why + " — /model use " + op.Name + " <model-id>, or /login " + op.Name + " again"
 			r.fail = f
 		}
 		return r
@@ -701,7 +702,7 @@ func (m *tuiModel) saveProvider() tea.Cmd {
 // service's model list, or why there is none.
 type loginCheckedMsg struct {
 	models modelFetchMsg
-	fail   modelsFail
+	fail   dunconfig.ModelsFail
 }
 
 // loginChecked takes the check's answer. Refused or unreachable: said in
@@ -716,13 +717,13 @@ func (m *tuiModel) loginChecked(msg loginCheckedMsg) tea.Cmd {
 	m.providerChecking = ""
 	if why := m.loginFail(m.providerPending.URL, msg.fail); why != "" {
 		m.providerErr = why
-		if msg.fail.refused && m.providerStep != fieldKey && m.lastStep() == fieldKey {
+		if msg.fail.Refused && m.providerStep != fieldKey && m.lastStep() == fieldKey {
 			m.providerMove(fieldKey - m.providerStep)
 		}
 		m.refresh()
 		return textinput.Blink
 	}
-	notice, err := applyProviderOp(m.providerPending)
+	notice, err := dunconfig.ApplyProviderOp(m.providerPending)
 	if err != nil {
 		m.providerErr = err.Error()
 		m.refresh()
@@ -767,7 +768,7 @@ func (m tuiModel) providerFormPanel() string {
 		rows = append(rows, wholeRows(m.providerErr, m.w, "  ", stErr)...)
 	}
 	// "privately": saveConfig keeps the file 0600 (only you can read it).
-	notes := []string{"saved privately to " + tildePath(configPath())}
+	notes := []string{"saved privately to " + tildePath(dunconfig.ConfigPath())}
 	if t := m.providerTmpl; t != nil && m.providerEdit == "" {
 		switch {
 		case t.local():
@@ -786,7 +787,7 @@ func (m tuiModel) providerFormPanel() string {
 	}
 	// Always a row, so the form does not grow as the address is typed.
 	if n := m.providerName(); m.providerEdit == "" {
-		switch _, ok := loadConfig().named(n); {
+		switch _, ok := dunconfig.LoadConfig().Named(n); {
 		case n == "":
 			notes = append(notes, "the name comes from the address")
 		case ok:
@@ -824,7 +825,7 @@ func (m tuiModel) providerHint() string {
 // loginRename is /login rename <old> <new>: the saved service's name, the
 // one the splash, the picker and the spend row say.
 func (m *tuiModel) loginRename(old, name string) {
-	msg, err := applyProviderOp(providerOp{Op: "rename", Name: old, NewName: name})
+	msg, err := dunconfig.ApplyProviderOp(dunconfig.ProviderOp{Op: "rename", Name: old, NewName: name})
 	if err != nil {
 		m.append(stErr.Render(err.Error()))
 		return
@@ -876,7 +877,7 @@ func claudeNote(id string) string {
 	if shim.IsAlias(id) && slices.Contains(anthropicAliases, id) {
 		return "the newest " + strings.TrimSuffix(id, "-latest")
 	}
-	p, ok := shim.PriceOf(loadPrices(), id)
+	p, ok := shim.PriceOf(dunconfig.LoadPrices(), id)
 	if !ok {
 		return ""
 	}

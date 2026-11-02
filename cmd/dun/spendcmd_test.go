@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/anthropicadmin"
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 func fakeAntBin(t *testing.T, script string) string {
@@ -27,7 +28,7 @@ func fakeAntBin(t *testing.T, script string) string {
 // With neither credential it says estimates and how to get more.
 func TestSpendLine_Neither(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	got := spendLine(context.Background(), anthropicadmin.Source{KeyFile: spendKeyFile()}, dunConfig{}, time.Now())
+	got := spendLine(context.Background(), anthropicadmin.Source{KeyFile: spendKeyFile()}, dunconfig.DunConfig{}, time.Now())
 	if !strings.Contains(got, "est this month") {
 		t.Errorf("%q", got)
 	}
@@ -43,7 +44,7 @@ func TestSpendLine_IndividualAccount(t *testing.T) {
 	}))
 	defer srv.Close()
 	s := anthropicadmin.Source{Ant: fakeAntBin(t, "echo tok"), Base: srv.URL}
-	got := spendLine(context.Background(), s, dunConfig{SpendBudget: 100}, time.Now())
+	got := spendLine(context.Background(), s, dunconfig.DunConfig{SpendBudget: 100}, time.Now())
 	for _, want := range []string{"~$12.50 est", "~$87.50 est left of your $100.00"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q in %q", want, got)
@@ -56,7 +57,7 @@ func TestSpendLine_IndividualAccount(t *testing.T) {
 
 func TestSpendLine_NotLoggedIn(t *testing.T) {
 	ant := fakeAntBin(t, `exit 1`)
-	got := spendLine(context.Background(), anthropicadmin.Source{Ant: ant}, dunConfig{}, time.Now())
+	got := spendLine(context.Background(), anthropicadmin.Source{Ant: ant}, dunconfig.DunConfig{}, time.Now())
 	if !strings.Contains(got, "est this month") || strings.Contains(got, "billed since") {
 		t.Errorf("%q", got)
 	}
@@ -90,13 +91,13 @@ func TestSpendBudget(t *testing.T) {
 	if msg, err := setSpendBudget("$100"); err != nil || !strings.Contains(msg, "$100.00") {
 		t.Fatalf("%q %v", msg, err)
 	}
-	if loadConfig().SpendBudget != 100 {
-		t.Errorf("saved %v", loadConfig().SpendBudget)
+	if dunconfig.LoadConfig().SpendBudget != 100 {
+		t.Errorf("saved %v", dunconfig.LoadConfig().SpendBudget)
 	}
 	if _, err := setSpendBudget("lots"); err == nil {
 		t.Error("lots was taken")
 	}
-	if _, err := setSpendBudget("off"); err != nil || loadConfig().SpendBudget != 0 {
+	if _, err := setSpendBudget("off"); err != nil || dunconfig.LoadConfig().SpendBudget != 0 {
 		t.Errorf("off: %v", err)
 	}
 }
@@ -113,7 +114,7 @@ func TestSpendReconcile(t *testing.T) {
 	if err != nil || !strings.Contains(msg, "~$7.00 est") {
 		t.Fatalf("%q %v", msg, err)
 	}
-	fc := loadConfig()
+	fc := dunconfig.LoadConfig()
 	fc.SpendBudget = 100
 	got := spendLine(context.Background(), anthropicadmin.Source{}, fc, at.Add(48*time.Hour))
 	for _, want := range []string{"~$42.50 est this month", "$40.00 from you", "~$57.50 est left"} {

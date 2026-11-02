@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // startFresh is a first start: no session before, the engine's events in
@@ -82,7 +83,7 @@ func TestSplash_FreshSessionOnly(t *testing.T) {
 func TestSplash_KeptThroughAModelPick(t *testing.T) {
 	var sent bytes.Buffer
 	m := startFresh(t, &sent, 0, nil)
-	m.switchModel(providerConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
+	m.switchModel(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
 	m = m.handleEvent(evMsg{"type": "session", "id": "s1", "resumed": float64(0)})
 	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m = m.handleEvent(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
@@ -163,22 +164,22 @@ func TestDivider_LeansTowardTheFocusedSide(t *testing.T) {
 // --session is for this session only, as alt+enter is.
 func TestModelTyped_SavesTheDefault(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	cfg := loadConfig()
-	cfg.putProvider(providerConfig{Name: "work", URL: "http://llm/v1"})
-	if err := saveConfig(cfg); err != nil {
+	cfg := dunconfig.LoadConfig()
+	cfg.PutProvider(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"})
+	if err := dunconfig.SaveConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.provider, m.url = "work", "http://llm/v1"
 	modelSlash(&m, []string{"chat-standard"})
-	if c := loadConfig(); c.Model != "chat-standard" || c.Provider != "work" {
+	if c := dunconfig.LoadConfig(); c.Model != "chat-standard" || c.Provider != "work" {
 		t.Errorf("typed /model did not save: %+v", c)
 	}
 	if m.switchNote != "using chat-standard on work · saved as default" {
 		t.Errorf("note %q", m.switchNote)
 	}
 	modelSlash(&m, []string{"work", "chat-fast", "--session"})
-	if c := loadConfig(); c.Model != "chat-standard" {
+	if c := dunconfig.LoadConfig(); c.Model != "chat-standard" {
 		t.Errorf("--session changed the default to %q", c.Model)
 	}
 	if m.switchNote != "using chat-fast on work · this session only" {
@@ -191,10 +192,10 @@ func TestModelTyped_SavesTheDefault(t *testing.T) {
 // the search line and the rows.
 func TestModelList_ChatFirstCursorOnDefault(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	cfg := loadConfig()
-	cfg.putProvider(providerConfig{Name: "work", URL: "http://llm/v1"})
-	cfg.use(providerConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard")
-	if err := saveConfig(cfg); err != nil {
+	cfg := dunconfig.LoadConfig()
+	cfg.PutProvider(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"})
+	cfg.Use(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard")
+	if err := dunconfig.SaveConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")

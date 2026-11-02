@@ -15,6 +15,7 @@ import (
 	"github.com/iodesystems/agentkit/anthropicadmin"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/spendmeter"
 )
 
@@ -30,15 +31,9 @@ import (
 //
 // A corrallm in front of Anthropic will answer this for its clients (its /v1/spend).
 
-// spendKnown is a real figure and when it was true.
-type spendKnown struct {
-	USD float64   `json:"usd"`
-	At  time.Time `json:"at"`
-}
-
 // spendKeyFile is where an Admin key goes. Beside the other oauth tokens, and not
 // in config.json, because it can manage the whole org.
-func spendKeyFile() string { return filepath.Join(dunHome(), "oauth", "anthropic-admin.key") }
+func spendKeyFile() string { return filepath.Join(dunconfig.DunHome(), "oauth", "anthropic-admin.key") }
 
 // antPath is Anthropic's ant, "" when there is none. Apache Ant has the same name.
 func antPath(ctx context.Context) string {
@@ -55,7 +50,7 @@ func spendSource(ctx context.Context) anthropicadmin.Source {
 
 // spendLine is what is known, in words: the report if this account can read it, else
 // the ledger, from the last figure the user gave if it is from this month.
-func spendLine(ctx context.Context, s anthropicadmin.Source, fc dunConfig, now time.Time) string {
+func spendLine(ctx context.Context, s anthropicadmin.Source, fc dunconfig.DunConfig, now time.Time) string {
 	if s.How() != "" {
 		if got, err := s.MonthToDate(ctx, now); err == nil {
 			line := fmt.Sprintf("spend: $%.2f billed since %s (org-wide, usually within 5 minutes)", got.USD, got.Since.Format("Jan 2"))
@@ -101,9 +96,9 @@ func setSpendKnown(value string, now time.Time) (string, error) {
 	if err != nil || n < 0 {
 		return "", fmt.Errorf("reconcile: the amount the Console shows this month, in USD")
 	}
-	fc := loadConfig()
-	fc.SpendKnown = spendKnown{USD: n, At: now}
-	if err := saveConfig(fc); err != nil {
+	fc := dunconfig.LoadConfig()
+	fc.SpendKnown = dunconfig.SpendKnown{USD: n, At: now}
+	if err := dunconfig.SaveConfig(fc); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("spend: $%.2f this month as of now (saved). This dun's ledger had ~$%.2f est", n, estimatedThisMonth()), nil
@@ -111,7 +106,7 @@ func setSpendKnown(value string, now time.Time) (string, error) {
 
 // setSpendBudget saves action's budget and says so.
 func setSpendBudget(value string) (string, error) {
-	fc := loadConfig()
+	fc := dunconfig.LoadConfig()
 	if value == "off" {
 		fc.SpendBudget = 0
 	} else {
@@ -121,7 +116,7 @@ func setSpendBudget(value string) (string, error) {
 		}
 		fc.SpendBudget = n
 	}
-	if err := saveConfig(fc); err != nil {
+	if err := dunconfig.SaveConfig(fc); err != nil {
 		return "", err
 	}
 	if fc.SpendBudget == 0 {
@@ -138,7 +133,7 @@ func spendControl(ctx context.Context, action string) string {
 	case len(f) == 0:
 		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		return spendLine(ctx, spendSource(ctx), loadConfig(), time.Now())
+		return spendLine(ctx, spendSource(ctx), dunconfig.LoadConfig(), time.Now())
 	case len(f) == 2 && f[0] == "reconcile":
 		msg, err := setSpendKnown(f[1], time.Now())
 		if err != nil {
@@ -169,7 +164,7 @@ func spendCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	s := spendSource(ctx)
 	switch rest := fs.Args(); {
 	case len(rest) == 0:
-		fmt.Fprintln(stdout, spendLine(ctx, s, loadConfig(), time.Now()))
+		fmt.Fprintln(stdout, spendLine(ctx, s, dunconfig.LoadConfig(), time.Now()))
 	case rest[0] == "reconcile" && len(rest) == 2:
 		msg, err := setSpendKnown(rest[1], time.Now())
 		if err != nil {

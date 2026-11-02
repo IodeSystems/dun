@@ -9,6 +9,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // The `dun --setup` wizard as a small Bubble Tea program (consistent with the
@@ -31,7 +33,7 @@ type setupModel struct {
 	step        setupStep
 	url, key    textinput.Model
 	custom      textinput.Model // "type a model name" field
-	cur         dunConfig
+	cur         dunconfig.DunConfig
 	models      []string
 	fetching    bool
 	sel         int // model list cursor; == len(models) is the "type it" row
@@ -40,7 +42,7 @@ type setupModel struct {
 	saved       bool
 }
 
-func newSetupModel(cur dunConfig) setupModel {
+func newSetupModel(cur dunconfig.DunConfig) setupModel {
 	url := textinput.New()
 	url.SetValue(cur.URL)
 	url.Placeholder = "https://… (an OpenAI-compatible endpoint)"
@@ -66,7 +68,7 @@ func (m setupModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m setupModel) fetchCmd() tea.Cmd {
 	url, key := m.url.Value(), m.key.Value()
-	return func() tea.Msg { return modelsMsg(fetchModels(url, key)) }
+	return func() tea.Msg { return modelsMsg(dunconfig.FetchModels(url, key)) }
 }
 
 // customRow reports whether the model step's cursor is on the "type it" row.
@@ -189,8 +191,8 @@ func (m setupModel) viewText() string {
 	b.WriteString(stSetupTitle.Render("dun setup") + stSetupLabel.Render("  ·  enter: next · esc: cancel") + "\n\n")
 
 	// URL + key rows show the value once past them; the active row shows the field.
-	b.WriteString(field(m.step, stepURL, "URL", m.url.View(), firstNonEmpty(m.url.Value(), "—")))
-	b.WriteString(field(m.step, stepKey, "key", m.key.View(), maskKey(m.key.Value())))
+	b.WriteString(field(m.step, stepURL, "URL", m.url.View(), dunconfig.FirstNonEmpty(m.url.Value(), "—")))
+	b.WriteString(field(m.step, stepKey, "key", m.key.View(), dunconfig.MaskKey(m.key.Value())))
 
 	b.WriteString(stSetupLabel.Render("  model  "))
 	switch {
@@ -235,7 +237,7 @@ func (m setupModel) modelPicker() string {
 
 // runSetupTUI runs the wizard and saves on completion.
 func runSetupTUI() error {
-	final, err := tea.NewProgram(newSetupModel(loadConfig())).Run()
+	final, err := tea.NewProgram(newSetupModel(dunconfig.LoadConfig())).Run()
 	if err != nil {
 		return err
 	}
@@ -245,16 +247,16 @@ func runSetupTUI() error {
 		return nil
 	}
 	// The wizard sets the default provider; it keeps the others /model added.
-	c := loadConfig()
-	p := providerConfig{Name: hostName(fm.url.Value()), Kind: providerOpenAI, URL: fm.url.Value(), Key: fm.key.Value()}
-	if old, ok := c.providerAt(p.URL); ok {
+	c := dunconfig.LoadConfig()
+	p := dunconfig.ProviderConfig{Name: dunconfig.HostName(fm.url.Value()), Kind: dunconfig.ProviderOpenAI, URL: fm.url.Value(), Key: fm.key.Value()}
+	if old, ok := c.ProviderAt(p.URL); ok {
 		p.Name = old.Name
 	}
-	c.use(p, fm.chosenModel)
-	if err := saveConfig(c); err != nil {
+	c.Use(p, fm.chosenModel)
+	if err := dunconfig.SaveConfig(c); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "saved → %s\n  url:   %s\n  model: %s\n  key:   %s\n",
-		configPath(), c.URL, c.Model, maskKey(c.Key))
+		dunconfig.ConfigPath(), c.URL, c.Model, dunconfig.MaskKey(c.Key))
 	return nil
 }

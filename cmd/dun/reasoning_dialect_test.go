@@ -1,12 +1,16 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
+)
 
 // The reasoning dialect: DUN_REASONING, else the active provider's when it
 // is the endpoint in use, else the config's; an unknown one is refused.
 func TestReasoningDialect(t *testing.T) {
-	fc := dunConfig{Provider: "corp", Reasoning: "llamacpp",
-		Providers: []providerConfig{{Name: "corp", URL: "https://litellm.corp/v1/", Reasoning: "openai"}}}
+	fc := dunconfig.DunConfig{Provider: "corp", Reasoning: "llamacpp",
+		Providers: []dunconfig.ProviderConfig{{Name: "corp", URL: "https://litellm.corp/v1/", Reasoning: "openai"}}}
 	if d, err := reasoningDialect(fc, "https://litellm.corp/v1"); err != nil || d != "openai" {
 		t.Errorf("provider's: %q %v", d, err)
 	}

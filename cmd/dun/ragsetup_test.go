@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/update"
 )
 
@@ -269,7 +270,7 @@ func TestRagSetup_NoDaemonWritesConfig(t *testing.T) {
 	if err != nil || cur.Roles["vision"] != (ragRole{"local", "qwen-vl"}) || len(cur.Providers) != 1 || !cur.Providers[0].HasKey {
 		t.Fatalf("read %+v %v", cur, err)
 	}
-	provs := loadConfig().providerList()
+	provs := dunconfig.LoadConfig().ProviderList()
 	pl, err := planRagSetup(cur, map[string]ragPick{
 		"embed":  {provider: "openrouter", model: "text-embedding-3-small"},
 		"vision": {}, // none
@@ -319,7 +320,7 @@ func TestRagSetup_ProviderReuseAndNames(t *testing.T) {
 		{Name: "openrouter", BaseURL: "http://elsewhere/v1", HasKey: true},
 		{Name: "or-same", BaseURL: "https://openrouter.example/api/v1/", HasKey: true},
 	}}
-	pl, err := planRagSetup(cur, map[string]ragPick{"embed": {provider: "openrouter", model: "e"}}, loadConfig().providerList())
+	pl, err := planRagSetup(cur, map[string]ragPick{"embed": {provider: "openrouter", model: "e"}}, dunconfig.LoadConfig().ProviderList())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +331,7 @@ func TestRagSetup_ProviderReuseAndNames(t *testing.T) {
 		t.Error("a key file was written for a provider that has a key")
 	}
 	cur.Providers = cur.Providers[:1]
-	pl, _ = planRagSetup(cur, map[string]ragPick{"embed": {provider: "openrouter", model: "e"}}, loadConfig().providerList())
+	pl, _ = planRagSetup(cur, map[string]ragPick{"embed": {provider: "openrouter", model: "e"}}, dunconfig.LoadConfig().ProviderList())
 	if pl.roles["embed"].Provider != "openrouter-2" {
 		t.Errorf("numbered: %+v", pl.roles)
 	}

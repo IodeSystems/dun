@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"golang.org/x/term"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 // Where /login cannot be typed — a task run headless, `dun --setup` with no
@@ -18,7 +20,7 @@ const envProvider = "  DUN_URL=<OpenAI-compatible base URL> DUN_MODEL=<model> DU
 // headlessMissing is what a headless task says when there is no provider or
 // no model (providerMissing), before anything starts.
 func headlessMissing(err error) string {
-	if errors.Is(err, errNoModel) {
+	if errors.Is(err, dunconfig.ErrNoModel) {
 		return "dun: no model chosen, so the task cannot run. Pick one:\n" +
 			"  dun --setup                 in a terminal (saved for next time), or\n" +
 			"  DUN_MODEL=<model> dun \"…\"   for this run (or --model)\n"

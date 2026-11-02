@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -250,15 +251,15 @@ func readBudget(noNet bool) usageBudget {
 	if noNet {
 		return usageBudget{Status: "skipped", Detail: "--no-net"}
 	}
-	fc := loadConfig()
-	p, ok := fc.active()
-	url, key := firstNonEmpty(os.Getenv("DUN_URL"), p.URL), firstNonEmpty(os.Getenv("DUN_LLM_KEY"), p.Key)
+	fc := dunconfig.LoadConfig()
+	p, ok := fc.Active()
+	url, key := dunconfig.FirstNonEmpty(os.Getenv("DUN_URL"), p.URL), dunconfig.FirstNonEmpty(os.Getenv("DUN_LLM_KEY"), p.Key)
 	if !ok && url == "" {
 		return usageBudget{Status: "none", Detail: "no provider logged in"}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	b, err := budgetFetcher(ctx, url, key, firstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model))
+	b, err := budgetFetcher(ctx, url, key, dunconfig.FirstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model))
 	out := usageBudget{Provider: p.Name}
 	switch {
 	case errors.Is(err, llm.ErrBudgetUnsupported):

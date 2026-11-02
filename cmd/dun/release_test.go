@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dund"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/update"
@@ -40,8 +41,8 @@ func TestStagedLine(t *testing.T) {
 func TestUpgradeSwitch(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	line, err := upgradeSwitch(false)
-	if err != nil || !loadConfig().NoUpdates || !strings.HasPrefix(line, "updates off — dun no longer checks for new releases · /upgrade on to check again") {
-		t.Fatalf("%q %v %v", line, err, loadConfig().NoUpdates)
+	if err != nil || !dunconfig.LoadConfig().NoUpdates || !strings.HasPrefix(line, "updates off — dun no longer checks for new releases · /upgrade on to check again") {
+		t.Fatalf("%q %v %v", line, err, dunconfig.LoadConfig().NoUpdates)
 	}
 	if !strings.Contains(line, "it does not update from releases") {
 		t.Errorf("a dev build's switch does not say it never updates: %q", line)
@@ -51,7 +52,7 @@ func TestUpgradeSwitch(t *testing.T) {
 	if releaseUpdate() != "" {
 		t.Error("checked with updates off")
 	}
-	if line, _ := upgradeSwitch(true); loadConfig().NoUpdates || !strings.HasPrefix(line, "updates on — dun checks for a new release once a day · /upgrade off to stop") {
+	if line, _ := upgradeSwitch(true); dunconfig.LoadConfig().NoUpdates || !strings.HasPrefix(line, "updates on — dun checks for a new release once a day · /upgrade off to stop") {
 		t.Fatalf("on: %q", line)
 	}
 }

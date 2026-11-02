@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
 func setupKey(m setupModel, k tea.KeyPressMsg) setupModel {
@@ -14,7 +16,7 @@ func setupKey(m setupModel, k tea.KeyPressMsg) setupModel {
 
 // URL → key → model(list), preselecting the current model, then pick one.
 func TestSetupWizard_pickFromList(t *testing.T) {
-	m := newSetupModel(dunConfig{URL: "http://x:1", Model: "b", Key: "sk-1"})
+	m := newSetupModel(dunconfig.DunConfig{URL: "http://x:1", Model: "b", Key: "sk-1"})
 	if m.step != stepURL {
 		t.Fatal("wizard should start on the URL step")
 	}
@@ -49,7 +51,7 @@ func TestSetupWizard_pickFromList(t *testing.T) {
 
 // No model list (offline / endpoint lacks /models) → type a name.
 func TestSetupWizard_customModel(t *testing.T) {
-	m := newSetupModel(dunConfig{})
+	m := newSetupModel(dunconfig.DunConfig{})
 	m.step = stepModel
 	nm, _ := m.Update(modelsMsg{}) // empty → custom row
 	m = nm.(setupModel)
@@ -65,7 +67,7 @@ func TestSetupWizard_customModel(t *testing.T) {
 
 // esc cancels without saving.
 func TestSetupWizard_cancel(t *testing.T) {
-	m := setupKey(newSetupModel(dunConfig{}), tea.KeyPressMsg{Code: tea.KeyEscape})
+	m := setupKey(newSetupModel(dunconfig.DunConfig{}), tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.saved {
 		t.Fatal("esc must not save")
 	}

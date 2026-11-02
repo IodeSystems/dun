@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -266,11 +267,11 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go func() {
 				providersMu.Lock()
 				defer providersMu.Unlock()
-				var op providerOp
+				var op dunconfig.ProviderOp
 				msg := ""
 				if err := json.Unmarshal([]byte(action), &op); err != nil {
 					msg = "a provider operation is JSON: " + err.Error()
-				} else if m, err := applyProviderOp(op); err != nil {
+				} else if m, err := dunconfig.ApplyProviderOp(op); err != nil {
 					msg = err.Error()
 				} else {
 					msg = m
@@ -391,7 +392,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			if err != nil {
 				msg = "retry: " + err.Error()
 			} else if save != nil {
-				if err := saveConfig(*save); err != nil {
+				if err := dunconfig.SaveConfig(*save); err != nil {
 					msg += " — but not saved: " + err.Error()
 				}
 				h.Aside("[control/retry] " + msg)
@@ -406,7 +407,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			if err != nil {
 				msg = "loops: " + err.Error()
 			} else if save != nil {
-				if err := saveConfig(*save); err != nil {
+				if err := dunconfig.SaveConfig(*save); err != nil {
 					msg += " — but not saved: " + err.Error()
 				}
 				h.Aside("[control/loops] " + msg)
@@ -891,7 +892,7 @@ func emitInterrupted(h *dun.Harness, em *emitter, res agent.TurnResult) {
 // already drifted apart once.
 func emitTurnError(sessionCtx context.Context, h *dun.Harness, em *emitter, err error) {
 	h.RecordTurnError(err)
-	if e := setupMissing(err); e != nil {
+	if e := dunconfig.SetupMissing(err); e != nil {
 		err = e
 	}
 	em.emit(&proto.Error{Error: err.Error(), Fatal: sessionCtx.Err() != nil})

@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -775,7 +776,7 @@ func (m tuiModel) serviceName() string {
 	if m.provider != "" {
 		return m.provider
 	}
-	return hostName(m.url)
+	return dunconfig.HostName(m.url)
 }
 
 // splashW is the width the splash's rows are cut to: one column less than

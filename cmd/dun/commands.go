@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -95,7 +96,7 @@ func extCommand(e dun.Extension, state, detail string) proto.CommandSpec {
 	}
 	return proto.CommandSpec{Name: e.Slash.Name, Usage: usage, Group: "tools", Choices: choices(pairs...),
 		Text: len(names) > 0, State: state, Detail: detail, Help: e.Slash.Help,
-		Description: firstNonEmpty(e.Slash.Description, e.Description)}
+		Description: dunconfig.FirstNonEmpty(e.Slash.Description, e.Description)}
 }
 
 // extOwnCommands are e's commands beside the server switch, as name, help
@@ -242,15 +243,15 @@ var providersMu sync.Mutex
 // modelsEvent lists every saved provider's models, fetched in parallel.
 // Keys stay here; a client gets names, URLs and ids.
 func modelsEvent() *proto.Models {
-	cfg := loadConfig()
-	ps, def := cfg.providerList(), cfg.activeName()
+	cfg := dunconfig.LoadConfig()
+	ps, def := cfg.ProviderList(), cfg.ActiveName()
 	out := make([]proto.ModelProvider, len(ps))
 	var wg sync.WaitGroup
 	for i, p := range ps {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ids, why := listModels(p.URL, p.Key)
+			ids, why := dunconfig.ListModels(p.URL, p.Key)
 			if ids == nil {
 				ids = []string{} // a list, never null, for every client
 			}
