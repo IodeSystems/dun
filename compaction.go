@@ -5,9 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/iodesystems/dun/internal/tokenmeter"
-
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/tokenmeter"
 )
 
 // CompactionNote is one history fold, for a UI and for the logs.

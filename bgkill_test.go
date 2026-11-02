@@ -13,10 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun/internal/proc"
-
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/proc"
 )
 
 // treeCommand starts a child that starts a grandchild, and writes both pids

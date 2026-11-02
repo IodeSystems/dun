@@ -18,18 +18,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/iodesystems/dun/internal/tokenmeter"
-
-	"github.com/iodesystems/dun/internal/mounttool"
-
-	filetools "github.com/iodesystems/agentkit/files"
-	"github.com/iodesystems/dun/internal/procstat"
-
 	"github.com/google/uuid"
 
 	"github.com/iodesystems/agentkit/agent"
+	filetools "github.com/iodesystems/agentkit/files"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mounttool"
+	"github.com/iodesystems/dun/internal/procstat"
+	"github.com/iodesystems/dun/internal/spendmeter"
+	"github.com/iodesystems/dun/internal/tokenmeter"
 )
 
 // Config configures a dun harness.
@@ -68,7 +66,7 @@ type Config struct {
 	// spend.go). The CALLER points each llm.Client's OnUsage at Spend.Note —
 	// Client and every client ClientFor builds — since only it constructs them.
 	// nil → no spend accounting.
-	Spend *SpendMeter
+	Spend *spendmeter.Meter
 	// StatsLedger is where the root session's round stats go (roundstats.go);
 	// nil writes none. cmd/dun points it at $DUN_HOME/stats.
 	StatsLedger *StatsLedger

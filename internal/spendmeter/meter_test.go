@@ -1,4 +1,4 @@
-package dun
+package spendmeter
 
 import (
 	"context"
@@ -18,7 +18,7 @@ func costed(amount float64, cur string) llm.Usage {
 }
 
 func TestSpendMeterAccumulates(t *testing.T) {
-	m := NewSpendMeter()
+	m := NewMeter()
 	m.Note(costed(0.25, llm.CurrencyUSD))
 	m.Note(llm.Usage{}) // a response that reported no cost
 	m.Note(costed(0.5, llm.CurrencyUSD))
@@ -46,14 +46,14 @@ func TestSpendMeterAccumulates(t *testing.T) {
 
 // Nothing priced is not "spent 0".
 func TestSpendMeterNothingReported(t *testing.T) {
-	m := NewSpendMeter()
+	m := NewMeter()
 	m.Note(llm.Usage{PromptTokens: 10})
 	m.EndTurn()
 	s := m.Snapshot()
 	if s.CostedCalls != 0 || s.LastTurnCosted != 0 || s.Budget.Reported || s.Limits.Reported {
 		t.Errorf("snapshot = %+v", s)
 	}
-	var nilMeter *SpendMeter
+	var nilMeter *Meter
 	nilMeter.Note(costed(1, "USD")) // a harness with no meter
 	nilMeter.EndTurn()
 	if nilMeter.Snapshot().Calls != 0 {
@@ -64,7 +64,7 @@ func TestSpendMeterNothingReported(t *testing.T) {
 // The per-response key spend is fresher than the last poll, but only the poll
 // knows the reset — the merge keeps both.
 func TestSpendMeterBudgetMerge(t *testing.T) {
-	m := NewSpendMeter()
+	m := NewMeter()
 	reset := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	m.SetBudget(llm.KeyBudget{Spend: 10, Limit: 50, HasLimit: true, Remaining: 40, HasRemaining: true,
 		ResetAt: reset, Interval: "30d", Currency: "USD", Source: llm.BudgetSourceLiteLLM, Reported: true}, nil)
@@ -99,7 +99,7 @@ func (f *fakeBudget) KeyBudget(context.Context) (llm.KeyBudget, error) {
 }
 
 func TestPollBudgetStopsWhenUnsupported(t *testing.T) {
-	m := NewSpendMeter()
+	m := NewMeter()
 	src := &fakeBudget{err: llm.ErrBudgetUnsupported}
 	done := make(chan struct{})
 	go func() { m.PollBudget(context.Background(), src, time.Millisecond, 0, nil); close(done) }()
@@ -116,7 +116,7 @@ func TestPollBudgetStopsWhenUnsupported(t *testing.T) {
 // Reads at start, then on a poke once the gap has passed — a poke inside the
 // gap is not a read.
 func TestPollBudgetPokeHonoursGap(t *testing.T) {
-	m := NewSpendMeter()
+	m := NewMeter()
 	src := &fakeBudget{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -133,7 +133,7 @@ func TestPollBudgetPokeHonoursGap(t *testing.T) {
 		t.Errorf("calls = %d", src.calls.Load())
 	}
 
-	m2 := NewSpendMeter()
+	m2 := NewMeter()
 	src2 := &fakeBudget{}
 	changed2 := make(chan struct{}, 8)
 	go m2.PollBudget(ctx, src2, time.Hour, 0, func() { changed2 <- struct{}{} })
@@ -164,7 +164,7 @@ func TestSpendMeterFromLiteLLMResponse(t *testing.T) {
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer srv.Close()
-	m := NewSpendMeter()
+	m := NewMeter()
 	c := llm.NewClient(srv.URL, "k", "m")
 	c.OnUsage = m.Note
 	ch, err := c.ChatStream(context.Background(), []llm.Message{{Role: "user", Content: "x"}}, nil, nil)
@@ -219,7 +219,7 @@ func TestBudgetInterval(t *testing.T) {
 // summed over the same interval.
 func TestSpendMeterRollups(t *testing.T) {
 	now := time.Date(2026, 10, 28, 15, 30, 0, 0, time.Local)
-	m := NewSpendMeter()
+	m := NewMeter()
 	at := now
 	m.now = func() time.Time { return at }
 	m.SetBudget(llm.KeyBudget{Reported: true, ResetAt: now.Add(48 * time.Hour), Interval: "3d"}, nil)

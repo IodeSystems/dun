@@ -1,4 +1,4 @@
-package dun
+package spendmeter
 
 import (
 	"bufio"
@@ -20,9 +20,9 @@ import (
 func TestLedger_ConcurrentAppendsAreWhole(t *testing.T) {
 	const perWriter = 300
 	if dir := os.Getenv("DUN_LEDGER_CHILD"); dir != "" {
-		l := NewSpendLedger(dir)
+		l := NewLedger(dir)
 		for i := 0; i < perWriter; i++ {
-			if err := l.Append(SpendEntry{Provider: "p", Key: "k", Model: strings.Repeat("m", 150) + fmt.Sprint(os.Getpid()), Cost: 0.01, Currency: "USD"}); err != nil {
+			if err := l.Append(Entry{Provider: "p", Key: "k", Model: strings.Repeat("m", 150) + fmt.Sprint(os.Getpid()), Cost: 0.01, Currency: "USD"}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -47,9 +47,9 @@ func TestLedger_ConcurrentAppendsAreWhole(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			l := NewSpendLedger(dir) // its own open per write, like another session
+			l := NewLedger(dir) // its own open per write, like another session
 			for j := 0; j < perWriter; j++ {
-				if err := l.Append(SpendEntry{Provider: "p", Model: fmt.Sprint("g", i), Cost: 0.01, Currency: "USD"}); err != nil {
+				if err := l.Append(Entry{Provider: "p", Model: fmt.Sprint("g", i), Cost: 0.01, Currency: "USD"}); err != nil {
 					errs <- err
 					return
 				}
@@ -70,7 +70,7 @@ func TestLedger_ConcurrentAppendsAreWhole(t *testing.T) {
 		}
 		sc := bufio.NewScanner(fh)
 		for sc.Scan() {
-			var e SpendEntry
+			var e Entry
 			if err := json.Unmarshal(sc.Bytes(), &e); err != nil || e.Cost != 0.01 {
 				t.Fatalf("torn line %q: %v", sc.Text(), err)
 			}
@@ -84,7 +84,7 @@ func TestLedger_ConcurrentAppendsAreWhole(t *testing.T) {
 	if want := (procs + routines) * perWriter; n != want {
 		t.Errorf("lines %d, want %d", n, want)
 	}
-	l := NewSpendLedger(dir)
+	l := NewLedger(dir)
 	if got := l.Summary("", time.Time{}).Today["USD"]; got < 23.99 || got > 24.01 {
 		t.Errorf("today %v, want 24", got)
 	}
@@ -95,10 +95,10 @@ func TestLedger_ConcurrentAppendsAreWhole(t *testing.T) {
 func TestLedger_PeriodsAndIncrementalRead(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 10, 23, 15, 0, 0, 0, time.Local) // a Friday
-	l := NewSpendLedger(dir)
+	l := NewLedger(dir)
 	l.now = func() time.Time { return now }
 	add := func(at time.Time, model string, cost float64, cur string) {
-		if err := l.Append(SpendEntry{Time: at, Provider: "work", Key: "fp1", Model: model, Cost: cost, Currency: cur}); err != nil {
+		if err := l.Append(Entry{Time: at, Provider: "work", Key: "fp1", Model: model, Cost: cost, Currency: cur}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -125,8 +125,8 @@ func TestLedger_PeriodsAndIncrementalRead(t *testing.T) {
 		t.Error("entries")
 	}
 	// Another process appends; this ledger's next read adds it once.
-	other := NewSpendLedger(dir)
-	if err := other.Append(SpendEntry{Time: now.Add(-time.Minute), Provider: "work", Key: "fp2", Model: "a", Cost: 0.25, Currency: "USD"}); err != nil {
+	other := NewLedger(dir)
+	if err := other.Append(Entry{Time: now.Add(-time.Minute), Provider: "work", Key: "fp2", Model: "a", Cost: 0.25, Currency: "USD"}); err != nil {
 		t.Fatal(err)
 	}
 	s = l.Summary("fp1", time.Time{})
@@ -153,10 +153,10 @@ func TestLedger_PeriodsAndIncrementalRead(t *testing.T) {
 // line has the key's fingerprint, never the key.
 func TestLedger_NoteAsWritesCostedResponsesWithoutTheKey(t *testing.T) {
 	dir := t.TempDir()
-	m := NewSpendMeter()
+	m := NewMeter()
 	const key = "sk-live-secret-1234"
-	m.SetLedger(NewSpendLedger(dir), KeyFingerprint(key))
-	note := m.NoteAs(SpendSource{Provider: "work", Key: KeyFingerprint(key), Model: "chat"})
+	m.SetLedger(NewLedger(dir), KeyFingerprint(key))
+	note := m.NoteAs(Source{Provider: "work", Key: KeyFingerprint(key), Model: "chat"})
 	note(llm.Usage{})                                                              // no cost: no line
 	note(llm.Usage{Cost: llm.Cost{Amount: 0.02, Currency: "USD", Reported: true}}) // a line
 	note(llm.Usage{Cost: llm.Cost{Amount: 0, Currency: "USD", Reported: true}})    // a real zero: a line
@@ -183,7 +183,7 @@ func TestLedger_NoteAsWritesCostedResponsesWithoutTheKey(t *testing.T) {
 // This hour, all time (last year's line too) and an interval, over every key.
 func TestLedger_HourTotalAndInterval(t *testing.T) {
 	now := time.Date(2026, 10, 23, 15, 30, 0, 0, time.Local)
-	l := NewSpendLedger(t.TempDir())
+	l := NewLedger(t.TempDir())
 	l.now = func() time.Time { return now }
 	for _, e := range []struct {
 		at   time.Time
@@ -191,7 +191,7 @@ func TestLedger_HourTotalAndInterval(t *testing.T) {
 		cost float64
 	}{{now.Add(-10 * time.Minute), "fp1", 0.125}, {now.Add(-2 * time.Hour), "fp2", 0.5},
 		{now.AddDate(0, 0, -3), "fp1", 1}, {time.Date(2025, 12, 30, 12, 0, 0, 0, time.Local), "fp1", 8}} {
-		if err := l.Append(SpendEntry{Time: e.at, Provider: "work", Key: e.key, Model: "a", Cost: e.cost, Currency: "USD"}); err != nil {
+		if err := l.Append(Entry{Time: e.at, Provider: "work", Key: e.key, Model: "a", Cost: e.cost, Currency: "USD"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -209,20 +209,40 @@ func TestLedger_HourTotalAndInterval(t *testing.T) {
 func TestSpendLedger_KeyBudgetCarriesToTheNextSession(t *testing.T) {
 	dir := t.TempDir()
 	at := time.Now().Add(-2 * time.Hour)
-	m := NewSpendMeter()
-	m.SetLedger(NewSpendLedger(dir), "fp1")
+	m := NewMeter()
+	m.SetLedger(NewLedger(dir), "fp1")
 	m.now = func() time.Time { return at }
 	m.SetBudget(llm.KeyBudget{Spend: 1, Remaining: 9, HasRemaining: true, Currency: "USD", Reported: true}, nil)
 
-	next := NewSpendMeter()
-	next.SetLedger(NewSpendLedger(dir), "fp1")
+	next := NewMeter()
+	next.SetLedger(NewLedger(dir), "fp1")
 	s := next.Snapshot()
 	if !s.Budget.Reported || s.Budget.Remaining != 9 || !s.BudgetAt.Equal(at.UTC()) {
 		t.Errorf("budget %+v at %v", s.Budget, s.BudgetAt)
 	}
-	other := NewSpendMeter()
-	other.SetLedger(NewSpendLedger(dir), "fp2")
+	other := NewMeter()
+	other.SetLedger(NewLedger(dir), "fp2")
 	if other.Snapshot().Budget.Reported {
 		t.Error("another key's budget was taken")
+	}
+}
+
+// A child on another key counts toward the session's spend, but that key's
+// budget is not the session key's.
+func TestSpendMeter_OtherKeysBudgetIsNotTheSessions(t *testing.T) {
+	m := NewMeter()
+	m.SetLedger(NewLedger(t.TempDir()), KeyFingerprint("ck"))
+	other := m.NoteAs(Source{Provider: "local", Key: KeyFingerprint("lk"), Model: "small"})
+	other(llm.Usage{PromptTokens: 10, KeyBudget: llm.KeyBudget{Reported: true, Currency: "USD"}})
+	if m.budget.Reported {
+		t.Error("another key's budget became the session's")
+	}
+	if m.prompt != 10 {
+		t.Errorf("its tokens were not counted: %d", m.prompt)
+	}
+	own := m.NoteAs(Source{Provider: "claude", Key: KeyFingerprint("ck"), Model: "big"})
+	own(llm.Usage{KeyBudget: llm.KeyBudget{Reported: true, Currency: "USD"}})
+	if !m.budget.Reported {
+		t.Error("the session key's own budget was dropped")
 	}
 }

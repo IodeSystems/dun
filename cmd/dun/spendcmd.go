@@ -14,8 +14,8 @@ import (
 
 	"github.com/iodesystems/agentkit/anthropicadmin"
 	"github.com/iodesystems/agentkit/llm"
-
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/spendmeter"
 )
 
 // dun spend: what has been spent, and the budget left. The ledger is the design.
@@ -86,13 +86,13 @@ func spendLine(ctx context.Context, s anthropicadmin.Source, fc dunConfig, now t
 
 // estimatedThisMonth is the ledger's estimates this month, on every key.
 var estimatedThisMonth = func() float64 {
-	return dun.NewSpendLedger(dun.DefaultLedgerDir()).Summary("", time.Time{}).Month[llm.CurrencyUSDEstimate]
+	return spendmeter.NewLedger(dun.DefaultLedgerDir()).Summary("", time.Time{}).Month[llm.CurrencyUSDEstimate]
 }
 
 // estimatedSince is the ledger's estimates since t, counted from the start of its
 // hour, on every key.
 var estimatedSince = func(t time.Time) float64 {
-	return dun.NewSpendLedger(dun.DefaultLedgerDir()).Summary("", t).Interval[llm.CurrencyUSDEstimate]
+	return spendmeter.NewLedger(dun.DefaultLedgerDir()).Summary("", t).Interval[llm.CurrencyUSDEstimate]
 }
 
 // setSpendKnown saves the real figure and says how far the ledger was from it.

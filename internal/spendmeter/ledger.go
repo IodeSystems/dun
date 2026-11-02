@@ -1,4 +1,4 @@
-package dun
+package spendmeter
 
 import (
 	"bufio"
@@ -39,8 +39,8 @@ import (
 
 const ledgerLineMax = 1024
 
-// SpendEntry is one ledger line.
-type SpendEntry struct {
+// Entry is one ledger line.
+type Entry struct {
 	Time     time.Time `json:"t"`
 	Provider string    `json:"provider"`
 	Key      string    `json:"key,omitempty"`
@@ -59,8 +59,8 @@ func KeyFingerprint(key string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// SpendLedger appends to and sums the ledger in dir.
-type SpendLedger struct {
+// Ledger appends to and sums the ledger in dir.
+type Ledger struct {
 	dir string
 	now func() time.Time
 
@@ -72,22 +72,19 @@ type SpendLedger struct {
 	total map[string]float64                       // currency → amount, all time
 }
 
-// NewSpendLedger is the ledger in dir ($DUN_HOME/spend).
-func NewSpendLedger(dir string) *SpendLedger {
-	return &SpendLedger{dir: dir, now: time.Now, read: map[string]int64{},
+// NewLedger is the ledger in dir ($DUN_HOME/spend).
+func NewLedger(dir string) *Ledger {
+	return &Ledger{dir: dir, now: time.Now, read: map[string]int64{},
 		days: map[string]map[string]float64{}, model: map[string]map[string]map[string]float64{},
 		hours: map[string]map[int64]map[string]float64{}, total: map[string]float64{}}
 }
 
-// DefaultLedgerDir is $DUN_HOME/spend.
-func DefaultLedgerDir() string { return filepath.Join(DunHome(), "spend") }
-
-func (l *SpendLedger) file(t time.Time) string {
+func (l *Ledger) file(t time.Time) string {
 	return filepath.Join(l.dir, "spend-"+t.UTC().Format("2006-01")+".jsonl")
 }
 
 // Append writes one entry as one line, in one write.
-func (l *SpendLedger) Append(e SpendEntry) error {
+func (l *Ledger) Append(e Entry) error {
 	if l == nil {
 		return nil
 	}
@@ -124,8 +121,8 @@ func (l *SpendLedger) Append(e SpendEntry) error {
 	return werr
 }
 
-// LedgerSummary is the ledger's totals as of one moment, by currency.
-type LedgerSummary struct {
+// Summary is the ledger's totals as of one moment, by currency.
+type Summary struct {
 	// Hour is since the hour began (local); Total is all time.
 	Hour, Today, Week, Month, Year, Total map[string]float64
 	// Interval is every key's spend since the interval began (Summary's
@@ -142,9 +139,9 @@ type LedgerSummary struct {
 // sums the periods around now: this hour, today (since local midnight), this
 // week (since Monday), this month, this year, all time, the interval since
 // `since` (zero: none); key's trailing 24 hours.
-func (l *SpendLedger) Summary(key string, since time.Time) LedgerSummary {
+func (l *Ledger) Summary(key string, since time.Time) Summary {
 	if l == nil {
-		return LedgerSummary{}
+		return Summary{}
 	}
 	now := l.now()
 	l.mu.Lock()
@@ -156,7 +153,7 @@ func (l *SpendLedger) Summary(key string, since time.Time) LedgerSummary {
 	week := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
 	month := time.Date(y, mo, 1, 0, 0, 0, 0, loc)
 	year := time.Date(y, 1, 1, 0, 0, 0, 0, loc)
-	s := LedgerSummary{Hour: map[string]float64{}, Today: map[string]float64{}, Week: map[string]float64{},
+	s := Summary{Hour: map[string]float64{}, Today: map[string]float64{}, Week: map[string]float64{},
 		Month: map[string]float64{}, Year: map[string]float64{}, Total: map[string]float64{},
 		Interval: map[string]float64{}, ByModel: map[string]map[string]float64{}, Last24h: map[string]float64{}}
 	add := func(m map[string]float64, by map[string]float64) {
@@ -209,14 +206,14 @@ func (l *SpendLedger) Summary(key string, since time.Time) LedgerSummary {
 }
 
 // scan reads every month's file, each from where it stopped.
-func (l *SpendLedger) scan(now time.Time) {
+func (l *Ledger) scan(now time.Time) {
 	files, _ := filepath.Glob(filepath.Join(l.dir, "spend-*.jsonl"))
 	for _, f := range files {
 		l.scanFile(f, now)
 	}
 }
 
-func (l *SpendLedger) scanFile(path string, now time.Time) {
+func (l *Ledger) scanFile(path string, now time.Time) {
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -238,7 +235,7 @@ func (l *SpendLedger) scanFile(path string, now time.Time) {
 		}
 		off += int64(len(line))
 		l.read[path] = off
-		var e SpendEntry
+		var e Entry
 		if json.Unmarshal([]byte(strings.TrimSpace(line)), &e) != nil || e.Time.IsZero() {
 			continue
 		}
@@ -269,10 +266,10 @@ func bump[K comparable](m map[K]map[string]float64, k K, cur string, v float64) 
 	by[cur] += v
 }
 
-// SpendSource is who a client's responses are billed to: the ledger's
+// Source is who a client's responses are billed to: the ledger's
 // provider, key fingerprint and model; Role is which client it is (RoleMain,
 // RoleModel, RoleVision), for the round stats (roundstats.go).
-type SpendSource struct {
+type Source struct {
 	Provider, Key, Model string
 	Role                 string
 }
@@ -288,7 +285,7 @@ const (
 // SetRoundHook gives every response, with its source, to f as well: the root
 // session's round stats (Harness.noteRound). One hook; a later call replaces
 // it.
-func (m *SpendMeter) SetRoundHook(f func(SpendSource, llm.Usage)) {
+func (m *Meter) SetRoundHook(f func(Source, llm.Usage)) {
 	if m == nil {
 		return
 	}
@@ -299,7 +296,7 @@ func (m *SpendMeter) SetRoundHook(f func(SpendSource, llm.Usage)) {
 
 // SetLedger points the meter at a ledger; key is the session's key
 // fingerprint (for the trailing-24-hour rate against its budget).
-func (m *SpendMeter) SetLedger(l *SpendLedger, key string) {
+func (m *Meter) SetLedger(l *Ledger, key string) {
 	if m == nil {
 		return
 	}
@@ -318,7 +315,7 @@ func (m *SpendMeter) SetLedger(l *SpendLedger, key string) {
 // key than the session's (a child on another provider, a vision model) counts
 // toward the session's spend, but its key's budget and limits are not the
 // session key's, so they are left out.
-func (m *SpendMeter) NoteAs(src SpendSource) func(u llm.Usage) {
+func (m *Meter) NoteAs(src Source) func(u llm.Usage) {
 	return func(u llm.Usage) {
 		if m == nil {
 			return
@@ -340,7 +337,7 @@ func (m *SpendMeter) NoteAs(src SpendSource) func(u llm.Usage) {
 		m.mu.Lock()
 		l, now := m.ledger, m.now()
 		m.mu.Unlock()
-		_ = l.Append(SpendEntry{Time: now, Provider: src.Provider, Key: src.Key, Model: src.Model,
+		_ = l.Append(Entry{Time: now, Provider: src.Provider, Key: src.Key, Model: src.Model,
 			Cost: u.Cost.Amount, Currency: u.Cost.Currency})
 	}
 }
@@ -354,10 +351,10 @@ type savedKeyBudget struct {
 	At     time.Time     `json:"at"`
 }
 
-func (l *SpendLedger) keyFile(fp string) string { return filepath.Join(l.dir, "key-"+fp+".json") }
+func (l *Ledger) keyFile(fp string) string { return filepath.Join(l.dir, "key-"+fp+".json") }
 
 // SaveKeyBudget keeps b, read at at, as key fp's last budget.
-func (l *SpendLedger) SaveKeyBudget(fp string, b llm.KeyBudget, at time.Time) error {
+func (l *Ledger) SaveKeyBudget(fp string, b llm.KeyBudget, at time.Time) error {
 	if l == nil || fp == "" || !b.Reported {
 		return nil
 	}
@@ -372,7 +369,7 @@ func (l *SpendLedger) SaveKeyBudget(fp string, b llm.KeyBudget, at time.Time) er
 }
 
 // LoadKeyBudget is key fp's last budget and when it was read.
-func (l *SpendLedger) LoadKeyBudget(fp string) (llm.KeyBudget, time.Time, bool) {
+func (l *Ledger) LoadKeyBudget(fp string) (llm.KeyBudget, time.Time, bool) {
 	if l == nil || fp == "" {
 		return llm.KeyBudget{}, time.Time{}, false
 	}

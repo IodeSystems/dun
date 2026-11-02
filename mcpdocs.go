@@ -11,9 +11,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/iodesystems/dun/internal/proc"
-
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/proc"
 )
 
 // An MCP server's documentation, copied into the docs index.

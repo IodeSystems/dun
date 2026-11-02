@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/spendmeter"
 )
 
 // Every response a meter sees reaches the root session's round stats with
@@ -20,10 +21,10 @@ func TestRoundStats_TurnSpeedAndLedger(t *testing.T) {
 	h.rounds.ledger = NewStatsLedger(dir)
 	h.systemParts = SystemBreakdown{Total: 9000, Parts: []ContextPart{{Name: "system", Tokens: 3000}, {Name: "mcp: vay", Tokens: 6000}}}
 	h.hosted = map[string]hostedState{"notes": {Connected: true, SchemaBytes: 4000}}
-	m := NewSpendMeter()
+	m := spendmeter.NewMeter()
 	m.SetRoundHook(h.noteRound)
-	main := m.NoteAs(SpendSource{Provider: "p", Model: "m", Role: RoleMain})
-	child := m.NoteAs(SpendSource{Provider: "p", Model: "small", Role: RoleModel})
+	main := m.NoteAs(spendmeter.Source{Provider: "p", Model: "m", Role: spendmeter.RoleMain})
+	child := m.NoteAs(spendmeter.Source{Provider: "p", Model: "small", Role: spendmeter.RoleModel})
 
 	h.BeginTurnStats()
 	main(llm.Usage{PromptTokens: 10000, CompletionTokens: 200, LatencyMS: 3000,
@@ -59,13 +60,13 @@ func TestRoundStats_TurnSpeedAndLedger(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if first.Session != "20261024-1" || first.Role != RoleMain || first.Prefix != 9000 || first.Schemas["vay"] != 6000 || first.Scripted["notes"] != 1000 {
+	if first.Session != "20261024-1" || first.Role != spendmeter.RoleMain || first.Prefix != 9000 || first.Schemas["vay"] != 6000 || first.Scripted["notes"] != 1000 {
 		t.Errorf("first: %+v", first)
 	}
 	if !first.PrefixProcessed() || second.PrefixProcessed() {
 		t.Errorf("prefix processed: first %v, second %v (cached %d of %d)", first.PrefixProcessed(), second.PrefixProcessed(), second.Cached, second.Prefix)
 	}
-	if third.Role != RoleModel || third.Prefix != 0 || third.Schemas != nil {
+	if third.Role != spendmeter.RoleModel || third.Prefix != 0 || third.Schemas != nil {
 		t.Errorf("a side model's round carries no prefix: %+v", third)
 	}
 	// The next turn starts empty.
@@ -80,11 +81,11 @@ func TestStatsLedger_Summary(t *testing.T) {
 	l := NewStatsLedger(t.TempDir())
 	now := time.Now()
 	for _, r := range []RoundStat{
-		{Time: now.Add(-30 * 24 * time.Hour), Role: RoleMain, Prefix: 100, Schemas: map[string]int{"a": 50}}, // too old
-		{Time: now, Role: RoleMain, Prompt: 1000, Prefix: 100, Schemas: map[string]int{"a": 50}, Scripted: map[string]int{"s": 400},
+		{Time: now.Add(-30 * 24 * time.Hour), Role: spendmeter.RoleMain, Prefix: 100, Schemas: map[string]int{"a": 50}}, // too old
+		{Time: now, Role: spendmeter.RoleMain, Prompt: 1000, Prefix: 100, Schemas: map[string]int{"a": 50}, Scripted: map[string]int{"s": 400},
 			PromptN: 1000, PromptMS: 200, Costed: true, Cost: 0.2, Currency: "USD", Completion: 0},
-		{Time: now, Role: RoleMain, Prompt: 1000, Cached: 900, Prefix: 100, Schemas: map[string]int{"a": 50}, Scripted: map[string]int{"s": 400}},
-		{Time: now, Role: RoleModel, Prompt: 300},
+		{Time: now, Role: spendmeter.RoleMain, Prompt: 1000, Cached: 900, Prefix: 100, Schemas: map[string]int{"a": 50}, Scripted: map[string]int{"s": 400}},
+		{Time: now, Role: spendmeter.RoleModel, Prompt: 300},
 	} {
 		if err := l.Append(r); err != nil {
 			t.Fatal(err)

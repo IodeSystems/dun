@@ -8,6 +8,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -130,7 +131,7 @@ func TestSpendWarningThresholds(t *testing.T) {
 
 // The snapshot → wire mapping keeps "not reported" absent.
 func TestSpendProto(t *testing.T) {
-	m := dun.NewSpendMeter()
+	m := spendmeter.NewMeter()
 	if p := spendProto(m.Snapshot(), spendNow); p.Session != nil || p.LastTurn != nil || p.Key != nil || p.Limits != nil {
 		t.Errorf("empty meter = %+v", p)
 	}

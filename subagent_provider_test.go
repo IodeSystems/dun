@@ -131,26 +131,6 @@ func TestAgentToolDef_ProviderOnlyWithSeveral(t *testing.T) {
 	}
 }
 
-// A child on another key counts toward the session's spend, but that key's
-// budget is not the session key's.
-func TestSpendMeter_OtherKeysBudgetIsNotTheSessions(t *testing.T) {
-	m := NewSpendMeter()
-	m.SetLedger(NewSpendLedger(t.TempDir()), KeyFingerprint("ck"))
-	other := m.NoteAs(SpendSource{Provider: "local", Key: KeyFingerprint("lk"), Model: "small"})
-	other(llm.Usage{PromptTokens: 10, KeyBudget: llm.KeyBudget{Reported: true, Currency: "USD"}})
-	if m.budget.Reported {
-		t.Error("another key's budget became the session's")
-	}
-	if m.prompt != 10 {
-		t.Errorf("its tokens were not counted: %d", m.prompt)
-	}
-	own := m.NoteAs(SpendSource{Provider: "claude", Key: KeyFingerprint("ck"), Model: "big"})
-	own(llm.Usage{KeyBudget: llm.KeyBudget{Reported: true, Currency: "USD"}})
-	if !m.budget.Reported {
-		t.Error("the session key's own budget was dropped")
-	}
-}
-
 // A child spawned with an effort thinks at that level, keeps it in its
 // record, and does not save it: /effort's saved level is every session's.
 func TestSubAgent_OwnEffort(t *testing.T) {

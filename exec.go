@@ -18,10 +18,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/iodesystems/dun/internal/proc"
-
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/proc"
 )
 
 // envInt reads an integer from the environment, falling back to fallback.

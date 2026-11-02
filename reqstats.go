@@ -4,9 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun/internal/tokenmeter"
-
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/tokenmeter"
 )
 
 // Request stats: how fast the last model request went, for a status bar

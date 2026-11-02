@@ -15,11 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun/internal/mounttool"
-
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mounttool"
 )
 
 // Tool servers start and stop while a session runs.

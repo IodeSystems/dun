@@ -13,11 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun/internal/heartbeat"
-
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/heartbeat"
 )
 
 // Sub-agents — spending someone else's context.

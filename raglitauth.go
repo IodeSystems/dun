@@ -39,9 +39,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun/internal/proc"
-
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/proc"
 )
 
 // RaglitTokenFile is where /rag login keeps dun's raglit token.

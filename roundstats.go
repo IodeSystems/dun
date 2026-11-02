@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/spendmeter"
 )
 
 // Round stats: what each model round cost in tokens, time and money, kept so
@@ -39,7 +40,7 @@ import (
 type RoundStat struct {
 	Time     time.Time `json:"t"`
 	Session  string    `json:"session,omitempty"`
-	Role     string    `json:"role,omitempty"` // SpendSource.Role: main, model, vision
+	Role     string    `json:"role,omitempty"` // spendmeter.Source.Role: main, model, vision
 	Provider string    `json:"provider,omitempty"`
 	Model    string    `json:"model,omitempty"`
 
@@ -121,7 +122,7 @@ const (
 )
 
 // noteRound folds one response in. It is the spend meter's round hook.
-func (h *Harness) noteRound(src SpendSource, u llm.Usage) {
+func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 	r := RoundStat{Time: time.Now(), Session: h.sessionName(), Role: src.Role, Provider: src.Provider, Model: src.Model,
 		Prompt: u.PromptTokens, Cached: u.CachedPromptTokens(), CacheWrite: u.CacheCreationInputTokens,
 		Completion: u.CompletionTokens, LatencyMS: u.LatencyMS}
@@ -131,7 +132,7 @@ func (h *Harness) noteRound(src SpendSource, u llm.Usage) {
 	if u.Cost.Reported {
 		r.Cost, r.Currency, r.Costed = u.Cost.Amount, u.Cost.Currency, true
 	}
-	if src.Role == RoleMain {
+	if src.Role == spendmeter.RoleMain {
 		sp := h.SystemParts()
 		r.Prefix = sp.Total
 		for _, p := range sp.Parts {
@@ -264,7 +265,7 @@ func (h *Harness) scriptedStandalone() map[string]int {
 }
 
 // StatsLedger appends round stats under dir ($DUN_HOME/stats), one file a
-// month. Safe across processes the way SpendLedger is.
+// month. Safe across processes the way spendmeter.Ledger is.
 type StatsLedger struct {
 	dir string
 	mu  sync.Mutex
@@ -374,7 +375,7 @@ func (l *StatsLedger) Summary(since time.Time) (s StatsSummary) {
 				s.Cost += r.Cost
 				s.CostTokens += r.Prompt - r.Cached + r.Completion
 			}
-			if r.Role != RoleMain {
+			if r.Role != spendmeter.RoleMain {
 				continue
 			}
 			s.Rounds++

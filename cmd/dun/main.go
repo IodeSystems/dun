@@ -29,6 +29,7 @@ import (
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/openurl"
+	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -633,18 +634,18 @@ func main() {
 	// Money and limits: every response from this client and from every client
 	// the per-model cache builds reports into one meter, so the session's spend
 	// covers the turn, its side calls and its sub-agents. See dun/spend.go.
-	spend := dun.NewSpendMeter()
+	spend := spendmeter.NewMeter()
 	// Every response with a cost is also a line in the machine's spend ledger
 	// ($DUN_HOME/spend, dun/ledger.go), billed to the provider, a fingerprint
 	// of the key (never the key) and the model.
-	spend.SetLedger(dun.NewSpendLedger(dun.DefaultLedgerDir()), dun.KeyFingerprint(effKey))
+	spend.SetLedger(spendmeter.NewLedger(dun.DefaultLedgerDir()), spendmeter.KeyFingerprint(effKey))
 	usageFor := func(u, k, model, role string) func(llm.Usage) {
-		return spend.NoteAs(dun.SpendSource{Provider: providerLabel(fc, u), Key: dun.KeyFingerprint(k), Model: model, Role: role})
+		return spend.NoteAs(spendmeter.Source{Provider: providerLabel(fc, u), Key: spendmeter.KeyFingerprint(k), Model: model, Role: role})
 	}
-	client.OnUsage = usageFor(*url, effKey, *model, dun.RoleMain)
+	client.OnUsage = usageFor(*url, effKey, *model, spendmeter.RoleMain)
 	var runner agent.LLMRunner = client
 	childClients := clientCache(fc, *url, effKey, func(c *llm.Client, u string) { tuneClient(fc, c, u) },
-		func(u, k, model string) func(llm.Usage) { return usageFor(u, k, model, dun.RoleModel) })
+		func(u, k, model string) func(llm.Usage) { return usageFor(u, k, model, spendmeter.RoleModel) })
 	if why := providerMissing(*url, *model); why != nil {
 		runner = noProvider{why}
 		childClients = func(string, string) (dun.ChildClient, error) { return dun.ChildClient{}, why }
@@ -695,7 +696,7 @@ func main() {
 		DockerImage:   resolveDockerImage(*docker),
 		DockerNetwork: *dockerNetwork,
 		ExtraMounts:   mounts,
-		Vision:        visionConfig(fc, *url, effKey, *model, func(u, k, m string) func(llm.Usage) { return usageFor(u, k, m, dun.RoleVision) }),
+		Vision:        visionConfig(fc, *url, effKey, *model, func(u, k, m string) func(llm.Usage) { return usageFor(u, k, m, spendmeter.RoleVision) }),
 	}
 	// An OAuth server's login opens a browser on this machine too — unless
 	// DUN_NO_BROWSER is set (a headless box, a test). The URL is shown to
@@ -996,7 +997,7 @@ func main() {
 	// its own goroutine — never on the turn path. An endpoint with none stops
 	// the poller after one probe per documented path.
 	if providerMissing(*url, *model) == nil {
-		go spend.PollBudget(ctx, client, dun.BudgetPollEvery, dun.BudgetPollGap, func() {
+		go spend.PollBudget(ctx, client, spendmeter.BudgetPollEvery, spendmeter.BudgetPollGap, func() {
 			if em != nil {
 				em.emit(spendProto(h.Spend(), time.Now()))
 			}

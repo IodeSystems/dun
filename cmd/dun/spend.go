@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -20,7 +20,7 @@ import (
 // on screen — never 0, which would read as free (or as exhausted).
 
 // spendProto is the wire shape of a meter snapshot.
-func spendProto(s dun.SpendSnapshot, now time.Time) *proto.Spend {
+func spendProto(s spendmeter.Snapshot, now time.Time) *proto.Spend {
 	p := &proto.Spend{
 		Currency: s.Currency, Mixed: s.Mixed,
 		Calls: s.Calls, CostedCalls: s.CostedCalls,
