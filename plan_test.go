@@ -2,10 +2,13 @@ package dun
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/agentkit/taskgraph"
 )
 
 func planHarness(t *testing.T, file bool) *Harness {
@@ -276,5 +279,36 @@ func TestPlan_SnapshotIsTheTree(t *testing.T) {
 	}
 	if w := s.Rows[1].Waiting; len(w) != 2 {
 		t.Errorf("waiting: %v", w)
+	}
+}
+
+// The store is dun's (agentkit ships none): a failed save undoes the change
+// and the tool says so.
+func TestPlan_MemStoreFailedSaveUndoes(t *testing.T) {
+	fail := false
+	st := &planMemStore{save: func(taskgraph.Graph) error {
+		if fail {
+			return errors.New("disk full")
+		}
+		return nil
+	}}
+	_, handle := taskgraph.Tool(st, "")
+	handle(context.Background(), `{"action":"add","title":"a","done_when":"x"}`)
+	fail = true
+	if out := handle(context.Background(), `{"action":"add","title":"b","done_when":"x"}`); !strings.Contains(out, "disk full") {
+		t.Errorf("save failure: %s", out)
+	}
+	if g, _ := st.View(context.Background()); len(g.Nodes) != 1 {
+		t.Errorf("nodes after a failed save: %d", len(g.Nodes))
+	}
+}
+
+// The model's own change to its own node is told to no one: it already has
+// the tool's answer.
+func TestPlan_ModelsOwnChangeIsNotAnAside(t *testing.T) {
+	h := planHarness(t, false)
+	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
+	if q := queuedTexts(h); len(q) != 0 {
+		t.Errorf("asides: %q", q)
 	}
 }

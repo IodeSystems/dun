@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/agentkit/taskgraph"
 	"github.com/iodesystems/dun/internal/fsutil"
-	"github.com/iodesystems/dun/internal/taskgraph"
 )
 
-// The task plan (docs/taskplan.md): the graph and its rules are
-// internal/taskgraph; this file is what a session does with it.
+// The task plan (docs/taskplan.md): the graph and its rules are agentkit's
+// taskgraph; this file is what a session does with it, and the store.
 //
 //   - Stored in <session>.plan.json beside the session, so a plan survives a
 //     resume and a fold; a session with no file keeps it in memory.
@@ -43,7 +45,7 @@ type planFileData struct {
 
 // planState is the session's plan in memory.
 type planState struct {
-	store *taskgraph.MemStore
+	store *planMemStore
 	file  string // the session file it was read for
 	// mode and approved: plan mode, and whether the person approved the
 	// plan. Guarded by Harness.planMu.
@@ -67,7 +69,7 @@ func (h *Harness) planNow() *planState {
 			}
 		}
 	}
-	p.store = taskgraph.NewMemStore(g, func(g taskgraph.Graph) error { return h.savePlan(p, g) })
+	p.store = &planMemStore{g: g, save: func(g taskgraph.Graph) error { return h.savePlan(p, g) }}
 	h.plan = p
 	return p
 }
@@ -85,6 +87,38 @@ func (h *Harness) savePlan(p *planState, g taskgraph.Graph) error {
 		return err
 	}
 	return fsutil.WriteAtomic(PlanFile(p.file), append(b, '\n'), 0o600)
+}
+
+// planMemStore keeps a plan in memory, and hands it to save after each kept
+// change (nil save: a session with no file). agentkit's taskgraph ships no
+// store: the host provides it. One per session's plan, shared by every caller.
+type planMemStore struct {
+	mu sync.Mutex
+	g  taskgraph.Graph
+	// save writes the plan out. If it fails the change is undone.
+	save func(g taskgraph.Graph) error
+}
+
+func (s *planMemStore) View(context.Context) (taskgraph.Graph, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.g.Clone(), nil
+}
+
+func (s *planMemStore) Update(_ context.Context, fn func(g *taskgraph.Graph) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := s.g.Clone()
+	if err := fn(&next); err != nil {
+		return err
+	}
+	if s.save != nil {
+		if err := s.save(next); err != nil {
+			return err
+		}
+	}
+	s.g = next
+	return nil
 }
 
 // planStore is the tool's Store: the session's plan, wherever the session
@@ -134,7 +168,25 @@ func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Contex
 
 // planToolDef is the plan tool for a root session and its handler.
 func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string) {
-	return taskgraph.Tool(planStore{h}, "", taskgraph.WithNote(planNote))
+	return taskgraph.Tool(planStore{h}, "", taskgraph.WithNote(planNote),
+		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) { h.planTell(cs, "") }))
+}
+
+// planTell routes a kept change to the owners it names, without the actor
+// (taskgraph.Change.Tell). Owner "" is this session's main agent, told by an
+// aside on its next turn; note is what it hears. Every node is the main
+// agent's until delegation (docs/taskplan.md) gives a subtree another owner,
+// and with it the session to inject into, so another owner hears nothing yet.
+func (h *Harness) planTell(cs []taskgraph.Change, note string) {
+	if note == "" {
+		return
+	}
+	for _, c := range cs {
+		if slices.Contains(c.Tell, "") {
+			h.Aside(note)
+			return
+		}
+	}
 }
 
 // ── the turn's line ─────────────────────────────────────────────────────
@@ -331,11 +383,12 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		} else {
 			patch.Goal = &text
 		}
-		if err := p.store.Update(ctx, func(g *taskgraph.Graph) error { return g.Update(id, patch) }); err != nil {
+		cs, err := taskgraph.Apply(ctx, p.store, planActorUser, func(g *taskgraph.Graph) error { return g.Update(id, patch) })
+		if err != nil {
 			return "", err
 		}
 		h.planChanged()
-		h.Aside(fmt.Sprintf("[control/plan] The user changed node %s's %s to: %s", id, field, text))
+		h.planTell(cs, fmt.Sprintf("[control/plan] The user changed node %s's %s to: %s", id, field, text))
 		return fmt.Sprintf("node %s: %s set", id, field), nil
 	case "drop":
 		id, why, _ := strings.Cut(rest, " ")
@@ -346,13 +399,14 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 			why = "dropped by the user"
 		}
 		var waiting int
-		if err := p.store.Update(ctx, func(g *taskgraph.Graph) error {
+		cs, err := taskgraph.Apply(ctx, p.store, planActorUser, func(g *taskgraph.Graph) error {
 			if err := g.SetStatus(id, taskgraph.Dropped, why); err != nil {
 				return err
 			}
 			waiting = len(g.Dependents(id))
 			return nil
-		}); err != nil {
+		})
+		if err != nil {
 			return "", err
 		}
 		h.planChanged()
@@ -360,11 +414,15 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		if waiting > 0 {
 			note += " " + strconv.Itoa(waiting) + " node(s) wait on it: replace it (a node with replaces " + id + ") and update their needs."
 		}
-		h.Aside(note)
+		h.planTell(cs, note)
 		return "node " + id + " dropped", nil
 	}
 	return "", fmt.Errorf("usage: /plan [mode on|off | approve | edit <id> title|goal <text> | drop <id> [why]]")
 }
+
+// planActorUser is the person, as an actor in taskgraph.Apply: never an owner,
+// so a change they make is told to every owner it touches.
+const planActorUser = "user"
 
 func (h *Harness) planModeWord(p *planState) string {
 	h.planMu.Lock()

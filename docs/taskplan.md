@@ -11,18 +11,24 @@ what is meant to happen, and the model keeps it. They stay separate.
 
 | Layer | Where | Holds |
 |---|---|---|
-| Graph | `internal/taskgraph` | Nodes, `needs`, cycle check, ready set, status rules, subgraph ownership. Stdlib only, no `Harness` |
-| Tool | `internal/taskgraph` | The `plan` tool's definition and handler, over a `Store` interface |
-| Host | root `dun` | Storage, the turn line, the tool group, delegation |
+| Graph | agentkit `taskgraph` | Nodes, `needs`, cycle check, ready set, status rules, subgraph ownership. Stdlib only, no `Harness` |
+| Tool | agentkit `taskgraph` | The `plan` tool's definition and handler, over a `Store` interface |
+| Host | root `dun` | The store (`planMemStore`), the turn line, the tool group, routing changes, delegation |
 | Screen | `internal/tui` | `/plan` |
 
-agentkit's rules say it does not own a task DAG (agentkit `CLAUDE.md`). So the graph
-starts here. aw4 said no: its DAG is a projection of an event log. agentkit's owner
-reads a reduced package as belonging there, as an optional sibling like `files` and
-`loopdetector`, after delegation ships; that needs Carl's edit to agentkit's "no task
-DAG" rule. So `internal/taskgraph` imports stdlib and agentkit's `llm` only, and knows
-nothing of dun: no plan mode, no approval, no sub-agent numbering. Delegation and
-scheduling stay in the host.
+The graph started here (098c15b) and moved to agentkit in v0.22.0 (Carl, 2026-11-03),
+as an optional sibling like `files` and `loopdetector`. It imports stdlib and
+agentkit's `llm` only, and knows nothing of dun: no plan mode, no approval, no
+sub-agent numbering. agentkit ships no store; the host provides one (one per plan,
+shared by every session that works it). Delegation and scheduling stay in the host.
+
+**Telling owners.** Every write the host makes goes through `taskgraph.Apply`, which
+returns the changes and, for each, the owners to tell (never the actor). The tool
+does the same through `WithOnChange`. `planTell` routes them: owner "" is the main
+agent, told by an aside. The person is actor `user`, so their edit reaches every
+owner it touches; the model's own change reaches no one. Until delegation gives a
+subtree another owner, "" is the only one; delegation adds the delegator, which the
+graph does not record.
 
 ## A node
 
@@ -122,7 +128,7 @@ parallel with worktree isolation.
 
 ## Build order
 
-1. `internal/taskgraph`, the tool, storage, the group. ✅
+1. The graph, the tool, storage, the group. ✅ (graph and tool moved to agentkit v0.22.0)
 2. `/plan` in the TUI, plan mode and approval. ✅
 3. Delegation.
 4. Parallel runs and per-node models.
