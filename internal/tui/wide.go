@@ -240,7 +240,7 @@ func cutRow(r string, off, avail int) string {
 	for room := 12; ; room++ {
 		ind = fmt.Sprintf(" … +%d cols →", w-(from+avail-lw-room))
 		if ansi.StringWidth(ind) <= room {
-			ind = strings.Repeat(" ", room-ansi.StringWidth(ind)) + ind
+			ind = strings.Repeat(" ", max(0, room-ansi.StringWidth(ind))) + ind
 			break
 		}
 	}

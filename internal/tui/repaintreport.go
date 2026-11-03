@@ -128,7 +128,7 @@ func newRedactorFor(home string, users, hosts []string) redactor {
 // fitPlaceholder is ph at exactly w cells: padded with "_", or cut short.
 func fitPlaceholder(ph string, w int) string {
 	if n := utf8.RuneCountInString(ph); n < w {
-		return ph + strings.Repeat("_", w-n)
+		return ph + strings.Repeat("_", max(0, w-n))
 	}
 	return string([]rune(ph)[:w])
 }

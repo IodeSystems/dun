@@ -133,7 +133,7 @@ func holdHeight(w string, maxH, maxKey *int, key int) string {
 	}
 	n := strings.Count(w, "\n") + 1
 	if n < *maxH {
-		return w + strings.Repeat("\n", *maxH-n)
+		return w + strings.Repeat("\n", max(0, *maxH-n))
 	}
 	*maxH = n
 	return w

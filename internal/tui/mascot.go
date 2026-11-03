@@ -77,7 +77,7 @@ func mascotArt(grid []string) []string {
 	}
 	rows := make([]string, len(grid), len(grid)+1)
 	for i, r := range grid {
-		rows[i] = r + strings.Repeat(".", w-len(r))
+		rows[i] = r + strings.Repeat(".", max(0, w-len(r)))
 	}
 	if len(rows)%2 == 1 {
 		rows = append(rows, strings.Repeat(".", w))

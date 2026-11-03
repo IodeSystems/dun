@@ -102,7 +102,7 @@ func ServerHeader(idW, viaW int, key keyStyle) string {
 			b.WriteString(c.word)
 			continue
 		}
-		b.WriteString(key(c.word, c.key) + strings.Repeat(" ", w-len([]rune(c.word))))
+		b.WriteString(key(c.word, c.key) + strings.Repeat(" ", max(0, w-len([]rune(c.word)))))
 	}
 	return b.String()
 }

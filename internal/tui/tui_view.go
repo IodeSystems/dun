@@ -78,12 +78,12 @@ func divider(w int, focusUp bool) string {
 	half := min(w, bandCap) / 2
 	bump := min(max(half/3, 2), 8)
 	if focusUp {
-		return stEdge.Render(strings.Repeat("▁", half-bump)+strings.Repeat("▄", bump)) +
-			StDim.Render(strings.Repeat("▁", w-half))
+		return stEdge.Render(strings.Repeat("▁", max(0, half-bump))+strings.Repeat("▄", bump)) +
+			StDim.Render(strings.Repeat("▁", max(0, w-half)))
 	}
 	bump = min(bump, w-half)
 	return StDim.Render(strings.Repeat("▔", half)) +
-		stEdge.Render(strings.Repeat("▀", bump)+strings.Repeat("▔", w-half-bump))
+		stEdge.Render(strings.Repeat("▀", bump)+strings.Repeat("▔", max(0, w-half-bump)))
 }
 
 // bottomCue is drawn over the divider's right end while the conversation is

@@ -935,7 +935,7 @@ func (m *multilineInput) rowView(s wrapSeg, caret int) string {
 		var cell, rest string
 		switch r := m.buf[i]; {
 		case r == '\t':
-			cell, rest = " ", strings.Repeat(" ", w-1)+string(m.buf[i+1:j])
+			cell, rest = " ", strings.Repeat(" ", max(0, w-1))+string(m.buf[i+1:j])
 		case m.isTok(r):
 			label := ansi.Truncate(m.pasteLabel(r), w, "…")
 			if i == caret {

@@ -192,5 +192,5 @@ func (b reqBar) withStats(head string, w int) string {
 	if stats == "" {
 		return head
 	}
-	return head + strings.Repeat(" ", w-hw-ansi.StringWidth(stats)) + stats
+	return head + strings.Repeat(" ", max(0, w-hw-ansi.StringWidth(stats))) + stats
 }

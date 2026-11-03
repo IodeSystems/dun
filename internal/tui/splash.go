@@ -708,7 +708,7 @@ func splashBadge(w int) []string {
 	center := func(text string, st lipgloss.Style) string {
 		text, _ = fitPlain(text, w)
 		pad := (w - lipgloss.Width(text)) / 2
-		return strings.Repeat(" ", pad) + st.Render(text) + strings.Repeat(" ", w-pad-lipgloss.Width(text))
+		return strings.Repeat(" ", pad) + st.Render(text) + strings.Repeat(" ", max(0, w-pad-lipgloss.Width(text)))
 	}
 	return []string{center(ver, StDim), center("git'r dun!", stEdge)}
 }

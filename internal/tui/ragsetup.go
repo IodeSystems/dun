@@ -910,7 +910,7 @@ func (m tuiModel) ragSetupPanel() string {
 		}
 		tail := ""
 		if len(post) > 0 {
-			tail = strings.Repeat(" ", idW-len(c.row.id)) + "  " + StDim.Render(strings.Join(post, " · "))
+			tail = strings.Repeat(" ", max(0, idW-len(c.row.id))) + "  " + StDim.Render(strings.Join(post, " · "))
 		}
 		list = append(list, listRow(pre, c.row.id, tail, i == r.list.sel))
 	}

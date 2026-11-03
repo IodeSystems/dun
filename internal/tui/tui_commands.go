@@ -596,7 +596,7 @@ func (m tuiModel) palettePanel() string {
 	}
 	for i := lo; i < hi; i++ {
 		c := matches[i]
-		pad := strings.Repeat(" ", nameW-len(c.Name)-1)
+		pad := strings.Repeat(" ", max(0, nameW-len(c.Name)-1))
 		name := stCmd.Render("/" + c.Name)
 		if i == m.paletteSel {
 			name = "/" + c.Name // listRow puts it in the accent

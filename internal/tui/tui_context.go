@@ -153,7 +153,7 @@ func ctxRow(label, value, note string) string {
 	if lipgloss.Width(label) > ctxLabelW-1 {
 		label = textfmt.Clip(label, ctxLabelW-1)
 	}
-	pad := strings.Repeat(" ", ctxLabelW-lipgloss.Width(label))
+	pad := strings.Repeat(" ", max(0, ctxLabelW-lipgloss.Width(label)))
 	return "\n  " + StDim.Render(label+pad) + value + StDim.Render(note)
 }
 

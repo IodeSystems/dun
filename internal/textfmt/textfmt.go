@@ -26,7 +26,7 @@ func Clip(s string, n int) string {
 
 func Pad(s string, w int) string {
 	if n := len([]rune(s)); n < w {
-		return s + strings.Repeat(" ", w-n)
+		return s + strings.Repeat(" ", max(0, w-n))
 	}
 	return s
 }

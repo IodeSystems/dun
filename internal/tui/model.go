@@ -456,7 +456,7 @@ func (m tuiModel) modelPanel() string {
 		}
 		tail := ""
 		if len(post) > 0 {
-			tail = strings.Repeat(" ", idW-len(r.id)) + "  " + StDim.Render(strings.Join(post, " · "))
+			tail = strings.Repeat(" ", max(0, idW-len(r.id))) + "  " + StDim.Render(strings.Join(post, " · "))
 		}
 		name := r.id
 		if modelKind(r.id) != "" && i != m.models.sel {
