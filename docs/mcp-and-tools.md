@@ -319,3 +319,25 @@ format on edit.
   the edit row's formatted / formatSkipped. Upstream limits: `--lsp-off` does
   not apply to node selectors or `/query`, and `--root-marker` is stored but
   unused.
+
+## dun as an MCP server: `dun mcp` (2026-11-04)
+
+USER 2026-11-04: "interface claude<->dun for making things cheaper". `dun mcp`
+serves dun's sessions to another agent over MCP on stdio
+(`claude mcp add dun -- dun mcp`). Tools: `dun_sessions`, `dun_start`,
+`dun_send`, `dun_wait`, `dun_answer`, `dun_interrupt`. `dun mcp --help` is the
+user's documentation.
+
+- It is a dund client on the unix socket, like the TUI (`tui.DialDund`, which
+  starts dund when nothing listens). No token: the socket's peer uid is the
+  principal. The HTTP API stays experimental and is not used.
+- A call opens its own connection: subscribe from the session's last event,
+  send, read until `done`, an `ask`, an `error` or the timeout. A reply counts
+  only after the `user` echo of this call's own message, so a turn already
+  running ends no wait that is not its own.
+- A timeout loses nothing: the result names the event number and `dun_wait`
+  reads on from it. The session keeps working with no client attached.
+- Provider keys never cross: `dun_start` takes a provider NAME and passes its
+  URL to the engine (`--url`, dund's allowlist); the engine reads the key.
+- JSON-RPC by hand (`cmd/dun/mcpserve.go`): initialize, ping, tools/list,
+  tools/call are all an MCP server needs here; no SDK dependency.

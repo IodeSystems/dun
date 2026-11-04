@@ -120,6 +120,7 @@ start:
   dun --continue             reopen the most recent session for this workspace
   dun doctor [--fix]         check providers, tools, dund and the service; --fix runs what it can
   dun tmux                   the tmux.conf lines that show dun's state in the window list
+  dun mcp                    dun's sessions as an MCP server on stdio, for another agent (dun mcp --help)
   dun -p                     engine mode: line-delimited JSON events on stdin/stdout
   dun dund …                 the session service (dun dund --help)
 
@@ -211,6 +212,10 @@ func main() {
 			os.Exit(2)
 		}
 		os.Exit(0)
+	}
+	// `dun mcp`: dun's sessions as an MCP server on stdio (mcpserve.go).
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		os.Exit(mcpCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	// `dun tmux`: the tmux.conf lines that show dun's window mark (tmux.go).
 	if len(os.Args) > 1 && os.Args[1] == "tmux" {

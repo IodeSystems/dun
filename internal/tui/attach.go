@@ -476,3 +476,6 @@ func (p *dunProc) jobUsage(id int) bool {
 	}
 	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "job_usage", "job": id}) == nil
 }
+
+// DialDund is dialDund for the other clients in this binary (dun mcp).
+func DialDund() (net.Conn, error) { return dialDund() }
