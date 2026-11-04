@@ -376,3 +376,52 @@ func TestMultilineInput_CaretSolidWhileTyping(t *testing.T) {
 		t.Fatal("caret did not blink back on")
 	}
 }
+
+// ctrl+k twice kills two lines into one entry and ctrl+y puts both back;
+// alt+y after a yank swaps in the kill before (readline's kill ring).
+func TestMultilineInput_KillRing(t *testing.T) {
+	ctrl := func(c rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: c, Mod: tea.ModCtrl} }
+	alt := func(c rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: c, Mod: tea.ModAlt} }
+	in := newMultilineInput()
+	in.SetValue("one\ntwo")
+	in.cursor = 0
+	in = in.HandleKey(ctrl('k')) // "one"
+	in = in.HandleKey(ctrl('k')) // the newline
+	if in.Value() != "two" || len(in.kills) != 1 || in.kills[0] != "one\n" {
+		t.Fatalf("after two kills: %q, ring %q", in.Value(), in.kills)
+	}
+	in.cursor = len(in.buf)
+	in = in.HandleKey(ctrl('y'))
+	if in.Value() != "twoone\n" {
+		t.Fatalf("yank: %q", in.Value())
+	}
+
+	// A word killed back joins at the front; a key between starts a new entry.
+	in.SetValue("alpha beta gamma")
+	in.cursor = len(in.buf)
+	in = in.HandleKey(ctrl('w'))
+	in = in.HandleKey(ctrl('w'))
+	if got := in.kills[len(in.kills)-1]; got != "beta gamma" {
+		t.Fatalf("two words back: %q", got)
+	}
+	in = in.HandleKey(ctrl('y'))
+	if in.Value() != "alpha beta gamma" {
+		t.Fatalf("yank back: %q", in.Value())
+	}
+	in = in.HandleKey(alt('y'))
+	if in.Value() != "alpha one\n" {
+		t.Fatalf("alt+y swaps in the kill before: %q", in.Value())
+	}
+	in = in.HandleKey(ctrl('a'))
+	in = in.HandleKey(alt('y')) // not right after a yank: nothing
+	if in.Value() != "alpha one\n" {
+		t.Errorf("alt+y after a motion changed the text: %q", in.Value())
+	}
+
+	// The ring survives a sent message (Reset), as a shell's does.
+	in.Reset()
+	in = in.HandleKey(ctrl('y'))
+	if in.Value() != "beta gamma" {
+		t.Errorf("after Reset: %q", in.Value())
+	}
+}

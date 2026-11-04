@@ -61,7 +61,21 @@ type multilineInput struct {
 	// lay is the last layout. A pointer so the copies Bubble Tea makes of the
 	// model (View runs on one) share it.
 	lay *layout
+
+	// The kill ring, as readline keeps it (USER 2026-11-04: "I expected
+	// ctrl-k ctrl-k and ctrl-y to work"). Each kill (ctrl+k, ctrl+u, ctrl+w,
+	// alt+d) is text as written, tokens expanded, newest last; kills in a row
+	// make one entry. ctrl+y puts the newest back; alt+y, right after a yank,
+	// swaps it for the one before. It outlives a sent message, as it does in
+	// a shell.
+	kills    []string
+	lastKey  string // "kill", "yank" or "": what the previous key did
+	yankIdx  int    // the ring entry the last yank put in
+	yankFrom int    // where the last yank's text starts in buf; it ends at the cursor
 }
+
+// killRing is how many kills are kept.
+const killRing = 16
 
 // inputMaxLines caps the box. It GROWS to this, it does not start at it: an
 // empty composer that reserves four rows is four rows of conversation nobody
@@ -658,6 +672,8 @@ func (m *multilineInput) HandleKey(msg tea.KeyPressMsg) multilineInput {
 		return *m
 	}
 	m.typedAt, m.blinkOn = time.Now(), true
+	prev := m.lastKey
+	m.lastKey = ""
 
 	switch msg.String() {
 	// A newline has to be typeable: enter submits, so the composer needs its own
@@ -689,23 +705,30 @@ func (m *multilineInput) HandleKey(msg tea.KeyPressMsg) multilineInput {
 		m.cursor = m.wordRight()
 		m.clampCursor()
 	case "ctrl+w", "alt+backspace", "ctrl+backspace":
-		m.deleteTo(m.wordLeft())
+		m.kill(m.wordLeft(), prev)
 	case "alt+d":
-		m.deleteTo(m.wordRight())
+		m.kill(m.wordRight(), prev)
 	// At the line's edge (an empty line is at both) there is nothing left to
 	// kill, so the key takes the newline: ctrl+u joins this line to the end of
 	// the one above, ctrl+k joins the one below to this.
 	case "ctrl+k":
 		if end := m.lineEnd(); end > m.cursor {
-			m.deleteTo(end)
+			m.kill(end, prev)
 		} else {
-			m.deleteTo(m.cursor + 1)
+			m.kill(m.cursor+1, prev)
 		}
 	case "ctrl+u":
 		if start := m.lineStart(); start < m.cursor {
-			m.deleteTo(start)
+			m.kill(start, prev)
 		} else {
-			m.deleteTo(m.cursor - 1)
+			m.kill(m.cursor-1, prev)
+		}
+	case "ctrl+y":
+		m.yank(len(m.kills) - 1)
+	case "alt+y":
+		if prev == "yank" && len(m.kills) > 1 {
+			m.deleteTo(m.yankFrom)
+			m.yank((m.yankIdx + len(m.kills) - 1) % len(m.kills))
 		}
 	case "ctrl+d", "delete":
 		m.delete()
@@ -748,6 +771,65 @@ func (m *multilineInput) HandlePaste(text string) multilineInput {
 	}
 	m.insert(r)
 	return *m
+}
+
+// kill deletes from the cursor to to and keeps the text in the ring. Right
+// after another kill it joins that entry: a kill forward adds to its end, a
+// kill back to its start, so ctrl+k ctrl+k ctrl+y puts both lines back.
+func (m *multilineInput) kill(to int, prev string) {
+	lo, hi := min(m.cursor, to), max(m.cursor, to)
+	lo, hi = max(lo, 0), min(hi, len(m.buf))
+	if lo >= hi {
+		m.lastKey = prev // nothing killed: a next kill still joins
+		return
+	}
+	text := m.written(m.buf[lo:hi])
+	switch {
+	case prev == "kill" && len(m.kills) > 0 && to < m.cursor:
+		m.kills[len(m.kills)-1] = text + m.kills[len(m.kills)-1]
+	case prev == "kill" && len(m.kills) > 0:
+		m.kills[len(m.kills)-1] += text
+	default:
+		m.kills = append(m.kills, text)
+		if len(m.kills) > killRing {
+			m.kills = m.kills[len(m.kills)-killRing:]
+		}
+	}
+	m.deleteTo(to)
+	m.lastKey = "kill"
+}
+
+// yank puts ring entry i in at the cursor, as a paste would be: big text
+// becomes a paste token, a known image label its image.
+func (m *multilineInput) yank(i int) {
+	if i < 0 || i >= len(m.kills) {
+		return
+	}
+	r := []rune(m.kills[i])
+	if bigPaste(r) {
+		r = []rune{m.addPaste(r)}
+	} else {
+		r = m.tokenizeImages(r)
+	}
+	m.yankFrom, m.yankIdx = m.cursor, i
+	m.insert(r)
+	m.lastKey = "yank"
+}
+
+// written is runes as the text they stand for: paste tokens are their text,
+// image tokens their labels (what Value does for the whole buffer).
+func (m *multilineInput) written(rs []rune) string {
+	var b strings.Builder
+	for _, r := range rs {
+		if p, ok := m.pastes[r]; ok {
+			b.WriteString(p)
+		} else if img, ok := m.images[r]; ok {
+			b.WriteString(img.Label)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // insert puts runes at the cursor. Built through a fresh slice on purpose: the

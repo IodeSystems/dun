@@ -73,6 +73,8 @@ var keyActions = []keyAction{
 	{"delete.to_end", "main", "delete to the end of the line", []string{"ctrl+k"}},
 	{"delete.to_start", "main", "delete to the start of the line", []string{"ctrl+u"}},
 	{"delete.char", "main", "delete the character under the cursor", []string{"ctrl+d", "delete"}},
+	{"yank", "main", "put back the text the last kill deleted (ctrl+k, ctrl+u, ctrl+w, alt+d)", []string{"ctrl+y"}},
+	{"yank.pop", "main", "right after a yank: swap it for the kill before", []string{"alt+y"}},
 	{"paste.text", "main", "paste the clipboard's text", []string{"ctrl+p"}},
 	{"paste.image", "main", "paste the clipboard's image", []string{"ctrl+v"}},
 	{"paste.expand", "main", "open a paste token for editing", []string{"ctrl+o"}},
