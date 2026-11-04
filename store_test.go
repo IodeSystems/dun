@@ -105,6 +105,22 @@ func TestSessionStore_Reset(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("after reopen: Context returned %d entries, want 0", len(got))
 	}
+
+	// The cleared transcript is kept beside it, whole.
+	kept, _ := filepath.Glob(filepath.Join(filepath.Dir(path), "s.cleared.*.jsonl"))
+	if len(kept) != 1 {
+		t.Fatalf("cleared copies = %v; want 1", kept)
+	}
+	old, _ := openSessionStore(kept[0])
+	if old.Loaded() != 2 {
+		t.Fatalf("cleared copy holds %d entries, want 2", old.Loaded())
+	}
+
+	// Clearing an empty conversation keeps nothing more.
+	s.Reset()
+	if again, _ := filepath.Glob(filepath.Join(filepath.Dir(path), "s.cleared.*.jsonl")); len(again) != 1 {
+		t.Fatalf("an empty /clear wrote a copy: %v", again)
+	}
 }
 
 // History maps loaded store entries to replayable items in chronological order:

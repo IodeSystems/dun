@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -574,13 +575,27 @@ func (s *sessionStore) docsEntries() []string {
 	return out
 }
 
-// Reset clears all entries, starting a fresh session log.
+// Reset clears all entries, starting a fresh session log under the same id:
+// the provider sees an empty conversation, the session's servers are not
+// touched. The cleared transcript is kept beside it as
+// "<id>.cleared.<time>.jsonl" (USER 2026-11-04) — a sidecar, so it is not
+// listed as a session and goes with the session when that is removed. Blobs
+// are content-addressed and never collected, so its refs stay readable.
 func (s *sessionStore) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.path != "" && len(s.entries) > 0 {
+		_ = os.Rename(s.path, clearedPath(s.path, time.Now()))
+	}
 	s.entries = nil
 	s.unclaimed = 0
 	s.flushLocked()
+}
+
+// clearedPath is where Reset keeps the transcript it clears: "<id>.jsonl" →
+// "<id>.cleared.20261104T153000.jsonl".
+func clearedPath(path string, at time.Time) string {
+	return strings.TrimSuffix(path, ".jsonl") + ".cleared." + at.Format("20060102T150405") + ".jsonl"
 }
 
 // ── inbox helpers ──────────────────────────────────────────────────
