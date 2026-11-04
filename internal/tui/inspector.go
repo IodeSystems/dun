@@ -206,7 +206,7 @@ func (ins *inspector) update(msg tea.KeyPressMsg) (open bool, cmd tea.Cmd) {
 				ins.jumpTo(len(ins.matches) - 1)
 			}
 		default:
-			ins.search, cmd = ins.search.Update(msg)
+			cmd = editField(&ins.search, "inspector.search", msg)
 		}
 		return true, cmd
 	}

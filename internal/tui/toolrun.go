@@ -24,7 +24,7 @@ import (
 // removed or shrunk while the run is on screen (the no-screen-jump rule —
 // tested as a property over mixed event streams, see noshrink_test.go). A
 // thought is one line (thoughtLine), live and finished, unless the person
-// unfolded thinking (ctrl+t, thinking.go): then it is open as the sketch
+// unfolded thinking (ctrl+x t, thinking.go): then it is open as the sketch
 // shows. The header carries the summary and changes in place.
 //
 // A run is OPEN while it is the last block and the round's reply has not

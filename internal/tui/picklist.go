@@ -66,7 +66,7 @@ func (p *pickList) move(key string, n, window int) bool {
 // query (the owner puts the cursor back on the first match).
 func (p *pickList) typeKey(msg tea.Msg) (cmd tea.Cmd, changed bool) {
 	before := p.query.Value()
-	p.query, cmd = p.query.Update(msg)
+	cmd = editField(&p.query, "pick", msg)
 	return cmd, p.query.Value() != before
 }
 

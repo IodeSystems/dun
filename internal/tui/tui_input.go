@@ -77,6 +77,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 
+	case editorDoneMsg:
+		m.editorDone(msg)
+		return m, nil
+
 	case loginCheckedMsg:
 		return m, m.loginChecked(msg)
 
@@ -106,7 +110,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// ctrl+c while a turn runs interrupts it too; a second ctrl+c within
 		// quitAgain falls through to the quit below (USER 2026-10-22).
-		if msg.String() == "ctrl+c" && m.turnRunning() && time.Since(m.ctrlCAt) > quitAgain {
+		if msg.String() == "ctrl+c" && m.turnRunning() && time.Since(m.ctrlCAt) > quitAgain && !m.ctrlCClears() {
 			m.ctrlCAt = time.Now()
 			return m.interrupt()
 		}
@@ -222,6 +226,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, nil
 		}
+		// The shell keys on the composer as a whole, and chords (composerkeys.go).
+		var cmd tea.Cmd
+		var done bool
+		if msg, cmd, done = m.composerKey(msg); done {
+			return m, cmd
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			if m.disableExit {
@@ -322,9 +332,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "ctrl+end": // end a scroll-back: newest output, following again
 			m.scrollToEnd()
-			return m, nil
-		case "ctrl+t": // every thought: its one line, or in full
-			m.toggleThinking()
 			return m, nil
 		case "ctrl+home": // top of the last user message: the current exchange
 			m.scrollToLastUser()
@@ -646,12 +653,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Text is pasted by the terminal, as before.
 			if msg.String() == "ctrl+v" {
 				return m, pasteImageCmd()
-			}
-			// ctrl+p: the clipboard's text, read by dun (USER 2026-10-27: no
-			// paste key beside ctrl+k and ctrl+u); a terminal's own paste is
-			// a PasteMsg, as before.
-			if msg.String() == "ctrl+p" {
-				return m, pasteTextCmd()
 			}
 			m.input = m.input.HandleKey(msg)
 			m.paletteSel = 0 // typing re-filters the palette; start at the top
@@ -1106,12 +1107,12 @@ func (m tuiModel) paste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case m.inspecting:
 		if m.insp.searching {
-			m.insp.search, cmd = m.insp.search.Update(msg)
+			cmd = editField(&m.insp.search, "inspector.search", msg)
 		}
 		return m, cmd
 	case m.jobViewing:
 		if m.jv.searching {
-			m.jv.search, cmd = m.jv.search.Update(msg)
+			cmd = editField(&m.jv.search, "jobs.search", msg)
 		}
 		return m, cmd
 	case m.asking:

@@ -55,10 +55,11 @@ var keyActions = []keyAction{
 	{"scroll.turn", "main", "the top of your last message; again, the one before", []string{"ctrl+home"}},
 	{"page.up", "main", "a page up", []string{"pgup"}},
 	{"page.down", "main", "a page down", []string{"pgdown"}},
-	{"history.prev", "main", "the previous message you sent", []string{"ctrl+up"}},
-	{"history.next", "main", "the next message you sent", []string{"ctrl+down"}},
+	{"history.prev", "main", "the previous message you sent", []string{"ctrl+up", "ctrl+p"}},
+	{"history.next", "main", "the next message you sent", []string{"ctrl+down", "ctrl+n"}},
 
-	{"thinking.fold", "main", "all thinking: one line each, or in full", []string{"ctrl+t"}},
+	{"thinking.fold", "main", "all thinking: one line each, or in full", []string{"ctrl+x t"}},
+	{"edit.external", "main", "edit the message in $VISUAL or $EDITOR", []string{"ctrl+x ctrl+e"}},
 
 	{"move.up", "main", "up: a line, a block, or history at the input's top", []string{"up"}},
 	{"move.down", "main", "down", []string{"down"}},
@@ -69,13 +70,24 @@ var keyActions = []keyAction{
 	{"word.left", "main", "a word left", []string{"alt+left", "ctrl+left", "alt+b"}},
 	{"word.right", "main", "a word right", []string{"alt+right", "ctrl+right", "alt+f"}},
 	{"delete.word_back", "main", "delete the word before the cursor", []string{"ctrl+w", "alt+backspace", "ctrl+backspace"}},
-	{"delete.word_forward", "main", "delete the word after the cursor", []string{"alt+d"}},
+	{"delete.word_forward", "main", "delete the word after the cursor", []string{"alt+d", "alt+delete", "ctrl+delete"}},
+	{"delete.char_back", "main", "delete the character before the cursor", []string{"backspace", "ctrl+h"}},
 	{"delete.to_end", "main", "delete to the end of the line", []string{"ctrl+k"}},
 	{"delete.to_start", "main", "delete to the start of the line", []string{"ctrl+u"}},
 	{"delete.char", "main", "delete the character under the cursor", []string{"ctrl+d", "delete"}},
-	{"yank", "main", "put back the text the last kill deleted (ctrl+k, ctrl+u, ctrl+w, alt+d)", []string{"ctrl+y"}},
+	{"yank", "main", "put back the text the last kill deleted (ctrl+k, ctrl+u, ctrl+w, alt+d, ctrl+c)", []string{"ctrl+y"}},
 	{"yank.pop", "main", "right after a yank: swap it for the kill before", []string{"alt+y"}},
-	{"paste.text", "main", "paste the clipboard's text", []string{"ctrl+p"}},
+	{"transpose.chars", "main", "swap the two characters at the cursor", []string{"ctrl+t"}},
+	{"transpose.words", "main", "swap the two words at the cursor", []string{"alt+t"}},
+	{"case.upper", "main", "upper-case the next word", []string{"alt+u"}},
+	{"case.lower", "main", "lower-case the next word", []string{"alt+l"}},
+	{"case.capital", "main", "capitalize the next word", []string{"alt+c"}},
+	{"undo", "main", "undo the last change to the text", []string{"ctrl+_", "ctrl+/"}},
+	{"buffer.start", "main", "the start of the whole message", []string{"alt+<"}},
+	{"buffer.end", "main", "the end of the whole message", []string{"alt+>"}},
+	{"clear", "main", "with text: empty the message (ctrl+y brings it back); empty: interrupt, then quit", []string{"ctrl+c"}},
+	{"redraw", "main", "redraw the screen", []string{"ctrl+l"}},
+	{"paste.text", "main", "paste the clipboard's text", []string{"ctrl+x p"}},
 	{"paste.image", "main", "paste the clipboard's image", []string{"ctrl+v"}},
 	{"paste.expand", "main", "open a paste token for editing", []string{"ctrl+o"}},
 }
@@ -252,6 +264,9 @@ func (km keyMap) translate(scope string, msg tea.Msg) tea.Msg {
 			return msg // one of its own defaults: the handlers match it as is
 		}
 		a, _ := actionByName(name)
+		if strings.Contains(a.keys[0], " ") {
+			return msg // a chord's action: asked for by name (composerKey)
+		}
 		out, _ := parseKey(a.keys[0])
 		return out
 	}
@@ -315,6 +330,9 @@ func (km keyMap) report() string {
 // typesText reports whether a key, pressed in the composer, would type
 // something: a printable character with no ctrl or alt, or space.
 func typesText(key string) bool {
+	if strings.Contains(key, " ") {
+		return false // a chord starts with its prefix, which types nothing
+	}
 	k, err := parseKey(key)
 	if err != nil {
 		return false
@@ -325,6 +343,16 @@ func typesText(key string) bool {
 // normKey is a key as Bubble Tea names it, from however a person wrote it
 // ("Ctrl+G", "alt+ctrl+x").
 func normKey(s string) (string, error) {
+	if parts := strings.Fields(s); len(parts) > 1 { // a chord: "ctrl+x t"
+		for i, p := range parts {
+			n, err := normKey(p)
+			if err != nil {
+				return "", err
+			}
+			parts[i] = n
+		}
+		return strings.Join(parts, " "), nil
+	}
 	k, err := parseKey(s)
 	if err != nil {
 		return "", err

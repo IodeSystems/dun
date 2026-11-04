@@ -175,11 +175,11 @@ func (m setupModel) typeInto(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch {
 	case m.step == stepURL:
-		m.url, cmd = m.url.Update(msg)
+		cmd = editField(&m.url, "setup.url", msg)
 	case m.step == stepKey:
-		m.key, cmd = m.key.Update(msg)
+		cmd = editField(&m.key, "setup.key", msg)
 	case m.step == stepModel && m.customRow():
-		m.custom, cmd = m.custom.Update(msg)
+		cmd = editField(&m.custom, "setup.custom", msg)
 	}
 	return m, cmd
 }

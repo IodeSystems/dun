@@ -88,7 +88,7 @@ func TestRun_ThoughtIsALineUntilUnfolded(t *testing.T) {
 	if strings.Contains(scr, "second line of it") || strings.Contains(scr, "thought for") {
 		t.Errorf("folded: the thought's body shows:\n%s", scr)
 	}
-	v.m = key(v.m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	v.m = ctrlT(v.m)
 	scr = v.view()
 	for _, want := range []string{"▾ ✻ thought for", "next: echo 0. Then check it.", "✓ $ echo 0", "▾ ✻ thinking…", "second line of it"} {
 		if !strings.Contains(scr, want) {

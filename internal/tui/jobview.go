@@ -483,7 +483,7 @@ func (v *jobView) key(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			}
 		default:
 			var cmd tea.Cmd
-			v.search, cmd = v.search.Update(msg)
+			cmd = editField(&v.search, "jobs.search", msg)
 			return true, cmd
 		}
 		return true, nil

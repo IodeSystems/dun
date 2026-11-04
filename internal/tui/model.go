@@ -676,7 +676,7 @@ func (m tuiModel) updateProviderForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // it (freeName).
 func (m tuiModel) typeProviderField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.providerFields[m.providerStep], cmd = m.providerFields[m.providerStep].Update(msg)
+	cmd = editField(&m.providerFields[m.providerStep], fmt.Sprintf("provider.%d", m.providerStep), msg)
 	if m.providerStep == fieldAddr && m.providerEdit == "" {
 		name := &m.providerFields[fieldName]
 		if name.Value() == m.providerAuto {

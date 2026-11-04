@@ -38,7 +38,7 @@ func (m tuiModel) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // typeSearch is a key or a paste in the "/" query box.
 func (m tuiModel) typeSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.search, cmd = m.search.Update(msg)
+	cmd = editField(&m.search, "search", msg)
 	m.matches = m.computeMatches() // live: preview the first hit as you type
 	if len(m.matches) > 0 {
 		m.matchPos = 0

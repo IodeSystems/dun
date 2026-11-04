@@ -61,21 +61,7 @@ type multilineInput struct {
 	// lay is the last layout. A pointer so the copies Bubble Tea makes of the
 	// model (View runs on one) share it.
 	lay *layout
-
-	// The kill ring, as readline keeps it (USER 2026-11-04: "I expected
-	// ctrl-k ctrl-k and ctrl-y to work"). Each kill (ctrl+k, ctrl+u, ctrl+w,
-	// alt+d) is text as written, tokens expanded, newest last; kills in a row
-	// make one entry. ctrl+y puts the newest back; alt+y, right after a yank,
-	// swaps it for the one before. It outlives a sent message, as it does in
-	// a shell.
-	kills    []string
-	lastKey  string // "kill", "yank" or "": what the previous key did
-	yankIdx  int    // the ring entry the last yank put in
-	yankFrom int    // where the last yank's text starts in buf; it ends at the cursor
 }
-
-// killRing is how many kills are kept.
-const killRing = 16
 
 // inputMaxLines caps the box. It GROWS to this, it does not start at it: an
 // empty composer that reserves four rows is four rows of conversation nobody
@@ -187,6 +173,7 @@ func cleanInput(r []rune) []rune {
 
 func (m *multilineInput) Reset() {
 	m.buf, m.cursor, m.scroll, m.pastes, m.images = nil, 0, 0, nil, nil
+	edits.forget(composerID) // the text went: nothing to undo back to
 }
 
 func (m *multilineInput) Focus() {
@@ -672,8 +659,17 @@ func (m *multilineInput) HandleKey(msg tea.KeyPressMsg) multilineInput {
 		return *m
 	}
 	m.typedAt, m.blinkOn = time.Now(), true
-	prev := m.lastKey
-	m.lastKey = ""
+	// The editing keys every field shares (editcore.go): kills, yank, undo,
+	// transpose, case.
+	e := editBuf{buf: m.buf, cur: m.cursor, lo: m.lineStart(), hi: m.lineEnd(),
+		written: m.written, runes: m.yankRunes, prev: m.prevUnit, next: m.nextUnit}
+	if editKey(composerID, msg.String(), &e) {
+		m.buf, m.cursor = e.buf, e.cur
+		m.clampCursor()
+		return *m
+	}
+	before := editSnap{buf: m.buf, cur: m.cursor}
+	defer func() { edits.noteTyped(composerID, before, m.buf) }()
 
 	switch msg.String() {
 	// A newline has to be typeable: enter submits, so the composer needs its own
@@ -704,32 +700,6 @@ func (m *multilineInput) HandleKey(msg tea.KeyPressMsg) multilineInput {
 	case "alt+right", "ctrl+right", "alt+f":
 		m.cursor = m.wordRight()
 		m.clampCursor()
-	case "ctrl+w", "alt+backspace", "ctrl+backspace":
-		m.kill(m.wordLeft(), prev)
-	case "alt+d":
-		m.kill(m.wordRight(), prev)
-	// At the line's edge (an empty line is at both) there is nothing left to
-	// kill, so the key takes the newline: ctrl+u joins this line to the end of
-	// the one above, ctrl+k joins the one below to this.
-	case "ctrl+k":
-		if end := m.lineEnd(); end > m.cursor {
-			m.kill(end, prev)
-		} else {
-			m.kill(m.cursor+1, prev)
-		}
-	case "ctrl+u":
-		if start := m.lineStart(); start < m.cursor {
-			m.kill(start, prev)
-		} else {
-			m.kill(m.cursor-1, prev)
-		}
-	case "ctrl+y":
-		m.yank(len(m.kills) - 1)
-	case "alt+y":
-		if prev == "yank" && len(m.kills) > 1 {
-			m.deleteTo(m.yankFrom)
-			m.yank((m.yankIdx + len(m.kills) - 1) % len(m.kills))
-		}
 	case "ctrl+d", "delete":
 		m.delete()
 	case "ctrl+o": // open a paste token for editing
@@ -773,47 +743,17 @@ func (m *multilineInput) HandlePaste(text string) multilineInput {
 	return *m
 }
 
-// kill deletes from the cursor to to and keeps the text in the ring. Right
-// after another kill it joins that entry: a kill forward adds to its end, a
-// kill back to its start, so ctrl+k ctrl+k ctrl+y puts both lines back.
-func (m *multilineInput) kill(to int, prev string) {
-	lo, hi := min(m.cursor, to), max(m.cursor, to)
-	lo, hi = max(lo, 0), min(hi, len(m.buf))
-	if lo >= hi {
-		m.lastKey = prev // nothing killed: a next kill still joins
-		return
-	}
-	text := m.written(m.buf[lo:hi])
-	switch {
-	case prev == "kill" && len(m.kills) > 0 && to < m.cursor:
-		m.kills[len(m.kills)-1] = text + m.kills[len(m.kills)-1]
-	case prev == "kill" && len(m.kills) > 0:
-		m.kills[len(m.kills)-1] += text
-	default:
-		m.kills = append(m.kills, text)
-		if len(m.kills) > killRing {
-			m.kills = m.kills[len(m.kills)-killRing:]
-		}
-	}
-	m.deleteTo(to)
-	m.lastKey = "kill"
-}
+// composerID names the composer's undo history (editcore.go).
+const composerID = "composer"
 
-// yank puts ring entry i in at the cursor, as a paste would be: big text
-// becomes a paste token, a known image label its image.
-func (m *multilineInput) yank(i int) {
-	if i < 0 || i >= len(m.kills) {
-		return
-	}
-	r := []rune(m.kills[i])
+// yankRunes is yanked text as the composer holds it, as a paste would be:
+// big text becomes a paste token, a known image label its image.
+func (m *multilineInput) yankRunes(text string) []rune {
+	r := []rune(text)
 	if bigPaste(r) {
-		r = []rune{m.addPaste(r)}
-	} else {
-		r = m.tokenizeImages(r)
+		return []rune{m.addPaste(r)}
 	}
-	m.yankFrom, m.yankIdx = m.cursor, i
-	m.insert(r)
-	m.lastKey = "yank"
+	return m.tokenizeImages(r)
 }
 
 // written is runes as the text they stand for: paste tokens are their text,

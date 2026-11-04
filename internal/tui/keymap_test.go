@@ -34,6 +34,12 @@ func press(t *testing.T, s string) tea.KeyPressMsg {
 func TestKeyMap_DefaultsAndPresetsLoad(t *testing.T) {
 	for _, a := range keyActions {
 		for _, k := range a.keys {
+			if strings.Contains(k, " ") { // a chord: each key of it
+				if n, err := normKey(k); err != nil || n != k {
+					t.Errorf("%s: chord %q normalizes to %q (%v)", a.name, k, n, err)
+				}
+				continue
+			}
 			if p, err := parseKey(k); err != nil || p.String() != k {
 				t.Errorf("%s: %q parses to %q (%v)", a.name, k, p.String(), err)
 			}
@@ -55,7 +61,11 @@ func TestKeyMap_EveryActionMovesAndEveryDefaultPasses(t *testing.T) {
 		if a.scope != "main" {
 			continue
 		}
+		chord := strings.Contains(a.keys[0], " ")
 		for _, k := range a.keys {
+			if chord {
+				continue // a chord is two presses; composerKey finishes it
+			}
 			if got := km.translate("main", press(t, k)); got == nil || got.(tea.KeyPressMsg).String() != k {
 				t.Errorf("%s: default %s did not pass through: %v", a.name, k, got)
 			}
@@ -64,11 +74,23 @@ func TestKeyMap_EveryActionMovesAndEveryDefaultPasses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s to f12: %v", a.name, err)
 		}
+		// A chord's action is asked for by name (boundAction): f12 arrives
+		// as itself. Any other action's key becomes its default.
+		want := a.keys[0]
+		if chord {
+			want = "f12"
+		}
 		got := moved.translate("main", press(t, "f12"))
-		if got == nil || got.(tea.KeyPressMsg).String() != a.keys[0] {
-			t.Errorf("%s on f12 delivered %v, want %s", a.name, got, a.keys[0])
+		if got == nil || got.(tea.KeyPressMsg).String() != want {
+			t.Errorf("%s on f12 delivered %v, want %s", a.name, got, want)
 		}
 		for _, k := range a.keys {
+			if chord {
+				if moved.is(a.name, k) {
+					t.Errorf("%s moved to f12, but its chord %s is still bound", a.name, k)
+				}
+				continue
+			}
 			if moved.translate("main", press(t, k)) != nil {
 				t.Errorf("%s moved to f12, but its default %s still works", a.name, k)
 			}

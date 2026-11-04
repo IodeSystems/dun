@@ -416,7 +416,7 @@ func (m *tuiModel) addMCPServer() bool {
 // typeMCPField is a key or a paste in the add-server form's field.
 func (m tuiModel) typeMCPField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.mcpFields[m.mcpStep], cmd = m.mcpFields[m.mcpStep].Update(msg)
+	cmd = editField(&m.mcpFields[m.mcpStep], fmt.Sprintf("mcp.%d", m.mcpStep), msg)
 	if m.mcpStep == mcpServer {
 		m.mcpErr = "" // said of what was there before
 		m.mcpFollowName()

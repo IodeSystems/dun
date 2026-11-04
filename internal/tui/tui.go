@@ -196,7 +196,7 @@ type tuiModel struct {
 	convoHold    int            // the convo pane keeps at least this many rows (holdConvo)
 	convoHoldW   int            // the pane width convoHold was measured at
 	paneTermH    int            // the terminal height the pane was last fitted at (a resize, not a panel)
-	thinkFull    bool           // ctrl+t: thoughts are drawn whole, not as their one line
+	thinkFull    bool           // ctrl+x t: thoughts are drawn whole, not as their one line
 	holdSkip     bool           // the next refresh replaces the conversation: no contract hold (dropHold)
 	// foldedRows is the rows folded away above the view this session
 	// (scrollfold.go): the conversation's height plus it never goes down.
@@ -304,6 +304,7 @@ type tuiModel struct {
 	reconnSince time.Time
 	skipHistory bool      // a respawned engine replays what is already on screen
 	ctrlCAt     time.Time // the last ctrl+c that interrupted a turn (a second one quits)
+	chord       string    // a chord started (ctrl+x), waiting for its next key (composerkeys.go)
 	// lastClickAt/lastClickLine: the last plain click in the conversation,
 	// to tell a double click (mouse.go).
 	lastClickAt   time.Time

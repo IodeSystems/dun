@@ -45,8 +45,12 @@ func TestThinkHeadline(t *testing.T) {
 	}
 }
 
-// ctrlT is the shortcut as the terminal sends it.
-func ctrlT(m tuiModel) tuiModel { return key(m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}) }
+// ctrlT is the thinking toggle as the terminal sends it: the chord ctrl+x t
+// (ctrl+t is the shell's transpose since USER 2026-11-04).
+func ctrlT(m tuiModel) tuiModel {
+	m = key(m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	return key(m, tea.KeyPressMsg{Code: 't', Text: "t"})
+}
 
 func (v *vtui) tick() {
 	nm, _ := v.m.Update(renderTickMsg{})
