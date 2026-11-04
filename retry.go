@@ -85,6 +85,9 @@ func noteFromEvent(ev llm.RetryEvent) RetryNote {
 	}
 	if bp := ev.BP; bp != nil {
 		n.Capacity, n.InFlight, n.Waiting, n.Queue = bp.Capacity, bp.InFlight, bp.Waiting, bp.Reason
+		if line := spentBudgets(bp.Budgets); line != "" {
+			n.Detail = line
+		}
 	}
 	// The reason sentence already quotes the server's message on the paths where
 	// there is one (5xx carries it, and a backpressure reason is built from the
@@ -93,6 +96,30 @@ func noteFromEvent(ev llm.RetryEvent) RetryNote {
 		n.Detail = ""
 	}
 	return n
+}
+
+// spentBudgets names each spent budget and when it admits again, from a 402
+// (corrallm: a calendar-day, calendar-month or total budget is gone). dun does
+// not fall back to another model on a 402; the turn fails, and this line is
+// what tells the user whose budget it was and when to come back.
+func spentBudgets(bs []llm.SpentBudget) string {
+	var parts []string
+	for _, b := range bs {
+		s := b.Summary
+		if s == "" {
+			s = strings.TrimSpace(b.Owner + " " + b.Window)
+		}
+		switch t, err := time.Parse(time.RFC3339, b.RoomAt); {
+		case b.RoomAt == "":
+			s += " — does not reset"
+		case err != nil:
+			s += " — resets " + b.RoomAt
+		default:
+			s += " — resets " + t.Local().Format("Mon Jan 2 15:04 MST")
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // wireRetry routes an llm.Client's retry narration to cfg.OnRetry.

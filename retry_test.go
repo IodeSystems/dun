@@ -203,6 +203,38 @@ func TestWireRetry_CarriesClientEvents(t *testing.T) {
 	}
 }
 
+// A 402 is not retried; the give-up note names whose budget is spent and when
+// it resets, so the failed turn says when to come back.
+func TestWireRetry_BudgetSpentNamesTheReset(t *testing.T) {
+	var got []RetryNote
+	c := llm.NewClient("http://127.0.0.1:1", "", "m")
+	wireRetry(c, func(n RetryNote) { got = append(got, n) }, nil)
+	room := time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
+	c.OnRetry(llm.RetryEvent{
+		Kind: llm.RetryGiveUp, Attempt: 1, Status: 402,
+		Reason: "not retried: llm: budget spent (status 402, budget_exhausted, not retried)",
+		BP: &llm.Backpressure{Type: "budget_exhausted", Budgets: []llm.SpentBudget{
+			{Summary: "anthropic daily pool spent", RoomAt: room.Format(time.RFC3339)},
+			{Owner: "key dun", Window: "usd/total"},
+		}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("notes = %v; want 1", got)
+	}
+	n := got[0]
+	if n.Kind != "giveup" || n.Retrying() || n.Status != 402 {
+		t.Errorf("note = %+v; want a terminal 402", n)
+	}
+	want := "anthropic daily pool spent — resets " + room.Local().Format("Mon Jan 2 15:04 MST") +
+		"; key dun usd/total — does not reset"
+	if n.Detail != want {
+		t.Errorf("Detail = %q; want %q", n.Detail, want)
+	}
+	if !strings.Contains(n.String(), want) {
+		t.Errorf("String() = %q; want the budgets in the line", n.String())
+	}
+}
+
 // wireRetry must tolerate a runner that is not an *llm.Client (a fake, another
 // transport): it simply gets no request-scope narration.
 func TestWireRetry_OtherRunnerIsNoOp(t *testing.T) {
