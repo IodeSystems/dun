@@ -37,8 +37,11 @@ func TestSample_BusyAndIdle(t *testing.T) {
 	if len(u.Procs) != 3 || !u.Rated {
 		t.Fatalf("busy group: %d procs, rated %v: %+v", len(u.Procs), u.Rated, u.Procs)
 	}
-	if runtime.GOOS == "linux" && u.CPU < 100 {
-		t.Errorf("two yes processes should use over a core: %.0f%%", u.CPU)
+	// 50%, the Verdict's own "busy" line, not "over a core": go test runs
+	// packages in parallel, and on a CI runner two yes processes got 71%
+	// (v0.2.6 release, twice). Idle reads 0%.
+	if runtime.GOOS == "linux" && u.CPU < 50 {
+		t.Errorf("two yes processes should read as busy (>= 50%%): %.0f%%", u.CPU)
 	}
 	if v := u.Verdict(0); runtime.GOOS == "linux" && !strings.Contains(v, "busy on CPU") {
 		t.Errorf("busy verdict %q (%s)", v, u.Line())
