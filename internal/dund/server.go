@@ -278,6 +278,34 @@ func (c *conn) handle(cmd proto.Command) {
 	switch p := cmd.Payload.(type) {
 	case *proto.ListSessions:
 		c.reply(cmd, "", &proto.SessionList{Items: svc.List(c.who)})
+	case *proto.MsgWho:
+		c.reply(cmd, "", &proto.MsgWhoList{Sessions: svc.Peers(c.who, ""), Listeners: svc.Listeners(c.who)})
+	case *proto.MsgSend:
+		sent, err := svc.MsgSend(c.who, *p)
+		if err != nil {
+			c.ack(cmd, "", err)
+			return
+		}
+		c.reply(cmd, "", &sent)
+	case *proto.MsgListen:
+		b, err := svc.Listen(c.who, p.Name)
+		if err != nil {
+			c.ack(cmd, "", err)
+			return
+		}
+		c.reply(cmd, "", &proto.MsgToken{Name: b.name, Token: b.token})
+		// The name is this connection's: it goes when the connection does.
+		go func() {
+			defer svc.Unlisten(b)
+			for {
+				select {
+				case <-c.done:
+					return
+				case m := <-b.in:
+					c.reply(proto.Command{}, "", &m)
+				}
+			}
+		}()
 	case *proto.Create:
 		// A handshake with a new engine takes seconds; the connection keeps
 		// reading meanwhile.

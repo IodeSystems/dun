@@ -341,3 +341,18 @@ user's documentation.
   URL to the engine (`--url`, dund's allowlist); the engine reads the key.
 - JSON-RPC by hand (`cmd/dun/mcpserve.go`): initialize, ping, tools/list,
   tools/call are all an MCP server needs here; no SDK dependency.
+
+## Messaging from a shell: `dun msg` (2026-11-04)
+
+USER 2026-11-04: dun↔dun messaging from a CLI. `dun msg --who` lists live
+sessions and listeners; `dun msg --name b` listens as b (prints
+`token=<token>`, then `FROM>MESSAGE` lines; a message of several lines is
+`FROM><h>` … `</h>`, h a hash of it); `dun msg [--as-token=x] <to> <text>`
+sends, as the token's listener or as `cli`. `dun msg --help` documents it.
+
+Owner's choices: listeners live in dund's memory only (a dund restart ends
+them); a name is held by one listener and freed with its connection, token
+and all; up to 200 messages wait for a slow reader, the oldest dropped with
+a notice. Sessions see listeners in `dun_list` and reach them with
+`dun_msg`; the same rate limit (6 a minute per sender and target) applies.
+Code: `proto/msg.go`, `internal/dund/mailbox.go`, `cmd/dun/msgcmd.go`.

@@ -48,7 +48,7 @@ func (s *Service) handlePeer(from *session, req proto.PeerRequest) {
 	rep := proto.PeerReply{RID: req.RID}
 	switch req.Op {
 	case "list":
-		rep.Sessions = s.Peers(from.owner, from.id)
+		rep.Sessions = append(s.Peers(from.owner, from.id), s.listenerRows(from.owner)...)
 	case "msg":
 		d, err := s.PeerSend(from.owner, from.id, req.To, req.Text, req.Wake)
 		if err != nil {
@@ -117,6 +117,15 @@ func (s *Service) PeerSend(principal, from, to, text string, wake bool) (PeerDel
 		return PeerDelivery{}, err
 	}
 	live := s.Peers(principal, from)
+	// A listener (dun msg --name): queued for it, from this session's name.
+	for _, p := range live {
+		if p.ID != from {
+			continue
+		}
+		if ok, err := s.deliverBox(principal, from, p.Name, to, text); ok {
+			return PeerDelivery{ID: to, Name: to}, err
+		}
+	}
 	var src, dst *proto.PeerSession
 	var named, others []*proto.PeerSession
 	for i := range live {

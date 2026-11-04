@@ -49,7 +49,9 @@ func dunListToolDef() llm.ToolDef {
 	td.Function.Description = "List the other dun sessions you can message with dun_msg: your user's sessions " +
 		"that are live in a running engine right now (one only resumable from disk is not listed). Each row: " +
 		"name (the address dun_msg takes), id, idle or busy, attached clients, workspace, branch (\"wt <branch>\" " +
-		"when it works in a dun worktree), and its current task. Yours is marked \"you\"."
+		"when it works in a dun worktree), and its current task. Yours is marked \"you\". Rows in state " +
+		"\"listener (dun msg)\" are not sessions: a script, a person or another agent listening from a shell; " +
+		"dun_msg reaches them too."
 	td.Function.Parameters = map[string]any{"type": "object", "properties": map[string]any{}}
 	return td
 }
@@ -62,7 +64,8 @@ func dunMsgToolDef() llm.ToolDef {
 		"would. A busy session reads it inside its current turn; an idle one starts a turn for it (unless " +
 		"wake is false — then it waits for that session's next turn). The other session cannot answer a " +
 		"question meant for your user. It replies, if it does, with dun_msg back to you. At most 6 messages " +
-		"a minute to one session."
+		"a minute to one session. A listener (dun_list) gets the message as text; it answers, if it does, " +
+		"with a message to you."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{

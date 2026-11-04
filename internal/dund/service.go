@@ -60,6 +60,9 @@ type Service struct {
 	// peerSent is when each (sender, target) pair's recent dun_msg went, for
 	// the rate limit (peer.go). Guarded by mu.
 	peerSent map[[2]string][]time.Time
+	// boxes are the listeners (dun msg --name), by owner and name
+	// (mailbox.go).
+	boxes map[[2]string]*mailbox
 }
 
 // New opens the registry in dir, loading the sessions it lists. Their engines

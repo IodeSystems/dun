@@ -121,6 +121,7 @@ start:
   dun doctor [--fix]         check providers, tools, dund and the service; --fix runs what it can
   dun tmux                   the tmux.conf lines that show dun's state in the window list
   dun mcp                    dun's sessions as an MCP server on stdio, for another agent (dun mcp --help)
+  dun msg                    message dun sessions and listen for messages from a shell (dun msg --help)
   dun -p                     engine mode: line-delimited JSON events on stdin/stdout
   dun dund …                 the session service (dun dund --help)
 
@@ -212,6 +213,10 @@ func main() {
 			os.Exit(2)
 		}
 		os.Exit(0)
+	}
+	// `dun msg`: message sessions and listen for messages from a shell (msgcmd.go).
+	if len(os.Args) > 1 && os.Args[1] == "msg" {
+		os.Exit(msgCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	// `dun mcp`: dun's sessions as an MCP server on stdio (mcpserve.go).
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
