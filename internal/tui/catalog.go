@@ -54,7 +54,7 @@ func (m *tuiModel) noteCatalog(ev evMsg) {
 var groupOrder = []string{"setup", "tools", "session", "git", "memory", "prompts", "client", "maintenance"}
 
 var tuiGroup = map[string]string{
-	"login": "setup", "model": "setup", "mcp add": "setup", "help": "setup", "config": "setup", "logout": "setup",
+	"login": "setup", "provider": "setup", "model": "setup", "mcp add": "setup", "help": "setup", "config": "setup", "logout": "setup",
 	"skill":  "tools",
 	"status": "session", "context": "session", "resume": "session", "new": "session", "persist": "session", "exit": "session", "close": "session", "splash": "session",
 	"reconnect": "client", "mouse": "client",

@@ -30,12 +30,13 @@ func TestPalette5_MCPAddHeadingAndClauses(t *testing.T) {
 		t.Errorf("no heading: %q", rows[0])
 	}
 	want := map[string]string{
-		"/login":   "connect to an AI service",
-		"/model":   "pick the model",
-		"/mcp add": "connect a server you were given",
-		"/help":    "list these commands",
+		"/login":    "connect to an AI service",
+		"/provider": "the AI services you are logged in to",
+		"/model":    "pick the model",
+		"/mcp add":  "connect a server you were given",
+		"/help":     "list these commands",
 	}
-	for _, r := range rows[1:5] {
+	for _, r := range rows[1:6] {
 		r = strings.TrimLeft(r, "▎ ")
 		ok := false
 		for name, desc := range want {
@@ -44,7 +45,7 @@ func TestPalette5_MCPAddHeadingAndClauses(t *testing.T) {
 			}
 		}
 		if !ok {
-			t.Errorf("row %q: not one of the first four, ending at a clause", r)
+			t.Errorf("row %q: not one of the first five, ending at a clause", r)
 		}
 	}
 	for _, r := range rows {

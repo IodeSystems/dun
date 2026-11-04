@@ -196,7 +196,7 @@ func TestPalette_SetupFirstOneColumn(t *testing.T) {
 	for _, c := range all[:6] {
 		first = append(first, c.Name)
 	}
-	if got := strings.Join(first, " "); got != "login model mcp add help config logout" {
+	if got := strings.Join(first, " "); got != "login provider model mcp add help config" {
 		t.Errorf("first six: %s", got)
 	}
 	if last := all[len(all)-1].Name; tuiGroup[last] != "maintenance" {

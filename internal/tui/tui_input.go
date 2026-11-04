@@ -72,6 +72,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case providerStatusMsg:
+		m.append(providerListing(msg.rows, m.url, m.model))
+		m.refresh()
+		return m, nil
+
 	case loginCheckedMsg:
 		return m, m.loginChecked(msg)
 
