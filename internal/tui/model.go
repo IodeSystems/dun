@@ -167,6 +167,12 @@ func (m *tuiModel) openModelPicker(query string, have ...modelFetchMsg) tea.Cmd 
 	m.input.Blur()
 	ps := m.pickerProviders()
 	m.modelPending = len(ps)
+	// Several services, hundreds of models: the list opens on the one in
+	// use (USER 2026-11-04); tab moves to the next, then to all of them.
+	m.modelScope = ""
+	if len(ps) > 1 && slices.ContainsFunc(ps, func(p dunconfig.ProviderConfig) bool { return p.Name == m.provider }) {
+		m.modelScope = m.provider
+	}
 	cmds := []tea.Cmd{textinput.Blink}
 	for _, p := range ps {
 		if i := slices.IndexFunc(have, func(h modelFetchMsg) bool { return h.provider == p.Name }); i >= 0 {
@@ -279,19 +285,58 @@ func modelKind(id string) string {
 	return ""
 }
 
-// filteredModels returns the rows matching every word of the query.
+// filteredModels returns the rows of the provider in scope matching every
+// word of the query. A word that names another provider widens the list to
+// every provider, so typing "corp" finds corp's models from anywhere.
 func (m tuiModel) filteredModels() []modelRow {
 	words := m.models.words()
-	if len(words) == 0 {
+	scope := m.pickScope()
+	if len(words) == 0 && scope == "" {
 		return m.modelRows
 	}
 	var out []modelRow
 	for _, r := range m.modelRows {
-		if matchWords(words, r.provider+" "+r.id) {
+		if (scope == "" || r.provider == scope) && matchWords(words, r.provider+" "+r.id) {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// pickScope is the provider the list is limited to: modelScope, unless a
+// word of the query names another provider.
+func (m tuiModel) pickScope() string {
+	if m.modelScope == "" {
+		return ""
+	}
+	for _, w := range m.models.words() {
+		for _, p := range m.pickerProviders() {
+			if p.Name != m.modelScope && strings.HasPrefix(strings.ToLower(p.Name), w) {
+				return ""
+			}
+		}
+	}
+	return m.modelScope
+}
+
+// nextScope moves the picker to the next provider, after the last one to
+// every provider, and from there to the first; back goes the other way.
+func (m *tuiModel) nextScope(back bool) {
+	scopes := []string{""}
+	for _, p := range m.pickerProviders() {
+		scopes = append(scopes, p.Name)
+	}
+	i := max(0, slices.Index(scopes, m.modelScope))
+	if back {
+		i = (i + len(scopes) - 1) % len(scopes)
+	} else {
+		i = (i + 1) % len(scopes)
+	}
+	m.modelScope = scopes[i]
+	m.models.sel = 0
+	if i := slices.Index(m.filteredModels(), modelRow{m.provider, m.model}); i >= 0 {
+		m.models.sel = i
+	}
 }
 
 func (m tuiModel) selectedModel() (modelRow, bool) {
@@ -325,6 +370,12 @@ func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.closeModelPicker()
+		return m, nil
+	case "tab", "shift+tab":
+		if len(m.pickerProviders()) > 1 {
+			m.nextScope(msg.String() == "shift+tab")
+			m.refresh()
+		}
 		return m, nil
 	case "ctrl+a":
 		return m, m.openLogin("")
@@ -425,11 +476,19 @@ func (m tuiModel) modelPanel() string {
 	}
 	// The keys are on the status line (modelHint), like every other list's.
 	// One indent (listIndent) for the search line, the rows and the count.
-	rows := []string{stHeader.Render("pick a model"), listIndent + m.models.query.View()}
-	// One service: its name on every row says nothing.
-	several := len(m.pickerProviders()) > 1 || slices.ContainsFunc(m.modelRows, func(r modelRow) bool { return r.provider != m.modelRows[0].provider })
+	head := stHeader.Render("pick a model")
+	if n := len(m.pickerProviders()); n > 1 {
+		on := "every service"
+		if s := m.pickScope(); s != "" {
+			on = s
+		}
+		head += StDim.Render(fmt.Sprintf("  on %s · tab: %s", on, textfmt.Plural(n, "service")))
+	}
+	rows := []string{head, listIndent + m.models.query.View()}
 
 	shown := m.filteredModels()
+	// One service in the list: its name on every row says nothing.
+	several := slices.ContainsFunc(shown, func(r modelRow) bool { return r.provider != shown[0].provider })
 	window := pickWindow(m.h)
 	lo, hi := m.models.span(len(shown), window)
 	var list []string
@@ -492,7 +551,7 @@ func (m tuiModel) modelPanel() string {
 
 // modelHint is the picker's status line.
 func modelHint() string {
-	return "model  ·  enter use · esc cancel · alt+enter this session only · ctrl+a another service"
+	return "model  ·  enter use · esc cancel · alt+enter this session only · tab next service · ctrl+a log in"
 }
 
 // ── the add-provider form ──

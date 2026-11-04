@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // /provider — which AI services this dun is logged in to, and which one the
@@ -50,7 +51,7 @@ func providerSlash(m *tuiModel, args []string) tea.Cmd {
 		m.append(StDim.Render("no provider: /provider login to connect one"))
 		return nil
 	}
-	m.append(StDim.Render(fmt.Sprintf("asking %d %s for their models…", len(ps), plural(len(ps), "provider", "providers"))))
+	m.append(StDim.Render("asking " + textfmt.Plural(len(ps), "provider") + " for their models…"))
 	return func() tea.Msg {
 		rows := make([]providerStatus, len(ps))
 		var wg sync.WaitGroup
@@ -84,7 +85,7 @@ func providerListing(rows []providerStatus, inURL, inModel string) string {
 		if r.key {
 			key = "key"
 		}
-		status := fmt.Sprintf("%d %s", r.models, plural(r.models, "model", "models"))
+		status := textfmt.Plural(r.models, "model")
 		if r.models == 0 {
 			status = "✗ " + r.err
 			if r.err == "" {
@@ -95,11 +96,4 @@ func providerListing(rows []providerStatus, inURL, inModel string) string {
 	}
 	b.WriteString("\n" + StDim.Render("/model picks a model from any of them · /provider login [name] adds or edits one · /provider logout <name>"))
 	return b.String()
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }

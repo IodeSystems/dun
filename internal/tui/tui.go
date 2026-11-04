@@ -342,6 +342,7 @@ type tuiModel struct {
 	modelRows    []modelRow // every provider's models fetched so far
 	modelErrs    []string   // providers that returned no list
 	modelPending int        // providers not yet answered
+	modelScope   string     // the provider the picker lists, "" = every one (tab moves it)
 	// The login's service picker (/login): custom, then the templates.
 	loginPicking bool
 	logins       pickList

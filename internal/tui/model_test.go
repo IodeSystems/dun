@@ -44,9 +44,10 @@ func pick(m tuiModel, keys ...string) tuiModel {
 	for _, k := range keys {
 		var msg tea.KeyPressMsg
 		switch k {
-		case "down", "up", "tab", "enter", "esc":
+		case "down", "up", "tab", "shift+tab", "enter", "esc":
 			msg = map[string]tea.KeyPressMsg{"down": {Code: tea.KeyDown}, "up": {Code: tea.KeyUp},
-				"tab": {Code: tea.KeyTab}, "enter": {Code: tea.KeyEnter}, "esc": {Code: tea.KeyEscape}}[k]
+				"tab": {Code: tea.KeyTab}, "shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift},
+				"enter": {Code: tea.KeyEnter}, "esc": {Code: tea.KeyEscape}}[k]
 		default:
 			msg = runesKey([]rune(k))
 		}
@@ -236,5 +237,46 @@ func TestProviderForm_LoginAgainKeepsTheKey(t *testing.T) {
 	m.loginChecked(loginCheckedMsg{models: modelFetchMsg{provider: m.providerChecking, ids: []string{"m"}}})
 	if c := dunconfig.LoadConfig(); c.URL != "https://new.example.com" || c.Key != "sk-old" || c.ActiveName() != "old.example.com" {
 		t.Errorf("after login again: url=%q key kept=%v active=%q", c.URL, c.Key == "sk-old", c.ActiveName())
+	}
+}
+
+// Several services: the list opens on the one in use, tab moves to the next
+// and then to every service, and typing another one's name finds its models
+// from anywhere (USER 2026-11-04).
+func TestModelPicker_OpensOnTheProviderInUse(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	cfg := dunconfig.DunConfig{Providers: []dunconfig.ProviderConfig{
+		{Name: "corp", URL: "http://127.0.0.1:1/corp"}, {Name: "home", URL: "http://127.0.0.1:1/home"}}}
+	if err := dunconfig.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	m := newTUIModel(nil, ".")
+	m.provider, m.model = "home", "h1"
+	m.openModelPicker("")
+	m.addModelRows(modelFetchMsg{provider: "corp", ids: []string{"c1", "c2"}})
+	m.addModelRows(modelFetchMsg{provider: "home", ids: []string{"h1"}})
+	ids := func() (out []string) {
+		for _, r := range m.filteredModels() {
+			out = append(out, r.id)
+		}
+		return out
+	}
+	if got := strings.Join(ids(), " "); got != "h1" {
+		t.Fatalf("opened on %q; want home's models only", got)
+	}
+	if head := strings.Split(stripANSI(m.modelPanel()), "\n")[0]; head != "pick a model  on home · tab: 2 services" {
+		t.Errorf("heading %q", head)
+	}
+	m = pick(m, "tab")
+	if got := strings.Join(ids(), " "); got != "c1 c2 h1" {
+		t.Errorf("after home, tab lists every service: %q", got)
+	}
+	m = pick(m, "tab")
+	if got := strings.Join(ids(), " "); got != "c1 c2" || m.modelScope != "corp" {
+		t.Errorf("then corp: %q (%s)", got, m.modelScope)
+	}
+	m = pick(m, "shift+tab", "shift+tab", "corp")
+	if got := strings.Join(ids(), " "); m.modelScope != "home" || got != "c1 c2" {
+		t.Errorf("typing another service's name widens the list: scope %s, %q", m.modelScope, got)
 	}
 }
