@@ -363,6 +363,31 @@ func (m *tuiModel) traceEvent(ev evMsg) {
 	fmt.Fprintf(m.traceFile, "event %s %s\n", etype, data)
 }
 
+// traceInput writes a key or a paste to the trace file if tracing is on:
+// which key, or how long a paste is, never what was typed or pasted (a
+// printable key is "char"). What the terminal delivers is the evidence for
+// a paste that arrives as keys (USER 2026-11-04: tmux + iTerm2).
+func (m *tuiModel) traceInput(msg tea.Msg) {
+	if m.traceFile == nil {
+		return
+	}
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		k := msg.String()
+		if msg.Text != "" && msg.Mod == 0 {
+			k = fmt.Sprintf("char×%d", len([]rune(msg.Text)))
+		}
+		fmt.Fprintf(m.traceFile, "%s key %s\n", time.Now().Format("15:04:05.000"), k)
+	case tea.PasteStartMsg:
+		fmt.Fprintf(m.traceFile, "%s paste_start\n", time.Now().Format("15:04:05.000"))
+	case tea.PasteMsg:
+		fmt.Fprintf(m.traceFile, "%s paste %d chars %d lines\n", time.Now().Format("15:04:05.000"),
+			len([]rune(msg.Content)), strings.Count(strings.ReplaceAll(strings.ReplaceAll(msg.Content, "\r\n", "\n"), "\r", "\n"), "\n")+1)
+	case tea.PasteEndMsg:
+		fmt.Fprintf(m.traceFile, "%s paste_end\n", time.Now().Format("15:04:05.000"))
+	}
+}
+
 // traceResize writes a resize event to the trace file if tracing is on.
 func (m *tuiModel) traceResize(msg tea.WindowSizeMsg) {
 	if m.traceFile == nil {

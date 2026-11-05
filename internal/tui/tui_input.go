@@ -13,6 +13,7 @@ import (
 )
 
 func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.traceInput(msg)
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.traceResize(msg)
