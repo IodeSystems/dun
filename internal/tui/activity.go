@@ -610,8 +610,13 @@ func (m tuiModel) agentByID(id int) *agentRow {
 	return nil
 }
 
-// fitPlain truncates a PLAIN (unstyled) string to at most n columns, adding an
-// ellipsis when it cuts, and reports whether it did.
+// fitPlain truncates a PLAIN (unstyled) string to ONE row of at most n
+// columns, adding an ellipsis when it cuts, and reports whether it did.
+//
+// One row: runs of whitespace, newlines included, become a single space first.
+// lipgloss.Width measures a multi-line string by its widest line, so a
+// many-line agent prompt "fit" untouched and an opened stack drew every line
+// of every member's task, pushing the input off the screen (USER 2026-11-05).
 //
 // Styling is applied AFTER, never before: clipping a string that already has
 // escape codes in it counts those codes as characters and can leave a colour
@@ -619,6 +624,9 @@ func (m tuiModel) agentByID(id int) *agentRow {
 func fitPlain(s string, n int) (string, bool) {
 	if n <= 0 {
 		return "", true
+	}
+	if strings.ContainsAny(s, "\n\r\t") {
+		s = textfmt.OneLine(s)
 	}
 	if lipgloss.Width(s) <= n {
 		return s, false

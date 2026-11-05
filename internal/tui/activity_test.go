@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -147,5 +148,33 @@ func TestAgentRows_KeepChanged(t *testing.T) {
 	cur := keepChanged(old, []agentRow{{id: 1, state: "idle", changed: time.Now()}, {id: 2, state: "idle", changed: time.Now()}})
 	if !cur[0].changed.Equal(then) || cur[1].changed.Equal(then) {
 		t.Errorf("changed: %v %v", cur[0].changed, cur[1].changed)
+	}
+}
+
+// Every activity row is one screen row, whatever its detail holds: an opened
+// stack of agents with many-line tasks drew every line and pushed the input
+// off the screen.
+func TestActivity_MultiLineDetailIsOneRow(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
+	m.w, m.h = 100, 30
+	task := strings.Repeat("a line of the task\n", 40)
+	m.agents = []agentRow{
+		{id: 1, state: "dismissed", prompt: task},
+		{id: 2, state: "stopped", prompt: task},
+		{id: 3, state: "dismissed", prompt: task},
+	}
+	m.jobs = []jobRow{{id: 1, state: "running", command: "make\ntest\n"}}
+	if h := lipgloss.Height(m.activityView()); h != 1 {
+		t.Errorf("the strip is %d rows", h)
+	}
+	m.setFocus(focusActivity)
+	m.actSel = stackKey
+	m.actKeys("right")
+	rows := m.actRows()
+	if h := lipgloss.Height(m.activityView()); h != min(len(rows), actMaxRows)+1 {
+		t.Errorf("open table is %d rows for %d items:\n%s", h, len(rows), m.activityView())
+	}
+	if !strings.Contains(ansi.Strip(m.activityView()), "a line of the task a line") {
+		t.Errorf("the task's lines are not joined:\n%s", m.activityView())
 	}
 }
