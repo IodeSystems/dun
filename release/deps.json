@@ -4,27 +4,27 @@
   "published": "",
   "artifacts": {
     "mcpshell": {
-      "version": "v0.7.1",
+      "version": "v0.8.0",
       "files": {
         "darwin_amd64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.7.1/mcpshell_darwin_amd64.tar.gz",
-          "sha256": "56c9e65d5625e027d49bbe5925e4991522f0ca5657a2aa16aac9975090748454",
-          "size": 13395393
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.8.0/mcpshell_darwin_amd64.tar.gz",
+          "sha256": "efe8f3710598a71ac0f5097b7a36414f0b51deeab1e84b146b74e7683e351b32",
+          "size": 13444052
         },
         "darwin_arm64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.7.1/mcpshell_darwin_arm64.tar.gz",
-          "sha256": "4d0f53052a4ba9b63ddfb1ccdb0bd723cff9a8858f0a26df60e841dbfd5edebb",
-          "size": 12747498
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.8.0/mcpshell_darwin_arm64.tar.gz",
+          "sha256": "0cf41b4b1d5d7e1852aa191b26aed705a5126f9880352060bc93b4f08e6981be",
+          "size": 12795369
         },
         "linux_amd64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.7.1/mcpshell_linux_amd64.tar.gz",
-          "sha256": "51f0c9927aa5555136681d4e443fb2d8146e1f3492e3e190c2757a47c8d7bbf3",
-          "size": 13315957
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.8.0/mcpshell_linux_amd64.tar.gz",
+          "sha256": "557af25175ad3ec7568889a0cecff9c9034aa5d97cc372b571be488ab0e428c6",
+          "size": 13362749
         },
         "linux_arm64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.7.1/mcpshell_linux_arm64.tar.gz",
-          "sha256": "231ce4fd8bd1adeddef7e1d3d04e1218581482d0ca6afea81358911f1c218a5a",
-          "size": 12374118
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.8.0/mcpshell_linux_arm64.tar.gz",
+          "sha256": "d9e26f3929f61116929b1be5009f63d7593664041e81be996e31576e81a04d66",
+          "size": 12413210
         }
       }
     },

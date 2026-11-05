@@ -34,9 +34,16 @@ var Supported = []Tool{
 	// reads so dund refreshes a refused token (oauthbroker.go); regexp2
 	// v2.12.0. Recommended v0.7.1 (185037c, 2026-10-29): reading a let from
 	// an earlier eval says a let lasts one eval (it was "Unknown command",
-	// or the builtin of that name); 1/0 shows Infinity.
+	// or the builtin of that name); 1/0 shows Infinity. Recommended v0.8.0
+	// (2026-11-04), tarballs in deps.json: JS semantics where it differed —
+	// replace with a string or a regex without g changes the first match
+	// (replaceAll all), split() with no separator is [input], reduce with no
+	// initial value starts from the first element, Math.max()/min() with no
+	// arguments are -Infinity/Infinity; rest params bind every argument;
+	// slice(0, -1) and a stray break/continue no longer end the process. New
+	// syntax: ??= ||= &&=, labeled loops, numeric separators, more methods.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.7.1"},
+		Min: "v0.2.0", Recommended: "v0.8.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
