@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The engine pushes agents on a change only, so a running child's time is
@@ -45,5 +46,48 @@ func TestNotice_RewrapsWhenThePaneWidens(t *testing.T) {
 	v.m = nm.(tuiModel)
 	if w := widest(); w <= 48 {
 		t.Errorf("widened to 120, the notice is still %d columns wide", w)
+	}
+}
+
+// Dismissed agents are one stack row, in the strip and in the table; →
+// lists them under it, ← folds them back.
+func TestActivity_DismissedStack(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
+	m.w = 120
+	m.agents = []agentRow{
+		{id: 1, state: "dismissed", tokens: 1000},
+		{id: 2, state: "running"},
+		{id: 3, state: "dismissed", tokens: 2500},
+	}
+	plain := func(s string) string { return ansi.Strip(s) }
+	line := plain(m.activityView())
+	if !strings.Contains(line, "≡2 dismissed 3.5kt") || strings.Contains(line, "#1") || strings.Contains(line, "#3 dismissed") {
+		t.Errorf("strip: %q", line)
+	}
+	m.setFocus(focusActivity)
+	if rows := m.actRows(); len(rows) != 2 || rows[1].key != stackKey {
+		t.Fatalf("table rows: %+v", rows)
+	}
+	if got := plain(m.activityView()); !strings.Contains(got, "▾ 3 agents") {
+		t.Errorf("head: %q", got)
+	}
+	m.actSel = stackKey
+	m.actKeys("right")
+	rows := m.actRows()
+	if len(rows) != 4 || !rows[2].member || rows[2].key.id != 1 || rows[3].key.id != 3 {
+		t.Fatalf("open stack: %+v", rows)
+	}
+	if got := plain(m.activityView()); !strings.Contains(got, "▾ 3 agents") || !strings.Contains(got, "    · #3 dismissed") {
+		t.Errorf("open table:\n%s", got)
+	}
+	m.actMove(2)
+	m.actKeys("left")
+	if m.actStackOpen || m.actSel != stackKey || len(m.actRows()) != 2 {
+		t.Errorf("left did not fold the stack: open=%v sel=%+v", m.actStackOpen, m.actSel)
+	}
+	m.actStackOpen = true
+	m.setFocus(focusInput)
+	if got := plain(m.activityView()); strings.Contains(got, "#1 dismissed") || !strings.Contains(got, "≡2 dismissed") {
+		t.Errorf("strip with the stack open lists members: %q", got)
 	}
 }

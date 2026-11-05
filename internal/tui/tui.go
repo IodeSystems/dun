@@ -205,21 +205,22 @@ type tuiModel struct {
 	// panelHeld: a panel below (palette, form, picker) shrank the pane and
 	// the pinned view keeps panelYOff while it is open and the conversation
 	// is no longer than panelRows (applyScroll).
-	panelHeld   bool
-	panelYOff   int
-	panelRows   int
-	panelFollow bool                  // new rows arrived with a panel open, this update: a shrink keeps them in view
-	md          *glamour.TermRenderer // markdown renderer for assistant replies
-	mdWidth     int                   // width md was built for (rebuild only on change)
-	history     []string              // sent inputs, recalled with ctrl+↑/↓
-	histIdx     int                   // cursor into history (== len when not browsing)
-	mouseMode   string                // "all" | "cell" | "off" — what /mouse last set
-	focus       int                   // focusInput | focusConvo | focusActivity
-	task        string                // the last user message, for the task line
-	agents      []agentRow            // live sub-agents (activity.go)
-	jobs        []jobRow              // live background jobs (activity.go)
-	actLevel    int                   // actCollapsed | actList — → descends, ← ascends
-	actSel      actKey                // selected activity row, by identity not index
+	panelHeld    bool
+	panelYOff    int
+	panelRows    int
+	panelFollow  bool                  // new rows arrived with a panel open, this update: a shrink keeps them in view
+	md           *glamour.TermRenderer // markdown renderer for assistant replies
+	mdWidth      int                   // width md was built for (rebuild only on change)
+	history      []string              // sent inputs, recalled with ctrl+↑/↓
+	histIdx      int                   // cursor into history (== len when not browsing)
+	mouseMode    string                // "all" | "cell" | "off" — what /mouse last set
+	focus        int                   // focusInput | focusConvo | focusActivity
+	task         string                // the last user message, for the task line
+	agents       []agentRow            // live sub-agents (activity.go)
+	jobs         []jobRow              // live background jobs (activity.go)
+	actLevel     int                   // actCollapsed | actList — → descends, ← ascends
+	actSel       actKey                // selected activity row, by identity not index
+	actStackOpen bool                  // the dismissed agents' stack is listed open (activity.go)
 	// Agent scope: which child's conversation is on screen (0 = the root's),
 	// and the root's own conversation, stashed while it is (activity.go).
 	scopeAgent   int

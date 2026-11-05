@@ -170,6 +170,12 @@ are in `decisions.md`.
   arrived meanwhile were applied to it, not to the child's view. A question
   from the root (ask_user) leaves the child's view, because it needs the
   screen.
+- **Dismissed agents are one stack (2026-11-04).** A dismissed child is
+  history, so all of them are one row, `≡N dismissed <tokens>`, after the
+  live agents, in the one-line strip and in the table. → (or enter) on it
+  lists them under it, indented, where each can still be descended into; ←
+  on the stack or one of them folds it. The strip never lists it open. The
+  table's head still counts every agent.
 - **Typing while descended tells the child** (a `jobs tell`: its next
   message), and the placeholder says so. Chosen over a read-only view
   because the reason to open a child is usually to correct it, and the

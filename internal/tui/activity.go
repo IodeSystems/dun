@@ -62,7 +62,15 @@ type actRow struct {
 	// attn marks a row that will not resolve itself: a job that failed. It
 	// survives clipping (see actLine).
 	attn bool
+	// stacked is how many agents a stack row holds; member marks a row
+	// listed under an open stack. See actRows.
+	stacked int
+	member  bool
 }
+
+// stackKey is the row the dismissed agents are stacked into — an agent key
+// no child has, since ids start at 1 and the parent row is 0.
+var stackKey = actKey{agent: true, id: -1}
 
 // agentRow is one child as the TUI shows it.
 type agentRow struct {
@@ -174,8 +182,27 @@ func (m tuiModel) actRows() []actRow {
 	}
 	now := time.Now()
 	rows := make([]actRow, 0, len(m.agents)+len(m.jobs))
+	var gone []agentRow
 	for _, a := range m.agents {
+		if a.state == "dismissed" {
+			gone = append(gone, a)
+			continue
+		}
 		rows = append(rows, agentActRow(a, now))
+	}
+	// Dismissed agents are history: one row holds them all (USER
+	// 2026-11-04: "dismissed agents should combine into a stack"), in the
+	// one-line strip and in the table. → on it lists them under it, ← folds
+	// them back.
+	if len(gone) > 0 {
+		rows = append(rows, stackRow(gone, m.actStackOpen))
+		if m.actStackOpen {
+			for _, a := range gone {
+				r := agentActRow(a, now)
+				r.member = true
+				rows = append(rows, r)
+			}
+		}
 	}
 	for _, j := range m.jobs {
 		rows = append(rows, jobActRow(j, now))
@@ -209,6 +236,27 @@ func agentActRow(a agentRow, now time.Time) actRow {
 		key: actKey{agent: true, id: a.id}, mark: mark, style: style,
 		label: label, detail: detail,
 	}
+}
+
+// stackRow is the dismissed agents as one row: how many, what they spent,
+// and which they were.
+func stackRow(gone []agentRow, open bool) actRow {
+	tokens := 0
+	ids := make([]string, len(gone))
+	for i, a := range gone {
+		tokens += a.tokens
+		ids[i] = fmt.Sprintf("#%d", a.id)
+	}
+	label := fmt.Sprintf("%d dismissed", len(gone))
+	if tokens > 0 {
+		label += " " + compactTokens(tokens)
+	}
+	mark := "≡"
+	if open {
+		mark = "▾"
+	}
+	return actRow{key: stackKey, mark: mark, style: StDim, label: label,
+		detail: strings.Join(ids, " "), stacked: len(gone)}
 }
 
 func jobActRow(j jobRow, now time.Time) actRow {
@@ -279,8 +327,17 @@ func (m tuiModel) actLine(rows []actRow) string {
 	used := lipgloss.Width(glyph)
 	budget := m.w - 1
 
-	for i, r := range rows {
+	shown := rows[:0:0]
+	for _, r := range rows {
+		if !r.member {
+			shown = append(shown, r)
+		}
+	}
+	for i, r := range shown {
 		seg := r.mark + r.label
+		if r.key == stackKey {
+			seg = "≡" + r.label // the strip never lists the stack open
+		}
 		if i > 0 {
 			seg = " · " + seg
 		}
@@ -338,7 +395,11 @@ func (m tuiModel) actTable(rows []actRow) string {
 		if i == sel {
 			cursor = stSel.Render("➤ ")
 		}
-		body, cut := fitPlain(r.mark+" "+r.label, budget-2)
+		lead := r.mark + " "
+		if r.member {
+			lead = "  " + lead
+		}
+		body, cut := fitPlain(lead+r.label, budget-2)
 		line := cursor + r.style.Render(body)
 		if !cut && r.detail != "" {
 			d, _ := fitPlain("  "+r.detail, budget-2-lipgloss.Width(body))
@@ -367,9 +428,13 @@ func actWindow(sel, n int) int {
 func actCounts(rows []actRow) string {
 	agents, jobs := 0, 0
 	for _, r := range rows {
-		if r.key.agent {
+		switch {
+		case r.member:
+		case r.stacked > 0:
+			agents += r.stacked
+		case r.key.agent:
 			agents++
-		} else {
+		default:
 			jobs++
 		}
 	}
@@ -596,6 +661,13 @@ func (m *tuiModel) actKeys(key string) (tea.Cmd, bool) {
 		}
 		return m.actDescend(), true
 	case "left":
+		if m.actLevel == actList && m.actStackOpen {
+			if r := m.actSelected(); r != nil && (r.member || r.key == stackKey) {
+				m.actStackOpen = false
+				m.actSel = stackKey
+				return nil, true
+			}
+		}
 		if m.scopeAgent != 0 {
 			return m.leaveAgentScope(), true
 		}
@@ -616,6 +688,10 @@ func (m *tuiModel) actDescend() tea.Cmd {
 	}
 	if row.key == parentKey {
 		return m.leaveAgentScope()
+	}
+	if row.key == stackKey {
+		m.actStackOpen = !m.actStackOpen
+		return nil
 	}
 	if row.key.agent {
 		return m.enterAgentScope(row.key.id)
