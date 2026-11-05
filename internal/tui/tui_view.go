@@ -559,16 +559,20 @@ func (m tuiModel) drawView() string {
 	if m.jobViewing {
 		convo = m.jv.view(vp.Width, vp.Height)
 	}
-	out := append([]string{m.headView()}, top...)
-	out = append(out, convo, div, lower)
+	out := []framePart{{"head", m.headView()}}
+	for _, t := range top {
+		out = append(out, framePart{"activity", t})
+	}
+	out = append(out, framePart{"conversation", convo}, framePart{"divider", div}, framePart{"input", lower})
 	if s := m.activeScreen(); s != nil { // it takes the rows the base screen had
-		out = []string{m.headView(), s.view(&m, m.w, m.screenRows())}
+		out = []framePart{{"head", m.headView()}, {"screen", s.view(&m, m.w, m.screenRows())}}
 	}
 	if u := m.upgradeView(); u != "" {
-		out = append(out, u) // persistent while dund upgrades
+		out = append(out, framePart{"upgrade", u}) // persistent while dund upgrades
 	}
-	out = append(out, fitHints(status, m.w))
-	return strings.Join(out, "\n")
+	out = append(out, framePart{"status", fitHints(status, m.w)})
+	// The one check that no part pushed the input off the screen (overflow.go).
+	return fitFrame(out, m.h, m.w)
 }
 
 // lowerView is the bottom pane: the input line, or the answer picker when asking.
