@@ -146,6 +146,9 @@ func TestUpgradeNowCommand(t *testing.T) {
 	v, rec := busyVtui(t)
 	v.event(pendingEv)
 	v.send("/upgrade now")
+	// The tools first (dun tools --upgrade), then the restart.
+	nm, _ := v.m.update(toolsMsg{upgrade: true})
+	v.m = nm.(tuiModel)
 	if !strings.Contains(rec.String(), `"type":"upgrade"`) || !strings.Contains(rec.String(), `"now":true`) {
 		t.Fatalf("sent %q", rec.String())
 	}

@@ -21,6 +21,8 @@ func TestMain(m *testing.M) {
 	os.Setenv("XDG_RUNTIME_DIR", home)
 	os.Setenv("RAGLIT_ROOT", home+"/rag")
 	os.Setenv("DUN_REGISTRY", "off") // never the network
+	// /upgrade runs `dun tools`: the test binary is not dun.
+	runTools = func(bool) ([]toolState, error) { return nil, nil }
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)

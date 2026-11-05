@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -218,44 +217,7 @@ func init() {
 			m.reloadReq = true
 			return tea.Quit
 		}},
-		{"upgrade", "[now|off|on]", "dund's pending upgrade: what it waits for; now restarts it at once (cut work resumes after); off|on: a release build's daily update check", func(m *tuiModel, args []string) tea.Cmd {
-			if len(args) > 0 && (args[0] == "off" || args[0] == "on") {
-				line, err := upgradeSwitch(args[0] == "on")
-				if err != nil {
-					m.append(StErr.Render("updates: not saved: " + err.Error()))
-					return nil
-				}
-				m.append(StDim.Render(line))
-				return nil
-			}
-			if m.upgrade == nil {
-				// A source build: nothing tells dund there is a newer build,
-				// so dund and its
-				// engines keep the one they started with. now moves them to
-				// the build this TUI runs (USER 2026-10-27: /upgrade on a
-				// source build was a dead end).
-				if len(args) > 0 && args[0] == "now" {
-					m.append(StDim.Render("asking dund to restart into this build (" + buildinfo.Version + ") — running turns are interrupted and resume after"))
-					return upgradeIntoSelfCmd(m.proc)
-				}
-				line := "no dund upgrade is pending"
-				if !buildinfo.IsRelease() {
-					line += " · dund and its engines keep the build they started with; /upgrade now restarts them into this one (" + buildinfo.Version + ")"
-				}
-				m.append(StDim.Render(line))
-				return nil
-			}
-			if len(args) == 0 || args[0] != "now" {
-				m.append(stNote.Render(upgradeDetail(m.upgrade, m.sessionID)))
-				return nil
-			}
-			if !m.proc.upgradeNow() {
-				m.append(StErr.Render("no session service right now — nothing restarted"))
-				return nil
-			}
-			m.append(StDim.Render("asked dund to restart now — running turns are interrupted and resume after"))
-			return nil
-		}},
+		{"upgrade", "[now|off|on]", "dund's pending upgrade and each tool (mcpshell, poly-lsp-mcp, raglit) against the version this dun pins; now installs the tools that are behind and restarts dund (cut work resumes after); off|on: a release build's daily update check", upgradeSlash},
 		{"version", "", "which dun this is, the newest release, and whether this build updates itself, and from where", versionSlash},
 		{"keys", "[reload|preset <name>]", "the key map: every rebindable action and its keys; yours go in ~/.dun/keys.json", keysSlash},
 		{"perf", "", "redraw timings for this session (and how to get a profile)", func(m *tuiModel, _ []string) tea.Cmd {

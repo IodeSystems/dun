@@ -62,7 +62,13 @@ key (`release/minisign.pub`, with the updater's key rotation).
 - **Presets:** the entries for this dun replace the built-in list.
 - **Tool pins:** an entry for this dun raises Min and Recommended above the
   built-in ones (never lowers them); `dun doctor --fix` downloads from its
-  files, sha256 checked, as from deps.json now.
+  files, sha256 checked, as from deps.json now. `/upgrade` (USER
+  2026-11-04) lists each tool against its pin through `dun tools`, which
+  fetches the index first; `/upgrade now` runs `dun tools --upgrade` (the
+  same downloads and go installs as `--fix`, and only to the pin, never a
+  tool's latest release) and then restarts dund, so the engines start on
+  the new tools. A tool release reaches users when its pin is published
+  (`make site-push`), with no dun release; nothing installs it unasked.
 - A dev build (`dun dev`) takes entries regardless of their `dun` range.
 - Every build reads the registry, a dev build too (you run one): the key
   and the registry's address are compiled into all builds

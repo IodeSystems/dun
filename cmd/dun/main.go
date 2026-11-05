@@ -119,6 +119,7 @@ start:
   dun "fix the flaky test"   run one task headless, print the diff, exit
   dun --continue             reopen the most recent session for this workspace
   dun doctor [--fix]         check providers, tools, dund and the service; --fix runs what it can
+  dun tools [--upgrade]      the tools against the versions this dun pins; --upgrade installs them (dun tools --help)
   dun tmux                   the tmux.conf lines that show dun's state in the window list
   dun mcp                    dun's sessions as an MCP server on stdio, for another agent (dun mcp --help)
   dun msg                    message dun sessions and listen for messages from a shell (dun msg --help)
@@ -213,6 +214,11 @@ func main() {
 			os.Exit(2)
 		}
 		os.Exit(0)
+	}
+	// `dun tools`: the tools against the pinned versions; --upgrade installs
+	// them (toolscmd.go, /upgrade).
+	if len(os.Args) > 1 && os.Args[1] == "tools" {
+		os.Exit(toolsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	// `dun msg`: message sessions and listen for messages from a shell (msgcmd.go).
 	if len(os.Args) > 1 && os.Args[1] == "msg" {

@@ -842,6 +842,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case copiedMsg:
 		return m, m.flash(copiedNote(msg))
 
+	case toolsMsg:
+		cmd := m.toolsDone(msg)
+		m.refresh()
+		return m, cmd
+
 	case upgradeSelfMsg:
 		if msg.err != nil {
 			m.append(StErr.Render("upgrade: " + msg.err.Error()))
