@@ -51,7 +51,7 @@ func TestCostBlockAlignedAndGrouped(t *testing.T) {
 	// Every row's value ends in one column, so the amounts line up on their
 	// last digit.
 	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.TrimSpace(line) == "" {
+		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") || strings.TrimSpace(line) == "" {
 			continue
 		}
 		r := []rune(line)
@@ -190,22 +190,22 @@ func TestCostBlockRollups(t *testing.T) {
 	sp.SessionHour, sp.SessionToday, sp.SessionInterval = ptr(0.25), ptr(1.5), ptr(1234.5)
 	sp.Interval, sp.IntervalOfKey = "30d", true
 	sp.Ledger = &proto.SpendLedger{Entries: true, Hour: map[string]float64{"USD": 1}, Today: map[string]float64{"USD": 2},
-		Week: map[string]float64{"USD": 3}, Month: map[string]float64{"USD": 4}, Interval: map[string]float64{"USD": 5},
+		Week: map[string]float64{"USD": 3}, Month: map[string]float64{"USD": 4}, Year: map[string]float64{"USD": 10}, Interval: map[string]float64{"USD": 5},
 		Total: map[string]float64{"USD": 26.43, "credits": 3}}
-	out := stripANSI(costBlock(&contextStats{spend: sp}, spendNow))
+	out := stripANSI(costBlock(&contextStats{spend: sp}, spendNow) + ledgerBlock(&contextStats{spend: sp}))
 	// Each row's label and amount, spaces collapsed.
 	flat := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
 		"calls priced this hour 0.25 USD today 1.50 USD key period (30d) 1,234.50 USD last turn",
 		"machine spend 26.43 USD + 3 credits · all time",
-		"this hour 1.00 USD today 2.00 USD this week 3.00 USD this month 4.00 USD key period (30d) 5.00 USD",
+		"this hour 1.00 USD today 2.00 USD this week 3.00 USD this month 4.00 USD this year 10.00 USD key period (30d) 5.00 USD",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.TrimSpace(line) == "" {
+		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") || strings.TrimSpace(line) == "" {
 			continue
 		}
 		if r := []rune(line); len(r) < valueEnd || r[valueEnd-1] == ' ' {
@@ -214,7 +214,7 @@ func TestCostBlockRollups(t *testing.T) {
 	}
 	sp.IntervalOfKey, sp.Interval = false, "7d"
 	sp.Key = &proto.KeyBudget{Spend: 2, Currency: "USD"}
-	out = stripANSI(costBlock(&contextStats{spend: sp}, spendNow))
+	out = stripANSI(costBlock(&contextStats{spend: sp}, spendNow) + ledgerBlock(&contextStats{spend: sp}))
 	if !strings.Contains(out, "last 7d") || !strings.Contains(out, "all time (no reset stated)") {
 		t.Errorf("no 7d interval or all-time key spend:\n%s", out)
 	}

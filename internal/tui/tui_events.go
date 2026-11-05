@@ -602,16 +602,19 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.queuedMsgs = int(evNum(ev["count"]))
 		// Track OOB messages for /context.
 		m.ctxStats.oobMessages++
+		m.syncStats()
 		m.refresh()
 	case "context_cost":
 		// The pre-conversation cost, delivered when it is measured rather than
 		// waiting for a turn to finish. Arrives twice: estimates, then exact.
 		m.ctxStats.readSystemCost(ev)
 		m.ctxStats.readWindow(ev)
+		m.syncStats()
 		m.refresh()
 	case "spend":
 		// A key-budget read that landed between turns (dun/spend.go).
 		m.ctxStats.readSpend(ev)
+		m.syncStats()
 		m.refresh()
 	case "usage":
 		// Accumulate token usage stats for /context.
@@ -635,6 +638,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		if v := evNum(ev["notifications_lifted"]); v > 0 {
 			m.ctxStats.notificationsSmuggled = int(v)
 		}
+		m.syncStats()
 	case "done":
 		cut := str(ev["reason"]) == "interrupted"
 		if cut {

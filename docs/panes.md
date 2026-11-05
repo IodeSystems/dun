@@ -70,6 +70,10 @@ conversation). Tests: `bounce_test.go`, `noshrink_test.go`, `pane_test.go`,
    `/mcp` the first: the table pane (the pager with its table) over the
    selected server's log pane. The base screen is not on panes yet: it holds
    the owner rules above, so it moves last.
+   `/context` and `/usage` (USER 2026-11-04, `internal/tui/statsview.go`):
+   one screen, a tab bar over the pager, opened on the Context or the Usage
+   tab; tab moves between Context, Usage and Spend. It redraws on each usage
+   event, and nothing goes in the conversation.
 2. The other pager views (`/mcp tools`, a
    block) become screens where a second pane earns its place.
 3. The job view and the inspector move onto screens.

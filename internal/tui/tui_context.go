@@ -280,13 +280,12 @@ func windowBlock(s *contextStats) string {
 	return b.String()
 }
 
-// showContext appends a detailed breakdown of context usage to the conversation.
-func (m *tuiModel) showContext() {
+// usageText is /usage's Usage tab: this session's tokens, side calls,
+// surfacing, cache, and cost & limits.
+func (m *tuiModel) usageText() string {
 	s := &m.ctxStats
 	var b strings.Builder
-	b.WriteString(stHeader.Render("context"))
-
-	b.WriteString("\n\n  " + stHeader.Render("tokens"))
+	b.WriteString("  " + stHeader.Render("tokens"))
 	b.WriteString("\n  " + StDim.Render("processed:  ") + numfmt.Commaf("%d", s.processedTokens))
 	b.WriteString("\n  " + StDim.Render("generated:  ") + numfmt.Commaf("%d", s.generatedTokens))
 	b.WriteString("\n  " + StDim.Render("cached:     ") + numfmt.Commaf("%d", s.cachedTokens))
@@ -298,7 +297,15 @@ func (m *tuiModel) showContext() {
 	b.WriteString(surfacingBlock(s))
 	b.WriteString(cacheBlock(s))
 	b.WriteString(costBlock(s, time.Now()))
-	b.WriteString(windowBlock(s))
+	return b.String()
+}
+
+// contextText is /context's Context tab: the window, what fills it (the
+// system prompt's parts, the conversation), and what shaped it.
+func (m *tuiModel) contextText() string {
+	s := &m.ctxStats
+	var b strings.Builder
+	b.WriteString(strings.TrimPrefix(windowBlock(s), "\n\n"))
 
 	b.WriteString("\n\n  " + stHeader.Render("conversation"))
 	b.WriteString("\n  " + StDim.Render("blocks:     ") + numfmt.Commaf("%d", len(m.convo)))
@@ -367,7 +374,7 @@ func (m *tuiModel) showContext() {
 		b.WriteString("\n  " + StDim.Render("forced calls:   ") + numfmt.Commaf("%d", s.forcedToolCalls) + StDim.Render(" (host-injected)"))
 	}
 
-	m.append(b.String())
+	return b.String()
 }
 
 // readSystemCost decodes the pre-conversation cost off an event carrying it —

@@ -65,9 +65,11 @@ Code: `spend.go`, `ledger.go`. Source: agentkit reads what a gateway reports
 - Poll rules (`PollBudget`): at start, every 5 min, and after a turn when the
   last read is at least 30 s old; it stops once the endpoint has no budget.
 - The status line warns under 10% left (dim) and colours under 2% or empty.
-- Rollups in /context (USER 2026-10-28): the session's spend this hour,
-  today and over the interval; the machine's (the ledger, every key) this
-  hour, today, this week, this month, over the interval, and all time. The
+- Rollups in /usage (USER 2026-10-28; a screen since 2026-11-04): the
+  Usage tab has the session's spend this hour, today and over the interval;
+  the Spend tab has the machine's (the ledger, every key) this hour, today,
+  this week, this month, this year, over the interval, all time, and this
+  month by model. The
   **interval** is the key budget's period (one `Interval` back from
   `ResetAt`) when the gateway states both, else the last 7 days. Hour
   buckets, so an interval counts from the start of its first hour. "key

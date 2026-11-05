@@ -4183,9 +4183,7 @@ func TestContext_ShowsSideCalls(t *testing.T) {
 		"rephrase": map[string]any{"calls": 1.0, "latency_ms": 400.0, "last_ms": 400.0,
 			"processed": 200.0, "cached": 100.0, "generated": 40.0, "avg_ms": 400.0, "tok_per_s": 100.0},
 	}})
-	m.convo = []convoEntry{{collapsed: "old"}}
-	m.showContext()
-	last := m.convo[len(m.convo)-1].collapsed
+	last := m.usageText()
 	for _, want := range []string{"side calls", "rephrase", "prompt rewrites (/rephrase)", "1 call"} {
 		if !strings.Contains(last, want) {
 			t.Errorf("/context missing %q:\n%s", want, last)

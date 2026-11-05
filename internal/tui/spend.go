@@ -123,6 +123,59 @@ func ledgerRow(label string, by map[string]float64, tail string) string {
 	return ctxRow(label, ctxMoney(by[curs[0]]), note+tail)
 }
 
+// ledgerBlock is every session's and sub-agent's spend on this machine,
+// from the ledger (/usage's Spend tab): the periods under the all-time
+// total, then this month by model, the most first.
+func ledgerBlock(s *contextStats) string {
+	sp := s.spend
+	var b strings.Builder
+	b.WriteString("\n  " + stHeader.Render("this machine"))
+	b.WriteString(StDim.Render(" — every session and sub-agent, from the ledger"))
+	l := (*proto.SpendLedger)(nil)
+	if sp != nil {
+		l = sp.Ledger
+	}
+	if l == nil || !l.Entries {
+		b.WriteString("\n  " + StDim.Render("nothing spent yet: no response reported a cost this year"))
+		return b.String()
+	}
+	b.WriteString(ledgerRow("machine spend", l.Total, " · all time, every session on this machine"))
+	for _, r := range []struct {
+		label string
+		by    map[string]float64
+	}{{"this hour", l.Hour}, {"today", l.Today}, {"this week", l.Week}, {"this month", l.Month},
+		{"this year", l.Year}, {intervalLabel(sp), l.Interval}} {
+		b.WriteString(ledgerRow("  "+r.label, r.by, ""))
+	}
+	if len(l.Last24h) > 0 {
+		b.WriteString(ledgerRow("this key, 24h", l.Last24h, " · the rate its budget is measured against"))
+	}
+	if len(l.ByModel) > 0 {
+		b.WriteString("\n\n  " + stHeader.Render("this month by model"))
+		names := make([]string, 0, len(l.ByModel))
+		for n := range l.ByModel {
+			names = append(names, n)
+		}
+		sum := func(by map[string]float64) (t float64) {
+			for _, v := range by {
+				t += v
+			}
+			return t
+		}
+		sort.Slice(names, func(i, j int) bool {
+			a, c := sum(l.ByModel[names[i]]), sum(l.ByModel[names[j]])
+			if a != c {
+				return a > c
+			}
+			return names[i] < names[j]
+		})
+		for _, n := range names {
+			b.WriteString(ledgerRow("  "+n, l.ByModel[n], ""))
+		}
+	}
+	return b.String()
+}
+
 // noCostHint says why calls came back with no cost, and what would change
 // that: the answer depends on the gateway.
 func noCostHint(sp *proto.Spend) string {
@@ -234,18 +287,6 @@ func costBlock(s *contextStats, now time.Time) string {
 		notReported("key budget", " (read failed: "+textfmt.Clip(sp.KeyError, 60)+")")
 	default:
 		notReported("key budget", "")
-	}
-
-	// Every session's and sub-agent's on this machine, from the ledger.
-	if l := sp.Ledger; l != nil && l.Entries {
-		b.WriteString(ledgerRow("machine spend", l.Total, " · all time, every session on this machine"))
-		for _, r := range []struct {
-			label string
-			by    map[string]float64
-		}{{"this hour", l.Hour}, {"today", l.Today}, {"this week", l.Week}, {"this month", l.Month},
-			{intervalLabel(sp), l.Interval}} {
-			b.WriteString(ledgerRow("  "+r.label, r.by, ""))
-		}
 	}
 
 	// Rate limits, as the latest response reported them.

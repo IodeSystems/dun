@@ -193,7 +193,7 @@ func init() {
 		{"config", "", "show this session's model settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
 		{"status", "", "this session: build, workspace, model, tools and servers", func(m *tuiModel, _ []string) tea.Cmd { m.statusSlash(); return nil }},
 		{"logout", "<provider>", "log out of an AI service: forget its address and key", logoutSlash},
-		{"context", "[config [--max N] [--compact-buffer N] [--tool-lod N] [--recap-nudge N]]", "inspect context usage: tokens, compaction, recaps, truncation; config: the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model", func(m *tuiModel, args []string) tea.Cmd {
+		{"context", "[config [--max N] [--compact-buffer N] [--tool-lod N] [--recap-nudge N]]", "the context screen (tabs: context, usage, spend): the window, the system prompt, compaction, recaps, truncation; config: the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model", func(m *tuiModel, args []string) tea.Cmd {
 			if len(args) > 0 && strings.EqualFold(args[0], "config") {
 				// Bare: the picker (the flags with their values, contextChoices).
 				if len(args) == 1 {
@@ -207,7 +207,11 @@ func init() {
 				}
 				return nil
 			}
-			m.showContext()
+			m.openStats(statsContext)
+			return nil
+		}},
+		{"usage", "", "this session's tokens, cache, cost and limits, and this machine's spend: a screen with tabs (tab moves, esc closes)", func(m *tuiModel, _ []string) tea.Cmd {
+			m.openStats(statsUsage)
 			return nil
 		}},
 		{"reload", "", "restart this TUI into the dun binary on disk (after make install), on the same session", func(m *tuiModel, _ []string) tea.Cmd {
