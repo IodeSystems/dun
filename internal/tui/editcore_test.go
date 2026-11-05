@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"testing"
 
 	"charm.land/bubbles/v2/textinput"
@@ -110,5 +111,49 @@ func TestEdit_TransposeCaseUndo(t *testing.T) {
 	in = in.HandleKey(ctrlK('_'))
 	if in.Value() != "" {
 		t.Errorf("undo the typing, one step: %q", in.Value())
+	}
+}
+
+// A word is letters and digits (readline): alt+f, alt+b, alt+backspace and
+// alt+d stop at each / and . of a path; ctrl+w takes the whole path.
+func TestEdit_WordsStopAtPunctuation(t *testing.T) {
+	edits = &editState{}
+	const path = "open /a/docs/stubs.md now"
+	in := newMultilineInput()
+	in.SetValue(path)
+	in.cursor = 4
+	var stops []int
+	for range 4 {
+		in = in.HandleKey(altK('f'))
+		stops = append(stops, in.cursor)
+	}
+	if want := []int{7, 12, 18, 21}; !slices.Equal(stops, want) {
+		t.Errorf("alt+f stops %v, want %v", stops, want)
+	}
+	in = in.HandleKey(altK('b'))
+	if in.cursor != 19 {
+		t.Errorf("alt+b to %d, want 19", in.cursor)
+	}
+
+	in.cursor = 21 // after "md"
+	in = in.HandleKey(tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModAlt})
+	if in.Value() != "open /a/docs/stubs. now" {
+		t.Errorf("alt+backspace: %q", in.Value())
+	}
+	in.SetValue(path)
+	in.cursor = 21
+	in = in.HandleKey(ctrlK('w'))
+	if in.Value() != "open  now" {
+		t.Errorf("ctrl+w: %q", in.Value())
+	}
+
+	f := textinput.New()
+	f.Focus()
+	f.SetValue(path)
+	f.SetCursor(len(path))
+	editField(&f, "form", altK('b'))
+	editField(&f, "form", altK('b'))
+	if f.Position() != 19 {
+		t.Errorf("alt+b twice in a field: %d, want 19", f.Position())
 	}
 }

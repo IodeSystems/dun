@@ -830,29 +830,8 @@ func (m *multilineInput) lineEnd() int {
 	return len(m.buf)
 }
 
-func (m *multilineInput) wordLeft() int {
-	i := m.cursor
-	for i > 0 && isWordSep(m.buf[i-1]) {
-		i--
-	}
-	for i > 0 && !isWordSep(m.buf[i-1]) {
-		i--
-	}
-	return i
-}
-
-func (m *multilineInput) wordRight() int {
-	i := m.cursor
-	for i < len(m.buf) && isWordSep(m.buf[i]) {
-		i++
-	}
-	for i < len(m.buf) && !isWordSep(m.buf[i]) {
-		i++
-	}
-	return i
-}
-
-func isWordSep(r rune) bool { return r == ' ' || r == '\t' || r == '\n' }
+func (m *multilineInput) wordLeft() int  { return wordStart(m.buf, m.cursor) }
+func (m *multilineInput) wordRight() int { return wordEnd(m.buf, m.cursor) }
 
 // ── cursor movement ──
 

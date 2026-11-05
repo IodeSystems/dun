@@ -14,7 +14,8 @@ import (
 // one-line field (textinput, through editField) run a key through editKey
 // first; what it does not take, the field does itself (motions, typing).
 //
-//	ctrl+w, alt+backspace, ctrl+backspace  kill the word before the cursor
+//	ctrl+w                                 kill the blank-separated word before the cursor
+//	alt+backspace, ctrl+backspace          kill the word before the cursor
 //	alt+d, alt+delete, ctrl+delete         kill the word after it
 //	ctrl+k                                 kill to the end of the line
 //	ctrl+u                                 kill to the start of the line
@@ -25,6 +26,10 @@ import (
 //	alt+u, alt+l, alt+c                    upper, lower, capitalize the next word
 //	ctrl+h                                 delete the character before the cursor
 //	ctrl+_, ctrl+/                         undo
+//
+// A word is a run of letters and digits, as in readline: alt+f stops at each
+// / and . of a path. ctrl+w alone takes blank-separated words
+// (unix-word-rubout), so it still removes a whole path (USER 2026-11-05).
 //
 // Kills in a row make one ring entry, as in readline: a kill forward adds to
 // its end, a kill back to its start. The ring is one for all fields, so a
@@ -99,7 +104,9 @@ func editKey(id, key string, e *editBuf) bool {
 	before := editSnap{buf: e.buf, cur: e.cur}
 	st.last, st.lastID = "", id
 	switch key {
-	case "ctrl+w", "alt+backspace", "ctrl+backspace":
+	case "ctrl+w":
+		st.kill(e, blankStart(e.buf, e.cur), prev)
+	case "alt+backspace", "ctrl+backspace":
 		st.kill(e, wordStart(e.buf, e.cur), prev)
 	case "alt+d", "alt+delete", "ctrl+delete":
 		st.kill(e, wordEnd(e.buf, e.cur), prev)
@@ -259,7 +266,7 @@ func transposeWords(e *editBuf) {
 		s2 = wordStart(e.buf, e2)
 	}
 	e1 := s2
-	for e1 > 0 && isWordSep(e.buf[e1-1]) {
+	for e1 > 0 && !isWordRune(e.buf[e1-1]) {
 		e1--
 	}
 	s1 := wordStart(e.buf, e1)
@@ -288,7 +295,7 @@ func caseWord(e *editBuf, key string) {
 		case "alt+l":
 			w[i] = unicode.ToLower(r)
 		case "alt+c":
-			if isWordSep(r) {
+			if !isWordRune(r) {
 				continue
 			}
 			if first {
@@ -302,8 +309,30 @@ func caseWord(e *editBuf, key string) {
 	e.cur = end
 }
 
-// wordStart and wordEnd are the shell's words: runs of anything but blanks.
+// wordStart and wordEnd are readline's words: runs of letters and digits.
 func wordStart(buf []rune, i int) int {
+	for i > 0 && !isWordRune(buf[i-1]) {
+		i--
+	}
+	for i > 0 && isWordRune(buf[i-1]) {
+		i--
+	}
+	return i
+}
+
+func wordEnd(buf []rune, i int) int {
+	for i < len(buf) && !isWordRune(buf[i]) {
+		i++
+	}
+	for i < len(buf) && isWordRune(buf[i]) {
+		i++
+	}
+	return i
+}
+
+// blankStart is the start of the shell word before i: a run of anything but
+// blanks (ctrl+w).
+func blankStart(buf []rune, i int) int {
 	for i > 0 && isWordSep(buf[i-1]) {
 		i--
 	}
@@ -313,15 +342,9 @@ func wordStart(buf []rune, i int) int {
 	return i
 }
 
-func wordEnd(buf []rune, i int) int {
-	for i < len(buf) && isWordSep(buf[i]) {
-		i++
-	}
-	for i < len(buf) && !isWordSep(buf[i]) {
-		i++
-	}
-	return i
-}
+func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+func isWordSep(r rune) bool { return r == ' ' || r == '\t' || r == '\n' }
 
 // splice is buf with [lo, hi) replaced by r, in a new slice: the composer's
 // layout caches by the buffer's identity, so a buffer is never written in
@@ -352,6 +375,17 @@ func editField(ti *textinput.Model, id string, msg tea.Msg) tea.Cmd {
 	before := editSnap{buf: []rune(ti.Value()), cur: ti.Position()}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		e := editBuf{buf: before.buf, cur: before.cur, lo: 0, hi: len(before.buf)}
+		// textinput's own word motions stop only at blanks.
+		switch k.String() {
+		case "alt+left", "ctrl+left", "alt+b":
+			ti.SetCursor(wordStart(e.buf, e.cur))
+			edits.last = ""
+			return nil
+		case "alt+right", "ctrl+right", "alt+f":
+			ti.SetCursor(wordEnd(e.buf, e.cur))
+			edits.last = ""
+			return nil
+		}
 		if editKey(id, k.String(), &e) {
 			if s := string(e.buf); s != ti.Value() {
 				ti.SetValue(strings.ReplaceAll(s, "\n", " "))
