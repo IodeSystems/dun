@@ -144,6 +144,10 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 			"cannot fit one turn's floor. Raise DUN_CONTEXT_TOKENS or unset it (unset = no compaction).",
 			h.compactTurn)
 	}
+	// What the summary may have dropped, from dun's own records.
+	if n := h.foldRestoreNote(); n != "" {
+		h.Aside(n)
+	}
 	if h.cfg.OnCompaction != nil {
 		h.cfg.OnCompaction(note)
 	}

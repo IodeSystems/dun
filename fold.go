@@ -1,7 +1,9 @@
 package dun
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/iodesystems/agentkit/llm"
 )
@@ -60,4 +62,63 @@ func (h *Harness) inFlight() string {
 		lines = append(lines, line+" — task: "+oneLine(sa.prompt, 160))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// foldRestoreCap is how much of a child's task, or a job's command, the
+// after-fold notice quotes. The task is why the child exists; a one-line
+// excerpt (inFlight's 160) is not enough to act on, and the whole of a long
+// brief would cost every fold its size again.
+const foldRestoreCap = 1000
+
+// foldRestoreNote is what the model is told right after a fold: the work that
+// is still alive, with each one's id, start time, how long it has run, and the
+// command or task that started it. The summary may have lost all of it — the
+// fold is TOLD what is in flight (foldTask), but nothing makes it write that
+// down — and a model that does not know a job is running starts it again.
+// Empty when nothing is in flight.
+func (h *Harness) foldRestoreNote() string {
+	now := time.Now()
+	var lines []string
+	for _, j := range h.bgJobList() {
+		j.mu.Lock()
+		done, started, written, command := j.done, j.started, j.written, j.command
+		j.mu.Unlock()
+		if done {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- job #%d — RUNNING now · started %s · running %s · %d bytes out — `%s`",
+			j.id, started.Format("15:04:05"), roundDur(now.Sub(started)), written, oneLine(command, foldRestoreCap)))
+	}
+	for _, sa := range h.agentList() {
+		state, status, _, since := sa.snapshot()
+		if state == agentDismissed {
+			continue
+		}
+		sa.mu.Lock()
+		started, prompt := sa.started, sa.prompt
+		sa.mu.Unlock()
+		what := string(state)
+		if state == agentRunning {
+			what = "RUNNING now"
+		}
+		line := fmt.Sprintf("- agent #%d — %s", sa.num, what)
+		if !started.IsZero() {
+			// since is this run's length: still growing while running, fixed
+			// once the run ended (snapshot) — so "ran", not "idle for".
+			verb := "ran"
+			if state == agentRunning {
+				verb = "running"
+			}
+			line += fmt.Sprintf(" · started %s · %s %s", started.Format("15:04:05"), verb, roundDur(since))
+		}
+		if status != "" {
+			line += " · " + status
+		}
+		lines = append(lines, line+" — task: "+oneLine(prompt, foldRestoreCap))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "Context was just compacted. This work is still alive; do not start it again. " +
+		"jobs(...) reports on any of it.\n" + strings.Join(lines, "\n")
 }
