@@ -122,6 +122,7 @@ start:
   dun tools [--upgrade]      the tools against the versions this dun pins; --upgrade installs them (dun tools --help)
   dun tmux                   the tmux.conf lines that show dun's state in the window list
   dun mcp                    dun's sessions as an MCP server on stdio, for another agent (dun mcp --help)
+  dun watch <session>        a line each time a session ends a turn or asks (dun watch --help)
   dun msg                    message dun sessions and listen for messages from a shell (dun msg --help)
   dun -p                     engine mode: line-delimited JSON events on stdin/stdout
   dun dund …                 the session service (dun dund --help)
@@ -227,6 +228,10 @@ func main() {
 	// `dun mcp`: dun's sessions as an MCP server on stdio (mcpserve.go).
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		os.Exit(mcpCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+	// `dun watch`: a line each time a session ends a turn or asks (watchcmd.go).
+	if len(os.Args) > 1 && os.Args[1] == "watch" {
+		os.Exit(watchCmd(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	// `dun tmux`: the tmux.conf lines that show dun's window mark (tmux.go).
 	if len(os.Args) > 1 && os.Args[1] == "tmux" {

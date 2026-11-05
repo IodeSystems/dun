@@ -50,7 +50,7 @@ or in an MCP client's config:
 
 Tools:
 
-  dun_sessions   your dun sessions: id, workspace, running, last event
+  dun_sessions   your running dun sessions: id, workspace, last event
   dun_start      start a session in a workspace with a first message;
                  optional model and provider (a provider you logged in to
                  with /provider login); waits for the reply
@@ -63,6 +63,11 @@ A reply ends one of four ways: done (the reply), asking (a question and
 its options: answer with dun_answer), error, or still working when the
 wait ran out (timeout_s, default 600): call dun_wait with the event
 number the result gives, and nothing is lost.
+
+To be told when a session ends its turn or asks, without holding a call
+open: send with timeout_s 0 and run "dun watch <session> --after N" (the
+result names it) under Claude Code's Monitor, or with --once in the
+background. dun watch --help has the details.
 
 Flags:
 
@@ -169,7 +174,9 @@ func (s *mcpServer) handle(m rpcMsg) (any, *rpcErr) {
 			"instructions": "dun runs coding-agent sessions on the models and providers its user logged in to. " +
 				"Hand it work that does not need you: dun_start a session in a workspace with the task, " +
 				"read the reply, follow up with dun_send. A result that is still working gives an event " +
-				"number: dun_wait from it.",
+				"number: dun_wait from it. To keep working while it runs, send with timeout_s 0 and run " +
+				"the `dun watch` command the result names under your Monitor tool: it prints a line " +
+				"when the session finishes its turn or asks for input.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
@@ -208,7 +215,7 @@ var (
 )
 
 var mcpTools = []map[string]any{
-	{"name": "dun_sessions", "description": "List your dun sessions: id, workspace, whether its engine runs, clients attached, and its last event number.",
+	{"name": "dun_sessions", "description": "List your running dun sessions (engine connected to dund): id, workspace, clients attached, and its last event number.",
 		"inputSchema": mcpSchema(nil, map[string]any{})},
 	{"name": "dun_start", "description": "Start a dun session in a workspace and send it its first message. Waits for the reply. The session runs on the given model and provider, else dun's saved default.",
 		"inputSchema": mcpSchema([]string{"prompt"}, map[string]any{
@@ -355,17 +362,26 @@ func (s *mcpServer) sessions() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(items) == 0 {
-		return "no dun sessions — dun_start makes one", nil
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].ID > items[j].ID })
-	var b strings.Builder
+	// Only sessions whose engine is connected to dund (USER 2026-11-05): a
+	// stopped one is history, and the list of every session ever made buries
+	// the few a caller can talk to.
+	live := items[:0]
 	for _, it := range items {
-		state := "stopped"
 		if it.Running {
-			state = "running"
+			live = append(live, it)
 		}
-		fmt.Fprintf(&b, "%s  %s  %s · %d attached · last event %d\n", it.ID, it.Workspace, state, it.Attached, it.LastSeq)
+	}
+	stopped := len(items) - len(live)
+	if len(live) == 0 {
+		return fmt.Sprintf("no dun session is running (%d stopped) — dun_start makes one", stopped), nil
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].ID > live[j].ID })
+	var b strings.Builder
+	for _, it := range live {
+		fmt.Fprintf(&b, "%s  %s  %d attached · last event %d\n", it.ID, it.Workspace, it.Attached, it.LastSeq)
+	}
+	if stopped > 0 {
+		fmt.Fprintf(&b, "(%d stopped, not listed)\n", stopped)
 	}
 	return b.String(), nil
 }
@@ -479,6 +495,14 @@ func (s *mcpServer) follow(session string, after uint64, cmd *proto.Command, ech
 	}
 }
 
+// watchHint is how to be told when the session ends its turn or asks, without
+// holding a tool call open for it (watchcmd.go).
+func (r mcpReply) watchHint() string {
+	return fmt.Sprintf("to be told when it ends or asks: Monitor `dun watch %s --after %d` "+
+		"(or run `dun watch %s --after %d --once` in the background), then dun_wait {\"session\": %q, \"after\": %d} for the reply\n",
+		r.session, r.seq, r.session, r.seq, r.session, r.seq)
+}
+
 // mcpReply gathers one turn's events into the text a caller reads.
 type mcpReply struct {
 	session string
@@ -539,8 +563,10 @@ func (r mcpReply) render(end string) string {
 	switch end {
 	case "working":
 		fmt.Fprintf(&b, "still working: dun_wait {\"session\": %q, \"after\": %d} to read on\n", r.session, r.seq)
+		b.WriteString(r.watchHint())
 	case "sent":
 		fmt.Fprintf(&b, "sent: dun_wait {\"session\": %q, \"after\": %d} for the reply\n", r.session, r.seq)
+		b.WriteString(r.watchHint())
 	case "asking":
 		fmt.Fprintf(&b, "question: %s\n", r.ask.Question)
 		if len(r.ask.Options) > 0 {
