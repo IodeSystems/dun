@@ -209,9 +209,11 @@ func TestMouse_ClickActivity(t *testing.T) {
 	if m.actSel != rows[1].key {
 		t.Fatalf("row click selected %+v, want %+v", m.actSel, rows[1].key)
 	}
-	m = click(m, 3, top+2)
-	if m.scopeAgent != rows[1].key.id {
-		t.Errorf("second click should open agent %d, scope %d", rows[1].key.id, m.scopeAgent)
+	// rows[2] is idle agent #2 (most recent first: the running rows above).
+	m = click(m, 3, top+3)
+	m = click(m, 3, top+3)
+	if !rows[2].key.agent || m.scopeAgent != rows[2].key.id {
+		t.Errorf("second click should open agent %d, scope %d", rows[2].key.id, m.scopeAgent)
 	}
 }
 

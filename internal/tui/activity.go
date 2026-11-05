@@ -19,6 +19,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -66,6 +67,10 @@ type actRow struct {
 	// listed under an open stack. See actRows.
 	stacked int
 	member  bool
+	// recent is the row's last activity: now while it runs, else when it
+	// last changed (an agent) or ended (a job). The open table is sorted by
+	// it (actRows).
+	recent time.Time
 }
 
 // stackKey is the row the dismissed agents are stacked into — an agent key
@@ -85,6 +90,23 @@ type agentRow struct {
 	// every second, so a running child's time is counted on from there, as a
 	// job's is (jobRow).
 	at time.Time
+	// changed is when this child's state, status or tokens last moved, as
+	// far as the pushes say (keepChanged): its last activity.
+	changed time.Time
+}
+
+// keepChanged carries each child's changed time over from the last push
+// when nothing about it moved; a push lists every child, not only the one
+// that changed.
+func keepChanged(old, cur []agentRow) []agentRow {
+	for i := range cur {
+		for _, o := range old {
+			if o.id == cur[i].id && o.state == cur[i].state && o.status == cur[i].status && o.tokens == cur[i].tokens && !o.changed.IsZero() {
+				cur[i].changed = o.changed
+			}
+		}
+	}
+	return cur
 }
 
 // elapsed is the child's run time, counted to now while it runs.
@@ -123,7 +145,7 @@ func agentRowsFromEvent(ev evMsg) []agentRow {
 		out = append(out, agentRow{
 			id: num(m["id"]), state: str(m["state"]), status: str(m["status"]),
 			prompt: str(m["prompt"]), model: str(m["model"]),
-			tokens: num(m["tokens"]), seconds: num(m["seconds"]), at: at,
+			tokens: num(m["tokens"]), seconds: num(m["seconds"]), at: at, changed: at,
 		})
 	}
 	return out
@@ -173,10 +195,77 @@ func (m tuiModel) liveAgents() int {
 
 // actRows flattens agents and jobs into one selectable list.
 //
-// Agents first, then jobs, each in id order — a STABLE order, deliberately not
-// sorted by interest. Rows that reorder themselves as states change would move
-// under a selection that is already on one.
+// The open table is most recent activity first (USER 2026-11-04), as of when
+// it was opened (actOrder): rows that reorder themselves as states change
+// would move under a selection that is already on one. A row that appears
+// while it is open goes at the end. The one-line strip, and a table with no
+// order taken, is agents then jobs, each in id order.
 func (m tuiModel) actRows() []actRow {
+	rows := m.baseRows()
+	if m.scopeAgent != 0 || m.actLevel != actList || len(m.actOrder) == 0 {
+		return rows
+	}
+	return orderRows(rows, m.actOrder)
+}
+
+// orderRows puts rows in order's sequence, a stack's members kept under it,
+// and rows order does not name after, as they were.
+func orderRows(rows []actRow, order []actKey) []actRow {
+	at := make(map[actKey]int, len(order))
+	for i, k := range order {
+		at[k] = i
+	}
+	var tops [][]actRow // each top-level row with the members under it
+	for _, r := range rows {
+		if r.member && len(tops) > 0 {
+			tops[len(tops)-1] = append(tops[len(tops)-1], r)
+			continue
+		}
+		tops = append(tops, []actRow{r})
+	}
+	rank := func(g []actRow) int {
+		if i, ok := at[g[0].key]; ok {
+			return i
+		}
+		return len(order)
+	}
+	sort.SliceStable(tops, func(i, j int) bool { return rank(tops[i]) < rank(tops[j]) })
+	out := make([]actRow, 0, len(rows))
+	for _, g := range tops {
+		out = append(out, g...)
+	}
+	return out
+}
+
+// takeActOrder is the open table's order: the rows now, most recent first.
+func (m tuiModel) takeActOrder() []actKey {
+	rows := m.baseRows()
+	var tops []actRow
+	for _, r := range rows {
+		if !r.member {
+			tops = append(tops, r)
+		}
+	}
+	sort.SliceStable(tops, func(i, j int) bool { return tops[i].recent.After(tops[j].recent) })
+	order := make([]actKey, len(tops))
+	for i, r := range tops {
+		order[i] = r.key
+	}
+	return order
+}
+
+// openActList opens the table: its order taken now, the most recent row
+// selected.
+func (m *tuiModel) openActList() {
+	m.actLevel = actList
+	m.actOrder = m.takeActOrder()
+	if rows := m.actRows(); len(rows) > 0 {
+		m.actSel = rows[0].key
+	}
+}
+
+// baseRows is actRows in id order.
+func (m tuiModel) baseRows() []actRow {
 	if m.scopeAgent != 0 {
 		return m.scopeRows()
 	}
@@ -197,6 +286,7 @@ func (m tuiModel) actRows() []actRow {
 	if len(gone) > 0 {
 		rows = append(rows, stackRow(gone, m.actStackOpen))
 		if m.actStackOpen {
+			sort.SliceStable(gone, func(i, j int) bool { return gone[i].changed.After(gone[j].changed) })
 			for _, a := range gone {
 				r := agentActRow(a, now)
 				r.member = true
@@ -232,9 +322,13 @@ func agentActRow(a agentRow, now time.Time) actRow {
 	if detail == "" {
 		detail = a.prompt
 	}
+	recent := a.changed
+	if a.state == "running" {
+		recent = now
+	}
 	return actRow{
 		key: actKey{agent: true, id: a.id}, mark: mark, style: style,
-		label: label, detail: detail,
+		label: label, detail: detail, recent: recent,
 	}
 }
 
@@ -242,8 +336,12 @@ func agentActRow(a agentRow, now time.Time) actRow {
 // and which they were.
 func stackRow(gone []agentRow, open bool) actRow {
 	tokens := 0
+	var recent time.Time
 	ids := make([]string, len(gone))
 	for i, a := range gone {
+		if a.changed.After(recent) {
+			recent = a.changed
+		}
 		tokens += a.tokens
 		ids[i] = fmt.Sprintf("#%d", a.id)
 	}
@@ -256,7 +354,7 @@ func stackRow(gone []agentRow, open bool) actRow {
 		mark = "▾"
 	}
 	return actRow{key: stackKey, mark: mark, style: StDim, label: label,
-		detail: strings.Join(ids, " "), stacked: len(gone)}
+		detail: strings.Join(ids, " "), stacked: len(gone), recent: recent}
 }
 
 func jobActRow(j jobRow, now time.Time) actRow {
@@ -281,9 +379,13 @@ func jobActRow(j jobRow, now time.Time) actRow {
 	if j.muted {
 		label += " muted"
 	}
+	recent := time.Unix(j.ended, 0)
+	if j.ended == 0 {
+		recent = now // running, or no end said: treat as active
+	}
 	return actRow{
 		key: actKey{id: j.id}, mark: mark, style: style,
-		label: label, detail: j.command,
+		label: label, detail: j.command, recent: recent,
 		attn: j.state == "failed" || j.state == "timeout" || j.state == "error",
 	}
 }
@@ -614,9 +716,8 @@ func (m *tuiModel) setFocus(z int) {
 		m.sel = m.selSkipUp(len(m.convo) - 1)
 	case focusActivity:
 		m.input.Blur()
-		m.actLevel = actList
-		if rows := m.actRows(); len(rows) > 0 && m.actIndex(rows) < 0 {
-			m.actSel = rows[0].key
+		if m.actLevel != actList {
+			m.openActList()
 		}
 	}
 }
@@ -656,7 +757,7 @@ func (m *tuiModel) actKeys(key string) (tea.Cmd, bool) {
 		return nil, true
 	case "right", "enter":
 		if m.actLevel == actCollapsed {
-			m.actLevel = actList
+			m.openActList()
 			return nil, true
 		}
 		return m.actDescend(), true

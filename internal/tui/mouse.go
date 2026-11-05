@@ -222,7 +222,6 @@ func (m tuiModel) activityClick(r int) (tea.Model, tea.Cmd) {
 	}
 	if m.actLevel == actCollapsed {
 		m.setFocus(focusActivity)
-		m.actLevel = actList
 		m.refresh()
 		return m, nil
 	}

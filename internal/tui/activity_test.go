@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -89,5 +90,62 @@ func TestActivity_DismissedStack(t *testing.T) {
 	m.setFocus(focusInput)
 	if got := plain(m.activityView()); strings.Contains(got, "#1 dismissed") || !strings.Contains(got, "≡2 dismissed") {
 		t.Errorf("strip with the stack open lists members: %q", got)
+	}
+}
+
+// The open table is most recent activity first, as of when it opened: what
+// runs, then what changed or ended last; it does not reorder while open, and
+// a row that arrives meanwhile goes at the end. The strip stays in id order.
+func TestActivity_RecentFirst(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
+	m.w = 120
+	now := time.Now()
+	m.agents = []agentRow{
+		{id: 1, state: "idle", changed: now.Add(-time.Hour)},
+		{id: 2, state: "idle", changed: now.Add(-time.Minute)},
+	}
+	m.jobs = []jobRow{
+		{id: 1, state: "ok", started: now.Add(-2 * time.Hour).Unix(), ended: now.Add(-30 * time.Minute).Unix()},
+		{id: 2, state: "running", started: now.Add(-time.Minute).Unix()},
+	}
+	keys := func() []actKey {
+		var ks []actKey
+		for _, r := range m.actRows() {
+			ks = append(ks, r.key)
+		}
+		return ks
+	}
+	if got := keys(); got[0] != (actKey{agent: true, id: 1}) {
+		t.Errorf("collapsed: %v, want id order", got)
+	}
+	m.setFocus(focusActivity)
+	want := []actKey{{id: 2}, {agent: true, id: 2}, {id: 1}, {agent: true, id: 1}}
+	if got := keys(); !slices.Equal(got, want) {
+		t.Fatalf("open: %v, want %v", got, want)
+	}
+	if m.actSel != want[0] {
+		t.Errorf("selected %v, want the most recent", m.actSel)
+	}
+	// Agent #1 starts running: it does not jump while the table is open.
+	m.agents[0].state, m.agents[0].changed = "running", now
+	m.jobs = append(m.jobs, jobRow{id: 3, state: "running", started: now.Unix()})
+	want = append(want, actKey{id: 3})
+	if got := keys(); !slices.Equal(got, want) {
+		t.Errorf("while open: %v, want %v", got, want)
+	}
+	m.setFocus(focusInput)
+	m.setFocus(focusActivity)
+	if got := keys(); got[0] == (actKey{id: 1}) || got[len(got)-1] != (actKey{id: 1}) {
+		t.Errorf("reopened: %v, want the ended job last", got)
+	}
+}
+
+// A push lists every child: one that did not move keeps its changed time.
+func TestAgentRows_KeepChanged(t *testing.T) {
+	then := time.Now().Add(-time.Hour)
+	old := []agentRow{{id: 1, state: "idle", changed: then}, {id: 2, state: "running", changed: then}}
+	cur := keepChanged(old, []agentRow{{id: 1, state: "idle", changed: time.Now()}, {id: 2, state: "idle", changed: time.Now()}})
+	if !cur[0].changed.Equal(then) || cur[1].changed.Equal(then) {
+		t.Errorf("changed: %v %v", cur[0].changed, cur[1].changed)
 	}
 }

@@ -176,6 +176,13 @@ are in `decisions.md`.
   lists them under it, indented, where each can still be descended into; ←
   on the stack or one of them folds it. The strip never lists it open. The
   table's head still counts every agent.
+- **The open table is most recent first (2026-11-04).** Opening the
+  activity table (tab, →, a click) sorts agents and jobs together by their
+  last activity: running rows first, then by when an agent last changed or
+  a job ended. The order is taken when the table opens and kept while it is
+  open, so rows do not move under the selection; a row that arrives
+  meanwhile goes at the end. The selection starts on the top row. The
+  one-line strip stays in id order.
 - **Typing while descended tells the child** (a `jobs tell`: its next
   message), and the placeholder says so. Chosen over a read-only view
   because the reason to open a child is usually to correct it, and the

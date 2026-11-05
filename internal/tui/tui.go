@@ -220,6 +220,7 @@ type tuiModel struct {
 	jobs         []jobRow              // live background jobs (activity.go)
 	actLevel     int                   // actCollapsed | actList — → descends, ← ascends
 	actSel       actKey                // selected activity row, by identity not index
+	actOrder     []actKey              // the open table's order, taken when it opened (activity.go)
 	actStackOpen bool                  // the dismissed agents' stack is listed open (activity.go)
 	// Agent scope: which child's conversation is on screen (0 = the root's),
 	// and the root's own conversation, stashed while it is (activity.go).

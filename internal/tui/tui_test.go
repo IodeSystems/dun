@@ -2442,9 +2442,10 @@ func TestActivity_TabOpensTheTableWithAHighlight(t *testing.T) {
 		t.Errorf("the table should show a row per item with the cursor on one:\n%s", v)
 	}
 
+	// Most recent first: the two running rows, then idle agent #2.
 	m = key(m, kDown)
-	if sel := m.actSelected(); sel == nil || sel.key != (actKey{agent: true, id: 2}) {
-		t.Errorf("down should move to the second agent, got %+v", sel)
+	if sel := m.actSelected(); sel == nil || sel.key != (actKey{id: 3}) {
+		t.Errorf("down should move to the running job, got %+v", sel)
 	}
 	m = key(m, kLeft)
 	if m.focus != focusActivity || m.actLevel != actList {
@@ -2618,8 +2619,8 @@ func TestFocus_ArrowsStopAtEveryEdge(t *testing.T) {
 	for range 5 {
 		stay(focusActivity, "↓ to the last row", kDown)
 	}
-	if sel := m.actSelected(); sel == nil || sel.key != (actKey{id: 3}) {
-		t.Fatalf("↓ should stop on the last row (job 3), got %+v", sel)
+	if sel := m.actSelected(); sel == nil || sel.key != (actKey{agent: true, id: 2}) {
+		t.Fatalf("↓ should stop on the last row (idle agent #2), got %+v", sel)
 	}
 	m = key(m, kTab)
 	if m.focus != focusInput {
@@ -2643,8 +2644,8 @@ func TestActivity_OnlyDeadJobsIsStillReachable(t *testing.T) {
 	if m.focus != focusActivity {
 		t.Fatalf("finished jobs should keep the zone reachable, got focus %d", m.focus)
 	}
-	if sel := m.actSelected(); sel == nil || sel.key != (actKey{id: 7}) {
-		t.Fatalf("the first dead job should be highlighted, got %+v", sel)
+	if sel := m.actSelected(); sel == nil || sel.key != (actKey{id: 8}) {
+		t.Fatalf("the job that ended last should be highlighted, got %+v", sel)
 	}
 }
 
