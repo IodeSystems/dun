@@ -42,8 +42,12 @@ var Supported = []Tool{
 	// arguments are -Infinity/Infinity; rest params bind every argument;
 	// slice(0, -1) and a stray break/continue no longer end the process. New
 	// syntax: ??= ||= &&=, labeled loops, numeric separators, more methods.
+	// Recommended v0.8.1 (2026-11-04), tarballs in deps.json: a Go panic in
+	// a command is an "internal error" eval result, not the end of the MCP
+	// server; the script, its vars and the stack go to stderr between
+	// "--- script ---" and "--- end ---".
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.8.0"},
+		Min: "v0.2.0", Recommended: "v0.8.1"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
