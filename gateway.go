@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,11 +44,11 @@ type ShareSpec struct {
 }
 
 // ShareRequest is an engine's ask for an endpoint: the spec, its instance,
-// and for InstanceAgent the agent's number (0 is the session itself).
+// and for InstanceAgent the sub-agent's path in its session ("2", "2.1").
 type ShareRequest struct {
 	Spec     ShareSpec `json:"spec"`
 	Instance string    `json:"instance,omitempty"`
-	Agent    int       `json:"agent,omitempty"`
+	Agent    string    `json:"agent,omitempty"`
 }
 
 // ShareGrant is the gateway's answer: the endpoint, this client's bearer,
@@ -130,11 +129,11 @@ func NewGateway(b *OAuthBroker) *Gateway {
 }
 
 // Key is the upstream a request shares: the spec, and for InstanceAgent
-// the session and the agent number.
+// the session and the agent's path.
 func (r ShareRequest) Key(session string) string {
 	b, _ := json.Marshal(r.Spec)
 	if r.Instance == InstanceAgent {
-		b = append(b, "\x00"+session+"\x00"+strconv.Itoa(r.Agent)...)
+		b = append(b, "\x00"+session+"\x00"+r.Agent...)
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:12])

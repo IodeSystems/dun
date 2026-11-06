@@ -95,7 +95,7 @@ func modelToolName(t mcpmgr.MCPTool) string {
 // regain, when set, is asked about a failed call: true means the server was
 // started again (a shared one the gateway no longer had), and the call is
 // made once more.
-func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool string, args map[string]any, result string),
+func mcpDispatcher(mgr toolCaller, tools []mcpmgr.MCPTool, onCall func(tool string, args map[string]any, result string),
 	regain func(ctx context.Context, serverID string, err error) bool) agent.ToolDispatcher {
 	type route struct{ server, tool string }
 	routes := make(map[string]route, len(tools))
@@ -138,6 +138,19 @@ func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool
 		}
 		return res, nil
 	}
+}
+
+// toolCaller calls one server's tool: a manager, or a child's two
+// (childCaller).
+type toolCaller interface {
+	CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
+}
+
+// childCaller routes a child's call to its own instance or its parent's.
+type childCaller struct{ h *Harness }
+
+func (c childCaller) CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error) {
+	return c.h.mgrFor(serverID).CallTool(ctx, serverID, toolName, args)
 }
 
 // isTruncatedJSON reports whether s looks CUT OFF rather than mis-written: a

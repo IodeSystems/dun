@@ -24,8 +24,12 @@ import (
 //	nodir     no project: no file tools, exec in a scratch directory; for
 //	          research and summaries
 //
-// MCP servers stay the parent's, shared (no second index per child), so
-// poly-lsp reads the parent's tree, not a child's worktree. The isolation is
+// MCP servers stay the parent's, shared (no second index per child), except
+// each server keyed on {{workspace}}: an isolated child resolves those
+// against its own tree and runs its own instance (servers_share.go
+// childOwn), so poly-lsp reads the child's worktree (its daemon gives it a
+// root of its own). Servers not keyed on the workspace stay the parent's
+// (USER 2026-11-06). The isolation is
 // written beside the child's transcript (<sub>.iso.json) so a resumed child
 // goes back to the same tree.
 

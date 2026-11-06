@@ -415,6 +415,12 @@ type Harness struct {
 	// shellShares are the grants the running shell's hosted servers use,
 	// by server id (servers_share.go shareHosted). Guarded by srvMu.
 	shellShares map[string]ShareGrant
+	// ownMgr is a child's own instances (servers_share.go childOwn): an
+	// agent instance, and for a child isolated in a tree of its own each
+	// server keyed on {{workspace}}. own names them; every other server is
+	// its parent's, in mgr. Set in Start, before any turn.
+	ownMgr *mcpmgr.Manager
+	own    map[string]bool
 	// raglit's keys for this session, on the root (raglitauth.go).
 	ragMu                            sync.Mutex
 	ragSession, ragKey, ragBranchKey string
@@ -568,7 +574,16 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// servers answer the same questions, so spawning a second set would pay for
 	// a second poly-lsp index and a second raglit ingest to get identical
 	// answers. It also must not start or stop them: that is the parent's.
+	//
+	// The exception is the child's own instances (childOwn): a server with
+	// instance agent, and, for a child isolated in a tree of its own, each
+	// server keyed on {{workspace}}. They run in a manager of the child's,
+	// under the same ids, so the tool names the model sees do not change.
 	mgr, ownsMgr := cfg.Parent.managerFor()
+	var own map[string]bool
+	if cfg.Parent != nil {
+		servers, own = childOwn(cfg.Parent, cfg, servers)
+	}
 	store, err := openSessionStore(cfg.SessionFile)
 	if err != nil {
 		if ownsMgr {
@@ -610,6 +625,10 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if ownsMgr {
 		mgr.SetNotificationHandler(h.noteServerNotification)
 	}
+	if len(own) > 0 {
+		h.ownMgr, h.own = mcpmgr.NewManager(), own
+		h.ownMgr.SetNotificationHandler(h.noteServerNotification)
+	}
 
 	// Autostart is best-effort by design: a missing binary or a server that
 	// refuses to run is worth SAYING (it lands in Servers()[i].Err, which the
@@ -626,12 +645,12 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// OnServerStarted reports it. Servers() says it is starting until then.
 	var builtins sync.WaitGroup
 	for _, s := range servers {
-		if !s.Autostart || !ownsMgr || s.Via == ViaShell { // the shell starts it
+		if !s.Autostart || (!ownsMgr && !own[s.ID]) || s.Via == ViaShell { // the shell starts it
 			continue
 		}
 		h.markStarting(s.ID)
-		wg := &sync.WaitGroup{} // an added server's: nobody waits on it
-		if builtinServer(s.ID) {
+		wg := &sync.WaitGroup{}               // an added server's: nobody waits on it
+		if builtinServer(s.ID) || own[s.ID] { // a child's own: its first turn wants them
 			wg = &builtins
 		}
 		wg.Add(1)
@@ -642,7 +661,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 			if err != nil && !errors.As(err, &miss) { // not installed: the UI says it, once
 				log.Printf("dun: %s did not start: %v", s.ID, err)
 			}
-			if cfg.OnServerStarted != nil {
+			if cfg.OnServerStarted != nil && ownsMgr { // the session's servers, not a child's
 				cfg.OnServerStarted(s.ID, err)
 			}
 		}()
@@ -834,14 +853,19 @@ func (h *Harness) Close() {
 		hs.Close()
 	}
 	// A child does not own the manager it borrowed. Closing it here would stop
-	// the servers out from under the parent that lent them.
+	// the servers out from under the parent that lent them. Its own instances
+	// are its own: they stop with it (a shared one's client is released).
 	if h.ownsMgr {
 		h.mgr.Close()
+	}
+	if h.ownMgr != nil {
+		h.ownMgr.Close()
 	}
 }
 
 // managerFor gives a child its parent's manager, or a root a fresh one. The
 // bool is whether the caller OWNS it, which is what decides who may close it.
+// A child's own instances are in a manager of its own (Harness.ownMgr).
 func (h *Harness) managerFor() (*mcpmgr.Manager, bool) {
 	if h == nil {
 		return mcpmgr.NewManager(), true

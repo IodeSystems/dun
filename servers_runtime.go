@@ -400,6 +400,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 			s.ID, ShellNamespace(s.ID), s.ID)
 	}
 	t0 := time.Now()
+	mgr := h.mgrFor(s.ID) // a child's own instance is in its own manager
 	h.markStarting(s.ID)
 	// A start can be stopped (cancelStart): switched off while it starts,
 	// it does not hold anything up for the rest of its timeout.
@@ -539,14 +540,14 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if err == nil {
 		phase.set("waiting for the handshake")
 		th := time.Now()
-		err = h.mgr.StartServer(ctx, mcfg)
+		err = mgr.StartServer(ctx, mcfg)
 		if err != nil && shared {
 			h.unshare(s.ID, true)
 		} else if err != nil {
 			err = explainStartErr(ctx, s, err)
 		} else {
 			who := ""
-			if info, ok := h.mgr.ServerInfo(s.ID); ok && (info.Name != "" || info.Version != "") {
+			if info, ok := mgr.ServerInfo(s.ID); ok && (info.Name != "" || info.Version != "") {
 				who = " · " + strings.TrimSpace(info.Name+" "+info.Version)
 			}
 			h.noteServer(s.ID, "handshake done · %s%s", secs(time.Since(th)), who)
@@ -554,14 +555,14 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	}
 	if err == nil {
 		phase.set("waiting for its tools")
-		err = waitServerTools(ctx, h.mgr, s.ID, timeout)
+		err = waitServerTools(ctx, mgr, s.ID, timeout)
 		if err != nil {
-			h.mgr.StopServer(s.ID) // half-started is worse than not started
+			mgr.StopServer(s.ID) // half-started is worse than not started
 		}
 	}
 	// Skills and prompts are read once, at start, so the tool rebuild below
 	// can list them. Only for an added server: the built-ins serve neither.
-	if err == nil && !builtinServer(s.ID) {
+	if err == nil && !builtinServer(s.ID) && h.parent == nil { // a child's catalog is its parent's
 		h.discoverCatalog(ctx, s.ID)
 	}
 	if err == nil && s.ID == ServerShell {
@@ -660,7 +661,7 @@ func (h *Harness) rebuildTools() {
 		h.useNoTools()
 		return
 	}
-	tools := filterTools(h.mgr.GetTools(), h.specs)
+	tools := filterTools(h.mcpTools(), h.specs)
 	hostedNS := h.hostedNamespaces()
 	moved := map[string]string{} // id → namespace, for servers now in the shell
 	if len(hostedNS) > 0 {
@@ -689,7 +690,11 @@ func (h *Harness) rebuildTools() {
 	// CLIPPED result — the one the model actually read.
 	report := h.cappedReporter(cfg.OnToolCall)
 	toolDefs := mcpToolDefs(tools)
-	dispatch := mcpDispatcher(h.mgr, tools, report, h.regainShared)
+	var caller toolCaller = h.mgr
+	if h.ownMgr != nil {
+		caller = childCaller{h}
+	}
+	dispatch := mcpDispatcher(caller, tools, report, h.regainShared)
 	// The extensions the hooks go to, among the running servers.
 	exts := h.extensions()
 	searchers := searchExts(exts, tools)

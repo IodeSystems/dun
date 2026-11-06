@@ -86,7 +86,23 @@ it decides, as `via` does (`ServerScopes.Instance*`, `ServerSpec.Instance`,
   sub-agent whose resolved spec is the same.
 - `session`: one per session, the engine's own, as before the gateway. Its
   sub-agents share it (a child shares its parent's manager).
-- `agent`: one per session and one more per sub-agent.
+- `agent`: one per session and one more per sub-agent. The session's is
+  its own, as `session` is; a child's is a gateway key of its own (the
+  session and the agent's path, "2" or "2.1") under dund, else the child's
+  own start. It runs in a manager of the child's under the same server id,
+  so the tool names the model sees do not change, and stops with the child.
+
+Isolated sub-agents (USER 2026-11-06): a child in a tree of its own
+(isolation worktree or docker) resolves its servers against that tree. Each
+server whose args or env name `{{workspace}}` (poly-lsp's manifest does) is
+then an instance of its own for that tree, by the same rule as any other:
+`shared` with the tree in the key is one per workspace, and poly-lsp's
+daemon gives it a root of its own. A server not keyed on the workspace
+(raglit, a remote one) stays the parent's. A child in its parent's tree
+keeps its parent's servers, as before (`childOwn`, `servers_share.go`).
+A child's own instances start with it and do not follow a later switch in
+the session; the next child, or the child's restart, reads the switches
+again.
 
 Not switchable: the built-in servers. Each declares its fixed instance in
 one place beside the built-in definitions (`builtinInstances`,

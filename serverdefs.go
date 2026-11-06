@@ -41,6 +41,10 @@ type Server struct {
 	// InstanceSession or InstanceAgent; a built-in's fixed one
 	// (builtinInstances). See ServerSpec.Instance.
 	Instance string
+	// PerWorkspace: its args or env name {{workspace}}, so a child isolated
+	// in a tree of its own gets an instance of its own for that tree
+	// (servers_share.go childOwn).
+	PerWorkspace bool
 	// Scopes is where Autostart, Via and Instance came from (mcpscope.go).
 	Scopes ServerScopes
 	// Shell is mcpshell's settings when it hosts the server

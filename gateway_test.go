@@ -252,7 +252,7 @@ func TestShareRequest_Key(t *testing.T) {
 		t.Error("another workspace's args: another key")
 	}
 	a0 := ShareRequest{Spec: sp, Instance: InstanceAgent}
-	a1 := ShareRequest{Spec: sp, Instance: InstanceAgent, Agent: 1}
+	a1 := ShareRequest{Spec: sp, Instance: InstanceAgent, Agent: "1"}
 	if a0.Key("s1") == a1.Key("s1") || a0.Key("s1") == a0.Key("s2") || a0.Key("s1") == shared.Key("s1") {
 		t.Error("agent: a key per session and agent")
 	}

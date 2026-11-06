@@ -316,6 +316,7 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		SessionTools:   sess.Tools,
 		Via:            via,
 		Instance:       instance,
+		PerWorkspace:   workspaceKeyed(s),
 		Shell:          s.Shell,
 		Bearer:         s.Bearer,
 		OAuth:          s.OAuth,
@@ -327,6 +328,18 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		IndexAnyway:    s.IndexAnyway,
 		Wake:           s.Wake,
 	}, true, nil
+}
+
+// workspaceKeyed reports whether s's args or env name {{workspace}}: as
+// written, or in its bundled manifest (whose base is expanded before the
+// layers see it).
+func workspaceKeyed(s ServerSpec) bool {
+	raw := slices.Concat(s.Args, s.Env)
+	if e, ok := bundledExt(s.ID); ok {
+		es := e.server()
+		raw = slices.Concat(raw, es.Args, es.Env)
+	}
+	return slices.ContainsFunc(raw, func(a string) bool { return strings.Contains(a, "{{workspace}}") })
 }
 
 // resolveInstance is the nearest scope's instance switch, recorded in sc:
