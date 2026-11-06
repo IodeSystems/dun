@@ -29,27 +29,27 @@
       }
     },
     "poly-lsp-mcp": {
-      "version": "v0.4.0",
+      "version": "v0.4.1",
       "files": {
         "darwin_amd64": {
-          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.0/poly-lsp-mcp_darwin_amd64.tar.gz",
-          "sha256": "5e0b28125e77f85e1cd3e587eaa35951d5e074d31e0d1cd3cd16d9158950dc69",
-          "size": 19162460
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.1/poly-lsp-mcp_darwin_amd64.tar.gz",
+          "sha256": "eac5ae22433c6d8ca93b34744baf8ccb172c57faabfd32b78c90d4045f7853f4",
+          "size": 19162310
         },
         "darwin_arm64": {
-          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.0/poly-lsp-mcp_darwin_arm64.tar.gz",
-          "sha256": "810e58ff7f7027f3a310ed0b5dcfb0a7a4d3857f82de47f15600cb4c060c2ca9",
-          "size": 17814751
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.1/poly-lsp-mcp_darwin_arm64.tar.gz",
+          "sha256": "b14e87b88e476c2dba7306e3255332927aae8cda7ae4e675af651289189444bb",
+          "size": 17817705
         },
         "linux_amd64": {
-          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.0/poly-lsp-mcp_linux_amd64.tar.gz",
-          "sha256": "9303b827dfb26578b69b2cd0c648f8983cd8b47cfeaf6fde846838e466ce8fde",
-          "size": 17537042
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.1/poly-lsp-mcp_linux_amd64.tar.gz",
+          "sha256": "29a0e4a1ec263e72ecadead1d8fcb76e0fdb82dcb606e2cc2775ef30a786a196",
+          "size": 17539672
         },
         "linux_arm64": {
-          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.0/poly-lsp-mcp_linux_arm64.tar.gz",
-          "sha256": "6a0a57c75b5c22f04bb0d1d1e1a6dc9bf73d567dec09e8b2e3a08cf15ce829bd",
-          "size": 16121097
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.1/poly-lsp-mcp_linux_arm64.tar.gz",
+          "sha256": "fdd72a4b7ecf79865206e4f3523b83d34e1242a0e96149da5d3dd971c0511790",
+          "size": 16124428
         }
       }
     },

@@ -74,9 +74,11 @@ var Supported = []Tool{
 	// list|add|remove` (the /lsp table), per-client --lsp-off / --lsp-on and
 	// --format-on-edit / --no-format-on-edit; the shared daemon reads a
 	// config only from an absolute --config, so custom servers reach it
-	// through `lsp add` (servers.yaml).
+	// through `lsp add` (servers.yaml). Recommended v0.4.1 (cdeeb2a,
+	// 2026-11-03), tarballs in deps.json: child LSPs run at nice +10;
+	// clangd -j is capped at half the cores (at most 8).
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.4.0"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.4.1"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /rag setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,
