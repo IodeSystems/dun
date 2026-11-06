@@ -44,7 +44,8 @@ var sessionTask = func(workspace, id string) string {
 // handlePeer answers an engine's peer request. Its own goroutine, never the
 // event reader's: delivering writes to another engine's stdin, and two
 // readers each waiting on the other's engine would deadlock.
-func (s *Service) handlePeer(from *session, req proto.PeerRequest) {
+// eng is the engine that asked: its gateway clients are its (mcpgw.go).
+func (s *Service) handlePeer(from *session, eng Engine, req proto.PeerRequest) {
 	rep := proto.PeerReply{RID: req.RID}
 	switch req.Op {
 	case "list":
@@ -74,6 +75,15 @@ func (s *Service) handlePeer(from *session, req proto.PeerRequest) {
 		}
 		rep.OAuth = s.OAuth(context.Background(), from, *req.OAuth)
 		rep.Error = rep.OAuth.Error
+	case "mcp_share", "mcp_release":
+		if req.Share == nil {
+			rep.Error = req.Op + ": no request"
+			break
+		}
+		var err error
+		if rep.Share, err = s.mcpShare(from, eng, req.Op, req.Share); err != nil {
+			rep.Error = err.Error()
+		}
 	default:
 		rep.Error = fmt.Sprintf("unknown peer op %q", req.Op)
 	}

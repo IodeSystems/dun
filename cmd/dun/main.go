@@ -744,6 +744,7 @@ func main() {
 			cfg.Peers = peers
 			cfg.Loops = peers
 			cfg.OAuthBroker = peers.oauth // dund holds the OAuth tokens
+			cfg.Gateway = peers           // and the shared MCP servers' connections
 		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }

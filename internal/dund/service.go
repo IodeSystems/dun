@@ -63,6 +63,8 @@ type Service struct {
 	// boxes are the listeners (dun msg --name), by owner and name
 	// (mailbox.go).
 	boxes map[[2]string]*mailbox
+	// gwh is the MCP gateway, started on first use (mcpgw.go).
+	gwh gatewayHolder
 }
 
 // New opens the registry in dir, loading the sessions it lists. Their engines
@@ -690,6 +692,9 @@ func (s *Service) Close() {
 		}()
 	}
 	wg.Wait()
+	if gw := s.gwh.get(false); gw != nil {
+		gw.Close()
+	}
 }
 
 // --- the registry on disk ---

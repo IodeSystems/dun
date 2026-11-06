@@ -67,6 +67,30 @@ func (p *peerLink) oauth(ctx context.Context, req dun.OAuthRequest) (dun.OAuthRe
 	return res, err
 }
 
+// Share asks dund's MCP gateway for a shared server's endpoint
+// (dun/gateway.go). The first share of a server waits on its start, which
+// may wait on a login.
+func (p *peerLink) Share(ctx context.Context, req dun.ShareRequest) (dun.ShareGrant, error) {
+	b, err := json.Marshal(req)
+	if err != nil {
+		return dun.ShareGrant{}, err
+	}
+	rep, err := p.callFor(ctx, proto.PeerRequest{Op: "mcp_share", Share: &proto.McpShareReq{Request: string(b)}}, oauthTimeout)
+	if err != nil {
+		return dun.ShareGrant{}, err
+	}
+	if rep.Share == nil {
+		return dun.ShareGrant{}, errors.New("dund gave no endpoint")
+	}
+	return dun.ShareGrant{URL: rep.Share.URL, Bearer: rep.Share.Bearer, Key: rep.Share.Key}, nil
+}
+
+// Release gives a gateway client back.
+func (p *peerLink) Release(ctx context.Context, bearer string) error {
+	_, err := p.call(ctx, proto.PeerRequest{Op: "mcp_release", Share: &proto.McpShareReq{Release: bearer}})
+	return err
+}
+
 func (p *peerLink) callFor(ctx context.Context, req proto.PeerRequest, timeout time.Duration) (proto.PeerReply, error) {
 	ch := make(chan proto.PeerReply, 1)
 	p.mu.Lock()
@@ -153,6 +177,12 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			if json.Unmarshal(line, &n) == nil && strings.TrimSpace(n.Text) != "" {
 				em.emit(&proto.Notification{Kind: "service", Text: n.Text})
 				h.ServiceNotice(n.Text)
+			}
+		case "mcp_notify":
+			// A shared server's notification, from dund's gateway.
+			var n proto.McpNotify
+			if json.Unmarshal(line, &n) == nil {
+				h.GatewayNotify(n.Key, n.Method, n.Params)
 			}
 		case "servers":
 			// Another session wrote the global server file: re-read it now if

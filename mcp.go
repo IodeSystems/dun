@@ -91,7 +91,12 @@ func modelToolName(t mcpmgr.MCPTool) string {
 // mcpDispatcher routes a model tool call to the owning MCP server (by tool name).
 // Errors meant for the model (unknown tool, bad args, tool failure) are formatted
 // INTO the result so the loop stays alive.
-func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool string, args map[string]any, result string)) agent.ToolDispatcher {
+//
+// regain, when set, is asked about a failed call: true means the server was
+// started again (a shared one the gateway no longer had), and the call is
+// made once more.
+func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool string, args map[string]any, result string),
+	regain func(ctx context.Context, serverID string, err error) bool) agent.ToolDispatcher {
 	type route struct{ server, tool string }
 	routes := make(map[string]route, len(tools))
 	for _, t := range tools {
@@ -122,6 +127,9 @@ func mcpDispatcher(mgr *mcpmgr.Manager, tools []mcpmgr.MCPTool, onCall func(tool
 			}
 		}
 		res, err := mgr.CallTool(ctx, serverID, r.tool, args)
+		if err != nil && regain != nil && regain(ctx, serverID, err) {
+			res, err = mgr.CallTool(ctx, serverID, r.tool, args)
+		}
 		if err != nil {
 			res = fmt.Sprintf("ERROR: %v", err)
 		}

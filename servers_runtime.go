@@ -517,9 +517,19 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		URL: s.URL, Headers: s.Headers,
 		OnStderr: func(line string) { h.addServerLines(s.ID, []string{line}, true) },
 	}
+	// A shared server is one connection in dund for every session
+	// (servers_share.go): the engine connects to dund's endpoint for it,
+	// and dund logs in.
+	shared := err == nil && h.shareable(s)
+	if shared {
+		phase.set("asking dund for the shared connection")
+		err = h.shareStart(ctx, s, &mcfg, timeout)
+	} else {
+		h.unshare(s.ID, false)
+	}
 	// An OAuth server logs in BEFORE it connects: a login takes as long as
 	// the person does, and must not run inside the handshake's timeout.
-	if oc := h.oauthFor(s); err == nil && oc != nil {
+	if oc := h.oauthFor(s); err == nil && oc != nil && !shared {
 		phase.set("logging in (OAuth)")
 		h.noteServer(s.ID, "OAuth: checking the login")
 		err = oc.ensure(ctx)
@@ -529,7 +539,9 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		phase.set("waiting for the handshake")
 		th := time.Now()
 		err = h.mgr.StartServer(ctx, mcfg)
-		if err != nil {
+		if err != nil && shared {
+			h.unshare(s.ID, true)
+		} else if err != nil {
 			err = explainStartErr(ctx, s, err)
 		} else {
 			who := ""
@@ -676,7 +688,7 @@ func (h *Harness) rebuildTools() {
 	// CLIPPED result — the one the model actually read.
 	report := h.cappedReporter(cfg.OnToolCall)
 	toolDefs := mcpToolDefs(tools)
-	dispatch := mcpDispatcher(h.mgr, tools, report)
+	dispatch := mcpDispatcher(h.mgr, tools, report, h.regainShared)
 	// The extensions the hooks go to, among the running servers.
 	exts := h.extensions()
 	searchers := searchExts(exts, tools)

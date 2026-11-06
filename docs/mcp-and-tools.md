@@ -156,6 +156,30 @@ next `mcp_share` starts it again, and an engine whose call fails because the
 gateway has no such server asks again once. A dund upgrade stops every
 engine, so nothing outlives it.
 
+**Code.** The gateway (endpoint, upstreams, clients, grace, OAuth through
+the broker, notification fan-out) is `gateway.go` in package dun, beside the
+broker and the start code it reuses (`waitServerTools`, `brokered`); dund
+wires it (`internal/dund/mcpgw.go`: the peer ops `mcp_share` and
+`mcp_release`, `mcp_login` to the sessions, `mcp_notify` to the engines,
+release on the engine's exit). The engine's half is `servers_share.go`.
+
+- The grace is `GatewayGrace` (2 minutes; a var for tests).
+- A client is one bearer. Its MCP sessions (`Mcp-Session-Id`) are checked
+  on each request; an unknown bearer, or a session id it did not open, is
+  404 `no such server`. `mcp_release` gives a bearer back for a client that
+  will not send `DELETE` itself (a stopped shell).
+- `tools/call` answers the text agentkit rendered; a tool error stays one
+  (`isError`), worded as a direct server's. An upstream call that fails with
+  a closed transport, or a remote that ended its session, drops the upstream.
+- "Asks again once": the engine's dispatcher sees `HTTP 404 from <the
+  endpoint>`, stops the server, shares again, starts it, and repeats the
+  call (`regainShared`).
+- A changed instance restarts a running server (the other connection).
+- Not shared, though `shared`: a server of an extension with a host hook
+  (`host_hooks`): the hook calls back into the engine that started it.
+- What a shared stdio server writes to stderr goes to dund's log, not the
+  engine's activity log for it.
+
 ## Tool cost and toggles
 
 `/mcp` and `/mcp tools` show per server `N tools - ~Xk tokens - M hidden`; each

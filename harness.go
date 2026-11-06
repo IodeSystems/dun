@@ -166,6 +166,9 @@ type Config struct {
 	// refreshes it and runs the login (oauthbroker.go); OnLogin and
 	// OpenBrowser are then dund's to do.
 	OAuthBroker func(ctx context.Context, req OAuthRequest) (OAuthResult, error)
+	// Gateway, when set, is dund's MCP gateway (gateway.go): a shared
+	// server is reached through it, one connection for every session.
+	Gateway MCPGateway
 	// OnNotify fires when a plain notification (KindNotification) is injected
 	// into the conversation (e.g. a background job's completion).
 	OnNotify func(text string)
@@ -406,6 +409,9 @@ type Harness struct {
 	// Servers() reads it while holding srvMu.
 	oauthMu sync.Mutex
 	oauth   map[string]oauthEntry
+	// shared is each server reached through dund's gateway: its grant
+	// (servers_share.go). Guarded by srvMu.
+	shared map[string]ShareGrant
 	// raglit's keys for this session, on the root (raglitauth.go).
 	ragMu                            sync.Mutex
 	ragSession, ragKey, ragBranchKey string

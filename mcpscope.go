@@ -585,7 +585,9 @@ func (h *Harness) reconcileServers(ctx context.Context, restart map[string]bool)
 	// Stops first, so the shell restart and the starts see the new set.
 	for id, o := range old {
 		n, ok := now[id]
-		if h.mgr.ServerStarted(id) && direct(o, true) && (!direct(n, ok) || restart[id]) {
+		// A changed instance is another connection: the shared one, or this
+		// session's own.
+		if h.mgr.ServerStarted(id) && direct(o, true) && (!direct(n, ok) || restart[id] || o.Instance != n.Instance) {
 			h.mgr.StopServer(id)
 			h.noteServer(id, "stopped")
 		}
@@ -601,7 +603,7 @@ func (h *Harness) reconcileServers(ctx context.Context, restart map[string]bool)
 	}
 	for _, n := range next {
 		o, had := old[n.ID]
-		if !direct(n, true) || h.mgr.ServerStarted(n.ID) || h.isStarting(n.ID) || (direct(o, had) && !restart[n.ID]) {
+		if !direct(n, true) || h.mgr.ServerStarted(n.ID) || h.isStarting(n.ID) || (direct(o, had) && !restart[n.ID] && o.Instance == n.Instance) {
 			continue
 		}
 		h.markStarting(n.ID)

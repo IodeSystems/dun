@@ -17,6 +17,7 @@ func init() {
 	command[ServersChanged]("servers")
 	command[OAuthCmd]("oauth")
 	event[OAuthResult]("oauth_result")
+	command[McpNotify]("mcp_notify")
 }
 
 // PeerRequest is an engine asking dund to list the live sessions (Op
@@ -36,6 +37,9 @@ type PeerRequest struct {
 	// server's token and is the one process that refreshes it or logs in
 	// (dun/oauthbroker.go).
 	OAuth *OAuthReq `json:"oauth,omitempty"`
+	// Share is the operation for Op "mcp_share" (an endpoint of dund's MCP
+	// gateway, dun/gateway.go) and "mcp_release" (a client given back).
+	Share *McpShareReq `json:"share,omitempty"`
 }
 
 // PeerReply answers a PeerRequest. Error is set when it failed. For "list",
@@ -52,6 +56,32 @@ type PeerReply struct {
 	Started  bool          `json:"started,omitempty"`
 	Sched    *SchedReply   `json:"sched,omitempty"`
 	OAuth    *OAuthResult  `json:"oauth,omitempty"`
+	Share    *McpShareRep  `json:"share,omitempty"`
+}
+
+// McpShareReq asks dund's gateway for a shared server's endpoint: Request
+// is dun.ShareRequest as JSON (the resolved spec, the instance, the agent
+// number). For "mcp_release", Release is the bearer given back.
+type McpShareReq struct {
+	Request string `json:"request,omitempty"`
+	Release string `json:"release,omitempty"`
+}
+
+// McpShareRep is the endpoint: its URL, this client's bearer, and the
+// upstream's key, which McpNotify names.
+type McpShareRep struct {
+	URL    string `json:"url"`
+	Bearer string `json:"bearer"`
+	Key    string `json:"key"`
+}
+
+// McpNotify is a notification a shared upstream sent (notifications/*),
+// for every engine attached to it: the engine hands it to the servers it
+// reaches through Key as if each had sent it.
+type McpNotify struct {
+	Key    string         `json:"key"`
+	Method string         `json:"method"`
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // OAuthReq asks dund for an OAuth server's token (Op "token"), for one

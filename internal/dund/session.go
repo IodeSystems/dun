@@ -245,7 +245,7 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) 
 	for sc.Scan() {
 		if ev, ok := decodeEvent(sc.Bytes()); ok {
 			if req, ok := ev.Payload.(*proto.PeerRequest); ok {
-				go s.svc.handlePeer(s, *req)
+				go s.svc.handlePeer(s, eng, *req)
 				continue
 			}
 			s.track(ev)
@@ -257,6 +257,7 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) 
 		}
 	}
 	err := eng.Wait()
+	s.svc.releaseEngine(eng) // its gateway clients (mcpgw.go)
 	s.exited(eng, err)
 	// What it was doing ended with it. dund's own "stopped" goes to the log,
 	// not through track, so without this a turn cut by a stop stayed "in a
