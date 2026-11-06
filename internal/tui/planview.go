@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,7 +45,10 @@ type planView struct {
 	// (syncPager); phase steps the motion.
 	live planLive
 	// order maps a page node to its row; -1 is the finished-trees row.
+	// keys names each page node (its id, and which time that id is shown),
+	// so the selection follows a node when the rows move (keepPlace).
 	order []int
+	keys  []string
 	// animating: the last layout has a row in motion, so the pulse runs.
 	animating bool
 }
@@ -100,7 +104,8 @@ func (v *planView) lines(_ *tuiModel, w int) []string {
 
 func (v *planView) page() pageDoc {
 	narrow := v.width > 0 && v.width < narrowW
-	v.order, v.animating = v.order[:0], false
+	v.order, v.keys, v.animating = v.order[:0], v.keys[:0], false
+	seen := map[string]int{}
 	live, done := v.segments()
 	nodes := make([]pageNode, 0, len(v.rows))
 	for _, i := range live {
@@ -152,6 +157,8 @@ func (v *planView) page() pageDoc {
 		nodes = append(nodes, pageNode{head: head, sub: sub, body: strings.Join(body, "\n"), pre: true,
 			err: r.status == "dropped" || r.status == "blocked", style: style})
 		v.order = append(v.order, i)
+		seen[r.id]++
+		v.keys = append(v.keys, fmt.Sprintf("%s#%d", r.id, seen[r.id]))
 	}
 	// Finished trees, out of the way: one row at the end that opens to them
 	// (USER 2026-11-05: "clear done trees and move them out"). The graph
@@ -173,6 +180,7 @@ func (v *planView) page() pageDoc {
 		nodes = append(nodes, pageNode{head: fmt.Sprintf("≡ %s finished · %s", textfmt.Plural(trees, "tree"),
 			textfmt.Plural(len(done), "node")), body: strings.Join(body, "\n"), pre: true, style: &StDim})
 		v.order = append(v.order, -1)
+		v.keys = append(v.keys, "≡")
 	}
 	if len(nodes) == 0 {
 		nodes = append(nodes, pageNode{body: "The plan is empty. The model makes nodes with its plan tool when a task has several steps."})
@@ -315,7 +323,7 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 		v.rows = append(v.rows, r)
 	}
 	if cur := m.planPaging(); cur != nil {
-		v.width = cur.width
+		v.width, v.keys = cur.width, cur.keys // keys: where the selection was (keepPlace)
 		*cur = *v
 		m.syncPager()
 		return m
@@ -453,6 +461,34 @@ func (m *tuiModel) endPlanTell(text string) {
 		m.flashText, m.flashUntil = "told "+t.who+" about node "+t.id, time.Now().Add(flashFor)
 	}
 	m.openPlan()
+}
+
+// keepPlace moves the pager's selection and open nodes from the page laid
+// out with keys before to the same nodes in the page now: a tree finishing
+// above the selection moves its rows to the end, and the next key must act
+// on the node the person was on.
+func (v *planView) keepPlace(p *pager, before []string) {
+	if len(before) == 0 || slices.Equal(before, v.keys) {
+		return
+	}
+	at := make(map[string]int, len(v.keys))
+	for i, k := range v.keys {
+		at[k] = i
+	}
+	if p.cur >= 0 && p.cur < len(before) {
+		if i, ok := at[before[p.cur]]; ok {
+			p.cur = i
+		}
+	}
+	open := map[int]bool{}
+	for i, o := range p.open {
+		if o && i >= 0 && i < len(before) {
+			if j, ok := at[before[i]]; ok {
+				open[j] = true
+			}
+		}
+	}
+	p.open = open
 }
 
 // planLiveNow is the agents' state for /plan.

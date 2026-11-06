@@ -293,3 +293,24 @@ func TestPlanScreen_DiveAndTell(t *testing.T) {
 		t.Errorf("a leading / ran as a command: sent %s", rec.String())
 	}
 }
+
+// The selection follows its node when an update moves the rows: a tree that
+// finishes above the cursor folds away to the end, and e still edits the node
+// the person was on.
+func TestPlanScreen_SelectionFollowsItsNode(t *testing.T) {
+	m, _ := ownedPlanModel(t)
+	for range 2 { // 3, 4, then 5
+		nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		m = nm.(tuiModel)
+	}
+	ev := ownedPlan()
+	rows := ev["rows"].([]any)
+	rows[2].(map[string]any)["status"] = "done"
+	rows[3].(map[string]any)["status"] = "done"
+	m = m.notePlan(ev)
+	nm, _ := m.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+	em := nm.(tuiModel)
+	if got := em.input.Value(); got != "/plan edit 5 title Main's step" {
+		t.Errorf("e acted on %q", got)
+	}
+}

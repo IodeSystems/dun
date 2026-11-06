@@ -24,8 +24,8 @@ import (
 //     resume and a fold; a session with no file keeps it in memory.
 //     Read on first use, and again if the session's file changed (as the
 //     worklog is, worklog.go).
-//   - The `plan` tool, in the built-in group "plan". Root sessions only:
-//     a child gets no plan tool yet (delegation, a later step).
+//   - The `plan` tool, in the built-in group "plan". A root's covers the
+//     graph; a child gets one only while it owns nodes (childPlanTool).
 //   - A turn that begins while the plan has open nodes carries a short line
 //     (planTurnLine).
 //   - Plan mode (/plan mode on), and the person's approval. Both are the
@@ -169,22 +169,36 @@ func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Contex
 // planToolDef is the plan tool for a root session and its handler.
 func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string) {
 	return taskgraph.Tool(planStore{h}, "", taskgraph.WithNote(planNote),
-		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) { h.planTell(cs, "") }))
+		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
+			h.planTell(cs, "the main agent", "")
+		}))
 }
 
 // planTell routes a kept change to the owners it names, without the actor
-// (taskgraph.Change.Tell). Owner "" is this session's main agent, told by an
-// aside on its next turn; note is what it hears. Every node is the main
-// agent's until delegation (docs/taskplan.md) gives a subtree another owner,
-// and with it the session to inject into, so another owner hears nothing yet.
-func (h *Harness) planTell(cs []taskgraph.Change, note string) {
-	if note == "" {
-		return
-	}
+// (taskgraph.Change.Tell); who is the actor, in words. Owner "" is this
+// session's main agent: note is what it hears, as an aside on its next turn
+// ("" tells it nothing). A child that owns a changed node hears which nodes
+// and who changed them, inside its running turn or at its next one.
+func (h *Harness) planTell(cs []taskgraph.Change, who, note string) {
+	main, kids := false, map[int][]string{}
 	for _, c := range cs {
-		if slices.Contains(c.Tell, "") {
-			h.Aside(note)
-			return
+		for _, o := range c.Tell {
+			if o == "" {
+				main = true
+			} else if k, ok := planAgentNum(o); ok && !slices.Contains(kids[k], c.ID) {
+				kids[k] = append(kids[k], c.ID)
+			}
+		}
+	}
+	if main && note != "" {
+		h.Aside(note)
+	}
+	for k, ids := range kids {
+		if sa := h.agentByID(k); sa != nil {
+			if child := sa.harness(); child != nil {
+				child.Notify(fmt.Sprintf("[control/plan] %s changed plan node(s) %s, which you own. "+
+					"plan(show) has them as they are now; carry on to match.", who, strings.Join(ids, ", ")))
+			}
 		}
 	}
 }
@@ -388,7 +402,7 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 			return "", err
 		}
 		h.planChanged()
-		h.planTell(cs, fmt.Sprintf("[control/plan] The user changed node %s's %s to: %s", id, field, text))
+		h.planTell(cs, "the user", fmt.Sprintf("[control/plan] The user changed node %s's %s to: %s", id, field, text))
 		return fmt.Sprintf("node %s: %s set", id, field), nil
 	case "drop":
 		id, why, _ := strings.Cut(rest, " ")
@@ -414,7 +428,7 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		if waiting > 0 {
 			note += " " + strconv.Itoa(waiting) + " node(s) wait on it: replace it (a node with replaces " + id + ") and update their needs."
 		}
-		h.planTell(cs, note)
+		h.planTell(cs, "the user", note)
 		return "node " + id + " dropped", nil
 	case "tell":
 		id, text, _ := strings.Cut(rest, " ")
@@ -430,7 +444,9 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 // to change the plan to match — not a direct edit (USER 2026-11-05: "Decide
 // x" nodes want "it's this way", and the owner should make the change). The
 // main agent is told as /plan approve tells it (a notification, which wakes
-// it); a child, inside its running turn or as its next run.
+// it); a child, inside its running turn (its run continues for it) or as its
+// next run. A node whose child is gone, stopped or dismissed goes to the main
+// agent: no one else can act on it.
 func (h *Harness) planTellOwner(id, text string) (string, error) {
 	g, _ := h.planNow().store.View(context.Background())
 	n := g.Get(id)
@@ -439,27 +455,25 @@ func (h *Harness) planTellOwner(id, text string) (string, error) {
 	}
 	msg := fmt.Sprintf("[control/plan] The user, about plan node %s (%q): %s\n"+
 		"Change the plan to match with the plan tool (this node, or the nodes under it), then carry on.", id, n.Title, text)
-	num, isAgent := strings.CutPrefix(n.Owner, "agent:")
-	if !isAgent {
+	k, isAgent := planAgentNum(n.Owner)
+	var sa *subAgent
+	var child *Harness
+	if isAgent {
+		if sa = h.agentByID(k); sa != nil {
+			child = sa.harness()
+		}
+	}
+	if child == nil {
 		h.Notify(msg)
+		if isAgent {
+			return fmt.Sprintf("told the main agent about node %s (agent #%d, its owner, is not running)", id, k), nil
+		}
 		return fmt.Sprintf("told the main agent about node %s", id), nil
 	}
-	k, _ := strconv.Atoi(num)
-	sa := h.agentByID(k)
-	if sa == nil {
-		return "", fmt.Errorf("node %s belongs to agent #%s, which is gone", id, num)
-	}
-	state, _, _, _ := sa.snapshot()
-	sa.mu.Lock()
-	child := sa.h
-	sa.mu.Unlock()
-	switch {
-	case state == agentRunning && child != nil:
+	if state, _, _, _ := sa.snapshot(); state == agentRunning {
 		child.Say(msg)
 		h.Aside(fmt.Sprintf("The user told agent #%d about plan node %s: %q.", k, id, oneLine(text, 300)))
 		return fmt.Sprintf("told agent #%d about node %s (it is working; it reads this in its turn)", k, id), nil
-	case child == nil:
-		return "", fmt.Errorf("agent #%d is %s; resume it before telling it something", k, state)
 	}
 	out := h.AgentTell(k, msg)
 	if !strings.HasPrefix(out, "Told agent") {
@@ -493,55 +507,125 @@ func (h *Harness) planModeSuffix(p *planState) string {
 
 // ── nodes a child works ─────────────────────────────────────────────────
 
-// A child spawned for a plan node (the agent tool's `node`) owns that node and
-// everything that needs it, until it is dismissed (USER 2026-11-05: color the
-// plan by agent, and dive from a node into the agent working it). Owning them
-// takes them out of the parent's ready list, which keeps the parent from
-// starting them too. The child gets a plan tool over its parent's graph that
-// changes only its own nodes (childPlanTool), so the person can talk to the
-// owner of a node and the owner changes it (PlanCmd "tell").
+// The main agent hands out the plan breadth first (USER 2026-11-06): only a
+// ready node — todo, nobody's, every need done — goes to a child, and only
+// that node, to a new child (agent's node) or an idle one (jobs' node). So no
+// child waits on another's node; when a child's nodes are done, the main
+// agent gives what became ready to the same children or to new ones. A
+// child may hold several. It owes a publish for each — done with notes of
+// what it found or made, or dropped with why — and a run that ends owing is
+// reminded once (subAgent.work). Nodes it adds are its own, and owed too.
+// Owning takes a node out of the main agent's ready list; dismissing the
+// child gives back what it did not finish.
 
 // planOwner is a child as a node's owner: "agent:N", as jobs(agent:N) names it.
 func planOwner(num int) string { return "agent:" + strconv.Itoa(num) }
 
-// planCanAssign says why node id cannot go to a new child, or nil.
+// planAgentNum is the child an owner names ("agent:N").
+func planAgentNum(owner string) (int, bool) {
+	n, ok := strings.CutPrefix(owner, "agent:")
+	if !ok {
+		return 0, false
+	}
+	k, err := strconv.Atoi(n)
+	return k, err == nil && k > 0
+}
+
+// planCanAssign says why node id cannot go to a child, or nil.
 func (h *Harness) planCanAssign(id string) error {
 	if h.isChild() {
-		return fmt.Errorf("a sub-agent has no plan; only the main agent gives nodes to children")
+		return fmt.Errorf("a sub-agent has no plan of its own; only the main agent gives nodes to children")
 	}
 	g, _ := h.planNow().store.View(context.Background())
-	if g.Get(id) == nil {
+	n := g.Get(id)
+	switch {
+	case n == nil:
 		return fmt.Errorf("no plan node %s", id)
+	case n.Owner != "":
+		return fmt.Errorf("node %s already belongs to %s", id, n.Owner)
+	case n.Status != taskgraph.Todo:
+		return fmt.Errorf("node %s is %s; only a todo node can be given", id, n.Status)
 	}
-	for _, n := range g.Subtree(id) {
-		if n.Owner != "" {
-			return fmt.Errorf("node %s already belongs to %s", n.ID, n.Owner)
+	if ok, _ := g.CanStart(id); !ok {
+		return fmt.Errorf("node %s is not ready: it needs %s first. Give its needs out, or do them, and give it when they are done",
+			id, strings.Join(n.Needs, ", "))
+	}
+	return nil
+}
+
+// planAssign gives node id, alone, to child num, and the child its plan tool.
+func (h *Harness) planAssign(id string, num int) error {
+	if err := h.planCanAssign(id); err != nil {
+		return err
+	}
+	if err := h.planNow().store.Update(context.Background(), func(g *taskgraph.Graph) error {
+		n := g.Get(id)
+		if n == nil || n.Owner != "" {
+			return fmt.Errorf("node %s was taken meanwhile", id)
+		}
+		n.Owner = planOwner(num)
+		return nil
+	}); err != nil {
+		return err
+	}
+	h.planChanged()
+	if sa := h.agentByID(num); sa != nil {
+		if child := sa.harness(); child != nil {
+			child.applyTools() // the plan tool, now that it owns a node
 		}
 	}
 	return nil
 }
 
-// planAssign gives node id, and what needs it, to child num.
-func (h *Harness) planAssign(id string, num int) error {
-	p := h.planNow()
-	if err := p.store.Update(context.Background(), func(g *taskgraph.Graph) error {
-		return g.Assign(id, planOwner(num))
-	}); err != nil {
-		return err
+// giveNode gives ready node id to idle child num: what jobs(agent:N, node:)
+// does. It returns the child's next message — the node's brief, then tell.
+func (h *Harness) giveNode(num int, id, tell string) (string, error) {
+	sa := h.agentByID(num)
+	if sa == nil {
+		return "", fmt.Errorf("no agent #%d", num)
 	}
-	h.planChanged()
-	return nil
+	switch state, _, _, _ := sa.snapshot(); {
+	case state == agentRunning:
+		return "", fmt.Errorf("agent #%d is still running; give it node %s once it reports, or start a new agent with agent(node:%q)", num, id, id)
+	case sa.harness() == nil:
+		return "", fmt.Errorf("agent #%d is %s; resume it first, or start a new agent with agent(node:%q)", num, state, id)
+	}
+	if err := h.planAssign(id, num); err != nil {
+		return "", err
+	}
+	msg := "Work this plan node next." + h.planBrief(id)
+	if tell = strings.TrimSpace(tell); tell != "" {
+		msg += "\n\n" + tell
+	}
+	return msg, nil
 }
 
-// planRelease gives back to the main agent the nodes a dismissed child owned
-// and did not finish, so they return to its ready list instead of waiting on
-// a child that is gone. Finished nodes keep their owner: who did them.
+// planBrief is what a child is told of a node it is given.
+func (h *Harness) planBrief(id string) string {
+	g, _ := h.planNow().store.View(context.Background())
+	n := g.Get(id)
+	if n == nil {
+		return ""
+	}
+	b := fmt.Sprintf("\n\nYou own plan node %s: %s.", id, n.Title)
+	if n.Goal != "" {
+		b += " Goal: " + n.Goal + "."
+	}
+	if n.DoneWhen != "" {
+		b += " Done when: " + n.DoneWhen + "."
+	}
+	return b + " Publish it with the plan tool when its work is done: status done with notes of what you " +
+		"found or made, or dropped with why. The main agent plans what follows from what you publish."
+}
+
+// planRelease gives back to the main agent the nodes child num owned and did
+// not finish, so they return to its ready list instead of waiting on a child
+// that is gone. Finished nodes keep their owner: who did them.
 func (h *Harness) planRelease(num int) {
 	owner, released := planOwner(num), false
-	p := h.planNow()
-	_ = p.store.Update(context.Background(), func(g *taskgraph.Graph) error {
+	_ = h.planNow().store.Update(context.Background(), func(g *taskgraph.Graph) error {
 		for _, n := range g.Nodes {
-			if n.Owner == owner && n.Status != taskgraph.Done && n.Status != taskgraph.Dropped {
+			if n.Owner == owner && planOpen(n) {
 				n.Owner, released = "", true
 			}
 		}
@@ -550,6 +634,29 @@ func (h *Harness) planRelease(num int) {
 	if released {
 		h.planChanged()
 	}
+}
+
+// planReleaseOrphans gives back the unfinished nodes of children this session
+// no longer has, or has dismissed (a resume after a crash that kept no record
+// of one).
+func (h *Harness) planReleaseOrphans() {
+	g, _ := h.planNow().store.View(context.Background())
+	seen := map[int]bool{}
+	for _, n := range g.Nodes {
+		k, ok := planAgentNum(n.Owner)
+		if !ok || seen[k] || !planOpen(n) {
+			continue
+		}
+		seen[k] = true
+		if sa := h.agentByID(k); sa == nil || sa.isDismissed() {
+			h.planRelease(k)
+		}
+	}
+}
+
+// planOpen: not done and not dropped.
+func planOpen(n *taskgraph.Node) bool {
+	return n.Status != taskgraph.Done && n.Status != taskgraph.Dropped
 }
 
 // planOwns says whether owner owns any node of this session's plan.
@@ -563,24 +670,59 @@ func (h *Harness) planOwns(owner string) bool {
 	return false
 }
 
+// planOwed is the nodes owner has not published yet.
+func (h *Harness) planOwed(owner string) []*taskgraph.Node {
+	g, _ := h.planNow().store.View(context.Background())
+	var out []*taskgraph.Node
+	for _, n := range g.Nodes {
+		if n.Owner == owner && planOpen(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // childPlanNote is the child's plan tool's extra sentence.
 const childPlanNote = "This is your parent's plan. You own some of its nodes and may change, add under and " +
-	"finish only those; the rest are shown so you can see what yours wait on and what waits on yours."
+	"finish only those; the rest are shown so you can see what yours wait on and what waits on yours. " +
+	"You owe a publish for each node you own: status done with notes of what you found or made, or dropped with why."
 
-// childPlanTool is a child's plan tool: its parent's graph, as owner
-// cfg.PlanOwner, changing only that owner's nodes. What it changes reaches the
-// parent's screen at once, and the parent's main agent when it touches a
-// node of theirs.
+// childPlanTool is a child's plan tool: its parent's graph, as its owner
+// ("agent:N"), changing only that owner's nodes. What it changes reaches the
+// parent's screen at once; a publish (done or dropped) wakes the parent's
+// main agent, with what became ready, and any other change rides its next turn.
 func (h *Harness) childPlanTool() (llm.ToolDef, func(context.Context, string) string) {
-	parent, actor := h.cfg.Parent, h.cfg.PlanOwner
+	parent, actor := h.cfg.Parent, planOwner(h.cfg.AgentID)
 	return taskgraph.Tool(planStore{parent}, actor, taskgraph.WithNote(childPlanNote),
 		taskgraph.WithMayChange(func(a string, n *taskgraph.Node) bool { return n != nil && n.Owner == a }),
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
-			ids := make([]string, 0, len(cs))
-			for _, c := range cs {
-				ids = append(ids, c.ID)
-			}
-			parent.planTell(cs, fmt.Sprintf("[control/plan] agent #%d changed plan node(s) %s.",
-				h.cfg.AgentID, strings.Join(slices.Compact(ids), ", ")))
+			parent.planFromChild(h.cfg.AgentID, cs)
 		}))
+}
+
+// planFromChild tells the main agent what child num changed.
+func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
+	var ids, published, ready []string
+	for _, c := range cs {
+		if !slices.Contains(ids, c.ID) {
+			ids = append(ids, c.ID)
+		}
+		if c.After != nil && !planOpen(c.After) && (c.Before == nil || planOpen(c.Before)) {
+			published = append(published, fmt.Sprintf("%s %s", c.ID, c.After.Status))
+		}
+		if c.Ready && c.After != nil && c.After.Owner == "" {
+			ready = append(ready, c.ID)
+		}
+	}
+	who := fmt.Sprintf("agent #%d", num)
+	if len(published) == 0 {
+		h.planTell(cs, who, fmt.Sprintf("[control/plan] %s changed plan node(s) %s.", who, strings.Join(ids, ", ")))
+		return
+	}
+	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has its notes).", who, strings.Join(published, ", "))
+	if len(ready) > 0 {
+		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (jobs(agent:N, node:…)), a new one (agent(node:…)), or do them."
+	}
+	h.planTell(cs, who, "")
+	h.Notify(msg)
 }

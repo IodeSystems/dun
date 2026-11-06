@@ -806,12 +806,13 @@ func (h *Harness) rebuildTools() {
 		}
 	}
 	// plan: the task plan (plan.go). A root's covers the graph; a child's,
-	// only when it owns nodes, covers those (childPlanTool).
+	// only while it owns nodes of its parent's, covers those (childPlanTool;
+	// planAssign rebuilds the tools when it is given its first).
 	if !h.isChild() {
 		def, handle := h.planTool()
 		toolDefs = append(toolDefs, def)
 		dispatch = withPlan(dispatch, h, handle, report)
-	} else if h.cfg.PlanOwner != "" && h.cfg.Parent != nil {
+	} else if h.cfg.Parent != nil && h.cfg.Parent.planOwns(planOwner(h.cfg.AgentID)) {
 		def, handle := h.childPlanTool()
 		toolDefs = append(toolDefs, def)
 		dispatch = withPlan(dispatch, h, handle, report)

@@ -118,32 +118,59 @@ WHEN: once as each turn begins (`prepareTurn`), not per tool result. The model's
 person makes arrives as its own note. A turn with no open nodes gets none. Cost: at
 most 5 short lines (about 100 tokens) a turn.
 
-## A child owns a node (2026-11-05)
+## Children work ready nodes, breadth first (2026-11-06)
 
-The light link, before full delegation. `agent({prompt, node})` gives the child the
-node and everything that needs it (`Graph.Assign`, owner `agent:N`) BEFORE the child
-starts, so its tool set has a plan tool: the parent's graph, as actor `agent:N`, with
-`WithMayChange` allowing only that owner's nodes (`childPlanTool`). Its changes reach
-the parent's screen at once and the main agent when they touch its nodes. Owned nodes
-leave the main agent's ready list (`Ready("")`). Dismissing the child gives its
-unfinished nodes back to owner ""; finished ones keep who did them.
+The main agent is the only scheduler. It gives a child a READY node — todo, owner
+"", every need done — and only that node: `agent({prompt, node})` for a new child,
+`jobs({agent: N, node})` for an idle one. So no child ever waits on another child's
+node, and there is no subgraph to compute. When nodes are published, the main agent
+gives what became ready to the same children or to new ones.
+
+USER 2026-11-06, after a first cut that gave a node and everything that needs it
+(`Graph.Assign`): that split a diamond badly (A→M, B→M: the child for A took M, so
+B could not go to another). Considered next: one batched call that gives each named
+node plus its unowned prerequisites, with cross-owner waits. Rejected for this:
+"breadth first open levels — main agent can only assign to unblocked, and when
+resolved, main agent can reassign to newly unblocked or create new agents for them."
+
+- A child may own several nodes. It **owes a publish** for each: status done with
+  notes of what it found or made, or dropped with why. Nodes it adds are its own, and
+  owed too.
+- A run that ends owing is reminded ONCE (`subAgent.work`); if it still owes, its
+  report says so ("Still owes a publish for …") and the main agent decides. Once, so
+  a child that cannot finish does not loop. (Assumption, not the user's words.)
+- A run also takes one more turn for a message that arrived during its last round
+  and that no tool result carried (`/plan tell` to a running child).
+- A publish WAKES the main agent (a notification): which nodes, and what became
+  ready. Other child edits ride its next turn as an aside.
+- A change someone else makes to a child's node (the person's `/plan edit|drop`, the
+  main agent) is told to that child, as a notification it reads in its turn.
+- The child's plan tool: the parent's graph, as actor `agent:N`, `WithMayChange`
+  allowing only that owner's nodes (`childPlanTool`). It is in the child's tool set
+  while it owns nodes; `planAssign` rebuilds the child's tools (`applyTools`).
+- The node is given after the child is on record (`h.agents`, its sidecar), so a
+  crash leaves it with nobody rather than with a child no resume knows of; a resume
+  also gives back the open nodes of children it has no record of
+  (`planReleaseOrphans`). Dismissing a child gives back what it did not finish;
+  finished nodes keep who did them.
 
 `/plan tell <id> <text>` hands the person's words about a node to its owner, to
 change the plan to match, instead of a direct edit (USER: "Decide x" nodes want
 "it's this way"). The main agent hears it as a notification; a running child inside
-its turn (`Say`); an idle one as its next run (`AgentTell`).
+its turn (`Say`); an idle one as its next run (`AgentTell`); a node whose child is
+gone, stopped or dismissed goes to the main agent.
 
-## Delegation (later)
+agentkit's `Graph.Subtree` and `Graph.Assign` (a node and what needs it) are unused
+by dun now.
 
-`plan delegate <node>` spawns a child owning that node and all that hangs from it. The
-child sees only its subgraph and can change only that; it may add nodes under it, and
-those show to the person. Status flows back; when it finishes, the parent is told and
-new nodes are ready. Each node may name a model and effort. Unrelated nodes can run in
-parallel with worktree isolation.
+## Later
+
+Each node may name a model and effort. Unrelated nodes can run in parallel with
+worktree isolation (the child's isolation, today).
 
 ## Build order
 
 1. The graph, the tool, storage, the group. ✅ (graph and tool moved to agentkit v0.22.0)
 2. `/plan` in the TUI, plan mode and approval. ✅
-3. Delegation. ◐ a child owns a node and changes it (above); `plan delegate` is not built.
+3. Delegation. ✅ breadth first: ready nodes to children, a publish owed for each (above).
 4. Parallel runs and per-node models.

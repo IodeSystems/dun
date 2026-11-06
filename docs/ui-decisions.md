@@ -193,6 +193,9 @@ are in `decisions.md`.
   dimming, says what is active. enter on a node a child owns dives into
   that child; on the main agent's working node it closes the screen;
   otherwise it opens details, as → always does.
+  The selection and open rows follow their node when an update moves the
+  rows (a tree finishing above the cursor), so the next key acts on the
+  node the person was on.
 - **Talking to a plan node lends the composer (2026-11-05).** `t` on a node
   closes /plan, the placeholder and status say `tell <owner> about node N`,
   and enter sends `/plan tell`; esc sends nothing. Either way /plan comes

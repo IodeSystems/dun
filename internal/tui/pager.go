@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -352,6 +353,11 @@ func (m *tuiModel) syncPager() {
 		}
 		if pv, ok := m.pg.id.(*planView); ok { // who is working, for its colours and motion
 			pv.live = m.planLiveNow()
+			before := slices.Clone(pv.keys)
+			doc := pv.page()
+			pv.keepPlace(&m.pg, before)
+			m.pg.layout(doc, m.vp.Width, h)
+			return
 		}
 		m.pg.layout(v.page(), m.vp.Width, h)
 		return

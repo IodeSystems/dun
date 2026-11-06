@@ -450,10 +450,6 @@ func childConfig(parent *Harness, num int, cc childRun, iso isolation) Config {
 	}
 	cfg.Parent = parent
 	cfg.AgentID = num
-	cfg.PlanOwner = ""
-	if parent.planOwns(planOwner(num)) {
-		cfg.PlanOwner = planOwner(num)
-	}
 	cfg.Client = cc.client
 	cfg.ChildModel = cc.model
 	cfg.Effort = cc.effort
@@ -533,8 +529,8 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effor
 	return h.spawnAgentFor(ctx, prompt, provider, model, effort, mode, "")
 }
 
-// spawnAgentFor is spawnAgent for a plan node: the child owns node (and what
-// needs it) from before it starts, so its tool set has the plan tool for them.
+// spawnAgentFor is spawnAgent for a plan node: the child is given node (a
+// ready one, planCanAssign) before its first turn, and its brief says so.
 func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, effort, mode, node string) (*subAgent, error) {
 	if provider == "" && model == "" {
 		provider, model = h.cfg.ChildProvider, h.cfg.ChildModel
@@ -569,21 +565,11 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, ef
 	// (that is the whole point of an async spawn), so tying it to the caller's
 	// context would kill it the moment the parent's turn ended.
 	runCtx, cancel := context.WithCancel(context.Background())
-	if node != "" {
-		if err := h.planAssign(node, num); err != nil {
-			cancel()
-			iso.release()
-			return nil, err
-		}
-	}
 	ccfg := childConfig(h, num, run, iso)
 	child, err := Start(runCtx, ccfg)
 	if err != nil {
 		cancel()
 		iso.release()
-		if node != "" {
-			h.planRelease(num)
-		}
 		return nil, err
 	}
 	saveIsolation(ccfg.SessionFile, iso)
@@ -609,6 +595,15 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, ef
 	h.agMu.Unlock()
 	sa.hook(child)
 	sa.saveState()
+	// Given only once the child is on record: a crash before this leaves the
+	// node with nobody, not with a child no resume knows of.
+	if node != "" {
+		if err := h.planAssign(node, num); err != nil {
+			sa.quit()
+			return nil, err
+		}
+		prompt += h.planBrief(node)
+	}
 	h.agentsChanged()
 
 	go sa.run(runCtx, prompt+iso.brief())
@@ -630,7 +625,7 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 		return
 	}
 
-	res, err := h.Ask(ctx, prompt)
+	res, err := s.work(ctx, h, prompt)
 	switch {
 	case ctx.Err() != nil:
 		s.settle(agentDismissed)
@@ -646,6 +641,62 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 		}
 	}
 	s.settleReporting(agentIdle)
+}
+
+// work is one run of the child: msg's turn, then a turn for what arrived
+// too late for it (a message during its last round, which no tool result
+// carried), then — once a run — a reminder of the plan nodes it still owes a
+// publish for. A run that still owes after the reminder ends anyway; its
+// report says what it owes, for the main agent.
+func (s *subAgent) work(ctx context.Context, h *Harness, msg string) (agent.TurnResult, error) {
+	res, err := h.Ask(ctx, msg)
+	reminded := false
+	for range 8 { // bounded: a run never loops on its own news
+		if err != nil || ctx.Err() != nil {
+			break
+		}
+		if h.Pending() > 0 {
+			var next agent.TurnResult
+			if next, err = h.Continue(ctx); err == nil && strings.TrimSpace(next.Reply) != "" {
+				res = next
+			}
+			continue
+		}
+		owed := s.owed()
+		if len(owed) == 0 || reminded {
+			break
+		}
+		reminded = true
+		var next agent.TurnResult
+		if next, err = h.Ask(ctx, "[control/plan] Before you stop: you have not published plan node(s) "+
+			strings.Join(owed, ", ")+". For each, set status done with notes of what you found or made, "+
+			"or dropped with why, using the plan tool. If one cannot be finished, say why in its notes and drop it, "+
+			"or leave it and say why in your reply."); err == nil && strings.TrimSpace(next.Reply) != "" {
+			res.Reply = strings.TrimSpace(res.Reply + "\n\n" + next.Reply) // the answer stays; this adds to it
+		}
+	}
+	if owed := s.owed(); len(owed) > 0 && err == nil && ctx.Err() == nil {
+		res.Reply = strings.TrimSpace(res.Reply + "\n\n(Still owes a publish for plan node(s) " + strings.Join(owed, ", ") + ".)")
+	}
+	return res, err
+}
+
+// owed is the ids and titles of the plan nodes this child has not published.
+func (s *subAgent) owed() []string {
+	if s.parent == nil {
+		return nil
+	}
+	var out []string
+	for _, n := range s.parent.planOwed(planOwner(s.num)) {
+		out = append(out, fmt.Sprintf("%s (%s)", n.ID, n.Title))
+	}
+	return out
+}
+
+func (s *subAgent) isDismissed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state == agentDismissed
 }
 
 func (s *subAgent) finalIsEmpty() bool {
@@ -686,7 +737,7 @@ func (s *subAgent) tell(msg string) string {
 	s.parent.agentsChanged()
 
 	go func() {
-		res, err := h.Ask(ctx, msg)
+		res, err := s.work(ctx, h, msg)
 		if err != nil {
 			s.setFinal("FAILED: " + err.Error())
 		} else if reply := strings.TrimSpace(res.Reply); reply != "" && s.finalIsEmpty() {
@@ -834,6 +885,9 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 		if sa.harness() != nil {
 			resumed = append(resumed, sa)
 		}
+	}
+	if !h.isChild() {
+		h.planReleaseOrphans()
 	}
 	return resumed, cut
 }
@@ -1096,9 +1150,9 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 			"effort": map[string]any{"type": "string", "enum": EffortLevels,
 				"description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server"},
 			"wait": map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
-			"node": map[string]any{"type": "string", "description": "the plan node this child works on: it owns that node " +
-				"and every node that needs it until you dismiss it, and they leave your ready list. It gets a plan tool " +
-				"that changes only those nodes"},
+			"node": map[string]any{"type": "string", "description": "a ready plan node (todo, nobody's, its needs done) for this child: " +
+				"it owns that node alone and owes you a publish of it (done with notes, or dropped with why); the node leaves " +
+				"your ready list. It gets a plan tool that changes only its own nodes. Give an idle agent more with jobs(agent:N, node:…)"},
 			"isolation": map[string]any{"type": "string", "enum": []string{IsoNone, IsoWorktree, IsoDocker, IsoNoDir},
 				"description": "where the child works. none (default): this tree. worktree: its own git worktree branched " +
 					"from this tree's last commit (uncommitted changes are not in it); it commits there and you merge its " +
@@ -1155,7 +1209,7 @@ func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort,
 		return "ERROR: agent requires a non-empty prompt."
 	}
 	node = strings.TrimSpace(node)
-	// Checked before the spawn, so a bad node starts no child.
+	// Checked before the spawn too, so a bad node starts no child.
 	if node != "" {
 		if err := h.planCanAssign(node); err != nil {
 			return "ERROR: " + err.Error() + ". No agent was started."
@@ -1167,9 +1221,8 @@ func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort,
 	}
 	owns := ""
 	if node != "" {
-		owns = fmt.Sprintf(" It owns plan node %s and every node that needs it, so they are out of your ready "+
-			"list. It has a plan tool for them: it can change, add under, and finish its own nodes. "+
-			"Dismissing it gives back the ones not done.", node)
+		owns = fmt.Sprintf(" It owns plan node %s, out of your ready list, and owes you a publish of it; "+
+			"you are told when it publishes, with what became ready. Dismissing it gives back what it did not finish.", node)
 	}
 	if !wait {
 		where := ""

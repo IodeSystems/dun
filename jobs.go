@@ -65,6 +65,8 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 		props["agent"] = map[string]any{"type": "integer", "description": "a sub-agent's number"}
 		props["tell"] = map[string]any{"type": "string", "description": "agent only: its next message — the answer, if it ended its turn with a question, or new work"}
 		props["resume"] = map[string]any{"type": "boolean", "description": "agent only: restart a stopped agent from its transcript"}
+		props["node"] = map[string]any{"type": "string", "description": "agent only: give this idle agent a ready plan node " +
+			"(todo, nobody's, its needs done) and start it on it; tell adds to the brief. It owes you a publish of it"}
 	}
 	props["tail"] = map[string]any{"type": "integer", "description": "show the last N lines of " + strings.Join(tail, " or ")}
 	props["kill"] = map[string]any{"type": "boolean", "description": "true " + strings.Join(kill, ", or ")}
@@ -88,6 +90,7 @@ type jobsArgs struct {
 	Grep        *string `json:"grep"`
 	BufferBytes *int    `json:"buffer_bytes"`
 	Ignore      *bool   `json:"ignore"`
+	Node        string  `json:"node"`
 }
 
 func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
@@ -133,7 +136,7 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 // pollSig is a read of one job (no wait, kill, tell, resume or tuning) as a
 // key; plain is false for anything else, which never turns into a wait.
 func (a jobsArgs) pollSig() (string, bool) {
-	if a.Wait || a.Kill || a.Tell != "" || a.Resume || a.Grep != nil || a.BufferBytes != nil || a.Ignore != nil {
+	if a.Wait || a.Kill || a.Tell != "" || a.Resume || a.Node != "" || a.Grep != nil || a.BufferBytes != nil || a.Ignore != nil {
 		return "", false
 	}
 	switch {
@@ -190,17 +193,20 @@ func (a jobsArgs) reported() map[string]any {
 	if a.Resume {
 		m["resume"] = true
 	}
+	if a.Node != "" {
+		m["node"] = a.Node
+	}
 	return m
 }
 
 const (
 	jobsCommandParams = "A command's job (job:N) takes wait, tail, kill, grep, buffer_bytes, ignore."
-	jobsAgentParams   = "An agent (agent:N) takes wait, tail, kill, tell, resume."
+	jobsAgentParams   = "An agent (agent:N) takes wait, tail, kill, tell, resume, node."
 )
 
 func runJobs(ctx context.Context, h *Harness, a jobsArgs) string {
 	commandOnly := a.Grep != nil || a.BufferBytes != nil || a.Ignore != nil
-	agentOnly := a.Tell != "" || a.Resume
+	agentOnly := a.Tell != "" || a.Resume || a.Node != ""
 	switch {
 	case a.Job != nil && a.Agent != nil:
 		// The model saw "background job #N" in an agent's report or tail and
@@ -219,10 +225,20 @@ func runJobs(ctx context.Context, h *Harness, a jobsArgs) string {
 		if commandOnly {
 			return "ERROR: grep, buffer_bytes and ignore are for a command's job. " + jobsAgentParams
 		}
+		if node := strings.TrimSpace(a.Node); node != "" {
+			if a.Kill || a.Resume {
+				return "ERROR: node starts an idle agent on a node; it does not go with kill or resume."
+			}
+			tell, err := h.giveNode(*a.Agent, node, a.Tell)
+			if err != nil {
+				return "ERROR: " + err.Error()
+			}
+			a.Tell = tell
+		}
 		return agentMonitor(ctx, h, a.Agent, a.Tail, a.Tell, a.Wait, a.Resume, a.Kill)
 	}
 	if agentOnly {
-		return "ERROR: tell and resume are for a sub-agent. " + jobsCommandParams
+		return "ERROR: tell, resume and node are for a sub-agent. " + jobsCommandParams
 	}
 	if a.Kill {
 		msg, err := h.KillJob(*a.Job, "model")

@@ -89,17 +89,12 @@ type Config struct {
 	// index), reports to it, and gets the child tool set instead of the root's.
 	Parent *Harness
 	// AgentID is this child's id within its parent. Zero for a root.
-	AgentID int
-	// PlanOwner is this child as the owner of nodes in its parent's plan
-	// ("agent:N"), when it owns any: it then gets a plan tool over its
-	// parent's graph that changes only its own nodes (plan.go). "" for a
-	// root, and for a child that owns none.
-	PlanOwner string
-	System    string         // nil → defaultSystem
-	Exec      ExecBackend    // nil → no exec tool; else adds the built-in exec tool
-	Ask       AskFunc        // nil → no ask_user tool; else adds the human-in-the-loop tool
-	Mount     mounttool.Func // nil → no mount tool; else adds the mount (host path → container) tool
-	Worktree  *Worktree      // the session worktree
+	AgentID  int
+	System   string         // nil → defaultSystem
+	Exec     ExecBackend    // nil → no exec tool; else adds the built-in exec tool
+	Ask      AskFunc        // nil → no ask_user tool; else adds the human-in-the-loop tool
+	Mount    mounttool.Func // nil → no mount tool; else adds the mount (host path → container) tool
+	Worktree *Worktree      // the session worktree
 	// CommitCfg is how /worktree commit writes its message. nil = the
 	// conventional-commits default.
 	CommitCfg   *CommitConfig
