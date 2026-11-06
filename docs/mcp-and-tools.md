@@ -64,6 +64,83 @@ servers cannot be moved. Code: `shellhost.go`, `servers_config.go`.
 - Direct servers other than the built-ins get tool names `<id>__<tool>`
   (two servers may share a tool name). Built-in names stay unprefixed.
 
+## One connection per server: dund's gateway (2026-11-06)
+
+USER 2026-11-06: "global/shared mcp servers actually init as many times as
+they are used in dun sessions -- we need dun to hold ONE connection for a mcp
+server, and then route request/responses to the dun agents transparently,
+such that /mcp add something_requiring_auth doesn't force the auth restart to
+happen X active sessions -- this should also save startup time and memory."
+Then: "it should work in mcpshell, and we should be able to toggle if it's
+shared or per-session, or even per-subagent", and the switch set: "global,
+project, session, (scripted, standalone), instance: (shared (default),
+session, agent)".
+
+**The switch.** `instance` is a third per-server switch beside on/off and
+mode, set at global, project or session scope; the nearest scope that sets
+it decides, as `via` does (`ServerScopes.Instance*`, `ServerSpec.Instance`,
+`SessionServer.Instance`). `/mcp instance <id> shared|session|agent|unset
+[--global|--project|--session]`, and a column in the `/mcp` table.
+
+- `shared` (default): one connection in dund for every session and
+  sub-agent whose resolved spec is the same.
+- `session`: one per session, the engine's own, as before the gateway. Its
+  sub-agents share it (a child shares its parent's manager).
+- `agent`: one per session and one more per sub-agent.
+
+Not switchable: the built-in servers (shell, poly-lsp, raglit; mcpshell
+holds a session's `eval` state, poly-lsp and raglit have daemons of their
+own). A scripted server with `agent` is refused: it runs in the session's
+shell, and a child has no shell of its own. With no dund (a test, a bare
+`dun -p`), `shared` acts as `session`.
+
+**The key** is the spec as the engine resolves it: the command found on PATH,
+args (placeholders expanded, so a `{{workspace}}` server is per workspace),
+env with `$NAME` values read, url, headers and bearer resolved, the oauth
+block, the timeout. dund starts engines in its own directory, so a stdio
+server's working directory is the same for every session and is not part of
+the key. Two sessions that resolve a server differently get two
+connections; `agent` adds the session and the agent number to the key,
+which is what makes it its own.
+
+**The data path** is MCP. dund serves each shared server as a Streamable
+HTTP endpoint on a loopback listener (`127.0.0.1`, a random port, the path
+naming the key) and each client gets its own bearer, so the engine's
+manager and mcpshell connect to it as to any remote server, with no new
+transport and no change to agentkit. dund holds the one upstream connection
+(agentkit's `mcpmgr`, as an engine does) and answers `initialize` from the
+upstream's handshake, `tools/list` from its tools, and forwards
+`tools/call`, `resources/*`, `prompts/*` and `ping`. A tool's result is the
+text agentkit renders, which is all an engine reads; an image arrives as
+agentkit's `[image: …]` line either way.
+
+**The control path** is the engine's stdio to dund (peer op `mcp_share`):
+the engine sends the resolved spec and the instance; dund answers with the
+endpoint's URL and a bearer for this client. dund counts each client
+against its session; a client's `DELETE` (the manager's close) and the
+engine's exit release it. The upstream stops a grace period after its last
+client is released, so a server switched off and on, or a session resumed,
+does not pay the start again.
+
+**Auth.** dund already holds every OAuth token (`oauthbroker.go`); the
+gateway's upstream asks the broker directly, so an OAuth server logs in once
+for every session. A login's URL goes to the session that started the
+upstream, and to every session attached while the login waits, as the
+`mcp_login` event. The engine runs no OAuth for a shared server, and
+mcpshell's entry for one is the gateway URL with its bearer, so it needs no
+`auth_cmd`.
+
+**Notifications** the upstream sends (`notifications/*`: tools changed, log
+messages) go to every attached engine over its stdio (`mcp_notify`), which
+hands them to its manager's handler as if its own server had sent them.
+
+**Start and failure.** The first client's `mcp_share` starts the upstream
+and waits for its handshake and tools, under the spec's timeout; later
+clients get the running one at once. An upstream that exits is dropped; the
+next `mcp_share` starts it again, and an engine whose call fails because the
+gateway has no such server asks again once. A dund upgrade stops every
+engine, so nothing outlives it.
+
 ## Tool cost and toggles
 
 `/mcp` and `/mcp tools` show per server `N tools - ~Xk tokens - M hidden`; each
