@@ -33,11 +33,11 @@ func switchesEvent(h *dun.Harness, action string) *proto.Switches {
 		return &proto.Switches{Kind: kind, Message: "no such kind of switches: " + kind}
 	}
 	ev := &proto.Switches{Kind: v.Kind, Items: []proto.SwitchItem{}, Mode: v.Mode, ModeFrom: v.ModeFrom,
-		Modes: v.Modes, About: v.About, Order: v.Order, Note: v.Note, Message: msg, Slash: v.Slash, Status: v.Status}
+		Modes: v.Modes, About: v.About, Order: v.Order, Note: v.Note, Message: msg, Slash: v.Slash, Status: v.Status, Search: v.Search}
 	for _, it := range v.Items {
 		ev.Items = append(ev.Items, proto.SwitchItem{Name: it.Name, Description: it.Description, Source: it.Source,
 			Detail: it.Detail, Tokens: it.Tokens, On: it.On, From: it.From,
-			Global: it.Global, Project: it.Project, Session: it.Session})
+			Global: it.Global, Project: it.Project, Session: it.Session, Parent: it.Parent})
 	}
 	return ev
 }

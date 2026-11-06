@@ -73,6 +73,9 @@ type switchKind struct {
 	// status is facts for a UI's status pane, a sentence each: what the
 	// kind depends on and whether it is there (raglit for the rules).
 	status func(mode string) []string
+	// search is where the kind looks for its items, a line each, for a pane
+	// under the list: what was found and what was not.
+	search func() []string
 	// prepare, when set, runs before a mode is saved: what the mode needs
 	// (a summary written), or why it cannot be set.
 	prepare func(mode string) error
@@ -192,6 +195,7 @@ type SwitchView struct {
 	Note     string            `json:"note,omitempty"`
 	Slash    string            `json:"slash,omitempty"` // the command: "skill", "rules"
 	Status   []string          `json:"status,omitempty"`
+	Search   []string          `json:"search,omitempty"` // where the kind looks (switchKind.search)
 }
 
 // switchView builds a kind's view.
@@ -215,6 +219,9 @@ func (h *Harness) switchView(k switchKind) SwitchView {
 	}
 	if k.status != nil {
 		v.Status = k.status(v.Mode)
+	}
+	if k.search != nil {
+		v.Search = k.search()
 	}
 	return v
 }

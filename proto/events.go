@@ -858,6 +858,9 @@ type Switches struct {
 	Message  string            `json:"message,omitempty"`
 	Slash    string            `json:"slash,omitempty"`  // the command: "skill", "rules"
 	Status   []string          `json:"status,omitempty"` // facts for the status pane
+	// Search is where the kind looks, a line each, for a pane under the
+	// list (the rules: the root files' names, the import rule, the caps).
+	Search []string `json:"search,omitempty"`
 }
 
 // SkillFile answers the control command "skillfile", whose action is JSON
@@ -891,6 +894,9 @@ type SwitchItem struct {
 	Global      string `json:"global,omitempty"`
 	Project     string `json:"project,omitempty"`
 	Session     string `json:"session,omitempty"`
+	// Parent names the row this one sits under (an index under its rag
+	// provider, a rules file under the one that imports it).
+	Parent string `json:"parent,omitempty"`
 }
 
 // Extensions is every extension, for a UI's /ext list: the control command

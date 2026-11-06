@@ -165,3 +165,38 @@ func TestLSPPicker_BareLSPOpensTheTable(t *testing.T) {
 		t.Errorf("sent %s", rec.String())
 	}
 }
+
+// /rules is a tree: an import sits under the file that imports it, one
+// indent a level; a file with imports shows its cost with them; the pane
+// under the list says where the rules are looked for (USER 2026-11-06).
+func TestRulesPicker_TreeAndSearchPane(t *testing.T) {
+	v := newVtui(160, 40)
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
+	rec := &recWC{}
+	v.m.proc = &dunProc{stdin: rec}
+	v.m = typeStr(v.m, "/rules")
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	v.event(map[string]any{"type": "switches", "kind": "rules", "slash": "rules", "mode": "full", "order": []any{"full", "summary", "index"},
+		"items": []any{
+			map[string]any{"name": "AGENTS.md", "source": "root", "tokens": 1000.0, "on": true},
+			map[string]any{"name": "docs/a.md", "source": "import", "parent": "AGENTS.md", "tokens": 2000.0, "on": true},
+			map[string]any{"name": "docs/b.md", "source": "import", "parent": "docs/a.md", "tokens": 500.0, "on": true},
+			map[string]any{"name": "docs/off.md", "source": "import", "parent": "AGENTS.md", "tokens": 9000.0, "on": false},
+		},
+		"search": []any{"looked for in /ws:", "  ✓ AGENTS.md", "  ✗ CLAUDE.md (not there)"},
+	})
+	got := v.view()
+	for _, want := range []string{
+		"● AGENTS.md  ~1.0k tok (~3.5k with imports)",
+		"▸   ● docs/a.md  ~2.0k tok (~2.5k with imports)",
+		"▸     ● docs/b.md  ~500 tok  g",
+		"✗ CLAUDE.md (not there)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "✗ CLAUDE.md") < strings.Index(got, "docs/b.md") {
+		t.Errorf("the search pane is not under the list:\n%s", got)
+	}
+}

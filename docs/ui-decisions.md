@@ -111,6 +111,19 @@ are in `decisions.md`.
   status (mode, cost, what it depends on, a warning) is a pane above it,
   never a row; under 80 columns a row is two lines, the name above its
   switches and cost.
+- **`/rules` is a tree, with where it looks below** (USER 2026-11-06:
+  "we should have those in a tree, with the estimated ctx size, and we
+  should also have a lower pane that shows our search paths"). Each
+  `@path` import sits under the file that imports it, depth first, one
+  indent a level; a missing or unread import is a row that says why. A file
+  that imports others shows its cost and, beside it, the cost with every
+  import under it that is on. The pane under the list names each root file
+  dun looks for in the workspace (✓ found, ✗ not there, · not read because
+  the other spelling is), the import rule and depth, the caps, and what is
+  not read (subdirectories, `.dun/`, `.claude/`, `~/.claude/CLAUDE.md`; an
+  `@path` brings one in). Any switch list whose rows have parents keeps its
+  rows' spacing, so the indent shows (the indexes under raglit in `/rag`
+  too: their parent never reached the TUI before).
 - **`/file` searches only after `/` or `~`** (USER 2026-11-06: "we should
   HAVE to type "/" to search, so we can toggle things on the file like
   global,project,session and read,write"). Every path starts with one of the

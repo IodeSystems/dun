@@ -113,7 +113,7 @@ func loadRules(workspace string) rulesSet {
 		data []byte
 	}
 	var roots []root
-	for _, names := range [][]string{{"AGENTS.md", "agents.md"}, {"CLAUDE.md"}} {
+	for _, names := range rulesRoots {
 		for _, n := range names {
 			p := filepath.Join(workspace, n)
 			if b, err := os.ReadFile(p); err == nil {
@@ -144,6 +144,40 @@ func loadRules(workspace string) rulesSet {
 		l.imports(d, 1)
 	}
 	return set
+}
+
+// rulesRoots are the root files' names, each a list tried in order (the
+// first that exists is read).
+var rulesRoots = [][]string{{"AGENTS.md", "agents.md"}, {"CLAUDE.md"}}
+
+// rulesSearch is where the rules are looked for, for /rules' lower pane: each
+// root file's path in the workspace, found or not, then how imports are
+// followed and the caps. Only these: not subdirectories, not .dun/ or
+// .claude/, not the home directory's.
+func rulesSearch(workspace string) []string {
+	if workspace == "" {
+		return []string{"no workspace: no rules files"}
+	}
+	out := []string{"looked for in " + workspace + ":"}
+	for _, names := range rulesRoots {
+		found := false
+		for i, n := range names {
+			p := filepath.Join(workspace, n)
+			switch _, err := os.Stat(p); {
+			case found:
+				out = append(out, "  · "+n+" (not read: "+names[i-1]+" is)")
+			case err == nil:
+				out = append(out, "  ✓ "+n)
+				found = true
+			default:
+				out = append(out, "  ✗ "+n+" (not there)")
+			}
+		}
+	}
+	out = append(out,
+		fmt.Sprintf("imports: @path in a file read (relative to that file, ~ is home), %d deep at most", rulesImportDepth),
+		fmt.Sprintf("caps: %d KiB a file, %d KiB in all · not read: subdirectories, .dun/, .claude/, ~/.claude/CLAUDE.md (import one with @path)", rulesFileMax>>10, rulesTotalMax>>10))
+	return out
 }
 
 // doc makes a rulesDoc of a file's bytes, cut to the caps.

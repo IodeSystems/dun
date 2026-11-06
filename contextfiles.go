@@ -36,20 +36,37 @@ func (h *Harness) rulesSwitchKind() switchKind {
 			set := loadRules(h.cfg.Workspace)
 			var out []SwitchItem
 			add := func(d rulesDoc, desc string) {
-				it := SwitchItem{Name: d.Name, Description: desc, Source: "root", Tokens: h.meter.Estimate(d.heading() + "\n\n" + d.Text)}
+				it := SwitchItem{Name: d.Name, Description: desc, Source: "root", Parent: d.From}
+				if d.Text != "" || d.Note == "" {
+					it.Tokens = h.meter.Estimate(d.heading() + "\n\n" + d.Text)
+				}
 				if d.From != "" {
 					it.Source = "import"
 				}
 				if d.Note != "" {
 					it.Detail = d.Note
+					if d.Text == "" {
+						it.Source = "import · " + d.Note
+					}
 				}
 				out = append(out, it)
 			}
+			// A tree: each root, then what it imports, depth first (the
+			// order they were read in), so each import sits under its file.
+			kids := map[string][]rulesDoc{}
+			for _, d := range set.Imports {
+				kids[d.From] = append(kids[d.From], d)
+			}
+			var walk func(d rulesDoc)
+			walk = func(d rulesDoc) {
+				for _, k := range kids[d.Name] {
+					add(k, "imported by "+k.From)
+					walk(k)
+				}
+			}
 			for _, d := range set.Roots {
 				add(d, "the project's rules (a root file: off takes the project's own rules out of every request)")
-			}
-			for _, d := range set.Imports {
-				add(d, "imported by "+d.From)
+				walk(d)
 			}
 			return out
 		},
@@ -68,6 +85,7 @@ func (h *Harness) rulesSwitchKind() switchKind {
 			}
 			return nil
 		},
+		search: func() []string { return rulesSearch(h.cfg.Workspace) },
 		// No note: the status line says whether the docs index is on, and
 		// what that changes; the same thing twice was the warning (USER
 		// 2026-10-25).

@@ -383,13 +383,40 @@ func (p *serverLogPane) hint(*tuiModel) string {
 // ── a switch list (/rules, /skill) ──────────────────────────────────
 
 // switchScreen is a kind's status pane over its list.
-func switchScreen() *paneScreen {
-	return &paneScreen{
+// switchScreen is a switch list's screen; search: with a pane under the
+// list saying where the kind looks (/rules: its files).
+func switchScreen(search bool) *paneScreen {
+	s := &paneScreen{
 		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: switchListPane{}, weight: 1, min: 3}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.switchesPaging() != nil },
 	}
+	if search {
+		s.panes = append(s.panes, screenPane{body: switchSearchPane{}, fixed: true})
+	}
+	return s
 }
+
+// switchSearchPane is the pane under a switch list: where its kind looks.
+type switchSearchPane struct{}
+
+func (switchSearchPane) lines(m *tuiModel, w int) []string {
+	if v := m.switchesPaging(); v != nil {
+		return v.searchLines(w)
+	}
+	return nil
+}
+
+func (p switchSearchPane) view(m *tuiModel, w, h int) string {
+	rows := p.lines(m, w)
+	if len(rows) > h {
+		rows = rows[:h]
+	}
+	return lipgloss.NewStyle().Width(w).MaxWidth(w).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
+}
+
+func (switchSearchPane) key(*tuiModel, tea.KeyPressMsg) bool { return false }
+func (switchSearchPane) hint(*tuiModel) string               { return "" }
 
 // viewStatusPane is a list's status pane: the lines its view (the pager's)
 // gives, the mode, the cost, the facts and a warning.

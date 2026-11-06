@@ -54,6 +54,7 @@ type switchListView struct {
 	order    []string          // the modes, the default first
 	note     string            // a warning, in the status pane
 	status   []string          // the kind's facts (raglit on or off), in the status pane
+	search   []string          // where the kind looks (the rules' files), in a pane under the list
 	query    string
 	width    int // the pane's; under narrowW a row is two lines
 }
@@ -164,6 +165,9 @@ func (v *switchListView) page() pageDoc {
 		title = fmt.Sprintf("filter %q: %d of %d shown", v.query, len(shown), len(v.rows))
 	}
 	narrow := v.width > 0 && v.width < narrowW
+	// A tree (an import under its file, an index under its provider) keeps
+	// its rows' spacing, or the indent that shows the level collapses.
+	tree := slices.ContainsFunc(v.rows, func(r switchRow) bool { return r.parent != "" })
 	nodes := make([]pageNode, 0, len(shown)+1)
 	for _, i := range shown {
 		r := v.rows[i]
@@ -173,7 +177,11 @@ func (v *switchListView) page() pageDoc {
 		}
 		first, _, _ := strings.Cut(strings.TrimSpace(r.desc), "\n")
 		cells := fmt.Sprintf("g%s p%s s%s", mcptable.CellMark(r.global), mcptable.CellMark(r.project), mcptable.CellMark(r.session))
-		head := fmt.Sprintf("%s %s  ~%s tok  %s  %s  %s", mark, r.name, numfmt.KTokens(r.tokens), cells, r.source, first)
+		cost := "~" + numfmt.KTokens(r.tokens) + " tok"
+		if all := v.treeTokens(i); all > r.tokens { // a file that imports others: with them
+			cost += " (~" + numfmt.KTokens(all) + " with imports)"
+		}
+		head := fmt.Sprintf("%s %s  %s  %s  %s  %s", mark, r.name, cost, cells, r.source, first)
 		if len(v.order) == 0 { // no cost to show: the indexes
 			head = fmt.Sprintf("%s %s  %s  %s  %s", mark, r.name, cells, r.source, first)
 		}
@@ -184,7 +192,7 @@ func (v *switchListView) page() pageDoc {
 			// unset row is on by default, and three dashes on every row
 			// were noise (USER 2026-10-25, a phone).
 			head = mark + " " + r.name
-			sub = fmt.Sprintf("~%s tok · %s", numfmt.KTokens(r.tokens), r.source)
+			sub = cost + " · " + r.source
 			if len(v.order) == 0 {
 				sub = r.source
 			}
@@ -195,9 +203,9 @@ func (v *switchListView) page() pageDoc {
 				sub += " · " + first
 			}
 		}
-		if r.parent != "" { // under its provider, dim while the provider is off
-			head = "  " + head
-			if p := v.byName(r.parent); p != nil && !p.on {
+		if d, off := v.depth(r); d > 0 { // under its provider or importer, dim while one above is off
+			head = strings.Repeat("  ", d) + head
+			if off {
 				head = StDim.Render(ansi.Strip(head))
 			}
 		}
@@ -212,7 +220,7 @@ func (v *switchListView) page() pageDoc {
 			body += "\n" + r.detail
 		}
 		body += "\n\n" + strings.TrimSpace(r.desc)
-		nodes = append(nodes, pageNode{head: head, sub: sub, body: body})
+		nodes = append(nodes, pageNode{head: head, sub: sub, body: body, pre: tree})
 	}
 	if v.query != "" && len(shown) == 0 {
 		nodes = append(nodes, pageNode{head: fmt.Sprintf("nothing matches %q — backspace or esc", v.query)})
@@ -296,6 +304,11 @@ func (m tuiModel) noteSwitches(ev evMsg) tuiModel {
 			fresh.status = append(fresh.status, str(x))
 		}
 	}
+	if sp, ok := ev["search"].([]any); ok {
+		for _, x := range sp {
+			fresh.search = append(fresh.search, str(x))
+		}
+	}
 	if o, ok := ev["order"].([]any); ok {
 		for _, x := range o {
 			fresh.order = append(fresh.order, str(x))
@@ -327,7 +340,7 @@ func (m tuiModel) noteSwitches(ev evMsg) tuiModel {
 		}
 		m.pg = newPager(-1, fresh)
 		m.paging = true
-		m.scr = switchScreen() // the status pane over the list (panes.go)
+		m.scr = switchScreen(len(fresh.search) > 0) // the status pane over the list (panes.go)
 		m.syncPager()
 	case msg != "":
 		m.append(replyLine(msg))
@@ -491,6 +504,48 @@ func (m *tuiModel) fileTableCmd(action string) {
 	if !m.proc.controlCmd("files", action) || !m.proc.controlCmd("switches", "paths") {
 		m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
 	}
+}
+
+// depth is how many rows r sits under (its parent, theirs, …), and whether
+// one of them is off. A missing parent ends the chain; so does a loop.
+func (v *switchListView) depth(r switchRow) (d int, off bool) {
+	seen := map[string]bool{r.name: true}
+	for p := v.byName(r.parent); p != nil && !seen[p.name]; p = v.byName(p.parent) {
+		seen[p.name] = true
+		d++
+		off = off || !p.on
+	}
+	return d, off
+}
+
+// treeTokens is row i's cost with everything under it that is on: a rules
+// file with the files it imports.
+func (v *switchListView) treeTokens(i int) int {
+	total := v.rows[i].tokens
+	for j := range v.rows {
+		if j == i || !v.rows[j].on {
+			continue
+		}
+		for p := v.byName(v.rows[j].parent); p != nil; p = v.byName(p.parent) {
+			if p.name == v.rows[i].name {
+				total += v.rows[j].tokens
+				break
+			}
+			if p.name == v.rows[j].name { // a loop
+				break
+			}
+		}
+	}
+	return total
+}
+
+// searchLines is the pane under the list: where the kind looks.
+func (v *switchListView) searchLines(w int) []string {
+	var out []string
+	for _, s := range v.search {
+		out = append(out, wrapToRows(StDim.Render(s), w)...)
+	}
+	return out
 }
 
 func (v *switchListView) byName(name string) *switchRow {

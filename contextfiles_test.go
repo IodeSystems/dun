@@ -52,6 +52,44 @@ func TestContextFiles_Switches(t *testing.T) {
 	}
 }
 
+// /rules is a tree (USER 2026-11-06: "we should have those in a tree, with
+// the estimated ctx size, and ... a lower pane that shows our search
+// paths"): each import under the file that imports it, depth first, after
+// its root; a missing import is a row that says so; the search lines name
+// each root file found or not, and the import rule.
+func TestContextFiles_TreeAndSearch(t *testing.T) {
+	ws := t.TempDir()
+	writeRule(t, filepath.Join(ws, "AGENTS.md"), "root @docs/a.md @gone.md")
+	writeRule(t, filepath.Join(ws, "docs", "a.md"), "a imports @b.md")
+	writeRule(t, filepath.Join(ws, "docs", "b.md"), "b rule")
+	writeRule(t, filepath.Join(ws, "CLAUDE.md"), "claude @docs/c.md")
+	writeRule(t, filepath.Join(ws, "docs", "c.md"), "c rule")
+	h := rulesHarness(t, ws)
+	v, _ := h.SwitchView(rulesKind)
+	var got []string
+	for _, it := range v.Items {
+		got = append(got, it.Name+"<"+it.Parent)
+	}
+	want := []string{"AGENTS.md<", "docs/a.md<AGENTS.md", "docs/b.md<docs/a.md", "gone.md<AGENTS.md", "CLAUDE.md<", "docs/c.md<CLAUDE.md"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("tree:\n got %v\nwant %v", got, want)
+	}
+	for _, it := range v.Items {
+		if it.Name == "gone.md" && (it.Tokens != 0 || !strings.Contains(it.Source, "not found")) {
+			t.Errorf("missing import: %+v", it)
+		}
+	}
+	search := strings.Join(v.Search, "\n")
+	for _, w := range []string{"✓ AGENTS.md", "· agents.md (not read: AGENTS.md is)", "✓ CLAUDE.md", "@path", "5 deep", ".claude/"} {
+		if !strings.Contains(search, w) {
+			t.Errorf("search lacks %q:\n%s", w, search)
+		}
+	}
+	if s := strings.Join(rulesSearch(t.TempDir()), "\n"); !strings.Contains(s, "✗ AGENTS.md (not there)") || !strings.Contains(s, "✗ agents.md") || !strings.Contains(s, "✗ CLAUDE.md") {
+		t.Errorf("an empty workspace:\n%s", s)
+	}
+}
+
 // /rules <mode> sets the project's mode in the rules switches and clears the
 // mode rules.json held, so a mode has one home per scope; a mode a scope
 // sets is what RulesStatus reports.
