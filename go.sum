@@ -92,10 +92,14 @@ github.com/iodesystems/agentkit v0.22.0 h1:+5U+dD4XVQRbLIpGn2mqhcieK7fPAgxxrCfsw
 github.com/iodesystems/agentkit v0.22.0/go.mod h1:O6wkM17stJqYuTeWBksIXYCD14+byuZ2AsH4TWRjoXw=
 github.com/iodesystems/agentkit v0.23.0 h1:bJqr4kYla5WvUkX90zqJ5cjt8x+kswgShZxYwQrVMD8=
 github.com/iodesystems/agentkit v0.23.0/go.mod h1:O6wkM17stJqYuTeWBksIXYCD14+byuZ2AsH4TWRjoXw=
+github.com/iodesystems/agentkit v0.24.0 h1:2ojP7hUH85mSSi+Bu5C2uzBhReWVnL2vwWQK9nObsmE=
+github.com/iodesystems/agentkit v0.24.0/go.mod h1:QknznlQRmU0Ywotk64RrZVAYKH+8HBw4Uhfg2HdQ8As=
 github.com/iodesystems/gwag/v2 v2.3.1 h1:KaMWT1XDxQegVL9fAjTde6KQDvOWaWvDRkVgJqBH26g=
 github.com/iodesystems/gwag/v2 v2.3.1/go.mod h1:DhwtM+vBI1xKDCmJf5Up85GwhBoSZI3mSrYSCwXRqHk=
 github.com/iodesystems/openai-claude-api-shim v0.4.0 h1:vvQIeoFN91lsf0sY3RcyjjWCVSIK/z6GAoE2d9tgMmQ=
 github.com/iodesystems/openai-claude-api-shim v0.4.0/go.mod h1:AyPLwyzGcME+wU6ggxHvDj8s0tek7NFx/vbZHhog0nM=
+github.com/iodesystems/openai-claude-api-shim v0.5.0 h1:jXVz48LGnJ/fB9uf4GTM9JiPL06d1IaQx6nQoovZ+ug=
+github.com/iodesystems/openai-claude-api-shim v0.5.0/go.mod h1:AyPLwyzGcME+wU6ggxHvDj8s0tek7NFx/vbZHhog0nM=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
