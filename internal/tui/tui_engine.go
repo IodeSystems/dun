@@ -284,22 +284,6 @@ func (p *dunProc) send(content string, imgs []proto.Image) bool {
 	return json.NewEncoder(p.stdin).Encode(ev) == nil
 }
 
-// sendReset tells the engine to clear its session store.
-func (p *dunProc) sendReset() bool {
-	if p == nil {
-		return false
-	}
-	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "reset"}) == nil
-}
-
-// serverCmd asks the engine to report on, start, or stop a tool server.
-func (p *dunProc) serverCmd(alias, action string) bool {
-	if p == nil {
-		return false
-	}
-	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "server", "id": alias, "action": action}) == nil
-}
-
 // controlCmd asks the engine to perform a control action (docker/worktree).
 func (p *dunProc) controlCmd(id, action string) bool {
 	if p == nil {

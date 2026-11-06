@@ -45,7 +45,7 @@ func thinkingRound() []llm.StreamChunk {
 func TestReasoningTee_ReportsDeltasForwardsChunks(t *testing.T) {
 	inner := &thinkRunner{chunks: thinkingRound()}
 	var got []string
-	r := teeReasoning(inner, func(s string) { got = append(got, s) })
+	r := &reasoningTee{LLMRunner: inner, on: func(s string) { got = append(got, s) }}
 	ch, err := r.ChatStream(context.Background(), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -63,9 +63,6 @@ func TestReasoningTee_ReportsDeltasForwardsChunks(t *testing.T) {
 	if untee(r) != inner {
 		t.Error("untee does not give back the runner underneath")
 	}
-	if teeReasoning(inner, nil) != inner {
-		t.Error("no callback should mean no tee")
-	}
 }
 
 // A reader that walks away (its context cancelled) does not strand the tee's
@@ -73,7 +70,7 @@ func TestReasoningTee_ReportsDeltasForwardsChunks(t *testing.T) {
 func TestReasoningTee_CancelledReaderDrains(t *testing.T) {
 	src := make(chan llm.StreamChunk)
 	ctx, cancel := context.WithCancel(context.Background())
-	r := teeReasoning(chanRunner(src), func(string) {})
+	r := &reasoningTee{LLMRunner: chanRunner(src), on: func(string) {}}
 	out, _ := r.ChatStream(ctx, nil, nil, nil)
 	src <- llm.StreamChunk{Reasoning: "a"} // taken by the tee, now blocked on out
 	cancel()

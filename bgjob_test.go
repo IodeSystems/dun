@@ -335,20 +335,16 @@ func TestJobs_MutedJobIsStillPushed(t *testing.T) {
 	}
 }
 
-func TestExecMonitor_ListsJobsAndAppliesSettings(t *testing.T) {
+// jobs(job:N, …) tunes a command's job and reports on it; a bad pattern is
+// reported, not swallowed.
+func TestJobs_TuneACommandsJob(t *testing.T) {
 	h := testHarness(t)
-	if out := execMonitor(h, nil, nil, nil, nil); !strings.Contains(out, "No background jobs") {
-		t.Errorf("an empty list should say so: %q", out)
-	}
-
 	j := testJob(h, 9, "build")
 	h.bgMu.Lock()
 	h.bgJobs = map[int]*bgJob{9: j}
 	h.bgMu.Unlock()
 
-	id, buf := 9, 100
-	grep, ignore := "ERROR", false
-	out := execMonitor(h, &id, &buf, &grep, &ignore)
+	out := jobsCall(t, h, "jobs", `{"job":9,"buffer_bytes":100,"grep":"ERROR","ignore":false}`)
 	if !strings.Contains(out, "#9 RUNNING") {
 		t.Errorf("the report should lead with the job's state: %q", out)
 	}
@@ -359,8 +355,7 @@ func TestExecMonitor_ListsJobsAndAppliesSettings(t *testing.T) {
 		t.Errorf("settings were not applied: %+v", mon)
 	}
 
-	bad := "([unclosed"
-	if out := execMonitor(h, &id, nil, &bad, nil); !strings.Contains(out, "not a valid regexp") {
+	if out := jobsCall(t, h, "jobs", `{"job":9,"grep":"([unclosed"}`); !strings.Contains(out, "not a valid regexp") {
 		t.Errorf("a bad pattern must be reported, not swallowed: %q", out)
 	}
 }

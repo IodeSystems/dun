@@ -42,15 +42,6 @@ func (h *Harness) teeTurn(r agent.LLMRunner, on func(string)) agent.LLMRunner {
 	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req}
 }
 
-// teeReasoning wraps r so on sees each reasoning delta. nil on → r itself, so
-// a host that does not ask pays nothing.
-func teeReasoning(r agent.LLMRunner, on func(string)) agent.LLMRunner {
-	if r == nil || on == nil {
-		return r
-	}
-	return &reasoningTee{LLMRunner: r, on: on}
-}
-
 // untee is the runner under a tee, for a call that is not the turn's.
 func untee(r agent.LLMRunner) agent.LLMRunner {
 	if t, ok := r.(*reasoningTee); ok {

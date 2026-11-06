@@ -690,30 +690,6 @@ func (h *Harness) bgJobList() []*bgJob {
 	return out
 }
 
-// execMonitor tunes job id and reports on it, or lists every job when id is
-// nil: the command half of the jobs tool (jobs.go).
-func execMonitor(h *Harness, id, bufferBytes *int, grep *string, ignore *bool) string {
-	if id == nil {
-		jobs := h.bgJobList()
-		if len(jobs) == 0 {
-			return "No background jobs. Start one with a long exec; it hands itself over after the grace."
-		}
-		lines := make([]string, 0, len(jobs))
-		for _, j := range jobs {
-			lines = append(lines, j.status())
-		}
-		return strings.Join(lines, "\n")
-	}
-	j := h.bgJobByID(*id)
-	if j == nil {
-		return fmt.Sprintf("ERROR: no background job #%d.", *id)
-	}
-	if msg := tuneJob(h, j, bufferBytes, grep, ignore); msg != "" {
-		return msg
-	}
-	return jobReport(j, 0)
-}
-
 func describeMonitor(m bgMonitor) string {
 	if m.Ignore {
 		return "monitor: MUTED (no progress, no completion notice)"
