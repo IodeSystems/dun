@@ -280,4 +280,16 @@ func TestPlanScreen_DiveAndTell(t *testing.T) {
 	if m.planTelling != nil || !m.planWant || strings.Contains(rec.String(), "tell") {
 		t.Errorf("esc must send nothing and go back to /plan: %s", rec.String())
 	}
+
+	// A tell that starts with "/" is still the words, not a command.
+	m, rec = ownedPlanModel(t)
+	nm, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+	m = nm.(tuiModel)
+	rec.Reset()
+	m.input.SetValue("/src/db should be postgres")
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	if !strings.Contains(rec.String(), `"tell 3 /src/db should be postgres"`) || m.planTelling != nil {
+		t.Errorf("a leading / ran as a command: sent %s", rec.String())
+	}
 }

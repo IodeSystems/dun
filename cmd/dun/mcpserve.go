@@ -276,7 +276,7 @@ func (s *mcpServer) call(name string, a map[string]any) (string, error) {
 		}
 		return s.wait(str("session"), uint64(max(0, num("after", 0))), "", wait)
 	case "dun_answer":
-		if str("session") == "" {
+		if str("session") == "" || strings.TrimSpace(str("value")) == "" {
 			return "", errors.New("session and value are required")
 		}
 		return s.send(str("session"), proto.NewCommand("", &proto.Answer{Value: str("value")}), "", wait)

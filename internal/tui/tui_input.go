@@ -391,6 +391,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			v := strings.TrimSpace(m.input.Value())
+			// Lent to /plan tell: every line is the words for the node's
+			// owner, even one that starts with "/" or is "exit".
+			if m.planTelling != nil {
+				if v == "" {
+					return m, nil
+				}
+				return m.sendUserImages(v, nil), nil
+			}
 			if strings.HasPrefix(v, "/") {
 				return m, m.runPaletteEnter(v)
 			}
@@ -411,7 +419,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.starting && m.scopeAgent == 0 && m.planTelling == nil {
+			if m.starting && m.scopeAgent == 0 {
 				return m.keepUntilReady(v, m.input.Images()), nil
 			}
 			return m.sendUserImages(v, m.input.Images()), nil
