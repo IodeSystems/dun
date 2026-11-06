@@ -450,6 +450,10 @@ func childConfig(parent *Harness, num int, cc childRun, iso isolation) Config {
 	}
 	cfg.Parent = parent
 	cfg.AgentID = num
+	cfg.PlanOwner = ""
+	if parent.planOwns(planOwner(num)) {
+		cfg.PlanOwner = planOwner(num)
+	}
 	cfg.Client = cc.client
 	cfg.ChildModel = cc.model
 	cfg.Effort = cc.effort
@@ -526,6 +530,12 @@ func (h *Harness) clientFor(provider, model string) (childRun, error) {
 // spawnAgent starts a child and registers it. The child is RUNNING when this
 // returns; the caller decides whether to wait for it.
 func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effort, mode string) (*subAgent, error) {
+	return h.spawnAgentFor(ctx, prompt, provider, model, effort, mode, "")
+}
+
+// spawnAgentFor is spawnAgent for a plan node: the child owns node (and what
+// needs it) from before it starts, so its tool set has the plan tool for them.
+func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, effort, mode, node string) (*subAgent, error) {
 	if provider == "" && model == "" {
 		provider, model = h.cfg.ChildProvider, h.cfg.ChildModel
 	}
@@ -559,11 +569,21 @@ func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effor
 	// (that is the whole point of an async spawn), so tying it to the caller's
 	// context would kill it the moment the parent's turn ended.
 	runCtx, cancel := context.WithCancel(context.Background())
+	if node != "" {
+		if err := h.planAssign(node, num); err != nil {
+			cancel()
+			iso.release()
+			return nil, err
+		}
+	}
 	ccfg := childConfig(h, num, run, iso)
 	child, err := Start(runCtx, ccfg)
 	if err != nil {
 		cancel()
 		iso.release()
+		if node != "" {
+			h.planRelease(num)
+		}
 		return nil, err
 	}
 	saveIsolation(ccfg.SessionFile, iso)
@@ -697,6 +717,9 @@ func (s *subAgent) quit() string {
 		h.Close()
 	}
 	s.settle(agentDismissed)
+	if s.parent != nil {
+		s.parent.planRelease(s.num)
+	}
 	rel := s.iso.release()
 	if path := s.transcript(); path != "" {
 		return fmt.Sprintf("Dismissed agent #%d. Its transcript is at %s.%s", s.num, path, rel)
@@ -1073,6 +1096,9 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 			"effort": map[string]any{"type": "string", "enum": EffortLevels,
 				"description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server"},
 			"wait": map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
+			"node": map[string]any{"type": "string", "description": "the plan node this child works on: it owns that node " +
+				"and every node that needs it until you dismiss it, and they leave your ready list. It gets a plan tool " +
+				"that changes only those nodes"},
 			"isolation": map[string]any{"type": "string", "enum": []string{IsoNone, IsoWorktree, IsoDocker, IsoNoDir},
 				"description": "where the child works. none (default): this tree. worktree: its own git worktree branched " +
 					"from this tree's last commit (uncommitted changes are not in it); it commits there and you merge its " +
@@ -1103,9 +1129,10 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			Effort    string `json:"effort"`
 			Wait      bool   `json:"wait"`
 			Isolation string `json:"isolation"`
+			Node      string `json:"node"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		out := spawnTool(ctx, h, args.Prompt, args.Provider, args.Model, args.Effort, args.Isolation, args.Wait)
+		out := spawnTool(ctx, h, args.Prompt, args.Provider, args.Model, args.Effort, args.Isolation, args.Node, args.Wait)
 		if onCall != nil {
 			call := map[string]any{"prompt": args.Prompt, "model": args.Model, "wait": args.Wait}
 			if args.Provider != "" {
@@ -1114,19 +1141,35 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			if args.Effort != "" {
 				call["effort"] = args.Effort
 			}
+			if args.Node != "" {
+				call["node"] = args.Node
+			}
 			onCall("agent", call, out)
 		}
 		return out, nil
 	}
 }
 
-func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort, isolation string, wait bool) string {
+func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort, isolation, node string, wait bool) string {
 	if strings.TrimSpace(prompt) == "" {
 		return "ERROR: agent requires a non-empty prompt."
 	}
-	sa, err := h.spawnAgent(ctx, prompt, provider, model, effort, isolation)
+	node = strings.TrimSpace(node)
+	// Checked before the spawn, so a bad node starts no child.
+	if node != "" {
+		if err := h.planCanAssign(node); err != nil {
+			return "ERROR: " + err.Error() + ". No agent was started."
+		}
+	}
+	sa, err := h.spawnAgentFor(ctx, prompt, provider, model, effort, isolation, node)
 	if err != nil {
 		return "ERROR: could not start the agent: " + err.Error()
+	}
+	owns := ""
+	if node != "" {
+		owns = fmt.Sprintf(" It owns plan node %s and every node that needs it, so they are out of your ready "+
+			"list. It has a plan tool for them: it can change, add under, and finish its own nodes. "+
+			"Dismissing it gives back the ones not done.", node)
 	}
 	if !wait {
 		where := ""
@@ -1141,9 +1184,9 @@ func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort,
 		if w := sa.where(); w != "" {
 			where = " on " + w + where
 		}
-		return fmt.Sprintf("Started agent #%d%s. It is working; you will be told when it finishes or asks you something. "+
+		return fmt.Sprintf("Started agent #%d%s.%s It is working; you will be told when it finishes or asks you something. "+
 			"Do other work, or jobs(agent:%d, wait:true) if you have nothing to do until it answers.",
-			sa.num, where, sa.num)
+			sa.num, where, owns, sa.num)
 	}
 	select {
 	case <-sa.waitCh():
@@ -1152,6 +1195,9 @@ func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort,
 	case <-h.userWaiting():
 		return fmt.Sprintf("agent #%d is still running; stopped waiting because a message arrived (the user wrote, or another dun session did) — "+
 			"it follows. You will be told when it finishes.", sa.num)
+	}
+	if owns != "" {
+		return strings.TrimSpace(owns) + "\n" + sa.report()
 	}
 	return sa.report()
 }

@@ -118,6 +118,21 @@ WHEN: once as each turn begins (`prepareTurn`), not per tool result. The model's
 person makes arrives as its own note. A turn with no open nodes gets none. Cost: at
 most 5 short lines (about 100 tokens) a turn.
 
+## A child owns a node (2026-11-05)
+
+The light link, before full delegation. `agent({prompt, node})` gives the child the
+node and everything that needs it (`Graph.Assign`, owner `agent:N`) BEFORE the child
+starts, so its tool set has a plan tool: the parent's graph, as actor `agent:N`, with
+`WithMayChange` allowing only that owner's nodes (`childPlanTool`). Its changes reach
+the parent's screen at once and the main agent when they touch its nodes. Owned nodes
+leave the main agent's ready list (`Ready("")`). Dismissing the child gives its
+unfinished nodes back to owner ""; finished ones keep who did them.
+
+`/plan tell <id> <text>` hands the person's words about a node to its owner, to
+change the plan to match, instead of a direct edit (USER: "Decide x" nodes want
+"it's this way"). The main agent hears it as a notification; a running child inside
+its turn (`Say`); an idle one as its next run (`AgentTell`).
+
 ## Delegation (later)
 
 `plan delegate <node>` spawns a child owning that node and all that hangs from it. The
@@ -130,5 +145,5 @@ parallel with worktree isolation.
 
 1. The graph, the tool, storage, the group. ✅ (graph and tool moved to agentkit v0.22.0)
 2. `/plan` in the TUI, plan mode and approval. ✅
-3. Delegation.
+3. Delegation. ◐ a child owns a node and changes it (above); `plan delegate` is not built.
 4. Parallel runs and per-node models.

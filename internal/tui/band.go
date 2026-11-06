@@ -342,7 +342,9 @@ func (m tuiModel) bandShown() bool {
 }
 
 // pulseWanted is whether the pulse clock should be running.
-func (m tuiModel) pulseWanted() bool { return band.pulse() && m.bandShown() }
+func (m tuiModel) pulseWanted() bool {
+	return band.pulse() && m.bandShown() || m.planAnimates()
+}
 
 // repaintBand moves the selected rows to the current pulse step without
 // re-rendering anything else.

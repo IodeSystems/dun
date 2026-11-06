@@ -805,9 +805,14 @@ func (h *Harness) rebuildTools() {
 			dispatch = withSkill(dispatch, h, report)
 		}
 	}
-	// plan, for a root session: the task plan (plan.go). A child gets none yet.
+	// plan: the task plan (plan.go). A root's covers the graph; a child's,
+	// only when it owns nodes, covers those (childPlanTool).
 	if !h.isChild() {
 		def, handle := h.planTool()
+		toolDefs = append(toolDefs, def)
+		dispatch = withPlan(dispatch, h, handle, report)
+	} else if h.cfg.PlanOwner != "" && h.cfg.Parent != nil {
+		def, handle := h.childPlanTool()
 		toolDefs = append(toolDefs, def)
 		dispatch = withPlan(dispatch, h, handle, report)
 	}

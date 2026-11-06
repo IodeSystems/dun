@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -38,6 +40,25 @@ type planView struct {
 	mode, approved bool
 	total, done    int
 	width          int
+	// live is who is working, read from the model at every layout
+	// (syncPager); phase steps the motion.
+	live planLive
+	// order maps a page node to its row; -1 is the finished-trees row.
+	order []int
+	// animating: the last layout has a row in motion, so the pulse runs.
+	animating bool
+}
+
+// planLive is what /plan needs to know of the agents to colour and move it.
+type planLive struct {
+	agents       map[int]string // child id → state
+	busy, asking bool           // the main agent: a turn runs; it asks you
+	phase        int
+}
+
+// planTellTo is a plan node whose owner the composer is telling something.
+type planTellTo struct {
+	id, title, who, placeholder string
 }
 
 func (v *planView) setWidth(w int) { v.width = w }
@@ -79,10 +100,14 @@ func (v *planView) lines(_ *tuiModel, w int) []string {
 
 func (v *planView) page() pageDoc {
 	narrow := v.width > 0 && v.width < narrowW
+	v.order, v.animating = v.order[:0], false
+	live, done := v.segments()
 	nodes := make([]pageNode, 0, len(v.rows))
-	for _, r := range v.rows {
+	for _, i := range live {
+		r := v.rows[i]
+		mark, style, ownerTag := v.motion(r)
 		indent := strings.Repeat("  ", r.depth)
-		head := indent + r.id + " " + planMark(r.status) + " " + r.title
+		head := indent + r.id + " " + mark + " " + r.title
 		var tags []string
 		if r.repeat {
 			tags = append(tags, "again")
@@ -90,8 +115,8 @@ func (v *planView) page() pageDoc {
 		if r.ready {
 			tags = append(tags, "ready")
 		}
-		if r.owner != "" {
-			tags = append(tags, "agent "+r.owner)
+		if ownerTag != "" {
+			tags = append(tags, ownerTag)
 		}
 		if len(r.waiting) > 0 {
 			tags = append(tags, textfmt.Plural(len(r.waiting), "wait"))
@@ -124,7 +149,30 @@ func (v *planView) page() pageDoc {
 		if r.repeat {
 			body = append([]string{"(already shown under another parent)"}, body...)
 		}
-		nodes = append(nodes, pageNode{head: head, sub: sub, body: strings.Join(body, "\n"), pre: true, err: r.status == "dropped" || r.status == "blocked"})
+		nodes = append(nodes, pageNode{head: head, sub: sub, body: strings.Join(body, "\n"), pre: true,
+			err: r.status == "dropped" || r.status == "blocked", style: style})
+		v.order = append(v.order, i)
+	}
+	// Finished trees, out of the way: one row at the end that opens to them
+	// (USER 2026-11-05: "clear done trees and move them out"). The graph
+	// keeps them; this is the view.
+	if len(done) > 0 {
+		trees := 0
+		var body []string
+		for _, i := range done {
+			r := v.rows[i]
+			if r.depth == 0 {
+				trees++
+			}
+			line := strings.Repeat("  ", r.depth) + r.id + " " + planMark(r.status) + " " + r.title
+			if n, ok := planAgentOf(r.owner); ok {
+				line += fmt.Sprintf("  · agent %d", n)
+			}
+			body = append(body, line)
+		}
+		nodes = append(nodes, pageNode{head: fmt.Sprintf("≡ %s finished · %s", textfmt.Plural(trees, "tree"),
+			textfmt.Plural(len(done), "node")), body: strings.Join(body, "\n"), pre: true, style: &StDim})
+		v.order = append(v.order, -1)
 	}
 	if len(nodes) == 0 {
 		nodes = append(nodes, pageNode{body: "The plan is empty. The model makes nodes with its plan tool when a task has several steps."})
@@ -132,12 +180,104 @@ func (v *planView) page() pageDoc {
 	return pageDoc{title: textfmt.Plural(v.total, "node"), nodes: nodes}
 }
 
+// segments splits the rows into trees (a root and the rows under it, up to
+// the next root) and sorts them: the trees with work left, and the rows of the
+// finished ones, where every node is done or dropped.
+func (v *planView) segments() (live, done []int) {
+	for i := 0; i < len(v.rows); {
+		j := i + 1
+		for j < len(v.rows) && v.rows[j].depth > 0 {
+			j++
+		}
+		finished := true
+		for k := i; k < j; k++ {
+			if st := v.rows[k].status; st != "done" && st != "dropped" {
+				finished = false
+				break
+			}
+		}
+		for k := i; k < j; k++ {
+			if finished {
+				done = append(done, k)
+			} else {
+				live = append(live, k)
+			}
+		}
+		i = j
+	}
+	return live, done
+}
+
+// planSpin is a working owner's mark, one frame per pulse step.
+var planSpin = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// planOwnerColors tell agents apart on /plan. None is green (the main agent's,
+// and "it worked"), red (failed), orange (attention) or pink (asking, and
+// where you are): those mean something already.
+var planOwnerColors = []lipgloss.Style{
+	lipgloss.NewStyle().Foreground(lipgloss.Color("33")),  // blue
+	lipgloss.NewStyle().Foreground(lipgloss.Color("37")),  // teal
+	lipgloss.NewStyle().Foreground(lipgloss.Color("135")), // purple
+	lipgloss.NewStyle().Foreground(lipgloss.Color("130")), // brown
+	lipgloss.NewStyle().Foreground(lipgloss.Color("63")),  // indigo
+	lipgloss.NewStyle().Foreground(lipgloss.Color("66")),  // slate
+}
+
+// planAgentOf is the child a node's owner names ("agent:N").
+func planAgentOf(owner string) (int, bool) {
+	n, ok := strings.CutPrefix(owner, "agent:")
+	if !ok {
+		return 0, false
+	}
+	k, err := strconv.Atoi(n)
+	return k, err == nil
+}
+
+// motion is a row's mark, colour and owner tag from who owns it and what they
+// are doing: a working owner's open nodes spin; the main agent's node in
+// progress shows ? while it asks you; an idle owner's are still. Colour says
+// which agent; motion says what it is doing (USER 2026-11-05).
+func (v *planView) motion(r planRow) (mark string, style *lipgloss.Style, tag string) {
+	mark = planMark(r.status)
+	open := r.status == "todo" || r.status == "doing"
+	if n, ok := planAgentOf(r.owner); ok {
+		st := planOwnerColors[(n-1+len(planOwnerColors))%len(planOwnerColors)]
+		state := v.live.agents[n]
+		if state == "" {
+			state = "gone"
+		}
+		tag = fmt.Sprintf("agent %d %s", n, state)
+		if state == "running" && open {
+			mark, v.animating = planSpin[v.live.phase%len(planSpin)], true
+			tag = fmt.Sprintf("agent %d working", n)
+		}
+		return mark, &st, tag
+	}
+	if r.status != "doing" {
+		return mark, nil, ""
+	}
+	switch {
+	case v.live.asking:
+		v.animating = true
+		st := stAsk
+		if v.live.phase/4%2 == 1 {
+			st = stNote
+		}
+		return "?", &st, "asking you"
+	case v.live.busy:
+		v.animating = true
+		return planSpin[v.live.phase%len(planSpin)], nil, "working"
+	}
+	return mark, nil, ""
+}
+
 func (v *planView) hint() string {
 	if v.width > 0 && v.width < narrowW {
-		return "a approve · e g d edit/drop · enter open · esc"
+		return "t tell · a approve · e g d edit/drop · enter dive/open · esc"
 	}
-	return hotKey("approve", "a") + StDim.Render(" · ") + hotKey("edit title", "e") + StDim.Render(" · ") + hotKey("goal", "g") +
-		StDim.Render(" · ") + hotKey("drop", "d") + StDim.Render(" · enter details · esc back")
+	return hotKey("tell", "t") + StDim.Render(" · ") + hotKey("approve", "a") + StDim.Render(" · ") + hotKey("edit title", "e") +
+		StDim.Render(" · ") + hotKey("goal", "g") + StDim.Render(" · ") + hotKey("drop", "d") +
+		StDim.Render(" · enter dive into its agent, else details · → details · esc back")
 }
 
 // openPlan asks the engine for the plan; the screen opens when it arrives.
@@ -212,6 +352,10 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 		return m.pg.key(msg.String())
 	}
 	k := msg.String()
+	var r *planRow
+	if m.pg.cur >= 0 && m.pg.cur < len(v.order) && v.order[m.pg.cur] >= 0 {
+		r = &v.rows[v.order[m.pg.cur]]
+	}
 	switch k {
 	case "a":
 		if !m.proc.controlCmd("plan", "approve") {
@@ -221,10 +365,9 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 		m.flashText, m.flashUntil = "/plan approve", time.Now().Add(flashFor)
 		return true
 	case "e", "g", "d":
-		if m.pg.cur < 0 || m.pg.cur >= len(v.rows) {
+		if r == nil {
 			return true
 		}
-		r := v.rows[m.pg.cur]
 		line := "/plan drop " + r.id + " "
 		switch k {
 		case "e":
@@ -238,8 +381,93 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 		m.input.SetValue(line)
 		m.input.CursorEnd()
 		return true
+	case "t":
+		if r != nil {
+			m.startPlanTell(*r, v)
+		}
+		return true
+	case "enter":
+		if r != nil && m.planDive(*r) {
+			return true
+		}
 	}
 	return m.pg.key(k)
+}
+
+// planDive goes from a node into the session working it: a child's
+// conversation (as the activity strip's descent does), or the main one for a
+// node the main agent is working now. False when nobody is: enter then opens
+// the node's details.
+func (m *tuiModel) planDive(r planRow) bool {
+	if n, ok := planAgentOf(r.owner); ok {
+		if m.agentByID(n) == nil {
+			return false
+		}
+		m.popScreen()
+		m.enterAgentScope(n)
+		return true
+	}
+	if r.status == "doing" && (m.busy || m.asking || m.askParked) {
+		m.popScreen()
+		if m.scopeAgent != 0 {
+			m.leaveAgentScope()
+		}
+		return true
+	}
+	return false
+}
+
+// startPlanTell lends the composer to telling a node's owner something: the
+// screen goes down so the composer shows, and sending (or esc) brings it back
+// (USER 2026-11-05: talk to the plan; "this does mean coopting the text entry
+// bar"). The owner changes the plan to match; it is not a direct edit.
+func (m *tuiModel) startPlanTell(r planRow, v *planView) {
+	who := "the main agent"
+	if n, ok := planAgentOf(r.owner); ok {
+		who = fmt.Sprintf("agent #%d", n)
+	}
+	m.planTelling = &planTellTo{id: r.id, title: r.title, who: who, placeholder: m.input.placeholder}
+	m.popScreen()
+	m.input.Reset()
+	m.input.placeholder = fmt.Sprintf("tell %s about node %s · %s…", who, r.id, r.title)
+	m.setFocus(focusInput)
+	m.refresh()
+}
+
+// endPlanTell gives the composer back and opens /plan again; text, when not
+// empty, is sent to the node's owner first.
+func (m *tuiModel) endPlanTell(text string) {
+	t := m.planTelling
+	if t == nil {
+		return
+	}
+	m.planTelling = nil
+	m.input.placeholder = t.placeholder
+	m.input.Reset()
+	if text != "" {
+		if !m.proc.controlCmd("plan", "tell "+t.id+" "+text) {
+			m.append(StErr.Render("no engine right now — not sent"))
+			m.refresh()
+			return
+		}
+		m.flashText, m.flashUntil = "told "+t.who+" about node "+t.id, time.Now().Add(flashFor)
+	}
+	m.openPlan()
+}
+
+// planLiveNow is the agents' state for /plan.
+func (m tuiModel) planLiveNow() planLive {
+	l := planLive{agents: map[int]string{}, busy: m.busy, asking: m.asking || m.askParked, phase: m.pulse}
+	for _, a := range m.agents {
+		l.agents[a.id] = a.state
+	}
+	return l
+}
+
+// planAnimates is whether /plan has a row in motion: the pulse runs for it.
+func (m tuiModel) planAnimates() bool {
+	v := m.planPaging()
+	return v != nil && v.animating
 }
 
 func (planListPane) hint(m *tuiModel) string {

@@ -241,6 +241,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true // deliberate exit: do not respawn the engine
 			return m, tea.Quit
 		case "esc":
+			if m.planTelling != nil { // not sent: back to /plan
+				m.endPlanTell("")
+				return m, nil
+			}
 			if m.searchActive { // leave match-scroll mode, back to free selection
 				m.searchActive = false
 				m.matches = nil
@@ -407,7 +411,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.starting && m.scopeAgent == 0 {
+			if m.starting && m.scopeAgent == 0 && m.planTelling == nil {
 				return m.keepUntilReady(v, m.input.Images()), nil
 			}
 			return m.sendUserImages(v, m.input.Images()), nil
@@ -1212,6 +1216,13 @@ func (m tuiModel) sendUser(v string) tuiModel { return m.sendUserImages(v, nil) 
 
 // sendUserImages is sendUser for a message with the composer's images.
 func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
+	// Lent to /plan: the words go to a node's owner (planview.go).
+	if m.planTelling != nil {
+		m.history = append(m.history, v)
+		m.histIdx = len(m.history)
+		m.endPlanTell(v)
+		return m
+	}
 	// In agent scope the input steers that CHILD instead of the session. Same
 	// gesture the parent's jobs(agent:N, tell:) makes, same code path in the
 	// engine — there is one definition of what telling a child means.

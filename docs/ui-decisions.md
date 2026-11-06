@@ -183,6 +183,21 @@ are in `decisions.md`.
   open, so rows do not move under the selection; a row that arrives
   meanwhile goes at the end. The selection starts on the top row. The
   one-line strip stays in id order.
+- **/plan shows who works what (2026-11-05).** A tree whose every node is
+  done or dropped folds into one row at the end, `≡ N trees finished · M
+  nodes`, which opens to them; the graph keeps them. A node a child owns is
+  drawn in that child's colour (a palette with no green, red, orange or
+  pink: those already mean something) and tagged `agent N <state>`; a
+  working owner's open nodes spin, the main agent's node in progress spins
+  during a turn and shows a pink/orange `?` while it asks. Motion, not
+  dimming, says what is active. enter on a node a child owns dives into
+  that child; on the main agent's working node it closes the screen;
+  otherwise it opens details, as → always does.
+- **Talking to a plan node lends the composer (2026-11-05).** `t` on a node
+  closes /plan, the placeholder and status say `tell <owner> about node N`,
+  and enter sends `/plan tell`; esc sends nothing. Either way /plan comes
+  back. The owner changes the plan to match: the words are an instruction,
+  not an edit.
 - **Typing while descended tells the child** (a `jobs tell`: its next
   message), and the placeholder says so. Chosen over a read-only view
   because the reason to open a child is usually to correct it, and the

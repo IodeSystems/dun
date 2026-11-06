@@ -38,6 +38,9 @@ type pageNode struct {
 	pre  bool        // the head's spacing is kept (a table row), not collapsed
 	sub  string      // a second line under the head, dim: what a narrow screen moves off it
 	insp *inspSource // a call: "i" opens it in the inspector
+	// style, when set, draws the head instead of the default (the plan's
+	// owner colours); err still wins.
+	style *lipgloss.Style
 }
 
 // inspSource is what the inspector shows for a call.
@@ -154,6 +157,9 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 		}
 		head, _ := fitPlain(h, p.w-3)
 		st := StTool
+		if n.style != nil {
+			st = *n.style
+		}
 		if n.err {
 			st = StErr
 		}
@@ -343,6 +349,9 @@ func (m *tuiModel) syncPager() {
 		}
 		if sw, ok := m.pg.id.(interface{ setWidth(int) }); ok { // a narrow screen's rows are two lines
 			sw.setWidth(m.vp.Width)
+		}
+		if pv, ok := m.pg.id.(*planView); ok { // who is working, for its colours and motion
+			pv.live = m.planLiveNow()
 		}
 		m.pg.layout(v.page(), m.vp.Width, h)
 		return

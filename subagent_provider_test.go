@@ -82,7 +82,7 @@ func TestSubAgent_AnotherProviderFailsInsteadOfFallingBack(t *testing.T) {
 	if _, err := h.spawnAgent(context.Background(), "x", "local", "", "", ""); err == nil || !strings.Contains(err.Error(), "needs a model") {
 		t.Errorf("provider with no model: %v", err)
 	}
-	if out := spawnTool(context.Background(), h, "x", "gone", "m", "", "", false); !strings.HasPrefix(out, "ERROR:") {
+	if out := spawnTool(context.Background(), h, "x", "gone", "m", "", "", "", false); !strings.HasPrefix(out, "ERROR:") {
 		t.Errorf("the tool must report the failure: %q", out)
 	}
 	if n := len(h.Agents()); n != 0 {

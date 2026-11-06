@@ -68,7 +68,9 @@ func TestPlanScreen(t *testing.T) {
 			if strings.Count(plain, "Document it in the README") != 2 || !strings.Contains(plain, "again") {
 				t.Errorf("repeat not shown:\n%s", plain)
 			}
-			for _, want := range []string{"○ Document", "◐ Emit", "✓ Parse", "✗ Old way", "1 wait"} {
+			// "Old way" is a tree on its own, dropped: finished, so it is in
+			// the one row at the end, not in the tree.
+			for _, want := range []string{"○ Document", "◐ Emit", "✓ Parse", "≡ 1 tree finished · 1 node", "1 wait"} {
 				if !strings.Contains(plain, want) {
 					t.Errorf("lacks %q:\n%s", want, plain)
 				}
@@ -151,5 +153,131 @@ func TestPlanScreen_Empty(t *testing.T) {
 	m = m.notePlan(evMsg{"type": "plan", "total": 0.0, "done": 0.0, "rows": []any{}})
 	if plain := ansi.Strip(m.drawView()); !strings.Contains(plain, "plan is empty") {
 		t.Errorf("empty:\n%s", plain)
+	}
+}
+
+// ownedPlan is a plan with a finished tree first, a tree agent #2 owns, and
+// the main agent's node in progress.
+func ownedPlan() evMsg {
+	return evMsg{"type": "plan", "total": 5.0, "done": 2.0, "rows": []any{
+		map[string]any{"id": "1", "title": "Old work", "status": "done"},
+		map[string]any{"id": "2", "title": "Old child", "status": "dropped", "depth": 1.0},
+		map[string]any{"id": "3", "title": "Decide the db", "status": "todo", "owner": "agent:2"},
+		map[string]any{"id": "4", "title": "Migrate", "status": "todo", "owner": "agent:2", "depth": 1.0},
+		map[string]any{"id": "5", "title": "Main's step", "status": "doing"},
+	}}
+}
+
+func ownedPlanModel(t *testing.T) (tuiModel, *recWC) {
+	t.Helper()
+	m, rec := planModel(t, 100, 30)
+	m.agents = []agentRow{{id: 2, state: "running", prompt: "decide"}}
+	m = m.notePlan(ownedPlan())
+	m.syncPager()
+	return m, rec
+}
+
+// A finished tree (every node done or dropped) leaves the tree for one row at
+// the end, which opens to it; the keys still act on the node under the
+// cursor, whatever moved.
+func TestPlanScreen_FinishedTreesFoldAway(t *testing.T) {
+	m, _ := ownedPlanModel(t)
+	plain := ansi.Strip(m.drawView())
+	if strings.Contains(plain, "Old work") || !strings.Contains(plain, "≡ 1 tree finished · 2 nodes") {
+		t.Fatalf("the finished tree is not folded:\n%s", plain)
+	}
+	if strings.Index(plain, "Decide the db") > strings.Index(plain, "≡ 1 tree finished") {
+		t.Errorf("the finished row is not last:\n%s", plain)
+	}
+	// The first node shown is 3 now, not the row-0 node 1.
+	nm, _ := m.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+	em := nm.(tuiModel)
+	if got := em.input.Value(); got != "/plan edit 3 title Decide the db" {
+		t.Errorf("e acted on %q", got)
+	}
+	m, _ = ownedPlanModel(t)
+	for i := 0; i < 3; i++ {
+		nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		m = nm.(tuiModel)
+	}
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	if plain := ansi.Strip(m.drawView()); !strings.Contains(plain, "1 ✓ Old work") || !strings.Contains(plain, "  2 ✗ Old child") {
+		t.Errorf("the finished row does not open to its trees:\n%s", plain)
+	}
+}
+
+// An agent's nodes carry its colour and say what it is doing; a working
+// agent's open nodes spin, and stop when it goes idle. The main agent's node
+// in progress spins while a turn runs and shows ? while it asks.
+func TestPlanScreen_OwnerColourAndMotion(t *testing.T) {
+	m, _ := ownedPlanModel(t)
+	plain := ansi.Strip(m.drawView())
+	if !strings.Contains(plain, "agent 2 working") || strings.Contains(plain, "3 ○ Decide") {
+		t.Errorf("a working agent's node does not spin:\n%s", plain)
+	}
+	if !m.planAnimates() || !m.pulseWanted() {
+		t.Error("a node in motion must run the pulse")
+	}
+	if !strings.Contains(m.drawView(), planOwnerColors[1].Render("3 ")[:8]) {
+		t.Errorf("agent 2's colour is not on its node")
+	}
+	m.agents[0].state = "idle"
+	m.syncPager()
+	plain = ansi.Strip(m.drawView())
+	if !strings.Contains(plain, "3 ○ Decide the db") || !strings.Contains(plain, "agent 2 idle") || m.planAnimates() {
+		t.Errorf("an idle agent's node still moves:\n%s", plain)
+	}
+	m.busy = true
+	m.syncPager()
+	if plain := ansi.Strip(m.drawView()); !strings.Contains(plain, "Main's step  · working") || !m.planAnimates() {
+		t.Errorf("the main agent's node in progress:\n%s", plain)
+	}
+	m.asking = true
+	m.syncPager()
+	if plain := ansi.Strip(m.drawView()); !strings.Contains(plain, "5 ? Main's step  · asking you") {
+		t.Errorf("asking:\n%s", plain)
+	}
+}
+
+// enter on a node an agent works dives into that agent; t lends the composer
+// to telling the node's owner, and sending puts /plan back.
+func TestPlanScreen_DiveAndTell(t *testing.T) {
+	m, rec := ownedPlanModel(t)
+	rec.Reset()
+	nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	if m.activeScreen() != nil || m.scopeAgent != 2 {
+		t.Fatalf("enter did not dive: screen %v, scope %d", m.activeScreen() != nil, m.scopeAgent)
+	}
+
+	m, rec = ownedPlanModel(t)
+	nm, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+	m = nm.(tuiModel)
+	if m.activeScreen() != nil || m.planTelling == nil || !strings.Contains(m.input.placeholder, "tell agent #2 about node 3") {
+		t.Fatalf("t did not lend the composer: %q", m.input.placeholder)
+	}
+	if plain := ansi.Strip(m.drawView()); !strings.Contains(plain, "tell agent #2 about node 3") || !strings.Contains(plain, "esc back to /plan") {
+		t.Errorf("the status does not say where the words go:\n%s", plain)
+	}
+	rec.Reset()
+	m.input.SetValue("use postgres")
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	if !strings.Contains(rec.String(), `"tell 3 use postgres"`) {
+		t.Errorf("sent %s", rec.String())
+	}
+	if m.planTelling != nil || !m.planWant || m.input.placeholder == "" || strings.Contains(m.input.placeholder, "tell agent") {
+		t.Errorf("the composer is not given back, or /plan not asked for again: %q", m.input.placeholder)
+	}
+
+	m, rec = ownedPlanModel(t)
+	nm, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+	m = nm.(tuiModel)
+	rec.Reset()
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = nm.(tuiModel)
+	if m.planTelling != nil || !m.planWant || strings.Contains(rec.String(), "tell") {
+		t.Errorf("esc must send nothing and go back to /plan: %s", rec.String())
 	}
 }

@@ -3,6 +3,7 @@ package dun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -310,5 +311,124 @@ func TestPlan_ModelsOwnChangeIsNotAnAside(t *testing.T) {
 	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
 	if q := queuedTexts(h); len(q) != 0 {
 		t.Errorf("asides: %q", q)
+	}
+}
+
+// A child spawned for a node owns it and what needs it: they leave the main
+// agent's ready list, show the owner, and come back when it is dismissed
+// unfinished. A node that cannot be given starts no child.
+func TestPlan_ChildOwnsItsNode(t *testing.T) {
+	h := startParentOf(t, &scriptRunner{rounds: []roundFn{textRound("done"), textRound("done")}})
+	planCall(t, h, `{"action":"add","title":"build","done_when":"x"}`)
+	planCall(t, h, `{"action":"add","title":"test","done_when":"x","needs":["1"]}`)
+	planCall(t, h, `{"action":"add","title":"other","done_when":"x"}`)
+	ids := map[string]string{}
+	for _, r := range h.Plan().Rows {
+		ids[r.Title] = r.ID
+	}
+
+	if out := spawnTool(context.Background(), h, "x", "", "", "", "", "nope", false); !strings.Contains(out, "no plan node nope") ||
+		!strings.Contains(out, "No agent was started") || len(h.agentList()) != 0 {
+		t.Fatalf("a bad node: %q, %d agents", out, len(h.agentList()))
+	}
+	out := spawnTool(context.Background(), h, "build it", "", "", "", "", ids["build"], false)
+	if !strings.Contains(out, "owns plan node "+ids["build"]) {
+		t.Fatalf("spawn: %q", out)
+	}
+	sa := h.agentList()[0]
+	owner := planOwner(sa.num)
+	for _, r := range h.Plan().Rows {
+		want := ""
+		if r.Title != "other" {
+			want = owner
+		}
+		if r.Owner != want {
+			t.Errorf("%s owned by %q, want %q", r.Title, r.Owner, want)
+		}
+	}
+	g, _ := h.planNow().store.View(context.Background())
+	if ready := g.Ready(""); len(ready) != 1 || ready[0].Title != "other" {
+		t.Errorf("the main agent's ready list: %v", ready)
+	}
+	if out := spawnTool(context.Background(), h, "x", "", "", "", "", ids["test"], false); !strings.Contains(out, "already belongs to "+owner) {
+		t.Errorf("a node already owned: %q", out)
+	}
+
+	planCall(t, h, `{"action":"update","id":"`+ids["build"]+`","status":"doing"}`)
+	if out := planCall(t, h, `{"action":"done","id":"`+ids["build"]+`","account":"built"}`); !strings.Contains(out, "done") || strings.Contains(out, "cannot") {
+		t.Fatalf("done: %s", out)
+	}
+	waitIdle(t, sa)
+	sa.quit()
+	for _, r := range h.Plan().Rows {
+		switch r.Title {
+		case "build":
+			if r.Owner != owner {
+				t.Errorf("a finished node keeps who did it: %q", r.Owner)
+			}
+		case "test":
+			if r.Owner != "" {
+				t.Errorf("an unfinished node goes back to the main agent: %q", r.Owner)
+			}
+		}
+	}
+}
+
+// A child that owns nodes has a plan tool over its parent's graph that changes
+// only its own nodes, and what it changes is told to the main agent when it
+// touches theirs. The person's words about a node go to its owner.
+func TestPlan_ChildToolAndTell(t *testing.T) {
+	h := startParentOf(t, &scriptRunner{rounds: []roundFn{textRound("done"), textRound("done"), textRound("done")}})
+	planCall(t, h, `{"action":"add","title":"decide db","done_when":"x"}`)
+	planCall(t, h, `{"action":"add","title":"main's","done_when":"x"}`)
+	ids := map[string]string{}
+	for _, r := range h.Plan().Rows {
+		ids[r.Title] = r.ID
+	}
+	out := spawnTool(context.Background(), h, "decide", "", "", "", "", ids["decide db"], false)
+	if !strings.Contains(out, "has a plan tool") {
+		t.Fatalf("spawn: %q", out)
+	}
+	sa := h.agentList()[0]
+	waitIdle(t, sa)
+	sa.mu.Lock()
+	child := sa.h
+	sa.mu.Unlock()
+	if child.cfg.PlanOwner != planOwner(sa.num) {
+		t.Fatalf("the child is not an owner: %q", child.cfg.PlanOwner)
+	}
+	_, handle := child.childPlanTool()
+	ctx := context.Background()
+	if out := handle(ctx, `{"action":"update","id":"`+ids["decide db"]+`","goal":"postgres"}`); strings.Contains(out, "ERROR") || strings.Contains(out, "may not") {
+		t.Errorf("its own node: %q", out)
+	}
+	if out := handle(ctx, `{"action":"update","id":"`+ids["main's"]+`","goal":"hijacked"}`); !strings.Contains(strings.ToLower(out), "not") {
+		t.Errorf("another's node must be refused: %q", out)
+	}
+	for _, r := range h.Plan().Rows {
+		if r.Title == "decide db" && r.Goal != "postgres" {
+			t.Errorf("the child's change did not reach the parent's plan: %+v", r)
+		}
+		if r.Title == "main's" && r.Goal == "hijacked" {
+			t.Errorf("the child changed a node it does not own")
+		}
+	}
+
+	// The person's words: to the main agent for its node, to the child for its.
+	h.notes()
+	msg, err := h.PlanCmd(ctx, "tell "+ids["main's"]+" it's this way")
+	if err != nil || !strings.Contains(msg, "main agent") {
+		t.Fatalf("tell main: %q %v", msg, err)
+	}
+	if n := h.notes(); len(n) != 1 || !strings.Contains(n[0], "it's this way") || !strings.Contains(n[0], "Change the plan") {
+		t.Errorf("main agent heard %q", n)
+	}
+	msg, err = h.PlanCmd(ctx, "tell "+ids["decide db"]+" use sqlite")
+	if err != nil || !strings.Contains(msg, fmt.Sprintf("agent #%d", sa.num)) {
+		t.Fatalf("tell child: %q %v", msg, err)
+	}
+	waitIdle(t, sa)
+	if _, err := h.PlanCmd(ctx, "tell nope x"); err == nil {
+		t.Error("an unknown node must be an error")
 	}
 }
