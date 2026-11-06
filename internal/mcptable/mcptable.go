@@ -56,14 +56,6 @@ func ViaCell(st dun.ServerState) string {
 	return dun.ModeWord(st.Via) + " (" + st.ViaFrom + ")"
 }
 
-// modeWord is one scope's mode switch as a word: "" stays unset.
-func modeWord(v string) string {
-	if v == "" {
-		return "unset"
-	}
-	return dun.ModeWord(v)
-}
-
 // tableCols are the column headers after the id, with each one's hotkey
 // (the TUI's /mcp view cycles a column with it). "" is no key.
 var tableCols = []struct{ word, key string }{

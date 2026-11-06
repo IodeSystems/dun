@@ -326,24 +326,6 @@ func TestSchedLoopFiringAndDefault(t *testing.T) {
 	}
 }
 
-func indexOf(ss []string, s string) int {
-	for i, x := range ss {
-		if x == s {
-			return i
-		}
-	}
-	return -1
-}
-
-func indexPrefix(ss []string, p string) int {
-	for i, x := range ss {
-		if strings.HasPrefix(x, p) {
-			return i
-		}
-	}
-	return -1
-}
-
 // A message to another session by name goes there, says where it came
 // from, wakes a stopped engine, and keeps an empty session from being
 // forgotten meanwhile.

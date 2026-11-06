@@ -47,12 +47,6 @@ func (f *fakeSpawner) Spawn(workspace string, args []string) (dund.Engine, error
 	return e, nil
 }
 
-func (f *fakeSpawner) spawnArgs() [][]string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.spawns)
-}
-
 type fakeEngine struct {
 	in      *io.PipeReader
 	stdin   io.WriteCloser

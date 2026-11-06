@@ -1006,16 +1006,6 @@ func suggestStyle(selected bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 }
 
-// withCaret reverse-videos the rune at index col of a plain one-line string,
-// adding a cell past the end when that is where the cursor sits.
-func withCaret(s string, col int) string {
-	r := []rune(s)
-	if col >= len(r) {
-		return s + stCaret.Render(" ")
-	}
-	return string(r[:col]) + stCaret.Render(string(r[col])) + string(r[col+1:])
-}
-
 // pad fills the row to the full width so a shortened line cannot leave the
 // previous frame's characters behind it.
 func (m *multilineInput) pad(s string) string {

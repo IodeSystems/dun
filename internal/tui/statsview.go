@@ -113,7 +113,7 @@ func (statsPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 		return m.pg.key(msg.String())
 	}
 	n := len(statsTabs)
-	to := -1
+	var to int
 	switch k := msg.String(); k {
 	case "tab", "right", "l":
 		to = (v.tab + 1) % n

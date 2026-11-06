@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"strings"
 	"testing"
@@ -298,32 +297,6 @@ func TestRunServerCmd_UnknownActionListsRestart(t *testing.T) {
 func haveBin(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
-}
-
-// testExecBackend implements dun.ExecBackend by running real shell commands.
-type testExecBackend struct {
-	dir string
-}
-
-func (e *testExecBackend) Run(ctx context.Context, command string, w io.Writer) dun.ExecResult {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Dir = e.dir
-	var buf bytes.Buffer
-	if w != nil {
-		cmd.Stdout = io.MultiWriter(&buf, w)
-		cmd.Stderr = io.MultiWriter(&buf, w)
-	} else {
-		cmd.Stdout = &buf
-		cmd.Stderr = &buf
-	}
-	err := cmd.Run()
-	result := dun.ExecResult{
-		Output: buf.String(),
-	}
-	if err != nil {
-		result.Err = err.Error()
-	}
-	return result
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

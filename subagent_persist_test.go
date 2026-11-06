@@ -17,11 +17,6 @@ import (
 // ones stay stopped and dismissed ones stay dismissed. Without persist they
 // come back stopped, as before.
 
-// blockRound is a model round that never ends until its turn is cancelled.
-func blockRound(_ context.Context, _ []llm.Message, out chan<- llm.StreamChunk) {
-	<-make(chan struct{})
-}
-
 // cancellableBlock blocks until ctx ends.
 func cancellableBlock(ctx context.Context, _ []llm.Message, _ chan<- llm.StreamChunk) { <-ctx.Done() }
 

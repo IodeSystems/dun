@@ -1715,7 +1715,7 @@ func TestTUI_RestartSendsNoServerSwitches(t *testing.T) {
 	nm, _ = m.Update(eofMsg{})
 	m = nm.(tuiModel)
 	sent.Reset()
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
+	m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
 		"servers": []any{map[string]any{"id": "raglit", "running": false}}})
 	if strings.Contains(sent.String(), `"type":"server"`) {
 		t.Errorf("a restart sent a server switch: %q", sent.String())

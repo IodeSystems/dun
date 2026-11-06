@@ -26,7 +26,7 @@ func TestContextPicker_EnterOnAFlagWaitsForItsValue(t *testing.T) {
 		t.Fatalf("composer: %q", got)
 	}
 	m = typeStr(m, "512k")
-	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(rec.String(), `"action":"--max 512k"`) || strings.Count(rec.String(), "ctxconfig") != 1 {
 		t.Errorf("sent: %s", rec.String())
 	}

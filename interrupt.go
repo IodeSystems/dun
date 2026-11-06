@@ -258,7 +258,8 @@ func (h *Harness) recordInterrupt(ctx context.Context) {
 	}
 	h.store.appendSilent(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindNotification, Tag: interruptTag,
-		Content: note, CreatedAt: time.Now().UnixNano(),
+		// After the partial reply above (now), even on a coarse clock.
+		Content: note, CreatedAt: max(now, time.Now().UnixNano()),
 	})
 }
 
