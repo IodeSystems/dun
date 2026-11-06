@@ -409,6 +409,12 @@ type Harness struct {
 	// Servers() reads it while holding srvMu.
 	oauthMu sync.Mutex
 	oauth   map[string]oauthEntry
+	// added is the /file grants as file toolsets (addedWriters), read by
+	// each file call: a path the person adds in a turn is open to that
+	// turn's next call, though the tool set waits for the turn's end.
+	// Dropped by every edit of a paths file (editPathsFile).
+	addedMu sync.Mutex
+	added   *addedSets
 	// shared is each server reached through dund's gateway: its grant
 	// (servers_share.go). Guarded by srvMu.
 	shared map[string]ShareGrant

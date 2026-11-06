@@ -234,11 +234,12 @@ func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args strin
 }
 
 // withFiles routes the file tools to the toolset and reports each call.
-func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp, added []*filetools.Toolset, readOnly map[*filetools.Toolset]bool, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, grants func() ([]*filetools.Toolset, map[*filetools.Toolset]bool), onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if !ts.Handles(tc.Function.Name) {
 			return inner(ctx, tc)
 		}
+		added, readOnly := grants() // read per call: see Harness.added
 		route := ts
 		out := ""
 		if t := tmpReader(ts, tmp, tc.Function.Name, tc.Function.Arguments); t != nil {

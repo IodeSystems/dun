@@ -287,3 +287,75 @@ func TestFilePaths_WorkspaceRow(t *testing.T) {
 		t.Errorf("write at session: %s", out)
 	}
 }
+
+// A path added while a turn runs is open to that turn's next call: the
+// model asks, the person adds, the model tries again in the same turn
+// (USER 2026-11-06: "adding a file after it has tried to write doesn't seem
+// to work"). The tool set waits for the turn's end; the grant does not, and
+// the same call a third time is not a loop: the person changed its answer.
+func TestFileAdd_DuringATurn(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	old := tmpRoots
+	tmpRoots = func() []string { return nil }
+	t.Cleanup(func() { tmpRoots = old })
+	ws, other := t.TempDir(), t.TempDir()
+	notes := filepath.Join(other, "notes.md")
+	os.WriteFile(notes, []byte("old\n"), 0o644)
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Client: &scriptRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	h.turnMu.Lock() // a turn is running
+	defer h.turnMu.Unlock()
+	if out := fileCall(t, h, "file_write", map[string]any{"path": notes, "content": "new\n", "overwrite": true}); !strings.Contains(out, "/file add "+notes+" --write") {
+		t.Fatalf("outside: want the command with --write: %s", out)
+	}
+	if _, err := h.AddPath(notes, ScopeSession, PathOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if out := fileCall(t, h, "file_write", map[string]any{"path": notes, "content": "new\n", "overwrite": true}); !strings.Contains(out, "reading only") {
+		t.Errorf("added read only, in the turn: want the read-only refusal: %s", out)
+	}
+	if _, err := h.SetPathMode(notes, ScopeSession, "write"); err != nil {
+		t.Fatal(err)
+	}
+	if out := fileCall(t, h, "file_write", map[string]any{"path": notes, "content": "new\n", "overwrite": true}); strings.Contains(out, "ERROR") {
+		t.Errorf("made writable, in the turn: %s", out)
+	}
+	if b, _ := os.ReadFile(notes); string(b) != "new\n" {
+		t.Errorf("not written: %q", b)
+	}
+}
+
+// A file the model means to create can be added before it exists, when its
+// directory does: that file alone opens, and the write makes it.
+func TestFileAdd_ANewFile(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	old := tmpRoots
+	tmpRoots = func() []string { return nil }
+	t.Cleanup(func() { tmpRoots = old })
+	ws, other := t.TempDir(), t.TempDir()
+	fresh := filepath.Join(other, "plan.md")
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Client: &scriptRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	out := fileCall(t, h, "file_write", map[string]any{"path": fresh, "content": "x\n"})
+	if !strings.Contains(out, "/file add "+fresh+" --write") || !strings.Contains(out, "/file add "+other+" --write") {
+		t.Fatalf("outside, not there yet: want the file and its directory: %s", out)
+	}
+	if _, err := h.AddPath(fresh, ScopeSession, PathOptions{Write: true}); err != nil {
+		t.Fatalf("a file not there yet, in a directory that is: %v", err)
+	}
+	if out := fileCall(t, h, "file_write", map[string]any{"path": fresh, "content": "x\n"}); strings.Contains(out, "ERROR") {
+		t.Errorf("write: %s", out)
+	}
+	if out := fileCall(t, h, "file_write", map[string]any{"path": filepath.Join(other, "else.md"), "content": "x\n"}); !strings.Contains(out, "only the files added") {
+		t.Errorf("its neighbour: %s", out)
+	}
+	if _, err := h.AddPath(filepath.Join(t.TempDir(), "no", "such", "dir.md"), ScopeSession, PathOptions{}); err == nil {
+		t.Error("a file in a directory that is not there: want an error")
+	}
+}

@@ -118,6 +118,15 @@ func (g *loopGuard) observe(tool, key string) int {
 	return 1
 }
 
+// reset ends the run: the person changed what the next call can return (a
+// /file grant), so the same call again is not a loop.
+func (g *loopGuard) reset() {
+	g.mu.Lock()
+	g.tool, g.key, g.n = "", "", 0
+	g.last, g.asked, g.logged = "", false, false
+	g.mu.Unlock()
+}
+
 // noteResult remembers what a call that RAN returned, so a later refusal can
 // quote it back. Refusals do not call this: the point is what the model already
 // received, not what it was told about receiving it.

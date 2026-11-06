@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -152,7 +154,48 @@ func (h *Harness) editPathsFile(scope string, edit func(*pathsFile)) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
+	defer h.dropAdded()
 	return fsutil.WriteAtomic(p, append(b, '\n'), 0o600)
+}
+
+// addedSets is addedWriters' answer, kept until a paths file changes.
+type addedSets struct {
+	ts       []*filetools.Toolset
+	readOnly map[*filetools.Toolset]bool
+}
+
+// addedNow is the grants as the file tools route them: built once, then
+// kept until a paths file is edited here.
+func (h *Harness) addedNow() ([]*filetools.Toolset, map[*filetools.Toolset]bool) {
+	h.addedMu.Lock()
+	defer h.addedMu.Unlock()
+	if h.added == nil {
+		ts, ro := h.addedWriters()
+		h.added = &addedSets{ts: ts, readOnly: ro}
+	}
+	return h.added.ts, h.added.readOnly
+}
+
+// dropAdded forgets the grants, and the loop guard's run: a call refused
+// for want of a grant is the one to try again once it is given.
+func (h *Harness) dropAdded() {
+	h.addedMu.Lock()
+	h.added = nil
+	h.addedMu.Unlock()
+	h.loop.reset()
+}
+
+// statAdded is os.Stat for a path to open, except that a file not there yet
+// in a directory that is opens as a file (nil info): the model asked to
+// create it.
+func statAdded(p string) (os.FileInfo, error) {
+	st, err := os.Stat(p)
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		if d, derr := os.Stat(filepath.Dir(p)); derr == nil && d.IsDir() {
+			return nil, nil
+		}
+	}
+	return st, err
 }
 
 // migrateAdded reads the old <session>.files.json list into the session's
@@ -259,16 +302,17 @@ func (h *Harness) AddPath(p, scope string, o PathOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	st, err := os.Stat(abs)
+	st, err := statAdded(abs)
 	if err != nil {
 		return "", fmt.Errorf("%s: %v", p, err)
 	}
+	isDir := st != nil && st.IsDir()
 	on := true
 	mode := "read"
 	if o.Write {
 		mode = "write"
 	}
-	idx := !o.NoIndex && st.IsDir()
+	idx := !o.NoIndex && isDir
 	if err := h.editPaths(scope, func(m map[string]PathEntry) {
 		e := m[abs]
 		e.On, e.Mode, e.Index = &on, mode, &idx
@@ -278,12 +322,12 @@ func (h *Harness) AddPath(p, scope string, o PathOptions) (string, error) {
 	}
 	h.applyTools()
 	what := "the file"
-	if st.IsDir() {
+	if isDir {
 		what = "the directory, and everything under it,"
 	}
 	msg := fmt.Sprintf("files: %s — %s open to dun's file tools for %s, %s", abs, strings.TrimPrefix(what, "the "), scopeWords(scope),
 		map[bool]string{true: "read and write", false: "read only (/file mode " + abs + " write lets dun change it)"}[o.Write])
-	if st.IsDir() {
+	if isDir {
 		msg += " · " + h.indexPath(abs, scope, idx)
 	}
 	return msg + " · /file remove " + abs + " takes it back", nil
@@ -464,10 +508,10 @@ func (h *Harness) addedWriters() (out []*filetools.Toolset, readOnly map[*fileto
 		if !a.On {
 			continue
 		}
-		st, err := os.Stat(a.Path)
+		st, err := statAdded(a.Path)
 		switch {
 		case err != nil:
-		case st.IsDir():
+		case st != nil && st.IsDir():
 			dirs = append(dirs, a)
 		default:
 			d := filepath.Dir(a.Path)
@@ -516,13 +560,24 @@ func outsideHint(ts *filetools.Toolset, name, args string) string {
 	if _, err := filetools.Under(ts.Root(), p); err == nil {
 		return ""
 	}
-	dir := p
-	if st, err := os.Stat(p); err == nil && !st.IsDir() {
-		dir = filepath.Dir(p)
+	dir := filepath.Dir(p)
+	if st, err := os.Stat(p); err == nil && st.IsDir() {
+		dir = p
+	}
+	// A write or an edit needs the path open for writing: the command
+	// says so, or the person adds it read only and the call is refused
+	// again.
+	write := ""
+	if name == ts.Name(filetools.Edit) || name == ts.Name(filetools.Write) {
+		write = " --write"
+	}
+	if dir == p {
+		return fmt.Sprintf("ERROR: %s is outside this workspace (%s), and the user has not added it. "+
+			"Ask the user to add it: /file add %s%s. Do not work around this with exec.", p, ts.Root(), p, write)
 	}
 	return fmt.Sprintf("ERROR: %s is outside this workspace (%s), and the user has not added it. "+
-		"Ask the user to add it: /file add %s (or /file add %s for its directory). Do not work around this with exec.",
-		p, ts.Root(), p, dir)
+		"Ask the user to add it: /file add %s%s (or /file add %s%s for its directory). Do not work around this with exec.",
+		p, ts.Root(), p, write, dir, write)
 }
 
 // pathsSwitchKind is /file's table: every path a scope names, on, off or
