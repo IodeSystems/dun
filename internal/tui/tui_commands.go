@@ -213,6 +213,7 @@ func init() {
 			m.openStats(statsUsage)
 			return nil
 		}},
+		{"who", "", "who is here: this session's name, its sub-agents under it, and every other live session and dun msg listener; a screen, type to filter, esc closes", whoSlash},
 		{"reload", "", "restart this TUI into the dun binary on disk (after make install), on the same session", func(m *tuiModel, _ []string) tea.Cmd {
 			m.reloadReq = true
 			return tea.Quit

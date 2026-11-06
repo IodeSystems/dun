@@ -141,7 +141,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.paging {
 				m.syncPager()
 			}
-			return m, nil
+			cmd := m.scrCmd
+			m.scrCmd = nil
+			return m, cmd
 		}
 		m.scr = nil
 		// So does the pager, all but ctrl+c: it reads one block in the convo
@@ -854,6 +856,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case copiedMsg:
 		return m, m.flash(copiedNote(msg))
+
+	case whoMsg:
+		m.whoDone(msg)
+		return m, nil
 
 	case toolsMsg:
 		cmd := m.toolsDone(msg)

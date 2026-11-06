@@ -255,6 +255,7 @@ type tuiModel struct {
 	bandAt       int            // the pane row they start at
 	pg           pager          // the pager (valid while paging)
 	scr          *paneScreen    // a pushed screen over the pager (panes.go), or nil
+	scrCmd       tea.Cmd        // what a screen's key left to run (/who asking dund again)
 	extWant      bool           // /ext asked for the list (extview.go)
 	planWant     bool           // /plan asked for the plan (planview.go)
 	planTelling  *planTellTo    // the composer is telling a plan node's owner (planview.go)

@@ -201,6 +201,17 @@ are in `decisions.md`.
   and enter sends `/plan tell`; esc sends nothing. Either way /plan comes
   back. The owner changes the plan to match: the words are an instruction,
   not an edit.
+- **`/who` is one searchable screen (USER 2026-11-06).** A status pane
+  ("you are <name>", the counts, a dund failure) over one list: this
+  session, its sub-agents under it as a tree (`├─ #N state`), then the other
+  live sessions, then the `dun msg` listeners. The names are dund's
+  (dun_list's), so a name on the screen is one dun_msg takes; with no dund,
+  this session is its id and the others are not listed, and the pane says
+  why. It is type-to-filter like `/skill` (space adds a word once one
+  letter is typed); a sub-agent that matches keeps
+  this session above it. Sub-agents update from agents events; the sessions
+  are asked once on open and again on ctrl+r (`whoview.go`). A sub-agent
+  has no name, only its number, and no children, so the tree is one level.
 - **Typing while descended tells the child** (a `jobs tell`: its next
   message), and the placeholder says so. Chosen over a read-only view
   because the reason to open a child is usually to correct it, and the

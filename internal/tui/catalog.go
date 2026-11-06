@@ -56,7 +56,7 @@ var groupOrder = []string{"setup", "tools", "session", "git", "memory", "prompts
 var tuiGroup = map[string]string{
 	"login": "setup", "provider": "setup", "model": "setup", "mcp add": "setup", "help": "setup", "config": "setup", "logout": "setup",
 	"skill":  "tools",
-	"status": "session", "context": "session", "usage": "session", "resume": "session", "new": "session", "persist": "session", "exit": "session", "close": "session", "splash": "session",
+	"status": "session", "context": "session", "usage": "session", "who": "session", "resume": "session", "new": "session", "persist": "session", "exit": "session", "close": "session", "splash": "session",
 	"reconnect": "client", "mouse": "client",
 	"reload": "maintenance", "upgrade": "maintenance", "version": "maintenance", "perf": "maintenance", "repaint": "maintenance",
 	"scrolldebug": "maintenance", "trace": "maintenance",

@@ -361,6 +361,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// tokens already streamed the reply; nothing to add.
 	case "agents":
 		m.agents = keepChanged(m.agents, agentRowsFromEvent(ev))
+		m.syncWho()
 	case "job_usage":
 		// What an open job view asked for (jobview.go): dund's sample of the
 		// job's processes.
