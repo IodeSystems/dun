@@ -501,7 +501,16 @@ type ServerState struct {
 	ViaProject string `json:"viaProject,omitempty"`
 	ViaSession string `json:"viaSession,omitempty"`
 	ViaFrom    string `json:"viaFrom,omitempty"`
-	Detail     string `json:"detail,omitempty"`
+	// Instance is "shared", "session" or "agent" (a built-in's fixed one,
+	// "workspace" too); InstanceGlobal/InstanceProject/InstanceSession its
+	// switch at each scope, InstanceFrom the deciding scope ("" for a
+	// built-in).
+	Instance        string `json:"instance,omitempty"`
+	InstanceGlobal  string `json:"instanceGlobal,omitempty"`
+	InstanceProject string `json:"instanceProject,omitempty"`
+	InstanceSession string `json:"instanceSession,omitempty"`
+	InstanceFrom    string `json:"instanceFrom,omitempty"`
+	Detail          string `json:"detail,omitempty"`
 	// Slash is the command that switches it ("raglit" for /rag), for a
 	// server that has one.
 	Slash string `json:"slash,omitempty"`

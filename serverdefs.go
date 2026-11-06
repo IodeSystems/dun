@@ -37,7 +37,11 @@ type Server struct {
 	// Via is "" (dun connects to it) or ViaShell (mcpshell hosts it and dun
 	// does not start it). See ServerSpec.Via.
 	Via string
-	// Scopes is where Autostart and Via came from (mcpscope.go).
+	// Instance is how many connections it gets, resolved: InstanceShared,
+	// InstanceSession or InstanceAgent; a built-in's fixed one
+	// (builtinInstances). See ServerSpec.Instance.
+	Instance string
+	// Scopes is where Autostart, Via and Instance came from (mcpscope.go).
 	Scopes ServerScopes
 	// Shell is mcpshell's settings when it hosts the server
 	// (ServerSpec.Shell).
@@ -212,6 +216,33 @@ const (
 	ServerShell = "shell"    // mcpshell
 	ServerDocs  = "raglit"   // raglit — /rag
 )
+
+// builtinInstance is a built-in server's fixed instance and why it is
+// fixed: the instance switch (ServerSpec.Instance) is refused for these, and
+// the /mcp table shows this value, marked built-in.
+type builtinInstance struct{ instance, why string }
+
+// builtinInstances are the built-in servers' fixed instances, the one place
+// they are declared (mcpscope.go resolve and SetServerInstance read it).
+var builtinInstances = map[string]builtinInstance{
+	// mcpshell holds the session's eval state (exported variables, its
+	// hosted servers) and the engine starts one per session.
+	ServerShell: {InstanceSession, "it holds this session's eval state"},
+	// The engine starts a poly-lsp-mcp proxy per session; with --daemon the
+	// proxies share one daemon, which holds one index and one LSP fleet per
+	// root ({{workspace}}).
+	ServerCode: {InstanceWorkspace, "its daemon keeps one index per workspace"},
+	// `raglit serve` is a thin per-session client of the one per-user
+	// raglit daemon, which holds every project's index.
+	ServerDocs: {InstanceShared, "every session's raglit is a client of one raglit daemon"},
+}
+
+// BuiltinInstance is id's fixed instance and why, ok=false for a server
+// that is not built in.
+func BuiltinInstance(id string) (instance, why string, ok bool) {
+	b, ok := builtinInstances[canonicalServerID(id)]
+	return b.instance, b.why, ok
+}
 
 // legacyServerIDs are the ids the two optional servers had before they were
 // named for what they are. Files and sidecars may still hold them.

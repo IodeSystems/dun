@@ -16,10 +16,11 @@ import (
 func tableStates() []dun.ServerState {
 	return []dun.ServerState{
 		{ID: "playwright", Proto: "stdio", Auto: true, Via: dun.ViaShell, ViaFrom: dun.ScopeGlobal, ViaGlobal: dun.ViaShell,
-			Global: "on", From: dun.ScopeGlobal},
+			Global: "on", From: dun.ScopeGlobal, Instance: dun.InstanceShared, InstanceFrom: dun.ScopeGlobal},
 		{ID: "figma", Proto: "http", Auto: true, Running: true, Tools: 3, Via: dun.ViaDirect, ViaFrom: dun.ScopeSession,
-			ViaSession: dun.ViaDirect, Global: "off", Project: "on", From: dun.ScopeProject},
-		{ID: dun.ServerShell, Proto: "stdio", Global: "on", Session: "off", From: dun.ScopeSession},
+			ViaSession: dun.ViaDirect, Global: "off", Project: "on", From: dun.ScopeProject,
+			Instance: dun.InstanceAgent, InstanceSession: dun.InstanceAgent, InstanceFrom: dun.ScopeSession},
+		{ID: dun.ServerShell, Proto: "stdio", Global: "on", Session: "off", From: dun.ScopeSession, Instance: dun.InstanceSession},
 	}
 }
 
@@ -28,13 +29,13 @@ func tableStates() []dun.ServerState {
 func TestServerTable_Plain(t *testing.T) {
 	out := mcptable.ServerTable(tableStates(), mcptable.PlainKey)
 	lines := strings.Split(out, "\n")
-	if want := "  server      proto  global   project  session  mode                   → state"; lines[0] != want {
+	if want := "  server      proto  global   project  session  mode                   instance            → state"; lines[0] != want {
 		t.Errorf("header:\n%q\n%q", lines[0], want)
 	}
 	for i, want := range []string{
-		"playwright  stdio     ●        –        –     scripted (global)      on (global)",
-		"figma       http      ○        ●        –     standalone (session)   on (project)",
-		"shell       stdio     ●        –        ○     standalone (built-in)  off (session)",
+		"playwright  stdio     ●        –        –     scripted (global)      shared (global)     on (global)",
+		"figma       http      ○        ●        –     standalone (session)   agent (session)     on (project)",
+		"shell       stdio     ●        –        ○     standalone (built-in)  session (built-in)  off (session)",
 	} {
 		if !strings.HasPrefix(lines[i+1], "  "+want) {
 			t.Errorf("row %d:\n%q\nwant prefix\n%q", i, lines[i+1], "  "+want)
@@ -45,12 +46,12 @@ func TestServerTable_Plain(t *testing.T) {
 // A hotkey letter is bold and underlined inside its word, and the styling
 // changes no text. (Without a terminal the renderer drops the styling.)
 func TestServerHeader_HotKeys(t *testing.T) {
-	idW, viaW := mcptable.TableWidths(tableStates())
-	got := mcptable.ServerHeader(idW, viaW, hotKey)
-	if stripANSI(got) != mcptable.ServerHeader(idW, viaW, mcptable.PlainKey) {
+	cw := mcptable.TableWidths(tableStates())
+	got := mcptable.ServerHeader(cw, hotKey)
+	if stripANSI(got) != mcptable.ServerHeader(cw, mcptable.PlainKey) {
 		t.Errorf("styling changed the text: %q", stripANSI(got))
 	}
-	for _, k := range []string{"g", "p", "s", "m"} {
+	for _, k := range []string{"g", "p", "s", "m", "i"} {
 		if !strings.Contains(got, stHotKey.Render(k)) {
 			t.Errorf("%s not marked: %q", k, got)
 		}
@@ -79,7 +80,7 @@ func TestMCPServersView_Keys(t *testing.T) {
 	if strings.Contains(convoText(m), "mcp servers …") {
 		t.Error("the table opened; the listing must not also land in the scrollback")
 	}
-	if h := stripANSI(m.serversPaging().hint()); !strings.Contains(h, "mode at session") {
+	if h := stripANSI(m.serversPaging().hint()); !strings.Contains(h, "instance at session") {
 		t.Errorf("hint names the mode scope: %q", h)
 	}
 	if v := stripANSI(m.pg.view(140, 10)); !strings.Contains(v, "playwright  stdio     ●        –        –     scripted (global)") {
@@ -103,18 +104,23 @@ func TestMCPServersView_Keys(t *testing.T) {
 		{"p", "mcp on playwright --project"},
 		{"s", "mcp on playwright --session"},
 		{"m", "mcp mode playwright scripted --session"},
+		{"i", "mcp instance playwright shared --session"},
 		{"j", ""},
+		{"i", "mcp instance figma unset --session"},
 		{"p", "mcp off figma --project"},
 		{"m", "mcp mode figma unset --session"},
 		{"M", ""},
 		{"g", ""},
 		{"m", "mcp mode figma scripted --global"},
+		{"i", "mcp instance figma session --global"},
+		{"j", ""},
+		{"i", ""}, // the shell: built in, fixed
 	} {
 		if got := sent(c.key); got != c.want {
 			t.Errorf("%s: sent %q, want %q", c.key, got, c.want)
 		}
 	}
-	if h := stripANSI(m.serversPaging().hint()); !strings.Contains(h, "mode at global") {
+	if h := stripANSI(m.serversPaging().hint()); !strings.Contains(h, "instance at global") {
 		t.Errorf("after M g: %q", h)
 	}
 }
@@ -130,6 +136,7 @@ func TestPalette_MCPScopeCompletion(t *testing.T) {
 		"/mcp mode github scr":       "mode github scripted",
 		"/mcp mode github scripted ": "mode github scripted --global",
 		"/mcp unset github ":         "unset github --project",
+		"/mcp instance github ag":    "instance github agent",
 		"/mcp add play":              "add playwright",
 	} {
 		mm := typeStr(m, in)

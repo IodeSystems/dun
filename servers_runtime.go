@@ -119,6 +119,15 @@ type ServerState struct {
 	ViaProject string `json:"viaProject,omitempty"`
 	ViaSession string `json:"viaSession,omitempty"`
 	ViaFrom    string `json:"viaFrom,omitempty"`
+	// Instance is the resolved instance (InstanceShared, InstanceSession,
+	// InstanceAgent; a built-in's fixed one), InstanceGlobal, InstanceProject
+	// and InstanceSession the switch at each scope ("" unset), InstanceFrom
+	// the scope that decided ("" for a built-in: it is fixed).
+	Instance        string `json:"instance,omitempty"`
+	InstanceGlobal  string `json:"instanceGlobal,omitempty"`
+	InstanceProject string `json:"instanceProject,omitempty"`
+	InstanceSession string `json:"instanceSession,omitempty"`
+	InstanceFrom    string `json:"instanceFrom,omitempty"`
 	// Auth is a remote server's credentials: its OAuth login state, "static
 	// bearer", "static header" or "none"; "" for a local server.
 	Auth string `json:"auth,omitempty"`
@@ -206,6 +215,12 @@ func (h *Harness) Servers() []ServerState {
 			ViaProject:   s.Scopes.ViaProject,
 			ViaSession:   s.Scopes.ViaSession,
 			ViaFrom:      s.Scopes.ViaFrom,
+
+			Instance:        s.Instance,
+			InstanceGlobal:  s.Scopes.InstanceGlobal,
+			InstanceProject: s.Scopes.InstanceProject,
+			InstanceSession: s.Scopes.InstanceSession,
+			InstanceFrom:    s.Scopes.InstanceFrom,
 		}
 		st.Description = h.describe(s.ID)
 		st.Log = h.serverLogTail(s.ID, serverLogShown)
@@ -1115,6 +1130,12 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 		return "", err
 	}
 	spec.Via = via
+	if spec.Instance, err = NormalizeInstance(spec.Instance); err != nil {
+		return "", err
+	}
+	if spec.Instance == InstanceAgent && via == ViaShell {
+		return "", fmt.Errorf("instance agent is for a standalone server: a scripted one runs in the session's shell, which a sub-agent shares")
+	}
 	// A remote server with no credentials that answers with an OAuth
 	// challenge logs in with OAuth; dun picks the client (oauthauto.go).
 	if spec.OAuth == nil && wantsOAuth(ctx, spec) {

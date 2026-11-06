@@ -211,6 +211,12 @@ func routeSlash(line string, r slashRoutes) {
 				return
 			}
 			r.control("mcp", "mode "+strings.Join(lowerAll(args[1:]), " "))
+		case "instance":
+			if _, err := dun.NormalizeInstance(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
+				r.reply("usage: /mcp instance <id> shared|session|agent|unset [--global|--project|--session] (bare: this session)")
+				return
+			}
+			r.control("mcp", "instance "+strings.Join(lowerAll(args[1:]), " "))
 		case "toggle":
 			if len(args) < 4 || len(args) > 5 {
 				r.reply("usage: /mcp toggle <id> <tool> on|off|unset [--global|--project|--session] (bare: this session)")

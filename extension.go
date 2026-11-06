@@ -242,6 +242,9 @@ func (e *Extension) validate() error {
 	if err := checkOAuth(e.Server, via); err != nil {
 		return fmt.Errorf("server.oauth: %w", err)
 	}
+	if _, err := NormalizeInstance(e.Server.Instance); err != nil {
+		return fmt.Errorf("server.instance: %w", err)
+	}
 	if e.Server.Disabled {
 		return fmt.Errorf("server.disabled: an extension is turned off with /mcp off, not disabled")
 	}
@@ -352,7 +355,7 @@ func (e Extension) server() Server {
 	s := e.spec()
 	auto := s.Autostart != nil && *s.Autostart
 	return Server{ID: s.ID, Command: s.Command, Args: s.Args, URL: s.URL, Headers: requestHeaders(s), Bearer: s.Bearer,
-		Env: s.Env, Timeout: s.Timeout, Autostart: auto, Disable: s.Disable, Via: s.Via, Shell: s.Shell, OAuth: s.OAuth}
+		Env: s.Env, Timeout: s.Timeout, Autostart: auto, Disable: s.Disable, Via: s.Via, Instance: s.Instance, Shell: s.Shell, OAuth: s.OAuth}
 }
 
 // skillsDir is e's skills directory, or "".

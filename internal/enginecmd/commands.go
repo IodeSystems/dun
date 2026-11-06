@@ -129,13 +129,14 @@ func OwnCommands(iso string) []proto.CommandSpec {
 	// In the order a client lists them within a group: /mcp, which a new
 	// user adds a server with, before /ext, which explains extensions.
 	return []proto.CommandSpec{
-		{Name: "mcp", Usage: "[info | help | add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | mode <id> standalone|scripted|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
+		{Name: "mcp", Usage: "[info | help | add [preset] | tools [id] | on|off <id> [--global|--project|--session] | unset <id> --project|--session | mode <id> standalone|scripted|unset [--scope] | instance <id> shared|session|agent|unset [--scope] | toggle <id> <tool> on|off|unset [--scope] | remove <id> | refresh <id> | login|logout <id> | restart [id]]", Group: "tools", Text: true,
 			Choices: choices("info", "each server's state, mode, tools and tokens; the shell; what scripting a heavy one saves",
 				"help", "these actions, one line each",
 				"add", "add a server: a form — a preset, or an id and a URL or a local command",
 				"on", "turn a server on: this session, or --project / --global", "off", "turn a server off: this session, or --project / --global",
 				"unset", "clear a server's --project or --session switch", "restart", "restart servers", "remove", "remove a server from the catalog", "refresh", "re-index a server's docs",
 				"mode", "standalone (its own tools, schemas in every request) or scripted (in mcpshell, called through eval), at a scope",
+				"instance", "shared (one connection in dund for every session), session (this session's own) or agent (one more per sub-agent), at a scope",
 				"toggle", "turn one tool on or off, at a scope",
 				"tools", "what each server's tools cost; with an id, list them and turn some off",
 				"login", "log in to an oauth server in the browser", "logout", "delete (and revoke) an oauth server's token"),

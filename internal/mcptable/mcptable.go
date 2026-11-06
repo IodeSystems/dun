@@ -56,10 +56,26 @@ func ViaCell(st dun.ServerState) string {
 	return dun.ModeWord(st.Via) + " (" + st.ViaFrom + ")"
 }
 
+// InstanceCell is "shared (global)": how many connections, and which switch
+// said so; a built-in's fixed one is marked built-in.
+func InstanceCell(st dun.ServerState) string {
+	if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+		return "dun's own tools"
+	}
+	inst := st.Instance
+	if inst == "" {
+		inst = dun.InstanceShared
+	}
+	if st.InstanceFrom == "" {
+		return inst + " (built-in)"
+	}
+	return inst + " (" + st.InstanceFrom + ")"
+}
+
 // tableCols are the column headers after the id, with each one's hotkey
 // (the TUI's /mcp view cycles a column with it). "" is no key.
 var tableCols = []struct{ word, key string }{
-	{"global", "g"}, {"project", "p"}, {"session", "s"}, {"mode", "m"}, {"→ state", ""},
+	{"global", "g"}, {"project", "p"}, {"session", "s"}, {"mode", "m"}, {"instance", "i"}, {"→ state", ""},
 }
 
 // keyStyle renders a header word with its hotkey letter marked.
@@ -68,27 +84,34 @@ type keyStyle func(word, key string) string
 // PlainKey marks nothing: the text listing every client gets.
 func PlainKey(word, _ string) string { return word }
 
-// TableWidths are the id column's and the via column's widths.
-func TableWidths(states []dun.ServerState) (idW, viaW int) {
-	idW, viaW = len("server"), len("mode")
+// Widths are the columns that size to their cells: the id, the mode and
+// the instance.
+type Widths struct{ ID, Via, Instance int }
+
+// TableWidths are the widths states' rows need.
+func TableWidths(states []dun.ServerState) Widths {
+	w := Widths{ID: len("server"), Via: len("mode"), Instance: len("instance")}
 	for _, st := range states {
-		idW = max(idW, len(st.ID))
-		viaW = max(viaW, len([]rune(ViaCell(st))))
+		w.ID = max(w.ID, len(st.ID))
+		w.Via = max(w.Via, len([]rune(ViaCell(st))))
+		w.Instance = max(w.Instance, len([]rune(InstanceCell(st))))
 	}
-	return
+	return w
 }
 
 // ServerHeader is the table's header row.
-func ServerHeader(idW, viaW int, key keyStyle) string {
+func ServerHeader(cw Widths, key keyStyle) string {
 	var b strings.Builder
-	b.WriteString(textfmt.Pad("server", idW) + "  " + textfmt.Pad("proto", protoW))
+	b.WriteString(textfmt.Pad("server", cw.ID) + "  " + textfmt.Pad("proto", protoW))
 	for i, c := range tableCols {
 		b.WriteString("  ")
 		w := len([]rune(c.word))
 		if i < 3 {
 			w = max(w, 7)
 		} else if c.word == "mode" {
-			w = viaW
+			w = cw.Via
+		} else if c.word == "instance" {
+			w = cw.Instance
 		}
 		if c.key == "" {
 			b.WriteString(c.word)
@@ -101,18 +124,18 @@ func ServerHeader(idW, viaW int, key keyStyle) string {
 
 // ServerRow is one server's row: the switches, where it runs, what it is,
 // and what it is doing.
-func ServerRow(st dun.ServerState, idW, viaW int, detail string) string {
+func ServerRow(st dun.ServerState, cw Widths, detail string) string {
 	cell := func(v string) string { return "   " + CellMark(v) + "   " }
-	return textfmt.Pad(st.ID, idW) + "  " + textfmt.Pad(st.Proto, protoW) + "  " + cell(st.Global) + "  " + cell(st.Project) + "  " + cell(st.Session) +
-		"  " + textfmt.Pad(ViaCell(st), viaW) + "  " + StateCell(st) + " · " + detail
+	return textfmt.Pad(st.ID, cw.ID) + "  " + textfmt.Pad(st.Proto, protoW) + "  " + cell(st.Global) + "  " + cell(st.Project) + "  " + cell(st.Session) +
+		"  " + textfmt.Pad(ViaCell(st), cw.Via) + "  " + textfmt.Pad(InstanceCell(st), cw.Instance) + "  " + StateCell(st) + " · " + detail
 }
 
 // ServerTable is the header and a row per server, indented.
 func ServerTable(states []dun.ServerState, key keyStyle) string {
-	idW, viaW := TableWidths(states)
-	rows := []string{"  " + ServerHeader(idW, viaW, key)}
+	cw := TableWidths(states)
+	rows := []string{"  " + ServerHeader(cw, key)}
 	for _, st := range states {
-		rows = append(rows, "  "+ServerRow(st, idW, viaW, ServerDetail(st)))
+		rows = append(rows, "  "+ServerRow(st, cw, ServerDetail(st)))
 	}
 	return strings.Join(rows, "\n")
 }

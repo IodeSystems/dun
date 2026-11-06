@@ -20,6 +20,7 @@ import (
 //	/mcp unset <id> --project|--session
 //	/mcp mode <id> standalone|scripted|unset [--scope]
 //	                                   via, move and shell|direct are synonyms
+//	/mcp instance <id> shared|session|agent|unset [--scope]
 //	/mcp toggle <id> <tool> on|off|unset [--scope]
 
 // scopeArg reads the scope flags after a command; def when there are none.
@@ -127,6 +128,40 @@ func runViaCmd(ctx context.Context, h *dun.Harness, f []string) string {
 			msg += "\nthe shell is not running — it hosts " + id + " when it starts (/mcp on shell)"
 		}
 		msg += "\n" + shellPlacementNote
+	}
+	return msg
+}
+
+// runInstanceCmd sets a server's instance: instance <id>
+// shared|session|agent|unset [--scope].
+func runInstanceCmd(ctx context.Context, h *dun.Harness, f []string) string {
+	const usage = "usage: /mcp instance <id> shared|session|agent|unset [--global|--project|--session] (bare: this session)"
+	if len(f) < 2 {
+		return usage
+	}
+	id, inst := f[0], strings.ToLower(f[1])
+	scope, err := scopeArg(f[2:], dun.ScopeSession)
+	if err != nil {
+		return "mcp instance: " + err.Error()
+	}
+	if inst == "unset" {
+		inst = ""
+	} else if v, err := dun.NormalizeInstance(inst); err != nil {
+		return usage
+	} else if v == "" {
+		inst = dun.InstanceShared
+	}
+	if _, err := h.SetServerInstance(ctx, id, scope, inst); err != nil {
+		return "mcp instance: " + err.Error()
+	}
+	st, _ := stateOf(h, id)
+	word := inst
+	if word == "" {
+		word = "unset"
+	}
+	msg := id + ": instance " + scope + " " + word + " → " + mcptable.InstanceCell(st) + " · " + mcptable.ServerDetail(st)
+	if st.InstanceFrom != scope && st.InstanceFrom != "" && inst != "" {
+		msg += "\nthe " + fromWord(st.InstanceFrom) + " switch decides here"
 	}
 	return msg
 }

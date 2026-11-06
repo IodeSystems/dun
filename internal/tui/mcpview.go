@@ -21,7 +21,9 @@ import (
 //	s  session  unset → on → off → unset
 //	m  mode     scripted → standalone → unset, at the mode scope (session
 //	            unless changed); global has no unset, so it is the two
-//	M  then g/p/s chooses the mode scope
+//	i  instance shared → session → agent → unset, at the mode scope; global
+//	            has no unset
+//	M  then g/p/s chooses the mode scope (m and i write there)
 //
 // Each key sends the typed command (/mcp on <id> --global …) through the
 // engine like any other client, and the server event that answers refreshes
@@ -130,12 +132,12 @@ func (v *mcpServersView) starting() bool {
 }
 
 func (v *mcpServersView) page() pageDoc {
-	idW, viaW := mcptable.TableWidths(v.rows)
+	cw := mcptable.TableWidths(v.rows)
 	if v.width > 0 && v.width < narrowW { // the id and its state above, the switches below
 		nodes := make([]pageNode, 0, len(v.rows))
 		for i, st := range v.rows {
-			sub := fmt.Sprintf("%s %s %s · %s · %s", hotKey("g", "g")+mcptable.CellMark(st.Global), hotKey("p", "p")+mcptable.CellMark(st.Project),
-				hotKey("s", "s")+mcptable.CellMark(st.Session), mcptable.ViaCell(st), st.Proto)
+			sub := fmt.Sprintf("%s %s %s · %s · %s · %s", hotKey("g", "g")+mcptable.CellMark(st.Global), hotKey("p", "p")+mcptable.CellMark(st.Project),
+				hotKey("s", "s")+mcptable.CellMark(st.Session), mcptable.ViaCell(st), mcptable.InstanceCell(st), st.Proto)
 			nodes = append(nodes, pageNode{head: v.connMark(st) + " " + st.ID + " · " + v.details[i], sub: sub,
 				body: serverBody(st, v.details[i]), err: st.Err != "", pre: true})
 		}
@@ -144,9 +146,9 @@ func (v *mcpServersView) page() pageDoc {
 	nodes := make([]pageNode, 0, len(v.rows))
 	for i, st := range v.rows {
 		body := serverBody(st, v.details[i])
-		nodes = append(nodes, pageNode{head: v.connMark(st) + " " + mcptable.ServerRow(st, idW, viaW, v.details[i]), body: body, err: st.Err != "", pre: true})
+		nodes = append(nodes, pageNode{head: v.connMark(st) + " " + mcptable.ServerRow(st, cw, v.details[i]), body: body, err: st.Err != "", pre: true})
 	}
-	return pageDoc{title: "servers", header: "  " + mcptable.ServerHeader(idW, viaW, hotKey), nodes: nodes}
+	return pageDoc{title: "servers", header: "  " + mcptable.ServerHeader(cw, hotKey), nodes: nodes}
 }
 
 // hint is the status line: the keys, with the scope m writes to.
@@ -157,7 +159,7 @@ func (v *mcpServersView) hint() string {
 	}
 	return hotKey("global", "g") + StDim.Render(" on/off · ") + hotKey("project", "p") + StDim.Render("/") +
 		hotKey("session", "s") + StDim.Render(" unset→on→off · ") + hotKey("mode", "m") +
-		StDim.Render(" at "+v.viaScope+" (M+g/p/s: scope) · ") + hotKey("tools", "t") + StDim.Render(" · enter details · esc back")
+		StDim.Render("/") + hotKey("instance", "i") + StDim.Render(" at "+v.viaScope+" (M+g/p/s: scope) · ") + hotKey("tools", "t") + StDim.Render(" · enter details · esc back")
 }
 
 // serverStates reads a server event's list.
@@ -187,6 +189,8 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 			Via: str(o["via"]), Proto: str(o["proto"]), Global: str(o["global"]), Project: str(o["project"]), Session: str(o["session"]),
 			From: str(o["from"]), ViaGlobal: str(o["viaGlobal"]), ViaProject: str(o["viaProject"]),
 			ViaSession: str(o["viaSession"]), ViaFrom: str(o["viaFrom"]),
+			Instance: str(o["instance"]), InstanceGlobal: str(o["instanceGlobal"]), InstanceProject: str(o["instanceProject"]),
+			InstanceSession: str(o["instanceSession"]), InstanceFrom: str(o["instanceFrom"]),
 			Tools: int(evNum(o["tools"])), Slash: str(o["slash"]),
 			Index: str(o["index"]), IndexSeconds: evNum(o["indexSeconds"]), IndexErr: str(o["indexErr"]),
 			Cost: int(evNum(o["cost"])), Standalone: int(evNum(o["standalone"])),
@@ -271,6 +275,23 @@ func nextVia(v, scope string) string {
 	return dun.ViaShell
 }
 
+// nextInstance is shared → session → agent → unset → shared; global has no
+// unset.
+func nextInstance(v, scope string) string {
+	switch v {
+	case dun.InstanceShared:
+		return dun.InstanceSession
+	case dun.InstanceSession:
+		return dun.InstanceAgent
+	case dun.InstanceAgent:
+		if scope == dun.ScopeGlobal {
+			return dun.InstanceShared
+		}
+		return "unset"
+	}
+	return dun.InstanceShared
+}
+
 // serverKey handles a key on the table; false leaves it to the pager.
 func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 	if v.pickVia {
@@ -294,7 +315,7 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 		}
 		return true
 	}
-	if k != "g" && k != "p" && k != "s" && k != "m" {
+	if k != "g" && k != "p" && k != "s" && k != "m" && k != "i" {
 		return false
 	}
 	if m.pg.cur < 0 || m.pg.cur >= len(v.rows) {
@@ -323,6 +344,20 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 			next = dun.ModeWord(next)
 		}
 		line = "mcp mode " + st.ID + " " + next + " --" + v.viaScope
+	case "i":
+		if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+			m.flashText, m.flashUntil = st.ID+" is dun's own tools: they have no instance — t lists them", time.Now().Add(flashFor)
+			return true
+		}
+		if st.InstanceFrom == "" {
+			m.flashText, m.flashUntil = st.ID+" is built in: its instance is fixed ("+st.Instance+")", time.Now().Add(flashFor)
+			return true
+		}
+		cur := map[string]string{dun.ScopeGlobal: st.InstanceGlobal, dun.ScopeProject: st.InstanceProject, dun.ScopeSession: st.InstanceSession}[v.viaScope]
+		if v.viaScope == dun.ScopeGlobal && cur == "" {
+			cur = dun.InstanceShared
+		}
+		line = "mcp instance " + st.ID + " " + nextInstance(cur, v.viaScope) + " --" + v.viaScope
 	}
 	if !m.proc.controlCmd("slash", line) {
 		m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
@@ -372,6 +407,9 @@ func serverBody(st dun.ServerState, detail string) string {
 	rows = append(rows, switchSentence(st))
 	if st.Via != "" {
 		rows = append(rows, "mode: "+modeSentence(st))
+	}
+	if st.Instance != "" && !strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+		rows = append(rows, "instance: "+instanceSentence(st))
 	}
 	if st.Tools > 0 {
 		t := textfmt.Plural(st.Tools, "tool")
@@ -429,4 +467,17 @@ func modeSentence(st dun.ServerState) string {
 		s += " (set " + map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project", dun.ScopeSession: "for this session"}[st.ViaFrom] + ")"
 	}
 	return s + " — m changes it"
+}
+
+// instanceSentence is a server's instance, in words.
+func instanceSentence(st dun.ServerState) string {
+	if fixed, why, ok := dun.BuiltinInstance(st.ID); ok {
+		return fixed + ", fixed: " + why + " (built in)"
+	}
+	s := st.Instance + ": " + map[string]string{
+		dun.InstanceShared:  "one connection in dund for every session and sub-agent that resolves it the same",
+		dun.InstanceSession: "this session's own connection, which its sub-agents share",
+		dun.InstanceAgent:   "this session's own connection, and one more for each sub-agent",
+	}[st.Instance]
+	return s + " (set " + map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project", dun.ScopeSession: "for this session"}[st.InstanceFrom] + ") — i changes it"
 }

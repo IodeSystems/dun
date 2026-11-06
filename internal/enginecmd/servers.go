@@ -83,6 +83,7 @@ func ServersProto(states []dun.ServerState) []proto.ServerState {
 		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Missing: st.Missing, Auth: st.Auth,
 			Via: st.Via, Proto: st.Proto, Global: st.Global, Project: st.Project, Session: st.Session, From: st.From,
 			ViaGlobal: st.ViaGlobal, ViaProject: st.ViaProject, ViaSession: st.ViaSession, ViaFrom: st.ViaFrom,
+			Instance: st.Instance, InstanceGlobal: st.InstanceGlobal, InstanceProject: st.InstanceProject, InstanceSession: st.InstanceSession, InstanceFrom: st.InstanceFrom,
 			Detail: mcptable.ServerDetail(st), Slash: SlashOf(st), Starting: st.Starting, StartingSeconds: st.StartingSeconds,
 			Index: st.Index, IndexSeconds: st.IndexSeconds, IndexErr: st.IndexErr, Exclude: st.Exclude,
 			Hosted: st.Hosted, Cost: st.Cost, Standalone: st.Standalone, Description: st.Description, Title: st.Title,

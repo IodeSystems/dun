@@ -254,6 +254,8 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		return msg
 	case "mode", "via", "move":
 		return runViaCmd(ctx, h, strings.Fields(arg))
+	case "instance":
+		return runInstanceCmd(ctx, h, strings.Fields(arg))
 	case "refresh":
 		if arg == "" {
 			return "usage: /mcp refresh <id> — re-read its docs into the index"

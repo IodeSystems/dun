@@ -88,11 +88,26 @@ it decides, as `via` does (`ServerScopes.Instance*`, `ServerSpec.Instance`,
   sub-agents share it (a child shares its parent's manager).
 - `agent`: one per session and one more per sub-agent.
 
-Not switchable: the built-in servers (shell, poly-lsp, raglit; mcpshell
-holds a session's `eval` state, poly-lsp and raglit have daemons of their
-own). A scripted server with `agent` is refused: it runs in the session's
-shell, and a child has no shell of its own. With no dund (a test, a bare
-`dun -p`), `shared` acts as `session`.
+Not switchable: the built-in servers. Each declares its fixed instance in
+one place beside the built-in definitions (`builtinInstances`,
+`serverdefs.go`); the refusal reads it, and the `/mcp` table shows it as
+`<instance> (built-in)` (USER 2026-11-06):
+
+- shell: `session`. mcpshell holds the session's `eval` state, and the
+  engine starts one per session.
+- poly-lsp: `workspace`. The engine starts a proxy per session; with
+  `--daemon` the proxies share one daemon, which keeps one index and one LSP
+  fleet per root.
+- raglit: `shared`. `raglit serve` is a thin per-session client of the one
+  per-user raglit daemon, which holds every project's index.
+
+A scripted server with `agent` is refused by `/mcp instance` and `/mcp
+mode`: it runs in the session's shell, and a child has no shell of its own.
+A hand-edited file that still holds the pair runs it as `session`. With no
+dund (a test, a bare `dun -p`), `shared` acts as `session`.
+
+In the TUI's `/mcp` table, `i` cycles the instance at the mode scope (`M`
+then g/p/s picks it): shared → session → agent → unset; global has no unset.
 
 **The key** is the spec as the engine resolves it: the command found on PATH,
 args (placeholders expanded, so a `{{workspace}}` server is per workspace),

@@ -73,6 +73,11 @@ type ServerScopes struct {
 	ViaGlobal, ViaProject    string // "", ViaDirect, ViaShell
 	ViaSession               string
 	ViaFrom                  string // the scope that decided Via; "" for a built-in
+	// The instance switch at each scope ("", InstanceShared, InstanceSession,
+	// InstanceAgent) and the scope that decided Server.Instance; "" for a
+	// built-in, whose instance is fixed (builtinInstances).
+	InstanceGlobal, InstanceProject, InstanceSession string
+	InstanceFrom                                     string
 	// Indexes switched on (attached) and off (detached) at each scope
 	// (attach.go); Server.Attach and Server.Detach are the result.
 	AttachGlobal, AttachProject, AttachSession []string
@@ -90,15 +95,17 @@ func (s ServerScopes) GlobalOn(via string) bool {
 
 // SessionServer is one server's switches in a session's sidecar.
 type SessionServer struct {
-	On     *bool           `json:"on,omitempty"`
-	Via    string          `json:"via,omitempty"`
-	Tools  map[string]bool `json:"tools,omitempty"`
-	Attach []string        `json:"attach,omitempty"`
-	Detach []string        `json:"detach,omitempty"`
+	On  *bool  `json:"on,omitempty"`
+	Via string `json:"via,omitempty"`
+	// Instance is ServerSpec.Instance at this scope.
+	Instance string          `json:"instance,omitempty"`
+	Tools    map[string]bool `json:"tools,omitempty"`
+	Attach   []string        `json:"attach,omitempty"`
+	Detach   []string        `json:"detach,omitempty"`
 }
 
 func (s SessionServer) empty() bool {
-	return s.On == nil && s.Via == "" && len(s.Tools) == 0 && len(s.Attach) == 0 && len(s.Detach) == 0
+	return s.On == nil && s.Via == "" && s.Instance == "" && len(s.Tools) == 0 && len(s.Attach) == 0 && len(s.Detach) == 0
 }
 
 // SessionServersFile is the session's switch sidecar, "" for an in-memory
@@ -166,7 +173,7 @@ type catalogEntry struct {
 func specOf(s Server) ServerSpec {
 	auto := s.Autostart
 	return ServerSpec{ID: s.ID, Command: s.Command, Args: s.Args, URL: s.URL, Headers: s.Headers, Bearer: s.Bearer,
-		Env: s.Env, Timeout: s.Timeout, Autostart: &auto, Disable: s.Disable, Via: s.Via, Shell: s.Shell, OAuth: s.OAuth}
+		Env: s.Env, Timeout: s.Timeout, Autostart: &auto, Disable: s.Disable, Via: s.Via, Instance: s.Instance, Shell: s.Shell, OAuth: s.OAuth}
 }
 
 // loadCatalog merges base (the built-ins, or a caller's Go-level servers),
@@ -221,7 +228,7 @@ func loadCatalog(dir string, base []Server) ([]catalogEntry, error) {
 func switchesOnly(s ServerSpec) bool {
 	return s.Command == "" && s.URL == "" && s.Args == nil && s.Env == nil && s.Headers == nil &&
 		s.Bearer == "" && s.OAuth == nil && s.Timeout == 0 &&
-		(s.Wake || s.Autostart != nil || s.Via != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Detach != nil || s.Exclude != nil || s.IndexBudget != "" || s.IndexAnyway)
+		(s.Wake || s.Autostart != nil || s.Via != "" || s.Instance != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Detach != nil || s.Exclude != nil || s.IndexBudget != "" || s.IndexAnyway)
 }
 
 // resolve turns a catalog entry and this session's switches into the Server
@@ -276,6 +283,10 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 	if via == ViaDirect {
 		via = ""
 	}
+	instance, err := resolveInstance(s.ID, &sc, e.global.Instance, e.project.Instance, sess.Instance, via)
+	if err != nil {
+		return Server{}, false, err
+	}
 	if err := checkOAuth(s, via); err != nil {
 		return Server{}, false, fmt.Errorf("dun: server %q: %w", s.ID, err)
 	}
@@ -304,6 +315,7 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		ProjectTools:   e.project.Tools,
 		SessionTools:   sess.Tools,
 		Via:            via,
+		Instance:       instance,
 		Shell:          s.Shell,
 		Bearer:         s.Bearer,
 		OAuth:          s.OAuth,
@@ -315,6 +327,50 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		IndexAnyway:    s.IndexAnyway,
 		Wake:           s.Wake,
 	}, true, nil
+}
+
+// resolveInstance is the nearest scope's instance switch, recorded in sc:
+// shared when none sets it; a built-in's fixed one, which no scope may set.
+// A scripted server set to agent runs as session: it runs in the session's
+// shell, and a child has no shell of its own (the setters refuse that pair;
+// a hand-edited file may still hold it).
+func resolveInstance(id string, sc *ServerScopes, global, project, session, via string) (string, error) {
+	var err error
+	for _, v := range []struct {
+		in  string
+		out *string
+	}{{global, &sc.InstanceGlobal}, {project, &sc.InstanceProject}, {session, &sc.InstanceSession}} {
+		if v.in == "" {
+			continue
+		}
+		if *v.out, err = NormalizeInstance(v.in); err != nil {
+			return "", fmt.Errorf("dun: server %q: %w", id, err)
+		}
+		if *v.out == "" {
+			*v.out = InstanceShared
+		}
+	}
+	if fixed, _, ok := BuiltinInstance(id); ok {
+		if sc.InstanceGlobal != "" || sc.InstanceProject != "" || sc.InstanceSession != "" {
+			return "", fmt.Errorf("dun: server %q is built in and its instance is fixed (%s; remove its \"instance\")", id, fixed)
+		}
+		return fixed, nil
+	}
+	inst := InstanceShared
+	switch {
+	case sc.InstanceSession != "":
+		inst, sc.InstanceFrom = sc.InstanceSession, ScopeSession
+	case sc.InstanceProject != "":
+		inst, sc.InstanceFrom = sc.InstanceProject, ScopeProject
+	case sc.InstanceGlobal != "":
+		inst, sc.InstanceFrom = sc.InstanceGlobal, ScopeGlobal
+	default:
+		sc.InstanceFrom = ScopeGlobal
+	}
+	if inst == InstanceAgent && via == ViaShell {
+		inst = InstanceSession
+	}
+	return inst, nil
 }
 
 // envRefs reads each "KEY=$NAME" or "KEY=${NAME}" from dun's environment
@@ -656,6 +712,9 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 	default:
 		return "", fmt.Errorf("mode %q: want standalone or scripted", via)
 	}
+	if s, _ := h.knownServer(id); via == ViaShell && s.Instance == InstanceAgent {
+		return "", fmt.Errorf("%s has instance agent: a scripted server runs in the session's shell, which a sub-agent shares — set its instance to session or shared first", id)
+	}
 	stored := via
 	if scope == ScopeGlobal && via == ViaDirect {
 		stored = "" // the global layer's direct is its absence
@@ -664,6 +723,47 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 		func(s *ServerSpec) { s.Via = stored },
 		func(s *ServerSpec) { s.Via = stored },
 		func(s *SessionServer) { s.Via = stored })
+	if err != nil {
+		return "", err
+	}
+	return path, h.reloadServers(ctx, true, nil)
+}
+
+// SetServerInstance sets id's instance at scope: InstanceShared,
+// InstanceSession, InstanceAgent, or "" to unset (not at global, where unset
+// is shared). It returns the file written.
+func (h *Harness) SetServerInstance(ctx context.Context, id, scope, instance string) (string, error) {
+	if _, ok := builtinID(id); ok {
+		return "", fmt.Errorf("%s is dun's own: it has no instance", id)
+	}
+	if fixed, why, ok := BuiltinInstance(id); ok {
+		return "", fmt.Errorf("%q is a built-in server: its instance is fixed, %s (%s)", id, fixed, why)
+	}
+	s, err := h.knownServer(id)
+	if err != nil {
+		return "", err
+	}
+	switch instance {
+	case "":
+		if scope == ScopeGlobal {
+			return "", fmt.Errorf("the global instance is shared, session or agent — it has no unset")
+		}
+	case InstanceShared, InstanceSession:
+	case InstanceAgent:
+		if s.Via == ViaShell {
+			return "", fmt.Errorf("%s is scripted: it runs in the session's shell, which a sub-agent shares — agent is for a standalone server", id)
+		}
+	default:
+		return "", fmt.Errorf("instance %q: want %s, %s or %s", instance, InstanceShared, InstanceSession, InstanceAgent)
+	}
+	stored := instance
+	if scope == ScopeGlobal && instance == InstanceShared {
+		stored = "" // the global layer's shared is its absence
+	}
+	path, err := h.writeScope(id, scope,
+		func(s *ServerSpec) { s.Instance = stored },
+		func(s *ServerSpec) { s.Instance = stored },
+		func(s *SessionServer) { s.Instance = stored })
 	if err != nil {
 		return "", err
 	}

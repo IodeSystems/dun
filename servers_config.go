@@ -129,6 +129,11 @@ type ServerSpec struct {
 	// inside its one eval tool as a namespace (help("<ns>")), and dun does not
 	// start it at all. A built-in server cannot be placed in the shell.
 	Via string `json:"via,omitempty"`
+	// Instance is how many connections the server gets: "shared" (or "", the
+	// default: one in dund for every session whose resolved spec is the
+	// same), "session" (the engine's own) or "agent" (one more per
+	// sub-agent). A built-in server's is fixed (builtinInstances).
+	Instance string `json:"instance,omitempty"`
 	// Shell is passed to mcpshell for a server it hosts (Via "shell") and
 	// ignored for a direct one. A later layer's block replaces a lower one's.
 	Shell *ShellOptions `json:"shell,omitempty"`
@@ -327,6 +332,30 @@ func NormalizeVia(via string) (string, error) {
 		return ViaShell, nil
 	}
 	return "", fmt.Errorf("mode %q: want %s or %s", via, ModeStandalone, ModeScripted)
+}
+
+// Instances a ServerSpec.Instance may name (docs/mcp-and-tools.md, "One
+// connection per server"). "" means InstanceShared. InstanceWorkspace is no
+// switch value: it is poly-lsp's fixed one (builtinInstances).
+const (
+	InstanceShared    = "shared"
+	InstanceSession   = "session"
+	InstanceAgent     = "agent"
+	InstanceWorkspace = "workspace"
+)
+
+// NormalizeInstance reads an Instance value: "" for shared,
+// InstanceSession, InstanceAgent, or an error naming what is accepted.
+func NormalizeInstance(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", InstanceShared:
+		return "", nil
+	case InstanceSession:
+		return InstanceSession, nil
+	case InstanceAgent:
+		return InstanceAgent, nil
+	}
+	return "", fmt.Errorf("instance %q: want %s, %s or %s", v, InstanceShared, InstanceSession, InstanceAgent)
 }
 
 // MountSpec declares an extra local path that must be accessible from both
@@ -590,6 +619,9 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	// back out of the shell.
 	if next.Via != "" {
 		out.Via = next.Via
+	}
+	if next.Instance != "" {
+		out.Instance = next.Instance
 	}
 	if next.Shell != nil {
 		out.Shell = next.Shell

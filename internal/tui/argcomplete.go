@@ -152,8 +152,9 @@ var mcpArgs = map[string][]string{
 	"tools": {"id"}, "remove": {"id"}, "rm": {"id"}, "refresh": {"id"}, "login": {"id"}, "logout": {"id"}, "restart": {"id"},
 	"on": {"id", "scope"}, "off": {"id", "scope"}, "unset": {"id", "unsetScope"},
 	"mode": {"id", "mode", "scope"}, "via": {"id", "mode", "scope"}, "move": {"id", "mode", "scope"},
-	"toggle": {"id", "", "tool", "scope"},
-	"add":    {"preset"},
+	"instance": {"id", "instance", "scope"},
+	"toggle":   {"id", "", "tool", "scope"},
+	"add":      {"preset"},
 }
 
 var srvArgs = map[string][]string{"on": {"scope"}, "off": {"scope"}, "unset": {"unsetScope"}}
@@ -178,6 +179,12 @@ func mcpArgCands(m *tuiModel, kind string) ([]argChoice, string) {
 		add(dun.ModeScripted, "in mcpshell, called through eval, schemas out of the prompt")
 		add("unset", "clear this scope's mode")
 		return out, "modes"
+	case "instance":
+		add(dun.InstanceShared, "one connection in dund for every session (the default)")
+		add(dun.InstanceSession, "this session's own connection, shared with its sub-agents")
+		add(dun.InstanceAgent, "one more connection for each sub-agent")
+		add("unset", "clear this scope's instance")
+		return out, "instances"
 	case "tool":
 		add("on", "")
 		add("off", "")
