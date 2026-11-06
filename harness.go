@@ -412,6 +412,9 @@ type Harness struct {
 	// shared is each server reached through dund's gateway: its grant
 	// (servers_share.go). Guarded by srvMu.
 	shared map[string]ShareGrant
+	// shellShares are the grants the running shell's hosted servers use,
+	// by server id (servers_share.go shareHosted). Guarded by srvMu.
+	shellShares map[string]ShareGrant
 	// raglit's keys for this session, on the root (raglitauth.go).
 	ragMu                            sync.Mutex
 	ragSession, ragKey, ragBranchKey string

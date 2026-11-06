@@ -240,6 +240,13 @@ func (h *Harness) shellArgsHosted(s Server) []string {
 		log.Printf("dun: no project state dir — the shell starts without its hosted servers")
 		return s.Args
 	}
+	h.srvMu.Lock()
+	for i, s := range hosted {
+		if g, ok := h.shellShares[s.ID]; ok { // dund's endpoint, with this shell's bearer
+			hosted[i] = Server{ID: s.ID, URL: g.URL, Headers: map[string]string{"Authorization": "Bearer " + g.Bearer}, Shell: s.Shell}
+		}
+	}
+	h.srvMu.Unlock()
 	b, err := mcpshellConfig(hosted, h.oauthAuthCmd)
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(path), 0o700)
@@ -436,9 +443,12 @@ func (h *Harness) loginHosted(ctx context.Context, shell string, phase *startPha
 	h.srvMu.Lock()
 	hosted := h.hostedSpecs()
 	h.srvMu.Unlock()
+	h.srvMu.Lock()
+	shares := h.shellShares
+	h.srvMu.Unlock()
 	for _, hs := range hosted {
 		src := h.oauthFor(hs)
-		if src == nil {
+		if _, shared := shares[hs.ID]; src == nil || shared {
 			continue
 		}
 		phase.set("logging in (OAuth) to " + hs.ID)

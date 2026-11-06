@@ -453,6 +453,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	}
 	args := s.Args
 	if s.ID == ServerShell {
+		h.shareHosted(ctx, s.ID, phase) // before the login: a shared one is dund's to log in
 		h.loginHosted(ctx, s.ID, phase)
 		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
 		env = h.shellEnv(s, env)

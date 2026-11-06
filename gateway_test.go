@@ -81,8 +81,8 @@ func newGateway(t *testing.T) *Gateway {
 }
 
 // gatewayHarness is an engine under dund: its shared servers go through g.
-func gatewayHarness(t *testing.T, g *Gateway, session string, login func(id, url string)) *Harness {
-	h := newServerHarness(t)
+func gatewayHarness(t *testing.T, g *Gateway, session string, login func(id, url string), specs ...Server) *Harness {
+	h := newServerHarness(t, specs...)
 	h.cfg.Gateway = gwLink{g: g, c: GatewayClient{Session: session, Engine: h, Login: login,
 		Notify: func(key, method string, params map[string]any) { h.GatewayNotify(key, method, params) }}}
 	return h

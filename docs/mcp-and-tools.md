@@ -179,6 +179,14 @@ release on the engine's exit). The engine's half is `servers_share.go`.
   (`host_hooks`): the hook calls back into the engine that started it.
 - What a shared stdio server writes to stderr goes to dund's log, not the
   engine's activity log for it.
+- A scripted server that is shared: before the shell starts
+  (`shareHosted`), the engine shares it as a standalone one would (the same
+  key, so a server scripted in one session and standalone in another is one
+  upstream), and its `shell-mcp.json` entry is the endpoint with the shell's
+  bearer, no `auth_cmd`, and no `loginHosted` for it. Each shell start gives
+  the last shell's bearers back (`mcp_release`). One whose share fails is
+  hosted as before. A stopped shell's bearers are released at the next shell
+  start or the engine's exit.
 
 ## Tool cost and toggles
 
