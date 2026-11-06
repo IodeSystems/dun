@@ -28,7 +28,7 @@ import (
 //   - tg (generation, tokens a second): llama.cpp's predicted_n /
 //     predicted_ms when sent; else the completion tokens over the time from
 //     the first token to the last. LIVE while the reply streams: the streamed
-//     characters at the measured chars-per-token (tokencal.go), over the time
+//     characters at the measured chars-per-token (internal/tokenmeter), over the time
 //     since the first token, at most reqLiveEvery apart; the final figure
 //     replaces it.
 //   - cache: the request's cached prompt tokens over its prompt tokens; only

@@ -1,7 +1,7 @@
 package proto
 
 // Command payloads. As with events, the names are the ones the engine reads
-// today (cmd/dun main.go, inputStream).
+// today (cmd/dun inputstream.go).
 
 func init() {
 	command[User]("user")

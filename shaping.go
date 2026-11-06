@@ -331,7 +331,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		// provider's usage report arrives with no record of what was sent, so
 		// the pairing is positional. This builder is the last thing to run
 		// before streamChat, on the same goroutine, which is what makes that
-		// safe. See tokencal.go.
+		// safe. See internal/tokenmeter.
 		meter.NoteBuild(total, est)
 		how := "estimated at 4 chars/token"
 		if meter.Measured() {

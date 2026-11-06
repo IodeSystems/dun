@@ -10,7 +10,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 )
 
-// tokencal.go — measuring chars-per-token instead of guessing it.
+// tokenmeter — measuring chars-per-token instead of guessing it.
 //
 // Every token number dun produced used to be agentkit's CharsByFour: bytes/4.
 // That is the Shaper's budget arithmetic, the `Active` window shown in the UI,

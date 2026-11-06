@@ -482,7 +482,7 @@ type Harness struct {
 	// meter is the chars-per-token ratio measured from the provider's own usage
 	// reports. It is the Shaper's estimator AND the Session's, so the budget the
 	// context is shaped to and the window size reported to the user are the same
-	// number by construction. See tokencal.go.
+	// number by construction. See internal/tokenmeter.
 	meter tokenmeter.Meter
 	// req measures the turn's requests for a status bar (reqstats.go); nil
 	// when nothing listens.
@@ -681,7 +681,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Runner: cfg.Client,
 		// Not agentkit's CharsByFour default: on this endpoint's own traffic
 		// that is 31% low, which puts the shape target above the whole window
-		// and makes every rung below unreachable. See tokencal.go.
+		// and makes every rung below unreachable. See internal/tokenmeter.
 		Estimate: &h.meter,
 		Policy:   shaperPolicy(h.windowTokens()),
 		// Compaction is bookkeeping, not model work: stop the turn's budget

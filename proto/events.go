@@ -1,7 +1,7 @@
 package proto
 
 // Event payloads, one struct per type. The field names are the engine's
-// existing ones (cmd/dun main.go), so moving the engine onto these structs
+// existing ones (cmd/dun engine.go), so moving the engine onto these structs
 // changes no line a client reads.
 //
 // Diagnostic blocks that only /context reads (side_calls, surfacing, cache)

@@ -30,7 +30,6 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/enginecmd"
-	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/openurl"
 	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -1080,8 +1079,6 @@ type closeCtx struct {
 	sessionID string
 	wt        *dun.Worktree
 }
-
-func humanBytes(n int64) string { return numfmt.HumanBytes(n) }
 
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "dun: %v\n", err)

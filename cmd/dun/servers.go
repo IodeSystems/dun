@@ -545,7 +545,7 @@ func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
 
 // ctrlCmdAsks reports whether a control command may put a question to the human
 // before it finishes. Those must not run on the reader goroutine — see the
-// caller in main.go. Kept beside the commands themselves so adding an asking
+// caller in engine.go. Kept beside the commands themselves so adding an asking
 // one is a change in this file, not a hang found in production.
 func ctrlCmdAsks(id, action string) bool {
 	return id == "worktree" && action == "commit" || isolateBuilds(id, action)
@@ -621,7 +621,7 @@ const maxCommitRounds = 3
 // sitting right there in the repo.
 //
 // MUST NOT run on the engine's control-command goroutine — it asks. See
-// Harness.AskUser and setCtrlCmd in main.go.
+// Harness.AskUser and setCtrlCmd (inputstream.go).
 func runWorktreeCommit(ctx context.Context, h *dun.Harness) string {
 	view, _ := gitView(h)
 	if view == nil {

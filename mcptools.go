@@ -35,7 +35,7 @@ const HeavyServerTokens = 5000
 
 // toolTokens is what one tool's definition costs: its wire JSON, as the model
 // receives it, priced by the meter calibrated on this provider's own usage
-// (tokencal.go) — the same ratio every other estimate in a session uses.
+// (internal/tokenmeter) — the same ratio every other estimate in a session uses.
 func (h *Harness) toolTokens(t mcpmgr.MCPTool) int {
 	b, err := json.Marshal(mcpToolDefs([]mcpmgr.MCPTool{t})[0])
 	if err != nil {

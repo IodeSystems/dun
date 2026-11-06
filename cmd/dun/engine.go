@@ -941,7 +941,7 @@ func closeSession(workspace, sessionID string, wt *dun.Worktree) string {
 // An abandoned worktree is the one thing here a human has to decide about.
 func reportHousekeeping(res dun.PruneResult, sessions []string) {
 	if n := len(res.Pruned); n > 0 {
-		fmt.Fprintf(os.Stderr, "dun: pruned %s (%s)\n", textfmt.Plural(n, "stale worktree"), humanBytes(res.Freed))
+		fmt.Fprintf(os.Stderr, "dun: pruned %s (%s)\n", textfmt.Plural(n, "stale worktree"), numfmt.HumanBytes(res.Freed))
 	}
 	if n := len(sessions); n > 0 {
 		fmt.Fprintf(os.Stderr, "dun: pruned %s\n", textfmt.Plural(n, "old session"))

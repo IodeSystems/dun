@@ -78,7 +78,7 @@ func outputReserve() int { return maxOutputTokens() + outputMargin }
 
 // generationBudget sizes one response against what is actually left.
 //
-// promptTokens is this round's prompt, measured (see tokencal.go) rather than
+// promptTokens is this round's prompt, measured (see internal/tokenmeter) rather than
 // guessed. The cap is the smaller of the hard limit and the real room, so a
 // prompt that grew past its budget — a pristine tail that cannot be shaped, a
 // round the Shaper could not fold — still gets a request that fits instead of
