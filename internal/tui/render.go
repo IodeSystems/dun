@@ -101,11 +101,72 @@ func renderMarkdown(r *glamour.TermRenderer, text string) string {
 	if r == nil {
 		return text
 	}
-	out, err := r.Render(text)
+	out, err := r.Render(demoteStepHeads(text))
 	if err != nil {
 		return text
 	}
 	return strings.Trim(out, "\n")
+}
+
+// demoteStepHeads turns a leaked thinking step heading — a `# Thinking: …`
+// or `# Summary: …` line, which the system prompt asks for in private
+// thinking only — into a plain italic line of its own. A model that writes
+// them in its reply anyway got glamour's H1 there: yellow on a blue band,
+// code spans in grey bands (USER 2026-11-05: "thinking summary colors are
+// super bad"). Fenced code is left as written.
+func demoteStepHeads(text string) string {
+	if !strings.Contains(text, "#") {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	fence := ""
+	changed := false
+	for i, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if fence != "" {
+			if strings.HasPrefix(t, fence) {
+				fence = ""
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			fence = t[:3]
+			continue
+		}
+		label, rest, ok := stepHead(t)
+		if !ok {
+			continue
+		}
+		out := "*" + label + ":*"
+		if rest != "" {
+			out += " " + rest
+		}
+		// Blank lines around it: a heading ends its line, a paragraph does not.
+		lines[i] = "\n" + out + "\n"
+		changed = true
+	}
+	if !changed {
+		return text
+	}
+	return strings.Join(lines, "\n")
+}
+
+// stepHead parses `#… Thinking: rest` or `#… Summary: rest` (any level, any
+// case) into its label and rest.
+func stepHead(t string) (label, rest string, ok bool) {
+	h := strings.TrimLeft(t, "#")
+	if len(h) == len(t) || len(t)-len(h) > 6 {
+		return "", "", false
+	}
+	h = strings.TrimSpace(h)
+	for _, l := range []string{"Thinking", "Summary"} {
+		if len(h) > len(l) && strings.EqualFold(h[:len(l)], l) {
+			if r := strings.TrimSpace(h[len(l):]); strings.HasPrefix(r, ":") {
+				return l, strings.TrimSpace(r[1:]), true
+			}
+		}
+	}
+	return "", "", false
 }
 
 var (
