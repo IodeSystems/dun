@@ -621,7 +621,7 @@ func (h *Harness) pathsView() SwitchView {
 		})
 	}
 	v.Status = []string{"/file add <path> [--global|--project|--session] [--write] [--no-index] · /file mode <path> read|write · /file index <path> on|off",
-		"the nearest scope that says decides · ctrl+g/p/s on → off → unset"}
+		"the nearest scope that says decides · g/p/s on → off → unset · / or ~ to search"}
 	return v
 }
 

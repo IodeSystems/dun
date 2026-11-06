@@ -64,9 +64,11 @@ func TestFilePicker_BareFileOpensTheTable(t *testing.T) {
 	}
 }
 
-// In the /file table, a typed path and enter adds it for the session, and
-// ctrl+w flips the row read only ↔ read and write where it is decided; the
-// hint names both (USER 2026-10-28: "no obvious hotkey that says add").
+// In the /file table, a search starts only with "/" or "~" (USER
+// 2026-11-06: "we should HAVE to type "/" to search, so we can toggle things
+// on the file"): before it, g/p/s cycle a scope and r/w set the mode on the
+// row, and other letters are the pager's; typed, a path and enter adds it
+// for the session. ctrl+w still flips read ↔ write where it is decided.
 func TestFilePicker_AddAndWriteKeys(t *testing.T) {
 	v := newVtui(160, 30)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
@@ -77,19 +79,59 @@ func TestFilePicker_AddAndWriteKeys(t *testing.T) {
 	v.event(map[string]any{"type": "switches", "kind": "paths", "slash": "file", "items": []any{
 		map[string]any{"name": "/home/me/notes", "source": "read · indexed", "on": true, "from": "global", "global": "on"},
 	}})
-	if got := v.view(); !strings.Contains(got, "enter adds it") || !strings.Contains(got, "ctrl+w read/write") {
-		t.Errorf("hint lacks add/write:\n%s", got)
+	if got := v.view(); !strings.Contains(got, "/ or ~ searches") || !strings.Contains(got, "w read and write") {
+		t.Errorf("hint lacks search/write:\n%s", got)
+	}
+	sw := v.m.switchesPaging()
+	for _, c := range []struct{ key, want string }{
+		{"w", "mode /home/me/notes write --global"},
+		{"r", "mode /home/me/notes read --global"},
+		{"g", "off /home/me/notes --global"},
+		{"s", "on /home/me/notes --session"},
+		{"p", "on /home/me/notes --project"},
+	} {
+		rec.Reset()
+		v.m = typeStr(v.m, c.key)
+		if s := rec.String(); !strings.Contains(s, c.want) {
+			t.Errorf("%s sent %s, want %q", c.key, s, c.want)
+		}
+		if sw.query != "" {
+			t.Errorf("%s started a search: %q", c.key, sw.query)
+		}
+	}
+	rec.Reset()
+	v.m = typeStr(v.m, "x")
+	if sw.query != "" || rec.Len() != 0 {
+		t.Errorf("x: query %q, sent %s", sw.query, rec.String())
 	}
 	rec.Reset()
 	v.m = key(v.m, tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
 	if s := rec.String(); !strings.Contains(s, "mode /home/me/notes write --global") || !strings.Contains(s, `"paths"`) {
 		t.Errorf("ctrl+w sent %s", s)
 	}
+	// Searching, g p s r w are the path's letters.
 	rec.Reset()
-	v.m = typeStr(v.m, "~/src")
+	v.m = typeStr(v.m, "~/src/gprsw")
+	if sw.query != "~/src/gprsw" || rec.Len() != 0 {
+		t.Fatalf("typed a path: query %q, sent %s", sw.query, rec.String())
+	}
 	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if s := rec.String(); !strings.Contains(s, "add ~/src --session") {
+	if s := rec.String(); !strings.Contains(s, "add ~/src/gprsw --session") {
 		t.Errorf("enter sent %s", s)
+	}
+	rec.Reset()
+	v.m = typeStr(v.m, "/tmp/a b")
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if s := rec.String(); !strings.Contains(s, "add /tmp/a b --session") {
+		t.Errorf("a path with a space: sent %s", s)
+	}
+	// Backspace over the "/" ends the search: g is a key again.
+	v.m = typeStr(v.m, "/")
+	v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	rec.Reset()
+	v.m = typeStr(v.m, "g")
+	if s := rec.String(); !strings.Contains(s, "--global") {
+		t.Errorf("g after the search ended: sent %s", s)
 	}
 }
 

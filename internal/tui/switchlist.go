@@ -225,9 +225,15 @@ func (v *switchListView) page() pageDoc {
 func (v *switchListView) hint() string {
 	if v.kind == "paths" { // /file: add from the filter, read/write per row
 		if v.width > 0 && v.width < narrowW {
-			return "⏎ add · ␣ on/off · ^w write · ^g ^p ^s scopes · esc"
+			if v.query != "" {
+				return "⏎ add · ⌫ · esc"
+			}
+			return "/ search · g p s scopes · r w · ␣ on/off · esc"
 		}
-		return "type a path, enter adds it (session, read only) · space on/off (session) · ctrl+w read/write · ctrl+g/p/s global/project/session · esc clear, back"
+		if v.query != "" {
+			return "enter adds it (session, read only) · backspace · esc clears"
+		}
+		return "/ or ~ searches or types a path to add · g/p/s cycle global/project/session · r read only · w read and write · space on/off (session) · esc back"
 	}
 	if len(v.order) == 0 {
 		if v.width > 0 && v.width < narrowW {
@@ -345,6 +351,11 @@ func (m *tuiModel) switchKey(v *switchListView, k, text string) bool {
 			m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
 		}
 	}
+	if v.kind == "paths" {
+		if done, ok := m.pathsKey(v, k, text); done {
+			return ok
+		}
+	}
 	switch k {
 	case "space":
 		if r := v.row(m.pg.cur); r != nil {
@@ -387,11 +398,7 @@ func (m *tuiModel) switchKey(v *switchListView, k, text string) bool {
 			if strings.HasPrefix(r.source, "read and write") {
 				mode = "read"
 			}
-			scope := r.from
-			if scope == "" {
-				scope = "session"
-			}
-			m.fileTableCmd("mode " + r.name + " " + mode + " --" + scope)
+			m.pathMode(r, mode)
 		}
 		return true
 	case "enter": // a skill: read it in a pane below (skillpane.go)
@@ -430,6 +437,52 @@ func (m *tuiModel) switchKey(v *switchListView, k, text string) bool {
 	m.pg.cur, m.pg.off = 0, 0
 	m.syncPager()
 	return true
+}
+
+// pathsKey is /file's keys (USER 2026-11-06: "we should HAVE to type "/" to
+// search, so we can toggle things on the file"). A search starts only with
+// "/" or "~", as a path does; until then a letter is a key: g, p and s cycle
+// that scope's switch, r and w set the row read only or read and write, and
+// the rest are the pager's (j, k, q). Searching, every letter and space is
+// the path's; enter adds it, backspace takes a letter back (the first ends
+// the search), esc clears it. done=false: switchKey's own handling.
+func (m *tuiModel) pathsKey(v *switchListView, k, text string) (done, ok bool) {
+	if v.query != "" {
+		if k == "space" {
+			v.query += " "
+			m.pg.cur, m.pg.off = 0, 0
+			m.syncPager()
+			return true, true
+		}
+		return false, false
+	}
+	if utf8.RuneCountInString(text) != 1 || k == "space" || strings.HasPrefix(k, "ctrl+") || strings.HasPrefix(k, "alt+") {
+		return false, false
+	}
+	switch text {
+	case "/", "~":
+		v.query = text
+		m.pg.cur, m.pg.off = 0, 0
+		m.syncPager()
+		return true, true
+	case "g", "p", "s":
+		return true, m.switchKey(v, "ctrl+"+text, "")
+	case "r", "w":
+		if r := v.row(m.pg.cur); r != nil {
+			m.pathMode(r, map[string]string{"r": "read", "w": "write"}[text])
+		}
+		return true, true
+	}
+	return true, false // the pager's
+}
+
+// pathMode sets r's path read or write at the scope that decides it.
+func (m *tuiModel) pathMode(r *switchRow, mode string) {
+	scope := r.from
+	if scope == "" {
+		scope = "session"
+	}
+	m.fileTableCmd("mode " + r.name + " " + mode + " --" + scope)
 }
 
 // fileTableCmd runs a /file command from the paths table, then asks for the

@@ -111,6 +111,15 @@ are in `decisions.md`.
   status (mode, cost, what it depends on, a warning) is a pane above it,
   never a row; under 80 columns a row is two lines, the name above its
   switches and cost.
+- **`/file` searches only after `/` or `~`** (USER 2026-11-06: "we should
+  HAVE to type "/" to search, so we can toggle things on the file like
+  global,project,session and read,write"). Every path starts with one of the
+  two, so nothing is lost. Before it, letters are keys on the row: g, p and s
+  cycle that scope's switch, r and w set read only or read and write, and
+  the rest are the pager's (j, k, q). While searching, every letter and space
+  is part of the path; enter adds it, and backspacing over the first
+  character ends the search. ctrl+g/p/s and ctrl+w still work. The other
+  switch lists keep type-to-filter: their names are words, not paths.
 - **The skill reader is a pane below the list** (owner, 2026-10-27): enter
   on a skill opens it; the reader has the keys (tab is its next link, not
   the next pane) until esc on the skill itself closes it. Under 80 columns
