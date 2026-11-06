@@ -46,8 +46,12 @@ var Supported = []Tool{
 	// a command is an "internal error" eval result, not the end of the MCP
 	// server; the script, its vars and the stack go to stderr between
 	// "--- script ---" and "--- end ---".
+	// Recommended v0.9.0 (2026-11-06), tarballs in deps.json: async functions
+	// and Promise methods on settled values; an async call returns a
+	// rejection that raises in operators, conditions, typeof and ??, with its
+	// call site; catch gets the bare message.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.8.1"},
+		Min: "v0.2.0", Recommended: "v0.9.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
