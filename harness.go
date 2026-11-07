@@ -159,6 +159,10 @@ type Config struct {
 	// TurnLimit caps tool-call rounds per turn (--tool-call-turn-limit);
 	// 0 is DUN_MAX_TURNS, else 400 (turnlimit.go).
 	TurnLimit int
+	// AsideEscalate is how long a silent job's or child's heartbeat waits
+	// for a turn to carry it before it wakes the agent (--aside-escalate-ms;
+	// 0 is DUN_ASIDE_ESCALATE_MS, else 5s; asidettl.go).
+	AsideEscalate time.Duration
 	// NoTools is a plain chat (dun --no-tools): no tool of any kind reaches
 	// the model, no server starts, and a call to a tool is refused.
 	NoTools bool

@@ -44,6 +44,12 @@ const (
 type queued struct {
 	kind queuedKind
 	text string
+	// The rest is set only through AsideWith (asidettl.go): a key a newer
+	// version replaces, when an undelivered aside becomes a notification
+	// (escalateAt), and whether it is dropped when the next turn starts.
+	key        string
+	escalateAt time.Time
+	turnScoped bool
 }
 
 // queuedPolicy is everything the drains need to know about a kind.
@@ -180,11 +186,7 @@ func (h *Harness) userWaiting() <-chan struct{} {
 // every request, so the model CAN see the new set — but not that it changed
 // mid-conversation, and a model that reasoned two turns ago about not having
 // search will keep acting on that. The aside is the delta, not the schemas.
-func (h *Harness) Aside(text string) {
-	h.noteMu.Lock()
-	h.queue = append(h.queue, queued{kind: queuedAside, text: text})
-	h.noteMu.Unlock()
-}
+func (h *Harness) Aside(text string) { h.AsideWith(text, AsideOpts{}) }
 
 // ForceToolCall queues a tool call to be injected into the next LLM response's
 // tool_calls before they are persisted or dispatched. The call appears as if

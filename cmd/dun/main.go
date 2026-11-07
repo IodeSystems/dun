@@ -270,6 +270,7 @@ func main() {
 	fresh := flag.Bool("new", false, "start a new session, even when this workspace has one no client is attached to (which plain dun resumes)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
+	asideEscalateMS := flag.Int("aside-escalate-ms", 0, "how long a heartbeat about a silent background job or child waits for a turn to carry it before it wakes the agent (0: DUN_ASIDE_ESCALATE_MS, else 5000)")
 	turnLimit := flag.Int("tool-call-turn-limit", 0, "the most tool-call rounds one turn may make (0: DUN_MAX_TURNS, else 400); the model is told it, and warned at 80%")
 	nonInteractive := flag.Bool("non-interactive", false, "with -p: a run no one answers or reads along (a script, a benchmark): no ask_user, and the model is told it is on its own")
 	tuiFlag := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
@@ -714,6 +715,7 @@ func main() {
 		NoTools:        *noTools,
 		NonInteractive: *nonInteractive && *prog,
 		TurnLimit:      *turnLimit,
+		AsideEscalate:  time.Duration(*asideEscalateMS) * time.Millisecond,
 		SessionFile:    sessionFile,
 		Persist:        *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the

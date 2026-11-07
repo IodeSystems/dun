@@ -684,7 +684,7 @@ func (h *Harness) watchRecap(tool string, size int) {
 	if !ok || !h.claimCue(cue.key) {
 		return
 	}
-	h.Aside(recapAdvice(cue.detail))
+	h.AsideWith(recapAdvice(cue.detail), AsideOpts{Key: "recap"})
 }
 
 // maybeNudgeRecap is the window-size fallback, for churn with no shape.
@@ -713,7 +713,7 @@ func (h *Harness) maybeNudgeRecap(active int) {
 	if big.ToolName != "" {
 		what += " from " + big.ToolName
 	}
-	h.Aside(recapAdvice(what))
+	h.AsideWith(recapAdvice(what), AsideOpts{Key: "recap"})
 }
 
 // recapAdvice is the one wording, so every trigger says it the same way: the

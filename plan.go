@@ -249,7 +249,7 @@ func (h *Harness) planTurnLine() {
 		return
 	}
 	if line := g.Brief(""); line != "" {
-		h.Aside("[plan] " + line)
+		h.AsideWith("[plan] "+line, AsideOpts{Key: "plan"})
 	}
 }
 

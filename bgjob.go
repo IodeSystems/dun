@@ -462,8 +462,13 @@ func (h *Harness) notifyAndWake(text string) {
 // never CAUSE a turn, and it waits indefinitely if none comes, which is the
 // correct fate for a reminder nobody needed. The onNotify ping is kept so the
 // human still sees the line the moment it fires.
-func (h *Harness) notifyQuietly(text string) {
-	h.Aside(text)
+func (h *Harness) notifyQuietly(text string) { h.notifyQuietlyWith(text, AsideOpts{}) }
+
+// notifyQuietlyWith is notifyQuietly with an aside's delivery rule
+// (asidettl.go): a heartbeat is keyed, so the newer one replaces the older,
+// and escalates, so an agent asleep on a silent job is woken to decide.
+func (h *Harness) notifyQuietlyWith(text string, o AsideOpts) {
+	h.AsideWith(text, o)
 	if cb := h.store.notifyCallback(); cb != nil {
 		cb(text)
 	}
@@ -593,9 +598,10 @@ func (j *bgJob) heartbeat() {
 			// notifyQuietly, NOT j.notify: the reminder must not reset the
 			// silence it is reporting on, and must not buy a turn to report it
 			// — a job being quiet is not a reason to call the model.
-			j.h.notifyQuietly(fmt.Sprintf(
+			j.h.notifyQuietlyWith(fmt.Sprintf(
 				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n%s",
-				j.id, roundDur(quiet), j.command, out, j.logLine(), read))
+				j.id, roundDur(quiet), j.command, out, j.logLine(), read),
+				AsideOpts{Key: fmt.Sprintf("job:%d:quiet", j.id), EscalateAfter: j.h.asideEscalate()})
 		},
 	)
 }

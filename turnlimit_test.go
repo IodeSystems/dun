@@ -55,11 +55,16 @@ func TestTurnLimit_WarnsOnceAt80Percent(t *testing.T) {
 	if n, _ := warnings(); n != 1 {
 		t.Errorf("warned %d times in one turn", n)
 	}
+	// A new turn (prepareTurn: reset, drop the old turn's asides) warns again.
 	h.turnRounds.reset()
+	h.dropTurnScoped()
+	if n, _ := warnings(); n != 0 {
+		t.Fatalf("the old turn's warning outlived it: %d", n)
+	}
 	for i := 1; i <= 8; i++ {
 		h.noteTurnRound()
 	}
-	if n, _ := warnings(); n != 2 {
+	if n, _ := warnings(); n != 1 {
 		t.Errorf("a new turn was not warned again: %d", n)
 	}
 }
@@ -90,7 +95,7 @@ func TestTurnLimit_StaleWarningDropped(t *testing.T) {
 	}
 	h.Aside("[plan] keep me")
 	h.turnRounds.reset()
-	h.dropStaleTurnLimit()
+	h.dropTurnScoped()
 	for _, q := range queuedTexts(h) {
 		if strings.HasPrefix(q, turnLimitTag) {
 			t.Errorf("stale warning still queued: %q", q)

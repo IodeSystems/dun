@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"sync/atomic"
 )
 
@@ -56,16 +55,8 @@ type turnRounds struct {
 
 func (r *turnRounds) reset() { r.n.Store(0); r.warned.Store(false) }
 
-// turnLimitTag starts the warning's text; dropStaleTurnLimit finds it by it.
+// turnLimitTag starts the warning's text.
 const turnLimitTag = "[turn limit] "
-
-// dropStaleTurnLimit drops a warning still queued from the turn before. An
-// aside never causes a turn, so a warning queued in a round that then ended
-// the turn would ride the NEXT turn's first result, counting rounds that
-// turn has not used. Called where the round count is reset (prepareTurn).
-func (h *Harness) dropStaleTurnLimit() {
-	h.drain(func(q queued) bool { return q.kind == queuedAside && strings.HasPrefix(q.text, turnLimitTag) })
-}
 
 // noteTurnRound counts one round (noteUsage) and warns once at the 80% mark.
 func (h *Harness) noteTurnRound() {
@@ -74,7 +65,7 @@ func (h *Harness) noteTurnRound() {
 	if n < turnLimitWarnRound(limit) || !h.turnRounds.warned.CompareAndSwap(false, true) {
 		return
 	}
-	h.Aside(fmt.Sprintf(turnLimitTag+"%d of this turn's %d tool-call rounds are used; %d are left before the turn is cut off. "+
+	h.AsideWith(fmt.Sprintf(turnLimitTag+"%d of this turn's %d tool-call rounds are used; %d are left before the turn is cut off. "+
 		"Write your result now (the file, the answer, the fix), check it once, and end the turn. Do not start a new approach.",
-		n, limit, limit-n))
+		n, limit, limit-n), AsideOpts{Key: "turn-limit", TurnScoped: true})
 }

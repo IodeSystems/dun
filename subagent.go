@@ -170,7 +170,8 @@ func (s *subAgent) heartbeat() {
 			// reporting on. A reminder is the absence of news, so it never buys
 			// a turn. (A child that asked something is idle, and its question
 			// was the report that already woke the parent.)
-			s.parent.notifyQuietly(line)
+			s.parent.notifyQuietlyWith(line, AsideOpts{Key: fmt.Sprintf("agent:%d:quiet", s.num),
+				EscalateAfter: s.parent.asideEscalate()})
 		},
 	)
 }
