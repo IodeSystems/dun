@@ -156,6 +156,9 @@ type Config struct {
 	// thinking headings, the Markdown note); cmd/dun gives it no Ask, so
 	// there is no ask_user. {OUTPUT} stays: the engine expands it.
 	NonInteractive bool
+	// TurnLimit caps tool-call rounds per turn (--tool-call-turn-limit);
+	// 0 is DUN_MAX_TURNS, else 400 (turnlimit.go).
+	TurnLimit int
 	// NoTools is a plain chat (dun --no-tools): no tool of any kind reaches
 	// the model, no server starts, and a call to a tool is refused.
 	NoTools bool
@@ -304,14 +307,15 @@ type Harness struct {
 
 	// rounds is what each model round cost, the open turn's totals and the
 	// endpoint's prefill speed (roundstats.go). The root session's only.
-	rounds  roundStats
-	agents  map[int]*subAgent
-	ownsMgr bool
-	parent  *Harness  // nil for a root
-	agentID int       // this harness's id within its parent; 0 for a root
-	self    *subAgent // this harness's own record IN its parent; nil for a root
-	noteMu  sync.Mutex
-	queue   []queued // messages not yet delivered to the model
+	rounds     roundStats
+	agents     map[int]*subAgent
+	ownsMgr    bool
+	parent     *Harness   // nil for a root
+	agentID    int        // this harness's id within its parent; 0 for a root
+	self       *subAgent  // this harness's own record IN its parent; nil for a root
+	turnRounds turnRounds // this turn's tool-call rounds, for the turn limit
+	noteMu     sync.Mutex
+	queue      []queued // messages not yet delivered to the model
 	// userWaitCh is closed by Say, so a tool sitting in a wait can stop and let
 	// the message reach the model now. Guarded by noteMu; see userWaiting.
 	userWaitCh chan struct{}
@@ -745,7 +749,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Runner:               h.teeTurn(cfg.Client, cfg.OnReasoning),
 		OnAssistantToken:     cfg.OnToken,
 		OnUsage:              h.noteUsage,
-		MaxTurns:             maxTurns(),
+		MaxTurns:             h.turnLimit(),
 		Build:                measuredBuild(shaper, h),
 		ToolFormat:           toolFormat(),
 		// The same estimator the Shaper uses, so `Active` and the budget cannot

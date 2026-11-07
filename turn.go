@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -132,6 +130,7 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	// in the present tense about the last response, and the last response is now
 	// the one that recovered. See clearOverflowHints.
 	h.clearOverflowHints()
+	h.turnRounds.reset() // the turn limit counts this turn's rounds (turnlimit.go)
 	if h.healOrphanToolCalls(ctx) == 0 {
 		h.flushQueued()
 	}
@@ -208,15 +207,4 @@ func (h *Harness) healOrphans(ctx context.Context, result func(name string) stri
 		h.store.publish(e)
 	}
 	return len(orphans)
-}
-
-// maxTurns is the cap on agent loop iterations. 400 suits a coding agent
-// working through a large task; DUN_MAX_TURNS overrides it.
-func maxTurns() int {
-	if v := os.Getenv("DUN_MAX_TURNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	return 400
 }

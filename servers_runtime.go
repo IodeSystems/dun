@@ -884,6 +884,7 @@ func (h *Harness) rebuildTools() {
 	// script gets the output and the model does not retype it.
 	if len(toolDefs) > 0 {
 		sys += systemSlots
+		sys += systemTurnLimit(h.turnLimit())
 	}
 	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {
 		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
