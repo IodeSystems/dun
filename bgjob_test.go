@@ -3,7 +3,6 @@ package dun
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -68,11 +67,12 @@ func TestBgJob_SilentUntilAsked(t *testing.T) {
 	}
 }
 
-// buffer_bytes is the chattiness bound: report only once enough has piled up.
-func TestBgJob_ProgressOnlyAfterBufferBytes(t *testing.T) {
+// every_bytes is the chattiness bound: report once enough has been written,
+// and say how much, not what (USER 2026-11-06: the text is the log's).
+func TestBgJob_ProgressOnlyAfterEveryBytes(t *testing.T) {
 	h := testHarness(t)
 	j := testJob(h, 2, "build")
-	j.mon = bgMonitor{BufferBytes: 20}
+	j.mon = bgMonitor{EveryBytes: 20}
 
 	j.Write([]byte("short\n"))
 	if n := h.notes(); len(n) != 0 {
@@ -83,54 +83,17 @@ func TestBgJob_ProgressOnlyAfterBufferBytes(t *testing.T) {
 	if len(n) != 1 {
 		t.Fatalf("crossing the threshold should report exactly once, got %d: %q", len(n), n)
 	}
-	if !strings.Contains(n[0], "short") || !strings.Contains(n[0], "twenty bytes") {
-		t.Errorf("a report must carry everything held back so far: %q", n[0])
+	if !strings.Contains(n[0], "+52 B, +2 lines") || strings.Contains(n[0], "twenty") {
+		t.Errorf("a report counts everything since the last one, and carries no text: %q", n[0])
 	}
 }
 
-// A partial line is not reportable: the model cannot act on half a line and a
-// regexp cannot judge one.
-func TestBgJob_HoldsPartialLines(t *testing.T) {
-	h := testHarness(t)
-	j := testJob(h, 3, "build")
-	j.mon = bgMonitor{BufferBytes: 1}
-
-	j.Write([]byte("no newline yet"))
-	if n := h.notes(); len(n) != 0 {
-		t.Fatalf("half a line must not be reported: %q", n)
-	}
-	j.Write([]byte(" — and now there is\n"))
-	n := h.notes()
-	if len(n) != 1 || !strings.Contains(n[0], "no newline yet — and now there is") {
-		t.Fatalf("the line should arrive whole once it is complete: %q", n)
-	}
-}
-
-func TestBgJob_GrepLimitsWhatIsReported(t *testing.T) {
-	h := testHarness(t)
-	j := testJob(h, 4, "test")
-	j.mon = bgMonitor{BufferBytes: 1, Grep: "FAIL"}
-	j.re = regexp.MustCompile("FAIL")
-
-	j.Write([]byte("ok pkg/a\nFAIL pkg/b\nok pkg/c\n"))
-	n := h.notes()
-	if len(n) != 1 {
-		t.Fatalf("want one report, got %q", n)
-	}
-	if !strings.Contains(n[0], "FAIL pkg/b") {
-		t.Errorf("the matching line must be reported: %q", n[0])
-	}
-	if strings.Contains(n[0], "ok pkg/a") {
-		t.Errorf("non-matching lines must be filtered out: %q", n[0])
-	}
-}
-
-// ignore is for a job whose answer stopped mattering: no progress AND no
+// mute is for a job whose answer stopped mattering: no progress AND no
 // completion, or it is not actually muted.
-func TestBgJob_IgnoreMutesCompletionToo(t *testing.T) {
+func TestBgJob_MuteSilencesCompletionToo(t *testing.T) {
 	h := testHarness(t)
 	j := testJob(h, 5, "build")
-	j.mon = bgMonitor{BufferBytes: 1, Ignore: true}
+	j.mon = bgMonitor{EveryBytes: 1, Mute: true}
 
 	j.Write([]byte("noise\n"))
 	j.finish(ExecResult{Code: 1})
@@ -173,7 +136,7 @@ func TestStartBackground_LogsAndReportsTheExitCode(t *testing.T) {
 	// The log's path in the isolation tmp, read with file_read: the same
 	// file on the host and under --docker (isotmp.go). Not "grep it with
 	// exec", which needs a shell that may not see the file.
-	if !strings.Contains(notes[0], "job-1.log") || !strings.Contains(notes[0], "file_read({path:") {
+	if !strings.Contains(notes[0], "job-1.log") || !strings.Contains(notes[0], "(file_read)") {
 		t.Errorf("the notice must name the log and how to read it: %q", notes[0])
 	}
 	if strings.Contains(notes[0], "grep it with exec") {
@@ -213,12 +176,12 @@ func TestBgJob_HeartbeatSaysStillRunning(t *testing.T) {
 	}
 }
 
-// `ignore` means the model stopped caring about this job's outcome, and a
+// `mute` means the model stopped caring about this job's outcome, and a
 // heartbeat is exactly the outcome-adjacent noise it asked not to hear.
 func TestBgJob_HeartbeatRespectsMute(t *testing.T) {
 	h := testHarness(t)
 	j := testJob(h, 8, "sleep 300")
-	j.mon = bgMonitor{Ignore: true}
+	j.mon = bgMonitor{Mute: true}
 	j.hb = fastHeartbeat()
 	go j.heartbeat()
 	defer j.finish(ExecResult{})
@@ -322,7 +285,7 @@ func TestJobs_MutedJobIsStillPushed(t *testing.T) {
 
 	j := h.newJobStarted(HostExec{Dir: t.TempDir()}, "echo quiet")
 	j.mu.Lock()
-	j.mon.Ignore = true
+	j.mon.Mute = true
 	j.mu.Unlock()
 
 	waitFor(t, 10*time.Second, func() bool {
@@ -335,8 +298,7 @@ func TestJobs_MutedJobIsStillPushed(t *testing.T) {
 	}
 }
 
-// jobs(job:N, …) tunes a command's job and reports on it; a bad pattern is
-// reported, not swallowed.
+// jobs(job:N, …) tunes a command's job and reports on it.
 func TestJobs_TuneACommandsJob(t *testing.T) {
 	h := testHarness(t)
 	j := testJob(h, 9, "build")
@@ -344,19 +306,15 @@ func TestJobs_TuneACommandsJob(t *testing.T) {
 	h.bgJobs = map[int]*bgJob{9: j}
 	h.bgMu.Unlock()
 
-	out := jobsCall(t, h, "jobs", `{"job":9,"buffer_bytes":100,"grep":"ERROR","ignore":false}`)
-	if !strings.Contains(out, "#9 RUNNING") {
-		t.Errorf("the report should lead with the job's state: %q", out)
+	out := jobsCall(t, h, "jobs", `{"job":9,"every_bytes":100,"every_secs":30,"mute":false}`)
+	if !strings.Contains(out, "#9 RUNNING") || !strings.Contains(out, "every 100 B or 30s") {
+		t.Errorf("the report should lead with the job's state and say its monitor: %q", out)
 	}
 	j.mu.Lock()
-	mon, re := j.mon, j.re
+	mon := j.mon
 	j.mu.Unlock()
-	if mon.BufferBytes != 100 || mon.Grep != "ERROR" || re == nil {
+	if mon.EveryBytes != 100 || mon.EverySecs != 30 || mon.Mute {
 		t.Errorf("settings were not applied: %+v", mon)
-	}
-
-	if out := jobsCall(t, h, "jobs", `{"job":9,"grep":"([unclosed"}`); !strings.Contains(out, "not a valid regexp") {
-		t.Errorf("a bad pattern must be reported, not swallowed: %q", out)
 	}
 }
 
@@ -367,7 +325,7 @@ func TestJobs_TuneACommandsJob(t *testing.T) {
 func TestBgJob_HeartbeatIsDebouncedByTheJobsOwnOutput(t *testing.T) {
 	h := testHarness(t)
 	j := testJob(h, 10, "chatty")
-	j.mon = bgMonitor{BufferBytes: 1}
+	j.mon = bgMonitor{EveryBytes: 1}
 	j.hb = fastHeartbeat()
 	go j.heartbeat()
 	defer j.finish(ExecResult{})
@@ -480,7 +438,7 @@ func TestJobs_ReplyCarriesProcessUsage(t *testing.T) {
 	if j.info().PGID == 0 {
 		t.Fatal("the job never learned its process group")
 	}
-	out := jobReport(j, 0)
+	out := jobReport(j)
 	if !strings.Contains(out, "processes: cpu 0%") || !strings.Contains(out, "fds") || !strings.Contains(out, "idle") {
 		t.Fatalf("no usage in the reply:\n%s", out)
 	}

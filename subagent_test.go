@@ -103,7 +103,7 @@ func TestSubAgent_HeartbeatRemindsAboutAnIdleChild(t *testing.T) {
 		}
 		return false
 	})
-	if !strings.Contains(seen, "kill:true") {
+	if !strings.Contains(seen, "dismiss:true") {
 		t.Errorf("a reminder about an idle child must say how to dismiss it: %q", seen)
 	}
 }
@@ -213,7 +213,7 @@ func TestRoleSystem_TellsEachSideWhatItMayDo(t *testing.T) {
 		t.Errorf("a root's role is the agent tool's description, not the prompt: %q", root)
 	}
 	desc := agentToolDef("", "", "", nil).Function.Description
-	if !strings.Contains(desc, "jobs(agent:N, kill:true)") || !strings.Contains(desc, "nothing cleans it up") {
+	if !strings.Contains(desc, "dismiss:true ends it") || !strings.Contains(desc, "nothing cleans it up") {
 		t.Errorf("agent must say how to clean up a child: %q", desc)
 	}
 }

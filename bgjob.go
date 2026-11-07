@@ -1,18 +1,19 @@
 package dun
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/iodesystems/dun/internal/heartbeat"
+	"github.com/iodesystems/dun/internal/procstat"
 )
 
 // Background jobs — what a long command looks like while it is still running.
@@ -37,16 +38,22 @@ const bgTailBytes = 4000
 // bgMonitor is what a job is allowed to say while it runs. The zero value is
 // the old behaviour — silent until it exits — which stays the DEFAULT: a job
 // nobody asked about should not spend context.
+//
+// A progress report says THAT output was written and how much, never the
+// output itself (USER 2026-11-06: "No output, just notifying the change,
+// xbytes/lines written to combined stdioe"): the text is in the job's log,
+// read with file_read. The throttle is bytes or time, whichever comes first.
 type bgMonitor struct {
-	// BufferBytes reports once this many matched-but-unreported bytes pile up.
-	// 0 = never report progress.
-	BufferBytes int
-	// Grep, when set, limits reports to lines matching it. Compiled once.
-	Grep string
-	// Ignore mutes the job completely, INCLUDING its completion. For a job
+	// EveryBytes reports once this many unreported bytes are written; 0 = no
+	// byte threshold.
+	EveryBytes int
+	// EverySecs reports new output at most this often; 0 = no time threshold.
+	// With neither set, nothing is reported until the job finishes.
+	EverySecs int
+	// Mute silences the job completely, INCLUDING its completion. For a job
 	// whose answer stopped mattering — the model moved on, the check was
 	// superseded — where the notification is pure noise.
-	Ignore bool
+	Mute bool
 }
 
 // bgJob is one background command: its log, its monitor settings, and whatever
@@ -77,18 +84,23 @@ type bgJob struct {
 
 	mu      sync.Mutex
 	mon     bgMonitor
-	re      *regexp.Regexp
 	log     io.WriteCloser // dualLog: the bg dir and the isolation tmp (isotmp.go)
 	early   []byte         // output held in memory while the job has no log file yet
-	partial []byte         // bytes since the last newline; a line is not reportable yet
-	pending []byte         // matched lines not yet reported
+	partial []byte         // bytes since the last newline: the last line is not complete yet
 	written int64
-	done    bool
-	bg      bool // promoted: has a number, a row in the pane, and a voice
-	settled bool // someone has claimed the result — inline or background
-	res     ExecResult
-	ended   time.Time
-	last    string // the last non-empty complete line of output (/jobs shows it)
+	lines   int64 // newlines written in all
+	// What the next progress report counts: bytes and lines since the last
+	// one, and when that was. reportAt fires a due time-throttled report when
+	// no more output arrives to trigger it.
+	pendBytes, pendLines int64
+	reportedAt           time.Time
+	reportAt             *time.Timer
+	done                 bool
+	bg                   bool // promoted: has a number, a row in the pane, and a voice
+	settled              bool // someone has claimed the result — inline or background
+	res                  ExecResult
+	ended                time.Time
+	last                 string // the last non-empty complete line of output (/jobs shows it)
 
 	// pgid is the process group the command runs in, once a host backend
 	// reported it (notePGID); 0 unknown (docker). usage reads it.
@@ -100,11 +112,6 @@ type bgJob struct {
 	// long the job had run then. Set once, by kill.
 	killedBy  string
 	killAfter time.Duration
-
-	// waiters counts jobs(job:N, wait:true) calls blocked on this job. While
-	// one waits, the finish notice is not sent: the waiter's result carries
-	// the outcome, and sending both would say it twice.
-	waiters int
 }
 
 // bgEarlyMax bounds the in-memory buffer a not-yet-promoted job keeps. Its
@@ -126,17 +133,20 @@ func (j *bgJob) Write(p []byte) (int, error) {
 	}
 	j.written += int64(len(p))
 	j.outAt = time.Now()
+	nl := int64(bytes.Count(p, []byte{'\n'}))
+	j.lines += nl
+	j.pendBytes += int64(len(p))
+	j.pendLines += nl
 
 	j.partial = append(j.partial, p...)
 	if i := lastNewline(j.partial); i >= 0 {
-		complete := j.partial[:i+1]
-		if l := lastLine(complete); l != "" {
+		if l := lastLine(j.partial[:i+1]); l != "" {
 			j.last = l
 		}
 		j.partial = append([]byte(nil), j.partial[i+1:]...)
-		j.pending = append(j.pending, j.filter(complete)...)
 	}
 	note := j.reportLocked(false)
+	j.armReportLocked()
 	j.mu.Unlock()
 
 	// Notify outside the lock: it takes the harness's queue lock and may call
@@ -160,34 +170,59 @@ func (j *bgJob) notify(text string) {
 	j.h.notifyAndWake(text)
 }
 
-// filter keeps the lines a monitor asked for. No pattern = everything.
-func (j *bgJob) filter(b []byte) []byte {
-	if j.re == nil {
-		return b
+// reportLocked returns the progress note to send, if one is due, and resets
+// what it counts. Due: EveryBytes unreported bytes, or EverySecs since the
+// last report with something new. The note says how much was written and
+// where, not what: the text is the log's.
+func (j *bgJob) reportLocked(timeUp bool) string {
+	if j.mon.Mute || j.pendBytes == 0 || !j.bg {
+		return ""
 	}
-	var keep []byte
-	for _, line := range strings.SplitAfter(string(b), "\n") {
-		if line != "" && j.re.MatchString(line) {
-			keep = append(keep, line...)
-		}
+	since := time.Since(j.reportedAt)
+	byBytes := j.mon.EveryBytes > 0 && j.pendBytes >= int64(j.mon.EveryBytes)
+	byTime := j.mon.EverySecs > 0 && (timeUp || since >= time.Duration(j.mon.EverySecs)*time.Second)
+	if !byBytes && !byTime {
+		return ""
 	}
-	return keep
+	note := fmt.Sprintf("background job #%d — `%s` (still running, %s): +%s, +%s written to its "+
+		"combined stdout/stderr since the last report (%s, %s in all).\n%s",
+		j.id, j.command, roundDur(time.Since(j.started)), procstat.Bytes(float64(j.pendBytes)), linesOf(j.pendLines),
+		procstat.Bytes(float64(j.written)), linesOf(j.lines), j.logLine())
+	j.pendBytes, j.pendLines, j.reportedAt = 0, 0, time.Now()
+	if j.reportAt != nil {
+		j.reportAt.Stop()
+		j.reportAt = nil
+	}
+	return note
 }
 
-// reportLocked returns the progress note to send, if one is due, and clears
-// what it reports. force ignores the byte threshold (a monitor read wants
-// whatever is there now).
-func (j *bgJob) reportLocked(force bool) string {
-	if j.mon.Ignore || len(j.pending) == 0 {
-		return ""
+func linesOf(n int64) string {
+	if n == 1 {
+		return "1 line"
 	}
-	if !force && (j.mon.BufferBytes <= 0 || len(j.pending) < j.mon.BufferBytes) {
-		return ""
+	return fmt.Sprintf("%d lines", n)
+}
+
+// armReportLocked schedules the time-throttled report for output that arrived
+// before EverySecs was up: without it, a burst followed by silence would wait
+// for more output (or the end) to be reported.
+func (j *bgJob) armReportLocked() {
+	if j.mon.EverySecs <= 0 || j.mon.Mute || j.pendBytes == 0 || j.reportAt != nil || j.done || !j.bg {
+		return
 	}
-	body := string(j.pending)
-	j.pending = nil
-	return fmt.Sprintf("background job #%d — `%s` (still running, %s):\n%s",
-		j.id, j.command, roundDur(time.Since(j.started)), strings.TrimRight(body, "\n"))
+	wait := time.Duration(j.mon.EverySecs)*time.Second - time.Since(j.reportedAt)
+	j.reportAt = time.AfterFunc(max(wait, 0), func() {
+		j.mu.Lock()
+		j.reportAt = nil
+		note := ""
+		if !j.done {
+			note = j.reportLocked(true)
+		}
+		j.mu.Unlock()
+		if note != "" {
+			j.notify(note)
+		}
+	})
 }
 
 // finish records the outcome and releases whoever is waiting on it. If the job
@@ -201,6 +236,10 @@ func (j *bgJob) finish(res ExecResult) {
 		res.Killed = fmt.Sprintf("killed by the %s after %s", j.killedBy, roundDur(j.killAfter))
 	}
 	j.done, j.res, j.ended = true, res, time.Now()
+	if j.reportAt != nil {
+		j.reportAt.Stop() // the completion notice says the rest
+		j.reportAt = nil
+	}
 	if j.log != nil {
 		if res.Killed != "" {
 			_, _ = fmt.Fprintf(j.log, "\n[dun: %s; it and everything it started were stopped]\n", res.Killed)
@@ -227,7 +266,7 @@ func (j *bgJob) finish(res ExecResult) {
 	j.h.bgMu.Lock()
 	j.h.bgRun--
 	j.h.bgMu.Unlock()
-	// Pushed even for a MUTED job: `ignore` silences the model, not the human,
+	// Pushed even for a MUTED job: `mute` silences the model, not the human,
 	// and a row stuck on "running" forever is the bug the pane exists to stop.
 	j.h.jobsChanged()
 	if note := j.completionNote(); note != "" {
@@ -241,7 +280,7 @@ func (j *bgJob) finish(res ExecResult) {
 func (j *bgJob) completionNote() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.mon.Ignore || j.waiters > 0 {
+	if j.mon.Mute {
 		return ""
 	}
 	return fmt.Sprintf("background job #%d %s — `%s` (%s)\n%s\n%s",
@@ -330,11 +369,9 @@ func (j *bgJob) handoffNotice(waited time.Duration) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return fmt.Sprintf(
-		"`%s` is STILL RUNNING after %s — it was NOT killed and has NOT failed. It is now "+
-			"background job #%d and it runs to completion on its own.\n%s\n"+
-			"Do not re-run it or poll it: you will be notified when it finishes. jobs(job:%d) shows "+
-			"what it has produced so far. Do other work in the meantime.",
-		j.command, roundDur(waited), j.id, j.logLine(), j.id)
+		"`%s` is still running after %s (not killed, not failed): background job #%d. A monitor "+
+			"tells you when it finishes; do other work or end your turn. %s",
+		j.command, roundDur(waited), j.id, j.logLine())
 }
 
 // logLine cites the job's log by path, in the session's isolation tmp: the
@@ -345,8 +382,7 @@ func (j *bgJob) logLine() string {
 	if j.logPath == "" {
 		return "(no log file)"
 	}
-	return fmt.Sprintf("full output: %s — read it with file_read({path:%q, grep:\"…\"}), or offset:-50 for its end",
-		j.logPath, j.logPath)
+	return "Output: " + j.logPath + " (file_read)."
 }
 
 // status is the one-line answer to "what is job N doing?".
@@ -532,9 +568,9 @@ func (j *bgJob) heartbeat() {
 		},
 		func(quiet time.Duration) {
 			j.mu.Lock()
-			muted, written := j.mon.Ignore, j.written
+			muted, written := j.mon.Mute, j.written
 			j.mu.Unlock()
-			// A muted job stays silent here too: `ignore` means the model stopped
+			// A muted job stays silent here too: `mute` means the model stopped
 			// caring about this job's outcome, and a reminder is exactly that
 			// noise. The human still sees the row in the pane.
 			if muted {
@@ -558,9 +594,8 @@ func (j *bgJob) heartbeat() {
 			// silence it is reporting on, and must not buy a turn to report it
 			// — a job being quiet is not a reason to call the model.
 			j.h.notifyQuietly(fmt.Sprintf(
-				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n%s "+
-					"jobs(job:%d) to see what it has produced.",
-				j.id, roundDur(quiet), j.command, out, j.logLine(), read, j.id))
+				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n%s",
+				j.id, roundDur(quiet), j.command, out, j.logLine(), read))
 		},
 	)
 }
@@ -599,7 +634,7 @@ func (j *bgJob) info() JobInfo {
 	defer j.mu.Unlock()
 	out := JobInfo{
 		ID: j.id, Command: j.command, Log: j.logPath, State: "running",
-		Bytes: j.written, Started: j.started.Unix(), Muted: j.mon.Ignore, Last: j.last, PGID: j.pgid,
+		Bytes: j.written, Started: j.started.Unix(), Muted: j.mon.Mute, Last: j.last, PGID: j.pgid,
 	}
 	if j.done {
 		out.State, out.Code, out.Ended = jobState(j.res), j.res.Code, j.ended.Unix()
@@ -675,17 +710,21 @@ func (h *Harness) bgJobList() []*bgJob {
 }
 
 func describeMonitor(m bgMonitor) string {
-	if m.Ignore {
+	if m.Mute {
 		return "monitor: MUTED (no progress, no completion notice)"
 	}
 	parts := []string{"completion notice on"}
-	if m.BufferBytes > 0 {
-		parts = append(parts, fmt.Sprintf("progress every %d bytes", m.BufferBytes))
+	var every []string
+	if m.EveryBytes > 0 {
+		every = append(every, procstat.Bytes(float64(m.EveryBytes)))
+	}
+	if m.EverySecs > 0 {
+		every = append(every, fmt.Sprintf("%ds", m.EverySecs))
+	}
+	if len(every) > 0 {
+		parts = append(parts, "a report of how much was written every "+strings.Join(every, " or "))
 	} else {
 		parts = append(parts, "no progress reports")
-	}
-	if m.Grep != "" {
-		parts = append(parts, "matching /"+m.Grep+"/")
 	}
 	return "monitor: " + strings.Join(parts, ", ")
 }

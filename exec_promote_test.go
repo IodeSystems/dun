@@ -70,10 +70,10 @@ func TestExec_SlowCommandBecomesAJob(t *testing.T) {
 	if el := time.Since(start); el > 1500*time.Millisecond {
 		t.Fatalf("the call must return at the grace, not at the command: %s", el)
 	}
-	if !strings.Contains(out, "STILL RUNNING") || !strings.Contains(out, "NOT killed") {
+	if !strings.Contains(out, "still running") || !strings.Contains(out, "not killed") {
 		t.Fatalf("the notice must say the command is alive: %q", out)
 	}
-	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "jobs(job:1)") {
+	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "job-1.log (file_read)") {
 		t.Fatalf("the notice must name the job and where to look: %q", out)
 	}
 

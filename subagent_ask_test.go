@@ -96,14 +96,16 @@ func TestSubAgent_QuestionIsATurnEndAndTellAnswersIt(t *testing.T) {
 	if !strings.Contains(note, "Which season should the haiku be about?") {
 		t.Fatalf("the parent must get the question's text, not just 'idle': %q", note)
 	}
-	if !strings.Contains(note, `jobs(agent:1, tell:"…")`) {
+	if !strings.Contains(note, `agent({id:1, tell:"…"})`) {
 		t.Errorf("the notification must say how to answer: %q", note)
 	}
 
-	id := sa.num
-	out := agentMonitor(context.Background(), h, &id, 0, "winter", true, false, false)
-	if !strings.Contains(out, "Told agent #1") || !strings.Contains(out, "Snow on the pine") {
-		t.Fatalf("tell must start the next turn and wait must report it: %s", out)
+	if out := agentOp(h, sa.num, "winter", "", false, false); !strings.Contains(out, "Told agent #1") {
+		t.Fatalf("tell must start the next turn: %s", out)
+	}
+	waitIdle(t, sa)
+	if out := sa.report(); !strings.Contains(out, "Snow on the pine") {
+		t.Fatalf("its report must carry the next turn's answer: %s", out)
 	}
 	if len(second) == 0 {
 		t.Fatal("the child never ran a second turn")

@@ -54,126 +54,112 @@ func TestJobs_ListsBothKinds(t *testing.T) {
 	}
 }
 
-// wait blocks until a command finishes and reports its outcome; the job's
-// own finish notice is not sent as well. A message ends the wait early.
-func TestJobs_WaitOnACommand(t *testing.T) {
+// jobs manages, it does not read: a job's report says its state and how
+// much it wrote, and where the log is; the output itself is not in it.
+func TestJobs_ReportsNoOutput(t *testing.T) {
 	h := testHarness(t)
 	be := &HostShell{Dir: t.TempDir()}
 	t.Cleanup(be.Close)
-	j := h.newJobStarted(be, "sleep 0.5; echo finished-now")
-	start := time.Now()
-	out := jobsCall(t, h, "jobs", fmt.Sprintf(`{"job":%d,"wait":true}`, j.id))
-	if time.Since(start) < 300*time.Millisecond {
-		t.Errorf("wait returned before the command finished: %s", out)
-	}
-	if !strings.Contains(out, "succeeded") || !strings.Contains(out, "finished-now") {
-		t.Errorf("wait result: %q", out)
-	}
-	for _, n := range h.notes() {
-		if strings.Contains(n, "finished-now") {
-			t.Errorf("the finish was reported twice, as a notice too: %q", n)
-		}
-	}
-
-	slow := h.newJobStarted(be, "sleep 30")
-	t.Cleanup(func() { slow.killAndWait("test") })
-	res := make(chan string, 1)
-	go func() { res <- jobsCall(t, h, "jobs", fmt.Sprintf(`{"job":%d,"wait":true}`, slow.id)) }()
-	time.Sleep(200 * time.Millisecond)
-	h.Say("status?")
-	select {
-	case r := <-res:
-		if !strings.Contains(r, "user wrote") || !strings.Contains(r, "RUNNING") {
-			t.Errorf("an interrupted wait must say why and that it still runs: %s", r)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("jobs(job:N, wait:true) did not stop for the message")
-	}
-}
-
-// tail is the last N lines of a command's log.
-func TestJobs_TailOfACommandLog(t *testing.T) {
-	h := testHarness(t)
-	be := &HostShell{Dir: t.TempDir()}
-	t.Cleanup(be.Close)
-	j := h.newJobStarted(be, "for i in 1 2 3 4 5 6; do echo line$i; done")
+	j := h.newJobStarted(be, "for i in 1 2 3; do echo line-$i; done")
 	<-j.doneCh
-	out := jobsCall(t, h, "jobs", fmt.Sprintf(`{"job":%d,"tail":2}`, j.id))
-	if !strings.Contains(out, "last 2 lines:\nline5\nline6") || strings.Contains(out, "line4") {
-		t.Errorf("tail: %q", out)
+	out := jobsCall(t, h, "jobs", fmt.Sprintf(`{"job":%d}`, j.id))
+	for _, want := range []string{"succeeded", "written: 21 B, 3 lines", "Output: ", "(file_read)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "line-2") {
+		t.Errorf("the report carries output: %s", out)
 	}
 }
 
-// kill dismisses an agent (agent_monitor's quit, which still works).
-func TestJobs_KillAnAgent(t *testing.T) {
+// What jobs no longer takes (tail, wait, grep, the agent ops, the old names)
+// is refused with what it does take; nothing is silently ignored into a
+// different call.
+func TestJobs_RefusesWhatItNoLongerTakes(t *testing.T) {
+	h := testHarness(t)
+	for _, args := range []string{`{"job":1,"tail":5}`, `{"job":1,"wait":true}`, `{"job":1,"grep":"x"}`,
+		`{"agent":1,"tell":"hi"}`, `{"job":1,"buffer_bytes":10}`, `{"job":1,"ignore":true}`} {
+		out := jobsCall(t, h, "jobs", args)
+		if !strings.HasPrefix(out, "ERROR: jobs takes job, kill, mute, every_bytes, every_secs") {
+			t.Errorf("%s: %q", args, out)
+		}
+	}
+	if out := jobsCall(t, h, "jobs", `{"kill":true}`); !strings.Contains(out, "name the job") {
+		t.Errorf("kill with no job: %q", out)
+	}
+	if out := jobsCall(t, h, "exec_monitor", `{}`); out != "inner" {
+		t.Errorf("the old alias still dispatches here: %q", out)
+	}
+}
+
+// The schema is management only, the same for a root and a child: agents are
+// the agent tool's.
+func TestJobs_SchemaIsManagementOnly(t *testing.T) {
+	props := func(td llm.ToolDef) []string {
+		var ks []string
+		for k := range td.Function.Parameters.(map[string]any)["properties"].(map[string]any) {
+			ks = append(ks, k)
+		}
+		slices.Sort(ks)
+		return ks
+	}
+	want := []string{"every_bytes", "every_secs", "job", "kill", "mute"}
+	for _, agents := range []bool{true, false} {
+		if got := props(jobsToolDef(true, agents)); !slices.Equal(got, want) {
+			t.Errorf("agents=%v: %v", agents, got)
+		}
+	}
+}
+
+// Every_bytes and every_secs report that output was written and how much,
+// never the output; every_secs reports a burst that is followed by silence.
+func TestJobs_ProgressSaysHowMuchNotWhat(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	h := testHarness(t)
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	j := h.newJobStarted(be, "sleep 0.3; echo shh | tr s z; sleep 30") // writes "zhh", not in the command
+	t.Cleanup(func() { j.killAndWait("test") })
+	jobsCall(t, h, "jobs", fmt.Sprintf(`{"job":%d,"every_secs":1}`, j.id))
+	deadline := time.Now().Add(4 * time.Second)
+	var got string
+	for time.Now().Before(deadline) && got == "" {
+		for _, n := range h.notes() {
+			if strings.Contains(n, "since the last report") {
+				got = n
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !strings.Contains(got, "+4 B, +1 line") || strings.Contains(got, "zhh") {
+		t.Fatalf("progress report: %q", got)
+	}
+}
+
+// agent({id, …}) acts on an existing child; a call that is neither shape says
+// both, and prompt with id is refused (it would start nothing).
+func TestAgent_ActsOnAnExistingChildByID(t *testing.T) {
 	h, sa := testAgent(t, 3, "look around")
 	registerAgent(h, sa)
-	if out := jobsCall(t, h, "jobs", `{"agent":3,"kill":true}`); !strings.Contains(out, "agent #3") {
-		t.Errorf("kill: %q", out)
+	d := withAgent(func(context.Context, llm.ToolCall) (string, error) { return "inner", nil }, h, nil)
+	call := func(args string) string {
+		var tc llm.ToolCall
+		tc.Function.Name, tc.Function.Arguments = "agent", args
+		out, _ := d(context.Background(), tc)
+		return out
+	}
+	if out := call(`{"model":"x"}`); !strings.Contains(out, "or {id, tell?") || !strings.Contains(out, "You sent {model}") {
+		t.Errorf("neither shape: %q", out)
+	}
+	if out := call(`{"id":3,"prompt":"new"}`); !strings.Contains(out, "leave id out") {
+		t.Errorf("prompt with id: %q", out)
+	}
+	if out := call(`{"id":3,"dismiss":true}`); !strings.Contains(out, "agent #3") {
+		t.Errorf("dismiss: %q", out)
 	}
 	if state, _, _, _ := sa.snapshot(); state != agentDismissed {
-		t.Errorf("state after kill: %s", state)
-	}
-
-	_, sb := testAgent(t, 4, "again")
-	sb.parent = h
-	registerAgent(h, sb)
-	jobsCall(t, h, "agent_monitor", `{"agent":4,"quit":true}`)
-	if state, _, _, _ := sb.snapshot(); state != agentDismissed {
-		t.Errorf("agent_monitor quit: %s", state)
-	}
-}
-
-// A parameter for the other kind is an error that says what does apply.
-func TestJobs_KindMismatchErrors(t *testing.T) {
-	h, sa := testAgent(t, 1, "x")
-	registerAgent(h, sa)
-	cases := map[string]string{
-		`{"job":1,"agent":1}`:          "not both",
-		`{"job":1,"tell":"hi"}`:        "takes wait, tail, kill, grep",
-		`{"job":1,"resume":true}`:      "for a sub-agent",
-		`{"agent":1,"grep":"x"}`:       "takes wait, tail, kill, tell, resume",
-		`{"agent":1,"ignore":true}`:    "for a command's job",
-		`{"kill":true}`:                "name the job",
-		`{"wait":true}`:                "name the job",
-		`{"agent":1,"buffer_bytes":1}`: "for a command's job",
-	}
-	for args, want := range cases {
-		out := jobsCall(t, h, "jobs", args)
-		if !strings.HasPrefix(out, "ERROR") || !strings.Contains(out, want) {
-			t.Errorf("%s: %q, want %q", args, out, want)
-		}
-	}
-}
-
-// The old names still dispatch, and are not in the tool list.
-func TestJobs_AliasesDispatch(t *testing.T) {
-	h := testHarness(t)
-	be := &HostShell{Dir: t.TempDir()}
-	t.Cleanup(be.Close)
-	j := h.newJobStarted(be, "echo hi")
-	<-j.doneCh
-	if out := jobsCall(t, h, "exec_monitor", fmt.Sprintf(`{"job":%d}`, j.id)); !strings.Contains(out, "succeeded") {
-		t.Errorf("exec_monitor: %q", out)
-	}
-	if out := jobsCall(t, h, "agent_monitor", `{}`); !strings.Contains(out, "job #1") {
-		t.Errorf("agent_monitor list: %q", out)
-	}
-	if out := jobsCall(t, h, "other", `{}`); out != "inner" {
-		t.Errorf("another tool must fall through: %q", out)
-	}
-	root := jobsToolDef(true, true)
-	child := jobsToolDef(true, false)
-	props := func(td llm.ToolDef) map[string]any {
-		return td.Function.Parameters.(map[string]any)["properties"].(map[string]any)
-	}
-	if _, ok := props(root)["tell"]; !ok {
-		t.Error("a root's jobs must take tell")
-	}
-	for _, p := range []string{"agent", "tell", "resume"} {
-		if _, ok := props(child)[p]; ok {
-			t.Errorf("a child's jobs must not offer %q: it has no agents", p)
-		}
+		t.Errorf("state after dismiss: %s", state)
 	}
 }
 
@@ -193,7 +179,7 @@ func TestJobs_ARepeatedPollWaits(t *testing.T) {
 	}
 	start := time.Now()
 	out := jobsCall(t, h, "jobs", q)
-	if time.Since(start) < 500*time.Millisecond || !strings.Contains(out, "waited until it did") || !strings.Contains(out, "at-last") {
+	if time.Since(start) < 500*time.Millisecond || !strings.Contains(out, "waited until it did") || !strings.Contains(out, "written: 8 B") {
 		t.Errorf("the second read did not wait (%s): %s", time.Since(start), out)
 	}
 	// A different question in between is not a repeat.
@@ -215,7 +201,8 @@ func TestJobs_AMessageEndsTheRun(t *testing.T) {
 	t.Cleanup(be.Close)
 	j := h.newJobStarted(be, "sleep 30")
 	t.Cleanup(func() { j.killAndWait("test") })
-	q := fmt.Sprintf(`{"job":%d,"wait":true}`, j.id)
+	q := fmt.Sprintf(`{"job":%d}`, j.id)
+	jobsCall(t, h, "jobs", q) // the first look; the next identical one waits
 	h.loop.observe("jobs", q)
 	h.loop.observe("jobs", q)
 	out := make(chan string, 1)
@@ -250,24 +237,6 @@ func TestJobs_ListedFromTheStart(t *testing.T) {
 	}
 	if out := jobsCall(t, h, "jobs", `{}`); out != "No background jobs or sub-agents." {
 		t.Errorf("with nothing running: %q", out)
-	}
-}
-
-// agent and job together: refused, and the answer says whose job numbers are
-// whose and how to reach a sub-agent's (a model asked the parent for a
-// child's job #9, seen in the child's report).
-func TestJobs_AgentAndJobSaysWhoseJobItIs(t *testing.T) {
-	ws := t.TempDir()
-	h, err := Start(context.Background(), Config{Workspace: ws, Client: &scriptRunner{}, Exec: &HostShell{Dir: ws}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer h.Close()
-	out := jobsCall(t, h, "jobs", `{"agent":1,"job":9}`)
-	for _, want := range []string{"not both", "jobs(job:9) is your own job #9", "jobs(agent:1, tell:"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("lacks %q: %q", want, out)
-		}
 	}
 }
 

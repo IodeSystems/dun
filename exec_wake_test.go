@@ -28,7 +28,7 @@ func TestExec_SayDuringWaitHandsOverAtOnce(t *testing.T) {
 	if el := time.Since(start); el > 3*time.Second {
 		t.Fatalf("the message must end the wait, not the timeout: %s", el)
 	}
-	for _, want := range []string{"STILL RUNNING", "background job #1", "user wrote", "[user] how far along is it?"} {
+	for _, want := range []string{"still running", "background job #1", "user wrote", "[user] how far along is it?"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("result missing %q:\n%s", want, out)
 		}
@@ -98,7 +98,7 @@ func TestExec_FinishedBeforeTheWakeAnswersInline(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.Say("too late")
-	if !strings.Contains(out, "done-fast") || strings.Contains(out, "STILL RUNNING") {
+	if !strings.Contains(out, "done-fast") || strings.Contains(out, "still running") {
 		t.Fatalf("want the normal output: %q", out)
 	}
 	if strings.Contains(out, "too late") {
@@ -129,7 +129,7 @@ func TestExec_SayReleasesEveryWait(t *testing.T) {
 	for range 2 {
 		select {
 		case out := <-outs:
-			if !strings.Contains(out, "STILL RUNNING") {
+			if !strings.Contains(out, "still running") {
 				t.Errorf("want a handoff: %q", out)
 			}
 			if strings.Contains(out, "[user] both of you") {
@@ -146,36 +146,5 @@ func TestExec_SayReleasesEveryWait(t *testing.T) {
 		if _, err := h.KillJob(id, "test"); err != nil {
 			t.Fatal(err)
 		}
-	}
-}
-
-// agent_monitor(wait:true) is the same wait over a child: the message ends it,
-// and the child keeps running.
-func TestAgentMonitor_SayEndsTheWait(t *testing.T) {
-	h, sa := testAgent(t, 1, "do the thing")
-	h.agMu.Lock()
-	if h.agents == nil {
-		h.agents = map[int]*subAgent{}
-	}
-	h.agents[sa.num] = sa
-	h.agMu.Unlock()
-	sa.mu.Lock()
-	sa.done = make(chan struct{})
-	sa.startRunLocked()
-	sa.state = agentRunning
-	sa.mu.Unlock()
-
-	id := sa.num
-	out := make(chan string, 1)
-	go func() { out <- agentMonitor(context.Background(), h, &id, 0, "", true, false, false) }()
-	time.Sleep(200 * time.Millisecond)
-	h.Say("status?")
-	select {
-	case r := <-out:
-		if !strings.Contains(r, "user wrote") {
-			t.Errorf("the report must say why it stopped waiting: %s", r)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("agent_monitor(wait:true) did not stop for the message")
 	}
 }

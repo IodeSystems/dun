@@ -4,125 +4,106 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/procstat"
 )
 
 // The jobs tool: one view of the session's background work (USER
 // 2026-10-27: "Can we fuse the concept of a background job? Keep exec and
 // agent launch different though. They just output a typed background job
-// that is monitored.").
-//
-// Two kinds of job, each started by its own tool: a command exec handed to
-// the background (bgjob.go, "background job #N", jobs(job:N)) and a
-// sub-agent (subagent.go, "agent #N", jobs(agent:N)). What a model does with
-// either is the same few things — list, wait, read the end of, end — so they
-// share one tool; what only one kind can do (tell an agent, grep a command)
-// is named as that kind's, and asking it of the other kind is an error that
-// says what does apply.
+// that is monitored."). Since 2026-11-06 it only MANAGES commands (kill,
+// mute, report thresholds) and lists sub-agents; output is read from the
+// job's log with file_read, and a sub-agent is managed with the agent tool.
 //
 // A child has exec, so it has jobs for its own commands. It never has
 // agents of its own (no `agent` tool), and its harness's agent list is its
 // own, empty — so it cannot see or touch its parent's or its siblings'.
-//
-// The old tools exec_monitor and agent_monitor still dispatch here, hidden
-// from the list, so a resumed session or a model's habit still works.
-// agent_monitor's quit is kill.
 
-// jobsToolNames are the names withJobs answers: the tool and its hidden
-// aliases.
-var jobsToolNames = map[string]bool{"jobs": true, "exec_monitor": true, "agent_monitor": true}
-
-// jobsToolDef describes the kinds this harness has: commands when it has
-// exec, agents when it can spawn them.
+// jobs MANAGES commands; it does not read them (USER 2026-11-06: "Tail wait
+// grep die. Agent stuff moves."). A command's output is its log, a file read
+// with file_read; its monitor reports when it finishes and, if asked, as its
+// output grows (bytes or time), saying how much was written, not what. A
+// sub-agent is managed with the agent tool (agent({id, tell|node|resume|
+// dismiss})); jobs only lists it.
 func jobsToolDef(commands, agents bool) llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "jobs"
-	props := map[string]any{
-		"wait": map[string]any{"type": "boolean", "description": "block until it finishes; a new message stops the wait"},
-	}
-	var kinds, tail, kill []string
+	props := map[string]any{}
+	desc := "Lists background work"
 	if commands {
-		kinds = append(kinds, "a command that outlived its exec timeout (job:N)")
-		tail = append(tail, "a command's log")
-		kill = append(kill, "ends a command and everything it started")
 		props["job"] = map[string]any{"type": "integer", "description": "a command's job number"}
-		props["grep"] = map[string]any{"type": "string", "description": "command only: while it runs, report only lines matching this regexp; \"\" clears it"}
-		props["buffer_bytes"] = map[string]any{"type": "integer", "description": "command only: report progress each time this many matching bytes pile up; 0 = never"}
-		props["ignore"] = map[string]any{"type": "boolean", "description": "command only: true mutes it, its finish notice too; it keeps running"}
+		props["kill"] = map[string]any{"type": "boolean", "description": "true ends the command and everything it started"}
+		props["mute"] = map[string]any{"type": "boolean", "description": "true: no more reports about it, its finish included; it keeps running"}
+		props["every_bytes"] = map[string]any{"type": "integer", "description": "report each time this many more bytes are written; 0 = off"}
+		props["every_secs"] = map[string]any{"type": "integer", "description": "report new output at most this often; 0 = off"}
+		desc = "Manage a command that outlived its exec timeout (job:N): a monitor is on it, and you are told when " +
+			"it finishes, so there is nothing to check. Its output is its log; read it with file_read. Reports as " +
+			"output grows are off until you set every_bytes or every_secs (whichever comes first); they say how " +
+			"much was written, not what. With no job, lists background work"
 	}
 	if agents {
-		kinds = append(kinds, "a sub-agent (agent:N)")
-		tail = append(tail, "an agent's transcript")
-		kill = append(kill, "dismisses an agent")
-		props["agent"] = map[string]any{"type": "integer", "description": "a sub-agent's number"}
-		props["tell"] = map[string]any{"type": "string", "description": "agent only: its next message — the answer, if it ended its turn with a question, or new work"}
-		props["resume"] = map[string]any{"type": "boolean", "description": "agent only: restart a stopped agent from its transcript"}
-		props["node"] = map[string]any{"type": "string", "description": "agent only: give this idle agent a ready plan node " +
-			"(todo, nobody's, its needs done) and start it on it; tell adds to the brief. It owes you a publish of it"}
+		desc += "; sub-agents are listed here and managed with agent({id, …})"
 	}
-	props["tail"] = map[string]any{"type": "integer", "description": "show the last N lines of " + strings.Join(tail, " or ")}
-	props["kill"] = map[string]any{"type": "boolean", "description": "true " + strings.Join(kill, ", or ")}
-	td.Function.Description = "Background work: " + strings.Join(kinds, " and ") + ". You are notified when one " +
-		"finishes, so do not poll: asking about one again before it changes waits until it does. " +
-		"With no number, lists them all."
+	td.Function.Description = desc + "."
 	td.Function.Parameters = map[string]any{"type": "object", "properties": props}
 	return td
 }
 
-// jobsArgs is every parameter of jobs and of its two aliases.
+// jobsArgs is every parameter of jobs.
 type jobsArgs struct {
-	Job         *int    `json:"job"`
-	Agent       *int    `json:"agent"`
-	Wait        bool    `json:"wait"`
-	Tail        int     `json:"tail"`
-	Kill        bool    `json:"kill"`
-	Quit        bool    `json:"quit"` // agent_monitor's kill
-	Tell        string  `json:"tell"`
-	Resume      bool    `json:"resume"`
-	Grep        *string `json:"grep"`
-	BufferBytes *int    `json:"buffer_bytes"`
-	Ignore      *bool   `json:"ignore"`
-	Node        string  `json:"node"`
+	Job        *int  `json:"job"`
+	Kill       bool  `json:"kill"`
+	Mute       *bool `json:"mute"`
+	EveryBytes *int  `json:"every_bytes"`
+	EverySecs  *int  `json:"every_secs"`
+	// unknown is what else the call sent: refused, naming what jobs takes.
+	unknown []string
 }
+
+var jobsParams = map[string]bool{"job": true, "kill": true, "mute": true, "every_bytes": true, "every_secs": true}
 
 func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		if !jobsToolNames[tc.Function.Name] {
+		if tc.Function.Name != "jobs" {
 			return inner(ctx, tc)
 		}
 		var a jobsArgs
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
-		a.Kill = a.Kill || a.Quit
-		// A poll asked again with nothing changed waits instead (USER
-		// 2026-10-27: a session polled agent_monitor until the loop guard
-		// stopped the turn, 10 identical rounds). The same plain question
-		// can only get the same answer until the job moves, so this call
-		// blocks until it does; a new message still breaks the wait.
-		//
-		// The read comes first because a job's report hands over its pending
-		// output: anything new makes the answer differ, and it is returned.
+		var sent map[string]any
+		_ = json.Unmarshal([]byte(tc.Function.Arguments), &sent)
+		for k := range sent {
+			if !jobsParams[k] {
+				a.unknown = append(a.unknown, k)
+			}
+		}
+		// A plain look at the same job, asked again with nothing changed,
+		// waits until it changes (USER 2026-10-27: a session polled until the
+		// loop guard stopped the turn). Keyed by the job alone: a key that
+		// carried tail let tail:5 and tail:10 alternate past it (Terminal-Bench,
+		// 2026-11-06: six reads in five seconds).
 		sig, plain := a.pollSig()
-		out := runJobs(ctx, h, a)
+		out := runJobs(h, a)
 		waited := plain && sig != "" && h.jobsRepeat(sig, out)
 		if waited {
-			a.Wait = true
-			out = runJobs(ctx, h, a)
+			if j := h.bgJobByID(*a.Job); j != nil {
+				if note := j.waitChange(ctx, h); note != "" {
+					out = note + "\n"
+				} else {
+					out = ""
+				}
+				out += "Nothing had changed since you last asked, so this call waited until it did.\n" + runJobs(h, a)
+			}
 		}
 		if plain {
 			h.jobsNote(sig, out)
 		}
-		if waited {
-			out = "Nothing had changed since you last asked, so this call waited until it did.\n" + out
-		}
-		// A message is what the run of identical calls says did not happen.
 		if strings.Contains(out, jobsMessageStop) {
 			h.loop.observe("", "")
 		}
@@ -133,19 +114,16 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 	}
 }
 
-// pollSig is a read of one job (no wait, kill, tell, resume or tuning) as a
-// key; plain is false for anything else, which never turns into a wait.
+// pollSig is a plain look at one job as a key; plain is false for anything
+// that changes something, which never turns into a wait.
 func (a jobsArgs) pollSig() (string, bool) {
-	if a.Wait || a.Kill || a.Tell != "" || a.Resume || a.Node != "" || a.Grep != nil || a.BufferBytes != nil || a.Ignore != nil {
+	if a.Kill || a.Mute != nil || a.EveryBytes != nil || a.EverySecs != nil || len(a.unknown) > 0 {
 		return "", false
 	}
-	switch {
-	case a.Job != nil:
-		return fmt.Sprintf("job:%d:%d", *a.Job, a.Tail), true
-	case a.Agent != nil:
-		return fmt.Sprintf("agent:%d:%d", *a.Agent, a.Tail), true
+	if a.Job != nil {
+		return fmt.Sprintf("job:%d", *a.Job), true
 	}
-	return "", true // the list: noted, but never waited on (it is a look, with no one job to wait for)
+	return "", true // the list: noted, but never waited on
 }
 
 // jobsMessageStop is what a wait broken by a message says.
@@ -175,70 +153,32 @@ func (a jobsArgs) reported() map[string]any {
 	if a.Job != nil {
 		m["job"] = *a.Job
 	}
-	if a.Agent != nil {
-		m["agent"] = *a.Agent
-	}
-	if a.Wait {
-		m["wait"] = true
-	}
-	if a.Tail > 0 {
-		m["tail"] = a.Tail
-	}
 	if a.Kill {
 		m["kill"] = true
 	}
-	if a.Tell != "" {
-		m["tell"] = a.Tell
+	if a.Mute != nil {
+		m["mute"] = *a.Mute
 	}
-	if a.Resume {
-		m["resume"] = true
+	if a.EveryBytes != nil {
+		m["every_bytes"] = *a.EveryBytes
 	}
-	if a.Node != "" {
-		m["node"] = a.Node
+	if a.EverySecs != nil {
+		m["every_secs"] = *a.EverySecs
 	}
 	return m
 }
 
-const (
-	jobsCommandParams = "A command's job (job:N) takes wait, tail, kill, grep, buffer_bytes, ignore."
-	jobsAgentParams   = "An agent (agent:N) takes wait, tail, kill, tell, resume, node."
-)
-
-func runJobs(ctx context.Context, h *Harness, a jobsArgs) string {
-	commandOnly := a.Grep != nil || a.BufferBytes != nil || a.Ignore != nil
-	agentOnly := a.Tell != "" || a.Resume || a.Node != ""
-	switch {
-	case a.Job != nil && a.Agent != nil:
-		// The model saw "background job #N" in an agent's report or tail and
-		// asked for it through the parent: job numbers belong to whoever
-		// started the job, and a sub-agent's jobs are its own.
-		return fmt.Sprintf("ERROR: give job or agent, not both. Job numbers belong to whoever started the job: "+
-			"jobs(job:%d) is your own job #%d; a job agent #%d started is its own — ask it with "+
-			"jobs(agent:%d, tell:\"…\"), or read what it did with jobs(agent:%d, tail:40).",
-			*a.Job, *a.Job, *a.Agent, *a.Agent, *a.Agent)
-	case a.Job == nil && a.Agent == nil:
-		if commandOnly || agentOnly || a.Wait || a.Tail > 0 || a.Kill {
-			return "ERROR: name the job: job:N for a command, agent:N for a sub-agent. With no arguments, jobs lists them."
+func runJobs(h *Harness, a jobsArgs) string {
+	if len(a.unknown) > 0 {
+		sort.Strings(a.unknown)
+		return "ERROR: jobs takes job, kill, mute, every_bytes, every_secs (not " + strings.Join(a.unknown, ", ") +
+			"). A job's output is its log: read it with file_read. Sub-agents: agent({id, …})."
+	}
+	if a.Job == nil {
+		if a.Kill || a.Mute != nil || a.EveryBytes != nil || a.EverySecs != nil {
+			return "ERROR: name the job: job:N. With no arguments, jobs lists background work."
 		}
 		return h.jobsList()
-	case a.Agent != nil:
-		if commandOnly {
-			return "ERROR: grep, buffer_bytes and ignore are for a command's job. " + jobsAgentParams
-		}
-		if node := strings.TrimSpace(a.Node); node != "" {
-			if a.Kill || a.Resume {
-				return "ERROR: node starts an idle agent on a node; it does not go with kill or resume."
-			}
-			tell, err := h.giveNode(*a.Agent, node, a.Tell)
-			if err != nil {
-				return "ERROR: " + err.Error()
-			}
-			a.Tell = tell
-		}
-		return agentMonitor(ctx, h, a.Agent, a.Tail, a.Tell, a.Wait, a.Resume, a.Kill)
-	}
-	if agentOnly {
-		return "ERROR: tell, resume and node are for a sub-agent. " + jobsCommandParams
 	}
 	if a.Kill {
 		msg, err := h.KillJob(*a.Job, "model")
@@ -251,17 +191,8 @@ func runJobs(ctx context.Context, h *Harness, a jobsArgs) string {
 	if j == nil {
 		return fmt.Sprintf("ERROR: no background job #%d.", *a.Job)
 	}
-	if msg := tuneJob(h, j, a.BufferBytes, a.Grep, a.Ignore); msg != "" {
-		return msg
-	}
-	var b strings.Builder
-	if a.Wait {
-		if note := j.wait(ctx, h); note != "" {
-			b.WriteString(note + "\n")
-		}
-	}
-	b.WriteString(jobReport(j, a.Tail))
-	return b.String()
+	tuneJob(h, j, a.EveryBytes, a.EverySecs, a.Mute)
+	return jobReport(j)
 }
 
 // jobsList is every job of both kinds, one line each, oldest first per kind.
@@ -283,90 +214,72 @@ func (h *Harness) jobsList() string {
 	return strings.Join(lines, "\n")
 }
 
-// wait blocks until the job finishes, the turn is cancelled, or a message
-// arrives for the session (the user's, or another session's) — the same
-// rules as an agent's wait. It returns why it stopped early, or "" when the
-// job finished.
-//
-// While someone waits, the job's own finish notice is not sent (see
-// completionNote): the waiter's result carries it.
-func (j *bgJob) wait(ctx context.Context, h *Harness) string {
+// waitChange blocks until the job writes more or finishes, the turn is
+// cancelled, or a message arrives: what a repeated look is answered with.
+// "" when the job moved; else why the wait stopped.
+func (j *bgJob) waitChange(ctx context.Context, h *Harness) string {
 	j.mu.Lock()
-	if j.done {
+	written := j.written
+	j.mu.Unlock()
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		j.mu.Lock()
+		moved := j.done || j.written != written
+		id := j.id
 		j.mu.Unlock()
-		return ""
-	}
-	j.waiters++
-	j.mu.Unlock()
-	note := ""
-	select {
-	case <-j.doneCh:
-	case <-ctx.Done():
-		note = fmt.Sprintf("job #%d is still running; the turn was cancelled.", j.id)
-	case <-h.userWaiting():
-		note = jobsMessageStop
-	}
-	j.mu.Lock()
-	j.waiters--
-	done := j.done
-	j.mu.Unlock()
-	if done {
-		return ""
-	}
-	return note
-}
-
-// tuneJob applies the command-only settings; "" or an error message.
-func tuneJob(h *Harness, j *bgJob, bufferBytes *int, grep *string, ignore *bool) string {
-	if bufferBytes == nil && grep == nil && ignore == nil {
-		return ""
-	}
-	j.mu.Lock()
-	if grep != nil {
-		if strings.TrimSpace(*grep) == "" {
-			j.mon.Grep, j.re = "", nil
-		} else {
-			re, err := regexp.Compile(*grep)
-			if err != nil {
-				j.mu.Unlock()
-				return fmt.Sprintf("ERROR: grep %q is not a valid regexp: %v", *grep, err)
-			}
-			j.mon.Grep, j.re = *grep, re
+		if moved {
+			return ""
+		}
+		select {
+		case <-j.doneCh:
+		case <-tick.C:
+		case <-ctx.Done():
+			return fmt.Sprintf("job #%d is still running; the turn was cancelled.", id)
+		case <-h.userWaiting():
+			return jobsMessageStop
 		}
 	}
-	if bufferBytes != nil {
-		j.mon.BufferBytes = *bufferBytes
-	}
-	if ignore != nil {
-		j.mon.Ignore = *ignore
-	}
-	j.mu.Unlock()
-	h.jobsChanged() // muting/unmuting changes what the row says about itself
-	return ""
 }
 
-// jobReport is one command's state: its status, its monitor, its log, and
-// either the last tail lines of the log or what it produced since the last
-// report (all of its output's end, once it finished).
-func jobReport(j *bgJob, tail int) string {
+// tuneJob applies the monitor settings given.
+func tuneJob(h *Harness, j *bgJob, everyBytes, everySecs *int, mute *bool) {
+	if everyBytes == nil && everySecs == nil && mute == nil {
+		return
+	}
 	j.mu.Lock()
-	mon, done, res, logPath := j.mon, j.done, j.res, j.logPath
-	// Hand back whatever has accumulated, whether or not it met the threshold —
-	// an explicit ask is not the same as a scheduled report.
-	pending := string(j.pending)
-	j.pending = nil
-	early := string(j.early)
+	if everyBytes != nil {
+		j.mon.EveryBytes = max(*everyBytes, 0)
+	}
+	if everySecs != nil {
+		j.mon.EverySecs = max(*everySecs, 0)
+	}
+	if mute != nil {
+		j.mon.Mute = *mute
+	}
+	note := j.reportLocked(false)
+	j.armReportLocked()
+	j.mu.Unlock()
+	if note != "" {
+		j.notify(note)
+	}
+	h.jobsChanged() // muting/unmuting changes what the row says about itself
+}
+
+// jobReport is one command's state: status, what its processes are doing,
+// its monitor, and how much it wrote; never the output (that is its log).
+func jobReport(j *bgJob) string {
+	j.mu.Lock()
+	mon, done, written, lines := j.mon, j.done, j.written, j.lines
+	since := j.outAt
+	if since.IsZero() {
+		since = j.started
+	}
 	j.mu.Unlock()
 
 	var b strings.Builder
 	b.WriteString(j.status())
 	if !done {
-		j.mu.Lock()
-		since := j.outAt
-		if since.IsZero() {
-			since = j.started
-		}
-		j.mu.Unlock()
 		if line, verdict, ok := j.usage(time.Since(since)); ok {
 			b.WriteString("\nprocesses: " + line)
 			if verdict != "" {
@@ -375,60 +288,7 @@ func jobReport(j *bgJob, tail int) string {
 		}
 	}
 	b.WriteString("\n" + describeMonitor(mon))
-	if logPath != "" {
-		b.WriteString("\nlog: " + logPath)
-	}
-	switch {
-	case tail > 0:
-		text := early
-		if done {
-			text = res.Output
-		}
-		if logPath != "" {
-			if t, err := readTail(logPath, 1<<20); err == nil {
-				text = t
-			}
-		}
-		fmt.Fprintf(&b, "\nlast %d lines:\n%s", tail, lastLines(text, tail))
-	case done:
-		b.WriteString("\n" + tailOf(res.Output, bgTailBytes))
-	case pending != "":
-		b.WriteString("\nsince the last report:\n" + strings.TrimRight(pending, "\n"))
-	default:
-		b.WriteString("\n(nothing new since the last report)")
-	}
+	fmt.Fprintf(&b, "\nwritten: %s, %s to its combined stdout/stderr", procstat.Bytes(float64(written)), linesOf(lines))
+	b.WriteString("\n" + j.logLine())
 	return b.String()
-}
-
-// readTail reads at most max bytes from the end of a file.
-func readTail(path string, max int64) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if off := st.Size() - max; off > 0 {
-		if _, err := f.Seek(off, io.SeekStart); err != nil {
-			return "", err
-		}
-	}
-	b, err := io.ReadAll(f)
-	return string(b), err
-}
-
-// lastLines is the last n lines of s.
-func lastLines(s string, n int) string {
-	s = strings.TrimRight(s, "\n")
-	if s == "" {
-		return "(no output)"
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
 }

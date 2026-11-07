@@ -285,7 +285,7 @@ func TestJobs_KillCommand(t *testing.T) {
 		t.Errorf("jobs kill: %q", out)
 	}
 	kill := jobsToolDef(true, false).Function.Parameters.(map[string]any)["properties"].(map[string]any)["kill"].(map[string]any)
-	if !strings.Contains(kill["description"].(string), "ends a command and everything it started") {
+	if !strings.Contains(kill["description"].(string), "ends the command and everything it started") {
 		t.Error("the tool definition must say what kill does")
 	}
 }

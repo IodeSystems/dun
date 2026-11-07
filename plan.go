@@ -518,7 +518,7 @@ func (h *Harness) planModeSuffix(p *planState) string {
 // Owning takes a node out of the main agent's ready list; dismissing the
 // child gives back what it did not finish.
 
-// planOwner is a child as a node's owner: "agent:N", as jobs(agent:N) names it.
+// planOwner is a child as a node's owner: "agent:N".
 func planOwner(num int) string { return "agent:" + strconv.Itoa(num) }
 
 // planAgentNum is the child an owner names ("agent:N").
@@ -577,7 +577,7 @@ func (h *Harness) planAssign(id string, num int) error {
 	return nil
 }
 
-// giveNode gives ready node id to idle child num: what jobs(agent:N, node:)
+// giveNode gives ready node id to idle child num: what agent({id:N, node:})
 // does. It returns the child's next message — the node's brief, then tell.
 func (h *Harness) giveNode(num int, id, tell string) (string, error) {
 	sa := h.agentByID(num)
@@ -721,7 +721,7 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 	}
 	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has its notes).", who, strings.Join(published, ", "))
 	if len(ready) > 0 {
-		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (jobs(agent:N, node:…)), a new one (agent(node:…)), or do them."
+		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (agent({id:N, node:…})), a new one (agent({prompt:…, node:…})), or do them."
 	}
 	h.planTell(cs, who, "")
 	h.Notify(msg)

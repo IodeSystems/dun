@@ -56,7 +56,7 @@ const compactionThrashTurns = 2
 // not just when a turn finishes, which is what makes the parent's view of a
 // child move while the child is still working.
 //
-// Why it matters more than it sounds: jobs(agent:N)'s report is the only thing a
+// Why it matters more than it sounds: agent({id:N})'s report is the only thing a
 // parent has to judge a child by, and its two moving parts are elapsed time and
 // tokens. With both frozen, "still working" and "stopped making progress" print
 // the same line — which is exactly how a wedged child went unnoticed for 15

@@ -29,7 +29,7 @@ import (
 //
 //   - a sub-agent's tell_parent message, which arrives as a notification
 //     ("agent #2: …") — agent #2 → you;
-//   - this session's jobs(agent:N, tell:"…") — you → agent #N;
+//   - this session's agent({id:N, tell:"…"}) — you → agent #N;
 //   - this session's dun_msg(to, text) — you → dun:<name>;
 //   - another session's dun_msg, a "peer" notification — dun:<name> → you.
 //

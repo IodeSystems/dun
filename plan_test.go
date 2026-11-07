@@ -443,10 +443,10 @@ func TestPlan_ChildPublishesAndIsGivenTheNext(t *testing.T) {
 		t.Fatalf("the main agent heard %q", n)
 	}
 
-	if out := jobsCall(t, h, "jobs", fmt.Sprintf(`{"agent":%d,"node":%q,"tell":"run go test"}`, sa.num, ids["main's"]+"x")); !strings.Contains(out, "ERROR") {
+	if out := agentOp(h, sa.num, "run go test", ids["main's"]+"x", false, false); !strings.Contains(out, "ERROR") {
 		t.Errorf("an unknown node: %q", out)
 	}
-	if out := jobsCall(t, h, "jobs", fmt.Sprintf(`{"agent":%d,"node":%q,"tell":"run go test"}`, sa.num, ids["test"])); !strings.Contains(out, "Told agent") {
+	if out := agentOp(h, sa.num, "run go test", ids["test"], false, false); !strings.Contains(out, "Told agent") {
 		t.Fatalf("give the next node: %q", out)
 	}
 	waitIdle(t, sa)
