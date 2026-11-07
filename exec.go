@@ -589,13 +589,45 @@ func (p *shellProc) kill() {
 	}
 }
 
-// Close kills the shell this backend owns. Rehoist swaps the exec backend
-// wholesale (host ↔ docker, or into a worktree), and the shell the outgoing one
-// held would otherwise sit there for the life of the session.
+// Close ends the shell this backend owns: at session end, and when Rehoist
+// swaps the exec backend wholesale (host ↔ docker, or into a worktree).
+//
+// It ends the SHELL, not its process group. Holding h.mu means no command is
+// in flight (RunPromotable holds it for the whole command; a promoted one has
+// its own shell already), so what is left in the group is what the agent
+// backgrounded on purpose (`server &`, nohup) — a server a task said to leave
+// running. Killing the group took those down with dun: Terminal-Bench's
+// kv-store-grpc, 2026-11-06, failed with the server dead at verify time.
+// A job that writes to the shell's pipe after dun exits gets EPIPE; one that
+// logs to a file keeps running.
 func (h *HostShell) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.teardown()
+	if h.p != nil {
+		h.p.release()
+		h.p = nil
+	}
+}
+
+// release ends an idle shell and leaves its process group alone: EOF on stdin
+// makes `sh` exit by itself; one that has not, after the bound, is killed by
+// its own pid, not -pid.
+func (p *shellProc) release() {
+	if p.stdin != nil {
+		_ = p.stdin.Close()
+	}
+	select {
+	case <-p.dead:
+		return
+	case <-time.After(proc.KillGroupDelay):
+	}
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+	select {
+	case <-p.dead:
+	case <-time.After(proc.KillGroupDelay):
+	}
 }
 
 // teardown kills the current shell and forgets it. Caller must hold h.mu.
