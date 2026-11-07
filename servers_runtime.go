@@ -885,8 +885,10 @@ func (h *Harness) rebuildTools() {
 		sys += rules
 	}
 	// agentkit's own {OUTPUT} note is off (OmitSlotInstructions); this is
-	// the shorter one, on the same terms: only when there are tools.
-	if len(toolDefs) > 0 && !cfg.Bare {
+	// the shorter one, on the same terms: only when there are tools. Also
+	// under --bare: the ENGINE expands the slots (agentkit expandSlots), so a
+	// script gets the output and the model does not retype it.
+	if len(toolDefs) > 0 {
 		sys += systemSlots
 	}
 	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {

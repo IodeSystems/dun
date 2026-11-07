@@ -152,8 +152,8 @@ type Config struct {
 	NoDir bool
 	// Bare (--bare): a scripted run nobody reads or answers, such as a
 	// benchmark. The system prompt leaves out what only a client uses (the
-	// thinking headings, Markdown, {OUTPUT}); cmd/dun gives it no Ask, so
-	// there is no ask_user.
+	// thinking headings, the Markdown note); cmd/dun gives it no Ask, so
+	// there is no ask_user. {OUTPUT} stays: the engine expands it.
 	Bare bool
 	// NoTools is a plain chat (dun --no-tools): no tool of any kind reaches
 	// the model, no server starts, and a call to a tool is refused.

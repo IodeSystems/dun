@@ -1,6 +1,8 @@
 package dun
 
 import (
+	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,5 +33,29 @@ func TestSystemFor_BareDropsThinkingHeadings(t *testing.T) {
 	}
 	if strings.Contains(systemFor(tools, nil, nil, "", true), "# Thinking:") {
 		t.Error("--bare still asks for thinking headings")
+	}
+}
+
+// What --bare is, end to end: no ask_user (no Ask), no thinking headings or
+// Markdown note, and the {OUTPUT} note KEPT, since the engine expands slots
+// and a script gets the output without the model retyping it.
+func TestBare_KeepsOutputSlotsDropsClientNotes(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}, Bare: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	sys := h.Session.System
+	if !strings.Contains(sys, "{OUTPUT}") {
+		t.Error("--bare dropped the {OUTPUT} note")
+	}
+	for _, gone := range []string{"# Thinking:", "shown as Markdown"} {
+		if strings.Contains(sys, gone) {
+			t.Errorf("--bare kept %q", gone)
+		}
+	}
+	if slices.Contains(h.ToolNames(), "ask_user") {
+		t.Error("ask_user listed with no Ask")
 	}
 }
