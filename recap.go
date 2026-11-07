@@ -636,8 +636,10 @@ func recapToolDef() llm.ToolDef {
 	return td
 }
 
-// readSavedToolDef is listed once something was saved under a ref (a
-// clipped result, a job's log): before that it has nothing to read.
+// readSavedToolDef reads what was saved under a ref (a clipped result, a
+// job's log). Listed from the first request like every tool, though it has
+// nothing to read before the first save (servers_runtime.go: a tool joining
+// later changes the prompt's prefix).
 func readSavedToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
