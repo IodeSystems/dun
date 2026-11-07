@@ -81,6 +81,9 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	persist := !slices.Contains(args, "--session")
 	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "--session" })
 	switch {
+	case len(args) == 1 && (args[0] == "caps" || args[0] == "probe"):
+		// What the model is known to do, and the check: the engine's.
+		return engineSlash("model")(m, args)
 	case len(args) >= 1 && args[0] == "use":
 		if len(args) != 3 {
 			m.append(StErr.Render("usage: /model use <provider> <model-id> [--session]"))
