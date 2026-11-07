@@ -307,7 +307,8 @@ func TestSettle_OwedAcrossResume(t *testing.T) {
 	}
 }
 
-// Two plan changes leave one queued "plan" aside with the latest board.
+// Two edits of one node leave one queued board ("plan", the latest state) and
+// one queued event note (the user's latest edit), not a pile of either.
 func TestPlanBoard_OneKeyedAside(t *testing.T) {
 	h := planHarness(t, false)
 	planCall(t, h, `{"action":"add","title":"parse the file","done_when":"x"}`)
@@ -320,10 +321,29 @@ func TestPlanBoard_OneKeyedAside(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := queuedTexts(h)
-	if len(q) != 1 || !strings.HasPrefix(q[0], "[plan] ") || !strings.Contains(q[0], "Parse it fast") || strings.Contains(q[0], "Parse it\n") {
+	if len(q) != 2 || !strings.HasPrefix(q[0], "[plan] ") || !strings.Contains(q[0], "Parse it fast") {
 		t.Fatalf("queued: %q", q)
 	}
 	if h.queue[0].key != "plan" || h.queue[0].kind != queuedAside {
-		t.Errorf("not a keyed aside: %+v", h.queue[0])
+		t.Errorf("the board is not a keyed aside: %+v", h.queue[0])
+	}
+	if !strings.Contains(q[1], "The user changed node 1's title to: Parse it fast") || h.queue[1].kind != queuedAside {
+		t.Errorf("the user's edit is not said, or not the latest: %q", q[1])
+	}
+}
+
+// A drop is an event the board cannot show (the node just disappears from
+// it): the main agent is told, with what waits on the dropped node.
+func TestPlanBoard_DropSaysWhatWaits(t *testing.T) {
+	h := planHarness(t, false)
+	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
+	planCall(t, h, `{"action":"add","title":"b","done_when":"x","needs":["1"]}`)
+	h.queue = nil
+	if _, err := h.PlanCmd(context.Background(), "drop 1 wrong way"); err != nil {
+		t.Fatal(err)
+	}
+	q := strings.Join(queuedTexts(h), "\n")
+	if !strings.Contains(q, "The user dropped node 1 (wrong way). 1 node(s) wait on it") {
+		t.Errorf("the drop and what waits on it are not said: %q", q)
 	}
 }

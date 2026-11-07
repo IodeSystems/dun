@@ -108,8 +108,16 @@ trigger on an error line; the pattern filter was removed in the jobs rework, and
 - A child's change to nodes the main agent owns is an aside to the main agent
   (`planTell`). The user's change to a child's nodes is a notify to that child.
 - `/plan approve`, edit and drop are notifies: the user asks the model to act.
-- Nothing wakes the main agent when a node becomes ready with no owner, when a
-  node becomes blocked, or when the whole plan is done.
+- When a child publishes plan nodes, the main agent gets a notify that names
+  the nodes now ready and says to hand them to an agent (`planFromChild`). So
+  part of "the frontier moved" exists. Nothing wakes the main agent when a node
+  becomes ready in another way (a dependency done by the main agent or a child
+  that publishes nothing), when a node becomes blocked, or when the whole plan
+  is done.
+- The user's `/plan edit` and `/plan drop` are said to the main agent as an
+  event beside the board (keyed per node and field, so a second edit replaces
+  the first): the board cannot show what the user changed, and a dropped node
+  only disappears from it.
 
 ### End of turn (`idlecheck.go`, agentkit `Session.OnIdle`; branch `idle-check`)
 

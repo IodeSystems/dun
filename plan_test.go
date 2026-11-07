@@ -220,10 +220,12 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 		cmd, want string
 		wakes     bool
 	}{
-		// The main agent hears the board, not a note (docs/attention.md).
-		{"edit 1 title Parse it", "Parse it", false},
-		{"edit 1 goal Read the file", "Parse it", false},
-		{"drop 1 wrong way", "[plan] ", false},
+		// The person's change is an event the model is told, beside the
+		// board (docs/attention.md): what they changed, and for a drop what
+		// waits on it, which the board cannot show.
+		{"edit 1 title Parse it", "changed node 1's title to: Parse it", false},
+		{"edit 1 goal Read the file", "goal to: Read the file", false},
+		{"drop 1 wrong way", "dropped node 1 (wrong way). 1 node(s) wait on it", false},
 		// A setting, not a request: no echo (USER 2026-11-07). The plan
 		// gate's refusal says what plan mode means when a call hits it.
 		{"mode on", "", false},
@@ -240,7 +242,13 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 			}
 			continue
 		}
-		if len(q) != 1 || !strings.Contains(q[0], tc.want) || !strings.HasPrefix(q[0], "[control/plan] ") && !strings.HasPrefix(q[0], "[plan] ") {
+		said := false
+		for _, x := range q {
+			if strings.HasPrefix(x, "[control/plan] ") && strings.Contains(x, tc.want) {
+				said = true
+			}
+		}
+		if !said {
 			t.Errorf("%s: %v", tc.cmd, q)
 		}
 		if (h.Pending() > 0) != tc.wakes {

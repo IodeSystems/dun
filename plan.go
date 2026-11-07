@@ -170,7 +170,7 @@ func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Contex
 func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string) {
 	return taskgraph.Tool(planStore{h}, "", taskgraph.WithNote(planNote),
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
-			h.planTell(cs, "the main agent")
+			h.planTell(cs, "the main agent", "")
 		}))
 }
 
@@ -178,10 +178,18 @@ func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string)
 // (taskgraph.Change.Tell); who is the actor, in words. Owner "" is this
 // session's main agent: it hears the board as it stands now, ONE aside keyed
 // "plan" that every change replaces, never a pile of change notes
-// (docs/attention.md, "The plan board"). A child that owns a changed node
-// hears which nodes and who changed them, inside its running turn or at its
-// next one.
-func (h *Harness) planTell(cs []taskgraph.Change, who string) {
+// (docs/attention.md, "The plan board"). note is an EVENT the board cannot
+// show, said once beside it: the user's edit, or a drop and what waits on it
+// (a dropped node only disappears from the board). "" adds nothing. A child
+// that owns a changed node hears which nodes and who changed them, inside its
+// running turn or at its next one.
+func (h *Harness) planTell(cs []taskgraph.Change, who, note string) {
+	h.planTellKeyed(cs, who, note, "")
+}
+
+// planTellKeyed is planTell with the event note keyed: a later edit of the same
+// node and field replaces the queued one instead of piling on it.
+func (h *Harness) planTellKeyed(cs []taskgraph.Change, who, note, key string) {
 	main, kids := false, map[int][]string{}
 	for _, c := range cs {
 		for _, o := range c.Tell {
@@ -194,6 +202,9 @@ func (h *Harness) planTell(cs []taskgraph.Change, who string) {
 	}
 	if main {
 		h.planBoard()
+		if note != "" {
+			h.AsideWith(note, AsideOpts{Key: key})
+		}
 	}
 	for k, ids := range kids {
 		if sa := h.agentByID(k); sa != nil {
@@ -433,7 +444,7 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 			return "", err
 		}
 		h.planChanged()
-		h.planTell(cs, "the user")
+		h.planTellKeyed(cs, "the user", fmt.Sprintf("[control/plan] The user changed node %s's %s to: %s", id, field, text), "plan-edit:"+id+":"+field)
 		return fmt.Sprintf("node %s: %s set", id, field), nil
 	case "drop":
 		id, why, _ := strings.Cut(rest, " ")
@@ -443,14 +454,23 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		if why = strings.TrimSpace(why); why == "" {
 			why = "dropped by the user"
 		}
+		var waiting int
 		cs, err := taskgraph.Apply(ctx, p.store, planActorUser, func(g *taskgraph.Graph) error {
-			return g.SetStatus(id, taskgraph.Dropped, why)
+			if err := g.SetStatus(id, taskgraph.Dropped, why); err != nil {
+				return err
+			}
+			waiting = len(g.Dependents(id))
+			return nil
 		})
 		if err != nil {
 			return "", err
 		}
 		h.planChanged()
-		h.planTell(cs, "the user")
+		note := "[control/plan] The user dropped node " + id + " (" + why + ")."
+		if waiting > 0 {
+			note += " " + strconv.Itoa(waiting) + " node(s) wait on it: replace it (a node with replaces " + id + ") and update their needs."
+		}
+		h.planTellKeyed(cs, "the user", note, "plan-drop:"+id)
 		return "node " + id + " dropped", nil
 	case "tell":
 		id, text, _ := strings.Cut(rest, " ")
@@ -738,13 +758,13 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 	}
 	who := fmt.Sprintf("agent #%d", num)
 	if len(published) == 0 {
-		h.planTell(cs, who)
+		h.planTell(cs, who, "") // the board says it; a child's change is not news
 		return
 	}
 	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has its notes).", who, strings.Join(published, ", "))
 	if len(ready) > 0 {
 		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (agent({id:N, node:…})), a new one (agent({prompt:…, node:…})), or do them."
 	}
-	h.planTell(cs, who)
+	h.planTell(cs, who, "")
 	h.Notify(msg)
 }
