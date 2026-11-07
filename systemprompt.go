@@ -65,8 +65,8 @@ const (
 	// against the task (TB2.1, 2026-11-07: 4 of 8 fails ended within 9 tool
 	// calls).
 	systemFinish   = "Finish the whole task: a missing tool or package is yours to install. Before your final message, read the task again and check each requirement it states (paths, names, formats, values) against what you produced, by running or reading it, and fix what does not match. "
-	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. " + systemFinish + "Be concise. When the task is done, briefly summarize what you changed."
-	systemWork     = "\n\nWork step by step: read what you need before changing it, make minimal precise edits, and verify by running the build/tests with exec. " + systemFinish + "Be concise. When the task is done, briefly summarize what you changed."
+	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. " + systemFinish + "Be concise. When the task is done, briefly say what you changed and what remains."
+	systemWork     = "\n\nWork step by step: read what you need before changing it, make minimal precise edits, and verify by running the build/tests with exec. " + systemFinish + "Be concise. When the task is done, briefly say what you changed and what remains."
 	// systemAlone is --non-interactive's: no one is there during the run.
 	systemAlone = "\n\nThis run is non-interactive: no one reads your messages until you finish, and no one answers questions. You are on your own to reach the goal."
 

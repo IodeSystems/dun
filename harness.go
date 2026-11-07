@@ -758,6 +758,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// finish_reason=length: decide between shedding history and telling the
 		// model what it hit. See overflow.go.
 		OnOverflow: h.onOverflow,
+		// Where the turn would end: a check, or the open plan (idlecheck.go).
+		OnIdle: h.onIdle,
 	}
 	// $DUN_HARNESS in exec's environment, and the file it names written
 	// before the first request (harnessinfo.go).
