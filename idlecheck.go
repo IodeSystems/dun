@@ -19,7 +19,12 @@ import (
 // or says why they remain (USER 2026-11-07).
 
 // idleChecklist is the --non-interactive check.
-const idleChecklist = "Before you end the turn: list each requirement the task states (file paths, names, formats, values, behaviors). For each, check it against what you produced now: run it where it can run, read it only where it cannot. Fix anything that does not match, then give your final message. If a requirement cannot be met, say why."
+// The wording keeps the turn open when a requirement fails: TB2.1
+// winning-avg-corewars (2026-11-07) found 35% where 75% was required, wrote
+// "I should attempt to improve stone before finishing — but I'm in an
+// idle_check asking to verify and give final message", and stopped; pi kept
+// working and passed.
+const idleChecklist = "Before you end the turn: list each requirement the task states (file paths, names, formats, values, behaviors) and check each against what you produced now: run it where it can run, read it only where it cannot. If any is not met and you can still work on it, do not end the turn: keep working until it is met. End the turn only when every requirement is met, or when one cannot be met; then say which and why."
 
 // idlePlanOpen is the note when the plan has open items.
 const idlePlanOpen = "The plan still has open items:\n%s\nContinue them, or end the turn saying why each remains."

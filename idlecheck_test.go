@@ -19,8 +19,8 @@ func TestOnIdle(t *testing.T) {
 	if got := h.onIdle(ctx, 1, 0); got != "" {
 		t.Errorf("one-round answer was checked: %q", got)
 	}
-	if got := h.onIdle(ctx, 5, 0); !strings.Contains(got, "list each requirement") {
-		t.Errorf("non-interactive work turn not checked: %q", got)
+	if got := h.onIdle(ctx, 5, 0); !strings.Contains(got, "list each requirement") || !strings.Contains(got, "do not end the turn: keep working") {
+		t.Errorf("non-interactive work turn not checked, or the check reads as an order to finish: %q", got)
 	}
 	if got := h.onIdle(ctx, 6, 1); got != "" {
 		t.Errorf("asked twice in one turn: %q", got)
