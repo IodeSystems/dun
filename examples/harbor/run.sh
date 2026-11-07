@@ -7,7 +7,8 @@
 # DUN_URL / DUN_LLM_KEY / DUN_MODEL (default: ~/.dun/config.json's url and key),
 # DUN_EFFORT (low), DUN_PRICE_IN/CACHED/OUT (USD per 1M tokens), BUDGET (0.80),
 # ATTEMPTS (1, harbor -k), OUT (a jobs dir to add to; default a new one),
-# DUN_HARBOR_BIN (the binaries to upload; default ./bin).
+# DUN_HARBOR_BIN (the binaries to upload; default ./bin), HARBOR_ARGS (more harbor
+# run flags, e.g. "--agent-timeout-multiplier 3" for a slower model).
 #
 # A clear error stops the run (exit 2): a trial exception other than an agent
 # timeout, or dun ending before its first model request. Those are the harness's
@@ -60,7 +61,7 @@ for t in "$@"; do
 	fi
 	echo "== $t (spent so far \$$s)"
 	"$HARBOR" run -p "$TASKS/$t" --agent dun_agent:Dun -m "$DUN_MODEL" -e docker -k "$ATTEMPTS" -n 1 \
-		-o "$out" --job-name "$t" 2>&1 | grep -E "Mean|Exceptions|│ +[0-9]" || true
+		-o "$out" --job-name "$t" ${HARBOR_ARGS:-} 2>&1 | grep -E "Mean|Exceptions|│ +[0-9]" || true
 	if why=$(clear_error "$t") && [ -n "$why" ]; then
 		echo "abort: $why"
 		exit 2
