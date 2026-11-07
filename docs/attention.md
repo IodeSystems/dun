@@ -136,6 +136,16 @@ When a turn that used tools ends, a settle timer starts (proposed: 2 minutes).
 
 - **The user replies first:** the timer is cancelled. The user is the check, and
   nothing is spent.
+- **The user is active in the TUI:** the timer restarts. Typing in the composer,
+  scrolling, opening a pane or `/plan` all mean the user is present and reading
+  or about to answer. The TUI already tracks stillness for suggestions ("the
+  input box is empty and the person has sat still"); it sends the engine a
+  presence ping at most every 10 s or so while the user is active, and the
+  engine only restarts the timer. The engine never sees keystrokes. A client with
+  no keyboard (a `-p` script, a peer, dund) sends no pings, and only a reply
+  cancels the timer.
+- **Typing does not cut a settle turn that has started.** Only a sent message
+  does (head chop, below): keystrokes are not a reply.
 - **The timer fires:** one settle turn. The model compares what it did with the
   request, finishes what it can without the user, and ends with a status report
   that offers four outcomes:
@@ -240,7 +250,7 @@ Risks:
 
 ## Open decisions (owner)
 
-1. **The settle delay:** 2 minutes is a guess.
+1. **The settle delay:** 2 minutes of no reply and no TUI activity is a guess.
 2. **Is a settle turn allowed to start a turn?** The rule is: only a user message,
    a dun message or an MCP out-of-band event may start a turn. A settle is a
    dun-originated wake. This document counts it as a dun message.
