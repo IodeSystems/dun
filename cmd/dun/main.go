@@ -248,7 +248,7 @@ func main() {
 	// Key default stays empty so `dun -h` never prints the secret; the real value
 	// is resolved after parse (flag > env > config).
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
-	ws := flag.String("workspace", ".", "workspace directory (a git repo → worktree isolation)")
+	ws := flag.String("workspace", ".", "workspace directory (worked in place; --worktree isolates a git repo)")
 	docker := flag.String("docker", "", "run the entire process in the bundled Docker image (--docker=true); for commands in your own image, start a session and use /isolate docker image <image|Dockerfile>")
 	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place); in a session, /isolate worktree")
