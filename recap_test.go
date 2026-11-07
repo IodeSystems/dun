@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -514,6 +515,7 @@ func TestRecapNudge_SilentWithNoSingleOffender(t *testing.T) {
 // node_read of a big file, a search with many hits and an eval returning a big
 // structure all cost the same window, so the cap lives around EVERY tool.
 func TestRecapWatch_CapsEveryTool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	dir := t.TempDir()
 	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
 	h := &Harness{store: st, wake: make(chan struct{}, 1), cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
@@ -536,81 +538,13 @@ func TestRecapWatch_CapsEveryTool(t *testing.T) {
 	if !strings.Contains(out, "characters elided") {
 		t.Errorf("the gap must say what happened: %q", out[:200])
 	}
-	// A REF, not a path — under --docker a host path is not openable by the
-	// model at all.
-	if !strings.Contains(out, `read_saved({ref:`) {
-		t.Errorf("the gap must say how to read the rest: %q", out[len(out)-300:])
+	// A PATH in the isolation tmp, read with file_read (isotmp.go).
+	m := regexp.MustCompile(`saved to (\S+) — read it with file_read`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("the gap must name the saved file and how to read it: %q", out[len(out)-300:])
 	}
-
-	// And that ref really reads back, dun-side: no shell, no container.
-	ref := ""
-	h.recapMu.Lock()
-	for k := range h.spills {
-		ref = k
-	}
-	h.recapMu.Unlock()
-	if ref == "" {
-		t.Fatal("no spill was registered")
-	}
-	got := h.readSpill(ref, "hit", 0, 0, 0, false)
-	if !strings.Contains(got, "lines match") {
-		t.Errorf("grep should work on a spilled result: %q", got[:120])
-	}
-	if head := h.readSpill(ref, "", 3, 0, 0, false); !strings.Contains(head, "first 3 of") {
-		t.Errorf("head should work: %q", head[:120])
-	}
-	// full is BOUNDED: an unbounded read hands back exactly what the cap took
-	// out, through a door marked convenience.
-	full := h.readSpill(ref, "", 0, 0, 0, true)
-	if len(full) > execInlineMax+500 {
-		t.Errorf("a full read must stay bounded, got %d characters", len(full))
-	}
-	if h.readSpill("nope", "", 0, 0, 0, true) == "" || !strings.Contains(h.readSpill("nope", "", 0, 0, 0, true), "Known refs") {
-		t.Error("an unknown ref should say which ones exist")
-	}
-}
-
-// Output with no line structure — a minified document, a base64 payload, one
-// enormous generated line — defeats grep, head and tail alike: every one of
-// them is line-based, so they all hand back the single line that was the
-// problem. Paging is the only handle on it.
-func TestReadSpill_PagesOutputWithNoLines(t *testing.T) {
-	dir := t.TempDir()
-	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
-	h := &Harness{store: st, cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
-
-	blob := "{" + strings.Repeat("\"k\":\"v\",", 12000) + "}" // one line, ~96k chars
-	ref := h.spillRef("eval {}", blob)
-	if ref == "" {
-		t.Fatal("no ref")
-	}
-
-	// Asked about, it says the line-based tools cannot help and how to page.
-	desc := h.readSpill(ref, "", 0, 0, 0, false)
-	if !strings.Contains(desc, "no line structure") || !strings.Contains(desc, "at:0") {
-		t.Fatalf("it must say paging is the way in: %q", desc)
-	}
-
-	first := h.readSpill(ref, "", 0, 0, 0, true)
-	if !strings.Contains(first, "characters 0–") {
-		t.Fatalf("full on an unlined blob should page from the start: %q", first[:120])
-	}
-	if !strings.Contains(first, "next page: read_saved({ref:") {
-		t.Fatalf("a page must say where the next one starts: %q", first[:200])
-	}
-	if len(first) > execInlineMax+400 {
-		t.Errorf("a page must stay bounded, got %d", len(first))
-	}
-
-	second := h.readSpill(ref, "", 0, 0, execInlineMax, false)
-	if !strings.Contains(second, fmt.Sprintf("characters %d–", execInlineMax)) {
-		t.Errorf("at: should page from the offset given: %q", second[:120])
-	}
-	// Past the end of the FILE, which is larger than the blob: the saved copy
-	// carries a "$ command" header so the offsets are the file's, not the
-	// output's.
-	if past := h.readSpill(ref, "", 0, 0, len(blob)+1000, false); !strings.Contains(past, "past the end") {
-		t.Errorf("an offset past the end must say so: %q", past)
+	if b, err := os.ReadFile(m[1]); err != nil || !strings.Contains(string(b), "result line") {
+		t.Errorf("the named file does not hold the result: %v", err)
 	}
 }
 
@@ -633,6 +567,7 @@ func TestCapExecOutput_NeverSplitsARune(t *testing.T) {
 // sides must see the same text — and it must spill ONCE, or the human is told
 // to read a copy the model has never heard of.
 func TestCappedReporter_ShowsTheHumanWhatTheModelSaw(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	dir := t.TempDir()
 	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
 	h := &Harness{store: st, wake: make(chan struct{}, 1), cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
@@ -654,89 +589,31 @@ func TestCappedReporter_ShowsTheHumanWhatTheModelSaw(t *testing.T) {
 	if reported != toModel {
 		t.Fatalf("the human and the model must see the same text (%d vs %d chars)", len(reported), len(toModel))
 	}
-	h.recapMu.Lock()
-	n := len(h.spills)
-	h.recapMu.Unlock()
-	if n != 1 {
-		t.Fatalf("capping twice must not spill twice, got %d refs", n)
+	saved, _ := filepath.Glob(filepath.Join(h.bgLogDir(), "exec-*.out"))
+	if len(saved) != 1 {
+		t.Fatalf("capping twice must not spill twice, got %d saved files", len(saved))
 	}
 }
 
-// Live: tail:100 of a three-line file handed the model the entire
-// 98,000-character blob — the cap defeated through recap's own door, by the one
-// tool that exists to manage the window. Every read is bounded.
-func TestReadSpill_BoundsItsOwnAnswers(t *testing.T) {
-	dir := t.TempDir()
-	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
-	h := &Harness{store: st, cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
-	blob := "BEGIN" + strings.Repeat("payload-", 12000) + "END"
-	ref := h.spillRef("gen.sh", blob)
-
-	for _, read := range []struct {
-		name string
-		out  string
-	}{
-		{"tail", h.readSpill(ref, "", 0, 100, 0, false)},
-		{"head", h.readSpill(ref, "", 100, 0, 0, false)},
-		{"grep", h.readSpill(ref, "payload", 0, 0, 0, false)},
-		{"full", h.readSpill(ref, "", 0, 0, 0, true)},
-	} {
-		if len(read.out) > execInlineMax+600 {
-			t.Errorf("%s returned %d characters — the cap must hold through recap's own door", read.name, len(read.out))
-		}
-	}
-	// And a read that had to be clipped says how to get the rest properly,
-	// rather than silently handing back two ends again.
-	if out := h.readSpill(ref, "", 0, 100, 0, false); !strings.Contains(out, "page it instead") {
-		t.Errorf("a clipped read must point at paging: %q", out[len(out)-200:])
-	}
-}
-
-// Live: grep for SECRET on a 98,000-character single line returned that whole
-// line, the clip took the middle, and the middle was where the match was — so
-// the one read that should have answered the question threw the answer away.
-// The model then hunted the spill file through the filesystem, which only
-// worked because exec had a host to search.
-func TestReadSpill_GrepWindowsAMatchInsideAHugeLine(t *testing.T) {
-	dir := t.TempDir()
-	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
-	h := &Harness{store: st, cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
-
-	pad := strings.Repeat("payload-data-", 4000)
-	blob := "BEGIN" + pad + "SECRET=cafebabe1234-END" + pad + "FINISH" // ~104k, one line
-	ref := h.spillRef("gen.sh", blob)
-
-	out := h.readSpill(ref, "SECRET=[a-f0-9]+", 0, 0, 0, false)
-	if !strings.Contains(out, "cafebabe1234") {
-		t.Fatalf("the match must survive the read that found it: %q", out[:200])
-	}
-	if len(out) > execInlineMax {
-		t.Errorf("a windowed grep should be small, got %d characters", len(out))
-	}
-	// The window says WHERE it was, so the model can page around it if it wants
-	// more than the window.
-	if !strings.Contains(out, "@") {
-		t.Errorf("a windowed match must carry its offset: %q", out[:200])
-	}
-}
-
-// read_saved is listed from the first request (a tool joining later changed
-// the prompt's prefix — USER 2026-10-28), and needs ref.
-func TestReadSaved_ListedAndNeedsRef(t *testing.T) {
+// read_saved is retired: saved output is a file read with file_read. It is not
+// listed, and a call to it (an old transcript's habit) says where things are.
+func TestReadSaved_Retired(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if !slices.Contains(h.ToolNames(), "read_saved") {
-		t.Fatalf("not listed: %v", h.ToolNames())
+	if slices.Contains(h.ToolNames(), "read_saved") {
+		t.Fatalf("still listed: %v", h.ToolNames())
 	}
 	d := withRecap(nil, h, nil)
-	var tc llm.ToolCall
-	tc.Function.Name, tc.Function.Arguments = "read_saved", `{}`
-	if out, _ := d(context.Background(), tc); !strings.Contains(out, "needs ref") {
-		t.Errorf("no ref: %q", out)
+	for _, args := range []string{`{}`, `{"ref":"r1","grep":"x"}`} {
+		var tc llm.ToolCall
+		tc.Function.Name, tc.Function.Arguments = "read_saved", args
+		if out, _ := d(context.Background(), tc); !strings.Contains(out, "file_read") {
+			t.Errorf("%s: %q", args, out)
+		}
 	}
 }
 

@@ -483,10 +483,6 @@ type Harness struct {
 	recapMu     sync.Mutex
 	recapNudged int
 	recapSeen   map[string]bool // suggestions already made, so none repeats
-	// spills maps a short ref to a saved result. A ref, not a path: under
-	// --docker the file is on the host and the model's container cannot open it.
-	spills   map[string]string
-	spillSeq int
 	// capped memoizes the clip by content, so the model and the UI get the same
 	// text and one spill rather than two.
 	capped map[string]string

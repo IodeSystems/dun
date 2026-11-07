@@ -31,7 +31,7 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 			t.Errorf("the system prompt repeats a tool's description (%q)", own)
 		}
 	}
-	if !strings.Contains(shellOnly, "read_saved reads the rest") {
+	if !strings.Contains(shellOnly, "file_read reads the rest") {
 		t.Error("with exec, the prompt must say a large result is clipped and where the rest is")
 	}
 	// No worktree or Docker → no containment line.
@@ -336,7 +336,7 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 func serverToolNames(h *Harness) []string {
 	builtin := map[string]bool{
 		"exec": true, "jobs": true, "ask_user": true, "agent": true,
-		"tell_parent": true, "ask_parent": true, "recap": true, "session": true, "read_saved": true,
+		"tell_parent": true, "ask_parent": true, "recap": true, "session": true,
 		"dun_list": true, "dun_msg": true, "loop_ctl": true, "plan": true,
 	}
 	var out []string

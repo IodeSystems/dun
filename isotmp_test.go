@@ -1,11 +1,15 @@
 package dun
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/agentkit/llm"
 )
 
 func isoHarness(t *testing.T) (*Harness, string) {
@@ -96,5 +100,46 @@ func TestDockerExec_MountsIsoTmpAtItsPath(t *testing.T) {
 		return strings.HasPrefix(a, "/tmp/dun-")
 	}) {
 		t.Error("mounted a tmp with none set")
+	}
+}
+
+// The two live failures read_saved was fixed for, now through file_read on
+// the saved file, the way the model reaches it (the session's dispatcher):
+// grep for a match in the middle of one huge line returned the line clipped
+// to its ends, without the match; tail:100 of a three-line file returned the
+// whole 98,000-character blob.
+func TestSavedOutput_ReadWithFileRead(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	ws := t.TempDir()
+	sf := filepath.Join(t.TempDir(), "20261106-230000.jsonl")
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []Server{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	blob := "BEGIN" + strings.Repeat("payload-", 12000) + "SECRET=abc123" + strings.Repeat("payload-", 12000) + "END"
+	path := h.spillExec("gen.sh", blob)
+	if !strings.HasPrefix(path, IsoTmpDir(sf)) {
+		t.Fatalf("not in the isolation tmp: %s", path)
+	}
+	read := func(args string) string {
+		var tc llm.ToolCall
+		tc.Function.Name, tc.Function.Arguments = "file_read", args
+		out, err := h.Session.Dispatch(context.Background(), tc)
+		if err != nil || strings.HasPrefix(out, "ERROR") {
+			t.Fatalf("file_read %s: %v %s", args, err, out)
+		}
+		return out
+	}
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	if g := read(`{"path":` + q(path) + `,"grep":"SECRET=[a-f0-9]+"}`); !strings.Contains(g, "SECRET=abc123") || !strings.Contains(g, "at=") {
+		t.Errorf("grep lost the match: %s", g)
+	}
+	if tail := read(`{"path":` + q(path) + `,"offset":-100}`); len(tail) > 70*1024 {
+		t.Errorf("a tail read returned %d bytes: unbounded", len(tail))
+	}
+	if p := read(`{"path":` + q(path) + `,"at":0}`); !strings.Contains(p, "next page at=") {
+		t.Errorf("at does not page: %.200s", p)
 	}
 }

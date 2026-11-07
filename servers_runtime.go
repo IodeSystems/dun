@@ -795,7 +795,8 @@ func (h *Harness) rebuildTools() {
 	// applies and then reports. It used to ask a root's human first — see the
 	// rules at the top of recap.go for why that prompt was removed.
 	toolDefs = append(toolDefs, recapToolDef())
-	toolDefs = append(toolDefs, readSavedToolDef())
+	// read_saved is not listed: saved output is a file in the isolation tmp,
+	// read with file_read (isotmp.go). withRecap still answers a call to it.
 	dispatch = withRecap(dispatch, h, report)
 	// session is available to BOTH roles and, like recap, always on: what
 	// runs the model (for a repo's PR rules) and how a long task keeps its

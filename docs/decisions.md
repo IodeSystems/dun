@@ -46,9 +46,18 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   back as a window around it with its offset. The cap must hold through
   `recap`'s own door (`tail:100` once returned a whole blob).
 - **Line-based readers are useless on output with no lines.** Minified
-  documents defeat grep, head and tail. `read_saved({ref, at:N})` pages by offset
-  and each page says where the next begins. "Unlined" means the longest line,
-  not the line count.
+  documents defeat grep, head and tail. `file_read({path, at:N})` pages by byte
+  offset and each page says where the next begins (agentkit v0.25.0; this was
+  `read_saved({ref, at:N})` until 2026-11-06). "Unlined" means the longest
+  line, not the line count.
+- **Saved output is a file, named by path, not a ref** (USER 2026-11-06). A
+  clipped result or a job log is written to the session's bg dir and to its
+  isolation tmp, `$TMPDIR/dun-<session>` (`isotmp.go`), the same path on the
+  host and under `--docker` (mounted read-only there). `file_read` and
+  `exec` both open it, so `read_saved` was retired: one tool fewer on every
+  request. A ref existed only because the host path did not exist inside the
+  container. A wiped `/tmp` is refilled from the bg dir at start, resume and
+  rehoist.
 - **An unset budget is unbudgeted, not a budget of zero.** agentkit's Shaper
   read `BudgetTokens: 0` as a zero-token ceiling, so the default
   (`DUN_CONTEXT_TOKENS` unset) compacted every turn: 45 folds in 29 minutes in

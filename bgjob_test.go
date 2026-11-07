@@ -170,11 +170,11 @@ func TestStartBackground_LogsAndReportsTheExitCode(t *testing.T) {
 	if !strings.Contains(notes[0], "FAILED (exit 2)") {
 		t.Errorf("the notice must carry the exit code: %q", notes[0])
 	}
-	// A REF, not a path. "grep it with exec" names a host file the model's
-	// container cannot open under --docker, and one it has no shell for when
-	// there is no exec backend at all.
-	if !strings.Contains(notes[0], `ref "job1"`) || !strings.Contains(notes[0], "read_saved({ref:") {
-		t.Errorf("the notice must name a readable ref, not a path: %q", notes[0])
+	// The log's path in the isolation tmp, read with file_read: the same
+	// file on the host and under --docker (isotmp.go). Not "grep it with
+	// exec", which needs a shell that may not see the file.
+	if !strings.Contains(notes[0], "job-1.log") || !strings.Contains(notes[0], "file_read({path:") {
+		t.Errorf("the notice must name the log and how to read it: %q", notes[0])
 	}
 	if strings.Contains(notes[0], "grep it with exec") {
 		t.Error("the notice must not tell the model to shell out for a file it may not be able to reach")

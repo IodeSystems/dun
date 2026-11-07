@@ -147,19 +147,21 @@ func capExecOutput(out, command string, spill func(command, output string) strin
 
 	where := "the rest was not saved"
 	if spill != nil {
-		if ref := spill(command, out); ref != "" {
-			// A REF, not a path: under --docker the file is on the host and the
-			// model's container cannot open it, so a path was never usable.
+		if path := spill(command, out); path != "" {
+			// A PATH in the session's isolation tmp (isotmp.go): the same file
+			// on the host and, mounted at its own path, under --docker. It used
+			// to be a ref read with read_saved, because the host path it named
+			// then did not exist inside the container.
 			//
 			// And advise only what can WORK here. On output with no lines to
-			// speak of, grep/head/tail all hand back the single line that was
-			// the problem, so suggesting them sends the model down a road that
-			// dead-ends; paging is the only way in.
+			// speak of, grep and line ranges all hand back the single line
+			// that was the problem; paging by byte offset is the only way in.
 			if longestLine(out) > execInlineMax {
-				where = fmt.Sprintf("ref %q — ONE long line, so grep/head/tail cannot help: page it with "+
-					"read_saved({ref:%q, at:0}), then the offset each page reports", ref, ref)
+				where = fmt.Sprintf("saved to %s — ONE long line, so grep and line ranges cannot reach into it: "+
+					"page it with file_read({path:%q, at:0}); each page names the next at", path, path)
 			} else {
-				where = fmt.Sprintf("ref %q — read it with read_saved({ref:%q, grep:\"…\"}), or head/tail/full/at", ref, ref)
+				where = fmt.Sprintf("saved to %s — read it with file_read({path:%q, grep:\"…\"}), or a line range "+
+					"(offset:-50 is the end)", path, path)
 			}
 		}
 	}

@@ -70,12 +70,12 @@ const (
 )
 
 // systemExecCap quotes the clip limit, which must be the one number the code
-// enforces. Only with exec: the ref it names is read with read_saved, and the
+// enforces. Only with exec: the file it names is read with file_read, and the
 // clipping is exec's (execInlineMax).
 //
 // "Do not claim" stays: models reported what was in the elided middle.
 var systemExecCap = "\n\nA tool result over " + fmt.Sprintf("%d", execInlineMax) + " characters reaches you clipped " +
-	"to its start and end; the gap names a ref, and read_saved reads the rest. That is not a failure, and re-running " +
+	"to its start and end; the gap names the file it was saved to, and file_read reads the rest. That is not a failure, and re-running " +
 	"only clips it again. Do not claim to have seen the clipped part."
 
 // HostedLine is the system prompt's sentence naming the servers hosted in

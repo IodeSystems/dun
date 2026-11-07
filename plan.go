@@ -251,7 +251,7 @@ var writeVerb = regexp.MustCompile(`(?i)(^|_|-)(write|edit|delete|remove|rename|
 // write (edit, write, delete, move), agent (a sub-agent has them all), mount,
 // loop_ctl (schedules runs of its own), dun_msg (acts in another session),
 // every tool of the shell server, and an MCP tool whose name has a write verb.
-// Allowed: file read, grep and list, plan, ask_user, session, read_saved,
+// Allowed: file read, grep and list, plan, ask_user, session,
 // recap, skill, memory, jobs, tell_parent, dun_list, and the other MCP tools.
 func changesWorkspace(name, server string) bool {
 	switch name {

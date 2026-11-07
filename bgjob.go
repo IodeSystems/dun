@@ -55,7 +55,6 @@ type bgJob struct {
 	id      int
 	command string
 	logPath string
-	logRef  string // how the model addresses this log (see logLine)
 	started time.Time
 	h       *Harness
 
@@ -80,9 +79,9 @@ type bgJob struct {
 	mon     bgMonitor
 	re      *regexp.Regexp
 	log     io.WriteCloser // dualLog: the bg dir and the isolation tmp (isotmp.go)
-	early   []byte // output held in memory while the job has no log file yet
-	partial []byte // bytes since the last newline; a line is not reportable yet
-	pending []byte // matched lines not yet reported
+	early   []byte         // output held in memory while the job has no log file yet
+	partial []byte         // bytes since the last newline; a line is not reportable yet
+	pending []byte         // matched lines not yet reported
 	written int64
 	done    bool
 	bg      bool // promoted: has a number, a row in the pane, and a voice
@@ -338,21 +337,16 @@ func (j *bgJob) handoffNotice(waited time.Duration) string {
 		j.command, roundDur(waited), j.id, j.logLine(), j.id)
 }
 
-// logLine cites the job's log by REF. It used to hand over a host path with
-// "grep it with exec", which under --docker names a file the model's container
-// cannot open, and with no exec backend names one it has no way to read at all.
+// logLine cites the job's log by path, in the session's isolation tmp: the
+// same file on the host and under --docker (isotmp.go), read with file_read.
+// It was a ref read with read_saved while the path named a host file the
+// container could not open.
 func (j *bgJob) logLine() string {
 	if j.logPath == "" {
 		return "(no log file)"
 	}
-	if j.logRef == "" && j.h != nil {
-		j.logRef = j.h.registerSpill("job", j.logPath)
-	}
-	if j.logRef == "" {
-		return "full output: " + j.logPath
-	}
-	return fmt.Sprintf("full output: ref %q — read it with read_saved({ref:%q, grep:\"…\"}), or head/tail",
-		j.logRef, j.logRef)
+	return fmt.Sprintf("full output: %s — read it with file_read({path:%q, grep:\"…\"}), or offset:-50 for its end",
+		j.logPath, j.logPath)
 }
 
 // status is the one-line answer to "what is job N doing?".

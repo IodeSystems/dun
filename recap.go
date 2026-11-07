@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -404,199 +403,13 @@ func writeSidecar(path string, entries []agent.Entry) error {
 
 // ── reading back what was clipped ───────────────────────────────────
 //
-// The cap spills the whole result to a file. The first version told the model
-// to "grep it with exec", which is wrong twice over: under --docker the file is
-// on the HOST and the container has only the worktree mounted, so the path does
-// not exist for the model at all; and with no exec backend there is no shell to
-// grep with. Background job logs have carried the same broken instruction since
-// they were written.
-//
-// So retrieval is dun-side and addressed by a REF — a short name printed in the
-// gap — rather than by a path the model may have no way to open. Reads are
-// bounded by the same cap that created the spill, or a "full" read would put
-// back exactly what was taken out.
-
-// grepWholeLine is the longest line returned in full by a grep read. Beyond it,
-// only a window around each match comes back — the line itself is the problem.
-const grepWholeLine = 2000
-
-// grepContext is how much of a long line to show either side of a match, and
-// grepMaxWindows caps how many matches answer at once.
-const (
-	grepContext    = 300
-	grepMaxWindows = 20
-)
-
-// unlined reports whether the line-based readers are useless here: not "how
-// many lines" but "is any single line bigger than a whole reply". A file of
-// three lines where one is 96,000 characters is unlined for every practical
-// purpose, and counting lines would call it structured. The saved file also
-// carries a "$ command" header, so a one-line blob is never a one-line file.
-func unlined(lines []string) bool {
-	for _, l := range lines {
-		if len(l) > execInlineMax {
-			return true
-		}
-	}
-	return false
-}
-
-// boundRead is the cap applied to recap's OWN answers.
-//
-// Live: asked for tail:100 of a three-line file, this handed the model the
-// entire 98,000-character blob — the cap defeated through recap's own door, by
-// the one tool that exists to manage the window. Every read is bounded, and a
-// read that had to be clipped says how to get the rest properly rather than
-// silently returning two ends again.
-func boundRead(ref, out string) string {
-	if len(out) <= execInlineMax {
-		return out
-	}
-	return fmt.Sprintf("%s\n[that read was %d characters, too big to return whole — page it instead: "+
-		"read_saved({ref:%q, at:0}), then the offset each page reports]", capExecOutput(out, "", nil), len(out), ref)
-}
-
-// pageOf returns one window of a result that cannot be read any other way, and
-// says where the next one starts. Paging is the only handle on output with no
-// lines to grep, and the reply has to carry the offset or the model must guess.
-func pageOf(ref, body string, at int) string {
-	if at < 0 {
-		at = 0
-	}
-	if at >= len(body) {
-		return fmt.Sprintf("%s: offset %d is past the end (%d characters).", ref, at, len(body))
-	}
-	end := at + execInlineMax
-	if end > len(body) {
-		end = len(body)
-	}
-	page := safeCutFront(safeCut(body[at:end]))
-	more := ""
-	if end < len(body) {
-		more = fmt.Sprintf(" — next page: read_saved({ref:%q, at:%d})", ref, end)
-	}
-	return fmt.Sprintf("%s: characters %d–%d of %d%s\n%s", ref, at, end, len(body), more, page)
-}
-
-// registerSpill files a path under a short ref and returns it.
-// The first one puts read_saved in the tool set.
-func (h *Harness) registerSpill(kind, path string) string {
-	h.recapMu.Lock()
-	if h.spills == nil {
-		h.spills = map[string]string{}
-	}
-	h.spillSeq++
-	ref := fmt.Sprintf("%s%d", kind, h.spillSeq)
-	h.spills[ref] = path
-	h.recapMu.Unlock()
-	return ref
-}
-
-func (h *Harness) spillPath(ref string) string {
-	h.recapMu.Lock()
-	defer h.recapMu.Unlock()
-	return h.spills[strings.TrimSpace(ref)]
-}
-
-// readSpill answers read_saved({ref: …}): the clipped result, or a job log, read
-// without a shell and without leaving the process.
-func (h *Harness) readSpill(ref, grep string, head, tail, at int, full bool) string {
-	path := h.spillPath(ref)
-	if path == "" {
-		var known []string
-		h.recapMu.Lock()
-		for k := range h.spills {
-			known = append(known, k)
-		}
-		h.recapMu.Unlock()
-		sort.Strings(known)
-		if len(known) == 0 {
-			return "ERROR: no saved results yet. A ref appears in the gap when a result is too big to show whole."
-		}
-		return fmt.Sprintf("ERROR: no saved result %q. Known refs: %s", ref, strings.Join(known, ", "))
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "ERROR: " + err.Error()
-	}
-	body := string(data)
-	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-	// Output with no line structure — a minified JSON document, a base64 blob,
-	// one enormous generated line — cannot be read with grep, head or tail:
-	// every one of them is line-based, so they all hand back the single line
-	// that was the problem. Such a result is only reachable by PAGING, so `at`
-	// takes a character offset and the reply says where the next page starts.
-	if at > 0 || (full && unlined(lines)) {
-		return pageOf(ref, body, at)
-	}
-
-	switch {
-	case grep != "":
-		re, err := regexp.Compile(grep)
-		if err != nil {
-			return fmt.Sprintf("ERROR: %q is not a valid regexp: %v", grep, err)
-		}
-		// A match inside a very long line must come back as a WINDOW around the
-		// match, not as the line. Live: grep for SECRET on a 98,000-character
-		// single line returned that whole line, the clip took the middle, and
-		// the middle was where the match was — so the one read that should have
-		// answered the question threw the answer away. The model then spent six
-		// calls hunting the spill file through the filesystem, which only worked
-		// because exec had a host to search; under --docker it would have failed.
-		var hit []string
-		for i, l := range lines {
-			if len(l) <= grepWholeLine {
-				if re.MatchString(l) {
-					hit = append(hit, fmt.Sprintf("%d: %s", i+1, l))
-				}
-				continue
-			}
-			for _, loc := range re.FindAllStringIndex(l, grepMaxWindows) {
-				from, to := loc[0]-grepContext, loc[1]+grepContext
-				if from < 0 {
-					from = 0
-				}
-				if to > len(l) {
-					to = len(l)
-				}
-				hit = append(hit, fmt.Sprintf("%d@%d: …%s…", i+1, loc[0], safeCutFront(safeCut(l[from:to]))))
-			}
-		}
-		if len(hit) == 0 {
-			return fmt.Sprintf("%s: no line matches %q (%d lines searched).", ref, grep, len(lines))
-		}
-		out := fmt.Sprintf("%s: %d of %d lines match %q\n%s", ref, len(hit), len(lines), grep, strings.Join(hit, "\n"))
-		return capExecOutput(out, "", nil) // a match list can itself be enormous
-	case head > 0:
-		if head > len(lines) {
-			head = len(lines)
-		}
-		return boundRead(ref, fmt.Sprintf("%s: first %d of %d lines\n%s", ref, head, len(lines),
-			strings.Join(lines[:head], "\n")))
-	case tail > 0:
-		if tail > len(lines) {
-			tail = len(lines)
-		}
-		return boundRead(ref, fmt.Sprintf("%s: last %d of %d lines\n%s", ref, tail, len(lines),
-			strings.Join(lines[len(lines)-tail:], "\n")))
-	case full:
-		// Bounded on purpose. An unbounded "full" would hand back exactly what
-		// the cap removed, which is the whole problem returning through a door
-		// marked convenience.
-		if len(body) <= execInlineMax {
-			return fmt.Sprintf("%s: %d lines\n%s", ref, len(lines), body)
-		}
-		return fmt.Sprintf("%s: %d lines, %d characters — too large to show whole, so this is still clipped. "+
-			"Narrow it with grep, head or tail, or page it with at:0, at:%d, …\n%s",
-			ref, len(lines), len(body), execInlineMax, capExecOutput(body, "", nil))
-	}
-	shape := fmt.Sprintf("%d lines", len(lines))
-	if unlined(lines) {
-		shape += " (no line structure — grep/head/tail cannot help; page it with at:0)"
-	}
-	return fmt.Sprintf("%s: %s, %d characters. Ask for part of it: grep, head, tail, at:<offset>, or "+
-		"full:true (still bounded).", ref, shape, len(body))
-}
+// The cap saves the whole result to a file in the session's isolation tmp
+// (isotmp.go) and the gap names its path: the same file on the host and,
+// mounted at its own path, under --docker. It is read with file_read, which
+// pages by byte offset (at) where there are no lines to grep. That was this
+// file's read_saved tool, addressed by a ref because the host path did not
+// exist inside the container (retired 2026-11-06: one tool fewer on every
+// request; agentkit v0.25.0 gave file_read the paging).
 
 // ── the tool ────────────────────────────────────────────────────────
 
@@ -636,30 +449,10 @@ func recapToolDef() llm.ToolDef {
 	return td
 }
 
-// readSavedToolDef reads what was saved under a ref (a clipped result, a
-// job's log). Listed from the first request like every tool, though it has
-// nothing to read before the first save (servers_runtime.go: a tool joining
-// later changes the prompt's prefix).
-func readSavedToolDef() llm.ToolDef {
-	var td llm.ToolDef
-	td.Type = "function"
-	td.Function.Name = "read_saved"
-	td.Function.Description = "Read back a saved result by its `ref` (printed where a result was clipped; a " +
-		"job's log has one too): grep, head, tail, a page at an offset, or full."
-	td.Function.Parameters = map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"ref":  map[string]any{"type": "string", "description": "the saved result's ref"},
-			"grep": map[string]any{"type": "string", "description": "only lines matching this regexp"},
-			"head": map[string]any{"type": "integer", "description": "the first N lines"},
-			"tail": map[string]any{"type": "integer", "description": "the last N lines"},
-			"at":   map[string]any{"type": "integer", "description": "a page starting at this character offset"},
-			"full": map[string]any{"type": "boolean", "description": "as much as the cap allows"},
-		},
-		"required": []string{"ref"},
-	}
-	return td
-}
+// readSavedRetired answers a call to the retired read_saved (an old
+// transcript's habit, or recap given a ref): where saved output is now.
+const readSavedRetired = "ERROR: read_saved is retired: saved output is a file now, and the note where a " +
+	"result was clipped names its path. Read it with file_read (grep, a line range, or at for a byte page)."
 
 func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
@@ -668,24 +461,17 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		}
 		var args struct {
 			Ref     string   `json:"ref"`
-			Grep    string   `json:"grep"`
-			Head    int      `json:"head"`
-			Tail    int      `json:"tail"`
-			At      int      `json:"at"`
-			Full    bool     `json:"full"`
 			From    string   `json:"from"`
 			Summary string   `json:"summary"`
 			Keep    []string `json:"keep"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		// A ref means READ, also as recap: the old single tool's habit and old
-		// transcripts still answer.
+		// A ref, or read_saved at all, was a READ: answered with where saved
+		// output is now, not run as a recap.
 		var out string
 		switch {
-		case strings.TrimSpace(args.Ref) != "":
-			out = h.readSpill(args.Ref, args.Grep, args.Head, args.Tail, args.At, args.Full)
-		case tc.Function.Name == "read_saved":
-			out = "ERROR: read_saved needs ref: the ref printed where the result was saved."
+		case tc.Function.Name == "read_saved" || strings.TrimSpace(args.Ref) != "":
+			out = readSavedRetired
 		case strings.TrimSpace(args.Summary) == "":
 			// Say the shape and what was sent, not one missing word (USER
 			// 2026-10-27: three failed calls on "needs a summary", then the
@@ -696,7 +482,7 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 				"recap {summary: string, from?: string, keep?: string[]} — summary is the account that " +
 				"replaces this turn's work since the user's latest message; from starts the span later, after " +
 				"an exact phrase from this turn; keep names tool results in the span to keep word for word. " +
-				"To read a saved result, use read_saved {ref}.\n" +
+				"To read a saved result, use file_read on the path its clip note names.\n" +
 				"You sent " + sentSig(sent) + "."
 		default:
 			out = h.runRecap(ctx, args.From, args.Summary, args.Keep)
@@ -708,22 +494,6 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			a := map[string]any{}
 			if strings.TrimSpace(args.Ref) != "" {
 				a["ref"] = args.Ref
-				for k, v := range map[string]any{"grep": args.Grep, "head": args.Head, "tail": args.Tail, "at": args.At, "full": args.Full} {
-					switch t := v.(type) {
-					case string:
-						if t != "" {
-							a[k] = t
-						}
-					case int:
-						if t != 0 {
-							a[k] = t
-						}
-					case bool:
-						if t {
-							a[k] = t
-						}
-					}
-				}
 			} else {
 				a["from"], a["summary"], a["keep"] = args.From, args.Summary, args.Keep
 			}
@@ -992,16 +762,6 @@ func withRecapWatch(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 	}
 }
 
-// spillRef saves an oversized result and returns the ref the model will use to
-// read it back.
-func (h *Harness) spillRef(command, output string) string {
-	path := h.spillExec(command, output)
-	if path == "" {
-		return ""
-	}
-	return h.registerSpill("r", path)
-}
-
 // capOnce is the cap, memoized by content.
 //
 // It has to be applied in TWO places — once for the model (withRecapWatch) and
@@ -1026,7 +786,7 @@ func (h *Harness) capOnce(command, out string) string {
 	}
 	h.recapMu.Unlock()
 
-	capped := capExecOutput(out, command, func(cmd, body string) string { return h.spillRef(cmd, body) })
+	capped := capExecOutput(out, command, h.spillExec)
 
 	h.recapMu.Lock()
 	if h.capped == nil {
