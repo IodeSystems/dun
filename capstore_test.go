@@ -99,3 +99,23 @@ func TestCaps_PinTranslatesOff(t *testing.T) {
 		t.Errorf("fold sent %s, want reasoning_effort low", sent)
 	}
 }
+
+// The effort_off pin is not written to the store: removing it from the config
+// must remove it.
+func TestCaps_HostPinNotStored(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	c := llm.NewClient("https://llm.example/v1", "", "glm")
+	TrackCaps(c, "low")
+	if err := storeSnapshot(c); err != nil {
+		t.Fatal(err)
+	}
+	snap := c.Capabilities()
+	if _, ok := LoadCaps(snap.Endpoint, snap.Model).Facts[llm.CapReasoningOff]; ok {
+		t.Error("the host pin was stored")
+	}
+	c2 := llm.NewClient("https://llm.example/v1", "", "glm")
+	TrackCaps(c2, "")
+	if _, ok := c2.Capabilities().OffEffort(); ok {
+		t.Error("the pin outlived its config")
+	}
+}

@@ -64,20 +64,28 @@ func loadCapsLocked(endpoint, model string) llm.Capabilities {
 	return c
 }
 
-// storeFact writes one fact into the stored record.
-func storeFact(endpoint, model, key string, f llm.Fact) error {
+// storeSnapshot writes c's whole record, as it is now, to the store. Taken
+// under capsMu, so whichever write runs last writes the latest state: two
+// changes to one key in quick succession cannot leave the older value on disk.
+// Host facts are not stored: they come from the config on every start, and a
+// stored one would outlive its config line.
+func storeSnapshot(c *llm.Client) error {
 	capsMu.Lock()
 	defer capsMu.Unlock()
-	c := loadCapsLocked(endpoint, model)
-	c.Facts[key] = f
-	b, err := json.MarshalIndent(c, "", "  ")
+	snap := c.Capabilities()
+	for k, f := range snap.Facts {
+		if f.Source == llm.SourceHost {
+			delete(snap.Facts, k)
+		}
+	}
+	b, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(CapsDir(), 0o755); err != nil {
 		return err
 	}
-	p := capsFile(endpoint, model)
+	p := capsFile(snap.Endpoint, snap.Model)
 	tmp := p + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
@@ -97,9 +105,10 @@ func TrackCaps(c *llm.Client, effortOff string) {
 	}
 	c.SetCapabilities(stored)
 	c.OnLearn = func(l llm.Learned) {
-		// OnLearn must not block the request: write in the background.
+		// OnLearn must not block the request, nor re-enter the Client:
+		// the snapshot is taken in the background, under the store's lock.
 		go func() {
-			if err := storeFact(l.Endpoint, l.Model, l.Key, l.Fact); err != nil {
+			if err := storeSnapshot(c); err != nil {
 				log.Printf("dun: capabilities: not stored: %v", err)
 			}
 		}()
