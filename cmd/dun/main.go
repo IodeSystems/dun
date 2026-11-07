@@ -270,7 +270,7 @@ func main() {
 	fresh := flag.Bool("new", false, "start a new session, even when this workspace has one no client is attached to (which plain dun resumes)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
-	bare := flag.Bool("bare", false, "with -p: a scripted run nobody reads or answers (a benchmark): no ask_user, and no thinking-heading or Markdown notes in the system prompt")
+	nonInteractive := flag.Bool("non-interactive", false, "with -p: a run no one answers or reads along (a script, a benchmark): no ask_user, and the model is told it is on its own")
 	tuiFlag := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	// --web-tui: this terminal TUI in a browser tab, byte for byte through a
 	// pty (serveterm.go). Not dund's web app (dund --web-experimental), which is its own
@@ -701,19 +701,19 @@ func main() {
 		Spend:     spend,
 		// Each round's tokens, time and cost, for the turn's stats and what a
 		// tool server costs (dun/roundstats.go).
-		StatsLedger:   dun.NewStatsLedger(dun.DefaultStatsDir()),
-		ChildModel:    *childModel,
-		ChildProvider: *childProvider,
-		ChildEffort:   *childEffort,
-		Exec:          backend,
-		Worktree:      wt,
-		CommitCfg:     dun.LoadCommit(absWS),
-		Files:         filesConfig(absWS, *noDir),
-		NoDir:         *noDir,
-		NoTools:       *noTools,
-		Bare:          *bare && *prog,
-		SessionFile:   sessionFile,
-		Persist:       *persistFlag,
+		StatsLedger:    dun.NewStatsLedger(dun.DefaultStatsDir()),
+		ChildModel:     *childModel,
+		ChildProvider:  *childProvider,
+		ChildEffort:    *childEffort,
+		Exec:           backend,
+		Worktree:       wt,
+		CommitCfg:      dun.LoadCommit(absWS),
+		Files:          filesConfig(absWS, *noDir),
+		NoDir:          *noDir,
+		NoTools:        *noTools,
+		NonInteractive: *nonInteractive && *prog,
+		SessionFile:    sessionFile,
+		Persist:        *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.
 		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") == "0",
@@ -903,8 +903,8 @@ func main() {
 				}
 			})
 		}
-		// --bare: nobody answers, so no ask_user (a nil Ask offers none).
-		if !cfg.Bare {
+		// --non-interactive: nobody answers, so no ask_user (a nil Ask offers none).
+		if !cfg.NonInteractive {
 			cfg.Ask = ask
 		}
 		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {

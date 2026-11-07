@@ -150,11 +150,12 @@ type Config struct {
 	// NoDir is a session attached to no directory (dun --no-dir, nodir.go):
 	// no file tools, no rules, and no server that needs a project directory.
 	NoDir bool
-	// Bare (--bare): a scripted run nobody reads or answers, such as a
-	// benchmark. The system prompt leaves out what only a client uses (the
+	// NonInteractive (--non-interactive): a run no one answers or reads
+	// along, such as a script or a benchmark. The system prompt says the
+	// model is on its own and leaves out what only a client uses (the
 	// thinking headings, the Markdown note); cmd/dun gives it no Ask, so
 	// there is no ask_user. {OUTPUT} stays: the engine expands it.
-	Bare bool
+	NonInteractive bool
 	// NoTools is a plain chat (dun --no-tools): no tool of any kind reaches
 	// the model, no server starts, and a call to a tool is refused.
 	NoTools bool

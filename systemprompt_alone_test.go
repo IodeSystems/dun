@@ -24,7 +24,7 @@ func TestSystemFor_ContainmentOnlyWhenIsolated(t *testing.T) {
 	}
 }
 
-// --bare leaves out the thinking headings, which only the TUI's thought line
+// --non-interactive leaves out the thinking headings, which only the TUI's thought line
 // uses.
 func TestSystemFor_BareDropsThinkingHeadings(t *testing.T) {
 	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}
@@ -32,39 +32,42 @@ func TestSystemFor_BareDropsThinkingHeadings(t *testing.T) {
 		t.Error("a client-facing run lost the thinking headings")
 	}
 	if strings.Contains(systemFor(tools, nil, nil, "", true), "# Thinking:") {
-		t.Error("--bare still asks for thinking headings")
+		t.Error("--non-interactive still asks for thinking headings")
 	}
 }
 
-// --bare says no one is there: finish alone, install what is missing, check
-// the task's requirements before the end. A client-facing run does not.
-func TestSystemFor_BareSaysHeadless(t *testing.T) {
+// Every run's work line says to finish, install what is missing, and check
+// the task's requirements; --non-interactive adds that the model is alone.
+func TestSystemFor_FinishAlwaysAloneOnlyNonInteractive(t *testing.T) {
 	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}
-	if !strings.Contains(systemFor(tools, nil, nil, "", true), "no one answers questions") {
-		t.Error("--bare has no headless line")
-	}
-	if strings.Contains(systemFor(tools, nil, nil, "", false), "no one answers questions") {
-		t.Error("a client-facing run got the headless line")
+	for _, alone := range []bool{false, true} {
+		s := systemFor(tools, nil, nil, "", alone)
+		if !strings.Contains(s, "check each requirement it states") {
+			t.Errorf("alone=%v: no finish-and-check line", alone)
+		}
+		if strings.Contains(s, "You are on your own") != alone {
+			t.Errorf("alone=%v: on-your-own line present=%v", alone, !alone)
+		}
 	}
 }
 
-// What --bare is, end to end: no ask_user (no Ask), no thinking headings or
+// What --non-interactive is, end to end: no ask_user (no Ask), no thinking headings or
 // Markdown note, and the {OUTPUT} note KEPT, since the engine expands slots
 // and a script gets the output without the model retyping it.
 func TestBare_KeepsOutputSlotsDropsClientNotes(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}, Bare: true})
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}, NonInteractive: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
 	sys := h.Session.System
 	if !strings.Contains(sys, "{OUTPUT}") {
-		t.Error("--bare dropped the {OUTPUT} note")
+		t.Error("--non-interactive dropped the {OUTPUT} note")
 	}
 	for _, gone := range []string{"# Thinking:", "shown as Markdown"} {
 		if strings.Contains(sys, gone) {
-			t.Errorf("--bare kept %q", gone)
+			t.Errorf("--non-interactive kept %q", gone)
 		}
 	}
 	if slices.Contains(h.ToolNames(), "ask_user") {

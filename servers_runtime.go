@@ -857,13 +857,13 @@ func (h *Harness) rebuildTools() {
 	sys := cfg.System
 	rules, rulesMode, rulesSet := "", "", rulesSet{}
 	if sys == "" {
-		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), cfg.Bare, hostedNS...)
+		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), cfg.NonInteractive, hostedNS...)
 		sys += roleSystem(h.isChild())
 		sys += h.identityLine()
 		if h.cfg.NoDir {
 			sys += noDirSystem
 		}
-		if !cfg.Bare {
+		if !cfg.NonInteractive {
 			sys += replyFormatSystem
 		}
 		sys += h.cfg.SystemNote
@@ -880,7 +880,7 @@ func (h *Harness) rebuildTools() {
 	}
 	// agentkit's own {OUTPUT} note is off (OmitSlotInstructions); this is
 	// the shorter one, on the same terms: only when there are tools. Also
-	// under --bare: the ENGINE expands the slots (agentkit expandSlots), so a
+	// under --non-interactive: the ENGINE expands the slots (agentkit expandSlots), so a
 	// script gets the output and the model does not retype it.
 	if len(toolDefs) > 0 {
 		sys += systemSlots
@@ -1266,7 +1266,7 @@ func (h *Harness) useNoTools() {
 	sys := h.cfg.System
 	if sys == "" {
 		sys = noToolsSystem + h.identityLine()
-		if !h.cfg.Bare {
+		if !h.cfg.NonInteractive {
 			sys += replyFormatSystem
 		}
 		sys += h.cfg.SystemNote

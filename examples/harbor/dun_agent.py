@@ -93,7 +93,7 @@ class Dun(BaseInstalledAgent):
                 '''p="$p${p:+,}\\"$d\\":{\\"on\\":true,\\"mode\\":\\"write\\",\\"index\\":false}"; done; '''
                 f"printf '{{\"paths\":{{%s}}}}' \"$p\" > {HOME}/paths.json; "
                 f"printf '%s\\n' {shlex.quote(event)} | "
-                f'dun -p --bare --workspace "$PWD" --timeout {TIMEOUT} > {LOG} 2> /logs/agent/dun.stderr; '
+                f'dun -p --non-interactive --workspace "$PWD" --timeout {TIMEOUT} > {LOG} 2> /logs/agent/dun.stderr; '
                 "echo dun exit $? >> /logs/agent/dun.stderr"
             ),
             env=env,
