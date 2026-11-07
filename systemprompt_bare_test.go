@@ -36,6 +36,18 @@ func TestSystemFor_BareDropsThinkingHeadings(t *testing.T) {
 	}
 }
 
+// --bare says no one is there: finish alone, install what is missing, check
+// the task's requirements before the end. A client-facing run does not.
+func TestSystemFor_BareSaysHeadless(t *testing.T) {
+	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}
+	if !strings.Contains(systemFor(tools, nil, nil, "", true), "no one answers questions") {
+		t.Error("--bare has no headless line")
+	}
+	if strings.Contains(systemFor(tools, nil, nil, "", false), "no one answers questions") {
+		t.Error("a client-facing run got the headless line")
+	}
+}
+
 // What --bare is, end to end: no ask_user (no Ask), no thinking headings or
 // Markdown note, and the {OUTPUT} note KEPT, since the engine expands slots
 // and a script gets the output without the model retyping it.

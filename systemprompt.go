@@ -60,6 +60,11 @@ const (
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
 
 	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. Be concise. When the task is done, briefly summarize what you changed."
+	// systemHeadless is --bare's: no one is there during the run. Without it
+	// the model stopped at the first plausible result, gave up on a missing
+	// interpreter, and checked nothing against the task (TB2.1 runs,
+	// 2026-11-07: 4 of 8 fails ended within 9 tool calls).
+	systemHeadless = "\n\nNo one reads your messages until you finish, and no one answers questions: finish the whole task yourself. A missing tool or package is yours to install. Before your final message, read the task again and check each requirement it states (paths, names, formats, values) against what you produced, by running or reading it; fix what does not match."
 	systemWork     = "\n\nWork step by step: read what you need before changing it, make minimal precise edits, and verify by running the build/tests with exec. Be concise. When the task is done, briefly summarize what you changed."
 
 	// systemSlots replaces agentkit's SlotSystemNote (OmitSlotInstructions):
@@ -109,7 +114,8 @@ func HostedLine(hosted []string) string {
 // line the model has no way to know they exist.
 //
 // bare: no client renders the reply or shows the thinking (--bare), so the
-// heading convention for the TUI's thought line is left out.
+// heading convention for the TUI's thought line is left out, and no one is
+// there to answer or review, which systemHeadless says.
 func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files string, bare bool, hosted ...string) string {
 	have := map[string]bool{}
 	for _, t := range tools {
@@ -162,6 +168,9 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files str
 		b.WriteString(systemWorkCode)
 	} else {
 		b.WriteString(systemWork)
+	}
+	if bare {
+		b.WriteString(systemHeadless)
 	}
 	return b.String()
 }
