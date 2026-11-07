@@ -19,7 +19,7 @@ import (
 // or says why they remain (USER 2026-11-07).
 
 // idleChecklist is the --non-interactive check.
-const idleChecklist = "Before you end the turn: list each requirement the task states (file paths, names, formats, values, behaviors). For each, say how you checked it against what you produced: a command you ran or a file you read, now. Fix anything that does not match. Then give your final message."
+const idleChecklist = "Before you end the turn: list each requirement the task states (file paths, names, formats, values, behaviors). For each, check it against what you produced now: run it where it can run, read it only where it cannot. Fix anything that does not match, then give your final message. If a requirement cannot be met, say why."
 
 // idlePlanOpen is the note when the plan has open items.
 const idlePlanOpen = "The plan still has open items:\n%s\nContinue them, or end the turn saying why each remains."

@@ -273,7 +273,7 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 // systemFiles is the system prompt's line for the file tools: when to use
 // them rather than exec, and the paths they take beyond the tree. What each
 // one does is in its own description.
-func systemFiles(ts *filetools.Toolset) string {
+func systemFiles(ts *filetools.Toolset, open string) string {
 	if ts == nil {
 		return ""
 	}
@@ -289,7 +289,7 @@ func systemFiles(ts *filetools.Toolset) string {
 	if ts.Handles(ts.Name(filetools.Edit)) {
 		line += ", and to edit them (not sed or heredocs)"
 	}
-	line += ". Paths are relative to the working tree, or one the user added with /file add"
+	line += ". Paths are relative to the working tree" + open
 	var tmp []string
 	for _, bare := range []string{filetools.Read, filetools.Grep, filetools.List} {
 		if ts.Handles(ts.Name(bare)) {

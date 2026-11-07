@@ -384,3 +384,25 @@ func TestFilesAside_ListsEveryPathWithItsMode(t *testing.T) {
 		}
 	}
 }
+
+// The system prompt names every open path and its mode, rebuilt when one is
+// added: the model knows which paths it may read and which it may change.
+func TestSystemPrompt_ListsOpenPaths(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws, ro := t.TempDir(), t.TempDir()
+	sf := filepath.Join(t.TempDir(), "s.jsonl")
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []Server{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if !strings.Contains(h.Session.System, "Paths are relative to the working tree (read and write)") {
+		t.Errorf("no workspace mode in the paths line:\n%s", h.Session.System)
+	}
+	if _, err := h.AddPath(ro, ScopeSession, PathOptions{NoIndex: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.Session.System, "also open: "+ro+" (read only)") {
+		t.Errorf("the added path is not in the system prompt:\n%s", h.Session.System)
+	}
+}
