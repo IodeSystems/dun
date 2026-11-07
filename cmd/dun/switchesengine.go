@@ -24,8 +24,6 @@ func switchesEvent(h *dun.Harness, action string) *proto.Switches {
 		msg, err = switchOp(h, kind, f[1:])
 		if err != nil {
 			msg = kind + ": " + err.Error()
-		} else {
-			h.Aside("[control/" + kind + "] " + msg)
 		}
 	}
 	v, ok := h.SwitchView(kind)

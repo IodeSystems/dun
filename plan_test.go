@@ -223,7 +223,9 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 		{"edit 1 title Parse it", "changed node 1's title to: Parse it", false},
 		{"edit 1 goal Read the file", "goal to: Read the file", false},
 		{"drop 1 wrong way", "dropped node 1 (wrong way). 1 node(s) wait on it", false},
-		{"mode on", "plan mode on", false},
+		// A setting, not a request: no echo (USER 2026-11-07). The plan
+		// gate's refusal says what plan mode means when a call hits it.
+		{"mode on", "", false},
 		{"approve", "approved the plan", true},
 	} {
 		h.queue = nil
@@ -231,6 +233,12 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 			t.Fatalf("%s: %v", tc.cmd, err)
 		}
 		q := queuedTexts(h)
+		if tc.want == "" {
+			if len(q) != 0 {
+				t.Errorf("%s: echoed %v", tc.cmd, q)
+			}
+			continue
+		}
 		if len(q) != 1 || !strings.Contains(q[0], tc.want) || !strings.HasPrefix(q[0], "[control/plan] ") {
 			t.Errorf("%s: %v", tc.cmd, q)
 		}
