@@ -170,16 +170,18 @@ func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Contex
 func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string) {
 	return taskgraph.Tool(planStore{h}, "", taskgraph.WithNote(planNote),
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
-			h.planTell(cs, "the main agent", "")
+			h.planTell(cs, "the main agent")
 		}))
 }
 
 // planTell routes a kept change to the owners it names, without the actor
 // (taskgraph.Change.Tell); who is the actor, in words. Owner "" is this
-// session's main agent: note is what it hears, as an aside on its next turn
-// ("" tells it nothing). A child that owns a changed node hears which nodes
-// and who changed them, inside its running turn or at its next one.
-func (h *Harness) planTell(cs []taskgraph.Change, who, note string) {
+// session's main agent: it hears the board as it stands now, ONE aside keyed
+// "plan" that every change replaces, never a pile of change notes
+// (docs/attention.md, "The plan board"). A child that owns a changed node
+// hears which nodes and who changed them, inside its running turn or at its
+// next one.
+func (h *Harness) planTell(cs []taskgraph.Change, who string) {
 	main, kids := false, map[int][]string{}
 	for _, c := range cs {
 		for _, o := range c.Tell {
@@ -190,8 +192,8 @@ func (h *Harness) planTell(cs []taskgraph.Change, who, note string) {
 			}
 		}
 	}
-	if main && note != "" {
-		h.Aside(note)
+	if main {
+		h.planBoard()
 	}
 	for k, ids := range kids {
 		if sa := h.agentByID(k); sa != nil {
@@ -244,13 +246,20 @@ func (h *Harness) planTurnLine() {
 	if h.isChild() {
 		return
 	}
-	g, err := planStore{h}.View(context.Background())
-	if err != nil {
-		return
-	}
-	if line := g.Brief(""); line != "" {
+	if line := h.planOpen(); line != "" {
 		h.AsideWith("[plan] "+line, AsideOpts{Key: "plan"})
 	}
+}
+
+// planBoard queues the current board for the main agent, replacing the one
+// still queued. With nothing open it says so: a board that silently kept the
+// earlier text would show nodes that are done.
+func (h *Harness) planBoard() {
+	line := h.planOpen()
+	if line == "" {
+		line = "no open items."
+	}
+	h.AsideWith("[plan] "+line, AsideOpts{Key: "plan"})
 }
 
 // ── plan mode ───────────────────────────────────────────────────────────
@@ -424,7 +433,7 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 			return "", err
 		}
 		h.planChanged()
-		h.planTell(cs, "the user", fmt.Sprintf("[control/plan] The user changed node %s's %s to: %s", id, field, text))
+		h.planTell(cs, "the user")
 		return fmt.Sprintf("node %s: %s set", id, field), nil
 	case "drop":
 		id, why, _ := strings.Cut(rest, " ")
@@ -434,23 +443,14 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		if why = strings.TrimSpace(why); why == "" {
 			why = "dropped by the user"
 		}
-		var waiting int
 		cs, err := taskgraph.Apply(ctx, p.store, planActorUser, func(g *taskgraph.Graph) error {
-			if err := g.SetStatus(id, taskgraph.Dropped, why); err != nil {
-				return err
-			}
-			waiting = len(g.Dependents(id))
-			return nil
+			return g.SetStatus(id, taskgraph.Dropped, why)
 		})
 		if err != nil {
 			return "", err
 		}
 		h.planChanged()
-		note := "[control/plan] The user dropped node " + id + " (" + why + ")."
-		if waiting > 0 {
-			note += " " + strconv.Itoa(waiting) + " node(s) wait on it: replace it (a node with replaces " + id + ") and update their needs."
-		}
-		h.planTell(cs, "the user", note)
+		h.planTell(cs, "the user")
 		return "node " + id + " dropped", nil
 	case "tell":
 		id, text, _ := strings.Cut(rest, " ")
@@ -738,13 +738,13 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 	}
 	who := fmt.Sprintf("agent #%d", num)
 	if len(published) == 0 {
-		h.planTell(cs, who, fmt.Sprintf("[control/plan] %s changed plan node(s) %s.", who, strings.Join(ids, ", ")))
+		h.planTell(cs, who)
 		return
 	}
 	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has its notes).", who, strings.Join(published, ", "))
 	if len(ready) > 0 {
 		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (agent({id:N, node:…})), a new one (agent({prompt:…, node:…})), or do them."
 	}
-	h.planTell(cs, who, "")
+	h.planTell(cs, who)
 	h.Notify(msg)
 }
