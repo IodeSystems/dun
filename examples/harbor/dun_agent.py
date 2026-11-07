@@ -84,7 +84,7 @@ class Dun(BaseInstalledAgent):
             command=(
                 "mkdir -p /logs/agent; "
                 f"printf '%s\\n' {shlex.quote(event)} | "
-                f'dun -p --workspace "$PWD" --timeout {TIMEOUT} > {LOG} 2> /logs/agent/dun.stderr; '
+                f'dun -p --bare --workspace "$PWD" --timeout {TIMEOUT} > {LOG} 2> /logs/agent/dun.stderr; '
                 "echo dun exit $? >> /logs/agent/dun.stderr"
             ),
             env=env,
