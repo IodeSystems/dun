@@ -76,6 +76,9 @@ func (n OverflowNote) String() string {
 	if n.InToolCall {
 		where = "a tool call"
 	}
+	if n.Window == 0 {
+		return fmt.Sprintf("the endpoint cut %s after %d tokens (window unknown); %s", where, n.Generated, what)
+	}
 	return fmt.Sprintf("agent exceeded the context window — %s was cut after %d tokens "+
 		"with %d of %d left; %s", where, n.Generated, n.Free, n.Window, what)
 }
@@ -111,7 +114,11 @@ func (h *Harness) onOverflow(ctx context.Context, o agent.Overflow) agent.Overfl
 	// pass already told the model and it happened again anyway. The second
 	// clause is the escalation: a hint that did not work is not worth repeating.
 	crowded := window > 0 && note.Free < compactWhenFreeBelow()
-	if crowded || o.Attempt > 1 {
+	// A reply larger than the whole prompt says the reply is what is big, not
+	// the history: folding a 31k-token history for a 65k-token runaway lost the
+	// history and fixed nothing (TB2.1 path-tracing-reverse, 2026-11-07).
+	runaway := prompt > 0 && o.Generated > prompt
+	if crowded || (o.Attempt > 1 && !runaway) {
 		if n, err := h.foldHistory(ctx, foldByOverflow); err != nil {
 			log.Printf("dun: overflow: could not fold history: %v", err)
 		} else {
@@ -153,11 +160,20 @@ func overflowHint(n OverflowNote) string {
 	if n.InToolCall {
 		what = "Your last tool call"
 	}
-	b = fmt.Appendf(b, "%s was CUT OFF mid-way: the endpoint stopped generating because the "+
-		"request ran out of context, not because anything was wrong with what you were writing. ", what)
+	if n.Window > 0 {
+		b = fmt.Appendf(b, "%s was CUT OFF mid-way: the endpoint stopped generating because the "+
+			"request ran out of context, not because anything was wrong with what you were writing. ", what)
+	} else {
+		// No window known: the cut is the endpoint's output limit or the context,
+		// and dun cannot tell which. Say only what was measured.
+		b = fmt.Appendf(b, "%s was CUT OFF mid-way: the endpoint stopped generating at a limit, "+
+			"not because anything was wrong with what you were writing. ", what)
+	}
 	if n.Window > 0 {
 		b = fmt.Appendf(b, "The prompt was %d tokens of a %d-token window, leaving about %d to answer in, "+
 			"and the answer reached %d. ", n.PromptTokens, n.Window, n.Free, n.Generated)
+	} else if n.Generated > 0 && n.PromptTokens > 0 {
+		b = fmt.Appendf(b, "It reached %d tokens before the cut, on a %d-token prompt. ", n.Generated, n.PromptTokens)
 	} else if n.Generated > 0 {
 		b = fmt.Appendf(b, "It reached %d tokens before the cut. ", n.Generated)
 	}

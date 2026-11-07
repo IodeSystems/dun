@@ -101,6 +101,23 @@ func TestOverflow_SecondAttemptEscalatesToFolding(t *testing.T) {
 	}
 }
 
+// A reply larger than the whole prompt is a runaway: the second cut does not
+// fold, since the history is not what is big (path-tracing-reverse: a 65536-
+// token reply on a 31k prompt folded, and the fold failed too).
+func TestOverflow_RunawayLargerThanPromptNeverFolds(t *testing.T) {
+	h, runner := overflowHarness(t, 0)
+	seedHistory(t, h, 8)
+	for a := 1; a <= 3; a++ {
+		dec := h.onOverflow(context.Background(), agent.Overflow{PromptTokens: 31560, Generated: 65536, Attempt: a})
+		if strings.Contains(dec.Note, "ran out of context") {
+			t.Errorf("window unknown, but the note blames the context:\n%s", dec.Note)
+		}
+	}
+	if runner.calls != 0 {
+		t.Errorf("a runaway reply folded the history; summarizer calls = %d", runner.calls)
+	}
+}
+
 // With no window stated there is no arithmetic to report, and inventing one
 // would be the chars/4 mistake in a new place. Say what IS known and stop.
 func TestOverflow_UnknownWindowStillHints(t *testing.T) {
