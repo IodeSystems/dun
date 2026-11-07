@@ -713,6 +713,7 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 		return true // what was queued during it runs next
 	}
 	if err != nil {
+		emitFailedUsage(h, em, res)
 		emitTurnError(ctx, h, em, err)
 		return false
 	}
@@ -847,6 +848,7 @@ func endTurn(ctx, tctx context.Context, h *dun.Harness, em *emitter, res agent.T
 		return true
 	}
 	if err != nil {
+		emitFailedUsage(h, em, res)
 		emitTurnError(ctx, h, em, err)
 		return false
 	}
@@ -863,6 +865,15 @@ func endTurn(ctx, tctx context.Context, h *dun.Harness, em *emitter, res agent.T
 func emitInterrupted(h *dun.Harness, em *emitter, res agent.TurnResult) {
 	em.emit(usageEvent(h, res.Usage))
 	em.emit(&proto.Done{Reason: "interrupted", Detail: h.InterruptedJobs()})
+}
+
+// emitFailedUsage reports what a failed turn cost. A turn that ends on an
+// error (max turns, a provider failure) has still spent its rounds, and usage
+// is per turn: without this the rounds of a failed turn are in no usage event.
+func emitFailedUsage(h *dun.Harness, em *emitter, res agent.TurnResult) {
+	if res.Usage.Turns > 0 {
+		em.emit(usageEvent(h, res.Usage))
+	}
 }
 
 // emitTurnError reports a failed turn, and says whether the SESSION is over.
