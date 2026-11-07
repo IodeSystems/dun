@@ -75,6 +75,9 @@ class Dun(BaseInstalledAgent):
             "DUN_LLM_KEY": os.environ["DUN_LLM_KEY"],
             "DUN_MODEL": self.model_name or os.environ["DUN_MODEL"],
             "DUN_REASONING": "openai",
+            # GLM-5.3 on Fireworks cannot stop thinking: it refuses reasoning_effort
+            # "none", so a fold (effort off) is sent as low instead.
+            "DUN_EFFORT_OFF": os.environ.get("DUN_EFFORT_OFF", "low"),
             "DUN_NO_AUTOBUILD": "1",
         }
         event = json.dumps({"type": "user", "content": instruction})
