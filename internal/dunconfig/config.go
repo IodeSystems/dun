@@ -85,6 +85,13 @@ type ProviderConfig struct {
 	// it from the address and model; openai (reasoning_effort, what a LiteLLM
 	// proxy maps per provider), openrouter, llamacpp or anthropic name it.
 	Reasoning string `json:"reasoning,omitempty"`
+	// EffortOff is what /effort off (and a fold) sends to this endpoint
+	// instead of off: a model that cannot stop thinking refuses off
+	// (Fireworks GLM-5.3: 400 on reasoning_effort "none"), and sending
+	// nothing leaves its default, the most thinking. "minimal" or "low".
+	// Until agentkit keeps a capability record per model (aw4
+	// i_1m6v7hgpwcwrk5pbswp0w6), this is set by hand.
+	EffortOff string `json:"effort_off,omitempty"`
 }
 
 // ProviderList returns the logged-in providers. A config from before

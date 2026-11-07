@@ -16,11 +16,12 @@ import (
 // thinking off, and are told what the session is for and what is in flight.
 
 // foldOpts are a fold call's request options: thinking off, as /effort off
-// sends it. A summarizer that thinks spends its budget before it writes; on
-// a server whose default thinks, that was thousands of tokens per fold.
-func foldOpts() *llm.ChatOpts {
+// sends it (Config.EffortOff for a model that cannot stop thinking). A
+// summarizer that thinks spends its budget before it writes; on a server
+// whose default thinks, that was thousands of tokens per fold.
+func (h *Harness) foldOpts() *llm.ChatOpts {
 	o := &llm.ChatOpts{}
-	applyEffort(o, EffortOff)
+	h.applyEffort(o, EffortOff)
 	return o
 }
 

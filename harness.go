@@ -156,6 +156,9 @@ type Config struct {
 	// thinking headings, the Markdown note); cmd/dun gives it no Ask, so
 	// there is no ask_user. {OUTPUT} stays: the engine expands it.
 	NonInteractive bool
+	// EffortOff is what off is sent as, for a model that cannot stop
+	// thinking (dunconfig.ProviderConfig.EffortOff); "" sends off.
+	EffortOff string
 	// NoTools is a plain chat (dun --no-tools): no tool of any kind reaches
 	// the model, no server starts, and a call to a tool is refused.
 	NoTools bool
@@ -726,7 +729,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Rehead: h.rehead,
 		// A fold thinks nothing and is told the session's state and what is
 		// in flight; its summary is sized by agentkit to the fold (fold.go).
-		SummaryOpts: foldOpts(),
+		SummaryOpts: h.foldOpts(),
 		TaskFunc:    h.foldTask,
 		// What a fold deletes stays searchable in the session's raglit
 		// branch (raglitauth.go); nil without a raglit that has keys.

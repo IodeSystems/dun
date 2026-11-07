@@ -712,6 +712,7 @@ func main() {
 		NoDir:          *noDir,
 		NoTools:        *noTools,
 		NonInteractive: *nonInteractive && *prog,
+		EffortOff:      effortOff(fc, *url),
 		SessionFile:    sessionFile,
 		Persist:        *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the

@@ -342,7 +342,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		// window from startup, the prompt from the line above. See outbudget.go.
 		window := h.windowTokens()
 		gen, ok := applyGeneration(h.Session.ChatOpts, window, est)
-		applyEffort(h.Session.ChatOpts, h.Effort()) // /effort: thinking on, off or the server's
+		h.applyEffort(h.Session.ChatOpts, h.Effort()) // /effort: thinking on, off or the server's
 		room := "no window known, response uncapped"
 		if window > 0 {
 			room = fmt.Sprintf("response capped at %d (%d left in the %d window)",
