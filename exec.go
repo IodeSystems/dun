@@ -354,8 +354,13 @@ func (h *HostShell) RunPromotable(ctx context.Context, command string, w io.Writ
 	// cd back to the project root (the reset), run the command, then mark the
 	// end with the exit code. $? is the command's status because it is the
 	// immediately preceding command.
+	//
+	// The command's stdin is /dev/null. The shell reads its commands from this
+	// pipe, sentinel included, so a command that inherited it (head, read, an
+	// installer's prompt) ate the sentinel and waited forever for more. Braces,
+	// not a subshell: export and cd still reach the next call.
 	script := "cd " + shellQuote(h.Dir) + " 2>/dev/null\n" +
-		command + "\n" +
+		"{ " + command + "\n} </dev/null\n" +
 		"echo " + sentinel + " $?\n\n"
 	if _, err := h.p.stdin.Write([]byte(script)); err != nil {
 		// The shell died between calls. Start a fresh one and retry once.
