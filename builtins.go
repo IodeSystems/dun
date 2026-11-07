@@ -22,7 +22,7 @@ import (
 // switch, then its group's; unset everywhere, on. A tool switched off is
 // left out of the definitions the model is sent and refused if called.
 //
-// The core group — exec, ask_user, session — is shown and
+// The core group — exec, ask_user — is shown and
 // cannot be switched off: without it a session cannot run a command or ask.
 // Saved output is a file in the isolation tmp, so exec can still read it back
 // with the file tools off. A built-in that no group names is core.
@@ -49,7 +49,7 @@ type builtinGroup struct {
 
 var builtinGroups = []builtinGroup{
 	{builtinCore, "dun's core: run a command, ask you, the session's own state, read back a saved result — always on",
-		[]string{"exec", "ask_user", "session"}},
+		[]string{"exec", "ask_user"}},
 	{"files", "read, edit and write files in the workspace and the paths /file adds", []string{"file_"}},
 	{"agents", "sub-agents and background jobs", []string{"agent", "tell_parent", "jobs"}},
 	{"peers", "list and message the other dun sessions (dund)", []string{"dun_list", "dun_msg"}},

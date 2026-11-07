@@ -13,7 +13,10 @@ import (
 // be switched alone; core cannot be switched off (USER 2026-10-28).
 func TestBuiltinGroups_SwitchAGroupAndATool(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Client: &scriptRunner{}})
+	// With exec, as every real session has: core is exec and ask_user now
+	// that session is gone, so a harness with neither had no core row.
+	ws := t.TempDir()
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Client: &scriptRunner{}, Exec: &HostShell{Dir: ws}})
 	if err != nil {
 		t.Fatal(err)
 	}

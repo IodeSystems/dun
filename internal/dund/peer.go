@@ -30,15 +30,12 @@ const (
 // peerTaskMax clips a listed task line.
 const peerTaskMax = 120
 
-// sessionTask is the session's status or goal from its state sidecar (a
-// variable: the tests' fake engine writes none, and the real one is under the
-// user's dun home).
+// sessionTask is what the session is doing: the first line of its plan's
+// brief (a variable: the tests' fake engine writes no plan, and the real one
+// is under the user's dun home).
 var sessionTask = func(workspace, id string) string {
-	st := dun.LoadSessionState(dun.SessionFile(workspace, id))
-	if st.Status != "" {
-		return st.Status
-	}
-	return st.Goal
+	first, _, _ := strings.Cut(dun.PlanBrief(dun.SessionFile(workspace, id)), "\n")
+	return first
 }
 
 // handlePeer answers an engine's peer request. Its own goroutine, never the

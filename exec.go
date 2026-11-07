@@ -226,7 +226,10 @@ const shellFlags = "-c"
 
 // HostExec runs commands on the host, in dir. Use only for a trusted or
 // throwaway workspace — there is no sandbox.
-type HostExec struct{ Dir string }
+type HostExec struct {
+	Dir string
+	Env []string // added to the command's environment (DUN_HARNESS)
+}
 
 // pgidKey carries a job's "here is my process group" callback in the context
 // a command runs under: a host backend calls it once the group exists, so the
@@ -251,6 +254,7 @@ func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResu
 	// dun's terminal — see internal/proc. killGroup is also what makes the deadline
 	// bite: it kills the whole process group, not just the `sh` that spawned it.
 	proc.KillGroup(proc.Detach(cmd))
+	cmd.Env = append(cmd.Env, h.Env...)
 	return finishNoting(ctx, w, cmd)
 }
 
@@ -283,6 +287,7 @@ func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResu
 // job rather than a stalled session.
 type HostShell struct {
 	Dir string
+	Env []string // added to the shell's environment (DUN_HARNESS)
 
 	mu  sync.Mutex
 	p   *shellProc
@@ -523,6 +528,7 @@ func (h *HostShell) start() error {
 	cmd := exec.Command("sh")
 	cmd.Dir = h.Dir
 	proc.Detach(cmd)
+	cmd.Env = append(cmd.Env, h.Env...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -722,6 +728,8 @@ type DockerExec struct {
 	// its own path so a saved result's path means the same file in here as on
 	// the host. "" mounts nothing.
 	TmpDir string
+	// Env is passed to the container (-e): DUN_HARNESS names a file in TmpDir.
+	Env []string
 }
 
 // runArgs builds the `docker run` argv for one command in a container called
@@ -748,6 +756,9 @@ func (d DockerExec) runArgs(name, command string) []string {
 	}
 	if d.TmpDir != "" {
 		args = append(args, "-v", d.TmpDir+":"+d.TmpDir+":ro")
+	}
+	for _, kv := range d.Env {
+		args = append(args, "-e", kv)
 	}
 	// Mount extra paths read-only at /<name>.
 	for _, m := range d.ExtraMounts {

@@ -41,6 +41,7 @@ func (h *Harness) Rehoist(workspace string, wt *Worktree, dockerOn bool) {
 		// the working directory resets to the project root each time.
 		h.cfg.Exec = &HostShell{Dir: workspace}
 	}
+	h.cfg.Exec = h.withExecEnv(h.cfg.Exec)
 	h.srvMu.Unlock()
 	h.restoreIsoTmp()
 	h.applyTools()

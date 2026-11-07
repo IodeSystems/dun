@@ -8,15 +8,14 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 )
 
-// A fold is told the session's state and the work in flight, from dun's own
+// A fold is told the session's plan and the work in flight, from dun's own
 // records: the conversation being folded is what loses them.
-func TestFoldTask_StateAndInFlight(t *testing.T) {
+func TestFoldTask_PlanAndInFlight(t *testing.T) {
 	h := startParentOf(t, &scriptRunner{rounds: []roundFn{textRound("done"), textRound("done")}})
 	if got := h.foldTask(); got != "" {
 		t.Errorf("nothing set and nothing running: %q", got)
 	}
-	goal := "ship the fold budget"
-	h.stateMerge(&goal, nil, []string{"wire rescue"}, nil)
+	planCall(t, h, `{"action":"add","title":"wire rescue","done_when":"the rescue folds in stages"}`)
 	kept := spawnKid(t, h, "read the build log and say what failed")
 	gone := spawnKid(t, h, "an aside that was dismissed")
 	waitIdle(t, kept)
@@ -24,7 +23,7 @@ func TestFoldTask_StateAndInFlight(t *testing.T) {
 	gone.quit()
 
 	task := h.foldTask()
-	for _, want := range []string{"goal: ship the fold budget", "[ ] wire rescue", "# In flight",
+	for _, want := range []string{"# Plan", "wire rescue", "# In flight",
 		"read the build log and say what failed"} {
 		if !strings.Contains(task, want) {
 			t.Errorf("fold task lacks %q:\n%s", want, task)

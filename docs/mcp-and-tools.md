@@ -423,7 +423,7 @@ anyone. Code: `project.go`, `servers_config.go` (`serverConfigPaths`).
 scope like a server (`/mcp off dun:peers --project`), and each of its tools
 alone from `t` (`/mcp toggle dun:files file_write off`). The nearest scope
 decides: a tool's own switch, then its group's; unset everywhere, on.
-`dun:core` (exec, ask_user, session) is shown but cannot be
+`dun:core` (exec, ask_user) is shown but cannot be
 switched off. A tool switched off leaves the definitions and is refused if
 called. Stored in `builtins.json` at each scope (builtins.go). A switch
 changes the listed tools, the prompt's prefix: the server re-reads the

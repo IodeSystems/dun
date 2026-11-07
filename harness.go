@@ -321,13 +321,6 @@ type Harness struct {
 	// runs. The Session's Preparer wraps it (withBudgetNotice), so is never nil.
 	docsPrep agent.NotificationPreparer
 
-	// Session state (goal/plan/todo/status) — see sessionstate.go. stateMu
-	// guards state: the tool runs on the turn's dispatcher goroutine while
-	// rehydration runs at Start. The sidecar path is derived from
-	// cfg.SessionFile on each read/write, so nothing to hold here but the
-	// state itself.
-	stateMu sync.Mutex
-	state   SessionState
 	// files is the built-in file toolset for the current working tree, and
 	// filesKey what it was built from (see fileTools). Touched only under
 	// turnMu, by rebuildTools.
@@ -765,11 +758,10 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// model what it hit. See overflow.go.
 		OnOverflow: h.onOverflow,
 	}
-	// Rehydrate the session's durable state before the tools are built, so the
-	// first system prompt already carries it. A resumed session (one with a
-	// session file) finds its goal/plan/todo the same way it finds its
-	// conversation; a fresh or in-memory session has none and renders nothing.
-	h.applySessionState()
+	// $DUN_HARNESS in exec's environment, and the file it names written
+	// before the first request (harnessinfo.go).
+	h.cfg.Exec = h.withExecEnv(h.cfg.Exec)
+	h.writeHarnessInfo()
 	// Tools, Dispatch, System and Preparer all depend on WHICH servers are
 	// running, and that changes mid-session (/rag on, /lsp off). applyTools
 	// owns those four fields; nothing else may set them.

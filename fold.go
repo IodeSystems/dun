@@ -25,13 +25,13 @@ func foldOpts() *llm.ChatOpts {
 }
 
 // foldTask is what a fold is told the session is for (agent.Shaper.TaskFunc):
-// the session state and the work in flight, from dun's own records rather
-// than from the conversation being folded, which is what loses them. Empty
-// when there is neither: agentkit then uses the system prompt.
+// the plan and the work in flight, from dun's own records rather than from
+// the conversation being folded, which is what loses them. Empty when there
+// is neither: agentkit then uses the system prompt.
 func (h *Harness) foldTask() string {
 	var parts []string
-	if st := strings.TrimSpace(renderState(h.currentState())); st != "" {
-		parts = append(parts, st)
+	if b := h.planOpen(); b != "" {
+		parts = append(parts, "# Plan\n"+b)
 	}
 	if f := h.inFlight(); f != "" {
 		parts = append(parts, "# In flight\n"+f)

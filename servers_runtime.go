@@ -798,18 +798,9 @@ func (h *Harness) rebuildTools() {
 	// read_saved is not listed: saved output is a file in the isolation tmp,
 	// read with file_read (isotmp.go). withRecap still answers a call to it.
 	dispatch = withRecap(dispatch, h, report)
-	// session is available to BOTH roles and, like recap, always on: what
-	// runs the model (for a repo's PR rules) and how a long task keeps its
-	// goal, plan, and open steps across context pressure and process restarts
-	// (session_tool.go). It also answers the old names harness and
-	// session_state, which are not in the list.
-	//
-	// Listed, with a one-line description. Hidden, the identity line's "call
-	// session()" named a tool the model could not call: llama.cpp's grammar
-	// (and heredoc mode) admits listed names only, so a model tried it in
-	// eval and mcpshell said "Unknown command 'session'" (USER 2026-10-28).
-	toolDefs = append(toolDefs, sessionToolDef())
-	dispatch = withSession(dispatch, h, report)
+	// No session tool (USER 2026-11-06): harness info is the file
+	// $DUN_HARNESS names (harnessinfo.go), and what the session is doing is
+	// its plan.
 	// memory only while a memory.save extension runs AND a turn.before one
 	// does: a note is worth writing only because the proactive search brings
 	// it back (see memory.go).
@@ -893,13 +884,6 @@ func (h *Harness) rebuildTools() {
 	}
 	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {
 		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
-	}
-
-	// The session's durable state, when there is any, goes into the system
-	// prompt so a resumed or compacted session reads its own goal and open
-	// steps before it does anything else. Empty state renders nothing.
-	if block := h.sessionStateBlock(); block != "" {
-		sys += block
 	}
 
 	// Outermost of all, so it sees every tool including recap — recap

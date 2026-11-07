@@ -216,6 +216,30 @@ func (h *Harness) planTell(cs []taskgraph.Change, who, note string) {
 // ready, and a change the person makes mid-turn arrives as its own note
 // (planTold). So it is at most five short lines per turn and none while
 // nothing is open.
+// planOpen is the plan's open work in a few short lines, "" with none: what
+// a fold is told the session is for (fold.go).
+func (h *Harness) planOpen() string {
+	g, err := planStore{h}.View(context.Background())
+	if err != nil {
+		return ""
+	}
+	return g.Brief("")
+}
+
+// PlanBrief is a session's plan brief read from its sidecar, for dund's peer
+// list (what another session is doing); "" with no plan.
+func PlanBrief(sessionFile string) string {
+	b, err := os.ReadFile(PlanFile(sessionFile))
+	if err != nil {
+		return ""
+	}
+	var d planFileData
+	if json.Unmarshal(b, &d) != nil {
+		return ""
+	}
+	return d.Graph.Brief("")
+}
+
 func (h *Harness) planTurnLine() {
 	if h.isChild() {
 		return
@@ -251,7 +275,7 @@ var writeVerb = regexp.MustCompile(`(?i)(^|_|-)(write|edit|delete|remove|rename|
 // write (edit, write, delete, move), agent (a sub-agent has them all), mount,
 // loop_ctl (schedules runs of its own), dun_msg (acts in another session),
 // every tool of the shell server, and an MCP tool whose name has a write verb.
-// Allowed: file read, grep and list, plan, ask_user, session,
+// Allowed: file read, grep and list, plan, ask_user,
 // recap, skill, memory, jobs, tell_parent, dun_list, and the other MCP tools.
 func changesWorkspace(name, server string) bool {
 	switch name {

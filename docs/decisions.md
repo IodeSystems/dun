@@ -505,12 +505,15 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   already sees every entry, and a child's callbacks stay nil, so a child
   nobody watches costs nothing. A viewer that disconnects without `leave`
   leaves the count up; the cost is forwarded events, not state.
-- **One `session` tool for what runs the model and the task's state (USER,
-  2026-10-27).** `harness` and `session_state` both answered "what is this
-  session"; `session` returns `{harness, state}` as JSON, reads with no
-  arguments and merges any of goal/plan/todo/status. The old names still
-  dispatch, hidden. `dun session <id> info` and the harness file are
-  unchanged.
+- **No `session` tool (USER, 2026-11-06; it replaced `harness` and
+  `session_state` on 2026-10-27).** Harness info is a file: `$DUN_HARNESS`
+  in exec's environment names `harness.json` in the isolation tmp, rewritten
+  at each turn start; the system prompt says so in one line, with no session
+  id (cache). What the session is doing is its plan: a fold is told the
+  plan's brief, `dun_list` shows its first line, and a resumed session's
+  first turn carries the `[plan]` aside. The goal/plan/todo/status store and
+  its `.state.json` are gone. `dun session <id> info` and the harness file
+  beside the session are unchanged.
 - **Each fact once (USER, 2026-10-27: "reduce the verbosity and
   duplication").** The system prompt no longer repeats dun's tool
   descriptions (exec, exec_monitor, ask_user, recap, the sub-agent

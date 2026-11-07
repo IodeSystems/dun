@@ -104,7 +104,7 @@ Refused: `exec` (a command cannot be told read-only), `file_edit`, `file_write`,
 shell server, and an MCP tool whose name has a write verb (write, edit, delete,
 rename, create, apply, commit, push, run, …: a guess, since MCP tools do not say
 whether they are read-only). Allowed: `file_read`, `file_grep`, `file_list`, `plan`,
-`ask_user`, `session`, `recap`, `skill`, `memory`, `jobs`,
+`ask_user`, `recap`, `skill`, `memory`, `jobs`,
 `tell_parent`, `dun_list`, and other MCP tools.
 
 ## Directing the agent

@@ -123,17 +123,59 @@ func (h *Harness) writeHarnessInfo() {
 		return
 	}
 	_ = fsutil.WriteAtomic(HarnessInfoFile(h.cfg.SessionFile), append(b, '\n'), 0o600)
+	// The model's copy, $DUN_HARNESS (harnessTmpPath): in the isolation tmp,
+	// so exec reads it on the host and under --docker alike.
+	if p := h.harnessTmpPath(); p != "" {
+		_ = fsutil.WriteAtomic(p, append(b, '\n'), 0o600)
+	}
+}
+
+// harnessTmpPath is the model's copy of the harness info, $DUN_HARNESS in
+// exec's environment (USER 2026-11-06: harness info replaces the session tool
+// with one line). "" for a child or a session without an isolation tmp.
+func (h *Harness) harnessTmpPath() string {
+	if h.cfg.SessionFile == "" || h.cfg.Parent != nil {
+		return ""
+	}
+	tmp := h.isoTmp()
+	if tmp == "" {
+		return ""
+	}
+	return filepath.Join(tmp, "harness.json")
+}
+
+// withExecEnv gives exec's commands $DUN_HARNESS. Per backend, not the
+// process environment: a child harness runs in the same process.
+func (h *Harness) withExecEnv(e ExecBackend) ExecBackend {
+	p := h.harnessTmpPath()
+	if p == "" {
+		return e
+	}
+	env := []string{"DUN_HARNESS=" + p}
+	switch b := e.(type) {
+	case *HostShell:
+		b.Env = env
+	case HostExec:
+		b.Env = env
+		return b
+	case DockerExec:
+		b.Env = env
+		return b
+	}
+	return e
 }
 
 // identityLine says where dun's harness info is (USER 2026-10-27: asked for
 // a one-character icon, the model answered 👷). The icon itself is in the
 // preamble (systemPreamble), so "You are dun" is said once.
 func (h *Harness) identityLine() string {
-	// The tool was hidden at first (USER 2026-10-27) and is listed again with
-	// a one-line description (USER 2026-10-28): a hidden tool cannot be
-	// called under a grammar. No session id or
-	// version in the line itself, so the prompt's text is the same in every
-	// session (the provider's cache) and nothing here goes stale.
-	return "\n\nCall session() for harness info (version, session, model, branch), " +
-		"and copy from it when a project's rules ask a commit, PR or report to name the agent, model or version."
+	// A file named by an env var, not a tool (USER 2026-11-06): no schema on
+	// every request. No session id or version in the line itself, so the
+	// prompt's text is the same in every session (the provider's cache) and
+	// nothing here goes stale. Only where exec can read it.
+	if h.harnessTmpPath() == "" || h.cfg.Exec == nil {
+		return ""
+	}
+	return "\n\nHarness info (dun version, session, model, effort, branch) is the JSON file $DUN_HARNESS; " +
+		"copy from it when a project's rules ask a commit, PR or report to name the agent, model or version."
 }
