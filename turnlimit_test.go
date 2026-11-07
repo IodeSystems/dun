@@ -80,3 +80,23 @@ func TestTurnLimit_InSystemPrompt(t *testing.T) {
 		t.Errorf("session MaxTurns %d", h.Session.MaxTurns)
 	}
 }
+
+// A warning queued in the round that ended a turn does not ride the next one.
+func TestTurnLimit_StaleWarningDropped(t *testing.T) {
+	h := newNoteHarness(t)
+	h.cfg.TurnLimit = 10
+	for i := 1; i <= 8; i++ {
+		h.noteTurnRound() // round 8 queues the warning; the turn then ends
+	}
+	h.Aside("[plan] keep me")
+	h.turnRounds.reset()
+	h.dropStaleTurnLimit()
+	for _, q := range queuedTexts(h) {
+		if strings.HasPrefix(q, turnLimitTag) {
+			t.Errorf("stale warning still queued: %q", q)
+		}
+	}
+	if got := queuedTexts(h); len(got) != 1 || got[0] != "[plan] keep me" {
+		t.Errorf("other asides must stay: %q", got)
+	}
+}

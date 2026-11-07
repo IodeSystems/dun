@@ -131,6 +131,7 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	// the one that recovered. See clearOverflowHints.
 	h.clearOverflowHints()
 	h.turnRounds.reset() // the turn limit counts this turn's rounds (turnlimit.go)
+	h.dropStaleTurnLimit()
 	if h.healOrphanToolCalls(ctx) == 0 {
 		h.flushQueued()
 	}
