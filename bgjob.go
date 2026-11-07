@@ -365,13 +365,31 @@ func (j *bgJob) openLogLocked() {
 // is not dead — the reflex on seeing anything other than output is to run it
 // again, which is how one slow build becomes three. And name the ONE place its
 // answer will come from, so the model stops thinking about it until then.
+//
+// "Ending your turn is safe" is said outright: a Terminal-Bench model told only
+// "do other work or end your turn" ran `sleep 280` three times beside its job
+// and killed it at 33 min. Every driver waits for a running job and wakes the
+// model with its completion (cmd/dun engine.go runLoop and drainStep,
+// human.go). The progress line names the one blind spot: a monitor counts
+// only stdout/stderr, and that run sent its output to files.
+//
+// A sub-agent is the exception: its run ends with its turn (subAgent.work does
+// not wait for jobs), so a finish after that reaches it only when its parent
+// tells it more. It is told that instead of being told it is safe.
 func (j *bgJob) handoffNotice(waited time.Duration) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	wait := "Do not sleep or poll for it. Do other work or end your turn: ending your turn is safe, " +
+		"the run waits for the job and wakes you when it finishes. "
+	if j.h != nil && j.h.parent != nil {
+		wait = "Do not poll for it. If you end your turn, your run ends: the job keeps running, and its " +
+			"finish reaches you only when your parent tells you more. "
+	}
 	return fmt.Sprintf(
-		"`%s` is still running after %s (not killed, not failed): background job #%d. A monitor "+
-			"tells you when it finishes; do other work or end your turn. %s",
-		j.command, roundDur(waited), j.id, j.logLine())
+		"`%s` is still running after %s (not killed, not failed): background job #%d. %s"+
+			"For progress reports, call jobs({job: %d, every_secs: 60}) or every_bytes. They count only "+
+			"what the command prints to stdout/stderr; progress written to a file is not seen, so print it to stdout. %s",
+		j.command, roundDur(waited), j.id, wait, j.id, j.logLine())
 }
 
 // logLine cites the job's log by path, in the session's isolation tmp: the

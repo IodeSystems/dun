@@ -46,7 +46,8 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 		desc = "Manage a command that outlived its exec timeout (job:N): a monitor is on it, and you are told when " +
 			"it finishes, so there is nothing to check. Its output is its log; read it with file_read. Reports as " +
 			"output grows are off until you set every_bytes or every_secs (whichever comes first); they say how " +
-			"much was written, not what. With no job, lists background work"
+			"much was written, not what, and count only what the command prints to stdout/stderr: progress it " +
+			"writes to a file is not seen. With no job, lists background work"
 	}
 	if agents {
 		desc += "; sub-agents are listed here and managed with agent({id, …})"

@@ -444,3 +444,25 @@ func TestJobs_ReplyCarriesProcessUsage(t *testing.T) {
 	}
 	t.Log(out)
 }
+
+// The handoff says ending the turn is safe (every root driver waits for a
+// running job and wakes the model), names the progress report, and says the
+// monitor sees only stdout/stderr (Terminal-Bench: a model slept beside a job
+// whose output went to files). A sub-agent's run ends with its turn, so it is
+// told that instead.
+func TestHandoffNotice_SaysEndingTheTurnIsSafe(t *testing.T) {
+	h := testHarness(t)
+	j := &bgJob{id: 3, command: "make", h: h}
+	out := j.handoffNotice(15 * time.Minute)
+	for _, want := range []string{"background job #3", "Do not sleep or poll", "ending your turn is safe",
+		"wakes you when it finishes", "jobs({job: 3, every_secs: 60})", "every_bytes", "stdout/stderr", "written to a file"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("handoff missing %q:\n%s", want, out)
+		}
+	}
+	child := &bgJob{id: 1, command: "make", h: &Harness{parent: h}}
+	out = child.handoffNotice(time.Minute)
+	if strings.Contains(out, "is safe") || !strings.Contains(out, "your run ends") {
+		t.Errorf("a sub-agent must not be told ending its turn is safe:\n%s", out)
+	}
+}

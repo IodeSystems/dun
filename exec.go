@@ -864,7 +864,7 @@ func execToolDef() llm.ToolDef {
 		"there; a variable you `export` persists into the next call. Returns stdout and stderr together; a " +
 		"non-zero exit is shown as [exit: …].\n" +
 		"A command still running after `timeout` (30s) is not killed: it becomes background job #N and you " +
-		"are notified when it finishes. If the user writes while you wait, it becomes a job at once and their " +
+		"are notified when it finishes: do not sleep or poll for it. If the user writes while you wait, it becomes a job at once and their " +
 		"message is in the result. Its output is its log: read it with file_read while it runs. " +
 		"Do not run anything interactive: there is no terminal and no input, so it can only hang."
 	td.Function.Parameters = map[string]any{
