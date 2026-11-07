@@ -69,7 +69,6 @@ class Dun(BaseInstalledAgent):
     @with_prompt_template
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         env = {
-            "PATH": f"{REMOTE}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "SSL_CERT_FILE": f"{REMOTE}/ca.crt",
             "DUN_HOME": HOME,
             "DUN_URL": os.environ["DUN_URL"],
@@ -83,6 +82,16 @@ class Dun(BaseInstalledAgent):
             environment,
             command=(
                 "mkdir -p /logs/agent; "
+                # The image's own PATH (an ENV in its Dockerfile) stays: dun goes in front.
+                f"export PATH={REMOTE}:$PATH; "
+                # The container is the sandbox, and no one is there to /file add a
+                # path: open every top-level directory to dun's file tools, for
+                # writing, unindexed. Not / itself (dun refuses it), not the
+                # kernel's or harbor's own, and not the workspace (already open).
+                "p=; for d in /*/; do d=${d%/}; [ -L \"$d\" ] && continue; "
+                'case "$d" in /proc|/sys|/dev|/logs|/installed-agent|"$PWD") continue;; esac; '
+                '''p="$p${p:+,}\\"$d\\":{\\"on\\":true,\\"mode\\":\\"write\\",\\"index\\":false}"; done; '''
+                f"printf '{{\"paths\":{{%s}}}}' \"$p\" > {HOME}/paths.json; "
                 f"printf '%s\\n' {shlex.quote(event)} | "
                 f'dun -p --bare --workspace "$PWD" --timeout {TIMEOUT} > {LOG} 2> /logs/agent/dun.stderr; '
                 "echo dun exit $? >> /logs/agent/dun.stderr"
@@ -95,17 +104,34 @@ class Dun(BaseInstalledAgent):
         log = self.logs_dir / "dun.jsonl"
         if not log.is_file():
             return
-        usage = None
+        # usage events are per turn, so they are summed. A turn killed before
+        # its usage event (an agent timeout) is counted from its request
+        # events instead: those cover the parent's rounds only, not children's.
+        processed = cached = generated = 0
+        pend = [0, 0, 0]
+        seen = False
         for line in log.read_text(errors="replace").splitlines():
             try:
                 e = json.loads(line)
             except ValueError:
                 continue
-            if e.get("type") == "usage":
-                usage = e
-        if usage is None:
+            t = e.get("type")
+            if t == "usage":
+                seen = True
+                processed += int(e.get("processed") or 0)
+                cached += int(e.get("cached") or 0)
+                generated += int(e.get("generated") or 0)
+                if e.get("turns"):  # a turn with no rounds says nothing about the ones before it
+                    pend = [0, 0, 0]
+            elif t == "request" and e.get("phase") == "done":
+                seen = True
+                c = int(e.get("cached") or 0)
+                pend[0] += int(e.get("prompt") or 0) - c
+                pend[1] += c
+                pend[2] += int(e.get("gen") or 0)
+        if not seen:
             return
-        processed, cached, generated = (int(usage.get(k) or 0) for k in ("processed", "cached", "generated"))
+        processed, cached, generated = processed + pend[0], cached + pend[1], generated + pend[2]
         context.n_input_tokens = processed + cached
         context.n_cache_tokens = cached
         context.n_output_tokens = generated
