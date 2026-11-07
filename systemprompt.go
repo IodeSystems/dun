@@ -66,8 +66,10 @@ const (
 	// tests then ran (torch), and data lost by opening a damaged database with
 	// a tool that "repaired" it (db-wal-recovery: the model was sure the
 	// command was harmless, so "only when sure" would not have saved it; the
-	// data being the only copy would).
-	systemFinish   = "Finish the whole task: a missing tool or package is yours to install. Treat data you were given as the only copy: back it up before anything that could change or delete it. Before your final message, check each requirement the task states (paths, names, formats, values) against what you produced, running it where it can run, and fix what does not match; then say briefly what you changed and what remains. Be concise."
+	// data being the only copy would). The brute-force sentence: a
+	// Terminal-Bench run spent 33 min on a CPU key search beside a direct
+	// method, with no estimate of how long the search would take.
+	systemFinish   = "Finish the whole task: a missing tool or package is yours to install. Treat data you were given as the only copy: back it up before anything that could change or delete it. Before a brute-force search, measure its rate and estimate the total time; if that exceeds what a direct method needs or the time you have, use the direct method. Before your final message, check each requirement the task states (paths, names, formats, values) against what you produced, running it where it can run, and fix what does not match; then say briefly what you changed and what remains. Be concise."
 	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, and make minimal precise edits; the diagnostics come back with each edit. Prefer node_edit over rewriting files. " + systemFinish
 	systemWork     = "\n\nWork step by step: read what you need before changing it, and make minimal precise edits. " + systemFinish
 	// systemAlone is --non-interactive's: no one is there during the run.
