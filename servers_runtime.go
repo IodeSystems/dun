@@ -875,6 +875,9 @@ func (h *Harness) rebuildTools() {
 		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
 	}
+	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "recap" }) {
+		sys += systemRecap
+	}
 	// agentkit's own {OUTPUT} note is off (OmitSlotInstructions); this is
 	// the shorter one, on the same terms: only when there are tools. Also
 	// under --bare: the ENGINE expands the slots (agentkit expandSlots), so a

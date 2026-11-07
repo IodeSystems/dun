@@ -69,6 +69,16 @@ const (
 		"there, even when your view of it was clipped."
 )
 
+// systemRecap is when to recap, in the system prompt rather than a cue
+// (USER 2026-11-06: "put it in the system context. I think it's worth it").
+// Every request after a recap is smaller by what it folded; measured on the
+// 2026-11-06 Terminal-Bench run, one recap mid-task would have saved 7-26% of
+// the input of the four long tasks. At the END of a turn it saves nothing and
+// costs a request (2 of 8 one-shot runs, USER 2026-10-27): hence "while work
+// remains".
+const systemRecap = "\n\nWhile work remains in a turn, recap what is settled (failed attempts, finished " +
+	"exploration, big results you have used): every later request is smaller by it. Not at the end of a turn."
+
 // systemExecCap quotes the clip limit, which must be the one number the code
 // enforces. Only with exec: the file it names is read with file_read, and the
 // clipping is exec's (execInlineMax).

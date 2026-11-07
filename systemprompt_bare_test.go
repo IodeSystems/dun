@@ -59,3 +59,28 @@ func TestBare_KeepsOutputSlotsDropsClientNotes(t *testing.T) {
 		t.Error("ask_user listed with no Ask")
 	}
 }
+
+// When to recap is said once, in the system prompt, and only while recap is
+// a tool: switched off, the line goes with it. The tool's own description no
+// longer argues against it.
+func TestSystemRecap_WithTheToolOnly(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{}, Exec: &HostShell{Dir: ws}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if !strings.Contains(h.Session.System, "While work remains in a turn, recap") {
+		t.Fatal("no recap line in the system prompt")
+	}
+	if strings.Contains(recapToolDef().Function.Description, "not recommended") {
+		t.Error("the recap description still argues against it")
+	}
+	if _, err := h.SetServerOn(context.Background(), "dun:recap", ScopeProject, ptr(false)); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(h.Session.System, "recap what is settled") {
+		t.Error("the recap line outlived the tool")
+	}
+}
