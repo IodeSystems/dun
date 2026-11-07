@@ -207,7 +207,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   model ran `gh auth login` through `exec`; gh started an OAuth device flow and
   polled for a code printed into a pipe nobody read. A 5-minute kill was added,
   then replaced: a command now waits `execGrace` (30 s, the `timeout` argument
-  overrides) and then is promoted to a numbered background job the model is
+  overrides up to `execGraceMax`, 300 s) and then is promoted to a numbered background job the model is
   told about. (A second cause confirmed it: with a persistent shell, `exit 7`
   exits the shell, so the sentinel line never prints, and the session sat
   "working" ten minutes with zero LLM requests. A job that is always tracked

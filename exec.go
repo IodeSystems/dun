@@ -855,6 +855,13 @@ func runCmd(ctx context.Context, w io.Writer, cmd *exec.Cmd, note bool) ExecResu
 // hour, while nothing in the loop could tell "working" from "stuck".
 const execGrace = 30 * time.Second
 
+// execGraceMax caps a model-set `timeout`. A Terminal-Bench model set 900 and
+// sat 15 min in one call, unable to see anything else: past the cap the
+// command is a job like any other, and the handoff (and a finish cutting a
+// later wait, workEnded) covers the rest. Nothing is killed at the cap. A var
+// so a test can shorten it.
+var execGraceMax = 5 * time.Minute
+
 // execToolDef is the tool the model calls to run commands.
 func execToolDef() llm.ToolDef {
 	var td llm.ToolDef
@@ -873,7 +880,7 @@ func execToolDef() llm.ToolDef {
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "the shell command to run"},
-			"timeout": map[string]any{"type": "integer", "description": "seconds to wait for the command before it becomes a background job (default 30)"},
+			"timeout": map[string]any{"type": "integer", "description": "seconds to wait for the command before it becomes a background job (default 30, at most 300)"},
 		},
 		"required": []string{"command"},
 	}
@@ -931,6 +938,10 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		if grace < 0 {
 			grace = 0
 		}
+		capped := grace > execGraceMax
+		if capped {
+			grace = execGraceMax
+		}
 
 		var user <-chan struct{} // nil blocks forever: no harness, no wake
 		if userWaiting != nil {
@@ -967,6 +978,9 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			}
 			if cut {
 				out += "\nHanded over early because other background work finished — its notice follows."
+			}
+			if capped {
+				out += fmt.Sprintf("\nYour timeout of %ds was capped at %ds.", *args.Timeout, int(execGraceMax.Seconds()))
 			}
 		}
 		if onCall != nil {
