@@ -716,7 +716,7 @@ func (h *Harness) rebuildTools() {
 		startJob := func(command string) *bgJob {
 			return h.startJob(cfg.Exec, command)
 		}
-		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting)
+		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting, h.workEnded)
 	}
 	// File tools, rooted at the working tree. Rebuilt with the tool set, so a
 	// worktree switch (Rehoist) moves their root with exec's.

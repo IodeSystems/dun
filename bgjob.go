@@ -270,7 +270,10 @@ func (j *bgJob) finish(res ExecResult) {
 	// and a row stuck on "running" forever is the bug the pane exists to stop.
 	j.h.jobsChanged()
 	if note := j.completionNote(); note != "" {
-		j.notify(note)
+		if j.hb != nil {
+			j.hb.Spoke()
+		}
+		j.h.notifyEnded(note)
 	}
 }
 
@@ -462,6 +465,51 @@ func (h *Harness) notifyAndWake(text string) {
 	case h.wake <- struct{}{}:
 	default: // wake is buffered; a full buffer just means a turn is already due
 	}
+}
+
+// notifyEnded is notifyAndWake for an END of background work: a job's
+// completion or a sub-agent's report. It also releases an exec waiting out its
+// grace (workEnded), so the model reads the news now, inside that exec's
+// result, instead of after the wait.
+//
+// Queued BEFORE the release: the released exec's result lifts the queue
+// (liftQueued), and that is the only delivery. The note is drained there, so
+// flushQueued never publishes it a second time; the leftover wake runs a
+// Continue with nothing pending, which is a no-op.
+func (h *Harness) notifyEnded(text string) {
+	h.Notify(text)
+	h.noteMu.Lock()
+	if h.endWaitCh != nil {
+		close(h.endWaitCh)
+		h.endWaitCh = nil
+	}
+	h.noteMu.Unlock()
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+}
+
+// workEnded is ready once a background job or a sub-agent's run ends after
+// the call. An exec adds it to its wait, as it adds userWaiting.
+//
+// Only an end counts. A progress report or a quiet reminder is not a reason to
+// stop a command the model chose to wait for; a finish is, because the model
+// may be waiting for exactly that (a Terminal-Bench model ran `sleep 280`
+// beside its job). A muted job says nothing and so releases nothing. The
+// exec's own command does not count: it is provisional while it is waited on,
+// and a provisional job's finish is the exec's own result.
+//
+// Unlike userWaiting it is not ready for a notice queued BEFORE the call: that
+// notice rides this exec's result anyway, and releasing at once would turn
+// every quick command after a finish into a job.
+func (h *Harness) workEnded() <-chan struct{} {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	if h.endWaitCh == nil {
+		h.endWaitCh = make(chan struct{})
+	}
+	return h.endWaitCh
 }
 
 // notifyQuietly is what a REMINDER gets: the human sees it immediately, the

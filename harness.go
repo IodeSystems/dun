@@ -331,6 +331,10 @@ type Harness struct {
 	// userWaitCh is closed by Say, so a tool sitting in a wait can stop and let
 	// the message reach the model now. Guarded by noteMu; see userWaiting.
 	userWaitCh chan struct{}
+	// endWaitCh is closed when a background job or a sub-agent's run ends, so
+	// an exec waiting out its grace hands over at once. Guarded by noteMu; see
+	// workEnded.
+	endWaitCh chan struct{}
 	// budgetNote is the budget notice waiting for the next model call (see
 	// budget.go). Guarded by noteMu.
 	budgetNote string

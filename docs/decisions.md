@@ -215,6 +215,19 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   throw away expensive work. A wedged job is caught by the heartbeat, which
   notifies instead. A caller with its own deadline (ship's `checkTimeout`)
   keeps it.
+- **The end of other background work ends an exec's wait (`workEnded`,
+  `notifyEnded`).** A Terminal-Bench model waited beside job #1 with
+  `sleep 280` execs and killed the job at 33 min. Now a job's completion or a
+  sub-agent's report, arriving while an exec waits out its grace, promotes that
+  exec at once (as a user message does), and the notice rides its result
+  (`liftQueued`), so it is delivered once. Only an end counts: a progress
+  report or a reminder does not stop a command the model chose to wait for. A
+  muted job says nothing, so it releases nothing. The exec's own command does
+  not count (it is provisional while waited on). A notice queued before the
+  call does not release it: it rides the result anyway, and a release at once
+  would make every quick command after a finish a job. Sub-agent reports are
+  included: the model is told it will hear when a child finishes, the same
+  promise as for a job.
 - **A command's outcome is its exit code; the text is for the model.**
   Pass/fail was `strings.Contains(out, "[exit:")`: a check that printed the
   marker failed spuriously, and a lost marker read as a pass.

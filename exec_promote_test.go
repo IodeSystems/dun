@@ -20,7 +20,7 @@ func execDispatcher(t *testing.T, h *Harness) agent.ToolDispatcher {
 	t.Cleanup(be.Close)
 	return withExec(nil, be, nil, func(command string) *bgJob {
 		return h.startJob(be, command)
-	}, nil, h.userWaiting)
+	}, nil, h.userWaiting, h.workEnded)
 }
 
 func execCall(args string) llm.ToolCall {

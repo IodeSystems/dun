@@ -215,7 +215,12 @@ func (s *subAgent) settle(state agentState) { s.settleThen(state, nil) }
 // report before it was queued (flaky 1 in 10–20; the same order as the bg
 // job's doneCh, 2755d6f).
 func (s *subAgent) settleReporting(state agentState) {
-	s.settleThen(state, func() { s.notify(s.report()) })
+	s.settleThen(state, func() {
+		if s.hb != nil {
+			s.hb.Spoke()
+		}
+		s.parent.notifyEnded(s.report())
+	})
 }
 
 func (s *subAgent) settleThen(state agentState, before func()) {
