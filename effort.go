@@ -157,7 +157,7 @@ func listedThinking(ctx context.Context, e Endpoint) (ServerThinking, bool) {
 			ServerThinking
 		} `json:"data"`
 	}
-	if !getListed(ctx, e, strings.TrimRight(e.URL, "/")+"/models", &models) {
+	if !getModels(ctx, e, &models) {
 		return ServerThinking{}, false
 	}
 	for _, m := range models.Data {

@@ -38,6 +38,30 @@ func TestListedWindow(t *testing.T) {
 	}
 }
 
+// A URL with no /v1 is the host (agentkit's chatURL adds it for chat): the
+// list is at /v1/models, and /models may be a web page that answers 200.
+// corrallm at https://llm.iodesystems.com did exactly that (2026-11-07).
+func TestListedWindow_HostOnlyURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Write([]byte(`{"data":[{"id":"glm","context_length":1048576,"thinking_default":"on"}]}`))
+		case "/models":
+			w.Write([]byte("<!doctype html><html><title>corrallm</title></html>"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	e := Endpoint{URL: srv.URL, Model: "glm"}
+	if got := listedWindow(context.Background(), e); got != 1048576 {
+		t.Errorf("window %d, want 1048576 from /v1/models", got)
+	}
+	if th, ok := listedThinking(context.Background(), e); !ok || th.Default != "on" {
+		t.Errorf("thinking %+v %v, want the /v1/models entry", th, ok)
+	}
+}
+
 // A window set for a model wins over the server and is kept for the next
 // session of that model only; auto forgets it.
 func TestSetWindow(t *testing.T) {
