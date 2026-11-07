@@ -46,7 +46,7 @@ func (h *Harness) SystemParts() SystemBreakdown {
 // prompt keeps the role, the containment, how to choose between tools, how to
 // work, and the lines for MCP servers whose descriptions dun does not write.
 const (
-	systemPreamble = `You are dun, a coding agent working inside an isolated workspace.`
+	systemPreamble = "You are dun (" + Icon + "), a coding agent"
 
 	// systemThinking makes reasoning skimmable: the TUI shows a thought as one
 	// line, the latest heading while it streams and the summary after
@@ -70,12 +70,12 @@ const (
 )
 
 // systemExecCap quotes the clip limit, which must be the one number the code
-// enforces. Only with exec: the ref it names is read with recap, and the
+// enforces. Only with exec: the ref it names is read with read_saved, and the
 // clipping is exec's (execInlineMax).
 //
 // "Do not claim" stays: models reported what was in the elided middle.
 var systemExecCap = "\n\nA tool result over " + fmt.Sprintf("%d", execInlineMax) + " characters reaches you clipped " +
-	"to its start and end; the gap names a ref, and recap reads the rest. That is not a failure, and re-running " +
+	"to its start and end; the gap names a ref, and read_saved reads the rest. That is not a failure, and re-running " +
 	"only clips it again. Do not claim to have seen the clipped part."
 
 // HostedLine is the system prompt's sentence naming the servers hosted in
@@ -97,7 +97,10 @@ func HostedLine(hosted []string) string {
 // hosted are the MCP servers the shell carries as eval namespaces. mcpshell's
 // eval description is fixed text that names none of them, so without this
 // line the model has no way to know they exist.
-func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files string, hosted ...string) string {
+//
+// bare: no client renders the reply or shows the thinking (--bare), so the
+// heading convention for the TUI's thought line is left out.
+func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files string, bare bool, hosted ...string) string {
 	have := map[string]bool{}
 	for _, t := range tools {
 		have[t.ServerID] = true
@@ -105,19 +108,25 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files str
 	var b strings.Builder
 	b.WriteString(systemPreamble)
 	// Tell the agent about its containment so it knows what it's working with.
+	// Only a real worktree (one with a branch of its own) isolates anything:
+	// the pass-through one dun makes without --worktree is the directory
+	// itself, and calling it a worktree told the model it was isolated when
+	// it worked in place.
 	var containment []string
-	if wt != nil && wt.Path != "" {
+	if wt != nil && wt.Path != "" && wt.Branch != "" {
 		containment = append(containment, "git worktree at "+wt.Path)
 	}
 	if _, ok := exec.(DockerExec); ok {
 		containment = append(containment, "Docker container")
 	}
 	if len(containment) > 0 {
-		b.WriteString(" Containment: " + strings.Join(containment, " + ") + ".")
+		b.WriteString(", working inside an isolated workspace. Containment: " + strings.Join(containment, " + ") + ".")
 	} else {
 		b.WriteString(".")
 	}
-	b.WriteString(systemThinking)
+	if !bare {
+		b.WriteString(systemThinking)
+	}
 	var fam strings.Builder
 	if have[ServerCode] {
 		fam.WriteString(systemCode)

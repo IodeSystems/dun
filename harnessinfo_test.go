@@ -28,10 +28,12 @@ func TestHarnessInfo(t *testing.T) {
 	line := h.identityLine()
 	// The session tool is not listed; the line says to call it, and carries no
 	// session id or version (the same text in every session, for the cache).
-	for _, want := range []string{"You are dun (👷)", "Call session() for harness info"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("identity lacks %q: %s", want, line)
-		}
+	if !strings.Contains(line, "Call session() for harness info") {
+		t.Errorf("identity lacks the session() pointer: %s", line)
+	}
+	// "You are dun" is said once, in the preamble, with the icon.
+	if strings.Contains(line, "You are dun") || !strings.Contains(systemPreamble, "You are dun (👷)") {
+		t.Errorf("identity said twice or icon missing: %q / %q", line, systemPreamble)
 	}
 	d := withSession(func(context.Context, llm.ToolCall) (string, error) { return "other", nil }, h, nil)
 	var call llm.ToolCall

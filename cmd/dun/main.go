@@ -85,7 +85,7 @@ var flagGroups = []struct {
 	names []string
 }{
 	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "web-tui", "addr", "p", "version"}},
-	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase"}},
+	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase", "bare"}},
 	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp", "no-rag", "no-lsp", "no-tools", "media"}},
 	{"experimental", []string{"exp-iterm-tabcontrol"}},
 	{"advanced", []string{"persist", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
@@ -270,6 +270,7 @@ func main() {
 	fresh := flag.Bool("new", false, "start a new session, even when this workspace has one no client is attached to (which plain dun resumes)")
 	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
+	bare := flag.Bool("bare", false, "with -p: a scripted run nobody reads or answers (a benchmark): no ask_user, and no client conventions in the system prompt")
 	tuiFlag := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	// --web-tui: this terminal TUI in a browser tab, byte for byte through a
 	// pty (serveterm.go). Not dund's web app (dund --web-experimental), which is its own
@@ -710,6 +711,7 @@ func main() {
 		Files:         filesConfig(absWS, *noDir),
 		NoDir:         *noDir,
 		NoTools:       *noTools,
+		Bare:          *bare && *prog,
 		SessionFile:   sessionFile,
 		Persist:       *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
@@ -877,7 +879,7 @@ func main() {
 		// ask_user, a mount, dun's own "not a project") reads the next line of
 		// in.answers; two open at once could each take the other's answer.
 		var askMu sync.Mutex
-		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {
+		ask := func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {
 			askMu.Lock()
 			defer askMu.Unlock()
 			// Paused for the whole wait: the person deciding is not the turn
@@ -900,6 +902,10 @@ func main() {
 					return "", actx.Err()
 				}
 			})
+		}
+		// --bare: nobody answers, so no ask_user (a nil Ask offers none).
+		if !cfg.Bare {
+			cfg.Ask = ask
 		}
 		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {
 			askMu.Lock()

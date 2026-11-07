@@ -865,13 +865,15 @@ func (h *Harness) rebuildTools() {
 	sys := cfg.System
 	rules, rulesMode, rulesSet := "", "", rulesSet{}
 	if sys == "" {
-		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), hostedNS...)
+		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), cfg.Bare, hostedNS...)
 		sys += roleSystem(h.isChild())
 		sys += h.identityLine()
 		if h.cfg.NoDir {
 			sys += noDirSystem
 		}
-		sys += replyFormatSystem
+		if !cfg.Bare {
+			sys += replyFormatSystem
+		}
 		sys += h.cfg.SystemNote
 		// The workspace's root AGENTS.md and CLAUDE.md, and what they import,
 		// are standing context: the model needs the project's rules from the
@@ -883,7 +885,7 @@ func (h *Harness) rebuildTools() {
 	}
 	// agentkit's own {OUTPUT} note is off (OmitSlotInstructions); this is
 	// the shorter one, on the same terms: only when there are tools.
-	if len(toolDefs) > 0 {
+	if len(toolDefs) > 0 && !cfg.Bare {
 		sys += systemSlots
 	}
 	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {
@@ -1262,7 +1264,7 @@ func (h *Harness) describe(id string) string {
 }
 
 // noToolsSystem is the system prompt of a --no-tools session.
-const noToolsSystem = "You are dun, in a plain chat: this session has no tools. You cannot run commands, read or " +
+const noToolsSystem = "You are dun (" + Icon + "), in a plain chat: this session has no tools. You cannot run commands, read or " +
 	"change files, or search; answer from what you know and from what the user tells or pastes."
 
 // useNoTools is rebuildTools for --no-tools: nothing is offered to the model
@@ -1273,7 +1275,11 @@ func (h *Harness) useNoTools() {
 	h.Tools = nil
 	sys := h.cfg.System
 	if sys == "" {
-		sys = noToolsSystem + h.identityLine() + replyFormatSystem + h.cfg.SystemNote
+		sys = noToolsSystem + h.identityLine()
+		if !h.cfg.Bare {
+			sys += replyFormatSystem
+		}
+		sys += h.cfg.SystemNote
 	}
 	h.Session.Tools = nil
 	h.Session.Dispatch = func(_ context.Context, tc llm.ToolCall) (string, error) {

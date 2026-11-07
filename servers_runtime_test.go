@@ -14,7 +14,7 @@ import (
 // Describing a tool family whose tools are absent is worse than saying nothing:
 // the model plans around node_query, calls it, and gets "unknown tool".
 func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
-	shellOnly := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, HostExec{Dir: "/tmp"}, nil, "")
+	shellOnly := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, HostExec{Dir: "/tmp"}, nil, "", false)
 	if strings.Contains(shellOnly, "node_query") {
 		t.Error("described code tools with no code server running")
 	}
@@ -31,7 +31,7 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 			t.Errorf("the system prompt repeats a tool's description (%q)", own)
 		}
 	}
-	if !strings.Contains(shellOnly, "recap reads the rest") {
+	if !strings.Contains(shellOnly, "read_saved reads the rest") {
 		t.Error("with exec, the prompt must say a large result is clipped and where the rest is")
 	}
 	// No worktree or Docker → no containment line.
@@ -43,7 +43,7 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 		{Name: "node_query", ServerID: ServerCode},
 		{Name: "eval", ServerID: ServerShell},
 		{Name: "search", ServerID: ServerDocs},
-	}, DockerExec{Dir: "/work", Image: "golang:1.23"}, &Worktree{Path: "/tmp/wt", Branch: "feat"}, "")
+	}, DockerExec{Dir: "/work", Image: "golang:1.23"}, &Worktree{Path: "/tmp/wt", Branch: "feat"}, "", false)
 	for _, want := range []string{"node_query", "mcpshell", "raglit", "[docs] notes"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("full tool set: missing %q", want)
@@ -59,7 +59,7 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 
 	// No backend, no exec tool — so describing one invites a call to something
 	// that is not there. Same rule as the MCP families.
-	none := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "")
+	none := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "", false)
 	if strings.Contains(none, "clipped") {
 		t.Errorf("described exec with no backend configured:\n%s", none)
 	}

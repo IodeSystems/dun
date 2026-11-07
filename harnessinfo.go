@@ -125,15 +125,15 @@ func (h *Harness) writeHarnessInfo() {
 	_ = fsutil.WriteAtomic(HarnessInfoFile(h.cfg.SessionFile), append(b, '\n'), 0o600)
 }
 
-// identityLine introduces dun in the system prompt: its icon, its session,
-// and where the rest is (USER 2026-10-27: asked for a one-character icon,
-// the model answered 👷; say so, and the session).
+// identityLine says where dun's harness info is (USER 2026-10-27: asked for
+// a one-character icon, the model answered 👷). The icon itself is in the
+// preamble (systemPreamble), so "You are dun" is said once.
 func (h *Harness) identityLine() string {
 	// The tool was hidden at first (USER 2026-10-27) and is listed again with
 	// a one-line description (USER 2026-10-28): a hidden tool cannot be
 	// called under a grammar. No session id or
 	// version in the line itself, so the prompt's text is the same in every
 	// session (the provider's cache) and nothing here goes stale.
-	return "\n\nYou are dun (" + Icon + "). Call session() for harness info (version, session, model, branch), " +
+	return "\n\nCall session() for harness info (version, session, model, branch), " +
 		"and copy from it when a project's rules ask a commit, PR or report to name the agent, model or version."
 }
