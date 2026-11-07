@@ -272,6 +272,7 @@ func main() {
 	prog := flag.Bool("p", false, "programmatic mode: emit + read line-delimited JSON events")
 	asideEscalateMS := flag.Int("aside-escalate-ms", 0, "how long a heartbeat about a silent background job or child waits for a turn to carry it before it wakes the agent (0: DUN_ASIDE_ESCALATE_MS, else 5000)")
 	turnLimit := flag.Int("tool-call-turn-limit", 0, "the most tool-call rounds one turn may make (0: DUN_MAX_TURNS, else 400); the model is told it, and warned at 80%")
+	settleDelay := flag.Duration("settle-delay", 0, "interactive: how long after a turn that used tools, with no reply and no sign of the person at the TUI, the agent is woken to report what is done, left, or needs them (0 is off; unset: DUN_SETTLE_DELAY, else 2m)")
 	nonInteractive := flag.Bool("non-interactive", false, "with -p: a run no one answers or reads along (a script, a benchmark): no ask_user, and the model is told it is on its own")
 	tuiFlag := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	// --web-tui: this terminal TUI in a browser tab, byte for byte through a
@@ -716,6 +717,7 @@ func main() {
 		NonInteractive: *nonInteractive && *prog,
 		TurnLimit:      *turnLimit,
 		AsideEscalate:  time.Duration(*asideEscalateMS) * time.Millisecond,
+		SettleDelay:    settleDelayFlag(*settleDelay),
 		EffortOff:      effortOff(fc, *url),
 		SessionFile:    sessionFile,
 		Persist:        *persistFlag,
@@ -1104,4 +1106,15 @@ func filesConfig(ws string, noDir bool) *dun.FilesConfig {
 		return &dun.FilesConfig{Tools: []string{}}
 	}
 	return dun.LoadFiles(ws)
+}
+
+// settleDelayFlag turns --settle-delay into Config.SettleDelay, where 0 means
+// "unset" and a negative value is off: a flag given as 0 is off (dun/settle.go).
+func settleDelayFlag(d time.Duration) time.Duration {
+	set := false
+	flag.Visit(func(f *flag.Flag) { set = set || f.Name == "settle-delay" })
+	if set && d == 0 {
+		return -1
+	}
+	return d
 }

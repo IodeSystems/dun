@@ -132,6 +132,8 @@ trigger on an error line; the pattern filter was removed in the jobs rework, and
 
 ### 1. Delayed settle (interactive)
 
+Built on branch `settle` (`settle.go`; `--settle-delay`, `DUN_SETTLE_DELAY`, control `presence`).
+
 When a turn that used tools ends, a settle timer starts (proposed: 2 minutes).
 
 - **The user replies first:** the timer is cancelled. The user is the check, and
@@ -169,7 +171,7 @@ When a turn that used tools ends, a settle timer starts (proposed: 2 minutes).
 ### 2. The plan board, and plan notifies
 
 - The plan board is **one keyed aside**, replaced on every change by anyone,
-  never a pile of change notes.
+  never a pile of change notes. Built on branch `settle` (`planBoard`, `plan.go`).
 - These plan events become **notifies**, because each needs a decision:
   - a node became ready and no child owns it (the frontier moved);
   - a node is blocked;

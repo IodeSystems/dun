@@ -163,6 +163,10 @@ type Config struct {
 	// for a turn to carry it before it wakes the agent (--aside-escalate-ms;
 	// 0 is DUN_ASIDE_ESCALATE_MS, else 5s; asidettl.go).
 	AsideEscalate time.Duration
+	// SettleDelay is how long the person may be away after a turn that used
+	// tools before dun makes the agent report (--settle-delay; 0 is
+	// DUN_SETTLE_DELAY, else 2m; negative is off; settle.go).
+	SettleDelay time.Duration
 	// EffortOff is what off is sent as, for a model that cannot stop
 	// thinking (dunconfig.ProviderConfig.EffortOff); "" sends off.
 	EffortOff string
@@ -317,10 +321,11 @@ type Harness struct {
 	rounds     roundStats
 	agents     map[int]*subAgent
 	ownsMgr    bool
-	parent     *Harness   // nil for a root
-	agentID    int        // this harness's id within its parent; 0 for a root
-	self       *subAgent  // this harness's own record IN its parent; nil for a root
-	turnRounds turnRounds // this turn's tool-call rounds, for the turn limit
+	parent     *Harness    // nil for a root
+	agentID    int         // this harness's id within its parent; 0 for a root
+	self       *subAgent   // this harness's own record IN its parent; nil for a root
+	turnRounds turnRounds  // this turn's tool-call rounds, for the turn limit
+	settle     settleState // the delayed end-of-turn report (settle.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model
 	// userWaitCh is closed by Say, so a tool sitting in a wait can stop and let
@@ -622,6 +627,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// A resumed session's history is not this session's to act on: the
 	// memory triggers look only at what arrives from here on.
 	h.markTriggerScan()
+	h.settleResume() // a settle owed when the session stopped (settle.go)
 	// Saved output readable by path again, after a reboot wiped /tmp (isotmp.go).
 	h.restoreIsoTmp()
 	// Every response the engine's clients get reaches the root session's
@@ -821,12 +827,14 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 	ctx, end := h.interruptible(ctx)
 	defer end()
 	h.clearBudgetNotes()
+	h.settleBegin(true)
 	h.prepareTurn(ctx)
 	h.workInput(task)
 	h.store.publish(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
 	res, err := h.turnThenTriggers(ctx)
+	h.settleEnd(true, false, err)
 	return h.finishInterrupt(ctx, res, err)
 }
 
@@ -861,6 +869,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 // gone would keep working against tools that no longer answer.
 func (h *Harness) Close() {
 	h.markClosed()
+	h.settleClose()
 	h.closeAgents()
 	// The shell this harness owns. A child's is its own (see childConfig), so
 	// closing it here does not touch the parent's.

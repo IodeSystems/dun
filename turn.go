@@ -94,6 +94,7 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 	ctx, end := h.interruptible(ctx)
 	defer end()
 	h.clearBudgetNotes()
+	st := h.settleBegin(false)
 	// Publish anything a tool result did not already carry (and pair off any
 	// interrupted tool call), so the turn below has it — and so several jobs
 	// finishing at once become ONE turn.
@@ -102,9 +103,11 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 		// Nothing new to react to. Running the model anyway appends an assistant
 		// message directly after the previous one, which providers reject on the
 		// following request. A duplicate wake is a no-op, not a turn.
+		h.settleEnd(false, st, nil)
 		return agent.TurnResult{}, nil
 	}
 	res, err := h.turnThenTriggers(ctx)
+	h.settleEnd(false, st, err)
 	return h.finishInterrupt(ctx, res, err)
 }
 
@@ -130,8 +133,9 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	// in the present tense about the last response, and the last response is now
 	// the one that recovered. See clearOverflowHints.
 	h.clearOverflowHints()
-	h.turnRounds.reset() // the turn limit counts this turn's rounds (turnlimit.go)
-	h.dropTurnScoped()   // asides about the turn that ended (asidettl.go)
+	h.turnRounds.reset()  // the turn limit counts this turn's rounds (turnlimit.go)
+	h.dropTurnScoped()    // asides about the turn that ended (asidettl.go)
+	h.settleResumeAside() // once, on the first user turn after a resume (settle.go)
 	if h.healOrphanToolCalls(ctx) == 0 {
 		h.flushQueued()
 	}

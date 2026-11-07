@@ -399,11 +399,13 @@ func (h *Harness) AskImages(ctx context.Context, task string, imgs []ImageInput)
 	ctx, end := h.interruptible(ctx)
 	defer end()
 	h.clearBudgetNotes()
+	h.settleBegin(true)
 	h.prepareTurn(ctx)
 	e := agent.Entry{ID: uuid.New().String(), Kind: agent.KindUser, Content: task, Parts: parts,
 		CreatedAt: time.Now().UnixNano()}
 	h.store.publish(e)
 	res, err := h.turnThenTriggers(ctx)
+	h.settleEnd(true, false, err)
 	if !known {
 		switch {
 		case err == nil:

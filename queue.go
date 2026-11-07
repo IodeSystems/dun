@@ -50,6 +50,9 @@ type queued struct {
 	key        string
 	escalateAt time.Time
 	turnScoped bool
+	// tag marks the history entry it becomes, so it can be dropped later
+	// (settle.go).
+	tag string
 }
 
 // queuedPolicy is everything the drains need to know about a kind.
@@ -133,6 +136,7 @@ func (h *Harness) Notify(text string) {
 // message for as long as it waits — an hour, for exec timeout:3600. So Say
 // also releases those waits: see userWaiting.
 func (h *Harness) Say(text string) {
+	h.settleCancel() // the user answered: no settle (settle.go)
 	h.workInput(text)
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedUser, text: text})
@@ -208,6 +212,7 @@ func (h *Harness) ForceToolCall(tc llm.ToolCall) {
 // to the model's own tool calls, so the Turn loop persists and dispatches all
 // of them as if the model had generated them.
 func (h *Harness) mergeForcedToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
+	h.settle.tools.Add(int64(len(tcs))) // the turn used tools (settle.go)
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()
 	if len(h.forcedToolCalls) == 0 {
@@ -290,7 +295,7 @@ func (h *Harness) flushQueued() int {
 	for _, q := range items {
 		h.store.publish(agent.Entry{
 			ID: uuid.New().String(), Kind: q.policy().entryKind,
-			Content: q.text, CreatedAt: time.Now().UnixNano(),
+			Tag: q.tag, Content: q.text, CreatedAt: time.Now().UnixNano(),
 		})
 	}
 	return len(items)
