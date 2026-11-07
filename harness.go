@@ -163,6 +163,9 @@ type Config struct {
 	// for a turn to carry it before it wakes the agent (--aside-escalate-ms;
 	// 0 is DUN_ASIDE_ESCALATE_MS, else 5s; asidettl.go).
 	AsideEscalate time.Duration
+	// EffortOff is what off is sent as, for a model that cannot stop
+	// thinking (dunconfig.ProviderConfig.EffortOff); "" sends off.
+	EffortOff string
 	// NoTools is a plain chat (dun --no-tools): no tool of any kind reaches
 	// the model, no server starts, and a call to a tool is refused.
 	NoTools bool
@@ -734,7 +737,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Rehead: h.rehead,
 		// A fold thinks nothing and is told the session's state and what is
 		// in flight; its summary is sized by agentkit to the fold (fold.go).
-		SummaryOpts: foldOpts(),
+		SummaryOpts: h.foldOpts(),
 		TaskFunc:    h.foldTask,
 		// What a fold deletes stays searchable in the session's raglit
 		// branch (raglitauth.go); nil without a raglit that has keys.

@@ -130,6 +130,29 @@ func recapNudgeAt() int {
 
 var windowHTTP = &http.Client{Timeout: contextWindowTimeout}
 
+// modelsURLs are where e's model list may be, in order: like agentkit's
+// chatURL, a base with no /v1 is the host, so /v1/models comes first. Asking
+// only base+"/models" of https://llm.iodesystems.com got corrallm's web page,
+// and every TB2.1 trial ran with no window known (2026-11-07).
+func modelsURLs(url string) []string {
+	base := strings.TrimRight(url, "/")
+	if strings.HasSuffix(base, "/v1") {
+		return []string{base + "/models"}
+	}
+	return []string{base + "/v1/models", base + "/models"}
+}
+
+// getModels reads e's model list into v from the first of modelsURLs that
+// answers with one.
+func getModels(ctx context.Context, e Endpoint, v any) bool {
+	for _, u := range modelsURLs(e.URL) {
+		if getListed(ctx, e, u, v) {
+			return true
+		}
+	}
+	return false
+}
+
 // getListed reads one of e's model-list endpoints into v.
 func getListed(ctx context.Context, e Endpoint, u string, v any) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -177,7 +200,7 @@ func listedWindow(ctx context.Context, e Endpoint) int {
 			} `json:"top_provider"`
 		} `json:"data"`
 	}
-	if get(base+"/models", &models) {
+	if getModels(ctx, e, &models) {
 		want := e.Model
 		if shim.IsAlias(want) {
 			var list []shim.Model

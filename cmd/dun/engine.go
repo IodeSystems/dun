@@ -109,7 +109,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 						rest = f[2]
 					}
 					msg = extIndexCmd(ctx, h, f[0], f[1], rest)
-					h.Aside("[control/ext] " + f[1] + " " + f[0] + ": " + msg)
 				} else if f := strings.SplitN(action, " ", 4); len(f) >= 3 && f[0] == "call" {
 					text := ""
 					if len(f) == 4 {
@@ -120,7 +119,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 						out = "error: " + err.Error()
 					}
 					msg = "/" + f[1] + " " + f[2] + ": " + out
-					h.Aside("[control/ext] " + msg)
 				}
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			}()
@@ -231,7 +229,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 					msg = "nothing saved: " + err.Error()
 				}
 				msg = "memory: " + msg
-				h.Aside("[control/remember] " + msg)
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			}()
 			return
@@ -244,7 +241,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			go func() {
 				verb, _, _ := strings.Cut(action, " ")
 				msg := runMCPCmd(ctx, h, action)
-				h.Aside("[control/mcp] " + msg)
 				em.emit(&proto.ServerEvent{ID: "mcp", Action: verb, Message: msg,
 					Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Builtins: enginecmd.ServersProto(h.BuiltinGroups())})
 				em.emit(catalogEvent(h))
@@ -324,11 +320,9 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// settings in force.
 		if id == "ctxconfig" {
 			go func() {
-				msg, changed, err := contextConfigCmd(ctx, h, action)
+				msg, _, err := contextConfigCmd(ctx, h, action)
 				if err != nil {
 					msg = "context config: " + err.Error()
-				} else if changed {
-					h.Aside("[control/context] " + msg)
 				}
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 				em.emit(settingsEvent())
@@ -383,7 +377,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			if err != nil {
 				msg = "file: " + err.Error()
 			} else if strings.TrimSpace(action) != "" {
-				h.Aside("[control/file] " + msg)
+				h.Aside(h.FilesAside()) // the model must know read from write
 			}
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
@@ -412,7 +406,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				if err := dunconfig.SaveConfig(*save); err != nil {
 					msg += " — but not saved: " + err.Error()
 				}
-				h.Aside("[control/retry] " + msg)
 			}
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
@@ -427,7 +420,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				if err := dunconfig.SaveConfig(*save); err != nil {
 					msg += " — but not saved: " + err.Error()
 				}
-				h.Aside("[control/loops] " + msg)
 			}
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
@@ -448,7 +440,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				} else {
 					enginecmd.EffortLevel = h.Effort()
 					msg = "effort: " + enginecmd.EffortLevel + " — " + h.EffortWords(enginecmd.EffortLevel) + " (saved; from the next request)"
-					h.Aside("[control/effort] " + msg)
 				}
 			}
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
@@ -466,8 +457,6 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 				msg, err := rulesCmd(ctx, h, action)
 				if err != nil {
 					msg = "rules: " + err.Error()
-				} else if action != "" {
-					h.Aside("[control/rules] " + msg)
 				}
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			}()
@@ -531,14 +520,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 					em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "isolate: setting the docker image (a Dockerfile is built; this can take a while) ..."})
 				}
 				msg := runControlCmd(ctx, h, id, action)
-				h.Aside("[control/" + id + "] " + msg)
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			}()
 			return
 		}
 		wsBefore, isoBefore := h.Workspace(), isolationMode(h)
 		msg := runControlCmd(ctx, h, id, action)
-		h.Aside("[control/" + id + "] " + msg)
 		em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 		for _, ev := range isolateEvents(h, wsBefore, isoBefore) {
 			em.emit(ev)

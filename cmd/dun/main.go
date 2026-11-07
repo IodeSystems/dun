@@ -716,6 +716,7 @@ func main() {
 		NonInteractive: *nonInteractive && *prog,
 		TurnLimit:      *turnLimit,
 		AsideEscalate:  time.Duration(*asideEscalateMS) * time.Millisecond,
+		EffortOff:      effortOff(fc, *url),
 		SessionFile:    sessionFile,
 		Persist:        *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the

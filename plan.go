@@ -387,10 +387,8 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 			}
 			h.planChanged()
 			if on {
-				h.Aside("[control/plan] The user turned plan mode on: until they approve the plan, tools that change files or run commands are refused. Write the plan with the plan tool, then wait for /plan approve.")
 				return "plan mode: on · the model plans first; /plan approve lets it change things", nil
 			}
-			h.Aside("[control/plan] The user turned plan mode off: no approval is needed.")
 			return "plan mode: off", nil
 		}
 		return "", fmt.Errorf("usage: /plan mode on|off")

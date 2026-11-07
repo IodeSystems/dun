@@ -40,6 +40,22 @@ func reasoningDialect(fc dunconfig.DunConfig, url string) (string, error) {
 	return d, nil
 }
 
+// effortOff is what off sends to the endpoint at url (ProviderConfig.EffortOff):
+// DUN_EFFORT_OFF, else the active provider's when it is that endpoint, else
+// the saved provider's at url; "" sends off as off.
+func effortOff(fc dunconfig.DunConfig, url string) string {
+	if e := os.Getenv("DUN_EFFORT_OFF"); e != "" {
+		return e
+	}
+	if p, ok := fc.Active(); ok && strings.TrimRight(p.URL, "/") == strings.TrimRight(url, "/") {
+		return p.EffortOff
+	}
+	if p, ok := fc.ProviderAt(url); ok {
+		return p.EffortOff
+	}
+	return ""
+}
+
 // noProvider stands in for the LLM when providerMissing says why: every call
 // fails with that, and nothing is contacted.
 type noProvider struct{ why error }

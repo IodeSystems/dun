@@ -359,3 +359,28 @@ func TestFileAdd_ANewFile(t *testing.T) {
 		t.Error("a file in a directory that is not there: want an error")
 	}
 }
+
+// After a /file change the model is told every open path and its mode, so it
+// can tell read from write, not just what changed.
+func TestFilesAside_ListsEveryPathWithItsMode(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws, ro, rw := t.TempDir(), t.TempDir(), t.TempDir()
+	sf := filepath.Join(t.TempDir(), "s.jsonl")
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []Server{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if _, err := h.AddPath(ro, ScopeSession, PathOptions{NoIndex: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.AddPath(rw, ScopeSession, PathOptions{Write: true, NoIndex: true}); err != nil {
+		t.Fatal(err)
+	}
+	a := h.FilesAside()
+	for _, want := range []string{ws + " (read and write)", ro + " (read only)", rw + " (read and write)", "Nothing else"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("aside lacks %q:\n%s", want, a)
+		}
+	}
+}

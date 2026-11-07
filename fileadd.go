@@ -55,6 +55,25 @@ type pathsFile struct {
 	Workspace string `json:"workspace,omitempty"`
 }
 
+// FilesAside is what the model is told after the user changes which paths the
+// file tools may use: every open path with its mode, not just the change. A
+// model told only "on" or "taken back" could not tell read from write (USER
+// 2026-11-07). An aside: it rides the next turn or tool result, and never
+// starts a turn.
+func (h *Harness) FilesAside() string {
+	write, _ := h.workspaceWrite()
+	mode := map[bool]string{true: "read and write", false: "read only"}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[files] The user changed the paths dun's file tools may use. Now open: the workspace %s (%s)", h.cfg.Workspace, mode[write])
+	for _, a := range h.AddedEntries() {
+		if a.On {
+			fmt.Fprintf(&b, "; %s (%s)", a.Path, mode[a.Write])
+		}
+	}
+	b.WriteString(". Nothing else outside the workspace is open.")
+	return b.String()
+}
+
 // AddedPath is a path as the scopes decide it.
 type AddedPath struct {
 	Path      string
