@@ -42,6 +42,9 @@ func TestSystemFor_FinishAlwaysAloneOnlyNonInteractive(t *testing.T) {
 	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}
 	for _, alone := range []bool{false, true} {
 		s := systemFor(tools, nil, nil, "", alone)
+		if !strings.Contains(s, "copy it first and work on the copy") {
+			t.Errorf("alone=%v: no copy-first line", alone)
+		}
 		if !strings.Contains(s, "check each requirement it states") {
 			t.Errorf("alone=%v: no finish-and-check line", alone)
 		}
