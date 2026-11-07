@@ -35,13 +35,14 @@ func (h *Harness) Rehoist(workspace string, wt *Worktree, dockerOn bool) {
 		go old.Close()
 	}
 	if dockerOn {
-		h.cfg.Exec = DockerExec{Dir: workspace, Image: image, Network: true, ExtraMounts: h.cfg.ExtraMounts}
+		h.cfg.Exec = DockerExec{Dir: workspace, Image: image, Network: true, ExtraMounts: h.cfg.ExtraMounts, TmpDir: h.isoTmp()}
 	} else {
 		// Host: persistent shell so exports survive between exec calls while
 		// the working directory resets to the project root each time.
 		h.cfg.Exec = &HostShell{Dir: workspace}
 	}
 	h.srvMu.Unlock()
+	h.restoreIsoTmp()
 	h.applyTools()
 }
 

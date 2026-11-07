@@ -621,6 +621,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// A resumed session's history is not this session's to act on: the
 	// memory triggers look only at what arrives from here on.
 	h.markTriggerScan()
+	// Saved output readable by path again, after a reboot wiped /tmp (isotmp.go).
+	h.restoreIsoTmp()
 	// Every response the engine's clients get reaches the root session's
 	// round stats, and its stats ledger (roundstats.go). A child shares the
 	// parent's meter and leaves the hook to it.

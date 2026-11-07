@@ -716,6 +716,10 @@ type DockerExec struct {
 	// sibling module referenced by go.mod replace) become accessible inside
 	// the container.
 	ExtraMounts []MountSpec
+	// TmpDir is the session's isolation tmp (isotmp.go), mounted read-only at
+	// its own path so a saved result's path means the same file in here as on
+	// the host. "" mounts nothing.
+	TmpDir string
 }
 
 // runArgs builds the `docker run` argv for one command in a container called
@@ -739,6 +743,9 @@ func (d DockerExec) runArgs(name, command string) []string {
 	}
 	if !d.Network {
 		args = append(args, "--network", "none")
+	}
+	if d.TmpDir != "" {
+		args = append(args, "-v", d.TmpDir+":"+d.TmpDir+":ro")
 	}
 	// Mount extra paths read-only at /<name>.
 	for _, m := range d.ExtraMounts {

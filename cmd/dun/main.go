@@ -611,7 +611,7 @@ func main() {
 	dockerImage := resolveDockerImage(*docker)
 	var backend dun.ExecBackend
 	if dockerImage != "" {
-		backend = dun.DockerExec{Dir: effWS, Image: dockerImage, Network: *dockerNetwork, ExtraMounts: mounts}
+		backend = dun.DockerExec{Dir: effWS, Image: dockerImage, Network: *dockerNetwork, ExtraMounts: mounts, TmpDir: dun.MkIsoTmp(sessionFile)}
 	} else {
 		// Persistent shell: exports survive between exec calls, while the
 		// working directory resets to the project root each time.

@@ -97,7 +97,7 @@ func (iso isolation) apply(cfg *Config) {
 		cfg.Worktree = &Worktree{Path: iso.Path, Branch: iso.Branch, repoRoot: iso.Repo, Mounts: cfg.ExtraMounts}
 		if iso.Mode == IsoDocker {
 			image := dockerImageOrDefault(cfg.DockerImage)
-			cfg.Exec = DockerExec{Dir: iso.Path, Image: image, Network: true, ExtraMounts: cfg.ExtraMounts}
+			cfg.Exec = DockerExec{Dir: iso.Path, Image: image, Network: true, ExtraMounts: cfg.ExtraMounts, TmpDir: MkIsoTmp(cfg.SessionFile)}
 		} else {
 			cfg.Exec = &HostShell{Dir: iso.Path}
 		}

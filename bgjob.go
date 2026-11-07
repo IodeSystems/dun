@@ -79,7 +79,7 @@ type bgJob struct {
 	mu      sync.Mutex
 	mon     bgMonitor
 	re      *regexp.Regexp
-	log     *os.File
+	log     io.WriteCloser // dualLog: the bg dir and the isolation tmp (isotmp.go)
 	early   []byte // output held in memory while the job has no log file yet
 	partial []byte // bytes since the last newline; a line is not reportable yet
 	pending []byte // matched lines not yet reported
@@ -308,9 +308,8 @@ func (j *bgJob) openLogLocked() {
 	if dir == "" {
 		return
 	}
-	path := filepath.Join(dir, fmt.Sprintf("job-%d.log", j.id))
-	f, err := os.Create(path)
-	if err != nil {
+	f, path := j.h.createBoth(fmt.Sprintf("job-%d.log", j.id))
+	if f == nil {
 		// A log we cannot open is not worth failing the job over — the output
 		// still reaches the model, it is just not grep-able.
 		return
@@ -654,21 +653,12 @@ func (h *Harness) jobsChanged() {
 // of thing: output that exists, is wanted occasionally, and must not be paid
 // for on every turn.
 func (h *Harness) spillExec(command, output string) string {
-	dir := h.bgLogDir()
-	if dir == "" {
-		return ""
-	}
 	h.bgMu.Lock()
 	h.bgSeq++
 	n := h.bgSeq
 	h.bgMu.Unlock()
-
-	path := filepath.Join(dir, fmt.Sprintf("exec-%d.out", n))
 	body := fmt.Sprintf("$ %s\n\n%s", command, output)
-	if os.WriteFile(path, []byte(body), 0o600) != nil {
-		return ""
-	}
-	return path
+	return h.saveBoth(fmt.Sprintf("exec-%d.out", n), []byte(body))
 }
 
 // bgJobByID looks a job up for the jobs tool.
