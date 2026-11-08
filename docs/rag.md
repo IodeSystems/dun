@@ -195,9 +195,9 @@ change re-queues the affected stages.
   and where their files live, and opens each with `raglit.Open(path)`. What
   dund needs from raglit: Store, Hit and the job API, stable and tagged.
 - The four indexes are **for dund itself** (USER, relayed by raglit-a4): they
-  serve dun's own work. The user's document corpora stay on raglitd. So OCR/PDF
-  extraction matters less in dund; whether it is in dund's first slice is open
-  (USER to decide).
+  serve dun's own work. The user's document corpora stay on raglitd. OCR and
+  PDF/image extraction are in dund's first slice anyway (USER, relayed by
+  raglit-a4).
 
 - Does code and document indexing move into dund too, or only memory? This
   proposal assumes both.
