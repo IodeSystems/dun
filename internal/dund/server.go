@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun/internal/ragd"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -58,6 +59,9 @@ type Server struct {
 	upgrade   func(exe, version string) error
 	noUpgrade string
 
+	// rag is retrieval (ragd), set by SetRag; nil refuses the rag commands.
+	rag *ragd.Host
+
 	mu    sync.Mutex
 	conns map[*conn]struct{}
 }
@@ -75,6 +79,9 @@ func NewServer(svc *Service, principal Principal) *Server {
 func (s *Server) SetBuild(version, exe string, upgrade func(exe, version string) error) {
 	s.version, s.exe, s.upgrade = version, exe, upgrade
 }
+
+// SetRag serves the rag commands from h. Call it before Serve.
+func (s *Server) SetRag(h *ragd.Host) { s.rag = h }
 
 // SetNoUpgrade says why Upgrade is refused (a nil upgrade in SetBuild): in
 // Hello's reply, and in the refusal.
@@ -401,6 +408,8 @@ func (c *conn) handle(cmd proto.Command) {
 			}
 		}
 		go func() { c.reply(cmd, cmd.Session, svc.OAuth(context.Background(), ses, p.OAuthReq)) }()
+	case *proto.RagSearch, *proto.RagIngest, *proto.RagJobs:
+		c.handleRag(cmd)
 	case *proto.Leave:
 		// This connection's subscription goes first, so the service counts the
 		// clients still attached without it.
@@ -429,6 +438,33 @@ func (c *conn) handle(cmd proto.Command) {
 		}
 		c.ack(cmd, cmd.Session, err)
 	}
+}
+
+// handleRag answers a rag command, off the read loop: a search embeds the
+// query, and a first ingest creates an index.
+func (c *conn) handleRag(cmd proto.Command) {
+	h := c.srv.rag
+	if h == nil {
+		c.ack(cmd, "", errors.New("retrieval is not running in this dund"))
+		return
+	}
+	go func() {
+		var out any
+		var err error
+		switch p := cmd.Payload.(type) {
+		case *proto.RagSearch:
+			out, err = h.Search(context.Background(), *p)
+		case *proto.RagIngest:
+			out, err = h.Ingest(*p)
+		case *proto.RagJobs:
+			out, err = h.Jobs(*p)
+		}
+		if err != nil {
+			c.ack(cmd, "", err)
+			return
+		}
+		c.reply(cmd, "", out)
+	}()
 }
 
 // countView keeps the connection's open sub-agent views: a view opens one,
