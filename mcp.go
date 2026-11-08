@@ -52,8 +52,9 @@ var toolDocs = map[string]string{
 	"eval": "\n\nmcpshell is a JS subset — do the whole task in ONE eval that ENDS in the value:\n" +
 		"  export let total = [1,2,3].reduce((a,b) => a + b, 0)   // export → survives to your NEXT eval; plain let/const does not\n" +
 		"  total * 2                                              // the LAST expression is the output (console.log is not the result)\n" +
-		"  [3,1,2,1] |> unique()                                  // dedup. NOT `new Set(...)` — `new` does not exist here\n" +
-		"There is no `new`/`class`/`this`/`import`/`async`. Dedup, count, sort etc. are pipe commands — help() lists them.",
+		"  [3,1,2,1] |> unique()                                  // dedup. There is no Set or Map; use unique() or an object\n" +
+		"`new` works only for Date and Intl.*. There is no `class`/`this`/`import`. async/await are accepted and do nothing. " +
+		"Dedup, count, sort etc. are pipe commands — help() lists them.",
 }
 
 // mcpToolDefs bridges discovered MCP tools into the OpenAI tool format. The MCP
