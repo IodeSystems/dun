@@ -188,8 +188,10 @@ change re-queues the affected stages.
   memories, strategies**. Strategies is new: the learned, reusable approaches
   from the learning-phase design (churn → resolved candidate → lesson), kept
   apart from memories so a lesson's retrieval is not crowded by project facts.
-- Whether OCR/PDF stays in dund's scope given text-heavy code and docs (this
-  file assumes yes, per USER earlier).
+- The four indexes are **for dund itself** (USER, relayed by raglit-a4): they
+  serve dun's own work. The user's document corpora stay on raglitd. So OCR/PDF
+  extraction matters less in dund; whether it is in dund's first slice is open
+  (USER to decide).
 
 - Does code and document indexing move into dund too, or only memory? This
   proposal assumes both.
