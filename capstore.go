@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,9 +33,11 @@ func CapsDir() string { return filepath.Join(DunHome(), "capabilities") }
 
 // capsFile is the record's file for (endpoint, model). Hashed: an endpoint is
 // a URL and a model id may hold slashes; the file itself names both.
-func capsFile(endpoint, model string) string {
+func capsFile(endpoint, model string) string { return capsFileIn(CapsDir(), endpoint, model) }
+
+func capsFileIn(dir, endpoint, model string) string {
 	sum := sha256.Sum256([]byte(endpoint + "\n" + model))
-	return filepath.Join(CapsDir(), hex.EncodeToString(sum[:8])+".json")
+	return filepath.Join(dir, hex.EncodeToString(sum[:8])+".json")
 }
 
 // capsMu serializes writes: OnLearn runs on request goroutines, and a parent
@@ -43,14 +46,20 @@ var capsMu sync.Mutex
 
 // LoadCaps is the stored record for (endpoint, model); empty when none.
 func LoadCaps(endpoint, model string) llm.Capabilities {
-	capsMu.Lock()
-	defer capsMu.Unlock()
-	return loadCapsLocked(endpoint, model)
+	return LoadCapsIn(CapsDir(), endpoint, model)
 }
 
-func loadCapsLocked(endpoint, model string) llm.Capabilities {
+// LoadCapsIn is LoadCaps from the store in dir: for dund, whose home is its
+// --home, not $DUN_HOME.
+func LoadCapsIn(dir, endpoint, model string) llm.Capabilities {
+	capsMu.Lock()
+	defer capsMu.Unlock()
+	return loadCapsLocked(dir, endpoint, model)
+}
+
+func loadCapsLocked(dir, endpoint, model string) llm.Capabilities {
 	c := llm.Capabilities{Endpoint: endpoint, Model: model, Facts: map[string]llm.Fact{}}
-	b, err := os.ReadFile(capsFile(endpoint, model))
+	b, err := os.ReadFile(capsFileIn(dir, endpoint, model))
 	if err != nil {
 		return c
 	}
@@ -72,7 +81,21 @@ func loadCapsLocked(endpoint, model string) llm.Capabilities {
 func storeSnapshot(c *llm.Client) error {
 	capsMu.Lock()
 	defer capsMu.Unlock()
-	snap := c.Capabilities()
+	return storeLocked(CapsDir(), c.Capabilities())
+}
+
+// StoreCapsIn writes the record snap to the store in dir, replacing the one
+// kept for its (endpoint, model). Host facts are not stored (storeSnapshot).
+// For a record a probe built outside a Client's traffic: dund's model roles
+// (internal/ragd/probe.go).
+func StoreCapsIn(dir string, snap llm.Capabilities) error {
+	capsMu.Lock()
+	defer capsMu.Unlock()
+	return storeLocked(dir, snap)
+}
+
+func storeLocked(dir string, snap llm.Capabilities) error {
+	snap.Facts = maps.Clone(snap.Facts)
 	for k, f := range snap.Facts {
 		if f.Source == llm.SourceHost {
 			delete(snap.Facts, k)
@@ -82,10 +105,10 @@ func storeSnapshot(c *llm.Client) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(CapsDir(), 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	p := capsFile(snap.Endpoint, snap.Model)
+	p := capsFileIn(dir, snap.Endpoint, snap.Model)
 	tmp := p + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
