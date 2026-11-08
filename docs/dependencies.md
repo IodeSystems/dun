@@ -1,17 +1,20 @@
 # Dependencies and the release cascade
 
-dun builds on one Go module and runs three tools. Each has its own repo and,
-except agentkit, its own Claude session that owns it. dun asks the owner; it
-does not tag, push or edit another repo unless the owner (Carl) says so.
+dun builds on Go modules and runs three tools. Each has its own repo and its
+own Claude session that owns it. dun asks the owner; it does not tag, push or
+edit another repo unless the owner (Carl) says so. The procedure is the
+`/release` skill (`.claude/skills/release/SKILL.md`).
 
 | | kind | how dun pins it | owner session | aw4 project |
 |---|---|---|---|---|
-| agentkit | Go module (engine) | `go.mod` | none: dun-a8 edits it, with Carl's OK per change | — |
-| mcpshell | binary, spawned | `release/supported.go` + `release/deps.json` | mcpshell-ea | mcpshell |
-| poly-lsp-mcp | binary, spawned (shared daemon) | same | poly-lsp-mcp-78 | poly-lsp-mcp |
-| raglit | binary, spawned | same | raglit-a2 | raglit |
+| agentkit | Go module (engine) | `go.mod` | agentkit-f2 (changes go through it, not committed by dun) | — |
+| openai-claude-api-shim | Go module (dun imports it directly) | `go.mod` | agentkit-f2 | — |
+| mcpshell | binary, spawned | `release/supported.go` + `release/deps.json` | mcpshell-5c | mcpshell |
+| poly-lsp-mcp | binary, spawned (shared daemon) | same | poly-lsp-mcp-1c | poly-lsp-mcp |
+| raglit | binary, spawned | same | raglit-a4 | raglit |
+| corrallm | the gateway, not pinned | — | corrallm-2c | — |
 
-Session names are as of 2026-10-24; `ListAgents` shows the current ones.
+Session names are as of 2026-11-08; `ListAgents` shows the current ones.
 
 ## What each pin means
 
@@ -39,7 +42,7 @@ Order: agentkit, then the three tools (independent of each other), then dun.
    and `gh run list` yourself first so the question is specific.
 2. **agentkit.** If dun needs unreleased agentkit commits: Carl approves, push,
    tag `vX.Y.Z`, then `go get github.com/iodesystems/agentkit@vX.Y.Z` in dun.
-3. **Tools.** The owner tags; its CI publishes the tarballs. Then in dun:
+3. **Tools.** The owner tags and uploads the tarballs (mcpshell: `make release` and `gh release upload` from a clean checkout; its CI only tests). Then in dun:
    set `Recommended` (and `Min` if needed) with a comment saying what the
    version brings, fill `deps.json` from the published tarballs, run
    `go test ./release/` and `make test`.
