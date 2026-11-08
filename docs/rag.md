@@ -1,6 +1,7 @@
 # Retrieval in dund (ragcore)
 
-Status: slice 2 is built (below, "Built: slice 2"); the rest is a proposal.
+Status: slices 2 and 3 are built (below, "Built: slice 2", "Built: slice 3");
+the rest is a proposal.
 dun's retrieval (memory notes, proactive surfacing of
 docs and code) runs on raglit today, as a separate server and a bundled
 extension that is off unless `/rag on`. So persistent memory is effectively off:
@@ -107,7 +108,7 @@ re-index.
    likelier first storage change, before a second backend.
 4. **The vector dimension belongs to the embedding model.** Record the model id
    and dimension per index, refuse a write that does not match, and re-embed as
-   a job when the model changes. Never mix spaces.
+   a job when the model changes. Never mix spaces. Built in slice 3 (below).
 5. **Originals outside the database**: source PDFs and images on the
    filesystem or an object store, by content hash. The DB keeps text and
    metadata, and dedup comes free.
@@ -148,7 +149,7 @@ change re-queues the affected stages.
 | OCR (vision model or tesseract) | scans, images → text | indexed by filename and caption, and said so |
 | fragmenter | semantic segmentation of unstructured documents | rule-based: headings, code symbols, paragraphs |
 
-**Probes** (extending `/model probe`):
+**Probes** (extending `/model probe`; built, "Built: slice 3"):
 
 - **embedding**: dimension, batch limit, latency, the same vector for the same input;
 - **OCR**: a fixture image with known text, scored by character error rate;
@@ -228,12 +229,66 @@ other way to make the `*Embedder` that `SetEmbedder` takes),
 tags). Ingest is always a queued job; a direct `Store.Ingest` needs
 `Document` and `Fragment` fields, which are not pinned either.
 
+## Built: slice 3
+
+**Probes**: `dun dund rag probe [embed|vision|segment|identity]` (no role:
+all four), or `/model probe <role>` in a session. Each spends a few
+requests on the role's model and writes facts with source `probed` into
+agentkit's capability record for that (endpoint, model), the file
+`/model probe` writes (`$DUN_HOME/capabilities`). The record is an open
+keyed map, so these are new keys, not a new format:
+
+| role | key | measures |
+|---|---|---|
+| embed | `embed.dimension` | length of one vector |
+| | `embed.batch_max` | largest of 1, 8, 32, 64 inputs per request accepted; stops at the first failure (evidence names it) |
+| | `embed.latency` | wall time per request, by batch size (`1:40ms 8:55ms …`) |
+| | `embed.deterministic` | the same input twice gives cosine >= 0.9999 |
+| vision | `ocr.cer` | character error rate reading a generated PNG (basicfont, 4x; no binary in the tree) of two known lines |
+| segment | `segment.schema` | raglit's own `Segmenter` (its `emit_fragments` schema and fix loop) on a two-topic fixture: true when it validated without the fallback and the fragments hold >= 80% of the words; false says why |
+| identity | the chat keys | agentkit's `ProbeCapabilities`, as `/model probe` |
+
+The probe runs in the CLI, not in dund: roles are a pure function of
+`config.json` (`Resolve`), and a probe should not need dund running. A
+failure of one embed input stops the embed probe with nothing recorded.
+
+Measured 2026-11-08, `local-nomic-embed-text` on the gateway: dimension
+768, batch 64 accepted, latency 1:1552ms (first call, model load) 8:41ms
+32:139ms 64:243ms, deterministic (cosine 1.000000).
+
+**Index model record**: each index records the embed model its vectors came
+from (raglit's `index_meta` `embed_model`, which raglit already keeps) and
+their dimension (`index_meta` `embed_dim`, dund's key; raglit has none).
+The dimension is the probed `embed.dimension`; never probed, only the
+model id is compared. On open:
+
+- no record: the index adopts the embed role (raglit's rule);
+- record matches: the embedder is attached; fragments with no vector
+  (ingested while embed was off, or a cut-off re-embed) are embedded in the
+  background;
+- record differs (model id, or a known dimension): no embedder. No vector is
+  written to it and a hybrid search runs as FTS with a note naming both
+  models. dund logs it once.
+
+`dun dund rag reembed --index …` (socket `rag_reembed` → `rag_reembedding`)
+drops the old vectors (`SyncEmbedModel`), records the role's model and
+dimension, attaches the embedder and embeds every fragment in the
+background (`BackfillVectors`, 64 at a time). Not a raglit queue job: the
+pinned API has none. It resumes across restarts because open backfills
+whatever has no vector. A dimension change under the same model id is
+refused: `SyncEmbedModel` drops vectors only for another model id.
+
+**raglit exports used, not pinned by api_test.go** (new in slice 3):
+`Store.EmbedModel`, `Store.SyncEmbedModel`, `Store.BackfillVectors`,
+`Store.MissingVectors`, `Store.Meta`, `Store.SetMeta`, `NewSegmenter`,
+`Segmenter.SegmentText`, `SegResult.Degraded`.
+
 ## Slices
 
 1. raglit: split attest into types and service; semver tags (raglit's call).
 2. dund hosts ragcore: the socket API for search, the job runner, config.
    Built (above); branch commands are not.
-3. Model-role configuration and the four probes.
+3. Model-role configuration and the four probes. Built (above).
 4. Field filters before ranking (needed by memory).
 5. dun memory and surfacing move to dund; `/rag on` stops being needed for memory.
 6. ANN vector index, when an index outgrows the scan.
