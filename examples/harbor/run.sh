@@ -8,7 +8,8 @@
 # DUN_EFFORT (low), DUN_PRICE_IN/CACHED/OUT (USD per 1M tokens), BUDGET (0.80),
 # ATTEMPTS (1, harbor -k), OUT (a jobs dir to add to; default a new one),
 # DUN_HARBOR_BIN (the binaries to upload; default ./bin), HARBOR_ARGS (more harbor
-# run flags, e.g. "--agent-timeout-multiplier 3" for a slower model).
+# run flags, e.g. "--agent-timeout-multiplier 3" for a slower model),
+# DUN_MEMORY (0: memory off; set 1 for a run that wants it).
 #
 # A clear error stops the run (exit 2): a trial exception other than an agent
 # timeout, or dun ending before its first model request. Those are the harness's
