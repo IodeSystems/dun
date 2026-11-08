@@ -338,6 +338,7 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 // each said once.
 func openRag(home string) (*ragd.Host, error) {
 	roles := ragd.Resolve(dunconfig.LoadConfigFile(filepath.Join(home, "config.json")))
+	roles.CapsDir = filepath.Join(home, "capabilities")
 	for _, line := range roles.Said {
 		fmt.Fprintln(os.Stderr, "dund: rag:", line)
 	}

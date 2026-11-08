@@ -10,6 +10,12 @@
 // its first ingest. Indexes already on disk are opened at start, so jobs
 // queued before a restart run again; a search or a job list of an index that
 // does not exist answers empty and creates nothing.
+//
+// The index model record (docs/rag.md, storage item 4): each index records
+// the embed model its vectors came from (raglit's index_meta embed_model)
+// and their dimension (index_meta embed_dim, dund's key). An index whose
+// record differs from the embed role gets no embedder: no vector is written
+// to it and it is searched by text only, until Reembed.
 package ragd
 
 import (
@@ -22,6 +28,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,14 +56,26 @@ type Host struct {
 	root   string
 	models raglit.Models
 	embed  *raglit.Embedder // nil: FTS only
+	dim    int              // the embed model's probed dimension; 0 when not probed
 	ident  *raglit.Identifier
 	runner *raglit.Runner
 	logf   func(string, ...any)
 
-	mu     sync.Mutex
-	stores map[string]*raglit.Store // by "<dir>/<index>"
-	closed bool
+	// bg bounds the vector backfills; Close cancels it and waits on fills.
+	bg     context.Context
+	stopBg context.CancelFunc
+	fills  sync.WaitGroup
+
+	mu      sync.Mutex
+	stores  map[string]*raglit.Store // by "<dir>/<index>"
+	stale   map[string]string        // index → why its vectors are not the embed role's
+	filling map[string]bool          // index → a backfill runs
+	closed  bool
 }
+
+// metaEmbedDim is the index_meta key of the vectors' dimension. raglit
+// records the model (embed_model) but not the dimension.
+const metaEmbedDim = "embed_dim"
 
 // Open opens the indexes under root that exist and starts the runner. r is
 // the model roles (Resolve); its Channels is set here when nil.
@@ -71,13 +90,18 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 	if m.Channels == nil {
 		m.Channels = raglit.NewChannels()
 	}
-	h := &Host{root: root, models: m, logf: logf, stores: map[string]*raglit.Store{}}
+	h := &Host{root: root, models: m, logf: logf, stores: map[string]*raglit.Store{},
+		stale: map[string]string{}, filling: map[string]bool{}}
+	h.bg, h.stopBg = context.WithCancel(context.Background())
 	if m.Embed.Model != "" {
 		h.embed = raglit.NewEmbedder(llm.NewClient(m.Embed.BaseURL, m.Embed.APIKey, m.Embed.Model), m.Embed.Model)
+		h.dim = embedDimension(r.CapsDir, m.Embed)
 	}
 	h.ident = m.Identifier()
 	for _, name := range onDisk(root) {
 		if _, err := h.open(name); err != nil {
+			h.stopBg()
+			h.fills.Wait()
 			h.closeStores()
 			return nil, err
 		}
@@ -207,10 +231,155 @@ func (h *Host) open(name string) (*raglit.Store, error) {
 	}
 	// Both before the runner can see the store: search embeds queries through
 	// the embedder, and the caption queue drains only where an identifier is.
-	st.SetEmbedder(h.embed)
+	h.attachEmbed(name, st)
 	st.SetIdentifier(h.ident)
 	h.stores[name] = st
 	return st, nil
+}
+
+// attachEmbed gives st the embedder when its record matches the embed role,
+// under h.mu. An index with no record adopts the role's model (raglit's
+// rule: its vectors are from the model configured when they were made). A
+// match with fragments that have no vector (ingested while embed was off,
+// or a re-embed cut off by a stop) starts a backfill.
+func (h *Host) attachEmbed(name string, st *raglit.Store) {
+	if h.embed == nil {
+		st.SetEmbedder(nil)
+		return
+	}
+	have := st.EmbedModel()
+	haveDim := metaInt(st, metaEmbedDim)
+	if have != "" && (have != h.embed.Model || haveDim > 0 && h.dim > 0 && haveDim != h.dim) {
+		why := fmt.Sprintf("its vectors are from %s%s, the embed role is %s%s",
+			have, dimSaid(haveDim), h.embed.Model, dimSaid(h.dim))
+		h.stale[name] = why
+		st.SetEmbedder(nil)
+		h.logf("dund: rag: %s: %s: no vectors are written to it and it is searched by text only; `dun dund rag reembed` rebuilds them", name, why)
+		return
+	}
+	if have == "" {
+		if _, err := st.SyncEmbedModel(h.embed.Model); err != nil {
+			h.logf("dund: rag: %s: embed model record: %v", name, err)
+		}
+	}
+	if haveDim == 0 && h.dim > 0 {
+		if err := st.SetMeta(metaEmbedDim, strconv.Itoa(h.dim), time.Now().Unix()); err != nil {
+			h.logf("dund: rag: %s: embed dimension record: %v", name, err)
+		}
+	}
+	st.SetEmbedder(h.embed)
+	h.backfillLocked(name, st)
+}
+
+func dimSaid(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (dimension %d)", n)
+}
+
+func metaInt(st *raglit.Store, key string) int {
+	v, _ := st.Meta(key)
+	n, _ := strconv.Atoi(v)
+	return n
+}
+
+// backfillLocked embeds, in the background, every fragment of st that has no
+// vector, under h.mu. One fill per index at a time; a failure stops it until
+// the next open or Reembed.
+func (h *Host) backfillLocked(name string, st *raglit.Store) {
+	if h.filling[name] {
+		return
+	}
+	if n, err := st.MissingVectors(); err != nil || n == 0 {
+		return
+	}
+	h.filling[name] = true
+	h.fills.Add(1)
+	go func() {
+		defer h.fills.Done()
+		total := 0
+		for h.bg.Err() == nil {
+			n, err := st.BackfillVectors(h.bg, 64)
+			if err != nil {
+				if h.bg.Err() == nil {
+					h.logf("dund: rag: %s: embedding stopped after %d fragments: %v", name, total, err)
+				}
+				break
+			}
+			if n == 0 {
+				break
+			}
+			total += n
+		}
+		if total > 0 {
+			h.logf("dund: rag: %s: embedded %d fragments that had no vector", name, total)
+		}
+		h.mu.Lock()
+		delete(h.filling, name)
+		h.mu.Unlock()
+	}()
+}
+
+// Reembed brings an index's vectors to the embed role: vectors from another
+// model are dropped, the record is set to the role's model and dimension, the
+// embedder is attached, and the fragments with no vector are embedded in the
+// background.
+func (h *Host) Reembed(q proto.RagReembed) (*proto.RagReembedding, error) {
+	name, err := Name(q.Project, q.Index)
+	if err != nil {
+		return nil, err
+	}
+	if h.embed == nil {
+		return nil, errNoEmbed
+	}
+	st, err := h.store(name, false)
+	if err != nil {
+		return nil, err
+	}
+	if st == nil {
+		return nil, fmt.Errorf("rag: no index %s yet", name)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return nil, errors.New("rag: dund is stopping")
+	}
+	if st.EmbedModel() == h.embed.Model {
+		if d := metaInt(st, metaEmbedDim); d > 0 && h.dim > 0 && d != h.dim {
+			// SyncEmbedModel drops vectors only for another model id.
+			return nil, fmt.Errorf("rag: %s: vectors of dimension %d from %s, which now gives %d: raglit has no call that drops vectors of the same model", name, d, h.embed.Model, h.dim)
+		}
+	}
+	dropped, err := st.SyncEmbedModel(h.embed.Model)
+	if err != nil {
+		return nil, err
+	}
+	dim := ""
+	if h.dim > 0 {
+		dim = strconv.Itoa(h.dim)
+	}
+	if err := st.SetMeta(metaEmbedDim, dim, time.Now().Unix()); err != nil {
+		return nil, err
+	}
+	delete(h.stale, name)
+	st.SetEmbedder(h.embed)
+	missing, err := st.MissingVectors()
+	if err != nil {
+		return nil, err
+	}
+	if dropped {
+		h.logf("dund: rag: %s: dropped vectors from another model; embedding %d fragments with %s", name, missing, h.embed.Model)
+	}
+	h.backfillLocked(name, st)
+	return &proto.RagReembedding{Index: name, Model: h.embed.Model, Dim: h.dim, Dropped: dropped, Missing: missing}, nil
+}
+
+// staleWhy is why name's vectors are not the embed role's; "" when they are.
+func (h *Host) staleWhy(name string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.stale[name]
 }
 
 // Search runs q on its index.
@@ -243,6 +412,9 @@ func (h *Host) Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, e
 	var hits []raglit.Hit
 	if mode == "hybrid" && h.embed == nil {
 		mode, out.Note = "fts", "no embed model (facets.embed): searched by text only"
+	}
+	if why := h.staleWhy(name); mode == "hybrid" && why != "" {
+		mode, out.Note = "fts", "searched by text only: "+why+"; `dun dund rag reembed` rebuilds the vectors"
 	}
 	if mode == "hybrid" {
 		hits, err = st.HybridSearchFiltered(ctx, q.Query, f, limit)
@@ -364,6 +536,8 @@ func (h *Host) Close(grace time.Duration) bool {
 	h.mu.Unlock()
 	ok := h.runner.Drain(grace)
 	h.runner.CutOff() // the identity queue, which Drain leaves running
+	h.stopBg()
+	h.fills.Wait()
 	h.closeStores()
 	return ok
 }

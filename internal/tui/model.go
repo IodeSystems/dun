@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/ragd"
 	"github.com/iodesystems/dun/internal/textfmt"
 	shim "github.com/iodesystems/openai-claude-api-shim"
 )
@@ -81,8 +82,12 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	persist := !slices.Contains(args, "--session")
 	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "--session" })
 	switch {
-	case len(args) == 1 && (args[0] == "caps" || args[0] == "probe"):
-		// What the model is known to do, and the check: the engine's.
+	case len(args) == 1 && (args[0] == "caps" || args[0] == "probe"),
+		len(args) == 2 && args[0] == "probe" && slices.Contains(ragd.Facets, args[1]):
+		// What the model is known to do, and the check: the engine's. With a
+		// retrieval role (embed, vision, segment, identity), that role's
+		// probe (internal/ragd/probe.go). A provider named "probe" is
+		// reached with /model use.
 		return engineSlash("model")(m, args)
 	case len(args) >= 1 && args[0] == "use":
 		if len(args) != 3 {

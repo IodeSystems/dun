@@ -11,8 +11,11 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/iodesystems/agentkit/llm"
 	"github.com/spf13/cobra"
 
+	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/ragd"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -27,9 +30,14 @@ func ragCmd(l *loader) *cobra.Command {
 			"the global set (no --project) has memories and strategies.",
 	}
 	cmd.PersistentFlags().StringVar(&project, "project", "", "the project's slug (default: the global set)")
-	cmd.PersistentFlags().StringVar(&index, "index", "", "code, docs, memories or strategies (required)")
+	cmd.PersistentFlags().StringVar(&index, "index", "", "code, docs, memories or strategies (required but by probe)")
 	cmd.PersistentFlags().BoolVar(&asJSON, "json", false, "print the reply as JSON")
-	_ = cmd.MarkPersistentFlagRequired("index")
+	needIndex := func() error {
+		if index == "" {
+			return errors.New(`required flag "index" not set`)
+		}
+		return nil
+	}
 
 	show := func(v any, text func() error) error {
 		if asJSON {
@@ -49,6 +57,9 @@ func ragCmd(l *loader) *cobra.Command {
 		Short: "search an index",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if err := needIndex(); err != nil {
+				return err
+			}
 			l.load()
 			var out proto.RagHits
 			q := &proto.RagSearch{Project: project, Index: index, Query: strings.Join(args, " "), Mode: mode, Limit: limit,
@@ -87,6 +98,9 @@ func ragCmd(l *loader) *cobra.Command {
 		Short: "queue a file or URL for an index (the index is made on first use)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if err := needIndex(); err != nil {
+				return err
+			}
 			l.load()
 			q := &proto.RagIngest{Project: project, Index: index, Title: title, Tags: itags}
 			if strings.Contains(args[0], "://") {
@@ -118,6 +132,9 @@ func ragCmd(l *loader) *cobra.Command {
 		Short: "list an index's ingest jobs, newest first",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := needIndex(); err != nil {
+				return err
+			}
 			l.load()
 			var out proto.RagJobList
 			if err := ragCall(l, &proto.RagJobs{Project: project, Index: index, State: state, Limit: jlimit}, &out); err != nil {
@@ -136,7 +153,98 @@ func ragCmd(l *loader) *cobra.Command {
 	jobs.Flags().StringVar(&state, "state", "", "pending, running, done or error (default: all)")
 	jobs.Flags().IntVar(&jlimit, "limit", 20, "most jobs")
 
-	cmd.AddCommand(search, ingest, jobs)
+	reembed := &cobra.Command{
+		Use:   "reembed",
+		Short: "rebuild an index's vectors with the configured embed model",
+		Long: "An index records the embed model and dimension its vectors came from. When the\n" +
+			"embed role (facets.embed) differs, dund searches the index by text only and writes\n" +
+			"no vectors to it. reembed drops the old vectors, records the new model, and embeds\n" +
+			"every fragment again in the background (dund's log says when it is done).",
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := needIndex(); err != nil {
+				return err
+			}
+			l.load()
+			var out proto.RagReembedding
+			if err := ragCall(l, &proto.RagReembed{Project: project, Index: index}, &out); err != nil {
+				return err
+			}
+			return show(out, func() error {
+				what := "kept its vectors"
+				if out.Dropped {
+					what = "dropped its old vectors"
+				}
+				fmt.Printf("%s: %s; embed model %s%s; %d fragments to embed\n", out.Index, what, out.Model, dimSaid(out.Dim), out.Missing)
+				return nil
+			})
+		},
+	}
+
+	probe := &cobra.Command{
+		Use:   "probe [" + strings.Join(ragd.Facets, "|") + "]",
+		Short: "probe the retrieval model roles (all, or one) and record the results",
+		Long: "Each role's probe spends a few requests on its model and writes what it measured\n" +
+			"to the capability record (<home>/capabilities, the record /model probe writes):\n" +
+			"  embed     dimension, largest batch of 1/8/32/64, latency per batch, same vector twice\n" +
+			"  vision    character error rate reading a generated image of known text\n" +
+			"  segment   raglit's segmenter on a fixture document: valid fragments or why not\n" +
+			"  identity  the chat probes of /model probe\n" +
+			"Runs here, not in dund: the roles come from <home>/config.json's facets.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			l.load()
+			facet := ""
+			if len(args) == 1 {
+				facet = args[0]
+			}
+			cfg := dunconfig.LoadConfigFile(filepath.Join(l.home, "config.json"))
+			res, err := ragd.Probe(c.Context(), cfg, filepath.Join(l.home, "capabilities"), facet)
+			if err != nil {
+				return err
+			}
+			failed := false
+			for i, r := range res {
+				if r.Err != nil {
+					failed = true
+				}
+				if asJSON {
+					continue
+				}
+				if i > 0 {
+					fmt.Println()
+				}
+				fmt.Println(r.Report())
+			}
+			if asJSON {
+				type row struct {
+					Facet string           `json:"facet"`
+					Said  string           `json:"said"`
+					Caps  llm.Capabilities `json:"caps,omitzero"`
+					Error string           `json:"error,omitempty"`
+				}
+				var rows []row
+				for _, r := range res {
+					x := row{Facet: r.Facet, Said: r.Said, Caps: r.Caps}
+					if r.Err != nil {
+						x.Error = r.Err.Error()
+					}
+					rows = append(rows, x)
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(rows); err != nil {
+					return err
+				}
+			}
+			if failed {
+				return errors.New("a probe stopped")
+			}
+			return nil
+		},
+	}
+
+	cmd.AddCommand(search, ingest, jobs, reembed, probe)
 	return cmd
 }
 
@@ -174,6 +282,13 @@ func ragCall(l *loader, payload any, out any) error {
 		}
 		return json.Unmarshal(b, out)
 	}
+}
+
+func dimSaid(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (dimension %d)", n)
 }
 
 // oneLine is s on one line, cut to n runes.

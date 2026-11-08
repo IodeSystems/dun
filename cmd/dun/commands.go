@@ -286,7 +286,8 @@ func routeSlash(line string, r slashRoutes) {
 	case "effort":
 		r.control(name, arg(0))
 	case "model":
-		r.control(name, arg(0))
+		// probe takes a retrieval role: /model probe embed (capscmd.go).
+		r.control(name, strings.TrimSpace(arg(0)+" "+arg(1)))
 	case "file":
 		// The path as typed: its case matters.
 		switch {

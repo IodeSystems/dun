@@ -9,9 +9,11 @@ func init() {
 	command[RagSearch]("rag_search")
 	command[RagIngest]("rag_ingest")
 	command[RagJobs]("rag_jobs")
+	command[RagReembed]("rag_reembed")
 	event[RagHits]("rag_hits")
 	event[RagIngested]("rag_ingested")
 	event[RagJobList]("rag_jobs")
+	event[RagReembedding]("rag_reembedding")
 }
 
 // RagFilter limits a search before ranking. Every constraint must hold.
@@ -96,4 +98,27 @@ type RagJob struct {
 // RagJobList answers RagJobs.
 type RagJobList struct {
 	Jobs []RagJob `json:"jobs"`
+}
+
+// RagReembed rebuilds an index's vectors with the embed model dund is
+// configured with (facets.embed). An index records the embed model and
+// dimension its vectors came from; when they differ from the configured
+// one, dund searches that index by text only and writes no vectors to it
+// until this runs. Vectors from another model are dropped, then every
+// fragment with no vector is embedded in the background. Answered with
+// RagReembedding.
+type RagReembed struct {
+	Project string `json:"project,omitempty"`
+	Index   string `json:"index"`
+}
+
+// RagReembedding answers RagReembed: the model the index now records,
+// whether its old vectors were dropped, and how many fragments wait for a
+// vector (the background work).
+type RagReembedding struct {
+	Index   string `json:"index"`
+	Model   string `json:"model"`
+	Dim     int    `json:"dim,omitempty"`
+	Dropped bool   `json:"dropped,omitempty"`
+	Missing int    `json:"missing"`
 }

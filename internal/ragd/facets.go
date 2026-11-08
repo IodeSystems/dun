@@ -14,6 +14,10 @@ type Roles struct {
 	Models raglit.Models
 	// Said is one line per role: its model and provider, or why it is off.
 	Said []string
+	// CapsDir is the capability store (<home>/capabilities), where the role
+	// probes record what they measured; dund reads the embed dimension
+	// from it. Empty: not read.
+	CapsDir string
 }
 
 // Resolve turns the config's facets into raglit's model roles. A facet names

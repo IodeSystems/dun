@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/ragd"
 )
 
 // capsClient is the session's main client, for /model and /model probe. The
@@ -29,5 +32,14 @@ func capsControl(ctx context.Context, action string) string {
 		}
 		return msg
 	}
-	return "usage: /model caps | /model probe"
+	// A retrieval role, as dund resolves it from the config's facets
+	// (docs/rag.md, Model roles).
+	if facet, ok := strings.CutPrefix(action, "probe "); ok {
+		res, err := ragd.Probe(ctx, dunconfig.LoadConfig(), dun.CapsDir(), facet)
+		if err != nil {
+			return err.Error()
+		}
+		return res[0].Report()
+	}
+	return "usage: /model caps | /model probe [" + strings.Join(ragd.Facets, "|") + "]"
 }

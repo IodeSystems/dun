@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,10 @@ func TestRagCommandsOverTheSocket(t *testing.T) {
 	ing := a.until(func(ev proto.Event) bool { return ev.Re == "r1" })
 	if _, ok := ing.Payload.(*proto.RagIngested); !ok {
 		t.Fatalf("ingest answered %s %+v", ing.Type, ing.Payload)
+	}
+	a.send("r1b", "", &proto.RagReembed{Project: "dun", Index: "docs"})
+	if p, ok := a.until(func(ev proto.Event) bool { return ev.Re == "r1b" }).Payload.(*proto.Ack); !ok || !strings.Contains(p.Error, "no embed model") {
+		t.Fatalf("rag_reembed with no embed model: %+v", p)
 	}
 	a.send("r2", "", &proto.RagSearch{Project: "dun", Index: "bogus", Query: "narwhal"})
 	if p, ok := a.until(func(ev proto.Event) bool { return ev.Re == "r2" }).Payload.(*proto.Ack); !ok || p.Error == "" {
