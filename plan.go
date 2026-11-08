@@ -196,6 +196,7 @@ func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Contex
 func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string) {
 	def, handle := taskgraph.Tool(planStore{h}, "",
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
+			h.planMoved(cs) // the stall window (plannudge.go)
 			h.planTell(cs, "the main agent", "")
 		}))
 	def.Function.Description = planDescFor(h.cfg.NonInteractive)

@@ -75,6 +75,7 @@ func (h *Harness) noteUsage(u agent.TokenUsage) {
 	h.maybeNudgeRecap(u.Active)
 	h.noteTurnRound()
 	h.planNudgeRound() // after the count it reads (plannudge.go)
+	h.planStallRound() // the same count
 	if h.self == nil {
 		return
 	}

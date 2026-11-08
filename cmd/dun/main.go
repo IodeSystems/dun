@@ -274,6 +274,7 @@ func main() {
 	turnLimit := flag.Int("tool-call-turn-limit", 0, "the most tool-call rounds one turn may make (0: DUN_MAX_TURNS, else 400); the model is told it, and warned at 80%")
 	settleDelay := flag.Duration("settle-delay", 0, "interactive: how long after a turn that used tools, with no reply and no sign of the person at the TUI, the agent is woken to report what is done, left, or needs them (0 is off; unset: DUN_SETTLE_DELAY, else 2m)")
 	planNudgeRounds := flag.Int("plan-nudge-rounds", 0, "after this many rounds in a turn with no open plan node, the main agent is made to write the plan, once per turn (0 is off; unset: DUN_PLAN_NUDGE_ROUNDS, else 25)")
+	planStallRounds := flag.Int("plan-stall-rounds", 0, "after this many rounds in a turn with open plan nodes and no node moved, the main agent is made to update the plan, at most 3 times per turn (0 is off; unset: DUN_PLAN_STALL_ROUNDS, else 30)")
 	planNudgeFails := flag.Int("plan-nudge-fails", 0, "after this many failed tool results in a row with no open plan node, the main agent is made to write the plan, once per turn (0 is off; unset: DUN_PLAN_NUDGE_FAILS, else 4)")
 	nonInteractive := flag.Bool("non-interactive", false, "with -p: a run no one answers or reads along (a script, a benchmark): no ask_user, and the model is told it is on its own")
 	tuiFlag := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
@@ -722,6 +723,7 @@ func main() {
 		SettleDelay:     settleDelayFlag(*settleDelay),
 		PlanNudgeRounds: intFlagOff("plan-nudge-rounds", *planNudgeRounds),
 		PlanNudgeFails:  intFlagOff("plan-nudge-fails", *planNudgeFails),
+		PlanStallRounds: intFlagOff("plan-stall-rounds", *planStallRounds),
 		EffortOff:       effortOff(fc, *url),
 		SessionFile:     sessionFile,
 		Persist:         *persistFlag,

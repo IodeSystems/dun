@@ -127,16 +127,24 @@ func execs(cmd string, upto int, plan bool) func(int, bool) *llm.ToolCall {
 	}
 }
 
+// startNudge starts a session with the stalled-plan nudge off, so these tests
+// see the no-plan nudge alone.
 func startNudge(t *testing.T, r *nudgeRunner, rounds, fails int) *Harness {
+	t.Helper()
+	return startStall(t, r, rounds, fails, -1)
+}
+
+func startStall(t *testing.T, r *nudgeRunner, rounds, fails, stall int) *Harness {
 	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
 	t.Setenv("DUN_PLAN_NUDGE_ROUNDS", "")
 	t.Setenv("DUN_PLAN_NUDGE_FAILS", "")
+	t.Setenv("DUN_PLAN_STALL_ROUNDS", "")
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir, Servers: []Server{}, Client: r, Exec: &HostShell{Dir: dir},
 		SessionFile:     filepath.Join(dir, "s.jsonl"),
-		PlanNudgeRounds: rounds, PlanNudgeFails: fails,
+		PlanNudgeRounds: rounds, PlanNudgeFails: fails, PlanStallRounds: stall,
 	})
 	if err != nil {
 		t.Fatal(err)

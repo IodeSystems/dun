@@ -85,8 +85,10 @@ class Dun(BaseInstalledAgent):
         if os.environ.get("DUN_MAX_TURNS"):
             env["DUN_MAX_TURNS"] = os.environ["DUN_MAX_TURNS"]
         # When dun makes the model write the plan: after N rounds with no plan
-        # (default 25), or K failed tool results in a row (default 4); 0 is off.
-        for var in ("DUN_PLAN_NUDGE_ROUNDS", "DUN_PLAN_NUDGE_FAILS"):
+        # (default 25), or K failed tool results in a row (default 4); and when
+        # it makes the model update a plan no node of which moved in S rounds
+        # (default 30). 0 is off.
+        for var in ("DUN_PLAN_NUDGE_ROUNDS", "DUN_PLAN_NUDGE_FAILS", "DUN_PLAN_STALL_ROUNDS"):
             if os.environ.get(var):
                 env[var] = os.environ[var]
         event = json.dumps({"type": "user", "content": instruction})

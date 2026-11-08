@@ -173,6 +173,11 @@ type Config struct {
 	// --plan-nudge-fails; 0 is DUN_PLAN_NUDGE_ROUNDS / DUN_PLAN_NUDGE_FAILS,
 	// else 25 and 4; negative is off; plannudge.go).
 	PlanNudgeRounds, PlanNudgeFails int
+	// PlanStallRounds is when the main agent is made to update a plan that has
+	// open nodes but no node moved in this many rounds, at most 3 times a turn
+	// (--plan-stall-rounds; 0 is DUN_PLAN_STALL_ROUNDS, else 30; negative is
+	// off; plannudge.go).
+	PlanStallRounds int
 	// EffortOff is what off is sent as, for a model that cannot stop
 	// thinking (dunconfig.ProviderConfig.EffortOff); "" sends off.
 	EffortOff string
