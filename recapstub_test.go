@@ -88,6 +88,17 @@ func TestRecapStub_ListsEachRemovedCallWithAReadablePath(t *testing.T) {
 		{"file_read", `{"path":"/src/main.go"}`, "ok", "package main"},
 		{"node_query", `{"q":"x"}`, "ERROR", "ERROR: no such node"},
 	}
+	// One directory, stated once in the header; each line names only its file.
+	dir := IsoTmpDir(h.cfg.SessionFile)
+	if !strings.Contains(text, recapStubHead+recapStubDir+dir+"/:") {
+		t.Fatalf("the header does not name the files' directory %q:\n%s", dir, text)
+	}
+	for i := range m {
+		if strings.Contains(m[i][5], "/") {
+			t.Errorf("stub %d repeats a path, want a bare file name: %q", i, m[i][5])
+		}
+		m[i][5] = filepath.Join(dir, m[i][5])
+	}
 	for i, w := range want {
 		g := m[i]
 		if g[1] != w.tool || g[2] != w.args || g[3] != w.outcome || g[4] != fmt.Sprint(len(w.result)) {

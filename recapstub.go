@@ -32,8 +32,14 @@ const recapStubMax = 40
 const recapArgsMax = 80
 
 // recapStubHead opens the stub list in the replacement. Also how a later recap
-// in the same turn finds the lines of an earlier one and carries them on.
-const recapStubHead = "Calls removed from context (outcome, result size, file with the result; read it with file_read):"
+// in the same turn finds the lines of an earlier one and carries them on. The
+// directory the result files are in follows it once (recapStubDir), and each
+// line names only its file (USER 2026-11-08: "abs path can be single prefix"):
+// an absolute path per line cost ~15-20 of a stub's ~35-50 tokens.
+const recapStubHead = "Calls removed from context (outcome, result size, result file; read it with file_read)"
+
+// recapStubDir introduces the one directory all of a list's files are in.
+const recapStubDir = " — files in "
 
 // removedCall is one tool call a recap takes out, with its result.
 type removedCall struct {
@@ -165,8 +171,8 @@ func (h *Harness) saveRemoved(calls []removedCall, tag string) []stubLine {
 		}
 		body := head + "\n\n" + rc.Result.Content
 		path := h.saveBoth(fmt.Sprintf("%s-%d.out", tag, k+1), []byte(body))
-		where := path
-		if where == "" {
+		where := filepath.Base(path)
+		if path == "" {
 			where = "(not saved)"
 		}
 		oc := h.callOutcome(rc)
@@ -187,9 +193,14 @@ func carriedStubs(subsumed []agent.Entry) (lines []stubLine, counts []string) {
 		if e.Kind != agent.KindAssistant {
 			continue
 		}
-		_, block, ok := strings.Cut(e.Content, recapStubHead+"\n")
+		_, rest, ok := strings.Cut(e.Content, recapStubHead)
 		if !ok {
 			continue
+		}
+		head, block, _ := strings.Cut(rest, "\n")
+		dir := ""
+		if _, d, ok := strings.Cut(head, recapStubDir); ok {
+			dir = strings.TrimSuffix(strings.TrimSuffix(d, ":"), "/")
 		}
 		for _, l := range strings.Split(block, "\n") {
 			if !strings.HasPrefix(l, "- ") {
@@ -205,6 +216,9 @@ func carriedStubs(subsumed []agent.Entry) (lines []stubLine, counts []string) {
 				sl.outcome = oc
 				if j := strings.LastIndex(tail, ", "); j >= 0 {
 					sl.path = tail[j+2:]
+					if dir != "" && sl.path != "(not saved)" && !filepath.IsAbs(sl.path) {
+						sl.path = filepath.Join(dir, sl.path)
+					}
 				}
 			}
 			lines = append(lines, sl)
@@ -221,6 +235,10 @@ func stubBlock(lines []stubLine, counts []string) string {
 	}
 	var b strings.Builder
 	b.WriteString(recapStubHead)
+	if dir := stubDir(lines); dir != "" {
+		b.WriteString(recapStubDir + dir + "/")
+	}
+	b.WriteString(":")
 	for _, c := range counts {
 		b.WriteString("\n" + c)
 	}
@@ -232,6 +250,17 @@ func stubBlock(lines []stubLine, counts []string) string {
 		b.WriteString("\n" + l.text)
 	}
 	return b.String()
+}
+
+// stubDir is the directory the lines' result files are in; all of one
+// session's are in its isolation tmp. "" when none was saved.
+func stubDir(lines []stubLine) string {
+	for _, l := range lines {
+		if l.path != "" && l.path != "(not saved)" && filepath.IsAbs(l.path) {
+			return filepath.Dir(l.path)
+		}
+	}
+	return ""
 }
 
 // countLine is "M earlier calls: K exec (J failed), … — results in <dir>".
