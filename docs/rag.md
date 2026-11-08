@@ -177,11 +177,19 @@ change re-queues the affected stages.
 
 ## Open
 
-- **Trust domain (USER decision).** raglit's rule (2026-10-30): always through
-  the daemon, no embedded mode, so auth and ACL are enforced in one place. dund
-  embedding the engine for one user's own memory does not break it if dund is
-  its own trust domain; but a dund index is then not reachable by raglit
-  clients, and raglit's ACL does not apply to it.
+- **Trust domain: decided (USER 2026-11-07, relayed by raglit-a4).** dund is
+  its own trust domain, so embedding raglit's engine is approved in principle.
+  raglit's rule (2026-10-30: always through the daemon, no embedded mode) keeps
+  holding for raglitd and raglit web, with ACL, keys, Registry and OIDC; none of
+  that goes into dund. dund opens its Stores directly (`raglit.OpenIndex` /
+  `Open`) and is the single writer; a dund index is not reachable by raglit
+  clients.
+- **Scope: decided.** dund keeps exactly four indexes: **code, documentation,
+  memories, strategies**. Strategies is new: the learned, reusable approaches
+  from the learning-phase design (churn → resolved candidate → lesson), kept
+  apart from memories so a lesson's retrieval is not crowded by project facts.
+- Whether OCR/PDF stays in dund's scope given text-heavy code and docs (this
+  file assumes yes, per USER earlier).
 
 - Does code and document indexing move into dund too, or only memory? This
   proposal assumes both.
