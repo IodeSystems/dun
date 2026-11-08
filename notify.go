@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -201,7 +202,7 @@ func docKind(g string, attached bool) string {
 	switch g {
 	case groupSkill:
 		return "skill"
-	case groupMemory:
+	case groupMemory, groupMemoryGlobal:
 		return "memory"
 	case groupRules:
 		return "rule"
@@ -558,6 +559,22 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 				}
 			}
 		}
+		// Project notes before global ones (USER 2026-11-08): each is its own
+		// group, ranked in its own index, and a pass that surfaces both puts
+		// the project's first.
+		groupOf := func(w win) string {
+			if group == nil {
+				return ""
+			}
+			return group(w.h.DocID)
+		}
+		if gi := slices.IndexFunc(wins, func(w win) bool { return groupOf(w) == groupMemoryGlobal }); gi >= 0 {
+			if pi := slices.IndexFunc(wins, func(w win) bool { return groupOf(w) == groupMemory }); pi > gi {
+				gw := wins[gi]
+				wins = slices.Delete(wins, gi, gi+1)
+				wins = slices.Insert(wins, pi, gw) // right after the project win, now at pi-1
+			}
+		}
 		if len(wins) > 0 {
 			// Model-facing content. A short document is put in WHOLE: what the
 			// pointer showed was its first line (a memory note's question), so
@@ -608,7 +625,7 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 				info.Inline, info.Kind = inline, docKind(g, src.isAttached(index))
 				infos = append(infos, info)
 				switch g {
-				case groupMemory:
+				case groupMemory, groupMemoryGlobal:
 					// The cue is here because this is the one moment the model
 					// holds the evidence: it is working in what the note is about.
 					b.WriteString("A note an earlier session on this project saved may apply. It records what was true " +
@@ -659,8 +676,13 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 	})
 }
 
-// groupMemory is the group of hits that are memory notes.
-const groupMemory = "memory"
+// groupMemory is the group of hits that are this project's memory notes,
+// groupMemoryGlobal of the global ones (scope global). Separate groups: the
+// two are separate indexes, whose bm25 scores do not compare.
+const (
+	groupMemory       = "memory"
+	groupMemoryGlobal = "memory-global"
+)
 
 // groupSkill is the group of hits that are skills' SKILL.md and reference
 // files.

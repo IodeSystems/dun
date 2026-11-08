@@ -54,6 +54,10 @@ probes written by the author of the notes.
   index, so the code file won every pass. The rule runs per group (memory notes
   versus the rest) and a pass can surface one of each. A surfaced note is
   labelled as saved by an earlier session.
+- **Project and global notes are separate groups** (USER 2026-11-08): they
+  are two dund indexes, so each group is ranked in its own index and passes
+  the rule on its own. A pass can surface one of each; the project note
+  comes first.
 - With one or two notes the margin has no runner-up, so any word overlap
   surfaces a note; the rule works as notes accumulate.
 

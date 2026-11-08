@@ -10,11 +10,13 @@ misleads the model, so the rule is strict: a miss is cheaper than noise. Code:
 
 ## Rule
 
-The rule runs per group (memory notes, skills, rules, MCP docs, workspace
-docs, attached docs) and surfaces only the top document of a group that
+The rule runs per group (project memory notes, global memory notes, skills,
+rules, MCP docs, workspace docs, attached docs) and surfaces only the top document of a group that
 clears the bar. A group that fails surfaces nothing and marks nothing seen, so
-the same documents can win a later, clearer pass. Early measurement (2026-10-20):
-"any hit, two slots" made 11 of 21 surfaced notes the wrong one and surfaced
+the same documents can win a later, clearer pass. Project and global notes
+are separate groups because they are separate dund indexes (USER
+2026-11-08); when both surface, the project note comes first. Early
+measurement (2026-10-20): "any hit, two slots" made 11 of 21 surfaced notes the wrong one and surfaced
 two on every negative probe.
 
 By index kind:

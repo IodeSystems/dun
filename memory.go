@@ -498,13 +498,17 @@ func raglitStoreFlags(args []string) []string {
 	return out
 }
 
-// group names the surfacing group of a hit: memory for a note in this store,
-// "" for anything else. Nil-safe: with no store nothing is a note.
+// group names the surfacing group of a hit: memory for a project note in
+// this store, memory-global for a global one, "" for anything else.
+// Nil-safe: with no store nothing is a note.
 func (m *memoryStore) group(docID string) string {
-	if m != nil && m.holds(docID) {
-		return groupMemory
+	switch {
+	case m == nil || !m.holds(docID):
+		return ""
+	case m.global != "" && strings.HasPrefix(docID, m.global+string(os.PathSeparator)):
+		return groupMemoryGlobal
 	}
-	return ""
+	return groupMemory
 }
 
 // holds reports whether path is in one of the store's directories.

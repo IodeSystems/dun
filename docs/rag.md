@@ -302,9 +302,8 @@ sync), `memory.go` (the tool).
   docs server's, when that runs. A hit carries `similarity`, `matched` and
   `terms`, so the surfacing rule and thresholds are unchanged
   (`surfacing.md`). No tag or path filter is sent: the surfacing search
-  used none before. Project and global hits are one group (memory): under
-  the coverage rule that compares bm25 scores of two indexes, which do not
-  compare (`memory.md`, "Per group"). Not measured.
+  used none before. Project and global notes are separate groups, each
+  ranked in its own index; the project note comes first (USER 2026-11-08).
 - **Double hit.** A tagged note is found up to three times in one search:
   its frontmatter, its text, and the caption its tags are written as
   (measured live, FTS, 2026-11-08). dun keeps one hit per note path, with

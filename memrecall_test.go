@@ -255,3 +255,53 @@ func TestMemRecall_ToolNeedsOnlyARagLink(t *testing.T) {
 		t.Error("memory with no RagLink")
 	}
 }
+
+// Project and global notes are separate groups (USER 2026-11-08): each is
+// ranked in its own index and passes the coverage rule on its own, and a
+// pass that surfaces both puts the project's first.
+func TestMemRecall_ProjectAndGlobalAreSeparateGroups(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	rag := &fakeRag{}
+	h, err := Start(context.Background(), Config{Workspace: ws, Rag: rag})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	m := h.memoryStore()
+	note := func(dir, name, text string) string {
+		p := filepath.Join(dir, name)
+		writeRule(t, p, text)
+		return p
+	}
+	hit := func(p string, score float64) proto.RagHit {
+		return proto.RagHit{Path: "file://" + p, Title: filepath.Base(p), Text: "x", Score: score, Matched: 2, Terms: 2}
+	}
+	setHits := func(project, global []proto.RagHit) {
+		rag.mu.Lock()
+		rag.hits = map[string][]proto.RagHit{raglitProject(ws): project, "": global}
+		rag.mu.Unlock()
+	}
+
+	// Global's bm25 score is far higher, and in one group it would win alone;
+	// apart, both clear the rule and the project note comes first.
+	proj := note(m.dir, "p1.md", "Zebra deploys in this repo need --frostbite.")
+	glob := note(m.global, "g1.md", "The user deploys zebra on Fridays only.")
+	setHits([]proto.RagHit{hit(proj, 1)}, []proto.RagHit{hit(glob, 9)})
+	aside := surfaceOnce(t, h, "zebra deploys")
+	pi, gi := strings.Index(aside, "--frostbite"), strings.Index(aside, "Fridays only")
+	if pi < 0 || gi < 0 || pi > gi {
+		t.Fatalf("want the project note, then the global one:\n%s", aside)
+	}
+
+	// The rule per group: the project's two notes are too close (under 1.5x),
+	// so only the global note surfaces.
+	p2 := note(m.dir, "p2.md", "Yak builds need CGO off.")
+	p3 := note(m.dir, "p3.md", "Yak builds run on Mondays.")
+	g2 := note(m.global, "g2.md", "The user wants yak builds small.")
+	setHits([]proto.RagHit{hit(p2, 3), hit(p3, 2.5)}, []proto.RagHit{hit(g2, 0.1)})
+	aside = surfaceOnce(t, h, "yak builds")
+	if !strings.Contains(aside, "yak builds small") || strings.Contains(aside, "CGO off") || strings.Contains(aside, "Mondays") {
+		t.Fatalf("want only the global note:\n%s", aside)
+	}
+}
