@@ -366,7 +366,7 @@ func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
 // line), when it was written, and what has happened to it since.
 func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 	if !on {
-		return "memories: the docs index is off — /rag on (notes are kept on disk either way)"
+		return "memories: off in this session (notes are kept on disk either way)"
 	}
 	if len(ms) == 0 {
 		return "memories: none for this project yet — /remember, or say \"remember, …\""
@@ -391,6 +391,12 @@ func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 		}
 		var tags []string
 		tags = append(tags, m.Date)
+		if m.Global {
+			tags = append(tags, "global")
+		}
+		if len(m.Tags) > 0 {
+			tags = append(tags, "tags "+strings.Join(m.Tags, ", "))
+		}
 		if m.Refined > 0 {
 			tags = append(tags, fmt.Sprintf("refined %d×", m.Refined))
 		}

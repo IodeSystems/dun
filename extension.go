@@ -62,8 +62,8 @@ import (
 //	               turn.before      search the conversation, surface a clear
 //	                                winner as an aside (roles.search)
 //	               workspace.open   index the workspace when the server starts
-//	               memory.save      memory notes (needs a turn.before
-//	                                extension, which is how a note comes back)
+//	               memory.save      accepted, unused: memory notes are
+//	                                dund's since rag slice 5 (memrecall.go)
 //	               skills.changed   the local skills, SKILL.md and references
 //	               rules.changed    the rules' imports, in /rules index mode
 //	               mcp.docs         MCP servers' resources, on /mcp add|refresh

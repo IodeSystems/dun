@@ -256,6 +256,10 @@ type Config struct {
 	// Loops reaches dund's scheduler, for loop_ctl (loopctl.go). nil with
 	// Peers: no dund, no loops.
 	Loops LoopLink
+	// Rag reaches dund's retrieval, which holds the memory notes' indexes
+	// (raglink.go, memrecall.go). Set, the session has the memory tool and
+	// recalls notes, with dund down too (from the files); nil, neither.
+	Rag RagLink
 	// Vision is what images on a user message need: which model Client runs
 	// (for the vision probe record) and the vision→text model that describes
 	// images for one that cannot read them. See images.go.
@@ -467,9 +471,13 @@ type Harness struct {
 	applyPending atomic.Bool
 	// toolNames is the tool set's names as of the last rebuild, sorted.
 	toolNames atomic.Pointer[[]string]
-	// memory is the note store while the docs server runs, else nil. Set by
-	// rebuildTools; read by /remember from another goroutine.
+	// memory is the note store when the session has a RagLink, else nil.
+	// Set by rebuildTools; read by /remember from another goroutine.
 	memory atomic.Pointer[memoryStore]
+	// memLinkOnce makes memLinkV, the notes' link to dund, once per harness
+	// (a child uses its parent's).
+	memLinkOnce sync.Once
+	memLinkV    *memLink
 	// catalog is what each started server offers besides tools: skills and
 	// prompts (skills.go). Guarded by srvMu.
 	catalog map[string]mcpCatalog

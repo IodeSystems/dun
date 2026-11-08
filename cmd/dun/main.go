@@ -748,6 +748,13 @@ func main() {
 	if os.Getenv("DUN_NO_BROWSER") == "" {
 		cfg.OpenBrowser = openurl.Open
 	}
+	// Memory notes are indexed and recalled through dund's retrieval, dialed
+	// on its socket per call: under dund or standalone alike, and with dund
+	// down from the note files (dun/memrecall.go). DUN_MEMORY=0: no memory
+	// tool and no recall.
+	if os.Getenv("DUN_MEMORY") != "0" {
+		cfg.Rag = dun.DundRag(dundcli.Socket(dun.DunHome()))
+	}
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}

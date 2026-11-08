@@ -21,6 +21,8 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+
+	"github.com/iodesystems/dun/proto"
 )
 
 // startFakeRaglit starts a harness on ws whose raglit is the fake, with the
@@ -28,11 +30,17 @@ import (
 // harness, the fake's log and the hits file its search answers from.
 func startFakeRaglit(t *testing.T, ws string, start bool, others ...Server) (*Harness, string, string) {
 	t.Helper()
+	return startFakeRaglitRag(t, ws, start, nil, others...)
+}
+
+// startFakeRaglitRag is startFakeRaglit with a RagLink for the memory notes.
+func startFakeRaglitRag(t *testing.T, ws string, start bool, rag RagLink, others ...Server) (*Harness, string, string) {
+	t.Helper()
 	hits := filepath.Join(t.TempDir(), "hits.json")
 	cmd, logPath := fakeBin(t, "raglit", "raglit", fakeHitsEnv+"="+hits)
 	servers := append([]Server{{ID: ServerDocs, Command: cmd, Timeout: 20,
 		Args: []string{"serve", "--project", raglitProject(ws), "--index", raglitIndex(ws)}}}, others...)
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: servers})
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: servers, Rag: rag})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,22 +155,24 @@ func TestRaglitStart_IngestsTheWorkspace(t *testing.T) {
 	}
 }
 
-// Before a turn, raglit's search is asked about the conversation and each
-// group's clear winner comes back as one aside: a memory note (with the
-// refine cue), a skill (as a load cue naming the skill), an MCP server's
-// documentation, and the workspace's own file (inlined, being short).
+// Before a turn, raglit's search and dund's memories are asked about the
+// conversation and each group's clear winner comes back as one aside: a
+// memory note from dund (with the refine cue), a skill (as a load cue naming
+// the skill), an MCP server's documentation, and the workspace's own file
+// (inlined, being short).
 func TestRaglit_SurfacesMemorySkillMCPAndWorkspaceHitsBeforeATurn(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DUN_HOME", home)
 	writeSkill(t, filepath.Join(home, "skills"), "zebra-deploy", "---\nname: zebra-deploy\ndescription: deploy to the zebra cluster\n---\nuse --frostbite")
 	ws := t.TempDir()
-	h, logPath, hits := startFakeRaglit(t, ws, true)
+	rag := &fakeRag{}
+	h, logPath, hits := startFakeRaglitRag(t, ws, true, rag)
 	skillMD := filepath.Join(home, "skills", "zebra-deploy", "SKILL.md")
 	waitFor(t, 10*time.Second, func() bool { _, ok := h.skillForDoc(skillMD); return ok })
 
 	m := h.memoryStore()
 	if m == nil {
-		t.Fatal("no memory store while raglit runs")
+		t.Fatal("no memory store with a RagLink")
 	}
 	note := filepath.Join(m.dir, "zebra.md")
 	mcpDoc := filepath.Join(mcpDocsRoot(), "corp", "runbook.md")
@@ -170,7 +180,11 @@ func TestRaglit_SurfacesMemorySkillMCPAndWorkspaceHitsBeforeATurn(t *testing.T) 
 	writeRule(t, note, "Zebra deploys need --frostbite.")
 	writeRule(t, mcpDoc, "# Runbook\nzebra nodes run the old kernel")
 	writeRule(t, wsDoc, "zebra notes from the workspace")
-	writeHits(t, hits, note, skillMD, mcpDoc, wsDoc)
+	writeHits(t, hits, skillMD, mcpDoc, wsDoc)
+	rag.mu.Lock()
+	rag.hits = map[string][]proto.RagHit{raglitProject(ws): {{Path: "file://" + note, Title: "zebra.md",
+		Text: "Zebra deploys need --frostbite.", Score: 3, Matched: 2, Terms: 2}}}
+	rag.mu.Unlock()
 
 	aside := surfaceOnce(t, h, "how do I deploy to zebra?")
 	for _, want := range []string{
@@ -191,37 +205,35 @@ func TestRaglit_SurfacesMemorySkillMCPAndWorkspaceHitsBeforeATurn(t *testing.T) 
 	if err := h.StopServer(ServerDocs); err != nil {
 		t.Fatal(err)
 	}
-	if h.docsPrep != nil {
-		t.Error("the proactive search outlived raglit")
+	// The memories are dund's: their search stays.
+	if h.docsPrep == nil {
+		t.Error("the memory search went with raglit")
 	}
 }
 
-// The memory tool exists while raglit runs; a note it adds is a file in the
-// project's memory dir, ingested into index memory of raglit's store.
-func TestRaglit_MemoryToolIndexesANoteAndGoesWithTheServer(t *testing.T) {
+// Memory moved to dund (docs/rag.md, slice 5): raglit up does not bring the
+// memory tool, and its going does not take it away.
+func TestRaglit_MemoryIsNotTheDocsServers(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
-	h, logPath, _ := startFakeRaglit(t, ws, false)
-	if slices.Contains(modelToolNames(h), "memory") {
-		t.Fatal("memory without raglit")
-	}
-	if err := h.StartServer(context.Background(), ServerDocs); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(modelToolNames(h), "memory") {
-		t.Fatalf("no memory tool with raglit up: %v", modelToolNames(h))
-	}
-	out := callTool(t, h, "memory", map[string]any{"action": "add", "content": "The user wants commits small.", "question": "how big should commits be?"})
-	if !strings.Contains(out, "saved ") {
-		t.Fatalf("add: %q", out)
-	}
-	dir := memoryDir(raglitProject(ws))
-	logHas(t, logPath, "raglit ingest --project "+raglitProject(ws)+" --index memory --now "+dir+string(os.PathSeparator))
-	if err := h.StopServer(ServerDocs); err != nil {
-		t.Fatal(err)
-	}
+	h, _, _ := startFakeRaglit(t, ws, true)
 	if slices.Contains(modelToolNames(h), "memory") || h.memoryStore() != nil {
-		t.Error("memory outlived raglit")
+		t.Fatal("raglit brought the memory tool")
+	}
+	servers := []Server{{ID: ServerDocs, Command: h.cfg.Servers[0].Command, Timeout: 20, Args: h.cfg.Servers[0].Args}}
+	h2, err := Start(context.Background(), Config{Workspace: ws, Servers: servers, Rag: &fakeRag{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h2.Close)
+	if err := h2.StartServer(context.Background(), ServerDocs); err != nil {
+		t.Fatal(err)
+	}
+	if err := h2.StopServer(ServerDocs); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(modelToolNames(h2), "memory") || h2.docsPrep == nil {
+		t.Error("memory or its recall went with raglit")
 	}
 }
 

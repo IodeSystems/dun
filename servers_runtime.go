@@ -801,13 +801,16 @@ func (h *Harness) rebuildTools() {
 	// No session tool (USER 2026-11-06): harness info is the file
 	// $DUN_HARNESS names (harnessinfo.go), and what the session is doing is
 	// its plan.
-	// memory only while a memory.save extension runs AND a turn.before one
-	// does: a note is worth writing only because the proactive search brings
-	// it back (see memory.go).
+	// memory whenever the session reaches dund's retrieval (cfg.Rag): a note
+	// is worth writing only because the proactive search brings it back, and
+	// that search is dund's now, not the docs server's (memory.go,
+	// memrecall.go). With dund down it reads the files.
 	h.memory.Store(nil)
-	if e, ok := hookExt(exts, HookMemorySave, tools); ok && len(searchers) > 0 {
-		m := memoryFor(h.indexSink(e), h.cfg.Workspace)
+	var memF *memFinder
+	if l := h.memLink(); l != nil {
+		m := memoryFor(l, h.cfg.Workspace)
 		h.memory.Store(m)
+		memF = &memFinder{l: l, m: m}
 		toolDefs = append(toolDefs, memoryToolDef())
 		dispatch = withMemory(dispatch, h, m, report)
 	}
@@ -953,18 +956,27 @@ func (h *Harness) rebuildTools() {
 	// The budget notice (budget.go) rides the same seam, with or without a
 	// docs server, so the preparer is never nil.
 	var docs agent.NotificationPreparer
-	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil {
+	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil || memF != nil {
 		// MinScore 0: raglit's score is BM25 or a rank fusion (hybrid), in
 		// no fixed range. What surfaces is decided by the hit's similarity
 		// or query-word coverage instead (see docsPreparer): one document
 		// per group and pass, inlined when short.
-		group := sf.group(searchers[0].ID, docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc))
+		inner := docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc)
+		group := inner
 		home, _ := os.UserHomeDir()
-		src := &hitSources{index: sf.idx.get, attached: sf.attached,
-			display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) },
-			meta:    sf.idx.metaOf, meaning: sf.meaning}
-		docs = docsPreparer(h.store, sf.finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
-			sf.fetch, group, h.skillForDoc, src, cfg.OnDocs)
+		src := &hitSources{display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) }}
+		var finder agent.DocFinder
+		var fetch docBodyFunc
+		if sf != nil {
+			group = sf.group(searchers[0].ID, inner)
+			src.index, src.attached, src.meta, src.meaning = sf.idx.get, sf.attached, sf.idx.metaOf, sf.meaning
+			finder, fetch = sf.finder, sf.fetch
+		}
+		if memF != nil {
+			finder, fetch = withMemFinder(memF, finder, fetch, src)
+		}
+		docs = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
+			fetch, group, h.skillForDoc, src, cfg.OnDocs)
 	}
 	h.docsPrep = docs
 	h.Session.Preparer = h.withBudgetNotice(docs)

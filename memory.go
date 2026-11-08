@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -22,13 +23,16 @@ import (
 // Memory — notes a later session on this project needs and cannot get from the
 // code, the git history or the docs (plan item 9).
 //
-// A note is one markdown file in ~/.dun/memory/<project>/, put into the
-// `memory` index of the project's raglit namespace. That index is the reason a
-// note is worth writing: the proactive search (docsPreparer) covers every index
-// in the namespace, so a note comes back into a later conversation unasked,
-// inlined whole, when that conversation is about it (M0: right note on 10 of
-// 11 probes that share its words, 0 wrong). So the tool exists only while the
-// docs server runs — without the search, a note is never read again.
+// A note is one markdown file in ~/.dun/memory/<project>/ (scope project) or
+// ~/.dun/memory/@global/ (scope global), put into dund's memories index of
+// that project or of the global set (docs/rag.md, slice 5). That index is the
+// reason a note is worth writing: the proactive search (docsPreparer, through
+// memrecall.go) brings a note back into a later conversation unasked, inlined
+// whole, when that conversation is about it (M0: right note on 10 of 11
+// probes that share its words, 0 wrong). The tool is there whenever the
+// session has a RagLink, with or without the docs server. With dund down,
+// a note is still written, the search falls back to the notes on disk, and
+// the index catches up on the next contact (memrecall.go).
 //
 // Writes go straight to disk, with no approval step (USER, 2026-10-19), after
 // a scan for text that would act on a later prompt instead of informing it.
@@ -39,8 +43,20 @@ import (
 // frontmatter and changes nothing yet; the remote private/public layers are a
 // later slice that uploads these same files.
 
-// memoryIndex is the raglit index notes go into, in the project's namespace.
-const memoryIndex = "memory"
+// memoryIndex is dund's index notes go into, a project's or the global
+// set's (internal/ragd).
+const memoryIndex = "memories"
+
+// globalMemoryDir is the directory of the notes of scope global, under
+// memory/. '@' is in no project slug (normalizeProject), so no project's
+// notes share it.
+const globalMemoryDir = "@global"
+
+// memoryMaxTags and memoryTagMax cap a note's tags: a few short words.
+const (
+	memoryMaxTags = 8
+	memoryTagMax  = 40
+)
 
 // memoryMaxChars caps a note's text, so the whole file (with frontmatter)
 // stays under inlineMaxChars and surfaces inline instead of as a pointer.
@@ -75,6 +91,10 @@ func memoryToolDef() llm.ToolDef {
 			"why":      map[string]any{"type": "string", "description": "refine/void/confirm: the evidence — the user's own words, or the file you read and what it says. A confirm needs that check done first: \"the user asked me to check\" is not evidence. No dates — dun records when"},
 			"source":   map[string]any{"type": "string", "enum": []string{"user", "code"}, "description": "refine/void/confirm: who says so — the user, or the code as it is now"},
 			"public":   map[string]any{"type": "boolean", "description": "add: share with everyone on this project (default: private to you)"},
+			"scope": map[string]any{"type": "string", "enum": []string{"project", "global"},
+				"description": "add: project (default) for a fact about this project; global for one that holds in every project, such as how the user works"},
+			"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "add/refine: a few short topic words, such as build or deploy (refine: replaces them)"},
 		},
 		"required": []string{"action"},
 	}
@@ -82,13 +102,15 @@ func memoryToolDef() llm.ToolDef {
 }
 
 type memoryArgs struct {
-	Action   string `json:"action"`
-	Content  string `json:"content"`
-	Question string `json:"question"`
-	OldText  string `json:"old_text"`
-	Why      string `json:"why"`
-	Source   string `json:"source"`
-	Public   bool   `json:"public"`
+	Action   string   `json:"action"`
+	Content  string   `json:"content"`
+	Question string   `json:"question"`
+	OldText  string   `json:"old_text"`
+	Why      string   `json:"why"`
+	Source   string   `json:"source"`
+	Public   bool     `json:"public"`
+	Scope    string   `json:"scope"`
+	Tags     []string `json:"tags"`
 }
 
 // noteMeta is what the frontmatter records about where a note came from.
@@ -99,14 +121,30 @@ type noteMeta struct {
 	extra map[string]string
 }
 
-// memoryStore writes, replaces and removes notes in one directory, and keeps
-// the index in step. ingest and forget are nil when there is no index.
+// memoryStore writes, replaces and removes notes in two directories (the
+// project's and the global one), and keeps the index in step. ingest and
+// forget are nil when there is no index; an error from either that wraps
+// ErrRagDown is a note to the model, not a failure: the file is the record
+// and the index catches up (memrecall.go).
 type memoryStore struct {
 	dir    string
+	global string // "" when there is no global scope
 	ingest func(path string) error
 	forget func(path string) error
 	now    func() time.Time
 }
+
+// dirs is the directories the store's notes are in.
+func (m *memoryStore) dirs() []string {
+	if m.global == "" {
+		return []string{m.dir}
+	}
+	return []string{m.dir, m.global}
+}
+
+// downNote is the line added to a call's result when the index could not be
+// reached: said, so the model does not retry a write that happened.
+const downNote = " — dund is not reachable: the note is on disk, and it is indexed when dund is"
 
 // apply runs one memory call. The error is for the model to read: a bad call
 // is answered, never fatal.
@@ -116,14 +154,35 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		if err := scanNote(a.Content, a.Question); err != nil {
 			return "", err
 		}
-		if err := os.MkdirAll(m.dir, 0o755); err != nil {
+		tags, err := cleanTags(a.Tags)
+		if err != nil {
 			return "", err
 		}
-		path := filepath.Join(m.dir, m.noteName(a))
-		if err := m.write(path, a, meta); err != nil {
+		a.Tags = tags
+		dir := m.dir
+		switch a.Scope {
+		case "", "project":
+		case "global":
+			if m.global == "" {
+				return "", fmt.Errorf("this session keeps no global notes")
+			}
+			dir = m.global
+		default:
+			return "", fmt.Errorf("scope must be project or global, not %q", a.Scope)
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
-		return "saved " + filepath.Base(path), nil
+		path := filepath.Join(dir, m.noteName(a))
+		down, err := m.write(path, a, meta)
+		if err != nil {
+			return "", err
+		}
+		out := "saved " + filepath.Base(path)
+		if dir == m.global && m.global != "" {
+			out += " (global)"
+		}
+		return out + down, nil
 	case "refine", "replace":
 		path, err := m.find(a.OldText)
 		if err != nil {
@@ -143,6 +202,12 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		if a.Question == "" {
 			a.Question = old.meta["question"]
 		}
+		if a.Tags == nil {
+			a.Tags = noteTags(old.meta)
+		}
+		if a.Tags, err = cleanTags(a.Tags); err != nil {
+			return "", err
+		}
 		a.Public = old.meta["public"] == "true"
 		if err := m.attest(path, attestEntry{Kind: "corrected", Unit: old.unit(), Text: strings.TrimSpace(a.Content),
 			Note: a.Why, By: by, Was: old.body}); err != nil {
@@ -151,10 +216,11 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		// Same file, so the index replaces the document instead of adding one.
 		old.meta["refined"] = m.now().Format("2006-01-02")
 		delete(old.meta, "confirmed") // a confirmation was of the text this replaces
-		if err := m.write(path, a, noteMeta{Session: meta.Session, Commit: meta.Commit, extra: old.meta}); err != nil {
+		down, err := m.write(path, a, noteMeta{Session: meta.Session, Commit: meta.Commit, extra: old.meta})
+		if err != nil {
 			return "", err
 		}
-		return "refined " + filepath.Base(path) + " (the old text is kept in its log)", nil
+		return "refined " + filepath.Base(path) + " (the old text is kept in its log)" + down, nil
 	case "void", "remove":
 		path, err := m.find(a.OldText)
 		if err != nil {
@@ -169,9 +235,14 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 			return "", err
 		}
 		// Out of the index first: a log line for a void that then failed
-		// would say the note is gone while search still serves it.
+		// would say the note is gone while search still serves it. With dund
+		// down, the void goes ahead: the next contact removes every *.md.void
+		// from the index (memrecall.go), and the search on disk reads *.md.
+		down := ""
 		if m.forget != nil {
-			if err := m.forget(path); err != nil {
+			if err := m.forget(path); errors.Is(err, ErrRagDown) {
+				down = " — dund is not reachable: it leaves the index when dund is"
+			} else if err != nil {
 				return "", fmt.Errorf("not voided: the index refused it: %w", err)
 			}
 		}
@@ -186,7 +257,7 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		if err := os.Rename(path, path+voidSuffix); err != nil {
 			return "", err
 		}
-		return "voided " + filepath.Base(path) + " (kept as " + filepath.Base(path+voidSuffix) + ")", nil
+		return "voided " + filepath.Base(path) + " (kept as " + filepath.Base(path+voidSuffix) + ")" + down, nil
 	case "confirm":
 		path, err := m.find(a.OldText)
 		if err != nil {
@@ -204,17 +275,20 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 			return "", err
 		}
 		old.meta["confirmed"] = m.now().Format("2006-01-02")
-		if err := m.write(path, memoryArgs{Content: old.body, Question: old.meta["question"], Public: old.meta["public"] == "true"},
-			noteMeta{extra: old.meta}); err != nil {
+		down, err := m.write(path, memoryArgs{Content: old.body, Question: old.meta["question"], Public: old.meta["public"] == "true",
+			Tags: noteTags(old.meta)}, noteMeta{extra: old.meta})
+		if err != nil {
 			return "", err
 		}
-		return "confirmed " + filepath.Base(path), nil
+		return "confirmed " + filepath.Base(path) + down, nil
 	default:
 		return "", fmt.Errorf("action must be add, refine, void or confirm, not %q", a.Action)
 	}
 }
 
-func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) error {
+// write writes the note and indexes it. down is downNote when the index
+// could not be reached, else "".
+func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) (down string, err error) {
 	// A rewritten note keeps when and where it was first written; refined
 	// and confirmed say what has happened to it since.
 	field := func(k, v string) string {
@@ -240,21 +314,62 @@ func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) error {
 			b.WriteString(k + ": " + v + "\n")
 		}
 	}
+	if len(a.Tags) > 0 {
+		b.WriteString("tags: " + strings.Join(a.Tags, ", ") + "\n")
+	}
 	fmt.Fprintf(&b, "public: %t\n", a.Public)
 	b.WriteString("---\n")
 	b.WriteString(strings.TrimSpace(a.Content) + "\n")
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return err
+		return "", err
 	}
 	if m.ingest != nil {
-		if err := m.ingest(path); err != nil {
+		if err := m.ingest(path); errors.Is(err, ErrRagDown) {
+			return downNote, nil
+		} else if err != nil {
 			// The file is the record; the index can be rebuilt from it. Say so
 			// rather than fail the call, or the model retries a write that
 			// already happened.
 			log.Printf("dun: memory: %s saved but not indexed: %v", filepath.Base(path), err)
 		}
 	}
-	return nil
+	return "", nil
+}
+
+// cleanTags trims, lower-cases and de-duplicates tags, and refuses what
+// would not fit the frontmatter line they are written on.
+func cleanTags(tags []string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, t := range tags {
+		t = strings.Join(strings.Fields(strings.ToLower(t)), " ")
+		if t == "" || seen[t] {
+			continue
+		}
+		if strings.ContainsAny(t, ",:") || len([]rune(t)) > memoryTagMax {
+			return nil, fmt.Errorf("tag %q: a tag is a few words, at most %d characters, with no comma or colon", t, memoryTagMax)
+		}
+		if err := scanNote(t, ""); err != nil {
+			return nil, fmt.Errorf("tag %q: %w", t, err)
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	if len(out) > memoryMaxTags {
+		return nil, fmt.Errorf("%d tags; at most %d", len(out), memoryMaxTags)
+	}
+	return out, nil
+}
+
+// noteTags is a note's tags, from its frontmatter.
+func noteTags(meta map[string]string) []string {
+	var out []string
+	for _, t := range strings.Split(meta["tags"], ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // noteName is date, a slug of the question (or the note), and a short hash of
@@ -281,7 +396,11 @@ func (m *memoryStore) find(phrase string) (string, error) {
 	if phrase == "" {
 		return "", fmt.Errorf("old_text is required: a phrase copied from the note")
 	}
-	paths, _ := filepath.Glob(filepath.Join(m.dir, "*.md"))
+	var paths []string
+	for _, d := range m.dirs() {
+		ps, _ := filepath.Glob(filepath.Join(d, "*.md"))
+		paths = append(paths, ps...)
+	}
 	sort.Strings(paths)
 	var hits []string
 	for _, p := range paths {
@@ -332,19 +451,26 @@ func scanNote(content, question string) error {
 	return nil
 }
 
-// memoryFor is the store for a workspace's project, indexed through the
-// memory.save extension's index sink — for raglit its own binary and store
-// flags, so a note lands where that server searches (the shared daemon by
-// default; an --embedded --home when the config says so). A nil sink keeps
-// the file and indexes nothing.
-func memoryFor(sink *mcpDocsSink, workspace string) *memoryStore {
-	m := &memoryStore{dir: memoryDir(raglitProject(workspace)), now: time.Now}
-	if sink == nil {
+// memoryFor is the store for a workspace's project: its notes and the
+// global ones, indexed into dund's memories indexes through link. A nil link
+// keeps the files and indexes nothing.
+func memoryFor(link *memLink, workspace string) *memoryStore {
+	m := &memoryStore{dir: memoryDir(raglitProject(workspace)), global: memoryDir(globalMemoryDir), now: time.Now}
+	if link == nil {
 		return m
 	}
-	m.ingest = func(path string) error { return sink.ingest(memoryIndex, []string{path}) }
-	m.forget = func(path string) error { return sink.forget(memoryIndex, []string{path}) }
+	m.ingest = func(path string) error { return link.ingest(m, path) }
+	m.forget = func(path string) error { return link.forget(m, path) }
 	return m
+}
+
+// scopeOf is the dund project a note's index belongs to: "" (the global
+// set) for a global note, else the project's slug.
+func (m *memoryStore) scopeOf(path, project string) string {
+	if m.global != "" && filepath.Dir(path) == m.global {
+		return ""
+	}
+	return project
 }
 
 // raglitStoreFlags picks the flags that choose WHICH store out of a raglit
@@ -375,13 +501,23 @@ func raglitStoreFlags(args []string) []string {
 // group names the surfacing group of a hit: memory for a note in this store,
 // "" for anything else. Nil-safe: with no store nothing is a note.
 func (m *memoryStore) group(docID string) string {
-	if m != nil && strings.HasPrefix(docID, m.dir+string(os.PathSeparator)) {
+	if m != nil && m.holds(docID) {
 		return groupMemory
 	}
 	return ""
 }
 
-// memoryStore is the note store, or nil when the docs server is not running.
+// holds reports whether path is in one of the store's directories.
+func (m *memoryStore) holds(path string) bool {
+	for _, d := range m.dirs() {
+		if strings.HasPrefix(path, d+string(os.PathSeparator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// memoryStore is the note store, or nil when the session has no RagLink.
 func (h *Harness) memoryStore() *memoryStore { return h.memory.Load() }
 
 // withMemory handles the memory tool locally; everything else routes onward.
