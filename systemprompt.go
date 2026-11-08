@@ -59,14 +59,19 @@ const (
 
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
 
-	// systemFinish is in every run's work line (USER 2026-11-07: hassle the
-	// user less by default). Without it the model stopped at the first
-	// plausible result, gave up on a missing interpreter, and checked nothing
-	// against the task (TB2.1, 2026-11-07: 4 of 8 fails ended within 9 tool
-	// calls).
-	systemFinish   = "Finish the whole task: a missing tool or package is yours to install. Before your final message, read the task again and check each requirement it states (paths, names, formats, values) against what you produced, by running or reading it, and fix what does not match. "
-	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, make minimal precise edits, verify via the diagnostics AND by running the build/tests with exec. Prefer node_edit over rewriting files. " + systemFinish + "Be concise. When the task is done, briefly summarize what you changed."
-	systemWork     = "\n\nWork step by step: read what you need before changing it, make minimal precise edits, and verify by running the build/tests with exec. " + systemFinish + "Be concise. When the task is done, briefly summarize what you changed."
+	// systemFinish ends every run's work line (USER 2026-11-07: hassle the user
+	// less by default). Measured on TB2.1, 2026-11-07, at GLM-5.3 low effort:
+	// fails that ended within 9 tool calls on the first plausible result, a
+	// missing interpreter given up on, a check made by reading code that the
+	// tests then ran (torch), and data lost by opening a damaged database with
+	// a tool that "repaired" it (db-wal-recovery: the model was sure the
+	// command was harmless, so "only when sure" would not have saved it; the
+	// data being the only copy would). The brute-force sentence: a
+	// Terminal-Bench run spent 33 min on a CPU key search beside a direct
+	// method, with no estimate of how long the search would take.
+	systemFinish   = "Finish the whole task: a missing tool or package is yours to install. Treat data you were given as the only copy: back it up before anything that could change or delete it. Before a brute-force search, measure its rate and estimate the total time; if that exceeds what a direct method needs or the time you have, use the direct method. Before your final message, check each requirement the task states (paths, names, formats, values) against what you produced, running it where it can run, and fix what does not match; then say briefly what you changed and what remains. Be concise."
+	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, and make minimal precise edits; the diagnostics come back with each edit. Prefer node_edit over rewriting files. " + systemFinish
+	systemWork     = "\n\nWork step by step: read what you need before changing it, and make minimal precise edits. " + systemFinish
 	// systemAlone is --non-interactive's: no one is there during the run.
 	systemAlone = "\n\nThis run is non-interactive: no one reads your messages until you finish, and no one answers questions. You are on your own to reach the goal."
 

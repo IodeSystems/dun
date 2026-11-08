@@ -269,3 +269,63 @@ func TestJobs_ListsOnlyWhatThisAgentStarted(t *testing.T) {
 		t.Errorf("the child's list:\n%s", child)
 	}
 }
+
+// kill (or a monitor setting) with no job is refused with the running jobs
+// and what their processes are doing, so the retry can name one: a
+// Terminal-Bench model sent {"kill":true} alone three times in 54 trials.
+func TestJobs_NoJobNamesTheRunningOnes(t *testing.T) {
+	h := testHarness(t)
+	if out := jobsCall(t, h, "jobs", `{"kill":true}`); !strings.Contains(out, "name the job") ||
+		!strings.Contains(out, "No background command is running.") {
+		t.Errorf("none running: %q", out)
+	}
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	done := h.newJobStarted(be, "true")
+	<-done.doneCh
+	j := h.newJobStarted(be, "sleep 30")
+	t.Cleanup(func() { j.killAndWait("test") })
+	deadline := time.Now().Add(3 * time.Second)
+	for j.info().PGID == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond) // processes are read once the job knows its group
+	}
+
+	out := jobsCall(t, h, "jobs", `{"kill":true}`)
+	if !strings.HasPrefix(out, "ERROR: name the job: job:N. Running now:\n") ||
+		!strings.Contains(out, fmt.Sprintf("job #%d RUNNING", j.id)) || !strings.Contains(out, "processes: ") {
+		t.Errorf("running list: %q", out)
+	}
+	if strings.Contains(out, fmt.Sprintf("#%d succeeded", done.id)) {
+		t.Errorf("a finished job is listed as one to name: %q", out)
+	}
+	j.mu.Lock()
+	killed := j.done
+	j.mu.Unlock()
+	if killed {
+		t.Error("kill with no job killed something")
+	}
+}
+
+// A finished job is reported when asked for by number, and only named in a
+// list; a number that never was a job says so, with what does exist.
+func TestJobs_FinishedReportOnlyByID(t *testing.T) {
+	h := testHarness(t)
+	if out := jobsCall(t, h, "jobs", `{"job":1}`); !strings.Contains(out, "no background job #1") ||
+		!strings.Contains(out, "No command has become a background job yet") {
+		t.Errorf("never a job: %q", out)
+	}
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	done := h.newJobStarted(be, "echo hi")
+	<-done.doneCh
+	if out := jobsCall(t, h, "jobs", `{}`); strings.Contains(out, "echo hi") ||
+		!strings.Contains(out, fmt.Sprintf("Finished: #%d", done.id)) {
+		t.Errorf("list: %q", out)
+	}
+	if out := jobsCall(t, h, "jobs", fmt.Sprintf(`{"job":%d}`, done.id)); !strings.Contains(out, "succeeded") {
+		t.Errorf("by id: %q", out)
+	}
+	if out := jobsCall(t, h, "jobs", `{"job":9}`); !strings.Contains(out, fmt.Sprintf("Finished: #%d", done.id)) {
+		t.Errorf("unknown id: %q", out)
+	}
+}

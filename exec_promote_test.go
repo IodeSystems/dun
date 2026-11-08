@@ -20,7 +20,7 @@ func execDispatcher(t *testing.T, h *Harness) agent.ToolDispatcher {
 	t.Cleanup(be.Close)
 	return withExec(nil, be, nil, func(command string) *bgJob {
 		return h.startJob(be, command)
-	}, nil, h.userWaiting)
+	}, nil, h.userWaiting, h.workEnded)
 }
 
 func execCall(args string) llm.ToolCall {
@@ -188,5 +188,36 @@ func TestChildConfig_ChildGetsItsOwnShell(t *testing.T) {
 	}
 	if child.Dir != dir {
 		t.Errorf("the child's shell must work in the same directory: %q, want %q", child.Dir, dir)
+	}
+}
+
+// A model-set timeout past the cap waits only the cap, then hands over like
+// any slow command, and the handoff says the timeout was capped.
+func TestExec_TimeoutIsCapped(t *testing.T) {
+	old := execGraceMax
+	execGraceMax = time.Second
+	t.Cleanup(func() { execGraceMax = old })
+	h := testHarness(t)
+	d := execDispatcher(t, h)
+
+	start := time.Now()
+	out, err := d(context.Background(), execCall(`{"command":"sleep 30","timeout":900}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Fatalf("the wait must stop at the cap: %s", el)
+	}
+	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "timeout of 900s was capped at 1s") {
+		t.Fatalf("want the handoff and the cap: %q", out)
+	}
+	if _, err := h.KillJob(1, "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Under the cap: no word about it.
+	out, _ = d(context.Background(), execCall(`{"command":"echo quick","timeout":1}`))
+	if strings.Contains(out, "capped") {
+		t.Fatalf("a timeout under the cap is not capped: %q", out)
 	}
 }

@@ -384,3 +384,29 @@ func TestFilesAside_ListsEveryPathWithItsMode(t *testing.T) {
 		}
 	}
 }
+
+// The system prompt names no open path and no mode (USER 2026-11-07): the
+// file tools refuse what is not open, and filesystem isolation is what holds
+// exec to it. Adding a path changes nothing in it.
+func TestSystemPrompt_NamesNoOpenPaths(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws, ro := t.TempDir(), t.TempDir()
+	sf := filepath.Join(t.TempDir(), "s.jsonl")
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []Server{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	before := h.Session.System
+	for _, no := range []string{"(read and write)", "(read only)", "also open"} {
+		if strings.Contains(before, no) {
+			t.Errorf("the system prompt names modes (%q):\n%s", no, before)
+		}
+	}
+	if _, err := h.AddPath(ro, ScopeSession, PathOptions{NoIndex: true}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(h.Session.System, ro) {
+		t.Errorf("the added path is in the system prompt:\n%s", h.Session.System)
+	}
+}

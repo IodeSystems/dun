@@ -99,6 +99,22 @@ func (r ExecResult) Render() string {
 	return s
 }
 
+// renderForeground is a finished foreground exec's result: Render, and a
+// word when the command printed nothing. An empty result read as a pass:
+// full5 break-filter-js-from-html (2026-11-07) ran a test script that
+// printed nothing, got "", and took it as passing. Not for job logs.
+// The exit line stays the last line, where the TUI reads it.
+func renderForeground(r ExecResult) string {
+	if strings.TrimSpace(r.Output) != "" {
+		return r.Render()
+	}
+	if !r.Failed() {
+		return "(no output; exit 0)"
+	}
+	r.Output = "(no output)"
+	return r.Render()
+}
+
 // execInlineMax is how much of a foreground result reaches the model.
 //
 // Background jobs have had this since the day they were written: stream to a
@@ -855,6 +871,13 @@ func runCmd(ctx context.Context, w io.Writer, cmd *exec.Cmd, note bool) ExecResu
 // hour, while nothing in the loop could tell "working" from "stuck".
 const execGrace = 30 * time.Second
 
+// execGraceMax caps a model-set `timeout`. A Terminal-Bench model set 900 and
+// sat 15 min in one call, unable to see anything else: past the cap the
+// command is a job like any other, and the handoff (and a finish cutting a
+// later wait, workEnded) covers the rest. Nothing is killed at the cap. A var
+// so a test can shorten it.
+var execGraceMax = 5 * time.Minute
+
 // execToolDef is the tool the model calls to run commands.
 func execToolDef() llm.ToolDef {
 	var td llm.ToolDef
@@ -864,14 +887,16 @@ func execToolDef() llm.ToolDef {
 		"there; a variable you `export` persists into the next call. Returns stdout and stderr together; a " +
 		"non-zero exit is shown as [exit: …].\n" +
 		"A command still running after `timeout` (30s) is not killed: it becomes background job #N and you " +
-		"are notified when it finishes. If the user writes while you wait, it becomes a job at once and their " +
-		"message is in the result. Its output is its log: read it with file_read while it runs. " +
+		"are notified when it finishes: do not sleep or poll for it. If the user writes while you wait, it " +
+		"becomes a job at once and their message is in the result. The same happens when another background " +
+		"job or a sub-agent finishes while you wait: its notice is in the result. Its output is its log: read " +
+		"it with file_read while it runs. " +
 		"Do not run anything interactive: there is no terminal and no input, so it can only hang."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "the shell command to run"},
-			"timeout": map[string]any{"type": "integer", "description": "seconds to wait for the command before it becomes a background job (default 30)"},
+			"timeout": map[string]any{"type": "integer", "description": "seconds to wait for the command before it becomes a background job (default 30, at most 300)"},
 		},
 		"required": []string{"command"},
 	}
@@ -893,7 +918,11 @@ func execToolDef() llm.ToolDef {
 // the job is promoted early and the message rides the handoff, so a model
 // that asked to wait an hour reads it now — and can look at the job's output
 // so far instead of waiting for the end.
-func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command string) *bgJob, spill func(command, output string) string, userWaiting func() <-chan struct{}) agent.ToolDispatcher {
+//
+// It ends the same way when other background work ends (workEnded: a job's
+// completion or a sub-agent's report): the notice rides the handoff, so a
+// model that waits in exec beside a job hears of its finish at once.
+func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command string) *bgJob, spill func(command, output string) string, userWaiting, workEnded func() <-chan struct{}) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
@@ -911,7 +940,12 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		// withRecapWatch. Capping twice would spill the same output twice.
 		if startJob == nil {
 			// No job machinery (a bare dispatcher in a test): run it straight.
-			out := backend.Run(ctx, args.Command, nil).Render()
+			res := backend.Run(ctx, args.Command, nil)
+			if res.Failed() {
+				markExecFailed(ctx) // a stall's failure (plannudge.go)
+			}
+			markExecVerdict(ctx, execVerdict(res, true, 0))
+			out := renderForeground(res)
 			if onCall != nil {
 				onCall("exec", map[string]any{"command": args.Command}, out)
 			}
@@ -925,14 +959,22 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		if grace < 0 {
 			grace = 0
 		}
+		capped := grace > execGraceMax
+		if capped {
+			grace = execGraceMax
+		}
 
 		var user <-chan struct{} // nil blocks forever: no harness, no wake
 		if userWaiting != nil {
 			user = userWaiting()
 		}
+		var ended <-chan struct{} // nil blocks forever, as user does
+		if workEnded != nil {
+			ended = workEnded()
+		}
 		start := time.Now()
 		j := startJob(args.Command)
-		woken := false
+		woken, cut := false, false
 		if grace > 0 {
 			t := time.NewTimer(grace)
 			select {
@@ -941,17 +983,29 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			case <-ctx.Done():
 			case <-user:
 				woken = true
+			case <-ended:
+				cut = true
 			}
 			t.Stop()
 		}
 		res, done := j.settle()
-		out := res.Render()
+		if res.Failed() || !done {
+			markExecFailed(ctx) // failed, or ran past its timeout (plannudge.go)
+		}
+		markExecVerdict(ctx, execVerdict(res, done, j.id))
+		out := renderForeground(res)
 		if !done {
 			// The time it actually waited: a wake or an interrupt ends the
 			// grace early, and "after 10m" for a 12 s wait misleads.
 			out = j.handoffNotice(min(grace, time.Since(start)))
 			if woken {
 				out += "\nHanded over early because a message arrived (the user wrote, or another dun session did) — it follows."
+			}
+			if cut {
+				out += "\nHanded over early because other background work finished — its notice follows."
+			}
+			if capped {
+				out += fmt.Sprintf("\nYour timeout of %ds was capped at %ds.", *args.Timeout, int(execGraceMax.Seconds()))
 			}
 		}
 		if onCall != nil {

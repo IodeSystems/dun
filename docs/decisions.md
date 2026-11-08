@@ -99,6 +99,18 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   model gives the tool name it knows. A bare tool name keeps only that tool's
   most recent call. A `from` prefers the user message; an assistant turn that
   echoes the phrase collapsed a span to 85 characters.
+- **A removed call stays listed (stub), by default** (USER, 2026-11-08;
+  `recapstub.go`). The summary lost which commands ran and how each ended,
+  and in long Terminal-Bench trials cheap models ran them again. Each removed
+  call that `keep` and `drop` do not name becomes one line in the
+  replacement: tool, arguments cut to 80 characters, outcome (an exec's from
+  its recorded ExecResult, its exit line after a resume), result size, and a
+  file with the result in the isolation tmp. `file_read` on that path is the
+  one recall route. Past 40 lines the earliest become one count line. `drop`
+  (matched as `keep`) leaves no stub, for noise. The stubs are text in the
+  replacement entry, so no tool pair is split. The recapN.jsonl sidecar
+  stays: it is the audit trail of the whole span, with the prose and the
+  dropped calls the result files do not hold.
 - **A context-management nudge must name what to remove and arrive when the
   churn happens.** A prompt line describing `recap` got zero uses. A
   window-size nudge was read and ignored: a threshold says "you spend a lot",
@@ -207,7 +219,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   model ran `gh auth login` through `exec`; gh started an OAuth device flow and
   polled for a code printed into a pipe nobody read. A 5-minute kill was added,
   then replaced: a command now waits `execGrace` (30 s, the `timeout` argument
-  overrides) and then is promoted to a numbered background job the model is
+  overrides up to `execGraceMax`, 300 s) and then is promoted to a numbered background job the model is
   told about. (A second cause confirmed it: with a persistent shell, `exit 7`
   exits the shell, so the sentinel line never prints, and the session sat
   "working" ten minutes with zero LLM requests. A job that is always tracked
@@ -215,6 +227,19 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   throw away expensive work. A wedged job is caught by the heartbeat, which
   notifies instead. A caller with its own deadline (ship's `checkTimeout`)
   keeps it.
+- **The end of other background work ends an exec's wait (`workEnded`,
+  `notifyEnded`).** A Terminal-Bench model waited beside job #1 with
+  `sleep 280` execs and killed the job at 33 min. Now a job's completion or a
+  sub-agent's report, arriving while an exec waits out its grace, promotes that
+  exec at once (as a user message does), and the notice rides its result
+  (`liftQueued`), so it is delivered once. Only an end counts: a progress
+  report or a reminder does not stop a command the model chose to wait for. A
+  muted job says nothing, so it releases nothing. The exec's own command does
+  not count (it is provisional while waited on). A notice queued before the
+  call does not release it: it rides the result anyway, and a release at once
+  would make every quick command after a finish a job. Sub-agent reports are
+  included: the model is told it will hear when a child finishes, the same
+  promise as for a job.
 - **A command's outcome is its exit code; the text is for the model.**
   Pass/fail was `strings.Contains(out, "[exit:")`: a check that printed the
   marker failed spuriously, and a lost marker read as a pass.

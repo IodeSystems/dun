@@ -30,6 +30,9 @@ type reasoningTee struct {
 	round *roundCapture
 	// req, when set, measures each round's speed (reqstats.go).
 	req *reqMeter
+	// force, when set, may force a plan call on this request: it returns the
+	// options to send, nil for as they are (plannudge.go).
+	force func(tools []llm.ToolDef, opts *llm.ChatOpts) *llm.ChatOpts
 }
 
 // teeTurn is the turn's runner: teed for live reasoning (when on is set) and
@@ -39,7 +42,7 @@ func (h *Harness) teeTurn(r agent.LLMRunner, on func(string)) agent.LLMRunner {
 		return r
 	}
 	h.req = h.newReqMeter()
-	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req}
+	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req, force: h.planForceOpts}
 }
 
 // untee is the runner under a tee, for a call that is not the turn's.
@@ -57,7 +60,13 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 		return nil, err
 	}
 	t.req.begin() // the request is sent from here: ttft counts from now
-	in, err := t.LLMRunner.ChatStream(ctx, msgs, tools, opts)
+	var in <-chan llm.StreamChunk
+	var err error
+	if forced := t.forced(tools, opts); forced != nil {
+		in, err = planForcedStream(ctx, t.LLMRunner, msgs, tools, opts, forced)
+	} else {
+		in, err = t.LLMRunner.ChatStream(ctx, msgs, tools, opts)
+	}
 	if err != nil || in == nil {
 		t.req.end()
 		return in, err
@@ -99,6 +108,13 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 		}
 	}()
 	return out, nil
+}
+
+func (t *reasoningTee) forced(tools []llm.ToolDef, opts *llm.ChatOpts) *llm.ChatOpts {
+	if t.force == nil {
+		return nil
+	}
+	return t.force(tools, opts)
 }
 
 // teeGrace is how long the tee offers a cancelled stream's error to a reader

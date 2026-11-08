@@ -403,6 +403,7 @@ type tuiModel struct {
 	// keystroke and at the end of every turn, and the request goes out only once
 	// the person has actually stopped. See idleSuggestDelay.
 	lastKeyAt         time.Time // last keystroke OR turn end — the idle clock
+	lastPresence      time.Time // last presence ping sent to the engine (presence.go)
 	idleTickPending   bool      // a debounce tick is already scheduled
 	idleWantTick      bool      // an event asked for one (handleEvent has no tea.Cmd)
 	suggestedThisIdle bool      // already asked during this idle; do not ask twice
@@ -496,6 +497,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.(type) {
 		case tea.KeyPressMsg, tea.PasteMsg:
 			t.armIdleSuggest()
+			t.notePresence()
+		case tea.MouseWheelMsg:
+			t.notePresence()
 		}
 		if t.idleWantTick && !t.idleTickPending {
 			t.idleWantTick, t.idleTickPending = false, true

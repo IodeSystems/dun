@@ -77,6 +77,12 @@ type recapSpan struct {
 	// been told the opposite of the truth.
 	Unmatched []string
 	KeptCalls []string // tool names kept, for the confirmation
+	// Removed are the calls that leave as a stub (recapstub.go), in order:
+	// neither kept nor dropped.
+	Removed []removedCall
+	// DroppedCalls are the tool names drop matched: they leave with no stub.
+	DroppedCalls  []string
+	UnmatchedDrop []string
 }
 
 // planRecap works out which entries a recap would replace.
@@ -87,7 +93,9 @@ type recapSpan struct {
 // reaches before the latest user message. The tool call currently executing
 // (this recap) is never in it: its own result would be orphaned the moment it
 // returns.
-func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, error) {
+//
+// keep and drop name calls the same way (matchCalls). A call both name is kept.
+func planRecap(entries []agent.Entry, from string, keep, drop []string) (recapSpan, error) {
 	var sp recapSpan
 	// Search BELOW the live call. The recap call's own arguments contain `from`
 	// verbatim, so a plain backward search always matches the recap itself,
@@ -134,50 +142,22 @@ func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, er
 		sp.Anchor = &entries[start]
 	}
 
-	// A keep term may be a tool_call id, a tool NAME, or a substring of the
-	// call's arguments — because the model cannot see call ids. They are
-	// protocol-level and never appear in its context, so a keep list keyed only
-	// on them is unusable by the only caller there is. Live run: the model
-	// invented "exec_2", matched nothing, and silently lost the one result it
-	// had asked to keep.
-	keeping, matched := map[string]bool{}, map[string]bool{}
 	live := liveCallID(entries)
-	for _, term := range keep {
-		if term == "" {
-			continue
-		}
-		// A bare tool NAME keeps only that tool's MOST RECENT call. The model
-		// reaches for the name it knows ("exec"), and keeping every call of it
-		// preserved the 255,720-character `cat` the recap existed to remove —
-		// measured, on the first run where the model recapped unprompted. A
-		// phrase from the arguments is specific, so it keeps every match.
-		byName := false
-		for _, e := range entries[start+1:] {
-			if e.Kind == agent.KindToolCall && e.ToolName == term && e.ToolCallID != live {
-				byName = true
-			}
-		}
-		for i := len(entries) - 1; i > start; i-- {
-			e := entries[i]
-			if e.Kind != agent.KindToolCall || e.ToolCallID == live {
-				continue
-			}
-			hit := e.ToolCallID == term || strings.Contains(e.Content, term) ||
-				(byName && e.ToolName == term)
-			if !hit {
-				continue
-			}
-			keeping[e.ToolCallID] = true
-			matched[term] = true
-			sp.KeptCalls = append(sp.KeptCalls, e.ToolName)
-			if byName && e.ToolName == term && !strings.Contains(e.Content, term) {
-				break // the most recent one only
-			}
+	keeping, kept, unmatched := matchCalls(entries, start, live, keep)
+	sp.KeptCalls, sp.Unmatched = kept.names, unmatched
+	dropping, dropped, unmatchedDrop := matchCalls(entries, start, live, drop)
+	sp.UnmatchedDrop = unmatchedDrop
+	seen := map[string]bool{}
+	for i, id := range dropped.ids {
+		if !keeping[id] && !seen[id] {
+			seen[id] = true
+			sp.DroppedCalls = append(sp.DroppedCalls, dropped.names[i])
 		}
 	}
-	for _, term := range keep {
-		if term != "" && !matched[term] {
-			sp.Unmatched = append(sp.Unmatched, term)
+	results := map[string]agent.Entry{}
+	for _, e := range entries[start+1:] {
+		if e.Kind == agent.KindToolResult {
+			results[e.ToolCallID] = e
 		}
 	}
 	// live (the tool call with no result yet: this recap) is resolved above.
@@ -197,12 +177,73 @@ func planRecap(entries []agent.Entry, from string, keep []string) (recapSpan, er
 			if e.Kind == agent.KindToolResult {
 				sp.Said = append(sp.Said, liftedUserWords(e.Content)...)
 			}
+			// A recap call is no work to list.
+			if e.Kind == agent.KindToolCall && !dropping[e.ToolCallID] && e.ToolName != "recap" {
+				if r, ok := results[e.ToolCallID]; ok {
+					sp.Removed = append(sp.Removed, removedCall{Call: e, Result: r})
+				}
+			}
 		}
 	}
 	if len(sp.Subsumes) == 0 {
 		return sp, fmt.Errorf("nothing to recap in this turn — the span is already clean")
 	}
 	return sp, nil
+}
+
+// matchedCalls are the calls a term list named, in match order.
+type matchedCalls struct{ ids, names []string }
+
+// matchCalls resolves keep or drop terms to tool call ids after start.
+//
+// A term may be a tool_call id, a tool NAME, or a substring of the call's
+// arguments — because the model cannot see call ids. They are protocol-level
+// and never appear in its context, so a list keyed only on them is unusable by
+// the only caller there is. Live run: the model invented "exec_2", matched
+// nothing, and silently lost the one result it had asked to keep.
+func matchCalls(entries []agent.Entry, start int, live string, terms []string) (map[string]bool, matchedCalls, []string) {
+	ids, matched := map[string]bool{}, map[string]bool{}
+	var got matchedCalls
+	for _, term := range terms {
+		if term == "" {
+			continue
+		}
+		// A bare tool NAME names only that tool's MOST RECENT call. The model
+		// reaches for the name it knows ("exec"), and keeping every call of it
+		// preserved the 255,720-character `cat` the recap existed to remove —
+		// measured, on the first run where the model recapped unprompted. A
+		// phrase from the arguments is specific, so it names every match.
+		byName := false
+		for _, e := range entries[start+1:] {
+			if e.Kind == agent.KindToolCall && e.ToolName == term && e.ToolCallID != live {
+				byName = true
+			}
+		}
+		for i := len(entries) - 1; i > start; i-- {
+			e := entries[i]
+			if e.Kind != agent.KindToolCall || e.ToolCallID == live {
+				continue
+			}
+			hit := e.ToolCallID == term || strings.Contains(e.Content, term) ||
+				(byName && e.ToolName == term)
+			if !hit {
+				continue
+			}
+			ids[e.ToolCallID] = true
+			matched[term] = true
+			got.ids, got.names = append(got.ids, e.ToolCallID), append(got.names, e.ToolName)
+			if byName && e.ToolName == term && !strings.Contains(e.Content, term) {
+				break // the most recent one only
+			}
+		}
+	}
+	var unmatched []string
+	for _, term := range terms {
+		if term != "" && !matched[term] {
+			unmatched = append(unmatched, term)
+		}
+	}
+	return ids, got, unmatched
 }
 
 // turnStart is the index of the latest user message: the current turn's start.
@@ -309,16 +350,23 @@ func hasPendingCall(entries []agent.Entry, e agent.Entry) bool {
 // replaced it. Nothing here is a question — the recap has already applied — so
 // it is written as an account, and it carries the replacement text in full,
 // because "9 entries removed" alone is a number, not visibility.
-func (sp recapSpan) report(summary string) string {
+// text is the replacement as stored: the summary, the user's words, the stubs.
+func (sp recapSpan) report(text string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Removed %d entries (~%d characters) from the model's context.\n", len(sp.Subsumes), sp.Chars)
 	if n := len(sp.KeptCalls); n > 0 {
 		fmt.Fprintf(&b, "Kept the %s call%s and its result.\n", strings.Join(sp.KeptCalls, ", "), plural(n))
 	}
+	if n := len(sp.DroppedCalls); n > 0 {
+		fmt.Fprintf(&b, "Dropped the %s call%s with no stub.\n", strings.Join(sp.DroppedCalls, ", "), plural(n))
+	}
 	if len(sp.Unmatched) > 0 {
 		fmt.Fprintf(&b, "NOTE: %q matched nothing and was NOT kept.\n", strings.Join(sp.Unmatched, ", "))
 	}
-	b.WriteString("\nReplaced with:\n" + indent(withSaid(summary, sp.Said)))
+	if len(sp.UnmatchedDrop) > 0 {
+		fmt.Fprintf(&b, "NOTE: drop %q matched nothing.\n", strings.Join(sp.UnmatchedDrop, ", "))
+	}
+	b.WriteString("\nReplaced with:\n" + indent(text))
 	b.WriteString("\n\nWhat was removed is on disk; it left the model's context, not the record.")
 	return b.String()
 }
@@ -334,18 +382,34 @@ func indent(s string) string {
 // applyRecap rewrites the store: the span's entries move to a sidecar, one
 // assistant entry takes their place, and a citation records where they went.
 func (h *Harness) applyRecap(sp recapSpan, summary string) (string, error) {
+	note, _, err := h.applyRecapText(sp, summary)
+	return note, err
+}
+
+// applyRecapText is applyRecap, also returning the replacement text: the
+// summary, the user's words, and a stub for each removed call (recapstub.go).
+//
+// The stubs are TEXT in the one assistant entry, not tool entries: a call and
+// its result leave together or stay together, so no pair is broken.
+func (h *Harness) applyRecapText(sp recapSpan, summary string) (string, string, error) {
 	sidecar := h.nextRecapFile()
 	if sidecar != "" {
 		if err := writeSidecar(sidecar, sp.Subsumes); err != nil {
 			// Refuse rather than proceed: losing the churn silently is the one
 			// outcome this design exists to prevent.
-			return "", fmt.Errorf("recap not applied — could not save what it would remove: %w", err)
+			return "", "", fmt.Errorf("recap not applied — could not save what it would remove: %w", err)
 		}
+	}
+	carried, counts := carriedStubs(sp.Subsumes)
+	lines := append(carried, h.saveRemoved(sp.Removed, recapFileTag(sidecar))...)
+	text := withSaid(summary, sp.Said)
+	if block := stubBlock(lines, counts); block != "" {
+		text = strings.TrimRight(text, "\n") + "\n\n" + block
 	}
 	now := time.Now().UnixNano()
 	replacement := agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindAssistant,
-		Content: withSaid(summary, sp.Said), CreatedAt: now,
+		Content: text, CreatedAt: now,
 	}
 	citation := agent.Entry{
 		ID: uuid.New().String(), Kind: kindRecap, CreatedAt: now + 1,
@@ -358,7 +422,7 @@ func (h *Harness) applyRecap(sp recapSpan, summary string) (string, error) {
 		"recap-"+replacement.ID, "", summary, sp.Subsumes)
 	h.cache.noteRecap()
 	h.recapsSince.Add(1) // the next round's stat says a recap happened (roundstats.go)
-	return citation.Content, nil
+	return citation.Content, text, nil
 }
 
 func sidecarName(path string) string {
@@ -431,8 +495,10 @@ func recapToolDef() llm.ToolDef {
 	td.Function.Description = "Replace a span of this conversation with a summary once it stops being worth its " +
 		"context: a big result you have taken what you need from, failed attempts before one worked, a " +
 		"misunderstanding cleared up later. It covers this turn only, from the user's latest message; what the " +
-		"user typed in it is kept word for word. The span is moved to a file, not deleted, but your summary is " +
-		"all that stays in context, so make it accurate: do not round numbers or guess at what you did not read."
+		"user typed in it is kept word for word. Each removed tool call stays as a one-line stub: the tool, its " +
+		"arguments, the outcome, and the path of a file with its result, to read with file_read. keep holds " +
+		"results in full; drop removes calls with no stub. All other text is replaced by your summary, so make " +
+		"it accurate: do not round numbers or guess at what you did not read."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -442,6 +508,11 @@ func recapToolDef() llm.ToolDef {
 			"keep": map[string]any{
 				"type": "array", "items": map[string]any{"type": "string"},
 				"description": "results to keep verbatim, by tool name (\"exec\") or a phrase from the call (\"grep -c\"), not by id",
+			},
+			"drop": map[string]any{
+				"type": "array", "items": map[string]any{"type": "string"},
+				"description": "calls to remove with no stub, named as for keep: noise such as repeated status " +
+					"checks, or a long failed output you are done with",
 			},
 		},
 		"required": []string{"summary"},
@@ -464,6 +535,7 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			From    string   `json:"from"`
 			Summary string   `json:"summary"`
 			Keep    []string `json:"keep"`
+			Drop    []string `json:"drop"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		// A ref, or read_saved at all, was a READ: answered with where saved
@@ -479,13 +551,14 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			var sent map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &sent)
 			out = "ERROR: recap was called without summary.\n" +
-				"recap {summary: string, from?: string, keep?: string[]} — summary is the account that " +
-				"replaces this turn's work since the user's latest message; from starts the span later, after " +
-				"an exact phrase from this turn; keep names tool results in the span to keep word for word. " +
+				"recap {summary: string, from?: string, keep?: string[], drop?: string[]} — summary is the " +
+				"account that replaces this turn's work since the user's latest message; from starts the span " +
+				"later, after an exact phrase from this turn; keep names tool results in the span to keep word " +
+				"for word; drop names calls to remove with no stub. " +
 				"To read a saved result, use file_read on the path its clip note names.\n" +
 				"You sent " + sentSig(sent) + "."
 		default:
-			out = h.runRecap(ctx, args.From, args.Summary, args.Keep)
+			out = h.runRecap(ctx, args.From, args.Summary, args.Keep, args.Drop)
 		}
 		if onCall != nil {
 			// Report what was actually ASKED. Read-mode calls used to display as
@@ -496,6 +569,9 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 				a["ref"] = args.Ref
 			} else {
 				a["from"], a["summary"], a["keep"] = args.From, args.Summary, args.Keep
+				if len(args.Drop) > 0 {
+					a["drop"] = args.Drop
+				}
 			}
 			onCall(tc.Function.Name, a, out)
 		}
@@ -503,7 +579,7 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 	}
 }
 
-func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []string) string {
+func (h *Harness) runRecap(ctx context.Context, from, summary string, keep, drop []string) string {
 	if strings.TrimSpace(summary) == "" {
 		return "ERROR: recap needs a summary — the account that replaces what it removes."
 	}
@@ -511,25 +587,25 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 	if err != nil {
 		return "ERROR: could not read the conversation: " + err.Error()
 	}
-	sp, err := planRecap(entries, from, keep)
+	sp, err := planRecap(entries, from, keep, drop)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
 
 	// No confirmation. Recap applies and then says what it did — see the rules
 	// at the top of this file.
-	note, err := h.applyRecap(sp, summary)
+	note, text, err := h.applyRecapText(sp, summary)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
 	// The bar's context figure drops now: the removed entries' characters
-	// at the measured ratio, less the summary that replaced them.
-	h.req.adjustCtx(h.meter.Estimate(summary) - int(float64(sp.Chars)/h.meter.CharsPerToken()+0.5))
+	// at the measured ratio, less the text that replaced them.
+	h.req.adjustCtx(h.meter.Estimate(text) - int(float64(sp.Chars)/h.meter.CharsPerToken()+0.5))
 	h.workRecap(summary)
 	if h.cfg.OnRecap != nil {
 		h.cfg.OnRecap(RecapNote{
 			Entries: len(sp.Subsumes), Chars: sp.Chars, Note: note,
-			Detail: sp.report(summary),
+			Detail: sp.report(text),
 		})
 	}
 	// Not "Continue from here": a recap made as the task's last step read that
@@ -539,7 +615,7 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 		since = fmt.Sprintf("%q", from)
 	}
 	out := fmt.Sprintf("Done — %s. Everything since %s now reads as the summary you gave; "+
-		"the removed entries are on disk and out of your context. If the task is done, answer now; "+
+		"each removed call is listed under it with the path of its result. If the task is done, answer now; "+
 		"otherwise continue.", note, since)
 	if len(sp.Unmatched) > 0 {
 		// Said plainly, because the model asked to keep something and did not
@@ -547,6 +623,10 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep []str
 		out += fmt.Sprintf("\nNOTE: %s matched no tool call in that span, so nothing was kept for it. "+
 			"`keep` takes a tool NAME or a phrase from the call's arguments — call ids are not visible to you.",
 			strings.Join(sp.Unmatched, ", "))
+	}
+	if len(sp.UnmatchedDrop) > 0 {
+		out += fmt.Sprintf("\nNOTE: drop %s matched no tool call in that span, so those calls stay as stubs.",
+			strings.Join(sp.UnmatchedDrop, ", "))
 	}
 	return out
 }
@@ -684,7 +764,7 @@ func (h *Harness) watchRecap(tool string, size int) {
 	if !ok || !h.claimCue(cue.key) {
 		return
 	}
-	h.Aside(recapAdvice(cue.detail))
+	h.AsideWith(recapAdvice(cue.detail), AsideOpts{Key: "recap"})
 }
 
 // maybeNudgeRecap is the window-size fallback, for churn with no shape.
@@ -713,7 +793,7 @@ func (h *Harness) maybeNudgeRecap(active int) {
 	if big.ToolName != "" {
 		what += " from " + big.ToolName
 	}
-	h.Aside(recapAdvice(what))
+	h.AsideWith(recapAdvice(what), AsideOpts{Key: "recap"})
 }
 
 // recapAdvice is the one wording, so every trigger says it the same way: the

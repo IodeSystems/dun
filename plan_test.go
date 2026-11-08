@@ -220,6 +220,9 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 		cmd, want string
 		wakes     bool
 	}{
+		// The person's change is an event the model is told, beside the
+		// board (docs/attention.md): what they changed, and for a drop what
+		// waits on it, which the board cannot show.
 		{"edit 1 title Parse it", "changed node 1's title to: Parse it", false},
 		{"edit 1 goal Read the file", "goal to: Read the file", false},
 		{"drop 1 wrong way", "dropped node 1 (wrong way). 1 node(s) wait on it", false},
@@ -239,7 +242,13 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 			}
 			continue
 		}
-		if len(q) != 1 || !strings.Contains(q[0], tc.want) || !strings.HasPrefix(q[0], "[control/plan] ") {
+		said := false
+		for _, x := range q {
+			if strings.HasPrefix(x, "[control/plan] ") && strings.Contains(x, tc.want) {
+				said = true
+			}
+		}
+		if !said {
 			t.Errorf("%s: %v", tc.cmd, q)
 		}
 		if (h.Pending() > 0) != tc.wakes {
@@ -535,5 +544,34 @@ func TestPlan_OrphanedNodesAreReleased(t *testing.T) {
 	h.restoreAgents()
 	if g, _ := h.planNow().store.View(context.Background()); g.Get(id).Owner != "" {
 		t.Errorf("an orphan's node: owner %q", g.Get(id).Owner)
+	}
+}
+
+// --non-interactive: no one approves or edits the plan, so the description
+// says neither; interactive keeps both. Both say what the plan is for, and a
+// session gets the same description every time (the prompt cache).
+func TestPlan_DescriptionByMode(t *testing.T) {
+	h := planHarness(t, false)
+	d, _ := h.planTool()
+	inter := d.Function.Description
+	for _, want := range []string{"The plan is what survives", "done_when", "/plan approve", "plan mode", "edit the plan"} {
+		if !strings.Contains(inter, want) {
+			t.Errorf("interactive description lacks %q: %s", want, inter)
+		}
+	}
+	h.cfg.NonInteractive = true
+	d, _ = h.planTool()
+	non := d.Function.Description
+	if !strings.Contains(non, "The plan is what survives") || !strings.Contains(non, "done_when") {
+		t.Errorf("non-interactive description lacks the purpose or the mechanics: %s", non)
+	}
+	for _, not := range []string{"approve", "plan mode", "user", "User"} {
+		if strings.Contains(non, not) {
+			t.Errorf("non-interactive description has %q: %s", not, non)
+		}
+	}
+	d2, _ := h.planTool()
+	if d2.Function.Description != non {
+		t.Error("the description changed between two builds of one session")
 	}
 }

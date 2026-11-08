@@ -144,11 +144,37 @@ func (h *Harness) planChanged() {
 	}
 }
 
-// planNote is the host's words in the tool's description: the graph's own
-// say nothing of plan mode or of files.
-const planNote = "A node may list files, the paths it expects to change. While plan mode is on, the user " +
+// planDesc is the root's plan tool description, in place of taskgraph's
+// own: purpose first, then the mechanics (USER 2026-11-07: in 72
+// Terminal-Bench trials, 20 ran 60 or more rounds and none used the plan).
+// The purpose is checkable: the plan is a sidecar (planNow), not entries, so
+// recap and a fold never cut it; a fold is given it (foldTask) and each turn
+// starts with its open nodes (planTurnLine).
+const planDesc = "The plan is what survives. It is kept outside the conversation: recap and context folds do " +
+	"not cut it, a fold's summary is given it, and each turn starts with its open nodes. What is only in the " +
+	"conversation can be lost when context is cut. Make nodes for work with several steps; a one-step task " +
+	"needs none. A node has a title, a goal, done_when (what must be true when it is done) and needs (ids it " +
+	"waits on; it is ready when all of them are done). Begin a node: update it to status doing. When done_when " +
+	"is true: done, with an account of how it was met. block: you are stuck, with a reason; waiting on other " +
+	"nodes is not blocked. A dropped node keeps its dependents waiting: add a node with replaces, then update " +
+	"their needs. Actions: add, update, show (one node by id, else the whole plan), ready, done, block, drop. " +
+	"A node may list files, the paths it expects to change."
+
+// planNote is the interactive part: the person, and plan mode. Left out under
+// --non-interactive, where no one reads, edits or approves the plan.
+const planNote = "The user can read and edit the plan. While plan mode is on, the user " +
 	"must approve the plan before you change files or run commands: make the nodes, then ask them to " +
 	"approve it (/plan approve); until then reading, searching and this tool work."
+
+// planDescFor is the description for this session. It depends only on
+// Config.NonInteractive, which a session never changes, so the tool def is
+// the same on every request (the provider's prompt cache).
+func planDescFor(nonInteractive bool) string {
+	if nonInteractive {
+		return planDesc
+	}
+	return planDesc + " " + planNote
+}
 
 // withPlan adds the plan tool's handler to the dispatcher.
 func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Context, string) string, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
@@ -168,18 +194,31 @@ func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Contex
 
 // planToolDef is the plan tool for a root session and its handler.
 func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string) {
-	return taskgraph.Tool(planStore{h}, "", taskgraph.WithNote(planNote),
+	def, handle := taskgraph.Tool(planStore{h}, "",
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
+			h.planMoved(cs) // the stall window (plannudge.go)
 			h.planTell(cs, "the main agent", "")
 		}))
+	def.Function.Description = planDescFor(h.cfg.NonInteractive)
+	return def, handle
 }
 
 // planTell routes a kept change to the owners it names, without the actor
 // (taskgraph.Change.Tell); who is the actor, in words. Owner "" is this
-// session's main agent: note is what it hears, as an aside on its next turn
-// ("" tells it nothing). A child that owns a changed node hears which nodes
-// and who changed them, inside its running turn or at its next one.
+// session's main agent: it hears the board as it stands now, ONE aside keyed
+// "plan" that every change replaces, never a pile of change notes
+// (docs/attention.md, "The plan board"). note is an EVENT the board cannot
+// show, said once beside it: the user's edit, or a drop and what waits on it
+// (a dropped node only disappears from the board). "" adds nothing. A child
+// that owns a changed node hears which nodes and who changed them, inside its
+// running turn or at its next one.
 func (h *Harness) planTell(cs []taskgraph.Change, who, note string) {
+	h.planTellKeyed(cs, who, note, "")
+}
+
+// planTellKeyed is planTell with the event note keyed: a later edit of the same
+// node and field replaces the queued one instead of piling on it.
+func (h *Harness) planTellKeyed(cs []taskgraph.Change, who, note, key string) {
 	main, kids := false, map[int][]string{}
 	for _, c := range cs {
 		for _, o := range c.Tell {
@@ -190,8 +229,11 @@ func (h *Harness) planTell(cs []taskgraph.Change, who, note string) {
 			}
 		}
 	}
-	if main && note != "" {
-		h.Aside(note)
+	if main {
+		h.planBoard()
+		if note != "" {
+			h.AsideWith(note, AsideOpts{Key: key})
+		}
 	}
 	for k, ids := range kids {
 		if sa := h.agentByID(k); sa != nil {
@@ -244,13 +286,20 @@ func (h *Harness) planTurnLine() {
 	if h.isChild() {
 		return
 	}
-	g, err := planStore{h}.View(context.Background())
-	if err != nil {
-		return
+	if line := h.planOpen(); line != "" {
+		h.AsideWith("[plan] "+line, AsideOpts{Key: "plan"})
 	}
-	if line := g.Brief(""); line != "" {
-		h.Aside("[plan] " + line)
+}
+
+// planBoard queues the current board for the main agent, replacing the one
+// still queued. With nothing open it says so: a board that silently kept the
+// earlier text would show nodes that are done.
+func (h *Harness) planBoard() {
+	line := h.planOpen()
+	if line == "" {
+		line = "no open items."
 	}
+	h.AsideWith("[plan] "+line, AsideOpts{Key: "plan"})
 }
 
 // ── plan mode ───────────────────────────────────────────────────────────
@@ -424,7 +473,7 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 			return "", err
 		}
 		h.planChanged()
-		h.planTell(cs, "the user", fmt.Sprintf("[control/plan] The user changed node %s's %s to: %s", id, field, text))
+		h.planTellKeyed(cs, "the user", fmt.Sprintf("[control/plan] The user changed node %s's %s to: %s", id, field, text), "plan-edit:"+id+":"+field)
 		return fmt.Sprintf("node %s: %s set", id, field), nil
 	case "drop":
 		id, why, _ := strings.Cut(rest, " ")
@@ -450,7 +499,7 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		if waiting > 0 {
 			note += " " + strconv.Itoa(waiting) + " node(s) wait on it: replace it (a node with replaces " + id + ") and update their needs."
 		}
-		h.planTell(cs, "the user", note)
+		h.planTellKeyed(cs, "the user", note, "plan-drop:"+id)
 		return "node " + id + " dropped", nil
 	case "tell":
 		id, text, _ := strings.Cut(rest, " ")
@@ -738,7 +787,7 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 	}
 	who := fmt.Sprintf("agent #%d", num)
 	if len(published) == 0 {
-		h.planTell(cs, who, fmt.Sprintf("[control/plan] %s changed plan node(s) %s.", who, strings.Join(ids, ", ")))
+		h.planTell(cs, who, "") // the board says it; a child's change is not news
 		return
 	}
 	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has its notes).", who, strings.Join(published, ", "))

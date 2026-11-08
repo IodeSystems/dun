@@ -73,6 +73,9 @@ func (h *Harness) noteUsage(u agent.TokenUsage) {
 	// A large window earns a reminder that recap exists, naming what is filling
 	// it. See maybeNudgeRecap: the system prompt alone did not move the model.
 	h.maybeNudgeRecap(u.Active)
+	h.noteTurnRound()
+	h.planNudgeRound() // after the count it reads (plannudge.go)
+	h.planStallRound() // the same count
 	if h.self == nil {
 		return
 	}

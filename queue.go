@@ -44,6 +44,15 @@ const (
 type queued struct {
 	kind queuedKind
 	text string
+	// The rest is set only through AsideWith (asidettl.go): a key a newer
+	// version replaces, when an undelivered aside becomes a notification
+	// (escalateAt), and whether it is dropped when the next turn starts.
+	key        string
+	escalateAt time.Time
+	turnScoped bool
+	// tag marks the history entry it becomes, so it can be dropped later
+	// (settle.go).
+	tag string
 }
 
 // queuedPolicy is everything the drains need to know about a kind.
@@ -127,6 +136,7 @@ func (h *Harness) Notify(text string) {
 // message for as long as it waits — an hour, for exec timeout:3600. So Say
 // also releases those waits: see userWaiting.
 func (h *Harness) Say(text string) {
+	h.settleCancel() // the user answered: no settle (settle.go)
 	h.workInput(text)
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedUser, text: text})
@@ -180,11 +190,7 @@ func (h *Harness) userWaiting() <-chan struct{} {
 // every request, so the model CAN see the new set — but not that it changed
 // mid-conversation, and a model that reasoned two turns ago about not having
 // search will keep acting on that. The aside is the delta, not the schemas.
-func (h *Harness) Aside(text string) {
-	h.noteMu.Lock()
-	h.queue = append(h.queue, queued{kind: queuedAside, text: text})
-	h.noteMu.Unlock()
-}
+func (h *Harness) Aside(text string) { h.AsideWith(text, AsideOpts{}) }
 
 // ForceToolCall queues a tool call to be injected into the next LLM response's
 // tool_calls before they are persisted or dispatched. The call appears as if
@@ -206,6 +212,7 @@ func (h *Harness) ForceToolCall(tc llm.ToolCall) {
 // to the model's own tool calls, so the Turn loop persists and dispatches all
 // of them as if the model had generated them.
 func (h *Harness) mergeForcedToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
+	h.settle.tools.Add(int64(len(tcs))) // the turn used tools (settle.go)
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()
 	if len(h.forcedToolCalls) == 0 {
@@ -288,7 +295,7 @@ func (h *Harness) flushQueued() int {
 	for _, q := range items {
 		h.store.publish(agent.Entry{
 			ID: uuid.New().String(), Kind: q.policy().entryKind,
-			Content: q.text, CreatedAt: time.Now().UnixNano(),
+			Tag: q.tag, Content: q.text, CreatedAt: time.Now().UnixNano(),
 		})
 	}
 	return len(items)

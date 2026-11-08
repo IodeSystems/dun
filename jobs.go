@@ -46,7 +46,8 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 		desc = "Manage a command that outlived its exec timeout (job:N): a monitor is on it, and you are told when " +
 			"it finishes, so there is nothing to check. Its output is its log; read it with file_read. Reports as " +
 			"output grows are off until you set every_bytes or every_secs (whichever comes first); they say how " +
-			"much was written, not what. With no job, lists background work"
+			"much was written, not what, and count only what the command prints to stdout/stderr: progress it " +
+			"writes to a file is not seen. With no job, lists background work"
 	}
 	if agents {
 		desc += "; sub-agents are listed here and managed with agent({id, …})"
@@ -176,7 +177,10 @@ func runJobs(h *Harness, a jobsArgs) string {
 	}
 	if a.Job == nil {
 		if a.Kill || a.Mute != nil || a.EveryBytes != nil || a.EverySecs != nil {
-			return "ERROR: name the job: job:N. With no arguments, jobs lists background work."
+			// The model sent kill with no job three times in 54 Terminal-Bench
+			// trials and retried with job:1 each time: give it the running jobs
+			// to choose from in the same answer.
+			return "ERROR: name the job: job:N. " + h.jobsRunning()
 		}
 		return h.jobsList()
 	}
@@ -189,17 +193,86 @@ func runJobs(h *Harness, a jobsArgs) string {
 	}
 	j := h.bgJobByID(*a.Job)
 	if j == nil {
-		return fmt.Sprintf("ERROR: no background job #%d.", *a.Job)
+		return fmt.Sprintf("ERROR: no background job #%d. %s", *a.Job, h.jobsRunning())
 	}
 	tuneJob(h, j, a.EveryBytes, a.EverySecs, a.Mute)
 	return jobReport(j)
+}
+
+// jobsRunning is the background commands still running, with what their
+// processes are doing: what a call that needs a job number is answered with
+// when it has none.
+func (h *Harness) jobsRunning() string {
+	var lines []string
+	for _, j := range h.bgJobList() {
+		j.mu.Lock()
+		done := j.done
+		j.mu.Unlock()
+		if !done {
+			lines = append(lines, "job "+j.status()+j.usageSuffix())
+		}
+	}
+	head := "No background command is running."
+	if len(lines) > 0 {
+		head = "Running now:\n" + strings.Join(lines, "\n")
+	}
+	return head + h.jobsFinishedLine()
+}
+
+// jobsFinishedLine names the finished jobs by number only, so the model can
+// ask for one (jobs({job: N}) reports its outcome); a list does not repeat
+// what already reported. A Terminal-Bench model asked for a job #1 that
+// never existed: every command had finished inside its timeout.
+func (h *Harness) jobsFinishedLine() string {
+	var ids []string
+	any := false
+	for _, j := range h.bgJobList() {
+		any = true
+		j.mu.Lock()
+		done := j.done
+		j.mu.Unlock()
+		if done {
+			ids = append(ids, fmt.Sprintf("#%d", j.id))
+		}
+	}
+	switch {
+	case !any:
+		return " No command has become a background job yet: one that finishes within its exec timeout is not a job."
+	case len(ids) > 0:
+		return "\nFinished: " + strings.Join(ids, ", ") + " (jobs({job: N}) for one's outcome)."
+	}
+	return ""
+}
+
+// usageSuffix is a running job's processes, on the same line (" · processes: …"), or ""
+// when the job is done or its processes are unknown (a docker job).
+func (j *bgJob) usageSuffix() string {
+	j.mu.Lock()
+	since := j.outAt
+	if since.IsZero() {
+		since = j.started
+	}
+	j.mu.Unlock()
+	line, verdict, ok := j.usage(time.Since(since))
+	if !ok {
+		return ""
+	}
+	if verdict != "" {
+		line += " — " + verdict
+	}
+	return " · processes: " + line
 }
 
 // jobsList is every job of both kinds, one line each, oldest first per kind.
 func (h *Harness) jobsList() string {
 	var lines []string
 	for _, j := range h.bgJobList() {
-		lines = append(lines, "job "+j.status())
+		j.mu.Lock()
+		done := j.done
+		j.mu.Unlock()
+		if !done {
+			lines = append(lines, "job "+j.status()+j.usageSuffix())
+		}
 	}
 	for _, sa := range h.agentList() {
 		line := "agent " + sa.line()
@@ -208,10 +281,17 @@ func (h *Harness) jobsList() string {
 		}
 		lines = append(lines, line)
 	}
+	fin := ""
+	if len(h.bgJobList()) > 0 {
+		fin = h.jobsFinishedLine()
+	}
 	if len(lines) == 0 {
+		if fin != "" {
+			return "No background job or sub-agent is running." + fin
+		}
 		return "No background jobs or sub-agents."
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n") + fin
 }
 
 // waitChange blocks until the job writes more or finishes, the turn is

@@ -382,6 +382,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
+		// The TUI's throttled sign that the person is here: a pending settle
+		// starts its delay again (dun/settle.go). No reply: it is not news.
+		if id == "presence" {
+			h.SettlePresence()
+			return
+		}
 		// Up with messages queued (the TUI): take back the ones the running
 		// turn has not taken, for the composer.
 		if id == "unqueue" {

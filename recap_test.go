@@ -40,7 +40,7 @@ func convo() []agent.Entry {
 
 // The span is everything after the anchor, and the churn is what goes.
 func TestPlanRecap_ReplacesTheSpanAfterTheAnchor(t *testing.T) {
-	sp, err := planRecap(convo(), "nested quotes", nil)
+	sp, err := planRecap(convo(), "nested quotes", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestPlanRecap_ReplacesTheSpanAfterTheAnchor(t *testing.T) {
 // The one shape a provider rejects outright is a call without its result. A
 // kept id keeps BOTH halves; an unkept one loses both.
 func TestPlanRecap_KeepsToolPairsWhole(t *testing.T) {
-	sp, err := planRecap(convo(), "nested quotes", []string{"c2"})
+	sp, err := planRecap(convo(), "nested quotes", []string{"c2"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,16 +86,16 @@ func TestPlanRecap_KeepsToolPairsWhole(t *testing.T) {
 }
 
 func TestPlanRecap_RefusesWhatItCannotAnchor(t *testing.T) {
-	if _, err := planRecap(convo(), "a phrase nobody said", nil); err == nil {
+	if _, err := planRecap(convo(), "a phrase nobody said", nil, nil); err == nil {
 		t.Error("an unmatched anchor must be an error, not a silent whole-conversation wipe")
 	}
 	// No from: the span starts at the user's latest message.
-	sp, err := planRecap(convo(), "", nil)
+	sp, err := planRecap(convo(), "", nil, nil)
 	if err != nil || sp.Anchor == nil || sp.Anchor.Kind != agent.KindUser {
 		t.Fatalf("no from should anchor on the latest user message, got %+v %v", sp.Anchor, err)
 	}
 	// The anchor is matched from the END backwards, so the most recent wins.
-	sp, err = planRecap(convo(), "go test", nil)
+	sp, err = planRecap(convo(), "go test", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +108,7 @@ func TestPlanRecap_RefusesWhatItCannotAnchor(t *testing.T) {
 // takes its place, the removed entries are on disk, and the citation never
 // reaches the model.
 func TestRecap_MovesChurnToDiskAndOutOfContext(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
 	st, err := openSessionStore(path)
@@ -120,7 +121,7 @@ func TestRecap_MovesChurnToDiskAndOutOfContext(t *testing.T) {
 	}
 	before, _ := st.Context(context.Background(), "dun")
 
-	sp, err := planRecap(before, "nested quotes", []string{"c2"})
+	sp, err := planRecap(before, "nested quotes", []string{"c2"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +187,7 @@ func TestPlanRecap_StaysInTheCurrentTurn(t *testing.T) {
 		agent.Entry{ID: "a3", Kind: agent.KindAssistant, Content: "recapping"},
 		agent.Entry{ID: "t9", Kind: agent.KindToolCall, Content: `{}`, ToolCallID: "c9", ToolName: "recap"},
 	)
-	sp, err := planRecap(entries, "", nil)
+	sp, err := planRecap(entries, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,12 +199,12 @@ func TestPlanRecap_StaysInTheCurrentTurn(t *testing.T) {
 			t.Fatalf("the span reached into an earlier turn: %+v", e)
 		}
 	}
-	_, err = planRecap(entries, "nested quotes", nil)
+	_, err = planRecap(entries, "nested quotes", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "current turn") {
 		t.Fatalf("a from before the latest user message must be refused and say why, got %v", err)
 	}
 	// The user's message itself may be quoted: it is the turn's start.
-	if sp, err := planRecap(entries, "keep the regex", nil); err != nil || sp.Anchor.ID != "u2" {
+	if sp, err := planRecap(entries, "keep the regex", nil, nil); err != nil || sp.Anchor.ID != "u2" {
 		t.Fatalf("quoting the latest user message should anchor on it, got %+v %v", sp.Anchor, err)
 	}
 }
@@ -212,6 +213,7 @@ func TestPlanRecap_StaysInTheCurrentTurn(t *testing.T) {
 // result is recapped they go into the summary word for word, in order, and
 // nothing else lifted with them does.
 func TestRecap_KeepsWhatTheUserSaidMidTurnVerbatim(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	st, _ := openSessionStore(path)
 	h := &Harness{store: st, cfg: Config{SessionFile: path}}
@@ -222,7 +224,7 @@ func TestRecap_KeepsWhatTheUserSaidMidTurnVerbatim(t *testing.T) {
 	for _, e := range entries {
 		st.appendSilent(e)
 	}
-	out := h.runRecap(context.Background(), "", "Switched to a stack; tests pass.", nil)
+	out := h.runRecap(context.Background(), "", "Switched to a stack; tests pass.", nil, nil)
 	if strings.Contains(out, "ERROR") {
 		t.Fatal(out)
 	}
@@ -235,6 +237,8 @@ func TestRecap_KeepsWhatTheUserSaidMidTurnVerbatim(t *testing.T) {
 	}
 	want := "Switched to a stack; tests pass.\n\nThe user said, during this span (verbatim):\n" +
 		"1. \"not the lexer — the parser\\nline two\"\n2. \"and keep it under 100 lines\""
+	// The stub list follows the user's words (recapstub.go).
+	summary, _, _ = strings.Cut(summary, "\n\n"+recapStubHead)
 	if summary != want {
 		t.Fatalf("summary as stored:\n%s\nwant:\n%s", summary, want)
 	}
@@ -243,13 +247,14 @@ func TestRecap_KeepsWhatTheUserSaidMidTurnVerbatim(t *testing.T) {
 // After the task is done, a recap result that says "continue" sent the model
 // back to check its work again (USER 2026-10-27 benchmark).
 func TestRecap_ResultSaysToAnswerWhenDone(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	st, _ := openSessionStore(path)
 	h := &Harness{store: st, cfg: Config{SessionFile: path}}
 	for _, e := range convo() {
 		st.appendSilent(e)
 	}
-	out := h.runRecap(context.Background(), "", "done", nil)
+	out := h.runRecap(context.Background(), "", "done", nil, nil)
 	if !strings.Contains(out, "If the task is done, answer now") || strings.Contains(out, "Continue from here") {
 		t.Fatalf("result: %q", out)
 	}
@@ -259,6 +264,7 @@ func TestRecap_ResultSaysToAnswerWhenDone(t *testing.T) {
 // REPORTED instead: the count in Note, and the replacement text in Detail.
 // Visibility after the fact is the whole of the trade for dropping the prompt.
 func TestRecap_AppliesWithoutAskingAndReports(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	st, _ := openSessionStore(path)
 	var note RecapNote
@@ -275,7 +281,7 @@ func TestRecap_AppliesWithoutAskingAndReports(t *testing.T) {
 	}
 	before, _ := st.Context(context.Background(), "dun")
 
-	out := h.runRecap(context.Background(), "nested quotes", "a summary", nil)
+	out := h.runRecap(context.Background(), "nested quotes", "a summary", nil, nil)
 	if strings.Contains(out, "ERROR") || strings.Contains(out, "declined") {
 		t.Fatalf("recap should have applied: %q", out)
 	}
@@ -296,13 +302,14 @@ func TestRecap_AppliesWithoutAskingAndReports(t *testing.T) {
 
 // The same, with no Ask configured at all — a sub-agent.
 func TestRecap_ChildRecapsWithoutAsking(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	st, _ := openSessionStore(path)
 	h := &Harness{store: st, cfg: Config{SessionFile: path}} // no Ask: a child
 	for _, e := range convo() {
 		st.appendSilent(e)
 	}
-	out := h.runRecap(context.Background(), "nested quotes", "the answer is a stack", nil)
+	out := h.runRecap(context.Background(), "nested quotes", "the answer is a stack", nil, nil)
 	if strings.Contains(out, "ERROR") || strings.Contains(out, "declined") {
 		t.Fatalf("a child should recap freely: %q", out)
 	}
@@ -326,7 +333,7 @@ func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
 	// call of it preserved the 255,720-character `cat` the recap existed to
 	// remove — measured on the first run where a model recapped unprompted, and
 	// the model reaches for the name it knows rather than a phrase.
-	byName, err := planRecap(convo(), "nested quotes", []string{"exec"})
+	byName, err := planRecap(convo(), "nested quotes", []string{"exec"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +357,7 @@ func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
 		t.Error("naming a tool must not preserve its oldest, largest result")
 	}
 
-	byArgs, err := planRecap(convo(), "nested quotes", []string{"go test"})
+	byArgs, err := planRecap(convo(), "nested quotes", []string{"go test"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +366,7 @@ func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
 	}
 
 	// The failure that actually happened: an id the model made up.
-	invented, err := planRecap(convo(), "nested quotes", []string{"exec_2"})
+	invented, err := planRecap(convo(), "nested quotes", []string{"exec_2"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +382,7 @@ func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
 // the confirmation read "keeping the exec, recap calls" — true, and confusing.
 // It is kept unconditionally anyway.
 func TestPlanRecap_KeepDoesNotMatchTheRecapCallItself(t *testing.T) {
-	sp, err := planRecap(convo(), "nested quotes", []string{"from"})
+	sp, err := planRecap(convo(), "nested quotes", []string{"from"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -716,7 +716,7 @@ func (h *Harness) rebuildTools() {
 		startJob := func(command string) *bgJob {
 			return h.startJob(cfg.Exec, command)
 		}
-		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting)
+		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting, h.workEnded)
 	}
 	// File tools, rooted at the working tree. Rebuilt with the tool set, so a
 	// worktree switch (Rehoist) moves their root with exec's.
@@ -852,6 +852,11 @@ func (h *Harness) rebuildTools() {
 	// arrived while it was running back inside the result. A background job that
 	// finishes mid-turn is then reported in the result the model is already
 	// reading, instead of scheduling a turn of its own.
+	// Counts failed results toward a stall (plannudge.go). Inside the lift, so
+	// the nudge's aside rides the result that tripped it.
+	dispatch = withPlanNudge(dispatch, h)
+	// A change after the end-of-turn check re-arms it (idlecheck.go).
+	dispatch = withIdleRearm(dispatch, h)
 	dispatch = withLiftedQueue(dispatch, h)
 
 	sys := cfg.System
@@ -884,6 +889,7 @@ func (h *Harness) rebuildTools() {
 	// script gets the output and the model does not retype it.
 	if len(toolDefs) > 0 {
 		sys += systemSlots
+		sys += systemTurnLimit(h.turnLimit())
 	}
 	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {
 		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."

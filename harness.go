@@ -156,6 +156,28 @@ type Config struct {
 	// thinking headings, the Markdown note); cmd/dun gives it no Ask, so
 	// there is no ask_user. {OUTPUT} stays: the engine expands it.
 	NonInteractive bool
+	// TurnLimit caps tool-call rounds per turn (--tool-call-turn-limit);
+	// 0 is DUN_MAX_TURNS, else 400 (turnlimit.go).
+	TurnLimit int
+	// AsideEscalate is how long a silent job's or child's heartbeat waits
+	// for a turn to carry it before it wakes the agent (--aside-escalate-ms;
+	// 0 is DUN_ASIDE_ESCALATE_MS, else 5s; asidettl.go).
+	AsideEscalate time.Duration
+	// SettleDelay is how long the person may be away after a turn that used
+	// tools before dun makes the agent report (--settle-delay; 0 is
+	// DUN_SETTLE_DELAY, else 2m; negative is off; settle.go).
+	SettleDelay time.Duration
+	// PlanNudgeRounds and PlanNudgeFails are when the main agent is made to
+	// write the plan: after this many rounds in a turn, or this many failed
+	// tool results in a row, with no open plan node (--plan-nudge-rounds,
+	// --plan-nudge-fails; 0 is DUN_PLAN_NUDGE_ROUNDS / DUN_PLAN_NUDGE_FAILS,
+	// else 25 and 4; negative is off; plannudge.go).
+	PlanNudgeRounds, PlanNudgeFails int
+	// PlanStallRounds is when the main agent is made to update a plan that has
+	// open nodes but no node moved in this many rounds, at most 3 times a turn
+	// (--plan-stall-rounds; 0 is DUN_PLAN_STALL_ROUNDS, else 30; negative is
+	// off; plannudge.go).
+	PlanStallRounds int
 	// EffortOff is what off is sent as, for a model that cannot stop
 	// thinking (dunconfig.ProviderConfig.EffortOff); "" sends off.
 	EffortOff string
@@ -307,17 +329,25 @@ type Harness struct {
 
 	// rounds is what each model round cost, the open turn's totals and the
 	// endpoint's prefill speed (roundstats.go). The root session's only.
-	rounds  roundStats
-	agents  map[int]*subAgent
-	ownsMgr bool
-	parent  *Harness  // nil for a root
-	agentID int       // this harness's id within its parent; 0 for a root
-	self    *subAgent // this harness's own record IN its parent; nil for a root
-	noteMu  sync.Mutex
-	queue   []queued // messages not yet delivered to the model
+	rounds     roundStats
+	agents     map[int]*subAgent
+	ownsMgr    bool
+	parent     *Harness    // nil for a root
+	agentID    int         // this harness's id within its parent; 0 for a root
+	self       *subAgent   // this harness's own record IN its parent; nil for a root
+	turnRounds turnRounds  // this turn's tool-call rounds, for the turn limit
+	nudge      planNudge   // this turn's plan nudge (plannudge.go)
+	idle       idleState   // changes since this turn's last check (idlecheck.go)
+	settle     settleState // the delayed end-of-turn report (settle.go)
+	noteMu     sync.Mutex
+	queue      []queued // messages not yet delivered to the model
 	// userWaitCh is closed by Say, so a tool sitting in a wait can stop and let
 	// the message reach the model now. Guarded by noteMu; see userWaiting.
 	userWaitCh chan struct{}
+	// endWaitCh is closed when a background job or a sub-agent's run ends, so
+	// an exec waiting out its grace hands over at once. Guarded by noteMu; see
+	// workEnded.
+	endWaitCh chan struct{}
 	// budgetNote is the budget notice waiting for the next model call (see
 	// budget.go). Guarded by noteMu.
 	budgetNote string
@@ -483,6 +513,9 @@ type Harness struct {
 	// capped memoizes the clip by content, so the model and the UI get the same
 	// text and one spill rather than two.
 	capped map[string]string
+	// execVerdicts is how each exec call ended, by tool call id, for the
+	// stub a recap leaves (recapstub.go).
+	execVerdicts map[string]string
 	// Compaction counters. compactTurn resets each turn, so >1 is thrashing
 	// rather than a busy session.
 	compactMu   sync.Mutex
@@ -614,6 +647,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// A resumed session's history is not this session's to act on: the
 	// memory triggers look only at what arrives from here on.
 	h.markTriggerScan()
+	h.settleResume() // a settle owed when the session stopped (settle.go)
 	// Saved output readable by path again, after a reboot wiped /tmp (isotmp.go).
 	h.restoreIsoTmp()
 	// Every response the engine's clients get reaches the root session's
@@ -748,7 +782,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Runner:               h.teeTurn(cfg.Client, cfg.OnReasoning),
 		OnAssistantToken:     cfg.OnToken,
 		OnUsage:              h.noteUsage,
-		MaxTurns:             maxTurns(),
+		MaxTurns:             h.turnLimit(),
 		Build:                measuredBuild(shaper, h),
 		ToolFormat:           toolFormat(),
 		// The same estimator the Shaper uses, so `Active` and the budget cannot
@@ -761,6 +795,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// finish_reason=length: decide between shedding history and telling the
 		// model what it hit. See overflow.go.
 		OnOverflow: h.onOverflow,
+		// Where the turn would end: a check, or the open plan (idlecheck.go).
+		OnIdle: h.onIdle,
 	}
 	// $DUN_HARNESS in exec's environment, and the file it names written
 	// before the first request (harnessinfo.go).
@@ -811,12 +847,14 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 	ctx, end := h.interruptible(ctx)
 	defer end()
 	h.clearBudgetNotes()
+	h.settleBegin(true)
 	h.prepareTurn(ctx)
 	h.workInput(task)
 	h.store.publish(agent.Entry{
 		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
 	res, err := h.turnThenTriggers(ctx)
+	h.settleEnd(true, false, err)
 	return h.finishInterrupt(ctx, res, err)
 }
 
@@ -851,6 +889,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 // gone would keep working against tools that no longer answer.
 func (h *Harness) Close() {
 	h.markClosed()
+	h.settleClose()
 	h.closeAgents()
 	// The shell this harness owns. A child's is its own (see childConfig), so
 	// closing it here does not touch the parent's.

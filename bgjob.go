@@ -270,7 +270,10 @@ func (j *bgJob) finish(res ExecResult) {
 	// and a row stuck on "running" forever is the bug the pane exists to stop.
 	j.h.jobsChanged()
 	if note := j.completionNote(); note != "" {
-		j.notify(note)
+		if j.hb != nil {
+			j.hb.Spoke()
+		}
+		j.h.notifyEnded(note)
 	}
 }
 
@@ -365,13 +368,31 @@ func (j *bgJob) openLogLocked() {
 // is not dead — the reflex on seeing anything other than output is to run it
 // again, which is how one slow build becomes three. And name the ONE place its
 // answer will come from, so the model stops thinking about it until then.
+//
+// "Ending your turn is safe" is said outright: a Terminal-Bench model told only
+// "do other work or end your turn" ran `sleep 280` three times beside its job
+// and killed it at 33 min. Every driver waits for a running job and wakes the
+// model with its completion (cmd/dun engine.go runLoop and drainStep,
+// human.go). The progress line names the one blind spot: a monitor counts
+// only stdout/stderr, and that run sent its output to files.
+//
+// A sub-agent is the exception: its run ends with its turn (subAgent.work does
+// not wait for jobs), so a finish after that reaches it only when its parent
+// tells it more. It is told that instead of being told it is safe.
 func (j *bgJob) handoffNotice(waited time.Duration) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	wait := "Do not sleep or poll for it. Do other work or end your turn: ending your turn is safe, " +
+		"the run waits for the job and wakes you when it finishes. "
+	if j.h != nil && j.h.parent != nil {
+		wait = "Do not poll for it. If you end your turn, your run ends: the job keeps running, and its " +
+			"finish reaches you only when your parent tells you more. "
+	}
 	return fmt.Sprintf(
-		"`%s` is still running after %s (not killed, not failed): background job #%d. A monitor "+
-			"tells you when it finishes; do other work or end your turn. %s",
-		j.command, roundDur(waited), j.id, j.logLine())
+		"`%s` is still running after %s (not killed, not failed): background job #%d. %s"+
+			"For progress reports, call jobs({job: %d, every_secs: 60}) or every_bytes. They count only "+
+			"what the command prints to stdout/stderr; progress written to a file is not seen, so print it to stdout. %s",
+		j.command, roundDur(waited), j.id, wait, j.id, j.logLine())
 }
 
 // logLine cites the job's log by path, in the session's isolation tmp: the
@@ -446,6 +467,51 @@ func (h *Harness) notifyAndWake(text string) {
 	}
 }
 
+// notifyEnded is notifyAndWake for an END of background work: a job's
+// completion or a sub-agent's report. It also releases an exec waiting out its
+// grace (workEnded), so the model reads the news now, inside that exec's
+// result, instead of after the wait.
+//
+// Queued BEFORE the release: the released exec's result lifts the queue
+// (liftQueued), and that is the only delivery. The note is drained there, so
+// flushQueued never publishes it a second time; the leftover wake runs a
+// Continue with nothing pending, which is a no-op.
+func (h *Harness) notifyEnded(text string) {
+	h.Notify(text)
+	h.noteMu.Lock()
+	if h.endWaitCh != nil {
+		close(h.endWaitCh)
+		h.endWaitCh = nil
+	}
+	h.noteMu.Unlock()
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+}
+
+// workEnded is ready once a background job or a sub-agent's run ends after
+// the call. An exec adds it to its wait, as it adds userWaiting.
+//
+// Only an end counts. A progress report or a quiet reminder is not a reason to
+// stop a command the model chose to wait for; a finish is, because the model
+// may be waiting for exactly that (a Terminal-Bench model ran `sleep 280`
+// beside its job). A muted job says nothing and so releases nothing. The
+// exec's own command does not count: it is provisional while it is waited on,
+// and a provisional job's finish is the exec's own result.
+//
+// Unlike userWaiting it is not ready for a notice queued BEFORE the call: that
+// notice rides this exec's result anyway, and releasing at once would turn
+// every quick command after a finish into a job.
+func (h *Harness) workEnded() <-chan struct{} {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	if h.endWaitCh == nil {
+		h.endWaitCh = make(chan struct{})
+	}
+	return h.endWaitCh
+}
+
 // notifyQuietly is what a REMINDER gets: the human sees it immediately, the
 // model reads it whenever it next runs a turn anyway, and it never buys a turn
 // of its own.
@@ -462,8 +528,13 @@ func (h *Harness) notifyAndWake(text string) {
 // never CAUSE a turn, and it waits indefinitely if none comes, which is the
 // correct fate for a reminder nobody needed. The onNotify ping is kept so the
 // human still sees the line the moment it fires.
-func (h *Harness) notifyQuietly(text string) {
-	h.Aside(text)
+func (h *Harness) notifyQuietly(text string) { h.notifyQuietlyWith(text, AsideOpts{}) }
+
+// notifyQuietlyWith is notifyQuietly with an aside's delivery rule
+// (asidettl.go): a heartbeat is keyed, so the newer one replaces the older,
+// and escalates, so an agent asleep on a silent job is woken to decide.
+func (h *Harness) notifyQuietlyWith(text string, o AsideOpts) {
+	h.AsideWith(text, o)
 	if cb := h.store.notifyCallback(); cb != nil {
 		cb(text)
 	}
@@ -593,9 +664,10 @@ func (j *bgJob) heartbeat() {
 			// notifyQuietly, NOT j.notify: the reminder must not reset the
 			// silence it is reporting on, and must not buy a turn to report it
 			// — a job being quiet is not a reason to call the model.
-			j.h.notifyQuietly(fmt.Sprintf(
+			j.h.notifyQuietlyWith(fmt.Sprintf(
 				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n%s",
-				j.id, roundDur(quiet), j.command, out, j.logLine(), read))
+				j.id, roundDur(quiet), j.command, out, j.logLine(), read),
+				AsideOpts{Key: fmt.Sprintf("job:%d:quiet", j.id), EscalateAfter: j.h.asideEscalate()})
 		},
 	)
 }
