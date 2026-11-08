@@ -72,7 +72,32 @@ type DunConfig struct {
 	NoUpdates bool `json:"no_updates,omitempty"`
 	// Reasoning is providerConfig.Reasoning for a config with no providers.
 	Reasoning string `json:"reasoning,omitempty"`
+	// Facets are the models dund's retrieval uses, by role (FacetEmbed and
+	// the others): which saved provider serves each, and the model id. A
+	// role not here is off, except embed, which defaults to the active
+	// provider's DefaultEmbedModel (docs/rag.md). The chat roles (main,
+	// child, vision) may move into this map later; they are not here now.
+	Facets map[string]Facet `json:"facets,omitempty"`
 }
+
+// Facet is one model role: the saved provider (ProviderConfig.Name) that
+// serves it, and the model id there. An empty Provider is the active one.
+type Facet struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model"`
+}
+
+// The facet roles dund knows.
+const (
+	FacetEmbed    = "embed"    // vectors for search
+	FacetVision   = "vision"   // page images to text (OCR)
+	FacetSegment  = "segment"  // splits text into fragments
+	FacetIdentity = "identity" // a caption and tags per document
+)
+
+// DefaultEmbedModel is the embed facet when the config names none: the
+// model corrallm serves for embeddings.
+const DefaultEmbedModel = "local-nomic-embed-text"
 
 // ProviderConfig is one OpenAI-compatible endpoint: /v1/models and
 // /v1/chat/completions under URL, authorized by Key.
@@ -368,9 +393,12 @@ func DunHome() string {
 func ConfigPath() string { return filepath.Join(DunHome(), "config.json") }
 
 // LoadConfig reads the saved config; a missing/corrupt file yields a zero config.
-func LoadConfig() DunConfig {
+func LoadConfig() DunConfig { return LoadConfigFile(ConfigPath()) }
+
+// LoadConfigFile is LoadConfig for the config at path (dund serve --home).
+func LoadConfigFile(path string) DunConfig {
 	var c DunConfig
-	if b, err := os.ReadFile(ConfigPath()); err == nil {
+	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &c)
 	}
 	return c
