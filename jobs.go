@@ -177,7 +177,10 @@ func runJobs(h *Harness, a jobsArgs) string {
 	}
 	if a.Job == nil {
 		if a.Kill || a.Mute != nil || a.EveryBytes != nil || a.EverySecs != nil {
-			return "ERROR: name the job: job:N. With no arguments, jobs lists background work."
+			// The model sent kill with no job three times in 54 Terminal-Bench
+			// trials and retried with job:1 each time: give it the running jobs
+			// to choose from in the same answer.
+			return "ERROR: name the job: job:N. " + h.jobsRunning()
 		}
 		return h.jobsList()
 	}
@@ -196,11 +199,49 @@ func runJobs(h *Harness, a jobsArgs) string {
 	return jobReport(j)
 }
 
+// jobsRunning is the background commands still running, with what their
+// processes are doing: what a call that needs a job number is answered with
+// when it has none.
+func (h *Harness) jobsRunning() string {
+	var lines []string
+	for _, j := range h.bgJobList() {
+		j.mu.Lock()
+		done := j.done
+		j.mu.Unlock()
+		if !done {
+			lines = append(lines, "job "+j.status()+j.usageSuffix())
+		}
+	}
+	if len(lines) == 0 {
+		return "No background command is running."
+	}
+	return "Running now:\n" + strings.Join(lines, "\n")
+}
+
+// usageSuffix is a running job's processes, on the same line (" · processes: …"), or ""
+// when the job is done or its processes are unknown (a docker job).
+func (j *bgJob) usageSuffix() string {
+	j.mu.Lock()
+	since := j.outAt
+	if since.IsZero() {
+		since = j.started
+	}
+	j.mu.Unlock()
+	line, verdict, ok := j.usage(time.Since(since))
+	if !ok {
+		return ""
+	}
+	if verdict != "" {
+		line += " — " + verdict
+	}
+	return " · processes: " + line
+}
+
 // jobsList is every job of both kinds, one line each, oldest first per kind.
 func (h *Harness) jobsList() string {
 	var lines []string
 	for _, j := range h.bgJobList() {
-		lines = append(lines, "job "+j.status())
+		lines = append(lines, "job "+j.status()+j.usageSuffix())
 	}
 	for _, sa := range h.agentList() {
 		line := "agent " + sa.line()
