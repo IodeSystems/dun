@@ -1,6 +1,7 @@
 # Retrieval in dund (ragcore)
 
-A proposal, not built. dun's retrieval (memory notes, proactive surfacing of
+Status: slice 2 is built (below, "Built: slice 2"); the rest is a proposal.
+dun's retrieval (memory notes, proactive surfacing of
 docs and code) runs on raglit today, as a separate server and a bundled
 extension that is off unless `/rag on`. So persistent memory is effectively off:
 the `memory` tool exists only while the docs server runs (`memory.md`), and in
@@ -166,10 +167,72 @@ change re-queues the affected stages.
 - **Budgets**: a per-day token and dollar budget per role, and idle-time
   scheduling for ingest. OCR and model fragmenting are the expensive stages.
 
+## Built: slice 2
+
+dund hosts raglit v0.5.1 (`internal/ragd`). Sessions do not use it yet
+(slice 5); `dun dund rag` is the manual client.
+
+**Layout**, under `$DUN_HOME/dund/rag/`:
+
+```
+global/{memories,strategies}/
+<project-slug>/{code,docs,memories,strategies}/
+```
+
+Each index is its own raglit Home (`raglit.OpenHome`). The project slug is
+the caller's: dun's `raglitProject` (serverdefs.go, package `dun`), which
+dund cannot import, so dund only checks it (`[a-z0-9._-]`, not `global`).
+An index is made on its first ingest. At start, dund opens the indexes on
+disk, so jobs queued before a restart run. A search or job list of an index
+that does not exist answers empty and makes nothing.
+
+**Jobs**: one `raglit.Runner` over all open indexes (a map as the
+`StoreSet`; `Existing` never opens one). Each store gets `SetEmbedder` and
+`SetIdentifier` when it opens. On stop and on re-exec: `Drain(10s)`, then
+`CutOff`; a cut-off job goes back on the queue.
+
+**Facets** (model roles), in `~/.dun/config.json`:
+
+```json
+"facets": {"embed": {"provider": "corrallm", "model": "local-nomic-embed-text"},
+           "vision": {...}, "segment": {...}, "identity": {...}}
+```
+
+`provider` is a saved provider's name (its URL and key are used); empty is
+the active provider. With no `embed` facet, embed is `local-nomic-embed-text`
+on the active provider. A role not set, or on a provider that is not saved,
+is off: no embed → FTS only; no vision → tesseract if installed, else no
+OCR; no identity → no captions. dund logs each role once at start. The chat
+roles (main, child, vision for chat) may move into this map later.
+
+**Socket commands** (no session id; `proto/rag.go`):
+
+| command → reply | fields |
+|---|---|
+| `rag_search` → `rag_hits` | project (empty = global), index, query, filter {path_prefix, tags, fields}, limit, mode (hybrid, default; fts) → mode, note, hits [path, title, page, text, score] |
+| `rag_ingest` → `rag_ingested` | project, index, path (absolute) or url (http, https, file), title, tags → job, url |
+| `rag_jobs` → `rag_jobs` | project, index, state, limit → jobs [id, url, title, state, error, fragments] |
+
+An index the project does not keep is refused. A hit's path is its source
+URL (`file:///abs/path`). Hybrid with no embed model, or with one that
+fails, runs as FTS and says so in `note`. Tags are normalized on write and
+on read; a tag filter is whole-tag AND. Tags given on ingest are written
+as a supplied caption (named by the title, else the file name), and that
+caption is also a searchable fragment: a search can hit it beside the
+document's own text.
+
+**Not pinned by raglit's api_test.go, used anyway**: `NewEmbedder` (no
+other way to make the `*Embedder` that `SetEmbedder` takes),
+`Models.Identifier` (raglit's ragcore.md says to use it), and
+`Store.SupplyIdentity` with `DocIdentity` (the one way a caller writes
+tags). Ingest is always a queued job; a direct `Store.Ingest` needs
+`Document` and `Fragment` fields, which are not pinned either.
+
 ## Slices
 
 1. raglit: split attest into types and service; semver tags (raglit's call).
-2. dund hosts ragcore: the socket API for search and branch, the job runner, config.
+2. dund hosts ragcore: the socket API for search, the job runner, config.
+   Built (above); branch commands are not.
 3. Model-role configuration and the four probes.
 4. Field filters before ranking (needed by memory).
 5. dun memory and surfacing move to dund; `/rag on` stops being needed for memory.
@@ -181,8 +244,8 @@ change re-queues the affected stages.
   its own trust domain, so embedding raglit's engine is approved in principle.
   raglit's rule (2026-10-30: always through the daemon, no embedded mode) keeps
   holding for raglitd and raglit web, with ACL, keys, Registry and OIDC; none of
-  that goes into dund. dund opens its Stores directly (`raglit.OpenIndex` /
-  `Open`) and is the single writer; a dund index is not reachable by raglit
+  that goes into dund. dund opens its Stores directly (`raglit.OpenHome`, one
+  Home per index) and is the single writer; a dund index is not reachable by raglit
   clients.
 - **Scope: decided.** dund keeps exactly four indexes: **code, documentation,
   memories, strategies**. Strategies is new: the learned, reusable approaches
@@ -192,7 +255,8 @@ change re-queues the affected stages.
   raglit's organization: no Registry, no Home layout, no `project:<ns>`
   namespaces, no `/mcp/{project}` keys. dund decides which Stores exist (for
   example per project, plus a global set of code, docs, memory and strategy)
-  and where their files live, and opens each with `raglit.Open(path)`. What
+  and where their files live, and opens each with `raglit.OpenHome` (a bare
+  `Open` has no Home: no originals or page images). What
   dund needs from raglit: Store, Hit and the job API, stable and tagged.
 - The four indexes are **for dund itself** (USER, relayed by raglit-a4): they
   serve dun's own work. The user's document corpora stay on raglitd. OCR and
