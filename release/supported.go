@@ -55,8 +55,14 @@ var Supported = []Tool{
 	// saturated to wrong results with no error: Terminal-Bench feal XORed
 	// 64-bit values to all zeros), BigInt (BigInt(), 123n, asUintN/asIntN),
 	// ^ is XOR and | is OR (|. and |: stay aliases), and x |> Number.
+	// Recommended v0.11.0 (2026-11-08, 75b6c0a), tarballs in deps.json: the JS
+	// object model (class, this, new, instanceof, Map/Set, Error subclasses),
+	// solver sensitivity/explain, cp, route, num, geo, graph algorithms.
+	// Breaking for scripts, not for dun's launch: extra arguments to a command
+	// are an error; class/extends/super/this/instanceof are reserved; throw
+	// keeps a non-string value. darwin_arm64 run on a Mac (2026-11-08).
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.10.0"},
+		Min: "v0.2.0", Recommended: "v0.11.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
