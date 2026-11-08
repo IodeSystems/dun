@@ -19,7 +19,19 @@ them, on the same engine.
 
 ## The split
 
-**ragcore**: a library extracted from raglit.
+**ragcore is raglit's root package, imported, not extracted** (raglit-a4,
+2026-11-08, on raglit b008935). `github.com/iodesystems/raglit` is already the
+library: store, branches, queue, worker, pipeline, extract, OCR, embed, identity
+and search, about 33k lines with no HTTP server. HTTP/huma, OIDC, the MCP server
+and the UI are in `cmd/raglit` (about 23k lines). Go links only the packages
+imported, so dund would not carry them. What raglit changes first: split
+`raglit/attest` into data types (no huma) and its HTTP service, because huma
+reaches the root package only through attest; then semver tags, with
+Store/Hit/the Job API as a public surface. **Not a nested module**: aw4 already
+builds against `../raglit` through a replace and breaks on each dependency bump,
+and a second module doubles that.
+
+What ragcore means here:
 
 - **Ingest pipeline**: fetch → extract (PDF and image to text, kept: USER) →
   OCR → fragment → embed → commit. Each stage records the engine that ran it
@@ -28,10 +40,20 @@ them, on the same engine.
 - **Search**: FTS (bm25) + vector + RRF hybrid; field filters applied before
   ranking (below).
 - **Branches**: copy-on-write overlay (below).
-- **Storage**: an interface with SQLite as the reference backend.
+- **Storage**: SQLite, concrete. No storage interface until a second backend
+  exists (raglit-a4: an interface now is guessing). Queries are sqlc-generated
+  into raglit `internal/db`; a Postgres backend is a second sqlc engine plus
+  rewrites of FTS5, the cosine scan and the overlay.
 - **Model roles**: configuration and probing (below).
 
-**Not in ragcore** (USER: "doesn't really need attestation"): attestation,
+**Present but unused by dund**: the root package also holds `acl.go`,
+`keys.go` and `Registry` (many indexes, ACL, admin). Store does not depend on
+them (`Open(path)` and `OpenIndex(home, name)` work without a Registry), so dund
+uses Store and the queue directly. Not checked: whether `worker.go`/`queue.go`
+assume a Registry for multi-index scheduling; one index may need a small
+single-store adapter. The `attestations` table stays in the schema, unused.
+
+**Not used from ragcore** (USER: "doesn't really need attestation"): attestation,
 HTTP API, auth, UI, MCP server. Attestation is a judgment layer above
 retrieval. dun's memory already keeps its own log (`memattest.go` writes
 `<note>.md.attest.jsonl` in raglit's `attest.Entry` shape), and the raglit
@@ -92,7 +114,18 @@ re-index.
    so SQLite → Postgres is supported.
 7. **Deletion**: garbage-collect orphaned fragments and vectors as a job.
 8. **One writer**: dund serializes writes, sessions read; SQLite in WAL mode.
-9. **Field filters inside the backend**: tags and frontmatter as filters before
+9. **Field filters before ranking** (raglit-a4: the structure supports it). The
+   path filter already does this: `pathPredicate` (raglit store.go:788) is a SQL
+   predicate in the WHERE of both the FTS and the cosine query, and RRF fuses
+   after. A field filter is a second predicate, e.g. `EXISTS (SELECT 1 FROM
+   doc_fields f WHERE f.doc_id = d.id AND json_extract(f.fields,'$.k') = ?)`.
+   `doc_fields` is one JSON row per document, indexed only on type, so
+   `json_extract` runs per row: fine for a memory index; a large index wants
+   expression indexes or a `doc_tags(doc_id, tag)` table. Branches: correct only
+   if a field edit in a branch also writes the document into the branch layer
+   (not checked). An ANN index loses free pre-filtering (filtered HNSW or
+   over-fetch then filter), so fix filter semantics before an ANN swap.
+   Earlier text of this item:: tags and frontmatter as filters before
    ranking. The memory design needs them (tags filter, embeddings rank: an
    embedding alone blurs scope; the first measurements found noise was the
    problem, 11 of 21 surfaced notes wrong). `doc_fields` already holds typed
@@ -102,7 +135,9 @@ re-index.
 ## Model roles
 
 Each is configured, probed, and recorded in agentkit's capability record (the
-same record as `/model probe`). An index records which models built it; a
+same record as `/model probe`). raglit already configures roles (`modelchan.go`,
+`ocrengine.go`, `captionprofile.go`): start from that format so dun and raglit
+do not keep two. An index records which models built it; a
 change re-queues the affected stages.
 
 | role | for | absent |
@@ -133,7 +168,7 @@ change re-queues the affected stages.
 
 ## Slices
 
-1. raglit extracts ragcore: a code move plus the storage interface (raglit's work).
+1. raglit: split attest into types and service; semver tags (raglit's call).
 2. dund hosts ragcore: the socket API for search and branch, the job runner, config.
 3. Model-role configuration and the four probes.
 4. Field filters before ranking (needed by memory).
@@ -141,6 +176,12 @@ change re-queues the affected stages.
 6. ANN vector index, when an index outgrows the scan.
 
 ## Open
+
+- **Trust domain (USER decision).** raglit's rule (2026-10-30): always through
+  the daemon, no embedded mode, so auth and ACL are enforced in one place. dund
+  embedding the engine for one user's own memory does not break it if dund is
+  its own trust domain; but a dund index is then not reachable by raglit
+  clients, and raglit's ACL does not apply to it.
 
 - Does code and document indexing move into dund too, or only memory? This
   proposal assumes both.
