@@ -434,3 +434,55 @@ func TestOpenBackfillsVectorsOfAnIndexWithoutThem(t *testing.T) {
 		t.Fatalf("search %+v, want hybrid with hits", got)
 	}
 }
+
+// A re-embed is refused while the index has a running ingest job: raglit's
+// SetEmbedder is a plain field write that the job's worker reads. Once the
+// job ends, it runs.
+func TestReembedRefusedWhileAJobRuns(t *testing.T) {
+	f := &fakeModels{dim: 8}
+	h := openWith(t, t.TempDir(), f.serve(t), "nomic-embed-text", "")
+	t.Cleanup(func() { h.Close(time.Second) })
+	ingest(t, h, proto.RagIngest{Project: "p", Index: "docs", Path: writeDoc(t, "a.md", "zeppelin sighting\n")})
+
+	// A source that answers only when released holds its job in running.
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("slow harbor notes\n"))
+	}))
+	t.Cleanup(slow.Close)
+	r, err := h.Ingest(proto.RagIngest{Project: "p", Index: "docs", URL: slow.URL + "/slow.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		js, err := h.Jobs(proto.RagJobs{Project: "p", Index: "docs", State: "running"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(js.Jobs) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatal("the slow job never ran")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, err = h.Reembed(proto.RagReembed{Project: "p", Index: "docs"})
+	if err == nil || !strings.Contains(err.Error(), "1 running ingest job") || !strings.Contains(err.Error(), "--project p --index docs") {
+		close(release)
+		t.Fatalf("reembed with a running job: %v, want the refusal", err)
+	}
+	close(release)
+	waitDone(t, h, "p", "docs", r.Job)
+	if _, err := h.Reembed(proto.RagReembed{Project: "p", Index: "docs"}); err != nil {
+		t.Fatalf("reembed after the job ended: %v", err)
+	}
+}

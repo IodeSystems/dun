@@ -340,6 +340,19 @@ func (h *Host) Reembed(q proto.RagReembed) (*proto.RagReembedding, error) {
 	if st == nil {
 		return nil, fmt.Errorf("rag: no index %s yet", name)
 	}
+	// raglit's SetEmbedder is a plain field write that a running job's
+	// worker reads (raglit-a4 has the fix), so the embedder is not swapped
+	// under one.
+	if running, err := st.Jobs("running", 0); err != nil {
+		return nil, err
+	} else if len(running) > 0 {
+		flags := "--index " + q.Index
+		if q.Project != "" {
+			flags = "--project " + q.Project + " " + flags
+		}
+		return nil, fmt.Errorf("rag: %s has %d running ingest job(s): reembed when they end (`dun dund rag jobs %s --state running`)",
+			name, len(running), flags)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
