@@ -144,11 +144,37 @@ func (h *Harness) planChanged() {
 	}
 }
 
-// planNote is the host's words in the tool's description: the graph's own
-// say nothing of plan mode or of files.
-const planNote = "A node may list files, the paths it expects to change. While plan mode is on, the user " +
+// planDesc is the root's plan tool description, in place of taskgraph's
+// own: purpose first, then the mechanics (USER 2026-11-07: in 72
+// Terminal-Bench trials, 20 ran 60 or more rounds and none used the plan).
+// The purpose is checkable: the plan is a sidecar (planNow), not entries, so
+// recap and a fold never cut it; a fold is given it (foldTask) and each turn
+// starts with its open nodes (planTurnLine).
+const planDesc = "The plan is what survives. It is kept outside the conversation: recap and context folds do " +
+	"not cut it, a fold's summary is given it, and each turn starts with its open nodes. What is only in the " +
+	"conversation can be lost when context is cut. Make nodes for work with several steps; a one-step task " +
+	"needs none. A node has a title, a goal, done_when (what must be true when it is done) and needs (ids it " +
+	"waits on; it is ready when all of them are done). Begin a node: update it to status doing. When done_when " +
+	"is true: done, with an account of how it was met. block: you are stuck, with a reason; waiting on other " +
+	"nodes is not blocked. A dropped node keeps its dependents waiting: add a node with replaces, then update " +
+	"their needs. Actions: add, update, show (one node by id, else the whole plan), ready, done, block, drop. " +
+	"A node may list files, the paths it expects to change."
+
+// planNote is the interactive part: the person, and plan mode. Left out under
+// --non-interactive, where no one reads, edits or approves the plan.
+const planNote = "The user can read and edit the plan. While plan mode is on, the user " +
 	"must approve the plan before you change files or run commands: make the nodes, then ask them to " +
 	"approve it (/plan approve); until then reading, searching and this tool work."
+
+// planDescFor is the description for this session. It depends only on
+// Config.NonInteractive, which a session never changes, so the tool def is
+// the same on every request (the provider's prompt cache).
+func planDescFor(nonInteractive bool) string {
+	if nonInteractive {
+		return planDesc
+	}
+	return planDesc + " " + planNote
+}
 
 // withPlan adds the plan tool's handler to the dispatcher.
 func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Context, string) string, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
@@ -168,10 +194,12 @@ func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Contex
 
 // planToolDef is the plan tool for a root session and its handler.
 func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string) {
-	return taskgraph.Tool(planStore{h}, "", taskgraph.WithNote(planNote),
+	def, handle := taskgraph.Tool(planStore{h}, "",
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
 			h.planTell(cs, "the main agent", "")
 		}))
+	def.Function.Description = planDescFor(h.cfg.NonInteractive)
+	return def, handle
 }
 
 // planTell routes a kept change to the owners it names, without the actor

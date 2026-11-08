@@ -3,6 +3,7 @@ package dun
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // idlecheck.go — what dun says when the model is about to end a turn
@@ -15,8 +16,9 @@ import (
 // the system prompt's finish-and-check line alone did not catch it.
 //
 // Interactive: the person is there and reads the final message, so no extra
-// round, unless the plan still has open items: the model then continues them
-// or says why they remain (USER 2026-11-07).
+// round, unless the plan still has open nodes: the model then finishes them,
+// or marks them done or dropped (USER 2026-11-07). Both modes list the open
+// nodes with their done_when.
 
 // idleChecklist is the --non-interactive check.
 // The wording keeps the turn open when a requirement fails: TB2.1
@@ -26,8 +28,38 @@ import (
 // working and passed.
 const idleChecklist = "Before you end the turn: list each requirement the task states (file paths, names, formats, values, behaviors) and check each against what you produced now: run it where it can run, read it only where it cannot. If any is not met and you can still work on it, do not end the turn: keep working until it is met. End the turn only when every requirement is met, or when one cannot be met; then say which and why."
 
-// idlePlanOpen is the note when the plan has open items.
-const idlePlanOpen = "The plan still has open items:\n%s\nContinue them, or end the turn saying why each remains."
+// idlePlanOpen is the note when the main agent's plan has open nodes: each
+// one's title and done_when, so the model checks the plan's own terms, not
+// only the task's (USER 2026-11-07).
+const idlePlanOpen = "Open plan nodes:\n%s\nFinish each, or mark it done with how done_when was met, or drop it with why."
+
+// idlePlanMax is how many open nodes the note lists; plan(show) has the rest.
+const idlePlanMax = 10
+
+// idleOpenNodes lists the main agent's open nodes, one line each: id, title,
+// done_when. "" with none.
+func (h *Harness) idleOpenNodes() string {
+	g, err := planStore{h}.View(context.Background())
+	if err != nil {
+		return ""
+	}
+	var lines []string
+	more := 0
+	for _, n := range g.Nodes {
+		if n.Owner != "" || !planOpen(n) {
+			continue
+		}
+		if len(lines) == idlePlanMax {
+			more++
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s %s; done_when: %s", n.ID, n.Title, n.DoneWhen))
+	}
+	if more > 0 {
+		lines = append(lines, fmt.Sprintf("- and %d more (plan show)", more))
+	}
+	return strings.Join(lines, "\n")
+}
 
 func (h *Harness) onIdle(_ context.Context, rounds, asks int) string {
 	if asks > 0 {
@@ -38,7 +70,7 @@ func (h *Harness) onIdle(_ context.Context, rounds, asks int) string {
 		note = idleChecklist
 	}
 	if !h.isChild() {
-		if open := h.planOpen(); open != "" {
+		if open := h.idleOpenNodes(); open != "" {
 			if note != "" {
 				note += "\n\n"
 			}
