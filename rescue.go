@@ -244,6 +244,9 @@ func (h *Harness) summarizeRescue(ctx context.Context, older []agent.Entry, budg
 	start := time.Now()
 	opts := h.foldOpts()
 	opts.MaxTokens = agent.SummaryCap(budget)
+	if lim := h.outputLimit(); lim > 0 && opts.MaxTokens > lim {
+		opts.MaxTokens = lim // limits only narrow downstream (see applyGeneration)
+	}
 	ch, err := h.client.ChatStream(ctx, []llm.Message{
 		{Role: "system", Content: "You are a compaction worker. Produce the state handoff only."},
 		{Role: "user", Content: b.String()},

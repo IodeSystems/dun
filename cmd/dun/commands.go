@@ -285,6 +285,8 @@ func routeSlash(line string, r slashRoutes) {
 		}
 	case "effort":
 		r.control(name, arg(0))
+	case "model":
+		r.control(name, arg(0))
 	case "file":
 		// The path as typed: its case matters.
 		switch {

@@ -436,6 +436,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: spendControl(ctx, action)})
 			return
 		}
+		// /model caps | probe: what the session's model is known to do, and
+		// the explicit check (capscmd.go). Detached: a probe is requests.
+		if id == "model" {
+			go func() { em.emit(&proto.ControlEvent{ID: id, Action: action, Message: capsControl(ctx, action)}) }()
+			return
+		}
 		// /effort: bare says the level; a level is set, saved, and applies
 		// from the next request (dun/effort.go).
 		if id == "effort" {

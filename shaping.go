@@ -117,6 +117,20 @@ const windowRetries = 6
 // stated one.
 func (h *Harness) windowTokens() int { return int(h.window.Load()) }
 
+// outputLimit is the endpoint's known output ceiling from the capability record
+// (limits.output), 0 when unknown. A request's max_tokens never goes above it.
+func (h *Harness) outputLimit() int {
+	if h == nil {
+		return 0
+	}
+	c, ok := h.client.(interface{ Capabilities() llm.Capabilities }) // an *llm.Client; fakes have none
+	if !ok {
+		return 0
+	}
+	n, _ := c.Capabilities().OutputLimit()
+	return n
+}
+
 // ensureWindow re-asks for the window when the session is running without one.
 //
 // Startup asking used to be one shot: a single request, 10 seconds, and a miss
@@ -341,7 +355,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		// number. This is the only place both halves are known at once: the
 		// window from startup, the prompt from the line above. See outbudget.go.
 		window := h.windowTokens()
-		gen, ok := applyGeneration(h.Session.ChatOpts, window, est)
+		gen, ok := applyGeneration(h.Session.ChatOpts, window, est, h.outputLimit())
 		h.applyEffort(h.Session.ChatOpts, h.Effort()) // /effort: thinking on, off or the server's
 		room := "no window known, response uncapped"
 		if window > 0 {

@@ -102,15 +102,10 @@ func (h *Harness) Effort() string {
 // agentkit sends them in the endpoint's dialect: chat_template_kwargs and a
 // budget to llama.cpp, a `reasoning` object to OpenRouter (the effort, or
 // the budget as max_tokens), a thinking budget to Anthropic.
-// applyEffort is applyEffort with off sent as Config.EffortOff when one is
-// set: thinking on, at that effort, for a model that refuses off.
-func (h *Harness) applyEffort(opts *llm.ChatOpts, level string) {
-	applyEffort(opts, level)
-	if level == EffortOff && opts != nil && h.cfg.EffortOff != "" {
-		on := true
-		opts.EnableThinking, opts.ReasoningEffort = &on, h.cfg.EffortOff
-	}
-}
+// applyEffort is the harness's way in to applyEffort. A model that refuses
+// off is agentkit's capability record's job: the provider's effort_off is
+// pinned there (capstore.go), and off is sent as it.
+func (h *Harness) applyEffort(opts *llm.ChatOpts, level string) { applyEffort(opts, level) }
 
 func applyEffort(opts *llm.ChatOpts, level string) {
 	if opts == nil {

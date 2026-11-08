@@ -74,13 +74,13 @@ func TestApplyGeneration(t *testing.T) {
 	t.Setenv("DUN_MAX_OUTPUT_TOKENS", "")
 
 	// nil opts: nothing to write.
-	if _, ok := applyGeneration(nil, 220_000, 100_000); ok {
+	if _, ok := applyGeneration(nil, 220_000, 100_000, 0); ok {
 		t.Error("nil opts must not be ok")
 	}
 
 	// No honest budget: previous caps are left in place.
 	prev := llm.ChatOpts{MaxTokens: 9999, ReasoningBudgetTokens: func() *int { v := 5555; return &v }()}
-	gen, ok := applyGeneration(&prev, 220_000, 220_000-outputMargin-minOutputTokens+1)
+	gen, ok := applyGeneration(&prev, 220_000, 220_000-outputMargin-minOutputTokens+1, 0)
 	if ok {
 		t.Errorf("below the floor must not be ok: got %d", gen)
 	}
@@ -90,7 +90,7 @@ func TestApplyGeneration(t *testing.T) {
 
 	// Happy path: caps are written.
 	opts := &llm.ChatOpts{}
-	gen, ok = applyGeneration(opts, 220_000, 100_000)
+	gen, ok = applyGeneration(opts, 220_000, 100_000, 0)
 	if !ok {
 		t.Fatalf("should be ok: got %d", gen)
 	}
@@ -128,5 +128,27 @@ func TestWindowBudget_Accessors(t *testing.T) {
 	b = WindowBudget{Window: 100_000, Prompt: 150_000}
 	if got := b.Free(); got != -50_000 {
 		t.Errorf("Free() overrun = %d, want -50000", got)
+	}
+}
+
+// A known output limit caps the window-derived budget and is never exceeded;
+// an unknown one (0) changes nothing; a limit above the budget does not raise it.
+func TestApplyGeneration_NeverAboveTheOutputLimit(t *testing.T) {
+	free, _ := generationBudget(220_000, 100_000)
+	opts := &llm.ChatOpts{}
+	gen, ok := applyGeneration(opts, 220_000, 100_000, 8192)
+	if !ok || gen != 8192 || opts.MaxTokens != 8192 {
+		t.Fatalf("limit 8192: gen=%d ok=%v max=%d", gen, ok, opts.MaxTokens)
+	}
+	if think := *opts.ReasoningBudgetTokens; think > 8192 {
+		t.Fatalf("reasoning budget above the limit: %d", think)
+	}
+	gen, _ = applyGeneration(opts, 220_000, 100_000, 0)
+	if gen != free {
+		t.Fatalf("unknown limit changed the budget: %d, want %d", gen, free)
+	}
+	gen, _ = applyGeneration(opts, 220_000, 100_000, free*10)
+	if gen != free {
+		t.Fatalf("a larger limit raised the budget: %d, want %d", gen, free)
 	}
 }

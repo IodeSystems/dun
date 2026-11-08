@@ -178,9 +178,6 @@ type Config struct {
 	// (--plan-stall-rounds; 0 is DUN_PLAN_STALL_ROUNDS, else 30; negative is
 	// off; plannudge.go).
 	PlanStallRounds int
-	// EffortOff is what off is sent as, for a model that cannot stop
-	// thinking (dunconfig.ProviderConfig.EffortOff); "" sends off.
-	EffortOff string
 	// NoTools is a plain chat (dun --no-tools): no tool of any kind reaches
 	// the model, no server starts, and a call to a tool is refused.
 	NoTools bool

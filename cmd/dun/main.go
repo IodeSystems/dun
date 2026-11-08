@@ -664,6 +664,7 @@ func main() {
 	var in *inputStream
 	client := llm.NewClient(*url, effKey, *model)
 	tuneClient(fc, client, *url) // its /effort dialect and retries; the env wins, below
+	capsClient = client          // /model and /model probe (capscmd.go)
 	// Logged out, or no model chosen: a stand-in that refuses every call with
 	// what to do, so the engine still starts (a client can /login through it)
 	// and nothing is contacted.
@@ -724,7 +725,6 @@ func main() {
 		PlanNudgeRounds: intFlagOff("plan-nudge-rounds", *planNudgeRounds),
 		PlanNudgeFails:  intFlagOff("plan-nudge-fails", *planNudgeFails),
 		PlanStallRounds: intFlagOff("plan-stall-rounds", *planStallRounds),
-		EffortOff:       effortOff(fc, *url),
 		SessionFile:     sessionFile,
 		Persist:         *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the

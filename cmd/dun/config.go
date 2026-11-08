@@ -136,6 +136,9 @@ func clientCache(fc dunconfig.DunConfig, url, key string, tune func(c *llm.Clien
 // tuneClient sets what the config says about a client on url: how it is asked
 // to think (/effort) and its retries.
 func tuneClient(fc dunconfig.DunConfig, c *llm.Client, url string) {
+	// What this (endpoint, model) is known to do, from DUN_HOME, and what it
+	// learns from here (capstore.go). effort_off is pinned there.
+	dun.TrackCaps(c, effortOff(fc, url))
 	// How /effort's level reaches the model (agentkit's reasoning dialects):
 	// a LiteLLM proxy in front of OpenRouter names neither in its address.
 	if d, err := reasoningDialect(fc, url); err != nil {

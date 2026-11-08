@@ -121,11 +121,20 @@ func reasoningBudget(generation int) int { return generation * 2 / 3 }
 // copies it by value at the top of every chat round, and the context builder
 // that calls this runs on the turn's own goroutine immediately before that copy.
 // Anything setting it from elsewhere would be a race.
-func applyGeneration(opts *llm.ChatOpts, window, promptTokens int) (gen int, ok bool) {
+//
+// outLimit is the endpoint's known output ceiling (the capability record's
+// limits.output; 0 = unknown). Limits only narrow downstream (USER 2026-11-08,
+// via agentkit-f2): corrallm's window and max_tokens clamp are the ceiling, and
+// dun may ask for less, never more. So the window-derived budget is clamped to
+// it and never raised past it.
+func applyGeneration(opts *llm.ChatOpts, window, promptTokens, outLimit int) (gen int, ok bool) {
 	if opts == nil {
 		return 0, false
 	}
 	gen, ok = generationBudget(window, promptTokens)
+	if ok && outLimit > 0 && gen > outLimit {
+		gen = outLimit
+	}
 	if !ok {
 		// Leave the previous round's caps in place rather than clearing them: an
 		// unbounded request is exactly the failure mode being fixed, and a

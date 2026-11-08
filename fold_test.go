@@ -2,7 +2,6 @@ package dun
 
 import (
 	"context"
-	"github.com/iodesystems/agentkit/llm"
 	"strings"
 	"testing"
 
@@ -67,19 +66,6 @@ func TestFoldOpts_ThinkingOff(t *testing.T) {
 	o := h.foldOpts()
 	if o.EnableThinking == nil || *o.EnableThinking || o.ReasoningEffort != "none" {
 		t.Errorf("fold options %+v", o)
-	}
-	// A model that cannot stop thinking: off is sent as the provider's
-	// effort_off (Fireworks GLM-5.3 refuses "none").
-	h.cfg.EffortOff = "minimal"
-	o = h.foldOpts()
-	if o.EnableThinking == nil || !*o.EnableThinking || o.ReasoningEffort != "minimal" {
-		t.Errorf("fold options with effort_off: %+v", o)
-	}
-	// Other levels are untouched by it.
-	o2 := &llm.ChatOpts{}
-	h.applyEffort(o2, EffortHigh)
-	if o2.ReasoningEffort != "high" {
-		t.Errorf("high with effort_off set: %+v", o2)
 	}
 }
 
