@@ -1,12 +1,10 @@
 # Retrieval in dund (ragcore)
 
-Status: slices 2 and 3 are built (below, "Built: slice 2", "Built: slice 3");
-the rest is a proposal.
-dun's retrieval (memory notes, proactive surfacing of
-docs and code) runs on raglit today, as a separate server and a bundled
-extension that is off unless `/rag on`. So persistent memory is effectively off:
-the `memory` tool exists only while the docs server runs (`memory.md`), and in
-practice recap, which is in-session only, is the memory dun has. This file is
+Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
+3", "Built: slice 5"); the rest is a proposal.
+Memory notes are indexed and recalled through dund (slice 5), with or
+without `/rag on`. Code and doc search still run on raglit, as a separate
+server and a bundled extension that is off unless `/rag on`. This file is
 why retrieval would move into dund, and what it would need from raglit.
 Related: `memory.md` (write side, attestation), `surfacing.md` (the retrieval
 rule), `sessions-and-dund.md` (dund).
@@ -170,8 +168,8 @@ change re-queues the affected stages.
 
 ## Built: slice 2
 
-dund hosts raglit v0.5.1 (`internal/ragd`). Sessions do not use it yet
-(slice 5); `dun dund rag` is the manual client.
+dund hosts raglit v0.5.1 (`internal/ragd`). Sessions use it for memory
+notes (slice 5); `dun dund rag` is the manual client.
 
 **Layout**, under `$DUN_HOME/dund/rag/`:
 
@@ -210,9 +208,11 @@ roles (main, child, vision for chat) may move into this map later.
 
 | command → reply | fields |
 |---|---|
-| `rag_search` → `rag_hits` | project (empty = global), index, query, filter {path_prefix, tags, fields}, limit, mode (hybrid, default; fts) → mode, note, hits [path, title, page, text, score] |
+| `rag_search` → `rag_hits` | project (empty = global), index, query, filter {path_prefix, tags, fields}, limit, mode (hybrid, default; fts) → mode, note, hits [path, title, page, text, score, similarity, matched, terms] |
 | `rag_ingest` → `rag_ingested` | project, index, path (absolute) or url (http, https, file), title, tags → job, url |
 | `rag_jobs` → `rag_jobs` | project, index, state, limit → jobs [id, url, title, state, error, fragments] |
+| `rag_forget` → `rag_forgotten` | project, index, path or url → url, removed (slice 5) |
+| `rag_sync` → `rag_synced` | project, index, files [path, title, tags], gone [path] → queued, current, removed (slice 5) |
 
 An index the project does not keep is refused. A hit's path is its source
 URL (`file:///abs/path`). Hybrid with no embed model, or with one that
@@ -283,6 +283,48 @@ refused: `SyncEmbedModel` drops vectors only for another model id.
 `Store.MissingVectors`, `Store.Meta`, `Store.SetMeta`, `NewSegmenter`,
 `Segmenter.SegmentText`, `SegResult.Degraded`.
 
+## Built: slice 5
+
+The memory tool and memory recall use dund; `/rag on` is not needed for
+them. Code and doc search are unchanged (raglit, `/rag on`). Code:
+`raglink.go` (the socket client), `memrecall.go` (search, degraded mode,
+sync), `memory.go` (the tool).
+
+- **Link.** A session dials dund's socket (`Socket(DUN_HOME)`) for each
+  call, under dund or as a standalone `dun -p`. `DUN_MEMORY=0`: no memory
+  tool and no memory recall.
+- **Write.** A note stays a file (`memory/<project>/`, or
+  `memory/@global/` for `scope: global`) with its attestation log. The
+  tool now takes `scope` and `tags`; tags go in the frontmatter and to
+  `rag_ingest`. Index: `memories` of the project, or of the global set.
+  A void sends `rag_forget`.
+- **Recall.** The proactive search asks both memories indexes beside the
+  docs server's, when that runs. A hit carries `similarity`, `matched` and
+  `terms`, so the surfacing rule and thresholds are unchanged
+  (`surfacing.md`). No tag or path filter is sent: the surfacing search
+  used none before. Project and global hits are one group (memory): under
+  the coverage rule that compares bm25 scores of two indexes, which do not
+  compare (`memory.md`, "Per group"). Not measured.
+- **Double hit.** A tagged note is found up to three times in one search:
+  its frontmatter, its text, and the caption its tags are written as
+  (measured live, FTS, 2026-11-08). dun keeps one hit per note path, with
+  the best similarity and term count of its fragments.
+- **dund down** (no socket, or a dund with no retrieval): the note is
+  written and the tool result says it is not indexed yet; a void goes
+  ahead and says the same. Recall is a word search of the note files
+  (question, tags, text; stop words left out), under the coverage rule.
+  The session says once that it is degraded.
+- **Sync.** The first call that reaches dund (at start, and after any
+  failure) sends `rag_sync` with every note and every voided note. dund
+  queues a note it lacks, or holds with another source hash (or, without
+  a hash, from before the file's mtime), and removes the voided ones.
+- **Re-embed guard.** `rag_reembed` is refused while the index has a
+  running ingest job: raglit's `SetEmbedder` is a plain field write a
+  running worker reads (raglit-a4 has the fix).
+
+Not built: the strategies index (rules with a short name and optional
+detail; global, project or important).
+
 ## Slices
 
 1. raglit: split attest into types and service; semver tags (raglit's call).
@@ -291,6 +333,7 @@ refused: `SyncEmbedModel` drops vectors only for another model id.
 3. Model-role configuration and the four probes. Built (above).
 4. Field filters before ranking (needed by memory).
 5. dun memory and surfacing move to dund; `/rag on` stops being needed for memory.
+   Built (above).
 6. ANN vector index, when an index outgrows the scan.
 
 ## Open

@@ -1,7 +1,8 @@
 # Proactive retrieval ("surfacing")
 
-Before each model round, dun searches raglit with the user's message and may
-inject the best match into the prompt. A wrong injection costs context and
+Before each model round, dun searches with the user's message (raglit's
+indexes while `/rag on`; dund's memories indexes whenever dund is reachable,
+`rag.md` "Built: slice 5") and may inject the best match into the prompt. A wrong injection costs context and
 misleads the model, so the rule is strict: a miss is cheaper than noise. Code:
 `notify.go` (rule and query), `surfacing.go` (labels), `extension.go`
 (`indexedFinder`). Constants: `surfaceFloor`, `surfaceDelta`, `coverageFloor`,
@@ -63,7 +64,9 @@ document out of the top 20 for 4 of 8. Latency per pass fell from a median of
 
 `mode` is left unset so raglit picks hybrid on an index with embeddings and
 bm25 on one without. The search role's `list` tool tells dun which indexes have
-embeddings (`indexMeaning`).
+embeddings (`indexMeaning`). For dund's memories indexes, a reply in mode
+hybrid means the index has embeddings; with dund down, the word search of the
+note files runs under the coverage rule.
 
 ## Presentation
 
