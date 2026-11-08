@@ -74,6 +74,7 @@ func (h *Harness) noteUsage(u agent.TokenUsage) {
 	// it. See maybeNudgeRecap: the system prompt alone did not move the model.
 	h.maybeNudgeRecap(u.Active)
 	h.noteTurnRound()
+	h.planNudgeRound() // after the count it reads (plannudge.go)
 	if h.self == nil {
 		return
 	}

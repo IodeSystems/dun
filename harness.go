@@ -167,6 +167,12 @@ type Config struct {
 	// tools before dun makes the agent report (--settle-delay; 0 is
 	// DUN_SETTLE_DELAY, else 2m; negative is off; settle.go).
 	SettleDelay time.Duration
+	// PlanNudgeRounds and PlanNudgeFails are when the main agent is made to
+	// write the plan: after this many rounds in a turn, or this many failed
+	// tool results in a row, with no open plan node (--plan-nudge-rounds,
+	// --plan-nudge-fails; 0 is DUN_PLAN_NUDGE_ROUNDS / DUN_PLAN_NUDGE_FAILS,
+	// else 25 and 4; negative is off; plannudge.go).
+	PlanNudgeRounds, PlanNudgeFails int
 	// EffortOff is what off is sent as, for a model that cannot stop
 	// thinking (dunconfig.ProviderConfig.EffortOff); "" sends off.
 	EffortOff string
@@ -325,6 +331,7 @@ type Harness struct {
 	agentID    int         // this harness's id within its parent; 0 for a root
 	self       *subAgent   // this harness's own record IN its parent; nil for a root
 	turnRounds turnRounds  // this turn's tool-call rounds, for the turn limit
+	nudge      planNudge   // this turn's plan nudge (plannudge.go)
 	settle     settleState // the delayed end-of-turn report (settle.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model

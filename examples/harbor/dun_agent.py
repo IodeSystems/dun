@@ -84,6 +84,11 @@ class Dun(BaseInstalledAgent):
         # a cost guard: report it with the results.
         if os.environ.get("DUN_MAX_TURNS"):
             env["DUN_MAX_TURNS"] = os.environ["DUN_MAX_TURNS"]
+        # When dun makes the model write the plan: after N rounds with no plan
+        # (default 25), or K failed tool results in a row (default 4); 0 is off.
+        for var in ("DUN_PLAN_NUDGE_ROUNDS", "DUN_PLAN_NUDGE_FAILS"):
+            if os.environ.get(var):
+                env[var] = os.environ[var]
         event = json.dumps({"type": "user", "content": instruction})
         await self.exec_as_agent(
             environment,

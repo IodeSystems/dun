@@ -924,7 +924,11 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		// withRecapWatch. Capping twice would spill the same output twice.
 		if startJob == nil {
 			// No job machinery (a bare dispatcher in a test): run it straight.
-			out := backend.Run(ctx, args.Command, nil).Render()
+			res := backend.Run(ctx, args.Command, nil)
+			if res.Failed() {
+				markExecFailed(ctx) // a stall's failure (plannudge.go)
+			}
+			out := res.Render()
 			if onCall != nil {
 				onCall("exec", map[string]any{"command": args.Command}, out)
 			}
@@ -968,6 +972,9 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			t.Stop()
 		}
 		res, done := j.settle()
+		if res.Failed() || !done {
+			markExecFailed(ctx) // failed, or ran past its timeout (plannudge.go)
+		}
 		out := res.Render()
 		if !done {
 			// The time it actually waited: a wake or an interrupt ends the

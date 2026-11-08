@@ -134,6 +134,7 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	// the one that recovered. See clearOverflowHints.
 	h.clearOverflowHints()
 	h.turnRounds.reset()  // the turn limit counts this turn's rounds (turnlimit.go)
+	h.nudge.reset()       // one plan nudge per turn (plannudge.go)
 	h.dropTurnScoped()    // asides about the turn that ended (asidettl.go)
 	h.settleResumeAside() // once, on the first user turn after a resume (settle.go)
 	if h.healOrphanToolCalls(ctx) == 0 {

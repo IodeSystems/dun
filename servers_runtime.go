@@ -852,6 +852,9 @@ func (h *Harness) rebuildTools() {
 	// arrived while it was running back inside the result. A background job that
 	// finishes mid-turn is then reported in the result the model is already
 	// reading, instead of scheduling a turn of its own.
+	// Counts failed results toward a stall (plannudge.go). Inside the lift, so
+	// the nudge's aside rides the result that tripped it.
+	dispatch = withPlanNudge(dispatch, h)
 	dispatch = withLiftedQueue(dispatch, h)
 
 	sys := cfg.System
