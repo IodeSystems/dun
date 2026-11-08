@@ -69,8 +69,9 @@ func TestOnIdle_ListsOpenNodesDoneWhen(t *testing.T) {
 	}
 }
 
-// After the check, an edit, a write or an exec re-arms it once, naming the
-// change; no change, no second check; never a third.
+// After the check, an edit or a write re-arms it once, naming the change; an
+// exec (the verification the check asks for) does not; no change, no second
+// check; never a third.
 func TestOnIdle_RearmsAfterALateChange(t *testing.T) {
 	ctx := context.Background()
 	h := planHarness(t, false)
@@ -99,13 +100,16 @@ func TestOnIdle_RearmsAfterALateChange(t *testing.T) {
 		t.Fatalf("a third check: %q", got)
 	}
 
-	// A new turn: an exec after the check is named as commands run.
+	// A new turn: an exec alone after the check does not re-arm it.
 	h.idle.reset()
 	h.onIdle(ctx, 5, 0)
 	h.idle.note("exec", `{"command":"python test.py"}`)
+	if got := h.onIdle(ctx, 6, 1); got != "" {
+		t.Errorf("an exec re-armed the check: %q", got)
+	}
 	h.idle.note("file_write", `{"path":"/app/a"}`)
-	if got := h.onIdle(ctx, 6, 1); !strings.HasPrefix(got, "You changed /app/a and ran commands after the last check:") {
-		t.Errorf("exec and write: %q", got)
+	if got := h.onIdle(ctx, 6, 1); !strings.HasPrefix(got, "You changed /app/a after the last check:") {
+		t.Errorf("write after exec: %q", got)
 	}
 }
 

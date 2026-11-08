@@ -14,7 +14,10 @@ import (
 
 // idlecheck.go — what dun says when the model is about to end a turn
 // (agent.Session.OnIdle). Asked once per turn, and once more after a file
-// edit or write or an exec made since (idleRearm); never a third time.
+// edit or write made since (idleRearm); never a third time. An exec does not
+// re-arm it: the check itself asks the model to run what it produced, so an
+// exec after it is nearly always that verification, and counting it would
+// buy a second check on almost every task (review, 2026-11-07).
 //
 // --non-interactive: no one reviews the result, so a turn that did work (more
 // than one round) ends only after the model has checked the task's stated
@@ -124,19 +127,18 @@ type idleState struct {
 	mu      sync.Mutex
 	checked bool
 	paths   []string // file_edit and file_write paths, in order, once each
-	ran     bool     // an exec
 }
 
 func (s *idleState) reset() {
 	s.mu.Lock()
-	s.checked, s.paths, s.ran = false, nil, false
+	s.checked, s.paths = false, nil
 	s.mu.Unlock()
 }
 
 // mark records a check: changes count from here.
 func (s *idleState) mark() {
 	s.mu.Lock()
-	s.checked, s.paths, s.ran = true, nil, false
+	s.checked, s.paths = true, nil
 	s.mu.Unlock()
 }
 
@@ -148,8 +150,6 @@ func (s *idleState) note(tool, args string) {
 		return
 	}
 	switch tool {
-	case "exec":
-		s.ran = true
 	case "file_edit", "file_write":
 		var a struct {
 			Path string `json:"path"`
@@ -180,9 +180,6 @@ func (s *idleState) change() string {
 			what += fmt.Sprintf(" and %d more files", n-idlePathsMax)
 		}
 		parts = append(parts, what)
-	}
-	if s.ran {
-		parts = append(parts, "ran commands")
 	}
 	return strings.Join(parts, " and ")
 }
