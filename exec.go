@@ -944,6 +944,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			if res.Failed() {
 				markExecFailed(ctx) // a stall's failure (plannudge.go)
 			}
+			markExecVerdict(ctx, execVerdict(res, true, 0))
 			out := renderForeground(res)
 			if onCall != nil {
 				onCall("exec", map[string]any{"command": args.Command}, out)
@@ -991,6 +992,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		if res.Failed() || !done {
 			markExecFailed(ctx) // failed, or ran past its timeout (plannudge.go)
 		}
+		markExecVerdict(ctx, execVerdict(res, done, j.id))
 		out := renderForeground(res)
 		if !done {
 			// The time it actually waited: a wake or an interrupt ends the

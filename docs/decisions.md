@@ -99,6 +99,18 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   model gives the tool name it knows. A bare tool name keeps only that tool's
   most recent call. A `from` prefers the user message; an assistant turn that
   echoes the phrase collapsed a span to 85 characters.
+- **A removed call stays listed (stub), by default** (USER, 2026-11-08;
+  `recapstub.go`). The summary lost which commands ran and how each ended,
+  and in long Terminal-Bench trials cheap models ran them again. Each removed
+  call that `keep` and `drop` do not name becomes one line in the
+  replacement: tool, arguments cut to 80 characters, outcome (an exec's from
+  its recorded ExecResult, its exit line after a resume), result size, and a
+  file with the result in the isolation tmp. `file_read` on that path is the
+  one recall route. Past 40 lines the earliest become one count line. `drop`
+  (matched as `keep`) leaves no stub, for noise. The stubs are text in the
+  replacement entry, so no tool pair is split. The recapN.jsonl sidecar
+  stays: it is the audit trail of the whole span, with the prose and the
+  dropped calls the result files do not hold.
 - **A context-management nudge must name what to remove and arrive when the
   churn happens.** A prompt line describing `recap` got zero uses. A
   window-size nudge was read and ignored: a threshold says "you spend a lot",

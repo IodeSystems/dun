@@ -513,6 +513,9 @@ type Harness struct {
 	// capped memoizes the clip by content, so the model and the UI get the same
 	// text and one spill rather than two.
 	capped map[string]string
+	// execVerdicts is how each exec call ended, by tool call id, for the
+	// stub a recap leaves (recapstub.go).
+	execVerdicts map[string]string
 	// Compaction counters. compactTurn resets each turn, so >1 is thrashing
 	// rather than a busy session.
 	compactMu   sync.Mutex

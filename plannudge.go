@@ -312,12 +312,23 @@ func planForcedStream(ctx context.Context, r agent.LLMRunner, msgs []llm.Message
 // say it failed without anyone parsing its text (ExecResult says why not).
 type execOutcomeKey struct{}
 
-type execOutcome struct{ failed bool }
+type execOutcome struct {
+	failed bool
+	// verdict is how the command ended, for recap's stub (recapstub.go).
+	verdict string
+}
 
 // markExecFailed records, for withPlanNudge, that exec failed or timed out.
 func markExecFailed(ctx context.Context) {
 	if o, ok := ctx.Value(execOutcomeKey{}).(*execOutcome); ok {
 		o.failed = true
+	}
+}
+
+// markExecVerdict records how exec ended; withPlanNudge files it by call id.
+func markExecVerdict(ctx context.Context, verdict string) {
+	if o, ok := ctx.Value(execOutcomeKey{}).(*execOutcome); ok {
+		o.verdict = verdict
 	}
 }
 
@@ -328,6 +339,9 @@ func withPlanNudge(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher 
 		o := &execOutcome{}
 		out, err := inner(context.WithValue(ctx, execOutcomeKey{}, o), tc)
 		h.planNudgeResult(err != nil || o.failed || strings.HasPrefix(out, "ERROR"))
+		if o.verdict != "" {
+			h.noteExecVerdict(tc.ID, o.verdict)
+		}
 		return out, err
 	}
 }
