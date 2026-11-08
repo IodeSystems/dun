@@ -108,8 +108,12 @@ var Supported = []Tool{
 	// --json. A plain name it lacks is a 404, so all-off is the glob <own>:-*
 	// (dun/attach.go). --embedded, --db and --embed are gone; ingest --now is
 	// an alias of --wait. Older raglits still work: dun probes `help key`.
+	// Recommended v0.5.1 (2026-11-08, f317da1), tarballs in deps.json: the Go
+	// dependency upgrade (agentkit v0.25.0 and others). v0.5.0 normalizes every
+	// tag on write (lowercase, whitespace collapsed); dun matches no tags, so
+	// nothing changes for it. MCP surface unchanged since v0.4.1.
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.4.0"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.5.1"},
 }
 
 // Tool is one Supported entry.
