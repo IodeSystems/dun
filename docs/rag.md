@@ -188,6 +188,12 @@ change re-queues the affected stages.
   memories, strategies**. Strategies is new: the learned, reusable approaches
   from the learning-phase design (churn → resolved candidate → lesson), kept
   apart from memories so a lesson's retrieval is not crowded by project facts.
+- **Organization: dund's own** (USER, relayed by raglit-a4). dund uses none of
+  raglit's organization: no Registry, no Home layout, no `project:<ns>`
+  namespaces, no `/mcp/{project}` keys. dund decides which Stores exist (for
+  example per project, plus a global set of code, docs, memory and strategy)
+  and where their files live, and opens each with `raglit.Open(path)`. What
+  dund needs from raglit: Store, Hit and the job API, stable and tagged.
 - The four indexes are **for dund itself** (USER, relayed by raglit-a4): they
   serve dun's own work. The user's document corpora stay on raglitd. So OCR/PDF
   extraction matters less in dund; whether it is in dund's first slice is open
