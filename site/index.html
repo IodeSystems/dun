@@ -207,8 +207,8 @@
     <p class="lede">The point is reliability on cheap models and modest hardware, not peak capability.</p>
 
     <div class="headline">
-      <span class="num">1/15 → <b>10/30</b></span>
-      <span class="ctx">on the 15 Terminal-Bench 2.1 tasks dun found hardest, GLM-5.3-Flash at low effort; old build 1 attempt per task, now 2. <a href="#evidence">What that does and does not show.</a></span>
+      <span class="num">7% → <b>33%</b></span>
+      <span class="ctx">(1 attempt per task → 2) on the 15 Terminal-Bench 2.1 tasks dun found hardest, GLM-5.3-Flash at low effort. <a href="#evidence">What that does and does not show.</a></span>
     </div>
 
     <div class="actions">
@@ -255,11 +255,11 @@
         <p>9 rated hard and 6 rated medium by Terminal-Bench. Pass rate on these 15 tasks:</p>
         <ul class="bars">
           <li><span class="lab">dun, older build <small>1/15, 1 attempt per task</small></span><span class="val">7%</span><span class="track"><span class="fill" style="width:7%"></span></span></li>
-          <li><span class="lab">pi, our control run, same setup</span><span class="val">7%</span><span class="track"><span class="fill" style="width:7%"></span></span></li>
-          <li><span class="lab">public leaderboard, average of 9 harnesses</span><span class="val">31%</span><span class="track"><span class="fill" style="width:31%"></span></span></li>
+          <li><span class="lab">pi, our control run, same setup <small>1/15, 1 attempt per task</small></span><span class="val">7%</span><span class="track"><span class="fill" style="width:7%"></span></span></li>
+          <li><span class="lab">public leaderboard, average of 9 harnesses <small>3 attempts per task (6 for codex, opencode)</small></span><span class="val">31%</span><span class="track"><span class="fill" style="width:31%"></span></span></li>
           <li class="us"><span class="lab">dun now <small>10/30, 2 attempts per task</small></span><span class="val">33%</span><span class="track"><span class="fill" style="width:33%"></span></span></li>
-          <li><span class="lab">claude-code, public leaderboard</span><span class="val">38%</span><span class="track"><span class="fill" style="width:38%"></span></span></li>
-          <li><span class="lab">hermes, public leaderboard (top)</span><span class="val">40%</span><span class="track"><span class="fill" style="width:40%"></span></span></li>
+          <li><span class="lab">claude-code, public leaderboard <small>45 trials, 3 attempts per task</small></span><span class="val">38%</span><span class="track"><span class="fill" style="width:38%"></span></span></li>
+          <li><span class="lab">hermes, public leaderboard (top) <small>45 trials, 3 attempts per task</small></span><span class="val">40%</span><span class="track"><span class="fill" style="width:40%"></span></span></li>
         </ul>
         <p class="why gap">Mid-pack among the public harnesses for this model, not the top.</p>
       </div>
@@ -278,7 +278,7 @@
         <li>Across the whole suite, the gain is within noise: 18 → 19 of 37 matched tasks, one attempt each.</li>
         <li>dun is not yet frugal with tokens: it spends about 3× the tokens per passed task of the leading harnesses.</li>
         <li>Some tasks are bound by the model, not the harness (vision, crypto math). A harness does not fix those.</li>
-        <li>The hard-task set was chosen by where dun did worst, so it is the set with the most room to improve.</li>
+        <li>The 15 tasks were picked as the ones where dun had run longest (60+ rounds).</li>
       </ul>
     </div>
   </div>
