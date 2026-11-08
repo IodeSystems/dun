@@ -70,4 +70,12 @@ func TestRagCommandsOverTheSocket(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	a.send("r4", "", &proto.RagSync{Project: "dun", Index: "memories", Files: []proto.RagSyncFile{{Path: doc}}})
+	if p, ok := a.until(func(ev proto.Event) bool { return ev.Re == "r4" }).Payload.(*proto.RagSynced); !ok || p.Queued != 1 {
+		t.Fatalf("rag_sync answered %+v", p)
+	}
+	a.send("r5", "", &proto.RagForget{Project: "dun", Index: "docs", Path: doc})
+	if p, ok := a.until(func(ev proto.Event) bool { return ev.Re == "r5" }).Payload.(*proto.RagForgotten); !ok || !p.Removed {
+		t.Fatalf("rag_forget answered %+v", p)
+	}
 }

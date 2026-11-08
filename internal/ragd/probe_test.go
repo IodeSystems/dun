@@ -486,3 +486,24 @@ func TestReembedRefusedWhileAJobRuns(t *testing.T) {
 		t.Fatalf("reembed after the job ended: %v", err)
 	}
 }
+
+// A hit carries what the surfacing rule reads: the similarity of a
+// vector-ranked hit, and the query words it holds.
+func TestHitsCarrySimilarityAndTerms(t *testing.T) {
+	f := &fakeModels{dim: 8}
+	h := openWith(t, t.TempDir(), f.serve(t), "nomic-embed-text", "")
+	t.Cleanup(func() { h.Close(time.Second) })
+	ingest(t, h, proto.RagIngest{Index: "memories", Path: writeDoc(t, "a.md", "narwhal tusk survey\n")})
+	got := search(t, h, proto.RagSearch{Index: "memories", Query: "narwhal walrus"})
+	if got.Mode != "hybrid" || len(got.Hits) == 0 {
+		t.Fatalf("search %+v, want hybrid hits", got)
+	}
+	x := got.Hits[0]
+	if x.Similarity == nil || x.Terms != 2 || x.Matched != 1 {
+		t.Fatalf("hit %+v (sim %v), want a similarity and 1 of 2 terms", x, x.Similarity)
+	}
+	fts := search(t, h, proto.RagSearch{Index: "memories", Query: "narwhal walrus", Mode: "fts"})
+	if len(fts.Hits) == 0 || fts.Hits[0].Similarity != nil || fts.Hits[0].Terms != 2 {
+		t.Fatalf("fts hit %+v, want no similarity and the terms", fts.Hits)
+	}
+}

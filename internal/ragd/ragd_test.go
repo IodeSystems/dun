@@ -279,3 +279,82 @@ func TestResolveFacets(t *testing.T) {
 		t.Fatalf("embed with no provider: %+v", r.Models.Embed)
 	}
 }
+
+// waitIdle waits until an index has no pending or running job.
+func waitIdle(t *testing.T, h *Host, project, index string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		busy := 0
+		for _, s := range []string{"pending", "running"} {
+			js, err := h.Jobs(proto.RagJobs{Project: project, Index: index, State: s})
+			if err != nil {
+				t.Fatal(err)
+			}
+			busy += len(js.Jobs)
+		}
+		if busy == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s/%s: %d jobs still queued after 30s", project, index, busy)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Sync queues what the index lacks or holds stale, skips what is current,
+// and removes what is gone; Forget removes one document and is idempotent.
+func TestSyncAndForget(t *testing.T) {
+	h := open(t, t.TempDir())
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.md"), filepath.Join(dir, "b.md")
+	for p, text := range map[string]string{a: "ocelot den\n", b: "capybara pond\n"} {
+		if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := []proto.RagSyncFile{{Path: a, Tags: []string{"wild"}}, {Path: b}}
+	r, err := h.Sync(proto.RagSync{Project: "dun", Index: "memories", Files: files})
+	if err != nil || r.Queued != 2 || r.Current != 0 {
+		t.Fatalf("first sync %+v %v, want 2 queued", r, err)
+	}
+	waitIdle(t, h, "dun", "memories")
+	if r, err = h.Sync(proto.RagSync{Project: "dun", Index: "memories", Files: files}); err != nil || r.Queued != 0 || r.Current != 2 {
+		t.Fatalf("second sync %+v %v, want both current", r, err)
+	}
+	q := proto.RagSearch{Project: "dun", Index: "memories", Query: "ocelot", Mode: "fts", Filter: proto.RagFilter{Tags: []string{"wild"}}}
+	if got := search(t, h, q); len(got.Hits) == 0 {
+		t.Fatal("a synced file's tags do not filter")
+	}
+
+	// Changed bytes: queued again. Gone: removed.
+	if err := os.WriteFile(a, []byte("ocelot den, moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r, err = h.Sync(proto.RagSync{Project: "dun", Index: "memories", Files: files[:1], Gone: []string{b}}); err != nil || r.Queued != 1 || r.Removed != 1 {
+		t.Fatalf("sync after a change %+v %v, want 1 queued, 1 removed", r, err)
+	}
+	waitIdle(t, h, "dun", "memories")
+	if got := search(t, h, proto.RagSearch{Project: "dun", Index: "memories", Query: "capybara", Mode: "fts"}); len(got.Hits) != 0 {
+		t.Fatalf("a gone file still found: %+v", got.Hits)
+	}
+	if got := search(t, h, proto.RagSearch{Project: "dun", Index: "memories", Query: "moved", Mode: "fts"}); len(got.Hits) == 0 {
+		t.Fatal("the changed text is not indexed")
+	}
+
+	f, err := h.Forget(proto.RagForget{Project: "dun", Index: "memories", Path: a})
+	if err != nil || !f.Removed {
+		t.Fatalf("forget %+v %v", f, err)
+	}
+	if f, err = h.Forget(proto.RagForget{Project: "dun", Index: "memories", Path: a}); err != nil || f.Removed {
+		t.Fatalf("second forget %+v %v, want not removed and no error", f, err)
+	}
+	// An index that does not exist: nothing made.
+	if r, err := h.Sync(proto.RagSync{Project: "other", Index: "memories", Gone: []string{a}}); err != nil || r.Removed != 0 {
+		t.Fatalf("sync of no index %+v %v", r, err)
+	}
+	if _, err := os.Stat(filepath.Join(h.root, "other")); err == nil {
+		t.Fatal("a gone-only sync made an index")
+	}
+}

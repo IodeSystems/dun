@@ -20,6 +20,8 @@ package ragd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -442,7 +444,8 @@ func (h *Host) Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, e
 	}
 	out.Mode = mode
 	for _, x := range hits {
-		out.Hits = append(out.Hits, proto.RagHit{Path: x.Path, Title: x.Title, Page: x.Page, Text: x.Text, Score: x.Score})
+		out.Hits = append(out.Hits, proto.RagHit{Path: x.Path, Title: x.Title, Page: x.Page, Text: x.Text, Score: x.Score,
+			Similarity: x.Similarity, Matched: len(x.Matched), Terms: x.QueryTerms})
 	}
 	return out, nil
 }
@@ -461,22 +464,134 @@ func (h *Host) Ingest(q proto.RagIngest) (*proto.RagIngested, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(q.Tags) > 0 {
-		// The one way the library takes tags from its caller: a supplied
-		// caption, consumed by the document's next commit.
-		cap := q.Title
-		if cap == "" {
-			cap = filepath.Base(src)
-		}
-		if err := st.SupplyIdentity(src, raglit.DocIdentity{Name: cap, ContentTags: q.Tags}, "dund"); err != nil {
-			return nil, err
-		}
-	}
-	id, err := st.Enqueue(src, q.Title)
+	id, err := enqueue(st, src, q.Title, q.Tags)
 	if err != nil {
 		return nil, err
 	}
 	return &proto.RagIngested{Job: id, URL: src}, nil
+}
+
+// enqueue queues src on st with its title and tags.
+func enqueue(st *raglit.Store, src, title string, tags []string) (int64, error) {
+	if len(tags) > 0 {
+		// The one way the library takes tags from its caller: a supplied
+		// caption, consumed by the document's next commit.
+		cap := title
+		if cap == "" {
+			cap = filepath.Base(src)
+		}
+		if err := st.SupplyIdentity(src, raglit.DocIdentity{Name: cap, ContentTags: tags}, "dund"); err != nil {
+			return 0, err
+		}
+	}
+	return st.Enqueue(src, title)
+}
+
+// Forget removes one document from its index. An index or a document that
+// does not exist is not an error: Removed says whether one was there.
+func (h *Host) Forget(q proto.RagForget) (*proto.RagForgotten, error) {
+	name, err := Name(q.Project, q.Index)
+	if err != nil {
+		return nil, err
+	}
+	src, err := forgetSource(q.Path, q.URL)
+	if err != nil {
+		return nil, err
+	}
+	out := &proto.RagForgotten{URL: src}
+	st, err := h.store(name, false)
+	if err != nil || st == nil {
+		return out, err
+	}
+	if st.DocumentAddedAt(src) == 0 {
+		return out, nil
+	}
+	if err := st.RemoveDocument(src, false); err != nil {
+		return nil, err
+	}
+	out.Removed = true
+	return out, nil
+}
+
+// forgetSource is source for a document that may no longer be on disk.
+func forgetSource(path, u string) (string, error) {
+	switch {
+	case path != "" && u != "":
+		return "", errors.New("rag: a path or a URL, not both")
+	case path != "":
+		if !filepath.IsAbs(path) {
+			return "", fmt.Errorf("rag: %q is not an absolute path", path)
+		}
+		return "file://" + filepath.Clean(path), nil
+	case u != "":
+		return u, nil
+	}
+	return "", errors.New("rag: forget needs a path or a URL")
+}
+
+// current reports whether st holds path's file as it is now. With a
+// recorded source hash (raglit's: sha256, hex), the bytes decide: a rewrite
+// with the same bytes is current, and a change committed under a job that
+// read the old bytes is not. Without one, the document must have been
+// indexed after the file last changed.
+func current(st *raglit.Store, src, path string) bool {
+	at := st.DocumentAddedAt(src)
+	if at == 0 {
+		return false
+	}
+	if h, _ := st.DocumentHash(src); h != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		sum := sha256.Sum256(b)
+		return h == hex.EncodeToString(sum[:])
+	}
+	fi, err := os.Stat(path)
+	return err == nil && at >= fi.ModTime().UnixNano()
+}
+
+// Sync queues each of q.Files the index does not hold, or holds from
+// before the file last changed, and removes each of q.Gone. Each step is
+// idempotent, so a caller may send the whole set every time.
+func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
+	name, err := Name(q.Project, q.Index)
+	if err != nil {
+		return nil, err
+	}
+	out := &proto.RagSynced{}
+	st, err := h.store(name, len(q.Files) > 0)
+	if err != nil || st == nil {
+		return out, err
+	}
+	for _, f := range q.Files {
+		src, err := source(f.Path, "")
+		if err != nil {
+			return nil, err
+		}
+		if current(st, src, f.Path) {
+			out.Current++
+			continue
+		}
+		if _, err := enqueue(st, src, f.Title, f.Tags); err != nil {
+			return nil, err
+		}
+		out.Queued++
+	}
+	for _, p := range q.Gone {
+		src, err := forgetSource(p, "")
+		if err != nil {
+			return nil, err
+		}
+		if st.DocumentAddedAt(src) == 0 {
+			continue
+		}
+		if err := st.RemoveDocument(src, false); err != nil {
+			return nil, err
+		}
+		out.Removed++
+	}
+	return out, nil
 }
 
 // source is the URL a job reads: file:// for a local path, which must be

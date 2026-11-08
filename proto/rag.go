@@ -10,10 +10,14 @@ func init() {
 	command[RagIngest]("rag_ingest")
 	command[RagJobs]("rag_jobs")
 	command[RagReembed]("rag_reembed")
+	command[RagForget]("rag_forget")
+	command[RagSync]("rag_sync")
 	event[RagHits]("rag_hits")
 	event[RagIngested]("rag_ingested")
 	event[RagJobList]("rag_jobs")
 	event[RagReembedding]("rag_reembedding")
+	event[RagForgotten]("rag_forgotten")
+	event[RagSynced]("rag_synced")
 }
 
 // RagFilter limits a search before ranking. Every constraint must hold.
@@ -40,13 +44,20 @@ type RagSearch struct {
 	Mode    string    `json:"mode,omitempty"`
 }
 
-// RagHit is one fragment a search found.
+// RagHit is one fragment a search found. Similarity is the cosine of the
+// query and fragment vectors, nil when the vector side did not rank it (an
+// FTS search, or a hybrid hit outside the vector pool); the score of a
+// hybrid search is a fused rank and sets no bar. Matched is how many of
+// the query's Terms (after stopwords) the fragment holds.
 type RagHit struct {
-	Path  string  `json:"path"`
-	Title string  `json:"title,omitempty"`
-	Page  int     `json:"page,omitempty"`
-	Text  string  `json:"text"`
-	Score float64 `json:"score"`
+	Path       string   `json:"path"`
+	Title      string   `json:"title,omitempty"`
+	Page       int      `json:"page,omitempty"`
+	Text       string   `json:"text"`
+	Score      float64  `json:"score"`
+	Similarity *float64 `json:"similarity,omitempty"`
+	Matched    int      `json:"matched,omitempty"`
+	Terms      int      `json:"terms,omitempty"`
 }
 
 // RagHits answers RagSearch. Mode is the mode that ran; Note says why it is
@@ -121,4 +132,48 @@ type RagReembedding struct {
 	Dim     int    `json:"dim,omitempty"`
 	Dropped bool   `json:"dropped,omitempty"`
 	Missing int    `json:"missing"`
+}
+
+// RagForget removes one document from an index: Path is the local file it
+// was ingested from (absolute), or URL its source. Answered with
+// RagForgotten; a document the index does not hold is not an error.
+type RagForget struct {
+	Project string `json:"project,omitempty"`
+	Index   string `json:"index"`
+	Path    string `json:"path,omitempty"`
+	URL     string `json:"url,omitempty"`
+}
+
+// RagForgotten answers RagForget: whether the index held the document.
+type RagForgotten struct {
+	URL     string `json:"url"`
+	Removed bool   `json:"removed"`
+}
+
+// RagSync brings an index in step with a set of local files (dun's memory
+// notes, which are written while dund may be down). Each of Files is
+// queued when the index does not hold it or holds an older version than
+// the file (its modification time is after the document was indexed);
+// each of Gone (absolute paths) is removed. Answered with RagSynced.
+type RagSync struct {
+	Project string        `json:"project,omitempty"`
+	Index   string        `json:"index"`
+	Files   []RagSyncFile `json:"files,omitempty"`
+	Gone    []string      `json:"gone,omitempty"`
+}
+
+// RagSyncFile is one file of a RagSync, with the title and tags it is
+// ingested with (as RagIngest).
+type RagSyncFile struct {
+	Path  string   `json:"path"`
+	Title string   `json:"title,omitempty"`
+	Tags  []string `json:"tags,omitempty"`
+}
+
+// RagSynced answers RagSync: how many files were queued, how many were
+// already current, and how many gone ones were removed.
+type RagSynced struct {
+	Queued  int `json:"queued"`
+	Current int `json:"current"`
+	Removed int `json:"removed"`
 }
