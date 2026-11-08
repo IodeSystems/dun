@@ -99,6 +99,22 @@ func (r ExecResult) Render() string {
 	return s
 }
 
+// renderForeground is a finished foreground exec's result: Render, and a
+// word when the command printed nothing. An empty result read as a pass:
+// full5 break-filter-js-from-html (2026-11-07) ran a test script that
+// printed nothing, got "", and took it as passing. Not for job logs.
+// The exit line stays the last line, where the TUI reads it.
+func renderForeground(r ExecResult) string {
+	if strings.TrimSpace(r.Output) != "" {
+		return r.Render()
+	}
+	if !r.Failed() {
+		return "(no output; exit 0)"
+	}
+	r.Output = "(no output)"
+	return r.Render()
+}
+
 // execInlineMax is how much of a foreground result reaches the model.
 //
 // Background jobs have had this since the day they were written: stream to a
@@ -928,7 +944,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			if res.Failed() {
 				markExecFailed(ctx) // a stall's failure (plannudge.go)
 			}
-			out := res.Render()
+			out := renderForeground(res)
 			if onCall != nil {
 				onCall("exec", map[string]any{"command": args.Command}, out)
 			}
@@ -975,7 +991,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		if res.Failed() || !done {
 			markExecFailed(ctx) // failed, or ran past its timeout (plannudge.go)
 		}
-		out := res.Render()
+		out := renderForeground(res)
 		if !done {
 			// The time it actually waited: a wake or an interrupt ends the
 			// grace early, and "after 10m" for a 12 s wait misleads.
