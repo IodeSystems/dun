@@ -270,40 +270,20 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 	}
 }
 
-// systemFiles is the system prompt's line for the file tools: when to use
-// them rather than exec, and the paths they take beyond the tree. What each
-// one does is in its own description.
-func systemFiles(ts *filetools.Toolset, open string) string {
-	if ts == nil {
+// systemFiles is the system prompt's line for the file tools. It names no
+// paths and no modes (USER 2026-11-07): what is open is the file tools'
+// refusal to say and, for exec, the filesystem isolation's to enforce; a
+// listed path set is text the model reads every request and can work around.
+// It no longer bans cat/sed/grep either: in 72 Terminal-Bench trials the
+// model ran cat 179 times, sed 111 and grep 106 beside 190 file_reads. What
+// it says is the one reason that holds: sed -i says nothing when its pattern
+// misses (exit 0), file_edit refuses (20% vs 10% failed, and sed's count
+// misses the silent ones).
+func systemFiles(ts *filetools.Toolset) string {
+	if ts == nil || !ts.Handles(ts.Name(filetools.Edit)) {
 		return ""
 	}
-	names := ts.Names()
-	if len(names) == 0 {
-		return ""
-	}
-	line := "\n\nUse " + strings.Join(names, ", ") + ", not exec, to read files (not cat/head/sed) and search them (not grep/rg/find)"
-	if !ts.Handles(ts.Name(filetools.Grep)) && ts.Handles(ts.Name(filetools.Read)) {
-		line = "\n\nUse " + strings.Join(names, ", ") + ", not exec, to read files and directories (not cat/head/sed/ls) and search them (" +
-			ts.Name(filetools.Read) + " with grep, not grep/rg/find)"
-	}
-	if ts.Handles(ts.Name(filetools.Edit)) {
-		line += ", and to edit them (not sed or heredocs)"
-	}
-	line += ". Paths are relative to the working tree" + open
-	var tmp []string
-	for _, bare := range []string{filetools.Read, filetools.Grep, filetools.List} {
-		if ts.Handles(ts.Name(bare)) {
-			tmp = append(tmp, ts.Name(bare))
-		}
-	}
-	if len(tmp) > 0 {
-		verb := " also take"
-		if len(tmp) == 1 {
-			verb = " also takes"
-		}
-		line += "; " + strings.Join(tmp, ", ") + verb + " an absolute path under /tmp"
-	}
-	return line + "."
+	return "\n\nEdit files with " + ts.Name(filetools.Edit) + ": it says when the text did not match; sed -i does not."
 }
 
 // addedRoute is the added path's toolset for a call whose path is absolute

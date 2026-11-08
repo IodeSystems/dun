@@ -385,9 +385,10 @@ func TestFilesAside_ListsEveryPathWithItsMode(t *testing.T) {
 	}
 }
 
-// The system prompt names every open path and its mode, rebuilt when one is
-// added: the model knows which paths it may read and which it may change.
-func TestSystemPrompt_ListsOpenPaths(t *testing.T) {
+// The system prompt names no open path and no mode (USER 2026-11-07): the
+// file tools refuse what is not open, and filesystem isolation is what holds
+// exec to it. Adding a path changes nothing in it.
+func TestSystemPrompt_NamesNoOpenPaths(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws, ro := t.TempDir(), t.TempDir()
 	sf := filepath.Join(t.TempDir(), "s.jsonl")
@@ -396,13 +397,16 @@ func TestSystemPrompt_ListsOpenPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if !strings.Contains(h.Session.System, "Paths are relative to the working tree (read and write)") {
-		t.Errorf("no workspace mode in the paths line:\n%s", h.Session.System)
+	before := h.Session.System
+	for _, no := range []string{"(read and write)", "(read only)", "also open"} {
+		if strings.Contains(before, no) {
+			t.Errorf("the system prompt names modes (%q):\n%s", no, before)
+		}
 	}
 	if _, err := h.AddPath(ro, ScopeSession, PathOptions{NoIndex: true}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(h.Session.System, "also open: "+ro+" (read only)") {
-		t.Errorf("the added path is not in the system prompt:\n%s", h.Session.System)
+	if strings.Contains(h.Session.System, ro) {
+		t.Errorf("the added path is in the system prompt:\n%s", h.Session.System)
 	}
 }

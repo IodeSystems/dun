@@ -173,7 +173,9 @@ func (h *Harness) identityLine() string {
 	// every request. No session id or version in the line itself, so the
 	// prompt's text is the same in every session (the provider's cache) and
 	// nothing here goes stale. Only where exec can read it.
-	if h.harnessTmpPath() == "" || h.cfg.Exec == nil {
+	// Not under --non-interactive: no project rules ask a benchmark or a
+	// script run to name the agent in a commit (USER 2026-11-07, prompt trim).
+	if h.harnessTmpPath() == "" || h.cfg.Exec == nil || h.cfg.NonInteractive {
 		return ""
 	}
 	return "\n\nHarness info (dun version, session, model, effort, branch) is the JSON file $DUN_HARNESS; " +

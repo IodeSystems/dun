@@ -55,27 +55,6 @@ type pathsFile struct {
 	Workspace string `json:"workspace,omitempty"`
 }
 
-// openPaths is the system prompt's part of the paths line: the working
-// tree's mode, and every path the user opened with its mode. A path list
-// rather than "or one the user added": a model must know which paths are
-// open, and for reading or for writing. Changing it rebuilds the system
-// prompt (applyTools), which is rare.
-func (h *Harness) openPaths() string {
-	write, _ := h.workspaceWrite()
-	mode := map[bool]string{true: "read and write", false: "read only"}
-	s := " (" + mode[write] + ")"
-	var extra []string
-	for _, a := range h.AddedEntries() {
-		if a.On {
-			extra = append(extra, a.Path+" ("+mode[a.Write]+")")
-		}
-	}
-	if len(extra) > 0 {
-		s += "; also open: " + strings.Join(extra, ", ")
-	}
-	return s
-}
-
 // FilesAside is what the model is told after the user changes which paths the
 // file tools may use: every open path with its mode, not just the change. A
 // model told only "on" or "taken back" could not tell read from write (USER

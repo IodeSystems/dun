@@ -857,7 +857,7 @@ func (h *Harness) rebuildTools() {
 	sys := cfg.System
 	rules, rulesMode, rulesSet := "", "", rulesSet{}
 	if sys == "" {
-		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft, h.openPaths()), cfg.NonInteractive, hostedNS...)
+		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), cfg.NonInteractive, hostedNS...)
 		sys += roleSystem(h.isChild())
 		sys += h.identityLine()
 		if h.cfg.NoDir {
