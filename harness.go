@@ -332,6 +332,7 @@ type Harness struct {
 	self       *subAgent   // this harness's own record IN its parent; nil for a root
 	turnRounds turnRounds  // this turn's tool-call rounds, for the turn limit
 	nudge      planNudge   // this turn's plan nudge (plannudge.go)
+	idle       idleState   // changes since this turn's last check (idlecheck.go)
 	settle     settleState // the delayed end-of-turn report (settle.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model

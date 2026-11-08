@@ -2,8 +2,12 @@ package dun
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/agentkit/llm"
 )
 
 // --non-interactive: a turn that did work is checked once before it ends; a
@@ -62,5 +66,87 @@ func TestOnIdle_ListsOpenNodesDoneWhen(t *testing.T) {
 		if strings.Contains(got, not) {
 			t.Errorf("a finished node is listed (%q):\n%s", not, got)
 		}
+	}
+}
+
+// After the check, an edit, a write or an exec re-arms it once, naming the
+// change; no change, no second check; never a third.
+func TestOnIdle_RearmsAfterALateChange(t *testing.T) {
+	ctx := context.Background()
+	h := planHarness(t, false)
+	h.cfg.NonInteractive = true
+
+	h.idle.note("file_write", `{"path":"/app/early.html"}`) // before any check: not a change since one
+	if got := h.onIdle(ctx, 5, 0); !strings.Contains(got, "list each requirement") || strings.Contains(got, "after the last check") {
+		t.Fatalf("first check: %q", got)
+	}
+	if got := h.onIdle(ctx, 6, 1); got != "" {
+		t.Fatalf("no change since the check, checked again: %q", got)
+	}
+	h.idle.note("file_read", `{"path":"/app/out.html"}`)
+	if got := h.onIdle(ctx, 6, 1); got != "" {
+		t.Fatalf("a read is not a change: %q", got)
+	}
+	h.idle.note("file_edit", `{"path":"/app/out.html"}`)
+	h.idle.note("file_write", `{"path":"/app/out.html"}`)
+	got := h.onIdle(ctx, 7, 1)
+	if !strings.HasPrefix(got, "You changed /app/out.html after the last check: check the requirements again against what is there now.\n\n") ||
+		!strings.Contains(got, "list each requirement") || strings.Contains(got, "early.html") {
+		t.Fatalf("second check: %q", got)
+	}
+	h.idle.note("exec", `{"command":"make"}`)
+	if got := h.onIdle(ctx, 8, 2); got != "" {
+		t.Fatalf("a third check: %q", got)
+	}
+
+	// A new turn: an exec after the check is named as commands run.
+	h.idle.reset()
+	h.onIdle(ctx, 5, 0)
+	h.idle.note("exec", `{"command":"python test.py"}`)
+	h.idle.note("file_write", `{"path":"/app/a"}`)
+	if got := h.onIdle(ctx, 6, 1); !strings.HasPrefix(got, "You changed /app/a and ran commands after the last check:") {
+		t.Errorf("exec and write: %q", got)
+	}
+}
+
+// Through a session: check, write, second check naming the file, write,
+// end. Six requests; the rearm text first rides the fifth.
+func TestOnIdle_RearmInATurn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.html")
+	write := func(i int) *llm.ToolCall {
+		return nudgeCall(fmt.Sprintf("w%d", i), "file_write", fmt.Sprintf(`{"path":%q,"content":"v%d"}`, path, i))
+	}
+	r := &nudgeRunner{reply: func(i int, _ bool) *llm.ToolCall {
+		switch i {
+		case 0, 2, 4:
+			return write(i)
+		}
+		return nil
+	}}
+	t.Setenv("DUN_HOME", t.TempDir())
+	h, err := Start(context.Background(), Config{
+		Workspace: dir, Servers: []Server{}, Client: r, Exec: &HostShell{Dir: dir},
+		SessionFile: filepath.Join(dir, "s.jsonl"), NonInteractive: true,
+		PlanNudgeRounds: -1, PlanNudgeFails: -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	if _, err := h.Ask(context.Background(), "write out.html"); err != nil {
+		t.Fatal(err)
+	}
+	if n := r.calls(); n != 6 {
+		t.Fatalf("%d requests, want 6", n)
+	}
+	rearm := "You changed " + path + " after the last check"
+	for i := range 6 {
+		if has := r.sentHas(i, rearm); has != (i >= 4) {
+			t.Errorf("request %d: rearm text present %v", i, has)
+		}
+	}
+	if !r.sentHas(2, "list each requirement") {
+		t.Error("the first check is missing")
 	}
 }

@@ -855,6 +855,8 @@ func (h *Harness) rebuildTools() {
 	// Counts failed results toward a stall (plannudge.go). Inside the lift, so
 	// the nudge's aside rides the result that tripped it.
 	dispatch = withPlanNudge(dispatch, h)
+	// A change after the end-of-turn check re-arms it (idlecheck.go).
+	dispatch = withIdleRearm(dispatch, h)
 	dispatch = withLiftedQueue(dispatch, h)
 
 	sys := cfg.System
