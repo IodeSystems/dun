@@ -193,7 +193,7 @@ func runJobs(h *Harness, a jobsArgs) string {
 	}
 	j := h.bgJobByID(*a.Job)
 	if j == nil {
-		return fmt.Sprintf("ERROR: no background job #%d.", *a.Job)
+		return fmt.Sprintf("ERROR: no background job #%d. %s", *a.Job, h.jobsRunning())
 	}
 	tuneJob(h, j, a.EveryBytes, a.EverySecs, a.Mute)
 	return jobReport(j)
@@ -212,10 +212,36 @@ func (h *Harness) jobsRunning() string {
 			lines = append(lines, "job "+j.status()+j.usageSuffix())
 		}
 	}
-	if len(lines) == 0 {
-		return "No background command is running."
+	head := "No background command is running."
+	if len(lines) > 0 {
+		head = "Running now:\n" + strings.Join(lines, "\n")
 	}
-	return "Running now:\n" + strings.Join(lines, "\n")
+	return head + h.jobsFinishedLine()
+}
+
+// jobsFinishedLine names the finished jobs by number only, so the model can
+// ask for one (jobs({job: N}) reports its outcome); a list does not repeat
+// what already reported. A Terminal-Bench model asked for a job #1 that
+// never existed: every command had finished inside its timeout.
+func (h *Harness) jobsFinishedLine() string {
+	var ids []string
+	any := false
+	for _, j := range h.bgJobList() {
+		any = true
+		j.mu.Lock()
+		done := j.done
+		j.mu.Unlock()
+		if done {
+			ids = append(ids, fmt.Sprintf("#%d", j.id))
+		}
+	}
+	switch {
+	case !any:
+		return " No command has become a background job yet: one that finishes within its exec timeout is not a job."
+	case len(ids) > 0:
+		return "\nFinished: " + strings.Join(ids, ", ") + " (jobs({job: N}) for one's outcome)."
+	}
+	return ""
 }
 
 // usageSuffix is a running job's processes, on the same line (" · processes: …"), or ""
@@ -241,7 +267,12 @@ func (j *bgJob) usageSuffix() string {
 func (h *Harness) jobsList() string {
 	var lines []string
 	for _, j := range h.bgJobList() {
-		lines = append(lines, "job "+j.status()+j.usageSuffix())
+		j.mu.Lock()
+		done := j.done
+		j.mu.Unlock()
+		if !done {
+			lines = append(lines, "job "+j.status()+j.usageSuffix())
+		}
 	}
 	for _, sa := range h.agentList() {
 		line := "agent " + sa.line()
@@ -250,10 +281,17 @@ func (h *Harness) jobsList() string {
 		}
 		lines = append(lines, line)
 	}
+	fin := ""
+	if len(h.bgJobList()) > 0 {
+		fin = h.jobsFinishedLine()
+	}
 	if len(lines) == 0 {
+		if fin != "" {
+			return "No background job or sub-agent is running." + fin
+		}
 		return "No background jobs or sub-agents."
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n") + fin
 }
 
 // waitChange blocks until the job writes more or finishes, the turn is

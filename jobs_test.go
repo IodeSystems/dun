@@ -305,3 +305,27 @@ func TestJobs_NoJobNamesTheRunningOnes(t *testing.T) {
 		t.Error("kill with no job killed something")
 	}
 }
+
+// A finished job is reported when asked for by number, and only named in a
+// list; a number that never was a job says so, with what does exist.
+func TestJobs_FinishedReportOnlyByID(t *testing.T) {
+	h := testHarness(t)
+	if out := jobsCall(t, h, "jobs", `{"job":1}`); !strings.Contains(out, "no background job #1") ||
+		!strings.Contains(out, "No command has become a background job yet") {
+		t.Errorf("never a job: %q", out)
+	}
+	be := &HostShell{Dir: t.TempDir()}
+	t.Cleanup(be.Close)
+	done := h.newJobStarted(be, "echo hi")
+	<-done.doneCh
+	if out := jobsCall(t, h, "jobs", `{}`); strings.Contains(out, "echo hi") ||
+		!strings.Contains(out, fmt.Sprintf("Finished: #%d", done.id)) {
+		t.Errorf("list: %q", out)
+	}
+	if out := jobsCall(t, h, "jobs", fmt.Sprintf(`{"job":%d}`, done.id)); !strings.Contains(out, "succeeded") {
+		t.Errorf("by id: %q", out)
+	}
+	if out := jobsCall(t, h, "jobs", `{"job":9}`); !strings.Contains(out, fmt.Sprintf("Finished: #%d", done.id)) {
+		t.Errorf("unknown id: %q", out)
+	}
+}
