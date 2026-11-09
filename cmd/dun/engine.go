@@ -36,7 +36,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	}
 	in.setInterrupt(interruptCmd)
 	em.emit(&proto.Ready{Tools: h.ToolNames(), Servers: enginecmd.ServersProto(h.Servers()),
-		Hint: enginecmd.ServerHint(h.Servers())})
+		Hint: withToolWarnings(enginecmd.ServerHint(h.Servers()))})
 	em.emit(catalogEvent(h))
 	em.emit(settingsEvent())
 	em.emit(commandsEvent(h))
