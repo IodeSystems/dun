@@ -1,8 +1,9 @@
 # Reading: virtual paths and a budgeted whole read
 
-A proposal, not built, except the item paths (`memory:`, `strategy:`,
-`constraint:`; `strategies.md`, `notekinds.go`). Code today: agentkit `files/read.go` (the caps), dun
-`recap.go` (large-result cues), `exec.go` (clipping). Related: `rag.md` (what
+Built: the item paths (`memory:`, `strategy:`, `constraint:`; `strategies.md`,
+`notekinds.go`) and the whole read (section 2, `wholeread.go`). Not built:
+`doc:` paths. Code: agentkit `files/read.go` (the caps), dun `wholeread.go`
+(the whole read), `recap.go` (large-result cues), `exec.go` (clipping). Related: `rag.md` (what
 the virtual paths would read), `memory.md`.
 
 ## What exists
@@ -58,6 +59,52 @@ The refusal says the numbers ("X is N tokens; M are free") and then:
    If X is larger than a child's whole window, say to narrow instead.
 3. **Narrow**: grep it first, or read a range.
 
+### As built (`wholeread.go`)
+
+- **Wrapper, not agentkit.** `withFiles` routes the call as before (tree, tmp,
+  `/file` paths) and hands a `whole` read to `Harness.readWhole`, which pages
+  the file with ranged reads on that same toolset and joins the pages under
+  one header. Root, refusals, the binary check and the read-before-write record
+  stay agentkit's. A line longer than a page comes back cut, as a ranged read
+  cuts it. The schema gains `whole` by wrapping the read def
+  (`wholeReadDefs`): one boolean property and one description line:
+  `{path:"docs/design.md", whole:true} reads all of a file, past those caps,
+  when it fits the context left.` `whole` with offset/limit/at is refused;
+  with grep it is a grep. Item paths answer first and ignore it.
+- **The room**: `Window()`: window − max(last prompt, fixed overhead) −
+  `outputReserve()` (the reply reserve already sent as `max_tokens`). Tool
+  results since the last request are not counted.
+- **Tokens**: file size at the meter's measured chars/token
+  (`bytesToTokens`) for the check; the read's own text (`meter.Estimate`) for
+  the aside's N.
+- **Thresholds** (consts `wholeSmallTokens` = 5000, `wholeRoomShare` = 4):
+  up to 5000 is served whatever the room (an ordinary ranged read is ~16k,
+  unchecked); above that, up to a quarter of the room, served with the aside;
+  above, refused.
+- **The aside is the large-result recap cue.** It claims the key that cue
+  would claim later (`bigCueKey`, now by call id), so one large result gets
+  one cue, and the cap's clip is skipped for that result (`keepWhole`): it was
+  measured to fit.
+- **The refusal's numbers.** The limit is a quarter of the room, so "M are
+  free" became the allowance and the room, and the recap amount is what makes
+  the read fit (4N − free), not N − M:
+
+  ```
+  ERROR: X is N tokens; a whole read may take A, a quarter of the F free. Ways out:
+  1. Recap what is settled to free at least K tokens, then read it again.
+  2. agent({prompt: "read X and report …"}): a child spends its own context and returns the findings.
+  3. Grep it first, or read a range.
+  ```
+
+  Recap is left out when it cannot free K (K > what is in use past the fixed
+  overhead): not "always available" as above, since it would be false advice.
+  Delegation is offered only with `agent` in this agent's tool set; when X is
+  larger than a child's whole window (window − overhead − reserve; a child is
+  assumed to have this session's window) it reads "It is larger than a child's
+  whole window: narrow it." instead.
+- **No window known**: up to 5000 is served; above, refused with "the
+  context window is unknown", and narrow.
+
 ## Cost and ownership
 
 Mostly dun: the budget check, the aside and the refusal wrap agentkit's read;
@@ -68,6 +115,8 @@ through agentkit-f2.
 ## Open
 
 - The thresholds (5k tokens, a quarter of the room, the reply reserve) are
-  starting points; measure on real sessions.
+  starting points; measure on real sessions (`wholeread.go`'s consts).
+- A child's window is assumed equal to this session's; a child on another
+  model may have another.
 - Whether `doc:` reads go through dund's socket (rag.md) or the session's own
   store handle.
