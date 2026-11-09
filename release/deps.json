@@ -4,27 +4,27 @@
   "published": "",
   "artifacts": {
     "mcpshell": {
-      "version": "v0.11.0",
+      "version": "v0.11.1",
       "files": {
         "darwin_amd64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.0/mcpshell_darwin_amd64.tar.gz",
-          "sha256": "4f7dca9b77ff9630ebd90a70ae96fa099518b774041fb135d1decf97f8c1a3aa",
-          "size": 15499763
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.1/mcpshell_darwin_amd64.tar.gz",
+          "sha256": "94d3112c4896f7508e2744bc8acd57297bf25762cb19894f02487de3351c2936",
+          "size": 15503766
         },
         "darwin_arm64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.0/mcpshell_darwin_arm64.tar.gz",
-          "sha256": "84835521104c4fe99f30d0120febc8aa2b21988c7f35318c8609d16e1b4609c2",
-          "size": 14611948
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.1/mcpshell_darwin_arm64.tar.gz",
+          "sha256": "36262d4d08a1a5cb9c9d1a28a00b7a9239876db53e194d9761ad0eb7be51a00d",
+          "size": 14614924
         },
         "linux_amd64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.0/mcpshell_linux_amd64.tar.gz",
-          "sha256": "5dd0ac8c37916e76299563dcc57e73658b878f548c0f7e74d4cd849e825afbe3",
-          "size": 15365896
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.1/mcpshell_linux_amd64.tar.gz",
+          "sha256": "4da968aab18e5e1811f31bf95f17a407a120c6e6c2131274bde7a6c957f63b23",
+          "size": 15365754
         },
         "linux_arm64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.0/mcpshell_linux_arm64.tar.gz",
-          "sha256": "b0353649456b6ddaa5761fb5312e31b24b29da54322fa0411171a811bf556bb4",
-          "size": 14140036
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.1/mcpshell_linux_arm64.tar.gz",
+          "sha256": "eb8cd5a3b43be79dbb3521534a8f2a5a3e1a786e33e4b9bb882d9a48b8e4c151",
+          "size": 14140210
         }
       }
     },

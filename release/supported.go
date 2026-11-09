@@ -61,8 +61,10 @@ var Supported = []Tool{
 	// Breaking for scripts, not for dun's launch: extra arguments to a command
 	// are an error; class/extends/super/this/instanceof are reserved; throw
 	// keeps a non-string value. darwin_arm64 run on a Mac (2026-11-08).
+	// Recommended v0.11.1 (2026-11-09, 1bdd7f1), tarballs in deps.json:
+	// parseJson joins escaped surrogate pairs (emoji from Python json.dump).
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.11.0"},
+		Min: "v0.2.0", Recommended: "v0.11.1"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
