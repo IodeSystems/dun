@@ -494,11 +494,58 @@ func (h *Host) Ingest(q proto.RagIngest) (*proto.RagIngested, error) {
 	if err != nil {
 		return nil, err
 	}
+	if q.Text != "" {
+		if q.Path == "" {
+			return nil, errors.New("rag: text is ingested under a path, not a URL")
+		}
+		if err := ingestText(st, src, q.Title, q.Text, q.Tags); err != nil {
+			return nil, err
+		}
+		return &proto.RagIngested{URL: src}, nil
+	}
 	id, err := enqueue(st, src, q.Title, q.Tags)
 	if err != nil {
 		return nil, err
 	}
 	return &proto.RagIngested{Job: id, URL: src}, nil
+}
+
+// textHashKey is the index_meta key of the sha256 (hex) of the text
+// ingested for src by ingestText. raglit records a source hash only for
+// what it reads itself, so dund records this one; rag_sync compares it.
+func textHashKey(src string) string { return "dund_text_sha256 " + src }
+
+func textHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+// ingestText indexes text as the one fragment of the document src, now, with
+// no job (raglit's Store.Ingest), after setting its tags (none: left as they
+// are). For a memory note: its name or question and its detail, so its
+// frontmatter is never a fragment. The text's hash is recorded for rag_sync.
+func ingestText(st *raglit.Store, src, title, text string, tags []string) error {
+	if len(tags) > 0 {
+		if err := st.SetTags(src, tags); err != nil {
+			return err
+		}
+	}
+	if err := st.Ingest(context.Background(), raglit.Document{Path: src, Title: title,
+		Fragments: []raglit.Fragment{{Page: 0, Ord: 0, Text: text}}}); err != nil {
+		return err
+	}
+	return st.SetMeta(textHashKey(src), textHash(text), time.Now().Unix())
+}
+
+// removeDoc removes src from st, with the text hash ingestText recorded.
+func removeDoc(st *raglit.Store, src string) error {
+	if err := st.RemoveDocument(src, false); err != nil {
+		return err
+	}
+	if _, ok := st.Meta(textHashKey(src)); ok {
+		return st.SetMeta(textHashKey(src), "", time.Now().Unix())
+	}
+	return nil
 }
 
 // enqueue queues src on st with its title, after setting its tags (none:
@@ -558,7 +605,7 @@ func (h *Host) Forget(q proto.RagForget) (*proto.RagForgotten, error) {
 	if _, ok := docs[src]; !ok {
 		return out, nil
 	}
-	if err := st.RemoveDocument(src, false); err != nil {
+	if err := removeDoc(st, src); err != nil {
 		return nil, err
 	}
 	out.Removed = true
@@ -638,7 +685,18 @@ func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
 		if err != nil {
 			return nil, err
 		}
-		if d, ok := docs[src]; current(d, ok, f.Path) {
+		d, ok := docs[src]
+		var cur bool
+		if f.Text != "" {
+			// Text: the hash of what was ingested decides, not the file's
+			// bytes, so a change to the frontmatter alone (important) is
+			// current.
+			have, _ := st.Meta(textHashKey(src))
+			cur = ok && have == textHash(f.Text)
+		} else {
+			cur = current(d, ok, f.Path)
+		}
+		if cur {
 			// Tags change without the bytes changing (RagTag while dund was
 			// down): set them anyway, it writes one column.
 			if len(f.Tags) > 0 {
@@ -649,7 +707,12 @@ func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
 			out.Current++
 			continue
 		}
-		if _, err := enqueue(st, src, f.Title, f.Tags); err != nil {
+		if f.Text != "" {
+			err = ingestText(st, src, f.Title, f.Text, f.Tags)
+		} else {
+			_, err = enqueue(st, src, f.Title, f.Tags)
+		}
+		if err != nil {
 			return nil, err
 		}
 		out.Queued++
@@ -662,7 +725,7 @@ func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
 		if _, ok := docs[src]; !ok {
 			continue
 		}
-		if err := st.RemoveDocument(src, false); err != nil {
+		if err := removeDoc(st, src); err != nil {
 			return nil, err
 		}
 		out.Removed++

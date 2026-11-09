@@ -73,7 +73,9 @@ type RagHits struct {
 // RagIngest queues one source for an index: Path (a local file, absolute) or
 // URL (http, https or file). Tags, when given, replace the document's tags
 // (raglit's SetTags: filter data, not text); none leaves them as they are.
-// Answered with RagIngested.
+// Text, when given (with Path), is the document: one fragment, indexed at
+// once with no job (Job is 0); the file is not read. Answered with
+// RagIngested.
 type RagIngest struct {
 	Project string   `json:"project,omitempty"`
 	Index   string   `json:"index"`
@@ -81,6 +83,7 @@ type RagIngest struct {
 	URL     string   `json:"url,omitempty"`
 	Title   string   `json:"title,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
+	Text    string   `json:"text,omitempty"`
 }
 
 // RagIngested answers RagIngest: the job and the URL it reads.
@@ -154,7 +157,10 @@ type RagForgotten struct {
 // RagSync brings an index in step with a set of local files (dun's memory
 // notes, which are written while dund may be down). Each of Files is
 // queued when the index does not hold it or holds other bytes (its source
-// hash; without one, the file changed after the document was indexed);
+// hash; without one, the file changed after the document was indexed). A
+// file with Text is ingested at once when the index lacks it or holds
+// other text (the hash dund recorded of the text it ingested); Queued
+// counts both.
 // the tags of each, current or not, are set as RagTag sets them. Each of
 // Gone (absolute paths) is removed. Answered with RagSynced.
 type RagSync struct {
@@ -164,12 +170,13 @@ type RagSync struct {
 	Gone    []string      `json:"gone,omitempty"`
 }
 
-// RagSyncFile is one file of a RagSync, with the title and tags it is
-// ingested with (as RagIngest).
+// RagSyncFile is one file of a RagSync, with the title, tags and text it
+// is ingested with (as RagIngest).
 type RagSyncFile struct {
 	Path  string   `json:"path"`
 	Title string   `json:"title,omitempty"`
 	Tags  []string `json:"tags,omitempty"`
+	Text  string   `json:"text,omitempty"`
 }
 
 // RagSynced answers RagSync: how many files were queued, how many were

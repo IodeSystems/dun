@@ -362,37 +362,66 @@ func TestSyncAndForget(t *testing.T) {
 	}
 }
 
-// A tagged note has no caption hit: its tags are filter data (raglit's
-// SetTags), not a fragment beside its text. Before raglit v0.6 the same note
-// came back up to three times (frontmatter, text, caption). Now a word only
-// in the body is one hit. A word in the frontmatter too is two: raglit keeps
-// a Markdown file's frontmatter as a fragment of its own (origin
-// "frontmatter"), so dun still keeps one hit per note path (memrecall.go).
-func TestTaggedNoteHasNoCaptionHit(t *testing.T) {
+// A note is one hit in a raw search, for a word in its name and its detail
+// both: it is ingested as text (its name and detail, one fragment), its
+// frontmatter is no fragment, and its tags are filter data (SetTags), not a
+// caption. Before raglit v0.6 the same note came back up to three times.
+func TestTaggedNoteIsOneHit(t *testing.T) {
 	h := open(t, t.TempDir())
-	note := writeDoc(t, "pelican.md", "---\nname: pelican-drill\nkind: strategy\ndate: 2026-11-08\ntags: pelican, drills\npublic: false\n---\nRun the pelican drill before a release.\n")
-	ingest(t, h, proto.RagIngest{Project: "dun", Index: "strategies", Path: note, Title: "pelican-drill",
-		Tags: []string{"pelican", "kind:strategy"}})
-	for _, f := range []proto.RagFilter{{}, {Tags: []string{"kind:strategy"}}, {Tags: []string{"pelican", "kind:strategy"}}} {
-		r := search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "release", Mode: "fts", Filter: f})
-		if len(r.Hits) != 1 {
-			t.Fatalf("body word, filter %+v: %d hits, want 1: %+v", f, len(r.Hits), r.Hits)
-		}
-		r = search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "pelican", Mode: "fts", Filter: f})
-		fm := 0
-		for _, x := range r.Hits {
-			if strings.HasPrefix(x.Text, "---") {
-				fm++
+	note := writeDoc(t, "pelican.md", "---\nname: pelican-drill\nkind: strategy\ndate: 2026-11-08\npublic: false\n---\nRun the pelican drill before a release.\n")
+	text := "pelican-drill\n\nRun the pelican drill before a release."
+	r, err := h.Ingest(proto.RagIngest{Project: "dun", Index: "strategies", Path: note, Title: "strategy:pelican-drill",
+		Tags: []string{"drills", "kind:strategy"}, Text: text})
+	if err != nil || r.Job != 0 {
+		t.Fatalf("ingest %+v %v, want no job", r, err)
+	}
+	for _, f := range []proto.RagFilter{{}, {Tags: []string{"kind:strategy"}}, {Tags: []string{"drills", "kind:strategy"}}} {
+		for _, q := range []string{"pelican", "release", "drill"} {
+			r := search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: q, Mode: "fts", Filter: f})
+			if len(r.Hits) != 1 || strings.Contains(r.Hits[0].Text, "---") {
+				t.Fatalf("%q, filter %+v: %d hits, want 1 with no frontmatter: %+v", q, f, len(r.Hits), r.Hits)
 			}
 		}
-		if len(r.Hits) != 2 || fm != 1 {
-			t.Fatalf("frontmatter and body word, filter %+v: %d hits, want the frontmatter and the body: %+v", f, len(r.Hits), r.Hits)
-		}
+	}
+	// Frontmatter words are not text: "public" is not found.
+	if r := search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "public", Mode: "fts"}); len(r.Hits) != 0 {
+		t.Fatalf("a frontmatter word: %d hits", len(r.Hits))
 	}
 	// "kind" is not the tag "kind:strategy": whole tags only.
 	if r := search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "pelican", Mode: "fts",
 		Filter: proto.RagFilter{Tags: []string{"kind"}}}); len(r.Hits) != 0 {
 		t.Fatalf("tag kind: %d hits, want 0", len(r.Hits))
+	}
+
+	// Sync with text: the hash of the ingested text decides. The file's
+	// frontmatter changing alone (marked important) is current; new text is
+	// ingested again; gone is removed, its hash with it.
+	if err := os.WriteFile(note, []byte("---\nname: pelican-drill\nkind: strategy\nimportant: true\n---\nRun the pelican drill before a release.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sf := proto.RagSyncFile{Path: note, Title: "strategy:pelican-drill", Tags: []string{"kind:strategy", "important"}, Text: text}
+	if got, err := h.Sync(proto.RagSync{Project: "dun", Index: "strategies", Files: []proto.RagSyncFile{sf}}); err != nil || got.Current != 1 || got.Queued != 0 {
+		t.Fatalf("sync of the same text: %+v %v, want current", got, err)
+	}
+	if r := search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "pelican", Mode: "fts",
+		Filter: proto.RagFilter{Tags: []string{"important"}}}); len(r.Hits) != 1 {
+		t.Fatalf("a current file's tags not set: %d hits", len(r.Hits))
+	}
+	sf.Text = "pelican-drill\n\nRun the pelican drill after a release."
+	if got, err := h.Sync(proto.RagSync{Project: "dun", Index: "strategies", Files: []proto.RagSyncFile{sf}}); err != nil || got.Queued != 1 {
+		t.Fatalf("sync of new text: %+v %v, want it ingested", got, err)
+	}
+	if r := search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "after", Mode: "fts"}); len(r.Hits) != 1 {
+		t.Fatalf("new text: %d hits", len(r.Hits))
+	}
+	if got, err := h.Sync(proto.RagSync{Project: "dun", Index: "strategies", Gone: []string{note}}); err != nil || got.Removed != 1 {
+		t.Fatalf("sync gone: %+v %v", got, err)
+	}
+	if v, _ := storeOf(t, h, "dun/strategies").Meta(textHashKey("file://" + note)); v != "" {
+		t.Fatalf("the text hash outlived its document: %q", v)
+	}
+	if js, err := h.Jobs(proto.RagJobs{Project: "dun", Index: "strategies"}); err != nil || len(js.Jobs) != 0 {
+		t.Fatalf("jobs %+v %v, want none: text is ingested directly", js, err)
 	}
 }
 

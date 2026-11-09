@@ -64,9 +64,10 @@ void, confirm). Each index has its own link, so each syncs on its own.
 Each item is tagged in its index (raglit `SetTags`: filter data, no
 fragment) with its own tags, `kind:<kind>`, and `important` when marked.
 A search with the tag filter `kind:strategy` finds strategies only.
-`/memories important` and `unimportant` rewrite the file and send
-`rag_tag`, not an ingest; the next sync queues the file once, because its
-bytes changed (`rag.md`, slice 5).
+An item is indexed as its name and detail (one fragment, no
+frontmatter), so it is one hit. `/memories important` and `unimportant`
+rewrite the file and send `rag_tag`, not an ingest; its text is the same,
+so the next sync finds it current (`rag.md`, slice 5).
 
 ## What reaches the model
 

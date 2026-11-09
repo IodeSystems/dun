@@ -236,8 +236,8 @@ tags of every file it is given, current or not.
 
 **raglit calls** (raglit v0.6.1): every function and method dund calls is
 pinned in raglit's `api_test.go`, except `Home.IndexPath` (dund checks
-whether an index file exists before opening it). Ingest is always a
-queued job.
+whether an index file exists before opening it). A file is ingested as a
+queued job; text (memory notes) by `Store.Ingest` at once.
 
 ## Built: slice 3
 
@@ -314,21 +314,26 @@ sync), `memory.go` (the tool).
   (`surfacing.md`). No tag or path filter is sent: the surfacing search
   used none before. Project and global notes are separate groups, each
   ranked in its own index; the project note comes first (USER 2026-11-08).
-- **Double hit.** Before raglit v0.6, a tagged note was found up to three
+- **One hit.** Before raglit v0.6, a tagged note was found up to three
   times in one search: its frontmatter, its text, and the caption its tags
-  were written as (measured live, FTS, 2026-11-08). Tags are now
-  `SetTags` (no caption). raglit keeps a Markdown file's frontmatter as a
-  fragment of its own, so a word in both the frontmatter and the text is
-  still two hits; a word in the text only is one
-  (`TestTaggedNoteHasNoCaptionHit`). dun keeps one hit per note path, with
-  the best similarity and term count of its fragments.
+  were written as (measured live, FTS, 2026-11-08). A note is now indexed
+  as text, not as its file: `rag_ingest` and `rag_sync` carry `text`, a
+  memory's question and answer or an item's name and detail, and dund
+  calls `Store.Ingest` with that one fragment, at once, with no job. The
+  frontmatter is no fragment and the tags are `SetTags`, so a word in the
+  name and the detail is one hit (`TestTaggedNoteIsOneHit`). Frontmatter
+  words (`public`, the date) are not searchable. dun still keeps one hit
+  per note path.
 - **Tags.** A note is filed under its own tags, `kind:<kind>`
   (`kind:memory`, `kind:strategy`, `kind:constraint`) and `important` when
   the user marked it. A change that leaves the text as it was
   (`/memories important`, `unimportant`, a refine of the tags alone) sends
-  `rag_tag` and no ingest. The index then holds the old bytes, so the next
-  `rag_sync` (next session start, or after dund was down) queues the note
-  once.
+  `rag_tag` and no ingest.
+- **Sync of text.** raglit records a source hash only for what it reads
+  itself, so dund records the sha256 of the text it ingested, in the
+  index's `index_meta` (key `dund_text_sha256 <url>`; cleared on forget).
+  `rag_sync` re-ingests a note when that hash differs from its text now. A
+  frontmatter change alone (important) is current.
 - **dund down** (no socket, or a dund with no retrieval): the note is
   written and the tool result says it is not indexed yet; a void goes
   ahead and says the same. Recall is a word search of the note files

@@ -300,8 +300,9 @@ func TestStrategies_ImportantAndRetagSendTagsNotAnIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := len(ingestsOf(f))
-	if n == 0 || !slices.Equal(ingestsOf(f)[n-1].Tags, []string{"kind:strategy"}) {
-		t.Fatalf("add: ingests %+v, want one tagged kind:strategy", ingestsOf(f))
+	if n == 0 || !slices.Equal(ingestsOf(f)[n-1].Tags, []string{"kind:strategy"}) ||
+		ingestsOf(f)[n-1].Text != "pelican-drill\n\nRun the pelican drill before a release." {
+		t.Fatalf("add: ingests %+v, want one tagged kind:strategy, its name and detail as text", ingestsOf(f))
 	}
 	tagsOf := func() []proto.RagTag {
 		f.mu.Lock()
@@ -332,6 +333,9 @@ func TestStrategies_ImportantAndRetagSendTagsNotAnIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	n = len(ingestsOf(f))
+	if got := ingestsOf(f)[n-1].Text; got != "how to build?\n\nBuilds need CGO off." {
+		t.Fatalf("memory text %q, want its question and answer", got)
+	}
 	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "CGO off", Content: "Builds need CGO off.", Tags: []string{"build"}, Why: "w", Source: "user"}, noteMeta{}); err != nil {
 		t.Fatal(err)
 	}

@@ -69,15 +69,26 @@ func (l *memLink) ingest(m *memoryStore, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
 	defer cancel()
 	_, err := l.link.Ingest(ctx, proto.RagIngest{Project: m.scopeOf(path, l.project), Index: m.indexName(),
-		Path: path, Title: noteTitle(path, n.meta), Tags: ragTags(n.meta)})
+		Path: path, Title: noteTitle(path, n.meta), Tags: ragTags(n.meta), Text: noteText(path, n)})
 	l.saw(m, err)
 	return err
 }
 
+// noteText is what a note is indexed as: a memory's question and answer, or
+// an item's name and detail. The frontmatter is not: its metadata goes as
+// tags (ragTags), so a word in the name and the detail is one hit.
+func noteText(path string, n note) string {
+	head := noteNameOf(path, n.meta)
+	if noteKind(n.meta) == kindMemory {
+		head = n.meta["question"]
+	}
+	return strings.TrimSpace(head + "\n\n" + strings.TrimSpace(n.body))
+}
+
 // tag sends a note's tags to its index with no ingest (raglit's SetTags):
 // for a change that leaves its text as it was, such as marking it
-// important. The index keeps the document's old bytes; the next sync sees
-// they differ from the file's and queues it once.
+// important. Its indexed text (noteText) is unchanged, so the next sync
+// finds it current.
 func (l *memLink) tag(m *memoryStore, path string) error {
 	n, _ := readNote(path)
 	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
@@ -168,7 +179,7 @@ func (l *memLink) syncOnce(m *memoryStore) bool {
 			if err != nil {
 				continue
 			}
-			q.Files = append(q.Files, proto.RagSyncFile{Path: p, Title: noteTitle(p, n.meta), Tags: ragTags(n.meta)})
+			q.Files = append(q.Files, proto.RagSyncFile{Path: p, Title: noteTitle(p, n.meta), Tags: ragTags(n.meta), Text: noteText(p, n)})
 		}
 		voided, _ := filepath.Glob(filepath.Join(sc.dir, "*.md"+voidSuffix))
 		for _, p := range voided {
