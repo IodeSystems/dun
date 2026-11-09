@@ -73,7 +73,8 @@ type Host struct {
 	embed   *raglit.Embedder // nil: FTS only
 	dim     int              // the embed model's probed dimension; 0 when not probed
 	ident   *raglit.Identifier
-	runners []*raglit.Runner // memories+strategies, code+docs
+	code    raglit.CodeSegmenter // Models.Code of the code+docs runner
+	runners []*raglit.Runner     // memories+strategies, code+docs
 	logf    func(string, ...any)
 
 	// bg bounds the vector backfills; Close cancels it and waits on fills.
@@ -108,7 +109,7 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 	if m.Channels == nil {
 		m.Channels = raglit.NewChannels()
 	}
-	h := &Host{root: root, models: m, logf: logf, stores: map[string]*raglit.Store{},
+	h := &Host{root: root, models: m, code: newCodeSeg(), logf: logf, stores: map[string]*raglit.Store{},
 		stale: map[string]string{}, filling: map[string]bool{}}
 	h.bg, h.stopBg = context.WithCancel(context.Background())
 	if m.Embed.Model != "" {
@@ -124,14 +125,19 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 			return nil, err
 		}
 	}
+	// The code+docs runner cuts files at declarations and headings
+	// (Models.Code); the memory runner's models have no segmenter.
+	coded := h.models
+	coded.Code = h.code
 	for _, set := range []struct {
 		indexes []string
 		runners int
-	}{{[]string{"memories", "strategies"}, memoryRunners}, {[]string{"code", "docs"}, 0}} {
+		models  raglit.Models
+	}{{[]string{"memories", "strategies"}, memoryRunners, h.models}, {[]string{"code", "docs"}, 0, coded}} {
 		r := &raglit.Runner{
 			Stores: storeSubset{h, set.indexes},
 			NewWorker: func(s *raglit.Store) (*raglit.Worker, error) {
-				return raglit.NewWorker(s, h.models, nil), nil
+				return raglit.NewWorker(s, set.models, nil), nil
 			},
 			Runners: set.runners,
 			Logf:    logf,
