@@ -23,7 +23,7 @@ func TestMcpToolDefs_EnrichesEval(t *testing.T) {
 	if !strings.HasPrefix(eval, "Execute mcpshell code.") {
 		t.Fatal("original description should be preserved")
 	}
-	for _, want := range []string{"export", "LAST expression", "|> unique()", "class/this/new/instanceof", "No import, generators"} {
+	for _, want := range []string{"lasts the session", "reuse a builtin", "LAST expression", "|> unique()", "class/this/new/instanceof", "No import, generators"} {
 		if !strings.Contains(eval, want) {
 			t.Fatalf("eval doc missing %q:\n%s", want, eval)
 		}

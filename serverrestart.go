@@ -154,7 +154,7 @@ func (h *Harness) restartExited(ctx context.Context, id string, callErr error) s
 	mgr.StopServer(id)
 	state := "Its state from earlier calls is gone."
 	if canonicalServerID(id) == ServerShell {
-		state = "Its state from earlier calls is gone (exported variables, loaded modules)."
+		state = "Its state from earlier calls is gone (session variables, loaded toolkits)."
 	}
 	var msg string
 	if err := o.startServer(ctx, s); err != nil {
