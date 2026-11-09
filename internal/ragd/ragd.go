@@ -53,15 +53,28 @@ var (
 // they are cut off (and go back on the queue).
 const DrainGrace = 10 * time.Second
 
-// Host owns every index and the job runner. It is a raglit.StoreSet.
+// stopWait bounds the wait for the runners' Done after the cut-off: a
+// cancelled caption call or job writing its state back.
+const stopWait = 10 * time.Second
+
+// memoryRunners is how many ingest jobs the memory runner runs at once.
+// Notes are small; two keep one slow source from holding up the rest.
+const memoryRunners = 2
+
+// Host owns every index and the job runners. It is a raglit.StoreSet.
+//
+// Two runners share one Channels (the per-model admission limits): one over
+// the memories and strategies indexes of every scope, one over code and
+// docs. A bulk code ingest then holds no runner a memory note waits for;
+// model capacity is still shared (raglit ragcore.md, R8 "Priority").
 type Host struct {
-	root   string
-	models raglit.Models
-	embed  *raglit.Embedder // nil: FTS only
-	dim    int              // the embed model's probed dimension; 0 when not probed
-	ident  *raglit.Identifier
-	runner *raglit.Runner
-	logf   func(string, ...any)
+	root    string
+	models  raglit.Models
+	embed   *raglit.Embedder // nil: FTS only
+	dim     int              // the embed model's probed dimension; 0 when not probed
+	ident   *raglit.Identifier
+	runners []*raglit.Runner // memories+strategies, code+docs
+	logf    func(string, ...any)
 
 	// bg bounds the vector backfills; Close cancels it and waits on fills.
 	bg     context.Context
@@ -111,16 +124,52 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 			return nil, err
 		}
 	}
-	h.runner = &raglit.Runner{
-		Stores: h,
-		NewWorker: func(s *raglit.Store) (*raglit.Worker, error) {
-			return raglit.NewWorker(s, h.models, nil), nil
-		},
-		Logf:  logf,
-		Notef: func(f string, a ...any) { logf("dund: rag: "+f, a...) },
+	for _, set := range []struct {
+		indexes []string
+		runners int
+	}{{[]string{"memories", "strategies"}, memoryRunners}, {[]string{"code", "docs"}, 0}} {
+		r := &raglit.Runner{
+			Stores: storeSubset{h, set.indexes},
+			NewWorker: func(s *raglit.Store) (*raglit.Worker, error) {
+				return raglit.NewWorker(s, h.models, nil), nil
+			},
+			Runners: set.runners,
+			Logf:    logf,
+			Notef:   func(f string, a ...any) { logf("dund: rag: "+f, a...) },
+		}
+		r.Start(context.Background())
+		h.runners = append(h.runners, r)
 	}
-	h.runner.Start(context.Background())
 	return h, nil
+}
+
+// storeSubset is the Host's open indexes of some kinds ("memories" and so
+// on), in every scope: one runner's raglit.StoreSet.
+type storeSubset struct {
+	h       *Host
+	indexes []string
+}
+
+func (s storeSubset) Names() []string {
+	var out []string
+	for _, n := range s.h.Names() {
+		if s.has(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func (s storeSubset) Existing(name string) (*raglit.Store, error) {
+	if !s.has(name) {
+		return nil, os.ErrNotExist
+	}
+	return s.h.Existing(name)
+}
+
+func (s storeSubset) has(name string) bool {
+	_, ix, _ := strings.Cut(name, "/")
+	return slices.Contains(s.indexes, ix)
 }
 
 // onDisk is every "<dir>/<index>" under root that has an index file.
@@ -678,9 +727,12 @@ func (h *Host) Jobs(q proto.RagJobs) (*proto.RagJobList, error) {
 	return out, nil
 }
 
-// Close drains the runner (running jobs get grace to finish, then are cut
-// off and go back on the queue) and closes every index. It reports whether
-// every job stopped in time.
+// Close drains both runners (running jobs get grace to finish, then are
+// cut off and go back on the queue), cuts off the caption loops, waits for
+// every runner's Done, and then closes every index. It reports whether every
+// job stopped in time. A runner that is still not done after stopWait
+// leaves the indexes open: closing one under a running job
+// or caption is worse than a process that exits with them open.
 func (h *Host) Close(grace time.Duration) bool {
 	h.mu.Lock()
 	if h.closed {
@@ -689,10 +741,35 @@ func (h *Host) Close(grace time.Duration) bool {
 	}
 	h.closed = true
 	h.mu.Unlock()
-	ok := h.runner.Drain(grace)
-	h.runner.CutOff() // the identity queue, which Drain leaves running
+	ok := true
+	var wg sync.WaitGroup
+	var okMu sync.Mutex
+	for _, r := range h.runners {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if !r.Drain(grace) {
+				okMu.Lock()
+				ok = false
+				okMu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	for _, r := range h.runners {
+		r.CutOff() // the caption loop, which Drain leaves running
+	}
 	h.stopBg()
 	h.fills.Wait()
+	wait := time.After(stopWait)
+	for _, r := range h.runners {
+		select {
+		case <-r.Done():
+		case <-wait:
+			h.logf("dund: rag: a runner did not stop within %s; the indexes are left open", stopWait)
+			return false
+		}
+	}
 	h.closeStores()
 	return ok
 }

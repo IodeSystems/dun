@@ -3,8 +3,11 @@ package ragd
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -421,5 +424,61 @@ func TestTagWithoutReingest(t *testing.T) {
 	ingest(t, h, proto.RagIngest{Project: "dun", Index: "memories", Path: b})
 	if r := search(t, h, q); len(r.Hits) != 2 {
 		t.Fatalf("after the held tag's ingest: %d hits, want 2", len(r.Hits))
+	}
+}
+
+// Two runners: memories and strategies in one, code and docs in the other.
+// A memory note is ingested while a docs job is held running, and Close
+// waits for both runners before it closes the indexes.
+func TestTwoRunners(t *testing.T) {
+	root := t.TempDir()
+	h, err := Open(root, Roles{}, t.Logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.runners) != 2 {
+		t.Fatalf("%d runners, want 2", len(h.runners))
+	}
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("slow harbor notes\n"))
+	}))
+	t.Cleanup(slow.Close)
+	if _, err := h.Ingest(proto.RagIngest{Project: "dun", Index: "docs", URL: slow.URL + "/slow.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	ingest(t, h, proto.RagIngest{Project: "dun", Index: "memories", Path: writeDoc(t, "m.md", "egret roost\n")})
+	ingest(t, h, proto.RagIngest{Index: "strategies", Path: writeDoc(t, "s.md", "ibis wade\n")})
+
+	mem, code := storeSubset{h, []string{"memories", "strategies"}}, storeSubset{h, []string{"code", "docs"}}
+	if n := mem.Names(); !slices.Equal(n, []string{"dun/memories", "global/strategies"}) {
+		t.Fatalf("memory runner's indexes %v", n)
+	}
+	if n := code.Names(); !slices.Equal(n, []string{"dun/docs"}) {
+		t.Fatalf("code runner's indexes %v", n)
+	}
+	if _, err := mem.Existing("dun/docs"); err == nil {
+		t.Fatal("the memory runner sees dun/docs")
+	}
+
+	go func() { time.Sleep(200 * time.Millisecond); close(release) }()
+	if !h.Close(5 * time.Second) {
+		t.Fatal("Close: a job did not stop in time")
+	}
+	for _, r := range h.runners {
+		select {
+		case <-r.Done():
+		default:
+			t.Fatal("Close returned before a runner was done")
+		}
+	}
+	if n := h.Names(); len(n) != 0 {
+		t.Fatalf("indexes still open after Close: %v", n)
 	}
 }
