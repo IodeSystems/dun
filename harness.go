@@ -456,6 +456,9 @@ type Harness struct {
 	// its parent's, in mgr. Set in Start, before any turn.
 	ownMgr *mcpmgr.Manager
 	own    map[string]bool
+	// restarts is each local server restarted after it exited during a
+	// call (serverrestart.go), on the harness that runs it.
+	restarts restartLog
 	// raglit's keys for this session, on the root (raglitauth.go).
 	ragMu                            sync.Mutex
 	ragSession, ragKey, ragBranchKey string

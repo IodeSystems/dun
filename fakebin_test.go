@@ -144,6 +144,17 @@ func fakeBinMain(persona string) {
 		serveFake(map[string]func(map[string]any) string{
 			"node_query": func(map[string]any) string { return "[]" },
 		})
+	case "exiter": // a server that dies on a call (serverrestart_test.go)
+		fakeLogf("start pid=%d", os.Getpid())
+		serveFake(map[string]func(map[string]any) string{
+			"pid": func(map[string]any) string { return strconv.Itoa(os.Getpid()) },
+			"crash": func(map[string]any) string {
+				fmt.Fprintln(os.Stderr, "panic: boom")
+				fmt.Fprintln(os.Stderr, "goroutine 1 [running]:")
+				os.Exit(2)
+				return ""
+			},
+		})
 	}
 }
 

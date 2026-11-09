@@ -94,11 +94,13 @@ func modelToolName(t mcpmgr.MCPTool) string {
 // Errors meant for the model (unknown tool, bad args, tool failure) are formatted
 // INTO the result so the loop stays alive.
 //
-// regain, when set, is asked about a failed call: true means the server was
+// regain, when set, is asked about a failed call: retry means the server was
 // started again (a shared one the gateway no longer had), and the call is
-// made once more.
+// made once more; a reply is what the model reads instead of the error (a
+// local server that exited, restarted but not called again: the call may
+// be what killed it).
 func mcpDispatcher(mgr toolCaller, tools []mcpmgr.MCPTool, onCall func(tool string, args map[string]any, result string),
-	regain func(ctx context.Context, serverID string, err error) bool) agent.ToolDispatcher {
+	regain func(ctx context.Context, serverID string, err error) (retry bool, reply string)) agent.ToolDispatcher {
 	type route struct{ server, tool string }
 	routes := make(map[string]route, len(tools))
 	for _, t := range tools {
@@ -129,8 +131,13 @@ func mcpDispatcher(mgr toolCaller, tools []mcpmgr.MCPTool, onCall func(tool stri
 			}
 		}
 		res, err := mgr.CallTool(ctx, serverID, r.tool, args)
-		if err != nil && regain != nil && regain(ctx, serverID, err) {
-			res, err = mgr.CallTool(ctx, serverID, r.tool, args)
+		if err != nil && regain != nil {
+			switch retry, reply := regain(ctx, serverID, err); {
+			case retry:
+				res, err = mgr.CallTool(ctx, serverID, r.tool, args)
+			case reply != "":
+				res, err = reply, nil
+			}
 		}
 		if err != nil {
 			res = fmt.Sprintf("ERROR: %v", err)
