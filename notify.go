@@ -204,6 +204,8 @@ func docKind(g string, attached bool) string {
 		return "skill"
 	case groupMemory, groupMemoryGlobal:
 		return "memory"
+	case groupStrategy, groupStrategyGlobal:
+		return "strategy"
 	case groupRules:
 		return "rule"
 	case groupMCPDocs:
@@ -568,11 +570,13 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 			}
 			return group(w.h.DocID)
 		}
-		if gi := slices.IndexFunc(wins, func(w win) bool { return groupOf(w) == groupMemoryGlobal }); gi >= 0 {
-			if pi := slices.IndexFunc(wins, func(w win) bool { return groupOf(w) == groupMemory }); pi > gi {
-				gw := wins[gi]
-				wins = slices.Delete(wins, gi, gi+1)
-				wins = slices.Insert(wins, pi, gw) // right after the project win, now at pi-1
+		for _, pair := range [][2]string{{groupMemory, groupMemoryGlobal}, {groupStrategy, groupStrategyGlobal}} {
+			if gi := slices.IndexFunc(wins, func(w win) bool { return groupOf(w) == pair[1] }); gi >= 0 {
+				if pi := slices.IndexFunc(wins, func(w win) bool { return groupOf(w) == pair[0] }); pi > gi {
+					gw := wins[gi]
+					wins = slices.Delete(wins, gi, gi+1)
+					wins = slices.Insert(wins, pi, gw) // right after the project win, now at pi-1
+				}
 			}
 		}
 		if len(wins) > 0 {
@@ -631,6 +635,9 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					b.WriteString("A note an earlier session on this project saved may apply. It records what was true " +
 						"then; if the user or the code now says otherwise, fix it — memory action=refine (or void if it " +
 						"no longer applies) with why and source:\n")
+				case groupStrategy, groupStrategyGlobal:
+					b.WriteString("A strategy or constraint saved for this work may apply (its path is its kind:name; " +
+						"memory action=refine or void fixes one that is wrong, with why and source):\n")
 				case groupMCPDocs:
 					b.WriteString("From the documentation of an MCP server you have:\n")
 				case groupRules:

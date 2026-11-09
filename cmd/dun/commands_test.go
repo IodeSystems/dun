@@ -135,6 +135,7 @@ func TestRouteSlash(t *testing.T) {
 		"worktree new":                         {"control", "worktree", "new"},
 		"remember Tests Are Slow":              {"control", "remember", "Tests Are Slow"},
 		"memories":                             {"control", "memories", ""},
+		"memories add strategy Keep-Case X":    {"control", "memories", "add strategy Keep-Case X"},
 		"clear":                                {"reset", "", ""},
 		"discard":                              {"control", "close", ""},
 		"rephrase prompt Be Terse, Please":     {"control", "rephrase", "prompt Be Terse, Please"},

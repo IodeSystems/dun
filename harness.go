@@ -478,6 +478,13 @@ type Harness struct {
 	// (a child uses its parent's).
 	memLinkOnce sync.Once
 	memLinkV    *memLink
+	// strategies is the strategies and constraints store, beside memory
+	// (notekinds.go); stratLink its link to dund. listed is the files the
+	// standing list of the system prompt shows, as of the last rebuild.
+	strategies    atomic.Pointer[memoryStore]
+	stratLinkOnce sync.Once
+	stratLinkV    *memLink
+	listed        atomic.Pointer[map[string]bool]
 	// catalog is what each started server offers besides tools: skills and
 	// prompts (skills.go). Guarded by srvMu.
 	catalog map[string]mcpCatalog

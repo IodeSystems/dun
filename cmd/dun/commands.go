@@ -336,7 +336,11 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("usage: /rules [full|summary|index [--scope] | on|off|unset <file|glob> [--global|--project|--session] | mode <mode|unset> [--scope]]")
 		}
-	case "memories", "interrupt":
+	case "memories":
+		// The rest of the line as typed: a detail keeps its case.
+		_, rest := textfmt.CutFields(strings.TrimPrefix(strings.TrimSpace(line), "/"), 1)
+		r.control(name, rest)
+	case "interrupt":
 		r.control(name, "")
 	case "discard": // the engine's control is still "close"
 		r.control("close", "")

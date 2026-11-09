@@ -80,14 +80,20 @@ func memoryToolDef() llm.ToolDef {
 		"new note. A note records what was true when it was written: when the user says otherwise or the code " +
 		"shows otherwise, refine it (new content) or void it (no longer applies), with why and source; confirm " +
 		"one you checked against the code and found right. refine, void and confirm find the note by old_text, a " +
-		"phrase copied from it or its question."
+		"phrase copied from it or its question, or its path (memory:<name>). kind strategy saves an approach that " +
+		"worked and will work again (name: a short slug; content: the detail, optional); kind constraint saves a " +
+		"rule the user set for how to work, only when the user states it. Read any by its path with file_read: " +
+		"memory:<name>, strategy:<name>, constraint:<name>."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"action":   map[string]any{"type": "string", "enum": []string{"add", "refine", "void", "confirm"}},
+			"action": map[string]any{"type": "string", "enum": []string{"add", "refine", "void", "confirm"}},
+			"kind": map[string]any{"type": "string", "enum": []string{kindMemory, kindStrategy, kindConstraint},
+				"description": "memory (default): a fact; strategy: an approach; constraint: a rule the user set"},
+			"name":     map[string]any{"type": "string", "description": "add: a short name, a few words (made a slug); required for strategy and constraint"},
 			"content":  map[string]any{"type": "string", "description": "add/refine: the note — the fact and where it applies, and why it holds only if that was said; never add a reason or consequence nobody stated, and no dates (dun records when)"},
 			"question": map[string]any{"type": "string", "description": "add/refine: the question this note answers, in the words a later user would ask it"},
-			"old_text": map[string]any{"type": "string", "description": "refine/void/confirm: a phrase copied exactly from the note or its question"},
+			"old_text": map[string]any{"type": "string", "description": "refine/void/confirm: a phrase copied exactly from the note or its question, or its path (strategy:<name>)"},
 			"why":      map[string]any{"type": "string", "description": "refine/void/confirm: the evidence — the user's own words, or the file you read and what it says. A confirm needs that check done first: \"the user asked me to check\" is not evidence. No dates — dun records when"},
 			"source":   map[string]any{"type": "string", "enum": []string{"user", "code"}, "description": "refine/void/confirm: who says so — the user, or the code as it is now"},
 			"public":   map[string]any{"type": "boolean", "description": "add: share with everyone on this project (default: private to you)"},
@@ -111,6 +117,8 @@ type memoryArgs struct {
 	Public   bool     `json:"public"`
 	Scope    string   `json:"scope"`
 	Tags     []string `json:"tags"`
+	Kind     string   `json:"kind"`
+	Name     string   `json:"name"`
 }
 
 // noteMeta is what the frontmatter records about where a note came from.
@@ -129,6 +137,13 @@ type noteMeta struct {
 type memoryStore struct {
 	dir    string
 	global string // "" when there is no global scope
+	// index is the dund index the files go into ("" is memories), kinds
+	// the kinds kept here (nil is memory only), groups the surfacing groups
+	// of a project and a global hit (zero: the memory groups). One shape
+	// for every kind (notekinds.go).
+	index  string
+	kinds  []string
+	groups [2]string
 	ingest func(path string) error
 	forget func(path string) error
 	now    func() time.Time
@@ -151,7 +166,12 @@ const downNote = " — dund is not reachable: the note is on disk, and it is ind
 func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 	switch a.Action {
 	case "add":
-		if err := scanNote(a.Content, a.Question); err != nil {
+		kind, err := m.kindOf(a.Kind)
+		if err != nil {
+			return "", err
+		}
+		a.Kind = kind
+		if err := scanItem(a); err != nil {
 			return "", err
 		}
 		tags, err := cleanTags(a.Tags)
@@ -173,12 +193,15 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
-		path := filepath.Join(dir, m.noteName(a))
+		path, err := m.newPath(dir, &a)
+		if err != nil {
+			return "", err
+		}
 		down, err := m.write(path, a, meta)
 		if err != nil {
 			return "", err
 		}
-		out := "saved " + filepath.Base(path)
+		out := "saved " + filepath.Base(path) + " (" + a.Kind + ":" + a.Name + ")"
 		if dir == m.global && m.global != "" {
 			out += " (global)"
 		}
@@ -299,6 +322,15 @@ func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) (down stri
 	}
 	var b strings.Builder
 	b.WriteString("---\n")
+	if v := field("name", a.Name); v != "" {
+		b.WriteString("name: " + v + "\n")
+	}
+	if v := field("kind", a.Kind); v != "" && v != kindMemory {
+		b.WriteString("kind: " + v + "\n")
+	}
+	if meta.extra["important"] == "true" {
+		b.WriteString("important: true\n")
+	}
 	if q := strings.TrimSpace(a.Question); q != "" {
 		b.WriteString("question: " + q + "\n")
 	}
@@ -390,11 +422,18 @@ func (m *memoryStore) noteName(a memoryArgs) string {
 		normalizeProject(strings.Join(words, "-")), hex.EncodeToString(sum[:3]))
 }
 
-// find returns the one note whose text contains phrase.
+// find returns the one note whose text contains phrase, or the one a path
+// (strategy:<name>) names.
 func (m *memoryStore) find(phrase string) (string, error) {
 	phrase = strings.TrimSpace(phrase)
 	if phrase == "" {
 		return "", fmt.Errorf("old_text is required: a phrase copied from the note")
+	}
+	if kind, name, ok := parseItemPath(phrase); ok && m.keeps(kind) {
+		if p := m.named(kind, name); p != "" {
+			return p, nil
+		}
+		return "", fmt.Errorf("no %s named %q", kind, name)
 	}
 	var paths []string
 	for _, d := range m.dirs() {
@@ -455,7 +494,8 @@ func scanNote(content, question string) error {
 // global ones, indexed into dund's memories indexes through link. A nil link
 // keeps the files and indexes nothing.
 func memoryFor(link *memLink, workspace string) *memoryStore {
-	m := &memoryStore{dir: memoryDir(raglitProject(workspace)), global: memoryDir(globalMemoryDir), now: time.Now}
+	m := &memoryStore{dir: memoryDir(raglitProject(workspace)), global: memoryDir(globalMemoryDir), now: time.Now,
+		index: memoryIndex, kinds: []string{kindMemory}, groups: [2]string{groupMemory, groupMemoryGlobal}}
 	if link == nil {
 		return m
 	}
@@ -505,10 +545,15 @@ func (m *memoryStore) group(docID string) string {
 	switch {
 	case m == nil || !m.holds(docID):
 		return ""
-	case m.global != "" && strings.HasPrefix(docID, m.global+string(os.PathSeparator)):
-		return groupMemoryGlobal
 	}
-	return groupMemory
+	g := m.groups
+	if g[0] == "" {
+		g = [2]string{groupMemory, groupMemoryGlobal}
+	}
+	if m.global != "" && strings.HasPrefix(docID, m.global+string(os.PathSeparator)) {
+		return g[1]
+	}
+	return g[0]
 }
 
 // holds reports whether path is in one of the store's directories.
@@ -551,9 +596,26 @@ func (h *Harness) memoryCall(m *memoryStore, rawArgs string) string {
 	if h.cfg.SessionFile != "" {
 		meta.Session = strings.TrimSuffix(filepath.Base(h.cfg.SessionFile), ".jsonl")
 	}
+	// A strategy or a constraint is in the strategies store: by its kind,
+	// or by the path old_text names.
+	kind := a.Kind
+	if k, _, ok := parseItemPath(a.OldText); ok && kind == "" {
+		kind = k
+	}
+	if kind == kindStrategy || kind == kindConstraint {
+		if m = h.strategyStore(); m == nil {
+			return "memory: this session keeps no strategies or constraints"
+		}
+	}
+	before := h.importantKey()
 	out, err := m.apply(a, meta)
 	if err != nil {
 		return "memory: " + err.Error()
+	}
+	// An important item changed or went: the standing list in the system
+	// prompt is rebuilt (after the turn, applyTools).
+	if h.importantKey() != before {
+		h.applyTools()
 	}
 	return out
 }

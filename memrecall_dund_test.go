@@ -69,9 +69,14 @@ func (d *dundRag) down() {
 // fragment), or fails.
 func (d *dundRag) find(project, query, want string, tags ...string) {
 	d.t.Helper()
+	d.findIn("memories", project, query, want, tags...)
+}
+
+func (d *dundRag) findIn(index, project, query, want string, tags ...string) {
+	d.t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		r, err := d.host.Search(context.Background(), proto.RagSearch{Project: project, Index: "memories", Query: query, Mode: "fts",
+		r, err := d.host.Search(context.Background(), proto.RagSearch{Project: project, Index: index, Query: query, Mode: "fts",
 			Filter: proto.RagFilter{Tags: tags}})
 		if err != nil {
 			d.t.Fatal(err)
@@ -172,5 +177,38 @@ func TestMemoryNotesGoToDund(t *testing.T) {
 			t.Fatalf("the note voided while dund was down is still indexed: %+v", r.Hits)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Strategies and constraints over dund's socket: they go to the
+// strategies index of their scope (not memories), and file_read reads one
+// by its path.
+func TestStrategiesGoToDund(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	d := serveDund(t)
+	ws := filepath.Join(t.TempDir(), "harbor")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h, err := dun.Start(context.Background(), dun.Config{Workspace: ws, Rag: dun.DundRag(d.sock)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	out := memoryCall(t, h, map[string]any{"action": "add", "kind": "strategy", "name": "bisect quokka",
+		"content": "Bisect the quokka failure with -count=20 first."})
+	if !strings.Contains(out, "strategy:bisect-quokka") || strings.Contains(out, "not reachable") {
+		t.Fatalf("strategy add: %q", out)
+	}
+	if _, err := h.MemoriesCommand("add constraint global no-wombat Never touch the wombat config."); err != nil {
+		t.Fatal(err)
+	}
+	d.findIn("strategies", "harbor", "quokka", "strategy-bisect-quokka")
+	d.findIn("strategies", "", "wombat", "constraint-no-wombat")
+	d.none("harbor", "quokka")
+	var tc llm.ToolCall
+	tc.Function.Name, tc.Function.Arguments = "file_read", `{"path":"constraint:no-wombat"}`
+	if out, _ := h.Session.Dispatch(context.Background(), tc); !strings.Contains(out, "wombat config") {
+		t.Fatalf("file_read constraint: %q", out)
 	}
 }

@@ -488,9 +488,18 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			}()
 			return
 		}
-		// /memories: the project's notes and what has happened to them.
+		// /memories: the project's notes, strategies and constraints and
+		// what has happened to them; add, rm, important, unimportant.
 		if id == "memories" {
-			em.emit(&proto.ControlEvent{ID: id, Message: memoriesListing(h.Memories(), h.Remembering())})
+			if strings.TrimSpace(action) == "" {
+				em.emit(&proto.ControlEvent{ID: id, Message: memoriesListing(h.Memories(), h.Remembering())})
+				return
+			}
+			msg, err := h.MemoriesCommand(action)
+			if err != nil {
+				msg = "memories: " + err.Error()
+			}
+			em.emit(&proto.ControlEvent{ID: id, Message: msg})
 			return
 		}
 		// An MCP prompt, run as a slash command: rendered here, sent back for

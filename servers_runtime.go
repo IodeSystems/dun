@@ -805,14 +805,23 @@ func (h *Harness) rebuildTools() {
 	// is worth writing only because the proactive search brings it back, and
 	// that search is dund's now, not the docs server's (memory.go,
 	// memrecall.go). With dund down it reads the files.
+	// Strategies and constraints ride the same link, tool and recall, in
+	// their own index (notekinds.go); file_read takes their paths.
 	h.memory.Store(nil)
-	var memF *memFinder
+	h.strategies.Store(nil)
+	var memF, stratF *memFinder
 	if l := h.memLink(); l != nil {
 		m := memoryFor(l, h.cfg.Workspace)
 		h.memory.Store(m)
-		memF = &memFinder{l: l, m: m}
+		memF = &memFinder{l: l, m: m, skip: h.listedImportant}
+		if sl := h.stratLink(); sl != nil {
+			s := strategyFor(sl, h.cfg.Workspace)
+			h.strategies.Store(s)
+			stratF = &memFinder{l: sl, m: s, skip: h.listedImportant}
+		}
 		toolDefs = append(toolDefs, memoryToolDef())
 		dispatch = withMemory(dispatch, h, m, report)
+		dispatch = withItemRead(dispatch, h)
 	}
 	// Skills into the index, off the turn lock: raglit takes a while.
 	if e, ok := hookExt(exts, HookSkillsChanged, tools); ok {
@@ -882,6 +891,9 @@ func (h *Harness) rebuildTools() {
 		_, rulesIndexed := hookExt(exts, HookRulesChanged, tools)
 		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
+		// The important memories, strategies and constraints, by path
+		// (notekinds.go): in every session, with no retrieval.
+		sys += h.standingBlock()
 	}
 	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "recap" }) {
 		sys += systemRecap
@@ -961,7 +973,7 @@ func (h *Harness) rebuildTools() {
 		// no fixed range. What surfaces is decided by the hit's similarity
 		// or query-word coverage instead (see docsPreparer): one document
 		// per group and pass, inlined when short.
-		inner := docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc)
+		inner := docGroup([]*memoryStore{h.memoryStore(), h.strategyStore()}, h.skillForDoc, h.isRulesDoc)
 		group := inner
 		home, _ := os.UserHomeDir()
 		src := &hitSources{display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) }}
@@ -974,6 +986,9 @@ func (h *Harness) rebuildTools() {
 		}
 		if memF != nil {
 			finder, fetch = withMemFinder(memF, finder, fetch, src)
+		}
+		if stratF != nil {
+			finder, fetch = withMemFinder(stratF, finder, fetch, src)
 		}
 		docs = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
 			fetch, group, h.skillForDoc, src, cfg.OnDocs)

@@ -113,7 +113,12 @@ func readNote(path string) (note, error) {
 
 // unit is the note's content id: its question and answer.
 func (n note) unit() string {
-	sum := sha256.Sum256([]byte(n.meta["question"] + "\n" + n.body))
+	// A strategy or constraint has no question: its name is what it answers.
+	q := n.meta["question"]
+	if q == "" && n.meta["kind"] != "" {
+		q = n.meta["name"]
+	}
+	sum := sha256.Sum256([]byte(q + "\n" + n.body))
 	return hex.EncodeToString(sum[:8])
 }
 
@@ -132,6 +137,13 @@ type MemoryInfo struct {
 	VoidWhy      string   `json:"voidWhy,omitempty"`
 	Global       bool     `json:"global,omitempty"` // scope global: in every project
 	Tags         []string `json:"tags,omitempty"`
+	// Kind is memory, strategy or constraint; Name its short name, and
+	// Kind:Name the path file_read takes. Important: shown in every
+	// session (notekinds.go).
+	Kind      string `json:"kind,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Important bool   `json:"important,omitempty"`
+	path      string // the file, for the standing list
 }
 
 // list reports every note, current first by date, then the voided ones.
@@ -153,7 +165,8 @@ func (m *memoryStore) list() []MemoryInfo {
 			base := strings.TrimSuffix(p, voidSuffix)
 			info := MemoryInfo{File: filepath.Base(base), Question: n.meta["question"], Body: n.body,
 				Date: n.meta["date"], Void: strings.HasSuffix(p, voidSuffix),
-				Global: m.global != "" && filepath.Dir(p) == m.global, Tags: noteTags(n.meta)}
+				Global: m.global != "" && filepath.Dir(p) == m.global, Tags: noteTags(n.meta),
+				Kind: noteKind(n.meta), Name: noteNameOf(base, n.meta), Important: n.meta["important"] == "true", path: base}
 			cur := n.unit()
 			for _, e := range readAttest(base) {
 				switch e.Kind {
@@ -175,14 +188,19 @@ func (m *memoryStore) list() []MemoryInfo {
 	return out
 }
 
-// Memories lists this project's notes and the global ones, or nil when the
-// session keeps none (no RagLink).
+// Memories lists this project's notes and the global ones, then the
+// strategies and constraints (notekinds.go), or nil when the session keeps
+// none (no RagLink).
 func (h *Harness) Memories() []MemoryInfo {
 	m := h.memoryStore()
 	if m == nil {
 		return nil
 	}
-	return m.list()
+	out := m.list()
+	if s := h.strategyStore(); s != nil {
+		out = append(out, s.list()...)
+	}
+	return out
 }
 
 // Remembering reports whether notes can be written and found: the session
