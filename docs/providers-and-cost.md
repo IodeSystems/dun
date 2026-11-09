@@ -46,6 +46,52 @@ model reads").
   the service's PATH, whether dund's socket answers this user (tests peer
   credentials), the service, a self-updating build's Go version.
 
+## Model facets
+
+Code: `internal/dunconfig/facets.go`. Every model dun uses is a role in
+`facets` in `config.json`: `main` (the session), `child` (sub-agents),
+`vision` (describes chat images for a model that cannot read them, and OCRs
+pages for dund), `embed`, `segment`, `identity` (dund's retrieval,
+`rag.md`). Each is `{provider, model, effort}`: `provider` is a saved
+provider's name (empty: the active one; for `child`, the session's), `effort`
+an `/effort` level (empty: the saved level).
+
+```json
+"facets": {
+  "main":   {"provider": "work", "model": "chat-standard"},
+  "child":  {"provider": "fast", "model": "chat-fast", "effort": "low"},
+  "vision": {"provider": "openrouter", "model": "qwen2.5-vl-7b-instruct"},
+  "embed":  {"provider": "corrallm", "model": "local-nomic-embed-text"}
+}
+```
+
+- **One resolver.** The engine, dund's retrieval (`ragd.Resolve`), `/model`
+  and `dun doctor` all call `DunConfig.Resolve`. Precedence, field by field
+  (a layer that names only a model keeps the endpoint of the layer below):
+  CLI flag > env > `facets.<role>` > the old top-level fields > the role's
+  default. Flags: `--url`/`--model`/`--key` (main), `--child-provider`/
+  `--child-model`/`--child-effort` (child). Env: `DUN_URL`/`DUN_MODEL`/
+  `DUN_LLM_KEY` (main only). Old fields: `model` (main), `vision_model`/
+  `vision_provider` (vision). Defaults: embed is `local-nomic-embed-text` on
+  the active provider; child is main's model; the rest are off.
+- **Old configs keep working.** Loading reads the old fields as fallbacks
+  and never rewrites the file. `/model use`, the picker, `dun --setup` and
+  the web's provider `use` write `facets.main`; they also write the old
+  `model` and make the provider active, so an older binary on the same
+  config runs the same model. Logout of main's provider clears `facets.main`
+  (as it cleared `model`); rename moves every facet on it.
+- `facets.main.effort` applies only when `/effort` has saved no level
+  (`effort.json`), so `/effort` keeps working as before.
+- `/model` lists every role, its model on its provider and where it came
+  from (`flag`, `env`, `config`, `config, old field`, `default`, or `session`
+  for a `--session` pick), then opens the picker. `/model use <facet>
+  <provider>/<model>` sets one role; `/model use <provider>/<model>` and
+  `/model use <provider> <id>` set main. The text before the first `/` is a
+  provider only when one of that name is saved, so `anthropic/claude-x` on
+  OpenRouter is a model id. `/model probe <facet>` runs the probes: chat
+  probes for main and child, OCR for vision (`ragd/probe.go`). `dun doctor`
+  prints one line per role.
+
 ## Spend meter
 
 Code: `spend.go`, `ledger.go`. Source: agentkit reads what a gateway reports

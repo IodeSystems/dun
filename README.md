@@ -487,12 +487,15 @@ base64. The first image sent to a model probes it: a refusal records that
 model (by provider URL and id) as having no vision in `~/.dun/vision.json`, a
 turn that goes through records that it has. For a model without vision, a
 vision model describes each image and the description goes in its place; set
-one in `~/.dun/config.json`:
+one with `/model use vision <provider>/<model>`, which writes the vision facet
+in `~/.dun/config.json` (`docs/providers-and-cost.md`, Model facets):
 
 ```jsonc
-"vision_model": "qwen2.5-vl-7b-instruct",  // a model id that reads images, on the active provider
-"vision_provider": "openrouter"             // optional: a model on another logged-in provider
+"facets": {"vision": {"provider": "openrouter", "model": "qwen2.5-vl-7b-instruct"}}
 ```
+
+The older `vision_model` and `vision_provider` fields are still read when no
+vision facet is set.
 
 With none set, a message with images to such a model is not sent: the TUI says
 why and puts the message back in the composer. A message with images sent
