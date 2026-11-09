@@ -47,7 +47,12 @@ window is tracked already: the `window` field of request events).
 |---|---|
 | small | whole, as now |
 | large, fits (over ~5k tokens and under ~a quarter of the room) | whole, plus an aside: "This read is N tokens. Take what you need from it, then recap it on your next turn." (the existing large-result recap cue) |
-| would blow the context | refused, with every way out that applies, in order (below) |
+| over a quarter, within the room | whole, plus a stronger aside: "This read is N tokens, over a quarter of the room left. Take what you need from it and recap it right after, this turn or the next." |
+| would blow the context (over the room) | refused, with every way out that applies, in order (below) |
+
+(USER 2026-11-09: "refuse a whole read only when it would blow the context."
+The room is the free room minus the reply reserve; over a quarter of it the
+aside is stronger. This replaced refusing everything over a quarter.)
 
 The refusal says the numbers ("X is N tokens; M are free") and then:
 
@@ -80,24 +85,25 @@ The refusal says the numbers ("X is N tokens; M are free") and then:
 - **Thresholds** (consts `wholeSmallTokens` = 5000, `wholeRoomShare` = 4):
   up to 5000 is served whatever the room (an ordinary ranged read is ~16k,
   unchecked); above that, up to a quarter of the room, served with the aside;
-  above, refused.
+  up to the room, served with the stronger aside (`wholeAsideBig`); above,
+  refused.
 - **The aside is the large-result recap cue.** It claims the key that cue
   would claim later (`bigCueKey`, now by call id), so one large result gets
   one cue, and the cap's clip is skipped for that result (`keepWhole`): it was
   measured to fit.
-- **The refusal's numbers.** The limit is a quarter of the room, so "M are
-  free" became the allowance and the room, and the recap amount is what makes
-  the read fit (4N − free), not N − M:
+- **The refusal's numbers.** M is the room (reserve already out), and the
+  recap amount is N − M:
 
   ```
-  ERROR: X is N tokens; a whole read may take A, a quarter of the F free. Ways out:
-  1. Recap what is settled to free at least K tokens, then read it again.
+  ERROR: X is N tokens; M are free. Ways out:
+  1. Recap what is settled to free at least N−M tokens, then read it again.
   2. agent({prompt: "read X and report …"}): a child spends its own context and returns the findings.
   3. Grep it first, or read a range.
   ```
 
-  Recap is left out when it cannot free K (K > what is in use past the fixed
-  overhead): not "always available" as above, since it would be false advice.
+  Recap is left out when it cannot free N − M (more than is in use past the
+  fixed overhead, i.e. X is larger than an empty context's room): not "always
+  available" as above, since it would be false advice.
   Delegation is offered only with `agent` in this agent's tool set; when X is
   larger than a child's whole window (window − overhead − reserve; a child is
   assumed to have this session's window) it reads "It is larger than a child's
