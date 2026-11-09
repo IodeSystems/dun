@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/depver"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -24,6 +25,7 @@ import (
 // toolState is one row of `dun tools --json` (cmd/dun/toolscmd.go).
 type toolState struct {
 	Name    string `json:"name"`
+	Path    string `json:"path"`
 	Version string `json:"version"`
 	Origin  string `json:"origin"`
 	Target  string `json:"target"`
@@ -33,6 +35,14 @@ type toolState struct {
 	Updated bool   `json:"updated"`
 	Error   string `json:"error"`
 	Missing bool   `json:"missing"`
+	Pin     string `json:"pin"`
+	Release bool   `json:"release"`
+}
+
+// dep is the row as /version shows it.
+func (r toolState) dep() depver.Tool {
+	return depver.Tool{Name: r.Name, Path: r.Path, Version: r.Version, Origin: r.Origin,
+		Pin: r.Pin, Release: r.Release, Missing: r.Missing}
 }
 
 // toolsMsg is `dun tools`'s answer; upgrade: it was --upgrade (/upgrade now).
