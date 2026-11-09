@@ -81,8 +81,8 @@ dun's decisions:
 - **Writes go straight to disk, no approval step** (USER), after a scan that
   refuses control and format characters, chat-template tokens, and over 1200
   chars. A note is one file in `~/.dun/memory/<project>/`, or
-  `~/.dun/memory/@global/` for scope global (frontmatter: question, date,
-  session, commit, tags, public), indexed in dund's `memories` index of the
+  `~/.dun/memory/@global/` for scope global (frontmatter: name, question, date,
+  session, commit, tags, important, public), indexed in dund's `memories` index of the
   project or of the global set. Local first (USER 2026-10-21); `public` is
   recorded and changes nothing yet.
 - **The fork shares the turn's prefix.** Measured by replaying a captured
@@ -153,6 +153,10 @@ carries the caveat and the invitation** (`notify.go`, group memory): a note
   history are re-derivable and the fastest to go stale. The residue worth
   keeping is what is not in the tree: why an approach was abandoned, what a
   measurement showed, which reading of an ambiguous request was right.
+- **Important notes** (USER 2026-11-08): a note has a short name and can
+  be marked important; an important one is listed by path in every
+  session's system prompt (`strategies.md`). Only the user marks one
+  (`/memories important`), which keeps the rule below.
 - **Personalization**: no model-written pinned list (USER 2026-10-19). A pinned
   list reaches every turn through the system prompt, so a wrong model-inferred
   entry ("user prefers X") would steer every session and could override the

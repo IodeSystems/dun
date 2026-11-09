@@ -1,6 +1,7 @@
 # Reading: virtual paths and a budgeted whole read
 
-A proposal, not built. Code today: agentkit `files/read.go` (the caps), dun
+A proposal, not built, except the item paths (`memory:`, `strategy:`,
+`constraint:`; `strategies.md`, `notekinds.go`). Code today: agentkit `files/read.go` (the caps), dun
 `recap.go` (large-result cues), `exec.go` (clipping). Related: `rag.md` (what
 the virtual paths would read), `memory.md`.
 
@@ -23,8 +24,9 @@ the virtual paths would read), `memory.md`.
 (USER 2026-11-08: "virtual file read then? Searchpath? Even for raglit.")
 `file_read` takes namespaced paths besides files:
 
-- `rule:<name>`, `strategy:<name>`, `memory:<question-slug>` — the stores in
-  `rag.md`, each a file with a short name and optional detail;
+- `constraint:<name>`, `strategy:<name>`, `memory:<name>` — the stores in
+  `strategies.md`, each a file with a short name and optional detail
+  (built; "constraint", not "rule": the rules files are another thing);
 - `doc:<index>/<path>` — a ragcore document, whole or ranged like a file;
 - saved outputs, by the path a clipped result already names.
 

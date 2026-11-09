@@ -1,7 +1,8 @@
 # Retrieval in dund (ragcore)
 
 Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
-3", "Built: slice 5"); the rest is a proposal.
+3", "Built: slice 5"), and the strategies index (`strategies.md`); the rest
+is a proposal.
 Memory notes are indexed and recalled through dund (slice 5), with or
 without `/rag on`. Code and doc search still run on raglit, as a separate
 server and a bundled extension that is off unless `/rag on`. This file is
@@ -321,8 +322,9 @@ sync), `memory.go` (the tool).
   running ingest job: raglit's `SetEmbedder` is a plain field write a
   running worker reads (raglit-a4 has the fix).
 
-Not built: the strategies index (rules with a short name and optional
-detail; global, project or important).
+Built since: the strategies index, holding strategies and constraints
+(one file shape with memories: a short name, optional detail, global or
+project, important). See `strategies.md`.
 
 ## Slices
 
@@ -348,6 +350,8 @@ detail; global, project or important).
   memories, strategies**. Strategies is new: the learned, reusable approaches
   from the learning-phase design (churn → resolved candidate → lesson), kept
   apart from memories so a lesson's retrieval is not crowded by project facts.
+  The user's constraints share it, marked by `kind` (`strategies.md`). The
+  learning phase is not built.
 - **Organization: dund's own** (USER, relayed by raglit-a4). dund uses none of
   raglit's organization: no Registry, no Home layout, no `project:<ns>`
   namespaces, no `/mcp/{project}` keys. dund decides which Stores exist (for
