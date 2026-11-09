@@ -393,9 +393,10 @@ func TestIndexModelRecordRefusesAnotherVectorSpaceUntilReembed(t *testing.T) {
 	}
 }
 
-// A dimension that differs under the same model id also refuses, and a
-// re-embed says it cannot drop vectors of the same model.
-func TestIndexModelRecordRefusesAnotherDimension(t *testing.T) {
+// A dimension that differs under the same model id also gives text search
+// only, until a re-embed, which drops the old vectors and records the new
+// dimension.
+func TestIndexModelRecordAnotherDimensionUntilReembed(t *testing.T) {
 	f := &fakeModels{dim: 8}
 	url := f.serve(t)
 	root, caps := t.TempDir(), t.TempDir()
@@ -413,8 +414,20 @@ func TestIndexModelRecordRefusesAnotherDimension(t *testing.T) {
 	if got.Mode != "fts" || !strings.Contains(got.Note, "dimension 16") {
 		t.Fatalf("search %+v, want fts naming dimension 16", got)
 	}
-	if _, err := h.Reembed(proto.RagReembed{Index: "memories"}); err == nil || !strings.Contains(err.Error(), "same model") {
-		t.Fatalf("reembed: %v, want the same-model refusal", err)
+	re, err := h.Reembed(proto.RagReembed{Index: "memories"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !re.Dropped || re.Dim != 16 || re.Missing < 1 {
+		t.Fatalf("reembed %+v, want dropped, dimension 16, the document missing", re)
+	}
+	st := storeOf(t, h, "global/memories")
+	waitNoMissing(t, st)
+	if metaInt(st, metaEmbedDim) != 16 {
+		t.Fatalf("record dim %d after reembed, want 16", metaInt(st, metaEmbedDim))
+	}
+	if got := search(t, h, proto.RagSearch{Index: "memories", Query: "narwhal"}); got.Mode != "hybrid" || got.Note != "" || len(got.Hits) == 0 {
+		t.Fatalf("after reembed: %+v, want hybrid with hits", got)
 	}
 }
 
@@ -435,10 +448,11 @@ func TestOpenBackfillsVectorsOfAnIndexWithoutThem(t *testing.T) {
 	}
 }
 
-// A re-embed is refused while the index has a running ingest job: raglit's
-// SetEmbedder is a plain field write that the job's worker reads. Once the
-// job ends, it runs.
-func TestReembedRefusedWhileAJobRuns(t *testing.T) {
+// A re-embed while the index has a running ingest job: raglit's SetEmbedder
+// is atomic, so the swap under the job's worker is no data race (run with
+// -race). The job ends done and every fragment, its own included, gets a
+// vector.
+func TestReembedWhileAJobRuns(t *testing.T) {
 	f := &fakeModels{dim: 8}
 	h := openWith(t, t.TempDir(), f.serve(t), "nomic-embed-text", "")
 	t.Cleanup(func() { h.Close(time.Second) })
@@ -475,15 +489,20 @@ func TestReembedRefusedWhileAJobRuns(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	_, err = h.Reembed(proto.RagReembed{Project: "p", Index: "docs"})
-	if err == nil || !strings.Contains(err.Error(), "1 running ingest job") || !strings.Contains(err.Error(), "--project p --index docs") {
-		close(release)
-		t.Fatalf("reembed with a running job: %v, want the refusal", err)
-	}
+	re, err := h.Reembed(proto.RagReembed{Project: "p", Index: "docs"})
 	close(release)
+	if err != nil {
+		t.Fatalf("reembed with a running job: %v", err)
+	}
+	if !re.Dropped {
+		t.Fatalf("reembed %+v, want the old vectors dropped", re)
+	}
 	waitDone(t, h, "p", "docs", r.Job)
-	if _, err := h.Reembed(proto.RagReembed{Project: "p", Index: "docs"}); err != nil {
-		t.Fatalf("reembed after the job ended: %v", err)
+	waitNoMissing(t, storeOf(t, h, "p/docs"))
+	for _, q := range []string{"zeppelin", "harbor"} {
+		if got := search(t, h, proto.RagSearch{Project: "p", Index: "docs", Query: q}); got.Mode != "hybrid" || len(got.Hits) == 0 {
+			t.Fatalf("%s after reembed: %+v, want hybrid with hits", q, got)
+		}
 	}
 }
 

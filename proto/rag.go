@@ -115,9 +115,8 @@ type RagJobList struct {
 // configured with (facets.embed). An index records the embed model and
 // dimension its vectors came from; when they differ from the configured
 // one, dund searches that index by text only and writes no vectors to it
-// until this runs. Vectors from another model are dropped, then every
-// fragment with no vector is embedded in the background. Answered with
-// RagReembedding.
+// until this runs. Every vector is dropped, then every fragment is
+// embedded again in the background. Answered with RagReembedding.
 type RagReembed struct {
 	Project string `json:"project,omitempty"`
 	Index   string `json:"index"`

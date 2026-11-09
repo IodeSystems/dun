@@ -12,10 +12,10 @@
 // does not exist answers empty and creates nothing.
 //
 // The index model record (docs/rag.md, storage item 4): each index records
-// the embed model its vectors came from (raglit's index_meta embed_model)
-// and their dimension (index_meta embed_dim, dund's key). An index whose
-// record differs from the embed role gets no embedder: no vector is written
-// to it and it is searched by text only, until Reembed.
+// the embed model its vectors came from and their dimension (raglit's
+// index_meta embed_model and embed_dim, written by SyncEmbedModel). An index
+// whose record differs from the embed role gets no embedder: no vector is
+// written to it and it is searched by text only, until Reembed.
 package ragd
 
 import (
@@ -75,8 +75,11 @@ type Host struct {
 	closed  bool
 }
 
-// metaEmbedDim is the index_meta key of the vectors' dimension. raglit
-// records the model (embed_model) but not the dimension.
+// metaEmbedDim is raglit's index_meta key of the vectors' dimension. raglit
+// writes it (SyncEmbedModel); dund only reads it. Before raglit v0.6, dund
+// wrote this key itself, with the same name and meaning (the probed vector
+// length), so an index from then needs no migration: raglit reads the value
+// as its own.
 const metaEmbedDim = "embed_dim"
 
 // Open opens the indexes under root that exist and starts the runner. r is
@@ -259,15 +262,14 @@ func (h *Host) attachEmbed(name string, st *raglit.Store) {
 		h.logf("dund: rag: %s: %s: no vectors are written to it and it is searched by text only; `dun dund rag reembed` rebuilds them", name, why)
 		return
 	}
-	if have == "" {
-		if _, err := st.SyncEmbedModel(h.embed.Model); err != nil {
-			h.logf("dund: rag: %s: embed model record: %v", name, err)
-		}
-	}
-	if haveDim == 0 && h.dim > 0 {
-		if err := st.SetMeta(metaEmbedDim, strconv.Itoa(h.dim), time.Now().Unix()); err != nil {
-			h.logf("dund: rag: %s: embed dimension record: %v", name, err)
-		}
+	// No record: adopt the role. A match: record a dimension not yet
+	// recorded. Vectors of another length than h.dim (an index with no dim
+	// record) cannot be compared with a query at all; raglit drops them, and
+	// the backfill below rebuilds them.
+	if dropped, err := st.SyncEmbedModel(h.embed.Model, h.dim); err != nil {
+		h.logf("dund: rag: %s: embed model record: %v", name, err)
+	} else if dropped {
+		h.logf("dund: rag: %s: dropped vectors of another dimension than %s%s", name, h.embed.Model, dimSaid(h.dim))
 	}
 	st.SetEmbedder(h.embed)
 	h.backfillLocked(name, st)
@@ -323,10 +325,12 @@ func (h *Host) backfillLocked(name string, st *raglit.Store) {
 	}()
 }
 
-// Reembed brings an index's vectors to the embed role: vectors from another
-// model are dropped, the record is set to the role's model and dimension, the
-// embedder is attached, and the fragments with no vector are embedded in the
-// background.
+// Reembed rebuilds an index's vectors with the embed role: every vector is
+// dropped (DropVectors), the record is set to the role's model and dimension
+// (SyncEmbedModel), the embedder is attached, and every fragment is embedded
+// in the background. A job running on the index meanwhile is not a problem:
+// raglit's SetEmbedder is atomic and its vector writes check the embedder
+// they were made with (TestReembedWhileAJobRuns, -race).
 func (h *Host) Reembed(q proto.RagReembed) (*proto.RagReembedding, error) {
 	name, err := Name(q.Project, q.Index)
 	if err != nil {
@@ -342,39 +346,16 @@ func (h *Host) Reembed(q proto.RagReembed) (*proto.RagReembedding, error) {
 	if st == nil {
 		return nil, fmt.Errorf("rag: no index %s yet", name)
 	}
-	// raglit's SetEmbedder is a plain field write that a running job's
-	// worker reads (raglit-a4 has the fix), so the embedder is not swapped
-	// under one.
-	if running, err := st.Jobs("running", 0); err != nil {
-		return nil, err
-	} else if len(running) > 0 {
-		flags := "--index " + q.Index
-		if q.Project != "" {
-			flags = "--project " + q.Project + " " + flags
-		}
-		return nil, fmt.Errorf("rag: %s has %d running ingest job(s): reembed when they end (`dun dund rag jobs %s --state running`)",
-			name, len(running), flags)
-	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
 		return nil, errors.New("rag: dund is stopping")
 	}
-	if st.EmbedModel() == h.embed.Model {
-		if d := metaInt(st, metaEmbedDim); d > 0 && h.dim > 0 && d != h.dim {
-			// SyncEmbedModel drops vectors only for another model id.
-			return nil, fmt.Errorf("rag: %s: vectors of dimension %d from %s, which now gives %d: raglit has no call that drops vectors of the same model", name, d, h.embed.Model, h.dim)
-		}
-	}
-	dropped, err := st.SyncEmbedModel(h.embed.Model)
+	n, err := st.DropVectors()
 	if err != nil {
 		return nil, err
 	}
-	dim := ""
-	if h.dim > 0 {
-		dim = strconv.Itoa(h.dim)
-	}
-	if err := st.SetMeta(metaEmbedDim, dim, time.Now().Unix()); err != nil {
+	if _, err := st.SyncEmbedModel(h.embed.Model, h.dim); err != nil {
 		return nil, err
 	}
 	delete(h.stale, name)
@@ -383,11 +364,11 @@ func (h *Host) Reembed(q proto.RagReembed) (*proto.RagReembedding, error) {
 	if err != nil {
 		return nil, err
 	}
-	if dropped {
-		h.logf("dund: rag: %s: dropped vectors from another model; embedding %d fragments with %s", name, missing, h.embed.Model)
+	if n > 0 {
+		h.logf("dund: rag: %s: dropped %d vectors; embedding %d fragments with %s", name, n, missing, h.embed.Model)
 	}
 	h.backfillLocked(name, st)
-	return &proto.RagReembedding{Index: name, Model: h.embed.Model, Dim: h.dim, Dropped: dropped, Missing: missing}, nil
+	return &proto.RagReembedding{Index: name, Model: h.embed.Model, Dim: h.dim, Dropped: n > 0, Missing: missing}, nil
 }
 
 // staleWhy is why name's vectors are not the embed role's; "" when they are.

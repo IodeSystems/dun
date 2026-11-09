@@ -101,8 +101,8 @@ github.com/iodesystems/gwag/v2 v2.11.0 h1:iKCeD+4n7sXDkdUnJRzZrPicc3mv/IjSbeuNa7
 github.com/iodesystems/gwag/v2 v2.11.0/go.mod h1:SWXgRoavRjPPEiUUF3bxJ9KA/FKTeIZQR8KRTSSTUi4=
 github.com/iodesystems/openai-claude-api-shim v0.6.0 h1:pI+UOTbiHZkmoS0VpusJfYmZC4jxv9arN1e/cUZaLlg=
 github.com/iodesystems/openai-claude-api-shim v0.6.0/go.mod h1:AyPLwyzGcME+wU6ggxHvDj8s0tek7NFx/vbZHhog0nM=
-github.com/iodesystems/raglit v0.5.1 h1:5EKj+jkuzPuMZrciQNRCurh2ZGAn1Ev4cp0O0Ch4AxU=
-github.com/iodesystems/raglit v0.5.1/go.mod h1:QDIx1CmtB99TyAMGhzEb2xVQCV4yPXf0icGwom0fNDk=
+github.com/iodesystems/raglit v0.6.1 h1:coIam2p0eTZDHlAXi34Q/+QIg3J9Ls1DHp8gqGyuSAc=
+github.com/iodesystems/raglit v0.6.1/go.mod h1:QDIx1CmtB99TyAMGhzEb2xVQCV4yPXf0icGwom0fNDk=
 github.com/iodesystems/sqlc-go-codegen-metaquery v1.7.0 h1:Hs4F5H+x/KWuX9N0/K1rQ812xYz8f4E+luXk1KtJQ4o=
 github.com/iodesystems/sqlc-go-codegen-metaquery v1.7.0/go.mod h1:wrk1YFVXQlFNMUsrBcn9sCWUiey1i4EdEMhR47+BU7I=
 github.com/lucasb-eyer/go-colorful v1.4.1 h1:1EO+WB73+EH8EVbzlrG3KLAfEypQWVHIBqlTf+2hNss=
