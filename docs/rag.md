@@ -590,7 +590,7 @@ USER 2026-11-09: worktrees are raglit branches. Code: `internal/ragd/branch.go`,
   from the learning-phase design (churn → resolved candidate → lesson), kept
   apart from memories so a lesson's retrieval is not crowded by project facts.
   The user's constraints share it, marked by `kind` (`strategies.md`). The
-  learning phase is not built.
+  learning phase's first slice is built (`strategies.md`, "Learning phase").
 - **Organization: dund's own** (USER, relayed by raglit-a4). dund uses none of
   raglit's organization: no Registry, no Home layout, no `project:<ns>`
   namespaces, no `/mcp/{project}` keys. dund decides which Stores exist (for

@@ -40,9 +40,9 @@ import (
 // (docs/memory.md, Personalization, USER 2026-10-19). Its detail is a
 // file_read of its path (memory:<name>, strategy:<name>, constraint:<name>).
 //
-// Learning phase (not built, docs/rag.md): a resolved churn becomes a
-// strategy through strategyStore().apply with kind strategy, as the memory
-// tool's add does.
+// Learning phase (learn.go): a resolved churn becomes a candidate strategy
+// through strategyStore().apply with kind strategy, as the memory tool's
+// add does, tagged candidate until the user accepts it.
 
 const (
 	kindMemory     = "memory"
@@ -389,13 +389,16 @@ func (h *Harness) noteMeta() noteMeta {
 }
 
 // MemoriesUsage is /memories' usage line.
-const MemoriesUsage = "usage: /memories [add memory|strategy|constraint [global] <name> [detail] | rm <kind:name> | important|unimportant <kind:name>]"
+const MemoriesUsage = "usage: /memories [add memory|strategy|constraint [global] <name> [detail] | rm <kind:name> | important|unimportant <kind:name> | candidates | accept|reject <kind:name>]"
 
-// MemoriesCommand carries out /memories add, rm, important and
-// unimportant, and returns the line for the user. The user is the source:
+// MemoriesCommand carries out /memories add, rm, important, unimportant,
+// candidates, accept and reject, and returns the line for the user. The user is the source:
 // an rm is a void with the user as the evidence.
 func (h *Harness) MemoriesCommand(action string) (string, error) {
 	f := strings.Fields(action)
+	if len(f) == 1 && f[0] == "candidates" {
+		return h.candidatesListing()
+	}
 	if len(f) < 2 {
 		return "", fmt.Errorf("%s", MemoriesUsage)
 	}
@@ -442,10 +445,15 @@ func (h *Harness) MemoriesCommand(action string) (string, error) {
 			return "", err
 		}
 		return m.apply(memoryArgs{Action: "void", OldText: f[1], Why: "removed by the user with /memories rm", Source: "user"}, h.noteMeta())
+	case "accept", "reject":
+		return h.reviewCandidate(f[0], f[1])
 	case "important", "unimportant":
 		m, path, err := h.itemArg(f[1])
 		if err != nil {
 			return "", err
+		}
+		if f[0] == "important" && isCandidate(path) {
+			return "", fmt.Errorf("%s is a candidate: /memories accept it first", f[1])
 		}
 		n, err := readNote(path)
 		if err != nil {

@@ -143,7 +143,10 @@ type MemoryInfo struct {
 	Kind      string `json:"kind,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Important bool   `json:"important,omitempty"`
-	path      string // the file, for the standing list
+	// Recurred: how many times the learning phase proposed this candidate
+	// again (learn.go).
+	Recurred int    `json:"recurred,omitempty"`
+	path     string // the file, for the standing list
 }
 
 // list reports every note, current first by date, then the voided ones.
@@ -180,6 +183,8 @@ func (m *memoryStore) list() []MemoryInfo {
 					}
 				case "unsupported":
 					info.VoidWhy = e.Note
+				case "recurred":
+					info.Recurred++
 				}
 			}
 			out = append(out, info)

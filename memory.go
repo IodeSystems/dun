@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -235,6 +236,10 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		}
 		if a.Tags, err = cleanTags(a.Tags); err != nil {
 			return "", err
+		}
+		// A candidate stays one: only the user accepts it (learn.go).
+		if slices.Contains(noteTags(old.meta), candidateTag) && !slices.Contains(a.Tags, candidateTag) {
+			a.Tags = append(a.Tags, candidateTag)
 		}
 		a.Public = old.meta["public"] == "true"
 		if err := m.attest(path, attestEntry{Kind: "corrected", Unit: old.unit(), Text: strings.TrimSpace(a.Content),
@@ -617,6 +622,13 @@ func (h *Harness) memoryCall(m *memoryStore, rawArgs string) string {
 	if kind == kindStrategy || kind == kindConstraint {
 		if m = h.strategyStore(); m == nil {
 			return "memory: this session keeps no strategies or constraints"
+		}
+	}
+	// The candidate tag is the learning phase's; the user accepts or
+	// rejects a candidate (learn.go).
+	for _, t := range a.Tags {
+		if strings.EqualFold(strings.TrimSpace(t), candidateTag) {
+			return "memory: the candidate tag is set by the learning phase only; the user reviews candidates with /memories candidates"
 		}
 	}
 	before := h.importantKey()

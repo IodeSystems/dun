@@ -342,6 +342,7 @@ type Harness struct {
 	turnRounds turnRounds  // this turn's tool-call rounds, for the turn limit
 	nudge      planNudge   // this turn's plan nudge (plannudge.go)
 	idle       idleState   // changes since this turn's last check (idlecheck.go)
+	learn      learnState  // resolved churn waiting for its lesson (learn.go)
 	settle     settleState // the delayed end-of-turn report (settle.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model
@@ -884,6 +885,9 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 // let go of turnMu — the memory triggers over what it added.
 func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error) {
 	res, err := h.runTurnWithRescue(ctx, h.Session.Turn)
+	// Held churn episodes become candidate lessons once the task verifies
+	// (learn.go): after the turn, so no request of the turn waits on it.
+	h.learnAfterTurn(ctx, err)
 	// The turn's edits into the code and docs indexes (codesearch.go), with
 	// or without an error: a failed turn can have written files too.
 	h.codeReindex()
