@@ -233,8 +233,13 @@ func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args strin
 	return nil
 }
 
+// wholeReader answers a read with whole:true on the toolset it was routed
+// to (Harness.readWhole, wholeread.go).
+type wholeReader func(ctx context.Context, route *filetools.Toolset, name, args, id string) string
+
 // withFiles routes the file tools to the toolset and reports each call.
-func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, grants func() ([]*filetools.Toolset, map[*filetools.Toolset]bool), onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+// whole, when set, answers a read that asks for all of a file.
+func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, grants func() ([]*filetools.Toolset, map[*filetools.Toolset]bool), whole wholeReader, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if !ts.Handles(tc.Function.Name) {
 			return inner(ctx, tc)
@@ -257,6 +262,9 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 		if out == "" && readOnly[route] && (tc.Function.Name == ts.Name(filetools.Edit) || tc.Function.Name == ts.Name(filetools.Write)) {
 			out = fmt.Sprintf("ERROR: %s is open to dun for reading only. To change it the user runs /file mode %s write "+
 				"(the path, or the directory added). Do not work around this with exec.", route.Root(), route.Root())
+		}
+		if out == "" && whole != nil && ts.Bare(tc.Function.Name) == filetools.Read && wantsWhole(tc.Function.Arguments) {
+			out = whole(ctx, route, tc.Function.Name, tc.Function.Arguments, tc.ID)
 		}
 		if out == "" {
 			out = route.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
