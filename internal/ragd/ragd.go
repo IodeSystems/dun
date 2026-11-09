@@ -475,7 +475,8 @@ func (h *Host) Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, e
 	out.Mode = mode
 	for _, x := range hits {
 		out.Hits = append(out.Hits, proto.RagHit{Path: x.Path, Title: x.Title, Page: x.Page, Text: x.Text, Score: x.Score,
-			Similarity: x.Similarity, Matched: len(x.Matched), Terms: x.QueryTerms})
+			Similarity: x.Similarity, Matched: len(x.Matched), Terms: x.QueryTerms,
+			StartLine: x.StartLine, EndLine: x.EndLine, Symbol: x.Symbol, ContentID: x.ContentID})
 	}
 	return out, nil
 }

@@ -3,6 +3,9 @@
 Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
 3", "Built: slice 5"), and the strategies index (`strategies.md`); the rest
 is a proposal.
+Status note: raglit is at v0.7.0; RagHit carries start_line, end_line, symbol,
+content_id. No code segmenter (Models.Code) is plugged in: waits on the cgo and
+binary-size decision.
 Memory notes are indexed and recalled through dund (slice 5), with or
 without `/rag on`. Code and doc search still run on raglit, as a separate
 server and a bundled extension that is off unless `/rag on`. This file is

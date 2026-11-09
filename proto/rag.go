@@ -60,6 +60,12 @@ type RagHit struct {
 	Similarity *float64 `json:"similarity,omitempty"`
 	Matched    int      `json:"matched,omitempty"`
 	Terms      int      `json:"terms,omitempty"`
+	// StartLine and EndLine are the fragment's half-open 1-based line span in
+	// its source; absent when unknown.
+	StartLine int    `json:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty"`
+	Symbol    string `json:"symbol,omitempty"`
+	ContentID string `json:"content_id,omitempty"`
 }
 
 // RagHits answers RagSearch. Mode is the mode that ran; Note says why it is
