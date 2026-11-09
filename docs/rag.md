@@ -3,10 +3,12 @@
 Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
 3", "Built: slice 5"), and the strategies index (`strategies.md`); the rest
 is a proposal.
-Status note: raglit is at v0.7.0; RagHit carries start_line, end_line, symbol,
+Status note: raglit is at v0.8.0; RagHit carries start_line, end_line, symbol,
 content_id. The code and docs indexes are built by `rag_index` (below, "Built:
 code and docs indexes"), with poly-lsp-mcp's segmenter, pure Go, and sessions
-search them (below, "Built: session code and doc search").
+search them (below, "Built: session code and doc search"). A git worktree's
+code and docs are a raglit branch of the main checkout's (below, "Built:
+worktree branches").
 Memory notes are indexed and recalled through dund (slice 5), with or
 without `/rag on`; so are the workspace's code and docs. `/rag on` (raglit, a
 separate server and a bundled extension) is only for raglitd's own corpora:
@@ -271,9 +273,11 @@ for the job's commit; a re-ingest leaves them alone. `rag_tag` replaces a
 document's tags with no ingest (no tags clears them). `rag_sync` sets the
 tags of every file it is given, current or not.
 
-**raglit calls** (raglit v0.7.0): every function and method dund calls is
+**raglit calls** (raglit v0.8.0): every function and method dund calls is
 pinned in raglit's `api_test.go`, except `Models.Embedder` and the
-`Embedder` fields `Client` and `Model` (the embed paths above). A file is ingested as a
+`Embedder` fields `Client` and `Model` (the embed paths above), and the file
+name `branch.json` that dund reads a branch's `BranchMeta` from (raglit
+exports the type, not a reader). A file is ingested as a
 queued job; text (memory notes) by `Store.Ingest` at once.
 
 ## Built: slice 3
@@ -421,7 +425,9 @@ Code: `internal/ragd/index.go`, `internal/ragd/codeseg.go`,
   reply counts `queued, current, removed, failed`, per index and summed;
   `project` empty is root's slug (`raglitProject`).
 - **Jobs.** Every file is a job on the code+docs runner; the reply comes
-  when the jobs are queued, not done (`rag jobs`).
+  when the jobs are queued, not done (`rag jobs`). One walk queues each
+  index's files in one transaction (`Store.EnqueueMany`, raglit v0.8.0),
+  not one commit per file.
 - **Trigger.** `dun dund rag index`, and a session's (below): at session
   start and at each turn end. A file watcher is raglit's to build (USER
   2026-11-09: tree watching, worktree branches and fragment reuse belong in
@@ -433,6 +439,10 @@ Code: `internal/ragd/index.go`, `internal/ragd/codeseg.go`,
   itself 5 to 12 s (one queue insert per file, while the runner already
   commits). A no-change re-run: 63 ms, nothing queued, 2 failed
   (`xterm.js`, a test JSON: minified).
+  With `EnqueueMany` (2026-11-09, temp DUN_HOME, FTS only, first index of an
+  empty index, the call only): before, 830 files of this worktree, 7.1, 10.3
+  and 7.2 s (3 runs); after, 805 files of the main checkout, 1.28, 1.18 and
+  1.18 s (3 runs).
 - **Search.** `rag_search` on code or docs returns `start_line`, `end_line`
   (half-open) and `symbol`; `dun dund rag search` prints
   `path:start-last symbol`, the last line inclusive.
@@ -449,9 +459,9 @@ wiring), `notify.go` (the groups' kind and pointer).
   next turn end. No index is sent with `--no-dir`, nor for a workspace that
   is the home directory or `/`. This is the interim trigger;
   `codeLink.reindex` is the one seam raglit's watcher replaces.
-- **Search.** `rag_search` of both indexes at once, filtered to
-  `file://<workspace>/`: worktrees of one repo share the project slug and
-  so the indexes, and a search answers from its own tree only. Hits sort
+- **Search.** `rag_search` of both indexes at once, with `root: workspace`
+  and filtered to `file://<workspace>/`: in a worktree, dund reads the
+  worktree's branch of each index (below, "Built: worktree branches"). Hits sort
   by similarity where there is one, then score. Each hit is shown as
   `path:start-end symbol` (the last line inclusive; raglit's span is
   half-open), the path relative to the workspace.
@@ -478,6 +488,80 @@ wiring), `notify.go` (the groups' kind and pointer).
   through `rag_index`: the call 0.11 to 0.12 s, the hit in `rag_search`
   0.52 to 0.62 s after the edit (3 runs). Through a session, add the rest
   of the turn: the call goes when the turn ends.
+
+## Built: worktree branches
+
+USER 2026-11-09: worktrees are raglit branches. Code: `internal/ragd/branch.go`,
+`internal/ragd/index.go`, `internal/dund/ragindex.go`, `internal/fsutil`
+(`Canon`). Tests: `internal/ragd/branch_test.go`.
+
+- **Path spelling.** Every root and path dund stores or filters by is
+  `fsutil.Canon`: `filepath.EvalSymlinks`, then `Clean`; a path that does not
+  exist keeps its missing tail on its nearest existing ancestor, resolved. A
+  document path is the canonical root joined with the file's path below the
+  root as walked (a symlink inside the tree is not resolved). Applied to the
+  `rag_index` root (`ragIndex` walks the canonical root), the files given to
+  `Host.Index` (`canonFiles`), the search `root` and `path_prefix`
+  (`canonPrefix`), and the session's root (`codesearch.go`). Why: raglit
+  translates worktree paths by string prefix and resolves no symlinks, and
+  `WorktreeOf` returns git's resolved path; `/tmp` is a symlink on macOS.
+  Documents an index got before this rule under another spelling are not
+  removed by a walk (it removes only under the canonical root).
+- **Branch.** `rag_index` on a linked worktree (`raglit.WorktreeOf`, cached
+  per root) opens the project's code and docs indexes as branches of the
+  main checkout's (`raglit.OpenBranch(parent, branch, worktree, main)`), at
+  `<rag>/<project>/branches/<base>-<8 hex of sha256(root)>/{code,docs}/`.
+  The walk writes to the branch only: a changed or new file is queued in the
+  branch, a file identical to the main checkout's is current through the
+  overlay (raglit translates its path, so it is not copied), and a deleted
+  file is removed, which tombstones it in the branch. The main checkout's
+  index is never written by a worktree's walk.
+- **Main checkout first.** When the project has no code or docs index yet,
+  `ragIndex` indexes the main checkout first (`Host.Index` refuses a worktree
+  whose main checkout is not indexed). A file the main checkout's index has
+  a pending or running job for is not queued in the branch (`deferred`): its
+  job would read it before the parent holds it, and the branch would keep a
+  copy of an unchanged file. The next `rag_index` decides it.
+- **Segmenter.** Under a new segmenter runtime a branch re-reads only the
+  files it holds itself (`BranchDiff`); the main checkout's `rag_index`
+  re-reads the rest.
+- **ErrParentOnly.** The walk's writes are enqueue, `SetMeta` and
+  `RemoveDocument` (a tombstone on a branch); none writes a parent's
+  document. An `ErrParentOnly` from it is returned as an error naming the
+  branch, never skipped.
+- **SQLITE_BUSY on remove.** raglit's `RemoveDocument` on a branch that the
+  runner writes returned SQLITE_BUSY at once, not after its busy_timeout:
+  7 of 90 runs of the branch tests; 1 of 90 with the walk's removals moved
+  before its queue. dund removes before it queues and retries a remove on
+  SQLITE_BUSY (`removeBusy`: 5 tries, 50 ms more each); the last error is
+  returned. With both, 0 of 120 runs failed. raglit's to fix (aw4 issue).
+- **Search.** `rag_search` with a `root` that is a worktree, on code or docs,
+  searches the branch (raglit overlays the parent at worktree paths; a main
+  checkout path does not resolve through it). A worktree with no branch yet
+  answers no hits and a note. Without `root`, or for the main checkout, the
+  project's index as before.
+- **GC.** `raglit.GCBranches` over every branch home,
+  `<rag>/*/branches/*/{code,docs}` (the directories that exist); alive is
+  "the branch.json root is a directory". At dund start (`ragd.Open`, before
+  any index opens) and by `dun dund rag gc` (`rag_gc` → `rag_gced
+  {branches, removed}`), which first closes an open branch whose root is
+  gone.
+- **Start.** `ragd.Open` opens every branch on disk whose parent index is
+  there, with the roots from its `branch.json`, so jobs queued before a
+  restart run again.
+- **Old copies.** dund before branches indexed a worktree as a second copy
+  in the project's index, filtered by path. Those documents stay in the
+  parent until the project's index is rebuilt; a branch never shows them (a
+  parent path under the worktree root is left out) and the main checkout's
+  search filters them out by path.
+- **Measured** (2026-11-09, temp DUN_HOME, FTS only, the main checkout
+  `~/local/src/iodesystems/dun` at d01114e, then this worktree, branch
+  `ragcore-dund`, 61 tracked files changed and 4 untracked new ones): parent
+  code 756 and docs 47 documents (29.5 MB and 5.4 MB on disk); the branch's
+  own code 60 (28 added, 32 changed) and 1 tombstone, docs 5 (1 added, 4
+  changed) (7.1 MB and 1.7 MB on disk). The worktree's `rag_index` call 0.75 s
+  (62 code and 5 docs files queued, 766 current, 1 removed); its jobs done
+  5.6 s after; 6.4 s in all. The main checkout's jobs took 70 s.
 
 ## Slices
 
@@ -517,9 +601,8 @@ wiring), `notify.go` (the groups' kind and pointer).
   PDF/image extraction are in dund's first slice anyway (USER, relayed by
   raglit-a4).
 
-- Worktree branches (a worktree's index as a raglit branch of the main
-  checkout's) and the tree watcher: raglit's to build (USER 2026-11-09).
-  Until then a worktree's files are a second copy in the project's indexes.
+- The tree watcher: raglit's to build (USER 2026-11-09). Worktree branches
+  are built (above).
 - ragcore API stability and versioning between raglit and dun.
 - Merge for branches (raglit P6): needed when a sub-agent's index changes should
   land in the parent.
