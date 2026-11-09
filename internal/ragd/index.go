@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/iodesystems/raglit"
-	"modernc.org/sqlite"
 
 	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/proto"
@@ -164,7 +163,7 @@ func (h *Host) dropOutside(name string, st *raglit.Store, root string, out *prot
 		if c := fsutil.Canon(p); c == root || strings.HasPrefix(c, root+"/") {
 			continue
 		}
-		if err := removeBusy(st, src); err != nil {
+		if err := removeDoc(st, src); err != nil {
 			return fmt.Errorf("remove %s: %w", src, err)
 		}
 		n++
@@ -235,7 +234,7 @@ func (h *Host) walk(st, parent *raglit.Store, root, main string, files []string,
 		items = append(items, raglit.EnqueueItem{URL: src, Fresh: again})
 	}
 	// Removals before the queue, so the runner is not committing this
-	// walk's jobs meanwhile (removeBusy).
+	// walk's jobs meanwhile.
 	under := "file://" + root + "/"
 	for src := range docs {
 		if !strings.HasPrefix(src, under) || want[src] {
@@ -243,7 +242,7 @@ func (h *Host) walk(st, parent *raglit.Store, root, main string, files []string,
 		}
 		// A branch: removing a document only the parent holds tombstones it
 		// in the branch; the parent is not touched.
-		if err := removeBusy(st, src); err != nil {
+		if err := removeDoc(st, src); err != nil {
 			return nil, fmt.Errorf("remove %s: %w", src, err)
 		}
 		out.Removed++
@@ -269,29 +268,6 @@ func (h *Host) walk(st, parent *raglit.Store, root, main string, files []string,
 		}
 	}
 	return out, nil
-}
-
-// removeBusy is removeDoc, again after SQLITE_BUSY (up to 5 tries, 50 ms
-// more each time). raglit's RemoveDocument on a branch the runner writes
-// returned SQLITE_BUSY at once, not after busy_timeout: 7 of 90 runs of the
-// branch tests, 1 of 90 with the removals before the queue (raglit, aw4
-// issue). A remove is idempotent, so a retry is safe; the last error is
-// returned.
-func removeBusy(st *raglit.Store, src string) error {
-	var err error
-	for i := range 5 {
-		if err = removeDoc(st, src); err == nil || !isBusy(err) {
-			return err
-		}
-		time.Sleep(time.Duration(i+1) * 50 * time.Millisecond)
-	}
-	return err
-}
-
-// isBusy reports whether err is SQLite's SQLITE_BUSY (any extended code).
-func isBusy(err error) bool {
-	var e *sqlite.Error
-	return errors.As(err, &e) && e.Code()&0xff == 5
 }
 
 // branchOwn is the paths of the documents a branch holds itself (not

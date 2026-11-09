@@ -288,3 +288,74 @@ func TestRootThroughASymlink(t *testing.T) {
 		t.Errorf("worktree by its resolved path: %+v, want all current", r)
 	}
 }
+
+// fdsOn is how many of this process's open files are path.
+func fdsOn(t *testing.T, path string) int {
+	t.Helper()
+	ents, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Skip("no /proc/self/fd")
+	}
+	n := 0
+	for _, e := range ents {
+		if l, err := os.Readlink(filepath.Join("/proc/self/fd", e.Name())); err == nil && l == path {
+			n++
+		}
+	}
+	return n
+}
+
+// A branch opens over dund's own handle on the parent (OpenBranchOn): the
+// parent index file gains no descriptor, closing the branch leaves the
+// parent usable, and closing the host closes the parent after its branches.
+func TestBranchSharesTheParentHandle(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	root := t.TempDir()
+	h, err := Open(root, Roles{}, t.Logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, wt := branchRepo(t)
+	indexAt(t, h, main)
+	parent := raglit.Home(filepath.Join(root, "dun/code")).IndexPath()
+	if r, _ := filepath.EvalSymlinks(parent); r != "" {
+		parent = r
+	}
+	before := fdsOn(t, parent)
+	if before == 0 {
+		t.Fatal("the parent index has no open descriptor")
+	}
+	indexAt(t, h, wt) // opens the branch and runs its jobs
+	// Searches read through the branch to the parent: dingo is the parent's.
+	for _, q := range []string{"dingo", "cobra", "dingo", "buffalo"} {
+		search(t, h, proto.RagSearch{Project: "dun", Index: "code", Query: q, Mode: "fts", Root: wt})
+	}
+	name := branchName("dun", "code", wt)
+	br, err := h.Existing(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := fdsOn(t, parent)
+	t.Logf("parent index.sqlite descriptors: %d before the branch, %d after its index run", before, after)
+	if after > before {
+		t.Errorf("parent index descriptors %d before the branch, %d after; want no more", before, after)
+	}
+	h.mu.Lock()
+	_ = br.Close()
+	delete(h.stores, name)
+	h.mu.Unlock()
+	pst, err := h.Existing("dun/code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := documents(pst); err != nil {
+		t.Errorf("the parent after its branch closed: %v", err)
+	}
+	if _, err := h.openBranch(name, wt, main); err != nil {
+		t.Fatal(err)
+	}
+	h.Close(time.Second)
+	if n := fdsOn(t, parent); n != 0 {
+		t.Errorf("%d descriptors on the parent index after Close", n)
+	}
+}
