@@ -251,11 +251,13 @@ func firstNonEmptyStr(vs ...string) string {
 // rules, MCP docs, or the workspace's own documents. Each group is ranked on
 // its own because raglit scores from different indexes do not compare (see
 // groupHits). skill and rules may be nil.
-func docGroup(mem *memoryStore, skill func(string) (skillHit, bool), rules func(string) bool) func(string) string {
+func docGroup(mems []*memoryStore, skill func(string) (skillHit, bool), rules func(string) bool) func(string) string {
 	root := mcpDocsRoot() + string(os.PathSeparator)
 	return func(docID string) string {
-		if g := mem.group(docID); g != "" {
-			return g
+		for _, mem := range mems {
+			if g := mem.group(docID); g != "" {
+				return g
+			}
 		}
 		if skill != nil {
 			if _, ok := skill(docID); ok {

@@ -226,7 +226,7 @@ func TestPlanStall_AfterThePlanNudge(t *testing.T) {
 
 // What moves the plan.
 func TestPlanStall_WhatMoves(t *testing.T) {
-	base := &taskgraph.Node{ID: "1", Title: "a", Goal: "g", DoneWhen: "d", Status: taskgraph.Todo, Needs: []string{"2"}}
+	base := &taskgraph.Node{ID: "1", Title: "a", Details: "g", DoneWhen: "d", Status: taskgraph.Todo, Needs: []string{"2"}}
 	with := func(f func(n *taskgraph.Node)) *taskgraph.Node {
 		n := *base
 		n.Needs = slices.Clone(base.Needs)
@@ -241,10 +241,10 @@ func TestPlanStall_WhatMoves(t *testing.T) {
 		{"added", taskgraph.Change{After: base}, true},
 		{"status", taskgraph.Change{Before: base, After: with(func(n *taskgraph.Node) { n.Status = taskgraph.Doing })}, true},
 		{"done_when", taskgraph.Change{Before: base, After: with(func(n *taskgraph.Node) { n.DoneWhen = "e" })}, true},
-		{"goal", taskgraph.Change{Before: base, After: with(func(n *taskgraph.Node) { n.Goal = "h" })}, true},
+		{"details", taskgraph.Change{Before: base, After: with(func(n *taskgraph.Node) { n.Details = "h" })}, true},
 		{"needs", taskgraph.Change{Before: base, After: with(func(n *taskgraph.Node) { n.Needs = nil })}, true},
 		{"title", taskgraph.Change{Before: base, After: with(func(n *taskgraph.Node) { n.Title = "b" })}, false},
-		{"notes", taskgraph.Change{Before: base, After: with(func(n *taskgraph.Node) { n.Notes = "n" })}, false},
+		{"account", taskgraph.Change{Before: base, After: with(func(n *taskgraph.Node) { n.Account = "n" })}, false},
 		{"removed", taskgraph.Change{Before: base}, false},
 	} {
 		if got := planMove(c.ch); got != c.want {

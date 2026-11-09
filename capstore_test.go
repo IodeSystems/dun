@@ -2,15 +2,27 @@ package dun
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
 )
+
+// capsHome points DUN_HOME at a fresh dir and, before the dir is removed,
+// waits for the background stores a Client's learning started.
+func capsHome(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	t.Cleanup(WaitCapsStores)
+}
 
 // glmNone is Fireworks GLM-5.3's real answer to reasoning_effort "none"
 // (2026-11-07, through corrallm).
@@ -19,7 +31,7 @@ const glmNone = `{"error":{"message":"GLM-5.3 is a thinking-only model; disablin
 // What a Client learns is stored in DUN_HOME and seeded into the next Client
 // for the same (endpoint, model): the refusal is paid for once.
 func TestCaps_LearnStoreSeed(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
+	capsHome(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		if strings.Contains(string(b), `"none"`) {
@@ -65,7 +77,7 @@ func TestCaps_LearnStoreSeed(t *testing.T) {
 
 // effort_off is pinned as a host fact; /model shows where each fact came from.
 func TestCaps_EffortOffPinned(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
+	capsHome(t)
 	c := llm.NewClient("https://llm.example/v1", "", "glm")
 	TrackCaps(c, "low")
 	caps := c.Capabilities()
@@ -80,7 +92,7 @@ func TestCaps_EffortOffPinned(t *testing.T) {
 // With effort_off pinned, off goes on the wire as it: a fold never sends the
 // "none" a thinking-only model refuses.
 func TestCaps_PinTranslatesOff(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
+	capsHome(t)
 	var sent string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -103,7 +115,7 @@ func TestCaps_PinTranslatesOff(t *testing.T) {
 // The effort_off pin is not written to the store: removing it from the config
 // must remove it.
 func TestCaps_HostPinNotStored(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
+	capsHome(t)
 	c := llm.NewClient("https://llm.example/v1", "", "glm")
 	TrackCaps(c, "low")
 	if err := storeSnapshot(c); err != nil {
@@ -118,4 +130,43 @@ func TestCaps_HostPinNotStored(t *testing.T) {
 	if _, ok := c2.Capabilities().OffEffort(); ok {
 		t.Error("the pin outlived its config")
 	}
+}
+
+// Many learn events for one record, at once: no store fails, no temp file is
+// left, and the file on disk is the final record.
+func TestCaps_ConcurrentLearnLastWins(t *testing.T) {
+	capsHome(t)
+	c := llm.NewClient("https://llm.example/v1", "", "glm")
+	TrackCaps(c, "")
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			snap := c.Capabilities()
+			snap.Facts[fmt.Sprintf("k%d", i)] = llm.Fact{Value: fmt.Sprint(i), Source: llm.SourceObserved, At: time.Now()}
+			c.SetCapabilities(snap)
+			c.OnLearn(llm.Learned{Endpoint: snap.Endpoint, Model: snap.Model, Key: "k"})
+		}(i)
+	}
+	wg.Wait()
+	WaitCapsStores()
+	final := c.Capabilities()
+	got := LoadCaps(final.Endpoint, final.Model)
+	if !reflect.DeepEqual(factKeys(got), factKeys(final)) {
+		t.Errorf("disk has %v, final record has %v", factKeys(got), factKeys(final))
+	}
+	ents, _ := os.ReadDir(CapsDir())
+	if len(ents) != 1 {
+		t.Errorf("want one record file, have %d entries", len(ents))
+	}
+}
+
+func factKeys(c llm.Capabilities) []string {
+	var ks []string
+	for k := range c.Facts {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
 }

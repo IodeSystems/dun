@@ -33,7 +33,7 @@ graph does not record.
 ## A node
 
 ```
-id, title, goal, status, needs[], owner, done_when, notes, files[], replaces, why, account
+id, title, details, status, needs[], owner, done_when, replaces, why, account
 ```
 
 - `status`: `todo`, `doing`, `done`, `blocked`, `dropped`. The changes allowed are a
@@ -54,9 +54,11 @@ id, title, goal, status, needs[], owner, done_when, notes, files[], replaces, wh
 - `drop` keeps the node (with its reason). `replaces` (optional id, of a dropped node)
   lets a new node stand in for it; the dependents are re-pointed by an `update` that
   changes their `needs`.
-- `files`: the paths the node expects to change. Nothing enforces it yet; parallel runs
-  need it (aw4 had nine landings refused in one night from siblings editing one test
-  file). Kept in dun until the package moves.
+- `details`: free text, what the node is for and what the next reader needs. Only
+  `show <id>` prints it; the whole-plan `show` lists title, status and done_when.
+  agentkit v0.27.0 replaced `goal`, `notes` and `files` with it. A sidecar written
+  before that is read with details = goal, a blank line, notes (an empty part is
+  skipped); files are dropped (`planFileData.UnmarshalJSON`).
 - `owner`: an opaque string the graph round-trips and `Ready` filters on. "" is the
   session's main agent. Who may change a node is a hook the host gives the tool
   (`WithMayChange`), not a rule of the graph. `Subtree(id)` is the node and all that
@@ -69,7 +71,7 @@ One tool, `plan`, in a built-in group `plan` (`dun:plan`), with an `action`:
 `update` also sets `status` to `todo` or `doing` (begin a node, or take back a block).
 The package's entry is `Tool(store, actor, opts...)` returning the definition and a
 handler, after agentkit's `SessionSearchTool`. The host adds its own sentences to the
-description (`WithNote`): plan mode and `files` are the host's to explain.
+description (`WithNote`): plan mode is the host's to explain.
 
 Every result is short: the node touched and what is ready now.
 
@@ -82,8 +84,8 @@ folds and resume. A session with no file (an in-memory session) keeps it in memo
 
 `/plan` opens a screen with the graph as a tree. A node with several parents shows
 under each, marked as a repeat ("again"). From it a person can approve the plan, edit
-a node's title or goal, or drop a node. Re-ordering is not built: order is the edges,
-and the screen does not edit them (not built). `e`, `g` and `d` fill the composer with
+a node's title or details, or drop a node. Re-ordering is not built: order is the edges,
+and the screen does not edit them (not built). `e`, `m` and `d` fill the composer with
 `/plan edit|drop …` to finish, so a drop is typed, not a keystroke. What the person
 changes reaches the model as a note: an approval as a notification that wakes it,
 the rest as asides that ride its next turn. The engine sends the graph as a `plan`
@@ -134,7 +136,7 @@ node plus its unowned prerequisites, with cross-owner waits. Rejected for this:
 resolved, main agent can reassign to newly unblocked or create new agents for them."
 
 - A child may own several nodes. It **owes a publish** for each: status done with
-  notes of what it found or made, or dropped with why. Nodes it adds are its own, and
+  an account of what it found or made, or dropped with why. Nodes it adds are its own, and
   owed too.
 - A run that ends owing is reminded ONCE (`subAgent.work`); if it still owes, its
   report says so ("Still owes a publish for …") and the main agent decides. Once, so

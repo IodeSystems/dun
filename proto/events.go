@@ -948,14 +948,12 @@ type Plan struct {
 type PlanNode struct {
 	ID       string   `json:"id"`
 	Title    string   `json:"title"`
-	Goal     string   `json:"goal,omitempty"`
+	Details  string   `json:"details,omitempty"`
 	Status   string   `json:"status"` // todo, doing, done, blocked, dropped
 	DoneWhen string   `json:"done_when,omitempty"`
 	Needs    []string `json:"needs,omitempty"`
 	Owner    string   `json:"owner,omitempty"`
-	Files    []string `json:"files,omitempty"`
 	Replaces string   `json:"replaces,omitempty"`
-	Notes    string   `json:"notes,omitempty"`
 	Why      string   `json:"why,omitempty"`     // why it is blocked or dropped
 	Account  string   `json:"account,omitempty"` // how done_when was met
 	// Waiting is why a todo node cannot start, from its edges.

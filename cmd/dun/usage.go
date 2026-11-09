@@ -251,16 +251,14 @@ func readBudget(noNet bool) usageBudget {
 	if noNet {
 		return usageBudget{Status: "skipped", Detail: "--no-net"}
 	}
-	fc := dunconfig.LoadConfig()
-	p, ok := fc.Active()
-	url, key := dunconfig.FirstNonEmpty(os.Getenv("DUN_URL"), p.URL), dunconfig.FirstNonEmpty(os.Getenv("DUN_LLM_KEY"), p.Key)
-	if !ok && url == "" {
+	main := dunconfig.LoadConfig().Resolve(dunconfig.FacetMain, nil, os.Getenv)
+	if main.URL == "" {
 		return usageBudget{Status: "none", Detail: "no provider logged in"}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	b, err := budgetFetcher(ctx, url, key, dunconfig.FirstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model))
-	out := usageBudget{Provider: p.Name}
+	b, err := budgetFetcher(ctx, main.URL, main.Key, main.Model)
+	out := usageBudget{Provider: main.Provider}
 	switch {
 	case errors.Is(err, llm.ErrBudgetUnsupported):
 		out.Status, out.Detail = "unsupported", "the endpoint does not report a key budget"

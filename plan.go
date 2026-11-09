@@ -43,6 +43,34 @@ type planFileData struct {
 	Approved bool            `json:"approved,omitempty"`
 }
 
+// UnmarshalJSON reads a sidecar written before agentkit's plan node became
+// title, details, done_when and needs: a node's goal and notes become its
+// details (goal, a blank line, notes; an empty part is skipped), and its
+// files are dropped. A node that already has details keeps them.
+func (d *planFileData) UnmarshalJSON(b []byte) error {
+	type plain planFileData
+	if err := json.Unmarshal(b, (*plain)(d)); err != nil {
+		return err
+	}
+	var old struct {
+		Graph struct {
+			Nodes []struct {
+				Goal  string `json:"goal"`
+				Notes string `json:"notes"`
+			} `json:"nodes"`
+		} `json:"graph"`
+	}
+	if json.Unmarshal(b, &old) != nil || len(old.Graph.Nodes) != len(d.Graph.Nodes) {
+		return nil
+	}
+	for i, o := range old.Graph.Nodes {
+		if n := d.Graph.Nodes[i]; n != nil && n.Details == "" {
+			n.Details = strings.Join(slices.DeleteFunc([]string{o.Goal, o.Notes}, func(s string) bool { return s == "" }), "\n\n")
+		}
+	}
+	return nil
+}
+
 // planState is the session's plan in memory.
 type planState struct {
 	store *planMemStore
@@ -153,12 +181,12 @@ func (h *Harness) planChanged() {
 const planDesc = "The plan is what survives. It is kept outside the conversation: recap and context folds do " +
 	"not cut it, a fold's summary is given it, and each turn starts with its open nodes. What is only in the " +
 	"conversation can be lost when context is cut. Make nodes for work with several steps; a one-step task " +
-	"needs none. A node has a title, a goal, done_when (what must be true when it is done) and needs (ids it " +
+	"needs none. A node has a title, details, done_when (what must be true when it is done) and needs (ids it " +
 	"waits on; it is ready when all of them are done). Begin a node: update it to status doing. When done_when " +
 	"is true: done, with an account of how it was met. block: you are stuck, with a reason; waiting on other " +
 	"nodes is not blocked. A dropped node keeps its dependents waiting: add a node with replaces, then update " +
 	"their needs. Actions: add, update, show (one node by id, else the whole plan), ready, done, block, drop. " +
-	"A node may list files, the paths it expects to change."
+	"The whole-plan show lists titles, statuses and done_when; show with an id gives the node with its details."
 
 // planNote is the interactive part: the person, and plan mode. Left out under
 // --non-interactive, where no one reads, edits or approves the plan.
@@ -364,9 +392,9 @@ func withPlanGate(inner agent.ToolDispatcher, h *Harness, serverOf map[string]st
 
 // PlanRow is one row of the plan as a tree, for a screen.
 type PlanRow struct {
-	ID, Title, Goal, Status, DoneWhen, Owner, Why, Account, Notes, Replaces string
-	Needs, Files, Waiting                                                   []string
-	Depth                                                                   int
+	ID, Title, Details, Status, DoneWhen, Owner, Why, Account, Replaces string
+	Needs, Waiting                                                      []string
+	Depth                                                               int
 	// Repeat: the node shows under another of its parents as well; this row
 	// only points at it.
 	Repeat bool
@@ -396,8 +424,8 @@ func (h *Harness) Plan() PlanSnapshot {
 	for _, r := range g.Tree() {
 		n := r.Node
 		ready, _ := g.CanStart(n.ID)
-		row := PlanRow{ID: n.ID, Title: n.Title, Goal: n.Goal, Status: string(n.Status), DoneWhen: n.DoneWhen, Owner: n.Owner,
-			Why: n.Why, Account: n.Account, Notes: n.Notes, Replaces: n.Replaces, Needs: n.Needs, Files: n.Files,
+		row := PlanRow{ID: n.ID, Title: n.Title, Details: n.Details, Status: string(n.Status), DoneWhen: n.DoneWhen, Owner: n.Owner,
+			Why: n.Why, Account: n.Account, Replaces: n.Replaces, Needs: n.Needs,
 			Depth: r.Depth, Repeat: r.Repeat, Ready: ready}
 		if n.Status == taskgraph.Todo {
 			row.Waiting = g.Waiting(n.ID)
@@ -408,7 +436,7 @@ func (h *Harness) Plan() PlanSnapshot {
 }
 
 // PlanCmd runs a /plan action other than the screen: "" (the plan as text),
-// "mode [on|off]", "approve", "edit <id> title|goal <text>", "drop <id>
+// "mode [on|off]", "approve", "edit <id> title|details <text>", "drop <id>
 // [why]". What the person changes reaches the model as a note: the approval
 // wakes it (it was told to wait), the rest ride its next turn.
 func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
@@ -459,14 +487,14 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		id, tail, _ := strings.Cut(rest, " ")
 		field, text, _ := strings.Cut(strings.TrimSpace(tail), " ")
 		text = strings.TrimSpace(text)
-		if id == "" || text == "" || (field != "title" && field != "goal") {
-			return "", fmt.Errorf("usage: /plan edit <id> title|goal <text>")
+		if id == "" || text == "" || (field != "title" && field != "details") {
+			return "", fmt.Errorf("usage: /plan edit <id> title|details <text>")
 		}
 		patch := taskgraph.Patch{}
 		if field == "title" {
 			patch.Title = &text
 		} else {
-			patch.Goal = &text
+			patch.Details = &text
 		}
 		cs, err := taskgraph.Apply(ctx, p.store, planActorUser, func(g *taskgraph.Graph) error { return g.Update(id, patch) })
 		if err != nil {
@@ -508,7 +536,7 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		}
 		return h.planTellOwner(id, strings.TrimSpace(text))
 	}
-	return "", fmt.Errorf("usage: /plan [mode on|off | approve | edit <id> title|goal <text> | drop <id> [why] | tell <id> <text>]")
+	return "", fmt.Errorf("usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why] | tell <id> <text>]")
 }
 
 // planTellOwner hands what the person said about node id to whoever owns it,
@@ -583,7 +611,7 @@ func (h *Harness) planModeSuffix(p *planState) string {
 // that node, to a new child (agent's node) or an idle one (jobs' node). So no
 // child waits on another's node; when a child's nodes are done, the main
 // agent gives what became ready to the same children or to new ones. A
-// child may hold several. It owes a publish for each — done with notes of
+// child may hold several. It owes a publish for each — done with an account of
 // what it found or made, or dropped with why — and a run that ends owing is
 // reminded once (subAgent.work). Nodes it adds are its own, and owed too.
 // Owning takes a node out of the main agent's ready list; dismissing the
@@ -679,13 +707,13 @@ func (h *Harness) planBrief(id string) string {
 		return ""
 	}
 	b := fmt.Sprintf("\n\nYou own plan node %s: %s.", id, n.Title)
-	if n.Goal != "" {
-		b += " Goal: " + n.Goal + "."
+	if n.Details != "" {
+		b += " Details: " + n.Details + "."
 	}
 	if n.DoneWhen != "" {
 		b += " Done when: " + n.DoneWhen + "."
 	}
-	return b + " Publish it with the plan tool when its work is done: status done with notes of what you " +
+	return b + " Publish it with the plan tool when its work is done: status done with an account of what you " +
 		"found or made, or dropped with why. The main agent plans what follows from what you publish."
 }
 
@@ -756,7 +784,7 @@ func (h *Harness) planOwed(owner string) []*taskgraph.Node {
 // childPlanNote is the child's plan tool's extra sentence.
 const childPlanNote = "This is your parent's plan. You own some of its nodes and may change, add under and " +
 	"finish only those; the rest are shown so you can see what yours wait on and what waits on yours. " +
-	"You owe a publish for each node you own: status done with notes of what you found or made, or dropped with why."
+	"You owe a publish for each node you own: status done with an account of what you found or made, or dropped with why."
 
 // childPlanTool is a child's plan tool: its parent's graph, as its owner
 // ("agent:N"), changing only that owner's nodes. What it changes reaches the
@@ -790,7 +818,7 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 		h.planTell(cs, who, "") // the board says it; a child's change is not news
 		return
 	}
-	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has its notes).", who, strings.Join(published, ", "))
+	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has the node).", who, strings.Join(published, ", "))
 	if len(ready) > 0 {
 		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (agent({id:N, node:…})), a new one (agent({prompt:…, node:…})), or do them."
 	}

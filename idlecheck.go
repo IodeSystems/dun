@@ -142,6 +142,13 @@ func (s *idleState) mark() {
 	s.mu.Unlock()
 }
 
+// wasChecked reports whether a check was given in this turn.
+func (s *idleState) wasChecked() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.checked
+}
+
 // note records one tool call, if a check came before it.
 func (s *idleState) note(tool, args string) {
 	s.mu.Lock()

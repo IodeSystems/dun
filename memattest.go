@@ -113,7 +113,12 @@ func readNote(path string) (note, error) {
 
 // unit is the note's content id: its question and answer.
 func (n note) unit() string {
-	sum := sha256.Sum256([]byte(n.meta["question"] + "\n" + n.body))
+	// A strategy or constraint has no question: its name is what it answers.
+	q := n.meta["question"]
+	if q == "" && n.meta["kind"] != "" {
+		q = n.meta["name"]
+	}
+	sum := sha256.Sum256([]byte(q + "\n" + n.body))
 	return hex.EncodeToString(sum[:8])
 }
 
@@ -127,17 +132,34 @@ type MemoryInfo struct {
 	Confirmed string `json:"confirmed,omitempty"`
 	// StaleConfirm: confirmed once, then changed — the confirmation was of
 	// text the note no longer says.
-	StaleConfirm bool   `json:"staleConfirm,omitempty"`
-	Void         bool   `json:"void,omitempty"`
-	VoidWhy      string `json:"voidWhy,omitempty"`
+	StaleConfirm bool     `json:"staleConfirm,omitempty"`
+	Void         bool     `json:"void,omitempty"`
+	VoidWhy      string   `json:"voidWhy,omitempty"`
+	Global       bool     `json:"global,omitempty"` // scope global: in every project
+	Tags         []string `json:"tags,omitempty"`
+	// Kind is memory, strategy or constraint; Name its short name, and
+	// Kind:Name the path file_read takes. Important: shown in every
+	// session (notekinds.go).
+	Kind      string `json:"kind,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Important bool   `json:"important,omitempty"`
+	// Recurred: how many times the learning phase proposed this candidate
+	// again (learn.go).
+	Recurred int    `json:"recurred,omitempty"`
+	path     string // the file, for the standing list
 }
 
 // list reports every note, current first by date, then the voided ones.
 func (m *memoryStore) list() []MemoryInfo {
 	var out []MemoryInfo
 	for _, pat := range []string{"*.md", "*.md" + voidSuffix} {
-		paths, _ := filepath.Glob(filepath.Join(m.dir, pat))
-		sort.Sort(sort.Reverse(sort.StringSlice(paths)))
+		var paths []string
+		for _, d := range m.dirs() {
+			ps, _ := filepath.Glob(filepath.Join(d, pat))
+			paths = append(paths, ps...)
+		}
+		// By name, newest first: a name starts with its date.
+		sort.Slice(paths, func(i, j int) bool { return filepath.Base(paths[i]) > filepath.Base(paths[j]) })
 		for _, p := range paths {
 			n, err := readNote(p)
 			if err != nil {
@@ -145,7 +167,9 @@ func (m *memoryStore) list() []MemoryInfo {
 			}
 			base := strings.TrimSuffix(p, voidSuffix)
 			info := MemoryInfo{File: filepath.Base(base), Question: n.meta["question"], Body: n.body,
-				Date: n.meta["date"], Void: strings.HasSuffix(p, voidSuffix)}
+				Date: n.meta["date"], Void: strings.HasSuffix(p, voidSuffix),
+				Global: m.global != "" && filepath.Dir(p) == m.global, Tags: noteTags(n.meta),
+				Kind: noteKind(n.meta), Name: noteNameOf(base, n.meta), Important: n.meta["important"] == "true", path: base}
 			cur := n.unit()
 			for _, e := range readAttest(base) {
 				switch e.Kind {
@@ -159,6 +183,8 @@ func (m *memoryStore) list() []MemoryInfo {
 					}
 				case "unsupported":
 					info.VoidWhy = e.Note
+				case "recurred":
+					info.Recurred++
 				}
 			}
 			out = append(out, info)
@@ -167,15 +193,21 @@ func (m *memoryStore) list() []MemoryInfo {
 	return out
 }
 
-// Memories lists this project's notes, or nil without the docs index.
+// Memories lists this project's notes and the global ones, then the
+// strategies and constraints (notekinds.go), or nil when the session keeps
+// none (no RagLink).
 func (h *Harness) Memories() []MemoryInfo {
 	m := h.memoryStore()
 	if m == nil {
 		return nil
 	}
-	return m.list()
+	out := m.list()
+	if s := h.strategyStore(); s != nil {
+		out = append(out, s.list()...)
+	}
+	return out
 }
 
-// Remembering reports whether notes can be written and found: the docs
-// index is up.
+// Remembering reports whether notes can be written and found: the session
+// has a RagLink (dund, or with dund down the notes on disk).
 func (h *Harness) Remembering() bool { return h.memoryStore() != nil }

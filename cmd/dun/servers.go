@@ -366,10 +366,10 @@ func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
 // line), when it was written, and what has happened to it since.
 func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 	if !on {
-		return "memories: the docs index is off — /rag on (notes are kept on disk either way)"
+		return "memories: off in this session (notes are kept on disk either way)"
 	}
 	if len(ms) == 0 {
-		return "memories: none for this project yet — /remember, or say \"remember, …\""
+		return "memories: none for this project yet — /remember, or say \"remember, …\"; " + dun.MemoriesUsage
 	}
 	var b strings.Builder
 	live, void := 0, 0
@@ -380,7 +380,7 @@ func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 			live++
 		}
 	}
-	fmt.Fprintf(&b, "memories — %d current, %d void", live, void)
+	fmt.Fprintf(&b, "memories, strategies and constraints — %d current, %d void", live, void)
 	for _, m := range ms {
 		title := m.Question
 		if title == "" {
@@ -389,8 +389,21 @@ func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 		if len(title) > 100 {
 			title = title[:100] + "…"
 		}
+		if m.Kind != "" {
+			// The path file_read and /memories take.
+			title = strings.TrimSpace(m.Kind + ":" + m.Name + "  " + title)
+		}
 		var tags []string
 		tags = append(tags, m.Date)
+		if m.Important {
+			tags = append(tags, "important")
+		}
+		if m.Global {
+			tags = append(tags, "global")
+		}
+		if len(m.Tags) > 0 {
+			tags = append(tags, "tags "+strings.Join(m.Tags, ", "))
+		}
 		if m.Refined > 0 {
 			tags = append(tags, fmt.Sprintf("refined %d×", m.Refined))
 		}
@@ -404,7 +417,7 @@ func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 		}
 		fmt.Fprintf(&b, "\n  %s  · %s", title, strings.Join(tags, " · "))
 	}
-	b.WriteString("\nto fix one, tell the model (\"that note about X is wrong, it's Y\") — it refines or voids it with you as the source")
+	b.WriteString("\nto fix one, tell the model (\"that note about X is wrong, it's Y\") — it refines or voids it with you as the source\n" + dun.MemoriesUsage)
 	return b.String()
 }
 

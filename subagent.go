@@ -675,8 +675,8 @@ func (s *subAgent) work(ctx context.Context, h *Harness, msg string) (agent.Turn
 		reminded = true
 		var next agent.TurnResult
 		if next, err = h.Ask(ctx, "[control/plan] Before you stop: you have not published plan node(s) "+
-			strings.Join(owed, ", ")+". For each, set status done with notes of what you found or made, "+
-			"or dropped with why, using the plan tool. If one cannot be finished, say why in its notes and drop it, "+
+			strings.Join(owed, ", ")+". For each, set status done with an account of what you found or made, "+
+			"or dropped with why, using the plan tool. If one cannot be finished, drop it with why, "+
 			"or leave it and say why in your reply."); err == nil && strings.TrimSpace(next.Reply) != "" {
 			res.Reply = strings.TrimSpace(res.Reply + "\n\n" + next.Reply) // the answer stays; this adds to it
 		}

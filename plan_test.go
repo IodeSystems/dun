@@ -80,7 +80,7 @@ func TestPlan_ToolIsAGroupAndNamesNeitherModeNorFilesInTheGraph(t *testing.T) {
 	}
 	h := planHarness(t, false)
 	d, _ := h.planTool()
-	if !strings.Contains(d.Function.Description, "plan mode") || !strings.Contains(d.Function.Description, "list files") {
+	if !strings.Contains(d.Function.Description, "plan mode") || !strings.Contains(d.Function.Description, "details") || strings.Contains(d.Function.Description, "goal") || strings.Contains(d.Function.Description, "list files") {
 		t.Errorf("the host's note is missing: %s", d.Function.Description)
 	}
 }
@@ -224,7 +224,7 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 		// board (docs/attention.md): what they changed, and for a drop what
 		// waits on it, which the board cannot show.
 		{"edit 1 title Parse it", "changed node 1's title to: Parse it", false},
-		{"edit 1 goal Read the file", "goal to: Read the file", false},
+		{"edit 1 details Read the file", "details to: Read the file", false},
 		{"drop 1 wrong way", "dropped node 1 (wrong way). 1 node(s) wait on it", false},
 		// A setting, not a request: no echo (USER 2026-11-07). The plan
 		// gate's refusal says what plan mode means when a call hits it.
@@ -446,7 +446,7 @@ func TestPlan_ChildPublishesAndIsGivenTheNext(t *testing.T) {
 	}
 	_, handle := child.childPlanTool()
 	ctx := context.Background()
-	if out := handle(ctx, `{"action":"update","id":"`+ids["main's"]+`","goal":"hijacked"}`); !strings.Contains(strings.ToLower(out), "not") {
+	if out := handle(ctx, `{"action":"update","id":"`+ids["main's"]+`","details":"hijacked"}`); !strings.Contains(strings.ToLower(out), "not") {
 		t.Errorf("another's node must be refused: %q", out)
 	}
 	h.notes()
@@ -497,7 +497,7 @@ func TestPlan_OwnersHearOfTheirNodes(t *testing.T) {
 	ctx := context.Background()
 
 	child.notes()
-	if _, err := h.PlanCmd(ctx, "edit "+ids["decide db"]+" goal postgres"); err != nil {
+	if _, err := h.PlanCmd(ctx, "edit "+ids["decide db"]+" details postgres"); err != nil {
 		t.Fatal(err)
 	}
 	if n := child.notes(); len(n) != 1 || !strings.Contains(n[0], "the user changed plan node(s) "+ids["decide db"]) {
@@ -573,5 +573,40 @@ func TestPlan_DescriptionByMode(t *testing.T) {
 	d2, _ := h.planTool()
 	if d2.Function.Description != non {
 		t.Error("the description changed between two builds of one session")
+	}
+}
+
+// A sidecar written with agentkit's old node (goal, notes, files) reads as
+// details = goal + blank line + notes; files are dropped.
+func TestPlan_OldSidecarRowsBecomeDetails(t *testing.T) {
+	h := planHarness(t, true)
+	old := `{"graph":{"nodes":[
+{"id":"1","title":"both","goal":"G","notes":"N","files":["a.go"],"status":"todo","done_when":"d"},
+{"id":"2","title":"goal only","goal":"G2","status":"todo","done_when":"d"},
+{"id":"3","title":"notes only","notes":"N3","status":"todo","done_when":"d"},
+{"id":"4","title":"neither","status":"todo","done_when":"d"},
+{"id":"5","title":"new","details":"D","status":"todo","done_when":"d"}],"seq":5},"mode":true}`
+	if err := os.WriteFile(PlanFile(h.cfg.SessionFile), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := h.Plan()
+	got := map[string]string{}
+	for _, r := range s.Rows {
+		got[r.ID] = r.Details
+	}
+	want := map[string]string{"1": "G\n\nN", "2": "G2", "3": "N3", "4": "", "5": "D"}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("node %s details = %q, want %q", id, got[id], w)
+		}
+	}
+	if !s.Mode {
+		t.Error("mode lost")
+	}
+	// Saved again, the row is in the new shape.
+	planCall(t, h, `{"action":"add","title":"x","done_when":"y"}`)
+	b, _ := os.ReadFile(PlanFile(h.cfg.SessionFile))
+	if strings.Contains(string(b), `"goal"`) || strings.Contains(string(b), `"notes"`) || strings.Contains(string(b), `"files"`) {
+		t.Errorf("old fields persisted: %s", b)
 	}
 }
