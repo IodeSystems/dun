@@ -127,6 +127,10 @@ type noteMeta struct {
 	Commit  string
 	// extra is a rewritten note's existing frontmatter, kept over the above.
 	extra map[string]string
+	// tagOnly: the rewrite leaves the note's text as it was (important,
+	// unimportant, a refine of the tags alone), so the index gets its tags
+	// (retag) and no ingest.
+	tagOnly bool
 }
 
 // memoryStore writes, replaces and removes notes in two directories (the
@@ -145,6 +149,7 @@ type memoryStore struct {
 	kinds  []string
 	groups [2]string
 	ingest func(path string) error
+	retag  func(path string) error
 	forget func(path string) error
 	now    func() time.Time
 }
@@ -237,9 +242,11 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 			return "", err
 		}
 		// Same file, so the index replaces the document instead of adding one.
+		// The same text and question with other tags is a retag: no ingest.
+		retag := strings.TrimSpace(a.Content) == strings.TrimSpace(old.body) && a.Question == old.meta["question"]
 		old.meta["refined"] = m.now().Format("2006-01-02")
 		delete(old.meta, "confirmed") // a confirmation was of the text this replaces
-		down, err := m.write(path, a, noteMeta{Session: meta.Session, Commit: meta.Commit, extra: old.meta})
+		down, err := m.write(path, a, noteMeta{Session: meta.Session, Commit: meta.Commit, extra: old.meta, tagOnly: retag})
 		if err != nil {
 			return "", err
 		}
@@ -355,8 +362,12 @@ func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) (down stri
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return "", err
 	}
-	if m.ingest != nil {
-		if err := m.ingest(path); errors.Is(err, ErrRagDown) {
+	index := m.ingest
+	if meta.tagOnly && m.retag != nil {
+		index = m.retag
+	}
+	if index != nil {
+		if err := index(path); errors.Is(err, ErrRagDown) {
 			return downNote, nil
 		} else if err != nil {
 			// The file is the record; the index can be rebuilt from it. Say so
@@ -500,6 +511,7 @@ func memoryFor(link *memLink, workspace string) *memoryStore {
 		return m
 	}
 	m.ingest = func(path string) error { return link.ingest(m, path) }
+	m.retag = func(path string) error { return link.tag(m, path) }
 	m.forget = func(path string) error { return link.forget(m, path) }
 	return m
 }

@@ -452,20 +452,38 @@ func (h *Host) Ingest(q proto.RagIngest) (*proto.RagIngested, error) {
 	return &proto.RagIngested{Job: id, URL: src}, nil
 }
 
-// enqueue queues src on st with its title and tags.
+// enqueue queues src on st with its title, after setting its tags (none:
+// left as they are). SetTags on a path not yet committed holds the tags for
+// the commit of this job; on a committed one it writes them now, and the
+// re-ingest leaves them alone.
 func enqueue(st *raglit.Store, src, title string, tags []string) (int64, error) {
 	if len(tags) > 0 {
-		// The one way the library takes tags from its caller: a supplied
-		// caption, consumed by the document's next commit.
-		cap := title
-		if cap == "" {
-			cap = filepath.Base(src)
-		}
-		if err := st.SupplyIdentity(src, raglit.DocIdentity{Name: cap, ContentTags: tags}, "dund"); err != nil {
+		if err := st.SetTags(src, tags); err != nil {
 			return 0, err
 		}
 	}
 	return st.Enqueue(src, title)
+}
+
+// Tag replaces one document's tags (raglit's SetTags), with no ingest. The
+// index is created if needed, so the tags can be held for a first ingest.
+func (h *Host) Tag(q proto.RagTag) (*proto.RagTagged, error) {
+	name, err := Name(q.Project, q.Index)
+	if err != nil {
+		return nil, err
+	}
+	src, err := forgetSource(q.Path, q.URL)
+	if err != nil {
+		return nil, err
+	}
+	st, err := h.store(name, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := st.SetTags(src, q.Tags); err != nil {
+		return nil, err
+	}
+	return &proto.RagTagged{URL: src}, nil
 }
 
 // Forget removes one document from its index. An index or a document that
@@ -524,7 +542,7 @@ func forgetSource(path, u string) (string, error) {
 	case u != "":
 		return u, nil
 	}
-	return "", errors.New("rag: forget needs a path or a URL")
+	return "", errors.New("rag: forget and tag need a path or a URL")
 }
 
 // current reports whether d, the index's document (ok: there is one), holds
@@ -572,6 +590,13 @@ func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
 			return nil, err
 		}
 		if d, ok := docs[src]; current(d, ok, f.Path) {
+			// Tags change without the bytes changing (RagTag while dund was
+			// down): set them anyway, it writes one column.
+			if len(f.Tags) > 0 {
+				if err := st.SetTags(src, f.Tags); err != nil {
+					return nil, err
+				}
+			}
 			out.Current++
 			continue
 		}

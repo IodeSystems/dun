@@ -69,9 +69,34 @@ func (l *memLink) ingest(m *memoryStore, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
 	defer cancel()
 	_, err := l.link.Ingest(ctx, proto.RagIngest{Project: m.scopeOf(path, l.project), Index: m.indexName(),
-		Path: path, Title: noteTitle(path, n.meta), Tags: noteTags(n.meta)})
+		Path: path, Title: noteTitle(path, n.meta), Tags: ragTags(n.meta)})
 	l.saw(m, err)
 	return err
+}
+
+// tag sends a note's tags to its index with no ingest (raglit's SetTags):
+// for a change that leaves its text as it was, such as marking it
+// important. The index keeps the document's old bytes; the next sync sees
+// they differ from the file's and queues it once.
+func (l *memLink) tag(m *memoryStore, path string) error {
+	n, _ := readNote(path)
+	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
+	defer cancel()
+	_, err := l.link.Tag(ctx, proto.RagTag{Project: m.scopeOf(path, l.project), Index: m.indexName(),
+		Path: path, Tags: ragTags(n.meta)})
+	l.saw(m, err)
+	return err
+}
+
+// ragTags is the tags a note is filed under in its index: its own, then
+// kind:<kind> (kind:memory, kind:strategy, kind:constraint), then
+// important when the user marked it. Tags are filter data, not text.
+func ragTags(meta map[string]string) []string {
+	out := append(noteTags(meta), "kind:"+noteKind(meta))
+	if meta["important"] == "true" {
+		out = append(out, "important")
+	}
+	return out
 }
 
 func (l *memLink) forget(m *memoryStore, path string) error {
@@ -143,7 +168,7 @@ func (l *memLink) syncOnce(m *memoryStore) bool {
 			if err != nil {
 				continue
 			}
-			q.Files = append(q.Files, proto.RagSyncFile{Path: p, Title: noteTitle(p, n.meta), Tags: noteTags(n.meta)})
+			q.Files = append(q.Files, proto.RagSyncFile{Path: p, Title: noteTitle(p, n.meta), Tags: ragTags(n.meta)})
 		}
 		voided, _ := filepath.Glob(filepath.Join(sc.dir, "*.md"+voidSuffix))
 		for _, p := range voided {

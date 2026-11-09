@@ -24,6 +24,7 @@ type RagLink interface {
 	Ingest(ctx context.Context, q proto.RagIngest) (*proto.RagIngested, error)
 	Forget(ctx context.Context, q proto.RagForget) (*proto.RagForgotten, error)
 	Sync(ctx context.Context, q proto.RagSync) (*proto.RagSynced, error)
+	Tag(ctx context.Context, q proto.RagTag) (*proto.RagTagged, error)
 }
 
 // ErrRagDown is a RagLink's error when dund cannot be reached, or answers
@@ -109,5 +110,10 @@ func (d dundRag) Forget(ctx context.Context, q proto.RagForget) (*proto.RagForgo
 
 func (d dundRag) Sync(ctx context.Context, q proto.RagSync) (*proto.RagSynced, error) {
 	var out proto.RagSynced
+	return &out, d.call(ctx, &q, &out)
+}
+
+func (d dundRag) Tag(ctx context.Context, q proto.RagTag) (*proto.RagTagged, error) {
+	var out proto.RagTagged
 	return &out, d.call(ctx, &q, &out)
 }

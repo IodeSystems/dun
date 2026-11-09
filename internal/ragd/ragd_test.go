@@ -358,3 +358,68 @@ func TestSyncAndForget(t *testing.T) {
 		t.Fatal("a gone-only sync made an index")
 	}
 }
+
+// A tagged note has no caption hit: its tags are filter data (raglit's
+// SetTags), not a fragment beside its text. Before raglit v0.6 the same note
+// came back up to three times (frontmatter, text, caption). Now a word only
+// in the body is one hit. A word in the frontmatter too is two: raglit keeps
+// a Markdown file's frontmatter as a fragment of its own (origin
+// "frontmatter"), so dun still keeps one hit per note path (memrecall.go).
+func TestTaggedNoteHasNoCaptionHit(t *testing.T) {
+	h := open(t, t.TempDir())
+	note := writeDoc(t, "pelican.md", "---\nname: pelican-drill\nkind: strategy\ndate: 2026-11-08\ntags: pelican, drills\npublic: false\n---\nRun the pelican drill before a release.\n")
+	ingest(t, h, proto.RagIngest{Project: "dun", Index: "strategies", Path: note, Title: "pelican-drill",
+		Tags: []string{"pelican", "kind:strategy"}})
+	for _, f := range []proto.RagFilter{{}, {Tags: []string{"kind:strategy"}}, {Tags: []string{"pelican", "kind:strategy"}}} {
+		r := search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "release", Mode: "fts", Filter: f})
+		if len(r.Hits) != 1 {
+			t.Fatalf("body word, filter %+v: %d hits, want 1: %+v", f, len(r.Hits), r.Hits)
+		}
+		r = search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "pelican", Mode: "fts", Filter: f})
+		fm := 0
+		for _, x := range r.Hits {
+			if strings.HasPrefix(x.Text, "---") {
+				fm++
+			}
+		}
+		if len(r.Hits) != 2 || fm != 1 {
+			t.Fatalf("frontmatter and body word, filter %+v: %d hits, want the frontmatter and the body: %+v", f, len(r.Hits), r.Hits)
+		}
+	}
+	// "kind" is not the tag "kind:strategy": whole tags only.
+	if r := search(t, h, proto.RagSearch{Project: "dun", Index: "strategies", Query: "pelican", Mode: "fts",
+		Filter: proto.RagFilter{Tags: []string{"kind"}}}); len(r.Hits) != 0 {
+		t.Fatalf("tag kind: %d hits, want 0", len(r.Hits))
+	}
+}
+
+// RagTag replaces the tags of a committed document with no ingest job, and
+// tags set before the first ingest are applied at its commit.
+func TestTagWithoutReingest(t *testing.T) {
+	h := open(t, t.TempDir())
+	a := writeDoc(t, "a.md", "heron watch\n")
+	ingest(t, h, proto.RagIngest{Project: "dun", Index: "memories", Path: a, Tags: []string{"kind:memory"}})
+	q := proto.RagSearch{Project: "dun", Index: "memories", Query: "heron", Mode: "fts", Filter: proto.RagFilter{Tags: []string{"important"}}}
+	if r := search(t, h, q); len(r.Hits) != 0 {
+		t.Fatalf("before the tag: %d hits", len(r.Hits))
+	}
+	if _, err := h.Tag(proto.RagTag{Project: "dun", Index: "memories", Path: a, Tags: []string{"kind:memory", "important"}}); err != nil {
+		t.Fatal(err)
+	}
+	if r := search(t, h, q); len(r.Hits) != 1 {
+		t.Fatalf("after the tag: %d hits, want 1", len(r.Hits))
+	}
+	if js, err := h.Jobs(proto.RagJobs{Project: "dun", Index: "memories"}); err != nil || len(js.Jobs) != 1 {
+		t.Fatalf("jobs %+v %v, want the one ingest", js, err)
+	}
+
+	// Tag, then ingest: the commit applies the held tags.
+	b := writeDoc(t, "b.md", "heron nest\n")
+	if _, err := h.Tag(proto.RagTag{Project: "dun", Index: "memories", Path: b, Tags: []string{"important"}}); err != nil {
+		t.Fatal(err)
+	}
+	ingest(t, h, proto.RagIngest{Project: "dun", Index: "memories", Path: b})
+	if r := search(t, h, q); len(r.Hits) != 2 {
+		t.Fatalf("after the held tag's ingest: %d hits, want 2", len(r.Hits))
+	}
+}

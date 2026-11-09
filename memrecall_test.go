@@ -21,6 +21,7 @@ type fakeRag struct {
 	ingests []proto.RagIngest
 	forgets []proto.RagForget
 	syncs   []proto.RagSync
+	tags    []proto.RagTag
 	hits    map[string][]proto.RagHit // by project ("" global)
 	mode    string
 }
@@ -80,6 +81,16 @@ func (f *fakeRag) Sync(_ context.Context, q proto.RagSync) (*proto.RagSynced, er
 	return &proto.RagSynced{Queued: len(q.Files), Removed: len(q.Gone)}, nil
 }
 
+func (f *fakeRag) Tag(_ context.Context, q proto.RagTag) (*proto.RagTagged, error) {
+	if f.isDown() {
+		return nil, ErrRagDown
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tags = append(f.tags, q)
+	return &proto.RagTagged{URL: "file://" + q.Path}, nil
+}
+
 func (f *fakeRag) syncCalls() []proto.RagSync {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -123,7 +134,7 @@ func TestMemRecall_AddIngestsIntoTheScopesIndexWithTags(t *testing.T) {
 	}
 	p, g := f.ingests[0], f.ingests[1]
 	if p.Project != "proj" || p.Index != "memories" || filepath.Dir(p.Path) != m.dir || p.Title != "how to build?" ||
-		!slices.Equal(p.Tags, []string{"build", "ci"}) {
+		!slices.Equal(p.Tags, []string{"build", "ci", "kind:memory"}) {
 		t.Errorf("project ingest %+v", p)
 	}
 	if g.Project != "" || filepath.Dir(g.Path) != memoryDir(globalMemoryDir) {
@@ -137,7 +148,7 @@ func TestMemRecall_AddIngestsIntoTheScopesIndexWithTags(t *testing.T) {
 	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "CGO off", Content: "Builds need CGO on.", Why: "w", Source: "user"}, noteMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if last := f.ingests[len(f.ingests)-1]; !slices.Equal(last.Tags, []string{"build", "ci"}) {
+	if last := f.ingests[len(f.ingests)-1]; !slices.Equal(last.Tags, []string{"build", "ci", "kind:memory"}) {
 		t.Errorf("refine dropped the tags: %+v", last)
 	}
 	if _, err := m.apply(memoryArgs{Action: "void", OldText: "fragments", Why: "w", Source: "user"}, noteMeta{}); err != nil {

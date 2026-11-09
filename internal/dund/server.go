@@ -408,7 +408,7 @@ func (c *conn) handle(cmd proto.Command) {
 			}
 		}
 		go func() { c.reply(cmd, cmd.Session, svc.OAuth(context.Background(), ses, p.OAuthReq)) }()
-	case *proto.RagSearch, *proto.RagIngest, *proto.RagJobs, *proto.RagReembed, *proto.RagForget, *proto.RagSync:
+	case *proto.RagSearch, *proto.RagIngest, *proto.RagJobs, *proto.RagReembed, *proto.RagForget, *proto.RagSync, *proto.RagTag:
 		c.handleRag(cmd)
 	case *proto.Leave:
 		// This connection's subscription goes first, so the service counts the
@@ -464,6 +464,8 @@ func (c *conn) handleRag(cmd proto.Command) {
 			out, err = h.Forget(*p)
 		case *proto.RagSync:
 			out, err = h.Sync(*p)
+		case *proto.RagTag:
+			out, err = h.Tag(*p)
 		}
 		if err != nil {
 			c.ack(cmd, "", err)

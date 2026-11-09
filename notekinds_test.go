@@ -290,3 +290,58 @@ func TestStrategies_UserAddReplaces(t *testing.T) {
 		t.Errorf("the model's add of an existing name: %q", out)
 	}
 }
+
+// Marking an item important, or a refine of its tags alone, sends its tags
+// (rag_tag) and no ingest: the text the index holds is unchanged.
+func TestStrategies_ImportantAndRetagSendTagsNotAnIngest(t *testing.T) {
+	f := &fakeRag{}
+	h, _ := itemHarness(t, f)
+	if _, err := h.MemoriesCommand("add strategy pelican-drill Run the pelican drill before a release."); err != nil {
+		t.Fatal(err)
+	}
+	n := len(ingestsOf(f))
+	if n == 0 || !slices.Equal(ingestsOf(f)[n-1].Tags, []string{"kind:strategy"}) {
+		t.Fatalf("add: ingests %+v, want one tagged kind:strategy", ingestsOf(f))
+	}
+	tagsOf := func() []proto.RagTag {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return slices.Clone(f.tags)
+	}
+	if _, err := h.MemoriesCommand("important strategy:pelican-drill"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(ingestsOf(f)); got != n {
+		t.Fatalf("important: %d ingests, want %d (none)", got, n)
+	}
+	tg := tagsOf()
+	if len(tg) != 1 || tg[0].Index != strategiesIndex || !slices.Equal(tg[0].Tags, []string{"kind:strategy", "important"}) {
+		t.Fatalf("important: tag calls %+v", tg)
+	}
+	if _, err := h.MemoriesCommand("unimportant strategy:pelican-drill"); err != nil {
+		t.Fatal(err)
+	}
+	if tg = tagsOf(); len(tg) != 2 || !slices.Equal(tg[1].Tags, []string{"kind:strategy"}) || len(ingestsOf(f)) != n {
+		t.Fatalf("unimportant: tag calls %+v, ingests %d", tg, len(ingestsOf(f)))
+	}
+
+	// The memory tool's refine: the same text with new tags is a retag;
+	// new text is an ingest.
+	m := h.memoryStore()
+	if _, err := m.apply(memoryArgs{Action: "add", Content: "Builds need CGO off.", Question: "how to build?"}, noteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	n = len(ingestsOf(f))
+	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "CGO off", Content: "Builds need CGO off.", Tags: []string{"build"}, Why: "w", Source: "user"}, noteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if tg = tagsOf(); len(ingestsOf(f)) != n || len(tg) != 3 || !slices.Equal(tg[2].Tags, []string{"build", "kind:memory"}) {
+		t.Fatalf("retag: tag calls %+v, ingests %d want %d", tg, len(ingestsOf(f)), n)
+	}
+	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "CGO off", Content: "Builds need CGO on.", Why: "w", Source: "user"}, noteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ingestsOf(f)) != n+1 || len(tagsOf()) != 3 {
+		t.Fatalf("refine of the text: ingests %d want %d, tag calls %d", len(ingestsOf(f)), n+1, len(tagsOf()))
+	}
+}

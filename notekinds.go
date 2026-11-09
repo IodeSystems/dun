@@ -82,6 +82,7 @@ func strategyFor(link *memLink, workspace string) *memoryStore {
 		return m
 	}
 	m.ingest = func(path string) error { return link.ingest(m, path) }
+	m.retag = func(path string) error { return link.tag(m, path) }
 	m.forget = func(path string) error { return link.forget(m, path) }
 	return m
 }
@@ -456,7 +457,7 @@ func (h *Harness) MemoriesCommand(action string) (string, error) {
 			delete(n.meta, "important")
 		}
 		down, err := m.write(path, memoryArgs{Content: n.body, Question: n.meta["question"], Public: n.meta["public"] == "true",
-			Tags: noteTags(n.meta)}, noteMeta{extra: n.meta})
+			Tags: noteTags(n.meta)}, noteMeta{extra: n.meta, tagOnly: true})
 		if err != nil {
 			return "", err
 		}

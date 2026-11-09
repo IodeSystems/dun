@@ -12,12 +12,14 @@ func init() {
 	command[RagReembed]("rag_reembed")
 	command[RagForget]("rag_forget")
 	command[RagSync]("rag_sync")
+	command[RagTag]("rag_tag")
 	event[RagHits]("rag_hits")
 	event[RagIngested]("rag_ingested")
 	event[RagJobList]("rag_jobs")
 	event[RagReembedding]("rag_reembedding")
 	event[RagForgotten]("rag_forgotten")
 	event[RagSynced]("rag_synced")
+	event[RagTagged]("rag_tagged")
 }
 
 // RagFilter limits a search before ranking. Every constraint must hold.
@@ -69,9 +71,9 @@ type RagHits struct {
 }
 
 // RagIngest queues one source for an index: Path (a local file, absolute) or
-// URL (http, https or file). Tags, when given, are written with the document
-// (as its supplied caption, named Title or the file's name). Answered with
-// RagIngested.
+// URL (http, https or file). Tags, when given, replace the document's tags
+// (raglit's SetTags: filter data, not text); none leaves them as they are.
+// Answered with RagIngested.
 type RagIngest struct {
 	Project string   `json:"project,omitempty"`
 	Index   string   `json:"index"`
@@ -151,9 +153,10 @@ type RagForgotten struct {
 
 // RagSync brings an index in step with a set of local files (dun's memory
 // notes, which are written while dund may be down). Each of Files is
-// queued when the index does not hold it or holds an older version than
-// the file (its modification time is after the document was indexed);
-// each of Gone (absolute paths) is removed. Answered with RagSynced.
+// queued when the index does not hold it or holds other bytes (its source
+// hash; without one, the file changed after the document was indexed);
+// the tags of each, current or not, are set as RagTag sets them. Each of
+// Gone (absolute paths) is removed. Answered with RagSynced.
 type RagSync struct {
 	Project string        `json:"project,omitempty"`
 	Index   string        `json:"index"`
@@ -175,4 +178,21 @@ type RagSynced struct {
 	Queued  int `json:"queued"`
 	Current int `json:"current"`
 	Removed int `json:"removed"`
+}
+
+// RagTag replaces one document's tags without ingesting it again: Path is
+// the local file it was ingested from (absolute), or URL its source. No
+// tags clears them. On a document the index does not hold yet, the tags
+// are held and its next ingest applies them. Answered with RagTagged.
+type RagTag struct {
+	Project string   `json:"project,omitempty"`
+	Index   string   `json:"index"`
+	Path    string   `json:"path,omitempty"`
+	URL     string   `json:"url,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+}
+
+// RagTagged answers RagTag: the document's source URL.
+type RagTagged struct {
+	URL string `json:"url"`
 }
