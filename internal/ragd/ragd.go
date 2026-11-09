@@ -35,7 +35,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/raglit"
 
 	"github.com/iodesystems/dun/proto"
@@ -113,7 +112,7 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 		stale: map[string]string{}, filling: map[string]bool{}}
 	h.bg, h.stopBg = context.WithCancel(context.Background())
 	if m.Embed.Model != "" {
-		h.embed = raglit.NewEmbedder(llm.NewClient(m.Embed.BaseURL, m.Embed.APIKey, m.Embed.Model), m.Embed.Model)
+		h.embed = newEmbedder(m)
 		h.dim = embedDimension(r.CapsDir, m.Embed)
 	}
 	h.ident = m.Identifier()
@@ -468,7 +467,7 @@ func (h *Host) Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, e
 		mode, out.Note = "fts", "searched by text only: "+why+"; `dun dund rag reembed` rebuilds the vectors"
 	}
 	if mode == "hybrid" {
-		hits, err = st.HybridSearchFiltered(ctx, q.Query, f, limit)
+		hits, err = st.HybridSearchFiltered(forSearch(ctx), q.Query, f, limit)
 		if err != nil {
 			mode, out.Note = "fts", "the embed model failed ("+err.Error()+"): searched by text only"
 		}
