@@ -158,8 +158,10 @@ type ServerSpec struct {
 	IndexBudget string `json:"index_budget,omitempty"`
 	// IndexAnyway lets the server index a root that is not a project (the
 	// home directory, /, a directory of clones): passed as --index-anyway to
-	// a poly-lsp-mcp that takes it. Written at project scope when the person
-	// answers dun's question (askNotProject) or runs /lsp index-anyway.
+	// a poly-lsp-mcp that takes it, and it lifts dun's root guard
+	// (rootguard.go). Written at project scope only when the person runs
+	// /lsp index-anyway on (indexanyway.go): no tool and no answer to a
+	// question sets it.
 	IndexAnyway bool `json:"index_anyway,omitempty"`
 	// LSPRoots, LSPMaxRSSMB and LSPIdleStop replace dun's safe defaults for
 	// a poly-lsp-mcp's child LSPs (--lsp-roots single, --lsp-max-rss-mb

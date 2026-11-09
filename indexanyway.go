@@ -15,33 +15,27 @@ import (
 // with reason "not a project", the repositories it found (repos, at most 20,
 // of reposTotal) and the remedy — --root <one repo>, or --index-anyway.
 //
-// dun asks once per session, through the same question the model's ask_user
-// puts (Config.Ask: the picker in the TUI, an `ask` event for a client):
+// Indexing such a root anyway is the person's choice and only theirs
+// (2026-11-09): an index of a directory of clones took a machine down
+// twice. dun says once per session that the code server is off, which
+// repositories to start dun in, and that /lsp index-anyway on indexes the
+// root regardless. It asks no question: an answer to Config.Ask can come
+// from a model (dun mcp's dun_answer relays the session's questions to the
+// agent driving it; a headless run reads its answer from a pipe), so no
+// answer to it can set ServerSpec.IndexAnyway. Only /lsp index-anyway (a
+// server command, from a client: the TUI's slash, dund's token-gated
+// control API) and a config file the person writes set it; no tool does.
 //
-//   - "index anyway": ServerSpec.IndexAnyway is saved for this project and
-//     the server restarts with --index-anyway. Undo: /lsp index-anyway
-//     off.
-//   - "not now": the code server stays failed for the session and dun does
-//     not ask again; the line says which repository to start dun in.
-//
-// Only a binary whose `mcp --help` lists --index-anyway is offered the first
-// answer (IndexProtocol); for an older one, or with no Config.Ask (a client
-// that cannot ask), dun says the same in one line and asks nothing. The rest
-// of dun runs either way.
-
-// Not-a-project answers, as the question offers them.
-const (
-	answerIndexAnyway = "index anyway"
-	answerNotNow      = "not now"
-)
+// The line names the slash only to a binary whose `mcp --help` lists
+// --index-anyway (IndexProtocol). The rest of dun runs either way.
 
 // notProjectRepoLines is how many repositories the hint line names.
 const notProjectRepoLines = 5
 
-// askNotProject handles a not-a-project failure from id and returns the line
-// for the person (and, as an aside, the model). It blocks on the person's
-// answer; afterIndex runs it off the client's read goroutine.
-func (h *Harness) askNotProject(id string, n indexNote) string {
+// notProjectLine handles a not-a-project failure from id and returns the line
+// for the person (and, as an aside, the model), once per session. It never
+// sets index-anyway: the answer is always "not now".
+func (h *Harness) notProjectLine(id string, n indexNote) string {
 	h.srvMu.Lock()
 	asked := h.indexAsked[id]
 	if h.indexAsked == nil {
@@ -50,7 +44,7 @@ func (h *Harness) askNotProject(id string, n indexNote) string {
 	h.indexAsked[id] = true
 	h.srvMu.Unlock()
 	if asked {
-		return "" // the person has been asked; no second nagging
+		return "" // said once; no second nagging
 	}
 	s, err := h.knownServer(id)
 	if err != nil {
@@ -63,36 +57,16 @@ func (h *Harness) askNotProject(id string, n indexNote) string {
 	if command, err := FindCommand(s.Command); err == nil {
 		sup, _, _ = IndexProtocol(command)
 	}
-	if !sup.Anyway || s.IndexAnyway || h.cfg.Ask == nil {
+	if !sup.Anyway || s.IndexAnyway {
 		// Nothing to offer: the binary cannot, or already did and still
-		// refused; or there is no one to ask.
-		line := fmt.Sprintf("%s: %s is not a project — the code tools need one. %s", id, dir, hint)
-		if sup.Anyway && !s.IndexAnyway {
-			line += fmt.Sprintf(" · /%s index-anyway on indexes it regardless", slash)
-		}
-		return line
+		// refused.
+		return fmt.Sprintf("%s: %s is not a project — the code tools need one. %s", id, dir, hint)
 	}
-	q := fmt.Sprintf("dun is running in %s — not a project%s. Index all of it anyway, or start dun in one of them? (the code tools need a project)",
-		dir, reposInside(n))
-	if hint != "" {
-		q += "\n" + hint
-	}
-	ans, err := h.cfg.Ask(context.Background(), q, []string{answerIndexAnyway, answerNotNow}, false, []string{answerNotNow})
-	if err != nil {
-		return ""
-	}
-	if strings.EqualFold(strings.TrimSpace(ans), answerIndexAnyway) {
-		saved, err := h.editIndexSpec(context.Background(), id, false, func(s *ServerSpec) { s.IndexAnyway = true })
-		if err != nil {
-			return fmt.Sprintf("%s: would index %s anyway, but could not save that: %v", id, dir, err)
-		}
-		return fmt.Sprintf("%s: indexing %s anyway, for this project (saved to %s) · undo: /%s index-anyway off", id, dir, saved, slash)
-	}
-	line := fmt.Sprintf("%s: off for this session — %s is not a project; the rest of dun works.", id, dir)
+	line := fmt.Sprintf("%s: off for this session — %s is not a project%s; the rest of dun works.", id, dir, reposInside(n))
 	if hint != "" {
 		line += "\n" + hint
 	}
-	return line + fmt.Sprintf("\n/%s index-anyway on indexes %s regardless.", slash, dir)
+	return line + fmt.Sprintf("\n/%s index-anyway on indexes %s regardless (the person's choice: dun never sets it).", slash, dir)
 }
 
 // reposInside is " (12 git repos inside)", or "" when none were found.

@@ -425,7 +425,7 @@ type Harness struct {
 	index        map[string]*indexState
 	indexSeen    map[string]bool
 	indexRetried map[string]bool
-	// indexAsked: servers whose not-a-project question was put this session.
+	// indexAsked: servers whose not-a-project line was said this session.
 	indexAsked map[string]bool
 	// setup is each server's install-hint report (setupstate.go); setupSaid
 	// the servers whose one line has been said. Guarded by srvMu.

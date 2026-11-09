@@ -344,7 +344,7 @@ func (h *Harness) afterIndex(id string, n indexNote) {
 	case n.State == IndexReady:
 		msg = h.nestedWarning(id, n.Index)
 	case n.Reason == reasonNotProject:
-		msg = h.askNotProject(id, n)
+		msg = h.notProjectLine(id, n)
 	case (n.Budget != "" || n.Limit > 0) && n.Index != nil:
 		msg = h.retryIndex(id, n)
 	default:
