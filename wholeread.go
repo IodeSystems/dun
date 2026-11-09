@@ -20,8 +20,10 @@ import (
 // (8KB unranged, 64KB ranged; files/read.go), when it fits in the room this
 // session has left: the window, less the last prompt, less the reply's
 // reserve (outputReserve). Under wholeSmallTokens it is served as is; up to
-// a 1/wholeRoomShare of the room it is served with the recap cue; past that
-// it is refused with the numbers and the ways out that apply.
+// 1/wholeRoomShare of the room with the recap cue; up to all of the room
+// with a stronger cue (recap it right after); past the room it is refused
+// with the numbers and the ways out that apply (USER 2026-11-09: refuse only
+// a read that would blow the context).
 //
 // It wraps agentkit's read rather than changing it: the read is paged with
 // ranged reads on the same toolset the call was routed to, so the root,
@@ -34,13 +36,17 @@ const (
 	// wholeSmallTokens: a whole read up to this is served with no cue. It is
 	// largeResultChars (recap.go) at four characters a token.
 	wholeSmallTokens = 5000
-	// wholeRoomShare: a whole read may take 1/wholeRoomShare of the room
-	// left; a larger one is refused.
+	// wholeRoomShare: a whole read over 1/wholeRoomShare of the room left
+	// gets wholeAsideBig instead of wholeAside.
 	wholeRoomShare = 4
 )
 
-// wholeAside is the cue on a large whole read.
-const wholeAside = "This read is %d tokens. Take what you need from it, then recap it on your next turn."
+// wholeAside is the cue on a large whole read; wholeAsideBig on one over
+// 1/wholeRoomShare of the room.
+const (
+	wholeAside    = "This read is %d tokens. Take what you need from it, then recap it on your next turn."
+	wholeAsideBig = "This read is %d tokens, over a quarter of the room left. Take what you need from it and recap it right after, this turn or the next."
+)
 
 // wholeDesc is the line file_read's description gains.
 const wholeDesc = ` {path:"docs/design.md", whole:true} reads all of a file, past those caps, when it fits the context left.`
@@ -128,8 +134,8 @@ func (h *Harness) readWhole(ctx context.Context, route *filetools.Toolset, name,
 	if err != nil || serr != nil || !st.Mode().IsRegular() {
 		return route.Dispatch(ctx, name, args) // agentkit's refusal, or a directory's listing
 	}
-	n := h.bytesToTokens(int(st.Size()))
-	if msg := wholeVerdict(a.Path, n, h.wholeRoom()); msg != "" {
+	n, room := h.bytesToTokens(int(st.Size())), h.wholeRoom()
+	if msg := wholeVerdict(a.Path, n, room); msg != "" {
 		return msg
 	}
 	out := readPages(ctx, route, name, a.Path)
@@ -141,10 +147,18 @@ func (h *Harness) readWhole(ctx context.Context, route *filetools.Toolset, name,
 		// The large-result recap cue (recap.go), raised now instead of once
 		// the model has moved on: the key is the one that cue would claim.
 		if h.claimCue(bigCueKey(id)) {
-			h.AsideWith(fmt.Sprintf(wholeAside, t), AsideOpts{Key: "recap"})
+			h.AsideWith(fmt.Sprintf(wholeAsideFor(t, room), t), AsideOpts{Key: "recap"})
 		}
 	}
 	return out
+}
+
+// wholeAsideFor is the cue's wording for a read of n tokens against r.
+func wholeAsideFor(n int, r wholeRoom) string {
+	if r.known && n > r.free/wholeRoomShare {
+		return wholeAsideBig
+	}
+	return wholeAside
 }
 
 // wholeVerdict is the refusal of a whole read of path, n tokens, against r;
@@ -157,20 +171,19 @@ func wholeVerdict(path string, n int, r wholeRoom) string {
 		return fmt.Sprintf("ERROR: %s is %d tokens, and the context window is unknown, so a whole read stops at %d. "+
 			"Grep it first, or read a range.", path, n, wholeSmallTokens)
 	}
-	allow := max(0, r.free/wholeRoomShare)
-	if n <= allow {
+	if n <= r.free {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "ERROR: %s is %d tokens; a whole read may take %d, a quarter of the %d free. Ways out:", path, n, allow, max(0, r.free))
+	fmt.Fprintf(&b, "ERROR: %s is %d tokens; %d are free. Ways out:", path, n, max(0, r.free))
 	step := 0
 	line := func(s string, args ...any) {
 		step++
 		fmt.Fprintf(&b, "\n%d. "+s, append([]any{step}, args...)...)
 	}
 	// Recap frees what is in use, and the room grows by that; it fits once
-	// the room is wholeRoomShare*n.
-	if need := wholeRoomShare*n - r.free; need <= r.inUse {
+	// the room is n.
+	if need := n - r.free; need <= r.inUse {
 		line("Recap what is settled to free at least %d tokens, then read it again.", need)
 	}
 	if r.agent {

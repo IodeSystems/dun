@@ -71,15 +71,33 @@ func TestWholeRead_LargeFits(t *testing.T) {
 	if strings.Count(out, "This read is") != 1 || !strings.Contains(out, "Take what you need from it, then recap it on your next turn.") {
 		t.Errorf("cue: %q", out[strings.LastIndex(out, "3000\t"):])
 	}
+	if strings.Contains(out, "over a quarter") {
+		t.Error("under a quarter got the stronger cue")
+	}
 }
 
-// Past a quarter of the room: refused with the numbers; the root has the
+// Over a quarter of the room, under all of it (USER 2026-11-09): served,
+// with the stronger cue.
+func TestWholeRead_OverAQuarter(t *testing.T) {
+	h, ws := wholeHarness(t, 200000, 0)
+	writeLines(t, filepath.Join(ws, "big.txt"), 3000, 60) // ~213KB, ~53k tokens of ~165k free
+	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt", "whole": true})
+	if !strings.HasPrefix(out, "big.txt: 3000 lines\n") || !strings.Contains(out, "\n3000\tline 3000 ") {
+		t.Fatalf("not served whole: %.200q", out)
+	}
+	if strings.Count(out, "This read is") != 1 ||
+		!strings.Contains(out, "tokens, over a quarter of the room left. Take what you need from it and recap it right after, this turn or the next.") {
+		t.Errorf("cue: %q", out[strings.LastIndex(out, "3000\t"):])
+	}
+}
+
+// Past the room: refused with the numbers; the root has the
 // agent tool, so delegation is offered.
 func TestWholeRead_BlowsContext(t *testing.T) {
 	h, ws := wholeHarness(t, 200000, 100000)
-	writeLines(t, filepath.Join(ws, "big.txt"), 2000, 50) // ~120KB, ~30k tokens
+	writeLines(t, filepath.Join(ws, "big.txt"), 4000, 65) // ~304KB, ~76k tokens of ~65k free
 	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt", "whole": true})
-	for _, want := range []string{"ERROR: big.txt is ", " tokens; a whole read may take ", "1. Recap what is settled to free at least ",
+	for _, want := range []string{"ERROR: big.txt is ", " are free. Ways out:", "1. Recap what is settled to free at least ",
 		`2. agent({prompt: "read big.txt and report …"})`, "3. Grep it first, or read a range."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("refusal lacks %q:\n%s", want, out)
@@ -92,14 +110,14 @@ func TestWholeRead_BlowsContext(t *testing.T) {
 
 func TestWholeRead_RefusalVariants(t *testing.T) {
 	// Recap can free enough; no agent tool (a child): recap, then narrow.
-	out := wholeVerdict("x.log", 30000, wholeRoom{known: true, free: 65000, inUse: 100000, empty: 165000})
-	if !strings.Contains(out, "x.log is 30000 tokens; a whole read may take 16250, a quarter of the 65000 free") ||
-		!strings.Contains(out, "1. Recap what is settled to free at least 55000 tokens") ||
+	out := wholeVerdict("x.log", 80000, wholeRoom{known: true, free: 65000, inUse: 100000, empty: 165000})
+	if !strings.Contains(out, "ERROR: x.log is 80000 tokens; 65000 are free. Ways out:") ||
+		!strings.Contains(out, "1. Recap what is settled to free at least 15000 tokens") ||
 		!strings.Contains(out, "2. Grep it first") || strings.Contains(out, "agent(") {
 		t.Errorf("no agent tool:\n%s", out)
 	}
 	// With the agent tool.
-	out = wholeVerdict("x.log", 30000, wholeRoom{known: true, free: 65000, inUse: 100000, empty: 165000, agent: true})
+	out = wholeVerdict("x.log", 80000, wholeRoom{known: true, free: 65000, inUse: 100000, empty: 165000, agent: true})
 	if !strings.Contains(out, `2. agent({prompt: "read x.log and report …"})`) || !strings.Contains(out, "3. Grep") {
 		t.Errorf("agent tool:\n%s", out)
 	}
@@ -117,8 +135,12 @@ func TestWholeRead_RefusalVariants(t *testing.T) {
 	if out := wholeVerdict("x.log", 4000, wholeRoom{}); out != "" {
 		t.Errorf("small with no window: %s", out)
 	}
-	if out := wholeVerdict("x.log", 16000, wholeRoom{known: true, free: 65000}); out != "" {
+	if out := wholeVerdict("x.log", 65000, wholeRoom{known: true, free: 65000}); out != "" {
 		t.Errorf("fits: %s", out)
+	}
+	if wholeAsideFor(16000, wholeRoom{known: true, free: 65000}) != wholeAside ||
+		wholeAsideFor(17000, wholeRoom{known: true, free: 65000}) != wholeAsideBig {
+		t.Error("the cue's wording does not turn at a quarter of the room")
 	}
 }
 
