@@ -298,6 +298,36 @@ func TestProbeIdentityRunsTheChatProbesAndOffRolesAreSaid(t *testing.T) {
 	}
 }
 
+// The chat roles reuse the chat probes: child on its facet, and a child with
+// no model of its own probes main; a flag wins over the facet.
+func TestProbeChatRolesMainAndChild(t *testing.T) {
+	f := &fakeModels{chat: func(map[string]any) string { return "sure" }}
+	cfg := cfgWith(f.serve(t), map[string]dunconfig.Facet{"main": {Model: "chat"}})
+	t.Setenv("DUN_MODEL", "")
+	t.Setenv("DUN_URL", "")
+	for _, tc := range []struct {
+		facet string
+		flags dunconfig.Overrides
+		said  string
+	}{
+		{"main", nil, "main: chat on "},
+		{"child", nil, "child: same as main · default; main: chat on "},
+		{"child", dunconfig.Overrides{"child": {Model: "kid"}}, "child: kid on main's provider · flag"},
+	} {
+		res, err := ProbeWith(context.Background(), cfg, tc.flags, t.TempDir(), tc.facet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := res[0]
+		if !strings.HasPrefix(r.Said, tc.said) {
+			t.Errorf("%s said %q, want %q", tc.facet, r.Said, tc.said)
+		}
+		if _, ok := r.Caps.Facts[llm.CapToolsChoiceForced]; !ok {
+			t.Errorf("%s: no chat-probe fact: %s", tc.facet, r.Report())
+		}
+	}
+}
+
 // openWith is a Host with an embed role on url.
 func openWith(t *testing.T, root, url, model, capsDir string) *Host {
 	t.Helper()

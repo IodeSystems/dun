@@ -277,6 +277,18 @@ func TestResolveFacets(t *testing.T) {
 		}
 	}
 
+	// The unified resolver: the old vision_model serves the vision role, and
+	// the chat roles are roles, not typos.
+	cfg.Facets = map[string]dunconfig.Facet{"main": {Model: "chat"}, "child": {Model: "kid"}}
+	cfg.VisionModel, cfg.VisionProvider = "vl", "far"
+	r = Resolve(cfg)
+	if v := r.Models.Vision; v.Model != "vl" || v.BaseURL != "https://far" {
+		t.Fatalf("vision from vision_model = %+v", v)
+	}
+	if all := strings.Join(r.Said, "\n"); strings.Contains(all, "not a role") {
+		t.Fatalf("main or child said as no role: %q", all)
+	}
+
 	// Logged out: no default embed.
 	if r := Resolve(dunconfig.DunConfig{}); r.Models.Embed.Model != "" {
 		t.Fatalf("embed with no provider: %+v", r.Models.Embed)
