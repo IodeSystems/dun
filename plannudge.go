@@ -48,7 +48,7 @@ import (
 // node has moved for S rounds (--plan-stall-rounds, 30) → force a plan call,
 // with an aside keyed "plan-stall" that names the open nodes. A move is a
 // change the main agent's own plan call makes: a node added, a status
-// changed, or a new done_when, goal or needs (planMoved). show and ready
+// changed, or a new done_when, details or needs (planMoved). show and ready
 // write nothing. After a nudge the window starts again; at most 3 per turn,
 // counted apart from the no-plan nudge.
 
@@ -234,7 +234,7 @@ func (h *Harness) planMoved(cs []taskgraph.Change) {
 }
 
 // planMove reports whether a change moves the plan: a node added, its status
-// changed, or a new done_when, goal or needs. A title, notes or files edit
+// changed, or a new done_when, details or needs. A title edit
 // alone does not.
 func planMove(c taskgraph.Change) bool {
 	switch {
@@ -244,7 +244,7 @@ func planMove(c taskgraph.Change) bool {
 		return true
 	}
 	b, a := c.Before, c.After
-	return b.Status != a.Status || b.DoneWhen != a.DoneWhen || b.Goal != a.Goal || !slices.Equal(b.Needs, a.Needs)
+	return b.Status != a.Status || b.DoneWhen != a.DoneWhen || b.Details != a.Details || !slices.Equal(b.Needs, a.Needs)
 }
 
 // planNudgeResult counts one tool result toward a stall. The same streak
