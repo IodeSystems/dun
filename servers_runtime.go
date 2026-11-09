@@ -513,6 +513,10 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if sup.Daemon && (sup.AnyRoot || underHome(h.cfg.Workspace)) && !slices.Contains(args, "--daemon") {
 		args = append(slices.Clone(args), "--daemon")
 	}
+	// Safe child-LSP limits, to a build that takes them (lspSafeArgs).
+	if safe := lspSafeArgs(s, sup, slices.Contains(args, "--daemon")); len(safe) > 0 {
+		args = append(slices.Clone(args), safe...)
+	}
 	h.markIndexBuilding(s.ID, indexes)
 	if s.URL == "" && err == nil {
 		h.noteServer(s.ID, "running %s (timeout %s)", commandLine(command, args), secs(timeout))

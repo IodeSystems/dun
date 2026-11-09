@@ -51,6 +51,9 @@ const (
 	// --hook line: a build whose --daemon proxy keeps the hook; "anyroot"
 	// adds anyRootMarker (its daemon admits a root outside $HOME).
 	fakeDaemonEnv = "DUN_FAKE_DAEMON"
+	// fakeLifecycleEnv makes the fake's `mcp --help` list the child-LSP
+	// lifecycle flags dun passes safe values to (lspsafe.go).
+	fakeLifecycleEnv = "DUN_FAKE_LIFECYCLE"
 )
 
 // fakeBin writes dir/name, a wrapper that runs this test binary as persona,
@@ -117,6 +120,12 @@ func fakeBinMain(persona string) {
 			}
 			if os.Getenv(fakeAnywayEnv) != "" {
 				fmt.Println("      --index-anyway")
+			}
+			if os.Getenv(fakeLifecycleEnv) != "" {
+				fmt.Println("      --lsp-idle-stop duration   stop an idle child (default 15m0s)\n" +
+					"      --lsp-max-rss-mb int       stop a child over this RSS (default 6144)\n" +
+					"      --lsp-roots string         single or auto (default \"single\")\n" +
+					"      --lsp-roots-max int        (default 8)")
 			}
 			if mode := os.Getenv(fakeDaemonEnv); mode != "" {
 				d := "      --daemon   proxy to the shared daemon"
