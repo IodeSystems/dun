@@ -229,7 +229,7 @@ type builtinInstance struct{ instance, why string }
 // builtinInstances are the built-in servers' fixed instances, the one place
 // they are declared (mcpscope.go resolve and SetServerInstance read it).
 var builtinInstances = map[string]builtinInstance{
-	// mcpshell holds the session's eval state (exported variables, its
+	// mcpshell holds the session's eval state (session variables, its
 	// hosted servers) and the engine starts one per session.
 	ServerShell: {InstanceSession, "it holds this session's eval state"},
 	// The engine starts a poly-lsp-mcp proxy per session; with --daemon the

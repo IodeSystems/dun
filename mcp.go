@@ -50,9 +50,10 @@ var toolDocs = map[string]string{
 	// node_edit: rename is the right tool for renaming; oldText/newText for snippets.
 	"node_edit": "\n\nRENAMING a symbol? Use the rename op — ONE call renames the declaration AND every usage across the WHOLE workspace, atomically. Do NOT rename by hand-editing files one at a time with oldText/newText: that misses usages and leaves the build broken between edits. For snippets, oldText must occur exactly once WITHIN the node — keep it short. Pass the node's whole text to rewrite it entirely.",
 	"eval": "\n\nmcpshell is a JS subset — do the whole task in ONE eval that ENDS in the value:\n" +
-		"  export let total = [1,2,3].reduce((a,b) => a + b, 0)   // export → survives to your NEXT eval; plain let/const does not\n" +
-		"  total * 2                                              // the LAST expression is the output (console.log is not the result)\n" +
-		"  [3,1,2,1] |> unique()                                  // dedup; new Set(xs) also works ([...set] for pipes)\n" +
+		"  let total = [1,2,3].reduce((a,b) => a + b, 0)   // lasts the session (like a REPL); redeclare to replace it\n" +
+		"  total * 2                                       // the LAST expression is the output (console.log is not the result)\n" +
+		"  [3,1,2,1] |> unique()                           // dedup; new Set(xs) also works ([...set] for pipes)\n" +
+		"A top-level name can't reuse a builtin or command (all, keys, sum, max…): pick another (let total, not let sum).\n" +
 		"class/this/new/instanceof, Map/Set and Error subclasses work as in JS. No import, generators, Symbol or Proxy. " +
 		"Unlike JS: == and === compare plain objects by structure; Map/Set keys(), values() and entries() return arrays; " +
 		"an error mcpshell raises itself is a string in catch. Dedup, count, sort etc. are pipe commands — help() lists them.",
