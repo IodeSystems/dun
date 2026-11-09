@@ -57,9 +57,16 @@ Do not push unless the user asks.
 dund keeps four indexes (`rag.md`). Memories go to `memories`;
 strategies and constraints both go to `strategies`, told apart by
 `kind`, so a lesson's retrieval is not crowded by project facts. Both use
-the same store code (`memoryStore`), the same `rag_ingest`, `rag_forget`
-and `rag_sync` calls, and the same attestation log (refine, void,
-confirm). Each index has its own link, so each syncs on its own.
+the same store code (`memoryStore`), the same `rag_ingest`, `rag_tag`,
+`rag_forget` and `rag_sync` calls, and the same attestation log (refine,
+void, confirm). Each index has its own link, so each syncs on its own.
+
+Each item is tagged in its index (raglit `SetTags`: filter data, no
+fragment) with its own tags, `kind:<kind>`, and `important` when marked.
+A search with the tag filter `kind:strategy` finds strategies only.
+`/memories important` and `unimportant` rewrite the file and send
+`rag_tag`, not an ingest; the next sync queues the file once, because its
+bytes changed (`rag.md`, slice 5).
 
 ## What reaches the model
 

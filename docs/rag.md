@@ -186,10 +186,17 @@ An index is made on its first ingest. At start, dund opens the indexes on
 disk, so jobs queued before a restart run. A search or job list of an index
 that does not exist answers empty and makes nothing.
 
-**Jobs**: one `raglit.Runner` over all open indexes (a map as the
-`StoreSet`; `Existing` never opens one). Each store gets `SetEmbedder` and
-`SetIdentifier` when it opens. On stop and on re-exec: `Drain(10s)`, then
-`CutOff`; a cut-off job goes back on the queue.
+**Jobs**: two `raglit.Runner`s over one `Channels`: one over the
+memories and strategies indexes of every scope (2 jobs at once), one over
+code and docs (raglit's default). A bulk code ingest then holds no runner a
+memory note waits for; the shared `Channels` still limit each model across
+both. Each runner's `StoreSet` is the open indexes of its kinds;
+`Existing` never opens one. Each store gets `SetEmbedder` and
+`SetIdentifier` when it opens. On stop and on re-exec: `Drain(10s)` of both
+runners, then `CutOff` of both (the caption loop, which Drain leaves
+running), then wait for both `Done` (raglit v0.6: Done covers the caption
+loop) before the stores are closed. A runner not done 10s after the
+cut-off leaves the stores open. A cut-off job goes back on the queue.
 
 **Facets** (model roles), in `~/.dun/config.json`:
 
@@ -214,21 +221,23 @@ roles (main, child, vision for chat) may move into this map later.
 | `rag_jobs` → `rag_jobs` | project, index, state, limit → jobs [id, url, title, state, error, fragments] |
 | `rag_forget` → `rag_forgotten` | project, index, path or url → url, removed (slice 5) |
 | `rag_sync` → `rag_synced` | project, index, files [path, title, tags], gone [path] → queued, current, removed (slice 5) |
+| `rag_tag` → `rag_tagged` | project, index, path or url, tags → url |
 
 An index the project does not keep is refused. A hit's path is its source
 URL (`file:///abs/path`). Hybrid with no embed model, or with one that
-fails, runs as FTS and says so in `note`. Tags are normalized on write and
-on read; a tag filter is whole-tag AND. Tags given on ingest are written
-as a supplied caption (named by the title, else the file name), and that
-caption is also a searchable fragment: a search can hit it beside the
-document's own text.
+fails, runs as FTS and says so in `note`. Tags are raglit's caller-owned
+tags (`Store.SetTags`, the `documents.tags` column): filter data, not text,
+so no fragment. Normalized on write and on read; a tag filter is whole-tag
+AND, and `kind:strategy` matches exactly. Tags given on ingest are set
+before the job is queued: on a path not yet committed raglit holds them
+for the job's commit; a re-ingest leaves them alone. `rag_tag` replaces a
+document's tags with no ingest (no tags clears them). `rag_sync` sets the
+tags of every file it is given, current or not.
 
-**Not pinned by raglit's api_test.go, used anyway**: `NewEmbedder` (no
-other way to make the `*Embedder` that `SetEmbedder` takes),
-`Models.Identifier` (raglit's ragcore.md says to use it), and
-`Store.SupplyIdentity` with `DocIdentity` (the one way a caller writes
-tags). Ingest is always a queued job; a direct `Store.Ingest` needs
-`Document` and `Fragment` fields, which are not pinned either.
+**raglit calls** (raglit v0.6.1): every function and method dund calls is
+pinned in raglit's `api_test.go`, except `Home.IndexPath` (dund checks
+whether an index file exists before opening it). Ingest is always a
+queued job.
 
 ## Built: slice 3
 
@@ -258,31 +267,31 @@ Measured 2026-11-08, `local-nomic-embed-text` on the gateway: dimension
 32:139ms 64:243ms, deterministic (cosine 1.000000).
 
 **Index model record**: each index records the embed model its vectors came
-from (raglit's `index_meta` `embed_model`, which raglit already keeps) and
-their dimension (`index_meta` `embed_dim`, dund's key; raglit has none).
-The dimension is the probed `embed.dimension`; never probed, only the
-model id is compared. On open:
+from and their dimension (raglit's `index_meta` `embed_model` and
+`embed_dim`, both written by `SyncEmbedModel(model, dim)`; dund only reads
+them). The dimension is the probed `embed.dimension`; never probed, dim 0
+is passed (unknown) and only the model id is compared. Before raglit v0.6
+dund wrote `embed_dim` itself, with the same key and meaning, so an index
+from then needs no migration: raglit reads it as its own. On open:
 
 - no record: the index adopts the embed role (raglit's rule);
-- record matches: the embedder is attached; fragments with no vector
-  (ingested while embed was off, or a cut-off re-embed) are embedded in the
-  background;
+- record matches: `SyncEmbedModel` records a dimension not yet recorded
+  (and drops stored vectors of another length, which no query can match);
+  the embedder is attached; fragments with no vector (ingested while embed
+  was off, or a cut-off re-embed) are embedded in the background;
 - record differs (model id, or a known dimension): no embedder. No vector is
   written to it and a hybrid search runs as FTS with a note naming both
   models. dund logs it once.
 
 `dun dund rag reembed --index …` (socket `rag_reembed` → `rag_reembedding`)
-drops the old vectors (`SyncEmbedModel`), records the role's model and
-dimension, attaches the embedder and embeds every fragment in the
-background (`BackfillVectors`, 64 at a time). Not a raglit queue job: the
+drops every vector (`DropVectors`), records the role's model and dimension
+(`SyncEmbedModel`), attaches the embedder and embeds every fragment in the
+background (`BackfillVectors`, 64 at a time). A dimension change under the
+same model id is re-embedded the same way. Not a raglit queue job: the
 pinned API has none. It resumes across restarts because open backfills
-whatever has no vector. A dimension change under the same model id is
-refused: `SyncEmbedModel` drops vectors only for another model id.
-
-**raglit exports used, not pinned by api_test.go** (new in slice 3):
-`Store.EmbedModel`, `Store.SyncEmbedModel`, `Store.BackfillVectors`,
-`Store.MissingVectors`, `Store.Meta`, `Store.SetMeta`, `NewSegmenter`,
-`Segmenter.SegmentText`, `SegResult.Degraded`.
+whatever has no vector. It runs while an ingest job runs on the index:
+raglit's `SetEmbedder` is atomic (v0.6), and a vector made with a
+replaced embedder is not written (`TestReembedWhileAJobRuns`, `-race`).
 
 ## Built: slice 5
 
@@ -305,10 +314,21 @@ sync), `memory.go` (the tool).
   (`surfacing.md`). No tag or path filter is sent: the surfacing search
   used none before. Project and global notes are separate groups, each
   ranked in its own index; the project note comes first (USER 2026-11-08).
-- **Double hit.** A tagged note is found up to three times in one search:
-  its frontmatter, its text, and the caption its tags are written as
-  (measured live, FTS, 2026-11-08). dun keeps one hit per note path, with
+- **Double hit.** Before raglit v0.6, a tagged note was found up to three
+  times in one search: its frontmatter, its text, and the caption its tags
+  were written as (measured live, FTS, 2026-11-08). Tags are now
+  `SetTags` (no caption). raglit keeps a Markdown file's frontmatter as a
+  fragment of its own, so a word in both the frontmatter and the text is
+  still two hits; a word in the text only is one
+  (`TestTaggedNoteHasNoCaptionHit`). dun keeps one hit per note path, with
   the best similarity and term count of its fragments.
+- **Tags.** A note is filed under its own tags, `kind:<kind>`
+  (`kind:memory`, `kind:strategy`, `kind:constraint`) and `important` when
+  the user marked it. A change that leaves the text as it was
+  (`/memories important`, `unimportant`, a refine of the tags alone) sends
+  `rag_tag` and no ingest. The index then holds the old bytes, so the next
+  `rag_sync` (next session start, or after dund was down) queues the note
+  once.
 - **dund down** (no socket, or a dund with no retrieval): the note is
   written and the tool result says it is not indexed yet; a void goes
   ahead and says the same. Recall is a word search of the note files
@@ -318,9 +338,6 @@ sync), `memory.go` (the tool).
   failure) sends `rag_sync` with every note and every voided note. dund
   queues a note it lacks, or holds with another source hash (or, without
   a hash, from before the file's mtime), and removes the voided ones.
-- **Re-embed guard.** `rag_reembed` is refused while the index has a
-  running ingest job: raglit's `SetEmbedder` is a plain field write a
-  running worker reads (raglit-a4 has the fix).
 
 Built since: the strategies index, holding strategies and constraints
 (one file shape with memories: a short name, optional detail, global or
