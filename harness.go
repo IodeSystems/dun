@@ -498,6 +498,10 @@ type Harness struct {
 	// (codesearch.go), once per harness (a child uses its parent's).
 	codeLinkOnce sync.Once
 	codeLinkV    *codeLink
+	// codeRootOnce makes codeRootV, the root the code index takes: the
+	// workspace, or "" when the root guard keeps it out (codeIndexRoot).
+	codeRootOnce sync.Once
+	codeRootV    string
 	listed       atomic.Pointer[map[string]bool]
 	// catalog is what each started server offers besides tools: skills and
 	// prompts (skills.go). Guarded by srvMu.

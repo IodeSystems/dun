@@ -1137,6 +1137,12 @@ func ingestWorkspace(sink *mcpDocsSink, workspace string, cfg *RagConfig) string
 	if sink == nil {
 		return ""
 	}
+	// The root guard (rootguard.go), as for dund's code index.
+	if scan := scanRootCached(workspace); scan.TooBig() {
+		note := fmt.Sprintf("workspace ingest: %s holds %s: not ingested (dun's root guard)", workspace, scanSummary(scan))
+		log.Printf("dun: %s", note)
+		return note
+	}
 	plan := planIngest(workspace, cfg)
 	if len(plan.Files) == 0 {
 		return ""
