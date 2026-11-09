@@ -193,15 +193,46 @@ that does not exist answers empty and makes nothing.
 
 **Jobs**: two `raglit.Runner`s over one `Channels`: one over the
 memories and strategies indexes of every scope (2 jobs at once), one over
-code and docs (raglit's default). A bulk code ingest then holds no runner a
-memory note waits for; the shared `Channels` still limit each model across
-both. Each runner's `StoreSet` is the open indexes of its kinds;
+code and docs (2 jobs at once, `codeRunners`). A bulk code ingest then holds
+no runner a memory note waits for; the shared `Channels` still limit each
+model across both. Each runner's `StoreSet` is the open indexes of its kinds;
 `Existing` never opens one. Each store gets `SetEmbedder` and
 `SetIdentifier` when it opens. On stop and on re-exec: `Drain(10s)` of both
 runners, then `CutOff` of both (the caption loop, which Drain leaves
 running), then wait for both `Done` (raglit v0.6: Done covers the caption
 loop) before the stores are closed. A runner not done 10s after the
 cut-off leaves the stores open. A cut-off job goes back on the queue.
+
+**Embed paths** (`embedroute.go`): every index has one embedder, whose
+client routes by the call's context. A job's fragments, a backfill and a
+reembed go through `Models.Embedder()`: the embed model's admission channel
+in the shared `Channels` (width 1 at start, learned up to 8), the ingest
+retry policy and the 429 hook. A search's query embedding (`Search` marks
+its ctx) goes on a plain client that takes no slot, so it never waits
+behind ingest (`TestSearchDoesNotWaitForIngestAdmission`: every ingest
+embed call held open by the model, a hybrid search answers). Before
+2026-11-09 dund's embedder was ungated: ingest and queries shared one
+`llm.Client` and no admission at all. A query can still wait at the model
+server itself; dund cannot order that.
+
+**Ingest load** (measured 2026-11-09, this repo, 827 files, FTS only, temp
+DUN_HOME, 24 cores, machine load average 30 to 48 from other work; 2 runs
+each): first index, call to last job done, 78 and 80 s at 8 code jobs, 83
+and 82 s at 2. dund's CPU, sampled each 0.5 s: peak 2.2 and 1.6 cores at 8,
+1.7 and 1.5 at 2; mean while indexing 0.4 to 0.5 at both. `rag search`
+(fts, the CLI's own start included) during the index: p50 51 and 54 ms, p95
+67 and 118 ms at 8; p50 50 and 73 ms, p95 86 and 133 ms at 2; idle 33 to 55
+ms. CPU is not what the first index is bound by; the cap bounds concurrent
+model calls, which these runs do not exercise.
+
+**Priority: not lowered.** Go cannot set a goroutine's priority: goroutines
+move between OS threads, and raglit's runner starts its own, so a per-thread
+nice (Linux `setpriority` on a thread id; macOS has none) would not stay on
+ingest work. A whole-process nice at serve start is inherited by what dund
+starts (session engines, MCP servers) and lowers its socket replies too.
+Measured at nice 10, same load: index 84 s, peak 1.3 cores, idle `rag
+search` p50 62 ms (33 to 55 at nice 0). No gain to buy, so dund stays at
+nice 0.
 
 **Facets** (model roles), in `~/.dun/config.json`:
 
@@ -240,9 +271,9 @@ for the job's commit; a re-ingest leaves them alone. `rag_tag` replaces a
 document's tags with no ingest (no tags clears them). `rag_sync` sets the
 tags of every file it is given, current or not.
 
-**raglit calls** (raglit v0.6.1): every function and method dund calls is
-pinned in raglit's `api_test.go`, except `Home.IndexPath` (dund checks
-whether an index file exists before opening it). A file is ingested as a
+**raglit calls** (raglit v0.7.0): every function and method dund calls is
+pinned in raglit's `api_test.go`, except `Models.Embedder` and the
+`Embedder` fields `Client` and `Model` (the embed paths above). A file is ingested as a
 queued job; text (memory notes) by `Store.Ingest` at once.
 
 ## Built: slice 3
