@@ -1,0 +1,104 @@
+package dun
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+)
+
+// TestLearn_Replay runs the churn detector over recorded sessions, with no
+// model call: DUN_CHURN_REPLAY is a glob of dun.jsonl event streams (a
+// Harbor trial's agent/dun.jsonl). It reports the episodes per trial, the
+// trial's reward when its verifier wrote one, and the first episode's
+// lesson prompt. Skipped without the variable.
+//
+//	DUN_CHURN_REPLAY='examples/harbor/jobs/*/*/*/agent/dun.jsonl' go test -run TestLearn_Replay -v
+func TestLearn_Replay(t *testing.T) {
+	glob := os.Getenv("DUN_CHURN_REPLAY")
+	if glob == "" {
+		t.Skip("DUN_CHURN_REPLAY is not set")
+	}
+	files, err := filepath.Glob(glob)
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no files: %q %v", glob, err)
+	}
+	sort.Strings(files)
+	var sample string
+	trials, withEp, total := 0, 0, 0
+	byReward := map[string][2]int{} // reward: trials, episodes
+	for _, f := range files {
+		eps, err := replayChurn(f)
+		if err != nil {
+			t.Logf("%s: %v", f, err)
+			continue
+		}
+		trials++
+		total += len(eps)
+		if len(eps) > 0 {
+			withEp++
+			if sample == "" {
+				sample = f + "\n" + learnPrompt(eps[0])
+			}
+		}
+		reward := "none"
+		if b, err := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(f)), "verifier", "reward.txt")); err == nil {
+			reward = strings.TrimSpace(string(b))
+		}
+		r := byReward[reward]
+		byReward[reward] = [2]int{r[0] + 1, r[1] + len(eps)}
+		t.Logf("%3d episodes  reward %-4s %s", len(eps), reward, f)
+	}
+	t.Logf("%d trials, %d with an episode, %d episodes; by reward (trials, episodes): %v", trials, withEp, total, byReward)
+	t.Logf("sample prompt:\n%s", sample)
+}
+
+// replayChurn feeds one event stream's tool results, in order, through the
+// plan nudge's counter, as withPlanNudge does: a result that starts ERROR,
+// or an exec with an [exit: ...] verdict, failed. A user message starts a
+// turn.
+func replayChurn(path string) ([]churnEpisode, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	h := &Harness{}
+	var calls []churnAttempt
+	var out []churnEpisode
+	sc := bufio.NewScanner(fh)
+	sc.Buffer(make([]byte, 1<<20), 64<<20)
+	for sc.Scan() {
+		line := sc.Bytes()
+		var e struct {
+			Type   string          `json:"type"`
+			Tool   string          `json:"tool"`
+			Args   json.RawMessage `json:"args"`
+			Result string          `json:"result"`
+		}
+		if json.Unmarshal(line, &e) != nil {
+			continue
+		}
+		switch e.Type {
+		case "user":
+			h.nudge.reset()
+			calls = nil
+		case "tool_call":
+			calls = append(calls, churnAttempt{Tool: e.Tool, Args: string(e.Args)})
+		case "tool_result":
+			args := ""
+			if len(calls) > 0 {
+				args = calls[0].Args
+				calls = calls[1:]
+			}
+			failed := strings.HasPrefix(e.Result, "ERROR") || strings.Contains(e.Result, "[exit: ")
+			if ep := h.planNudgeResult(failed, newChurnAttempt(e.Tool, args, e.Result)); ep != nil {
+				out = append(out, *ep)
+			}
+		}
+	}
+	return out, sc.Err()
+}
