@@ -15,7 +15,7 @@ user-authored kind is called **constraint**, not rule.
 | kind | what | written by |
 |---|---|---|
 | memory | a fact a later session needs (`memory.md`) | the model, `/remember`, `/memories add` |
-| strategy | an approach that worked and will work again | the model, `/memories add`; later the learning phase |
+| strategy | an approach that worked and will work again | the model, `/memories add`; the learning phase, as a candidate |
 | constraint | a rule the user set for how to work | the user (`/memories add`), or the model when the user states it |
 
 **Not the rules files.** dun's rules feature (`rules.go`: the workspace's
@@ -110,6 +110,8 @@ rest of `reading.md` (whole reads, budgets, `doc:`) is not.
   - `/memories rm <kind:name>`: a void with the user as source (the file
     is kept as `*.md.void`).
   - `/memories important <kind:name>`, `/memories unimportant <kind:name>`.
+  - `/memories candidates`, `/memories accept|reject <kind:name>`: the
+    learning phase's proposals (below).
 
 ## Off
 
@@ -125,12 +127,80 @@ is not indexed yet; recall is a word search of the files; the next
 contact syncs the set. The standing list reads the files, so it does not
 depend on dund.
 
-## Learning phase (not built)
+## Learning phase (first slice, built)
 
-The design in `rag.md` (churn, resolved candidate, lesson) would write a
-lesson with `strategyStore().apply(memoryArgs{Action: "add", Kind:
-"strategy", ...})`, the same call the tool makes (hook noted at the top
-of `notekinds.go`).
+Code: `learn.go`; the streak is `plannudge.go`'s. Churn → resolved
+candidate → lesson, written as a strategy the user reviews.
+
+Constraints (USER 2026-11-09): lessons are generic (no task names, paths,
+file contents or answers; a lesson useless without its task is dropped,
+so a benchmark score measures retrieval, not memorization); only the user
+marks an item important; off in evals; one small bounded call per
+resolved episode, never per round; lessons from resolutions only.
+
+- **Episode.** The plan nudge's failure streak (`nudge.fails`, the one
+  counter; a failure is what it already counts: ERROR, a dispatcher
+  error, a failed exec) of at least 3 results, ended by a success on the
+  target of one of the failed calls. A target is the tool, and its path
+  when the call has one (`file_edit:a.go`); an exec's target is `exec`,
+  so another command that works is the fix. A streak that never ends, is
+  shorter than 3, or ends with a success on another target, gives
+  nothing. The streak keeps its last 6 failed calls, each clipped (240
+  bytes of the command or arguments, 320 of the result). "Resolved" is
+  tool-level: the call worked; no verifier is asked.
+- **Call.** After the turn (in the background, the turn does not wait),
+  one side call per episode, kind `learn` in `/context`: no tools, no
+  history, `max_tokens` 400, about 1.2k tokens in. The prompt is the
+  episode only; the task's text is not in it. The model answers
+  `{name, detail, tags}` or `{"skip": true}`.
+- **Cap: 3 lesson calls per session** (`learnCap`). An episode past it is
+  dropped, not queued. Replay (below): 1 of 362 trials had more than 3.
+- **Genericity filter** (`genericityError`, deterministic, after the
+  call). Rejected:
+  - shape: a detail over 400 bytes or 3 sentences, a name over 6 words;
+  - always: a path (`/a`, `./a`, `~/a`, `a/b/c`, `C:\`), a file name with
+    a common extension, a URL, a hash (7+ hex characters with a digit and
+    a letter), a number of 5+ digits or an IP address, a code fence, a
+    quoted span over 40 characters;
+  - a workspace file or directory name (3 levels down) that looks like an
+    identifier (`_`, a dot, a digit, an inner capital, or `-` with a
+    capital);
+  - a token the task marks: in a quoted span of the user's messages, or
+    with a digit, `_`, a dot or an inner capital (`POV-Ray`, `illum1`);
+  - five words in a row from the user's messages;
+  - an identifier from the episode's calls (snake_case, camelCase,
+    dotted.name; not an ALL_CAPS variable such as `LD_LIBRARY_PATH`).
+  It over-rejects on purpose: "python3" in the task rejects a lesson that
+  says python3. No model self-check.
+- **Dedup.** Skipped, not written, when a strategy of the same name
+  exists or was voided (a rejected lesson is not proposed again), or one
+  shares 70% of the shorter text's words: found by the strategies index
+  (dund down: the files), candidates included, and among the voided ones.
+- **Write.** `strategyStore().apply` with kind strategy, project scope,
+  the lesson's tags plus `candidate`: the file, the dund ingest, as the
+  memory tool's add. Its attestation log gets `proposed`, by `dun:learn`.
+  Not important. The user is told by a notice.
+- **Excluded from recall** by a tag filter in dun: the recall finder
+  drops a hit whose file has the tag `candidate` (dund's search and the
+  word search of the files). Not in raglit's filter: it keeps documents
+  with every tag given and cannot exclude one. A candidate still reads
+  with `file_read strategy:<name>`.
+- **Review** (`/memories`):
+  - `/memories candidates` lists them;
+  - `/memories accept strategy:<name>`: the tag goes (a retag, no
+    ingest), a `confirmed` entry by the user; recall finds it from then;
+  - `/memories reject strategy:<name>`: a void by the user;
+  - `/memories important` refuses a candidate: accept it first.
+  The model cannot set the tag (the memory tool refuses it) and a refine
+  keeps it.
+- **Off**: no strategies store (`DUN_MEMORY=0`, which the Harbor adapter
+  sets; no dund link), and in a sub-agent.
+
+Replay (2026-11-09, no model calls: `TestLearn_Replay` with
+`DUN_CHURN_REPLAY` set to a glob of `agent/dun.jsonl`): 362 Terminal-Bench
+trials in `examples/harbor/jobs`; 44 had an episode, 58 episodes (35
+trials 1, 5 trials 2, 3 trials 3, 1 trial 4). By the trial's reward: 189
+passed with 15 episodes, 158 failed with 39, 15 unscored with 4.
 
 ## Decisions (USER 2026-11-08)
 
