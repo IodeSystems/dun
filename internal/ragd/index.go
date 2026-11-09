@@ -108,7 +108,11 @@ func (h *Host) indexOne(project, index, root, main string, files []string) (*pro
 		return out, err
 	}
 	var parent *raglit.Store
-	if main != "" {
+	if main == "" {
+		if err := h.dropOutside(name, st, root, out); err != nil {
+			return nil, fmt.Errorf("rag: index %s: %w", name, err)
+		}
+	} else {
 		parent = st
 		if st, err = h.branch(project, index, root, main, true); err != nil {
 			return nil, err
@@ -125,6 +129,51 @@ func (h *Host) indexOne(project, index, root, main string, files []string) (*pro
 		return nil, fmt.Errorf("rag: index %s: %w", name, err)
 	}
 	return n, nil
+}
+
+// outsideKey is the index_meta key dropOutside sets on a main checkout's
+// index once it has run: the root it kept.
+const outsideKey = "dund_outside_root_dropped"
+
+// dropOutside is a one-time cleanup of st, the code or docs index of the
+// main checkout at root. A dund before worktree branches (dda88f1) indexed
+// a linked worktree into the main checkout's index and told the two copies
+// apart by path; those copies are the documents whose file:// path is not
+// under root (both spelled by fsutil.Canon). They are removed, once per
+// index (outsideKey). Only when root is a main checkout's top (root/.git is
+// a directory): a subdirectory or a directory outside git shares its
+// project's index with paths it does not hold. A document that is not a
+// file:// path is kept.
+func (h *Host) dropOutside(name string, st *raglit.Store, root string, out *proto.RagIndexCounts) error {
+	if _, done := st.Meta(outsideKey); done {
+		return nil
+	}
+	if fi, err := os.Stat(filepath.Join(root, ".git")); err != nil || !fi.IsDir() {
+		return nil
+	}
+	docs, err := documents(st)
+	if err != nil {
+		return err
+	}
+	n := 0
+	for src := range docs {
+		p, ok := strings.CutPrefix(src, "file://")
+		if !ok {
+			continue
+		}
+		if c := fsutil.Canon(p); c == root || strings.HasPrefix(c, root+"/") {
+			continue
+		}
+		if err := removeBusy(st, src); err != nil {
+			return fmt.Errorf("remove %s: %w", src, err)
+		}
+		n++
+	}
+	if n > 0 {
+		h.logf("dund: rag: %s: removed %d documents outside %s (worktree copies of an older dund)", name, n, root)
+	}
+	out.Removed += n
+	return st.SetMeta(outsideKey, root, time.Now().Unix())
 }
 
 // walk is indexOne on st, the index or (parent != nil) the worktree's

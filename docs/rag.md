@@ -552,10 +552,14 @@ USER 2026-11-09: worktrees are raglit branches. Code: `internal/ragd/branch.go`,
   there, with the roots from its `branch.json`, so jobs queued before a
   restart run again.
 - **Old copies.** dund before branches indexed a worktree as a second copy
-  in the project's index, filtered by path. Those documents stay in the
-  parent until the project's index is rebuilt; a branch never shows them (a
-  parent path under the worktree root is left out) and the main checkout's
-  search filters them out by path.
+  in the project's index, filtered by path. The first `rag_index` of the
+  main checkout removes them, once per index (`dropOutside`, meta key
+  `dund_outside_root_dropped`): every `file://` document whose path, by
+  `fsutil.Canon`, is not under the root. Only when the root is a checkout's
+  top (`<root>/.git` a directory); a subdirectory root skips it. Not at
+  start: dund does not know a project's root until a `rag_index` names it.
+  A project slug two repos share (the same base name) loses the other
+  repo's documents once; its next `rag_index` queues them again.
 - **Measured** (2026-11-09, temp DUN_HOME, FTS only, the main checkout
   `~/local/src/iodesystems/dun` at d01114e, then this worktree, branch
   `ragcore-dund`, 61 tracked files changed and 4 untracked new ones): parent
