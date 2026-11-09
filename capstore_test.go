@@ -2,10 +2,15 @@ package dun
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -125,4 +130,43 @@ func TestCaps_HostPinNotStored(t *testing.T) {
 	if _, ok := c2.Capabilities().OffEffort(); ok {
 		t.Error("the pin outlived its config")
 	}
+}
+
+// Many learn events for one record, at once: no store fails, no temp file is
+// left, and the file on disk is the final record.
+func TestCaps_ConcurrentLearnLastWins(t *testing.T) {
+	capsHome(t)
+	c := llm.NewClient("https://llm.example/v1", "", "glm")
+	TrackCaps(c, "")
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			snap := c.Capabilities()
+			snap.Facts[fmt.Sprintf("k%d", i)] = llm.Fact{Value: fmt.Sprint(i), Source: llm.SourceObserved, At: time.Now()}
+			c.SetCapabilities(snap)
+			c.OnLearn(llm.Learned{Endpoint: snap.Endpoint, Model: snap.Model, Key: "k"})
+		}(i)
+	}
+	wg.Wait()
+	WaitCapsStores()
+	final := c.Capabilities()
+	got := LoadCaps(final.Endpoint, final.Model)
+	if !reflect.DeepEqual(factKeys(got), factKeys(final)) {
+		t.Errorf("disk has %v, final record has %v", factKeys(got), factKeys(final))
+	}
+	ents, _ := os.ReadDir(CapsDir())
+	if len(ents) != 1 {
+		t.Errorf("want one record file, have %d entries", len(ents))
+	}
+}
+
+func factKeys(c llm.Capabilities) []string {
+	var ks []string
+	for k := range c.Facts {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
 }

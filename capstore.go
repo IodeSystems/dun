@@ -116,11 +116,24 @@ func storeLocked(dir string, snap llm.Capabilities) error {
 		return err
 	}
 	p := capsFileIn(dir, snap.Endpoint, snap.Model)
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	f, err := os.CreateTemp(dir, filepath.Base(p)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	tmp := f.Name()
+	_, err = f.Write(b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // TrackCaps seeds c from the store, pins off as the provider's effort_off
