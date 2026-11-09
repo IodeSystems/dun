@@ -484,8 +484,14 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.URL == "" && err == nil {
 		indexes, sup = h.speaksIndex(s, command)
 	}
+	// dun's root guard (rootguard.go): a root of many repositories or too
+	// many files is not indexed whole.
+	excludes := s.Exclude
+	if s.URL == "" && err == nil && asksIndex(s) {
+		args, excludes = h.guardCodeRoot(s, args, excludes)
+	}
 	if indexes {
-		args = append(slices.Clone(args), excludeArgs(s.Exclude)...)
+		args = append(slices.Clone(args), excludeArgs(excludes)...)
 		// The project's startup budget, to a build that has one.
 		if sup.Budget && s.IndexBudget != "" {
 			args = append(args, "--index-budget", s.IndexBudget)
@@ -703,6 +709,7 @@ func (h *Harness) rebuildTools() {
 		caller = childCaller{h}
 	}
 	dispatch := mcpDispatcher(caller, tools, report, h.regain)
+	dispatch = withCodeGuard(dispatch, h, tools)
 	// The extensions the hooks go to, among the running servers.
 	exts := h.extensions()
 	searchers := searchExts(exts, tools)

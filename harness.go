@@ -427,6 +427,9 @@ type Harness struct {
 	indexRetried map[string]bool
 	// indexAsked: servers whose not-a-project line was said this session.
 	indexAsked map[string]bool
+	// codeGuards are the poly-lsp servers under the root guard
+	// (codeguard.go), by id. Guarded by srvMu.
+	codeGuards map[string]*codeGuard
 	// setup is each server's install-hint report (setupstate.go); setupSaid
 	// the servers whose one line has been said. Guarded by srvMu.
 	setup     map[string]*SetupReport

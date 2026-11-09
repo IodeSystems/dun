@@ -598,10 +598,19 @@ func (h *Harness) IndexExcludes(id string) []string { return h.excludesOf(id) }
 // addExcludes saves dirs into id's project excludes and restarts it, in the
 // background. It returns the file written.
 func (h *Harness) addExcludes(id string, dirs []string) (string, error) {
+	// A server the root guard moved onto a repository reports its
+	// directories relative to that repository; the project's are relative
+	// to the workspace.
+	prefix := ""
+	h.srvMu.Lock()
+	if g := h.codeGuards[id]; g != nil && g.scope != "" {
+		prefix = g.scope + "/"
+	}
+	h.srvMu.Unlock()
 	return h.editExcludes(context.Background(), id, false, func(cur []string) []string {
 		for _, d := range dirs {
-			if c := cleanExclude(d); c != "" && !slices.Contains(cur, c) {
-				cur = append(cur, c)
+			if c := cleanExclude(d); c != "" && !slices.Contains(cur, prefix+c) {
+				cur = append(cur, prefix+c)
 			}
 		}
 		return cur
