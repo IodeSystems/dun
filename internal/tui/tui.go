@@ -73,6 +73,10 @@ type TuiOpts struct {
 	// ItermTabs is --exp-iterm-tabcontrol: title and colour the iTerm2 tab
 	// (iterm.go). This client's terminal only; procArgs leaves it out.
 	ItermTabs bool
+	// Flags are the model flags this client was started with, by role
+	// (--model, --url, --child-model…): /model says which role came from a
+	// flag (dunconfig.Resolve).
+	Flags dunconfig.Overrides
 }
 
 // RunTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
