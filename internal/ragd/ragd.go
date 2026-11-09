@@ -484,13 +484,30 @@ func (h *Host) Forget(q proto.RagForget) (*proto.RagForgotten, error) {
 	if err != nil || st == nil {
 		return out, err
 	}
-	if st.DocumentAddedAt(src) == 0 {
+	docs, err := documents(st)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := docs[src]; !ok {
 		return out, nil
 	}
 	if err := st.RemoveDocument(src, false); err != nil {
 		return nil, err
 	}
 	out.Removed = true
+	return out, nil
+}
+
+// documents is st's documents by path (raglit's Documents: one query).
+func documents(st *raglit.Store) (map[string]raglit.DocSummary, error) {
+	ds, err := st.Documents()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]raglit.DocSummary, len(ds))
+	for _, d := range ds {
+		out[d.Path] = d
+	}
 	return out, nil
 }
 
@@ -510,26 +527,26 @@ func forgetSource(path, u string) (string, error) {
 	return "", errors.New("rag: forget needs a path or a URL")
 }
 
-// current reports whether st holds path's file as it is now. With a
-// recorded source hash (raglit's: sha256, hex), the bytes decide: a rewrite
-// with the same bytes is current, and a change committed under a job that
-// read the old bytes is not. Without one, the document must have been
-// indexed after the file last changed.
-func current(st *raglit.Store, src, path string) bool {
-	at := st.DocumentAddedAt(src)
-	if at == 0 {
+// current reports whether d, the index's document (ok: there is one), holds
+// path's file as it is now. With a recorded source hash (raglit's
+// ContentHash: sha256 hex of the raw bytes), the bytes decide: a rewrite with
+// the same bytes is current, and a change committed under a job that read
+// the old bytes is not. Without one, the document must have been ingested
+// (AddedAt) after the file last changed.
+func current(d raglit.DocSummary, ok bool, path string) bool {
+	if !ok || d.AddedAt == 0 {
 		return false
 	}
-	if h, _ := st.DocumentHash(src); h != "" {
+	if d.ContentHash != "" {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			return false
 		}
 		sum := sha256.Sum256(b)
-		return h == hex.EncodeToString(sum[:])
+		return d.ContentHash == hex.EncodeToString(sum[:])
 	}
 	fi, err := os.Stat(path)
-	return err == nil && at >= fi.ModTime().UnixNano()
+	return err == nil && d.AddedAt >= fi.ModTime().UnixNano()
 }
 
 // Sync queues each of q.Files the index does not hold, or holds from
@@ -545,12 +562,16 @@ func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
 	if err != nil || st == nil {
 		return out, err
 	}
+	docs, err := documents(st)
+	if err != nil {
+		return nil, err
+	}
 	for _, f := range q.Files {
 		src, err := source(f.Path, "")
 		if err != nil {
 			return nil, err
 		}
-		if current(st, src, f.Path) {
+		if d, ok := docs[src]; current(d, ok, f.Path) {
 			out.Current++
 			continue
 		}
@@ -564,7 +585,7 @@ func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
 		if err != nil {
 			return nil, err
 		}
-		if st.DocumentAddedAt(src) == 0 {
+		if _, ok := docs[src]; !ok {
 			continue
 		}
 		if err := st.RemoveDocument(src, false); err != nil {
