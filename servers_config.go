@@ -153,9 +153,8 @@ type ServerSpec struct {
 	Exclude []string `json:"exclude,omitempty"`
 	// IndexBudget is the server's index startup budget, as poly-lsp-mcp's
 	// --index-budget takes it ("48000ms", "20000ops", "0" unbounded); ""
-	// is its default. Written at project scope by /lsp budget and by
-	// dun when an index runs out of budget with nothing obvious to leave
-	// out.
+	// is its default. Written at project scope by /lsp budget, by the
+	// person only: dun never raises it on its own (indexstate.go).
 	IndexBudget string `json:"index_budget,omitempty"`
 	// IndexAnyway lets the server index a root that is not a project (the
 	// home directory, /, a directory of clones): passed as --index-anyway to

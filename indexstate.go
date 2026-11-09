@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"os/exec"
 	"path"
@@ -13,7 +12,6 @@ import (
 	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,12 +50,13 @@ import (
 //     (chooseExcludes: as few as bring the files under what was read in
 //     budget), saves them in the project's server config
 //     (ServerSpec.Exclude, $DUN_HOME/projects/<id>/dun.local.json), and
-//     restarts the server with --exclude for each. With nothing obvious it
-//     raises the budget instead — the remedy's, else the spent one scaled by
-//     files counted over files read, plus a fifth — saved as
-//     ServerSpec.IndexBudget. Either way it says what it did, why, and how
-//     to undo it (/lsp include <dir>, /lsp budget default). Once
-//     per session; a second failure is reported, not retried.
+//     restarts the server with --exclude for each. An exclude can only make
+//     the index smaller. With nothing obvious dun changes nothing and says
+//     so, with the remedies for the person: /lsp exclude, /lsp include,
+//     /lsp budget. dun never raises the budget itself: the budget is
+//     poly-lsp's stop for an index that grows without bound, and raising it
+//     on its own took two machines down (2026-11-09, docs/mcp-and-tools.md).
+//     Once per session; a second failure is reported, not retried.
 //   - failed at the file cap (the intermediate build): the same excludes;
 //     with nothing obvious it changes nothing and reports.
 //
@@ -359,8 +358,9 @@ func (h *Harness) afterIndex(id string, n indexNote) {
 }
 
 // retryIndex is a build that ran out of budget (or, from the intermediate
-// build, hit its file cap): leave out the obvious directories, else raise
-// the budget, and start again — once per session; else report.
+// build, hit its file cap): leave out the obvious directories and start
+// again — once per session; else report. It never raises the budget: that
+// is the person's choice (/lsp budget), never dun's.
 func (h *Harness) retryIndex(id string, n indexNote) string {
 	rep := *n.Index
 	// The files that fit: what was read within the budget, or the cap.
@@ -373,13 +373,9 @@ func (h *Harness) retryIndex(id string, n indexNote) string {
 		what = fmt.Sprintf("the index stopped at its limit — %s indexable files, limit %s", numfmt.Grouped(rep.Files), numfmt.Grouped(n.Limit))
 	}
 	dirs := chooseExcludes(rep, target)
-	raise := ""
-	if len(dirs) == 0 && n.Budget != "" {
-		raise = raisedBudget(n)
-	}
 	h.srvMu.Lock()
 	retried := h.indexRetried[id]
-	if (len(dirs) > 0 || raise != "") && !retried {
+	if len(dirs) > 0 && !retried {
 		if h.indexRetried == nil {
 			h.indexRetried = map[string]bool{}
 		}
@@ -391,16 +387,13 @@ func (h *Harness) retryIndex(id string, n indexNote) string {
 	case retried:
 		return fmt.Sprintf("%s: %s, again, after dun's change (%s).\n%s\nremedy: %s\nin dun, for this project: /%s exclude <dir>, /%s include <dir>, /%s budget <Nms|Nops|default>",
 			id, what, h.indexConfigNow(id), indexPostMortem(rep), n.Remedy, slash, slash, slash)
-	case len(dirs) == 0 && raise == "":
-		return fmt.Sprintf("%s: %s. No directory is an obvious one to leave out, so dun changed nothing; the code tools answer with this error until one is.\n%s\nremedy: %s; in dun, /%s exclude <dir> (saved for this project)",
-			id, what, indexPostMortem(rep), n.Remedy, slash)
-	case raise != "":
-		saved, err := h.editIndexSpec(context.Background(), id, false, func(s *ServerSpec) { s.IndexBudget = raise })
-		if err != nil {
-			return fmt.Sprintf("%s: %s. dun would raise the budget to %s, but could not save that: %v\n%s", id, what, raise, err, indexPostMortem(rep))
+	case len(dirs) == 0:
+		budget := ""
+		if n.Budget != "" {
+			budget = fmt.Sprintf(", or /%s budget <Nms|Nops> to give it more time (your choice: dun does not raise it)", slash)
 		}
-		return fmt.Sprintf("%s: %s, and no directory is an obvious one to leave out. dun raised the budget to %s, for this project; %s is restarting with it. Saved in %s.\n%s\nTo undo: /%s budget default. To leave a directory out instead: /%s exclude <dir>.",
-			id, what, raise, id, saved, indexPostMortem(rep), slash, slash)
+		return fmt.Sprintf("%s: %s. No directory is an obvious one to leave out, so dun changed nothing; the code tools answer with this error until one is.\n%s\nremedy: %s\nin dun, for this project: /%s exclude <dir>, /%s include <dir>%s",
+			id, what, indexPostMortem(rep), n.Remedy, slash, slash, budget)
 	}
 	var keep []string
 	for _, d := range dirs {
@@ -440,31 +433,8 @@ func (h *Harness) indexConfigNow(id string) string {
 	return strings.Join(parts, "; ")
 }
 
-// remedyBudget is the budget poly-lsp's remedy names: "--index-budget
-// 48000ms (now 30000ms)".
-var remedyBudget = regexp.MustCompile(`--index-budget (\d+(?:ms|ops)?) \(now`)
-
 // budgetPattern is a budget as --index-budget takes it.
 var budgetPattern = regexp.MustCompile(`^(\d+)(ms|ops)?$`)
-
-// raisedBudget is a budget that would have fitted the build in n: the one
-// its remedy names, else the spent one scaled by files counted over files
-// read, plus a fifth (poly-lsp's own rule), in whole seconds.
-func raisedBudget(n indexNote) string {
-	if m := remedyBudget.FindStringSubmatch(n.Remedy); m != nil {
-		return m[1]
-	}
-	m := budgetPattern.FindStringSubmatch(n.Budget)
-	if m == nil || n.Index == nil {
-		return ""
-	}
-	v, _ := strconv.Atoi(m[1])
-	scale := float64(n.Index.Files) / float64(max(n.Read, 1)) * 1.2
-	if m[2] == "ops" {
-		return fmt.Sprintf("%dops", int(float64(v)*scale)+1)
-	}
-	return fmt.Sprintf("%dms", int(math.Ceil(float64(v)*scale/1000))*1000)
-}
 
 // them is "it" or "them".
 func them(n int) string {
