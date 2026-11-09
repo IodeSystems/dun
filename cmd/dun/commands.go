@@ -281,7 +281,7 @@ func routeSlash(line string, r slashRoutes) {
 		case "mode", "approve", "edit", "drop":
 			r.control(name, strings.TrimSpace(arg(0)+" "+strings.Join(args[min(1, len(args)):], " ")))
 		default:
-			r.reply("usage: /plan [mode on|off | approve | edit <id> title|goal <text> | drop <id> [why]]")
+			r.reply("usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why]]")
 		}
 	case "effort":
 		r.control(name, arg(0))

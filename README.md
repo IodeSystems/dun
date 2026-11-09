@@ -501,7 +501,7 @@ during a turn waits for the turn to end (an image cannot ride a tool result).
 ## The task plan
 
 For work with several steps the model keeps a plan: a graph of tasks (`plan` tool,
-the built-in group `dun:plan`), each with a title, a goal, what "done" means
+the built-in group `dun:plan`), each with a title, details, what "done" means
 (`done_when`) and the nodes it needs. A node is ready when everything it needs is
 done; a dropped node keeps its dependents waiting until they are re-pointed to a
 replacement. While the plan has open nodes each turn carries a few lines saying what
@@ -510,10 +510,10 @@ the session.
 
 | | |
 |---|---|
-| `/plan` | the graph as a tree; a node with several parents shows under each. `a` approves, `e`/`g` edit a title/goal, `d` drops (the composer is filled in to finish), enter shows a node |
+| `/plan` | the graph as a tree; a node with several parents shows under each. `a` approves, `e`/`m` edit a title/details, `d` drops (the composer is filled in to finish), enter shows a node |
 | `/plan mode on\|off` | plan mode, off by default. On, `exec`, `file_edit`/`file_write`/`file_delete`/`file_move`, `agent`, `mount`, `loop_ctl`, `dun_msg`, the shell server's tools and MCP tools named for a write are refused until the plan is approved; reading, searching and `plan` work |
 | `/plan approve` | lets the model change things in plan mode (an edit to the plan afterwards keeps it) |
-| `/plan edit <id> title\|goal <text>`, `/plan drop <id> [why]` | what the screen's keys send |
+| `/plan edit <id> title\|details <text>`, `/plan drop <id> [why]` | what the screen's keys send |
 
 What you change reaches the model as a note. Marking a node done is the model's.
 
