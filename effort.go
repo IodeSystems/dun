@@ -53,14 +53,21 @@ func effortFile() string { return filepath.Join(DunHome(), "effort.json") }
 
 // LoadEffort is the saved level; default when none is saved.
 func LoadEffort() string {
+	l, _ := SavedEffort()
+	return l
+}
+
+// SavedEffort is the saved level, and whether one is saved (else default):
+// facets.main's effort applies only when /effort has saved none.
+func SavedEffort() (string, bool) {
 	var f struct {
 		Level string `json:"level"`
 	}
 	b, err := os.ReadFile(effortFile())
 	if err != nil || json.Unmarshal(b, &f) != nil || !validEffort(f.Level) {
-		return EffortDefault
+		return EffortDefault, false
 	}
-	return f.Level
+	return f.Level, true
 }
 
 func validEffort(l string) bool {

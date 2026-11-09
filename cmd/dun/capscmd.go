@@ -14,6 +14,10 @@ import (
 // record shown is this client's: its endpoint and model (capstore.go).
 var capsClient *llm.Client
 
+// modelFlags are this engine's model flags by role (main.go), so /model
+// probe child probes the child as this session runs it.
+var modelFlags dunconfig.Overrides
+
 // capsControl answers the engine's "model" control: bare shows what is known
 // about the session's model and how each fact was learned; probe checks now,
 // with a few short requests, and shows the result.
@@ -24,7 +28,7 @@ func capsControl(ctx context.Context, action string) string {
 	switch action {
 	case "", "caps":
 		return dun.CapsReport(capsClient.Capabilities())
-	case "probe":
+	case "probe", "probe " + dunconfig.FacetMain:
 		caps, err := llm.ProbeCapabilities(ctx, capsClient, llm.ProbeOpts{})
 		msg := dun.CapsReport(caps)
 		if err != nil {
@@ -32,14 +36,14 @@ func capsControl(ctx context.Context, action string) string {
 		}
 		return msg
 	}
-	// A retrieval role, as dund resolves it from the config's facets
-	// (docs/rag.md, Model roles).
+	// Another role, as dunconfig resolves it from this engine's flags and
+	// the config's facets (docs/rag.md, Model roles).
 	if facet, ok := strings.CutPrefix(action, "probe "); ok {
-		res, err := ragd.Probe(ctx, dunconfig.LoadConfig(), dun.CapsDir(), facet)
+		res, err := ragd.ProbeWith(ctx, dunconfig.LoadConfig(), modelFlags, dun.CapsDir(), facet)
 		if err != nil {
 			return err.Error()
 		}
 		return res[0].Report()
 	}
-	return "usage: /model caps | /model probe [" + strings.Join(ragd.Facets, "|") + "]"
+	return "usage: /model caps | /model probe [" + strings.Join(dunconfig.FacetNames, "|") + "]"
 }

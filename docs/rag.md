@@ -248,7 +248,9 @@ the active provider. With no `embed` facet, embed is `local-nomic-embed-text`
 on the active provider. A role not set, or on a provider that is not saved,
 is off: no embed → FTS only; no vision → tesseract if installed, else no
 OCR; no identity → no captions. dund logs each role once at start. The chat
-roles (main, child, vision for chat) may move into this map later.
+roles (main, child) are in the same map, and vision is one role for chat
+images and OCR; one resolver serves all of them (`dunconfig.Resolve`,
+`providers-and-cost.md`, Model facets).
 
 **Socket commands** (no session id; `proto/rag.go`):
 

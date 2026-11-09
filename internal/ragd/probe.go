@@ -10,6 +10,7 @@ import (
 	"image/draw"
 	"image/png"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -68,23 +69,36 @@ func (p ProbeResult) Report() string {
 	return s
 }
 
-// Facets are the roles in the order probes run.
+// Facets are the retrieval roles, in the order probes run. The chat roles
+// (main, child) are probed by name only.
 var Facets = []string{dunconfig.FacetEmbed, dunconfig.FacetVision, dunconfig.FacetSegment, dunconfig.FacetIdentity}
 
-// Probe probes facet ("" is every role) as cfg resolves it, and stores each
-// record in the capability store at capsDir. A role that is off is reported
-// and not probed.
+// Probe probes facet ("" is every retrieval role) as cfg resolves it, and
+// stores each record in the capability store at capsDir. A role that is off
+// is reported and not probed.
 func Probe(ctx context.Context, cfg dunconfig.DunConfig, capsDir, facet string) ([]ProbeResult, error) {
+	return ProbeWith(ctx, cfg, nil, capsDir, facet)
+}
+
+// ProbeWith is Probe with the session's flags (dunconfig.Overrides), so a
+// role a flag set is probed as it runs. Any role of dunconfig.FacetNames
+// may be named: main and child get the chat probes (as /model probe and the
+// identity role do), vision the OCR probe.
+func ProbeWith(ctx context.Context, cfg dunconfig.DunConfig, flags dunconfig.Overrides, capsDir, facet string) ([]ProbeResult, error) {
 	names := Facets
 	if facet != "" {
-		if !isFacet(facet) {
-			return nil, fmt.Errorf("rag: no role %q (%s)", facet, strings.Join(Facets, ", "))
+		if !dunconfig.IsFacet(facet) {
+			return nil, fmt.Errorf("rag: no role %q (%s)", facet, strings.Join(dunconfig.FacetNames, ", "))
 		}
 		names = []string{facet}
 	}
 	r := Resolve(cfg)
 	var out []ProbeResult
 	for _, name := range names {
+		if name == dunconfig.FacetMain || name == dunconfig.FacetChild {
+			out = append(out, probeChatRole(ctx, cfg, flags, capsDir, name))
+			continue
+		}
 		role := roleOf(r.Models, name)
 		res := ProbeResult{Facet: name, Said: saidOf(r.Said, name)}
 		if role.Model != "" {
@@ -95,13 +109,25 @@ func Probe(ctx context.Context, cfg dunconfig.DunConfig, capsDir, facet string) 
 	return out, nil
 }
 
-func isFacet(s string) bool {
-	for _, f := range Facets {
-		if f == s {
-			return true
-		}
+// probeChatRole probes main or child with the chat probes. A child with no
+// model of its own is main's: main is probed and said so; a child with no
+// provider is on main's.
+func probeChatRole(ctx context.Context, cfg dunconfig.DunConfig, flags dunconfig.Overrides, capsDir, name string) ProbeResult {
+	f := cfg.Resolve(name, flags, os.Getenv)
+	res := ProbeResult{Facet: name, Said: name + ": " + strings.TrimSpace(strings.TrimPrefix(f.Line(), name))}
+	if name == dunconfig.FacetChild && f.Model == "" && f.Provider == "" {
+		f = cfg.Resolve(dunconfig.FacetMain, flags, os.Getenv)
+		res.Said += "; main: " + strings.TrimSpace(strings.TrimPrefix(f.Line(), dunconfig.FacetMain))
 	}
-	return false
+	if name == dunconfig.FacetChild && f.URL == "" && f.Off == "" {
+		m := cfg.Resolve(dunconfig.FacetMain, flags, os.Getenv)
+		f.URL, f.Key = m.URL, m.Key
+	}
+	if !f.On() || f.URL == "" {
+		return res
+	}
+	res.Caps, res.Err = probeRole(ctx, capsDir, dunconfig.FacetIdentity, raglit.ModelRole{BaseURL: f.URL, APIKey: f.Key, Model: f.Model})
+	return res
 }
 
 func roleOf(m raglit.Models, name string) raglit.ModelRole {

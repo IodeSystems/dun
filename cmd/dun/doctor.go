@@ -197,8 +197,21 @@ func (d *doctor) providers() {
 		return
 	}
 	def := cfg.ActiveName()
-	if cfg.Model == "" {
+	// The model roles as the config resolves them (env included: it is what
+	// a session started here would run).
+	main := cfg.Resolve(dunconfig.FacetMain, nil, os.Getenv)
+	if main.Model == "" {
 		d.add("fail", "model", "no model chosen on "+def, "/model in the TUI, web or app")
+	}
+	for _, r := range cfg.ResolveAll(nil, os.Getenv) {
+		level, fix := "ok", ""
+		if r.Off != "" {
+			level, fix = "warn", "/model use "+r.Facet+" <provider>/<model>, or /login the provider"
+		}
+		d.add(level, "facet", r.Line(), fix)
+	}
+	for _, n := range cfg.UnknownFacets() {
+		d.add("warn", "facet", "facets."+n+" is not a role ("+strings.Join(dunconfig.FacetNames, ", ")+"); ignored", "remove it from "+dunconfig.ConfigPath())
 	}
 	for _, p := range ps {
 		name := p.Name
@@ -210,12 +223,12 @@ func (d *doctor) providers() {
 		case len(ids) == 0:
 			d.add("warn", "provider", fmt.Sprintf("%s at %s, %s: %s", name, p.URL, dunconfig.KeyNote(p.Key), why),
 				"a wrong key: /login "+p.Name+" again; a gateway that lists nothing: /model use "+p.Name+" <id>")
-		case p.Name == def && cfg.Model != "" && !slices.Contains(ids, cfg.Model):
-			d.add("warn", "model", fmt.Sprintf("%s is not among %s's %d models", cfg.Model, p.Name, len(ids)), "/model to pick one it lists")
+		case p.Name == main.Provider && main.Model != "" && !slices.Contains(ids, main.Model):
+			d.add("warn", "model", fmt.Sprintf("%s is not among %s's %d models", main.Model, p.Name, len(ids)), "/model to pick one it lists")
 		default:
 			detail := fmt.Sprintf("%s at %s, %s: %d models", name, p.URL, dunconfig.KeyNote(p.Key), len(ids))
-			if p.Name == def && cfg.Model != "" {
-				detail += "; model " + cfg.Model
+			if p.Name == main.Provider && main.Model != "" {
+				detail += "; model " + main.Model
 			}
 			d.add("ok", "provider", detail, "")
 		}
