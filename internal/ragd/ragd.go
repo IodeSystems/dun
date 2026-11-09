@@ -60,6 +60,14 @@ const stopWait = 10 * time.Second
 // Notes are small; two keep one slow source from holding up the rest.
 const memoryRunners = 2
 
+// codeRunners is how many ingest jobs the code+docs runner runs at once.
+// The first index of a repo queues every file (800 jobs for this repo); at
+// raglit's default of 8, eight jobs at once read, cut and write files and
+// call the model roles (embed, vision, segment) that the machine's sessions
+// use too. Two bound that. Measured FTS only, the first index takes the same
+// wall time at 2 as at 8 (docs/rag.md, Jobs): the cap costs nothing there.
+const codeRunners = 2
+
 // Host owns every index and the job runners. It is a raglit.StoreSet.
 //
 // Two runners share one Channels (the per-model admission limits): one over
@@ -132,7 +140,7 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 		indexes []string
 		runners int
 		models  raglit.Models
-	}{{[]string{"memories", "strategies"}, memoryRunners, h.models}, {[]string{"code", "docs"}, 0, coded}} {
+	}{{[]string{"memories", "strategies"}, memoryRunners, h.models}, {[]string{"code", "docs"}, codeRunners, coded}} {
 		r := &raglit.Runner{
 			Stores: storeSubset{h, set.indexes},
 			NewWorker: func(s *raglit.Store) (*raglit.Worker, error) {
