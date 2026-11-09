@@ -129,8 +129,11 @@ var Supported = []Tool{
 	// (off by default) and re-embeds an index whose vectors are of another
 	// length; no flag or command dun uses changed. linux_amd64 prints
 	// version 0.8.0.
+	// Recommended v0.8.1 (2026-11-09, 5b66995), tarballs in deps.json: fixes
+	// SQLITE_BUSY from a deferred BEGIN (_txlock=immediate), adds ReadBranch
+	// and OpenBranchOn (library only; the CLI is unchanged).
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.8.0"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.8.1"},
 }
 
 // Tool is one Supported entry.
