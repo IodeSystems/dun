@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -207,10 +208,14 @@ func (l *memLink) syncOnce(m *memoryStore) bool {
 // memFinder is the proactive search's finder for one store's files: the
 // memory notes, or the strategies and constraints. skip (may be nil) leaves
 // out a file the standing list already shows (notekinds.go).
+// Candidates (learn.go) are left out unless candidates is set: a tag
+// filter in dun, after the search (raglit's filter keeps tags; it has no
+// way to exclude one).
 type memFinder struct {
-	l    *memLink
-	m    *memoryStore
-	skip func(path string) bool
+	l          *memLink
+	m          *memoryStore
+	skip       func(path string) bool
+	candidates bool
 }
 
 // memSearchLimit is the hits asked of each memories index per pass.
@@ -284,6 +289,9 @@ func (f *memFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, e
 			}
 			if f.skip != nil && f.skip(path) {
 				continue // in the standing list of every request already
+			}
+			if !f.candidates && isCandidate(path) {
+				continue // proposed, not accepted (learn.go)
 			}
 			hm := hitMeta{Matched: h.Matched, Terms: h.Terms}
 			if h.Similarity != nil {
@@ -365,7 +373,7 @@ func (f *memFinder) local(q string) []agent.DocHit {
 				continue
 			}
 			n, err := readNote(p)
-			if err != nil {
+			if err != nil || (!f.candidates && slices.Contains(noteTags(n.meta), candidateTag)) {
 				continue
 			}
 			words := map[string]bool{}
