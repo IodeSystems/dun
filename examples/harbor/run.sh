@@ -9,7 +9,8 @@
 # ATTEMPTS (1, harbor -k), OUT (a jobs dir to add to; default a new one),
 # DUN_HARBOR_BIN (the binaries to upload; default ./bin), HARBOR_ARGS (more harbor
 # run flags, e.g. "--agent-timeout-multiplier 3" for a slower model),
-# DUN_MEMORY (0: memory off; set 1 for a run that wants it).
+# DUN_MEMORY (0: memory off; set 1 for a run that wants it), DUN_CODE_SEARCH (0: dund's
+# code and docs search off; set 1 to turn it on).
 #
 # A clear error stops the run (exit 2): a trial exception other than an agent
 # timeout, or dun ending before its first model request. Those are the harness's

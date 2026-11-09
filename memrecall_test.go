@@ -22,8 +22,13 @@ type fakeRag struct {
 	forgets []proto.RagForget
 	syncs   []proto.RagSync
 	tags    []proto.RagTag
-	hits    map[string][]proto.RagHit // by project ("" global)
+	hits    map[string][]proto.RagHit // by project ("" global): the memories and strategies indexes
 	mode    string
+	// code and docs (codesearch.go): the hits of those indexes by index
+	// name, the rag_index calls and the searches of them.
+	code     map[string][]proto.RagHit
+	indexes  []proto.RagIndex
+	searches []proto.RagSearch
 }
 
 func (f *fakeRag) isDown() bool {
@@ -48,7 +53,33 @@ func (f *fakeRag) Search(_ context.Context, q proto.RagSearch) (*proto.RagHits, 
 	if mode == "" {
 		mode = "fts"
 	}
+	if q.Index == "code" || q.Index == "docs" {
+		f.searches = append(f.searches, q)
+		var out []proto.RagHit
+		for _, h := range f.code[q.Index] {
+			if strings.HasPrefix(h.Path, q.Filter.PathPrefix) {
+				out = append(out, h)
+			}
+		}
+		return &proto.RagHits{Mode: mode, Hits: out}, nil
+	}
 	return &proto.RagHits{Mode: mode, Hits: f.hits[q.Project]}, nil
+}
+
+func (f *fakeRag) Index(_ context.Context, q proto.RagIndex) (*proto.RagIndexed, error) {
+	if f.isDown() {
+		return nil, ErrRagDown
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.indexes = append(f.indexes, q)
+	return &proto.RagIndexed{Project: q.Project}, nil
+}
+
+func (f *fakeRag) indexCalls() []proto.RagIndex {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.indexes)
 }
 
 func (f *fakeRag) Ingest(_ context.Context, q proto.RagIngest) (*proto.RagIngested, error) {

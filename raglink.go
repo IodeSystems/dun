@@ -14,7 +14,8 @@ import (
 
 // RagLink is the way to dund's retrieval (docs/rag.md, slice 5): its
 // indexes hold the memory notes (memory.go) and answer the proactive search
-// for them (memrecall.go). The session dials dund's socket for each call,
+// for them (memrecall.go), and hold the workspace's code and docs
+// (codesearch.go). The session dials dund's socket for each call,
 // so a session under dund and a standalone `dun -p` with dund serving reach
 // it the same way. An error that wraps ErrRagDown means dund is not there,
 // or runs no retrieval: the caller degrades (memrecall.go), it does not
@@ -25,6 +26,7 @@ type RagLink interface {
 	Forget(ctx context.Context, q proto.RagForget) (*proto.RagForgotten, error)
 	Sync(ctx context.Context, q proto.RagSync) (*proto.RagSynced, error)
 	Tag(ctx context.Context, q proto.RagTag) (*proto.RagTagged, error)
+	Index(ctx context.Context, q proto.RagIndex) (*proto.RagIndexed, error)
 }
 
 // ErrRagDown is a RagLink's error when dund cannot be reached, or answers
@@ -115,5 +117,10 @@ func (d dundRag) Sync(ctx context.Context, q proto.RagSync) (*proto.RagSynced, e
 
 func (d dundRag) Tag(ctx context.Context, q proto.RagTag) (*proto.RagTagged, error) {
 	var out proto.RagTagged
+	return &out, d.call(ctx, &q, &out)
+}
+
+func (d dundRag) Index(ctx context.Context, q proto.RagIndex) (*proto.RagIndexed, error) {
+	var out proto.RagIndexed
 	return &out, d.call(ctx, &q, &out)
 }

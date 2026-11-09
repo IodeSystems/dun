@@ -755,6 +755,10 @@ func main() {
 	if os.Getenv("DUN_MEMORY") != "0" {
 		cfg.Rag = dun.DundRag(dundcli.Socket(dun.DunHome()))
 	}
+	// The workspace's code and docs are indexed and searched through dund
+	// too (dun/codesearch.go). DUN_CODE_SEARCH=0: not (the Harbor adapter's
+	// default); DUN_MEMORY=0 turns it off with memory.
+	cfg.NoCodeSearch = os.Getenv("DUN_CODE_SEARCH") == "0"
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}

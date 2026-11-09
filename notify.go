@@ -210,6 +210,8 @@ func docKind(g string, attached bool) string {
 		return "rule"
 	case groupMCPDocs:
 		return "mcp-doc"
+	case groupCode:
+		return "code"
 	}
 	if attached {
 		return "attached doc"
@@ -651,7 +653,11 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					fmt.Fprintf(&b, "%d possibly-relevant document(s); surfacing 1 (%s):\n", w.n, info.Why())
 					fmt.Fprintf(&b, "- %q (id=%s) — %s\n", h.Title, h.DocID, h.Line)
 					fmt.Fprintf(&b, "Source: %s\n", info.Source())
-					b.WriteString("Call the search tool with an id to read a document if it helps.")
+					if g == groupCode || g == groupDocs {
+						b.WriteString("Read it with file_read if it helps.")
+					} else {
+						b.WriteString("Call the search tool with an id to read a document if it helps.")
+					}
 				}
 			}
 			content := b.String()

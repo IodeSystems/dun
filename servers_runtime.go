@@ -435,7 +435,10 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// The guard used to be `RaglitHome != ""`, which silently became "never"
 	// the moment the per-session temp home was removed — the ingest was still
 	// called, from a branch that could no longer be taken.
-	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed && authErr == nil {
+	//
+	// With the code and docs search through dund (codesearch.go), the
+	// workspace is dund's to index, and raglit keeps its own corpora only.
+	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed && authErr == nil && h.codeLink() == nil {
 		dir := h.cfg.ConfigDir
 		if dir == "" {
 			dir = h.cfg.Workspace
@@ -705,6 +708,22 @@ func (h *Harness) rebuildTools() {
 	describeAttached(toolDefs, searchers, h.specs, attached)
 	h.srvMu.Unlock()
 	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
+	// Code and docs search through dund (codesearch.go). With a docs server
+	// (/rag on), its search names no index → this project's code and docs
+	// too; outside withAttached, so the call is read as the model made it.
+	code := h.codeLink()
+	docsSearch := ""
+	if code != nil {
+		for _, e := range searchers {
+			if e.ID == ServerDocs {
+				docsSearch = modelToolName(mcpmgr.MCPTool{ServerID: e.ID, Name: e.Roles.Search.Tool})
+			}
+		}
+		if docsSearch != "" {
+			describeCodeInDocsSearch(toolDefs, docsSearch)
+			dispatch = withCodeInDocsSearch(dispatch, h, code, docsSearch)
+		}
+	}
 	mcpDefs := len(toolDefs) // after these: dun's own (builtins.go)
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef())
@@ -822,6 +841,16 @@ func (h *Harness) rebuildTools() {
 		toolDefs = append(toolDefs, memoryToolDef())
 		dispatch = withMemory(dispatch, h, m, report)
 		dispatch = withItemRead(dispatch, h)
+	}
+	// search: the code and docs indexes, when no docs server gives a search
+	// tool of its own (that one searches them too, above).
+	var codeF *codeFinder
+	if code != nil {
+		codeF = &codeFinder{l: code, root: func() string { return filepath.Clean(h.cfg.Workspace) }}
+		if !slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "search" }) {
+			toolDefs = append(toolDefs, searchToolDef())
+			dispatch = withCodeSearch(dispatch, h, code, report)
+		}
 	}
 	// Skills into the index, off the turn lock: raglit takes a while.
 	if e, ok := hookExt(exts, HookSkillsChanged, tools); ok {
@@ -968,7 +997,7 @@ func (h *Harness) rebuildTools() {
 	// The budget notice (budget.go) rides the same seam, with or without a
 	// docs server, so the preparer is never nil.
 	var docs agent.NotificationPreparer
-	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil || memF != nil {
+	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil || memF != nil || codeF != nil {
 		// MinScore 0: raglit's score is BM25 or a rank fusion (hybrid), in
 		// no fixed range. What surfaces is decided by the hit's similarity
 		// or query-word coverage instead (see docsPreparer): one document
@@ -989,6 +1018,9 @@ func (h *Harness) rebuildTools() {
 		}
 		if stratF != nil {
 			finder, fetch = withMemFinder(stratF, finder, fetch, src)
+		}
+		if codeF != nil {
+			finder, fetch, group = withCodeFinder(codeF, finder, fetch, src, group)
 		}
 		docs = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
 			fetch, group, h.skillForDoc, src, cfg.OnDocs)
