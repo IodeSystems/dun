@@ -1,8 +1,10 @@
 # Proactive retrieval ("surfacing")
 
 Before each model round, dun searches with the user's message (raglit's
-indexes while `/rag on`; dund's memories indexes whenever dund is reachable,
-`rag.md` "Built: slice 5") and may inject the best match into the prompt. A wrong injection costs context and
+indexes while `/rag on`; dund's memories indexes, `rag.md` "Built: slice 5",
+and the workspace's code and docs indexes, `rag.md` "Built: session code and
+doc search", whenever dund is reachable) and may inject the best match into
+the prompt. A wrong injection costs context and
 misleads the model, so the rule is strict: a miss is cheaper than noise. Code:
 `notify.go` (rule and query), `surfacing.go` (labels), `extension.go`
 (`indexedFinder`). Constants: `surfaceFloor`, `surfaceDelta`, `coverageFloor`,
@@ -11,8 +13,9 @@ misleads the model, so the rule is strict: a miss is cheaper than noise. Code:
 ## Rule
 
 The rule runs per group (project memory notes, global memory notes, project
-strategies and constraints, global ones, skills, rules, MCP docs, workspace
-docs, attached docs) and surfaces only the top document of a group that
+strategies and constraints, global ones, skills, rules, MCP docs, the
+workspace's code and its docs in dund (groups `code` and `workspace-docs`),
+raglit's workspace docs, attached docs) and surfaces only the top document of a group that
 clears the bar. A group that fails surfaces nothing and marks nothing seen, so
 the same documents can win a later, clearer pass. Project and global notes
 are separate groups because they are separate dund indexes (USER
@@ -66,6 +69,12 @@ message), 2 with the first 30, 0 with the first 20, and 1 with the old query
 (the model's ~110-word reply joined to the message), which pushed the right
 document out of the top 20 for 4 of 8. Latency per pass fell from a median of
 4.9 s (over the 3 s preparer timeout, so passes failed open) to 1.2 s.
+
+A code or docs hit from dund is one fragment, named `path:start-end` and its
+symbol (`Source: code · path:start-end`); it is inlined from those lines of the
+file when they are at most 1500 characters, else a pointer to `file_read`.
+Not yet measured: the floors above were set on raglit's indexes, and a code
+fragment is shorter than the documents they were set on.
 
 `mode` is left unset so raglit picks hybrid on an index with embeddings and
 bm25 on one without. The search role's `list` tool tells dun which indexes have

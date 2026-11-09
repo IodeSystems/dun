@@ -5,11 +5,12 @@ Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
 is a proposal.
 Status note: raglit is at v0.7.0; RagHit carries start_line, end_line, symbol,
 content_id. The code and docs indexes are built by `rag_index` (below, "Built:
-code and docs indexes"), with poly-lsp-mcp's segmenter, pure Go. Sessions do
-not search them yet.
+code and docs indexes"), with poly-lsp-mcp's segmenter, pure Go, and sessions
+search them (below, "Built: session code and doc search").
 Memory notes are indexed and recalled through dund (slice 5), with or
-without `/rag on`. Code and doc search still run on raglit, as a separate
-server and a bundled extension that is off unless `/rag on`. This file is
+without `/rag on`; so are the workspace's code and docs. `/rag on` (raglit, a
+separate server and a bundled extension) is only for raglitd's own corpora:
+attached indexes, include and add-document, the raglit UI. This file is
 why retrieval would move into dund, and what it would need from raglit.
 Related: `memory.md` (write side, attestation), `surfacing.md` (the retrieval
 rule), `sessions-and-dund.md` (dund).
@@ -390,13 +391,10 @@ Code: `internal/ragd/index.go`, `internal/ragd/codeseg.go`,
   `project` empty is root's slug (`raglitProject`).
 - **Jobs.** Every file is a job on the code+docs runner; the reply comes
   when the jobs are queued, not done (`rag jobs`).
-- **Trigger: on demand only** (`dun dund rag index`). Proposed, not built:
-  (1) at session start for the workspace, best-effort, in the background
-  (a no-change run on this repo is 0.06 to 0.1 s, so it costs nothing when
-  nothing changed); (2) dund re-runs it for each workspace a session has open
-  when a turn ends, which catches the agent's own edits; (3) a file watcher
-  (fsnotify is already in the module graph through poly-lsp-mcp), only if
-  (2) proves too late.
+- **Trigger.** `dun dund rag index`, and a session's (below): at session
+  start and at each turn end. A file watcher is raglit's to build (USER
+  2026-11-09: tree watching, worktree branches and fragment reuse belong in
+  raglit core), and replaces the turn-end call when it exists.
 - **Measured** (this repo, FTS only, no embed, 24 cores, 2026-11-09): 826
   files (778 code, 48 docs), 19,971 fragments (19,377 code, 594 docs); 705
   code files cut at declarations, 71 in windows; 36 Markdown files at
@@ -407,14 +405,48 @@ Code: `internal/ragd/index.go`, `internal/ragd/codeseg.go`,
 - **Search.** `rag_search` on code or docs returns `start_line`, `end_line`
   (half-open) and `symbol`; `dun dund rag search` prints
   `path:start-last symbol`, the last line inclusive.
-- **Session search: not switched.** The session's code and doc tools are
-  still raglit's docs server under `/rag on`. Proposed switch: the session
-  sends `rag_index` for its workspace (trigger 1), and the docs tools and the
-  proactive docs search send `rag_search` to the code and docs indexes
-  through `raglink.go`, as memory recall does; `/rag on` would then be only
-  for raglitd's own corpora (attached indexes, the user's documents, the
-  raglit UI), and `/rag workspace` would decide whether dund indexes the
-  workspace.
+
+## Built: session code and doc search
+
+Code: `codesearch.go`, `raglink.go` (`Index`), `servers_runtime.go` (the
+wiring), `notify.go` (the groups' kind and pointer).
+
+- **Index.** A root session sends `rag_index {project, root: workspace}`
+  when it starts and again when each turn ends (`turnThenTriggers`, with or
+  without an error), in the background. Calls that come while one runs fold
+  into one more run. A child sends none: its edits are in its parent's
+  next turn end. No index is sent with `--no-dir`, nor for a workspace that
+  is the home directory or `/`. This is the interim trigger;
+  `codeLink.reindex` is the one seam raglit's watcher replaces.
+- **Search.** `rag_search` of both indexes at once, filtered to
+  `file://<workspace>/`: worktrees of one repo share the project slug and
+  so the indexes, and a search answers from its own tree only. Hits sort
+  by similarity where there is one, then score. Each hit is shown as
+  `path:start-end symbol` (the last line inclusive; raglit's span is
+  half-open), the path relative to the workspace.
+- **Tools.** No docs server (no `/rag on`): one new tool, `search` (query,
+  path, limit), over the code and docs indexes; it reads nothing whole,
+  `file_read` does. With the docs server: no new tool; raglit's `search`
+  with no `index` gets the code and docs hits after its JSON, and its
+  description says so. One tool named `search` either way.
+- **Proactive search.** `codeFinder` beside the memory finders and the docs
+  server's. Groups `code` and `workspace-docs`, each ranked on its own
+  (`surfacing.md`). A DocID is `path:start-end`; a fragment of at most 1500
+  characters is inlined from the file's lines, a longer one is a pointer to
+  `file_read`.
+- **`/rag on`.** The docs server no longer ingests the workspace
+  (`workspace.open` is skipped while code search is on): the workspace is
+  dund's. `/rag workspace` matters only with code search off.
+- **Off.** `DUN_CODE_SEARCH=0` (`Config.NoCodeSearch`), and `DUN_MEMORY=0`
+  (no RagLink). The Harbor adapter sets `DUN_CODE_SEARCH=0` by default.
+- **dund down.** Once per outage the session says search is degraded
+  (`OnNotify`); the tool says to use grep (exec) or `node_query`. Nothing
+  starts raglit's server.
+- **Measured** (this worktree, temp DUN_HOME, FTS only, 2026-11-09): first
+  index 827 files, the call 7.8 s, every job done 52 s after. Edit to hit
+  through `rag_index`: the call 0.11 to 0.12 s, the hit in `rag_search`
+  0.52 to 0.62 s after the edit (3 runs). Through a session, add the rest
+  of the turn: the call goes when the turn ends.
 
 ## Slices
 
@@ -454,8 +486,9 @@ Code: `internal/ragd/index.go`, `internal/ragd/codeseg.go`,
   PDF/image extraction are in dund's first slice anyway (USER, relayed by
   raglit-a4).
 
-- Does code and document indexing move into dund too, or only memory? The
-  indexes are built (above); sessions do not search them yet.
+- Worktree branches (a worktree's index as a raglit branch of the main
+  checkout's) and the tree watcher: raglit's to build (USER 2026-11-09).
+  Until then a worktree's files are a second copy in the project's indexes.
 - ragcore API stability and versioning between raglit and dun.
 - Merge for branches (raglit P6): needed when a sub-agent's index changes should
   land in the parent.
