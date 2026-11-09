@@ -1,10 +1,10 @@
 package ragd
 
 import (
-	"runtime/debug"
-
 	"github.com/iodesystems/poly-lsp-mcp/segment"
 	"github.com/iodesystems/raglit"
+
+	"github.com/iodesystems/dun/internal/depver"
 )
 
 // codeSeg is raglit.CodeSegmenter over poly-lsp-mcp's segment package, a
@@ -42,24 +42,11 @@ func (codeSeg) Runtime() string {
 	return "poly-lsp-mcp/segment@" + segmentVersion() + " " + segment.Runtime()
 }
 
-// segmentVersion is poly-lsp-mcp's module version in this binary's build
-// info (go.mod pins v0.5.0), "devel" when the binary has none (a go.work
-// replace).
-func segmentVersion() string {
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		for _, d := range bi.Deps {
-			if d.Path == "github.com/iodesystems/poly-lsp-mcp" {
-				if d.Replace != nil && d.Replace.Version != "" {
-					return d.Replace.Version
-				}
-				if d.Version != "" && d.Version != "(devel)" {
-					return d.Version
-				}
-			}
-		}
-	}
-	return "devel"
-}
+// segmentVersion is poly-lsp-mcp's version in this binary (depver): the
+// build info's, "devel" under a directory replace (a go.work), and go.mod's
+// pin when the build info lists no modules (a test binary from Go 1.26,
+// which read "devel" in CI while a Go 1.27 one read v0.5.0).
+func segmentVersion() string { return depver.Version(depver.PolyLSP) }
 
 // codeSpans copies segment.Spans field for field (raglit.CodeSpan is the
 // same shape on purpose).
