@@ -44,6 +44,13 @@ func capsFileIn(dir, endpoint, model string) string {
 // and its children may share an (endpoint, model).
 var capsMu sync.Mutex
 
+// capsStores counts the background stores OnLearn starts.
+var capsStores sync.WaitGroup
+
+// WaitCapsStores returns when every background store TrackCaps started has
+// finished. A test calls it before its store directory is removed.
+func WaitCapsStores() { capsStores.Wait() }
+
 // LoadCaps is the stored record for (endpoint, model); empty when none.
 func LoadCaps(endpoint, model string) llm.Capabilities {
 	return LoadCapsIn(CapsDir(), endpoint, model)
@@ -130,7 +137,9 @@ func TrackCaps(c *llm.Client, effortOff string) {
 	c.OnLearn = func(l llm.Learned) {
 		// OnLearn must not block the request, nor re-enter the Client:
 		// the snapshot is taken in the background, under the store's lock.
+		capsStores.Add(1)
 		go func() {
+			defer capsStores.Done()
 			if err := storeSnapshot(c); err != nil {
 				log.Printf("dun: capabilities: not stored: %v", err)
 			}
