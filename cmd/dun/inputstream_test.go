@@ -1,8 +1,8 @@
 package main
 
 import (
+	"io"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -99,14 +99,20 @@ func TestInputStreamSkipsJunk(t *testing.T) {
 // TestInputStreamResetCallback verifies that a "reset" event invokes the
 // callback installed via setResetCb.
 func TestInputStreamResetCallback(t *testing.T) {
-	s := newInputStreamFrom(strings.NewReader(
-		`{"type":"reset"}` + "\n" +
-			`{"type":"user","content":"after"}` + "\n"))
-	var called atomic.Bool
-	s.setResetCb(func() { called.Store(true) })
-	// Give the scanner a moment to process the reset event.
-	time.Sleep(50 * time.Millisecond)
-	if !called.Load() {
+	// The events go in after the callback is installed: a reset read before
+	// setResetCb is dropped (no queue, unlike the server and agent handlers),
+	// and a strings.Reader let the scanner win that race under load.
+	pr, pw := io.Pipe()
+	s := newInputStreamFrom(pr)
+	called := make(chan struct{})
+	s.setResetCb(func() { close(called) })
+	go func() {
+		_, _ = io.WriteString(pw, `{"type":"reset"}`+"\n"+`{"type":"user","content":"after"}`+"\n")
+		_ = pw.Close()
+	}()
+	select {
+	case <-called:
+	case <-time.After(5 * time.Second):
 		t.Fatal("reset callback not invoked")
 	}
 	if got := drain(t, s); len(got) != 1 || got[0] != "after" {

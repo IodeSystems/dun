@@ -166,7 +166,8 @@ func TestIndexFreshOnNewSegmenter(t *testing.T) {
 	}
 }
 
-// Runtime names the walk's module version and the pure-Go parser.
+// Runtime names the walk's module version (go.mod's, whether or not the
+// test binary's build info lists modules) and the pure-Go parser.
 func TestCodeSegRuntime(t *testing.T) {
 	rt := codeSeg{}.Runtime()
 	if !strings.HasPrefix(rt, "poly-lsp-mcp/segment@v0.5.0 gotreesitter") {

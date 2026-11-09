@@ -412,6 +412,9 @@ func main() {
 
 	if *ver {
 		fmt.Println("dun " + buildinfo.Version)
+		for _, l := range versionBlock() {
+			fmt.Println(l)
+		}
 		return
 	}
 	if *setup {

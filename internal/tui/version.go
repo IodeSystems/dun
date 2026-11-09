@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/depver"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
@@ -18,7 +19,9 @@ import (
 )
 
 // /version (USER 2026-10-28): which dun this is, the newest release, and the
-// update policy — whether this build updates itself, and from where.
+// update policy — whether this build updates itself, and from where. Then
+// the libraries compiled in and the tools dun runs, each against the
+// version this dun pins (USER 2026-11-09).
 
 // versionLatestMsg is the newest release, looked up for /version.
 type versionLatestMsg struct{ line string }
@@ -26,10 +29,25 @@ type versionLatestMsg struct{ line string }
 func versionSlash(m *tuiModel, _ []string) tea.Cmd {
 	m.append(StDim.Render(strings.Join(versionLines(time.Now()), "\n")))
 	m.refresh()
+	// The tools are `dun tools --json`'s rows (cmd/dun/toolscmd.go), as
+	// /upgrade reads them: their build info, never running them.
+	tools := func() tea.Msg { return versionLatestMsg{line: versionToolLines(runTools(false))} }
 	if !buildinfo.IsRelease() {
-		return nil // only release builds carry a download location
+		return tools // only release builds carry a download location
 	}
-	return func() tea.Msg { return versionLatestMsg{line: latestLine()} }
+	return tea.Batch(tools, func() tea.Msg { return versionLatestMsg{line: latestLine()} })
+}
+
+// versionToolLines is /version's tools block, a line per tool.
+func versionToolLines(rows []toolState, err error) string {
+	if err != nil {
+		return "tools: not checked — " + textfmt.PlainLine(err.Error())
+	}
+	lines := []string{"tools:"}
+	for _, r := range rows {
+		lines = append(lines, "  "+r.dep().Line())
+	}
+	return strings.Join(lines, "\n")
 }
 
 // versionLines is what /version says at once: the build and the policy.
@@ -45,7 +63,11 @@ func versionLines(now time.Time) []string {
 		}
 		out = append(out, fmt.Sprintf("dun %s · source build (%s) · %s", cur, buildinfo.Version, plat))
 	}
-	return append(out, "updates: "+updatePolicy(now))
+	out = append(out, "updates: "+updatePolicy(now), "modules:")
+	for _, l := range depver.ModuleLines() {
+		out = append(out, "  "+l)
+	}
+	return out
 }
 
 // updatePolicy says whether this build updates itself, and from where.
