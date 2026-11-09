@@ -4,8 +4,9 @@ Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
 3", "Built: slice 5"), and the strategies index (`strategies.md`); the rest
 is a proposal.
 Status note: raglit is at v0.7.0; RagHit carries start_line, end_line, symbol,
-content_id. No code segmenter (Models.Code) is plugged in: waits on the cgo and
-binary-size decision.
+content_id. The code and docs indexes are built by `rag_index` (below, "Built:
+code and docs indexes"), with poly-lsp-mcp's segmenter, pure Go. Sessions do
+not search them yet.
 Memory notes are indexed and recalled through dund (slice 5), with or
 without `/rag on`. Code and doc search still run on raglit, as a separate
 server and a bundled extension that is off unless `/rag on`. This file is
@@ -225,6 +226,7 @@ roles (main, child, vision for chat) may move into this map later.
 | `rag_forget` → `rag_forgotten` | project, index, path or url → url, removed (slice 5) |
 | `rag_sync` → `rag_synced` | project, index, files [path, title, tags], gone [path] → queued, current, removed (slice 5) |
 | `rag_tag` → `rag_tagged` | project, index, path or url, tags → url |
+| `rag_index` → `rag_indexed` | project (empty: root's slug), root → project, queued, current, removed, failed, code {…}, docs {…}, summary |
 
 An index the project does not keep is refused. A hit's path is its source
 URL (`file:///abs/path`). Hybrid with no embed model, or with one that
@@ -351,6 +353,69 @@ Built since: the strategies index, holding strategies and constraints
 (one file shape with memories: a short name, optional detail, global or
 project, important). See `strategies.md`.
 
+## Built: code and docs indexes
+
+`rag_index {project, root}` → `rag_indexed`, and `dun dund rag index [ROOT]`.
+Code: `internal/ragd/index.go`, `internal/ragd/codeseg.go`,
+`internal/dund/ragindex.go`.
+
+- **Pure Go (USER 2026-11-09).** dund imports
+  `github.com/iodesystems/poly-lsp-mcp/segment` v0.5.0 without
+  `-tags treesitter_cgo`: the parser is gotreesitter, and the release build is
+  unchanged (`CGO_ENABLED=0`). `codeSeg` is a copy of raglit's
+  `cmd/raglit/codesegment.go`; its `Runtime()` is
+  `poly-lsp-mcp/segment@v0.5.0 gotreesitter@…`. It is `Models.Code` of the
+  code+docs runner only; the memories+strategies runner has none. Binary:
+  55.5 MB → 65.9 MB (stripped, linux/amd64, +10.4 MB).
+- **Files.** The workspace ingest rules (`rag_ingest.go`: git's file list or
+  a walk that honors `.gitignore`, dependency and build directories, the
+  directory and file size limits, binary files, the `rag` section of
+  dun.json). dund calls `dun.IndexFiles(root)`; ragd does not import package
+  `dun`.
+- **Code or docs: by extension.** `.md .markdown .mdx .txt .rst .adoc .pdf`
+  go to docs; every other chosen file goes to code (`.gitignore`, `Makefile`
+  and `.json` too). A file never moves between the two. raglit cuts a file
+  the segmenter knows at its declarations (symbol, line span, doc comment
+  in) and Markdown at its headings (symbol is the heading path, `A.B`); text,
+  rst and the rest are read into windows.
+- **Incremental.** A file is queued when the index does not hold it or holds
+  other bytes (`DocSummary.ContentHash` against the file's sha256). A
+  document under `root` whose file is no longer chosen is removed. A file
+  whose newest job failed (raglit refuses minified files) after it last
+  changed is not queued; `failed` counts it. The index records the
+  segmenter's runtime (`index_meta` `dund_code_segmenter`); when it differs
+  (the first index with the segmenter, or a new poly-lsp-mcp), every held
+  file is queued Fresh, because raglit skips bytes it already holds. The
+  reply counts `queued, current, removed, failed`, per index and summed;
+  `project` empty is root's slug (`raglitProject`).
+- **Jobs.** Every file is a job on the code+docs runner; the reply comes
+  when the jobs are queued, not done (`rag jobs`).
+- **Trigger: on demand only** (`dun dund rag index`). Proposed, not built:
+  (1) at session start for the workspace, best-effort, in the background
+  (a no-change run on this repo is 0.06 to 0.1 s, so it costs nothing when
+  nothing changed); (2) dund re-runs it for each workspace a session has open
+  when a turn ends, which catches the agent's own edits; (3) a file watcher
+  (fsnotify is already in the module graph through poly-lsp-mcp), only if
+  (2) proves too late.
+- **Measured** (this repo, FTS only, no embed, 24 cores, 2026-11-09): 826
+  files (778 code, 48 docs), 19,971 fragments (19,377 code, 594 docs); 705
+  code files cut at declarations, 71 in windows; 36 Markdown files at
+  sections. First index 66 s from the call to the last job done; the call
+  itself 5 to 12 s (one queue insert per file, while the runner already
+  commits). A no-change re-run: 63 ms, nothing queued, 2 failed
+  (`xterm.js`, a test JSON: minified).
+- **Search.** `rag_search` on code or docs returns `start_line`, `end_line`
+  (half-open) and `symbol`; `dun dund rag search` prints
+  `path:start-last symbol`, the last line inclusive.
+- **Session search: not switched.** The session's code and doc tools are
+  still raglit's docs server under `/rag on`. Proposed switch: the session
+  sends `rag_index` for its workspace (trigger 1), and the docs tools and the
+  proactive docs search send `rag_search` to the code and docs indexes
+  through `raglink.go`, as memory recall does; `/rag on` would then be only
+  for raglitd's own corpora (attached indexes, the user's documents, the
+  raglit UI), and `/rag workspace` would decide whether dund indexes the
+  workspace.
+
 ## Slices
 
 1. raglit: split attest into types and service; semver tags (raglit's call).
@@ -389,8 +454,8 @@ project, important). See `strategies.md`.
   PDF/image extraction are in dund's first slice anyway (USER, relayed by
   raglit-a4).
 
-- Does code and document indexing move into dund too, or only memory? This
-  proposal assumes both.
+- Does code and document indexing move into dund too, or only memory? The
+  indexes are built (above); sessions do not search them yet.
 - ragcore API stability and versioning between raglit and dun.
 - Merge for branches (raglit P6): needed when a sub-agent's index changes should
   land in the parent.
