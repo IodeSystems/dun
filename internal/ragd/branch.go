@@ -3,7 +3,6 @@ package ragd
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -137,8 +136,14 @@ func (h *Host) openBranch(name, root, main string) (*raglit.Store, error) {
 	if st, ok := h.stores[name]; ok {
 		return st, nil
 	}
-	parent := raglit.Home(filepath.Join(h.root, parentOf(name)))
-	st, err := raglit.OpenBranch(parent, raglit.Home(filepath.Join(h.root, name)), root, main)
+	// Over dund's own handle on the parent, so the process holds one per
+	// index file. The branch's Close leaves it open; closeStores closes
+	// branches before parents.
+	parent, err := h.openLocked(parentOf(name))
+	if err != nil {
+		return nil, fmt.Errorf("rag: open branch %s: %w", name, err)
+	}
+	st, err := raglit.OpenBranchOn(parent, raglit.Home(filepath.Join(h.root, name)), root, main)
 	if err != nil {
 		return nil, fmt.Errorf("rag: open branch %s: %w", name, err)
 	}
@@ -159,18 +164,11 @@ func branchHomes(root string) []string {
 	return out
 }
 
-// branchMeta reads a branch home's branch.json (raglit.BranchMeta, which
-// raglit writes in the branch's home); ok is false when there is none.
+// branchMeta reads a branch home's BranchMeta (raglit.ReadBranch); ok is
+// false when there is none or it cannot be read.
 func branchMeta(home string) (raglit.BranchMeta, bool) {
-	b, err := os.ReadFile(filepath.Join(home, "branch.json"))
-	if err != nil {
-		return raglit.BranchMeta{}, false
-	}
-	var m raglit.BranchMeta
-	if json.Unmarshal(b, &m) != nil {
-		return raglit.BranchMeta{}, false
-	}
-	return m, true
+	m, ok, err := raglit.ReadBranch(raglit.Home(home))
+	return m, ok && err == nil
 }
 
 // rootAlive is GCBranches's alive: the worktree root is still a directory.

@@ -3,7 +3,7 @@
 Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
 3", "Built: slice 5"), and the strategies index (`strategies.md`); the rest
 is a proposal.
-Status note: raglit is at v0.8.0; RagHit carries start_line, end_line, symbol,
+Status note: raglit is at v0.8.1; RagHit carries start_line, end_line, symbol,
 content_id. The code and docs indexes are built by `rag_index` (below, "Built:
 code and docs indexes"), with poly-lsp-mcp's segmenter, pure Go, and sessions
 search them (below, "Built: session code and doc search"). A git worktree's
@@ -176,7 +176,7 @@ change re-queues the affected stages.
 
 ## Built: slice 2
 
-dund hosts raglit v0.8.0 (`internal/ragd`). Sessions use it for memory
+dund hosts raglit v0.8.1 (`internal/ragd`). Sessions use it for memory
 notes (slice 5); `dun dund rag` is the manual client.
 
 **Layout**, under `$DUN_HOME/dund/rag/`:
@@ -275,11 +275,10 @@ for the job's commit; a re-ingest leaves them alone. `rag_tag` replaces a
 document's tags with no ingest (no tags clears them). `rag_sync` sets the
 tags of every file it is given, current or not.
 
-**raglit calls** (raglit v0.8.0): every function and method dund calls is
+**raglit calls** (raglit v0.8.1): every function and method dund calls is
 pinned in raglit's `api_test.go`, except `Models.Embedder` and the
 `Embedder` fields `Client` and `Model` (the embed paths above), and the file
-name `branch.json` that dund reads a branch's `BranchMeta` from (raglit
-exports the type, not a reader). A file is ingested as a
+name `branch.json` (read through `ReadBranch`, which is pinned). A file is ingested as a
 queued job; text (memory notes) by `Store.Ingest` at once.
 
 ## Built: slice 3
@@ -531,12 +530,14 @@ USER 2026-11-09: worktrees are raglit branches. Code: `internal/ragd/branch.go`,
   `RemoveDocument` (a tombstone on a branch); none writes a parent's
   document. An `ErrParentOnly` from it is returned as an error naming the
   branch, never skipped.
-- **SQLITE_BUSY on remove.** raglit's `RemoveDocument` on a branch that the
-  runner writes returned SQLITE_BUSY at once, not after its busy_timeout:
-  7 of 90 runs of the branch tests; 1 of 90 with the walk's removals moved
-  before its queue. dund removes before it queues and retries a remove on
-  SQLITE_BUSY (`removeBusy`: 5 tries, 50 ms more each); the last error is
-  returned. With both, 0 of 120 runs failed. raglit's to fix (aw4 issue).
+- **One handle per index file.** A branch opens with `OpenBranchOn` over
+  dund's cached parent store (`Host.stores`), not `OpenBranch`, which opens
+  a second handle on the parent. The branch's `Close` leaves the parent
+  open; `closeStores` closes branches first, then parents. GC and start-up
+  read a branch's `BranchMeta` with `ReadBranch`.
+- **SQLITE_BUSY.** Fixed in raglit v0.8.1 (`_txlock=immediate` in the DSN:
+  an FTS5 config read inside a deferred BEGIN on a fresh pooled connection
+  returned SQLITE_BUSY at once). dund keeps no retry around removes.
 - **Search.** `rag_search` with a `root` that is a worktree, on code or docs,
   searches the branch (raglit overlays the parent at worktree paths; a main
   checkout path does not resolve through it). A worktree with no branch yet

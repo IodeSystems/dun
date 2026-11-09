@@ -294,6 +294,11 @@ func (h *Host) store(name string, create bool) (*raglit.Store, error) {
 func (h *Host) open(name string) (*raglit.Store, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.openLocked(name)
+}
+
+// openLocked is open under h.mu.
+func (h *Host) openLocked(name string) (*raglit.Store, error) {
 	if h.closed {
 		return nil, errors.New("rag: dund is stopping")
 	}
@@ -880,6 +885,14 @@ func (h *Host) Close(grace time.Duration) bool {
 func (h *Host) closeStores() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// Branches first: OpenBranchOn leaves the parent open, and the parent
+	// must outlive them.
+	for n, st := range h.stores {
+		if parentOf(n) != n {
+			_ = st.Close()
+			delete(h.stores, n)
+		}
+	}
 	for n, st := range h.stores {
 		_ = st.Close()
 		delete(h.stores, n)
