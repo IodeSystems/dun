@@ -54,6 +54,27 @@ type Beat struct {
 	// gen is bumped only by Spoke(), so the loop can tell "it said something
 	// while I was waiting" (reset the backoff) from "I fired" (advance it).
 	gen int
+
+	// Now and Sleep are the clock; nil is the real one. A test sets both to
+	// step the loop by hand: real sleeps of a few milliseconds failed CI
+	// when a loaded runner held the writer past a reminder interval.
+	Now   func() time.Time
+	Sleep func(time.Duration)
+}
+
+func (b *Beat) now() time.Time {
+	if b.Now != nil {
+		return b.Now()
+	}
+	return time.Now()
+}
+
+func (b *Beat) sleep(d time.Duration) {
+	if b.Sleep != nil {
+		b.Sleep(d)
+		return
+	}
+	time.Sleep(d)
 }
 
 func New() *Beat {
@@ -65,7 +86,7 @@ func New() *Beat {
 // silence deserves the same early attention as the first.
 func (b *Beat) Spoke() {
 	b.mu.Lock()
-	b.Last, b.gen = time.Now(), b.gen+1
+	b.Last, b.gen = b.now(), b.gen+1
 	b.mu.Unlock()
 }
 
@@ -89,8 +110,8 @@ func (b *Beat) Run(done func() bool, fire func(quiet time.Duration)) {
 		b.mu.Unlock()
 
 		iv := b.interval(step)
-		if wait := time.Until(last.Add(iv)); wait > 0 {
-			time.Sleep(wait)
+		if wait := last.Add(iv).Sub(b.now()); wait > 0 {
+			b.sleep(wait)
 		}
 		if done() {
 			return
@@ -102,7 +123,7 @@ func (b *Beat) Run(done func() bool, fire func(quiet time.Duration)) {
 			// Measure the NEXT interval from this reminder, not from the silence
 			// that earned it, or the backoff would fire the whole schedule at
 			// once. Not a Spoke(): the thing itself still has not said anything.
-			b.Last = time.Now()
+			b.Last = b.now()
 		}
 		b.mu.Unlock()
 		if spoke {

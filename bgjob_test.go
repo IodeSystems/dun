@@ -322,36 +322,103 @@ func TestJobs_TuneACommandsJob(t *testing.T) {
 // progress is already evidence of life, so a chatty job should never trigger a
 // reminder at all — and the reminder must not reset the silence it is reporting
 // on, or it would only ever fire once.
+//
+// The beat runs on a stepped clock: with real sleeps (a write every 5ms
+// against a 10ms reminder) a loaded CI runner held the writer past the
+// interval and the reminder fired, correctly, at a job that had gone quiet
+// (the v0.4.0 release run).
 func TestBgJob_HeartbeatIsDebouncedByTheJobsOwnOutput(t *testing.T) {
 	h := testHarness(t)
 	j := testJob(h, 10, "chatty")
 	j.mon = bgMonitor{EveryBytes: 1}
-	j.hb = fastHeartbeat()
+	clk := newStepClock()
+	j.hb = &heartbeat.Beat{Sched: []time.Duration{10 * time.Millisecond}, Every: 20 * time.Millisecond,
+		Last: clk.Now(), Now: clk.Now, Sleep: clk.Sleep}
 	go j.heartbeat()
+	defer clk.release()
 	defer j.finish(ExecResult{})
 
-	// Keep talking for well past several reminder intervals.
-	deadline := time.Now().Add(120 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		j.Write([]byte("still going\n"))
-		time.Sleep(5 * time.Millisecond)
-	}
-	for _, n := range h.notes() {
-		if strings.Contains(n, "STILL RUNNING") {
-			t.Fatalf("a job that keeps reporting must not also be reminded about: %q", n)
-		}
-	}
-
-	// Stop talking, and the reminder comes back.
-	waitFor(t, 3*time.Second, func() bool {
-		for _, n := range h.notes() {
-			if strings.Contains(n, "STILL RUNNING") {
-				return true
+	reminded := func() int {
+		n := 0
+		for _, s := range h.notes() {
+			if strings.Contains(s, "STILL RUNNING") {
+				n++
 			}
 		}
-		return false
-	})
+		return n
+	}
+	// Keep talking, each time before the reminder is due, for many intervals.
+	d := clk.slept()
+	for range 50 {
+		clk.add(d / 2)
+		j.Write([]byte("still going\n"))
+		clk.add(d - d/2)
+		d = clk.step()
+	}
+	if n := reminded(); n != 0 {
+		t.Fatalf("a job that keeps reporting must not also be reminded about: %d reminders", n)
+	}
+
+	// Stop talking, and the reminder comes back; and again, since a reminder
+	// is not the job speaking.
+	for i := range 2 {
+		clk.add(d)
+		d = clk.step()
+		if n := reminded(); n != 1 {
+			t.Fatalf("quiet interval %d: %d reminders, want 1", i+1, n)
+		}
+	}
 }
+
+// stepClock is a heartbeat.Beat clock the test steps: Sleep hands the
+// duration to the test and blocks until step.
+type stepClock struct {
+	mu    sync.Mutex
+	t     time.Time
+	sleep chan time.Duration
+	wake  chan struct{}
+}
+
+func newStepClock() *stepClock {
+	return &stepClock{t: time.Unix(1_800_000_000, 0), sleep: make(chan time.Duration), wake: make(chan struct{})}
+}
+
+func (c *stepClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *stepClock) Sleep(d time.Duration) {
+	c.sleep <- d
+	<-c.wake
+}
+
+func (c *stepClock) add(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+// slept waits for the beat to sleep and returns for how long.
+func (c *stepClock) slept() time.Duration {
+	select {
+	case d := <-c.sleep:
+		return d
+	case <-time.After(10 * time.Second):
+		panic("the heartbeat never slept")
+	}
+}
+
+// step wakes the beat and waits for its next sleep: whatever it fired in
+// between has been queued.
+func (c *stepClock) step() time.Duration {
+	c.wake <- struct{}{}
+	return c.slept()
+}
+
+// release lets a sleeping beat run to its end (after the job finished).
+func (c *stepClock) release() { close(c.wake) }
 
 // A heartbeat reports the ABSENCE of news, and must not buy a turn to do it.
 //
