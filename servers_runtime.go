@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	filetools "github.com/iodesystems/agentkit/files"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/dun/internal/mounttool"
@@ -741,8 +742,10 @@ func (h *Harness) rebuildTools() {
 	// worktree switch (Rehoist) moves their root with exec's.
 	ft := h.fileTools()
 	if ft != nil {
-		toolDefs = append(toolDefs, ft.Defs()...)
-		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h.addedNow, report)
+		// file_read gains whole: all of a file, bounded by the context left
+		// (wholeread.go). A dun wrapper; agentkit's caps are unchanged.
+		toolDefs = append(toolDefs, wholeReadDefs(ft.Defs(), ft.Name(filetools.Read))...)
+		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h.addedNow, h.readWhole, report)
 	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
