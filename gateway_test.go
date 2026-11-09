@@ -186,7 +186,7 @@ func TestGateway_RegainAfterDrop(t *testing.T) {
 	g.mu.Unlock()
 	g.drop(up)
 	tools := filterTools(h.mgr.GetTools(), h.specs)
-	call := mcpDispatcher(h.mgr, tools, nil, h.regainShared)
+	call := mcpDispatcher(h.mgr, tools, nil, h.regain)
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = "ctr__echo", `{"x":"again"}`
 	out, err := call(ctx, tc)

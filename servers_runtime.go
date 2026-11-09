@@ -698,7 +698,7 @@ func (h *Harness) rebuildTools() {
 	if h.ownMgr != nil {
 		caller = childCaller{h}
 	}
-	dispatch := mcpDispatcher(caller, tools, report, h.regainShared)
+	dispatch := mcpDispatcher(caller, tools, report, h.regain)
 	// The extensions the hooks go to, among the running servers.
 	exts := h.extensions()
 	searchers := searchExts(exts, tools)
