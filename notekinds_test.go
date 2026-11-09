@@ -251,3 +251,42 @@ func TestStrategies_OffWithoutARagLink(t *testing.T) {
 		t.Error("/memories add with no RagLink")
 	}
 }
+
+// The user's /memories add of an existing name replaces it: the old detail
+// is in the log, the file is indexed again, important stays; the model's
+// add of the same name is refused.
+func TestStrategies_UserAddReplaces(t *testing.T) {
+	f := &fakeRag{}
+	h, _ := itemHarness(t, f)
+	if _, err := h.MemoriesCommand("add constraint no-push Do not push."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.MemoriesCommand("important constraint:no-push"); err != nil {
+		t.Fatal(err)
+	}
+	n := len(ingestsOf(f))
+	out, err := h.MemoriesCommand("add constraint no-push Do not push unless the user asks.")
+	if err != nil || !strings.HasPrefix(out, "replaced constraint:no-push") {
+		t.Fatalf("replace: %q %v", out, err)
+	}
+	p := h.strategyStore().named(kindConstraint, "no-push")
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), "unless the user asks") || !strings.Contains(string(b), "important: true") {
+		t.Errorf("replaced file:\n%s", b)
+	}
+	in := ingestsOf(f)
+	if len(in) != n+1 || in[len(in)-1].Path != p {
+		t.Errorf("not indexed again: %+v", in)
+	}
+	log := readAttest(p)
+	if len(log) != 1 || log[0].Kind != "corrected" || log[0].Was != "Do not push." || log[0].By != "user" {
+		t.Errorf("log %+v", log)
+	}
+	// Another scope is another item.
+	if out, err := h.MemoriesCommand("add constraint global no-push Never push."); err != nil || strings.HasPrefix(out, "replaced") {
+		t.Errorf("global add: %q %v", out, err)
+	}
+	if out := callTool(t, h, "memory", map[string]any{"action": "add", "kind": "constraint", "name": "no-push"}); !strings.Contains(out, "exists") {
+		t.Errorf("the model's add of an existing name: %q", out)
+	}
+}

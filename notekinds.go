@@ -425,6 +425,15 @@ func (h *Harness) MemoriesCommand(action string) (string, error) {
 		if kind == kindMemory {
 			a.Question = strings.ReplaceAll(rest[0], "-", " ")
 		}
+		dir := m.dir
+		if a.Scope == "global" && m.global != "" {
+			dir = m.global
+		}
+		// The user's add replaces an item of the same kind, scope and name
+		// (USER 2026-11-08); the model's add refuses one.
+		if p := namedIn(dir, kind, itemSlug(a.Name)); p != "" {
+			return m.replace(p, a, h.noteMeta())
+		}
 		return m.apply(a, h.noteMeta())
 	case "rm":
 		m, _, err := h.itemArg(f[1])
@@ -478,4 +487,32 @@ func (h *Harness) itemArg(s string) (*memoryStore, string, error) {
 		return nil, "", fmt.Errorf("no %s named %q", kind, name)
 	}
 	return m, p, nil
+}
+
+// replace rewrites the item at path with a's detail, for the user's
+// /memories add of a name that exists. The old detail goes into the
+// attestation log (corrected, was), the file keeps its name, date and
+// important flag, and it is indexed again.
+func (m *memoryStore) replace(path string, a memoryArgs, meta noteMeta) (string, error) {
+	if err := scanItem(a); err != nil {
+		return "", err
+	}
+	old, err := readNote(path)
+	if err != nil {
+		return "", err
+	}
+	if err := m.attest(path, attestEntry{Kind: "corrected", Unit: old.unit(), Text: strings.TrimSpace(a.Content),
+		Note: "replaced by the user with /memories add", By: "user", Was: old.body}); err != nil {
+		return "", err
+	}
+	old.meta["refined"] = m.now().Format("2006-01-02")
+	delete(old.meta, "confirmed")
+	a.Question = cmp.Or(old.meta["question"], a.Question)
+	a.Tags = noteTags(old.meta)
+	a.Public = old.meta["public"] == "true"
+	down, err := m.write(path, a, noteMeta{Session: meta.Session, Commit: meta.Commit, extra: old.meta})
+	if err != nil {
+		return "", err
+	}
+	return "replaced " + noteKind(old.meta) + ":" + noteNameOf(path, old.meta) + " (the old detail is kept in its log)" + down, nil
 }

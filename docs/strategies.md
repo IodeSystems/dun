@@ -98,7 +98,7 @@ rest of `reading.md` (whole reads, budgets, `doc:`) is not.
 - **User**: `/memories`.
   - `/memories` lists all three kinds, important ones marked.
   - `/memories add memory|strategy|constraint [global] <name> [detail]`;
-    a name the scope already has is refused.
+    a name the scope already has is replaced (Decisions, below).
   - `/memories rm <kind:name>`: a void with the user as source (the file
     is kept as `*.md.void`).
   - `/memories important <kind:name>`, `/memories unimportant <kind:name>`.
@@ -124,10 +124,14 @@ lesson with `strategyStore().apply(memoryArgs{Action: "add", Kind:
 "strategy", ...})`, the same call the tool makes (hook noted at the top
 of `notekinds.go`).
 
-## Open
+## Decisions (USER 2026-11-08)
 
-- Whether the model may mark an item important (now: user only).
-- Whether the cap should be per kind instead of shared (now: 12 shared,
-  constraints first).
-- `/memories add` refuses an existing name; editing an item's detail is a
-  refine through the model, or rm then add.
+- Only the user marks an item important; the tool cannot.
+- The standing list holds 12 items shared across the kinds, constraints
+  first.
+- A name in both scopes resolves to the project's.
+- The user's `/memories add` of a name that exists (same kind, scope and
+  name) replaces it: the old detail goes into the attestation log
+  (`corrected`, `was`), the file keeps its name, date and important flag,
+  it is indexed again, and the reply says it replaced an item. The
+  model's add of an existing name is refused.
