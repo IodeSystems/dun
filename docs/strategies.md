@@ -146,15 +146,33 @@ resolved episode, never per round; lessons from resolutions only.
   so another command that works is the fix. A streak that never ends, is
   shorter than 3, or ends with a success on another target, gives
   nothing. The streak keeps its last 6 failed calls, each clipped (240
-  bytes of the command or arguments, 320 of the result). "Resolved" is
-  tool-level: the call worked; no verifier is asked.
-- **Call.** After the turn (in the background, the turn does not wait),
-  one side call per episode, kind `learn` in `/context`: no tools, no
+  bytes of the command or arguments, 320 of the result).
+- **Stall episode** (USER 2026-11-09). The stalled-plan nudge fired
+  (`plannudge.go`), then the main agent's plan moved (a node added, a
+  status, goal or done_when changed). It holds the rounds stalled, the
+  open nodes the nudge named, the last 6 calls before it, and the move.
+  Same cap, same gate.
+- **Gate: held until the task verifies** (USER 2026-11-09). Episodes are
+  held in the session (at most 12; the oldest go), and the lesson calls
+  are made only when the task verifies:
+  - the turn ended without an error, after an end-of-turn check in that
+    turn (`idlecheck.go`: the requirement checklist, or the open-nodes
+    note), and the main agent's plan has a done node and none open
+    (dropped counts as closed: a dropped approach replaced by another is
+    normal). The checklist has no structured answer, so "all met" is the
+    model ending the turn after it;
+  - or the user ends a worklog task as done (`/worklog end`, outcome
+    done): the only user signal of "it is done" dun has. No "accept the
+    result" command exists.
+  Episodes that never verify go with the session: they are held in
+  memory only.
+- **Call.** Once verified (in the background, the turn does not wait),
+  one side call per held episode, kind `learn` in `/context`: no tools, no
   history, `max_tokens` 400, about 1.2k tokens in. The prompt is the
   episode only; the task's text is not in it. The model answers
   `{name, detail, tags}` or `{"skip": true}`.
-- **Cap: 3 lesson calls per session** (`learnCap`). An episode past it is
-  dropped, not queued. Replay (below): 1 of 362 trials had more than 3.
+- **Cap: 3 lesson calls per session** (`learnCap`). It counts calls, not
+  episodes held; once 3 calls are made, no more episodes are held.
 - **Genericity filter** (`genericityError`, deterministic, after the
   call). Rejected:
   - shape: a detail over 400 bytes or 3 sentences, a name over 6 words;
@@ -172,10 +190,13 @@ resolved episode, never per round; lessons from resolutions only.
     dotted.name; not an ALL_CAPS variable such as `LD_LIBRARY_PATH`).
   It over-rejects on purpose: "python3" in the task rejects a lesson that
   says python3. No model self-check.
-- **Dedup.** Skipped, not written, when a strategy of the same name
+- **Dedup and recurrence.** Not written when a strategy of the same name
   exists or was voided (a rejected lesson is not proposed again), or one
   shares 70% of the shorter text's words: found by the strategies index
   (dund down: the files), candidates included, and among the voided ones.
+  When the match is a current candidate, a `recurred` entry (by
+  `dun:learn`) goes into its log; `/memories candidates` shows the count
+  ("seen 3×"). A recurrence never accepts it: only the user does.
 - **Write.** `strategyStore().apply` with kind strategy, project scope,
   the lesson's tags plus `candidate`: the file, the dund ingest, as the
   memory tool's add. Its attestation log gets `proposed`, by `dun:learn`.
@@ -183,7 +204,9 @@ resolved episode, never per round; lessons from resolutions only.
 - **Excluded from recall** by a tag filter in dun: the recall finder
   drops a hit whose file has the tag `candidate` (dund's search and the
   word search of the files). Not in raglit's filter: it keeps documents
-  with every tag given and cannot exclude one. A candidate still reads
+  with every tag given and cannot exclude one. raglit is asked for an
+  exclude-tag filter (`NotTags`, USER 2026-11-09); the drop in dun stays
+  until dund passes it. A candidate still reads
   with `file_read strategy:<name>`.
 - **Review** (`/memories`):
   - `/memories candidates` lists them;
@@ -197,10 +220,17 @@ resolved episode, never per round; lessons from resolutions only.
   sets; no dund link), and in a sub-agent.
 
 Replay (2026-11-09, no model calls: `TestLearn_Replay` with
-`DUN_CHURN_REPLAY` set to a glob of `agent/dun.jsonl`): 362 Terminal-Bench
-trials in `examples/harbor/jobs`; 44 had an episode, 58 episodes (35
-trials 1, 5 trials 2, 3 trials 3, 1 trial 4). By the trial's reward: 189
-passed with 15 episodes, 158 failed with 39, 15 unscored with 4.
+`DUN_CHURN_REPLAY` set to a glob of `agent/dun.jsonl`), 362 Terminal-Bench
+trials in `examples/harbor/jobs`, the trial's reward standing in for the
+gate:
+
+- failure episodes only (first slice): 58 episodes in 44 trials; 189
+  passed trials had 15, 158 failed had 39, 15 unscored had 4.
+- with stall episodes (approximated from the plan calls; the stream has
+  no plan state): 109 episodes in 62 trials, 51 of them stalls; passed
+  trials 22, failed 83, unscored 4.
+- lesson calls at 3 a trial: 99 without the gate, 22 with it. Most churn
+  is in trials that never verify, and the gate drops it.
 
 ## Decisions (USER 2026-11-08)
 
