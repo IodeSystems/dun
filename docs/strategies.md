@@ -148,9 +148,9 @@ resolved episode, never per round; lessons from resolutions only.
   nothing. The streak keeps its last 6 failed calls, each clipped (240
   bytes of the command or arguments, 320 of the result).
 - **Stall episode** (USER 2026-11-09). The stalled-plan nudge fired
-  (`plannudge.go`), then the main agent's plan moved (a node added, a
-  status, goal or done_when changed). It holds the rounds stalled, the
-  open nodes the nudge named, the last 6 calls before it, and the move.
+  (`plannudge.go`), then the main agent's plan moved (a node added, or its
+  status, details, done_when or needs changed). It holds the rounds stalled,
+  the open nodes the nudge named, the last 6 calls before it, and the move.
   Same cap, same gate.
 - **Gate: held until the task verifies** (USER 2026-11-09). Episodes are
   held in the session (at most 12; the oldest go), and the lesson calls

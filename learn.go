@@ -128,7 +128,7 @@ type churnEpisode struct {
 }
 
 // planMoveBrief says what a plan write moved: a node added, or its status,
-// goal or done_when changed.
+// details, done_when or needs changed.
 func planMoveBrief(cs []taskgraph.Change) string {
 	var parts []string
 	for _, c := range cs {
@@ -142,7 +142,7 @@ func planMoveBrief(cs []taskgraph.Change) string {
 		case b.Status != a.Status:
 			parts = append(parts, fmt.Sprintf("%q: %s → %s", a.Title, b.Status, a.Status))
 		default:
-			parts = append(parts, fmt.Sprintf("%q: goal or done_when changed", a.Title))
+			parts = append(parts, fmt.Sprintf("%q: details, done_when or needs changed", a.Title))
 		}
 	}
 	return strings.Join(parts, "; ")

@@ -18,7 +18,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/iodesystems/agentkit v0.26.0
+	github.com/iodesystems/agentkit v0.27.0
 	github.com/iodesystems/gwag/v2 v2.11.0
 	github.com/iodesystems/openai-claude-api-shim v0.6.0
 	github.com/iodesystems/poly-lsp-mcp v0.5.0
