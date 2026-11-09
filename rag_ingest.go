@@ -544,3 +544,22 @@ func (p IngestPlan) Summary() string {
 	}
 	return b.String()
 }
+
+// IndexFiles is what dund's code and docs indexes are given from root
+// (rag_index): the files these rules choose, with root's rag config, and the
+// summary line. A root that cannot be read yields no files.
+func IndexFiles(root string) ([]string, string) {
+	plan := planIngest(root, LoadRag(root))
+	var files []string
+	for _, f := range plan.Files {
+		if fi, err := os.Stat(f); err == nil && fi.Mode().IsRegular() {
+			files = append(files, f)
+		}
+	}
+	plan.Files = files
+	return files, plan.Summary()
+}
+
+// ProjectSlug is the project slug of workspace (raglitProject): the name of
+// its indexes in dund.
+func ProjectSlug(workspace string) string { return raglitProject(workspace) }

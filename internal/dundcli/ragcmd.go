@@ -75,11 +75,7 @@ func ragCmd(l *loader) *cobra.Command {
 					fmt.Fprintln(os.Stderr, "no hits")
 				}
 				for _, h := range out.Hits {
-					where := h.Path
-					if h.Page > 0 {
-						where += fmt.Sprintf(" p%d", h.Page)
-					}
-					fmt.Printf("%.4g  %s  %s\n    %s\n", h.Score, where, h.Title, oneLine(h.Text, 200))
+					fmt.Printf("%.4g  %s  %s\n    %s\n", h.Score, hitWhere(h), h.Title, oneLine(h.Text, 200))
 				}
 				return nil
 			})
@@ -181,6 +177,45 @@ func ragCmd(l *loader) *cobra.Command {
 		},
 	}
 
+	indexCmd := &cobra.Command{
+		Use:   "index [ROOT]",
+		Short: "index a project's code and docs from a directory (default: the current one)",
+		Long: "Walks ROOT with the workspace ingest rules (gitignore, the rag section of dun.json:\n" +
+			"size limits, dependency and build directories, binary files). Markdown, text, rst,\n" +
+			"AsciiDoc and PDF go to the docs index; every other file to code. A new or changed file\n" +
+			"(by content hash) is queued; a file gone from ROOT is removed. Run it again to\n" +
+			"catch up: an unchanged tree queues nothing. --project defaults to ROOT's slug.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			root := "."
+			if len(args) == 1 {
+				root = args[0]
+			}
+			abs, err := filepath.Abs(root)
+			if err != nil {
+				return err
+			}
+			l.load()
+			var out proto.RagIndexed
+			if err := ragCall(l, &proto.RagIndex{Project: project, Root: abs}, &out); err != nil {
+				return err
+			}
+			return show(out, func() error {
+				if out.Summary != "" {
+					fmt.Fprintln(os.Stderr, out.Summary)
+				}
+				fmt.Printf("%s: queued %d, current %d, removed %d (code %d/%d/%d, docs %d/%d/%d)\n",
+					out.Project, out.Queued, out.Current, out.Removed,
+					out.Code.Queued, out.Code.Current, out.Code.Removed,
+					out.Docs.Queued, out.Docs.Current, out.Docs.Removed)
+				if out.Failed > 0 {
+					fmt.Printf("%d failed and unchanged since (rag jobs --state error); queued again when changed\n", out.Failed)
+				}
+				return nil
+			})
+		},
+	}
+
 	probe := &cobra.Command{
 		Use:   "probe [" + strings.Join(ragd.Facets, "|") + "]",
 		Short: "probe the retrieval model roles (all, or one) and record the results",
@@ -244,7 +279,7 @@ func ragCmd(l *loader) *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(search, ingest, jobs, reembed, probe)
+	cmd.AddCommand(search, ingest, jobs, reembed, indexCmd, probe)
 	return cmd
 }
 
@@ -282,6 +317,25 @@ func ragCall(l *loader, payload any, out any) error {
 		}
 		return json.Unmarshal(b, out)
 	}
+}
+
+// hitWhere is a hit's file, without file://, with its lines as an editor
+// reads them ("path:12-30", the last line inclusive) and its symbol, or its
+// page for a paged document.
+func hitWhere(h proto.RagHit) string {
+	where := strings.TrimPrefix(h.Path, "file://")
+	switch {
+	case h.StartLine > 0 && h.EndLine > h.StartLine+1:
+		where += fmt.Sprintf(":%d-%d", h.StartLine, h.EndLine-1)
+	case h.StartLine > 0:
+		where += fmt.Sprintf(":%d", h.StartLine)
+	case h.Page > 0:
+		where += fmt.Sprintf(" p%d", h.Page)
+	}
+	if h.Symbol != "" {
+		where += " " + h.Symbol
+	}
+	return where
 }
 
 func dimSaid(n int) string {

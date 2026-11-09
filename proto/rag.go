@@ -13,6 +13,7 @@ func init() {
 	command[RagForget]("rag_forget")
 	command[RagSync]("rag_sync")
 	command[RagTag]("rag_tag")
+	command[RagIndex]("rag_index")
 	event[RagHits]("rag_hits")
 	event[RagIngested]("rag_ingested")
 	event[RagJobList]("rag_jobs")
@@ -20,6 +21,7 @@ func init() {
 	event[RagForgotten]("rag_forgotten")
 	event[RagSynced]("rag_synced")
 	event[RagTagged]("rag_tagged")
+	event[RagIndexed]("rag_indexed")
 }
 
 // RagFilter limits a search before ranking. Every constraint must hold.
@@ -208,4 +210,39 @@ type RagTag struct {
 // RagTagged answers RagTag: the document's source URL.
 type RagTagged struct {
 	URL string `json:"url"`
+}
+
+// RagIndex brings a project's code and docs indexes in step with the files
+// under Root (absolute), chosen by the workspace ingest rules (gitignore,
+// size limits, binary skip; dun's rag_ingest.go and the "rag" section of
+// dun.json). A prose file (Markdown, text, reStructuredText, AsciiDoc, PDF)
+// goes to docs, every other file to code. A file the index lacks or holds
+// with other bytes is queued; a document under Root whose file is no longer
+// chosen is removed. Empty Project is Root's project slug (dun's
+// raglitProject), not the global set: the global set has no code or docs.
+// Answered with RagIndexed.
+type RagIndex struct {
+	Project string `json:"project,omitempty"`
+	Root    string `json:"root"`
+}
+
+// RagIndexed answers RagIndex: the counts of each index and their sums.
+// Summary is the file rules' line: what was chosen and what was skipped.
+type RagIndexed struct {
+	Project string `json:"project"`
+	RagIndexCounts
+	Code    RagIndexCounts `json:"code"`
+	Docs    RagIndexCounts `json:"docs"`
+	Summary string         `json:"summary,omitempty"`
+}
+
+// RagIndexCounts is what a RagIndex did: files queued, files the index
+// already held as they are, documents removed, and files not queued
+// because their last job failed (raglit refused them: minified, unreadable)
+// after they last changed. A failed file is queued again when it changes.
+type RagIndexCounts struct {
+	Queued  int `json:"queued"`
+	Current int `json:"current"`
+	Removed int `json:"removed"`
+	Failed  int `json:"failed,omitempty"`
 }
