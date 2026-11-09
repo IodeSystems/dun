@@ -484,8 +484,14 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.URL == "" && err == nil {
 		indexes, sup = h.speaksIndex(s, command)
 	}
+	// dun's root guard (rootguard.go): a root of many repositories or too
+	// many files is not indexed whole.
+	excludes := s.Exclude
+	if s.URL == "" && err == nil && asksIndex(s) {
+		args, excludes = h.guardCodeRoot(s, args, excludes)
+	}
 	if indexes {
-		args = append(slices.Clone(args), excludeArgs(s.Exclude)...)
+		args = append(slices.Clone(args), excludeArgs(excludes)...)
 		// The project's startup budget, to a build that has one.
 		if sup.Budget && s.IndexBudget != "" {
 			args = append(args, "--index-budget", s.IndexBudget)
@@ -512,6 +518,10 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// workspace under $HOME.
 	if sup.Daemon && (sup.AnyRoot || underHome(h.cfg.Workspace)) && !slices.Contains(args, "--daemon") {
 		args = append(slices.Clone(args), "--daemon")
+	}
+	// Safe child-LSP limits, to a build that takes them (lspSafeArgs).
+	if safe := lspSafeArgs(s, sup, slices.Contains(args, "--daemon")); len(safe) > 0 {
+		args = append(slices.Clone(args), safe...)
 	}
 	h.markIndexBuilding(s.ID, indexes)
 	if s.URL == "" && err == nil {
@@ -699,6 +709,7 @@ func (h *Harness) rebuildTools() {
 		caller = childCaller{h}
 	}
 	dispatch := mcpDispatcher(caller, tools, report, h.regain)
+	dispatch = withCodeGuard(dispatch, h, tools)
 	// The extensions the hooks go to, among the running servers.
 	exts := h.extensions()
 	searchers := searchExts(exts, tools)
@@ -1125,6 +1136,12 @@ func missing(want, have []string) []string {
 func ingestWorkspace(sink *mcpDocsSink, workspace string, cfg *RagConfig) string {
 	if sink == nil {
 		return ""
+	}
+	// The root guard (rootguard.go), as for dund's code index.
+	if scan := scanRootCached(workspace); scan.TooBig() {
+		note := fmt.Sprintf("workspace ingest: %s holds %s: not ingested (dun's root guard)", workspace, scanSummary(scan))
+		log.Printf("dun: %s", note)
+		return note
 	}
 	plan := planIngest(workspace, cfg)
 	if len(plan.Files) == 0 {

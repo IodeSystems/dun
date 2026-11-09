@@ -185,3 +185,38 @@ func TestCodeSearch_SplitSpan(t *testing.T) {
 		}
 	}
 }
+
+// A workspace of many repositories is not indexed wholesale: no rag_index,
+// at start or at a turn's end. A small one is.
+func TestCodeSearch_RootGuard(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := manyRepos(t, 20)
+	rag := &fakeRag{}
+	h, err := Start(context.Background(), Config{Workspace: ws, Rag: rag, Client: &visionRunner{vision: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	if _, err := h.Ask(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := len(rag.indexCalls()); n != 0 {
+		t.Fatalf("%d rag_index calls for a root of 20 repos: %+v", n, rag.indexCalls())
+	}
+	if h.codeIndexRoot() != "" {
+		t.Fatalf("root %q", h.codeIndexRoot())
+	}
+
+	small := manyRepos(t, 2)
+	rag2 := &fakeRag{}
+	h2, err := Start(context.Background(), Config{Workspace: small, Rag: rag2, Client: &visionRunner{vision: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h2.Close)
+	waitFor(t, 5*time.Second, func() bool { return len(rag2.indexCalls()) == 1 })
+	if q := rag2.indexCalls()[0]; q.Root != filepath.Clean(small) {
+		t.Fatalf("rag_index %+v", q)
+	}
+}

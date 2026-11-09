@@ -917,7 +917,7 @@ func main() {
 				Turn: n.Turn, SinceLastSecs: n.SinceLastSecs, Cause: n.Cause})
 		}
 		// askMu: one question open at a time. Every question (the model's
-		// ask_user, a mount, dun's own "not a project") reads the next line of
+		// ask_user, a mount) reads the next line of
 		// in.answers; two open at once could each take the other's answer.
 		var askMu sync.Mutex
 		ask := func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {

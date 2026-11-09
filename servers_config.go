@@ -153,15 +153,24 @@ type ServerSpec struct {
 	Exclude []string `json:"exclude,omitempty"`
 	// IndexBudget is the server's index startup budget, as poly-lsp-mcp's
 	// --index-budget takes it ("48000ms", "20000ops", "0" unbounded); ""
-	// is its default. Written at project scope by /lsp budget and by
-	// dun when an index runs out of budget with nothing obvious to leave
-	// out.
+	// is its default. Written at project scope by /lsp budget, by the
+	// person only: dun never raises it on its own (indexstate.go).
 	IndexBudget string `json:"index_budget,omitempty"`
 	// IndexAnyway lets the server index a root that is not a project (the
 	// home directory, /, a directory of clones): passed as --index-anyway to
-	// a poly-lsp-mcp that takes it. Written at project scope when the person
-	// answers dun's question (askNotProject) or runs /lsp index-anyway.
+	// a poly-lsp-mcp that takes it, and it lifts dun's root guard
+	// (rootguard.go). Written at project scope only when the person runs
+	// /lsp index-anyway on (indexanyway.go): no tool and no answer to a
+	// question sets it.
 	IndexAnyway bool `json:"index_anyway,omitempty"`
+	// LSPRoots, LSPMaxRSSMB and LSPIdleStop replace dun's safe defaults for
+	// a poly-lsp-mcp's child LSPs (--lsp-roots single, --lsp-max-rss-mb
+	// 2048, --lsp-idle-stop 5m; lspSafeArgs), as those flags take them
+	// ("auto", 0 = no limit, "0" = never). Set by the person in a config
+	// file; dun writes none of them.
+	LSPRoots    string `json:"lsp_roots,omitempty"`
+	LSPMaxRSSMB *int   `json:"lsp_max_rss_mb,omitempty"`
+	LSPIdleStop string `json:"lsp_idle_stop,omitempty"`
 	// Wake lets the server's messages start a turn on an idle session
 	// (serverwake.go). Each wake is a turn someone pays for, so it is off
 	// unless set here.
@@ -641,6 +650,15 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	}
 	if next.IndexAnyway {
 		out.IndexAnyway = true
+	}
+	if next.LSPRoots != "" {
+		out.LSPRoots = next.LSPRoots
+	}
+	if next.LSPMaxRSSMB != nil {
+		out.LSPMaxRSSMB = next.LSPMaxRSSMB
+	}
+	if next.LSPIdleStop != "" {
+		out.LSPIdleStop = next.LSPIdleStop
 	}
 	if next.Wake {
 		out.Wake = true

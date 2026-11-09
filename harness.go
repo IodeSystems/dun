@@ -425,8 +425,11 @@ type Harness struct {
 	index        map[string]*indexState
 	indexSeen    map[string]bool
 	indexRetried map[string]bool
-	// indexAsked: servers whose not-a-project question was put this session.
+	// indexAsked: servers whose not-a-project line was said this session.
 	indexAsked map[string]bool
+	// codeGuards are the poly-lsp servers under the root guard
+	// (codeguard.go), by id. Guarded by srvMu.
+	codeGuards map[string]*codeGuard
 	// setup is each server's install-hint report (setupstate.go); setupSaid
 	// the servers whose one line has been said. Guarded by srvMu.
 	setup     map[string]*SetupReport
@@ -495,6 +498,10 @@ type Harness struct {
 	// (codesearch.go), once per harness (a child uses its parent's).
 	codeLinkOnce sync.Once
 	codeLinkV    *codeLink
+	// codeRootOnce makes codeRootV, the root the code index takes: the
+	// workspace, or "" when the root guard keeps it out (codeIndexRoot).
+	codeRootOnce sync.Once
+	codeRootV    string
 	listed       atomic.Pointer[map[string]bool]
 	// catalog is what each started server offers besides tools: skills and
 	// prompts (skills.go). Guarded by srvMu.

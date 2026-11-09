@@ -298,14 +298,38 @@ func codeSearchRoot(ws string) bool {
 }
 
 // codeReindex is the trigger: at session start and at each turn end of a
-// root session (a child's turns end inside its parent's).
+// root session (a child's turns end inside its parent's). The root guard's
+// count runs off the caller's goroutine, once per session (codeIndexRoot).
 func (h *Harness) codeReindex() {
 	if h.isChild() {
 		return
 	}
 	if l := h.codeLink(); l != nil {
-		l.reindex(filepath.Clean(h.cfg.Workspace))
+		go func() {
+			if root := h.codeIndexRoot(); root != "" {
+				l.reindex(root)
+			}
+		}()
 	}
+}
+
+// codeIndexRoot is the root rag_index takes: the workspace, or "" when the
+// root guard (rootguard.go) finds it too big — 3 or more repositories, or
+// over 50,000 files — which is then not indexed wholesale, said once in the
+// log. Such a workspace is no repository dund could take instead: one
+// inside a repository is too big by its own files, and the repository
+// holds them.
+func (h *Harness) codeIndexRoot() string {
+	h.codeRootOnce.Do(func() {
+		ws := filepath.Clean(h.cfg.Workspace)
+		scan := scanRootCached(ws)
+		if !scan.TooBig() {
+			h.codeRootV = ws
+			return
+		}
+		log.Printf("dun: code search: %s holds %s: not indexed (dun's root guard; took %s)", ws, scanSummary(scan), scan.Took.Round(time.Millisecond))
+	})
+	return h.codeRootV
 }
 
 // codeSearchLimit is the hits a search tool call returns by default.
