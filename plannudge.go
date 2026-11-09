@@ -103,14 +103,17 @@ type planNudge struct {
 	moved, stalls int
 	// churn is the current failure streak's last attempts, in brief, for
 	// the learning phase (learn.go). Its length is not a count: fails is.
-	churn []churnAttempt
+	// recent is the turn's last calls, failed or not; stallEp is the
+	// episode a stall nudge opened, which the next plan move resolves.
+	churn, recent []churnAttempt
+	stallEp       *churnEpisode
 }
 
 func (n *planNudge) reset() {
 	n.mu.Lock()
 	n.fails, n.done, n.force = 0, false, false
 	n.moved, n.stalls = 0, 0
-	n.churn = nil
+	n.churn, n.recent, n.stallEp = nil, nil, nil
 	n.mu.Unlock()
 }
 
@@ -198,6 +201,11 @@ func (h *Harness) planStallRound() {
 	}
 	h.nudge.stalls++
 	h.nudge.moved = n // the window starts again
+	// The learning phase's stall episode: the plan moving next resolves it
+	// (planMoved). A second stall before a move keeps the first.
+	if h.nudge.stallEp == nil {
+		h.nudge.stallEp = &churnEpisode{Stall: still, Open: names, Tried: slices.Clone(h.nudge.recent)}
+	}
 	h.nudge.force = true
 	h.AsideWith(fmt.Sprintf(planStallText, still, len(open), strings.Join(names, "; ")),
 		AsideOpts{Key: "plan-stall", TurnScoped: true})
@@ -216,7 +224,13 @@ func (h *Harness) planMoved(cs []taskgraph.Change) {
 	n := int(h.turnRounds.n.Load())
 	h.nudge.mu.Lock()
 	h.nudge.moved = n
+	ep := h.nudge.stallEp
+	h.nudge.stallEp = nil
 	h.nudge.mu.Unlock()
+	if ep != nil {
+		ep.Fix = churnAttempt{Tool: taskgraph.ToolName, Target: taskgraph.ToolName, Args: clipMiddle(planMoveBrief(cs), churnArgsMax)}
+		h.learnQueue(ep)
+	}
 }
 
 // planMove reports whether a change moves the plan: a node added, its status
@@ -240,6 +254,7 @@ func (h *Harness) planNudgeResult(failed bool, a churnAttempt) *churnEpisode {
 	limit := h.planNudgeFails()
 	h.nudge.mu.Lock()
 	defer h.nudge.mu.Unlock()
+	h.nudge.recent = churnKeepLast(h.nudge.recent, a)
 	if !failed {
 		ep := churnResolved(h.nudge.fails, h.nudge.churn, a)
 		h.nudge.fails, h.nudge.churn = 0, nil

@@ -18,6 +18,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/agentkit/taskgraph"
 )
 
 // learn.go — the learning phase, first slice: churn → resolved candidate →
@@ -30,11 +31,28 @@ import (
 // another target, or never ended, produces nothing: lessons come from
 // resolutions only (USER 2026-11-09).
 //
-// Lesson: after the turn (learnAfterTurn), one side call per episode (kind
+// A stall episode (USER 2026-11-09): the stalled-plan nudge fired
+// (planStallRound), then the main agent's plan moved (planMoved). It holds
+// the open nodes, the rounds stalled, the calls before the nudge, and the
+// move. Same cap and gate.
+//
+// Gate (USER 2026-11-09): episodes are held in the session until the task
+// verifies, and only then is a lesson call made (learnVerified):
+//   - the turn ended without an error, after an end-of-turn check in that
+//     turn (idlecheck.go: the requirement checklist, or the open-nodes
+//     note), with a plan of at least one done node and none open (done or
+//     dropped: a dropped approach replaced by another is closed); or
+//   - the user ends a worklog task as done (/worklog end): the one user
+//     signal of "it is done" dun has.
+// Episodes that never verify are dropped with the session: they are held
+// in memory only.
+//
+// Lesson: once verified (learnVerified), one side call per episode (kind
 // "learn": no tools, no history, at most learnMaxTokens out, a prompt of at
 // most churnKeep failed calls and the fix, each clipped) turns it into a
-// candidate {name, detail, tags}. At most learnCap calls per session; an
-// episode past the cap is dropped, not queued. The model may answer skip.
+// candidate {name, detail, tags}. At most learnCap calls per session: the
+// cap counts calls, not episodes held; at most learnHoldMax are held (the
+// oldest go). The model may answer skip.
 // The task's text is not in the prompt.
 //
 // Genericity (genericityError): deterministic heuristics reject a detail
@@ -48,7 +66,10 @@ import (
 // ingest), with a "proposed" entry in its attestation log. It is not
 // important: only the user marks that. Recall leaves candidates out
 // (memFinder: a tag filter in dun, as raglit's filter keeps tags and cannot
-// exclude one). The user reviews them: /memories candidates, accept (the
+// exclude one; raglit is asked for NotTags, USER 2026-11-09). A lesson that
+// comes back as a current candidate adds a "recurred" entry to its log, the
+// count /memories candidates shows; it is never accepted for the user.
+// The user reviews them: /memories candidates, accept (the
 // tag goes, a "confirmed" entry by the user), reject (a void by the user).
 //
 // Off without a strategies store (DUN_MEMORY=0 or no dund link; the Harbor
@@ -70,6 +91,8 @@ const (
 	learnCap = 3
 	// learnMaxTokens caps one lesson call's answer.
 	learnMaxTokens = 400
+	// learnHoldMax is how many episodes wait for the task to verify.
+	learnHoldMax = 12
 	// learnTimeout bounds one lesson call.
 	learnTimeout = 90 * time.Second
 
@@ -92,10 +115,37 @@ type churnAttempt struct {
 
 // churnEpisode is a resolved streak: its length, its last failed calls
 // (oldest first), and the call that worked.
+//
+// A stall episode has Stall (the rounds with no plan move) and Open (the
+// open nodes the nudge named) instead of Fails; Tried is the calls before
+// the nudge, and Fix the plan move.
 type churnEpisode struct {
 	Fails int
+	Stall int
+	Open  []string
 	Tried []churnAttempt
 	Fix   churnAttempt
+}
+
+// planMoveBrief says what a plan write moved: a node added, or its status,
+// goal or done_when changed.
+func planMoveBrief(cs []taskgraph.Change) string {
+	var parts []string
+	for _, c := range cs {
+		if !planMove(c) {
+			continue
+		}
+		a := c.After
+		switch b := c.Before; {
+		case b == nil:
+			parts = append(parts, fmt.Sprintf("added %q (done when: %s)", a.Title, a.DoneWhen))
+		case b.Status != a.Status:
+			parts = append(parts, fmt.Sprintf("%q: %s → %s", a.Title, b.Status, a.Status))
+		default:
+			parts = append(parts, fmt.Sprintf("%q: goal or done_when changed", a.Title))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // newChurnAttempt is a call in brief: an exec's command, else a path, else
@@ -171,36 +221,71 @@ type learnState struct {
 	pending []churnEpisode
 	calls   int        // lesson calls this session (learnCap)
 	run     sync.Mutex // one flush at a time
+	wg      sync.WaitGroup
 }
 
 // learnOn reports whether this session learns: the main agent, with a
 // strategies store.
 func (h *Harness) learnOn() bool { return !h.isChild() && h.strategyStore() != nil }
 
-// learnQueue keeps a resolved episode for the end of the turn, while the
-// session's cap has room.
+// learnQueue holds a resolved episode until the task verifies, while the
+// session has lesson calls left.
 func (h *Harness) learnQueue(ep *churnEpisode) {
 	if ep == nil || !h.learnOn() {
 		return
 	}
 	h.learn.mu.Lock()
 	defer h.learn.mu.Unlock()
-	if h.learn.calls+len(h.learn.pending) < learnCap {
-		h.learn.pending = append(h.learn.pending, *ep)
+	if h.learn.calls >= learnCap {
+		return
+	}
+	h.learn.pending = append(h.learn.pending, *ep)
+	if len(h.learn.pending) > learnHoldMax {
+		h.learn.pending = slices.Clone(h.learn.pending[len(h.learn.pending)-learnHoldMax:])
 	}
 }
 
-// learnAfterTurn turns the turn's episodes into candidates, in the
+// learnAfterTurn releases the held episodes when the turn verified the
+// task (taskVerified).
+func (h *Harness) learnAfterTurn(ctx context.Context, err error) {
+	if err == nil && h.taskVerified() {
+		h.learnVerified(ctx)
+	}
+}
+
+// taskVerified: an end-of-turn check was given in this turn, and the main
+// agent's plan has a done node and none open.
+func (h *Harness) taskVerified() bool {
+	if !h.idle.wasChecked() {
+		return false
+	}
+	g, err := planStore{h}.View(context.Background())
+	if err != nil {
+		return false
+	}
+	done := false
+	for _, n := range g.Nodes {
+		if planOpen(n) {
+			return false
+		}
+		done = done || n.Status == taskgraph.Done
+	}
+	return done
+}
+
+// learnVerified turns the held episodes into candidates, in the
 // background: the turn does not wait on it.
-func (h *Harness) learnAfterTurn(ctx context.Context) {
+func (h *Harness) learnVerified(ctx context.Context) {
 	h.learn.mu.Lock()
 	n := len(h.learn.pending)
 	h.learn.mu.Unlock()
-	if n == 0 {
+	if n == 0 || !h.learnOn() {
 		return
 	}
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), learnTimeout*learnCap)
+	h.learn.wg.Add(1)
 	go func() {
+		defer h.learn.wg.Done()
 		defer cancel()
 		for _, out := range h.learnFlush(fctx) {
 			log.Printf("dun: learn: %s", out)
@@ -260,7 +345,12 @@ func (h *Harness) learnOne(ctx context.Context, ep churnEpisode) string {
 	if err := genericityError(c, h.learnTaskText(), episodeText(ep), workspaceNames(h.cfg.Workspace)); err != nil {
 		return "rejected " + c.Name + ": " + err.Error()
 	}
-	if dup := h.lessonDuplicate(ctx, s, c); dup != "" {
+	if dup, cand := h.lessonDuplicate(ctx, s, c); dup != "" {
+		if cand != "" {
+			n, _ := readNote(cand)
+			_ = s.attest(cand, attestEntry{Kind: "recurred", Unit: n.unit(), By: "dun:learn", Note: "proposed again as " + c.Name})
+			return "recurred " + c.Name + ": " + dup
+		}
 		return "skipped " + c.Name + ": " + dup
 	}
 	out, err := s.apply(memoryArgs{Action: "add", Kind: kindStrategy, Name: c.Name, Content: c.Detail,
@@ -271,12 +361,20 @@ func (h *Harness) learnOne(ctx context.Context, ep churnEpisode) string {
 	if p := s.named(kindStrategy, c.Name); p != "" {
 		n, _ := readNote(p)
 		_ = s.attest(p, attestEntry{Kind: "proposed", Unit: n.unit(), By: "dun:learn",
-			Note: fmt.Sprintf("learning phase: %d failed calls in a row, then a %s call worked", ep.Fails, ep.Fix.Tool)})
+			Note: episodeNote(ep)})
 	}
 	if h.cfg.OnNotify != nil {
 		h.cfg.OnNotify("learned a candidate strategy:" + c.Name + " — /memories candidates to accept or reject it")
 	}
 	return out
+}
+
+// episodeNote is a candidate's proposed entry: where it came from.
+func episodeNote(ep churnEpisode) string {
+	if ep.Stall > 0 {
+		return fmt.Sprintf("learning phase: the plan stalled %d rounds, then moved", ep.Stall)
+	}
+	return fmt.Sprintf("learning phase: %d failed calls in a row, then a %s call worked", ep.Fails, ep.Fix.Tool)
 }
 
 // learnInstruction is the lesson call's prompt head. Model-facing.
@@ -292,9 +390,25 @@ Answer with one JSON object and nothing else:
 {"name": "<2 to 5 words, kebab-case>", "detail": "<at most 3 sentences>", "tags": ["<1 to 3 short topic words>"]}
 `
 
+// learnStallInstruction is learnInstruction for a stall episode.
+// Model-facing.
+var learnStallInstruction = strings.Replace(learnInstruction,
+	"made several tool calls in a row that failed, then a call that worked",
+	"stopped making progress on its plan, then changed the plan and the task was finished", 1)
+
 // learnPrompt is the episode in brief, after learnInstruction.
 func learnPrompt(ep churnEpisode) string {
 	var b strings.Builder
+	if ep.Stall > 0 {
+		b.WriteString(learnStallInstruction)
+		fmt.Fprintf(&b, "\nThe plan did not move for %d rounds. Open steps: %s\n", ep.Stall, flatLine(strings.Join(ep.Open, "; ")))
+		fmt.Fprintf(&b, "\nIts last calls before that (oldest first):\n")
+		for i, t := range ep.Tried {
+			fmt.Fprintf(&b, "%d. %s: %s\n   result: %s\n", i+1, t.Tool, flatLine(t.Args), flatLine(t.Out))
+		}
+		fmt.Fprintf(&b, "\nThen it changed the plan: %s\n", flatLine(ep.Fix.Args))
+		return b.String()
+	}
 	b.WriteString(learnInstruction)
 	fmt.Fprintf(&b, "\nFailed calls (%d in a row; the last %d, oldest first):\n", ep.Fails, len(ep.Tried))
 	for i, t := range ep.Tried {
@@ -571,9 +685,18 @@ func sharedRun(a, b string, n int) string {
 // its name (current or voided: a rejected lesson is not proposed again),
 // or one that shares lessonOverlap of the shorter text's words, found by
 // the strategies index (dund down: the files) or among the voided ones.
-func (h *Harness) lessonDuplicate(ctx context.Context, s *memoryStore, c lesson) string {
+//
+// cand is the current candidate it repeats, "" for any other match: a
+// recurrence is counted on a candidate only.
+func (h *Harness) lessonDuplicate(ctx context.Context, s *memoryStore, c lesson) (dup, cand string) {
+	ifCand := func(p string) string {
+		if isCandidate(p) {
+			return p
+		}
+		return ""
+	}
 	if p := s.named(kindStrategy, c.Name); p != "" {
-		return "strategy:" + c.Name + " exists"
+		return "strategy:" + c.Name + " exists", ifCand(p)
 	}
 	terms := queryTerms(c.Name + " " + c.Detail)
 	same := func(p string) bool {
@@ -586,10 +709,10 @@ func (h *Harness) lessonDuplicate(ctx context.Context, s *memoryStore, c lesson)
 		for _, p := range voided {
 			n, err := readNote(p)
 			if err == nil && noteKind(n.meta) == kindStrategy && noteNameOf(strings.TrimSuffix(p, voidSuffix), n.meta) == c.Name {
-				return "strategy:" + c.Name + " was voided"
+				return "strategy:" + c.Name + " was voided", ""
 			}
 			if same(p) {
-				return "like the voided " + filepath.Base(p)
+				return "like the voided " + filepath.Base(p), ""
 			}
 		}
 	}
@@ -598,11 +721,11 @@ func (h *Harness) lessonDuplicate(ctx context.Context, s *memoryStore, c lesson)
 		for _, hit := range hits {
 			if same(hit.DocID) {
 				n, _ := readNote(hit.DocID)
-				return "like strategy:" + noteNameOf(hit.DocID, n.meta)
+				return "like strategy:" + noteNameOf(hit.DocID, n.meta), ifCand(hit.DocID)
 			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // termOverlap is the share of the shorter list's terms the other holds.
@@ -646,6 +769,9 @@ func (h *Harness) candidatesListing() (string, error) {
 		}
 		n++
 		fmt.Fprintf(&b, "\n  %s:%s  %s  · %s", i.Kind, i.Name, i.Body, i.Date)
+		if i.Recurred > 0 {
+			fmt.Fprintf(&b, " · seen %d×", i.Recurred+1)
+		}
 	}
 	if n == 0 {
 		return "candidates: none — the learning phase proposes a strategy when a run of failed calls ends in one that works", nil

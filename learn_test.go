@@ -110,8 +110,14 @@ func TestLearn_EpisodeBecomesOneCandidate(t *testing.T) {
 	}
 	// The same lesson again: one call, no second strategy.
 	runSteps(t, h, churn(4)...)
-	if outs := h.learnFlush(context.Background()); r.called != 2 || len(outs) != 1 || !strings.Contains(outs[0], "skipped") {
+	if outs := h.learnFlush(context.Background()); r.called != 2 || len(outs) != 1 || !strings.Contains(outs[0], "recurred") {
 		t.Errorf("second: calls %d, %q", r.called, outs)
+	}
+	if out, _ := h.MemoriesCommand("candidates"); !strings.Contains(out, "seen 2×") {
+		t.Errorf("recurrence not shown: %q", out)
+	}
+	if es := readAttest(p); es[len(es)-1].Kind != "recurred" || !isCandidate(p) {
+		t.Errorf("recurrence not in the log, or accepted: %+v", es)
 	}
 }
 
@@ -277,5 +283,96 @@ func TestLearn_ModelCannotTagOrUntagCandidates(t *testing.T) {
 	if p := h.strategyStore().named(kindStrategy, "install-missing-build-tools"); !isCandidate(p) {
 		b, _ := os.ReadFile(p)
 		t.Errorf("refine dropped the tag:\n%s", b)
+	}
+}
+
+// held is the episodes waiting for the task to verify.
+func held(h *Harness) []churnEpisode {
+	h.learn.mu.Lock()
+	defer h.learn.mu.Unlock()
+	return slices.Clone(h.learn.pending)
+}
+
+// An episode waits for the task to verify: not on a turn with no check, nor
+// with a node open; on a turn that had the check and a plan all done.
+func TestLearn_HeldUntilTheTaskVerifies(t *testing.T) {
+	h, r := learnHarness(t, &fakeRag{}, genericLesson)
+	runSteps(t, h, churn(3)...)
+	h.learnAfterTurn(context.Background(), nil)
+	planCall(t, h, `{"action":"add","title":"build it","done_when":"it builds"}`)
+	h.idle.mark()
+	h.learnAfterTurn(context.Background(), nil) // a node open
+	planCall(t, h, `{"action":"update","id":"1","status":"doing"}`)
+	planCall(t, h, `{"action":"done","id":"1","account":"it builds"}`)
+	h.learnAfterTurn(context.Background(), context.Canceled) // the turn failed
+	h.learn.wg.Wait()
+	if r.called != 0 || len(held(h)) != 1 {
+		t.Fatalf("called %d before verification, held %d", r.called, len(held(h)))
+	}
+	h.learnAfterTurn(context.Background(), nil)
+	h.learn.wg.Wait()
+	if r.called != 1 || len(held(h)) != 0 {
+		t.Errorf("verified: called %d, held %d", r.called, len(held(h)))
+	}
+}
+
+// The user ending a worklog task as done verifies it.
+func TestLearn_WorklogEndDoneVerifies(t *testing.T) {
+	h, r := learnHarness(t, &fakeRag{}, genericLesson)
+	if _, err := h.WorklogCmd("start build it"); err != nil {
+		t.Fatal(err)
+	}
+	runSteps(t, h, churn(3)...)
+	if _, err := h.WorklogCmd("end done it builds"); err != nil {
+		t.Fatal(err)
+	}
+	h.learn.wg.Wait()
+	if r.called != 1 {
+		t.Errorf("called %d", r.called)
+	}
+}
+
+// The cap counts calls, not episodes held: more episodes than the cap are
+// held, and the calls stop at the cap.
+func TestLearn_CapCountsCallsNotHeld(t *testing.T) {
+	h, r := learnHarness(t, &fakeRag{}, genericLesson)
+	for range learnCap + 2 {
+		runSteps(t, h, churn(3)...)
+	}
+	if n := len(held(h)); n != learnCap+2 {
+		t.Errorf("held %d", n)
+	}
+	h.learnFlush(context.Background())
+	if r.called != learnCap || len(held(h)) != 0 {
+		t.Errorf("called %d, held %d", r.called, len(held(h)))
+	}
+}
+
+// A stalled plan that moves after the stall nudge is an episode: its
+// prompt names the stall, the open nodes, the calls before, and the move.
+func TestLearn_StalledPlanThatMovesIsAnEpisode(t *testing.T) {
+	h, r := learnHarness(t, &fakeRag{}, genericLesson)
+	names := []string{"exec", "plan"}
+	h.toolNames.Store(&names)
+	planCall(t, h, `{"action":"add","title":"build it","done_when":"it builds"}`)
+	runSteps(t, h, execStep("make", false), execStep("make again", false))
+	h.cfg.PlanStallRounds = 3
+	h.turnRounds.n.Store(10)
+	h.planStallRound()
+	if h.nudge.stalls != 1 || len(held(h)) != 0 {
+		t.Fatalf("stalls %d, held %d", h.nudge.stalls, len(held(h)))
+	}
+	planCall(t, h, `{"action":"drop","id":"1","reason":"wrong approach"}`)
+	planCall(t, h, `{"action":"add","title":"build with the other tool","done_when":"it builds"}`)
+	eps := held(h)
+	if len(eps) != 1 || eps[0].Stall != 10 || len(eps[0].Tried) != 2 {
+		t.Fatalf("held %+v", eps)
+	}
+	h.learnFlush(context.Background())
+	p := r.seen[0].Content
+	for _, want := range []string{"did not move for 10 rounds", "build it", "make again", "dropped"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, p)
+		}
 	}
 }

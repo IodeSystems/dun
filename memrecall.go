@@ -210,7 +210,9 @@ func (l *memLink) syncOnce(m *memoryStore) bool {
 // out a file the standing list already shows (notekinds.go).
 // Candidates (learn.go) are left out unless candidates is set: a tag
 // filter in dun, after the search (raglit's filter keeps tags; it has no
-// way to exclude one).
+// way to exclude one). raglit is asked for an exclude-tag filter (NotTags,
+// USER 2026-11-09); when dund passes it, the search can leave candidates
+// out and stop spending its hits on them. Keep this drop until then.
 type memFinder struct {
 	l          *memLink
 	m          *memoryStore

@@ -590,6 +590,11 @@ func (h *Harness) WorklogCmd(action string) (string, error) {
 		if err := h.saveWorklogLocked(); err != nil {
 			return "", err
 		}
+		if t.Outcome == WorkDone {
+			// The user says the task is done: the learning phase's
+			// verification (learn.go).
+			h.learnVerified(context.Background())
+		}
 		msg := fmt.Sprintf("worklog: #%d %s — %s: %s (%s)", t.N, t.Title, t.Outcome, t.Why, workDuration(t.End.Sub(t.Start)))
 		if p := w.task(w.Open); p != nil {
 			msg += fmt.Sprintf(" · back to #%d %s", p.N, p.Title)
