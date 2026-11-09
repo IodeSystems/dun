@@ -23,6 +23,7 @@ import (
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/tui"
 	"github.com/iodesystems/dun/internal/update"
@@ -390,6 +391,72 @@ func (d *doctor) polyLSP() {
 	}
 	d.polyLSPAt(bin, where)
 	d.polyLSPLanguages(bin)
+	d.polyLSPStatus(bin)
+}
+
+// polyLSPStatus is a line per running poly-lsp-mcp root, from
+// `poly-lsp-mcp status --json`: the root, its child LSPs, their total RSS
+// and the files its index holds. Silent for a build without the command.
+func (d *doctor) polyLSPStatus(bin string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "status", "--json")
+	cmd.Env = append(os.Environ(), "LSP_REBUILD_DONE=1")
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	lines, ok := polyStatusLines(out)
+	if !ok {
+		return
+	}
+	for _, l := range lines {
+		d.add("ok", "poly-lsp", l, "")
+	}
+}
+
+// polyStatus is one status file of `poly-lsp-mcp status --json`
+// (multiplex.StatusFile), the fields doctor reads.
+type polyStatus struct {
+	PID      int    `json:"pid"`
+	Root     string `json:"root"`
+	Children []struct {
+		State string `json:"state"`
+		PID   int    `json:"pid"`
+		RSS   int64  `json:"rss"`
+	} `json:"children"`
+	Index *struct {
+		Files int `json:"files"`
+	} `json:"index"`
+}
+
+// polyStatusLines are status's lines: one per root; ok=false when out is
+// not status JSON.
+func polyStatusLines(out []byte) ([]string, bool) {
+	var files []polyStatus
+	if json.Unmarshal(out, &files) != nil {
+		return nil, false
+	}
+	if len(files) == 0 {
+		return []string{"status: no poly-lsp-mcp running"}, true
+	}
+	var lines []string
+	for _, f := range files {
+		running, rss := 0, int64(0)
+		for _, c := range f.Children {
+			if c.PID != 0 {
+				running++
+				rss += c.RSS
+			}
+		}
+		index := "index not reported"
+		if f.Index != nil {
+			index = "index " + numfmt.Grouped(f.Index.Files) + " files"
+		}
+		lines = append(lines, fmt.Sprintf("status: %s (pid %d): %s running, %s RSS, %s",
+			f.Root, f.PID, textfmt.Plural(running, "child LSP"), numfmt.HumanBytes(rss), index))
+	}
+	return lines, true
 }
 
 // polyLSPLanguages lists the language servers this directory's project is
