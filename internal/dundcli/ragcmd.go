@@ -208,6 +208,9 @@ func ragCmd(l *loader) *cobra.Command {
 					out.Project, out.Queued, out.Current, out.Removed,
 					out.Code.Queued, out.Code.Current, out.Code.Removed,
 					out.Docs.Queued, out.Docs.Current, out.Docs.Removed)
+				if out.Deferred > 0 {
+					fmt.Printf("%d deferred: the main checkout's index has them queued; the next index decides them\n", out.Deferred)
+				}
 				if out.Failed > 0 {
 					fmt.Printf("%d failed and unchanged since (rag jobs --state error); queued again when changed\n", out.Failed)
 				}
@@ -279,7 +282,27 @@ func ragCmd(l *loader) *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(search, ingest, jobs, reembed, indexCmd, probe)
+	gc := &cobra.Command{
+		Use:   "gc",
+		Short: "remove the index branches of worktrees that no longer exist",
+		Long: "rag_index on a git worktree keeps its files as a branch of the main checkout's code and\n" +
+			"docs indexes (<home>/dund/rag/<project>/branches/<worktree>/). gc removes each branch\n" +
+			"whose worktree directory is gone. dund also does this when it starts.",
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			l.load()
+			var out proto.RagGCed
+			if err := ragCall(l, &proto.RagGC{}, &out); err != nil {
+				return err
+			}
+			return show(out, func() error {
+				fmt.Printf("removed %d of %d index branches\n", out.Removed, out.Branches)
+				return nil
+			})
+		},
+	}
+
+	cmd.AddCommand(search, ingest, jobs, reembed, indexCmd, probe, gc)
 	return cmd
 }
 

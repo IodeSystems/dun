@@ -5,6 +5,7 @@
 //
 //	global/{memories,strategies}/
 //	<project-slug>/{code,docs,memories,strategies}/
+//	<project-slug>/branches/<worktree>/{code,docs}/   (branch.go)
 //
 // Each index is its own raglit Home (raglit.OpenHome). An index is created on
 // its first ingest. Indexes already on disk are opened at start, so jobs
@@ -37,6 +38,7 @@ import (
 
 	"github.com/iodesystems/raglit"
 
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -93,6 +95,7 @@ type Host struct {
 	stores  map[string]*raglit.Store // by "<dir>/<index>"
 	stale   map[string]string        // index → why its vectors are not the embed role's
 	filling map[string]bool          // index → a backfill runs
+	trees   map[string]string        // canonical root → its main checkout; "" not a worktree (Worktree)
 	closed  bool
 }
 
@@ -117,13 +120,18 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 		m.Channels = raglit.NewChannels()
 	}
 	h := &Host{root: root, models: m, code: newCodeSeg(), logf: logf, stores: map[string]*raglit.Store{},
-		stale: map[string]string{}, filling: map[string]bool{}}
+		stale: map[string]string{}, filling: map[string]bool{}, trees: map[string]string{}}
 	h.bg, h.stopBg = context.WithCancel(context.Background())
 	if m.Embed.Model != "" {
 		h.embed = newEmbedder(m)
 		h.dim = embedDimension(r.CapsDir, m.Embed)
 	}
 	h.ident = m.Identifier()
+	// The branches of worktrees gone since the last run go before anything
+	// is open (GCBranches needs them closed).
+	if _, err := h.GC(); err != nil {
+		h.logf("dund: rag: %v", err)
+	}
 	for _, name := range onDisk(root) {
 		if _, err := h.open(name); err != nil {
 			h.stopBg()
@@ -132,6 +140,7 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 			return nil, err
 		}
 	}
+	h.openBranches()
 	// The code+docs runner cuts files at declarations and headings
 	// (Models.Code); the memory runner's models have no segmenter.
 	coded := h.models
@@ -181,8 +190,7 @@ func (s storeSubset) Existing(name string) (*raglit.Store, error) {
 }
 
 func (s storeSubset) has(name string) bool {
-	_, ix, _ := strings.Cut(name, "/")
-	return slices.Contains(s.indexes, ix)
+	return slices.Contains(s.indexes, indexOf(name))
 }
 
 // onDisk is every "<dir>/<index>" under root that has an index file.
@@ -462,11 +470,20 @@ func (h *Host) Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, e
 		limit = 10
 	}
 	out := &proto.RagHits{Mode: mode, Hits: []proto.RagHit{}}
-	st, err := h.store(name, false)
+	var st *raglit.Store
+	if main, tree := h.searchTree(q); tree {
+		root := fsutil.Canon(q.Root)
+		if st, err = h.branch(q.Project, q.Index, root, main, false); err == nil && st == nil {
+			out.Note = "the worktree " + root + " is not indexed yet (rag_index)"
+		}
+		name = branchName(q.Project, q.Index, root)
+	} else {
+		st, err = h.store(name, false)
+	}
 	if err != nil || st == nil {
 		return out, err
 	}
-	f := raglit.SearchFilter{PathPrefix: q.Filter.PathPrefix, Tags: q.Filter.Tags, Fields: q.Filter.Fields}
+	f := raglit.SearchFilter{PathPrefix: canonPrefix(q.Filter.PathPrefix), Tags: q.Filter.Tags, Fields: q.Filter.Fields}
 	var hits []raglit.Hit
 	if mode == "hybrid" && h.embed == nil {
 		mode, out.Note = "fts", "no embed model (facets.embed): searched by text only"
@@ -492,6 +509,15 @@ func (h *Host) Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, e
 			StartLine: x.StartLine, EndLine: x.EndLine, Symbol: x.Symbol, ContentID: x.ContentID})
 	}
 	return out, nil
+}
+
+// searchTree is the main checkout when q is a code or docs search for a
+// worktree root (q.Root).
+func (h *Host) searchTree(q proto.RagSearch) (string, bool) {
+	if q.Root == "" || !filepath.IsAbs(q.Root) || q.Project == "" || (q.Index != "code" && q.Index != "docs") {
+		return "", false
+	}
+	return h.Worktree(q.Root)
 }
 
 // Ingest queues one source on its index, creating the index if needed.

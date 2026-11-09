@@ -17,6 +17,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -34,8 +35,9 @@ import (
 //   - search: the `search` tool (when no docs server gives one), the docs
 //     server's search (its hits after the server's own, when it names no
 //     index), and the proactive search (codeFinder), each a rag_search of
-//     both indexes, under the workspace's path only (a sibling worktree's
-//     files are in the same project's indexes).
+//     both indexes, under the workspace's path, with the workspace as its
+//     root: in a linked worktree dund searches the worktree's branch of
+//     each index, over the main checkout's (docs/rag.md, "Worktrees").
 //
 // On by default, with no /rag on; DUN_CODE_SEARCH=0 turns it off (the
 // Harbor adapter does). dund down: the session says once that search is
@@ -173,7 +175,7 @@ func (c codeHit) docID() string {
 // label is path:start-end and the symbol, the path relative to root.
 func (c codeHit) label(root string) string {
 	p := c.path
-	if rel, err := filepath.Rel(root, p); err == nil && inside(rel) {
+	if rel, err := filepath.Rel(fsutil.Canon(root), p); err == nil && inside(rel) {
 		p = rel
 	}
 	if c.start > 0 {
@@ -190,7 +192,8 @@ func (c codeHit) label(root string) string {
 // first: by similarity where there is one, then by score. down is true
 // when neither index could be reached.
 func (l *codeLink) search(ctx context.Context, root, q, sub string, limit int) ([]codeHit, error) {
-	prefix := "file://" + filepath.Clean(root) + "/"
+	root = fsutil.Canon(root) // as dund spells the paths it holds
+	prefix := "file://" + root + "/"
 	if sub = strings.TrimSpace(sub); sub != "" {
 		if !filepath.IsAbs(sub) {
 			sub = filepath.Join(root, sub)
@@ -210,7 +213,7 @@ func (l *codeLink) search(ctx context.Context, root, q, sub string, limit int) (
 		go func() {
 			defer wg.Done()
 			r, err := l.link.Search(ctx, proto.RagSearch{Project: project, Index: ix, Query: q, Limit: limit,
-				Filter: proto.RagFilter{PathPrefix: prefix}})
+				Filter: proto.RagFilter{PathPrefix: prefix}, Root: root})
 			res[i] = result{ix, r, err}
 		}()
 	}

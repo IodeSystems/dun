@@ -14,6 +14,7 @@ func init() {
 	command[RagSync]("rag_sync")
 	command[RagTag]("rag_tag")
 	command[RagIndex]("rag_index")
+	command[RagGC]("rag_gc")
 	event[RagHits]("rag_hits")
 	event[RagIngested]("rag_ingested")
 	event[RagJobList]("rag_jobs")
@@ -22,6 +23,7 @@ func init() {
 	event[RagSynced]("rag_synced")
 	event[RagTagged]("rag_tagged")
 	event[RagIndexed]("rag_indexed")
+	event[RagGCed]("rag_gced")
 }
 
 // RagFilter limits a search before ranking. Every constraint must hold.
@@ -38,6 +40,9 @@ type RagFilter struct {
 // RagSearch searches one index. Project is the project's slug (dun's
 // raglitProject); empty is the global set. Mode is "hybrid" (the default:
 // FTS and vectors, fused) or "fts"; hybrid with no embed model runs as fts.
+// Root is the workspace the search is for (absolute): when it is a linked
+// git worktree, a code or docs search reads the worktree's branch of the
+// index (rag_index on it made one), and none when there is no branch yet.
 // Answered with RagHits.
 type RagSearch struct {
 	Project string    `json:"project,omitempty"`
@@ -46,6 +51,7 @@ type RagSearch struct {
 	Filter  RagFilter `json:"filter,omitzero"`
 	Limit   int       `json:"limit,omitempty"`
 	Mode    string    `json:"mode,omitempty"`
+	Root    string    `json:"root,omitempty"`
 }
 
 // RagHit is one fragment a search found. Similarity is the cosine of the
@@ -220,10 +226,24 @@ type RagTagged struct {
 // with other bytes is queued; a document under Root whose file is no longer
 // chosen is removed. Empty Project is Root's project slug (dun's
 // raglitProject), not the global set: the global set has no code or docs.
+// When Root is a linked git worktree, its files go to the worktree's
+// branch of each index, over the main checkout's (which is indexed first
+// when it is not yet): the branch holds only the files that differ.
 // Answered with RagIndexed.
 type RagIndex struct {
 	Project string `json:"project,omitempty"`
 	Root    string `json:"root"`
+}
+
+// RagGC removes the index branches of worktrees that no longer exist.
+// Answered with RagGCed.
+type RagGC struct{}
+
+// RagGCed answers RagGC: how many branch homes were looked at and how
+// many were removed.
+type RagGCed struct {
+	Branches int `json:"branches"`
+	Removed  int `json:"removed"`
 }
 
 // RagIndexed answers RagIndex: the counts of each index and their sums.
@@ -240,9 +260,14 @@ type RagIndexed struct {
 // already held as they are, documents removed, and files not queued
 // because their last job failed (raglit refused them: minified, unreadable)
 // after they last changed. A failed file is queued again when it changes.
+// Deferred (a worktree only) is files not queued in the branch because the
+// main checkout's index has a job for the same file pending: queued in the
+// branch then, the branch would copy a file the parent is about to hold.
+// The next RagIndex decides them.
 type RagIndexCounts struct {
-	Queued  int `json:"queued"`
-	Current int `json:"current"`
-	Removed int `json:"removed"`
-	Failed  int `json:"failed,omitempty"`
+	Queued   int `json:"queued"`
+	Current  int `json:"current"`
+	Removed  int `json:"removed"`
+	Failed   int `json:"failed,omitempty"`
+	Deferred int `json:"deferred,omitempty"`
 }
