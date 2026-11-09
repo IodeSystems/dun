@@ -176,7 +176,7 @@ change re-queues the affected stages.
 
 ## Built: slice 2
 
-dund hosts raglit v0.5.1 (`internal/ragd`). Sessions use it for memory
+dund hosts raglit v0.8.0 (`internal/ragd`). Sessions use it for memory
 notes (slice 5); `dun dund rag` is the manual client.
 
 **Layout**, under `$DUN_HOME/dund/rag/`:

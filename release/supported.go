@@ -118,8 +118,15 @@ var Supported = []Tool{
 	// dependency upgrade (agentkit v0.25.0 and others). v0.5.0 normalizes every
 	// tag on write (lowercase, whitespace collapsed); dun matches no tags, so
 	// nothing changes for it. MCP surface unchanged since v0.4.1.
+	// Recommended v0.8.0 (2026-11-09, e50ed7f), tarballs in deps.json: the
+	// binary of the same raglit dund imports as a module (ragcore v0.6-v0.8:
+	// caller-owned tags, the embedder roles, the code segmenter adapter,
+	// EnqueueMany, worktree branches). The daemon gains --code-segmenter
+	// (off by default) and re-embeds an index whose vectors are of another
+	// length; no flag or command dun uses changed. linux_amd64 prints
+	// version 0.8.0.
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.5.1"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.8.0"},
 }
 
 // Tool is one Supported entry.
