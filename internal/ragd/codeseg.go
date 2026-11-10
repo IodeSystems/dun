@@ -35,7 +35,7 @@ func (codeSeg) Sections(content []byte) ([]raglit.CodeSpan, error) {
 }
 
 // Runtime names the walk and the parser under it, as
-// "poly-lsp-mcp/segment@v0.5.0 gotreesitter@…". It is in raglit's KindCode
+// "poly-lsp-mcp/segment@v0.5.1 gotreesitter@…". It is in raglit's KindCode
 // pool key and in the index's segmenter record (segmenterKey): a new
 // poly-lsp-mcp can cut the same file differently on the same parser.
 func (codeSeg) Runtime() string {

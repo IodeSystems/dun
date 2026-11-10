@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// A build whose `mcp --help` lists the lifecycle flags gets dun's safe
-// values; no --index-anyway unless the project set it; and dun writes no
+// A build whose `mcp --help` lists the lifecycle flags gets --lsp-roots
+// single only; no --index-anyway unless the project set it; and dun writes no
 // override.
 func TestLSPSafe_Defaults(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
@@ -16,8 +16,11 @@ func TestLSPSafe_Defaults(t *testing.T) {
 	h, log, _ := startIndexed(t, ws, fakeIndexEnv+"=ready", fakeLifecycleEnv+"=1", fakeAnywayEnv+"=1")
 	waitIndex(t, h, IndexReady)
 	args := argLines(log)
-	if len(args) != 1 || !strings.HasSuffix(args[0], " --lsp-roots single --lsp-max-rss-mb 2048 --lsp-idle-stop 5m") {
+	if len(args) != 1 || !strings.HasSuffix(args[0], " --lsp-roots single") {
 		t.Fatalf("spawn: %q", args)
+	}
+	if strings.Contains(args[0], "--lsp-max-rss-mb") || strings.Contains(args[0], "--lsp-idle-stop") {
+		t.Fatalf("interim flags passed: %q", args[0])
 	}
 	if strings.Contains(args[0], "--index-anyway") {
 		t.Fatalf("--index-anyway passed unasked: %q", args[0])

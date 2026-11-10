@@ -97,9 +97,16 @@ var Supported = []Tool{
 	// (fff65bf, 2026-11-09), tarballs in deps.json: the segment package
 	// (symbols and Markdown sections for raglit's code segmenter); the C
 	// tree-sitter runtime is opt-in (-tags treesitter_cgo), but the release
-	// binaries set it; no MCP schema change.
+	// binaries set it; no MCP schema change. Recommended v0.5.1 (f82a647,
+	// 2026-11-10), tarballs in deps.json: daemon-wide bounds by default — at
+	// most 4 LSP children (LRU), children RSS 25% of RAM, per child
+	// min(3 GiB, 15% of RAM), idle stop 10m, proactive didOpen off, daemon
+	// GOMEMLIMIT auto, one niced index build, --max-files 50000 per root (not
+	// lifted by --index-anyway), a macOS memory-pressure stop, orphaned
+	// children reaped. `status --json` gains fleet and memoryLimit. dun's
+	// interim --lsp-max-rss-mb and --lsp-idle-stop are dropped (lspsafe.go).
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.0"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.1"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /rag setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,

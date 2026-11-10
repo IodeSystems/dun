@@ -37,7 +37,7 @@ var Modules = []Module{
 	{Name: "agentkit", Path: AgentKit, Pin: "v0.27.0"},
 	{Name: "openai-claude-api-shim", Path: Shim, Pin: "v0.6.0"},
 	{Name: "raglit", Part: "ragcore", Path: Raglit, Pin: "v0.8.1"},
-	{Name: "poly-lsp-mcp", Part: "segment", Path: PolyLSP, Pin: "v0.5.0"},
+	{Name: "poly-lsp-mcp", Part: "segment", Path: PolyLSP, Pin: "v0.5.1"},
 	{Name: "gwag", Part: "gat", Path: Gwag, Pin: "v2.11.0"},
 }
 

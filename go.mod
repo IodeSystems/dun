@@ -21,7 +21,7 @@ require (
 	github.com/iodesystems/agentkit v0.27.0
 	github.com/iodesystems/gwag/v2 v2.11.0
 	github.com/iodesystems/openai-claude-api-shim v0.6.0
-	github.com/iodesystems/poly-lsp-mcp v0.5.0
+	github.com/iodesystems/poly-lsp-mcp v0.5.1
 	github.com/iodesystems/raglit v0.8.1
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
@@ -52,6 +52,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dlclark/regexp2/v2 v2.10.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/getkin/kin-openapi v0.153.0 // indirect
 	github.com/go-openapi/jsonpointer v1.0.2 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
@@ -83,6 +84,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab // indirect
 	google.golang.org/grpc v1.85.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -428,6 +429,13 @@ type polyStatus struct {
 	Index *struct {
 		Files int `json:"files"`
 	} `json:"index"`
+	// Fleet is the daemon-wide child count and RSS (v0.5.1); 0 = no cap.
+	Fleet *struct {
+		MaxChildren int   `json:"maxChildren"`
+		Running     int   `json:"running"`
+		RSS         int64 `json:"rss"`
+		RSSBudget   int64 `json:"rssBudget"`
+	} `json:"fleet"`
 }
 
 // polyStatusLines are status's lines: one per root; ok=false when out is
@@ -453,8 +461,20 @@ func polyStatusLines(out []byte) ([]string, bool) {
 		if f.Index != nil {
 			index = "index " + numfmt.Grouped(f.Index.Files) + " files"
 		}
-		lines = append(lines, fmt.Sprintf("status: %s (pid %d): %s running, %s RSS, %s",
-			f.Root, f.PID, textfmt.Plural(running, "child LSP"), numfmt.HumanBytes(rss), index))
+		line := fmt.Sprintf("status: %s (pid %d): %s running, %s RSS, %s",
+			f.Root, f.PID, textfmt.Plural(running, "child LSP"), numfmt.HumanBytes(rss), index)
+		if fl := f.Fleet; fl != nil {
+			cap := "no cap"
+			if fl.MaxChildren > 0 {
+				cap = "of " + strconv.Itoa(fl.MaxChildren)
+			}
+			line += fmt.Sprintf("; daemon %d children (%s)", fl.Running, cap)
+			line += ", " + numfmt.HumanBytes(fl.RSS) + " RSS"
+			if fl.RSSBudget > 0 {
+				line += " of " + numfmt.HumanBytes(fl.RSSBudget)
+			}
+		}
+		lines = append(lines, line)
 	}
 	return lines, true
 }

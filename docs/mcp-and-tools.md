@@ -474,13 +474,14 @@ guards, which hold with or without those fixes:
   gets the obvious excludes (they can only shrink the index), else nothing:
   dun gives the person `/lsp exclude`, `include`, `budget`, and never raises
   `--index-budget` itself.
-- **Safe child limits** (`lspsafe.go`): `--lsp-roots single
-  --lsp-max-rss-mb 2048 --lsp-idle-stop 5m`, to a build whose `mcp --help`
-  lists each. Overrides: `lsp_roots`, `lsp_max_rss_mb`, `lsp_idle_stop` in
-  the server spec (project or global); dun writes none. With `--daemon` only
-  `--lsp-roots` is passed: the proxy ignores the other two (the daemon's own
-  limits apply, 6 GiB and 15 min by default), and without `--daemon` they
-  make it serve in-process.
+- **Child limits** (`lspsafe.go`): `--lsp-roots single`, to a build whose
+  `mcp --help` lists it. dun's interim `--lsp-max-rss-mb 2048` and
+  `--lsp-idle-stop 5m` are gone: v0.5.1 bounds the daemon by default (4
+  children, RSS budgets, 10 min idle), the proxy ignores those flags with
+  `--daemon`, and without it they force in-process mode. Overrides:
+  `lsp_roots`, `lsp_max_rss_mb`, `lsp_idle_stop` in the server spec (project
+  or global); the last two are passed only when set and without `--daemon`;
+  dun writes none.
 - **index-anyway is the person's** (`indexanyway.go`). A not-a-project root
   gets a line, not a question: an answer to `Config.Ask` can come from a
   model (`dun mcp`'s `dun_answer`) or a pipe. Only `/lsp index-anyway on`
