@@ -478,10 +478,10 @@ guards, which hold with or without those fixes:
   `mcp --help` lists it. dun's interim `--lsp-max-rss-mb 2048` and
   `--lsp-idle-stop 5m` are gone: v0.5.1 bounds the daemon by default (4
   children, RSS budgets, 10 min idle), the proxy ignores those flags with
-  `--daemon`, and without it they force in-process mode. Overrides:
-  `lsp_roots`, `lsp_max_rss_mb`, `lsp_idle_stop` in the server spec (project
-  or global); the last two are passed only when set and without `--daemon`;
-  dun writes none.
+  `--daemon`, and without it they force in-process mode. Override:
+  `lsp_roots` in the server spec (project or global); dun writes none. The
+  settings `lsp_max_rss_mb` and `lsp_idle_stop` are removed; a config that
+  still has them loads, and the keys are ignored.
 - **index-anyway is the person's** (`indexanyway.go`). A not-a-project root
   gets a line, not a question: an answer to `Config.Ask` can come from a
   model (`dun mcp`'s `dun_answer`) or a pipe. Only `/lsp index-anyway on`
