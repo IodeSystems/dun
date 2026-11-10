@@ -40,15 +40,29 @@ func TestAskInline_PasteOnAnOptionLandsInTheTextRow(t *testing.T) {
 	}
 }
 
-// The hotkeys keep their meaning on an option row and type on the text row:
-// `n` starts a detail (single-select), space toggles (multi-select). Any other
-// letter jumps.
-func TestAskInline_HotkeysWinOnOptionRows(t *testing.T) {
-	t.Run("n on an option starts a detail", func(t *testing.T) {
+// Every printable key types, on any row: "no" typed on an option row lands in
+// the text row and is sent. A detail is ctrl+d, not a letter. Space is the
+// one printable hotkey: it toggles a multi-select option row.
+func TestAskInline_EveryLetterTypes(t *testing.T) {
+	t.Run("no from an option row", func(t *testing.T) {
 		v := askingVtui(t, "A", "B")
-		v.m = key(v.m, kN)
+		v.m = typeStr(v.m, "no")
+		if v.m.noting || !v.m.onAskText() || v.m.askField.Value() != "no" {
+			t.Fatalf("noting=%v on text=%v text=%q", v.m.noting, v.m.onAskText(), v.m.askField.Value())
+		}
+		v.m = key(v.m, kEnter)
+		if v.m.asking || !strings.Contains(v.convo(), "› no") {
+			t.Errorf("asking=%v convo:\n%s", v.m.asking, v.convo())
+		}
+	})
+	t.Run("ctrl+d on an option starts a detail", func(t *testing.T) {
+		v := askingVtui(t, "A", "B")
+		v.m = key(v.m, kCtrlD)
 		if !v.m.noting || v.m.onAskText() || v.m.askField.Value() != "" {
 			t.Fatalf("noting=%v on text=%v text=%q", v.m.noting, v.m.onAskText(), v.m.askField.Value())
+		}
+		if !strings.Contains(v.view(), "type a detail") {
+			t.Errorf("no detail hint:\n%s", v.view())
 		}
 		// The detail's own letters type into the detail, not the text row.
 		v.m = typeStr(v.m, "now")
@@ -56,15 +70,22 @@ func TestAskInline_HotkeysWinOnOptionRows(t *testing.T) {
 			t.Errorf("detail=%q text=%q", v.m.input.Value(), v.m.askField.Value())
 		}
 	})
-	t.Run("n on the text row types", func(t *testing.T) {
+	t.Run("the hint names ctrl+d", func(t *testing.T) {
 		v := askingVtui(t, "A", "B")
-		v.m = typeStr(v.m, "x") // jump
-		v.m = key(v.m, kN)
-		if v.m.noting || v.m.askField.Value() != "xn" {
+		if !strings.Contains(v.view(), "ctrl+d detail") {
+			t.Errorf("hint:\n%s", v.view())
+		}
+	})
+	t.Run("ctrl+d on the text row deletes, no detail", func(t *testing.T) {
+		v := askingVtui(t, "A", "B")
+		v.m = typeStr(v.m, "xy")
+		v.m = key(v.m, tea.KeyPressMsg{Code: tea.KeyLeft})
+		v.m = key(v.m, kCtrlD)
+		if v.m.noting || v.m.askField.Value() != "x" {
 			t.Errorf("noting=%v text=%q", v.m.noting, v.m.askField.Value())
 		}
 	})
-	t.Run("space on a multi option toggles", func(t *testing.T) {
+	t.Run("space on a multi option toggles; on the text row it types", func(t *testing.T) {
 		v := askingVtui(t, "A", "B")
 		v.m.askMulti, v.m.askChecked = true, make([]bool, 2)
 		v.m = key(v.m, runesKey([]rune(" ")))
@@ -74,14 +95,6 @@ func TestAskInline_HotkeysWinOnOptionRows(t *testing.T) {
 		v.m = typeStr(v.m, "a b")
 		if v.m.askField.Value() != "a b" {
 			t.Errorf("space on the text row should type: %q", v.m.askField.Value())
-		}
-	})
-	t.Run("n in multi jumps (no detail there)", func(t *testing.T) {
-		v := askingVtui(t, "A", "B")
-		v.m.askMulti, v.m.askChecked = true, make([]bool, 2)
-		v.m = typeStr(v.m, "new")
-		if v.m.noting || v.m.askField.Value() != "new" {
-			t.Errorf("noting=%v text=%q", v.m.noting, v.m.askField.Value())
 		}
 	})
 }
@@ -142,7 +155,7 @@ func TestAskInline_NoCustomHasNoTextRow(t *testing.T) {
 		t.Errorf("hint offers editing:\n%s", stripANSI(m.View().Content))
 	}
 	m = typeStr(m, "maybe")
-	m = key(m, kN)
+	m = key(m, kCtrlD)
 	m = key(m, kTab)
 	nm, _ := m.Update(tea.PasteMsg{Content: "pasted"})
 	m = nm.(tuiModel)

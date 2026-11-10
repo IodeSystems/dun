@@ -236,7 +236,7 @@ func TestAsk_DraftComesBack(t *testing.T) {
 			enter(v)
 		},
 		"detail": func(v *vtui) {
-			v.m = key(v.m, kN)
+			v.m = key(v.m, kCtrlD)
 			v.m = typeStr(v.m, "because")
 			enter(v) // saves the detail
 			enter(v) // sends the option with it
@@ -320,7 +320,7 @@ func TestAsk_TabEditsTheOption(t *testing.T) {
 	})
 	t.Run("with a detail", func(t *testing.T) {
 		v := askingVtui(t, "A", "B")
-		v.m = key(v.m, kN)
+		v.m = key(v.m, kCtrlD)
 		v.m = typeStr(v.m, "soon")
 		v.m = key(v.m, kEnter)
 		v.m = key(v.m, kTab)

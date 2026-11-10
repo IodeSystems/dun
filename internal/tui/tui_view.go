@@ -466,7 +466,7 @@ func (m tuiModel) drawView() string {
 	case m.asking && m.askNoCustom:
 		status = stAsk.Render("❓ ↑/↓ choose · enter select · esc " + m.askEscWord())
 	case m.asking:
-		status = stAsk.Render("❓ ↑/↓ choose · enter select · tab/→ edit · n add detail · esc " + m.askEscWord())
+		status = stAsk.Render("❓ ↑/↓ choose · enter select · tab/→ edit · ctrl+d detail · esc " + m.askEscWord())
 	case m.searching:
 		status = m.search.View() + StDim.Render(fmt.Sprintf("  (%d matches · enter to navigate)", len(m.matches)))
 	case m.searchActive:

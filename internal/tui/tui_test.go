@@ -106,6 +106,7 @@ var (
 	kDown  = tea.KeyPressMsg{Code: tea.KeyDown}
 	kEnter = tea.KeyPressMsg{Code: tea.KeyEnter}
 	kN     = runesKey([]rune("n"))
+	kCtrlD = tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}
 	kSlash = runesKey([]rune("/"))
 	kEsc   = tea.KeyPressMsg{Code: tea.KeyEscape}
 	kRight = tea.KeyPressMsg{Code: tea.KeyRight}
@@ -283,7 +284,7 @@ func TestTUI_AskCustomRowTypesWithoutEnter(t *testing.T) {
 		t.Errorf("the text row should be in the list:\n%s", m.askPanel())
 	}
 
-	m = key(m, kN) // a plain letter — and the one that means "add a detail" elsewhere
+	m = key(m, kN) // a plain letter: every printable key types
 	if m.noting {
 		t.Fatal("`n` on the text row types an n; it must not start a detail")
 	}
@@ -324,7 +325,7 @@ func TestTUI_AskCustomRowStillNavigable(t *testing.T) {
 	}
 }
 
-// The ask picker: ↑/↓ choose an option, `n` attaches a detail, enter sends
+// The ask picker: ↑/↓ choose an option, ctrl+d attaches a detail, enter sends
 // "<option> — <detail>".
 func TestTUI_AskPickerOptionWithNote(t *testing.T) {
 	proc := &dunProc{stdin: &echoWC{}}
@@ -337,9 +338,9 @@ func TestTUI_AskPickerOptionWithNote(t *testing.T) {
 	if m.askSel != 1 {
 		t.Fatalf("↓ should select option 1, got %d", m.askSel)
 	}
-	m = key(m, kN) // start a detail
+	m = key(m, kCtrlD) // start a detail
 	if !m.noting {
-		t.Fatal("n should start a detail")
+		t.Fatal("ctrl+d should start a detail")
 	}
 	m.input.SetValue("fast")
 	m = key(m, kEnter) // confirm the detail

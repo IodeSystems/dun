@@ -263,8 +263,9 @@ are in `decisions.md`.
 - **The own-words answer is a row of the list (USER 2026-11-10).** The last
   row, `› type an answer…`, is a text field in place: highlighted, it takes
   the keys; a character typed or pasted on any other row moves there and
-  types. Hotkeys win on option rows: `n` starts a detail (single-select),
-  space toggles (multi-select); on the text row they type. esc clears the
+  types. Every printable key types ("no" is a common answer), except space
+  on a multi-select option row, which toggles. A detail is ctrl+d
+  (single-select), not a letter. esc clears the
   words, then parks the question. In multi-select the words are one more
   checked entry; enter keeps them as an option. An ask with `no_custom`
   (proto `Ask.NoCustom`) has no text row.

@@ -186,7 +186,7 @@ type tuiModel struct {
 	askOptions    []string     // the offered options; a trailing text row is implicit (askTextRow)
 	askRec        []string     // the options the model recommends (marked, preselected)
 	askSel        int          // highlighted answer row (== askTextRow() → the text row)
-	askNote       string       // optional detail attached to the chosen option ("n")
+	askNote       string       // optional detail attached to the chosen option (ctrl+d)
 	askMulti      bool         // multi-select: space toggles, enter submits the checked set
 	askChecked    []bool       // per-option checked state (multi mode; len == len(askOptions))
 	// askEdit is the option the text row was opened from (tab/→): an index, or

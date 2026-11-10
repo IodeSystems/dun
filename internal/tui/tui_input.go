@@ -934,7 +934,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // updateAsking drives the answer picker: ↑/↓ highlight a row, enter selects,
-// `n` attaches a detail to the highlighted option, tab or → opens the option
+// ctrl+d attaches a detail to the highlighted option, tab or → opens the option
 // in the text row to edit. The last row (askTextRow) is a text field in the
 // list itself: highlighted, it has the keys; typing on any other row moves
 // there and types (USER 2026-11-10). esc backs out of a detail, then clears
@@ -1071,9 +1071,9 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, nil
 		}
-	case "n":
-		// A hotkey on an option row: it wins over typing there. On the text
-		// row it types an n.
+	case "ctrl+d":
+		// Add a detail: not a printable key, so every letter types (an
+		// answer is often "no"). On the text row ctrl+d deletes a character.
 		if !m.noting && !onText && !m.askMulti && !m.askNoCustom && m.askSel < len(m.askOptions) {
 			m.noting = true
 			m.input.Reset()
@@ -1083,8 +1083,9 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 	case "space":
-		// The other hotkey: in multi mode space toggles an option, as enter
-		// does. On the text row it types a space.
+		// The one printable hotkey: in multi mode space toggles an option, as
+		// enter does (no answer starts with a space). On the text row, and in
+		// single-select, it types.
 		if !m.noting && !onText && m.askMulti && m.askSel < len(m.askOptions) {
 			m.askChecked[m.askSel] = !m.askChecked[m.askSel]
 			m.refresh()
