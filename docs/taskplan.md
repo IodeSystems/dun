@@ -123,8 +123,8 @@ most 5 short lines (about 100 tokens) a turn.
 ## Children work ready nodes, breadth first (2026-11-06)
 
 The main agent is the only scheduler. It gives a child a READY node — todo, owner
-"", every need done — and only that node: `agent({prompt, node})` for a new child,
-`jobs({agent: N, node})` for an idle one. So no child ever waits on another child's
+"", every need done — and only that node: `agent({node})` for a new child,
+`agent({id: N, node})` for an idle one. So no child ever waits on another child's
 node, and there is no subgraph to compute. When nodes are published, the main agent
 gives what became ready to the same children or to new ones.
 
@@ -155,6 +155,37 @@ resolved, main agent can reassign to newly unblocked or create new agents for th
   also gives back the open nodes of children it has no record of
   (`planReleaseOrphans`). Dismissing a child gives back what it did not finish;
   finished nodes keep who did them.
+
+## A child starts only on a node (USER 2026-11-10)
+
+"Subagents should only be launchable via plan nodes!" `agent` has no `prompt`:
+`agent({node: "<id>", model?, effort?, isolation?, wait?})` starts a child, and its
+first message is "Work this plan node." and the node's brief (`planBrief`: title,
+details, done_when, and to publish it). The task goes in the node's details. The
+child reports onto the node: it publishes it with its plan tool (done with an
+account, or dropped with why).
+
+Refused, with nothing started or changed (`spawnTool`, `planCanAssign`):
+
+- no node, or a `prompt`: "agent starts a child only on a plan node. Add a node
+  with plan({action:"add", title, details, done_when}), then call
+  agent({node:"<id>"})." (`agentNoNode`, `agentNoPrompt`);
+- an unknown node, or a done or dropped one: the same fix;
+- a node with a live child: "node N already has a child, agent #K; one child per
+  node." It is free again when that child publishes it or is dismissed;
+- the plan tool switched off: there is no node to name, and the refusal says so.
+
+Why no prompt on top of the node: the smaller surface. With both, part of the
+task would be in a prompt only the child saw, and the plan would not say what the
+child was asked. An idle child still takes `agent({id: N, tell})` and
+`agent({id: N, node, tell})`: that is work for a child already started, not a start.
+
+Nesting: a child has no `agent` tool (depth 1, docs/decisions.md "Sub-agents"), so
+there is no child-of-a-child to brief. A child that finds more work adds nodes
+under its own in the parent's plan; they are its own and owed. The main agent
+stays the only one that starts children. The person's commands start no
+sub-agent (the agents pane views and tells existing ones; `dun mcp`'s `dun_start`
+starts a separate session), so nothing there changed.
 
 `/plan tell <id> <text>` hands the person's words about a node to its owner, to
 change the plan to match, instead of a direct edit (USER: "Decide x" nodes want

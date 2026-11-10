@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/agentkit/taskgraph"
 	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/heartbeat"
 )
@@ -529,15 +530,17 @@ func (h *Harness) clientFor(provider, model string) (childRun, error) {
 	return childRun{client: c.Runner, provider: provider, model: model, endpoint: c.Endpoint}, nil
 }
 
-// spawnAgent starts a child and registers it. The child is RUNNING when this
-// returns; the caller decides whether to wait for it.
-func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effort, mode string) (*subAgent, error) {
-	return h.spawnAgentFor(ctx, prompt, provider, model, effort, mode, "")
-}
-
-// spawnAgentFor is spawnAgent for a plan node: the child is given node (a
-// ready one, planCanAssign) before its first turn, and its brief says so.
+// spawnAgentFor starts a child and registers it. The child is RUNNING when
+// this returns; the caller decides whether to wait for it. With node (a ready
+// one, planCanAssign) the child is given it before its first turn, and the
+// node's brief follows prompt. The model's only way here is spawnTool, which
+// always names a node (USER 2026-11-10); a child with no node is the tests'.
 func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, effort, mode, node string) (*subAgent, error) {
+	if node != "" {
+		// Before the record is made, so the prompt kept (the agents pane,
+		// a resume) is the brief the child got.
+		prompt += h.planBrief(node)
+	}
 	if provider == "" && model == "" {
 		provider, model = h.cfg.ChildProvider, h.cfg.ChildModel
 	}
@@ -608,7 +611,6 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, ef
 			sa.quit()
 			return nil, err
 		}
-		prompt += h.planBrief(node)
 	}
 	h.agentsChanged()
 
@@ -1141,24 +1143,25 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "agent"
-	td.Function.Description = "Delegate a task to a sub-agent: for work that would cost you a lot of context for a " +
-		"small answer (reading a long log, scanning a large file). It has your tools, spends its own context, and " +
-		"returns an answer; what it read never enters yours. It returns at once and you are notified each time " +
-		"the child ends a turn, unless wait:true. Then act on it by id: agent({id:N, tell:\"…\"}) answers its question " +
-		"or gives it new work, node gives it a plan node, resume restarts a stopped one, dismiss:true ends it. It " +
-		"stays resident until you dismiss it; nothing cleans it up for you. Default model: " + model +
-		". Default effort: " + effort + "."
+	td.Function.Description = "Start a sub-agent on a plan node: for work that would cost you a lot of context for a " +
+		"small answer (reading a long log, scanning a large file). Add the node with plan first, then agent({node:\"<id>\"}): " +
+		"the node's title, details and done_when are the child's whole brief (it cannot see your conversation), and " +
+		"it publishes its answer onto the node. It has your tools and spends its own context; what it read never " +
+		"enters yours. It returns at once and you are notified each time the child ends a turn, unless wait:true. " +
+		"Then act on it by id: agent({id:N, tell:\"…\"}) answers its question or gives it new work, node gives it " +
+		"another plan node, resume restarts a stopped one, dismiss:true ends it. It stays resident until you dismiss " +
+		"it; nothing cleans it up for you. Default model: " + model + ". Default effort: " + effort + "."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"prompt": map[string]any{"type": "string", "description": "the task, complete on its own — the child cannot see your conversation"},
-			"model":  map[string]any{"type": "string", "description": "run this child on a specific model"},
+			"model": map[string]any{"type": "string", "description": "run this child on a specific model"},
 			"effort": map[string]any{"type": "string", "enum": EffortLevels,
 				"description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server"},
 			"wait": map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
-			"node": map[string]any{"type": "string", "description": "a ready plan node (todo, nobody's, its needs done) for this child: " +
-				"it owns that node alone and owes you a publish of it (done with notes, or dropped with why); the node leaves " +
-				"your ready list. It gets a plan tool that changes only its own nodes. With id: give idle agent #id this node; tell adds to its brief"},
+			"node": map[string]any{"type": "string", "description": "the plan node a new child works: a ready one (todo, no child on it, " +
+				"its needs done). Its title, details and done_when are the child's brief; it owns the node alone and owes you a " +
+				"publish of it (done with notes, or dropped with why); the node leaves your ready list. It gets a plan tool that " +
+				"changes only its own nodes. With id: give idle agent #id this node; tell adds to its brief"},
 			"id":      map[string]any{"type": "integer", "description": "act on existing agent #id instead of starting one"},
 			"tell":    map[string]any{"type": "string", "description": "with id: its next message: the answer to its question, or new work"},
 			"resume":  map[string]any{"type": "boolean", "description": "with id: restart a stopped agent from its transcript"},
@@ -1186,6 +1189,8 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			return inner(ctx, tc)
 		}
 		var args struct {
+			// Prompt is read only to refuse it: the brief is the node's
+			// (USER 2026-11-10, "Subagents should only be launchable via plan nodes").
 			Prompt    string `json:"prompt"`
 			Provider  string `json:"provider"`
 			Model     string `json:"model"`
@@ -1203,25 +1208,15 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		var out string
 		switch {
+		case strings.TrimSpace(args.Prompt) != "":
+			out = agentNoPrompt
 		case args.ID != nil:
-			if strings.TrimSpace(args.Prompt) != "" {
-				out = fmt.Sprintf("ERROR: prompt starts a NEW child; with id you act on agent #%d: tell, node, resume or "+
-					"dismiss. For a new child, leave id out.", *args.ID)
-				break
-			}
 			out = agentOp(h, *args.ID, args.Tell, args.Node, args.Resume, args.Dismiss)
-		case strings.TrimSpace(args.Prompt) == "":
-			// Say both shapes and what was sent (the recap lesson, USER
-			// 2026-10-27: a bare "needs X" made a model give up on the tool).
-			var sent map[string]any
-			_ = json.Unmarshal([]byte(tc.Function.Arguments), &sent)
-			out = "ERROR: agent takes {prompt, model?, effort?, isolation?, node?, wait?} to start a child, " +
-				"or {id, tell? | node? | resume? | dismiss?} for agent #id. You sent " + sentSig(sent) + "."
 		default:
-			out = spawnTool(ctx, h, args.Prompt, args.Provider, args.Model, args.Effort, args.Isolation, args.Node, args.Wait)
+			out = spawnTool(ctx, h, args.Provider, args.Model, args.Effort, args.Isolation, args.Node, args.Wait)
 		}
 		if onCall != nil {
-			call := map[string]any{"prompt": args.Prompt, "model": args.Model, "wait": args.Wait}
+			call := map[string]any{"model": args.Model, "wait": args.Wait}
 			if args.ID != nil {
 				call = map[string]any{"id": *args.ID}
 				for k, v := range map[string]any{"tell": args.Tell, "node": args.Node} {
@@ -1251,26 +1246,39 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 	}
 }
 
-func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort, isolation, node string, wait bool) string {
-	if strings.TrimSpace(prompt) == "" {
-		return "ERROR: agent requires a non-empty prompt."
-	}
+// The refusals of a spawn that names no usable node (USER 2026-11-10:
+// "Subagents should only be launchable via plan nodes!"). Each says the fix.
+const (
+	agentNoNode = "ERROR: agent starts a child only on a plan node. " + planFix + " No agent was started."
+	// agentNoPrompt: the brief is the node's alone, so the task lives in the
+	// plan, where the person and a resume can read it, and not in a prompt
+	// only the child saw.
+	agentNoPrompt = "ERROR: agent takes no prompt; a child's brief is its plan node's title, details and done_when. " +
+		"Put the task in the node's details with plan, then call agent({node:\"<id>\"}). No agent was started."
+	agentNoPlan = "ERROR: agent starts a child only on a plan node, and the plan tool is off in this session " +
+		"(the user turns it on in /mcp). No agent was started."
+)
+
+// spawnTool is agent({node, …}): the model's only way to start a child. The
+// child's first message is node's brief (planBrief); nothing else.
+func spawnTool(ctx context.Context, h *Harness, provider, model, effort, isolation, node string, wait bool) string {
 	node = strings.TrimSpace(node)
-	// Checked before the spawn too, so a bad node starts no child.
-	if node != "" {
-		if err := h.planCanAssign(node); err != nil {
-			return "ERROR: " + err.Error() + ". No agent was started."
-		}
+	switch {
+	case node == "" && !h.hasTool(taskgraph.ToolName):
+		return agentNoPlan
+	case node == "":
+		return agentNoNode
 	}
-	sa, err := h.spawnAgentFor(ctx, prompt, provider, model, effort, isolation, node)
+	// Checked before the spawn too, so a bad node starts no child.
+	if err := h.planCanAssign(node); err != nil {
+		return "ERROR: " + strings.TrimSuffix(err.Error(), ".") + ". No agent was started."
+	}
+	sa, err := h.spawnAgentFor(ctx, "Work this plan node.", provider, model, effort, isolation, node)
 	if err != nil {
 		return "ERROR: could not start the agent: " + err.Error()
 	}
-	owns := ""
-	if node != "" {
-		owns = fmt.Sprintf(" It owns plan node %s, out of your ready list, and owes you a publish of it; "+
-			"you are told when it publishes, with what became ready. Dismissing it gives back what it did not finish.", node)
-	}
+	owns := fmt.Sprintf(" It owns plan node %s, out of your ready list, and owes you a publish of it; "+
+		"you are told when it publishes, with what became ready. Dismissing it gives back what it did not finish.", node)
 	if !wait {
 		where := ""
 		if sa.iso.isolated() {
@@ -1296,10 +1304,7 @@ func spawnTool(ctx context.Context, h *Harness, prompt, provider, model, effort,
 		return fmt.Sprintf("agent #%d is still running; stopped waiting because a message arrived (the user wrote, or another dun session did) — "+
 			"it follows. You will be told when it finishes.", sa.num)
 	}
-	if owns != "" {
-		return strings.TrimSpace(owns) + "\n" + sa.report()
-	}
-	return sa.report()
+	return strings.TrimSpace(owns) + "\n" + sa.report()
 }
 
 // agentMonitor is the agent half of the jobs tool (jobs.go): list, or one

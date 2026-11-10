@@ -377,12 +377,12 @@ func TestPlan_ChildIsGivenOnlyAReadyNode(t *testing.T) {
 	ids := planIDs(h)
 
 	for node, want := range map[string]string{"nope": "no plan node nope", ids["test"]: "is not ready"} {
-		if out := spawnTool(context.Background(), h, "x", "", "", "", "", node, false); !strings.Contains(out, want) ||
+		if out := spawnTool(context.Background(), h, "", "", "", "", node, false); !strings.Contains(out, want) ||
 			!strings.Contains(out, "No agent was started") || len(h.agentList()) != 0 {
 			t.Fatalf("node %s: %q, %d agents", node, out, len(h.agentList()))
 		}
 	}
-	out := spawnTool(context.Background(), h, "build it", "", "m", "", "", ids["build"], false)
+	out := spawnTool(context.Background(), h, "", "m", "", "", ids["build"], false)
 	if !strings.Contains(out, "owns plan node "+ids["build"]) {
 		t.Fatalf("spawn: %q", out)
 	}
@@ -401,7 +401,7 @@ func TestPlan_ChildIsGivenOnlyAReadyNode(t *testing.T) {
 	if ready := g.Ready(""); len(ready) != 1 || ready[0].Title != "other" {
 		t.Errorf("the main agent's ready list: %v", ready)
 	}
-	if out := spawnTool(context.Background(), h, "x", "", "", "", "", ids["build"], false); !strings.Contains(out, "already belongs to "+owner) {
+	if out := spawnTool(context.Background(), h, "", "", "", "", ids["build"], false); !strings.Contains(out, fmt.Sprintf("already has a child, agent #%d", sa.num)) {
 		t.Errorf("a node already owned: %q", out)
 	}
 
@@ -437,7 +437,7 @@ func TestPlan_ChildPublishesAndIsGivenTheNext(t *testing.T) {
 	planCall(t, h, `{"action":"add","title":"test","done_when":"x","needs":["1"]}`)
 	planCall(t, h, `{"action":"add","title":"main's","done_when":"x"}`)
 	ids := planIDs(h)
-	spawnTool(context.Background(), h, "build it", "", "m", "", "", ids["build"], false)
+	spawnTool(context.Background(), h, "", "m", "", "", ids["build"], false)
 	sa := h.agentList()[0]
 	waitIdle(t, sa)
 	child := sa.harness()
@@ -490,7 +490,7 @@ func TestPlan_OwnersHearOfTheirNodes(t *testing.T) {
 	planCall(t, h, `{"action":"add","title":"decide db","done_when":"x"}`)
 	planCall(t, h, `{"action":"add","title":"main's","done_when":"x"}`)
 	ids := planIDs(h)
-	spawnTool(context.Background(), h, "decide", "", "", "", "", ids["decide db"], false)
+	spawnTool(context.Background(), h, "", "", "", "", ids["decide db"], false)
 	sa := h.agentList()[0]
 	waitIdle(t, sa)
 	child := sa.harness()

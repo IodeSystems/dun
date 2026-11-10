@@ -149,10 +149,12 @@ func TestAgent_ActsOnAnExistingChildByID(t *testing.T) {
 		out, _ := d(context.Background(), tc)
 		return out
 	}
-	if out := call(`{"model":"x"}`); !strings.Contains(out, "or {id, tell?") || !strings.Contains(out, "You sent {model}") {
+	// No node and no id: a start with nothing to start on (USER 2026-11-10).
+	// This harness has no plan tool, so the refusal says that.
+	if out := call(`{"model":"x"}`); out != agentNoPlan {
 		t.Errorf("neither shape: %q", out)
 	}
-	if out := call(`{"id":3,"prompt":"new"}`); !strings.Contains(out, "leave id out") {
+	if out := call(`{"id":3,"prompt":"new"}`); out != agentNoPrompt {
 		t.Errorf("prompt with id: %q", out)
 	}
 	if out := call(`{"id":3,"dismiss":true}`); !strings.Contains(out, "agent #3") {

@@ -444,6 +444,15 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `agent` (and `jobs` with its agent params); a child gets `tell_parent` and
   no `ask_user`. Depth 1 holds because a child is never handed `agent`; a child
   cannot reach the human because `ask_user` is absent (`applyTools`).
+- **Sub-agents start only on plan nodes (USER, 2026-11-10: "Subagents should
+  only be launchable via plan nodes!").** `agent({node, …})` is the model's
+  one way to start a child; the free `prompt` is gone, and a call with one, or
+  with no node, an unknown node, a finished one, or one a live child owns, is
+  refused, starts nothing and says the fix (add a node with `plan`, then
+  `agent({node:"<id>"})`). The brief is the node's title, details and
+  done_when alone, not a prompt on top: one place for the task, which the
+  person and a resume can read, and one parameter fewer. One node, one child.
+  Children still get no `agent` (depth 1). See docs/taskplan.md.
 - **Decided (USER, 2026-07-31):** `tell_parent(status, message)`: status
   overwrites and never notifies, message is an event. `agent_monitor` also
   carries `tell`, `resume`, `quit`. Spawn is async; `wait:true` opts out. A
