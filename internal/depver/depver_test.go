@@ -73,7 +73,7 @@ func TestModuleLines(t *testing.T) {
 		"agentkit v0.27.0",
 		"openai-claude-api-shim v0.6.0",
 		"raglit v0.8.1 (ragcore)",
-		"poly-lsp-mcp devel (segment) — replaced by /src/poly-lsp-mcp; go.mod pins v0.5.0",
+		"poly-lsp-mcp devel (segment) — replaced by /src/poly-lsp-mcp; go.mod pins v0.5.1",
 		"gwag v2.11.0 (gat) — from go.mod: this binary's build info lists no modules",
 	}
 	if got := moduleLines(deps); strings.Join(got, "\n") != strings.Join(want, "\n") {
