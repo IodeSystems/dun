@@ -437,12 +437,14 @@ nothing until it exits unless asked to. You stop one with `/jobs kill <n>` (bare
 in the activity pane. An interrupt does not stop the turn's jobs; it lists the
 ones still running, with the kill command.
 
-**Sub-agents:** `agent{prompt}` spawns a child agent to spend ITS context instead
-of yours — read a huge log, fetch and digest a page, survey how something is used
-— and hand back the conclusion. A child works in the parent's worktree and shares
+**Sub-agents:** `agent{node}` spawns a child agent on a plan node to spend ITS
+context instead of yours — read a huge log, fetch and digest a page, survey how something is used
+— and hand back the conclusion. There is no free prompt: the node's title,
+details and done_when are the child's brief, and it publishes its answer onto
+the node. A child works in the parent's worktree and shares
 its tool servers (no second index), runs on `--child-model` if you set one, and
 cannot spawn agents of its own or reach you directly. With more than one provider
-logged in, a child can run on another one: `agent{prompt, provider, model}`, or
+logged in, a child can run on another one: `agent{node, provider, model}`, or
 `--child-provider` with `--child-model` for the default — a session on the Claude
 API can hand work to a smaller model on a local server. Its tokens count in the
 session's spend, billed to its own provider and key. `agent{effort}` (or

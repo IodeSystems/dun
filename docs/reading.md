@@ -59,8 +59,10 @@ The refusal says the numbers ("X is N tokens; M are free") and then:
 1. **Compact, then retry** (USER 2026-11-08): "recap what is settled to free at
    least N−M tokens, then read it again." Always available.
 2. **Delegate** — only when the `agent` tool is in this agent's tool set
-   (children and some modes have none): "or `agent({prompt: "read X and
-   report …"})`: a child spends its own context and returns the findings."
+   (children and some modes have none) and so is `plan` (a child starts only
+   on a plan node, USER 2026-11-10): "add a plan node "read X and report …",
+   then `agent({node: "<id>"})`: a child spends its own context and returns
+   the findings."
    If X is larger than a child's whole window, say to narrow instead.
 3. **Narrow**: grep it first, or read a range.
 
@@ -97,7 +99,7 @@ The refusal says the numbers ("X is N tokens; M are free") and then:
   ```
   ERROR: X is N tokens; M are free. Ways out:
   1. Recap what is settled to free at least N−M tokens, then read it again.
-  2. agent({prompt: "read X and report …"}): a child spends its own context and returns the findings.
+  2. Add a plan node "read X and report …", then agent({node: "<id>"}): a child spends its own context and returns the findings.
   3. Grep it first, or read a range.
   ```
 
