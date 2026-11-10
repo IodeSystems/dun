@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dun — a coding agent for the terminal</title>
-<meta name="description" content="dun is an open-source (MIT) coding agent for the terminal, for long sessions on any OpenAI-compatible model: a screen that does not jump, metrics for every request, and a context window kept small for real work.">
+<title>dun — a coding agent that keeps going until it is done</title>
+<meta name="description" content="dun is an open-source (MIT) coding agent for the terminal. It plans, delegates, manages its own context and keeps on track until the job is done, on cheap models and modest hardware.">
 <meta name="author" content="IodeSystems">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark light">
 <link rel="canonical" href="https://dun.iodesystems.com/">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
 <link rel="apple-touch-icon" sizes="192x192" href="apple-touch-icon.png">
 <link rel="alternate" type="application/json" href="harness.json" title="dun harness metadata">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="dun">
-<meta property="og:title" content="dun — a coding agent for the terminal">
-<meta property="og:description" content="Open-source coding agent for long sessions on any OpenAI-compatible model.">
+<meta property="og:title" content="dun — a coding agent that keeps going until it is done">
+<meta property="og:description" content="Open-source coding agent for long jobs on cheap models: it plans, delegates, manages its context and keeps on track until the job is done.">
 <meta property="og:url" content="https://dun.iodesystems.com/">
 <meta property="og:image" content="https://dun.iodesystems.com/screenshots/desktop-conversation.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -25,7 +27,7 @@
   "name": "dun",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS",
-  "description": "An open-source coding agent for the terminal, written in Go. Works with any OpenAI-compatible model.",
+  "description": "An open-source coding agent for the terminal, written in Go, for long jobs on any OpenAI-compatible model.",
   "url": "https://dun.iodesystems.com/",
   "downloadUrl": "https://github.com/IodeSystems/dun/releases/latest",
   "codeRepository": "https://github.com/IodeSystems/dun",
@@ -37,86 +39,147 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+  /* Tokens (~/doc patterns/design.md): type 12·13·14·16·20·24·32, weights 400·500·600,
+     spacing 4·8·12·16·24·32·48, radius 6 / 999, colour by role. Dark is the default. */
   :root {
-    --bg:#0d1117; --bg2:#10141b; --panel:#161b22; --term:#16181c; --border:#2a313b; --border2:#3a4250;
-    --fg:#e6edf3; --muted:#a3adb9; --dim:#7d8792;
-    --accent:#ff7ab6; --accent-ink:#1a0d14; --accent-soft:rgba(255,122,182,.12);
-    --ok:#3ddc97; --max:1040px;
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s6:24px; --s8:32px; --s12:48px;
+    --r:6px; --max:1040px; --measure:72ch;
     --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+
+    --bg:#0d1117; --surface:#161b22; --surface2:#10141b; --term:#16181c;
+    --border:#2a313b; --border2:#3a4250;
+    --text:#e6edf3; --text2:#a3adb9; --text3:#7d8792;
+    --accent:#ff7ab6; --accent-ink:#1a0d14; --accent-soft:rgba(255,122,182,.12);
+    --bar:#4a5260;
+    --ok:#3ddc97; --warn:#e3b341;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#ffffff; --surface:#f6f7f9; --surface2:#eef0f3; --term:#f6f7f9;
+      --border:#dde1e6; --border2:#c9ced6;
+      --text:#1a1d23; --text2:#4b5361; --text3:#6b7380;
+      --accent:#b8306f; --accent-ink:#ffffff; --accent-soft:rgba(184,48,111,.09);
+      --bar:#b4bac4;
+      --ok:#1a7f52; --warn:#8a6100;
+    }
   }
   * { box-sizing:border-box; }
   html { -webkit-text-size-adjust:100%; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 var(--sans); overflow-x:hidden; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 var(--sans); overflow-x:hidden; }
   img { max-width:100%; height:auto; display:block; }
   a { color:var(--accent); text-decoration:none; }
   a:hover { text-decoration:underline; }
-  a:focus-visible, button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:4px; }
+  a:focus-visible, button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:var(--r); }
   code, pre { font-family:var(--mono); }
-  code { font-size:.88em; background:var(--panel); border:1px solid var(--border); border-radius:5px; padding:.05em .35em; }
-  .wrap { max-width:var(--max); margin:0 auto; padding:0 24px; }
+  code { font-size:.88em; background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:0 var(--s1); overflow-wrap:anywhere; }
+  .wrap { max-width:var(--max); margin:0 auto; padding:0 var(--s6); }
+  p { max-width:var(--measure); }
 
   .top { border-bottom:1px solid var(--border); font:13px/1 var(--mono); }
-  .top .wrap { display:flex; justify-content:space-between; align-items:center; height:48px; }
-  .top .brand { background:var(--accent); color:var(--accent-ink); font-weight:700; padding:4px 9px; border-radius:3px; }
-  .top nav a { color:var(--muted); margin-left:18px; }
-  .top nav a:hover { color:var(--fg); }
+  .top .wrap { display:flex; justify-content:space-between; align-items:center; height:48px; gap:var(--s4); }
+  .top .brand { background:var(--accent); color:var(--accent-ink); font-weight:600; padding:var(--s1) var(--s2); border-radius:var(--r); }
+  .top nav { display:flex; gap:var(--s4); flex-wrap:wrap; }
+  .top nav a { color:var(--text2); }
+  .top nav a:hover { color:var(--text); }
 
-  header { padding:64px 0 40px; text-align:center; background:radial-gradient(800px 360px at 50% -60px, rgba(255,122,182,.16), transparent 70%); }
-  h1 { font-size:clamp(3rem,10vw,5.2rem); line-height:1; margin:0; font-weight:800; letter-spacing:-.04em; }
-  h1 .hat { font-size:.6em; vertical-align:.12em; margin-right:.1em; }
-  .tagline { font:500 1rem/1.4 var(--mono); color:var(--accent); margin:14px 0 0; }
-  .lede { font-size:clamp(1.1rem,2.6vw,1.3rem); max-width:640px; margin:20px auto 32px; }
+  header { padding:var(--s12) 0; background:radial-gradient(800px 360px at 30% -80px, var(--accent-soft), transparent 70%); }
+  .eyebrow { font:500 13px/1.4 var(--mono); color:var(--text2); margin:0 0 var(--s4); }
+  h1 { font-size:32px; line-height:1.2; margin:0; font-weight:600; letter-spacing:-.02em; max-width:22ch; }
+  h1 em { font-style:normal; color:var(--accent); }
+  .lede { font-size:20px; line-height:1.5; margin:var(--s4) 0 0; }
+  .lede + .lede { font-size:16px; color:var(--text2); margin-top:var(--s3); }
 
-  .install { max-width:640px; margin:0 auto; text-align:left; background:var(--term); border:1px solid var(--border2); border-radius:12px; overflow:hidden; }
-  .tabs { display:flex; border-bottom:1px solid var(--border); background:#12141a; }
-  .tabs button { font:13px/1 var(--mono); color:var(--muted); background:none; border:0; border-bottom:2px solid transparent; padding:12px 16px; cursor:pointer; }
-  .tabs button[aria-selected="true"] { color:var(--fg); border-bottom-color:var(--accent); }
+  .clunker { margin:var(--s8) 0 0; padding:var(--s4) var(--s6); border-left:3px solid var(--accent); background:var(--surface); border-radius:0 var(--r) var(--r) 0; max-width:var(--measure); }
+  .clunker p { margin:0; font-size:16px; }
+  .clunker cite { display:block; margin-top:var(--s2); font:400 13px/1.4 var(--mono); color:var(--text3); font-style:normal; }
+
+  .headline { margin:var(--s8) 0 0; display:flex; flex-wrap:wrap; align-items:baseline; gap:var(--s2) var(--s4); }
+  .headline .num { font:600 24px/1.2 var(--mono); }
+  .headline .num b { color:var(--accent); font-weight:600; }
+  .headline .ctx { color:var(--text2); font-size:14px; flex:1 1 280px; }
+
+  .actions { margin:var(--s6) 0 0; display:flex; flex-wrap:wrap; gap:var(--s3); }
+  .btn { display:inline-block; font:500 14px/1 var(--sans); padding:var(--s3) var(--s4); border-radius:var(--r); border:1px solid var(--border2); color:var(--text); }
+  .btn:hover { text-decoration:none; border-color:var(--text3); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+
+  section { padding:var(--s12) 0; border-top:1px solid var(--border); }
+  h2 { font-size:24px; line-height:1.25; margin:0 0 var(--s3); letter-spacing:-.01em; font-weight:600; }
+  h3 { font-size:16px; line-height:1.35; margin:0 0 var(--s2); font-weight:600; }
+  .intro { color:var(--text2); margin:0 0 var(--s8); }
+
+  .cards { display:grid; gap:var(--s4); grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:var(--s6); min-width:0; }
+  .card p { margin:0; color:var(--text2); font-size:14px; }
+  .card p + p { margin-top:var(--s2); }
+  .card .why { font-size:13px; color:var(--text3); }
+  .card .gap { margin-top:var(--s6); }
+
+  .setup { font:500 13px/1.5 var(--mono); color:var(--text2); background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:var(--s3) var(--s4); margin:0 0 var(--s6); max-width:none; }
+  .ev { display:grid; gap:var(--s4); grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); }
+  .bars { list-style:none; margin:var(--s4) 0 0; padding:0; display:grid; gap:var(--s2); }
+  .bars li { display:grid; grid-template-columns:minmax(0,1fr) 4.5em; gap:var(--s1) var(--s3); align-items:center; font-size:13px; }
+  .bars .lab { color:var(--text2); min-width:0; }
+  .bars .lab small { color:var(--text3); font-size:12px; }
+  .bars .val { font-family:var(--mono); text-align:right; font-variant-numeric:tabular-nums; }
+  .bars .track, .bars .fill { display:block; }
+  .bars .track { grid-column:1 / -1; height:8px; background:var(--surface2); border-radius:999px; overflow:hidden; }
+  .bars .fill { height:100%; background:var(--bar); border-radius:999px; }
+  .bars li.us .lab { color:var(--text); font-weight:500; }
+  .bars li.us .fill { background:var(--accent); }
+  .card .big { font:600 32px/1.1 var(--mono); margin:var(--s2) 0 var(--s1); color:var(--text); }
+  .big span { color:var(--text3); font-weight:400; }
+
+  .limits { margin:var(--s6) 0 0; background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:var(--s6); }
+  .limits ul { margin:var(--s2) 0 0; padding-left:var(--s6); color:var(--text2); font-size:14px; }
+  .limits li + li { margin-top:var(--s2); }
+  .limits li { max-width:var(--measure); }
+
+  .install { max-width:640px; text-align:left; background:var(--term); border:1px solid var(--border2); border-radius:var(--r); overflow:hidden; }
+  .tabs { display:flex; border-bottom:1px solid var(--border); background:var(--surface2); }
+  .tabs button { font:13px/1 var(--mono); color:var(--text2); background:none; border:0; border-bottom:2px solid transparent; padding:var(--s3) var(--s4); cursor:pointer; }
+  .tabs button[aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); }
   .tabs .copy { margin-left:auto; }
-  .panel { padding:14px 18px; }
+  .panel { padding:var(--s3) var(--s4); }
   .panel[hidden] { display:none; }
-  pre { margin:0; overflow-x:auto; font-size:13.5px; line-height:1.7; }
+  pre { margin:0; overflow-x:auto; font-size:13px; line-height:1.7; }
   pre .p { color:var(--accent); user-select:none; -webkit-user-select:none; }
-  pre .c { color:var(--dim); }
-  .panel ul { margin:10px 0 0; padding:0; list-style:none; display:grid; gap:4px 18px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); font:13px/1.5 var(--mono); }
-  .panel p { margin:10px 0 0; color:var(--muted); font-size:.9rem; }
-  .after { max-width:640px; margin:12px auto 0; color:var(--muted); font-size:.92rem; }
+  pre .c { color:var(--text3); }
+  .panel ul { margin:var(--s2) 0 0; padding:0; list-style:none; display:grid; gap:var(--s1) var(--s4); grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr)); font:13px/1.5 var(--mono); }
+  .panel p { margin:var(--s2) 0 0; color:var(--text2); font-size:14px; }
+  .after { max-width:640px; margin:var(--s3) 0 0; color:var(--text2); font-size:14px; }
+  .shot { max-width:960px; margin:var(--s8) 0 0; border:1px solid var(--border2); border-radius:var(--r); overflow:hidden; }
 
-  .shot { max-width:960px; margin:48px auto 0; border:1px solid var(--border2); border-radius:12px; overflow:hidden; }
-
-  section { padding:72px 0; border-top:1px solid var(--border); }
-  h2 { font-size:clamp(1.6rem,4vw,2.2rem); line-height:1.15; margin:0 0 12px; letter-spacing:-.02em; font-weight:800; }
-  .intro { color:var(--muted); max-width:720px; margin:0 0 32px; }
-
-  .goals { display:grid; gap:18px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); }
-  .goal { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:20px; }
-  .goal h3 { margin:0 0 8px; font-size:1.05rem; }
-  .goal p { margin:0; color:var(--muted); font-size:.94rem; }
-
-  .matrix { overflow-x:auto; border:1px solid var(--border); border-radius:12px; background:var(--panel); }
+  .matrix { overflow-x:auto; border:1px solid var(--border); border-radius:var(--r); background:var(--surface); }
   table { border-collapse:collapse; width:100%; font:14px/1.35 var(--sans); }
-  th, td { padding:10px 12px; border-bottom:1px solid var(--border); text-align:center; }
+  th, td { padding:var(--s2) var(--s3); border-bottom:1px solid var(--border); text-align:center; }
   th:first-child, td:first-child { text-align:left; }
-  thead th { font:600 13px/1.3 var(--mono); color:var(--muted); background:var(--bg2); position:sticky; top:0; }
+  thead th { font:600 13px/1.3 var(--mono); color:var(--text2); background:var(--surface2); }
   thead th.us { color:var(--accent); }
   td.us { background:var(--accent-soft); }
-  td small { display:block; color:var(--dim); font-size:.78rem; }
-  tr.group td { font:600 12px/1 var(--mono); color:var(--dim); text-transform:uppercase; letter-spacing:.08em; background:var(--bg2); text-align:left; }
-  td.n { font-family:var(--mono); }
-  .y { color:var(--ok); } .h { color:#e3b341; } .x { color:var(--dim); }
+  td small { display:block; color:var(--text3); font-size:12px; }
+  tr.group td { font:600 12px/1 var(--mono); color:var(--text3); text-transform:uppercase; letter-spacing:.08em; background:var(--surface2); text-align:left; }
+  td.n { font-family:var(--mono); text-align:right; font-variant-numeric:tabular-nums; }
+  .y { color:var(--ok); } .h { color:var(--warn); } .x { color:var(--text3); }
   tbody tr:last-child td { border-bottom:0; }
-  .fine { color:var(--dim); font-size:.84rem; margin:14px 0 0; }
+  .fine { color:var(--text3); font-size:13px; margin:var(--s3) 0 0; }
 
-  footer { border-top:1px solid var(--border); padding:32px 0 48px; color:var(--muted); font-size:.9rem; }
-  footer .wrap { display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; }
-  footer .mono { font-family:var(--mono); color:var(--dim); }
+  footer { border-top:1px solid var(--border); padding:var(--s8) 0 var(--s12); color:var(--text2); font-size:14px; }
+  footer .wrap { display:flex; flex-wrap:wrap; gap:var(--s3); justify-content:space-between; }
+  footer .mono { font-family:var(--mono); color:var(--text3); }
 
   @media (max-width:600px) {
-    .wrap { padding:0 16px; }
-    header { padding:44px 0 28px; }
-    th, td { padding:8px 6px; font-size:12.5px; }
+    .wrap { padding:0 var(--s4); }
+    header { padding:var(--s8) 0; }
+    h1 { font-size:24px; }
+    .lede { font-size:16px; }
+    .clunker { padding:var(--s3) var(--s4); }
+    .card, .limits { padding:var(--s4); }
+    .card .big { font-size:24px; }
+    th, td { padding:var(--s2) var(--s1); font-size:12px; }
     pre { font-size:12px; }
   }
 </style>
@@ -126,16 +189,105 @@
 <div class="top">
   <div class="wrap">
     <a class="brand" href="#">dun</a>
-    <nav><a href="#matrix">compare</a><a href="bench/whole-task.html">bench</a><a href="https://github.com/IodeSystems/dun">github</a></nav>
+    <nav><a href="#how">how</a><a href="#evidence">evidence</a><a href="#install">install</a><a href="https://github.com/IodeSystems/dun">github</a></nav>
   </div>
 </div>
 
 <header>
   <div class="wrap">
-    <h1><span class="hat" role="img" aria-label="construction worker">👷</span>dun</h1>
-    <p class="tagline">ain't pretty. gets it dun.</p>
-    <p class="lede">An open-source coding agent for the terminal, for long working sessions on any OpenAI-compatible model.</p>
+    <p class="eyebrow"><span role="img" aria-label="construction worker">👷</span> dun · open-source coding agent for the terminal · MIT</p>
+    <h1>Get it dun. Rip and tear until it is <em>dun</em>.</h1>
+    <p class="lede">dun is a coding agent for long jobs. It plans, delegates, manages its own context, and keeps on track until the work is done. Giving up when a task is impossible is a very. last. resort.</p>
+    <p class="lede">It works with any OpenAI-compatible model, hosted or local, and it is tuned for the cheap ones.</p>
 
+    <blockquote class="clunker">
+      <p>We don't want to be wasteful, but if we can get there with bottom-tier models and computers, great. I don't drive a Ferrari, but the clunker has started every time for the last 600k miles.</p>
+      <cite>— the author of dun</cite>
+    </blockquote>
+    <p class="lede">The point is reliability on cheap models and modest hardware, not peak capability.</p>
+
+    <div class="headline">
+      <span class="num">7% → <b>33%</b></span>
+      <span class="ctx">(1 attempt per task → 2) on the 15 Terminal-Bench 2.1 tasks where dun ran longest, GLM-5.3-Flash at low effort. <a href="#evidence">What that does and does not show.</a></span>
+    </div>
+
+    <div class="actions">
+      <a class="btn" href="#evidence">See the evidence</a>
+      <a class="btn primary" href="#install">Install dun</a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section id="how" aria-labelledby="how-h">
+  <div class="wrap">
+    <h2 id="how-h">How it keeps going</h2>
+    <p class="intro">A cheap model forgets, gives up early, and believes silence. Each of these is shipped behavior aimed at one of those failures.</p>
+    <div class="cards">
+      <div class="card"><h3>It checks the requirements before it stops</h3>
+        <p>In a <code>--non-interactive</code> run, before a turn that did work can end, the model lists each requirement the task states (paths, names, formats, values) and checks each against what it produced, by running it where it can. If one is not met and it can still work on it, it keeps working.</p>
+        <p class="why">Interactive: no extra round, unless the plan still has open steps.</p></div>
+      <div class="card"><h3>A plan that says what it is for</h3>
+        <p>The plan tool's description leads with its purpose: the plan is kept outside the conversation, so cutting context does not cut it, and each turn starts with its open steps. Each step has a goal and a <code>done_when</code>.</p>
+        <p class="why">No plan after 25 rounds, or 4 failures in a row: the model is made to write one. A plan with no step moved for 30 rounds: it is made to update it (at most 3 times a turn).</p></div>
+      <div class="card"><h3>Background jobs that report back</h3>
+        <p>A long command becomes a background job. dun tells the model when the job finishes, so it does not sleep or poll. A command the model is waiting on is cut short when another job finishes, so the news arrives at once.</p></div>
+      <div class="card"><h3>Loud, not silent</h3>
+        <p>A command that printed nothing returns <code>(no output; exit 0)</code>, not an empty string a model reads as a pass. A file edit whose text matches only when whitespace is ignored is applied, and the result says so.</p></div>
+      <div class="card"><h3>Recap that leaves a trail</h3>
+        <p>The model can replace its own churn with a summary. Each removed call stays as one line: the tool, its arguments, the outcome, the result size, and the file that holds the full result. The model can read that file again.</p></div>
+      <div class="card"><h3>Sub-agents with their own context</h3>
+        <p>Work that costs a lot of context for a small answer, such as reading a long log, goes to a sub-agent. It has the same tools, spends its own context, and returns the answer; what it read never enters the parent's context. It can run in its own worktree or container.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="evidence" aria-labelledby="ev-h">
+  <div class="wrap">
+    <h2 id="ev-h">The evidence, and its limits</h2>
+    <p class="intro">The limits are part of the claim. Read them with the numbers.</p>
+    <p class="setup">Every number here: GLM-5.3-Flash at low effort, through Fireworks · Terminal-Bench 2.1 · run with Harbor</p>
+
+    <div class="ev">
+      <div class="card">
+        <h3>The 15 tasks where dun ran longest</h3>
+        <p>9 rated hard and 6 rated medium by Terminal-Bench. Pass rate on these 15 tasks:</p>
+        <ul class="bars">
+          <li><span class="lab">dun, older build <small>1/15, 1 attempt per task</small></span><span class="val">7%</span><span class="track"><span class="fill" style="width:7%"></span></span></li>
+          <li><span class="lab">pi, our control run, same setup <small>1/15, 1 attempt per task</small></span><span class="val">7%</span><span class="track"><span class="fill" style="width:7%"></span></span></li>
+          <li><span class="lab">public leaderboard, average of 9 harnesses <small>3 attempts per task (6 for codex, opencode)</small></span><span class="val">31%</span><span class="track"><span class="fill" style="width:31%"></span></span></li>
+          <li class="us"><span class="lab">dun now <small>10/30, 2 attempts per task</small></span><span class="val">33%</span><span class="track"><span class="fill" style="width:33%"></span></span></li>
+          <li><span class="lab">claude-code, public leaderboard <small>45 trials, 3 attempts per task</small></span><span class="val">38%</span><span class="track"><span class="fill" style="width:38%"></span></span></li>
+          <li><span class="lab">hermes, public leaderboard (top) <small>45 trials, 3 attempts per task</small></span><span class="val">40%</span><span class="track"><span class="fill" style="width:40%"></span></span></li>
+        </ul>
+        <p class="why gap">Mid-pack among the public harnesses for this model, not the top.</p>
+      </div>
+      <div class="card">
+        <h3>The model started to plan</h3>
+        <p>On long tasks, before and after the plan tool's description was rewritten to lead with its purpose. Trials in which the model used the plan without being forced:</p>
+        <p class="big">0<span>/72</span> → 26<span>/30</span></p>
+        <h3 class="gap">First passes on very hard tasks</h3>
+        <p>dun's first passes on <code>dna-assembly</code> and on <code>path-tracing-reverse</code>, which has a 3% pass rate on the leaderboard.</p>
+      </div>
+    </div>
+
+    <div class="limits">
+      <h3>What this does not show</h3>
+      <ul>
+        <li>Across the whole suite, the gain is within noise: 18 → 19 of 37 matched tasks, one attempt each.</li>
+        <li>dun is not yet frugal with tokens: it spends about 3× the tokens per passed task of the leading harnesses.</li>
+        <li>Some tasks are bound by the model, not the harness (vision, crypto math). A harness does not fix those.</li>
+        <li>The 15 tasks were picked as the ones where dun had run longest (60+ rounds).</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="install" aria-labelledby="install-h">
+  <div class="wrap">
+    <h2 id="install-h">Install and run</h2>
+    <p class="intro">Linux and macOS, amd64 and arm64.</p>
     <div class="install">
       <div class="tabs" role="tablist" aria-label="Install">
         <button role="tab" aria-selected="true" aria-controls="t-curl" id="b-curl">curl</button>
@@ -145,7 +297,7 @@
       </div>
       <div class="panel" role="tabpanel" id="t-curl" aria-labelledby="b-curl">
 <pre><span class="p">$ </span>curl -fsSL https://dun.iodesystems.com/install.sh | sh</pre>
-        <p>Linux and macOS, amd64 and arm64. Installs the latest release to <code>~/.local/bin</code> after checking its sha256. <a href="install.sh">Read the script.</a></p>
+        <p>Installs the latest release to <code>~/.local/bin</code> after checking its sha256. <a href="install.sh">Read the script.</a></p>
       </div>
       <div class="panel" role="tabpanel" id="t-dl" aria-labelledby="b-dl" hidden>
         <ul>
@@ -166,29 +318,27 @@
     <div class="shot">
       <picture>
         <source media="(max-width:600px)" srcset="screenshots/phone-conversation.png" width="490" height="399">
-        <img src="screenshots/desktop-conversation.png" width="1800" height="950"
+        <img src="screenshots/desktop-conversation.png" width="1800" height="950" loading="lazy"
           alt="dun in a terminal: the user asks what the team notes say; dun shows the notes tool call and its result, then answers.">
       </picture>
     </div>
   </div>
-</header>
+</section>
 
-<main>
-
-<section aria-labelledby="goals-h">
+<section aria-labelledby="more-h">
   <div class="wrap">
-    <h2 id="goals-h">Built for real work, on the model you have</h2>
-    <p class="intro">Hours-long sessions on hosted, gateway or local models, including cheap and weak ones. What it optimizes for:</p>
-    <div class="goals">
-      <div class="goal"><h3>Zero jank</h3>
+    <h2 id="more-h">Also built for long sessions</h2>
+    <p class="intro">Hours-long sessions on hosted, gateway or local models.</p>
+    <div class="cards">
+      <div class="card"><h3>Zero jank</h3>
         <p>Redraws are capped at 30 a second and each block's layout is cached, so a streamed reply does not re-lay-out the scrollback for every token. <code>/perf</code> shows frame times and the message behind the slowest frame.</p></div>
-      <div class="goal"><h3>Zero bounce</h3>
+      <div class="card"><h3>Zero bounce</h3>
         <p>What you are reading stays where it is. Blocks fold only once they are wholly above the view, and new output never moves a scrolled-up reader.</p></div>
-      <div class="goal"><h3>Extended metrics</h3>
+      <div class="card"><h3>Extended metrics</h3>
         <p><code>/usage</code> shows cache hits by kind of request and whether a miss was dun's (it rewrote the prompt, and why) or the server's. Spend and key budget as the gateway reports them. <code>dun --usage</code> reads a per-response log kept in <code>~/.dun/stats</code>.</p></div>
-      <div class="goal"><h3>Context kept small for long sessions</h3>
-        <p>Output over 20,000 characters is cut, the whole kept in a file. The model can replace its own churn with a summary. MCP tools can run scripted, their schemas out of every request. A tool is listed only once it has a use.</p></div>
-      <div class="goal"><h3>Works with any other harness</h3>
+      <div class="card"><h3>Context kept small</h3>
+        <p>Output over 20,000 characters is cut, the whole kept in a file. MCP tools can run scripted, their schemas out of every request. A tool is listed only once it has a use.</p></div>
+      <div class="card"><h3>Works with any other harness</h3>
         <p>Another agent can hand dun the long, cheap part of a job: <code>dun mcp</code> serves dun's sessions over MCP (<code>claude mcp add dun -- dun mcp</code>). Anything with a shell can join in too: <code>dun msg --name b</code> listens and prints <code>FROM&gt;MESSAGE</code> lines, <code>dun msg b "…"</code> sends, and sessions reach listeners with <code>dun_msg</code>.</p></div>
     </div>
   </div>
@@ -196,8 +346,8 @@
 
 <section id="matrix" aria-labelledby="matrix-h">
   <div class="wrap">
-    <h2 id="matrix-h">Compared</h2>
-    <p class="intro">Measured with the same model for every agent (Qwen 27B on llama.cpp). Each benchmark page has the setup, the prompt, every run, and the scripts.</p>
+    <h2 id="matrix-h">Compared: tokens and features</h2>
+    <p class="intro">An earlier, separate measurement: the same model for every agent (Qwen 27B on llama.cpp), dun v0.1.8. Each benchmark page has the setup, the prompt, every run, and the scripts.</p>
     <div class="matrix">
       <table>
         <thead><tr><th scope="col"></th><th scope="col" class="us">dun</th><th scope="col">Claude Code</th><th scope="col">opencode</th><th scope="col">pi</th></tr></thead>
