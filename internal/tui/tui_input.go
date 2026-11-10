@@ -867,6 +867,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, cmd
 
+	case channelMsg:
+		m.channelDone(msg)
+		m.refresh()
+		return m, nil
+
 	case upgradeSelfMsg:
 		if msg.err != nil {
 			m.append(StErr.Render("upgrade: " + msg.err.Error()))

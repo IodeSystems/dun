@@ -111,6 +111,29 @@ build must not cut work short, and no one should have to coordinate it.
 - The TUI re-execs into its own binary when that is dund's new build; the web
   app reloads on a new build.
 
+## Release and source channels
+
+How a binary was built is its channel; there is no config key. A release
+build (`make release`, install.sh) checks the signed manifest daily and
+installs newer releases over its own file; `/upgrade off|on` stops and
+restarts that check. A source build (`make install`, `make
+install-launcher`) rebuilds itself from its checkout and never updates from
+releases on its own.
+
+- `/upgrade --channel=release` on a source build installs the newest
+  release now: verified with the release key, refused if the manifest is
+  older than one seen before (replay), but not refused when the release is
+  older than this build (`v0.4.1-30-g…` → `v0.4.1`). Both versions are
+  shown. It goes over this binary's file; the launcher's binary
+  (`~/.cache/dun/dun`, `$DUN_BIN`) is left alone and the release goes to
+  install.sh's path (`~/.local/bin/dun`, `$DUN_INSTALL_DIR`). A `dun` earlier
+  on PATH that would run instead (the launcher script, usually) is named in
+  a warning and never removed. Afterwards plain `/upgrade` follows releases.
+- `/upgrade --channel=source` on a release build downloads and builds
+  nothing; it says to run `make install` in the dun checkout.
+- `--channel=` the channel this dun is already on is plain `/upgrade`; any
+  other value is refused.
+
 ## Remote API
 
 - **gat calls operations in-process, so huma per-operation middleware does not

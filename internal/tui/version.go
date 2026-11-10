@@ -79,7 +79,7 @@ func updatePolicy(now time.Time) string {
 		case os.Getenv("DUN_NO_AUTOBUILD") == "1":
 			return "none — a source build from " + buildinfo.SrcDir + "; rebuilding on start is off (DUN_NO_AUTOBUILD=1)"
 		}
-		return "a source build: rebuilds itself from " + buildinfo.SrcDir + " when its source changed, at start; releases are not looked up"
+		return "a source build: rebuilds itself from " + buildinfo.SrcDir + " when its source changed, at start; releases are not looked up (/upgrade --channel=release switches to them)"
 	}
 	if newUpdater() == nil {
 		return "none — this build carries no release key (dun doctor says why)"
