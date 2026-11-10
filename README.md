@@ -437,12 +437,14 @@ nothing until it exits unless asked to. You stop one with `/jobs kill <n>` (bare
 in the activity pane. An interrupt does not stop the turn's jobs; it lists the
 ones still running, with the kill command.
 
-**Sub-agents:** `agent{prompt}` spawns a child agent to spend ITS context instead
-of yours — read a huge log, fetch and digest a page, survey how something is used
-— and hand back the conclusion. A child works in the parent's worktree and shares
+**Sub-agents:** `agent{node}` spawns a child agent on a plan node to spend ITS
+context instead of yours — read a huge log, fetch and digest a page, survey how something is used
+— and hand back the conclusion. There is no free prompt: the node's title,
+details and done_when are the child's brief, and it publishes its answer onto
+the node. A child works in the parent's worktree and shares
 its tool servers (no second index), runs on `--child-model` if you set one, and
 cannot spawn agents of its own or reach you directly. With more than one provider
-logged in, a child can run on another one: `agent{prompt, provider, model}`, or
+logged in, a child can run on another one: `agent{node, provider, model}`, or
 `--child-provider` with `--child-model` for the default — a session on the Claude
 API can hand work to a smaller model on a local server. Its tokens count in the
 session's spend, billed to its own provider and key. `agent{effort}` (or
@@ -487,12 +489,15 @@ base64. The first image sent to a model probes it: a refusal records that
 model (by provider URL and id) as having no vision in `~/.dun/vision.json`, a
 turn that goes through records that it has. For a model without vision, a
 vision model describes each image and the description goes in its place; set
-one in `~/.dun/config.json`:
+one with `/model use vision <provider>/<model>`, which writes the vision facet
+in `~/.dun/config.json` (`docs/providers-and-cost.md`, Model facets):
 
 ```jsonc
-"vision_model": "qwen2.5-vl-7b-instruct",  // a model id that reads images, on the active provider
-"vision_provider": "openrouter"             // optional: a model on another logged-in provider
+"facets": {"vision": {"provider": "openrouter", "model": "qwen2.5-vl-7b-instruct"}}
 ```
+
+The older `vision_model` and `vision_provider` fields are still read when no
+vision facet is set.
 
 With none set, a message with images to such a model is not sent: the TUI says
 why and puts the message back in the composer. A message with images sent
@@ -501,7 +506,7 @@ during a turn waits for the turn to end (an image cannot ride a tool result).
 ## The task plan
 
 For work with several steps the model keeps a plan: a graph of tasks (`plan` tool,
-the built-in group `dun:plan`), each with a title, a goal, what "done" means
+the built-in group `dun:plan`), each with a title, details, what "done" means
 (`done_when`) and the nodes it needs. A node is ready when everything it needs is
 done; a dropped node keeps its dependents waiting until they are re-pointed to a
 replacement. While the plan has open nodes each turn carries a few lines saying what
@@ -510,10 +515,10 @@ the session.
 
 | | |
 |---|---|
-| `/plan` | the graph as a tree; a node with several parents shows under each. `a` approves, `e`/`g` edit a title/goal, `d` drops (the composer is filled in to finish), enter shows a node |
+| `/plan` | the graph as a tree; a node with several parents shows under each. `a` approves, `e`/`m` edit a title/details, `d` drops (the composer is filled in to finish), enter shows a node |
 | `/plan mode on\|off` | plan mode, off by default. On, `exec`, `file_edit`/`file_write`/`file_delete`/`file_move`, `agent`, `mount`, `loop_ctl`, `dun_msg`, the shell server's tools and MCP tools named for a write are refused until the plan is approved; reading, searching and `plan` work |
 | `/plan approve` | lets the model change things in plan mode (an edit to the plan afterwards keeps it) |
-| `/plan edit <id> title\|goal <text>`, `/plan drop <id> [why]` | what the screen's keys send |
+| `/plan edit <id> title\|details <text>`, `/plan drop <id> [why]` | what the screen's keys send |
 
 What you change reaches the model as a note. Marking a node done is the model's.
 

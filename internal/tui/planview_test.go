@@ -11,7 +11,7 @@ import (
 func planEvent(extra map[string]any) evMsg {
 	ev := evMsg{"type": "plan", "mode": true, "total": 4.0, "done": 1.0, "rows": []any{
 		map[string]any{"id": "1", "title": "Parse the file", "status": "done", "done_when": "tests pass", "account": "go test ok"},
-		map[string]any{"id": "2", "title": "Emit events", "status": "doing", "goal": "write the encoder", "done_when": "round trip", "needs": []any{"1"}, "depth": 1.0},
+		map[string]any{"id": "2", "title": "Emit events", "status": "doing", "details": "write the encoder", "done_when": "round trip", "needs": []any{"1"}, "depth": 1.0},
 		map[string]any{"id": "3", "title": "Document it in the README", "status": "todo", "done_when": "README has it", "needs": []any{"1", "2"},
 			"waiting": []any{"needs 2 (doing)"}, "depth": 2.0},
 		map[string]any{"id": "3", "title": "Document it in the README", "status": "todo", "needs": []any{"1", "2"}, "waiting": []any{"needs 2 (doing)"},

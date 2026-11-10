@@ -228,7 +228,8 @@ func loadCatalog(dir string, base []Server) ([]catalogEntry, error) {
 func switchesOnly(s ServerSpec) bool {
 	return s.Command == "" && s.URL == "" && s.Args == nil && s.Env == nil && s.Headers == nil &&
 		s.Bearer == "" && s.OAuth == nil && s.Timeout == 0 &&
-		(s.Wake || s.Autostart != nil || s.Via != "" || s.Instance != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Detach != nil || s.Exclude != nil || s.IndexBudget != "" || s.IndexAnyway)
+		(s.Wake || s.Autostart != nil || s.Via != "" || s.Instance != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Detach != nil || s.Exclude != nil || s.IndexBudget != "" || s.IndexAnyway ||
+			s.LSPRoots != "" || s.LSPMaxRSSMB != nil || s.LSPIdleStop != "")
 }
 
 // resolve turns a catalog entry and this session's switches into the Server
@@ -326,6 +327,9 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		Exclude:        s.Exclude,
 		IndexBudget:    s.IndexBudget,
 		IndexAnyway:    s.IndexAnyway,
+		LSPRoots:       s.LSPRoots,
+		LSPMaxRSSMB:    s.LSPMaxRSSMB,
+		LSPIdleStop:    s.LSPIdleStop,
 		Wake:           s.Wake,
 	}, true, nil
 }

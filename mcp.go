@@ -50,9 +50,10 @@ var toolDocs = map[string]string{
 	// node_edit: rename is the right tool for renaming; oldText/newText for snippets.
 	"node_edit": "\n\nRENAMING a symbol? Use the rename op — ONE call renames the declaration AND every usage across the WHOLE workspace, atomically. Do NOT rename by hand-editing files one at a time with oldText/newText: that misses usages and leaves the build broken between edits. For snippets, oldText must occur exactly once WITHIN the node — keep it short. Pass the node's whole text to rewrite it entirely.",
 	"eval": "\n\nmcpshell is a JS subset — do the whole task in ONE eval that ENDS in the value:\n" +
-		"  export let total = [1,2,3].reduce((a,b) => a + b, 0)   // export → survives to your NEXT eval; plain let/const does not\n" +
-		"  total * 2                                              // the LAST expression is the output (console.log is not the result)\n" +
-		"  [3,1,2,1] |> unique()                                  // dedup; new Set(xs) also works ([...set] for pipes)\n" +
+		"  let total = [1,2,3].reduce((a,b) => a + b, 0)   // lasts the session (like a REPL); redeclare to replace it\n" +
+		"  total * 2                                       // the LAST expression is the output (console.log is not the result)\n" +
+		"  [3,1,2,1] |> unique()                           // dedup; new Set(xs) also works ([...set] for pipes)\n" +
+		"A top-level name can't reuse a builtin or command (all, keys, sum, max…): pick another (let total, not let sum).\n" +
 		"class/this/new/instanceof, Map/Set and Error subclasses work as in JS. No import, generators, Symbol or Proxy. " +
 		"Unlike JS: == and === compare plain objects by structure; Map/Set keys(), values() and entries() return arrays; " +
 		"an error mcpshell raises itself is a string in catch. Dedup, count, sort etc. are pipe commands — help() lists them.",
@@ -94,11 +95,13 @@ func modelToolName(t mcpmgr.MCPTool) string {
 // Errors meant for the model (unknown tool, bad args, tool failure) are formatted
 // INTO the result so the loop stays alive.
 //
-// regain, when set, is asked about a failed call: true means the server was
+// regain, when set, is asked about a failed call: retry means the server was
 // started again (a shared one the gateway no longer had), and the call is
-// made once more.
+// made once more; a reply is what the model reads instead of the error (a
+// local server that exited, restarted but not called again: the call may
+// be what killed it).
 func mcpDispatcher(mgr toolCaller, tools []mcpmgr.MCPTool, onCall func(tool string, args map[string]any, result string),
-	regain func(ctx context.Context, serverID string, err error) bool) agent.ToolDispatcher {
+	regain func(ctx context.Context, serverID string, err error) (retry bool, reply string)) agent.ToolDispatcher {
 	type route struct{ server, tool string }
 	routes := make(map[string]route, len(tools))
 	for _, t := range tools {
@@ -129,8 +132,13 @@ func mcpDispatcher(mgr toolCaller, tools []mcpmgr.MCPTool, onCall func(tool stri
 			}
 		}
 		res, err := mgr.CallTool(ctx, serverID, r.tool, args)
-		if err != nil && regain != nil && regain(ctx, serverID, err) {
-			res, err = mgr.CallTool(ctx, serverID, r.tool, args)
+		if err != nil && regain != nil {
+			switch retry, reply := regain(ctx, serverID, err); {
+			case retry:
+				res, err = mgr.CallTool(ctx, serverID, r.tool, args)
+			case reply != "":
+				res, err = reply, nil
+			}
 		}
 		if err != nil {
 			res = fmt.Sprintf("ERROR: %v", err)

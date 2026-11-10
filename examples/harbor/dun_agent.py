@@ -16,6 +16,12 @@ dun runs in engine mode (-p): the JSON event log goes to /logs/agent/dun.jsonl,
 and its usage event gives the token counts. cost_usd is priced from those counts
 with DUN_PRICE_IN / DUN_PRICE_CACHED / DUN_PRICE_OUT (USD per 1M tokens); without
 them it is left unset.
+
+Memory (dun's memory tool and recall of notes) is off: DUN_MEMORY=0 unless the
+worker's environment sets DUN_MEMORY, e.g. DUN_MEMORY=1 for a run that wants it.
+Code and docs search through dund is off the same way: DUN_CODE_SEARCH=0 unless
+the worker's environment sets it. So are the user's rules files (~/AGENTS.md,
+~/CLAUDE.md, ~/.claude/CLAUDE.md in the container): DUN_USER_RULES=0 unless set.
 """
 
 from __future__ import annotations
@@ -79,6 +85,16 @@ class Dun(BaseInstalledAgent):
             # "none", so a fold (effort off) is sent as low instead.
             "DUN_EFFORT_OFF": os.environ.get("DUN_EFFORT_OFF", "low"),
             "DUN_NO_AUTOBUILD": "1",
+            # Evals run with no memory (USER 2026-11-08): no notes carried
+            # between trials. A run that wants memory sets DUN_MEMORY.
+            "DUN_MEMORY": os.environ.get("DUN_MEMORY", "0"),
+            # And no code and docs search through dund (dun/codesearch.go): a
+            # trial's index would outlive it. DUN_CODE_SEARCH=1 turns it on.
+            "DUN_CODE_SEARCH": os.environ.get("DUN_CODE_SEARCH", "0"),
+            # And no user rules files (dun/rules.go): a trial reads only the
+            # task's own AGENTS.md and CLAUDE.md, whatever the image's home
+            # holds. DUN_USER_RULES=1 reads them.
+            "DUN_USER_RULES": os.environ.get("DUN_USER_RULES", "0"),
         }
         # dun's round limit per turn (default 400). A benchmark may set it lower as
         # a cost guard: report it with the results.

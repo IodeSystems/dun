@@ -445,7 +445,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		if !m.asking {
 			m.keepDraft() // the composer is the user's draft; the question borrows it
 		}
-		m.asking, m.noting, m.customAnswer = true, false, false
+		m.asking, m.noting = true, false
 		m.askSel, m.askNote = 0, ""
 		m.input.Blur()
 		m.settleAsk() // a new question replaces any parked one
@@ -480,15 +480,17 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.askSel = i // enter takes the recommendation
 			}
 		}
-		// No options → a pure free-text prompt: drop straight into text entry so
-		// the user can just type. Otherwise typing is inert until enter opens the
-		// "custom answer" row — surprising when there's nothing else to pick.
-		if len(m.askOptions) == 0 {
-			m.customAnswer = true
-			m.input.Reset()
-			m.input.placeholder = "type your answer…"
-			m.input.Focus()
+		// A question with no options is only its text row (row 0), so typing
+		// answers at once. no_custom means nothing without options to pick.
+		nc, _ := ev["no_custom"].(bool)
+		m.askNoCustom = nc && len(m.askOptions) > 0
+		m.askField = newMultilineInput()
+		m.askField.width = askFieldWidth(m.w)
+		m.askField.placeholder = "type an answer…"
+		if m.askMulti {
+			m.askField.placeholder = "type another option…"
 		}
+		m.askEdit = m.askTextRow()
 	case "retry":
 		return m.handleRetry(ev)
 	case "upgrade":

@@ -4,77 +4,77 @@
   "published": "",
   "artifacts": {
     "mcpshell": {
-      "version": "v0.11.0",
+      "version": "v0.12.0",
       "files": {
         "darwin_amd64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.0/mcpshell_darwin_amd64.tar.gz",
-          "sha256": "4f7dca9b77ff9630ebd90a70ae96fa099518b774041fb135d1decf97f8c1a3aa",
-          "size": 15499763
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.12.0/mcpshell_darwin_amd64.tar.gz",
+          "sha256": "cd360ee646369d6e3666c1e0b7b77b69e12e7e786da47a089ca54b967c771c4b",
+          "size": 15544268
         },
         "darwin_arm64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.0/mcpshell_darwin_arm64.tar.gz",
-          "sha256": "84835521104c4fe99f30d0120febc8aa2b21988c7f35318c8609d16e1b4609c2",
-          "size": 14611948
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.12.0/mcpshell_darwin_arm64.tar.gz",
+          "sha256": "e2efdb79d6007955f7fdfc327b631e4cdf97f3b93cf181c01b41dfd12ba36fe0",
+          "size": 14651529
         },
         "linux_amd64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.0/mcpshell_linux_amd64.tar.gz",
-          "sha256": "5dd0ac8c37916e76299563dcc57e73658b878f548c0f7e74d4cd849e825afbe3",
-          "size": 15365896
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.12.0/mcpshell_linux_amd64.tar.gz",
+          "sha256": "259526ef0224d53b486898cc11590bc7a48c695775c6fae5c925a74025e010ac",
+          "size": 15404298
         },
         "linux_arm64": {
-          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.11.0/mcpshell_linux_arm64.tar.gz",
-          "sha256": "b0353649456b6ddaa5761fb5312e31b24b29da54322fa0411171a811bf556bb4",
-          "size": 14140036
+          "url": "https://github.com/IodeSystems/mcpshell/releases/download/v0.12.0/mcpshell_linux_arm64.tar.gz",
+          "sha256": "7cb5d40c5996a278109af150ca3e7ac4b35b73f2b51a444e2bafe6261c821ab0",
+          "size": 14175028
         }
       }
     },
     "poly-lsp-mcp": {
-      "version": "v0.4.1",
+      "version": "v0.5.1",
       "files": {
         "darwin_amd64": {
-          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.1/poly-lsp-mcp_darwin_amd64.tar.gz",
-          "sha256": "eac5ae22433c6d8ca93b34744baf8ccb172c57faabfd32b78c90d4045f7853f4",
-          "size": 19162310
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.5.1/poly-lsp-mcp_darwin_amd64.tar.gz",
+          "sha256": "b5b35c90dba1e2bd2ffde4f320d0fb90b7be8bbaa2b111580b419fc51f4eb298",
+          "size": 19218805
         },
         "darwin_arm64": {
-          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.1/poly-lsp-mcp_darwin_arm64.tar.gz",
-          "sha256": "b14e87b88e476c2dba7306e3255332927aae8cda7ae4e675af651289189444bb",
-          "size": 17817705
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.5.1/poly-lsp-mcp_darwin_arm64.tar.gz",
+          "sha256": "b60f9b0c6c20fe377861c29e3bbd92d20dec2bd86691d247c8593fff495b4b9f",
+          "size": 17943442
         },
         "linux_amd64": {
-          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.1/poly-lsp-mcp_linux_amd64.tar.gz",
-          "sha256": "29a0e4a1ec263e72ecadead1d8fcb76e0fdb82dcb606e2cc2775ef30a786a196",
-          "size": 17539672
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.5.1/poly-lsp-mcp_linux_amd64.tar.gz",
+          "sha256": "9ab5abc14f1cc1035bea682d7fd25fb6c76ccb83fe594c902336ba8d773a9867",
+          "size": 17594710
         },
         "linux_arm64": {
-          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.4.1/poly-lsp-mcp_linux_arm64.tar.gz",
-          "sha256": "fdd72a4b7ecf79865206e4f3523b83d34e1242a0e96149da5d3dd971c0511790",
-          "size": 16124428
+          "url": "https://github.com/IodeSystems/poly-lsp-mcp/releases/download/v0.5.1/poly-lsp-mcp_linux_arm64.tar.gz",
+          "sha256": "57a6fcd978a3c8d719828a86aa2f3306e8aa7f3a58a3ba6640c01c6826dd6ecc",
+          "size": 16173578
         }
       }
     },
     "raglit": {
-      "version": "v0.5.1",
+      "version": "v0.8.1",
       "files": {
         "darwin_amd64": {
-          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.5.1/raglit_darwin_amd64.tar.gz",
-          "sha256": "818e72ad4fc7d584e1b5ffb0a46d1e5c3abcb648b97d583d1e625db29ae3f9bd",
-          "size": 28162625
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.8.1/raglit_darwin_amd64.tar.gz",
+          "sha256": "dea52b5c15995358417983fe158b72b2b81aa4a9588d825f01be83fb368ea834",
+          "size": 36604245
         },
         "darwin_arm64": {
-          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.5.1/raglit_darwin_arm64.tar.gz",
-          "sha256": "9d7b9a903ba491fdcb2684ccea9d3422c2389f22a14278b7909e986dc701ca18",
-          "size": 26553490
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.8.1/raglit_darwin_arm64.tar.gz",
+          "sha256": "44c4abae6ad5f5f392c172bf759c795dcefeeda29705cbd8569a4f4b870da255",
+          "size": 34577569
         },
         "linux_amd64": {
-          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.5.1/raglit_linux_amd64.tar.gz",
-          "sha256": "df860d934f27e55bcf4a5ac88a8cb00b55dec6d8ceec5072ffea18fa54a35123",
-          "size": 27313382
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.8.1/raglit_linux_amd64.tar.gz",
+          "sha256": "b8c54aae917a3423846cefa7a3dad7e8d4eb895657303d54264e82d87ed77470",
+          "size": 35544902
         },
         "linux_arm64": {
-          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.5.1/raglit_linux_arm64.tar.gz",
-          "sha256": "4cb7a00590f2e52bdebd58863220a9184b61644eca4f8a85f7f660d254fbf5f6",
-          "size": 25110006
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.8.1/raglit_linux_arm64.tar.gz",
+          "sha256": "807b8d5cea33baed93b6c4423327c0668fa405091bfcec0c4cf567e4fa3d0f9d",
+          "size": 32764869
         }
       }
     }

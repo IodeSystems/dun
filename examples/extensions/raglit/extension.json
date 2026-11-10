@@ -8,8 +8,8 @@
   },
   "slash": {
     "name": "rag",
-    "description": "project search (raglit): finds the parts of this project that bear on a question",
-    "help": "Project search (raglit) reads this project's files and docs into an index. While it is on, dun gives the model the parts that bear on each question, and the model can search the index itself. It also keeps the notes from /remember.\n/rag on — turn it on for this session\n/rag auto — turn it on in every session of this project\n/rag off, /rag manual — the same two, to turn it off\n/rag alone — whether it is on, and what it has read",
+    "description": "project search (raglit): raglit's own document indexes (attached ones, include, the UI); this project's code and docs are dund's, with no /rag on",
+    "help": "Project search (raglit) is raglit's own document indexes: the ones attached to this workspace (/rag attach), what include and add-document read, and raglit's UI. This project's code and docs need no /rag on: dund indexes and searches them in every session (and /remember's notes). While raglit is on, dun gives the model the parts of its indexes that bear on each question, and the model's search reads them too.\n/rag on — turn it on for this session\n/rag auto — turn it on in every session of this project\n/rag off, /rag manual — the same two, to turn it off\n/rag alone — whether it is on, and what it has read",
     "commands": {
       "include": {
         "help": "FILE|DIR... — add to this workspace's index and keep up to date: a directory is WATCHED (raglit re-reads changed and new files); a file is read once. add-document reads a directory once, without watching",

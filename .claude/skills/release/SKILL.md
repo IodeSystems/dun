@@ -15,6 +15,20 @@ session: its owner does it, with Carl's OK for that repo. dun itself is tagged,
 pushed, signed and published only when Carl asks for it in this conversation
 (an earlier "go" does not carry over).
 
+## 0. Branches (USER 2026-11-09: "pick a system and keep it")
+
+- **`main` is the development line.** Work we have committed to goes on
+  `main`, merged once its checks pass. There is no `next`, `dev`, `final` or
+  staging branch.
+- **Work not yet committed to** goes on one short-lived topic branch per
+  piece, named for the work (`ragcore`, `fix-dead-server`), never for a
+  stage (`next`, `final`, `-v2`). It is either merged into `main` or deleted.
+  Delete a branch (and its worktree) once it is merged.
+- **A release is an annotated tag on `main`** (`vX.Y.Z`). Tags are
+  branchable: a patch for a past release goes on `release/vX.Y`, cut from
+  its tag only when a patch is needed, with fixes cherry-picked from `main`,
+  and tagged `vX.Y.Z+1` from there.
+
 ## 1. What dun depends on
 
 | dependency | kind | pinned in | owner session (check `ListAgents`) |
@@ -94,8 +108,9 @@ reach dun's use of the gateway.
 
 When Carl says to release vX.Y.Z (in this conversation):
 
-1. Land on main: fast-forward main to the tested commit (branch first if work
-   is on a branch; never rebase or force a pushed branch).
+1. The release is cut from `main` (section 0): the tested commit is on
+   `main` already; a patch release is cut from `release/vX.Y`. Never rebase
+   or force a pushed branch.
 2. Pick the version: minor for features or breaking changes in 0.x, patch for
    fixes only. Last tags: `git tag --sort=-creatordate | head`.
 3. Tag the clean commit: `git tag -a vX.Y.Z -m "dun vX.Y.Z"`; push main and the

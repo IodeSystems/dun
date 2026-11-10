@@ -61,8 +61,14 @@ var Supported = []Tool{
 	// Breaking for scripts, not for dun's launch: extra arguments to a command
 	// are an error; class/extends/super/this/instanceof are reserved; throw
 	// keeps a non-string value. darwin_arm64 run on a Mac (2026-11-08).
+	// Recommended v0.11.1 (2026-11-09, 1bdd7f1), tarballs in deps.json:
+	// parseJson joins escaped surrogate pairs (emoji from Python json.dump).
+	// Recommended v0.12.0 (2026-11-09, 527a9b6), tarballs in deps.json:
+	// session-scoped let/const; eval clear; builtin names are reserved at top
+	// level; File values from ls/glob. Breaking for scripts (`let all` is an
+	// error), not for dun's launch, so Min stays.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.11.0"},
+		Min: "v0.2.0", Recommended: "v0.12.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
@@ -87,9 +93,20 @@ var Supported = []Tool{
 	// config only from an absolute --config, so custom servers reach it
 	// through `lsp add` (servers.yaml). Recommended v0.4.1 (cdeeb2a,
 	// 2026-11-03), tarballs in deps.json: child LSPs run at nice +10;
-	// clangd -j is capped at half the cores (at most 8).
+	// clangd -j is capped at half the cores (at most 8). Recommended v0.5.0
+	// (fff65bf, 2026-11-09), tarballs in deps.json: the segment package
+	// (symbols and Markdown sections for raglit's code segmenter); the C
+	// tree-sitter runtime is opt-in (-tags treesitter_cgo), but the release
+	// binaries set it; no MCP schema change. Recommended v0.5.1 (f82a647,
+	// 2026-11-10), tarballs in deps.json: daemon-wide bounds by default — at
+	// most 4 LSP children (LRU), children RSS 25% of RAM, per child
+	// min(3 GiB, 15% of RAM), idle stop 10m, proactive didOpen off, daemon
+	// GOMEMLIMIT auto, one niced index build, --max-files 50000 per root (not
+	// lifted by --index-anyway), a macOS memory-pressure stop, orphaned
+	// children reaped. `status --json` gains fleet and memoryLimit. dun's
+	// interim --lsp-max-rss-mb and --lsp-idle-stop are dropped (lspsafe.go).
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.4.1"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.1"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /rag setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,
@@ -112,8 +129,18 @@ var Supported = []Tool{
 	// dependency upgrade (agentkit v0.25.0 and others). v0.5.0 normalizes every
 	// tag on write (lowercase, whitespace collapsed); dun matches no tags, so
 	// nothing changes for it. MCP surface unchanged since v0.4.1.
+	// Recommended v0.8.0 (2026-11-09, e50ed7f), tarballs in deps.json: the
+	// binary of the same raglit dund imports as a module (ragcore v0.6-v0.8:
+	// caller-owned tags, the embedder roles, the code segmenter adapter,
+	// EnqueueMany, worktree branches). The daemon gains --code-segmenter
+	// (off by default) and re-embeds an index whose vectors are of another
+	// length; no flag or command dun uses changed. linux_amd64 prints
+	// version 0.8.0.
+	// Recommended v0.8.1 (2026-11-09, 5b66995), tarballs in deps.json: fixes
+	// SQLITE_BUSY from a deferred BEGIN (_txlock=immediate), adds ReadBranch
+	// and OpenBranchOn (library only; the CLI is unchanged).
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.5.1"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.8.1"},
 }
 
 // Tool is one Supported entry.

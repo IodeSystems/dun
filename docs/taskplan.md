@@ -33,7 +33,7 @@ graph does not record.
 ## A node
 
 ```
-id, title, goal, status, needs[], owner, done_when, notes, files[], replaces, why, account
+id, title, details, status, needs[], owner, done_when, replaces, why, account
 ```
 
 - `status`: `todo`, `doing`, `done`, `blocked`, `dropped`. The changes allowed are a
@@ -54,9 +54,11 @@ id, title, goal, status, needs[], owner, done_when, notes, files[], replaces, wh
 - `drop` keeps the node (with its reason). `replaces` (optional id, of a dropped node)
   lets a new node stand in for it; the dependents are re-pointed by an `update` that
   changes their `needs`.
-- `files`: the paths the node expects to change. Nothing enforces it yet; parallel runs
-  need it (aw4 had nine landings refused in one night from siblings editing one test
-  file). Kept in dun until the package moves.
+- `details`: free text, what the node is for and what the next reader needs. Only
+  `show <id>` prints it; the whole-plan `show` lists title, status and done_when.
+  agentkit v0.27.0 replaced `goal`, `notes` and `files` with it. A sidecar written
+  before that is read with details = goal, a blank line, notes (an empty part is
+  skipped); files are dropped (`planFileData.UnmarshalJSON`).
 - `owner`: an opaque string the graph round-trips and `Ready` filters on. "" is the
   session's main agent. Who may change a node is a hook the host gives the tool
   (`WithMayChange`), not a rule of the graph. `Subtree(id)` is the node and all that
@@ -69,7 +71,7 @@ One tool, `plan`, in a built-in group `plan` (`dun:plan`), with an `action`:
 `update` also sets `status` to `todo` or `doing` (begin a node, or take back a block).
 The package's entry is `Tool(store, actor, opts...)` returning the definition and a
 handler, after agentkit's `SessionSearchTool`. The host adds its own sentences to the
-description (`WithNote`): plan mode and `files` are the host's to explain.
+description (`WithNote`): plan mode is the host's to explain.
 
 Every result is short: the node touched and what is ready now.
 
@@ -82,8 +84,8 @@ folds and resume. A session with no file (an in-memory session) keeps it in memo
 
 `/plan` opens a screen with the graph as a tree. A node with several parents shows
 under each, marked as a repeat ("again"). From it a person can approve the plan, edit
-a node's title or goal, or drop a node. Re-ordering is not built: order is the edges,
-and the screen does not edit them (not built). `e`, `g` and `d` fill the composer with
+a node's title or details, or drop a node. Re-ordering is not built: order is the edges,
+and the screen does not edit them (not built). `e`, `m` and `d` fill the composer with
 `/plan edit|drop …` to finish, so a drop is typed, not a keystroke. What the person
 changes reaches the model as a note: an approval as a notification that wakes it,
 the rest as asides that ride its next turn. The engine sends the graph as a `plan`
@@ -121,8 +123,8 @@ most 5 short lines (about 100 tokens) a turn.
 ## Children work ready nodes, breadth first (2026-11-06)
 
 The main agent is the only scheduler. It gives a child a READY node — todo, owner
-"", every need done — and only that node: `agent({prompt, node})` for a new child,
-`jobs({agent: N, node})` for an idle one. So no child ever waits on another child's
+"", every need done — and only that node: `agent({node})` for a new child,
+`agent({id: N, node})` for an idle one. So no child ever waits on another child's
 node, and there is no subgraph to compute. When nodes are published, the main agent
 gives what became ready to the same children or to new ones.
 
@@ -134,7 +136,7 @@ node plus its unowned prerequisites, with cross-owner waits. Rejected for this:
 resolved, main agent can reassign to newly unblocked or create new agents for them."
 
 - A child may own several nodes. It **owes a publish** for each: status done with
-  notes of what it found or made, or dropped with why. Nodes it adds are its own, and
+  an account of what it found or made, or dropped with why. Nodes it adds are its own, and
   owed too.
 - A run that ends owing is reminded ONCE (`subAgent.work`); if it still owes, its
   report says so ("Still owes a publish for …") and the main agent decides. Once, so
@@ -153,6 +155,37 @@ resolved, main agent can reassign to newly unblocked or create new agents for th
   also gives back the open nodes of children it has no record of
   (`planReleaseOrphans`). Dismissing a child gives back what it did not finish;
   finished nodes keep who did them.
+
+## A child starts only on a node (USER 2026-11-10)
+
+"Subagents should only be launchable via plan nodes!" `agent` has no `prompt`:
+`agent({node: "<id>", model?, effort?, isolation?, wait?})` starts a child, and its
+first message is "Work this plan node." and the node's brief (`planBrief`: title,
+details, done_when, and to publish it). The task goes in the node's details. The
+child reports onto the node: it publishes it with its plan tool (done with an
+account, or dropped with why).
+
+Refused, with nothing started or changed (`spawnTool`, `planCanAssign`):
+
+- no node, or a `prompt`: "agent starts a child only on a plan node. Add a node
+  with plan({action:"add", title, details, done_when}), then call
+  agent({node:"<id>"})." (`agentNoNode`, `agentNoPrompt`);
+- an unknown node, or a done or dropped one: the same fix;
+- a node with a live child: "node N already has a child, agent #K; one child per
+  node." It is free again when that child publishes it or is dismissed;
+- the plan tool switched off: there is no node to name, and the refusal says so.
+
+Why no prompt on top of the node: the smaller surface. With both, part of the
+task would be in a prompt only the child saw, and the plan would not say what the
+child was asked. An idle child still takes `agent({id: N, tell})` and
+`agent({id: N, node, tell})`: that is work for a child already started, not a start.
+
+Nesting: a child has no `agent` tool (depth 1, docs/decisions.md "Sub-agents"), so
+there is no child-of-a-child to brief. A child that finds more work adds nodes
+under its own in the parent's plan; they are its own and owed. The main agent
+stays the only one that starts children. The person's commands start no
+sub-agent (the agents pane views and tells existing ones; `dun mcp`'s `dun_start`
+starts a separate session), so nothing there changed.
 
 `/plan tell <id> <text>` hands the person's words about a node to its owner, to
 change the plan to match, instead of a direct edit (USER: "Decide x" nodes want

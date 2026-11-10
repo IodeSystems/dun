@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sys/unix"
 
@@ -28,9 +29,12 @@ import (
 //	tool from go install  → go install <module>@<recommended> (--fix runs it)
 //	tool from a checkout  → rebuild it in that checkout (said, never run)
 //
-// --fix never downgrades and never touches a checkout. A build whose version
-// says nothing (a modified checkout, a plain go build, "(devel)") is not
-// compared: one ok line says so, with no update to nag about.
+// --fix never downgrades and never touches a checkout. A modified checkout
+// is compared by the version its build info gives (v0.7.2-0.<ts>-<sha>+dirty
+// is v0.7.2's pseudo-version, valid semver): a Mac ran such a build, far
+// below Min, for weeks while doctor said ok. Only a build whose version says
+// nothing (a plain go build, "(devel)") is not compared: one ok line says
+// so, with no update to nag about.
 
 // Fix actions planTool can name.
 const (
@@ -57,7 +61,7 @@ type toolPlan struct {
 func planTool(name, p string, o update.Origin, s release.Tool, env toolEnv) toolPlan {
 	pl := toolPlan{level: "ok", detail: name + ": " + o.String()}
 	v := o.Version
-	if !semver.IsValid(v) || o.Kind == update.GoBuild || (o.Kind == update.Checkout && o.Modified) {
+	if !semver.IsValid(v) || o.Kind == update.GoBuild {
 		if o.Kind != update.Release && o.Kind != update.GoInstall {
 			pl.detail += "; can't compare its version with " + s.Recommended + " (this dun's)"
 		}
@@ -74,6 +78,9 @@ func planTool(name, p string, o update.Origin, s release.Tool, env toolEnv) tool
 		pl.detail += "; too old for this dun (it needs " + s.Min + " or newer)"
 	case behind:
 		pl.detail += "; an update is available: " + target + " (tested with this dun)"
+		if o.Kind == update.Checkout && o.Modified {
+			pl.level = "warn" // unreleased code, and behind what this dun was tested with
+		}
 	default:
 		return pl
 	}
@@ -107,6 +114,15 @@ func planTool(name, p string, o update.Origin, s release.Tool, env toolEnv) tool
 		pl.fix = "rebuild it from its checkout (make install)"
 		if o.SrcDir != "" {
 			pl.fix = "rebuild it in " + o.SrcDir + " (make install)"
+		}
+		if o.Modified {
+			pl.detail = name + ": a modified checkout of " + v + " (at " + o.Revision + ")" + strings.TrimPrefix(pl.detail, name+": "+o.String())
+			where := "its checkout"
+			if o.SrcDir != "" {
+				where = o.SrcDir
+			}
+			pl.fix = "rebuild it in " + where + " from a current tag (make install), or remove " + p +
+				" and run dun doctor --fix to get the pinned release"
 		}
 	}
 	return pl
@@ -251,4 +267,66 @@ func originNote(name string, o update.Origin) string {
 		return "; a go install build serves a placeholder web UI (the real one needs node to build; raglit's release tarballs include it)"
 	}
 	return ""
+}
+
+// toolWarnings are the session's start lines on the tools the engine runs
+// (Ready's hint): each one too old for this dun or not a release build, by
+// path and version, with the version dun pins and the fix. A Mac ran a
+// modified mcpshell checkout from ~/.local/bin, found on PATH first, with
+// no word from dun until it crashed. Build info only: no tool is run.
+func toolWarnings() []string {
+	d := &doctor{}
+	var out []string
+	for _, t := range release.Supported {
+		p, err := dun.FindCommand(t.Name)
+		if err != nil {
+			continue // missing: the server's own start says so
+		}
+		o, err := update.OfFile(p)
+		if err != nil {
+			continue
+		}
+		s, _ := supportedTool(t.Name)
+		if w := toolWarning(t.Name, p, o, s, d.toolEnv(t.Name, p)); w != "" {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// toolWarning is toolWarnings' line for name at p, or "". A build with no
+// version ("(devel)", a plain go build) is not compared, as in doctor.
+func toolWarning(name, p string, o update.Origin, s release.Tool, env toolEnv) string {
+	v := o.Version
+	if !semver.IsValid(v) || o.Kind == update.GoBuild {
+		return ""
+	}
+	pl := planTool(name, p, o, s, env)
+	unreleased := o.Kind != update.Release && (o.Modified || module.IsPseudoVersion(v) || semver.Build(v) != "")
+	if pl.level != "warn" && !unreleased {
+		return ""
+	}
+	pin := s.Recommended
+	if env.pinned != "" {
+		pin = env.pinned
+	}
+	what := "not a release build"
+	if semver.Compare(v, s.Min) < 0 {
+		what = "too old for this dun (it needs " + s.Min + " or newer)"
+	}
+	fix := pl.fix
+	if fix == "" {
+		fix = "remove " + p + " and run dun doctor --fix to get the pinned release"
+	}
+	return fmt.Sprintf("%s: %s is %s, %s; this dun pins %s. Fix: %s", name, p, v, what, pin, fix)
+}
+
+// withToolWarnings is Ready's hint with toolWarnings after it: the TUI says
+// the hint once per session.
+func withToolWarnings(hint string) string {
+	lines := toolWarnings()
+	if hint != "" {
+		lines = append([]string{hint}, lines...)
+	}
+	return strings.Join(lines, "\n")
 }

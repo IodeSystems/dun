@@ -131,55 +131,53 @@ func TestIndex_BudgetExcludesAndRetries(t *testing.T) {
 	}
 }
 
-// Out of budget with nothing obvious to leave out: dun raises the budget to
-// the one the remedy names, saves it, restarts with it, and says how to
-// undo it. The next session starts with it; budget default takes it back.
-func TestIndex_BudgetRaisedWhenNothingObvious(t *testing.T) {
+// An index out of budget with nothing obvious to leave out: dun changes
+// nothing — it never raises the budget on its own (2026-11-09) — and says
+// what the person can do. The person's /lsp budget is passed on.
+func TestIndex_BudgetNeverRaised(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
 	env := []string{fakeIndexEnv + "=budget-plain", fakeIndexOKEnv + "=budget=48000ms"}
 	h, log, msgs := startIndexed(t, ws, env...)
 	msg := nextMsg(t, msgs)
-	for _, want := range []string{"30000ms read 90,000 of 120,000 indexable files, and no directory is an obvious one to leave out",
-		"dun raised the budget to 48000ms, for this project; poly-lsp is restarting with it.", "src/", "docs/",
-		"To undo: /lsp budget default. To leave a directory out instead: /lsp exclude <dir>."} {
+	for _, want := range []string{"30000ms read 90,000 of 120,000 indexable files. No directory is an obvious one to leave out, so dun changed nothing",
+		"src/", "docs/", "remedy: get under budget", "/lsp exclude <dir>, /lsp include <dir>, or /lsp budget <Nms|Nops>",
+		"dun does not raise it"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the report lacks %q:\n%s", want, msg)
 		}
 	}
-	if m := nextMsg(t, msgs); m != "" {
-		t.Errorf("the ready index said something: %q", m)
+	if strings.Contains(msg, "raised") {
+		t.Errorf("the report says dun raised something:\n%s", msg)
 	}
-	if st := waitIndex(t, h, IndexReady); st.IndexBudget != "48000ms" || len(st.Exclude) != 0 {
-		t.Fatalf("%+v", st)
+	st := waitIndex(t, h, IndexFailed)
+	if st.IndexBudget != "" || len(st.Exclude) != 0 {
+		t.Fatalf("dun changed the index settings: %+v", st)
 	}
-	if args := argLines(log); len(args) != 2 || strings.Contains(args[0], "--index-budget") || !strings.HasSuffix(args[1], "--index-budget 48000ms") {
+	time.Sleep(300 * time.Millisecond)
+	if args := argLines(log); len(args) != 1 || strings.Contains(args[0], "--index-budget") {
 		t.Fatalf("spawns: %q", args)
 	}
-	b, err := os.ReadFile(filepath.Join(ResolveProject(ws).WriteDir(), LocalServersFile))
-	if err != nil || !strings.Contains(string(b), `"index_budget": "48000ms"`) {
-		t.Fatalf("not saved for the project: %s %v", b, err)
+	if b, err := os.ReadFile(filepath.Join(ResolveProject(ws).WriteDir(), LocalServersFile)); err == nil && strings.Contains(string(b), "index_budget") {
+		t.Fatalf("a budget was saved for the project: %s", b)
 	}
-	h.Close()
 
-	h2, log2, msgs2 := startIndexed(t, ws, env...)
-	if m := nextMsg(t, msgs2); m != "" {
-		t.Errorf("the later session reported %q", m)
-	}
-	if args := argLines(log2); len(args) != 1 || !strings.HasSuffix(args[0], "--index-budget 48000ms") {
-		t.Fatalf("later spawn: %q", args)
-	}
-	if _, _, err := h2.SetIndexBudget(context.Background(), ServerCode, "soon"); err == nil {
+	// The person's budget: saved, and the server restarts with it.
+	if _, _, err := h.SetIndexBudget(context.Background(), ServerCode, "soon"); err == nil {
 		t.Error("a budget that is not one was taken")
 	}
-	if _, changed, err := h2.SetIndexBudget(context.Background(), ServerCode, "default"); err != nil || !changed {
+	if _, changed, err := h.SetIndexBudget(context.Background(), ServerCode, "48000ms"); err != nil || !changed {
+		t.Fatalf("budget 48000ms: %v %v", changed, err)
+	}
+	waitIndex(t, h, IndexReady)
+	if args := argLines(log); len(args) != 2 || !strings.HasSuffix(args[1], "--index-budget 48000ms") {
+		t.Fatalf("after /lsp budget: %q", args)
+	}
+	if _, changed, err := h.SetIndexBudget(context.Background(), ServerCode, "default"); err != nil || !changed {
 		t.Fatalf("budget default: %v %v", changed, err)
 	}
-	if b := h2.IndexBudget(ServerCode); b != "" {
+	if b := h.IndexBudget(ServerCode); b != "" {
 		t.Fatalf("budget still %q", b)
-	}
-	if args := argLines(log2); len(args) != 2 || strings.Contains(args[1], "--index-budget") {
-		t.Fatalf("after default: %q", args)
 	}
 }
 
@@ -242,23 +240,6 @@ func TestIndex_InterimLimit(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if n := len(argLines(log)); n != 1 {
 		t.Fatalf("%d spawns, want 1", n)
-	}
-}
-
-func TestRaisedBudget(t *testing.T) {
-	rep := &IndexReport{Files: 12000}
-	for _, c := range []struct {
-		n    indexNote
-		want string
-	}{
-		{indexNote{Remedy: "Or raise it: --index-budget 3000ms (now 300ms).", Budget: "300ms", Read: 10, Index: rep}, "3000ms"},
-		{indexNote{Budget: "30000ms", Read: 9000, Index: rep}, "48000ms"}, // 30 s × 12000/9000 × 1.2
-		{indexNote{Budget: "5000ops", Read: 5000, Index: rep}, "14401ops"},
-		{indexNote{Budget: "soon", Index: rep}, ""},
-	} {
-		if got := raisedBudget(c.n); got != c.want {
-			t.Errorf("raisedBudget(%+v) = %q, want %q", c.n, got, c.want)
-		}
 	}
 }
 

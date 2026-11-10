@@ -1,6 +1,7 @@
 package dun
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,13 @@ import (
 
 	"github.com/iodesystems/dun/internal/heartbeat"
 )
+
+// spawnAgent starts a child with a free prompt and no plan node: the engine
+// path under spawnTool, for tests about the child itself. The model has no
+// such path (USER 2026-11-10: sub-agents only via plan nodes).
+func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effort, mode string) (*subAgent, error) {
+	return h.spawnAgentFor(ctx, prompt, provider, model, effort, mode, "")
+}
 
 // testAgent is a child with no harness — enough to exercise the state machine,
 // which is where every bug in this file has been. Spawning a real one needs an

@@ -280,3 +280,80 @@ func TestModelPicker_OpensOnTheProviderInUse(t *testing.T) {
 		t.Errorf("typing another service's name widens the list: scope %s, %q", m.modelScope, got)
 	}
 }
+
+// /model lists every role with its model, provider and where it came from:
+// a flag the client started with, the config's facets, an old field, a
+// default; a session-only pick of main says so.
+func TestModelSlash_ListsEveryFacetAndItsSource(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	t.Setenv("DUN_MODEL", "")
+	cfg := dunconfig.DunConfig{Provider: "work", VisionModel: "old-vl",
+		Providers: []dunconfig.ProviderConfig{{Name: "work", URL: "http://127.0.0.1:1/w", Key: "sk-secret"}, {Name: "fast", URL: "http://127.0.0.1:1/f"}},
+		Facets:    map[string]dunconfig.Facet{dunconfig.FacetMain: {Provider: "work", Model: "chat"}, "typo": {Model: "x"}}}
+	if err := dunconfig.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	m := newTUIModel(nil, ".")
+	m.opts.Flags = dunconfig.Overrides{dunconfig.FacetChild: {Provider: "fast", Model: "kid"}}
+	m.provider, m.url, m.model = "work", "http://127.0.0.1:1/w", "chat"
+	all := stripANSI(strings.Join(m.facetLines(), "\n"))
+	for _, want := range []string{
+		"main      chat on work · config",
+		"child     kid on fast · flag",
+		"vision    old-vl on work · config, old field",
+		"embed     local-nomic-embed-text on work · default",
+		"segment   off · default",
+		"identity  off · default",
+		"facets.typo: not a role",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("listing\n%s\nmissing %q", all, want)
+		}
+	}
+	if strings.Contains(all, "sk-secret") {
+		t.Fatal("a key in /model's listing")
+	}
+	m.model = "other" // a /model --session pick
+	if all := stripANSI(strings.Join(m.facetLines(), "\n")); !strings.Contains(all, "main      other on work · session") {
+		t.Errorf("session pick:\n%s", all)
+	}
+}
+
+// /model use <facet> <provider>/<model> saves that role to facets; with no
+// facet, it is main, and /model use <provider> <id> still works.
+func TestModelSlash_UsePerFacet(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	cfg := dunconfig.DunConfig{Provider: "work",
+		Providers: []dunconfig.ProviderConfig{{Name: "work", URL: "http://llm/w"}, {Name: "fast", URL: "http://llm/f"}}}
+	if err := dunconfig.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.provider, m.url = "work", "http://llm/w"
+
+	modelSlash(&m, []string{"use", "child", "fast/kid"})
+	modelSlash(&m, []string{"use", "vision", "fast/qwen-vl"})
+	modelSlash(&m, []string{"use", "embed", "e5"}) // no provider: the active one
+	c := dunconfig.LoadConfig()
+	if f := c.Facets; f["child"] != (dunconfig.Facet{Provider: "fast", Model: "kid"}) ||
+		f["vision"] != (dunconfig.Facet{Provider: "fast", Model: "qwen-vl"}) || f["embed"] != (dunconfig.Facet{Model: "e5"}) {
+		t.Fatalf("facets saved: %+v", f)
+	}
+	if !strings.Contains(stripANSI(convoText(m)), "saved facets.child · kid on fast · config") {
+		t.Errorf("notice:\n%s", stripANSI(convoText(m)))
+	}
+
+	modelSlash(&m, []string{"use", "fast/chat-fast"})
+	c = dunconfig.LoadConfig()
+	if c.Facets["main"] != (dunconfig.Facet{Provider: "fast", Model: "chat-fast"}) || c.Provider != "fast" || m.model != "chat-fast" {
+		t.Fatalf("use <provider>/<model> is main: %+v, running %s", c.Facets, m.model)
+	}
+	modelSlash(&m, []string{"use", "work", "chat"})
+	if c := dunconfig.LoadConfig(); c.Facets["main"] != (dunconfig.Facet{Provider: "work", Model: "chat"}) || m.model != "chat" {
+		t.Fatalf("use <provider> <id>: %+v", c.Facets)
+	}
+	modelSlash(&m, []string{"use", "child", "fast/x", "--session"})
+	if c := dunconfig.LoadConfig(); c.Facets["child"].Model != "kid" {
+		t.Fatal("--session saved a child facet")
+	}
+}

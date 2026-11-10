@@ -13,23 +13,16 @@ import (
 // dun package (images.go there).
 
 // visionConfig is what the engine running model on url needs for images.
-// The vision model is on the provider vision_provider names, else on url.
-func visionConfig(fc dunconfig.DunConfig, url, key, model string, usageFor func(url, key, model string) func(llm.Usage)) dun.VisionConfig {
+// The describer is the vision role as dunconfig resolves it (facets.vision,
+// else vision_model); a role that is off is as if none were set.
+func visionConfig(vr dunconfig.Resolved, url, model string, usageFor func(url, key, model string) func(llm.Usage)) dun.VisionConfig {
 	v := dun.VisionConfig{Key: dun.VisionKey(url, model), Model: model}
-	if fc.VisionModel == "" {
+	if !vr.On() {
 		return v
 	}
-	vu, vk := url, key
-	if fc.VisionProvider != "" {
-		p, ok := fc.Named(fc.VisionProvider)
-		if !ok {
-			return v // a provider not logged in: as if none were set
-		}
-		vu, vk = p.URL, p.Key
-	}
-	c := llm.NewClient(vu, vk, fc.VisionModel)
-	c.OnUsage = usageFor(vu, vk, fc.VisionModel)
-	v.Describer, v.DescriberModel = c, fc.VisionModel
+	c := llm.NewClient(vr.URL, vr.Key, vr.Model)
+	c.OnUsage = usageFor(vr.URL, vr.Key, vr.Model)
+	v.Describer, v.DescriberModel = c, vr.Model
 	return v
 }
 

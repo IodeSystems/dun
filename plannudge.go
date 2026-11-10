@@ -48,7 +48,7 @@ import (
 // node has moved for S rounds (--plan-stall-rounds, 30) → force a plan call,
 // with an aside keyed "plan-stall" that names the open nodes. A move is a
 // change the main agent's own plan call makes: a node added, a status
-// changed, or a new done_when, goal or needs (planMoved). show and ready
+// changed, or a new done_when, details or needs (planMoved). show and ready
 // write nothing. After a nudge the window starts again; at most 3 per turn,
 // counted apart from the no-plan nudge.
 
@@ -101,12 +101,19 @@ type planNudge struct {
 	// moved is the round of the last plan move or stall nudge in this turn
 	// (0: the turn's start); stalls is the stall nudges given in this turn.
 	moved, stalls int
+	// churn is the current failure streak's last attempts, in brief, for
+	// the learning phase (learn.go). Its length is not a count: fails is.
+	// recent is the turn's last calls, failed or not; stallEp is the
+	// episode a stall nudge opened, which the next plan move resolves.
+	churn, recent []churnAttempt
+	stallEp       *churnEpisode
 }
 
 func (n *planNudge) reset() {
 	n.mu.Lock()
 	n.fails, n.done, n.force = 0, false, false
 	n.moved, n.stalls = 0, 0
+	n.churn, n.recent, n.stallEp = nil, nil, nil
 	n.mu.Unlock()
 }
 
@@ -194,6 +201,11 @@ func (h *Harness) planStallRound() {
 	}
 	h.nudge.stalls++
 	h.nudge.moved = n // the window starts again
+	// The learning phase's stall episode: the plan moving next resolves it
+	// (planMoved). A second stall before a move keeps the first.
+	if h.nudge.stallEp == nil {
+		h.nudge.stallEp = &churnEpisode{Stall: still, Open: names, Tried: slices.Clone(h.nudge.recent)}
+	}
 	h.nudge.force = true
 	h.AsideWith(fmt.Sprintf(planStallText, still, len(open), strings.Join(names, "; ")),
 		AsideOpts{Key: "plan-stall", TurnScoped: true})
@@ -212,11 +224,17 @@ func (h *Harness) planMoved(cs []taskgraph.Change) {
 	n := int(h.turnRounds.n.Load())
 	h.nudge.mu.Lock()
 	h.nudge.moved = n
+	ep := h.nudge.stallEp
+	h.nudge.stallEp = nil
 	h.nudge.mu.Unlock()
+	if ep != nil {
+		ep.Fix = churnAttempt{Tool: taskgraph.ToolName, Target: taskgraph.ToolName, Args: clipMiddle(planMoveBrief(cs), churnArgsMax)}
+		h.learnQueue(ep)
+	}
 }
 
 // planMove reports whether a change moves the plan: a node added, its status
-// changed, or a new done_when, goal or needs. A title, notes or files edit
+// changed, or a new done_when, details or needs. A title edit
 // alone does not.
 func planMove(c taskgraph.Change) bool {
 	switch {
@@ -226,22 +244,28 @@ func planMove(c taskgraph.Change) bool {
 		return true
 	}
 	b, a := c.Before, c.After
-	return b.Status != a.Status || b.DoneWhen != a.DoneWhen || b.Goal != a.Goal || !slices.Equal(b.Needs, a.Needs)
+	return b.Status != a.Status || b.DoneWhen != a.DoneWhen || b.Details != a.Details || !slices.Equal(b.Needs, a.Needs)
 }
 
-// planNudgeResult counts one tool result toward a stall.
-func (h *Harness) planNudgeResult(failed bool) {
+// planNudgeResult counts one tool result toward a stall. The same streak
+// is the learning phase's churn (learn.go): a is the call in brief, and the
+// result is the episode a success on a failed call's target ends, else nil.
+func (h *Harness) planNudgeResult(failed bool, a churnAttempt) *churnEpisode {
 	limit := h.planNudgeFails()
 	h.nudge.mu.Lock()
 	defer h.nudge.mu.Unlock()
+	h.nudge.recent = churnKeepLast(h.nudge.recent, a)
 	if !failed {
-		h.nudge.fails = 0
-		return
+		ep := churnResolved(h.nudge.fails, h.nudge.churn, a)
+		h.nudge.fails, h.nudge.churn = 0, nil
+		return ep
 	}
 	h.nudge.fails++
+	h.nudge.churn = churnKeepLast(h.nudge.churn, a)
 	if limit > 0 && h.nudge.fails >= limit && h.planNudgeOK() {
 		h.planNudgeNow(fmt.Sprintf(planNudgeFailsText, h.nudge.fails))
 	}
+	return nil
 }
 
 // planNudgeNow queues the aside and arms the forced call. Caller holds
@@ -338,7 +362,12 @@ func withPlanNudge(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher 
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		o := &execOutcome{}
 		out, err := inner(context.WithValue(ctx, execOutcomeKey{}, o), tc)
-		h.planNudgeResult(err != nil || o.failed || strings.HasPrefix(out, "ERROR"))
+		res := out
+		if err != nil {
+			res = "ERROR: " + err.Error()
+		}
+		failed := err != nil || o.failed || strings.HasPrefix(out, "ERROR")
+		h.learnQueue(h.planNudgeResult(failed, newChurnAttempt(tc.Function.Name, tc.Function.Arguments, res)))
 		if o.verdict != "" {
 			h.noteExecVerdict(tc.ID, o.verdict)
 		}

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/tui"
 	"github.com/iodesystems/dun/internal/update"
@@ -197,8 +199,21 @@ func (d *doctor) providers() {
 		return
 	}
 	def := cfg.ActiveName()
-	if cfg.Model == "" {
+	// The model roles as the config resolves them (env included: it is what
+	// a session started here would run).
+	main := cfg.Resolve(dunconfig.FacetMain, nil, os.Getenv)
+	if main.Model == "" {
 		d.add("fail", "model", "no model chosen on "+def, "/model in the TUI, web or app")
+	}
+	for _, r := range cfg.ResolveAll(nil, os.Getenv) {
+		level, fix := "ok", ""
+		if r.Off != "" {
+			level, fix = "warn", "/model use "+r.Facet+" <provider>/<model>, or /login the provider"
+		}
+		d.add(level, "facet", r.Line(), fix)
+	}
+	for _, n := range cfg.UnknownFacets() {
+		d.add("warn", "facet", "facets."+n+" is not a role ("+strings.Join(dunconfig.FacetNames, ", ")+"); ignored", "remove it from "+dunconfig.ConfigPath())
 	}
 	for _, p := range ps {
 		name := p.Name
@@ -210,12 +225,12 @@ func (d *doctor) providers() {
 		case len(ids) == 0:
 			d.add("warn", "provider", fmt.Sprintf("%s at %s, %s: %s", name, p.URL, dunconfig.KeyNote(p.Key), why),
 				"a wrong key: /login "+p.Name+" again; a gateway that lists nothing: /model use "+p.Name+" <id>")
-		case p.Name == def && cfg.Model != "" && !slices.Contains(ids, cfg.Model):
-			d.add("warn", "model", fmt.Sprintf("%s is not among %s's %d models", cfg.Model, p.Name, len(ids)), "/model to pick one it lists")
+		case p.Name == main.Provider && main.Model != "" && !slices.Contains(ids, main.Model):
+			d.add("warn", "model", fmt.Sprintf("%s is not among %s's %d models", main.Model, p.Name, len(ids)), "/model to pick one it lists")
 		default:
 			detail := fmt.Sprintf("%s at %s, %s: %d models", name, p.URL, dunconfig.KeyNote(p.Key), len(ids))
-			if p.Name == def && cfg.Model != "" {
-				detail += "; model " + cfg.Model
+			if p.Name == main.Provider && main.Model != "" {
+				detail += "; model " + main.Model
 			}
 			d.add("ok", "provider", detail, "")
 		}
@@ -377,6 +392,91 @@ func (d *doctor) polyLSP() {
 	}
 	d.polyLSPAt(bin, where)
 	d.polyLSPLanguages(bin)
+	d.polyLSPStatus(bin)
+}
+
+// polyLSPStatus is a line per running poly-lsp-mcp root, from
+// `poly-lsp-mcp status --json`: the root, its child LSPs, their total RSS
+// and the files its index holds. Silent for a build without the command.
+func (d *doctor) polyLSPStatus(bin string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "status", "--json")
+	cmd.Env = append(os.Environ(), "LSP_REBUILD_DONE=1")
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	lines, ok := polyStatusLines(out)
+	if !ok {
+		return
+	}
+	for _, l := range lines {
+		d.add("ok", "poly-lsp", l, "")
+	}
+}
+
+// polyStatus is one status file of `poly-lsp-mcp status --json`
+// (multiplex.StatusFile), the fields doctor reads.
+type polyStatus struct {
+	PID      int    `json:"pid"`
+	Root     string `json:"root"`
+	Children []struct {
+		State string `json:"state"`
+		PID   int    `json:"pid"`
+		RSS   int64  `json:"rss"`
+	} `json:"children"`
+	Index *struct {
+		Files int `json:"files"`
+	} `json:"index"`
+	// Fleet is the daemon-wide child count and RSS (v0.5.1); 0 = no cap.
+	Fleet *struct {
+		MaxChildren int   `json:"maxChildren"`
+		Running     int   `json:"running"`
+		RSS         int64 `json:"rss"`
+		RSSBudget   int64 `json:"rssBudget"`
+	} `json:"fleet"`
+}
+
+// polyStatusLines are status's lines: one per root; ok=false when out is
+// not status JSON.
+func polyStatusLines(out []byte) ([]string, bool) {
+	var files []polyStatus
+	if json.Unmarshal(out, &files) != nil {
+		return nil, false
+	}
+	if len(files) == 0 {
+		return []string{"status: no poly-lsp-mcp running"}, true
+	}
+	var lines []string
+	for _, f := range files {
+		running, rss := 0, int64(0)
+		for _, c := range f.Children {
+			if c.PID != 0 {
+				running++
+				rss += c.RSS
+			}
+		}
+		index := "index not reported"
+		if f.Index != nil {
+			index = "index " + numfmt.Grouped(f.Index.Files) + " files"
+		}
+		line := fmt.Sprintf("status: %s (pid %d): %s running, %s RSS, %s",
+			f.Root, f.PID, textfmt.Plural(running, "child LSP"), numfmt.HumanBytes(rss), index)
+		if fl := f.Fleet; fl != nil {
+			cap := "no cap"
+			if fl.MaxChildren > 0 {
+				cap = "of " + strconv.Itoa(fl.MaxChildren)
+			}
+			line += fmt.Sprintf("; daemon %d children (%s)", fl.Running, cap)
+			line += ", " + numfmt.HumanBytes(fl.RSS) + " RSS"
+			if fl.RSSBudget > 0 {
+				line += " of " + numfmt.HumanBytes(fl.RSSBudget)
+			}
+		}
+		lines = append(lines, line)
+	}
+	return lines, true
 }
 
 // polyLSPLanguages lists the language servers this directory's project is

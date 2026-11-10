@@ -171,7 +171,7 @@ func init() {
 	SlashCommands = []slashCmd{
 		{"login", "[name]", "connect to an AI service: its address, and a key if it needs one", loginSlash},
 		{"provider", "[login [name] | logout <name>]", "the AI services you are logged in to: which one is in use, each one's address and models; login and logout", providerSlash},
-		{"model", "[provider] [name] [--session] | use <provider> <id> | caps | probe", "pick the model: a searchable list from every service you are logged in to", modelSlash},
+		{"model", "[provider] [name] [--session] | use [<facet>] <provider>/<id> | caps | probe [main|child|vision|embed|segment|identity]", "pick the model: every role's model and where it came from, then a searchable list from every service you are logged in to", modelSlash},
 		// /mcp add is a subcommand, listed on its own so a person who was
 		// given a server finds it in the first screen of the list (run 4:
 		// it was only in /mcp's description).

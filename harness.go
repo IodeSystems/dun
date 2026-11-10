@@ -256,6 +256,18 @@ type Config struct {
 	// Loops reaches dund's scheduler, for loop_ctl (loopctl.go). nil with
 	// Peers: no dund, no loops.
 	Loops LoopLink
+	// Rag reaches dund's retrieval, which holds the memory notes' indexes
+	// (raglink.go, memrecall.go). Set, the session has the memory tool and
+	// recalls notes, with dund down too (from the files); nil, neither.
+	Rag RagLink
+	// NoCodeSearch turns off the code and docs search through dund
+	// (codesearch.go): DUN_CODE_SEARCH=0, as under the Harbor adapter.
+	NoCodeSearch bool
+	// NoUserRules leaves the user's rules files (~/AGENTS.md, ~/CLAUDE.md,
+	// ~/.claude/CLAUDE.md) out of the rules block (rules.go):
+	// DUN_USER_RULES=0, as under the Harbor adapter, where a trial must not
+	// depend on the machine's home directory.
+	NoUserRules bool
 	// Vision is what images on a user message need: which model Client runs
 	// (for the vision probe record) and the vision→text model that describes
 	// images for one that cannot read them. See images.go.
@@ -335,6 +347,7 @@ type Harness struct {
 	turnRounds turnRounds  // this turn's tool-call rounds, for the turn limit
 	nudge      planNudge   // this turn's plan nudge (plannudge.go)
 	idle       idleState   // changes since this turn's last check (idlecheck.go)
+	learn      learnState  // resolved churn waiting for its lesson (learn.go)
 	settle     settleState // the delayed end-of-turn report (settle.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model
@@ -417,8 +430,11 @@ type Harness struct {
 	index        map[string]*indexState
 	indexSeen    map[string]bool
 	indexRetried map[string]bool
-	// indexAsked: servers whose not-a-project question was put this session.
+	// indexAsked: servers whose not-a-project line was said this session.
 	indexAsked map[string]bool
+	// codeGuards are the poly-lsp servers under the root guard
+	// (codeguard.go), by id. Guarded by srvMu.
+	codeGuards map[string]*codeGuard
 	// setup is each server's install-hint report (setupstate.go); setupSaid
 	// the servers whose one line has been said. Guarded by srvMu.
 	setup     map[string]*SetupReport
@@ -456,6 +472,9 @@ type Harness struct {
 	// its parent's, in mgr. Set in Start, before any turn.
 	ownMgr *mcpmgr.Manager
 	own    map[string]bool
+	// restarts is each local server restarted after it exited during a
+	// call (serverrestart.go), on the harness that runs it.
+	restarts restartLog
 	// raglit's keys for this session, on the root (raglitauth.go).
 	ragMu                            sync.Mutex
 	ragSession, ragKey, ragBranchKey string
@@ -467,9 +486,28 @@ type Harness struct {
 	applyPending atomic.Bool
 	// toolNames is the tool set's names as of the last rebuild, sorted.
 	toolNames atomic.Pointer[[]string]
-	// memory is the note store while the docs server runs, else nil. Set by
-	// rebuildTools; read by /remember from another goroutine.
+	// memory is the note store when the session has a RagLink, else nil.
+	// Set by rebuildTools; read by /remember from another goroutine.
 	memory atomic.Pointer[memoryStore]
+	// memLinkOnce makes memLinkV, the notes' link to dund, once per harness
+	// (a child uses its parent's).
+	memLinkOnce sync.Once
+	memLinkV    *memLink
+	// strategies is the strategies and constraints store, beside memory
+	// (notekinds.go); stratLink its link to dund. listed is the files the
+	// standing list of the system prompt shows, as of the last rebuild.
+	strategies    atomic.Pointer[memoryStore]
+	stratLinkOnce sync.Once
+	stratLinkV    *memLink
+	// codeLinkOnce makes codeLinkV, the link to the code and docs indexes
+	// (codesearch.go), once per harness (a child uses its parent's).
+	codeLinkOnce sync.Once
+	codeLinkV    *codeLink
+	// codeRootOnce makes codeRootV, the root the code index takes: the
+	// workspace, or "" when the root guard keeps it out (codeIndexRoot).
+	codeRootOnce sync.Once
+	codeRootV    string
+	listed       atomic.Pointer[map[string]bool]
 	// catalog is what each started server offers besides tools: skills and
 	// prompts (skills.go). Guarded by srvMu.
 	catalog map[string]mcpCatalog
@@ -814,6 +852,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if h.applyPending.Load() { // a server came up while the lock was held
 		h.applyTools()
 	}
+	// The workspace into dund's code and docs indexes, in the background
+	// (codesearch.go); again at each turn end.
+	h.codeReindex()
 	// Children of a resumed session are gone as processes but their transcripts
 	// are not. Register them (restarted, in a session that persists; else
 	// stopped) and SAY so — a model that spawned an agent last session must
@@ -859,6 +900,12 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 // let go of turnMu — the memory triggers over what it added.
 func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error) {
 	res, err := h.runTurnWithRescue(ctx, h.Session.Turn)
+	// Held churn episodes become candidate lessons once the task verifies
+	// (learn.go): after the turn, so no request of the turn waits on it.
+	h.learnAfterTurn(ctx, err)
+	// The turn's edits into the code and docs indexes (codesearch.go), with
+	// or without an error: a failed turn can have written files too.
+	h.codeReindex()
 	if err == nil {
 		h.workReply(res.Reply) // the worklog's open task (worklog.go)
 		// Not the turn's ctx: the caller cancels it once the turn returns,

@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -239,12 +240,13 @@ func main() {
 	flag.Usage = usage
 	ver := flag.Bool("version", false, "print version and exit")
 	setup := flag.Bool("setup", false, "run the interactive setup wizard (LLM url/model/key) and exit")
-	// Flag defaults come from env then the saved config — so a CLI flag still
-	// overrides for a one-off run. There is no built-in provider. See config.go.
+	// The model flags default to empty: after parse, each role resolves
+	// flag > env > facets > the old fields > default (dunconfig/facets.go),
+	// so a CLI flag still overrides for a one-off run. There is no built-in
+	// provider. See config.go.
 	fc := dunconfig.LoadConfig()
-	act, _ := fc.Active()
-	url := flag.String("url", dunconfig.FirstNonEmpty(os.Getenv("DUN_URL"), act.URL), "LLM base URL (default: the logged-in provider; /login)")
-	model := flag.String("model", dunconfig.FirstNonEmpty(os.Getenv("DUN_MODEL"), fc.Model), "chat model (must support tool calls; default: the saved one, /model)")
+	url := flag.String("url", "", "LLM base URL (default: $DUN_URL, else facets.main's provider, else the logged-in one; /login)")
+	model := flag.String("model", "", "chat model (must support tool calls; default: $DUN_MODEL, else facets.main, else the saved model; /model)")
 	// Key default stays empty so `dun -h` never prints the secret; the real value
 	// is resolved after parse (flag > env > config).
 	key := flag.String("key", "", "API key (set via $DUN_LLM_KEY or 'dun --setup')")
@@ -252,9 +254,9 @@ func main() {
 	docker := flag.String("docker", "", "run the entire process in the bundled Docker image (--docker=true); for commands in your own image, start a session and use /isolate docker image <image|Dockerfile>")
 	dockerNetwork := flag.Bool("docker-network", true, "give the Docker container network access (default: on, so Go toolchain downloads work)")
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place); in a session, /isolate worktree")
-	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: same as --model)")
-	childProvider := flag.String("child-provider", "", "logged-in provider --child-model is on (default: this session's)")
-	childEffort := flag.String("child-effort", "", "effort for spawned sub-agents: default, off, low, medium, high (default: the saved /effort level)")
+	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: facets.child, else same as --model)")
+	childProvider := flag.String("child-provider", "", "logged-in provider --child-model is on (default: facets.child's, else this session's)")
+	childEffort := flag.String("child-effort", "", "effort for spawned sub-agents: default, off, low, medium, high (default: facets.child's, else the saved /effort level)")
 	// ship was removed 2026-10-27: repos state their own shipping rules. The
 	// flags stay accepted and do nothing, because an older TUI or dund passes
 	// them to this engine and a script may too.
@@ -410,6 +412,9 @@ func main() {
 
 	if *ver {
 		fmt.Println("dun " + buildinfo.Version)
+		for _, l := range versionBlock() {
+			fmt.Println(l)
+		}
 		return
 	}
 	if *setup {
@@ -430,18 +435,29 @@ func main() {
 	if !suggestEnabled {
 		enginecmd.SuggestMode = "off"
 	}
+	// Every model role, resolved once (dunconfig/facets.go). The key: flag >
+	// env > the key of the provider at the resolved URL.
+	modelFlags = dunconfig.Overrides{
+		dunconfig.FacetMain:  {URL: *url, Key: *key, Model: *model},
+		dunconfig.FacetChild: {Provider: *childProvider, Model: *childModel, Effort: *childEffort},
+	}
+	mainRole := fc.Resolve(dunconfig.FacetMain, modelFlags, os.Getenv)
+	childRole := fc.Resolve(dunconfig.FacetChild, modelFlags, os.Getenv)
+	if mainRole.Off != "" {
+		fmt.Fprintln(os.Stderr, "dun: facets.main: "+mainRole.Off)
+	}
+	*url, *model = mainRole.URL, mainRole.Model
+	effKey := mainRole.Key
 	engineModel, engineURL = *model, *url
 	if p, ok := fc.ProviderAt(*url); ok {
 		engineProvider = p.Name
 	}
-	// Resolve the effective key: explicit flag > env > saved config.
-	// The saved key is the one of the provider at --url, so a --url naming
-	// another configured provider gets that provider's key.
-	savedKey := fc.Key
-	if p, ok := fc.ProviderAt(*url); ok {
-		savedKey = p.Key
+	// The session's effort: the saved /effort level, else facets.main's.
+	var mainEffort string
+	if _, saved := dun.SavedEffort(); !saved && slices.Contains(dun.EffortLevels, mainRole.Effort) {
+		mainEffort = mainRole.Effort
+		enginecmd.EffortLevel = mainEffort
 	}
-	effKey := dunconfig.FirstNonEmpty(*key, os.Getenv("DUN_LLM_KEY"), savedKey)
 	// Dev self-update: if this is a source-stamped build and the tree changed,
 	// rebuild in place and re-exec the fresh binary. Skipped for spawned children
 	// (DUN_CHILD) and the -p engine mode; no-op for released binaries (srcDir="").
@@ -493,7 +509,7 @@ func main() {
 	// one mode you had to ask for. A positional task still runs headless: that
 	// is the scripting path and scripts must not suddenly open a UI.
 	if *tuiFlag || (firstTask == "" && !*prog && !*serve) {
-		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs}); err != nil {
+		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs, Flags: modelFlags}); err != nil {
 			fatal(err)
 		}
 		return
@@ -501,7 +517,7 @@ func main() {
 
 	// Serve mode: the TUI over xterm.js; each browser tab spawns a web session.
 	if *serve {
-		if err := runServe(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools}, *addr); err != nil {
+		if err := runServe(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, Flags: modelFlags}, *addr); err != nil {
 			fatal(err)
 		}
 		return
@@ -709,9 +725,10 @@ func main() {
 		// Each round's tokens, time and cost, for the turn's stats and what a
 		// tool server costs (dun/roundstats.go).
 		StatsLedger:     dun.NewStatsLedger(dun.DefaultStatsDir()),
-		ChildModel:      *childModel,
-		ChildProvider:   *childProvider,
-		ChildEffort:     *childEffort,
+		ChildModel:      childRole.Model,
+		ChildProvider:   childRole.Provider,
+		ChildEffort:     childRole.Effort,
+		Effort:          mainEffort,
 		Exec:            backend,
 		Worktree:        wt,
 		CommitCfg:       dun.LoadCommit(absWS),
@@ -740,7 +757,7 @@ func main() {
 		DockerImage:   resolveDockerImage(*docker),
 		DockerNetwork: *dockerNetwork,
 		ExtraMounts:   mounts,
-		Vision:        visionConfig(fc, *url, effKey, *model, func(u, k, m string) func(llm.Usage) { return usageFor(u, k, m, spendmeter.RoleVision) }),
+		Vision:        visionConfig(fc.Resolve(dunconfig.FacetVision, modelFlags, os.Getenv), *url, *model, func(u, k, m string) func(llm.Usage) { return usageFor(u, k, m, spendmeter.RoleVision) }),
 	}
 	// An OAuth server's login opens a browser on this machine too — unless
 	// DUN_NO_BROWSER is set (a headless box, a test). The URL is shown to
@@ -748,6 +765,20 @@ func main() {
 	if os.Getenv("DUN_NO_BROWSER") == "" {
 		cfg.OpenBrowser = openurl.Open
 	}
+	// Memory notes are indexed and recalled through dund's retrieval, dialed
+	// on its socket per call: under dund or standalone alike, and with dund
+	// down from the note files (dun/memrecall.go). DUN_MEMORY=0: no memory
+	// tool and no recall.
+	if os.Getenv("DUN_MEMORY") != "0" {
+		cfg.Rag = dun.DundRag(dundcli.Socket(dun.DunHome()))
+	}
+	// The workspace's code and docs are indexed and searched through dund
+	// too (dun/codesearch.go). DUN_CODE_SEARCH=0: not (the Harbor adapter's
+	// default); DUN_MEMORY=0 turns it off with memory.
+	cfg.NoCodeSearch = os.Getenv("DUN_CODE_SEARCH") == "0"
+	// The user's rules files are read in every session (dun/rules.go).
+	// DUN_USER_RULES=0: not (the Harbor adapter's default).
+	cfg.NoUserRules = os.Getenv("DUN_USER_RULES") == "0"
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}
@@ -889,7 +920,7 @@ func main() {
 				Turn: n.Turn, SinceLastSecs: n.SinceLastSecs, Cause: n.Cause})
 		}
 		// askMu: one question open at a time. Every question (the model's
-		// ask_user, a mount, dun's own "not a project") reads the next line of
+		// ask_user, a mount) reads the next line of
 		// in.answers; two open at once could each take the other's answer.
 		var askMu sync.Mutex
 		ask := func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {

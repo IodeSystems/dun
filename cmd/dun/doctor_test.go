@@ -81,3 +81,24 @@ func TestDoctor_Help(t *testing.T) {
 		}
 	}
 }
+
+// `poly-lsp-mcp status --json`: a line per root, its running children, their
+// RSS and the index's files; not JSON is no lines.
+func TestPolyStatusLines(t *testing.T) {
+	out := []byte(`[{"pid":41,"root":"/w/a","children":[{"language":"go","state":"running","pid":50,"rss":1073741824},
+		{"language":"python","state":"stopped","idleSec":0}],"index":{"files":1234,"bytes":9},
+		"fleet":{"maxChildren":4,"running":2,"rss":2147483648,"rssBudget":4294967296}},
+		{"pid":42,"root":"/w/b","children":[]}]`)
+	lines, ok := polyStatusLines(out)
+	want := []string{"status: /w/a (pid 41): 1 child LSP running, 1.0 GB RSS, index 1,234 files; daemon 2 children (of 4), 2.0 GB RSS of 4.0 GB",
+		"status: /w/b (pid 42): 0 child LSPs running, 0 B RSS, index not reported"}
+	if !ok || strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("%v %q", ok, lines)
+	}
+	if lines, ok := polyStatusLines([]byte("[]")); !ok || len(lines) != 1 {
+		t.Fatalf("none running: %v %q", ok, lines)
+	}
+	if _, ok := polyStatusLines([]byte("Error: unknown command")); ok {
+		t.Fatal("not JSON read as status")
+	}
+}

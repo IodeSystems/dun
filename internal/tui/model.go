@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/ragd"
 	"github.com/iodesystems/dun/internal/textfmt"
 	shim "github.com/iodesystems/openai-claude-api-shim"
 )
@@ -61,18 +63,23 @@ func (m tuiModel) providerNamed(name string) (dunconfig.ProviderConfig, bool) {
 }
 
 // modelSlash implements /model — picking among the logged-in providers'
-// models (/login and /logout manage the providers):
+// models (/login and /logout manage the providers), and the model of each
+// role (dunconfig.FacetNames):
 //
-//	/model                      the picker
+//	/model                      every role and where it came from, then the picker
 //	/model <name>               switch to that model on this provider
 //	/model <provider> <name>    switch to that model on that provider
 //	/model use <provider> <id>  the same, by id — for a provider that does
 //	                            not list its models
+//	/model use <provider>/<id>  the same
+//	/model use <facet> <provider>/<id>   set one role's model (facets.<facet>);
+//	                            main is the switch above
+//	/model probe [<facet>]      the capability probes for a role
 //
 // Every form saves the pick as the default, as enter in the picker does;
 // --session (anywhere in the arguments) is for this session only, as
 // alt+enter in the picker is — the scope flag /mcp and the server
-// switches use.
+// switches use. Only main has a session-only pick.
 func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	if m.replaying {
 		m.append(StDim.Render("this is a replay — there is no engine to resume with"))
@@ -81,12 +88,19 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	persist := !slices.Contains(args, "--session")
 	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "--session" })
 	switch {
-	case len(args) == 1 && (args[0] == "caps" || args[0] == "probe"):
-		// What the model is known to do, and the check: the engine's.
+	case len(args) == 1 && (args[0] == "caps" || args[0] == "probe"),
+		len(args) == 2 && args[0] == "probe" && dunconfig.IsFacet(args[1]):
+		// What the model is known to do, and the check: the engine's. With a
+		// role, that role's probe (cmd/dun/capscmd.go, internal/ragd/probe.go).
+		// A provider named "probe" is reached with /model use.
 		return engineSlash("model")(m, args)
+	case len(args) == 3 && args[0] == "use" && dunconfig.IsFacet(args[1]):
+		return m.useFacet(args[1], args[2], persist)
+	case len(args) == 2 && args[0] == "use":
+		return m.useFacet(dunconfig.FacetMain, args[1], persist)
 	case len(args) >= 1 && args[0] == "use":
 		if len(args) != 3 {
-			m.append(StErr.Render("usage: /model use <provider> <model-id> [--session]"))
+			m.append(StErr.Render("usage: /model use [<facet>] <provider>/<model-id> [--session] · /model use <provider> <model-id> · facets: " + strings.Join(dunconfig.FacetNames, ", ")))
 			return nil
 		}
 		p, ok := dunconfig.LoadConfig().Named(args[1])
@@ -113,7 +127,71 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 		}
 		return m.switchModel(p, args[0], persist)
 	}
+	m.append(StDim.Render(strings.Join(m.facetLines(), "\n")))
 	return m.openModelPicker("")
+}
+
+// facetLines is every role as it is served: the config's resolution with
+// this client's flags (dunconfig.Resolve), main as the engine runs it when
+// a session-only pick or a restart moved it. Keys are never in it.
+func (m *tuiModel) facetLines() []string {
+	cfg := dunconfig.LoadConfig()
+	out := []string{"models by role · /model use <facet> <provider>/<model> sets one"}
+	for _, r := range cfg.ResolveAll(m.opts.Flags, os.Getenv) {
+		if r.Facet == dunconfig.FacetMain && m.model != "" &&
+			(r.Model != m.model || r.URL != strings.TrimRight(m.url, "/")) {
+			r = dunconfig.Resolved{Facet: r.Facet, Provider: m.provider, URL: m.url, Model: m.model, Effort: r.Effort, Source: dunconfig.SourceSession}
+			if r.Provider == "" {
+				r.Provider = dunconfig.HostName(m.url)
+			}
+		}
+		out = append(out, "  "+r.Line())
+	}
+	for _, n := range cfg.UnknownFacets() {
+		out = append(out, "  facets."+n+": not a role; ignored")
+	}
+	return out
+}
+
+// useFacet is /model use [<facet>] <provider>/<model>. Main switches the
+// session (switchModel); another role is saved to facets.<facet> and is
+// used by what starts next (a session; dund for the retrieval roles).
+func (m *tuiModel) useFacet(facet, pick string, persist bool) tea.Cmd {
+	cfg := dunconfig.LoadConfig()
+	provider, model := cfg.ParsePick(pick)
+	if model == "" || strings.ContainsAny(model, " \t") {
+		m.append(StErr.Render("a model id is one word: /model use " + facet + " <provider>/<model-id>"))
+		return nil
+	}
+	if facet == dunconfig.FacetMain {
+		if provider == "" {
+			m.append(StErr.Render("no saved provider in " + pick + " — /model use <provider>/<model-id>; /provider lists them"))
+			return nil
+		}
+		p, _ := cfg.Named(provider)
+		return m.switchModel(p, model, persist)
+	}
+	if !persist {
+		m.append(StErr.Render("only main has a session-only pick: /model use " + facet + " " + pick + " saves it"))
+		return nil
+	}
+	f := cfg.Facets[facet]
+	f.Provider, f.Model = provider, model
+	cfg.SetFacet(facet, f)
+	if err := dunconfig.SaveConfig(cfg); err != nil {
+		m.append(StErr.Render("failed to save config: " + err.Error()))
+		return nil
+	}
+	when := "a session started from now uses it"
+	if slices.Contains(ragd.Facets, facet) {
+		when = "dund uses it from its next start"
+		if facet == dunconfig.FacetVision {
+			when += "; a session started from now describes images with it"
+		}
+	}
+	r := cfg.Resolve(facet, m.opts.Flags, os.Getenv)
+	m.appendNotice(convoEntry{collapsed: okNotice("saved facets." + facet + " · " + strings.TrimSpace(strings.TrimPrefix(r.Line(), facet)) + " · " + when)})
+	return nil
 }
 
 // loginSlash implements /login [name]: the service picker, then the form (a
@@ -421,6 +499,12 @@ func (m *tuiModel) switchModel(p dunconfig.ProviderConfig, model string, persist
 		if err := dunconfig.SaveConfig(cfg); err != nil {
 			m.append(StErr.Render("failed to save config: " + err.Error()))
 			return nil
+		}
+		// Saved: main now comes from the config, not the flag it was started with.
+		if f, ok := m.opts.Flags[dunconfig.FacetMain]; ok {
+			m.opts.Flags = maps.Clone(m.opts.Flags)
+			f.Model, f.URL = "", ""
+			m.opts.Flags[dunconfig.FacetMain] = f
 		}
 	}
 	// The words of a status notice (okNotice): what happened · its detail.

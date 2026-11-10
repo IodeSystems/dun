@@ -444,6 +444,15 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `agent` (and `jobs` with its agent params); a child gets `tell_parent` and
   no `ask_user`. Depth 1 holds because a child is never handed `agent`; a child
   cannot reach the human because `ask_user` is absent (`applyTools`).
+- **Sub-agents start only on plan nodes (USER, 2026-11-10: "Subagents should
+  only be launchable via plan nodes!").** `agent({node, …})` is the model's
+  one way to start a child; the free `prompt` is gone, and a call with one, or
+  with no node, an unknown node, a finished one, or one a live child owns, is
+  refused, starts nothing and says the fix (add a node with `plan`, then
+  `agent({node:"<id>"})`). The brief is the node's title, details and
+  done_when alone, not a prompt on top: one place for the task, which the
+  person and a resume can read, and one parameter fewer. One node, one child.
+  Children still get no `agent` (depth 1). See docs/taskplan.md.
 - **Decided (USER, 2026-07-31):** `tell_parent(status, message)`: status
   overwrites and never notifies, message is an event. `agent_monitor` also
   carries `tell`, `resume`, `quit`. Spawn is async; `wait:true` opts out. A
@@ -609,6 +618,26 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   is included once. `/rules summary` condenses imports with one side call and
   refuses a summary that is not smaller; `/rules index` puts imports in raglit.
   One offer, once per hash, when the block exceeds ~4000 tokens.
+- **User rules files are read in every session** (USER 2026-11-10: "does not
+  read ~/AGENTS.md or ~/CLAUDE.md!!!!"; `rules.go`). `~/AGENTS.md` (or
+  `~/agents.md`), `~/CLAUDE.md` and `~/.claude/CLAUDE.md`, in that order: the
+  last is Claude Code's user file, the second is where some keep it instead
+  (the owner does), so both are read; the same bytes go in once. They are a
+  "## User rules" section before "## Project rules", each file under a
+  `### ~/path` header, so the project's rules, read later, refine them. Their
+  `@path` imports work as the project's (relative to the importing file) and
+  are rendered in the user section in full mode. With the workspace at the
+  home directory, its AGENTS.md and CLAUDE.md are the project's and are read
+  once. Own budget, not a share: `rulesUserMax` (64 KiB) for the user files
+  and their imports together, the per-file 64 KiB cap as before, and the
+  project keeps its whole 256 KiB, so a large `~/CLAUDE.md` cannot crowd the
+  project's rules out. Past the budget a file is cut with a note and an import
+  is "not read: the user rules reached their 64 KiB total". `$XDG_CONFIG_HOME`
+  and `~/.dun/AGENTS.md` are not read (no doc named them as rules files).
+  Off: `DUN_USER_RULES=0` (`Config.NoUserRules`; a child inherits it with its
+  Config, as it does the rules); the Harbor adapter sets it by default so a
+  trial does not depend on the image's home. Each user file is also a `/rules`
+  switch, so global scope off takes one out of every project.
 - **Shared raglit indexes** (`attach.go`): raglit's daemon is shared and its
   watcher keeps indexes fresh; dun only reads. `/rag attach` adds a
   qualified `proj:idx` to the search selector at session, project or global

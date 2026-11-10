@@ -36,3 +36,22 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	return nil
 }
+
+// Canon is the one spelling dund stores a root or a path in (docs/rag.md,
+// "Path spelling"): absolute p with its symlinks resolved
+// (filepath.EvalSymlinks), then Clean. A path that does not exist keeps its
+// missing tail on its nearest existing ancestor, resolved. raglit matches
+// worktree roots against document paths as strings, so a root and the paths
+// under it must be spelled one way; /tmp is a symlink on macOS.
+func Canon(p string) string {
+	p = filepath.Clean(p)
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	dir, base := filepath.Split(p)
+	dir = filepath.Clean(dir)
+	if dir == p || base == "" {
+		return p
+	}
+	return filepath.Join(Canon(dir), base)
+}

@@ -79,8 +79,8 @@ func TestAsk_ReopenAndAnswer(t *testing.T) {
 // while it is parked goes out as a message, and the question stays open.
 func TestAsk_FreeTextParksAndMessagesStillSend(t *testing.T) {
 	v := askingVtui(t)
-	if !v.m.customAnswer {
-		t.Fatal("precondition: a free-text question opens its text field")
+	if !v.m.onAskText() {
+		t.Fatal("precondition: a free-text question opens on its text row")
 	}
 	v.m = key(v.m, kEsc)
 	if v.m.quitting || !v.m.askParked {
@@ -96,22 +96,39 @@ func TestAsk_FreeTextParksAndMessagesStillSend(t *testing.T) {
 		v.m = key(v.m, kUp)
 	}
 	v.m = key(v.m, kEnter)
-	if !v.m.asking || !v.m.customAnswer {
-		t.Fatalf("free-text question did not reopen as its field: asking=%v custom=%v", v.m.asking, v.m.customAnswer)
+	if !v.m.asking || !v.m.onAskText() {
+		t.Fatalf("free-text question did not reopen on its text row: asking=%v sel=%d", v.m.asking, v.m.askSel)
 	}
 }
 
-// esc inside the custom row goes back to the options, not out of the question.
-func TestAsk_EscFromCustomRowReturnsToOptions(t *testing.T) {
+// esc on the text row clears the words first and keeps the question; the
+// second esc parks it. Words survive parking.
+func TestAsk_EscClearsThenParks(t *testing.T) {
 	v := askingVtui(t, "A")
-	v.m = key(v.m, kDown) // the custom row
-	v.m = key(v.m, kEnter)
-	if !v.m.customAnswer {
-		t.Fatal("precondition: custom field open")
+	v.m = key(v.m, kDown) // the text row
+	v.m = typeStr(v.m, "mine")
+	if !strings.Contains(v.view(), "esc clear") {
+		t.Errorf("hint should say esc clears:\n%s", v.view())
 	}
 	v.m = key(v.m, kEsc)
-	if !v.m.asking || v.m.customAnswer || v.m.askParked {
-		t.Errorf("asking=%v custom=%v parked=%v", v.m.asking, v.m.customAnswer, v.m.askParked)
+	if !v.m.asking || v.m.askParked || v.m.askField.Value() != "" || !v.m.onAskText() {
+		t.Fatalf("first esc: asking=%v parked=%v text=%q sel=%d", v.m.asking, v.m.askParked, v.m.askField.Value(), v.m.askSel)
+	}
+	v.m = key(v.m, kEsc)
+	if v.m.asking || !v.m.askParked {
+		t.Fatalf("second esc: asking=%v parked=%v", v.m.asking, v.m.askParked)
+	}
+
+	// Parked with words in the row, they are there when it reopens.
+	v = askingVtui(t, "A")
+	v.m.askField.SetValue("kept")
+	v.m.askSel = v.m.askTextRow()
+	m, _ := v.m.parkAsk()
+	v.m = m.(tuiModel)
+	m, _ = v.m.reopenAsk()
+	v.m = m.(tuiModel)
+	if v.m.askField.Value() != "kept" || !v.m.onAskText() {
+		t.Errorf("after park and reopen: text=%q sel=%d", v.m.askField.Value(), v.m.askSel)
 	}
 }
 
@@ -219,7 +236,7 @@ func TestAsk_DraftComesBack(t *testing.T) {
 			enter(v)
 		},
 		"detail": func(v *vtui) {
-			v.m = key(v.m, kN)
+			v.m = key(v.m, kCtrlD)
 			v.m = typeStr(v.m, "because")
 			enter(v) // saves the detail
 			enter(v) // sends the option with it
@@ -276,10 +293,10 @@ func TestAsk_TabEditsTheOption(t *testing.T) {
 			v := askingVtui(t, "A", "B", "C")
 			v.m = key(v.m, kDown) // B
 			v.m = key(v.m, k)
-			if !v.m.customAnswer || v.m.input.Value() != "B" || v.m.input.cursor != 1 {
-				t.Fatalf("custom=%v composer=%q cursor=%d", v.m.customAnswer, v.m.input.Value(), v.m.input.cursor)
+			if !v.m.onAskText() || v.m.askField.Value() != "B" || v.m.askField.cursor != 1 {
+				t.Fatalf("on text=%v text=%q cursor=%d", v.m.onAskText(), v.m.askField.Value(), v.m.askField.cursor)
 			}
-			if !strings.Contains(v.view(), "esc back to the options") {
+			if !strings.Contains(v.view(), "esc clear") {
 				t.Errorf("no editing hint:\n%s", v.view())
 			}
 			v.m = typeStr(v.m, ", but blue")
@@ -294,8 +311,8 @@ func TestAsk_TabEditsTheOption(t *testing.T) {
 		v.m = key(v.m, kDown)
 		v.m = key(v.m, kRight)
 		v.m = key(v.m, kEsc)
-		if !v.m.asking || v.m.customAnswer || v.m.askSel != 1 {
-			t.Errorf("asking=%v custom=%v sel=%d", v.m.asking, v.m.customAnswer, v.m.askSel)
+		if !v.m.asking || v.m.askField.Value() != "" || v.m.askSel != 1 {
+			t.Errorf("asking=%v text=%q sel=%d", v.m.asking, v.m.askField.Value(), v.m.askSel)
 		}
 		if strings.Contains(v.convo(), "› B") {
 			t.Error("esc sent the answer")
@@ -303,12 +320,12 @@ func TestAsk_TabEditsTheOption(t *testing.T) {
 	})
 	t.Run("with a detail", func(t *testing.T) {
 		v := askingVtui(t, "A", "B")
-		v.m = key(v.m, kN)
+		v.m = key(v.m, kCtrlD)
 		v.m = typeStr(v.m, "soon")
 		v.m = key(v.m, kEnter)
 		v.m = key(v.m, kTab)
-		if v.m.input.Value() != "A — soon" {
-			t.Errorf("composer = %q, want what enter would send", v.m.input.Value())
+		if v.m.askField.Value() != "A — soon" {
+			t.Errorf("text row = %q, want what enter would send", v.m.askField.Value())
 		}
 	})
 	t.Run("multi", func(t *testing.T) {
@@ -318,16 +335,16 @@ func TestAsk_TabEditsTheOption(t *testing.T) {
 		v.m = key(v.m, kDown)
 		v.m = key(v.m, kDown) // highlight C
 		v.m = key(v.m, kTab)
-		if v.m.input.Value() != "C" { // its own text (USER 2026-10-27: edit every option)
-			t.Errorf("composer = %q, want the highlighted option's text", v.m.input.Value())
+		if v.m.askField.Value() != "C" { // its own text (USER 2026-10-27: edit every option)
+			t.Errorf("text row = %q, want the highlighted option's text", v.m.askField.Value())
 		}
 	})
 	t.Run("custom row", func(t *testing.T) {
 		v := askingVtui(t, "A")
-		v.m = key(v.m, kDown) // the custom row
+		v.m = key(v.m, kDown) // the text row
 		v.m = key(v.m, kTab)
-		if v.m.customAnswer {
-			t.Error("tab on the custom row has no option to edit")
+		if v.m.askField.Value() != "" || !v.m.onAskText() {
+			t.Errorf("tab on the text row has no option to edit: text=%q", v.m.askField.Value())
 		}
 	})
 }

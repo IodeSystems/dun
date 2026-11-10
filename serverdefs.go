@@ -66,6 +66,11 @@ type Server struct {
 	IndexBudget string
 	// IndexAnyway indexes a root that is not a project (ServerSpec.IndexAnyway).
 	IndexAnyway bool
+	// LSPRoots, LSPMaxRSSMB and LSPIdleStop override lspSafeArgs
+	// (ServerSpec.LSPRoots and the rest); empty or nil keep dun's default.
+	LSPRoots    string
+	LSPMaxRSSMB *int
+	LSPIdleStop string
 	// Wake: its messages may start a turn on an idle session (ServerSpec.Wake).
 	Wake bool
 }
@@ -229,7 +234,7 @@ type builtinInstance struct{ instance, why string }
 // builtinInstances are the built-in servers' fixed instances, the one place
 // they are declared (mcpscope.go resolve and SetServerInstance read it).
 var builtinInstances = map[string]builtinInstance{
-	// mcpshell holds the session's eval state (exported variables, its
+	// mcpshell holds the session's eval state (session variables, its
 	// hosted servers) and the engine starts one per session.
 	ServerShell: {InstanceSession, "it holds this session's eval state"},
 	// The engine starts a poly-lsp-mcp proxy per session; with --daemon the

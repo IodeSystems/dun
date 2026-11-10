@@ -8,6 +8,8 @@ import "fmt"
 // project's own indexes and the attached ones. Kept at the scopes of the
 // other switches (switches.go) in rag.json under "workspace"; on unless a
 // scope says off. A --no-dir session has no workspace to read: always off.
+// With the code and docs search through dund on (codesearch.go), raglit
+// never reads the workspace: it is dund's, and this switch has no effect.
 
 const ragKind = "rag"
 

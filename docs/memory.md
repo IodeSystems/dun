@@ -8,13 +8,15 @@ history or the docs. Code: `memory.go` (tool, store, scan), `memattest.go`
 
 ## The value is surfacing, not writing
 
-(USER 2026-10-19.) A note is worth writing only if a raglit index can put it
+(USER 2026-10-19.) A note is worth writing only if an index can put it
 into the conversation unasked: the model reads it inside a tool result it was
 already going to read, without calling `search`. The path already existed
 (`docsPreparer` appends hits as one Entry, which keeps the cached prefix), so
-surfacing was proved on hand-written notes before any write path was built. The
-memory tool exists only while the docs server runs, because without the search
-a note is never read again.
+surfacing was proved on hand-written notes before any write path was built.
+The index is dund's since rag slice 5 (`rag.md`, "Built: slice 5"): the
+memory tool is there whenever the session has a link to dund, with or
+without `/rag on`. With dund down, recall is a word search of the note files
+and the index catches up on the next contact.
 
 **Surfaced text is not a one-time cost.** The Entry stays in history, so it is
 re-sent every turn until compaction drops it. That is why `surfacing.go` counts
@@ -52,6 +54,10 @@ probes written by the author of the notes.
   index, so the code file won every pass. The rule runs per group (memory notes
   versus the rest) and a pass can surface one of each. A surfaced note is
   labelled as saved by an earlier session.
+- **Project and global notes are separate groups** (USER 2026-11-08): they
+  are two dund indexes, so each group is ranked in its own index and passes
+  the rule on its own. A pass can surface one of each; the project note
+  comes first.
 - With one or two notes the margin has no runner-up, so any word overlap
   surfaces a note; the rule works as notes accumulate.
 
@@ -74,10 +80,11 @@ dun's decisions:
   as `/remember [text]`.
 - **Writes go straight to disk, no approval step** (USER), after a scan that
   refuses control and format characters, chat-template tokens, and over 1200
-  chars. A note is one file in `~/.dun/memory/<project>/` (frontmatter:
-  question, date, session, commit, public), indexed in the project's `memory`
-  index. Local first (USER 2026-10-21); `public` is recorded and changes
-  nothing yet.
+  chars. A note is one file in `~/.dun/memory/<project>/`, or
+  `~/.dun/memory/@global/` for scope global (frontmatter: name, question, date,
+  session, commit, tags, important, public), indexed in dund's `memories` index of the
+  project or of the global set. Local first (USER 2026-10-21); `public` is
+  recorded and changes nothing yet.
 - **The fork shares the turn's prefix.** Measured by replaying a captured
   6 592-token turn (M1, 2026-10-21): no tools, 0 cached of 3 878; the turn's
   tools, 6 426 cached and 166 processed. `tool_choice` `none`, `required` and a
@@ -146,13 +153,17 @@ carries the caveat and the invitation** (`notify.go`, group memory): a note
   history are re-derivable and the fastest to go stale. The residue worth
   keeping is what is not in the tree: why an approach was abandoned, what a
   measurement showed, which reading of an ambiguous request was right.
+- **Important notes** (USER 2026-11-08): a note has a short name and can
+  be marked important; an important one is listed by path in every
+  session's system prompt (`strategies.md`). Only the user marks one
+  (`/memories important`), which keeps the rule below.
 - **Personalization**: no model-written pinned list (USER 2026-10-19). A pinned
   list reaches every turn through the system prompt, so a wrong model-inferred
   entry ("user prefers X") would steer every session and could override the
   current request. Standing preferences belong in a user-level file the user
-  edits by hand (`~/.dun/AGENTS.md`, loaded after the workspace's root
-  AGENTS.md and labelled as defaults the request overrides); that file is not
-  built. A "remember I want..." goes to a private note and the reply tells the
+  edits by hand: since 2026-11-10 that is `~/AGENTS.md`, `~/CLAUDE.md` or
+  `~/.claude/CLAUDE.md`, read before the project's rules (`decisions.md`,
+  "User rules files"); the `~/.dun/AGENTS.md` once planned here is not built. A "remember I want..." goes to a private note and the reply tells the
   user to move it if it should apply every turn.
 
 ## Sharing (designed with raglit, not built in dun)
@@ -162,7 +173,8 @@ Two axes: scope (project or user) and visibility (private or public). Decisions
 
 - A write is private unless the call says `public:true`: a leak cannot be
   undone, a missed share can.
-- `/rag on` registers the project with the raglit server under a project id
+- (Designed for raglit's server; memory notes are dund's now, `rag.md`.)
+  `/rag on` registers the project with the raglit server under a project id
   (the repo's root commit, label the normalized `origin`). No index for the id:
   it becomes the base. One exists: you get a top layer over it, and write only
   your own layer. Every layer sees public sibling layers in search.

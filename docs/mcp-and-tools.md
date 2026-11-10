@@ -460,6 +460,47 @@ format on edit.
   not apply to node selectors or `/query`, and `--root-marker` is stored but
   unused.
 
+## poly-lsp guards (2026-11-09)
+
+Incident, 2026-11-09: on Carl's Mac, dun ran in `~/work/pr-analysis`, a
+directory of many cloned repos. The model's `node_*` calls had poly-lsp index
+all of it, and the machine went down twice. poly-lsp's gaps (no global child
+cap, a didOpen of every file, a whole-root index bounded only by the 30 s
+`--index-budget`, no daemon GOMEMLIMIT, no reaping when the daemon dies, a
+PSI stop that does nothing on macOS) are fixed in poly-lsp v0.5.1. dun's
+guards, which hold with or without those fixes:
+
+- **No budget raise** (`indexstate.go` retryIndex). An index out of budget
+  gets the obvious excludes (they can only shrink the index), else nothing:
+  dun gives the person `/lsp exclude`, `include`, `budget`, and never raises
+  `--index-budget` itself.
+- **Child limits** (`lspsafe.go`): `--lsp-roots single`, to a build whose
+  `mcp --help` lists it. dun's interim `--lsp-max-rss-mb 2048` and
+  `--lsp-idle-stop 5m` are gone: v0.5.1 bounds the daemon by default (4
+  children, RSS budgets, 10 min idle), the proxy ignores those flags with
+  `--daemon`, and without it they force in-process mode. Overrides:
+  `lsp_roots`, `lsp_max_rss_mb`, `lsp_idle_stop` in the server spec (project
+  or global); the last two are passed only when set and without `--daemon`;
+  dun writes none.
+- **index-anyway is the person's** (`indexanyway.go`). A not-a-project root
+  gets a line, not a question: an answer to `Config.Ask` can come from a
+  model (`dun mcp`'s `dun_answer`) or a pipe. Only `/lsp index-anyway on`
+  (a server command from a client) or the config file sets it; no tool does.
+  Headless runs are always "not now".
+- **Root guard** (`rootguard.go`, `codeguard.go`). Before poly-lsp starts on
+  a root, dun counts repos to depth 3 and files to 50,000 (`git ls-files`
+  in a repo, else a walk that skips what poly-lsp skips; 3 s at most). With
+  3+ repos or over 50,000 files, poly-lsp starts on an empty placeholder
+  root (tools listed, nothing indexed); a `node_*` call naming a path in one
+  repo restarts it there, paths made relative to that repo; other calls are
+  refused with the repo list. `index_anyway` lifts it. Cost, measured: 4 ms
+  on dun's repo (860 files), 0.6 ms on 20 small repos, 0.6 s on a directory
+  of 115 repos past the file cap (warm cache).
+- **dund's code index** (`codesearch.go` codeIndexRoot) and the raglit
+  workspace ingest skip a root the guard finds too big; logged once.
+- `dun doctor` shows `poly-lsp-mcp status --json`: per root, the child LSPs
+  running, their RSS, and the index's files.
+
 ## dun as an MCP server: `dun mcp` (2026-11-04)
 
 USER 2026-11-04: "interface claude<->dun for making things cheaper". `dun mcp`

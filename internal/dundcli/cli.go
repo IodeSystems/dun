@@ -5,9 +5,10 @@
 //	dund serve       run the service (one per DUN_HOME)
 //	dund sessions    list your sessions
 //	dund token       make a new local token for HTTP clients (the old one stops working)
+//	dund rag         search and fill the retrieval indexes (docs/rag.md)
 //
 // Paths: $DUN_HOME (default ~/.dun) holds dund.sock (0600), dund.pid, the
-// registry in dund/ and, when a client started the service, dund.log.
+// registry in dund/, the retrieval indexes in dund/rag/ and, when a client started the service, dund.log.
 package dundcli
 
 import (
@@ -33,8 +34,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dund"
 	"github.com/iodesystems/dun/internal/dundapi"
+	"github.com/iodesystems/dun/internal/ragd"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -119,7 +122,7 @@ func newRoot() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&l.home, "home", "", "state directory (default $DUN_HOME, else ~/.dun)")
 	root.PersistentFlags().StringVar(&l.sock, "socket", "", "unix socket (default <home>/dund.sock)")
-	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l), serviceCmd(l), schemaCmd())
+	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l), serviceCmd(l), schemaCmd(), ragCmd(l))
 	return root
 }
 
@@ -251,6 +254,12 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		})
 	}
 	srv.SetBuild(Version, self, upgrade)
+	rag, err := openRag(l.home)
+	if err != nil {
+		ln.Close()
+		return err
+	}
+	srv.SetRag(rag)
 	go func() { errc <- srv.Serve(ln) }()
 	var hs *http.Server
 	if httpAddr != "" {
@@ -258,12 +267,14 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		h, err := dundapi.Handler(svc, o)
 		if err != nil {
 			ln.Close()
+			rag.Close(0)
 			return err
 		}
 		hs = &http.Server{Addr: httpAddr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 		hl, err := net.Listen("tcp", httpAddr)
 		if err != nil {
 			ln.Close()
+			rag.Close(0)
 			return fmt.Errorf("listen %s: %w", httpAddr, err)
 		}
 		go func() {
@@ -312,11 +323,26 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	}
 	ln.Close()
 	os.Remove(sock)
+	// Before the re-exec too: a job cut off here goes back on the queue for
+	// the next dund, rather than showing as an error.
+	rag.Close(ragd.DrainGrace)
 	svc.Close()
 	if reexec {
 		return syscall.Exec(self, os.Args, os.Environ())
 	}
 	return err
+}
+
+// openRag starts retrieval (docs/rag.md): the indexes under
+// <home>/dund/rag, with the model roles from <home>/config.json's facets,
+// each said once.
+func openRag(home string) (*ragd.Host, error) {
+	roles := ragd.Resolve(dunconfig.LoadConfigFile(filepath.Join(home, "config.json")))
+	roles.CapsDir = filepath.Join(home, "capabilities")
+	for _, line := range roles.Said {
+		fmt.Fprintln(os.Stderr, "dund: rag:", line)
+	}
+	return ragd.Open(filepath.Join(home, "dund", "rag"), roles, nil)
 }
 
 // Version is the build this dund runs, set by the binary that embeds it.

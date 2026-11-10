@@ -282,7 +282,7 @@ func TestPlanNudge_NotForAChild(t *testing.T) {
 	h.toolNames.Store(&names)
 	h.parent = &Harness{}
 	for range 10 {
-		h.planNudgeResult(true)
+		h.planNudgeResult(true, churnAttempt{})
 	}
 	h.turnRounds.n.Store(100)
 	h.cfg.PlanNudgeRounds = 3

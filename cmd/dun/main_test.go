@@ -14,6 +14,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("DUN_HOME", home)
+	// And off the real home directory: a harness reads the user's rules
+	// files (~/AGENTS.md, ~/CLAUDE.md, ~/.claude/CLAUDE.md, dun/rules.go).
+	os.Setenv("HOME", home)
 	// Off the user's shared tool daemons, as the dun package's TestMain:
 	// a real poly-lsp-mcp would proxy to ~/.poly-lsp's, raglit read ~/.raglit.
 	os.Setenv("POLY_LSP_NO_DAEMON", "1")

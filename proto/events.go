@@ -338,6 +338,9 @@ type Ask struct {
 	// RecommendedAll is every option the model recommends: one, or for multi
 	// the ones to check (any number).
 	RecommendedAll []string `json:"recommended_all,omitempty"`
+	// NoCustom: the answer must be one of the options, so a client offers no
+	// field for the person's own words. Ignored when there are no options.
+	NoCustom bool `json:"no_custom,omitempty"`
 }
 
 // Mount asks to mount a host path into the container; answered yes or no.
@@ -948,14 +951,12 @@ type Plan struct {
 type PlanNode struct {
 	ID       string   `json:"id"`
 	Title    string   `json:"title"`
-	Goal     string   `json:"goal,omitempty"`
+	Details  string   `json:"details,omitempty"`
 	Status   string   `json:"status"` // todo, doing, done, blocked, dropped
 	DoneWhen string   `json:"done_when,omitempty"`
 	Needs    []string `json:"needs,omitempty"`
 	Owner    string   `json:"owner,omitempty"`
-	Files    []string `json:"files,omitempty"`
 	Replaces string   `json:"replaces,omitempty"`
-	Notes    string   `json:"notes,omitempty"`
 	Why      string   `json:"why,omitempty"`     // why it is blocked or dropped
 	Account  string   `json:"account,omitempty"` // how done_when was met
 	// Waiting is why a todo node cannot start, from its edges.

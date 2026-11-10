@@ -9,6 +9,7 @@ import (
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
+	"github.com/iodesystems/dun/internal/depver"
 	"github.com/iodesystems/dun/internal/update"
 )
 
@@ -45,6 +46,26 @@ type toolRow struct {
 	Updated bool   `json:"updated,omitempty"` // --upgrade ran it and it worked
 	Error   string `json:"error,omitempty"`
 	Missing bool   `json:"missing,omitempty"`
+	Pin     string `json:"pin,omitempty"`     // the version this dun pins (the download, else Recommended)
+	Release bool   `json:"release,omitempty"` // a release build of the tool
+}
+
+// dep is the row as /version and dun --version show it.
+func (r toolRow) dep() depver.Tool {
+	return depver.Tool{Name: r.Name, Path: r.Path, Version: r.Version, Origin: r.Origin,
+		Pin: r.Pin, Release: r.Release, Missing: r.Missing}
+}
+
+// pinFor is the version this dun pins for name: the release download, else
+// the version it supports (release.Supported, raised by the registry).
+func pinFor(name string) string {
+	if a, _, ok := pinnedTool(name); ok {
+		return a.Version
+	}
+	if s, ok := supportedTool(name); ok {
+		return s.Recommended
+	}
+	return ""
 }
 
 func toolsCmd(args []string, stdout, stderr io.Writer) int {
@@ -98,7 +119,7 @@ func toolRows(upgrade bool) []toolRow {
 		if t.name == "git" {
 			continue
 		}
-		r := toolRow{Name: t.name}
+		r := toolRow{Name: t.name, Pin: pinFor(t.name)}
 		p, err := dun.FindCommand(t.name)
 		if err != nil {
 			r.Missing = true
@@ -115,7 +136,7 @@ func toolRows(upgrade bool) []toolRow {
 			rows = append(rows, r)
 			continue
 		}
-		r.Version, r.Origin = o.Version, o.String()
+		r.Version, r.Origin, r.Release = o.Version, o.String(), o.Kind == update.Release
 		s, ok := supportedTool(t.name)
 		if !ok {
 			rows = append(rows, r)
@@ -130,7 +151,7 @@ func toolRows(upgrade bool) []toolRow {
 			} else {
 				r.Updated = true
 				if o, err := update.OfFile(p); err == nil {
-					r.Version, r.Origin = o.Version, o.String()
+					r.Version, r.Origin, r.Release = o.Version, o.String(), o.Kind == update.Release
 				}
 			}
 		}
@@ -175,4 +196,19 @@ func (r toolRow) line() string {
 		}
 	}
 	return s
+}
+
+// versionBlock is what dun --version prints after its first line: the
+// libraries compiled in and the tools dun runs, a line each. The registry is
+// the cached one (main installed it); no tool is run.
+func versionBlock() []string {
+	out := []string{"modules:"}
+	for _, l := range depver.ModuleLines() {
+		out = append(out, "  "+l)
+	}
+	out = append(out, "tools:")
+	for _, r := range toolRows(false) {
+		out = append(out, "  "+r.dep().Line())
+	}
+	return out
 }

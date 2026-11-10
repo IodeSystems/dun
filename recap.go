@@ -1,6 +1,7 @@
 package dun
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -744,7 +745,7 @@ func recapCueFor(entries []agent.Entry, tool string, size int) (recapCue, bool) 
 			name = "a tool"
 		}
 		return recapCue{
-			key: "big:" + e.ID,
+			key: bigCueKey(cmp.Or(e.ToolCallID, e.ID)),
 			detail: fmt.Sprintf("the %d-character %s result earlier in this turn is still in your "+
 				"context, and you have moved on from it", len(e.Content), name),
 		}, true
@@ -752,6 +753,10 @@ func recapCueFor(entries []agent.Entry, tool string, size int) (recapCue, bool) 
 	_ = size
 	return recapCue{}, false
 }
+
+// bigCueKey is the large-result cue's key for the result of call id. A
+// whole read raises it when it lands (wholeread.go) and so claims it.
+func bigCueKey(id string) string { return "big:" + id }
 
 // watchRecap is called after every tool call: it raises at most one suggestion,
 // and never the same one twice.
@@ -875,6 +880,22 @@ func (h *Harness) capOnce(command, out string) string {
 	h.capped[key] = capped
 	h.recapMu.Unlock()
 	return capped
+}
+
+// keepWhole makes out its own capped form, for the model and the UI alike:
+// a whole read was measured against the room left (wholeread.go), and the
+// cap would clip what it was let through to read.
+func (h *Harness) keepWhole(out string) {
+	if len(out) <= execInlineMax {
+		return
+	}
+	sum := sha256.Sum256([]byte(out))
+	h.recapMu.Lock()
+	defer h.recapMu.Unlock()
+	if h.capped == nil {
+		h.capped = map[string]string{}
+	}
+	h.capped[hex.EncodeToString(sum[:])] = out
 }
 
 // cappedReporter wraps the UI callback so what the human sees is what the MODEL

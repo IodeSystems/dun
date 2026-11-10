@@ -54,37 +54,49 @@ func savedLocal(ws string) string {
 	return string(b)
 }
 
-// A root that is not a project: dun asks once; "index anyway" is saved for
-// the project, the server restarts with --index-anyway, a later session
-// starts with the flag and asks nothing, and index-anyway off undoes it.
-func TestIndexAnyway_AskedAndAccepted(t *testing.T) {
+// A root that is not a project, with an asker that would say "index
+// anyway" (a model driving the session through dun mcp, a pipe): dun asks
+// nothing, sets nothing, restarts nothing, and says once what the person can
+// do. Only /lsp index-anyway (SetIndexAnyway) sets it; a later session
+// starts with the flag, and off undoes it.
+func TestIndexAnyway_PersonOnly(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
 	t.Setenv("HOME", ws)
 	a := &asker{ans: "index anyway"}
 	h, log, msgs := startNotProject(t, ws, a.ask, fakeAnywayEnv+"=1")
 	msg := nextMsg(t, msgs)
-	wantQ := "dun is running in ~ — not a project (12 git repos inside). Index all of it anyway, or start dun in one of them? (the code tools need a project)\n" +
-		"start dun in a repository instead: cd a && dun · cd b && dun · cd c && dun · cd d && dun · cd e && dun · and 7 more"
-	if a.asked() != 1 || a.qs[0] != wantQ {
-		t.Fatalf("asked %d: %q", a.asked(), a.qs)
-	}
-	if got := strings.Join(a.opts[0], "|"); got != "index anyway|not now" {
-		t.Errorf("options %q", got)
-	}
-	for _, want := range []string{"poly-lsp: indexing ~ anyway, for this project (saved to ", "undo: /lsp index-anyway off"} {
+	for _, want := range []string{"poly-lsp: off for this session — ~ is not a project (12 git repos inside); the rest of dun works.",
+		"cd a && dun · cd b && dun · cd c && dun · cd d && dun · cd e && dun · and 7 more",
+		"/lsp index-anyway on indexes ~ regardless (the person's choice: dun never sets it)."} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the line lacks %q:\n%s", want, msg)
 		}
 	}
-	if m := nextMsg(t, msgs); m != "" { // the restarted build is ready, quietly
-		t.Errorf("the ready build said %q", m)
+	if strings.Contains(msg, "cd f && dun") {
+		t.Errorf("more than five repositories named:\n%s", msg)
+	}
+	if a.asked() != 0 {
+		t.Fatalf("asked %d: %q", a.asked(), a.qs)
+	}
+	if st := waitIndex(t, h, IndexFailed); st.IndexAnyway || !strings.HasPrefix(st.IndexErr, "not a project") {
+		t.Fatalf("%+v", st)
+	}
+	// The same failure again (a manual restart): nothing more is said.
+	h.noteIndex(ServerCode, indexNote{State: IndexFailed, Reason: reasonNotProject, Error: "not a project: x", Repos: []string{"a"}})
+	if m := nextMsg(t, msgs); m != "" {
+		t.Errorf("said again: %q", m)
+	}
+	if len(argLines(log)) != 1 || h.IndexAnyway(ServerCode) || strings.Contains(savedLocal(ws), "index_anyway") {
+		t.Fatalf("changed: spawns %q, saved %s", argLines(log), savedLocal(ws))
+	}
+
+	// The person's /lsp index-anyway on: saved, restarted with the flag.
+	if _, changed, err := h.SetIndexAnyway(context.Background(), ServerCode, true); err != nil || !changed {
+		t.Fatalf("on: %v %v", changed, err)
 	}
 	waitIndex(t, h, IndexReady)
-	if st := codeState(h); !st.IndexAnyway || !h.IndexAnyway(ServerCode) {
-		t.Fatalf("not set: %+v", st)
-	}
-	if args := argLines(log); len(args) != 2 || strings.Contains(args[0], "--index-anyway") || !strings.HasSuffix(args[1], "--index-anyway") {
+	if args := argLines(log); len(args) != 2 || !strings.HasSuffix(args[1], "--index-anyway") {
 		t.Fatalf("spawns: %q", args)
 	}
 	if !strings.Contains(savedLocal(ws), `"index_anyway": true`) {
@@ -92,18 +104,15 @@ func TestIndexAnyway_AskedAndAccepted(t *testing.T) {
 	}
 	h.Close()
 
-	// A later session: the saved yes is on the first spawn; nothing is asked.
-	a2 := &asker{ans: "not now"}
-	h2, log2, msgs2 := startNotProject(t, ws, a2.ask, fakeAnywayEnv+"=1")
+	// A later session: the saved yes is on the first spawn.
+	h2, log2, msgs2 := startNotProject(t, ws, nil, fakeAnywayEnv+"=1")
 	if m := nextMsg(t, msgs2); m != "" {
 		t.Errorf("the later session said %q", m)
 	}
 	waitIndex(t, h2, IndexReady)
-	if args := argLines(log2); len(args) != 1 || !strings.HasSuffix(args[0], "--index-anyway") || a2.asked() != 0 {
-		t.Fatalf("later spawn: %q, asked %d", args, a2.asked())
+	if args := argLines(log2); len(args) != 1 || !strings.HasSuffix(args[0], "--index-anyway") {
+		t.Fatalf("later spawn: %q", args)
 	}
-
-	// The undo restarts without the flag and takes the entry out.
 	_, changed, err := h2.SetIndexAnyway(context.Background(), ServerCode, false)
 	if err != nil || !changed || h2.IndexAnyway(ServerCode) {
 		t.Fatalf("off: %v %v", changed, err)
@@ -114,47 +123,40 @@ func TestIndexAnyway_AskedAndAccepted(t *testing.T) {
 	if strings.Contains(savedLocal(ws), "index_anyway") {
 		t.Errorf("still saved: %s", savedLocal(ws))
 	}
-	if _, changed, _ := h2.SetIndexAnyway(context.Background(), ServerCode, false); changed {
-		t.Error("off twice changed something")
-	}
 }
 
-// "not now": nothing is saved or restarted, the line names repositories to
-// start dun in (five of them), and the question is not put a second time.
-func TestIndexAnyway_NotNowAsksOnce(t *testing.T) {
+// A headless session (dun -p --non-interactive, harbor: no Config.Ask) is
+// "not now": the line, nothing saved, no --index-anyway.
+func TestIndexAnyway_HeadlessNeverSets(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
-	a := &asker{ans: "not now"}
-	h, log, msgs := startNotProject(t, ws, a.ask, fakeAnywayEnv+"=1")
-	msg := nextMsg(t, msgs)
-	for _, want := range []string{"poly-lsp: off for this session — " + ws + " is not a project; the rest of dun works.",
-		"cd a && dun · cd b && dun · cd c && dun · cd d && dun · cd e && dun · and 7 more",
-		"/lsp index-anyway on indexes " + ws + " regardless."} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the line lacks %q:\n%s", want, msg)
+	lsp, log := fakeBin(t, "poly-lsp-mcp", "poly-lsp", fakeIndexEnv+"=notproject", fakeAnywayEnv+"=1")
+	msgs := make(chan string, 8)
+	h, err := Start(context.Background(), Config{
+		Workspace: ws, Client: &scriptRunner{}, SessionFile: filepath.Join(ws, "s.jsonl"), NonInteractive: true,
+		Servers:       []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		OnServerIndex: func(id, msg string) { msgs <- msg },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	if msg := nextMsg(t, msgs); !strings.Contains(msg, "off for this session") || !strings.Contains(msg, "/lsp index-anyway on indexes "+ws+" regardless") {
+		t.Fatalf("%q", msg)
+	}
+	waitIndex(t, h, IndexFailed)
+	if h.IndexAnyway(ServerCode) || strings.Contains(savedLocal(ws), "index_anyway") {
+		t.Fatalf("set: %s", savedLocal(ws))
+	}
+	for _, l := range argLines(log) {
+		if strings.Contains(l, "--index-anyway") {
+			t.Fatalf("--index-anyway passed: %s", l)
 		}
-	}
-	if strings.Contains(msg, "cd f && dun") {
-		t.Errorf("more than five repositories named:\n%s", msg)
-	}
-	if st := waitIndex(t, h, IndexFailed); st.IndexAnyway || !strings.HasPrefix(st.IndexErr, "not a project") {
-		t.Fatalf("%+v", st)
-	}
-	// The same failure again (a manual restart): no second question.
-	h.noteIndex(ServerCode, indexNote{State: IndexFailed, Reason: reasonNotProject, Error: "not a project: x", Repos: []string{"a"}})
-	if m := nextMsg(t, msgs); m != "" {
-		t.Errorf("asked again: %q", m)
-	}
-	if a.asked() != 1 || len(argLines(log)) != 1 || h.IndexAnyway(ServerCode) {
-		t.Fatalf("asked %d, spawns %q", a.asked(), argLines(log))
-	}
-	if strings.Contains(savedLocal(ws), "index_anyway") {
-		t.Errorf("saved: %s", savedLocal(ws))
 	}
 }
 
 // A binary whose --help does not list --index-anyway is not offered it: one
-// line, no question, and index-anyway on is refused.
+// line, and index-anyway on is refused.
 func TestIndexAnyway_ProbeGates(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
@@ -179,23 +181,10 @@ func TestIndexAnyway_ProbeGates(t *testing.T) {
 	h2, log2, msgs2 := startNotProject(t, ws, a.ask)
 	nextMsg(t, msgs2)
 	waitIndex(t, h2, IndexFailed)
-	if a.asked() != 0 {
-		t.Errorf("asked %d", a.asked())
-	}
 	for _, l := range argLines(log2) {
 		if strings.Contains(l, "--index-anyway") {
 			t.Errorf("an old build got --index-anyway: %s", l)
 		}
-	}
-}
-
-// With no one to ask (no Config.Ask), the same one line, and the command.
-func TestIndexAnyway_NoAsker(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	_, _, msgs := startNotProject(t, t.TempDir(), nil, fakeAnywayEnv+"=1")
-	msg := nextMsg(t, msgs)
-	if !strings.Contains(msg, "cd a && dun") || !strings.Contains(msg, "/lsp index-anyway on indexes it regardless") {
-		t.Fatalf("%q", msg)
 	}
 }
 

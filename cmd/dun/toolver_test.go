@@ -61,8 +61,17 @@ func TestPlanTool(t *testing.T) {
 		{co("v0.2.1-0.20260101000000-abc123456789", "", false), goOK, "ok",
 			"t: built from a checkout at abc1234; an update is available: v0.3.0 (tested with this dun)", "rebuild it from its checkout (make install)", ""},
 		{co("v0.3.1-0.20261101000000-abc123456789", "/src/t", false), goOK, "ok", "t: built from a checkout at abc1234", "", ""},
-		{co("v0.0.0-20260101000000-abc123456789+dirty", "/src/t", true), goOK, "ok",
-			"t: built from a checkout at abc1234, modified; can't compare its version with v0.3.0 (this dun's)", "", ""},
+		// a modified checkout: compared by its build info's version (Carl's Mac, 2026-11-09)
+		{co("v0.0.0-20260101000000-abc123456789+dirty", "/src/t", true), goOK, "warn",
+			"t: a modified checkout of v0.0.0-20260101000000-abc123456789+dirty (at abc1234); too old for this dun (it needs v0.2.0 or newer)",
+			"rebuild it in /src/t from a current tag (make install), or remove /bin/t and run dun doctor --fix to get the pinned release", ""},
+		{co("v0.1.2-0.20261030062958-886d6f12c3e4+dirty", "", true), goOK, "warn",
+			"t: a modified checkout of v0.1.2-0.20261030062958-886d6f12c3e4+dirty (at abc1234); too old for this dun (it needs v0.2.0 or newer)",
+			"rebuild it in its checkout from a current tag (make install), or remove /bin/t and run dun doctor --fix to get the pinned release", ""},
+		{co("v0.2.5-0.20261030062958-886d6f12c3e4+dirty", "", true), goOK, "warn", // modified and behind
+			"t: a modified checkout of v0.2.5-0.20261030062958-886d6f12c3e4+dirty (at abc1234); an update is available: v0.3.0 (tested with this dun)",
+			"rebuild it in its checkout from a current tag (make install), or remove /bin/t and run dun doctor --fix to get the pinned release", ""},
+		{co("v0.3.1-0.20261030062958-886d6f12c3e4+dirty", "", true), goOK, "ok", "t: built from a checkout at abc1234, modified", "", ""},
 		{co("(devel)", "/src/t", false), goOK, "ok", "t: built from a checkout at abc1234; can't compare its version with v0.3.0 (this dun's)", "", ""},
 		// a plain go build
 		{update.Origin{Kind: update.GoBuild, Version: "(devel)"}, goOK, "ok",
@@ -253,6 +262,45 @@ func TestToolInstallIsPinned(t *testing.T) {
 	for _, s := range release.Supported {
 		if m := dun.ToolInstall[s.Name].Module; m != s.Module+"@"+s.Recommended {
 			t.Errorf("%s: ToolInstall %q, want @%s", s.Name, m, s.Recommended)
+		}
+	}
+}
+
+// The session-start warning: Carl's Mac ran a modified mcpshell checkout
+// found on PATH first (2026-11-09); doctor warns, and the start says so
+// with the path, version, pin and fix. A release at the pin says nothing,
+// and a build with no version is not compared.
+func TestToolWarning(t *testing.T) {
+	s, _ := release.SupportedTool("mcpshell")
+	const v = "v0.7.2-0.20261030062958-886d6f12c3e4+dirty"
+	const p = "/Users/carltaylor/.local/bin/mcpshell"
+	carl := update.Origin{Kind: update.Checkout, Version: v, Revision: "886d6f1", Modified: true}
+	env := toolEnv{pinned: s.Recommended}
+	if pl := planTool("mcpshell", p, carl, s, env); pl.level != "warn" {
+		t.Errorf("doctor on Carl's build: %s %s", pl.level, pl.detail)
+	}
+	want := "mcpshell: " + p + " is " + v + ", not a release build; this dun pins " + s.Recommended +
+		". Fix: rebuild it in its checkout from a current tag (make install), or remove " + p +
+		" and run dun doctor --fix to get the pinned release"
+	if got := toolWarning("mcpshell", p, carl, s, env); got != want {
+		t.Errorf("Carl's build:\n got %q\nwant %q", got, want)
+	}
+	old := update.Origin{Kind: update.Release, Version: "v0.1.0"}
+	if got := toolWarning("mcpshell", p, old, s, env); !strings.Contains(got, "is v0.1.0, too old for this dun (it needs "+s.Min+" or newer); this dun pins "+s.Recommended) {
+		t.Errorf("a release below Min: %q", got)
+	}
+	pseudo := update.Origin{Kind: update.GoInstall, Version: "v0.11.1-0.20261108000000-abcdefabcdef"}
+	if got := toolWarning("mcpshell", p, pseudo, s, env); !strings.Contains(got, "not a release build") {
+		t.Errorf("a pseudo-version: %q", got)
+	}
+	for _, o := range []update.Origin{
+		{Kind: update.Release, Version: s.Recommended},
+		{Kind: update.GoInstall, Version: s.Recommended},
+		{Kind: update.Checkout, Version: "(devel)", Revision: "abc1234", Modified: true},
+		{Kind: update.GoBuild, Version: "(devel)"},
+	} {
+		if got := toolWarning("mcpshell", p, o, s, env); got != "" {
+			t.Errorf("%+v: %q", o, got)
 		}
 	}
 }

@@ -21,19 +21,19 @@ import (
 // can start, the engine says (Ready, Waiting).
 //
 //	a            approve the plan (plan mode: the model may change things)
-//	e, g         edit the selected node's title, goal: the composer takes
+//	e, m         edit the selected node's title, details: the composer takes
 //	             the command, filled in, to change and send
 //	d            drop the selected node, same way: a reason can be added
-//	enter, →     the node's goal, done-when, needs, files, why it waits
+//	enter, →     the node's details, done-when, needs, why it waits
 //
 // Marking a node done is the model's, so there is no key for it. What the
 // person changes reaches the model as a note (dun/plan.go).
 
 type planRow struct {
-	id, title, goal, status, doneWhen, owner, replaces, notes, why, account string
-	needs, files, waiting                                                   []string
-	ready, repeat                                                           bool
-	depth                                                                   int
+	id, title, details, status, doneWhen, owner, replaces, why, account string
+	needs, waiting                                                      []string
+	ready, repeat                                                       bool
+	depth                                                               int
 }
 
 type planView struct {
@@ -140,17 +140,15 @@ func (v *planView) page() pageDoc {
 				body = append(body, k+": "+s)
 			}
 		}
-		add("goal", r.goal)
+		add("details", r.details)
 		add("done when", r.doneWhen)
 		add("needs", strings.Join(r.needs, ", "))
 		for _, w := range r.waiting {
 			add("waiting", w)
 		}
-		add("files", strings.Join(r.files, ", "))
 		add("replaces", r.replaces)
 		add("why", r.why)
 		add("account", r.account)
-		add("notes", r.notes)
 		if r.repeat {
 			body = append([]string{"(already shown under another parent)"}, body...)
 		}
@@ -281,10 +279,10 @@ func (v *planView) motion(r planRow) (mark string, style *lipgloss.Style, tag st
 
 func (v *planView) hint() string {
 	if v.width > 0 && v.width < narrowW {
-		return "t tell · a approve · e g d edit/drop · enter dive/open · esc"
+		return "t tell · a approve · e m d edit/drop · enter dive/open · esc"
 	}
 	return hotKey("tell", "t") + StDim.Render(" · ") + hotKey("approve", "a") + StDim.Render(" · ") + hotKey("edit title", "e") +
-		StDim.Render(" · ") + hotKey("goal", "g") + StDim.Render(" · ") + hotKey("drop", "d") +
+		StDim.Render(" · ") + hotKey("details", "m") + StDim.Render(" · ") + hotKey("drop", "d") +
 		StDim.Render(" · enter dive into its agent, else details · → details · esc back")
 }
 
@@ -315,9 +313,9 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 	rows, _ := ev["rows"].([]any)
 	for _, x := range rows {
 		o, _ := x.(map[string]any)
-		r := planRow{id: str(o["id"]), title: str(o["title"]), goal: str(o["goal"]), status: str(o["status"]), doneWhen: str(o["done_when"]),
-			owner: str(o["owner"]), replaces: str(o["replaces"]), notes: str(o["notes"]), why: str(o["why"]), account: str(o["account"]),
-			needs: strList(o["needs"]), files: strList(o["files"]), waiting: strList(o["waiting"]), depth: intOf(o["depth"])}
+		r := planRow{id: str(o["id"]), title: str(o["title"]), details: str(o["details"]), status: str(o["status"]), doneWhen: str(o["done_when"]),
+			owner: str(o["owner"]), replaces: str(o["replaces"]), why: str(o["why"]), account: str(o["account"]),
+			needs: strList(o["needs"]), waiting: strList(o["waiting"]), depth: intOf(o["depth"])}
 		r.ready, _ = o["ready"].(bool)
 		r.repeat, _ = o["repeat"].(bool)
 		v.rows = append(v.rows, r)
@@ -372,7 +370,7 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 		}
 		m.flashText, m.flashUntil = "/plan approve", time.Now().Add(flashFor)
 		return true
-	case "e", "g", "d":
+	case "e", "m", "d":
 		if r == nil {
 			return true
 		}
@@ -380,8 +378,8 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 		switch k {
 		case "e":
 			line = "/plan edit " + r.id + " title " + r.title
-		case "g":
-			line = "/plan edit " + r.id + " goal " + r.goal
+		case "m":
+			line = "/plan edit " + r.id + " details " + r.details
 		}
 		// The composer, filled in: the screen goes down and the person
 		// changes the text and sends it.

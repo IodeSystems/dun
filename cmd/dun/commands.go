@@ -281,12 +281,13 @@ func routeSlash(line string, r slashRoutes) {
 		case "mode", "approve", "edit", "drop":
 			r.control(name, strings.TrimSpace(arg(0)+" "+strings.Join(args[min(1, len(args)):], " ")))
 		default:
-			r.reply("usage: /plan [mode on|off | approve | edit <id> title|goal <text> | drop <id> [why]]")
+			r.reply("usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why]]")
 		}
 	case "effort":
 		r.control(name, arg(0))
 	case "model":
-		r.control(name, arg(0))
+		// probe takes a retrieval role: /model probe embed (capscmd.go).
+		r.control(name, strings.TrimSpace(arg(0)+" "+arg(1)))
 	case "file":
 		// The path as typed: its case matters.
 		switch {
@@ -335,7 +336,11 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("usage: /rules [full|summary|index [--scope] | on|off|unset <file|glob> [--global|--project|--session] | mode <mode|unset> [--scope]]")
 		}
-	case "memories", "interrupt":
+	case "memories":
+		// The rest of the line as typed: a detail keeps its case.
+		_, rest := textfmt.CutFields(strings.TrimPrefix(strings.TrimSpace(line), "/"), 1)
+		r.control(name, rest)
+	case "interrupt":
 		r.control(name, "")
 	case "discard": // the engine's control is still "close"
 		r.control("close", "")

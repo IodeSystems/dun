@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	filetools "github.com/iodesystems/agentkit/files"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/dun/internal/mounttool"
@@ -435,7 +436,10 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// The guard used to be `RaglitHome != ""`, which silently became "never"
 	// the moment the per-session temp home was removed — the ingest was still
 	// called, from a branch that could no longer be taken.
-	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed && authErr == nil {
+	//
+	// With the code and docs search through dund (codesearch.go), the
+	// workspace is dund's to index, and raglit keeps its own corpora only.
+	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed && authErr == nil && h.codeLink() == nil {
 		dir := h.cfg.ConfigDir
 		if dir == "" {
 			dir = h.cfg.Workspace
@@ -480,8 +484,14 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if s.URL == "" && err == nil {
 		indexes, sup = h.speaksIndex(s, command)
 	}
+	// dun's root guard (rootguard.go): a root of many repositories or too
+	// many files is not indexed whole.
+	excludes := s.Exclude
+	if s.URL == "" && err == nil && asksIndex(s) {
+		args, excludes = h.guardCodeRoot(s, args, excludes)
+	}
 	if indexes {
-		args = append(slices.Clone(args), excludeArgs(s.Exclude)...)
+		args = append(slices.Clone(args), excludeArgs(excludes)...)
 		// The project's startup budget, to a build that has one.
 		if sup.Budget && s.IndexBudget != "" {
 			args = append(args, "--index-budget", s.IndexBudget)
@@ -508,6 +518,10 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	// workspace under $HOME.
 	if sup.Daemon && (sup.AnyRoot || underHome(h.cfg.Workspace)) && !slices.Contains(args, "--daemon") {
 		args = append(slices.Clone(args), "--daemon")
+	}
+	// Safe child-LSP limits, to a build that takes them (lspSafeArgs).
+	if safe := lspSafeArgs(s, sup, slices.Contains(args, "--daemon")); len(safe) > 0 {
+		args = append(slices.Clone(args), safe...)
 	}
 	h.markIndexBuilding(s.ID, indexes)
 	if s.URL == "" && err == nil {
@@ -694,7 +708,8 @@ func (h *Harness) rebuildTools() {
 	if h.ownMgr != nil {
 		caller = childCaller{h}
 	}
-	dispatch := mcpDispatcher(caller, tools, report, h.regainShared)
+	dispatch := mcpDispatcher(caller, tools, report, h.regain)
+	dispatch = withCodeGuard(dispatch, h, tools)
 	// The extensions the hooks go to, among the running servers.
 	exts := h.extensions()
 	searchers := searchExts(exts, tools)
@@ -705,6 +720,22 @@ func (h *Harness) rebuildTools() {
 	describeAttached(toolDefs, searchers, h.specs, attached)
 	h.srvMu.Unlock()
 	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
+	// Code and docs search through dund (codesearch.go). With a docs server
+	// (/rag on), its search names no index → this project's code and docs
+	// too; outside withAttached, so the call is read as the model made it.
+	code := h.codeLink()
+	docsSearch := ""
+	if code != nil {
+		for _, e := range searchers {
+			if e.ID == ServerDocs {
+				docsSearch = modelToolName(mcpmgr.MCPTool{ServerID: e.ID, Name: e.Roles.Search.Tool})
+			}
+		}
+		if docsSearch != "" {
+			describeCodeInDocsSearch(toolDefs, docsSearch)
+			dispatch = withCodeInDocsSearch(dispatch, h, code, docsSearch)
+		}
+	}
 	mcpDefs := len(toolDefs) // after these: dun's own (builtins.go)
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef())
@@ -722,8 +753,10 @@ func (h *Harness) rebuildTools() {
 	// worktree switch (Rehoist) moves their root with exec's.
 	ft := h.fileTools()
 	if ft != nil {
-		toolDefs = append(toolDefs, ft.Defs()...)
-		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h.addedNow, report)
+		// file_read gains whole: all of a file, bounded by the context left
+		// (wholeread.go). A dun wrapper; agentkit's caps are unchanged.
+		toolDefs = append(toolDefs, wholeReadDefs(ft.Defs(), ft.Name(filetools.Read))...)
+		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h.addedNow, h.readWhole, report)
 	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
@@ -801,15 +834,37 @@ func (h *Harness) rebuildTools() {
 	// No session tool (USER 2026-11-06): harness info is the file
 	// $DUN_HARNESS names (harnessinfo.go), and what the session is doing is
 	// its plan.
-	// memory only while a memory.save extension runs AND a turn.before one
-	// does: a note is worth writing only because the proactive search brings
-	// it back (see memory.go).
+	// memory whenever the session reaches dund's retrieval (cfg.Rag): a note
+	// is worth writing only because the proactive search brings it back, and
+	// that search is dund's now, not the docs server's (memory.go,
+	// memrecall.go). With dund down it reads the files.
+	// Strategies and constraints ride the same link, tool and recall, in
+	// their own index (notekinds.go); file_read takes their paths.
 	h.memory.Store(nil)
-	if e, ok := hookExt(exts, HookMemorySave, tools); ok && len(searchers) > 0 {
-		m := memoryFor(h.indexSink(e), h.cfg.Workspace)
+	h.strategies.Store(nil)
+	var memF, stratF *memFinder
+	if l := h.memLink(); l != nil {
+		m := memoryFor(l, h.cfg.Workspace)
 		h.memory.Store(m)
+		memF = &memFinder{l: l, m: m, skip: h.listedImportant}
+		if sl := h.stratLink(); sl != nil {
+			s := strategyFor(sl, h.cfg.Workspace)
+			h.strategies.Store(s)
+			stratF = &memFinder{l: sl, m: s, skip: h.listedImportant}
+		}
 		toolDefs = append(toolDefs, memoryToolDef())
 		dispatch = withMemory(dispatch, h, m, report)
+		dispatch = withItemRead(dispatch, h)
+	}
+	// search: the code and docs indexes, when no docs server gives a search
+	// tool of its own (that one searches them too, above).
+	var codeF *codeFinder
+	if code != nil {
+		codeF = &codeFinder{l: code, root: func() string { return filepath.Clean(h.cfg.Workspace) }}
+		if !slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "search" }) {
+			toolDefs = append(toolDefs, searchToolDef())
+			dispatch = withCodeSearch(dispatch, h, code, report)
+		}
 	}
 	// Skills into the index, off the turn lock: raglit takes a while.
 	if e, ok := hookExt(exts, HookSkillsChanged, tools); ok {
@@ -879,6 +934,9 @@ func (h *Harness) rebuildTools() {
 		_, rulesIndexed := hookExt(exts, HookRulesChanged, tools)
 		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
+		// The important memories, strategies and constraints, by path
+		// (notekinds.go): in every session, with no retrieval.
+		sys += h.standingBlock()
 	}
 	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "recap" }) {
 		sys += systemRecap
@@ -953,18 +1011,33 @@ func (h *Harness) rebuildTools() {
 	// The budget notice (budget.go) rides the same seam, with or without a
 	// docs server, so the preparer is never nil.
 	var docs agent.NotificationPreparer
-	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil {
+	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil || memF != nil || codeF != nil {
 		// MinScore 0: raglit's score is BM25 or a rank fusion (hybrid), in
 		// no fixed range. What surfaces is decided by the hit's similarity
 		// or query-word coverage instead (see docsPreparer): one document
 		// per group and pass, inlined when short.
-		group := sf.group(searchers[0].ID, docGroup(h.memoryStore(), h.skillForDoc, h.isRulesDoc))
+		inner := docGroup([]*memoryStore{h.memoryStore(), h.strategyStore()}, h.skillForDoc, h.isRulesDoc)
+		group := inner
 		home, _ := os.UserHomeDir()
-		src := &hitSources{index: sf.idx.get, attached: sf.attached,
-			display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) },
-			meta:    sf.idx.metaOf, meaning: sf.meaning}
-		docs = docsPreparer(h.store, sf.finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
-			sf.fetch, group, h.skillForDoc, src, cfg.OnDocs)
+		src := &hitSources{display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) }}
+		var finder agent.DocFinder
+		var fetch docBodyFunc
+		if sf != nil {
+			group = sf.group(searchers[0].ID, inner)
+			src.index, src.attached, src.meta, src.meaning = sf.idx.get, sf.attached, sf.idx.metaOf, sf.meaning
+			finder, fetch = sf.finder, sf.fetch
+		}
+		if memF != nil {
+			finder, fetch = withMemFinder(memF, finder, fetch, src)
+		}
+		if stratF != nil {
+			finder, fetch = withMemFinder(stratF, finder, fetch, src)
+		}
+		if codeF != nil {
+			finder, fetch, group = withCodeFinder(codeF, finder, fetch, src, group)
+		}
+		docs = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
+			fetch, group, h.skillForDoc, src, cfg.OnDocs)
 	}
 	h.docsPrep = docs
 	h.Session.Preparer = h.withBudgetNotice(docs)
@@ -1063,6 +1136,12 @@ func missing(want, have []string) []string {
 func ingestWorkspace(sink *mcpDocsSink, workspace string, cfg *RagConfig) string {
 	if sink == nil {
 		return ""
+	}
+	// The root guard (rootguard.go), as for dund's code index.
+	if scan := scanRootCached(workspace); scan.TooBig() {
+		note := fmt.Sprintf("workspace ingest: %s holds %s: not ingested (dun's root guard)", workspace, scanSummary(scan))
+		log.Printf("dun: %s", note)
+		return note
 	}
 	plan := planIngest(workspace, cfg)
 	if len(plan.Files) == 0 {

@@ -5,8 +5,9 @@
 // settings save to $DUN_HOME/config.json (default ~/.dun/config.json, 0600).
 //
 // Precedence when dun starts: CLI flag > env (DUN_URL/DUN_MODEL/DUN_LLM_KEY) >
-// config file. So a one-off `--model X` still wins for a single run without
-// touching the saved config.
+// config file (facets, then the old top-level fields). So a one-off `--model
+// X` still wins for a single run without touching the saved config. Every
+// model role resolves the same way (facets.go).
 //
 // There is no built-in provider (USER 2026-10-22): dun talks to nothing until
 // a provider is logged in (/login, `dun --setup`) or named by flag or env.
@@ -72,7 +73,50 @@ type DunConfig struct {
 	NoUpdates bool `json:"no_updates,omitempty"`
 	// Reasoning is providerConfig.Reasoning for a config with no providers.
 	Reasoning string `json:"reasoning,omitempty"`
+	// Facets are the models dun uses, by role (FacetMain and the others):
+	// which saved provider serves each, the model id, and an optional effort.
+	// Every role resolves through Resolve (facets.go): flag > env > this map
+	// > the old fields above (model, vision_model) > a default. Writers
+	// (/model use) write this map; the old fields are read, not migrated.
+	Facets map[string]Facet `json:"facets,omitempty"`
 }
+
+// Facet is one model role: the saved provider (ProviderConfig.Name) that
+// serves it, and the model id there. An empty Provider is the active one
+// (for child: the main session's). Effort is an /effort level for the
+// role; empty is the saved /effort level.
+type Facet struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model"`
+	Effort   string `json:"effort,omitempty"`
+}
+
+// The facet roles.
+const (
+	FacetMain     = "main"     // the session's model
+	FacetChild    = "child"    // sub-agents; empty is main's
+	FacetVision   = "vision"   // reads images: chat images for a model that cannot, and page OCR
+	FacetEmbed    = "embed"    // vectors for search
+	FacetSegment  = "segment"  // splits text into fragments
+	FacetIdentity = "identity" // a caption and tags per document
+)
+
+// FacetNames are the roles in the order they are shown.
+var FacetNames = []string{FacetMain, FacetChild, FacetVision, FacetEmbed, FacetSegment, FacetIdentity}
+
+// IsFacet says whether name is a role.
+func IsFacet(name string) bool {
+	for _, f := range FacetNames {
+		if f == name {
+			return true
+		}
+	}
+	return false
+}
+
+// DefaultEmbedModel is the embed facet when the config names none: the
+// model corrallm serves for embeddings.
+const DefaultEmbedModel = "local-nomic-embed-text"
 
 // ProviderConfig is one OpenAI-compatible endpoint: /v1/models and
 // /v1/chat/completions under URL, authorized by Key.
@@ -204,6 +248,9 @@ type ProviderOp struct {
 	URL   string `json:"url,omitempty"`
 	Key   string `json:"key,omitempty"`   // login: optional; again under a saved name, empty keeps the saved key
 	Model string `json:"model,omitempty"` // use: an id, typed when the list is not there
+	// Facet is the role use sets (FacetNames); "" is main, which also makes
+	// Name the active provider.
+	Facet string `json:"facet,omitempty"`
 	// NewName is rename's new name for Name (the login form fills a name in
 	// from the address; this is how it is changed).
 	NewName string `json:"new_name,omitempty"`
@@ -242,6 +289,7 @@ func ApplyProviderOp(op ProviderOp) (string, error) {
 			cfg.Provider, cfg.URL, cfg.Key = p.Name, p.URL, p.Key
 		case !loggedIn: // the first login is the default; the model comes next
 			cfg.Provider, cfg.URL, cfg.Key, cfg.Model = p.Name, p.URL, p.Key, ""
+			cfg.SetFacet(FacetMain, Facet{})
 		}
 		msg = fmt.Sprintf("logged in to %s · %s · %s", name, u, KeyNote(p.Key))
 	case "logout":
@@ -251,6 +299,9 @@ func ApplyProviderOp(op ProviderOp) (string, error) {
 		wasDefault := cfg.ActiveName() == name
 		cfg.RemoveProvider(name)
 		msg = "logged out of " + name
+		if wasDefault || cfg.Facets[FacetMain].Provider == name {
+			cfg.SetFacet(FacetMain, Facet{}) // the model comes next, as with the old field
+		}
 		switch {
 		case len(cfg.Providers) == 0:
 			cfg.Provider, cfg.URL, cfg.Key, cfg.Model = "", "", "", ""
@@ -269,8 +320,19 @@ func ApplyProviderOp(op ProviderOp) (string, error) {
 		if model == "" || strings.ContainsAny(model, " \t") {
 			return "", errors.New("a model id is one word")
 		}
-		cfg.Use(p, model)
-		msg = "default: " + model + " on " + name
+		switch op.Facet {
+		case "", FacetMain:
+			cfg.Use(p, model)
+			msg = "default: " + model + " on " + name
+		default:
+			if !IsFacet(op.Facet) {
+				return "", errors.New("no facet " + op.Facet + " (" + strings.Join(FacetNames, ", ") + ")")
+			}
+			f := cfg.Facets[op.Facet]
+			f.Provider, f.Model = p.Name, model
+			cfg.SetFacet(op.Facet, f)
+			msg = op.Facet + ": " + model + " on " + name
+		}
 	case "rename":
 		p, ok := cfg.Named(name)
 		if !ok {
@@ -292,6 +354,12 @@ func ApplyProviderOp(op ProviderOp) (string, error) {
 		}
 		if wasDefault {
 			cfg.Provider = to
+		}
+		for k, f := range cfg.Facets {
+			if f.Provider == name {
+				f.Provider = to
+				cfg.Facets[k] = f
+			}
 		}
 		msg = "renamed " + name + " to " + to
 	default:
@@ -341,10 +409,15 @@ func KeyNote(k string) string {
 	return "key set"
 }
 
-// Use makes p and model the saved defaults.
+// Use makes p and model the saved defaults: facets.main, and p the active
+// provider. The old top-level model is written too, so an older binary on
+// the same config runs the same model.
 func (c *DunConfig) Use(p ProviderConfig, model string) {
 	c.PutProvider(p)
 	c.Provider, c.URL, c.Key, c.Model = p.Name, p.URL, p.Key, model
+	f := c.Facets[FacetMain]
+	f.Provider, f.Model = p.Name, model
+	c.SetFacet(FacetMain, f)
 }
 
 func HostName(u string) string {
@@ -368,9 +441,12 @@ func DunHome() string {
 func ConfigPath() string { return filepath.Join(DunHome(), "config.json") }
 
 // LoadConfig reads the saved config; a missing/corrupt file yields a zero config.
-func LoadConfig() DunConfig {
+func LoadConfig() DunConfig { return LoadConfigFile(ConfigPath()) }
+
+// LoadConfigFile is LoadConfig for the config at path (dund serve --home).
+func LoadConfigFile(path string) DunConfig {
 	var c DunConfig
-	if b, err := os.ReadFile(ConfigPath()); err == nil {
+	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &c)
 	}
 	return c
