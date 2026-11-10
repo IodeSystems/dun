@@ -53,7 +53,7 @@ func TestVersionSources(t *testing.T) {
 		{AgentKit, "v0.27.0", "build"},
 		{PolyLSP, Devel, "replaced by ../poly-lsp-mcp"},
 		{Shim, "v0.6.1", "build"},
-		{Raglit, "v0.8.1", "go.mod"},
+		{Raglit, "v0.9.0", "go.mod"},
 		{"example.com/other", "", ""},
 	} {
 		if v, from := version(c.path, deps); v != c.want || from != c.from {
@@ -72,7 +72,7 @@ func TestModuleLines(t *testing.T) {
 	want := []string{
 		"agentkit v0.27.0",
 		"openai-claude-api-shim v0.6.0",
-		"raglit v0.8.1 (ragcore)",
+		"raglit v0.9.0 (ragcore)",
 		"poly-lsp-mcp devel (segment) — replaced by /src/poly-lsp-mcp; go.mod pins v0.5.1",
 		"gwag v2.11.0 (gat) — from go.mod: this binary's build info lists no modules",
 	}

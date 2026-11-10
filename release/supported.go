@@ -139,8 +139,11 @@ var Supported = []Tool{
 	// Recommended v0.8.1 (2026-11-09, 5b66995), tarballs in deps.json: fixes
 	// SQLITE_BUSY from a deferred BEGIN (_txlock=immediate), adds ReadBranch
 	// and OpenBranchOn (library only; the CLI is unchanged).
+	// Recommended v0.9.0 (2026-11-10, af18801), tarballs in deps.json: IndexTree
+	// and WatchTree/WatchHub (library only), failed-source backoff, vector reuse
+	// by text hash; the CLI is unchanged. linux_amd64 prints version 0.9.0.
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.8.1"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.9.0"},
 }
 
 // Tool is one Supported entry.
