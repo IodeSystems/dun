@@ -12,6 +12,12 @@ own tools into one agent working inside an isolated workspace:
 - **[raglit](https://github.com/iodesystems/raglit)** — search your docs/code +
   proactive suggestions.
 
+Get it dun. Rip and tear until it is dun. dun is for long jobs: it plans,
+delegates, manages its own context and keeps going until the work is done.
+It works with any OpenAI-compatible model, hosted or local, and is tuned for
+cheap models and modest hardware: reliability, not peak capability. Evidence
+and its limits (Terminal-Bench 2.1): https://dun.iodesystems.com/
+
 ## MCP servers
 
 dun knows three tool servers, expected on `PATH`: `poly-lsp` (poly-lsp-mcp), `shell`
@@ -30,6 +36,19 @@ should still get a working dun. Turn them on per session, or once for good:
 | `/rag auto` · `/lsp auto` | on for this project, every session (= `on --project`) |
 | `/rag manual` · `/lsp manual` | off for this project (= `off --project`); it stops now |
 | `/rag login` · `/rag logout` | a raglit with keys: mint dun's own raglit token, or revoke it |
+
+**poly-lsp refuses a root that is too big.** Before poly-lsp starts, dun counts
+the repos under the root (depth 3) and its files. With 3 or more repos, or over
+50,000 files, poly-lsp starts on an empty placeholder root and indexes nothing:
+pick one repo (a `node_*` call naming a path in it restarts poly-lsp there).
+`/lsp index-anyway on` lifts the guard for the project; only you set it, no tool
+or model can. dun never raises poly-lsp's index budget on its own. The same
+guard keeps dund's code index and the raglit workspace ingest off such a root.
+poly-lsp-mcp v0.5.1 bounds its daemon by default (child count, RSS, idle stop),
+so dun no longer passes `lsp_max_rss_mb` or `lsp_idle_stop`; a config that still
+has them loads and ignores them. `dun doctor` lists each running poly-lsp root
+with its child LSPs, their RSS and indexed files. Detail:
+`docs/mcp-and-tools.md`, "poly-lsp guards".
 
 **Every server has three switches** — global (`$DUN_HOME/mcp.json`, every
 workspace), project (`$DUN_HOME/projects/<id>/dun.local.json`) and session
@@ -138,6 +157,13 @@ jpeg, gif or webp to a one-shot task: `dun --media shot.png "what is wrong here"
 never a silent absence. A server that fails to start is reported and skipped —
 it costs you that family, not your session.
 
+**User rules.** In every session dun reads your own rules files before the
+project's: `~/AGENTS.md`, `~/CLAUDE.md` and `~/.claude/CLAUDE.md` (the same
+bytes count once), within their own size budget, so the project's rules refine
+them. `/rules` lists each file and whether it was read. `DUN_USER_RULES=0`
+leaves them out (the Harbor adapter's default, for repeatable runs). See
+`docs/decisions.md`, "User rules files".
+
 **dun writes nothing into the repos it works on** — no `.dun/`, no
 `.gitignore` entry to ask of anyone. What it keeps per project lives in
 `$DUN_HOME/projects/<id>/` (default `~/.dun`):
@@ -196,6 +222,10 @@ make install   # builds the stamped binary into ~/.local/bin/dun (BINDIR=… to 
 # mcpshell (the eval tool) is looked for on PATH, then beside dun; without it dun
 # works with one tool less. `dun doctor --fix` installs it (go install, needs Go).
 # poly-lsp-mcp and raglit only if you use /lsp, /rag
+# `dun doctor` lists what is missing or behind; `/upgrade` compares dund and
+# each tool with the version this dun pins.
+# `/upgrade --channel=release|source` switches a source build to signed releases
+# (release to source prints the `make install` hint).
 
 dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
               # URL, bearer optional) and pick a model. In the TUI, web or
@@ -423,7 +453,10 @@ round-trip whose only output is "ok, noted" is not worth buying.
 
 **Human-in-the-loop:** the agent can call `ask_user{question, options}` when a
 decision is yours — the turn pauses, you're asked (a picker in the TUI), and it
-resumes with your answer. **Proactive docs:** relevant docs are pushed as 🔔
+resumes with your answer. The last row of the picker, `› type an answer…`,
+takes your own words in place: any printable key types there (space toggles on
+a multi-select option), and ctrl+d on an option adds a detail to it. An ask
+that must be one of its options has no text row. **Proactive docs:** relevant docs are pushed as 🔔
 notifications as the conversation moves (raglit's index watched via agentkit's
 FinderPreparer). **Background work:** an `exec` that is still running after 30s hands itself over
 to a background job (the full test suite, a long build); when it finishes the
@@ -437,7 +470,9 @@ nothing until it exits unless asked to. You stop one with `/jobs kill <n>` (bare
 in the activity pane. An interrupt does not stop the turn's jobs; it lists the
 ones still running, with the kill command.
 
-**Sub-agents:** `agent{node}` spawns a child agent on a plan node to spend ITS
+**Sub-agents:** a child starts only on a plan node (`docs/taskplan.md`): `agent`
+takes no `prompt`, and a call with no node, or a done or dropped one, is refused
+with nothing started. `agent{node}` spawns a child agent on a plan node to spend ITS
 context instead of yours — read a huge log, fetch and digest a page, survey how something is used
 — and hand back the conclusion. There is no free prompt: the node's title,
 details and done_when are the child's brief, and it publishes its answer onto
