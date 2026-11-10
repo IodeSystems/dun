@@ -630,7 +630,12 @@ func planAgentNum(owner string) (int, bool) {
 	return k, err == nil && k > 0
 }
 
-// planCanAssign says why node id cannot go to a child, or nil.
+// planFix is how to start a child when a call named no node it can have.
+const planFix = `Add a node with plan({action:"add", title, details, done_when}), then call agent({node:"<id>"}).`
+
+// planCanAssign says why node id cannot go to a child, or nil. One node, one
+// child: a node a child owns is refused until that child publishes it or is
+// dismissed. A finished node is checked first: it keeps who did it.
 func (h *Harness) planCanAssign(id string) error {
 	if h.isChild() {
 		return fmt.Errorf("a sub-agent has no plan of its own; only the main agent gives nodes to children")
@@ -639,8 +644,16 @@ func (h *Harness) planCanAssign(id string) error {
 	n := g.Get(id)
 	switch {
 	case n == nil:
-		return fmt.Errorf("no plan node %s", id)
+		return fmt.Errorf("no plan node %s. %s", id, planFix)
+	case !planOpen(n):
+		return fmt.Errorf("node %s is %s. %s", id, n.Status, planFix)
 	case n.Owner != "":
+		if k, ok := planAgentNum(n.Owner); ok {
+			if sa := h.agentByID(k); sa != nil && !sa.isDismissed() {
+				return fmt.Errorf("node %s already has a child, agent #%d; one child per node. Act on it with agent({id:%d}), "+
+					"or add another node with plan", id, k, k)
+			}
+		}
 		return fmt.Errorf("node %s already belongs to %s", id, n.Owner)
 	case n.Status != taskgraph.Todo:
 		return fmt.Errorf("node %s is %s; only a todo node can be given", id, n.Status)
@@ -820,7 +833,7 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 	}
 	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has the node).", who, strings.Join(published, ", "))
 	if len(ready) > 0 {
-		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (agent({id:N, node:…})), a new one (agent({prompt:…, node:…})), or do them."
+		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (agent({id:N, node:…})), a new one (agent({node:…})), or do them."
 	}
 	h.planTell(cs, who, "")
 	h.Notify(msg)

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/agentkit/taskgraph"
 
 	filetools "github.com/iodesystems/agentkit/files"
 )
@@ -110,7 +111,9 @@ type wholeRoom struct {
 // otherwise, and its own window is not known until it starts.
 func (h *Harness) wholeRoom() wholeRoom {
 	b := h.Window()
-	r := wholeRoom{known: b.Known(), agent: h.hasTool("agent")}
+	// A child starts only on a plan node (USER 2026-11-10), so delegating
+	// needs both tools.
+	r := wholeRoom{known: b.Known(), agent: h.hasTool("agent") && h.hasTool(taskgraph.ToolName)}
 	if !r.known {
 		return r
 	}
@@ -188,7 +191,7 @@ func wholeVerdict(path string, n int, r wholeRoom) string {
 	}
 	if r.agent {
 		if n <= r.empty {
-			line(`agent({prompt: "read %s and report …"}): a child spends its own context and returns the findings.`, path)
+			line(`Add a plan node "read %s and report …", then agent({node: "<id>"}): a child spends its own context and returns the findings.`, path)
 		} else {
 			line("It is larger than a child's whole window: narrow it.")
 		}

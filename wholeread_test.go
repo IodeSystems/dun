@@ -98,7 +98,7 @@ func TestWholeRead_BlowsContext(t *testing.T) {
 	writeLines(t, filepath.Join(ws, "big.txt"), 4000, 65) // ~304KB, ~76k tokens of ~65k free
 	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt", "whole": true})
 	for _, want := range []string{"ERROR: big.txt is ", " are free. Ways out:", "1. Recap what is settled to free at least ",
-		`2. agent({prompt: "read big.txt and report …"})`, "3. Grep it first, or read a range."} {
+		`2. Add a plan node "read big.txt and report …", then agent({node: "<id>"}): a child spends its own context`, "3. Grep it first, or read a range."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("refusal lacks %q:\n%s", want, out)
 		}
@@ -118,7 +118,7 @@ func TestWholeRead_RefusalVariants(t *testing.T) {
 	}
 	// With the agent tool.
 	out = wholeVerdict("x.log", 80000, wholeRoom{known: true, free: 65000, inUse: 100000, empty: 165000, agent: true})
-	if !strings.Contains(out, `2. agent({prompt: "read x.log and report …"})`) || !strings.Contains(out, "3. Grep") {
+	if !strings.Contains(out, `2. Add a plan node "read x.log and report …", then agent({node: "<id>"})`) || !strings.Contains(out, "3. Grep") {
 		t.Errorf("agent tool:\n%s", out)
 	}
 	// Larger than a child's window: no recap (it cannot free enough), no
