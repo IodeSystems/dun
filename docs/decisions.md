@@ -664,6 +664,25 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   (sender, target). The engine unsets `DUN_DUND` at start so a dun run inside
   exec does not inherit the link. Children get no peer tools.
 
+## Release updates
+
+- **A source build moves to releases only when asked (Carl, 2026-11-10;
+  reverses item 47's "dev/source builds have no download paths at all",
+  `git show cb0e5bd:plan/plan.md`).** The manifest URL is in every build
+  (`release/key.go`, beside the key that was already there), but a source
+  build reads it only on an explicit `/upgrade --channel=release`; it never
+  self-updates from releases otherwise. The channel stays a property of the
+  binary, not a config key: the installed release identifies itself, so
+  plain `/upgrade` follows releases afterwards. The explicit switch may
+  install an older version than the running one (a source build is usually
+  ahead of the last tag) and shows both; the manifest replay check stays,
+  and plain `/upgrade` still refuses a downgrade. The launcher's binary is
+  not overwritten (the launcher would rebuild it from source on the next
+  start); the release goes to install.sh's `~/.local/bin/dun`, and any `dun`
+  that comes first on PATH is named, never deleted. Release → source is
+  `make install` in the checkout: dun downloads and builds nothing for it.
+  Details: `sessions-and-dund.md`, Release and source channels.
+
 ## Sessions, supervision and diagnosis
 
 - **One representation, not two.** The agentkit entry list is both the model's

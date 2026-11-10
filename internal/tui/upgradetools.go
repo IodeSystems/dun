@@ -88,6 +88,9 @@ func toolsCmd(upgrade bool) tea.Cmd {
 
 // upgradeSlash is /upgrade.
 func upgradeSlash(m *tuiModel, args []string) tea.Cmd {
+	if ch, ok := channelArg(args); ok {
+		return channelSlash(m, ch)
+	}
 	if len(args) > 0 && (args[0] == "off" || args[0] == "on") {
 		line, err := upgradeSwitch(args[0] == "on")
 		if err != nil {

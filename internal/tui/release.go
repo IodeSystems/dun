@@ -105,7 +105,7 @@ func upgradeSwitch(on bool) (string, error) {
 		line = "updates on — dun checks for a new release once a day · /upgrade off to stop"
 	}
 	if !buildinfo.IsRelease() {
-		line += " (this dun is " + buildinfo.SelfOrigin().String() + ": it does not update from releases)"
+		line += " (this dun is " + buildinfo.SelfOrigin().String() + ": it does not update from releases; /upgrade --channel=release switches it to them)"
 	}
 	return line, nil
 }

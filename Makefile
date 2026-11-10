@@ -14,7 +14,9 @@
 # `make release` builds the release builds (-tags release, -X main.channel=
 # release): they carry the manifest URL and the minisign key, install tools
 # from the pinned release/deps.json, and update from signed releases. See
-# the release target below and plan item 47.
+# the release target below and plan item 47. Every build carries the
+# manifest URL; a source build reads it only on /upgrade --channel=release,
+# which installs the newest release over it (docs/decisions.md).
 
 SRCDIR  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 VERSION := $(shell git -C $(SRCDIR) describe --tags --always --dirty 2>/dev/null || echo dev)
