@@ -161,9 +161,9 @@ carries the caveat and the invitation** (`notify.go`, group memory): a note
   list reaches every turn through the system prompt, so a wrong model-inferred
   entry ("user prefers X") would steer every session and could override the
   current request. Standing preferences belong in a user-level file the user
-  edits by hand (`~/.dun/AGENTS.md`, loaded after the workspace's root
-  AGENTS.md and labelled as defaults the request overrides); that file is not
-  built. A "remember I want..." goes to a private note and the reply tells the
+  edits by hand: since 2026-11-10 that is `~/AGENTS.md`, `~/CLAUDE.md` or
+  `~/.claude/CLAUDE.md`, read before the project's rules (`decisions.md`,
+  "User rules files"); the `~/.dun/AGENTS.md` once planned here is not built. A "remember I want..." goes to a private note and the reply tells the
   user to move it if it should apply every turn.
 
 ## Sharing (designed with raglit, not built in dun)

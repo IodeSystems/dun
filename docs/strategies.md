@@ -18,8 +18,8 @@ user-authored kind is called **constraint**, not rule.
 | strategy | an approach that worked and will work again | the model, `/memories add`; the learning phase, as a candidate |
 | constraint | a rule the user set for how to work | the user (`/memories add`), or the model when the user states it |
 
-**Not the rules files.** dun's rules feature (`rules.go`: the workspace's
-AGENTS.md and CLAUDE.md and their `@imports`, `/rules`) is unchanged and
+**Not the rules files.** dun's rules feature (`rules.go`: the user's and the
+workspace's AGENTS.md and CLAUDE.md and their `@imports`, `/rules`) is unchanged and
 separate. A rules file is a whole document the user maintains in the
 repo; a constraint is one short named item in dun's own store. The name
 "rule" was not used for the new kind because it clashes with those files.
