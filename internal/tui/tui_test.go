@@ -267,42 +267,36 @@ func TestTUI_FocusToggleAndSelection(t *testing.T) {
 	}
 }
 
-// Typing on the custom row answers straight away — the row is a text field, and
+// Typing on the text row answers straight away — the row is a text field, and
 // having to press enter to wake it up is the bug this covers. Note `n`, which
 // starts a detail on an option row, has to type an "n" here instead.
 func TestTUI_AskCustomRowTypesWithoutEnter(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	m = key(m, kDown)
-	m = key(m, kDown) // past B, onto the custom row
-	if m.askSel != len(m.askOptions) {
-		t.Fatalf("expected the custom row highlighted, got sel=%d of %d options", m.askSel, len(m.askOptions))
+	m = key(m, kDown) // past B, onto the text row
+	if m.askSel != m.askTextRow() || !m.onAskText() {
+		t.Fatalf("expected the text row highlighted, got sel=%d of %d options", m.askSel, len(m.askOptions))
 	}
-	if m.customAnswer {
-		t.Fatal("highlighting the row must not start capturing on its own")
-	}
-	// The affordance is on the row, where someone is looking when they wonder
-	// whether enter is required.
-	if !strings.Contains(m.askPanel(), "just type") {
-		t.Errorf("highlighted custom row should say it takes typing:\n%s", m.askPanel())
+	// The row says what it is for, in the list itself.
+	if !strings.Contains(stripANSI(m.askPanel()), "type an answer…") {
+		t.Errorf("the text row should be in the list:\n%s", m.askPanel())
 	}
 
 	m = key(m, kN) // a plain letter — and the one that means "add a detail" elsewhere
-	if !m.customAnswer {
-		t.Fatal("typing on the custom row should start the free-text answer")
-	}
 	if m.noting {
-		t.Fatal("`n` on the custom row types an n; it must not start a detail")
+		t.Fatal("`n` on the text row types an n; it must not start a detail")
 	}
-	if m.input.Value() != "n" {
-		t.Fatalf("the keystroke that opened the field must also type into it, got %q", m.input.Value())
-	}
-	if strings.Contains(m.askPanel(), "just type") {
-		t.Errorf("the hint should go once the field is capturing:\n%s", m.askPanel())
+	if m.askField.Value() != "n" {
+		t.Fatalf("the keystroke must type into the row, got %q", m.askField.Value())
 	}
 	m = typeStr(m, "ope")
-	if m.input.Value() != "nope" {
-		t.Fatalf("typing should continue into the field, got %q", m.input.Value())
+	if m.askField.Value() != "nope" {
+		t.Fatalf("typing should continue into the row, got %q", m.askField.Value())
+	}
+	// In the list, not in a field below it: the row holds the words.
+	if p := strings.Split(stripANSI(m.askPanel()), "\n"); len(p) != 3 || !strings.Contains(p[2], "› nope") {
+		t.Errorf("the words should be on the text row, the panel three rows:\n%s", m.askPanel())
 	}
 	m = key(m, kEnter)
 	if m.asking {
@@ -313,19 +307,20 @@ func TestTUI_AskCustomRowTypesWithoutEnter(t *testing.T) {
 	}
 }
 
-// Arrow keys still navigate: the custom row captures TEXT, not the UI keys, so
+// Arrow keys still navigate: the text row takes TEXT, not the UI keys, so
 // a user can arrow onto it and back off without getting stuck in a field.
 func TestTUI_AskCustomRowStillNavigable(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	m = key(m, kDown)
 	m = key(m, kDown)
-	if m.askSel != len(m.askOptions) || m.customAnswer {
-		t.Fatalf("setup: sel=%d capturing=%v", m.askSel, m.customAnswer)
+	m = typeStr(m, "half")
+	if !m.onAskText() {
+		t.Fatalf("setup: sel=%d", m.askSel)
 	}
 	m = key(m, kUp)
-	if m.askSel != 1 || m.customAnswer {
-		t.Fatalf("↑ off the custom row should just move: sel=%d capturing=%v", m.askSel, m.customAnswer)
+	if m.askSel != 1 || m.onAskText() || m.askField.Value() != "half" {
+		t.Fatalf("↑ off the text row should just move and keep the words: sel=%d text=%q", m.askSel, m.askField.Value())
 	}
 }
 
@@ -371,13 +366,13 @@ func TestTUI_AskNoOptionsFreeText(t *testing.T) {
 	if !m.asking || len(m.askOptions) != 0 {
 		t.Fatalf("expected a no-options ask, got opts=%v", m.askOptions)
 	}
-	if !m.customAnswer {
-		t.Fatal("no-options ask should enter free-text mode immediately")
+	if !m.onAskText() {
+		t.Fatal("no-options ask should give the text row the keys immediately")
 	}
 	// Type without pressing enter first — this was the bug (inert typing).
 	m = typeStr(m, "blue")
-	if m.input.Value() != "blue" {
-		t.Fatalf("typing should reach the input, got %q", m.input.Value())
+	if m.askField.Value() != "blue" {
+		t.Fatalf("typing should reach the text row, got %q", m.askField.Value())
 	}
 	m = key(m, kEnter)
 	if m.asking {
@@ -422,21 +417,21 @@ func TestTUI_AskMultiSelect(t *testing.T) {
 	}
 }
 
-// The custom/chat row lets you type a free-text answer.
+// Enter on an empty text row sends nothing; the words typed there are sent.
 func TestTUI_AskPickerCustomAnswer(t *testing.T) {
 	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
 	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	m = key(m, kDown)
-	m = key(m, kDown) // move onto the custom row (index == len(options))
+	m = key(m, kDown) // move onto the text row (index == len(options))
 	if m.askSel != 2 {
-		t.Fatalf("expected custom row selected, got %d", m.askSel)
+		t.Fatalf("expected text row selected, got %d", m.askSel)
 	}
-	m = key(m, kEnter) // open free-text entry
-	if !m.customAnswer {
-		t.Fatal("enter on the custom row should open free-text entry")
+	m = key(m, kEnter)
+	if !m.asking {
+		t.Fatal("enter on an empty text row sent an answer")
 	}
-	m.input.SetValue("let's chat about X")
+	m = typeStr(m, "let's chat about X")
 	m = key(m, kEnter)
 	if m.asking {
 		t.Fatal("sending a custom answer should end asking")

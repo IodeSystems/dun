@@ -451,18 +451,22 @@ func (m tuiModel) drawView() string {
 		} else {
 			status = StDim.Render(m.pg.hint())
 		}
-	case m.asking && len(m.askOptions) == 0:
-		status = stAsk.Render("❓ type your answer · enter send · esc answer later")
 	case m.asking && m.noting:
 		status = stAsk.Render("❓ type a detail · enter keep it · esc back to the options")
-	case m.asking && m.customAnswer && m.askMulti:
-		status = stAsk.Render("❓ type the option · enter keep it, checked · esc back to the options")
-	case m.asking && m.customAnswer:
-		status = stAsk.Render("❓ type your answer · enter send · esc back to the options")
+	case m.asking && m.onAskText() && m.askMulti:
+		status = stAsk.Render("❓ type an option · enter keep it, checked · ✓ done to submit · esc " + m.askEscWord())
+	case m.asking && m.onAskText():
+		status = stAsk.Render("❓ type your answer · enter send · esc " + m.askEscWord())
+	// The text row says "type an answer…" itself, so the option rows' hints
+	// do not: at 80 columns the line has no room for it and esc.
+	case m.asking && m.askMulti && m.askNoCustom:
+		status = stAsk.Render("❓ ↑/↓ move · enter toggle · ✓ done to submit · esc " + m.askEscWord())
 	case m.asking && m.askMulti:
-		status = stAsk.Render("❓ ↑/↓ move · enter toggle · tab/→ edit · ✓ done to submit · esc answer later")
+		status = stAsk.Render("❓ ↑/↓ move · enter toggle · tab/→ edit · ✓ done to submit · esc " + m.askEscWord())
+	case m.asking && m.askNoCustom:
+		status = stAsk.Render("❓ ↑/↓ choose · enter select · esc " + m.askEscWord())
 	case m.asking:
-		status = stAsk.Render("❓ ↑/↓ choose · enter select · tab/→ edit · n add detail · esc answer later")
+		status = stAsk.Render("❓ ↑/↓ choose · enter select · tab/→ edit · n add detail · esc " + m.askEscWord())
 	case m.searching:
 		status = m.search.View() + StDim.Render(fmt.Sprintf("  (%d matches · enter to navigate)", len(m.matches)))
 	case m.searchActive:
@@ -610,12 +614,13 @@ func (m tuiModel) lowerView() string {
 	return m.input.View()
 }
 
-// askPanel renders the answer options (highlighted selection), a trailing
-// custom/chat row, any attached detail, and the text field when capturing one.
+// askPanel renders the answer options (highlighted selection), the text row
+// (an answer in the person's own words, typed in place), in multi mode the
+// done row, any attached detail, and the detail's field while capturing one.
 func (m tuiModel) askPanel() string {
-	custom := len(m.askOptions)
-	rows := make([]string, 0, custom+2)
-	sel := func(i int) bool { return m.askSel == i && !m.noting && !m.customAnswer }
+	text := m.askTextRow()
+	rows := make([]string, 0, len(m.askOptions)+3)
+	sel := func(i int) bool { return m.askSel == i && !m.noting }
 	gut := func(text string, on bool) string {
 		if on {
 			return addGutter(text, "▎ ", stSel)
@@ -636,27 +641,33 @@ func (m tuiModel) askPanel() string {
 		}
 		rows = append(rows, gut(label, sel(i)))
 	}
-	// The affordance belongs on the row itself: highlighted and not yet
-	// capturing is exactly the moment someone wonders whether to press enter.
-	customLabel := "✎ custom answer / chat…"
-	if sel(custom) && !m.customAnswer {
-		customLabel += "   (just type)"
+	done := len(m.askOptions)
+	if text >= 0 {
+		// The caret shows only where the keys go; the row looks the same
+		// highlighted or not, apart from the gutter.
+		f := m.askField
+		f.focused = sel(text)
+		rows = append(rows, gut(f.View(), sel(text)))
+		done = text + 1
 	}
-	rows = append(rows, gut(StDim.Render(customLabel), sel(custom) || m.customAnswer))
-	if m.askMulti { // a submit row so enter can toggle options without needing space
-		n := 0
-		for _, on := range m.askChecked {
-			if on {
-				n++
-			}
-		}
-		rows = append(rows, gut(stAsk.Render(fmt.Sprintf("✓ done — submit %d selected", n)), sel(custom+1)))
+	if m.askMulti { // a submit row so enter can toggle options
+		n := len(m.askPicked())
+		rows = append(rows, gut(stAsk.Render(fmt.Sprintf("✓ done — submit %d selected", n)), sel(done)))
 	}
 	if m.askNote != "" {
 		rows = append(rows, StDim.Render("   detail: "+m.askNote))
 	}
-	if m.noting || m.customAnswer {
+	if m.noting {
 		rows = append(rows, m.input.View())
 	}
 	return strings.Join(rows, "\n")
+}
+
+// askEscWord is what esc does next in the picker: clear typed words first,
+// then leave the question for later.
+func (m tuiModel) askEscWord() string {
+	if m.askField.Value() != "" {
+		return "clear"
+	}
+	return "answer later"
 }

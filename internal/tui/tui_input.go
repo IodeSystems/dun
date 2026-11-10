@@ -33,6 +33,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp.Width = max(1, msg.Width)
 		}
 		m.input.width = msg.Width - 2
+		m.askField.width = askFieldWidth(msg.Width)
 		m.search.SetWidth(msg.Width - 4)
 		// Only when the WIDTH actually changed: a renderer is word-wrap state
 		// and nothing else, and rebuilding one is not free. A height-only
@@ -932,19 +933,24 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateAsking drives the answer picker: ↑/↓ highlight an option (the last row
-// is a custom/chat free-text answer), enter selects, `n` attaches a detail to
-// the highlighted option, tab or → opens the option as a custom answer to edit.
-// While typing a detail or a custom answer, keys go to the input; esc backs
-// out of that sub-mode.
+// updateAsking drives the answer picker: ↑/↓ highlight a row, enter selects,
+// `n` attaches a detail to the highlighted option, tab or → opens the option
+// in the text row to edit. The last row (askTextRow) is a text field in the
+// list itself: highlighted, it has the keys; typing on any other row moves
+// there and types (USER 2026-11-10). esc backs out of a detail, then clears
+// the typed text, then parks the question.
 func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	custom := len(m.askOptions) // index of the trailing "custom / chat" row
-	// In multi mode a "✓ done" row follows the custom row (submits the checked
-	// set) — so options toggle on enter without stealing space (a typed char).
-	maxRow := custom
-	if m.askMulti {
-		maxRow = custom + 1
+	text := m.askTextRow()
+	// In multi mode a "✓ done" row comes last (submits the checked set), so
+	// options toggle on enter as well as space.
+	maxRow := len(m.askOptions) - 1
+	if text >= 0 {
+		maxRow = text
 	}
+	if m.askMulti {
+		maxRow++
+	}
+	onText := m.onAskText()
 	switch msg.String() {
 	case "ctrl+c":
 		if m.disableExit {
@@ -953,12 +959,21 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true // deliberate exit: do not respawn the engine
 		return m, tea.Quit
 	case "esc":
-		// One level out: from a detail or a custom answer back to the options,
-		// and from the options out of the question — which stays open.
-		if m.noting || (m.customAnswer && len(m.askOptions) > 0) {
-			m.noting, m.customAnswer = false, false
+		// One level out: a detail back to the options; typed text cleared
+		// (back to the option it was opened from); then out of the question,
+		// which stays open.
+		if m.noting {
+			m.noting = false
 			m.input.Reset()
 			m.input.Blur()
+			m.refresh()
+			return m, nil
+		}
+		if m.askField.Value() != "" {
+			if m.askEdit >= 0 && m.askEdit < len(m.askOptions) {
+				m.askSel = m.askEdit
+			}
+			m.clearAskField()
 			m.refresh()
 			return m, nil
 		}
@@ -972,52 +987,25 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.input.Blur()
 			m.refresh()
 			return m, nil
-		case m.customAnswer && m.askMulti:
-			// Multi: the field edits an option or adds one; enter keeps it,
-			// checked, and goes back to the list. Done sends the checked set.
-			v := strings.TrimSpace(m.input.Value())
-			if v != "" {
-				if m.askEdit >= 0 && m.askEdit < len(m.askOptions) {
-					m.askOptions[m.askEdit], m.askChecked[m.askEdit] = v, true
-					m.askSel = m.askEdit
-				} else {
-					m.askOptions = append(m.askOptions, v)
-					m.askChecked = append(m.askChecked, true)
-					m.askSel = len(m.askOptions) - 1
-				}
-			}
-			m.customAnswer = false
-			m.input.Reset()
-			m.input.Blur()
+		case onText && m.askMulti:
+			// Multi: the words become an option, checked (or replace the one
+			// they were opened from), and the row empties for another. Done
+			// sends the checked set.
+			m.keepAskField()
 			m.refresh()
 			return m, nil
-		case m.customAnswer:
-			v := strings.TrimSpace(m.input.Value())
+		case onText:
+			v := strings.TrimSpace(m.askField.Value())
 			if v == "" {
 				return m, nil
 			}
 			return m.sendAnswer(v), nil
-		case m.askMulti && m.askSel < custom: // toggle the highlighted option
+		case m.askMulti && m.askSel < len(m.askOptions): // toggle the highlighted option
 			m.askChecked[m.askSel] = !m.askChecked[m.askSel]
 			m.refresh()
 			return m, nil
-		case m.askSel == custom: // open free-text / chat entry
-			m.customAnswer, m.askEdit = true, custom
-			m.input.Reset()
-			m.input.placeholder = "type your answer, or chat…"
-			if m.askMulti {
-				m.input.placeholder = "another option: enter adds it, checked"
-			}
-			m.input.Focus()
-			m.refresh()
-			return m, textinput.Blink
 		case m.askMulti: // the "✓ done" row: submit the checked set
-			var picked []string
-			for i, on := range m.askChecked {
-				if on {
-					picked = append(picked, m.askOptions[i])
-				}
-			}
+			picked := m.askPicked()
 			if len(picked) == 0 {
 				return m, nil // nothing checked yet
 			}
@@ -1032,16 +1020,19 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.scrollToLastUser()
 		return m, nil
 	// ↑/↓ follow the same rule here as everywhere else: move within the thing
-	// you are in — the option list, or the caret when typing a detail/custom
-	// answer — and at its edge fall through and scroll the conversation. A
-	// question you cannot read the backlog behind is a question you cannot
-	// answer, and the options are exactly when you want to look back.
+	// you are in — the list, the text row's caret, or the detail's — and at
+	// its edge fall through and scroll the conversation. A question you
+	// cannot read the backlog behind is a question you cannot answer, and the
+	// options are exactly when you want to look back.
 	case "up":
-		if m.noting || m.customAnswer {
-			if !m.input.AtFirstLine() {
-				break // let the caret move (handled below)
-			}
-		} else if m.askSel > 0 {
+		switch {
+		case m.noting && !m.input.AtFirstLine():
+			m.input = m.input.HandleKey(msg)
+			return m, nil
+		case onText && !m.askField.AtFirstLine():
+			m.askField = m.askField.HandleKey(msg)
+			return m, nil
+		case !m.noting && m.askSel > 0:
 			m.askSel--
 			m.refresh()
 			return m, nil
@@ -1050,11 +1041,14 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.updateScrollPin()
 		return m, nil
 	case "down":
-		if m.noting || m.customAnswer {
-			if !m.input.AtLastLine() {
-				break // let the caret move (handled below)
-			}
-		} else if m.askSel < maxRow {
+		switch {
+		case m.noting && !m.input.AtLastLine():
+			m.input = m.input.HandleKey(msg)
+			return m, nil
+		case onText && !m.askField.AtLastLine():
+			m.askField = m.askField.HandleKey(msg)
+			return m, nil
+		case !m.noting && m.askSel < maxRow:
 			m.askSel++
 			m.refresh()
 			return m, nil
@@ -1063,30 +1057,24 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.updateScrollPin()
 		return m, nil
 	case "tab", "right":
-		// Edit the highlighted answer before sending it: the custom field,
-		// holding what enter would send from here. Esc goes back to the
-		// options; nothing is sent.
-		if !m.noting && !m.customAnswer && m.askSel < custom {
-			m.customAnswer, m.askEdit = true, m.askSel
-			m.input.Reset()
+		// Edit the highlighted answer before sending it: the text row,
+		// holding what enter would send from here (in multi mode, the
+		// option's own text). esc goes back to the option; nothing is sent.
+		if !m.noting && text >= 0 && m.askSel < len(m.askOptions) {
+			v := m.askAnswerAt(m.askSel)
 			if m.askMulti {
-				// Edit this option's own text; enter keeps it, checked.
-				m.input.SetValue(m.askOptions[m.askSel])
-				m.input.CursorEnd()
-				m.input.placeholder = "this option, as you want it"
-				m.input.Focus()
-				m.refresh()
-				return m, textinput.Blink
+				v = m.askOptions[m.askSel] // USER 2026-10-27: edit every option
 			}
-			m.input.SetValue(m.askAnswerAt(m.askSel))
-			m.input.CursorEnd()
-			m.input.placeholder = "type your answer, or chat…"
-			m.input.Focus()
+			m.askField.SetValue(v)
+			m.askField.CursorEnd()
+			m.askEdit, m.askSel = m.askSel, text
 			m.refresh()
-			return m, textinput.Blink
+			return m, nil
 		}
 	case "n":
-		if !m.noting && !m.customAnswer && !m.askMulti && m.askSel < custom {
+		// A hotkey on an option row: it wins over typing there. On the text
+		// row it types an n.
+		if !m.noting && !onText && !m.askMulti && !m.askNoCustom && m.askSel < len(m.askOptions) {
 			m.noting = true
 			m.input.Reset()
 			m.input.placeholder = "add a detail…"
@@ -1094,30 +1082,99 @@ func (m tuiModel) updateAsking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, textinput.Blink
 		}
-	}
-	// The custom row IS a text field, so typing on it answers — no enter first.
-	// A no-options ask already drops straight into text entry
-	// (TestTUI_AskNoOptionsFreeText); this makes the row that offers the
-	// same thing behave the same way, and the key that opened the field is the
-	// key that types into it. Enter still opens it empty, and every other row
-	// keeps its bindings (`n` types an n HERE, but still starts a detail there).
-	if !m.noting && !m.customAnswer && m.askSel == custom && typedText(msg) {
-		m.customAnswer, m.askEdit = true, custom
-		m.input.Reset()
-		m.input.placeholder = "type your answer, or chat…"
-		if m.askMulti {
-			m.input.placeholder = "another option: enter adds it, checked"
+	case "space":
+		// The other hotkey: in multi mode space toggles an option, as enter
+		// does. On the text row it types a space.
+		if !m.noting && !onText && m.askMulti && m.askSel < len(m.askOptions) {
+			m.askChecked[m.askSel] = !m.askChecked[m.askSel]
+			m.refresh()
+			return m, nil
 		}
-		m.input.Focus()
-		m.input = m.input.HandleKey(msg)
-		m.refresh()
-		return m, textinput.Blink
 	}
-	if m.noting || m.customAnswer { // typing into the detail / custom field
+	switch {
+	case m.noting: // typing into the detail
 		m.input = m.input.HandleKey(msg)
-		return m, nil
+	case onText: // typing into the text row
+		m.askField = m.askField.HandleKey(msg)
+	case text >= 0 && typedText(msg):
+		// Typing on an option row is an answer in your own words: the key
+		// moves to the text row and types there.
+		m.askSel = text
+		m.askField = m.askField.HandleKey(msg)
+		m.refresh()
 	}
 	return m, nil
+}
+
+// askTextRow is the text row's index (after the options), or -1 when the
+// answer must be one of the options.
+func (m tuiModel) askTextRow() int {
+	if m.askNoCustom {
+		return -1
+	}
+	return len(m.askOptions)
+}
+
+// onAskText reports whether the text row has the keys.
+func (m tuiModel) onAskText() bool {
+	return m.asking && !m.noting && m.askSel == m.askTextRow()
+}
+
+// askFieldWidth is the text row's width in a terminal w columns wide: the
+// row carries the selection gutter as well as the field's own prompt. 0 (no
+// size yet) is the field's default width.
+func askFieldWidth(w int) int {
+	if w <= 0 {
+		return 0
+	}
+	return max(1, w-4)
+}
+
+// clearAskField empties the text row; what it holds next is new words.
+func (m *tuiModel) clearAskField() {
+	m.askField.Reset()
+	m.askEdit = m.askTextRow()
+}
+
+// keepAskField is enter on the text row in multi mode: the words become an
+// option, checked, or replace the option they were opened from (and the
+// selection goes back to it). Empty words keep nothing.
+func (m *tuiModel) keepAskField() {
+	v := strings.TrimSpace(m.askField.Value())
+	if v == "" {
+		return
+	}
+	if e := m.askEdit; e >= 0 && e < len(m.askOptions) {
+		m.askOptions[e], m.askChecked[e] = v, true
+		m.clearAskField()
+		m.askSel = e
+		return
+	}
+	m.askOptions = append(m.askOptions, v)
+	m.askChecked = append(m.askChecked, true)
+	m.clearAskField()
+	m.askSel = m.askTextRow()
+}
+
+// askPicked is what the done row sends in multi mode: the checked options,
+// and the text row's words as one more entry (or in place of the option they
+// were opened from), so words typed but not yet kept are not lost.
+func (m tuiModel) askPicked() []string {
+	v := strings.TrimSpace(m.askField.Value())
+	edit := m.askEdit >= 0 && m.askEdit < len(m.askOptions)
+	var picked []string
+	for i, opt := range m.askOptions {
+		switch {
+		case edit && i == m.askEdit && v != "":
+			picked = append(picked, v)
+		case i < len(m.askChecked) && m.askChecked[i]:
+			picked = append(picked, opt)
+		}
+	}
+	if v != "" && !edit {
+		picked = append(picked, v)
+	}
+	return picked
 }
 
 // paste routes a bracketed paste to the text field that has the keys, the way
@@ -1140,20 +1197,18 @@ func (m tuiModel) paste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case m.asking:
-		if !m.noting && !m.customAnswer {
-			if m.askSel != len(m.askOptions) {
-				return m, nil
-			}
-			// The custom row is a text field: pasting on it answers, as typing does.
-			m.customAnswer = true
-			m.input.Reset()
-			m.input.placeholder = "type your answer, or chat…"
-			m.input.Focus()
-			cmd = textinput.Blink
+		switch {
+		case m.noting:
+			m.input = m.input.HandlePaste(msg.Content)
+		case m.askTextRow() >= 0:
+			// A paste is typing: it lands in the text row, from any row.
+			m.askSel = m.askTextRow()
+			m.askField = m.askField.HandlePaste(msg.Content)
+		default:
+			return m, nil // only the options can answer
 		}
-		m.input = m.input.HandlePaste(msg.Content)
 		m.refresh()
-		return m, cmd
+		return m, nil
 	case m.mcpForm:
 		return m.typeMCPField(msg)
 	case m.rag != nil:
@@ -1310,6 +1365,7 @@ func (m tuiModel) clearAsk() tuiModel {
 	m.setFocus(focusInput)
 	m.dropAsk()
 	m.askOptions, m.askSel, m.askNote = nil, 0, ""
-	m.askMulti, m.askChecked = false, nil
+	m.askMulti, m.askChecked, m.askNoCustom = false, nil, false
+	m.askField.Reset()
 	return m
 }

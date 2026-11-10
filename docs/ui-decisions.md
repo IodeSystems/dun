@@ -260,8 +260,16 @@ are in `decisions.md`.
   group, SIGKILL after 2 s; Docker uses `docker stop --time 2` on the named
   container. A killed job's completion notice says it was killed, not that it
   failed.
-- **Edit an answer.** Tab or right arrow on an ask option opens the custom
-  field holding what enter would send. `multi` is described to the model as
+- **The own-words answer is a row of the list (USER 2026-11-10).** The last
+  row, `› type an answer…`, is a text field in place: highlighted, it takes
+  the keys; a character typed or pasted on any other row moves there and
+  types. Hotkeys win on option rows: `n` starts a detail (single-select),
+  space toggles (multi-select); on the text row they type. esc clears the
+  words, then parks the question. In multi-select the words are one more
+  checked entry; enter keeps them as an option. An ask with `no_custom`
+  (proto `Ask.NoCustom`) has no text row.
+- **Edit an answer.** Tab or right arrow on an ask option puts what enter
+  would send into the text row. `multi` is described to the model as
   "pick several"; models never set it before the description named the cases.
 - **ctrl+tab types a tab.** Pasted tabs are kept (bracketed paste); a tab in
   the composer is a literal tab.

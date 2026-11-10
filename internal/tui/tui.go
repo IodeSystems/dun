@@ -183,25 +183,31 @@ type tuiModel struct {
 	confirm       confirmState // a pending y/n question (jobkill.go)
 	busyStart     time.Time    // when the current busy turn started
 	asking        bool         // agent is waiting on an ask_user answer
-	askOptions    []string     // the offered options; a trailing "custom" row is implicit
+	askOptions    []string     // the offered options; a trailing text row is implicit (askTextRow)
 	askRec        []string     // the options the model recommends (marked, preselected)
-	askSel        int          // highlighted answer row (== len(askOptions) → the custom row)
+	askSel        int          // highlighted answer row (== askTextRow() → the text row)
 	askNote       string       // optional detail attached to the chosen option ("n")
 	askMulti      bool         // multi-select: space toggles, enter submits the checked set
 	askChecked    []bool       // per-option checked state (multi mode; len == len(askOptions))
-	// askEdit is the option the text field edits in multi mode: an index, or
-	// len(askOptions) for a new one (the custom row); enter keeps it,
-	// checked, instead of sending (USER 2026-10-27).
-	askEdit      int
-	noting       bool           // capturing a detail for the selected option
-	customAnswer bool           // capturing a free-text / chat answer
-	askDraft     multilineInput // the composer as it was when the question took the keys
-	askDraftSet  bool           // askDraft holds a draft to give back (restoreDraft)
-	convoHold    int            // the convo pane keeps at least this many rows (holdConvo)
-	convoHoldW   int            // the pane width convoHold was measured at
-	paneTermH    int            // the terminal height the pane was last fitted at (a resize, not a panel)
-	thinkFull    bool           // ctrl+x t: thoughts are drawn whole, not as their one line
-	holdSkip     bool           // the next refresh replaces the conversation: no contract hold (dropHold)
+	// askEdit is the option the text row was opened from (tab/→): an index, or
+	// askTextRow() for words of the person's own. In multi mode enter keeps
+	// the words, checked, as that option or a new one, instead of sending
+	// (USER 2026-10-27); esc goes back to that option.
+	askEdit int
+	// askField is the text row: an answer in the person's own words, typed in
+	// the option list itself (USER 2026-11-10: no extra step to reach it).
+	// It has the keys whenever the text row is highlighted; it is kept while
+	// the question is parked.
+	askField    multilineInput
+	askNoCustom bool           // the answer must be one of the options: no text row
+	noting      bool           // capturing a detail for the selected option
+	askDraft    multilineInput // the composer as it was when the question took the keys
+	askDraftSet bool           // askDraft holds a draft to give back (restoreDraft)
+	convoHold   int            // the convo pane keeps at least this many rows (holdConvo)
+	convoHoldW  int            // the pane width convoHold was measured at
+	paneTermH   int            // the terminal height the pane was last fitted at (a resize, not a panel)
+	thinkFull   bool           // ctrl+x t: thoughts are drawn whole, not as their one line
+	holdSkip    bool           // the next refresh replaces the conversation: no contract hold (dropHold)
 	// foldedRows is the rows folded away above the view this session
 	// (scrollfold.go): the conversation's height plus it never goes down.
 	foldedRows int
