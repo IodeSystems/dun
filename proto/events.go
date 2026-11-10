@@ -338,6 +338,9 @@ type Ask struct {
 	// RecommendedAll is every option the model recommends: one, or for multi
 	// the ones to check (any number).
 	RecommendedAll []string `json:"recommended_all,omitempty"`
+	// NoCustom: the answer must be one of the options, so a client offers no
+	// field for the person's own words. Ignored when there are no options.
+	NoCustom bool `json:"no_custom,omitempty"`
 }
 
 // Mount asks to mount a host path into the container; answered yes or no.

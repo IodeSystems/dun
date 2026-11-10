@@ -20,7 +20,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `message` | Turn reply finalized | `role`, `content` |
 | `suggestions` | Predicted next messages | `items[]` |
 | `notification` | Proactive notification (RAG, background) | `kind`, `text` |
-| `ask` | Agent waiting on user input | `question`, `options[]`, `multi` |
+| `ask` | Agent waiting on user input | `question`, `options[]`, `multi`, `recommended_all[]`, `no_custom` (answer must be an option) |
 | `queued` | Message buffered mid-turn | `text`, `count` |
 | `usage` | Token accounting | `total`, `active`, `cached`, `processed`, `generated`, `turns` |
 | `done` | Turn completed | `reason` (`interrupted` when the user stopped it) |
