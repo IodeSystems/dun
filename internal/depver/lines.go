@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// ModuleLines are the libraries compiled in, one line each: "raglit v0.8.1
+// ModuleLines are the libraries compiled in, one line each: "raglit v0.9.0
 // (ragcore)", and what is off — a version that is not go.mod's, a directory
 // replace, a version read from go.mod because the build info has none.
 func ModuleLines() []string { return moduleLines(deps()) }

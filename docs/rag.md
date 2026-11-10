@@ -3,7 +3,7 @@
 Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
 3", "Built: slice 5"), and the strategies index (`strategies.md`); the rest
 is a proposal.
-Status note: raglit is at v0.8.1; RagHit carries start_line, end_line, symbol,
+Status note: raglit is at v0.9.0; RagHit carries start_line, end_line, symbol,
 content_id. The code and docs indexes are built by `rag_index` (below, "Built:
 code and docs indexes"), with poly-lsp-mcp's segmenter, pure Go, and sessions
 search them (below, "Built: session code and doc search"). A git worktree's
@@ -176,7 +176,7 @@ change re-queues the affected stages.
 
 ## Built: slice 2
 
-dund hosts raglit v0.8.1 (`internal/ragd`). Sessions use it for memory
+dund hosts raglit v0.9.0 (`internal/ragd`). Sessions use it for memory
 notes (slice 5); `dun dund rag` is the manual client.
 
 **Layout**, under `$DUN_HOME/dund/rag/`:
@@ -275,7 +275,7 @@ for the job's commit; a re-ingest leaves them alone. `rag_tag` replaces a
 document's tags with no ingest (no tags clears them). `rag_sync` sets the
 tags of every file it is given, current or not.
 
-**raglit calls** (raglit v0.8.1): every function and method dund calls is
+**raglit calls** (raglit v0.9.0): every function and method dund calls is
 pinned in raglit's `api_test.go`, except `Models.Embedder` and the
 `Embedder` fields `Client` and `Model` (the embed paths above), and the file
 name `branch.json` (read through `ReadBranch`, which is pinned). A file is ingested as a
