@@ -66,11 +66,9 @@ type Server struct {
 	IndexBudget string
 	// IndexAnyway indexes a root that is not a project (ServerSpec.IndexAnyway).
 	IndexAnyway bool
-	// LSPRoots, LSPMaxRSSMB and LSPIdleStop override lspSafeArgs
-	// (ServerSpec.LSPRoots and the rest); empty or nil keep dun's default.
-	LSPRoots    string
-	LSPMaxRSSMB *int
-	LSPIdleStop string
+	// LSPRoots overrides lspSafeArgs (ServerSpec.LSPRoots); empty keeps
+	// dun's default.
+	LSPRoots string
 	// Wake: its messages may start a turn on an idle session (ServerSpec.Wake).
 	Wake bool
 }

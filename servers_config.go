@@ -163,14 +163,11 @@ type ServerSpec struct {
 	// /lsp index-anyway on (indexanyway.go): no tool and no answer to a
 	// question sets it.
 	IndexAnyway bool `json:"index_anyway,omitempty"`
-	// LSPRoots, LSPMaxRSSMB and LSPIdleStop replace dun's safe defaults for
-	// a poly-lsp-mcp's child LSPs (lspSafeArgs: --lsp-roots single by
-	// default; the other two are passed only when set, and not with --daemon),
-	// as those flags take them ("auto", 0 = no limit, "0" = never). Set by the person in a config
-	// file; dun writes none of them.
-	LSPRoots    string `json:"lsp_roots,omitempty"`
-	LSPMaxRSSMB *int   `json:"lsp_max_rss_mb,omitempty"`
-	LSPIdleStop string `json:"lsp_idle_stop,omitempty"`
+	// LSPRoots replaces dun's safe default for a poly-lsp-mcp's child LSPs
+	// (lspSafeArgs: --lsp-roots single), as that flag takes it ("auto").
+	// Set by the person in a config file; dun writes none. The removed
+	// lsp_max_rss_mb and lsp_idle_stop keys are ignored on load.
+	LSPRoots string `json:"lsp_roots,omitempty"`
 	// Wake lets the server's messages start a turn on an idle session
 	// (serverwake.go). Each wake is a turn someone pays for, so it is off
 	// unless set here.
@@ -653,12 +650,6 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 	}
 	if next.LSPRoots != "" {
 		out.LSPRoots = next.LSPRoots
-	}
-	if next.LSPMaxRSSMB != nil {
-		out.LSPMaxRSSMB = next.LSPMaxRSSMB
-	}
-	if next.LSPIdleStop != "" {
-		out.LSPIdleStop = next.LSPIdleStop
 	}
 	if next.Wake {
 		out.Wake = true

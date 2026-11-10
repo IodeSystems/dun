@@ -192,10 +192,8 @@ type IndexSupport struct {
 	Daemon   bool // --daemon that keeps the file-access hook (daemonMarker)
 	AnyRoot  bool // its daemon admits a root outside --allow (anyRootMarker)
 	LSP      bool // --lsp-off / --lsp-on: the /lsp language switches (v0.4.0)
-	// The child-LSP lifecycle flags dun passes safe values to (lspSafeArgs).
-	Roots    bool // --lsp-roots
-	MaxRSS   bool // --lsp-max-rss-mb
-	IdleStop bool // --lsp-idle-stop
+	// The child-LSP flag dun passes a safe value to (lspSafeArgs).
+	Roots bool // --lsp-roots
 }
 
 // daemonMarker is in the --hook help of a poly-lsp-mcp whose --daemon proxy
@@ -255,8 +253,6 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 	sup.AnyRoot = strings.Contains(help, anyRootMarker)
 	sup.LSP = lspFlagsKnown(help)
 	sup.Roots = strings.Contains(help, "--lsp-roots ")
-	sup.MaxRSS = strings.Contains(help, "--lsp-max-rss-mb")
-	sup.IdleStop = strings.Contains(help, "--lsp-idle-stop")
 	sup.Protocol = sup.Budget || strings.Contains(help, "--index-max-files")
 	indexProbes.Store(key, sup)
 	return sup, resolved, nil

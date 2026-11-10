@@ -520,7 +520,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		args = append(slices.Clone(args), "--daemon")
 	}
 	// Safe child-LSP limits, to a build that takes them (lspSafeArgs).
-	if safe := lspSafeArgs(s, sup, slices.Contains(args, "--daemon")); len(safe) > 0 {
+	if safe := lspSafeArgs(s, sup); len(safe) > 0 {
 		args = append(slices.Clone(args), safe...)
 	}
 	h.markIndexBuilding(s.ID, indexes)
