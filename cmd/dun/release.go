@@ -25,7 +25,9 @@ import (
 // the background, installs a newer dun over its own file, and asks dund to
 // move to it at its next quiet moment (the coordinated upgrade). A build
 // from a checkout rebuilds itself (selfupdate.go); a go install build is
-// told the go install command; neither ever takes a build from releases.
+// told the go install command; neither takes a build from releases except
+// on an explicit /upgrade --channel=release (Carl 2026-11-10,
+// internal/tui/channel.go).
 
 // channel is "release" in a release build, stamped by make release.
 var channel = ""

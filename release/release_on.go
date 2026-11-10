@@ -7,11 +7,6 @@ import _ "embed"
 // Built is true in a release build (`go build -tags release`).
 const Built = true
 
-// ManifestURL is where a release build looks for the newest release's
-// manifest; its signature is beside it, ManifestURL + ".minisig". Only
-// release builds carry a download location at all (owner, item 47).
-const ManifestURL = "https://github.com/IodeSystems/dun/releases/latest/download/dun-manifest.json"
-
 // PublicKey is the minisign public key file (one key, or several during a
 // rotation) that a release manifest must be signed with. The committed file
 // is a placeholder that parses as no key: a build carrying it never updates.
