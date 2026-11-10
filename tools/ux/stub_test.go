@@ -29,3 +29,24 @@ func TestCannedReply_NotesCallsTheToolFirst(t *testing.T) {
 		t.Fatalf("called %q with no notes tool", call)
 	}
 }
+
+// The colour request is asked back with ask_user and its arguments, then
+// answered once the result is in.
+func TestCannedReply_ColourAsksFirst(t *testing.T) {
+	tools := []json.RawMessage{json.RawMessage(`{"type":"function","function":{"name":"ask_user"}}`)}
+	req := chatRequest{Tools: tools, Messages: []json.RawMessage{msg("user", "Change the greeting colour")}}
+	if reply, call := cannedReply(req); call != "ask_user" || reply != "" {
+		t.Fatalf("first answer: reply %q call %q", reply, call)
+	}
+	var a struct {
+		Question string   `json:"question"`
+		Options  []string `json:"options"`
+	}
+	if err := json.Unmarshal([]byte(askArgs), &a); err != nil || a.Question == "" || len(a.Options) < 2 {
+		t.Fatalf("askArgs: %v %+v", err, a)
+	}
+	req.Messages = append(req.Messages, msg("assistant", ""), msg("tool", "blue"))
+	if reply, call := cannedReply(req); call != "" || reply == "" {
+		t.Fatalf("after the answer: reply %q call %q", reply, call)
+	}
+}

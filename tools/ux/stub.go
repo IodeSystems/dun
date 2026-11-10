@@ -129,10 +129,19 @@ func llmHandler(reqLog io.Writer) http.Handler {
 	return mux
 }
 
-// toolCall answers with one call to the tool named, with no arguments.
+// askArgs is the stub's one question (the "ask" walk): ask_user with two
+// options and a recommendation, the shape a real model sends.
+const askArgs = `{"question":"Which colour should the greeting use?","options":["red","green"],"recommended":"green"}`
+
+// toolCall answers with one call to the tool named: ask_user with askArgs,
+// any other tool with no arguments.
 func toolCall(w http.ResponseWriter, req chatRequest, name string, usage map[string]any) {
-	tc := map[string]any{"index": 0, "id": "call_notes_1", "type": "function",
-		"function": map[string]any{"name": name, "arguments": "{}"}}
+	args := "{}"
+	if name == "ask_user" {
+		args = askArgs
+	}
+	tc := map[string]any{"index": 0, "id": "call_stub_1", "type": "function",
+		"function": map[string]any{"name": name, "arguments": args}}
 	if !req.Stream {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -176,6 +185,21 @@ func notesTool(tools []json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// hasTool reports whether the request offers the tool named.
+func hasTool(tools []json.RawMessage, name string) bool {
+	for _, raw := range tools {
+		var t struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		}
+		if json.Unmarshal(raw, &t) == nil && t.Function.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 type chatRequest struct {
@@ -222,6 +246,13 @@ func cannedReply(req chatRequest) (string, string) {
 		}
 		return "The team notes say to keep the greeting short, and that you release on Fridays. " +
 			"Is there something in greet you want to change before then?", ""
+	}
+	// A question back (ask_user), then an answer from what the person chose.
+	if strings.Contains(strings.ToLower(last), "colour") && hasTool(req.Tools, "ask_user") {
+		if lastRole != "tool" {
+			return "", "ask_user"
+		}
+		return "Done: the greeting uses the colour you chose.", ""
 	}
 	if strings.Contains(strings.ToLower(last), "project") || strings.Contains(last, "?") {
 		return "This project is a small command-line tool. The README says it prints a greeting, " +
