@@ -23,8 +23,8 @@ func TestAsk_MultiCustomAddsAndEditsOptions(t *testing.T) {
 	}
 	m.askSel = 1
 	m = key(m, kTab) // edit "tests"
-	if m.input.Value() != "tests" {
-		t.Fatalf("edit field: %q", m.input.Value())
+	if m.askField.Value() != "tests" {
+		t.Fatalf("edit field: %q", m.askField.Value())
 	}
 	m = typeStr(m, " (unit)")
 	m = key(m, kEnter)

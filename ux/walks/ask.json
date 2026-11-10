@@ -1,0 +1,77 @@
+{
+  "name": "ask",
+  "scenario": "first-assistant",
+  "role": "the owner of a small project on your own computer; nobody else has set anything up for you",
+  "goal": "When dun asks me to choose, I want to answer in my own words without hunting for where to type.",
+  "note": "Ask walk (2026-11-10): the own-words answer is a row of the option list; typing on any row types there.",
+  "sizes": ["49x21", "100x30"],
+  "typing_ms": 45,
+  "steps": [
+    {
+      "id": "first-screen",
+      "promise": "The first screen tells me what dun needs from me before it can help.",
+      "settle_ms": 1500,
+      "actions": [
+        {"wait_for": "ask dun to do something", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "asking-before-setup-is-kept",
+      "promise": "What I ask before I am set up is kept for later.",
+      "actions": [
+        {"type": "Change the greeting colour"},
+        {"key": "enter"},
+        {"wait_for": "kept your question", "timeout_ms": 20000}
+      ]
+    },
+    {
+      "id": "signed-in",
+      "promise": "I can sign in with what my colleague gave me and pick a model.",
+      "settle_ms": 1500,
+      "actions": [
+        {"type": "/"},
+        {"wait_for": "commands"},
+        {"type": "login"},
+        {"key": "enter"},
+        {"wait_for": "log in to an AI service"},
+        {"key": "enter", "say": "picked custom: my colleague gave me an address"},
+        {"wait_for": "custom: an OpenAI-compatible service"},
+        {"type": "${LLM_URL}"},
+        {"key": "enter"},
+        {"type": "${LLM_KEY}"},
+        {"key": "enter"},
+        {"wait_for": "chat-standard"},
+        {"type": "chat-standard"},
+        {"sleep_ms": 400},
+        {"key": "enter"},
+        {"wait_for": "using chat-standard", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "dun-asks-me-to-choose",
+      "promise": "When dun asks me to choose, I can see the choices and where to type my own answer.",
+      "settle_ms": 1500,
+      "actions": [
+        {"key": "enter", "say": "pressed Enter (the input line held my request)"},
+        {"wait_for": "Which colour", "timeout_ms": 60000}
+      ]
+    },
+    {
+      "id": "typing-answers-in-my-own-words",
+      "promise": "I type my own answer straight away, without first finding a special row.",
+      "settle_ms": 800,
+      "actions": [
+        {"type": "blue", "say": "typed blue while the recommended choice was highlighted"}
+      ]
+    },
+    {
+      "id": "enter-sends-my-answer",
+      "promise": "Enter sends what I typed, and dun goes on with it.",
+      "settle_ms": 1500,
+      "actions": [
+        {"key": "enter"},
+        {"wait_for": "colour you chose", "timeout_ms": 30000}
+      ]
+    }
+  ]
+}

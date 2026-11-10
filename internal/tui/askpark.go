@@ -83,14 +83,7 @@ func (m tuiModel) reopenAsk() (tea.Model, tea.Cmd) {
 	if i := m.askEntry(); i >= 0 {
 		m.convo[i].renderAsk(false)
 	}
-	m.input.Blur()
-	if len(m.askOptions) == 0 {
-		// A free-text question is only its text field.
-		m.customAnswer = true
-		m.input.Reset()
-		m.input.placeholder = "type your answer…"
-		m.input.Focus()
-	}
+	m.input.Blur() // the text row and the selection are as they were left
 	m.refresh()
 	return m, nil
 }
@@ -141,7 +134,7 @@ func (m *tuiModel) dropAsk() {
 	if !m.asking {
 		return
 	}
-	m.asking, m.noting, m.customAnswer = false, false, false
+	m.asking, m.noting = false, false
 	m.restoreDraft()
 	m.input.placeholder = "ask dun to do something…"
 	m.input.Focus()
