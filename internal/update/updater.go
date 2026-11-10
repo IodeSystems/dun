@@ -114,41 +114,8 @@ func (u *Updater) Run(ctx context.Context) (res Result, err error) {
 		_ = saveState(sf, st)
 	}()
 
-	body, err := u.Fetch.Small(ctx, u.ManifestURL, MaxManifest)
+	m, err := u.verified(ctx, &st, sf, &cur)
 	if err != nil {
-		return res, err
-	}
-	sig, err := u.Fetch.Small(ctx, u.ManifestURL+".minisig", MaxSig)
-	if err != nil {
-		return res, err
-	}
-	keys := append([]PublicKey(nil), u.Keys...)
-	for _, line := range st.Keys {
-		if k, err := ParsePublicKey(line); err == nil {
-			keys = append(keys, k)
-		}
-	}
-	m, next, err := VerifyManifest(body, string(sig), keys)
-	if err != nil {
-		return res, err
-	}
-	mv, _ := ParseVersion(m.Version)
-	// Replay: a signed manifest stays valid for ever, so one older than a
-	// manifest seen before, or than this build, is refused.
-	if prev, err := ParseVersion(st.Version); err == nil && mv.Compare(prev) < 0 {
-		return res, &VerifyError{fmt.Sprintf("the manifest is %s, older than %s seen before (a replay?)", m.Version, st.Version)}
-	}
-	if p, err := time.Parse(time.RFC3339, st.Published); err == nil && m.PublishedAt().Before(p) {
-		return res, &VerifyError{fmt.Sprintf("the manifest was published %s, before one seen %s (a replay?)", m.Published, st.Published)}
-	}
-	if mv.Compare(cur) < 0 {
-		return res, &VerifyError{fmt.Sprintf("the manifest is %s, older than this build %s (a replay?)", m.Version, u.Current)}
-	}
-	st.Version, st.Published = m.Version, m.Published
-	if next != nil && !slices.Contains(st.Keys, next.Line()) {
-		st.Keys = append(st.Keys, next.Line())
-	}
-	if err := saveState(sf, st); err != nil {
 		return res, err
 	}
 
@@ -170,6 +137,85 @@ func (u *Updater) Run(ctx context.Context) (res Result, err error) {
 		return res, err
 	}
 	st.Staged = a.Version
+	res.Staged, res.To, res.Summary = true, a.Version, m.Summary
+	return res, nil
+}
+
+// verified fetches the newest release's manifest and its signature,
+// verifies them with the keys this build trusts and any next key endorsed
+// before, refuses one older than a manifest seen before or than floor (a
+// replay; floor is this build, nil for a channel switch), and records it as
+// seen in st (saved to sf).
+func (u *Updater) verified(ctx context.Context, st *State, sf string, floor *Version) (*Manifest, error) {
+	body, err := u.Fetch.Small(ctx, u.ManifestURL, MaxManifest)
+	if err != nil {
+		return nil, err
+	}
+	sig, err := u.Fetch.Small(ctx, u.ManifestURL+".minisig", MaxSig)
+	if err != nil {
+		return nil, err
+	}
+	keys := append([]PublicKey(nil), u.Keys...)
+	for _, line := range st.Keys {
+		if k, err := ParsePublicKey(line); err == nil {
+			keys = append(keys, k)
+		}
+	}
+	m, next, err := VerifyManifest(body, string(sig), keys)
+	if err != nil {
+		return nil, err
+	}
+	mv, _ := ParseVersion(m.Version)
+	// Replay: a signed manifest stays valid for ever, so one older than a
+	// manifest seen before, or than this build, is refused.
+	if prev, err := ParseVersion(st.Version); err == nil && mv.Compare(prev) < 0 {
+		return nil, &VerifyError{fmt.Sprintf("the manifest is %s, older than %s seen before (a replay?)", m.Version, st.Version)}
+	}
+	if p, err := time.Parse(time.RFC3339, st.Published); err == nil && m.PublishedAt().Before(p) {
+		return nil, &VerifyError{fmt.Sprintf("the manifest was published %s, before one seen %s (a replay?)", m.Published, st.Published)}
+	}
+	if floor != nil && mv.Compare(*floor) < 0 {
+		return nil, &VerifyError{fmt.Sprintf("the manifest is %s, older than this build %s (a replay?)", m.Version, u.Current)}
+	}
+	st.Version, st.Published = m.Version, m.Published
+	if next != nil && !slices.Contains(st.Keys, next.Line()) {
+		st.Keys = append(st.Keys, next.Line())
+	}
+	if err := saveState(sf, *st); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// Switch is /upgrade --channel=release on a build of another channel (a
+// source build; Carl 2026-11-10, docs/decisions.md): it installs the newest
+// release's dun at Exe now, whatever this build's version — an explicit
+// switch may go to an older version than Current (v0.4.1-30-g… → v0.4.1),
+// and Current need not be a release version at all. The manifest's replay
+// check stays; the daily interval does not apply.
+func (u *Updater) Switch(ctx context.Context) (Result, error) {
+	sf := StateFile(u.Home)
+	st := loadState(sf)
+	res := Result{Checked: true, From: u.Current}
+	m, err := u.verified(ctx, &st, sf, nil)
+	if err != nil {
+		return res, err
+	}
+	a, file, ok := m.File("dun", u.Platform)
+	if !ok {
+		return res, fmt.Errorf("release %s has no dun for %s", m.Version, u.Platform)
+	}
+	if _, err := ParseVersion(a.Version); err != nil {
+		return res, &VerifyError{"dun's version: " + err.Error()}
+	}
+	if err := os.MkdirAll(filepath.Dir(u.Exe), 0o755); err != nil {
+		return res, err
+	}
+	if _, err := u.Fetch.Install(ctx, file, "dun", u.Exe); err != nil {
+		return res, err
+	}
+	st.Staged = a.Version
+	_ = saveState(sf, st)
 	res.Staged, res.To, res.Summary = true, a.Version, m.Summary
 	return res, nil
 }
