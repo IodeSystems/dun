@@ -776,6 +776,9 @@ func main() {
 	// too (dun/codesearch.go). DUN_CODE_SEARCH=0: not (the Harbor adapter's
 	// default); DUN_MEMORY=0 turns it off with memory.
 	cfg.NoCodeSearch = os.Getenv("DUN_CODE_SEARCH") == "0"
+	// The user's rules files are read in every session (dun/rules.go).
+	// DUN_USER_RULES=0: not (the Harbor adapter's default).
+	cfg.NoUserRules = os.Getenv("DUN_USER_RULES") == "0"
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}

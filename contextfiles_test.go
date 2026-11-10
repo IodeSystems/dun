@@ -85,7 +85,7 @@ func TestContextFiles_TreeAndSearch(t *testing.T) {
 			t.Errorf("search lacks %q:\n%s", w, search)
 		}
 	}
-	if s := strings.Join(rulesSearch(t.TempDir()), "\n"); !strings.Contains(s, "✗ AGENTS.md (not there)") || !strings.Contains(s, "✗ agents.md") || !strings.Contains(s, "✗ CLAUDE.md") {
+	if s := strings.Join(rulesSearch(t.TempDir(), true), "\n"); !strings.Contains(s, "✗ AGENTS.md (not there)") || !strings.Contains(s, "✗ agents.md") || !strings.Contains(s, "✗ CLAUDE.md") {
 		t.Errorf("an empty workspace:\n%s", s)
 	}
 }

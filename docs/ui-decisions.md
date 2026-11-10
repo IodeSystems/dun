@@ -118,10 +118,12 @@ are in `decisions.md`.
   indent a level; a missing or unread import is a row that says why. A file
   that imports others shows its cost and, beside it, the cost with every
   import under it that is on. The pane under the list names each root file
-  dun looks for in the workspace (✓ found, ✗ not there, · not read because
-  the other spelling is), the import rule and depth, the caps, and what is
-  not read (subdirectories, `.dun/`, `.claude/`, `~/.claude/CLAUDE.md`; an
-  `@path` brings one in). Any switch list whose rows have parents keeps its
+  dun looks for, the user's in the home directory first (USER 2026-11-10;
+  with sizes; "off" under `DUN_USER_RULES=0`), then the workspace's (✓
+  found, ✗ not there, · not read because the other spelling is), the import
+  rule and depth, the caps, and what is not read (subdirectories, the
+  workspace's `.dun/` and `.claude/`; an `@path` brings one in). Bare
+  `/rules` lists each user file, read or not, on one line. Any switch list whose rows have parents keeps its
   rows' spacing, so the indent shows (the indexes under raglit in `/rag`
   too: their parent never reached the TUI before).
 - **`/file` searches only after `/` or `~`** (USER 2026-11-06: "we should

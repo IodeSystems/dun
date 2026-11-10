@@ -10,7 +10,8 @@
 # DUN_HARBOR_BIN (the binaries to upload; default ./bin), HARBOR_ARGS (more harbor
 # run flags, e.g. "--agent-timeout-multiplier 3" for a slower model),
 # DUN_MEMORY (0: memory off; set 1 for a run that wants it), DUN_CODE_SEARCH (0: dund's
-# code and docs search off; set 1 to turn it on).
+# code and docs search off; set 1 to turn it on), DUN_USER_RULES (0: the home
+# directory's AGENTS.md / CLAUDE.md / .claude/CLAUDE.md not read; set 1 to read them).
 #
 # A clear error stops the run (exit 2): a trial exception other than an agent
 # timeout, or dun ending before its first model request. Those are the harness's

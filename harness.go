@@ -263,6 +263,11 @@ type Config struct {
 	// NoCodeSearch turns off the code and docs search through dund
 	// (codesearch.go): DUN_CODE_SEARCH=0, as under the Harbor adapter.
 	NoCodeSearch bool
+	// NoUserRules leaves the user's rules files (~/AGENTS.md, ~/CLAUDE.md,
+	// ~/.claude/CLAUDE.md) out of the rules block (rules.go):
+	// DUN_USER_RULES=0, as under the Harbor adapter, where a trial must not
+	// depend on the machine's home directory.
+	NoUserRules bool
 	// Vision is what images on a user message need: which model Client runs
 	// (for the vision probe record) and the vision→text model that describes
 	// images for one that cannot read them. See images.go.

@@ -30,7 +30,7 @@ func TestBreakdownCountsTheRules(t *testing.T) {
 }
 
 // rootRules is the block in mode full, as the system prompt gets it.
-func rootRules(ws string) string { return loadRules(ws).render(RulesFull, "") }
+func rootRules(ws string) string { return loadRules(ws, true).render(RulesFull, "") }
 
 func writeRule(t *testing.T, path, text string) {
 	t.Helper()
@@ -80,7 +80,7 @@ func TestLoadRules_Imports(t *testing.T) {
 	writeRule(t, filepath.Join(ws, "docs", "fenced.md"), "must not appear")
 	writeRule(t, filepath.Join(home, "global.md"), "home rule")
 
-	set := loadRules(ws)
+	set := loadRules(ws, true)
 	got := strings.Join(importNames(set), ", ")
 	want := "docs/a.md, docs/sub/b.md, docs/sub/a2.md, ~/global.md, gone.md [not found]"
 	if got != want {
@@ -103,7 +103,7 @@ func TestLoadRules_DepthCap(t *testing.T) {
 	for i := 1; i <= 7; i++ {
 		writeRule(t, filepath.Join(ws, "f"+string(rune('0'+i))+".md"), "level "+string(rune('0'+i))+" @f"+string(rune('0'+i+1))+".md")
 	}
-	set := loadRules(ws)
+	set := loadRules(ws, true)
 	got := strings.Join(importNames(set), ", ")
 	want := "f1.md, f2.md, f3.md, f4.md, f5.md, f6.md [not read: imports nest deeper than 5]"
 	if got != want {
@@ -120,7 +120,7 @@ func TestLoadRules_SizeCaps(t *testing.T) {
 		writeRule(t, filepath.Join(ws, name), strings.Repeat("x", rulesFileMax+100))
 	}
 	writeRule(t, filepath.Join(ws, "AGENTS.md"), strings.Join(imports, "\n"))
-	set := loadRules(ws)
+	set := loadRules(ws, true)
 	total := 0
 	for _, d := range append(set.Roots, set.Imports...) {
 		total += len(d.Text)
@@ -187,7 +187,7 @@ func TestRulesRender_Modes(t *testing.T) {
 	ws := t.TempDir()
 	writeRule(t, filepath.Join(ws, "AGENTS.md"), "root verbatim @x.md @y.md")
 	writeRule(t, filepath.Join(ws, "x.md"), "x full text")
-	set := loadRules(ws)
+	set := loadRules(ws, true)
 	sum := set.render(RulesSummary, "the condensed text")
 	if !strings.Contains(sum, "root verbatim") || !strings.Contains(sum, "the condensed text") || strings.Contains(sum, "x full text") || !strings.Contains(sum, "- y.md (not found)") {
 		t.Errorf("summary:\n%s", sum)
@@ -325,7 +325,7 @@ func TestSyncRulesIndex(t *testing.T) {
 	step := func(h *Harness, mode, want string) {
 		t.Helper()
 		log = nil
-		h.syncRulesIndex(sink, loadRules(ws), mode)
+		h.syncRulesIndex(sink, loadRules(ws, true), mode)
 		if got := strings.Join(log, "; "); got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
@@ -350,7 +350,7 @@ func TestRulesFiles(t *testing.T) {
 	ws := t.TempDir()
 	writeRule(t, filepath.Join(ws, "AGENTS.md"), "root rules\n@docs/a.md")
 	writeRule(t, filepath.Join(ws, "docs", "a.md"), strings.Repeat("a fact. ", 50))
-	set := loadRules(ws)
+	set := loadRules(ws, true)
 	full := set.files(RulesFull)
 	if len(full) != 2 || full[0].Name != "AGENTS.md" || full[1].Name != "docs/a.md" || full[1].Tokens < 90 {
 		t.Errorf("full: %v", full)
