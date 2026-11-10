@@ -5,37 +5,27 @@ import (
 	"strconv"
 )
 
-// Safe child-LSP limits for poly-lsp-mcp (2026-11-09).
+// Child-LSP flags for poly-lsp-mcp (2026-11-10).
 //
-// poly-lsp-mcp's own defaults let a child LSP (gopls, tsserver, pylsp) grow
-// to 6 GiB and idle for 15 minutes; on a Mac analyzing a directory of
-// clones, that took the machine down twice. dun passes tighter ones to a
-// build whose `mcp --help` lists the flag (IndexProtocol):
+// dun passes --lsp-roots single (one child per language, at the root; also
+// poly-lsp-mcp's default) to a build whose `mcp --help` lists the flag.
 //
-//	--lsp-roots single      one child per language, at the root
-//	--lsp-max-rss-mb 2048   a child over 2 GiB is stopped (it starts again on use)
-//	--lsp-idle-stop 5m      a child idle 5 minutes is stopped
+// Until poly-lsp-mcp v0.5.1, dun also passed --lsp-max-rss-mb 2048 and
+// --lsp-idle-stop 5m, because a child could grow to 6 GiB and idle for 15
+// minutes (a Mac analyzing a directory of clones went down twice). v0.5.1
+// bounds the whole daemon by default (4 children, an RSS budget, 10 min idle),
+// and those two flags configure only the daemon's own fleet: the proxy
+// ignores them with --daemon, and without --daemon they force in-process
+// mode. dun passes neither by default.
 //
-// Each one is overridden by the server spec (ServerSpec.LSPRoots,
-// LSPMaxRSSMB, LSPIdleStop) in a config file the person writes; dun writes
-// none of them.
-//
-// In daemon mode (--daemon) the proxy takes --lsp-roots with its open, but
-// --lsp-max-rss-mb and --lsp-idle-stop configure the daemon's own child
-// fleet: the proxy ignores them, and given without --daemon they make
-// poly-lsp-mcp serve in-process (its inProcessOnlyFlags). So with --daemon
-// dun passes --lsp-roots only, and the daemon's own limits apply.
+// The server spec's LSPMaxRSSMB and LSPIdleStop, which the person writes in a
+// config file, are still passed, without --daemon only. LSPRoots replaces
+// "single". dun writes none of them.
 
-// The safe defaults.
-const (
-	lspSafeRoots    = "single"
-	lspSafeMaxRSSMB = 2048
-	lspSafeIdleStop = "5m"
-)
+const lspSafeRoots = "single"
 
-// lspSafeArgs are the lifecycle flags s gets: dun's safe values or the
-// spec's, each to a build that takes it (sup); with daemon, --lsp-roots
-// only.
+// lspSafeArgs are the lifecycle flags s gets, each to a build that takes it
+// (sup).
 func lspSafeArgs(s Server, sup IndexSupport, daemon bool) []string {
 	var out []string
 	if sup.Roots {
@@ -44,15 +34,11 @@ func lspSafeArgs(s Server, sup IndexSupport, daemon bool) []string {
 	if daemon {
 		return out
 	}
-	if sup.MaxRSS {
-		mb := lspSafeMaxRSSMB
-		if s.LSPMaxRSSMB != nil {
-			mb = *s.LSPMaxRSSMB
-		}
-		out = append(out, "--lsp-max-rss-mb", strconv.Itoa(mb))
+	if sup.MaxRSS && s.LSPMaxRSSMB != nil {
+		out = append(out, "--lsp-max-rss-mb", strconv.Itoa(*s.LSPMaxRSSMB))
 	}
-	if sup.IdleStop {
-		out = append(out, "--lsp-idle-stop", cmp.Or(s.LSPIdleStop, lspSafeIdleStop))
+	if sup.IdleStop && s.LSPIdleStop != "" {
+		out = append(out, "--lsp-idle-stop", s.LSPIdleStop)
 	}
 	return out
 }

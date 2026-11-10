@@ -164,9 +164,9 @@ type ServerSpec struct {
 	// question sets it.
 	IndexAnyway bool `json:"index_anyway,omitempty"`
 	// LSPRoots, LSPMaxRSSMB and LSPIdleStop replace dun's safe defaults for
-	// a poly-lsp-mcp's child LSPs (--lsp-roots single, --lsp-max-rss-mb
-	// 2048, --lsp-idle-stop 5m; lspSafeArgs), as those flags take them
-	// ("auto", 0 = no limit, "0" = never). Set by the person in a config
+	// a poly-lsp-mcp's child LSPs (lspSafeArgs: --lsp-roots single by
+	// default; the other two are passed only when set, and not with --daemon),
+	// as those flags take them ("auto", 0 = no limit, "0" = never). Set by the person in a config
 	// file; dun writes none of them.
 	LSPRoots    string `json:"lsp_roots,omitempty"`
 	LSPMaxRSSMB *int   `json:"lsp_max_rss_mb,omitempty"`
