@@ -5,8 +5,9 @@ import (
 	"fmt"
 )
 
-// The rules files: the workspace's root AGENTS.md and CLAUDE.md and what
-// they import (rules.go), as a kind of scoped switches (switches.go) — USER
+// The rules files: the user's ~/AGENTS.md, ~/CLAUDE.md and
+// ~/.claude/CLAUDE.md, the workspace's root AGENTS.md and CLAUDE.md, and
+// what they import (rules.go), as a kind of scoped switches (switches.go) — USER
 // 2026-10-24: "the same beautiful behavior as /mcp -- global, project,
 // session, mode"; 2026-10-25: one command, /rules (it was /context-file
 // beside it).
@@ -33,10 +34,13 @@ func (h *Harness) rulesSwitchKind() switchKind {
 		slash: "rules",
 		modes: []string{RulesFull, RulesSummary, RulesIndex},
 		items: func() []SwitchItem {
-			set := loadRules(h.cfg.Workspace)
+			set := h.loadRules()
 			var out []SwitchItem
 			add := func(d rulesDoc, desc string) {
 				it := SwitchItem{Name: d.Name, Description: desc, Source: "root", Parent: d.From}
+				if d.User && d.From == "" {
+					it.Source = "user"
+				}
 				if d.Text != "" || d.Note == "" {
 					it.Tokens = h.meter.Estimate(d.heading() + "\n\n" + d.Text)
 				}
@@ -65,7 +69,11 @@ func (h *Harness) rulesSwitchKind() switchKind {
 				}
 			}
 			for _, d := range set.Roots {
-				add(d, "the project's rules (a root file: off takes the project's own rules out of every request)")
+				desc := "the project's rules (a root file: off takes the project's own rules out of every request)"
+				if d.User {
+					desc = "the user's rules, read in every project (off at global scope takes them out of every project's requests)"
+				}
+				add(d, desc)
 				walk(d)
 			}
 			return out
@@ -78,14 +86,14 @@ func (h *Harness) rulesSwitchKind() switchKind {
 		},
 		prepare: func(mode string) error {
 			if mode == RulesSummary {
-				return h.ensureRulesSummary(context.Background(), loadRules(h.cfg.Workspace))
+				return h.ensureRulesSummary(context.Background(), h.loadRules())
 			}
 			if mode == RulesIndex && !h.hookStarted(HookRulesChanged) {
 				return fmt.Errorf("index mode needs the docs index: /rag on first")
 			}
 			return nil
 		},
-		search: func() []string { return rulesSearch(h.cfg.Workspace) },
+		search: func() []string { return rulesSearch(h.Workspace(), !h.cfg.NoUserRules) },
 		// No note: the status line says whether the docs index is on, and
 		// what that changes; the same thing twice was the warning (USER
 		// 2026-10-25).
