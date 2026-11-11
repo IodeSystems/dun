@@ -40,7 +40,7 @@ var Modules = []Module{
 	{Name: "raglit", Part: "ragcore", Path: Raglit, Pin: "v0.9.0"},
 	{Name: "poly-lsp-mcp", Part: "segment", Path: PolyLSP, Pin: "v0.5.1"},
 	{Name: "gwag", Part: "gat", Path: Gwag, Pin: "v2.11.0"},
-	{Name: "bubbleteandmd", Part: "sanitize", Path: BubbleTeaMD, Pin: "v0.2.0"},
+	{Name: "bubbleteandmd", Part: "sanitize", Path: BubbleTeaMD, Pin: "v0.3.0"},
 }
 
 // Devel is the version of a module replaced by a directory (a go.work or a
