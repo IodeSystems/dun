@@ -67,8 +67,11 @@ var Supported = []Tool{
 	// session-scoped let/const; eval clear; builtin names are reserved at top
 	// level; File values from ls/glob. Breaking for scripts (`let all` is an
 	// error), not for dun's launch, so Min stays.
+	// Recommended v0.12.1 (2026-11-10, b22c0c2), tarballs in deps.json: const is
+	// enforced (assignment errors); xs.sort/reverse/fill mutate in place and
+	// return xs; Ns.help() on a command namespace.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.12.0"},
+		Min: "v0.2.0", Recommended: "v0.12.1"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
