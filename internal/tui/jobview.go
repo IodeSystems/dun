@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/bubbleteandmd"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/procstat"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -188,7 +189,7 @@ func logLine(s string) string {
 	if i := strings.LastIndexByte(s, '\r'); i >= 0 {
 		s = s[i+1:]
 	}
-	s = stripANSI(s)
+	s = bubbleteandmd.Sanitize(stripANSI(s)) // what stripANSI leaves: C1, bidi, a bare ESC
 	if !strings.ContainsRune(s, '\t') {
 		return s
 	}

@@ -312,3 +312,10 @@ func TestJobView_ShowsWhatItsProcessesAreDoing(t *testing.T) {
 		t.Errorf("p should open a row per process:\n%s", view)
 	}
 }
+
+func TestLogLine_NoTerminalEscapes(t *testing.T) {
+	got := logLine("a\x1b]52;c;SGVsbG8=\x07b\x1b[2Jc\x9b31md‮e\tf")
+	if strings.ContainsAny(got, "\x1b\x07\x9b") || strings.ContainsRune(got, '‮') {
+		t.Errorf("escape left in %q", got)
+	}
+}

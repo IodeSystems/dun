@@ -8,12 +8,44 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/bubbleteandmd"
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
+
+// cleanEvent returns ev with every string value (nested maps and lists
+// included) passed through bubbleteandmd.Sanitize: model, tool and server
+// text reaches the screen only through events, and a terminal escape in it
+// (OSC 52 clipboard write, title, cursor move, screen clear) must be shown
+// as text, not sent. Keys are protocol and stay. The input map is not
+// changed; dun's own styling is added after this, at render.
+func cleanEvent(ev evMsg) evMsg {
+	out, _ := cleanValue(map[string]any(ev)).(map[string]any)
+	return evMsg(out)
+}
+
+func cleanValue(v any) any {
+	switch x := v.(type) {
+	case string:
+		return bubbleteandmd.Sanitize(x)
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = cleanValue(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = cleanValue(e)
+		}
+		return out
+	}
+	return v
+}
 
 // noteServers records which switchable servers are up, so a restart can put
 // them back. Only ones with a command (/rag, /lsp) — the rest are the config's
@@ -46,6 +78,7 @@ func (m *tuiModel) noteServers(ev evMsg) {
 // none of it lands in the child's view. A question needs the screen, so it
 // leaves the scope first.
 func (m tuiModel) handleEvent(ev evMsg) tuiModel {
+	ev = cleanEvent(ev)
 	if m.scopeAgent == 0 {
 		return m.applyEvent(ev)
 	}
