@@ -666,6 +666,15 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 
 ## Release updates
 
+- **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to
+  their product.** `VerifyManifest` (`internal/update/manifest.go`, used by
+  `Run` and `Switch`) requires the signature's trusted comment to be exactly
+  `dun <version> manifest` (what `make release` writes) and refuses a
+  `product` field other than `dun` (absent = dun). It runs before `key_next`
+  is returned and before any `State` write, so a para manifest cannot add a
+  trusted key or move the replay floor. The registry index keeps its own
+  check (`VerifyAny`, comment `dun registry`, unchanged).
+
 - **A source build moves to releases only when asked (Carl, 2026-11-10;
   reverses item 47's "dev/source builds have no download paths at all",
   `git show cb0e5bd:plan/plan.md`).** The manifest URL is in every build

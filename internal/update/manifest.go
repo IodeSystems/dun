@@ -40,6 +40,7 @@ const (
 
 type Manifest struct {
 	Schema    int                 `json:"schema"`
+	Product   string              `json:"product,omitempty"` // absent = "dun"
 	Version   string              `json:"version"`
 	Published string              `json:"published"`
 	Summary   string              `json:"summary,omitempty"`
@@ -123,13 +124,15 @@ func (m *Manifest) File(name, plat string) (Artifact, File, bool) {
 }
 
 // VerifyManifest checks body's signature with one of keys, then parses it.
+// The signature's trusted comment must be "dun <version> manifest" (what
+// make release writes), and a "product" field, if present, must be "dun".
 // It returns the manifest, and the next key when key_next is present and
 // endorsed by the key that signed the manifest.
 func VerifyManifest(body []byte, sig string, keys []PublicKey) (*Manifest, *PublicKey, error) {
 	if len(keys) == 0 {
 		return nil, nil, ErrNoKey
 	}
-	signer, err := VerifyAny(body, sig, keys)
+	signer, parsed, err := verifyAnySig(body, sig, keys)
 	if err != nil {
 		return nil, nil, &VerifyError{"the manifest's signature: " + err.Error()}
 	}
@@ -139,6 +142,14 @@ func VerifyManifest(body []byte, sig string, keys []PublicKey) (*Manifest, *Publ
 	}
 	if _, err := ParseVersion(m.Version); err != nil {
 		return nil, nil, &VerifyError{"manifest version: " + err.Error()}
+	}
+	// The key also signs other products' manifests (para). Bind this one to
+	// dun before anything is trusted or recorded from it.
+	if want := "dun " + m.Version + " manifest"; parsed.Trusted != want {
+		return nil, nil, &VerifyError{fmt.Sprintf("the manifest is for %q, not dun (want %q)", parsed.Trusted, want)}
+	}
+	if m.Product != "" && m.Product != "dun" {
+		return nil, nil, &VerifyError{fmt.Sprintf("the manifest is for product %q, not dun", m.Product)}
 	}
 	if m.PublishedAt().IsZero() {
 		return nil, nil, &VerifyError{"manifest: no publication time"}

@@ -257,7 +257,7 @@ func (r release) publish(t *testing.T) []byte {
 	}
 	b, _ := json.Marshal(m)
 	r.srv.put("/latest/dun-manifest.json", b)
-	r.srv.put("/latest/dun-manifest.json.minisig", []byte(r.key.sign(b)))
+	r.srv.put("/latest/dun-manifest.json.minisig", []byte(Sign(r.key.priv, r.key.pub.ID, b, "dun "+r.version+" manifest")))
 	return b
 }
 
@@ -389,6 +389,48 @@ func TestUpdater_KeyRotation(t *testing.T) {
 	}}.publish(t)
 	if _, err := newUpdater(srv2, []PublicKey{k1b.pub}, "v0.3.0", exe2, home2).Run(context.Background()); err == nil || !strings.Contains(err.Error(), "key_next") {
 		t.Fatalf("rogue key_next: %v", err)
+	}
+}
+
+// A manifest of another product signed with the same key is refused before
+// its key_next is trusted or any state is written.
+func TestUpdater_RefusesOtherProduct(t *testing.T) {
+	for _, c := range []struct {
+		name, trusted, product string
+		wantErr                string
+	}{
+		{name: "para comment", trusted: "para v9.9.9 manifest", wantErr: `"para v9.9.9 manifest"`},
+		{name: "wrong version in comment", trusted: "dun v0.1.0 manifest", wantErr: "not dun"},
+		{name: "product field", trusted: "dun v0.4.0 manifest", product: "para", wantErr: `product "para"`},
+		{name: "right", trusted: "dun v0.4.0 manifest"},
+		{name: "product dun", trusted: "dun v0.4.0 manifest", product: "dun"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv, k1, exe, home := setup(t)
+			k2 := newKey(t)
+			r := release{srv: srv, key: k1, version: "v0.4.0", body: "new", mut: func(m *Manifest) {
+				m.Product = c.product
+				m.KeyNext = &Endorsement{Key: k2.pub.Line(), Signature: k1.sign([]byte(k2.pub.Line()))}
+			}}
+			b := r.publish(t)
+			srv.put("/latest/dun-manifest.json.minisig", []byte(Sign(k1.priv, k1.pub.ID, b, c.trusted)))
+			_, err := newUpdater(srv, []PublicKey{k1.pub}, "v0.3.0", exe, home).Run(context.Background())
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !IsVerify(err) || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("want %q, got %v", c.wantErr, err)
+			}
+			if st := loadState(StateFile(home)); len(st.Keys) != 0 || st.Version != "" || st.Published != "" {
+				t.Fatalf("state written: %+v", st)
+			}
+			if b, _ := os.ReadFile(exe); string(b) != "v0.3.0 binary" {
+				t.Fatalf("exe replaced: %q", b)
+			}
+		})
 	}
 }
 
