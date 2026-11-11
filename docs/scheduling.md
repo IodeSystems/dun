@@ -47,6 +47,11 @@ with /loop (like claude it installs a loop_ctl() tool)".
   The bracket is one short line because every first request is measured.
 - A firing whose engine would not start is put back a minute later
   (`schedRetry`); one whose session is gone is dropped and logged.
+- **Nothing fires while a dund upgrade is pending** (Carl 2026-11-10;
+  `scheduler.held`): a firing starts or extends a turn, which the restart
+  would wait for. The entry keeps its time, so it is due when the hold ends
+  — in the next dund, or at once after a failed upgrade — and goes once,
+  with the "due …, sent …" bracket when it is late.
 - Target: this session by default; `--to <name|id>` names another of the
   owner's sessions. Names are dun_list's (`<folder>:<hhmmss>`), computed over
   every session of the owner, not only the loaded ones (a message may be for

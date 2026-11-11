@@ -682,6 +682,19 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   that comes first on PATH is named, never deleted. Release → source is
   `make install` in the checkout: dun downloads and builds nothing for it.
   Details: `sessions-and-dund.md`, Release and source channels.
+- **Carl: questions don't hold an upgrade; idle actions wait for it
+  (2026-11-10).** Idle actions: while an upgrade is pending dund starts no
+  turn, because each turn is one more thing the restart waits for. The
+  scheduler fires nothing (`scheduler.held`); a held entry keeps its `At`,
+  so `schedule.json` already carries the hold across the restart, and the
+  next dund fires each held entry once (missed loop runs are not replayed,
+  as after any downtime). A failed upgrade pokes the scheduler. The wrap-up
+  notice and the "did not happen" notice are quiet: an idle session with
+  only jobs or sub-agents is told and not woken — this reverses the
+  2026-10-28 "wakes for it if idle"; its jobs hold the upgrade until they
+  end or the grace period cuts them. Not covered: the engine's own wakes (a
+  job finishing, an aside escalating, a tool server's wake) and a peer's
+  `dun_msg` with wake; they are not idle actions of dund's.
 
 ## Sessions, supervision and diagnosis
 

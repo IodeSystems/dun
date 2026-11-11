@@ -202,3 +202,17 @@ func (h *Harness) ServiceNotice(text string) {
 	default: // a turn is already due
 	}
 }
+
+// ServiceNoticeQuiet is ServiceNotice that wakes no idle session: while an
+// upgrade is pending, an idle session must not start a turn (dund
+// upgrade.go). A running turn still gets it — a wait it is in is freed, and
+// its next tool result carries it; otherwise it rides the next turn.
+func (h *Harness) ServiceNoticeQuiet(text string) {
+	h.noteMu.Lock()
+	h.queue = append(h.queue, queued{kind: queuedServiceQuiet, text: text})
+	if h.userWaitCh != nil {
+		close(h.userWaitCh)
+		h.userWaitCh = nil
+	}
+	h.noteMu.Unlock()
+}

@@ -393,3 +393,148 @@ func TestUpgradeInstallRunsAtTheQuietPointAndCanFail(t *testing.T) {
 		t.Fatalf("%d installs", installs.Load())
 	}
 }
+
+// A pending upgrade holds every firing: nothing goes, nothing moves. When
+// the hold ends each held entry fires once — a loop that missed several
+// runs is not replayed as a burst.
+func TestSchedHeldWhileUpgradePending(t *testing.T) {
+	sc, clk, got := newSched(t)
+	held := true
+	sc.held = func() bool { return held }
+	t0 := clk.now()
+	sc.add(msg(alice, "s1", t0, "the deploy?"))
+	l := msg(alice, "s1", t0, "poll")
+	l.Every = 10 * time.Minute
+	loop := sc.add(l)
+	sc.fireDue()
+	clk.add(time.Hour) // six runs missed
+	sc.fireDue()
+	if len(*got) != 0 {
+		t.Fatalf("fired while held: %v", texts(*got))
+	}
+	if e, _ := sc.get(alice, loop.ID); !e.At.Equal(t0) || e.Iteration != 0 {
+		t.Fatalf("held loop moved: %+v", e)
+	}
+	held = false
+	sc.fireDue()
+	sc.fireDue()
+	if g := texts(*got); g != "the deploy?,poll" {
+		t.Fatalf("after the hold fired %q", g)
+	}
+	if e, _ := sc.get(alice, loop.ID); e.Iteration != 1 || !e.At.Equal(clk.now().Add(10*time.Minute)) {
+		t.Errorf("loop after the hold: %+v", e)
+	}
+}
+
+// Through the service: a message and a loop due while an upgrade is
+// pending are held; the upgrade fails, and each goes once.
+func TestUpgradeHoldsSchedUntilItFails(t *testing.T) {
+	fastUpgrade(t)
+	svc, sp, _ := newSvc(t)
+	busy := working(t, svc, false)
+	idle, _ := svc.Create(alice, t.TempDir(), nil, "")
+	svc.SetUpgradeInstall(func(string, string) error { return errors.New("no room on disk") })
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	waitFor(t, func() bool { return svc.UpgradeStatus() != nil })
+	svc.sched.add(msg(alice, idle, time.Now().Add(-time.Second), "the deploy?"))
+	l := msg(alice, idle, time.Now().Add(-time.Second), "poll")
+	l.Every = 10 * time.Minute
+	svc.sched.add(l)
+	svc.sched.fireDue()
+	time.Sleep(5 * upgradePoll)
+	for _, r := range sp.received() {
+		if strings.HasPrefix(r, "user "+idle) {
+			t.Fatalf("fired while an upgrade was pending: %q", r)
+		}
+	}
+	_ = svc.Send(alice, busy, proto.NewCommand("", &proto.User{Content: "finish"})) // quiet point: the install fails
+	waitRecord(t, sp, "user "+idle+": [scheduled ")
+	waitRecord(t, sp, "user "+idle+": [loop ")
+	time.Sleep(5 * upgradePoll)
+	n := 0
+	for _, r := range sp.received() {
+		if strings.HasPrefix(r, "user "+idle) {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("%d firings after the hold: %q", n, sp.received())
+	}
+}
+
+// Held across the restart: the entries keep their time in schedule.json,
+// and the next dund fires each once.
+func TestUpgradeHoldsSchedAcrossTheRestart(t *testing.T) {
+	fastUpgrade(t)
+	svc, sp, dir := newSvc(t)
+	busy := working(t, svc, false)
+	idle, _ := svc.Create(alice, t.TempDir(), nil, "")
+	_ = svc.Send(alice, idle, proto.NewCommand("", &proto.User{Content: "hi"})) // kept on load: something was asked
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	waitFor(t, func() bool { return svc.UpgradeStatus() != nil })
+	l := msg(alice, idle, time.Now().Add(-time.Second), "poll")
+	l.Every = 10 * time.Minute
+	svc.sched.add(l)
+	svc.sched.fireDue()
+	_ = svc.Send(alice, busy, proto.NewCommand("", &proto.User{Content: "finish"}))
+	select {
+	case <-svc.UpgradeReady():
+	case <-time.After(5 * time.Second):
+		t.Fatal("never ready")
+	}
+	svc.Close()
+	for _, r := range sp.received() {
+		if strings.HasPrefix(r, "user "+idle+": [loop ") {
+			t.Fatalf("fired before the restart: %q", r)
+		}
+	}
+	sp2 := &fakeSpawner{}
+	svc2, err := New(dir, sp2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc2.Close()
+	waitRecord(t, sp2, "user "+idle+": [loop 1, run 1,")
+	time.Sleep(50 * time.Millisecond)
+	n := 0
+	for _, r := range sp2.received() {
+		if strings.HasPrefix(r, "user "+idle+": [loop ") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d loop runs after the restart: %q", n, sp2.received())
+	}
+}
+
+// The wrap-up notice wakes no idle session: one with only a background job
+// (no turn) is told quietly, and is not started on a turn.
+func TestUpgradeNoticeWakesNoIdleSession(t *testing.T) {
+	fastUpgrade(t)
+	svc, sp, _ := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "job"}))
+	ses, _ := svc.Get(alice, id)
+	waitFor(t, func() bool { return len(ses.waiting()) == 1 })
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	waitRecord(t, sp, "notice "+id+": ")
+	time.Sleep(5 * upgradePoll)
+	for _, r := range sp.received() {
+		if strings.HasPrefix(r, "waking notice ") {
+			t.Fatalf("a notice that wakes: %q", r)
+		}
+	}
+	ses.actMu.Lock()
+	inTurn := ses.inTurn
+	ses.actMu.Unlock()
+	if inTurn {
+		t.Fatal("the idle session was started on a turn")
+	}
+	// The job ends; the upgrade with it (its loop must not outlive the test).
+	_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "endjob"}))
+	select {
+	case <-svc.UpgradeReady():
+	case <-time.After(5 * time.Second):
+		t.Fatal("never ready")
+	}
+}

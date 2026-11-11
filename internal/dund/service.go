@@ -89,6 +89,9 @@ func New(dir string, spawner Spawner) (*Service, error) {
 		return ses != nil && ses.loaded() && ses.busy()
 	}
 	sched.deliver = s.deliverScheduled
+	// A pending upgrade holds every firing (schedule.go); failUpgrade pokes
+	// the scheduler when the hold ends without a restart.
+	sched.held = func() bool { return s.UpgradeStatus() != nil }
 	recs, err := s.loadRegistry()
 	if err != nil {
 		return nil, err

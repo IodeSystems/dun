@@ -139,7 +139,13 @@ func (e *fakeEngine) run(id string) {
 		case *proto.ServersChanged:
 			e.sp.record("servers " + id)
 		case *proto.ServiceNotice:
-			e.sp.record("notice " + id + ": " + p.Text)
+			// dund's notices are quiet (they start no turn); one that would
+			// wake the engine is recorded apart, so a test sees it.
+			if p.Quiet {
+				e.sp.record("notice " + id + ": " + p.Text)
+			} else {
+				e.sp.record("waking notice " + id + ": " + p.Text)
+			}
 		case *proto.PeerReply:
 			b, _ := json.Marshal(p)
 			e.sp.record("reply " + id + ": " + string(b))

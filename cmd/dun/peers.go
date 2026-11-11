@@ -176,7 +176,11 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			var n proto.ServiceNotice
 			if json.Unmarshal(line, &n) == nil && strings.TrimSpace(n.Text) != "" {
 				em.emit(&proto.Notification{Kind: "service", Text: n.Text})
-				h.ServiceNotice(n.Text)
+				if n.Quiet {
+					h.ServiceNoticeQuiet(n.Text)
+				} else {
+					h.ServiceNotice(n.Text)
+				}
 			}
 		case "mcp_notify":
 			// A shared server's notification, from dund's gateway.

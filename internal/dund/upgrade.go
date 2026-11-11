@@ -28,10 +28,18 @@ import (
 //
 // The busy sessions are told (USER 2026-10-28): each one with a turn, a
 // question, jobs or sub-agents gets a notice, once, that an upgrade waits
-// for it — finish the step, end the turn — and wakes for it if idle. After
-// the restart, one that wrapped up is woken with "done, resume"; one the
-// restart cut short gets the resume message that says what was cut. If the
-// upgrade fails, they are told to carry on.
+// for it — finish the step, end the turn. After the restart, one that
+// wrapped up is woken with "done, resume"; one the restart cut short gets
+// the resume message that says what was cut. If the upgrade fails, they are
+// told to carry on.
+//
+// While it is pending, nothing on dund's side starts a turn (Carl
+// 2026-11-10): a turn started now is one more thing the restart waits for.
+// The notices are quiet (proto.ServiceNotice.Quiet): a running turn reads
+// one, an idle session — one with only jobs or sub-agents — is not woken by
+// it; this replaces the 2026-10-28 "and wakes for it if idle". Scheduled
+// messages and loops are held (schedule.go): they keep their time and fire
+// once when the hold ends, in the next dund or after a failed upgrade.
 
 // Variables so tests can shorten them.
 var (
@@ -244,10 +252,11 @@ func (s *Service) failUpgrade(err error) {
 		ses.noticed, ses.resume = false, ""
 		ses.actMu.Unlock()
 		if was {
-			_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Text: "The dun upgrade you were told about did not happen (" +
+			_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: "The dun upgrade you were told about did not happen (" +
 				err.Error() + "); dun keeps running as it was. Carry on."}))
 		}
 	}
+	s.sched.poke() // the held firings go now (schedule.go)
 }
 
 // noticeBusy tells each session the pending upgrade waits for, once, to wrap
@@ -271,7 +280,9 @@ func (s *Service) noticeBusy(version string, left time.Duration) {
 			"background jobs are killed. Finish the step you are on, leave the work where it resumes cleanly, let your "+
 			"background jobs finish or stop the ones you do not need, and end your turn. You will be told when it is done.",
 			strings.TrimPrefix(orBuild(version), "build "), max(1, mins))
-		_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Text: text}))
+		// Quiet: a turn running gets it, an idle session is not woken by it
+		// (a turn started now would be one more thing the upgrade waits for).
+		_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: text}))
 	}
 }
 

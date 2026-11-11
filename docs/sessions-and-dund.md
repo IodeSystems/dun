@@ -108,6 +108,12 @@ build must not cut work short, and no one should have to coordinate it.
   that text prefix, not a transcript tag.
 - A transcript that ends mid-turn and is under 30 minutes old at start is a
   crash and is woken the same way (`crashWindow`).
+- While an upgrade is pending, dund starts no turn (Carl 2026-11-10). The
+  wrap-up notice is quiet (`ServiceNotice{quiet}`): a running turn reads it,
+  an idle session with only jobs or sub-agents is told but not woken.
+  Scheduled messages and loops are held: an entry keeps its time in
+  `schedule.json` and fires once when the hold ends — at the next dund's
+  start, or at once when the upgrade fails — however many runs it missed.
 - The TUI re-execs into its own binary when that is dund's new build; the web
   app reloads on a new build.
 
