@@ -70,7 +70,7 @@ func TestModuleLines(t *testing.T) {
 	deps[PolyLSP] = &debug.Module{Path: PolyLSP, Version: "v0.5.0", Replace: &debug.Module{Path: "/src/poly-lsp-mcp"}}
 	delete(deps, Gwag)
 	want := []string{
-		"agentkit v0.27.0",
+		"agentkit v0.27.1",
 		"openai-claude-api-shim v0.6.0",
 		"raglit v0.9.0 (ragcore)",
 		"poly-lsp-mcp devel (segment) — replaced by /src/poly-lsp-mcp; go.mod pins v0.5.1",
