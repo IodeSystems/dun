@@ -969,22 +969,26 @@ func main() {
 			})
 		}
 	} else {
-		cfg.OnToken = func(s string) { fmt.Print(s) }
+		cfg.OnToken = func(s string) { fmt.Print(safeOut(s)) }
 		if answerMode {
-			cfg.OnToken = func(s string) { fmt.Fprint(os.Stderr, s) } // the work; the answer is printed after
+			cfg.OnToken = func(s string) { fmt.Fprint(os.Stderr, safeErr(s)) } // the work; the answer is printed after
 			cfg.SystemNote = answerSystem
 		}
 		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
-			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", tool, shortArgs(args), textfmt.Clip(textfmt.OneLine(result), 200))
+			fmt.Fprintf(os.Stderr, "\n  ⚙ %s(%s) → %s\n", safeErr(tool), safeErr(shortArgs(args)), safeErr(textfmt.Clip(textfmt.OneLine(result), 200)))
 		}
-		cfg.OnNotify = func(text string) { fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", textfmt.Clip(textfmt.OneLine(text), 200)) }
+		cfg.OnNotify = func(text string) {
+			fmt.Fprintf(os.Stderr, "\n  🔔 %s\n", safeErr(textfmt.Clip(textfmt.OneLine(text), 200)))
+		}
 		cfg.OnLogin = func(server, url string) { fmt.Fprintf(os.Stderr, "\n  🔑 %s\n", enginecmd.LoginLine(server, url)) }
-		cfg.OnMemoryTrigger = func(msg string) { fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", textfmt.Clip(textfmt.OneLine(msg), 200)) }
-		cfg.OnRules = func(msg string) { fmt.Fprintf(os.Stderr, "\n  %s\n", msg) }
+		cfg.OnMemoryTrigger = func(msg string) {
+			fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", safeErr(textfmt.Clip(textfmt.OneLine(msg), 200)))
+		}
+		cfg.OnRules = func(msg string) { fmt.Fprintf(os.Stderr, "\n  %s\n", safeErr(msg)) }
 		cfg.OnDocs = func(n dun.DocsNote) {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
 			for _, d := range n.Docs {
-				fmt.Fprintf(os.Stderr, "     %s  (%s)\n       %s\n", d.Title, d.Why(), d.Source())
+				fmt.Fprintf(os.Stderr, "     %s  (%s)\n       %s\n", safeErr(d.Title), safeErr(d.Why()), safeErr(d.Source()))
 			}
 		}
 		cfg.OnRetry = func(n dun.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
@@ -1096,7 +1100,7 @@ func main() {
 	}
 	reply := runHuman(ctx, h, firstTask, absWS, media.inputs(), *noTools)
 	if answerMode {
-		fmt.Println(answerOf(reply))
+		fmt.Println(safeOut(answerOf(reply)))
 	}
 
 	// Report the changes the agent made in the isolated worktree.

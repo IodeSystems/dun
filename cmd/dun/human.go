@@ -81,13 +81,13 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string, imgs 
 // humanAsk prompts on the terminal and reads a line. A number picks an option;
 // with multi, comma-separated numbers (e.g. "1,3") pick several.
 func humanAsk(_ context.Context, question string, options []string, multi bool, recommended []string) (string, error) {
-	fmt.Fprintf(os.Stderr, "\n❓ %s\n", question)
+	fmt.Fprintf(os.Stderr, "\n❓ %s\n", safeErr(question))
 	for i, o := range options {
 		mark := ""
 		if slices.Contains(recommended, o) {
 			mark = "  (recommended)"
 		}
-		fmt.Fprintf(os.Stderr, "   %d) %s%s\n", i+1, o, mark)
+		fmt.Fprintf(os.Stderr, "   %d) %s%s\n", i+1, safeErr(o), mark)
 	}
 	if multi && len(options) > 0 {
 		fmt.Fprint(os.Stderr, "answer (comma-separated numbers for several): ")

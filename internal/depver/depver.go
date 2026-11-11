@@ -17,11 +17,12 @@ import (
 
 // The module paths of dun's own libraries.
 const (
-	AgentKit = "github.com/iodesystems/agentkit"
-	Shim     = "github.com/iodesystems/openai-claude-api-shim"
-	Raglit   = "github.com/iodesystems/raglit"
-	PolyLSP  = "github.com/iodesystems/poly-lsp-mcp"
-	Gwag     = "github.com/iodesystems/gwag/v2"
+	AgentKit    = "github.com/iodesystems/agentkit"
+	Shim        = "github.com/iodesystems/openai-claude-api-shim"
+	Raglit      = "github.com/iodesystems/raglit"
+	PolyLSP     = "github.com/iodesystems/poly-lsp-mcp"
+	Gwag        = "github.com/iodesystems/gwag/v2"
+	BubbleTeaMD = "github.com/iodesystems/bubbleteandmd"
 )
 
 // Module is one of dun's libraries: its name, the part of it dun uses, and
@@ -39,6 +40,7 @@ var Modules = []Module{
 	{Name: "raglit", Part: "ragcore", Path: Raglit, Pin: "v0.9.0"},
 	{Name: "poly-lsp-mcp", Part: "segment", Path: PolyLSP, Pin: "v0.5.1"},
 	{Name: "gwag", Part: "gat", Path: Gwag, Pin: "v2.11.0"},
+	{Name: "bubbleteandmd", Part: "sanitize", Path: BubbleTeaMD, Pin: "v0.2.0"},
 }
 
 // Devel is the version of a module replaced by a directory (a go.work or a
