@@ -35,7 +35,7 @@ type Module struct {
 // require version: TestPinsMatchGoMod fails when go.mod moves and these do
 // not.
 var Modules = []Module{
-	{Name: "agentkit", Path: AgentKit, Pin: "v0.27.0"},
+	{Name: "agentkit", Path: AgentKit, Pin: "v0.27.1"},
 	{Name: "openai-claude-api-shim", Path: Shim, Pin: "v0.6.0"},
 	{Name: "raglit", Part: "ragcore", Path: Raglit, Pin: "v0.9.0"},
 	{Name: "poly-lsp-mcp", Part: "segment", Path: PolyLSP, Pin: "v0.5.1"},
