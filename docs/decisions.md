@@ -683,7 +683,15 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `make install` in the checkout: dun downloads and builds nothing for it.
   Details: `sessions-and-dund.md`, Release and source channels.
 - **Carl: questions don't hold an upgrade; idle actions wait for it
-  (2026-11-10).** Idle actions: while an upgrade is pending dund starts no
+  (2026-11-10).** Questions: a turn waiting on an `ask_user` question waits
+  on the person, so it no longer holds a restart (it held for up to
+  `upgradeGrace`, then the agent was told to ask again). The stop saves the
+  question in the registry; the next dund shows it again and the answer
+  arrives as a new `[automatic]` user message, not as the tool result —
+  Carl accepted that; the engine that asked is gone, and a message needs no
+  engine to keep a call open across the restart. Interrupting it leaves a
+  quiet note: an interrupted question starts no turn today either. Idle
+  actions: while an upgrade is pending dund starts no
   turn, because each turn is one more thing the restart waits for. The
   scheduler fires nothing (`scheduler.held`); a held entry keeps its `At`,
   so `schedule.json` already carries the hold across the restart, and the

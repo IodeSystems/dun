@@ -103,9 +103,19 @@ build must not cut work short, and no one should have to coordinate it.
 - A restart that cuts work (also SIGTERM and a service restart) first
   interrupts turns with a reason (`Interrupt(reason)`), flags `resume` in the
   registry, and the next dund wakes only those sessions with a user message
-  starting `[automatic] ` (`resumePrefix`; killed jobs are listed, and a cut
-  `ask_user` is not replayed, so the agent is asked to re-ask). The marker is
-  that text prefix, not a transcript tag.
+  starting `[automatic] ` (`resumePrefix`; killed jobs are listed). The
+  marker is that text prefix, not a transcript tag.
+- An open `ask_user` question does not hold the upgrade (Carl 2026-11-10).
+  The stop interrupts its turn and saves the question (the whole `Ask`) in
+  the registry record (`ask`). The next dund shows it again as an open
+  question in a turn — appended to the session's log, and in the snapshot
+  a reconnecting client gets — and does not wake the agent. The answer
+  wakes it with `[automatic] Answer to your question "<q>": <answer>` (a new
+  message, not the ask_user result); an interrupt ends the shown turn and
+  leaves the agent a quiet `[dun]` note. Anything else the stop cut (killed
+  jobs, stopped sub-agents) rides with the answer or the note. Jobs and
+  sub-agents beside the question still hold the upgrade; a mount question
+  still holds it too.
 - A transcript that ends mid-turn and is under 30 minutes old at start is a
   crash and is woken the same way (`crashWindow`).
 - While an upgrade is pending, dund starts no turn (Carl 2026-11-10). The

@@ -324,12 +324,21 @@ func TestUpgradeNowWithNothingPending(t *testing.T) {
 
 // A message for a session cut by a crash says so.
 func TestResumeMessage(t *testing.T) {
-	m := resumeMessage("dund stopped unexpectedly", true, true, nil, []proto.AgentInfo{{ID: 2}})
+	m := resumeMessage("dund stopped unexpectedly", true, nil, []proto.AgentInfo{{ID: 2}})
 	for _, want := range []string{"[automatic] dund stopped unexpectedly while you were working; your turn was interrupted",
-		"ask it again", "sub-agents: #2", "Resume the task."} {
+		"sub-agents: #2", "Resume the task."} {
 		if !strings.Contains(m, want) {
 			t.Errorf("%q lacks %q", m, want)
 		}
+	}
+	if strings.Contains(m, "ask it again") {
+		t.Errorf("%q tells the agent to ask again", m)
+	}
+	// A question cut beside a job: the answer carries what was killed.
+	a := answerMessage("Which?", "b", resumeMessage("dund restarted", false, []proto.JobInfo{{ID: 3, Command: "make"}}, nil))
+	if a != "[automatic] Answer to your question \"Which?\": b\ndund restarted while you were working. "+
+		"The restart killed these background jobs: #3 `make`; start again the ones you still need. Resume the task." {
+		t.Errorf("answer %q", a)
 	}
 }
 
@@ -536,5 +545,179 @@ func TestUpgradeNoticeWakesNoIdleSession(t *testing.T) {
 	case <-svc.UpgradeReady():
 	case <-time.After(5 * time.Second):
 		t.Fatal("never ready")
+	}
+}
+
+// asking starts a session and puts it in a turn waiting on an ask_user
+// question (and a job, if job).
+func asking(t *testing.T, svc *Service, job bool) string {
+	t.Helper()
+	id, err := svc.Create(alice, t.TempDir(), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job {
+		_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "job"}))
+	}
+	_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "ask"}))
+	ses, _ := svc.Get(alice, id)
+	waitFor(t, func() bool { return ses.openAsk() != nil })
+	return id
+}
+
+// restartWithAsk runs an upgrade over a session that only waits on its
+// question, and returns the next service on the same registry.
+func restartWithAsk(t *testing.T) (svc2 *Service, sp2 *fakeSpawner, id, dir string) {
+	t.Helper()
+	fastUpgrade(t)
+	svc, sp, dir := newSvc(t)
+	id = asking(t, svc, false)
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	select {
+	case <-svc.UpgradeReady():
+	case <-time.After(5 * time.Second):
+		t.Fatal("an open question held the upgrade")
+	}
+	if !slices.Contains(sp.received(), "interrupt "+id+": dund restarted into build v2 while this turn was running") {
+		t.Fatalf("interrupt: %q", sp.received())
+	}
+	svc.Close()
+	sp2 = &fakeSpawner{}
+	svc2, err := New(dir, sp2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(svc2.Close)
+	return svc2, sp2, id, dir
+}
+
+// A session whose only busy state is an open ask_user question does not
+// hold the upgrade: the question is saved in the registry, no resume
+// message is left, and a question beside a job still waits for the job.
+func TestUpgradeQuestionDoesNotHold(t *testing.T) {
+	fastUpgrade(t)
+	svc, _, dir := newSvc(t)
+	both := asking(t, svc, true)
+	b, _ := svc.Get(alice, both)
+	if w := whats(b.waiting()); !slices.Equal(w, []string{"job"}) {
+		t.Fatalf("question and job: waiting %v", w)
+	}
+	only := asking(t, svc, false)
+	o, _ := svc.Get(alice, only)
+	if w := o.waiting(); len(w) != 0 {
+		t.Fatalf("question only: waiting %+v", w)
+	}
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	time.Sleep(5 * upgradePoll)
+	select {
+	case <-svc.UpgradeReady():
+		t.Fatal("restarted while a job ran")
+	default:
+	}
+	_ = svc.Send(alice, both, proto.NewCommand("", &proto.User{Content: "endjob"}))
+	select {
+	case <-svc.UpgradeReady():
+	case <-time.After(5 * time.Second):
+		t.Fatal("never ready")
+	}
+	svc.Close()
+	recs, _ := (&Service{dir: dir}).loadRegistry()
+	for _, r := range recs {
+		if r.ID == only && (r.Ask == nil || r.Ask.Question != "Which one?" || !r.Ask.NoCustom ||
+			!slices.Equal(r.Ask.Options, []string{"a", "b"}) || r.Resume != "") {
+			t.Fatalf("saved: ask %+v resume %q", r.Ask, r.Resume)
+		}
+	}
+}
+
+// After the restart the question is shown again — to a live subscriber and
+// in a reconnecting client's snapshot — the agent is not woken, and the
+// answer wakes it with a user message; the saved question is then gone.
+func TestUpgradeRestoredAskAnswerIsAMessage(t *testing.T) {
+	svc2, sp2, id, dir := restartWithAsk(t)
+	ses, _ := svc2.Get(alice, id)
+	waitFor(t, func() bool { return ses.log.Last() >= 2 })
+	_, replay, sub, err := ses.subscribe(0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub.Close()
+	var types []string
+	for _, ev := range replay {
+		types = append(types, ev.Type)
+	}
+	if !slices.Equal(types, []string{"turn", "ask"}) || replay[1].Payload.(*proto.Ask).Question != "Which one?" {
+		t.Fatalf("shown: %v", types)
+	}
+	snap, _, sub, err := ses.subscribe(1, "an old epoch")
+	if err != nil || snap == nil {
+		t.Fatal(err)
+	}
+	sub.Close()
+	found := false
+	for _, st := range snap.Payload.(*proto.Snapshot).State {
+		if a, ok := st.Payload.(*proto.Ask); ok && a.Question == "Which one?" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a reconnecting client's snapshot lacks the question")
+	}
+	time.Sleep(50 * time.Millisecond)
+	for _, r := range sp2.received() {
+		if strings.HasPrefix(r, "user "+id) {
+			t.Fatalf("woken before the answer: %q", r)
+		}
+	}
+
+	_, live, _ := ses.log.Subscribe(ses.log.Last(), 100)
+	defer live.Close()
+	if err := svc2.Send(alice, id, proto.NewCommand("", &proto.Answer{Value: "b"})); err != nil {
+		t.Fatal(err)
+	}
+	if a := next(t, live, "answered").Payload.(*proto.Answered); a.Value != "b" {
+		t.Fatalf("answered %q", a.Value)
+	}
+	if got := waitRecord(t, sp2, "user "+id+": "); got != "user "+id+`: [automatic] Answer to your question "Which one?": b` {
+		t.Fatalf("delivered %q", got)
+	}
+	for _, r := range sp2.received() {
+		if strings.HasPrefix(r, "answer ") {
+			t.Fatalf("the answer reached an engine with no question: %q", r)
+		}
+	}
+	recs, _ := (&Service{dir: dir}).loadRegistry()
+	for _, r := range recs {
+		if r.ID == id && (r.Ask != nil || r.Resume != "") {
+			t.Fatalf("still saved: %+v", r)
+		}
+	}
+}
+
+// Interrupting the restored question ends the shown turn and leaves the
+// agent a quiet note; no turn is started.
+func TestUpgradeRestoredAskDismissed(t *testing.T) {
+	svc2, sp2, id, _ := restartWithAsk(t)
+	ses, _ := svc2.Get(alice, id)
+	waitFor(t, func() bool { return ses.log.Last() >= 2 })
+	_, live, _ := ses.log.Subscribe(ses.log.Last(), 100)
+	defer live.Close()
+	if err := svc2.Send(alice, id, proto.NewCommand("", &proto.Interrupt{})); err != nil {
+		t.Fatal(err)
+	}
+	if d := next(t, live, "done").Payload.(*proto.Done); d.Reason != "interrupted" {
+		t.Fatalf("done %+v", d)
+	}
+	got := waitRecord(t, sp2, "notice "+id+": ")
+	if !strings.Contains(got, `Your question "Which one?"`) || !strings.Contains(got, "dismissed") {
+		t.Fatalf("note %q", got)
+	}
+	for _, r := range sp2.received() {
+		if strings.HasPrefix(r, "user "+id) || strings.HasPrefix(r, "interrupt "+id) {
+			t.Fatalf("%q", r)
+		}
+	}
+	if ses.restoredAsk() != nil {
+		t.Fatal("still restored")
 	}
 }

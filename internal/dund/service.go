@@ -99,7 +99,8 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	dropped := 0
 	for _, r := range recs {
 		ses := &session{svc: s, id: r.ID, workspace: r.Workspace, owner: r.Owner,
-			members: r.Members, args: r.Args, persist: r.Persist, resume: r.Resume, log: proto.NewLog(r.ID, logCapacity)}
+			members: r.Members, args: r.Args, persist: r.Persist, resume: r.Resume, restored: r.Ask,
+			log: proto.NewLog(r.ID, logCapacity)}
 		// A session nothing was ever asked in is not kept (USER 2026-10-22);
 		// no engine runs yet, so it can simply be left out.
 		if !ses.persist && !ses.hasMessages() && !sched.has(r.ID) {
@@ -113,8 +114,8 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	// working when dund last died (a crash records nothing): woken the same
 	// way, and said so.
 	for _, ses := range s.sessions {
-		if ses.resume == "" && crashedMidTurn(ses.workspace, ses.id) {
-			ses.resume = resumeMessage("dund stopped unexpectedly (a crash, or it was killed)", true, false, nil, nil)
+		if ses.resume == "" && ses.restored == nil && crashedMidTurn(ses.workspace, ses.id) {
+			ses.resume = resumeMessage("dund stopped unexpectedly (a crash, or it was killed)", true, nil, nil)
 		}
 	}
 	if dropped > 0 {
@@ -711,7 +712,11 @@ type record struct {
 	Persist   bool     `json:"persist,omitempty"`
 	// Resume is the message the session's agent is woken with on the next
 	// start: it was working when dund stopped. Sent once, then cleared.
+	// With Ask set it waits for that question's answer instead.
 	Resume string `json:"resume,omitempty"`
+	// Ask is the ask_user question the stop cut: shown again on the next
+	// start, and its answer wakes the session (upgrade.go restoredReply).
+	Ask *proto.Ask `json:"ask,omitempty"`
 }
 
 func (s *Service) registryPath() string { return filepath.Join(s.dir, "sessions.json") }
@@ -746,7 +751,8 @@ func (s *Service) saveRegistry() error {
 	recs := make([]record, 0, len(s.sessions))
 	for _, ses := range s.sessions {
 		recs = append(recs, record{ID: ses.id, Workspace: ses.workspace, Owner: ses.owner,
-			Members: ses.members, Args: ses.args, Persist: ses.persist, Resume: ses.resumeNote()})
+			Members: ses.members, Args: ses.args, Persist: ses.persist, Resume: ses.resumeNote(),
+			Ask: ses.restoredAsk()})
 	}
 	s.mu.Unlock()
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
