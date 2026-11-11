@@ -86,7 +86,7 @@ func TestReleaseUpdate_StagesAndAsksDund(t *testing.T) {
 	body, _ := json.Marshal(m)
 	mux.HandleFunc("/dun-manifest.json", func(w http.ResponseWriter, _ *http.Request) { w.Write(body) })
 	mux.HandleFunc("/dun-manifest.json.minisig", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(update.Sign(priv, key.ID, body, "timestamp:1")))
+		w.Write([]byte(update.Sign(priv, key.ID, body, "dun v0.4.0 manifest")))
 	})
 	mux.HandleFunc("/dun_linux_amd64.tar.gz", func(w http.ResponseWriter, _ *http.Request) { w.Write(tb.Bytes()) })
 

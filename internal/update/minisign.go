@@ -142,16 +142,23 @@ func (k PublicKey) Verify(msg []byte, sig *Signature) error {
 
 // VerifyAny checks sig with whichever of keys it names, and returns that key.
 func VerifyAny(msg []byte, sigText string, keys []PublicKey) (PublicKey, error) {
+	k, _, err := verifyAnySig(msg, sigText, keys)
+	return k, err
+}
+
+// verifyAnySig is VerifyAny that also returns the parsed signature, for its
+// trusted comment.
+func verifyAnySig(msg []byte, sigText string, keys []PublicKey) (PublicKey, *Signature, error) {
 	sig, err := ParseSignature(sigText)
 	if err != nil {
-		return PublicKey{}, err
+		return PublicKey{}, nil, err
 	}
 	for _, k := range keys {
 		if k.ID == sig.KeyID {
-			return k, k.Verify(msg, sig)
+			return k, sig, k.Verify(msg, sig)
 		}
 	}
-	return PublicKey{}, fmt.Errorf("signed by key %s, which this build does not trust", PublicKey{ID: sig.KeyID}.IDString())
+	return PublicKey{}, nil, fmt.Errorf("signed by key %s, which this build does not trust", PublicKey{ID: sig.KeyID}.IDString())
 }
 
 // Sign makes a prehashed ("ED") minisign signature of msg, as `minisign -S`
