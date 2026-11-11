@@ -2,6 +2,7 @@ package dund
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,8 +72,17 @@ type session struct {
 	lastActive time.Time
 	inTurn     bool
 	asking     bool
-	jobs       []proto.JobInfo   // the running ones
-	agents     []proto.AgentInfo // the running ones
+	// ask is the open ask_user question (nil for a mount question): a
+	// restart does not wait for it, it is saved and shown again (restored).
+	ask *proto.Ask
+	// restored is the question the last stop cut, saved in the registry
+	// and shown to clients again (restoredEvs, appended to the log) with no
+	// engine asking it: the person's answer, or interrupt, goes to the
+	// agent as a message (upgrade.go restoredReply).
+	restored    *proto.Ask
+	restoredEvs []proto.Event
+	jobs        []proto.JobInfo   // the running ones
+	agents      []proto.AgentInfo // the running ones
 	// resume is the message a restart left for this session's agent: it was
 	// working when dund stopped, and is woken with it on the next start
 	// (persisted in the registry). Guarded by actMu, a leaf lock.
@@ -97,11 +107,20 @@ func (s *session) track(ev proto.Event) {
 	case *proto.Turn:
 		s.inTurn = true
 	case *proto.Done, *proto.Error:
-		s.inTurn = false
-	case *proto.Ask, *proto.Mount:
+		// A question the turn asked ends with it, however it ended (an
+		// interrupted ask_user sends no answered), as the clients take it.
+		s.inTurn, s.asking, s.ask = false, false, nil
+	case *proto.Ask:
 		s.asking = true
+		c := *p
+		s.ask = &c
+		// The engine asks again, or something new: that question is the
+		// open one now, as a client shows it.
+		s.restored, s.restoredEvs = nil, nil
+	case *proto.Mount:
+		s.asking, s.ask = true, nil
 	case *proto.Answered:
-		s.asking = false
+		s.asking, s.ask = false, nil
 	case *proto.Workspace:
 		// The in-place Worktree that a session without --worktree makes reports the workspace
 		// itself: that is no worktree.
@@ -127,7 +146,7 @@ func (s *session) track(ev proto.Event) {
 		}
 	case *proto.EngineState:
 		if p.State != "started" {
-			s.inTurn, s.asking, s.jobs, s.agents = false, false, nil, nil
+			s.inTurn, s.asking, s.ask, s.jobs, s.agents = false, false, nil, nil, nil
 		}
 	}
 }
@@ -151,8 +170,10 @@ func (s *session) idle(d time.Duration) bool {
 	return running && !s.occupied() && time.Since(s.lastActive) >= d
 }
 
-// waiting is what a restart would cut short in this session, one entry per
-// thing, for a pending upgrade to name.
+// waiting is what a pending upgrade waits for in this session, one entry
+// per thing, for it to name. An open ask_user question is not in it (Carl
+// 2026-11-10): a stop saves it and the next dund asks it again
+// (prepareStop); the turn around it waits only on the person.
 func (s *session) waiting() []proto.UpgradeWait {
 	s.mu.Lock()
 	running := s.running
@@ -164,7 +185,8 @@ func (s *session) waiting() []proto.UpgradeWait {
 	defer s.actMu.Unlock()
 	var out []proto.UpgradeWait
 	switch {
-	case s.asking:
+	case s.asking && s.ask != nil:
+	case s.asking: // a mount question: not saved, so it holds as a turn does
 		out = append(out, proto.UpgradeWait{Session: s.id, What: "question", Hint: "answer it, or interrupt the turn"})
 	case s.inTurn:
 		out = append(out, proto.UpgradeWait{Session: s.id, What: "turn", Hint: "interrupt it"})
@@ -178,6 +200,19 @@ func (s *session) waiting() []proto.UpgradeWait {
 			Hint: "interrupt the turn"})
 	}
 	return out
+}
+
+// openAsk is the open ask_user question, or nil.
+func (s *session) openAsk() *proto.Ask {
+	s.mu.Lock()
+	running := s.running
+	s.mu.Unlock()
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	if !running || !s.asking {
+		return nil
+	}
+	return s.ask
 }
 
 // touch marks the session used now (a command, a subscribe).
@@ -363,8 +398,12 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 	go s.readEvents(eng, s.engDone, sc)
 }
 
-// send writes a command to the engine, starting it first if need be.
+// send writes a command to the engine, starting it first if need be. An
+// answer or interrupt for a restored question is dund's to handle.
 func (s *session) send(c proto.Command) error {
+	if done, err := s.restoredReply(c); done {
+		return err
+	}
 	s.touch()
 	if err := s.ensureRunning(); err != nil {
 		return err
@@ -460,6 +499,14 @@ func (s *session) subscribe(after uint64, epoch string) (*proto.Event, []proto.E
 	// would otherwise be lost.
 	last := s.log.Last()
 	state := s.log.State()
+	// A restored question is no engine event a snapshot keeps: it goes with
+	// the state, so a client that reconnects after the restart shows it.
+	s.actMu.Lock()
+	if evs := s.restoredEvs; len(evs) > 0 {
+		state = append(state, evs...)
+		slices.SortFunc(state, func(a, b proto.Event) int { return cmp.Compare(a.Seq, b.Seq) })
+	}
+	s.actMu.Unlock()
 	items := dun.SessionHistory(dun.SessionFile(s.workspace, s.id))
 	replay, sub, err = s.log.Subscribe(last, subBuffer)
 	if err != nil {

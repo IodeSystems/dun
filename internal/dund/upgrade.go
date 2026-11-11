@@ -16,8 +16,8 @@ import (
 
 // A coordinated upgrade. When a new build is in place (dund's own binary was
 // replaced, or a client of another build asked), dund does not restart at
-// once: a restart stops every engine, which would cut a turn, a question, a
-// job or a sub-agent short. It becomes pending instead, tells every
+// once: a restart stops every engine, which would cut a turn, a job or a
+// sub-agent short. It becomes pending instead, tells every
 // connection what it waits for (proto.UpgradeStatus), and restarts when that
 // is done — or when someone says "now", or after upgradeGrace. A restart that
 // cuts work short interrupts the turns with the reason, records in the
@@ -26,12 +26,37 @@ import (
 // planned stops (SIGTERM, a service restart) record and resume the same way
 // (PrepareStop).
 //
+// An open ask_user question does not hold it (Carl 2026-11-10): the turn
+// around it waits on the person, not on work, and the question survives
+// the restart. The stop interrupts that turn and saves the question (its
+// proto.Ask, whole) in the registry; the next dund shows it again to every
+// client as an open question in a turn (showRestored) and does not wake
+// the agent. The person's answer wakes it with a user message, `[automatic]
+// Answer to your question "<question>": <answer>` — a new message, not the
+// ask_user result (Carl accepted). An interrupt instead ends the shown turn
+// and leaves a quiet note, as an interrupted question starts no turn. What
+// else the stop cut (jobs, sub-agents) goes with the answer or the note:
+// the agent could not act on it before. A question beside running jobs or
+// sub-agents is saved the same way; those still hold the upgrade. A mount
+// question is not saved and holds as a turn does.
+//
 // The busy sessions are told (USER 2026-10-28): each one with a turn, a
 // question, jobs or sub-agents gets a notice, once, that an upgrade waits
-// for it — finish the step, end the turn — and wakes for it if idle. After
-// the restart, one that wrapped up is woken with "done, resume"; one the
-// restart cut short gets the resume message that says what was cut. If the
-// upgrade fails, they are told to carry on.
+// for it — finish the step, end the turn. After the restart, one that
+// wrapped up is woken with "done, resume"; one the restart cut short gets
+// the resume message that says what was cut. If the upgrade fails, they are
+// told to carry on.
+//
+// While it is pending, nothing on dund's side starts a turn (Carl
+// 2026-11-10): a turn started now is one more thing the restart waits for.
+// One exception: an idle session with background jobs or sub-agents the
+// upgrade waits for is woken by its wrap-up notice, once per pending
+// upgrade, to wrap them up (the 2026-10-28 "and wakes for it if idle").
+// Otherwise the notices are quiet (proto.ServiceNotice.Quiet): to a running
+// turn, and the "did not happen" one; a session with nothing running is not
+// told at all. Scheduled messages and loops are held (schedule.go): they
+// keep their time and fire once when the hold ends, in the next dund or
+// after a failed upgrade.
 
 // Variables so tests can shorten them.
 var (
@@ -244,10 +269,11 @@ func (s *Service) failUpgrade(err error) {
 		ses.noticed, ses.resume = false, ""
 		ses.actMu.Unlock()
 		if was {
-			_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Text: "The dun upgrade you were told about did not happen (" +
+			_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: "The dun upgrade you were told about did not happen (" +
 				err.Error() + "); dun keeps running as it was. Carry on."}))
 		}
 	}
+	s.sched.poke() // the held firings go now (schedule.go)
 }
 
 // noticeBusy tells each session the pending upgrade waits for, once, to wrap
@@ -264,6 +290,7 @@ func (s *Service) noticeBusy(version string, left time.Duration) {
 			continue
 		}
 		ses.noticed = true
+		inTurn := ses.inTurn
 		ses.actMu.Unlock()
 		mins := int(left.Minutes() + 0.5)
 		text := fmt.Sprintf("dun is about to be upgraded to %s: dund restarts as soon as this session is idle — no turn "+
@@ -271,7 +298,11 @@ func (s *Service) noticeBusy(version string, left time.Duration) {
 			"background jobs are killed. Finish the step you are on, leave the work where it resumes cleanly, let your "+
 			"background jobs finish or stop the ones you do not need, and end your turn. You will be told when it is done.",
 			strings.TrimPrefix(orBuild(version), "build "), max(1, mins))
-		_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Text: text}))
+		// Quiet to a running turn, which reads it anyway: a wake would only
+		// start one more turn after it. An idle session here has jobs or
+		// sub-agents the upgrade waits for, and is woken, once (noticed), to
+		// wrap them up (USER 2026-10-28; Carl 2026-11-10).
+		_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: inTurn, Text: text}))
 	}
 }
 
@@ -289,13 +320,10 @@ func orBuild(v string) string {
 // Idle sessions are left as they are. The caller then stops the service.
 func (s *Service) PrepareStop(why string) {
 	var wg sync.WaitGroup
-	flagged := 0
 	for _, ses := range s.all() {
-		w := ses.waiting()
-		if len(w) == 0 {
+		if len(ses.waiting()) == 0 && ses.openAsk() == nil {
 			continue
 		}
-		flagged++
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -303,8 +331,9 @@ func (s *Service) PrepareStop(why string) {
 		}()
 	}
 	wg.Wait()
+	flagged := 0
 	for _, ses := range s.all() { // also the ones told to wrap up, which did
-		if ses.resumeNote() != "" && len(ses.waiting()) == 0 {
+		if ses.resumeNote() != "" || ses.restoredAsk() != nil {
 			flagged++
 		}
 	}
@@ -317,10 +346,12 @@ func (s *Service) PrepareStop(why string) {
 }
 
 // prepareStop interrupts this session's turn (if any) and records what it
-// was doing for the next start.
+// was doing for the next start. An open ask_user question is saved: the
+// next dund shows it again, and the agent is woken by its answer, not by
+// the resume message, which waits for that answer (restoredReply).
 func (s *session) prepareStop(why string) {
 	s.actMu.Lock()
-	turn, asking := s.inTurn, s.asking
+	turn, asking, ask := s.inTurn, s.asking, s.ask
 	jobs, agents := slices.Clone(s.jobs), slices.Clone(s.agents)
 	s.actMu.Unlock()
 	if turn || asking {
@@ -342,7 +373,114 @@ func (s *session) prepareStop(why string) {
 		// restoredAgentsNote): saying "stopped" here would be wrong.
 		agents = nil
 	}
-	s.setResume(resumeMessage(why, turn || asking, asking, jobs, agents))
+	if ask != nil {
+		note := ""
+		if len(jobs) > 0 || len(agents) > 0 {
+			note = resumeMessage(why, false, jobs, agents)
+		}
+		s.actMu.Lock()
+		s.restored, s.restoredEvs, s.resume = ask, nil, note
+		s.actMu.Unlock()
+		return
+	}
+	s.setResume(resumeMessage(why, turn || asking, jobs, agents))
+}
+
+func (s *session) restoredAsk() *proto.Ask {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	return s.restored
+}
+
+// showRestored puts the restored question in the session's log as a turn
+// waiting on it, so every client shows it as it shows any open question
+// (and can answer it, or interrupt the turn to dismiss it). No engine runs
+// that turn: dund ends it (restoredReply).
+func (s *session) showRestored() {
+	s.actMu.Lock()
+	r := s.restored
+	shown := len(s.restoredEvs) > 0
+	s.actMu.Unlock()
+	if r == nil || shown {
+		return
+	}
+	// Appended with actMu released: it is a leaf lock. One caller at a
+	// time (the start's resumeFlagged, or a failed reply).
+	q := *r
+	evs := []proto.Event{s.log.Append(proto.NewEvent(&proto.Turn{Kind: "user"})), s.log.Append(proto.NewEvent(&q))}
+	s.actMu.Lock()
+	if s.restored == r {
+		s.restoredEvs = evs
+	}
+	s.actMu.Unlock()
+}
+
+// restoredReply handles c when it answers or interrupts the restored
+// question (done), and lets anything else through to the engine. The answer
+// wakes the agent with a user message; an interrupt ends the shown turn and
+// leaves the agent a quiet note, as an interrupted question starts no turn.
+// Either way the resume note held with the question goes with it.
+func (s *session) restoredReply(c proto.Command) (done bool, err error) {
+	s.actMu.Lock()
+	q := s.restored
+	// The engine's own open question, or its running turn, takes these.
+	if q == nil || s.asking || s.inTurn {
+		s.actMu.Unlock()
+		return false, nil
+	}
+	var answer *proto.Answer
+	switch p := c.Payload.(type) {
+	case *proto.Answer:
+		answer = p
+	case *proto.Interrupt:
+	default:
+		s.actMu.Unlock()
+		return false, nil
+	}
+	note := s.resume
+	s.restored, s.restoredEvs, s.resume = nil, nil, ""
+	s.actMu.Unlock()
+	if answer != nil {
+		s.log.Append(proto.NewEvent(&proto.Answered{Value: answer.Value}))
+		err = s.send(proto.NewCommand("", &proto.User{Content: answerMessage(q.Question, answer.Value, note)}))
+	} else {
+		s.log.Append(proto.NewEvent(&proto.Done{Reason: "interrupted", Detail: "question dismissed"}))
+		err = s.send(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: dismissedNote(q.Question, note)}))
+	}
+	if err != nil {
+		// Not delivered: it stays for the next try (a retry asks again).
+		s.actMu.Lock()
+		if s.restored == nil {
+			s.restored, s.resume = q, note
+		}
+		s.actMu.Unlock()
+		s.showRestored()
+		return true, err
+	}
+	if err := s.svc.saveRegistry(); err != nil {
+		log.Printf("dund: registry: %v", err)
+	}
+	return true, nil
+}
+
+// answerMessage is the user message a restored question's answer wakes the
+// agent with; note is what the stop cut besides (resumeMessage), if anything.
+func answerMessage(question, answer, note string) string {
+	m := resumePrefix + "Answer to your question \"" + question + "\": " + answer
+	if note != "" {
+		m += "\n" + strings.TrimPrefix(note, resumePrefix)
+	}
+	return m
+}
+
+// dismissedNote is what the agent is told when the person interrupts a
+// restored question instead of answering it.
+func dismissedNote(question, note string) string {
+	m := "Your question \"" + question + "\" (asked before dund restarted) was dismissed without an answer."
+	if note != "" {
+		m += " " + strings.TrimPrefix(note, resumePrefix)
+	}
+	return m
 }
 
 func (s *session) setResume(msg string) {
@@ -359,16 +497,13 @@ func (s *session) resumeNote() string {
 
 // resumeMessage is what a session's agent is woken with after a stop that
 // cut its work short: what happened, what was lost, and to carry on.
-func resumeMessage(why string, turn, asking bool, jobs []proto.JobInfo, agents []proto.AgentInfo) string {
+func resumeMessage(why string, turn bool, jobs []proto.JobInfo, agents []proto.AgentInfo) string {
 	var b strings.Builder
 	b.WriteString(resumePrefix + why + " while you were working")
 	if turn {
 		b.WriteString("; your turn was interrupted at the point above")
 	}
 	b.WriteString(".")
-	if asking {
-		b.WriteString(" Your question to the user (ask_user) was cut before it was answered: ask it again if you still need the answer.")
-	}
 	if len(jobs) > 0 {
 		list := make([]string, len(jobs))
 		for i, j := range jobs {
@@ -400,10 +535,15 @@ var crashedMidTurn = func(workspace, id string) bool {
 
 // resumeFlagged wakes every session the last stop flagged: its engine
 // starts and gets the resume message as a user message. The flag is cleared
-// once sent, so it is sent once.
+// once sent, so it is sent once. A session with a restored question is not
+// woken: the question is shown again, and its answer wakes it.
 func (s *Service) resumeFlagged() {
 	sent := 0
 	for _, ses := range s.all() {
+		if ses.restoredAsk() != nil {
+			ses.showRestored()
+			continue
+		}
 		msg := ses.resumeNote()
 		if msg == "" {
 			continue

@@ -34,8 +34,12 @@ func init() {
 // itself (internal/dund/upgrade.go): an upgrade is coming and the session
 // should wrap up its work, or the upgrade is done and it can resume. The
 // engine hands it to the model, labelled as dun's, and wakes it if idle.
+// Quiet: it wakes nothing — it reaches a running turn (in its next tool
+// result, or by freeing a wait) or rides the next turn that starts for
+// another reason; an idle session is not woken for it.
 type ServiceNotice struct {
-	Text string `json:"text"`
+	Text  string `json:"text"`
+	Quiet bool   `json:"quiet,omitempty"`
 }
 
 // JobUsageReq asks what background job Job's processes are doing: their

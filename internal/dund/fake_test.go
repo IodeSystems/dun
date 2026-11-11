@@ -88,7 +88,7 @@ func (e *fakeEngine) run(id string) {
 	e.emit(enc, &proto.Session{ID: id})
 	e.emit(enc, &proto.Ready{Tools: []string{"exec"}})
 	sc := bufio.NewScanner(e.in)
-	slow := false
+	slow, asking := false, false
 	for sc.Scan() {
 		var c proto.Command
 		if json.Unmarshal(sc.Bytes(), &c) != nil {
@@ -121,6 +121,12 @@ func (e *fakeEngine) run(id string) {
 					e.emit(enc, &proto.Done{})
 				}
 				continue
+			case "ask": // a turn that asks the user (ask_user) and waits for the answer
+				e.emit(enc, &proto.UserEcho{Content: p.Content})
+				e.emit(enc, &proto.Turn{Kind: "user"})
+				e.emit(enc, &proto.Ask{Question: "Which one?", Options: []string{"a", "b"}, NoCustom: true})
+				slow, asking = true, true
+				continue
 			case "job": // a background job, running until "endjob"
 				e.emit(enc, &proto.Jobs{Jobs: []proto.JobInfo{{ID: 3, Command: "go test ./...", State: "running"}}})
 				continue
@@ -132,6 +138,13 @@ func (e *fakeEngine) run(id string) {
 			e.emit(enc, &proto.Turn{Kind: "user"})
 			e.emit(enc, &proto.Message{Role: "assistant", Content: "re: " + p.Content})
 			e.emit(enc, &proto.Done{})
+		case *proto.Answer:
+			e.sp.record("answer " + id + ": " + p.Value)
+			if asking {
+				asking, slow = false, false
+				e.emit(enc, &proto.Answered{Value: p.Value})
+				e.emit(enc, &proto.Done{})
+			}
 		case *proto.PeerMsg:
 			e.sp.record(fmt.Sprintf("peer %s: from %s (%s) wake=%v: %s", id, p.FromName, p.From, p.Wake, p.Text))
 		case *proto.AgentCmd:
@@ -139,14 +152,20 @@ func (e *fakeEngine) run(id string) {
 		case *proto.ServersChanged:
 			e.sp.record("servers " + id)
 		case *proto.ServiceNotice:
-			e.sp.record("notice " + id + ": " + p.Text)
+			// dund's notices are quiet (they start no turn); one that would
+			// wake the engine is recorded apart, so a test sees it.
+			if p.Quiet {
+				e.sp.record("notice " + id + ": " + p.Text)
+			} else {
+				e.sp.record("waking notice " + id + ": " + p.Text)
+			}
 		case *proto.PeerReply:
 			b, _ := json.Marshal(p)
 			e.sp.record("reply " + id + ": " + string(b))
 		case *proto.Interrupt:
 			e.sp.record("interrupt " + id + ": " + p.Reason)
 			if slow {
-				slow = false
+				slow, asking = false, false
 				e.emit(enc, &proto.Done{Reason: "interrupted"})
 			}
 		case *proto.Stop:

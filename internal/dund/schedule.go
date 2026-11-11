@@ -45,6 +45,13 @@ import (
 // time, or it has not, and selfPaceDefault applies and the person is told.
 // Missed firings (dund was down) are not replayed as a burst: the next
 // firing counts from when the late one actually went.
+//
+// While an upgrade is pending nothing fires (held; Carl 2026-11-10): a
+// firing starts a turn, or adds to one, and that delays the restart the
+// upgrade waits for. A held entry keeps its At, so it is due the moment the
+// hold ends — in the next dund, which loads it due from schedule.json, or in
+// this one when the upgrade fails (poke) — and fires once however many runs
+// it missed, as after any downtime.
 
 // Variables so tests can shorten them.
 var (
@@ -93,6 +100,8 @@ type scheduler struct {
 	// it is ErrNoSession (the session is gone, and so is the entry).
 	busy    func(session string) bool
 	deliver func(e schedEntry) error
+	// held reports that nothing may fire now (an upgrade is pending).
+	held func() bool
 
 	saveMu sync.Mutex // orders writes, as Service.saveMu does
 
@@ -104,7 +113,8 @@ type scheduler struct {
 
 func loadScheduler(path string, now func() time.Time) (*scheduler, error) {
 	sc := &scheduler{path: path, now: now, entries: map[int]*schedEntry{}, kick: make(chan struct{}, 1),
-		busy: func(string) bool { return false }, deliver: func(schedEntry) error { return nil }}
+		busy: func(string) bool { return false }, deliver: func(schedEntry) error { return nil },
+		held: func() bool { return false }}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return sc, nil
@@ -171,7 +181,9 @@ func (sc *scheduler) run(done <-chan struct{}) {
 	for {
 		sc.fireDue()
 		wait := schedMaxWait
-		if at, ok := sc.earliest(); ok {
+		// Held, a due entry stays due: waiting for it would spin. The hold
+		// ends with a poke (or the next dund).
+		if at, ok := sc.earliest(); ok && !sc.held() {
 			wait = min(wait, max(0, at.Sub(sc.now())))
 		}
 		t := time.NewTimer(wait)
@@ -200,8 +212,12 @@ func (sc *scheduler) earliest() (time.Time, bool) {
 }
 
 // fireDue fires every entry due now, earliest first (ties by id, which is
-// the order they were made), and returns what it fired.
+// the order they were made), and returns what it fired. Held, it fires
+// nothing and moves nothing.
 func (sc *scheduler) fireDue() []schedEntry {
+	if sc.held() {
+		return nil
+	}
 	now := sc.now()
 	sc.mu.Lock()
 	var due []schedEntry

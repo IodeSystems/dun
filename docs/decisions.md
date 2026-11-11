@@ -682,6 +682,30 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   that comes first on PATH is named, never deleted. Release → source is
   `make install` in the checkout: dun downloads and builds nothing for it.
   Details: `sessions-and-dund.md`, Release and source channels.
+- **Carl: questions don't hold an upgrade; idle actions wait for it
+  (2026-11-10).** Questions: a turn waiting on an `ask_user` question waits
+  on the person, so it no longer holds a restart (it held for up to
+  `upgradeGrace`, then the agent was told to ask again). The stop saves the
+  question in the registry; the next dund shows it again and the answer
+  arrives as a new `[automatic]` user message, not as the tool result —
+  Carl accepted that; the engine that asked is gone, and a message needs no
+  engine to keep a call open across the restart. Interrupting it leaves a
+  quiet note: an interrupted question starts no turn today either. Idle
+  actions: while an upgrade is pending dund starts no
+  turn, because each turn is one more thing the restart waits for. The
+  scheduler fires nothing (`scheduler.held`); a held entry keeps its `At`,
+  so `schedule.json` already carries the hold across the restart, and the
+  next dund fires each held entry once (missed loop runs are not replayed,
+  as after any downtime). A failed upgrade pokes the scheduler. One
+  exception, Carl's choice: an idle session with background jobs or
+  sub-agents the upgrade waits for is woken by the wrap-up notice, once per
+  pending upgrade, so it can wrap them up (the 2026-10-28 "wakes for it if
+  idle" stands for them); a turn would otherwise wait for its jobs or the
+  grace period. The wrap-up notice to a running turn and the "did not
+  happen" notice are quiet; a session with nothing running is not told.
+  Not covered: the engine's own wakes (a
+  job finishing, an aside escalating, a tool server's wake) and a peer's
+  `dun_msg` with wake; they are not idle actions of dund's.
 
 ## Sessions, supervision and diagnosis
 

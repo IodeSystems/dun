@@ -205,3 +205,21 @@ func TestServiceNotice_QueuedAsDunsAndWakes(t *testing.T) {
 		t.Error("an idle session should be woken for it")
 	}
 }
+
+// A quiet service notice is dun's word too, but no news worth a turn: an
+// idle session is not woken for it (a pending upgrade must not start turns).
+func TestServiceNoticeQuiet_QueuedAndWakesNothing(t *testing.T) {
+	h := testHarness(t)
+	h.ServiceNoticeQuiet("dun is about to be upgraded")
+	h.noteMu.Lock()
+	q := append([]queued(nil), h.queue...)
+	h.noteMu.Unlock()
+	if len(q) != 1 || q[0].kind != queuedServiceQuiet || q[0].policy().prefix != "[dun] " || q[0].policy().causesTurn {
+		t.Fatalf("queued: %+v", q)
+	}
+	select {
+	case <-h.wake:
+		t.Error("an idle session was woken")
+	default:
+	}
+}
