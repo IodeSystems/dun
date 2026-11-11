@@ -49,11 +49,14 @@ import (
 //
 // While it is pending, nothing on dund's side starts a turn (Carl
 // 2026-11-10): a turn started now is one more thing the restart waits for.
-// The notices are quiet (proto.ServiceNotice.Quiet): a running turn reads
-// one, an idle session — one with only jobs or sub-agents — is not woken by
-// it; this replaces the 2026-10-28 "and wakes for it if idle". Scheduled
-// messages and loops are held (schedule.go): they keep their time and fire
-// once when the hold ends, in the next dund or after a failed upgrade.
+// One exception: an idle session with background jobs or sub-agents the
+// upgrade waits for is woken by its wrap-up notice, once per pending
+// upgrade, to wrap them up (the 2026-10-28 "and wakes for it if idle").
+// Otherwise the notices are quiet (proto.ServiceNotice.Quiet): to a running
+// turn, and the "did not happen" one; a session with nothing running is not
+// told at all. Scheduled messages and loops are held (schedule.go): they
+// keep their time and fire once when the hold ends, in the next dund or
+// after a failed upgrade.
 
 // Variables so tests can shorten them.
 var (
@@ -287,6 +290,7 @@ func (s *Service) noticeBusy(version string, left time.Duration) {
 			continue
 		}
 		ses.noticed = true
+		inTurn := ses.inTurn
 		ses.actMu.Unlock()
 		mins := int(left.Minutes() + 0.5)
 		text := fmt.Sprintf("dun is about to be upgraded to %s: dund restarts as soon as this session is idle — no turn "+
@@ -294,9 +298,11 @@ func (s *Service) noticeBusy(version string, left time.Duration) {
 			"background jobs are killed. Finish the step you are on, leave the work where it resumes cleanly, let your "+
 			"background jobs finish or stop the ones you do not need, and end your turn. You will be told when it is done.",
 			strings.TrimPrefix(orBuild(version), "build "), max(1, mins))
-		// Quiet: a turn running gets it, an idle session is not woken by it
-		// (a turn started now would be one more thing the upgrade waits for).
-		_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: text}))
+		// Quiet to a running turn, which reads it anyway: a wake would only
+		// start one more turn after it. An idle session here has jobs or
+		// sub-agents the upgrade waits for, and is woken, once (noticed), to
+		// wrap them up (USER 2026-10-28; Carl 2026-11-10).
+		_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: inTurn, Text: text}))
 	}
 }
 

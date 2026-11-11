@@ -516,28 +516,33 @@ func TestUpgradeHoldsSchedAcrossTheRestart(t *testing.T) {
 	}
 }
 
-// The wrap-up notice wakes no idle session: one with only a background job
-// (no turn) is told quietly, and is not started on a turn.
-func TestUpgradeNoticeWakesNoIdleSession(t *testing.T) {
+// The one wake while an upgrade is pending: an idle session with only a
+// background job is woken by the wrap-up notice, exactly once, to wrap it
+// up; an idle session with nothing running is not told or woken.
+func TestUpgradeNoticeWakesOnlyIdleJobSessionsOnce(t *testing.T) {
 	fastUpgrade(t)
 	svc, sp, _ := newSvc(t)
 	id, _ := svc.Create(alice, t.TempDir(), nil, "")
 	_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "job"}))
 	ses, _ := svc.Get(alice, id)
 	waitFor(t, func() bool { return len(ses.waiting()) == 1 })
+	idle, _ := svc.Create(alice, t.TempDir(), nil, "")
 	_ = svc.RequestUpgrade("/x/dun", "v2")
-	waitRecord(t, sp, "notice "+id+": ")
-	time.Sleep(5 * upgradePoll)
+	waitRecord(t, sp, "waking notice "+id+": ")
+	time.Sleep(10 * upgradePoll)
+	n := 0
 	for _, r := range sp.received() {
-		if strings.HasPrefix(r, "waking notice ") {
-			t.Fatalf("a notice that wakes: %q", r)
+		switch {
+		case strings.HasPrefix(r, "waking notice "+id+": "):
+			n++
+		case strings.Contains(r, "notice "+idle+": ") || strings.HasPrefix(r, "user "+idle):
+			t.Fatalf("the session with nothing running: %q", r)
+		case strings.HasPrefix(r, "notice "+id+": "):
+			t.Fatalf("also told quietly: %q", r)
 		}
 	}
-	ses.actMu.Lock()
-	inTurn := ses.inTurn
-	ses.actMu.Unlock()
-	if inTurn {
-		t.Fatal("the idle session was started on a turn")
+	if n != 1 {
+		t.Fatalf("woken %d times", n)
 	}
 	// The job ends; the upgrade with it (its loop must not outlive the test).
 	_ = svc.Send(alice, id, proto.NewCommand("", &proto.User{Content: "endjob"}))

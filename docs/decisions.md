@@ -696,11 +696,14 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   scheduler fires nothing (`scheduler.held`); a held entry keeps its `At`,
   so `schedule.json` already carries the hold across the restart, and the
   next dund fires each held entry once (missed loop runs are not replayed,
-  as after any downtime). A failed upgrade pokes the scheduler. The wrap-up
-  notice and the "did not happen" notice are quiet: an idle session with
-  only jobs or sub-agents is told and not woken — this reverses the
-  2026-10-28 "wakes for it if idle"; its jobs hold the upgrade until they
-  end or the grace period cuts them. Not covered: the engine's own wakes (a
+  as after any downtime). A failed upgrade pokes the scheduler. One
+  exception, Carl's choice: an idle session with background jobs or
+  sub-agents the upgrade waits for is woken by the wrap-up notice, once per
+  pending upgrade, so it can wrap them up (the 2026-10-28 "wakes for it if
+  idle" stands for them); a turn would otherwise wait for its jobs or the
+  grace period. The wrap-up notice to a running turn and the "did not
+  happen" notice are quiet; a session with nothing running is not told.
+  Not covered: the engine's own wakes (a
   job finishing, an aside escalating, a tool server's wake) and a peer's
   `dun_msg` with wake; they are not idle actions of dund's.
 
