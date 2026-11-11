@@ -123,6 +123,15 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   described `exec` with no backend, and quoted no deadline. Values (the exec
   grace) are interpolated from the constant, so the promise cannot drift from
   the code.
+- **The system prompt teaches bubbleteandmd's directive forms (Carl,
+  2026-11-11).** `prompt.Format(prompt.Options{})` (Math and Diagrams off: the
+  TUI shows math and mermaid as code) follows `replyFormatSystem`
+  (`replyformat.go`): 2,000 characters, about 500 tokens by chars/4, fixed text
+  so it keeps the cache. On by default; off with `DUN_FORMAT_PROMPT=0`
+  (`Config.NoFormatPrompt`, env only, like `DUN_USER_RULES`). Absent in a
+  sub-agent (its reply goes to the parent model) and under `--non-interactive`
+  (no one reads along), so the Harbor adapter, which uses both, never has it;
+  it also sets `DUN_FORMAT_PROMPT=0` itself. Present in `--no-tools` chat.
 - **Tool docs prescribe only the habit that bites.** `toolDocs["node_query"]`
   (`mcp.go`) was written from a corpus of 39 distinct failing selectors: 25 were
   a bare file path where an id belongs, 8 a grep pattern quoted twice. Those

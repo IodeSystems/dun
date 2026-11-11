@@ -779,6 +779,9 @@ func main() {
 	// The user's rules files are read in every session (dun/rules.go).
 	// DUN_USER_RULES=0: not (the Harbor adapter's default).
 	cfg.NoUserRules = os.Getenv("DUN_USER_RULES") == "0"
+	// The answer-formatting prompt (bubbleteandmd's directive forms) is in
+	// every session shown to a person. DUN_FORMAT_PROMPT=0: not.
+	cfg.NoFormatPrompt = os.Getenv("DUN_FORMAT_PROMPT") == "0"
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}
