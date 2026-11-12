@@ -21,10 +21,19 @@ func planHarness(t *testing.T, file bool) *Harness {
 	return h
 }
 
-func planCall(t *testing.T, h *Harness, args string) string {
+func planCall(t *testing.T, h *Harness, name, args string) string {
 	t.Helper()
-	_, handle := h.planTool()
-	return handle(context.Background(), args)
+	return h.planTools().Dispatch(context.Background(), name, args)
+}
+
+// planAddDesc is plan_add's description as a root session offers it.
+func planAddDesc(h *Harness) string {
+	for _, d := range h.planDefs(h.planTools()) {
+		if d.Function.Name == "plan_add" {
+			return d.Function.Description
+		}
+	}
+	return ""
 }
 
 func queuedTexts(h *Harness) []string {
@@ -39,7 +48,7 @@ func queuedTexts(h *Harness) []string {
 
 func TestPlan_PersistsBesideTheSession(t *testing.T) {
 	h := planHarness(t, true)
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
 	if _, err := h.PlanCmd(context.Background(), "mode on"); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +74,7 @@ func TestPlan_PersistsBesideTheSession(t *testing.T) {
 
 func TestPlan_InMemoryWithoutAFile(t *testing.T) {
 	h := planHarness(t, false)
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
 	if len(h.Plan().Rows) != 1 {
 		t.Error("plan lost")
 	}
@@ -75,13 +84,16 @@ func TestPlan_InMemoryWithoutAFile(t *testing.T) {
 }
 
 func TestPlan_ToolIsAGroupAndNamesNeitherModeNorFilesInTheGraph(t *testing.T) {
-	if g := groupOfTool("plan"); g != "plan" {
-		t.Errorf("group of plan: %s", g)
+	if g := groupOfTool("plan_add"); g != "plan" {
+		t.Errorf("group of plan_add: %s", g)
 	}
 	h := planHarness(t, false)
-	d, _ := h.planTool()
-	if !strings.Contains(d.Function.Description, "plan mode") || !strings.Contains(d.Function.Description, "details") || strings.Contains(d.Function.Description, "goal") || strings.Contains(d.Function.Description, "list files") {
-		t.Errorf("the host's note is missing: %s", d.Function.Description)
+	desc := planAddDesc(h)
+	if !strings.Contains(desc, "plan mode") || !strings.Contains(desc, "details") || strings.Contains(desc, "goal") || strings.Contains(desc, "list files") {
+		t.Errorf("the host's note is missing: %s", desc)
+	}
+	if got := groupOfTool("plan_show"); got != "plan" {
+		t.Errorf("group of plan_show: %s", got)
 	}
 }
 
@@ -89,7 +101,7 @@ func TestPlan_ChangesWorkspace(t *testing.T) {
 	for name, want := range map[string]bool{
 		"exec": true, "file_edit": true, "file_write": true, "file_delete": true, "file_move": true,
 		"agent": true, "mount": true, "loop_ctl": true, "dun_msg": true,
-		"file_read": false, "file_grep": false, "file_list": false, "plan": false, "ask_user": false, "session": false,
+		"file_read": false, "file_grep": false, "file_list": false, "plan_add": false, "plan_close": false, "ask_user": false, "session": false,
 		"read_saved": false, "recap": false, "skill": false, "memory": false, "jobs": false, "tell_parent": false, "dun_list": false,
 	} {
 		if got := changesWorkspace(name, ""); got != want {
@@ -145,14 +157,14 @@ func TestPlan_GateRefusesUntilApproved(t *testing.T) {
 	if _, err := h.PlanCmd(ctx, "approve"); err == nil {
 		t.Error("approved an empty plan")
 	}
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
 	if _, err := h.PlanCmd(ctx, "approve"); err != nil {
 		t.Fatal(err)
 	}
 	if out := run("exec"); out != "ok" {
 		t.Errorf("approved: %s", out)
 	}
-	planCall(t, h, `{"action":"add","title":"b","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"b","done_when":"x"}`)
 	if out := run("exec"); out != "ok" {
 		t.Errorf("after a tool edit the approval was lost: %s", out)
 	}
@@ -175,8 +187,8 @@ func TestPlan_TurnLine(t *testing.T) {
 	if q := queuedTexts(h); len(q) != 0 {
 		t.Errorf("a line for an empty plan: %v", q)
 	}
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
-	planCall(t, h, `{"action":"add","title":"b","done_when":"x","needs":["1"]}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"b","done_when":"x","needs":["1"]}`)
 	// Tool calls add nothing to the queue.
 	if q := queuedTexts(h); len(q) != 0 {
 		t.Errorf("a tool call queued a line: %v", q)
@@ -192,17 +204,17 @@ func TestPlan_TurnLine(t *testing.T) {
 	}
 	// A turn begins: one line, read at the tail with the turn.
 	h.queue = nil
-	planCall(t, h, `{"action":"update","id":"1","status":"doing"}`)
-	planCall(t, h, `{"action":"done","id":"1","account":"ok"}`)
-	planCall(t, h, `{"action":"update","id":"2","status":"doing"}`)
-	planCall(t, h, `{"action":"done","id":"2","account":"ok"}`)
+	planCall(t, h, "plan_update", `{"id":"1","status":"doing"}`)
+	planCall(t, h, "plan_close", `{"outcome":"done","id":"1","account":"ok"}`)
+	planCall(t, h, "plan_update", `{"id":"2","status":"doing"}`)
+	planCall(t, h, "plan_close", `{"outcome":"done","id":"2","account":"ok"}`)
 	h.planTurnLine()
 	if q := queuedTexts(h); len(q) != 0 {
 		t.Errorf("a line with nothing open: %v", q)
 	}
 	// A child has none.
 	h.parent = &Harness{}
-	planCall(t, h, `{"action":"add","title":"c","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"c","done_when":"x"}`)
 	h.planTurnLine()
 	if q := queuedTexts(h); len(q) != 0 {
 		t.Errorf("a child got a line: %v", q)
@@ -212,8 +224,8 @@ func TestPlan_TurnLine(t *testing.T) {
 func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 	h := planHarness(t, false)
 	ctx := context.Background()
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
-	planCall(t, h, `{"action":"add","title":"b","done_when":"x","needs":["1"]}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"b","done_when":"x","needs":["1"]}`)
 	changed := 0
 	h.cfg.OnPlan = func() { changed++ }
 	for _, tc := range []struct {
@@ -269,7 +281,7 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 	}
 	// The tool's own changes tell the UI too, and the model nothing.
 	h.queue, changed = nil, 0
-	planCall(t, h, `{"action":"add","title":"c","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"c","done_when":"x"}`)
 	if changed != 1 || len(queuedTexts(h)) != 0 {
 		t.Errorf("tool change: %d, %v", changed, queuedTexts(h))
 	}
@@ -277,9 +289,9 @@ func TestPlan_PersonsChangesReachTheModel(t *testing.T) {
 
 func TestPlan_SnapshotIsTheTree(t *testing.T) {
 	h := planHarness(t, false)
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
-	planCall(t, h, `{"action":"add","title":"b","done_when":"x"}`)
-	planCall(t, h, `{"action":"add","title":"c","done_when":"x","needs":["1","2"]}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"b","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"c","done_when":"x","needs":["1","2"]}`)
 	s := h.Plan()
 	var got []string
 	for _, r := range s.Rows {
@@ -310,10 +322,10 @@ func TestPlan_MemStoreFailedSaveUndoes(t *testing.T) {
 		}
 		return nil
 	}}
-	_, handle := taskgraph.Tool(st, "")
-	handle(context.Background(), `{"action":"add","title":"a","done_when":"x"}`)
+	handle := taskgraph.New(st, "").Dispatch
+	handle(context.Background(), "plan_add", `{"title":"a","done_when":"x"}`)
 	fail = true
-	if out := handle(context.Background(), `{"action":"add","title":"b","done_when":"x"}`); !strings.Contains(out, "disk full") {
+	if out := handle(context.Background(), "plan_add", `{"title":"b","done_when":"x"}`); !strings.Contains(out, "disk full") {
 		t.Errorf("save failure: %s", out)
 	}
 	if g, _ := st.View(context.Background()); len(g.Nodes) != 1 {
@@ -325,7 +337,7 @@ func TestPlan_MemStoreFailedSaveUndoes(t *testing.T) {
 // the tool's answer.
 func TestPlan_ModelsOwnChangeIsNotAnAside(t *testing.T) {
 	h := planHarness(t, false)
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
 	if q := queuedTexts(h); len(q) != 0 {
 		t.Errorf("asides: %q", q)
 	}
@@ -371,9 +383,9 @@ func sentHas(r *scriptRunner, text string) bool {
 func TestPlan_ChildIsGivenOnlyAReadyNode(t *testing.T) {
 	r := &scriptRunner{}
 	h := startParentOf(t, r)
-	planCall(t, h, `{"action":"add","title":"build","done_when":"x"}`)
-	planCall(t, h, `{"action":"add","title":"test","done_when":"x","needs":["1"]}`)
-	planCall(t, h, `{"action":"add","title":"other","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"build","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"test","done_when":"x","needs":["1"]}`)
+	planCall(t, h, "plan_add", `{"title":"other","done_when":"x"}`)
 	ids := planIDs(h)
 
 	for node, want := range map[string]string{"nope": "no plan node nope", ids["test"]: "is not ready"} {
@@ -433,25 +445,25 @@ func TestPlan_ChildIsGivenOnlyAReadyNode(t *testing.T) {
 func TestPlan_ChildPublishesAndIsGivenTheNext(t *testing.T) {
 	r := &scriptRunner{}
 	h := startParentOf(t, r)
-	planCall(t, h, `{"action":"add","title":"build","done_when":"x"}`)
-	planCall(t, h, `{"action":"add","title":"test","done_when":"x","needs":["1"]}`)
-	planCall(t, h, `{"action":"add","title":"main's","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"build","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"test","done_when":"x","needs":["1"]}`)
+	planCall(t, h, "plan_add", `{"title":"main's","done_when":"x"}`)
 	ids := planIDs(h)
 	spawnTool(context.Background(), h, "", "m", "", "", ids["build"], false)
 	sa := h.agentList()[0]
 	waitIdle(t, sa)
 	child := sa.harness()
-	if !offersTool(child, taskgraph.ToolName) {
+	if !offersTool(child, taskgraph.ToolAdd) {
 		t.Fatal("a child that owns a node has no plan tool")
 	}
-	_, handle := child.childPlanTool()
+	handle := child.childPlanTool().Dispatch
 	ctx := context.Background()
-	if out := handle(ctx, `{"action":"update","id":"`+ids["main's"]+`","details":"hijacked"}`); !strings.Contains(strings.ToLower(out), "not") {
+	if out := handle(ctx, "plan_update", `{"id":"`+ids["main's"]+`","details":"hijacked"}`); !strings.Contains(strings.ToLower(out), "not") {
 		t.Errorf("another's node must be refused: %q", out)
 	}
 	h.notes()
-	handle(ctx, `{"action":"update","id":"`+ids["build"]+`","status":"doing"}`)
-	if out := handle(ctx, `{"action":"done","id":"`+ids["build"]+`","account":"built"}`); strings.Contains(out, "cannot") {
+	handle(ctx, "plan_update", `{"id":"`+ids["build"]+`","status":"doing"}`)
+	if out := handle(ctx, "plan_close", `{"outcome":"done","id":"`+ids["build"]+`","account":"built"}`); strings.Contains(out, "cannot") {
 		t.Fatalf("publish: %s", out)
 	}
 	n := h.notes()
@@ -487,8 +499,8 @@ func TestPlan_ChildPublishesAndIsGivenTheNext(t *testing.T) {
 // goes to the main agent.
 func TestPlan_OwnersHearOfTheirNodes(t *testing.T) {
 	h := startParentOf(t, &scriptRunner{})
-	planCall(t, h, `{"action":"add","title":"decide db","done_when":"x"}`)
-	planCall(t, h, `{"action":"add","title":"main's","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"decide db","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"main's","done_when":"x"}`)
 	ids := planIDs(h)
 	spawnTool(context.Background(), h, "", "", "", "", ids["decide db"], false)
 	sa := h.agentList()[0]
@@ -522,8 +534,8 @@ func TestPlan_OwnersHearOfTheirNodes(t *testing.T) {
 	}
 
 	// Its owner gone (dismissed after it finished the node): to the main agent.
-	_, handle := child.childPlanTool()
-	handle(ctx, `{"action":"done","id":"`+ids["decide db"]+`","account":"sqlite"}`)
+	handle := child.childPlanTool().Dispatch
+	handle(ctx, "plan_close", `{"outcome":"done","id":"`+ids["decide db"]+`","account":"sqlite"}`)
 	sa.quit()
 	h.notes()
 	if msg, err := h.PlanCmd(ctx, "tell "+ids["decide db"]+" reopen it"); err != nil || !strings.Contains(msg, "main agent") {
@@ -535,7 +547,7 @@ func TestPlan_OwnersHearOfTheirNodes(t *testing.T) {
 // give and the child's first save) goes back to the main agent on resume.
 func TestPlan_OrphanedNodesAreReleased(t *testing.T) {
 	h := startParentOf(t, &scriptRunner{})
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
 	id := planIDs(h)["a"]
 	_ = h.planNow().store.Update(context.Background(), func(g *taskgraph.Graph) error {
 		g.Get(id).Owner = planOwner(7)
@@ -552,16 +564,14 @@ func TestPlan_OrphanedNodesAreReleased(t *testing.T) {
 // session gets the same description every time (the prompt cache).
 func TestPlan_DescriptionByMode(t *testing.T) {
 	h := planHarness(t, false)
-	d, _ := h.planTool()
-	inter := d.Function.Description
+	inter := planAddDesc(h)
 	for _, want := range []string{"The plan is what survives", "done_when", "/plan approve", "plan mode", "edit the plan"} {
 		if !strings.Contains(inter, want) {
 			t.Errorf("interactive description lacks %q: %s", want, inter)
 		}
 	}
 	h.cfg.NonInteractive = true
-	d, _ = h.planTool()
-	non := d.Function.Description
+	non := planAddDesc(h)
 	if !strings.Contains(non, "The plan is what survives") || !strings.Contains(non, "done_when") {
 		t.Errorf("non-interactive description lacks the purpose or the mechanics: %s", non)
 	}
@@ -570,8 +580,7 @@ func TestPlan_DescriptionByMode(t *testing.T) {
 			t.Errorf("non-interactive description has %q: %s", not, non)
 		}
 	}
-	d2, _ := h.planTool()
-	if d2.Function.Description != non {
+	if planAddDesc(h) != non {
 		t.Error("the description changed between two builds of one session")
 	}
 }
@@ -604,7 +613,7 @@ func TestPlan_OldSidecarRowsBecomeDetails(t *testing.T) {
 		t.Error("mode lost")
 	}
 	// Saved again, the row is in the new shape.
-	planCall(t, h, `{"action":"add","title":"x","done_when":"y"}`)
+	planCall(t, h, "plan_add", `{"title":"x","done_when":"y"}`)
 	b, _ := os.ReadFile(PlanFile(h.cfg.SessionFile))
 	if strings.Contains(string(b), `"goal"`) || strings.Contains(string(b), `"notes"`) || strings.Contains(string(b), `"files"`) {
 		t.Errorf("old fields persisted: %s", b)

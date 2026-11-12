@@ -113,7 +113,7 @@ func (h *Harness) wholeRoom() wholeRoom {
 	b := h.Window()
 	// A child starts only on a plan node (USER 2026-11-10), so delegating
 	// needs both tools.
-	r := wholeRoom{known: b.Known(), agent: h.hasTool("agent") && h.hasTool(taskgraph.ToolName)}
+	r := wholeRoom{known: b.Known(), agent: h.hasTool("agent") && h.hasTool(taskgraph.ToolAdd)}
 	if !r.known {
 		return r
 	}

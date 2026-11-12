@@ -32,10 +32,10 @@ func TestAgentNode_ToolSchemaHasNoPrompt(t *testing.T) {
 
 func TestAgentNode_RefusedWithoutAUsableNode(t *testing.T) {
 	h := startParentOf(t, &scriptRunner{})
-	planCall(t, h, `{"action":"add","title":"finished","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"finished","done_when":"x"}`)
 	ids := planIDs(h)
-	planCall(t, h, `{"action":"update","id":"`+ids["finished"]+`","status":"doing"}`)
-	if out := planCall(t, h, `{"action":"done","id":"`+ids["finished"]+`","account":"did it"}`); strings.Contains(out, "cannot") {
+	planCall(t, h, "plan_update", `{"id":"`+ids["finished"]+`","status":"doing"}`)
+	if out := planCall(t, h, "plan_close", `{"outcome":"done","id":"`+ids["finished"]+`","account":"did it"}`); strings.Contains(out, "cannot") {
 		t.Fatalf("done: %s", out)
 	}
 	before := planRowsSig(h)
@@ -63,7 +63,7 @@ func TestAgentNode_RefusedWithoutAUsableNode(t *testing.T) {
 	if after := planRowsSig(h); after != before {
 		t.Errorf("a refused call changed the plan:\n%s\n%s", before, after)
 	}
-	if !strings.Contains(agentNoNode, `Add a node with plan(`) || !strings.Contains(agentNoNode, `then call agent({node:"<id>"})`) {
+	if !strings.Contains(agentNoNode, `Add a node with plan_add(`) || !strings.Contains(agentNoNode, `then call agent({node:"<id>"})`) {
 		t.Errorf("the refusal does not say the fix: %q", agentNoNode)
 	}
 }
@@ -71,7 +71,7 @@ func TestAgentNode_RefusedWithoutAUsableNode(t *testing.T) {
 // One node, one child: a second child on a node that has a live one is refused.
 func TestAgentNode_OneChildPerNode(t *testing.T) {
 	h := startParentOf(t, &scriptRunner{})
-	planCall(t, h, `{"action":"add","title":"scan","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"scan","done_when":"x"}`)
 	id := planIDs(h)["scan"]
 	if out := callTool(t, h, "agent", map[string]any{"node": id}); !strings.HasPrefix(out, "Started agent #1") {
 		t.Fatalf("first child: %q", out)
@@ -103,7 +103,7 @@ func TestAgentNode_OneChildPerNode(t *testing.T) {
 func TestAgentNode_BriefsFromTheNodeAndReportsOntoIt(t *testing.T) {
 	r := &scriptRunner{}
 	h := startParentOf(t, r)
-	planCall(t, h, `{"action":"add","title":"read the log","details":"find the first panic in build.log","done_when":"the panic line is quoted"}`)
+	planCall(t, h, "plan_add", `{"title":"read the log","details":"find the first panic in build.log","done_when":"the panic line is quoted"}`)
 	id := planIDs(h)["read the log"]
 	out := callTool(t, h, "agent", map[string]any{"node": id, "model": "m"})
 	if !strings.HasPrefix(out, "Started agent #1") || !strings.Contains(out, "owns plan node "+id) {
@@ -119,10 +119,10 @@ func TestAgentNode_BriefsFromTheNodeAndReportsOntoIt(t *testing.T) {
 		t.Errorf("kept prompt: %q", sa.prompt)
 	}
 
-	_, handle := sa.harness().childPlanTool()
+	handle := sa.harness().childPlanTool().Dispatch
 	h.notes()
-	handle(context.Background(), `{"action":"update","id":"`+id+`","status":"doing"}`)
-	handle(context.Background(), `{"action":"done","id":"`+id+`","account":"panic: nil map at main.go:12"}`)
+	handle(context.Background(), "plan_update", `{"id":"`+id+`","status":"doing"}`)
+	handle(context.Background(), "plan_close", `{"outcome":"done","id":"`+id+`","account":"panic: nil map at main.go:12"}`)
 	for _, row := range h.Plan().Rows {
 		if row.ID == id && (row.Status != "done" || row.Account != "panic: nil map at main.go:12" || row.Owner != planOwner(sa.num)) {
 			t.Errorf("the node after the publish: %+v", row)

@@ -540,7 +540,7 @@ during a turn waits for the turn to end (an image cannot ride a tool result).
 
 ## The task plan
 
-For work with several steps the model keeps a plan: a graph of tasks (`plan` tool,
+For work with several steps the model keeps a plan: a graph of tasks (the `plan_add`, `plan_update`, `plan_close` and `plan_show` tools,
 the built-in group `dun:plan`), each with a title, details, what "done" means
 (`done_when`) and the nodes it needs. A node is ready when everything it needs is
 done; a dropped node keeps its dependents waiting until they are re-pointed to a

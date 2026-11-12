@@ -12,7 +12,7 @@ what is meant to happen, and the model keeps it. They stay separate.
 | Layer | Where | Holds |
 |---|---|---|
 | Graph | agentkit `taskgraph` | Nodes, `needs`, cycle check, ready set, status rules, subgraph ownership. Stdlib only, no `Harness` |
-| Tool | agentkit `taskgraph` | The `plan` tool's definition and handler, over a `Store` interface |
+| Tools | agentkit `taskgraph` | The four plan tools' definitions and dispatch, over a `Store` interface |
 | Host | root `dun` | The store (`planMemStore`), the turn line, the tool group, routing changes, delegation |
 | Screen | `internal/tui` | `/plan` |
 
@@ -66,12 +66,15 @@ id, title, details, status, needs[], owner, done_when, replaces, why, account
 
 ## The tool
 
-One tool, `plan`, in a built-in group `plan` (`dun:plan`), with an `action`:
-`add`, `update`, `show`, `ready`, `done`, `block`, `drop`. `delegate` comes later.
-`update` also sets `status` to `todo` or `doing` (begin a node, or take back a block).
-The package's entry is `Tool(store, actor, opts...)` returning the definition and a
-handler, after agentkit's `SessionSearchTool`. The host adds its own sentences to the
-description (`WithNote`): plan mode is the host's to explain.
+Four tools in a built-in group `plan` (`dun:plan`): `plan_add` (title and done_when
+required), `plan_update` (id; also sets `status` to `todo` or `doing`: begin a node, or
+take back a block), `plan_close` (id and `outcome` done, block or drop; `account` for
+done, `reason` for block and drop) and `plan_show` (no id: the whole plan, ending with
+the actor's ready line; with an id: the node). `delegate` comes later.
+The package's entry is `New(store, actor, opts...)` returning `*Tools` (`Defs`,
+`Dispatch`, `Wrap`, `Has`). The host adds its own sentences to the descriptions
+(`WithNote`, which applies to `plan_add` and `plan_show`): plan mode is the host's to
+explain. Every refusal starts "ERROR: plan: "; a success never starts with ERROR.
 
 Every result is short: the node touched and what is ready now.
 
@@ -105,7 +108,7 @@ Refused: `exec` (a command cannot be told read-only), `file_edit`, `file_write`,
 (schedules runs of its own), `dun_msg` (acts in another session), every tool of the
 shell server, and an MCP tool whose name has a write verb (write, edit, delete,
 rename, create, apply, commit, push, run, …: a guess, since MCP tools do not say
-whether they are read-only). Allowed: `file_read`, `file_grep`, `file_list`, `plan`,
+whether they are read-only). Allowed: `file_read`, `file_grep`, `file_list`, the plan tools,
 `ask_user`, `recap`, `skill`, `memory`, `jobs`,
 `tell_parent`, `dun_list`, and other MCP tools.
 
@@ -116,7 +119,7 @@ the next ready ones, at most 5 lines. It goes in as an aside at the tail, so it 
 not disturb the cached prefix, and it is read fresh after a fold.
 
 WHEN: once as each turn begins (`prepareTurn`), not per tool result. The model's own
-`plan` calls already answer with the node touched and what is ready, and a change the
+plan tool calls already answer with the node touched and what is ready, and a change the
 person makes arrives as its own note. A turn with no open nodes gets none. Cost: at
 most 5 short lines (about 100 tokens) a turn.
 
@@ -147,7 +150,7 @@ resolved, main agent can reassign to newly unblocked or create new agents for th
   ready. Other child edits ride its next turn as an aside.
 - A change someone else makes to a child's node (the person's `/plan edit|drop`, the
   main agent) is told to that child, as a notification it reads in its turn.
-- The child's plan tool: the parent's graph, as actor `agent:N`, `WithMayChange`
+- The child's plan tools: the parent's graph, as actor `agent:N`, `WithMayChange`
   allowing only that owner's nodes (`childPlanTool`). It is in the child's tool set
   while it owns nodes; `planAssign` rebuilds the child's tools (`applyTools`).
 - The node is given after the child is on record (`h.agents`, its sidecar), so a
@@ -162,18 +165,18 @@ resolved, main agent can reassign to newly unblocked or create new agents for th
 `agent({node: "<id>", model?, effort?, isolation?, wait?})` starts a child, and its
 first message is "Work this plan node." and the node's brief (`planBrief`: title,
 details, done_when, and to publish it). The task goes in the node's details. The
-child reports onto the node: it publishes it with its plan tool (done with an
+child reports onto the node: it publishes it with `plan_close` (done with an
 account, or dropped with why).
 
 Refused, with nothing started or changed (`spawnTool`, `planCanAssign`):
 
 - no node, or a `prompt`: "agent starts a child only on a plan node. Add a node
-  with plan({action:"add", title, details, done_when}), then call
+  with plan_add({title, details, done_when}), then call
   agent({node:"<id>"})." (`agentNoNode`, `agentNoPrompt`);
 - an unknown node, or a done or dropped one: the same fix;
 - a node with a live child: "node N already has a child, agent #K; one child per
   node." It is free again when that child publishes it or is dismissed;
-- the plan tool switched off: there is no node to name, and the refusal says so.
+- the plan tools switched off: there is no node to name, and the refusal says so.
 
 Why no prompt on top of the node: the smaller surface. With both, part of the
 task would be in a prompt only the child saw, and the plan would not say what the

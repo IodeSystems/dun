@@ -31,7 +31,7 @@ func TestOnIdle(t *testing.T) {
 	}
 
 	h.cfg.NonInteractive = false
-	planCall(t, h, `{"action":"add","title":"write the parser","done_when":"tests pass"}`)
+	planCall(t, h, "plan_add", `{"title":"write the parser","done_when":"tests pass"}`)
 	if got := h.onIdle(ctx, 3, 0); !strings.Contains(got, "Open plan nodes") || !strings.Contains(got, "write the parser") {
 		t.Errorf("interactive with an open plan: %q", got)
 	}
@@ -43,12 +43,12 @@ func TestOnIdle_ListsOpenNodesDoneWhen(t *testing.T) {
 	ctx := context.Background()
 	h := planHarness(t, false)
 	h.cfg.NonInteractive = true
-	planCall(t, h, `{"action":"add","title":"write the parser","done_when":"go test ./parser passes"}`)
-	planCall(t, h, `{"action":"add","title":"old idea","done_when":"never"}`)
-	planCall(t, h, `{"action":"add","title":"read the spec","done_when":"spec read"}`)
-	planCall(t, h, `{"action":"drop","id":"2","reason":"not needed"}`)
-	planCall(t, h, `{"action":"update","id":"3","status":"doing"}`)
-	if out := planCall(t, h, `{"action":"done","id":"3","account":"read it"}`); !strings.Contains(out, "done") {
+	planCall(t, h, "plan_add", `{"title":"write the parser","done_when":"go test ./parser passes"}`)
+	planCall(t, h, "plan_add", `{"title":"old idea","done_when":"never"}`)
+	planCall(t, h, "plan_add", `{"title":"read the spec","done_when":"spec read"}`)
+	planCall(t, h, "plan_close", `{"outcome":"drop","id":"2","reason":"not needed"}`)
+	planCall(t, h, "plan_update", `{"id":"3","status":"doing"}`)
+	if out := planCall(t, h, "plan_close", `{"outcome":"done","id":"3","account":"read it"}`); !strings.Contains(out, "done") {
 		t.Fatalf("done: %s", out)
 	}
 	got := h.onIdle(ctx, 5, 0)

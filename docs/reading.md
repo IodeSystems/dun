@@ -59,7 +59,7 @@ The refusal says the numbers ("X is N tokens; M are free") and then:
 1. **Compact, then retry** (USER 2026-11-08): "recap what is settled to free at
    least N−M tokens, then read it again." Always available.
 2. **Delegate** — only when the `agent` tool is in this agent's tool set
-   (children and some modes have none) and so is `plan` (a child starts only
+   (children and some modes have none) and so are the plan tools (a child starts only
    on a plan node, USER 2026-11-10): "add a plan node "read X and report …",
    then `agent({node: "<id>"})`: a child spends its own context and returns
    the findings."

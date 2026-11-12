@@ -181,7 +181,7 @@ func (v *planView) page() pageDoc {
 		v.keys = append(v.keys, "≡")
 	}
 	if len(nodes) == 0 {
-		nodes = append(nodes, pageNode{body: "The plan is empty. The model makes nodes with its plan tool when a task has several steps."})
+		nodes = append(nodes, pageNode{body: "The plan is empty. The model makes nodes with its plan tools when a task has several steps."})
 	}
 	return pageDoc{title: textfmt.Plural(v.total, "node"), nodes: nodes}
 }

@@ -31,8 +31,9 @@ import (
 //     (ExecResult.Failed: non-zero exit, spawn error, killed) or ran past its
 //     timeout and became a job. Any other result ends the run.
 //
-// The response is on the next request: tool_choice forces a `plan` call (a
-// heredoc transport gets a grammar over plan alone, as fork.go does), and an
+// The response is on the next request: tool_choice forces a plan call (a
+// heredoc transport gets a grammar over that tool alone, as fork.go does;
+// planForceTool picks plan_add or plan_show), and an
 // aside keyed "plan-nudge" says why, riding the same round's tool results.
 //
 // At most once per turn, the main agent only (a child owns a node already),
@@ -44,7 +45,7 @@ import (
 // A plan that stops moving (USER 2026-11-07). In 30 trials of the planning
 // build, 26 used the plan, but most failed ones made 1-2 plan calls and then
 // ran blind to the 150-round cap. So, with the same force and the same
-// limits (main agent, plan tool present): the plan has open nodes and no
+// limits (main agent, plan tools present): the plan has open nodes and no
 // node has moved for S rounds (--plan-stall-rounds, 30) → force a plan call,
 // with an aside keyed "plan-stall" that names the open nodes. A move is a
 // change the main agent's own plan call makes: a node added, a status
@@ -131,7 +132,7 @@ const (
 // planNudgeOK reports whether a nudge may be given now: the main agent,
 // plan in the tool set, none yet in this turn, and no open node.
 func (h *Harness) planNudgeOK() bool {
-	if h.isChild() || h.nudge.done || !h.hasTool(taskgraph.ToolName) {
+	if h.isChild() || h.nudge.done || !h.hasTool(taskgraph.ToolAdd) {
 		return false
 	}
 	g, err := planStore{h}.View(context.Background())
@@ -172,7 +173,7 @@ func (h *Harness) planNudgeRound() {
 // counted it: S rounds with no plan move and open nodes force a plan call.
 func (h *Harness) planStallRound() {
 	limit := h.planStallRounds()
-	if limit == 0 || h.isChild() || !h.hasTool(taskgraph.ToolName) {
+	if limit == 0 || h.isChild() || !h.hasTool(taskgraph.ToolAdd) {
 		return
 	}
 	n := int(h.turnRounds.n.Load())
@@ -211,7 +212,7 @@ func (h *Harness) planStallRound() {
 		AsideOpts{Key: "plan-stall", TurnScoped: true})
 }
 
-// planMoved notes the main agent's own plan changes (planTool's OnChange):
+// planMoved notes the main agent's own plan changes (planTools' OnChange):
 // a move starts the stall window again.
 func (h *Harness) planMoved(cs []taskgraph.Change) {
 	moved := false
@@ -228,7 +229,7 @@ func (h *Harness) planMoved(cs []taskgraph.Change) {
 	h.nudge.stallEp = nil
 	h.nudge.mu.Unlock()
 	if ep != nil {
-		ep.Fix = churnAttempt{Tool: taskgraph.ToolName, Target: taskgraph.ToolName, Args: clipMiddle(planMoveBrief(cs), churnArgsMax)}
+		ep.Fix = churnAttempt{Tool: "plan", Target: "plan", Args: clipMiddle(planMoveBrief(cs), churnArgsMax)}
 		h.learnQueue(ep)
 	}
 }
@@ -296,20 +297,33 @@ func (h *Harness) planForceOpts(tools []llm.ToolDef, opts *llm.ChatOpts) *llm.Ch
 	if opts != nil {
 		o = *opts
 	}
-	if defOf(tools, taskgraph.ToolName) != nil {
-		choice, _ := json.Marshal(map[string]any{"type": "function", "function": map[string]any{"name": taskgraph.ToolName}})
+	name := h.planForceTool()
+	if defOf(tools, name) != nil {
+		choice, _ := json.Marshal(map[string]any{"type": "function", "function": map[string]any{"name": name}})
 		o.ToolChoice = string(choice)
 		return &o
 	}
 	// Heredoc transport: no tools in the request, a grammar over all of them.
-	// A grammar over plan alone forces it (fork.go).
+	// A grammar over that tool alone forces it (fork.go).
 	if len(tools) == 0 && o.Grammar != "" {
-		if d := defOf(h.Session.Tools, taskgraph.ToolName); d != nil {
+		if d := defOf(h.Session.Tools, name); d != nil {
 			o.Grammar = llm.HeredocGrammar([]llm.ToolDef{*d})
 			return &o
 		}
 	}
 	return nil
+}
+
+// planForceTool is the plan tool a forced call names. The nudge for no plan
+// (no open node) forces plan_add: the plan is to be written. The stall nudge
+// (open nodes) forces plan_show: update and close need an id and add would
+// invent a node, so the model reads the plan and then updates it, as the
+// aside says.
+func (h *Harness) planForceTool() string {
+	if g, err := (planStore{h}).View(context.Background()); err == nil && g.Open() > 0 {
+		return taskgraph.ToolShow
+	}
+	return taskgraph.ToolAdd
 }
 
 func defOf(tools []llm.ToolDef, name string) *llm.ToolDef {

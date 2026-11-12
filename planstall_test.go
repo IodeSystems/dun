@@ -20,10 +20,10 @@ func stallScript(upto int, first map[int]string) func(int, bool) *llm.ToolCall {
 	return func(i int, forced bool) *llm.ToolCall {
 		id := fmt.Sprintf("c%d", i)
 		if a, ok := first[i]; ok {
-			return nudgeCall(id, "plan", a)
+			return planNudgeCall(id, a)
 		}
 		if forced {
-			return nudgeCall(id, "plan", `{"action":"show"}`)
+			return nudgeCall(id, "plan_show", `{}`)
 		}
 		if i >= upto {
 			return nil
@@ -32,7 +32,10 @@ func stallScript(upto int, first map[int]string) func(int, bool) *llm.ToolCall {
 	}
 }
 
-const stallAdd = `{"action":"add","title":"the work","done_when":"it works"}`
+const (
+	stallAddArgs = `{"title":"the work","done_when":"it works"}`
+	stallAdd     = "plan_add " + stallAddArgs
+)
 
 // Open nodes and no move for S rounds: one forced plan call, and the aside
 // names the open nodes.
@@ -45,6 +48,9 @@ func TestPlanStall_AfterRounds(t *testing.T) {
 	at := r.forcedAt()
 	if !slices.Equal(at, []int{4}) {
 		t.Fatalf("forced at %v of %d requests, want [4]", at, r.calls())
+	}
+	if c := r.choice[4]; !strings.Contains(c, `"plan_show"`) {
+		t.Errorf("stall: forced %s, want plan_show", c)
 	}
 	if !r.sentHas(4, "[plan] No plan node has moved in 3 rounds; 1 open: 1 the work. "+planStallAsk) {
 		t.Error("the forced request does not carry the aside")
@@ -60,7 +66,7 @@ func TestPlanStall_MoveResets(t *testing.T) {
 	// none: 4 is the text, 5 the end-of-turn check).
 	r := &nudgeRunner{reply: stallScript(4, map[int]string{
 		0: stallAdd,
-		2: `{"action":"update","id":"1","status":"doing"}`,
+		2: `plan_update {"id":"1","status":"doing"}`,
 	})}
 	h := startStall(t, r, -1, -1, 3)
 	askOK(t, h)
@@ -73,9 +79,9 @@ func TestPlanStall_MoveResets(t *testing.T) {
 func TestPlanStall_ShowAndReadyDoNotMove(t *testing.T) {
 	r := &nudgeRunner{reply: stallScript(5, map[int]string{
 		0: stallAdd,
-		1: `{"action":"show"}`,
-		2: `{"action":"ready"}`,
-		3: `{"action":"show","id":"1"}`,
+		1: `plan_show {}`,
+		2: `plan_show {}`,
+		3: `plan_show {"id":"1"}`,
 	})}
 	h := startStall(t, r, -1, -1, 3)
 	askOK(t, h)
@@ -141,8 +147,8 @@ func TestPlanStall_Off(t *testing.T) {
 func TestPlanStall_NotWhenAllDone(t *testing.T) {
 	r := &nudgeRunner{reply: stallScript(12, map[int]string{
 		0: stallAdd,
-		1: `{"action":"update","id":"1","status":"doing"}`,
-		2: `{"action":"done","id":"1","account":"it works"}`,
+		1: `plan_update {"id":"1","status":"doing"}`,
+		2: `plan_close {"outcome":"done","id":"1","account":"it works"}`,
 	})}
 	h := startStall(t, r, -1, -1, 3)
 	askOK(t, h)
@@ -155,13 +161,13 @@ func TestPlanStall_NotWhenAllDone(t *testing.T) {
 // at most 5 open nodes and counts them all.
 func TestPlanStall_NotForAChild(t *testing.T) {
 	h := planHarness(t, false)
-	names := []string{"exec", "plan"}
+	names := []string{"exec", "plan_add"}
 	h.toolNames.Store(&names)
 	for i := range 7 {
-		planCall(t, h, fmt.Sprintf(`{"action":"add","title":"step %d","done_when":"x"}`, i+1))
+		planCall(t, h, "plan_add", fmt.Sprintf(`{"title":"step %d","done_when":"x"}`, i+1))
 	}
-	planCall(t, h, `{"action":"update","id":"2","status":"doing"}`)
-	if out := planCall(t, h, `{"action":"done","id":"2","account":"x"}`); !strings.Contains(out, "done") {
+	planCall(t, h, "plan_update", `{"id":"2","status":"doing"}`)
+	if out := planCall(t, h, "plan_close", `{"outcome":"done","id":"2","account":"x"}`); !strings.Contains(out, "done") {
 		t.Fatalf("done: %s", out)
 	}
 	h.parent = &Harness{}
@@ -187,7 +193,7 @@ func TestPlanStall_NotForAChild(t *testing.T) {
 // No plan tool: no stall nudge.
 func TestPlanStall_NeedsThePlanTool(t *testing.T) {
 	h := planHarness(t, false)
-	planCall(t, h, stallAdd)
+	planCall(t, h, "plan_add", stallAddArgs)
 	names := []string{"exec"}
 	h.toolNames.Store(&names)
 	h.cfg.PlanStallRounds = 3
@@ -205,7 +211,7 @@ func TestPlanStall_AfterThePlanNudge(t *testing.T) {
 	r.reply = func(next func(int, bool) *llm.ToolCall) func(int, bool) *llm.ToolCall {
 		return func(i int, forced bool) *llm.ToolCall {
 			if forced && i == 3 {
-				return nudgeCall("p", "plan", stallAdd)
+				return planNudgeCall("p", stallAdd)
 			}
 			return next(i, forced)
 		}
