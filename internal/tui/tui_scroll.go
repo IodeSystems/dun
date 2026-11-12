@@ -15,6 +15,7 @@ func (m *tuiModel) refresh() {
 	start := time.Now()
 	defer func() { frames.observe(stageRefresh, time.Since(start)) }()
 	m.liveSplashNow()
+	m.docSync()
 	blocks := make([]string, 0, len(m.convo)+1)
 	for _, e := range m.convo {
 		blocks = append(blocks, e.view())
@@ -223,6 +224,7 @@ func (m *tuiModel) refresh() {
 	m.frame = frm
 
 	m.applyScroll(selMode)
+	m.revealDoc()
 }
 
 // applyScroll is where the viewport is allowed to move on its own: keep the

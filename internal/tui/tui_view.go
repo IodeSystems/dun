@@ -517,13 +517,19 @@ func (m tuiModel) drawView() string {
 			status = StDim.Render("docs  ·  ↑/↓ doc · → open · ← close, then out · ctrl+c quit")
 		} else {
 			switch {
+			case m.docEntry() != nil:
+				status = StDim.Render("forms  ·  tab/shift+tab form · enter/space open/close · ←/→ tab · ↑/↓ scroll · esc leave")
 			case m.insideBox() != nil:
 				status = StDim.Render("inside  ·  ↑/↓ pgup/pgdn g/G scroll · ← leave · enter open")
 			case m.insideWide() != nil:
 				w := m.insideWide()
 				status = StDim.Render(fmt.Sprintf("sideways  ·  ←/→ scroll · home/end edge · esc leave · col %d of %d", w.off+1, w.max+m.vp.Width-wideIndicatorRoom))
+			case m.selWide() != nil && m.selWide().max > 0 && m.selForms():
+				status = StDim.Render("convo  ·  ↑/↓ select · → scroll sideways · enter forms · y copy · tab input")
 			case m.selWide() != nil && m.selWide().max > 0:
 				status = StDim.Render("convo  ·  ↑/↓ select · → scroll sideways · y copy · tab input")
+			case m.selForms():
+				status = StDim.Render("convo  ·  ↑/↓ select · →/enter forms · y copy · tab input")
 			case m.selBox() != nil:
 				status = StDim.Render("convo  ·  ↑/↓ select · → scroll inside · enter open · tab input")
 			default:
