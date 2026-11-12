@@ -49,8 +49,8 @@ import (
 // node has moved for S rounds (--plan-stall-rounds, 30) → force a plan call,
 // with an aside keyed "plan-stall" that names the open nodes. A move is a
 // change the main agent's own plan call makes: a node added, a status
-// changed, or a new done_when, details or needs (planMoved). show and ready
-// write nothing. After a nudge the window starts again; at most 3 per turn,
+// changed, or a new done_when, details or needs (planMoved). plan_show
+// writes nothing. After a nudge the window starts again; at most 3 per turn,
 // counted apart from the no-plan nudge.
 
 const (
