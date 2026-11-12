@@ -779,6 +779,10 @@ func main() {
 	// The user's rules files are read in every session (dun/rules.go).
 	// DUN_USER_RULES=0: not (the Harbor adapter's default).
 	cfg.NoUserRules = os.Getenv("DUN_USER_RULES") == "0"
+	// The answer-formatting prompt (bubbleteandmd's directive forms) is in
+	// every session shown to a person. DUN_FORMAT_PROMPT=0: not. A headless
+	// task (no -p) prints the reply as raw text, so the forms are left out.
+	cfg.NoFormatPrompt = os.Getenv("DUN_FORMAT_PROMPT") == "0" || !*prog
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/iodesystems/bubbleteandmd"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -69,6 +70,10 @@ type convoEntry struct {
 	// wide is the answer's sideways scroll, when a code block or table in it
 	// is wider than the pane (wide.go). nil until one is.
 	wide *wideState
+	// ans renders mdSource (answer.go): the Stream it streamed through, or
+	// one made for the widths in ansKey.
+	ans    *bubbleteandmd.Stream
+	ansKey string
 
 	// Wrapped render, cached. A finalized block's text never changes, but
 	// refresh() runs once per STREAMED TOKEN, so re-wrapping the whole

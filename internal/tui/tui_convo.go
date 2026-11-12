@@ -115,8 +115,9 @@ func (m *tuiModel) flushCur() {
 		// Finalize the streamed reply as rendered markdown (headers, lists, code).
 		// The final render can come out shorter than a partial one did (an
 		// unclosed fence, a list mid-item): it keeps the streamed height.
-		m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src,
-			maxH: m.curMaxH, maxKey: m.curMaxKey})
+		e := m.finishAnswer(src)
+		e.maxH, e.maxKey = m.curMaxH, m.curMaxKey
+		m.convo = append(m.convo, e)
 	}
 	m.cur, m.curMaxH, m.curMaxKey = "", 0, 0
 }
@@ -183,7 +184,9 @@ func (m *tuiModel) replayItems(items []any, run int) int {
 		case "assistant":
 			m.endRun()
 			src := strings.TrimRight(str(im["content"]), "\n")
-			m.convo = append(m.convo, convoEntry{collapsed: renderMarkdown(m.md, src), mdSource: src})
+			e := convoEntry{mdSource: src}
+			e.collapsed = m.renderEntry(&e, max(1, m.vp.Width-1))
+			m.convo = append(m.convo, e)
 			n++
 		case "tool_call":
 			// The same path as a live call: into the run's box (toolrun.go),

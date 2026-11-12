@@ -37,6 +37,7 @@ var (
 func initMarkdownStyle() {
 	mdStyleOnce.Do(func() {
 		mdStyle = resolveMDStyle()
+		warmAnswerRenderer()
 		if mdStyle == "light" {
 			stSecondary = stSecondary.Foreground(lipgloss.Color("240"))
 		}

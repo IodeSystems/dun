@@ -99,8 +99,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/iodesystems/agentkit v0.28.0 h1:tfEd0he5akuw0no//KkIr8MzDOfIuuV/FE6XdMUor4w=
 github.com/iodesystems/agentkit v0.28.0/go.mod h1:QknznlQRmU0Ywotk64RrZVAYKH+8HBw4Uhfg2HdQ8As=
-github.com/iodesystems/bubbleteandmd v0.3.0 h1:BRy5akxNW6rDJactEPEtm4pkruJ5IuVVF6iw5tmfpuU=
-github.com/iodesystems/bubbleteandmd v0.3.0/go.mod h1:Mq8b1YpF/eE8v5FIZN29ZVhlNOhvS38RCHyQiNufppg=
+github.com/iodesystems/bubbleteandmd v0.4.0 h1:EKT4O/i2AX6xQVpd5WOKROTYjaa1lx+J293rxkYH2iE=
+github.com/iodesystems/bubbleteandmd v0.4.0/go.mod h1:+9SjBzupFoNQIhc2CdbrdW8sIvxOGFGrvkqf4todsd4=
 github.com/iodesystems/gwag/v2 v2.11.0 h1:iKCeD+4n7sXDkdUnJRzZrPicc3mv/IjSbeuNa7oP24E=
 github.com/iodesystems/gwag/v2 v2.11.0/go.mod h1:SWXgRoavRjPPEiUUF3bxJ9KA/FKTeIZQR8KRTSSTUi4=
 github.com/iodesystems/openai-claude-api-shim v0.6.0 h1:pI+UOTbiHZkmoS0VpusJfYmZC4jxv9arN1e/cUZaLlg=

@@ -925,6 +925,7 @@ func (h *Harness) rebuildTools() {
 		}
 		if !cfg.NonInteractive {
 			sys += replyFormatSystem
+			sys += h.formatPromptSystem()
 		}
 		sys += h.cfg.SystemNote
 		// The workspace's root AGENTS.md and CLAUDE.md, and what they import,
@@ -1353,6 +1354,7 @@ func (h *Harness) useNoTools() {
 		sys = noToolsSystem + h.identityLine()
 		if !h.cfg.NonInteractive {
 			sys += replyFormatSystem
+			sys += h.formatPromptSystem()
 		}
 		sys += h.cfg.SystemNote
 	}

@@ -48,7 +48,7 @@ func fullText(m tuiModel) string {
 		blocks = append(blocks, e.view())
 	}
 	if m.cur != "" {
-		blocks = append(blocks, renderMarkdown(m.md, m.cur))
+		blocks = append(blocks, m.curAnswer(max(1, m.vp.Width-1)))
 	}
 	return strings.Join(blocks, "\n")
 }
@@ -1772,10 +1772,7 @@ func TestTUI_NoEngineIsSurvivable(t *testing.T) {
 // the finalized block.
 func TestTUI_StreamingMatchesFinalized(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
-	m.md = newMarkdown(80)
-	if m.md == nil {
-		t.Skip("glamour renderer unavailable")
-	}
+	m.mdWidth = 80
 
 	// Simulate streaming tokens that form markdown.
 	m.cur = "**bold** and `code`"

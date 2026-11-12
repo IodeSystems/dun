@@ -50,7 +50,7 @@ func (m *tuiModel) refresh() {
 	if curAt >= 0 {
 		// The streaming reply renders the way it will once finished: its
 		// wide blocks cut at the pane, not wrapped (wide.go).
-		blocks[curAt], _ = renderAnswer(m.md, m.proseW(), m.cur, wrapW, 0)
+		blocks[curAt] = m.curAnswer(wrapW)
 	}
 	rendered := make([]string, 0, len(m.vp.lines)) // display rows, not blocks
 	frm := frame{
