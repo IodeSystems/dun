@@ -22,6 +22,7 @@ worker's environment sets DUN_MEMORY, e.g. DUN_MEMORY=1 for a run that wants it.
 Code and docs search through dund is off the same way: DUN_CODE_SEARCH=0 unless
 the worker's environment sets it. So are the user's rules files (~/AGENTS.md,
 ~/CLAUDE.md, ~/.claude/CLAUDE.md in the container): DUN_USER_RULES=0 unless set.
+The answer-formatting prompt is off the same way: DUN_FORMAT_PROMPT=0 unless set.
 """
 
 from __future__ import annotations
@@ -95,6 +96,9 @@ class Dun(BaseInstalledAgent):
             # task's own AGENTS.md and CLAUDE.md, whatever the image's home
             # holds. DUN_USER_RULES=1 reads them.
             "DUN_USER_RULES": os.environ.get("DUN_USER_RULES", "0"),
+            # And no answer-formatting prompt (dun/replyformat.go): no person
+            # reads a trial's replies. DUN_FORMAT_PROMPT=1 adds it.
+            "DUN_FORMAT_PROMPT": os.environ.get("DUN_FORMAT_PROMPT", "0"),
         }
         # dun's round limit per turn (default 400). A benchmark may set it lower as
         # a cost guard: report it with the results.

@@ -268,6 +268,10 @@ type Config struct {
 	// DUN_USER_RULES=0, as under the Harbor adapter, where a trial must not
 	// depend on the machine's home directory.
 	NoUserRules bool
+	// NoFormatPrompt leaves bubbleteandmd's answer-formatting section out of the
+	// system prompt (replyformat.go): DUN_FORMAT_PROMPT=0. A child and a
+	// --non-interactive run never have it.
+	NoFormatPrompt bool
 	// Vision is what images on a user message need: which model Client runs
 	// (for the vision probe record) and the vision→text model that describes
 	// images for one that cannot read them. See images.go.
