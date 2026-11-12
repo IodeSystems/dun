@@ -218,7 +218,9 @@ type tuiModel struct {
 	panelYOff    int
 	panelRows    int
 	panelFollow  bool       // new rows arrived with a panel open, this update: a shrink keeps them in view
-	ans          *answerKit // answer renderers and the streaming reply's Stream (answer.go)
+	ans          *answerKit // answer renderers and the streaming reply's Doc (answer.go)
+	docAt        int        // 1 + the convo index of the answer whose forms have the keys; 0: none (docfocus.go)
+	docReveal    bool       // the next refresh scrolls the focused form into view (revealDoc)
 	mdWidth      int        // terminal width the prose column is taken from (proseW)
 	history      []string   // sent inputs, recalled with ctrl+↑/↓
 	histIdx      int        // cursor into history (== len when not browsing)

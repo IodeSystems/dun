@@ -209,6 +209,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		}
+		// An answer's forms have the keys (docfocus.go): it refreshed.
+		if m.docKeys(msg) {
+			return m, nil
+		}
 		// Descended into a box, the keys scroll it (box.go); into an answer's
 		// wide blocks, they scroll them sideways (wide.go).
 		if m.insideKeys(msg.String()) || m.insideWideKeys(msg.String()) {
@@ -361,6 +365,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.sel >= 0 && m.sel < len(m.convo) && m.convo[m.sel].needLogin && !m.loggedIn() {
 					m.setFocus(focusInput)
 					return m, m.openLogin("")
+				}
+				// An answer with forms: enter gives them the keys (docfocus.go).
+				if m.enterDoc() {
+					m.refresh()
+					return m, nil
 				}
 				// Thinking (and anything else with a page) opens in the pager.
 				if m.openPager(m.sel) {

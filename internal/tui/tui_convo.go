@@ -266,6 +266,10 @@ func (m *tuiModel) descendSel() bool {
 		e.wide.inside = true
 		return true
 	}
+	// An answer with forms: → gives them the keys (docfocus.go).
+	if m.enterDoc() {
+		return true
+	}
 	if d := e.docs; d != nil {
 		if d.descended {
 			// Inside the list: → opens the highlighted document. Already open,

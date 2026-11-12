@@ -132,6 +132,23 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   sub-agent (its reply goes to the parent model) and under `--non-interactive`
   (no one reads along), so the Harbor adapter, which uses both, never has it;
   it also sets `DUN_FORMAT_PROMPT=0` itself. Present in `--no-tools` chat.
+- **A reply's forms take keys from the conversation, not the composer
+  (2026-11-12, `docfocus.go`).** Each reply renders through a bubbleteandmd
+  `Doc` (layer 3) at height 0: dun keeps its own scroll. tab is already the
+  composer's completion and the zone cycle, so focus enters where the
+  composer is not the key target: the selected answer in convo focus. enter
+  gives its forms the keys; → does too when no block is cut at the edge (→
+  descends into a wide block first, so its sideways scroll is unchanged). The
+  answer selected gets the keys, not the last one with forms: the selection
+  is what the person is on. Inside: tab/shift+tab form, enter/space toggle,
+  ←/→ tab or tree cursor; ↑/↓ stay dun's scroll and the forms keep the keys
+  while the answer stays selected. Leaving (tab past the last form,
+  shift+tab before the first, esc, ← on a form that does not take ←) is one
+  level out to the answer and is consumed, as ← at a wide block's left edge:
+  an extra tab does not change the zone. A fold or tab switch is the
+  person's action, so the answer may shrink (its held height starts over).
+  A finished reply keeps its Doc; a width change makes a new Doc with a copy
+  of the State (folds, tabs, focus).
 - **Tool docs prescribe only the habit that bites.** `toolDocs["node_query"]`
   (`mcp.go`) was written from a corpus of 39 distinct failing selectors: 25 were
   a bare file path where an id belongs, 8 a grep pattern quoted twice. Those
