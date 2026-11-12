@@ -12,8 +12,8 @@ import (
 	"github.com/iodesystems/bubbleteandmd"
 )
 
-// Answers render through bubbleteandmd: one Stream per reply, Frame per
-// token, Final once at the end. Blocks before the tail are rendered once and
+// Answers render through bubbleteandmd: one Doc (a Stream with interactive
+// forms, docfocus.go) per reply, Frame per token, Final once at the end. Blocks before the tail are rendered once and
 // kept in answerCache, so a frame costs the tail, not the reply; a finished
 // reply rendered again (a resize, a replayed history) is the cache's.
 //
@@ -21,7 +21,9 @@ import (
 // WideBlocks(pane), renders a top-level code block or table wider than that
 // at its own width, each row cut at the pane with "… +N cols →" (wide.go
 // has the why). A Stream's key names the style, the prose column and the
-// pane: a new one of any of them is a new Renderer and a new Stream.
+// pane: a new one of any of them is a new Renderer and a new Doc, which takes
+// the old Doc's State (folds, tabs, focus: keyed by byte offset in the
+// source, the same at every width).
 
 // answerCache is the rendered-block cache, one per program (mutex-safe).
 var answerCache = bubbleteandmd.NewCache(512)
@@ -50,10 +52,10 @@ func warmAnswerRenderer() {
 }
 
 // answerKit is a model's answer renderers, by prose column and pane, and
-// the streaming reply's Stream.
+// the streaming reply's Doc.
 type answerKit struct {
 	rs     map[[2]int]*bubbleteandmd.DirectiveRenderer
-	cur    *bubbleteandmd.Stream // the reply streaming now (m.cur)
+	cur    *bubbleteandmd.Doc // the reply streaming now (m.cur)
 	curKey string
 }
 
@@ -67,9 +69,11 @@ func (m *tuiModel) kit() *answerKit {
 // answerKey names what a render depends on besides the source.
 func answerKey(proseW, pane int) string { return fmt.Sprintf("%s/%d/%d", mdStyle, proseW, pane) }
 
-// stream is a new Stream for prose column proseW and pane, and its key; nil
-// when no renderer can be built (the caller shows the source).
-func (k *answerKit) stream(proseW, pane int) (*bubbleteandmd.Stream, string) {
+// doc is a new Doc for prose column proseW and pane, and its key; nil when
+// no renderer can be built (the caller shows the source). st, when not nil,
+// is the State it renders in (a copy: the old Doc of a reply at another
+// width, or the Doc a prefix or natural render must match).
+func (k *answerKit) doc(proseW, pane int, st *bubbleteandmd.State) (*bubbleteandmd.Doc, string) {
 	at := [2]int{proseW, pane}
 	r, ok := k.rs[at]
 	if !ok {
@@ -85,14 +89,33 @@ func (k *answerKit) stream(proseW, pane int) (*bubbleteandmd.Stream, string) {
 		k.rs[at] = r
 	}
 	key := answerKey(proseW, pane)
-	return bubbleteandmd.NewStream(r, key, answerCache), key
+	d := bubbleteandmd.NewDoc(r, key, answerCache)
+	if st != nil {
+		*d.State() = *st
+	}
+	return d, key
+}
+
+// stateOf is d's State, nil for no Doc.
+func stateOf(d *bubbleteandmd.Doc) *bubbleteandmd.State {
+	if d == nil {
+		return nil
+	}
+	return d.State()
 }
 
 // answerOut renders src through s: a frame while it streams, the final
-// render at the end. On an error (or no Stream) it is the source, sanitized.
-func answerOut(s *bubbleteandmd.Stream, src string, final bool) string {
+// render at the end. On an error (or no Doc) it is the source, sanitized.
+func answerOut(s *bubbleteandmd.Doc, src string, final bool) string {
+	out, _ := answerOutLead(s, src, final)
+	return out
+}
+
+// answerOutLead is answerOut and the blank lines it trimmed from the top:
+// the Doc's stop lines count them.
+func answerOutLead(s *bubbleteandmd.Doc, src string, final bool) (string, int) {
 	if s == nil {
-		return bubbleteandmd.Sanitize(src)
+		return bubbleteandmd.Sanitize(src), 0
 	}
 	in := demoteStepHeads(src)
 	var out string
@@ -103,31 +126,32 @@ func answerOut(s *bubbleteandmd.Stream, src string, final bool) string {
 		out, err = s.Frame(in)
 	}
 	if err != nil {
-		return bubbleteandmd.Sanitize(src)
+		return bubbleteandmd.Sanitize(src), 0
 	}
-	return strings.Trim(out, "\n")
+	top := strings.TrimLeft(out, "\n")
+	return strings.TrimRight(top, "\n"), len(out) - len(top)
 }
 
 // curAnswer renders the streaming reply (m.cur) for a pane avail columns
-// wide: a Frame of its Stream, made again when the widths moved.
+// wide: a Frame of its Doc, made again (State kept) when the widths moved.
 func (m *tuiModel) curAnswer(avail int) string {
 	k := m.kit()
 	pw := m.proseW()
 	if key := answerKey(pw, avail); k.cur == nil || k.curKey != key {
-		k.cur, k.curKey = k.stream(pw, avail)
+		k.cur, k.curKey = k.doc(pw, avail, stateOf(k.cur))
 	}
 	return answerOut(k.cur, m.cur, false)
 }
 
 // finishAnswer is the finished reply src as an entry: the streaming reply's
-// Stream ends with Final (it must: a frame can hide a partial table row),
+// Doc ends with Final (it must: a frame can hide a partial table row),
 // and the entry keeps it for the renders to come.
 func (m *tuiModel) finishAnswer(src string) convoEntry {
 	e := convoEntry{mdSource: src}
 	k := m.kit()
 	if k.cur != nil {
 		e.ans, e.ansKey = k.cur, k.curKey
-		e.collapsed = answerOut(e.ans, src, true)
+		e.collapsed, e.ansLead = answerOutLead(e.ans, src, true)
 	} else {
 		e.collapsed = m.renderEntry(&e, max(1, m.vp.Width-1))
 	}
@@ -160,10 +184,10 @@ func cutMax(out string) int {
 	return n + wideIndicatorRoom - 12
 }
 
-// rowsOf is how many rows src renders to at pane avail, trailing blank
-// rows left out. The blocks come from answerCache.
-func (m *tuiModel) rowsOf(src string, avail int) int {
-	s, _ := m.kit().stream(m.proseW(), avail)
+// rowsOf is how many rows src renders to at pane avail in State st,
+// trailing blank rows left out. The blocks come from answerCache.
+func (m *tuiModel) rowsOf(src string, avail int, st *bubbleteandmd.State) int {
+	s, _ := m.kit().doc(m.proseW(), avail, st)
 	rows := strings.Split(answerOut(s, src, true), "\n")
 	for len(rows) > 0 && strings.TrimSpace(ansi.Strip(rows[len(rows)-1])) == "" {
 		rows = rows[:len(rows)-1]
@@ -177,9 +201,10 @@ func (m *tuiModel) rowsOf(src string, avail int) int {
 // and cut at avail from column off (cutRow); prose rows stay as they are.
 // A block's rows are found by rendering the source up to it and through it:
 // the renderer joins blocks as a whole render does, so a prefix's rows are
-// the whole render's first rows.
-func (m *tuiModel) panAnswer(src, cut string, avail, off int) string {
-	ns, _ := m.kit().stream(m.proseW(), natPane)
+// the whole render's first rows. Every render here is in State st (the
+// reply's folds and tabs), so it has the layout of cut.
+func (m *tuiModel) panAnswer(src, cut string, avail, off int, st *bubbleteandmd.State) string {
+	ns, _ := m.kit().doc(m.proseW(), natPane, st)
 	nat := strings.Split(answerOut(ns, src, true), "\n")
 	rows := strings.Split(cut, "\n")
 	if len(nat) != len(rows) {
@@ -190,9 +215,9 @@ func (m *tuiModel) panAnswer(src, cut string, avail, off int) string {
 		if s.wide {
 			p := 0
 			if len(pre) > 0 {
-				p = m.rowsOf(strings.Join(pre, "\n"), avail)
+				p = m.rowsOf(strings.Join(pre, "\n"), avail, st)
 			}
-			q := min(m.rowsOf(strings.Join(append(pre, s.text), "\n"), avail), len(rows))
+			q := min(m.rowsOf(strings.Join(append(pre, s.text), "\n"), avail, st), len(rows))
 			cutHere := false
 			for i := p; i < q && !cutHere; i++ {
 				cutHere = rows[i] != nat[i]

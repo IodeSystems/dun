@@ -197,15 +197,17 @@ func cutRow(r string, off, avail int) string {
 func (m tuiModel) proseW() int { return max(20, min(m.mdWidth, bandCap)-2) }
 
 // renderEntry renders a finished answer at avail columns from its source
-// (its Stream's Final; the Stream is made again when the widths moved) and
+// (its Doc's Final; the Doc is made again, State kept, when the widths
+// moved) and
 // keeps its sideways scroll in step: created when something is cut, the
 // offset clamped when a wider pane needs less of it.
 func (m *tuiModel) renderEntry(e *convoEntry, avail int) string {
 	pw := m.proseW()
 	if key := answerKey(pw, avail); e.ans == nil || e.ansKey != key {
-		e.ans, e.ansKey = m.kit().stream(pw, avail)
+		e.ans, e.ansKey = m.kit().doc(pw, avail, stateOf(e.ans))
 	}
-	text := answerOut(e.ans, e.mdSource, true)
+	text, lead := answerOutLead(e.ans, e.mdSource, true)
+	e.ansLead = lead
 	maxOff := cutMax(text)
 	switch {
 	case maxOff > 0 && e.wide == nil:
@@ -217,7 +219,7 @@ func (m *tuiModel) renderEntry(e *convoEntry, avail int) string {
 		e.wide.off = min(e.wide.off, maxOff)
 	}
 	if e.wide != nil && e.wide.off > 0 {
-		text = m.panAnswer(e.mdSource, text, avail, e.wide.off)
+		text = m.panAnswer(e.mdSource, text, avail, e.wide.off, stateOf(e.ans))
 	}
 	return text
 }
