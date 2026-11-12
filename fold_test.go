@@ -15,7 +15,7 @@ func TestFoldTask_PlanAndInFlight(t *testing.T) {
 	if got := h.foldTask(); got != "" {
 		t.Errorf("nothing set and nothing running: %q", got)
 	}
-	planCall(t, h, `{"action":"add","title":"wire rescue","done_when":"the rescue folds in stages"}`)
+	planCall(t, h, "plan_add", `{"title":"wire rescue","done_when":"the rescue folds in stages"}`)
 	kept := spawnKid(t, h, "read the build log and say what failed")
 	gone := spawnKid(t, h, "an aside that was dismissed")
 	waitIdle(t, kept)

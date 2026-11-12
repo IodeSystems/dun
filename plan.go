@@ -24,7 +24,7 @@ import (
 //     resume and a fold; a session with no file keeps it in memory.
 //     Read on first use, and again if the session's file changed (as the
 //     worklog is, worklog.go).
-//   - The `plan` tool, in the built-in group "plan". A root's covers the
+//   - The plan tools (plan_add, plan_update, plan_close, plan_show), in the built-in group "plan". A root's covers the
 //     graph; a child gets one only while it owns nodes (childPlanTool).
 //   - A turn that begins while the plan has open nodes carries a short line
 //     (planTurnLine).
@@ -172,29 +172,29 @@ func (h *Harness) planChanged() {
 	}
 }
 
-// planDesc is the root's plan tool description, in place of taskgraph's
-// own: purpose first, then the mechanics (USER 2026-11-07: in 72
-// Terminal-Bench trials, 20 ran 60 or more rounds and none used the plan).
-// The purpose is checkable: the plan is a sidecar (planNow), not entries, so
-// recap and a fold never cut it; a fold is given it (foldTask) and each turn
-// starts with its open nodes (planTurnLine).
-const planDesc = "The plan is what survives. It is kept outside the conversation: recap and context folds do " +
-	"not cut it, a fold's summary is given it, and each turn starts with its open nodes. What is only in the " +
-	"conversation can be lost when context is cut. Make nodes for work with several steps; a one-step task " +
-	"needs none. A node has a title, details, done_when (what must be true when it is done) and needs (ids it " +
-	"waits on; it is ready when all of them are done). Begin a node: update it to status doing. When done_when " +
-	"is true: done, with an account of how it was met. block: you are stuck, with a reason; waiting on other " +
-	"nodes is not blocked. A dropped node keeps its dependents waiting: add a node with replaces, then update " +
-	"their needs. Actions: add, update, show (one node by id, else the whole plan), ready, done, block, drop. " +
-	"The whole-plan show lists titles, statuses and done_when; show with an id gives the node with its details."
+// planDesc is the root's plan_add description, in place of taskgraph's own:
+// purpose first, then the mechanics (USER 2026-11-07: in 72 Terminal-Bench
+// trials, 20 ran 60 or more rounds and none used the plan). The purpose is
+// checkable: the plan is a sidecar (planNow), not entries, so recap and a
+// fold never cut it; a fold is given it (foldTask) and each turn starts with
+// its open nodes (planTurnLine).
+const planDesc = "Add a node to the plan. The plan is what survives. It is kept outside the conversation: recap and " +
+	"context folds do not cut it, a fold's summary is given it, and each turn starts with its open nodes. What is " +
+	"only in the conversation can be lost when context is cut. Make nodes for work with several steps; a " +
+	"one-step task needs none. A node has a title, details, done_when (what must be true when it is done) and " +
+	"needs (ids it waits on; it is ready when all of them are done). Begin a node: plan_update it to status doing. " +
+	"When done_when is true: plan_close done, with an account of how it was met. plan_close block: you are stuck, " +
+	"with a reason; waiting on other nodes is not blocked. A dropped node keeps its dependents waiting: plan_add a " +
+	"node with replaces, then plan_update their needs. plan_show lists titles, statuses and done_when, then what " +
+	"is ready; plan_show with an id gives the node with its details."
 
 // planNote is the interactive part: the person, and plan mode. Left out under
 // --non-interactive, where no one reads, edits or approves the plan.
 const planNote = "The user can read and edit the plan. While plan mode is on, the user " +
 	"must approve the plan before you change files or run commands: make the nodes, then ask them to " +
-	"approve it (/plan approve); until then reading, searching and this tool work."
+	"approve it (/plan approve); until then reading, searching and the plan tools work."
 
-// planDescFor is the description for this session. It depends only on
+// planDescFor is the plan_add description for this session. It depends only on
 // Config.NonInteractive, which a session never changes, so the tool def is
 // the same on every request (the provider's prompt cache).
 func planDescFor(nonInteractive bool) string {
@@ -204,31 +204,40 @@ func planDescFor(nonInteractive bool) string {
 	return planDesc + " " + planNote
 }
 
-// withPlan adds the plan tool's handler to the dispatcher.
-func withPlan(inner agent.ToolDispatcher, h *Harness, handle func(context.Context, string) string, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+// withPlan adds the plan tools to the dispatcher. onCall hears every plan
+// call and its result.
+func withPlan(inner agent.ToolDispatcher, tg *taskgraph.Tools, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+	plan := tg.Wrap(inner)
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		if tc.Function.Name != taskgraph.ToolName {
-			return inner(ctx, tc)
-		}
-		out := handle(ctx, tc.Function.Arguments)
-		if onCall != nil {
+		out, err := plan(ctx, tc)
+		if onCall != nil && tg.Has(tc.Function.Name) {
 			var a map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
-			onCall(taskgraph.ToolName, a, out)
+			onCall(tc.Function.Name, a, out)
 		}
-		return out, nil
+		return out, err
 	}
 }
 
-// planToolDef is the plan tool for a root session and its handler.
-func (h *Harness) planTool() (llm.ToolDef, func(context.Context, string) string) {
-	def, handle := taskgraph.Tool(planStore{h}, "",
+// planTools is the plan tools for a root session.
+func (h *Harness) planTools() *taskgraph.Tools {
+	return taskgraph.New(planStore{h}, "",
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
 			h.planMoved(cs) // the stall window (plannudge.go)
 			h.planTell(cs, "the main agent", "")
 		}))
-	def.Function.Description = planDescFor(h.cfg.NonInteractive)
-	return def, handle
+}
+
+// planDefs is the plan tools' defs for a root session: agentkit's, with
+// plan_add's description replaced by planDescFor.
+func (h *Harness) planDefs(tg *taskgraph.Tools) []llm.ToolDef {
+	defs := tg.Defs()
+	for i := range defs {
+		if defs[i].Function.Name == taskgraph.ToolAdd {
+			defs[i].Function.Description = planDescFor(h.cfg.NonInteractive)
+		}
+	}
+	return defs
 }
 
 // planTell routes a kept change to the owners it names, without the actor
@@ -267,7 +276,7 @@ func (h *Harness) planTellKeyed(cs []taskgraph.Change, who, note, key string) {
 		if sa := h.agentByID(k); sa != nil {
 			if child := sa.harness(); child != nil {
 				child.Notify(fmt.Sprintf("[control/plan] %s changed plan node(s) %s, which you own. "+
-					"plan(show) has them as they are now; carry on to match.", who, strings.Join(ids, ", ")))
+					"plan_show has them as they are now; carry on to match.", who, strings.Join(ids, ", ")))
 			}
 		}
 	}
@@ -381,8 +390,8 @@ func withPlanGate(inner agent.ToolDispatcher, h *Harness, serverOf map[string]st
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if n := tc.Function.Name; changesWorkspace(n, serverOf[n]) && h.planLocked() {
 			return "ERROR: plan mode is on and the plan is not approved, so " + n + " is refused: it changes things. " +
-				"Write the plan with the plan tool (nodes with done_when), tell the user, and wait for them to run /plan approve. " +
-				"Reading, searching and the plan tool work meanwhile.", nil
+				"Write the plan with plan_add (nodes with done_when), tell the user, and wait for them to run /plan approve. " +
+				"Reading, searching and the plan tools work meanwhile.", nil
 		}
 		return inner(ctx, tc)
 	}
@@ -553,7 +562,7 @@ func (h *Harness) planTellOwner(id, text string) (string, error) {
 		return "", fmt.Errorf("no plan node %s", id)
 	}
 	msg := fmt.Sprintf("[control/plan] The user, about plan node %s (%q): %s\n"+
-		"Change the plan to match with the plan tool (this node, or the nodes under it), then carry on.", id, n.Title, text)
+		"Change the plan to match with the plan tools (this node, or the nodes under it), then carry on.", id, n.Title, text)
 	k, isAgent := planAgentNum(n.Owner)
 	var sa *subAgent
 	var child *Harness
@@ -631,7 +640,7 @@ func planAgentNum(owner string) (int, bool) {
 }
 
 // planFix is how to start a child when a call named no node it can have.
-const planFix = `Add a node with plan({action:"add", title, details, done_when}), then call agent({node:"<id>"}).`
+const planFix = `Add a node with plan_add({title, details, done_when}), then call agent({node:"<id>"}).`
 
 // planCanAssign says why node id cannot go to a child, or nil. One node, one
 // child: a node a child owns is refused until that child publishes it or is
@@ -665,7 +674,7 @@ func (h *Harness) planCanAssign(id string) error {
 	return nil
 }
 
-// planAssign gives node id, alone, to child num, and the child its plan tool.
+// planAssign gives node id, alone, to child num, and the child its plan tools.
 func (h *Harness) planAssign(id string, num int) error {
 	if err := h.planCanAssign(id); err != nil {
 		return err
@@ -726,7 +735,7 @@ func (h *Harness) planBrief(id string) string {
 	if n.DoneWhen != "" {
 		b += " Done when: " + n.DoneWhen + "."
 	}
-	return b + " Publish it with the plan tool when its work is done: status done with an account of what you " +
+	return b + " Publish it with plan_close when its work is done: done with an account of what you " +
 		"found or made, or dropped with why. The main agent plans what follows from what you publish."
 }
 
@@ -794,18 +803,18 @@ func (h *Harness) planOwed(owner string) []*taskgraph.Node {
 	return out
 }
 
-// childPlanNote is the child's plan tool's extra sentence.
+// childPlanNote is the child's plan tools' extra sentence (plan_add and plan_show).
 const childPlanNote = "This is your parent's plan. You own some of its nodes and may change, add under and " +
 	"finish only those; the rest are shown so you can see what yours wait on and what waits on yours. " +
-	"You owe a publish for each node you own: status done with an account of what you found or made, or dropped with why."
+	"You owe a publish for each node you own: plan_close done with an account of what you found or made, or drop with why."
 
-// childPlanTool is a child's plan tool: its parent's graph, as its owner
+// childPlanTool is a child's plan tools: its parent's graph, as its owner
 // ("agent:N"), changing only that owner's nodes. What it changes reaches the
 // parent's screen at once; a publish (done or dropped) wakes the parent's
 // main agent, with what became ready, and any other change rides its next turn.
-func (h *Harness) childPlanTool() (llm.ToolDef, func(context.Context, string) string) {
+func (h *Harness) childPlanTool() *taskgraph.Tools {
 	parent, actor := h.cfg.Parent, planOwner(h.cfg.AgentID)
-	return taskgraph.Tool(planStore{parent}, actor, taskgraph.WithNote(childPlanNote),
+	return taskgraph.New(planStore{parent}, actor, taskgraph.WithNote(childPlanNote),
 		taskgraph.WithMayChange(func(a string, n *taskgraph.Node) bool { return n != nil && n.Owner == a }),
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
 			parent.planFromChild(h.cfg.AgentID, cs)
@@ -831,7 +840,7 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 		h.planTell(cs, who, "") // the board says it; a child's change is not news
 		return
 	}
-	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan(show, id) has the node).", who, strings.Join(published, ", "))
+	msg := fmt.Sprintf("[control/plan] %s published plan node(s) %s (plan_show with the id has the node).", who, strings.Join(published, ", "))
 	if len(ready) > 0 {
 		msg += " Now ready: " + strings.Join(ready, ", ") + " — give them to an idle agent (agent({id:N, node:…})), a new one (agent({node:…})), or do them."
 	}

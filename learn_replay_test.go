@@ -115,13 +115,24 @@ func replayChurn(path string) ([]churnEpisode, error) {
 			}
 		case "tool_call":
 			calls = append(calls, churnAttempt{Tool: e.Tool, Args: string(e.Args)})
-			if e.Tool != "plan" {
-				break
-			}
+			// Recorded sessions use the old single plan tool (action) or the
+			// split tools (plan_add, plan_update, plan_close).
 			var a struct {
-				Action string `json:"action"`
+				Action  string `json:"action"`
+				Outcome string `json:"outcome"`
 			}
 			_ = json.Unmarshal(e.Args, &a)
+			switch e.Tool {
+			case "plan":
+			case "plan_add":
+				a.Action = "add"
+			case "plan_update":
+				a.Action = "update"
+			case "plan_close":
+				a.Action = a.Outcome
+			default:
+				continue
+			}
 			switch a.Action {
 			case "add":
 				open++
@@ -133,7 +144,7 @@ func replayChurn(path string) ([]churnEpisode, error) {
 			}
 			moved = rounds
 			if stall != nil {
-				stall.Fix = churnAttempt{Tool: "plan", Args: clipMiddle(string(e.Args), churnArgsMax)}
+				stall.Fix = churnAttempt{Tool: e.Tool, Args: clipMiddle(string(e.Args), churnArgsMax)}
 				out = append(out, *stall)
 				stall = nil
 			}

@@ -888,13 +888,13 @@ func (h *Harness) rebuildTools() {
 	// only while it owns nodes of its parent's, covers those (childPlanTool;
 	// planAssign rebuilds the tools when it is given its first).
 	if !h.isChild() {
-		def, handle := h.planTool()
-		toolDefs = append(toolDefs, def)
-		dispatch = withPlan(dispatch, h, handle, report)
+		tg := h.planTools()
+		toolDefs = append(toolDefs, h.planDefs(tg)...)
+		dispatch = withPlan(dispatch, tg, report)
 	} else if h.cfg.Parent != nil && h.cfg.Parent.planOwns(planOwner(h.cfg.AgentID)) {
-		def, handle := h.childPlanTool()
-		toolDefs = append(toolDefs, def)
-		dispatch = withPlan(dispatch, h, handle, report)
+		tg := h.childPlanTool()
+		toolDefs = append(toolDefs, tg.Defs()...)
+		dispatch = withPlan(dispatch, tg, report)
 	}
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
 	// the moment churn is created rather than whenever usage is next measured.

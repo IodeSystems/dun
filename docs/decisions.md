@@ -474,7 +474,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   only be launchable via plan nodes!").** `agent({node, …})` is the model's
   one way to start a child; the free `prompt` is gone, and a call with one, or
   with no node, an unknown node, a finished one, or one a live child owns, is
-  refused, starts nothing and says the fix (add a node with `plan`, then
+  refused, starts nothing and says the fix (add a node with `plan_add`, then
   `agent({node:"<id>"})`). The brief is the node's title, details and
   done_when alone, not a prompt on top: one place for the task, which the
   person and a resume can read, and one parameter fewer. One node, one child.

@@ -677,8 +677,8 @@ func (s *subAgent) work(ctx context.Context, h *Harness, msg string) (agent.Turn
 		reminded = true
 		var next agent.TurnResult
 		if next, err = h.Ask(ctx, "[control/plan] Before you stop: you have not published plan node(s) "+
-			strings.Join(owed, ", ")+". For each, set status done with an account of what you found or made, "+
-			"or dropped with why, using the plan tool. If one cannot be finished, drop it with why, "+
+			strings.Join(owed, ", ")+". For each, plan_close it done with an account of what you found or made, "+
+			"or drop it with why. If one cannot be finished, drop it with why, "+
 			"or leave it and say why in your reply."); err == nil && strings.TrimSpace(next.Reply) != "" {
 			res.Reply = strings.TrimSpace(res.Reply + "\n\n" + next.Reply) // the answer stays; this adds to it
 		}
@@ -1160,7 +1160,7 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 			"wait": map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
 			"node": map[string]any{"type": "string", "description": "the plan node a new child works: a ready one (todo, no child on it, " +
 				"its needs done). Its title, details and done_when are the child's brief; it owns the node alone and owes you a " +
-				"publish of it (done with notes, or dropped with why); the node leaves your ready list. It gets a plan tool that " +
+				"publish of it (done with notes, or dropped with why); the node leaves your ready list. It gets plan tools that " +
 				"changes only its own nodes. With id: give idle agent #id this node; tell adds to its brief"},
 			"id":      map[string]any{"type": "integer", "description": "act on existing agent #id instead of starting one"},
 			"tell":    map[string]any{"type": "string", "description": "with id: its next message: the answer to its question, or new work"},
@@ -1254,8 +1254,8 @@ const (
 	// plan, where the person and a resume can read it, and not in a prompt
 	// only the child saw.
 	agentNoPrompt = "ERROR: agent takes no prompt; a child's brief is its plan node's title, details and done_when. " +
-		"Put the task in the node's details with plan, then call agent({node:\"<id>\"}). No agent was started."
-	agentNoPlan = "ERROR: agent starts a child only on a plan node, and the plan tool is off in this session " +
+		"Put the task in the node's details with plan_add, then call agent({node:\"<id>\"}). No agent was started."
+	agentNoPlan = "ERROR: agent starts a child only on a plan node, and the plan tools are off in this session " +
 		"(the user turns it on in /mcp). No agent was started."
 )
 
@@ -1264,7 +1264,7 @@ const (
 func spawnTool(ctx context.Context, h *Harness, provider, model, effort, isolation, node string, wait bool) string {
 	node = strings.TrimSpace(node)
 	switch {
-	case node == "" && !h.hasTool(taskgraph.ToolName):
+	case node == "" && !h.hasTool(taskgraph.ToolAdd):
 		return agentNoPlan
 	case node == "":
 		return agentNoNode

@@ -43,7 +43,7 @@ const idleChecklist = "Before you end the turn: list each requirement the task s
 // only the task's (USER 2026-11-07).
 const idlePlanOpen = "Open plan nodes:\n%s\nFinish each, or mark it done with how done_when was met, or drop it with why."
 
-// idlePlanMax is how many open nodes the note lists; plan(show) has the rest.
+// idlePlanMax is how many open nodes the note lists; plan_show has the rest.
 const idlePlanMax = 10
 
 // idleOpenNodes lists the main agent's open nodes, one line each: id, title,
@@ -66,7 +66,7 @@ func (h *Harness) idleOpenNodes() string {
 		lines = append(lines, fmt.Sprintf("- %s %s; done_when: %s", n.ID, n.Title, n.DoneWhen))
 	}
 	if more > 0 {
-		lines = append(lines, fmt.Sprintf("- and %d more (plan show)", more))
+		lines = append(lines, fmt.Sprintf("- and %d more (plan_show)", more))
 	}
 	return strings.Join(lines, "\n")
 }

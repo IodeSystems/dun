@@ -29,7 +29,7 @@ func (r *nudgeRunner) ChatStream(_ context.Context, msgs []llm.Message, _ []llm.
 	if opts != nil {
 		choice = opts.ToolChoice
 	}
-	forced := strings.Contains(choice, `"plan"`)
+	forced := strings.Contains(choice, `"plan_`)
 	r.mu.Lock()
 	if forced && r.refuse {
 		r.choice = append(r.choice, choice)
@@ -69,7 +69,7 @@ func (r *nudgeRunner) forcedAt() []int {
 	defer r.mu.Unlock()
 	var at []int
 	for i, c := range r.choice {
-		if strings.Contains(c, `"plan"`) {
+		if strings.Contains(c, `"plan_`) {
 			at = append(at, i)
 		}
 	}
@@ -106,6 +106,12 @@ func (r *nudgeRunner) calls() int {
 	return len(r.choice)
 }
 
+// planNudgeCall is nudgeCall for "name {args}", the form stall scripts use.
+func planNudgeCall(id, nameArgs string) *llm.ToolCall {
+	name, args, _ := strings.Cut(nameArgs, " ")
+	return nudgeCall(id, name, args)
+}
+
 func nudgeCall(id, name, args string) *llm.ToolCall {
 	tc := &llm.ToolCall{ID: id, Type: "function"}
 	tc.Function.Name, tc.Function.Arguments = name, args
@@ -118,7 +124,7 @@ func execs(cmd string, upto int, plan bool) func(int, bool) *llm.ToolCall {
 	return func(i int, forced bool) *llm.ToolCall {
 		id := fmt.Sprintf("c%d", i)
 		if forced && plan {
-			return nudgeCall(id, "plan", `{"action":"add","title":"finish","done_when":"it works"}`)
+			return nudgeCall(id, "plan_add", `{"title":"finish","done_when":"it works"}`)
 		}
 		if i >= upto {
 			return nil
@@ -170,6 +176,9 @@ func TestPlanNudge_AfterRounds(t *testing.T) {
 	if len(at) != 1 || at[0] != 3 {
 		t.Fatalf("forced at %v of %d requests, want [3]", at, r.calls())
 	}
+	if c := r.choice[3]; !strings.Contains(c, `"plan_add"`) {
+		t.Errorf("no plan: forced %s, want plan_add", c)
+	}
 	if !r.sentHas(3, "This task has run 3 rounds with no plan. Write the plan now") {
 		t.Error("the forced request does not carry the aside")
 	}
@@ -207,7 +216,7 @@ func TestPlanNudge_NotWithAPlan(t *testing.T) {
 	r := &nudgeRunner{reply: func(i int, forced bool) *llm.ToolCall {
 		switch {
 		case i == 0:
-			return nudgeCall("p", "plan", `{"action":"add","title":"the work","done_when":"it works"}`)
+			return nudgeCall("p", "plan_add", `{"title":"the work","done_when":"it works"}`)
 		case i < 8:
 			return nudgeCall(fmt.Sprintf("c%d", i), "exec", `{"command":"false"}`)
 		}
@@ -227,7 +236,7 @@ func TestPlanNudge_AfterFails(t *testing.T) {
 		id := fmt.Sprintf("c%d", i)
 		switch {
 		case forced:
-			return nudgeCall(id, "plan", `{"action":"add","title":"fix it","done_when":"it runs"}`)
+			return nudgeCall(id, "plan_add", `{"title":"fix it","done_when":"it runs"}`)
 		case i == 0 || i == 2:
 			return nudgeCall(id, "exec", `{"command":"exit 3"}`)
 		case i == 1:
@@ -278,7 +287,7 @@ func TestPlanNudge_Off(t *testing.T) {
 // A child is never nudged: it owns a node already.
 func TestPlanNudge_NotForAChild(t *testing.T) {
 	h := planHarness(t, false)
-	names := []string{"exec", "plan"}
+	names := []string{"exec", "plan_add"}
 	h.toolNames.Store(&names)
 	h.parent = &Harness{}
 	for range 10 {

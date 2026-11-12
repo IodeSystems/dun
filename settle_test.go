@@ -311,7 +311,7 @@ func TestSettle_OwedAcrossResume(t *testing.T) {
 // one queued event note (the user's latest edit), not a pile of either.
 func TestPlanBoard_OneKeyedAside(t *testing.T) {
 	h := planHarness(t, false)
-	planCall(t, h, `{"action":"add","title":"parse the file","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"parse the file","done_when":"x"}`)
 	ctx := context.Background()
 	h.queue = nil
 	if _, err := h.PlanCmd(ctx, "edit 1 title Parse it"); err != nil {
@@ -336,8 +336,8 @@ func TestPlanBoard_OneKeyedAside(t *testing.T) {
 // it): the main agent is told, with what waits on the dropped node.
 func TestPlanBoard_DropSaysWhatWaits(t *testing.T) {
 	h := planHarness(t, false)
-	planCall(t, h, `{"action":"add","title":"a","done_when":"x"}`)
-	planCall(t, h, `{"action":"add","title":"b","done_when":"x","needs":["1"]}`)
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"b","done_when":"x","needs":["1"]}`)
 	h.queue = nil
 	if _, err := h.PlanCmd(context.Background(), "drop 1 wrong way"); err != nil {
 		t.Fatal(err)

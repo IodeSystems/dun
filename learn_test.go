@@ -299,11 +299,11 @@ func TestLearn_HeldUntilTheTaskVerifies(t *testing.T) {
 	h, r := learnHarness(t, &fakeRag{}, genericLesson)
 	runSteps(t, h, churn(3)...)
 	h.learnAfterTurn(context.Background(), nil)
-	planCall(t, h, `{"action":"add","title":"build it","done_when":"it builds"}`)
+	planCall(t, h, "plan_add", `{"title":"build it","done_when":"it builds"}`)
 	h.idle.mark()
 	h.learnAfterTurn(context.Background(), nil) // a node open
-	planCall(t, h, `{"action":"update","id":"1","status":"doing"}`)
-	planCall(t, h, `{"action":"done","id":"1","account":"it builds"}`)
+	planCall(t, h, "plan_update", `{"id":"1","status":"doing"}`)
+	planCall(t, h, "plan_close", `{"outcome":"done","id":"1","account":"it builds"}`)
 	h.learnAfterTurn(context.Background(), context.Canceled) // the turn failed
 	h.learn.wg.Wait()
 	if r.called != 0 || len(held(h)) != 1 {
@@ -352,9 +352,9 @@ func TestLearn_CapCountsCallsNotHeld(t *testing.T) {
 // prompt names the stall, the open nodes, the calls before, and the move.
 func TestLearn_StalledPlanThatMovesIsAnEpisode(t *testing.T) {
 	h, r := learnHarness(t, &fakeRag{}, genericLesson)
-	names := []string{"exec", "plan"}
+	names := []string{"exec", "plan_add"}
 	h.toolNames.Store(&names)
-	planCall(t, h, `{"action":"add","title":"build it","done_when":"it builds"}`)
+	planCall(t, h, "plan_add", `{"title":"build it","done_when":"it builds"}`)
 	runSteps(t, h, execStep("make", false), execStep("make again", false))
 	h.cfg.PlanStallRounds = 3
 	h.turnRounds.n.Store(10)
@@ -362,8 +362,8 @@ func TestLearn_StalledPlanThatMovesIsAnEpisode(t *testing.T) {
 	if h.nudge.stalls != 1 || len(held(h)) != 0 {
 		t.Fatalf("stalls %d, held %d", h.nudge.stalls, len(held(h)))
 	}
-	planCall(t, h, `{"action":"drop","id":"1","reason":"wrong approach"}`)
-	planCall(t, h, `{"action":"add","title":"build with the other tool","done_when":"it builds"}`)
+	planCall(t, h, "plan_close", `{"outcome":"drop","id":"1","reason":"wrong approach"}`)
+	planCall(t, h, "plan_add", `{"title":"build with the other tool","done_when":"it builds"}`)
 	eps := held(h)
 	if len(eps) != 1 || eps[0].Stall != 10 || len(eps[0].Tried) != 2 {
 		t.Fatalf("held %+v", eps)
