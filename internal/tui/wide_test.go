@@ -194,6 +194,18 @@ func TestWide_StreamedAsFinished(t *testing.T) {
 		return rows[:len(rows)-3]
 	}
 	d, a := strip(during), strip(after)
+	// A table still growing at the tail with fewer than 8 body rows is one
+	// muted "table…" row until Final draws it (bubbleteandmd tablehold.go:
+	// its column widths settle in the first rows, so it appears once, at the
+	// widths it keeps). wideAnswer ends in a one-row table: the rows from
+	// the placeholder on are the table's, drawn at the finish. Every row
+	// above it must not change.
+	for k := range d {
+		if strings.Contains(d[k], "table…") {
+			d = d[:k]
+			break
+		}
+	}
 	for k := range d {
 		if k < len(a) && d[k] != a[k] && strings.TrimSpace(d[k]) != "" {
 			t.Errorf("row %d changed at the finish:\n %q\n %q", k, d[k], a[k])

@@ -15,7 +15,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/glamour/v2"
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
@@ -218,20 +217,20 @@ type tuiModel struct {
 	panelHeld    bool
 	panelYOff    int
 	panelRows    int
-	panelFollow  bool                  // new rows arrived with a panel open, this update: a shrink keeps them in view
-	md           *glamour.TermRenderer // markdown renderer for assistant replies
-	mdWidth      int                   // width md was built for (rebuild only on change)
-	history      []string              // sent inputs, recalled with ctrl+↑/↓
-	histIdx      int                   // cursor into history (== len when not browsing)
-	mouseMode    string                // "all" | "cell" | "off" — what /mouse last set
-	focus        int                   // focusInput | focusConvo | focusActivity
-	task         string                // the last user message, for the task line
-	agents       []agentRow            // live sub-agents (activity.go)
-	jobs         []jobRow              // live background jobs (activity.go)
-	actLevel     int                   // actCollapsed | actList — → descends, ← ascends
-	actSel       actKey                // selected activity row, by identity not index
-	actOrder     []actKey              // the open table's order, taken when it opened (activity.go)
-	actStackOpen bool                  // the dismissed agents' stack is listed open (activity.go)
+	panelFollow  bool       // new rows arrived with a panel open, this update: a shrink keeps them in view
+	ans          *answerKit // answer renderers and the streaming reply's Stream (answer.go)
+	mdWidth      int        // terminal width the prose column is taken from (proseW)
+	history      []string   // sent inputs, recalled with ctrl+↑/↓
+	histIdx      int        // cursor into history (== len when not browsing)
+	mouseMode    string     // "all" | "cell" | "off" — what /mouse last set
+	focus        int        // focusInput | focusConvo | focusActivity
+	task         string     // the last user message, for the task line
+	agents       []agentRow // live sub-agents (activity.go)
+	jobs         []jobRow   // live background jobs (activity.go)
+	actLevel     int        // actCollapsed | actList — → descends, ← ascends
+	actSel       actKey     // selected activity row, by identity not index
+	actOrder     []actKey   // the open table's order, taken when it opened (activity.go)
+	actStackOpen bool       // the dismissed agents' stack is listed open (activity.go)
 	// Agent scope: which child's conversation is on screen (0 = the root's),
 	// and the root's own conversation, stashed while it is (activity.go).
 	scopeAgent   int

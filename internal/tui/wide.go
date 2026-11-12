@@ -19,7 +19,8 @@ import (
 // its own width, up to the pane's, and when it is wider still each row is cut
 // at the pane's edge with what is left said there — "… +N cols →". The rows
 // do not wrap, so the block is as many rows as it has lines, and scrolling it
-// sideways changes rows in place (no bounce).
+// sideways changes rows in place (no bounce). The cut is bubbleteandmd's
+// (WideBlocks, answer.go); the sideways scroll is dun's (panAnswer).
 //
 // The answer is selected with ↑/↓ like any block; → descends into its wide
 // blocks, and then ←/→ (h/l) scroll them sideways, home/end go to an edge,
@@ -148,62 +149,6 @@ func wideRenderer(w int) *glamour.TermRenderer {
 	return r
 }
 
-// renderAnswer renders an answer's markdown for a pane avail columns wide:
-// prose through md (wrapped at the prose column, proseW), and each code
-// block or table wider than that at its own width, its rows cut at avail
-// from column off with "… +N cols →" at the cut. It returns the rows and the
-// largest off that still shows something new (0 when nothing is cut).
-func renderAnswer(md *glamour.TermRenderer, proseW int, src string, avail, off int) (string, int) {
-	segs := splitWide(src)
-	var parts []string
-	var prose []string
-	flush := func() {
-		if len(prose) > 0 {
-			if r := renderMarkdown(md, strings.Join(prose, "\n")); strings.TrimSpace(ansi.Strip(r)) != "" {
-				parts = append(parts, r)
-			}
-			prose = nil
-		}
-	}
-	maxOff := 0
-	for _, s := range segs {
-		if !s.wide || s.need <= proseW {
-			prose = append(prose, s.text)
-			continue
-		}
-		flush()
-		width := s.need
-		if !s.table {
-			// Code is not stretched to its wrap width (trailing padding is
-			// trimmed below), so its renderers can be shared by rounding up.
-			width = (s.need + 8 + 19) / 20 * 20
-		}
-		rows := strings.Split(renderMarkdown(wideRenderer(width), s.text), "\n")
-		widest := 0
-		for i, r := range rows {
-			rows[i] = trimRightCells(r)
-			widest = max(widest, ansi.StringWidth(rows[i]))
-		}
-		// A block rendered alone brings its own blank rows above and below;
-		// the parts are joined with one, as glamour spaces blocks.
-		for len(rows) > 0 && strings.TrimSpace(ansi.Strip(rows[0])) == "" {
-			rows = rows[1:]
-		}
-		for len(rows) > 0 && strings.TrimSpace(ansi.Strip(rows[len(rows)-1])) == "" {
-			rows = rows[:len(rows)-1]
-		}
-		if widest > avail {
-			maxOff = max(maxOff, widest-avail+wideIndicatorRoom)
-			for i, r := range rows {
-				rows[i] = cutRow(r, off, avail)
-			}
-		}
-		parts = append(parts, strings.Join(rows, "\n"))
-	}
-	flush()
-	return strings.Join(parts, "\n\n"), maxOff
-}
-
 // wideIndicatorRoom is the most columns "… +N cols →" takes from a row.
 const wideIndicatorRoom = 16
 
@@ -251,15 +196,17 @@ func cutRow(r string, off, avail int) string {
 // proseW is the prose column: what m.md wraps at (newMarkdown's floor too).
 func (m tuiModel) proseW() int { return max(20, min(m.mdWidth, bandCap)-2) }
 
-// renderEntry renders an answer at avail columns from its source and keeps
-// its sideways scroll in step: created when something is cut, the offset
-// clamped when a wider pane needs less of it.
-func (m tuiModel) renderEntry(e *convoEntry, avail int) string {
-	off := 0
-	if e.wide != nil {
-		off = e.wide.off
+// renderEntry renders a finished answer at avail columns from its source
+// (its Stream's Final; the Stream is made again when the widths moved) and
+// keeps its sideways scroll in step: created when something is cut, the
+// offset clamped when a wider pane needs less of it.
+func (m *tuiModel) renderEntry(e *convoEntry, avail int) string {
+	pw := m.proseW()
+	if key := answerKey(pw, avail); e.ans == nil || e.ansKey != key {
+		e.ans, e.ansKey = m.kit().stream(pw, avail)
 	}
-	text, maxOff := renderAnswer(m.md, m.proseW(), e.mdSource, avail, off)
+	text := answerOut(e.ans, e.mdSource, true)
+	maxOff := cutMax(text)
 	switch {
 	case maxOff > 0 && e.wide == nil:
 		e.wide = &wideState{max: maxOff}
@@ -267,10 +214,10 @@ func (m tuiModel) renderEntry(e *convoEntry, avail int) string {
 		e.wide.max, e.wide.off, e.wide.inside = 0, 0, false
 	case e.wide != nil:
 		e.wide.max = maxOff
-		if e.wide.off > maxOff {
-			e.wide.off = maxOff
-			text, _ = renderAnswer(m.md, m.proseW(), e.mdSource, avail, maxOff)
-		}
+		e.wide.off = min(e.wide.off, maxOff)
+	}
+	if e.wide != nil && e.wide.off > 0 {
+		text = m.panAnswer(e.mdSource, text, avail, e.wide.off)
 	}
 	return text
 }
