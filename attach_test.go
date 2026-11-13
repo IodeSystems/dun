@@ -307,7 +307,16 @@ func TestSetIndex_OwnIndexOffNarrowsTheSearch(t *testing.T) {
 	var calls []string
 	var mu sync.Mutex
 	ts := fakeIndexMCP(t, &calls, &mu)
-	ws := t.TempDir()
+	// The project is the workspace's directory name, and ownIdxCache is keyed
+	// by it: t.TempDir() names are "001", "002", ... in every test, so a
+	// bare TempDir shares its cache entry with every other test's workspace
+	// of that number. A listing another test left running (the real raglit,
+	// seconds under load) then lands on this entry after it is seeded below.
+	// A name only this test uses keeps the entry its own.
+	ws := filepath.Join(t.TempDir(), "ownidxoff")
+	if err := os.Mkdir(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{{ID: ServerDocs, URL: ts.URL, Timeout: 10}}})
 	if err != nil {
 		t.Fatal(err)
