@@ -90,8 +90,11 @@ an `/effort` level (empty: the saved level).
   `facets.<role>`, and `alt+enter`, the session-only pick, is refused for
   it), `esc` in that picker comes back to the window, `p` runs the role's
   probe, `x` resets it (removes `facets.<role>`; the row then shows its
-  fallback), `esc` closes. The retrieval roles (`embed`, `vision`,
-  `segment`, `identity`) take effect when dund restarts; there is no reload.
+  fallback), `esc` closes. What a save or a reset did is said on the
+  window's hint row and put in the conversation at the close, into the rows
+  the window gives back, so no row above the window moves (no bounce). The
+  retrieval roles (`embed`, `vision`, `segment`, `identity`) take effect
+  when dund restarts; there is no reload.
   The external raglit server has its own roles (`/rag setup`). Typing
   `/model ` completes `use`, `probe`, `caps`; after `use` the roles and
   `<provider>/<model>` (models from the picker's rows when fetched); after
