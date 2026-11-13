@@ -51,7 +51,7 @@ func TestRoles_BareModelOpensWindow(t *testing.T) {
 		"embed     local-nomic-embed-text on work · default",
 		"segment   off · default",
 		"answers you in the conversation",
-		"apply after dund restarts",
+		"the background service (dund) restarts",
 		"/rag setup",
 	} {
 		if !strings.Contains(p, want) {
@@ -61,11 +61,11 @@ func TestRoles_BareModelOpensWindow(t *testing.T) {
 	if strings.Contains(p, "sk-secret") {
 		t.Error("a key in the roles window")
 	}
-	if h := stripANSI(m.View().Content); !strings.Contains(h, "p probe") || !strings.Contains(h, "x reset") {
+	if h := stripANSI(m.View().Content); !strings.Contains(h, "p test it") || !strings.Contains(h, "x reset") {
 		t.Errorf("hints missing from the screen:\n%s", h)
 	}
 	m = pick(m, "down", "down")
-	if p := stripANSI(m.rolesPanel()); !strings.Contains(p, "vision: reads images and does OCR") {
+	if p := stripANSI(m.rolesPanel()); !strings.Contains(p, "vision: reads images and does OCR; off: basic OCR (tesseract) if installed") {
 		t.Errorf("purpose of the highlighted role:\n%s", p)
 	}
 	m = pick(m, "esc")
@@ -131,7 +131,7 @@ func TestRoles_PickerMarksTheRolesModel(t *testing.T) {
 			line = l
 		}
 	}
-	if !strings.Contains(line, "in use") {
+	if !strings.Contains(line, "current") {
 		t.Errorf("the role's model is not marked:\n%s", p)
 	}
 }
@@ -336,7 +336,7 @@ func TestRoles_FitsSmallHeights(t *testing.T) {
 	if h := rolesHint(48); strings.Contains(h, "move") {
 		t.Errorf("move should go first at 48: %q", h)
 	}
-	if h := rolesHint(100); !strings.Contains(h, "move") || !strings.Contains(h, "probe") {
+	if h := rolesHint(100); !strings.Contains(h, "move") || !strings.Contains(h, "test it") {
 		t.Errorf("wide hint: %q", h)
 	}
 }
@@ -365,5 +365,52 @@ func TestRolePicker_StartsOnAFittingModel(t *testing.T) {
 	m.addModelRows(modelFetchMsg{provider: "work", ids: ids})
 	if r, _ := m.selectedModel(); r.id != "embed-small" {
 		t.Errorf("embed default absent from the list started on %v", r)
+	}
+}
+
+// Round 3: one restart statement on one row at 100 columns, a blank row
+// before the hints, the divider's gap, the picker's "current" marker, and the
+// completion list: roles tagged, short, models after.
+func TestRoles_Round3(t *testing.T) {
+	m, _ := rolesModel(t, nil)
+	m = resized(m, 100, 30)
+	modelSlash(&m, nil)
+	p := stripANSI(m.rolesPanel())
+	if !strings.Contains(p, restartNote+"\n") || ansi.StringWidth(listIndent+restartNote) > 100 {
+		t.Errorf("restart note on one row:\n%s", p)
+	}
+	if strings.HasSuffix(p, "\n") == false {
+		t.Errorf("no blank row before the hints:\n%q", p)
+	}
+	if m.dividerGap() != 1 {
+		t.Error("no gap above the divider")
+	}
+	if strings.Contains(stripANSI(m.View().Content), "sessions started from now") {
+		t.Error("a second restart statement")
+	}
+	m.useFacet("vision", "fast/qwen-vl", true)
+	if got := stripANSI(convoText(m)); !strings.Contains(got, "vision: qwen-vl on fast · saved") || strings.Contains(got, "sessions") {
+		t.Errorf("save message:\n%s", got)
+	}
+
+	m, _ = rolesModel(t, map[string]dunconfig.Facet{dunconfig.FacetEmbed: {Provider: "work", Model: "e5"}})
+	m.openRolePicker(dunconfig.FacetEmbed)
+	m.addModelRows(modelFetchMsg{provider: "work", ids: []string{"chat", "e5"}})
+	if v := stripANSI(m.modelPanel()); !strings.Contains(v, "e5") || !strings.Contains(v, "current") || strings.Contains(v, "in use") {
+		t.Errorf("role picker marker:\n%s", v)
+	}
+
+	m, _ = rolesModel(t, nil)
+	m = resized(m, 48, 24)
+	m.modelRows = []modelRow{{"work", "chat"}}
+	m = typeStr(m, "/model use ")
+	_, l, _ := m.paletteArgs()
+	for i, c := range l.choices[:len(dunconfig.FacetNames)] {
+		if c.label != dunconfig.FacetNames[i] || c.source != "role" || ansi.StringWidth(c.label+"  role  "+c.desc) > 46 {
+			t.Errorf("role choice %d: %+v", i, c)
+		}
+	}
+	if c := l.choices[len(dunconfig.FacetNames)]; !strings.HasPrefix(c.desc, "pick a model of") {
+		t.Errorf("provider row: %+v", c)
 	}
 }

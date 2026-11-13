@@ -18,7 +18,7 @@ import (
 var rolePurpose = map[string]string{
 	dunconfig.FacetMain:     "answers you in the conversation",
 	dunconfig.FacetChild:    "the sub-agents main starts; with no model, main's",
-	dunconfig.FacetVision:   "reads images and does OCR; off: tesseract if it is installed",
+	dunconfig.FacetVision:   "reads images and does OCR; off: basic OCR (tesseract) if installed",
 	dunconfig.FacetEmbed:    "turns text into vectors for search; off: search by text only",
 	dunconfig.FacetSegment:  "splits documents into parts; off: the vision model, else rules",
 	dunconfig.FacetIdentity: "captions and tags what is indexed; off: no captions or tags",
@@ -98,6 +98,20 @@ func (m *tuiModel) resetRole(facet string) {
 	m.appendNotice(convoEntry{collapsed: okNotice(facet + " reset to its default: " + roleWhat(r))})
 }
 
+// restartNote is said once, in the window, and says what dund is: the save
+// message says only what was saved.
+const restartNote = "chat images: new sessions · search and page OCR: after the background service (dund) restarts"
+
+// roleShort is a role in a few words, for the completion list.
+var roleShort = map[string]string{
+	dunconfig.FacetMain:     "the conversation",
+	dunconfig.FacetChild:    "sub-agents",
+	dunconfig.FacetVision:   "images and OCR",
+	dunconfig.FacetEmbed:    "search vectors",
+	dunconfig.FacetSegment:  "splits documents",
+	dunconfig.FacetIdentity: "captions and tags",
+}
+
 // roleWhat is what a role is served by, in words: "vision-standard on local",
 // "off", "same as main". No role name, no source.
 func roleWhat(r dunconfig.Resolved) string {
@@ -133,22 +147,28 @@ func (m tuiModel) rolesPanel() string {
 		f := dunconfig.FacetNames[i]
 		notes = append(notes, wholeRows(f+": "+rolePurpose[f], m.w, listIndent, StDim))
 	}
-	notes = append(notes, wholeRows("the search and image roles apply after dund restarts", m.w, listIndent, StDim))
+	notes = append(notes, wholeRows(restartNote, m.w, listIndent, StDim))
 	notes = append(notes, wholeRows("the raglit server has its own roles: /rag setup", m.w, listIndent, StDim))
 	for _, n := range cfg.UnknownFacets() {
 		notes = append(notes, []string{listIndent + StDim.Render("facets."+n+": not a role; ignored")})
 	}
-	// A blank row, then each note that fits whole, in order of use.
+	// A blank row, then each note that fits whole, in order of use, then a
+	// blank row before the hints (the last row of the budget).
 	if len(rows)+1 < budget {
 		rows = append(rows, "")
+		noted := false
 		for _, n := range notes {
-			if len(rows)+len(n) <= budget {
+			if len(rows)+len(n) < budget {
 				rows = append(rows, n...)
+				noted = true
 			}
 		}
-		if rows[len(rows)-1] == "" {
+		if !noted {
 			rows = rows[:len(rows)-1]
 		}
+	}
+	if len(rows) < budget {
+		rows = append(rows, "")
 	}
 	return strings.Join(rows, "\n")
 }
@@ -160,7 +180,7 @@ func rolesHint(w int) string {
 		order int
 		text  string
 	}{
-		{0, "↑/↓ move"}, {1, "enter pick a model"}, {2, "p probe"}, {3, "x reset"}, {4, "esc close"},
+		{0, "↑/↓ move"}, {1, "enter pick a model"}, {2, "p test it"}, {3, "x reset"}, {4, "esc close"},
 	}
 	priority := []int{1, 4, 3, 2, 0}
 	const head = "roles"

@@ -16,7 +16,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
-	"github.com/iodesystems/dun/internal/ragd"
 	"github.com/iodesystems/dun/internal/textfmt"
 	shim "github.com/iodesystems/openai-claude-api-shim"
 )
@@ -163,16 +162,8 @@ func (m *tuiModel) useFacet(facet, pick string, persist bool) tea.Cmd {
 		m.append(StErr.Render("failed to save config: " + err.Error()))
 		return nil
 	}
-	// The retrieval roles' restart notice is in the roles window's footer.
-	when := ""
-	switch {
-	case facet == dunconfig.FacetVision:
-		when = " · sessions started from now describe images with it"
-	case !slices.Contains(ragd.Facets, facet):
-		when = " · a session started from now uses it"
-	}
 	r := cfg.Resolve(facet, m.opts.Flags, os.Getenv)
-	m.appendNotice(convoEntry{collapsed: okNotice(facet + " model: " + roleWhat(r) + " · saved" + when)})
+	m.appendNotice(convoEntry{collapsed: okNotice(facet + ": " + roleWhat(r) + " · saved")})
 	return nil
 }
 
@@ -640,7 +631,11 @@ func (m tuiModel) modelPanel() string {
 			post = append(post, k)
 		}
 		if r == cur {
-			post = append(post, "in use")
+			if m.rolePick() {
+				post = append(post, "current")
+			} else {
+				post = append(post, "in use")
+			}
 		}
 		if n := claudeNote(r.id); n != "" {
 			post = append(post, n)

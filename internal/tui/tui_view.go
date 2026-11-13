@@ -153,6 +153,15 @@ func (s viewState) Next() viewState {
 	return viewMinimized
 }
 
+// dividerGap is 1 while the roles window is open: a blank row above the
+// divider, so the notice a role change just made does not touch it.
+func (m tuiModel) dividerGap() int {
+	if m.modelPicking && m.rolesPicking {
+		return 1
+	}
+	return 0
+}
+
 // panelOpen says a panel the person opened is below the conversation, in
 // the composer's place: the palette, a form, a picker.
 func (m tuiModel) panelOpen() bool {
@@ -294,7 +303,7 @@ func (m tuiModel) overlayQuestion() string {
 // render path reads ONE computed value instead of re-deriving it. The two agree
 // because refresh is the only writer and it sets frame.height from this.
 func (m tuiModel) convoHeightBudget() int {
-	h := m.h - 2 // divider 1 + status 1; every other row is measured, not assumed
+	h := m.h - 2 - m.dividerGap() // divider 1 + status 1; every other row is measured, not assumed
 	h -= lipgloss.Height(m.headView())
 	// The activity strip sits above the conversation. It vanishes when it has
 	// nothing to say, so a session that never delegates loses no space to it.
@@ -577,6 +586,9 @@ func (m tuiModel) drawView() string {
 	out := []framePart{{"head", m.headView()}}
 	for _, t := range top {
 		out = append(out, framePart{"activity", t})
+	}
+	if m.dividerGap() > 0 {
+		div = "\n" + div // a blank row: a notice does not touch the divider
 	}
 	out = append(out, framePart{"conversation", convo}, framePart{"divider", div}, framePart{"input", lower})
 	if s := m.activeScreen(); s != nil { // it takes the rows the base screen had

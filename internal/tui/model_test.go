@@ -340,7 +340,7 @@ func TestModelSlash_UsePerFacet(t *testing.T) {
 		f["vision"] != (dunconfig.Facet{Provider: "fast", Model: "qwen-vl"}) || f["embed"] != (dunconfig.Facet{Model: "e5"}) {
 		t.Fatalf("facets saved: %+v", f)
 	}
-	if !strings.Contains(stripANSI(convoText(m)), "child model: kid on fast · saved") {
+	if !strings.Contains(stripANSI(convoText(m)), "child: kid on fast · saved") {
 		t.Errorf("notice:\n%s", stripANSI(convoText(m)))
 	}
 

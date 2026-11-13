@@ -174,7 +174,7 @@ func modelChoices(m *tuiModel, arg string) *argList {
 	roles := func(more bool) {
 		noun = "roles"
 		for _, f := range dunconfig.FacetNames {
-			add(f, rolePurpose[f], more)
+			cands = append(cands, argChoice{value: f, label: f, source: "role", desc: roleShort[f], more: more})
 		}
 	}
 	picks := func() {
@@ -182,7 +182,7 @@ func modelChoices(m *tuiModel, arg string) *argList {
 		saved := map[string]bool{}
 		for _, p := range cfg.ProviderList() {
 			saved[p.Name] = true
-			add(p.Name+"/", "a model of "+p.Name, true)
+			add(p.Name+"/", "pick a model of "+p.Name, true)
 		}
 		// modelRows outlives the picker; a provider since logged out is not offered.
 		for _, r := range m.modelRows {
