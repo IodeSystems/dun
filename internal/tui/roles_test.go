@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -222,5 +223,72 @@ func TestRoles_SmallScreen(t *testing.T) {
 	v := stripANSI(m.View().Content)
 	if !strings.Contains(v, "models by role") || !strings.Contains(v, "esc close") {
 		t.Errorf("small screen:\n%s", v)
+	}
+}
+
+// labelsOf are the labels of the argument choices at the input.
+func labelsOf(t *testing.T, m tuiModel) []string {
+	t.Helper()
+	_, l, ok := m.paletteArgs()
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, c := range l.choices {
+		out = append(out, c.label)
+	}
+	return out
+}
+
+// /model completes its subcommands, then the roles and the provider/model
+// after use, the roles after probe; no key is typed into the input.
+func TestModelCompletion(t *testing.T) {
+	m, _ := rolesModel(t, nil)
+	m.modelRows = []modelRow{{"fast", "qwen-vl"}, {"work", "chat"}}
+
+	m = typeStr(m, "/model ")
+	if got := strings.Join(labelsOf(t, m), " "); got != "use probe caps" {
+		t.Errorf("/model : %q", got)
+	}
+	m = typeStr(m, "use ")
+	got := labelsOf(t, m)
+	for _, want := range append([]string{"fast/", "work/", "fast/qwen-vl"}, dunconfig.FacetNames...) {
+		if !slices.Contains(got, want) {
+			t.Errorf("/model use : no %q in %v", want, got)
+		}
+	}
+	m = typeStr(m, "fast/")
+	if got := labelsOf(t, m); len(got) < 2 || got[0] != "fast/" || !slices.Contains(got, "fast/qwen-vl") || slices.Contains(got, "work/chat") {
+		t.Errorf("/model use fast/ : %v", got)
+	}
+	// tab on a provider continues it with no space
+	m = key(m, kTab)
+	if v := m.input.Value(); v != "/model use fast/" {
+		t.Errorf("tab on a provider: %q", v)
+	}
+
+	m, _ = rolesModel(t, nil)
+	m.modelRows = []modelRow{{"fast", "qwen-vl"}}
+	m = typeStr(m, "/model use vision ")
+	if got := strings.Join(labelsOf(t, m), " "); got != "work/ fast/ fast/qwen-vl" {
+		t.Errorf("/model use vision : %q", got)
+	}
+	if p := stripANSI(m.palettePanel()); strings.Contains(p, "tea.Key") || strings.Contains(p, "{") {
+		t.Errorf("a key string leaks:\n%s", p)
+	}
+
+	m, _ = rolesModel(t, nil)
+	m = typeStr(m, "/model probe ")
+	if got := strings.Join(labelsOf(t, m), " "); got != strings.Join(dunconfig.FacetNames, " ") {
+		t.Errorf("/model probe : %q", got)
+	}
+	m = typeStr(m, "vis")
+	if got := labelsOf(t, m); len(got) == 0 || got[0] != "vision" {
+		t.Errorf("/model probe vis: %v", got)
+	}
+	m, _ = rolesModel(t, nil)
+	m = typeStr(m, "/model probe vision ")
+	if got := labelsOf(t, m); got != nil {
+		t.Errorf("nothing follows a role: %v", got)
 	}
 }

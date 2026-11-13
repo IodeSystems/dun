@@ -306,7 +306,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd, l, ok := m.paletteArgs(); ok {
 					if len(l.choices) > 0 {
 						sel := min(max(m.paletteSel, 0), len(l.choices)-1)
-						m.input.SetValue("/" + cmd + " " + l.choices[sel].value + " ")
+						m.input.SetValue(argFilled(cmd, l.choices[sel].value))
 						m.input.CursorEnd()
 						m.paletteSel = 0
 						m.refresh()

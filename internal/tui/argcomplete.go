@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -145,6 +146,73 @@ func skillChoices(m *tuiModel, arg string) *argList {
 	return &argList{rankChoices(arg, cands), len(cands), "skills"}
 }
 
+// argFilled is the input after an argument choice is taken with tab: the
+// command and the value, and a space for the next word — but not after a
+// "provider/", which the model id continues.
+func argFilled(cmd, value string) string {
+	s := "/" + cmd + " " + value
+	if strings.HasSuffix(value, "/") {
+		return s
+	}
+	return s + " "
+}
+
+// modelChoices completes /model: its subcommands, then the role and the
+// provider/model of "use", the role of "probe". The models are the picker's
+// rows when it has fetched them; nothing is asked of a service here.
+func modelChoices(m *tuiModel, arg string) *argList {
+	words := strings.Fields(arg)
+	q := ""
+	if n := len(words); n > 0 && strings.TrimRight(arg, " \t\n") == arg {
+		words, q = words[:n-1], words[n-1]
+	}
+	var cands []argChoice
+	noun := "models"
+	add := func(v, d string, more bool) {
+		cands = append(cands, argChoice{value: v, label: v, desc: d, more: more})
+	}
+	roles := func(more bool) {
+		noun = "roles"
+		for _, f := range dunconfig.FacetNames {
+			add(f, rolePurpose[f], more)
+		}
+	}
+	picks := func() {
+		cfg := dunconfig.LoadConfig()
+		for _, p := range cfg.ProviderList() {
+			add(p.Name+"/", "a model of "+p.Name, true)
+		}
+		for _, r := range m.modelRows {
+			add(r.provider+"/"+r.id, "", false)
+		}
+	}
+	switch {
+	case len(words) == 0:
+		noun = "subcommands"
+		add("use", "set a model: use [<role>] <provider>/<model-id>", true)
+		add("probe", "what a role's model can do: probe [<role>]", true)
+		add("caps", "what the model is known to do", false)
+	case words[0] == "use" && len(words) == 1:
+		roles(true)
+		picks()
+		noun = "roles and models"
+	case words[0] == "use" && len(words) == 2 && dunconfig.IsFacet(words[1]):
+		picks()
+	case words[0] == "probe" && len(words) == 1:
+		roles(false)
+	default:
+		return nil
+	}
+	prefix := strings.Join(words, " ")
+	if prefix != "" {
+		prefix += " "
+	}
+	for i := range cands {
+		cands[i].value = prefix + cands[i].value
+	}
+	return &argList{rankChoices(q, cands), len(cands), noun}
+}
+
 // mcpArgs is what each /mcp subcommand takes after it, position by
 // position: a server id, a preset, a mode, a tool switch, a scope flag, or
 // "" for free text (a tool name). The /rag and /lsp switches take a scope.
@@ -277,6 +345,9 @@ func (m tuiModel) completerFor(name string) argCompleter {
 	}
 	if name == "context" {
 		return contextChoices
+	}
+	if name == "model" {
+		return modelChoices
 	}
 	for _, c := range m.engineCmds {
 		if c.name == name && len(c.choices) > 0 {

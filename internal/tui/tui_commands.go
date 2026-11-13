@@ -419,7 +419,7 @@ func (m *tuiModel) runPaletteEnter(v string) tea.Cmd {
 		// as tab does, not run without one (USER 2026-10-27: enter on --max
 		// ran "--max" and said it needs a value).
 		if l.choices[sel].more {
-			m.input.SetValue("/" + cmd + " " + l.choices[sel].value + " ")
+			m.input.SetValue(argFilled(cmd, l.choices[sel].value))
 			m.input.CursorEnd()
 			m.refresh()
 			return nil
