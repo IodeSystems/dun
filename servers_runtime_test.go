@@ -82,6 +82,9 @@ func TestStart_FailingAutostartIsNotFatal(t *testing.T) {
 		t.Fatalf("a failing server should not fail Start: %v", err)
 	}
 	defer h.Close()
+	// Start waits only serverStartGrace for an autostart server; a loaded
+	// machine can spend longer spawning sh. Wait for the start to settle.
+	h.WaitServers(context.Background())
 
 	st, ok := serverState(h, ServerDocs)
 	if !ok {
