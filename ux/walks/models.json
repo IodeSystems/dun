@@ -1,0 +1,107 @@
+{
+  "name": "models",
+  "scenario": "first-assistant",
+  "role": "the owner of a small project on your own computer; nobody else has set anything up for you",
+  "goal": "I want to find out which model reads images (OCR) and which makes embeddings, and change the OCR model.",
+  "note": "Models walk (2026-11-13): /model opens the roles window; enter picks a role's model, x resets it, esc closes; /model use completes.",
+  "sizes": ["48x24", "100x30"],
+  "typing_ms": 45,
+  "steps": [
+    {
+      "id": "first-screen",
+      "promise": "The first screen tells me what dun needs from me before it can help.",
+      "settle_ms": 1500,
+      "actions": [
+        {"wait_for": "ask dun to do something", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "signed-in",
+      "promise": "I can sign in with what my colleague gave me and pick a model.",
+      "settle_ms": 1500,
+      "actions": [
+        {"type": "/"},
+        {"wait_for": "commands"},
+        {"type": "login"},
+        {"key": "enter"},
+        {"wait_for": "log in to an AI service"},
+        {"key": "enter", "say": "picked custom: my colleague gave me an address"},
+        {"wait_for": "custom: an OpenAI-compatible service"},
+        {"type": "${LLM_URL}"},
+        {"key": "enter"},
+        {"type": "${LLM_KEY}"},
+        {"key": "enter"},
+        {"wait_for": "chat-standard"},
+        {"type": "chat-standard"},
+        {"sleep_ms": 400},
+        {"key": "enter"},
+        {"wait_for": "using chat-standard", "timeout_ms": 30000}
+      ]
+    },
+    {
+      "id": "roles-window",
+      "promise": "I can see which model does each job, including images and embeddings.",
+      "settle_ms": 1000,
+      "actions": [
+        {"type": "/model"},
+        {"key": "enter"},
+        {"wait_for": "models by role", "timeout_ms": 20000}
+      ]
+    },
+    {
+      "id": "vision-highlighted",
+      "promise": "I can move to the image-reading role and see what it does.",
+      "settle_ms": 800,
+      "actions": [
+        {"key": "down"},
+        {"key": "down"},
+        {"wait_for": "vision"}
+      ]
+    },
+    {
+      "id": "vision-picker",
+      "promise": "Enter shows me the models I can give that role.",
+      "settle_ms": 1000,
+      "actions": [
+        {"key": "enter"},
+        {"wait_for": "vision-standard", "timeout_ms": 20000}
+      ]
+    },
+    {
+      "id": "vision-chosen",
+      "promise": "After I choose, I am back at the roles window and it shows my new image model.",
+      "settle_ms": 1200,
+      "actions": [
+        {"type": "vision-standard"},
+        {"sleep_ms": 400},
+        {"key": "enter"},
+        {"wait_for": "models by role", "timeout_ms": 20000}
+      ]
+    },
+    {
+      "id": "embed-reset",
+      "promise": "I can put the embeddings role back to its default with one key.",
+      "settle_ms": 1200,
+      "actions": [
+        {"key": "down"},
+        {"type": "x"}
+      ]
+    },
+    {
+      "id": "roles-closed",
+      "promise": "Esc closes the window and I am back at my input.",
+      "settle_ms": 1000,
+      "actions": [
+        {"key": "esc"}
+      ]
+    },
+    {
+      "id": "model-use-completes",
+      "promise": "Typing /model use shows me what can come next.",
+      "settle_ms": 1200,
+      "actions": [
+        {"type": "/model use "}
+      ]
+    }
+  ]
+}
