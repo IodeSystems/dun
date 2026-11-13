@@ -61,9 +61,9 @@ type toolPlan struct {
 func planTool(name, p string, o update.Origin, s release.Tool, env toolEnv) toolPlan {
 	pl := toolPlan{level: "ok", detail: name + ": " + o.String()}
 	v := o.Version
-	if !semver.IsValid(v) || o.Kind == update.GoBuild {
+	if !semver.IsValid(v) || o.Kind == update.GoBuild || isUnstamped(v) {
 		if o.Kind != update.Release && o.Kind != update.GoInstall {
-			pl.detail += "; can't compare its version with " + s.Recommended + " (this dun's)"
+			pl.detail += "; unknown version, can't compare it with " + s.Recommended + " (this dun's)"
 		}
 		return pl
 	}
@@ -270,7 +270,7 @@ func originNote(name string, o update.Origin) string {
 }
 
 // toolWarnings are the session's start lines on the tools the engine runs
-// (Ready's hint): each one too old for this dun or not a release build, by
+// (Ready's hint): each one older than the version this dun pins, by
 // path and version, with the version dun pins and the fix. A Mac ran a
 // modified mcpshell checkout from ~/.local/bin, found on PATH first, with
 // no word from dun until it crashed. Build info only: no tool is run.
@@ -298,27 +298,30 @@ func toolWarnings() []string {
 // version ("(devel)", a plain go build) is not compared, as in doctor.
 func toolWarning(name, p string, o update.Origin, s release.Tool, env toolEnv) string {
 	v := o.Version
-	if !semver.IsValid(v) || o.Kind == update.GoBuild {
-		return ""
-	}
-	pl := planTool(name, p, o, s, env)
-	unreleased := o.Kind != update.Release && (o.Modified || module.IsPseudoVersion(v) || semver.Build(v) != "")
-	if pl.level != "warn" && !unreleased {
+	if !semver.IsValid(v) || o.Kind == update.GoBuild || isUnstamped(v) {
 		return ""
 	}
 	pin := s.Recommended
 	if env.pinned != "" {
 		pin = env.pinned
 	}
-	what := "not a release build"
-	if semver.Compare(v, s.Min) < 0 {
-		what = "too old for this dun (it needs " + s.Min + " or newer)"
+	// Semver orders a pseudo-version (v0.12.2-0.<time>-<hash>) after the tag
+	// it follows, and ignores +dirty: at or past the pin is fine.
+	if semver.Compare(v, pin) >= 0 {
+		return ""
 	}
+	pl := planTool(name, p, o, s, env)
 	fix := pl.fix
 	if fix == "" {
 		fix = "remove " + p + " and run dun doctor --fix to get the pinned release"
 	}
-	return fmt.Sprintf("%s: %s is %s, %s; this dun pins %s. Fix: %s", name, p, v, what, pin, fix)
+	return fmt.Sprintf("%s: %s is %s, older than the %s this dun pins. Fix: %s", name, p, v, pin, fix)
+}
+
+// isUnstamped is a version Go gives a build with no VCS stamp: v0.0.0-<time>-<hash>.
+// It says nothing about age.
+func isUnstamped(v string) bool {
+	return semver.MajorMinor(v) == "v0.0" && module.IsPseudoVersion(v) && strings.HasPrefix(v, "v0.0.0-")
 }
 
 // withToolWarnings is Ready's hint with toolWarnings after it: the TUI says

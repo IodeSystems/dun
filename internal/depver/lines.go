@@ -3,6 +3,9 @@ package depver
 import (
 	"runtime/debug"
 	"strings"
+
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 // ModuleLines are the libraries compiled in, one line each: "raglit v0.9.0
@@ -49,8 +52,9 @@ type Tool struct {
 }
 
 // Line is the tool's version line: "mcpshell v0.12.0 at /p (release); pinned
-// v0.12.0", with "differs from the pin" or "not a release build" after
-// it when either holds.
+// v0.12.0", with "older than the pin", "differs from the pin" or
+// "unknown version" after it. A build past the pin (a pseudo-version after the
+// tag, +dirty) is not flagged for not being a release.
 func (t Tool) Line() string {
 	pin := ""
 	if t.Pin != "" {
@@ -71,11 +75,13 @@ func (t Tool) Line() string {
 	}
 	s += pin
 	var marks []string
-	if t.Pin != "" && t.Version != t.Pin {
+	switch {
+	case !semver.IsValid(t.Version) || (module.IsPseudoVersion(t.Version) && strings.HasPrefix(t.Version, "v0.0.0-")):
+		marks = append(marks, "unknown version (no release tag in its build info)")
+	case t.Pin != "" && semver.Compare(t.Version, t.Pin) < 0:
+		marks = append(marks, "older than the pin")
+	case t.Pin != "" && t.Version != t.Pin:
 		marks = append(marks, "differs from the pin")
-	}
-	if !t.Release {
-		marks = append(marks, "not a release build")
 	}
 	if len(marks) > 0 {
 		s += " — " + strings.Join(marks, ", ")

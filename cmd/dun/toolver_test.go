@@ -56,15 +56,14 @@ func TestPlanTool(t *testing.T) {
 		{rel("v0.3.0"), toolEnv{pinned: "v0.3.0", beside: true}, "ok", "t: release v0.3.0", "", ""},
 		{rel("(devel)"), toolEnv{pinned: "v0.3.0", beside: true}, "ok", "t: release (devel)", "", ""},
 		// checkout: said, never run
-		{co("v0.0.0-20260101000000-abc123456789", "/src/t", false), goOK, "warn",
-			"t: built from a checkout at abc1234; too old for this dun (it needs v0.2.0 or newer)", "rebuild it in /src/t (make install)", ""},
+		{co("v0.0.0-20260101000000-abc123456789", "/src/t", false), goOK, "ok", // no tag in the build info: unknown, not old
+			"t: built from a checkout at abc1234; unknown version, can't compare it with v0.3.0 (this dun's)", "", ""},
 		{co("v0.2.1-0.20260101000000-abc123456789", "", false), goOK, "ok",
 			"t: built from a checkout at abc1234; an update is available: v0.3.0 (tested with this dun)", "rebuild it from its checkout (make install)", ""},
 		{co("v0.3.1-0.20261101000000-abc123456789", "/src/t", false), goOK, "ok", "t: built from a checkout at abc1234", "", ""},
 		// a modified checkout: compared by its build info's version (Carl's Mac, 2026-11-09)
-		{co("v0.0.0-20260101000000-abc123456789+dirty", "/src/t", true), goOK, "warn",
-			"t: a modified checkout of v0.0.0-20260101000000-abc123456789+dirty (at abc1234); too old for this dun (it needs v0.2.0 or newer)",
-			"rebuild it in /src/t from a current tag (make install), or remove /bin/t and run dun doctor --fix to get the pinned release", ""},
+		{co("v0.0.0-20260101000000-abc123456789+dirty", "/src/t", true), goOK, "ok",
+			"t: built from a checkout at abc1234, modified; unknown version, can't compare it with v0.3.0 (this dun's)", "", ""},
 		{co("v0.1.2-0.20261030062958-886d6f12c3e4+dirty", "", true), goOK, "warn",
 			"t: a modified checkout of v0.1.2-0.20261030062958-886d6f12c3e4+dirty (at abc1234); too old for this dun (it needs v0.2.0 or newer)",
 			"rebuild it in its checkout from a current tag (make install), or remove /bin/t and run dun doctor --fix to get the pinned release", ""},
@@ -72,10 +71,10 @@ func TestPlanTool(t *testing.T) {
 			"t: a modified checkout of v0.2.5-0.20261030062958-886d6f12c3e4+dirty (at abc1234); an update is available: v0.3.0 (tested with this dun)",
 			"rebuild it in its checkout from a current tag (make install), or remove /bin/t and run dun doctor --fix to get the pinned release", ""},
 		{co("v0.3.1-0.20261030062958-886d6f12c3e4+dirty", "", true), goOK, "ok", "t: built from a checkout at abc1234, modified", "", ""},
-		{co("(devel)", "/src/t", false), goOK, "ok", "t: built from a checkout at abc1234; can't compare its version with v0.3.0 (this dun's)", "", ""},
+		{co("(devel)", "/src/t", false), goOK, "ok", "t: built from a checkout at abc1234; unknown version, can't compare it with v0.3.0 (this dun's)", "", ""},
 		// a plain go build
 		{update.Origin{Kind: update.GoBuild, Version: "(devel)"}, goOK, "ok",
-			"t: a plain go build, outside version control; can't compare its version with v0.3.0 (this dun's)", "", ""},
+			"t: a plain go build, outside version control; unknown version, can't compare it with v0.3.0 (this dun's)", "", ""},
 	} {
 		pl := planTool("t", "/bin/t", c.o, s, c.env)
 		if pl.level != c.level || pl.detail != c.detail || pl.fix != c.fix || pl.act != c.act {
@@ -223,8 +222,8 @@ func TestToolOrigin_RealBinaries(t *testing.T) {
 	}
 	d = &doctor{fix: true}
 	d.toolOrigin("faketool", co)
-	if f := line(d); f.level != "warn" || !strings.HasPrefix(f.detail, "faketool: built from a checkout at ") ||
-		!strings.HasSuffix(f.detail, "; too old for this dun (it needs v0.2.0 or newer)") || f.fix != "rebuild it in "+src+" (make install)" {
+	if f := line(d); f.level != "ok" || !strings.HasPrefix(f.detail, "faketool: built from a checkout at ") ||
+		!strings.HasSuffix(f.detail, "; unknown version, can't compare it with v0.3.0 (this dun's)") || f.fix != "" {
 		t.Errorf("checkout: %+v", f)
 	}
 }
@@ -266,41 +265,48 @@ func TestToolInstallIsPinned(t *testing.T) {
 	}
 }
 
-// The session-start warning: Carl's Mac ran a modified mcpshell checkout
-// found on PATH first (2026-11-09); doctor warns, and the start says so
-// with the path, version, pin and fix. A release at the pin says nothing,
-// and a build with no version is not compared.
+// The session-start warning: a tool older than the pin says so, with the
+// path, version, pin and fix. At or past the pin (a release, a pseudo-version
+// after the tag, +dirty) it says nothing; a version with no tag is unknown,
+// not old, and doctor alone reports it.
 func TestToolWarning(t *testing.T) {
 	s, _ := release.SupportedTool("mcpshell")
-	const v = "v0.7.2-0.20261030062958-886d6f12c3e4+dirty"
-	const p = "/Users/carltaylor/.local/bin/mcpshell"
-	carl := update.Origin{Kind: update.Checkout, Version: v, Revision: "886d6f1", Modified: true}
+	const p = "/home/u/.local/bin/mcpshell"
 	env := toolEnv{pinned: s.Recommended}
-	if pl := planTool("mcpshell", p, carl, s, env); pl.level != "warn" {
-		t.Errorf("doctor on Carl's build: %s %s", pl.level, pl.detail)
-	}
-	want := "mcpshell: " + p + " is " + v + ", not a release build; this dun pins " + s.Recommended +
+	const old = "v0.7.2-0.20261030062958-886d6f12c3e4"
+	carl := update.Origin{Kind: update.Checkout, Version: old + "+dirty", Revision: "886d6f1", Modified: true}
+	want := "mcpshell: " + p + " is " + old + "+dirty, older than the " + s.Recommended + " this dun pins" +
 		". Fix: rebuild it in its checkout from a current tag (make install), or remove " + p +
 		" and run dun doctor --fix to get the pinned release"
 	if got := toolWarning("mcpshell", p, carl, s, env); got != want {
-		t.Errorf("Carl's build:\n got %q\nwant %q", got, want)
+		t.Errorf("old modified checkout:\n got %q\nwant %q", got, want)
 	}
-	old := update.Origin{Kind: update.Release, Version: "v0.1.0"}
-	if got := toolWarning("mcpshell", p, old, s, env); !strings.Contains(got, "is v0.1.0, too old for this dun (it needs "+s.Min+" or newer); this dun pins "+s.Recommended) {
-		t.Errorf("a release below Min: %q", got)
-	}
-	pseudo := update.Origin{Kind: update.GoInstall, Version: "v0.11.1-0.20261108000000-abcdefabcdef"}
-	if got := toolWarning("mcpshell", p, pseudo, s, env); !strings.Contains(got, "not a release build") {
-		t.Errorf("a pseudo-version: %q", got)
+	for _, o := range []update.Origin{
+		{Kind: update.Release, Version: "v0.1.0"},
+		{Kind: update.GoInstall, Version: old},
+		{Kind: update.Checkout, Version: old, Revision: "886d6f1"},
+	} {
+		if got := toolWarning("mcpshell", p, o, s, env); !strings.Contains(got, "is "+o.Version+", older than the "+s.Recommended+" this dun pins") {
+			t.Errorf("%+v: %q", o, got)
+		}
 	}
 	for _, o := range []update.Origin{
 		{Kind: update.Release, Version: s.Recommended},
+		{Kind: update.Release, Version: "v99.0.0"},
 		{Kind: update.GoInstall, Version: s.Recommended},
+		{Kind: update.GoInstall, Version: "v99.0.1-0.20261111161500-ca705850cc73"},
+		{Kind: update.Checkout, Version: "v99.0.1-0.20261111161500-ca705850cc73+dirty", Revision: "ca70585", Modified: true},
 		{Kind: update.Checkout, Version: "(devel)", Revision: "abc1234", Modified: true},
 		{Kind: update.GoBuild, Version: "(devel)"},
+		{Kind: update.Checkout, Version: "v0.0.0-20261101000000-abcdefabcdef", Revision: "abc1234"},
 	} {
 		if got := toolWarning("mcpshell", p, o, s, env); got != "" {
 			t.Errorf("%+v: %q", o, got)
 		}
+	}
+	// doctor reports a tagless version as unknown.
+	u := update.Origin{Kind: update.Checkout, Version: "v0.0.0-20261101000000-abcdefabcdef", Revision: "abc1234"}
+	if pl := planTool("mcpshell", p, u, s, env); pl.level != "ok" || !strings.Contains(pl.detail, "unknown version") {
+		t.Errorf("doctor on v0.0.0-: %s %q", pl.level, pl.detail)
 	}
 }

@@ -72,7 +72,7 @@ func TestVersion_ModulesAndTools(t *testing.T) {
 	want := strings.Join([]string{
 		"tools:",
 		"  mcpshell v0.12.0 at /b/mcpshell (release); pinned v0.12.0",
-		"  poly-lsp-mcp v0.4.0 at /g/poly-lsp-mcp (go install v0.4.0); pinned v0.5.0 — differs from the pin, not a release build",
+		"  poly-lsp-mcp v0.4.0 at /g/poly-lsp-mcp (go install v0.4.0); pinned v0.5.0 — older than the pin",
 		"  raglit: not installed; pinned v0.8.0",
 	}, "\n")
 	if got != want {
