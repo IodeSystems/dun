@@ -127,8 +127,8 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 		}
 		return m.switchModel(p, args[0], persist)
 	}
-	m.append(StDim.Render(strings.Join(m.facetLines(), "\n")))
-	return m.openModelPicker("")
+	m.openRoles(0)
+	return textinput.Blink
 }
 
 // facetLines is every role as it is served: the config's resolution with
@@ -429,7 +429,7 @@ func (m tuiModel) selectedModel() (modelRow, bool) {
 }
 
 func (m *tuiModel) closeModelPicker() {
-	m.modelPicking = false
+	m.modelPicking, m.rolesPicking, m.pickFacet = false, false, ""
 	m.models.query.Blur()
 	m.input.Focus()
 	m.refresh()
@@ -438,6 +438,9 @@ func (m *tuiModel) closeModelPicker() {
 // updateModelPicking owns the keys while the model list is open. Printable
 // keys go to the search box, so moving is on the arrows and ctrl+p/ctrl+n.
 func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.rolesPicking {
+		return m.updateRoles(msg)
+	}
 	if m.loginPicking {
 		return m.updateLoginPicker(msg)
 	}
@@ -555,6 +558,9 @@ func (m *tuiModel) switchModel(p dunconfig.ProviderConfig, model string, persist
 
 // modelPanel renders the model picker in the lower pane.
 func (m tuiModel) modelPanel() string {
+	if m.rolesPicking {
+		return m.rolesPanel()
+	}
 	if m.loginPicking {
 		return m.loginPanel()
 	}
@@ -637,7 +643,7 @@ func (m tuiModel) modelPanel() string {
 }
 
 // modelHint is the picker's status line.
-func modelHint() string {
+func (m tuiModel) modelHint() string {
 	return "model  ·  enter use · esc cancel · alt+enter this session only · tab next service · ctrl+a log in"
 }
 
@@ -687,7 +693,7 @@ func (m *tuiModel) openProviderForm(edit *dunconfig.ProviderConfig) tea.Cmd {
 		m.providerFields[fieldKey].Placeholder = placeholder("a new key (empty: keep it)")
 	}
 	m.providerFields[m.providerStep].Focus()
-	m.providerForm, m.modelPicking, m.loginPicking = true, true, false
+	m.providerForm, m.modelPicking, m.loginPicking, m.rolesPicking = true, true, false, false
 	m.input.Blur()
 	m.refresh()
 	return textinput.Blink

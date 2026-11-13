@@ -359,6 +359,11 @@ type tuiModel struct {
 	modelErrs    []string   // providers that returned no list
 	modelPending int        // providers not yet answered
 	modelScope   string     // the provider the picker lists, "" = every one (tab moves it)
+	// The roles window (/model): every role and its model; enter opens the
+	// picker for the role (pickFacet), esc there comes back here.
+	rolesPicking bool   // the roles window owns the keys; modelPicking is set with it
+	rolesSel     int    // its highlighted row, an index of dunconfig.FacetNames
+	pickFacet    string // the role the picker picks for, "" = not opened from the window
 	// The login's service picker (/login): custom, then the templates.
 	loginPicking bool
 	logins       pickList

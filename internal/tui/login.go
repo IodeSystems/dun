@@ -133,7 +133,7 @@ func templateNamed(name string) (loginTmpl, bool) {
 // row, and none leaves the row as it was).
 func (m *tuiModel) openLogin(query string) tea.Cmd {
 	m.logins = newPickList(query, "type to filter")
-	m.loginPicking, m.modelPicking, m.providerForm = true, true, false
+	m.loginPicking, m.modelPicking, m.providerForm, m.rolesPicking = true, true, false, false
 	m.loginProbe = map[string]int{}
 	m.logins.sel = m.firstLogin()
 	// The kept question's line (or the not-logged-in one) said "type /login":

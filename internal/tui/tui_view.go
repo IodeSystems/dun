@@ -473,12 +473,14 @@ func (m tuiModel) drawView() string {
 		status = StDim.Render(fmt.Sprintf("match %d/%d  ·  ↑/↓ prev/next · / new search · esc exit", m.matchPos+1, len(m.matches)))
 	// A form or picker shows its own keys here, never the composer's: two
 	// meanings of enter on one screen was the fault.
+	case m.modelPicking && m.rolesPicking:
+		status = StDim.Render(rolesHint())
 	case m.modelPicking && m.loginPicking:
 		status = StDim.Render(loginHint())
 	case m.modelPicking && m.providerForm:
 		status = StDim.Render(m.providerHint())
 	case m.modelPicking:
-		status = StDim.Render(modelHint())
+		status = StDim.Render(m.modelHint())
 	case m.mcpForm:
 		status = StDim.Render(m.mcpHint())
 	case m.rag != nil:

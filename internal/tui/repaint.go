@@ -420,6 +420,8 @@ func (m tuiModel) openName() string {
 		return "question parked"
 	case m.picking:
 		return "session picker"
+	case m.modelPicking && m.rolesPicking:
+		return "roles window"
 	case m.modelPicking:
 		return "model picker"
 	case m.mcpForm:

@@ -66,7 +66,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case modelFetchMsg:
-		if m.modelPicking && !m.providerForm && !m.loginPicking {
+		if m.modelPicking && !m.providerForm && !m.loginPicking && !m.rolesPicking {
 			m.addModelRows(msg)
 			m.refresh()
 		}
@@ -1226,6 +1226,8 @@ func (m tuiModel) paste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m.typeMCPField(msg)
 	case m.rag != nil:
 		return m.typeRagQuery(msg)
+	case m.modelPicking && m.rolesPicking:
+		return m, nil // a list of roles has no search box
 	case m.modelPicking && m.loginPicking:
 		return m.typeLoginQuery(msg)
 	case m.modelPicking && m.providerForm:
