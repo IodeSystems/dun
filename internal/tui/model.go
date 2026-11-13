@@ -131,28 +131,6 @@ func modelSlash(m *tuiModel, args []string) tea.Cmd {
 	return textinput.Blink
 }
 
-// facetLines is every role as it is served: the config's resolution with
-// this client's flags (dunconfig.Resolve), main as the engine runs it when
-// a session-only pick or a restart moved it. Keys are never in it.
-func (m *tuiModel) facetLines() []string {
-	cfg := dunconfig.LoadConfig()
-	out := []string{"models by role · /model use <facet> <provider>/<model> sets one"}
-	for _, r := range cfg.ResolveAll(m.opts.Flags, os.Getenv) {
-		if r.Facet == dunconfig.FacetMain && m.model != "" &&
-			(r.Model != m.model || r.URL != strings.TrimRight(m.url, "/")) {
-			r = dunconfig.Resolved{Facet: r.Facet, Provider: m.provider, URL: m.url, Model: m.model, Effort: r.Effort, Source: dunconfig.SourceSession}
-			if r.Provider == "" {
-				r.Provider = dunconfig.HostName(m.url)
-			}
-		}
-		out = append(out, "  "+r.Line())
-	}
-	for _, n := range cfg.UnknownFacets() {
-		out = append(out, "  facets."+n+": not a role; ignored")
-	}
-	return out
-}
-
 // useFacet is /model use [<facet>] <provider>/<model>. Main switches the
 // session (switchModel); another role is saved to facets.<facet> and is
 // used by what starts next (a session; dund for the retrieval roles).
@@ -243,7 +221,7 @@ func logoutSlash(m *tuiModel, args []string) tea.Cmd {
 // login's own check), whose rows are in it from the start.
 func (m *tuiModel) openModelPicker(query string, have ...modelFetchMsg) tea.Cmd {
 	m.models = newPickList(query, "type to search")
-	m.modelPicking = true
+	m.modelPicking, m.rolesPicking = true, false
 	m.modelRows, m.modelErrs = nil, nil
 	m.input.Blur()
 	ps := m.pickerProviders()
@@ -251,8 +229,9 @@ func (m *tuiModel) openModelPicker(query string, have ...modelFetchMsg) tea.Cmd 
 	// Several services, hundreds of models: the list opens on the one in
 	// use (USER 2026-11-04); tab moves to the next, then to all of them.
 	m.modelScope = ""
-	if len(ps) > 1 && slices.ContainsFunc(ps, func(p dunconfig.ProviderConfig) bool { return p.Name == m.provider }) {
-		m.modelScope = m.provider
+	cur := m.pickCurrent()
+	if len(ps) > 1 && slices.ContainsFunc(ps, func(p dunconfig.ProviderConfig) bool { return p.Name == cur.provider }) {
+		m.modelScope = cur.provider
 	}
 	cmds := []tea.Cmd{textinput.Blink}
 	for _, p := range ps {
@@ -313,8 +292,8 @@ func (m *tuiModel) addModelRows(msg modelFetchMsg) {
 	// Before the user has moved, the cursor rests on the running model, else
 	// the saved default, else the first chat model (row 0 after the sort).
 	if !had {
-		cur = modelRow{m.provider, m.model}
-		if m.model == "" {
+		cur = m.pickCurrent()
+		if m.model == "" && !m.rolePick() {
 			c := dunconfig.LoadConfig()
 			cur = modelRow{c.Provider, c.Model}
 		}
@@ -415,9 +394,31 @@ func (m *tuiModel) nextScope(back bool) {
 	}
 	m.modelScope = scopes[i]
 	m.models.sel = 0
-	if i := slices.Index(m.filteredModels(), modelRow{m.provider, m.model}); i >= 0 {
+	if i := slices.Index(m.filteredModels(), m.pickCurrent()); i >= 0 {
 		m.models.sel = i
 	}
+}
+
+// rolePick says the picker picks for a role other than main, which is
+// saved to facets.<role> and not switched to.
+func (m tuiModel) rolePick() bool {
+	return m.pickFacet != "" && m.pickFacet != dunconfig.FacetMain
+}
+
+// pickCurrent is the model the picker marks "in use" and starts on: the
+// running one for main, else what the role resolves to.
+func (m tuiModel) pickCurrent() modelRow {
+	if !m.rolePick() {
+		return modelRow{m.provider, m.model}
+	}
+	r := dunconfig.LoadConfig().Resolve(m.pickFacet, m.opts.Flags, os.Getenv)
+	if r.Model == "" {
+		return modelRow{}
+	}
+	if r.Provider == "" {
+		r.Provider = m.provider
+	}
+	return modelRow{r.Provider, r.Model}
 }
 
 func (m tuiModel) selectedModel() (modelRow, bool) {
@@ -453,6 +454,10 @@ func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
+		if m.pickFacet != "" { // back to the roles window
+			m.openRoles(slices.Index(dunconfig.FacetNames, m.pickFacet))
+			return m, nil
+		}
 		m.closeModelPicker()
 		return m, nil
 	case "tab", "shift+tab":
@@ -473,6 +478,16 @@ func (m tuiModel) updateModelPicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		p, found := m.providerNamed(r.provider)
 		if !found {
 			return m, nil
+		}
+		if m.rolePick() {
+			if msg.String() != "enter" {
+				m.append(StErr.Render("only main has a session-only pick: enter saves " + m.pickFacet + "'s model"))
+				return m, nil
+			}
+			facet := m.pickFacet
+			cmd := m.useFacet(facet, r.provider+"/"+r.id, true)
+			m.openRoles(slices.Index(dunconfig.FacetNames, facet))
+			return m, cmd
 		}
 		m.closeModelPicker()
 		return m, m.switchModel(p, r.id, msg.String() == "enter")
@@ -570,6 +585,10 @@ func (m tuiModel) modelPanel() string {
 	// The keys are on the status line (modelHint), like every other list's.
 	// One indent (listIndent) for the search line, the rows and the count.
 	head := stHeader.Render("pick a model")
+	if m.rolePick() {
+		head = stHeader.Render("pick a model for " + m.pickFacet)
+	}
+	cur := m.pickCurrent()
 	if n := len(m.pickerProviders()); n > 1 {
 		on := "every service"
 		if s := m.pickScope(); s != "" {
@@ -600,7 +619,7 @@ func (m tuiModel) modelPanel() string {
 		if k := modelKind(r.id); k != "" {
 			post = append(post, k)
 		}
-		if r.id == m.model && r.provider == m.provider {
+		if r == cur {
 			post = append(post, "in use")
 		}
 		if n := claudeNote(r.id); n != "" {
@@ -644,6 +663,12 @@ func (m tuiModel) modelPanel() string {
 
 // modelHint is the picker's status line.
 func (m tuiModel) modelHint() string {
+	if m.rolePick() {
+		return "model for " + m.pickFacet + "  ·  enter save · esc back to roles · tab next service · ctrl+a log in"
+	}
+	if m.pickFacet != "" {
+		return "model  ·  enter use · esc back to roles · alt+enter this session only · tab next service · ctrl+a log in"
+	}
 	return "model  ·  enter use · esc cancel · alt+enter this session only · tab next service · ctrl+a log in"
 }
 

@@ -296,7 +296,8 @@ func TestModelSlash_ListsEveryFacetAndItsSource(t *testing.T) {
 	m := newTUIModel(nil, ".")
 	m.opts.Flags = dunconfig.Overrides{dunconfig.FacetChild: {Provider: "fast", Model: "kid"}}
 	m.provider, m.url, m.model = "work", "http://127.0.0.1:1/w", "chat"
-	all := stripANSI(strings.Join(m.facetLines(), "\n"))
+	m.openRoles(0)
+	all := stripANSI(m.rolesPanel())
 	for _, want := range []string{
 		"main      chat on work · config",
 		"child     kid on fast · flag",
@@ -314,7 +315,7 @@ func TestModelSlash_ListsEveryFacetAndItsSource(t *testing.T) {
 		t.Fatal("a key in /model's listing")
 	}
 	m.model = "other" // a /model --session pick
-	if all := stripANSI(strings.Join(m.facetLines(), "\n")); !strings.Contains(all, "main      other on work · session") {
+	if all := stripANSI(m.rolesPanel()); !strings.Contains(all, "main      other on work · session") {
 		t.Errorf("session pick:\n%s", all)
 	}
 }
