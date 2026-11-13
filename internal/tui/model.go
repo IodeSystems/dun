@@ -163,15 +163,16 @@ func (m *tuiModel) useFacet(facet, pick string, persist bool) tea.Cmd {
 		m.append(StErr.Render("failed to save config: " + err.Error()))
 		return nil
 	}
-	when := "a session started from now uses it"
-	if slices.Contains(ragd.Facets, facet) {
-		when = "dund uses it from its next start"
-		if facet == dunconfig.FacetVision {
-			when += "; a session started from now describes images with it"
-		}
+	// The retrieval roles' restart notice is in the roles window's footer.
+	when := ""
+	switch {
+	case facet == dunconfig.FacetVision:
+		when = " · sessions started from now describe images with it"
+	case !slices.Contains(ragd.Facets, facet):
+		when = " · a session started from now uses it"
 	}
 	r := cfg.Resolve(facet, m.opts.Flags, os.Getenv)
-	m.appendNotice(convoEntry{collapsed: okNotice("saved facets." + facet + " · " + strings.TrimSpace(strings.TrimPrefix(r.Line(), facet)) + " · " + when)})
+	m.appendNotice(convoEntry{collapsed: okNotice(facet + " model: " + roleWhat(r) + " · saved" + when)})
 	return nil
 }
 

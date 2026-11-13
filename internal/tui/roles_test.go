@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"github.com/charmbracelet/x/ansi"
 	"slices"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func TestRoles_BareModelOpensWindow(t *testing.T) {
 		"embed     local-nomic-embed-text on work · default",
 		"segment   off · default",
 		"answers you in the conversation",
-		"take effect when dund restarts",
+		"apply after dund restarts",
 		"/rag setup",
 	} {
 		if !strings.Contains(p, want) {
@@ -193,11 +194,11 @@ func TestRoles_ResetFallsBack(t *testing.T) {
 	if !m.rolesPicking {
 		t.Error("reset closed the window")
 	}
-	if !strings.Contains(stripANSI(convoText(m)), "reset facets.embed") {
+	if !strings.Contains(stripANSI(convoText(m)), "embed reset to its default") {
 		t.Errorf("no notice:\n%s", stripANSI(convoText(m)))
 	}
 	m = pick(m, "x") // again: nothing to remove
-	if !strings.Contains(stripANSI(convoText(m)), "facets.embed is not set") {
+	if !strings.Contains(stripANSI(convoText(m)), "embed already uses its default") {
 		t.Errorf("no word on a second reset:\n%s", stripANSI(convoText(m)))
 	}
 }
@@ -305,5 +306,37 @@ func TestModelCompletion_SkipsLoggedOutProviders(t *testing.T) {
 	}
 	if slices.Contains(got, "gone/ghost-1") {
 		t.Errorf("logged-out provider offered: %v", got)
+	}
+}
+
+// At small heights the window fits in half the rows, the highlighted role
+// stays in view, and notes go before roles do. The hint at 48 columns keeps
+// enter and esc.
+func TestRoles_FitsSmallHeights(t *testing.T) {
+	for _, h := range []int{10, 12, 14, 24} {
+		for sel := range dunconfig.FacetNames {
+			m, _ := rolesModel(t, nil)
+			m = resized(m, 48, h)
+			m.openRoles(sel)
+			p := stripANSI(m.rolesPanel())
+			if n := strings.Count(p, "\n") + 1; n > max(5, h/2) {
+				t.Errorf("h=%d sel=%d: %d rows > %d:\n%s", h, sel, n, max(5, h/2), p)
+			}
+			want := "\u258e " + dunconfig.FacetNames[sel]
+			if !strings.Contains(p, want) {
+				t.Errorf("h=%d sel=%d: highlighted row not shown:\n%s", h, sel, p)
+			}
+		}
+	}
+	for _, w := range []int{48, 40} {
+		if h := rolesHint(w); !strings.Contains(h, "enter") || !strings.Contains(h, "esc") || ansi.StringWidth(h) > w {
+			t.Errorf("hint at %d: %q", w, h)
+		}
+	}
+	if h := rolesHint(48); strings.Contains(h, "move") {
+		t.Errorf("move should go first at 48: %q", h)
+	}
+	if h := rolesHint(100); !strings.Contains(h, "move") || !strings.Contains(h, "probe") {
+		t.Errorf("wide hint: %q", h)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
 )
@@ -84,7 +85,8 @@ func (m *tuiModel) openRolePicker(facet string) tea.Cmd {
 func (m *tuiModel) resetRole(facet string) {
 	cfg := dunconfig.LoadConfig()
 	if _, ok := cfg.Facets[facet]; !ok {
-		m.append(StDim.Render("facets." + facet + " is not set"))
+		r := cfg.Resolve(facet, m.opts.Flags, os.Getenv)
+		m.append(StDim.Render(facet + " already uses its default (" + roleWhat(r) + ")"))
 		return
 	}
 	cfg.SetFacet(facet, dunconfig.Facet{})
@@ -93,31 +95,90 @@ func (m *tuiModel) resetRole(facet string) {
 		return
 	}
 	r := cfg.Resolve(facet, m.opts.Flags, os.Getenv)
-	m.appendNotice(convoEntry{collapsed: okNotice("reset facets." + facet + " · " + strings.TrimSpace(strings.TrimPrefix(r.Line(), facet)))})
+	m.appendNotice(convoEntry{collapsed: okNotice(facet + " reset to its default: " + roleWhat(r))})
 }
 
-// rolesPanel renders the roles window in the lower pane. The highlighted
-// row has the gutter bar and the accent; no row is dimmed.
+// roleWhat is what a role is served by, in words: "vision-standard on local",
+// "off", "same as main". No role name, no source.
+func roleWhat(r dunconfig.Resolved) string {
+	l := strings.TrimSpace(strings.TrimPrefix(r.Line(), r.Facet))
+	if i := strings.LastIndex(l, " · "); i >= 0 {
+		l = l[:i]
+	}
+	return l
+}
+
+// rolesPanel renders the roles window in the lower pane, in at most half the
+// terminal's rows. The highlighted row has the gutter bar and the accent; no
+// row is dimmed. When the rows do not fit the window scrolls to keep the
+// highlighted one in view; the notes go first, then the rows scroll.
 func (m tuiModel) rolesPanel() string {
 	cfg := dunconfig.LoadConfig()
+	roles := m.resolvedRoles(cfg)
+	budget := 1 << 30
+	if m.h > 0 {
+		budget = max(5, m.h/2)
+	}
 	rows := []string{stHeader.Render("models by role")}
-	for i, r := range m.resolvedRoles(cfg) {
-		rows = append(rows, listRow("", r.Line(), "", i == m.rolesSel))
+	avail := max(1, budget-1)
+	start := 0
+	if len(roles) > avail {
+		start = min(max(0, m.rolesSel-avail+1), len(roles)-avail)
 	}
-	for _, n := range cfg.UnknownFacets() {
-		rows = append(rows, listIndent+StDim.Render("facets."+n+": not a role; ignored"))
+	for i := start; i < len(roles) && i < start+avail; i++ {
+		rows = append(rows, listRow("", roles[i].Line(), "", i == m.rolesSel))
 	}
-	rows = append(rows, "")
+	var notes [][]string
 	if i := m.rolesSel; i >= 0 && i < len(dunconfig.FacetNames) {
 		f := dunconfig.FacetNames[i]
-		rows = append(rows, wholeRows(f+": "+rolePurpose[f], m.w, listIndent, StDim)...)
+		notes = append(notes, wholeRows(f+": "+rolePurpose[f], m.w, listIndent, StDim))
 	}
-	rows = append(rows, wholeRows("embed, vision, segment and identity take effect when dund restarts", m.w, listIndent, StDim)...)
-	rows = append(rows, wholeRows("the raglit server has its own roles: /rag setup", m.w, listIndent, StDim)...)
+	notes = append(notes, wholeRows("the search and image roles apply after dund restarts", m.w, listIndent, StDim))
+	notes = append(notes, wholeRows("the raglit server has its own roles: /rag setup", m.w, listIndent, StDim))
+	for _, n := range cfg.UnknownFacets() {
+		notes = append(notes, []string{listIndent + StDim.Render("facets."+n+": not a role; ignored")})
+	}
+	// A blank row, then each note that fits whole, in order of use.
+	if len(rows)+1 < budget {
+		rows = append(rows, "")
+		for _, n := range notes {
+			if len(rows)+len(n) <= budget {
+				rows = append(rows, n...)
+			}
+		}
+		if rows[len(rows)-1] == "" {
+			rows = rows[:len(rows)-1]
+		}
+	}
 	return strings.Join(rows, "\n")
 }
 
-// rolesHint is the roles window's status line.
-func rolesHint() string {
-	return "roles  ·  ↑/↓ move · enter pick a model · p probe · x reset · esc close"
+// rolesHint is the roles window's status line. At a narrow width the keys
+// that fit are the most needed first: enter, esc, x, p, then move.
+func rolesHint(w int) string {
+	keys := []struct {
+		order int
+		text  string
+	}{
+		{0, "↑/↓ move"}, {1, "enter pick a model"}, {2, "p probe"}, {3, "x reset"}, {4, "esc close"},
+	}
+	priority := []int{1, 4, 3, 2, 0}
+	const head = "roles"
+	for n := len(priority); n >= 1; n-- {
+		keep := map[int]bool{}
+		for _, o := range priority[:n] {
+			keep[o] = true
+		}
+		var parts []string
+		for _, k := range keys {
+			if keep[k.order] {
+				parts = append(parts, k.text)
+			}
+		}
+		line := head + "  ·  " + strings.Join(parts, " · ")
+		if w <= 0 || ansi.StringWidth(line) <= w || n == 1 {
+			return line
+		}
+	}
+	return head
 }

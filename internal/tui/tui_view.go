@@ -474,7 +474,7 @@ func (m tuiModel) drawView() string {
 	// A form or picker shows its own keys here, never the composer's: two
 	// meanings of enter on one screen was the fault.
 	case m.modelPicking && m.rolesPicking:
-		status = StDim.Render(rolesHint())
+		status = StDim.Render(rolesHint(m.w))
 	case m.modelPicking && m.loginPicking:
 		status = StDim.Render(loginHint())
 	case m.modelPicking && m.providerForm:
