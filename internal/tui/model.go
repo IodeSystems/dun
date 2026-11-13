@@ -40,6 +40,7 @@ type modelFetchMsg struct {
 	provider string
 	ids      []string
 	err      string
+	gen      int // the openModelPicker that asked; an older one's reply is dropped
 }
 
 // pickerProviders returns the providers /model lists: the saved ones, plus
@@ -225,6 +226,8 @@ func (m *tuiModel) openModelPicker(query string, have ...modelFetchMsg) tea.Cmd 
 	m.models = newPickList(query, "type to search")
 	m.modelPicking, m.rolesPicking = true, false
 	m.modelRows, m.modelErrs = nil, nil
+	m.modelGen++
+	gen := m.modelGen
 	m.input.Blur()
 	ps := m.pickerProviders()
 	m.modelPending = len(ps)
@@ -244,9 +247,9 @@ func (m *tuiModel) openModelPicker(query string, have ...modelFetchMsg) tea.Cmd 
 		cmds = append(cmds, func() tea.Msg {
 			ids, why := dunconfig.ListModels(p.URL, p.Key)
 			if len(ids) == 0 {
-				return modelFetchMsg{provider: p.Name, err: why + " — /model use " + p.Name + " <model-id>, or /login " + p.Name + " again"}
+				return modelFetchMsg{provider: p.Name, gen: gen, err: why + " — /model use " + p.Name + " <model-id>, or /login " + p.Name + " again"}
 			}
-			return modelFetchMsg{provider: p.Name, ids: ids}
+			return modelFetchMsg{provider: p.Name, gen: gen, ids: ids}
 		})
 	}
 	m.refresh()

@@ -66,7 +66,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case modelFetchMsg:
-		if m.modelPicking && !m.providerForm && !m.loginPicking && !m.rolesPicking {
+		if msg.gen == m.modelGen && m.modelPicking && !m.providerForm && !m.loginPicking && !m.rolesPicking {
 			m.addModelRows(msg)
 			m.refresh()
 		}

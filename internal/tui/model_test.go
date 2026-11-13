@@ -358,3 +358,32 @@ func TestModelSlash_UsePerFacet(t *testing.T) {
 		t.Fatal("--session saved a child facet")
 	}
 }
+
+// A reply to an earlier picker (esc to the roles window, enter another role)
+// is dropped: it must not add rows or count against the new picker's pending.
+func TestModelPicker_StaleFetchReplyIsDropped(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	cfg := dunconfig.DunConfig{Providers: []dunconfig.ProviderConfig{
+		{Name: "corp", URL: "http://127.0.0.1:1/corp"}, {Name: "home", URL: "http://127.0.0.1:1/home"}}}
+	if err := dunconfig.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	m := newTUIModel(nil, ".")
+	m.openModelPicker("")
+	first := m.modelGen
+	m.openRoles(0)
+	m.openModelPicker("")
+	if m.modelGen == first {
+		t.Fatal("generation not bumped")
+	}
+	nm, _ := m.Update(modelFetchMsg{provider: "corp", gen: first, ids: []string{"old"}})
+	m = nm.(tuiModel)
+	if len(m.modelRows) != 0 || m.modelPending != 2 {
+		t.Fatalf("stale reply landed: rows %v pending %d", m.modelRows, m.modelPending)
+	}
+	nm, _ = m.Update(modelFetchMsg{provider: "corp", gen: m.modelGen, ids: []string{"new"}})
+	m = nm.(tuiModel)
+	if len(m.modelRows) != 1 || m.modelPending != 1 {
+		t.Fatalf("current reply: rows %v pending %d", m.modelRows, m.modelPending)
+	}
+}

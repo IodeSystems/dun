@@ -358,6 +358,7 @@ type tuiModel struct {
 	modelRows    []modelRow // every provider's models fetched so far
 	modelErrs    []string   // providers that returned no list
 	modelPending int        // providers not yet answered
+	modelGen     int        // bumped per openModelPicker; fetch replies carry it
 	modelScope   string     // the provider the picker lists, "" = every one (tab moves it)
 	// The roles window (/model): every role and its model; enter opens the
 	// picker for the role (pickFacet), esc there comes back here.
