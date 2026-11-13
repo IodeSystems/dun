@@ -82,9 +82,20 @@ an `/effort` level (empty: the saved level).
   (as it cleared `model`); rename moves every facet on it.
 - `facets.main.effort` applies only when `/effort` has saved no level
   (`effort.json`), so `/effort` keeps working as before.
-- `/model` lists every role, its model on its provider and where it came
-  from (`flag`, `env`, `config`, `config, old field`, `default`, or `session`
-  for a `--session` pick), then opens the picker. `/model use <facet>
+- Bare `/model` opens the roles window (`tui/roles.go`): one row per role,
+  its model on its provider and where it came from (`flag`, `env`, `config`,
+  `config, old field`, `default`, or `session` for a `--session` pick), and
+  the highlighted role's purpose. Keys: `enter` opens the picker for that
+  role (main switches the session as before; another role is saved to
+  `facets.<role>`, and `alt+enter`, the session-only pick, is refused for
+  it), `esc` in that picker comes back to the window, `p` runs the role's
+  probe, `x` resets it (removes `facets.<role>`; the row then shows its
+  fallback), `esc` closes. The retrieval roles (`embed`, `vision`,
+  `segment`, `identity`) take effect when dund restarts; there is no reload.
+  The external raglit server has its own roles (`/rag setup`). Typing
+  `/model ` completes `use`, `probe`, `caps`; after `use` the roles and
+  `<provider>/<model>` (models from the picker's rows when fetched); after
+  `probe` the roles. `/model use <facet>
   <provider>/<model>` sets one role; `/model use <provider>/<model>` and
   `/model use <provider> <id>` set main. The text before the first `/` is a
   provider only when one of that name is saved, so `anthropic/claude-x` on

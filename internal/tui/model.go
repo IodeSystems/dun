@@ -66,7 +66,9 @@ func (m tuiModel) providerNamed(name string) (dunconfig.ProviderConfig, bool) {
 // models (/login and /logout manage the providers), and the model of each
 // role (dunconfig.FacetNames):
 //
-//	/model                      every role and where it came from, then the picker
+//	/model                      the roles window: every role and where it came
+//	                            from; enter picks its model, x resets it
+//	                            (removes facets.<role>), p probes it
 //	/model <name>               switch to that model on this provider
 //	/model <provider> <name>    switch to that model on that provider
 //	/model use <provider> <id>  the same, by id — for a provider that does
