@@ -58,9 +58,11 @@ func (m tuiModel) updateRoles(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc", "ctrl+c":
 		m.closeModelPicker()
 	case "up", "ctrl+p":
+		m.rolesSaid = ""
 		m.rolesSel = max(0, m.rolesSel-1)
 		m.refresh()
 	case "down", "ctrl+n":
+		m.rolesSaid = ""
 		m.rolesSel = min(len(dunconfig.FacetNames)-1, m.rolesSel+1)
 		m.refresh()
 	case "enter":
@@ -86,7 +88,7 @@ func (m *tuiModel) resetRole(facet string) {
 	cfg := dunconfig.LoadConfig()
 	if _, ok := cfg.Facets[facet]; !ok {
 		r := cfg.Resolve(facet, m.opts.Flags, os.Getenv)
-		m.append(StDim.Render(facet + " already uses its default (" + roleWhat(r) + ")"))
+		m.roleSaid(facet+" already uses its default ("+roleWhat(r)+")", false)
 		return
 	}
 	cfg.SetFacet(facet, dunconfig.Facet{})
@@ -95,7 +97,73 @@ func (m *tuiModel) resetRole(facet string) {
 		return
 	}
 	r := cfg.Resolve(facet, m.opts.Flags, os.Getenv)
-	m.appendNotice(convoEntry{collapsed: okNotice(facet + " reset to its default: " + roleWhat(r))})
+	m.roleSaid(facet+" reset to its default: "+roleWhat(r), true)
+}
+
+// roleNote is a result of the roles window, kept for the conversation until
+// the window closes. ok: a ✓ notice (appendNotice); else a dim line.
+type roleNote struct {
+	text string
+	ok   bool
+}
+
+// roleSaid says what a role change did. With the roles window (or a
+// role's picker) open it goes on the window's hint row and waits: added to
+// the conversation then, the pinned view followed it and the rows above the
+// window moved up (ux models run, steps 06-07). The close puts the waiting
+// lines in the conversation (flushRoleNotes), into the rows the window gave
+// back, so nothing moves then either. With no window open (/model use) it
+// is said in the conversation at once.
+func (m *tuiModel) roleSaid(text string, ok bool) {
+	if !m.modelPicking || (!m.rolesPicking && m.pickFacet == "") {
+		m.sayRoleNote(roleNote{text, ok})
+		return
+	}
+	m.rolesSaid = text
+	if ok {
+		m.rolesSaid = "✓ " + text
+	}
+	m.rolesQueued = append(m.rolesQueued, roleNote{text, ok})
+	m.refresh()
+}
+
+func (m *tuiModel) sayRoleNote(n roleNote) {
+	if n.ok {
+		m.appendNotice(convoEntry{collapsed: okNotice(n.text)})
+		return
+	}
+	m.append(StDim.Render(n.text))
+}
+
+// flushRoleNotes puts the window's waiting results in the conversation.
+func (m *tuiModel) flushRoleNotes() {
+	q := m.rolesQueued
+	m.rolesQueued, m.rolesSaid = nil, ""
+	for _, n := range q {
+		m.sayRoleNote(n)
+	}
+}
+
+// rolesStatus is the window's status row: the last result, then the keys
+// that fit after it. A result too long for any key is cut before esc
+// close; the next move gives the keys back.
+func (m tuiModel) rolesStatus() string {
+	if m.rolesSaid == "" {
+		return StDim.Render(rolesHint(m.w))
+	}
+	said := StDim.Render(m.rolesSaid)
+	if strings.HasPrefix(m.rolesSaid, "✓ ") {
+		said = stOK.Render(m.rolesSaid)
+	}
+	w := m.w
+	if w <= 0 {
+		w = 1 << 30
+	}
+	if keys, ok := rolesKeys(w - ansi.StringWidth(m.rolesSaid)); ok {
+		return said + StDim.Render("  ·  "+keys)
+	}
+	const out = "  ·  esc close" // the way out stays; the result is cut
+	return fitText(said, max(1, m.w-len(out))) + StDim.Render(out)
 }
 
 // restartNote is said once, in the window, and says what dund is: the save
@@ -176,6 +244,14 @@ func (m tuiModel) rolesPanel() string {
 // rolesHint is the roles window's status line. At a narrow width the keys
 // that fit are the most needed first: enter, esc, x, p, then move.
 func rolesHint(w int) string {
+	const head = "roles"
+	if keys, ok := rolesKeys(w - len(head)); ok {
+		return head + "  ·  " + keys
+	}
+	return head
+}
+
+func rolesKeys(w int) (string, bool) {
 	keys := []struct {
 		order int
 		text  string
@@ -183,7 +259,6 @@ func rolesHint(w int) string {
 		{0, "↑/↓ move"}, {1, "enter pick a model"}, {2, "p test it"}, {3, "x reset"}, {4, "esc close"},
 	}
 	priority := []int{1, 4, 3, 2, 0}
-	const head = "roles"
 	for n := len(priority); n >= 1; n-- {
 		keep := map[int]bool{}
 		for _, o := range priority[:n] {
@@ -195,10 +270,10 @@ func rolesHint(w int) string {
 				parts = append(parts, k.text)
 			}
 		}
-		line := head + "  ·  " + strings.Join(parts, " · ")
-		if w <= 0 || ansi.StringWidth(line) <= w || n == 1 {
-			return line
+		line := strings.Join(parts, " · ")
+		if ansi.StringWidth(line)+5 <= w {
+			return line, true
 		}
 	}
-	return head
+	return "", false
 }

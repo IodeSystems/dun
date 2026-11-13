@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"slices"
 	"strings"
@@ -194,12 +195,58 @@ func TestRoles_ResetFallsBack(t *testing.T) {
 	if !m.rolesPicking {
 		t.Error("reset closed the window")
 	}
-	if !strings.Contains(stripANSI(convoText(m)), "embed reset to its default") {
-		t.Errorf("no notice:\n%s", stripANSI(convoText(m)))
+	if h := stripANSI(m.View().Content); !strings.Contains(h, "✓ embed reset to its default") {
+		t.Errorf("no word on the hint row:\n%s", h)
 	}
 	m = pick(m, "x") // again: nothing to remove
-	if !strings.Contains(stripANSI(convoText(m)), "embed already uses its default") {
-		t.Errorf("no word on a second reset:\n%s", stripANSI(convoText(m)))
+	if h := stripANSI(m.View().Content); !strings.Contains(h, "embed already uses its default") {
+		t.Errorf("no word on a second reset:\n%s", h)
+	}
+	if got := stripANSI(convoText(m)); strings.Contains(got, "embed") {
+		t.Errorf("said in the conversation while the window is open:\n%s", got)
+	}
+	m = pick(m, "esc")
+	got := stripANSI(convoText(m))
+	if a, b := strings.Index(got, "embed reset to its default"), strings.Index(got, "embed already uses its default"); a < 0 || b < a {
+		t.Errorf("the close says both, in order:\n%s", got)
+	}
+}
+
+// A role change made in the window moves no row above it, and the close
+// keeps the top row: the results go in the rows the window gave back
+// (ux models run, 100x30, steps 06-08: the banner scrolled off).
+func TestRoles_ResultsMoveNothing(t *testing.T) {
+	for _, sz := range [][2]int{{100, 30}, {48, 24}} {
+		m, _ := rolesModel(t, map[string]dunconfig.Facet{dunconfig.FacetEmbed: {Provider: "fast", Model: "e5"}})
+		m = resized(m, sz[0], sz[1])
+		for i := 0; i < 12; i++ { // a banner's worth of rows
+			m.append(fmt.Sprintf("banner row %d", i))
+		}
+		modelSlash(&m, nil)
+		m = pick(m)
+		top := func(m tuiModel) string {
+			return strings.Split(stripANSI(m.View().Content), "\n")[1]
+		}
+		before := top(m)
+		m = pick(m, "down", "down", "enter") // vision's picker
+		m.modelRows = []modelRow{{"fast", "qwen-vl"}, {"work", "chat"}}
+		m = pick(m, "enter", "down", "x") // save vision, reset embed
+		if got := top(m); got != before {
+			t.Errorf("%v: the top row moved while the window was open: %q, was %q", sz, got, before)
+		}
+		if h := stripANSI(m.View().Content); !strings.Contains(h, "embed reset to its default") || !strings.Contains(h, "esc close") {
+			t.Errorf("%v: hint row:\n%s", sz, h)
+		}
+		m = pick(m, "esc")
+		if got := top(m); got != before {
+			t.Errorf("%v: the top row moved on close: %q, was %q", sz, got, before)
+		}
+		v := stripANSI(m.View().Content)
+		for _, want := range []string{"vision: qwen-vl on fast · saved", "embed reset to its default"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("%v: %q not on screen after the close:\n%s", sz, want, v)
+			}
+		}
 	}
 }
 
@@ -389,6 +436,7 @@ func TestRoles_Round3(t *testing.T) {
 		t.Error("a second restart statement")
 	}
 	m.useFacet("vision", "fast/qwen-vl", true)
+	m.closeModelPicker()
 	if got := stripANSI(convoText(m)); !strings.Contains(got, "vision: qwen-vl on fast · saved") || strings.Contains(got, "sessions") {
 		t.Errorf("save message:\n%s", got)
 	}

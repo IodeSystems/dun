@@ -365,6 +365,11 @@ type tuiModel struct {
 	rolesPicking bool   // the roles window owns the keys; modelPicking is set with it
 	rolesSel     int    // its highlighted row, an index of dunconfig.FacetNames
 	pickFacet    string // the role the picker picks for, "" = not opened from the window
+	// What the window did (saved, reset, already the default): said on its
+	// hint row while it is open, and put in the conversation when it closes
+	// (roleSaid), so no row above the window moves while it is open.
+	rolesSaid   string
+	rolesQueued []roleNote
 	// The login's service picker (/login): custom, then the templates.
 	loginPicking bool
 	logins       pickList

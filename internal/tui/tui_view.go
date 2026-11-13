@@ -154,7 +154,8 @@ func (s viewState) Next() viewState {
 }
 
 // dividerGap is 1 while the roles window is open: a blank row above the
-// divider, so the notice a role change just made does not touch it.
+// divider, so the conversation's last row does not touch it (a role
+// change's result waits on the hint row until the close: roleSaid).
 func (m tuiModel) dividerGap() int {
 	if m.modelPicking && m.rolesPicking {
 		return 1
@@ -483,7 +484,7 @@ func (m tuiModel) drawView() string {
 	// A form or picker shows its own keys here, never the composer's: two
 	// meanings of enter on one screen was the fault.
 	case m.modelPicking && m.rolesPicking:
-		status = StDim.Render(rolesHint(m.w))
+		status = m.rolesStatus()
 	case m.modelPicking && m.loginPicking:
 		status = StDim.Render(loginHint())
 	case m.modelPicking && m.providerForm:

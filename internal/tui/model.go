@@ -163,7 +163,7 @@ func (m *tuiModel) useFacet(facet, pick string, persist bool) tea.Cmd {
 		return nil
 	}
 	r := cfg.Resolve(facet, m.opts.Flags, os.Getenv)
-	m.appendNotice(convoEntry{collapsed: okNotice(facet + ": " + roleWhat(r) + " · saved")})
+	m.roleSaid(facet+": "+roleWhat(r)+" · saved", true)
 	return nil
 }
 
@@ -445,6 +445,7 @@ func (m *tuiModel) closeModelPicker() {
 	m.models.query.Blur()
 	m.input.Focus()
 	m.refresh()
+	m.flushRoleNotes() // after the close: the lines take rows the window gave back
 }
 
 // updateModelPicking owns the keys while the model list is open. Printable
