@@ -676,15 +676,26 @@ func (m tuiModel) modelPanel() string {
 	return strings.Join(rows, "\n")
 }
 
-// modelHint is the picker's status line.
+// modelHint is the picker's status line. tab only does something with two
+// or more services; ctrl+a opens the login list, so signed in it adds another.
 func (m tuiModel) modelHint() string {
+	var tail string
+	n := len(m.pickerProviders())
+	if n > 1 {
+		tail += " · tab next service"
+	}
+	if n == 0 {
+		tail += " · ctrl+a log in"
+	} else {
+		tail += " · ctrl+a add a service"
+	}
 	if m.rolePick() {
-		return "model for " + m.pickFacet + "  ·  enter save · esc back to roles · tab next service · ctrl+a log in"
+		return "model for " + m.pickFacet + "  ·  enter save · esc back to roles" + tail
 	}
 	if m.pickFacet != "" {
-		return "model  ·  enter use · esc back to roles · alt+enter this session only · tab next service · ctrl+a log in"
+		return "model  ·  enter use · esc back to roles · alt+enter this session only" + tail
 	}
-	return "model  ·  enter use · esc cancel · alt+enter this session only · tab next service · ctrl+a log in"
+	return "model  ·  enter use · esc cancel · alt+enter this session only" + tail
 }
 
 // ── the add-provider form ──

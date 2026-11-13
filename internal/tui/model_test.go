@@ -387,3 +387,40 @@ func TestModelPicker_StaleFetchReplyIsDropped(t *testing.T) {
 		t.Fatalf("current reply: rows %v pending %d", m.modelRows, m.modelPending)
 	}
 }
+
+// tab needs two services; ctrl+a logs in when nobody is, else adds a service.
+func TestModelPicker_HintFitsTheServices(t *testing.T) {
+	save := func(names ...string) tuiModel {
+		t.Setenv("DUN_HOME", t.TempDir())
+		var cfg dunconfig.DunConfig
+		for _, n := range names {
+			cfg.Providers = append(cfg.Providers, dunconfig.ProviderConfig{Name: n, URL: "http://127.0.0.1:1/" + n})
+		}
+		if err := dunconfig.SaveConfig(cfg); err != nil {
+			t.Fatal(err)
+		}
+		m := newTUIModel(nil, ".")
+		m.openModelPicker("")
+		return m
+	}
+	for _, c := range []struct {
+		names []string
+		tab   bool
+		ctrlA string
+	}{
+		{nil, false, "ctrl+a log in"},
+		{[]string{"one"}, false, "ctrl+a add a service"},
+		{[]string{"one", "two"}, true, "ctrl+a add a service"},
+	} {
+		h := save(c.names...).modelHint()
+		if got := strings.Contains(h, "tab next service"); got != c.tab {
+			t.Errorf("%v: tab hint %v in %q", c.names, got, h)
+		}
+		if !strings.Contains(h, c.ctrlA) {
+			t.Errorf("%v: want %q in %q", c.names, c.ctrlA, h)
+		}
+		if len(c.names) > 0 && strings.Contains(h, "log in") {
+			t.Errorf("%v: signed in but hint says log in: %q", c.names, h)
+		}
+	}
+}
