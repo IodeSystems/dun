@@ -92,7 +92,8 @@
       "promise": "Esc closes the window and I am back at my input.",
       "settle_ms": 1000,
       "actions": [
-        {"key": "esc"}
+        {"key": "esc"},
+        {"wait_gone": "models by role"}
       ]
     },
     {
