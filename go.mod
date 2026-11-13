@@ -19,7 +19,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/iodesystems/agentkit v0.29.0
-	github.com/iodesystems/bubbleteandmd v0.4.0
+	github.com/iodesystems/bubbleteandmd v0.5.1
 	github.com/iodesystems/gwag/v2 v2.11.0
 	github.com/iodesystems/openai-claude-api-shim v0.6.0
 	github.com/iodesystems/poly-lsp-mcp v0.5.1
