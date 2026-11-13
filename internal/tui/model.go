@@ -310,8 +310,22 @@ func (m *tuiModel) addModelRows(msg modelFetchMsg) {
 		return
 	}
 	if !had {
+		// A role with no model starts on the first model that fits it: no
+		// row is dimmed or hidden for not fitting.
+		if k := roleKinds[m.pickFacet]; k != "" && m.rolePick() {
+			if i := slices.IndexFunc(rows, func(r modelRow) bool { return modelKind(r.id) == k }); i >= 0 {
+				m.models.sel = i
+				return
+			}
+		}
 		m.models.sel = suggestedModel(rows)
 	}
+}
+
+// roleKinds is the modelKind that fits a role, for where its picker starts.
+var roleKinds = map[string]string{
+	dunconfig.FacetVision: "images",
+	dunconfig.FacetEmbed:  "embeddings",
 }
 
 // suggestedModel is the row the picker starts on when nothing is running

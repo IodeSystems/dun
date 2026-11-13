@@ -340,3 +340,30 @@ func TestRoles_FitsSmallHeights(t *testing.T) {
 		t.Errorf("wide hint: %q", h)
 	}
 }
+
+// A role with no model starts its picker on the first model that fits it;
+// one with a model starts on that model.
+func TestRolePicker_StartsOnAFittingModel(t *testing.T) {
+	ids := []string{"chat-standard", "embed-small", "vision-standard"}
+	m, _ := rolesModel(t, nil)
+	m.openRoles(2)
+	m.openRolePicker(dunconfig.FacetVision)
+	m.addModelRows(modelFetchMsg{provider: "work", gen: m.modelGen, ids: ids})
+	if r, _ := m.selectedModel(); r.id != "vision-standard" {
+		t.Errorf("vision started on %v", r)
+	}
+
+	m, _ = rolesModel(t, map[string]dunconfig.Facet{dunconfig.FacetEmbed: {Provider: "work", Model: "zz-other"}})
+	m.openRolePicker(dunconfig.FacetEmbed)
+	m.addModelRows(modelFetchMsg{provider: "work", ids: append(ids, "zz-other")})
+	if r, _ := m.selectedModel(); r.id != "zz-other" {
+		t.Errorf("embed with a model started on %v", r)
+	}
+
+	m, _ = rolesModel(t, nil)
+	m.openRolePicker(dunconfig.FacetEmbed)
+	m.addModelRows(modelFetchMsg{provider: "work", ids: ids})
+	if r, _ := m.selectedModel(); r.id != "embed-small" {
+		t.Errorf("embed default absent from the list started on %v", r)
+	}
+}
