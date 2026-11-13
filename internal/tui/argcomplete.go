@@ -179,11 +179,16 @@ func modelChoices(m *tuiModel, arg string) *argList {
 	}
 	picks := func() {
 		cfg := dunconfig.LoadConfig()
+		saved := map[string]bool{}
 		for _, p := range cfg.ProviderList() {
+			saved[p.Name] = true
 			add(p.Name+"/", "a model of "+p.Name, true)
 		}
+		// modelRows outlives the picker; a provider since logged out is not offered.
 		for _, r := range m.modelRows {
-			add(r.provider+"/"+r.id, "", false)
+			if saved[r.provider] {
+				add(r.provider+"/"+r.id, "", false)
+			}
 		}
 	}
 	switch {

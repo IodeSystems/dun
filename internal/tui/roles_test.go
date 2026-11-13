@@ -292,3 +292,18 @@ func TestModelCompletion(t *testing.T) {
 		t.Errorf("nothing follows a role: %v", got)
 	}
 }
+
+// Rows left by a picker are offered only for providers still saved: one
+// logged out since is not.
+func TestModelCompletion_SkipsLoggedOutProviders(t *testing.T) {
+	m, _ := rolesModel(t, nil)
+	m.modelRows = []modelRow{{"fast", "qwen-vl"}, {"gone", "ghost-1"}}
+	m = typeStr(m, "/model use ")
+	got := labelsOf(t, m)
+	if !slices.Contains(got, "fast/qwen-vl") {
+		t.Errorf("saved provider's model missing: %v", got)
+	}
+	if slices.Contains(got, "gone/ghost-1") {
+		t.Errorf("logged-out provider offered: %v", got)
+	}
+}
