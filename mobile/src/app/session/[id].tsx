@@ -21,6 +21,7 @@ import {
 import { Markdown } from '@/components/markdown/Markdown';
 import { McpForm } from '@/components/McpForm';
 import { McpToolsPanel } from '@/components/McpToolsPanel';
+import { NoticeRow } from '@/components/notices/NoticeRow';
 import { ModelPicker } from '@/components/ModelPicker';
 import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
@@ -525,6 +526,8 @@ function Row({ item }: { item: Item }) {
           {item.text}
         </Text>
       );
+    case 'notice':
+      return <NoticeRow notice={item.notice} />;
     case 'question':
       return (
         <View
