@@ -58,6 +58,7 @@ import {
 } from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
 import { noStats, noteRequest } from '@/lib/stats';
+import { headerScroll, headerShow, headerStart } from '@/lib/headerhide';
 import { turnState } from '@/lib/turnstate';
 import { shouldReload, upgradeLines } from '@/lib/upgrade';
 import { providerLine, type ProviderOp } from '@/lib/provider';
@@ -66,8 +67,6 @@ import { useAuth } from '@/providers/AuthProvider';
 
 // Rows the web transcript renders per page: it is not virtualized.
 const page = 300;
-// How far from the newest row (dp) the reader is in the history: the header steps aside.
-const AWAY = 48;
 
 const transcript = {
   // No side gutter: message boxes span the full width.
@@ -92,10 +91,9 @@ export default function Session() {
   const [panel, setPanel] = useState(false);
   // The header's panels, and whether it has stepped aside (onScroll).
   const [sheet, setSheet] = useState<'ctx' | 'plan' | 'tasks' | null>(null);
+  const hide = useRef(headerStart);
   const [away, setAway] = useState(false);
-  const [peek, setPeek] = useState(false);
-  const scrollY = useRef(0);
-  const peekAt = useRef<number | null>(null);
+  const [headerH, setHeaderH] = useState(0);
   const [picker, setPicker] = useState<string | null>(null); // the search, when open
   const [mcpForm, setMcpForm] = useState(false);
   const [toolsFor, setToolsFor] = useState<string | null>(null); // the server /mcp tools asked for
@@ -331,19 +329,15 @@ export default function Session() {
     }
   }
 
-  // The header steps aside while the reader is in the history (offset 0 is
-  // the newest row: column-reverse on the web, inverted on native; the web's
-  // offset runs negative), and comes back at the newest. Reading the offset
-  // only: nothing here sets it.
+  // The header steps aside while the reader scrolls into the history (offset
+  // 0 is the newest row: column-reverse on the web, inverted on native; the
+  // web's offset runs negative) and comes back when they scroll down or reach
+  // the newest (lib/headerhide: thresholds, content growth ignored). Reading
+  // the offset only: nothing here sets it.
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
-    const y = Math.abs(e.nativeEvent.contentOffset.y);
-    scrollY.current = y;
-    setAway(y > AWAY);
-    // Brought back by a tap: it stays until the reader scrolls on.
-    if (peekAt.current !== null && (y <= AWAY || Math.abs(y - peekAt.current) > AWAY * 2)) {
-      peekAt.current = null;
-      setPeek(false);
-    }
+    const ev = e.nativeEvent;
+    hide.current = headerScroll(hide.current, Math.abs(ev.contentOffset.y), ev.contentSize?.height ?? -1);
+    setAway(hide.current.hidden);
   }
 
   return (
@@ -353,12 +347,13 @@ export default function Session() {
       <SessionHeader
         view={view}
         stats={stats.id === id ? stats.s : noStats}
-        hidden={away && !peek && !view.ask}
+        hidden={away && !view.ask}
         panel={panel}
         onShow={() => {
-          peekAt.current = scrollY.current;
-          setPeek(true);
+          hide.current = headerShow(hide.current);
+          setAway(false);
         }}
+        onHeight={setHeaderH}
         act={{
           ctx: () => setSheet('ctx'),
           plan: () => {
@@ -422,7 +417,11 @@ export default function Session() {
           onClose={() => setSheet(null)}
         />
       ) : null}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* The header overlays the transcript; only the status bar's room is kept here. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1, paddingTop: insets.top }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         {Platform.OS === 'web' ? (
           // column-reverse on the scrolling element: the browser puts
           // scrollTop 0 at the bottom, holds it there as content grows, and
@@ -444,6 +443,8 @@ export default function Session() {
                 />
               </View>
             ) : null}
+            {/* The oldest end: room for the header, so the first row is not under it. */}
+            <View style={{ height: headerH }} />
           </ScrollView>
         ) : (
           // Native: a ScrollView's column-reverse does not move the scroll
@@ -459,6 +460,8 @@ export default function Session() {
             maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
             contentContainerStyle={transcript}
             renderItem={({ item }) => <Row item={item} />}
+            // inverted: the footer is the visual top, room for the header over it
+            ListFooterComponent={<View style={{ height: headerH }} />}
           />
         )}
         <View
