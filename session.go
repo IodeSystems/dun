@@ -210,6 +210,28 @@ func ListSessions(root string) []string {
 	return ids
 }
 
+// ListAskedSessions returns the ids of sessions that were asked in
+// (SessionAsked), newest first, at most limit of them (limit <= 0: all). It
+// includes a session whose live transcript is empty or notices-only after a
+// /clear: the archive holds the ask. Every listing goes through it.
+func ListAskedSessions(root string, limit int) []string {
+	ids, empty := scanSessionIDs(root)
+	for id := range empty {
+		ids = append(ids, id)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+		if SessionAsked(root, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // SessionInfo is one saved session, summarized for a picker.
 //
 // The id alone is a timestamp, which tells you when but never WHICH — and a
@@ -240,7 +262,7 @@ const previewScanLimit = 4000
 // known rather than hidden — a session you cannot open is exactly the one you
 // want to see.
 func ListSessionInfo(root string) []SessionInfo {
-	ids := ListSessions(root)
+	ids := ListAskedSessions(root, 0)
 	out := make([]SessionInfo, 0, len(ids))
 	for _, id := range ids {
 		path := SessionFile(root, id)
@@ -248,14 +270,7 @@ func ListSessionInfo(root string) []SessionInfo {
 		if st, err := os.Stat(path); err == nil {
 			info.ModTime = st.ModTime()
 		}
-		var unreadable bool
-		info.Entries, info.Preview, unreadable = scanSession(path)
-		// Read whole and no user message: nothing was asked in it, so there
-		// is nothing to resume (USER 2026-10-22). One that could not be read
-		// stays listed.
-		if !unreadable && info.Preview == "" {
-			continue
-		}
+		info.Entries, info.Preview, _ = scanSession(path)
 		if last := lastUserMessage(path); last != info.Preview {
 			info.Last = last
 		}

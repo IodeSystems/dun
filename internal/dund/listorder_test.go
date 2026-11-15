@@ -89,3 +89,37 @@ func TestListIncludesTranscriptsOnDisk(t *testing.T) {
 		t.Errorf("bob sees %d rows", len(got))
 	}
 }
+
+// The on-disk listing follows dun.SessionAsked: a cleared session (notices
+// only, archive holds the ask) is listed; a notices-only one is not.
+func TestListOnDiskUsesSessionAsked(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	svc, _, _ := newSvc(t)
+	ws := t.TempDir()
+	if _, err := svc.Create(alice, ws, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	dir := dun.RootDir(ws)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	user := `{"Kind":"user","Content":"fix it"}` + "\n"
+	note := `{"Kind":"notification","Content":"x"}` + "\n"
+	for name, body := range map[string]string{
+		"19990101-000000.jsonl":                         note,
+		"19990101-000000.cleared.19990101-000100.jsonl": user,
+		"19990102-000000.jsonl":                         note, // never asked
+		"19990103-000000.jsonl":                         user,
+	} {
+		if err := os.WriteFile(dir+"/"+name, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := map[string]bool{}
+	for _, s := range svc.List(alice) {
+		got[s.ID] = true
+	}
+	if !got["19990101-000000"] || !got["19990103-000000"] || got["19990102-000000"] {
+		t.Errorf("listed %v; want cleared and asked, not the unasked", got)
+	}
+}

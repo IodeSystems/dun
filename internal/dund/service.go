@@ -378,15 +378,12 @@ func (s *Service) List(principal string) []proto.SessionSummary {
 		out = append(out, ses.summary())
 	}
 	for _, ws := range wss {
-		n := 0
-		for _, id := range dun.ListSessions(ws) { // newest id first; no sidecars, no empty files
-			if n >= diskPerWorkspace {
-				break
-			}
+		// Newest id first, asked-in only (dun.SessionAsked), no sidecars.
+		// Registry sessions are skipped after the limit: they count toward it.
+		for _, id := range dun.ListAskedSessions(ws, diskPerWorkspace) {
 			if have[ws+"\x00"+id] {
 				continue
 			}
-			n++
 			mt, _ := transcriptTime(ws, id)
 			out = append(out, proto.SessionSummary{ID: id, Workspace: ws, Owner: principal,
 				Members: []string{principal}, LastActive: rfc3339(mt)})

@@ -125,3 +125,27 @@ func TestListSessionInfo_LastUserMessage(t *testing.T) {
 		t.Errorf("last: %q", got)
 	}
 }
+
+// A cleared session — live transcript notices only, or emptied — is listed:
+// its archive holds the ask (SessionAsked). One with no ask anywhere is not.
+func TestListSessionInfo_ShowsAClearedSession(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	w := func(name, body string) { os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644) }
+	user := `{"Kind":"user","Content":"fix it"}` + "\n"
+	note := `{"Kind":"notification","Content":"cleared"}` + "\n"
+	w("20261114-100000.jsonl", note)
+	w("20261114-100000.cleared.20261114-100500.jsonl", user)
+	w("20261114-100001.jsonl", "") // emptied after /clear
+	w("20261114-100001.cleared.20261114-100500.jsonl", user)
+	w("20261114-100002.jsonl", note) // never asked
+	var ids []string
+	for _, s := range ListSessionInfo(ws) {
+		ids = append(ids, s.ID)
+	}
+	if len(ids) != 2 || ids[0] != "20261114-100001" || ids[1] != "20261114-100000" {
+		t.Errorf("listed %v; want the two cleared sessions", ids)
+	}
+}
