@@ -47,6 +47,7 @@ const api = async (method, path, body) => (await fetch(base + path, { method, he
   await step('a slash command answers; a panel chip runs one', async () => {
     await box.fill('/rephrase on'); await box.press('Enter');
     await p.getByText('rephrase: on', { exact: true }).waitFor({ timeout: 10000 });
+    await p.getByLabel('Session menu').click(); // the header's overflow
     await p.getByText('Session', { exact: true }).click();
     await p.getByRole('button', { name: 'auto', exact: true }).last().click();
     await p.getByText('suggestions: auto', { exact: true }).waitFor({ timeout: 10000 });

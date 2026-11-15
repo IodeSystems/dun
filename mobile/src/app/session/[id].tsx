@@ -1,11 +1,22 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { explain } from '@/api/client';
 import { followSession } from '@/api/live';
 import {
+  AgentCmd,
   Answer,
   AskModels,
   Control,
@@ -25,14 +36,28 @@ import { NoticeRow } from '@/components/notices/NoticeRow';
 import { ModelPicker } from '@/components/ModelPicker';
 import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
-import { StatsBar } from '@/components/StatsBar';
+import { CtxSheet } from '@/components/header/CtxSheet';
+import { SessionHeader } from '@/components/header/SessionHeader';
+import { PlanSheet } from '@/components/plan/PlanSheet';
+import { TasksSheet } from '@/components/tasks/TasksSheet';
 import { Thinking } from '@/components/thinking/Thinking';
 import { ToolRun } from '@/components/tools/ToolRun';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
-import { apply, empty, isKillAll, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
+import {
+  apply,
+  empty,
+  isKillAll,
+  parseLine,
+  suggest,
+  unwatchAgent,
+  watchAgent,
+  type Item,
+  type View as Shown,
+} from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
 import { noStats, noteRequest } from '@/lib/stats';
+import { turnState } from '@/lib/turnstate';
 import { shouldReload, upgradeLines } from '@/lib/upgrade';
 import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, space, TOUCH, useColors } from '@/lib/theme';
@@ -40,6 +65,8 @@ import { useAuth } from '@/providers/AuthProvider';
 
 // Rows the web transcript renders per page: it is not virtualized.
 const page = 300;
+// How far from the newest row (dp) the reader is in the history: the header steps aside.
+const AWAY = 48;
 
 const transcript = {
   // No side gutter: message boxes span the full width.
@@ -63,6 +90,12 @@ export default function Session() {
   const [text, setText] = useState('');
   const [sendErr, setSendErr] = useState('');
   const [panel, setPanel] = useState(false);
+  // The header's panels, and whether it has stepped aside (onScroll).
+  const [sheet, setSheet] = useState<'ctx' | 'plan' | 'tasks' | null>(null);
+  const [away, setAway] = useState(false);
+  const [peek, setPeek] = useState(false);
+  const scrollY = useRef(0);
+  const peekAt = useRef<number | null>(null);
   const [picker, setPicker] = useState<string | null>(null); // the search, when open
   const [mcpForm, setMcpForm] = useState(false);
   const [toolsFor, setToolsFor] = useState<string | null>(null); // the server /mcp tools asked for
@@ -290,32 +323,107 @@ export default function Session() {
     }
   }
 
+  async function agentCmd(agent: number, action: 'view' | 'leave' | 'tell', content?: string) {
+    try {
+      await auth.client?.request(AgentCmd, { id, agent: String(agent), action, content });
+    } catch (e) {
+      setSendErr(`agent ${action}: ` + explain(e).message);
+    }
+  }
+
+  // The header steps aside while the reader is in the history (offset 0 is
+  // the newest row: column-reverse on the web, inverted on native; the web's
+  // offset runs negative), and comes back at the newest. Reading the offset
+  // only: nothing here sets it.
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    const y = Math.abs(e.nativeEvent.contentOffset.y);
+    scrollY.current = y;
+    setAway(y > AWAY);
+    // Brought back by a tap: it stays until the reader scrolls on.
+    if (peekAt.current !== null && (y <= AWAY || Math.abs(y - peekAt.current) > AWAY * 2)) {
+      peekAt.current = null;
+      setPeek(false);
+    }
+  }
+
   return (
     <Screen>
-      <Stack.Screen
-        options={{
-          title: id,
-          headerRight: () => (
-            <View style={{ flexDirection: 'row' }}>
-              <Pressable onPress={() => openPicker('')} style={{ paddingHorizontal: space.md }}>
-                <Text style={{ color: c.muted }} numberOfLines={1}>
-                  {view.settings?.model || 'Model'}
-                </Text>
-              </Pressable>
-              <Pressable onPress={() => setPanel((p) => !p)} style={{ paddingHorizontal: space.md }}>
-                <Text style={{ color: panel ? c.accent : c.muted }}>{panel ? 'Hide session' : 'Session'}</Text>
-              </Pressable>
-            </View>
-          ),
+      {/* The stack's header gives way to the session's own (components/header), which can slide away. */}
+      <Stack.Screen options={{ title: id, headerShown: false }} />
+      <SessionHeader
+        view={view}
+        stats={stats.id === id ? stats.s : noStats}
+        hidden={away && !peek && !view.ask}
+        panel={panel}
+        onShow={() => {
+          peekAt.current = scrollY.current;
+          setPeek(true);
+        }}
+        act={{
+          ctx: () => setSheet('ctx'),
+          plan: () => {
+            setSheet('plan');
+            // The latest plan, in case this dund's snapshot does not keep one.
+            void auth.client?.request(Control, { id, target: 'plan', action: 'view' }).catch(() => undefined);
+          },
+          tasks: () => setSheet('tasks'),
+          model: () => openPicker(''),
+          session: () => setPanel((p) => !p),
         }}
       />
+      {sheet === 'ctx' ? (
+        <CtxSheet stats={stats.id === id ? stats.s : noStats} ctx={view.bg.ctx} onClose={() => setSheet(null)} />
+      ) : null}
+      {sheet === 'plan' && view.bg.plan ? (
+        <PlanSheet
+          plan={view.bg.plan}
+          live={{
+            busy: turnState(view).state === 'working',
+            asking: turnState(view).state === 'ask',
+            agents: Object.fromEntries(view.bg.agents.map((a) => [a.id, a.state])),
+          }}
+          run={(action) =>
+            void auth.client
+              ?.request(Control, { id, target: 'plan', action })
+              .catch((e) => setSendErr('plan ' + action + ': ' + explain(e).message))
+          }
+          onClose={() => setSheet(null)}
+        />
+      ) : null}
+      {sheet === 'tasks' ? (
+        <TasksSheet
+          agents={view.bg.agents}
+          jobs={view.bg.jobs}
+          agentView={view.agentView}
+          client={auth.client}
+          session={id}
+          act={{
+            openAgent: (n, prompt) => {
+              setView((v) => watchAgent(v, n, prompt));
+              void agentCmd(n, 'view');
+            },
+            closeAgent: () => {
+              const n = view.agentView?.id;
+              setView(unwatchAgent);
+              if (n !== undefined) void agentCmd(n, 'leave');
+            },
+            tell: (n, content) => void agentCmd(n, 'tell', content),
+            kill: (n) =>
+              void auth.client
+                ?.request(Control, { id, target: 'jobs', action: 'kill ' + n })
+                .catch((e) => setSendErr('kill: ' + explain(e).message)),
+          }}
+          onClose={() => setSheet(null)}
+        />
+      ) : null}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <StatsBar stats={stats.id === id ? stats.s : noStats} />
         {Platform.OS === 'web' ? (
           // column-reverse on the scrolling element: the browser puts
           // scrollTop 0 at the bottom, holds it there as content grows, and
           // anchors the reader's place when they have scrolled up.
           <ScrollView
+            onScroll={onScroll}
+            scrollEventThrottle={32}
             style={{ flexDirection: 'column-reverse' }}
             contentContainerStyle={[transcript, { flexDirection: 'column-reverse' }]}
           >
@@ -340,6 +448,8 @@ export default function Session() {
             data={rows}
             keyExtractor={(i) => i.key}
             inverted
+            onScroll={onScroll}
+            scrollEventThrottle={32}
             maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
             contentContainerStyle={transcript}
             renderItem={({ item }) => <Row item={item} />}
@@ -444,7 +554,11 @@ export default function Session() {
               ) : null}
             </View>
           ) : null}
-          {conn ? <ErrorText>{conn}</ErrorText> : view.status ? <Muted>{view.status}</Muted> : null}
+          {conn ? (
+            <ErrorText>{conn}</ErrorText>
+          ) : view.status && !headerSays(view) ? (
+            <Muted>{view.status}</Muted>
+          ) : null}
           {sendErr ? <ErrorText>{sendErr}</ErrorText> : null}
           <View>
             <Field
@@ -497,6 +611,10 @@ export default function Session() {
     </Screen>
   );
 }
+
+/** The status the header already shows (lib/turnstate.ts): not said again above the composer. */
+const headerSays = (v: Shown) =>
+  turnState(v).state !== 'idle' && (v.status === 'working…' || v.status === 'interrupting…' || !!v.bg.retry);
 
 // Round up-arrow send button inset at the input's bottom-right. The visible
 // circle is 32dp; the pressable is TOUCH x TOUCH.
