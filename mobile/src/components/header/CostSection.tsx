@@ -25,10 +25,10 @@ export function CostSection({ spend }: { spend: Spend | null }) {
           </Text>
           {s.rows.map((r) => (
             <View key={r.label} style={{ flexDirection: 'row', gap: space.sm, alignItems: 'baseline' }}>
-              <Text style={{ flex: 1, color: c.muted, fontSize: font.sm }} numberOfLines={1}>
+              <Text style={{ flexShrink: 0, maxWidth: '50%', color: c.muted, fontSize: font.sm }} numberOfLines={1}>
                 {r.label}
               </Text>
-              <View style={{ alignItems: 'flex-end', flexShrink: 1 }}>
+              <View style={{ flex: 1, alignItems: 'flex-end' }}>
                 {r.value ? (
                   <Text
                     style={{
