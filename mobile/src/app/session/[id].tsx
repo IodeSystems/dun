@@ -1,5 +1,5 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -92,7 +92,11 @@ export default function Session() {
   // The header's panels, and whether it has stepped aside (onScroll).
   const [sheet, setSheet] = useState<'ctx' | 'plan' | 'tasks' | null>(null);
   const hide = useRef(headerStart);
-  const [away, setAway] = useState(false);
+  // Set by AwayHeader: a hide or show re-renders the header, not this screen.
+  const setAway = useRef<(away: boolean) => void>(() => undefined);
+  const onAway = useCallback((set: (away: boolean) => void) => {
+    setAway.current = set;
+  }, []);
   const [headerH, setHeaderH] = useState(0);
   const [picker, setPicker] = useState<string | null>(null); // the search, when open
   const [mcpForm, setMcpForm] = useState(false);
@@ -339,22 +343,26 @@ export default function Session() {
     const ev = e.nativeEvent;
     const h = ev.contentSize?.height ?? -1;
     const max = h < 0 ? Infinity : h - (ev.layoutMeasurement?.height ?? 0);
-    hide.current = headerScroll(hide.current, fromNewest(ev.contentOffset.y, Platform.OS === 'web', max), h);
-    setAway(hide.current.hidden);
+    hide.current = headerScroll(
+      hide.current,
+      fromNewest(ev.contentOffset.y, Platform.OS === 'web', max),
+      h,
+      Date.now(),
+    );
+    setAway.current(hide.current.hidden);
   }
 
   return (
     <Screen>
       {/* The stack's header gives way to the session's own (components/header), which can slide away. */}
       <Stack.Screen options={{ title: id, headerShown: false }} />
-      <SessionHeader
+      <AwayHeader
+        onAway={onAway}
         view={view}
         stats={stats.id === id ? stats.s : noStats}
-        hidden={away && !view.ask}
         panel={panel}
         onShow={() => {
-          hide.current = headerShow(hide.current);
-          setAway(false);
+          hide.current = headerShow(hide.current, Date.now());
         }}
         onHeight={setHeaderH}
         act={{
@@ -653,6 +661,35 @@ function SendButton({ disabled, onPress }: { disabled: boolean; onPress: () => v
         </Text>
       </View>
     </Pressable>
+  );
+}
+
+/**
+ * The session header with its own hidden state. The screen sets it on scroll
+ * through the setter it hands to onAway; keeping it here means a hide or show re-renders the header
+ * only, never the transcript (a re-render of every row on each toggle was a
+ * long task mid-scroll: 50-70 ms at 6x CPU throttle). The ask keeps it shown.
+ */
+function AwayHeader({
+  onAway,
+  onShow,
+  ...props
+}: Omit<ComponentProps<typeof SessionHeader>, 'hidden'> & {
+  onAway: (set: (away: boolean) => void) => void;
+}) {
+  const [away, setHidden] = useState(false);
+  useEffect(() => {
+    onAway(setHidden);
+  }, [onAway]);
+  return (
+    <SessionHeader
+      {...props}
+      hidden={away && !props.view.ask}
+      onShow={() => {
+        onShow();
+        setHidden(false);
+      }}
+    />
   );
 }
 
