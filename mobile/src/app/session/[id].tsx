@@ -25,9 +25,9 @@ import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
-import { apply, empty, interrupting, isKillAll, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
+import { apply, empty, isKillAll, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
-import { shouldReload, upgradeLines, waitsOnTurnHere } from '@/lib/upgrade';
+import { shouldReload, upgradeLines } from '@/lib/upgrade';
 import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
@@ -57,6 +57,27 @@ export default function Session() {
   const recall = useRef(-1); // index into sent while ↑/↓ browse it
   const uiLoaded = useRef(false);
   const listRef = useRef<FlatList<Item>>(null);
+  // The list follows new content only while the reader is at the bottom; it
+  // must not yank them back from history a streaming token at a time.
+  const stick = useRef(true);
+
+  // The list is inverted and its data is reversed (newest at index 0), so
+  // offset 0 = the newest row at the bottom. A prepended row appears at the
+  // bottom without a scroll jump; the list manages its own position.
+  const rows: Item[] = view.streaming
+    ? [...view.items, { key: 'streaming', kind: 'assistant' as const, text: view.streaming }].reverse()
+    : [...view.items].reverse();
+  const jumpToNewest = useCallback(() => {
+    if (rows.length) listRef.current?.scrollToIndex({ index: 0, viewPosition: 0, animated: false });
+  }, [rows.length]);
+
+  // The list starts (and a session switch returns) at the newest row. A beat
+  // after render: the rows are in then.
+  useEffect(() => {
+    stick.current = true;
+    const t = setTimeout(jumpToNewest, 0);
+    return () => clearTimeout(t);
+  }, [id, jumpToNewest]);
 
   // The dund build this page loaded against. After dund restarts into
   // another build (a snapshot follows the reconnect), the web page reloads
@@ -170,12 +191,6 @@ export default function Session() {
     }
   }
 
-  // Stop: the engine's /interrupt. The turn ends with done{interrupted}.
-  function stop() {
-    setView(interrupting);
-    void runSlash('interrupt');
-  }
-
   // Restart now: dund interrupts what the upgrade waits for; those sessions
   // resume after the restart.
   async function upgradeNow() {
@@ -264,9 +279,6 @@ export default function Session() {
     }
   }
 
-  const rows: Item[] = view.streaming
-    ? [...view.items, { key: 'streaming', kind: 'assistant', text: view.streaming }]
-    : view.items;
   return (
     <Screen>
       <Stack.Screen
@@ -291,7 +303,24 @@ export default function Session() {
           ref={listRef}
           data={rows}
           keyExtractor={(i) => i.key}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          inverted
+          initialScrollIndex={0}
+          onScroll={(e) => {
+            // Offset 0 = the newest row (index 0, at the bottom of the
+            // inverted list). The reader is following while near there.
+            stick.current = ((e.nativeEvent as { contentOffset: { y: number } }).contentOffset.y ?? 0) < 80;
+          }}
+          onMomentumScrollEnd={(e) => {
+            stick.current = ((e.nativeEvent as { contentOffset: { y: number } }).contentOffset.y ?? 0) < 80;
+          }}
+          onScrollToIndexFailed={() => {
+            // The newest row is not rendered yet (the reader is in history):
+            // wait for it to come into view, then go to it.
+            setTimeout(() => jumpToNewest(), 50);
+          }}
+          onContentSizeChange={() => {
+            if (stick.current) jumpToNewest();
+          }}
           contentContainerStyle={{
             padding: space.lg,
             gap: space.sm,
@@ -303,15 +332,21 @@ export default function Session() {
         />
         <View
           style={{
-            padding: space.md,
+            paddingHorizontal: space.lg,
             paddingBottom: space.md + insets.bottom,
-            borderTopWidth: 1,
-            borderColor: c.border,
             gap: space.sm,
           }}
         >
           {view.ask ? (
-            <View style={{ gap: space.sm, padding: space.md, borderWidth: 1, borderColor: c.accent, borderRadius: 8 }}>
+            <View
+              style={{
+                gap: space.sm,
+                paddingVertical: space.xs,
+                borderLeftWidth: 3,
+                borderColor: c.accent,
+                paddingLeft: space.md,
+              }}
+            >
               <Text style={{ color: c.text, fontSize: font.md }}>❓ {view.ask.question}</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
                 {view.ask.options.map((o) => (
@@ -389,9 +424,6 @@ export default function Session() {
               ))}
               {view.upgrade.state === 'pending' ? (
                 <View style={{ flexDirection: 'row', gap: space.sm }}>
-                  {waitsOnTurnHere(view.upgrade, id) && view.busy ? (
-                    <Button title="Stop" onPress={stop} disabled={view.status === 'interrupting…'} />
-                  ) : null}
                   <Button title="Restart now" onPress={() => void upgradeNow()} />
                 </View>
               ) : null}
@@ -401,7 +433,14 @@ export default function Session() {
           {sendErr ? <ErrorText>{sendErr}</ErrorText> : null}
           <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-end' }}>
             <Field
-              style={{ flex: 1, paddingVertical: space.sm }}
+              style={{
+                flex: 1,
+                paddingVertical: space.sm,
+                paddingHorizontal: 0,
+                borderWidth: 0,
+                backgroundColor: 'transparent',
+                fontSize: font.composer,
+              }}
               value={text}
               onChangeText={setText}
               multiline
@@ -438,18 +477,7 @@ export default function Session() {
                 }
               }}
             />
-            {view.busy ? <Button title="Stop" onPress={stop} disabled={view.status === 'interrupting…'} /> : null}
-            <Button
-              title="Send"
-              primary
-              disabled={!text.trim()}
-              onPress={() => {
-                if (view.ask) {
-                  void answer(text.trim());
-                  setText('');
-                } else void send();
-              }}
-            />
+            <Button title="↵" primary disabled={!text.trim()} onPress={() => setText((t) => t + '\n')} />
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -486,23 +514,28 @@ function Row({ item }: { item: Item }) {
           </Text>
         </View>
       );
-    case 'tool':
+    case 'tool': {
+      // One row for the call and its result: the tool, its main argument on
+      // the line, the full exchange under it when opened.
       return (
         <Pressable
           onPress={() => setOpen(!open)}
-          style={{ backgroundColor: c.sunken, borderRadius: 8, padding: space.sm }}
+          style={{ backgroundColor: c.sunken, borderRadius: 8, padding: space.sm, gap: 2 }}
         >
-          <Text style={{ color: c.muted, fontFamily: mono, fontSize: font.sm }}>
-            {open ? '▾ ' : '▸ '}
+          <Text style={{ color: c.muted, fontFamily: mono, fontSize: font.sm }} numberOfLines={1}>
+            {item.done ? '✓ ' : '· '}
             {item.title}
+            {item.arg ? '  ' + item.arg : ''}
           </Text>
           {open ? (
-            <Text selectable style={{ color: c.text, fontFamily: mono, fontSize: font.sm, marginTop: space.xs }}>
-              {item.body}
+            <Text selectable style={{ color: c.text, fontFamily: mono, fontSize: font.sm }}>
+              {item.request}
+              {item.result ? '\n---\n' + item.result : ''}
             </Text>
           ) : null}
         </Pressable>
       );
+    }
     case 'note':
       return (
         <Text style={{ color: item.error ? c.danger : c.muted, fontSize: font.sm, paddingHorizontal: space.md }}>

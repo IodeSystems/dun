@@ -30,13 +30,14 @@ test('a turn: echo, streamed tokens, the settled message, done', () => {
   expect(w.busy).toBe(false);
 });
 
-test('a tool call settles the text streamed before it', () => {
+test('a tool call settles the text streamed before it; the result lands in its row', () => {
   const v = run([
     { type: 'token', text: 'let me look' },
     { type: 'tool_call', tool: 'exec', args: { cmd: 'ls' } },
     { type: 'tool_result', tool: 'exec', result: 'a b' },
   ]);
-  expect(v.items.map((i) => i.kind)).toEqual(['assistant', 'tool', 'tool']);
+  expect(v.items.map((i) => i.kind)).toEqual(['assistant', 'tool']);
+  expect(v.items[1]).toMatchObject({ kind: 'tool', title: 'exec', done: true, result: 'a b' });
   expect(v.streaming).toBeNull();
 });
 

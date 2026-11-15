@@ -10,7 +10,7 @@ import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 export type Item =
   | { key: string; kind: 'user'; text: string; queued?: boolean }
   | { key: string; kind: 'assistant'; text: string }
-  | { key: string; kind: 'tool'; title: string; body: string }
+  | { key: string; kind: 'tool'; title: string; arg: string; request: string; result: string | null; done: boolean }
   | { key: string; kind: 'note'; text: string; error?: boolean }
   | { key: string; kind: 'question'; text: string; options: string[]; recommended?: string };
 
@@ -133,10 +133,18 @@ function fromHistory(v: View, it: Ev): View {
       return push(v, { kind: 'assistant', text: str(it.content) });
     case 'tool_call':
       if (it.tool === 'ask_user') return pushQuestion(v, it.args);
-      return push(v, { kind: 'tool', title: '⚙ ' + str(it.tool), body: JSON.stringify(it.args ?? {}, null, 2) });
+      return push(v, {
+        kind: 'tool',
+        title: str(it.tool),
+        arg: toolArg(it.args),
+        request: JSON.stringify(it.args ?? {}, null, 2),
+        result: null,
+        done: false,
+      });
     case 'tool_result':
       if (it.tool === 'ask_user') return push(v, { kind: 'user', text: str(it.content) });
-      return push(v, { kind: 'tool', title: '↳ ' + str(it.tool), body: str(it.content) });
+      // The call's row: the result lands in it, not in a second one.
+      return finishTool(v, str(it.content));
     case 'notification':
       return push(v, { kind: 'note', text: '🔔 ' + str(it.content) });
   }
@@ -155,6 +163,34 @@ export function replaceWith(items: unknown[], keep?: View): View {
   };
   for (const it of items) if (it && typeof it === 'object') v = fromHistory(v, it as Ev);
   return v;
+}
+
+/** The index of the last tool item, so its result can land in it. */
+function lastTool(v: View): number {
+  for (let i = v.items.length - 1; i >= 0; i--) {
+    const it = v.items[i];
+    if (it?.kind === 'tool') return i;
+  }
+  return -1;
+}
+
+/** One line of a tool call's arguments: the tool's main input, not the whole JSON. */
+export function toolArg(args: unknown): string {
+  const a = (args ?? {}) as Record<string, unknown>;
+  const s = (k: string) => (typeof a[k] === 'string' ? a[k] : '');
+  const line =
+    s('command') ||
+    s('node') ||
+    s('path') ||
+    s('selector') ||
+    s('query') ||
+    s('code') ||
+    s('text') ||
+    s('question') ||
+    s('name') ||
+    s('title') ||
+    s('url');
+  return line.length > 120 ? line.slice(0, 120) + '…' : line;
 }
 
 export function apply(v: View, ev: Ev): View {
@@ -189,11 +225,18 @@ export function apply(v: View, ev: Ev): View {
       // ask_user's call and result arrive once it is answered: they are what
       // shows the question and the answer, live as from history.
       if (ev.tool === 'ask_user') return pushQuestion(w, ev.args);
-      return push(w, { kind: 'tool', title: '⚙ ' + str(ev.tool), body: JSON.stringify(ev.args ?? {}, null, 2) });
+      return push(w, {
+        kind: 'tool',
+        title: str(ev.tool),
+        arg: toolArg(ev.args),
+        request: JSON.stringify(ev.args ?? {}, null, 2),
+        result: null,
+        done: false,
+      });
     }
     case 'tool_result':
       if (ev.tool === 'ask_user') return push(v, { kind: 'user', text: str(ev.result) });
-      return push(v, { kind: 'tool', title: '↳ ' + str(ev.tool), body: str(ev.result) });
+      return finishTool(v, str(ev.result));
     case 'done':
       if (ev.reason === 'interrupted') return interrupted(v, str(ev.detail));
       // Messages queued into the turn have been read by it.
@@ -271,6 +314,16 @@ export function apply(v: View, ev: Ev): View {
       return { ...v, status: `${Number(ev.count ?? 0)} message(s) queued for the running turn` };
   }
   return v;
+}
+
+/** A tool's result lands in its call's row. */
+function finishTool(v: View, result: string): View {
+  const i = lastTool(v);
+  if (i < 0) return push(v, { kind: 'tool', title: '?', arg: '', request: '', result, done: true });
+  const items = [...v.items];
+  const t = items[i] as Extract<Item, { kind: 'tool' }>;
+  items[i] = { ...t, result, done: true };
+  return { ...v, items };
 }
 
 /** The line an interrupted turn ends with (the TUI's too). */

@@ -4,7 +4,7 @@
 //
 // Pages: network first (a new build is picked up at once), the cached shell
 // when offline. Hashed bundles (/_expo/…) and icons: cache first.
-const CACHE = 'dun-v1';
+const CACHE = 'dun-v2';
 // Type-checked through public/tsconfig.json (webworker lib).
 const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
 const SHELL = ['/', '/manifest.json', '/logo192.png', '/logo512.png', '/favicon.ico'];
@@ -42,12 +42,21 @@ sw.addEventListener('fetch', (e) => {
     );
     return;
   }
+  if (url.pathname === '/version.json') {
+    // The deploy stamp: never cached, so a polling client sees a new build.
+    e.respondWith(fetch(e.request));
+    return;
+  }
   if (url.pathname.startsWith('/_expo/') || SHELL.includes(url.pathname)) {
     e.respondWith(
       caches.match(e.request).then(
         (hit) =>
           hit ||
           fetch(e.request).then((r) => {
+            // A missing bundle would come back as index.html (200 text/html)
+            // from the SPA fallback: never cache that as a bundle, or a
+            // broken deploy poisons the cache until the version bumps.
+            if (!r.ok || r.headers.get('content-type')?.includes('text/html')) return r;
             const copy = r.clone();
             e.waitUntil(caches.open(CACHE).then((c) => c.put(e.request, copy)));
             return r;

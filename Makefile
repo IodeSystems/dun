@@ -72,6 +72,10 @@ schema: ## regenerate mobile/schema.graphql from dund's operations
 web: ## build the client (mobile/, react-native-web) and install it for dund's --web-root
 	cd mobile && pnpm install --frozen-lockfile && pnpm export:web
 	@rm -rf $(WEB_ROOT).new && mkdir -p $(dir $(WEB_ROOT)) && cp -r mobile/dist $(WEB_ROOT).new
+	printf '{"v":"%s"}\n' "$$(date -u +%Y%m%dT%H%M%SZ)" > $(WEB_ROOT).new/version.json
+	@for b in $$(grep -oE '/_expo/[A-Za-z0-9_/.-]+\.(js|css)' $(WEB_ROOT).new/index.html | sort -u); do \
+	  [ -f "$(WEB_ROOT).new$$b" ] || { echo "make web: $$b is named by index.html but missing from the export; the live root is kept"; exit 1; }; \
+	done
 	@if [ -d $(WEB_ROOT) ]; then mv $(WEB_ROOT) $(WEB_ROOT).old; fi
 	@mv $(WEB_ROOT).new $(WEB_ROOT) && rm -rf $(WEB_ROOT).old
 	@echo "installed the web client → $(WEB_ROOT)"
@@ -100,6 +104,10 @@ MINISIGN_KEY    ?=
 webapp: ## the web app (mobile/, exported for the web) → internal/dundapi/webdist, which a release build embeds (pnpm, node)
 	cd mobile && pnpm install --frozen-lockfile && pnpm run gen && pnpm run export:web
 	rm -rf internal/dundapi/webdist && cp -r mobile/dist internal/dundapi/webdist
+	printf '{"v":"%s"}\n' "$(VERSION)" > internal/dundapi/webdist/version.json
+	@for b in $$(grep -oE '/_expo/[A-Za-z0-9_/.-]+\.(js|css)' internal/dundapi/webdist/index.html | sort -u); do \
+	  [ -f "internal/dundapi/webdist$$b" ] || { echo "make webapp: $$b is named by index.html but missing from the export"; exit 1; }; \
+	done
 
 release: webapp ## release builds + signed dun-manifest.json → dist/<version>/ (RELEASE_VERSION=vX.Y.Z, MINISIGN_KEY=…)
 	@case "$(RELEASE_VERSION)" in v[0-9]*.[0-9]*.[0-9]*-*|*-dirty|*-g*) echo "make release: $(RELEASE_VERSION) is not vX.Y.Z (tag a clean commit, or RELEASE_VERSION=vX.Y.Z)"; exit 1;; v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "make release: $(RELEASE_VERSION) is not vX.Y.Z (tag a clean commit, or RELEASE_VERSION=vX.Y.Z)"; exit 1;; esac
