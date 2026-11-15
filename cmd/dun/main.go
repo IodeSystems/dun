@@ -786,6 +786,7 @@ func main() {
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}
+		em.turn = newTurnTracker(em, func() *dun.Harness { h, _ := started.Load().(*dun.Harness); return h })
 		in = newInputStream()
 		// Under dund, the model can see and message the other live sessions
 		// (peers.go); standalone, the tools are absent.

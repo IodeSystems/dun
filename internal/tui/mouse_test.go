@@ -61,7 +61,7 @@ func mouseConvoAt(t *testing.T) (m tuiModel, wrapped, tog, first int) {
 	m = newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 16})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	first = len(m.convo)
 	for i := 0; i < 6; i++ {
 		m.convo = append(m.convo, convoEntry{collapsed: fmt.Sprintf("message %d", i)})

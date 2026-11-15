@@ -43,6 +43,7 @@ type convoEntry struct {
 	provisionalText string // original text, used to restore normal style on delivery
 	msgID           string // the user event's id: what delivered and withdrawn name
 	callID          string // a carried message's call (msg): its tool_result names it
+	lost            bool   // a queued message its engine never delivered (turnstate.go)
 	userText        string // raw user message text (non-empty for user messages only)
 	// stats is the cost of the turn this message started (turnstats.go):
 	// shown under it when it is opened.

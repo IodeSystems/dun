@@ -21,7 +21,7 @@ func TestMCPTable_ShowsBuiltinGroups(t *testing.T) {
 	m.mcpServersWant = true
 	ev := evMsg{"type": "server", "id": "*", "servers": []any{map[string]any{"id": "sh", "running": true, "global": "on"}},
 		"builtins": []any{map[string]any{"id": "dun:files", "running": true, "auto": true, "global": "on", "tools": float64(3), "proto": "dun"}}}
-	m = m.handleEvent(ev)
+	m = m.feed(ev)
 	plain := ansi.Strip(m.drawView())
 	if !strings.Contains(plain, "dun:files") || !strings.Contains(plain, "sh") {
 		t.Fatalf("table:\n%s", plain)

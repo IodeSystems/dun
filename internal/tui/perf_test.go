@@ -52,7 +52,7 @@ func BenchmarkStreamingTurn(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				m.cur = ""
 				for t := 0; t < tokens; t++ {
-					m = m.handleEvent(evMsg{"type": "token", "text": "word "})
+					m = m.feed(evMsg{"type": "token", "text": "word "})
 				}
 				for f := 0; f < frames; f++ {
 					m.refresh()
@@ -92,7 +92,7 @@ func BenchmarkTokenHandling(b *testing.B) {
 	m := buildModel(200, 8)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m = m.handleEvent(evMsg{"type": "token", "text": "word "})
+		m = m.feed(evMsg{"type": "token", "text": "word "})
 	}
 }
 

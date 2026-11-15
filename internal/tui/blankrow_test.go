@@ -26,6 +26,7 @@ func TestTUI_WhitespaceReplyTakesNoRow(t *testing.T) {
 	long := "L100- " + strings.Repeat("abcdefghi ", 9) + "end"
 	v.send(long)
 	v.event(map[string]any{"type": "turn"})
+	v.event(map[string]any{"type": "turn_state", "phase": "working", "queued": []any{}})
 	v.event(map[string]any{"type": "token", "text": "\n\n"})
 	nm, _ := v.m.Update(renderTickMsg{})
 	v.m = nm.(tuiModel)

@@ -95,6 +95,7 @@ test('activity rows read as the TUI rows', () => {
 test('the header status: working with the tool and the clock, waiting, retrying, ready', () => {
   let v = run([
     { type: 'turn', kind: 'user', ts: T0 },
+    { type: 'turn_state', phase: 'working', since: t0, queued: [] },
     { type: 'tool_call', tool: 'exec', args: { command: 'go test ./internal/tui/... -run TestPlanViewMotion' } },
   ]);
   // The call as the TUI says it (callText), cut at 40.
@@ -104,17 +105,30 @@ test('the header status: working with the tool and the clock, waiting, retrying,
   });
   v = run([{ type: 'tool_result', tool: 'exec', result: 'a' }], v);
   expect(headerStatus(v, t0 + 65_000).text).toBe('working… · 1m5s');
-  v = run([{ type: 'retry', kind: 'wait', text: 'provider 503 — retrying in 4s' }], v);
+  v = run(
+    [
+      { type: 'retry', kind: 'wait', text: 'provider 503 — retrying in 4s' },
+      {
+        type: 'turn_state',
+        phase: 'retrying',
+        since: t0,
+        queued: [],
+        retry: { kind: 'wait', text: 'provider 503 — retrying in 4s' },
+      },
+    ],
+    v,
+  );
   expect(headerStatus(v, t0)).toEqual({ state: 'retry', text: '⏳ provider 503 — retrying in 4s' });
   v = run(
     [
       { type: 'retry', kind: 'recovered', text: 'back' },
       { type: 'ask', question: 'which?', options: ['a', 'b'] },
+      { type: 'turn_state', phase: 'waiting_answer', since: t0, queued: [], ask: { question: 'which?' } },
     ],
     v,
   );
   expect(headerStatus(v, t0).state).toBe('ask');
-  v = run([{ type: 'done' }], v);
+  v = run([{ type: 'done' }, { type: 'turn_state', phase: 'idle', queued: [] }], v);
   expect(headerStatus(v, t0)).toEqual({ state: 'idle', text: 'ready' });
   expect(elapsed(0, t0)).toBe('');
 });
@@ -125,16 +139,19 @@ test('done clears the question the turn asked, as the TUI does', () => {
 });
 
 test('a continue turn (background work started it) is busy', () => {
-  const v = run([{ type: 'turn', kind: 'continue', ts: T0 }]);
+  const v = run([
+    { type: 'turn', kind: 'continue', ts: T0 },
+    { type: 'turn_state', phase: 'working', since: t0, queued: [] },
+  ]);
   expect(v.busy).toBe(true);
   expect(v.bg.busySince).toBe(t0);
 });
 
-test('a snapshot brings back the plan, the work and a running turn, its clock from the turn event', () => {
+test('a snapshot brings back the plan, the work and a running turn, its clock from turn_state', () => {
   const v = applySnapshot({
     type: 'snapshot',
     items: [{ kind: 'user', content: 'build the header' }],
-    state: [planEv, agentsEv, jobsEv, { type: 'turn', kind: 'user', ts: T0 }],
+    state: [planEv, agentsEv, jobsEv, { type: 'turn_state', phase: 'working', since: t0, queued: [] }],
   });
   expect(v.busy).toBe(true);
   expect(v.bg.busySince).toBe(t0);

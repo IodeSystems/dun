@@ -1,8 +1,8 @@
 // Where the turn is — waiting on the person, retrying, working, or idle — and
 // the header's status line for it, in the TUI's words (internal/tui/tui_view.go,
-// the status switch). The one place the client derives it: from the turn,
-// tool, retry, ask and done events today (View.busy, View.ask, View.bg), and
-// from a single state event once dund sends one.
+// the status switch). Read from the session's turn_state event (View.turn;
+// dun cmd/dun/turnstate.go), not derived from other events. An event log with
+// no turn_state (from before it) reads as idle.
 
 import type { View } from './events';
 
@@ -19,10 +19,18 @@ export type TurnState = {
 };
 
 export function turnState(v: View): TurnState {
-  const base = { since: v.bg.busySince, tool: v.bg.activeTool, interrupting: false, retry: v.bg.retry };
-  if (v.ask) return { ...base, state: 'ask' };
-  if (v.bg.retry) return { ...base, state: 'retry' };
-  if (v.busy) return { ...base, state: 'working', interrupting: v.status === 'interrupting…' };
+  const t = v.turn;
+  const base = { since: t?.since ?? 0, tool: v.bg.activeTool, interrupting: false, retry: t?.retry ?? '' };
+  switch (t?.phase) {
+    case 'waiting_answer':
+      return { ...base, state: 'ask' };
+    case 'retrying':
+      return { ...base, state: 'retry' };
+    case 'working':
+      return { ...base, state: 'working' };
+    case 'interrupting':
+      return { ...base, state: 'working', interrupting: true };
+  }
   return { ...base, state: 'idle', since: 0, tool: '' };
 }
 

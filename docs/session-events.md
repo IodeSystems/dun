@@ -46,3 +46,30 @@ makes the right thing obvious"). Wire format and the full type list:
   newest pending call of the same tool.
 - Order inside a call: `tool_call`, then (while it runs) whatever else
   happens, then `tool_result`, then `delivered` for the messages it carried.
+
+## turn_state
+
+`turn_state {phase, since, queued:[{id,text}], ask?, mount?, retry?, discard?,
+tool?, call_id?}` is where the turn is, sent on every change and kept as
+state, so a snapshot carries the latest (also past the 256-event replay
+window). Clients read busy, the turn's clock, the open question, an
+interrupt under way, a provider wait and the queue from it; they do not
+derive them from `turn`, tokens, tool calls or `done`.
+
+- `phase`: `idle` · `working` · `waiting_answer` (`ask` or `mount` is open) ·
+  `interrupting` (an interrupt reached the turn; its `done` ends it) ·
+  `retrying` (`retry` is the provider wait). `giveup` goes to `idle`.
+- `discard`: a turn-scope retry redoes a round whose stream died; the text it
+  streamed is dropped (the TUI leaves a "regenerating" marker).
+- `since`: when the turn began, Unix ms; 0 when idle.
+- `queued`: every message waiting for the model, oldest first, with its
+  text. It outlives an interrupted or failed turn (the next turn takes it).
+- Owner: the engine (`cmd/dun/turnstate.go`), because only it knows the turn,
+  the interrupt, the question and the queue. It follows its own events as it
+  writes them (one rule, `proto.StepTurnState`), so no path can change the
+  turn without the state following. dund sends `idle` with an empty queue
+  when the engine stops or dies (nothing of a turn outlives it), and
+  `waiting_answer` for a question it restored after a restart.
+- A queued row whose id the state no longer lists, with no `delivered` or
+  `withdrawn` for it, while idle: lost with its engine; clients say so.
+- Old logs: an event log with no `turn_state` reads as idle.

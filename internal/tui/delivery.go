@@ -11,7 +11,7 @@ func (m *tuiModel) queuedRow(id string) int {
 	if id == "" {
 		return -1
 	}
-	return slices.IndexFunc(m.convo, func(e convoEntry) bool { return e.provisional && e.msgID == id })
+	return slices.IndexFunc(m.convo, func(e convoEntry) bool { return (e.provisional || e.lost) && e.msgID == id })
 }
 
 // settleDelivered makes each delivered message an ordinary user row, after

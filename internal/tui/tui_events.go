@@ -248,9 +248,6 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		if msg := strings.TrimSpace(str(ev["message"])); msg != "" {
 			m.append(replyLine(msg))
 		}
-		if str(ev["id"]) == "interrupt" { // there was no turn to interrupt
-			m.interrupting = false
-		}
 		// /close is terminal: the session it was editing no longer exists, so
 		// staying attached to it would be showing a conversation that cannot be
 		// resumed. Quit only once the engine has confirmed the work is done.
@@ -259,17 +256,9 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.proc.forget() // and the service lets the session go
 		}
 	case "reasoning":
-		m.busy = true
-		if m.busyStart.IsZero() {
-			m.busyStart = time.Now()
-		}
 		m.suggestions = nil
 		m.addThinking(str(ev["text"]))
 	case "token":
-		m.busy = true // a turn is active (incl. autonomous background-completion turns)
-		if m.busyStart.IsZero() {
-			m.busyStart = time.Now()
-		}
 		m.suggestions = nil
 		m.endRun() // the reply began: the run takes nothing more
 		if m.liveThinking() >= 0 {
@@ -298,10 +287,6 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.suggestSel = 0
 		m.refresh()
 	case "tool_call":
-		m.busy = true
-		if m.busyStart.IsZero() {
-			m.busyStart = time.Now()
-		}
 		m.suggestions = nil
 		m.endThinking()
 		m.flushCur()
@@ -533,13 +518,9 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// divider; the engine's delivered or withdrawn event, by id, ends it.
 		text := str(ev["content"])
 		if ev["queued"] == true {
-			m.convo = append(m.convo, convoEntry{
-				collapsed:       StDim.Render("› " + text + " (queued)"),
-				provisional:     true,
-				provisionalText: text,
-				userText:        text,
-				msgID:           str(ev["id"]),
-			})
+			if m.queuedRow(str(ev["id"])) < 0 { // a turn_state may have shown it first
+				m.convo = append(m.convo, queuedEntry(str(ev["id"]), text))
+			}
 		} else {
 			m.task = text
 			m.appendUser(text)
@@ -567,11 +548,9 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.input.CursorEnd()
 		m.refresh()
 	case "turn":
-		m.busy = true
-		if m.busyStart.IsZero() {
-			m.busyStart = time.Now()
-		}
 		m.suggestions = nil
+	case "turn_state":
+		return m.applyTurnState(ev)
 	case "answered":
 		// The open question is settled, whoever answered it.
 		// The client that answered has already closed it; on another, it is
@@ -610,9 +589,8 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.suggestMode = mode
 		}
 	case "queued":
-		// The message itself arrived as a `user` event (queued); this is the
-		// count of what the running turn has buffered.
-		m.queuedMsgs = int(evNum(ev["count"]))
+		// The message itself arrived as a `user` event (queued); the count of
+		// what is queued is turn_state's.
 		// Track OOB messages for /context.
 		m.ctxStats.oobMessages++
 		m.syncStats()
@@ -673,15 +651,12 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.append(stNote.Render("  " + d))
 			}
 		}
-		m.interrupting = false
 		if !cut {
 			m.settleUnnamedQueued() // an event log from before ids only
 		}
+		// Busy, the queue and the retry banner are turn_state's, which follows.
 		// Not re-pinned: a reader who scrolled up stays where they are (USER
 		// 2026-10-28: zero bounce); a pinned one already follows.
-		m.busy, m.queuedMsgs = false, 0
-		m.busyStart = time.Time{}
-		m.clearRetry()
 		// The agent is idle: separate this turn's output from whatever the
 		// human sends next with a blank row.
 		m.turnGap()
@@ -710,11 +685,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.attnErr = true // the window's "!" (tmux.go)
 		}
 		m.settleUnnamedQueued() // an event log from before ids only
-		// Not re-pinned: a reader who scrolled up stays where they are (USER
-		// 2026-10-28: zero bounce); a pinned one already follows.
-		m.busy, m.queuedMsgs = false, 0
-		m.busyStart = time.Time{}
-		m.clearRetry()
+		// Busy, the queue and the retry banner are turn_state's, which follows.
 		// Whether the SESSION survived is the engine's call, not something to
 		// infer from the error text. It says so, because promising "send a
 		// message to retry" to a session that cannot run another turn is worse
@@ -734,7 +705,6 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.cur = ""
 		m.activeTool = ""
 		m.sel = -1
-		m.busy = false
 		m.dropAsk()
 		m.dropHold()                         // nothing left on screen to hold in place
 		m.suggestions, m.suggestSel = nil, 0 // they were about the conversation just cleared
@@ -763,21 +733,18 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				m.starting, m.startingStart = true, time.Now()
 			}
 		case "restarting":
-			m.busy = false
 			m.dropAsk()
 			m.settleAsk()
-			m.busyStart = time.Time{}
 			m.restarts = int(evNum(ev["restarts"]))
 			m.skipHistory = true // it will replay what is already on screen
 			m.append(StErr.Render(str(ev["reason"]) + " — restarting it; the session is kept"))
 		case "gave_up":
-			m.busy, m.starting = false, false
+			m.starting = false
 			m.dropAsk()
 			m.settleAsk()
 			m.fatalErr = str(ev["reason"]) + " — gave up restarting it"
 			m.append(StErr.Render(m.fatalErr + "\n/reconnect to try again · your conversation is saved"))
 		case "stopped":
-			m.busy = false
 			m.dropAsk()
 			m.settleAsk()
 		}
@@ -833,8 +800,6 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 		}
 	case "giveup":
 		m.clearRetry()
-		m.busy = false
-		m.busyStart = time.Time{}
 		// Update the retry block in-place if it exists.
 		if len(m.convo) > 0 && m.convo[len(m.convo)-1].run == nil && m.convo[len(m.convo)-1].collapsed != "" && strings.HasPrefix(m.convo[len(m.convo)-1].collapsed, "⏳ ") {
 			e := &m.convo[len(m.convo)-1]
@@ -845,23 +810,11 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 			m.append(StErr.Render("✗ " + str(ev["text"])))
 		}
 	default:
-		// A turn-scope retry means the generation died mid-stream and will be
-		// redone, so drop the half-streamed text rather than letting the regenerated
-		// reply append to a broken sentence. Tool results already recorded are kept
-		// (the engine resumes from them), only the interrupted reply is discarded.
-		if str(ev["scope"]) == "turn" {
-			if replyShown(m.cur) {
-				// Its text goes (it is being regenerated), its rows do not: a
-				// marker holds the height it had.
-				m.convo = append(m.convo, convoEntry{collapsed: StDim.Render("↺ the reply was cut off — regenerating"),
-					maxH: m.curMaxH, maxKey: m.curMaxKey})
-			}
-			m.cur, m.curMaxH, m.curMaxKey = "", 0, 0
-		}
+		// Whether the half-streamed reply is dropped is turn_state's discard
+		// (turnstate.go), which follows this event.
 		// Whatever was thought before the failure stays, folded; the retried
 		// round thinks in a block of its own.
 		m.endThinking()
-		m.busy = true
 		m.retry = m.retryBanner(ev)
 		if ms := evNum(ev["delay_ms"]); ms > 0 {
 			m.retryDue = time.Now().Add(time.Duration(ms) * time.Millisecond)

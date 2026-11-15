@@ -93,8 +93,8 @@ func TestLines5_WarningMarkAndKeptQuestion(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(evMsg{"type": "settings", "model": "", "url": ""})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "settings", "model": "", "url": ""})
 	if !strings.Contains(stripANSI(convoText(m)), "\n⚠ not logged in") && !strings.HasPrefix(stripANSI(convoText(m)), "⚠ not logged in") {
 		t.Errorf("no mark:\n%s", stripANSI(convoText(m)))
 	}

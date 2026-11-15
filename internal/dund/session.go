@@ -299,10 +299,18 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) 
 	// turn" until the next engine finished one (found live: a loop waited on
 	// it, and busy() said so to dun_list too).
 	s.track(proto.NewEvent(&proto.EngineState{State: "stopped"}))
+	// Nothing of a turn outlives its engine, its queue included: the
+	// engine cannot say so, dund does (proto.TurnState).
+	s.log.Append(proto.NewEvent(idleTurn()))
 	// An engine gone mid-turn (stopped by /exit, crashed) never sends that
 	// turn's done: for a self-paced loop waiting on it, this is its end.
 	s.svc.loopTurnEnded(s)
 	close(done)
+}
+
+// idleTurn is the turn_state of a session with no engine turn.
+func idleTurn() *proto.TurnState {
+	return &proto.TurnState{Phase: proto.PhaseIdle, Queued: []proto.QueuedMsg{}}
 }
 
 func decodeEvent(line []byte) (proto.Event, bool) {

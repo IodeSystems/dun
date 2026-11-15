@@ -13,7 +13,8 @@ import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 
 export type Item =
   // id: the user event's (dun delivery.go); delivered and withdrawn name it.
-  | { key: string; kind: 'user'; text: string; queued?: boolean; id?: string }
+  // lost: queued, and its engine stopped before delivering it.
+  | { key: string; kind: 'user'; text: string; queued?: boolean; id?: string; lost?: boolean }
   | { key: string; kind: 'assistant'; text: string }
   // Consecutive tool calls, each merged with its result (toolcalls.ts).
   | Run
@@ -53,9 +54,12 @@ export type View = {
   items: Item[];
   /** The reply streaming in, before its message event settles it. */
   streaming: string | null;
+  /** turn_state's phase is not idle. */
   busy: boolean;
   status: string;
   ask: Ask | null;
+  /** The session's turn_state (the engine's; dund's when the engine stopped); null before the first. */
+  turn: Turn | null;
   /** The engine's slash commands, with their current state (commands event). */
   commands: Command[];
   skills: Skill[];
@@ -75,6 +79,16 @@ export type View = {
   n: number; // key counter
 };
 
+/** proto.TurnState as the client keeps it (docs/session-events.md). */
+export type Turn = {
+  phase: 'idle' | 'working' | 'waiting_answer' | 'interrupting' | 'retrying';
+  /** When the turn began (ms), 0 idle. */
+  since: number;
+  /** The provider wait's line, '' when none. */
+  retry: string;
+  queued: { id: string; text: string }[];
+};
+
 export type AgentView = { id: number; prompt: string; loaded: boolean; view: View };
 
 export const empty: View = {
@@ -83,6 +97,7 @@ export const empty: View = {
   busy: false,
   status: '',
   ask: null,
+  turn: null,
   commands: [],
   skills: [],
   models: null,
@@ -136,7 +151,7 @@ function pushUser(v: View, text: string, queued?: boolean, id?: string): View {
 
 const QUEUED_STATUS = ' message(s) queued for the running turn';
 
-const isQueued = (i: Item, id: string) => i.kind === 'user' && i.queued === true && i.id === id;
+const isQueued = (i: Item, id: string) => i.kind === 'user' && (i.queued === true || i.lost === true) && i.id === id;
 
 /**
  * delivered: the engine says these queued messages reached the model. Each
@@ -174,6 +189,75 @@ function settleUnnamedQueued(v: View): View {
 /** is_error: the engine omits false, so with a call_id an absent one is false; without, unknown (an old log). */
 const errorOf = (e: Ev): boolean | undefined =>
   typeof e.is_error === 'boolean' ? e.is_error : e.call_id ? false : undefined;
+
+/** An ask event, or turn_state's ask. */
+function parseAsk(a: Ev): Ask {
+  return {
+    question: str(a.question),
+    options: (a.options as string[]) ?? [],
+    recommended: str(a.recommended) || undefined,
+  };
+}
+
+const phases = ['idle', 'working', 'waiting_answer', 'interrupting', 'retrying'] as const;
+
+/**
+ * turn_state: where the session's turn is, from the engine (dun
+ * cmd/dun/turnstate.go). busy, the status line, the open question, a dropped
+ * half-streamed reply and the queued rows are read from it, never inferred
+ * from tokens, tool calls or done.
+ */
+function applyTurnState(v: View, ev: Ev): View {
+  const phase = phases.find((p) => p === ev.phase) ?? 'idle';
+  const r = (ev.retry ?? null) as Ev | null;
+  const queued = (Array.isArray(ev.queued) ? (ev.queued as Ev[]) : []).map((q) => ({
+    id: str(q.id),
+    text: str(q.text),
+  }));
+  const turn: Turn = { phase, since: Number(ev.since ?? 0), retry: r ? str(r.text) || 'retrying…' : '', queued };
+  const status =
+    phase === 'interrupting'
+      ? 'interrupting…'
+      : phase === 'retrying'
+        ? turn.retry
+        : queued.length
+          ? `${queued.length}${QUEUED_STATUS}`
+          : phase === 'idle'
+            ? ''
+            : 'working…';
+  let ask = v.ask;
+  if (phase === 'waiting_answer' && ev.ask && typeof ev.ask === 'object') ask = v.ask ?? parseAsk(ev.ask as Ev);
+  else if (phase !== 'interrupting') ask = null;
+  // A round whose stream died is streamed again: its text goes.
+  const streaming = phase === 'retrying' && ev.discard === true ? null : v.streaming;
+  const w: View = { ...v, busy: phase !== 'idle', status, ask, streaming, turn };
+  return reconcileQueued(w, queued);
+}
+
+/**
+ * The queued rows follow the state's queue: one it lists that is not shown
+ * (a client that arrived late) is added; with no turn and an empty queue, a
+ * row still queued was lost with its engine (delivered and withdrawn come
+ * before the state that drops a row).
+ */
+function reconcileQueued(v: View, queued: { id: string; text: string }[]): View {
+  let w = v;
+  for (const q of queued) {
+    const at = w.items.findIndex((i) => i.kind === 'user' && i.id === q.id);
+    const it = w.items[at];
+    if (at < 0) w = pushUser(w, q.text, true, q.id);
+    else if (it?.kind === 'user' && it.lost) {
+      const items = [...w.items];
+      items[at] = { ...it, queued: true, lost: false };
+      w = { ...w, items };
+    }
+  }
+  if (queued.length || w.busy || !w.items.some((i) => i.kind === 'user' && i.queued && i.id)) return w;
+  return {
+    ...w,
+    items: w.items.map((i) => (i.kind === 'user' && i.queued && i.id ? { ...i, queued: false, lost: true } : i)),
+  };
+}
 
 const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
@@ -251,6 +335,7 @@ export function apply(v: View, ev: Ev): View {
         busy: v.busy,
         status: v.status,
         ask: v.ask,
+        turn: v.turn,
         upgrade: v.upgrade,
         bg: v.bg,
         agentView: v.agentView,
@@ -263,10 +348,10 @@ export function apply(v: View, ev: Ev): View {
       return withdraw(v, ids(ev.ids));
     case 'upgrade':
       return { ...v, upgrade: parseUpgrade(ev) };
-    case 'turn':
-      return { ...v, busy: true, status: 'working…' };
+    case 'turn_state':
+      return applyTurnState(v, ev);
     case 'token':
-      return { ...v, busy: true, streaming: (v.streaming ?? '') + str(ev.text) };
+      return { ...v, streaming: (v.streaming ?? '') + str(ev.text) };
     case 'message': {
       const text = str(ev.content) || v.streaming || '';
       const w = { ...v, streaming: null };
@@ -276,7 +361,7 @@ export function apply(v: View, ev: Ev): View {
       // A tool call ends the text streamed before it.
       let w = v;
       if (v.streaming) w = push({ ...v, streaming: null }, { kind: 'assistant', text: v.streaming });
-      // ask_user's call and result arrive once it is answered: they are what
+      // ask_user's call (when it is asked) and result (the answer) are what
       // shows the question and the answer, live as from history.
       if (ev.tool === 'ask_user') return pushQuestion(w, ev.args);
       return (
@@ -298,21 +383,15 @@ export function apply(v: View, ev: Ev): View {
     }
     case 'done':
       if (ev.reason === 'interrupted') return interrupted(v, str(ev.detail));
-      return { ...settleUnnamedQueued(v), busy: false, status: '', streaming: null };
+      // Busy and the status are turn_state's, which follows.
+      return { ...settleUnnamedQueued(v), streaming: null };
     case 'error':
       return push(
-        { ...settleUnnamedQueued(v), busy: false, status: '', streaming: null },
+        { ...settleUnnamedQueued(v), streaming: null },
         { kind: 'note', text: 'error: ' + str(ev.error), error: true },
       );
     case 'ask':
-      return {
-        ...v,
-        ask: {
-          question: str(ev.question),
-          options: (ev.options as string[]) ?? [],
-          recommended: str(ev.recommended) || undefined,
-        },
-      };
+      return { ...v, ask: parseAsk(ev) };
     case 'answered':
       // The question and the answer are shown from ask_user's call and result.
       return { ...v, ask: null };
@@ -348,9 +427,7 @@ export function apply(v: View, ev: Ev): View {
         skills: ((ev.skills as Skill[]) ?? []).map((k) => ({ name: k.name, description: k.description })),
       };
     case 'control': {
-      let w = ev.id === 'close' && str(ev.message).startsWith('closed') ? { ...v, closed: true } : v;
-      // No turn to interrupt: drop the "interrupting…".
-      if (ev.id === 'interrupt' && w.status === 'interrupting…') w = { ...w, status: '' };
+      const w = ev.id === 'close' && str(ev.message).startsWith('closed') ? { ...v, closed: true } : v;
       return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;
     }
     case 'server':
@@ -367,21 +444,15 @@ export function apply(v: View, ev: Ev): View {
       };
     case 'engine':
       if (ev.state === 'started') return v;
+      // Busy and the question are turn_state's: dund sends idle for a stopped engine.
       return push(
-        { ...v, busy: false, ask: ev.state === 'restarting' ? null : v.ask },
+        { ...v },
         {
           kind: 'note',
           text: `engine ${str(ev.state)}${ev.reason ? ': ' + str(ev.reason) : ''}`,
           error: ev.state === 'gave_up',
         },
       );
-    case 'retry':
-      return { ...v, status: str(ev.text) || 'retrying…' };
-    case 'queued': {
-      const n = Number(ev.count ?? 0);
-      if (n > 0) return { ...v, status: `${n}${QUEUED_STATUS}` };
-      return v.status.endsWith(QUEUED_STATUS) ? { ...v, status: '' } : v;
-    }
   }
   return v;
 }
@@ -389,7 +460,7 @@ export function apply(v: View, ev: Ev): View {
 /** A reasoning delta: it opens the round's thought if none is live, and grows it. */
 function addThinking(v: View, delta: string, at: number): View {
   const i = liveThought(v.items);
-  const w = { ...v, busy: true };
+  const w = v;
   if (i < 0) return pushThought(w, { text: delta, start: at, end: 0, live: true });
   const items = [...v.items];
   const it = items[i]!;
@@ -414,11 +485,6 @@ function pushThought(v: View, t: Thought): View {
 /** The line an interrupted turn ends with (the TUI's too). */
 export const interruptedNote = '⏹ interrupted — your next message continues from here';
 
-/** What the screen shows from pressing Stop until the turn ends. */
-export function interrupting(v: View): View {
-  return v.busy ? { ...v, status: 'interrupting…' } : v;
-}
-
 /**
  * A turn the user stopped: the reply streamed so far stays (the engine keeps
  * it too), and a note ends the turn. Queued messages stay marked: they were
@@ -426,7 +492,7 @@ export function interrupting(v: View): View {
  * the cut turn started that are still running, and how to stop them.
  */
 function interrupted(v: View, detail: string): View {
-  let w: View = { ...v, busy: false, status: '', streaming: null };
+  let w: View = { ...v, streaming: null };
   if (v.streaming?.trim()) w = push(w, { kind: 'assistant', text: v.streaming });
   w = push(w, { kind: 'note', text: interruptedNote });
   return detail ? push(w, { kind: 'note', text: detail }) : w;

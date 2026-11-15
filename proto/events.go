@@ -46,6 +46,7 @@ func init() {
 	event[UserEcho]("user")
 	event[Delivered]("delivered")
 	event[Withdrawn]("withdrawn")
+	event[TurnState]("turn_state")
 	event[ImageRefused]("image_refused")
 	event[Turn]("turn")
 	event[Answered]("answered")
@@ -720,6 +721,46 @@ type UserEcho struct {
 type Delivered struct {
 	IDs    []string `json:"ids"`
 	CallID string   `json:"call_id,omitempty"`
+}
+
+// TurnState is where the session's turn is, sent on every change and kept
+// as state (a snapshot carries the latest): a client reads busy, the open
+// question, an interrupt under way, a provider wait and the queue from it,
+// and infers none of them.
+//
+// Phase: idle (no turn), working, waiting_answer (Ask or Mount is open),
+// interrupting (an interrupt reached the turn; its done ends it), retrying
+// (Retry is the provider wait; Discard: the round's streamed text is thrown
+// away and streams again). Since is when the turn began (Unix ms), 0 idle.
+// Tool and CallID are the call running now. Queued is every message waiting
+// for the model, oldest first, with its text, so a client that arrives late
+// shows them. The engine sends it; dund sends idle when the engine stops or
+// dies, and waiting_answer for a question it restored after a restart.
+type TurnState struct {
+	Phase   string      `json:"phase"`
+	Since   int64       `json:"since,omitempty"`
+	Queued  []QueuedMsg `json:"queued"`
+	Ask     *Ask        `json:"ask,omitempty"`
+	Mount   *Mount      `json:"mount,omitempty"`
+	Retry   *Retry      `json:"retry,omitempty"`
+	Discard bool        `json:"discard,omitempty"`
+	Tool    string      `json:"tool,omitempty"`
+	CallID  string      `json:"call_id,omitempty"`
+}
+
+// The phases of a TurnState.
+const (
+	PhaseIdle          = "idle"
+	PhaseWorking       = "working"
+	PhaseWaitingAnswer = "waiting_answer"
+	PhaseInterrupting  = "interrupting"
+	PhaseRetrying      = "retrying"
+)
+
+// QueuedMsg is a message waiting for the running turn.
+type QueuedMsg struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // Withdrawn: queued messages taken back before the model read them (the

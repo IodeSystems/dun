@@ -1357,7 +1357,6 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 		m.refresh()
 		return m
 	}
-	m.busy = true
 	m.scrollPinned = true // user just sent a message — show it
 	m.refresh()
 	return m

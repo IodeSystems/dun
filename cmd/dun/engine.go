@@ -32,6 +32,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	interruptCmd := func(reason string) {
 		if !h.Interrupt(reason) {
 			em.emit(&proto.ControlEvent{ID: "interrupt", Message: "nothing to interrupt: no turn is running"})
+		} else if em.turn != nil {
+			em.turn.interrupting()
 		}
 	}
 	in.setInterrupt(interruptCmd)

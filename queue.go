@@ -375,6 +375,20 @@ func (h *Harness) Unqueue() []QueuedMsg {
 	return out
 }
 
+// QueuedUser is the person's messages waiting for the model, oldest first:
+// turn_state's queue.
+func (h *Harness) QueuedUser() []QueuedMsg {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	var out []QueuedMsg
+	for _, q := range h.queue {
+		if q.kind == queuedUser {
+			out = append(out, QueuedMsg{ID: q.id, Text: q.text})
+		}
+	}
+	return out
+}
+
 // Queued reports how many buffered messages are waiting to reach the model, so a
 // UI can say "1 queued" rather than leaving the user wondering whether what they
 // typed went anywhere.

@@ -24,17 +24,17 @@ func startFresh(t *testing.T, sent *bytes.Buffer, resumed int, history []any) tu
 	m := newTUIModel(&dunProc{stdin: bufCloser{sent}}, filepath.Join(home, "greet"))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "session", "id": "s1", "resumed": float64(resumed)})
+	m = m.feed(evMsg{"type": "session", "id": "s1", "resumed": float64(resumed)})
 	if history != nil {
-		m = m.handleEvent(evMsg{"type": "history", "items": history})
+		m = m.feed(evMsg{"type": "history", "items": history})
 	}
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval", "read"},
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval", "read"},
 		"servers": []any{
 			map[string]any{"id": "shell", "running": true, "tools": float64(2)},
 			map[string]any{"id": "raglit", "slash": "raglit"},
 			map[string]any{"id": "poly-lsp", "slash": "poly-lsp"},
 		}})
-	return m.handleEvent(evMsg{"type": "settings", "model": "", "url": ""})
+	return m.feed(evMsg{"type": "settings", "model": "", "url": ""})
 }
 
 // A fresh session opens with the splash: what a person acts on — the folder
@@ -85,9 +85,9 @@ func TestSplash_KeptThroughAModelPick(t *testing.T) {
 	var sent bytes.Buffer
 	m := startFresh(t, &sent, 0, nil)
 	m.switchModel(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
-	m = m.handleEvent(evMsg{"type": "session", "id": "s1", "resumed": float64(0)})
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
+	m = m.feed(evMsg{"type": "session", "id": "s1", "resumed": float64(0)})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
 	if len(m.convo) == 0 || !m.convo[0].splash {
 		t.Fatalf("splash gone after the pick:\n%s", convoText(m))
 	}

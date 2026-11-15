@@ -354,7 +354,7 @@ func TestAsk_TabEditsTheOption(t *testing.T) {
 func TestAsk_MultiPrechecksTheRecommended(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Fix which?", "options": []any{"lint", "tests", "docs"},
+	m = m.feed(evMsg{"type": "ask", "question": "Fix which?", "options": []any{"lint", "tests", "docs"},
 		"multi": true, "recommended": "lint", "recommended_all": []any{"lint", "docs"}})
 	if !m.askChecked[0] || m.askChecked[1] || !m.askChecked[2] || m.askSel != 0 {
 		t.Fatalf("checked=%v sel=%d", m.askChecked, m.askSel)
@@ -373,7 +373,7 @@ func TestAsk_MultiPrechecksTheRecommended(t *testing.T) {
 	// An engine that sends only `recommended` (single) is read as before.
 	m = newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}, "recommended": "B"})
+	m = m.feed(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}, "recommended": "B"})
 	if m.askSel != 1 || m.askChecked[1] {
 		t.Errorf("single: sel=%d checked=%v", m.askSel, m.askChecked)
 	}

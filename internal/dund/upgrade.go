@@ -408,6 +408,10 @@ func (s *session) showRestored() {
 	// time (the start's resumeFlagged, or a failed reply).
 	q := *r
 	evs := []proto.Event{s.log.Append(proto.NewEvent(&proto.Turn{Kind: "user"})), s.log.Append(proto.NewEvent(&q))}
+	// The state says it too, as the engine's would: a question is open.
+	ask := q
+	s.log.Append(proto.NewEvent(&proto.TurnState{Phase: proto.PhaseWaitingAnswer, Since: time.Now().UnixMilli(),
+		Queued: []proto.QueuedMsg{}, Ask: &ask}))
 	s.actMu.Lock()
 	if s.restored == r {
 		s.restoredEvs = evs
@@ -445,6 +449,7 @@ func (s *session) restoredReply(c proto.Command) (done bool, err error) {
 		err = s.send(proto.NewCommand("", &proto.User{Content: answerMessage(q.Question, answer.Value, note)}))
 	} else {
 		s.log.Append(proto.NewEvent(&proto.Done{Reason: "interrupted", Detail: "question dismissed"}))
+		s.log.Append(proto.NewEvent(idleTurn()))
 		err = s.send(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: dismissedNote(q.Question, note)}))
 	}
 	if err != nil {

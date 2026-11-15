@@ -8,7 +8,7 @@ import (
 // The grace starting is one dim line in the TUI, not a bell.
 func TestTUI_BudgetSpentLine(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg{"type": "notification", "kind": "budget",
+	m = m.feed(evMsg{"type": "notification", "kind": "budget",
 		"text": "turn budget 30m spent — the model is told to wrap up; cut in 6m"})
 	var all strings.Builder
 	for _, e := range m.convo {

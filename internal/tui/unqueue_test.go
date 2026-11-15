@@ -14,14 +14,14 @@ func TestUnqueue_UpLoadsThemIntoTheComposer(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: rec}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "user", "id": "m1", "content": "fix the typo", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "count": float64(1)})
+	m = m.feed(evMsg{"type": "user", "id": "m1", "content": "fix the typo", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "count": float64(1)})
 	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m = nm.(tuiModel)
 	if !strings.Contains(rec.String(), `"unqueue"`) {
 		t.Fatalf("up did not ask: %s", rec.String())
 	}
-	m = m.handleEvent(evMsg{"type": "withdrawn", "ids": []any{"m1"}})
+	m = m.feed(evMsg{"type": "withdrawn", "ids": []any{"m1"}})
 	if got := m.input.Value(); got != "fix the typo" {
 		t.Errorf("composer: %q", got)
 	}
@@ -38,9 +38,9 @@ func TestUnqueue_OtherClientDropsRowsOnly(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "user", "id": "m1", "content": "same words", "queued": true})
-	m = m.handleEvent(evMsg{"type": "user", "id": "m2", "content": "same words", "queued": true})
-	m = m.handleEvent(evMsg{"type": "withdrawn", "ids": []any{"m2"}})
+	m = m.feed(evMsg{"type": "user", "id": "m1", "content": "same words", "queued": true})
+	m = m.feed(evMsg{"type": "user", "id": "m2", "content": "same words", "queued": true})
+	m = m.feed(evMsg{"type": "withdrawn", "ids": []any{"m2"}})
 	if m.input.Value() != "" {
 		t.Errorf("a client that did not ask took the text: %q", m.input.Value())
 	}

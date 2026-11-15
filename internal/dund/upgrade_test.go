@@ -641,7 +641,7 @@ func TestUpgradeQuestionDoesNotHold(t *testing.T) {
 func TestUpgradeRestoredAskAnswerIsAMessage(t *testing.T) {
 	svc2, sp2, id, dir := restartWithAsk(t)
 	ses, _ := svc2.Get(alice, id)
-	waitFor(t, func() bool { return ses.log.Last() >= 2 })
+	waitFor(t, func() bool { return ses.log.Last() >= 3 })
 	_, replay, sub, err := ses.subscribe(0, "")
 	if err != nil {
 		t.Fatal(err)
@@ -651,7 +651,8 @@ func TestUpgradeRestoredAskAnswerIsAMessage(t *testing.T) {
 	for _, ev := range replay {
 		types = append(types, ev.Type)
 	}
-	if !slices.Equal(types, []string{"turn", "ask"}) || replay[1].Payload.(*proto.Ask).Question != "Which one?" {
+	if !slices.Equal(types, []string{"turn", "ask", "turn_state"}) || replay[1].Payload.(*proto.Ask).Question != "Which one?" ||
+		replay[2].Payload.(*proto.TurnState).Phase != proto.PhaseWaitingAnswer {
 		t.Fatalf("shown: %v", types)
 	}
 	snap, _, sub, err := ses.subscribe(1, "an old epoch")

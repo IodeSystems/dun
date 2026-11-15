@@ -670,7 +670,7 @@ function Row({ item }: { item: Item }) {
         <View style={{ backgroundColor: c.user, borderRadius: 8, padding: space.md }}>
           <Text selectable style={{ color: c.text, fontSize: font.md }}>
             {item.text}
-            {item.queued ? '  (queued)' : ''}
+            {item.queued ? '  (queued)' : item.lost ? '  (not delivered: the engine stopped)' : ''}
           </Text>
         </View>
       );

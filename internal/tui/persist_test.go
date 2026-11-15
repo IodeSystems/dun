@@ -44,7 +44,7 @@ func TestPersistAndExit(t *testing.T) {
 		{map[string]any{"type": "persist", "on": true}, "/persist off to let /exit stop it"},
 		{map[string]any{"type": "persist", "on": false}, "/persist to keep it running"},
 	} {
-		m = m.handleEvent(evMsg(c.ev))
+		m = m.feed(evMsg(c.ev))
 		if !strings.Contains(convoText(m), c.want) {
 			t.Errorf("%v: no %q in %q", c.ev, c.want, stripANSI(convoText(m)))
 		}
@@ -69,14 +69,14 @@ func TestReadyNamesNoTools(t *testing.T) {
 	for i := 0; i < 172; i++ {
 		tools = append(tools, fmt.Sprintf("t%d", i))
 	}
-	m = m.handleEvent(evMsg{"type": "ready", "tools": tools})
+	m = m.feed(evMsg{"type": "ready", "tools": tools})
 	if txt := convoText(m); strings.Contains(txt, "t0") || strings.Contains(txt, "ready") {
 		t.Errorf("ready wrote:\n%s", txt)
 	}
 	if h := stripANSI(m.headView()); h != "dun · ws · m1" {
 		t.Errorf("header %q", h)
 	}
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	if s := stripANSI(sectionsView(m.statusSections(100), 100)); !strings.Contains(s, "tools       1 · /mcp info\n") {
 		t.Errorf("/status:\n%s", s)
 	}
@@ -109,7 +109,7 @@ func TestOfflineShowsTheSavedConversation(t *testing.T) {
 		t.Fatalf("shown %d times", n)
 	}
 	// dund comes back and replays the same history: skipped.
-	m = m.handleEvent(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "what broke the build"}}})
+	m = m.feed(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "what broke the build"}}})
 	if n := strings.Count(stripANSI(convoText(m)), "what broke the build"); n != 1 {
 		t.Fatalf("after dund's replay: shown %d times", n)
 	}

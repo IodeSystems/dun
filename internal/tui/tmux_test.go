@@ -230,7 +230,7 @@ func TestAttnErrorShowsAndClears(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
 	m.busy = true
 	prev := m
-	m = m.handleEvent(evMsg{"type": "error", "error": "provider: 502 bad gateway"})
+	m = m.feed(evMsg{"type": "error", "error": "provider: 502 bad gateway"})
 	m, _ = syncAttn(prev, m, nil)
 	if m.attnState != attnError {
 		t.Fatalf("after a failed turn: %q", m.attnState)

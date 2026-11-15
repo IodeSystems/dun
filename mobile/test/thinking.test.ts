@@ -65,6 +65,7 @@ test('one block per round: reasoning grows it, the first token closes it', () =>
   const v = run([
     { type: 'user', content: 'hi' },
     { type: 'turn' },
+    { type: 'turn_state', phase: 'working', queued: [] },
     { type: 'reasoning', text: '# Thinking: read', ts: '2026-11-14T10:00:00Z' },
     { type: 'reasoning', text: ' the file\nhmm', ts: '2026-11-14T10:00:02Z' },
   ]);

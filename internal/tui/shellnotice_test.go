@@ -21,7 +21,7 @@ func noticeRows(t *testing.T, w int, text string) []string {
 	var mm tea.Model = newTUIModel(&dunProc{}, "/ws")
 	mm, _ = mm.Update(tea.WindowSizeMsg{Width: w, Height: 30})
 	m := mm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "notification", "kind": "job", "text": text})
+	m = m.feed(evMsg{"type": "notification", "kind": "job", "text": text})
 	e := m.convo[len(m.convo)-1]
 	e.state = viewExpanded
 	return strings.Split(ansi.Strip(e.view()), "\n")

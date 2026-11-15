@@ -31,7 +31,7 @@ func barModel(t *testing.T, w int, rs ...proto.Request) tuiModel {
 	m.w, m.h = w, 30
 	m.branch = "worktree-agent-a257eaba" // a title as long as a real one
 	for _, r := range rs {
-		m = m.handleEvent(reqEv(t, r))
+		m = m.feed(reqEv(t, r))
 	}
 	return m
 }
@@ -81,9 +81,9 @@ func TestReqBar_Widths(t *testing.T) {
 func TestReqBar_NoBounce(t *testing.T) {
 	m := barModel(t, 120, reqDone)
 	a := stripANSI(m.headView())
-	m = m.handleEvent(reqEv(t, proto.Request{Phase: "start", Ctx: 41700, Window: 131072}))
+	m = m.feed(reqEv(t, proto.Request{Phase: "start", Ctx: 41700, Window: 131072}))
 	b := stripANSI(m.headView())
-	m = m.handleEvent(reqEv(t, proto.Request{Phase: "live", TTFTMS: 12300, Gen: 9, TGS: 150, Ctx: 41709, Window: 131072}))
+	m = m.feed(reqEv(t, proto.Request{Phase: "live", TTFTMS: 12300, Gen: 9, TGS: 150, Ctx: 41709, Window: 131072}))
 	c := stripANSI(m.headView())
 	if len([]rune(a)) != len([]rune(b)) || len([]rune(b)) != len([]rune(c)) {
 		t.Errorf("widths moved:\n%q\n%q\n%q", a, b, c)
@@ -95,8 +95,8 @@ func TestReqBar_NoBounce(t *testing.T) {
 		t.Errorf("live %q", c)
 	}
 	// After the request ends the figures stay.
-	m = m.handleEvent(reqEv(t, reqDone))
-	m = m.handleEvent(evMsg{"type": "done"})
+	m = m.feed(reqEv(t, reqDone))
+	m = m.feed(evMsg{"type": "done"})
 	if d := stripANSI(m.headView()); !strings.HasSuffix(d, "tg   45/s   ~45") {
 		t.Errorf("after the turn %q", d)
 	}
@@ -129,7 +129,7 @@ func TestReqBar_CacheNeverReported(t *testing.T) {
 	}
 	// Reported once, 0% is a figure.
 	r.CacheReported = true
-	m = m.handleEvent(reqEv(t, r))
+	m = m.feed(reqEv(t, r))
 	if head := stripANSI(m.headView()); !strings.Contains(head, "cache   0%") {
 		t.Errorf("a reported 0%% cache: %q", head)
 	}

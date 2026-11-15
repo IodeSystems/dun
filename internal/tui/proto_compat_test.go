@@ -59,7 +59,7 @@ func TestReasoningEventReachesTheTUI(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg(raw))
+	m = m.feed(evMsg(raw))
 	if i := m.liveThinking(); i < 0 || m.convo[i].think.text != "weighing it" {
 		t.Errorf("the TUI did not take the event: %d", i)
 	}
