@@ -27,7 +27,11 @@ export function NoticeRow({ notice }: { notice: Notice }) {
 
 /** The ▸/▾ an openable row starts with. */
 function Glyph({ open, color }: { open: boolean; color: string }) {
-  return <Text style={{ color, fontSize: font.sm }}>{open ? '▾ ' : '▸ '}</Text>;
+  return (
+    <Text style={{ color, fontSize: font.sm, flexShrink: 0 }} numberOfLines={1}>
+      {open ? '▾ ' : '▸ '}
+    </Text>
+  );
 }
 
 function Label({ text }: { text: string }) {
@@ -42,7 +46,9 @@ function Label({ text }: { text: string }) {
         borderRadius: 4,
         paddingHorizontal: 4,
         marginRight: space.xs,
+        flexShrink: 0,
       }}
+      numberOfLines={1}
     >
       {text}
     </Text>
@@ -63,7 +69,8 @@ function Plain({ n }: { n: Extract<Notice, { type: 'plain' }> }) {
       <Text
         selectable={open}
         numberOfLines={open ? undefined : 1}
-        style={{ color, fontSize: font.sm, flexShrink: 1 }}
+        style={{ color, fontSize: font.sm, flex: 1, minWidth: 0 }}
+        ellipsizeMode="tail"
         testID="notice-text"
       >
         {n.icon} {open ? n.text : first}
@@ -90,7 +97,12 @@ function Job({ n }: { n: Extract<Notice, { type: 'job' }> }) {
     >
       <View style={{ flexDirection: 'row' }}>
         <Glyph open={open} color={c.notice} />
-        <Text numberOfLines={open ? undefined : 1} style={{ color: c.notice, fontSize: font.sm, flexShrink: 1 }}>
+        <Text
+          numberOfLines={open ? undefined : 1}
+          style={{ color: c.notice, fontSize: font.sm, flex: 1, minWidth: 0 }}
+          ellipsizeMode="tail"
+          testID="fold-title"
+        >
           {open ? `🔔 ${n.head} ${n.took}` : jobLine(n)}
         </Text>
       </View>
@@ -132,7 +144,12 @@ function Docs({ n }: { n: Extract<Notice, { type: 'docs' }> }) {
         style={{ flexDirection: 'row' }}
       >
         <Glyph open={open} color={c.notice} />
-        <Text numberOfLines={open ? undefined : 1} style={{ color: c.notice, fontSize: font.sm, flexShrink: 1 }}>
+        <Text
+          numberOfLines={open ? undefined : 1}
+          style={{ color: c.notice, fontSize: font.sm, flex: 1, minWidth: 0 }}
+          ellipsizeMode="tail"
+          testID="fold-title"
+        >
           {docsHead(n, open)}
         </Text>
       </Pressable>
@@ -179,7 +196,7 @@ function Msg({ n }: { n: Extract<Notice, { type: 'msg' }> }) {
   const footer = !n.carried ? '' : !n.done ? 'sending…' : n.failed ? '✗ ' + n.status : n.status;
   return (
     <View style={{ paddingHorizontal: space.md, gap: 2 }}>
-      <Text style={{ fontSize: font.sm, color: c.text }}>
+      <Text style={{ fontSize: font.sm, color: c.text }} numberOfLines={1} ellipsizeMode="tail" testID="fold-title">
         <Text style={{ color: c.muted }}>✉ </Text>
         <Text style={{ fontWeight: '700' }}>{n.from}</Text>
         <Text style={{ color: c.muted }}> → </Text>

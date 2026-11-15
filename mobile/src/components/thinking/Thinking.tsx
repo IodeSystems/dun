@@ -32,10 +32,15 @@ export function Thinking({ item }: { item: Thought }) {
           <Text style={{ color: c.muted, fontSize: font.sm }}>{thinkHeader(item, now)}</Text>
         ) : (
           <>
-            <Text style={{ color: c.text, fontSize: font.sm, flexShrink: 1 }} numberOfLines={1}>
+            <Text
+              style={{ color: c.muted, fontSize: font.sm, flex: 1, minWidth: 0 }}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              testID="fold-title"
+            >
               {'✻ ' + thoughtHead(item)}
             </Text>
-            <Text style={{ color: c.muted, fontSize: font.sm }}>
+            <Text style={{ color: c.muted, fontSize: font.sm, flexShrink: 0 }} numberOfLines={1}>
               {thoughtMeta(item, now, width > 0 && width < NARROW)}
             </Text>
           </>

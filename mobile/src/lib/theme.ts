@@ -1,6 +1,6 @@
 import { useColorScheme } from 'react-native';
 
-const light = {
+export const light = {
   bg: '#fbfbfa',
   surface: '#ffffff',
   sunken: '#f4f3ef',

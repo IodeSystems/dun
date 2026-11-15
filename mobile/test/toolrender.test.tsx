@@ -54,13 +54,15 @@ const shell: ToolCall = {
 test('shell: the call line with its verdict, the error kept under it, the output when opened', async () => {
   const root = await render(<ToolCallRow call={shell} />);
   expect(texts(root)).toEqual([
-    '▸ ✗ $ go test ./...  → ✗ 1 · main_test.go:3: want 1, got 2',
+    '▸ ✗ ',
+    '$ go test ./...',
+    '  → ✗ 1 · main_test.go:3: want 1, got 2',
     'main_test.go:3: want 1, got 2',
     'FAIL',
   ]);
   await press(root, '▸');
   const open = texts(root);
-  expect(open[0]!.startsWith('▾ ✗ $ go test')).toBe(true);
+  expect(open.slice(0, 2)).toEqual(['▾ ✗ ', '$ go test ./...']);
   expect(open).toContain('$ go test ./...');
   expect(open).toContain('ok  pkg/a\nmain_test.go:3: want 1, got 2\nFAIL');
   expect(open).toContain('exit: 1');
@@ -85,7 +87,7 @@ test('edit: the diff, + and - lines in the theme colours', async () => {
     state: 'done',
   };
   const root = await render(<ToolCallRow call={call} />);
-  expect(texts(root)).toEqual(['▸ ✓ edit internal/a.go +2 −1']);
+  expect(texts(root)).toEqual(['▸ ✓ ', 'edit internal/a.go', ' +2 −1']);
   await press(root, '▸');
   const spans = root.queryAll((n) => n.type === 'Text' && n.parent?.type === 'Text');
   const colour = (s: string): unknown => (spans.find((n) => text(n) === s)?.props.style as { color?: string })?.color;
@@ -108,15 +110,17 @@ test('a run of several calls is one section, its summary until opened', async ()
     ],
   };
   const root = await render(<ToolRun run={run} />);
-  expect(texts(root)).toEqual(['▸ ⚙ 3 steps — exec ×2, file read · running… · 1 failed']);
+  expect(texts(root)).toEqual(['▸ ', '⚙ 3 steps — exec ×2, file read', ' · running… · 1 failed']);
   await press(root, '▸ ⚙');
   const open = texts(root);
-  expect(open[0]).toBe('▾ ⚙ 3 steps — exec ×2, file read · running… · 1 failed');
-  expect(open).toContain('▸ ✓ read a.go (5 lines)');
-  expect(open).toContain('▸ … $ ls  → running…');
+  expect(open.slice(0, 3)).toEqual(['▾ ', '⚙ 3 steps — exec ×2, file read', ' · running… · 1 failed']);
+  expect(open).toContain('read a.go');
+  expect(open).toContain(' (5 lines)');
+  expect(open).toContain('$ ls');
+  expect(open).toContain('  → running…');
 });
 
 test('a run of one call is that call alone', async () => {
   const root = await render(<ToolRun run={{ key: '0', kind: 'tools', calls: [shell] }} />);
-  expect(texts(root)[0]).toBe('▸ ✗ $ go test ./...  → ✗ 1 · main_test.go:3: want 1, got 2');
+  expect(texts(root).slice(0, 3)).toEqual(['▸ ✗ ', '$ go test ./...', '  → ✗ 1 · main_test.go:3: want 1, got 2']);
 });

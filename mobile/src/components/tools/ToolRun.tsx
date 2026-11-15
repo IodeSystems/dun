@@ -40,15 +40,26 @@ export function ToolCallRow({ call }: { call: ToolCall }) {
         onPress={() => setOpen(!open)}
         style={{ paddingVertical: 2 }}
       >
-        <Text style={[text, { color: c.text }]}>
-          <Text style={{ color: c.muted }}>{open ? '▾ ' : '▸ '}</Text>
-          <Text style={{ color: markColor }}>{mark}</Text>
-          {callText(call.tool, call.args)}
-          <Text style={{ color: tone[p.tone] }}>
-            {joint(p.text)}
-            {p.text}
+        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+          <Text style={[text, { color: c.muted, flexShrink: 0 }]} numberOfLines={1}>
+            {open ? '▾ ' : '▸ '}
+            <Text style={{ color: markColor }}>{mark}</Text>
           </Text>
-        </Text>
+          <Text
+            style={[text, { color: c.text, flex: 1, minWidth: 0 }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            testID="fold-title"
+          >
+            {callText(call.tool, call.args)}
+          </Text>
+          {p.text ? (
+            <Text style={[text, { color: tone[p.tone], flexShrink: 0, maxWidth: '50%' }]} numberOfLines={1}>
+              {joint(p.text)}
+              {p.text}
+            </Text>
+          ) : null}
+        </View>
       </Pressable>
       {!open && call.state === 'error' && call.result
         ? failLines(call.result).map((l, i) => (
@@ -100,13 +111,26 @@ export function ToolRun({ run }: { run: Run }) {
         onPress={() => setOpen(!open)}
         style={{ paddingVertical: 2 }}
       >
-        <Text style={{ color: c.text, fontFamily: mono, fontSize: font.sm }}>
-          <Text style={{ color: c.muted }}>{open ? '▾ ' : '▸ '}</Text>
-          {s.head}
-          <Text style={{ color: c.muted }}>{s.thought}</Text>
-          <Text style={{ color: c.muted }}>{s.running}</Text>
-          <Text style={{ color: c.danger }}>{s.failed}</Text>
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+          <Text style={{ color: c.muted, fontFamily: mono, fontSize: font.sm, flexShrink: 0 }} numberOfLines={1}>
+            {open ? '▾ ' : '▸ '}
+          </Text>
+          <Text
+            style={{ color: c.text, fontFamily: mono, fontSize: font.sm, flex: 1, minWidth: 0 }}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            testID="fold-title"
+          >
+            {s.head}
+          </Text>
+          {s.thought || s.running || s.failed ? (
+            <Text style={{ fontFamily: mono, fontSize: font.sm, flexShrink: 0 }} numberOfLines={1}>
+              <Text style={{ color: c.muted }}>{s.thought}</Text>
+              <Text style={{ color: c.muted }}>{s.running}</Text>
+              <Text style={{ color: c.danger }}>{s.failed}</Text>
+            </Text>
+          ) : null}
+        </View>
       </Pressable>
       {open ? (
         <View style={{ paddingLeft: space.md, gap: space.xs }}>
