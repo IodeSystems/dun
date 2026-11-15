@@ -1,0 +1,104 @@
+// A run of tool calls, the TUI's box (internal/tui/toolrun.go): a header with
+// the summary when it has more than one call, then a line per call:
+//
+//	⚙ 3 steps — exec ×2, read
+//	✓ $ go test ./...  → ✓ 12 lines · ok
+//	✗ $ make lint  → ✗ 1 · main.go:3: unused x
+//	    main.go:3: unused x
+//	… read internal/a.go  → running…
+//
+// A call is one line, collapsed; a press opens its body (registry.ts). A
+// failed call keeps up to two lines of its error under the line, as the TUI.
+
+import { createElement, useState } from 'react';
+import { Pressable, Text, View } from 'react-native';
+
+import type { Run, ToolCall } from '@/lib/toolcalls';
+import { callText, failLines, preview, runSummary, type Tone } from '@/lib/tooltext';
+import { font, mono, space, useColors } from '@/lib/theme';
+
+import { bodyFor } from './registry';
+
+/** How a preview joins its call: a range or a count follows the path, a verdict follows an arrow. */
+const joint = (p: string) => (/^[:(+]/.test(p) ? (p.startsWith(':') ? '' : ' ') : '  → ');
+
+export function ToolCallRow({ call }: { call: ToolCall }) {
+  const c = useColors();
+  const [open, setOpen] = useState(false);
+  const p = preview(call);
+  const tone: Record<Tone, string> = { ok: c.text, err: c.danger, muted: c.muted };
+  const mark = call.state === 'pending' ? '… ' : call.state === 'error' ? '✗ ' : '✓ ';
+  const markColor = call.state === 'pending' ? c.muted : call.state === 'error' ? c.danger : c.accent;
+  const text = { fontFamily: mono, fontSize: font.sm };
+  return (
+    <View style={{ gap: space.xs }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen(!open)}
+        style={{ paddingVertical: 2 }}
+      >
+        <Text style={[text, { color: c.text }]}>
+          <Text style={{ color: c.muted }}>{open ? '▾ ' : '▸ '}</Text>
+          <Text style={{ color: markColor }}>{mark}</Text>
+          {callText(call.tool, call.args)}
+          <Text style={{ color: tone[p.tone] }}>
+            {joint(p.text)}
+            {p.text}
+          </Text>
+        </Text>
+      </Pressable>
+      {!open && call.state === 'error' && call.result
+        ? failLines(call.result).map((l, i) => (
+            <Text key={i} selectable style={[text, { color: c.danger, paddingLeft: space.lg }]} numberOfLines={1}>
+              {l}
+            </Text>
+          ))
+        : null}
+      {open ? <View style={{ paddingLeft: space.lg }}>{createElement(bodyFor(call), { call })}</View> : null}
+    </View>
+  );
+}
+
+/**
+ * A run of one call is that call's line alone (toolrun.go single: one call
+ * said once). A longer run is one section, collapsed to its summary; a press
+ * opens the calls.
+ */
+export function ToolRun({ run }: { run: Run }) {
+  const c = useColors();
+  const [open, setOpen] = useState(false);
+  const frame = { backgroundColor: c.sunken, borderRadius: 8, padding: space.sm, gap: space.xs };
+  if (run.calls.length === 1) {
+    return (
+      <View style={frame}>
+        <ToolCallRow call={run.calls[0]!} />
+      </View>
+    );
+  }
+  const s = runSummary(run.calls);
+  return (
+    <View style={frame}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen(!open)}
+        style={{ paddingVertical: 2 }}
+      >
+        <Text style={{ color: c.text, fontFamily: mono, fontSize: font.sm }}>
+          <Text style={{ color: c.muted }}>{open ? '▾ ' : '▸ '}</Text>
+          {s.head}
+          <Text style={{ color: c.muted }}>{s.running}</Text>
+          <Text style={{ color: c.danger }}>{s.failed}</Text>
+        </Text>
+      </Pressable>
+      {open ? (
+        <View style={{ paddingLeft: space.md, gap: space.xs }}>
+          {run.calls.map((call, i) => (
+            <ToolCallRow key={i} call={call} />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}

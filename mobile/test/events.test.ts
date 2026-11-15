@@ -36,8 +36,8 @@ test('a tool call settles the text streamed before it; the result lands in its r
     { type: 'tool_call', tool: 'exec', args: { cmd: 'ls' } },
     { type: 'tool_result', tool: 'exec', result: 'a b' },
   ]);
-  expect(v.items.map((i) => i.kind)).toEqual(['assistant', 'tool']);
-  expect(v.items[1]).toMatchObject({ kind: 'tool', title: 'exec', done: true, result: 'a b' });
+  expect(v.items.map((i) => i.kind)).toEqual(['assistant', 'tools']);
+  expect(v.items[1]).toMatchObject({ kind: 'tools', calls: [{ tool: 'exec', state: 'done', result: 'a b' }] });
   expect(v.streaming).toBeNull();
 });
 
@@ -50,7 +50,7 @@ test('history replaces what is shown, never adds', () => {
       { kind: 'assistant', content: 'b' },
     ],
   });
-  expect(w.items.map((i) => (i.kind === 'tool' ? i.title : i.text))).toEqual(['a', 'b']);
+  expect(w.items.map((i) => (i.kind === 'tools' ? '' : i.text))).toEqual(['a', 'b']);
 });
 
 test('an ask stays open until answered, from any client', () => {
@@ -103,7 +103,7 @@ test('unknown events change nothing', () => {
 test('a snapshot event in the stream replaces what is shown', () => {
   const v = run([{ type: 'user', content: 'stale' }]);
   const w = apply(v, { type: 'snapshot', after: 9, items: [{ kind: 'assistant', content: 'fresh' }], state: [] });
-  expect(w.items.map((i) => (i.kind === 'tool' ? i.title : i.text))).toEqual(['fresh']);
+  expect(w.items.map((i) => (i.kind === 'tools' ? '' : i.text))).toEqual(['fresh']);
 });
 
 const cmds = [
@@ -247,7 +247,7 @@ test('a docs note names each surfaced document, why it won and where it came fro
       ],
     },
   ]);
-  const text = (x: View) => x.items.map((i) => (i.kind === 'tool' ? i.title : i.text))[0];
+  const text = (x: View) => x.items.map((i) => (i.kind === 'tools' ? '' : i.text))[0];
   expect(text(v)).toBe(
     '🔎 1 doc(s) surfaced\n• skill docs (only candidate · score 1.2e-05)\n  skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills',
   );

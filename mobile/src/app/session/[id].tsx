@@ -24,13 +24,14 @@ import { McpToolsPanel } from '@/components/McpToolsPanel';
 import { ModelPicker } from '@/components/ModelPicker';
 import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
+import { ToolRun } from '@/components/tools/ToolRun';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
 import { apply, empty, isKillAll, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
 import { shouldReload, upgradeLines } from '@/lib/upgrade';
 import { providerLine, type ProviderOp } from '@/lib/provider';
-import { font, mono, space, useColors } from '@/lib/theme';
+import { font, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
 
 // Rows the web transcript renders per page: it is not virtualized.
@@ -492,7 +493,6 @@ export default function Session() {
 
 function Row({ item }: { item: Item }) {
   const c = useColors();
-  const [open, setOpen] = useState(false);
   switch (item.kind) {
     case 'user':
       return (
@@ -517,28 +517,8 @@ function Row({ item }: { item: Item }) {
           <Markdown text={item.text} streaming={item.key === 'streaming'} />
         </View>
       );
-    case 'tool': {
-      // One row for the call and its result: the tool, its main argument on
-      // the line, the full exchange under it when opened.
-      return (
-        <Pressable
-          onPress={() => setOpen(!open)}
-          style={{ backgroundColor: c.sunken, borderRadius: 8, padding: space.sm, gap: 2 }}
-        >
-          <Text style={{ color: c.muted, fontFamily: mono, fontSize: font.sm }} numberOfLines={1}>
-            {item.done ? '✓ ' : '· '}
-            {item.title}
-            {item.arg ? '  ' + item.arg : ''}
-          </Text>
-          {open ? (
-            <Text selectable style={{ color: c.text, fontFamily: mono, fontSize: font.sm }}>
-              {item.request}
-              {item.result ? '\n---\n' + item.result : ''}
-            </Text>
-          ) : null}
-        </Pressable>
-      );
-    }
+    case 'tools':
+      return <ToolRun run={item} />;
     case 'note':
       return (
         <Text style={{ color: item.error ? c.danger : c.muted, fontSize: font.sm, paddingHorizontal: space.md }}>
