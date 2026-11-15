@@ -11,20 +11,21 @@
 // failed call keeps up to two lines of its error under the line, as the TUI.
 
 import { createElement, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import type { Thought } from '@/lib/thinking';
 import type { Run, ToolCall } from '@/lib/toolcalls';
 import { callText, failLines, preview, runSummary, type Tone } from '@/lib/tooltext';
 import { font, mono, space, useColors } from '@/lib/theme';
 
+import { Fold } from '../fold/Fold';
 import { Thinking } from '../thinking/Thinking';
 import { bodyFor } from './registry';
 
 /** How a preview joins its call: a range or a count follows the path, a verdict follows an arrow. */
 const joint = (p: string) => (/^[:(+]/.test(p) ? (p.startsWith(':') ? '' : ' ') : '  → ');
 
-export function ToolCallRow({ call }: { call: ToolCall }) {
+export function ToolCallRow({ call, flat }: { call: ToolCall; flat?: boolean }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
   const p = preview(call);
@@ -34,33 +35,38 @@ export function ToolCallRow({ call }: { call: ToolCall }) {
   const text = { fontFamily: mono, fontSize: font.sm };
   return (
     <View style={{ gap: space.xs }}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        onPress={() => setOpen(!open)}
-        style={{ paddingVertical: 2 }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-          <Text style={[text, { color: c.muted, flexShrink: 0 }]} numberOfLines={1}>
-            {open ? '▾ ' : '▸ '}
-            <Text style={{ color: markColor }}>{mark}</Text>
-          </Text>
-          <Text
-            style={[text, { color: c.text, flex: 1, minWidth: 0 }]}
-            numberOfLines={1}
-            ellipsizeMode="tail"
-            testID="fold-title"
-          >
-            {callText(call.tool, call.args)}
-          </Text>
-          {p.text ? (
-            <Text style={[text, { color: tone[p.tone], flexShrink: 0, maxWidth: '50%' }]} numberOfLines={1}>
-              {joint(p.text)}
-              {p.text}
+      <Fold
+        open={open}
+        onToggle={() => setOpen(!open)}
+        plain={flat}
+        nested
+        inset={space.sm}
+        headStyle={{ paddingVertical: 2 }}
+        head={
+          <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+            <Text style={[text, { color: c.muted, flexShrink: 0 }]} numberOfLines={1}>
+              {open ? '▾ ' : '▸ '}
+              <Text style={{ color: markColor }}>{mark}</Text>
             </Text>
-          ) : null}
-        </View>
-      </Pressable>
+            <Text
+              style={[text, { color: c.text, flex: 1, minWidth: 0 }]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              testID="fold-title"
+            >
+              {callText(call.tool, call.args)}
+            </Text>
+            {p.text ? (
+              <Text style={[text, { color: tone[p.tone], flexShrink: 0, maxWidth: '50%' }]} numberOfLines={1}>
+                {joint(p.text)}
+                {p.text}
+              </Text>
+            ) : null}
+          </View>
+        }
+      >
+        {open ? createElement(bodyFor(call), { call }) : null}
+      </Fold>
       {!open && call.state === 'error' && call.result
         ? failLines(call.result).map((l, i) => (
             <Text key={i} selectable style={[text, { color: c.danger, paddingLeft: space.lg }]} numberOfLines={1}>
@@ -68,7 +74,6 @@ export function ToolCallRow({ call }: { call: ToolCall }) {
             </Text>
           ))
         : null}
-      {open ? <View style={{ paddingLeft: space.lg }}>{createElement(bodyFor(call), { call })}</View> : null}
     </View>
   );
 }
@@ -93,24 +98,22 @@ function steps(run: Run): ({ call: ToolCall } | { thought: Thought })[] {
 export function ToolRun({ run }: { run: Run }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
-  const frame = { backgroundColor: c.sunken, borderRadius: 8, padding: space.sm, gap: space.xs };
   const thoughts = run.thoughts ?? [];
   if (run.calls.length === 1 && thoughts.length === 0) {
     return (
-      <View style={frame}>
-        <ToolCallRow call={run.calls[0]!} />
+      <View style={{ backgroundColor: c.sunken, borderRadius: 8, padding: space.sm }}>
+        <ToolCallRow call={run.calls[0]!} flat />
       </View>
     );
   }
   const s = runSummary(run.calls, thoughts);
   return (
-    <View style={frame}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        onPress={() => setOpen(!open)}
-        style={{ paddingVertical: 2 }}
-      >
+    <Fold
+      solid
+      open={open}
+      onToggle={() => setOpen(!open)}
+      headStyle={{ paddingVertical: 2 }}
+      head={
         <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
           <Text style={{ color: c.muted, fontFamily: mono, fontSize: font.sm, flexShrink: 0 }} numberOfLines={1}>
             {open ? '▾ ' : '▸ '}
@@ -131,14 +134,15 @@ export function ToolRun({ run }: { run: Run }) {
             </Text>
           ) : null}
         </View>
-      </Pressable>
+      }
+    >
       {open ? (
-        <View style={{ paddingLeft: space.md, gap: space.xs }}>
+        <View style={{ gap: space.xs }}>
           {steps(run).map((st, i) =>
-            'call' in st ? <ToolCallRow key={i} call={st.call} /> : <Thinking key={i} item={st.thought} />,
+            'call' in st ? <ToolCallRow key={i} call={st.call} /> : <Thinking key={i} item={st.thought} nested />,
           )}
         </View>
       ) : null}
-    </View>
+    </Fold>
   );
 }

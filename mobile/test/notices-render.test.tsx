@@ -42,7 +42,7 @@ test('docs open to each document with why and source, and a doc opens to its sni
   expect(all(root)).toBe('▸ 🔎 2 relevant doc(s) · 1 surfaced · doc README');
   press(root);
   expect(all(root)).toBe('▾ 🔎 2 relevant doc(s) · 1 surfaced▸ README (sim 0.8)doc · README.md');
-  press(root, 1);
+  press(root, 2);
   expect(all(root)).toContain('install with make');
 });
 

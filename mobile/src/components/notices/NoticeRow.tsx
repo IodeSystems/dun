@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { PlainCode } from '@/components/code/Code';
+import { Fold } from '@/components/fold/Fold';
 import { Markdown } from '@/components/markdown/Markdown';
 import { docsHead, docWhy, jobLine, msgFoldLines, msgLong, type Doc, type Notice, type Tone } from '@/lib/notices';
 import { font, mono, space, useColors, type Colors } from '@/lib/theme';
@@ -64,7 +65,7 @@ function Plain({ n }: { n: Extract<Notice, { type: 'plain' }> }) {
   // One row; a notice with more lines (or one a phone cannot fit) opens.
   const openable = more.length > 0 || first.length > 120;
   const row = (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: space.md }}>
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
       {openable ? <Glyph open={open} color={color} /> : null}
       {n.label ? <Label text={n.label} /> : null}
       <Text
@@ -78,11 +79,10 @@ function Plain({ n }: { n: Extract<Notice, { type: 'plain' }> }) {
       </Text>
     </View>
   );
-  if (!openable) return row;
   return (
-    <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }}>
-      {row}
-    </Pressable>
+    <View style={{ paddingHorizontal: space.md }}>
+      <Fold open={open} onToggle={openable ? () => setOpen(!open) : undefined} inset={space.md} head={row} />
+    </View>
   );
 }
 
@@ -90,32 +90,35 @@ function Job({ n }: { n: Extract<Notice, { type: 'job' }> }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
   return (
-    <Pressable
-      onPress={() => setOpen(!open)}
-      accessibilityRole="button"
-      accessibilityState={{ expanded: open }}
-      style={{ paddingHorizontal: space.md, gap: 2 }}
-    >
-      <View style={{ flexDirection: 'row' }}>
-        <Glyph open={open} color={c.notice} />
-        <Text
-          numberOfLines={open ? undefined : 1}
-          style={{ color: c.notice, fontSize: font.sm, flex: 1, minWidth: 0 }}
-          ellipsizeMode="tail"
-          testID="fold-title"
-        >
-          {open ? `🔔 ${n.head} ${n.took}` : jobLine(n)}
-        </Text>
-      </View>
-      {open ? (
-        <>
-          <View style={{ backgroundColor: c.sunken, borderRadius: 6, padding: space.sm }}>
-            <PlainCode text={`$ ${n.command}`} />
+    <View style={{ paddingHorizontal: space.md }}>
+      <Fold
+        open={open}
+        onToggle={() => setOpen(!open)}
+        inset={space.md}
+        head={
+          <View style={{ flexDirection: 'row' }}>
+            <Glyph open={open} color={c.notice} />
+            <Text
+              numberOfLines={open ? undefined : 1}
+              style={{ color: c.notice, fontSize: font.sm, flex: 1, minWidth: 0 }}
+              ellipsizeMode="tail"
+              testID="fold-title"
+            >
+              {open ? `🔔 ${n.head} ${n.took}` : jobLine(n)}
+            </Text>
           </View>
-          {n.output ? <PlainCode text={n.output} color={c.muted} /> : null}
-        </>
-      ) : null}
-    </Pressable>
+        }
+      >
+        {open ? (
+          <View style={{ gap: space.xs }}>
+            <View style={{ backgroundColor: c.fold, borderRadius: 6, padding: space.sm }}>
+              <PlainCode text={`$ ${n.command}`} />
+            </View>
+            {n.output ? <PlainCode text={n.output} color={c.muted} /> : null}
+          </View>
+        ) : null}
+      </Fold>
+    </View>
   );
 }
 
@@ -123,24 +126,34 @@ function Docs({ n }: { n: Extract<Notice, { type: 'docs' }> }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
   return (
-    <View style={{ paddingHorizontal: space.md, gap: 2 }}>
-      <Pressable
-        onPress={() => setOpen(!open)}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        style={{ flexDirection: 'row' }}
+    <View style={{ paddingHorizontal: space.md }}>
+      <Fold
+        open={open}
+        onToggle={() => setOpen(!open)}
+        inset={space.md}
+        headStyle={{ flexDirection: 'row' }}
+        head={
+          <>
+            <Glyph open={open} color={c.notice} />
+            <Text
+              numberOfLines={open ? undefined : 1}
+              style={{ color: c.notice, fontSize: font.sm, flex: 1, minWidth: 0 }}
+              ellipsizeMode="tail"
+              testID="fold-title"
+            >
+              {docsHead(n, open)}
+            </Text>
+          </>
+        }
       >
-        <Glyph open={open} color={c.notice} />
-        <Text
-          numberOfLines={open ? undefined : 1}
-          style={{ color: c.notice, fontSize: font.sm, flex: 1, minWidth: 0 }}
-          ellipsizeMode="tail"
-          testID="fold-title"
-        >
-          {docsHead(n, open)}
-        </Text>
-      </Pressable>
-      {open ? n.docs.map((d, i) => <DocRow key={i} d={d} />) : null}
+        {open ? (
+          <View style={{ gap: space.xs }}>
+            {n.docs.map((d, i) => (
+              <DocRow key={i} d={d} />
+            ))}
+          </View>
+        ) : null}
+      </Fold>
     </View>
   );
 }
@@ -149,29 +162,34 @@ function DocRow({ d }: { d: Doc }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
   return (
-    <Pressable
-      onPress={() => setOpen(!open)}
-      disabled={!d.line}
-      accessibilityRole={d.line ? 'button' : undefined}
-      accessibilityState={{ expanded: open }}
-      style={{ paddingLeft: space.lg, gap: 1 }}
+    <Fold
+      open={open}
+      onToggle={d.line ? () => setOpen(!open) : undefined}
+      nested
+      inset={space.md}
+      head={
+        <Text style={{ fontSize: font.sm, color: c.text }}>
+          <Text style={{ color: c.muted }}>{d.line ? (open ? '▾ ' : '▸ ') : '• '}</Text>
+          {d.title}
+          <Text style={{ color: c.muted }}> ({docWhy(d)})</Text>
+        </Text>
+      }
     >
-      <Text style={{ fontSize: font.sm, color: c.text }}>
-        <Text style={{ color: c.muted }}>{d.line ? (open ? '▾ ' : '▸ ') : '• '}</Text>
-        {d.title}
-        <Text style={{ color: c.muted }}> ({docWhy(d)})</Text>
-      </Text>
-      {d.source ? (
-        <Text selectable style={{ color: c.muted, fontSize: 17, paddingLeft: space.md }}>
-          {d.source}
-        </Text>
+      {d.source || (open && d.line) ? (
+        <View style={{ gap: 1 }}>
+          {d.source ? (
+            <Text selectable style={{ color: c.muted, fontSize: 17, paddingLeft: space.md }}>
+              {d.source}
+            </Text>
+          ) : null}
+          {open && d.line ? (
+            <Text selectable style={{ color: c.muted, fontSize: 17, paddingLeft: space.md, fontFamily: mono }}>
+              {d.line}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
-      {open && d.line ? (
-        <Text selectable style={{ color: c.muted, fontSize: 17, paddingLeft: space.md, fontFamily: mono }}>
-          {d.line}
-        </Text>
-      ) : null}
-    </Pressable>
+    </Fold>
   );
 }
 
@@ -182,31 +200,48 @@ function Msg({ n }: { n: Extract<Notice, { type: 'msg' }> }) {
   const folded = long && !open;
   const footer = !n.carried ? '' : !n.done ? 'sending…' : n.failed ? '✗ ' + n.status : n.status;
   return (
-    <View style={{ paddingHorizontal: space.md, gap: 2 }}>
-      <Text style={{ fontSize: font.sm, color: c.text }} numberOfLines={1} ellipsizeMode="tail" testID="fold-title">
-        <Text style={{ color: c.muted }}>✉ </Text>
-        <Text style={{ fontWeight: '700' }}>{n.from}</Text>
-        <Text style={{ color: c.muted }}> → </Text>
-        <Text style={{ fontWeight: '700' }}>{n.to}</Text>
-      </Text>
-      {/* The text as markdown, as the TUI's box renders it; folded, its first lines plain. */}
-      <View style={{ borderLeftWidth: 2, borderColor: c.border, paddingLeft: space.sm }}>
-        {folded ? (
-          <Text numberOfLines={msgFoldLines} style={{ color: c.text, fontSize: font.md }}>
-            {n.text.trim()}
+    <View style={{ paddingHorizontal: space.md }}>
+      <Fold
+        open={open}
+        onToggle={long ? () => setOpen(!open) : undefined}
+        plain={!long}
+        inset={space.md}
+        head={
+          <Text style={{ fontSize: font.sm, color: c.text }} numberOfLines={1} ellipsizeMode="tail" testID="fold-title">
+            <Text style={{ color: c.muted }}>✉ </Text>
+            <Text style={{ fontWeight: '700' }}>{n.from}</Text>
+            <Text style={{ color: c.muted }}> → </Text>
+            <Text style={{ fontWeight: '700' }}>{n.to}</Text>
           </Text>
-        ) : (
-          <Markdown text={n.text.trim()} />
-        )}
-        {long ? (
-          <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }}>
-            <Text style={{ color: c.muted, fontSize: font.sm }}>{open ? 'less' : 'more…'}</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {footer ? (
-        <Text style={{ color: n.failed ? c.danger : c.muted, fontSize: font.sm, paddingLeft: space.sm }}>{footer}</Text>
-      ) : null}
+        }
+      >
+        {/* The text as markdown, as the TUI's box renders it; folded, its first lines plain. */}
+        <View style={{ gap: 2 }}>
+          <View style={open ? undefined : { borderLeftWidth: 2, borderColor: c.border, paddingLeft: space.sm }}>
+            {folded ? (
+              <Text numberOfLines={msgFoldLines} style={{ color: c.text, fontSize: font.md }}>
+                {n.text.trim()}
+              </Text>
+            ) : (
+              <Markdown text={n.text.trim()} />
+            )}
+            {long ? (
+              <Pressable
+                onPress={() => setOpen(!open)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open }}
+              >
+                <Text style={{ color: c.muted, fontSize: font.sm }}>{open ? 'less' : 'more…'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {footer ? (
+            <Text style={{ color: n.failed ? c.danger : c.muted, fontSize: font.sm, paddingLeft: space.sm }}>
+              {footer}
+            </Text>
+          ) : null}
+        </View>
+      </Fold>
     </View>
   );
 }

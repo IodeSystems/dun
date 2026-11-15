@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
+import { Fold } from '../fold/Fold';
 import { thinkHeader, thoughtHead, thoughtMeta, type Thought } from '@/lib/thinking';
 import { font, space, useColors } from '@/lib/theme';
 
@@ -12,54 +13,50 @@ const NARROW = 360;
  * and how much — and its whole text when tapped. While it streams the line
  * follows the latest heading and the time counts up.
  */
-export function Thinking({ item }: { item: Thought }) {
+export function Thinking({ item, nested }: { item: Thought; nested?: boolean }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
   const [width, setWidth] = useState(0);
   const now = useNow(item.live);
+  const inset = nested ? space.sm : space.md;
+  const text = item.text.trim();
   return (
     <View
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-      style={{ paddingHorizontal: space.md, paddingVertical: space.xs, gap: space.xs }}
+      style={{ paddingHorizontal: nested ? 0 : space.md, paddingVertical: space.xs }}
     >
-      <Pressable
-        onPress={() => setOpen(!open)}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm }}
+      <Fold
+        open={open}
+        onToggle={() => setOpen(!open)}
+        nested={nested}
+        inset={inset}
+        headStyle={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm }}
+        head={
+          open ? (
+            <Text style={{ color: c.muted, fontSize: font.sm }}>{thinkHeader(item, now)}</Text>
+          ) : (
+            <>
+              <Text
+                style={{ color: c.muted, fontSize: font.sm, flex: 1, minWidth: 0 }}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                testID="fold-title"
+              >
+                {'✻ ' + thoughtHead(item)}
+              </Text>
+              <Text style={{ color: c.muted, fontSize: font.sm, flexShrink: 0 }} numberOfLines={1}>
+                {thoughtMeta(item, now, width > 0 && width < NARROW)}
+              </Text>
+            </>
+          )
+        }
       >
-        {open ? (
-          <Text style={{ color: c.muted, fontSize: font.sm }}>{thinkHeader(item, now)}</Text>
-        ) : (
-          <>
-            <Text
-              style={{ color: c.muted, fontSize: font.sm, flex: 1, minWidth: 0 }}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              testID="fold-title"
-            >
-              {'✻ ' + thoughtHead(item)}
-            </Text>
-            <Text style={{ color: c.muted, fontSize: font.sm, flexShrink: 0 }} numberOfLines={1}>
-              {thoughtMeta(item, now, width > 0 && width < NARROW)}
-            </Text>
-          </>
-        )}
-      </Pressable>
-      {open && item.text.trim() ? (
-        <Text
-          selectable
-          style={{
-            color: c.muted,
-            fontSize: font.sm,
-            borderLeftWidth: 2,
-            borderColor: c.border,
-            paddingLeft: space.sm,
-          }}
-        >
-          {item.text.trim()}
-        </Text>
-      ) : null}
+        {open && text ? (
+          <Text selectable style={{ color: c.muted, fontSize: font.sm }}>
+            {text}
+          </Text>
+        ) : null}
+      </Fold>
     </View>
   );
 }
