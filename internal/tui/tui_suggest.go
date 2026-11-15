@@ -82,6 +82,18 @@ func (m tuiModel) asked() bool {
 	return false
 }
 
+// convoShown reports whether a conversation is on screen: anything but the
+// splash. A restart's history (docs/session-events.md) is drawn only when
+// nothing is.
+func (m tuiModel) convoShown() bool {
+	for _, e := range m.convo {
+		if !e.splash && !e.liveSplash {
+			return true
+		}
+	}
+	return false
+}
+
 // idleSuggestReady is every condition that must hold to spend the call.
 //
 // The `len(m.suggestions) == 0` clause is what makes "once per idle" hold even

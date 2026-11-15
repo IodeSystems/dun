@@ -507,9 +507,24 @@ type Session struct {
 // History is the conversation so far, for a client to render as scrollback.
 // It REPLACES what the client shows rather than adding to it: a client that
 // got a snapshot also gets the history a respawned engine sends.
+//
+// Reason is why it is sent (dund sets it: docs/session-events.md, "History
+// reason"): HistoryResume, the conversation an engine resumed, shown with a
+// "resumed" marker; HistoryRestart, a new engine on the conversation the
+// clients already have (a crash, an idle stop, a dund restart): a client
+// that shows it keeps what it has; HistoryModelSwitch, a new engine on
+// another model: a client replaces what it shows, with no marker. "" from
+// a dund before reasons: read as resume.
 type History struct {
-	Items []HistoryItem `json:"items"`
+	Items  []HistoryItem `json:"items"`
+	Reason string        `json:"reason,omitempty"`
 }
+
+const (
+	HistoryResume      = "resume"
+	HistoryRestart     = "restart"
+	HistoryModelSwitch = "model_switch"
+)
 
 // HistoryItem mirrors dun.HistoryItem.
 type HistoryItem struct {

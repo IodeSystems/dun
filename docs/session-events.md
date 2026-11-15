@@ -185,3 +185,24 @@ derive them from `turn`, tokens, tool calls or `done`.
   end a thought on the events listed above, guessed as before; marked in
   both clients (`endThinkingOld`, `endsThinkingOld`), used only until an
   event names its round.
+
+## History reason
+
+- `history {items, reason}`: an engine's replay of the conversation it
+  started on. dund sets `reason` (`internal/dund/session.go`
+  historyReason), because only dund knows why that engine started:
+  - `resume`: the session's first engine in this dund's life, on a stored
+    conversation. Shown, with the "resumed N entries" marker; a client that
+    already shows it (read from disk while dund was away) replaces it.
+  - `restart`: another engine on the conversation the clients already have:
+    a crash restart, an idle stop then a wake, a restart with the same
+    flags, the first engine after dund itself restarted. A client that
+    shows a conversation keeps it, and the lines it added since (the
+    restart's notice); one that shows nothing draws it, with no marker.
+  - `model_switch`: a restart on another `--model` or `--url`. A client
+    replaces what it shows, with no marker: nothing was resumed.
+- The TUI no longer guesses this (it used to skip the next history after
+  "restarting", and mark its own model pick to replay quietly).
+- Old logs: a history with no reason (a dund before reasons) reads as
+  `resume`, except in the TUI right after an `engine {restarting}`, where
+  it is skipped as before (marked fallback, `restartedOld`).

@@ -555,9 +555,8 @@ func (m *tuiModel) switchModel(p dunconfig.ProviderConfig, model string, persist
 	m.switchNote = note
 
 	// The service restarts the engine on the new endpoint, on this
-	// conversation; its history comes back and is rendered afresh, with no
-	// "resumed" marker — to the person nothing was resumed.
-	m.quietReplay = true
+	// conversation; its history comes back as a model_switch and is rendered
+	// afresh, with no "resumed" marker — to the person nothing was resumed.
 	if m.liveSplashAt() >= 0 || (len(m.convo) > 0 && m.convo[0].splash) {
 		m.splashWant, m.splashKeep = true, true // said again, with the new model
 	}

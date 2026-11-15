@@ -62,7 +62,12 @@ type session struct {
 	gaveUp       bool
 	restarts     int
 	restartStart time.Time
-	claimed      time.Time // handed out by CreateOrReuse; see reuseHold
+	// shown: an engine of this session already sent its conversation to
+	// clients (or the session outlived a dund restart), so the next engine's
+	// history is a restart, not a resume; switching: the next engine is on
+	// another model (Restart). They make history's reason (attach).
+	shown, switching bool
+	claimed          time.Time // handed out by CreateOrReuse; see reuseHold
 
 	// What the engine is doing, from its events: the idle stop must not end
 	// a turn, a question waiting for a person, a job or a sub-agent. Its own
@@ -300,9 +305,14 @@ var askedIn = func(workspace, id string) bool {
 
 // readEvents appends every frame the engine writes until its stdout closes,
 // then handles the exit.
-func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) {
+func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner, reason string) {
 	for sc.Scan() {
 		if ev, ok := decodeEvent(sc.Bytes()); ok {
+			// Why this engine replays the conversation: dund knows, the
+			// engine does not (docs/session-events.md, "History reason").
+			if h, ok := ev.Payload.(*proto.History); ok && h.Reason == "" {
+				h.Reason = reason
+			}
 			if req, ok := ev.Payload.(*proto.PeerRequest); ok {
 				go s.svc.handlePeer(s, eng, *req)
 				continue
@@ -427,7 +437,22 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 	s.eng, s.engDone = eng, make(chan struct{})
 	s.running, s.stopping, s.gaveUp = true, false, false
 	s.log.Append(proto.NewEvent(&proto.EngineState{State: "started"}))
-	go s.readEvents(eng, s.engDone, sc)
+	go s.readEvents(eng, s.engDone, sc, s.historyReason())
+}
+
+// historyReason is why the engine attached now replays the conversation,
+// for its history event: the first engine resumes it; a later one restarts
+// on what the clients have, or switches model (Restart). Called with mu held.
+func (s *session) historyReason() string {
+	reason := proto.HistoryResume
+	switch {
+	case s.switching:
+		reason = proto.HistoryModelSwitch
+	case s.shown:
+		reason = proto.HistoryRestart
+	}
+	s.shown, s.switching = true, false
+	return reason
 }
 
 // send writes a command to the engine, starting it first if need be. An

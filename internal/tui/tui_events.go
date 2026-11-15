@@ -357,17 +357,40 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		}
 		m.refresh()
 	case "history":
-		if m.skipHistory {
-			// A respawned engine replays the conversation it just resumed. It is
-			// already on screen — rendering it again would double the scrollback.
-			m.skipHistory = false
-			break
-		}
+		// Why it came is dund's to say (docs/session-events.md, "History
+		// reason"), not this client's to guess.
 		items, _ := ev["items"].([]any)
-		if len(items) > 0 && !m.splashKeep {
-			m.splashWant = false // a conversation to show, not a fresh one
+		reason := str(ev["reason"])
+		if reason == "" && m.restartedOld {
+			// Fallback, a dund before reasons: after its "restarting" this is
+			// the respawned engine's replay.
+			reason = proto.HistoryRestart
 		}
-		m.replay(items)
+		m.restartedOld = false
+		switch reason {
+		case proto.HistoryRestart:
+			// A new engine on the conversation on screen: kept as it is (and
+			// the lines this client added since). Shown only when nothing is.
+			if !m.convoShown() {
+				m.quietReplay = true
+				m.replay(items)
+			}
+		case proto.HistoryModelSwitch:
+			// Another model on the same conversation: rendered afresh, no
+			// "resumed" marker — to the person nothing was resumed.
+			m.rebuildFrom(items)
+		default: // resume, or a dund before reasons
+			if len(items) > 0 && !m.splashKeep {
+				m.splashWant = false // a conversation to show, not a fresh one
+			}
+			if m.convoShown() {
+				// Already on screen (read from disk while dund was away):
+				// replaced, so it is not shown twice.
+				m.rebuildFrom(items)
+				break
+			}
+			m.replay(items)
+		}
 	case "message":
 		// tokens already streamed the reply; nothing to add.
 	case "agents":
@@ -767,7 +790,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.dropAsk()
 			m.settleAsk()
 			m.restarts = int(evNum(ev["restarts"]))
-			m.skipHistory = true // it will replay what is already on screen
+			m.restartedOld = true // only for a dund before history reasons
 			m.append(StErr.Render(str(ev["reason"]) + " — restarting it; the session is kept"))
 		case "gave_up":
 			m.starting = false

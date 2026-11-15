@@ -100,7 +100,7 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	for _, r := range recs {
 		ses := &session{svc: s, id: r.ID, workspace: r.Workspace, owner: r.Owner,
 			members: r.Members, args: r.Args, persist: r.Persist, resume: r.Resume, restored: r.Ask,
-			log: proto.NewLog(r.ID, logCapacity)}
+			log: proto.NewLog(r.ID, logCapacity), shown: true}
 		// A session nothing was ever asked in is not kept (USER 2026-10-22);
 		// no engine runs yet, so it can simply be left out.
 		if !ses.persist && !ses.hasMessages() && !sched.has(r.ID) {
@@ -508,6 +508,10 @@ func (s *Service) Restart(principal, id string, args []string) error {
 	}
 	ses.stop()
 	ses.mu.Lock()
+	// Another model or endpoint: clients replace the conversation quietly.
+	if flagOf(ses.args, "--model") != flagOf(args, "--model") || flagOf(ses.args, "--url") != flagOf(args, "--url") {
+		ses.switching = true
+	}
 	ses.args = slices.Clone(args)
 	ses.mu.Unlock()
 	if err := s.saveRegistry(); err != nil {
@@ -546,6 +550,21 @@ func (s *Service) SwitchModel(principal, id, url, model string) error {
 	args := setFlag(setFlag(ses.args, "--model", model), "--url", url)
 	ses.mu.Unlock()
 	return s.Restart(principal, id, args)
+}
+
+// flagOf is a --name value (either spelling) in args, "" when absent.
+func flagOf(args []string, name string) string {
+	v := ""
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == name && i+1 < len(args):
+			v = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], name+"="):
+			v = strings.TrimPrefix(args[i], name+"=")
+		}
+	}
+	return v
 }
 
 // setFlag replaces a --name value (either spelling) or appends it; an empty

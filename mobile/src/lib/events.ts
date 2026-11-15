@@ -413,6 +413,11 @@ function applyNew(v: View, ev: Ev): View {
     case 'snapshot':
       return applySnapshot(ev, v);
     case 'history':
+      // dund says why (docs/session-events.md, "History reason"). A restart's
+      // is the conversation already shown: kept, with the lines added since
+      // (the restart's own notice). resume, model_switch, or no reason (a
+      // dund before reasons): replaced.
+      if (ev.reason === 'restart' && v.items.length > 0) return v;
       return {
         ...replaceWith((ev.items as unknown[]) ?? [], v),
         busy: v.busy,
