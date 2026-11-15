@@ -288,20 +288,15 @@ func (s *session) persists() bool {
 	return s.persist
 }
 
-// hasMessages reports whether the session's transcript holds a user message.
-// A session without one is not worth keeping: nothing was asked in it.
+// hasMessages reports whether the session's transcript, or an archive of it
+// (/clear's, a recap's), holds a user message. A session without one is not
+// worth keeping: nothing was asked in it.
 func (s *session) hasMessages() bool { return askedIn(s.workspace, s.id) }
 
-// askedIn reads the engine's transcript (a variable: the tests' fake engine
-// writes none).
-var askedIn = func(workspace, id string) bool {
-	for _, it := range dun.SessionHistory(dun.SessionFile(workspace, id)) {
-		if it.Kind == "user" {
-			return true
-		}
-	}
-	return false
-}
+// askedIn is the same rule PruneSessions keeps transcripts by, so dund never
+// drops a session the engine keeps (a variable: the tests' fake engine writes
+// no transcript).
+var askedIn = dun.SessionAsked
 
 // readEvents appends every frame the engine writes until its stdout closes,
 // then handles the exit.
