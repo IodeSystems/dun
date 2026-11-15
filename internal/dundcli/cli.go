@@ -5,6 +5,7 @@
 //	dund serve       run the service (one per DUN_HOME)
 //	dund sessions    list your sessions
 //	dund token       make a new local token for HTTP clients (the old one stops working)
+//	dund token create|list|revoke   named API tokens, one per client
 //	dund rag         search and fill the retrieval indexes (docs/rag.md)
 //
 // Paths: $DUN_HOME (default ~/.dun) holds dund.sock (0600), dund.pid, the
@@ -517,12 +518,13 @@ func schemaCmd() *cobra.Command {
 }
 
 func tokenCmd(l *loader) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "token",
 		Short: "make a new local token for HTTP clients; the previous one stops working",
 		Long: "Prints a new bearer token for clients that reach dund over HTTP (a browser on\n" +
 			"localhost, the app on the LAN). Only its hash is kept, so this is the one time\n" +
-			"it is shown; run it again to replace it.",
+			"it is shown; run it again to replace it. `token create|list|revoke` manage\n" +
+			"named tokens instead, each revoked on its own.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			l.load()
@@ -532,6 +534,58 @@ func tokenCmd(l *loader) *cobra.Command {
 			}
 			fmt.Println(tok)
 			return nil
+		},
+	}
+	cmd.AddCommand(tokenCreateCmd(l), tokenListCmd(l), tokenRevokeCmd(l))
+	return cmd
+}
+
+func tokenCreateCmd(l *loader) *cobra.Command {
+	return &cobra.Command{
+		Use:   "create <name>",
+		Short: "make a named API token; shown once",
+		Long: "Prints a new bearer token called <name>, which acts as you over HTTP. Only its\n" +
+			"hash is kept. A name in use is refused; revoke it first.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			l.load()
+			tok, err := dund.CreateAPIToken(filepath.Join(l.home, "dund"), args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Println(tok)
+			return nil
+		},
+	}
+}
+
+func tokenListCmd(l *loader) *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "list named API tokens (name, created; never the secret)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			l.load()
+			toks, err := dund.ListAPITokens(filepath.Join(l.home, "dund"))
+			if err != nil {
+				return err
+			}
+			for _, t := range toks {
+				fmt.Printf("%s\t%s\n", t.Name, t.Created.Format(time.RFC3339))
+			}
+			return nil
+		},
+	}
+}
+
+func tokenRevokeCmd(l *loader) *cobra.Command {
+	return &cobra.Command{
+		Use:   "revoke <name>",
+		Short: "revoke a named API token; takes effect at once",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			l.load()
+			return dund.RevokeAPIToken(filepath.Join(l.home, "dund"), args[0])
 		},
 	}
 }

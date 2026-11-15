@@ -210,13 +210,13 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 
 type bearerKey struct{}
 
-// principalFor is whom a bearer token stands for: the local token and a
-// sign-in token both stand for the owner.
+// principalFor is whom a bearer token stands for: the local token, a named
+// API token and a sign-in token all stand for the owner.
 func (s *Server) principalFor(tok string) (string, bool) {
 	if tok == "" {
 		return "", false
 	}
-	if s.svc.CheckToken(tok) {
+	if s.svc.CheckToken(tok) || s.svc.CheckAPIToken(tok) {
 		return s.owner, true
 	}
 	return s.svc.CheckSignIn(tok)

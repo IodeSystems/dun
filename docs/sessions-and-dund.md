@@ -154,6 +154,13 @@ releases on its own.
 
 ## Remote API
 
+- **Named API tokens**: `dund token create <name>` prints a `dun_n_...` bearer
+  once (list: `dund token list`, end it: `dund token revoke <name>`; also
+  `dun dund token ...`). Each acts as the owner, like the admin token (plain
+  `dund token`, unchanged); no scopes. Only SHA-256 is kept in
+  `dund/api-tokens.json` (0600, atomic write). dund re-reads the file on each
+  request, so revocation is immediate. Last-used is not tracked (a write per
+  request).
 - **gat calls operations in-process, so huma per-operation middleware does not
   run for GraphQL** (found by a test, then confirmed in gwag). gwag v2.1.3
   fixed this for later releases; dund keeps its own defence regardless: one

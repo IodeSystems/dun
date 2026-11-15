@@ -283,3 +283,52 @@ func TestAndroidReleases(t *testing.T) {
 		t.Errorf("listing: %d", resp.StatusCode)
 	}
 }
+
+// A named token acts as the owner until revoked; the admin token is unaffected.
+func TestNamedTokenAuthenticatesUntilRevoked(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := dund.New(dir, &fakeSpawner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(svc.Close)
+	h, err := dundapi.Handler(svc, dundapi.Options{Owner: "unix:1000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	admin, err := dund.NewToken(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	named, err := dund.CreateAPIToken(dir, "script")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dund.CreateAPIToken(dir, "script"); err == nil {
+		t.Fatal("duplicate name accepted")
+	}
+	for _, tok := range []string{admin, named} {
+		if code, _ := call(t, srv, tok, "GET", "/api/v1/sessions", nil); code != 200 {
+			t.Errorf("token %.8s: %d", tok, code)
+		}
+	}
+	code, m := call(t, srv, named, "POST", "/api/v1/sessions", map[string]any{"workspace": t.TempDir()})
+	if code != 200 {
+		t.Fatalf("create: %d %v", code, m)
+	}
+	id := m["id"].(string)
+	if code, m := call(t, srv, named, "POST", "/api/v1/sessions/"+id+"/subscribe-token", nil); code != 200 {
+		t.Errorf("subscribe-token: %d %v", code, m)
+	}
+	if err := dund.RevokeAPIToken(dir, "script"); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := call(t, srv, named, "GET", "/api/v1/sessions", nil); code != 401 {
+		t.Errorf("revoked: %d", code)
+	}
+	if code, _ := call(t, srv, admin, "GET", "/api/v1/sessions", nil); code != 200 {
+		t.Errorf("admin after revoke: %d", code)
+	}
+}
