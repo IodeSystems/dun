@@ -22,7 +22,7 @@ func (h *Harness) Resumed() int { return h.store.Loaded() }
 // client folds them into one block.
 type HistoryItem struct {
 	Kind    string         `json:"kind"`               // user|assistant|tool_call|tool_result|notification|reasoning|command
-	ID      string         `json:"id,omitempty"`       // a user message's id: the user event's (delivery.go)
+	ID      string         `json:"id,omitempty"`       // a user message's id (the user event's, delivery.go); a reply's (the message event's)
 	Queued  bool           `json:"queued,omitempty"`   // a user message a tool result carried mid-turn
 	IsError bool           `json:"is_error,omitempty"` // a tool_result that failed (ToolFailed)
 	Content string         `json:"content,omitempty"`
@@ -40,6 +40,12 @@ type HistoryItem struct {
 func (h *Harness) History() []HistoryItem {
 	return historyItems(h.store.History())
 }
+
+// ReplyID is the id of the reply the turn that just ended wrote: its
+// history item's, which the message event carries so a service can tell a
+// reply it already sent from a new one with the same text. "" when the turn
+// wrote none.
+func (h *Harness) ReplyID() string { return h.store.lastReplyID() }
 
 // SessionHistory is History read straight from a session file, with no
 // harness: what a service sends a client that has fallen too far behind to
@@ -76,7 +82,7 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 			if strings.TrimSpace(e.Content) == "" {
 				continue
 			}
-			out = append(out, HistoryItem{Kind: "assistant", Content: e.Content})
+			out = append(out, HistoryItem{Kind: "assistant", ID: e.ID, Content: e.Content})
 		case agent.KindToolCall:
 			var args map[string]any
 			_ = json.Unmarshal([]byte(e.Content), &args)

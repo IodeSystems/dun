@@ -64,3 +64,26 @@ func TestAfterSnapshotDropsWhatTheItemsHold(t *testing.T) {
 		t.Fatalf("kept %v", types)
 	}
 }
+
+// Two identical replies in a row both survive a reconnect: the one the
+// items hold is dropped by its id, the next one (same text, new id) is not.
+// An old engine's reply (no id) falls back to the text rule.
+func TestAfterSnapshotDedupesRepliesByID(t *testing.T) {
+	items := []dun.HistoryItem{
+		{Kind: "user", ID: "u1", Content: "ping"},
+		{Kind: "assistant", ID: "r1", Content: "pong"},
+	}
+	replay := []proto.Event{
+		proto.NewEvent(&proto.Message{Role: "assistant", Content: "pong", ID: "r1"}),
+		proto.NewEvent(&proto.UserEcho{ID: "u2", Content: "ping"}),
+		proto.NewEvent(&proto.Message{Role: "assistant", Content: "pong", ID: "r2"}),
+	}
+	got := afterSnapshot(items, replay)
+	if len(got) != 2 || got[1].Payload.(*proto.Message).ID != "r2" {
+		t.Fatalf("kept %d: %+v", len(got), got)
+	}
+	old := afterSnapshot(items, []proto.Event{proto.NewEvent(&proto.Message{Role: "assistant", Content: "pong"})})
+	if len(old) != 0 {
+		t.Errorf("an old engine's repeat of the last reply was kept")
+	}
+}

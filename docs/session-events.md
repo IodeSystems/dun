@@ -89,8 +89,12 @@ derive them from `turn`, tokens, tool calls or `done`.
   the session file again when an event was written meanwhile (a few tries).
   The engine writes an entry and sends its event apart, so dund also drops
   from the replay after a snapshot what the items hold: a `user` event by
-  id, a `tool_call`/`tool_result` by `call_id`, a `message` equal to the last
-  reply. An entry is in the snapshot or the replay, not both.
+  id, a `tool_call`/`tool_result` by `call_id`, a `message` by `id` (the
+  reply's entry; its `assistant` history item carries the same `id`). An
+  entry is in the snapshot or the replay, not both, and two identical
+  replies are two entries. Fallback, marked in dund, for an engine older
+  than reply ids: a `message` with no `id` equal to the last reply in the
+  items is dropped.
 - A client that gets a snapshot on a reconnect replaces its conversation
   with the snapshot's items: what happened while it was away is only there.
   The TUI keeps the splash, the draft, the open question and its picker,

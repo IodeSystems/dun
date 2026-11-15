@@ -405,6 +405,24 @@ func (s *sessionStore) History() []agent.Entry {
 	return out
 }
 
+// lastReplyID is the id of the newest reply since the newest user message
+// (the turn's own), or "" when that turn wrote none.
+func (s *sessionStore) lastReplyID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.entries) - 1; i >= 0; i-- {
+		switch s.entries[i].Kind {
+		case agent.KindAssistant:
+			if strings.TrimSpace(s.entries[i].Content) != "" {
+				return s.entries[i].ID
+			}
+		case agent.KindUser:
+			return ""
+		}
+	}
+	return ""
+}
+
 // recap replaces a span of the conversation with one entry and records a
 // citation.
 //

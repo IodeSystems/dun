@@ -81,10 +81,13 @@ type Reasoning struct {
 	Text string `json:"text"`
 }
 
-// Message is a whole reply, sent when the turn's text is final.
+// Message is a whole reply, sent when the turn's text is final. ID is the
+// reply's entry, the id its history item carries; empty from an older
+// engine.
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	ID      string `json:"id,omitempty"`
 }
 
 // ToolCall: a tool call STARTED (it is running until its tool_result).
@@ -478,7 +481,8 @@ type History struct {
 // HistoryItem mirrors dun.HistoryItem.
 type HistoryItem struct {
 	Kind string `json:"kind"`
-	// ID is a user message's id, the one its user event carried. Queued: a
+	// ID is a user message's id, the one its user event carried, or a
+	// reply's, the one its message event carried. Queued: a
 	// tool result carried it to the model mid-turn (it shows after that
 	// result); otherwise it was a turn's input. A log written before ids
 	// has none for lifted messages: they are only inside the tool result.

@@ -573,11 +573,10 @@ func (s *session) historyAt() (uint64, []dun.HistoryItem) {
 
 // afterSnapshot drops from the replay after a snapshot the events whose
 // entries the snapshot's items already hold: a user message by its id, a
-// tool call or result by its call_id, and a final reply equal to the last
-// one in the items. The engine writes an entry and sends its event apart
+// tool call or result by its call_id, a reply by its id. The engine writes an entry and sends its event apart
 // (either may come first), so without this an entry could show twice.
 func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event {
-	users, calls, results := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	users, calls, results, replies := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	lastReply := ""
 	for _, it := range items {
 		switch it.Kind {
@@ -588,6 +587,7 @@ func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event 
 		case "tool_result":
 			results[it.CallID] = it.CallID != ""
 		case "assistant":
+			replies[it.ID] = it.ID != ""
 			lastReply = it.Content
 		}
 	}
@@ -607,7 +607,13 @@ func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event 
 				continue
 			}
 		case *proto.Message:
-			if lastReply != "" && p.Content == lastReply {
+			if replies[p.ID] {
+				continue
+			}
+			// Fallback, for an engine older than reply ids: a reply equal to
+			// the last one in the items is taken for it (a repeated reply
+			// is dropped wrongly; ids fixed that).
+			if p.ID == "" && lastReply != "" && p.Content == lastReply {
 				continue
 			}
 		}
