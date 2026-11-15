@@ -502,7 +502,9 @@ func TestTUI_HistoryReplay(t *testing.T) {
 	if len(m.convo) != 5 {
 		t.Fatalf("expected 5 blocks, got %d", len(m.convo))
 	}
-	txt := convoText(m)
+	// Without colour: glamour styles each word apart (the style is a
+	// process global other tests change), so escapes split "on it".
+	txt := stripANSI(convoText(m))
 	for _, want := range []string{"fix the bug", "on it", "node read", "sel=F", "background job #1", "resumed 4 entries"} {
 		if !strings.Contains(txt, want) {
 			t.Fatalf("replayed scrollback missing %q in:\n%s", want, txt)
