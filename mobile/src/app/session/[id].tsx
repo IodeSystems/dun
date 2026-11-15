@@ -18,6 +18,7 @@ import {
   SwitchModel,
   UpgradeNow,
 } from '@/api/ops';
+import { Markdown } from '@/components/markdown/Markdown';
 import { McpForm } from '@/components/McpForm';
 import { McpToolsPanel } from '@/components/McpToolsPanel';
 import { ModelPicker } from '@/components/ModelPicker';
@@ -513,9 +514,7 @@ function Row({ item }: { item: Item }) {
             padding: space.md,
           }}
         >
-          <Text selectable style={{ color: c.text, fontSize: font.md }}>
-            {item.text}
-          </Text>
+          <Markdown text={item.text} streaming={item.key === 'streaming'} />
         </View>
       );
     case 'tool': {
