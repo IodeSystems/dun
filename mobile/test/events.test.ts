@@ -60,24 +60,51 @@ test('history replaces what is shown, never adds', () => {
   expect(w.items.map((i) => (i.kind === 'tools' || i.kind === 'notice' ? '' : i.text))).toEqual(['a', 'b']);
 });
 
-test('an ask stays open until answered, from any client', () => {
-  const v = run([{ type: 'ask', question: 'colour?', options: ['red', 'blue'] }]);
-  expect(v.ask).toEqual({ question: 'colour?', options: ['red', 'blue'] });
+test('an ask stays open until answered, from any client; its row comes from the ask', () => {
+  const v = run([
+    { type: 'tool_call', tool: 'ask_user', call_id: 'c1', args: { question: 'colour?', options: ['red', 'blue'] } },
+    {
+      type: 'ask',
+      ask_id: 'a1',
+      call_id: 'c1',
+      question: 'colour?',
+      options: ['red', 'blue', 'green'],
+      multi: true,
+      recommended_all: ['blue', 'green'],
+      no_custom: true,
+    },
+  ]);
+  expect(v.ask).toEqual({
+    askId: 'a1',
+    question: 'colour?',
+    options: ['red', 'blue', 'green'],
+    recommended: 'blue',
+    recommendedAll: ['blue', 'green'],
+    multi: true,
+    noCustom: true,
+  });
+  expect(v.items).toEqual([expect.objectContaining({ kind: 'question', multi: true, callId: 'c1' })]);
   const w = run(
     [
-      { type: 'answered', value: 'blue' },
-      {
-        type: 'tool_call',
-        tool: 'ask_user',
-        args: { question: 'colour?', options: ['red', 'blue'], recommended: 'blue' },
-      },
-      { type: 'tool_result', tool: 'ask_user', result: 'blue' },
+      { type: 'answered', ask_id: 'old', value: 'stale' }, // another question's: nothing
+      { type: 'answered', ask_id: 'a1', value: 'blue, green', by: 'unix:1000' },
+      { type: 'tool_result', tool: 'ask_user', call_id: 'c1', result: 'blue, green' },
     ],
     v,
   );
   expect(w.ask).toBeNull();
   expect(w.items.map((i) => i.kind)).toEqual(['question', 'user']);
-  expect(w.items[0]).toMatchObject({ text: 'colour?', recommended: 'blue' });
+  expect(w.items[1]).toMatchObject({ text: 'blue, green' });
+});
+
+test('a snapshot that holds the asking call shows one question row', () => {
+  const v = applySnapshot({
+    items: [{ kind: 'tool_call', tool: 'ask_user', call_id: 'c1', args: { question: 'ok?', options: ['y', 'n'] } }],
+    state: [],
+  });
+  const w = apply(v, { type: 'ask', ask_id: 'a', call_id: 'c1', question: 'ok?', options: ['y', 'n'] });
+  expect(w.items.filter((i) => i.kind === 'question')).toHaveLength(1);
+  expect(w.ask?.askId).toBe('a');
 });
 
 test('an ask_user in history renders as the question and its answer, not JSON', () => {
@@ -98,7 +125,8 @@ test('a snapshot renders the conversation then applies its state events', () => 
     items: [{ kind: 'user', content: 'q' }],
     state: [{ type: 'ask', question: 'ok?', options: [] }],
   });
-  expect(v.items).toHaveLength(1);
+  // The restored question (dund's, not in the history) is its own row.
+  expect(v.items.map((i) => i.kind)).toEqual(['user', 'question']);
   expect(v.ask?.question).toBe('ok?');
 });
 

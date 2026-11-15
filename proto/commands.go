@@ -32,8 +32,15 @@ type Image struct {
 }
 
 // Answer replies to the open ask or mount.
+//
+// AskID names the question it answers (the ask's ask_id): an answer to a
+// question no longer open is dropped, not taken by the next one. Empty
+// answers whatever is open (an older client). By is who answered: dund sets
+// it from the sender's principal, whatever the client put there.
 type Answer struct {
 	Value string `json:"value"`
+	AskID string `json:"ask_id,omitempty"`
+	By    string `json:"by,omitempty"`
 }
 
 // ServerCmd turns a tool server on, off, auto or manual (/rag, /lsp).

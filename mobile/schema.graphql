@@ -150,6 +150,7 @@ type dund_AndroidRelease {
 }
 
 input dund_AnswerInputBodyInput {
+  askId: String
   value: String!
 }
 

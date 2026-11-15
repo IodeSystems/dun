@@ -42,6 +42,7 @@ import { PlanSheet } from '@/components/plan/PlanSheet';
 import { TasksSheet } from '@/components/tasks/TasksSheet';
 import { Thinking } from '@/components/thinking/Thinking';
 import { ToolRun } from '@/components/tools/ToolRun';
+import { AskPanel } from '@/components/AskPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
 import {
@@ -81,7 +82,6 @@ const transcript = {
 export default function Session() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const auth = useAuth();
-  const c = useColors();
   const insets = useSafeAreaInsets();
   const [view, setView] = useState<Shown>(empty);
   // The request stats (lib/stats.ts), this session's only.
@@ -317,7 +317,7 @@ export default function Session() {
 
   async function answer(value: string) {
     try {
-      await auth.client?.request(Answer, { id, value });
+      await auth.client?.request(Answer, { id, value, askId: view.ask?.askId });
     } catch (e) {
       setSendErr('answer not sent: ' + explain(e).message);
     }
@@ -463,27 +463,7 @@ export default function Session() {
           }}
         >
           {view.ask ? (
-            <View
-              style={{
-                gap: space.sm,
-                paddingVertical: space.xs,
-                borderLeftWidth: 3,
-                borderColor: c.accent,
-                paddingLeft: space.md,
-              }}
-            >
-              <Text style={{ color: c.text, fontSize: font.md }}>❓ {view.ask.question}</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-                {view.ask.options.map((o) => (
-                  <Button
-                    key={o}
-                    title={o === view.ask?.recommended ? `${o} ★` : o}
-                    primary={o === view.ask?.recommended}
-                    onPress={() => void answer(o)}
-                  />
-                ))}
-              </View>
-            </View>
+            <AskPanel key={view.ask.askId ?? view.ask.question} ask={view.ask} answer={(o) => void answer(o)} />
           ) : null}
           {picker !== null ? (
             <ModelPicker
@@ -571,7 +551,9 @@ export default function Session() {
               value={text}
               onChangeText={setText}
               multiline
-              placeholder={view.ask ? 'or type an answer…' : 'ask dun to do something… (/ for commands)'}
+              placeholder={
+                view.ask && !view.ask.noCustom ? 'or type an answer…' : 'ask dun to do something… (/ for commands)'
+              }
               onKeyPress={(e) => {
                 // Enter sends on the web; Shift+Enter is a newline.
                 const ne = e.nativeEvent as { key: string; shiftKey?: boolean };
@@ -597,7 +579,7 @@ export default function Session() {
                 }
                 if (Platform.OS === 'web' && ne.key === 'Enter' && !ne.shiftKey) {
                   e.preventDefault();
-                  if (view.ask && text.trim()) {
+                  if (view.ask && !view.ask.noCustom && text.trim()) {
                     void answer(text.trim());
                     setText('');
                   } else void send();

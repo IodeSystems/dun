@@ -944,21 +944,17 @@ func main() {
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
 			return withoutClock(func() (string, error) {
-				ask := &proto.Ask{Question: q, Options: opts, Multi: multi, RecommendedAll: rec}
+				ask := &proto.Ask{AskID: dun.NewMessageID(), CallID: em.turn.callID(), Question: q, Options: opts, Multi: multi, RecommendedAll: rec}
 				if len(rec) > 0 {
 					ask.Recommended = rec[0]
 				}
 				em.emit(ask)
-				select {
-				case a, ok := <-in.answers:
-					if !ok {
-						return "", fmt.Errorf("input closed")
-					}
-					em.emit(&proto.Answered{Value: a})
-					return a, nil
-				case <-actx.Done():
-					return "", actx.Err()
+				a, err := awaitAnswer(actx, in.answers, ask.AskID)
+				if err != nil {
+					return "", err
 				}
+				em.emit(&proto.Answered{Value: a.Value, AskID: ask.AskID, By: a.By})
+				return a.Value, nil
 			})
 		}
 		// --non-interactive: nobody answers, so no ask_user (a nil Ask offers none).
@@ -969,17 +965,15 @@ func main() {
 			askMu.Lock()
 			defer askMu.Unlock()
 			return withoutClock(func() (bool, error) {
-				em.emit(&proto.Mount{Source: source, Name: name})
-				select {
-				case a, ok := <-in.answers:
-					if !ok {
-						return false, fmt.Errorf("input closed")
-					}
-					em.emit(&proto.Answered{Value: a})
-					return strings.TrimSpace(strings.ToLower(a)) == "yes" || strings.TrimSpace(strings.ToLower(a)) == "y", nil
-				case <-actx.Done():
-					return false, actx.Err()
+				id := dun.NewMessageID()
+				em.emit(&proto.Mount{AskID: id, Source: source, Name: name})
+				a, err := awaitAnswer(actx, in.answers, id)
+				if err != nil {
+					return false, err
 				}
+				em.emit(&proto.Answered{Value: a.Value, AskID: id, By: a.By})
+				v := strings.TrimSpace(strings.ToLower(a.Value))
+				return v == "yes" || v == "y", nil
 			})
 		}
 	} else {

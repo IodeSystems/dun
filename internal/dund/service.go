@@ -372,7 +372,7 @@ func (s *Service) Send(principal, id string, c proto.Command) error {
 	if err != nil {
 		return err
 	}
-	return ses.send(c)
+	return ses.send(stampAnswer(c, principal))
 }
 
 // Poll returns the session's events after seq after (of epoch epoch; see
@@ -811,4 +811,15 @@ func writeFileAtomic(path string, b []byte) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// stampAnswer sets an answer's By to the principal that sent it: answered
+// says who answered, and a client cannot speak for another.
+func stampAnswer(c proto.Command, principal string) proto.Command {
+	if a, ok := c.Payload.(*proto.Answer); ok {
+		cp := *a
+		cp.By = principal
+		c.Payload = &cp
+	}
+	return c
 }

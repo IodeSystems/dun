@@ -445,7 +445,7 @@ func (s *session) restoredReply(c proto.Command) (done bool, err error) {
 	s.restored, s.restoredEvs, s.resume = nil, nil, ""
 	s.actMu.Unlock()
 	if answer != nil {
-		s.log.Append(proto.NewEvent(&proto.Answered{Value: answer.Value}))
+		s.log.Append(proto.NewEvent(&proto.Answered{Value: answer.Value, AskID: q.AskID, By: answer.By}))
 		err = s.send(proto.NewCommand("", &proto.User{Content: answerMessage(q.Question, answer.Value, note)}))
 	} else {
 		s.log.Append(proto.NewEvent(&proto.Done{Reason: "interrupted", Detail: "question dismissed"}))

@@ -20,11 +20,34 @@ export type Item =
   | Run
   | { key: string; kind: 'note'; text: string; error?: boolean }
   | ({ key: string; kind: 'thinking' } & Thought)
-  | { key: string; kind: 'question'; text: string; options: string[]; recommended?: string }
+  // callId: the ask_user call asking it, which history's tool_call and the ask event both name.
+  | {
+      key: string;
+      kind: 'question';
+      text: string;
+      options: string[];
+      recommended?: string;
+      recommendedAll?: string[];
+      multi?: boolean;
+      callId?: string;
+    }
   // What the engine says beside the conversation (notices.ts): it ends a run.
   | { key: string; kind: 'notice'; notice: notices.Notice };
 
-export type Ask = { question: string; options: string[]; recommended?: string };
+/**
+ * The open question (proto.Ask). askId names it in the answer. multi: pick
+ * any number (recommendedAll are checked to start with). noCustom: the
+ * answer must be one of the options, no own words.
+ */
+export type Ask = {
+  askId?: string;
+  question: string;
+  options: string[];
+  recommended?: string;
+  recommendedAll: string[];
+  multi: boolean;
+  noCustom: boolean;
+};
 
 /** A slash command the engine carries out (proto.CommandSpec). */
 export type Command = {
@@ -192,10 +215,18 @@ const errorOf = (e: Ev): boolean | undefined =>
 
 /** An ask event, or turn_state's ask. */
 function parseAsk(a: Ev): Ask {
+  const all = Array.isArray(a.recommended_all) ? (a.recommended_all as string[]) : [];
+  const rec = all[0] ?? (str(a.recommended) || undefined);
+  const options = (a.options as string[]) ?? [];
   return {
+    ...(str(a.ask_id) ? { askId: str(a.ask_id) } : {}),
     question: str(a.question),
-    options: (a.options as string[]) ?? [],
-    recommended: str(a.recommended) || undefined,
+    options,
+    recommended: rec,
+    recommendedAll: all.length ? all : rec ? [rec] : [],
+    multi: a.multi === true,
+    // Meaningless without options to pick from (the TUI's rule).
+    noCustom: a.no_custom === true && options.length > 0,
   };
 }
 
@@ -261,14 +292,39 @@ function reconcileQueued(v: View, queued: { id: string; text: string }[]): View 
 
 const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
-/** An ask_user call as the question it is, not as JSON. */
-function pushQuestion(v: View, args: unknown): View {
+/** An ask_user call (history) as the question it is, not as JSON. */
+function pushQuestion(v: View, args: unknown, callId: string): View {
   const a = (args ?? {}) as Ev;
+  const rec = Array.isArray(a.recommended)
+    ? (a.recommended as string[])
+    : str(a.recommended)
+      ? [str(a.recommended)]
+      : [];
   return push(v, {
     kind: 'question',
     text: str(a.question),
     options: (a.options as string[]) ?? [],
-    recommended: str(a.recommended) || undefined,
+    recommended: rec[0],
+    recommendedAll: rec,
+    multi: a.multi === true,
+    ...(callId ? { callId } : {}),
+  });
+}
+
+/**
+ * The ask event: the question row, live (history shows it from the ask_user
+ * call). A row its call already has (a snapshot's history) is not repeated.
+ */
+function askRow(v: View, a: Ask, callId: string): View {
+  if (callId && v.items.some((i) => i.kind === 'question' && i.callId === callId)) return v;
+  return push(v, {
+    kind: 'question',
+    text: a.question,
+    options: a.options,
+    recommended: a.recommended,
+    recommendedAll: a.recommendedAll,
+    multi: a.multi,
+    ...(callId ? { callId } : {}),
   });
 }
 
@@ -280,7 +336,7 @@ function fromHistory(v: View, it: Ev): View {
     case 'assistant':
       return push(v, { kind: 'assistant', text: str(it.content) });
     case 'tool_call':
-      if (it.tool === 'ask_user') return pushQuestion(v, it.args);
+      if (it.tool === 'ask_user') return pushQuestion(v, it.args, str(it.call_id));
       return (
         pushCarried(v, str(it.tool), it.args, str(it.call_id)) ??
         merge(v, withCall(v.items, str(it.tool), it.args, str(it.call_id) || undefined, String(v.n)))
@@ -372,9 +428,8 @@ function applyNew(v: View, ev: Ev): View {
       // A tool call ends the text streamed before it.
       let w = v;
       if (v.streaming) w = push({ ...v, streaming: null }, { kind: 'assistant', text: v.streaming });
-      // ask_user's call (when it is asked) and result (the answer) are what
-      // shows the question and the answer, live as from history.
-      if (ev.tool === 'ask_user') return pushQuestion(w, ev.args);
+      // ask_user live: the ask event shows the question, answered the answer.
+      if (ev.tool === 'ask_user') return w;
       return (
         pushCarried(w, str(ev.tool), ev.args, str(ev.call_id)) ??
         merge(w, withCall(w.items, str(ev.tool), ev.args, str(ev.call_id) || undefined, String(w.n)))
@@ -383,7 +438,7 @@ function applyNew(v: View, ev: Ev): View {
     case 'tool_result': {
       // A queued message it carried is settled by the delivered event after it.
       const w = v;
-      if (ev.tool === 'ask_user') return push(w, { kind: 'user', text: str(ev.result) });
+      if (ev.tool === 'ask_user') return w;
       return (
         settleCarried(w, str(ev.tool), str(ev.result), str(ev.call_id)) ??
         merge(
@@ -401,11 +456,17 @@ function applyNew(v: View, ev: Ev): View {
         { ...settleUnnamedQueued(v), streaming: null },
         { kind: 'note', text: 'error: ' + str(ev.error), error: true },
       );
-    case 'ask':
-      return { ...v, ask: parseAsk(ev) };
-    case 'answered':
-      // The question and the answer are shown from ask_user's call and result.
-      return { ...v, ask: null };
+    case 'ask': {
+      const a = parseAsk(ev);
+      return { ...askRow(v, a, str(ev.call_id)), ask: a };
+    }
+    case 'answered': {
+      // The open question's answer, whoever gave it. One naming another
+      // question closes nothing here.
+      const id = str(ev.ask_id);
+      if (id && v.ask?.askId && id !== v.ask.askId) return v;
+      return push({ ...v, ask: null }, { kind: 'user', text: str(ev.value) });
+    }
     case 'notification':
       return push(v, { kind: 'notice', notice: notices.fromNotification(ev) });
     case 'recap':

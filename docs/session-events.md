@@ -87,3 +87,19 @@ derive them from `turn`, tokens, tool calls or `done`.
   from the replay after a snapshot what the items hold: a `user` event by
   id, a `tool_call`/`tool_result` by `call_id`, a `message` equal to the last
   reply. An entry is in the snapshot or the replay, not both.
+
+## Questions
+
+- `ask {ask_id, call_id, question, options, multi, recommended,
+  recommended_all, no_custom}`: the open question. `call_id` is the asking
+  `ask_user` call. The `ask` event is the question's row live; history shows
+  it from that call's `tool_call` item (a client that has the row for the
+  call does not add another). `multi`: any number may be picked,
+  `recommended_all` checked to start with, sent back comma-separated.
+  `no_custom`: the answer must be an option (meaningless without options).
+- `answer {value, ask_id}` (command): an answer naming a question that is no
+  longer open is dropped by the engine, not taken by the next question. dund
+  sets `by` from the sender's principal.
+- `answered {ask_id, value, by}`: the question is closed; its answer is the
+  person's row, live. `ask_user`'s live `tool_call`/`tool_result` add no row.
+- `mount {ask_id, …}` is answered the same way.

@@ -31,6 +31,16 @@ func newTurnTracker(em *emitter, h func() *dun.Harness) *turnTracker {
 		em: em, h: h, now: time.Now}
 }
 
+// callID is the tool call running now ("" between calls, or nil tracker).
+func (t *turnTracker) callID() string {
+	if t == nil {
+		return ""
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.st.CallID
+}
+
 // interrupting: an interrupt reached a running turn; its done ends it.
 func (t *turnTracker) interrupting() {
 	t.change(false, func(st *proto.TurnState) {

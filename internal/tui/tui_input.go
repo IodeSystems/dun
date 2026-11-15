@@ -1365,7 +1365,7 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 // sendAnswer resolves the ask: ships the answer to the engine and resets to
 // the input pane.
 func (m tuiModel) sendAnswer(v string) tuiModel {
-	if !m.proc.answer(v) {
+	if !m.proc.answer(v, m.askID) {
 		m.append(StErr.Render("no engine right now — answer not sent"))
 	}
 	m = m.clearAsk()

@@ -291,11 +291,18 @@ func (p *dunProc) controlCmd(id, action string) bool {
 	}
 	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "control", "id": id, "action": action}) == nil
 }
-func (p *dunProc) answer(value string) bool {
+
+// answer answers question askID (the ask's ask_id; "" an engine before
+// ids): an answer to a question already closed is dropped by the engine.
+func (p *dunProc) answer(value, askID string) bool {
 	if p == nil {
 		return false
 	}
-	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "answer", "value": value}) == nil
+	cmd := map[string]string{"type": "answer", "value": value}
+	if askID != "" {
+		cmd["ask_id"] = askID
+	}
+	return json.NewEncoder(p.stdin).Encode(cmd) == nil
 }
 func (p *dunProc) close() {
 	if p == nil {

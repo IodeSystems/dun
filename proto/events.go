@@ -343,7 +343,14 @@ type ContextCost struct {
 }
 
 // Ask is a question for the human; the answer command replies.
+//
+// AskID names this question: answered names it, an answer may.
+//
+// CallID is the ask_user call asking it (history's tool_call has it too),
+// so a client shows one question row for both.
 type Ask struct {
+	AskID       string   `json:"ask_id,omitempty"`
+	CallID      string   `json:"call_id,omitempty"`
 	Question    string   `json:"question"`
 	Options     []string `json:"options"`
 	Multi       bool     `json:"multi"`
@@ -358,6 +365,7 @@ type Ask struct {
 
 // Mount asks to mount a host path into the container; answered yes or no.
 type Mount struct {
+	AskID  string `json:"ask_id,omitempty"`
 	Source string `json:"source"`
 	Name   string `json:"name"`
 }
@@ -787,9 +795,12 @@ type Turn struct {
 	Kind string `json:"kind"`
 }
 
-// Answered: the open ask (or mount) got its answer.
+// Answered: the open ask (or mount) AskID got its answer, Value, from By
+// (the principal dund saw send it; empty from an older dund).
 type Answered struct {
 	Value string `json:"value"`
+	AskID string `json:"ask_id,omitempty"`
+	By    string `json:"by,omitempty"`
 }
 
 // Settings is the session's shared toggles, sent at ready and on each change.

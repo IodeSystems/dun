@@ -125,11 +125,14 @@ test('a snapshot after a live call replaces it, not adds to it', () => {
   expect(states(w)).toEqual([['exec:done']]);
 });
 
-test('ask_user stays a question and its answer', () => {
-  const v = run([
-    { type: 'tool_call', tool: 'ask_user', args: { question: 'q?' } },
-    { type: 'tool_result', tool: 'ask_user', result: 'yes' },
-  ]);
+test('ask_user stays a question and its answer (history)', () => {
+  const v = applySnapshot({
+    items: [
+      { kind: 'tool_call', tool: 'ask_user', args: { question: 'q?' } },
+      { kind: 'tool_result', tool: 'ask_user', content: 'yes' },
+    ],
+    state: [],
+  });
   expect(v.items.map((i: Item) => i.kind)).toEqual(['question', 'user']);
 });
 

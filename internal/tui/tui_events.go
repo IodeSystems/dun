@@ -293,7 +293,10 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// The call started (dun/toolevents.go): shown running until the
 		// tool_result that names its call_id. Appended; nothing above moves.
 		args, _ := ev["args"].(map[string]any)
-		m.addCall(str(ev["tool"]), str(ev["call_id"]), args)
+		// ask_user live: the ask event is its row, answered its answer.
+		if str(ev["tool"]) != "ask_user" {
+			m.addCall(str(ev["tool"]), str(ev["call_id"]), args)
+		}
 		m.activeTool = callText(str(ev["tool"]), args, 40)
 		m.refresh()
 	case "tool_result":
@@ -305,7 +308,9 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			no := false // the engine omits a false is_error
 			failed = &no
 		}
-		m.callResult(str(ev["call_id"]), str(ev["tool"]), result, failed)
+		if str(ev["tool"]) != "ask_user" {
+			m.callResult(str(ev["call_id"]), str(ev["tool"]), result, failed)
+		}
 		m.activeTool = ""
 		// Track tool result stats for /context
 		m.ctxStats.toolResults++
@@ -440,6 +445,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.keepDraft() // the composer is the user's draft; the question borrows it
 		}
 		m.asking, m.noting = true, false
+		m.askID = str(ev["ask_id"])
 		m.askSel, m.askNote = 0, ""
 		m.input.Blur()
 		m.settleAsk() // a new question replaces any parked one
@@ -552,7 +558,11 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 	case "turn_state":
 		return m.applyTurnState(ev)
 	case "answered":
-		// The open question is settled, whoever answered it.
+		// The open question is settled, whoever answered it. One naming
+		// another question (a stale answered) settles nothing here.
+		if id := str(ev["ask_id"]); id != "" && m.askID != "" && id != m.askID {
+			break
+		}
 		// The client that answered has already closed it; on another, it is
 		// still open and closes now.
 		m.settleAsk()
