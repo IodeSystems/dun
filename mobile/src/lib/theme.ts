@@ -15,6 +15,12 @@ export const light = {
   danger: '#b3261e',
   /** Proactive notices: the TUI's stNote (256-colour 214, orange). */
   notice: '#9a5a00',
+  /** A question waiting on the person: the TUI's stAsk (256-colour 213, pink). */
+  ask: '#b02a9c',
+  /** The agent at work: the TUI's spinner and StTool (green). */
+  working: '#1f7a3a',
+  /** Dims the screen under a sheet. */
+  scrim: '#00000066',
   /** Background tints of a diff's added and removed lines. */
   diffAdd: '#e3f4ea',
   diffDel: '#fbe5e3',
@@ -54,6 +60,9 @@ export const dark: typeof light = {
   user: '#1f2a3d',
   danger: '#f2867d',
   notice: '#f0a742',
+  ask: '#ff87ff',
+  working: '#5fd75f',
+  scrim: '#00000099',
   diffAdd: '#1c3326',
   diffDel: '#3a2220',
   /** The glamour "dark" chroma style; comment, type and attr lifted to 4:1 on sunken. */

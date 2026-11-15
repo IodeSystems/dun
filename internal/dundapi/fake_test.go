@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,10 +80,19 @@ func (e *fakeEngine) run(id string) {
 			if p.Content == "crash" {
 				return
 			}
+			if log, ok := strings.CutPrefix(p.Content, "job "); ok {
+				e.emit(enc, &proto.Jobs{Jobs: []proto.JobInfo{{ID: 1, Command: "make", Log: log, State: "exited"}}})
+				continue
+			}
 			e.emit(enc, &proto.UserEcho{Content: p.Content})
 			e.emit(enc, &proto.Turn{Kind: "user"})
 			e.emit(enc, &proto.Message{Role: "assistant", Content: "re: " + p.Content})
 			e.emit(enc, &proto.Done{})
+		case *proto.AgentCmd:
+			if p.Action == "view" {
+				n, _ := strconv.Atoi(p.ID)
+				e.emit(enc, &proto.AgentHistory{Agent: n, Prompt: "child"})
+			}
 		case *proto.Stop:
 			e.emit(enc, &proto.Exit{Reason: "stopped"})
 			return

@@ -196,3 +196,28 @@ export const Control = graphql(`
     }
   }
 `);
+
+export const AgentCmd = graphql(`
+  mutation AgentCmd($id: String!, $agent: String!, $action: dund_AgentInputBodyAction!, $content: String) {
+    dund {
+      agent(id: $id, body: { agent: $agent, action: $action, content: $content }) {
+        ok
+      }
+    }
+  }
+`);
+
+export const JobOutput = graphql(`
+  query JobOutput($id: String!, $job: Long!, $since: Long, $tail: Long) {
+    dund {
+      jobOutput(id: $id, job: $job, since: $since, tail: $tail) {
+        job
+        state
+        offset
+        size
+        next
+        data
+      }
+    }
+  }
+`);

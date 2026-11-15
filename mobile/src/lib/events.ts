@@ -4,6 +4,7 @@
 // The events are the protocol's flat JSON frames (dun proto/events.go); only
 // the fields read here are relied on.
 
+import { noBackground, noteBackground, type Background } from './background';
 import type { McpTool, McpTools } from './mcp';
 import * as notices from './notices';
 import { endsThinking, endThought, evTime, liveThought, type Thought } from './thinking';
@@ -66,8 +67,14 @@ export type View = {
   closed: boolean;
   /** dund upgrading (the upgrade event): the banner; null when none. */
   upgrade: Upgrade | null;
+  /** Agents, jobs, the plan, the context figures, the turn's tool and clock (background.ts). */
+  bg: Background;
+  /** The sub-agent whose conversation is open (agent view), its items folded like the session's. */
+  agentView: AgentView | null;
   n: number; // key counter
 };
+
+export type AgentView = { id: number; prompt: string; loaded: boolean; view: View };
 
 export const empty: View = {
   items: [],
@@ -82,6 +89,8 @@ export const empty: View = {
   mcpTools: null,
   closed: false,
   upgrade: null,
+  bg: noBackground,
+  agentView: null,
   n: 0,
 };
 
@@ -178,12 +187,16 @@ export function replaceWith(items: unknown[], keep?: View): View {
     models: keep?.models ?? null,
     settings: keep?.settings ?? null,
     mcpTools: keep?.mcpTools ?? null,
+    agentView: keep?.agentView ?? null,
   };
   for (const it of items) if (it && typeof it === 'object') v = fromHistory(v, it as Ev);
   return v;
 }
 
 export function apply(v: View, ev: Ev): View {
+  const bg = noteBackground(v.bg, ev);
+  if (bg !== v.bg) v = { ...v, bg };
+  v = applyMore(v, ev);
   // The round's thinking is over (lib/thinking.ts).
   if (endsThinking.has(str(ev.type)))
     v = { ...v, items: endThought(v.items, evTime(ev), ev.type === 'done' && ev.reason === 'interrupted') };
@@ -199,6 +212,8 @@ export function apply(v: View, ev: Ev): View {
         status: v.status,
         ask: v.ask,
         upgrade: v.upgrade,
+        bg: v.bg,
+        agentView: v.agentView,
       };
     case 'user':
       return pushUser(v, str(ev.content), ev.queued === true);
@@ -373,6 +388,50 @@ function interrupted(v: View, detail: string): View {
 /** /jobs kill all ends every running job: the screen asks first. */
 export function isKillAll(line: string): boolean {
   return /^\/?jobs\s+kill\s+all\s*$/i.test(line.trim());
+}
+
+/**
+ * What apply does besides its switch: a question the turn asked ends with the
+ * turn, however it ended (the TUI's done); the open sub-agent view follows
+ * its agent_history (which replaces) and agent_entry (which adds) events, and
+ * ignores another agent's, as the TUI's scope does.
+ */
+function applyMore(v: View, ev: Ev): View {
+  switch (ev.type) {
+    case 'done':
+      return v.ask ? { ...v, ask: null } : v;
+    case 'agent_history': {
+      const a = v.agentView;
+      if (!a || ev.agent !== a.id) return v;
+      const view = replaceWith((ev.items as unknown[]) ?? []);
+      return { ...v, agentView: { ...a, prompt: str(ev.prompt) || a.prompt, loaded: true, view } };
+    }
+    case 'agent_entry': {
+      const a = v.agentView;
+      if (!a || ev.agent !== a.id) return v;
+      let view = a.view;
+      for (const it of (ev.items as unknown[]) ?? [])
+        if (it && typeof it === 'object') view = fromHistory(view, it as Ev);
+      return { ...v, agentView: { ...a, view } };
+    }
+  }
+  return v;
+}
+
+/** Opens sub-agent id's conversation: its history fills it once the agent view's answer arrives. */
+export function watchAgent(v: View, id: number, prompt = ''): View {
+  return { ...v, agentView: { id, prompt, loaded: false, view: empty } };
+}
+
+export const unwatchAgent = (v: View): View => ({ ...v, agentView: null });
+
+/** The person's last message, for the header ('' before one). */
+export function lastUser(v: View): string {
+  for (let i = v.items.length - 1; i >= 0; i--) {
+    const it = v.items[i]!;
+    if (it.kind === 'user') return it.text;
+  }
+  return '';
 }
 
 /** A snapshot: the conversation, then the latest state events. */

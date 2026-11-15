@@ -132,6 +132,20 @@ func TestLogStateIsLatestPerType(t *testing.T) {
 	}
 }
 
+// The plan and the request bar survive a snapshot: their latest event is in
+// the state after the ring has dropped it.
+func TestLogStateKeepsPlanAndRequest(t *testing.T) {
+	l := NewLog("s", 2)
+	l.Append(NewEvent(&Plan{Total: 2, Done: 1, Rows: []PlanNode{{ID: "a", Status: "done"}, {ID: "b", Status: "doing"}}}))
+	l.Append(NewEvent(&Request{Phase: "start"}))
+	l.Append(NewEvent(&Request{Phase: "live", Ctx: 41300, Window: 131072}))
+	appendTokens(l, 4)
+	st := l.State()
+	if len(st) != 2 || st[0].Type != "plan" || st[1].Type != "request" || st[1].Seq != 3 {
+		t.Fatalf("state: %+v", st)
+	}
+}
+
 func TestLogClose(t *testing.T) {
 	l := NewLog("s", 4)
 	_, sub, _ := l.Subscribe(0, 4)
