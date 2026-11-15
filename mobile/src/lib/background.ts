@@ -5,6 +5,7 @@
 
 import { parseAgents, parseJobs, type Agent, type Job } from './activity';
 import { noCtx, noteCtx, type Ctx } from './ctxstats';
+import { noCtxView, noteCtxView, type CtxView } from './ctxview';
 import { parsePlan, type Plan } from './plan';
 import { evTime } from './thinking';
 import { callText } from './tooltext';
@@ -15,6 +16,8 @@ export type Background = {
   /** Null until the session has a plan with a row in it. */
   plan: Plan | null;
   ctx: Ctx;
+  /** The /context view's own figures (ctxview.ts). */
+  ctxv: CtxView;
   /** The call the turn is running, as the TUI says it (activeTool: callText, 40 wide); '' between calls. */
   activeTool: string;
   /** When the running turn started (ms), 0 when idle: the header's clock (turn_state since). */
@@ -28,6 +31,7 @@ export const noBackground: Background = {
   jobs: [],
   plan: null,
   ctx: noCtx,
+  ctxv: noCtxView,
   activeTool: '',
   busySince: 0,
   retry: '',
@@ -38,6 +42,12 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const args = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : null);
 
 export function noteBackground(b: Background, ev: Ev): Background {
+  const n = noteWork(b, ev);
+  const ctxv = noteCtxView(n.ctxv, ev);
+  return ctxv === n.ctxv ? n : { ...n, ctxv };
+}
+
+function noteWork(b: Background, ev: Ev): Background {
   switch (ev.type) {
     case 'agents':
       return { ...b, agents: parseAgents(ev, evTime(ev)) };

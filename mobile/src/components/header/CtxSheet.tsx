@@ -1,9 +1,11 @@
 import { Text, View } from 'react-native';
 
 import { sections, type Ctx, type DetailRow } from '@/lib/ctxstats';
+import { noCtxView, type CtxView } from '@/lib/ctxview';
 import { pieces, type Stats } from '@/lib/stats';
 import { font, mono, space, useColors } from '@/lib/theme';
 
+import { ContextSection } from './ContextSection';
 import { Sheet } from './Sheet';
 
 /**
@@ -11,7 +13,19 @@ import { Sheet } from './Sheet';
  * (lib/stats.ts, the TUI's top bar) and the /context and /usage figures
  * (lib/ctxstats.ts). Labels left, values right-aligned in one column (DES-7).
  */
-export function CtxSheet({ stats, ctx, onClose }: { stats: Stats; ctx: Ctx; onClose: () => void }) {
+export function CtxSheet({
+  stats,
+  ctx,
+  ctxv = noCtxView,
+  blocks = 0,
+  onClose,
+}: {
+  stats: Stats;
+  ctx: Ctx;
+  ctxv?: CtxView;
+  blocks?: number;
+  onClose: () => void;
+}) {
   const c = useColors();
   const req: DetailRow[] = stats.seen ? pieces(stats).map((p) => ({ label: p.label, value: p.value.trim() })) : [];
   const all = [{ title: 'this request', rows: req }, ...sections(ctx)].filter((s) => s.rows.length);
@@ -42,6 +56,7 @@ export function CtxSheet({ stats, ctx, onClose }: { stats: Stats; ctx: Ctx; onCl
           ))}
         </View>
       ))}
+      <ContextSection ctxv={ctxv} blocks={blocks} />
     </Sheet>
   );
 }

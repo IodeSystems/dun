@@ -43,6 +43,10 @@ export type AgentMsg = {
 export type Notice =
   | { type: 'plain'; tone: Tone; icon: string; text: string; label?: string }
   | { type: 'job'; head: string; took: string; command: string; output: string }
+  // An OAuth MCP server waiting for a login (mcp_login): url '' = another session started it.
+  | { type: 'login'; server: string; url: string; done: boolean }
+  // A slash command the person ran and dun's answer (history kind "command"; tui_convo.go).
+  | { type: 'command'; line: string; reply: string; attention: boolean }
   | { type: 'docs'; found: number; surfaced: number; tokens: number; docs: Doc[] }
   | ({ type: 'msg' } & AgentMsg);
 
@@ -237,12 +241,26 @@ export function agentToldNotice(ev: Ev): Notice | null {
 
 /** mcp_login: the URL whole, to be opened (enginecmd.LoginLine). */
 export function mcpLoginNotice(ev: Ev): Notice {
-  const server = str(ev.server);
-  const url = str(ev.url);
-  const text = url
-    ? `open to log in to ${server}: ${url}`
-    : `${server}: waiting for a login to it that another session started`;
-  return { type: 'plain', tone: 'note', icon: '🔑', text };
+  return { type: 'login', server: str(ev.server), url: str(ev.url), done: false };
+}
+
+/** The TUI's line for a login notice (enginecmd.LoginLine). */
+export function loginLine(n: { server: string; url: string }): string {
+  return n.url
+    ? `open to log in to ${n.server}: ${n.url}`
+    : `${n.server}: waiting for a login to it that another session started`;
+}
+
+/** onboarding.go failWords: a reply that failed or was refused is drawn in the notice colour. */
+const failWords =
+  /\b(error|errors|failed|fails|did not|could not|cannot|can't|refused|unknown|no such|not found|not logged in)\b|usage:/i;
+
+/** History "command": the line as typed, the reply under it (tui_convo.go). */
+export function commandNotice(content: string): Notice {
+  const nl = content.indexOf('\n');
+  const line = nl < 0 ? content : content.slice(0, nl);
+  const reply = nl < 0 ? '' : content.slice(nl + 1);
+  return { type: 'command', line, reply, attention: failWords.test(reply) };
 }
 
 export function oneLine(s: string): string {

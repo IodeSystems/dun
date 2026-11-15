@@ -4,12 +4,22 @@
 // Android draw the same.
 
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Linking, Pressable, Text, View } from 'react-native';
 
 import { PlainCode } from '@/components/code/Code';
 import { Fold } from '@/components/fold/Fold';
 import { Markdown } from '@/components/markdown/Markdown';
-import { docsHead, docWhy, jobLine, msgFoldLines, msgLong, type Doc, type Notice, type Tone } from '@/lib/notices';
+import {
+  docsHead,
+  loginLine,
+  docWhy,
+  jobLine,
+  msgFoldLines,
+  msgLong,
+  type Doc,
+  type Notice,
+  type Tone,
+} from '@/lib/notices';
 import { font, mono, space, useColors, type Colors } from '@/lib/theme';
 
 const toneColor = (c: Colors, t: Tone) => (t === 'error' ? c.danger : t === 'dim' ? c.muted : c.notice);
@@ -20,6 +30,10 @@ export function NoticeRow({ notice }: { notice: Notice }) {
       return <Plain n={notice} />;
     case 'job':
       return <Job n={notice} />;
+    case 'login':
+      return <Login n={notice} />;
+    case 'command':
+      return <Command n={notice} />;
     case 'docs':
       return <Docs n={notice} />;
     case 'msg':
@@ -82,6 +96,43 @@ function Plain({ n }: { n: Extract<Notice, { type: 'plain' }> }) {
   return (
     <View style={{ paddingHorizontal: space.md }}>
       <Fold open={open} onToggle={openable ? () => setOpen(!open) : undefined} inset={space.md} head={row} />
+    </View>
+  );
+}
+
+function Login({ n }: { n: Extract<Notice, { type: 'login' }> }) {
+  const c = useColors();
+  return (
+    <View style={{ paddingHorizontal: space.md, gap: space.xs }}>
+      <Text selectable style={{ color: c.notice, fontSize: font.sm }} testID="notice-text">
+        🔑 {n.done ? `${n.server}: logged in` : loginLine(n)}
+      </Text>
+      {n.url && !n.done ? (
+        <Pressable
+          accessibilityRole="link"
+          onPress={() => void Linking.openURL(n.url)}
+          style={{ alignSelf: 'flex-start', borderWidth: 1, borderColor: c.notice, borderRadius: 6, padding: space.sm }}
+          testID="login-open"
+        >
+          <Text style={{ color: c.notice, fontSize: font.sm }}>Log in to {n.server}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function Command({ n }: { n: Extract<Notice, { type: 'command' }> }) {
+  const c = useColors();
+  return (
+    <View style={{ paddingHorizontal: space.md }}>
+      <Text selectable style={{ color: c.muted, fontSize: font.sm }} testID="command-line">
+        › {n.line}
+      </Text>
+      {n.reply ? (
+        <Text selectable style={{ color: n.attention ? c.notice : c.text, fontSize: font.sm }} testID="command-reply">
+          {n.reply}
+        </Text>
+      ) : null}
     </View>
   );
 }

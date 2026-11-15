@@ -64,3 +64,20 @@ test('a message names sender and receiver; a long one folds', () => {
   press(root);
   expect(all(root)).toContain('less');
 });
+
+test('a login notice shows the TUI line and a button that opens the URL; settled, it is only a line', () => {
+  const { Linking } = jest.requireActual<typeof import('react-native')>('react-native');
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue();
+  const n: Notice = { type: 'login', server: 'gh', url: 'https://x.dev/login', done: false };
+  const root = render(n);
+  expect(all(root)).toBe('🔑 open to log in to gh: https://x.dev/loginLog in to gh');
+  press(root);
+  expect(open).toHaveBeenCalledWith('https://x.dev/login');
+  expect(all(render({ ...n, done: true }))).toBe('🔑 gh: logged in');
+  expect(all(render({ ...n, url: '' }))).toBe('🔑 gh: waiting for a login to it that another session started');
+});
+
+test('a command shows › line and its reply', () => {
+  const root = render({ type: 'command', line: '/model fast', reply: 'switched to fast', attention: false });
+  expect(all(root)).toBe('› /model fastswitched to fast');
+});
