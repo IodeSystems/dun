@@ -85,12 +85,21 @@ export default function Sessions() {
             }}
           >
             <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
-              <Text style={{ color: c.text, fontFamily: mono, fontSize: font.sm }}>{s.id}</Text>
-              <Text style={{ color: s.running ? c.accent : c.muted, fontSize: font.sm }}>
+              <Text
+                style={{ color: c.text, fontFamily: mono, fontSize: font.sm, flex: 1, minWidth: 0 }}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {s.id}
+              </Text>
+              <Text
+                style={{ color: s.running ? c.accent : c.muted, fontSize: font.sm, flexShrink: 0 }}
+                numberOfLines={1}
+              >
                 {s.running ? 'running' : 'stopped'}
               </Text>
             </View>
-            <Text style={{ color: c.muted, fontSize: font.sm }} numberOfLines={2}>
+            <Text style={{ color: c.muted, fontSize: font.sm }} numberOfLines={1} ellipsizeMode="tail">
               {s.workspace}
             </Text>
           </Pressable>
