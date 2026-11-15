@@ -193,16 +193,20 @@ func TestBrowseDirs(t *testing.T) {
 		return strings.Join(out, " ")
 	}
 	cases := []struct {
-		typed, dir, items, workspace string
-		exists                       bool
+		typed, dir, items, workspace, problem string
 	}{
-		{"", home, "docs src", home, true},
-		{"~", home, "docs src", home, true},
-		{"~/src/", filepath.Join(home, "src"), "aw4 Dun dun-web", filepath.Join(home, "src"), true},
-		{"src/du", filepath.Join(home, "src"), "Dun dun-web", filepath.Join(home, "src", "du"), false},
-		{"~/src/.g", filepath.Join(home, "src"), ".git", filepath.Join(home, "src", ".g"), false},
-		{"~/.", home, ".config", home, true},
-		{"~/nope/x", filepath.Join(home, "nope"), "", filepath.Join(home, "nope", "x"), false},
+		{"", home, "docs src", home, ""},
+		{"~", home, "docs src", home, ""},
+		{"~/src/", filepath.Join(home, "src"), "aw4 Dun dun-web", filepath.Join(home, "src"), ""},
+		{"src/du", filepath.Join(home, "src"), "Dun dun-web", filepath.Join(home, "src", "du"),
+			"no directory " + filepath.Join(home, "src", "du") + ": it does not exist"},
+		{"~/src/dunfile", filepath.Join(home, "src"), "", filepath.Join(home, "src", "dunfile"),
+			filepath.Join(home, "src", "dunfile") + " is a file, not a directory"},
+		{"~/src/.g", filepath.Join(home, "src"), ".git", filepath.Join(home, "src", ".g"),
+			"no directory " + filepath.Join(home, "src", ".g") + ": it does not exist"},
+		{"~/.", home, ".config", home, ""},
+		{"~/nope/x", filepath.Join(home, "nope"), "", filepath.Join(home, "nope", "x"),
+			"no directory " + filepath.Join(home, "nope", "x") + ": it does not exist"},
 	}
 	for _, c := range cases {
 		l, err := BrowseDirs(c.typed)
@@ -210,8 +214,8 @@ func TestBrowseDirs(t *testing.T) {
 			t.Errorf("%q: %v", c.typed, err)
 			continue
 		}
-		if l.Dir != c.dir || names(l) != c.items || l.Workspace != c.workspace || l.Exists != c.exists {
-			t.Errorf("%q: got dir %q items %q workspace %q exists %v", c.typed, l.Dir, names(l), l.Workspace, l.Exists)
+		if l.Dir != c.dir || names(l) != c.items || l.Workspace != c.workspace || l.Problem != c.problem {
+			t.Errorf("%q: got dir %q items %q workspace %q problem %q", c.typed, l.Dir, names(l), l.Workspace, l.Problem)
 		}
 	}
 	if _, err := BrowseDirs("~bob/"); err == nil {

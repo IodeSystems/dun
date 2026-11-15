@@ -2,6 +2,7 @@ package dundapi_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func TestListWorkspacesAndDirs(t *testing.T) {
 	}
 	code, m = call(t, srv, tok, "GET", "/api/v1/dirs?path="+url.QueryEscape(ws+"/su"), nil)
 	items, _ = m["items"].([]any)
-	if code != 200 || len(items) != 1 || items[0] != filepath.Join(ws, "sub") || m["exists"] != false || m["dir"] != ws {
+	if code != 200 || len(items) != 1 || items[0] != filepath.Join(ws, "sub") || !strings.Contains(fmt.Sprint(m["problem"]), "does not exist") || m["dir"] != ws {
 		t.Fatalf("dirs: %d %v", code, m)
 	}
 	if code, m := call(t, srv, tok, "GET", "/api/v1/dirs?path="+url.QueryEscape("~bob/"), nil); code != 400 {

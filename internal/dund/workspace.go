@@ -256,9 +256,9 @@ func isDir(p string) bool {
 type DirListing struct {
 	// Workspace is the typed path as Create would read it (ResolveWorkspace).
 	Workspace string `json:"workspace"`
-	// Exists is whether Workspace is an existing directory: Create would
-	// accept it.
-	Exists bool `json:"exists"`
+	// Problem is why Create would refuse Workspace (NormalizeWorkspace's
+	// sentence); "" when it would start there.
+	Problem string `json:"problem,omitempty"`
 	// Dir is the directory listed.
 	Dir string `json:"dir"`
 	// Items are Dir's subdirectories that start with the last part of the
@@ -285,7 +285,10 @@ func BrowseDirs(typed string) (DirListing, error) {
 	if err != nil {
 		return DirListing{}, err
 	}
-	out := DirListing{Workspace: resolved, Exists: isDir(resolved), Items: []string{}}
+	out := DirListing{Workspace: resolved, Items: []string{}}
+	if _, err := NormalizeWorkspace(resolved); err != nil {
+		out.Problem = err.Error()
+	}
 	// The prefix is the typed last part, before cleaning: "~/." asks for
 	// hidden directories in the home, not for the home's siblings.
 	dir, prefix := resolved, ""
