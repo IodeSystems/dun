@@ -198,8 +198,17 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 	case "plan":
 		m = m.notePlan(ev)
 	case "mcp_login":
-		// Whole, not oneLine'd or clipped: the URL is to be copied.
-		m.append(stNote.Render("🔑 " + enginecmd.LoginLine(str(ev["server"]), str(ev["url"]))))
+		// The engine (or dund) says how the login went: started, done,
+		// failed (docs/session-events.md, "MCP login").
+		switch server := str(ev["server"]); str(ev["phase"]) {
+		case proto.LoginDone:
+			m.append(StTool.Render("🔑 " + server + ": logged in"))
+		case proto.LoginFailed:
+			m.append(StErr.Render("🔑 " + server + ": login failed — " + textfmt.OneLine(str(ev["error"]))))
+		default: // started; no phase from an engine before phases
+			// Whole, not oneLine'd or clipped: the URL is to be copied.
+			m.append(stNote.Render("🔑 " + enginecmd.LoginLine(server, str(ev["url"]))))
+		}
 	case "prompt":
 		// An MCP prompt the user ran as a slash command, rendered by the
 		// engine: it goes in as their message.

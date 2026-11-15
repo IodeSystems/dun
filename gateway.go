@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
@@ -75,8 +76,10 @@ type MCPGateway interface {
 type GatewayClient struct {
 	Session string
 	Engine  any // comparable
-	// Login shows a login's URL to the session (mcp_login).
-	Login func(id, url string)
+	// Login shows a login's URL to the session (mcp_login), and LoginEnd how
+	// it ended (nil err: it went through).
+	Login    func(id, url string)
+	LoginEnd func(id string, err error)
 	// Notify hands an upstream's notification to the engine (mcp_notify).
 	Notify func(key, method string, params map[string]any)
 }
@@ -110,7 +113,7 @@ type gwUpstream struct {
 	timer *time.Timer // the grace stop, while it has no client
 
 	lmu      sync.Mutex
-	loginTo  map[string]func(id, url string) // sessions shown a login's URL
+	loginTo  map[string]GatewayClient // sessions shown a login's URL (Login, LoginEnd)
 	loginURL string
 }
 
@@ -158,7 +161,7 @@ func (g *Gateway) Share(ctx context.Context, c GatewayClient, req ShareRequest) 
 		up = nil // dropped as it failed; this ask starts it again
 	}
 	if up == nil {
-		up = &gwUpstream{key: key, spec: req.Spec, ready: make(chan struct{}), loginTo: map[string]func(string, string){}}
+		up = &gwUpstream{key: key, spec: req.Spec, ready: make(chan struct{}), loginTo: map[string]GatewayClient{}}
 		g.ups[key] = up
 		g.starts++
 		go g.start(up)
@@ -172,7 +175,7 @@ func (g *Gateway) Share(ctx context.Context, c GatewayClient, req ShareRequest) 
 	select {
 	case <-up.ready:
 	default:
-		up.watchLogin(c.Session, c.Login)
+		up.watchLogin(c)
 		select {
 		case <-up.ready:
 		case <-ctx.Done():
@@ -198,29 +201,45 @@ func (u *gwUpstream) failed() bool {
 
 // watchLogin shows session a login of this upstream: one waiting now, and
 // any while the start runs.
-func (u *gwUpstream) watchLogin(session string, show func(id, url string)) {
-	if show == nil {
+func (u *gwUpstream) watchLogin(c GatewayClient) {
+	if c.Login == nil {
 		return
 	}
 	u.lmu.Lock()
-	u.loginTo[session] = show
+	u.loginTo[c.Session] = c
 	url := u.loginURL
 	u.lmu.Unlock()
 	if url != "" {
-		show(u.spec.ID, url)
+		c.Login(u.spec.ID, url)
 	}
 }
 
 func (u *gwUpstream) showLogin(id, url string) {
 	u.lmu.Lock()
 	u.loginURL = url
-	to := make([]func(string, string), 0, len(u.loginTo))
-	for _, f := range u.loginTo {
-		to = append(to, f)
+	to := make([]GatewayClient, 0, len(u.loginTo))
+	for _, c := range u.loginTo {
+		to = append(to, c)
 	}
 	u.lmu.Unlock()
-	for _, f := range to {
-		f(id, url)
+	for _, c := range to {
+		c.Login(id, url)
+	}
+}
+
+// endLogin tells the sessions shown the login how it ended.
+func (u *gwUpstream) endLogin(id string, err error) {
+	u.lmu.Lock()
+	u.loginURL = ""
+	to := make([]GatewayClient, 0, len(u.loginTo))
+	for _, c := range u.loginTo {
+		to = append(to, c)
+	}
+	u.lmu.Unlock()
+	for _, c := range to {
+		if c.LoginEnd != nil {
+			c.LoginEnd(id, err)
+		}
 	}
 }
 
@@ -238,7 +257,12 @@ func (g *Gateway) start(up *gwUpstream) {
 	var err error
 	if s.OAuth != nil && s.URL != "" {
 		src := &brokered{id: s.ID, url: s.URL, spec: *s.OAuth, call: func(ctx context.Context, req OAuthRequest) (OAuthResult, error) {
-			return g.broker.Do(ctx, req, up.showLogin)
+			var shown atomic.Bool
+			res, err := g.broker.Do(ctx, req, func(id, url string) { shown.Store(true); up.showLogin(id, url) })
+			if shown.Load() {
+				up.endLogin(s.ID, err)
+			}
+			return res, err
 		}}
 		err = src.ensure(ctx)
 		cfg.Authorization, cfg.OnUnauthorized = src.Authorization, src.OnUnauthorized

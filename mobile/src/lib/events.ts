@@ -331,11 +331,26 @@ function askRow(v: View, a: Ask, callId: string): View {
   });
 }
 
-/** A waiting login notice for server, settled. */
-function loginDone(i: Item, server: string): Item {
-  return i.kind === 'notice' && i.notice.type === 'login' && i.notice.server === server && !i.notice.done
-    ? { ...i, notice: { ...i.notice, done: true } }
-    : i;
+/** A waiting login notice for server, settled (failed: error). legacyOnly: only one from an engine before phases. */
+function loginDone(i: Item, server: string, error = '', legacyOnly = false): Item {
+  if (i.kind !== 'notice' || i.notice.type !== 'login' || i.notice.server !== server || i.notice.done) return i;
+  if (legacyOnly && !i.notice.legacy) return i;
+  return { ...i, notice: { ...i.notice, done: true, ...(error ? { error } : {}) } };
+}
+
+/** mcp_login: a login started (a notice), or ended (its notice settled), as the engine or dund says. */
+function mcpLogin(v: View, ev: Ev): View {
+  const server = str(ev.server);
+  if (ev.phase !== 'done' && ev.phase !== 'failed')
+    return push(v, { kind: 'notice', notice: notices.mcpLoginNotice(ev) });
+  const error = ev.phase === 'failed' ? str(ev.error) || 'the login failed' : '';
+  const items = v.items.map((i) => loginDone(i, server, error));
+  if (items.some((x, k) => x !== v.items[k])) return { ...v, items };
+  // No waiting notice (this client came later): the outcome on its own.
+  return push(v, {
+    kind: 'notice',
+    notice: { type: 'login', server, url: '', done: true, ...(error ? { error } : {}) },
+  });
 }
 
 /** A history item (history event, snapshot) as a shown item. */
@@ -495,7 +510,7 @@ function applyNew(v: View, ev: Ev): View {
     case 'compaction':
       return push(v, { kind: 'notice', notice: notices.compactionNotice(ev) });
     case 'mcp_login':
-      return push(v, { kind: 'notice', notice: notices.mcpLoginNotice(ev) });
+      return mcpLogin(v, ev);
     case 'agent_told': {
       const n = notices.agentToldNotice(ev);
       return n ? push(v, { kind: 'notice', notice: n }) : v;
@@ -510,8 +525,9 @@ function applyNew(v: View, ev: Ev): View {
       const tools = (ev.tools as McpTool[] | undefined) ?? [];
       const server = str(ev.server);
       let w = server && (tools.length || v.mcpTools?.server !== server) ? { ...v, mcpTools: { server, tools } } : v;
-      // The server lists tools: its login (if it waited on one) went through.
-      if (server && tools.length) w = { ...w, items: w.items.map((i) => loginDone(i, server)) };
+      // Fallback, an engine before login phases: the server lists tools, so
+      // its login (if it waited on one) went through.
+      if (server && tools.length) w = { ...w, items: w.items.map((i) => loginDone(i, server, '', true)) };
       return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;
     }
     case 'settings':

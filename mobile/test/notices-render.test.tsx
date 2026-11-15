@@ -75,6 +75,7 @@ test('a login notice shows the TUI line and a button that opens the URL; settled
   expect(open).toHaveBeenCalledWith('https://x.dev/login');
   expect(all(render({ ...n, done: true }))).toBe('🔑 gh: logged in');
   expect(all(render({ ...n, url: '' }))).toBe('🔑 gh: waiting for a login to it that another session started');
+  expect(all(render({ ...n, done: true, error: 'access_denied' }))).toBe('🔑 gh: login failed — access_denied');
 });
 
 test('a command shows › line and its reply', () => {

@@ -957,13 +957,31 @@ type McpTool struct {
 	From    string `json:"from,omitempty"`
 }
 
-// McpLogin asks the person to log in to an OAuth MCP server: open URL in a
-// browser. The engine may run where no browser is (under dund), so this is
-// the way the login reaches them. URL "" means the engine is waiting for a
-// login another session started.
+// McpLogin is an OAuth MCP server's login (docs/session-events.md, "MCP
+// login"). Phase "started": the person is to open URL in a browser (the
+// engine may run where no browser is, so this is the way the login reaches
+// them); URL "" means a login another session started is being waited on.
+// "done": the login went through. "failed": it did not, Error says why. An
+// engine or dund before phases sends only the start, with no phase.
 type McpLogin struct {
 	Server string `json:"server"`
 	URL    string `json:"url,omitempty"`
+	Phase  string `json:"phase,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+const (
+	LoginStarted = "started"
+	LoginDone    = "done"
+	LoginFailed  = "failed"
+)
+
+// LoginEnd is the mcp_login that ends server's login: done, or failed with err.
+func LoginEnd(server string, err error) *McpLogin {
+	if err != nil {
+		return &McpLogin{Server: server, Phase: LoginFailed, Error: err.Error()}
+	}
+	return &McpLogin{Server: server, Phase: LoginDone}
 }
 
 // --- the protocol's own ---

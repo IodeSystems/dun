@@ -53,7 +53,10 @@ func (s *Service) mcpShare(ses *session, eng Engine, op string, req *proto.McpSh
 	ctx, cancel := context.WithTimeout(context.Background(), shareTimeout)
 	defer cancel()
 	g, err := gw.Share(ctx, dun.GatewayClient{Session: ses.id, Engine: eng,
-		Login: func(id, url string) { ses.log.Append(proto.NewEvent(&proto.McpLogin{Server: id, URL: url})) },
+		Login: func(id, url string) {
+			ses.log.Append(proto.NewEvent(&proto.McpLogin{Server: id, URL: url, Phase: proto.LoginStarted}))
+		},
+		LoginEnd: func(id string, err error) { ses.log.Append(proto.NewEvent(proto.LoginEnd(id, err))) },
 		Notify: func(key, method string, params map[string]any) {
 			_ = ses.sendLoaded(proto.NewCommand("", &proto.McpNotify{Key: key, Method: method, Params: params}))
 		}}, sr)

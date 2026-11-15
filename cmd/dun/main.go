@@ -888,7 +888,10 @@ func main() {
 				em.emit(&proto.Queued{Count: h.Queued()})
 			}
 		}
-		cfg.OnLogin = func(server, url string) { em.emit(&proto.McpLogin{Server: server, URL: url}) }
+		cfg.OnLogin = func(server, url string) {
+			em.emit(&proto.McpLogin{Server: server, URL: url, Phase: proto.LoginStarted})
+		}
+		cfg.OnLoginEnd = func(server string, err error) { em.emit(proto.LoginEnd(server, err)) }
 		// A memory trigger reports like /remember does, so the UI shows it the
 		// same way.
 		cfg.OnMemoryTrigger = func(msg string) {

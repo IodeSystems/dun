@@ -206,3 +206,18 @@ derive them from `turn`, tokens, tool calls or `done`.
 - Old logs: a history with no reason (a dund before reasons) reads as
   `resume`, except in the TUI right after an `engine {restarting}`, where
   it is skipped as before (marked fallback, `restartedOld`).
+
+## MCP login
+
+- `mcp_login {server, url, phase, error?}`: an OAuth MCP server's login.
+  `phase: started` with the URL to open (`url` "" while a login another
+  session started is waited on); then `done` when it went through, or
+  `failed` with `error`. One end per start the client was shown.
+- Sent by whoever runs the login: the engine (its own token, `OnLogin` /
+  `OnLoginEnd`, `mcpoauth.go`), or dund (the broker for an engine's token,
+  `internal/dund/oauth.go`; the gateway for a shared server, `mcpgw.go`).
+- A client settles the start's notice on the end; it does not infer the
+  outcome from a later `mcp_tools` listing (the web client did, and could
+  not show a failure).
+- Old logs: an `mcp_login` with no phase is a start; its notice is settled
+  by the server's tool list as before (marked fallback, mobile `legacy`).
