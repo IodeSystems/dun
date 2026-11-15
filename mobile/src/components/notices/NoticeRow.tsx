@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { Markdown } from '@/components/markdown/Markdown';
 import { docsHead, docWhy, jobLine, msgFoldLines, msgLong, type Doc, type Notice, type Tone } from '@/lib/notices';
 import { font, mono, space, useColors, type Colors } from '@/lib/theme';
 
@@ -147,6 +148,7 @@ function DocRow({ d }: { d: Doc }) {
     <Pressable
       onPress={() => setOpen(!open)}
       disabled={!d.line}
+      accessibilityRole={d.line ? 'button' : undefined}
       accessibilityState={{ expanded: open }}
       style={{ paddingLeft: space.lg, gap: 1 }}
     >
@@ -183,21 +185,21 @@ function Msg({ n }: { n: Extract<Notice, { type: 'msg' }> }) {
         <Text style={{ color: c.muted }}> → </Text>
         <Text style={{ fontWeight: '700' }}>{n.to}</Text>
       </Text>
-      <Pressable
-        onPress={() => setOpen(!open)}
-        disabled={!long}
-        accessibilityState={{ expanded: open }}
-        style={{ borderLeftWidth: 2, borderColor: c.border, paddingLeft: space.sm }}
-      >
-        <Text
-          selectable={!long || open}
-          numberOfLines={folded ? msgFoldLines : undefined}
-          style={{ color: c.text, fontSize: font.md }}
-        >
-          {n.text.trim()}
-        </Text>
-        {long ? <Text style={{ color: c.muted, fontSize: font.sm }}>{open ? 'less' : 'more…'}</Text> : null}
-      </Pressable>
+      {/* The text as markdown, as the TUI's box renders it; folded, its first lines plain. */}
+      <View style={{ borderLeftWidth: 2, borderColor: c.border, paddingLeft: space.sm }}>
+        {folded ? (
+          <Text numberOfLines={msgFoldLines} style={{ color: c.text, fontSize: font.md }}>
+            {n.text.trim()}
+          </Text>
+        ) : (
+          <Markdown text={n.text.trim()} />
+        )}
+        {long ? (
+          <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }}>
+            <Text style={{ color: c.muted, fontSize: font.sm }}>{open ? 'less' : 'more…'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
       {footer ? (
         <Text style={{ color: n.failed ? c.danger : c.muted, fontSize: font.sm, paddingLeft: space.sm }}>{footer}</Text>
       ) : null}
