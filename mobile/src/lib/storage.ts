@@ -8,7 +8,7 @@ const TOKEN_KEY = 'dun.token';
 const BASE_URL_KEY = 'dun.baseUrl';
 
 /** The service behind hz. A standalone install is reached by changing it. */
-export const REMOTE_BASE_URL = 'https://dun.iodesystems.com';
+export const REMOTE_BASE_URL = 'https://dun.office.iodesystems.com';
 
 /**
  * In a browser the page is served by dund itself, so its own origin is the

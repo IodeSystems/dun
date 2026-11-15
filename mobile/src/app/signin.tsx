@@ -13,7 +13,7 @@ import { useAuth } from '@/providers/AuthProvider';
 
 // Two ways in: sign in with the identity provider (when this dund has it on:
 // /api/v1/hello says sign_in), or paste the local token from `dun dund
-// token`. The address is where that dund is: dun.iodesystems.com through hz,
+// token`. The address is where that dund is: dun.office.iodesystems.com through hz,
 // or a standalone install's own address.
 
 /** The fragment a sign-in lands with (#token=…&return=… or #error=…). */
