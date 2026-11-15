@@ -79,6 +79,7 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 		defer close(out)
 		defer t.req.end()
 		sawDone := false
+		var held *llm.StreamChunk
 		for c := range in {
 			if t.round != nil {
 				t.round.add(c)
@@ -88,6 +89,14 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 				t.on(c.Reasoning)
 			}
 			sawDone = sawDone || c.Done
+			if c.Done {
+				// The client's usage hook (spend, round stats) runs when the
+				// stream ends, after this chunk. A reader that stops at Done
+				// would close the turn before the round is priced, so the
+				// final chunk waits for the stream's close.
+				held = &c
+				continue
+			}
 			select {
 			case out <- c:
 			case <-ctx.Done():
@@ -102,6 +111,14 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 				}
 				return
 			}
+		}
+		t.req.end() // after the usage hook, before the reader sees Done
+		if held != nil {
+			select {
+			case out <- *held:
+			case <-ctx.Done():
+			}
+			return
 		}
 		if ctx.Err() != nil && !sawDone {
 			cancelled(ctx, out)
