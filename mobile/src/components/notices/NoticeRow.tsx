@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { PlainCode } from '@/components/code/Code';
 import { Markdown } from '@/components/markdown/Markdown';
 import { docsHead, docWhy, jobLine, msgFoldLines, msgLong, type Doc, type Notice, type Tone } from '@/lib/notices';
 import { font, mono, space, useColors, type Colors } from '@/lib/theme';
@@ -108,24 +109,10 @@ function Job({ n }: { n: Extract<Notice, { type: 'job' }> }) {
       </View>
       {open ? (
         <>
-          <Text
-            selectable
-            style={{
-              color: c.text,
-              fontFamily: mono,
-              fontSize: font.sm,
-              backgroundColor: c.sunken,
-              borderRadius: 6,
-              padding: space.sm,
-            }}
-          >
-            $ {n.command}
-          </Text>
-          {n.output ? (
-            <Text selectable style={{ color: c.muted, fontFamily: mono, fontSize: font.sm }}>
-              {n.output}
-            </Text>
-          ) : null}
+          <View style={{ backgroundColor: c.sunken, borderRadius: 6, padding: space.sm }}>
+            <PlainCode text={`$ ${n.command}`} />
+          </View>
+          {n.output ? <PlainCode text={n.output} color={c.muted} /> : null}
         </>
       ) : null}
     </Pressable>

@@ -2,7 +2,7 @@
 // The parse is flowdown's (src/lib/markdown.ts); each top-level block is memoized by its
 // identity, so a streamed token re-renders the last block, not the reply.
 import { memo, useState, type ReactNode } from 'react';
-import { Linking, ScrollView, Text, View, type TextStyle } from 'react-native';
+import { Linking, Text, View, type TextStyle } from 'react-native';
 
 import {
   codeText,
@@ -14,7 +14,7 @@ import {
   type MarkdownBlock,
   type Node,
 } from '@/lib/markdown';
-import { Code } from '@/components/code/Code';
+import { Code, SideScroll } from '@/components/code/Code';
 import { font, mono, space, useColors, type Colors } from '@/lib/theme';
 
 export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
@@ -99,7 +99,7 @@ function blockOf(n: Node, key: number, c: Colors, open: boolean): ReactNode {
       );
     case 'table':
       return (
-        <ScrollView key={key} horizontal>
+        <SideScroll key={key}>
           <View style={{ flexDirection: 'row', borderWidth: 1, borderColor: c.border, borderRadius: 4 }}>
             {tableColumns(n).map((col, i) => (
               <View
@@ -126,7 +126,7 @@ function blockOf(n: Node, key: number, c: Colors, open: boolean): ReactNode {
               </View>
             ))}
           </View>
-        </ScrollView>
+        </SideScroll>
       );
     default:
       // html, footnotes and anything else: its text, never markup.

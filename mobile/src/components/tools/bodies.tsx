@@ -4,7 +4,7 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
-import { CodeText, DiffText, NumberedText } from '@/components/code/Code';
+import { CodeText, DiffText, NumberedText, PlainCode, SideScroll } from '@/components/code/Code';
 import { langForPath, type Lang } from '@/components/code/languages';
 import { exitMarker, type ToolCall } from '@/lib/toolcalls';
 import { argFull, isDiff, prettyJson } from '@/lib/tooltext';
@@ -36,22 +36,24 @@ export function Clipped({
   const style = { fontFamily: mono, fontSize: font.sm, color: color ?? c.text };
   return (
     <View>
-      {draw ? (
-        draw(shown)
-      ) : lineColor ? (
-        <Text selectable style={style}>
-          {shown.map((l, i) => (
-            <Fragment key={i}>
-              <Text style={{ color: lineColor(l) }}>{l}</Text>
-              {i < shown.length - 1 ? '\n' : ''}
-            </Fragment>
-          ))}
-        </Text>
-      ) : (
-        <Text selectable style={style}>
-          {shown.join('\n')}
-        </Text>
-      )}
+      <SideScroll>
+        {draw ? (
+          draw(shown)
+        ) : lineColor ? (
+          <Text selectable style={style}>
+            {shown.map((l, i) => (
+              <Fragment key={i}>
+                <Text style={{ color: lineColor(l) }}>{l}</Text>
+                {i < shown.length - 1 ? '\n' : ''}
+              </Fragment>
+            ))}
+          </Text>
+        ) : (
+          <Text selectable style={style}>
+            {shown.join('\n')}
+          </Text>
+        )}
+      </SideScroll>
       {cut ? (
         <Pressable accessibilityRole="button" onPress={() => setAll(true)} style={{ paddingVertical: space.xs }}>
           <Text style={{ color: c.accent, fontSize: font.sm }}>show all {lines.length} lines</Text>
@@ -121,9 +123,7 @@ export function ShellBody({ call }: BodyProps) {
   const out = marker === null ? call.result : call.result!.trimEnd().split('\n').slice(0, -1).join('\n');
   return (
     <View style={{ gap: space.xs }}>
-      <Text selectable style={{ fontFamily: mono, fontSize: font.sm, color: c.text }}>
-        $ {cmd}
-      </Text>
+      <PlainCode text={`$ ${cmd}`} />
       {other ? <Clipped text={other} color={c.muted} /> : null}
       {call.result === undefined ? (
         <Label>running…</Label>

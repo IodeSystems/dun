@@ -137,3 +137,14 @@ test('file_edit: code inside +/- lines highlighted, the marker and tint kept', (
   );
   expect(tinted.map(text)).toEqual(['+def b(): pass']);
 });
+
+test('exec: command and output plain, each in a sideways scroll', () => {
+  const long = 'x'.repeat(300);
+  const call: ToolCall = { tool: 'exec', args: { command: 'echo ' + long }, result: long, state: 'done' };
+  const Body = bodyFor(call);
+  const root = render(<Body call={call} />);
+  const scrolls = root.queryAll((n) => n.type === 'RCTScrollView' && n.props.horizontal === true);
+  expect(scrolls).toHaveLength(2);
+  expect(scrolls.every((s) => s.props.nestedScrollEnabled === true)).toBe(true);
+  expect(coloured(root)).toEqual([]);
+});

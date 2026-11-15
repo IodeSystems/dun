@@ -62,12 +62,36 @@ export const CodeText = memo(function CodeText({
   );
 });
 
+/**
+ * The one sideways scroll for code and output: its lines never wrap. Nested so a
+ * vertical page scroll still works around it on Android.
+ */
+export function SideScroll({ children }: { children: ReactNode }) {
+  return (
+    <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
+      {children}
+    </ScrollView>
+  );
+}
+
 /** A code block: the fence's info string picks the grammar (languages.ts langOf); scrolls sideways. */
 export function Code({ code, lang, streaming = false }: { code: string; lang?: string | null; streaming?: boolean }) {
   return (
-    <ScrollView horizontal>
+    <SideScroll>
       <CodeText code={code} lang={langOf(lang)} streaming={streaming} />
-    </ScrollView>
+    </SideScroll>
+  );
+}
+
+/** Output that is not code (a shell's, a job's): plain selectable monospace, never wrapped, scrolls sideways. */
+export function PlainCode({ text, color }: { text: string; color?: string }) {
+  const c = useColors();
+  return (
+    <SideScroll>
+      <Text selectable style={[codeStyle(c), color ? { color } : null]}>
+        {text}
+      </Text>
+    </SideScroll>
   );
 }
 
