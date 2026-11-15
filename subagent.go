@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,6 +68,7 @@ type subAgent struct {
 	effort   string // "" is the saved /effort level
 	parent   *Harness
 	iso      isolation // where it works, when not in its parent's tree (subisolation.go)
+	callID   string    // the parent's agent call that spawned it, "" for one from before (agentRecord); under mu
 
 	mu sync.Mutex
 	h  *Harness // nil for a stopped child until it is resumed
@@ -871,6 +873,7 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 		sa := &subAgent{
 			num: num, parent: h, state: agentStopped, restore: path,
 			prompt: rec.Prompt, iso: loadIsolation(path), model: rec.Model, provider: rec.Provider, effort: rec.Effort,
+			callID: rec.CallID,
 		}
 		if sa.prompt == "" {
 			sa.prompt = firstUserEntry(path)
@@ -911,6 +914,9 @@ type agentRecord struct {
 	Provider string `json:"provider,omitempty"` // "" is the parent session's
 	Effort   string `json:"effort,omitempty"`   // "" is the saved /effort level
 	Prompt   string `json:"prompt,omitempty"`   // as asked: the transcript's first message has the isolation brief too
+	// CallID is the parent's agent tool call that spawned the child: what
+	// lets a replayed history name the child on that call (agentSpawns).
+	CallID string `json:"call_id,omitempty"`
 }
 
 func agentFile(sessionFile string) string {
@@ -925,7 +931,7 @@ func agentFile(sessionFile string) string {
 // a child that was running then must resume as one that was.
 func (s *subAgent) saveState() {
 	s.mu.Lock()
-	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Effort: s.effort, Prompt: s.prompt}, s.closed
+	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Effort: s.effort, Prompt: s.prompt, CallID: s.callID}, s.closed
 	path := s.restore
 	if s.h != nil {
 		path = s.h.cfg.SessionFile
@@ -937,6 +943,47 @@ func (s *subAgent) saveState() {
 	if b, err := json.Marshal(rec); err == nil {
 		_ = fsutil.WriteAtomic(agentFile(path), b, 0o600)
 	}
+}
+
+// agentSpawns maps each spawning agent call of the session in sessionFile to
+// the child it started, from the children's sidecars: a history read with no
+// harness (SessionHistory) names them as History does.
+func agentSpawns(sessionFile string) map[string]int {
+	if sessionFile == "" {
+		return nil
+	}
+	matches, _ := filepath.Glob(strings.TrimSuffix(sessionFile, ".jsonl") + ".sub*.jsonl")
+	out := map[string]int{}
+	for _, path := range matches {
+		num, ok := subNumFromPath(sessionFile, path)
+		if !ok {
+			continue
+		}
+		if rec := loadAgentState(path); rec.CallID != "" {
+			out[rec.CallID] = num
+		}
+	}
+	return out
+}
+
+// noticeAgentRe is the head every notice from or about a child starts with,
+// as this file and plan.go write them: its message ("agent #N: …"), its
+// report ("agent #N is idle after …"), its reminder ("agent #N is still
+// running, quiet for …") and its plan publish ("[control/plan] agent #N
+// published …"). The writers are here, so the reading is too.
+var noticeAgentRe = regexp.MustCompile(`^(?:\[control/plan\] )?agent #(\d+)[: ]`)
+
+// NoticeAgent is the child a notice is from or about, or 0: what the
+// notification event and its history item carry as agent, so a client
+// opens the child without reading the text. A session entry keeps no field
+// for it, so the replay reads it from the same head the live event does.
+func NoticeAgent(text string) int {
+	m := noticeAgentRe.FindStringSubmatch(text)
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
 }
 
 // loadAgentState reads a child's sidecar. A transcript from before the
@@ -1211,13 +1258,20 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		var out string
+		num := 0 // the child this call started or acted on, for the tool_result event
 		switch {
 		case strings.TrimSpace(args.Prompt) != "":
 			out = agentNoPrompt
 		case args.ID != nil:
 			out = agentOp(h, *args.ID, args.Tell, args.Node, args.Resume, args.Dismiss)
+			if h.agentByID(*args.ID) != nil {
+				num = *args.ID
+			}
 		default:
-			out = spawnTool(ctx, h, args.Provider, args.Model, args.Effort, args.Isolation, args.Node, args.Wait)
+			out, num = spawnCall(ctx, h, tc.ID, args.Provider, args.Model, args.Effort, args.Isolation, args.Node, args.Wait)
+		}
+		if num > 0 {
+			h.toolCur.noteAgent(num)
 		}
 		if onCall != nil {
 			call := map[string]any{"model": args.Model, "wait": args.Wait}
@@ -1266,20 +1320,35 @@ const (
 // spawnTool is agent({node, …}): the model's only way to start a child. The
 // child's first message is node's brief (planBrief); nothing else.
 func spawnTool(ctx context.Context, h *Harness, provider, model, effort, isolation, node string, wait bool) string {
+	out, _ := spawnCall(ctx, h, "", provider, model, effort, isolation, node, wait)
+	return out
+}
+
+// spawnCall is spawnTool for the tool call callID: it also returns the
+// child's number (0 when none started), and the child's sidecar keeps
+// callID, so a replayed history names the child its spawn started
+// (History, agentSpawns).
+func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort, isolation, node string, wait bool) (string, int) {
 	node = strings.TrimSpace(node)
 	switch {
 	case node == "" && !h.hasTool(taskgraph.ToolAdd):
-		return agentNoPlan
+		return agentNoPlan, 0
 	case node == "":
-		return agentNoNode
+		return agentNoNode, 0
 	}
 	// Checked before the spawn too, so a bad node starts no child.
 	if err := h.planCanAssign(node); err != nil {
-		return "ERROR: " + strings.TrimSuffix(err.Error(), ".") + ". No agent was started."
+		return "ERROR: " + strings.TrimSuffix(err.Error(), ".") + ". No agent was started.", 0
 	}
 	sa, err := h.spawnAgentFor(ctx, "Work this plan node.", provider, model, effort, isolation, node)
 	if err != nil {
-		return "ERROR: could not start the agent: " + err.Error()
+		return "ERROR: could not start the agent: " + err.Error(), 0
+	}
+	if callID != "" {
+		sa.mu.Lock()
+		sa.callID = callID
+		sa.mu.Unlock()
+		sa.saveState()
 	}
 	owns := fmt.Sprintf(" It owns plan node %s, out of your ready list, and owes you a publish of it; "+
 		"you are told when it publishes, with what became ready. Dismissing it gives back what it did not finish.", node)
@@ -1298,17 +1367,17 @@ func spawnTool(ctx context.Context, h *Harness, provider, model, effort, isolati
 		}
 		return fmt.Sprintf("Started agent #%d%s.%s It is working; you will be told when it finishes or asks you something. "+
 			"Do other work, or end your turn if you have nothing to do until it answers.",
-			sa.num, where, owns)
+			sa.num, where, owns), sa.num
 	}
 	select {
 	case <-sa.waitCh():
 	case <-ctx.Done():
-		return fmt.Sprintf("agent #%d is still running; the turn was cancelled.", sa.num)
+		return fmt.Sprintf("agent #%d is still running; the turn was cancelled.", sa.num), sa.num
 	case <-h.userWaiting():
 		return fmt.Sprintf("agent #%d is still running; stopped waiting because a message arrived (the user wrote, or another dun session did) — "+
-			"it follows. You will be told when it finishes.", sa.num)
+			"it follows. You will be told when it finishes.", sa.num), sa.num
 	}
-	return strings.TrimSpace(owns) + "\n" + sa.report()
+	return strings.TrimSpace(owns) + "\n" + sa.report(), sa.num
 }
 
 // agentMonitor is the agent half of the jobs tool (jobs.go): list, or one
