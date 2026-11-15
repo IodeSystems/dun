@@ -13,6 +13,30 @@ export const light = {
   danger: '#b3261e',
   /** Proactive notices: the TUI's stNote (256-colour 214, orange). */
   notice: '#9a5a00',
+  /** Background tints of a diff's added and removed lines. */
+  diffAdd: '#e3f4ea',
+  diffDel: '#fbe5e3',
+  /**
+   * Code colours by role (components/code/highlight.ts Role): the TUI's glamour "light"
+   * chroma style (internal/tui/render.go mdStyle), darkened where under 4.5:1 on sunken.
+   */
+  syntax: {
+    comment: '#6e6e6e',
+    keyword: '#036fc4',
+    type: '#7049c2',
+    string: '#7e5b38',
+    number: '#157d6b',
+    function: '#017c44',
+    builtin: '#0a1bb1',
+    operator: '#c41a1a',
+    punctuation: '#a04848',
+    tag: '#581290',
+    attr: '#8362cb',
+    decorator: '#707017',
+    preproc: '#cf3400',
+    inserted: '#007b4d',
+    deleted: '#c40303',
+  },
 };
 
 const dark: typeof light = {
@@ -27,6 +51,26 @@ const dark: typeof light = {
   user: '#1f2a3d',
   danger: '#f2867d',
   notice: '#f0a742',
+  diffAdd: '#1c3326',
+  diffDel: '#3a2220',
+  /** The glamour "dark" chroma style; comment, type and attr lifted to 4:1 on sunken. */
+  syntax: {
+    comment: '#818181',
+    keyword: '#00aaff',
+    type: '#8282dd',
+    string: '#c69669',
+    number: '#6eefc0',
+    function: '#00d787',
+    builtin: '#ff8ec7',
+    operator: '#ef8080',
+    punctuation: '#e8e8a8',
+    tag: '#b083ea',
+    attr: '#7e7ee7',
+    decorator: '#ffff87',
+    preproc: '#ff875f',
+    inserted: '#00d787',
+    deleted: '#fd5b5b',
+  },
 };
 
 export type Colors = typeof light;

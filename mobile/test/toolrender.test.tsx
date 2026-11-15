@@ -90,13 +90,31 @@ test('edit: the diff, + and - lines in the theme colours', async () => {
   expect(texts(root)).toEqual(['▸ ✓ ', 'edit internal/a.go', ' +2 −1']);
   await press(root, '▸');
   const spans = root.queryAll((n) => n.type === 'Text' && n.parent?.type === 'Text');
-  const colour = (s: string): unknown => (spans.find((n) => text(n) === s)?.props.style as { color?: string })?.color;
-  const add = colour('+\tx := 2');
-  const del = colour('-\treturn 1');
+  // A .go path: each line's code highlighted (code.test.tsx); + and - lines keep a tint.
+  const bg = (s: string): unknown =>
+    (spans.find((n) => text(n) === s)?.props.style as { backgroundColor?: string } | undefined)?.backgroundColor;
+  const add = bg('+\tx := 2');
+  const del = bg('-\treturn 1');
   expect(add).toBeTruthy();
   expect(del).toBeTruthy();
   expect(add).not.toBe(del);
-  expect(colour(' func A() int {')).not.toBe(add);
+  expect(bg(' func A() int {')).toBeUndefined();
+});
+
+test('edit of a file with no grammar: + and - lines in the theme colours', async () => {
+  const call: ToolCall = {
+    tool: 'file_edit',
+    args: { path: 'notes.txt' },
+    result: 'edited notes.txt: +1 -1\n@@ -1,1 +1,1 @@\n-a\n+b',
+    state: 'done',
+  };
+  const root = await render(<ToolCallRow call={call} />);
+  await press(root, '▸');
+  const spans = root.queryAll((n) => n.type === 'Text' && n.parent?.type === 'Text');
+  const colour = (s: string): unknown => (spans.find((n) => text(n) === s)?.props.style as { color?: string })?.color;
+  expect(colour('+b')).toBeTruthy();
+  expect(colour('-a')).toBeTruthy();
+  expect(colour('+b')).not.toBe(colour('-a'));
 });
 
 test('a run of several calls is one section, its summary until opened', async () => {
