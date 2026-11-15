@@ -761,8 +761,18 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		}
 		state, _ := ev["state"].([]any)
 		for _, st := range state {
-			if sev, ok := st.(map[string]any); ok && sev["type"] != "history" {
-				m = m.handleEvent(evMsg(sev))
+			sev, ok := st.(map[string]any)
+			if !ok || sev["type"] == "history" {
+				continue
+			}
+			// A state event carried again (replayed) is state, not news: it
+			// adds no line, so a reconnect repeats no note. turn_state's
+			// queued rows and question are the state itself.
+			quiet := sev["replayed"] == true && sev["type"] != "turn_state"
+			n := len(m.convo)
+			m = m.handleEvent(evMsg(sev))
+			if quiet && m.scopeAgent == 0 && len(m.convo) > n {
+				m.convo = m.convo[:n]
 			}
 		}
 		m.refresh()

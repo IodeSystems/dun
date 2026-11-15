@@ -73,3 +73,17 @@ derive them from `turn`, tokens, tool calls or `done`.
 - A queued row whose id the state no longer lists, with no `delivered` or
   `withdrawn` for it, while idle: lost with its engine; clients say so.
 - Old logs: an event log with no `turn_state` reads as idle.
+
+## Snapshots and reconnects
+
+- Every state event in a `snapshot`'s `state` carries `replayed: true`
+  (an envelope field). It is state, not news: a client applies it and adds
+  no line for it (a server's message, a branch line, an engine restart), so
+  a reconnect does not repeat notes. `turn_state` is applied whole, queued
+  rows included.
+- The snapshot's `items` and its `after` seq are read to agree: dund reads
+  the session file again when an event was written meanwhile (a few tries).
+  The engine writes an entry and sends its event apart, so dund also drops
+  from the replay after a snapshot what the items hold: a `user` event by
+  id, a `tool_call`/`tool_result` by `call_id`, a `message` equal to the last
+  reply. An entry is in the snapshot or the replay, not both.

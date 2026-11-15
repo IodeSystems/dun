@@ -318,6 +318,17 @@ export function replaceWith(items: unknown[], keep?: View): View {
 }
 
 export function apply(v: View, ev: Ev): View {
+  // A state event a snapshot carries (replayed: true) is state, not news: it
+  // adds no row (no note, no notice), so a reconnect does not repeat them.
+  // turn_state's queued rows are the state itself.
+  if (ev.replayed === true && ev.type !== 'turn_state') {
+    const w = applyNew(v, ev);
+    return { ...w, items: v.items, n: v.n };
+  }
+  return applyNew(v, ev);
+}
+
+function applyNew(v: View, ev: Ev): View {
   const bg = noteBackground(v.bg, ev);
   if (bg !== v.bg) v = { ...v, bg };
   v = applyMore(v, ev);

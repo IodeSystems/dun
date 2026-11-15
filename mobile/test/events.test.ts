@@ -346,3 +346,22 @@ test('a docs notification is a docs notice: each document, why it won and where 
     source: 'skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills',
   });
 });
+
+test('a reconnect (snapshot, twice) repeats no note: replayed state adds no rows', () => {
+  const snap = {
+    type: 'snapshot',
+    items: [{ kind: 'user', id: 'u1', content: 'hi' }],
+    state: [
+      { type: 'server', id: 'rag', action: 'on', message: 'rag: on', replayed: true },
+      { type: 'engine', state: 'restarting', reason: 'crash', replayed: true },
+      { type: 'turn_state', phase: 'working', queued: [{ id: 'q', text: 'later' }], replayed: true },
+    ],
+  };
+  const once = apply(empty, snap);
+  const twice = apply(once, snap);
+  for (const v of [once, twice]) {
+    expect(v.items.map((i) => i.kind)).toEqual(['user', 'user']);
+    expect(v.items[1]).toMatchObject({ id: 'q', queued: true });
+    expect(v.busy).toBe(true);
+  }
+});
