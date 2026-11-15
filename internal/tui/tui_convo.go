@@ -191,10 +191,23 @@ func (m *tuiModel) replayItems(items []any) int {
 			m.convo = append(m.convo, e)
 			n++
 		case "tool_call":
-			// The same path as a live call, paired by call_id.
 			args, _ := im["args"].(map[string]any)
+			if str(im["tool"]) == "ask_user" {
+				// The question row, as the live ask event draws it.
+				m.endRun()
+				q := convoEntry{askText: argStr(args, "question"), askCall: str(im["call_id"])}
+				q.renderAsk(false)
+				m.convo = append(m.convo, q)
+				n++
+				break
+			}
+			// The same path as a live call, paired by call_id.
 			m.addCall(str(im["tool"]), str(im["call_id"]), args)
 		case "tool_result":
+			if str(im["tool"]) == "ask_user" {
+				n += m.replayAnswer(str(im["call_id"]), str(im["content"]))
+				break
+			}
 			var failed *bool
 			if b, ok := im["is_error"].(bool); ok {
 				failed = &b
@@ -226,6 +239,33 @@ func (m *tuiModel) replayItems(items []any) int {
 		}
 	}
 	return n
+}
+
+// replayAnswer is an ask_user result in history, drawn as live: the answer
+// is the person's row (live: answered). A question that got no answer (an
+// interrupt) keeps its row and adds none; one the engine refused before
+// asking (a bad call) was never shown live, so its row goes. It returns the
+// change in entries.
+func (m *tuiModel) replayAnswer(callID, result string) int {
+	at := -1
+	for i := len(m.convo) - 1; i >= 0 && callID != ""; i-- {
+		if m.convo[i].askCall == callID {
+			at = i
+			break
+		}
+	}
+	switch {
+	case strings.HasPrefix(result, "ERROR: could not get an answer"):
+		return 0
+	case strings.HasPrefix(result, "ERROR"):
+		if at >= 0 {
+			m.convo = append(m.convo[:at], m.convo[at+1:]...)
+			return -1
+		}
+		return 0
+	}
+	m.convo = append(m.convo, convoEntry{collapsed: userRow(result), userText: result})
+	return 1
 }
 
 // selDocs returns the docsBlock of the selected entry, or nil.

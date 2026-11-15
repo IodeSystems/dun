@@ -34,6 +34,7 @@ type convoEntry struct {
 	// its answer (askpark.go).
 	askText string
 	askOpen bool
+	askCall string // the asking ask_user call: history's row and the ask event's are one row
 	// provisional marks a message that was typed mid-turn and is queued for
 	// delivery. It appears in the conversation with a dimmed style so the user
 	// knows it landed but hasn't been delivered to the model yet. The engine's

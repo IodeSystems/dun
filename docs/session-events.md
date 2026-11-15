@@ -103,7 +103,11 @@ derive them from `turn`, tokens, tool calls or `done`.
   recommended_all, no_custom}`: the open question. `call_id` is the asking
   `ask_user` call. The `ask` event is the question's row live; history shows
   it from that call's `tool_call` item (a client that has the row for the
-  call does not add another). `multi`: any number may be picked,
+  call does not add another), and the answer from its `tool_result` item
+  as the person's row, as `answered` does live. A result `ERROR: could not
+  get an answer…` (interrupted) adds no row; any other `ERROR` result is a
+  call refused before it asked, shown live as nothing, and the TUI drops its
+  row. `multi`: any number may be picked,
   `recommended_all` checked to start with, sent back comma-separated.
   `no_custom`: the answer must be an option (meaningless without options).
 - `answer {value, ask_id}` (command): an answer naming a question that is no

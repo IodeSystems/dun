@@ -1,5 +1,7 @@
 package tui
 
+import "slices"
+
 // rebuildFrom puts the conversation on screen again from a snapshot's items:
 // a reconnect that came back past the replay window (or after a dund
 // restart) gets a snapshot, and what happened while this client was away is
@@ -31,8 +33,14 @@ func (m *tuiModel) rebuildFrom(items []any) {
 	m.replay(items)
 	// The open question's row: the state that follows reopens a question
 	// only when none is open, so one still open keeps its row here.
+	// History draws the row of its ask_user call (closed): that row is it.
 	if ask != nil && m.askEntry() < 0 {
-		m.convo = append(m.convo, *ask)
+		if i := slices.IndexFunc(m.convo, func(e convoEntry) bool { return ask.askCall != "" && e.askCall == ask.askCall }); i >= 0 {
+			m.convo[i].askOpen = true
+			m.convo[i].renderAsk(false)
+		} else {
+			m.convo = append(m.convo, *ask)
+		}
 	}
 	m.sel = -1
 	if selID != "" {

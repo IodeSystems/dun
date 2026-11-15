@@ -449,9 +449,17 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.askSel, m.askNote = 0, ""
 		m.input.Blur()
 		m.settleAsk() // a new question replaces any parked one
-		q := convoEntry{askText: str(ev["question"]), askOpen: true}
-		q.renderAsk(false)
-		m.convo = append(m.convo, q)
+		// The row its call already has (a snapshot's history drew it) is the
+		// question's row; otherwise it gets one.
+		call := str(ev["call_id"])
+		if i := slices.IndexFunc(m.convo, func(e convoEntry) bool { return call != "" && e.askCall == call }); i >= 0 {
+			m.convo[i].askOpen = true
+			m.convo[i].renderAsk(false)
+		} else {
+			q := convoEntry{askText: str(ev["question"]), askOpen: true, askCall: call}
+			q.renderAsk(false)
+			m.convo = append(m.convo, q)
+		}
 		m.refresh()
 		m.askOptions = nil
 		if opts, ok := ev["options"].([]any); ok {
