@@ -7,7 +7,7 @@
 import type { McpTool, McpTools } from './mcp';
 import * as notices from './notices';
 import { endsThinking, endThought, evTime, liveThought, type Thought } from './thinking';
-import { withCall, withResult, type Run } from './toolcalls';
+import { withCall, withResult, withThought, type Run } from './toolcalls';
 import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 
 export type Item =
@@ -162,7 +162,7 @@ function fromHistory(v: View, it: Ev): View {
     case 'notification':
       return push(v, { kind: 'notice', notice: notices.fromHistoryNotification(str(it.content)) });
     case 'reasoning':
-      return push(v, { kind: 'thinking', text: str(it.content), start: 0, end: 0, live: false });
+      return pushThought(v, { text: str(it.content), start: 0, end: 0, live: false });
   }
   return v;
 }
@@ -321,11 +321,25 @@ export function apply(v: View, ev: Ev): View {
 function addThinking(v: View, delta: string, at: number): View {
   const i = liveThought(v.items);
   const w = { ...v, busy: true };
-  if (i < 0) return push(w, { kind: 'thinking', text: delta, start: at, end: 0, live: true });
+  if (i < 0) return pushThought(w, { text: delta, start: at, end: 0, live: true });
   const items = [...v.items];
-  const t = items[i] as Extract<Item, { kind: 'thinking' }>;
-  items[i] = { ...t, text: t.text + delta };
+  const it = items[i]!;
+  if (it.kind === 'tools') {
+    const th = (it.thoughts ?? []).slice();
+    const t = th[th.length - 1]!;
+    th[th.length - 1] = { ...t, text: t.text + delta };
+    items[i] = { ...it, thoughts: th };
+  } else {
+    const t = it as Extract<Item, { kind: 'thinking' }>;
+    items[i] = { ...t, text: t.text + delta };
+  }
   return { ...w, items };
+}
+
+/** A thought: inside the open run, as the TUI does (thinking.go addThought), else a block of its own. */
+function pushThought(v: View, t: Thought): View {
+  const items = withThought(v.items, t);
+  return items ? { ...v, items } : push(v, { kind: 'thinking', ...t });
 }
 
 /** The line an interrupted turn ends with (the TUI's too). */

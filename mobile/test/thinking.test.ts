@@ -1,5 +1,6 @@
 /// <reference types="jest" />
 import { apply, applySnapshot, empty, type View } from '../src/lib/events';
+import type { Run } from '../src/lib/toolcalls';
 import { thinkDur, thinkHeader, thinkHeadline, thoughtHead, thoughtMeta, type Thought } from '../src/lib/thinking';
 
 // internal/tui/thinkfold_test.go TestThinkHeadline, case for case.
@@ -74,7 +75,7 @@ test('one block per round: reasoning grows it, the first token closes it', () =>
   const th = thoughts(w)[0] as Thought;
   expect(th.live).toBe(false);
   expect(th.end - th.start).toBe(7000);
-  // The next round's reasoning, after a tool call, is a block of its own.
+  // The next round's reasoning, after a tool call, is a step of the open run (toolcalls.test.ts).
   const x = run(
     [
       { type: 'tool_call', tool: 'read', args: {} },
@@ -84,8 +85,10 @@ test('one block per round: reasoning grows it, the first token closes it', () =>
     ],
     w,
   );
-  expect(thoughts(x)).toHaveLength(2);
-  expect(thoughts(x)[1]).toMatchObject({ live: false, cut: true });
+  expect(thoughts(x)).toHaveLength(1); // the first round's, before the reply
+  const r = x.items.find((i) => i.kind === 'tools') as Run;
+  expect(r.thoughts).toHaveLength(1);
+  expect(r.thoughts![0]).toMatchObject({ live: false, cut: true });
 });
 
 test('history: a finished round comes back as a reasoning item', () => {
