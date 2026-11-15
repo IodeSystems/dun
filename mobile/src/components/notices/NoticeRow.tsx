@@ -32,6 +32,8 @@ export function NoticeRow({ notice }: { notice: Notice }) {
       return <Job n={notice} />;
     case 'login':
       return <Login n={notice} />;
+    case 'command':
+      return <Command n={notice} />;
     case 'docs':
       return <Docs n={notice} />;
     case 'msg':
@@ -114,6 +116,22 @@ function Login({ n }: { n: Extract<Notice, { type: 'login' }> }) {
         >
           <Text style={{ color: c.notice, fontSize: font.sm }}>Log in to {n.server}</Text>
         </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function Command({ n }: { n: Extract<Notice, { type: 'command' }> }) {
+  const c = useColors();
+  return (
+    <View style={{ paddingHorizontal: space.md }}>
+      <Text selectable style={{ color: c.muted, fontSize: font.sm }} testID="command-line">
+        › {n.line}
+      </Text>
+      {n.reply ? (
+        <Text selectable style={{ color: n.attention ? c.notice : c.text, fontSize: font.sm }} testID="command-reply">
+          {n.reply}
+        </Text>
       ) : null}
     </View>
   );

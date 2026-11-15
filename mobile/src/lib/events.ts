@@ -361,6 +361,8 @@ function fromHistory(v: View, it: Ev): View {
       return push(v, { kind: 'notice', notice: notices.fromHistoryNotification(str(it.content)) });
     case 'reasoning':
       return pushThought(v, { text: str(it.content), start: 0, end: 0, live: false });
+    case 'command':
+      return push(v, { kind: 'notice', notice: notices.commandNotice(str(it.content)) });
   }
   return v;
 }

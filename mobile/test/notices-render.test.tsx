@@ -76,3 +76,8 @@ test('a login notice shows the TUI line and a button that opens the URL; settled
   expect(all(render({ ...n, done: true }))).toBe('🔑 gh: logged in');
   expect(all(render({ ...n, url: '' }))).toBe('🔑 gh: waiting for a login to it that another session started');
 });
+
+test('a command shows › line and its reply', () => {
+  const root = render({ type: 'command', line: '/model fast', reply: 'switched to fast', attention: false });
+  expect(all(root)).toBe('› /model fastswitched to fast');
+});

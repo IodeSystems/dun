@@ -195,3 +195,16 @@ test('a login is settled when its server lists tools', () => {
     { type: 'login', server: 'other', url: 'https://y.dev/login', done: false },
   ]);
 });
+
+test('history command: the line as typed, the reply under it, a failure marked', () => {
+  const v = replaceWith([
+    { kind: 'command', content: '/model fast\nswitched to fast' },
+    { kind: 'command', content: '/frob\nunknown command' },
+    { kind: 'command', content: '/clear' },
+  ]);
+  expect(notices(v)).toEqual([
+    { type: 'command', line: '/model fast', reply: 'switched to fast', attention: false },
+    { type: 'command', line: '/frob', reply: 'unknown command', attention: true },
+    { type: 'command', line: '/clear', reply: '', attention: false },
+  ]);
+});
