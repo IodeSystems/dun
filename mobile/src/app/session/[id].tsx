@@ -35,14 +35,15 @@ import { toggleAction, toolsRequest } from '@/lib/mcp';
 import { noStats, noteRequest } from '@/lib/stats';
 import { shouldReload, upgradeLines } from '@/lib/upgrade';
 import { providerLine, type ProviderOp } from '@/lib/provider';
-import { font, space, useColors } from '@/lib/theme';
+import { font, space, TOUCH, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
 
 // Rows the web transcript renders per page: it is not virtualized.
 const page = 300;
 
 const transcript = {
-  padding: space.lg,
+  // No side gutter: message boxes span the full width.
+  paddingVertical: space.lg,
   gap: space.sm,
   maxWidth: 860,
   width: '100%' as const,
@@ -445,14 +446,12 @@ export default function Session() {
           ) : null}
           {conn ? <ErrorText>{conn}</ErrorText> : view.status ? <Muted>{view.status}</Muted> : null}
           {sendErr ? <ErrorText>{sendErr}</ErrorText> : null}
-          <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-end' }}>
+          <View>
             <Field
               style={{
-                flex: 1,
                 paddingVertical: space.sm,
-                paddingHorizontal: 0,
-                borderWidth: 0,
-                backgroundColor: 'transparent',
+                // room for the send button inset at the right edge
+                paddingRight: TOUCH,
                 fontSize: font.composer,
               }}
               value={text}
@@ -491,11 +490,57 @@ export default function Session() {
                 }
               }}
             />
-            <Button title="↵" primary disabled={!text.trim()} onPress={() => setText((t) => t + '\n')} />
+            <SendButton disabled={!text.trim()} onPress={() => void send()} />
           </View>
         </View>
       </KeyboardAvoidingView>
     </Screen>
+  );
+}
+
+// Round up-arrow send button inset at the input's bottom-right. The visible
+// circle is 32dp; the pressable is TOUCH x TOUCH.
+function SendButton({ disabled, onPress }: { disabled: boolean; onPress: () => void }) {
+  const c = useColors();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Send"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={{
+        position: 'absolute',
+        right: 0,
+        bottom: 0,
+        width: TOUCH,
+        height: TOUCH,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <View
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 16,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: disabled ? c.sunken : c.accent,
+        }}
+      >
+        <Text
+          style={{
+            color: disabled ? c.muted : c.accentText,
+            fontSize: font.lg,
+            lineHeight: font.lg + 2,
+            fontWeight: '600',
+          }}
+        >
+          ↑
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -526,7 +571,11 @@ function Row({ item }: { item: Item }) {
         </View>
       );
     case 'tools':
-      return <ToolRun run={item} />;
+      return (
+        <View style={{ paddingHorizontal: space.lg }}>
+          <ToolRun run={item} />
+        </View>
+      );
     case 'thinking':
       return <Thinking item={item} />;
     case 'note':
