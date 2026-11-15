@@ -123,6 +123,58 @@ func scanSessionIDs(root string) (ids []string, empty map[string]time.Time) {
 	return ids, empty
 }
 
+// SessionAsked reports whether anything was asked in a session: a user
+// message in its transcript or in an archive of it — the transcript /clear set
+// aside ("<id>.cleared.<time>.jsonl") or a recap's ("<id>.recapN.jsonl").
+// It is THE rule for "this session was used": PruneSessions and dund both ask
+// it, so what one keeps the other keeps too. /clear leaves a transcript of
+// notices only, and judging by that alone deleted the archive with the
+// session (2026-11-14).
+//
+// A file that cannot be read counts as asked: it is exactly the one to look
+// at. A transcript that does not exist does not. It never creates anything.
+func SessionAsked(root, id string) bool {
+	files := []string{SessionFile(root, id)}
+	for _, pat := range []string{".cleared.*.jsonl", ".recap*.jsonl"} {
+		m, _ := filepath.Glob(filepath.Join(RootDir(root), id+pat))
+		files = append(files, m...)
+	}
+	for _, f := range files {
+		if fileAsked(f) {
+			return true
+		}
+	}
+	return false
+}
+
+// fileAsked reports whether a transcript file holds a user message (typed, or
+// delivered mid-turn), or cannot be read. It reads the whole file: one user
+// message after any number of notices still counts.
+func fileAsked(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return !os.IsNotExist(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		if len(strings.TrimSpace(sc.Text())) == 0 {
+			continue
+		}
+		var e struct {
+			Kind string `json:"Kind"`
+		}
+		if json.Unmarshal(sc.Bytes(), &e) != nil {
+			return true
+		}
+		if e.Kind == string(agent.KindUser) || e.Kind == string(kindDelivered) {
+			return true
+		}
+	}
+	return sc.Err() != nil
+}
+
 // SessionFile is the path for a specific session id under root.
 func SessionFile(root, id string) string {
 	return filepath.Join(RootDir(root), id+".jsonl")

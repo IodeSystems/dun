@@ -1,11 +1,15 @@
 package dun
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/agentkit/agent"
 )
 
 // pruneRepo is a repo with a worktree per named branch, so a test can say what
@@ -285,7 +289,7 @@ func TestIndexNameFor_SurvivesTheTreeItNames(t *testing.T) {
 }
 
 // A session with entries but no user message, old enough not to be live, is
-// removed with its sidecars; a fresh one, an asked one, the live one and an
+// removed, its sidecars left; a fresh one, an asked one, the live one and an
 // unreadable one are kept.
 func TestPruneSessions_RemovesUnaskedSessions(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
@@ -300,7 +304,7 @@ func TestPruneSessions_RemovesUnaskedSessions(t *testing.T) {
 	}
 	notice := `{"Kind":"notification","Content":"ready"}` + "\n"
 	write("20261022-100000", notice, old)                                    // unasked, old: removed
-	write("20261022-100000.sub1", notice, old)                               // its sidecar goes with it
+	write("20261022-100000.sub1", notice, old)                               // its sidecar: an automatic prune leaves it
 	write("20261022-100001", `{"Kind":"user","Content":"fix it"}`+"\n", old) // asked: kept
 	write("20261022-100002", notice, time.Now())                             // unasked but fresh: kept
 	write("20261022-100003", notice, old)                                    // the live one: kept
@@ -310,7 +314,122 @@ func TestPruneSessions_RemovesUnaskedSessions(t *testing.T) {
 	if strings.Join(removed, ",") != "20261022-100000" {
 		t.Fatalf("removed %v", removed)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "20261022-100000.sub1.jsonl")); !os.IsNotExist(err) {
-		t.Error("the sidecar was left behind")
+	if _, err := os.Stat(filepath.Join(dir, "20261022-100000.sub1.jsonl")); err != nil {
+		t.Errorf("an automatic prune removed a sidecar: %v", err)
+	}
+}
+
+// /clear sets the transcript aside and starts one that holds only notices.
+// Judged by that alone, the session looked unasked and the prune deleted it
+// with the archive — the conversation /clear promised to keep (2026-11-14).
+// The archive's user message makes the session asked: both survive.
+func TestPruneSessions_KeepsAClearedSession(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	path, id := NewSessionFile(ws)
+	ctx := context.Background()
+	s, _ := openSessionStore(path)
+	s.Append(ctx, "x", agent.Entry{ID: "1", Kind: agent.KindUser, Content: "fix it"})
+	s.Append(ctx, "x", agent.Entry{ID: "2", Kind: agent.KindAssistant, Content: "fixed"})
+	s.Reset()
+	s.Append(ctx, "x", agent.Entry{ID: "3", Kind: agent.KindNotification, Content: "cleared"})
+	cleared, _ := filepath.Glob(filepath.Join(RootDir(ws), id+".cleared.*.jsonl"))
+	if len(cleared) != 1 {
+		t.Fatalf("cleared copies: %v", cleared)
+	}
+	old := time.Now().Add(-time.Hour)
+	for _, p := range append(cleared, path) {
+		os.Chtimes(p, old, old)
+	}
+
+	if removed := PruneSessions(ws, ws, ""); len(removed) != 0 {
+		t.Fatalf("removed %v", removed)
+	}
+	for _, p := range append(cleared, path) {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s: %v", filepath.Base(p), err)
+		}
+	}
+}
+
+// The same for a recap archive, and for a transcript emptied after it (0
+// bytes): the archive's message keeps the session.
+func TestPruneSessions_KeepsASessionWhoseRecapWasAsked(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	old := time.Now().Add(-time.Hour)
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte(body), 0o644)
+		os.Chtimes(p, old, old)
+		return p
+	}
+	notice := `{"Kind":"notification","Content":"recapped"}` + "\n"
+	asked := `{"Kind":"user","Content":"fix it"}` + "\n"
+	files := []string{
+		write("20261114-100000.jsonl", notice),
+		write("20261114-100000.recap1.jsonl", asked),
+		write("20261114-100001.jsonl", ""),
+		write("20261114-100001.recap1.jsonl", asked),
+	}
+
+	if removed := PruneSessions(ws, ws, ""); len(removed) != 0 {
+		t.Fatalf("removed %v", removed)
+	}
+	for _, p := range files {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s: %v", filepath.Base(p), err)
+		}
+	}
+}
+
+// A session killed before its first message, with no archive that holds one,
+// is still pruned (USER 2026-10-22; whether it should be kept is open), and
+// its archives are left.
+func TestPruneSessions_UnaskedArchivesDoNotKeepASession(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	old := time.Now().Add(-time.Hour)
+	notice := `{"Kind":"notification","Content":"ready"}` + "\n"
+	for _, n := range []string{"20261114-100000.jsonl", "20261114-100000.cleared.20261114T100000.jsonl"} {
+		p := filepath.Join(dir, n)
+		os.WriteFile(p, []byte(notice), 0o644)
+		os.Chtimes(p, old, old)
+	}
+	if removed := PruneSessions(ws, ws, ""); strings.Join(removed, ",") != "20261114-100000" {
+		t.Fatalf("removed %v", removed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20261114-100000.cleared.20261114T100000.jsonl")); err != nil {
+		t.Errorf("the archive went with an automatic prune: %v", err)
+	}
+}
+
+// The window cap removes old asked sessions' transcripts, never their
+// archives.
+func TestPruneSessions_CapLeavesArchives(t *testing.T) {
+	repo := pruneRepo(t)
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := RootDir(repo)
+	os.MkdirAll(dir, 0o755)
+	asked := `{"Kind":"user","Content":"fix it"}` + "\n"
+	var ids []string
+	for i := 0; i < keepSessions+1; i++ {
+		id := fmt.Sprintf("20261114-1000%02d", i)
+		ids = append(ids, id)
+		os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(asked), 0o644)
+	}
+	oldest := ids[0]
+	archive := filepath.Join(dir, oldest+".cleared.20261114T100000.jsonl")
+	os.WriteFile(archive, []byte(asked), 0o644)
+
+	if removed := PruneSessions(repo, repo, ""); strings.Join(removed, ",") != oldest {
+		t.Fatalf("removed %v", removed)
+	}
+	if _, err := os.Stat(archive); err != nil {
+		t.Errorf("the cap removed an archive: %v", err)
 	}
 }
