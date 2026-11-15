@@ -224,7 +224,9 @@ func TestTUI_EventHandling(t *testing.T) {
 	if m.cur != "" {
 		t.Fatal("tool_call should flush the streamed text")
 	}
-	joined := convoText(m)
+	// Without colour: glamour styles each word apart, so escapes split the
+	// words in any style but notty (render.go mdStyle, a process global).
+	joined := stripANSI(convoText(m))
 	if !strings.Contains(joined, "looking…") || !strings.Contains(joined, "node query") {
 		t.Fatalf("conversation missing streamed text or tool line: %q", joined)
 	}
@@ -237,7 +239,7 @@ func TestTUI_EventHandling(t *testing.T) {
 	if m.cur != "" {
 		t.Fatal("done should flush cur")
 	}
-	if !strings.Contains(convoText(m), "done reading") {
+	if !strings.Contains(stripANSI(convoText(m)), "done reading") {
 		t.Fatal("final streamed text not finalized")
 	}
 }
