@@ -1,6 +1,6 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { explain } from '@/api/client';
@@ -32,6 +32,17 @@ import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
 
+// Rows the web transcript renders per page: it is not virtualized.
+const page = 300;
+
+const transcript = {
+  padding: space.lg,
+  gap: space.sm,
+  maxWidth: 860,
+  width: '100%' as const,
+  alignSelf: 'center' as const,
+};
+
 // One session: its events followed live over graphql-ws (src/api/live.ts).
 export default function Session() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,28 +67,18 @@ export default function Session() {
   const sent = useRef<string[]>([]);
   const recall = useRef(-1); // index into sent while ↑/↓ browse it
   const uiLoaded = useRef(false);
-  const listRef = useRef<FlatList<Item>>(null);
-  // The list follows new content only while the reader is at the bottom; it
-  // must not yank them back from history a streaming token at a time.
-  const stick = useRef(true);
+  // The web transcript renders the newest rows only; the reader asks for
+  // more. The count goes back to one page when the session changes.
+  const [earlier, setEarlier] = useState({ id, n: page });
+  const shown = earlier.id === id ? earlier.n : page;
 
-  // The list is inverted and its data is reversed (newest at index 0), so
-  // offset 0 = the newest row at the bottom. A prepended row appears at the
-  // bottom without a scroll jump; the list manages its own position.
+  // Newest first: the transcript is laid out bottom-up (column-reverse on
+  // the web, an inverted list on native), so offset 0 is the newest row at
+  // the bottom. The platform keeps that position as rows arrive; no code
+  // scrolls the list.
   const rows: Item[] = view.streaming
     ? [...view.items, { key: 'streaming', kind: 'assistant' as const, text: view.streaming }].reverse()
     : [...view.items].reverse();
-  const jumpToNewest = useCallback(() => {
-    if (rows.length) listRef.current?.scrollToIndex({ index: 0, viewPosition: 0, animated: false });
-  }, [rows.length]);
-
-  // The list starts (and a session switch returns) at the newest row. A beat
-  // after render: the rows are in then.
-  useEffect(() => {
-    stick.current = true;
-    const t = setTimeout(jumpToNewest, 0);
-    return () => clearTimeout(t);
-  }, [id, jumpToNewest]);
 
   // The dund build this page loaded against. After dund restarts into
   // another build (a snapshot follows the reconnect), the web page reloads
@@ -299,37 +300,40 @@ export default function Session() {
         }}
       />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <FlatList
-          ref={listRef}
-          data={rows}
-          keyExtractor={(i) => i.key}
-          inverted
-          initialScrollIndex={0}
-          onScroll={(e) => {
-            // Offset 0 = the newest row (index 0, at the bottom of the
-            // inverted list). The reader is following while near there.
-            stick.current = ((e.nativeEvent as { contentOffset: { y: number } }).contentOffset.y ?? 0) < 80;
-          }}
-          onMomentumScrollEnd={(e) => {
-            stick.current = ((e.nativeEvent as { contentOffset: { y: number } }).contentOffset.y ?? 0) < 80;
-          }}
-          onScrollToIndexFailed={() => {
-            // The newest row is not rendered yet (the reader is in history):
-            // wait for it to come into view, then go to it.
-            setTimeout(() => jumpToNewest(), 50);
-          }}
-          onContentSizeChange={() => {
-            if (stick.current) jumpToNewest();
-          }}
-          contentContainerStyle={{
-            padding: space.lg,
-            gap: space.sm,
-            maxWidth: 860,
-            width: '100%',
-            alignSelf: 'center',
-          }}
-          renderItem={({ item }) => <Row item={item} />}
-        />
+        {Platform.OS === 'web' ? (
+          // column-reverse on the scrolling element: the browser puts
+          // scrollTop 0 at the bottom, holds it there as content grows, and
+          // anchors the reader's place when they have scrolled up.
+          <ScrollView
+            style={{ flexDirection: 'column-reverse' }}
+            contentContainerStyle={[transcript, { flexDirection: 'column-reverse' }]}
+          >
+            {rows.slice(0, shown).map((item) => (
+              <Row key={item.key} item={item} />
+            ))}
+            {rows.length > shown ? (
+              <View style={{ alignItems: 'center' }}>
+                <Button
+                  title={`Show ${Math.min(page, rows.length - shown)} earlier`}
+                  onPress={() => setEarlier({ id, n: shown + page })}
+                />
+              </View>
+            ) : null}
+          </ScrollView>
+        ) : (
+          // Native: a ScrollView's column-reverse does not move the scroll
+          // origin, so the list is inverted (offset 0 = newest) and the
+          // platform holds the visible row when rows are added; within 80
+          // of the newest it follows them.
+          <FlatList
+            data={rows}
+            keyExtractor={(i) => i.key}
+            inverted
+            maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
+            contentContainerStyle={transcript}
+            renderItem={({ item }) => <Row item={item} />}
+          />
+        )}
         <View
           style={{
             paddingHorizontal: space.lg,
