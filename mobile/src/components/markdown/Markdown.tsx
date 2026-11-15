@@ -14,6 +14,7 @@ import {
   type MarkdownBlock,
   type Node,
 } from '@/lib/markdown';
+import { Code } from '@/components/code/Code';
 import { font, mono, space, useColors, type Colors } from '@/lib/theme';
 
 export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
@@ -30,16 +31,17 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
 
 const Block = memo(function Block({ block, closer }: { block: MarkdownBlock; closer: string }) {
   const c = useColors();
-  return <>{blocksOf(parseBlock(block, closer), c)}</>;
+  return <>{blocksOf(parseBlock(block, closer), c, closer !== '')}</>;
 });
 
 const HEADING = [0, font.xl, font.lg + 2, font.lg, font.md, font.md, font.sm];
 
-function blocksOf(node: Node, c: Colors): ReactNode[] {
-  return (node.children ?? []).map((n, i) => blockOf(n, i, c));
+/** open: the block is a fence still streaming (its closer is owed). */
+function blocksOf(node: Node, c: Colors, open = false): ReactNode[] {
+  return (node.children ?? []).map((n, i) => blockOf(n, i, c, open));
 }
 
-function blockOf(n: Node, key: number, c: Colors): ReactNode {
+function blockOf(n: Node, key: number, c: Colors, open: boolean): ReactNode {
   const body: TextStyle = { color: c.text, fontSize: font.md, lineHeight: font.md * 1.4 };
   switch (n.type) {
     case 'paragraph':
@@ -66,7 +68,7 @@ function blockOf(n: Node, key: number, c: Colors): ReactNode {
     case 'blockquote':
       return (
         <View key={key} style={{ borderLeftWidth: 3, borderLeftColor: c.border, paddingLeft: space.md, gap: space.xs }}>
-          {blocksOf(n, c)}
+          {blocksOf(n, c, open)}
         </View>
       );
     case 'list':
@@ -83,7 +85,7 @@ function blockOf(n: Node, key: number, c: Colors): ReactNode {
                       ? `${(n.start ?? 1) + i}.`
                       : '•'}
               </Text>
-              <View style={{ flex: 1, gap: space.xs }}>{blocksOf(item, c)}</View>
+              <View style={{ flex: 1, gap: space.xs }}>{blocksOf(item, c, open)}</View>
             </View>
           ))}
         </View>
@@ -92,11 +94,7 @@ function blockOf(n: Node, key: number, c: Colors): ReactNode {
       return (
         <View key={key} style={{ backgroundColor: c.sunken, borderRadius: 6, padding: space.sm, gap: space.xs }}>
           {n.lang ? <Text style={{ color: c.muted, fontSize: font.sm }}>{n.lang}</Text> : null}
-          <ScrollView horizontal>
-            <Text selectable style={{ color: c.text, fontFamily: mono, fontSize: font.sm }}>
-              {codeText(n)}
-            </Text>
-          </ScrollView>
+          <Code code={codeText(n)} lang={n.lang} streaming={open} />
         </View>
       );
     case 'table':

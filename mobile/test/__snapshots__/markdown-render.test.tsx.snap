@@ -306,7 +306,16 @@ exports[`renders each node kind with RN host components 1`] = `
               }
             }
           >
-            echo hi
+            <Text
+              style={
+                {
+                  "color": "#0a1bb1",
+                }
+              }
+            >
+              echo
+            </Text>
+             hi
           </Text>
         </View>
       </RCTScrollView>

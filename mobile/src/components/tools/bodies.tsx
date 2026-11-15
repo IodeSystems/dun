@@ -1,9 +1,11 @@
 // The open body of each kind of tool call: what the TUI's pager shows for it
 // (internal/tui/toolrun.go page: the call in full, then the renderer's body).
 
-import { Fragment, useState } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { CodeText, DiffText, NumberedText } from '@/components/code/Code';
+import { langForPath, type Lang } from '@/components/code/languages';
 import { exitMarker, type ToolCall } from '@/lib/toolcalls';
 import { argFull, isDiff, prettyJson } from '@/lib/tooltext';
 import { font, mono, space, useColors, type Colors } from '@/lib/theme';
@@ -18,10 +20,13 @@ export function Clipped({
   text,
   color,
   lineColor,
+  draw,
 }: {
   text: string;
   color?: string;
   lineColor?: (l: string) => string;
+  /** Draws the shown lines instead (highlighted code). */
+  draw?: (shown: string[]) => ReactNode;
 }) {
   const c = useColors();
   const [all, setAll] = useState(false);
@@ -31,7 +36,9 @@ export function Clipped({
   const style = { fontFamily: mono, fontSize: font.sm, color: color ?? c.text };
   return (
     <View>
-      {lineColor ? (
+      {draw ? (
+        draw(shown)
+      ) : lineColor ? (
         <Text selectable style={style}>
           {shown.map((l, i) => (
             <Fragment key={i}>
@@ -52,6 +59,17 @@ export function Clipped({
       ) : null}
     </View>
   );
+}
+
+/** The grammar for a file tool's path argument, or null (plain). */
+const pathLang = (call: ToolCall): Lang | null =>
+  langForPath(typeof call.args?.path === 'string' ? call.args.path : null);
+
+/** A diff: highlighted inside its +/- lines when the path has a grammar, else coloured by line. */
+function Diff({ text, lang }: { text: string; lang: Lang | null }) {
+  const c = useColors();
+  if (!lang) return <Clipped text={text} lineColor={diffColor(c)} />;
+  return <Clipped text={text} draw={(shown) => <DiffText lines={shown} lang={lang} />} />;
 }
 
 /** A unified diff's line colour (render.go colorizeDiff): +, -, @@; file headers neutral. */
@@ -121,14 +139,16 @@ export function ShellBody({ call }: BodyProps) {
 
 /** file_edit, node_edit (filerender.go fileEditRender, renderers.go diffRender): the diff, coloured. */
 export function DiffBody({ call }: BodyProps) {
-  const c = useColors();
   if (call.result === undefined || call.state === 'error') return <Result call={call} />;
-  return <Clipped text={call.result} lineColor={diffColor(c)} />;
+  return <Diff text={call.result} lang={pathLang(call)} />;
 }
 
 /** file_read, node_read (fileReadRender, nodeReadRender): what was read, verbatim. */
 export function ReadBody({ call }: BodyProps) {
-  return <Result call={call} />;
+  const lang = pathLang(call);
+  if (!lang || call.result === undefined || call.state === 'error' || !call.result.trim())
+    return <Result call={call} />;
+  return <Clipped text={call.result} draw={(shown) => <NumberedText lines={shown} lang={lang} />} />;
 }
 
 /** file_write (fileWriteRender): what was written, from the call's content. */
@@ -137,9 +157,14 @@ export function WriteBody({ call }: BodyProps) {
   return (
     <View style={{ gap: space.xs }}>
       <Result call={call} />
-      {content ? <Clipped text={content} /> : null}
+      {content ? <WriteContent text={content} lang={pathLang(call)} /> : null}
     </View>
   );
+}
+
+function WriteContent({ text, lang }: { text: string; lang: Lang | null }) {
+  if (!lang) return <Clipped text={text} />;
+  return <Clipped text={text} draw={(shown) => <CodeText code={shown.join('\n')} lang={lang} />} />;
 }
 
 /** file_grep, file_read with grep (fileGrepRender): the hits, verbatim. */
