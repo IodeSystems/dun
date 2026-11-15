@@ -93,13 +93,19 @@ func Handler(svc *dund.Service, o Options) (http.Handler, error) {
 }
 
 // spa serves app's files, and its index.html for any other path: a client
-// route (/session/…) is the app's shell, which routes itself.
+// route (/session/…) is the app's shell, which routes itself. A missing
+// file (under /_expo/ or /assets/, or with an extension) is a 404: the shell
+// served as a script or image gets cached by the service worker.
 func spa(app fs.FS) http.HandlerFunc {
 	files := http.FileServerFS(app)
 	return func(w http.ResponseWriter, req *http.Request) {
 		p := strings.TrimPrefix(path.Clean("/"+req.URL.Path), "/")
 		if st, err := fs.Stat(app, p); err == nil && !st.IsDir() {
 			files.ServeHTTP(w, req)
+			return
+		}
+		if strings.HasPrefix(p, "_expo/") || strings.HasPrefix(p, "assets/") || path.Ext(p) != "" {
+			http.NotFound(w, req)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-cache")

@@ -236,6 +236,19 @@ func TestWebRootServesTheClient(t *testing.T) {
 			t.Errorf("%s: %d %q", path, resp.StatusCode, b)
 		}
 	}
+	for _, path := range []string{"/_expo/x.js", "/_expo/static/js/web/missing-deadbeef.js", "/foo.png", "/assets/y", "/a/b.json"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 404 {
+			t.Errorf("missing %s: %d, want 404", path, resp.StatusCode)
+		}
+	}
+	if resp, _ := http.Get(srv.URL + "/signin"); resp.StatusCode != 200 {
+		t.Errorf("/signin: %d", resp.StatusCode)
+	}
 	if resp, _ := http.Get(srv.URL + "/api/v1/sessions"); resp.StatusCode != 401 {
 		t.Errorf("api without token: %d", resp.StatusCode)
 	}
