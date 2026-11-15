@@ -372,7 +372,13 @@ export default function Session() {
         }}
       />
       {sheet === 'ctx' ? (
-        <CtxSheet stats={stats.id === id ? stats.s : noStats} ctx={view.bg.ctx} onClose={() => setSheet(null)} />
+        <CtxSheet
+          stats={stats.id === id ? stats.s : noStats}
+          ctx={view.bg.ctx}
+          ctxv={view.bg.ctxv}
+          blocks={view.items.length}
+          onClose={() => setSheet(null)}
+        />
       ) : null}
       {sheet === 'plan' && view.bg.plan ? (
         <PlanSheet
