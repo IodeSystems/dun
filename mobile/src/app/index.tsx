@@ -1,12 +1,12 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Redirect, router, Stack } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
 
 import { explain, UnauthorizedError } from '@/api/client';
-import { CreateSession, ListSessions } from '@/api/ops';
+import { ListSessions } from '@/api/ops';
 import { AppRelease } from '@/components/AppRelease';
-import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
+import { Button, ErrorText, Muted, Screen } from '@/components/ui';
 import { ago, sessionRows } from '@/lib/sessionlist';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
@@ -15,7 +15,6 @@ import { useAuth } from '@/providers/AuthProvider';
 export default function Sessions() {
   const auth = useAuth();
   const c = useColors();
-  const [ws, setWs] = useState('');
   const list = useQuery({
     queryKey: ['sessions', auth.baseUrl],
     enabled: !!auth.client,
@@ -27,16 +26,6 @@ export default function Sessions() {
         throw explain(e);
       }
     },
-  });
-  const create = useMutation({
-    mutationFn: async (workspace: string) => {
-      try {
-        return (await auth.client!.request(CreateSession, { workspace })).dund.createSession?.id;
-      } catch (e) {
-        throw explain(e);
-      }
-    },
-    onSuccess: (id) => id && router.push({ pathname: '/session/[id]', params: { id } }),
   });
 
   const refused = list.error instanceof UnauthorizedError;
@@ -66,10 +55,11 @@ export default function Sessions() {
         ListHeaderComponent={
           <View style={{ gap: space.sm, marginBottom: space.sm }}>
             <AppRelease />
+            <Button title="New session" primary onPress={() => router.push('/new')} />
             {list.isLoading ? <ActivityIndicator /> : null}
             {list.error && !refused ? <ErrorText>{list.error.message}</ErrorText> : null}
             {!list.isLoading && !items.length ? (
-              <Muted>No sessions yet — start one below, or with dun in a terminal.</Muted>
+              <Muted>No sessions yet. Start one with New session, or run dun in a terminal.</Muted>
             ) : null}
           </View>
         }
@@ -105,25 +95,6 @@ export default function Sessions() {
             </Text>
           </Pressable>
         )}
-        ListFooterComponent={
-          <View style={{ gap: space.sm, marginTop: space.lg }}>
-            <Muted>New session in a workspace (an absolute path on the machine dund runs on)</Muted>
-            <Field
-              value={ws}
-              onChangeText={setWs}
-              placeholder="/home/you/src/project"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {create.error ? <ErrorText>{create.error.message}</ErrorText> : null}
-            <Button
-              title={create.isPending ? 'Starting…' : 'New session'}
-              primary
-              disabled={!ws.trim() || create.isPending}
-              onPress={() => create.mutate(ws.trim())}
-            />
-          </View>
-        }
       />
     </Screen>
   );

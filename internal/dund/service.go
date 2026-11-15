@@ -210,11 +210,9 @@ func (s *Service) create(principal, workspace string, args []string, resume stri
 			return "", ErrNoSession // someone else's
 		}
 	}
-	if !filepath.IsAbs(workspace) {
-		return "", fmt.Errorf("workspace must be an absolute path: %q", workspace)
-	}
-	if st, err := os.Stat(workspace); err != nil || !st.IsDir() {
-		return "", fmt.Errorf("workspace %s is not a directory", workspace)
+	workspace, err := NormalizeWorkspace(workspace)
+	if err != nil {
+		return "", err
 	}
 	if s.isClosing() {
 		return "", errors.New("service is shutting down")

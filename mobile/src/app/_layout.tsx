@@ -56,6 +56,7 @@ export default function RootLayout() {
           >
             <Stack.Screen name="index" options={{ title: 'dun' }} />
             <Stack.Screen name="signin" options={{ title: 'Sign in' }} />
+            <Stack.Screen name="new" options={{ title: 'New session' }} />
             <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />
           </Stack>
         </AuthProvider>

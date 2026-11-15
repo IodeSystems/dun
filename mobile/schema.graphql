@@ -38,7 +38,12 @@ type DundQueryNamespace {
     """with since -1, the last this many bytes; 0: from the start"""
     tail: Long
   ): dund_JobOutput @derived(operationId: "jobOutput")
+  listDirs(
+    """the path typed so far: absolute, ~/…, or under the home; a trailing / lists that directory"""
+    path: String
+  ): dund_DirListing @derived(operationId: "listDirs")
   listSessions: dund_SessionsOutputBody @derived(operationId: "listSessions")
+  listWorkspaces: dund_WorkspacesOutputBody @derived(operationId: "listWorkspaces")
   pollSessionEvents(
     """the last seq seen; 0 for the start"""
     after: Long
@@ -80,7 +85,12 @@ type DundV1QueryNamespace {
     """with since -1, the last this many bytes; 0: from the start"""
     tail: Long
   ): dund_JobOutput @derived(operationId: "jobOutput")
+  listDirs(
+    """the path typed so far: absolute, ~/…, or under the home; a trailing / lists that directory"""
+    path: String
+  ): dund_DirListing @derived(operationId: "listDirs")
   listSessions: dund_SessionsOutputBody @derived(operationId: "listSessions")
+  listWorkspaces: dund_WorkspacesOutputBody @derived(operationId: "listWorkspaces")
   pollSessionEvents(
     """the last seq seen; 0 for the start"""
     after: Long
@@ -173,6 +183,14 @@ input dund_CreateInputBodyInput {
   workspace: String!
 }
 
+type dund_DirListing {
+  dir: String!
+  items: [String!]!
+  problem: String
+  truncated: Boolean!
+  workspace: String!
+}
+
 type dund_EventsOutputBody {
   """pass as epoch on the next call"""
   epoch: String
@@ -252,4 +270,14 @@ input dund_UIInputBodyInput {
 
 type dund_UIOutputBody {
   state: JSON!
+}
+
+type dund_Workspace {
+  lastActive: String
+  path: String!
+  running: Boolean!
+}
+
+type dund_WorkspacesOutputBody {
+  items: [dund_Workspace!]!
 }

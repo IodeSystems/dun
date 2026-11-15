@@ -38,6 +38,34 @@ export const CreateSession = graphql(`
   }
 `);
 
+export const ListWorkspaces = graphql(`
+  query ListWorkspaces {
+    dund {
+      listWorkspaces {
+        items {
+          path
+          lastActive
+          running
+        }
+      }
+    }
+  }
+`);
+
+export const ListDirs = graphql(`
+  query ListDirs($path: String) {
+    dund {
+      listDirs(path: $path) {
+        workspace
+        problem
+        dir
+        items
+        truncated
+      }
+    }
+  }
+`);
+
 export const SendMessage = graphql(`
   mutation SendMessage($id: String!, $content: String!) {
     dund {

@@ -264,6 +264,20 @@ type CreateInput struct {
 	}
 }
 
+type WorkspacesOutput struct {
+	Body struct {
+		Items []dund.Workspace `json:"items"`
+	}
+}
+
+type DirsInput struct {
+	Path string `query:"path" doc:"the path typed so far: absolute, ~/…, or under the home; a trailing / lists that directory"`
+}
+
+type DirsOutput struct {
+	Body dund.DirListing
+}
+
 type IDOutput struct {
 	Body struct {
 		ID string `json:"id"`
@@ -426,6 +440,37 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 			o := &IDOutput{}
 			o.Body.ID = id
 			return o, nil
+		})
+	gat.Register(api, g, huma.Operation{OperationID: "listWorkspaces", Method: http.MethodGet, Path: "/api/v1/workspaces",
+		Summary: "Where the caller's sessions ran, most recent activity first: the new-session picker."},
+		func(ctx context.Context, _ *struct{}) (*WorkspacesOutput, error) {
+			p, err := who(ctx)
+			if err != nil {
+				return nil, err
+			}
+			o := &WorkspacesOutput{}
+			// ~/.dun/sessions is the user dund runs as: only that principal
+			// sees the workspaces recorded there.
+			o.Body.Items = s.svc.Workspaces(p, p == s.owner)
+			return o, nil
+		})
+	gat.Register(api, g, huma.Operation{OperationID: "listDirs", Method: http.MethodGet, Path: "/api/v1/dirs",
+		Summary: "Directories completing a typed workspace path, and how createSession would read it."},
+		func(ctx context.Context, in *DirsInput) (*DirsOutput, error) {
+			p, err := who(ctx)
+			if err != nil {
+				return nil, err
+			}
+			// The filesystem is the user dund runs as; another principal
+			// does not browse it.
+			if p != s.owner {
+				return nil, huma.Error403Forbidden("only the user dund runs as can browse its directories")
+			}
+			l, err := dund.BrowseDirs(in.Path)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return &DirsOutput{Body: l}, nil
 		})
 	gat.Register(api, g, huma.Operation{OperationID: "sendMessage", Method: http.MethodPost, Path: "/api/v1/sessions/{id}/messages",
 		Summary: "Send the session a message, as the user."},
