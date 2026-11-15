@@ -6,6 +6,7 @@
 
 import type { McpTool, McpTools } from './mcp';
 import * as notices from './notices';
+import { endsThinking, endThought, evTime, liveThought, type Thought } from './thinking';
 import { withCall, withResult, type Run } from './toolcalls';
 import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 
@@ -15,6 +16,7 @@ export type Item =
   // Consecutive tool calls, each merged with its result (toolcalls.ts).
   | Run
   | { key: string; kind: 'note'; text: string; error?: boolean }
+  | ({ key: string; kind: 'thinking' } & Thought)
   | { key: string; kind: 'question'; text: string; options: string[]; recommended?: string }
   // What the engine says beside the conversation (notices.ts): it ends a run.
   | { key: string; kind: 'notice'; notice: notices.Notice };
@@ -159,6 +161,8 @@ function fromHistory(v: View, it: Ev): View {
       );
     case 'notification':
       return push(v, { kind: 'notice', notice: notices.fromHistoryNotification(str(it.content)) });
+    case 'reasoning':
+      return push(v, { kind: 'thinking', text: str(it.content), start: 0, end: 0, live: false });
   }
   return v;
 }
@@ -178,7 +182,12 @@ export function replaceWith(items: unknown[], keep?: View): View {
 }
 
 export function apply(v: View, ev: Ev): View {
+  // The round's thinking is over (lib/thinking.ts).
+  if (endsThinking.has(str(ev.type)))
+    v = { ...v, items: endThought(v.items, evTime(ev), ev.type === 'done' && ev.reason === 'interrupted') };
   switch (ev.type) {
+    case 'reasoning':
+      return addThinking(v, str(ev.text), evTime(ev));
     case 'snapshot':
       return applySnapshot(ev, v);
     case 'history':
@@ -306,6 +315,17 @@ export function apply(v: View, ev: Ev): View {
       return { ...v, status: `${Number(ev.count ?? 0)} message(s) queued for the running turn` };
   }
   return v;
+}
+
+/** A reasoning delta: it opens the round's thought if none is live, and grows it. */
+function addThinking(v: View, delta: string, at: number): View {
+  const i = liveThought(v.items);
+  const w = { ...v, busy: true };
+  if (i < 0) return push(w, { kind: 'thinking', text: delta, start: at, end: 0, live: true });
+  const items = [...v.items];
+  const t = items[i] as Extract<Item, { kind: 'thinking' }>;
+  items[i] = { ...t, text: t.text + delta };
+  return { ...w, items };
 }
 
 /** The line an interrupted turn ends with (the TUI's too). */

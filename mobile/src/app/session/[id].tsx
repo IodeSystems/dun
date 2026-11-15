@@ -25,6 +25,7 @@ import { NoticeRow } from '@/components/notices/NoticeRow';
 import { ModelPicker } from '@/components/ModelPicker';
 import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
+import { Thinking } from '@/components/thinking/Thinking';
 import { ToolRun } from '@/components/tools/ToolRun';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
@@ -520,6 +521,8 @@ function Row({ item }: { item: Item }) {
       );
     case 'tools':
       return <ToolRun run={item} />;
+    case 'thinking':
+      return <Thinking item={item} />;
     case 'note':
       return (
         <Text style={{ color: item.error ? c.danger : c.muted, fontSize: font.sm, paddingHorizontal: space.md }}>
