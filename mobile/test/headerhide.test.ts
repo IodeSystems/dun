@@ -1,5 +1,13 @@
 /// <reference types="jest" />
-import { HIDE_AFTER, SHOW_AFTER, headerScroll, headerShow, headerStart, type HeaderHide } from '../src/lib/headerhide';
+import {
+  HIDE_AFTER,
+  SHOW_AFTER,
+  fromNewest,
+  headerScroll,
+  headerShow,
+  headerStart,
+  type HeaderHide,
+} from '../src/lib/headerhide';
 
 const H = 5000;
 // Feed offsets (same content height); the hidden flag after each.
@@ -59,4 +67,58 @@ test('a tap shows it until the reader scrolls on', () => {
   expect(s.hidden).toBe(false);
   expect(run([410], s).s.hidden).toBe(false);
   expect(run([400 + HIDE_AFTER], s).s.hidden).toBe(true);
+});
+
+// The raw offsets the transcript reports. Web: column-reverse, scrollTop runs
+// 0 (newest) to -max, and iOS Safari's rubber band at the newest end pushes it
+// positive. Native: inverted list, 0 to max, and iOS bounce at the newest end
+// runs negative.
+const MAX = H - 800;
+function raw(ys: number[], web: boolean, s: HeaderHide = headerStart): { s: HeaderHide; seen: boolean[] } {
+  const seen: boolean[] = [];
+  for (const y of ys) {
+    s = headerScroll(s, fromNewest(y, web, MAX), H);
+    seen.push(s.hidden);
+  }
+  return { s, seen };
+}
+
+test('web: the rubber band past the newest row does not hide it', () => {
+  // A fling down to the newest: scrollTop overshoots positive and settles at 0.
+  const { seen } = raw([-120, -60, -10, 0, 15, 40, 60, 40, 15, 0], true, headerStart);
+  expect(seen.slice(3)).toEqual([false, false, false, false, false, false, false]);
+});
+
+test('native: the bounce past the newest row does not hide it', () => {
+  const { seen } = raw([120, 60, 10, 0, -15, -40, -60, -40, -15, 0], false);
+  expect(seen.slice(3).every((x) => !x)).toBe(true);
+});
+
+test('web: a pull at the newest row while hidden shows it and stays shown', () => {
+  const hid = raw([-300], true).s;
+  expect(hid.hidden).toBe(true);
+  expect(raw([-100, -20, 0, 30, 50, 30, 0], true, hid).seen).toEqual([false, false, false, false, false, false, false]);
+});
+
+test('the bounce past the oldest row does not show it', () => {
+  // Reading at the top of the history: the bounce runs past -max and back.
+  const web = raw([-(MAX - 100), -MAX, -(MAX + 40), -(MAX + 60), -(MAX + 20), -MAX], true);
+  expect(web.seen.every((x) => x)).toBe(true);
+  const nat = raw([MAX - 100, MAX, MAX + 40, MAX + 60, MAX + 20, MAX], false);
+  expect(nat.seen.every((x) => x)).toBe(true);
+});
+
+test('a slow drag near the newest row: one hide, one show', () => {
+  const ys = [0, -2, -4, -6, -8, -10, -14, -20, -26, -31, -33, -36, -30, -24, -18, -12, -6, 0, 4, 9, 4, 0];
+  const { seen } = raw(ys, true);
+  const flips = seen.filter((x, i) => i > 0 && x !== seen[i - 1]).length;
+  expect(flips).toBe(2);
+});
+
+test('content shorter than the screen never hides it', () => {
+  let s = headerStart;
+  for (const y of [0, 10, 40, 60, 20, 0]) {
+    s = headerScroll(s, fromNewest(y, false, 0), 300);
+    expect(s.hidden).toBe(false);
+  }
 });

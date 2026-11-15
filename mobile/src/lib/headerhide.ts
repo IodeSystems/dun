@@ -39,3 +39,16 @@ export function headerScroll(s: HeaderHide, y: number, h: number): HeaderHide {
 export function headerShow(s: HeaderHide): HeaderHide {
   return { ...s, hidden: false, anchor: s.y };
 }
+
+/**
+ * The distance from the newest row for a raw scroll offset y, with max the
+ * furthest the content scrolls (content height minus the viewport). Web
+ * (column-reverse): scrollTop runs 0 at the newest to -max. Native (inverted
+ * list): 0 to max. A bounce past either end (iOS Safari's rubber band runs
+ * positive at the newest end on the web, negative on native) is clamped to
+ * that end, so it reads as no movement, not as a scroll the other way.
+ */
+export function fromNewest(y: number, web: boolean, max: number): number {
+  const d = web ? -y : y;
+  return Math.min(Math.max(d, 0), Math.max(max, 0));
+}

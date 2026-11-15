@@ -58,7 +58,7 @@ import {
 } from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
 import { noStats, noteRequest } from '@/lib/stats';
-import { headerScroll, headerShow, headerStart } from '@/lib/headerhide';
+import { fromNewest, headerScroll, headerShow, headerStart } from '@/lib/headerhide';
 import { turnState } from '@/lib/turnstate';
 import { shouldReload, upgradeLines } from '@/lib/upgrade';
 import { providerLine, type ProviderOp } from '@/lib/provider';
@@ -331,12 +331,15 @@ export default function Session() {
 
   // The header steps aside while the reader scrolls into the history (offset
   // 0 is the newest row: column-reverse on the web, inverted on native; the
-  // web's offset runs negative) and comes back when they scroll down or reach
-  // the newest (lib/headerhide: thresholds, content growth ignored). Reading
-  // the offset only: nothing here sets it.
+  // web's offset runs negative; a bounce past either end is clamped) and
+  // comes back when they scroll down or reach the newest (lib/headerhide:
+  // thresholds, content growth ignored). Reading the offset only: nothing
+  // here sets it.
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     const ev = e.nativeEvent;
-    hide.current = headerScroll(hide.current, Math.abs(ev.contentOffset.y), ev.contentSize?.height ?? -1);
+    const h = ev.contentSize?.height ?? -1;
+    const max = h < 0 ? Infinity : h - (ev.layoutMeasurement?.height ?? 0);
+    hide.current = headerScroll(hide.current, fromNewest(ev.contentOffset.y, Platform.OS === 'web', max), h);
     setAway(hide.current.hidden);
   }
 
