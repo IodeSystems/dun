@@ -25,11 +25,14 @@ import { NoticeRow } from '@/components/notices/NoticeRow';
 import { ModelPicker } from '@/components/ModelPicker';
 import { ProviderForm } from '@/components/ProviderForm';
 import { Palette, SessionPanel } from '@/components/SessionPanel';
+import { StatsBar } from '@/components/StatsBar';
+import { Thinking } from '@/components/thinking/Thinking';
 import { ToolRun } from '@/components/tools/ToolRun';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
 import { apply, empty, isKillAll, parseLine, suggest, type Item, type View as Shown } from '@/lib/events';
 import { toggleAction, toolsRequest } from '@/lib/mcp';
+import { noStats, noteRequest } from '@/lib/stats';
 import { shouldReload, upgradeLines } from '@/lib/upgrade';
 import { providerLine, type ProviderOp } from '@/lib/provider';
 import { font, space, useColors } from '@/lib/theme';
@@ -53,6 +56,8 @@ export default function Session() {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const [view, setView] = useState<Shown>(empty);
+  // The request stats (lib/stats.ts), this session's only.
+  const [stats, setStats] = useState({ id, s: noStats });
   const [conn, setConn] = useState('');
   const [text, setText] = useState('');
   const [sendErr, setSendErr] = useState('');
@@ -110,6 +115,7 @@ export default function Session() {
     return followSession(client, live, id, {
       onEvent: (ev) => {
         setView((v) => apply(v, ev));
+        setStats((x) => ({ id, s: noteRequest(x.id === id ? x.s : noStats, ev) }));
         if (ev.type === 'snapshot') checkBuild();
       },
       onConn: (problem) => {
@@ -303,6 +309,7 @@ export default function Session() {
         }}
       />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <StatsBar stats={stats.id === id ? stats.s : noStats} />
         {Platform.OS === 'web' ? (
           // column-reverse on the scrolling element: the browser puts
           // scrollTop 0 at the bottom, holds it there as content grows, and
@@ -520,6 +527,8 @@ function Row({ item }: { item: Item }) {
       );
     case 'tools':
       return <ToolRun run={item} />;
+    case 'thinking':
+      return <Thinking item={item} />;
     case 'note':
       return (
         <Text style={{ color: item.error ? c.danger : c.muted, fontSize: font.sm, paddingHorizontal: space.md }}>
