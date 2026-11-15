@@ -44,6 +44,9 @@ type Event struct {
 	Type    string    `json:"type"`
 	// Re is the id of the command this event answers (an ack).
 	Re string `json:"re,omitempty"`
+	// Replayed: a state event a snapshot carries again. It is state, not
+	// news: a client applies it and shows no note for it.
+	Replayed bool `json:"replayed,omitempty"`
 	// Payload is the type's struct from events.go (a pointer), or a
 	// map[string]any for a type this version does not know.
 	Payload any `json:"-"`
@@ -60,7 +63,7 @@ type Command struct {
 
 // The envelopes' JSON names; no payload may use them.
 var (
-	eventKeys   = map[string]bool{"v": true, "session": true, "seq": true, "epoch": true, "ts": true, "type": true, "re": true}
+	eventKeys   = map[string]bool{"v": true, "session": true, "seq": true, "epoch": true, "ts": true, "type": true, "re": true, "replayed": true}
 	commandKeys = map[string]bool{"v": true, "cid": true, "session": true, "type": true}
 )
 

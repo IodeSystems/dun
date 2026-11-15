@@ -88,12 +88,12 @@ func (e *echoWC) echo(m tuiModel, busy bool) tuiModel {
 		switch c["type"] {
 		case "user":
 			if busy {
-				m = m.handleEvent(evMsg{"type": "user", "content": c["content"], "queued": true})
+				m = m.feed(evMsg{"type": "user", "content": c["content"], "queued": true})
 			} else {
-				m = m.handleEvent(evMsg{"type": "user", "content": c["content"]})
+				m = m.feed(evMsg{"type": "user", "content": c["content"]})
 			}
 		case "answer":
-			m = m.handleEvent(evMsg{"type": "answered", "value": c["value"]})
+			m = m.feed(evMsg{"type": "answered", "value": c["value"]})
 		}
 	}
 	e.buf.Reset()
@@ -155,8 +155,13 @@ func (v *vtui) resize(w, h int) {
 // per-message layout sync that Update does, which is how a frame that overdrew
 // the terminal by one row stayed invisible to these tests.
 func (v *vtui) event(ev map[string]any) {
+	syncSim(v.m)
 	nm, _ := v.m.Update(evMsg(ev))
 	v.m = nm.(tuiModel)
+	if ts := simAfter(v.m.proc, evMsg(ev)); ts != nil { // the engine's turn_state after it
+		nm, _ = v.m.Update(ts)
+		v.m = nm.(tuiModel)
+	}
 }
 
 // send simulates the user typing a message and pressing enter.
@@ -200,7 +205,7 @@ func TestTUI_EventHandling(t *testing.T) {
 		t.Fatal("model should start in the 'starting' state")
 	}
 
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"node_query", "eval", "search"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"node_query", "eval", "search"}})
 	if m.starting {
 		t.Fatal("ready should clear starting")
 	}
@@ -210,12 +215,12 @@ func TestTUI_EventHandling(t *testing.T) {
 
 	// A turn: streamed tokens accumulate; a tool call flushes the streamed text.
 	m.busy = true
-	m = m.handleEvent(evMsg{"type": "token", "text": "look"})
-	m = m.handleEvent(evMsg{"type": "token", "text": "ing…"})
+	m = m.feed(evMsg{"type": "token", "text": "look"})
+	m = m.feed(evMsg{"type": "token", "text": "ing…"})
 	if m.cur != "looking…" {
 		t.Fatalf("tokens should accumulate into cur, got %q", m.cur)
 	}
-	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "node_query", "args": map[string]any{"selector": "x"}})
+	m = m.feed(evMsg{"type": "tool_call", "tool": "node_query", "args": map[string]any{"selector": "x"}})
 	if m.cur != "" {
 		t.Fatal("tool_call should flush the streamed text")
 	}
@@ -224,8 +229,8 @@ func TestTUI_EventHandling(t *testing.T) {
 		t.Fatalf("conversation missing streamed text or tool line: %q", joined)
 	}
 
-	m = m.handleEvent(evMsg{"type": "token", "text": "done reading"})
-	m = m.handleEvent(evMsg{"type": "done"})
+	m = m.feed(evMsg{"type": "token", "text": "done reading"})
+	m = m.feed(evMsg{"type": "done"})
 	if m.busy {
 		t.Fatal("done should clear busy")
 	}
@@ -273,7 +278,7 @@ func TestTUI_FocusToggleAndSelection(t *testing.T) {
 // starts a detail on an option row, has to type an "n" here instead.
 func TestTUI_AskCustomRowTypesWithoutEnter(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
+	m = m.feed(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	m = key(m, kDown)
 	m = key(m, kDown) // past B, onto the text row
 	if m.askSel != m.askTextRow() || !m.onAskText() {
@@ -312,7 +317,7 @@ func TestTUI_AskCustomRowTypesWithoutEnter(t *testing.T) {
 // a user can arrow onto it and back off without getting stuck in a field.
 func TestTUI_AskCustomRowStillNavigable(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
+	m = m.feed(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	m = key(m, kDown)
 	m = key(m, kDown)
 	m = typeStr(m, "half")
@@ -330,7 +335,7 @@ func TestTUI_AskCustomRowStillNavigable(t *testing.T) {
 func TestTUI_AskPickerOptionWithNote(t *testing.T) {
 	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
+	m = m.feed(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	if !m.asking || len(m.askOptions) != 2 || m.askSel != 0 {
 		t.Fatalf("ask not set up: asking=%v opts=%v sel=%d", m.asking, m.askOptions, m.askSel)
 	}
@@ -363,7 +368,7 @@ func TestTUI_AskPickerOptionWithNote(t *testing.T) {
 func TestTUI_AskNoOptionsFreeText(t *testing.T) {
 	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
-	m = m.handleEvent(evMsg{"type": "ask", "question": "What is your favorite color?", "options": nil})
+	m = m.feed(evMsg{"type": "ask", "question": "What is your favorite color?", "options": nil})
 	if !m.asking || len(m.askOptions) != 0 {
 		t.Fatalf("expected a no-options ask, got opts=%v", m.askOptions)
 	}
@@ -389,7 +394,7 @@ func TestTUI_AskNoOptionsFreeText(t *testing.T) {
 func TestTUI_AskMultiSelect(t *testing.T) {
 	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B", "C"}, "multi": true})
+	m = m.feed(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B", "C"}, "multi": true})
 	if !m.askMulti || len(m.askChecked) != 3 {
 		t.Fatalf("multi ask not set up: multi=%v checked=%v", m.askMulti, m.askChecked)
 	}
@@ -422,7 +427,7 @@ func TestTUI_AskMultiSelect(t *testing.T) {
 func TestTUI_AskPickerCustomAnswer(t *testing.T) {
 	proc := &dunProc{stdin: &echoWC{}}
 	m := newTUIModel(proc, "/ws")
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
+	m = m.feed(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B"}})
 	m = key(m, kDown)
 	m = key(m, kDown) // move onto the text row (index == len(options))
 	if m.askSel != 2 {
@@ -447,9 +452,9 @@ func TestTUI_AskPickerCustomAnswer(t *testing.T) {
 func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m = resized(m, 100, 30)
-	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "node_read", "args": map[string]any{"sel": "F"}})
+	m = m.feed(evMsg{"type": "tool_call", "tool": "node_read", "call_id": "c1", "args": map[string]any{"sel": "F"}})
 	full := "line one\nline two\nline three that is quite long and would be clipped in the preview form"
-	m = m.handleEvent(evMsg{"type": "tool_result", "result": full})
+	m = m.feed(evMsg{"type": "tool_result", "tool": "node_read", "call_id": "c1", "result": full})
 
 	if len(m.convo) != 1 || m.convo[0].run == nil {
 		t.Fatalf("call+result should be one run block, got %d", len(m.convo))
@@ -485,7 +490,7 @@ func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 // and a notification — plus a trailing "resumed N entries" marker.
 func TestTUI_HistoryReplay(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg{"type": "history", "items": []any{
+	m = m.feed(evMsg{"type": "history", "items": []any{
 		map[string]any{"kind": "user", "content": "fix the bug"},
 		map[string]any{"kind": "assistant", "content": "on it"},
 		map[string]any{"kind": "tool_call", "tool": "node_read", "call_id": "c1", "args": map[string]any{"sel": "F"}},
@@ -510,7 +515,7 @@ func TestTUI_HistoryReplay(t *testing.T) {
 	}
 	// A stray tool_result with no matching call renders standalone (no panic, no args).
 	m2 := newTUIModel(&dunProc{}, "/ws")
-	m2 = m2.handleEvent(evMsg{"type": "history", "items": []any{
+	m2 = m2.feed(evMsg{"type": "history", "items": []any{
 		map[string]any{"kind": "tool_result", "tool": "eval", "call_id": "x", "content": "42"},
 	}})
 	if len(m2.convo) != 2 { // the block + marker
@@ -563,9 +568,9 @@ func TestTUI_Suggestions(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(evMsg{"type": "user", "content": "hi"})
-	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "user", "content": "hi"})
+	m = m.feed(evMsg{"type": "suggestions", "items": []any{
 		map[string]any{"text": "run the tests", "prob": 0.7},
 		map[string]any{"text": "commit it", "prob": 0.2},
 	}})
@@ -585,8 +590,8 @@ func TestTUI_Suggestions(t *testing.T) {
 	}
 
 	// A new turn's token clears any showing suggestions.
-	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "x", "prob": 0.5}}})
-	m = m.handleEvent(evMsg{"type": "token", "text": "thinking"})
+	m = m.feed(evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "x", "prob": 0.5}}})
+	m = m.feed(evMsg{"type": "token", "text": "thinking"})
 	if len(m.suggestions) != 0 {
 		t.Fatal("a new turn should clear suggestions")
 	}
@@ -602,24 +607,24 @@ func TestTUI_NoSuggestionsBeforeTheFirstMessage(t *testing.T) {
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(sugs)
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(sugs)
 	if len(m.suggestions) != 0 || shown(m) {
 		t.Fatal("a fresh session shows suggestions")
 	}
 
-	m = m.handleEvent(evMsg{"type": "user", "content": "hi"})
-	m = m.handleEvent(evMsg{"type": "done"})
-	m = m.handleEvent(sugs)
+	m = m.feed(evMsg{"type": "user", "content": "hi"})
+	m = m.feed(evMsg{"type": "done"})
+	m = m.feed(sugs)
 	if !shown(m) {
 		t.Fatal("after the first exchange suggestions show as before")
 	}
 
-	m = m.handleEvent(evMsg{"type": "reset"})
+	m = m.feed(evMsg{"type": "reset"})
 	if len(m.suggestions) != 0 || shown(m) {
 		t.Fatal("/clear left the old suggestions showing")
 	}
-	m = m.handleEvent(sugs)
+	m = m.feed(sugs)
 	if shown(m) {
 		t.Fatal("a cleared session shows suggestions before a message")
 	}
@@ -638,9 +643,9 @@ func TestTUI_SuggestionsAreDimmed(t *testing.T) {
 		mdStyle = style
 		m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 		m = resized(m, 80, 24)
-		m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-		m = m.handleEvent(evMsg{"type": "user", "content": "hi"})
-		m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
+		m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+		m = m.feed(evMsg{"type": "user", "content": "hi"})
+		m = m.feed(evMsg{"type": "suggestions", "items": []any{
 			map[string]any{"text": "run the tests", "prob": 0.7},
 			map[string]any{"text": "commit it", "prob": 0.2},
 		}})
@@ -678,7 +683,7 @@ func TestTUI_ArrowNav(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.appendUser("hi")  // suggestions need something asked
 	m.append("a reply") // a plain convo message to land on
 
@@ -702,7 +707,7 @@ func TestTUI_ArrowNav(t *testing.T) {
 		t.Fatal("tab from the conversation (no activity) should be the input")
 	}
 	// right from an empty input accepts the ghost-text suggestion (fills the buffer).
-	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
+	m = m.feed(evMsg{"type": "suggestions", "items": []any{
 		map[string]any{"text": "alpha", "prob": 0.6},
 		map[string]any{"text": "bravo", "prob": 0.4},
 	}})
@@ -717,7 +722,7 @@ func TestTUI_ArrowNav(t *testing.T) {
 		t.Fatalf("right should accept ghost text, got %q", m.input.Value())
 	}
 	// enter sends the highlighted suggestion (when input is empty).
-	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{
+	m = m.feed(evMsg{"type": "suggestions", "items": []any{
 		map[string]any{"text": "alpha", "prob": 0.6},
 		map[string]any{"text": "bravo", "prob": 0.4},
 	}})
@@ -767,7 +772,7 @@ func TestTUI_UnknownSlash(t *testing.T) {
 	if !strings.Contains(buf.String(), `"action":"bogus"`) {
 		t.Fatalf("not handed to the engine: %s", buf.String())
 	}
-	m = m.handleEvent(evMsg{"type": "control", "id": "slash", "action": "bogus", "message": "no command /bogus"})
+	m = m.feed(evMsg{"type": "control", "id": "slash", "action": "bogus", "message": "no command /bogus"})
 	if !strings.Contains(convoText(m), "no command /bogus") {
 		t.Fatalf("expected the engine's answer, got: %s", convoText(m))
 	}
@@ -781,7 +786,7 @@ func TestTUI_Clear(t *testing.T) {
 	m.convo = append(m.convo, convoEntry{collapsed: "some tool call"})
 	m.cur = "partial assistant reply"
 	m.busy = true
-	m.pendingTool = 0
+	m.activeTool = "exec"
 
 	m = typeStr(m, "/clear")
 	m = key(m, kEnter)
@@ -790,12 +795,12 @@ func TestTUI_Clear(t *testing.T) {
 		t.Fatalf("expected a slash clear to the engine, got: %s", buf.String())
 	}
 	// …and its reset event is what clears the screen (any client's /clear).
-	m = m.handleEvent(evMsg{"type": "reset"})
+	m = m.feed(evMsg{"type": "reset"})
 	if len(m.convo) > 1 { // only the "session cleared" note remains
 		t.Fatalf("convo not cleared: %d entries", len(m.convo))
 	}
-	if m.cur != "" || m.busy || m.pendingTool != -1 {
-		t.Fatalf("not reset: cur=%q busy=%v pendingTool=%d", m.cur, m.busy, m.pendingTool)
+	if m.cur != "" || m.activeTool != "" {
+		t.Fatalf("not reset: cur=%q activeTool=%q", m.cur, m.activeTool)
 	}
 	if !strings.Contains(convoText(m), "session cleared") {
 		t.Fatalf("expected clear confirmation, got: %s", convoText(m))
@@ -810,7 +815,7 @@ func TestTUI_ScreenDump(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
 
 	nm, _ = m.Update(dumpMsg{}) // what SIGUSR1 delivers
@@ -841,10 +846,10 @@ func TestTUI_Inspector(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
-	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "eval", "args": map[string]any{"code": "print(x)"}})
-	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "alpha\nbravo\ncharlie\nbravo again"})
+	m = m.feed(evMsg{"type": "tool_call", "tool": "eval", "args": map[string]any{"code": "print(x)"}})
+	m = m.feed(evMsg{"type": "tool_result", "tool": "eval", "result": "alpha\nbravo\ncharlie\nbravo again"})
 
 	m = key(m, kTab)                  // focus the block
 	m = key(m, kEnter)                // the run's tree
@@ -940,7 +945,7 @@ func TestTUI_SlashSearch(t *testing.T) {
 // the nested doc list.
 func TestTUI_DocsNotificationNav(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg{
+	m = m.feed(evMsg{
 		"type": "notification", "kind": "docs", "found": float64(5), "surfaced": float64(2),
 		"docs": []any{
 			map[string]any{"title": "README", "line": "intro", "score": float64(1.2)},
@@ -1168,7 +1173,7 @@ func TestTUI_RightStopsWhereTheBlockEnds(t *testing.T) {
 // human learns it happened: one dim line that OPENS onto the replacement text.
 func TestTUI_RecapEventIsExpandable(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg{"type": "recap", "entries": 9.0, "chars": 258256.0,
+	m = m.feed(evMsg{"type": "recap", "entries": 9.0, "chars": 258256.0,
 		"note": "recap: 9 entries (~258256 chars) → s.recap1.jsonl",
 		"detail": "Removed 9 entries (~258256 characters) from the model's context.\n\n" +
 			"Replaced with:\n  │ the answer is a stack"})
@@ -1194,7 +1199,7 @@ func TestTUI_RecapEventIsExpandable(t *testing.T) {
 func TestTUI_ErrorEventClearsBusy(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
-	m = m.handleEvent(evMsg{"type": "error", "error": "boom"})
+	m = m.feed(evMsg{"type": "error", "error": "boom"})
 	if m.busy {
 		t.Fatal("error should clear busy")
 	}
@@ -1209,12 +1214,12 @@ func TestTUI_ErrorEventClearsBusy(t *testing.T) {
 func TestTUI_RetryBanner(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 100, 30)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
 
 	// A rich 429 from a fair-share proxy: the queue numbers are the difference
 	// between "429" and "4/4 busy, 2 ahead, come back in 10s".
-	m = m.handleEvent(evMsg{"type": "retry", "scope": "request", "kind": "429",
+	m = m.feed(evMsg{"type": "retry", "scope": "request", "kind": "429",
 		"attempt": 3.0, "status": 429.0, "delay_ms": 10000.0, "elapsed_ms": 13000.0,
 		"capacity": 4.0, "in_flight": 4.0, "waiting": 2.0, "queue": "queue-timeout",
 		"server_asked": true,
@@ -1242,14 +1247,14 @@ func TestTUI_RetryBanner(t *testing.T) {
 	}
 	// Subsequent waits update the banner but must NOT spam the conversation.
 	before := len(m.convo)
-	m = m.handleEvent(evMsg{"type": "retry", "scope": "request", "kind": "429",
+	m = m.feed(evMsg{"type": "retry", "scope": "request", "kind": "429",
 		"attempt": 4.0, "delay_ms": 10000.0, "reason": "provider at capacity (attempt 4)", "text": "again"})
 	if len(m.convo) != before {
 		t.Errorf("scrollback grew by %d on a repeat wait", len(m.convo)-before)
 	}
 
 	// Recovery takes the banner down and says so.
-	m = m.handleEvent(evMsg{"type": "retry", "kind": "recovered", "attempt": 5.0,
+	m = m.feed(evMsg{"type": "retry", "kind": "recovered", "attempt": 5.0,
 		"text": "provider recovered on attempt 5"})
 	if m.retry != "" || !m.retryDue.IsZero() {
 		t.Error("recovery left the banner up")
@@ -1265,12 +1270,13 @@ func TestTUI_RetryBanner(t *testing.T) {
 func TestTUI_TurnRetryDiscardsPartialReply(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 100, 30)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(evMsg{"type": "token", "text": "I'll start by rea"})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "turn", "kind": "user"})
+	m = m.feed(evMsg{"type": "token", "text": "I'll start by rea"})
 	if m.cur == "" {
 		t.Fatal("precondition: partial text should be buffered")
 	}
-	m = m.handleEvent(evMsg{"type": "retry", "scope": "turn", "kind": "interrupted",
+	m = m.feed(evMsg{"type": "retry", "scope": "turn", "kind": "interrupted",
 		"attempt": 1.0, "delay_ms": 1000.0, "reason": "the turn was interrupted", "text": "interrupted"})
 	if m.cur != "" {
 		t.Errorf("partial reply kept: %q", m.cur)
@@ -1288,13 +1294,13 @@ func TestTUI_TurnRetryDiscardsPartialReply(t *testing.T) {
 func TestTUI_GiveUpKeepsSessionUsable(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 100, 30)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
-	m = m.handleEvent(evMsg{"type": "retry", "kind": "giveup", "attempt": 5.0, "text": "gave up after 5m"})
+	m = m.feed(evMsg{"type": "retry", "kind": "giveup", "attempt": 5.0, "text": "gave up after 5m"})
 	if m.busy {
 		t.Error("giveup should clear busy so the input is usable")
 	}
-	m = m.handleEvent(evMsg{"type": "error", "error": "agent: chat: stream error"})
+	m = m.feed(evMsg{"type": "error", "error": "agent: chat: stream error"})
 	if !strings.Contains(stripANSI(convoText(m)), "send a message to retry from here") {
 		t.Errorf("no recovery hint after a failure:\n%s", stripANSI(convoText(m)))
 	}
@@ -1313,7 +1319,7 @@ func TestTUI_GiveUpKeepsSessionUsable(t *testing.T) {
 func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 100, 30)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
 
 	m = typeStr(m, "also update the README")
@@ -1327,8 +1333,8 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	}
 
 	// The engine's echo (queued) shows it provisional, dimmed, in place.
-	m = m.handleEvent(evMsg{"type": "user", "content": "also update the README", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "text": "also update the README", "count": 1.0})
+	m = m.feed(evMsg{"type": "user", "id": "m1", "content": "also update the README", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "text": "also update the README", "count": 1.0})
 	if m.queuedMsgs != 1 {
 		t.Errorf("queuedMsgs = %d; want 1", m.queuedMsgs)
 	}
@@ -1353,8 +1359,8 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	}
 
 	// A second one batches with it.
-	m = m.handleEvent(evMsg{"type": "user", "content": "and the changelog", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "text": "and the changelog", "count": 2.0})
+	m = m.feed(evMsg{"type": "user", "id": "m2", "content": "and the changelog", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "text": "and the changelog", "count": 2.0})
 	found2 := false
 	for _, e := range m.convo {
 		if e.provisional && e.provisionalText == "and the changelog" {
@@ -1369,15 +1375,21 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 		t.Errorf("second queued message not counted:\n%s", stripANSI(m.View().Content))
 	}
 
-	// The turn ending clears the provisional markers.
-	m = m.handleEvent(evMsg{"type": "done"})
+	// The turn ending alone settles nothing: the engine says when they
+	// reached the model.
+	m = m.feed(evMsg{"type": "done"})
+	if m.queuedRow("m1") < 0 {
+		t.Fatal("done settled a message the engine did not say was delivered")
+	}
+	m = m.feed(evMsg{"type": "delivered", "ids": []any{"m1", "m2"}})
+	m = m.feed(evMsg{"type": "queued", "count": 0.0})
 	if m.queuedMsgs != 0 {
-		t.Errorf("queuedMsgs = %d after done; want 0", m.queuedMsgs)
+		t.Errorf("queuedMsgs = %d after delivered; want 0", m.queuedMsgs)
 	}
 	// No provisional entries should remain.
 	for i, e := range m.convo {
 		if e.provisional {
-			t.Fatalf("convo[%d] should not be provisional after done", i)
+			t.Fatalf("convo[%d] should not be provisional after delivered", i)
 		}
 	}
 	// Both messages should now be in the convo as normal user entries.
@@ -1390,18 +1402,18 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	}
 }
 
-// Queued messages should also move into the convo when the turn errors — the
-// engine flushes them on error, so they're part of the conversation history.
+// A queued message with no id (an event log from before ids) settles when
+// the turn errors: the fallback, since no delivered event can name it.
 func TestTUI_QueuedMessagesOnError(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 100, 30)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.busy = true
 
 	m = typeStr(m, "fix this bug")
 	m = key(m, kEnter)
-	m = m.handleEvent(evMsg{"type": "user", "content": "fix this bug", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "text": "fix this bug", "count": 1.0})
+	m = m.feed(evMsg{"type": "user", "content": "fix this bug", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "text": "fix this bug", "count": 1.0})
 	// The message should be provisional in the convo.
 	found := false
 	for _, e := range m.convo {
@@ -1415,7 +1427,7 @@ func TestTUI_QueuedMessagesOnError(t *testing.T) {
 	}
 
 	// Error event should clear provisional markers.
-	m = m.handleEvent(evMsg{"type": "error", "error": "provider timeout", "fatal": false})
+	m = m.feed(evMsg{"type": "error", "error": "provider timeout", "fatal": false})
 	if m.busy {
 		t.Fatal("error should clear busy")
 	}
@@ -1454,7 +1466,7 @@ func TestTUI_ServerSlashCommands(t *testing.T) {
 	}
 
 	// The engine's reply is what the user sees, verbatim.
-	m = m.handleEvent(evMsg{"type": "server", "id": "raglit", "action": "auto",
+	m = m.feed(evMsg{"type": "server", "id": "raglit", "action": "auto",
 		"message": "raglit: autostart on (saved to /ws/.dun/dun.local.json)",
 		"tools":   []any{"eval", "search"}})
 	if !strings.Contains(convoText(m), "autostart on") {
@@ -1472,7 +1484,7 @@ func TestTUI_ReadyHint(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"},
 		"hint": "docs off — /rag on to start it, /rag auto to start it every session"})
 	if !strings.Contains(convoText(m), "/rag auto") {
 		t.Fatalf("ready hint not shown: %s", convoText(m))
@@ -1494,12 +1506,12 @@ func TestTUI_ErrorHintTracksFatality(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 
-	m = m.handleEvent(evMsg{"type": "error", "error": "context deadline exceeded", "fatal": false})
+	m = m.feed(evMsg{"type": "error", "error": "context deadline exceeded", "fatal": false})
 	if !strings.Contains(convoText(m), "session is intact") {
 		t.Errorf("a recoverable turn failure should say so: %s", convoText(m))
 	}
 
-	m = m.handleEvent(evMsg{"type": "error", "error": "context canceled", "fatal": true})
+	m = m.feed(evMsg{"type": "error", "error": "context canceled", "fatal": true})
 	txt := convoText(m)
 	if !strings.Contains(txt, "dun --continue") {
 		t.Errorf("a dead session should point at --continue: %s", txt)
@@ -1515,7 +1527,7 @@ func TestTUI_ExitEventExplainsItself(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "exit", "reason": "interrupted"})
+	m = m.feed(evMsg{"type": "exit", "reason": "interrupted"})
 	nm, _ = m.Update(eofMsg{})
 	m = nm.(tuiModel)
 	if !strings.Contains(convoText(m), "interrupted") {
@@ -1530,7 +1542,7 @@ func TestTUI_RespawnsACrashedEngine(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "session", "id": "20260730-101010"})
+	m = m.feed(evMsg{"type": "session", "id": "20260730-101010"})
 	if m.sessionID == "" {
 		t.Fatal("session id not captured — a respawn could not reattach")
 	}
@@ -1557,19 +1569,20 @@ func TestTUI_ShowsTheServiceRestartingTheEngine(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
 	m.busy = true
-	m = m.handleEvent(evMsg{"type": "engine", "state": "restarting", "reason": "engine exited: signal: killed", "restarts": 1.0})
+	m = m.feed(evMsg{"type": "engine", "state": "restarting", "reason": "engine exited: signal: killed", "restarts": 1.0})
+	m = m.feed(evMsg{"type": "turn_state", "phase": "idle", "queued": []any{}}) // dund's, after the death
 	if m.busy || !m.skipHistory || m.restarts != 1 || !strings.Contains(convoText(m), "restarting it") {
 		t.Fatalf("restarting: busy=%v skip=%v restarts=%d\n%s", m.busy, m.skipHistory, m.restarts, convoText(m))
 	}
-	m = m.handleEvent(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "old"}}})
+	m = m.feed(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "old"}}})
 	if strings.Contains(convoText(m), "old") {
 		t.Error("the respawned engine's history was rendered again")
 	}
-	m = m.handleEvent(evMsg{"type": "engine", "state": "gave_up", "reason": "engine exited"})
+	m = m.feed(evMsg{"type": "engine", "state": "gave_up", "reason": "engine exited"})
 	if !strings.Contains(m.fatalErr, "gave up") {
 		t.Fatalf("gave_up: %q", m.fatalErr)
 	}
-	m = m.handleEvent(evMsg{"type": "engine", "state": "started"})
+	m = m.feed(evMsg{"type": "engine", "state": "started"})
 	if m.fatalErr != "" {
 		t.Fatalf("started should clear the error: %q", m.fatalErr)
 	}
@@ -1580,7 +1593,7 @@ func TestTUI_ShowsTheServiceRestartingTheEngine(t *testing.T) {
 func TestTUI_SnapshotRendersConversationAndState(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "snapshot", "after": 40.0,
+	m = m.feed(evMsg{"type": "snapshot", "after": 40.0,
 		"items": []any{map[string]any{"kind": "user", "content": "earlier question"}},
 		"state": []any{map[string]any{"type": "session", "id": "s9"}, map[string]any{"type": "workspace", "branch": "wt-9"}}})
 	if !strings.Contains(convoText(m), "earlier question") || m.sessionID != "s9" || m.branch != "wt-9" {
@@ -1596,9 +1609,9 @@ func TestTUI_ExitThenLostServiceReconnects(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "session", "id": "20261022-111912"})
-	m = m.handleEvent(evMsg{"type": "exit", "reason": "stopped"})
-	m = m.handleEvent(evMsg{"type": "engine", "state": "stopped"})
+	m = m.feed(evMsg{"type": "session", "id": "20261022-111912"})
+	m = m.feed(evMsg{"type": "exit", "reason": "stopped"})
+	m = m.feed(evMsg{"type": "engine", "state": "stopped"})
 	nm, cmd := m.Update(eofMsg{})
 	m = nm.(tuiModel)
 	if cmd == nil {
@@ -1620,7 +1633,7 @@ func TestTUI_ExitThenLostServiceReconnects(t *testing.T) {
 func TestTUI_ReconnectRetriesWhileDundComesBack(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "session", "id": "20261022-111912"})
+	m = m.feed(evMsg{"type": "session", "id": "20261022-111912"})
 	nm, _ := m.Update(eofMsg{})
 	m = nm.(tuiModel)
 	down := errors.New("dial unix dund.sock: connect: no such file or directory")
@@ -1651,22 +1664,22 @@ func TestTUI_ReconnectRetriesWhileDundComesBack(t *testing.T) {
 func TestTUI_ReattachDoesNotWaitForAReadyThatIsNotComing(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "session", "id": "20261022-111912"})
-	m = m.handleEvent(evMsg{"type": "ready"})
+	m = m.feed(evMsg{"type": "session", "id": "20261022-111912"})
+	m = m.feed(evMsg{"type": "ready"})
 	nm, _ := m.Update(eofMsg{})
 	m = nm.(tuiModel)
 	nm, _ = m.Update(engineUpMsg{proc: &dunProc{stdin: discardWC{}, ch: make(chan tea.Msg)}, reattach: true})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "user", "content": "from the phone"})
-	m = m.handleEvent(evMsg{"type": "done"})
+	m = m.feed(evMsg{"type": "user", "content": "from the phone"})
+	m = m.feed(evMsg{"type": "done"})
 	if m.starting {
 		t.Fatal("a reattach with no new engine is stuck starting")
 	}
-	m = m.handleEvent(evMsg{"type": "engine", "state": "started"})
+	m = m.feed(evMsg{"type": "engine", "state": "started"})
 	if !m.starting {
 		t.Fatal("a new engine should hold input until ready")
 	}
-	m = m.handleEvent(evMsg{"type": "ready"})
+	m = m.feed(evMsg{"type": "ready"})
 	if m.starting {
 		t.Fatal("ready should end starting")
 	}
@@ -1706,12 +1719,12 @@ func TestTUI_RestartSendsNoServerSwitches(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: nopWC{&sent}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"search"},
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"search"},
 		"servers": []any{map[string]any{"id": "raglit", "running": true}}})
 	nm, _ = m.Update(eofMsg{})
 	m = nm.(tuiModel)
 	sent.Reset()
-	m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
+	m.feed(evMsg{"type": "ready", "tools": []any{"eval"},
 		"servers": []any{map[string]any{"id": "raglit", "running": false}}})
 	if strings.Contains(sent.String(), `"type":"server"`) {
 		t.Errorf("a restart sent a server switch: %q", sent.String())
@@ -2027,7 +2040,7 @@ func TestMultilineInput_UpAtFirstRowScrollsConvo(t *testing.T) {
 	m := newTUIModel(proc, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 
 	m = typeStr(m, "first message")
 	m = key(m, kEnter)
@@ -2296,7 +2309,7 @@ func TestMultilineInput_HistoryViaCtrl(t *testing.T) {
 	m := newTUIModel(proc, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 
 	m = typeStr(m, "first message")
 	m = key(m, kEnter)
@@ -2333,7 +2346,7 @@ func TestMultilineInput_EmptyInput(t *testing.T) {
 	m := newTUIModel(proc, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 
 	before := len(m.convo)
 	m = key(m, kEnter)
@@ -2370,12 +2383,12 @@ func withActivity(t *testing.T) tuiModel {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(evMsg{"type": "agents", "agents": []any{
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "agents", "agents": []any{
 		map[string]any{"id": 1.0, "state": "running", "prompt": "read the build log", "tokens": 6500.0, "seconds": 122.0},
 		map[string]any{"id": 2.0, "state": "idle", "prompt": "count matches", "tokens": 900.0, "seconds": 41.0},
 	}})
-	m = m.handleEvent(evMsg{"type": "jobs", "jobs": []any{
+	m = m.feed(evMsg{"type": "jobs", "jobs": []any{
 		map[string]any{"id": 3.0, "command": "go test -race ./...", "state": "running",
 			"started": float64(time.Now().Add(-time.Minute).Unix()), "log": "/tmp/job-3.log"},
 	}})
@@ -2464,7 +2477,7 @@ func TestActivity_SelectionSurvivesANewRow(t *testing.T) {
 	m.focus, m.actLevel = focusActivity, actList
 	m.actSel = actKey{id: 3} // the job
 
-	m = m.handleEvent(evMsg{"type": "agents", "agents": []any{
+	m = m.feed(evMsg{"type": "agents", "agents": []any{
 		map[string]any{"id": 1.0, "state": "running", "prompt": "a"},
 		map[string]any{"id": 2.0, "state": "idle", "prompt": "b"},
 		map[string]any{"id": 9.0, "state": "running", "prompt": "brand new"},
@@ -2501,13 +2514,13 @@ func TestActivity_AgentScopeSwapsTheConversation(t *testing.T) {
 	}
 
 	// The child's scrollback arrives, and only for the scope on screen.
-	m = m.handleEvent(evMsg{"type": "agent_history", "agent": 7.0, "items": []any{
+	m = m.feed(evMsg{"type": "agent_history", "agent": 7.0, "items": []any{
 		map[string]any{"kind": "user", "content": "someone else's conversation"},
 	}})
 	if len(m.convo) != 0 {
 		t.Error("history for another agent must not paste into this scope")
 	}
-	m = m.handleEvent(evMsg{"type": "agent_history", "agent": 1.0, "items": []any{
+	m = m.feed(evMsg{"type": "agent_history", "agent": 1.0, "items": []any{
 		map[string]any{"kind": "user", "content": "read the build log"},
 		map[string]any{"kind": "assistant", "content": "137 failures"},
 	}})
@@ -2547,7 +2560,7 @@ func TestActivity_TaskTracksTheLastUserMessage(t *testing.T) {
 	m2 := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m2.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m2 = nm.(tuiModel)
-	m2 = m2.handleEvent(evMsg{"type": "history", "items": []any{
+	m2 = m2.feed(evMsg{"type": "history", "items": []any{
 		map[string]any{"kind": "user", "content": "the resumed task"},
 	}})
 	if m2.task != "the resumed task" {
@@ -2628,7 +2641,7 @@ func TestActivity_OnlyDeadJobsIsStillReachable(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
 	now := float64(time.Now().Unix())
-	m = m.handleEvent(evMsg{"type": "jobs", "jobs": []any{
+	m = m.feed(evMsg{"type": "jobs", "jobs": []any{
 		map[string]any{"id": 7.0, "command": "make", "state": "failed", "code": 2.0, "started": now - 9, "ended": now - 3},
 		map[string]any{"id": 8.0, "command": "true", "state": "ok", "started": now - 2, "ended": now - 1},
 	}})
@@ -2689,7 +2702,7 @@ func suggestReq(t *testing.T, setup func(*tuiModel)) (tuiModel, string) {
 	m.starting = false                                              // a live session: servers are up
 	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}} // something to predict from
 	// The turn ends: the idle clock starts here.
-	m = m.handleEvent(evMsg{"type": "done"})
+	m = m.feed(evMsg{"type": "done"})
 	// setup runs AFTER `done` because it describes the state at the moment the
 	// tick LANDS. Running it before proved nothing for the busy case — `done`
 	// clears busy, so that subtest passed while testing the opposite.
@@ -2743,7 +2756,7 @@ func TestSuggest_KeystrokeRestartsTheWait(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
 	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}}
-	m = m.handleEvent(evMsg{"type": "done"})
+	m = m.feed(evMsg{"type": "done"})
 
 	// A key arrives now, so the deadline is 3s from now, not from `done`.
 	nm2, cmd := m.Update(runesKey([]rune{'h'}))
@@ -2779,15 +2792,16 @@ func TestSuggest_NoTimerWhenItCouldNeverFire(t *testing.T) {
 }
 
 // Pending messages: a mid-turn message is queued, then lifted into the next
-// tool result. The provisional marker must clear on tool_result (not wait for done),
-// and the message must remain in the convo as a normal user entry.
+// tool result. The tool result alone settles nothing; the engine's delivered
+// event, after it, makes the row a normal user entry after the result.
 func TestTUI_PendingClearedOnToolResult(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
 	// Simulate a queued mid-turn message (the "queued" event).
-	m = m.handleEvent(evMsg{"type": "user", "content": "fix the bug", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "text": "fix the bug", "count": 1.0})
+	m = m.feed(evMsg{"type": "tool_call", "tool": "eval", "call_id": "c1", "args": map[string]any{}})
+	m = m.feed(evMsg{"type": "user", "id": "m1", "content": "fix the bug", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "text": "fix the bug", "count": 1.0})
 	// The message should be provisional in the convo.
 	found := false
 	for _, e := range m.convo {
@@ -2803,16 +2817,23 @@ func TestTUI_PendingClearedOnToolResult(t *testing.T) {
 		t.Fatalf("queued event should set queuedMsgs, got %d", m.queuedMsgs)
 	}
 
-	// A tool result arrives — liftQueued drained the buffer, so the provisional
-	// marker must clear and the message renders normally.
-	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "ok"})
+	// A tool result arrives: still queued until the engine says delivered.
+	m = m.feed(evMsg{"type": "tool_result", "tool": "eval", "call_id": "c1", "result": "ok"})
+	if m.queuedRow("m1") < 0 {
+		t.Fatal("the tool result settled the message by itself")
+	}
+	m = m.feed(evMsg{"type": "delivered", "ids": []any{"m1"}, "call_id": "c1"})
+	m = m.feed(evMsg{"type": "queued", "count": 0.0})
 	for i, e := range m.convo {
 		if e.provisional {
-			t.Fatalf("convo[%d] should not be provisional after tool_result", i)
+			t.Fatalf("convo[%d] should not be provisional after delivered", i)
 		}
 	}
+	if last := m.convo[len(m.convo)-1]; last.userText != "fix the bug" || last.msgID != "m1" {
+		t.Fatalf("the delivered message is not last: %+v", last)
+	}
 	if m.queuedMsgs != 0 {
-		t.Fatalf("tool_result should clear queuedMsgs, got %d", m.queuedMsgs)
+		t.Fatalf("queued count 0 should clear queuedMsgs, got %d", m.queuedMsgs)
 	}
 
 	// The queued message should be in the convo as a user entry.
@@ -2885,7 +2906,8 @@ func TestVtui_SendShowsMessage(t *testing.T) {
 	if !strings.Contains(out, "test message") {
 		t.Fatalf("sent message not visible in view:\n%s", out)
 	}
-	// Model should be busy.
+	// Busy once the engine's turn starts.
+	v.event(map[string]any{"type": "turn", "kind": "user"})
 	if !v.model().busy {
 		t.Fatal("model should be busy after send")
 	}
@@ -3036,12 +3058,12 @@ func TestTUI_PendingFlushedOnDone(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
-	m = m.handleEvent(evMsg{"type": "user", "content": "also check tests", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "text": "also check tests", "count": 1.0})
+	m = m.feed(evMsg{"type": "user", "content": "also check tests", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "text": "also check tests", "count": 1.0})
 
 	// No tool_call/tool_result — just tokens and done.
-	m = m.handleEvent(evMsg{"type": "token", "text": "ok"})
-	m = m.handleEvent(evMsg{"type": "done"})
+	m = m.feed(evMsg{"type": "token", "text": "ok"})
+	m = m.feed(evMsg{"type": "done"})
 
 	// The provisional marker should be cleared by the done handler.
 	for i, e := range m.convo {
@@ -3061,10 +3083,10 @@ func TestTUI_MultiplePendingMessages(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
-	m = m.handleEvent(evMsg{"type": "user", "content": "first", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "text": "first", "count": 1.0})
-	m = m.handleEvent(evMsg{"type": "user", "content": "second", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "text": "second", "count": 2.0})
+	m = m.feed(evMsg{"type": "user", "id": "a", "content": "first", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "text": "first", "count": 1.0})
+	m = m.feed(evMsg{"type": "user", "id": "b", "content": "second", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "text": "second", "count": 2.0})
 
 	// Both should be provisional.
 	provCount := 0
@@ -3077,15 +3099,16 @@ func TestTUI_MultiplePendingMessages(t *testing.T) {
 		t.Fatalf("should have 2 provisional, got %d", provCount)
 	}
 
-	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "ok"})
+	m = m.feed(evMsg{"type": "tool_result", "tool": "eval", "result": "ok"})
+	m = m.feed(evMsg{"type": "delivered", "ids": []any{"a", "b"}})
 	for i, e := range m.convo {
 		if e.provisional {
-			t.Fatalf("convo[%d] should not be provisional after tool_result", i)
+			t.Fatalf("convo[%d] should not be provisional after delivered", i)
 		}
 	}
 
 	text := convoText(m)
-	if !strings.Contains(text, "first") || !strings.Contains(text, "second") {
+	if i, j := strings.Index(text, "first"), strings.Index(text, "second"); i < 0 || j < i {
 		t.Fatalf("convo should contain both messages: %q", text)
 	}
 }
@@ -3095,9 +3118,9 @@ func TestTUI_PendingClearedOnError(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
-	m = m.handleEvent(evMsg{"type": "user", "content": "before crash", "queued": true})
-	m = m.handleEvent(evMsg{"type": "queued", "text": "before crash", "count": 1.0})
-	m = m.handleEvent(evMsg{"type": "error", "error": "provider down"})
+	m = m.feed(evMsg{"type": "user", "content": "before crash", "queued": true})
+	m = m.feed(evMsg{"type": "queued", "text": "before crash", "count": 1.0})
+	m = m.feed(evMsg{"type": "error", "error": "provider down"})
 
 	// The message should no longer be provisional — it was flushed on error.
 	for i, e := range m.convo {
@@ -4046,7 +4069,7 @@ func TestTUI_EscOutsideAgentScopeSaysHowToExit(t *testing.T) {
 // the harness computed at startup, which is exactly when somebody asks.
 func TestTUI_ContextCostArrivesWithoutACompletedTurn(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg{
+	m = m.feed(evMsg{
 		"type": "context_cost", "system_tokens": float64(638), "system_exact": true,
 		"system_prompt": float64(11), "system_shared": float64(497),
 		"system_parts": []any{
@@ -4077,12 +4100,12 @@ func TestTUI_ContextCostArrivesWithoutACompletedTurn(t *testing.T) {
 // row surviving beside exact ones is the mixed table the design refuses.
 func TestTUI_ExactCostReplacesTheEstimate(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg{
+	m = m.feed(evMsg{
 		"type": "context_cost", "system_tokens": float64(900), "system_exact": false,
 		"system_prompt": float64(20),
 		"system_parts":  []any{map[string]any{"name": "built-in tools", "tokens": float64(880)}},
 	})
-	m = m.handleEvent(evMsg{
+	m = m.feed(evMsg{
 		"type": "context_cost", "system_tokens": float64(638), "system_exact": true,
 		"system_prompt": float64(11), "system_shared": float64(497),
 		"system_parts": []any{map[string]any{"name": "built-in tools", "tokens": float64(130)}},
@@ -4292,14 +4315,14 @@ func TestTUI_UIStateRoundTrip(t *testing.T) {
 	rec := &echoWC{}
 	m := newTUIModel(&dunProc{stdin: rec}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(evMsg{"type": "ui_state", "state": map[string]any{
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "ui_state", "state": map[string]any{
 		"history": []any{"first", "second"}, "draft": "half typed"}})
 	if len(m.history) != 2 || m.history[1] != "second" || m.input.Value() != "half typed" {
 		t.Fatalf("applied: history=%v draft=%q", m.history, m.input.Value())
 	}
 	m.input.SetValue("my own words")
-	m = m.handleEvent(evMsg{"type": "ui_state", "state": map[string]any{"draft": "theirs"}})
+	m = m.feed(evMsg{"type": "ui_state", "state": map[string]any{"draft": "theirs"}})
 	if m.input.Value() != "my own words" {
 		t.Fatalf("a pushed draft overwrote typing: %q", m.input.Value())
 	}
@@ -4317,7 +4340,7 @@ func TestTUI_UIStateRoundTrip(t *testing.T) {
 func TestTUI_AskPreselectsTheRecommendation(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B", "C"}, "recommended": "B"})
+	m = m.feed(evMsg{"type": "ask", "question": "Which?", "options": []any{"A", "B", "C"}, "recommended": "B"})
 	if m.askSel != 1 {
 		t.Fatalf("askSel = %d, want the recommended row", m.askSel)
 	}
@@ -4378,11 +4401,11 @@ func TestSuggest_NotOnAResumedSessionBeforeATurn(t *testing.T) {
 func TestServerUpInTheBackgroundIsQuiet(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	n := len(m.convo)
-	m = m.handleEvent(evMsg{"type": "server", "background": true, "message": "raglit: running · 4 tools"})
+	m = m.feed(evMsg{"type": "server", "background": true, "message": "raglit: running · 4 tools"})
 	if len(m.convo) != n {
 		t.Errorf("a background start was printed: %q", convoText(m))
 	}
-	m = m.handleEvent(evMsg{"type": "server", "background": true, "message": "raglit did not start: exit 1"})
+	m = m.feed(evMsg{"type": "server", "background": true, "message": "raglit did not start: exit 1"})
 	if !strings.Contains(stripANSI(convoText(m)), "did not start") {
 		t.Errorf("a background failure was not said: %q", convoText(m))
 	}
@@ -4398,7 +4421,7 @@ func TestActivity_FoldsWhenAQuestionTakesTheFocus(t *testing.T) {
 	if m.focus != focusActivity || len(strings.Split(m.activityView(), "\n")) < 3 {
 		t.Fatalf("precondition: the table is open, focus=%d", m.focus)
 	}
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which one?", "options": []any{"A", "B"}, "recommended": "A"})
+	m = m.feed(evMsg{"type": "ask", "question": "Which one?", "options": []any{"A", "B"}, "recommended": "A"})
 	m = key(m, kEnter)
 	if m.asking {
 		t.Fatal("precondition: the question was answered")
@@ -4415,7 +4438,7 @@ func TestActivity_FoldsWhenAQuestionTakesTheFocus(t *testing.T) {
 func TestHeadView_QuestionKeepsTheMetrics(t *testing.T) {
 	v := newVtui(110, 20)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
-	v.m = v.m.handleEvent(reqEv(t, reqDone))
+	v.m = v.m.feed(reqEv(t, reqDone))
 	long := ""
 	for i := 0; i < 60; i++ {
 		long += fmt.Sprintf("line %d of the answer\n\n", i)

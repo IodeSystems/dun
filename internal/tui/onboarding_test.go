@@ -25,9 +25,9 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: bufCloser{&sent}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"},
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"},
 		"hint": "off: raglit — /rag on (auto: every session)"})
-	m = m.handleEvent(evMsg{"type": "settings", "model": "", "url": ""})
+	m = m.feed(evMsg{"type": "settings", "model": "", "url": ""})
 	txt := convoText(m)
 	if !strings.Contains(txt, "⚠ not logged in — type /login to connect") || strings.Contains(txt, "ready") {
 		t.Fatalf("first screen:\n%s", txt)
@@ -51,9 +51,9 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 		t.Errorf("after the login:\n%s", txt)
 	}
 	m.switchModel(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
-	m = m.handleEvent(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "earlier"}}})
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}, "hint": "off: raglit — /rag on (auto: every session)"})
-	m = m.handleEvent(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
+	m = m.feed(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "earlier"}}})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}, "hint": "off: raglit — /rag on (auto: every session)"})
+	m = m.feed(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
 	txt = convoText(m)
 	for _, gone := range []string{"resumed", "not logged in", "kept your question", "off: raglit"} {
 		if strings.Contains(txt, gone) {
@@ -81,7 +81,7 @@ func TestOnboarding_SetupErrorIsTheNextStep(t *testing.T) {
 		t.Fatalf("setupMissing = %v", e)
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	m = m.handleEvent(evMsg{"type": "error", "error": dunconfig.ErrNoLogin.Error()})
+	m = m.feed(evMsg{"type": "error", "error": dunconfig.ErrNoLogin.Error()})
 	txt := convoText(m)
 	if strings.Contains(txt, "error:") || strings.Contains(txt, "session is intact") || !strings.Contains(txt, "/login") {
 		t.Errorf("convo:\n%s", txt)
@@ -231,7 +231,7 @@ func TestPalette_SetupFirstOneColumn(t *testing.T) {
 func TestServerMsg_AddReplacesProgress(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.convo = append(m.convo, convoEntry{collapsed: "adding notes…", adding: "notes"})
-	m = m.handleEvent(evMsg{"type": "server", "id": "mcp", "action": "add", "message": "notes added · running · 1 tool"})
+	m = m.feed(evMsg{"type": "server", "id": "mcp", "action": "add", "message": "notes added · running · 1 tool"})
 	txt := convoText(m)
 	if strings.Contains(txt, "adding notes") || strings.Count(txt, "notes added · running · 1 tool") != 1 {
 		t.Errorf("convo:\n%s", txt)

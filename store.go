@@ -47,6 +47,9 @@ type sessionStore struct {
 	// Called outside mu.
 	onEntry func(e agent.Entry, seq uint64)
 	seq     uint64 // entries appended since open; never goes back
+	// onToolResult sees each tool result once it is stored, outside mu:
+	// what records the messages it carried after it (delivery.go).
+	onToolResult func(agent.Entry)
 }
 
 // openSessionStore opens (loading any existing) session file at path; path ""
@@ -332,10 +335,13 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 	s.flushLocked()
 	cb := s.onNotify
 	s.seq++
-	seq, onEntry := s.seq, s.onEntry
+	seq, onEntry, onResult := s.seq, s.onEntry, s.onToolResult
 	s.mu.Unlock()
 	if onEntry != nil {
 		onEntry(e, seq)
+	}
+	if e.Kind == agent.KindToolResult && onResult != nil {
+		onResult(e)
 	}
 	// Docs notifications drive a structured UI path (onDocs); skip the plain ping.
 	if e.Kind == agent.KindNotification && e.Tag != tagDocs && cb != nil {
@@ -374,8 +380,9 @@ func (s *sessionStore) contextLocked() []agent.Entry {
 		// A recorded turn error is the same shape of thing for the same reason
 		// (see kindTurnError).
 		// The person's commands (usercommand.go) are theirs: kept, replayed
-		// to them, never the model's.
-		if e.Kind == kindRecap || e.Kind == kindTurnError || e.Kind == kindCommand {
+		// to them, never the model's. So is a delivered message (delivery.go):
+		// the model read it inside the tool result that carried it.
+		if e.Kind == kindRecap || e.Kind == kindTurnError || e.Kind == kindCommand || e.Kind == kindDelivered {
 			continue
 		}
 		out = append(out, e)
@@ -608,10 +615,13 @@ func (s *sessionStore) publish(e agent.Entry) {
 	s.unclaimed++
 	s.flushLocked()
 	s.seq++
-	seq, onEntry := s.seq, s.onEntry
+	seq, onEntry, onResult := s.seq, s.onEntry, s.onToolResult
 	s.mu.Unlock()
 	if onEntry != nil {
 		onEntry(e, seq)
+	}
+	if e.Kind == agent.KindToolResult && onResult != nil {
+		onResult(e)
 	}
 }
 

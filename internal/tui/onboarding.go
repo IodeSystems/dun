@@ -93,7 +93,7 @@ func (m *tuiModel) sayNeedLogin() {
 // dropNeedLogin takes the "not logged in" line away: said again elsewhere,
 // or no longer true (a login).
 func (m *tuiModel) dropNeedLogin() {
-	if m.busy || m.pendingTool >= 0 {
+	if m.busy || m.activeTool != "" {
 		return
 	}
 	m.convo = slices.DeleteFunc(m.convo, func(e convoEntry) bool { return e.needLogin })

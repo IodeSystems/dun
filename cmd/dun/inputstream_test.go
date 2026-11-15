@@ -72,7 +72,7 @@ func TestInputStreamRoutesAnswers(t *testing.T) {
 		`{"type":"answer","value":"yes"}` + "\n" + `{"type":"user","content":"hi"}` + "\n"))
 	select {
 	case v := <-s.answers:
-		if v != "yes" {
+		if v.Value != "yes" {
 			t.Fatalf("answer = %q, want yes", v)
 		}
 	case <-time.After(2 * time.Second):

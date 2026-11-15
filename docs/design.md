@@ -8,7 +8,7 @@ Other docs: `README.md` (use), `decisions.md` (why the code is the way it is),
 `ui-decisions.md` (TUI rules), `surfacing.md` (proactive retrieval),
 `event-protocol.md` (engine wire format), `mid-turn-messages.md`,
 `tui-architecture.md`, `node_query.md` (tool cheat sheet),
-`sessions-and-dund.md`, `providers-and-cost.md`, `mcp-and-tools.md`,
+`sessions-and-dund.md`, `session-events.md`, `providers-and-cost.md`, `mcp-and-tools.md`,
 `memory.md`, `scheduling.md`.
 
 ## What dun composes

@@ -129,6 +129,8 @@ type emitter struct {
 	// onReply sees every event after it is written: what keeps the person's
 	// commands in the session (recordReplies).
 	onReply func(payload any)
+	// turn follows the events into turn_state (turnstate.go); nil outside -p.
+	turn *turnTracker
 }
 
 func (e *emitter) emit(payload any) {
@@ -143,12 +145,15 @@ func (e *emitter) emit(payload any) {
 		e.enc = json.NewEncoder(w)
 	}
 	_ = e.enc.Encode(ev)
-	onReply := e.onReply
+	onReply, turn := e.onReply, e.turn
 	e.mu.Unlock()
 	// After the lock: keeping a command appends to the session, which may
 	// emit an event of its own.
 	if onReply != nil {
 		onReply(payload)
+	}
+	if turn != nil {
+		turn.observe(payload)
 	}
 }
 
@@ -257,7 +262,7 @@ func docsProto(docs []dun.DocHitInfo) []proto.DocHit {
 func historyProto(items []dun.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, proto.HistoryItem{Kind: it.Kind, Content: it.Content, Tool: it.Tool,
+		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool,
 			CallID: it.CallID, Args: it.Args})
 	}
 	return out

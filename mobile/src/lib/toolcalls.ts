@@ -1,13 +1,13 @@
 // Tool calls and their results, merged: one call is one entry that holds its
 // args and, once it arrives, its result. Pure, like events.ts.
 //
-// The engine sends a call and its result as two events (proto/events.go
-// ToolCall, ToolResult). Live events carry no call id; history items
-// (proto.HistoryItem) carry call_id. So a result is paired:
-//   1. by call_id, when both sides have one;
-//   2. else with the newest pending call of the same tool (the TUI's rule,
-//      internal/tui/toolrun.go runSetResult: the run's last pending call);
-//   3. else it is shown on its own, a call with no args (the TUI does too).
+// The engine sends a call when it starts and its result when it returns
+// (proto/events.go ToolCall, ToolResult; dun toolevents.go), both with the
+// call's call_id, as history items do. A result is paired with its call by
+// call_id, and is_error says whether it failed. Nothing is guessed, except
+// the FALLBACK for an event log from before call ids: a result with no id
+// goes to the newest pending call of the same tool that has no id either.
+// A result with no call seen is shown on its own, a call with no args.
 // A call whose id matches an earlier orphan result fills that entry's args.
 //
 // Consecutive calls fold into one run (internal/tui/toolrun.go): a call joins
@@ -23,7 +23,7 @@ import type { Thought } from './thinking';
 export type CallState = 'pending' | 'done' | 'error';
 
 export type ToolCall = {
-  /** proto.HistoryItem call_id; absent on live events. */
+  /** The call's call_id (absent only in an event log from before ids). */
   id?: string;
   tool: string;
   /** null: a result arrived with no call seen. */
@@ -66,8 +66,9 @@ export function failed(tool: string, result: string): boolean {
   return r.startsWith('ERROR') || r.startsWith('error:');
 }
 
-function settle(c: ToolCall, result: string): ToolCall {
-  return { ...c, result, state: failed(c.tool, result) ? 'error' : 'done' };
+/** isError: the engine's is_error; undefined (an old event log) reads the result. */
+function settle(c: ToolCall, result: string, isError?: boolean): ToolCall {
+  return { ...c, result, state: (isError ?? failed(c.tool, result)) ? 'error' : 'done' };
 }
 
 /** Indexes of [item, call] for the call a result belongs to, newest first. */
@@ -158,15 +159,20 @@ export function withResult<T extends Keyed>(
   result: string,
   id: string | undefined,
   newKey: string,
+  isError?: boolean,
 ): { items: T[]; added: boolean } {
-  const at =
-    (id ? find(items, (c) => c.id === id && c.state === 'pending') : null) ??
-    find(items, (c) => c.state === 'pending' && c.tool === tool && (!id || !c.id));
+  const at = id
+    ? find(items, (c) => c.id === id && c.state === 'pending')
+    : // FALLBACK: an event log from before call ids.
+      find(items, (c) => c.state === 'pending' && c.tool === tool && !c.id);
   if (at) {
     const [i, k] = at;
-    return { items: replaceCall(items, at, settle((items[i] as unknown as Run).calls[k]!, result)), added: false };
+    return {
+      items: replaceCall(items, at, settle((items[i] as unknown as Run).calls[k]!, result, isError)),
+      added: false,
+    };
   }
-  const c: ToolCall = settle({ tool, args: null, state: 'pending' }, result);
+  const c: ToolCall = settle({ tool, args: null, state: 'pending' }, result, isError);
   if (id) c.id = id;
   return addCall(items, c, newKey);
 }

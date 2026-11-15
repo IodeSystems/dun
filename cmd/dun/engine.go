@@ -32,6 +32,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	interruptCmd := func(reason string) {
 		if !h.Interrupt(reason) {
 			em.emit(&proto.ControlEvent{ID: "interrupt", Message: "nothing to interrupt: no turn is running"})
+		} else if em.turn != nil {
+			em.turn.interrupting()
 		}
 	}
 	in.setInterrupt(interruptCmd)
@@ -391,9 +393,11 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// Up with messages queued (the TUI): take back the ones the running
 		// turn has not taken, for the composer.
 		if id == "unqueue" {
-			texts := h.Unqueue()
-			b, _ := json.Marshal(texts)
-			em.emit(&proto.ControlEvent{ID: id, Action: string(b)})
+			ids := []string{}
+			for _, q := range h.Unqueue() {
+				ids = append(ids, q.ID)
+			}
+			em.emit(&proto.Withdrawn{IDs: ids})
 			em.emit(&proto.Queued{Count: h.Queued()})
 			return
 		}
@@ -599,12 +603,11 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(&proto.Notification{Text: "a message with images waits for this turn to end: an image cannot ride a tool result"})
 			return true
 		}
-		text := msg.content
-		// Echo BEFORE Say: Say can release an exec wait, and the tool_result
-		// that follows is what clears the client's "(queued)" mark. Echoed
-		// after, the mark would land behind the result that delivered it.
-		em.emit(&proto.UserEcho{Content: text, Queued: true})
-		h.Say(text)
+		text, mid := msg.content, dun.NewMessageID()
+		// Echo BEFORE Say: Say can release an exec wait, and the delivered
+		// event that follows its result names this id.
+		em.emit(&proto.UserEcho{ID: mid, Content: text, Queued: true})
+		h.SayAs(mid, text)
 		em.emit(&proto.Queued{Text: text, Count: h.Queued()})
 		return true
 	})
@@ -815,7 +818,8 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []
 	}
 	// What the user typed, before any rephrase: every client renders the
 	// message from this, not from what it sent itself.
-	em.emit(&proto.UserEcho{Content: task})
+	mid := dun.NewMessageID()
+	em.emit(&proto.UserEcho{ID: mid, Content: task})
 	em.emit(&proto.Turn{Kind: "user"})
 	h.BeginTurnStats()
 	tctx, end := beginTurn(ctx)
@@ -842,7 +846,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []
 			task = r
 		}
 	}
-	res, err := h.Ask(tctx, task)
+	res, err := h.AskAs(tctx, mid, task)
 	turnActive.Store(false)
 	return endTurn(ctx, tctx, h, em, res, err)
 }

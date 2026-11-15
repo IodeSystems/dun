@@ -11,7 +11,7 @@ import (
 func TestAsk_MultiCustomAddsAndEditsOptions(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Fix which?", "options": []any{"lint", "tests", "docs"}, "multi": true})
+	m = m.feed(evMsg{"type": "ask", "question": "Fix which?", "options": []any{"lint", "tests", "docs"}, "multi": true})
 	m = key(m, kEnter) // check lint
 	for range 3 {
 		m = key(m, kDown) // to the custom row

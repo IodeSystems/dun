@@ -844,7 +844,6 @@ type convoView struct {
 	convo                 []convoEntry
 	cur                   string
 	curMaxH, curMaxKey    int
-	pendingTool           int
 	task                  string
 	sel                   int
 	lines                 []string
@@ -857,7 +856,7 @@ type convoView struct {
 // takeView reads the conversation on screen.
 func (m *tuiModel) takeView() convoView {
 	return convoView{convo: m.convo, cur: m.cur, curMaxH: m.curMaxH, curMaxKey: m.curMaxKey,
-		pendingTool: m.pendingTool, task: m.task, sel: m.sel, lines: m.vp.lines, yoff: m.vp.YOffset,
+		task: m.task, sel: m.sel, lines: m.vp.lines, yoff: m.vp.YOffset,
 		pinned: m.scrollPinned, frame: m.frame, convoHold: m.convoHold, convoHoldW: m.convoHoldW}
 }
 
@@ -865,7 +864,7 @@ func (m *tuiModel) takeView() convoView {
 // included; nothing is rendered.
 func (m *tuiModel) putView(v convoView) {
 	m.convo, m.cur, m.curMaxH, m.curMaxKey = v.convo, v.cur, v.curMaxH, v.curMaxKey
-	m.pendingTool, m.task, m.sel = v.pendingTool, v.task, v.sel
+	m.task, m.sel = v.task, v.sel
 	m.vp.lines, m.vp.YOffset, m.scrollPinned = v.lines, v.yoff, v.pinned
 	m.frame, m.convoHold, m.convoHoldW = v.frame, v.convoHold, v.convoHoldW
 }
@@ -886,7 +885,7 @@ func (m *tuiModel) enterAgentScope(id int) tea.Cmd {
 		m.proc.agentCmd(m.scopeAgent, "leave", "")
 	}
 	m.scopeAgent = id
-	m.putView(convoView{pendingTool: -1, sel: -1, pinned: true, task: a.prompt})
+	m.putView(convoView{sel: -1, pinned: true, task: a.prompt})
 	m.dropHold() // a different conversation: no hold from the root's
 	m.actLevel = actCollapsed
 	m.actSel = parentKey

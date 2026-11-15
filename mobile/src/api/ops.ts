@@ -48,9 +48,9 @@ export const SendMessage = graphql(`
 `);
 
 export const Answer = graphql(`
-  mutation Answer($id: String!, $value: String!) {
+  mutation Answer($id: String!, $value: String!, $askId: String) {
     dund {
-      answer(id: $id, body: { value: $value }) {
+      answer(id: $id, body: { value: $value, askId: $askId }) {
         ok
       }
     }

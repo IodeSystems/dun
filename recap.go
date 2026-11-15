@@ -906,12 +906,16 @@ func (h *Harness) keepWhole(out string) {
 // asking "why did it not see the last line?" was misled by their own screen.
 // The harness has to say what actually happened.
 func (h *Harness) cappedReporter(onCall func(string, map[string]any, string)) func(string, map[string]any, string) {
-	if onCall == nil {
+	if onCall == nil && h.cfg.OnToolEnd == nil {
 		return nil
 	}
 	return func(tool string, args map[string]any, result string) {
 		h.workTool(workToolText(tool, args), result)
-		onCall(tool, args, h.capOnce(tool+" "+oneLine(fmt.Sprint(args), 120), result))
+		shown := h.capOnce(tool+" "+oneLine(fmt.Sprint(args), 120), result)
+		h.toolCur.report(shown) // the tool_result event's text (toolevents.go)
+		if onCall != nil {
+			onCall(tool, args, shown)
+		}
 	}
 }
 

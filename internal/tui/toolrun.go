@@ -51,6 +51,7 @@ type runItem struct {
 	output  string // the renderer's styled output, for the pager
 	think   *thinkBlock
 	wrap    boxState // a thought's wrapped rows (box.go's line-at-a-time cache)
+	callID  string   // the call's id: its tool_result names it (dun/toolevents.go)
 }
 
 type toolRun struct {
@@ -410,8 +411,8 @@ func runEntry(items ...*runItem) convoEntry {
 // runAddCall appends a call to the open run, or starts one — taking over the
 // finished thinking box just above, if there is one, in place. It returns the
 // run's index.
-func (m *tuiModel) runAddCall(tool string, args map[string]any) int {
-	it := &runItem{tool: tool, args: args}
+func (m *tuiModel) runAddCall(tool string, args map[string]any, callID string) int {
+	it := &runItem{tool: tool, args: args, callID: callID}
 	if i := m.openRun(); i >= 0 {
 		m.convo[i].run.items = append(m.convo[i].run.items, it)
 		m.touchRun(i)
@@ -433,29 +434,71 @@ func (m *tuiModel) runAddCall(tool string, args map[string]any) int {
 	return len(m.convo) - 1
 }
 
-// runSetResult gives the run's pending call its result.
-func (m *tuiModel) runSetResult(i int, tool, result string) {
-	if i < 0 || i >= len(m.convo) || m.convo[i].run == nil {
-		return
-	}
-	r := m.convo[i].run
-	var it *runItem
-	for k := len(r.items) - 1; k >= 0; k-- {
-		if r.items[k].think == nil && !r.items[k].done {
-			it = r.items[k]
-			break
+// findCall is the block holding call id — a run (and the call's item in it)
+// or a carried message's box (item nil) — or -1. Paired by the id the engine
+// gives both events; nothing is guessed.
+//
+// An id of "" is an event log from before call ids (a trace of an older
+// engine): the FALLBACK pairs it with the newest pending call of the same
+// tool, as the TUI used to. Only that case.
+func (m *tuiModel) findCall(id, tool string) (int, *runItem) {
+	for i := len(m.convo) - 1; i >= 0; i-- {
+		e := &m.convo[i]
+		if e.msg != nil && !e.msg.done && (e.callID == id || id == "" && e.callID == "") {
+			return i, nil
+		}
+		if e.run == nil {
+			continue
+		}
+		for k := len(e.run.items) - 1; k >= 0; k-- {
+			it := e.run.items[k]
+			if it.think != nil || it.done {
+				continue
+			}
+			if it.callID == id && (id != "" || it.tool == tool) {
+				return i, it
+			}
 		}
 	}
-	if it == nil { // a result with no call: show it on its own
-		it = &runItem{tool: tool}
-		r.items = append(r.items, it)
+	return -1, nil
+}
+
+// callResult gives call id its result, in its run or its message's box; a
+// result with no call seen is shown on its own. failed is the engine's
+// is_error; nil (an event log from before it) reads the result.
+func (m *tuiModel) callResult(id, tool, result string, failed *bool) {
+	i, it := m.findCall(id, tool)
+	if i >= 0 && it == nil {
+		m.convo[i].msg.setResult(result)
+		m.touchMsg(i)
+		return
+	}
+	if it == nil {
+		i = m.runAddCall(tool, nil, id)
+		items := m.convo[i].run.items
+		it = items[len(items)-1]
 	}
 	preview, body := renderToolResult(renderCtx{tool: it.tool, args: it.args, result: result, width: m.vp.Width})
 	it.result, it.done, it.output = result, true, body
-	it.failed = toolFailed(it.tool, result)
+	if failed != nil {
+		it.failed = *failed
+	} else {
+		it.failed = toolFailed(it.tool, result)
+	}
 	it.preview = strings.ReplaceAll(preview, "\n", " ")
 	it.head = callText(it.tool, it.args, 80) + it.preview
 	m.touchRun(i)
+}
+
+// addCall shows a call as it starts: a message to another agent in its own
+// box (agentmsg.go), anything else in the run's (toolrun.go).
+func (m *tuiModel) addCall(tool, id string, args map[string]any) {
+	if a := carriedMsg(tool, args); a != nil {
+		i := m.addMsg(a)
+		m.convo[i].callID = id
+		return
+	}
+	m.runAddCall(tool, args, id)
 }
 
 // endRun ends the open run, if any: the round's reply began, or the turn did.

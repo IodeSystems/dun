@@ -161,7 +161,7 @@ func TestTUI_ImageRefusedKeepsDraft(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.input.width = 80
 	label := "[image 4: s.png 8×8]"
-	m = m.handleEvent(evMsg{"type": "image_refused", "message": `m cannot read images … "vision_model": …`,
+	m = m.feed(evMsg{"type": "image_refused", "message": `m cannot read images … "vision_model": …`,
 		"content": "fix " + label, "images": []any{map[string]any{"path": "/p/s.png", "label": label}}})
 	if v := m.input.Value(); v != "fix "+label {
 		t.Fatalf("composer: %q", v)

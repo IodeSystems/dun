@@ -480,7 +480,10 @@ func childConfig(parent *Harness, num int, cc childRun, iso isolation) Config {
 	cfg.OnReasoning = nil
 	cfg.OnRequest = nil
 	cfg.OnToolCall = nil
+	cfg.OnToolStart = nil
+	cfg.OnToolEnd = nil
 	cfg.OnNotify = nil
+	cfg.OnDelivered = nil
 	cfg.OnDocs = nil
 	cfg.OnCompaction = nil
 	cfg.OnAgents = nil

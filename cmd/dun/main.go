@@ -786,6 +786,7 @@ func main() {
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}
+		em.turn = newTurnTracker(em, func() *dun.Harness { h, _ := started.Load().(*dun.Harness); return h })
 		in = newInputStream()
 		// Under dund, the model can see and message the other live sessions
 		// (peers.go); standalone, the tools are absent.
@@ -872,11 +873,20 @@ func main() {
 				}
 			}()
 		}
-		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
-			em.emit(&proto.ToolCall{Tool: tool, Args: args})
-			em.emit(&proto.ToolResult{Tool: tool, Result: result})
+		cfg.OnToolStart = func(c dun.ToolStart) {
+			em.emit(&proto.ToolCall{CallID: c.CallID, Tool: c.Tool, Args: c.Args})
+		}
+		cfg.OnToolEnd = func(r dun.ToolEnd) {
+			em.emit(&proto.ToolResult{CallID: r.CallID, Tool: r.Tool, Result: r.Result,
+				IsError: r.IsError, ElapsedMS: r.Elapsed.Milliseconds()})
 		}
 		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text}) }
+		cfg.OnDelivered = func(d dun.Delivery) {
+			em.emit(&proto.Delivered{IDs: d.IDs, CallID: d.CallID})
+			if h, _ := started.Load().(*dun.Harness); h != nil {
+				em.emit(&proto.Queued{Count: h.Queued()})
+			}
+		}
 		cfg.OnLogin = func(server, url string) { em.emit(&proto.McpLogin{Server: server, URL: url}) }
 		// A memory trigger reports like /remember does, so the UI shows it the
 		// same way.
@@ -934,21 +944,17 @@ func main() {
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
 			return withoutClock(func() (string, error) {
-				ask := &proto.Ask{Question: q, Options: opts, Multi: multi, RecommendedAll: rec}
+				ask := &proto.Ask{AskID: dun.NewMessageID(), CallID: em.turn.callID(), Question: q, Options: opts, Multi: multi, RecommendedAll: rec}
 				if len(rec) > 0 {
 					ask.Recommended = rec[0]
 				}
 				em.emit(ask)
-				select {
-				case a, ok := <-in.answers:
-					if !ok {
-						return "", fmt.Errorf("input closed")
-					}
-					em.emit(&proto.Answered{Value: a})
-					return a, nil
-				case <-actx.Done():
-					return "", actx.Err()
+				a, err := awaitAnswer(actx, in.answers, ask.AskID)
+				if err != nil {
+					return "", err
 				}
+				em.emit(&proto.Answered{Value: a.Value, AskID: ask.AskID, By: a.By})
+				return a.Value, nil
 			})
 		}
 		// --non-interactive: nobody answers, so no ask_user (a nil Ask offers none).
@@ -959,17 +965,15 @@ func main() {
 			askMu.Lock()
 			defer askMu.Unlock()
 			return withoutClock(func() (bool, error) {
-				em.emit(&proto.Mount{Source: source, Name: name})
-				select {
-				case a, ok := <-in.answers:
-					if !ok {
-						return false, fmt.Errorf("input closed")
-					}
-					em.emit(&proto.Answered{Value: a})
-					return strings.TrimSpace(strings.ToLower(a)) == "yes" || strings.TrimSpace(strings.ToLower(a)) == "y", nil
-				case <-actx.Done():
-					return false, actx.Err()
+				id := dun.NewMessageID()
+				em.emit(&proto.Mount{AskID: id, Source: source, Name: name})
+				a, err := awaitAnswer(actx, in.answers, id)
+				if err != nil {
+					return false, err
 				}
+				em.emit(&proto.Answered{Value: a.Value, AskID: id, By: a.By})
+				v := strings.TrimSpace(strings.ToLower(a.Value))
+				return v == "yes" || v == "y", nil
 			})
 		}
 	} else {

@@ -285,6 +285,9 @@ type AnswerInput struct {
 	SessionPath
 	Body struct {
 		Value string `json:"value"`
+		// AskID: the question answered (the ask event's ask_id); an answer
+		// to one no longer open is dropped. Empty answers the open one.
+		AskID string `json:"ask_id,omitempty"`
 	}
 }
 
@@ -440,7 +443,7 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 			if err != nil {
 				return nil, err
 			}
-			return ok(), fail(s.svc.Send(p, in.ID, proto.NewCommand("", &proto.Answer{Value: in.Body.Value})))
+			return ok(), fail(s.svc.Send(p, in.ID, proto.NewCommand("", &proto.Answer{Value: in.Body.Value, AskID: in.Body.AskID})))
 		})
 	gat.Register(api, g, huma.Operation{OperationID: "control", Method: http.MethodPost, Path: "/api/v1/sessions/{id}/control",
 		Summary: "Run a control or server command in the session."},

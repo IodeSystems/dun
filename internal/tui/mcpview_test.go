@@ -73,7 +73,7 @@ func TestMCPServersView_Keys(t *testing.T) {
 		_ = json.Unmarshal(b, &o)
 		list = append(list, o)
 	}
-	m = m.handleEvent(evMsg{"type": "server", "id": enginecmd.AllServers, "message": "mcp servers …", "servers": list})
+	m = m.feed(evMsg{"type": "server", "id": enginecmd.AllServers, "message": "mcp servers …", "servers": list})
 	if m.serversPaging() == nil {
 		t.Fatal("bare /mcp must open the table")
 	}

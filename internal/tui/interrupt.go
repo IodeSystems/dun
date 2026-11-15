@@ -47,8 +47,7 @@ func (m tuiModel) interrupt() (tea.Model, tea.Cmd) {
 		m.append(StErr.Render("no engine right now — nothing interrupted"))
 		return m, nil
 	}
-	m.interrupting = true
-	m.refresh()
+	// "interrupting…" is turn_state's word, which the engine sends at once.
 	return m, nil
 }
 

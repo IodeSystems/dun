@@ -159,13 +159,12 @@ func RunTUI(o TuiOpts) error {
 }
 
 type tuiModel struct {
-	proc        *dunProc
-	workspace   string
-	vp          convoPane
-	input       multilineInput
-	spin        spinner.Model
-	convo       []convoEntry // finalized conversation blocks
-	pendingTool int          // index of a tool call awaiting its result; -1 = none
+	proc      *dunProc
+	workspace string
+	vp        convoPane
+	input     multilineInput
+	spin      spinner.Model
+	convo     []convoEntry // finalized conversation blocks
 	// activeTool is the in-flight tool call rendered into the status line so
 	// "working…" says WHAT is running, not just that something is. Set on
 	// tool_call, cleared on tool_result. Empty while the model is thinking
@@ -182,6 +181,7 @@ type tuiModel struct {
 	confirm       confirmState // a pending y/n question (jobkill.go)
 	busyStart     time.Time    // when the current busy turn started
 	asking        bool         // agent is waiting on an ask_user answer
+	askID         string       // the open question's ask_id: the answer names it
 	askOptions    []string     // the offered options; a trailing text row is implicit (askTextRow)
 	askRec        []string     // the options the model recommends (marked, preselected)
 	askSel        int          // highlighted answer row (== askTextRow() → the text row)
@@ -260,6 +260,10 @@ type tuiModel struct {
 	// composer takes the text back (every client sees the event).
 	slashLine    string
 	schedEditAsk string
+	// unqueueAsk: THIS client sent "unqueue", so the withdrawn event that
+	// answers it puts the texts in this composer (every client drops the
+	// rows; delivery.go).
+	unqueueAsk   bool
 	flashUntil   time.Time      // when it goes
 	pulsePending bool           // a pulse tick is scheduled
 	bandRaw      []string       // the selected block's rows before the band, for a pulse step
@@ -473,7 +477,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
 	keys, keysErr := loadKeyMap()
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, userJump: -1, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, scrollPinned: true, userJump: -1, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
 }
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spin.Tick, m.input.BlinkTick(), waitForDump(m.dumpSig)}

@@ -149,6 +149,10 @@ func TestCrashedEngineRestartsThenGivesUp(t *testing.T) {
 	if st := next(t, sub, "engine").Payload.(*proto.EngineState); st.State != "gave_up" {
 		t.Fatalf("after the cap: %+v", st)
 	}
+	// A dead engine's turn is over, its queue with it: dund says so.
+	if st := next(t, sub, "turn_state").Payload.(*proto.TurnState); st.Phase != proto.PhaseIdle || st.Queued == nil {
+		t.Fatalf("turn_state after the death: %+v", st)
+	}
 	args := sp.spawnArgs()
 	last := args[len(args)-1]
 	if !slices.Equal(last, []string{"--model", "m", "--resume", id}) {

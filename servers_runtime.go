@@ -973,6 +973,8 @@ func (h *Harness) rebuildTools() {
 	// Outside everything: a call the turn reaches after an interrupt is not
 	// run at all (interrupt.go).
 	dispatch = withInterrupt(dispatch)
+	// Outermost: every dispatched call starts and ends (toolevents.go).
+	dispatch = withToolEvents(dispatch, h)
 
 	h.Session.Tools = toolDefs
 	names := make([]string, len(toolDefs))

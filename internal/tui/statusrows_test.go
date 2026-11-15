@@ -14,7 +14,7 @@ func TestStatus_EffortAndScriptedServers(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "settings", "model": "deepseek/x", "url": "https://or/v1", "effort": "high"})
+	m = m.feed(evMsg{"type": "settings", "model": "deepseek/x", "url": "https://or/v1", "effort": "high"})
 	m.noteServers(evMsg{"servers": []any{
 		map[string]any{"id": "vay", "auto": true, "via": "shell", "hosted": true, "tools": float64(112)},
 		map[string]any{"id": "notes", "auto": true, "via": "shell"},
@@ -35,7 +35,7 @@ func TestStatus_EffortAndScriptedServers(t *testing.T) {
 // learned it (the settings event's effortWords).
 func TestStatus_EffortDefaultFromTheServer(t *testing.T) {
 	m := buildModel(2, 2)
-	m = m.handleEvent(evMsg{"type": "settings", "model": "chat", "url": "https://llm/v1", "effort": "default",
+	m = m.feed(evMsg{"type": "settings", "model": "chat", "url": "https://llm/v1", "effort": "default",
 		"effortWords": "nothing sent: the server thinks at medium"})
 	m.statusSlash()
 	if s := stripANSI(m.convo[len(m.convo)-1].collapsed); !strings.Contains(s, "effort      default · nothing sent: the server thinks at medium · /effort") {

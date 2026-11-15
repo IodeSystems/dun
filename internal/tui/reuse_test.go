@@ -101,9 +101,9 @@ func TestNewFlagStaysWithTheClient(t *testing.T) {
 func TestNewSlashStartsAFreshSession(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "session", "id": "20261022-100001"})
-	m = m.handleEvent(evMsg{"type": "user", "content": "hi"})
-	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "next", "prob": 0.5}}})
+	m = m.feed(evMsg{"type": "session", "id": "20261022-100001"})
+	m = m.feed(evMsg{"type": "user", "content": "hi"})
+	m = m.feed(evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "next", "prob": 0.5}}})
 	m.opts.Workspace = "/ws"
 	cmd := newSlash(&m, nil)
 	if cmd == nil {
@@ -124,9 +124,9 @@ func TestNewSlashStartsAFreshSession(t *testing.T) {
 func TestSwitchSessionDropsSuggestions(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "session", "id": "20261022-100001"})
-	m = m.handleEvent(evMsg{"type": "user", "content": "hi"})
-	m = m.handleEvent(evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "next", "prob": 0.5}}})
+	m = m.feed(evMsg{"type": "session", "id": "20261022-100001"})
+	m = m.feed(evMsg{"type": "user", "content": "hi"})
+	m = m.feed(evMsg{"type": "suggestions", "items": []any{map[string]any{"text": "next", "prob": 0.5}}})
 	if len(m.suggestions) == 0 {
 		t.Fatal("setup: no suggestions")
 	}

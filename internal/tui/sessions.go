@@ -158,7 +158,7 @@ func (m *tuiModel) switchSession(id string) tea.Cmd {
 func (m *tuiModel) leaveSession() {
 	m.proc.close()
 	m.convo = nil
-	m.cur, m.pendingTool = "", -1
+	m.cur = ""
 	m.sel = -1
 	m.busy, m.starting = false, true
 	m.dropAsk()

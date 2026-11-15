@@ -12,17 +12,42 @@ import { withCall, withResult, withThought, type Run } from './toolcalls';
 import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 
 export type Item =
-  | { key: string; kind: 'user'; text: string; queued?: boolean }
+  // id: the user event's (dun delivery.go); delivered and withdrawn name it.
+  // lost: queued, and its engine stopped before delivering it.
+  | { key: string; kind: 'user'; text: string; queued?: boolean; id?: string; lost?: boolean }
   | { key: string; kind: 'assistant'; text: string }
   // Consecutive tool calls, each merged with its result (toolcalls.ts).
   | Run
   | { key: string; kind: 'note'; text: string; error?: boolean }
   | ({ key: string; kind: 'thinking' } & Thought)
-  | { key: string; kind: 'question'; text: string; options: string[]; recommended?: string }
+  // callId: the ask_user call asking it, which history's tool_call and the ask event both name.
+  | {
+      key: string;
+      kind: 'question';
+      text: string;
+      options: string[];
+      recommended?: string;
+      recommendedAll?: string[];
+      multi?: boolean;
+      callId?: string;
+    }
   // What the engine says beside the conversation (notices.ts): it ends a run.
   | { key: string; kind: 'notice'; notice: notices.Notice };
 
-export type Ask = { question: string; options: string[]; recommended?: string };
+/**
+ * The open question (proto.Ask). askId names it in the answer. multi: pick
+ * any number (recommendedAll are checked to start with). noCustom: the
+ * answer must be one of the options, no own words.
+ */
+export type Ask = {
+  askId?: string;
+  question: string;
+  options: string[];
+  recommended?: string;
+  recommendedAll: string[];
+  multi: boolean;
+  noCustom: boolean;
+};
 
 /** A slash command the engine carries out (proto.CommandSpec). */
 export type Command = {
@@ -52,9 +77,12 @@ export type View = {
   items: Item[];
   /** The reply streaming in, before its message event settles it. */
   streaming: string | null;
+  /** turn_state's phase is not idle. */
   busy: boolean;
   status: string;
   ask: Ask | null;
+  /** The session's turn_state (the engine's; dund's when the engine stopped); null before the first. */
+  turn: Turn | null;
   /** The engine's slash commands, with their current state (commands event). */
   commands: Command[];
   skills: Skill[];
@@ -74,6 +102,16 @@ export type View = {
   n: number; // key counter
 };
 
+/** proto.TurnState as the client keeps it (docs/session-events.md). */
+export type Turn = {
+  phase: 'idle' | 'working' | 'waiting_answer' | 'interrupting' | 'retrying';
+  /** When the turn began (ms), 0 idle. */
+  since: number;
+  /** The provider wait's line, '' when none. */
+  retry: string;
+  queued: { id: string; text: string }[];
+};
+
 export type AgentView = { id: number; prompt: string; loaded: boolean; view: View };
 
 export const empty: View = {
@@ -82,6 +120,7 @@ export const empty: View = {
   busy: false,
   status: '',
   ask: null,
+  turn: null,
   commands: [],
   skills: [],
   models: null,
@@ -127,27 +166,165 @@ function merge(v: View, r: { items: Item[]; added: boolean }): View {
 }
 
 /** A user message; dund's automatic resume after a restart is a note, not the person's. */
-function pushUser(v: View, text: string, queued?: boolean): View {
+function pushUser(v: View, text: string, queued?: boolean, id?: string): View {
   if (text.startsWith(autoResumePrefix))
     return push(v, { kind: 'note', text: '↻ resumed after the restart — ' + text.slice(autoResumePrefix.length) });
-  return push(v, queued ? { kind: 'user', text, queued } : { kind: 'user', text });
+  return push(v, { kind: 'user', text, ...(queued ? { queued } : {}), ...(id ? { id } : {}) });
 }
 
 const QUEUED_STATUS = ' message(s) queued for the running turn';
 
-function settleQueued(v: View): View {
-  if (!v.items.some((i) => i.kind === 'user' && i.queued)) return v;
-  return { ...v, items: v.items.map((i) => (i.kind === 'user' && i.queued ? { ...i, queued: false } : i)) };
+const isQueued = (i: Item, id: string) => i.kind === 'user' && (i.queued === true || i.lost === true) && i.id === id;
+
+/**
+ * delivered: the engine says these queued messages reached the model. Each
+ * becomes an ordinary message after what is shown so far — where history
+ * puts it (after the tool result that carried it), so a reconnect shows the
+ * same order.
+ */
+function deliver(v: View, ids: string[]): View {
+  let w = v;
+  for (const id of ids) {
+    const it = w.items.find((i) => isQueued(i, id));
+    if (it?.kind !== 'user') continue;
+    w = pushUser({ ...w, items: w.items.filter((i) => i !== it) }, it.text, false, id);
+  }
+  return w;
 }
 
-/** An ask_user call as the question it is, not as JSON. */
-function pushQuestion(v: View, args: unknown): View {
+/** withdrawn: queued messages taken back; their rows go, on every client. */
+function withdraw(v: View, ids: string[]): View {
+  const items = v.items.filter((i) => !ids.some((id) => isQueued(i, id)));
+  return items.length === v.items.length ? v : { ...v, items };
+}
+
+/**
+ * Fallback for an event log from before message ids: a queued row with no
+ * id can get no delivered event, so the turn's end settles it. Rows with an
+ * id wait for the engine's word.
+ */
+function settleUnnamedQueued(v: View): View {
+  const old = (i: Item) => i.kind === 'user' && i.queued === true && !i.id;
+  if (!v.items.some(old)) return v;
+  return { ...v, items: v.items.map((i) => (old(i) ? { ...i, queued: false } : i)) };
+}
+
+/** is_error: the engine omits false, so with a call_id an absent one is false; without, unknown (an old log). */
+const errorOf = (e: Ev): boolean | undefined =>
+  typeof e.is_error === 'boolean' ? e.is_error : e.call_id ? false : undefined;
+
+/** An ask event, or turn_state's ask. */
+function parseAsk(a: Ev): Ask {
+  const all = Array.isArray(a.recommended_all) ? (a.recommended_all as string[]) : [];
+  const rec = all[0] ?? (str(a.recommended) || undefined);
+  const options = (a.options as string[]) ?? [];
+  return {
+    ...(str(a.ask_id) ? { askId: str(a.ask_id) } : {}),
+    question: str(a.question),
+    options,
+    recommended: rec,
+    recommendedAll: all.length ? all : rec ? [rec] : [],
+    multi: a.multi === true,
+    // Meaningless without options to pick from (the TUI's rule).
+    noCustom: a.no_custom === true && options.length > 0,
+  };
+}
+
+const phases = ['idle', 'working', 'waiting_answer', 'interrupting', 'retrying'] as const;
+
+/**
+ * turn_state: where the session's turn is, from the engine (dun
+ * cmd/dun/turnstate.go). busy, the status line, the open question, a dropped
+ * half-streamed reply and the queued rows are read from it, never inferred
+ * from tokens, tool calls or done.
+ */
+function applyTurnState(v: View, ev: Ev): View {
+  const phase = phases.find((p) => p === ev.phase) ?? 'idle';
+  const r = (ev.retry ?? null) as Ev | null;
+  const queued = (Array.isArray(ev.queued) ? (ev.queued as Ev[]) : []).map((q) => ({
+    id: str(q.id),
+    text: str(q.text),
+  }));
+  const turn: Turn = { phase, since: Number(ev.since ?? 0), retry: r ? str(r.text) || 'retrying…' : '', queued };
+  const status =
+    phase === 'interrupting'
+      ? 'interrupting…'
+      : phase === 'retrying'
+        ? turn.retry
+        : queued.length
+          ? `${queued.length}${QUEUED_STATUS}`
+          : phase === 'idle'
+            ? ''
+            : 'working…';
+  let ask = v.ask;
+  if (phase === 'waiting_answer' && ev.ask && typeof ev.ask === 'object') ask = v.ask ?? parseAsk(ev.ask as Ev);
+  else if (phase !== 'interrupting') ask = null;
+  // A round whose stream died is streamed again: its text goes.
+  const streaming = phase === 'retrying' && ev.discard === true ? null : v.streaming;
+  const w: View = { ...v, busy: phase !== 'idle', status, ask, streaming, turn };
+  return reconcileQueued(w, queued);
+}
+
+/**
+ * The queued rows follow the state's queue: one it lists that is not shown
+ * (a client that arrived late) is added; with no turn and an empty queue, a
+ * row still queued was lost with its engine (delivered and withdrawn come
+ * before the state that drops a row).
+ */
+function reconcileQueued(v: View, queued: { id: string; text: string }[]): View {
+  let w = v;
+  for (const q of queued) {
+    const at = w.items.findIndex((i) => i.kind === 'user' && i.id === q.id);
+    const it = w.items[at];
+    if (at < 0) w = pushUser(w, q.text, true, q.id);
+    else if (it?.kind === 'user' && it.lost) {
+      const items = [...w.items];
+      items[at] = { ...it, queued: true, lost: false };
+      w = { ...w, items };
+    }
+  }
+  if (queued.length || w.busy || !w.items.some((i) => i.kind === 'user' && i.queued && i.id)) return w;
+  return {
+    ...w,
+    items: w.items.map((i) => (i.kind === 'user' && i.queued && i.id ? { ...i, queued: false, lost: true } : i)),
+  };
+}
+
+const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+/** An ask_user call (history) as the question it is, not as JSON. */
+function pushQuestion(v: View, args: unknown, callId: string): View {
   const a = (args ?? {}) as Ev;
+  const rec = Array.isArray(a.recommended)
+    ? (a.recommended as string[])
+    : str(a.recommended)
+      ? [str(a.recommended)]
+      : [];
   return push(v, {
     kind: 'question',
     text: str(a.question),
     options: (a.options as string[]) ?? [],
-    recommended: str(a.recommended) || undefined,
+    recommended: rec[0],
+    recommendedAll: rec,
+    multi: a.multi === true,
+    ...(callId ? { callId } : {}),
+  });
+}
+
+/**
+ * The ask event: the question row, live (history shows it from the ask_user
+ * call). A row its call already has (a snapshot's history) is not repeated.
+ */
+function askRow(v: View, a: Ask, callId: string): View {
+  if (callId && v.items.some((i) => i.kind === 'question' && i.callId === callId)) return v;
+  return push(v, {
+    kind: 'question',
+    text: a.question,
+    options: a.options,
+    recommended: a.recommended,
+    recommendedAll: a.recommendedAll,
+    multi: a.multi,
+    ...(callId ? { callId } : {}),
   });
 }
 
@@ -155,11 +332,11 @@ function pushQuestion(v: View, args: unknown): View {
 function fromHistory(v: View, it: Ev): View {
   switch (it.kind) {
     case 'user':
-      return pushUser(v, str(it.content));
+      return pushUser(v, str(it.content), false, str(it.id) || undefined);
     case 'assistant':
       return push(v, { kind: 'assistant', text: str(it.content) });
     case 'tool_call':
-      if (it.tool === 'ask_user') return pushQuestion(v, it.args);
+      if (it.tool === 'ask_user') return pushQuestion(v, it.args, str(it.call_id));
       return (
         pushCarried(v, str(it.tool), it.args, str(it.call_id)) ??
         merge(v, withCall(v.items, str(it.tool), it.args, str(it.call_id) || undefined, String(v.n)))
@@ -168,7 +345,10 @@ function fromHistory(v: View, it: Ev): View {
       if (it.tool === 'ask_user') return push(v, { kind: 'user', text: str(it.content) });
       return (
         settleCarried(v, str(it.tool), str(it.content), str(it.call_id)) ??
-        merge(v, withResult(v.items, str(it.tool), str(it.content), str(it.call_id) || undefined, String(v.n)))
+        merge(
+          v,
+          withResult(v.items, str(it.tool), str(it.content), str(it.call_id) || undefined, String(v.n), errorOf(it)),
+        )
       );
     case 'notification':
       return push(v, { kind: 'notice', notice: notices.fromHistoryNotification(str(it.content)) });
@@ -194,6 +374,17 @@ export function replaceWith(items: unknown[], keep?: View): View {
 }
 
 export function apply(v: View, ev: Ev): View {
+  // A state event a snapshot carries (replayed: true) is state, not news: it
+  // adds no row (no note, no notice), so a reconnect does not repeat them.
+  // turn_state's queued rows are the state itself.
+  if (ev.replayed === true && ev.type !== 'turn_state') {
+    const w = applyNew(v, ev);
+    return { ...w, items: v.items, n: v.n };
+  }
+  return applyNew(v, ev);
+}
+
+function applyNew(v: View, ev: Ev): View {
   const bg = noteBackground(v.bg, ev);
   if (bg !== v.bg) v = { ...v, bg };
   v = applyMore(v, ev);
@@ -211,18 +402,23 @@ export function apply(v: View, ev: Ev): View {
         busy: v.busy,
         status: v.status,
         ask: v.ask,
+        turn: v.turn,
         upgrade: v.upgrade,
         bg: v.bg,
         agentView: v.agentView,
       };
     case 'user':
-      return pushUser(v, str(ev.content), ev.queued === true);
+      return pushUser(v, str(ev.content), ev.queued === true, str(ev.id) || undefined);
+    case 'delivered':
+      return deliver(v, ids(ev.ids));
+    case 'withdrawn':
+      return withdraw(v, ids(ev.ids));
     case 'upgrade':
       return { ...v, upgrade: parseUpgrade(ev) };
-    case 'turn':
-      return { ...v, busy: true, status: 'working…' };
+    case 'turn_state':
+      return applyTurnState(v, ev);
     case 'token':
-      return { ...v, busy: true, streaming: (v.streaming ?? '') + str(ev.text) };
+      return { ...v, streaming: (v.streaming ?? '') + str(ev.text) };
     case 'message': {
       const text = str(ev.content) || v.streaming || '';
       const w = { ...v, streaming: null };
@@ -232,46 +428,45 @@ export function apply(v: View, ev: Ev): View {
       // A tool call ends the text streamed before it.
       let w = v;
       if (v.streaming) w = push({ ...v, streaming: null }, { kind: 'assistant', text: v.streaming });
-      // ask_user's call and result arrive once it is answered: they are what
-      // shows the question and the answer, live as from history.
-      if (ev.tool === 'ask_user') return pushQuestion(w, ev.args);
+      // ask_user live: the ask event shows the question, answered the answer.
+      if (ev.tool === 'ask_user') return w;
       return (
         pushCarried(w, str(ev.tool), ev.args, str(ev.call_id)) ??
         merge(w, withCall(w.items, str(ev.tool), ev.args, str(ev.call_id) || undefined, String(w.n)))
       );
     }
     case 'tool_result': {
-      // The engine lifts queued messages into this result, so the model has
-      // read them now: drop the queued mark here, as the TUI does.
-      let w = settleQueued(v);
-      if (w.status.endsWith(QUEUED_STATUS)) w = { ...w, status: '' };
-      if (ev.tool === 'ask_user') return push(w, { kind: 'user', text: str(ev.result) });
+      // A queued message it carried is settled by the delivered event after it.
+      const w = v;
+      if (ev.tool === 'ask_user') return w;
       return (
         settleCarried(w, str(ev.tool), str(ev.result), str(ev.call_id)) ??
-        merge(w, withResult(w.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(w.n)))
+        merge(
+          w,
+          withResult(w.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(w.n), errorOf(ev)),
+        )
       );
     }
     case 'done':
       if (ev.reason === 'interrupted') return interrupted(v, str(ev.detail));
-      // Messages queued into the turn have been read by it.
-      return { ...settleQueued(v), busy: false, status: '', streaming: null };
+      // Busy and the status are turn_state's, which follows.
+      return { ...settleUnnamedQueued(v), streaming: null };
     case 'error':
       return push(
-        { ...settleQueued(v), busy: false, status: '', streaming: null },
+        { ...settleUnnamedQueued(v), streaming: null },
         { kind: 'note', text: 'error: ' + str(ev.error), error: true },
       );
-    case 'ask':
-      return {
-        ...v,
-        ask: {
-          question: str(ev.question),
-          options: (ev.options as string[]) ?? [],
-          recommended: str(ev.recommended) || undefined,
-        },
-      };
-    case 'answered':
-      // The question and the answer are shown from ask_user's call and result.
-      return { ...v, ask: null };
+    case 'ask': {
+      const a = parseAsk(ev);
+      return { ...askRow(v, a, str(ev.call_id)), ask: a };
+    }
+    case 'answered': {
+      // The open question's answer, whoever gave it. One naming another
+      // question closes nothing here.
+      const id = str(ev.ask_id);
+      if (id && v.ask?.askId && id !== v.ask.askId) return v;
+      return push({ ...v, ask: null }, { kind: 'user', text: str(ev.value) });
+    }
     case 'notification':
       return push(v, { kind: 'notice', notice: notices.fromNotification(ev) });
     case 'recap':
@@ -304,9 +499,7 @@ export function apply(v: View, ev: Ev): View {
         skills: ((ev.skills as Skill[]) ?? []).map((k) => ({ name: k.name, description: k.description })),
       };
     case 'control': {
-      let w = ev.id === 'close' && str(ev.message).startsWith('closed') ? { ...v, closed: true } : v;
-      // No turn to interrupt: drop the "interrupting…".
-      if (ev.id === 'interrupt' && w.status === 'interrupting…') w = { ...w, status: '' };
+      const w = ev.id === 'close' && str(ev.message).startsWith('closed') ? { ...v, closed: true } : v;
       return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;
     }
     case 'server':
@@ -323,18 +516,15 @@ export function apply(v: View, ev: Ev): View {
       };
     case 'engine':
       if (ev.state === 'started') return v;
+      // Busy and the question are turn_state's: dund sends idle for a stopped engine.
       return push(
-        { ...v, busy: false, ask: ev.state === 'restarting' ? null : v.ask },
+        { ...v },
         {
           kind: 'note',
           text: `engine ${str(ev.state)}${ev.reason ? ': ' + str(ev.reason) : ''}`,
           error: ev.state === 'gave_up',
         },
       );
-    case 'retry':
-      return { ...v, status: str(ev.text) || 'retrying…' };
-    case 'queued':
-      return { ...v, status: `${Number(ev.count ?? 0)}${QUEUED_STATUS}` };
   }
   return v;
 }
@@ -342,7 +532,7 @@ export function apply(v: View, ev: Ev): View {
 /** A reasoning delta: it opens the round's thought if none is live, and grows it. */
 function addThinking(v: View, delta: string, at: number): View {
   const i = liveThought(v.items);
-  const w = { ...v, busy: true };
+  const w = v;
   if (i < 0) return pushThought(w, { text: delta, start: at, end: 0, live: true });
   const items = [...v.items];
   const it = items[i]!;
@@ -367,11 +557,6 @@ function pushThought(v: View, t: Thought): View {
 /** The line an interrupted turn ends with (the TUI's too). */
 export const interruptedNote = '⏹ interrupted — your next message continues from here';
 
-/** What the screen shows from pressing Stop until the turn ends. */
-export function interrupting(v: View): View {
-  return v.busy ? { ...v, status: 'interrupting…' } : v;
-}
-
 /**
  * A turn the user stopped: the reply streamed so far stays (the engine keeps
  * it too), and a note ends the turn. Queued messages stay marked: they were
@@ -379,7 +564,7 @@ export function interrupting(v: View): View {
  * the cut turn started that are still running, and how to stop them.
  */
 function interrupted(v: View, detail: string): View {
-  let w: View = { ...v, busy: false, status: '', streaming: null };
+  let w: View = { ...v, streaming: null };
   if (v.streaming?.trim()) w = push(w, { kind: 'assistant', text: v.streaming });
   w = push(w, { kind: 'note', text: interruptedNote });
   return detail ? push(w, { kind: 'note', text: detail }) : w;

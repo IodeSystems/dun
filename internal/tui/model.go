@@ -562,7 +562,7 @@ func (m *tuiModel) switchModel(p dunconfig.ProviderConfig, model string, persist
 		m.splashWant, m.splashKeep = true, true // said again, with the new model
 	}
 	m.convo = nil
-	m.cur, m.pendingTool = "", -1
+	m.cur = ""
 	m.sel = -1
 	m.busy, m.starting = false, true
 	m.dropAsk()

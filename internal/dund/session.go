@@ -299,10 +299,18 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner) 
 	// turn" until the next engine finished one (found live: a loop waited on
 	// it, and busy() said so to dun_list too).
 	s.track(proto.NewEvent(&proto.EngineState{State: "stopped"}))
+	// Nothing of a turn outlives its engine, its queue included: the
+	// engine cannot say so, dund does (proto.TurnState).
+	s.log.Append(proto.NewEvent(idleTurn()))
 	// An engine gone mid-turn (stopped by /exit, crashed) never sends that
 	// turn's done: for a self-paced loop waiting on it, this is its end.
 	s.svc.loopTurnEnded(s)
 	close(done)
+}
+
+// idleTurn is the turn_state of a session with no engine turn.
+func idleTurn() *proto.TurnState {
+	return &proto.TurnState{Phase: proto.PhaseIdle, Queued: []proto.QueuedMsg{}}
 }
 
 func decodeEvent(line []byte) (proto.Event, bool) {
@@ -494,11 +502,19 @@ func (s *session) subscribe(after uint64, epoch string) (*proto.Event, []proto.E
 	if err != errEpoch && !errors.Is(err, proto.ErrGap) && !errors.Is(err, proto.ErrFuture) {
 		return nil, nil, nil, err
 	}
+	// The conversation and the seq it is current to, read so they agree: a
+	// read during which the engine wrote an event is read again. What a
+	// snapshot's items hold is then dropped from the replay after it
+	// (afterSnapshot), so an entry is never in both.
+	last, items := s.historyAt()
 	// Last before State: a state event newer than last is sent twice (once
-	// here, once replayed), which is harmless; one older than the state read
-	// would otherwise be lost.
-	last := s.log.Last()
+	// here, once replayed); the copy here is marked replayed, so a client
+	// shows no note for it. One older than the state read would otherwise
+	// be lost.
 	state := s.log.State()
+	for i := range state {
+		state[i].Replayed = true
+	}
 	// A restored question is no engine event a snapshot keeps: it goes with
 	// the state, so a client that reconnects after the restart shows it.
 	s.actMu.Lock()
@@ -507,14 +523,73 @@ func (s *session) subscribe(after uint64, epoch string) (*proto.Event, []proto.E
 		slices.SortFunc(state, func(a, b proto.Event) int { return cmp.Compare(a.Seq, b.Seq) })
 	}
 	s.actMu.Unlock()
-	items := dun.SessionHistory(dun.SessionFile(s.workspace, s.id))
 	replay, sub, err = s.log.Subscribe(last, subBuffer)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	replay = afterSnapshot(items, replay)
 	snap := proto.NewEvent(&proto.Snapshot{After: last, Items: historyItems(items), State: state})
 	snap.Session, snap.Epoch, snap.TS = s.id, s.log.Epoch(), time.Now()
 	return &snap, replay, sub, nil
+}
+
+// historyAt reads the conversation and the log's last seq so that they
+// agree: when an event was written while the file was read, it reads again
+// (a few times; a session that never pauses is read as it is, and
+// afterSnapshot drops what repeats).
+func (s *session) historyAt() (uint64, []dun.HistoryItem) {
+	for try := 0; ; try++ {
+		last := s.log.Last()
+		items := dun.SessionHistory(dun.SessionFile(s.workspace, s.id))
+		if s.log.Last() == last || try == 4 {
+			return last, items
+		}
+	}
+}
+
+// afterSnapshot drops from the replay after a snapshot the events whose
+// entries the snapshot's items already hold: a user message by its id, a
+// tool call or result by its call_id, and a final reply equal to the last
+// one in the items. The engine writes an entry and sends its event apart
+// (either may come first), so without this an entry could show twice.
+func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event {
+	users, calls, results := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	lastReply := ""
+	for _, it := range items {
+		switch it.Kind {
+		case "user":
+			users[it.ID] = it.ID != ""
+		case "tool_call":
+			calls[it.CallID] = it.CallID != ""
+		case "tool_result":
+			results[it.CallID] = it.CallID != ""
+		case "assistant":
+			lastReply = it.Content
+		}
+	}
+	out := replay[:0:0]
+	for _, ev := range replay {
+		switch p := ev.Payload.(type) {
+		case *proto.UserEcho:
+			if users[p.ID] {
+				continue
+			}
+		case *proto.ToolCall:
+			if calls[p.CallID] {
+				continue
+			}
+		case *proto.ToolResult:
+			if results[p.CallID] {
+				continue
+			}
+		case *proto.Message:
+			if lastReply != "" && p.Content == lastReply {
+				continue
+			}
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // errEpoch: a seq from another log than this one.
@@ -523,7 +598,7 @@ var errEpoch = errors.New("seq from another epoch")
 func historyItems(items []dun.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, proto.HistoryItem{Kind: it.Kind, Content: it.Content, Tool: it.Tool, CallID: it.CallID, Args: it.Args})
+		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool, CallID: it.CallID, Args: it.Args})
 	}
 	return out
 }

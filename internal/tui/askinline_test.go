@@ -124,7 +124,7 @@ func TestAskInline_EscTwiceFromAnOptionRow(t *testing.T) {
 func TestAskInline_MultiTextIsOneMoreEntry(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Fix which?", "options": []any{"lint", "tests"}, "multi": true})
+	m = m.feed(evMsg{"type": "ask", "question": "Fix which?", "options": []any{"lint", "tests"}, "multi": true})
 	m = key(m, kEnter) // check lint
 	m = typeStr(m, "bench")
 	if !m.onAskText() {
@@ -146,7 +146,7 @@ func TestAskInline_MultiTextIsOneMoreEntry(t *testing.T) {
 func TestAskInline_NoCustomHasNoTextRow(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Commit?", "options": []any{"commit", "cancel"}, "no_custom": true})
+	m = m.feed(evMsg{"type": "ask", "question": "Commit?", "options": []any{"commit", "cancel"}, "no_custom": true})
 	panel := stripANSI(m.askPanel())
 	if strings.Contains(panel, "type an answer") || len(strings.Split(panel, "\n")) != 2 {
 		t.Fatalf("no text row expected:\n%s", panel)
@@ -175,7 +175,7 @@ func TestAskInline_NoCustomHasNoTextRow(t *testing.T) {
 	// Multi: the done row is right after the options.
 	m = newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	m = resized(m, 80, 24)
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Which?", "options": []any{"a", "b"}, "multi": true, "no_custom": true})
+	m = m.feed(evMsg{"type": "ask", "question": "Which?", "options": []any{"a", "b"}, "multi": true, "no_custom": true})
 	m = key(m, kEnter) // check a
 	m = key(m, kDown)
 	m = key(m, kDown) // done
@@ -186,7 +186,7 @@ func TestAskInline_NoCustomHasNoTextRow(t *testing.T) {
 
 	// no_custom without options would leave nothing to answer with: ignored.
 	m = newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
-	m = m.handleEvent(evMsg{"type": "ask", "question": "Name?", "no_custom": true})
+	m = m.feed(evMsg{"type": "ask", "question": "Name?", "no_custom": true})
 	if !m.onAskText() {
 		t.Errorf("a question with no options keeps its text row")
 	}

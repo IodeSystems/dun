@@ -5,7 +5,6 @@ import {
   empty,
   filterModels,
   interruptedNote,
-  interrupting,
   isKillAll,
   parseLine,
   replaceWith,
@@ -19,12 +18,20 @@ test('a turn: echo, streamed tokens, the settled message, done', () => {
   const v = run([
     { type: 'user', content: 'hi' },
     { type: 'turn', kind: 'user' },
+    { type: 'turn_state', phase: 'working', queued: [] },
     { type: 'token', text: 'hel' },
     { type: 'token', text: 'lo' },
   ]);
   expect(v.busy).toBe(true);
   expect(v.streaming).toBe('hello');
-  const w = run([{ type: 'message', role: 'assistant', content: 'hello' }, { type: 'done' }], v);
+  const w = run(
+    [
+      { type: 'message', role: 'assistant', content: 'hello' },
+      { type: 'done' },
+      { type: 'turn_state', phase: 'idle', queued: [] },
+    ],
+    v,
+  );
   expect(w.items.map((i) => i.kind)).toEqual(['user', 'assistant']);
   expect(w.streaming).toBeNull();
   expect(w.busy).toBe(false);
@@ -53,24 +60,51 @@ test('history replaces what is shown, never adds', () => {
   expect(w.items.map((i) => (i.kind === 'tools' || i.kind === 'notice' ? '' : i.text))).toEqual(['a', 'b']);
 });
 
-test('an ask stays open until answered, from any client', () => {
-  const v = run([{ type: 'ask', question: 'colour?', options: ['red', 'blue'] }]);
-  expect(v.ask).toEqual({ question: 'colour?', options: ['red', 'blue'] });
+test('an ask stays open until answered, from any client; its row comes from the ask', () => {
+  const v = run([
+    { type: 'tool_call', tool: 'ask_user', call_id: 'c1', args: { question: 'colour?', options: ['red', 'blue'] } },
+    {
+      type: 'ask',
+      ask_id: 'a1',
+      call_id: 'c1',
+      question: 'colour?',
+      options: ['red', 'blue', 'green'],
+      multi: true,
+      recommended_all: ['blue', 'green'],
+      no_custom: true,
+    },
+  ]);
+  expect(v.ask).toEqual({
+    askId: 'a1',
+    question: 'colour?',
+    options: ['red', 'blue', 'green'],
+    recommended: 'blue',
+    recommendedAll: ['blue', 'green'],
+    multi: true,
+    noCustom: true,
+  });
+  expect(v.items).toEqual([expect.objectContaining({ kind: 'question', multi: true, callId: 'c1' })]);
   const w = run(
     [
-      { type: 'answered', value: 'blue' },
-      {
-        type: 'tool_call',
-        tool: 'ask_user',
-        args: { question: 'colour?', options: ['red', 'blue'], recommended: 'blue' },
-      },
-      { type: 'tool_result', tool: 'ask_user', result: 'blue' },
+      { type: 'answered', ask_id: 'old', value: 'stale' }, // another question's: nothing
+      { type: 'answered', ask_id: 'a1', value: 'blue, green', by: 'unix:1000' },
+      { type: 'tool_result', tool: 'ask_user', call_id: 'c1', result: 'blue, green' },
     ],
     v,
   );
   expect(w.ask).toBeNull();
   expect(w.items.map((i) => i.kind)).toEqual(['question', 'user']);
-  expect(w.items[0]).toMatchObject({ text: 'colour?', recommended: 'blue' });
+  expect(w.items[1]).toMatchObject({ text: 'blue, green' });
+});
+
+test('a snapshot that holds the asking call shows one question row', () => {
+  const v = applySnapshot({
+    items: [{ kind: 'tool_call', tool: 'ask_user', call_id: 'c1', args: { question: 'ok?', options: ['y', 'n'] } }],
+    state: [],
+  });
+  const w = apply(v, { type: 'ask', ask_id: 'a', call_id: 'c1', question: 'ok?', options: ['y', 'n'] });
+  expect(w.items.filter((i) => i.kind === 'question')).toHaveLength(1);
+  expect(w.ask?.askId).toBe('a');
 });
 
 test('an ask_user in history renders as the question and its answer, not JSON', () => {
@@ -91,7 +125,8 @@ test('a snapshot renders the conversation then applies its state events', () => 
     items: [{ kind: 'user', content: 'q' }],
     state: [{ type: 'ask', question: 'ok?', options: [] }],
   });
-  expect(v.items).toHaveLength(1);
+  // The restored question (dund's, not in the history) is its own row.
+  expect(v.items.map((i) => i.kind)).toEqual(['user', 'question']);
   expect(v.ask?.question).toBe('ok?');
 });
 
@@ -173,10 +208,29 @@ test('/model is the client picker; models and settings are kept', () => {
   expect(filterModels(v.models!, 'or qwen').map((r) => r.provider)).toEqual(['or']);
 });
 
-test('a queued message loses its mark when the turn that read it ends', () => {
+test('a queued message with no id (an old event log) loses its mark when the turn ends', () => {
   const v = run([{ type: 'turn' }, { type: 'user', content: 'also this', queued: true }]);
   expect(v.items[0]).toMatchObject({ queued: true });
   expect(apply(v, { type: 'done' }).items[0]).toMatchObject({ queued: false });
+});
+
+test('a queued message with an id waits for delivered, not for the turn to end', () => {
+  const v = run([{ type: 'turn' }, { type: 'user', id: 'm1', content: 'also this', queued: true }, { type: 'done' }]);
+  expect(v.items[0]).toMatchObject({ queued: true, id: 'm1' });
+  const w = apply(v, { type: 'delivered', ids: ['m1'] });
+  expect(w.items).toHaveLength(1);
+  expect(w.items[0]).toMatchObject({ kind: 'user', id: 'm1', text: 'also this' });
+  expect(w.items[0]).not.toMatchObject({ queued: true });
+});
+
+test('withdrawn drops the rows it names, by id, not by text', () => {
+  const v = run([
+    { type: 'user', id: 'a', content: 'same', queued: true },
+    { type: 'user', id: 'b', content: 'same', queued: true },
+    { type: 'withdrawn', ids: ['b'] },
+  ]);
+  expect(v.items).toHaveLength(1);
+  expect(v.items[0]).toMatchObject({ id: 'a', queued: true });
 });
 
 test('a provider that failed to list (ids null) does not break the picker', () => {
@@ -187,17 +241,31 @@ test('a provider that failed to list (ids null) does not break the picker', () =
   expect(filterModels(ps, '').map((r) => r.id)).toEqual(['m1']);
 });
 
-test('a queued message loses its mark at the tool result that lifts it, as in the TUI', () => {
+test('a delivered message lands after the tool result that carried it, live as on replay', () => {
   const v = run([
     { type: 'turn' },
     { type: 'tool_call', tool: 'exec', args: { command: 'ls' } },
-    { type: 'user', content: 'also this', queued: true },
-    { type: 'queued', count: 1 },
+    { type: 'user', id: 'm1', content: 'also this', queued: true },
+    { type: 'turn_state', phase: 'working', queued: [{ id: 'm1', text: 'also this' }] },
   ]);
   expect(v.status).toBe('1 message(s) queued for the running turn');
-  const w = apply(v, { type: 'tool_result', tool: 'exec', result: 'ok' });
-  expect(w.items.find((i) => i.kind === 'user')).toMatchObject({ queued: false });
-  expect(w.status).toBe('');
+  let w = apply(v, { type: 'tool_result', tool: 'exec', result: 'ok' });
+  expect(w.items.find((i) => i.kind === 'user')).toMatchObject({ queued: true });
+  w = run(
+    [
+      { type: 'delivered', ids: ['m1'] },
+      { type: 'turn_state', phase: 'working', queued: [] },
+    ],
+    w,
+  );
+  expect(w.items.map((i) => i.kind)).toEqual(['tools', 'user']);
+  expect(w.status).toBe('working…');
+  const replayed = replaceWith([
+    { kind: 'tool_call', tool: 'exec', args: { command: 'ls' } },
+    { kind: 'tool_result', tool: 'exec', content: 'ok' },
+    { kind: 'user', id: 'm1', queued: true, content: 'also this' },
+  ]);
+  expect(replayed.items.map((i) => i.kind)).toEqual(['tools', 'user']);
 });
 
 test('an interrupted turn keeps its partial reply, ends with a note, and keeps queued marks', () => {
@@ -205,13 +273,20 @@ test('an interrupted turn keeps its partial reply, ends with a note, and keeps q
     { type: 'user', content: 'go' },
     { type: 'turn', kind: 'user' },
     { type: 'token', text: 'Starting with' },
-    { type: 'user', content: 'no, the other one', queued: true },
+    { type: 'user', id: 'q', content: 'no, the other one', queued: true },
   ]);
-  const s = interrupting(v);
+  const s = apply(v, { type: 'turn_state', phase: 'interrupting', queued: [{ id: 'q', text: 'no, the other one' }] });
   expect(s.status).toBe('interrupting…');
-  const w = apply(s, { type: 'done', reason: 'interrupted' });
+  // The queue outlives the cut turn: the next turn takes it.
+  const w = run(
+    [
+      { type: 'done', reason: 'interrupted' },
+      { type: 'turn_state', phase: 'idle', queued: [{ id: 'q', text: 'no, the other one' }] },
+    ],
+    s,
+  );
   expect(w.busy).toBe(false);
-  expect(w.status).toBe('');
+  expect(w.status).toBe('1 message(s) queued for the running turn');
   expect(w.streaming).toBeNull();
   expect(w.items.map((i) => i.kind)).toEqual(['user', 'user', 'assistant', 'note']);
   expect(w.items[2]).toMatchObject({ text: 'Starting with' });
@@ -237,11 +312,43 @@ test('only /jobs kill all asks first', () => {
   expect(isKillAll('jobs')).toBe(false);
 });
 
-test('interrupting is a no-op when idle, and an idle answer clears it', () => {
-  expect(interrupting(empty)).toBe(empty);
-  const v = interrupting(run([{ type: 'turn' }]));
-  const w = apply(v, { type: 'control', id: 'interrupt', message: 'nothing to interrupt: no turn is running' });
-  expect(w.status).toBe('');
+test('turn_state is busy, the status, the question and the queue; nothing is inferred', () => {
+  const ts = (phase: string, more: Record<string, unknown> = {}) => ({
+    type: 'turn_state',
+    phase,
+    queued: [],
+    ...more,
+  });
+  let v = run([{ type: 'turn' }, { type: 'token', text: 'x' }]);
+  expect(v.busy).toBe(false); // a token is not a state
+  v = run([ts('working', { since: 5 })], v);
+  expect(v.busy).toBe(true);
+  expect(v.status).toBe('working…');
+  v = run([ts('interrupting', { since: 5 })], v);
+  expect(v.status).toBe('interrupting…');
+  // A client that arrived late: the question and the queue from the state alone.
+  const late = run([
+    ts('waiting_answer', { ask: { question: 'which?', options: ['a', 'b'] }, queued: [{ id: 'q1', text: 'later' }] }),
+  ]);
+  expect(late.ask).toMatchObject({ question: 'which?', options: ['a', 'b'] });
+  expect(late.items).toEqual([expect.objectContaining({ kind: 'user', id: 'q1', queued: true })]);
+  expect(late.status).toBe('1 message(s) queued for the running turn');
+  // A provider wait whose round is redone drops the half-streamed reply.
+  const r = run([
+    ts('working'),
+    { type: 'token', text: 'half a sen' },
+    ts('retrying', { discard: true, retry: { text: 'wait' } }),
+  ]);
+  expect(r.streaming).toBeNull();
+  expect(r.status).toBe('wait');
+  // The engine stopped with a message queued: idle, an empty queue, the row says it was lost.
+  const lost = run([
+    { type: 'user', id: 'm', content: 'x', queued: true },
+    ts('working', { queued: [{ id: 'm', text: 'x' }] }),
+    ts('idle'),
+  ]);
+  expect(lost.busy).toBe(false);
+  expect(lost.items[0]).toMatchObject({ queued: false, lost: true });
 });
 
 test('a docs notification is a docs notice: each document, why it won and where it came from', () => {
@@ -266,4 +373,23 @@ test('a docs notification is a docs notice: each document, why it won and where 
     why: 'only candidate · score 1.2e-05',
     source: 'skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills',
   });
+});
+
+test('a reconnect (snapshot, twice) repeats no note: replayed state adds no rows', () => {
+  const snap = {
+    type: 'snapshot',
+    items: [{ kind: 'user', id: 'u1', content: 'hi' }],
+    state: [
+      { type: 'server', id: 'rag', action: 'on', message: 'rag: on', replayed: true },
+      { type: 'engine', state: 'restarting', reason: 'crash', replayed: true },
+      { type: 'turn_state', phase: 'working', queued: [{ id: 'q', text: 'later' }], replayed: true },
+    ],
+  };
+  const once = apply(empty, snap);
+  const twice = apply(once, snap);
+  for (const v of [once, twice]) {
+    expect(v.items.map((i) => i.kind)).toEqual(['user', 'user']);
+    expect(v.items[1]).toMatchObject({ id: 'q', queued: true });
+    expect(v.busy).toBe(true);
+  }
 });

@@ -109,8 +109,8 @@ func TestRestoredQuestion_IsMarked(t *testing.T) {
 		t.Errorf("the kept-question line is not in the attention colour: %q", held)
 	}
 	m.switchModel(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
 	if m.input.Value() != "Can you help?" {
 		t.Fatalf("composer holds %q", m.input.Value())
 	}

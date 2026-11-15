@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -20,7 +22,7 @@ import (
 // EOF but not on an explicit stop.
 type inputStream struct {
 	users   chan userMsg
-	answers chan string
+	answers chan proto.Answer
 	quit    chan struct{}
 
 	// mid routes a user message that arrived while a turn was in flight. The turn
@@ -245,7 +247,7 @@ func newInputStream() *inputStream { return newInputStreamFrom(os.Stdin) }
 // newInputStreamFrom is newInputStream over an arbitrary reader, so a test can
 // drive the event parsing and the EOF-vs-stop distinction without a real stdin.
 func newInputStreamFrom(r io.Reader) *inputStream {
-	s := &inputStream{users: make(chan userMsg), answers: make(chan string), quit: make(chan struct{}),
+	s := &inputStream{users: make(chan userMsg), answers: make(chan proto.Answer), quit: make(chan struct{}),
 		heldCh: make(chan struct{}, 1)}
 	go func() {
 		sc := bufio.NewScanner(r)
@@ -259,6 +261,8 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				Type    string `json:"type"`
 				Content string `json:"content"`
 				Value   string `json:"value"`
+				AskID   string `json:"ask_id"`
+				By      string `json:"by"`
 				ID      string `json:"id"`     // server/control: which target
 				Action  string `json:"action"` // server/control: action to take
 				Reason  string `json:"reason"` // interrupt: what stopped the turn ("" = the user)
@@ -288,7 +292,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				}
 				s.users <- msg
 			case "answer":
-				s.answers <- ev.Value
+				s.answers <- proto.Answer{Value: ev.Value, AskID: ev.AskID, By: ev.By}
 			case "peer", "peer_reply", "servers", "service_notice", "mcp_notify":
 				// Never an answer: a peer message cannot close an open
 				// ask_user, whatever it says.
@@ -317,4 +321,24 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 		close(s.users) // EOF: runProgrammatic drains background jobs before exiting
 	}()
 	return s
+}
+
+// awaitAnswer takes the answer to question id: one naming another question
+// (a late answer to one already closed) is dropped, not taken by this one.
+// An answer naming none (an older client) is this one's.
+func awaitAnswer(ctx context.Context, answers <-chan proto.Answer, id string) (proto.Answer, error) {
+	for {
+		select {
+		case a, ok := <-answers:
+			if !ok {
+				return proto.Answer{}, fmt.Errorf("input closed")
+			}
+			if a.AskID != "" && a.AskID != id {
+				continue
+			}
+			return a, nil
+		case <-ctx.Done():
+			return proto.Answer{}, ctx.Err()
+		}
+	}
 }

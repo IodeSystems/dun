@@ -34,7 +34,7 @@ func TestProtoCoversTUICommands(t *testing.T) {
 	p := &dunProc{stdin: nopCloser{&buf}}
 	p.send("hi [image 1: a.png 2×1]", []proto.Image{{Path: "/tmp/a.png", Label: "[image 1: a.png 2×1]"}})
 	p.controlCmd("docker", "on")
-	p.answer("yes")
+	p.answer("yes", "q1")
 	p.agentCmd(3, "tell", "go on")
 	cs := decodeStrict[proto.Command](t, buf.Bytes())
 	if len(cs) != 4 {
@@ -59,7 +59,7 @@ func TestReasoningEventReachesTheTUI(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := newTUIModel(&dunProc{}, "/ws")
-	m = m.handleEvent(evMsg(raw))
+	m = m.feed(evMsg(raw))
 	if i := m.liveThinking(); i < 0 || m.convo[i].think.text != "weighing it" {
 		t.Errorf("the TUI did not take the event: %d", i)
 	}

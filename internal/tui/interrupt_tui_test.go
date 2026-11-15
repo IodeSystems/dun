@@ -42,6 +42,8 @@ func TestInterrupt_CtrlGWhileBusy(t *testing.T) {
 	if !sentInterrupt(rec) {
 		t.Fatalf("ctrl+g while busy sent %q, want an interrupt", rec.String())
 	}
+	// The engine's answer: the turn is being interrupted.
+	v.event(map[string]any{"type": "turn_state", "phase": "interrupting", "queued": []any{}})
 	if !strings.Contains(v.view(), "interrupting…") {
 		t.Errorf("the status line should say interrupting:\n%s", v.view())
 	}

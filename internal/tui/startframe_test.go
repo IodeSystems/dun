@@ -127,9 +127,7 @@ func TestKeptMessage_SentAtReady(t *testing.T) {
 	if strings.Contains(convoText(m), keptLine) {
 		t.Fatalf("the kept line stayed after it was sent:\n%s", convoText(m))
 	}
-	if !m.busy {
-		t.Fatal("the turn it starts is not shown")
-	}
+	// That the turn runs is the engine's turn_state to say, not this client's.
 }
 
 // With nothing logged in, a kept message is held for /login like any other.

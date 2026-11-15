@@ -22,12 +22,12 @@ func TestSplash_MissingShellIsQuiet(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: bufCloser{&sent}}, t.TempDir())
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "session", "id": "s1"})
+	m = m.feed(evMsg{"type": "session", "id": "s1"})
 	err := (&dun.MissingError{Command: "mcpshell"}).Error()
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"read"},
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"read"},
 		"hint":    enginecmd.ServerHint([]dun.ServerState{{ID: dun.ServerShell, Err: err, Missing: true}}),
 		"servers": []any{map[string]any{"id": "shell", "err": err, "missing": true}}})
-	m = m.handleEvent(evMsg{"type": "settings", "model": "", "url": ""})
+	m = m.feed(evMsg{"type": "settings", "model": "", "url": ""})
 	s := stripANSI(convoText(m))
 	if !strings.Contains(s, "shell not installed") || strings.Contains(s, "did not start") {
 		t.Errorf("splash:\n%s", s)

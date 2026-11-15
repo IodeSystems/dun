@@ -66,12 +66,12 @@ func TestIsolate_Palette(t *testing.T) {
 // The TUI says nothing for an empty branch (back in place) and drops the ⎇.
 func TestIsolate_TUIWorkspaceEvent(t *testing.T) {
 	m, _ := skillModel(t, 0)
-	m = m.handleEvent(evMsg{"type": "workspace", "path": "/wt", "branch": "dun/1-x"})
+	m = m.feed(evMsg{"type": "workspace", "path": "/wt", "branch": "dun/1-x"})
 	n := len(m.convo)
 	if m.branch != "dun/1-x" || !strings.Contains(stripANSI(m.convo[n-1].collapsed), "worktree branch: dun/1-x") {
 		t.Fatalf("branch %q", m.branch)
 	}
-	m = m.handleEvent(evMsg{"type": "workspace", "path": "/ws", "branch": ""})
+	m = m.feed(evMsg{"type": "workspace", "path": "/ws", "branch": ""})
 	if m.branch != "" || len(m.convo) != n {
 		t.Errorf("back in place: branch %q, %d lines (was %d)", m.branch, len(m.convo), n)
 	}

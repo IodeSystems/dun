@@ -24,8 +24,8 @@ func scopeModel(t *testing.T, w int) (tuiModel, *bytes.Buffer) {
 	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 24})
 	m = nm.(tuiModel)
-	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
-	m = m.handleEvent(evMsg{"type": "agents", "agents": []any{
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+	m = m.feed(evMsg{"type": "agents", "agents": []any{
 		map[string]any{"id": 1.0, "state": "running", "prompt": "read the build log", "tokens": 6500.0, "seconds": 122.0},
 		map[string]any{"id": 2.0, "state": "idle", "prompt": "count matches", "tokens": 900.0, "seconds": 41.0},
 	}})
@@ -83,7 +83,7 @@ func TestAgentScope_HeaderNamesTheChildAndTheWayBack(t *testing.T) {
 func TestAgentScope_ShowsHistoryThenLiveEntries(t *testing.T) {
 	m, _ := scopeModel(t, 100)
 	m.enterAgentScope(1)
-	m = m.handleEvent(evMsg{"type": "agent_history", "agent": 1.0, "prompt": "read the build log", "items": []any{
+	m = m.feed(evMsg{"type": "agent_history", "agent": 1.0, "prompt": "read the build log", "items": []any{
 		map[string]any{"kind": "user", "content": "read the build log"},
 		map[string]any{"kind": "tool_call", "tool": "exec", "call_id": "c1", "args": map[string]any{"command": "tail build.log"}},
 	}})
@@ -94,13 +94,13 @@ func TestAgentScope_ShowsHistoryThenLiveEntries(t *testing.T) {
 	if m.suggestActive() {
 		t.Error("the root's suggestions must not show in a child's view")
 	}
-	m = m.handleEvent(evMsg{"type": "agent_entry", "agent": 2.0, "items": []any{
+	m = m.feed(evMsg{"type": "agent_entry", "agent": 2.0, "items": []any{
 		map[string]any{"kind": "assistant", "content": "another child's words"},
 	}})
-	m = m.handleEvent(evMsg{"type": "agent_entry", "agent": 1.0, "items": []any{
+	m = m.feed(evMsg{"type": "agent_entry", "agent": 1.0, "items": []any{
 		map[string]any{"kind": "tool_result", "tool": "exec", "call_id": "c1", "content": "FAIL pkg/x"},
 	}})
-	m = m.handleEvent(evMsg{"type": "agent_entry", "agent": 1.0, "items": []any{
+	m = m.feed(evMsg{"type": "agent_entry", "agent": 1.0, "items": []any{
 		map[string]any{"kind": "assistant", "content": "pkg/x fails first"},
 	}})
 	runs := 0
@@ -128,14 +128,14 @@ func TestAgentScope_ShowsHistoryThenLiveEntries(t *testing.T) {
 // conversation, not the child's, and are there on the way back.
 func TestAgentScope_RootEventsStayWithTheRoot(t *testing.T) {
 	m, _ := scopeModel(t, 100)
-	m = m.handleEvent(evMsg{"type": "user", "content": "the root task"})
+	m = m.feed(evMsg{"type": "user", "content": "the root task"})
 	m.enterAgentScope(2)
-	m = m.handleEvent(evMsg{"type": "agent_history", "agent": 2.0, "items": []any{
+	m = m.feed(evMsg{"type": "agent_history", "agent": 2.0, "items": []any{
 		map[string]any{"kind": "user", "content": "count matches"},
 	}})
-	m = m.handleEvent(evMsg{"type": "turn"})
-	m = m.handleEvent(evMsg{"type": "token", "text": "rootreply arrives"})
-	m = m.handleEvent(evMsg{"type": "done"})
+	m = m.feed(evMsg{"type": "turn"})
+	m = m.feed(evMsg{"type": "token", "text": "rootreply arrives"})
+	m = m.feed(evMsg{"type": "done"})
 	if strings.Contains(fullText(m), "rootreply") {
 		t.Errorf("the root's reply landed in the child's view: %s", fullText(m))
 	}
@@ -160,7 +160,7 @@ func TestAgentScope_EscRestoresTheRootScroll(t *testing.T) {
 	rows := len(m.vp.lines)
 
 	m.enterAgentScope(1)
-	m = m.handleEvent(evMsg{"type": "agent_history", "agent": 1.0, "items": []any{
+	m = m.feed(evMsg{"type": "agent_history", "agent": 1.0, "items": []any{
 		map[string]any{"kind": "user", "content": "read the build log"},
 		map[string]any{"kind": "assistant", "content": "137 failures"},
 	}})
@@ -199,7 +199,7 @@ func TestAgentScope_TypingTellsTheChild(t *testing.T) {
 	if strings.Contains(convoText(m), "last 40") {
 		t.Errorf("echoed before the child took it: %s", convoText(m))
 	}
-	m = m.handleEvent(evMsg{"type": "agent_entry", "agent": 2.0, "items": []any{
+	m = m.feed(evMsg{"type": "agent_entry", "agent": 2.0, "items": []any{
 		map[string]any{"kind": "user", "content": "look at the last 40 lines instead"},
 	}})
 	if !strings.Contains(convoText(m), "last 40") {

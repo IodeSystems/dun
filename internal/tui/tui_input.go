@@ -508,7 +508,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// scroll, as before.
 			if m.queuedMsgs > 0 && m.input.AtFirstLine() && !m.paletteActive() {
 				if m.proc.controlCmd("unqueue", "") {
-					m.queuedMsgs = 0
+					m.queuedMsgs, m.unqueueAsk = 0, true
 				}
 				return m, nil
 			}
@@ -1357,7 +1357,6 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 		m.refresh()
 		return m
 	}
-	m.busy = true
 	m.scrollPinned = true // user just sent a message — show it
 	m.refresh()
 	return m
@@ -1366,7 +1365,7 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 // sendAnswer resolves the ask: ships the answer to the engine and resets to
 // the input pane.
 func (m tuiModel) sendAnswer(v string) tuiModel {
-	if !m.proc.answer(v) {
+	if !m.proc.answer(v, m.askID) {
 		m.append(StErr.Render("no engine right now — answer not sent"))
 	}
 	m = m.clearAsk()

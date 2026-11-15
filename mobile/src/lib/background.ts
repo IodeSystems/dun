@@ -17,9 +17,9 @@ export type Background = {
   ctx: Ctx;
   /** The call the turn is running, as the TUI says it (activeTool: callText, 40 wide); '' between calls. */
   activeTool: string;
-  /** When the running turn started (ms), 0 when idle: the header's clock. */
+  /** When the running turn started (ms), 0 when idle: the header's clock (turn_state since). */
   busySince: number;
-  /** The provider wait (retry event) the turn is in; '' when none. */
+  /** The provider wait the turn is in (turn_state retry); '' when none. */
   retry: string;
 };
 
@@ -51,21 +51,22 @@ export function noteBackground(b: Background, ev: Ev): Background {
     case 'context_cost':
     case 'spend':
       return { ...b, ctx: noteCtx(b.ctx, ev) };
-    case 'turn':
-      // A user turn or a continue (background work started it): busy either way.
-      return { ...b, busySince: b.busySince || evTime(ev), activeTool: '' };
+    case 'turn_state': {
+      // Where the turn is (dun cmd/dun/turnstate.go): its clock and its wait.
+      const idle = ev.phase === 'idle';
+      const r = (ev.retry ?? null) as Record<string, unknown> | null;
+      return {
+        ...b,
+        busySince: idle ? 0 : Number(ev.since ?? 0) || b.busySince || evTime(ev),
+        retry: ev.phase === 'retrying' && r ? str(r.text) || 'retrying…' : '',
+        activeTool: idle ? '' : b.activeTool,
+      };
+    }
+    // The call running now: from its start (tool_call) to its end (tool_result).
     case 'tool_call':
       return { ...b, activeTool: callText(str(ev.tool), args(ev.args), 40) };
     case 'tool_result':
       return { ...b, activeTool: '' };
-    case 'retry':
-      return { ...b, retry: ev.kind === 'recovered' || ev.kind === 'giveup' ? '' : str(ev.text) || 'retrying…' };
-    case 'done':
-    case 'error':
-      return { ...b, busySince: 0, activeTool: '', retry: '' };
-    case 'engine':
-      // A stopping engine may still finish its turn; its done says so.
-      return ev.state === 'started' || ev.state === 'stopping' ? b : { ...b, busySince: 0, activeTool: '', retry: '' };
   }
   return b;
 }

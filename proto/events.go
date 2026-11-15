@@ -44,6 +44,9 @@ func init() {
 	event[Suggestions]("suggestions")
 	event[Exit]("exit")
 	event[UserEcho]("user")
+	event[Delivered]("delivered")
+	event[Withdrawn]("withdrawn")
+	event[TurnState]("turn_state")
 	event[ImageRefused]("image_refused")
 	event[Turn]("turn")
 	event[Answered]("answered")
@@ -84,14 +87,24 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// ToolCall: a tool call STARTED (it is running until its tool_result).
+// CallID pairs it with that result and with history's items; empty only
+// from an engine older than call ids, which sent the call with its result.
 type ToolCall struct {
-	Tool string         `json:"tool"`
-	Args map[string]any `json:"args"`
+	CallID string         `json:"call_id,omitempty"`
+	Tool   string         `json:"tool"`
+	Args   map[string]any `json:"args"`
 }
 
+// ToolResult: the call CallID returned. Result is what the person is shown
+// (capped as the model's is); IsError says it failed (an error, ERROR, or
+// exec's exit marker); ElapsedMS is how long it ran.
 type ToolResult struct {
-	Tool   string `json:"tool"`
-	Result string `json:"result"`
+	CallID    string `json:"call_id,omitempty"`
+	Tool      string `json:"tool"`
+	Result    string `json:"result"`
+	IsError   bool   `json:"is_error,omitempty"`
+	ElapsedMS int64  `json:"elapsed_ms,omitempty"`
 }
 
 // Done ends a turn. Reason is empty for a turn that finished, and
@@ -330,7 +343,14 @@ type ContextCost struct {
 }
 
 // Ask is a question for the human; the answer command replies.
+//
+// AskID names this question: answered names it, an answer may.
+//
+// CallID is the ask_user call asking it (history's tool_call has it too),
+// so a client shows one question row for both.
 type Ask struct {
+	AskID       string   `json:"ask_id,omitempty"`
+	CallID      string   `json:"call_id,omitempty"`
 	Question    string   `json:"question"`
 	Options     []string `json:"options"`
 	Multi       bool     `json:"multi"`
@@ -345,6 +365,7 @@ type Ask struct {
 
 // Mount asks to mount a host path into the container; answered yes or no.
 type Mount struct {
+	AskID  string `json:"ask_id,omitempty"`
 	Source string `json:"source"`
 	Name   string `json:"name"`
 }
@@ -456,7 +477,14 @@ type History struct {
 
 // HistoryItem mirrors dun.HistoryItem.
 type HistoryItem struct {
-	Kind    string         `json:"kind"`
+	Kind string `json:"kind"`
+	// ID is a user message's id, the one its user event carried. Queued: a
+	// tool result carried it to the model mid-turn (it shows after that
+	// result); otherwise it was a turn's input. A log written before ids
+	// has none for lifted messages: they are only inside the tool result.
+	ID      string         `json:"id,omitempty"`
+	Queued  bool           `json:"queued,omitempty"`
+	IsError bool           `json:"is_error,omitempty"` // a tool_result that failed
 	Content string         `json:"content,omitempty"`
 	Tool    string         `json:"tool,omitempty"`
 	CallID  string         `json:"call_id,omitempty"`
@@ -685,9 +713,70 @@ type Exit struct {
 // UserEcho is a user message the engine took, sent to every client so each
 // renders it — not just the one that typed it. Queued says it went into the
 // running turn rather than starting one.
+//
+// ID names the message from here on: delivered and withdrawn list it, and
+// history's user item carries it. Empty only from an engine older than ids.
 type UserEcho struct {
+	ID      string `json:"id,omitempty"`
 	Content string `json:"content"`
 	Queued  bool   `json:"queued,omitempty"`
+}
+
+// Delivered: queued messages reached the model. CallID is the tool call
+// whose result carried them (the event follows that tool_result, the order
+// history has); empty when a turn took them as its input. A client turns
+// each queued row into a delivered one, after what it shows so far.
+type Delivered struct {
+	IDs    []string `json:"ids"`
+	CallID string   `json:"call_id,omitempty"`
+}
+
+// TurnState is where the session's turn is, sent on every change and kept
+// as state (a snapshot carries the latest): a client reads busy, the open
+// question, an interrupt under way, a provider wait and the queue from it,
+// and infers none of them.
+//
+// Phase: idle (no turn), working, waiting_answer (Ask or Mount is open),
+// interrupting (an interrupt reached the turn; its done ends it), retrying
+// (Retry is the provider wait; Discard: the round's streamed text is thrown
+// away and streams again). Since is when the turn began (Unix ms), 0 idle.
+// Tool and CallID are the call running now. Queued is every message waiting
+// for the model, oldest first, with its text, so a client that arrives late
+// shows them. The engine sends it; dund sends idle when the engine stops or
+// dies, and waiting_answer for a question it restored after a restart.
+type TurnState struct {
+	Phase   string      `json:"phase"`
+	Since   int64       `json:"since,omitempty"`
+	Queued  []QueuedMsg `json:"queued"`
+	Ask     *Ask        `json:"ask,omitempty"`
+	Mount   *Mount      `json:"mount,omitempty"`
+	Retry   *Retry      `json:"retry,omitempty"`
+	Discard bool        `json:"discard,omitempty"`
+	Tool    string      `json:"tool,omitempty"`
+	CallID  string      `json:"call_id,omitempty"`
+}
+
+// The phases of a TurnState.
+const (
+	PhaseIdle          = "idle"
+	PhaseWorking       = "working"
+	PhaseWaitingAnswer = "waiting_answer"
+	PhaseInterrupting  = "interrupting"
+	PhaseRetrying      = "retrying"
+)
+
+// QueuedMsg is a message waiting for the running turn.
+type QueuedMsg struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// Withdrawn: queued messages taken back before the model read them (the
+// control command "unqueue"), to every client: each drops those rows. The
+// client that asked puts their text in its composer, from the user events it
+// has; the texts are not repeated here.
+type Withdrawn struct {
+	IDs []string `json:"ids"`
 }
 
 // ImageRefused: a user message with images was not sent, because the model
@@ -706,9 +795,12 @@ type Turn struct {
 	Kind string `json:"kind"`
 }
 
-// Answered: the open ask (or mount) got its answer.
+// Answered: the open ask (or mount) AskID got its answer, Value, from By
+// (the principal dund saw send it; empty from an older dund).
 type Answered struct {
 	Value string `json:"value"`
+	AskID string `json:"ask_id,omitempty"`
+	By    string `json:"by,omitempty"`
 }
 
 // Settings is the session's shared toggles, sent at ready and on each change.

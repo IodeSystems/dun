@@ -431,7 +431,7 @@ func (c *conn) handle(cmd proto.Command) {
 		}
 		ses, err := svc.Get(c.who, cmd.Session)
 		if err == nil {
-			err = ses.send(cmd)
+			err = ses.send(stampAnswer(cmd, c.who))
 		}
 		if a, ok := p.(*proto.AgentCmd); ok && err == nil {
 			c.countView(cmd.Session, a)

@@ -75,7 +75,6 @@ func (m tuiModel) sendKept() tuiModel {
 			m.append(StErr.Render("no engine right now — not sent: " + textfmt.OneLine(k.text)))
 			continue
 		}
-		m.busy = true
 	}
 	m.scrollPinned = true
 	m.refresh()
