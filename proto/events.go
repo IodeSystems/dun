@@ -102,6 +102,10 @@ type ToolCall struct {
 	Tool   string         `json:"tool"`
 	Args   map[string]any `json:"args"`
 	Round  int            `json:"round,omitempty"` // the model round that asked for it
+	// Agent is the sub-agent an agent call acts on (its args' id); 0 for
+	// any other call, and for a spawn, whose number is known only at its
+	// result.
+	Agent int `json:"agent,omitempty"`
 }
 
 // ToolResult: the call CallID returned. Result is what the person is shown
@@ -113,6 +117,9 @@ type ToolResult struct {
 	Result    string `json:"result"`
 	IsError   bool   `json:"is_error,omitempty"`
 	ElapsedMS int64  `json:"elapsed_ms,omitempty"`
+	// Agent is the sub-agent an agent call started or acted on; 0 for any
+	// other call, and for one that reached no agent.
+	Agent int `json:"agent,omitempty"`
 }
 
 // Done ends a turn. Reason is empty for a turn that finished, and
@@ -450,6 +457,9 @@ type Notification struct {
 	Bytes     int      `json:"bytes,omitempty"`
 	Tokens    int      `json:"tokens,omitempty"`
 	LatencyMS int64    `json:"latency_ms,omitempty"`
+	// Agent is the sub-agent the notice is from or about (its message, its
+	// report, its reminder, its plan publish); 0 otherwise.
+	Agent int `json:"agent,omitempty"`
 }
 
 type DocHit struct {
@@ -542,6 +552,9 @@ type HistoryItem struct {
 	Tool    string         `json:"tool,omitempty"`
 	CallID  string         `json:"call_id,omitempty"`
 	Args    map[string]any `json:"args,omitempty"`
+	// Agent: as the live tool_call, tool_result and notification events
+	// carry it.
+	Agent int `json:"agent,omitempty"`
 }
 
 // Workspace is the worktree the session runs in.

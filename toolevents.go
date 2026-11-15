@@ -22,6 +22,9 @@ type ToolStart struct {
 	CallID string
 	Tool   string
 	Args   map[string]any
+	// Agent is the sub-agent an agent call acts on (args.id); 0 for a
+	// spawn, whose number ToolEnd carries, and for any other tool.
+	Agent int
 }
 
 // ToolEnd is a tool call's result, as the person is shown it (the capped
@@ -32,6 +35,9 @@ type ToolEnd struct {
 	Result  string
 	IsError bool
 	Elapsed time.Duration
+	// Agent is the sub-agent an agent call started or acted on (withAgent
+	// notes it); 0 for any other call and for one that reached no agent.
+	Agent int
 }
 
 // ToolFailed reads whether a result is a failure: exec's own exit marker,
@@ -53,12 +59,29 @@ type toolCur struct {
 	mu       sync.Mutex
 	reported string
 	has      bool
+	agent    int // the sub-agent the call started or acted on (noteAgent)
 }
 
 func (c *toolCur) report(result string) {
 	c.mu.Lock()
 	c.reported, c.has = result, true
 	c.mu.Unlock()
+}
+
+// noteAgent records the sub-agent the call being dispatched reached, for
+// its tool_result event.
+func (c *toolCur) noteAgent(n int) {
+	c.mu.Lock()
+	c.agent = n
+	c.mu.Unlock()
+}
+
+func (c *toolCur) takeAgent() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := c.agent
+	c.agent = 0
+	return n
 }
 
 func (c *toolCur) take() (string, bool) {
@@ -81,12 +104,14 @@ func withToolEvents(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		if start != nil {
 			var args map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-			start(ToolStart{CallID: tc.ID, Tool: name, Args: args})
+			start(ToolStart{CallID: tc.ID, Tool: name, Args: args, Agent: agentArgID(name, args)})
 		}
 		h.toolCur.take() // nothing left over from a call that never ended
+		h.toolCur.takeAgent()
 		t0 := time.Now()
 		out, err := inner(ctx, tc)
 		shown, ok := h.toolCur.take()
+		agentNum := h.toolCur.takeAgent()
 		if !ok {
 			shown = out
 		}
@@ -96,8 +121,20 @@ func withToolEvents(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		}
 		if end != nil {
 			end(ToolEnd{CallID: tc.ID, Tool: name, Result: shown,
-				IsError: failed || ToolFailed(name, shown), Elapsed: time.Since(t0)})
+				IsError: failed || ToolFailed(name, shown), Elapsed: time.Since(t0), Agent: agentNum})
 		}
 		return out, err
 	}
+}
+
+// agentArgID is the sub-agent an agent call names (its id argument), or 0:
+// a spawn names none, and no other tool is an agent call.
+func agentArgID(tool string, args map[string]any) int {
+	if tool != "agent" {
+		return 0
+	}
+	if f, ok := args["id"].(float64); ok && f > 0 && f == float64(int(f)) {
+		return int(f)
+	}
+	return 0
 }

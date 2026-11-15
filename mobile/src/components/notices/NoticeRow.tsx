@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 
+import { OpenAgent } from '@/components/agents/AgentOpen';
 import { PlainCode } from '@/components/code/Code';
 import { Fold } from '@/components/fold/Fold';
 import { Markdown } from '@/components/markdown/Markdown';
@@ -24,7 +25,24 @@ import { font, mono, space, useColors, type Colors } from '@/lib/theme';
 
 const toneColor = (c: Colors, t: Tone) => (t === 'error' ? c.danger : t === 'dim' ? c.muted : c.notice);
 
-export function NoticeRow({ notice }: { notice: Notice }) {
+/**
+ * agent: the sub-agent the notice is from or about (the engine's `agent`):
+ * its view opens from the link under the notice; the notice's own press
+ * still folds it.
+ */
+export function NoticeRow({ notice, agent }: { notice: Notice; agent?: number }) {
+  if (!agent) return <NoticeBody notice={notice} />;
+  return (
+    <View>
+      <NoticeBody notice={notice} />
+      <View style={{ paddingHorizontal: space.md }}>
+        <OpenAgent agent={agent} />
+      </View>
+    </View>
+  );
+}
+
+function NoticeBody({ notice }: { notice: Notice }) {
   switch (notice.type) {
     case 'plain':
       return <Plain n={notice} />;

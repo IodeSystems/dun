@@ -175,9 +175,9 @@ export function SessionHeader({
             {plan ? chip(`☰ ${plan.done}/${plan.total}`, act.plan, `Plan, ${plan.done} of ${plan.total} done`) : null}
             {tasks
               ? chip(
-                  `⚙ ${tasks.running}`,
+                  `⚙ ${tasks.label}`,
                   act.tasks,
-                  `Background tasks, ${tasks.running} running${tasks.failed ? ', one failed' : ''}`,
+                  `Background tasks: ${tasks.label}, ${tasks.running} running${tasks.failed ? ', one failed' : ''}`,
                   tasks.failed ? c.danger : tasks.running ? c.working : c.muted,
                 )
               : null}

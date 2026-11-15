@@ -47,6 +47,24 @@ makes the right thing obvious"). Wire format and the full type list:
 - Order inside a call: `tool_call`, then (while it runs) whatever else
   happens, then `tool_result`, then `delivered` for the messages it carried.
 
+## Sub-agents on calls and notices
+
+- `agent`: the sub-agent number, so a client opens that child's view
+  (the `agent {id, action:"view"}` command) without reading text. On an `agent` tool
+  call: `tool_call.agent` is its `id` argument (a follow-up: tell, node,
+  resume, dismiss, report), absent on a spawn, whose number exists only
+  once it started; `tool_result.agent` is the child the call started or
+  acted on, absent when it reached none (a refused spawn, `no agent #N`).
+  On a `notification`: the child it is from or about (its message, report,
+  quiet reminder, plan publish), from the head the engine writes
+  (`dun.NoticeAgent`); absent otherwise.
+- Replay: history's `tool_call`, `tool_result` and `notification` items
+  carry the same `agent`. A session entry has no field for it, so a spawn's
+  number comes from the child's sidecar (`<sub>.agent.json` `call_id`, the
+  spawning call's id), a follow-up's from its `id` argument, and a notice's
+  from its text head, as live. A spawn from before the sidecar kept the call
+  id replays with no `agent` on it; its follow-ups still have one.
+
 ## turn_state
 
 `turn_state {phase, since, queued:[{id,text}], ask?, mount?, retry?, discard?,

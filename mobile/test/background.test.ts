@@ -73,7 +73,7 @@ test('agents, jobs and the plan fold into bg', () => {
   expect(v.bg.jobs[1]).toMatchObject({ id: 4, state: 'failed', code: 2 });
   expect(v.bg.plan).toMatchObject({ mode: true, total: 3, done: 1 });
   expect(v.bg.plan?.rows[2]).toMatchObject({ owner: 'agent:2', depth: 1, waiting: ['b'] });
-  expect(badge(v.bg.agents, v.bg.jobs)).toEqual({ running: 2, failed: true });
+  expect(badge(v.bg.agents, v.bg.jobs)).toEqual({ running: 2, failed: true, label: '2 agents · 2 jobs' });
 });
 
 test('an empty plan is no plan: the header shows no plan icon', () => {

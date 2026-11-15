@@ -322,7 +322,7 @@ func historyProto(items []dun.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
 		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool,
-			CallID: it.CallID, Args: it.Args})
+			CallID: it.CallID, Args: it.Args, Agent: it.Agent})
 	}
 	return out
 }

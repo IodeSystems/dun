@@ -29,6 +29,10 @@ type HistoryItem struct {
 	Tool    string         `json:"tool,omitempty"`    // tool_call / tool_result
 	CallID  string         `json:"call_id,omitempty"` // pairs a tool_call with its result
 	Args    map[string]any `json:"args,omitempty"`    // decoded tool_call arguments
+	// Agent is the sub-agent an agent tool_call / tool_result started or
+	// acted on, or a notification is from or about; 0 otherwise. The same
+	// number the live events carry (ToolStart, ToolEnd, NoticeAgent).
+	Agent int `json:"agent,omitempty"`
 }
 
 // History returns the loaded conversation as replayable items in chronological
@@ -38,7 +42,15 @@ type HistoryItem struct {
 // tool-call arguments are decoded from the stored JSON so the client renders
 // them like a live call.
 func (h *Harness) History() []HistoryItem {
-	return historyItems(h.store.History())
+	spawns := map[string]int{}
+	for _, sa := range h.agentList() {
+		sa.mu.Lock()
+		if sa.callID != "" {
+			spawns[sa.callID] = sa.num
+		}
+		sa.mu.Unlock()
+	}
+	return withSpawns(historyItems(h.store.History()), spawns)
 }
 
 // RoundUsages is the saved cost of each model round in the conversation, in
@@ -70,7 +82,21 @@ func SessionHistory(sessionFile string) []HistoryItem {
 	if err != nil {
 		return nil
 	}
-	return historyItems(st.History())
+	return withSpawns(historyItems(st.History()), agentSpawns(sessionFile))
+}
+
+// withSpawns names the child on each agent call that spawned one: the call
+// has no id argument, so its number is the child sidecar's (agentRecord.CallID).
+func withSpawns(items []HistoryItem, spawns map[string]int) []HistoryItem {
+	if len(spawns) == 0 {
+		return items
+	}
+	for i, it := range items {
+		if it.Tool == "agent" && it.Agent == 0 && it.CallID != "" {
+			items[i].Agent = spawns[it.CallID]
+		}
+	}
+	return items
 }
 func historyItems(entries []agent.Entry) []HistoryItem {
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -80,6 +106,7 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 		return entries[i].ID < entries[j].ID
 	})
 	out := make([]HistoryItem, 0, len(entries))
+	byCall := map[string]int{} // an agent call's id argument, for its result
 	for _, e := range entries {
 		// The round's reasoning rides the entry it produced (agentkit stamps it
 		// on the reply, or on the first call of a round with no prose). It goes
@@ -101,12 +128,16 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 		case agent.KindToolCall:
 			var args map[string]any
 			_ = json.Unmarshal([]byte(e.Content), &args)
-			out = append(out, HistoryItem{Kind: "tool_call", Tool: e.ToolName, CallID: e.ToolCallID, Args: args})
+			out = append(out, HistoryItem{Kind: "tool_call", Tool: e.ToolName, CallID: e.ToolCallID, Args: args,
+				Agent: agentArgID(e.ToolName, args)})
+			if n := out[len(out)-1].Agent; n > 0 {
+				byCall[e.ToolCallID] = n
+			}
 		case agent.KindToolResult:
 			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: e.Content,
-				IsError: ToolFailed(e.ToolName, e.Content)})
+				IsError: ToolFailed(e.ToolName, e.Content), Agent: byCall[e.ToolCallID]})
 		case agent.KindNotification:
-			out = append(out, HistoryItem{Kind: "notification", Content: e.Content})
+			out = append(out, HistoryItem{Kind: "notification", Content: e.Content, Agent: NoticeAgent(e.Content)})
 		case kindCommand:
 			out = append(out, HistoryItem{Kind: "command", Content: e.Content})
 		}

@@ -881,13 +881,13 @@ func main() {
 			}()
 		}
 		cfg.OnToolStart = func(c dun.ToolStart) {
-			em.emit(&proto.ToolCall{CallID: c.CallID, Tool: c.Tool, Args: c.Args})
+			em.emit(&proto.ToolCall{CallID: c.CallID, Tool: c.Tool, Args: c.Args, Agent: c.Agent})
 		}
 		cfg.OnToolEnd = func(r dun.ToolEnd) {
 			em.emit(&proto.ToolResult{CallID: r.CallID, Tool: r.Tool, Result: r.Result,
-				IsError: r.IsError, ElapsedMS: r.Elapsed.Milliseconds()})
+				IsError: r.IsError, ElapsedMS: r.Elapsed.Milliseconds(), Agent: r.Agent})
 		}
-		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text}) }
+		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text, Agent: dun.NoticeAgent(text)}) }
 		cfg.OnDelivered = func(d dun.Delivery) {
 			em.emit(&proto.Delivered{IDs: d.IDs, CallID: d.CallID})
 			if h, _ := started.Load().(*dun.Harness); h != nil {

@@ -30,6 +30,11 @@ export type ToolCall = {
   args: Record<string, unknown> | null;
   result?: string;
   state: CallState;
+  /**
+   * The sub-agent an agent call started or acted on: the engine's `agent`
+   * on its tool_call (a follow-up's id) or tool_result (a spawn's child).
+   */
+  agent?: number;
 };
 
 /**
@@ -130,6 +135,11 @@ export function withThought<T extends Keyed>(items: T[], t: Thought): T[] | null
   return out;
 }
 
+/** The engine's `agent` field: a positive whole number, or undefined. */
+export function agentOf(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+}
+
 /** A call: into the open run, or a new one; or the args of its orphan result. */
 export function withCall<T extends Keyed>(
   items: T[],
@@ -137,6 +147,7 @@ export function withCall<T extends Keyed>(
   args: unknown,
   id: string | undefined,
   newKey: string,
+  agent?: number,
 ): { items: T[]; added: boolean } {
   const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
   if (id) {
@@ -144,11 +155,16 @@ export function withCall<T extends Keyed>(
     if (at) {
       const [i, k] = at;
       const c = (items[i] as unknown as Run).calls[k]!;
-      return { items: replaceCall(items, at, { ...c, tool: c.tool || tool, args: a }), added: false };
+      const n = c.agent ?? agent;
+      return {
+        items: replaceCall(items, at, { ...c, tool: c.tool || tool, args: a, ...(n ? { agent: n } : {}) }),
+        added: false,
+      };
     }
   }
   const c: ToolCall = { tool, args: a, state: 'pending' };
   if (id) c.id = id;
+  if (agent) c.agent = agent;
   return addCall(items, c, newKey);
 }
 
@@ -160,7 +176,9 @@ export function withResult<T extends Keyed>(
   id: string | undefined,
   newKey: string,
   isError?: boolean,
+  agent?: number,
 ): { items: T[]; added: boolean } {
+  const withAgent = (c: ToolCall): ToolCall => (agent ? { ...c, agent } : c);
   const at = id
     ? find(items, (c) => c.id === id && c.state === 'pending')
     : // FALLBACK: an event log from before call ids.
@@ -168,11 +186,11 @@ export function withResult<T extends Keyed>(
   if (at) {
     const [i, k] = at;
     return {
-      items: replaceCall(items, at, settle((items[i] as unknown as Run).calls[k]!, result, isError)),
+      items: replaceCall(items, at, withAgent(settle((items[i] as unknown as Run).calls[k]!, result, isError))),
       added: false,
     };
   }
-  const c: ToolCall = settle({ tool, args: null, state: 'pending' }, result, isError);
+  const c: ToolCall = withAgent(settle({ tool, args: null, state: 'pending' }, result, isError));
   if (id) c.id = id;
   return addCall(items, c, newKey);
 }

@@ -7,6 +7,7 @@ import type { ComponentType } from 'react';
 import type { ToolCall } from '@/lib/toolcalls';
 import { jsonTools, readGrep } from '@/lib/tooltext';
 
+import { AgentBody } from './AgentBody';
 import { DiffBody, GenericBody, JsonBody, ReadBody, SearchBody, ShellBody, WriteBody, type BodyProps } from './bodies';
 
 export const bodies: Record<string, ComponentType<BodyProps>> = {
@@ -18,6 +19,7 @@ export const bodies: Record<string, ComponentType<BodyProps>> = {
   get_document: ReadBody,
   file_write: WriteBody,
   file_grep: SearchBody,
+  agent: AgentBody,
   ...Object.fromEntries([...jsonTools].map((t) => [t, JsonBody])),
 };
 
