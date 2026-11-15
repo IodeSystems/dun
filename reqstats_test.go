@@ -66,8 +66,9 @@ func TestReqMeter_ScriptedRequest(t *testing.T) {
 	send(llm.StreamChunk{Content: strings.Repeat("c", 40)}) // throttled
 	clk.add(900 * time.Millisecond)
 	send(llm.StreamChunk{Content: strings.Repeat("c", 40)}) // live: 30 tokens in 1s
-	send(llm.StreamChunk{Done: true, Usage: &llm.Usage{PromptTokens: 5000, CompletionTokens: 31,
-		PromptTokensDetails: &llm.PromptTokensDetails{CachedTokens: 4200}}})
+	// The final chunk is held until the stream closes (reasoning.go).
+	src <- llm.StreamChunk{Done: true, Usage: &llm.Usage{PromptTokens: 5000, CompletionTokens: 31,
+		PromptTokensDetails: &llm.PromptTokensDetails{CachedTokens: 4200}}}
 	close(src)
 	for range out {
 	}

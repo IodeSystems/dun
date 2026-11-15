@@ -135,6 +135,10 @@ derive them from `turn`, tokens, tool calls or `done`.
 - `request` is state: a snapshot keeps the last one, and it is the whole
   status bar. Clients show it and add nothing up, so a reconnect does not
   start the averages again.
+- Order: a round's `request` `done` (and its spend and turn_stats share) comes
+  before the turn's `usage` and `done`, the last round too. The engine holds
+  a round's final stream chunk until the client has priced the round
+  (`reasoningTee`).
 - Scope: the engine process. An engine restart (a crash, a model switch)
   starts the figures again.
 - Old logs: a `request` with no `session_stats` (an older engine) shows its own

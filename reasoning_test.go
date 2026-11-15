@@ -6,7 +6,9 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/iodesystems/agentkit/llm"
 )
@@ -136,5 +138,30 @@ func TestHarness_StreamsAndReplaysReasoning(t *testing.T) {
 	defer mu.Unlock()
 	if live.Len() != 0 {
 		t.Errorf("a side call's reasoning reached the turn's stream: %q", live.String())
+	}
+}
+
+// The final chunk of a round reaches the reader only after the client's
+// usage hook ran (it runs when the stream ends, after that chunk). A reader
+// that closes the turn at Done must find the round already priced.
+func TestReasoningTee_DoneWaitsForUsageHook(t *testing.T) {
+	src := make(chan llm.StreamChunk)
+	var priced atomic.Bool
+	r := &reasoningTee{LLMRunner: chanRunner(src), on: func(string) {}}
+	out, err := r.ChatStream(context.Background(), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		src <- llm.StreamChunk{Content: "hi"}
+		src <- llm.StreamChunk{Done: true, Usage: &llm.Usage{PromptTokens: 1}}
+		time.Sleep(50 * time.Millisecond) // the hook runs after the Done chunk
+		priced.Store(true)
+		close(src)
+	}()
+	for c := range out {
+		if c.Done && !priced.Load() {
+			t.Fatal("Done reached the reader before the round was priced")
+		}
 	}
 }
