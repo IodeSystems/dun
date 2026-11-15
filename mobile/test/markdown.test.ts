@@ -1,6 +1,9 @@
 /// <reference types="jest" />
 // The parser half: no DOM. RN's jest environment is node-based, with no document.
-import { codeText, createReply, parseBlock, safeUrl, tableColumns, type Node } from '../src/lib/markdown';
+
+import { codeText, createReply, mathLines, parseBlock, safeUrl, tableColumns, type Node } from '../src/lib/markdown';
+
+import { FORMS } from './fixtures/flowdown-forms';
 
 const tree = (md: string): Node[] => {
   const { blocks, closer } = createReply().update(md, false);
@@ -99,4 +102,19 @@ test('unchanged blocks keep identity across updates; their parse is reused', () 
   expect(b.blocks[1]).toBe(a.blocks[1]);
   expect(b.blocks[2]).not.toBe(a.blocks[2]);
   expect(parseBlock(b.blocks[0]!)).toBe(tree0);
+});
+
+test('the dialect fixture parses at every prefix while streaming', () => {
+  const reply = createReply();
+  for (let i = 1; i <= FORMS.length; i++) {
+    const { blocks, closer } = reply.update(FORMS.slice(0, i), true);
+    blocks.forEach((b, j) => parseBlock(b, j === blocks.length - 1 ? closer : ''));
+  }
+});
+
+test('math: $…$ and $$ fences are formulas, a price is text', () => {
+  const [p, display] = tree('Area $\\pi r^2$ costs $5 or $6.\n\n$$\nx^2\n$$');
+  expect(p!.children!.map((n) => n.type)).toEqual(['text', 'inlineMath', 'text']);
+  expect(display!.type).toBe('math');
+  expect(mathLines('\\pi r^2')).toEqual(['π r²']);
 });
