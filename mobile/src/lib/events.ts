@@ -5,6 +5,7 @@
 // the fields read here are relied on.
 
 import type { McpTool, McpTools } from './mcp';
+import * as notices from './notices';
 import { withCall, withResult, type Run } from './toolcalls';
 import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 
@@ -14,7 +15,9 @@ export type Item =
   // Consecutive tool calls, each merged with its result (toolcalls.ts).
   | Run
   | { key: string; kind: 'note'; text: string; error?: boolean }
-  | { key: string; kind: 'question'; text: string; options: string[]; recommended?: string };
+  | { key: string; kind: 'question'; text: string; options: string[]; recommended?: string }
+  // What the engine says beside the conversation (notices.ts): it ends a run.
+  | { key: string; kind: 'notice'; notice: notices.Notice };
 
 export type Ask = { question: string; options: string[]; recommended?: string };
 
@@ -83,24 +86,28 @@ export const empty: View = {
 type Ev = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
-/** What proactive search surfaced: each document, why it won, and where it came from (an older engine sends neither). */
-export function docsNote(ev: Ev): string {
-  const docs = Array.isArray(ev.docs) ? (ev.docs as Ev[]) : [];
-  const lines = [`🔎 ${Number(ev.surfaced ?? 0)} doc(s) surfaced`];
-  for (const d of docs) {
-    const why = str(d.why);
-    lines.push(`• ${str(d.title)}${why ? ` (${why})` : ''}`);
-    if (str(d.source)) lines.push(`  ${str(d.source)}`);
-  }
-  return lines.join('\n');
-}
-
 /** An item before it has a key (Omit spread over each member of the union). */
 type WithoutKey<T> = T extends unknown ? Omit<T, 'key'> : never;
 type NewItem = WithoutKey<Item>;
 
 function push(v: View, item: NewItem): View {
   return { ...v, n: v.n + 1, items: [...v.items, { ...item, key: String(v.n) }] };
+}
+
+/** A tool call that carried a message: the message, not a row in the run. */
+function pushCarried(v: View, tool: string, args: unknown, id: string): View | null {
+  const notice = notices.carriedMsg(tool, args, id || undefined);
+  return notice ? push(v, { kind: 'notice', notice }) : null;
+}
+
+/** That call's result: the message's footer; null when the result is a tool row's. */
+function settleCarried(v: View, tool: string, result: string, id: string): View | null {
+  const i = notices.pendingMsg(v.items, tool, id || undefined);
+  const it = v.items[i];
+  if (it?.kind !== 'notice' || it.notice.type !== 'msg') return null;
+  const items = [...v.items];
+  items[i] = { ...it, notice: { ...notices.settleMsg(it.notice, result), type: 'msg' } };
+  return { ...v, items };
 }
 
 /** A tool call or result merged into the runs (toolcalls.ts); a new run takes the next key. */
@@ -140,12 +147,18 @@ function fromHistory(v: View, it: Ev): View {
       return push(v, { kind: 'assistant', text: str(it.content) });
     case 'tool_call':
       if (it.tool === 'ask_user') return pushQuestion(v, it.args);
-      return merge(v, withCall(v.items, str(it.tool), it.args, str(it.call_id) || undefined, String(v.n)));
+      return (
+        pushCarried(v, str(it.tool), it.args, str(it.call_id)) ??
+        merge(v, withCall(v.items, str(it.tool), it.args, str(it.call_id) || undefined, String(v.n)))
+      );
     case 'tool_result':
       if (it.tool === 'ask_user') return push(v, { kind: 'user', text: str(it.content) });
-      return merge(v, withResult(v.items, str(it.tool), str(it.content), str(it.call_id) || undefined, String(v.n)));
+      return (
+        settleCarried(v, str(it.tool), str(it.content), str(it.call_id)) ??
+        merge(v, withResult(v.items, str(it.tool), str(it.content), str(it.call_id) || undefined, String(v.n)))
+      );
     case 'notification':
-      return push(v, { kind: 'note', text: '🔔 ' + str(it.content) });
+      return push(v, { kind: 'notice', notice: notices.fromHistoryNotification(str(it.content)) });
   }
   return v;
 }
@@ -196,11 +209,17 @@ export function apply(v: View, ev: Ev): View {
       // ask_user's call and result arrive once it is answered: they are what
       // shows the question and the answer, live as from history.
       if (ev.tool === 'ask_user') return pushQuestion(w, ev.args);
-      return merge(w, withCall(w.items, str(ev.tool), ev.args, str(ev.call_id) || undefined, String(w.n)));
+      return (
+        pushCarried(w, str(ev.tool), ev.args, str(ev.call_id)) ??
+        merge(w, withCall(w.items, str(ev.tool), ev.args, str(ev.call_id) || undefined, String(w.n)))
+      );
     }
     case 'tool_result':
       if (ev.tool === 'ask_user') return push(v, { kind: 'user', text: str(ev.result) });
-      return merge(v, withResult(v.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(v.n)));
+      return (
+        settleCarried(v, str(ev.tool), str(ev.result), str(ev.call_id)) ??
+        merge(v, withResult(v.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(v.n)))
+      );
     case 'done':
       if (ev.reason === 'interrupted') return interrupted(v, str(ev.detail));
       // Messages queued into the turn have been read by it.
@@ -223,8 +242,17 @@ export function apply(v: View, ev: Ev): View {
       // The question and the answer are shown from ask_user's call and result.
       return { ...v, ask: null };
     case 'notification':
-      if (ev.kind === 'docs') return push(v, { kind: 'note', text: docsNote(ev) });
-      return ev.text ? push(v, { kind: 'note', text: '🔔 ' + str(ev.text) }) : v;
+      return push(v, { kind: 'notice', notice: notices.fromNotification(ev) });
+    case 'recap':
+      return push(v, { kind: 'notice', notice: notices.recapNotice(ev) });
+    case 'compaction':
+      return push(v, { kind: 'notice', notice: notices.compactionNotice(ev) });
+    case 'mcp_login':
+      return push(v, { kind: 'notice', notice: notices.mcpLoginNotice(ev) });
+    case 'agent_told': {
+      const n = notices.agentToldNotice(ev);
+      return n ? push(v, { kind: 'notice', notice: n }) : v;
+    }
     case 'commands':
       return { ...v, commands: (ev.items as Command[]) ?? [] };
     case 'models':

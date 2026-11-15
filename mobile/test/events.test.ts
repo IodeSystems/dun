@@ -50,7 +50,7 @@ test('history replaces what is shown, never adds', () => {
       { kind: 'assistant', content: 'b' },
     ],
   });
-  expect(w.items.map((i) => (i.kind === 'tools' ? '' : i.text))).toEqual(['a', 'b']);
+  expect(w.items.map((i) => (i.kind === 'tools' || i.kind === 'notice' ? '' : i.text))).toEqual(['a', 'b']);
 });
 
 test('an ask stays open until answered, from any client', () => {
@@ -103,7 +103,7 @@ test('unknown events change nothing', () => {
 test('a snapshot event in the stream replaces what is shown', () => {
   const v = run([{ type: 'user', content: 'stale' }]);
   const w = apply(v, { type: 'snapshot', after: 9, items: [{ kind: 'assistant', content: 'fresh' }], state: [] });
-  expect(w.items.map((i) => (i.kind === 'tools' ? '' : i.text))).toEqual(['fresh']);
+  expect(w.items.map((i) => (i.kind === 'tools' || i.kind === 'notice' ? '' : i.text))).toEqual(['fresh']);
 });
 
 const cmds = [
@@ -231,7 +231,7 @@ test('interrupting is a no-op when idle, and an idle answer clears it', () => {
   expect(w.status).toBe('');
 });
 
-test('a docs note names each surfaced document, why it won and where it came from', () => {
+test('a docs notification is a docs notice: each document, why it won and where it came from', () => {
   const v = run([
     {
       type: 'notification',
@@ -247,11 +247,10 @@ test('a docs note names each surfaced document, why it won and where it came fro
       ],
     },
   ]);
-  const text = (x: View) => x.items.map((i) => (i.kind === 'tools' ? '' : i.text))[0];
-  expect(text(v)).toBe(
-    '🔎 1 doc(s) surfaced\n• skill docs (only candidate · score 1.2e-05)\n  skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills',
-  );
-  // An older engine: no why, no source.
-  const w = run([{ type: 'notification', kind: 'docs', surfaced: 1, docs: [{ title: 'README', score: 1 }] }]);
-  expect(text(w)).toBe('🔎 1 doc(s) surfaced\n• README');
+  const it = v.items[0];
+  expect(it?.kind === 'notice' && it.notice.type === 'docs' && it.notice.docs[0]).toMatchObject({
+    title: 'skill docs',
+    why: 'only candidate · score 1.2e-05',
+    source: 'skill · ~/.claude/skills/synced/b1/docs/SKILL.md · index skills',
+  });
 });

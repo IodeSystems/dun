@@ -11,6 +11,8 @@ const light = {
   accentText: '#ffffff',
   user: '#eef3fc',
   danger: '#b3261e',
+  /** Proactive notices: the TUI's stNote (256-colour 214, orange). */
+  notice: '#9a5a00',
 };
 
 const dark: typeof light = {
@@ -24,6 +26,7 @@ const dark: typeof light = {
   accentText: '#0d1726',
   user: '#1f2a3d',
   danger: '#f2867d',
+  notice: '#f0a742',
 };
 
 export type Colors = typeof light;
