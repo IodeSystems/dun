@@ -72,6 +72,10 @@ derive them from `turn`, tokens, tool calls or `done`.
   `waiting_answer` for a question it restored after a restart.
 - A queued row whose id the state no longer lists, with no `delivered` or
   `withdrawn` for it, while idle: lost with its engine; clients say so.
+- dund reads it too: the idle stop and an upgrade's waits take "in a turn"
+  and "a question is open" from `turn_state` (`session.track`). An engine
+  that has sent none since it started (an older build) is read from `turn`,
+  `done`, `error`, `ask`, `mount` and `answered`, a marked fallback.
 - Old logs: an event log with no `turn_state` reads as idle.
 
 ## Snapshots and reconnects

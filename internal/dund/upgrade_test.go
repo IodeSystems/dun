@@ -727,3 +727,40 @@ func TestUpgradeRestoredAskDismissed(t *testing.T) {
 		t.Fatal("still restored")
 	}
 }
+
+// An upgrade waits on what turn_state says: a working turn, a mount
+// question; not an ask_user question (saved and asked again), not idle.
+func TestUpgradeWaitsFollowTurnState(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	ses, _ := svc.Get(alice, id)
+	waitFor(t, func() bool { ses.mu.Lock(); defer ses.mu.Unlock(); return ses.running })
+	q := &proto.Ask{AskID: "a1", Question: "Which one?", Options: []string{"a", "b"}}
+	for _, c := range []struct {
+		st   proto.TurnState
+		want []string
+		ask  bool
+	}{
+		{proto.TurnState{Phase: proto.PhaseWorking}, []string{"turn"}, false},
+		{proto.TurnState{Phase: proto.PhaseWaitingAnswer, Mount: &proto.Mount{}}, []string{"question"}, false},
+		{proto.TurnState{Phase: proto.PhaseWaitingAnswer, Ask: q}, nil, true},
+		{proto.TurnState{Phase: proto.PhaseInterrupting}, []string{"turn"}, false},
+		{proto.TurnState{Phase: proto.PhaseIdle}, nil, false},
+	} {
+		st := c.st
+		st.Queued = []proto.QueuedMsg{}
+		ses.track(proto.NewEvent(&st))
+		if got := whats(ses.waiting()); !slices.Equal(got, c.want) {
+			t.Errorf("%s: waits on %v, want %v", st.Phase, got, c.want)
+		}
+		if a := ses.openAsk(); (a != nil) != c.ask || (a != nil && a.AskID != "a1") {
+			t.Errorf("%s: open ask %+v", st.Phase, a)
+		}
+	}
+	// A raw answered does not close a question turn_state holds open.
+	ses.track(proto.NewEvent(&proto.TurnState{Phase: proto.PhaseWaitingAnswer, Ask: q, Queued: []proto.QueuedMsg{}}))
+	ses.track(proto.NewEvent(&proto.Answered{AskID: "a1"}))
+	if ses.openAsk() == nil {
+		t.Error("answered without turn_state closed the question")
+	}
+}
