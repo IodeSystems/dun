@@ -43,6 +43,8 @@ export type AgentMsg = {
 export type Notice =
   | { type: 'plain'; tone: Tone; icon: string; text: string; label?: string }
   | { type: 'job'; head: string; took: string; command: string; output: string }
+  // An OAuth MCP server waiting for a login (mcp_login): url '' = another session started it.
+  | { type: 'login'; server: string; url: string; done: boolean }
   | { type: 'docs'; found: number; surfaced: number; tokens: number; docs: Doc[] }
   | ({ type: 'msg' } & AgentMsg);
 
@@ -237,12 +239,14 @@ export function agentToldNotice(ev: Ev): Notice | null {
 
 /** mcp_login: the URL whole, to be opened (enginecmd.LoginLine). */
 export function mcpLoginNotice(ev: Ev): Notice {
-  const server = str(ev.server);
-  const url = str(ev.url);
-  const text = url
-    ? `open to log in to ${server}: ${url}`
-    : `${server}: waiting for a login to it that another session started`;
-  return { type: 'plain', tone: 'note', icon: '🔑', text };
+  return { type: 'login', server: str(ev.server), url: str(ev.url), done: false };
+}
+
+/** The TUI's line for a login notice (enginecmd.LoginLine). */
+export function loginLine(n: { server: string; url: string }): string {
+  return n.url
+    ? `open to log in to ${n.server}: ${n.url}`
+    : `${n.server}: waiting for a login to it that another session started`;
 }
 
 export function oneLine(s: string): string {

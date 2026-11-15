@@ -328,6 +328,13 @@ function askRow(v: View, a: Ask, callId: string): View {
   });
 }
 
+/** A waiting login notice for server, settled. */
+function loginDone(i: Item, server: string): Item {
+  return i.kind === 'notice' && i.notice.type === 'login' && i.notice.server === server && !i.notice.done
+    ? { ...i, notice: { ...i.notice, done: true } }
+    : i;
+}
+
 /** A history item (history event, snapshot) as a shown item. */
 function fromHistory(v: View, it: Ev): View {
   switch (it.kind) {
@@ -488,7 +495,9 @@ function applyNew(v: View, ev: Ev): View {
       // when an answer carries none (a refused toggle names why).
       const tools = (ev.tools as McpTool[] | undefined) ?? [];
       const server = str(ev.server);
-      const w = server && (tools.length || v.mcpTools?.server !== server) ? { ...v, mcpTools: { server, tools } } : v;
+      let w = server && (tools.length || v.mcpTools?.server !== server) ? { ...v, mcpTools: { server, tools } } : v;
+      // The server lists tools: its login (if it waited on one) went through.
+      if (server && tools.length) w = { ...w, items: w.items.map((i) => loginDone(i, server)) };
       return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;
     }
     case 'settings':

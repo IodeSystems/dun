@@ -179,7 +179,19 @@ test('recap, compaction, mcp login and a refused tell are notices; an accepted t
   expect(notices(v)).toEqual([
     { type: 'plain', tone: 'dim', icon: '✂', text: 'recapped 3 entries\nthe summary' },
     { type: 'plain', tone: 'note', icon: '🗜', text: 'compacted 40 entries' },
-    { type: 'plain', tone: 'note', icon: '🔑', text: 'open to log in to gh: https://x.dev/login' },
+    { type: 'login', server: 'gh', url: 'https://x.dev/login', done: false },
     { type: 'plain', tone: 'note', icon: '↳', text: 'agent #2 is running: wait for it' },
+  ]);
+});
+
+test('a login is settled when its server lists tools', () => {
+  const v = run([
+    { type: 'mcp_login', server: 'gh', url: 'https://x.dev/login' },
+    { type: 'mcp_login', server: 'other', url: 'https://y.dev/login' },
+    { type: 'mcp_tools', server: 'gh', tools: [{ name: 'a', tokens: 1, enabled: true }] },
+  ]);
+  expect(notices(v)).toEqual([
+    { type: 'login', server: 'gh', url: 'https://x.dev/login', done: true },
+    { type: 'login', server: 'other', url: 'https://y.dev/login', done: false },
   ]);
 });
