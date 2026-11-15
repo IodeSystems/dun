@@ -37,7 +37,7 @@ export function useColors(): Colors {
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 };
 // Text sizes, in dp (x1.2 of the earlier 13/15/17/22/22).
-export const font = { sm: 16, md: 18, lg: 20, xl: 26, composer: 26 };
+export const font = { sm: 19, md: 22, lg: 24, xl: 31, composer: 23 };
 export const mono = 'monospace';
 /** Minimum touch target, in dp. */
 export const TOUCH = 44;

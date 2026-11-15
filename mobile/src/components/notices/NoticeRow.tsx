@@ -40,7 +40,7 @@ function Label({ text }: { text: string }) {
     <Text
       style={{
         color: c.muted,
-        fontSize: 13,
+        fontSize: 16,
         borderWidth: 1,
         borderColor: c.border,
         borderRadius: 4,
@@ -175,12 +175,12 @@ function DocRow({ d }: { d: Doc }) {
         <Text style={{ color: c.muted }}> ({docWhy(d)})</Text>
       </Text>
       {d.source ? (
-        <Text selectable style={{ color: c.muted, fontSize: 14, paddingLeft: space.md }}>
+        <Text selectable style={{ color: c.muted, fontSize: 17, paddingLeft: space.md }}>
           {d.source}
         </Text>
       ) : null}
       {open && d.line ? (
-        <Text selectable style={{ color: c.muted, fontSize: 14, paddingLeft: space.md, fontFamily: mono }}>
+        <Text selectable style={{ color: c.muted, fontSize: 17, paddingLeft: space.md, fontFamily: mono }}>
           {d.line}
         </Text>
       ) : null}

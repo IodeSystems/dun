@@ -15,7 +15,7 @@ exports[`renders each node kind with RN host components 1`] = `
       style={
         {
           "color": "#1d1d1b",
-          "fontSize": 22,
+          "fontSize": 26,
           "fontWeight": "700",
           "marginTop": 4,
         }
@@ -28,8 +28,8 @@ exports[`renders each node kind with RN host components 1`] = `
       style={
         {
           "color": "#1d1d1b",
-          "fontSize": 18,
-          "lineHeight": 25.2,
+          "fontSize": 22,
+          "lineHeight": 30.799999999999997,
         }
       }
     >
@@ -59,7 +59,7 @@ exports[`renders each node kind with RN host components 1`] = `
           {
             "backgroundColor": "#f4f3ef",
             "fontFamily": "monospace",
-            "fontSize": 16,
+            "fontSize": 19,
           }
         }
       >
@@ -112,8 +112,8 @@ exports[`renders each node kind with RN host components 1`] = `
             [
               {
                 "color": "#1d1d1b",
-                "fontSize": 18,
-                "lineHeight": 25.2,
+                "fontSize": 22,
+                "lineHeight": 30.799999999999997,
               },
               {
                 "color": "#6b6b66",
@@ -137,8 +137,8 @@ exports[`renders each node kind with RN host components 1`] = `
             style={
               {
                 "color": "#1d1d1b",
-                "fontSize": 18,
-                "lineHeight": 25.2,
+                "fontSize": 22,
+                "lineHeight": 30.799999999999997,
               }
             }
           >
@@ -159,8 +159,8 @@ exports[`renders each node kind with RN host components 1`] = `
             [
               {
                 "color": "#1d1d1b",
-                "fontSize": 18,
-                "lineHeight": 25.2,
+                "fontSize": 22,
+                "lineHeight": 30.799999999999997,
               },
               {
                 "color": "#6b6b66",
@@ -184,8 +184,8 @@ exports[`renders each node kind with RN host components 1`] = `
             style={
               {
                 "color": "#1d1d1b",
-                "fontSize": 18,
-                "lineHeight": 25.2,
+                "fontSize": 22,
+                "lineHeight": 30.799999999999997,
               }
             }
           >
@@ -214,8 +214,8 @@ exports[`renders each node kind with RN host components 1`] = `
             [
               {
                 "color": "#1d1d1b",
-                "fontSize": 18,
-                "lineHeight": 25.2,
+                "fontSize": 22,
+                "lineHeight": 30.799999999999997,
               },
               {
                 "color": "#6b6b66",
@@ -239,8 +239,8 @@ exports[`renders each node kind with RN host components 1`] = `
             style={
               {
                 "color": "#1d1d1b",
-                "fontSize": 18,
-                "lineHeight": 25.2,
+                "fontSize": 22,
+                "lineHeight": 30.799999999999997,
               }
             }
           >
@@ -264,8 +264,8 @@ exports[`renders each node kind with RN host components 1`] = `
         style={
           {
             "color": "#1d1d1b",
-            "fontSize": 18,
-            "lineHeight": 25.2,
+            "fontSize": 22,
+            "lineHeight": 30.799999999999997,
           }
         }
       >
@@ -286,7 +286,7 @@ exports[`renders each node kind with RN host components 1`] = `
         style={
           {
             "color": "#6b6b66",
-            "fontSize": 16,
+            "fontSize": 19,
           }
         }
       >
@@ -302,7 +302,7 @@ exports[`renders each node kind with RN host components 1`] = `
               {
                 "color": "#1d1d1b",
                 "fontFamily": "monospace",
-                "fontSize": 16,
+                "fontSize": 19,
               }
             }
           >
@@ -340,8 +340,8 @@ exports[`renders each node kind with RN host components 1`] = `
                 [
                   {
                     "color": "#1d1d1b",
-                    "fontSize": 18,
-                    "lineHeight": 25.2,
+                    "fontSize": 22,
+                    "lineHeight": 30.799999999999997,
                   },
                   {
                     "paddingHorizontal": 8,
@@ -361,8 +361,8 @@ exports[`renders each node kind with RN host components 1`] = `
                 [
                   {
                     "color": "#1d1d1b",
-                    "fontSize": 18,
-                    "lineHeight": 25.2,
+                    "fontSize": 22,
+                    "lineHeight": 30.799999999999997,
                   },
                   {
                     "paddingHorizontal": 8,
@@ -390,8 +390,8 @@ exports[`renders each node kind with RN host components 1`] = `
                 [
                   {
                     "color": "#1d1d1b",
-                    "fontSize": 18,
-                    "lineHeight": 25.2,
+                    "fontSize": 22,
+                    "lineHeight": 30.799999999999997,
                   },
                   {
                     "paddingHorizontal": 8,
@@ -411,8 +411,8 @@ exports[`renders each node kind with RN host components 1`] = `
                 [
                   {
                     "color": "#1d1d1b",
-                    "fontSize": 18,
-                    "lineHeight": 25.2,
+                    "fontSize": 22,
+                    "lineHeight": 30.799999999999997,
                   },
                   {
                     "paddingHorizontal": 8,
@@ -442,8 +442,8 @@ exports[`renders each node kind with RN host components 1`] = `
       style={
         {
           "color": "#1d1d1b",
-          "fontSize": 18,
-          "lineHeight": 25.2,
+          "fontSize": 22,
+          "lineHeight": 30.799999999999997,
         }
       }
     >
