@@ -1,0 +1,456 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`renders each node kind with RN host components 1`] = `
+<>
+  <View
+    style={
+      {
+        "gap": 8,
+      }
+    }
+  >
+    <Text
+      accessibilityRole="header"
+      selectable={true}
+      style={
+        {
+          "color": "#1d1d1b",
+          "fontSize": 19,
+          "fontWeight": "700",
+          "marginTop": 4,
+        }
+      }
+    >
+      Title
+    </Text>
+    <Text
+      selectable={true}
+      style={
+        {
+          "color": "#1d1d1b",
+          "fontSize": 15,
+          "lineHeight": 21,
+        }
+      }
+    >
+      a 
+      <Text
+        style={
+          {
+            "fontStyle": "italic",
+          }
+        }
+      >
+        b
+      </Text>
+       
+      <Text
+        style={
+          {
+            "fontWeight": "700",
+          }
+        }
+      >
+        c
+      </Text>
+       
+      <Text
+        style={
+          {
+            "backgroundColor": "#f4f3ef",
+            "fontFamily": "monospace",
+            "fontSize": 13,
+          }
+        }
+      >
+        d
+      </Text>
+       
+      <Text
+        accessibilityRole="link"
+        onPress={[Function]}
+        style={
+          {
+            "color": "#2f6fdb",
+            "textDecorationLine": "underline",
+          }
+        }
+      >
+        e
+      </Text>
+       
+      <Text
+        accessibilityRole="link"
+        onPress={[Function]}
+        style={
+          {
+            "color": "#2f6fdb",
+            "textDecorationLine": "underline",
+          }
+        }
+      >
+        [image: pic]
+      </Text>
+    </Text>
+    <View
+      style={
+        {
+          "gap": 4,
+        }
+      }
+    >
+      <View
+        style={
+          {
+            "flexDirection": "row",
+            "gap": 8,
+          }
+        }
+      >
+        <Text
+          style={
+            [
+              {
+                "color": "#1d1d1b",
+                "fontSize": 15,
+                "lineHeight": 21,
+              },
+              {
+                "color": "#6b6b66",
+                "minWidth": 22,
+              },
+            ]
+          }
+        >
+          1.
+        </Text>
+        <View
+          style={
+            {
+              "flex": 1,
+              "gap": 4,
+            }
+          }
+        >
+          <Text
+            selectable={true}
+            style={
+              {
+                "color": "#1d1d1b",
+                "fontSize": 15,
+                "lineHeight": 21,
+              }
+            }
+          >
+            one
+          </Text>
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "flexDirection": "row",
+            "gap": 8,
+          }
+        }
+      >
+        <Text
+          style={
+            [
+              {
+                "color": "#1d1d1b",
+                "fontSize": 15,
+                "lineHeight": 21,
+              },
+              {
+                "color": "#6b6b66",
+                "minWidth": 22,
+              },
+            ]
+          }
+        >
+          2.
+        </Text>
+        <View
+          style={
+            {
+              "flex": 1,
+              "gap": 4,
+            }
+          }
+        >
+          <Text
+            selectable={true}
+            style={
+              {
+                "color": "#1d1d1b",
+                "fontSize": 15,
+                "lineHeight": 21,
+              }
+            }
+          >
+            two
+          </Text>
+        </View>
+      </View>
+    </View>
+    <View
+      style={
+        {
+          "gap": 4,
+        }
+      }
+    >
+      <View
+        style={
+          {
+            "flexDirection": "row",
+            "gap": 8,
+          }
+        }
+      >
+        <Text
+          style={
+            [
+              {
+                "color": "#1d1d1b",
+                "fontSize": 15,
+                "lineHeight": 21,
+              },
+              {
+                "color": "#6b6b66",
+                "minWidth": 12,
+              },
+            ]
+          }
+        >
+          ☑
+        </Text>
+        <View
+          style={
+            {
+              "flex": 1,
+              "gap": 4,
+            }
+          }
+        >
+          <Text
+            selectable={true}
+            style={
+              {
+                "color": "#1d1d1b",
+                "fontSize": 15,
+                "lineHeight": 21,
+              }
+            }
+          >
+            done
+          </Text>
+        </View>
+      </View>
+    </View>
+    <View
+      style={
+        {
+          "borderLeftColor": "#e3e2de",
+          "borderLeftWidth": 3,
+          "gap": 4,
+          "paddingLeft": 12,
+        }
+      }
+    >
+      <Text
+        selectable={true}
+        style={
+          {
+            "color": "#1d1d1b",
+            "fontSize": 15,
+            "lineHeight": 21,
+          }
+        }
+      >
+        q
+      </Text>
+    </View>
+    <View
+      style={
+        {
+          "backgroundColor": "#f4f3ef",
+          "borderRadius": 6,
+          "gap": 4,
+          "padding": 8,
+        }
+      }
+    >
+      <Text
+        style={
+          {
+            "color": "#6b6b66",
+            "fontSize": 13,
+          }
+        }
+      >
+        sh
+      </Text>
+      <RCTScrollView
+        horizontal={true}
+      >
+        <View>
+          <Text
+            selectable={true}
+            style={
+              {
+                "color": "#1d1d1b",
+                "fontFamily": "monospace",
+                "fontSize": 13,
+              }
+            }
+          >
+            echo hi
+          </Text>
+        </View>
+      </RCTScrollView>
+    </View>
+    <RCTScrollView
+      horizontal={true}
+    >
+      <View>
+        <View
+          style={
+            {
+              "borderColor": "#e3e2de",
+              "borderRadius": 4,
+              "borderWidth": 1,
+              "flexDirection": "row",
+            }
+          }
+        >
+          <View
+            style={
+              {
+                "alignItems": "flex-start",
+                "borderColor": "#e3e2de",
+                "borderLeftWidth": 0,
+              }
+            }
+          >
+            <Text
+              selectable={true}
+              style={
+                [
+                  {
+                    "color": "#1d1d1b",
+                    "fontSize": 15,
+                    "lineHeight": 21,
+                  },
+                  {
+                    "paddingHorizontal": 8,
+                    "paddingVertical": 4,
+                  },
+                  {
+                    "fontWeight": "700",
+                  },
+                ]
+              }
+            >
+              h1
+            </Text>
+            <Text
+              selectable={true}
+              style={
+                [
+                  {
+                    "color": "#1d1d1b",
+                    "fontSize": 15,
+                    "lineHeight": 21,
+                  },
+                  {
+                    "paddingHorizontal": 8,
+                    "paddingVertical": 4,
+                  },
+                  false,
+                ]
+              }
+            >
+              x
+            </Text>
+          </View>
+          <View
+            style={
+              {
+                "alignItems": "flex-start",
+                "borderColor": "#e3e2de",
+                "borderLeftWidth": 1,
+              }
+            }
+          >
+            <Text
+              selectable={true}
+              style={
+                [
+                  {
+                    "color": "#1d1d1b",
+                    "fontSize": 15,
+                    "lineHeight": 21,
+                  },
+                  {
+                    "paddingHorizontal": 8,
+                    "paddingVertical": 4,
+                  },
+                  {
+                    "fontWeight": "700",
+                  },
+                ]
+              }
+            >
+              h2
+            </Text>
+            <Text
+              selectable={true}
+              style={
+                [
+                  {
+                    "color": "#1d1d1b",
+                    "fontSize": 15,
+                    "lineHeight": 21,
+                  },
+                  {
+                    "paddingHorizontal": 8,
+                    "paddingVertical": 4,
+                  },
+                  false,
+                ]
+              }
+            >
+              y
+            </Text>
+          </View>
+        </View>
+      </View>
+    </RCTScrollView>
+    <View
+      style={
+        {
+          "backgroundColor": "#e3e2de",
+          "height": 1,
+          "marginVertical": 4,
+        }
+      }
+    />
+    <Text
+      selectable={true}
+      style={
+        {
+          "color": "#1d1d1b",
+          "fontSize": 15,
+          "lineHeight": 21,
+        }
+      }
+    >
+      &lt;b&gt;
+      raw
+      &lt;/b&gt;
+    </Text>
+  </View>
+</>
+`;
