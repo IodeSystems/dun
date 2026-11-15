@@ -150,7 +150,7 @@ func replyShown(cur string) bool { return strings.TrimSpace(cur) != "" }
 // call/result blocks, notifications. No turn runs — this is pure display. A
 // trailing dim marker delimits the resumed history from new activity.
 func (m *tuiModel) replay(items []any) {
-	n := m.replayItems(items, -1)
+	n := m.replayItems(items)
 	m.endRun()
 	// A model pick restarts the engine on the same conversation: nothing was
 	// resumed as far as the person is concerned, so there is no marker.
@@ -165,13 +165,13 @@ func (m *tuiModel) replay(items []any) {
 // come: a call and its result arrive apart, so the open run is carried
 // across events and left open for the next call.
 func (m *tuiModel) replayLive(items []any) {
-	m.replayItems(items, m.openRun())
+	m.replayItems(items)
 	m.refresh()
 }
 
-// replayItems renders history items onto the conversation, the next
-// tool_result going to run; it returns how many entries it added.
-func (m *tuiModel) replayItems(items []any, run int) int {
+// replayItems renders history items onto the conversation, each tool_result
+// paired with its call by call_id; it returns how many entries it added.
+func (m *tuiModel) replayItems(items []any) int {
 	n := 0
 	for _, it := range items {
 		im, _ := it.(map[string]any)
@@ -191,25 +191,15 @@ func (m *tuiModel) replayItems(items []any, run int) int {
 			m.convo = append(m.convo, e)
 			n++
 		case "tool_call":
-			// The same path as a live call: into the run's box (toolrun.go),
-			// or a message's own (agentmsg.go).
+			// The same path as a live call, paired by call_id.
 			args, _ := im["args"].(map[string]any)
-			if a := carriedMsg(str(im["tool"]), args); a != nil {
-				run = m.addMsg(a)
-				break
-			}
-			run = m.runAddCall(str(im["tool"]), args)
+			m.addCall(str(im["tool"]), str(im["call_id"]), args)
 		case "tool_result":
-			if run >= 0 && run < len(m.convo) && m.convo[run].msg != nil && !m.convo[run].msg.done {
-				m.convo[run].msg.setResult(str(im["content"]))
-				m.touchMsg(run)
-				n++
-				break
+			var failed *bool
+			if b, ok := im["is_error"].(bool); ok {
+				failed = &b
 			}
-			if run < 0 || run >= len(m.convo) || m.convo[run].run == nil {
-				run = m.runAddCall(str(im["tool"]), nil) // a result with no call seen
-			}
-			m.runSetResult(run, str(im["tool"]), str(im["content"]))
+			m.callResult(str(im["call_id"]), str(im["tool"]), str(im["content"]), failed)
 			n++
 		case "notification":
 			m.endRun()

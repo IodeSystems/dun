@@ -21,9 +21,10 @@ func (h *Harness) Resumed() int { return h.store.Loaded() }
 // without re-running any turn. A tool_call and its result share a CallID so the
 // client folds them into one block.
 type HistoryItem struct {
-	Kind    string         `json:"kind"`             // user|assistant|tool_call|tool_result|notification|reasoning|command
-	ID      string         `json:"id,omitempty"`     // a user message's id: the user event's (delivery.go)
-	Queued  bool           `json:"queued,omitempty"` // a user message a tool result carried mid-turn
+	Kind    string         `json:"kind"`               // user|assistant|tool_call|tool_result|notification|reasoning|command
+	ID      string         `json:"id,omitempty"`       // a user message's id: the user event's (delivery.go)
+	Queued  bool           `json:"queued,omitempty"`   // a user message a tool result carried mid-turn
+	IsError bool           `json:"is_error,omitempty"` // a tool_result that failed (ToolFailed)
 	Content string         `json:"content,omitempty"`
 	Tool    string         `json:"tool,omitempty"`    // tool_call / tool_result
 	CallID  string         `json:"call_id,omitempty"` // pairs a tool_call with its result
@@ -81,7 +82,8 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 			_ = json.Unmarshal([]byte(e.Content), &args)
 			out = append(out, HistoryItem{Kind: "tool_call", Tool: e.ToolName, CallID: e.ToolCallID, Args: args})
 		case agent.KindToolResult:
-			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: e.Content})
+			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: e.Content,
+				IsError: ToolFailed(e.ToolName, e.Content)})
 		case agent.KindNotification:
 			out = append(out, HistoryItem{Kind: "notification", Content: e.Content})
 		case kindCommand:

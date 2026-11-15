@@ -86,14 +86,24 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// ToolCall: a tool call STARTED (it is running until its tool_result).
+// CallID pairs it with that result and with history's items; empty only
+// from an engine older than call ids, which sent the call with its result.
 type ToolCall struct {
-	Tool string         `json:"tool"`
-	Args map[string]any `json:"args"`
+	CallID string         `json:"call_id,omitempty"`
+	Tool   string         `json:"tool"`
+	Args   map[string]any `json:"args"`
 }
 
+// ToolResult: the call CallID returned. Result is what the person is shown
+// (capped as the model's is); IsError says it failed (an error, ERROR, or
+// exec's exit marker); ElapsedMS is how long it ran.
 type ToolResult struct {
-	Tool   string `json:"tool"`
-	Result string `json:"result"`
+	CallID    string `json:"call_id,omitempty"`
+	Tool      string `json:"tool"`
+	Result    string `json:"result"`
+	IsError   bool   `json:"is_error,omitempty"`
+	ElapsedMS int64  `json:"elapsed_ms,omitempty"`
 }
 
 // Done ends a turn. Reason is empty for a turn that finished, and
@@ -465,6 +475,7 @@ type HistoryItem struct {
 	// has none for lifted messages: they are only inside the tool result.
 	ID      string         `json:"id,omitempty"`
 	Queued  bool           `json:"queued,omitempty"`
+	IsError bool           `json:"is_error,omitempty"` // a tool_result that failed
 	Content string         `json:"content,omitempty"`
 	Tool    string         `json:"tool,omitempty"`
 	CallID  string         `json:"call_id,omitempty"`

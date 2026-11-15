@@ -239,3 +239,38 @@ func TestRun_Replay(t *testing.T) {
 		t.Errorf("replayed run: %d items, open=%v, boxed=%v", len(r.run.items), r.run.open, r.boxed())
 	}
 }
+
+// A call shows running from its tool_call (sent when it starts), and its
+// result lands on it by call_id — not on the newest pending call: two calls
+// of one tool, the first's result last.
+func TestToolRun_PairsByCallID(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = resized(m, 100, 30)
+	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "exec", "call_id": "a", "args": map[string]any{"command": "first"}})
+	i := m.openRun()
+	if i < 0 || m.convo[i].run.items[0].done || m.activeTool == "" {
+		t.Fatal("the started call is not shown running")
+	}
+	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "exec", "call_id": "b", "args": map[string]any{"command": "second"}})
+	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "exec", "call_id": "a", "result": "one", "is_error": true})
+	items := m.convo[i].run.items
+	if !items[0].done || items[0].result != "one" || !items[0].failed || items[1].done {
+		t.Fatalf("result paired wrong: %+v / %+v", items[0], items[1])
+	}
+	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "exec", "call_id": "b", "result": "ERROR-looking but fine"})
+	if !items[1].done || items[1].failed {
+		t.Errorf("is_error absent with a call_id is success: %+v", items[1])
+	}
+}
+
+// FALLBACK for an event log from before call ids: a result with none goes to
+// the newest pending call of its tool.
+func TestToolRun_NoCallIDFallback(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "exec", "args": map[string]any{}})
+	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "exec", "result": "[exit: status 1]"})
+	it := m.convo[len(m.convo)-1].run.items[0]
+	if !it.done || !it.failed {
+		t.Errorf("old-format result not paired: %+v", it)
+	}
+}

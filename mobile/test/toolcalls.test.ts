@@ -56,6 +56,26 @@ test('results pair by call_id when they come out of order', () => {
   ]);
 });
 
+test('live: a call shows pending from its start; its result pairs by call_id, is_error decides', () => {
+  const v = run([
+    { type: 'tool_call', tool: 'exec', call_id: 'a', args: { command: 'one' } },
+    { type: 'tool_call', tool: 'exec', call_id: 'b', args: { command: 'two' } },
+  ]);
+  expect(states(v)).toEqual([['exec:pending', 'exec:pending']]);
+  const w = run(
+    [
+      { type: 'tool_result', tool: 'exec', call_id: 'a', result: 'looks like ERROR but is not' },
+      { type: 'tool_result', tool: 'exec', call_id: 'b', result: 'ok', is_error: true },
+    ],
+    v,
+  );
+  expect(runs(w)[0]!.calls.map((c) => [c.args?.command, c.state])).toEqual([
+    ['one', 'done'],
+    ['two', 'error'],
+  ]);
+});
+
+// FALLBACK: an event log from before call ids.
 test('without ids a result takes the newest pending call of its tool', () => {
   const v = run([
     { type: 'tool_call', tool: 'exec', args: { command: 'one' } },

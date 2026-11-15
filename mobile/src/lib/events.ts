@@ -171,6 +171,10 @@ function settleUnnamedQueued(v: View): View {
   return { ...v, items: v.items.map((i) => (old(i) ? { ...i, queued: false } : i)) };
 }
 
+/** is_error: the engine omits false, so with a call_id an absent one is false; without, unknown (an old log). */
+const errorOf = (e: Ev): boolean | undefined =>
+  typeof e.is_error === 'boolean' ? e.is_error : e.call_id ? false : undefined;
+
 const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 /** An ask_user call as the question it is, not as JSON. */
@@ -201,7 +205,10 @@ function fromHistory(v: View, it: Ev): View {
       if (it.tool === 'ask_user') return push(v, { kind: 'user', text: str(it.content) });
       return (
         settleCarried(v, str(it.tool), str(it.content), str(it.call_id)) ??
-        merge(v, withResult(v.items, str(it.tool), str(it.content), str(it.call_id) || undefined, String(v.n)))
+        merge(
+          v,
+          withResult(v.items, str(it.tool), str(it.content), str(it.call_id) || undefined, String(v.n), errorOf(it)),
+        )
       );
     case 'notification':
       return push(v, { kind: 'notice', notice: notices.fromHistoryNotification(str(it.content)) });
@@ -283,7 +290,10 @@ export function apply(v: View, ev: Ev): View {
       if (ev.tool === 'ask_user') return push(w, { kind: 'user', text: str(ev.result) });
       return (
         settleCarried(w, str(ev.tool), str(ev.result), str(ev.call_id)) ??
-        merge(w, withResult(w.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(w.n)))
+        merge(
+          w,
+          withResult(w.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(w.n), errorOf(ev)),
+        )
       );
     }
     case 'done':

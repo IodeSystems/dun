@@ -30,3 +30,19 @@ makes the right thing obvious"). Wire format and the full type list:
   tool result carried before this change exists only inside that result. A
   queued `user` event with no id (a trace from an older engine) is settled at
   the turn's end, as clients used to; that fallback is marked in both clients.
+
+## Tool calls
+
+- `tool_call {call_id, tool, args}` goes out when the call **starts**
+  (dispatch begins), so a client shows it running. Every dispatched call
+  has one, a refused one too.
+- `tool_result {call_id, tool, result, is_error?, elapsed_ms}` when it
+  returns. `result` is the text a person is shown (capped as the model's
+  is); `is_error` is the engine's verdict (an error, `ERROR…`, exec's
+  `[exit: …]`), omitted when false. History's `tool_call`/`tool_result`
+  items carry the same `call_id`, and `tool_result` items `is_error`.
+- A client pairs by `call_id`. Fallback, marked in both clients, for an
+  event log from before ids only: a result with no `call_id` goes to the
+  newest pending call of the same tool.
+- Order inside a call: `tool_call`, then (while it runs) whatever else
+  happens, then `tool_result`, then `delivered` for the messages it carried.

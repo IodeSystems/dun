@@ -523,7 +523,7 @@ var errEpoch = errors.New("seq from another epoch")
 func historyItems(items []dun.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, Content: it.Content, Tool: it.Tool, CallID: it.CallID, Args: it.Args})
+		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool, CallID: it.CallID, Args: it.Args})
 	}
 	return out
 }

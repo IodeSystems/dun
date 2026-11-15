@@ -872,9 +872,12 @@ func main() {
 				}
 			}()
 		}
-		cfg.OnToolCall = func(tool string, args map[string]any, result string) {
-			em.emit(&proto.ToolCall{Tool: tool, Args: args})
-			em.emit(&proto.ToolResult{Tool: tool, Result: result})
+		cfg.OnToolStart = func(c dun.ToolStart) {
+			em.emit(&proto.ToolCall{CallID: c.CallID, Tool: c.Tool, Args: c.Args})
+		}
+		cfg.OnToolEnd = func(r dun.ToolEnd) {
+			em.emit(&proto.ToolResult{CallID: r.CallID, Tool: r.Tool, Result: r.Result,
+				IsError: r.IsError, ElapsedMS: r.Elapsed.Milliseconds()})
 		}
 		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text}) }
 		cfg.OnDelivered = func(d dun.Delivery) {

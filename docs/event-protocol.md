@@ -15,8 +15,8 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `ready` | Servers spawned, tools available | `tools[]`, `servers[]`, `hint` |
 | `server` | Server status changed (`/rag`, `/lsp`) | `id`, `action`, `message`, `tools[]`, `servers[]` |
 | `token` | Streaming assistant text | `text` (chunk) |
-| `tool_call` | Agent invoking a tool | `tool`, `args` |
-| `tool_result` | Tool returned | `tool`, `result` |
+| `tool_call` | A tool call started | `call_id`, `tool`, `args` |
+| `tool_result` | Tool returned | `call_id`, `tool`, `result`, `is_error`, `elapsed_ms` |
 | `message` | Turn reply finalized | `role`, `content` |
 | `suggestions` | Predicted next messages | `items[]` |
 | `notification` | Proactive notification (RAG, background) | `kind`, `text` |
@@ -41,20 +41,14 @@ Tea copies the model each `Update`). Rendering is deferred via `renderDue` +
 
 ### Tool Call / Result Pairing
 
-A `tool_call` event creates a `convoEntry` with `pendingTool` set to its index.
-The matching `tool_result` folds into the same entry via `foldedTool()`, making
-the pair one collapsible unit. If no pending call exists, the result is appended
-as a new entry.
+`tool_call` is sent when the call starts, `tool_result` when it returns; both
+carry `call_id`, and a client pairs them by it (`session-events.md`).
 
 ### Queued Messages
 
-When the user types while a turn is running, the engine buffers the message
-(via `Harness.Say`) and emits a `queued` event. The TUI:
-
-1. Removes the echo from the conversation (added by `sendUser`)
-2. Stores the text in `queuedTexts` (shown in a pending area above the divider)
-3. On `done` or `error`, moves the queued messages into the conversation at the
-   delivery point
+A message typed while a turn runs is echoed as `user {id, queued: true}`; the
+engine later sends `delivered {ids}` or `withdrawn {ids}` for it
+(`session-events.md`).
 
 ## Direction: TUI → Engine (stdin, line-delimited JSON)
 

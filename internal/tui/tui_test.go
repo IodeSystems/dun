@@ -447,9 +447,9 @@ func TestTUI_AskPickerCustomAnswer(t *testing.T) {
 func TestTUI_ToolCallExpandCollapse(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m = resized(m, 100, 30)
-	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "node_read", "args": map[string]any{"sel": "F"}})
+	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "node_read", "call_id": "c1", "args": map[string]any{"sel": "F"}})
 	full := "line one\nline two\nline three that is quite long and would be clipped in the preview form"
-	m = m.handleEvent(evMsg{"type": "tool_result", "result": full})
+	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "node_read", "call_id": "c1", "result": full})
 
 	if len(m.convo) != 1 || m.convo[0].run == nil {
 		t.Fatalf("call+result should be one run block, got %d", len(m.convo))
@@ -781,7 +781,7 @@ func TestTUI_Clear(t *testing.T) {
 	m.convo = append(m.convo, convoEntry{collapsed: "some tool call"})
 	m.cur = "partial assistant reply"
 	m.busy = true
-	m.pendingTool = 0
+	m.activeTool = "exec"
 
 	m = typeStr(m, "/clear")
 	m = key(m, kEnter)
@@ -794,8 +794,8 @@ func TestTUI_Clear(t *testing.T) {
 	if len(m.convo) > 1 { // only the "session cleared" note remains
 		t.Fatalf("convo not cleared: %d entries", len(m.convo))
 	}
-	if m.cur != "" || m.busy || m.pendingTool != -1 {
-		t.Fatalf("not reset: cur=%q busy=%v pendingTool=%d", m.cur, m.busy, m.pendingTool)
+	if m.cur != "" || m.busy || m.activeTool != "" {
+		t.Fatalf("not reset: cur=%q busy=%v activeTool=%q", m.cur, m.busy, m.activeTool)
 	}
 	if !strings.Contains(convoText(m), "session cleared") {
 		t.Fatalf("expected clear confirmation, got: %s", convoText(m))

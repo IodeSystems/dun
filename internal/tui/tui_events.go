@@ -305,29 +305,22 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.suggestions = nil
 		m.endThinking()
 		m.flushCur()
+		// The call started (dun/toolevents.go): shown running until the
+		// tool_result that names its call_id. Appended; nothing above moves.
 		args, _ := ev["args"].(map[string]any)
-		if a := carriedMsg(str(ev["tool"]), args); a != nil {
-			// A message to another agent: its own box (agentmsg.go).
-			m.pendingTool = m.addMsg(a)
-		} else {
-			// Into the run's box (toolrun.go): appended, nothing above it moves.
-			m.pendingTool = m.runAddCall(str(ev["tool"]), args)
-		}
+		m.addCall(str(ev["tool"]), str(ev["call_id"]), args)
 		m.activeTool = callText(str(ev["tool"]), args, 40)
 		m.refresh()
 	case "tool_result":
 		result := str(ev["result"])
-		idx := m.pendingTool
-		if idx >= 0 && idx < len(m.convo) && m.convo[idx].msg != nil && !m.convo[idx].msg.done {
-			m.convo[idx].msg.setResult(result)
-			m.touchMsg(idx)
-		} else {
-			if idx < 0 || idx >= len(m.convo) || m.convo[idx].run == nil {
-				idx = m.runAddCall(str(ev["tool"]), nil) // a result with no call seen
-			}
-			m.runSetResult(idx, str(ev["tool"]), result)
+		var failed *bool
+		if b, ok := ev["is_error"].(bool); ok {
+			failed = &b
+		} else if _, ok := ev["call_id"]; ok {
+			no := false // the engine omits a false is_error
+			failed = &no
 		}
-		m.pendingTool = -1
+		m.callResult(str(ev["call_id"]), str(ev["tool"]), result, failed)
 		m.activeTool = ""
 		// Track tool result stats for /context
 		m.ctxStats.toolResults++
@@ -395,7 +388,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// child currently on screen: a late reply for a scope we have already
 		// left would paste someone else's conversation over this one.
 		if num(ev["agent"]) == m.scopeAgent && m.scopeAgent != 0 {
-			m.convo, m.cur, m.pendingTool = nil, "", -1
+			m.convo, m.cur = nil, ""
 			m.dropHold()
 			if p := str(ev["prompt"]); p != "" {
 				m.task = p
@@ -403,7 +396,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			items, _ := ev["items"].([]any)
 			// Not replay: no resume marker, and the last run stays open, since
 			// a child at work gets its call's result as the next agent_entry.
-			m.replayItems(items, -1)
+			m.replayItems(items)
 			m.refresh()
 		}
 	case "agent_entry":
@@ -739,7 +732,6 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// The conversation was cleared — by this client's /clear or another's.
 		m.convo = nil
 		m.cur = ""
-		m.pendingTool = -1
 		m.activeTool = ""
 		m.sel = -1
 		m.busy = false

@@ -159,13 +159,12 @@ func RunTUI(o TuiOpts) error {
 }
 
 type tuiModel struct {
-	proc        *dunProc
-	workspace   string
-	vp          convoPane
-	input       multilineInput
-	spin        spinner.Model
-	convo       []convoEntry // finalized conversation blocks
-	pendingTool int          // index of a tool call awaiting its result; -1 = none
+	proc      *dunProc
+	workspace string
+	vp        convoPane
+	input     multilineInput
+	spin      spinner.Model
+	convo     []convoEntry // finalized conversation blocks
 	// activeTool is the in-flight tool call rendered into the status line so
 	// "working…" says WHAT is running, not just that something is. Set on
 	// tool_call, cleared on tool_result. Empty while the model is thinking
@@ -477,7 +476,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
 	keys, keysErr := loadKeyMap()
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, pendingTool: -1, scrollPinned: true, userJump: -1, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, scrollPinned: true, userJump: -1, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
 }
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spin.Tick, m.input.BlinkTick(), waitForDump(m.dumpSig)}

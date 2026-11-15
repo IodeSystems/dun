@@ -119,6 +119,10 @@ type Config struct {
 	// turn's own rounds only. nil → not measured.
 	OnRequest  func(RequestStat)
 	OnToolCall func(tool string, args map[string]any, result string)
+	// OnToolStart and OnToolEnd bracket every dispatched call, paired by
+	// call id (toolevents.go): what a client shows a running tool from.
+	OnToolStart func(ToolStart)
+	OnToolEnd   func(ToolEnd)
 	// OnServerStarted reports an added (non-built-in) server that started in
 	// the background at session start: err is nil when it is up and its
 	// tools have joined the tool set.
@@ -360,6 +364,8 @@ type Harness struct {
 	// lifted are the person's messages the next stored tool result carries
 	// (delivery.go). Guarded by noteMu.
 	lifted []queued
+	// toolCur is the dispatched call's shown result (toolevents.go).
+	toolCur toolCur
 	// userWaitCh is closed by Say, so a tool sitting in a wait can stop and let
 	// the message reach the model now. Guarded by noteMu; see userWaiting.
 	userWaitCh chan struct{}
