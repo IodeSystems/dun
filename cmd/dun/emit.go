@@ -257,7 +257,7 @@ func docsProto(docs []dun.DocHitInfo) []proto.DocHit {
 func historyProto(items []dun.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, proto.HistoryItem{Kind: it.Kind, Content: it.Content, Tool: it.Tool,
+		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, Content: it.Content, Tool: it.Tool,
 			CallID: it.CallID, Args: it.Args})
 	}
 	return out

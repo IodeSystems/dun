@@ -173,10 +173,29 @@ test('/model is the client picker; models and settings are kept', () => {
   expect(filterModels(v.models!, 'or qwen').map((r) => r.provider)).toEqual(['or']);
 });
 
-test('a queued message loses its mark when the turn that read it ends', () => {
+test('a queued message with no id (an old event log) loses its mark when the turn ends', () => {
   const v = run([{ type: 'turn' }, { type: 'user', content: 'also this', queued: true }]);
   expect(v.items[0]).toMatchObject({ queued: true });
   expect(apply(v, { type: 'done' }).items[0]).toMatchObject({ queued: false });
+});
+
+test('a queued message with an id waits for delivered, not for the turn to end', () => {
+  const v = run([{ type: 'turn' }, { type: 'user', id: 'm1', content: 'also this', queued: true }, { type: 'done' }]);
+  expect(v.items[0]).toMatchObject({ queued: true, id: 'm1' });
+  const w = apply(v, { type: 'delivered', ids: ['m1'] });
+  expect(w.items).toHaveLength(1);
+  expect(w.items[0]).toMatchObject({ kind: 'user', id: 'm1', text: 'also this' });
+  expect(w.items[0]).not.toMatchObject({ queued: true });
+});
+
+test('withdrawn drops the rows it names, by id, not by text', () => {
+  const v = run([
+    { type: 'user', id: 'a', content: 'same', queued: true },
+    { type: 'user', id: 'b', content: 'same', queued: true },
+    { type: 'withdrawn', ids: ['b'] },
+  ]);
+  expect(v.items).toHaveLength(1);
+  expect(v.items[0]).toMatchObject({ id: 'a', queued: true });
 });
 
 test('a provider that failed to list (ids null) does not break the picker', () => {
@@ -187,17 +206,31 @@ test('a provider that failed to list (ids null) does not break the picker', () =
   expect(filterModels(ps, '').map((r) => r.id)).toEqual(['m1']);
 });
 
-test('a queued message loses its mark at the tool result that lifts it, as in the TUI', () => {
+test('a delivered message lands after the tool result that carried it, live as on replay', () => {
   const v = run([
     { type: 'turn' },
     { type: 'tool_call', tool: 'exec', args: { command: 'ls' } },
-    { type: 'user', content: 'also this', queued: true },
+    { type: 'user', id: 'm1', content: 'also this', queued: true },
     { type: 'queued', count: 1 },
   ]);
   expect(v.status).toBe('1 message(s) queued for the running turn');
-  const w = apply(v, { type: 'tool_result', tool: 'exec', result: 'ok' });
-  expect(w.items.find((i) => i.kind === 'user')).toMatchObject({ queued: false });
+  let w = apply(v, { type: 'tool_result', tool: 'exec', result: 'ok' });
+  expect(w.items.find((i) => i.kind === 'user')).toMatchObject({ queued: true });
+  w = run(
+    [
+      { type: 'delivered', ids: ['m1'] },
+      { type: 'queued', count: 0 },
+    ],
+    w,
+  );
+  expect(w.items.map((i) => i.kind)).toEqual(['tools', 'user']);
   expect(w.status).toBe('');
+  const replayed = replaceWith([
+    { kind: 'tool_call', tool: 'exec', args: { command: 'ls' } },
+    { kind: 'tool_result', tool: 'exec', content: 'ok' },
+    { kind: 'user', id: 'm1', queued: true, content: 'also this' },
+  ]);
+  expect(replayed.items.map((i) => i.kind)).toEqual(['tools', 'user']);
 });
 
 test('an interrupted turn keeps its partial reply, ends with a note, and keeps queued marks', () => {

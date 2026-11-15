@@ -877,6 +877,12 @@ func main() {
 			em.emit(&proto.ToolResult{Tool: tool, Result: result})
 		}
 		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text}) }
+		cfg.OnDelivered = func(d dun.Delivery) {
+			em.emit(&proto.Delivered{IDs: d.IDs, CallID: d.CallID})
+			if h, _ := started.Load().(*dun.Harness); h != nil {
+				em.emit(&proto.Queued{Count: h.Queued()})
+			}
+		}
 		cfg.OnLogin = func(server, url string) { em.emit(&proto.McpLogin{Server: server, URL: url}) }
 		// A memory trigger reports like /remember does, so the UI shows it the
 		// same way.

@@ -48,13 +48,13 @@ func TestRephrasePrompt(t *testing.T) {
 // leaves the rest of the queue (an aside) alone.
 func TestUnqueue(t *testing.T) {
 	h := &Harness{}
-	h.Say("fix the typo")
-	h.Say("in main.go")
+	h.SayAs("m1", "fix the typo")
+	h.SayAs("m2", "in main.go")
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedAside, text: "an aside"})
 	h.noteMu.Unlock()
 	got := h.Unqueue()
-	if len(got) != 2 || got[0] != "fix the typo" || got[1] != "in main.go" {
+	if len(got) != 2 || got[0] != (QueuedMsg{ID: "m1", Text: "fix the typo"}) || got[1] != (QueuedMsg{ID: "m2", Text: "in main.go"}) {
 		t.Errorf("unqueued %v", got)
 	}
 	if len(h.queue) != 1 || h.queue[0].kind != queuedAside {

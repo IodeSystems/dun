@@ -45,6 +45,9 @@ const (
 type queued struct {
 	kind queuedKind
 	text string
+	// id is a person's message's id (queuedUser): the user event's, and the
+	// entry's it becomes (delivery.go).
+	id string
 	// The rest is set only through AsideWith (asidettl.go): a key a newer
 	// version replaces, when an undelivered aside becomes a notification
 	// (escalateAt), and whether it is dropped when the next turn starts.
@@ -137,11 +140,15 @@ func (h *Harness) Notify(text string) {
 // A tool call blocked in a wait (exec's grace, agent wait:true) would hold the
 // message for as long as it waits — an hour, for exec timeout:3600. So Say
 // also releases those waits: see userWaiting.
-func (h *Harness) Say(text string) {
+func (h *Harness) Say(text string) { h.SayAs(NewMessageID(), text) }
+
+// SayAs is Say for a message whose id the caller gave out already (the user
+// event's): delivered and withdrawn name it.
+func (h *Harness) SayAs(id, text string) {
 	h.settleCancel() // the user answered: no settle (settle.go)
 	h.workInput(text)
 	h.noteMu.Lock()
-	h.queue = append(h.queue, queued{kind: queuedUser, text: text})
+	h.queue = append(h.queue, queued{kind: queuedUser, text: text, id: id})
 	if h.userWaitCh != nil {
 		close(h.userWaitCh)
 		h.userWaitCh = nil
@@ -245,6 +252,7 @@ func (h *Harness) liftQueued(result string) string {
 	}
 	// Track notifications that were smuggled into this tool result.
 	h.noteMu.Lock()
+	h.stashLiftedLocked(items) // recorded after the result (deliverLifted)
 	for _, q := range items {
 		if q.kind == queuedNotification {
 			h.notificationsLifted++
@@ -294,12 +302,21 @@ func (h *Harness) drain(pred func(queued) bool) []queued {
 // them.
 func (h *Harness) flushQueued() int {
 	items := h.drain(func(q queued) bool { return q.policy().causesTurn })
+	var ids []string
 	for _, q := range items {
+		id := q.id
+		if id == "" {
+			id = uuid.New().String()
+		} else {
+			ids = append(ids, id)
+		}
 		h.store.publish(agent.Entry{
-			ID: uuid.New().String(), Kind: q.policy().entryKind,
+			ID: id, Kind: q.policy().entryKind,
 			Tag: q.tag, Content: q.text, CreatedAt: time.Now().UnixNano(),
 		})
 	}
+	// The person's messages are the turn's input now: read by the model.
+	h.delivered(Delivery{IDs: ids})
 	return len(items)
 }
 
@@ -342,14 +359,14 @@ func (h *Harness) Pending() int {
 // yet and returns them, oldest first (USER 2026-10-27: up with queued
 // messages loads them back into the composer, merged, to fix: "enter oops
 // fix"). One the turn already took stays where it is.
-func (h *Harness) Unqueue() []string {
+func (h *Harness) Unqueue() []QueuedMsg {
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()
-	var out []string
+	var out []QueuedMsg
 	kept := h.queue[:0]
 	for _, q := range h.queue {
 		if q.kind == queuedUser {
-			out = append(out, q.text)
+			out = append(out, QueuedMsg{ID: q.id, Text: q.text})
 			continue
 		}
 		kept = append(kept, q)

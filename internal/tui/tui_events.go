@@ -227,33 +227,6 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.ctxStats.charsRecapped += int(chars)
 		}
 	case "control":
-		// The queued messages taken back: out of the conversation's
-		// "(queued)" lines and into the composer, ahead of what is there.
-		if str(ev["id"]) == "unqueue" {
-			var texts []string
-			_ = json.Unmarshal([]byte(str(ev["action"])), &texts)
-			if len(texts) == 0 {
-				m.flashText, m.flashUntil = "nothing to take back: the turn already took them", time.Now().Add(flashFor)
-				break
-			}
-			for _, t := range texts {
-				for i := len(m.convo) - 1; i >= 0; i-- {
-					if m.convo[i].provisional && m.convo[i].provisionalText == t {
-						m.convo = append(m.convo[:i], m.convo[i+1:]...)
-						break
-					}
-				}
-			}
-			merged := strings.Join(texts, "\n")
-			if cur := m.input.Value(); strings.TrimSpace(cur) != "" {
-				merged += "\n" + cur
-			}
-			m.input.SetValue(merged)
-			m.input.CursorEnd()
-			m.setFocus(focusInput)
-			m.refresh()
-			break
-		}
 		// /schedule edit <id>: the entry's text, into the composer to be
 		// changed — in the client that asked; the others show the line.
 		if str(ev["id"]) == "schedule-edit" {
@@ -361,22 +334,32 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		if strings.Contains(result, "[") && strings.Contains(result, "characters elided") {
 			m.ctxStats.resultsTruncated++
 		}
-		// liftQueued drains the buffer into every tool result. So any provisional
-		// messages were just delivered to the LLM — clear the provisional marker
-		// and restore normal style.
-		for i := range m.convo {
-			if m.convo[i].provisional {
-				m.convo[i].provisional = false
-				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
-				m.convo[i].userText = m.convo[i].provisionalText
-				m.convo[i].provisionalText = ""
-				m.convo[i].invalidateWrap()
+		m.refresh()
+	case "delivered":
+		// Queued messages reached the model (dun/delivery.go): ordinary user
+		// rows now, after the tool result that carried them. Never re-pinned:
+		// a reader who has scrolled up stays where they are (USER 2026-10-28:
+		// zero bounce).
+		m.settleDelivered(strList(ev["ids"]))
+		m.refresh()
+	case "withdrawn":
+		// Queued messages taken back: out of every client's conversation,
+		// and into the composer of the one that asked, ahead of what is there.
+		texts := m.withdraw(strList(ev["ids"]))
+		if m.unqueueAsk {
+			m.unqueueAsk = false
+			if len(texts) == 0 {
+				m.flashText, m.flashUntil = "nothing to take back: the turn already took them", time.Now().Add(flashFor)
+			} else {
+				merged := strings.Join(texts, "\n")
+				if cur := m.input.Value(); strings.TrimSpace(cur) != "" {
+					merged += "\n" + cur
+				}
+				m.input.SetValue(merged)
+				m.input.CursorEnd()
+				m.setFocus(focusInput)
 			}
 		}
-		// Never re-pinned here: a delivered message was in view when it was
-		// sent (sending pins), and a reader who has scrolled up since stays
-		// where they are (USER 2026-10-28: zero bounce).
-		m.queuedMsgs = 0
 		m.refresh()
 	case "history":
 		if m.skipHistory {
@@ -554,7 +537,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		// rendered here, not when sent, so every client shows the same
 		// conversation. One buffered into the RUNNING turn is marked
 		// provisional so it shows where it belongs — not stuck above the
-		// divider; the marks clear when the turn ends.
+		// divider; the engine's delivered or withdrawn event, by id, ends it.
 		text := str(ev["content"])
 		if ev["queued"] == true {
 			m.convo = append(m.convo, convoEntry{
@@ -562,6 +545,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 				provisional:     true,
 				provisionalText: text,
 				userText:        text,
+				msgID:           str(ev["id"]),
 			})
 		} else {
 			m.task = text
@@ -697,18 +681,8 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			}
 		}
 		m.interrupting = false
-		// Clear any remaining provisional markers — the turn is done, so
-		// everything was delivered to the LLM. After an interrupt they were
-		// not: they are the next turn's message, which the engine starts at
-		// once, and its done settles them.
-		for i := range m.convo {
-			if !cut && m.convo[i].provisional {
-				m.convo[i].provisional = false
-				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
-				m.convo[i].userText = m.convo[i].provisionalText
-				m.convo[i].provisionalText = ""
-				m.convo[i].invalidateWrap()
-			}
+		if !cut {
+			m.settleUnnamedQueued() // an event log from before ids only
 		}
 		// Not re-pinned: a reader who scrolled up stays where they are (USER
 		// 2026-10-28: zero bounce); a pinned one already follows.
@@ -742,17 +716,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.append(StErr.Render("error: " + str(ev["error"])))
 			m.attnErr = true // the window's "!" (tmux.go)
 		}
-		// Clear any remaining provisional markers — the engine flushes them on
-		// error too, so they're part of the conversation history.
-		for i := range m.convo {
-			if m.convo[i].provisional {
-				m.convo[i].provisional = false
-				m.convo[i].collapsed = stUser.Render("› " + m.convo[i].provisionalText)
-				m.convo[i].userText = m.convo[i].provisionalText
-				m.convo[i].provisionalText = ""
-				m.convo[i].invalidateWrap()
-			}
-		}
+		m.settleUnnamedQueued() // an event log from before ids only
 		// Not re-pinned: a reader who scrolled up stays where they are (USER
 		// 2026-10-28: zero bounce); a pinned one already follows.
 		m.busy, m.queuedMsgs = false, 0

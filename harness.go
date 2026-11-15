@@ -18,8 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/iodesystems/agentkit/agent"
 	filetools "github.com/iodesystems/agentkit/files"
 	"github.com/iodesystems/agentkit/llm"
@@ -200,6 +198,10 @@ type Config struct {
 	// OnNotify fires when a plain notification (KindNotification) is injected
 	// into the conversation (e.g. a background job's completion).
 	OnNotify func(text string)
+	// OnDelivered fires when the person's messages reached the model: after
+	// the tool result that carried them is stored, or when a turn takes them
+	// as its input (delivery.go).
+	OnDelivered func(Delivery)
 	// OnDocs fires when the proactive-RAG preparer surfaces relevant documents —
 	// one aggregated summary per pass (found/surfaced counts + surfaced docs).
 	OnDocs func(DocsNote)
@@ -355,6 +357,9 @@ type Harness struct {
 	settle     settleState // the delayed end-of-turn report (settle.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model
+	// lifted are the person's messages the next stored tool result carries
+	// (delivery.go). Guarded by noteMu.
+	lifted []queued
 	// userWaitCh is closed by Say, so a tool sitting in a wait can stop and let
 	// the message reach the model now. Guarded by noteMu; see userWaiting.
 	userWaitCh chan struct{}
@@ -673,6 +678,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		cfg: cfg, specs: servers, sessSw: sessSw, exts: exts, extErrs: extErrs, lastErr: map[string]string{}, lastStart: map[string]time.Duration{}, starting: map[string]time.Time{}, closed: make(chan struct{}),
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
+	store.onToolResult = h.deliverLifted
 	// /effort's saved level (effort.go), unless this harness was given its
 	// own: a child spawned with an effort keeps it, and does not save it.
 	if cfg.Effort != "" {
@@ -886,6 +892,12 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 // would be the one order the provider rejects), and the turn then retries the
 // transport for as long as the policy allows.
 func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error) {
+	return h.AskAs(ctx, NewMessageID(), task)
+}
+
+// AskAs is Ask for a message whose id the caller gave out already (the user
+// event's): the entry it becomes keeps it, so history names it the same.
+func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult, error) {
 	ctx, end := h.interruptible(ctx)
 	defer end()
 	h.clearBudgetNotes()
@@ -893,7 +905,7 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 	h.prepareTurn(ctx)
 	h.workInput(task)
 	h.store.publish(agent.Entry{
-		ID: uuid.New().String(), Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
+		ID: id, Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
 	res, err := h.turnThenTriggers(ctx)
 	h.settleEnd(true, false, err)

@@ -44,6 +44,8 @@ func init() {
 	event[Suggestions]("suggestions")
 	event[Exit]("exit")
 	event[UserEcho]("user")
+	event[Delivered]("delivered")
+	event[Withdrawn]("withdrawn")
 	event[ImageRefused]("image_refused")
 	event[Turn]("turn")
 	event[Answered]("answered")
@@ -456,7 +458,13 @@ type History struct {
 
 // HistoryItem mirrors dun.HistoryItem.
 type HistoryItem struct {
-	Kind    string         `json:"kind"`
+	Kind string `json:"kind"`
+	// ID is a user message's id, the one its user event carried. Queued: a
+	// tool result carried it to the model mid-turn (it shows after that
+	// result); otherwise it was a turn's input. A log written before ids
+	// has none for lifted messages: they are only inside the tool result.
+	ID      string         `json:"id,omitempty"`
+	Queued  bool           `json:"queued,omitempty"`
 	Content string         `json:"content,omitempty"`
 	Tool    string         `json:"tool,omitempty"`
 	CallID  string         `json:"call_id,omitempty"`
@@ -685,9 +693,30 @@ type Exit struct {
 // UserEcho is a user message the engine took, sent to every client so each
 // renders it — not just the one that typed it. Queued says it went into the
 // running turn rather than starting one.
+//
+// ID names the message from here on: delivered and withdrawn list it, and
+// history's user item carries it. Empty only from an engine older than ids.
 type UserEcho struct {
+	ID      string `json:"id,omitempty"`
 	Content string `json:"content"`
 	Queued  bool   `json:"queued,omitempty"`
+}
+
+// Delivered: queued messages reached the model. CallID is the tool call
+// whose result carried them (the event follows that tool_result, the order
+// history has); empty when a turn took them as its input. A client turns
+// each queued row into a delivered one, after what it shows so far.
+type Delivered struct {
+	IDs    []string `json:"ids"`
+	CallID string   `json:"call_id,omitempty"`
+}
+
+// Withdrawn: queued messages taken back before the model read them (the
+// control command "unqueue"), to every client: each drops those rows. The
+// client that asked puts their text in its composer, from the user events it
+// has; the texts are not repeated here.
+type Withdrawn struct {
+	IDs []string `json:"ids"`
 }
 
 // ImageRefused: a user message with images was not sent, because the model

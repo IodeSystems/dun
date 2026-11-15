@@ -508,7 +508,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// scroll, as before.
 			if m.queuedMsgs > 0 && m.input.AtFirstLine() && !m.paletteActive() {
 				if m.proc.controlCmd("unqueue", "") {
-					m.queuedMsgs = 0
+					m.queuedMsgs, m.unqueueAsk = 0, true
 				}
 				return m, nil
 			}

@@ -21,7 +21,9 @@ func (h *Harness) Resumed() int { return h.store.Loaded() }
 // without re-running any turn. A tool_call and its result share a CallID so the
 // client folds them into one block.
 type HistoryItem struct {
-	Kind    string         `json:"kind"` // user|assistant|tool_call|tool_result|notification|reasoning
+	Kind    string         `json:"kind"`             // user|assistant|tool_call|tool_result|notification|reasoning|command
+	ID      string         `json:"id,omitempty"`     // a user message's id: the user event's (delivery.go)
+	Queued  bool           `json:"queued,omitempty"` // a user message a tool result carried mid-turn
 	Content string         `json:"content,omitempty"`
 	Tool    string         `json:"tool,omitempty"`    // tool_call / tool_result
 	CallID  string         `json:"call_id,omitempty"` // pairs a tool_call with its result
@@ -66,7 +68,9 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 		}
 		switch e.Kind {
 		case agent.KindUser:
-			out = append(out, HistoryItem{Kind: "user", Content: e.Content})
+			out = append(out, HistoryItem{Kind: "user", ID: e.ID, Content: e.Content})
+		case kindDelivered:
+			out = append(out, HistoryItem{Kind: "user", ID: e.ID, Queued: true, Content: e.Content})
 		case agent.KindAssistant:
 			if strings.TrimSpace(e.Content) == "" {
 				continue

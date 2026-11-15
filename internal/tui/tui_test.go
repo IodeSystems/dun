@@ -1327,7 +1327,7 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	}
 
 	// The engine's echo (queued) shows it provisional, dimmed, in place.
-	m = m.handleEvent(evMsg{"type": "user", "content": "also update the README", "queued": true})
+	m = m.handleEvent(evMsg{"type": "user", "id": "m1", "content": "also update the README", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "also update the README", "count": 1.0})
 	if m.queuedMsgs != 1 {
 		t.Errorf("queuedMsgs = %d; want 1", m.queuedMsgs)
@@ -1353,7 +1353,7 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	}
 
 	// A second one batches with it.
-	m = m.handleEvent(evMsg{"type": "user", "content": "and the changelog", "queued": true})
+	m = m.handleEvent(evMsg{"type": "user", "id": "m2", "content": "and the changelog", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "and the changelog", "count": 2.0})
 	found2 := false
 	for _, e := range m.convo {
@@ -1369,15 +1369,21 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 		t.Errorf("second queued message not counted:\n%s", stripANSI(m.View().Content))
 	}
 
-	// The turn ending clears the provisional markers.
+	// The turn ending alone settles nothing: the engine says when they
+	// reached the model.
 	m = m.handleEvent(evMsg{"type": "done"})
+	if m.queuedRow("m1") < 0 {
+		t.Fatal("done settled a message the engine did not say was delivered")
+	}
+	m = m.handleEvent(evMsg{"type": "delivered", "ids": []any{"m1", "m2"}})
+	m = m.handleEvent(evMsg{"type": "queued", "count": 0.0})
 	if m.queuedMsgs != 0 {
-		t.Errorf("queuedMsgs = %d after done; want 0", m.queuedMsgs)
+		t.Errorf("queuedMsgs = %d after delivered; want 0", m.queuedMsgs)
 	}
 	// No provisional entries should remain.
 	for i, e := range m.convo {
 		if e.provisional {
-			t.Fatalf("convo[%d] should not be provisional after done", i)
+			t.Fatalf("convo[%d] should not be provisional after delivered", i)
 		}
 	}
 	// Both messages should now be in the convo as normal user entries.
@@ -1390,8 +1396,8 @@ func TestTUI_SendWhileBusyQueues(t *testing.T) {
 	}
 }
 
-// Queued messages should also move into the convo when the turn errors — the
-// engine flushes them on error, so they're part of the conversation history.
+// A queued message with no id (an event log from before ids) settles when
+// the turn errors: the fallback, since no delivered event can name it.
 func TestTUI_QueuedMessagesOnError(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 100, 30)
@@ -2779,14 +2785,15 @@ func TestSuggest_NoTimerWhenItCouldNeverFire(t *testing.T) {
 }
 
 // Pending messages: a mid-turn message is queued, then lifted into the next
-// tool result. The provisional marker must clear on tool_result (not wait for done),
-// and the message must remain in the convo as a normal user entry.
+// tool result. The tool result alone settles nothing; the engine's delivered
+// event, after it, makes the row a normal user entry after the result.
 func TestTUI_PendingClearedOnToolResult(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
 	// Simulate a queued mid-turn message (the "queued" event).
-	m = m.handleEvent(evMsg{"type": "user", "content": "fix the bug", "queued": true})
+	m = m.handleEvent(evMsg{"type": "tool_call", "tool": "eval", "call_id": "c1", "args": map[string]any{}})
+	m = m.handleEvent(evMsg{"type": "user", "id": "m1", "content": "fix the bug", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "fix the bug", "count": 1.0})
 	// The message should be provisional in the convo.
 	found := false
@@ -2803,16 +2810,23 @@ func TestTUI_PendingClearedOnToolResult(t *testing.T) {
 		t.Fatalf("queued event should set queuedMsgs, got %d", m.queuedMsgs)
 	}
 
-	// A tool result arrives — liftQueued drained the buffer, so the provisional
-	// marker must clear and the message renders normally.
-	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "ok"})
+	// A tool result arrives: still queued until the engine says delivered.
+	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "call_id": "c1", "result": "ok"})
+	if m.queuedRow("m1") < 0 {
+		t.Fatal("the tool result settled the message by itself")
+	}
+	m = m.handleEvent(evMsg{"type": "delivered", "ids": []any{"m1"}, "call_id": "c1"})
+	m = m.handleEvent(evMsg{"type": "queued", "count": 0.0})
 	for i, e := range m.convo {
 		if e.provisional {
-			t.Fatalf("convo[%d] should not be provisional after tool_result", i)
+			t.Fatalf("convo[%d] should not be provisional after delivered", i)
 		}
 	}
+	if last := m.convo[len(m.convo)-1]; last.userText != "fix the bug" || last.msgID != "m1" {
+		t.Fatalf("the delivered message is not last: %+v", last)
+	}
 	if m.queuedMsgs != 0 {
-		t.Fatalf("tool_result should clear queuedMsgs, got %d", m.queuedMsgs)
+		t.Fatalf("queued count 0 should clear queuedMsgs, got %d", m.queuedMsgs)
 	}
 
 	// The queued message should be in the convo as a user entry.
@@ -3061,9 +3075,9 @@ func TestTUI_MultiplePendingMessages(t *testing.T) {
 	m := newTUIModel(&dunProc{}, "/ws")
 	m.busy = true
 
-	m = m.handleEvent(evMsg{"type": "user", "content": "first", "queued": true})
+	m = m.handleEvent(evMsg{"type": "user", "id": "a", "content": "first", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "first", "count": 1.0})
-	m = m.handleEvent(evMsg{"type": "user", "content": "second", "queued": true})
+	m = m.handleEvent(evMsg{"type": "user", "id": "b", "content": "second", "queued": true})
 	m = m.handleEvent(evMsg{"type": "queued", "text": "second", "count": 2.0})
 
 	// Both should be provisional.
@@ -3078,14 +3092,15 @@ func TestTUI_MultiplePendingMessages(t *testing.T) {
 	}
 
 	m = m.handleEvent(evMsg{"type": "tool_result", "tool": "eval", "result": "ok"})
+	m = m.handleEvent(evMsg{"type": "delivered", "ids": []any{"a", "b"}})
 	for i, e := range m.convo {
 		if e.provisional {
-			t.Fatalf("convo[%d] should not be provisional after tool_result", i)
+			t.Fatalf("convo[%d] should not be provisional after delivered", i)
 		}
 	}
 
 	text := convoText(m)
-	if !strings.Contains(text, "first") || !strings.Contains(text, "second") {
+	if i, j := strings.Index(text, "first"), strings.Index(text, "second"); i < 0 || j < i {
 		t.Fatalf("convo should contain both messages: %q", text)
 	}
 }

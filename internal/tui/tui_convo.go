@@ -178,8 +178,10 @@ func (m *tuiModel) replayItems(items []any, run int) int {
 		switch str(im["kind"]) {
 		case "user":
 			m.endRun()
-			m.task = str(im["content"]) // the task line survives a resume
-			m.convo = append(m.convo, convoEntry{collapsed: userRow(str(im["content"])), userText: str(im["content"])})
+			if im["queued"] != true { // one a tool result carried started nothing
+				m.task = str(im["content"]) // the task line survives a resume
+			}
+			m.convo = append(m.convo, convoEntry{collapsed: userRow(str(im["content"])), userText: str(im["content"]), msgID: str(im["id"])})
 			n++
 		case "assistant":
 			m.endRun()

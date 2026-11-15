@@ -36,11 +36,12 @@ type convoEntry struct {
 	askOpen bool
 	// provisional marks a message that was typed mid-turn and is queued for
 	// delivery. It appears in the conversation with a dimmed style so the user
-	// knows it landed but hasn't been delivered to the model yet. When the turn
-	// ends and the messages are delivered, they lose the provisional marker and
-	// render as normal user messages.
+	// knows it landed but hasn't been delivered to the model yet. The engine's
+	// delivered event, naming msgID, makes it a normal user message
+	// (delivery.go); withdrawn takes it out.
 	provisional     bool
 	provisionalText string // original text, used to restore normal style on delivery
+	msgID           string // the user event's id: what delivered and withdrawn name
 	userText        string // raw user message text (non-empty for user messages only)
 	// stats is the cost of the turn this message started (turnstats.go):
 	// shown under it when it is opened.

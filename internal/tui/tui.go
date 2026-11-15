@@ -260,6 +260,10 @@ type tuiModel struct {
 	// composer takes the text back (every client sees the event).
 	slashLine    string
 	schedEditAsk string
+	// unqueueAsk: THIS client sent "unqueue", so the withdrawn event that
+	// answers it puts the texts in this composer (every client drops the
+	// rows; delivery.go).
+	unqueueAsk   bool
 	flashUntil   time.Time      // when it goes
 	pulsePending bool           // a pulse tick is scheduled
 	bandRaw      []string       // the selected block's rows before the band, for a pulse step
