@@ -111,11 +111,14 @@ export function thinkHeader(t: Thought, now: number): string {
   return '✻ thought' + w;
 }
 
-/** The index of the thought still streaming in items, or -1 (liveThought). */
+type Holder = { kind: string; thoughts?: (Thought & { at: number })[] };
+
+/** The index of the thought still streaming in items (also the last thought of a tool run), or -1 (liveThought). */
 export function liveThought<T extends { kind: string }>(items: T[]): number {
   for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i] as T & Partial<Thought>;
+    const it = items[i] as T & Partial<Thought> & Holder;
     if (it.kind === 'thinking' && it.live) return i;
+    if (it.kind === 'tools' && it.thoughts?.at(-1)?.live) return i;
   }
   return -1;
 }
@@ -125,6 +128,12 @@ export function endThought<T extends { kind: string }>(items: T[], at: number, c
   const i = liveThought(items);
   if (i < 0) return items;
   const out = [...items];
-  out[i] = { ...out[i], live: false, end: at, ...(cut ? { cut: true } : {}) } as unknown as T;
+  const it = out[i] as T & Holder;
+  const close = { live: false, end: at, ...(cut ? { cut: true } : {}) };
+  if (it.kind === 'tools') {
+    const th = (it.thoughts ?? []).slice();
+    th[th.length - 1] = { ...(th[th.length - 1] as Thought & { at: number }), ...close };
+    out[i] = { ...it, thoughts: th };
+  } else out[i] = { ...it, ...close };
   return out;
 }

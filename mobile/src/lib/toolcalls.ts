@@ -11,10 +11,14 @@
 // A call whose id matches an earlier orphan result fills that entry's args.
 //
 // Consecutive calls fold into one run (internal/tui/toolrun.go): a call joins
-// the last transcript item when that item is a run; anything shown after a
-// run (a reply, a note, a user message) ends it, and the next call starts a
+// the last transcript item when that item is a run; a finished thought just
+// above takes over into the run's first place, as the TUI does (runAddCall).
+// Thinking is added to the open run (withThought) and does not end it;
+// anything else shown after a run (a reply, a note, a user message) ends it, and the next call starts a
 // new one. Pairing looks at every run, not only the last, so a result that
 // arrives late still finds its call.
+
+import type { Thought } from './thinking';
 
 export type CallState = 'pending' | 'done' | 'error';
 
@@ -28,7 +32,14 @@ export type ToolCall = {
   state: CallState;
 };
 
-export type Run = { key: string; kind: 'tools'; calls: ToolCall[] };
+/**
+ * A thought inside a run: at is how many calls came before it, so the run
+ * shows calls and thoughts in order (toolrun.go runItem). Thinking between
+ * calls does not end a run; a reply, a user message or a notice does.
+ */
+export type RunThought = Thought & { at: number };
+
+export type Run = { key: string; kind: 'tools'; calls: ToolCall[]; thoughts?: RunThought[] };
 
 /** The smallest shape a transcript item needs for these functions. */
 type Keyed = { key: string; kind: string };
@@ -92,7 +103,30 @@ function addCall<T extends Keyed>(items: T[], c: ToolCall, newKey: string): { it
     out[out.length - 1] = { ...run, calls: [...run.calls, c] } as unknown as T;
     return { items: out, added: false };
   }
+  if (last?.kind === 'thinking') {
+    const t = last as unknown as Thought;
+    if (!t.live) {
+      const { text, start, end, cut } = t;
+      const th: RunThought = { text, start, end, live: false, at: 0, ...(cut ? { cut } : {}) };
+      const out = items.slice();
+      out[out.length - 1] = { key: last.key, kind: 'tools', calls: [c], thoughts: [th] } as unknown as T;
+      return { items: out, added: false };
+    }
+  }
   return { items: [...items, { key: newKey, kind: 'tools', calls: [c] } as unknown as T], added: true };
+}
+
+/** A thought into the open run (the last item), after its calls so far; false when no run is open. */
+export function withThought<T extends Keyed>(items: T[], t: Thought): T[] | null {
+  const last = items[items.length - 1];
+  if (last?.kind !== 'tools') return null;
+  const run = last as unknown as Run;
+  const out = items.slice();
+  out[out.length - 1] = {
+    ...run,
+    thoughts: [...(run.thoughts ?? []), { ...t, at: run.calls.length }],
+  } as unknown as T;
+  return out;
 }
 
 /** A call: into the open run, or a new one; or the args of its orphan result. */

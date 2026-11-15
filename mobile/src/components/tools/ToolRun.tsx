@@ -13,10 +13,12 @@
 import { createElement, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import type { Thought } from '@/lib/thinking';
 import type { Run, ToolCall } from '@/lib/toolcalls';
 import { callText, failLines, preview, runSummary, type Tone } from '@/lib/tooltext';
 import { font, mono, space, useColors } from '@/lib/theme';
 
+import { Thinking } from '../thinking/Thinking';
 import { bodyFor } from './registry';
 
 /** How a preview joins its call: a range or a count follows the path, a verdict follows an arrow. */
@@ -60,6 +62,18 @@ export function ToolCallRow({ call }: { call: ToolCall }) {
   );
 }
 
+/** The run's calls and thoughts in order (a thought's `at` is the calls before it). */
+function steps(run: Run): ({ call: ToolCall } | { thought: Thought })[] {
+  const out: ({ call: ToolCall } | { thought: Thought })[] = [];
+  const ts = run.thoughts ?? [];
+  let k = 0;
+  for (let i = 0; i <= run.calls.length; i++) {
+    while (k < ts.length && ts[k]!.at <= i) out.push({ thought: ts[k++]! });
+    if (i < run.calls.length) out.push({ call: run.calls[i]! });
+  }
+  return out;
+}
+
 /**
  * A run of one call is that call's line alone (toolrun.go single: one call
  * said once). A longer run is one section, collapsed to its summary; a press
@@ -69,14 +83,15 @@ export function ToolRun({ run }: { run: Run }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
   const frame = { backgroundColor: c.sunken, borderRadius: 8, padding: space.sm, gap: space.xs };
-  if (run.calls.length === 1) {
+  const thoughts = run.thoughts ?? [];
+  if (run.calls.length === 1 && thoughts.length === 0) {
     return (
       <View style={frame}>
         <ToolCallRow call={run.calls[0]!} />
       </View>
     );
   }
-  const s = runSummary(run.calls);
+  const s = runSummary(run.calls, thoughts);
   return (
     <View style={frame}>
       <Pressable
@@ -88,15 +103,16 @@ export function ToolRun({ run }: { run: Run }) {
         <Text style={{ color: c.text, fontFamily: mono, fontSize: font.sm }}>
           <Text style={{ color: c.muted }}>{open ? '▾ ' : '▸ '}</Text>
           {s.head}
+          <Text style={{ color: c.muted }}>{s.thought}</Text>
           <Text style={{ color: c.muted }}>{s.running}</Text>
           <Text style={{ color: c.danger }}>{s.failed}</Text>
         </Text>
       </Pressable>
       {open ? (
         <View style={{ paddingLeft: space.md, gap: space.xs }}>
-          {run.calls.map((call, i) => (
-            <ToolCallRow key={i} call={call} />
-          ))}
+          {steps(run).map((st, i) =>
+            'call' in st ? <ToolCallRow key={i} call={st.call} /> : <Thinking key={i} item={st.thought} />,
+          )}
         </View>
       ) : null}
     </View>

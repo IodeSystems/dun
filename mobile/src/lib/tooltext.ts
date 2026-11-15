@@ -2,6 +2,7 @@
 // one-line preview. Each function names the Go function it mirrors in
 // internal/tui; keep them in step so the phone and the terminal read alike.
 
+import { thinkDur } from './thinking';
 import { exitMarker, type ToolCall } from './toolcalls';
 
 type Args = Record<string, unknown>;
@@ -258,7 +259,11 @@ export function preview(c: ToolCall): Preview {
  * (tools by label, most used first, then by name); failed is the " · 1 failed"
  * part, running " · running…" while a call has no result.
  */
-export function runSummary(calls: ToolCall[]): { head: string; failed: string; running: string } {
+export function runSummary(
+  calls: ToolCall[],
+  thoughts: { start: number; end: number; live: boolean }[] = [],
+  now = Date.now(),
+): { head: string; thought: string; failed: string; running: string } {
   const counts = new Map<string, number>();
   let bad = 0;
   let pending = 0;
@@ -269,8 +274,15 @@ export function runSummary(calls: ToolCall[]): { head: string; failed: string; r
   }
   const names = [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)! || (a < b ? -1 : a > b ? 1 : 0));
   const parts = names.map((n) => toolLabel(n) + (counts.get(n)! > 1 ? ` ×${counts.get(n)}` : ''));
+  // The TUI counts thoughts as steps and adds the time spent thinking (toolrun.go summary).
+  let thought = 0;
+  for (const t of thoughts) {
+    if (t.live) thought += now - t.start;
+    else if (t.end && t.start) thought += t.end - t.start;
+  }
   return {
-    head: `⚙ ${plural(calls.length, 'step')} — ${parts.join(', ')}`,
+    head: `⚙ ${plural(calls.length + thoughts.length, 'step')} — ${parts.join(', ')}`,
+    thought: thought > 0 ? ` · thought ${thinkDur(thought)}` : '',
     failed: bad ? ` · ${bad} failed` : '',
     running: pending ? ' · running…' : '',
   };

@@ -146,7 +146,7 @@ test('the TUI words: labels, call lines, previews, summary', () => {
       { tool: 'exec', args: {}, state: 'error' },
       { tool: 'file_read', args: {}, state: 'pending' },
     ]),
-  ).toEqual({ head: '⚙ 3 steps — exec ×2, file read', failed: ' · 1 failed', running: ' · running…' });
+  ).toEqual({ head: '⚙ 3 steps — exec ×2, file read', thought: '', failed: ' · 1 failed', running: ' · running…' });
 });
 
 test('the renderer registry: the TUI tools, a grep read, and the generic fallback', () => {
@@ -157,4 +157,84 @@ test('the renderer registry: the TUI tools, a grep read, and the generic fallbac
   expect(bodyFor({ tool: 'notes__project_notes', args: {} })).toBe(GenericBody);
   expect(bodyFor({ tool: 'never_heard_of_it', args: null })).toBe(GenericBody);
   expect(Object.keys(bodies)).toEqual(expect.arrayContaining(['exec', 'file_read', 'file_write', 'search']));
+});
+
+describe('thinking inside a run (toolrun.go: thoughts are steps of the open run)', () => {
+  const call = (n: string) => [
+    { type: 'tool_call', tool: 'exec', args: { command: n } },
+    { type: 'tool_result', tool: 'exec', result: n },
+  ];
+  const think = (text: string, a: string, b: string) => [
+    { type: 'reasoning', text, ts: a },
+    { type: 'tool_call', tool: 'read', args: { path: text }, ts: b },
+    { type: 'tool_result', tool: 'read', result: 'x' },
+  ];
+  const evs = [...call('a'), { type: 'reasoning', text: '# Thinking: next', ts: '2026-11-14T10:00:00Z' }, ...call('b')];
+
+  test('call, thinking, call is one run holding both calls and the thought, in order', () => {
+    const v = run(evs);
+    expect(v.items.map((i) => i.kind)).toEqual(['tools']);
+    const r = runs(v)[0]!;
+    expect(r.calls.map((c) => c.args?.command)).toEqual(['a', 'b']);
+    expect(r.thoughts).toHaveLength(1);
+    expect(r.thoughts![0]).toMatchObject({ at: 1, live: false, text: '# Thinking: next' });
+  });
+
+  test('a live thought grows inside the run and the next call closes it', () => {
+    let v = run([...call('a'), { type: 'reasoning', text: 'ab', ts: '2026-11-14T10:00:00Z' }]);
+    v = run([{ type: 'reasoning', text: 'cd' }], v);
+    expect(v.items).toHaveLength(1);
+    expect(runs(v)[0]!.thoughts![0]).toMatchObject({ text: 'abcd', live: true });
+    v = run([{ type: 'tool_call', tool: 'exec', args: {}, ts: '2026-11-14T10:00:04Z' }], v);
+    expect(runs(v)[0]!.thoughts![0]).toMatchObject({ live: false, end: Date.parse('2026-11-14T10:00:04Z') });
+  });
+
+  test('a thought before the first call is taken into the run, as the TUI does', () => {
+    const v = run([{ type: 'reasoning', text: 'first' }, ...call('a')]);
+    expect(v.items.map((i) => i.kind)).toEqual(['tools']);
+    expect(runs(v)[0]!.thoughts![0]).toMatchObject({ at: 0, text: 'first' });
+  });
+
+  test('thinking then a reply: the run ends and the next call starts a new run', () => {
+    const v = run([...call('a'), { type: 'reasoning', text: 't' }, { type: 'token', text: 'so' }, ...call('b')]);
+    expect(v.items.map((i) => i.kind)).toEqual(['tools', 'assistant', 'tools']);
+    expect(runs(v)[0]!.thoughts).toHaveLength(1);
+    expect(runs(v)[1]!.thoughts).toBeUndefined();
+  });
+
+  test('a user message or a note ends the run too', () => {
+    const v = run([...call('a'), { type: 'user', content: 'hm' }, { type: 'reasoning', text: 't' }, ...call('b')]);
+    expect(v.items.map((i) => i.kind)).toEqual(['tools', 'user', 'tools']);
+  });
+
+  test('history replay gives the same run as live', () => {
+    const live = run(evs);
+    const hist = applySnapshot({
+      type: 'snapshot',
+      items: [
+        { kind: 'tool_call', tool: 'exec', args: { command: 'a' }, call_id: '1' },
+        { kind: 'tool_result', tool: 'exec', content: 'a', call_id: '1' },
+        { kind: 'reasoning', content: '# Thinking: next' },
+        { kind: 'tool_call', tool: 'exec', args: { command: 'b' }, call_id: '2' },
+        { kind: 'tool_result', tool: 'exec', content: 'b', call_id: '2' },
+      ],
+    });
+    expect(hist.items.map((i) => i.kind)).toEqual(['tools']);
+    const [a, b] = [runs(live)[0]!, runs(hist)[0]!];
+    expect(b.calls.map((c) => [c.args, c.result, c.state])).toEqual(a.calls.map((c) => [c.args, c.result, c.state]));
+    expect(b.thoughts!.map((t) => [t.at, t.text])).toEqual(a.thoughts!.map((t) => [t.at, t.text]));
+  });
+
+  test('the summary counts thoughts as steps and adds the time thought (toolrun.go summary)', () => {
+    const calls = [
+      { tool: 'exec', args: {}, state: 'done' as const },
+      { tool: 'exec', args: {}, state: 'done' as const },
+    ];
+    expect(runSummary(calls, [{ start: 1000, end: 13000, live: false }])).toMatchObject({
+      head: '⚙ 3 steps — exec ×2',
+      thought: ' · thought 12s',
+    });
+    expect(runSummary(calls, [{ start: 0, end: 0, live: false }]).thought).toBe('');
+    expect(run(think('t', '2026-11-14T10:00:00Z', '2026-11-14T10:00:05Z')).items).toHaveLength(1);
+  });
 });
