@@ -105,7 +105,7 @@ function Login({ n }: { n: Extract<Notice, { type: 'login' }> }) {
   return (
     <View style={{ paddingHorizontal: space.md, gap: space.xs }}>
       <Text selectable style={{ color: c.notice, fontSize: font.sm }} testID="notice-text">
-        🔑 {n.done ? `${n.server}: logged in` : loginLine(n)}
+        🔑 {n.error ? `${n.server}: login failed — ${n.error}` : n.done ? `${n.server}: logged in` : loginLine(n)}
       </Text>
       {n.url && !n.done ? (
         <Pressable

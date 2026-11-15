@@ -51,7 +51,7 @@ func TestOnboarding_NotLoggedInHoldsTheQuestion(t *testing.T) {
 		t.Errorf("after the login:\n%s", txt)
 	}
 	m.switchModel(dunconfig.ProviderConfig{Name: "work", URL: "http://llm/v1"}, "chat-standard", true)
-	m = m.feed(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "earlier"}}})
+	m = m.feed(evMsg{"type": "history", "reason": "model_switch", "items": []any{map[string]any{"kind": "user", "content": "earlier"}}})
 	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}, "hint": "off: raglit — /rag on (auto: every session)"})
 	m = m.feed(evMsg{"type": "settings", "model": "chat-standard", "url": "http://llm/v1", "provider": "work"})
 	txt = convoText(m)

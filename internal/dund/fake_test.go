@@ -34,10 +34,11 @@ func (f *fakeSpawner) Spawn(workspace string, args []string) (Engine, error) {
 		return nil, err
 	}
 	id := fmt.Sprintf("s%d", f.n.Add(1))
+	resumed := false
 	if i := slices.Index(args, "--resume"); i >= 0 {
-		id = args[i+1]
+		id, resumed = args[i+1], true
 	}
-	e := &fakeEngine{done: make(chan struct{}), sp: f}
+	e := &fakeEngine{done: make(chan struct{}), sp: f, resumed: resumed}
 	var inW io.WriteCloser
 	e.in, inW = io.Pipe()
 	e.stdin = inW
@@ -74,6 +75,7 @@ type fakeEngine struct {
 	done    chan struct{}
 	once    sync.Once
 	sp      *fakeSpawner
+	resumed bool // started with --resume: it replays a history, as dun does
 }
 
 func (e *fakeEngine) emit(enc *json.Encoder, p any) {
@@ -86,6 +88,9 @@ func (e *fakeEngine) run(id string) {
 	defer e.end()
 	enc := json.NewEncoder(e.stdoutW)
 	e.emit(enc, &proto.Session{ID: id})
+	if e.resumed {
+		e.emit(enc, &proto.History{Items: []proto.HistoryItem{{Kind: "user", Content: "earlier"}}})
+	}
 	e.emit(enc, &proto.Ready{Tools: []string{"exec"}})
 	sc := bufio.NewScanner(e.in)
 	slow, asking := false, false

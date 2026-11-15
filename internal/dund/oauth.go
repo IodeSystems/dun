@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/openurl"
@@ -40,13 +41,20 @@ func (s *Service) OAuth(ctx context.Context, ses *session, req proto.OAuthReq) *
 		return &proto.OAuthResult{Error: "oauth: the spec: " + err.Error()}
 	}
 	var notify func(id, url string)
+	var shown atomic.Bool
 	if ses != nil {
 		notify = func(id, url string) {
-			ev := proto.NewEvent(&proto.McpLogin{Server: id, URL: url})
+			shown.Store(true)
+			ev := proto.NewEvent(&proto.McpLogin{Server: id, URL: url, Phase: proto.LoginStarted})
 			ses.log.Append(ev)
 		}
 	}
 	res, err := oauthBroker().Do(ctx, dun.OAuthRequest{Op: req.Op, ID: req.ID, URL: req.URL, WWW: req.WWW, Rejected: req.Rejected, Spec: spec}, notify)
+	// This request waited on a login it showed: say how it ended, so a
+	// client need not infer it from a later tool listing.
+	if shown.Load() {
+		ses.log.Append(proto.NewEvent(proto.LoginEnd(req.ID, err)))
+	}
 	out := &proto.OAuthResult{Authorization: res.Authorization, Revoked: res.Revoked, Status: dun.MarshalOAuthStatus(res.Status)}
 	if err != nil {
 		out.Error = err.Error()

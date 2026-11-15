@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -22,7 +21,8 @@ import (
 // last value until a new one arrives: a request's start used to clear them to
 // "–", so between requests — most of the time — the bar said nothing (USER
 // 2026-10-28). pp and tg also show the session's average, weighted by tokens
-// (processed for pp, generated for tg), after a "~": tg  45/s ~41.
+// (processed for pp, generated for tg), after a "~": tg  45/s ~41. The engine
+// keeps all of that (cmd/dun/reqbar.go) and sends it on each request event.
 //
 // No bounce: every piece has a fixed width (its number padded), so a number
 // changing never moves the others, and which pieces fit depends only on the
@@ -31,22 +31,17 @@ import (
 // narrowW there are none. cache is absent until the provider has reported
 // cached tokens once in the session: an unreported cache is not 0%.
 
-// reqBar is what the TUI keeps of the request events.
+// reqBar is what the TUI keeps of the request events: the last one. The
+// engine sends the session's figures on each (proto.RequestSession: the
+// last value of each, the averages, the cache), so nothing is added up here
+// and a reconnect's snapshot is the whole bar.
 type reqBar struct {
-	seen      bool // a request event arrived
-	r         proto.Request
-	cacheSeen bool // some request reported the cache field
-
-	// The last value of each figure, kept across requests.
-	ttft     int64
-	pp, tg   float64
-	cachePct int
-	cacheHas bool
-	// Token-weighted sums for the averages: Σ rate·tokens and Σ tokens.
-	ppSum, ppN, tgSum, tgN float64
+	seen bool // a request event arrived
+	r    proto.Request
+	s    proto.RequestSession
 }
 
-// noteRequest folds one request event in.
+// noteRequest takes one request event.
 func (b *reqBar) noteRequest(ev evMsg) {
 	raw, err := json.Marshal(ev)
 	if err != nil {
@@ -57,38 +52,21 @@ func (b *reqBar) noteRequest(ev evMsg) {
 		return
 	}
 	b.seen, b.r = true, r
-	if r.CacheReported {
-		b.cacheSeen = true
-	}
-	if r.TTFTMS > 0 {
-		b.ttft = r.TTFTMS
-	}
-	if r.PPS > 0 {
-		b.pp = r.PPS
-	}
-	if r.TGS > 0 {
-		b.tg = r.TGS
-	}
-	if r.Phase != "done" {
+	if r.Session != nil {
+		b.s = *r.Session
 		return
 	}
-	if r.CacheReported && r.Prompt > 0 {
-		b.cachePct, b.cacheHas = int(math.Round(float64(r.Cached)*100/float64(r.Prompt))), true
-	}
-	if n := float64(r.Prompt - r.Cached); r.PPS > 0 && n > 0 {
-		b.ppSum, b.ppN = b.ppSum+r.PPS*n, b.ppN+n
-	}
-	if n := float64(r.Gen); r.TGS > 0 && n > 0 {
-		b.tgSum, b.tgN = b.tgSum+r.TGS*n, b.tgN+n
-	}
+	// Fallback, an engine from before session figures: this event's own
+	// figures, no averages (they were summed here once).
+	b.s = proto.RequestSession{TTFTMS: r.TTFTMS, PPS: r.PPS, TGS: r.TGS, CacheSeen: r.CacheReported}
 }
 
 // avg is a token-weighted average, "" before there is one.
-func avg(sum, n float64) string {
-	if n <= 0 {
+func avg(v float64) string {
+	if v <= 0 {
 		return ""
 	}
-	return "~" + numfmt.TokK(int(sum/n))
+	return "~" + numfmt.TokK(int(v))
 }
 
 // reqPiece is one stat: its label and its value padded to a fixed width.
@@ -122,17 +100,21 @@ func (b reqBar) pieces() []reqPiece {
 		ctx.width = 6 + len(w)
 	}
 	out := []reqPiece{ctx}
-	if b.cacheSeen {
-		out = append(out, reqPiece{label: "cache", value: dash(b.cacheHas, fmt.Sprintf("%d%%", b.cachePct)), width: 4, drop: 2})
+	if st := b.s; st.CacheSeen {
+		pct := 0
+		if st.CachePct != nil {
+			pct = *st.CachePct
+		}
+		out = append(out, reqPiece{label: "cache", value: dash(st.CachePct != nil, fmt.Sprintf("%d%%", pct)), width: 4, drop: 2})
 	}
 	// A rate and its average, each padded, so neither moves the other.
 	withAvg := func(v float64, a string, w int) string {
 		return fmt.Sprintf("%*s %5s", w, dash(v > 0, numfmt.Rate(v)), a)
 	}
 	out = append(out,
-		reqPiece{label: "ttft", value: dash(b.ttft > 0, ttftText(b.ttft)), width: 5, drop: 1},
-		reqPiece{label: "pp", value: withAvg(b.pp, avg(b.ppSum, b.ppN), 7), width: 13, drop: 0},
-		reqPiece{label: "tg", value: withAvg(b.tg, avg(b.tgSum, b.tgN), 6), width: 12, drop: 4},
+		reqPiece{label: "ttft", value: dash(b.s.TTFTMS > 0, ttftText(b.s.TTFTMS)), width: 5, drop: 1},
+		reqPiece{label: "pp", value: withAvg(b.s.PPS, avg(b.s.PPAvg), 7), width: 13, drop: 0},
+		reqPiece{label: "tg", value: withAvg(b.s.TGS, avg(b.s.TGAvg), 6), width: 12, drop: 4},
 	)
 	return out
 }

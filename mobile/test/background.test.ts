@@ -1,6 +1,7 @@
 /// <reference types="jest" />
 import { agentRow, badge, compactDur, jobRow, rows } from '../src/lib/activity';
 import { sections } from '../src/lib/ctxstats';
+import { costBlock } from '../src/lib/costview';
 import { apply, applySnapshot, empty, lastUser, unwatchAgent, watchAgent, type View } from '../src/lib/events';
 import { modeWord, motion, planMark } from '../src/lib/plan';
 import { elapsed, headerStatus } from '../src/lib/turnstate';
@@ -187,15 +188,19 @@ test('usage, context_cost and spend fold into the context figures', () => {
     cache: { rounds: 4, hit_pct: 75, cached: 3000, processed: 4000 },
     spend: { calls: 4, costed_calls: 4, session_cost: 0.0123, currency: 'USD' },
   };
-  const v = run([{ type: 'context_cost', system_tokens: 8800, system_exact: false, window: 131072 }, usage, usage]);
+  // usage is cumulative: the second carries the session's totals, set, not added.
+  const later = { ...usage, total: 10000, generated: 2000, turns: 2 };
+  const v = run([{ type: 'context_cost', system_tokens: 8800, system_exact: false, window: 131072 }, usage, later]);
   expect(v.bg.ctx).toMatchObject({ total: 10000, generated: 2000, active: 41300, systemTokens: 9000, window: 131072 });
+  // A reconnect's snapshot holds only the last usage: the same figures.
+  expect(run([later]).bg.ctx).toMatchObject({ total: 10000, generated: 2000, cached: 3000, turns: 2 });
   const s = sections(v.bg.ctx);
-  expect(s.map((x) => x.title)).toEqual(['window', 'system', 'tokens', 'cache', 'cost']);
+  expect(s.map((x) => x.title)).toEqual(['window', 'system', 'tokens', 'cache']);
   expect(s[0]!.rows[1]).toMatchObject({ label: 'prompt', value: '41,300 of 120,000 budget', note: '(31%)' });
   expect(s[3]!.rows[0]!.value).toBe('4 · 75% hit');
-  expect(s[4]!.rows[0]!.value).toBe('0.01 USD');
+  expect(costBlock(v.bg.ctx.spend, 0).rows[0]!.value).toBe('0.01');
   const w = run([{ type: 'spend', calls: 5, costed_calls: 4, session_cost: 0.5, currency: 'USD' }], v);
-  expect(sections(w.bg.ctx)[4]!.rows[0]).toMatchObject({ value: '0.50 USD', note: '4 of 5 calls priced' });
+  expect(costBlock(w.bg.ctx.spend, 0).rows[0]).toMatchObject({ value: '0.50', note: 'USD · 4 of 5 calls priced' });
 });
 
 test('plan marks and motion: the asking node alternates, a working agent spins, idle is still', () => {

@@ -1,12 +1,15 @@
 /// <reference types="jest" />
 import { fit, noStats, noteRequest, rate, statsLine, tokK, ttftText, type Stats } from '../src/lib/stats';
 
-// The request events as dund sends them (proto.Request, flat in the event
-// frame); the cases are internal/tui/reqbar_test.go's.
+// The request events as the engine sends them (proto.Request, flat in the
+// event frame), each with the session's figures (proto.RequestSession); the
+// cases are internal/tui/reqbar_test.go's.
+const stats = { ttft_ms: 800, pp: 1234, tg: 45.2, pp_avg: 1234, tg_avg: 45.2, cache_seen: true, cache_pct: 96 };
 const reqDone = {
   v: 1,
   type: 'request',
   session: 's1',
+  session_stats: stats,
   seq: 42,
   ts: '2026-11-14T10:00:00Z',
   phase: 'done',
@@ -38,39 +41,39 @@ test('the widths: pieces drop pp → ttft → cache → ctx, tg kept longest (Te
   expect(fit(s, 5)).toEqual([]);
 });
 
-test('no bounce: start keeps the last figures, live replaces what it measured (TestReqBar_NoBounce)', () => {
-  const a = fold([reqDone]);
-  const b = fold([{ type: 'request', phase: 'start', ctx: 41700, window: 131072 }], a);
-  const c = fold([{ type: 'request', phase: 'live', ttft_ms: 12300, gen: 9, tg: 150, ctx: 41709, window: 131072 }], b);
-  const [la, lb, lc] = [a, b, c].map((s) => statsLine(s, 200));
-  expect(lb).toBe('ctx 41.7k/131k · cache  96% · ttft  0.8s · pp  1.2k/s ~1.2k · tg   45/s   ~45');
-  expect(lc?.endsWith('ttft 12.3s · pp  1.2k/s ~1.2k · tg  150/s   ~45')).toBe(true);
-  expect(new Set([la, lb, lc].map((l) => l?.length)).size).toBe(1);
-  // After the request ends the figures stay, the turn's end changes nothing.
-  const d = fold([reqDone, { type: 'done' }], c);
-  expect(statsLine(d, 200).endsWith('tg   45/s   ~45')).toBe(true);
+test('the last event is the row: nothing is added up here (TestReqBar_LastEventIsTheBar)', () => {
+  // A start's session keeps the last figures; the client shows them as sent.
+  const start = {
+    type: 'request',
+    phase: 'start',
+    ctx: 41700,
+    window: 131072,
+    session_stats: { ...stats, tg: 90, tg_avg: 36 },
+  };
+  const all = fold([reqDone, reqDone, start]);
+  const last = fold([start]);
+  expect(statsLine(last, 200)).toBe(statsLine(all, 200));
+  expect(statsLine(last, 200)).toBe('ctx 41.7k/131k · cache  96% · ttft  0.8s · pp  1.2k/s ~1.2k · tg   90/s   ~36');
+  // Widths do not move between events.
+  const live = { ...start, phase: 'live', session_stats: { ...stats, ttft_ms: 12300, tg: 150 } };
+  expect(statsLine(fold([live]), 200).length).toBe(statsLine(last, 200).length);
 });
 
-test('the average is weighted by tokens (TestReqBar_AverageIsTokenWeighted)', () => {
-  const s = fold([
-    { ...reqDone, tg: 30, gen: 900 },
-    { ...reqDone, tg: 90, gen: 100 },
-  ]);
-  expect(statsLine(s, 200).endsWith('tg   90/s   ~36')).toBe(true);
+test('a cache never reported is not shown; one reported without a finished request is a dash', () => {
+  const r = { ...reqDone, window: undefined, session_stats: { ...stats, cache_seen: undefined, cache_pct: undefined } };
+  expect(statsLine(fold([r]), 200)).toBe('ctx 41.3k · ttft  0.8s · pp  1.2k/s ~1.2k · tg   45/s   ~45');
+  const seen = { ...r, session_stats: { ...r.session_stats, cache_seen: true } };
+  expect(statsLine(fold([seen]), 200)).toContain('cache    –');
+  expect(statsLine(fold([{ ...seen, session_stats: { ...seen.session_stats, cache_pct: 0 } }]), 200)).toContain(
+    'cache   0%',
+  );
 });
 
-test('a cache never reported is not shown; a window not stated is the count alone (TestReqBar_CacheNeverReported)', () => {
-  const r = { ...reqDone, cached: undefined, cache_reported: undefined, window: undefined };
-  const s = fold([r]);
-  expect(statsLine(s, 200)).toBe('ctx 41.3k · ttft  0.8s · pp  1.2k/s ~1.2k · tg   45/s   ~45');
-  // Reported once, 0% is a figure.
-  expect(statsLine(fold([{ ...r, cache_reported: true }], s), 200)).toContain('cache   0%');
-});
-
-test('cache rate is cached prompt tokens over prompt tokens, from the done phase only', () => {
-  const live = fold([{ type: 'request', phase: 'live', prompt: 1000, cached: 10, cache_reported: true, ctx: 1 }]);
-  expect(statsLine(live, 200)).toContain('cache    –');
-  expect(fold([{ ...reqDone, prompt: 3, cached: 2 }]).cachePct).toBe(67);
+test("fallback, an engine from before session figures: the event's own, no averages", () => {
+  const { session_stats: _, ...old } = reqDone;
+  expect(statsLine(fold([old]), 200)).toBe(
+    'ctx 41.3k/131k · cache    – · ttft  0.8s · pp  1.2k/s       · tg   45/s      ',
+  );
 });
 
 test('numfmt: TokK, Rate and ttft as the Go prints them', () => {
@@ -90,37 +93,4 @@ test('numfmt: TokK, Rate and ttft as the Go prints them', () => {
   expect(tokK(1250)).toBe('1.2k');
   expect(tokK(1350)).toBe('1.4k');
   expect([250, 800, 12_300, 140_000].map(ttftText)).toEqual(['0.2s', '0.8s', '12.3s', '140s']);
-});
-
-test('a real round from a throwaway dund: live, then done (the endpoint states no window)', () => {
-  const head = { epoch: '315f0e263c901ffb', session: '20261114-175419', type: 'request', v: 1 };
-  const live = {
-    ...head,
-    ctx: 5939,
-    gen: 5,
-    phase: 'live',
-    seq: 21,
-    tg: 13.867705314157652,
-    ts: '2026-11-14T17:54:24.569036872-08:00',
-    ttft_ms: 1,
-  };
-  const done = {
-    ...head,
-    cache_reported: true,
-    cached: 4900,
-    ctx: 5320,
-    exact: true,
-    gen: 120,
-    phase: 'done',
-    pp: 300000,
-    prompt: 5200,
-    seq: 96,
-    tg: 18.826602722503786,
-    ts: '2026-11-14T17:54:30.643319069-08:00',
-    ttft_ms: 1,
-  };
-  expect(statsLine(fold([live]), 200)).toBe('ctx  5.9k · ttft  0.0s · pp       –       · tg   13/s      ');
-  expect(statsLine(fold([live, done]), 200)).toBe(
-    'ctx  5.3k · cache  94% · ttft  0.0s · pp  300k/s ~300k · tg   18/s   ~18',
-  );
 });

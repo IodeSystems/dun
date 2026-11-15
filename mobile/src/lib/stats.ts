@@ -1,6 +1,7 @@
 // The request stats: the TUI's top-bar figures (internal/tui/reqbar.go),
-// ported. dund measures them (reqstats.go) and sends a `request` event at a
-// round's start, live while it streams, and at its end:
+// ported. The engine measures them (reqstats.go) and sends a `request` event
+// at a round's start, live while it streams, and at its end, each with the
+// session's figures so far (docs/session-events.md, "Request stats"):
 //
 //   ctx 41.3k/131k · cache 96% · ttft 0.8s · pp 1.2k/s ~1.1k · tg 45/s ~41
 //
@@ -14,7 +15,7 @@
 // number changing never moves the others; when the row is too narrow the
 // pieces go in the order pp, ttft, cache, ctx, tg.
 
-/** What the screen keeps of the request events (reqBar). */
+/** What the screen keeps of the request events (reqBar): the last one's figures. */
 export type Stats = {
   seen: boolean;
   ctx: number;
@@ -23,12 +24,10 @@ export type Stats = {
   ttft: number;
   pp: number;
   tg: number;
-  cachePct: number;
-  cacheHas: boolean;
-  ppSum: number;
-  ppN: number;
-  tgSum: number;
-  tgN: number;
+  /** The last finished request's cached share of its prompt; null before one reported it. */
+  cachePct: number | null;
+  ppAvg: number;
+  tgAvg: number;
 };
 
 export const noStats: Stats = {
@@ -39,50 +38,46 @@ export const noStats: Stats = {
   ttft: 0,
   pp: 0,
   tg: 0,
-  cachePct: 0,
-  cacheHas: false,
-  ppSum: 0,
-  ppN: 0,
-  tgSum: 0,
-  tgN: 0,
+  cachePct: null,
+  ppAvg: 0,
+  tgAvg: 0,
 };
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
-/** Folds one event in; anything but a request event leaves s as it is (noteRequest). */
+/**
+ * Takes one event; anything but a request event leaves s as it is
+ * (noteRequest). The engine sends the session's figures on every request
+ * event (`session_stats`, proto.RequestSession), so nothing is added up here and
+ * a snapshot's last request event is the whole row.
+ */
 export function noteRequest(s: Stats, ev: Record<string, unknown>): Stats {
   if (ev.type !== 'request') return s;
-  const prompt = num(ev.prompt);
-  const cached = num(ev.cached);
-  const gen = num(ev.gen);
-  const pps = num(ev.pp);
-  const tgs = num(ev.tg);
-  const ttft = num(ev.ttft_ms);
-  const reported = ev.cache_reported === true;
-  const n: Stats = {
-    ...s,
-    seen: true,
-    ctx: num(ev.ctx),
-    window: num(ev.window),
-    cacheSeen: s.cacheSeen || reported,
-    ttft: ttft > 0 ? ttft : s.ttft,
-    pp: pps > 0 ? pps : s.pp,
-    tg: tgs > 0 ? tgs : s.tg,
+  const base = { seen: true, ctx: num(ev.ctx), window: num(ev.window) };
+  const ss = ev.session_stats;
+  if (!ss || typeof ss !== 'object') {
+    // Fallback, an engine from before session figures: this event's own
+    // figures, no averages (they were summed here once).
+    return {
+      ...noStats,
+      ...base,
+      cacheSeen: ev.cache_reported === true,
+      ttft: num(ev.ttft_ms),
+      pp: num(ev.pp),
+      tg: num(ev.tg),
+    };
+  }
+  const x = ss as Record<string, unknown>;
+  return {
+    ...base,
+    cacheSeen: x.cache_seen === true,
+    ttft: num(x.ttft_ms),
+    pp: num(x.pp),
+    tg: num(x.tg),
+    cachePct: typeof x.cache_pct === 'number' ? x.cache_pct : null,
+    ppAvg: num(x.pp_avg),
+    tgAvg: num(x.tg_avg),
   };
-  if (ev.phase !== 'done') return n;
-  if (reported && prompt > 0) {
-    n.cachePct = Math.round((cached * 100) / prompt);
-    n.cacheHas = true;
-  }
-  if (pps > 0 && prompt - cached > 0) {
-    n.ppSum += pps * (prompt - cached);
-    n.ppN += prompt - cached;
-  }
-  if (tgs > 0 && gen > 0) {
-    n.tgSum += tgs * gen;
-    n.tgN += gen;
-  }
-  return n;
 }
 
 /** Go's %.<p>f: an exact tie goes to the even digit (toFixed rounds it up). */
@@ -112,7 +107,7 @@ export function ttftText(ms: number): string {
 }
 
 /** A token-weighted average, "" before there is one. */
-const avg = (sum: number, n: number) => (n > 0 ? '~' + tokK(Math.trunc(sum / n)) : '');
+const avg = (v: number) => (v > 0 ? '~' + tokK(Math.trunc(v)) : '');
 
 const pad = (s: string, w: number) => s.padStart(w);
 const dash = (ok: boolean, s: string) => (ok ? s : '–');
@@ -128,12 +123,13 @@ export function pieces(s: Stats): Piece[] {
     ctx = { ...ctx, value: pad(`${pad(tokK(s.ctx), 5)}/${w}`, 6 + w.length) };
   }
   const out = [ctx];
-  if (s.cacheSeen) out.push({ label: 'cache', value: pad(dash(s.cacheHas, `${s.cachePct}%`), 4), drop: 2 });
+  if (s.cacheSeen)
+    out.push({ label: 'cache', value: pad(dash(s.cachePct !== null, `${s.cachePct ?? 0}%`), 4), drop: 2 });
   const withAvg = (v: number, a: string, w: number) => `${pad(dash(v > 0, rate(v)), w)} ${pad(a, 5)}`;
   out.push(
     { label: 'ttft', value: pad(dash(s.ttft > 0, ttftText(s.ttft)), 5), drop: 1 },
-    { label: 'pp', value: pad(withAvg(s.pp, avg(s.ppSum, s.ppN), 7), 13), drop: 0 },
-    { label: 'tg', value: pad(withAvg(s.tg, avg(s.tgSum, s.tgN), 6), 12), drop: 4 },
+    { label: 'pp', value: pad(withAvg(s.pp, avg(s.ppAvg), 7), 13), drop: 0 },
+    { label: 'tg', value: pad(withAvg(s.tg, avg(s.tgAvg), 6), 12), drop: 4 },
   );
   return out;
 }

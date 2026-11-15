@@ -172,7 +172,7 @@ test('recap, compaction, mcp login and a refused tell are notices; an accepted t
   const v = run([
     { type: 'recap', entries: 3, chars: 900, note: 'recapped 3 entries', detail: 'the summary\n' },
     { type: 'compaction', text: 'compacted 40 entries', subsumed: 40, tokens_before: 9000, tokens_after: 2000 },
-    { type: 'mcp_login', server: 'gh', url: 'https://x.dev/login' },
+    { type: 'mcp_login', phase: 'started', server: 'gh', url: 'https://x.dev/login' },
     { type: 'agent_told', agent: 2, message: 'Told agent #2.' },
     { type: 'agent_told', agent: 2, message: 'agent #2 is running:\nwait for it' },
   ]);
@@ -184,15 +184,33 @@ test('recap, compaction, mcp login and a refused tell are notices; an accepted t
   ]);
 });
 
-test('a login is settled when its server lists tools', () => {
+test('a login ends where the engine says: done, or failed with its error; a tool list settles nothing', () => {
+  const v = run([
+    { type: 'mcp_login', phase: 'started', server: 'gh', url: 'https://x.dev/login' },
+    { type: 'mcp_login', phase: 'started', server: 'other', url: 'https://y.dev/login' },
+    { type: 'mcp_login', phase: 'started', server: 'db', url: 'https://z.dev/login' },
+    { type: 'mcp_tools', server: 'db', tools: [{ name: 'a', tokens: 1, enabled: true }] },
+    { type: 'mcp_login', phase: 'done', server: 'gh' },
+    { type: 'mcp_login', phase: 'failed', server: 'other', error: 'access_denied' },
+    { type: 'mcp_login', phase: 'done', server: 'late' },
+  ]);
+  expect(notices(v)).toEqual([
+    { type: 'login', server: 'gh', url: 'https://x.dev/login', done: true },
+    { type: 'login', server: 'other', url: 'https://y.dev/login', done: true, error: 'access_denied' },
+    { type: 'login', server: 'db', url: 'https://z.dev/login', done: false },
+    { type: 'login', server: 'late', url: '', done: true },
+  ]);
+});
+
+test('fallback, an engine before login phases: settled when its server lists tools', () => {
   const v = run([
     { type: 'mcp_login', server: 'gh', url: 'https://x.dev/login' },
     { type: 'mcp_login', server: 'other', url: 'https://y.dev/login' },
     { type: 'mcp_tools', server: 'gh', tools: [{ name: 'a', tokens: 1, enabled: true }] },
   ]);
   expect(notices(v)).toEqual([
-    { type: 'login', server: 'gh', url: 'https://x.dev/login', done: true },
-    { type: 'login', server: 'other', url: 'https://y.dev/login', done: false },
+    { type: 'login', server: 'gh', url: 'https://x.dev/login', done: true, legacy: true },
+    { type: 'login', server: 'other', url: 'https://y.dev/login', done: false, legacy: true },
   ]);
 });
 

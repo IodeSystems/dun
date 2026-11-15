@@ -190,7 +190,10 @@ type Config struct {
 	// (mcpoauth.go); url "" means another session's login is being waited
 	// for. The engine may have no display, so this is the way that always
 	// works; OpenBrowser, when set, also tries to open it here.
-	OnLogin     func(server, url string)
+	OnLogin func(server, url string)
+	// OnLoginEnd hears how a login OnLogin showed ended: nil err, it went
+	// through.
+	OnLoginEnd  func(server string, err error)
 	OpenBrowser func(url string) error
 	// OAuthBroker, when set, is dund: it holds every OAuth server's token,
 	// refreshes it and runs the login (oauthbroker.go); OnLogin and

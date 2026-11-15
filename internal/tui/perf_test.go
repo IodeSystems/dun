@@ -70,7 +70,7 @@ func BenchmarkStreamingBox(b *testing.B) {
 	m := buildModel(200, 8)
 	m.refresh()
 	for i := 0; i < 200; i++ {
-		m.addThinking(fmt.Sprintf("line %d of a long thought, about as wide as a real one is\n", i))
+		m.addThinking(fmt.Sprintf("line %d of a long thought, about as wide as a real one is\n", i), 0)
 	}
 	m.refresh()
 	base := m.convo[len(m.convo)-1].think.text
@@ -81,7 +81,7 @@ func BenchmarkStreamingBox(b *testing.B) {
 			m.convo[len(m.convo)-1].think.text = base
 			b.StartTimer()
 		}
-		m.addThinking("another line of the thought, streaming in\n")
+		m.addThinking("another line of the thought, streaming in\n", 0)
 		m.refresh()
 	}
 }

@@ -35,7 +35,9 @@ func (h *Harness) oauthFor(s Server) oauthSource {
 	if h.cfg.OAuthBroker != nil {
 		src = newBrokered(s, h.cfg.OAuthBroker)
 	} else {
-		src = newOAuthClient(s, h.cfg.OnLogin, h.cfg.OpenBrowser)
+		oc := newOAuthClient(s, h.cfg.OnLogin, h.cfg.OpenBrowser)
+		oc.ended = h.cfg.OnLoginEnd
+		src = oc
 	}
 	h.oauth[s.ID] = oauthEntry{url: s.URL, spec: *s.OAuth, src: src}
 	return src

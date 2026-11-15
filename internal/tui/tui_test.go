@@ -1571,12 +1571,20 @@ func TestTUI_ShowsTheServiceRestartingTheEngine(t *testing.T) {
 	m.busy = true
 	m = m.feed(evMsg{"type": "engine", "state": "restarting", "reason": "engine exited: signal: killed", "restarts": 1.0})
 	m = m.feed(evMsg{"type": "turn_state", "phase": "idle", "queued": []any{}}) // dund's, after the death
-	if m.busy || !m.skipHistory || m.restarts != 1 || !strings.Contains(convoText(m), "restarting it") {
-		t.Fatalf("restarting: busy=%v skip=%v restarts=%d\n%s", m.busy, m.skipHistory, m.restarts, convoText(m))
+	if m.busy || m.restarts != 1 || !strings.Contains(convoText(m), "restarting it") {
+		t.Fatalf("restarting: busy=%v restarts=%d\n%s", m.busy, m.restarts, convoText(m))
 	}
-	m = m.feed(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "old"}}})
-	if strings.Contains(convoText(m), "old") {
-		t.Error("the respawned engine's history was rendered again")
+	// dund says the history is the restart's: what is on screen stays.
+	m = m.feed(evMsg{"type": "history", "reason": "restart", "items": []any{map[string]any{"kind": "user", "content": "old"}}})
+	if strings.Contains(convoText(m), "old") || !strings.Contains(convoText(m), "restarting it") {
+		t.Errorf("the respawned engine's history was rendered again, or replaced the screen:\n%s", convoText(m))
+	}
+	// Fallback, a dund before history reasons: the history after its
+	// "restarting" is skipped as before.
+	m = m.feed(evMsg{"type": "engine", "state": "restarting", "reason": "engine exited", "restarts": 2.0})
+	m = m.feed(evMsg{"type": "history", "items": []any{map[string]any{"kind": "user", "content": "older"}}})
+	if strings.Contains(convoText(m), "older") {
+		t.Error("an old dund's restart history was rendered again")
 	}
 	m = m.feed(evMsg{"type": "engine", "state": "gave_up", "reason": "engine exited"})
 	if !strings.Contains(m.fatalErr, "gave up") {
@@ -4438,7 +4446,7 @@ func TestActivity_FoldsWhenAQuestionTakesTheFocus(t *testing.T) {
 func TestHeadView_QuestionKeepsTheMetrics(t *testing.T) {
 	v := newVtui(110, 20)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
-	v.m = v.m.feed(reqEv(t, reqDone))
+	v.m = v.m.feed(reqEv(t, newReqFold(), reqDone))
 	long := ""
 	for i := 0; i < 60; i++ {
 		long += fmt.Sprintf("line %d of the answer\n\n", i)

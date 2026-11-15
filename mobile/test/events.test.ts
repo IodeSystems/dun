@@ -156,6 +156,23 @@ test('commands and skills are kept, through a history replace', () => {
   expect(v.skills[0]?.name).toBe('tdd');
 });
 
+test("history's reason: a restart keeps what is shown; resume, model_switch and no reason replace it", () => {
+  const shown = run([
+    { type: 'history', reason: 'resume', items: [{ kind: 'user', content: 'first' }] },
+    { type: 'engine', state: 'restarting', reason: 'engine exited', restarts: 1 },
+    { type: 'notification', content: 'since the restart' },
+  ]);
+  const users = (v: typeof shown) => v.items.filter((i) => i.kind === 'user').length;
+  const again = { items: [{ kind: 'user', content: 'first' }] };
+  const r = apply(shown, { type: 'history', reason: 'restart', ...again });
+  expect(r).toBe(shown); // nothing doubled, nothing dropped
+  expect(users(apply(shown, { type: 'history', reason: 'model_switch', ...again }))).toBe(1);
+  // An old dund (no reason): replaced, as before.
+  expect(users(apply(shown, { type: 'history', ...again }))).toBe(1);
+  // A restart's history to a client with nothing shown: drawn.
+  expect(users(apply(empty, { type: 'history', reason: 'restart', ...again }))).toBe(1);
+});
+
 test('a line is a message, a slash command, a skill, or unknown', () => {
   const skills = [{ name: 'tdd', description: '' }];
   expect(parseLine('hello', skills)).toEqual({ kind: 'message', text: 'hello' });

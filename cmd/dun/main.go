@@ -799,7 +799,8 @@ func main() {
 		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
-		cfg.OnRequest = func(r dun.RequestStat) { em.emit(requestEvent(r)) }
+		reqs := &proto.RequestFold{}
+		cfg.OnRequest = func(r dun.RequestStat) { em.emit(requestEvent(reqs, r)) }
 		// An autostart server that came up (or did not) after the session
 		// was ready. Before Start returns there is no harness to describe;
 		// the ready event that follows carries the server list instead.
@@ -887,7 +888,10 @@ func main() {
 				em.emit(&proto.Queued{Count: h.Queued()})
 			}
 		}
-		cfg.OnLogin = func(server, url string) { em.emit(&proto.McpLogin{Server: server, URL: url}) }
+		cfg.OnLogin = func(server, url string) {
+			em.emit(&proto.McpLogin{Server: server, URL: url, Phase: proto.LoginStarted})
+		}
+		cfg.OnLoginEnd = func(server string, err error) { em.emit(proto.LoginEnd(server, err)) }
 		// A memory trigger reports like /remember does, so the UI shows it the
 		// same way.
 		cfg.OnMemoryTrigger = func(msg string) {

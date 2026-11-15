@@ -321,9 +321,13 @@ type tuiModel struct {
 	// the attempts, for the status line.
 	reconnTries int
 	reconnSince time.Time
-	skipHistory bool      // a respawned engine replays what is already on screen
-	ctrlCAt     time.Time // the last ctrl+c that interrupted a turn (a second one quits)
-	chord       string    // a chord started (ctrl+x), waiting for its next key (composerkeys.go)
+	skipHistory bool // a reconnect: the next snapshot rebuilds what is on screen
+	// restartedOld: dund said the engine is restarting; only read for a
+	// history with no reason (a dund before history reasons).
+	restartedOld bool
+	rounds       bool      // an event named its model round: reasoning_end closes thoughts (thinking.go)
+	ctrlCAt      time.Time // the last ctrl+c that interrupted a turn (a second one quits)
+	chord        string    // a chord started (ctrl+x), waiting for its next key (composerkeys.go)
 	// lastClickAt/lastClickLine: the last plain click in the conversation,
 	// to tell a double click (mouse.go).
 	lastClickAt   time.Time

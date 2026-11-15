@@ -10,9 +10,13 @@ import (
 	"github.com/iodesystems/dun/proto"
 )
 
-// reqEv is a request event as it arrives: through JSON.
-func reqEv(t *testing.T, r proto.Request) evMsg {
+// reqEv is a request event as it arrives: through JSON, with the session's
+// figures the engine folds in f (nil: an engine from before them).
+func reqEv(t *testing.T, f *proto.RequestFold, r proto.Request) evMsg {
 	t.Helper()
+	if f != nil {
+		f.Note(&r)
+	}
 	b, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
@@ -26,14 +30,21 @@ func reqEv(t *testing.T, r proto.Request) evMsg {
 }
 
 func barModel(t *testing.T, w int, rs ...proto.Request) tuiModel {
+	m, _ := barModelF(t, w, rs...)
+	return m
+}
+
+// barModelF is barModel and the engine's fold, for more events.
+func barModelF(t *testing.T, w int, rs ...proto.Request) (tuiModel, *proto.RequestFold) {
+	f := &proto.RequestFold{}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.url, m.model = "http://llm/v1", "chat"
 	m.w, m.h = w, 30
 	m.branch = "worktree-agent-a257eaba" // a title as long as a real one
 	for _, r := range rs {
-		m = m.feed(reqEv(t, r))
+		m = m.feed(reqEv(t, f, r))
 	}
-	return m
+	return m, f
 }
 
 var reqDone = proto.Request{Phase: "done", TTFTMS: 800, Prompt: 5000, Cached: 4800, CacheReported: true,
@@ -79,11 +90,11 @@ func TestReqBar_Widths(t *testing.T) {
 // figures (it used to clear them to dashes, so between requests the bar said
 // nothing — USER 2026-10-28); a live update replaces only what it measured.
 func TestReqBar_NoBounce(t *testing.T) {
-	m := barModel(t, 120, reqDone)
+	m, f := barModelF(t, 120, reqDone)
 	a := stripANSI(m.headView())
-	m = m.feed(reqEv(t, proto.Request{Phase: "start", Ctx: 41700, Window: 131072}))
+	m = m.feed(reqEv(t, f, proto.Request{Phase: "start", Ctx: 41700, Window: 131072}))
 	b := stripANSI(m.headView())
-	m = m.feed(reqEv(t, proto.Request{Phase: "live", TTFTMS: 12300, Gen: 9, TGS: 150, Ctx: 41709, Window: 131072}))
+	m = m.feed(reqEv(t, f, proto.Request{Phase: "live", TTFTMS: 12300, Gen: 9, TGS: 150, Ctx: 41709, Window: 131072}))
 	c := stripANSI(m.headView())
 	if len([]rune(a)) != len([]rune(b)) || len([]rune(b)) != len([]rune(c)) {
 		t.Errorf("widths moved:\n%q\n%q\n%q", a, b, c)
@@ -95,7 +106,7 @@ func TestReqBar_NoBounce(t *testing.T) {
 		t.Errorf("live %q", c)
 	}
 	// After the request ends the figures stay.
-	m = m.feed(reqEv(t, reqDone))
+	m = m.feed(reqEv(t, f, reqDone))
 	m = m.feed(evMsg{"type": "done"})
 	if d := stripANSI(m.headView()); !strings.HasSuffix(d, "tg   45/s   ~45") {
 		t.Errorf("after the turn %q", d)
@@ -119,7 +130,7 @@ func TestReqBar_AverageIsTokenWeighted(t *testing.T) {
 func TestReqBar_CacheNeverReported(t *testing.T) {
 	r := reqDone
 	r.Cached, r.CacheReported, r.Window = 0, false, 0
-	m := barModel(t, 120, r)
+	m, f := barModelF(t, 120, r)
 	head := stripANSI(m.headView())
 	if strings.Contains(head, "cache") {
 		t.Errorf("cache shown though never reported: %q", head)
@@ -129,8 +140,38 @@ func TestReqBar_CacheNeverReported(t *testing.T) {
 	}
 	// Reported once, 0% is a figure.
 	r.CacheReported = true
-	m = m.feed(reqEv(t, r))
+	m = m.feed(reqEv(t, f, r))
 	if head := stripANSI(m.headView()); !strings.Contains(head, "cache   0%") {
 		t.Errorf("a reported 0%% cache: %q", head)
 	}
 }
+
+// A reconnect: the snapshot holds only the last request event, and it is
+// the whole bar (averages, cache, the last ttft and pp), because the engine
+// sends the session's figures on it and the TUI adds nothing up.
+func TestReqBar_LastEventIsTheBar(t *testing.T) {
+	long, short := reqDone, reqDone
+	long.TGS, long.Gen = 30, 900
+	short.TGS, short.Gen = 90, 100
+	before, f := barModelF(t, 120, long, short)
+	last := reqEv(t, f, proto.Request{Phase: "start", Ctx: 41700, Window: 131072})
+	before = before.feed(last)
+	after := barModel(t, 120)
+	after = after.feed(last)
+	if a, b := stripANSI(before.headView()), stripANSI(after.headView()); a != b || !strings.HasSuffix(b, "tg   90/s   ~36") {
+		t.Errorf("a client that saw every event:\n%q\none that saw only the last:\n%q", a, b)
+	}
+}
+
+// Fallback, an engine from before session figures: the event's own figures,
+// no averages, no cache share.
+func TestReqBar_OldEngine(t *testing.T) {
+	m := barModel(t, 120)
+	m = m.feed(reqEv(t, nil, reqDone))
+	if head := stripANSI(m.headView()); !strings.HasSuffix(head, "ctx 41.3k/131k · cache    – · ttft  0.8s · pp  1.2k/s       · tg   45/s      ") {
+		t.Errorf("bar %q", head)
+	}
+}
+
+// newReqFold is a fresh engine fold of the request figures.
+func newReqFold() *proto.RequestFold { return &proto.RequestFold{} }

@@ -104,6 +104,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	return m
 }
 func (m tuiModel) applyEvent(ev evMsg) tuiModel {
+	if _, ok := ev["round"].(float64); ok {
+		m.rounds = true // the engine names rounds: reasoning_end ends a thought
+	}
 	switch ev["type"] {
 	case "workspace":
 		// An empty branch is /isolate off: back in place, no worktree; the
@@ -195,8 +198,17 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 	case "plan":
 		m = m.notePlan(ev)
 	case "mcp_login":
-		// Whole, not oneLine'd or clipped: the URL is to be copied.
-		m.append(stNote.Render("🔑 " + enginecmd.LoginLine(str(ev["server"]), str(ev["url"]))))
+		// The engine (or dund) says how the login went: started, done,
+		// failed (docs/session-events.md, "MCP login").
+		switch server := str(ev["server"]); str(ev["phase"]) {
+		case proto.LoginDone:
+			m.append(StTool.Render("🔑 " + server + ": logged in"))
+		case proto.LoginFailed:
+			m.append(StErr.Render("🔑 " + server + ": login failed — " + textfmt.OneLine(str(ev["error"]))))
+		default: // started; no phase from an engine before phases
+			// Whole, not oneLine'd or clipped: the URL is to be copied.
+			m.append(stNote.Render("🔑 " + enginecmd.LoginLine(server, str(ev["url"]))))
+		}
 	case "prompt":
 		// An MCP prompt the user ran as a slash command, rendered by the
 		// engine: it goes in as their message.
@@ -257,15 +269,24 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		}
 	case "reasoning":
 		m.suggestions = nil
-		m.addThinking(str(ev["text"]))
+		m.addThinking(str(ev["text"]), int(evNum(ev["round"])))
+	case "reasoning_end":
+		// The round's thinking is over (the engine says so). Folding changes
+		// the block's height, so this frame is drawn now, not on the tick.
+		if t, _ := m.liveThought(); t != nil {
+			if ev["cut"] == true {
+				t.cut = true
+			}
+			m.endThinking()
+			m.refresh()
+		}
 	case "token":
 		m.suggestions = nil
 		m.endRun() // the reply began: the run takes nothing more
-		if m.liveThinking() >= 0 {
-			// The reply has begun, so the round's thinking is over. Folding
-			// changes the block's height, so this frame is drawn now, not on
-			// the tick.
-			m.endThinking()
+		if m.liveThinking() >= 0 && !m.rounds {
+			// Fallback, an engine from before round ids: the reply has begun,
+			// so the round's thinking is over. Drawn now, not on the tick.
+			m.endThinkingOld()
 			m.refresh()
 		}
 		m.cur += str(ev["text"])
@@ -288,7 +309,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.refresh()
 	case "tool_call":
 		m.suggestions = nil
-		m.endThinking()
+		m.endThinkingOld()
 		m.flushCur()
 		// The call started (dun/toolevents.go): shown running until the
 		// tool_result that names its call_id. Appended; nothing above moves.
@@ -345,17 +366,40 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		}
 		m.refresh()
 	case "history":
-		if m.skipHistory {
-			// A respawned engine replays the conversation it just resumed. It is
-			// already on screen — rendering it again would double the scrollback.
-			m.skipHistory = false
-			break
-		}
+		// Why it came is dund's to say (docs/session-events.md, "History
+		// reason"), not this client's to guess.
 		items, _ := ev["items"].([]any)
-		if len(items) > 0 && !m.splashKeep {
-			m.splashWant = false // a conversation to show, not a fresh one
+		reason := str(ev["reason"])
+		if reason == "" && m.restartedOld {
+			// Fallback, a dund before reasons: after its "restarting" this is
+			// the respawned engine's replay.
+			reason = proto.HistoryRestart
 		}
-		m.replay(items)
+		m.restartedOld = false
+		switch reason {
+		case proto.HistoryRestart:
+			// A new engine on the conversation on screen: kept as it is (and
+			// the lines this client added since). Shown only when nothing is.
+			if !m.convoShown() {
+				m.quietReplay = true
+				m.replay(items)
+			}
+		case proto.HistoryModelSwitch:
+			// Another model on the same conversation: rendered afresh, no
+			// "resumed" marker — to the person nothing was resumed.
+			m.rebuildFrom(items)
+		default: // resume, or a dund before reasons
+			if len(items) > 0 && !m.splashKeep {
+				m.splashWant = false // a conversation to show, not a fresh one
+			}
+			if m.convoShown() {
+				// Already on screen (read from disk while dund was away):
+				// replaced, so it is not shown twice.
+				m.rebuildFrom(items)
+				break
+			}
+			m.replay(items)
+		}
 	case "message":
 		// tokens already streamed the reply; nothing to add.
 	case "agents":
@@ -437,7 +481,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.refresh()
 		}
 	case "ask":
-		m.endThinking()
+		m.endThinkingOld()
 		m.flushCur()
 		m.paging = false // the question needs the screen
 		m.jobViewing = false
@@ -626,12 +670,13 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.syncStats()
 		m.refresh()
 	case "usage":
-		// Accumulate token usage stats for /context.
-		m.ctxStats.totalTokens += int(evNum(ev["total"]))
+		// The session's token totals, as the engine counts them (cumulative:
+		// the last usage is the whole count, so a snapshot's is too).
+		m.ctxStats.totalTokens = int(evNum(ev["total"]))
 		m.ctxStats.activeTokens = int(evNum(ev["active"]))
-		m.ctxStats.cachedTokens += int(evNum(ev["cached"]))
-		m.ctxStats.processedTokens += int(evNum(ev["processed"]))
-		m.ctxStats.generatedTokens += int(evNum(ev["generated"]))
+		m.ctxStats.cachedTokens = int(evNum(ev["cached"]))
+		m.ctxStats.processedTokens = int(evNum(ev["processed"]))
+		m.ctxStats.generatedTokens = int(evNum(ev["generated"]))
 		m.ctxStats.turns = int(evNum(ev["turns"]))
 		// Session-level stats (cumulative — use last value, not sum).
 		m.ctxStats.readSystemCost(ev)
@@ -653,7 +698,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		if cut {
 			m.markInterrupted()
 		}
-		m.endThinking()
+		m.endThinkingOld()
 		m.endRun()
 		m.flushCur()
 		// A question the turn asked ends with it, however the turn ended.
@@ -686,7 +731,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.armIdleSuggest()
 		m.refresh()
 	case "error":
-		m.endThinking()
+		m.endThinkingOld()
 		m.endRun()
 		// A setup step not taken is the next step, not a failure: said as
 		// the one action, with no retry advice — retrying cannot help.
@@ -754,7 +799,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.dropAsk()
 			m.settleAsk()
 			m.restarts = int(evNum(ev["restarts"]))
-			m.skipHistory = true // it will replay what is already on screen
+			m.restartedOld = true // only for a dund before history reasons
 			m.append(StErr.Render(str(ev["reason"]) + " — restarting it; the session is kept"))
 		case "gave_up":
 			m.starting = false
@@ -845,7 +890,7 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 		// (turnstate.go), which follows this event.
 		// Whatever was thought before the failure stays, folded; the retried
 		// round thinks in a block of its own.
-		m.endThinking()
+		m.endThinkingOld()
 		m.retry = m.retryBanner(ev)
 		if ms := evNum(ev["delay_ms"]); ms > 0 {
 			m.retryDue = time.Now().Add(time.Duration(ms) * time.Millisecond)

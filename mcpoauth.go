@@ -152,6 +152,11 @@ type oauthClient struct {
 
 	loginMu   sync.Mutex  // one interactive login at a time
 	loggingIn atomic.Bool // a login is waiting on the person
+	// ended, when set, hears how a login whose URL was shown ended (nil
+	// err: it went through): the mcp_login that closes the started one.
+	// loginShown is this login's URL was shown; both under loginMu.
+	ended      func(id string, err error)
+	loginShown bool
 }
 
 func newOAuthClient(s Server, notify func(id, authURL string), open func(string) error) *oauthClient {
@@ -433,11 +438,17 @@ func (c *oauthClient) authMethod(supported []string) string {
 
 // Login runs the interactive flow and stores the token. wwwAuthenticate is
 // the 401 that asked for it, or "".
-func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) error {
+func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) (err error) {
 	c.loginMu.Lock()
 	defer c.loginMu.Unlock()
 	c.loggingIn.Store(true)
 	defer c.loggingIn.Store(false)
+	c.loginShown = false
+	defer func() {
+		if c.loginShown && c.ended != nil {
+			c.ended(c.id, err)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, oauthLoginTimeout)
 	defer cancel()
 	as, err := c.discover(ctx, wwwAuthenticate)
@@ -540,6 +551,7 @@ func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) error {
 
 	if c.notify != nil {
 		c.notify(c.id, authURL)
+		c.loginShown = true
 	}
 	if c.open != nil {
 		_ = c.open(authURL) // best effort: the notified URL is the way that always works
@@ -597,6 +609,7 @@ func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) error {
 func (c *oauthClient) waitOtherLogin(ctx context.Context, port int, bindErr error) error {
 	if c.notify != nil {
 		c.notify(c.id, "")
+		c.loginShown = true
 	}
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()

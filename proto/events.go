@@ -67,18 +67,22 @@ func init() {
 // --- a turn ---
 
 // Token is a streamed fragment of the assistant's reply.
+// Round is the model round it is from (docs/session-events.md, "Thinking
+// rounds"); 0 from an engine before round ids.
 type Token struct {
-	Text string `json:"text"`
+	Text  string `json:"text"`
+	Round int    `json:"round,omitempty"`
 }
 
 // Reasoning is a streamed fragment of the model's reasoning — its thinking
 // before the reply or the tool call of a round. Deltas, like Token, and only
-// the turn's own: a sub-agent's or a side call's thinking is not sent. A
-// round's thinking ends when its first token or tool_call arrives, or the
-// turn ends (done, error); there is no event of its own for that. Thinking
-// from finished rounds comes back in history as items of kind "reasoning".
+// the turn's own: a sub-agent's or a side call's thinking is not sent. Round
+// is the model round it is from; the round's thinking ends at its
+// reasoning_end (rounds.go). Thinking from finished rounds comes back in
+// history as items of kind "reasoning".
 type Reasoning struct {
-	Text string `json:"text"`
+	Text  string `json:"text"`
+	Round int    `json:"round,omitempty"`
 }
 
 // Message is a whole reply, sent when the turn's text is final. ID is the
@@ -97,6 +101,7 @@ type ToolCall struct {
 	CallID string         `json:"call_id,omitempty"`
 	Tool   string         `json:"tool"`
 	Args   map[string]any `json:"args"`
+	Round  int            `json:"round,omitempty"` // the model round that asked for it
 }
 
 // ToolResult: the call CallID returned. Result is what the person is shown
@@ -141,6 +146,29 @@ type Request struct {
 	Exact         bool    `json:"exact,omitempty"`
 	Ctx           int     `json:"ctx,omitempty"`
 	Window        int     `json:"window,omitempty"`
+	// Session is the engine's figures over the session so far, on every
+	// request event, so the last one (a snapshot's) is the whole status bar:
+	// a client shows it and adds nothing up. Nil from an older engine.
+	Session *RequestSession `json:"session_stats,omitempty"`
+}
+
+// RequestSession is what the session's requests add up to
+// (docs/session-events.md, "Request stats"). TTFTMS, PPS and TGS are the
+// last value measured, kept across requests (a start does not clear them);
+// TGS moves while a reply streams. PPAvg and TGAvg are averages over the
+// finished requests, weighted by tokens: prompt tokens processed (prompt
+// less cached) for pp, tokens generated for tg; 0 before one. CacheSeen:
+// some request reported the cache field (an unreported cache is not 0%).
+// CachePct is the last finished request's cached share of its prompt; nil
+// until one with the cache field reported.
+type RequestSession struct {
+	TTFTMS    int64   `json:"ttft_ms,omitempty"`
+	PPS       float64 `json:"pp,omitempty"`
+	TGS       float64 `json:"tg,omitempty"`
+	PPAvg     float64 `json:"pp_avg,omitempty"`
+	TGAvg     float64 `json:"tg_avg,omitempty"`
+	CacheSeen bool    `json:"cache_seen,omitempty"`
+	CachePct  *int    `json:"cache_pct,omitempty"`
 }
 
 // SystemCost is what the context costs before the conversation.
@@ -177,7 +205,12 @@ type Window struct {
 	WindowFolds    int     `json:"window_folds"`
 }
 
-// Usage is a turn's accounting, sent before done.
+// Usage is the session's accounting as of a turn's end, sent before done.
+// Total, Cached, Processed, Generated and Turns (rounds) are CUMULATIVE over
+// the engine's session (agentkit's TokenUsage), not the turn's: the last
+// usage is the whole count, a snapshot keeps it, and a client sets them, it
+// does not add them up (docs/session-events.md, "Usage"). Active is the
+// window now. TurnStats is the turn's own share.
 type Usage struct {
 	Total               int `json:"total"`
 	Active              int `json:"active"`
@@ -474,9 +507,24 @@ type Session struct {
 // History is the conversation so far, for a client to render as scrollback.
 // It REPLACES what the client shows rather than adding to it: a client that
 // got a snapshot also gets the history a respawned engine sends.
+//
+// Reason is why it is sent (dund sets it: docs/session-events.md, "History
+// reason"): HistoryResume, the conversation an engine resumed, shown with a
+// "resumed" marker; HistoryRestart, a new engine on the conversation the
+// clients already have (a crash, an idle stop, a dund restart): a client
+// that shows it keeps what it has; HistoryModelSwitch, a new engine on
+// another model: a client replaces what it shows, with no marker. "" from
+// a dund before reasons: read as resume.
 type History struct {
-	Items []HistoryItem `json:"items"`
+	Items  []HistoryItem `json:"items"`
+	Reason string        `json:"reason,omitempty"`
 }
+
+const (
+	HistoryResume      = "resume"
+	HistoryRestart     = "restart"
+	HistoryModelSwitch = "model_switch"
+)
 
 // HistoryItem mirrors dun.HistoryItem.
 type HistoryItem struct {
@@ -909,13 +957,31 @@ type McpTool struct {
 	From    string `json:"from,omitempty"`
 }
 
-// McpLogin asks the person to log in to an OAuth MCP server: open URL in a
-// browser. The engine may run where no browser is (under dund), so this is
-// the way the login reaches them. URL "" means the engine is waiting for a
-// login another session started.
+// McpLogin is an OAuth MCP server's login (docs/session-events.md, "MCP
+// login"). Phase "started": the person is to open URL in a browser (the
+// engine may run where no browser is, so this is the way the login reaches
+// them); URL "" means a login another session started is being waited on.
+// "done": the login went through. "failed": it did not, Error says why. An
+// engine or dund before phases sends only the start, with no phase.
 type McpLogin struct {
 	Server string `json:"server"`
 	URL    string `json:"url,omitempty"`
+	Phase  string `json:"phase,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+const (
+	LoginStarted = "started"
+	LoginDone    = "done"
+	LoginFailed  = "failed"
+)
+
+// LoginEnd is the mcp_login that ends server's login: done, or failed with err.
+func LoginEnd(server string, err error) *McpLogin {
+	if err != nil {
+		return &McpLogin{Server: server, Phase: LoginFailed, Error: err.Error()}
+	}
+	return &McpLogin{Server: server, Phase: LoginDone}
 }
 
 // --- the protocol's own ---

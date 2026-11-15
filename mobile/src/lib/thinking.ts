@@ -1,18 +1,23 @@
 // Thinking: the model's reasoning, one line by default — the TUI's
 // (internal/tui/thinking.go), ported.
 //
-// One block per round. `reasoning` events are deltas: the first of a round
-// opens a block, live, and every later one grows it. The round's first reply
-// token, its first tool call, the end of the turn (or an error, a question,
-// a retry) closes it. Folded, the block is one line: the headline
+// One block per round. `reasoning` events are deltas, each naming its model
+// round (`round`): the first of a round opens a block, live, and every later
+// one grows it. The engine says when the round's thinking is over
+// (`reasoning_end {round, cut?}`, docs/session-events.md "Thinking rounds");
+// a reasoning delta of another round opens a new block. Folded, the block is one line: the headline
 // (thinkHeadline) and how long and how much (thoughtMeta). Open, it is the
 // header (thinkHeader) and the full text.
 
 /** A thought: its text, and when it started and ended (ms; 0 = unknown, as from history). */
-export type Thought = { text: string; start: number; end: number; live: boolean; cut?: boolean };
+export type Thought = { text: string; start: number; end: number; live: boolean; cut?: boolean; round?: number };
 
-/** The events that end the round's thinking (tui_events.go: token, tool_call, ask, done, error, retry). */
-export const endsThinking = new Set(['token', 'tool_call', 'message', 'ask', 'done', 'error', 'retry']);
+/**
+ * Fallback, an event log from before round ids (no `round`, no
+ * reasoning_end): the events that ended a round's thinking then, as the
+ * clients guessed it. Used only until an event names its round.
+ */
+export const endsThinkingOld = new Set(['token', 'tool_call', 'message', 'ask', 'done', 'error', 'retry']);
 
 /** An event's time in ms: its ts, else now. */
 export function evTime(ev: Record<string, unknown>): number {

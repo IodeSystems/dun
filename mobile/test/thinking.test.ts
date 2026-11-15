@@ -92,6 +92,63 @@ test('one block per round: reasoning grows it, the first token closes it', () =>
   expect(r.thoughts![0]).toMatchObject({ live: false, cut: true });
 });
 
+test('rounds: reasoning_end closes the thought, not the next token; a new round opens a new block', () => {
+  const t = (s: number) => `2026-11-14T10:00:0${s}Z`;
+  const v = run([
+    { type: 'user', content: 'hi' },
+    { type: 'turn_state', phase: 'working', queued: [] },
+    { type: 'request', phase: 'start' },
+    { type: 'reasoning', text: '# Thinking: read', round: 1, ts: t(0) },
+    { type: 'reasoning', text: ' the file', round: 1, ts: t(1) },
+  ]);
+  expect(thoughts(v)[0]).toMatchObject({ live: true, round: 1 });
+  // The engine ends it; the token after it changes nothing more.
+  const w = run(
+    [
+      { type: 'reasoning_end', round: 1, ts: t(3) },
+      { type: 'token', text: 'ok', round: 1, ts: t(7) },
+    ],
+    v,
+  );
+  const th = thoughts(w)[0] as Thought;
+  expect(th.live).toBe(false);
+  expect(th.end - th.start).toBe(3000);
+  // Round 2 thinks after a tool call: a step of the open run. A missed
+  // reasoning_end does not merge round 3's thinking into it.
+  const x = run(
+    [
+      { type: 'tool_call', tool: 'read', call_id: 'c1', round: 1, args: {} },
+      { type: 'tool_result', tool: 'read', call_id: 'c1', result: 'x' },
+      { type: 'reasoning', text: 'two', round: 2 },
+      { type: 'reasoning', text: 'three', round: 3 },
+    ],
+    w,
+  );
+  const r = x.items.find((i) => i.kind === 'tools') as Run;
+  expect(r.thoughts!.map((o) => [o.text, o.live])).toEqual([
+    ['two', false],
+    ['three', true],
+  ]);
+  // An interrupt mid-thought: the engine's reasoning_end says cut; done adds nothing.
+  const y = run(
+    [
+      { type: 'reasoning_end', round: 3, cut: true },
+      { type: 'done', reason: 'interrupted' },
+    ],
+    x,
+  );
+  expect((y.items.find((i) => i.kind === 'tools') as Run).thoughts![1]).toMatchObject({ live: false, cut: true });
+});
+
+test('rounds: with round ids, a question or an error no longer ends a thought; only reasoning_end does', () => {
+  const v = run([
+    { type: 'reasoning', text: 'a', round: 1 },
+    { type: 'error', error: 'x' },
+  ]);
+  expect(thoughts(v)[0]).toMatchObject({ live: true });
+  expect(thoughts(run([{ type: 'reasoning_end', round: 1 }], v))[0]).toMatchObject({ live: false });
+});
+
 test('history: a finished round comes back as a reasoning item', () => {
   const v = applySnapshot({
     type: 'snapshot',

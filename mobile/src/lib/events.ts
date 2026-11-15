@@ -7,7 +7,7 @@
 import { noBackground, noteBackground, type Background } from './background';
 import type { McpTool, McpTools } from './mcp';
 import * as notices from './notices';
-import { endsThinking, endThought, evTime, liveThought, type Thought } from './thinking';
+import { endsThinkingOld, endThought, evTime, liveThought, type Thought } from './thinking';
 import { withCall, withResult, withThought, type Run } from './toolcalls';
 import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 
@@ -99,6 +99,8 @@ export type View = {
   bg: Background;
   /** The sub-agent whose conversation is open (agent view), its items folded like the session's. */
   agentView: AgentView | null;
+  /** The engine stamps rounds (reasoning, token, tool_call carry `round`): reasoning_end closes a thought. */
+  rounds: boolean;
   n: number; // key counter
 };
 
@@ -130,6 +132,7 @@ export const empty: View = {
   upgrade: null,
   bg: noBackground,
   agentView: null,
+  rounds: false,
   n: 0,
 };
 
@@ -328,11 +331,26 @@ function askRow(v: View, a: Ask, callId: string): View {
   });
 }
 
-/** A waiting login notice for server, settled. */
-function loginDone(i: Item, server: string): Item {
-  return i.kind === 'notice' && i.notice.type === 'login' && i.notice.server === server && !i.notice.done
-    ? { ...i, notice: { ...i.notice, done: true } }
-    : i;
+/** A waiting login notice for server, settled (failed: error). legacyOnly: only one from an engine before phases. */
+function loginDone(i: Item, server: string, error = '', legacyOnly = false): Item {
+  if (i.kind !== 'notice' || i.notice.type !== 'login' || i.notice.server !== server || i.notice.done) return i;
+  if (legacyOnly && !i.notice.legacy) return i;
+  return { ...i, notice: { ...i.notice, done: true, ...(error ? { error } : {}) } };
+}
+
+/** mcp_login: a login started (a notice), or ended (its notice settled), as the engine or dund says. */
+function mcpLogin(v: View, ev: Ev): View {
+  const server = str(ev.server);
+  if (ev.phase !== 'done' && ev.phase !== 'failed')
+    return push(v, { kind: 'notice', notice: notices.mcpLoginNotice(ev) });
+  const error = ev.phase === 'failed' ? str(ev.error) || 'the login failed' : '';
+  const items = v.items.map((i) => loginDone(i, server, error));
+  if (items.some((x, k) => x !== v.items[k])) return { ...v, items };
+  // No waiting notice (this client came later): the outcome on its own.
+  return push(v, {
+    kind: 'notice',
+    notice: { type: 'login', server, url: '', done: true, ...(error ? { error } : {}) },
+  });
 }
 
 /** A history item (history event, snapshot) as a shown item. */
@@ -377,6 +395,7 @@ export function replaceWith(items: unknown[], keep?: View): View {
     settings: keep?.settings ?? null,
     mcpTools: keep?.mcpTools ?? null,
     agentView: keep?.agentView ?? null,
+    rounds: keep?.rounds ?? false,
   };
   for (const it of items) if (it && typeof it === 'object') v = fromHistory(v, it as Ev);
   return v;
@@ -397,15 +416,23 @@ function applyNew(v: View, ev: Ev): View {
   const bg = noteBackground(v.bg, ev);
   if (bg !== v.bg) v = { ...v, bg };
   v = applyMore(v, ev);
-  // The round's thinking is over (lib/thinking.ts).
-  if (endsThinking.has(str(ev.type)))
+  // The round's thinking is over: the engine says so (lib/thinking.ts).
+  if (typeof ev.round === 'number' && !v.rounds) v = { ...v, rounds: true };
+  if (ev.type === 'reasoning_end') v = { ...v, items: endThought(v.items, evTime(ev), ev.cut === true) };
+  else if (!v.rounds && endsThinkingOld.has(str(ev.type)))
+    // Fallback, an event log from before round ids.
     v = { ...v, items: endThought(v.items, evTime(ev), ev.type === 'done' && ev.reason === 'interrupted') };
   switch (ev.type) {
     case 'reasoning':
-      return addThinking(v, str(ev.text), evTime(ev));
+      return addThinking(v, str(ev.text), evTime(ev), typeof ev.round === 'number' ? ev.round : undefined);
     case 'snapshot':
       return applySnapshot(ev, v);
     case 'history':
+      // dund says why (docs/session-events.md, "History reason"). A restart's
+      // is the conversation already shown: kept, with the lines added since
+      // (the restart's own notice). resume, model_switch, or no reason (a
+      // dund before reasons): replaced.
+      if (ev.reason === 'restart' && v.items.length > 0) return v;
       return {
         ...replaceWith((ev.items as unknown[]) ?? [], v),
         busy: v.busy,
@@ -483,7 +510,7 @@ function applyNew(v: View, ev: Ev): View {
     case 'compaction':
       return push(v, { kind: 'notice', notice: notices.compactionNotice(ev) });
     case 'mcp_login':
-      return push(v, { kind: 'notice', notice: notices.mcpLoginNotice(ev) });
+      return mcpLogin(v, ev);
     case 'agent_told': {
       const n = notices.agentToldNotice(ev);
       return n ? push(v, { kind: 'notice', notice: n }) : v;
@@ -498,8 +525,9 @@ function applyNew(v: View, ev: Ev): View {
       const tools = (ev.tools as McpTool[] | undefined) ?? [];
       const server = str(ev.server);
       let w = server && (tools.length || v.mcpTools?.server !== server) ? { ...v, mcpTools: { server, tools } } : v;
-      // The server lists tools: its login (if it waited on one) went through.
-      if (server && tools.length) w = { ...w, items: w.items.map((i) => loginDone(i, server)) };
+      // Fallback, an engine before login phases: the server lists tools, so
+      // its login (if it waited on one) went through.
+      if (server && tools.length) w = { ...w, items: w.items.map((i) => loginDone(i, server, '', true)) };
       return ev.message ? push(w, { kind: 'note', text: str(ev.message) }) : w;
     }
     case 'settings':
@@ -541,10 +569,16 @@ function applyNew(v: View, ev: Ev): View {
 }
 
 /** A reasoning delta: it opens the round's thought if none is live, and grows it. */
-function addThinking(v: View, delta: string, at: number): View {
-  const i = liveThought(v.items);
-  const w = v;
-  if (i < 0) return pushThought(w, { text: delta, start: at, end: 0, live: true });
+function addThinking(v: View, delta: string, at: number, round?: number): View {
+  let i = liveThought(v.items);
+  let w = v;
+  // Another round's thinking: the live one is over (its reasoning_end was missed).
+  if (i >= 0 && round !== undefined && liveRound(v.items[i]!) !== round) {
+    w = { ...v, items: endThought(v.items, at) };
+    i = -1;
+  }
+  if (i < 0)
+    return pushThought(w, { text: delta, start: at, end: 0, live: true, ...(round !== undefined ? { round } : {}) });
   const items = [...v.items];
   const it = items[i]!;
   if (it.kind === 'tools') {
@@ -557,6 +591,13 @@ function addThinking(v: View, delta: string, at: number): View {
     items[i] = { ...t, text: t.text + delta };
   }
   return { ...w, items };
+}
+
+/** The round of the live thought in it (a block of its own, or a run's last). */
+function liveRound(it: Item): number | undefined {
+  if (it.kind === 'tools') return it.thoughts?.at(-1)?.round;
+  if (it.kind === 'thinking') return it.round;
+  return undefined;
 }
 
 /** A thought: inside the open run, as the TUI does (thinking.go addThought), else a block of its own. */

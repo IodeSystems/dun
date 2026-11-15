@@ -12,10 +12,13 @@ import (
 
 // Thinking: the model's reasoning, one line by default.
 //
-// One block per round. The engine's `reasoning` events are deltas; the first
-// one of a round opens a block, LIVE, and every later one grows it. The
+// One block per round. The engine's `reasoning` events are deltas, each
+// naming its model round; the first one of a round opens a block, LIVE, and
+// every later one grows it. The engine's `reasoning_end` closes it
+// (docs/session-events.md, "Thinking rounds"); a delta of another round opens
+// a new one. An event log from before round ids has neither: then the
 // round's first reply token, its first tool call, or the end of the turn
-// closes it.
+// closes it (endThinkingOld).
 //
 // FOLDED (the default) the block is ONE line (thoughtLine): the headline
 // (thinkHeadline) and how long and how much. dun's prompt asks the model to
@@ -43,6 +46,7 @@ type thinkBlock struct {
 	live       bool
 	cut        bool // the user interrupted the turn mid-thought
 	full       bool // drawn as its whole text, not the one line (ctrl+t)
+	round      int  // the model round it is from; 0 from history or an older engine
 }
 
 // liveThought is the thought still streaming and the block it is in — its
@@ -128,12 +132,18 @@ func (m *tuiModel) toggleThinking() {
 	}
 }
 
-// addThinking takes one reasoning delta: it opens the round's thought if none
-// is live, and grows it. Rendering is left to the tick, as for tokens.
-func (m *tuiModel) addThinking(delta string) {
+// addThinking takes one reasoning delta of round (0: not named): it opens
+// the round's thought if none is live, and grows it. A delta of another
+// round than the live thought's ends that one first. Rendering is left to
+// the tick, as for tokens.
+func (m *tuiModel) addThinking(delta string, round int) {
 	t, i := m.liveThought()
+	if t != nil && round > 0 && t.round != round {
+		m.endThinking()
+		t = nil
+	}
 	if t == nil {
-		t = &thinkBlock{start: time.Now(), live: true}
+		t = &thinkBlock{start: time.Now(), live: true, round: round}
 		i = m.addThought(t)
 	}
 	t.text += delta
@@ -152,6 +162,16 @@ func (m *tuiModel) endThinking() {
 	t.live = false
 	t.end = time.Now()
 	m.touchThought(i)
+}
+
+// endThinkingOld is the fallback for an event log from before round ids:
+// the event that ends the round's thinking is guessed (a token, a tool call,
+// a question, an error, a retry, the turn's end). Once an event named its
+// round (m.rounds), reasoning_end says it and this does nothing.
+func (m *tuiModel) endThinkingOld() {
+	if !m.rounds {
+		m.endThinking()
+	}
 }
 
 // thinkingEntry is a block for t, boxed and following its tail.

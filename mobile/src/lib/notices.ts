@@ -43,8 +43,10 @@ export type AgentMsg = {
 export type Notice =
   | { type: 'plain'; tone: Tone; icon: string; text: string; label?: string }
   | { type: 'job'; head: string; took: string; command: string; output: string }
-  // An OAuth MCP server waiting for a login (mcp_login): url '' = another session started it.
-  | { type: 'login'; server: string; url: string; done: boolean }
+  // An OAuth MCP server's login (mcp_login): url '' = another session started it. done: it
+  // ended, error says it failed. legacy: from an engine before phases, settled by the
+  // server's tool list instead.
+  | { type: 'login'; server: string; url: string; done: boolean; error?: string; legacy?: boolean }
   // A slash command the person ran and dun's answer (history kind "command"; tui_convo.go).
   | { type: 'command'; line: string; reply: string; attention: boolean }
   | { type: 'docs'; found: number; surfaced: number; tokens: number; docs: Doc[] }
@@ -239,9 +241,10 @@ export function agentToldNotice(ev: Ev): Notice | null {
   return { type: 'plain', tone: 'note', icon: '↳', text: oneLine(msg) };
 }
 
-/** mcp_login: the URL whole, to be opened (enginecmd.LoginLine). */
+/** mcp_login started: the URL whole, to be opened (enginecmd.LoginLine). */
 export function mcpLoginNotice(ev: Ev): Notice {
-  return { type: 'login', server: str(ev.server), url: str(ev.url), done: false };
+  const n: Notice = { type: 'login', server: str(ev.server), url: str(ev.url), done: false };
+  return ev.phase ? n : { ...n, legacy: true };
 }
 
 /** The TUI's line for a login notice (enginecmd.LoginLine). */
