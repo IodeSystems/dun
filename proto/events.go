@@ -141,6 +141,29 @@ type Request struct {
 	Exact         bool    `json:"exact,omitempty"`
 	Ctx           int     `json:"ctx,omitempty"`
 	Window        int     `json:"window,omitempty"`
+	// Session is the engine's figures over the session so far, on every
+	// request event, so the last one (a snapshot's) is the whole status bar:
+	// a client shows it and adds nothing up. Nil from an older engine.
+	Session *RequestSession `json:"session_stats,omitempty"`
+}
+
+// RequestSession is what the session's requests add up to
+// (docs/session-events.md, "Request stats"). TTFTMS, PPS and TGS are the
+// last value measured, kept across requests (a start does not clear them);
+// TGS moves while a reply streams. PPAvg and TGAvg are averages over the
+// finished requests, weighted by tokens: prompt tokens processed (prompt
+// less cached) for pp, tokens generated for tg; 0 before one. CacheSeen:
+// some request reported the cache field (an unreported cache is not 0%).
+// CachePct is the last finished request's cached share of its prompt; nil
+// until one with the cache field reported.
+type RequestSession struct {
+	TTFTMS    int64   `json:"ttft_ms,omitempty"`
+	PPS       float64 `json:"pp,omitempty"`
+	TGS       float64 `json:"tg,omitempty"`
+	PPAvg     float64 `json:"pp_avg,omitempty"`
+	TGAvg     float64 `json:"tg_avg,omitempty"`
+	CacheSeen bool    `json:"cache_seen,omitempty"`
+	CachePct  *int    `json:"cache_pct,omitempty"`
 }
 
 // SystemCost is what the context costs before the conversation.

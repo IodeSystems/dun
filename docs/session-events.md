@@ -120,3 +120,22 @@ derive them from `turn`, tokens, tool calls or `done`.
 - `answered {ask_id, value, by}`: the question is closed; its answer is the
   person's row, live. `ask_user`'s live `tool_call`/`tool_result` add no row.
 - `mount {ask_id, …}` is answered the same way.
+
+## Request stats
+
+- `request {phase, …, session}`: one model round's figures (`proto.Request`,
+  `dun/reqstats.go`), and in `session_stats` the session's so far
+  (`proto.RequestSession`, folded by the engine, `proto.RequestFold`):
+  `ttft_ms`, `pp`, `tg` the last measured (a start clears none; `tg` moves
+  while a reply streams), `pp_avg`/`tg_avg` the averages over finished
+  rounds weighted by tokens (prompt less cached for pp, generated for tg),
+  `cache_seen` (some round reported the cache field; an unreported cache is
+  not 0%), `cache_pct` the last finished round's cached share (absent until
+  one reported it).
+- `request` is state: a snapshot keeps the last one, and it is the whole
+  status bar. Clients show it and add nothing up, so a reconnect does not
+  start the averages again.
+- Scope: the engine process. An engine restart (a crash, a model switch)
+  starts the figures again.
+- Old logs: a `request` with no `session_stats` (an older engine) shows its own
+  figures and no averages; marked in both clients.

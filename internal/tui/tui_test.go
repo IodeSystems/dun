@@ -4438,7 +4438,7 @@ func TestActivity_FoldsWhenAQuestionTakesTheFocus(t *testing.T) {
 func TestHeadView_QuestionKeepsTheMetrics(t *testing.T) {
 	v := newVtui(110, 20)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
-	v.m = v.m.feed(reqEv(t, reqDone))
+	v.m = v.m.feed(reqEv(t, newReqFold(), reqDone))
 	long := ""
 	for i := 0; i < 60; i++ {
 		long += fmt.Sprintf("line %d of the answer\n\n", i)
