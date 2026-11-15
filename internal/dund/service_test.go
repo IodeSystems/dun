@@ -366,6 +366,50 @@ func TestIdleEnginesStop(t *testing.T) {
 	}
 }
 
+// With turn_state, the engine's state alone says it is busy: a raw turn or
+// ask event without one changes nothing, and idle ends a turn whose done
+// is still to come (a retry that gave up says idle before its error).
+func TestIdleFollowsTurnState(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	ses, _ := svc.Get(alice, id)
+	time.Sleep(20 * time.Millisecond) // the fake's startup events land
+	d := 10 * time.Millisecond
+	state := func(phase string) *proto.TurnState {
+		return &proto.TurnState{Phase: phase, Queued: []proto.QueuedMsg{}}
+	}
+	ses.track(proto.NewEvent(state(proto.PhaseIdle)))
+	ses.track(proto.NewEvent(&proto.Turn{Kind: "user"}))
+	ses.track(proto.NewEvent(&proto.Ask{Question: "?"}))
+	time.Sleep(2 * d)
+	if !ses.idle(d) {
+		t.Fatal("raw events said busy after turn_state said idle")
+	}
+	for _, phase := range []string{proto.PhaseWorking, proto.PhaseWaitingAnswer, proto.PhaseInterrupting, proto.PhaseRetrying} {
+		ses.track(proto.NewEvent(state(phase)))
+		ses.track(proto.NewEvent(&proto.Done{})) // ignored: turn_state owns it
+		time.Sleep(2 * d)
+		if ses.idle(d) {
+			t.Errorf("idle while %s", phase)
+		}
+	}
+	ses.track(proto.NewEvent(state(proto.PhaseIdle)))
+	time.Sleep(2 * d)
+	if !ses.idle(d) {
+		t.Error("turn_state idle, but not idle")
+	}
+	// A stopped engine forgets it: the next one may be older.
+	ses.track(proto.NewEvent(&proto.EngineState{State: "stopped"}))
+	ses.mu.Lock()
+	ses.running = true
+	ses.mu.Unlock()
+	ses.track(proto.NewEvent(&proto.Turn{Kind: "user"}))
+	time.Sleep(2 * d)
+	if ses.idle(d) {
+		t.Error("an engine without turn_state: its turn event no longer counts")
+	}
+}
+
 // A rebuild restarts dund only when nothing is busy.
 func TestBusyHoldsBackARestart(t *testing.T) {
 	svc, _, _ := newSvc(t)

@@ -43,9 +43,9 @@ func TestSnapshot_ReplayedStateRepeatsNoNote(t *testing.T) {
 			map[string]any{"type": "turn_state", "phase": "idle", "queued": []any{}, "replayed": true},
 		}}
 	m = m.handleEvent(snap)
-	n := len(m.convo)
-	m.skipHistory = true // a reconnect: the conversation is on screen
+	m.skipHistory = true // a reconnect: the conversation is rebuilt from it
 	m = m.handleEvent(snap)
+	n := len(m.convo)
 	m = m.handleEvent(snap)
 	if len(m.convo) != n || strings.Contains(stripANSI(convoText(m)), "rag: on") {
 		t.Errorf("notes repeated (%d → %d):\n%s", n, len(m.convo), convoText(m))

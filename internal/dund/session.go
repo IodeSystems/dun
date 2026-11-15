@@ -72,6 +72,10 @@ type session struct {
 	lastActive time.Time
 	inTurn     bool
 	asking     bool
+	// turnStated: this engine sends turn_state, and inTurn, asking and ask
+	// follow it alone. Until then (an engine from before turn_state) they
+	// are inferred from turn, done, error, ask, mount and answered.
+	turnStated bool
 	// ask is the open ask_user question (nil for a mount question): a
 	// restart does not wait for it, it is saved and shown again (restored).
 	ask *proto.Ask
@@ -104,23 +108,42 @@ func (s *session) track(ev proto.Event) {
 	defer s.actMu.Unlock()
 	s.lastActive = time.Now()
 	switch p := ev.Payload.(type) {
+	case *proto.TurnState:
+		s.turnStated = true
+		s.inTurn = p.Phase != proto.PhaseIdle
+		s.asking = p.Ask != nil || p.Mount != nil
+		s.ask = nil
+		if p.Ask != nil {
+			c := *p.Ask
+			s.ask = &c
+		}
 	case *proto.Turn:
-		s.inTurn = true
+		if !s.turnStated { // fallback: an engine without turn_state
+			s.inTurn = true
+		}
 	case *proto.Done, *proto.Error:
 		// A question the turn asked ends with it, however it ended (an
 		// interrupted ask_user sends no answered), as the clients take it.
-		s.inTurn, s.asking, s.ask = false, false, nil
+		if !s.turnStated { // fallback: an engine without turn_state
+			s.inTurn, s.asking, s.ask = false, false, nil
+		}
 	case *proto.Ask:
-		s.asking = true
-		c := *p
-		s.ask = &c
+		if !s.turnStated { // fallback: an engine without turn_state
+			s.asking = true
+			c := *p
+			s.ask = &c
+		}
 		// The engine asks again, or something new: that question is the
 		// open one now, as a client shows it.
 		s.restored, s.restoredEvs = nil, nil
 	case *proto.Mount:
-		s.asking, s.ask = true, nil
+		if !s.turnStated { // fallback: an engine without turn_state
+			s.asking, s.ask = true, nil
+		}
 	case *proto.Answered:
-		s.asking, s.ask = false, nil
+		if !s.turnStated { // fallback: an engine without turn_state
+			s.asking, s.ask = false, nil
+		}
 	case *proto.Workspace:
 		// The in-place Worktree that a session without --worktree makes reports the workspace
 		// itself: that is no worktree.
@@ -146,7 +169,8 @@ func (s *session) track(ev proto.Event) {
 		}
 	case *proto.EngineState:
 		if p.State != "started" {
-			s.inTurn, s.asking, s.ask, s.jobs, s.agents = false, false, nil, nil, nil
+			// The next engine says again whether it sends turn_state.
+			s.inTurn, s.asking, s.ask, s.jobs, s.agents, s.turnStated = false, false, nil, nil, nil, false
 		}
 	}
 }
@@ -549,11 +573,10 @@ func (s *session) historyAt() (uint64, []dun.HistoryItem) {
 
 // afterSnapshot drops from the replay after a snapshot the events whose
 // entries the snapshot's items already hold: a user message by its id, a
-// tool call or result by its call_id, and a final reply equal to the last
-// one in the items. The engine writes an entry and sends its event apart
+// tool call or result by its call_id, a reply by its id. The engine writes an entry and sends its event apart
 // (either may come first), so without this an entry could show twice.
 func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event {
-	users, calls, results := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	users, calls, results, replies := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	lastReply := ""
 	for _, it := range items {
 		switch it.Kind {
@@ -564,6 +587,7 @@ func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event 
 		case "tool_result":
 			results[it.CallID] = it.CallID != ""
 		case "assistant":
+			replies[it.ID] = it.ID != ""
 			lastReply = it.Content
 		}
 	}
@@ -583,7 +607,13 @@ func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event 
 				continue
 			}
 		case *proto.Message:
-			if lastReply != "" && p.Content == lastReply {
+			if replies[p.ID] {
+				continue
+			}
+			// Fallback, for an engine older than reply ids: a reply equal to
+			// the last one in the items is taken for it (a repeated reply
+			// is dropped wrongly; ids fixed that).
+			if p.ID == "" && lastReply != "" && p.Content == lastReply {
 				continue
 			}
 		}

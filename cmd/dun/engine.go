@@ -729,7 +729,7 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 		return false
 	}
 	if strings.TrimSpace(res.Reply) != "" {
-		em.emit(&proto.Message{Role: "assistant", Content: res.Reply})
+		em.emit(&proto.Message{Role: "assistant", Content: res.Reply, ID: replyID(h, res.Reply)})
 	}
 	em.emit(usageEvent(h, res.Usage))
 	em.emit(&proto.Done{})
@@ -864,10 +864,19 @@ func endTurn(ctx, tctx context.Context, h *dun.Harness, em *emitter, res agent.T
 		emitTurnError(ctx, h, em, err)
 		return false
 	}
-	em.emit(&proto.Message{Role: "assistant", Content: res.Reply})
+	em.emit(&proto.Message{Role: "assistant", Content: res.Reply, ID: replyID(h, res.Reply)})
 	em.emit(usageEvent(h, res.Usage))
 	em.emit(&proto.Done{})
 	return true
+}
+
+// replyID is the id of the turn's reply entry (the message event's id), or
+// "" for a turn with no reply text.
+func replyID(h *dun.Harness, reply string) string {
+	if strings.TrimSpace(reply) == "" {
+		return ""
+	}
+	return h.ReplyID()
 }
 
 // emitInterrupted ends a turn the user stopped. Not an error: the transcript

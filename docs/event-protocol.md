@@ -17,7 +17,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `token` | Streaming assistant text | `text` (chunk) |
 | `tool_call` | A tool call started | `call_id`, `tool`, `args` |
 | `tool_result` | Tool returned | `call_id`, `tool`, `result`, `is_error`, `elapsed_ms` |
-| `message` | Turn reply finalized | `role`, `content` |
+| `message` | Turn reply finalized | `role`, `content`, `id` (the reply's history item id) |
 | `suggestions` | Predicted next messages | `items[]` |
 | `notification` | Proactive notification (RAG, background) | `kind`, `text` |
 | `ask` | Agent waiting on user input | `question`, `options[]`, `multi`, `recommended_all[]`, `no_custom` (answer must be an option) |

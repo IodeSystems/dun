@@ -449,9 +449,17 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.askSel, m.askNote = 0, ""
 		m.input.Blur()
 		m.settleAsk() // a new question replaces any parked one
-		q := convoEntry{askText: str(ev["question"]), askOpen: true}
-		q.renderAsk(false)
-		m.convo = append(m.convo, q)
+		// The row its call already has (a snapshot's history drew it) is the
+		// question's row; otherwise it gets one.
+		call := str(ev["call_id"])
+		if i := slices.IndexFunc(m.convo, func(e convoEntry) bool { return call != "" && e.askCall == call }); i >= 0 {
+			m.convo[i].askOpen = true
+			m.convo[i].renderAsk(false)
+		} else {
+			q := convoEntry{askText: str(ev["question"]), askOpen: true, askCall: call}
+			q.renderAsk(false)
+			m.convo = append(m.convo, q)
+		}
 		m.refresh()
 		m.askOptions = nil
 		if opts, ok := ev["options"].([]any); ok {
@@ -763,10 +771,13 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m = m.applyUI(ev["state"])
 	case "snapshot":
 		// Too far behind to replay: the conversation, then the latest state.
-		// On a reconnect the conversation is already on screen; the history a
-		// respawned engine sends next is skipped by the same flag.
-		if !m.skipHistory {
-			items, _ := ev["items"].([]any)
+		// On a reconnect the screen is rebuilt from it, so what happened
+		// while detached shows (reconnect.go); the history a respawned engine
+		// sends next is still skipped by the same flag.
+		items, _ := ev["items"].([]any)
+		if m.skipHistory {
+			m.rebuildFrom(items)
+		} else {
 			m.replay(items)
 		}
 		state, _ := ev["state"].([]any)

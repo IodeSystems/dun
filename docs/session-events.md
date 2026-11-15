@@ -72,6 +72,10 @@ derive them from `turn`, tokens, tool calls or `done`.
   `waiting_answer` for a question it restored after a restart.
 - A queued row whose id the state no longer lists, with no `delivered` or
   `withdrawn` for it, while idle: lost with its engine; clients say so.
+- dund reads it too: the idle stop and an upgrade's waits take "in a turn"
+  and "a question is open" from `turn_state` (`session.track`). An engine
+  that has sent none since it started (an older build) is read from `turn`,
+  `done`, `error`, `ask`, `mount` and `answered`, a marked fallback.
 - Old logs: an event log with no `turn_state` reads as idle.
 
 ## Snapshots and reconnects
@@ -85,8 +89,17 @@ derive them from `turn`, tokens, tool calls or `done`.
   the session file again when an event was written meanwhile (a few tries).
   The engine writes an entry and sends its event apart, so dund also drops
   from the replay after a snapshot what the items hold: a `user` event by
-  id, a `tool_call`/`tool_result` by `call_id`, a `message` equal to the last
-  reply. An entry is in the snapshot or the replay, not both.
+  id, a `tool_call`/`tool_result` by `call_id`, a `message` by `id` (the
+  reply's entry; its `assistant` history item carries the same `id`). An
+  entry is in the snapshot or the replay, not both, and two identical
+  replies are two entries. Fallback, marked in dund, for an engine older
+  than reply ids: a `message` with no `id` equal to the last reply in the
+  items is dropped.
+- A client that gets a snapshot on a reconnect replaces its conversation
+  with the snapshot's items: what happened while it was away is only there.
+  The TUI keeps the splash, the draft, the open question and its picker,
+  and the scroll (at the bottom stays at the bottom); its own lines (notes,
+  command output) are not in a snapshot and go (`internal/tui/rebuild.go`).
 
 ## Questions
 
@@ -94,7 +107,11 @@ derive them from `turn`, tokens, tool calls or `done`.
   recommended_all, no_custom}`: the open question. `call_id` is the asking
   `ask_user` call. The `ask` event is the question's row live; history shows
   it from that call's `tool_call` item (a client that has the row for the
-  call does not add another). `multi`: any number may be picked,
+  call does not add another), and the answer from its `tool_result` item
+  as the person's row, as `answered` does live. A result `ERROR: could not
+  get an answer…` (interrupted) adds no row; any other `ERROR` result is a
+  call refused before it asked, shown live as nothing, and the TUI drops its
+  row. `multi`: any number may be picked,
   `recommended_all` checked to start with, sent back comma-separated.
   `no_custom`: the answer must be an option (meaningless without options).
 - `answer {value, ask_id}` (command): an answer naming a question that is no
