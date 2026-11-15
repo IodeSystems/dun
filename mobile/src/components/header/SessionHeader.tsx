@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Animated, Pressable, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { badge } from '@/lib/activity';
@@ -51,8 +51,12 @@ export type HeaderActions = {
  * tasks (only when there are some), and the overflow (model, session panel).
  * Each line is one line: what does not fit is cut with an ellipsis.
  *
- * hidden slides it up out of the way (the reader is in the history); a thin
- * strip in the state's colour stays, and tapping it brings the header back.
+ * It overlays the top of the transcript (position absolute): showing or
+ * hiding it never changes the transcript's size, so the scroll offset never
+ * moves with it. hidden slides it up out of the way (a transform; the reader
+ * is in the history); a thin strip in the state's colour stays, and tapping
+ * it brings the header back. onHeight reports its height (the safe-area inset
+ * not included), which the transcript keeps as room at its oldest end.
  */
 export function SessionHeader({
   view,
@@ -60,6 +64,7 @@ export function SessionHeader({
   hidden,
   panel,
   onShow,
+  onHeight,
   act,
 }: {
   view: Shown;
@@ -67,6 +72,7 @@ export function SessionHeader({
   hidden: boolean;
   panel: boolean;
   onShow: () => void;
+  onHeight: (h: number) => void;
   act: HeaderActions;
 }) {
   const c = useColors();
@@ -82,14 +88,19 @@ export function SessionHeader({
   const plan = view.bg.plan;
   const last = lastUser(view);
 
-  // Slide: the wrapper's height goes to 0 while the content moves up with it,
-  // so the transcript below takes the room and nothing in it moves.
+  // Slide: a transform only (the native driver where there is one), never
+  // the layout, so the transcript under it does not move.
   const [h, setH] = useState(0);
   const [shown] = useState(() => new Animated.Value(hidden ? 0 : 1));
   useEffect(() => {
     const to = hidden ? 0 : 1;
     if (reduced) shown.setValue(to);
-    else Animated.timing(shown, { toValue: to, duration: HIDE_MS, useNativeDriver: false }).start();
+    else
+      Animated.timing(shown, {
+        toValue: to,
+        duration: HIDE_MS,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
   }, [hidden, reduced, shown]);
 
   const chip = (label: string, onPress: () => void, a11y: string, tint?: string) => (
@@ -105,93 +116,108 @@ export function SessionHeader({
     </Pressable>
   );
 
+  // box-none: the wrapper keeps the header's box while it is slid away;
+  // touches there go to the transcript under it.
   return (
-    <View style={{ backgroundColor: c.bg, paddingTop: insets.top, zIndex: 1 }}>
+    <View pointerEvents="box-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1 }}>
       <Animated.View
-        style={
-          h
-            ? {
-                height: shown.interpolate({ inputRange: [0, 1], outputRange: [0, h] }),
-                overflow: 'hidden',
-              }
-            : undefined
-        }
+        aria-hidden={hidden}
+        onLayout={(e) => {
+          const n = e.nativeEvent.layout.height;
+          setH(n);
+          onHeight(n);
+        }}
+        style={{
+          marginTop: insets.top,
+          backgroundColor: c.bg,
+          transform: [{ translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-h, 0] }) }],
+        }}
       >
-        <Animated.View
-          onLayout={(e) => setH(e.nativeEvent.layout.height)}
-          style={
-            h
-              ? { transform: [{ translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-h, 0] }) }] }
-              : undefined
-          }
+        <View
+          style={{
+            borderBottomWidth: 1,
+            borderColor: c.border,
+            paddingRight: space.xs,
+            width: '100%',
+            maxWidth: 860,
+            alignSelf: 'center',
+          }}
         >
-          <View
-            style={{
-              borderBottomWidth: 1,
-              borderColor: c.border,
-              paddingRight: space.xs,
-              width: '100%',
-              maxWidth: 860,
-              alignSelf: 'center',
-            }}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Back to the sessions"
-                onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-                style={{ minHeight: TOUCH, minWidth: TOUCH, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Text style={{ color: c.text, fontSize: font.lg }}>‹</Text>
-              </Pressable>
-              <Text
-                accessibilityLiveRegion="polite"
-                style={{ flex: 1, color, fontSize: font.sm, fontWeight: st.state === 'idle' ? '400' : '500' }}
-                numberOfLines={1}
-              >
-                {st.state === 'working' ? (moving ? spin[phase % spin.length] : '⠿') + ' ' : ''}
-                {st.text}
-              </Text>
-              {chip(
-                '⋯',
-                () => setMore((m) => !m),
-                more ? 'Hide the session menu' : 'Session menu',
-                more ? c.accent : c.text,
-              )}
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: space.md }}>
-              <Text style={{ flex: 1, color: c.muted, fontSize: font.sm }} numberOfLines={1}>
-                {last ? '› ' + last.replace(/\s+/g, ' ') : ' '}
-              </Text>
-              {chip(ctxText(stats, view.bg.ctx.active, view.bg.ctx.window), act.ctx, 'Context details')}
-              {plan
-                ? chip(`☰ ${plan.done}/${plan.total}`, act.plan, `Plan, ${plan.done} of ${plan.total} done`)
-                : null}
-              {tasks
-                ? chip(
-                    `⚙ ${tasks.running}`,
-                    act.tasks,
-                    `Background tasks, ${tasks.running} running${tasks.failed ? ', one failed' : ''}`,
-                    tasks.failed ? c.danger : tasks.running ? c.working : c.muted,
-                  )
-                : null}
-            </View>
-            {more ? (
-              <View style={{ flexDirection: 'row', paddingLeft: space.md, gap: space.sm }}>
-                {chip(view.settings?.model || 'Model', act.model, 'Switch model', c.text)}
-                {chip(panel ? 'Hide session' : 'Session', act.session, 'Session commands', panel ? c.accent : c.text)}
-              </View>
-            ) : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to the sessions"
+              onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+              style={{ minHeight: TOUCH, minWidth: TOUCH, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ color: c.text, fontSize: font.lg }}>‹</Text>
+            </Pressable>
+            <Text
+              accessibilityLiveRegion="polite"
+              style={{ flex: 1, color, fontSize: font.sm, fontWeight: st.state === 'idle' ? '400' : '500' }}
+              numberOfLines={1}
+            >
+              {st.state === 'working' ? (moving ? spin[phase % spin.length] : '⠿') + ' ' : ''}
+              {st.text}
+            </Text>
+            {chip(
+              '⋯',
+              () => setMore((m) => !m),
+              more ? 'Hide the session menu' : 'Session menu',
+              more ? c.accent : c.text,
+            )}
           </View>
-        </Animated.View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: space.md }}>
+            <Text style={{ flex: 1, color: c.muted, fontSize: font.sm }} numberOfLines={1}>
+              {last ? '› ' + last.replace(/\s+/g, ' ') : ' '}
+            </Text>
+            {chip(ctxText(stats, view.bg.ctx.active, view.bg.ctx.window), act.ctx, 'Context details')}
+            {plan ? chip(`☰ ${plan.done}/${plan.total}`, act.plan, `Plan, ${plan.done} of ${plan.total} done`) : null}
+            {tasks
+              ? chip(
+                  `⚙ ${tasks.running}`,
+                  act.tasks,
+                  `Background tasks, ${tasks.running} running${tasks.failed ? ', one failed' : ''}`,
+                  tasks.failed ? c.danger : tasks.running ? c.working : c.muted,
+                )
+              : null}
+          </View>
+          {more ? (
+            <View style={{ flexDirection: 'row', paddingLeft: space.md, gap: space.sm }}>
+              {chip(view.settings?.model || 'Model', act.model, 'Switch model', c.text)}
+              {chip(panel ? 'Hide session' : 'Session', act.session, 'Session commands', panel ? c.accent : c.text)}
+            </View>
+          ) : null}
+        </View>
       </Animated.View>
+      {/* The status bar's room: the slid header goes under it. */}
+      {insets.top ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: insets.top,
+            backgroundColor: c.bg,
+          }}
+        />
+      ) : null}
       {hidden ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={'Show the header: ' + st.text}
           onPress={onShow}
           hitSlop={{ top: 8, bottom: 24 }}
-          style={{ height: space.xs, backgroundColor: st.state === 'idle' ? c.border : color }}
+          style={{
+            position: 'absolute',
+            top: insets.top,
+            left: 0,
+            right: 0,
+            height: space.xs,
+            backgroundColor: st.state === 'idle' ? c.border : color,
+          }}
         />
       ) : null}
     </View>
