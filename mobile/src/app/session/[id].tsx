@@ -1,5 +1,5 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { type ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
+import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -42,6 +42,7 @@ import { PlanSheet } from '@/components/plan/PlanSheet';
 import { TasksSheet } from '@/components/tasks/TasksSheet';
 import { Thinking } from '@/components/thinking/Thinking';
 import { ToolRun } from '@/components/tools/ToolRun';
+import { AgentOpenProvider } from '@/components/agents/AgentOpen';
 import { AskPanel } from '@/components/AskPanel';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
@@ -333,6 +334,39 @@ export default function Session() {
     }
   }
 
+  // The one way to a sub-agent's view: the badge's sheet, an agent call, a
+  // notice and a plan node all open it here (components/agents/AgentOpen).
+  // It is the tasks sheet on that agent; one open on another agent is left first.
+  function openAgent(n: number) {
+    const was = view.agentView?.id;
+    if (was === n) return setSheet('tasks');
+    if (was !== undefined) void agentCmd(was, 'leave');
+    setView((v) => watchAgent(v, n, v.bg.agents.find((a) => a.id === n)?.prompt ?? ''));
+    setSheet('tasks');
+    void agentCmd(n, 'view');
+  }
+  function closeAgent() {
+    const n = view.agentView?.id;
+    setView(unwatchAgent);
+    if (n !== undefined) void agentCmd(n, 'leave');
+  }
+  // The latest openAgent, so the context below changes only with what the
+  // rows show, not on every render (a streamed token re-renders this screen).
+  const openRef = useRef(openAgent);
+  useEffect(() => {
+    openRef.current = openAgent;
+  });
+  const agents = view.bg.agents;
+  const plan = view.bg.plan;
+  const agentOpen = useMemo(
+    () => ({
+      agents,
+      nodes: Object.fromEntries((plan?.rows ?? []).map((r) => [r.id, r.title])),
+      open: (n: number) => openRef.current(n),
+    }),
+    [agents, plan],
+  );
+
   // The header steps aside while the reader scrolls into the history (offset
   // 0 is the newest row: column-reverse on the web, inverted on native; the
   // web's offset runs negative; a bounce past either end is clamped) and
@@ -353,264 +387,259 @@ export default function Session() {
   }
 
   return (
-    <Screen>
-      {/* The stack's header gives way to the session's own (components/header), which can slide away. */}
-      <Stack.Screen options={{ title: id, headerShown: false }} />
-      <AwayHeader
-        onAway={onAway}
-        view={view}
-        stats={stats.id === id ? stats.s : noStats}
-        panel={panel}
-        onShow={() => {
-          hide.current = headerShow(hide.current, Date.now());
-        }}
-        onHeight={setHeaderH}
-        act={{
-          ctx: () => setSheet('ctx'),
-          plan: () => {
-            setSheet('plan');
-            // The latest plan, in case this dund's snapshot does not keep one.
-            void auth.client?.request(Control, { id, target: 'plan', action: 'view' }).catch(() => undefined);
-          },
-          tasks: () => setSheet('tasks'),
-          model: () => openPicker(''),
-          session: () => setPanel((p) => !p),
-        }}
-      />
-      {sheet === 'ctx' ? (
-        <CtxSheet
+    <AgentOpenProvider value={agentOpen}>
+      <Screen>
+        {/* The stack's header gives way to the session's own (components/header), which can slide away. */}
+        <Stack.Screen options={{ title: id, headerShown: false }} />
+        <AwayHeader
+          onAway={onAway}
+          view={view}
           stats={stats.id === id ? stats.s : noStats}
-          ctx={view.bg.ctx}
-          ctxv={view.bg.ctxv}
-          blocks={view.items.length}
-          onClose={() => setSheet(null)}
-        />
-      ) : null}
-      {sheet === 'plan' && view.bg.plan ? (
-        <PlanSheet
-          plan={view.bg.plan}
-          live={{
-            busy: turnState(view).state === 'working',
-            asking: turnState(view).state === 'ask',
-            agents: Object.fromEntries(view.bg.agents.map((a) => [a.id, a.state])),
+          panel={panel}
+          onShow={() => {
+            hide.current = headerShow(hide.current, Date.now());
           }}
-          run={(action) =>
-            void auth.client
-              ?.request(Control, { id, target: 'plan', action })
-              .catch((e) => setSendErr('plan ' + action + ': ' + explain(e).message))
-          }
-          onClose={() => setSheet(null)}
-        />
-      ) : null}
-      {sheet === 'tasks' ? (
-        <TasksSheet
-          agents={view.bg.agents}
-          jobs={view.bg.jobs}
-          agentView={view.agentView}
-          client={auth.client}
-          session={id}
+          onHeight={setHeaderH}
           act={{
-            openAgent: (n, prompt) => {
-              setView((v) => watchAgent(v, n, prompt));
-              void agentCmd(n, 'view');
+            ctx: () => setSheet('ctx'),
+            plan: () => {
+              setSheet('plan');
+              // The latest plan, in case this dund's snapshot does not keep one.
+              void auth.client?.request(Control, { id, target: 'plan', action: 'view' }).catch(() => undefined);
             },
-            closeAgent: () => {
-              const n = view.agentView?.id;
-              setView(unwatchAgent);
-              if (n !== undefined) void agentCmd(n, 'leave');
-            },
-            tell: (n, content) => void agentCmd(n, 'tell', content),
-            kill: (n) =>
-              void auth.client
-                ?.request(Control, { id, target: 'jobs', action: 'kill ' + n })
-                .catch((e) => setSendErr('kill: ' + explain(e).message)),
+            tasks: () => setSheet('tasks'),
+            model: () => openPicker(''),
+            session: () => setPanel((p) => !p),
           }}
-          onClose={() => setSheet(null)}
         />
-      ) : null}
-      {/* The header overlays the transcript; only the status bar's room is kept here. */}
-      <KeyboardAvoidingView
-        style={{ flex: 1, paddingTop: insets.top }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        {Platform.OS === 'web' ? (
-          // column-reverse on the scrolling element: the browser puts
-          // scrollTop 0 at the bottom, holds it there as content grows, and
-          // anchors the reader's place when they have scrolled up.
-          <ScrollView
-            onScroll={onScroll}
-            scrollEventThrottle={32}
-            style={{ flexDirection: 'column-reverse' }}
-            contentContainerStyle={[transcript, { flexDirection: 'column-reverse' }]}
-          >
-            {rows.slice(0, shown).map((item) => (
-              <Row key={item.key} item={item} />
-            ))}
-            {rows.length > shown ? (
-              <View style={{ alignItems: 'center' }}>
-                <Button
-                  title={`Show ${Math.min(page, rows.length - shown)} earlier`}
-                  onPress={() => setEarlier({ id, n: shown + page })}
-                />
-              </View>
-            ) : null}
-            {/* The oldest end: room for the header, so the first row is not under it. */}
-            <View style={{ height: headerH }} />
-          </ScrollView>
-        ) : (
-          // Native: a ScrollView's column-reverse does not move the scroll
-          // origin, so the list is inverted (offset 0 = newest) and the
-          // platform holds the visible row when rows are added; within 80
-          // of the newest it follows them.
-          <FlatList
-            data={rows}
-            keyExtractor={(i) => i.key}
-            inverted
-            onScroll={onScroll}
-            scrollEventThrottle={32}
-            maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
-            contentContainerStyle={transcript}
-            renderItem={({ item }) => <Row item={item} />}
-            // inverted: the footer is the visual top, room for the header over it
-            ListFooterComponent={<View style={{ height: headerH }} />}
+        {sheet === 'ctx' ? (
+          <CtxSheet
+            stats={stats.id === id ? stats.s : noStats}
+            ctx={view.bg.ctx}
+            ctxv={view.bg.ctxv}
+            blocks={view.items.length}
+            onClose={() => setSheet(null)}
           />
-        )}
-        <View
-          style={{
-            paddingHorizontal: space.lg,
-            paddingBottom: space.md + insets.bottom,
-            gap: space.sm,
-          }}
+        ) : null}
+        {sheet === 'plan' && view.bg.plan ? (
+          <PlanSheet
+            plan={view.bg.plan}
+            live={{
+              busy: turnState(view).state === 'working',
+              asking: turnState(view).state === 'ask',
+              agents: Object.fromEntries(view.bg.agents.map((a) => [a.id, a.state])),
+            }}
+            run={(action) =>
+              void auth.client
+                ?.request(Control, { id, target: 'plan', action })
+                .catch((e) => setSendErr('plan ' + action + ': ' + explain(e).message))
+            }
+            onClose={() => setSheet(null)}
+          />
+        ) : null}
+        {sheet === 'tasks' ? (
+          <TasksSheet
+            agents={view.bg.agents}
+            jobs={view.bg.jobs}
+            agentView={view.agentView}
+            client={auth.client}
+            session={id}
+            act={{
+              openAgent,
+              closeAgent,
+              tell: (n, content) => void agentCmd(n, 'tell', content),
+              kill: (n) =>
+                void auth.client
+                  ?.request(Control, { id, target: 'jobs', action: 'kill ' + n })
+                  .catch((e) => setSendErr('kill: ' + explain(e).message)),
+            }}
+            onClose={() => setSheet(null)}
+          />
+        ) : null}
+        {/* The header overlays the transcript; only the status bar's room is kept here. */}
+        <KeyboardAvoidingView
+          style={{ flex: 1, paddingTop: insets.top }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          {view.ask ? (
-            <AskPanel key={view.ask.askId ?? view.ask.question} ask={view.ask} answer={(o) => void answer(o)} />
-          ) : null}
-          {picker !== null ? (
-            <ModelPicker
-              providers={view.models}
-              current={view.settings}
-              initial={picker}
-              pick={(u, m, p) => void switchTo(u, m, p)}
-              op={(o, u) => void providerOp(o, u)}
-              edit={(p) => setProviderForm({ edit: p })}
-              close={() => setPicker(null)}
-            />
-          ) : null}
-          {providerForm ? (
-            <ProviderForm
-              edit={providerForm.edit}
-              name={providerForm.name}
-              save={(o) => void providerOp(o)}
-              close={() => setProviderForm(null)}
-            />
-          ) : null}
-          {mcpForm ? (
-            <McpForm
-              close={() => setMcpForm(false)}
-              add={(spec) =>
-                void auth.client
-                  ?.request(Control, { id, target: 'mcp', action: 'add ' + spec })
-                  .catch((e) => setSendErr('mcp add: ' + explain(e).message))
-              }
-            />
-          ) : null}
-          {toolsFor && view.mcpTools?.server === toolsFor ? (
-            <McpToolsPanel
-              tools={view.mcpTools}
-              close={() => setToolsFor(null)}
-              toggle={(t) =>
-                void auth.client
-                  ?.request(Control, { id, target: 'mcptools', action: toggleAction(toolsFor, t) })
-                  .catch((e) => setSendErr('mcp tools: ' + explain(e).message))
-              }
-            />
-          ) : null}
-          {panel ? (
-            <SessionPanel
-              commands={view.commands}
-              run={(l) => void runSlash(l)}
-              prefill={(t) => {
-                setText(t);
-                setPanel(false);
-              }}
-              addServer={() => {
-                setMcpForm(true);
-                setPanel(false);
-              }}
-            />
-          ) : null}
-          {text.startsWith('/') && !view.ask ? (
-            <Palette rows={suggest(text, view.commands, view.skills)} pick={setText} />
-          ) : null}
-          {view.upgrade ? (
-            <View style={{ gap: 2 }}>
-              {upgradeLines(view.upgrade, id).map((l, i) => (
-                <Muted key={i}>{l}</Muted>
+          {Platform.OS === 'web' ? (
+            // column-reverse on the scrolling element: the browser puts
+            // scrollTop 0 at the bottom, holds it there as content grows, and
+            // anchors the reader's place when they have scrolled up.
+            <ScrollView
+              onScroll={onScroll}
+              scrollEventThrottle={32}
+              style={{ flexDirection: 'column-reverse' }}
+              contentContainerStyle={[transcript, { flexDirection: 'column-reverse' }]}
+            >
+              {rows.slice(0, shown).map((item) => (
+                <Row key={item.key} item={item} />
               ))}
-              {view.upgrade.state === 'pending' ? (
-                <View style={{ flexDirection: 'row', gap: space.sm }}>
-                  <Button title="Restart now" onPress={() => void upgradeNow()} />
+              {rows.length > shown ? (
+                <View style={{ alignItems: 'center' }}>
+                  <Button
+                    title={`Show ${Math.min(page, rows.length - shown)} earlier`}
+                    onPress={() => setEarlier({ id, n: shown + page })}
+                  />
                 </View>
               ) : null}
-            </View>
-          ) : null}
-          {conn ? (
-            <ErrorText>{conn}</ErrorText>
-          ) : view.status && !headerSays(view) ? (
-            <Muted>{view.status}</Muted>
-          ) : null}
-          {sendErr ? <ErrorText>{sendErr}</ErrorText> : null}
-          <View>
-            <Field
-              style={{
-                paddingVertical: space.sm,
-                // room for the send button inset at the right edge
-                paddingRight: TOUCH,
-                fontSize: font.composer,
-              }}
-              value={text}
-              onChangeText={setText}
-              multiline
-              placeholder={
-                view.ask && !view.ask.noCustom ? 'or type an answer…' : 'ask dun to do something… (/ for commands)'
-              }
-              onKeyPress={(e) => {
-                // Enter sends on the web; Shift+Enter is a newline.
-                const ne = e.nativeEvent as { key: string; shiftKey?: boolean };
-                // ↑/↓ in an empty (or recalled) composer step through what was sent.
-                if (
-                  Platform.OS === 'web' &&
-                  (ne.key === 'ArrowUp' || ne.key === 'ArrowDown') &&
-                  (text === '' || recall.current >= 0)
-                ) {
-                  const h = sent.current;
-                  if (!h.length) return;
-                  e.preventDefault();
-                  let i = recall.current < 0 ? h.length : recall.current;
-                  i = ne.key === 'ArrowUp' ? Math.max(0, i - 1) : i + 1;
-                  if (i >= h.length) {
-                    recall.current = -1;
-                    setText('');
-                  } else {
-                    recall.current = i;
-                    setText(h[i] ?? '');
-                  }
-                  return;
-                }
-                if (Platform.OS === 'web' && ne.key === 'Enter' && !ne.shiftKey) {
-                  e.preventDefault();
-                  if (view.ask && !view.ask.noCustom && text.trim()) {
-                    void answer(text.trim());
-                    setText('');
-                  } else void send();
-                }
-              }}
+              {/* The oldest end: room for the header, so the first row is not under it. */}
+              <View style={{ height: headerH }} />
+            </ScrollView>
+          ) : (
+            // Native: a ScrollView's column-reverse does not move the scroll
+            // origin, so the list is inverted (offset 0 = newest) and the
+            // platform holds the visible row when rows are added; within 80
+            // of the newest it follows them.
+            <FlatList
+              data={rows}
+              keyExtractor={(i) => i.key}
+              inverted
+              onScroll={onScroll}
+              scrollEventThrottle={32}
+              maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
+              contentContainerStyle={transcript}
+              renderItem={({ item }) => <Row item={item} />}
+              // inverted: the footer is the visual top, room for the header over it
+              ListFooterComponent={<View style={{ height: headerH }} />}
             />
-            <SendButton disabled={!text.trim()} onPress={() => void send()} />
+          )}
+          <View
+            style={{
+              paddingHorizontal: space.lg,
+              paddingBottom: space.md + insets.bottom,
+              gap: space.sm,
+            }}
+          >
+            {view.ask ? (
+              <AskPanel key={view.ask.askId ?? view.ask.question} ask={view.ask} answer={(o) => void answer(o)} />
+            ) : null}
+            {picker !== null ? (
+              <ModelPicker
+                providers={view.models}
+                current={view.settings}
+                initial={picker}
+                pick={(u, m, p) => void switchTo(u, m, p)}
+                op={(o, u) => void providerOp(o, u)}
+                edit={(p) => setProviderForm({ edit: p })}
+                close={() => setPicker(null)}
+              />
+            ) : null}
+            {providerForm ? (
+              <ProviderForm
+                edit={providerForm.edit}
+                name={providerForm.name}
+                save={(o) => void providerOp(o)}
+                close={() => setProviderForm(null)}
+              />
+            ) : null}
+            {mcpForm ? (
+              <McpForm
+                close={() => setMcpForm(false)}
+                add={(spec) =>
+                  void auth.client
+                    ?.request(Control, { id, target: 'mcp', action: 'add ' + spec })
+                    .catch((e) => setSendErr('mcp add: ' + explain(e).message))
+                }
+              />
+            ) : null}
+            {toolsFor && view.mcpTools?.server === toolsFor ? (
+              <McpToolsPanel
+                tools={view.mcpTools}
+                close={() => setToolsFor(null)}
+                toggle={(t) =>
+                  void auth.client
+                    ?.request(Control, { id, target: 'mcptools', action: toggleAction(toolsFor, t) })
+                    .catch((e) => setSendErr('mcp tools: ' + explain(e).message))
+                }
+              />
+            ) : null}
+            {panel ? (
+              <SessionPanel
+                commands={view.commands}
+                run={(l) => void runSlash(l)}
+                prefill={(t) => {
+                  setText(t);
+                  setPanel(false);
+                }}
+                addServer={() => {
+                  setMcpForm(true);
+                  setPanel(false);
+                }}
+              />
+            ) : null}
+            {text.startsWith('/') && !view.ask ? (
+              <Palette rows={suggest(text, view.commands, view.skills)} pick={setText} />
+            ) : null}
+            {view.upgrade ? (
+              <View style={{ gap: 2 }}>
+                {upgradeLines(view.upgrade, id).map((l, i) => (
+                  <Muted key={i}>{l}</Muted>
+                ))}
+                {view.upgrade.state === 'pending' ? (
+                  <View style={{ flexDirection: 'row', gap: space.sm }}>
+                    <Button title="Restart now" onPress={() => void upgradeNow()} />
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {conn ? (
+              <ErrorText>{conn}</ErrorText>
+            ) : view.status && !headerSays(view) ? (
+              <Muted>{view.status}</Muted>
+            ) : null}
+            {sendErr ? <ErrorText>{sendErr}</ErrorText> : null}
+            <View>
+              <Field
+                style={{
+                  paddingVertical: space.sm,
+                  // room for the send button inset at the right edge
+                  paddingRight: TOUCH,
+                  fontSize: font.composer,
+                }}
+                value={text}
+                onChangeText={setText}
+                multiline
+                placeholder={
+                  view.ask && !view.ask.noCustom ? 'or type an answer…' : 'ask dun to do something… (/ for commands)'
+                }
+                onKeyPress={(e) => {
+                  // Enter sends on the web; Shift+Enter is a newline.
+                  const ne = e.nativeEvent as { key: string; shiftKey?: boolean };
+                  // ↑/↓ in an empty (or recalled) composer step through what was sent.
+                  if (
+                    Platform.OS === 'web' &&
+                    (ne.key === 'ArrowUp' || ne.key === 'ArrowDown') &&
+                    (text === '' || recall.current >= 0)
+                  ) {
+                    const h = sent.current;
+                    if (!h.length) return;
+                    e.preventDefault();
+                    let i = recall.current < 0 ? h.length : recall.current;
+                    i = ne.key === 'ArrowUp' ? Math.max(0, i - 1) : i + 1;
+                    if (i >= h.length) {
+                      recall.current = -1;
+                      setText('');
+                    } else {
+                      recall.current = i;
+                      setText(h[i] ?? '');
+                    }
+                    return;
+                  }
+                  if (Platform.OS === 'web' && ne.key === 'Enter' && !ne.shiftKey) {
+                    e.preventDefault();
+                    if (view.ask && !view.ask.noCustom && text.trim()) {
+                      void answer(text.trim());
+                      setText('');
+                    } else void send();
+                  }
+                }}
+              />
+              <SendButton disabled={!text.trim()} onPress={() => void send()} />
+            </View>
           </View>
-        </View>
-      </KeyboardAvoidingView>
-    </Screen>
+        </KeyboardAvoidingView>
+      </Screen>
+    </AgentOpenProvider>
   );
 }
 
@@ -734,7 +763,7 @@ function Row({ item }: { item: Item }) {
         </Text>
       );
     case 'notice':
-      return <NoticeRow notice={item.notice} />;
+      return <NoticeRow notice={item.notice} agent={item.agent} />;
     case 'question':
       return (
         <View

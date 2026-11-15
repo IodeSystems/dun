@@ -8,7 +8,7 @@ import { noBackground, noteBackground, type Background } from './background';
 import type { McpTool, McpTools } from './mcp';
 import * as notices from './notices';
 import { endsThinkingOld, endThought, evTime, liveThought, type Thought } from './thinking';
-import { withCall, withResult, withThought, type Run } from './toolcalls';
+import { agentOf, withCall, withResult, withThought, type Run } from './toolcalls';
 import { autoResumePrefix, parseUpgrade, type Upgrade } from './upgrade';
 
 export type Item =
@@ -32,7 +32,8 @@ export type Item =
       callId?: string;
     }
   // What the engine says beside the conversation (notices.ts): it ends a run.
-  | { key: string; kind: 'notice'; notice: notices.Notice };
+  // agent: the sub-agent it is from or about (the engine's `agent`), which a tap opens.
+  | { key: string; kind: 'notice'; notice: notices.Notice; agent?: number };
 
 /**
  * The open question (proto.Ask). askId names it in the answer. multi: pick
@@ -145,6 +146,11 @@ type NewItem = WithoutKey<Item>;
 
 function push(v: View, item: NewItem): View {
   return { ...v, n: v.n + 1, items: [...v.items, { ...item, key: String(v.n) }] };
+}
+
+/** A notice, with the sub-agent it is from or about when the engine named one. */
+function pushNotice(v: View, notice: notices.Notice, agent: number | undefined): View {
+  return push(v, { kind: 'notice', notice, ...(agent ? { agent } : {}) });
 }
 
 /** A tool call that carried a message: the message, not a row in the run. */
@@ -364,7 +370,7 @@ function fromHistory(v: View, it: Ev): View {
       if (it.tool === 'ask_user') return pushQuestion(v, it.args, str(it.call_id));
       return (
         pushCarried(v, str(it.tool), it.args, str(it.call_id)) ??
-        merge(v, withCall(v.items, str(it.tool), it.args, str(it.call_id) || undefined, String(v.n)))
+        merge(v, withCall(v.items, str(it.tool), it.args, str(it.call_id) || undefined, String(v.n), agentOf(it.agent)))
       );
     case 'tool_result':
       if (it.tool === 'ask_user') return push(v, { kind: 'user', text: str(it.content) });
@@ -372,11 +378,19 @@ function fromHistory(v: View, it: Ev): View {
         settleCarried(v, str(it.tool), str(it.content), str(it.call_id)) ??
         merge(
           v,
-          withResult(v.items, str(it.tool), str(it.content), str(it.call_id) || undefined, String(v.n), errorOf(it)),
+          withResult(
+            v.items,
+            str(it.tool),
+            str(it.content),
+            str(it.call_id) || undefined,
+            String(v.n),
+            errorOf(it),
+            agentOf(it.agent),
+          ),
         )
       );
     case 'notification':
-      return push(v, { kind: 'notice', notice: notices.fromHistoryNotification(str(it.content)) });
+      return pushNotice(v, notices.fromHistoryNotification(str(it.content)), agentOf(it.agent));
     case 'reasoning':
       return pushThought(v, { text: str(it.content), start: 0, end: 0, live: false });
     case 'command':
@@ -468,7 +482,7 @@ function applyNew(v: View, ev: Ev): View {
       if (ev.tool === 'ask_user') return w;
       return (
         pushCarried(w, str(ev.tool), ev.args, str(ev.call_id)) ??
-        merge(w, withCall(w.items, str(ev.tool), ev.args, str(ev.call_id) || undefined, String(w.n)))
+        merge(w, withCall(w.items, str(ev.tool), ev.args, str(ev.call_id) || undefined, String(w.n), agentOf(ev.agent)))
       );
     }
     case 'tool_result': {
@@ -479,7 +493,15 @@ function applyNew(v: View, ev: Ev): View {
         settleCarried(w, str(ev.tool), str(ev.result), str(ev.call_id)) ??
         merge(
           w,
-          withResult(w.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(w.n), errorOf(ev)),
+          withResult(
+            w.items,
+            str(ev.tool),
+            str(ev.result),
+            str(ev.call_id) || undefined,
+            String(w.n),
+            errorOf(ev),
+            agentOf(ev.agent),
+          ),
         )
       );
     }
@@ -504,7 +526,7 @@ function applyNew(v: View, ev: Ev): View {
       return push({ ...v, ask: null }, { kind: 'user', text: str(ev.value) });
     }
     case 'notification':
-      return push(v, { kind: 'notice', notice: notices.fromNotification(ev) });
+      return pushNotice(v, notices.fromNotification(ev), agentOf(ev.agent));
     case 'recap':
       return push(v, { kind: 'notice', notice: notices.recapNotice(ev) });
     case 'compaction':

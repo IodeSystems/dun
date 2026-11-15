@@ -13,11 +13,13 @@
 import { createElement, useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { agentCallTitle } from '@/lib/agentcall';
 import type { Thought } from '@/lib/thinking';
 import type { Run, ToolCall } from '@/lib/toolcalls';
 import { callText, failLines, preview, runSummary, type Tone } from '@/lib/tooltext';
 import { font, mono, space, useColors } from '@/lib/theme';
 
+import { OpenAgent, useAgentOpen } from '../agents/AgentOpen';
 import { Fold } from '../fold/Fold';
 import { Thinking } from '../thinking/Thinking';
 import { bodyFor } from './registry';
@@ -28,7 +30,15 @@ const joint = (p: string) => (/^[:(+]/.test(p) ? (p.startsWith(':') ? '' : ' ') 
 export function ToolCallRow({ call, flat }: { call: ToolCall; flat?: boolean }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
-  const p = preview(call);
+  const agents = useAgentOpen();
+  // An agent call: what it did to which child, and that child's state from
+  // the agents event (lib/agentcall; the body has its model and status); its
+  // press still folds, and Open goes to the child's view. The title keeps
+  // the room on a phone: the state is one word.
+  const isAgent = call.tool === 'agent';
+  const state = isAgent && call.state === 'done' ? (agents?.agents.find((a) => a.id === call.agent)?.state ?? '') : '';
+  const p = state ? { text: state, tone: 'muted' as Tone } : preview(call);
+  const title = isAgent ? agentCallTitle(call, agents?.nodes) : callText(call.tool, call.args);
   const tone: Record<Tone, string> = { ok: c.text, err: c.danger, muted: c.muted };
   const mark = call.state === 'pending' ? '… ' : call.state === 'error' ? '✗ ' : '✓ ';
   const markColor = call.state === 'pending' ? c.muted : call.state === 'error' ? c.danger : c.accent;
@@ -54,7 +64,7 @@ export function ToolCallRow({ call, flat }: { call: ToolCall; flat?: boolean }) 
               ellipsizeMode="tail"
               testID="fold-title"
             >
-              {callText(call.tool, call.args)}
+              {title}
             </Text>
             {p.text ? (
               <Text style={[text, { color: tone[p.tone], flexShrink: 0, maxWidth: '50%' }]} numberOfLines={1}>
@@ -62,6 +72,7 @@ export function ToolCallRow({ call, flat }: { call: ToolCall; flat?: boolean }) 
                 {p.text}
               </Text>
             ) : null}
+            {isAgent && call.agent ? <OpenAgent agent={call.agent} compact /> : null}
           </View>
         }
       >

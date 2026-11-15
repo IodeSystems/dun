@@ -160,10 +160,19 @@ export const rows = (agents: Agent[], jobs: Job[], now: number): Row[] => [
   ...jobs.map((j) => jobRow(j, now)),
 ];
 
-/** The header badge: what runs now, and whether a job failed. Null when there is nothing to show. */
-export function badge(agents: Agent[], jobs: Job[]): { running: number; failed: boolean } | null {
+const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+/**
+ * The header badge: what runs now, whether a job failed, and its label, what
+ * the sheet lists ("2 agents", "1 agent · 1 job"). Null when there is nothing
+ * to show.
+ */
+export function badge(agents: Agent[], jobs: Job[]): { running: number; failed: boolean; label: string } | null {
   if (!agents.length && !jobs.length) return null;
   const running = agents.filter((a) => a.state === 'running').length + jobs.filter((j) => j.state === 'running').length;
   const failed = jobs.some((j) => j.state === 'failed' || j.state === 'timeout' || j.state === 'error');
-  return { running, failed };
+  const label = [agents.length ? count(agents.length, 'agent') : '', jobs.length ? count(jobs.length, 'job') : '']
+    .filter(Boolean)
+    .join(' · ');
+  return { running, failed, label };
 }

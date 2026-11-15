@@ -21,7 +21,7 @@ const toneColor = (c: Colors, t: Tone) =>
 
 export type TaskActions = {
   /** Opens sub-agent id's conversation (agent view); closeAgent leaves it. */
-  openAgent: (id: number, prompt: string) => void;
+  openAgent: (id: number) => void;
   closeAgent: () => void;
   tell: (id: number, text: string) => void;
   kill: (job: number) => void;
@@ -32,6 +32,10 @@ export type TaskActions = {
  * sub-agent (▸ running, ✓ idle, ⏸ stopped) and per job (⚙ running, ✓ ok,
  * ✗ failed, ⏹ killed). An agent opens its conversation, followed live, and
  * takes a message; a job opens its output, and a running one can be killed.
+ *
+ * Which agent is open is the session's agent view (agentView), not this
+ * sheet's: a tool call, a notice or a plan node opens the same view
+ * (components/agents/AgentOpen), and this sheet shows it.
  */
 export function TasksSheet({
   agents,
@@ -51,7 +55,12 @@ export function TasksSheet({
   onClose: () => void;
 }) {
   const c = useColors();
-  const [open, setOpen] = useState<{ kind: 'agent' | 'job'; id: number } | null>(null);
+  const [job, setJob] = useState<number | null>(null);
+  const open: { kind: 'agent' | 'job'; id: number } | null = agentView
+    ? { kind: 'agent', id: agentView.id }
+    : job !== null
+      ? { kind: 'job', id: job }
+      : null;
   const [tellText, setTellText] = useState('');
   const anyRunning = agents.some((a) => a.state === 'running') || jobs.some((j) => j.state === 'running');
   const now = useNow(anyRunning);
@@ -60,7 +69,7 @@ export function TasksSheet({
 
   const back = () => {
     if (open?.kind === 'agent') act.closeAgent();
-    setOpen(null);
+    setJob(null);
     setTellText('');
   };
   const close = () => {
@@ -68,11 +77,13 @@ export function TasksSheet({
     onClose();
   };
   const pick = (r: Row) => {
-    setOpen({ kind: r.kind, id: r.id });
-    if (r.kind === 'agent') act.openAgent(r.id, agents.find((a) => a.id === r.id)?.prompt ?? '');
+    if (r.kind === 'agent') act.openAgent(r.id);
+    else setJob(r.id);
   };
 
-  if (open && sel) {
+  // An agent the agents event does not list (yet) still opens: its
+  // conversation, with no row above it.
+  if (open && (sel || open.kind === 'agent')) {
     const job = open.kind === 'job' ? jobs.find((j) => j.id === open.id) : undefined;
     return (
       <Sheet
@@ -115,7 +126,7 @@ export function TasksSheet({
         >
           <Text style={{ color: c.accent, fontSize: font.sm }}>‹ All tasks</Text>
         </Pressable>
-        <TaskRow row={sel} />
+        {sel ? <TaskRow row={sel} /> : null}
         {open.kind === 'job' ? (
           client ? (
             <JobOutput client={client} session={session} job={open.id} running={job?.state === 'running'} />

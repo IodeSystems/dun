@@ -1,10 +1,11 @@
 import { Pressable, Text, View } from 'react-native';
 
 import { Sheet } from '@/components/header/Sheet';
+import { OpenAgent } from '@/components/agents/AgentOpen';
 import { usePhase, useReducedMotion } from '@/components/header/motion';
 import { Button } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
-import { droppable, modeWord, motion, type Live, type Plan } from '@/lib/plan';
+import { droppable, modeWord, motion, ownerAgent, type Live, type Plan } from '@/lib/plan';
 import { font, mono, space, TOUCH, useColors, type Colors } from '@/lib/theme';
 
 const toneColor = (c: Colors, t: ReturnType<typeof motion>['tone']) =>
@@ -63,6 +64,7 @@ export function PlanSheet({
                   .filter(Boolean)
                   .join(' · ')}
               </Text>
+              {ownerAgent(r.owner) ? <OpenAgent agent={ownerAgent(r.owner)} /> : null}
             </View>
             {droppable(r) && !r.repeat ? (
               <Pressable
